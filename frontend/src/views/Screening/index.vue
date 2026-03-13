@@ -458,15 +458,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted, nextTick } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, Collection, TrendCharts, Download, Star, Setting, Connection, Warning, User } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import type { StockInfo } from '@/types/analysis'
-import { screeningApi, type FieldConfigResponse, type FieldInfo, type ScreeningMessageItem, type StockRecommendation } from '@/api/screening'
+import { screeningApi, type FieldConfigResponse, type FieldInfo, type ScreeningMessageItem, type ScreeningWsEnvelope, type ScreeningWsProgressData, type StockRecommendation } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
 import { getCurrentDataSource } from '@/api/sync'
+import { useAuthStore } from '@/stores/auth'
 import { normalizeMarketForAnalysis, exchangeCodeToMarket, getMarketByStockCode } from '@/utils/market'
 
 // Markdown 渲染
@@ -492,6 +493,10 @@ const aiMessages = ref<AiDisplayMessage[]>([])
 const aiInput = ref('')
 const aiLoading = ref(false)
 const aiMessagesContainer = ref<HTMLElement | null>(null)
+const aiSocket = ref<WebSocket | null>(null)
+const aiSocketConnected = ref(false)
+const aiPendingAssistantIndex = ref<number | null>(null)
+const authStore = useAuthStore()
 
 const scrollAiToBottom = () => {
   nextTick(() => {
@@ -519,6 +524,134 @@ const loadAiConversation = async () => {
   } catch { /* 静默 */ }
 }
 
+const updatePendingAssistantMessage = (patch: Partial<AiDisplayMessage>) => {
+  const idx = aiPendingAssistantIndex.value
+  if (idx == null || !aiMessages.value[idx]) return
+  aiMessages.value[idx] = {
+    ...aiMessages.value[idx],
+    ...patch,
+  }
+  scrollAiToBottom()
+}
+
+const appendPendingAssistantLine = (line: string) => {
+  const idx = aiPendingAssistantIndex.value
+  if (idx == null || !aiMessages.value[idx] || !line) return
+  const current = aiMessages.value[idx].content || ''
+  const next = current ? `${current}\n\n- ${line}` : `- ${line}`
+  aiMessages.value[idx] = {
+    ...aiMessages.value[idx],
+    content: next,
+  }
+  scrollAiToBottom()
+}
+
+const handleAiWebSocketMessage = (envelope: ScreeningWsEnvelope<any>) => {
+  if (envelope.type === 'connected' || envelope.type === 'pong') return
+
+  if (envelope.type === 'started') {
+    updatePendingAssistantMessage({ content: '- 已收到请求，开始处理', phase: 'result' })
+    return
+  }
+
+  if (envelope.type === 'progress') {
+    const data = envelope.data as ScreeningWsProgressData
+    if (data.phase) {
+      updatePendingAssistantMessage({ phase: data.phase })
+    }
+
+    if (data.event === 'tool_started' && data.tool) {
+      appendPendingAssistantLine(`正在查询：${data.tool}`)
+      return
+    }
+
+    if (data.event === 'tool_completed' && data.tool) {
+      appendPendingAssistantLine(`已完成：${data.tool}`)
+      return
+    }
+
+    if (data.message) {
+      appendPendingAssistantLine(data.message)
+    }
+    return
+  }
+
+  if (envelope.type === 'final') {
+    const data = envelope.data
+    updatePendingAssistantMessage({
+      content: data.reply,
+      tools_used: data.tools_used?.length ? data.tools_used : undefined,
+      stocks: data.stocks?.length ? data.stocks : undefined,
+      phase: data.phase,
+      is_fallback: data.is_fallback ?? false,
+    })
+    aiPendingAssistantIndex.value = null
+    aiLoading.value = false
+    return
+  }
+
+  if (envelope.type === 'error') {
+    const message = envelope.data?.message || '智能筛选连接异常'
+    updatePendingAssistantMessage({ content: `抱歉，处理您的请求时出错：${message}` })
+    aiPendingAssistantIndex.value = null
+    aiLoading.value = false
+    ElMessage.error(message)
+  }
+}
+
+const ensureAiSocket = async (): Promise<WebSocket> => {
+  if (aiSocket.value && aiSocketConnected.value && aiSocket.value.readyState === WebSocket.OPEN) {
+    return aiSocket.value
+  }
+
+  return await new Promise<WebSocket>((resolve, reject) => {
+    try {
+      if (aiSocket.value) {
+        try { aiSocket.value.close() } catch {}
+      }
+
+      const token = authStore.token || localStorage.getItem('auth-token') || ''
+      if (!token) {
+        reject(new Error('未登录或登录已过期'))
+        return
+      }
+
+      const socket = new WebSocket(screeningApi.getIntelligentChatWsUrl(token))
+      aiSocket.value = socket
+
+      socket.onopen = () => {
+        aiSocketConnected.value = true
+        resolve(socket)
+      }
+
+      socket.onmessage = (event) => {
+        try {
+          handleAiWebSocketMessage(JSON.parse(event.data) as ScreeningWsEnvelope<any>)
+        } catch (error) {
+          console.error('智能筛选 WS 消息解析失败', error)
+        }
+      }
+
+      socket.onerror = () => {
+        aiSocketConnected.value = false
+        reject(new Error('智能筛选 WebSocket 连接失败'))
+      }
+
+      socket.onclose = () => {
+        aiSocketConnected.value = false
+        aiSocket.value = null
+        if (aiLoading.value && aiPendingAssistantIndex.value != null) {
+          updatePendingAssistantMessage({ content: '抱歉，智能筛选流式连接已断开，请重试。' })
+          aiPendingAssistantIndex.value = null
+          aiLoading.value = false
+        }
+      }
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error('智能筛选连接失败'))
+    }
+  })
+}
+
 const sendAiMessage = async (text: string) => {
   if (!text.trim() || aiLoading.value) return
   aiMessages.value.push({ role: 'user', content: text })
@@ -526,23 +659,29 @@ const sendAiMessage = async (text: string) => {
   scrollAiToBottom()
   aiLoading.value = true
   try {
-    const res = await screeningApi.intelligentChat(text)
-    const data = (res as any)?.data ?? res
     aiMessages.value.push({
       role: 'assistant',
-      content: data.reply,
-      tools_used: data.tools_used?.length ? data.tools_used : undefined,
-      stocks: data.stocks?.length ? data.stocks : undefined,
-      phase: data.phase,
-      is_fallback: data.is_fallback ?? false,
+      content: '- 正在建立智能筛选流式连接',
+      tools_used: undefined,
+      stocks: undefined,
+      phase: 'result',
+      is_fallback: false,
     })
+    aiPendingAssistantIndex.value = aiMessages.value.length - 1
     scrollAiToBottom()
+
+    const socket = await ensureAiSocket()
+    socket.send(JSON.stringify({ type: 'chat', message: text }))
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? e.message : '请求失败，请稍后重试'
     ElMessage.error(errMsg)
-    aiMessages.value.push({ role: 'assistant', content: `抱歉，处理您的请求时出错：${errMsg}` })
-  } finally {
+    updatePendingAssistantMessage({ content: `抱歉，处理您的请求时出错：${errMsg}` })
+    aiPendingAssistantIndex.value = null
     aiLoading.value = false
+  } finally {
+    if (!aiLoading.value) {
+      scrollAiToBottom()
+    }
   }
 }
 
@@ -982,6 +1121,14 @@ onMounted(() => {
   loadCurrentDataSource()
   // 加载智能筛选对话历史
   loadAiConversation()
+})
+
+onUnmounted(() => {
+  if (aiSocket.value) {
+    try { aiSocket.value.close() } catch {}
+    aiSocket.value = null
+    aiSocketConnected.value = false
+  }
 })
 </script>
 

@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import inspect
 import json
 import logging
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional
@@ -145,6 +146,18 @@ class UnifiedLLMClient:
         """
         self._tools.update(tools)
 
+    async def _emit_progress(self, progress_callback: Optional[Callable], payload: Dict[str, Any]) -> None:
+        """统一处理可选的进度回调，兼容同步/异步函数。"""
+        if not progress_callback:
+            return
+
+        try:
+            result = progress_callback(payload)
+            if inspect.isawaitable(result):
+                await result
+        except Exception as e:
+            logger.debug("[UnifiedLLM] 进度回调失败(忽略): %s", e)
+
     def chat(
         self,
         messages: List[Message],
@@ -180,6 +193,7 @@ class UnifiedLLMClient:
         max_tool_rounds: int = 5,
         tools_used: Optional[List[str]] = None,
         dry_run: bool = False,
+        progress_callback: Optional[Callable] = None,
         **kwargs
     ) -> LLMResponse:
         """
@@ -196,6 +210,7 @@ class UnifiedLLMClient:
                 messages, tools, response, max_tool_rounds,
                 tools_used=tools_used,
                 dry_run=dry_run,
+                progress_callback=progress_callback,
                 **kwargs
             )
 
@@ -255,6 +270,7 @@ class UnifiedLLMClient:
         max_rounds: int,
         tools_used: Optional[List[str]] = None,
         dry_run: bool = False,
+        progress_callback: Optional[Callable] = None,
         **kwargs
     ) -> LLMResponse:
         """异步执行工具调用循环，可选收集每轮调用的工具名称"""
@@ -264,10 +280,22 @@ class UnifiedLLMClient:
 
         while current_response.has_tool_calls and rounds < max_rounds:
             current_messages.append(current_response.to_message())
+            await self._emit_progress(progress_callback, {
+                "event": "tool_round_started",
+                "round": rounds + 1,
+                "tool_count": len(current_response.tool_calls),
+            })
 
             for tool_call in current_response.tool_calls:
                 if tools_used is not None:
                     tools_used.append(tool_call.name)
+
+                await self._emit_progress(progress_callback, {
+                    "event": "tool_started",
+                    "round": rounds + 1,
+                    "tool": tool_call.name,
+                    "arguments": tool_call.arguments,
+                })
 
                 if dry_run:
                     # ── 测试模式：只记日志，返回模拟结果 ──
@@ -288,6 +316,13 @@ class UnifiedLLMClient:
                         tool_call,
                         self._tools
                     )
+                await self._emit_progress(progress_callback, {
+                    "event": "tool_completed",
+                    "round": rounds + 1,
+                    "tool": tool_call.name,
+                    "is_error": result.is_error,
+                    "preview": (result.content or "")[:400],
+                })
                 current_messages.append(Message(
                     role="tool",
                     content=result.content,
@@ -306,6 +341,10 @@ class UnifiedLLMClient:
                 )
 
             current_response = await self._adapter.achat(current_messages, tools, **kwargs)
+            await self._emit_progress(progress_callback, {
+                "event": "tool_round_completed",
+                "round": rounds + 1,
+            })
             rounds += 1
 
         # ── 最终综合：当工具轮次耗尽但 LLM 仍想调用工具时，强制生成文本回复 ──
@@ -314,6 +353,10 @@ class UnifiedLLMClient:
                 f"[UnifiedLLM] 工具调用轮次已达上限 ({max_rounds})，"
                 f"LLM 仍请求工具调用，启动最终综合..."
             )
+            await self._emit_progress(progress_callback, {
+                "event": "tool_limit_reached",
+                "max_rounds": max_rounds,
+            })
             # 注意：不能把带 tool_calls 的 assistant 消息直接加入历史，
             # 否则 API 会要求紧跟对应的 tool response 消息（400 错误）。
             # 只保留其中的文本内容（如果有），作为纯文本 assistant 消息。
@@ -335,6 +378,10 @@ class UnifiedLLMClient:
                 current_messages, tools=None, **kwargs
             )
             logger.info("[UnifiedLLM] ✅ 最终综合完成")
+            await self._emit_progress(progress_callback, {
+                "event": "tool_limit_summary_completed",
+                "max_rounds": max_rounds,
+            })
 
         return current_response
 

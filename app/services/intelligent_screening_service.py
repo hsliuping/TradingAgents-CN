@@ -11,7 +11,7 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -166,7 +166,32 @@ class IntelligentScreeningService:
             logger.warning(f"[智能筛选] 快速粗筛降级失败: {e}")
             return []
 
-    async def chat(self, user_id: str, message: str) -> Dict[str, Any]:
+    async def _emit_progress(
+        self,
+        progress_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]],
+        event: str,
+        **data,
+    ) -> None:
+        """发送智能筛选进度事件，供 WebSocket 流式展示。"""
+        if not progress_callback:
+            return
+
+        payload = {
+            "event": event,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **data,
+        }
+        try:
+            await progress_callback(payload)
+        except Exception as e:
+            logger.debug("[智能筛选] 进度推送失败(忽略): %s", e)
+
+    async def chat(
+        self,
+        user_id: str,
+        message: str,
+        progress_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    ) -> Dict[str, Any]:
         """
         核心方法：处理用户的选股请求（三阶段流程）
 
@@ -180,6 +205,7 @@ class IntelligentScreeningService:
                 "tools_used": [],
                 "stocks": [],
                 "phase": "result",
+                "is_fallback": False,
             }
 
         # 1. 获取历史对话
@@ -188,6 +214,16 @@ class IntelligentScreeningService:
         # 2. 判断当前应进入哪个阶段
         phase = self._determine_phase(history, message)
         logger.info(f"[智能筛选] 用户={user_id} 当前阶段={phase} 消息={message[:50]}")
+        await self._emit_progress(
+            progress_callback,
+            "phase_determined",
+            phase=phase,
+            message=(
+                "正在分析您的筛选需求" if phase == "confirmation"
+                else "正在生成筛选执行计划" if phase == "planning"
+                else "正在执行批量筛选与验证"
+            ),
+        )
 
         # 3. 构建消息列表（包含历史）
         # planning 阶段需要将实际可用的工具清单传入提示词，防止 LLM 幻觉工具名
@@ -204,6 +240,12 @@ class IntelligentScreeningService:
         async def _do_chat():
             nonlocal tools_used
             if phase == "result":
+                await self._emit_progress(
+                    progress_callback,
+                    "status",
+                    phase=phase,
+                    message="已进入执行阶段，开始调用批量筛选工具",
+                )
                 # 阶段 3：实际调用工具执行筛选
                 resp = await self._llm_client.achat(
                     messages,
@@ -211,8 +253,15 @@ class IntelligentScreeningService:
                     auto_execute_tools=True,
                     max_tool_rounds=SCREENING_MAX_TOOL_ROUNDS,
                     tools_used=tools_used,
+                    progress_callback=progress_callback,
                 )
             else:
+                await self._emit_progress(
+                    progress_callback,
+                    "status",
+                    phase=phase,
+                    message="正在生成阶段性回复",
+                )
                 # 阶段 1（confirmation）和阶段 2（planning）：均不调用工具
                 resp = await self._llm_client.achat(messages, tools=None)
             return resp.content
@@ -228,11 +277,24 @@ class IntelligentScreeningService:
             logger.info(
                 f"[智能筛选] 完成 phase={phase} elapsed={elapsed:.2f}s tools_used={len(tools_used)}"
             )
+            await self._emit_progress(
+                progress_callback,
+                "status",
+                phase=phase,
+                message=f"阶段处理完成，用时 {elapsed:.2f} 秒",
+                tools_used=tools_used,
+            )
         except asyncio.TimeoutError:
             timeout_seconds = (
                 SCREENING_RESULT_TIMEOUT_SECONDS if phase == "result" else ASSISTANT_TIMEOUT_SECONDS
             )
             logger.warning(f"[智能筛选] 请求超时（{timeout_seconds}s，phase={phase}）")
+            await self._emit_progress(
+                progress_callback,
+                "timeout",
+                phase=phase,
+                message=f"处理超时，开始尝试降级兜底（{timeout_seconds} 秒）",
+            )
 
             # result 阶段超时时，优先回退到最近一次成功结果，再回退到数据库快速粗筛
             fallback_stocks = []
@@ -249,7 +311,16 @@ class IntelligentScreeningService:
                     f"{json.dumps({'stocks': fallback_stocks}, ensure_ascii=False, indent=2)}\n"
                     "```"
                 )
-                await self._save_message(user_id, message, reply, tools_used, fallback_stocks, "result")
+                await self._save_message(
+                    user_id, message, reply, tools_used, fallback_stocks, "result", is_fallback=True,
+                )
+                await self._emit_progress(
+                    progress_callback,
+                    "fallback_ready",
+                    phase="result",
+                    message=f"已生成 {len(fallback_stocks)} 只降级候选结果",
+                    stocks=fallback_stocks,
+                )
                 return {
                     "reply": reply,
                     "tools_used": tools_used,
@@ -269,6 +340,12 @@ class IntelligentScreeningService:
             return {"reply": reply, "tools_used": tools_used, "stocks": [], "phase": "result"}
         except Exception as e:
             logger.exception("[智能筛选] 对话失败")
+            await self._emit_progress(
+                progress_callback,
+                "error",
+                phase=phase,
+                message=f"处理失败：{str(e)}",
+            )
             reply = f"处理您的请求时发生错误：{str(e)}。请稍后重试。"
             await self._save_message(user_id, message, reply, tools_used, [], "result")
             return {"reply": reply, "tools_used": tools_used, "stocks": [], "phase": "result"}
@@ -277,7 +354,13 @@ class IntelligentScreeningService:
         stocks = self._extract_stocks(reply) if phase == "result" else []
 
         await self._save_message(user_id, message, reply, tools_used, stocks, phase)
-        return {"reply": reply, "tools_used": tools_used, "stocks": stocks, "phase": phase}
+        return {
+            "reply": reply,
+            "tools_used": tools_used,
+            "stocks": stocks,
+            "phase": phase,
+            "is_fallback": False,
+        }
 
     def _determine_phase(self, history: list, message: str) -> str:
         """
@@ -522,7 +605,7 @@ class IntelligentScreeningService:
 
     async def _save_message(
         self, user_id: str, user_msg: str, assistant_reply: str,
-        tools_used: List[str], stocks: list, phase: str,
+        tools_used: List[str], stocks: list, phase: str, is_fallback: bool = False,
     ) -> None:
         """持久化对话消息到 screening_conversations"""
         now = datetime.now(timezone.utc)
@@ -533,6 +616,7 @@ class IntelligentScreeningService:
             "tools_used": tools_used,
             "stocks": stocks,
             "phase": phase,
+            "is_fallback": is_fallback,
             "timestamp": now,
         }
         await self._db.screening_conversations.update_one(
