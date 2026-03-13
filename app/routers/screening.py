@@ -55,7 +55,15 @@ async def get_screening_fields(user: dict = Depends(get_current_user)):
         categories = {
             "basic": ["code", "name", "industry", "area", "market"],
             "market_value": ["total_mv", "circ_mv"],
-            "financial": ["pe", "pb", "pe_ttm", "pb_mrq", "roe"],
+            "financial": [
+                "pe", "pb", "pe_ttm", "pb_mrq",
+                "roe", "roa", "gross_margin", "netprofit_margin",
+                "debt_to_assets", "assets_to_eqt",
+                "current_ratio", "quick_ratio", "cash_ratio",
+                "dividend_yield", "revenue_ttm", "net_profit_ttm",
+                "n_cashflow_act", "report_period",
+                "net_working_capital", "is_st"
+            ],
             "trading": ["turnover_rate", "volume_ratio"],
             "price": ["close", "pct_chg", "amount"],
             "technical": ["ma20", "rsi14", "kdj_k", "kdj_d", "kdj_j", "dif", "dea", "macd_hist"]

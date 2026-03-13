@@ -65,9 +65,18 @@ export interface StockRecommendation {
   pe?: number
   pb?: number
   roe?: number
+  roa?: number
+  gross_margin?: number
+  netprofit_margin?: number
   dividend_yield?: number
   debt_to_assets?: number
+  assets_to_eqt?: number
   current_ratio?: number
+  quick_ratio?: number
+  cash_ratio?: number
+  revenue_ttm?: number
+  net_profit_ttm?: number
+  n_cashflow_act?: number
   report_period?: string
   pct_change?: number
   reason: string

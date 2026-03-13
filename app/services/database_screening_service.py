@@ -41,6 +41,12 @@ class DatabaseScreeningService:
             "pe_ttm": "pe_ttm",         # 滚动市盈率
             "pb_mrq": "pb_mrq",         # 最新市净率
             "roe": "roe",                # 净资产收益率（最近一期）
+            "roa": "roa",                # 总资产收益率
+            "gross_margin": "gross_margin",          # 毛利率
+            "netprofit_margin": "netprofit_margin",  # 净利率
+            "revenue_ttm": "revenue_ttm",            # 滚动营收
+            "net_profit_ttm": "net_profit_ttm",      # 滚动净利润
+            "n_cashflow_act": "n_cashflow_act",      # 经营现金流净额
 
             # 交易指标
             "turnover_rate": "turnover_rate",  # 换手率%
@@ -48,10 +54,14 @@ class DatabaseScreeningService:
 
             # 扩展财务指标（来自 stock_screening_view 的计算字段）
             "debt_to_assets": "debt_to_assets",      # 资产负债率 (%)
+            "assets_to_eqt": "assets_to_eqt",        # 权益乘数
             "current_ratio": "current_ratio",        # 流动比率
+            "quick_ratio": "quick_ratio",            # 速动比率
+            "cash_ratio": "cash_ratio",              # 现金比率
             "dividend_yield": "dividend_yield",      # 股息率 (%)
             "net_working_capital": "net_working_capital",  # 净营运资本 (亿元)
             "is_st": "is_st",                        # 是否ST股 (True/False)
+            "report_period": "report_period",        # 最新财报期
 
             # 搜索关键词（虚拟字段）
             "keyword": "keyword",
@@ -365,15 +375,27 @@ class DatabaseScreeningService:
                     "roa": {"$first": "$roa"},
                     "netprofit_margin": {"$first": "$netprofit_margin"},
                     "gross_margin": {"$first": "$gross_margin"},
+                    "revenue_ttm": {"$first": "$revenue_ttm"},
+                    "net_profit_ttm": {"$first": "$net_profit_ttm"},
+                    "n_cashflow_act": {"$first": "$n_cashflow_act"},
+                    "assets_to_eqt_fi": {"$first": "$financial_indicators.assets_to_eqt"},
+                    "assets_to_eqt_flat": {"$first": "$assets_to_eqt"},
                     # 扩展财务指标：兼容 flat 和 nested 两种存储方式
                     "debt_to_assets_fi": {"$first": "$financial_indicators.debt_to_assets"},
                     "debt_to_assets_flat": {"$first": "$debt_to_assets"},
                     "current_ratio_fi": {"$first": "$financial_indicators.current_ratio"},
                     "current_ratio_flat": {"$first": "$current_ratio"},
+                    "quick_ratio_fi": {"$first": "$financial_indicators.quick_ratio"},
+                    "quick_ratio_flat": {"$first": "$quick_ratio"},
+                    "cash_ratio_fi": {"$first": "$financial_indicators.cash_ratio"},
+                    "cash_ratio_flat": {"$first": "$cash_ratio"},
                     "dividend_yield_fi": {"$first": "$financial_indicators.dividend_yield"},
                     "dividend_yield_flat": {"$first": "$dividend_yield"},
-                    "total_cur_assets": {"$first": "$balance_sheet.total_cur_assets"},
-                    "total_cur_liab": {"$first": "$balance_sheet.total_cur_liab"},
+                    "total_cur_assets_bs": {"$first": "$balance_sheet.total_cur_assets"},
+                    "total_cur_assets_flat": {"$first": "$total_cur_assets"},
+                    "total_cur_liab_bs": {"$first": "$balance_sheet.total_cur_liab"},
+                    "total_cur_liab_flat": {"$first": "$total_cur_liab"},
+                    "report_period": {"$first": "$report_period"},
                 }}
             ]
 
@@ -382,11 +404,14 @@ class DatabaseScreeningService:
                 code = doc.get("_id")
                 # 合并 flat 和 nested 字段，优先使用 nested（financial_indicators）
                 debt_to_assets = doc.get("debt_to_assets_fi") or doc.get("debt_to_assets_flat")
+                assets_to_eqt = doc.get("assets_to_eqt_fi") or doc.get("assets_to_eqt_flat")
                 current_ratio = doc.get("current_ratio_fi") or doc.get("current_ratio_flat")
+                quick_ratio = doc.get("quick_ratio_fi") or doc.get("quick_ratio_flat")
+                cash_ratio = doc.get("cash_ratio_fi") or doc.get("cash_ratio_flat")
                 dividend_yield = doc.get("dividend_yield_fi") or doc.get("dividend_yield_flat")
                 # 计算净营运资本
-                total_cur_assets = doc.get("total_cur_assets")
-                total_cur_liab = doc.get("total_cur_liab")
+                total_cur_assets = doc.get("total_cur_assets_flat") or doc.get("total_cur_assets_bs")
+                total_cur_liab = doc.get("total_cur_liab_flat") or doc.get("total_cur_liab_bs")
                 net_working_capital = None
                 if total_cur_assets is not None and total_cur_liab is not None:
                     net_working_capital = (total_cur_assets - total_cur_liab) / 1e8
@@ -395,10 +420,17 @@ class DatabaseScreeningService:
                     "roa": doc.get("roa"),
                     "netprofit_margin": doc.get("netprofit_margin"),
                     "gross_margin": doc.get("gross_margin"),
+                    "revenue_ttm": doc.get("revenue_ttm"),
+                    "net_profit_ttm": doc.get("net_profit_ttm"),
+                    "n_cashflow_act": doc.get("n_cashflow_act"),
                     "debt_to_assets": debt_to_assets,
+                    "assets_to_eqt": assets_to_eqt,
                     "current_ratio": current_ratio,
+                    "quick_ratio": quick_ratio,
+                    "cash_ratio": cash_ratio,
                     "dividend_yield": dividend_yield,
                     "net_working_capital": net_working_capital,
+                    "report_period": doc.get("report_period"),
                 }
 
             # 填充财务数据到结果中
@@ -411,15 +443,32 @@ class DatabaseScreeningService:
                         result["roe"] = financial_data.get("roe")
                     if result.get("debt_to_assets") is None:
                         result["debt_to_assets"] = financial_data.get("debt_to_assets")
+                    if result.get("assets_to_eqt") is None:
+                        result["assets_to_eqt"] = financial_data.get("assets_to_eqt")
                     if result.get("current_ratio") is None:
                         result["current_ratio"] = financial_data.get("current_ratio")
+                    if result.get("quick_ratio") is None:
+                        result["quick_ratio"] = financial_data.get("quick_ratio")
+                    if result.get("cash_ratio") is None:
+                        result["cash_ratio"] = financial_data.get("cash_ratio")
                     if result.get("dividend_yield") is None:
                         result["dividend_yield"] = financial_data.get("dividend_yield")
                     if result.get("net_working_capital") is None:
                         result["net_working_capital"] = financial_data.get("net_working_capital")
-                    # 可以添加更多财务指标
-                    # result["roa"] = financial_data.get("roa")
-                    # result["netprofit_margin"] = financial_data.get("netprofit_margin")
+                    if result.get("roa") is None:
+                        result["roa"] = financial_data.get("roa")
+                    if result.get("gross_margin") is None:
+                        result["gross_margin"] = financial_data.get("gross_margin")
+                    if result.get("netprofit_margin") is None:
+                        result["netprofit_margin"] = financial_data.get("netprofit_margin")
+                    if result.get("revenue_ttm") is None:
+                        result["revenue_ttm"] = financial_data.get("revenue_ttm")
+                    if result.get("net_profit_ttm") is None:
+                        result["net_profit_ttm"] = financial_data.get("net_profit_ttm")
+                    if result.get("n_cashflow_act") is None:
+                        result["n_cashflow_act"] = financial_data.get("n_cashflow_act")
+                    if result.get("report_period") is None:
+                        result["report_period"] = financial_data.get("report_period")
 
             logger.debug(f"✅ 已填充 {len(financial_data_map)} 条财务数据")
 
@@ -461,13 +510,23 @@ class DatabaseScreeningService:
             "pe_ttm": doc.get("pe_ttm"),
             "pb_mrq": doc.get("pb_mrq"),
             "roe": doc.get("roe"),
+            "roa": doc.get("roa"),
+            "gross_margin": doc.get("gross_margin"),
+            "netprofit_margin": doc.get("netprofit_margin"),
+            "revenue_ttm": doc.get("revenue_ttm"),
+            "net_profit_ttm": doc.get("net_profit_ttm"),
+            "n_cashflow_act": doc.get("n_cashflow_act"),
 
             # 扩展财务指标（来自 stock_screening_view 新增计算字段）
             "debt_to_assets": doc.get("debt_to_assets"),      # 资产负债率 (%)
+            "assets_to_eqt": doc.get("assets_to_eqt"),        # 权益乘数
             "current_ratio": doc.get("current_ratio"),        # 流动比率
+            "quick_ratio": doc.get("quick_ratio"),            # 速动比率
+            "cash_ratio": doc.get("cash_ratio"),              # 现金比率
             "dividend_yield": doc.get("dividend_yield"),      # 股息率 (%)
             "net_working_capital": doc.get("net_working_capital"),  # 净营运资本 (亿元)
             "is_st": doc.get("is_st"),                        # 是否ST股
+            "report_period": doc.get("report_period"),        # 最新财报期
 
             # 交易指标
             "turnover_rate": doc.get("turnover_rate"),
