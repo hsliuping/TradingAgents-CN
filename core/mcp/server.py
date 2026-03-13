@@ -17,8 +17,8 @@ import logging
 import os
 from typing import Optional
 
-from fastmcp import FastMCP
-from fastmcp.server.context import Context
+from mcp.server.auth.settings import AuthSettings
+from mcp.server.fastmcp import FastMCP, Context
 
 from core.mcp.auth import mcp_auth
 
@@ -29,6 +29,14 @@ logger = logging.getLogger(__name__)
 # 否则（开发/stdio 模式）不启用认证。
 _auth_enabled = os.getenv("MCP_AUTH_ENABLED", "false").lower() in ("true", "1", "yes")
 
+_auth_settings = None
+if _auth_enabled:
+    _auth_settings = AuthSettings(
+        issuer_url=os.getenv("MCP_AUTH_ISSUER_URL", "http://127.0.0.1:8000/mcp"),
+        resource_server_url=os.getenv("MCP_RESOURCE_SERVER_URL", "http://127.0.0.1:8000/mcp"),
+        required_scopes=mcp_auth.required_scopes,
+    )
+
 mcp = FastMCP(
     "TradingAgents-CN",
     version="1.0.0",
@@ -38,7 +46,8 @@ mcp = FastMCP(
         "用 chat_with_assistant 进行自由对话，用 list_workflows 查看可用工作流，\n"
         "用 screen_stocks 按条件智能选股，用 get_market_overview 获取 A 股市场概览。"
     ),
-    auth=mcp_auth if _auth_enabled else None,
+    auth=_auth_settings,
+    token_verifier=mcp_auth if _auth_enabled else None,
 )
 
 
