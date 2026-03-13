@@ -872,9 +872,15 @@ async def download_test_program():
     from pathlib import Path
 
     try:
-        test_program_path = Path("scripts/test_batch_import_apis.py")
+        project_root = Path(__file__).parent.parent.parent
+        candidate_paths = [
+            project_root / "docs" / "api" / "examples" / "stock_data_import_examples.py",
+            project_root / "scripts" / "test_batch_import_apis.py",
+        ]
 
-        if not test_program_path.exists():
+        test_program_path = next((path for path in candidate_paths if path.exists()), None)
+
+        if not test_program_path:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="测试程序文件不存在"
@@ -882,7 +888,7 @@ async def download_test_program():
 
         return FileResponse(
             path=str(test_program_path),
-            filename="test_batch_import_apis.py",
+            filename=test_program_path.name,
             media_type="text/x-python"
         )
 

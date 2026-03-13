@@ -16,6 +16,7 @@ export interface BuildInfo {
 export interface VersionInfo {
   current_version: string
   build_info: BuildInfo
+  update_channel?: string
   /** Docker 环境 */
   is_docker?: boolean
   /** 是否支持应用内更新（Windows 便携版/安装版） */
@@ -26,6 +27,7 @@ export interface VersionInfo {
 export interface UpdateInfo {
   has_update: boolean
   latest_version: string
+  package_type?: 'installer' | 'update'
   download_url: string
   file_size: number
   sha256: string

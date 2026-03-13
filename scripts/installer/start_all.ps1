@@ -497,13 +497,27 @@ if ($needsImport) {
                 $upgradeOutput | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
             }
             if ($LASTEXITCODE -eq 0) {
-                $upgradeApplied = $upgradeOutput | Select-String -Pattern "upgrade config|Applying upgrade|No upgrade"
-                if ($upgradeApplied) {
+                $appliedLines = $upgradeOutput | Select-String -Pattern "Applying upgrade config for|Updated last_applied_config_version"
+                $noOpLines = $upgradeOutput | Select-String -Pattern "No upgrade configs to apply|No releases directory found"
+                if ($appliedLines) {
+                    Write-Host "  Upgrade config applied successfully" -ForegroundColor Green
+                } elseif ($noOpLines) {
+                    Write-Host "  Upgrade config skipped: no incremental config to apply" -ForegroundColor Gray
+                } else {
                     Write-Host "  Upgrade config check completed" -ForegroundColor Green
                 }
+            } else {
+                Write-Host "  WARNING: Upgrade config script exited with code $LASTEXITCODE" -ForegroundColor Yellow
             }
         } catch {
             Write-Host "  WARNING: Upgrade config check failed: $_" -ForegroundColor Yellow
+        }
+    } else {
+        if (-not (Test-Path $upgradeScript)) {
+            Write-Host "  WARNING: Upgrade config script not found: $upgradeScript" -ForegroundColor Yellow
+        }
+        if (-not (Test-Path $upgradePythonExe)) {
+            Write-Host "  WARNING: Python executable for upgrade config not found: $upgradePythonExe" -ForegroundColor Yellow
         }
     }
 }

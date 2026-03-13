@@ -10,7 +10,7 @@
     输出目录。默认 release/packages/
 .PARAMETER SourceDir
     源代码目录。默认为便携版目录（编译后的代码）。
-    如果便携版不存在，使用项目根目录（源码）。
+    如果便携版不存在，则直接失败，避免把项目源码误打进更新包。
 #>
 
 param(
@@ -52,11 +52,17 @@ if (-not $SourceDir) {
         $SourceDir = $portableDir
         Write-Host "  Source: Portable directory (compiled)" -ForegroundColor Cyan
     } else {
-        $SourceDir = $root
-        Write-Host "  Source: Project root (source code)" -ForegroundColor Yellow
+        Write-Host "ERROR: Portable directory not found: $portableDir" -ForegroundColor Red
+        Write-Host "       Build the portable package first to avoid packaging raw source code." -ForegroundColor Red
+        exit 1
     }
 } else {
     Write-Host "  Source: $SourceDir" -ForegroundColor Cyan
+}
+
+if (-not (Test-Path $SourceDir)) {
+    Write-Host "ERROR: Source directory not found: $SourceDir" -ForegroundColor Red
+    exit 1
 }
 
 # ── 3. 确定输出目录 ──────────────────────────────────────
@@ -85,6 +91,14 @@ $includeItems = @(
     "BUILD_INFO"
 )
 
+$safeRootFallbackItems = @(
+    "releases",
+    "install",
+    "config",
+    "VERSION",
+    "BUILD_INFO"
+)
+
 # 对于 frontend，只打包 dist 目录（构建产物）
 # 如果源目录有 frontend/dist，打包 frontend/dist
 # 如果没有，打包整个 frontend（用户需要自己构建）
@@ -99,21 +113,44 @@ Write-Host "[1/3] Collecting files..." -ForegroundColor Yellow
 $copiedCount = 0
 foreach ($item in $includeItems) {
     $src = Join-Path $SourceDir $item
+    $actualSource = $src
     if (Test-Path $src) {
         $dst = Join-Path $tempDir $item
-        if ((Get-Item $src).PSIsContainer) {
+        if ((Get-Item $actualSource).PSIsContainer) {
             # 目录：递归复制
-            Copy-Item -Path $src -Destination $dst -Recurse -Force
+            Copy-Item -Path $actualSource -Destination $dst -Recurse -Force
             $fileCount = (Get-ChildItem -Path $dst -Recurse -File).Count
             Write-Host "    ✅ $item ($fileCount files)" -ForegroundColor Green
         } else {
             # 文件：直接复制
-            Copy-Item -Path $src -Destination $dst -Force
+            Copy-Item -Path $actualSource -Destination $dst -Force
             Write-Host "    ✅ $item" -ForegroundColor Green
         }
         $copiedCount++
     } else {
-        Write-Host "    ⚠️ $item (not found, skipped)" -ForegroundColor Yellow
+        $fallbackSrc = Join-Path $root $item
+        if (($SourceDir -ne $root) -and ($safeRootFallbackItems -contains $item) -and (Test-Path $fallbackSrc)) {
+            $actualSource = $fallbackSrc
+            $dst = Join-Path $tempDir $item
+            if ((Get-Item $actualSource).PSIsContainer) {
+                Copy-Item -Path $actualSource -Destination $dst -Recurse -Force
+                $fileCount = (Get-ChildItem -Path $dst -Recurse -File).Count
+                Write-Host "    ✅ $item ($fileCount files, fallback to project root)" -ForegroundColor Green
+            } else {
+                Copy-Item -Path $actualSource -Destination $dst -Force
+                Write-Host "    ✅ $item (fallback to project root)" -ForegroundColor Green
+            }
+            $copiedCount++
+        } else {
+            if ($safeRootFallbackItems -contains $item) {
+                Write-Host "    ⚠️ $item (not found, skipped)" -ForegroundColor Yellow
+            } else {
+                Write-Host "ERROR: Required compiled item missing from portable source: $item" -ForegroundColor Red
+                Write-Host "       SourceDir: $SourceDir" -ForegroundColor Red
+                Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+                exit 1
+            }
+        }
     }
 }
 

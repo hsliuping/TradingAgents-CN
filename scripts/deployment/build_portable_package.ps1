@@ -161,62 +161,74 @@ if (-not $SkipEmbeddedPython) {
 # Step 2: Build Frontend
 # ============================================================================
 
-Write-Host "[2/4] Building frontend..." -ForegroundColor Yellow
-Write-Host ""
+if ($SkipFrontendBuild) {
+    Write-Host "[2/4] Skipping frontend build (using existing portable frontend files)..." -ForegroundColor Gray
+    Write-Host ""
+} else {
+    Write-Host "[2/4] Building frontend..." -ForegroundColor Yellow
+    Write-Host ""
 
-$frontendDir = Join-Path $root "frontend"
-$frontendDistSrc = Join-Path $frontendDir "dist"
-$frontendDistDest = Join-Path $portableDir "frontend\dist"
+    $frontendDir = Join-Path $root "frontend"
+    $frontendDistSrc = Join-Path $frontendDir "dist"
+    $frontendDistDest = Join-Path $portableDir "frontend\dist"
 
-if (Test-Path $frontendDir) {
-    try {
-        # Build in main project directory using Yarn (same as Dockerfile)
-        Write-Host "  Building frontend in main project directory..." -ForegroundColor Cyan
-        Write-Host "  Installing dependencies with Yarn..." -ForegroundColor Gray
+    if (Test-Path $frontendDir) {
+        try {
+            # Build in main project directory using Yarn (same as Dockerfile)
+            Write-Host "  Building frontend in main project directory..." -ForegroundColor Cyan
+            Write-Host "  Installing dependencies with Yarn..." -ForegroundColor Gray
 
-        # Use cmd.exe to run yarn to avoid PowerShell parsing issues
-        $installProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "cd /d `"$frontendDir`" && yarn install --frozen-lockfile" -Wait -PassThru -NoNewWindow
+            # Use cmd.exe to run yarn to avoid PowerShell parsing issues
+            $installProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "cd /d `"$frontendDir`" && yarn install --frozen-lockfile" -Wait -PassThru -NoNewWindow
 
-        if ($installProcess.ExitCode -ne 0) {
-            Write-Host "  WARNING: yarn install failed with exit code $($installProcess.ExitCode)" -ForegroundColor Yellow
-        } else {
-            Write-Host "  Dependencies installed successfully" -ForegroundColor Green
-        }
+            if ($installProcess.ExitCode -ne 0) {
+                Write-Host "  Yarn install failed with exit code $($installProcess.ExitCode)" -ForegroundColor Yellow
+                Write-Host "  Falling back to npm install..." -ForegroundColor Gray
 
-        Write-Host "  Building frontend (skipping type check, this may take a few minutes)..." -ForegroundColor Gray
-        # Use 'yarn vite build' to skip TypeScript type checking (same as Dockerfile)
-        $buildProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "cd /d `"$frontendDir`" && yarn vite build" -Wait -PassThru -NoNewWindow
+                # Fallback to npm if yarn is not available
+                $npmInstallProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "cd /d `"$frontendDir`" && npm install" -Wait -PassThru -NoNewWindow
+                if ($npmInstallProcess.ExitCode -ne 0) {
+                    throw "npm install also failed"
+                }
+                Write-Host "  Dependencies installed successfully with npm" -ForegroundColor Green
+            } else {
+                Write-Host "  Dependencies installed successfully" -ForegroundColor Green
+            }
 
-        if ($buildProcess.ExitCode -ne 0) {
-            Write-Host "  WARNING: Frontend build failed with exit code $($buildProcess.ExitCode)" -ForegroundColor Yellow
-        } else {
+            Write-Host "  Building frontend (skipping type check, this may take a few minutes)..." -ForegroundColor Gray
+            # Use build-only script to skip vue-tsc type checking (same as Dockerfile)
+            $buildProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "cd /d `"$frontendDir`" && yarn build:only" -Wait -PassThru -NoNewWindow
+
+            if ($buildProcess.ExitCode -ne 0) {
+                throw "Frontend build failed with exit code $($buildProcess.ExitCode)"
+            }
+
             Write-Host "  Frontend build completed" -ForegroundColor Green
 
             # Copy dist to portable directory
             if (Test-Path $frontendDistSrc) {
                 Write-Host "  Copying frontend dist to portable directory..." -ForegroundColor Gray
 
-                # Remove old dist
                 if (Test-Path $frontendDistDest) {
                     Remove-Item -Path $frontendDistDest -Recurse -Force
                 }
 
-                # Copy new dist
                 Copy-Item -Path $frontendDistSrc -Destination $frontendDistDest -Recurse -Force
                 Write-Host "  Frontend dist copied successfully" -ForegroundColor Green
             } else {
-                Write-Host "  WARNING: Frontend dist not found: $frontendDistSrc" -ForegroundColor Yellow
+                Write-Host "  WARNING: Frontend dist not found after build" -ForegroundColor Yellow
             }
-        }
-    } catch {
-        Write-Host "  ERROR: Frontend build failed: $_" -ForegroundColor Red
-        Write-Host "  Continuing with packaging..." -ForegroundColor Yellow
-    }
-} else {
-    Write-Host "  WARNING: Frontend directory not found: $frontendDir" -ForegroundColor Yellow
-}
 
-Write-Host ""
+        } catch {
+            Write-Host "  WARNING: Frontend build failed: $_" -ForegroundColor Yellow
+            Write-Host "  Continuing with existing frontend files..." -ForegroundColor Gray
+        }
+    } else {
+        Write-Host "  Frontend directory not found, skipping build" -ForegroundColor Gray
+    }
+
+    Write-Host ""
+}
 
 # ============================================================================
 # Step 3: Package (unless skipped)
@@ -278,22 +290,27 @@ if (-not $Version) {
 
 # 生成构建信息
 Write-Host ""
-Write-Host "  Generating build info..." -ForegroundColor Cyan
-$buildInfoScript = Join-Path $root "scripts\build\generate_build_info.ps1"
-if (Test-Path $buildInfoScript) {
-    & powershell -ExecutionPolicy Bypass -File $buildInfoScript -BuildType "portable" -ProjectRoot $root
-    # 读取BUILD_INFO获取完整版本号
-    $buildInfoFile = Join-Path $root "BUILD_INFO"
-    if (Test-Path $buildInfoFile) {
-        $buildInfo = Get-Content $buildInfoFile -Raw | ConvertFrom-Json
-        $FullVersion = $buildInfo.full_version
-        if ($FullVersion) {
-            $Version = $FullVersion
-            Write-Host "  Using full version: $Version" -ForegroundColor Cyan
-        }
-    }
+$hasPinnedBuildVersion = $Version -match '-build\d{8}-\d{6}$'
+if ($hasPinnedBuildVersion) {
+    Write-Host "  Reusing existing full version: $Version" -ForegroundColor Cyan
 } else {
-    Write-Host "  Warning: Build info script not found: $buildInfoScript" -ForegroundColor Yellow
+    Write-Host "  Generating build info..." -ForegroundColor Cyan
+    $buildInfoScript = Join-Path $root "scripts\build\generate_build_info.ps1"
+    if (Test-Path $buildInfoScript) {
+        & powershell -ExecutionPolicy Bypass -File $buildInfoScript -BuildType "portable" -ProjectRoot $root
+        # 读取BUILD_INFO获取完整版本号
+        $buildInfoFile = Join-Path $root "BUILD_INFO"
+        if (Test-Path $buildInfoFile) {
+            $buildInfo = Get-Content $buildInfoFile -Raw | ConvertFrom-Json
+            $FullVersion = $buildInfo.full_version
+            if ($FullVersion) {
+                $Version = $FullVersion
+                Write-Host "  Using full version: $Version" -ForegroundColor Cyan
+            }
+        }
+    } else {
+        Write-Host "  Warning: Build info script not found: $buildInfoScript" -ForegroundColor Yellow
+    }
 }
 Write-Host ""
 
@@ -303,6 +320,8 @@ if (-not (Test-Path $packagesDir)) {
     New-Item -ItemType Directory -Path $packagesDir -Force | Out-Null
 }
 
+$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+
 # 使用BUILD_INFO中的完整版本号（如果存在）
 $buildInfoFile = Join-Path $root "BUILD_INFO"
 if (Test-Path $buildInfoFile) {
@@ -311,11 +330,9 @@ if (Test-Path $buildInfoFile) {
     if ($FullVersion) {
         $packageName = "TradingAgentsCN-Portable-$FullVersion"
     } else {
-        $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
         $packageName = "TradingAgentsCN-Portable-$Version-$timestamp"
     }
 } else {
-    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $packageName = "TradingAgentsCN-Portable-$Version-$timestamp"
 }
 
@@ -329,6 +346,11 @@ Write-Host ""
 
 Write-Host "  Creating temporary directory..." -ForegroundColor Gray
 $tempDir = Join-Path $env:TEMP "TradingAgentsCN-Package-$timestamp"
+
+if (Test-Path $tempDir) {
+    Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 
 Write-Host "  Copying all files to temporary directory..." -ForegroundColor Gray
@@ -378,13 +400,56 @@ $excludeDirs = @(
     (Join-Path $tempDir "data\mongodb"),
     (Join-Path $tempDir "data\redis"),
     (Join-Path $tempDir "logs"),
-    (Join-Path $tempDir "data\cache")
+    (Join-Path $tempDir "data\cache"),
+    (Join-Path $tempDir "tests"),
+    (Join-Path $tempDir "env"),
+    (Join-Path $tempDir "__pycache__")
+)
+
+$projectPythonWhitelist = @(
+    "app\__main__.py",
+    "app\worker\__main__.py",
+    "migrations\__main__.py",
+    "migrations\cli.py",
+    "scripts\apply_upgrade_config.py",
+    "scripts\import_config_and_create_user.py",
+    "scripts\import_mongodb_config.py",
+    "scripts\init_mongodb_user.py",
+    "scripts\installer\start_all.py",
+    "scripts\monitor\process_monitor.py",
+    "scripts\monitor\tray_monitor.py"
 )
 
 foreach ($dir in $excludeDirs) {
     if (Test-Path $dir) {
         Remove-Item -Path $dir -Recurse -Force -ErrorAction SilentlyContinue
         Write-Host "    Removed: $($dir.Replace($tempDir, ''))" -ForegroundColor DarkGray
+    }
+}
+
+Write-Host "  Removing non-whitelisted project Python source files..." -ForegroundColor Gray
+
+$projectPythonRoots = @(
+    (Join-Path $tempDir "app"),
+    (Join-Path $tempDir "core"),
+    (Join-Path $tempDir "tradingagents"),
+    (Join-Path $tempDir "migrations"),
+    (Join-Path $tempDir "scripts")
+)
+
+foreach ($pythonRoot in $projectPythonRoots) {
+    if (-not (Test-Path $pythonRoot)) {
+        continue
+    }
+
+    Get-ChildItem -Path $pythonRoot -Recurse -Filter "*.py" -File -ErrorAction SilentlyContinue | ForEach-Object {
+        $relativePath = $_.FullName.Substring($tempDir.Length + 1)
+        if ($projectPythonWhitelist -contains $relativePath) {
+            return
+        }
+
+        Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+        Write-Host "    Removed source: $relativePath" -ForegroundColor DarkGray
     }
 }
 
@@ -480,6 +545,11 @@ function Create-7zPackage {
     if ($ExcludeVendors7zip) {
         Write-Host "    Excluding vendors/7zip directory (for NSIS installer)..." -ForegroundColor Gray
         $tempDir7z = Join-Path $env:TEMP "TradingAgentsCN-7z-$timestamp"
+
+        if (Test-Path $tempDir7z) {
+            Remove-Item -Path $tempDir7z -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
         Copy-Item -Path $TempDir -Destination $tempDir7z -Recurse -Force
         $vendors7zipPath = Join-Path $tempDir7z "vendors\7zip"
         if (Test-Path $vendors7zipPath) {
@@ -552,50 +622,4 @@ try {
     exit 1
 }
 
-# ============================================================================
-# Clean up temporary directory
-# ============================================================================
-
-Write-Host "  Cleaning up temporary directory..." -ForegroundColor Gray
-Write-Host "  DEBUG: Temp directory kept at: $tempDir" -ForegroundColor Yellow
-# Remove-Item -Path $tempDir -Recurse -Force
-
-# ============================================================================
-# Display results
-# ============================================================================
-
-Write-Host ""
-Write-Host "============================================================================" -ForegroundColor Green
-Write-Host "  Package(s) Created Successfully!" -ForegroundColor Green
-Write-Host "============================================================================" -ForegroundColor Green
-Write-Host ""
-
-Write-Host "Package Information:" -ForegroundColor White
-foreach ($pkg in $createdPackages) {
-    $fileSizeMB = [math]::Round($pkg.Length / 1MB, 2)
-    $fileType = if ($pkg.Extension -eq ".7z") { "7z (for NSIS installer)" } else { "ZIP (for users)" }
-    Write-Host "  File: $($pkg.Name)" -ForegroundColor Cyan
-    Write-Host "  Type: $fileType" -ForegroundColor Cyan
-    Write-Host "  Size: $fileSizeMB MB" -ForegroundColor Cyan
-    Write-Host "  Path: $($pkg.FullName)" -ForegroundColor Cyan
-    Write-Host ""
-}
-
-Write-Host "Next Steps:" -ForegroundColor White
-if ($Format -eq "zip" -or $Format -eq "both") {
-    Write-Host "  For ZIP package (users):" -ForegroundColor Yellow
-    Write-Host "    1. Extract the ZIP file (Windows built-in)" -ForegroundColor Gray
-    Write-Host "    2. Run start_all.ps1 to start all services" -ForegroundColor Gray
-    Write-Host "    3. Visit http://localhost to access the application" -ForegroundColor Gray
-    Write-Host ""
-}
-if ($Format -eq "7z" -or $Format -eq "both") {
-    Write-Host "  For 7z package (NSIS installer):" -ForegroundColor Yellow
-    Write-Host "    1. Run build_installer.ps1 to create Windows installer" -ForegroundColor Gray
-    Write-Host "    2. The installer will use this 7z file internally" -ForegroundColor Gray
-    Write-Host ""
-}
-
-Write-Host "Note: First-time startup will automatically import configuration and create default user (admin/admin123)" -ForegroundColor Yellow
-Write-Host ""
 

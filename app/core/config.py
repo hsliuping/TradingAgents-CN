@@ -137,6 +137,10 @@ class Settings(BaseSettings):
         default="https://www.tradingagentscn.com/api",
         description="Update check API base URL (empty = use default)"
     )
+    UPDATE_CHECK_CHANNEL: str = Field(
+        default="stable",
+        description="Update release channel: stable or test"
+    )
 
     # 授权服务配置 (TradingAgents Account Service)
     # ⚠️ 注意：LICENSE_SERVICE_URL 已移除，验证服务器地址在 core/licensing/validator.py 中硬编码

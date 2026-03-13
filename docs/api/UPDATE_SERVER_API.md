@@ -3,7 +3,9 @@
 > **版本**: v1.0
 > **最后更新**: 2026-02-17
 > **接入方**: 官网后端 (`tradingagentscn.com`)
-> **调用方**: TradingAgents-CN 桌面客户端（Windows 安装版 / 便携版）
+> **调用方**: TradingAgents-CN 桌面客户端（Windows 安装版）
+
+> 说明：便携版后续不再作为对外发布形态。当前构建链路中如仍出现 `portable`，仅表示内部打包/安装包验证阶段的中间产物，不再面向实际用户分发。
 
 ---
 
@@ -64,7 +66,8 @@
 | 参数 | 类型 | 必填 | 说明 | 示例 |
 |------|------|------|------|------|
 | `version` | string | ✅ | 客户端当前版本号（语义化版本） | `2.0.0` |
-| `build_type` | string | ❌ | 构建类型 | `portable` / `installer` / `unknown` |
+| `build_type` | string | ❌ | 构建类型 | `installer` / `unknown` |
+| `channel` | string | ❌ | 更新通道，未传时应按正式通道处理 | `stable` / `test` |
 
 **Headers**:
 
@@ -75,10 +78,19 @@
 **请求示例**:
 
 ```
-GET /api/app/check-update?version=2.0.0&build_type=portable HTTP/1.1
+GET /api/app/check-update?version=2.0.0&build_type=installer&channel=stable HTTP/1.1
 Host: www.tradingagentscn.com
 User-Agent: TradingAgentsCN/2.0.0
 ```
+
+**通道建议**:
+
+| channel | 用途 | 建议行为 |
+|---------|------|----------|
+| `stable` | 正式发布 | 返回正式可发布版本 |
+| `test` | 内测 / 验证 | 返回测试包、预发包或灰度包 |
+
+> 为兼容旧客户端，服务端应在 `channel` 缺失时默认按 `stable` 处理。
 
 #### 响应
 
@@ -128,6 +140,7 @@ User-Agent: TradingAgentsCN/2.0.0
 |------|------|------|
 | `has_update` | bool | **核心字段** — 是否有新版本。客户端据此判断是否显示更新 UI |
 | `version` | string | 最新版本号，语义化版本格式，如 `2.0.1`、`2.1.0` |
+| `package_type` | string | 包类型。`installer` 表示安装包，`update` 表示应用内更新包。客户端会据此决定是下载安装程序还是执行应用内升级 |
 | `download_url` | string | 更新包下载地址（完整 URL）。客户端会用 **HTTP 流式下载**（`httpx.stream`），服务端需支持 `Content-Length` 响应头 |
 | `file_size` | int | 更新包文件大小（字节）。用于前端显示和进度计算。如果 download_url 的响应带了 `Content-Length`，会优先用响应头的值 |
 | `sha256` | string | 更新包的 SHA256 校验值（**64位十六进制小写**）。下载完成后客户端会校验，不匹配则拒绝安装。**留空则跳过校验**（不推荐） |
@@ -135,6 +148,161 @@ User-Agent: TradingAgentsCN/2.0.0
 | `release_date` | string | 发布日期，格式 `YYYY-MM-DD` |
 | `is_mandatory` | bool | 是否强制更新。`true` 时前端会阻止用户跳过此版本（当前版本 UI 已预留，后续可加弹窗拦截） |
 | `min_version` | string | 此更新包支持的最低客户端版本。例如 `2.0.0` 表示只有 ≥2.0.0 的客户端才能安装此更新包（当前客户端未校验此字段，**预留**） |
+
+### 服务端同步改造清单
+
+本次客户端协议扩展是 **在原有接口上新增一个可选查询参数 `channel`**。
+
+#### 1. 必须修改
+
+服务端需要同步修改 `GET /api/app/check-update` 的入参解析逻辑：
+
+| 项目 | 旧版 | 新版 |
+|------|------|------|
+| Query 参数 | `version`、`build_type` | `version`、`build_type`、`channel` |
+| `channel` 是否必填 | 不存在 | 否 |
+| 兼容要求 | 无 | **未传时必须按 `stable` 处理** |
+
+建议服务端伪代码：
+
+```python
+channel = (request.query_params.get("channel") or "stable").strip().lower()
+if channel not in {"stable", "test"}:
+    channel = "stable"
+```
+
+然后在查找可发布版本时，按 `channel` 过滤可用版本：
+
+- `stable`: 只返回正式发布版本
+- `test`: 返回测试/灰度/预发布版本
+
+#### 2. 响应体是否需要修改
+
+**需要新增 `package_type` 字段。**
+
+客户端当前会解析下面这些字段，其中新增了 `package_type`：
+
+- `has_update`
+- `version`
+- `package_type`
+- `download_url`
+- `file_size`
+- `sha256`
+- `release_notes`
+- `release_date`
+- `is_mandatory`
+- `min_version`
+
+也就是说，这次服务端协议改动的核心有两项：
+
+**支持按 `channel` 参数分流返回版本。**
+
+**返回 `package_type`，让客户端区分当前下载地址指向安装包还是更新包。**
+
+#### 3. 服务端数据模型建议增加的信息
+
+如果服务端当前是把发布信息存数据库或配置文件，建议每个发布记录增加一个 `channel` 字段。
+
+推荐最小结构：
+
+```json
+{
+  "version": "2.0.1",
+  "channel": "stable",
+  "package_type": "installer",
+  "build_type": "installer",
+  "download_url": "https://.../TradingAgentsCN-Setup-2.0.1.exe",
+  "sha256": "...",
+  "file_size": 12345678,
+  "release_notes": "...",
+  "release_date": "2026-03-12",
+  "is_mandatory": false,
+  "min_version": "2.0.0"
+}
+```
+
+其中新增的是：
+
+- `channel`: `stable` 或 `test`
+- `package_type`: `installer` 或 `update`
+
+其余字段沿用原逻辑即可。
+
+#### 3.1 `package_type` 的实际含义
+
+| package_type | 含义 | `download_url` 应指向 |
+|--------------|------|-----------------------|
+| `installer` | 安装包 | 安装程序下载地址（如 `.exe`） |
+| `update` | 应用内更新包 | 更新包地址（如 `update-{version}.zip`） |
+
+客户端行为：
+
+- `installer`: 仅下载安装程序，不走应用内更新器替换流程
+- `update`: 下载更新包，并交给应用内更新器执行替换升级
+
+#### 4. 服务端筛选逻辑建议
+
+如果服务端当前是“取最新版本号”直接返回，需要改成“按通道取最新版本号”后再返回。
+
+建议逻辑：
+
+1. 先确定请求通道 `channel`
+2. 在该通道内筛选可用版本
+3. 找到该通道下最新版本
+4. 与客户端传入的 `version` 比较
+5. 如果服务端版本更高，则返回更新信息；否则返回 `has_update=false`
+
+#### 5. 兼容性要求
+
+为了兼容旧客户端，服务端必须满足：
+
+- 没有 `channel` 参数时，默认等同于 `stable`
+- `channel` 传了未知值时，建议回退为 `stable`
+- 不要因为缺少 `channel` 就返回 4xx
+
+#### 6. 客户端本次已新增的信息
+
+本次客户端已经新增并实际发出的信息如下：
+
+| 信息 | 位置 | 示例 | 说明 |
+|------|------|------|------|
+| `channel` | Query 参数 | `stable` / `test` | 新增，用于区分正式和测试更新流 |
+
+客户端内部还新增了一个本地配置项：
+
+- `UPDATE_CHECK_CHANNEL`: 控制客户端发给服务端的通道值，默认 `stable`
+
+可接受的配置别名会被客户端归一化，例如：
+
+- 归一化到 `stable`: `stable`、`formal`、`prod`、`production`、`release`、`official`、`正式`、`线上`
+- 归一化到 `test`: `test`、`testing`、`beta`、`staging`、`preview`、`测试`、`预发`
+
+因此服务端最终实际接收到的值，正常情况下只会是：
+
+- `stable`
+- `test`
+
+#### 7. 推荐联调样例
+
+正式通道：
+
+```http
+GET /api/app/check-update?version=2.0.0&build_type=installer&channel=stable
+```
+
+测试通道：
+
+```http
+GET /api/app/check-update?version=2.0.0&build_type=installer&channel=test
+```
+
+旧客户端兼容样例：
+
+```http
+GET /api/app/check-update?version=2.0.0&build_type=installer
+```
+
+这三种请求都应该返回 200，差别仅在于服务端选用哪个发布通道的数据。
 
 ---
 
@@ -187,7 +355,7 @@ JSON 格式：
 
 ```json
 {
-    "build_type": "portable",
+    "build_type": "installer",
     "version": "2.0.1",
     "build_date": "2026-02-17T10:30:00Z",
     "git_commit": "abc1234",
@@ -302,7 +470,7 @@ def check_update(client_version: str, build_type: str) -> dict:
 
 ```bash
 # 模拟客户端请求
-curl -s "https://www.tradingagentscn.com/api/app/check-update?version=2.0.0&build_type=portable" \
+curl -s "https://www.tradingagentscn.com/api/app/check-update?version=2.0.0&build_type=installer" \
   -H "User-Agent: TradingAgentsCN/2.0.0" | python -m json.tool
 ```
 

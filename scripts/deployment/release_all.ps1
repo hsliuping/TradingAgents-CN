@@ -18,7 +18,8 @@
 param(
     [string]$Version = "",
     [switch]$SkipInstaller = $false,
-    [switch]$SkipPrepare = $false
+    [switch]$SkipPrepare = $false,
+    [string]$ArchiveRoot = "D:\release"
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,6 +46,8 @@ $migrationFile = Join-Path $root "migrations\v$versionUnderscore.py"
 Write-Host "============================================================================" -ForegroundColor Cyan
 Write-Host "  One-Click Release: $Version" -ForegroundColor Cyan
 Write-Host "============================================================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Archive Root: $ArchiveRoot" -ForegroundColor DarkGray
 Write-Host ""
 
 # ── Step 0: Auto-prepare ───────────────────────────────────────────────────────
@@ -126,8 +129,17 @@ async def downgrade(db):
 # ── Step 1: Generate BUILD_INFO ─────────────────────────────────────────────────
 Write-Host "[1/4] Generating BUILD_INFO..." -ForegroundColor Yellow
 $buildInfoScript = Join-Path $root "scripts\build\generate_build_info.ps1"
+$resolvedBuildVersion = $Version
 if (Test-Path $buildInfoScript) {
     & powershell -ExecutionPolicy Bypass -File $buildInfoScript -BuildType "installer" -ProjectRoot $root
+    $buildInfoPath = Join-Path $root "BUILD_INFO"
+    if (Test-Path $buildInfoPath) {
+        $buildInfo = Get-Content $buildInfoPath -Raw | ConvertFrom-Json
+        if ($buildInfo.full_version) {
+            $resolvedBuildVersion = $buildInfo.full_version
+            Write-Host "  Full version: $resolvedBuildVersion" -ForegroundColor Green
+        }
+    }
 } else {
     Write-Host "  Warning: generate_build_info.ps1 not found" -ForegroundColor Yellow
 }
@@ -139,12 +151,19 @@ $installerScript = Join-Path $root "scripts\windows-installer\build\build_instal
 if ($SkipInstaller) {
     Write-Host "  Skipped (SkipInstaller)" -ForegroundColor Gray
     $proScript = Join-Path $root "scripts\deployment\build_pro_package.ps1"
-    & powershell -ExecutionPolicy Bypass -File $proScript -Version $Version
+    & powershell -ExecutionPolicy Bypass -File $proScript -Version $resolvedBuildVersion
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $updateScript = Join-Path $root "scripts\deployment\build_update_package.ps1"
-    & powershell -ExecutionPolicy Bypass -File $updateScript -Version $Version
+    & powershell -ExecutionPolicy Bypass -File $updateScript -Version $resolvedBuildVersion
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    $archiveScript = Join-Path $root "scripts\deployment\archive_release_outputs.ps1"
+    if (Test-Path $archiveScript) {
+        & powershell -ExecutionPolicy Bypass -File $archiveScript -Version $Version -FullVersion $resolvedBuildVersion -ArchiveRoot $ArchiveRoot -ProjectRoot $root
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
 } elseif (Test-Path $installerScript) {
-    & powershell -ExecutionPolicy Bypass -File $installerScript -Version $Version
+    & powershell -ExecutionPolicy Bypass -File $installerScript -Version $resolvedBuildVersion -ArchiveRoot $ArchiveRoot
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } else {
     Write-Host "  ERROR: build_installer.ps1 not found" -ForegroundColor Red
@@ -158,6 +177,9 @@ $packagesDir = Join-Path $root "release\packages"
 if (Test-Path $packagesDir) {
     Get-ChildItem -Path $packagesDir -Filter "*.exe" | ForEach-Object { Write-Host "  Installer: $($_.Name)" -ForegroundColor White }
     Get-ChildItem -Path $packagesDir -Filter "update-*.zip" | ForEach-Object { Write-Host "  Update: $($_.Name)" -ForegroundColor White }
+}
+if (Test-Path $ArchiveRoot) {
+    Write-Host "  Archive root: $ArchiveRoot" -ForegroundColor White
 }
 Write-Host ""
 Write-Host "============================================================================" -ForegroundColor Cyan

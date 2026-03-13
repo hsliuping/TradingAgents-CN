@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import json
 import logging
 import uuid
 from datetime import datetime
@@ -19,6 +20,145 @@ logger = logging.getLogger("app.worker.watchlist_analysis")
 
 # 全局状态
 _is_running = False
+
+
+def _build_scheduled_email_attachments(results: List[Dict[str, Any]], analysis_time: str) -> List[tuple]:
+    """为定时分析完成邮件构建附件。"""
+    if not results:
+        return []
+
+    markdown_lines = [
+        "# Scheduled Analysis Report",
+        "",
+        f"Analysis Time: {analysis_time}",
+        f"Generated At: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+    ]
+
+    export_payload = []
+    for item in results:
+        stock_code = item.get("stock_code") or item.get("stock_symbol") or "unknown"
+        stock_name = item.get("stock_name") or stock_code
+        success = item.get("success", False)
+        recommendation = item.get("recommendation") or "未知"
+        confidence_score = item.get("confidence_score") or 0
+        risk_level = item.get("risk_level") or "中等"
+        summary = (item.get("summary") or "").strip()
+        key_points = item.get("key_points") or []
+
+        markdown_lines.append(f"## {stock_code} {stock_name}")
+        markdown_lines.append("")
+        markdown_lines.append(f"- Status: {'success' if success else 'failed'}")
+        markdown_lines.append(f"- Recommendation: {recommendation}")
+        markdown_lines.append(f"- Confidence: {confidence_score}")
+        markdown_lines.append(f"- Risk Level: {risk_level}")
+        if summary:
+            markdown_lines.append(f"- Summary: {summary}")
+        if key_points:
+            markdown_lines.append("- Key Points:")
+            for point in key_points[:5]:
+                markdown_lines.append(f"  - {point}")
+        markdown_lines.append("")
+
+        export_payload.append({
+            "stock_code": stock_code,
+            "stock_name": stock_name,
+            "success": success,
+            "recommendation": recommendation,
+            "confidence_score": confidence_score,
+            "risk_level": risk_level,
+            "summary": summary,
+            "key_points": key_points,
+        })
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    markdown_content = "\n".join(markdown_lines).encode("utf-8")
+    json_content = json.dumps(export_payload, ensure_ascii=False, indent=2).encode("utf-8")
+
+    return [
+        (f"scheduled_analysis_{timestamp}.md", markdown_content, "text/markdown"),
+        (f"scheduled_analysis_{timestamp}.json", json_content, "application/json"),
+    ]
+
+
+def _format_completed_task_result(task_id: str, task_doc: Dict[str, Any]) -> Dict[str, Any]:
+    """将任务结果统一转换为邮件所需格式。"""
+    result = task_doc.get("result") or {}
+    task_params = task_doc.get("task_params") or {}
+    stock_code = task_params.get("stock_code") or task_params.get("symbol") or result.get("stock_code") or result.get("stock_symbol") or ""
+
+    return {
+        "task_id": task_id,
+        "stock_code": stock_code,
+        "stock_name": result.get("stock_name") or stock_code,
+        "summary": result.get("summary", ""),
+        "recommendation": result.get("recommendation", ""),
+        "confidence_score": result.get("confidence_score", 0),
+        "risk_level": result.get("risk_level", "中等"),
+        "key_points": result.get("key_points", []),
+        "success": task_doc.get("status") == "completed",
+    }
+
+
+async def _wait_for_task_results(task_ids: List[str], timeout_seconds: int = 3600, poll_interval: int = 15) -> List[Dict[str, Any]]:
+    """等待批次任务结束，并收集可用于邮件汇总的结果。"""
+    if not task_ids:
+        return []
+
+    db = get_mongo_db()
+    pending_ids = set(task_ids)
+    completed_results: Dict[str, Dict[str, Any]] = {}
+    started_at = datetime.now()
+
+    while pending_ids and (datetime.now() - started_at).total_seconds() < timeout_seconds:
+        cursor = db.unified_analysis_tasks.find(
+            {"task_id": {"$in": list(pending_ids)}},
+            {"task_id": 1, "status": 1, "result": 1, "task_params": 1}
+        )
+        docs = await cursor.to_list(length=len(pending_ids))
+
+        for doc in docs:
+            task_id = doc.get("task_id")
+            if not task_id:
+                continue
+
+            status = doc.get("status")
+            if status in {"completed", "failed", "cancelled"}:
+                completed_results[task_id] = _format_completed_task_result(task_id, doc)
+                pending_ids.discard(task_id)
+
+        if pending_ids:
+            await asyncio.sleep(poll_interval)
+
+    if pending_ids:
+        logger.warning(f"⚠️ 定时分析邮件等待超时，仍有 {len(pending_ids)} 个任务未完成")
+
+    return [completed_results[task_id] for task_id in task_ids if task_id in completed_results]
+
+
+async def _send_scheduled_completion_email_when_ready(
+    user_id: str,
+    task_ids: List[str],
+    total: int,
+    analysis_time: str,
+) -> None:
+    """等待任务结束后发送带附件的定时分析完成邮件。"""
+    try:
+        results = await _wait_for_task_results(task_ids)
+        success = sum(1 for item in results if item.get("success"))
+        failed = max(total - success, 0)
+        await send_completion_notification(
+            user_id=user_id,
+            total=total,
+            success=success,
+            failed=failed,
+            results=results,
+            analysis_time=analysis_time,
+            send_in_app_notification=True,
+            send_email_notification=True,
+        )
+    except Exception as exc:
+        logger.warning(f"⚠️ 发送定时分析完成邮件失败: {exc}", exc_info=True)
 
 
 async def get_watchlist_stocks() -> List[Dict[str, Any]]:
@@ -122,6 +262,9 @@ async def analyze_user_watchlist_batch(
 
     task_ids = []
     task_mapping = []
+    submitted_task_ids = []
+    submitted_count = 0
+    failed_count = 0
 
     # 第一步：为所有股票创建任务（使用 v2.0 引擎）
     logger.info(f"  📝 [v2.0引擎] 开始创建 {len(stocks)} 个分析任务...")
@@ -197,9 +340,6 @@ async def analyze_user_watchlist_batch(
         # 生成批次ID（用于定时分析批次）
         batch_id = str(uuid.uuid4())
         
-        submitted_count = 0
-        failed_count = 0
-        
         for item in task_mapping:
             if item.get("task_id"):
                 task_id = item["task_id"]
@@ -229,6 +369,7 @@ async def analyze_user_watchlist_batch(
                         task_id=task_id  # 使用已创建的任务ID
                     )
                     submitted_count += 1
+                    submitted_task_ids.append(task_id)
                     logger.info(f"    ✅ [v2.0引擎] 任务已入队: {task_id} - {stock_code}")
                 except ValueError as e:
                     # 并发限制错误
@@ -242,9 +383,9 @@ async def analyze_user_watchlist_batch(
 
     return {
         "total": len(stocks),
-        "created": len(task_ids),
-        "failed": len(stocks) - len(task_ids),
-        "task_ids": task_ids,
+        "created": submitted_count,
+        "failed": len(stocks) - submitted_count,
+        "task_ids": submitted_task_ids,
         "task_mapping": task_mapping
     }
 
@@ -254,22 +395,34 @@ async def send_completion_notification(
     total: int,
     success: int,
     failed: int,
-    results: List[Dict[str, Any]]
+    results: List[Dict[str, Any]],
+    analysis_time: Optional[str] = None,
+    send_in_app_notification: bool = True,
+    send_email_notification: bool = True,
 ):
     """发送分析完成通知"""
     notifications_service = NotificationsService()
-    
-    if success > 0:
-        severity = "success" if failed == 0 else "warning"
-        title = "自选股定时分析完成"
-        content = f"已完成 {success}/{total} 只股票的分析"
-        if failed > 0:
-            content += f"，{failed} 只分析失败"
+    has_detailed_results = bool(results)
+    analysis_time = analysis_time or datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    if has_detailed_results:
+        if success > 0:
+            severity = "success" if failed == 0 else "warning"
+            title = "自选股定时分析完成"
+            content = f"已完成 {success}/{total} 只股票的分析"
+            if failed > 0:
+                content += f"，{failed} 只分析失败"
+        else:
+            severity = "error"
+            title = "自选股定时分析失败"
+            content = f"全部 {total} 只股票分析失败"
     else:
-        severity = "error"
-        title = "自选股定时分析失败"
-        content = f"全部 {total} 只股票分析失败"
-    
+        severity = "info" if success > 0 else "error"
+        title = "自选股定时分析已启动"
+        content = f"已提交 {success}/{total} 只股票的分析任务"
+        if failed > 0:
+            content += f"，{failed} 只提交失败"
+
     notification = NotificationCreate(
         user_id=user_id,
         type="analysis",
@@ -282,7 +435,8 @@ async def send_completion_notification(
             "total": total,
             "success": success,
             "failed": failed,
-            "analysis_date": datetime.now().strftime("%Y-%m-%d"),
+            "analysis_date": analysis_time,
+            "has_detailed_results": has_detailed_results,
             "stocks": [
                 {
                     "stock_code": r.get("stock_code"),
@@ -293,14 +447,18 @@ async def send_completion_notification(
             ]
         }
     )
-    
-    try:
-        await notifications_service.create_and_publish(notification)
-        logger.info(f"📬 已发送分析完成通知给用户 {user_id}")
-    except Exception as e:
-        logger.error(f"❌ 发送通知失败: {e}")
+
+    if send_in_app_notification:
+        try:
+            await notifications_service.create_and_publish(notification)
+            logger.info(f"📬 已发送分析通知给用户 {user_id}")
+        except Exception as e:
+            logger.error(f"❌ 发送通知失败: {e}")
 
     # 发送邮件通知（如果用户启用了邮件通知）
+    if not send_email_notification or not has_detailed_results:
+        return
+
     try:
         from app.services.email_service import get_email_service
         from app.models.email import EmailType
@@ -311,13 +469,15 @@ async def send_completion_notification(
         hold_count = sum(1 for r in results if r.get("recommendation") == "持有")
         sell_count = sum(1 for r in results if r.get("recommendation") == "卖出")
 
+        attachments = _build_scheduled_email_attachments(results, analysis_time)
+
         await email_service.send_analysis_email(
             user_id=user_id,
             email_type=EmailType.SCHEDULED_ANALYSIS,  # 🔥 修复：使用枚举而不是字符串
             template_name="scheduled_report",
             template_data={
                 "task_name": "自选股定时分析",
-                "analysis_date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "analysis_date": analysis_time,
                 "total_count": total,
                 "success_count": success,
                 "failed_count": failed,
@@ -327,7 +487,8 @@ async def send_completion_notification(
                 "stocks": results[:10],  # 只发送前10只股票的详情
                 "detail_url": "/analysis/history"
             },
-            reference_id=f"scheduled_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            reference_id=f"scheduled_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            attachments=attachments,
         )
         logger.info(f"📧 已尝试发送定时分析完成邮件给用户 {user_id}")
     except Exception as email_err:
@@ -412,8 +573,21 @@ async def run_watchlist_analysis():
                 total=user_total,
                 success=user_success,
                 failed=user_failed,
-                results=[]  # 并发执行时无法立即获取结果
+                results=[],
+                analysis_time=datetime.now().strftime("%Y-%m-%d %H:%M"),
+                send_in_app_notification=True,
+                send_email_notification=False,
             )
+
+            if batch_result.get("task_ids"):
+                asyncio.create_task(
+                    _send_scheduled_completion_email_when_ready(
+                        user_id=user_id,
+                        task_ids=batch_result["task_ids"],
+                        total=user_total,
+                        analysis_time=datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    )
+                )
 
             logger.info(f"  ✅ 用户 {user_id} 批量分析已启动: 成功创建 {user_success} 个任务, 失败 {user_failed} 个")
 
@@ -609,8 +783,21 @@ async def run_scheduled_analysis_slot(config_id: str, user_id: str, slot_index: 
             total=total_stocks,
             success=total_success,
             failed=total_failed,
-            results=[]
+            results=[],
+            analysis_time=datetime.now().strftime("%Y-%m-%d %H:%M"),
+            send_in_app_notification=True,
+            send_email_notification=False,
         )
+
+        if all_task_ids:
+            asyncio.create_task(
+                _send_scheduled_completion_email_when_ready(
+                    user_id=user_id,
+                    task_ids=all_task_ids,
+                    total=total_stocks,
+                    analysis_time=datetime.now().strftime("%Y-%m-%d %H:%M"),
+                )
+            )
 
         # 更新配置的最后运行时间
         from app.utils.timezone import now_tz

@@ -13,6 +13,8 @@ import logging
 import os
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from app.utils.api_key_utils import truncate_api_key
+
 logger = logging.getLogger(__name__)
 
 from langgraph.graph import StateGraph, START, END

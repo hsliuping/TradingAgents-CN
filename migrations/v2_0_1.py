@@ -12,6 +12,11 @@ v2.0.1 migration
 #   3. If field rename: $rename
 """
 
+import logging
+
+
+logger = logging.getLogger("migrations.v2_0_1")
+
 VERSION = "2.0.1"
 DESCRIPTION = "示例迁移 - 添加 migration_history 索引和系统版本记录"
 
@@ -27,16 +32,24 @@ async def upgrade(db):
     )
 
     # --- 2: real_positions - add original_avg_cost for dual-cost display ---
-    # For existing docs: set original_avg_cost = cost_price as fallback
+    # For existing docs: copy cost_price into original_avg_cost only when missing.
     result = await db.real_positions.update_many(
-        {"original_avg_cost": {"$exists": False}},
-        {"$set": {"original_avg_cost": "$cost_price"}}
+        {
+            "original_avg_cost": {"$exists": False},
+            "cost_price": {"$exists": True, "$ne": None},
+        },
+        [
+            {
+                "$set": {
+                    "original_avg_cost": "$cost_price"
+                }
+            }
+        ]
     )
-    # MongoDB $set with $cost_price requires aggregation pipeline; use simple copy
-    # Fallback: set to null, code handles None. Or run a loop - for simplicity we
-    # use update_many with $rename trick. Actually $set with field ref needs pipeline.
-    # Simpler: just set to None/doc - code already handles missing. Skip for now.
-    # The model has Optional[float]=None, so no migration strictly needed.
+    logger.info(
+        "v2.0.1 migration: backfilled original_avg_cost for %s real_positions docs",
+        result.modified_count,
+    )
 
     # --- 示例 3: 插入新配置数据（仅当不存在时） ---
     # existing = await db.system_configs.find_one({"key": "new_feature_flag"})
