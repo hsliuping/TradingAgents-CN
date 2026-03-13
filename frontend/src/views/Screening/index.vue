@@ -385,13 +385,6 @@
                 :image-size="80"
               />
               <div v-else class="messages-list">
-                <div v-if="aiLoading" class="message-item message-assistant thinking-bubble">
-                  <div class="message-avatar"><el-icon><TrendCharts /></el-icon></div>
-                  <div class="message-content thinking-content">
-                    <span class="thinking-text">正在分析选股需求</span>
-                    <span class="thinking-dots"><span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></span>
-                  </div>
-                </div>
                 <div v-for="(msg, idx) in aiMessages" :key="idx"
                   :class="['message-item', msg.role === 'user' ? 'message-user' : 'message-assistant']">
                   <template v-if="msg.role === 'user'">
@@ -401,7 +394,17 @@
                   <template v-else>
                     <div class="message-avatar"><el-icon><TrendCharts /></el-icon></div>
                     <div class="message-content">
-                      <div class="message-text markdown-content" v-html="renderScreeningMarkdown(msg.content)"></div>
+                      <div v-if="msg.progressSteps?.length" class="progress-timeline">
+                        <div class="timeline-header">
+                          <span class="timeline-title">{{ getPhaseLabel(msg.phase) }}</span>
+                          <span v-if="aiLoading && idx === aiPendingAssistantIndex" class="timeline-status">处理中</span>
+                        </div>
+                        <div v-for="(step, stepIdx) in msg.progressSteps" :key="`${idx}-${stepIdx}`" class="timeline-step">
+                          <span class="step-dot" :class="{ active: aiLoading && idx === aiPendingAssistantIndex && stepIdx === msg.progressSteps.length - 1 }"></span>
+                          <span class="step-text">{{ step }}</span>
+                        </div>
+                      </div>
+                      <div v-if="msg.content" class="message-text markdown-content" v-html="renderScreeningMarkdown(msg.content)"></div>
                       <div v-if="msg.tools_used?.length" class="message-tools">
                         <el-tag v-for="t in msg.tools_used" :key="t" size="small" type="info">{{ t }}</el-tag>
                       </div>
@@ -488,6 +491,7 @@ interface AiDisplayMessage {
   stocks?: StockRecommendation[]
   phase?: 'confirmation' | 'planning' | 'result'
   is_fallback?: boolean
+  progressSteps?: string[]
 }
 const aiMessages = ref<AiDisplayMessage[]>([])
 const aiInput = ref('')
@@ -506,6 +510,13 @@ const scrollAiToBottom = () => {
   })
 }
 
+const getPhaseLabel = (phase?: AiDisplayMessage['phase']) => {
+  if (phase === 'confirmation') return '需求分析中'
+  if (phase === 'planning') return '执行规划中'
+  if (phase === 'result') return '筛选执行中'
+  return '处理中'
+}
+
 const loadAiConversation = async () => {
   try {
     const res = await screeningApi.getIntelligentConversation()
@@ -518,6 +529,7 @@ const loadAiConversation = async () => {
         stocks: m.stocks,
         phase: m.phase,
         is_fallback: m.is_fallback,
+        progressSteps: undefined,
       }))
       scrollAiToBottom()
     }
@@ -537,11 +549,12 @@ const updatePendingAssistantMessage = (patch: Partial<AiDisplayMessage>) => {
 const appendPendingAssistantLine = (line: string) => {
   const idx = aiPendingAssistantIndex.value
   if (idx == null || !aiMessages.value[idx] || !line) return
-  const current = aiMessages.value[idx].content || ''
-  const next = current ? `${current}\n\n- ${line}` : `- ${line}`
+  const steps = [...(aiMessages.value[idx].progressSteps || [])]
+  if (steps[steps.length - 1] === line) return
+  steps.push(line)
   aiMessages.value[idx] = {
     ...aiMessages.value[idx],
-    content: next,
+    progressSteps: steps,
   }
   scrollAiToBottom()
 }
@@ -550,7 +563,8 @@ const handleAiWebSocketMessage = (envelope: ScreeningWsEnvelope<any>) => {
   if (envelope.type === 'connected' || envelope.type === 'pong') return
 
   if (envelope.type === 'started') {
-    updatePendingAssistantMessage({ content: '- 已收到请求，开始处理', phase: 'result' })
+    updatePendingAssistantMessage({ phase: 'result' })
+    appendPendingAssistantLine('已收到请求，开始处理')
     return
   }
 
@@ -661,11 +675,12 @@ const sendAiMessage = async (text: string) => {
   try {
     aiMessages.value.push({
       role: 'assistant',
-      content: '- 正在建立智能筛选流式连接',
+      content: '',
       tools_used: undefined,
       stocks: undefined,
       phase: 'result',
       is_fallback: false,
+      progressSteps: ['正在建立智能筛选流式连接'],
     })
     aiPendingAssistantIndex.value = aiMessages.value.length - 1
     scrollAiToBottom()
@@ -1302,17 +1317,75 @@ onUnmounted(() => {
       gap: 4px;
     }
 
-    .thinking-bubble { opacity: 0.95; }
-    .thinking-content { display: flex; align-items: baseline; gap: 2px; }
-    .thinking-text { color: var(--el-text-color-secondary); }
-    .thinking-dots .dot {
-      animation: screening-blink 1.4s infinite;
-      display: inline-block;
-      width: 0.5em;
+    .progress-timeline {
+      margin-bottom: 10px;
+      padding: 10px 12px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.2) 100%);
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: 10px;
+
+      .timeline-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .timeline-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--el-text-color-primary);
+        letter-spacing: 0.02em;
+      }
+
+      .timeline-status {
+        font-size: 12px;
+        color: var(--el-color-primary);
+      }
+
+      .timeline-step {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        position: relative;
+        padding: 0 0 8px 0;
+
+        &:last-child {
+          padding-bottom: 0;
+        }
+
+        &:not(:last-child)::after {
+          content: '';
+          position: absolute;
+          left: 5px;
+          top: 14px;
+          width: 1px;
+          height: calc(100% - 6px);
+          background: var(--el-border-color);
+        }
+      }
+
+      .step-dot {
+        width: 10px;
+        height: 10px;
+        margin-top: 4px;
+        border-radius: 50%;
+        background: var(--el-border-color-dark);
+        flex-shrink: 0;
+
+        &.active {
+          background: var(--el-color-primary);
+          box-shadow: 0 0 0 4px rgba(64, 158, 255, 0.14);
+        }
+      }
+
+      .step-text {
+        font-size: 13px;
+        line-height: 1.55;
+        color: var(--el-text-color-regular);
+      }
     }
-    .thinking-dots .dot:nth-child(1) { animation-delay: 0s; }
-    .thinking-dots .dot:nth-child(2) { animation-delay: 0.2s; }
-    .thinking-dots .dot:nth-child(3) { animation-delay: 0.4s; }
 
     .confirmation-actions {
       margin-top: 10px;
