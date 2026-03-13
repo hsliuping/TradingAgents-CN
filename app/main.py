@@ -88,8 +88,13 @@ from app.routers import review as review_router
 from app.routers import email as email_router
 
 # MCP Server 集成（v3.0）
-from core.mcp import mcp as _mcp_server
-from fastmcp.utilities.lifespan import combine_lifespans
+try:
+    from core.mcp import mcp as _mcp_server
+except ModuleNotFoundError as exc:
+    _mcp_server = None
+    _mcp_import_error = exc
+else:
+    _mcp_import_error = None
 
 
 def get_version() -> str:
@@ -969,10 +974,9 @@ async def lifespan(app: FastAPI):
 
 
 # ── MCP Sub-App（Streamable HTTP / SSE） ──
-# mcp.http_app() 返回 StarletteWithLifespan，自带 SessionManager 生命周期。
-# 使用 combine_lifespans 将 FastAPI 自身的 lifespan 与 MCP 的 lifespan 合并，
-# 确保 MCP 的 StreamableHTTPSessionManager 在主进程中正确初始化和清理。
-_mcp_app = _mcp_server.http_app(path="/", transport="streamable-http")
+# 当前 MCP SDK 使用 streamable_http_app() 生成可挂载的 Starlette 子应用。
+_mcp_app = _mcp_server.streamable_http_app() if _mcp_server is not None else None
+_app_lifespan = lifespan
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -981,12 +985,18 @@ app = FastAPI(
     version=get_version(),
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
-    lifespan=combine_lifespans(lifespan, _mcp_app.lifespan),
+    lifespan=_app_lifespan,
 )
 
 # 挂载 MCP Server 到 /mcp 路径
 # 客户端通过 http://host:port/mcp/ 访问 Streamable HTTP 端点
-app.mount("/mcp", _mcp_app)
+if _mcp_app is not None:
+    app.mount("/mcp", _mcp_app)
+elif _mcp_import_error is not None:
+    logging.getLogger("app.main").warning(
+        "⚠️ MCP Server 未启用，缺少依赖或导入失败: %s",
+        _mcp_import_error,
+    )
 
 # 安全中间件
 if not settings.DEBUG:

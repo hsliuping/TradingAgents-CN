@@ -5,7 +5,7 @@
 
 import logging
 import asyncio
-from typing import Optional
+from typing import Dict, Optional, Tuple
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo import MongoClient
 from pymongo.database import Database
@@ -41,27 +41,93 @@ class DatabaseManager:
         self.mongo_db: Optional[AsyncIOMotorDatabase] = None
         self.redis_client: Optional[Redis] = None
         self.redis_pool: Optional[ConnectionPool] = None
+        self._mongo_clients_by_loop: Dict[int, AsyncIOMotorClient] = {}
+        self._mongo_dbs_by_loop: Dict[int, AsyncIOMotorDatabase] = {}
+        self._redis_clients_by_loop: Dict[int, Redis] = {}
+        self._redis_pools_by_loop: Dict[int, ConnectionPool] = {}
         self._mongo_healthy = False
         self._redis_healthy = False
+
+    def _get_running_loop(self) -> Optional[asyncio.AbstractEventLoop]:
+        """获取当前事件循环；在非异步上下文中返回 None。"""
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+
+    def ensure_mongodb_for_current_loop(self) -> Tuple[AsyncIOMotorClient, AsyncIOMotorDatabase]:
+        """为当前事件循环获取独立的 MongoDB 客户端。"""
+        current_loop = self._get_running_loop()
+        loop_id = id(current_loop) if current_loop is not None else 0
+
+        client = self._mongo_clients_by_loop.get(loop_id)
+        database = self._mongo_dbs_by_loop.get(loop_id)
+        if client is not None and database is not None:
+            self.mongo_client = client
+            self.mongo_db = database
+            return client, database
+
+        client_kwargs = {
+            "maxPoolSize": settings.MONGO_MAX_CONNECTIONS,
+            "minPoolSize": settings.MONGO_MIN_CONNECTIONS,
+            "maxIdleTimeMS": 30000,
+            "serverSelectionTimeoutMS": settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,
+            "connectTimeoutMS": settings.MONGO_CONNECT_TIMEOUT_MS,
+            "socketTimeoutMS": settings.MONGO_SOCKET_TIMEOUT_MS,
+        }
+        if current_loop is not None:
+            client_kwargs["io_loop"] = current_loop
+
+        client = AsyncIOMotorClient(settings.MONGO_URI, **client_kwargs)
+        database = client[settings.MONGO_DB]
+        self._mongo_clients_by_loop[loop_id] = client
+        self._mongo_dbs_by_loop[loop_id] = database
+        self.mongo_client = client
+        self.mongo_db = database
+
+        if current_loop is not None and len(self._mongo_clients_by_loop) > 1:
+            logger.warning("⚠️ 检测到多个事件循环正在使用 MongoDB 连接，已为当前 loop 创建独立客户端")
+
+        return client, database
+
+    def ensure_redis_for_current_loop(self) -> Tuple[Redis, ConnectionPool]:
+        """为当前事件循环获取独立的 Redis 客户端。"""
+        current_loop = self._get_running_loop()
+        loop_id = id(current_loop) if current_loop is not None else 0
+
+        client = self._redis_clients_by_loop.get(loop_id)
+        pool = self._redis_pools_by_loop.get(loop_id)
+        if client is not None and pool is not None:
+            self.redis_client = client
+            self.redis_pool = pool
+            return client, pool
+
+        pool = ConnectionPool.from_url(
+            settings.REDIS_URL,
+            max_connections=settings.REDIS_MAX_CONNECTIONS,
+            retry_on_timeout=settings.REDIS_RETRY_ON_TIMEOUT,
+            decode_responses=True,
+            socket_connect_timeout=5,
+            socket_timeout=10,
+        )
+        client = Redis(connection_pool=pool)
+        self._redis_clients_by_loop[loop_id] = client
+        self._redis_pools_by_loop[loop_id] = pool
+        self.redis_client = client
+        self.redis_pool = pool
+
+        if current_loop is not None and len(self._redis_clients_by_loop) > 1:
+            logger.warning("⚠️ 检测到多个事件循环正在使用 Redis 连接，已为当前 loop 创建独立客户端")
+
+        return client, pool
 
     async def init_mongodb(self):
         """初始化MongoDB连接"""
         try:
             logger.info("🔄 正在初始化MongoDB连接...")
 
-            # 创建MongoDB客户端，配置连接池
-            self.mongo_client = AsyncIOMotorClient(
-                settings.MONGO_URI,
-                maxPoolSize=settings.MONGO_MAX_CONNECTIONS,
-                minPoolSize=settings.MONGO_MIN_CONNECTIONS,
-                maxIdleTimeMS=30000,  # 30秒空闲超时
-                serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,  # 服务器选择超时
-                connectTimeoutMS=settings.MONGO_CONNECT_TIMEOUT_MS,  # 连接超时
-                socketTimeoutMS=settings.MONGO_SOCKET_TIMEOUT_MS,  # 套接字超时
-            )
-
-            # 获取数据库实例
-            self.mongo_db = self.mongo_client[settings.MONGO_DB]
+            # 为当前事件循环创建专属客户端，避免跨 loop 复用
+            self.mongo_client, self.mongo_db = self.ensure_mongodb_for_current_loop()
 
             # 测试连接
             await self.mongo_client.admin.command('ping')
@@ -82,18 +148,8 @@ class DatabaseManager:
         try:
             logger.info("🔄 正在初始化Redis连接...")
 
-            # 创建Redis连接池
-            self.redis_pool = ConnectionPool.from_url(
-                settings.REDIS_URL,
-                max_connections=settings.REDIS_MAX_CONNECTIONS,
-                retry_on_timeout=settings.REDIS_RETRY_ON_TIMEOUT,
-                decode_responses=True,
-                socket_connect_timeout=5,  # 5秒连接超时
-                socket_timeout=10,  # 10秒套接字超时
-            )
-
-            # 创建Redis客户端
-            self.redis_client = Redis(connection_pool=self.redis_pool)
+            # 为当前事件循环创建专属客户端，避免跨 loop 复用
+            self.redis_client, self.redis_pool = self.ensure_redis_for_current_loop()
 
             # 测试连接
             await self.redis_client.ping()
@@ -112,30 +168,54 @@ class DatabaseManager:
         logger.info("🔄 正在关闭数据库连接...")
 
         # 关闭MongoDB连接
-        if self.mongo_client:
+        closed_mongo_clients = set()
+        for client in list(self._mongo_clients_by_loop.values()):
+            if client is None or id(client) in closed_mongo_clients:
+                continue
             try:
-                self.mongo_client.close()
-                self._mongo_healthy = False
-                logger.info("✅ MongoDB连接已关闭")
+                client.close()
+                closed_mongo_clients.add(id(client))
             except Exception as e:
                 logger.error(f"❌ 关闭MongoDB连接时出错: {e}")
+        if closed_mongo_clients:
+            self._mongo_healthy = False
+            logger.info("✅ MongoDB连接已关闭")
 
         # 关闭Redis连接
-        if self.redis_client:
+        closed_redis_clients = set()
+        for client in list(self._redis_clients_by_loop.values()):
+            if client is None or id(client) in closed_redis_clients:
+                continue
             try:
-                await self.redis_client.close()
-                self._redis_healthy = False
-                logger.info("✅ Redis连接已关闭")
+                await client.close()
+                closed_redis_clients.add(id(client))
             except Exception as e:
                 logger.error(f"❌ 关闭Redis连接时出错: {e}")
+        if closed_redis_clients:
+            self._redis_healthy = False
+            logger.info("✅ Redis连接已关闭")
 
         # 关闭Redis连接池
-        if self.redis_pool:
+        closed_redis_pools = set()
+        for pool in list(self._redis_pools_by_loop.values()):
+            if pool is None or id(pool) in closed_redis_pools:
+                continue
             try:
-                await self.redis_pool.disconnect()
-                logger.info("✅ Redis连接池已关闭")
+                await pool.disconnect()
+                closed_redis_pools.add(id(pool))
             except Exception as e:
                 logger.error(f"❌ 关闭Redis连接池时出错: {e}")
+        if closed_redis_pools:
+            logger.info("✅ Redis连接池已关闭")
+
+        self._mongo_clients_by_loop.clear()
+        self._mongo_dbs_by_loop.clear()
+        self._redis_clients_by_loop.clear()
+        self._redis_pools_by_loop.clear()
+        self.mongo_client = None
+        self.mongo_db = None
+        self.redis_client = None
+        self.redis_pool = None
 
     async def health_check(self) -> dict:
         """数据库健康检查"""
@@ -403,15 +483,17 @@ async def close_database():
 
 def get_mongo_client() -> AsyncIOMotorClient:
     """获取MongoDB客户端"""
-    if mongo_client is None:
-        raise RuntimeError("MongoDB客户端未初始化")
+    global mongo_client, mongo_db
+
+    mongo_client, mongo_db = db_manager.ensure_mongodb_for_current_loop()
     return mongo_client
 
 
 def get_mongo_db() -> AsyncIOMotorDatabase:
     """获取MongoDB数据库实例"""
-    if mongo_db is None:
-        raise RuntimeError("MongoDB数据库未初始化")
+    global mongo_client, mongo_db
+
+    mongo_client, mongo_db = db_manager.ensure_mongodb_for_current_loop()
     return mongo_db
 
 
@@ -441,8 +523,9 @@ def get_mongo_db_sync() -> Database:
 
 def get_redis_client() -> Redis:
     """获取Redis客户端（异步）"""
-    if redis_client is None:
-        raise RuntimeError("Redis客户端未初始化")
+    global redis_client, redis_pool
+
+    redis_client, redis_pool = db_manager.ensure_redis_for_current_loop()
     return redis_client
 
 

@@ -27,12 +27,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastmcp.server.auth.auth import AccessToken, TokenVerifier
+from mcp.server.auth.provider import AccessToken, TokenVerifier
 
 logger = logging.getLogger(__name__)
 
 
-class MCPApiKeyVerifier(TokenVerifier):
+class MCPApiKeyVerifier:
     """基于 API Key 的 MCP 认证器
 
     从 MongoDB system_configs 集合验证 API Key，
@@ -40,7 +40,7 @@ class MCPApiKeyVerifier(TokenVerifier):
     """
 
     def __init__(self, required_scopes: list[str] | None = None):
-        super().__init__(required_scopes=required_scopes)
+        self.required_scopes = required_scopes or ["mcp:tools"]
         self._config_cache: Optional[dict] = None
         self._cache_time: Optional[datetime] = None
         self._cache_ttl_seconds = 300  # 5 分钟缓存
@@ -82,7 +82,7 @@ class MCPApiKeyVerifier(TokenVerifier):
         return AccessToken(
             token=token,
             client_id=user_id,
-            scopes=["mcp:tools"],
+            scopes=self.required_scopes,
         )
 
     async def _find_api_key(self, token: str) -> Optional[dict]:
