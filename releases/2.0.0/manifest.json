@@ -1,0 +1,13 @@
+{
+  "version": "2.0.0",
+  "release_date": "2026-02-08",
+  "git_commit": "e73b8a8b",
+  "migrations": [
+    "migrations/v2_0_0.py"
+  ],
+  "upgrade_config": "upgrade_config.json",
+  "features": [],
+  "config_changes": [],
+  "env_changes": [],
+  "_baseline": "Production baseline. Installer: TradingAgentsCNSetup-2.0.0-build20260208-113504.exe"
+}

@@ -43,17 +43,21 @@ $syncDirs = @(
     "core",          # 🔥 v2.0 核心代码（必须同步！）
     "app",
     "tradingagents",
+    "migrations",
     # "web",         # ❌ 旧版 Web 界面，不再同步
     # "tests",       # ❌ 测试代码，不需要打包
     "examples",
     "prompts",
     "config",
-    "install"  # 🔥 包含数据库配置文件
+    "install",       # 🔥 包含数据库配置文件
+    "releases"       # 🔥 版本发布目录（升级配置 per-version）
 )
 
 # 🔥 注意：docs 目录不再完整同步，改为选择性同步
 
 $syncFiles = @(
+    "VERSION",           # Version for update check and display
+    "BUILD_INFO",        # Build metadata (build_date, git_commit, etc.)
     "requirements.txt",
     "pyproject.toml",  # 🔥 添加 pyproject.toml（包含 weasyprint 依赖）
     "README.md",
@@ -107,6 +111,39 @@ $portableSpecific = @(
     "start_services_clean.ps1",
     "stop_all.ps1",
     "README_STARTUP.txt"
+)
+
+$allowedPortableRootEntries = @(
+    ".env",
+    ".env.example",
+    "app",
+    "BUILD_INFO",
+    "config",
+    "core",
+    "data",
+    "debug_services.ps1",
+    "docs",
+    "examples",
+    "frontend",
+    "install",
+    "logs",
+    "migrations",
+    "prompts",
+    "pyproject.toml",
+    "README.md",
+    "README_STARTUP.txt",
+    "releases",
+    "requirements.txt",
+    "restart_all.ps1",
+    "runtime",
+    "scripts",
+    "start_all.ps1",
+    "start_services_clean.ps1",
+    "stop_all.ps1",
+    "temp",
+    "tradingagents",
+    "vendors",
+    "VERSION"
 )
 
 # 排除大文件和数据目录（安装时创建）
@@ -188,6 +225,29 @@ function Copy-WithProgress {
 $syncCount = 0
 $skipCount = 0
 
+Write-Host "Cleaning stale items in portable root..." -ForegroundColor Yellow
+Write-Host ""
+
+Get-ChildItem -Path $portableDir -Force | ForEach-Object {
+    if ($allowedPortableRootEntries -contains $_.Name) {
+        return
+    }
+
+    if ($DryRun) {
+        Write-Host "  [DRY RUN] Will remove stale item: $($_.Name)" -ForegroundColor Yellow
+        return
+    }
+
+    try {
+        Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  🗑️  Removed stale item: $($_.Name)" -ForegroundColor Gray
+    } catch {
+        Write-Host "  ❌ FAILED to remove stale item: $($_.Name) - $_" -ForegroundColor Red
+    }
+}
+
+Write-Host ""
+
 Write-Host "Syncing directories..." -ForegroundColor Yellow
 Write-Host ""
 
@@ -267,12 +327,12 @@ Write-Host ""
 Write-Host "Syncing docs..." -ForegroundColor Yellow
 Write-Host ""
 
-$docsSource = Join-Path $root "docs"
+$docsSource = Join-Path $root "docs\release_v2.0"
 $docsDest = Join-Path $portableDir "docs"
 
 if (Test-Path $docsSource) {
     if ($DryRun) {
-        Write-Host "  [DRY RUN] Will copy entire directory: docs" -ForegroundColor Yellow
+        Write-Host "  [DRY RUN] Will copy release docs directory: docs\\release_v2.0 -> docs" -ForegroundColor Yellow
     } else {
         try {
             # 删除目标目录（如果存在）
@@ -280,9 +340,36 @@ if (Test-Path $docsSource) {
                 Remove-Item -Path $docsDest -Recurse -Force
             }
 
-            # 复制整个目录
-            Copy-Item -Path $docsSource -Destination $docsDest -Recurse -Force
-            Write-Host "  ✅ Copied entire directory" -ForegroundColor Green
+            New-Item -ItemType Directory -Path $docsDest -Force | Out-Null
+
+            # 仅复制面向发布的用户文档
+            Copy-Item -Path (Join-Path $docsSource "*") -Destination $docsDest -Recurse -Force
+            Write-Host "  ✅ Copied release_v2.0 user docs only" -ForegroundColor Green
+
+            # 补充运行时直接读取的 API 指南、模板和示例文件
+            $runtimeDocMappings = @(
+                @{ Source = (Join-Path $root "docs\api\STOCK_DATA_IMPORT_API.md"); Destination = (Join-Path $docsDest "api\STOCK_DATA_IMPORT_API.md") },
+                @{ Source = (Join-Path $root "docs\api\examples\stock_data_import_examples.py"); Destination = (Join-Path $docsDest "api\examples\stock_data_import_examples.py") },
+                @{ Source = (Join-Path $root "docs\examples\social_media_api_guide.md"); Destination = (Join-Path $docsDest "examples\social_media_api_guide.md") },
+                @{ Source = (Join-Path $root "docs\examples\social_media_api_example.py"); Destination = (Join-Path $docsDest "examples\social_media_api_example.py") },
+                @{ Source = (Join-Path $root "docs\examples\social_media_template.csv"); Destination = (Join-Path $docsDest "examples\social_media_template.csv") },
+                @{ Source = (Join-Path $root "docs\examples\social_media_template.json"); Destination = (Join-Path $docsDest "examples\social_media_template.json") }
+            )
+
+            foreach ($mapping in $runtimeDocMappings) {
+                if (-not (Test-Path $mapping.Source)) {
+                    Write-Host "  ⚠️ Runtime doc asset missing: $($mapping.Source)" -ForegroundColor Yellow
+                    continue
+                }
+
+                $targetDir = Split-Path -Parent $mapping.Destination
+                if (-not (Test-Path $targetDir)) {
+                    New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+                }
+
+                Copy-Item -Path $mapping.Source -Destination $mapping.Destination -Force
+                Write-Host "  ✅ Copied runtime doc asset: $($mapping.Destination.Substring($docsDest.Length + 1))" -ForegroundColor Gray
+            }
 
             # 删除 __pycache__ 目录
             $pycacheDirs = Get-ChildItem -Path $docsDest -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue
@@ -301,6 +388,8 @@ if (Test-Path $docsSource) {
             Write-Host "  ❌ FAILED: docs - $_" -ForegroundColor Red
         }
     }
+} else {
+    Write-Host "  ❌ FAILED: docs\\release_v2.0 not found" -ForegroundColor Red
 }
 
 Write-Host ""
@@ -315,6 +404,7 @@ Write-Host ""
 # 定义需要同步的脚本文件
 $essentialScripts = @(
     "scripts\import_config_and_create_user.py",  # 🔥 导入数据库配置和创建用户
+    "scripts\apply_upgrade_config.py",           # 🔥 升级配置增量导入（升级安装后首次启动）
     "scripts\init_mongodb_user.py",              # 🔥 初始化 MongoDB 用户
     "scripts\import_mongodb_config.py",          # 🔥 导入 MongoDB 配置
     "scripts\init_mongodb.ps1",                  # 🔥 初始化 MongoDB (PowerShell)
@@ -325,34 +415,29 @@ $essentialScripts = @(
     "scripts\installer\start_all.py",            # 🔥 Python 启动脚本（包含退出日志功能）
     "scripts\installer\start_all.ps1",           # PowerShell 启动脚本
     "scripts\installer\stop_all.ps1",            # 停止服务脚本
+    "scripts\installer\start_services_clean.ps1", # MongoDB/Redis 服务启动脚本
+    "scripts\installer\collect_service_logs.ps1", # 错误日志收集脚本（诊断包）
+    "scripts\installer\restart_all.ps1",         # Restart all services (for tray menu)
     # 🔥 进程监控脚本
     "scripts\monitor\process_monitor.py",        # 进程监控守护进程（包含退出报告功能）
     "scripts\monitor\start_monitor.ps1",         # 启动监控脚本
     "scripts\monitor\stop_monitor.ps1",          # 停止监控脚本
     "scripts\monitor\view_monitor.ps1",          # 查看监控日志脚本
     "scripts\monitor\monitor_status.ps1",        # 监控状态查看脚本
+    "scripts\monitor\tray_monitor.py",            # 托盘监控主程序
+    "scripts\monitor\tray_start.ps1",             # 托盘监控启动脚本
     "scripts\monitor\README.md",                 # 监控脚本说明
     # 🔥 测试和示例程序
     "scripts\test_batch_import_apis.py"          # 批量导入API测试程序
 )
 
-# 定义需要复制到根目录的启动脚本
+# Define startup scripts to copy to portable root
 $startupScripts = @(
-    @{
-        Source = "scripts\installer\start_all.ps1"
-        Dest = "start_all.ps1"
-        Description = "启动所有服务"
-    },
-    @{
-        Source = "scripts\installer\stop_all.ps1"
-        Dest = "stop_all.ps1"
-        Description = "停止所有服务"
-    },
-    @{
-        Source = "debug_services.ps1"
-        Dest = "debug_services.ps1"
-        Description = "MongoDB和Redis诊断脚本"
-    }
+    @{ Source = 'scripts\installer\start_all.ps1'; Dest = 'start_all.ps1'; Description = 'Start all' },
+    @{ Source = 'scripts\installer\start_services_clean.ps1'; Dest = 'start_services_clean.ps1'; Description = 'MongoDB/Redis' },
+    @{ Source = 'scripts\installer\stop_all.ps1'; Dest = 'stop_all.ps1'; Description = 'Stop all' },
+    @{ Source = 'scripts\installer\restart_all.ps1'; Dest = 'restart_all.ps1'; Description = 'Restart all' },
+    @{ Source = 'debug_services.ps1'; Dest = 'debug_services.ps1'; Description = 'Debug services' }
 )
 
 foreach ($scriptPath in $essentialScripts) {

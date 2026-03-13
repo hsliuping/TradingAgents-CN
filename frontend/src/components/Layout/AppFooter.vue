@@ -2,7 +2,7 @@
   <div class="app-footer">
     <div class="footer-content">
       <div class="copyright">
-        <span>© 2026 TradingAgents-CN v2.0.0</span>
+        <span>© 2026 TradingAgents-CN {{ displayVersion }}</span>
         <span class="rights">All rights reserved.</span>
       </div>
       <div class="disclaimer-text">
@@ -13,7 +13,14 @@
 </template>
 
 <script setup lang="ts">
-// Footer组件逻辑
+import { computed } from 'vue'
+import { useAppStore } from '@/stores/app'
+
+const appStore = useAppStore()
+
+const displayVersion = computed(() => {
+  return `v${appStore.version}`
+})
 </script>
 
 <style lang="scss" scoped>

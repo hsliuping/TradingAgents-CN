@@ -100,10 +100,19 @@
         <el-table-column prop="name" label="任务名称" min-width="200" sortable>
           <template #default="{ row }">
             <div class="job-name">
-              <el-tag :type="row.paused ? 'warning' : 'success'" size="small">
-                {{ row.paused ? '已暂停' : '运行中' }}
-              </el-tag>
-              <span class="name-text">{{ row.name }}</span>
+              <div class="job-name-main">
+                <el-tag :type="row.paused ? 'warning' : 'success'" size="small">
+                  {{ row.paused ? '已暂停' : '运行中' }}
+                </el-tag>
+                <el-tag v-if="isJobRunning(row)" type="danger" size="small">
+                  执行中
+                </el-tag>
+                <span class="name-text">{{ row.name }}</span>
+              </div>
+              <div v-if="isJobRunning(row)" class="job-running-summary">
+                <span v-if="getJobRunningProgress(row) !== null">进度 {{ getJobRunningProgress(row) }}%</span>
+                <span v-if="getJobRunningStartedAt(row)">开始于 {{ formatDateTime(getJobRunningStartedAt(row)!) }}</span>
+              </div>
             </div>
           </template>
         </el-table-column>
@@ -175,6 +184,7 @@
                 :icon="Promotion"
                 @click="handleTrigger(row)"
                 :loading="actionLoading[row.id]"
+                :disabled="isJobRunning(row)"
               >
                 立即执行
               </el-button>
@@ -798,6 +808,40 @@ const filteredJobs = computed(() => {
   return result
 })
 
+const isJobRunning = (job: Job): boolean => {
+  return Boolean(job.has_running_execution)
+}
+
+const getRunningJobHint = (job: Job): string => {
+  const runningExecution = job.running_execution
+  if (!runningExecution) {
+    return '该任务已有未完成的执行实例，请等待当前任务完成'
+  }
+
+  const progress = runningExecution.progress ?? 0
+  const startedAt = runningExecution.started_at
+  const parts = [`该任务正在执行中`]
+  if (progress > 0) {
+    parts.push(`当前进度 ${progress}%`)
+  }
+  if (startedAt) {
+    parts.push(`开始于 ${formatDateTime(startedAt)}`)
+  }
+  return parts.join('，')
+}
+
+const getJobRunningProgress = (job: Job): number | null => {
+  if (!job.running_execution) {
+    return null
+  }
+
+  return job.running_execution.progress ?? 0
+}
+
+const getJobRunningStartedAt = (job: Job): string | null => {
+  return job.running_execution?.started_at || null
+}
+
 // 方法
 const loadJobs = async () => {
   loading.value = true
@@ -1015,6 +1059,11 @@ const handleResume = async (job: Job) => {
 
 const handleTrigger = async (job: Job) => {
   try {
+    if (isJobRunning(job)) {
+      ElMessage.warning(getRunningJobHint(job))
+      return
+    }
+
     await ElMessageBox.confirm(
       `确定要立即执行任务"${job.name}"吗？任务将在后台执行。`,
       '确认执行',
@@ -1081,6 +1130,7 @@ const handleTrigger = async (job: Job) => {
     }
   } finally {
     actionLoading[job.id] = false
+    await loadJobs()
   }
 }
 
@@ -1789,11 +1839,27 @@ onMounted(() => {
   .table-card {
     .job-name {
       display: flex;
-      align-items: center;
-      gap: 8px;
+      flex-direction: column;
+      gap: 6px;
+
+      .job-name-main {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
 
       .name-text {
         font-weight: 500;
+      }
+
+      .job-running-summary {
+        display: flex;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--el-color-danger);
+        margin-left: 2px;
+        flex-wrap: wrap;
       }
     }
   }

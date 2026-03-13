@@ -1,0 +1,14 @@
+# 临时日志
+*.log
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 旧版 / 带时间戳的 PPTX（只保留最新版，旧版不入库）
+TradingAgentsCN_项目介绍_2.0.0_2026-02-26*.pptx
+TradingAgentsCN_项目介绍_2.0.0_2026-02-27_103242.pptx
+
+# 临时校验文本
+ppt_check*.txt
+

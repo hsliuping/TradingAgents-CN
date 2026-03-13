@@ -362,7 +362,7 @@ const dataSourceTypes = [
   {
     label: 'Tushare',
     value: 'tushare',
-    register_url: 'https://tushare.pro/register?reg=tacn',
+    register_url: 'https://tushare.pro/weborder/#/login?reg=tacn',
     register_guide: '如果您还没有 Tushare 账号，请先注册并获取 Token：'
   },
   {

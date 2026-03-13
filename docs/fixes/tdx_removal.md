@@ -36,7 +36,7 @@ TUSHARE_ENABLED=true
 - ✅ 官方支持
 
 **获取 Token**：
-- 访问 https://tushare.pro/register?reg=tacn
+- 访问 https://tushare.pro/weborder/#/login?reg=tacn
 - 注册并获取免费 Token
 - 免费版每分钟 200 次调用
 

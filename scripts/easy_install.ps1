@@ -1,11 +1,20 @@
 # TradingAgents-CN 一键安装脚本 (Windows PowerShell)
 # 功能：自动检测环境、安装依赖、配置API密钥、启动应用
+# Win10 兼容：UTF-8 编码，避免中文乱码和脚本错误
 
 param(
     [switch]$Reconfigure,  # 重新配置
     [switch]$SkipInstall,  # 跳过安装，仅配置
     [switch]$Minimal       # 最小化安装（无数据库）
 )
+
+# Win10: 设置 UTF-8 编码，避免中文乱码
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+if ($PSVersionTable.PSVersion.Major -ge 5) {
+    $PSDefaultParameterValues['*:Encoding'] = 'utf8'
+}
 
 $ErrorActionPreference = "Stop"
 

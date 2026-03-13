@@ -25,6 +25,8 @@ logger = get_logger(__name__)
 
 # UTC+8 时区
 UTC_8 = timezone(timedelta(hours=8))
+ACTIVE_EXECUTION_WINDOW_MINUTES = 30
+FALLBACK_EXECUTION_WINDOW_MINUTES = 60
 
 
 def get_utc8_now():
@@ -35,6 +37,54 @@ def get_utc8_now():
     这样前端可以直接添加 +08:00 后缀显示
     """
     return now_tz().replace(tzinfo=None)
+
+
+def get_execution_activity_time(execution: Optional[Dict[str, Any]]) -> Optional[datetime]:
+    """获取执行记录的最近活动时间，优先使用 updated_at，兼容旧数据回退到 timestamp。"""
+    if not execution:
+        return None
+
+    return execution.get("updated_at") or execution.get("timestamp") or execution.get("scheduled_time")
+
+
+def build_active_running_query(job_filter: Optional[Dict[str, Any]] = None, window_minutes: int = ACTIVE_EXECUTION_WINDOW_MINUTES) -> Dict[str, Any]:
+    """构建仍处于活动状态的 running 执行记录查询条件。"""
+    active_threshold = get_utc8_now() - timedelta(minutes=window_minutes)
+    query: Dict[str, Any] = {
+        "status": "running",
+        "$or": [
+            {"updated_at": {"$gte": active_threshold}},
+            {
+                "updated_at": {"$exists": False},
+                "timestamp": {"$gte": active_threshold}
+            }
+        ]
+    }
+
+    if job_filter:
+        query.update(job_filter)
+
+    return query
+
+
+def build_recent_execution_query(job_filter: Dict[str, Any], statuses: Optional[List[str]] = None, window_minutes: int = ACTIVE_EXECUTION_WINDOW_MINUTES) -> Dict[str, Any]:
+    """构建最近有活动的执行记录查询条件。"""
+    active_threshold = get_utc8_now() - timedelta(minutes=window_minutes)
+    query: Dict[str, Any] = {
+        **job_filter,
+        "$or": [
+            {"updated_at": {"$gte": active_threshold}},
+            {
+                "updated_at": {"$exists": False},
+                "timestamp": {"$gte": active_threshold}
+            }
+        ]
+    }
+
+    if statuses is not None:
+        query["status"] = {"$in": statuses} if len(statuses) > 1 else statuses[0]
+
+    return query
 
 
 class TaskCancelledException(Exception):
@@ -63,6 +113,39 @@ class SchedulerService:
         if self.db is None:
             self.db = get_mongo_db()
         return self.db
+
+    async def _get_active_running_executions(self, job_id: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+        """获取最近仍有心跳的 running 执行记录。"""
+        db = self._get_db()
+        query = build_active_running_query({"job_id": job_id} if job_id else None)
+
+        running_executions = await db.scheduler_executions.find(query).sort("timestamp", -1).to_list(length=100)
+
+        running_by_job: Dict[str, Dict[str, Any]] = {}
+        for exec_record in running_executions:
+            current_job_id = exec_record.get("job_id")
+            if current_job_id and current_job_id not in running_by_job:
+                running_by_job[current_job_id] = exec_record
+
+        return running_by_job
+
+    def _build_execution_summary(self, exec_record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """构建前端可直接使用的执行记录摘要。"""
+        if not exec_record:
+            return None
+
+        started_at = exec_record.get("timestamp")
+        updated_at = exec_record.get("updated_at")
+        return {
+            "execution_id": str(exec_record.get("_id")),
+            "progress": exec_record.get("progress", 0),
+            "processed_items": exec_record.get("processed_items"),
+            "total_items": exec_record.get("total_items"),
+            "current_item": exec_record.get("current_item"),
+            "started_at": started_at.isoformat() if started_at else None,
+            "updated_at": updated_at.isoformat() if updated_at else None,
+            "message": exec_record.get("progress_message")
+        }
     
     async def list_jobs(self) -> List[Dict[str, Any]]:
         """
@@ -72,6 +155,7 @@ class SchedulerService:
             任务列表（包含挂起的任务信息）
         """
         db = self._get_db()
+        running_by_job = await self._get_active_running_executions()
         
         # 🔥 获取所有挂起的执行记录（只查询suspended状态，不包括已恢复的running状态）
         # 注意：只查询状态为suspended的记录，已恢复为running的记录不会显示
@@ -101,6 +185,11 @@ class SchedulerService:
             if metadata:
                 job_dict["display_name"] = metadata.get("display_name")
                 job_dict["description"] = metadata.get("description")
+
+            latest_running = running_by_job.get(job.id)
+            job_dict["has_running_execution"] = latest_running is not None
+            if latest_running:
+                job_dict["running_execution"] = self._build_execution_summary(latest_running)
             
             # 🔥 检查是否有挂起的执行记录
             # 注意：只显示状态为suspended的记录，已恢复为running的记录不会显示
@@ -143,11 +232,17 @@ class SchedulerService:
         job = self.scheduler.get_job(job_id)
         if job:
             job_dict = self._job_to_dict(job, include_details=True)
+            running_by_job = await self._get_active_running_executions(job_id=job_id)
             # 获取任务元数据
             metadata = await self._get_job_metadata(job_id)
             if metadata:
                 job_dict["display_name"] = metadata.get("display_name")
                 job_dict["description"] = metadata.get("description")
+
+            latest_running = running_by_job.get(job_id)
+            job_dict["has_running_execution"] = latest_running is not None
+            if latest_running:
+                job_dict["running_execution"] = self._build_execution_summary(latest_running)
             return job_dict
         return None
     
@@ -214,6 +309,8 @@ class SchedulerService:
             if not job:
                 logger.error(f"❌ 任务 {job_id} 不存在")
                 return False
+
+            current_execution_id: Optional[str] = None
 
             # 验证CRON表达式格式
             try:
@@ -315,6 +412,7 @@ class SchedulerService:
                     from bson import ObjectId
                     existing_record = await db.scheduler_executions.find_one({"_id": ObjectId(resume_execution_id)})
                     if existing_record:
+                        current_execution_id = str(existing_record["_id"])
                         # 🔥 从执行记录中读取进度信息，并添加到kwargs中
                         processed_items = existing_record.get("processed_items")
                         if processed_items is not None:
@@ -373,14 +471,21 @@ class SchedulerService:
                         sort=[("timestamp", -1)]
                     )
                     
-                    # 🔥 如果没有挂起任务，再查找是否有running记录（5分钟内）
+                    # 🔥 如果没有挂起任务，再查找是否有仍在活动中的running记录
+                    # 判断标准：最近30分钟内有 updated_at 心跳；旧数据兼容回退到 timestamp
                     if not suspended_record:
-                        five_minutes_ago = get_utc8_now() - timedelta(minutes=5)
+                        active_threshold = get_utc8_now() - timedelta(minutes=30)
                         running_record = await db.scheduler_executions.find_one(
                             {
                                 "job_id": job_id,
                                 "status": "running",
-                                "timestamp": {"$gte": five_minutes_ago}
+                                "$or": [
+                                    {"updated_at": {"$gte": active_threshold}},
+                                    {
+                                        "updated_at": {"$exists": False},
+                                        "timestamp": {"$gte": active_threshold}
+                                    }
+                                ]
                             },
                             sort=[("timestamp", -1)]
                         )
@@ -409,6 +514,7 @@ class SchedulerService:
                     if existing_record:
                         # 🔥 如果是suspended状态，自动恢复执行（手动触发时）
                         if existing_record.get("status") == "suspended":
+                            current_execution_id = str(existing_record["_id"])
                             resume_execution_id = str(existing_record["_id"])
                             # 从执行记录中读取进度信息
                             processed_items = existing_record.get("processed_items")
@@ -454,6 +560,7 @@ class SchedulerService:
                                           f"(job_id匹配: ^{job_id}(_|$))")
                             logger.info(f"🔄 手动触发时检测到挂起任务，自动恢复执行: {resume_execution_id} (is_manual=True)")
                         else:
+                            current_execution_id = str(existing_record["_id"])
                             # 🔥 如果是running状态，检查是否需要用户确认
                             if not force:
                                 # 有running记录且未强制，需要用户确认
@@ -500,7 +607,8 @@ class SchedulerService:
                             "cancel_requested": False,  # 🔥 新任务默认没有取消标记
                             "job_kwargs": final_kwargs  # 🔥 保存kwargs（已清理，不包含_resume_execution_id）
                         }
-                        await db.scheduler_executions.insert_one(execution_record)
+                        insert_result = await db.scheduler_executions.insert_one(execution_record)
+                        current_execution_id = str(insert_result.inserted_id)
                         logger.info(f"📝 已创建执行记录并保存kwargs: {final_kwargs} (is_manual=True)")
                         
                         # 🔥 立即清除旧的Redis缓存，确保前端查询进度时不会读取到旧数据
@@ -540,6 +648,10 @@ class SchedulerService:
                 # 🔥 手动触发标记已经包含在 final_kwargs 中（通过 kwargs["_manual_trigger"] = True）
                 
                 logger.info(f"🔍 构建执行参数: merged_kwargs={merged_kwargs}, final_kwargs={final_kwargs}, clean_kwargs_for_execution={clean_kwargs_for_execution}")
+
+                if current_execution_id:
+                    clean_kwargs_for_execution["_trigger_execution_id"] = current_execution_id
+                    logger.info(f"🧷 当前手动触发执行记录ID: {current_execution_id}")
                 
                 # 获取任务函数和参数
                 func = job.func
@@ -1430,14 +1542,8 @@ class SchedulerService:
 
             # 如果是完成状态（success/failed），先查找是否有对应的 running 记录
             if status in ["success", "failed"]:
-                # 查找最近的 running 记录（5分钟内）
-                five_minutes_ago = get_utc8_now() - timedelta(minutes=5)
                 existing_record = await db.scheduler_executions.find_one(
-                    {
-                        "job_id": job_id,
-                        "status": "running",
-                        "timestamp": {"$gte": five_minutes_ago}
-                    },
+                    build_active_running_query({"job_id": job_id}),
                     sort=[("timestamp", -1)]
                 )
 
@@ -1879,19 +1985,17 @@ async def update_job_progress(
                 # 因为suspended状态的记录可能是旧任务，不应该影响新任务
                 if original_job_id != execution_job_id:
                     original_execution = sync_db.scheduler_executions.find_one(
-                        {
-                            "job_id": original_job_id,
-                            "status": "running"  # 🔥 只检查running状态，忽略suspended状态
-                        },
+                        build_active_running_query({
+                            "job_id": original_job_id
+                        }),
                         sort=[("timestamp", -1)]
                     )
-                    # 🔥 如果找到了原始job_id的running记录，检查是否是当前任务（时间在5分钟内）
+                    # 🔥 如果找到了原始job_id的活动 running 记录，检查是否需要同步取消标记
                     if original_execution:
-                        execution_time = original_execution.get("timestamp") or original_execution.get("scheduled_time")
+                        execution_time = get_execution_activity_time(original_execution)
                         if execution_time:
                             time_diff = (get_utc8_now() - execution_time).total_seconds()
-                            # 只有是最近5分钟内的任务，才同步取消标记
-                            if time_diff <= 300 and original_execution.get("cancel_requested", False):
+                            if original_execution.get("cancel_requested", False):
                                 # 🔥 同步取消标记到当前执行记录
                                 sync_db.scheduler_executions.update_one(
                                     {"_id": execution_id},
@@ -1904,8 +2008,8 @@ async def update_job_progress(
                                 )
                                 cancel_requested = True
                                 logger.info(f"🔄 同步取消标记: 从 {original_job_id} 同步到 {execution_job_id} (时间差: {time_diff:.0f}秒)")
-                            elif time_diff > 300:
-                                logger.debug(f"🔍 原始job_id的执行记录太旧（{time_diff:.0f}秒前），不同步取消标记")
+                            else:
+                                logger.debug(f"🔍 原始job_id 的活动执行记录未设置取消标记，不同步取消状态")
             
             if cancel_requested:
                 sync_client.close()
@@ -2219,44 +2323,44 @@ async def mark_job_completed(job_id: str, stats: Optional[Dict[str, Any]] = None
         sync_db = sync_client[settings.MONGODB_DATABASE]
 
         # 🔥 改进查找逻辑：
-        # 1. 优先查找 running 状态的记录
-        # 2. 如果没有，查找最近的 suspended/running 记录（5分钟内，处理恢复挂起任务的情况）
-        # 3. 如果还没有，查找最近的 success 记录（5分钟内，处理 update_job_progress 已将状态更新为 success 的情况）
-        # 4. 如果还没有，查找最近的任何状态记录（10分钟内，作为最后的兜底方案）
-        from datetime import timedelta
-        five_minutes_ago = get_utc8_now() - timedelta(minutes=5)
-        ten_minutes_ago = get_utc8_now() - timedelta(minutes=10)
+        # 1. 优先查找仍有活动心跳的 running 记录
+        # 2. 如果没有，查找活动窗口内的 suspended/running 记录（处理恢复挂起任务的情况）
+        # 3. 如果还没有，查找活动窗口内的 success 记录（处理 update_job_progress 已先更新状态的情况）
+        # 4. 如果还没有，查找兜底窗口内的最近任意状态记录
+        recent_window_minutes = ACTIVE_EXECUTION_WINDOW_MINUTES
+        fallback_window_minutes = FALLBACK_EXECUTION_WINDOW_MINUTES
+        fallback_threshold = get_utc8_now() - timedelta(minutes=fallback_window_minutes)
         
         # 🔍 调试：先查询所有相关记录
         all_recent_records = list(sync_db.scheduler_executions.find(
-            {
-                "job_id": job_id,
-                "timestamp": {"$gte": ten_minutes_ago}
-            },
+            build_recent_execution_query(
+                {"job_id": job_id},
+                window_minutes=fallback_window_minutes
+            ),
             sort=[("timestamp", -1)]
         ).limit(5))
         
         if all_recent_records:
-            logger.info(f"🔍 [调试] 找到 {len(all_recent_records)} 条最近10分钟内的记录:")
+            logger.info(f"🔍 [调试] 找到 {len(all_recent_records)} 条最近{fallback_window_minutes}分钟内的记录:")
             for idx, rec in enumerate(all_recent_records):
-                logger.info(f"   [{idx+1}] _id={rec.get('_id')}, status={rec.get('status')}, timestamp={rec.get('timestamp')}, progress={rec.get('progress')}")
+                logger.info(f"   [{idx+1}] _id={rec.get('_id')}, status={rec.get('status')}, timestamp={rec.get('timestamp')}, updated_at={rec.get('updated_at')}, progress={rec.get('progress')}")
         else:
-            logger.warning(f"🔍 [调试] 未找到任务 {job_id} 最近10分钟内的任何记录")
+            logger.warning(f"🔍 [调试] 未找到任务 {job_id} 最近{fallback_window_minutes}分钟内的任何记录")
         
         # 首先尝试查找 running 状态的记录
         execution = sync_db.scheduler_executions.find_one(
-            {"job_id": job_id, "status": "running"},
+            build_active_running_query({"job_id": job_id}),
             sort=[("timestamp", -1)]
         )
         
         # 如果没有找到 running 记录，尝试查找最近的 suspended 或 running 记录（可能是刚恢复的）
         if not execution:
             execution = sync_db.scheduler_executions.find_one(
-                {
-                    "job_id": job_id,
-                    "status": {"$in": ["running", "suspended"]},
-                    "timestamp": {"$gte": five_minutes_ago}
-                },
+                build_recent_execution_query(
+                    {"job_id": job_id},
+                    statuses=["running", "suspended"],
+                    window_minutes=recent_window_minutes
+                ),
                 sort=[("timestamp", -1)]
             )
             if execution:
@@ -2265,27 +2369,33 @@ async def mark_job_completed(job_id: str, stats: Optional[Dict[str, Any]] = None
         # 🔥 如果还没有找到，尝试查找最近的 success 记录（可能是 update_job_progress 已将状态更新为 success）
         if not execution:
             execution = sync_db.scheduler_executions.find_one(
-                {
-                    "job_id": job_id,
-                    "status": "success",
-                    "timestamp": {"$gte": five_minutes_ago}
-                },
+                build_recent_execution_query(
+                    {"job_id": job_id},
+                    statuses=["success"],
+                    window_minutes=recent_window_minutes
+                ),
                 sort=[("timestamp", -1)]
             )
             if execution:
                 logger.info(f"📝 找到最近的 success 记录（可能是 update_job_progress 已更新状态）: {execution.get('_id')}, 将更新为最终状态")
         
-        # 🔥 最后的兜底方案：查找最近10分钟内的任何记录（按时间戳倒序，取最新的）
+        # 🔥 最后的兜底方案：查找最近兜底窗口内的任何记录（按时间戳倒序，取最新的）
         if not execution:
             execution = sync_db.scheduler_executions.find_one(
                 {
                     "job_id": job_id,
-                    "timestamp": {"$gte": ten_minutes_ago}
+                    "$or": [
+                        {"updated_at": {"$gte": fallback_threshold}},
+                        {
+                            "updated_at": {"$exists": False},
+                            "timestamp": {"$gte": fallback_threshold}
+                        }
+                    ]
                 },
                 sort=[("timestamp", -1)]
             )
             if execution:
-                logger.info(f"📝 [兜底] 找到最近10分钟内的记录: {execution.get('_id')}, status={execution.get('status')}, timestamp={execution.get('timestamp')}")
+                logger.info(f"📝 [兜底] 找到最近{fallback_window_minutes}分钟内的记录: {execution.get('_id')}, status={execution.get('status')}, timestamp={execution.get('timestamp')}")
 
         if not execution:
             logger.warning(f"⚠️ 未找到任务 {job_id} 的运行记录，无法标记为已完成")

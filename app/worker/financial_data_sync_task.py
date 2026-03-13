@@ -23,12 +23,12 @@ async def run_financial_data_sync(**kwargs):
     
     logger.info(f"🚀 [财务数据同步] 开始执行任务 (job_id={job_id})")
     
-    # 🔥 手动触发或强制执行时允许执行（即使有running记录）
+    # 🔥 普通手动触发也要检查是否已有未完成任务，只有强制执行才跳过
     manual_trigger = kwargs.get("_manual_trigger", False)
     force_execute = kwargs.get("_force_execute", False)
     
-    if not manual_trigger and not force_execute:
-        # 🔥 检查是否已有实例在运行（非手动触发且非强制执行时才检查）
+    if not force_execute:
+        # 🔥 检查是否已有实例在运行（普通手动触发也检查）
         from app.worker.tushare_sync_service import _check_task_running
         is_running, instance_id = await _check_task_running(job_id)
         if is_running:
@@ -39,8 +39,6 @@ async def run_financial_data_sync(**kwargs):
                 "running_instance_id": instance_id
             }
     else:
-        if manual_trigger:
-            logger.info(f"🔧 [APScheduler] 手动触发执行，允许执行（即使有running记录）")
         if force_execute:
             logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
     

@@ -2,7 +2,11 @@
 TradingAgents-CN Windows Portable Stopper
 Stops MongoDB, Redis, backend, optional Nginx based on runtime\pids.json.
 Encoding-safe version: ASCII-only output.
+.PARAMETER SkipTray
+    When set, do not stop tray monitor (used by restart_all.ps1 so it can continue)
 #>
+
+param([switch]$SkipTray)
 
 $ErrorActionPreference = 'Stop'
 
@@ -17,39 +21,43 @@ function Stop-ByPid {
     }
 }
 
-$root = (Get-Location).Path
-$pidFile = Join-Path $root 'runtime\pids.json'
-$monitorPidFile = Join-Path $root 'logs\process_monitor.pid'
+$scriptDir = Split-Path $PSScriptRoot -Parent
+$root = Split-Path $scriptDir -Parent
+$pidFile = [System.IO.Path]::Combine($root, 'runtime', 'pids.json')
+$monitorPidFile = [System.IO.Path]::Combine($root, 'logs', 'process_monitor.pid')
+
+function Test-IsStartAllProcess {
+    param([int]$ProcId, [string]$RootPath)
+    if ($ProcId -eq $PID) { return $false }
+    try {
+        $cmdLine = (Get-WmiObject Win32_Process -Filter "ProcessId = $ProcId" -ErrorAction SilentlyContinue).CommandLine
+        if (-not $cmdLine) { return $false }
+        if ($cmdLine -like "*restart_all*") { return $false }
+        return ($cmdLine -like "*start_all.ps1*" -or $cmdLine -like "*start_all*") -and $cmdLine -like "*$RootPath*"
+    } catch { return $false }
+}
 
 # Stop start_all.ps1 PowerShell process first (if running)
 try {
-    $startAllProcs = Get-Process powershell -ErrorAction SilentlyContinue | Where-Object {
-        try {
-            $cmdLine = (Get-WmiObject Win32_Process -Filter "ProcessId = $($_.Id)" -ErrorAction SilentlyContinue).CommandLine
-            $cmdLine -and $cmdLine -like "*start_all.ps1*"
-        } catch {
-            $false
-        }
-    }
+    $startAllProcs = Get-Process powershell -ErrorAction SilentlyContinue | Where-Object { Test-IsStartAllProcess -ProcId $_.Id -RootPath $root }
+    foreach ($proc in $startAllProcs) { Stop-ByPid -ProcessId $proc.Id -Name 'start_all.ps1 PowerShell' }
+} catch { }
 
-    foreach ($proc in $startAllProcs) {
-        Stop-ByPid -ProcessId $proc.Id -Name 'start_all.ps1 PowerShell'
+function Stop-TrayMonitor {
+    Get-Process -Name 'pythonw' -ErrorAction SilentlyContinue | ForEach-Object {
+        try { $cmdLine = (Get-WmiObject Win32_Process -Filter "ProcessId = $($_.Id)" -ErrorAction SilentlyContinue).CommandLine } catch { $cmdLine = $null }
+        if ($cmdLine -and $cmdLine -like "*tray_monitor*" -and $cmdLine -like "*$root*") { Stop-ByPid -ProcessId $_.Id -Name 'Tray Monitor' }
     }
-} catch {
-    # Ignore errors
 }
+# Stop Tray Monitor - skip when called from restart_all
+if (-not $SkipTray) { Stop-TrayMonitor }
 
 # Stop Process Monitor daemon
 if (Test-Path -LiteralPath $monitorPidFile) {
     try {
-        $monitorPid = Get-Content -LiteralPath $monitorPidFile -Raw
-        $monitorPid = $monitorPid.Trim()
-        if ($monitorPid -match '^\d+$') {
-            Stop-ByPid -ProcessId ([int]$monitorPid) -Name 'Process Monitor'
-        }
-    } catch {
-        Write-Host "Failed to stop Process Monitor from PID file"
-    }
+        $pidVal = (Get-Content -LiteralPath $monitorPidFile -Raw).Trim()
+        if ($pidVal -match '^\d+$') { Stop-ByPid -ProcessId ([int]$pidVal) -Name 'Process Monitor' }
+    } catch { Write-Host "Failed to stop Process Monitor from PID file" }
     Remove-Item -LiteralPath $monitorPidFile -Force -ErrorAction SilentlyContinue
 }
 
@@ -76,26 +84,14 @@ Write-Host "Stopping any remaining Python processes..."
 $pythonProcs = Get-Process -Name 'python' -ErrorAction SilentlyContinue
 if ($pythonProcs) {
     foreach ($proc in $pythonProcs) {
-        try {
-            # Try to get command line to check if it's from this installation
-            $cmdLine = $null
+        $cmdLine = $null
+        try { $cmdLine = (Get-WmiObject Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction SilentlyContinue).CommandLine } catch { }
+        $shouldStop = (-not $cmdLine) -or ($cmdLine -like "*$root*")
+        if ($shouldStop) {
             try {
-                $cmdLine = (Get-WmiObject Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction SilentlyContinue).CommandLine
-            } catch {
-                # WMI query failed, assume it's from this installation
-            }
-
-            # Stop if: 1) command line matches installation path, or 2) can't get command line (likely orphan)
-            if ((-not $cmdLine) -or ($cmdLine -like "*$root*")) {
-                try {
-                    Stop-Process -Id $proc.Id -Force -ErrorAction Stop
-                    Write-Host "  Stopped Python process (PID: $($proc.Id))"
-                } catch {
-                    Write-Host "  Failed to stop Python process (PID: $($proc.Id)) - may require admin rights"
-                }
-            }
-        } catch {
-            # Ignore errors
+                Stop-Process -Id $proc.Id -Force -ErrorAction Stop
+                Write-Host "  Stopped Python process (PID: $($proc.Id))"
+            } catch { Write-Host "  Failed to stop Python process (PID: $($proc.Id)) - may require admin rights" }
         }
     }
 }

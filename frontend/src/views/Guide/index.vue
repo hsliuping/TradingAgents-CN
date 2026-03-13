@@ -57,7 +57,7 @@
                 <li>将Token保存好，后续配置时需要用到</li>
               </ul>
               <div class="register-link-wrapper">
-                <el-link href="https://tushare.pro/register?reg=tacn" target="_blank" type="primary" :underline="false" class="register-link">
+                <el-link href="https://tushare.pro/weborder/#/login?reg=tacn" target="_blank" type="primary" :underline="false" class="register-link">
                   <el-icon><Link /></el-icon>
                   立即注册 Tushare 账号
                 </el-link>

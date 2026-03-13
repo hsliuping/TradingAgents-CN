@@ -160,6 +160,49 @@ CONFIG_COLLECTIONS = [
     "trading_system_evaluations",
 ]
 
+# 增量模式下各集合的唯一键（用于判断文档是否已存在，避免重复插入）
+# 支持单键或键列表（多键组合）
+COLLECTION_UNIQUE_KEYS = {
+    "agent_configs": ["agent_id"],
+    "prompt_templates": ["agent_id", "preference_type"],
+    "system_configs": ["key"],
+    "workflow_definitions": ["id"],
+    "workflows": ["id"],
+    "tool_configs": ["tool_id"],  # fallback: name
+    "llm_providers": ["provider_id"],
+    "model_catalog": ["model_id"],
+    "platform_configs": ["platform_id"],
+    "datasource_groupings": ["name"],
+    "market_categories": ["name"],
+    "tool_agent_bindings": ["tool_id", "agent_id"],
+    "agent_workflow_bindings": ["agent_id", "workflow_id"],
+}
+
+
+def _build_unique_query(doc: Dict[str, Any], collection_name: str) -> Optional[Dict[str, Any]]:
+    """根据集合的唯一键构建查询条件"""
+    if "_id" in doc:
+        return {"_id": doc["_id"]}
+    keys = COLLECTION_UNIQUE_KEYS.get(collection_name)
+    if keys:
+        query = {}
+        for k in keys:
+            if k in doc and doc[k] is not None:
+                query[k] = doc[k]
+        if query:
+            return query
+        # 单键集合若主键缺失，尝试备用键
+        if collection_name == "tool_configs" and "name" in doc:
+            return {"name": doc["name"]}
+    # 通用回退
+    if "username" in doc:
+        return {"username": doc["username"]}
+    if "name" in doc:
+        return {"name": doc["name"]}
+    if "key" in doc:
+        return {"key": doc["key"]}
+    return None
+
 
 def hash_password(password: str) -> str:
     """使用 SHA256 哈希密码（与系统一致）"""
@@ -307,32 +350,25 @@ def import_collection(
             "skipped": 0
         }
     else:
-        # 增量模式：跳过已存在的文档
+        # 增量模式：跳过已存在的文档（使用集合专属唯一键）
         inserted_count = 0
         skipped_count = 0
-        
+
         for doc in converted_docs:
-            # 检查是否已存在（根据 _id 或 username）
-            query = {}
-            if "_id" in doc:
-                query["_id"] = doc["_id"]
-            elif "username" in doc:
-                query["username"] = doc["username"]
-            elif "name" in doc:
-                query["name"] = doc["name"]
-            else:
-                # 没有唯一标识，直接插入
+            query = _build_unique_query(doc, collection_name)
+            if query is None:
+                # 没有唯一标识，直接插入（可能产生重复，但部分集合无稳定唯一键）
                 collection.insert_one(doc)
                 inserted_count += 1
                 continue
-            
+
             existing = collection.find_one(query)
             if existing:
                 skipped_count += 1
             else:
                 collection.insert_one(doc)
                 inserted_count += 1
-        
+
         return {
             "deleted": 0,
             "inserted": inserted_count,

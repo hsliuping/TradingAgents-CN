@@ -1,0 +1,22 @@
+{
+  "export_info": {
+    "created_at": "2026-02-08T00:00:00",
+    "target_version": "2.0.0",
+    "description": "Baseline version. No incremental upgrade items.",
+    "collections": [
+      "system_configs",
+      "prompt_templates",
+      "agent_configs",
+      "workflow_definitions",
+      "tool_configs"
+    ],
+    "format": "json"
+  },
+  "data": {
+    "system_configs": [],
+    "prompt_templates": [],
+    "agent_configs": [],
+    "workflow_definitions": [],
+    "tool_configs": []
+  }
+}

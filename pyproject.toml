@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tradingagents-cn-pro"
-version = "1.0.0"
+version = "2.0.1"
 description = "TradingAgents-CN Pro - Multi-agent stock analysis system with advanced features"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -43,7 +43,6 @@ dependencies = [
     "baostock>=0.8.8",
     "eodhd>=1.0.32",
     "finnhub-python>=2.4.23",
-    "pytdx>=1.72",  # 通达信数据接口（已弃用，保留兼容性）
     "tushare>=1.4.21",
     "yfinance>=0.2.63",
     "stockstats>=0.6.5",
@@ -62,6 +61,7 @@ dependencies = [
 
     # 数据处理和分析
     "pandas>=2.3.0",
+    "xlrd>=2.0.2",
 
     # 网络爬虫和解析
     "curl-cffi>=0.6.0",  # 模拟真实浏览器TLS指纹，绕过反爬虫检测
@@ -79,6 +79,8 @@ dependencies = [
 
     # 工具和辅助
     "psutil>=6.1.0",
+    "pystray>=0.19.0",
+    "Pillow>=10.0.0",
     "python-dotenv>=1.0.0",
     "pytz>=2025.2",
     "questionary>=2.1.0",

@@ -1191,7 +1191,11 @@ async def _check_task_running(job_id: str) -> Tuple[bool, Optional[str]]:
 
 
 async def run_baostock_basic_info_sync(**kwargs):
-    """运行BaoStock基础信息同步任务"""
+    """
+    运行BaoStock基础信息同步任务
+
+    🔥 使用统一线程池服务执行，避免阻塞主事件循环，保证 API 响应
+    """
     job_id = "baostock_basic_info_sync"
     
     # 🔥 手动触发或强制执行时允许执行（即使有running记录）
@@ -1214,18 +1218,41 @@ async def run_baostock_basic_info_sync(**kwargs):
             logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
     
     try:
+        from app.worker.unified_thread_pool_sync_service import get_unified_thread_pool_sync_service
+        unified_service = await get_unified_thread_pool_sync_service()
         service = BaoStockSyncService()
         await service.initialize()  # 🔥 必须先初始化
-        # 🔥 设置正确的 job_id，确保进度更新和状态标记使用正确的任务ID
         service._current_job_id = job_id
-        stats = await service.sync_stock_basic_info()
-        logger.info(f"🎯 BaoStock基础信息同步完成: {stats.basic_info_count}条记录, {len(stats.errors)}个错误")
+        sync_result = await unified_service.execute_sync_method(
+            sync_method=service.sync_stock_basic_info,
+            method_kwargs={},
+            job_id=job_id,
+            rate_limit_per_minute=300,
+        )
+        if sync_result.success:
+            stats = sync_result.result
+            logger.info(f"🎯 BaoStock基础信息同步完成: {stats.basic_info_count}条记录, {len(stats.errors)}个错误")
+            return stats
+        elif sync_result.error and ("取消" in sync_result.error or "cancelled" in sync_result.error.lower()):
+            logger.info(f"ℹ️ BaoStock基础信息同步任务已被用户取消")
+            return {"cancelled": True, "message": sync_result.error}
+        else:
+            raise RuntimeError(sync_result.error or "同步失败")
     except Exception as e:
+        from app.services.scheduler_service import TaskCancelledException
+        if isinstance(e, TaskCancelledException):
+            logger.info(f"ℹ️ BaoStock基础信息同步任务已被用户取消")
+            return {"cancelled": True, "message": str(e)}
         logger.error(f"❌ BaoStock基础信息同步任务失败: {e}")
+        raise
 
 
 async def run_baostock_daily_quotes_sync(**kwargs):
-    """运行BaoStock日K线同步任务（最新交易日）"""
+    """
+    运行BaoStock日K线同步任务（最新交易日）
+
+    🔥 使用统一线程池服务执行，避免阻塞主事件循环，保证 API 响应
+    """
     job_id = "baostock_daily_quotes_sync"
     
     # 🔥 手动触发或强制执行时允许执行（即使有running记录）
@@ -1248,14 +1275,33 @@ async def run_baostock_daily_quotes_sync(**kwargs):
             logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
     
     try:
+        from app.worker.unified_thread_pool_sync_service import get_unified_thread_pool_sync_service
+        unified_service = await get_unified_thread_pool_sync_service()
         service = BaoStockSyncService()
         await service.initialize()  # 🔥 必须先初始化
-        # 🔥 设置正确的 job_id，确保进度更新和状态标记使用正确的任务ID
         service._current_job_id = job_id
-        stats = await service.sync_daily_quotes()
-        logger.info(f"🎯 BaoStock日K线同步完成: {stats.quotes_count}条记录, {len(stats.errors)}个错误")
+        sync_result = await unified_service.execute_sync_method(
+            sync_method=service.sync_daily_quotes,
+            method_kwargs={},
+            job_id=job_id,
+            rate_limit_per_minute=300,
+        )
+        if sync_result.success:
+            stats = sync_result.result
+            logger.info(f"🎯 BaoStock日K线同步完成: {stats.quotes_count}条记录, {len(stats.errors)}个错误")
+            return stats
+        elif sync_result.error and ("取消" in sync_result.error or "cancelled" in sync_result.error.lower()):
+            logger.info(f"ℹ️ BaoStock日K线同步任务已被用户取消")
+            return {"cancelled": True, "message": sync_result.error}
+        else:
+            raise RuntimeError(sync_result.error or "同步失败")
     except Exception as e:
+        from app.services.scheduler_service import TaskCancelledException
+        if isinstance(e, TaskCancelledException):
+            logger.info(f"ℹ️ BaoStock日K线同步任务已被用户取消")
+            return {"cancelled": True, "message": str(e)}
         logger.error(f"❌ BaoStock日K线同步任务失败: {e}")
+        raise
 
 
 async def run_baostock_historical_sync(**kwargs):

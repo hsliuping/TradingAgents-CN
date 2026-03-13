@@ -1,6 +1,6 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
+from typing import List, Optional
 import os
 import warnings
 
@@ -130,6 +130,18 @@ class Settings(BaseSettings):
     STOCK_DATA_API_URL: str = Field(default="")
     STOCK_DATA_API_KEY: str = Field(default="")
 
+    # 更新检查服务配置
+    # 检查更新和下载更新包的 API 基础地址，留空则使用默认官网
+    # 用于测试时可配置为测试域名，例如: https://test.example.com/api
+    UPDATE_CHECK_BASE_URL: str = Field(
+        default="https://www.tradingagentscn.com/api",
+        description="Update check API base URL (empty = use default)"
+    )
+    UPDATE_CHECK_CHANNEL: str = Field(
+        default="stable",
+        description="Update release channel: stable or test"
+    )
+
     # 授权服务配置 (TradingAgents Account Service)
     # ⚠️ 注意：LICENSE_SERVICE_URL 已移除，验证服务器地址在 core/licensing/validator.py 中硬编码
     # 这样可以防止用户通过修改环境变量搭建假服务器绕过许可证验证
@@ -244,6 +256,12 @@ class Settings(BaseSettings):
     ETF_SYNC_ENABLED: bool = Field(default=True, description="启用 ETF 数据同步")
     ETF_SYNC_CRON: str = Field(default="0 4 * * 1-5", description="ETF 同步 CRON 表达式")  # 工作日凌晨4点
     ETF_SYNC_DAYS: int = Field(default=30, ge=1, le=365, description="ETF 日线同步天数")
+
+    # 官方行业数据（从官网 URL 获取，避免 AKShare 轮询封号）
+    OFFICIAL_INDUSTRY_DATA_URL: Optional[str] = Field(
+        default=None,
+        description="A股行业数据 JSON URL，格式: {\"600519\":\"白酒\",\"000001\":\"银行\"} 或 [{\"code\":\"600519\",\"industry\":\"白酒\"}]"
+    )
 
     # AKShare数据初始化配置
     AKSHARE_INIT_HISTORICAL_DAYS: int = Field(default=365, ge=1, le=3650, description="初始化历史数据天数")

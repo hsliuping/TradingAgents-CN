@@ -107,9 +107,20 @@ COPY release/TradingAgentsCN-portable/tradingagents ./tradingagents
 # 3. 复制配置文件
 COPY config ./config
 COPY scripts ./scripts
-COPY docs ./docs
 COPY install ./install
+
+# 4. 复制运行时文档白名单
+RUN mkdir -p /app/docs /app/docs/api/examples /app/docs/examples
+COPY docs/release_v2.0/ ./docs/
+COPY docs/api/STOCK_DATA_IMPORT_API.md ./docs/api/STOCK_DATA_IMPORT_API.md
+COPY docs/api/examples/stock_data_import_examples.py ./docs/api/examples/stock_data_import_examples.py
+COPY docs/examples/social_media_api_guide.md ./docs/examples/social_media_api_guide.md
+COPY docs/examples/social_media_api_example.py ./docs/examples/social_media_api_example.py
+COPY docs/examples/social_media_template.csv ./docs/examples/social_media_template.csv
+COPY docs/examples/social_media_template.json ./docs/examples/social_media_template.json
 ```
+
+说明：Docker 后端镜像不再复制整个 `docs/` 目录，而是对齐桌面安装包规则，只复制 `docs/release_v2.0/` 和运行时接口页面仍会直接读取的白名单文件，避免把内部文档一并带入镜像。
 
 ### Dockerfile.backend（旧版 - 已弃用）
 

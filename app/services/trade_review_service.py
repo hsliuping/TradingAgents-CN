@@ -1076,8 +1076,10 @@ class TradeReviewService:
 
         except Exception as e:
             logger.error(f"AI复盘分析失败: {e}", exc_info=True)
+            from app.utils.error_formatter import ErrorFormatter
+
             return AITradeReview(
-                summary=f"AI分析暂时不可用: {str(e)}",
+                summary=f"AI分析暂时不可用：{ErrorFormatter.format_user_message(str(e))}",
                 overall_score=50
             )
 

@@ -11,6 +11,7 @@
         <el-button v-if="activeTab === 'real'" type="primary" :icon="Plus" @click="showAddDialog = true">添加持仓</el-button>
         <el-button v-if="activeTab === 'real'" type="info" :icon="List" @click="showChangesDialog = true">变动记录</el-button>
         <el-button v-if="activeTab === 'real'" type="warning" :icon="Clock" @click="showHistoryDialog = true">历史持仓</el-button>
+        <el-button v-if="activeTab === 'real'" type="danger" plain size="small" @click="confirmResetAll">清零全部持仓</el-button>
         <!-- 暂时隐藏，功能未完善 -->
         <!-- <el-button type="success" :icon="DataAnalysis" @click="startAnalysis" :loading="analyzing">
           AI分析
@@ -136,7 +137,8 @@
                                 <el-dropdown-item command="split">拆股</el-dropdown-item>
                                 <el-dropdown-item command="merge">合股</el-dropdown-item>
                                 <el-dropdown-item command="adjust">调整成本</el-dropdown-item>
-                                <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                                <el-dropdown-item command="reset" divided>重置持仓</el-dropdown-item>
+                                <el-dropdown-item command="delete">删除</el-dropdown-item>
                               </el-dropdown-menu>
                             </template>
                           </el-dropdown>
@@ -202,7 +204,8 @@
                             <el-dropdown-item command="split">拆股</el-dropdown-item>
                             <el-dropdown-item command="merge">合股</el-dropdown-item>
                             <el-dropdown-item command="adjust">调整成本</el-dropdown-item>
-                            <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                            <el-dropdown-item command="reset" divided>重置持仓</el-dropdown-item>
+                            <el-dropdown-item command="delete">删除</el-dropdown-item>
                           </el-dropdown-menu>
                         </template>
                       </el-dropdown>
@@ -428,7 +431,7 @@
     />
 
     <!-- 持仓变动记录对话框 -->
-    <PositionChangesDialog v-model="showChangesDialog" />
+    <PositionChangesDialog v-model="showChangesDialog" @refresh="refreshData" />
 
     <!-- 历史持仓对话框 -->
     <HistoryPositionsDialog v-model="showHistoryDialog" />
@@ -609,6 +612,12 @@ const getCurrencySymbol = (market: string) => {
   return map[market] || '¥'
 }
 
+// 获取持仓有效市值：有行情用 market_value，无行情用成本价*数量（避免显示 -100% 浮亏）
+const getPositionValue = (p: PositionItem): number => {
+  if (p.market_value != null && p.market_value !== undefined) return p.market_value
+  return (p.cost_price ?? 0) * (p.quantity ?? 0)
+}
+
 // 聚合相同代码的持仓（按股票代码合并）
 interface AggregatedPosition extends PositionItem {
   position_count: number  // 该股票的持仓记录数
@@ -638,7 +647,7 @@ const aggregatePositionsByCode = (positions: PositionItem[]): AggregatedPosition
     }, 0)
     const avgCostPrice = totalQuantity > 0 ? totalCostDiluted / totalQuantity : 0
     const avgCostOriginal = totalQuantity > 0 ? totalCostOriginal / totalQuantity : 0
-    const totalMarketValue = positionList.reduce((sum, p) => sum + (p.market_value || 0), 0)
+    const totalMarketValue = positionList.reduce((sum, p) => sum + getPositionValue(p), 0)
     const totalUnrealizedPnl = totalMarketValue - totalCostDiluted
     const totalUnrealizedPnlPct = totalCostDiluted > 0 ? (totalUnrealizedPnl / totalCostDiluted) * 100 : 0
 
@@ -671,12 +680,12 @@ const getPositionsByMarket = (positions: PositionItem[], market: string) => {
 const getMarketValue = (positions: PositionItem[], market: string) => {
   return positions
     .filter(p => p.market === market)
-    .reduce((sum, p) => sum + (p.market_value || 0), 0)
+    .reduce((sum, p) => sum + getPositionValue(p), 0)
 }
 
 // 计算统计数据
 const calculateStats = (positions: PositionItem[]): StatsData => {
-  const total_value = positions.reduce((sum, p) => sum + (p.market_value || 0), 0)
+  const total_value = positions.reduce((sum, p) => sum + getPositionValue(p), 0)
   const total_cost = positions.reduce((sum, p) => sum + (p.cost_price || 0) * (p.quantity || 0), 0)
   const unrealized_pnl = total_value - total_cost
   const unrealized_pnl_pct = total_cost > 0 ? (unrealized_pnl / total_cost) * 100 : 0
@@ -692,13 +701,13 @@ const calculateStats = (positions: PositionItem[]): StatsData => {
 
 // 计算行业分布
 const calculateIndustryDistribution = (positions: PositionItem[]): IndustryItem[] => {
-  const total = positions.reduce((sum, p) => sum + (p.market_value || 0), 0)
+  const total = positions.reduce((sum, p) => sum + getPositionValue(p), 0)
   if (total === 0) return []
 
   const industryMap: Record<string, number> = {}
   positions.forEach(p => {
     const industry = p.industry || '未知'
-    industryMap[industry] = (industryMap[industry] || 0) + (p.market_value || 0)
+    industryMap[industry] = (industryMap[industry] || 0) + getPositionValue(p)
   })
 
   return Object.entries(industryMap)
@@ -831,6 +840,36 @@ const deletePosition = async (row: AggregatedPosition) => {
   }
 }
 
+const resetPosition = async (row: AggregatedPosition) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定重置 ${row.code} ${row.name || ''} 的整个持仓？将删除该股票的所有变动记录和持仓，此操作不可恢复。`,
+      '确认重置',
+      { type: 'warning' }
+    )
+    const res = await portfolioApi.resetPosition(row.code, row.market)
+    ElMessage.success(`重置成功，已删除 ${res.data?.deleted_changes ?? 0} 条记录`)
+    refreshData()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e.message || '重置失败')
+  }
+}
+
+const confirmResetAll = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定清零全部持仓？将删除所有持仓和变动记录，并完全清零资金账户（总资产、可用资金、初始资金等全部归零），此操作不可恢复。清零后需重新设置初始资金才能继续使用。',
+      '确认清零',
+      { type: 'warning' }
+    )
+    const res = await portfolioApi.resetAllPositions()
+    ElMessage.success(`清零成功，已删除 ${res.data?.deleted_positions ?? 0} 个持仓、${res.data?.deleted_changes ?? 0} 条记录`)
+    refreshData()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e.message || '清零失败')
+  }
+}
+
 const onPositionSaved = () => {
   showAddDialog.value = false
   editingPosition.value = null
@@ -955,6 +994,9 @@ const handleMoreAction = (command: string, row: AggregatedPosition) => {
     case 'adjust':
       operationType.value = 'adjust'
       showPositionOperationDialog.value = true
+      break
+    case 'reset':
+      resetPosition(row)
       break
   }
 }

@@ -1,5 +1,5 @@
 """
-TradingAgents-CN v2.0.0 FastAPI Backend
+TradingAgents-CN v2.0.1 FastAPI Backend
 主应用程序入口
 
 Copyright (c) 2025 hsliuping. All rights reserved.
@@ -100,7 +100,7 @@ def get_version() -> str:
             return version_file.read_text(encoding='utf-8').strip()
     except Exception:
         pass
-    return "1.0.0"  # 默认版本号
+    return "2.0.1"  # 默认版本号
 
 
 def get_build_info() -> dict:
@@ -268,6 +268,26 @@ async def lifespan(app: FastAPI):
 
     await init_db()
 
+    # 执行数据库迁移
+    try:
+        from app.core.database import get_mongo_db as _get_db
+        from migrations.runner import MigrationRunner
+
+        _mig_db = _get_db()
+        _runner = MigrationRunner(_mig_db)
+        _results = await _runner.run_pending()
+        if _results:
+            _ok = sum(1 for r in _results if r["status"] == "success")
+            _fail = sum(1 for r in _results if r["status"] == "failed")
+            logger.info(f"📦 数据库迁移完成: {_ok} 成功, {_fail} 失败")
+        else:
+            logger.info("📦 数据库已是最新版本")
+    except Exception as e:
+        logger.error(f"❌ 数据库迁移失败: {e}")
+        # 迁移失败不阻止启动，但记录错误
+        # 如果需要强制要求迁移成功才启动，取消下一行注释：
+        # raise
+
     # 初始化自定义工具
     try:
         from app.core.database import get_mongo_db
@@ -406,6 +426,13 @@ async def lifespan(app: FastAPI):
 
     logger.info("TradingAgents FastAPI backend started")
 
+    # 初始化交易日历缓存（确定今日/最近一个真实交易日，供 JIT 数据新鲜度判断使用）
+    try:
+        from app.services.trading_calendar_service import get_trading_calendar_service
+        await get_trading_calendar_service().warm_up()
+    except Exception as e:
+        logger.warning(f"⚠️ 交易日历缓存初始化失败（不影响启动）: {e}")
+
     # 启动期：若需要在休市时补充上一交易日收盘快照
     if settings.QUOTES_BACKFILL_ON_STARTUP:
         try:
@@ -448,31 +475,44 @@ async def lifespan(app: FastAPI):
         # 使用多数据源同步服务（支持自动切换）
         multi_source_service = MultiSourceBasicsSyncService()
 
-        # 根据 TUSHARE_ENABLED 配置决定优先数据源
-        # 如果 Tushare 被禁用，系统会自动使用其他可用数据源（AKShare/BaoStock）
-        preferred_sources = None  # None 表示使用默认优先级顺序
-
-        if settings.TUSHARE_ENABLED:
-            # Tushare 启用时，优先使用 Tushare
-            preferred_sources = ["tushare", "akshare", "baostock"]
-            logger.info(f"📊 股票基础信息同步优先数据源: Tushare > AKShare > BaoStock")
-        else:
-            # Tushare 禁用时，使用 AKShare 和 BaoStock
-            preferred_sources = ["akshare", "baostock"]
-            logger.info(f"📊 股票基础信息同步优先数据源: AKShare > BaoStock (Tushare已禁用)")
+        # 🔥 从数据库读取数据源优先级配置（而非硬编码）
+        # 排除 local/mongodb 等缓存层，只使用真实 API 数据源
+        async def get_preferred_sources_from_db():
+            """从数据库读取启用的 API 数据源优先级"""
+            try:
+                from app.core.data_source_priority import get_enabled_data_sources_async
+                all_sources = await get_enabled_data_sources_async("a_shares")
+                # 排除缓存层，只保留真实 API 数据源
+                api_sources = [s for s in all_sources if s not in ("local", "mongodb", "local_file")]
+                if api_sources:
+                    logger.info(f"📊 股票基础信息同步数据源优先级（来自数据库）: {' > '.join(api_sources)}")
+                    return api_sources
+                else:
+                    logger.warning("⚠️ 数据库中没有启用的 API 数据源，使用默认配置")
+                    return None
+            except Exception as e:
+                logger.error(f"❌ 读取数据源优先级失败: {e}，使用默认配置")
+                return None
 
         # 立即在启动后尝试一次（不阻塞）
         async def run_sync_with_sources():
+            preferred_sources = await get_preferred_sources_from_db()
             await multi_source_service.run_full_sync(force=False, preferred_sources=preferred_sources)
 
         asyncio.create_task(run_sync_with_sources())
 
         # 配置调度：优先使用 CRON，其次使用 HH:MM
+        # 🔥 定时任务也需要从数据库读取最新的数据源优先级
+        async def scheduled_sync_with_db_priority():
+            """定时任务：每次执行时从数据库读取最新的数据源优先级"""
+            preferred_sources = await get_preferred_sources_from_db()
+            await multi_source_service.run_full_sync(force=False, preferred_sources=preferred_sources)
+
         if settings.SYNC_STOCK_BASICS_ENABLED:
             if settings.SYNC_STOCK_BASICS_CRON:
                 # 如果提供了cron表达式
                 scheduler.add_job(
-                    lambda: multi_source_service.run_full_sync(force=False, preferred_sources=preferred_sources),
+                    scheduled_sync_with_db_priority,
                     CronTrigger.from_crontab(settings.SYNC_STOCK_BASICS_CRON, timezone=settings.TIMEZONE),
                     id="basics_sync_service",
                     name="股票基础信息同步（多数据源）"
@@ -481,7 +521,7 @@ async def lifespan(app: FastAPI):
             else:
                 hh, mm = (settings.SYNC_STOCK_BASICS_TIME or "06:30").split(":")
                 scheduler.add_job(
-                    lambda: multi_source_service.run_full_sync(force=False, preferred_sources=preferred_sources),
+                    scheduled_sync_with_db_priority,
                     CronTrigger(hour=int(hh), minute=int(mm), timezone=settings.TIMEZONE),
                     id="basics_sync_service",
                     name="股票基础信息同步（多数据源）"
@@ -832,6 +872,26 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📊 自选股定时分析已配置: {settings.WATCHLIST_ANALYSIS_CRON}")
 
+        # ==================== 交易日历缓存刷新任务 ====================
+        # 每日 18:30 刷新一次：Tushare daily_basic 数据一般在收盘后（15:00）
+        # 约 1~3 小时才稳定入库，18:30 之后获取当日数据才可靠。
+        # 启动时已由 warm_up() 完成初始化，本任务负责当日收盘后的更新。
+        async def _refresh_trading_calendar():
+            try:
+                from app.services.trading_calendar_service import get_trading_calendar_service
+                await get_trading_calendar_service().warm_up()
+                logger.info("🗓️ [TradingCalendar] 交易日历缓存已刷新（18:30 定时）")
+            except Exception as _e:
+                logger.warning(f"⚠️ [TradingCalendar] 定时刷新失败（不影响运行）: {_e}")
+
+        scheduler.add_job(
+            _refresh_trading_calendar,
+            CronTrigger(hour=18, minute=30, timezone=settings.TIMEZONE),
+            id="trading_calendar_refresh",
+            name="交易日历缓存刷新（每日18:30）"
+        )
+        logger.info("🗓️ 交易日历缓存刷新任务已配置（每日 18:30 执行）")
+
         scheduler.start()
 
         # 止盈提醒扫描任务（基于用户设置的 alert_gain_price）
@@ -1136,6 +1196,10 @@ app.include_router(logs.router, prefix="/api/system", tags=["logs"])
 # 新增：系统配置只读摘要
 from app.routers import system_config as system_config_router
 app.include_router(system_config_router.router, prefix="/api/system", tags=["system"])
+
+# 自动更新
+from app.routers import update as update_router
+app.include_router(update_router.router, tags=["update"])
 
 # 通知模块（REST + SSE）
 app.include_router(notifications_router.router, prefix="/api", tags=["notifications"])

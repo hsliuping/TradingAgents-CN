@@ -64,7 +64,9 @@ $criticalPackages = @(
     @{Import="pdfkit"; Pip="pdfkit"; Description="PDF 生成工具（pdfkit）"},
     @{Import="weasyprint"; Pip="weasyprint"; Description="PDF 生成工具（WeasyPrint，推荐）"},
     @{Import="qdrant_client"; Pip="qdrant-client"; Description="Qdrant 向量数据库（推荐，线程安全）"},
-    @{Import="chromadb"; Pip="chromadb"; Description="ChromaDB 向量数据库（保留兼容）"}
+    @{Import="chromadb"; Pip="chromadb"; Description="ChromaDB 向量数据库（保留兼容）"},
+    @{Import="pystray"; Pip="pystray"; Description="托盘监控（系统托盘图标）"},
+    @{Import="PIL"; Pip="Pillow"; Description="托盘监控图标绘制"}
 )
 
 # ============================================================================
@@ -146,12 +148,22 @@ if ($failedCount -gt 0) {
             Write-Host "  Installing: $($pkg.Pip)..." -ForegroundColor Gray
             
             try {
-                & $pythonExe -m pip install $pkg.Pip --no-warn-script-location 2>&1 | Out-Null
+                $ErrorActionPreference = "Continue"
+                $pipOutput = & $pythonExe -m pip install $pkg.Pip --no-warn-script-location 2>&1
+                $pipExitCode = $LASTEXITCODE
+                if ($pipExitCode -ne 0) {
+                    Write-Host "    Retrying with Tsinghua mirror..." -ForegroundColor DarkGray
+                    $pipOutput = & $pythonExe -m pip install $pkg.Pip --no-warn-script-location -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn 2>&1
+                    $pipExitCode = $LASTEXITCODE
+                }
+                $ErrorActionPreference = "Stop"
                 
-                if ($LASTEXITCODE -eq 0) {
-                    # Verify installation
+                if ($pipExitCode -eq 0) {
+                    $ErrorActionPreference = "Continue"
                     $verifyResult = & $pythonExe -c "import $($pkg.Import)" 2>&1
-                    if ($LASTEXITCODE -eq 0) {
+                    $verifyExitCode = $LASTEXITCODE
+                    $ErrorActionPreference = "Stop"
+                    if ($verifyExitCode -eq 0) {
                         Write-Host "    ✅ Successfully installed and verified" -ForegroundColor Green
                         $fixedCount++
                     } else {
@@ -159,11 +171,15 @@ if ($failedCount -gt 0) {
                         $fixFailedCount++
                     }
                 } else {
-                    Write-Host "    ❌ Installation failed" -ForegroundColor Red
+                    Write-Host "    ❌ Installation failed (exit code: $pipExitCode)" -ForegroundColor Red
+                    if ($pipOutput) {
+                        $lastErr = (@($pipOutput) | Select-Object -Last 3) -join "`n"
+                        Write-Host "    $lastErr" -ForegroundColor DarkGray
+                    }
                     $fixFailedCount++
                 }
             } catch {
-                Write-Host "    ❌ Error: $_" -ForegroundColor Red
+                Write-Host "    ❌ Error: $($_.Exception.Message)" -ForegroundColor Red
                 $fixFailedCount++
             }
         }

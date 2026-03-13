@@ -58,6 +58,11 @@ function getMainContent(): string {
 function getDescription(): string {
   const item = props.item
   if (!item) return ''
+
+  // signal类型下，第二列语义是condition（具体触发条件）。
+  if (props.type === 'signal' && item.condition) {
+    return String(item.condition)
+  }
   
   // 优先使用description字段
   if (item.description) {

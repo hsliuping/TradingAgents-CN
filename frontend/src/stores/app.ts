@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useStorage } from '@vueuse/core'
+import { APP_CONFIG } from '@/config/app'
 
 export interface AppState {
   // 应用基础状态
@@ -32,6 +33,7 @@ export interface AppState {
 
   // 系统信息
   version: string
+  fullVersion: string
   buildTime: string
   apiVersion: string
 }
@@ -66,7 +68,8 @@ export const useAppStore = defineStore('app', {
       showWelcome: true
     },
 
-    version: '0.1.16',
+    version: APP_CONFIG.version,
+    fullVersion: APP_CONFIG.fullVersion,
     buildTime: new Date().toISOString(),
     apiVersion: ''
   }),
@@ -94,6 +97,7 @@ export const useAppStore = defineStore('app', {
     appInfo(): Record<string, any> {
       return {
         version: this.version,
+        fullVersion: this.fullVersion,
         buildTime: this.buildTime,
         apiVersion: this.apiVersion,
         theme: this.theme,
@@ -260,7 +264,7 @@ export const useAppStore = defineStore('app', {
         this.setApiConnected(false)
       }
     },
-    
+
     // 重置应用状态
     resetAppState() {
       this.loading = false

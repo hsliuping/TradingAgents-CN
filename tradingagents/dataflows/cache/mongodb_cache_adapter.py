@@ -160,7 +160,15 @@ class MongoDBCacheAdapter:
     def get_historical_data(self, symbol: str, start_date: str = None, end_date: str = None,
                           period: str = "daily") -> Optional[pd.DataFrame]:
         """
-        获取历史数据，支持多周期，按数据源优先级查询
+        获取历史数据，支持多周期，按数据新鲜度优先查询。
+
+        查询策略：
+        1. 遍历所有配置的数据源，获取每个数据源的最新 trade_date
+        2. 选择 trade_date 最新的数据源（而非按优先级顺序选第一个有数据的）
+        3. 从该数据源查询完整数据返回
+
+        这样可以确保 JIT 同步写入的新数据被优先使用，而不会因为高优先级数据源
+        存有旧数据而被遮盖。
 
         Args:
             symbol: 股票代码
@@ -169,7 +177,7 @@ class MongoDBCacheAdapter:
             period: 数据周期（daily/weekly/monthly），默认为daily
 
         Returns:
-            DataFrame: 历史数据
+            DataFrame: 历史数据（来自数据最新的数据源）
         """
         if not self.use_app_cache or self.db is None:
             return None
@@ -178,41 +186,72 @@ class MongoDBCacheAdapter:
             code6 = str(symbol).zfill(6)
             collection = self.db.stock_daily_quotes
 
-            # 获取数据源优先级
+            # 获取数据源优先级（作为候选列表，不再决定返回顺序）
             priority_order = self._get_data_source_priority(symbol)
 
-            # 按优先级查询
+            # Step 1：查询每个数据源的最新 trade_date，找出数据最新的数据源
+            freshest_source = None
+            freshest_date = None
+
             for data_source in priority_order:
-                # 构建查询条件
-                query = {
-                    "symbol": code6,
-                    "period": period,
-                    "data_source": data_source  # 指定数据源
-                }
+                latest_doc = collection.find_one(
+                    {"symbol": code6, "period": period, "data_source": data_source},
+                    {"trade_date": 1, "_id": 0},
+                    sort=[("trade_date", -1)]
+                )
+                if latest_doc:
+                    latest_date = latest_doc.get("trade_date", "")
+                    logger.debug(
+                        f"🔍 [MongoDB新鲜度检查] {data_source}: symbol={code6}, "
+                        f"最新日期={latest_date}"
+                    )
+                    if freshest_date is None or latest_date > freshest_date:
+                        freshest_date = latest_date
+                        freshest_source = data_source
 
-                if start_date:
-                    query["trade_date"] = {"$gte": start_date}
-                if end_date:
-                    if "trade_date" in query:
-                        query["trade_date"]["$lte"] = end_date
-                    else:
-                        query["trade_date"] = {"$lte": end_date}
+            if freshest_source is None:
+                # 所有数据源都没有数据
+                logger.warning(
+                    f"⚠️ [数据来源: MongoDB] 所有数据源({', '.join(priority_order)})"
+                    f"都没有{period}数据: {symbol}，降级到其他数据源"
+                )
+                return None
 
-                # 查询数据
-                logger.debug(f"🔍 [MongoDB查询] 尝试数据源: {data_source}, symbol={code6}, period={period}")
-                cursor = collection.find(query, {"_id": 0}).sort("trade_date", 1)
-                data = list(cursor)
+            logger.info(
+                f"📅 [MongoDB新鲜度] {symbol} 最新数据来自 {freshest_source}，"
+                f"最新日期: {freshest_date}"
+            )
 
-                if data:
-                    df = pd.DataFrame(data)
-                    logger.info(f"✅ [数据来源: MongoDB-{data_source}] {symbol}, {len(df)}条记录 (period={period})")
-                    return df
+            # Step 2：从数据最新的数据源查询完整数据
+            query = {
+                "symbol": code6,
+                "period": period,
+                "data_source": freshest_source
+            }
+            if start_date:
+                query["trade_date"] = {"$gte": start_date}
+            if end_date:
+                if "trade_date" in query:
+                    query["trade_date"]["$lte"] = end_date
                 else:
-                    logger.debug(f"⚠️ [MongoDB-{data_source}] 未找到{period}数据: {symbol}")
+                    query["trade_date"] = {"$lte": end_date}
 
-            # 所有数据源都没有数据
-            logger.warning(f"⚠️ [数据来源: MongoDB] 所有数据源({', '.join(priority_order)})都没有{period}数据: {symbol}，降级到其他数据源")
-            return None
+            cursor = collection.find(query, {"_id": 0}).sort("trade_date", 1)
+            data = list(cursor)
+
+            if data:
+                df = pd.DataFrame(data)
+                logger.info(
+                    f"✅ [数据来源: MongoDB-{freshest_source}] {symbol}, "
+                    f"{len(df)}条记录 (period={period}, 最新日期={freshest_date})"
+                )
+                return df
+            else:
+                logger.warning(
+                    f"⚠️ [MongoDB-{freshest_source}] 按日期范围过滤后无数据: "
+                    f"{symbol} [{start_date}, {end_date}]"
+                )
+                return None
 
         except Exception as e:
             logger.warning(f"⚠️ 获取历史数据失败: {e}")
