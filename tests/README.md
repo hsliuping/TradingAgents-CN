@@ -63,6 +63,13 @@ cd tests
 python test_chinese_output.py
 ```
 
+### 运行 CI smoke 测试
+```bash
+python -m pytest tests/config/test_settings.py tests/config/test_logging_config.py tests/middleware/test_trace_id.py
+```
+
+说明：仓库默认的 pytest 配置只收集 tests/ 目录，用于避免根目录下的临时调试脚本被误纳入标准回归。
+
 ### 运行特定类别的测试
 ```bash
 # API测试

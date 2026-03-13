@@ -1,5 +1,9 @@
 name: 上游同步检查
 
+permissions:
+  contents: write
+  issues: write
+
 on:
   schedule:
     # 每周一上午9点检查上游更新
@@ -17,6 +21,15 @@ jobs:
   check-upstream:
     runs-on: ubuntu-latest
     name: 检查上游更新
+    outputs:
+      has_updates: ${{ steps.inspect_upstream.outputs.has_updates }}
+      new_commits: ${{ steps.inspect_upstream.outputs.new_commits }}
+      recent_commits: ${{ steps.inspect_upstream.outputs.recent_commits }}
+      features: ${{ steps.inspect_upstream.outputs.features }}
+      fixes: ${{ steps.inspect_upstream.outputs.fixes }}
+      docs: ${{ steps.inspect_upstream.outputs.docs }}
+      priority: ${{ steps.inspect_upstream.outputs.priority }}
+      reason: ${{ steps.inspect_upstream.outputs.reason }}
     
     steps:
     - name: 检出代码
@@ -42,67 +55,64 @@ jobs:
     
     - name: 添加上游仓库
       run: |
-        git remote add upstream https://github.com/TauricResearch/TradingAgents.git || true
+        git remote get-url upstream >/dev/null 2>&1 || git remote add upstream https://github.com/TauricResearch/TradingAgents.git
         git fetch upstream
-    
-    - name: 检查上游更新
-      id: check_updates
+
+    - name: 检查并分析上游更新
+      id: inspect_upstream
+      shell: bash
       run: |
-        # 获取上游新提交数量
         NEW_COMMITS=$(git rev-list --count HEAD..upstream/main)
-        echo "new_commits=$NEW_COMMITS" >> $GITHUB_OUTPUT
-        
+        echo "new_commits=$NEW_COMMITS" >> "$GITHUB_OUTPUT"
+
         if [ "$NEW_COMMITS" -gt 0 ]; then
-          echo "has_updates=true" >> $GITHUB_OUTPUT
-          echo "发现 $NEW_COMMITS 个新提交"
-          
-          # 获取最新提交信息
+          echo "has_updates=true" >> "$GITHUB_OUTPUT"
           git log --oneline --no-merges HEAD..upstream/main | head -10 > recent_commits.txt
-          echo "recent_commits<<EOF" >> $GITHUB_OUTPUT
-          cat recent_commits.txt >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          FEATURES=$(git log --oneline --no-merges HEAD..upstream/main | grep -i -E "(feat|feature|add)" | wc -l | tr -d ' ')
+          FIXES=$(git log --oneline --no-merges HEAD..upstream/main | grep -i -E "(fix|bug|patch)" | wc -l | tr -d ' ')
+          DOCS=$(git log --oneline --no-merges HEAD..upstream/main | grep -i -E "(doc|readme)" | wc -l | tr -d ' ')
+
+          if [ "$FIXES" -gt 0 ]; then
+            PRIORITY="high"
+            REASON="包含Bug修复"
+          elif [ "$FEATURES" -gt 2 ]; then
+            PRIORITY="medium"
+            REASON="包含多个新功能"
+          else
+            PRIORITY="low"
+            REASON="常规更新"
+          fi
         else
-          echo "has_updates=false" >> $GITHUB_OUTPUT
-          echo "没有新的上游更新"
+          echo "has_updates=false" >> "$GITHUB_OUTPUT"
+          printf '无新的上游提交\n' > recent_commits.txt
+          FEATURES=0
+          FIXES=0
+          DOCS=0
+          PRIORITY="none"
+          REASON="无更新"
         fi
-    
-    - name: 分析更新类型
-      if: steps.check_updates.outputs.has_updates == 'true'
-      id: analyze_updates
-      run: |
-        # 分析提交类型
-        FEATURES=$(git log --oneline --no-merges HEAD..upstream/main | grep -i -E "(feat|feature|add)" | wc -l)
-        FIXES=$(git log --oneline --no-merges HEAD..upstream/main | grep -i -E "(fix|bug|patch)" | wc -l)
-        DOCS=$(git log --oneline --no-merges HEAD..upstream/main | grep -i -E "(doc|readme)" | wc -l)
-        
-        echo "features=$FEATURES" >> $GITHUB_OUTPUT
-        echo "fixes=$FIXES" >> $GITHUB_OUTPUT
-        echo "docs=$DOCS" >> $GITHUB_OUTPUT
-        
-        # 判断更新优先级
-        if [ "$FIXES" -gt 0 ]; then
-          echo "priority=high" >> $GITHUB_OUTPUT
-          echo "reason=包含Bug修复" >> $GITHUB_OUTPUT
-        elif [ "$FEATURES" -gt 2 ]; then
-          echo "priority=medium" >> $GITHUB_OUTPUT
-          echo "reason=包含多个新功能" >> $GITHUB_OUTPUT
-        else
-          echo "priority=low" >> $GITHUB_OUTPUT
-          echo "reason=常规更新" >> $GITHUB_OUTPUT
-        fi
+
+        echo "features=$FEATURES" >> "$GITHUB_OUTPUT"
+        echo "fixes=$FIXES" >> "$GITHUB_OUTPUT"
+        echo "docs=$DOCS" >> "$GITHUB_OUTPUT"
+        echo "priority=$PRIORITY" >> "$GITHUB_OUTPUT"
+        echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+        echo "recent_commits<<EOF" >> "$GITHUB_OUTPUT"
+        cat recent_commits.txt >> "$GITHUB_OUTPUT"
+        echo "EOF" >> "$GITHUB_OUTPUT"
     
     - name: 创建Issue报告
-      if: steps.check_updates.outputs.has_updates == 'true'
+      if: steps.inspect_upstream.outputs.has_updates == 'true'
       uses: actions/github-script@v7
       with:
         script: |
-          const newCommits = '${{ steps.check_updates.outputs.new_commits }}';
-          const recentCommits = `${{ steps.check_updates.outputs.recent_commits }}`;
-          const features = '${{ steps.analyze_updates.outputs.features }}';
-          const fixes = '${{ steps.analyze_updates.outputs.fixes }}';
-          const docs = '${{ steps.analyze_updates.outputs.docs }}';
-          const priority = '${{ steps.analyze_updates.outputs.priority }}';
-          const reason = '${{ steps.analyze_updates.outputs.reason }}';
+          const newCommits = '${{ steps.inspect_upstream.outputs.new_commits }}';
+          const recentCommits = `${{ steps.inspect_upstream.outputs.recent_commits }}`;
+          const features = '${{ steps.inspect_upstream.outputs.features }}';
+          const fixes = '${{ steps.inspect_upstream.outputs.fixes }}';
+          const docs = '${{ steps.inspect_upstream.outputs.docs }}';
+          const priority = '${{ steps.inspect_upstream.outputs.priority }}';
+          const reason = '${{ steps.inspect_upstream.outputs.reason }}';
           
           const issueTitle = `🔄 上游更新检测 - ${newCommits} 个新提交`;
           const issueBody = `
@@ -179,18 +189,23 @@ jobs:
           }
     
     - name: 发送通知
-      if: steps.check_updates.outputs.has_updates == 'true'
+      if: steps.inspect_upstream.outputs.has_updates == 'true'
       run: |
         echo "📧 上游更新通知已发送"
-        echo "- 新提交数量: ${{ steps.check_updates.outputs.new_commits }}"
-        echo "- 更新优先级: ${{ steps.analyze_updates.outputs.priority }}"
+        echo "- 新提交数量: ${{ steps.inspect_upstream.outputs.new_commits }}"
+        echo "- 更新优先级: ${{ steps.inspect_upstream.outputs.priority }}"
         echo "- 已创建Issue进行跟踪"
 
   auto-sync:
     runs-on: ubuntu-latest
     name: 自动同步（仅限低风险更新）
     needs: check-upstream
-    if: github.event.inputs.force_sync == 'true' || (needs.check-upstream.outputs.priority == 'low' && needs.check-upstream.outputs.fixes == '0')
+    if: |
+      needs.check-upstream.outputs.has_updates == 'true' &&
+      (
+        (github.event_name == 'workflow_dispatch' && inputs.force_sync) ||
+        (needs.check-upstream.outputs.priority == 'low' && needs.check-upstream.outputs.fixes == '0')
+      )
     
     steps:
     - name: 检出代码
@@ -211,7 +226,7 @@ jobs:
     
     - name: 添加上游仓库
       run: |
-        git remote add upstream https://github.com/TauricResearch/TradingAgents.git
+        git remote get-url upstream >/dev/null 2>&1 || git remote add upstream https://github.com/TauricResearch/TradingAgents.git
         git fetch upstream
     
     - name: 执行自动同步
@@ -220,7 +235,7 @@ jobs:
     
     - name: 推送更新
       run: |
-        git push origin main
+        git push origin HEAD:${{ github.ref_name }}
     
     - name: 创建同步报告
       uses: actions/github-script@v7

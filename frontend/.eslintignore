@@ -1,0 +1,8 @@
+dist/
+node_modules/
+.vite/
+coverage/
+auto-imports.d.ts
+components.d.ts
+.eslintrc-auto-import.json
+tsconfig.tsbuildinfo

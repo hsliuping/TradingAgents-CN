@@ -1,13 +1,14 @@
 {
   "name": "tradingagents-cn-pro-frontend",
-  "version": "1.0.0",
+  "version": "2.0.1",
   "description": "TradingAgents-CN Pro 现代化前端界面",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --ignore-path .eslintignore",
+    "lint:fix": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .eslintignore",
     "format": "prettier --write src/",
     "type-check": "vue-tsc --noEmit"
   },
@@ -32,6 +33,7 @@
     "vue3-markdown-it": "^1.0.10"
   },
   "devDependencies": {
+    "@rushstack/eslint-patch": "^1.16.1",
     "@types/lodash-es": "^4.17.12",
     "@types/node": "^20.10.5",
     "@types/nprogress": "^0.2.3",

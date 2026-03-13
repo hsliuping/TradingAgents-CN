@@ -241,11 +241,7 @@
             <el-form-item label="目标集合">
               <el-autocomplete
                 v-model="dm.target_collection"
-                :fetch-suggestions="(q: string, cb: (arr: {value: string}[]) => void) => cb(
-                  mongoCollections
-                    .filter(c => (c.startsWith('stock') || c.startsWith('mcp') || c === 'market_quotes') && (!q || c.toLowerCase().includes(q.toLowerCase())))
-                    .map(c => ({ value: c }))
-                )"
+                :fetch-suggestions="getCollectionSuggestions"
                 placeholder="选择 stock_* / mcp_* 集合或输入自定义集合名"
                 style="width:100%"
                 clearable
@@ -605,6 +601,24 @@ const loadCollections = async () => {
   } catch {
     mongoCollections.value = []
   }
+}
+
+const getCollectionSuggestions = (
+  queryString: string,
+  callback: (items: Array<{ value: string }>) => void,
+) => {
+  const items = mongoCollections.value
+    .filter((collection) => {
+      const isSupportedCollection =
+        collection.startsWith('stock') ||
+        collection.startsWith('mcp') ||
+        collection === 'market_quotes'
+
+      return isSupportedCollection && (!queryString || collection.toLowerCase().includes(queryString.toLowerCase()))
+    })
+    .map((collection) => ({ value: collection }))
+
+  callback(items)
 }
 
 // 加载服务器工具列表（从数据库缓存，不重连 MCP 服务器）
