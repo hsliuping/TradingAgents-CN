@@ -25,6 +25,12 @@ SUPPORTED_FIELDS_DOC = """
 - pe_ttm     滚动市盈率（同 pe）
 - pb_mrq     最新市净率
 - roe        净资产收益率（%）
+- roa        总资产收益率（%）
+- gross_margin 销售毛利率（%）
+- netprofit_margin 销售净利率（%）
+- revenue_ttm 滚动12个月营收（元）
+- net_profit_ttm 滚动12个月净利润（元）
+- n_cashflow_act 经营现金流净额（元）
 - total_mv   总市值（亿元）
 - circ_mv    流通市值（亿元）
 - turnover_rate 换手率（%）
@@ -35,8 +41,12 @@ SUPPORTED_FIELDS_DOC = """
 - industry   行业名称（使用 == 或 in 操作符）
 - keyword    股票代码或名称模糊搜索（使用 contains 操作符）
 - debt_to_assets   资产负债率（%，注意银行等金融股通常 >90% 属正常）
+- assets_to_eqt    权益乘数（总资产/股东权益）
 - current_ratio    流动比率（流动资产/流动负债，>1 表示流动性良好）
+- quick_ratio      速动比率
+- cash_ratio       现金比率
 - dividend_yield   股息率（%，近12个月分红/当前股价）
+- report_period    最新财报期（如 20250930）
 - net_working_capital  净营运资本（亿元，= 流动资产 - 流动负债，> 0 为正）
 - is_st      是否为ST/＊ST股票（True/False，使用 == 操作符）
 
@@ -52,12 +62,12 @@ SUPPORTED_FIELDS_DOC = """
     name="全市场股票批量筛选",
     description=(
         "按多个财务和行情指标批量筛选 A 股股票。"
-        "支持 PE、PB、ROE、市值、资产负债率、流动比率、股息率、净营运资本、ST状态、行业等多条件组合筛选。"
+        "支持 PE、PB、ROE、ROA、毛利率、净利率、滚动营收、滚动净利润、经营现金流、市值、资产负债率、权益乘数、流动比率、速动比率、现金比率、股息率、净营运资本、ST状态、行业等多条件组合筛选。"
         "条件以 JSON 数组形式传入，每个条件包含 field（字段名）、operator（操作符）、value（值）三个字段。"
-        "支持的字段：pe/pb/roe/total_mv/circ_mv/debt_to_assets/current_ratio/dividend_yield/"
-        "net_working_capital/is_st/turnover_rate/pct_chg/amount/close/industry/keyword 等。"
+        "支持的字段：pe/pb/roe/roa/gross_margin/netprofit_margin/total_mv/circ_mv/debt_to_assets/assets_to_eqt/"
+        "current_ratio/quick_ratio/cash_ratio/dividend_yield/revenue_ttm/net_profit_ttm/n_cashflow_act/report_period/net_working_capital/is_st/turnover_rate/pct_chg/amount/close/industry/keyword 等。"
         "支持的操作符：> < >= <= == != between in not_in contains。"
-        "返回符合条件的股票列表，包含代码、名称、行业、PE、PB、ROE、资产负债率、股息率等信息。"
+        "返回符合条件的股票列表，包含代码、名称、行业、估值、盈利质量、现金流、偿债能力、股息率等信息。"
     ),
     category="screening",
     is_online=False,
@@ -154,10 +164,20 @@ async def _run_screening(
         total_mv = item.get("total_mv", "-")
         close = item.get("close", "-")
         pct_chg = item.get("pct_chg", "-")
+        roa = item.get("roa")
+        gross_margin = item.get("gross_margin")
+        netprofit_margin = item.get("netprofit_margin")
+        revenue_ttm = item.get("revenue_ttm")
+        net_profit_ttm = item.get("net_profit_ttm")
+        n_cashflow_act = item.get("n_cashflow_act")
         debt_to_assets = item.get("debt_to_assets")
+        assets_to_eqt = item.get("assets_to_eqt")
         current_ratio = item.get("current_ratio")
+        quick_ratio = item.get("quick_ratio")
+        cash_ratio = item.get("cash_ratio")
         dividend_yield = item.get("dividend_yield")
         net_working_capital = item.get("net_working_capital")
+        report_period = item.get("report_period")
         is_st = item.get("is_st")
 
         pe_str = f"{pe:.2f}" if isinstance(pe, (int, float)) else str(pe)
@@ -169,14 +189,34 @@ async def _run_screening(
 
         # 可选扩展指标
         extra_parts = []
+        if roa is not None:
+            extra_parts.append(f"ROA={roa:.2f}%")
+        if gross_margin is not None:
+            extra_parts.append(f"毛利率={gross_margin:.1f}%")
+        if netprofit_margin is not None:
+            extra_parts.append(f"净利率={netprofit_margin:.1f}%")
+        if revenue_ttm is not None:
+            extra_parts.append(f"营收TTM={revenue_ttm / 1e8:.2f}亿")
+        if net_profit_ttm is not None:
+            extra_parts.append(f"净利TTM={net_profit_ttm / 1e8:.2f}亿")
+        if n_cashflow_act is not None:
+            extra_parts.append(f"经营现金流={n_cashflow_act / 1e8:.2f}亿")
         if debt_to_assets is not None:
             extra_parts.append(f"负债率={debt_to_assets:.1f}%")
+        if assets_to_eqt is not None:
+            extra_parts.append(f"权益乘数={assets_to_eqt:.2f}")
         if current_ratio is not None:
             extra_parts.append(f"流动比率={current_ratio:.2f}")
+        if quick_ratio is not None:
+            extra_parts.append(f"速动比率={quick_ratio:.2f}")
+        if cash_ratio is not None:
+            extra_parts.append(f"现金比率={cash_ratio:.2f}")
         if dividend_yield is not None:
             extra_parts.append(f"股息率={dividend_yield:.2f}%")
         if net_working_capital is not None:
             extra_parts.append(f"净营运资本={net_working_capital:.2f}亿")
+        if report_period:
+            extra_parts.append(f"财报期={report_period}")
         if is_st is True:
             extra_parts.append("⚠️ ST")
         extra_str = (" | " + " ".join(extra_parts)) if extra_parts else ""

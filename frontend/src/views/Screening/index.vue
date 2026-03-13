@@ -433,9 +433,18 @@
                             <span v-if="s.pe != null">PE: {{ s.pe?.toFixed(1) }}</span>
                             <span v-if="s.pb != null">PB: {{ s.pb?.toFixed(2) }}</span>
                             <span v-if="s.roe != null">ROE: {{ s.roe?.toFixed(2) }}%</span>
+                            <span v-if="s.roa != null">ROA: {{ s.roa?.toFixed(2) }}%</span>
+                            <span v-if="s.gross_margin != null">毛利率: {{ s.gross_margin?.toFixed(1) }}%</span>
+                            <span v-if="s.netprofit_margin != null">净利率: {{ s.netprofit_margin?.toFixed(1) }}%</span>
                             <span v-if="s.dividend_yield != null">股息率: {{ s.dividend_yield?.toFixed(2) }}%</span>
                             <span v-if="s.debt_to_assets != null">负债率: {{ s.debt_to_assets?.toFixed(2) }}%</span>
+                            <span v-if="s.assets_to_eqt != null">权益乘数: {{ s.assets_to_eqt?.toFixed(2) }}</span>
                             <span v-if="s.current_ratio != null">流动比率: {{ s.current_ratio?.toFixed(2) }}</span>
+                            <span v-if="s.quick_ratio != null">速动比率: {{ s.quick_ratio?.toFixed(2) }}</span>
+                            <span v-if="s.cash_ratio != null">现金比率: {{ s.cash_ratio?.toFixed(2) }}</span>
+                            <span v-if="s.revenue_ttm != null">营收TTM: {{ formatAiAmountYi(s.revenue_ttm) }}</span>
+                            <span v-if="s.net_profit_ttm != null">净利TTM: {{ formatAiAmountYi(s.net_profit_ttm) }}</span>
+                            <span v-if="s.n_cashflow_act != null">经营现金流: {{ formatAiAmountYi(s.n_cashflow_act) }}</span>
                             <span v-if="s.report_period">财报期: {{ s.report_period }}</span>
                             <span v-if="s.pct_change != null" :class="(s.pct_change ?? 0) >= 0 ? 'text-red' : 'text-green'">
                               {{ (s.pct_change ?? 0) >= 0 ? '+' : '' }}{{ s.pct_change?.toFixed(2) }}%
@@ -528,6 +537,11 @@ const getPhaseLabel = (phase?: AiDisplayMessage['phase']) => {
   if (phase === 'planning') return '执行规划中'
   if (phase === 'result') return '筛选执行中'
   return '处理中'
+}
+
+const formatAiAmountYi = (value?: number | null) => {
+  if (value == null || Number.isNaN(value)) return ''
+  return `${(value / 100000000).toFixed(2)}亿`
 }
 
 const buildToolSummaryText = (tool?: string, summary?: Record<string, number>) => {

@@ -393,8 +393,48 @@ async def create_stock_screening_view(db):
                     # 财务指标
                     "roe": "$financial_data.roe",
                     "roa": "$financial_data.roa",
-                    "netprofit_margin": "$financial_data.netprofit_margin",
-                    "gross_margin": "$financial_data.gross_margin",
+                    "netprofit_margin": {
+                        "$ifNull": [
+                            "$financial_data.netprofit_margin",
+                            "$financial_data.financial_indicators.netprofit_margin"
+                        ]
+                    },
+                    "gross_margin": {
+                        "$ifNull": [
+                            "$financial_data.gross_margin",
+                            "$financial_data.financial_indicators.gross_margin"
+                        ]
+                    },
+                    "debt_to_assets": {
+                        "$ifNull": [
+                            "$financial_data.debt_to_assets",
+                            "$financial_data.financial_indicators.debt_to_assets"
+                        ]
+                    },
+                    "assets_to_eqt": {
+                        "$ifNull": [
+                            "$financial_data.assets_to_eqt",
+                            "$financial_data.financial_indicators.assets_to_eqt"
+                        ]
+                    },
+                    "current_ratio": {
+                        "$ifNull": [
+                            "$financial_data.current_ratio",
+                            "$financial_data.financial_indicators.current_ratio"
+                        ]
+                    },
+                    "quick_ratio": {
+                        "$ifNull": [
+                            "$financial_data.quick_ratio",
+                            "$financial_data.financial_indicators.quick_ratio"
+                        ]
+                    },
+                    "cash_ratio": {
+                        "$ifNull": [
+                            "$financial_data.cash_ratio",
+                            "$financial_data.financial_indicators.cash_ratio"
+                        ]
+                    },
                     "dividend_yield": {
                         "$ifNull": [
                             "$dividend_yield",
@@ -407,7 +447,39 @@ async def create_stock_screening_view(db):
                         ]
                     },
                     "dividend_yield_ttm": "$dividend_yield_ttm",
+                    "revenue_ttm": "$financial_data.revenue_ttm",
+                    "net_profit_ttm": "$financial_data.net_profit_ttm",
+                    "n_cashflow_act": "$financial_data.n_cashflow_act",
+                    "net_working_capital": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": [{"$ifNull": ["$financial_data.total_cur_assets", "$financial_data.balance_sheet.total_cur_assets"]}, None]},
+                                    {"$ne": [{"$ifNull": ["$financial_data.total_cur_liab", "$financial_data.balance_sheet.total_cur_liab"]}, None]}
+                                ]
+                            },
+                            {
+                                "$divide": [
+                                    {
+                                        "$subtract": [
+                                            {"$ifNull": ["$financial_data.total_cur_assets", "$financial_data.balance_sheet.total_cur_assets"]},
+                                            {"$ifNull": ["$financial_data.total_cur_liab", "$financial_data.balance_sheet.total_cur_liab"]}
+                                        ]
+                                    },
+                                    100000000
+                                ]
+                            },
+                            None
+                        ]
+                    },
                     "report_period": "$financial_data.report_period",
+                    "is_st": {
+                        "$regexMatch": {
+                            "input": {"$ifNull": ["$name", ""]},
+                            "regex": "(^|\\s)\\*?ST",
+                            "options": "i"
+                        }
+                    },
                     # 交易指标
                     "turnover_rate": 1,
                     "volume_ratio": 1,

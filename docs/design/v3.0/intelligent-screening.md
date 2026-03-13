@@ -4,10 +4,10 @@
 
 | 项目 | 内容 |
 |------|------|
-| 版本 | v1.0 |
-| 状态 | 设计完成，待实现 |
+| 版本 | v1.1 |
+| 状态 | 已实现并持续优化 |
 | 日期 | 2026-03 |
-| 目标 | 在股票筛选页面新增"智能筛选"Tab，通过 LLM 多轮对话实现自然语言选股，每次返回 5 只股票 |
+| 目标 | 在股票筛选页面提供基于 LLM 的自然语言选股能力，支持流式进度、结果卡片、自选股联动与超时兜底 |
 
 ---
 
@@ -26,7 +26,8 @@
 1. **自然语言选股**：用户用日常语言描述选股条件，LLM 理解后调用工具获取数据并推荐股票
 2. **每次返回 5 只股票**：结构化展示，包含代码、名称、核心指标、推荐理由
 3. **多轮对话记忆**：用户可追问调整条件（如"换成科技板块的""PE 再低一点"），系统保持上下文
-4. **工具调用透明**：展示 LLM 调用了哪些工具获取数据，增强可信度
+4. **工具调用透明**：展示当前阶段、工具调用与摘要进度，增强可信度
+5. **结果可落地**：支持将推荐结果加入自选股，并可通过对话将结果放入指定分组
 
 ### 1.3 与智能助手的区别
 
@@ -35,11 +36,11 @@
 | **定位** | 通用投资教练，回答任意问题 | 专注选股推荐 |
 | **输出格式** | 自由文本 Markdown | 结构化股票卡片 + 理由 |
 | **每次结果** | 不限 | 固定 5 只股票 |
-| **需求确认** | 无 | **先分析需求 → 提出改进建议 → 用户确认后再筛选** |
+| **需求确认** | 无 | **先分析需求 → 给出改进建议 → 生成执行计划 → 用户确认后再筛选** |
 | **对话记忆** | 当前无（仅持久化，不传给 LLM） | **完整多轮记忆**（历史传给 LLM） |
 | **系统提示词** | 通用投资教练风格 | 专注选股的专家风格 |
 | **会话存储** | `assistant_conversations` | `screening_conversations`（独立） |
-| **后续操作** | 无 | 可直接发起分析、加自选 |
+| **后续操作** | 无 | 当前已支持加入/取消自选；分组操作可通过对话触发，显式按钮待补 |
 
 ---
 
@@ -49,17 +50,23 @@
 前端 Screening/index.vue
 ├── Tab: 传统筛选（现有功能，不变）
 └── Tab: 智能筛选（新增）
-     ├── 对话区域（类似智能助手的聊天 UI）
-     ├── 股票结果卡片（每次 5 只，结构化展示）
-     └── 操作按钮（分析、加自选、查看详情）
+   ├── 对话区域（多轮上下文 + Markdown 回复）
+   ├── 阶段时间线（confirmation / planning / result）
+   ├── 工具进度徽标（tool_started / tool_completed）
+   ├── 股票结果卡片（每次 5 只，结构化展示）
+   └── 操作按钮（当前已支持加入/取消自选）
 
-         │ POST /api/screening/intelligent/chat
-         ▼
+     │ WebSocket /api/screening/intelligent/ws  ← 主链路，流式推送阶段与工具进度
+     │ HTTP POST /api/screening/intelligent/chat ← 兼容同步调用
+     ▼
 后端 IntelligentScreeningService
-├── 构建系统提示词（选股专家 + 工具列表 + 当前日期）
-├── 拼接对话历史（最近 N 轮）作为 context
-├── 调用 UnifiedLLMClient.achat() + function calling
+├── 构建分阶段系统提示词（需求确认 / 执行规划 / 执行结果）
+├── 拼接最近 N 轮对话历史作为 context
+├── planning 阶段注入实际可用工具摘要，避免幻觉工具名
+├── result 阶段仅开放批量筛选与自选股相关工具
+├── 通过 progress_callback 推送阶段、工具、超时、fallback 事件
 ├── 解析 LLM 返回 → 提取结构化股票列表
+├── 超时后优先回退历史成功结果，再回退数据库快速粗筛
 └── 持久化对话到 screening_conversations
 ```
 
@@ -67,393 +74,88 @@
 
 ## 3. 后端设计
 
-### 3.0 复用策略
+### 3.1 复用与新增
 
-智能筛选服务**大量复用**智能助手 (`app/services/intelligent_assistant_service.py`) 的基础设施：
+智能筛选继续复用智能助手的底层能力，但运行时策略已经明显分化：
 
-| 模块 | 复用方式 | 来源 |
-|------|---------|------|
-| LLM 配置解析 | 直接 import | `_get_assistant_llm_config()` |
-| 交易日计算 | 直接 import | `_get_latest_trade_date()` |
-| 超时常量 | 直接 import | `ASSISTANT_TIMEOUT_SECONDS` |
-| LLM 客户端 | 同样的 `UnifiedLLMClient.from_config()` 模式 | `core.llm` |
-| 工具注册表 | 同样的 `get_tool_registry()` + `tool_metadata_list_to_openai()` | `core.tools` |
-| 会话持久化 | 同样的 `$push` + `$slice` MongoDB 模式 | 参考 `save_assistant_message()` |
-| 请求 Schema | 直接复用 `ChatRequest` | `app.schemas.intelligent_assistant` |
+| 模块 | 当前实现 |
+|------|---------|
+| LLM 配置解析 | 复用 `_get_assistant_llm_config()` |
+| 当前交易日 | 复用 `_get_latest_trade_date()` |
+| 全局超时 | 复用 `ASSISTANT_TIMEOUT_SECONDS` |
+| LLM 客户端 | 复用 `UnifiedLLMClient.from_config()` |
+| 工具注册表 | 复用 `ToolRegistry`，但按智能筛选场景单独筛选工具 |
+| 会话持久化 | 复用 MongoDB `$push + $slice` 模式 |
+| 请求模型 | 继续复用 `ChatRequest` |
 
-**不复用（需新建）的部分**：
+新增或定制的部分：
 
-| 模块 | 原因 |
-|------|------|
-| 两阶段 `chat()` 流程 | 核心差异：confirmation → result |
-| `_is_new_screening_request()` | 新逻辑：判断是否走确认流程 |
-| 系统提示词 | 完全不同：选股专家 vs 投资教练 |
-| 多轮记忆 | 助手不传历史给 LLM，筛选必须传 |
-| `_extract_stocks()` | 新逻辑：从回复中提取结构化股票 |
-| `phase` + `stocks` 响应字段 | 新增字段 |
-| 工具筛选（5 类） | 助手用全部工具，筛选只用选股相关的 |
+| 模块 | 当前实现 |
+|------|---------|
+| 阶段控制 | 三阶段流程：`confirmation` → `planning` → `result` |
+| 进度推送 | 通过 `progress_callback` 将阶段、工具和 fallback 事件推送给前端 |
+| 工具收敛 | result 阶段只允许批量筛选和自选股相关工具 |
+| 超时预算 | result 阶段独立使用 `SCREENING_RESULT_TIMEOUT_SECONDS=75` 秒 |
+| 结构化结果 | 保持 `stocks` 字段，但当前仍依赖回复中的 JSON 代码块提取 |
+| 用户上下文 | 调用 `set_current_user_id(user_id)`，使 assistant_ops 类工具在智能筛选中可用 |
 
-### 3.1 服务模块
+### 3.2 当前服务行为
 
-**文件**: `app/services/intelligent_screening_service.py`
+文件：`app/services/intelligent_screening_service.py`
 
-```python
-import asyncio
-import json
-import logging
-import re
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+1. `confirmation` 阶段
+   - 只分析用户需求，不调用工具。
+   - 输出需求理解、改进建议，并等待用户确认。
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+2. `planning` 阶段
+   - 仍不执行工具，只说明接下来将调用哪些工具、用什么筛选思路。
+   - 提示词中会注入实际可用工具摘要，避免生成不存在的工具名。
 
-# ========== 复用智能助手的基础设施 ==========
-from app.services.intelligent_assistant_service import (
-    _get_assistant_llm_config,       # LLM 配置解析（数据库 → LLMConfig）
-    _get_latest_trade_date,           # A 股最近交易日
-    ASSISTANT_TIMEOUT_SECONDS,        # 整体超时（默认 120s）
-)
-from core.tools import get_tool_registry, tool_metadata_list_to_openai
-from core.llm import UnifiedLLMClient
+3. `result` 阶段
+   - 调用 `UnifiedLLMClient.achat(..., auto_execute_tools=True)` 执行工具链。
+   - `max_tool_rounds` 收紧为 4，避免多轮重工具导致长尾超时。
+   - 结果阶段仅开放以下工具：
 
-logger = logging.getLogger(__name__)
-
-# 会话历史最大条数（每用户）
-SCREENING_CONVERSATION_LIMIT = 50
-# 每次请求最多传给 LLM 的历史消息条数
-MAX_CONTEXT_MESSAGES = 20
-
-
-class IntelligentScreeningService:
-    """
-    智能筛选服务 — LLM 多轮对话选股
-
-    复用智能助手的 LLM 配置、工具注册表、超时机制等基础设施，
-    新增两阶段流程（需求确认 → 执行筛选）和多轮记忆。
-    """
-
-    def __init__(self, db: AsyncIOMotorDatabase):
-        self._db = db
-        self._llm_client: Optional[UnifiedLLMClient] = None
-        self._openai_tools: Optional[list] = None
-        self._tool_functions: Optional[dict] = None
-
-    async def _ensure_client(self) -> bool:
-        """
-        懒加载 LLM 客户端和工具（复用智能助手的 LLM 配置解析）
-
-        与智能助手的区别：只加载选股相关的 5 类工具，而非全部工具。
-        """
-        if self._llm_client is not None:
-            return True
-
-        # 复用智能助手的 LLM 配置解析
-        llm_config = await _get_assistant_llm_config(self._db)
-        if not llm_config:
-            return False
-
-        try:
-            self._llm_client = UnifiedLLMClient.from_config(llm_config)
-        except Exception as e:
-            logger.error(f"[智能筛选] 创建 LLM 客户端失败: {e}", exc_info=True)
-            return False
-
-        # 只加载选股相关的工具（区别于智能助手加载全部工具）
-        registry = get_tool_registry()
-        screening_categories = ["market", "fundamentals", "news", "china", "technical"]
-        all_metadata = registry.list_all()
-        screening_metadata = [
-            m for m in all_metadata
-            if m.fc_enabled and m.category in screening_categories
-        ]
-        self._openai_tools = tool_metadata_list_to_openai(screening_metadata)
-
-        self._tool_functions = {}
-        for tool in screening_metadata:
-            if tool.parameters:
-                func = registry.get_function(tool.id)
-                if func:
-                    self._tool_functions[tool.id] = func
-
-        self._llm_client.inject_tools(self._tool_functions)
-        logger.info(f"[智能筛选] 已加载 {len(self._openai_tools)} 个选股工具")
-        return True
-
-    async def chat(self, user_id: str, message: str) -> dict:
-        """
-        核心方法：处理用户的选股请求（两阶段流程）
-
-        阶段 1 — 需求确认（首次提出新需求时）：
-        1. 获取对话历史
-        2. 判断是否为"新需求"（首次对话 / 用户发起了新的选股主题）
-        3. 如果是新需求：LLM 分析需求 → 返回理解 + 改进建议 → 等待用户确认
-        4. 返回 phase="confirmation"，前端展示确认 UI
-
-        阶段 2 — 执行筛选（用户确认后）：
-        1. 用户选择"按原需求筛选"或"添加改进条件"
-        2. LLM 调用工具获取数据 → 返回 5 只股票
-        3. 返回 phase="result"
-
-        后续追问（如"PE 再低点"）直接执行，不再走确认流程。
-        """
-        client = await self._ensure_client()
-
-        # 1. 获取历史对话
-        history = await self._get_context_messages(user_id)
-
-        # 2. 系统提示词
-        system_prompt = self._get_system_prompt()
-
-        # 3. 构建消息列表（关键区别：包含历史！）
-        messages = [{"role": "system", "content": system_prompt}]
-        messages.extend(history)  # 历史对话
-        messages.append({"role": "user", "content": message})
-
-        # 4. 判断是否需要确认（新需求 = 无历史 或 用户明确发起新主题）
-        is_new_request = self._is_new_screening_request(history, message)
-
-        if is_new_request:
-            # === 阶段 1：需求确认（不调用工具） ===
-            result = await client.achat(
-                messages=messages,
-                tools=None,  # 确认阶段不调用工具
-            )
-            await self._save_message(user_id, message, result, [], [])
-            return {
-                "reply": result,
-                "tools_used": [],
-                "stocks": [],
-                "phase": "confirmation",
-            }
-        else:
-            # === 阶段 2：执行筛选（调用工具） ===
-            tools_used = []
-            result = await client.achat(
-                messages=messages,
-                tools=self._get_screening_tools(),
-                auto_execute_tools=True,
-                max_tool_rounds=8,
-                tools_used=tools_used,
-            )
-            stocks = self._extract_stocks(result)
-            await self._save_message(user_id, message, result, tools_used, stocks)
-            return {
-                "reply": result,
-                "tools_used": tools_used,
-                "stocks": stocks,
-                "phase": "result",
-            }
-
-    def _is_new_screening_request(self, history: list, message: str) -> bool:
-        """
-        判断当前消息是否为新的选股需求（需要走确认流程）
-
-        返回 True 的情况：
-        1. 无对话历史（用户首次发起对话）
-        2. 上一次对话已完成一轮筛选后，用户提出全新的选股主题
-
-        返回 False 的情况（直接执行）：
-        1. 用户回复的是确认指令（"按原需求筛选""添加改进条件"等）
-        2. 用户在已有结果基础上追问调整（"PE 再低点""换个行业"）
-        """
-        # 无历史 → 新需求
-        if not history:
-            return True
-
-        # 检查用户消息是否为确认指令
-        confirm_keywords = ["按原需求", "就这样", "确认", "开始筛选", "可以了",
-                           "添加改进", "加上", "按你的建议", "采纳建议"]
-        for kw in confirm_keywords:
-            if kw in message:
-                return False
-
-        # 检查上一条 assistant 消息是否为确认阶段的回复
-        # （如果上一条是确认阶段，那用户的回复是对确认的响应，不是新需求）
-        last_assistant = None
-        for msg in reversed(history):
-            if msg.get("role") == "assistant":
-                last_assistant = msg
-                break
-
-        if last_assistant:
-            # 如果上一条 assistant 消息包含股票推荐（有 stocks），
-            # 说明已经完成过筛选，当前可能是追问调整
-            if last_assistant.get("stocks"):
-                # 追问调整 → 直接执行
-                return False
-            # 如果上一条是确认阶段的回复（无 stocks），用户是在响应确认
-            return False
-
-        return True
-
-    async def _get_context_messages(self, user_id: str) -> list:
-        """获取最近 N 条对话历史，用于传给 LLM 作为上下文"""
-        doc = await self._db.screening_conversations.find_one(
-            {"user_id": user_id}
-        )
-        if not doc or not doc.get("messages"):
-            return []
-        messages = doc["messages"]
-        # 只取最近 MAX_CONTEXT_MESSAGES 条
-        return messages[-self.MAX_CONTEXT_MESSAGES:]
-
-    def _get_system_prompt(self) -> str:
-        """构建选股专家的系统提示词"""
-        curr_date = _get_latest_trade_date()
-        return f"""你是一位专业的 A 股选股专家。用户会用自然语言描述选股需求。
-
-## 工作模式
-
-你有两种工作模式，根据对话上下文自动切换：
-
-### 模式 1：需求确认（首次收到新的选股需求时）
-
-当用户首次提出选股需求时，**不要直接调用工具和推荐股票**，而是：
-
-1. **分析理解**：提炼用户需求的核心条件（行业、估值、风格、时间维度等）
-2. **展示理解**：用清晰的列表形式告诉用户"我理解您的需求是..."
-3. **改进建议**：基于你的专业判断，提出 2-3 条可选的改进建议（如增加筛选维度、调整阈值、补充考量因素等）
-4. **等待确认**：明确询问用户是"按原需求筛选"还是"采纳建议后再筛选"
-
-回复格式示例：
-```
-## 📋 需求分析
-
-我理解您的选股需求如下：
-- **行业范围**：xxx
-- **核心条件**：xxx
-- **筛选风格**：xxx
-
-## 💡 改进建议
-
-基于专业分析，我建议您可以考虑：
-1. xxx（原因）
-2. xxx（原因）
-3. xxx（原因）
-
-## ⏳ 请确认
-
-请选择：
-- **按原需求筛选** — 直接按您的条件执行
-- **采纳建议后筛选** — 添加以上改进条件后再执行
+```text
+screen_stocks_by_criteria
+batch_check_profit_consistency
+add_stocks_to_favorites
+list_watchlist_groups
+add_stock_to_watchlist
 ```
 
-### 模式 2：执行筛选（用户确认后 / 追问调整时）
+4. 超时与无结果兜底
+   - result 阶段超时后，优先回退最近一次历史成功结果。
+   - 若历史无结果，则调用数据库快速粗筛，返回高流动性、高市值的替代优质股。
+   - 所有兜底结果都设置 `is_fallback=true`，并在文案中明确说明“不是原始条件的直接命中结果”。
 
-当用户确认需求后，或在已有结果基础上追问调整时：
+5. 结果提取
+   - 当前仍通过 `_extract_stocks()` 从 Markdown 回复末尾的 JSON 代码块中提取 `stocks`。
+   - 这是当前最主要的可靠性风险，也是下一轮优化重点。
 
-1. **调用工具**：使用可用的工具获取市场数据、财务数据、行情数据等
-2. **精选推荐**：每次严格推荐 **5 只** 最符合条件的股票
-3. **结构化输出**：按以下 JSON 格式输出推荐结果
+### 3.3 提示词约束
 
-## 输出格式要求（仅模式 2）
+当前提示词与实现保持一致，关键约束如下：
 
-在回答的最后，必须包含一个 JSON 代码块，格式如下：
+| 约束 | 当前要求 |
+|------|---------|
+| 阶段隔离 | confirmation 和 planning 阶段不调用工具 |
+| 数量约束 | result 阶段默认输出 5 只股票 |
+| 结构化输出 | result 阶段末尾必须附带 JSON 代码块，供后端提取 `stocks` |
+| 结果真实性 | 若未筛出符合原条件的股票，必须明确说明并将替代结果标注为参考 |
+| 操作闭环 | 仅在用户明确要求时，才调用“加入自选/加入分组”类工具 |
+| 范围约束 | 仅推荐 A 股，不给买卖建议 |
 
-```json
-{{
-  "stocks": [
-    {{
-      "code": "600519",
-      "name": "贵州茅台",
-      "industry": "白酒",
-      "price": 1680.00,
-      "pe": 25.3,
-      "pb": 8.5,
-      "pct_change": 2.1,
-      "reason": "白马股龙头，业绩稳定增长，估值处于历史中位"
-    }}
-  ]
-}}
-```
-
-## 规则
-
-- 当前日期：{curr_date}
-- 模式 1 回复中**不要**包含 JSON 代码块和股票推荐
-- 模式 2 每次推荐恰好 5 只股票，不多不少
-- 推荐理由要具体，结合数据说话
-- 如果用户要求调整（如"换个行业""PE 再低点"），直接在之前推荐的基础上调整（模式 2）
-- 不给出具体的买入/卖出建议，只做选股推荐和分析
-- 只推荐 A 股（沪深两市）
-"""
-
-    # 注意：工具加载已在 _ensure_client() 中完成（只加载 5 类选股工具）
-    # 不再需要独立的 _get_screening_tools() 方法
-
-    def _extract_stocks(self, reply: str) -> list:
-        """从 LLM 回复中提取结构化股票列表"""
-        import json, re
-        # 尝试从 ```json ... ``` 代码块中提取
-        pattern = r'```json\s*(\{[\s\S]*?\})\s*```'
-        match = re.search(pattern, reply)
-        if match:
-            try:
-                data = json.loads(match.group(1))
-                return data.get("stocks", [])
-            except json.JSONDecodeError:
-                pass
-        return []
-
-    async def _save_message(self, user_id, user_msg, assistant_reply, tools_used, stocks):
-        """持久化对话消息到 screening_conversations"""
-        now = datetime.utcnow()
-        user_entry = {"role": "user", "content": user_msg, "timestamp": now}
-        assistant_entry = {
-            "role": "assistant",
-            "content": assistant_reply,
-            "tools_used": tools_used,
-            "stocks": stocks,
-            "timestamp": now,
-        }
-        await self._db.screening_conversations.update_one(
-            {"user_id": user_id},
-            {
-                "$push": {
-                    "messages": {
-                        "$each": [user_entry, assistant_entry],
-                        "$slice": -self.SCREENING_CONVERSATION_LIMIT,
-                    }
-                },
-                "$set": {"updated_at": now},
-                "$setOnInsert": {"created_at": now},
-            },
-            upsert=True,
-        )
-
-    async def get_conversation(self, user_id: str) -> list:
-        """获取完整对话历史（前端展示用）"""
-        doc = await self._db.screening_conversations.find_one({"user_id": user_id})
-        if not doc:
-            return []
-        return doc.get("messages", [])
-
-    async def clear_conversation(self, user_id: str):
-        """清空对话历史"""
-        await self._db.screening_conversations.delete_one({"user_id": user_id})
-```
-
-### 3.2 系统提示词设计要点
-
-| 要点 | 说明 |
-|------|------|
-| **角色定位** | 选股专家，不是通用助手 |
-| **固定数量** | 每次恰好 5 只，LLM 倾向于多给或少给，需要在 prompt 中强调 |
-| **结构化输出** | 要求 LLM 在回答末尾输出 JSON 代码块，便于前端解析 |
-| **多轮记忆** | 提示词中说明"在之前推荐的基础上调整"，引导 LLM 利用上下文 |
-| **数据驱动** | 强调"结合数据说话"，避免 LLM 编造数据 |
-| **合规** | 不给买卖建议，只做选股分析 |
-
-### 3.3 与智能助手的核心差异
-
-> 详细的复用 vs 新建清单见 §3.0。这里仅列出运行时行为的关键区别。
+### 3.4 与智能助手的运行差异
 
 | 维度 | 智能助手 | 智能筛选 |
 |------|---------|---------|
-| **对话历史** | `chat()` 不传历史给 LLM | 传最近 20 条历史 |
-| **工具范围** | 加载全部 `fc_enabled` 工具 | 只加载 5 类选股工具 |
-| **两阶段** | 无 | confirmation → result |
-| **请求 Schema** | `ChatRequest` | **复用同一个** `ChatRequest` |
+| 对话历史 | 默认不把完整历史传给 LLM | 传最近 20 条历史 |
+| 主交互方式 | HTTP 问答为主 | WebSocket 流式为主，HTTP 保留兼容 |
+| 阶段模型 | 单阶段 | confirmation → planning → result |
+| 工具范围 | 全量 `fc_enabled` 工具 | 加载选股相关工具，执行阶段再收敛到白名单 |
+| 超时策略 | 使用全局超时 | result 阶段使用独立更紧的预算 |
+| 失败处理 | 文本报错为主 | 历史成功结果 / 数据库粗筛双层 fallback |
 
 ---
 
@@ -461,97 +163,58 @@ class IntelligentScreeningService:
 
 ### 4.1 路由
 
-**文件**: `app/routers/intelligent_screening.py`
-**前缀**: `/api/screening/intelligent`
+文件：`app/routers/intelligent_screening.py`
+前缀：`/api/screening/intelligent`
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/chat` | 发送选股请求 |
+| `POST` | `/chat` | 同步模式对话接口，保留兼容用途 |
+| `WS` | `/ws` | 主交互链路，流式推送阶段与工具进度 |
 | `GET` | `/conversation` | 获取对话历史 |
 | `DELETE` | `/conversation` | 清空对话 |
 
 ### 4.2 请求/响应模型
 
-**请求模型**：直接复用 `app/schemas/intelligent_assistant.py` 中的 `ChatRequest`（`message` + 可选 `conversation_id`），无需新建请求类。
+请求模型继续复用 `app/schemas/intelligent_assistant.py` 中的 `ChatRequest`。
 
-**响应模型**：新建 `app/schemas/intelligent_screening.py`，仅包含响应类：
+响应模型位于 `app/schemas/intelligent_screening.py`，当前已扩展为：
 
-```python
-from app.schemas.intelligent_assistant import ChatRequest  # 复用
+| 模型 | 关键字段 |
+|------|---------|
+| `StockRecommendation` | `code`、`name`、`industry`、`price`、`pe`、`pb`、`roe`、`roa`、`gross_margin`、`netprofit_margin`、`dividend_yield`、`debt_to_assets`、`assets_to_eqt`、`current_ratio`、`quick_ratio`、`cash_ratio`、`revenue_ttm`、`net_profit_ttm`、`n_cashflow_act`、`report_period`、`pct_change`、`reason` |
+| `ScreeningChatResponse` | `reply`、`tools_used`、`stocks`、`phase`、`is_fallback` |
+| `ScreeningMessageItem` | `role`、`content`、`tools_used`、`stocks`、`phase`、`is_fallback` |
+| `ScreeningConversationResponse` | `messages` |
 
-class StockRecommendation(BaseModel):
-    """单只推荐股票"""
-    code: str = Field(..., description="股票代码")
-    name: str = Field("", description="股票名称")
-    industry: str = Field("", description="所属行业")
-    price: Optional[float] = Field(None, description="当前价格")
-    pe: Optional[float] = Field(None, description="市盈率")
-    pb: Optional[float] = Field(None, description="市净率")
-    pct_change: Optional[float] = Field(None, description="涨跌幅(%)")
-    reason: str = Field("", description="推荐理由")
+### 4.3 WebSocket 消息结构
 
-class ScreeningChatResponse(BaseModel):
-    """智能筛选对话响应"""
-    reply: str = Field(..., description="助手回复内容（Markdown）")
-    tools_used: List[str] = Field(default_factory=list, description="使用的工具列表")
-    stocks: List[StockRecommendation] = Field(default_factory=list, description="推荐的股票列表")
-    phase: str = Field("result", description="当前阶段: confirmation=需求确认, result=筛选结果")
+前端通过 WebSocket 获取流式事件，当前消息类型包括：
 
-class ScreeningMessageItem(BaseModel):
-    """筛选对话消息项"""
-    role: str = Field(..., description="user 或 assistant")
-    content: str = Field(..., description="消息内容")
-    tools_used: Optional[List[str]] = Field(None, description="工具列表")
-    stocks: Optional[List[StockRecommendation]] = Field(None, description="推荐股票")
-    phase: Optional[str] = Field(None, description="阶段标记: confirmation / result")
+| 类型 | 用途 |
+|------|------|
+| `connected` | 连接建立成功 |
+| `started` | 后端已收到请求 |
+| `progress` | 阶段切换、工具开始/完成、fallback 预告 |
+| `final` | 最终回复，包含 `reply/stocks/tools_used/phase/is_fallback` |
+| `error` | 处理失败 |
+| `pong` | 心跳响应 |
 
-class ScreeningConversationResponse(BaseModel):
-    """筛选对话历史响应"""
-    messages: List[ScreeningMessageItem] = Field(default_factory=list)
-```
+`progress` 事件中的关键字段：
 
-### 4.3 路由实现
+| 字段 | 说明 |
+|------|------|
+| `event` | 如 `phase_determined`、`status`、`tool_started`、`tool_completed`、`timeout`、`fallback_ready` |
+| `phase` | 当前阶段 |
+| `message` | 面向用户的简短说明 |
+| `tool` | 当前工具名 |
+| `summary` | 工具执行摘要，例如候选数量、新增自选数量等 |
 
-```python
-from app.schemas.intelligent_assistant import ChatRequest  # 复用请求模型
-from app.schemas.intelligent_screening import ScreeningChatResponse, ScreeningConversationResponse
+### 4.4 当前路由行为
 
-router = APIRouter(prefix="/api/screening/intelligent", tags=["intelligent-screening"])
-
-@router.post("/chat", response_model=ScreeningChatResponse)
-async def screening_chat(
-    request: ChatRequest,  # 复用智能助手的 ChatRequest
-    current_user=Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
-):
-    """智能筛选对话 — 自然语言选股"""
-    user_id = str(current_user["id"])
-    service = IntelligentScreeningService(db)
-    result = await service.chat(user_id, request.message.strip())
-    return ScreeningChatResponse(**result)
-
-@router.get("/conversation", response_model=ScreeningConversationResponse)
-async def get_screening_conversation(
-    current_user=Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
-):
-    """获取智能筛选对话历史"""
-    user_id = str(current_user["id"])
-    service = IntelligentScreeningService(db)
-    messages = await service.get_conversation(user_id)
-    return ScreeningConversationResponse(messages=messages)
-
-@router.delete("/conversation")
-async def clear_screening_conversation(
-    current_user=Depends(get_current_user),
-    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
-):
-    """清空智能筛选对话"""
-    user_id = str(current_user["id"])
-    service = IntelligentScreeningService(db)
-    await service.clear_conversation(user_id)
-    return {"success": True}
-```
+- `/chat`：直接调用 `IntelligentScreeningService.chat()`，适合测试或兼容场景。
+- `/ws`：校验 token 后建立长连接，把阶段和工具进度实时推送给前端。
+- `/conversation`：读取或清空 `screening_conversations`。
+- 历史接口会把 `phase` 和 `is_fallback` 一并返回，前端可完整恢复 UI 状态。
 
 ---
 
@@ -562,365 +225,168 @@ async def clear_screening_conversation(
 ```javascript
 {
   "_id": ObjectId(),
-  "user_id": "admin",                          // 用户 ID
-
+  "user_id": "admin",
   "messages": [
-    {
-      "role": "user",
-      "content": "帮我找几只低估值的白酒股",
-      "timestamp": ISODate("2026-03-03T10:00:00Z")
-    },
-    {
-      "role": "assistant",
-      "content": "根据您的需求，我为您筛选了以下 5 只低估值白酒股...",
-      "tools_used": ["get_stock_market_data_unified", "get_income_analysis"],
-      "stocks": [
-        {
-          "code": "600519",
-          "name": "贵州茅台",
-          "industry": "白酒",
-          "price": 1680.00,
-          "pe": 25.3,
-          "pb": 8.5,
-          "pct_change": 2.1,
-          "reason": "行业龙头，业绩稳定，PE 处于近三年低位"
-        }
-        // ... 共 5 只
-      ],
-      "timestamp": ISODate("2026-03-03T10:00:05Z")
-    },
-    {
-      "role": "user",
-      "content": "PE 能再低一些吗？低于 20 的",
-      "timestamp": ISODate("2026-03-03T10:01:00Z")
-    },
-    {
-      "role": "assistant",
-      "content": "好的，我重新筛选了 PE 低于 20 的白酒股...",
-      "tools_used": ["get_income_analysis"],
-      "stocks": [/* 调整后的 5 只 */],
-      "timestamp": ISODate("2026-03-03T10:01:08Z")
-    }
+  {
+    "role": "user",
+    "content": "帮我找几只低估值的银行股",
+    "timestamp": ISODate("2026-03-13T10:00:00Z")
+  },
+  {
+    "role": "assistant",
+    "content": "## 需求分析 ...",
+    "tools_used": [],
+    "stocks": [],
+    "phase": "confirmation",
+    "is_fallback": false,
+    "timestamp": ISODate("2026-03-13T10:00:03Z")
+  },
+  {
+    "role": "assistant",
+    "content": "未能为您筛出明确符合原条件的股票...",
+    "tools_used": ["screen_stocks_by_criteria"],
+    "stocks": [/* 5 只替代优质股 */],
+    "phase": "result",
+    "is_fallback": true,
+    "timestamp": ISODate("2026-03-13T10:00:30Z")
+  }
   ],
-
-  "created_at": ISODate("2026-03-03T10:00:00Z"),
-  "updated_at": ISODate("2026-03-03T10:01:08Z")
+  "created_at": ISODate("2026-03-13T10:00:00Z"),
+  "updated_at": ISODate("2026-03-13T10:00:30Z")
 }
 ```
 
-**索引设计：**
-```javascript
-db.screening_conversations.createIndex({"user_id": 1}, {unique: true})
-```
+索引与消息限制保持不变：
 
-**消息限制**: 使用 `$push` + `$slice: -50` 保留最近 50 条消息，防止无限增长。
+- `db.screening_conversations.createIndex({"user_id": 1}, {unique: true})`
+- 使用 `$push + $slice: -50` 保留最近 50 条消息
 
 ---
 
 ## 6. 前端设计
 
-### 6.1 页面结构
+### 6.1 当前页面结构
 
-在现有 `Screening/index.vue` 顶部增加 Tab 切换：
+智能筛选仍内嵌在 `frontend/src/views/Screening/index.vue` 的 Tab 中，但交互已从“提交后等待整包返回”升级为“阶段化流式反馈”：
 
-```
-┌──────────────────────────────────────────────────────────┐
-│  📊 股票筛选                                              │
-│                                                          │
-│  ┌────────────┐  ┌────────────┐                          │
-│  │ 传统筛选    │  │ 智能筛选 ✨ │                          │
-│  └────────────┘  └────────────┘                          │
-│                                                          │
-│  ═══════════ 智能筛选 Tab 内容 ══════════                 │
-│                                                          │
-│  ┌─ 对话区域 ────────────────────────────────────┐       │
-│  │                                               │       │
-│  │  🤖 请描述您的选股需求，例如：                   │       │
-│  │     "帮我找几只最近资金持续流入的低估值白马股"    │       │
-│  │                                               │       │
-│  │  👤 帮我找几只低估值的白酒股                     │       │
-│  │                                               │       │
-│  │  🤖 根据您的需求，筛选了以下 5 只低估值白酒股：  │       │
-│  │     🔧 使用工具: get_stock_market_data, ...     │       │
-│  │                                               │       │
-│  │  ┌─ 推荐股票 ─────────────────────────────┐   │       │
-│  │  │ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐   │   │       │
-│  │  │ │600519│ │000858│ │002304│ │603369│ ...│   │       │
-│  │  │ │贵州茅│ │五粮液│ │洋河股│ │今世缘│   │   │       │
-│  │  │ │PE:25 │ │PE:22 │ │PE:18 │ │PE:19 │   │   │       │
-│  │  │ │+2.1% │ │+1.5% │ │-0.3% │ │+0.8% │   │   │       │
-│  │  │ │[分析]│ │[分析]│ │[分析]│ │[分析]│   │   │       │
-│  │  │ └──────┘ └──────┘ └──────┘ └──────┘   │   │       │
-│  │  │         [批量分析] [加入自选]            │   │       │
-│  │  └────────────────────────────────────────┘   │       │
-│  │                                               │       │
-│  │  👤 PE 能再低一些吗？低于 20 的                 │       │
-│  │  🤖 ...                                       │       │
-│  └───────────────────────────────────────────────┘       │
-│                                                          │
-│  ┌─ 输入区域 ────────────────────────────────────┐       │
-│  │  描述您的选股需求...              [清空] [发送] │       │
-│  └───────────────────────────────────────────────┘       │
-└──────────────────────────────────────────────────────────┘
-```
+1. 对话区
+   - 展示用户消息和助手 Markdown 回复。
+   - 支持从历史接口恢复会话。
 
-### 6.2 前端 API
+2. 进度时间线
+   - 当 assistant 消息尚未完成时，先展示占位消息。
+   - `progressSteps` 按时间线展示阶段切换和工具执行摘要。
 
-**文件**: `frontend/src/api/screening.ts`（在现有文件中扩展）
+3. 阶段按钮
+   - `confirmation` 阶段：展示“按原需求筛选”“采纳建议后筛选”。
+   - `planning` 阶段：展示“执行筛选方案”“重新描述需求”。
 
-```typescript
-// === 智能筛选 API ===
+4. 结果卡片
+   - 当前展示 `price/pe/pb/roe/roa/gross_margin/netprofit_margin/dividend_yield/debt_to_assets/assets_to_eqt/current_ratio/quick_ratio/cash_ratio/revenue_ttm/net_profit_ttm/n_cashflow_act/report_period/pct_change`。
+   - 当 `is_fallback=true` 时，顶部显示黄色警示，明确这是替代候选而非命中结果。
 
-export interface StockRecommendation {
-  code: string
-  name: string
-  industry: string
-  price?: number
-  pe?: number
-  pb?: number
-  pct_change?: number
-  reason: string
-}
+5. 卡片操作
+   - 当前前端显式支持“加入自选/取消自选”。
+   - “查看详情 / 发起分析 / 指定分组”仍属于下一轮体验增强项。
 
-export interface ScreeningChatResponse {
-  reply: string
-  tools_used: string[]
-  stocks: StockRecommendation[]
-}
+### 6.2 前端 API 与类型
 
-export interface ScreeningMessageItem {
-  role: 'user' | 'assistant'
-  content: string
-  tools_used?: string[]
-  stocks?: StockRecommendation[]
-}
+文件：`frontend/src/api/screening.ts`
 
-export interface ScreeningConversationResponse {
-  messages: ScreeningMessageItem[]
-}
+当前已包含：
 
-// 在 screeningApi 对象中新增：
-export const screeningApi = {
-  // ... 现有方法 ...
+| 类型/方法 | 当前实现 |
+|------|---------|
+| `StockRecommendation` | 已同步更多财务字段 |
+| `ScreeningChatResponse` | 包含 `phase` 与 `is_fallback` |
+| `ScreeningMessageItem` | 支持历史恢复阶段和 fallback 状态 |
+| `ScreeningWsEnvelope` | WebSocket 统一消息封装 |
+| `ScreeningWsProgressData` | 进度、工具、摘要字段 |
+| `getIntelligentChatWsUrl()` | 生成智能筛选 WebSocket 地址 |
 
-  /** 智能筛选对话 */
-  intelligentChat: (message: string) =>
-    ApiClient.post<ScreeningChatResponse>(
-      '/api/screening/intelligent/chat',
-      { message }
-    ),
+### 6.3 当前前端能力边界
 
-  /** 获取智能筛选对话历史 */
-  getIntelligentConversation: () =>
-    ApiClient.get<ScreeningConversationResponse>(
-      '/api/screening/intelligent/conversation'
-    ),
+已实现：
 
-  /** 清空智能筛选对话 */
-  clearIntelligentConversation: () =>
-    ApiClient.delete('/api/screening/intelligent/conversation'),
-}
-```
+- WebSocket 流式连接与断线处理
+- 阶段时间线和工具摘要
+- fallback 警示文案
+- 智能筛选结果加入/取消自选
+- 会话历史恢复与清空
 
-### 6.3 股票推荐卡片组件
+未完成：
 
-每次 LLM 返回的 5 只股票，以卡片形式展示在对话消息中：
-
-```vue
-<!-- 股票推荐卡片（嵌入在 assistant 消息气泡中） -->
-<div class="stock-cards">
-  <div v-for="stock in msg.stocks" :key="stock.code" class="stock-card">
-    <div class="stock-header">
-      <span class="stock-code">{{ stock.code }}</span>
-      <span class="stock-name">{{ stock.name }}</span>
-      <el-tag size="small">{{ stock.industry }}</el-tag>
-    </div>
-    <div class="stock-metrics">
-      <span>价格: {{ stock.price }}</span>
-      <span>PE: {{ stock.pe }}</span>
-      <span :class="stock.pct_change >= 0 ? 'up' : 'down'">
-        {{ stock.pct_change > 0 ? '+' : '' }}{{ stock.pct_change }}%
-      </span>
-    </div>
-    <div class="stock-reason">{{ stock.reason }}</div>
-    <div class="stock-actions">
-      <el-button size="small" @click="goAnalysis(stock.code)">分析</el-button>
-      <el-button size="small" @click="addFavorite(stock.code)">加自选</el-button>
-    </div>
-  </div>
-</div>
-```
-
-### 6.4 前端改动清单
-
-| 文件 | 改动 |
-|------|------|
-| `frontend/src/views/Screening/index.vue` | 增加 `el-tabs` 切换传统/智能；智能筛选 Tab 内嵌对话 UI + 股票卡片 |
-| `frontend/src/api/screening.ts` | 新增 `intelligentChat`、`getIntelligentConversation`、`clearIntelligentConversation` |
-
-**不需要新建独立页面**，直接在现有筛选页面中通过 Tab 切换。
+- 结果卡片显式“查看详情”按钮
+- 结果卡片显式“发起分析”按钮
+- 结果卡片显式“加入指定分组”按钮
 
 ---
 
 ## 7. 工具选择策略
 
-智能筛选可调用的工具与智能助手共用同一个 `ToolRegistry`，但会按类别筛选：
+智能筛选仍通过统一的 `ToolRegistry` 加载工具，但已经拆成“可见工具集”和“执行工具集”两层：
 
-| 工具类别 | 用途 | 示例 |
-|---------|------|------|
-| `market` | 获取行情数据 | `get_stock_market_data_unified` |
-| `fundamentals` | 获取财务指标 | `get_income_analysis`、`get_financial_summary` |
-| `news` | 获取相关新闻 | `get_stock_news_unified` |
-| `china` | A 股特色数据 | `get_stock_list_by_industry` |
-| `technical` | 技术指标 | `get_technical_indicators` |
+### 7.1 加载层
 
-> 工具列表不是硬编码的，而是从 `ToolRegistry` 动态读取 `fc_enabled=True` 且类别匹配的工具。
+服务初始化时会加载与以下类别相关的工具：
 
----
+- `screening`
+- `market`
+- `fundamentals`
+- `news`
+- `china`
+- `technical`
 
-## 8. 对话流程示例
+此外，显式补入以下与用户操作闭环相关的工具：
 
-### 示例 1：基础选股（完整两阶段流程）
+- `add_stocks_to_favorites`
+- `list_watchlist_groups`
+- `add_stock_to_watchlist`
 
-```
-👤 帮我找几只低估值的消费电子股
+### 7.2 执行层
 
-🤖 [phase: confirmation — 不调用工具，先分析需求]
+真正进入 `result` 阶段时，只保留如下白名单：
 
-   ## 📋 需求分析
+| 工具 | 作用 |
+|------|------|
+| `screen_stocks_by_criteria` | 批量数据库筛选，核心工具 |
+| `batch_check_profit_consistency` | 对候选进行批量盈利稳定性校验 |
+| `add_stocks_to_favorites` | 用户明确要求时批量加入自选 |
+| `list_watchlist_groups` | 查询已有分组 |
+| `add_stock_to_watchlist` | 将推荐股票放入指定分组 |
 
-   我理解您的选股需求如下：
-   - **行业范围**：消费电子板块
-   - **核心条件**：低估值（低 PE、低 PB）
-   - **筛选风格**：价值导向
+这样做的目的：
 
-   ## 💡 改进建议
-
-   基于专业分析，我建议您可以考虑：
-   1. **增加盈利质量筛选**：加入 ROE > 10% 的条件，排除估值虽低但盈利能力差的公司
-   2. **关注资金面**：近期主力资金净流入的个股往往更有上涨动力
-   3. **排除 ST 和次新股**：降低风险，聚焦经营稳定的标的
-
-   ## ⏳ 请确认
-
-   请选择：
-   - **按原需求筛选** — 直接按"消费电子 + 低估值"条件执行
-   - **采纳建议后筛选** — 添加 ROE、资金面等改进条件后再执行
-
-                                     [按原需求筛选] [采纳建议后筛选]  ← 前端按钮
-
-👤 按原需求筛选
-
-🤖 [phase: result — 调用工具，返回结果]
-   [调用 get_stock_list_by_industry("消费电子")]
-   [调用 get_income_analysis("多只候选股")]
-   [调用 get_stock_market_data_unified("候选股行情")]
-
-   根据您的需求，我为您筛选了以下 5 只低估值消费电子股：
-   [股票卡片 x5]
-
-   筛选逻辑：
-   1. 从消费电子板块中选取市值前 30 的股票
-   2. 按 PE（TTM）从低到高排序
-   3. 排除 PE 为负（亏损）的公司
-   4. 综合考虑 PB 等指标
-
-👤 有没有做手机的？
-
-🤖 [phase: result — 追问调整，直接执行，不再走确认流程]
-   好的，我在消费电子中进一步筛选了手机产业链相关的个股：
-   [调整后的股票卡片 x5]
-```
-
-### 示例 2：采纳改进建议
-
-```
-👤 帮我找几只最近资金持续流入的低估值白马股
-
-🤖 [phase: confirmation]
-
-   ## 📋 需求分析
-
-   我理解您的选股需求如下：
-   - **选股范围**：白马股（大市值、业绩稳定的龙头企业）
-   - **估值条件**：低估值（PE、PB 处于合理或偏低水平）
-   - **资金面**：近期主力资金持续净流入
-
-   ## 💡 改进建议
-
-   基于专业分析，我建议您可以考虑：
-   1. **明确资金流入周期**：建议关注近 5 个交易日连续净流入的个股，而非单日
-   2. **加入业绩增长筛选**：白马股中优先选择近一年净利润同比增长 > 15% 的
-   3. **设置市值门槛**：总市值 > 500 亿，确保是真正的白马股
-
-   ## ⏳ 请确认
-
-   请选择：
-   - **按原需求筛选** — 直接按您的条件执行
-   - **采纳建议后筛选** — 添加以上改进条件后再执行
-
-👤 采纳建议后筛选
-
-🤖 [phase: result — 使用原需求 + 改进条件执行]
-   [调用工具获取数据]
-   好的，综合您的需求和改进条件，为您筛选了 5 只白马股：
-   [股票卡片 x5]
-```
-
-### 示例 3：模糊需求（确认阶段主动追问）
-
-```
-👤 最近什么股票比较好
-
-🤖 [phase: confirmation — 需求太模糊，确认阶段主动追问]
-
-   ## 📋 需求分析
-
-   您的选股需求比较宽泛，我需要进一步了解您的偏好：
-
-   - **行业范围**：未指定（全市场？）
-   - **筛选风格**：未指定
-
-   ## 💡 建议您补充以下信息
-
-   1. **行业偏好**：有倾向的行业吗？如科技、消费、医药、新能源等
-   2. **投资风格**：偏好成长股还是价值股？大盘还是小盘？
-   3. **持有周期**：关注短期热点还是中长期配置？
-
-   请告诉我您的想法，我来帮您精准筛选。
-
-👤 科技类的，中长期的
-
-🤖 [phase: confirmation — 补充信息后，再次确认]
-
-   ## 📋 需求分析
-
-   我理解您的选股需求如下：
-   - **行业范围**：科技板块（半导体、软件、AI、通信等）
-   - **持有周期**：中长期配置
-   - **隐含条件**：业绩稳健、有成长空间
-
-   ## 💡 改进建议
-
-   1. **聚焦细分赛道**：科技板块范围较广，建议聚焦 AI、半导体、信创等热门赛道
-   2. **加入研发投入筛选**：研发费用占比 > 10% 的科技公司通常更具长期竞争力
-   3. **关注机构持仓**：基金重仓的科技股通常基本面更扎实
-
-   ## ⏳ 请确认
-
-   请选择：
-   - **按原需求筛选** — 科技板块 + 中长期
-   - **采纳建议后筛选** — 添加细分赛道、研发投入等条件
-
-👤 就按你的建议来吧
-
-🤖 [phase: result]
-   [调用工具获取数据]
-   好的，为您筛选了 5 只适合中长期配置的科技股：
-   [股票卡片 x5]
-```
+- 避免单股重工具串行调用导致长尾超时
+- 让 planning 阶段与 result 阶段的工具集合保持一致
+- 保证“筛选结果生成”和“结果落地操作”在同一条对话链路内完成
 
 ---
+
+## 8. 当前实现状态与后续方向
+
+### 8.1 已完成能力
+
+1. 三阶段智能筛选流程已经落地：`confirmation` → `planning` → `result`。
+2. 前后端主链路已切换为 WebSocket 流式反馈，不再只在最后返回结果。
+3. result 阶段已收敛到批量筛选白名单，并设置独立超时预算。
+4. 超时或无命中结果时，已支持历史成功结果 / 数据库快速粗筛双层 fallback。
+5. fallback 文案已明确区分“未命中原条件”和“优质股替代参考”。
+6. 智能筛选已支持调用自选股与分组相关工具。
+7. 前端结果卡片已展示更多财务指标，并支持加入/取消自选。
+8. 结果卡片已可展示盈利质量、偿债能力、滚动营收、滚动净利润和经营现金流等扩展字段。
+
+### 8.2 当前已知限制
+
+1. 结构化结果提取仍依赖 LLM 回复中的 JSON 代码块，鲁棒性不足。
+2. 结果卡片还没有显式暴露“查看详情 / 发起分析 / 加入指定分组”按钮。
+3. 当前对“本轮实际筛选条件”和“排序依据”的可解释展示还不够结构化。
+
+### 8.3 下一步优先级
+
+1. 优先增强结果可靠性，减少对 JSON 代码块提取的脆弱依赖。
+2. 补齐结果闭环，增加详情、分析和分组入口。
+3. 增强筛选条件与排序依据的可解释展示。
 
 ## 9. 路由注册
 
@@ -933,37 +399,16 @@ app.include_router(intelligent_screening_router)
 
 ---
 
-## 10. 实现计划
+## 10. 变更同步说明
 
-### Phase 1：核心闭环（2-3 天）
+本次文档同步主要反映以下已落地改动：
 
-> 由于复用智能助手基础设施（见 §3.0），工作量显著减少。
-
-1. **后端**
-   - `app/schemas/intelligent_screening.py` — 仅响应模型（`ChatRequest` 复用自智能助手）
-   - `app/services/intelligent_screening_service.py` — 核心服务（`_ensure_client()` 复用 LLM 配置解析，主要新增两阶段 `chat()` 和 `_is_new_screening_request()`）
-   - `app/routers/intelligent_screening.py` — API 路由（结构与智能助手路由一致）
-   - `app/main.py` — 注册路由
-
-2. **前端**
-   - `frontend/src/api/screening.ts` — 新增智能筛选 API
-   - `frontend/src/views/Screening/index.vue` — Tab 切换 + 对话 UI + 股票卡片 + 确认按钮
-
-3. **数据库**
-   - `screening_conversations` 集合（自动创建）
-
-### Phase 2：体验优化（2-3 天）
-
-1. 股票卡片交互：点击跳转详情、一键分析、批量加自选
-2. 对话历史持久化：下次进入恢复上次对话
-3. 思考中动画 + 工具调用过程展示
-4. 移动端响应式适配
-
-### Phase 3：增强功能（后续）
-
-1. 热门选股模板（快捷按钮：低估值白马、科技成长、高股息等）
-2. 选股结果导出（Excel）
-3. 选股结果直接发起批量分析工作流
+1. 智能筛选已不是“待实现”功能，而是线上可用功能。
+2. 交互方式从同步 HTTP 补充为 WebSocket 主链路。
+3. 流程从两阶段升级为三阶段，并增加 planning 阶段。
+4. 增加了 result 阶段工具白名单、独立超时预算与 fallback 机制。
+5. 增加了 `is_fallback`、更多财务字段、自选股与分组操作能力。
+6. 将“后续操作”修正为当前真实状态，避免文档继续误导为“已支持详情/分析显式按钮”。
 
 ---
 

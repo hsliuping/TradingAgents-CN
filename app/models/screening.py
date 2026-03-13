@@ -221,6 +221,139 @@ BASIC_FIELDS_INFO = {
         unit="%",
         supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
     ),
+    "roa": FieldInfo(
+        name="roa",
+        display_name="总资产收益率",
+        field_type=FieldType.FUNDAMENTAL,
+        data_type="number",
+        description="总资产收益率(ROA，%)",
+        unit="%",
+        supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
+    ),
+    "gross_margin": FieldInfo(
+        name="gross_margin",
+        display_name="毛利率",
+        field_type=FieldType.FUNDAMENTAL,
+        data_type="number",
+        description="销售毛利率(%)",
+        unit="%",
+        supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
+    ),
+    "netprofit_margin": FieldInfo(
+        name="netprofit_margin",
+        display_name="净利率",
+        field_type=FieldType.FUNDAMENTAL,
+        data_type="number",
+        description="销售净利率(%)",
+        unit="%",
+        supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
+    ),
+    "debt_to_assets": FieldInfo(
+        name="debt_to_assets",
+        display_name="资产负债率",
+        field_type=FieldType.FUNDAMENTAL,
+        data_type="number",
+        description="资产负债率(%)",
+        unit="%",
+        supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
+    ),
+    "assets_to_eqt": FieldInfo(
+        name="assets_to_eqt",
+        display_name="权益乘数",
+        field_type=FieldType.FUNDAMENTAL,
+        data_type="number",
+        description="权益乘数(总资产/股东权益)",
+        unit="倍",
+        supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
+    ),
+    "current_ratio": FieldInfo(
+        name="current_ratio",
+        display_name="流动比率",
+        field_type=FieldType.FUNDAMENTAL,
+        data_type="number",
+        description="流动比率(流动资产/流动负债)",
+        unit="倍",
+        supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
+    ),
+    "quick_ratio": FieldInfo(
+        name="quick_ratio",
+        display_name="速动比率",
+        field_type=FieldType.FUNDAMENTAL,
+        data_type="number",
+        description="速动比率",
+        unit="倍",
+        supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
+    ),
+    "cash_ratio": FieldInfo(
+        name="cash_ratio",
+        display_name="现金比率",
+        field_type=FieldType.FUNDAMENTAL,
+        data_type="number",
+        description="现金比率",
+        unit="倍",
+        supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
+    ),
+    "dividend_yield": FieldInfo(
+        name="dividend_yield",
+        display_name="股息率",
+        field_type=FieldType.FUNDAMENTAL,
+        data_type="number",
+        description="近12个月股息率(%)",
+        unit="%",
+        supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
+    ),
+    "revenue_ttm": FieldInfo(
+        name="revenue_ttm",
+        display_name="滚动营收",
+        field_type=FieldType.FUNDAMENTAL,
+        data_type="number",
+        description="滚动12个月营业收入",
+        unit="元",
+        supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
+    ),
+    "net_profit_ttm": FieldInfo(
+        name="net_profit_ttm",
+        display_name="滚动净利润",
+        field_type=FieldType.FUNDAMENTAL,
+        data_type="number",
+        description="滚动12个月净利润",
+        unit="元",
+        supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
+    ),
+    "n_cashflow_act": FieldInfo(
+        name="n_cashflow_act",
+        display_name="经营现金流",
+        field_type=FieldType.FUNDAMENTAL,
+        data_type="number",
+        description="经营活动产生的现金流量净额",
+        unit="元",
+        supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
+    ),
+    "report_period": FieldInfo(
+        name="report_period",
+        display_name="财报期",
+        field_type=FieldType.FUNDAMENTAL,
+        data_type="string",
+        description="最新财报报告期，如 20250930",
+        supported_operators=[OperatorType.EQ, OperatorType.NE, OperatorType.IN, OperatorType.NOT_IN]
+    ),
+    "net_working_capital": FieldInfo(
+        name="net_working_capital",
+        display_name="净营运资本",
+        field_type=FieldType.FUNDAMENTAL,
+        data_type="number",
+        description="净营运资本(亿元)=流动资产-流动负债",
+        unit="亿元",
+        supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
+    ),
+    "is_st": FieldInfo(
+        name="is_st",
+        display_name="ST状态",
+        field_type=FieldType.BASIC,
+        data_type="string",
+        description="是否为ST或*ST股票",
+        supported_operators=[OperatorType.EQ, OperatorType.NE]
+    ),
     "turnover_rate": FieldInfo(
         name="turnover_rate",
         display_name="换手率",

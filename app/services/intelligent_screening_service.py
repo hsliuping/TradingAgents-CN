@@ -205,9 +205,19 @@ class IntelligentScreeningService:
                     "pe": item.get("pe") or item.get("pe_ttm"),
                     "pb": item.get("pb") or item.get("pb_mrq"),
                     "roe": item.get("roe"),
+                    "roa": item.get("roa"),
+                    "gross_margin": item.get("gross_margin"),
+                    "netprofit_margin": item.get("netprofit_margin"),
                     "dividend_yield": item.get("dividend_yield"),
                     "debt_to_assets": item.get("debt_to_assets"),
+                    "assets_to_eqt": item.get("assets_to_eqt"),
                     "current_ratio": item.get("current_ratio"),
+                    "quick_ratio": item.get("quick_ratio"),
+                    "cash_ratio": item.get("cash_ratio"),
+                    "revenue_ttm": item.get("revenue_ttm"),
+                    "net_profit_ttm": item.get("net_profit_ttm"),
+                    "n_cashflow_act": item.get("n_cashflow_act"),
+                    "report_period": item.get("report_period"),
                     "pct_change": item.get("pct_chg"),
                     "reason": "替代优质股候选：按非ST+市值排序的快速粗筛结果，并非原筛选条件的直接命中结果",
                 })
@@ -555,6 +565,9 @@ class IntelligentScreeningService:
 - pe / pe_ttm     市盈率（TTM）
 - pb / pb_mrq     市净率
 - roe             净资产收益率（%）
+- roa             总资产收益率（%）
+- gross_margin    毛利率（%）
+- netprofit_margin 净利率（%）
 - total_mv        总市值（亿元）
 - circ_mv         流通市值（亿元）
 - turnover_rate   换手率（%）
@@ -565,8 +578,15 @@ class IntelligentScreeningService:
 - industry        行业名称（使用 == 或 in 操作符）
 - keyword         股票代码或名称模糊搜索
 - debt_to_assets       资产负债率（%）
+- assets_to_eqt        权益乘数
 - current_ratio        流动比率（> 1 表示流动性良好）
+- quick_ratio          速动比率
+- cash_ratio           现金比率
 - dividend_yield       股息率（%）
+- revenue_ttm          滚动12个月营收（元）
+- net_profit_ttm       滚动12个月净利润（元）
+- n_cashflow_act       经营活动现金流净额（元）
+- report_period        最新财报期（如 20250930）
 - net_working_capital  净营运资本（亿元，> 0 表示流动资产超过流动负债）
 - is_st                是否ST股（True/False，使用 == 操作符，例如 {{"field":"is_st","operator":"==","value":false}}）
 
@@ -579,6 +599,14 @@ class IntelligentScreeningService:
 
 **第一步（宽口径批量筛选）**：调用 `screen_stocks_by_criteria`，设置 limit=50，按硬性指标（PE/PB/市值/资产负债率/is_st 等）过滤候选池。
 **第二步（盈利稳定性验证）**：将候选股票代码列表传给 `batch_check_profit_consistency`，一次查询验证近N年ROE稳定性。**禁止对每只股票单独重复查询财务数据。**
+
+## 字段使用建议
+
+- 优先使用可比较的比率型指标做硬筛选，如 PE、PB、ROE、毛利率、资产负债率、流动比率、股息率
+- `revenue_ttm`、`net_profit_ttm`、`n_cashflow_act` 更适合作为质量补充条件，不宜单独作为唯一标准
+- 如果用户强调“现金流好”“利润扎实”“财务稳健”，优先考虑 `n_cashflow_act > 0`、`net_profit_ttm > 0`、`debt_to_assets`、`current_ratio`
+- 如果用户强调“高分红”“防御型”，优先考虑 `dividend_yield` 并结合 `debt_to_assets`、`n_cashflow_act`
+- 如果用户强调“财报最新”“只看最新财报”，可通过 `report_period` 增加约束
 
 ## 自选股联动规则
 
@@ -656,9 +684,18 @@ class IntelligentScreeningService:
       "pe": 25.3,
       "pb": 8.5,
             "roe": 32.1,
+            "roa": 18.6,
+            "gross_margin": 51.2,
+            "netprofit_margin": 24.8,
             "dividend_yield": 3.1,
             "debt_to_assets": 18.5,
+            "assets_to_eqt": 1.42,
             "current_ratio": 4.2,
+            "quick_ratio": 3.8,
+            "cash_ratio": 1.9,
+            "revenue_ttm": 123456789000,
+            "net_profit_ttm": 45678900000,
+            "n_cashflow_act": 39876500000,
             "report_period": "20250930",
       "pct_change": 2.1,
       "reason": "白马股龙头，业绩稳定增长，估值处于历史中位"
@@ -673,6 +710,7 @@ class IntelligentScreeningService:
 - 每次推荐恰好 5 只股票，不多不少
 - 推荐理由要具体，结合数据说话
 - 若工具结果中已提供 ROE、股息率、资产负债率、流动比率、财报期，优先一并放入 JSON 字段，便于前端直接展示
+- 若工具结果中已提供 ROA、毛利率、净利率、滚动营收、滚动净利润、经营现金流、权益乘数、速动比率、现金比率，也可一并放入 JSON 字段，便于前端直接展示
 - 如果用户要求调整（如"换个行业""PE 再低点"），直接重新调用工具调整筛选
 - 如果用户明确要求将当前推荐结果加入自选股，可调用 `add_stocks_to_favorites` 一次性添加；未明确要求则不要主动添加
 - 如果用户明确要求将当前推荐结果放入某个分类，可调用 `add_stock_to_watchlist`，分组不存在时允许自动创建，例如“银行”“待分析”
