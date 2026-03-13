@@ -10,7 +10,7 @@
     输出目录。默认 release/packages/
 .PARAMETER SourceDir
     源代码目录。默认为便携版目录（编译后的代码）。
-    如果便携版不存在，使用项目根目录（源码）。
+    如果便携版不存在，则直接失败，避免把项目源码误打进更新包。
 #>
 
 param(
@@ -52,11 +52,17 @@ if (-not $SourceDir) {
         $SourceDir = $portableDir
         Write-Host "  Source: Portable directory (compiled)" -ForegroundColor Cyan
     } else {
-        $SourceDir = $root
-        Write-Host "  Source: Project root (source code)" -ForegroundColor Yellow
+        Write-Host "ERROR: Portable directory not found: $portableDir" -ForegroundColor Red
+        Write-Host "       Build the portable package first to avoid packaging raw source code." -ForegroundColor Red
+        exit 1
     }
 } else {
     Write-Host "  Source: $SourceDir" -ForegroundColor Cyan
+}
+
+if (-not (Test-Path $SourceDir)) {
+    Write-Host "ERROR: Source directory not found: $SourceDir" -ForegroundColor Red
+    exit 1
 }
 
 # ── 3. 确定输出目录 ──────────────────────────────────────
@@ -78,6 +84,14 @@ $includeItems = @(
     "tradingagents",
     "prompts",
     "migrations",
+    "releases",
+    "install",
+    "config",
+    "VERSION",
+    "BUILD_INFO"
+)
+
+$safeRootFallbackItems = @(
     "releases",
     "install",
     "config",
@@ -115,7 +129,7 @@ foreach ($item in $includeItems) {
         $copiedCount++
     } else {
         $fallbackSrc = Join-Path $root $item
-        if (($SourceDir -ne $root) -and (Test-Path $fallbackSrc)) {
+        if (($SourceDir -ne $root) -and ($safeRootFallbackItems -contains $item) -and (Test-Path $fallbackSrc)) {
             $actualSource = $fallbackSrc
             $dst = Join-Path $tempDir $item
             if ((Get-Item $actualSource).PSIsContainer) {
@@ -128,7 +142,14 @@ foreach ($item in $includeItems) {
             }
             $copiedCount++
         } else {
-            Write-Host "    ⚠️ $item (not found, skipped)" -ForegroundColor Yellow
+            if ($safeRootFallbackItems -contains $item) {
+                Write-Host "    ⚠️ $item (not found, skipped)" -ForegroundColor Yellow
+            } else {
+                Write-Host "ERROR: Required compiled item missing from portable source: $item" -ForegroundColor Red
+                Write-Host "       SourceDir: $SourceDir" -ForegroundColor Red
+                Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+                exit 1
+            }
         }
     }
 }

@@ -75,9 +75,19 @@ releases/2.0.2/
 
 **同步目录**：core, app, tradingagents, examples, prompts, config, install, releases
 
+**额外同步**：migrations（供升级包与迁移执行使用）
+
 **同步文件**：VERSION, BUILD_INFO, requirements.txt, pyproject.toml, README.md, .env.example, start_api.py, debug_services.ps1
 
 **排除**：`__pycache__`, `*.pyc`, `*.pyd`, `*.pyo`, `.pytest_cache`, `node_modules`, `.git`, 课程源码、设计文档等
+
+**文档打包规则**：不再同步整个 `docs/` 目录；发布包中的 `docs/` 只能来自 `docs/release_v2.0/` 这一套面向最终用户的交付文档。
+
+**学习中心例外规则**：学习中心文章不依赖安装包中的 `docs/` 目录。其内容来自前端构建时对 `docs/learning/`、`docs/paper/`、`docs/courses/advanced/expanded/` 的 `?raw` 导入，因此这些文档如有变更，必须重新构建前端后才能进入发布包。
+
+**编译规则**：`core/`、`app/`、`tradingagents/`、`scripts/`、`migrations/` 在便携版阶段统一编译；除运行入口白名单外，不应保留 Python 源码。
+
+**允许保留源码的运行入口**：`app/__main__.py`、`app/worker/__main__.py`、`scripts/apply_upgrade_config.py`、`scripts/import_config_and_create_user.py`、`scripts/import_mongodb_config.py`、`scripts/init_mongodb_user.py`、`scripts/installer/start_all.py`、`scripts/monitor/process_monitor.py`、`scripts/monitor/tray_monitor.py`、`migrations/__main__.py`、`migrations/cli.py`
 
 **便携版专属**（不同步，保留便携版中已有内容）：.env, data, logs, temp, runtime, vendors, frontend（使用 dist）, start_all.ps1, stop_all.ps1 等
 
@@ -100,6 +110,8 @@ releases/2.0.2/
 **状态**：仅供已安装客户端应用内升级使用，不面向用户手工下载页面作为主安装入口
 
 **脚本**：`scripts/deployment/build_update_package.ps1`
+
+**源码保护要求**：更新包必须从 `release/TradingAgentsCN-portable` 这一份已编译产物取源；如果便携目录缺失或关键代码目录缺失，应直接失败，不能回退到项目根目录打入原始 `.py` 源码。
 
 **当前包含**：app, core, frontend, scripts, tradingagents, prompts, migrations, releases, install, config, VERSION, BUILD_INFO
 
@@ -144,6 +156,10 @@ releases/2.0.2/
 - 更新包与 `.sha256`
 - `BUILD_INFO-{full_version}.json`
 - `manifest-{VERSION}.json`
+- `TradingAgentsCN-source-{full_version}.zip`
+- `git_release_info.json`
+- `GIT_COMMIT_INFO.txt`
+- `GIT_STATUS.txt`
 - `RELEASE_UPLOAD_INFO.md`
 - `release_metadata.json`
 
@@ -154,6 +170,15 @@ releases/2.0.2/
 - SHA256
 - 推荐下载地址
 - 可直接复制的后端 JSON 草稿
+
+同时每次归档都应绑定一个 git tag，推荐格式：`v{VERSION}-revNNN`。
+
+例如：
+
+- `v2.0.1-rev001`
+- `v2.0.1-rev002`
+
+这样同一个语义版本下的多次重新打包，也能分别对应到各自的代码留档和归档目录。
 
 **参数**：
 

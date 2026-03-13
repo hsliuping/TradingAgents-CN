@@ -43,6 +43,7 @@ $syncDirs = @(
     "core",          # 🔥 v2.0 核心代码（必须同步！）
     "app",
     "tradingagents",
+    "migrations",
     # "web",         # ❌ 旧版 Web 界面，不再同步
     # "tests",       # ❌ 测试代码，不需要打包
     "examples",
@@ -110,6 +111,39 @@ $portableSpecific = @(
     "start_services_clean.ps1",
     "stop_all.ps1",
     "README_STARTUP.txt"
+)
+
+$allowedPortableRootEntries = @(
+    ".env",
+    ".env.example",
+    "app",
+    "BUILD_INFO",
+    "config",
+    "core",
+    "data",
+    "debug_services.ps1",
+    "docs",
+    "examples",
+    "frontend",
+    "install",
+    "logs",
+    "migrations",
+    "prompts",
+    "pyproject.toml",
+    "README.md",
+    "README_STARTUP.txt",
+    "releases",
+    "requirements.txt",
+    "restart_all.ps1",
+    "runtime",
+    "scripts",
+    "start_all.ps1",
+    "start_services_clean.ps1",
+    "stop_all.ps1",
+    "temp",
+    "tradingagents",
+    "vendors",
+    "VERSION"
 )
 
 # 排除大文件和数据目录（安装时创建）
@@ -191,6 +225,29 @@ function Copy-WithProgress {
 $syncCount = 0
 $skipCount = 0
 
+Write-Host "Cleaning stale items in portable root..." -ForegroundColor Yellow
+Write-Host ""
+
+Get-ChildItem -Path $portableDir -Force | ForEach-Object {
+    if ($allowedPortableRootEntries -contains $_.Name) {
+        return
+    }
+
+    if ($DryRun) {
+        Write-Host "  [DRY RUN] Will remove stale item: $($_.Name)" -ForegroundColor Yellow
+        return
+    }
+
+    try {
+        Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  🗑️  Removed stale item: $($_.Name)" -ForegroundColor Gray
+    } catch {
+        Write-Host "  ❌ FAILED to remove stale item: $($_.Name) - $_" -ForegroundColor Red
+    }
+}
+
+Write-Host ""
+
 Write-Host "Syncing directories..." -ForegroundColor Yellow
 Write-Host ""
 
@@ -270,12 +327,12 @@ Write-Host ""
 Write-Host "Syncing docs..." -ForegroundColor Yellow
 Write-Host ""
 
-$docsSource = Join-Path $root "docs"
+$docsSource = Join-Path $root "docs\release_v2.0"
 $docsDest = Join-Path $portableDir "docs"
 
 if (Test-Path $docsSource) {
     if ($DryRun) {
-        Write-Host "  [DRY RUN] Will copy entire directory: docs" -ForegroundColor Yellow
+        Write-Host "  [DRY RUN] Will copy release docs directory: docs\\release_v2.0 -> docs" -ForegroundColor Yellow
     } else {
         try {
             # 删除目标目录（如果存在）
@@ -283,9 +340,11 @@ if (Test-Path $docsSource) {
                 Remove-Item -Path $docsDest -Recurse -Force
             }
 
-            # 复制整个目录
-            Copy-Item -Path $docsSource -Destination $docsDest -Recurse -Force
-            Write-Host "  ✅ Copied entire directory" -ForegroundColor Green
+            New-Item -ItemType Directory -Path $docsDest -Force | Out-Null
+
+            # 仅复制面向发布的用户文档
+            Copy-Item -Path (Join-Path $docsSource "*") -Destination $docsDest -Recurse -Force
+            Write-Host "  ✅ Copied release_v2.0 user docs only" -ForegroundColor Green
 
             # 删除 __pycache__ 目录
             $pycacheDirs = Get-ChildItem -Path $docsDest -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue
@@ -304,6 +363,8 @@ if (Test-Path $docsSource) {
             Write-Host "  ❌ FAILED: docs - $_" -ForegroundColor Red
         }
     }
+} else {
+    Write-Host "  ❌ FAILED: docs\\release_v2.0 not found" -ForegroundColor Red
 }
 
 Write-Host ""
