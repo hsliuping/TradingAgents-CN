@@ -400,8 +400,11 @@
                           <span v-if="aiLoading && idx === aiPendingAssistantIndex" class="timeline-status">处理中</span>
                         </div>
                         <div v-for="(step, stepIdx) in msg.progressSteps" :key="`${idx}-${stepIdx}`" class="timeline-step">
-                          <span class="step-dot" :class="{ active: aiLoading && idx === aiPendingAssistantIndex && stepIdx === msg.progressSteps.length - 1 }"></span>
-                          <span class="step-text">{{ step }}</span>
+                          <span class="step-dot" :class="[{ success: step.tone === 'success' }, { active: aiLoading && idx === aiPendingAssistantIndex && stepIdx === msg.progressSteps.length - 1 }]"></span>
+                          <div class="step-content">
+                            <span class="step-text">{{ step.text }}</span>
+                            <span v-if="step.meta" class="step-meta">{{ step.meta }}</span>
+                          </div>
                         </div>
                       </div>
                       <div v-if="msg.content" class="message-text markdown-content" v-html="renderScreeningMarkdown(msg.content)"></div>
@@ -491,7 +494,7 @@ interface AiDisplayMessage {
   stocks?: StockRecommendation[]
   phase?: 'confirmation' | 'planning' | 'result'
   is_fallback?: boolean
-  progressSteps?: string[]
+  progressSteps?: Array<{ text: string; tone?: 'info' | 'success'; meta?: string }>
 }
 const aiMessages = ref<AiDisplayMessage[]>([])
 const aiInput = ref('')
@@ -515,6 +518,28 @@ const getPhaseLabel = (phase?: AiDisplayMessage['phase']) => {
   if (phase === 'planning') return '执行规划中'
   if (phase === 'result') return '筛选执行中'
   return '处理中'
+}
+
+const buildToolSummaryText = (tool?: string, summary?: Record<string, number>) => {
+  if (!tool || !summary) return ''
+
+  if (tool === 'screen_stocks_by_criteria') {
+    const total = summary.total_candidates
+    const shown = summary.displayed_candidates
+    if (typeof total === 'number' && typeof shown === 'number') {
+      return `${total} 只候选，展示 ${shown} 只`
+    }
+  }
+
+  if (tool === 'batch_check_profit_consistency') {
+    const parts: string[] = []
+    if (typeof summary.stable_count === 'number') parts.push(`稳定 ${summary.stable_count}`)
+    if (typeof summary.volatile_count === 'number') parts.push(`不稳定 ${summary.volatile_count}`)
+    if (typeof summary.no_data_count === 'number') parts.push(`无数据 ${summary.no_data_count}`)
+    return parts.join(' / ')
+  }
+
+  return ''
 }
 
 const loadAiConversation = async () => {
@@ -550,8 +575,22 @@ const appendPendingAssistantLine = (line: string) => {
   const idx = aiPendingAssistantIndex.value
   if (idx == null || !aiMessages.value[idx] || !line) return
   const steps = [...(aiMessages.value[idx].progressSteps || [])]
-  if (steps[steps.length - 1] === line) return
-  steps.push(line)
+  if (steps[steps.length - 1]?.text === line) return
+  steps.push({ text: line, tone: 'info' })
+  aiMessages.value[idx] = {
+    ...aiMessages.value[idx],
+    progressSteps: steps,
+  }
+  scrollAiToBottom()
+}
+
+const appendPendingAssistantStep = (step: { text: string; tone?: 'info' | 'success'; meta?: string }) => {
+  const idx = aiPendingAssistantIndex.value
+  if (idx == null || !aiMessages.value[idx] || !step.text) return
+  const steps = [...(aiMessages.value[idx].progressSteps || [])]
+  const prev = steps[steps.length - 1]
+  if (prev?.text === step.text && prev?.meta === step.meta) return
+  steps.push(step)
   aiMessages.value[idx] = {
     ...aiMessages.value[idx],
     progressSteps: steps,
@@ -575,12 +614,16 @@ const handleAiWebSocketMessage = (envelope: ScreeningWsEnvelope<any>) => {
     }
 
     if (data.event === 'tool_started' && data.tool) {
-      appendPendingAssistantLine(`正在查询：${data.tool}`)
+      appendPendingAssistantStep({ text: `正在查询：${data.tool}`, tone: 'info' })
       return
     }
 
     if (data.event === 'tool_completed' && data.tool) {
-      appendPendingAssistantLine(`已完成：${data.tool}`)
+      appendPendingAssistantStep({
+        text: `已完成：${data.tool}`,
+        tone: 'success',
+        meta: buildToolSummaryText(data.tool, data.summary),
+      })
       return
     }
 
@@ -680,7 +723,7 @@ const sendAiMessage = async (text: string) => {
       stocks: undefined,
       phase: 'result',
       is_fallback: false,
-      progressSteps: ['正在建立智能筛选流式连接'],
+      progressSteps: [{ text: '正在建立智能筛选流式连接', tone: 'info' }],
     })
     aiPendingAssistantIndex.value = aiMessages.value.length - 1
     scrollAiToBottom()
@@ -1374,16 +1417,38 @@ onUnmounted(() => {
         background: var(--el-border-color-dark);
         flex-shrink: 0;
 
+        &.success {
+          background: var(--el-color-success);
+        }
+
         &.active {
           background: var(--el-color-primary);
           box-shadow: 0 0 0 4px rgba(64, 158, 255, 0.14);
         }
       }
 
+      .step-content {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+
       .step-text {
         font-size: 13px;
         line-height: 1.55;
         color: var(--el-text-color-regular);
+      }
+
+      .step-meta {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(64, 158, 255, 0.08);
+        color: var(--el-color-primary-dark-2);
+        font-size: 12px;
+        line-height: 1.4;
       }
     }
 

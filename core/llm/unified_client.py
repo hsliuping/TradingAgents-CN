@@ -8,6 +8,7 @@ import asyncio
 import inspect
 import json
 import logging
+import re
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -157,6 +158,32 @@ class UnifiedLLMClient:
                 await result
         except Exception as e:
             logger.debug("[UnifiedLLM] 进度回调失败(忽略): %s", e)
+
+    def _summarize_tool_result(self, tool_name: str, content: str) -> Dict[str, Any]:
+        """提取批量工具结果摘要，便于前端展示执行产出。"""
+        if not content:
+            return {}
+
+        if tool_name == "screen_stocks_by_criteria":
+            match = re.search(r"共找到\s*(\d+)\s*只符合条件的股票，以下展示前\s*(\d+)\s*只", content)
+            if match:
+                return {
+                    "total_candidates": int(match.group(1)),
+                    "displayed_candidates": int(match.group(2)),
+                }
+            if "未找到符合条件的股票" in content:
+                return {"total_candidates": 0, "displayed_candidates": 0}
+
+        if tool_name == "batch_check_profit_consistency":
+            match = re.search(r"稳定\s*(\d+)\s*只\s*\|\s*不稳定\s*(\d+)\s*只\s*\|\s*无数据\s*(\d+)\s*只", content)
+            if match:
+                return {
+                    "stable_count": int(match.group(1)),
+                    "volatile_count": int(match.group(2)),
+                    "no_data_count": int(match.group(3)),
+                }
+
+        return {}
 
     def chat(
         self,
@@ -322,6 +349,7 @@ class UnifiedLLMClient:
                     "tool": tool_call.name,
                     "is_error": result.is_error,
                     "preview": (result.content or "")[:400],
+                    "summary": self._summarize_tool_result(tool_call.name, result.content or ""),
                 })
                 current_messages.append(Message(
                     role="tool",
