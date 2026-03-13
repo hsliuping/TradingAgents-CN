@@ -16,3 +16,4 @@ agent: "autoreleases"
 6. 对 upgrade_config 要指出建议检查的集合，例如 system_configs、prompt_templates、agent_configs、workflow_definitions、tool_configs。
 7. 对 migration 要指出是否缺失、是否不完整、是否存在幂等性或字段复制风险。
 8. 默认采用只读分析模式，除非我明确要求开始实施，否则不要直接修改文件。
+9. 额外整理一份“目标版本相对上一版本的改进说明文档”草稿，供最终发布说明直接复用；如果我要求写入最终物料，则以单独 Markdown 文档形式输出。
