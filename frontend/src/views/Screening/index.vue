@@ -414,6 +414,8 @@
                         <el-button type="default" size="small" @click="sendAiMessage('重新描述需求')">重新描述需求</el-button>
                       </div>
                       <div v-if="msg.stocks?.length" class="stock-cards">
+                        <el-alert v-if="msg.is_fallback" type="warning" :closable="false" show-icon
+                          title="以下为超时降级结果（按市值排序的快速候选），请输入更明确条件获取精确筛选" style="margin-bottom:8px;" />
                         <el-card v-for="s in msg.stocks" :key="s.code" class="stock-card" shadow="hover">
                           <div class="stock-card-header">
                             <span class="stock-name">{{ s.name }}</span>
@@ -484,6 +486,7 @@ interface AiDisplayMessage {
   tools_used?: string[]
   stocks?: StockRecommendation[]
   phase?: 'confirmation' | 'planning' | 'result'
+  is_fallback?: boolean
 }
 const aiMessages = ref<AiDisplayMessage[]>([])
 const aiInput = ref('')
@@ -509,6 +512,7 @@ const loadAiConversation = async () => {
         tools_used: m.tools_used,
         stocks: m.stocks,
         phase: m.phase,
+        is_fallback: m.is_fallback,
       }))
       scrollAiToBottom()
     }
@@ -530,6 +534,7 @@ const sendAiMessage = async (text: string) => {
       tools_used: data.tools_used?.length ? data.tools_used : undefined,
       stocks: data.stocks?.length ? data.stocks : undefined,
       phase: data.phase,
+      is_fallback: data.is_fallback ?? false,
     })
     scrollAiToBottom()
   } catch (e: unknown) {

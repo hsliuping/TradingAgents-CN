@@ -72,7 +72,8 @@ export interface ScreeningChatResponse {
   reply: string
   tools_used: string[]
   stocks: StockRecommendation[]
-  phase: 'confirmation' | 'result'
+  phase: 'confirmation' | 'planning' | 'result'
+  is_fallback?: boolean
 }
 
 export interface ScreeningMessageItem {
@@ -80,7 +81,8 @@ export interface ScreeningMessageItem {
   content: string
   tools_used?: string[]
   stocks?: StockRecommendation[]
-  phase?: 'confirmation' | 'result'
+  phase?: 'confirmation' | 'planning' | 'result'
+  is_fallback?: boolean
 }
 
 export interface ScreeningConversationResponse {

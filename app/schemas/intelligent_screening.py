@@ -26,6 +26,7 @@ class ScreeningChatResponse(BaseModel):
     tools_used: List[str] = Field(default_factory=list, description="使用的工具列表")
     stocks: List[StockRecommendation] = Field(default_factory=list, description="推荐的股票列表")
     phase: str = Field("result", description="当前阶段: confirmation=需求确认, planning=执行规划, result=筛选结果")
+    is_fallback: bool = Field(False, description="是否为降级候选结果（LLM超时后由数据库粗筛兜底）")
 
 
 class ScreeningMessageItem(BaseModel):
@@ -35,6 +36,7 @@ class ScreeningMessageItem(BaseModel):
     tools_used: Optional[List[str]] = Field(None, description="工具列表")
     stocks: Optional[List[StockRecommendation]] = Field(None, description="推荐股票")
     phase: Optional[str] = Field(None, description="阶段标记: confirmation / planning / result")
+    is_fallback: Optional[bool] = Field(None, description="是否为降级候选结果")
 
 
 class ScreeningConversationResponse(BaseModel):

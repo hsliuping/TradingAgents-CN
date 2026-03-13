@@ -8,6 +8,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -34,6 +35,16 @@ MAX_CONTEXT_MESSAGES = 20
 # "screening" 类别包含 screen_stocks_by_criteria 批量筛选工具（核心）
 SCREENING_TOOL_CATEGORIES = ["screening", "market", "fundamentals", "news", "china", "technical"]
 
+# 执行阶段工具收敛：优先仅允许批量筛选链路，避免单股重工具放大时延
+RESULT_TOOL_ALLOWLIST = {
+    "screen_stocks_by_criteria",
+    "batch_check_profit_consistency",
+}
+
+# 选股场景独立预算，默认比全局助手更紧，避免长尾请求拖垮体验
+SCREENING_MAX_TOOL_ROUNDS = int(os.environ.get("SCREENING_MAX_TOOL_ROUNDS", "4"))
+SCREENING_RESULT_TIMEOUT_SECONDS = int(os.environ.get("SCREENING_RESULT_TIMEOUT_SECONDS", "75"))
+
 
 class IntelligentScreeningService:
     """
@@ -47,6 +58,7 @@ class IntelligentScreeningService:
         self._db = db
         self._llm_client: Optional[UnifiedLLMClient] = None
         self._openai_tools: Optional[list] = None
+        self._result_openai_tools: Optional[list] = None
         self._tool_functions: Optional[dict] = None
 
     async def _ensure_client(self) -> bool:
@@ -80,9 +92,79 @@ class IntelligentScreeningService:
                 if func:
                     self._tool_functions[tool.id] = func
 
+        # 结果执行阶段仅保留批量筛选相关工具，限制工具链复杂度
+        self._result_openai_tools = self._filter_result_tools(self._openai_tools)
+        if not self._result_openai_tools:
+            self._result_openai_tools = self._openai_tools
+            logger.warning("[智能筛选] 结果阶段批量工具白名单为空，回退到完整工具集")
+
         self._llm_client.inject_tools(self._tool_functions)
-        logger.info(f"[智能筛选] 已加载 {len(self._openai_tools)} 个选股工具")
+        logger.info(
+            f"[智能筛选] 已加载 {len(self._openai_tools)} 个选股工具，"
+            f"结果阶段使用 {len(self._result_openai_tools)} 个批量工具"
+        )
         return True
+
+    def _filter_result_tools(self, openai_tools: Optional[list]) -> list:
+        """过滤 result 阶段可用工具，优先保留批量筛选链路。"""
+        if not openai_tools:
+            return []
+
+        filtered = []
+        for t in openai_tools:
+            fn = t.get("function", {}) if isinstance(t, dict) else {}
+            name = fn.get("name")
+            if name in RESULT_TOOL_ALLOWLIST:
+                filtered.append(t)
+        return filtered
+
+    def _get_last_successful_stocks_from_history(self, history: list, max_stocks: int = 5) -> list:
+        """从历史消息中提取最近一次非空股票结果，用于超时降级兜底。"""
+        if not history:
+            return []
+
+        for msg in reversed(history):
+            if msg.get("role") != "assistant":
+                continue
+            stocks = msg.get("stocks") or []
+            if isinstance(stocks, list) and stocks:
+                return stocks[:max_stocks]
+        return []
+
+    async def _quick_screen_fallback(self, limit: int = 5) -> list:
+        """超时后的数据库粗筛兜底：直接返回高流动性高市值候选。"""
+        try:
+            from app.services.database_screening_service import get_database_screening_service
+
+            service = get_database_screening_service()
+            # 仅做轻量硬条件，保证响应速度
+            conditions = [
+                {"field": "is_st", "operator": "==", "value": False},
+                {"field": "total_mv", "operator": ">", "value": 30},
+            ]
+            items, _ = await service.screen_stocks(
+                conditions=conditions,
+                limit=max(1, min(limit, 10)),
+                offset=0,
+                order_by=[{"field": "total_mv", "direction": "desc"}],
+            )
+
+            stocks = []
+            for item in items:
+                stocks.append({
+                    "code": item.get("code", ""),
+                    "name": item.get("name", ""),
+                    "industry": item.get("industry", ""),
+                    "price": item.get("close"),
+                    "pe": item.get("pe") or item.get("pe_ttm"),
+                    "pb": item.get("pb") or item.get("pb_mrq"),
+                    "pct_change": item.get("pct_chg"),
+                    "reason": "超时降级候选：按非ST+市值排序的快速粗筛结果",
+                })
+            return stocks
+        except Exception as e:
+            logger.warning(f"[智能筛选] 快速粗筛降级失败: {e}")
+            return []
 
     async def chat(self, user_id: str, message: str) -> Dict[str, Any]:
         """
@@ -109,7 +191,7 @@ class IntelligentScreeningService:
 
         # 3. 构建消息列表（包含历史）
         # planning 阶段需要将实际可用的工具清单传入提示词，防止 LLM 幻觉工具名
-        tool_summary = self._build_tool_summary() if phase == "planning" else ""
+        tool_summary = self._build_tool_summary(self._result_openai_tools) if phase == "planning" else ""
         system_prompt = self._get_system_prompt(phase, tool_summary)
         messages = [Message(role=MessageRole.SYSTEM, content=system_prompt)]
         for h in history:
@@ -125,9 +207,9 @@ class IntelligentScreeningService:
                 # 阶段 3：实际调用工具执行筛选
                 resp = await self._llm_client.achat(
                     messages,
-                    tools=self._openai_tools,
+                    tools=self._result_openai_tools,
                     auto_execute_tools=True,
-                    max_tool_rounds=8,
+                    max_tool_rounds=SCREENING_MAX_TOOL_ROUNDS,
                     tools_used=tools_used,
                 )
             else:
@@ -136,16 +218,52 @@ class IntelligentScreeningService:
             return resp.content
 
         try:
+            started_at = datetime.now(timezone.utc)
             content = await asyncio.wait_for(
                 _do_chat(),
-                timeout=ASSISTANT_TIMEOUT_SECONDS,
+                timeout=SCREENING_RESULT_TIMEOUT_SECONDS if phase == "result" else ASSISTANT_TIMEOUT_SECONDS,
             )
             reply = content or "抱歉，暂时无法生成回答，请稍后再试。"
+            elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
+            logger.info(
+                f"[智能筛选] 完成 phase={phase} elapsed={elapsed:.2f}s tools_used={len(tools_used)}"
+            )
         except asyncio.TimeoutError:
-            logger.warning(f"[智能筛选] 请求超时（{ASSISTANT_TIMEOUT_SECONDS}s）")
+            timeout_seconds = (
+                SCREENING_RESULT_TIMEOUT_SECONDS if phase == "result" else ASSISTANT_TIMEOUT_SECONDS
+            )
+            logger.warning(f"[智能筛选] 请求超时（{timeout_seconds}s，phase={phase}）")
+
+            # result 阶段超时时，优先回退到最近一次成功结果，再回退到数据库快速粗筛
+            fallback_stocks = []
+            if phase == "result":
+                fallback_stocks = self._get_last_successful_stocks_from_history(history, max_stocks=5)
+                if not fallback_stocks:
+                    fallback_stocks = await self._quick_screen_fallback(limit=5)
+
+            if fallback_stocks:
+                reply = (
+                    f"处理超时（超过 {timeout_seconds} 秒），已为您返回降级候选结果（共 {len(fallback_stocks)} 只）。\n"
+                    "可继续输入更明确条件（行业、PE、市值、是否ST）以获取更精确筛选。\n\n"
+                    "```json\n"
+                    f"{json.dumps({'stocks': fallback_stocks}, ensure_ascii=False, indent=2)}\n"
+                    "```"
+                )
+                await self._save_message(user_id, message, reply, tools_used, fallback_stocks, "result")
+                return {
+                    "reply": reply,
+                    "tools_used": tools_used,
+                    "stocks": fallback_stocks,
+                    "phase": "result",
+                    "is_fallback": True,
+                }
+
             reply = (
-                f"抱歉，处理您的选股需求用时过长（已超过 {ASSISTANT_TIMEOUT_SECONDS} 秒）。\n\n"
-                "建议您：\n• 缩小筛选范围，如指定行业\n• 稍后重试"
+                f"抱歉，处理您的选股需求用时过长（已超过 {timeout_seconds} 秒）。\n\n"
+                "建议您：\n"
+                "• 保留 2-3 个硬条件（如 PE / 市值 / 非ST）\n"
+                "• 指定行业后再筛选\n"
+                "• 稍后重试"
             )
             await self._save_message(user_id, message, reply, tools_used, [], "result")
             return {"reply": reply, "tools_used": tools_used, "stocks": [], "phase": "result"}
@@ -210,12 +328,13 @@ class IntelligentScreeningService:
         messages = doc["messages"]
         return messages[-MAX_CONTEXT_MESSAGES:]
 
-    def _build_tool_summary(self) -> str:
+    def _build_tool_summary(self, tools: Optional[list] = None) -> str:
         """将当前注册的工具列表转为文字说明，供 planning 阶段系统提示词使用"""
-        if not self._openai_tools:
+        target_tools = tools if tools is not None else self._openai_tools
+        if not target_tools:
             return "（暂无可用工具）"
         lines = []
-        for t in self._openai_tools:
+        for t in target_tools:
             fn = t.get("function", {})
             name = fn.get("name", "")
             desc = fn.get("description", "")
@@ -468,20 +587,34 @@ class IntelligentScreeningService:
         ]
         tools_used: List[str] = []
         try:
+            started_at = datetime.now(timezone.utc)
             resp = await asyncio.wait_for(
                 self._llm_client.achat(
                     messages,
-                    tools=self._openai_tools,
+                    tools=self._result_openai_tools,
                     auto_execute_tools=True,
-                    max_tool_rounds=8,
+                    max_tool_rounds=SCREENING_MAX_TOOL_ROUNDS,
                     tools_used=tools_used,
                 ),
-                timeout=ASSISTANT_TIMEOUT_SECONDS,
+                timeout=SCREENING_RESULT_TIMEOUT_SECONDS,
             )
             reply = (resp.content if resp else None) or "未能生成选股结果，请稍后重试。"
+            elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
+            logger.info(f"[智能筛选] run_direct_screening 完成 elapsed={elapsed:.2f}s tools_used={len(tools_used)}")
         except asyncio.TimeoutError:
+            fallback_stocks = await self._quick_screen_fallback(limit=max_stocks)
+            if fallback_stocks:
+                reply = (
+                    f"选股处理超时（超过 {SCREENING_RESULT_TIMEOUT_SECONDS} 秒），"
+                    f"已返回降级候选（{len(fallback_stocks)} 只）。\n\n"
+                    "```json\n"
+                    f"{json.dumps({'stocks': fallback_stocks}, ensure_ascii=False, indent=2)}\n"
+                    "```"
+                )
+                return {"reply": reply, "stocks": fallback_stocks, "phase": "result", "is_fallback": True}
+
             reply = (
-                f"选股处理超时（超过 {ASSISTANT_TIMEOUT_SECONDS} 秒）。"
+                f"选股处理超时（超过 {SCREENING_RESULT_TIMEOUT_SECONDS} 秒）。"
                 "建议缩小筛选范围或稍后重试。"
             )
         except Exception as e:
