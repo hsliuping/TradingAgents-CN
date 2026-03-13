@@ -101,7 +101,7 @@ jobs:
           echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-frontend:latest" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# Run with docker-compose" >> $GITHUB_STEP_SUMMARY
-          echo "docker-compose -f docker-compose.hub.yml up -d" >> $GITHUB_STEP_SUMMARY
+          echo "docker compose -f docker-compose.hub.nginx.yml up -d" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Verify Architecture" >> $GITHUB_STEP_SUMMARY

@@ -60,8 +60,8 @@
 
 ### 📊 技术栈升级
 
-| 组件 | v0.1.x | v1.0.0-preview |
-|------|--------|----------------|
+| 组件 | v0.1.x | v2.0.1 |
+|------|--------|--------|
 | **后端框架** | Streamlit | FastAPI + Uvicorn |
 | **前端框架** | Streamlit | Vue 3 + Vite + Element Plus |
 | **数据库** | 可选 MongoDB | MongoDB + Redis |
@@ -89,6 +89,8 @@
 #### 📚 使用指南
 
 在使用前，建议先阅读详细的使用指南：
+
+说明：以下外链文章标题保留其发布时的历史版本名，安装与排障流程大多仍可参考；如与当前仓库实现冲突，请以本仓库中的 docs、VERSION 和发布说明为准。
 
 - **[1、📘 TradingAgents-CN v1.0.0-preview 使用指南](https://mp.weixin.qq.com/s/ppsYiBncynxlsfKFG8uEbw)**
 - **[2、📘 使用 Docker Compose 部署TradingAgents-CN v1.0.0-preview（完全版）](https://mp.weixin.qq.com/s/JkA0cOu8xJnoY_3LC5oXNw)**

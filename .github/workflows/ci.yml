@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - v3.0
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-smoke:
+    name: Backend Smoke Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装最小测试依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi pydantic pydantic-settings python-multipart concurrent-log-handler pytest httpx
+
+      - name: 运行后端 smoke 测试
+        run: |
+          pytest -q tests/config/test_settings.py tests/config/test_logging_config.py tests/middleware/test_trace_id.py
+
+  frontend-quality:
+    name: Frontend Smoke Checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装前端依赖
+        run: npm ci --no-audit --no-fund
+
+      - name: 关键文件 lint
+        run: npx eslint --config .eslintrc.cjs --no-ignore src/views/Workflow/McpServers.vue src/api/mcp.ts
+
+      - name: 构建 smoke
+        run: npm exec vite build
