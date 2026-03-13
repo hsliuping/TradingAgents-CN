@@ -89,6 +89,22 @@ export interface ScreeningConversationResponse {
   messages: ScreeningMessageItem[]
 }
 
+export interface ScreeningWsEnvelope<T = any> {
+  type: 'connected' | 'started' | 'progress' | 'final' | 'error' | 'pong'
+  data: T
+}
+
+export interface ScreeningWsProgressData {
+  event: string
+  phase?: 'confirmation' | 'planning' | 'result'
+  message?: string
+  tool?: string
+  tools_used?: string[]
+  stocks?: StockRecommendation[]
+  preview?: string
+  timestamp?: string
+}
+
 export const screeningApi = {
   run: (payload: ScreeningRunReq, options?: { timeout?: number }) =>
     ApiClient.post<ScreeningRunResp>('/api/screening/run', payload, { timeout: options?.timeout ?? 120000 }),
@@ -98,6 +114,11 @@ export const screeningApi = {
   // 智能筛选
   intelligentChat: (message: string) =>
     ApiClient.post<ScreeningChatResponse>('/api/screening/intelligent/chat', { message }, { timeout: 180000 }),
+  getIntelligentChatWsUrl: (token: string) => {
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const host = window.location.host
+    return `${wsProtocol}//${host}/api/screening/intelligent/ws?token=${encodeURIComponent(token)}`
+  },
   getIntelligentConversation: () =>
     ApiClient.get<ScreeningConversationResponse>('/api/screening/intelligent/conversation'),
   clearIntelligentConversation: () =>
