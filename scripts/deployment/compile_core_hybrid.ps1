@@ -10,7 +10,8 @@ param(
     [string]$SourceDir = "",
     [string]$OutputDir = "",
     [switch]$SkipCython = $false,
-    [switch]$KeepSource = $false
+    [switch]$KeepSource = $false,
+    [switch]$AllowBytecodeFallback = $false
 )
 
 # 设置控制台和文件编码为UTF-8
@@ -21,6 +22,15 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$portablePython = Join-Path $root "release\TradingAgentsCN-portable\vendors\python\python.exe"
+$venvPython = Join-Path $root "env\Scripts\python.exe"
+$runtimePythonExe = if (Test-Path $portablePython) { $portablePython } else { "python" }
+$buildPythonExe = if (Test-Path $venvPython) { $venvPython } elseif (Get-Command python -ErrorAction SilentlyContinue) { "python" } else { $runtimePythonExe }
+$requiredLicensingModules = @(
+    "validator",
+    "manager",
+    "features"
+)
 
 Write-Host "============================================================================" -ForegroundColor Cyan
 Write-Host "  Hybrid Core Compilation" -ForegroundColor Cyan
@@ -50,6 +60,8 @@ if (-not (Test-Path $SourceDir)) {
 
 Write-Host "Source: $SourceDir" -ForegroundColor Green
 Write-Host "Output: $OutputDir" -ForegroundColor Green
+Write-Host "Build Python: $buildPythonExe" -ForegroundColor Green
+Write-Host "Runtime Python: $runtimePythonExe" -ForegroundColor Green
 Write-Host ""
 
 # ============================================================================
@@ -119,16 +131,28 @@ if (-not $SkipCython) {
 
     # 检查Cython
     try {
-        $cythonVersion = & python -c "import Cython; print(Cython.__version__)" 2>&1
+        $cythonVersion = & $buildPythonExe -c "import Cython; print(Cython.__version__)" 2>&1
         Write-Host "  Using Cython: $cythonVersion" -ForegroundColor Gray
     } catch {
-        Write-Host "  ⚠️  Cython not installed, skipping Cython compilation" -ForegroundColor Yellow
-        Write-Host "  Install with: pip install Cython" -ForegroundColor Gray
-        $SkipCython = $true
+        if ($AllowBytecodeFallback) {
+            Write-Host "  ⚠️  Cython not installed, skipping Cython compilation" -ForegroundColor Yellow
+            Write-Host "  Install with: pip install Cython" -ForegroundColor Gray
+            $SkipCython = $true
+        } else {
+            throw "Cython is required for core/licensing but is not installed"
+        }
     }
 
     if (-not $SkipCython) {
         $licensingDir = Join-Path $OutputDir "licensing"
+        $sourceLicensingDir = Join-Path $root "core\licensing"
+        $licensingBuildRoot = Join-Path $root "build\licensing_build"
+        $licensingBuildLibDir = Join-Path $licensingBuildRoot "lib"
+        $licensingBuildTempDir = Join-Path $licensingBuildRoot "temp"
+
+        if (Test-Path $licensingBuildRoot) {
+            Remove-Item -Path $licensingBuildRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
         
         # 创建setup.py
         $setupPy = @"
@@ -185,46 +209,99 @@ setup(
         }
 
         Write-Host "  Compiling..." -ForegroundColor Gray
-        $buildProcess = Start-Process -FilePath "python" -ArgumentList @(
+        $buildProcess = Start-Process -FilePath $buildPythonExe -ArgumentList @(
             $setupPath,
             "build_ext",
-            "--inplace"
+            "--build-lib",
+            $licensingBuildLibDir,
+            "--build-temp",
+            $licensingBuildTempDir
         ) -Wait -PassThru -NoNewWindow
 
         if ($buildProcess.ExitCode -eq 0) {
             Write-Host "  ✅ Cython compilation completed" -ForegroundColor Green
 
-            # 复制编译后的文件到目标目录
-            $buildLibDir = Join-Path $root "build\lib.win-amd64-cpython-310\core\licensing"
-            if (Test-Path $buildLibDir) {
-                Get-ChildItem -Path $buildLibDir -Include "*.pyd", "*.so" -Recurse | ForEach-Object {
-                    $destPath = Join-Path $licensingDir $_.Name
-                    Copy-Item -Path $_.FullName -Destination $destPath -Force
-                    Write-Host "  Compiled: $($_.Name)" -ForegroundColor Gray
+            # 复制编译后的文件到目标目录。
+            # 避免使用 --inplace 回写源码目录，减少 Windows 下的锁文件和杀毒扫描导致的间歇性卡住。
+            $candidateDirs = @(
+                (Join-Path $licensingBuildLibDir "core\licensing"),
+                $sourceLicensingDir,
+                $licensingDir
+            ) | Select-Object -Unique
+            $compiledArtifacts = @()
+
+            foreach ($candidateDir in $candidateDirs) {
+                if (-not (Test-Path $candidateDir)) {
+                    continue
                 }
-            } else {
-                Write-Host "  ⚠️  Build output directory not found: $buildLibDir" -ForegroundColor Yellow
+
+                $compiledArtifacts += Get-ChildItem -Path $candidateDir -File -ErrorAction SilentlyContinue | Where-Object {
+                    $_.Extension -in @('.pyd', '.so')
+                }
+            }
+
+            $compiledArtifacts = $compiledArtifacts | Sort-Object FullName -Unique
+            if (-not $compiledArtifacts) {
+                throw "No compiled licensing artifacts (.pyd/.so) were produced"
+            }
+
+            foreach ($artifact in $compiledArtifacts) {
+                $destPath = Join-Path $licensingDir $artifact.Name
+                if ($artifact.FullName -ne $destPath) {
+                    Copy-Item -Path $artifact.FullName -Destination $destPath -Force
+                }
+                Write-Host "  Compiled: $($artifact.Name)" -ForegroundColor Gray
+            }
+
+            foreach ($moduleName in $requiredLicensingModules) {
+                $compiledModule = Get-ChildItem -Path $licensingDir -Filter "$moduleName*.pyd" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+                if (-not $compiledModule) {
+                    throw "Missing compiled licensing module: $moduleName"
+                }
             }
             
-            # 删除源码（保留__init__.py和models.py）
+            # 删除源码，仅在缺少编译产物时保留
             Get-ChildItem -Path $licensingDir -Filter "*.py" | ForEach-Object {
                 $fileName = $_.Name
-                if ($fileName -notin @("__init__.py", "models.py")) {
+                $pycPath = [System.IO.Path]::ChangeExtension($_.FullName, '.pyc')
+                $pydPath = [System.IO.Path]::ChangeExtension($_.FullName, '.pyd')
+
+                if ((Test-Path $pycPath) -or (Test-Path $pydPath)) {
                     Remove-Item -Path $_.FullName -Force
                     Write-Host "  Removed source: $fileName" -ForegroundColor Gray
+                } else {
+                    Write-Host "  ⚠️  Keeping source without compiled output: $fileName" -ForegroundColor Yellow
                 }
             }
             
             # 清理
             Remove-Item -Path $setupPath -Force -ErrorAction SilentlyContinue
-            Remove-Item -Path (Join-Path $root "build") -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path $licensingBuildRoot -Recurse -Force -ErrorAction SilentlyContinue
             Get-ChildItem -Path $licensingDir -Include "*.c" -Recurse | Remove-Item -Force
+
+            if ($sourceLicensingDir -ne $licensingDir -and (Test-Path $sourceLicensingDir)) {
+                Get-ChildItem -Path $sourceLicensingDir -Include "*.pyd", "*.lib", "*.exp" -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+            }
         } else {
-            Write-Host "  ⚠️  Cython compilation failed, falling back to bytecode" -ForegroundColor Yellow
+            if ($AllowBytecodeFallback) {
+                Write-Host "  ⚠️  Cython compilation failed, falling back to bytecode" -ForegroundColor Yellow
+            } else {
+                throw "Cython compilation failed for core/licensing"
+            }
         }
     }
 } else {
     Write-Host "[2/4] Skipping Cython compilation..." -ForegroundColor Gray
+}
+
+if (-not $SkipCython -and -not $AllowBytecodeFallback) {
+    $licensingDir = Join-Path $OutputDir "licensing"
+    foreach ($moduleName in $requiredLicensingModules) {
+        $compiledModule = Get-ChildItem -Path $licensingDir -Filter "$moduleName*.pyd" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $compiledModule) {
+            throw "Strict licensing compilation check failed: missing $moduleName*.pyd"
+        }
+    }
 }
 
 Write-Host ""
@@ -245,7 +322,7 @@ $compileArgs = @(
 )
 
 Write-Host "  Compiling..." -ForegroundColor Gray
-$compileProcess = Start-Process -FilePath "python" -ArgumentList $compileArgs -Wait -PassThru -NoNewWindow
+$compileProcess = Start-Process -FilePath $runtimePythonExe -ArgumentList $compileArgs -Wait -PassThru -NoNewWindow
 
 if ($compileProcess.ExitCode -eq 0) {
     Write-Host "  ✅ Bytecode compilation completed" -ForegroundColor Green
@@ -293,49 +370,16 @@ if ($KeepSource) {
         $fileName = $_.Name
         $relativePath = $pyFile.Substring($OutputDir.Length + 1)
 
-        # 保留的文件
-        $keepFiles = @(
-            "__init__.py",
-            "models.py"  # licensing/models.py需要保留（被其他模块导入）
-        )
+        # 检查是否有对应的.pyc或.pyd文件
+        $pycFile = $pyFile -replace "\.py$", ".pyc"
+        $pydFile = $pyFile -replace "\.py$", ".pyd"
 
-        # 🔥 保留的目录（不删除源码）
-        $keepDirs = @(
-            "prompts"  # 提示词模板目录，必须保留源码
-        )
-
-        # 检查是否在保留目录中
-        $inKeepDir = $false
-        foreach ($keepDir in $keepDirs) {
-            if ($relativePath -like "*\$keepDir\*" -or $relativePath -like "$keepDir\*") {
-                $inKeepDir = $true
-                break
-            }
-        }
-
-        if ($inKeepDir) {
-            Write-Host "  Kept (in prompts/): $relativePath" -ForegroundColor Cyan
-        } elseif ($fileName -in $keepFiles) {
-            # 清空__init__.py内容（只保留导入）
-            if ($fileName -eq "__init__.py") {
-                $content = Get-Content $pyFile -Raw -ErrorAction SilentlyContinue
-                if ($content -and $content -match "__all__\s*=") {
-                    $content -replace "(?s)^(.*?__all__\s*=\s*\[.*?\]).*", '$1' | Set-Content $pyFile
-                } else {
-                    "" | Set-Content $pyFile
-                }
-                Write-Host "  Cleaned: $relativePath" -ForegroundColor Gray
-            }
+        if ((Test-Path $pycFile) -or (Test-Path $pydFile)) {
+            Remove-Item -Path $pyFile -Force
+            $deleteCount++
+            Write-Host "  Deleted: $relativePath" -ForegroundColor Gray
         } else {
-            # 检查是否有对应的.pyc或.pyd文件
-            $pycFile = $pyFile -replace "\.py$", ".pyc"
-            $pydFile = $pyFile -replace "\.py$", ".pyd"
-
-            if ((Test-Path $pycFile) -or (Test-Path $pydFile)) {
-                Remove-Item -Path $pyFile -Force
-                $deleteCount++
-                Write-Host "  Deleted: $relativePath" -ForegroundColor Gray
-            }
+            Write-Host "  ⚠️  Kept (missing compiled output): $relativePath" -ForegroundColor Yellow
         }
     }
 

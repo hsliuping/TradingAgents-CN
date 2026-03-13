@@ -45,6 +45,22 @@ class TradingSystemService:
         except Exception as e:
             logger.warning(f"创建索引失败: {e}")
 
+    def _deep_merge_dict(self, base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+        """深度合并字典。override 中的值会覆盖 base。"""
+        result: Dict[str, Any] = dict(base or {})
+        for key, value in (override or {}).items():
+            if isinstance(value, dict) and isinstance(result.get(key), dict):
+                result[key] = self._deep_merge_dict(result.get(key, {}), value)
+            else:
+                result[key] = value
+        return result
+
+    def _is_published_status(self, status: Any) -> bool:
+        """兼容 Enum / str 两种状态值判断。"""
+        if isinstance(status, TradingSystemStatus):
+            return status == TradingSystemStatus.PUBLISHED
+        return str(status) == TradingSystemStatus.PUBLISHED.value
+
     def create_system(self, user_id: str, system_data: TradingSystemCreate) -> TradingSystem:
         """创建交易计划
         
@@ -103,6 +119,23 @@ class TradingSystemService:
         except Exception as e:
             logger.error(f"获取交易计划失败: {e}")
             return None
+
+    def get_effective_system(self, system_id: str, user_id: str) -> Optional[TradingSystem]:
+        """获取用于展示/评估的当前生效交易计划，自动合并 draft_data。"""
+        current_system = self.get_system(system_id, user_id)
+        if not current_system:
+            return None
+
+        if not isinstance(current_system.draft_data, dict) or not current_system.draft_data:
+            return current_system
+
+        base_snapshot = current_system.dict()
+        base_snapshot.pop("draft_data", None)
+        base_snapshot.pop("draft_updated_at", None)
+        merged_data = self._deep_merge_dict(base_snapshot, current_system.draft_data.copy())
+
+        logger.info(f"获取交易计划生效态：已合并草稿数据 system_id={system_id}")
+        return TradingSystem(**merged_data)
 
     def list_systems(self, user_id: str, is_active: Optional[bool] = None) -> List[TradingSystem]:
         """获取用户的交易计划列表
@@ -185,26 +218,46 @@ class TradingSystemService:
             return current_system
 
         # 如果系统已发布且保存为草稿，只更新草稿数据
-        if save_as_draft and current_system.status == TradingSystemStatus.PUBLISHED.value:
-            # 将更新数据保存到 draft_data（不包含元数据字段）
-            draft_data = update_dict.copy()
-            # 移除不应该在草稿中的字段
-            draft_data.pop("status", None)
-            draft_data.pop("is_active", None)
-            draft_data.pop("version", None)
-            draft_data.pop("updated_at", None)
-            draft_data.pop("created_at", None)
+        if save_as_draft and self._is_published_status(current_system.status):
+            # 将更新数据保存到 draft_data（不包含元数据字段），并与已有草稿做深合并。
+            # 这样即使传入的是增量 patch，也不会丢失既有草稿字段。
+            incoming_draft_data = update_dict.copy()
+            incoming_draft_data.pop("status", None)
+            incoming_draft_data.pop("is_active", None)
+            incoming_draft_data.pop("version", None)
+            incoming_draft_data.pop("updated_at", None)
+            incoming_draft_data.pop("created_at", None)
+
+            base_snapshot = current_system.dict()
+            base_snapshot.pop("id", None)
+            base_snapshot.pop("user_id", None)
+            base_snapshot.pop("version", None)
+            base_snapshot.pop("status", None)
+            base_snapshot.pop("is_active", None)
+            base_snapshot.pop("created_at", None)
+            base_snapshot.pop("updated_at", None)
+            base_snapshot.pop("draft_data", None)
+            base_snapshot.pop("draft_updated_at", None)
+
+            existing_draft_data = current_system.draft_data.copy() if isinstance(current_system.draft_data, dict) else {}
+            merged_draft_data = self._deep_merge_dict(base_snapshot, existing_draft_data)
+            merged_draft_data = self._deep_merge_dict(merged_draft_data, incoming_draft_data)
             
             result = self.collection.update_one(
                 {"_id": ObjectId(system_id), "user_id": user_id},
-                {"$set": {"draft_data": draft_data, "draft_updated_at": datetime.utcnow()}}
+                {"$set": {"draft_data": merged_draft_data, "draft_updated_at": datetime.utcnow()}}
             )
             
             if result.matched_count == 0:
                 return None
             
-            logger.info(f"保存草稿成功: system_id={system_id}")
+            logger.info(f"保存草稿成功: system_id={system_id}, status={current_system.status}")
             return self.get_system(system_id, user_id)
+
+        if save_as_draft:
+            logger.warning(
+                f"请求保存草稿，但系统未命中已发布草稿分支: system_id={system_id}, status={current_system.status}"
+            )
         
         # 否则，正常更新（草稿状态或直接更新）
         update_dict["updated_at"] = datetime.utcnow()

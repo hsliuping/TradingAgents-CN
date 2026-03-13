@@ -7,7 +7,9 @@ param(
     [string]$NsisPath,
     [switch]$SkipPortablePackage = $false,
     [switch]$Verbose = $false,
-    [switch]$Interactive = $false  # 🔥 交互模式：每步后确认
+    [switch]$Interactive = $false,
+    [string]$UpdateInstallDir = "",  # Copy updated scripts to existing install dir after build
+    [string]$ArchiveRoot = "D:\release"
 )
 
 $ErrorActionPreference = "Stop"
@@ -67,25 +69,30 @@ Write-Log "Backend Port: $BackendPort"
 Write-Log "MongoDB Port: $MongoPort"
 Write-Log "Redis Port: $RedisPort"
 Write-Log "Nginx Port: $NginxPort"
+Write-Log "Archive Root: $ArchiveRoot"
 
 # 生成构建信息
 Write-Log ""
-Write-Log "Generating build info..."
-$buildInfoScript = Join-Path $root "scripts\build\generate_build_info.ps1"
-if (Test-Path $buildInfoScript) {
-    & powershell -ExecutionPolicy Bypass -File $buildInfoScript -BuildType "installer" -ProjectRoot $root
-    # 读取BUILD_INFO获取完整版本号
-    $buildInfoFile = Join-Path $root "BUILD_INFO"
-    if (Test-Path $buildInfoFile) {
-        $buildInfo = Get-Content $buildInfoFile -Raw | ConvertFrom-Json
-        $FullVersion = $buildInfo.full_version
-        if ($FullVersion) {
-            $Version = $FullVersion
-            Write-Log "Using full version: $Version"
-        }
-    }
+if ($Version -match '-build\d{8}-\d{6}$') {
+    Write-Log "Reusing existing full version: $Version"
 } else {
-    Write-Log "Warning: Build info script not found: $buildInfoScript" "WARNING"
+    Write-Log "Generating build info..."
+    $buildInfoScript = Join-Path $root "scripts\build\generate_build_info.ps1"
+    if (Test-Path $buildInfoScript) {
+        & powershell -ExecutionPolicy Bypass -File $buildInfoScript -BuildType "installer" -ProjectRoot $root
+        # 读取BUILD_INFO获取完整版本号
+        $buildInfoFile = Join-Path $root "BUILD_INFO"
+        if (Test-Path $buildInfoFile) {
+            $buildInfo = Get-Content $buildInfoFile -Raw | ConvertFrom-Json
+            $FullVersion = $buildInfo.full_version
+            if ($FullVersion) {
+                $Version = $FullVersion
+                Write-Log "Using full version: $Version"
+            }
+        }
+    } else {
+        Write-Log "Warning: Build info script not found: $buildInfoScript" "WARNING"
+    }
 }
 Write-Log ""
 
@@ -152,6 +159,23 @@ if (-not $SkipPortablePackage) {
         Write-Log "No PDF/Word deps found. Place gtk3*.exe, wkhtmltox*.exe, pandoc*.msi in install/vendors/pdf or release/portable/vendors/pdf" "WARNING"
     }
 
+    # Step 1b2: 验证并安装托盘监控依赖 (pystray, Pillow)
+    Write-Log ""
+    Write-Log "Step 1b2: Verifying portable dependencies (pystray, Pillow for tray monitor)..."
+    $verifyScript = Join-Path $root "scripts\deployment\verify_portable_dependencies.ps1"
+    if (Test-Path $verifyScript) {
+        try {
+            & powershell -ExecutionPolicy Bypass -File $verifyScript -PortableDir $portableDir -Fix
+            if ($LASTEXITCODE -eq 0) {
+                Write-Log "Dependencies verified"
+            } else {
+                Write-Log "Dependency verification had issues (tray monitor may not work)" "WARNING"
+            }
+        } catch {
+            Write-Log "Dependency verification failed: $_" "WARNING"
+        }
+    }
+
     Write-Log ""
     Write-Log "Step 1c: Packaging into 7z archive..."
     # 🔥 Step 1b: 打包成 .7z 文件（用于 NSIS 安装包）
@@ -177,6 +201,25 @@ if (-not $SkipPortablePackage) {
 
     # 🔧 交互式确认
     Confirm-NextStep "Package into 7z archive" | Out-Null
+
+    # Step 1d: Build update package (update-{version}.zip for in-app update)
+    Write-Log ""
+    Write-Log "Step 1d: Building update package (for in-app update)..."
+    $updatePackageScript = Join-Path $root "scripts\deployment\build_update_package.ps1"
+    if (Test-Path $updatePackageScript) {
+        try {
+            & powershell -ExecutionPolicy Bypass -File $updatePackageScript -Version $Version
+            if ($LASTEXITCODE -eq 0) {
+                Write-Log "Update package built: update-$Version.zip"
+            } else {
+                Write-Log "Update package build had issues" "WARNING"
+            }
+        } catch {
+            Write-Log "Update package build failed: $_" "WARNING"
+        }
+    } else {
+        Write-Log "Update package script not found: $updatePackageScript" "WARNING"
+    }
 } else {
     Write-Log "Skipping portable package build (using existing package)"
 }
@@ -319,9 +362,44 @@ try {
         Write-Log "Warning: Expected output file not found: $outputFile" "WARNING"
     }
 
-    # 🔧 交互式确认
+    # Update existing install dir with latest scripts (restart_all, stop_all -SkipTray, etc.)
+    if ($UpdateInstallDir -and (Test-Path $UpdateInstallDir)) {
+        Write-Log ""
+        Write-Log "Updating scripts in install dir: $UpdateInstallDir"
+        $copyScript = Join-Path $root "scripts\installer\copy_tray_fix_to_install.ps1"
+        if (Test-Path $copyScript) {
+            try {
+                & powershell -ExecutionPolicy Bypass -File $copyScript -InstallDir $UpdateInstallDir
+                Write-Log "Scripts updated in install dir"
+            } catch {
+                Write-Log "Failed to update install dir: $_" "WARNING"
+            }
+        } else {
+            Write-Log "copy_tray_fix_to_install.ps1 not found" "WARNING"
+        }
+    }
+
+    # Interactive confirm
     Confirm-NextStep "Build NSIS installer" | Out-Null
 } catch {
     Write-Log "Compilation failed: $_" "ERROR"
     throw
+}
+
+Write-Log ""
+Write-Log "Step 3: Archiving release outputs..."
+$archiveScript = Join-Path $root "scripts\deployment\archive_release_outputs.ps1"
+if (Test-Path $archiveScript) {
+    try {
+        & powershell -ExecutionPolicy Bypass -File $archiveScript -Version (($Version -replace '-build\d{8}-\d{6}$', '')) -FullVersion $Version -ArchiveRoot $ArchiveRoot -PackagesDir $packagesDir -ProjectRoot $root
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log "Release archive completed"
+        } else {
+            Write-Log "Release archive exited with code $LASTEXITCODE" "WARNING"
+        }
+    } catch {
+        Write-Log "Release archive failed: $_" "WARNING"
+    }
+} else {
+    Write-Log "Archive script not found: $archiveScript" "WARNING"
 }

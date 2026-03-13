@@ -109,6 +109,9 @@ coverage/
 !README.md
 !docs/docker_deployment_guide.md
 !docs/auth_system_improvement.md
+!docs/release_v2.0/**
+!docs/api/STOCK_DATA_IMPORT_API.md
+!docs/examples/social_media_api_guide.md
 !docs/learning/**
 !docs/paper/**
 

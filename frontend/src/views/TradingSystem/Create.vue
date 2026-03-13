@@ -115,6 +115,13 @@
         <template #header>
           <span>选股规则</span>
         </template>
+        <div class="module-ai-actions">
+          <el-button type="primary" plain :loading="generatingStockSelectionRules" @click="handleGenerateStockSelectionRules">
+            <el-icon><MagicStick /></el-icon>
+            AI生成选股规则
+          </el-button>
+          <span class="module-ai-tip">结合交易风格、风险偏好和系统描述，生成必须满足/排除/加分条件</span>
+        </div>
         <RuleEditor v-model="formData.stock_selection" type="stock_selection" />
       </el-card>
 
@@ -123,6 +130,13 @@
         <template #header>
           <span>择时规则</span>
         </template>
+        <div class="module-ai-actions">
+          <el-button type="primary" plain :loading="generatingTimingRules" @click="handleGenerateTimingRules">
+            <el-icon><MagicStick /></el-icon>
+            AI生成择时规则
+          </el-button>
+          <span class="module-ai-tip">生成市场环境、技术位置、资金认可等入场信号，可再手动微调</span>
+        </div>
         <RuleEditor v-model="formData.timing" type="timing" />
       </el-card>
 
@@ -154,7 +168,10 @@
           <el-row :gutter="20">
             <el-col :span="8">
               <el-form-item label="单只股票仓位上限">
-                <el-slider v-model="positionMaxPerStock" :format-tooltip="(val: number) => `${val}%`" />
+                <div class="slider-with-value">
+                  <el-slider v-model="positionMaxPerStock" :format-tooltip="(val: number) => `${val}%`" />
+                  <span class="slider-value">{{ positionMaxPerStock }}%</span>
+                </div>
               </el-form-item>
             </el-col>
             <el-col :span="8">
@@ -176,6 +193,18 @@
         <template #header>
           <span>风险管理规则</span>
         </template>
+        <div class="risk-ai-actions">
+          <el-select v-model="riskRuleStyle" class="risk-style-select" size="default">
+            <el-option label="稳健模板" value="conservative" />
+            <el-option label="平衡模板" value="balanced" />
+            <el-option label="激进模板" value="aggressive" />
+          </el-select>
+          <el-button type="primary" plain :loading="generatingRiskRules" @click="handleGenerateRiskRules">
+            <el-icon><MagicStick /></el-icon>
+            AI生成风险规则
+          </el-button>
+          <span class="risk-ai-tip">根据风格与风险偏好生成止损/止盈/时间止损/逻辑止损，可二次编辑确认</span>
+        </div>
         <RuleEditor v-model="formData.risk_management" type="risk_management" />
       </el-card>
 
@@ -289,21 +318,54 @@
 
       <!-- 评估结果 -->
       <div v-else-if="evaluationResult" class="evaluation-content">
-        <!-- 总体评分 -->
-        <div class="score-section">
-          <div class="score-circle">
-            <div class="score-value">{{ evaluationResult.overall_score }}</div>
-            <div class="score-label">综合评分</div>
-          </div>
-          <div class="score-level">
+        <!-- 总体评级 -->
+        <div class="grade-section">
+          <div class="grade-badge">
             <el-tag 
-              :type="getScoreTagType(evaluationResult.overall_score)" 
+              :type="getGradeTagType(evaluationResult.grade)" 
               size="large"
             >
-              {{ getScoreLevel(evaluationResult.overall_score) }}
+              {{ evaluationResult.grade }}
             </el-tag>
           </div>
         </div>
+
+        <el-card class="evaluation-card" shadow="never" v-if="evaluationResult.dimension_scores">
+          <template #header>
+            <div class="card-header">
+              <el-icon><DataAnalysis /></el-icon>
+              <span>六维评分</span>
+            </div>
+          </template>
+          <div class="dimension-grid">
+            <div v-for="item in getDimensionScoreItems(evaluationResult.dimension_scores)" :key="item.key" class="dimension-item">
+              <div class="dimension-top">
+                <span class="dimension-label">{{ item.label }}</span>
+                <span class="dimension-score">{{ item.score.toFixed(1) }}/10</span>
+              </div>
+              <el-progress :percentage="item.score * 10" :stroke-width="10" :show-text="false" :color="getDimensionColor(item.score)" />
+            </div>
+          </div>
+        </el-card>
+
+        <el-card class="evaluation-card" shadow="never" v-if="evaluationResult.risk_rule_adjustment">
+          <template #header>
+            <div class="card-header">
+              <el-icon><WarningFilled /></el-icon>
+              <span>风险规则校准</span>
+            </div>
+          </template>
+          <div class="risk-adjustment">
+            <div class="adjustment-summary">
+              <span>原始等级：{{ evaluationResult.risk_rule_adjustment.before_grade }}</span>
+              <span>校准后：{{ evaluationResult.risk_rule_adjustment.after_grade }}</span>
+              <span>调整分：{{ formatDelta(evaluationResult.risk_rule_adjustment.delta) }}</span>
+            </div>
+            <div v-if="evaluationResult.risk_rule_adjustment.reason" class="adjustment-reason">
+              {{ evaluationResult.risk_rule_adjustment.reason }}
+            </div>
+          </div>
+        </el-card>
 
         <!-- 优点 -->
         <el-card class="evaluation-card" shadow="never">
@@ -365,6 +427,12 @@
             <pre>{{ evaluationResult.detailed_analysis }}</pre>
           </div>
         </el-card>
+
+        <div class="evaluation-bottom-actions">
+          <el-button type="primary" plain @click="optimizationDialogVisible = true">
+            与AI讨论并应用建议
+          </el-button>
+        </div>
       </div>
 
       <!-- 错误状态 -->
@@ -382,6 +450,14 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <OptimizationAssistantDialog
+      v-model="optimizationDialogVisible"
+      :plan-data="formData"
+      :evaluation-result="evaluationResult"
+      :applying="applyingOptimization"
+      @apply="handleApplyOptimizationUpdates"
+    />
   </div>
 </template>
 
@@ -402,8 +478,17 @@ import {
   DataAnalysis
 } from '@element-plus/icons-vue'
 import { useTradingSystemStore } from '@/stores/tradingSystem'
-import { evaluateTradingPlanDraft, publishTradingSystem, type TradingPlanEvaluation, type TradingSystemUpdatePayload } from '@/api/tradingSystem'
+import {
+  evaluateTradingPlanDraft,
+  publishTradingSystem,
+  generateModuleRules,
+  generateRiskManagementRules,
+  type OptimizationSuggestionUpdate,
+  type TradingPlanEvaluation,
+  type TradingSystemUpdatePayload
+} from '@/api/tradingSystem'
 import RuleEditor from './components/RuleEditor.vue'
+import OptimizationAssistantDialog from './components/OptimizationAssistantDialog.vue'
 import type { TradingSystemCreatePayload } from '@/api/tradingSystem'
 import { tradingSystemTemplates, type TradingSystemTemplate } from '@/config/tradingSystemTemplates'
 
@@ -432,7 +517,12 @@ const formData = ref<TradingSystemCreatePayload>({
   timing: { entry_signals: [] },
   position: { max_per_stock: 0.2, max_holdings: 10, min_holdings: 3 },
   holding: { add_conditions: [], reduce_conditions: [] },
-  risk_management: { stop_loss: {}, take_profit: {} },
+  risk_management: {
+    stop_loss: { type: 'percentage', percentage: 0.08 },
+    take_profit: { type: 'percentage', percentage: 0.2 },
+    time_stop: { enabled: false, max_holding_days: 30 },
+    logical_stop: { conditions: [] }
+  },
   review: { checklist: [] },
   discipline: { must_do: [], must_not: [] }
 })
@@ -441,6 +531,12 @@ const formData = ref<TradingSystemCreatePayload>({
 const evaluating = ref(false)
 const evaluationResult = ref<TradingPlanEvaluation | null>(null)
 const evaluationDialogVisible = ref(false)
+const optimizationDialogVisible = ref(false)
+const applyingOptimization = ref(false)
+const generatingStockSelectionRules = ref(false)
+const generatingTimingRules = ref(false)
+const generatingRiskRules = ref(false)
+const riskRuleStyle = ref<'conservative' | 'balanced' | 'aggressive'>('balanced')
 
 // 发布相关
 const publishing = ref(false)
@@ -466,6 +562,40 @@ const canNext = computed(() => {
 // 当前系统状态
 const currentSystem = ref<any>(null)
 
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return Object.prototype.toString.call(value) === '[object Object]'
+}
+
+function cloneValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function mergeDeep<T>(target: T, source: any): T {
+  if (Array.isArray(source)) {
+    return cloneValue(source) as T
+  }
+
+  if (!isPlainObject(source)) {
+    return source as T
+  }
+
+  const output: Record<string, any> = isPlainObject(target) ? { ...(target as Record<string, any>) } : {}
+  Object.entries(source).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      output[key] = cloneValue(value)
+      return
+    }
+
+    if (isPlainObject(value)) {
+      output[key] = mergeDeep(output[key], value)
+      return
+    }
+
+    output[key] = value
+  })
+  return output as T
+}
+
 // 生命周期
 onMounted(async () => {
   if (isEdit.value && systemId.value) {
@@ -473,9 +603,9 @@ onMounted(async () => {
     if (system) {
       currentSystem.value = system
       
-      // 如果系统已发布且有草稿数据，优先加载草稿数据
-      const sourceData = (system.status === 'published' && system.draft_data) 
-        ? { ...system, ...system.draft_data } 
+      // 如果系统已发布且有草稿数据，优先加载草稿数据（深合并，避免增量草稿丢字段）
+      const sourceData = (system.status === 'published' && system.draft_data)
+        ? mergeDeep(system, system.draft_data)
         : system
       
       formData.value = {
@@ -487,7 +617,12 @@ onMounted(async () => {
         timing: sourceData.timing || { entry_signals: [] },
         position: sourceData.position || { max_per_stock: 0.2, max_holdings: 10, min_holdings: 3 },
         holding: sourceData.holding || { add_conditions: [], reduce_conditions: [] },
-        risk_management: sourceData.risk_management || { stop_loss: {}, take_profit: {} },
+        risk_management: sourceData.risk_management || {
+          stop_loss: { type: 'percentage', percentage: 0.08 },
+          take_profit: { type: 'percentage', percentage: 0.2 },
+          time_stop: { enabled: false, max_holding_days: 30 },
+          logical_stop: { conditions: [] }
+        },
         review: sourceData.review || { checklist: [] },
         discipline: sourceData.discipline || { must_do: [], must_not: [] }
       }
@@ -509,6 +644,9 @@ function nextStep() {
 }
 
 async function handleSubmit() {
+  if (!validateRiskManagementRules()) {
+    return
+  }
   // 创建模式下，保存为草稿
   if (!isEdit.value) {
     const result = await store.createSystem(formData.value)
@@ -520,6 +658,9 @@ async function handleSubmit() {
 }
 
 async function handleSaveDraft() {
+  if (!validateRiskManagementRules()) {
+    return
+  }
   // 保存草稿，不创建版本
   if (!isEdit.value || !systemId.value) return
   
@@ -538,6 +679,9 @@ async function handleSaveDraft() {
 }
 
 async function handlePublish() {
+  if (!validateRiskManagementRules()) {
+    return
+  }
   // 发布，创建新版本并更新状态为已发布
   if (!isEdit.value || !systemId.value) return
   
@@ -638,6 +782,9 @@ function getRiskType(risk: string) {
 
 // AI评估功能
 async function handleEvaluate() {
+  if (!validateRiskManagementRules()) {
+    return
+  }
   // 验证基本信息
   if (!formData.value.name?.trim()) {
     ElMessage.warning('请先填写系统名称')
@@ -664,10 +811,182 @@ async function handleEvaluate() {
   }
 }
 
+async function handleGenerateRiskRules() {
+  generatingRiskRules.value = true
+  try {
+    const res = await generateRiskManagementRules({
+      style: (formData.value.style || 'medium_term') as any,
+      risk_profile: (formData.value.risk_profile || 'balanced') as any,
+      risk_style: riskRuleStyle.value,
+      description: formData.value.description || '',
+      current_rules: formData.value.risk_management || {}
+    })
+
+    if (res.success && res.data?.risk_management) {
+      formData.value.risk_management = res.data.risk_management as any
+      ElMessage.success('已生成风险管理规则，请确认后再保存')
+    } else {
+      ElMessage.error(res.message || '生成失败')
+    }
+  } catch (error: any) {
+    console.error('生成风险管理规则失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '生成失败，请稍后重试')
+  } finally {
+    generatingRiskRules.value = false
+  }
+}
+
+async function handleGenerateStockSelectionRules() {
+  generatingStockSelectionRules.value = true
+  try {
+    const res = await generateModuleRules({
+      module: 'stock_selection',
+      style: (formData.value.style || 'medium_term') as any,
+      risk_profile: (formData.value.risk_profile || 'balanced') as any,
+      description: formData.value.description || '',
+      current_rules: formData.value.stock_selection || {}
+    })
+
+    if (res.success && res.data?.rules) {
+      formData.value.stock_selection = mergeDeep(formData.value.stock_selection || {}, res.data.rules) as any
+      ElMessage.success('已生成选股规则，请确认后再保存')
+    } else {
+      ElMessage.error(res.message || '生成失败')
+    }
+  } catch (error: any) {
+    console.error('生成选股规则失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '生成失败，请稍后重试')
+  } finally {
+    generatingStockSelectionRules.value = false
+  }
+}
+
+async function handleGenerateTimingRules() {
+  generatingTimingRules.value = true
+  try {
+    const res = await generateModuleRules({
+      module: 'timing',
+      style: (formData.value.style || 'medium_term') as any,
+      risk_profile: (formData.value.risk_profile || 'balanced') as any,
+      description: formData.value.description || '',
+      current_rules: formData.value.timing || {}
+    })
+
+    if (res.success && res.data?.rules) {
+      formData.value.timing = mergeDeep(formData.value.timing || {}, res.data.rules) as any
+      ElMessage.success('已生成择时规则，请确认后再保存')
+    } else {
+      ElMessage.error(res.message || '生成失败')
+    }
+  } catch (error: any) {
+    console.error('生成择时规则失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '生成失败，请稍后重试')
+  } finally {
+    generatingTimingRules.value = false
+  }
+}
+
+function validateRiskManagementRules(): boolean {
+  const risk = formData.value.risk_management as any
+  const takeProfit = risk?.take_profit || {}
+
+  if (takeProfit.type === 'scaled') {
+    const levels = Array.isArray(takeProfit.levels) ? takeProfit.levels : []
+    if (!levels.length) {
+      ElMessage.warning('分批止盈至少需要配置一条分段规则')
+      return false
+    }
+    const totalSellRatio = levels.reduce((sum: number, item: any) => sum + Number(item?.sell_ratio || 0), 0)
+    if (totalSellRatio > 1.0001) {
+      ElMessage.warning(`分批止盈总卖出比例不能超过100%，当前为 ${(totalSellRatio * 100).toFixed(1)}%`)
+      return false
+    }
+  }
+
+  return true
+}
+
+function getStepByModule(module: string): number {
+  const stepMap: Record<string, number> = {
+    stock_selection: 1,
+    timing: 2,
+    position: 3,
+    risk_management: 4,
+    discipline: 5,
+    holding: 6,
+    review: 6
+  }
+  return stepMap[module] ?? currentStep.value
+}
+
+function handleApplyOptimizationUpdates(updates: OptimizationSuggestionUpdate[]) {
+  const validUpdates = updates.filter(item => item.patch && Object.keys(item.patch).length > 0)
+  if (!validUpdates.length) {
+    ElMessage.warning('当前没有可直接应用的结构化修改')
+    return
+  }
+
+  applyingOptimization.value = true
+  try {
+    let nextFormData = cloneValue(formData.value)
+    validUpdates.forEach((item) => {
+      nextFormData = mergeDeep(nextFormData, item.patch)
+    })
+
+    formData.value = nextFormData
+    optimizationDialogVisible.value = false
+    currentStep.value = getStepByModule(validUpdates[0].module)
+    ElMessage.success(`已应用 ${validUpdates.length} 条优化建议，请继续检查后保存`)
+  } finally {
+    applyingOptimization.value = false
+  }
+}
+
 function handleGoBackToEdit() {
   evaluationDialogVisible.value = false
   // 根据评估结果，可以跳转到需要修改的步骤
   // 这里简单处理，关闭对话框即可
+}
+
+function getGradeTagType(grade: string): string {
+  const gradeMap: Record<string, string> = {
+    '优秀': 'success',
+    '良好': 'primary',
+    '中等': 'warning',
+    '及格': 'info',
+    '不及格': 'danger',
+    '未评价': 'info'
+  }
+  return gradeMap[grade] || 'info'
+}
+
+function getDimensionScoreItems(dimensionScores: NonNullable<TradingPlanEvaluation['dimension_scores']>) {
+  const labelMap: Record<string, string> = {
+    completeness: '完整性',
+    consistency: '一致性',
+    executability: '可执行性',
+    risk_control: '风险控制',
+    adaptability: '适应性',
+    evolvability: '可进化性'
+  }
+
+  return Object.entries(dimensionScores).map(([key, score]) => ({
+    key,
+    label: labelMap[key] || key,
+    score: Number(score || 0)
+  }))
+}
+
+function getDimensionColor(score: number): string {
+  if (score >= 8.5) return '#67c23a'
+  if (score >= 7.5) return '#409eff'
+  if (score >= 6.5) return '#e6a23c'
+  return '#f56c6c'
+}
+
+function formatDelta(delta: number): string {
+  if (delta > 0) return `+${delta}`
+  return String(delta)
 }
 
 function getScoreTagType(score: number): string {
@@ -790,6 +1109,115 @@ function getScoreLevel(score: number): string {
     font-size: 13px;
     color: var(--el-text-color-secondary);
   }
+}
+
+.risk-ai-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+
+  .risk-style-select {
+    width: 120px;
+  }
+
+  .risk-ai-tip {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+}
+
+.module-ai-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+
+  .module-ai-tip {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+}
+
+.slider-with-value {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+
+  :deep(.el-slider) {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.slider-value {
+  min-width: 54px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+}
+
+.grade-section {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.evaluation-bottom-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.dimension-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.dimension-item {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+}
+
+.dimension-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.dimension-label {
+  font-weight: 600;
+}
+
+.dimension-score {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.risk-adjustment {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.adjustment-summary {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-weight: 600;
+}
+
+.adjustment-reason {
+  color: var(--el-text-color-regular);
+  line-height: 1.7;
 }
 
 .evaluation-loading {

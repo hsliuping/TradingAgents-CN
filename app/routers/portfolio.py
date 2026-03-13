@@ -15,6 +15,7 @@ from app.core.permissions import require_pro
 from app.services.portfolio_service import get_portfolio_service
 from app.models.portfolio import (
     PositionCreate, PositionUpdate, PositionImport, PositionOperationRequest,
+    PositionChangeUpdate,
     PortfolioAnalysisRequest, PositionResponse,
     PortfolioStatsResponse, PortfolioAnalysisResponse,
     PositionAnalysisRequest, PositionAnalysisByCodeRequest,
@@ -1212,6 +1213,96 @@ async def get_position_changes(
         })
     except Exception as e:
         logger.error(f"获取持仓变动记录失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.put("/position-changes/{change_id}", response_model=dict)
+async def update_position_change(
+    change_id: str,
+    data: PositionChangeUpdate,
+    current_user: dict = Depends(get_current_user)
+):
+    """修改单笔交易记录（用于修正录入错误：数量、单价，支持买入/加仓/减仓/卖出）"""
+    try:
+        service = get_portfolio_service()
+        result = await service.update_position_change(
+            user_id=current_user["id"],
+            change_id=change_id,
+            quantity=data.quantity,
+            price=data.price,
+            trade_time=data.trade_time
+        )
+        return ok(data=result)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"修改单笔成本失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.delete("/position-changes/{change_id}", response_model=dict)
+async def delete_position_change(
+    change_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """删除单笔变动记录，级联重算后续记录"""
+    try:
+        service = get_portfolio_service()
+        result = await service.delete_position_change(
+            user_id=current_user["id"],
+            change_id=change_id
+        )
+        return ok(data=result)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"删除变动记录失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/positions/reset", response_model=dict)
+async def reset_position(
+    code: str = Query(..., description="股票代码"),
+    market: str = Query("CN", description="市场: CN/HK/US"),
+    current_user: dict = Depends(get_current_user)
+):
+    """重置整个持仓：删除该股票的所有变动记录和持仓"""
+    try:
+        service = get_portfolio_service()
+        result = await service.reset_position(
+            user_id=current_user["id"],
+            code=code,
+            market=market
+        )
+        return ok(data=result)
+    except Exception as e:
+        logger.error(f"重置持仓失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/positions/reset-all", response_model=dict)
+async def reset_all_positions(
+    current_user: dict = Depends(get_current_user)
+):
+    """清零全部持仓：删除该用户所有持仓和变动记录"""
+    try:
+        service = get_portfolio_service()
+        result = await service.reset_all_positions(user_id=current_user["id"])
+        return ok(data=result)
+    except Exception as e:
+        logger.error(f"清零全部持仓失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)

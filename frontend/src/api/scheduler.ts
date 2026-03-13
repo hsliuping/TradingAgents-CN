@@ -14,6 +14,17 @@ export interface SuspendedExecution {
   message?: string
 }
 
+export interface RunningExecution {
+  execution_id: string
+  progress: number
+  processed_items?: number
+  total_items?: number
+  current_item?: string
+  started_at?: string
+  updated_at?: string
+  message?: string
+}
+
 // 任务状态
 export interface JobStatus {
   id: string  // 后端返回的是 id，不是 job_id
@@ -26,6 +37,8 @@ export interface JobStatus {
   description?: string
   has_suspended_execution?: boolean  // 是否有挂起的执行记录
   suspended_execution?: SuspendedExecution  // 挂起的执行记录详情
+  has_running_execution?: boolean
+  running_execution?: RunningExecution
 }
 
 // 任务进度
@@ -41,6 +54,23 @@ export interface JobProgress {
   started_at?: string  // 开始时间
   updated_at?: string   // 更新时间
 }
+
+export interface JobHistory {
+  [key: string]: any
+}
+
+export interface JobExecution {
+  [key: string]: any
+}
+
+export interface SchedulerStats {
+  total_jobs: number
+  running_jobs: number
+  paused_jobs: number
+  [key: string]: any
+}
+
+export type Job = JobStatus
 
 // API响应格式
 export interface ApiResponse<T = any> {

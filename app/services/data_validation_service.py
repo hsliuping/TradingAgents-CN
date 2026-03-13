@@ -46,9 +46,10 @@ class DataValidationService:
         analysis_date: str,
         market_type: str = "cn",
         check_basic_info: bool = True,
-        check_historical_data: bool = False,  # 🔥 默认禁用历史数据检查（功能未完善）
+        check_historical_data: bool = False,  # 🔥 默认禁用历史数据检查（避免误报）
         check_financial_data: bool = False,
         check_realtime_quotes: bool = False,
+        check_data_freshness: bool = False,  # 🔥 数据新鲜度检查：防止使用陈旧数据
         historical_days: int = 365  # 默认检查近1年的历史数据
     ) -> DataValidationResult:
         """
@@ -62,6 +63,7 @@ class DataValidationService:
             check_historical_data: 是否检查历史数据
             check_financial_data: 是否检查财务数据（可选）
             check_realtime_quotes: 是否检查实时行情（可选）
+            check_data_freshness: 是否检查数据新鲜度（防止用陈旧数据分析）
             historical_days: 需要检查的历史数据天数（默认365天）
             
         Returns:
@@ -130,8 +132,26 @@ class DataValidationService:
                         missing_data=missing_data,
                         details=details
                     )
-            
-            # 2. 检查历史数据
+
+            # 2. 检查数据新鲜度（防止分析时使用陈旧数据）
+            if check_data_freshness:
+                freshness_valid, freshness_msg, freshness_details = await self._check_data_freshness(
+                    db, symbol6, market_type, analysis_date_str
+                )
+                details["data_freshness"] = freshness_details
+                if not freshness_valid:
+                    missing_data.append("最新行情数据")
+                    logger.warning(f"⚠️ [数据新鲜度] 股票 {symbol6}: {freshness_msg}")
+                    return DataValidationResult(
+                        is_valid=False,
+                        message=freshness_msg,
+                        missing_data=missing_data,
+                        details=details
+                    )
+                else:
+                    logger.info(f"✅ [数据新鲜度] 股票 {symbol6}: {freshness_msg}")
+
+            # 3. 检查历史数据
             if check_historical_data:
                 # 计算需要检查的日期范围（确保都是字符串格式 YYYY-MM-DD）
                 start_date = (analysis_dt - timedelta(days=historical_days)).strftime('%Y-%m-%d')
@@ -229,6 +249,139 @@ class DataValidationService:
             logger.error(f"检查基础信息时出错: {e}")
             return False, f"检查基础信息时出错: {str(e)}", {"error": str(e)}
     
+    async def _check_data_freshness(
+        self,
+        db,
+        symbol: str,
+        market_type: str,
+        analysis_date: str
+    ) -> Tuple[bool, str, Dict[str, Any]]:
+        """
+        检查股票日行情数据的新鲜度，防止使用陈旧数据进行分析。
+
+        规则：stock_daily_quotes（或同名集合）中该股票最新 trade_date 相对于
+        分析日期（通常为今天）落后超过 2 个工作日，则认为数据陈旧。
+
+        Returns:
+            (is_valid, message, details)
+        """
+        try:
+            # 根据市场类型选择日行情集合（优先级依次降低）
+            collection_candidates = {
+                "cn": ["stock_daily_quotes", "stock_daily_history", "market_quotes"],
+                "hk": ["stock_daily_quotes_hk", "stock_daily_history_hk", "market_quotes_hk"],
+                "us": ["stock_daily_quotes_us", "stock_daily_history_us", "market_quotes_us"],
+            }
+            candidates = collection_candidates.get(market_type, ["stock_daily_quotes", "market_quotes"])
+
+            # 解析分析日期
+            try:
+                analysis_dt = datetime.strptime(analysis_date, '%Y-%m-%d')
+            except ValueError:
+                return True, "分析日期格式无法解析，跳过新鲜度检查", {"skipped": True}
+
+            latest_dt = None
+            used_collection = None
+
+            for col_name in candidates:
+                # 查询该股票最新的一条日行情记录
+                doc = await db[col_name].find_one(
+                    {"$or": [{"symbol": symbol}, {"code": symbol}, {"ts_code": {"$regex": f"^{symbol}"}}]},
+                    {"_id": 0, "trade_date": 1, "date": 1, "updated_at": 1},
+                    sort=[("trade_date", -1), ("date", -1), ("updated_at", -1)]
+                )
+                if not doc:
+                    continue
+
+                # 尝试从 trade_date / date 字段解析日期
+                raw_date = doc.get("trade_date") or doc.get("date")
+                if raw_date:
+                    for fmt in ('%Y-%m-%d', '%Y%m%d', '%Y/%m/%d'):
+                        try:
+                            latest_dt = datetime.strptime(str(raw_date), fmt)
+                            break
+                        except ValueError:
+                            continue
+
+                # 如果没有 trade_date/date，退而检查 updated_at
+                if latest_dt is None and doc.get("updated_at"):
+                    try:
+                        updated_at = doc["updated_at"]
+                        if isinstance(updated_at, datetime):
+                            latest_dt = updated_at.replace(tzinfo=None)
+                        else:
+                            latest_dt = datetime.fromisoformat(str(updated_at))
+                    except Exception:
+                        pass
+
+                if latest_dt is not None:
+                    used_collection = col_name
+                    break
+
+            # 如果完全没找到任何数据，视为数据缺失（返回 False）
+            if latest_dt is None:
+                return False, (
+                    f"股票 {symbol} 在数据库中没有日行情数据，"
+                    "请先完成数据同步再进行分析"
+                ), {
+                    "latest_trade_date": None,
+                    "analysis_date": analysis_date,
+                    "collections_checked": candidates
+                }
+
+            # 计算落后工作日数
+            # 如果 latest_dt >= analysis_dt（历史分析），说明数据覆盖到位，直接通过
+            if latest_dt.date() >= analysis_dt.date():
+                return True, (
+                    f"数据新鲜度正常（最新数据日期: {latest_dt.strftime('%Y-%m-%d')}）"
+                ), {
+                    "latest_trade_date": latest_dt.strftime('%Y-%m-%d'),
+                    "analysis_date": analysis_date,
+                    "collection": used_collection,
+                    "days_behind": 0
+                }
+
+            # 计算 latest_dt → analysis_dt 之间的工作日数（周一到周五）
+            missed_weekdays = 0
+            cur = latest_dt.date()
+            end = analysis_dt.date()
+            while cur < end:
+                cur_wd = cur.weekday()
+                if cur_wd < 5:  # 0=Monday … 4=Friday
+                    missed_weekdays += 1
+                cur += timedelta(days=1)
+
+            # 阈值：允许最多落后 2 个工作日（可覆盖周末 + 节假日 1 天）
+            MAX_MISSED_WEEKDAYS = 2
+            if missed_weekdays <= MAX_MISSED_WEEKDAYS:
+                return True, (
+                    f"数据新鲜度正常（最新数据日期: {latest_dt.strftime('%Y-%m-%d')}，"
+                    f"落后 {missed_weekdays} 个工作日）"
+                ), {
+                    "latest_trade_date": latest_dt.strftime('%Y-%m-%d'),
+                    "analysis_date": analysis_date,
+                    "collection": used_collection,
+                    "missed_weekdays": missed_weekdays
+                }
+            else:
+                return False, (
+                    f"股票 {symbol} 的行情数据已过期：数据库最新数据日期为 "
+                    f"{latest_dt.strftime('%Y-%m-%d')}，"
+                    f"距分析日期 {analysis_date} 落后了 {missed_weekdays} 个工作日。"
+                    "请等待数据同步完成后再重新发起分析。"
+                ), {
+                    "latest_trade_date": latest_dt.strftime('%Y-%m-%d'),
+                    "analysis_date": analysis_date,
+                    "collection": used_collection,
+                    "missed_weekdays": missed_weekdays,
+                    "threshold": MAX_MISSED_WEEKDAYS
+                }
+
+        except Exception as e:
+            # 新鲜度检查异常时，保守放行（不阻断分析），但记录错误
+            logger.error(f"⚠️ 数据新鲜度检查异常: {e}", exc_info=True)
+            return True, f"数据新鲜度检查异常（已跳过）: {str(e)}", {"error": str(e), "skipped": True}
+
     async def _check_historical_data(
         self,
         db,

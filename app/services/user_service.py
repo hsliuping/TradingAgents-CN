@@ -35,12 +35,22 @@ class UserService:
     def close(self):
         """关闭数据库连接"""
         if hasattr(self, 'client') and self.client:
-            self.client.close()
-            logger.info("✅ UserService MongoDB 连接已关闭")
+            try:
+                self.client.close()
+            except Exception:
+                pass
+            # 避免在 Python 关闭时记录日志（会触发 ImportError: sys.meta_path is None）
+            try:
+                logger.info("UserService MongoDB connection closed")
+            except Exception:
+                pass
 
     def __del__(self):
-        """析构函数，确保连接被关闭"""
-        self.close()
+        """析构函数，确保连接被关闭。不记录日志，避免 Python 关闭时崩溃。"""
+        try:
+            self.close()
+        except Exception:
+            pass
     
     @staticmethod
     def hash_password(password: str) -> str:

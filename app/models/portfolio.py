@@ -97,6 +97,13 @@ class PositionChange(BaseModel):
         return str(v) if v else None
 
 
+class PositionChangeUpdate(BaseModel):
+    """单笔交易修改请求（用于修正录入错误：数量、单价）"""
+    quantity: int = Field(..., gt=0, description="数量（买入/加仓为正数，减仓/卖出为本次操作的数量）")
+    price: float = Field(..., gt=0, description="单价（买入价或卖出价）")
+    trade_time: Optional[datetime] = Field(None, description="交易时间")
+
+
 class PositionChangeResponse(BaseModel):
     """持仓变动响应"""
     id: str

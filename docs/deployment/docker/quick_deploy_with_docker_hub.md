@@ -128,7 +128,7 @@ GOOGLE_ENABLED=true
 | 阿里百炼 | https://dashscope.aliyun.com/ | 国产模型，中文优化，推荐 |
 | DeepSeek | https://platform.deepseek.com/ | 性价比高，推荐 |
 | OpenAI | https://platform.openai.com/ | 需要国外网络 |
-| Tushare | https://tushare.pro/register?reg=tacn | 专业金融数据（可选） |
+| Tushare | https://tushare.pro/weborder/#/login?reg=tacn | 专业金融数据（可选） |
 
 ### 步骤 4：启动服务
 

@@ -232,7 +232,6 @@ pyparsing==3.2.5
 PyPika==0.48.9
 pyproject_hooks==1.2.0
 pyreadline3==3.5.4
-pytdx==1.72
 pytest==8.4.2
 pytest-asyncio==1.2.0
 python-dateutil==2.9.0.post0

@@ -409,6 +409,37 @@ export const portfolioApi = {
     )
   },
 
+  /** 修改单笔交易记录（数量、单价，用于修正录入错误） */
+  async updatePositionChange(changeId: string, data: { quantity: number; price: number; trade_time?: string }) {
+    return ApiClient.put<{ message: string; quantity: number; cost_price: number }>(
+      `/api/portfolio/position-changes/${changeId}`,
+      data
+    )
+  },
+
+  /** 删除单笔变动记录 */
+  async deletePositionChange(changeId: string) {
+    return ApiClient.delete<{ message: string; quantity: number; cost_price: number }>(
+      `/api/portfolio/position-changes/${changeId}`
+    )
+  },
+
+  /** 重置整个持仓（删除该股票所有变动记录和持仓） */
+  async resetPosition(code: string, market?: string) {
+    return ApiClient.post<{ message: string; deleted_changes: number; position_deleted: boolean }>(
+      '/api/portfolio/positions/reset',
+      undefined,
+      { params: { code, market: market || 'CN' } }
+    )
+  },
+
+  /** 清零全部持仓（删除该用户所有持仓和变动记录） */
+  async resetAllPositions() {
+    return ApiClient.post<{ message: string; deleted_changes: number; deleted_positions: number }>(
+      '/api/portfolio/positions/reset-all'
+    )
+  },
+
   /** 执行持仓操作（加仓、减仓、分红、拆股、合股、调整成本） */
   async operatePosition(data: PositionOperationPayload) {
     return ApiClient.post<PositionOperationResult>(

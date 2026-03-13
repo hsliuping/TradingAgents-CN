@@ -29,6 +29,10 @@
         <h4 class="rule-title">入场信号</h4>
         <RuleItem v-for="(item, index) in rule.entry_signals" :key="index" :item="item" type="signal" />
       </div>
+      <div v-if="rule.confirmation?.length" class="rule-group">
+        <h4 class="rule-title">确认条件</h4>
+        <RuleItem v-for="(item, index) in rule.confirmation" :key="index" :item="item" type="must" />
+      </div>
     </template>
 
     <!-- 仓位规则 -->
@@ -69,15 +73,42 @@
     <template v-else-if="type === 'risk_management'">
       <div v-if="rule.stop_loss" class="rule-group">
         <h4 class="rule-title">止损设置</h4>
-        <ConditionDisplay :condition="rule.stop_loss" />
+        <div class="risk-summary-card">
+          <div class="risk-summary-row">
+            <span class="risk-summary-label">类型：</span>
+            <span class="risk-summary-value">{{ getStopLossTypeLabel(rule.stop_loss?.type) }}</span>
+          </div>
+          <div v-if="getStopLossSummary(rule.stop_loss)" class="risk-summary-row">
+            <span class="risk-summary-label">条件：</span>
+            <span class="risk-summary-value">{{ getStopLossSummary(rule.stop_loss) }}</span>
+          </div>
+        </div>
       </div>
       <div v-if="rule.take_profit" class="rule-group">
         <h4 class="rule-title">止盈设置</h4>
-        <ConditionDisplay :condition="rule.take_profit" />
+        <div class="risk-summary-card">
+          <div class="risk-summary-row">
+            <span class="risk-summary-label">类型：</span>
+            <span class="risk-summary-value">{{ getTakeProfitTypeLabel(rule.take_profit?.type) }}</span>
+          </div>
+          <div v-if="getTakeProfitSummary(rule.take_profit)" class="risk-summary-row">
+            <span class="risk-summary-label">规则：</span>
+            <span class="risk-summary-value">{{ getTakeProfitSummary(rule.take_profit) }}</span>
+          </div>
+        </div>
       </div>
       <div v-if="rule.time_stop" class="rule-group">
         <h4 class="rule-title">时间止损</h4>
-        <ConditionDisplay :condition="rule.time_stop" />
+        <div class="risk-summary-card">
+          <div class="risk-summary-row">
+            <span class="risk-summary-label">启用：</span>
+            <span class="risk-summary-value">{{ rule.time_stop?.enabled ? '是' : '否' }}</span>
+          </div>
+          <div v-if="rule.time_stop?.enabled" class="risk-summary-row">
+            <span class="risk-summary-label">最大持有天数：</span>
+            <span class="risk-summary-value">{{ rule.time_stop?.max_holding_days || '-' }} 天</span>
+          </div>
+        </div>
       </div>
     </template>
 
@@ -158,6 +189,55 @@ function getFrequencyLabel(frequency: string): string {
   }
   return map[frequency] || frequency
 }
+
+function toPercentText(value: number | undefined, digits = 1): string {
+  if (value === undefined || value === null || Number.isNaN(Number(value))) return '-'
+  return `${(Number(value) * 100).toFixed(digits)}%`
+}
+
+function getStopLossTypeLabel(type: string | undefined): string {
+  const map: Record<string, string> = {
+    percentage: '固定比例',
+    technical: '技术位止损',
+    atr: 'ATR 止损'
+  }
+  return map[type || ''] || (type || '-')
+}
+
+function getTakeProfitTypeLabel(type: string | undefined): string {
+  const map: Record<string, string> = {
+    percentage: '固定比例',
+    trailing: '移动止盈',
+    scaled: '分批止盈'
+  }
+  return map[type || ''] || (type || '-')
+}
+
+function getStopLossSummary(stopLoss: any): string {
+  if (!stopLoss) return ''
+  if (stopLoss.type === 'technical') {
+    return stopLoss.description || '-'
+  }
+  if (stopLoss.type === 'atr') {
+    return `跌破 ${stopLoss.atr_multiplier ?? 2.0} 倍 ATR 止损`
+  }
+  return `亏损达到 ${toPercentText(stopLoss.percentage)} 时止损`
+}
+
+function getTakeProfitSummary(takeProfit: any): string {
+  if (!takeProfit) return ''
+  if (takeProfit.type === 'trailing') {
+    return `盈利达到 ${toPercentText(takeProfit.activation_profit_pct)} 后启动，较高点回撤 ${toPercentText(takeProfit.trailing_pullback_pct)} 止盈，参考 ${takeProfit.reference || 'highest_price'}`
+  }
+  if (takeProfit.type === 'scaled') {
+    const levels = Array.isArray(takeProfit.levels) ? takeProfit.levels : []
+    if (!levels.length) return '未设置分批止盈档位'
+    return levels
+      .map((item: any, index: number) => `第 ${index + 1} 档：盈利 ${toPercentText(item?.target_profit_pct)} 时卖出 ${toPercentText(item?.sell_ratio)}`)
+      .join('；')
+  }
+  return `盈利达到 ${toPercentText(takeProfit.percentage)} 时止盈`
+}
 </script>
 
 <style scoped lang="scss">
@@ -193,6 +273,42 @@ function getFrequencyLabel(frequency: string): string {
 
 .mt-3 {
   margin-top: 12px;
+}
+
+.risk-summary-card {
+  background: var(--el-fill-color-light);
+  padding: 12px;
+  border-radius: 6px;
+}
+
+.risk-summary-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--el-border-color-lighter);
+
+  &:first-child {
+    padding-top: 0;
+  }
+
+  &:last-child {
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+}
+
+.risk-summary-label {
+  min-width: 72px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.risk-summary-value {
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .checklist {

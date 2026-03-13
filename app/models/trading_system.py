@@ -4,7 +4,7 @@
 
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from enum import Enum
 
 
@@ -70,6 +70,65 @@ class RiskManagementRule(BaseModel):
     take_profit: Dict[str, Any] = Field(default_factory=dict, description="止盈设置")
     time_stop: Dict[str, Any] = Field(default_factory=dict, description="时间止损")
     logical_stop: Dict[str, Any] = Field(default_factory=dict, description="逻辑止损")
+
+    @staticmethod
+    def _sanitize_stop_loss(stop_loss: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        source = stop_loss or {}
+        stop_type = source.get("type", "percentage")
+
+        if stop_type == "technical":
+            return {
+                "type": "technical",
+                "description": source.get("description", "")
+            }
+
+        if stop_type == "atr":
+            return {
+                "type": "atr",
+                "atr_multiplier": float(source.get("atr_multiplier", 2.0))
+            }
+
+        return {
+            "type": "percentage",
+            "percentage": float(source.get("percentage", 0.08))
+        }
+
+    @staticmethod
+    def _sanitize_take_profit(take_profit: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        source = take_profit or {}
+        take_type = source.get("type", "percentage")
+
+        if take_type == "trailing":
+            return {
+                "type": "trailing",
+                "trailing_pullback_pct": float(source.get("trailing_pullback_pct", 0.08)),
+                "activation_profit_pct": float(source.get("activation_profit_pct", 0.1)),
+                "reference": source.get("reference", "highest_price")
+            }
+
+        if take_type == "scaled":
+            levels = source.get("levels") if isinstance(source.get("levels"), list) else []
+            if not levels:
+                levels = [
+                    {"target_profit_pct": 0.2, "sell_ratio": 0.3},
+                    {"target_profit_pct": 0.35, "sell_ratio": 0.3},
+                    {"target_profit_pct": 0.5, "sell_ratio": 0.4},
+                ]
+            return {
+                "type": "scaled",
+                "levels": levels
+            }
+
+        return {
+            "type": "percentage",
+            "percentage": float(source.get("percentage", 0.2))
+        }
+
+    @model_validator(mode="after")
+    def normalize_exclusive_fields(self):
+        self.stop_loss = self._sanitize_stop_loss(self.stop_loss)
+        self.take_profit = self._sanitize_take_profit(self.take_profit)
+        return self
 
 
 class ReviewRule(BaseModel):

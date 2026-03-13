@@ -57,9 +57,18 @@
                       <el-tag :type="!task.paused ? 'success' : 'info'" size="small">
                         {{ !task.paused ? '已启用' : '已暂停' }}
                       </el-tag>
+                      <el-tag v-if="isTaskRunning(task.id)" type="danger" size="small" style="margin-left: 8px;">
+                        执行中
+                      </el-tag>
                       <el-tag v-if="task.has_suspended_execution" type="warning" size="small" style="margin-left: 8px;">
                         ⏸️ 有挂起的任务
                       </el-tag>
+                      <span v-if="getTaskActiveProgress(task.id) !== null" class="task-running-meta">
+                        当前进度: {{ getTaskActiveProgress(task.id) }}%
+                      </span>
+                      <span v-if="getTaskActiveStartedAt(task.id)" class="task-running-meta">
+                        开始于 {{ formatTime(getTaskActiveStartedAt(task.id)!) }}
+                      </span>
                       <span v-if="formatScheduleDescription(task.trigger)" class="task-schedule">
                         <el-icon><Timer /></el-icon>
                         {{ formatScheduleDescription(task.trigger) }}
@@ -92,6 +101,7 @@
                             size="small"
                             type="primary"
                             :loading="taskTriggering[task.id]"
+                            :disabled="taskTriggering[task.id] || isTaskRunning(task.id)"
                             style="margin-left: 8px"
                           >
                             立即执行
@@ -101,13 +111,13 @@
                             <el-dropdown-menu>
                               <el-dropdown-item 
                                 command="incremental"
-                                :disabled="taskTriggering[task.id]"
+                                :disabled="taskTriggering[task.id] || isTaskRunning(task.id)"
                               >
                                 增量同步（仅同步新数据）
                               </el-dropdown-item>
                               <el-dropdown-item 
                                 command="full"
-                                :disabled="taskTriggering[task.id]"
+                                :disabled="taskTriggering[task.id] || isTaskRunning(task.id)"
                               >
                                 全量同步（同步所有历史数据）
                               </el-dropdown-item>
@@ -119,6 +129,7 @@
                           size="small"
                           type="primary"
                           :loading="taskTriggering[task.id]"
+                          :disabled="taskTriggering[task.id] || isTaskRunning(task.id)"
                           @click="handleTriggerTask(task.id)"
                           style="margin-left: 8px"
                         >
@@ -234,9 +245,18 @@
                       <el-tag :type="!task.paused ? 'success' : 'info'" size="small">
                         {{ !task.paused ? '已启用' : '已暂停' }}
                       </el-tag>
+                      <el-tag v-if="isTaskRunning(task.id)" type="danger" size="small" style="margin-left: 8px;">
+                        执行中
+                      </el-tag>
                       <el-tag v-if="task.has_suspended_execution" type="warning" size="small" style="margin-left: 8px;">
                         ⏸️ 有挂起的任务
                       </el-tag>
+                      <span v-if="getTaskActiveProgress(task.id) !== null" class="task-running-meta">
+                        当前进度: {{ getTaskActiveProgress(task.id) }}%
+                      </span>
+                      <span v-if="getTaskActiveStartedAt(task.id)" class="task-running-meta">
+                        开始于 {{ formatTime(getTaskActiveStartedAt(task.id)!) }}
+                      </span>
                       <span v-if="formatScheduleDescription(task.trigger)" class="task-schedule">
                         <el-icon><Timer /></el-icon>
                         {{ formatScheduleDescription(task.trigger) }}
@@ -269,6 +289,7 @@
                             size="small"
                             type="primary"
                             :loading="taskTriggering[task.id]"
+                            :disabled="taskTriggering[task.id] || isTaskRunning(task.id)"
                             style="margin-left: 8px"
                           >
                             立即执行
@@ -278,13 +299,13 @@
                             <el-dropdown-menu>
                               <el-dropdown-item 
                                 command="incremental"
-                                :disabled="taskTriggering[task.id]"
+                                :disabled="taskTriggering[task.id] || isTaskRunning(task.id)"
                               >
                                 增量同步（仅同步新数据）
                               </el-dropdown-item>
                               <el-dropdown-item 
                                 command="full"
-                                :disabled="taskTriggering[task.id]"
+                                :disabled="taskTriggering[task.id] || isTaskRunning(task.id)"
                               >
                                 全量同步（同步所有历史数据）
                               </el-dropdown-item>
@@ -296,6 +317,7 @@
                           size="small"
                           type="primary"
                           :loading="taskTriggering[task.id]"
+                          :disabled="taskTriggering[task.id] || isTaskRunning(task.id)"
                           @click="handleTriggerTask(task.id)"
                           style="margin-left: 8px"
                         >
@@ -411,9 +433,18 @@
                       <el-tag :type="!task.paused ? 'success' : 'info'" size="small">
                         {{ !task.paused ? '已启用' : '已暂停' }}
                       </el-tag>
+                      <el-tag v-if="isTaskRunning(task.id)" type="danger" size="small" style="margin-left: 8px;">
+                        执行中
+                      </el-tag>
                       <el-tag v-if="task.has_suspended_execution" type="warning" size="small" style="margin-left: 8px;">
                         ⏸️ 有挂起的任务
                       </el-tag>
+                      <span v-if="getTaskActiveProgress(task.id) !== null" class="task-running-meta">
+                        当前进度: {{ getTaskActiveProgress(task.id) }}%
+                      </span>
+                      <span v-if="getTaskActiveStartedAt(task.id)" class="task-running-meta">
+                        开始于 {{ formatTime(getTaskActiveStartedAt(task.id)!) }}
+                      </span>
                       <span v-if="formatScheduleDescription(task.trigger)" class="task-schedule">
                         <el-icon><Timer /></el-icon>
                         {{ formatScheduleDescription(task.trigger) }}
@@ -446,6 +477,7 @@
                             size="small"
                             type="primary"
                             :loading="taskTriggering[task.id]"
+                            :disabled="taskTriggering[task.id] || isTaskRunning(task.id)"
                             style="margin-left: 8px"
                           >
                             立即执行
@@ -455,13 +487,13 @@
                             <el-dropdown-menu>
                               <el-dropdown-item 
                                 command="incremental"
-                                :disabled="taskTriggering[task.id]"
+                                :disabled="taskTriggering[task.id] || isTaskRunning(task.id)"
                               >
                                 增量同步（仅同步新数据）
                               </el-dropdown-item>
                               <el-dropdown-item 
                                 command="full"
-                                :disabled="taskTriggering[task.id]"
+                                :disabled="taskTriggering[task.id] || isTaskRunning(task.id)"
                               >
                                 全量同步（同步所有历史数据）
                               </el-dropdown-item>
@@ -473,6 +505,7 @@
                           size="small"
                           type="primary"
                           :loading="taskTriggering[task.id]"
+                          :disabled="taskTriggering[task.id] || isTaskRunning(task.id)"
                           @click="handleTriggerTask(task.id)"
                           style="margin-left: 8px"
                         >
@@ -850,6 +883,47 @@ const isHistoricalTask = (jobId: string): boolean => {
   return jobId.includes('historical_sync')
 }
 
+const isTaskRunning = (jobId: string): boolean => {
+  const task = allTasks.value.find(item => item.id === jobId)
+  if (task?.has_running_execution) {
+    return true
+  }
+
+  return taskProgress.value[jobId]?.status === 'running'
+}
+
+const getTaskRunningHint = (jobId: string): string => {
+  const task = allTasks.value.find(item => item.id === jobId)
+  const taskName = task?.display_name || task?.name || jobId
+  const runningExecution = task?.running_execution
+
+  if (runningExecution?.progress !== undefined) {
+    return `${taskName}正在执行中，当前进度 ${runningExecution.progress}%，请稍后再试`
+  }
+
+  const progress = taskProgress.value[jobId]
+  if (progress?.progress !== undefined) {
+    return `${taskName}正在执行中，当前进度 ${progress.progress}%，请稍后再试`
+  }
+
+  return `${taskName}正在执行中，请稍后再试`
+}
+
+const getTaskActiveProgress = (jobId: string): number | null => {
+  const task = allTasks.value.find(item => item.id === jobId)
+  if (task?.running_execution?.progress !== undefined) {
+    return task.running_execution.progress
+  }
+
+  const progress = taskProgress.value[jobId]?.progress
+  return progress !== undefined ? progress : null
+}
+
+const getTaskActiveStartedAt = (jobId: string): string | null => {
+  const task = allTasks.value.find(item => item.id === jobId)
+  return task?.running_execution?.started_at || taskProgress.value[jobId]?.started_at || null
+}
+
 // 计算已用时间
 const calculateElapsedTime = (startedAt: string): string => {
   if (!startedAt) return '--'
@@ -1057,6 +1131,11 @@ const handleTerminateTask = async (jobId: string, executionId: string) => {
 // 触发任务执行
 const handleTriggerTask = async (jobId: string, fullSync: boolean = false) => {
   try {
+    if (isTaskRunning(jobId)) {
+      ElMessage.warning(getTaskRunningHint(jobId))
+      return
+    }
+
     // 🔥 检查是否有挂起任务
     const task = allTasks.value.find(t => t.id === jobId)
     if (task?.has_suspended_execution && task.suspended_execution) {
@@ -1500,6 +1579,12 @@ onUnmounted(() => {
                 align-items: center;
                 gap: 12px;
                 flex-wrap: wrap;
+
+                .task-running-meta {
+                  font-size: 12px;
+                  color: var(--el-color-danger);
+                  font-weight: 500;
+                }
                 
                 .task-schedule {
                   display: flex;

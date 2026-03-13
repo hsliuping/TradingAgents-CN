@@ -1,6 +1,7 @@
 @echo off
+chcp 65001 >nul
 REM TradingAgents-CN 简化启动脚本 (Windows)
-REM 用于日常快速启动应用
+REM 用于日常快速启动应用，Win10 兼容 UTF-8
 
 echo.
 echo ========================================

@@ -151,6 +151,37 @@ class AKShareSyncService:
             
             return stats
     
+    def _build_basic_info_from_list(
+        self, code: str, name: str, industry: str = ""
+    ) -> Dict[str, Any]:
+        """从股票列表 + 行业构建基础信息（避免 AKShare 轮询查询行业导致封号）"""
+        from datetime import datetime, timezone
+        code6 = str(code).strip().zfill(6)
+        market = "主板"
+        if code6.startswith(("60", "68", "90")):
+            market = "主板" if code6.startswith("60") else ("科创板" if code6.startswith("68") else "北交所")
+        elif code6.startswith("00"):
+            market = "主板" if code6.startswith("000") else "中小板" if code6.startswith("002") else "创业板"
+        elif code6.startswith("30"):
+            market = "创业板"
+        elif code6.startswith("8"):
+            market = "北交所"
+        ts_code = f"{code6}.SH" if code6.startswith(("60", "68", "90")) else f"{code6}.SZ" if code6.startswith(("00", "30")) else f"{code6}.BJ"
+        now = datetime.now(timezone.utc)
+        return {
+            "code": code6,
+            "symbol": code6,
+            "name": name or f"股票{code6}",
+            "industry": industry or "未知",
+            "area": "",
+            "market": market,
+            "list_date": "",
+            "full_symbol": ts_code,
+            "source": "akshare",
+            "data_source": "akshare",
+            "updated_at": now,
+        }
+
     async def _process_basic_info_batch(self, batch: List[Dict[str, Any]], force_update: bool) -> Dict[str, Any]:
         """处理基础信息批次"""
         batch_stats = {
@@ -159,10 +190,18 @@ class AKShareSyncService:
             "skipped_count": 0,
             "errors": []
         }
+
+        # 🔥 若配置了官方行业数据 URL，使用官网数据，避免 AKShare 轮询查询行业导致封号
+        from app.services.official_industry_service import fetch_industry_mapping
+        industry_mapping = await fetch_industry_mapping()
+        use_official_industry = bool(industry_mapping)
+        if use_official_industry:
+            logger.info(f"📊 使用官方行业数据（{len(industry_mapping)} 只），跳过 AKShare 轮询查询")
         
         for stock_info in batch:
             try:
                 code = stock_info["code"]
+                name = stock_info.get("name", "")
                 
                 # 检查是否需要更新
                 if not force_update:
@@ -171,8 +210,14 @@ class AKShareSyncService:
                         batch_stats["skipped_count"] += 1
                         continue
                 
-                # 获取详细基础信息
-                basic_info = await self.provider.get_stock_basic_info(code)
+                # 🔥 使用官方行业时：直接从列表+行业构建，不调用 get_stock_basic_info
+                if use_official_industry:
+                    code6 = str(code).strip().zfill(6)
+                    industry = industry_mapping.get(code6, "未知")
+                    basic_info = self._build_basic_info_from_list(code, name, industry)
+                else:
+                    # 未配置官方行业：沿用原逻辑（可能触发 AKShare 轮询）
+                    basic_info = await self.provider.get_stock_basic_info(code)
                 
                 if basic_info:
                     # 转换为字典格式
@@ -2183,7 +2228,11 @@ async def _check_task_running(job_id: str) -> Tuple[bool, Optional[str]]:
 
 
 async def run_akshare_basic_info_sync(force_update: bool = False, **kwargs):
-    """APScheduler任务：同步股票基础信息"""
+    """
+    APScheduler任务：同步股票基础信息
+
+    🔥 使用统一线程池服务执行，避免阻塞主事件循环，保证 API 响应
+    """
     job_id = "akshare_basic_info_sync"
     
     # 🔥 手动触发或强制执行时允许执行（即使有running记录）
@@ -2206,13 +2255,29 @@ async def run_akshare_basic_info_sync(force_update: bool = False, **kwargs):
             logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
     
     try:
+        from app.worker.unified_thread_pool_sync_service import get_unified_thread_pool_sync_service
+        unified_service = await get_unified_thread_pool_sync_service()
         service = await get_akshare_sync_service()
-        # 🔥 设置正确的 job_id，确保进度更新和状态标记使用正确的任务ID
         service._current_job_id = job_id
-        result = await service.sync_stock_basic_info(force_update=force_update)
-        logger.info(f"✅ AKShare基础信息同步完成: {result}")
-        return result
+        sync_result = await unified_service.execute_sync_method(
+            sync_method=service.sync_stock_basic_info,
+            method_kwargs={"force_update": force_update},
+            job_id=job_id,
+            rate_limit_per_minute=300,
+        )
+        if sync_result.success:
+            logger.info(f"✅ AKShare基础信息同步完成: {sync_result.result}")
+            return sync_result.result
+        elif sync_result.error and ("取消" in sync_result.error or "cancelled" in sync_result.error.lower()):
+            logger.info(f"ℹ️ AKShare基础信息同步任务已被用户取消")
+            return {"cancelled": True, "message": sync_result.error}
+        else:
+            raise RuntimeError(sync_result.error or "同步失败")
     except Exception as e:
+        from app.services.scheduler_service import TaskCancelledException
+        if isinstance(e, TaskCancelledException):
+            logger.info(f"ℹ️ AKShare基础信息同步任务已被用户取消")
+            return {"cancelled": True, "message": str(e)}
         logger.error(f"❌ AKShare基础信息同步失败: {e}")
         raise
 
@@ -2223,6 +2288,8 @@ async def run_akshare_quotes_sync(force: bool = False, **kwargs):
 
     Args:
         force: 是否强制执行（跳过交易时间检查），默认 False
+
+    🔥 使用统一线程池服务执行，避免阻塞主事件循环，保证 API 响应
     """
     # 🔥 手动触发或强制执行时允许执行（即使有running记录）
     manual_trigger = kwargs.get("_manual_trigger", False)
@@ -2246,14 +2313,30 @@ async def run_akshare_quotes_sync(force: bool = False, **kwargs):
             logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
     
     try:
+        from app.worker.unified_thread_pool_sync_service import get_unified_thread_pool_sync_service
+        unified_service = await get_unified_thread_pool_sync_service()
         service = await get_akshare_sync_service()
-        # 🔥 设置正确的 job_id，确保进度更新和状态标记使用正确的任务ID
         service._current_job_id = job_id
         # 注意：AKShare 没有交易时间检查逻辑，force 参数仅用于接口一致性
-        result = await service.sync_realtime_quotes(force=force)
-        logger.info(f"✅ AKShare行情同步完成: {result}")
-        return result
+        sync_result = await unified_service.execute_sync_method(
+            sync_method=service.sync_realtime_quotes,
+            method_kwargs={"force": force},
+            job_id=job_id,
+            rate_limit_per_minute=300,
+        )
+        if sync_result.success:
+            logger.info(f"✅ AKShare行情同步完成: {sync_result.result}")
+            return sync_result.result
+        elif sync_result.error and ("取消" in sync_result.error or "cancelled" in sync_result.error.lower()):
+            logger.info(f"ℹ️ AKShare行情同步任务已被用户取消")
+            return {"cancelled": True, "message": sync_result.error}
+        else:
+            raise RuntimeError(sync_result.error or "同步失败")
     except Exception as e:
+        from app.services.scheduler_service import TaskCancelledException
+        if isinstance(e, TaskCancelledException):
+            logger.info(f"ℹ️ AKShare行情同步任务已被用户取消")
+            return {"cancelled": True, "message": str(e)}
         logger.error(f"❌ AKShare行情同步失败: {e}")
         raise
 

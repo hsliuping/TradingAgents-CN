@@ -231,21 +231,54 @@
 
       <!-- 评估结果 -->
       <div v-else-if="evaluationResult" class="evaluation-content">
-        <!-- 总体评分 -->
-        <div class="score-section">
-          <div class="score-circle">
-            <div class="score-value">{{ evaluationResult.overall_score }}</div>
-            <div class="score-label">综合评分</div>
-          </div>
-          <div class="score-level">
+        <!-- 总体评级 -->
+        <div class="grade-section">
+          <div class="grade-badge">
             <el-tag 
-              :type="getScoreTagType(evaluationResult.overall_score)" 
+              :type="getGradeTagType(evaluationResult.grade)" 
               size="large"
             >
-              {{ getScoreLevel(evaluationResult.overall_score) }}
+              {{ evaluationResult.grade }}
             </el-tag>
           </div>
         </div>
+
+        <el-card class="evaluation-card" shadow="never" v-if="evaluationResult.dimension_scores">
+          <template #header>
+            <div class="card-header">
+              <el-icon><DataAnalysis /></el-icon>
+              <span>六维评分</span>
+            </div>
+          </template>
+          <div class="dimension-grid">
+            <div v-for="item in getDimensionScoreItems(evaluationResult.dimension_scores)" :key="item.key" class="dimension-item">
+              <div class="dimension-top">
+                <span class="dimension-label">{{ item.label }}</span>
+                <span class="dimension-score">{{ item.score.toFixed(1) }}/10</span>
+              </div>
+              <el-progress :percentage="item.score * 10" :stroke-width="10" :show-text="false" :color="getDimensionColor(item.score)" />
+            </div>
+          </div>
+        </el-card>
+
+        <el-card class="evaluation-card" shadow="never" v-if="evaluationResult.risk_rule_adjustment">
+          <template #header>
+            <div class="card-header">
+              <el-icon><WarningFilled /></el-icon>
+              <span>风险规则校准</span>
+            </div>
+          </template>
+          <div class="risk-adjustment">
+            <div class="adjustment-summary">
+              <span>原始等级：{{ evaluationResult.risk_rule_adjustment.before_grade }}</span>
+              <span>校准后：{{ evaluationResult.risk_rule_adjustment.after_grade }}</span>
+              <span>调整分：{{ formatDelta(evaluationResult.risk_rule_adjustment.delta) }}</span>
+            </div>
+            <div v-if="evaluationResult.risk_rule_adjustment.reason" class="adjustment-reason">
+              {{ evaluationResult.risk_rule_adjustment.reason }}
+            </div>
+          </div>
+        </el-card>
 
         <!-- 优点 -->
         <el-card class="evaluation-card" shadow="never">
@@ -307,6 +340,12 @@
             <pre>{{ evaluationResult.detailed_analysis }}</pre>
           </div>
         </el-card>
+
+        <div class="evaluation-bottom-actions">
+          <el-button type="primary" plain @click="optimizationDialogVisible = true">
+            与AI讨论并应用建议
+          </el-button>
+        </div>
       </div>
 
       <!-- 错误状态 -->
@@ -322,6 +361,14 @@
       </template>
     </el-dialog>
 
+    <OptimizationAssistantDialog
+      v-model="optimizationDialogVisible"
+      :plan-data="buildEditablePayload(system)"
+      :evaluation-result="evaluationResult"
+      :applying="applyingOptimization"
+      @apply="handleApplyOptimizationUpdates"
+    />
+
     <!-- 评估历史记录对话框 -->
     <el-dialog
       v-model="historyDialogVisible"
@@ -336,16 +383,9 @@
               {{ formatDateTime(row.created_at) }}
             </template>
           </el-table-column>
-          <el-table-column prop="overall_score" label="评分" width="100" align="center">
+          <el-table-column prop="grade" label="评级" width="100" align="center">
             <template #default="{ row }">
-              <el-tag :type="getScoreTagType(row.overall_score)" size="large">
-                {{ row.overall_score }}分
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="grade" label="等级" width="100" align="center">
-            <template #default="{ row }">
-              <el-tag :type="getScoreTagType(row.overall_score)" size="small">
+              <el-tag :type="getGradeTagType(row.grade)" size="large">
                 {{ row.grade }}
               </el-tag>
             </template>
@@ -663,11 +703,15 @@ import {
   getTradingSystemVersions,
   createTradingSystemVersion,
   publishTradingSystem,
+  type OptimizationSuggestionUpdate,
   type TradingPlanEvaluation,
   type EvaluationHistoryItem,
-  type TradingSystemVersion
+  type TradingSystemVersion,
+  type TradingSystem,
+  type TradingSystemUpdatePayload
 } from '@/api/tradingSystem'
 import RuleDisplay from './components/RuleDisplay.vue'
+import OptimizationAssistantDialog from './components/OptimizationAssistantDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -678,6 +722,8 @@ const system = computed(() => store.currentSystem)
 const evaluating = ref(false)
 const evaluationResult = ref<TradingPlanEvaluation | null>(null)
 const evaluationDialogVisible = ref(false)
+const optimizationDialogVisible = ref(false)
+const applyingOptimization = ref(false)
 const publishing = ref(false)
 
 // 评估历史相关
@@ -798,6 +844,112 @@ async function handleEvaluate() {
   }
 }
 
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return Object.prototype.toString.call(value) === '[object Object]'
+}
+
+function cloneValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function mergeDeep<T>(target: T, source: any): T {
+  if (Array.isArray(source)) {
+    return cloneValue(source) as T
+  }
+
+  if (!isPlainObject(source)) {
+    return source as T
+  }
+
+  const output: Record<string, any> = isPlainObject(target) ? { ...(target as Record<string, any>) } : {}
+  Object.entries(source).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      output[key] = cloneValue(value)
+      return
+    }
+
+    if (isPlainObject(value)) {
+      output[key] = mergeDeep(output[key], value)
+      return
+    }
+
+    output[key] = value
+  })
+  return output as T
+}
+
+function buildEditablePayload(currentSystem: TradingSystem | null): TradingSystemUpdatePayload {
+  if (!currentSystem) {
+    return {}
+  }
+
+  const sourceData = (currentSystem.status === 'published' && currentSystem.draft_data)
+    ? mergeDeep(currentSystem, currentSystem.draft_data)
+    : currentSystem
+
+  return {
+    name: sourceData.name,
+    description: sourceData.description || '',
+    style: sourceData.style,
+    risk_profile: sourceData.risk_profile,
+    stock_selection: cloneValue(sourceData.stock_selection || {}),
+    timing: cloneValue(sourceData.timing || {}),
+    position: cloneValue(sourceData.position || {}),
+    holding: cloneValue(sourceData.holding || {}),
+    risk_management: cloneValue(sourceData.risk_management || {}),
+    review: cloneValue(sourceData.review || {}),
+    discipline: cloneValue(sourceData.discipline || {})
+  }
+}
+
+function validateRiskManagementRules(payload: TradingSystemUpdatePayload): boolean {
+  const risk = payload.risk_management as any
+  const takeProfit = risk?.take_profit || {}
+
+  if (takeProfit.type === 'scaled') {
+    const levels = Array.isArray(takeProfit.levels) ? takeProfit.levels : []
+    const totalSellRatio = levels.reduce((sum: number, item: any) => sum + Number(item?.sell_ratio || 0), 0)
+    if (totalSellRatio > 1.0001) {
+      ElMessage.warning(`分批止盈总卖出比例不能超过100%，当前为 ${(totalSellRatio * 100).toFixed(1)}%`)
+      return false
+    }
+  }
+
+  return true
+}
+
+async function handleApplyOptimizationUpdates(updates: OptimizationSuggestionUpdate[]) {
+  if (!systemId.value || !system.value) return
+
+  const validUpdates = updates.filter(item => item.patch && Object.keys(item.patch).length > 0)
+  if (!validUpdates.length) {
+    ElMessage.warning('当前没有可直接应用的结构化修改')
+    return
+  }
+
+  let nextPayload = buildEditablePayload(system.value)
+  validUpdates.forEach((item) => {
+    nextPayload = mergeDeep(nextPayload, item.patch)
+  })
+
+  if (!validateRiskManagementRules(nextPayload)) {
+    return
+  }
+
+  applyingOptimization.value = true
+  try {
+    const saveAsDraft = system.value.status === 'published'
+    const result = await store.updateSystem(systemId.value, nextPayload, saveAsDraft)
+    if (result) {
+      optimizationDialogVisible.value = false
+      await store.fetchSystem(systemId.value)
+      ElMessage.success(saveAsDraft ? `已将 ${validUpdates.length} 条优化应用到草稿` : `已应用 ${validUpdates.length} 条优化建议`)
+    }
+  } finally {
+    applyingOptimization.value = false
+  }
+}
+
 // 工具函数
 function getStyleLabel(style: string) {
   const map: Record<string, string> = {
@@ -839,6 +991,47 @@ function formatDateTime(dateStr: string) {
   if (!dateStr) return '-'
   const date = new Date(dateStr)
   return date.toLocaleString('zh-CN')
+}
+
+function getGradeTagType(grade: string): string {
+  const gradeMap: Record<string, string> = {
+    '优秀': 'success',
+    '良好': 'primary',
+    '中等': 'warning',
+    '及格': 'info',
+    '不及格': 'danger',
+    '未评价': 'info'
+  }
+  return gradeMap[grade] || 'info'
+}
+
+function getDimensionScoreItems(dimensionScores: NonNullable<TradingPlanEvaluation['dimension_scores']>) {
+  const labelMap: Record<string, string> = {
+    completeness: '完整性',
+    consistency: '一致性',
+    executability: '可执行性',
+    risk_control: '风险控制',
+    adaptability: '适应性',
+    evolvability: '可进化性'
+  }
+
+  return Object.entries(dimensionScores).map(([key, score]) => ({
+    key,
+    label: labelMap[key] || key,
+    score: Number(score || 0)
+  }))
+}
+
+function getDimensionColor(score: number): string {
+  if (score >= 8.5) return '#67c23a'
+  if (score >= 7.5) return '#409eff'
+  if (score >= 6.5) return '#e6a23c'
+  return '#f56c6c'
+}
+
+function formatDelta(delta: number): string {
+  if (delta > 0) return `+${delta}`
+  return String(delta)
 }
 
 function getScoreTagType(score: number): string {
@@ -1137,6 +1330,22 @@ async function viewHistoryDetail(evaluationId: string) {
 }
 
 .evaluation-content {
+  .grade-section {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+
+  .evaluation-bottom-actions {
+    display: flex;
+    justify-content: center;
+    margin-top: 4px;
+    margin-bottom: 4px;
+  }
+
   .score-section {
     display: flex;
     align-items: center;
@@ -1167,6 +1376,52 @@ async function viewHistoryDetail(evaluationId: string) {
 
   .evaluation-card {
     margin-bottom: 16px;
+
+    .dimension-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .dimension-item {
+      padding: 12px;
+      border-radius: 8px;
+      background: var(--el-fill-color-light);
+    }
+
+    .dimension-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .dimension-label {
+      font-weight: 600;
+    }
+
+    .dimension-score {
+      color: var(--el-text-color-secondary);
+      font-size: 13px;
+    }
+
+    .risk-adjustment {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .adjustment-summary {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      font-weight: 600;
+    }
+
+    .adjustment-reason {
+      color: var(--el-text-color-regular);
+      line-height: 1.7;
+    }
 
     .evaluation-list {
       margin: 0;

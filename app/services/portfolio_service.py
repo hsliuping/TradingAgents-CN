@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta, timezone as tz
 from typing import Dict, Any, Optional, List
 from bson import ObjectId
+from app.utils.api_key_utils import truncate_api_key
 
 from app.core.database import get_mongo_db
 
@@ -446,6 +447,332 @@ class PortfolioService:
 
         return await self.db[self.position_changes_collection].count_documents(query)
 
+    async def update_position_change(
+        self,
+        user_id: str,
+        change_id: str,
+        quantity: int,
+        price: float,
+        trade_time: datetime = None
+    ) -> Dict[str, Any]:
+        """
+        修改单笔交易记录（用于修正录入错误：数量、单价）
+        支持 buy/add/reduce/sell 类型，修改后会级联重算后续记录并更新持仓
+        """
+        from bson import ObjectId
+        try:
+            obj_id = ObjectId(change_id)
+        except Exception:
+            raise ValueError("无效的变动记录ID")
+
+        change = await self.db[self.position_changes_collection].find_one(
+            {"_id": obj_id, "user_id": user_id}
+        )
+        if not change:
+            raise ValueError("变动记录不存在或无权修改")
+
+        ct = change.get("change_type")
+        if ct not in ("buy", "add", "reduce", "sell"):
+            raise ValueError("仅支持修改买入、加仓、减仓、卖出记录")
+
+        code = change["code"]
+        name = change.get("name", code)
+        market = change.get("market", "CN")
+        currency = change.get("currency", "CNY")
+
+        # 获取该股票所有变动记录，按时间排序
+        cursor = self.db[self.position_changes_collection].find(
+            {"user_id": user_id, "code": code, "market": market}
+        ).sort("created_at", 1)
+        all_changes = await cursor.to_list(None)
+
+        edit_idx = None
+        for i, c in enumerate(all_changes):
+            if c["_id"] == obj_id:
+                edit_idx = i
+                break
+        if edit_idx is None:
+            raise ValueError("变动记录不存在")
+
+        # 计算编辑前的状态（前一笔的 quantity_after, cost_value_after）
+        prev_qty = 0
+        prev_cost_val = 0.0
+        if edit_idx > 0:
+            prev = all_changes[edit_idx - 1]
+            prev_qty = prev.get("quantity_after", 0)
+            prev_cost_val = prev.get("cost_value_after", 0.0)
+
+        # 根据类型计算编辑后的记录
+        def compute_updated_change(c, qty_before, cost_val_before, new_qty, new_price):
+            ct = c.get("change_type")
+            cost_val_before = round(cost_val_before, 2)
+            cost_price_before = round(cost_val_before / qty_before, 4) if qty_before > 0 else 0.0
+
+            if ct in ("buy", "add"):
+                qty_after = qty_before + new_qty
+                cost_val_after = round(qty_before * cost_price_before + new_qty * new_price, 2)
+                cost_price_after = round(cost_val_after / qty_after, 4) if qty_after > 0 else 0.0
+                cost_val_after = round(qty_after * cost_price_after, 2)
+                cash_change = round(cost_val_before - cost_val_after, 2)
+                return {
+                    "quantity_before": qty_before,
+                    "cost_price_before": cost_price_before,
+                    "cost_value_before": cost_val_before,
+                    "quantity_after": qty_after,
+                    "cost_price_after": cost_price_after,
+                    "cost_value_after": cost_val_after,
+                    "quantity_change": new_qty,
+                    "cash_change": cash_change,
+                    "trade_price": None,
+                    "realized_profit": None,
+                }
+            else:  # reduce, sell
+                qty_after = qty_before - new_qty
+                cost_per_share = cost_val_before / qty_before if qty_before > 0 else 0.0
+                cost_val_after = round(qty_after * cost_per_share, 2) if qty_after > 0 else 0.0
+                cost_price_after = round(cost_val_after / qty_after, 4) if qty_after > 0 else 0.0
+                realized = round(new_qty * (new_price - cost_per_share), 2)
+                cash_change = round(cost_val_before - cost_val_after + new_qty * new_price, 2)
+                return {
+                    "quantity_before": qty_before,
+                    "cost_price_before": cost_price_before,
+                    "cost_value_before": cost_val_before,
+                    "quantity_after": qty_after,
+                    "cost_price_after": cost_price_after,
+                    "cost_value_after": cost_val_after,
+                    "quantity_change": -new_qty,
+                    "cash_change": cash_change,
+                    "trade_price": new_price,
+                    "realized_profit": realized,
+                }
+
+        # 更新编辑的记录
+        updated = compute_updated_change(change, prev_qty, prev_cost_val, quantity, price)
+        update_doc = {**updated}
+        if trade_time:
+            update_doc["trade_time"] = trade_time
+        await self.db[self.position_changes_collection].update_one(
+            {"_id": obj_id, "user_id": user_id},
+            {"$set": update_doc}
+        )
+
+        # 级联更新后续记录（用新的 curr 状态重算每笔的派生字段）
+        curr_qty = updated["quantity_after"]
+        curr_cost_val = updated["cost_value_after"]
+        for i in range(edit_idx + 1, len(all_changes)):
+            c = all_changes[i]
+            cid = c["_id"]
+            ct = c.get("change_type")
+            if ct in ("buy", "add"):
+                qty_change = c.get("quantity_change", 0)
+                orig_qty_after = c.get("quantity_after", 0)
+                orig_cost_after = c.get("cost_price_after", 0)
+                unit_price = (orig_cost_after * orig_qty_after - curr_cost_val) / qty_change if qty_change > 0 else 0
+                cascade_updated = compute_updated_change(c, curr_qty, curr_cost_val, qty_change, unit_price)
+            else:  # reduce, sell
+                qty_sold = abs(c.get("quantity_change", 0))
+                trade_p = c.get("trade_price", 0)
+                cascade_updated = compute_updated_change(c, curr_qty, curr_cost_val, qty_sold, trade_p)
+            await self.db[self.position_changes_collection].update_one(
+                {"_id": cid, "user_id": user_id},
+                {"$set": cascade_updated}
+            )
+            curr_qty = cascade_updated["quantity_after"]
+            curr_cost_val = cascade_updated["cost_value_after"]
+
+        cost_price = round(curr_cost_val / curr_qty, 4) if curr_qty > 0 else 0.0
+
+        # 更新 positions 表
+        position = await self.db[self.positions_collection].find_one(
+            {"user_id": user_id, "code": code, "market": market}
+        )
+        if position:
+            await self.db[self.positions_collection].update_one(
+                {"_id": position["_id"]},
+                {"$set": {
+                    "quantity": curr_qty,
+                    "cost_price": cost_price,
+                    "original_avg_cost": cost_price,
+                    "updated_at": now_tz()
+                }}
+            )
+
+        logger.info(f"单笔记录修正: {code} 变动记录 {change_id}, 数量 {quantity}, 单价 {price}")
+        return {"message": "记录修正成功", "quantity": curr_qty, "cost_price": cost_price}
+
+    async def delete_position_change(
+        self,
+        user_id: str,
+        change_id: str
+    ) -> Dict[str, Any]:
+        """
+        删除单笔变动记录，级联重算后续记录并更新持仓
+        """
+        from bson import ObjectId
+        try:
+            obj_id = ObjectId(change_id)
+        except Exception:
+            raise ValueError("无效的变动记录ID")
+
+        change = await self.db[self.position_changes_collection].find_one(
+            {"_id": obj_id, "user_id": user_id}
+        )
+        if not change:
+            raise ValueError("变动记录不存在或无权删除")
+
+        code = change["code"]
+        market = change.get("market", "CN")
+
+        # 获取该股票所有变动记录，按时间排序，排除要删除的
+        cursor = self.db[self.position_changes_collection].find(
+            {"user_id": user_id, "code": code, "market": market}
+        ).sort("created_at", 1)
+        all_changes = await cursor.to_list(None)
+        remaining = [c for c in all_changes if c["_id"] != obj_id]
+
+        # 删除该记录
+        await self.db[self.position_changes_collection].delete_one(
+            {"_id": obj_id, "user_id": user_id}
+        )
+
+        # 重放剩余记录，级联更新每条
+        def compute_updated_change(c, qty_before, cost_val_before, new_qty, new_price):
+            ct = c.get("change_type")
+            cost_val_before = round(cost_val_before, 2)
+            cost_price_before = round(cost_val_before / qty_before, 4) if qty_before > 0 else 0.0
+            if ct in ("buy", "add"):
+                qty_after = qty_before + new_qty
+                cost_val_after = round(qty_before * cost_price_before + new_qty * new_price, 2)
+                cost_price_after = round(cost_val_after / qty_after, 4) if qty_after > 0 else 0.0
+                cost_val_after = round(qty_after * cost_price_after, 2)
+                cash_change = round(cost_val_before - cost_val_after, 2)
+                return {
+                    "quantity_before": qty_before, "cost_price_before": cost_price_before,
+                    "cost_value_before": cost_val_before, "quantity_after": qty_after,
+                    "cost_price_after": cost_price_after, "cost_value_after": cost_val_after,
+                    "quantity_change": new_qty, "cash_change": cash_change,
+                    "trade_price": None, "realized_profit": None,
+                }
+            else:
+                qty_after = qty_before - new_qty
+                cost_per_share = cost_val_before / qty_before if qty_before > 0 else 0.0
+                cost_val_after = round(qty_after * cost_per_share, 2) if qty_after > 0 else 0.0
+                cost_price_after = round(cost_val_after / qty_after, 4) if qty_after > 0 else 0.0
+                realized = round(new_qty * (new_price - cost_per_share), 2)
+                cash_change = round(cost_val_before - cost_val_after + new_qty * new_price, 2)
+                return {
+                    "quantity_before": qty_before, "cost_price_before": cost_price_before,
+                    "cost_value_before": cost_val_before, "quantity_after": qty_after,
+                    "cost_price_after": cost_price_after, "cost_value_after": cost_val_after,
+                    "quantity_change": -new_qty, "cash_change": cash_change,
+                    "trade_price": new_price, "realized_profit": realized,
+                }
+
+        curr_qty = 0
+        curr_cost_val = 0.0
+        for c in remaining:
+            cid = c["_id"]
+            ct = c.get("change_type")
+            if ct in ("buy", "add"):
+                qty_change = c.get("quantity_change", 0)
+                orig_qty_after = c.get("quantity_after", 0)
+                orig_cost_after = c.get("cost_price_after", 0)
+                unit_price = (orig_cost_after * orig_qty_after - curr_cost_val) / qty_change if qty_change > 0 else 0
+                updated = compute_updated_change(c, curr_qty, curr_cost_val, qty_change, unit_price)
+            else:
+                qty_sold = abs(c.get("quantity_change", 0))
+                trade_p = c.get("trade_price", 0)
+                updated = compute_updated_change(c, curr_qty, curr_cost_val, qty_sold, trade_p)
+            await self.db[self.position_changes_collection].update_one(
+                {"_id": cid, "user_id": user_id},
+                {"$set": updated}
+            )
+            curr_qty = updated["quantity_after"]
+            curr_cost_val = updated["cost_value_after"]
+
+        cost_price = round(curr_cost_val / curr_qty, 4) if curr_qty > 0 else 0.0
+
+        position = await self.db[self.positions_collection].find_one(
+            {"user_id": user_id, "code": code, "market": market}
+        )
+        if position:
+            await self.db[self.positions_collection].update_one(
+                {"_id": position["_id"]},
+                {"$set": {
+                    "quantity": curr_qty,
+                    "cost_price": cost_price,
+                    "original_avg_cost": cost_price,
+                    "updated_at": now_tz()
+                }}
+            )
+        elif curr_qty > 0:
+            # 有变动记录但无持仓，需新建
+            name = change.get("name", code)
+            currency = change.get("currency", "CNY")
+            now = now_tz()
+            await self.db[self.positions_collection].insert_one({
+                "user_id": user_id, "code": code, "name": name, "market": market,
+                "currency": currency, "quantity": curr_qty, "cost_price": cost_price,
+                "original_avg_cost": cost_price, "source": PositionSource.MANUAL.value,
+                "created_at": now, "updated_at": now
+            })
+
+        logger.info(f"删除变动记录: {code} {change_id}")
+        return {"message": "删除成功", "quantity": curr_qty, "cost_price": cost_price}
+
+    async def reset_position(self, user_id: str, code: str, market: str = "CN") -> Dict[str, Any]:
+        """
+        重置整个持仓：删除该股票的所有变动记录和持仓，资金不返还（用户重新录入）
+        """
+        position = await self.db[self.positions_collection].find_one(
+            {"user_id": user_id, "code": code, "market": market}
+        )
+        deleted_changes = await self.db[self.position_changes_collection].delete_many(
+            {"user_id": user_id, "code": code, "market": market}
+        )
+        result = await self.db[self.positions_collection].delete_one(
+            {"user_id": user_id, "code": code, "market": market}
+        )
+        logger.info(f"重置持仓: {code} {market}, 删除 {deleted_changes.deleted_count} 条变动, 持仓 {'已删' if result.deleted_count else '不存在'}")
+        return {
+            "message": "重置成功",
+            "deleted_changes": deleted_changes.deleted_count,
+            "position_deleted": result.deleted_count > 0
+        }
+
+    async def reset_all_positions(self, user_id: str) -> Dict[str, Any]:
+        """
+        清零全部持仓：删除该用户所有持仓和变动记录，并完全清零资金账户
+        资金账户全部归零：现金、初始资金、入金、出金、累计收益均为 0
+        """
+        deleted_changes = await self.db[self.position_changes_collection].delete_many(
+            {"user_id": user_id}
+        )
+        deleted_positions = await self.db[self.positions_collection].delete_many(
+            {"user_id": user_id}
+        )
+
+        # 完全清零资金账户：现金、初始资金、入金、出金全部置为 0
+        zero_balance = {"CNY": 0.0, "HKD": 0.0, "USD": 0.0}
+        now = now_tz()
+        await self.db[self.accounts_collection].update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "cash": zero_balance,
+                "initial_capital": zero_balance,
+                "total_deposit": zero_balance,
+                "total_withdraw": zero_balance,
+                "updated_at": now
+            }}
+        )
+
+        logger.info(f"清零全部持仓: user={user_id}, 删除 {deleted_changes.deleted_count} 条变动, {deleted_positions.deleted_count} 个持仓, 资金账户已完全清零")
+        return {
+            "message": "清零成功",
+            "deleted_changes": deleted_changes.deleted_count,
+            "deleted_positions": deleted_positions.deleted_count
+        }
+
     # ==================== 持仓管理 ====================
 
     async def get_positions(
@@ -726,6 +1053,23 @@ class PortfolioService:
 
     async def add_position(self, user_id: str, data: PositionCreate) -> PositionResponse:
         """添加用户持仓（如果已有持仓则自动加仓）"""
+        # 🔥 添加前检查：必须有行情/历史数据，否则无法正确显示市值和浮动盈亏
+        current_price = await self._get_stock_price(data.code, data.market)
+        if not current_price or current_price <= 0:
+            raise ValueError(
+                f"股票 {data.code} 暂无行情数据，无法添加持仓。请先在「股票筛选」或「单股分析」中同步该股票的历史数据后再添加。"
+            )
+
+        # 🔥 必须填写买入日期，并校验成本价是否在该日历史高低价范围内
+        if not data.buy_date:
+            raise ValueError("添加持仓时必须填写买入日期，以便校验成本价是否正确。")
+        await self._validate_cost_price_against_historical(
+            code=data.code,
+            market=data.market,
+            buy_date=data.buy_date,
+            cost_price=data.cost_price
+        )
+
         # 获取股票名称和行业
         name = data.name
         logger.debug(f"📝 [添加持仓] 股票代码: {data.code}, 市场: {data.market}, 已有名称: {name}")
@@ -1784,7 +2128,7 @@ class PortfolioService:
             provider_name = provider_info.get("provider", "dashscope")
             logger.info(f"🔧 [持仓AI分析] 准备创建 LLM: provider={provider_name}, model={model_name}, temperature=0.3")
             if api_key:
-                logger.info(f"🔑 [持仓AI分析] API Key 前3位: {api_key[:3] if len(api_key) >= 3 else 'N/A'}")
+                logger.info(f"🔑 [持仓AI分析] API Key: {truncate_api_key(api_key)}")
             llm = create_llm_by_provider(
                 provider=provider_name,
                 model=model_name,
@@ -1803,9 +2147,12 @@ class PortfolioService:
 
         except Exception as e:
             logger.error(f"AI分析失败: {e}", exc_info=True)
+            from app.utils.error_formatter import ErrorFormatter
+
+            user_message = ErrorFormatter.format_user_message(str(e))
             return AIAnalysisResult(
-                summary=f"AI分析暂时不可用: {str(e)}",
-                suggestions=["请稍后重试分析"]
+                summary=f"AI分析暂时不可用：{user_message}",
+                suggestions=["请检查大模型账号、API Key、余额或套餐配置后重试"]
             )
 
     def _build_analysis_prompt(
@@ -2099,10 +2446,11 @@ class PortfolioService:
 
     async def _get_stock_price(self, code: str, market: str) -> Optional[float]:
         """获取股票最新价格"""
+        code6 = str(code).strip().zfill(6)
         if market == "CN":
-            # A股从数据库获取
+            # A股从数据库获取：1) market_quotes 2) stock_basic_info 3) stock_daily_quotes 历史数据
             q = await self.db["market_quotes"].find_one(
-                {"$or": [{"code": code}, {"symbol": code}]},
+                {"$or": [{"code": code}, {"code": code6}, {"symbol": code}, {"symbol": code6}]},
                 {"_id": 0, "close": 1}
             )
             if q and q.get("close"):
@@ -2111,14 +2459,26 @@ class PortfolioService:
                 except (ValueError, TypeError):
                     pass
 
-            # 回退到basic_info
+            # 回退到 basic_info
             basic = await self.db["stock_basic_info"].find_one(
-                {"$or": [{"code": code}, {"symbol": code}]},
+                {"$or": [{"code": code}, {"code": code6}, {"symbol": code}, {"symbol": code6}]},
                 {"_id": 0, "current_price": 1}
             )
             if basic and basic.get("current_price"):
                 try:
                     return float(basic["current_price"])
+                except (ValueError, TypeError):
+                    pass
+
+            # 回退到 stock_daily_quotes 历史数据（取最新收盘价）
+            daily = await self.db["stock_daily_quotes"].find_one(
+                {"$or": [{"symbol": code}, {"symbol": code6}, {"code": code}, {"code": code6}]},
+                sort=[("trade_date", -1)],
+                projection={"_id": 0, "close": 1}
+            )
+            if daily and daily.get("close"):
+                try:
+                    return float(daily["close"])
                 except (ValueError, TypeError):
                     pass
         else:
@@ -2136,6 +2496,62 @@ class PortfolioService:
 
         return None
 
+    async def _validate_cost_price_against_historical(
+        self, code: str, market: str, buy_date, cost_price: float
+    ) -> None:
+        """
+        校验成本价是否在买入日历史数据的最高价和最低价范围内。
+        若用户输入的价格明显错误（如茅台填10元），则拒绝添加。
+        """
+        if not buy_date:
+            return
+        # 格式化买入日期：支持 datetime、date、ISO 字符串
+        if hasattr(buy_date, "strftime"):
+            buy_date_str = buy_date.strftime("%Y-%m-%d")
+            buy_date_compact = buy_date.strftime("%Y%m%d")
+        elif isinstance(buy_date, str):
+            buy_date_str = buy_date[:10] if len(buy_date) >= 10 else buy_date
+            buy_date_compact = buy_date_str.replace("-", "") if "-" in buy_date_str else buy_date_str
+        else:
+            return  # 无法解析则跳过校验
+        code6 = str(code).strip().zfill(6)
+        symbol_conds = [{"symbol": code}, {"symbol": code6}, {"code": code}, {"code": code6}]
+        date_conds = [{"trade_date": buy_date_str}, {"trade_date": buy_date_compact}]
+        collection_map = {"CN": "stock_daily_quotes", "HK": "stock_daily_quotes_hk", "US": "stock_daily_quotes_us"}
+        coll_name = collection_map.get(market, "stock_daily_quotes")
+        coll = self.db[coll_name]
+        for date_cond in date_conds:
+            doc = await coll.find_one(
+                {"$or": symbol_conds, **date_cond},
+                {"_id": 0, "high": 1, "low": 1, "open": 1, "close": 1}
+            )
+            if doc:
+                break
+        if not doc:
+            raise ValueError(
+                f"股票 {code} 在 {buy_date_str} 无历史数据，无法校验价格。请先同步该日历史数据，或暂不填写买入日期。"
+            )
+        high_val = doc.get("high")
+        low_val = doc.get("low")
+        if high_val is None or low_val is None:
+            # 若缺少 high/low，用 open/close 作为范围
+            open_val = doc.get("open")
+            close_val = doc.get("close")
+            if open_val is not None and close_val is not None:
+                high_val = max(open_val, close_val)
+                low_val = min(open_val, close_val)
+            else:
+                return  # 无法校验则放行
+        try:
+            high_f = float(high_val)
+            low_f = float(low_val)
+        except (ValueError, TypeError):
+            return
+        if cost_price < low_f or cost_price > high_f:
+            raise ValueError(
+                f"成本价 {cost_price:.2f} 超出 {buy_date_str} 的波动范围（最低 {low_f:.2f}～最高 {high_f:.2f}），请检查输入是否正确。"
+            )
+
     async def _get_stock_name(self, code: str, market: str) -> Optional[str]:
         """获取股票名称"""
         if market == "CN":
@@ -2150,11 +2566,18 @@ class PortfolioService:
     async def _get_stock_industry(self, code: str, market: str) -> Optional[str]:
         """获取股票所属行业
         
-        按照数据库配置的数据源优先级顺序查询
+        优先从官网获取（避免 AKShare 轮询封号），其次按数据库数据源优先级查询
         """
         try:
             if market == "CN":
                 logger.info(f"🔍 [获取行业] 查询股票代码: {code}, 市场: {market}")
+
+                # 🔥 优先从官网获取行业数据（避免 AKShare 轮询封号）
+                from app.services.official_industry_service import get_industry
+                official_industry = await get_industry(code)
+                if official_industry:
+                    logger.info(f"✅ [获取行业] 从官网获取: {code} -> {official_industry}")
+                    return official_industry
                 
                 # 🔥 获取启用的数据源列表（按优先级从高到低排序）
                 from app.core.data_source_priority import get_enabled_data_sources_async
@@ -3450,7 +3873,7 @@ class PortfolioService:
             # 使用统一的 LLM 适配器
             logger.info(f"🔧 [持仓AI分析v2] 准备创建 LLM: provider={provider}, model={model_name}, temperature=0.3")
             if api_key:
-                logger.info(f"🔑 [持仓AI分析v2] API Key 前3位: {api_key[:3] if len(api_key) >= 3 else 'N/A'}")
+                logger.info(f"🔑 [持仓AI分析v2] API Key: {truncate_api_key(api_key)}")
             llm = create_llm_by_provider(
                 provider=provider,
                 model=model_name,
@@ -3471,16 +3894,9 @@ class PortfolioService:
         except Exception as e:
             error_msg = str(e)
             logger.error(f"❌ [持仓AI分析] 分析失败: {error_msg}", exc_info=True)
+            from app.utils.error_formatter import ErrorFormatter
 
-            # 提供更友好的错误信息
-            if "Connection error" in error_msg or "connect" in error_msg.lower():
-                action_reason = "AI服务连接失败，请检查网络连接或API配置"
-            elif "authentication" in error_msg.lower() or "api_key" in error_msg.lower():
-                action_reason = "API Key 无效或未配置，请在设置中配置正确的API Key"
-            elif "rate limit" in error_msg.lower():
-                action_reason = "API 调用频率超限，请稍后重试"
-            else:
-                action_reason = f"AI分析暂时不可用: {error_msg}"
+            action_reason = f"AI分析暂时不可用：{ErrorFormatter.format_user_message(error_msg, include_suggestion=False)}"
 
             return PositionAnalysisResult(
                 action=PositionAction.HOLD,
@@ -3519,9 +3935,11 @@ class PortfolioService:
 
         except Exception as e:
             logger.error(f"单股AI分析失败: {e}", exc_info=True)
+            from app.utils.error_formatter import ErrorFormatter
+
             return PositionAnalysisResult(
                 action=PositionAction.HOLD,
-                action_reason=f"AI分析暂时不可用: {str(e)}"
+                action_reason=f"AI分析暂时不可用：{ErrorFormatter.format_user_message(str(e), include_suggestion=False)}"
             )
 
     def _build_position_analysis_prompt(

@@ -253,9 +253,24 @@ MongoDB 诊断
   ✅ MongoDB运行正常
 ```
 
+## 错误日志收集
+
+当 MongoDB、Redis 或 Nginx 启动报错时，可使用 `collect_service_logs.ps1` 打包所有相关日志和配置，便于排查或提供给技术支持：
+
+```powershell
+.\scripts\installer\collect_service_logs.ps1
+```
+
+输出文件：`logs/diagnostics_YYYYMMDD_HHmmss.zip`，包含：
+- Nginx/Backend 日志
+- MongoDB/Redis 启动失败时的 stdout/stderr（由 `start_services_clean.ps1` 自动写入 `logs/mongodb_startup.log`、`logs/redis_startup.log`）
+- 配置文件（nginx.conf、redis.conf、mongodb.conf）
+- 进程与端口状态摘要
+
 ## 相关文件
 
-- `start_services_clean.ps1`: 服务启动脚本
+- `start_services_clean.ps1`: 服务启动脚本（MongoDB/Redis 启动失败时自动写入日志）
+- `collect_service_logs.ps1`: 错误日志收集脚本
 - `start_all.ps1`: 完整启动脚本（包括后端和Nginx）
 - `.env`: 环境配置文件
 

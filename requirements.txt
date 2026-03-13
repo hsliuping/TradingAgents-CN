@@ -7,6 +7,7 @@ openai>=1.0.0,<2.0.0
 langchain-openai>=0.1.0
 langchain-experimental
 pandas
+xlrd>=2.0.2
 yfinance
 praw
 feedparser
@@ -33,7 +34,8 @@ langchain-google-genai>=2.1.12  # 修复 client_options 未定义错误
 google-generativeai>=0.8.3  # Google Gemini SDK (修复包名错误)
 dashscope
 psutil
-pytdx  # 通达信数据接口（已弃用，保留兼容性）
+pystray>=0.19.0
+Pillow>=10.0.0
 pymongo  # MongoDB数据库支持，用于Token使用记录存储
 motor>=3.3.0  # 异步MongoDB驱动，用于FastAPI后端
 markdown>=3.4.0  # Markdown处理，用于报告生成

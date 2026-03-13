@@ -191,7 +191,6 @@ def generate_release_summary():
     logger.info(f"\n💡 使用方法:")
     logger.info(f"  git pull origin main")
     logger.info(f"  pip install -r requirements.txt")
-    logger.info(f"  pip install pytdx")
     logger.info(f"  python -m streamlit run web/app.py")
 
 def main():

@@ -18,6 +18,9 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 # Script is at project root directory
 # Project root is the same as script directory
 $root = $PSScriptRoot
@@ -30,7 +33,7 @@ $envPath = Join-Path $root '.env'
 function Load-Env($path) {
     $map = @{}
     if (Test-Path -LiteralPath $path) {
-        foreach ($line in Get-Content -LiteralPath $path) {
+        foreach ($line in Get-Content -LiteralPath $path -Encoding UTF8) {
             if ($line -match '^\s*#') { continue }
             if ($line -match '^\s*$') { continue }
             $idx = $line.IndexOf('=')

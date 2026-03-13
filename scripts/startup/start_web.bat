@@ -1,5 +1,6 @@
 @echo off
-echo 🚀 启动TradingAgents-CN Web应用...
+chcp 65001 >nul
+echo 启动 TradingAgents-CN Web 应用...
 echo.
 
 REM 激活虚拟环境

@@ -43,11 +43,23 @@
           </el-form-item>
 
           <el-form-item>
+            <div class="agreement-check">
+              <el-checkbox v-model="agreedToTerms">
+                我已阅读并同意
+              </el-checkbox>
+              <el-link type="primary" :underline="false" @click.prevent="showAgreementDialog">《用户协议》</el-link>
+              <span class="agreement-and">和</span>
+              <el-link type="primary" :underline="false" @click.prevent="showPrivacyDialog">《隐私政策》</el-link>
+            </div>
+          </el-form-item>
+
+          <el-form-item>
             <el-button
               type="primary"
               size="large"
               style="width: 100%"
               :loading="loginLoading"
+              :disabled="!agreedToTerms"
               @click="handleLogin"
             >
               登录
@@ -71,14 +83,45 @@
         </p>
       </div>
     </div>
+
+    <!-- 用户协议弹窗 -->
+    <el-dialog
+      v-model="agreementDialogVisible"
+      title="用户协议"
+      width="680px"
+      top="5vh"
+      :close-on-click-modal="false"
+      class="legal-dialog"
+    >
+      <div class="legal-content" v-html="agreementHtml"></div>
+      <template #footer>
+        <el-button @click="agreementDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 隐私政策弹窗 -->
+    <el-dialog
+      v-model="privacyDialogVisible"
+      title="隐私政策"
+      width="680px"
+      top="5vh"
+      :close-on-click-modal="false"
+      class="legal-dialog"
+    >
+      <div class="legal-content" v-html="privacyHtml"></div>
+      <template #footer>
+        <el-button @click="privacyDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { marked } from 'marked'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -86,11 +129,62 @@ const authStore = useAuthStore()
 const loginFormRef = ref()
 const loginLoading = ref(false)
 
+// 协议相关状态
+const agreedToTerms = ref(false)
+const agreementDialogVisible = ref(false)
+const privacyDialogVisible = ref(false)
+const agreementHtml = ref('')
+const privacyHtml = ref('')
+
 const loginForm = reactive({
   username: '',
   password: '',
   rememberMe: false
 })
+
+// 初始化：检查是否已经同意过协议
+onMounted(() => {
+  const accepted = localStorage.getItem('terms-accepted')
+  if (accepted === 'true') {
+    agreedToTerms.value = true
+  }
+})
+
+// 加载并显示用户协议
+const showAgreementDialog = async () => {
+  if (!agreementHtml.value) {
+    try {
+      const response = await fetch('/legal/USER_AGREEMENT.md')
+      if (response.ok) {
+        const mdText = await response.text()
+        agreementHtml.value = await marked(mdText)
+      } else {
+        agreementHtml.value = '<p>用户协议加载失败，请稍后重试。</p>'
+      }
+    } catch {
+      agreementHtml.value = '<p>用户协议加载失败，请稍后重试。</p>'
+    }
+  }
+  agreementDialogVisible.value = true
+}
+
+// 加载并显示隐私政策
+const showPrivacyDialog = async () => {
+  if (!privacyHtml.value) {
+    try {
+      const response = await fetch('/legal/PRIVACY_POLICY.md')
+      if (response.ok) {
+        const mdText = await response.text()
+        privacyHtml.value = await marked(mdText)
+      } else {
+        privacyHtml.value = '<p>隐私政策加载失败，请稍后重试。</p>'
+      }
+    } catch {
+      privacyHtml.value = '<p>隐私政策加载失败，请稍后重试。</p>'
+    }
+  }
+  privacyDialogVisible.value = true
+}
 
 const loginRules = {
   username: [
@@ -109,6 +203,12 @@ const handleLogin = async () => {
     return
   }
 
+  // 检查是否同意协议
+  if (!agreedToTerms.value) {
+    ElMessage.warning('请先阅读并同意用户协议和隐私政策')
+    return
+  }
+
   try {
     await loginFormRef.value.validate()
 
@@ -123,6 +223,8 @@ const handleLogin = async () => {
 
     if (success) {
       console.log('✅ 登录成功')
+      // 记住用户已同意协议
+      localStorage.setItem('terms-accepted', 'true')
       ElMessage.success('登录成功')
 
       // 跳转到重定向路径或仪表板
@@ -195,6 +297,28 @@ const handleLogin = async () => {
     width: 100%;
   }
 
+  .agreement-check {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    font-size: 13px;
+    line-height: 1.6;
+
+    .el-checkbox {
+      margin-right: 0;
+    }
+
+    .el-link {
+      font-size: 13px;
+      vertical-align: baseline;
+    }
+
+    .agreement-and {
+      margin: 0 2px;
+      color: var(--el-text-color-regular);
+    }
+  }
+
   .login-tip {
     text-align: center;
     width: 100%;
@@ -222,6 +346,86 @@ const handleLogin = async () => {
     margin-right: auto;
     color: white;
     opacity: 0.85;
+  }
+}
+</style>
+
+
+<style lang="scss">
+/* 法律文档弹窗样式（不使用 scoped，因为 el-dialog 渲染在 body 下） */
+.legal-dialog {
+  .el-dialog__body {
+    max-height: 65vh;
+    overflow-y: auto;
+    padding: 16px 24px;
+  }
+
+  .legal-content {
+    font-size: 14px;
+    line-height: 1.8;
+    color: var(--el-text-color-primary);
+
+    h1 {
+      font-size: 20px;
+      margin: 16px 0 8px;
+    }
+
+    h2 {
+      font-size: 17px;
+      margin: 20px 0 8px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--el-border-color-lighter);
+    }
+
+    h3 {
+      font-size: 15px;
+      margin: 14px 0 6px;
+    }
+
+    p {
+      margin: 8px 0;
+    }
+
+    ul, ol {
+      padding-left: 20px;
+      margin: 8px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8px 0;
+      font-size: 13px;
+
+      th, td {
+        border: 1px solid var(--el-border-color);
+        padding: 6px 10px;
+        text-align: left;
+      }
+
+      th {
+        background: var(--el-fill-color-light);
+        font-weight: 600;
+      }
+    }
+
+    blockquote {
+      margin: 10px 0;
+      padding: 8px 16px;
+      border-left: 4px solid var(--el-color-warning);
+      background: var(--el-fill-color-lighter);
+      border-radius: 4px;
+    }
+
+    strong {
+      color: var(--el-color-danger);
+    }
+
+    hr {
+      margin: 16px 0;
+      border: none;
+      border-top: 1px solid var(--el-border-color-lighter);
+    }
   }
 }
 </style>
