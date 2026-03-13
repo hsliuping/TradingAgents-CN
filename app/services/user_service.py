@@ -2,7 +2,9 @@
 用户服务 - 基于数据库的用户管理
 """
 
+import atexit
 import hashlib
+import sys
 import time
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -31,24 +33,39 @@ class UserService:
         self.client = MongoClient(settings.MONGO_URI)
         self.db = self.client[settings.MONGO_DB]
         self.users_collection = self.db.users
+        self._closed = False
+        atexit.register(self._close_at_exit)
 
-    def close(self):
+    def close(self, log: bool = True):
         """关闭数据库连接"""
+        if self._closed:
+            return
+
         if hasattr(self, 'client') and self.client:
             try:
                 self.client.close()
             except Exception:
                 pass
-            # 避免在 Python 关闭时记录日志（会触发 ImportError: sys.meta_path is None）
+
+        self._closed = True
+
+        if log and sys.meta_path is not None:
             try:
                 logger.info("UserService MongoDB connection closed")
             except Exception:
                 pass
 
-    def __del__(self):
-        """析构函数，确保连接被关闭。不记录日志，避免 Python 关闭时崩溃。"""
+    def _close_at_exit(self):
+        """解释器正常退出时关闭连接，不写日志。"""
         try:
-            self.close()
+            self.close(log=False)
+        except Exception:
+            pass
+
+    def __del__(self):
+        """析构函数，确保连接被关闭且不在解释器关闭阶段写日志。"""
+        try:
+            self.close(log=False)
         except Exception:
             pass
     
