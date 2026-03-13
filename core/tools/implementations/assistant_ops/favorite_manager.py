@@ -27,11 +27,24 @@ def _normalize_market(market: str) -> str:
     return "A股"
 
 
+def _parse_tags(tags: str) -> list[str]:
+    raw = (tags or "").replace("，", ",").replace("、", ",")
+    parsed = []
+    seen = set()
+    for item in raw.split(","):
+        tag = item.strip()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        parsed.append(tag)
+    return parsed
+
+
 @tool
 @register_tool(
     tool_id="add_stocks_to_favorites",
     name="批量添加股票到自选股",
-    description="将一只或多只股票批量添加到用户自选股列表，适合在智能选股完成后一次保存推荐结果。",
+    description="将一只或多只股票批量添加到用户自选股列表，适合在智能选股完成后一次保存推荐结果；支持通过 tags 参数同时给这些股票打标签，并为已在自选股中的股票补充标签。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -41,11 +54,17 @@ async def add_stocks_to_favorites(
         str,
         "股票 JSON 数组，例如 [{\"code\":\"600519\",\"name\":\"贵州茅台\",\"market\":\"A股\"}]",
     ],
+    tags: Annotated[
+        str,
+        "可选，给这些股票同时打上的标签，逗号分隔，例如 巴菲特,高分红",
+    ] = "",
 ) -> str:
-    """批量添加股票到当前用户的自选股列表。"""
+    """批量添加股票到当前用户的自选股列表，并可同时补充标签。"""
     from app.services.favorites_service import favorites_service
+    from app.services.tags_service import tags_service
 
     user_id = require_current_user_id()
+    parsed_tags = _parse_tags(tags)
 
     try:
         items = json.loads(stocks_json)
@@ -73,15 +92,55 @@ async def add_stocks_to_favorites(
     if not normalized_items:
         return "❌ 未解析出有效的股票代码。"
 
+    existing_favorites = await favorites_service.get_user_favorites(user_id)
+    existing_map = {
+        str(item.get("stock_code") or item.get("symbol") or "").strip(): item
+        for item in existing_favorites
+        if str(item.get("stock_code") or item.get("symbol") or "").strip()
+    }
+
+    if parsed_tags:
+        try:
+            existing_tags = {
+                tag.get("name")
+                for tag in await tags_service.list_tags(user_id)
+                if tag.get("name")
+            }
+            for tag_name in parsed_tags:
+                if tag_name in existing_tags:
+                    continue
+                try:
+                    await tags_service.create_tag(user_id=user_id, name=tag_name)
+                    existing_tags.add(tag_name)
+                except Exception:
+                    logger.debug("[add_stocks_to_favorites] 创建标签失败，继续使用收藏标签聚合: %s", tag_name, exc_info=True)
+        except Exception:
+            logger.debug("[add_stocks_to_favorites] 读取/创建标签失败，继续执行收藏更新", exc_info=True)
+
     added_codes = []
     skipped_codes = []
+    tagged_codes = []
     failed_codes = []
 
     for item in normalized_items:
         code = item["code"]
         try:
-            if await favorites_service.is_favorite(user_id, code):
-                skipped_codes.append(code)
+            existing = existing_map.get(code)
+            if existing:
+                current_tags = list(existing.get("tags") or [])
+                merged_tags = current_tags
+                if parsed_tags:
+                    merged_tags = list(dict.fromkeys([*current_tags, *parsed_tags]))
+
+                if merged_tags != current_tags:
+                    await favorites_service.update_favorite(
+                        user_id=user_id,
+                        stock_code=code,
+                        tags=merged_tags,
+                    )
+                    tagged_codes.append(code)
+                else:
+                    skipped_codes.append(code)
                 continue
 
             await favorites_service.add_favorite(
@@ -89,6 +148,7 @@ async def add_stocks_to_favorites(
                 stock_code=code,
                 stock_name=item["name"],
                 market=item["market"],
+                tags=parsed_tags,
             )
             added_codes.append(code)
         except Exception as e:
@@ -100,6 +160,10 @@ async def add_stocks_to_favorites(
     ]
     if added_codes:
         lines.append(f"- 新增: {', '.join(added_codes)}")
+    if parsed_tags:
+        lines.append(f"- 标签: {', '.join(parsed_tags)}")
+    if tagged_codes:
+        lines.append(f"- 已补充标签 {len(tagged_codes)} 只: {', '.join(tagged_codes)}")
     if skipped_codes:
         lines.append(f"- 已存在 {len(skipped_codes)} 只: {', '.join(skipped_codes)}")
     if failed_codes:
