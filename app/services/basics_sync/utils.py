@@ -113,7 +113,7 @@ def find_latest_trade_date() -> str:
 def fetch_daily_basic_mv_map(trade_date: str) -> Dict[str, Dict[str, float]]:
     """
     根据交易日获取日度基础指标映射。
-    覆盖字段：total_mv/circ_mv/pe/pb/ps/turnover_rate/volume_ratio/pe_ttm/pb_mrq/ps_ttm
+    覆盖字段：total_mv/circ_mv/pe/pb/ps/turnover_rate/volume_ratio/pe_ttm/pb_mrq/ps_ttm/dv_ratio/dv_ttm
     """
     from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
 
@@ -122,8 +122,8 @@ def fetch_daily_basic_mv_map(trade_date: str) -> Dict[str, Dict[str, float]]:
     if api is None:
         raise RuntimeError("Tushare API unavailable")
 
-    # 🔥 新增：添加 ps、ps_ttm、total_share、float_share 字段
-    fields = "ts_code,total_mv,circ_mv,pe,pb,ps,turnover_rate,volume_ratio,pe_ttm,pb_mrq,ps_ttm,total_share,float_share"
+    # 🔥 新增：添加 ps、ps_ttm、total_share、float_share、dv_ratio、dv_ttm 字段
+    fields = "ts_code,total_mv,circ_mv,pe,pb,ps,turnover_rate,volume_ratio,pe_ttm,pb_mrq,ps_ttm,total_share,float_share,dv_ratio,dv_ttm"
     db = api.daily_basic(trade_date=trade_date, fields=fields)
 
     data_map: Dict[str, Dict[str, float]] = {}
@@ -133,7 +133,7 @@ def fetch_daily_basic_mv_map(trade_date: str) -> Dict[str, Dict[str, float]]:
             if ts_code is not None:
                 try:
                     metrics = {}
-                    # 🔥 新增：添加 ps、ps_ttm、total_share、float_share 到字段列表
+                    # 🔥 新增：添加 ps、ps_ttm、total_share、float_share、dv_ratio、dv_ttm 到字段列表
                     for field in [
                         "total_mv",
                         "circ_mv",
@@ -147,6 +147,8 @@ def fetch_daily_basic_mv_map(trade_date: str) -> Dict[str, Dict[str, float]]:
                         "ps_ttm",
                         "total_share",
                         "float_share",
+                        "dv_ratio",
+                        "dv_ttm",
                     ]:
                         value = row.get(field)
                         if value is not None and str(value).lower() not in ["nan", "none", ""]:

@@ -12,6 +12,7 @@ def add_financial_metrics(doc: Dict, daily_metrics: Dict) -> None:
     - 估值：pe/pb/pe_ttm/pb_mrq/ps/ps_ttm（过滤 NaN/None）
     - 交易：turnover_rate/volume_ratio（过滤 NaN/None）
     - 股本：total_share/float_share（万股，过滤 NaN/None）
+    - 分红：dv_ratio/dv_ttm -> dividend_yield/dividend_yield_ttm（过滤 NaN/None）
     """
     # 市值（万元 -> 亿元）
     if "total_mv" in daily_metrics and daily_metrics["total_mv"] is not None:
@@ -46,6 +47,15 @@ def add_financial_metrics(doc: Dict, daily_metrics: Dict) -> None:
                 value = float(daily_metrics[field])
                 if not (value != value):  # 过滤 NaN
                     doc[field] = value
+            except (ValueError, TypeError):
+                pass
+
+    for source_field, target_field in {"dv_ratio": "dividend_yield", "dv_ttm": "dividend_yield_ttm"}.items():
+        if source_field in daily_metrics and daily_metrics[source_field] is not None:
+            try:
+                value = float(daily_metrics[source_field])
+                if not (value != value):  # 过滤 NaN
+                    doc[target_field] = value
             except (ValueError, TypeError):
                 pass
 

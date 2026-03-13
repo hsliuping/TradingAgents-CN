@@ -32,6 +32,28 @@ export interface FundamentalsResponse {
   ps_ttm?: number  // 🔥 新增：市销率（TTM）
   roe?: number
   debt_ratio?: number  // 🔥 新增：负债率
+  dividend_yield?: number
+  dividend_yield_ttm?: number
+  current_ratio?: number
+  quick_ratio?: number
+  cash_ratio?: number
+  gross_margin?: number
+  netprofit_margin?: number
+  revenue?: number
+  revenue_ttm?: number
+  net_income?: number
+  net_profit?: number
+  net_profit_ttm?: number
+  oper_profit?: number
+  total_profit?: number
+  total_assets?: number
+  total_liab?: number
+  total_equity?: number
+  n_cashflow_act?: number
+  report_period?: string
+  report_type?: string
+  ann_date?: string
+  financial_data_source?: string
   total_mv?: number
   circ_mv?: number
   turnover_rate?: number
@@ -87,6 +109,59 @@ export interface DataValidationResponse {
   details: Record<string, any>
 }
 
+export interface StockFinancialSummary {
+  report_period?: string
+  report_type?: string
+  ann_date?: string
+  data_source?: string
+  revenue?: number
+  revenue_ttm?: number
+  oper_rev?: number
+  net_income?: number
+  net_profit?: number
+  net_profit_ttm?: number
+  oper_profit?: number
+  total_profit?: number
+  gross_margin?: number
+  netprofit_margin?: number
+  roe?: number
+  roa?: number
+  roe_waa?: number
+  roe_dt?: number
+  debt_to_assets?: number
+  assets_to_eqt?: number
+  current_ratio?: number
+  quick_ratio?: number
+  cash_ratio?: number
+  total_assets?: number
+  total_liab?: number
+  total_equity?: number
+  total_cur_assets?: number
+  total_cur_liab?: number
+  money_cap?: number
+  accounts_receiv?: number
+  inventories?: number
+  fix_assets?: number
+  n_cashflow_act?: number
+  n_cashflow_inv_act?: number
+  n_cashflow_fin_act?: number
+  c_cash_equ_end_period?: number
+  c_cash_equ_beg_period?: number
+  updated_at?: string
+}
+
+export interface StockFinancialsResponse {
+  code: string
+  name?: string
+  data_source?: string
+  report_period?: string
+  report_type?: string
+  ann_date?: string
+  summary: StockFinancialSummary
+  raw_data?: Record<string, any[]>
+  available_fields: string[]
+}
+
 export const stocksApi = {
   /**
    * 获取股票行情
@@ -132,6 +207,18 @@ export const stocksApi = {
    */
   async getFundamentals(symbol: string) {
     return ApiClient.get<FundamentalsResponse>(`/api/stocks/${symbol}/fundamentals`)
+  },
+
+  /**
+   * 获取股票最新财务明细
+   * @param symbol 6位股票代码
+   * @param options includeRaw: 是否返回 raw_data 分组明细
+   */
+  async getFinancials(symbol: string, options?: { source?: string; includeRaw?: boolean }) {
+    return ApiClient.get<StockFinancialsResponse>(`/api/stocks/${symbol}/financials`, {
+      ...(options?.source ? { source: options.source } : {}),
+      ...(options?.includeRaw !== undefined ? { include_raw: String(options.includeRaw) } : {}),
+    })
   },
 
   /**

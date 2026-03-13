@@ -64,6 +64,11 @@ export interface StockRecommendation {
   price?: number
   pe?: number
   pb?: number
+  roe?: number
+  dividend_yield?: number
+  debt_to_assets?: number
+  current_ratio?: number
+  report_period?: string
   pct_change?: number
   reason: string
 }

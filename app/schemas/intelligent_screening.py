@@ -16,6 +16,11 @@ class StockRecommendation(BaseModel):
     price: Optional[float] = Field(None, description="当前价格")
     pe: Optional[float] = Field(None, description="市盈率")
     pb: Optional[float] = Field(None, description="市净率")
+    roe: Optional[float] = Field(None, description="净资产收益率(%)")
+    dividend_yield: Optional[float] = Field(None, description="股息率(%)")
+    debt_to_assets: Optional[float] = Field(None, description="资产负债率(%)")
+    current_ratio: Optional[float] = Field(None, description="流动比率")
+    report_period: Optional[str] = Field(None, description="财报期")
     pct_change: Optional[float] = Field(None, description="涨跌幅(%)")
     reason: str = Field("", description="推荐理由")
 

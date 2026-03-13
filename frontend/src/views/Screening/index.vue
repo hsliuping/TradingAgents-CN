@@ -421,7 +421,7 @@
                       </div>
                       <div v-if="msg.stocks?.length" class="stock-cards">
                         <el-alert v-if="msg.is_fallback" type="warning" :closable="false" show-icon
-                          title="以下为超时降级结果（按市值排序的快速候选），请输入更明确条件获取精确筛选" style="margin-bottom:8px;" />
+                          title="以下为优质股替代候选，不代表满足您原始筛选条件；如需继续精确筛选，请补充更明确条件" style="margin-bottom:8px;" />
                         <el-card v-for="s in msg.stocks" :key="s.code" class="stock-card" shadow="hover">
                           <div class="stock-card-header">
                             <span class="stock-name">{{ s.name }}</span>
@@ -432,6 +432,11 @@
                             <span v-if="s.price != null">价格: {{ s.price?.toFixed(2) }}</span>
                             <span v-if="s.pe != null">PE: {{ s.pe?.toFixed(1) }}</span>
                             <span v-if="s.pb != null">PB: {{ s.pb?.toFixed(2) }}</span>
+                            <span v-if="s.roe != null">ROE: {{ s.roe?.toFixed(2) }}%</span>
+                            <span v-if="s.dividend_yield != null">股息率: {{ s.dividend_yield?.toFixed(2) }}%</span>
+                            <span v-if="s.debt_to_assets != null">负债率: {{ s.debt_to_assets?.toFixed(2) }}%</span>
+                            <span v-if="s.current_ratio != null">流动比率: {{ s.current_ratio?.toFixed(2) }}</span>
+                            <span v-if="s.report_period">财报期: {{ s.report_period }}</span>
                             <span v-if="s.pct_change != null" :class="(s.pct_change ?? 0) >= 0 ? 'text-red' : 'text-green'">
                               {{ (s.pct_change ?? 0) >= 0 ? '+' : '' }}{{ s.pct_change?.toFixed(2) }}%
                             </span>

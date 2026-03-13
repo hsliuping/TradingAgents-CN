@@ -278,10 +278,13 @@ class BasicsSyncService:
                 if circ_mv_yi is not None:
                     doc["circ_mv"] = circ_mv_yi
 
-                # Add financial ratios (🔥 新增 ps 和 ps_ttm)
+                # Add financial ratios (🔥 新增 ps、ps_ttm 和股息率)
                 for field in ["pe", "pb", "ps", "pe_ttm", "pb_mrq", "ps_ttm"]:
                     if field in daily_metrics:
                         doc[field] = daily_metrics[field]
+                for source_field, target_field in {"dv_ratio": "dividend_yield", "dv_ttm": "dividend_yield_ttm"}.items():
+                    if source_field in daily_metrics:
+                        doc[target_field] = daily_metrics[source_field]
                 # ROE from fina_indicator snapshot
                 if isinstance(ts_code, str) and ts_code in roe_map:
                     roe_val = roe_map[ts_code].get("roe")

@@ -18,6 +18,104 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
 
+FINANCIAL_RAW_GROUPS = [
+    "income_statement",
+    "balance_sheet",
+    "cashflow_statement",
+    "financial_indicators",
+    "main_business",
+]
+
+
+def _pick_first_value(*values):
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _build_financial_summary(financial_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not financial_data:
+        return {}
+
+    indicators = financial_data.get("financial_indicators") or {}
+
+    summary = {
+        "report_period": financial_data.get("report_period"),
+        "report_type": financial_data.get("report_type"),
+        "ann_date": financial_data.get("ann_date"),
+        "data_source": financial_data.get("data_source"),
+        "revenue": financial_data.get("revenue"),
+        "revenue_ttm": financial_data.get("revenue_ttm"),
+        "oper_rev": financial_data.get("oper_rev"),
+        "net_income": financial_data.get("net_income"),
+        "net_profit": financial_data.get("net_profit"),
+        "net_profit_ttm": financial_data.get("net_profit_ttm"),
+        "oper_profit": financial_data.get("oper_profit"),
+        "total_profit": financial_data.get("total_profit"),
+        "gross_margin": _pick_first_value(financial_data.get("gross_margin"), indicators.get("gross_margin")),
+        "netprofit_margin": _pick_first_value(financial_data.get("netprofit_margin"), indicators.get("netprofit_margin")),
+        "roe": _pick_first_value(financial_data.get("roe"), indicators.get("roe"), indicators.get("roe_avg")),
+        "roa": _pick_first_value(financial_data.get("roa"), indicators.get("roa")),
+        "roe_waa": financial_data.get("roe_waa"),
+        "roe_dt": financial_data.get("roe_dt"),
+        "debt_to_assets": _pick_first_value(financial_data.get("debt_to_assets"), indicators.get("debt_to_assets")),
+        "assets_to_eqt": _pick_first_value(financial_data.get("assets_to_eqt"), indicators.get("assets_to_eqt")),
+        "current_ratio": _pick_first_value(financial_data.get("current_ratio"), indicators.get("current_ratio")),
+        "quick_ratio": _pick_first_value(financial_data.get("quick_ratio"), indicators.get("quick_ratio")),
+        "cash_ratio": _pick_first_value(financial_data.get("cash_ratio"), indicators.get("cash_ratio")),
+        "total_assets": financial_data.get("total_assets"),
+        "total_liab": financial_data.get("total_liab"),
+        "total_equity": financial_data.get("total_equity"),
+        "total_cur_assets": financial_data.get("total_cur_assets"),
+        "total_cur_liab": financial_data.get("total_cur_liab"),
+        "money_cap": financial_data.get("money_cap"),
+        "accounts_receiv": financial_data.get("accounts_receiv"),
+        "inventories": financial_data.get("inventories"),
+        "fix_assets": financial_data.get("fix_assets"),
+        "n_cashflow_act": financial_data.get("n_cashflow_act"),
+        "n_cashflow_inv_act": financial_data.get("n_cashflow_inv_act"),
+        "n_cashflow_fin_act": financial_data.get("n_cashflow_fin_act"),
+        "c_cash_equ_end_period": financial_data.get("c_cash_equ_end_period"),
+        "c_cash_equ_beg_period": financial_data.get("c_cash_equ_beg_period"),
+        "updated_at": financial_data.get("updated_at"),
+    }
+
+    return {k: v for k, v in summary.items() if v is not None}
+
+
+def _build_financial_raw_data(financial_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not financial_data:
+        return {}
+
+    raw_data = financial_data.get("raw_data") or {}
+    result: Dict[str, Any] = {}
+    for group in FINANCIAL_RAW_GROUPS:
+        if raw_data.get(group):
+            result[group] = raw_data.get(group)
+    return result
+
+
+async def _get_cn_source_priority() -> List[str]:
+    """按系统配置返回启用的 A 股数据源优先级，数字越大优先级越高。"""
+    try:
+        from app.core.unified_config import UnifiedConfigManager
+
+        config = UnifiedConfigManager()
+        data_source_configs = await config.get_data_source_configs_async()
+        enabled_sources = [
+            ds.type.lower()
+            for ds in data_source_configs
+            if ds.enabled and ds.type.lower() in ["tushare", "multi_source", "akshare", "baostock"]
+        ]
+        if enabled_sources:
+            return enabled_sources
+    except Exception as e:
+        logger.warning("获取数据源优先级失败，使用默认顺序: %s", e)
+
+    return ["tushare", "multi_source", "akshare", "baostock"]
+
+
 def _zfill_code(code: str) -> str:
     try:
         s = str(code).strip()
@@ -269,7 +367,7 @@ async def get_fundamentals(
             )
     else:
         # 🔥 未指定数据源，按优先级查询
-        source_priority = ["tushare", "multi_source", "akshare", "baostock"]
+        source_priority = await _get_cn_source_priority()
         b = None
 
         for src in source_priority:
@@ -292,17 +390,7 @@ async def get_fundamentals(
     # 🔥 按数据源优先级查询，而不是按时间戳，避免混用不同数据源的数据
     financial_data = None
     try:
-        # 获取数据源优先级配置
-        from app.core.unified_config import UnifiedConfigManager
-        config = UnifiedConfigManager()
-        data_source_configs = await config.get_data_source_configs_async()
-
-        # 提取启用的数据源，按优先级排序
-        enabled_sources = [
-            ds.type.lower() for ds in data_source_configs
-            if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
-        ]
-
+        enabled_sources = [src for src in await _get_cn_source_priority() if src in ['tushare', 'akshare', 'baostock']]
         if not enabled_sources:
             enabled_sources = ['tushare', 'akshare', 'baostock']
 
@@ -368,6 +456,30 @@ async def get_fundamentals(
         # 负债率（从 stock_financial_data 获取）
         "debt_ratio": None,
 
+        # 扩展财务字段
+        "dividend_yield": b.get("dividend_yield"),
+        "dividend_yield_ttm": b.get("dividend_yield_ttm"),
+        "current_ratio": None,
+        "quick_ratio": None,
+        "cash_ratio": None,
+        "gross_margin": None,
+        "netprofit_margin": None,
+        "revenue": None,
+        "revenue_ttm": None,
+        "net_income": None,
+        "net_profit": None,
+        "net_profit_ttm": None,
+        "oper_profit": None,
+        "total_profit": None,
+        "total_assets": None,
+        "total_liab": None,
+        "total_equity": None,
+        "n_cashflow_act": None,
+        "report_period": None,
+        "report_type": None,
+        "ann_date": None,
+        "financial_data_source": None,
+
         # 市值：优先使用实时市值，降级到静态市值
         "total_mv": total_mv,
         "circ_mv": b.get("circ_mv"),
@@ -384,17 +496,55 @@ async def get_fundamentals(
 
     # 5. 从财务数据中提取 ROE、负债率和计算 PS
     if financial_data:
+        data["report_period"] = financial_data.get("report_period")
+        data["report_type"] = financial_data.get("report_type")
+        data["ann_date"] = financial_data.get("ann_date")
+        data["financial_data_source"] = financial_data.get("data_source")
+
         # ROE（净资产收益率）
         if financial_data.get("financial_indicators"):
             indicators = financial_data["financial_indicators"]
             data["roe"] = indicators.get("roe")
             data["debt_ratio"] = indicators.get("debt_to_assets")
+            data["current_ratio"] = indicators.get("current_ratio")
+            data["quick_ratio"] = indicators.get("quick_ratio")
+            data["cash_ratio"] = indicators.get("cash_ratio")
+            data["gross_margin"] = indicators.get("gross_margin")
+            data["netprofit_margin"] = indicators.get("netprofit_margin")
+            data["dividend_yield"] = data["dividend_yield"] or indicators.get("dividend_yield")
 
         # 如果 financial_indicators 中没有，尝试从顶层字段获取
         if data["roe"] is None:
             data["roe"] = financial_data.get("roe")
         if data["debt_ratio"] is None:
             data["debt_ratio"] = financial_data.get("debt_to_assets")
+        if data["current_ratio"] is None:
+            data["current_ratio"] = financial_data.get("current_ratio")
+        if data["quick_ratio"] is None:
+            data["quick_ratio"] = financial_data.get("quick_ratio")
+        if data["cash_ratio"] is None:
+            data["cash_ratio"] = financial_data.get("cash_ratio")
+        if data["gross_margin"] is None:
+            data["gross_margin"] = financial_data.get("gross_margin")
+        if data["netprofit_margin"] is None:
+            data["netprofit_margin"] = financial_data.get("netprofit_margin")
+        if data["dividend_yield"] is None:
+            data["dividend_yield"] = financial_data.get("dividend_yield")
+
+        for field in [
+            "revenue",
+            "revenue_ttm",
+            "net_income",
+            "net_profit",
+            "net_profit_ttm",
+            "oper_profit",
+            "total_profit",
+            "total_assets",
+            "total_liab",
+            "total_equity",
+            "n_cashflow_act",
+        ]:
+            data[field] = financial_data.get(field)
 
         # 🔥 动态计算 PS（市销率）- 使用实时市值
         # 优先使用 TTM 营业收入，如果没有则使用单期营业收入
@@ -415,7 +565,82 @@ async def get_fundamentals(
     if data["roe"] is None:
         data["roe"] = b.get("roe")
 
+    if data["dividend_yield"] is None:
+        data["dividend_yield"] = b.get("dividend_yield")
+
     return ok(data)
+
+
+@router.get("/{code}/financials", response_model=dict)
+async def get_financials(
+    code: str,
+    source: Optional[str] = Query(None, description="数据源 (tushare/akshare/baostock)"),
+    include_raw: bool = Query(True, description="是否返回 raw_data 分组明细"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    获取股票最新财务明细。
+
+    主链路接口，返回：
+    1. summary：常用财务字段快照
+    2. raw_data：按利润表/资产负债表/现金流/财务指标/主营业务分组的原始明细
+    3. available_fields：当前文档实际已落库的顶层字段列表
+    """
+    market, normalized_code = _detect_market_and_code(code)
+    if market != 'CN':
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前接口仅支持 A 股财务明细")
+
+    db = get_mongo_db()
+    base_query: Dict[str, Any] = {"$or": [{"symbol": normalized_code}, {"code": normalized_code}]}
+
+    financial_data = None
+    if source:
+        query = {**base_query, "data_source": source}
+        financial_data = await db["stock_financial_data"].find_one(
+            query,
+            {"_id": 0},
+            sort=[("report_period", -1), ("updated_at", -1)]
+        )
+    else:
+        source_priority = [src for src in await _get_cn_source_priority() if src in ["tushare", "akshare", "baostock"]]
+        for preferred_source in source_priority:
+            query = {**base_query, "data_source": preferred_source}
+            financial_data = await db["stock_financial_data"].find_one(
+                query,
+                {"_id": 0},
+                sort=[("report_period", -1), ("updated_at", -1)]
+            )
+            if financial_data:
+                logger.info("✅ financials 接口使用数据源 %s 查询股票 %s", preferred_source, normalized_code)
+                break
+
+        if not financial_data:
+            financial_data = await db["stock_financial_data"].find_one(
+                base_query,
+                {"_id": 0},
+                sort=[("report_period", -1), ("updated_at", -1)]
+            )
+    if not financial_data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该股票的财务数据")
+
+    summary = _build_financial_summary(financial_data)
+    raw_data = _build_financial_raw_data(financial_data) if include_raw else {}
+    available_fields = sorted(
+        key for key in financial_data.keys()
+        if key not in {"_id", "raw_data"} and financial_data.get(key) is not None
+    )
+
+    return ok(data={
+        "code": normalized_code,
+        "name": financial_data.get("name"),
+        "data_source": financial_data.get("data_source"),
+        "report_period": financial_data.get("report_period"),
+        "report_type": financial_data.get("report_type"),
+        "ann_date": financial_data.get("ann_date"),
+        "summary": summary,
+        "raw_data": raw_data,
+        "available_fields": available_fields,
+    })
 
 
 @router.get("/{code}/kline", response_model=dict)
