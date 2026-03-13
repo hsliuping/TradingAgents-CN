@@ -183,6 +183,33 @@ class UnifiedLLMClient:
                     "no_data_count": int(match.group(3)),
                 }
 
+        if tool_name == "add_stocks_to_favorites":
+            summary: Dict[str, Any] = {}
+            added_match = re.search(r"已添加\s*(\d+)\s*只股票到自选股", content)
+            existed_match = re.search(r"已存在\s*(\d+)\s*只", content)
+            failed_match = re.search(r"失败\s*(\d+)\s*只", content)
+            if added_match:
+                summary["added_count"] = int(added_match.group(1))
+            if existed_match:
+                summary["existing_count"] = int(existed_match.group(1))
+            if failed_match:
+                summary["failed_count"] = int(failed_match.group(1))
+            return summary
+
+        if tool_name == "add_stock_to_watchlist":
+            summary: Dict[str, Any] = {}
+            added_match = re.search(r"已添加\s*(\d+)\s*只股票到[「\"]?([^」\"\n]+)[」\"]?", content)
+            created_match = re.search(r"已自动创建分组[「\"]?([^」\"\n]+)[」\"]?并添加\s*(\d+)\s*只股票", content)
+            existing_match = re.search(r"已在分组[「\"]?([^」\"\n]+)[」\"]?中", content)
+            if added_match:
+                summary["added_count"] = int(added_match.group(1))
+            if created_match:
+                summary["group_created"] = 1
+                summary["added_count"] = int(created_match.group(2))
+            if existing_match and "added_count" not in summary:
+                summary["existing_count"] = 1
+            return summary
+
         return {}
 
     def chat(

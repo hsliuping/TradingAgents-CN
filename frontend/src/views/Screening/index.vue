@@ -437,6 +437,11 @@
                             </span>
                           </div>
                           <div class="stock-card-reason">{{ s.reason }}</div>
+                          <div class="stock-card-actions">
+                            <el-button size="small" :type="isFavorited(s.code) ? 'warning' : 'primary'" plain @click="toggleAiFavorite(s)">
+                              {{ isFavorited(s.code) ? '取消自选' : '加入自选' }}
+                            </el-button>
+                          </div>
                         </el-card>
                       </div>
                     </div>
@@ -536,6 +541,14 @@ const buildToolSummaryText = (tool?: string, summary?: Record<string, number>) =
     if (typeof summary.stable_count === 'number') parts.push(`稳定 ${summary.stable_count}`)
     if (typeof summary.volatile_count === 'number') parts.push(`不稳定 ${summary.volatile_count}`)
     if (typeof summary.no_data_count === 'number') parts.push(`无数据 ${summary.no_data_count}`)
+    return parts.join(' / ')
+  }
+
+  if (tool === 'add_stocks_to_favorites') {
+    const parts: string[] = []
+    if (typeof summary.added_count === 'number') parts.push(`新增 ${summary.added_count}`)
+    if (typeof summary.existing_count === 'number') parts.push(`已存在 ${summary.existing_count}`)
+    if (typeof summary.failed_count === 'number') parts.push(`失败 ${summary.failed_count}`)
     return parts.join(' / ')
   }
 
@@ -757,6 +770,12 @@ const handleClearAi = () => {
       ElMessage.error(e instanceof Error ? e.message : '清空失败')
     }
   }).catch(() => {})
+}
+
+type FavoriteCandidate = {
+  symbol: string
+  name?: string
+  market?: string
 }
 
 // ---- 传统筛选 ----
@@ -1038,7 +1057,7 @@ const viewStockDetail = (stock: StockInfo) => {
 
 const isFavorited = (code: string) => favoriteSet.value.has(code)
 
-const toggleFavorite = async (stock: StockInfo) => {
+const toggleFavorite = async (stock: FavoriteCandidate) => {
   try {
     const code = stock.symbol
     if (favoriteSet.value.has(code)) {
@@ -1048,14 +1067,10 @@ const toggleFavorite = async (stock: StockInfo) => {
       favoriteSet.value.delete(code)
       ElMessage.success(`已取消自选：${stock.name || code}`)
     } else {
-      // 股票关注列表
-      // 根据股票代码判断市场类型
       let marketType = 'A股'
       if ((stock as any).market) {
-        // 如果有 market 字段，尝试转换（可能是交易所代码如 "sz", "sh"）
         marketType = exchangeCodeToMarket((stock as any).market)
       } else {
-        // 否则根据股票代码判断
         marketType = getMarketByStockCode(code) || 'A股'
       }
 
@@ -1073,6 +1088,14 @@ const toggleFavorite = async (stock: StockInfo) => {
   } catch (error: any) {
     ElMessage.error(error?.message || '自选操作失败')
   }
+}
+
+const toggleAiFavorite = async (stock: StockRecommendation) => {
+  await toggleFavorite({
+    symbol: stock.code,
+    name: stock.name,
+    market: 'A股',
+  })
 }
 
 const exportResults = () => {
@@ -1491,6 +1514,12 @@ onUnmounted(() => {
         font-size: 13px;
         color: var(--el-text-color-secondary);
         line-height: 1.5;
+      }
+
+      .stock-card-actions {
+        margin-top: 10px;
+        display: flex;
+        justify-content: flex-end;
       }
     }
 

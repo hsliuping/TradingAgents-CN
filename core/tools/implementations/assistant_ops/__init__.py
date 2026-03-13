@@ -13,6 +13,7 @@ from core.tools.implementations.assistant_ops import analysis_trigger  # noqa: F
 from core.tools.implementations.assistant_ops import report_query  # noqa: F401
 from core.tools.implementations.assistant_ops import schedule_manager  # noqa: F401
 from core.tools.implementations.assistant_ops import watchlist_manager  # noqa: F401
+from core.tools.implementations.assistant_ops import favorite_manager  # noqa: F401
 from core.tools.implementations.assistant_ops import position_analysis  # noqa: F401
 from core.tools.implementations.assistant_ops import trade_review_ops  # noqa: F401
 from core.tools.implementations.assistant_ops import trading_plan  # noqa: F401

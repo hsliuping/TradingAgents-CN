@@ -22,6 +22,7 @@ from app.services.intelligent_assistant_service import (
     ASSISTANT_TIMEOUT_SECONDS,
 )
 from core.tools import get_tool_registry, tool_metadata_list_to_openai
+from core.tools.context import set_current_user_id
 from core.llm import UnifiedLLMClient
 from core.llm.models import Message, MessageRole
 
@@ -34,11 +35,19 @@ MAX_CONTEXT_MESSAGES = 20
 # 选股相关的工具类别
 # "screening" 类别包含 screen_stocks_by_criteria 批量筛选工具（核心）
 SCREENING_TOOL_CATEGORIES = ["screening", "market", "fundamentals", "news", "china", "technical"]
+SCREENING_TOOL_IDS = {
+    "add_stocks_to_favorites",
+    "list_watchlist_groups",
+    "add_stock_to_watchlist",
+}
 
 # 执行阶段工具收敛：优先仅允许批量筛选链路，避免单股重工具放大时延
 RESULT_TOOL_ALLOWLIST = {
     "screen_stocks_by_criteria",
     "batch_check_profit_consistency",
+    "add_stocks_to_favorites",
+    "list_watchlist_groups",
+    "add_stock_to_watchlist",
 }
 
 # 选股场景独立预算，默认比全局助手更紧，避免长尾请求拖垮体验
@@ -81,7 +90,7 @@ class IntelligentScreeningService:
         all_metadata = registry.list_all()
         screening_metadata = [
             m for m in all_metadata
-            if m.fc_enabled and m.category in SCREENING_TOOL_CATEGORIES
+            if m.fc_enabled and (m.category in SCREENING_TOOL_CATEGORIES or m.id in SCREENING_TOOL_IDS)
         ]
         self._openai_tools = tool_metadata_list_to_openai(screening_metadata)
 
@@ -101,7 +110,7 @@ class IntelligentScreeningService:
         self._llm_client.inject_tools(self._tool_functions)
         logger.info(
             f"[智能筛选] 已加载 {len(self._openai_tools)} 个选股工具，"
-            f"结果阶段使用 {len(self._result_openai_tools)} 个批量工具"
+            f"结果阶段使用 {len(self._result_openai_tools)} 个执行工具"
         )
         return True
 
@@ -208,6 +217,8 @@ class IntelligentScreeningService:
                 "is_fallback": False,
             }
 
+        set_current_user_id(user_id)
+
         # 1. 获取历史对话
         history = await self._get_context_messages(user_id)
 
@@ -244,7 +255,7 @@ class IntelligentScreeningService:
                     progress_callback,
                     "status",
                     phase=phase,
-                    message="已进入执行阶段，开始调用批量筛选工具",
+                    message="已进入执行阶段，开始调用筛选与自选股工具",
                 )
                 # 阶段 3：实际调用工具执行筛选
                 resp = await self._llm_client.achat(
@@ -505,6 +516,12 @@ class IntelligentScreeningService:
 **第一步（宽口径批量筛选）**：调用 `screen_stocks_by_criteria`，设置 limit=50，按硬性指标（PE/PB/市值/资产负债率/is_st 等）过滤候选池。
 **第二步（盈利稳定性验证）**：将候选股票代码列表传给 `batch_check_profit_consistency`，一次查询验证近N年ROE稳定性。**禁止对每只股票单独重复查询财务数据。**
 
+## 自选股联动规则
+
+- 若用户明确要求“筛选完成后加入自选股”或“把上次推荐加入自选股”，可在最终推荐确定后调用 `add_stocks_to_favorites`
+- 若用户明确要求放入某个分类（如“银行”“待分析”），可调用 `add_stock_to_watchlist`，必要时先用 `list_watchlist_groups` 查看现有分类
+- 未明确提出自选股操作时，不要主动添加
+
 ## 你的任务：执行计划说明
 
 **不要调用任何工具，不要推荐股票。** 请详细说明你打算如何执行此次筛选：
@@ -587,6 +604,8 @@ class IntelligentScreeningService:
 - 每次推荐恰好 5 只股票，不多不少
 - 推荐理由要具体，结合数据说话
 - 如果用户要求调整（如"换个行业""PE 再低点"），直接重新调用工具调整筛选
+- 如果用户明确要求将当前推荐结果加入自选股，可调用 `add_stocks_to_favorites` 一次性添加；未明确要求则不要主动添加
+- 如果用户明确要求将当前推荐结果放入某个分类，可调用 `add_stock_to_watchlist`，分组不存在时允许自动创建，例如“银行”“待分析”
 - 不给出具体的买入/卖出建议，只做选股推荐和分析
 - 只推荐 A 股（沪深两市）
 """
@@ -658,6 +677,7 @@ class IntelligentScreeningService:
                 "stocks": [],
                 "phase": "result",
             }
+        set_current_user_id(user_id)
         curr_date = _get_latest_trade_date()
         direct_hint = (
             f"【直接执行模式】请根据用户消息中的条件直接调用筛选工具执行，"
