@@ -102,6 +102,7 @@ export interface ScreeningWsProgressData {
   tools_used?: string[]
   stocks?: StockRecommendation[]
   preview?: string
+  summary?: Record<string, number>
   timestamp?: string
 }
 
