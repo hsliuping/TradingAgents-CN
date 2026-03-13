@@ -83,6 +83,8 @@ releases/2.0.2/
 
 **文档打包规则**：不再同步整个 `docs/` 目录；发布包中的 `docs/` 只能来自 `docs/release_v2.0/` 这一套面向最终用户的交付文档。
 
+**运行时文档例外规则**：如果后端页面在运行时仍直接读取 `docs/api/` 或 `docs/examples/` 下的指南、模板、示例文件，则这些文件必须作为白名单资源额外打入发布包；不要为了裁剪文档把运行时依赖一并裁掉，否则页面会出现 404。
+
 **学习中心例外规则**：学习中心文章不依赖安装包中的 `docs/` 目录。其内容来自前端构建时对 `docs/learning/`、`docs/paper/`、`docs/courses/advanced/expanded/` 的 `?raw` 导入，因此这些文档如有变更，必须重新构建前端后才能进入发布包。
 
 **编译规则**：`core/`、`app/`、`tradingagents/`、`scripts/`、`migrations/` 在便携版阶段统一编译；除运行入口白名单外，不应保留 Python 源码。

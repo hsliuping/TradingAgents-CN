@@ -346,6 +346,31 @@ if (Test-Path $docsSource) {
             Copy-Item -Path (Join-Path $docsSource "*") -Destination $docsDest -Recurse -Force
             Write-Host "  ✅ Copied release_v2.0 user docs only" -ForegroundColor Green
 
+            # 补充运行时直接读取的 API 指南、模板和示例文件
+            $runtimeDocMappings = @(
+                @{ Source = (Join-Path $root "docs\api\STOCK_DATA_IMPORT_API.md"); Destination = (Join-Path $docsDest "api\STOCK_DATA_IMPORT_API.md") },
+                @{ Source = (Join-Path $root "docs\api\examples\stock_data_import_examples.py"); Destination = (Join-Path $docsDest "api\examples\stock_data_import_examples.py") },
+                @{ Source = (Join-Path $root "docs\examples\social_media_api_guide.md"); Destination = (Join-Path $docsDest "examples\social_media_api_guide.md") },
+                @{ Source = (Join-Path $root "docs\examples\social_media_api_example.py"); Destination = (Join-Path $docsDest "examples\social_media_api_example.py") },
+                @{ Source = (Join-Path $root "docs\examples\social_media_template.csv"); Destination = (Join-Path $docsDest "examples\social_media_template.csv") },
+                @{ Source = (Join-Path $root "docs\examples\social_media_template.json"); Destination = (Join-Path $docsDest "examples\social_media_template.json") }
+            )
+
+            foreach ($mapping in $runtimeDocMappings) {
+                if (-not (Test-Path $mapping.Source)) {
+                    Write-Host "  ⚠️ Runtime doc asset missing: $($mapping.Source)" -ForegroundColor Yellow
+                    continue
+                }
+
+                $targetDir = Split-Path -Parent $mapping.Destination
+                if (-not (Test-Path $targetDir)) {
+                    New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+                }
+
+                Copy-Item -Path $mapping.Source -Destination $mapping.Destination -Force
+                Write-Host "  ✅ Copied runtime doc asset: $($mapping.Destination.Substring($docsDest.Length + 1))" -ForegroundColor Gray
+            }
+
             # 删除 __pycache__ 目录
             $pycacheDirs = Get-ChildItem -Path $docsDest -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue
             foreach ($pycacheDir in $pycacheDirs) {

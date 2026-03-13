@@ -145,6 +145,14 @@ if (-not $SkipCython) {
 
     if (-not $SkipCython) {
         $licensingDir = Join-Path $OutputDir "licensing"
+        $sourceLicensingDir = Join-Path $root "core\licensing"
+        $licensingBuildRoot = Join-Path $root "build\licensing_build"
+        $licensingBuildLibDir = Join-Path $licensingBuildRoot "lib"
+        $licensingBuildTempDir = Join-Path $licensingBuildRoot "temp"
+
+        if (Test-Path $licensingBuildRoot) {
+            Remove-Item -Path $licensingBuildRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
         
         # 创建setup.py
         $setupPy = @"
@@ -204,17 +212,22 @@ setup(
         $buildProcess = Start-Process -FilePath $buildPythonExe -ArgumentList @(
             $setupPath,
             "build_ext",
-            "--inplace"
+            "--build-lib",
+            $licensingBuildLibDir,
+            "--build-temp",
+            $licensingBuildTempDir
         ) -Wait -PassThru -NoNewWindow
 
         if ($buildProcess.ExitCode -eq 0) {
             Write-Host "  ✅ Cython compilation completed" -ForegroundColor Green
 
             # 复制编译后的文件到目标目录。
-            # 注意：build_ext --inplace 在当前工程根目录执行时，可能直接把 .pyd 写回项目源码目录 core/licensing。
-            $sourceLicensingDir = Join-Path $root "core\licensing"
-            $buildLibDir = Join-Path $root "build\lib.win-amd64-cpython-310\core\licensing"
-            $candidateDirs = @($buildLibDir, $sourceLicensingDir, $licensingDir) | Select-Object -Unique
+            # 避免使用 --inplace 回写源码目录，减少 Windows 下的锁文件和杀毒扫描导致的间歇性卡住。
+            $candidateDirs = @(
+                (Join-Path $licensingBuildLibDir "core\licensing"),
+                $sourceLicensingDir,
+                $licensingDir
+            ) | Select-Object -Unique
             $compiledArtifacts = @()
 
             foreach ($candidateDir in $candidateDirs) {
@@ -263,7 +276,7 @@ setup(
             
             # 清理
             Remove-Item -Path $setupPath -Force -ErrorAction SilentlyContinue
-            Remove-Item -Path (Join-Path $root "build") -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path $licensingBuildRoot -Recurse -Force -ErrorAction SilentlyContinue
             Get-ChildItem -Path $licensingDir -Include "*.c" -Recurse | Remove-Item -Force
 
             if ($sourceLicensingDir -ne $licensingDir -and (Test-Path $sourceLicensingDir)) {
