@@ -321,8 +321,8 @@ async def create_stock_screening_view(db):
         # 检查视图是否已存在
         collections = await db.list_collection_names()
         if "stock_screening_view" in collections:
-            logger.info("📋 视图 stock_screening_view 已存在，跳过创建")
-            return
+            logger.info("📋 视图 stock_screening_view 已存在，先删除后重建以同步最新字段")
+            await db["stock_screening_view"].drop()
 
         # 创建视图：将 stock_basic_info、market_quotes 和 stock_financial_data 关联
         pipeline = [
@@ -395,6 +395,18 @@ async def create_stock_screening_view(db):
                     "roa": "$financial_data.roa",
                     "netprofit_margin": "$financial_data.netprofit_margin",
                     "gross_margin": "$financial_data.gross_margin",
+                    "dividend_yield": {
+                        "$ifNull": [
+                            "$dividend_yield",
+                            {
+                                "$ifNull": [
+                                    "$financial_data.financial_indicators.dividend_yield",
+                                    "$financial_data.dividend_yield"
+                                ]
+                            }
+                        ]
+                    },
+                    "dividend_yield_ttm": "$dividend_yield_ttm",
                     "report_period": "$financial_data.report_period",
                     # 交易指标
                     "turnover_rate": 1,

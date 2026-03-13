@@ -264,6 +264,33 @@
             <div class="fact"><span>PS(TTM)</span><b>{{ Number.isFinite(basics.ps) ? basics.ps.toFixed(2) : '-' }}</b></div>
             <div class="fact"><span>ROE</span><b>{{ fmtPercent(basics.roe) }}</b></div>
             <div class="fact"><span>负债率</span><b>{{ fmtPercent(basics.debtRatio) }}</b></div>
+            <div class="fact"><span>股息率</span><b>{{ fmtPercent(basics.dividendYield) }}</b></div>
+            <div class="fact"><span>流动比率</span><b>{{ fmtRatio(basics.currentRatio) }}</b></div>
+            <div class="fact"><span>最新财报期</span><b>{{ basics.reportPeriod || '-' }}</b></div>
+          </div>
+        </el-card>
+
+        <el-card shadow="hover" class="financial-card">
+          <template #header><div class="card-hd">财务明细快照</div></template>
+          <div class="facts">
+            <div class="fact"><span>公告日期</span><b>{{ financialSnapshot.annDate || '-' }}</b></div>
+            <div class="fact"><span>数据源</span><b>{{ financialSnapshot.dataSource || '-' }}</b></div>
+            <div class="fact"><span>毛利率</span><b>{{ fmtPercent(financialSnapshot.grossMargin) }}</b></div>
+            <div class="fact"><span>净利率</span><b>{{ fmtPercent(financialSnapshot.netprofitMargin) }}</b></div>
+            <div class="fact"><span>营收</span><b>{{ fmtAmount(financialSnapshot.revenue) }}</b></div>
+            <div class="fact"><span>净利润</span><b>{{ fmtAmount(financialSnapshot.netProfit) }}</b></div>
+            <div class="fact"><span>经营现金流</span><b>{{ fmtAmount(financialSnapshot.nCashflowAct) }}</b></div>
+            <div class="fact"><span>总资产</span><b>{{ fmtAmount(financialSnapshot.totalAssets) }}</b></div>
+            <div class="fact"><span>总负债</span><b>{{ fmtAmount(financialSnapshot.totalLiab) }}</b></div>
+          </div>
+          <div v-if="financialRawSections.length" class="raw-section-summary">
+            <div class="raw-title">raw_data 分组</div>
+            <div class="raw-tags">
+              <el-tag v-for="section in financialRawSections" :key="section.key" size="small" type="info" effect="plain">
+                {{ section.label }} {{ section.count }} 条
+              </el-tag>
+            </div>
+            <div class="raw-hint">这些原始分组已经通过主股票接口暴露，后续页面或智能工具可以直接下钻调用。</div>
           </div>
         </el-card>
 
@@ -584,6 +611,7 @@ async function handleSync() {
       // 刷新页面数据
       await fetchQuote()
       await fetchFundamentals()
+      await fetchFinancials()
     } else {
       ElMessage.error(res.message || '同步失败')
     }
@@ -621,6 +649,7 @@ async function clearCache() {
     await Promise.all([
       fetchQuote(),
       fetchFundamentals(),
+      fetchFinancials(),
       fetchKline(),
       fetchNews()
     ])
@@ -693,6 +722,9 @@ async function fetchFundamentals() {
     basics.roe = Number.isFinite(f.roe) ? Number(f.roe) : basics.roe
     const ff: any = f
     basics.debtRatio = Number.isFinite(ff.debt_ratio) ? Number(ff.debt_ratio) : basics.debtRatio
+    basics.dividendYield = Number.isFinite(ff.dividend_yield) ? Number(ff.dividend_yield) : basics.dividendYield
+    basics.currentRatio = Number.isFinite(ff.current_ratio) ? Number(ff.current_ratio) : basics.currentRatio
+    basics.reportPeriod = ff.report_period || basics.reportPeriod
 
     // 获取PE/PB的实时标识
     basics.peIsRealtime = ff.pe_is_realtime || false
@@ -700,6 +732,41 @@ async function fetchFundamentals() {
     basics.peUpdatedAt = ff.pe_updated_at || null
   } catch (e) {
     console.error('获取基本面失败', e)
+  }
+}
+
+async function fetchFinancials() {
+  try {
+    const res = await stocksApi.getFinancials(code.value, { includeRaw: true })
+    const d: any = (res as any)?.data || {}
+    const summary: any = d.summary || {}
+    const rawData: Record<string, any[]> = d.raw_data || {}
+
+    basics.dividendYield = Number.isFinite(summary.dividend_yield) ? Number(summary.dividend_yield) : basics.dividendYield
+    basics.currentRatio = Number.isFinite(summary.current_ratio) ? Number(summary.current_ratio) : basics.currentRatio
+    basics.reportPeriod = summary.report_period || d.report_period || basics.reportPeriod
+    basics.roe = Number.isFinite(summary.roe) ? Number(summary.roe) : basics.roe
+    basics.debtRatio = Number.isFinite(summary.debt_to_assets) ? Number(summary.debt_to_assets) : basics.debtRatio
+
+    financialSnapshot.annDate = summary.ann_date || d.ann_date || ''
+    financialSnapshot.dataSource = summary.data_source || d.data_source || ''
+    financialSnapshot.grossMargin = Number.isFinite(summary.gross_margin) ? Number(summary.gross_margin) : NaN
+    financialSnapshot.netprofitMargin = Number.isFinite(summary.netprofit_margin) ? Number(summary.netprofit_margin) : NaN
+    financialSnapshot.revenue = Number.isFinite(summary.revenue) ? Number(summary.revenue) : NaN
+    financialSnapshot.netProfit = Number.isFinite(summary.net_profit) ? Number(summary.net_profit) : NaN
+    financialSnapshot.nCashflowAct = Number.isFinite(summary.n_cashflow_act) ? Number(summary.n_cashflow_act) : NaN
+    financialSnapshot.totalAssets = Number.isFinite(summary.total_assets) ? Number(summary.total_assets) : NaN
+    financialSnapshot.totalLiab = Number.isFinite(summary.total_liab) ? Number(summary.total_liab) : NaN
+
+    financialRawSections.value = Object.entries(rawData)
+      .filter(([, items]) => Array.isArray(items) && items.length > 0)
+      .map(([key, items]) => ({
+        key,
+        label: financialRawLabels[key] || key,
+        count: items.length,
+      }))
+  } catch (e) {
+    console.error('获取财务明细失败', e)
   }
 }
 
@@ -728,6 +795,7 @@ onMounted(async () => {
   await Promise.all([
     fetchQuote(),
     fetchFundamentals(),
+    fetchFinancials(),
     fetchKline(),
     fetchNews(),
     checkFavorite(),
@@ -855,10 +923,35 @@ const basics = reactive({
   ps: NaN,              // 🔥 新增：市销率
   roe: NaN,
   debtRatio: NaN,
+  dividendYield: NaN,
+  currentRatio: NaN,
+  reportPeriod: '',
   peIsRealtime: false,  // PE是否为实时数据
   peSource: '',         // PE数据来源
   peUpdatedAt: null     // PE更新时间
 })
+
+const financialSnapshot = reactive({
+  annDate: '',
+  dataSource: '',
+  grossMargin: NaN,
+  netprofitMargin: NaN,
+  revenue: NaN,
+  netProfit: NaN,
+  nCashflowAct: NaN,
+  totalAssets: NaN,
+  totalLiab: NaN,
+})
+
+const financialRawSections = ref<Array<{ key: string; label: string; count: number }>>([])
+
+const financialRawLabels: Record<string, string> = {
+  income_statement: '利润表',
+  balance_sheet: '资产负债表',
+  cashflow_statement: '现金流量表',
+  financial_indicators: '财务指标',
+  main_business: '主营业务',
+}
 
 // 操作
 function onAnalyze() {
@@ -978,6 +1071,7 @@ async function fetchLatestAnalysis() {
 // 格式化
 function fmtPrice(v: any) { const n = Number(v); return Number.isFinite(n) ? n.toFixed(2) : '-' }
 function fmtPercent(v: any) { const n = Number(v); return Number.isFinite(n) ? `${n>0?'+':''}${n.toFixed(2)}%` : '-' }
+function fmtRatio(v: any) { const n = Number(v); return Number.isFinite(n) ? n.toFixed(2) : '-' }
 function fmtVolume(v: any) {
   const n = Number(v)
   if (!Number.isFinite(n)) return '-'
@@ -1268,6 +1362,11 @@ function exportReport() {
 .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .fact { display: flex; flex-direction: column; font-size: 12px; }
 .fact b { font-size: 14px; color: var(--el-text-color-primary); }
+.financial-card { margin-top: 12px; }
+.raw-section-summary { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.raw-title { font-size: 12px; color: var(--el-text-color-secondary); }
+.raw-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.raw-hint { font-size: 12px; color: var(--el-text-color-secondary); line-height: 1.5; }
 
 .quick-actions { display: flex; flex-direction: column; gap: 8px; }
 

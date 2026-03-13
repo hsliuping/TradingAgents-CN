@@ -84,8 +84,8 @@ class TushareAdapter(DataSourceAdapter):
         if not self.is_available():
             return None
         try:
-            # 🔥 新增 ps, ps_ttm, total_share, float_share 字段
-            fields = "ts_code,total_mv,circ_mv,pe,pb,ps,turnover_rate,volume_ratio,pe_ttm,pb_mrq,ps_ttm,total_share,float_share"
+            # 🔥 新增 ps, ps_ttm, total_share, float_share, dv_ratio, dv_ttm 字段
+            fields = "ts_code,total_mv,circ_mv,pe,pb,ps,turnover_rate,volume_ratio,pe_ttm,pb_mrq,ps_ttm,total_share,float_share,dv_ratio,dv_ttm"
             df = self._provider.api.daily_basic(trade_date=trade_date, fields=fields)
             if df is not None and not df.empty:
                 logger.info(
