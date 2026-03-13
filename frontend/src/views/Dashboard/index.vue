@@ -5,7 +5,7 @@
       <div class="welcome-content">
         <h1 class="welcome-title">
           欢迎使用 TradingAgents-CN
-          <span class="version-badge">v2.0.0 Pro</span>
+          <span class="version-badge">{{ displayVersion }} Pro</span>
         </h1>
         <p class="welcome-subtitle">
           AI辅助股票分析技术学习平台，通过全流程AI辅助，帮助您形成计划→执行→复盘→提升的循环提升方法
@@ -398,6 +398,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useAppStore } from '@/stores/app'
 import {
   TrendCharts,
   Search,
@@ -426,6 +427,8 @@ import { paperApi, type PaperAccountSummary } from '@/api/paper'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const appStore = useAppStore()
+const displayVersion = computed(() => `v${appStore.version}`)
 
 // 响应式数据
 const userStats = ref({

@@ -13,6 +13,7 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $portableDir = Join-Path $root "release\TradingAgentsCN-portable"
+$setFrontendVersionScript = Join-Path $PSScriptRoot "set_frontend_version_env.ps1"
 
 Write-Host "============================================================================" -ForegroundColor Cyan
 Write-Host "  Sync and Build TradingAgents-CN Portable (No Packaging)" -ForegroundColor Cyan
@@ -66,6 +67,11 @@ if (-not $SkipFrontend) {
 
     if (Test-Path $frontendDir) {
         try {
+            if (Test-Path $setFrontendVersionScript) {
+                Write-Host "  Injecting frontend version from VERSION..." -ForegroundColor Gray
+                & $setFrontendVersionScript -RootPath $root
+            }
+
             # Build in main project directory using Yarn
             Write-Host "  Building frontend in main project directory..." -ForegroundColor Cyan
             Write-Host "  Installing dependencies with Yarn..." -ForegroundColor Gray

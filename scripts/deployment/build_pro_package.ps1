@@ -30,6 +30,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $portableDir = Join-Path $root "release\TradingAgentsCN-portable"
+$setFrontendVersionScript = Join-Path $PSScriptRoot "set_frontend_version_env.ps1"
 
 # ============================================================================
 # 辅助函数：交互式确认
@@ -226,6 +227,11 @@ $viteCacheDir = Join-Path $frontendDir ".vite"
 
 if (Test-Path $frontendDir) {
     try {
+        if (Test-Path $setFrontendVersionScript) {
+            Write-Host "  Injecting frontend version from VERSION..." -ForegroundColor Gray
+            & $setFrontendVersionScript -RootPath $root
+        }
+
         # 清理旧的构建产物
         Write-Host "  Cleaning old build artifacts..." -ForegroundColor Gray
         if (Test-Path $frontendDistSrc) {
