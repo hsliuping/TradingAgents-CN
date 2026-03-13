@@ -611,7 +611,9 @@ class IntelligentScreeningService:
 ## 自选股联动规则
 
 - 若用户明确要求“筛选完成后加入自选股”或“把上次推荐加入自选股”，可在最终推荐确定后调用 `add_stocks_to_favorites`
-- 若用户明确要求放入某个分类（如“银行”“待分析”），可调用 `add_stock_to_watchlist`，必要时先用 `list_watchlist_groups` 查看现有分类
+- 若用户明确要求“加标签/打标签/标记”（如“打上巴菲特标签”），优先调用 `add_stocks_to_favorites` 并传入 `tags`
+- 若用户明确要求放入某个分类/分组（如“银行”“待分析”），可调用 `add_stock_to_watchlist`，必要时先用 `list_watchlist_groups` 查看现有分类
+- “标签”和“分组”不是同一概念：标签写入自选股的 `tags`，分组写入 watchlist group
 - 未明确提出自选股操作时，不要主动添加
 
 ## 你的任务：执行计划说明
@@ -712,8 +714,9 @@ class IntelligentScreeningService:
 - 若工具结果中已提供 ROE、股息率、资产负债率、流动比率、财报期，优先一并放入 JSON 字段，便于前端直接展示
 - 若工具结果中已提供 ROA、毛利率、净利率、滚动营收、滚动净利润、经营现金流、权益乘数、速动比率、现金比率，也可一并放入 JSON 字段，便于前端直接展示
 - 如果用户要求调整（如"换个行业""PE 再低点"），直接重新调用工具调整筛选
-- 如果用户明确要求将当前推荐结果加入自选股，可调用 `add_stocks_to_favorites` 一次性添加；未明确要求则不要主动添加
-- 如果用户明确要求将当前推荐结果放入某个分类，可调用 `add_stock_to_watchlist`，分组不存在时允许自动创建，例如“银行”“待分析”
+- 如果用户明确要求将当前推荐结果加入自选股，可调用 `add_stocks_to_favorites` 一次性添加；若同时要求“打标签/标记”，把标签通过 `tags` 参数一并写入
+- 如果用户明确要求将当前推荐结果放入某个分类/分组，可调用 `add_stock_to_watchlist`，分组不存在时允许自动创建，例如“银行”“待分析”
+- 若用户同时要求“加入自选 + 打标签 + 放入分组”，应先调用 `add_stocks_to_favorites` 写入 tags，再调用 `add_stock_to_watchlist`
 - 不给出具体的买入/卖出建议，只做选股推荐和分析
 - 只推荐 A 股（沪深两市）
 """
