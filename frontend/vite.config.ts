@@ -66,8 +66,36 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     sourcemap: false,
+    chunkSizeWarningLimit: 800,
     rollupOptions: {
       output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return undefined
+          }
+
+          if (id.includes('echarts') || id.includes('zrender') || id.includes('vue-echarts')) {
+            return 'vendor-echarts'
+          }
+
+          if (id.includes('element-plus') || id.includes('@element-plus')) {
+            return 'vendor-element-plus'
+          }
+
+          if (id.includes('pinia') || id.includes('vue-router') || id.includes('@vueuse')) {
+            return 'vendor-vue-ecosystem'
+          }
+
+          if (id.includes('marked') || id.includes('mermaid') || id.includes('highlight.js') || id.includes('markdown-it')) {
+            return 'vendor-markdown'
+          }
+
+          if (id.includes('vue')) {
+            return 'vendor-vue'
+          }
+
+          return 'vendor-misc'
+        },
         chunkFileNames: 'js/[name]-[hash].js',
         entryFileNames: 'js/[name]-[hash].js',
         assetFileNames: '[ext]/[name]-[hash].[ext]'

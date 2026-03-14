@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { useStorage } from '@vueuse/core'
 import { authApi } from '@/api/auth'
 import type { User, LoginForm, RegisterForm, UserUpdatePayload } from '@/types/auth'
+import { useAppStore } from './app'
 
 export interface AuthState {
   // 认证状态
@@ -372,38 +373,35 @@ export const useAuthStore = defineStore('auth', {
     syncUserPreferencesToAppStore() {
       if (!this.user?.preferences) return
 
-      // 动态导入 appStore 避免循环依赖
-      import('./app').then(({ useAppStore }) => {
-        const appStore = useAppStore()
-        const prefs = this.user!.preferences
+      const appStore = useAppStore()
+      const prefs = this.user!.preferences
 
-        // 同步主题设置
-        if (prefs.ui_theme) {
-          appStore.setTheme(prefs.ui_theme as 'light' | 'dark' | 'auto')
-        }
+      // 同步主题设置
+      if (prefs.ui_theme) {
+        appStore.setTheme(prefs.ui_theme as 'light' | 'dark' | 'auto')
+      }
 
-        // 同步侧边栏宽度
-        if (prefs.sidebar_width) {
-          appStore.setSidebarWidth(prefs.sidebar_width)
-        }
+      // 同步侧边栏宽度
+      if (prefs.sidebar_width) {
+        appStore.setSidebarWidth(prefs.sidebar_width)
+      }
 
-        // 同步语言设置
-        if (prefs.language) {
-          appStore.setLanguage(prefs.language as 'zh-CN' | 'en-US')
-        }
+      // 同步语言设置
+      if (prefs.language) {
+        appStore.setLanguage(prefs.language as 'zh-CN' | 'en-US')
+      }
 
-        // 同步分析偏好
-        if (prefs.default_market || prefs.default_depth || prefs.auto_refresh !== undefined || prefs.refresh_interval) {
-          appStore.updatePreferences({
-            defaultMarket: prefs.default_market as any,
-            defaultDepth: prefs.default_depth as any,
-            autoRefresh: prefs.auto_refresh,
-            refreshInterval: prefs.refresh_interval
-          })
-        }
+      // 同步分析偏好
+      if (prefs.default_market || prefs.default_depth || prefs.auto_refresh !== undefined || prefs.refresh_interval) {
+        appStore.updatePreferences({
+          defaultMarket: prefs.default_market as any,
+          defaultDepth: prefs.default_depth as any,
+          autoRefresh: prefs.auto_refresh,
+          refreshInterval: prefs.refresh_interval
+        })
+      }
 
-        console.log('✅ 用户偏好设置已同步到 appStore')
-      })
+      console.log('✅ 用户偏好设置已同步到 appStore')
     },
 
     // 修改密码

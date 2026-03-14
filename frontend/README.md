@@ -309,4 +309,4 @@ const exampleStore = useExampleStore()
 
 ---
 
-**TradingAgents-CN Frontend v2.0.1** - 现代化的股票分析平台前端
+**TradingAgents-CN Frontend v3.0.0** - 面向 AI 助手与智能投研工作流的现代化前端
