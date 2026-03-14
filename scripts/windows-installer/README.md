@@ -33,9 +33,17 @@ Two-layer approach:
 
 - ✅ Port configuration UI (Backend, MongoDB, Redis, Nginx)
 - ✅ Automatic port conflict detection
+- ✅ Installation path validation (rejects spaces, Chinese, and special characters)
 - ✅ UTF-8 encoding support for configuration files
 - ✅ Desktop and Start Menu shortcuts
 - ✅ Uninstaller with registry integration
+
+## Installation Path Rules
+
+- Use an English-only installation path
+- Do not install into a path containing spaces
+- Do not install into a path containing Chinese or other special characters
+- Recommended examples: `C:\TradingAgentsCN`, `D:\TradingAgentsCN99`
 
 ## Output
 

@@ -58,6 +58,83 @@ Var InstallMode
 Var hUpgradeRadio
 Var hOverwriteRadio
 
+Function ValidateInstallDirPath
+ Exch $0
+ Push $1
+ Push $2
+ Push $3
+ Push $4
+
+ StrLen $1 $0
+ ${If} $1 < 4
+  StrCpy $0 1
+  Goto done
+ ${EndIf}
+
+ StrCpy $2 $0 1 0
+ StrCpy $3 $0 1 1
+ StrCpy $4 $0 1 2
+
+ ${If} $3 != ":"
+  StrCpy $0 1
+  Goto done
+ ${EndIf}
+ ${If} $4 != "\"
+  StrCpy $0 1
+  Goto done
+ ${EndIf}
+
+ ${If} $2 >= "A"
+ ${AndIf} $2 <= "Z"
+ ${OrIf} $2 >= "a"
+ ${AndIf} $2 <= "z"
+ ${Else}
+  StrCpy $0 1
+  Goto done
+ ${EndIf}
+
+ StrCpy $4 3
+ loop_chars:
+  ${If} $4 >= $1
+    StrCpy $0 0
+    Goto done
+  ${EndIf}
+
+  StrCpy $2 $0 1 $4
+  ${If} $2 == "\\"
+  ${OrIf} $2 == "_"
+  ${OrIf} $2 == "-"
+  ${OrIf} $2 == "."
+  ${OrIf} $2 >= "0"
+  ${AndIf} $2 <= "9"
+  ${OrIf} $2 >= "A"
+  ${AndIf} $2 <= "Z"
+  ${OrIf} $2 >= "a"
+  ${AndIf} $2 <= "z"
+    IntOp $4 $4 + 1
+    Goto loop_chars
+  ${EndIf}
+
+  StrCpy $0 1
+
+ done:
+ Pop $4
+ Pop $3
+ Pop $2
+ Pop $1
+ Exch $0
+FunctionEnd
+
+Function DirectoryPageLeave
+ Push $INSTDIR
+ Call ValidateInstallDirPath
+ Pop $0
+ ${If} $0 != 0
+  MessageBox MB_ICONSTOP "Installation path must use English characters only and cannot contain spaces, Chinese characters, or other special characters.$\r$\n$\r$\nPlease use a path such as C:\\TradingAgentsCN or D:\\TradingAgentsCN99."
+  Abort
+ ${EndIf}
+FunctionEnd
+
 ; Generate random 4-digit port in safe range (avoiding common ports)
 ; Uses ranges: 4100-4999, 5100-5999, 6100-6299, 7100-7999, 9100-9999
 ; Avoids: 3000, 3306, 5000, 6000, 6379, 7000, 8000-9000, etc.
@@ -279,7 +356,9 @@ FunctionEnd
 !define MUI_FINISHPAGE_RUN_FUNCTION "LaunchApplication"
 
 Page custom PortsPage PortsPageLeave
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE DirectoryPageLeave
 !insertmacro MUI_PAGE_DIRECTORY
+!undef MUI_PAGE_CUSTOMFUNCTION_LEAVE
 Page custom InstallModePage InstallModePageLeave
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
