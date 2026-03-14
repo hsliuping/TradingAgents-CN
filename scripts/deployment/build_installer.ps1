@@ -98,7 +98,7 @@ Write-Host ""
 Write-Host "[3/5] Preparing installer resources..." -ForegroundColor Yellow
 Write-Host ""
 
-$installerDir = Join-Path $root "installer"
+$installerDir = Join-Path $root "scripts\windows-installer\nsis"
 $portableDir = Join-Path $root "release\TradingAgentsCN-portable"
 $licenseFile = Join-Path $root "LICENSE"
 
@@ -154,6 +154,15 @@ if (-not (Test-Path $nsiScript)) {
     exit 1
 }
 
+if (-not $Version) {
+    $versionFile = Join-Path $root "VERSION"
+    if (Test-Path $versionFile) {
+        $Version = (Get-Content $versionFile -Raw).Trim()
+    } else {
+        $Version = "1.0.0"
+    }
+}
+
 Write-Host "  NSIS script: $nsiScript" -ForegroundColor Gray
 Write-Host "  Compiling..." -ForegroundColor Gray
 Write-Host ""
@@ -161,6 +170,8 @@ Write-Host ""
 # 运行NSIS编译器
 $nsisArgs = @(
     "/V4",  # 详细输出
+    "/DPRODUCT_VERSION=$Version",
+    "/DPROJECT_ROOT=$root",
     $nsiScript
 )
 
@@ -181,16 +192,9 @@ Write-Host ""
 Write-Host "[5/5] Verifying installer..." -ForegroundColor Yellow
 Write-Host ""
 
-# 读取版本号
-$versionFile = Join-Path $root "VERSION"
-if (Test-Path $versionFile) {
-    $installerVersion = Get-Content $versionFile -Raw
-    $installerVersion = $installerVersion.Trim()
-} else {
-    $installerVersion = "1.0.0-preview"
-}
+$installerVersion = $Version
 
-$installerPath = Join-Path $root "release\packages\TradingAgentsCN-Setup-$installerVersion.exe"
+$installerPath = Join-Path $root "release\packages\TradingAgentsCNSetup-$installerVersion.exe"
 
 if (Test-Path $installerPath) {
     $installerSize = (Get-Item $installerPath).Length
@@ -199,7 +203,7 @@ if (Test-Path $installerPath) {
     Write-Host "  ✅ Installer created successfully!" -ForegroundColor Green
     Write-Host ""
     Write-Host "Installer Information:" -ForegroundColor White
-    Write-Host "  File: TradingAgentsCN-Setup-$installerVersion.exe" -ForegroundColor Cyan
+    Write-Host "  File: TradingAgentsCNSetup-$installerVersion.exe" -ForegroundColor Cyan
     Write-Host "  Size: $installerSizeMB MB" -ForegroundColor Cyan
     Write-Host "  Path: $installerPath" -ForegroundColor Cyan
 } else {
