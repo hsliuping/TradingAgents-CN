@@ -3,19 +3,29 @@
 """
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.routers.auth_db import get_current_user
 from app.core.database import get_mongo_db
 from app.schemas.intelligent_assistant import (
+    AssistantThreadItem,
+    AssistantThreadListResponse,
+    AssistantThreadMessagesResponse,
     ChatRequest,
     ChatResponse,
     ConversationResponse,
+    CreateAssistantThreadRequest,
     PlannedAnalysisResponse,
 )
 from app.services.intelligent_assistant_service import (
     chat_with_assistant,
+    create_assistant_thread,
     get_assistant_conversation,
+    get_assistant_thread_messages,
+    get_or_create_assistant_thread,
+    list_assistant_threads,
     clear_assistant_conversation,
     save_assistant_message,
 )
@@ -30,21 +40,78 @@ logger = logging.getLogger(__name__)
 async def get_conversation(
     current_user=Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+    conversation_id: Optional[str] = Query(None),
 ):
     """获取当前用户的智能助手会话历史"""
     user_id = str(current_user["id"])
-    messages = await get_assistant_conversation(db, user_id)
-    return ConversationResponse(messages=messages)
+    thread = await get_or_create_assistant_thread(db, user_id, conversation_id)
+    messages = await get_assistant_conversation(db, user_id, thread["thread_id"])
+    return ConversationResponse(messages=messages, conversation_id=thread["thread_id"])
 
 
 @router.delete("/conversation")
 async def clear_conversation(
     current_user=Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+    conversation_id: Optional[str] = Query(None),
 ):
     """清空当前用户的智能助手会话"""
     user_id = str(current_user["id"])
-    await clear_assistant_conversation(db, user_id)
+    await clear_assistant_conversation(db, user_id, conversation_id)
+    return {"success": True}
+
+
+@router.get("/threads", response_model=AssistantThreadListResponse)
+async def get_threads(
+    current_user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """获取当前用户的主题会话列表"""
+    user_id = str(current_user["id"])
+    items = await list_assistant_threads(db, user_id)
+    return AssistantThreadListResponse(
+        items=[AssistantThreadItem(**item) for item in items],
+        total=len(items),
+    )
+
+
+@router.post("/threads", response_model=AssistantThreadItem)
+async def create_thread(
+    request: CreateAssistantThreadRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """创建主题会话"""
+    user_id = str(current_user["id"])
+    item = await create_assistant_thread(db, user_id, request.title)
+    return AssistantThreadItem(**item)
+
+
+@router.get("/threads/{thread_id}/messages", response_model=AssistantThreadMessagesResponse)
+async def get_thread_messages(
+    thread_id: str,
+    current_user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """获取指定主题的消息列表"""
+    user_id = str(current_user["id"])
+    thread, messages = await get_assistant_thread_messages(db, user_id, thread_id)
+    return AssistantThreadMessagesResponse(
+        messages=messages,
+        conversation_id=thread_id,
+        thread=AssistantThreadItem(**thread),
+    )
+
+
+@router.delete("/threads/{thread_id}/messages")
+async def clear_thread_messages(
+    thread_id: str,
+    current_user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """清空指定主题的消息列表"""
+    user_id = str(current_user["id"])
+    await clear_assistant_conversation(db, user_id, thread_id)
     return {"success": True}
 
 
@@ -112,14 +179,18 @@ async def planned_analysis(
                     user_content=request.message.strip(),
                     assistant_content=result.reply,
                     tools_used=result.tools_used or [],
+                    conversation_id=request.conversation_id,
                 )
             except Exception as e:
                 logger.warning("[规划分析 API] 保存会话失败: %s", e)
+
+        thread = await get_or_create_assistant_thread(db, user_id, request.conversation_id)
 
         return PlannedAnalysisResponse(
             reply=result.reply,
             tools_used=result.tools_used,
             data_refs=result.data_refs,
+            conversation_id=thread["thread_id"],
             plan=result.plan.dict() if result.plan else None,
             step_results=[sr.dict() for sr in result.step_results] if result.step_results else None,
             source=result.source.value,

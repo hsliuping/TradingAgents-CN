@@ -35,6 +35,7 @@ from app.services.intelligent_assistant_service import (
     _get_assistant_llm_config,
     _get_system_prompt,
     _get_latest_trade_date,
+    get_assistant_conversation,
     IntelligentAssistantService,
 )
 
@@ -300,7 +301,7 @@ class PlannedAnalysisService:
     ) -> PlannedAnalysisResult:
         """核心分析流程"""
         # 获取会话上下文
-        context_messages = await self._get_context_messages(user_id)
+        context_messages = await self._get_context_messages(user_id, conversation_id)
 
         curr_date = _get_latest_trade_date()
         trade_date = curr_date  # 交易日与当前日期一致（_get_latest_trade_date 已处理周末）
@@ -478,19 +479,22 @@ class PlannedAnalysisService:
     async def _get_context_messages(
         self,
         user_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
     ) -> Optional[List[Message]]:
         """获取最近的会话历史作为上下文"""
         if not user_id:
             return None
 
         try:
-            doc = await self._db.assistant_conversations.find_one(
-                {"user_id": user_id}
+            raw_messages = await get_assistant_conversation(
+                self._db,
+                user_id,
+                conversation_id,
             )
-            if not doc or "messages" not in doc:
+            if not raw_messages:
                 return None
 
-            recent = doc["messages"][-MAX_CONTEXT_MESSAGES:]
+            recent = raw_messages[-MAX_CONTEXT_MESSAGES:]
             messages = []
             for m in recent:
                 role = MessageRole.USER if m["role"] == "user" else MessageRole.ASSISTANT
