@@ -46,6 +46,8 @@
 </template>
 
 <script setup lang="ts">
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
 interface HistoryPositionItem {
   code: string
   name: string
@@ -65,8 +67,8 @@ const emit = defineEmits<{
   (e: 'start-review', item: HistoryPositionItem): void
 }>()
 
-const getMarketType = (market: string) => {
-  const map: Record<string, string> = {
+const getMarketType = (market: string): TagType => {
+  const map: Record<string, TagType> = {
     CN: 'danger',
     HK: 'warning',
     US: 'primary'

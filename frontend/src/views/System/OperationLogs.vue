@@ -320,6 +320,7 @@ import * as echarts from 'echarts'
 import {
   OperationLogsApi,
   type OperationLog,
+  type OperationLogQuery,
   type OperationLogStats,
   getActionTypeName,
   getActionTypeTagColor,
@@ -329,7 +330,7 @@ import {
 // 响应式数据
 const loading = ref(false)
 const detailDialogVisible = ref(false)
-const selectedLog = ref(null)
+const selectedLog = ref<OperationLog | null>(null)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const totalLogs = ref(0)
@@ -339,7 +340,12 @@ const actionTypeChart = ref()
 const operationTrendChart = ref()
 
 // 筛选表单
-const filterForm = reactive({
+const filterForm = reactive<{
+  dateRange: string[]
+  actionType: string
+  success: boolean | ''
+  keyword: string
+}>({
   dateRange: [],
   actionType: '',
   success: '',
@@ -360,22 +366,24 @@ const logs = ref<OperationLog[]>([])
 // 统计数据详细信息
 const statsData = ref<OperationLogStats | null>(null)
 
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
 // 方法
-const getActionTypeTag = (actionType: string): string => {
-  return getActionTypeTagColor(actionType)
+const getActionTypeTag = (actionType: string): TagType => {
+  return getActionTypeTagColor(actionType) as TagType
 }
 
 const loadLogs = async () => {
   loading.value = true
   try {
     // 构建查询参数
-    const queryParams = {
+    const queryParams: OperationLogQuery = {
       page: currentPage.value,
       page_size: pageSize.value,
       start_date: filterForm.dateRange[0] || undefined,
       end_date: filterForm.dateRange[1] || undefined,
       action_type: filterForm.actionType || undefined,
-      success: filterForm.success !== '' ? filterForm.success : undefined,
+      success: typeof filterForm.success === 'boolean' ? filterForm.success : undefined,
       keyword: filterForm.keyword || undefined
     }
 

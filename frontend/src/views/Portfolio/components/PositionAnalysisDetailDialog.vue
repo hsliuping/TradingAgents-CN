@@ -124,12 +124,24 @@ import { ref, watch } from 'vue'
 import { type PositionAnalysisResult } from '@/api/portfolio'
 import { marked } from 'marked'
 
+type PositionSnapshot = {
+  code?: string
+  name?: string
+  quantity?: number
+  cost_price?: number
+  current_price?: number
+  market_value?: number
+  unrealized_pnl?: number
+  unrealized_pnl_pct?: number
+  industry?: string
+}
+
 // 配置marked选项
 marked.setOptions({ breaks: true, gfm: true })
 
 const props = defineProps<{
   modelValue: boolean
-  report: PositionAnalysisResult | null
+  report: (PositionAnalysisResult & { position_snapshot?: PositionSnapshot }) | null
 }>()
 
 const emit = defineEmits<{

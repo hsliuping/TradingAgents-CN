@@ -182,19 +182,19 @@ export interface SettingMeta {
 export const configApi = {
   // 获取系统配置
   getSystemConfig(): Promise<SystemConfig> {
-    return ApiClient.get('/api/config/system')
+    return ApiClient.get('/api/config/system').then((response: any) => response.data ?? response)
   },
 
   // ========== 大模型厂家管理 ==========
 
   // 获取所有大模型厂家
   getLLMProviders(): Promise<LLMProvider[]> {
-    return ApiClient.get('/api/config/llm/providers')
+    return ApiClient.get('/api/config/llm/providers').then((response: any) => response.data ?? response)
   },
 
   // 添加大模型厂家
   addLLMProvider(provider: Partial<LLMProvider>): Promise<{ message: string; id: string }> {
-    return ApiClient.post('/api/config/llm/providers', provider)
+    return ApiClient.post('/api/config/llm/providers', provider) as any
   },
 
   // 更新大模型厂家
@@ -233,7 +233,7 @@ export const configApi = {
     display_name: string
     models: string[]
   }>> {
-    return ApiClient.get('/api/config/llm/providers/embedding')
+    return ApiClient.get('/api/config/llm/providers/embedding').then((response: any) => response.data ?? response)
   },
 
   // 获取可用的模型列表（按厂家分组）
@@ -242,7 +242,7 @@ export const configApi = {
     provider_name: string
     models: Array<{ name: string; display_name: string }>
   }>> {
-    return ApiClient.get('/api/config/models')
+    return ApiClient.get('/api/config/models').then((response: any) => response.data ?? response)
   },
 
   // ========== 模型目录管理 ==========
@@ -265,7 +265,7 @@ export const configApi = {
       capabilities?: string[]
     }>
   }>> {
-    return ApiClient.get('/api/config/model-catalog')
+    return ApiClient.get('/api/config/model-catalog').then((response: any) => response.data ?? response)
   },
 
   // 获取指定厂家的模型目录
@@ -286,7 +286,7 @@ export const configApi = {
       capabilities?: string[]
     }>
   }> {
-    return ApiClient.get(`/api/config/model-catalog/${provider}`)
+    return ApiClient.get(`/api/config/model-catalog/${provider}`).then((response: any) => response.data ?? response)
   },
 
   // 保存模型目录
@@ -423,12 +423,12 @@ export const configApi = {
 
   // 获取所有大模型配置
   getLLMConfigs(): Promise<LLMConfig[]> {
-    return ApiClient.get('/api/config/llm')
+    return ApiClient.get('/api/config/llm').then((response: any) => response.data ?? response)
   },
 
   // 添加或更新大模型配置
   updateLLMConfig(config: Partial<LLMConfig>): Promise<{ message: string; model_name: string }> {
-    return ApiClient.post('/api/config/llm', config)
+    return ApiClient.post('/api/config/llm', config) as any
   },
 
   // 删除大模型配置
@@ -438,22 +438,22 @@ export const configApi = {
 
   // 设置默认大模型
   setDefaultLLM(name: string): Promise<{ message: string; default_llm: string }> {
-    return ApiClient.post('/api/config/llm/set-default', { name })
+    return ApiClient.post('/api/config/llm/set-default', { name }) as any
   },
 
   // 获取所有数据源配置
   getDataSourceConfigs(): Promise<DataSourceConfig[]> {
-    return ApiClient.get('/api/config/datasource')
+    return ApiClient.get('/api/config/datasource').then((response: any) => response.data ?? response)
   },
 
   // 添加数据源配置
   addDataSourceConfig(config: Partial<DataSourceConfig>): Promise<{ message: string; name: string }> {
-    return ApiClient.post('/api/config/datasource', config)
+    return ApiClient.post('/api/config/datasource', config) as any
   },
 
   // 设置默认数据源
   setDefaultDataSource(name: string): Promise<{ message: string; default_data_source: string }> {
-    return ApiClient.post('/api/config/datasource/set-default', { name })
+    return ApiClient.post('/api/config/datasource/set-default', { name }) as any
   },
 
   // 更新数据源配置
@@ -468,11 +468,11 @@ export const configApi = {
 
   // 市场分类管理
   getMarketCategories(): Promise<MarketCategory[]> {
-    return ApiClient.get('/api/config/market-categories')
+    return ApiClient.get('/api/config/market-categories').then((response: any) => response.data ?? response)
   },
 
   addMarketCategory(category: Partial<MarketCategory>): Promise<{ message: string; id: string }> {
-    return ApiClient.post('/api/config/market-categories', category)
+    return ApiClient.post('/api/config/market-categories', category) as any
   },
 
   updateMarketCategory(id: string, category: Partial<MarketCategory>): Promise<{ message: string }> {
@@ -485,7 +485,7 @@ export const configApi = {
 
   // 数据源分组管理
   getDataSourceGroupings(): Promise<DataSourceGrouping[]> {
-    return ApiClient.get('/api/config/datasource-groupings')
+    return ApiClient.get('/api/config/datasource-groupings').then((response: any) => response.data ?? response)
   },
 
   addDataSourceToCategory(dataSourceName: string, categoryId: string, priority?: number): Promise<{ message: string }> {
@@ -522,12 +522,12 @@ export const configApi = {
 
   // 获取所有数据库配置
   getDatabaseConfigs(): Promise<DatabaseConfig[]> {
-    return ApiClient.get('/api/config/database')
+    return ApiClient.get('/api/config/database').then((response: any) => response.data ?? response)
   },
 
   // 获取指定的数据库配置
   getDatabaseConfig(dbName: string): Promise<DatabaseConfig> {
-    return ApiClient.get(`/api/config/database/${encodeURIComponent(dbName)}`)
+    return ApiClient.get(`/api/config/database/${encodeURIComponent(dbName)}`).then((response: any) => response.data ?? response)
   },
 
   // 添加数据库配置
@@ -557,15 +557,15 @@ export const configApi = {
 
   // 获取默认模型配置
   getDefaultModels(): Promise<{ quick_analysis_model: string; deep_analysis_model: string }> {
-    return ApiClient.get('/api/config/settings').then(settings => ({
-      quick_analysis_model: settings.quick_analysis_model || 'qwen-turbo',
-      deep_analysis_model: settings.deep_analysis_model || 'qwen-max'
+    return ApiClient.get('/api/config/settings').then((settings: any) => ({
+      quick_analysis_model: settings.data?.quick_analysis_model || settings.quick_analysis_model || 'qwen-turbo',
+      deep_analysis_model: settings.data?.deep_analysis_model || settings.deep_analysis_model || 'qwen-max'
     }))
   },
 
   // 更新系统设置
   updateSystemSettings(settings: Record<string, any>): Promise<{ success: boolean; data: any; message: string; timestamp: string }> {
-    return ApiClient.put('/api/config/settings', settings)
+    return ApiClient.put('/api/config/settings', settings) as any
   },
 
   // 测试配置连接
@@ -575,12 +575,12 @@ export const configApi = {
 
   // 测试代理连接
   testProxyConnection(proxyConfig: { http_proxy?: string; https_proxy?: string }): Promise<{ success: boolean; data: { response_time: number }; message: string; timestamp: string }> {
-    return ApiClient.post('/api/config/test-proxy', proxyConfig)
+    return ApiClient.post('/api/config/test-proxy', proxyConfig) as any
   },
 
   // 导出配置
   exportConfig(): Promise<{ message: string; data: any; exported_at: string }> {
-    return ApiClient.post('/api/config/export')
+    return ApiClient.post('/api/config/export') as any
   },
 
   // 导入配置

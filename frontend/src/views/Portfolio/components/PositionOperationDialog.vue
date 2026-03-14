@@ -60,7 +60,7 @@
       </template>
 
       <el-form-item label="备注">
-        <el-input v-model="form.notes" type="textarea" rows="3" />
+        <el-input v-model="form.notes" type="textarea" :rows="3" />
       </el-form-item>
     </el-form>
 
@@ -193,13 +193,14 @@ const handleSubmit = async () => {
 
     // 调用统一的持仓操作API
     const result = await portfolioApi.operatePosition(operationData)
+    const operationResult = result.data ?? result
 
     // 根据操作类型显示不同的成功信息
-    if (form.value.operation_type === 'reduce' && result.profit !== undefined) {
-      const profitText = result.profit >= 0 ? `盈利 ${result.profit.toFixed(2)}` : `亏损 ${Math.abs(result.profit).toFixed(2)}`
-      ElMessage.success(`${result.message}，${profitText}元 (${result.profit_pct?.toFixed(2)}%)`)
+    if (form.value.operation_type === 'reduce' && operationResult.profit !== undefined) {
+      const profitText = operationResult.profit >= 0 ? `盈利 ${operationResult.profit.toFixed(2)}` : `亏损 ${Math.abs(operationResult.profit).toFixed(2)}`
+      ElMessage.success(`${operationResult.message}，${profitText}元 (${operationResult.profit_pct?.toFixed(2)}%)`)
     } else {
-      ElMessage.success(result.message || '操作成功')
+      ElMessage.success(operationResult.message || '操作成功')
     }
 
     visible.value = false

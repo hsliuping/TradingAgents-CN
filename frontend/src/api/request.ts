@@ -1,6 +1,6 @@
 import axios from 'axios'
 import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import router from '@/router'
@@ -489,7 +489,7 @@ export const testApiConnection = async (): Promise<boolean> => {
     const response = await request.get('/api/health', {
       timeout: 5000,
       skipErrorHandler: true
-    })
+    } as any)
 
     console.log('🔍 [API_TEST] 健康检查成功:', response.data)
     return true
@@ -598,7 +598,7 @@ export class ApiClient {
       ...config
     })
 
-    const blob = new Blob([blobData])
+    const blob = new Blob([blobData as unknown as BlobPart])
     const downloadUrl = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = downloadUrl
@@ -612,4 +612,3 @@ export class ApiClient {
 
 export default request
 export { request }
-export type { ApiResponse }

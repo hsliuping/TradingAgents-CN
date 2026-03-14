@@ -269,6 +269,32 @@ import {
 } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 
+interface TokenRecord {
+  timestamp: string
+  provider: string
+  model: string
+  stock_symbol: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cost: number
+  duration: number
+}
+
+interface ModelRankingItem {
+  name: string
+  requests: number
+  tokens: number
+  cost: number
+}
+
+const providerNameMap: Record<string, string> = {
+  dashscope: '阿里百炼',
+  openai: 'OpenAI',
+  google: 'Google',
+  deepseek: 'DeepSeek'
+}
+
 // 响应式数据
 const loading = ref(false)
 const timeRange = ref('month')
@@ -279,9 +305,9 @@ const pageSize = ref(20)
 const totalRecords = ref(0)
 
 // 图表引用
-const tokenTrendChart = ref()
-const costDistributionChart = ref()
-const providerChart = ref()
+const tokenTrendChart = ref<HTMLDivElement | null>(null)
+const costDistributionChart = ref<HTMLDivElement | null>(null)
+const providerChart = ref<HTMLDivElement | null>(null)
 
 // 数据
 const overview = reactive({
@@ -295,9 +321,9 @@ const overview = reactive({
   avgCostChange: 0
 })
 
-const records = ref([])
-const filteredRecords = ref([])
-const modelRanking = ref([])
+const records = ref<TokenRecord[]>([])
+const filteredRecords = ref<TokenRecord[]>([])
+const modelRanking = ref<ModelRankingItem[]>([])
 
 // 方法
 const formatNumber = (num: number): string => {
@@ -326,13 +352,7 @@ const formatDateTime = (timestamp: string): string => {
 }
 
 const getProviderName = (provider: string): string => {
-  const names = {
-    'dashscope': '阿里百炼',
-    'openai': 'OpenAI',
-    'google': 'Google',
-    'deepseek': 'DeepSeek'
-  }
-  return names[provider] || provider
+  return providerNameMap[provider] || provider
 }
 
 const loadStatistics = async () => {
@@ -447,7 +467,7 @@ const exportData = () => {
   ElMessage.info('导出功能开发中...')
 }
 
-const viewDetails = (row: any) => {
+const viewDetails = (_row?: TokenRecord) => {
   ElMessage.info('详情功能开发中...')
 }
 

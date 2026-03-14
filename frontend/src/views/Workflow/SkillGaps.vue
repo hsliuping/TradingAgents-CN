@@ -127,6 +127,8 @@ import {
   type GapStats,
 } from '@/api/skill_gaps'
 
+type ElTagType = 'primary' | 'success' | 'info' | 'warning' | 'danger'
+
 const router = useRouter()
 
 // 列表状态
@@ -208,9 +210,9 @@ function statusLabel(status: string) {
   return map[status] ?? status
 }
 
-function statusTagType(status: string) {
-  const map: Record<string, string> = { pending: 'danger', reviewed: 'info', creating: 'primary', resolved: 'success', dismissed: 'info', expired: '' }
-  return map[status] ?? ''
+function statusTagType(status: string): ElTagType {
+  const map: Record<string, ElTagType> = { pending: 'danger', reviewed: 'info', creating: 'primary', resolved: 'success', dismissed: 'info', expired: 'info' }
+  return map[status] ?? 'info'
 }
 
 function formatDate(dt: string) {

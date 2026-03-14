@@ -199,8 +199,8 @@ const refreshHistory = async () => {
 }
 
 // 获取状态类型
-const getStatusType = (status: string) => {
-  const typeMap: Record<string, string> = {
+const getStatusType = (status: string): 'success' | 'warning' | 'info' | 'danger' => {
+  const typeMap: Record<string, 'success' | 'warning' | 'info' | 'danger'> = {
     idle: 'info',
     running: 'warning',
     success: 'success',
@@ -225,8 +225,8 @@ const getStatusText = (status: string) => {
 }
 
 // 获取时间线类型
-const getTimelineType = (status: string) => {
-  const typeMap: Record<string, string> = {
+const getTimelineType = (status: string): 'primary' | 'success' | 'warning' | 'danger' | 'info' => {
+  const typeMap: Record<string, 'primary' | 'success' | 'warning' | 'danger' | 'info'> = {
     success: 'success',
     success_with_errors: 'warning',
     failed: 'danger',

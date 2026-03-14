@@ -80,7 +80,7 @@
 
       <el-table-column prop="enabled" label="状态" width="80" align="center">
         <template #default="{ row }">
-          <el-switch v-model="row.enabled" :disabled="row.is_builtin" @change="(val: boolean) => handleToggle(row, val)" size="small" />
+          <el-switch v-model="row.enabled" :disabled="row.is_builtin" @change="(val) => handleToggle(row, Boolean(val))" size="small" />
         </template>
       </el-table-column>
 

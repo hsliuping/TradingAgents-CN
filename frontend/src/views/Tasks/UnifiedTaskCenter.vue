@@ -92,7 +92,7 @@
         <el-table-column prop="task_id" label="任务ID" width="200" show-overflow-tooltip />
         <el-table-column label="任务类型" width="120">
           <template #default="{ row }">
-            {{ TaskTypeNames[row.task_type] || row.task_type }}
+            {{ getTaskTypeName(row.task_type) }}
           </template>
         </el-table-column>
         <el-table-column label="股票/代码" width="120">
@@ -107,8 +107,8 @@
         </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="TaskStatusColors[row.status]">
-              {{ TaskStatusNames[row.status] || row.status }}
+            <el-tag :type="getTaskStatusColor(row.status)">
+              {{ getTaskStatusName(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -203,7 +203,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { List, Refresh } from '@element-plus/icons-vue'
 import {
@@ -212,8 +212,6 @@ import {
   cancelTask as cancelTaskApi,
   resumeTask as resumeTaskApi,
   getTaskDetail,
-  TaskType,
-  TaskStatus,
   TaskTypeNames,
   TaskStatusNames,
   TaskStatusColors,
@@ -247,6 +245,27 @@ const filters = ref({
   taskType: '',
   status: ''
 })
+
+const getTaskTypeName = (taskType: unknown) => {
+  if (typeof taskType !== 'string') {
+    return '-'
+  }
+  return TaskTypeNames[taskType as keyof typeof TaskTypeNames] || taskType
+}
+
+const getTaskStatusName = (status: unknown) => {
+  if (typeof status !== 'string') {
+    return '-'
+  }
+  return TaskStatusNames[status as keyof typeof TaskStatusNames] || status
+}
+
+const getTaskStatusColor = (status: unknown) => {
+  if (typeof status !== 'string') {
+    return 'info'
+  }
+  return TaskStatusColors[status as keyof typeof TaskStatusColors] || 'info'
+}
 
 // 任务详情对话框
 const detailDialogVisible = ref(false)

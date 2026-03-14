@@ -60,7 +60,7 @@
             v-for="system in tradingSystems"
             :key="system.id"
             :label="system.name"
-            :value="system.id"
+            :value="system.id || system.name"
           >
             <div style="display: flex; justify-content: space-between; align-items: center">
               <span>{{ system.name }}</span>

@@ -263,7 +263,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Plus, Edit, Delete, List, Folder, Star, Promotion, TrendCharts, Money, Collection } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, List, Star, Collection } from '@element-plus/icons-vue'
 import {
   getWatchlistGroups,
   createWatchlistGroup,

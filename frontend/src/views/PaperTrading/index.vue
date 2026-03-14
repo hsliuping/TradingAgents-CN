@@ -8,7 +8,7 @@
       <div class="actions">
         <el-button :icon="Refresh" text size="small" @click="refreshAll">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="openOrderDialog">下市场单</el-button>
-        <el-button type="success" plain :icon="Setting" @click="openInitializeDialog">初始化账户</el-button>
+        <el-button type="success" plain :icon="Setting" @click="() => openInitializeDialog()">初始化账户</el-button>
         <el-button type="danger" plain :icon="Delete" @click="confirmReset">重置账户</el-button>
       </div>
     </div>

@@ -216,7 +216,7 @@
 
           <el-table :data="formData.models" border max-height="400">
             <el-table-column label="模型名称" width="200">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <el-input
                   v-model="row.name"
                   placeholder="如: qwen-turbo"
@@ -225,7 +225,7 @@
               </template>
             </el-table-column>
             <el-table-column label="显示名称" width="280">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <el-input
                   v-model="row.display_name"
                   placeholder="如: Qwen Turbo - 快速经济"
@@ -234,7 +234,7 @@
               </template>
             </el-table-column>
             <el-table-column label="输入价格/1K" width="180">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <div style="display: flex; align-items: center; gap: 4px;">
                   <el-input-number
                     v-model="row.input_price_per_1k"
@@ -249,7 +249,7 @@
               </template>
             </el-table-column>
             <el-table-column label="输出价格/1K" width="180">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <div style="display: flex; align-items: center; gap: 4px;">
                   <el-input-number
                     v-model="row.output_price_per_1k"
@@ -264,7 +264,7 @@
               </template>
             </el-table-column>
             <el-table-column label="上下文长度" width="150">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <el-input
                   v-model.number="row.context_length"
                   placeholder="1000000"
@@ -274,7 +274,7 @@
               </template>
             </el-table-column>
             <el-table-column label="货币单位" width="120">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <el-select
                   v-model="row.currency"
                   size="small"
@@ -598,28 +598,22 @@ const handleImportForProvider = () => {
       }
 
       // 询问用户选择合并模式
-      const { value: mergeMode } = await ElMessageBox.prompt(
+      const { value: mergeModeInput } = await ElMessageBox.prompt(
         `将为厂家 "${formData.value.provider_name}" 导入 ${currentProviderCatalog.models?.length || 0} 个模型。\n\n` +
-        '请选择导入模式：\n' +
-        '• update: 更新现有模型，添加新模型，保留原有模型中不在新数据里的模型（推荐，安全）\n' +
-        '• replace: 替换整个目录（会删除原有模型中不在新数据里的模型）\n' +
-        '• append: 仅追加新模型（不更新现有模型）\n\n' +
-        '⚠️ 注意：\n' +
-        '1. 导入只会更新模型目录，不会影响已配置的大模型配置\n' +
-        '2. update 模式会保留原有模型，如需删除过时模型请手动操作',
+        '请输入导入模式：update / replace / append\n\n' +
+        '• update: 更新现有模型，添加新模型，保留原有模型（推荐）\n' +
+        '• replace: 替换整个目录\n' +
+        '• append: 仅追加新模型',
         '选择导入模式',
         {
           confirmButtonText: '确定',
           cancelButtonText: '取消',
-          inputType: 'select',
-          inputOptions: {
-            update: 'update - 更新现有模型，添加新模型，保留原有模型（推荐，安全）',
-            replace: 'replace - 替换整个目录（会删除原有模型）',
-            append: 'append - 仅追加新模型（不更新现有模型）'
-          },
-          inputValue: 'update'
+          inputValue: 'update',
+          inputPattern: /^(update|replace|append)$/,
+          inputErrorMessage: '请输入 update、replace 或 append'
         }
       )
+      const mergeMode = mergeModeInput as 'update' | 'replace' | 'append'
 
       // 调用导入接口（只导入当前厂家）
       const response = await configApi.importModelCatalog({

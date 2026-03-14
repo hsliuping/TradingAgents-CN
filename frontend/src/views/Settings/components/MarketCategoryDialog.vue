@@ -132,7 +132,7 @@ watch(
   () => props.category,
   (category) => {
     if (category) {
-      formData.value = { ...category }
+      formData.value = { ...defaultFormData, ...category, description: category.description || '' }
     } else {
       formData.value = { ...defaultFormData }
     }
@@ -146,7 +146,7 @@ watch(
   (visible) => {
     if (visible) {
       if (props.category) {
-        formData.value = { ...props.category }
+        formData.value = { ...defaultFormData, ...props.category, description: props.category.description || '' }
       } else {
         formData.value = { ...defaultFormData }
       }

@@ -352,7 +352,7 @@ const lookupStockIndustry = async () => {
 }
 
 watch(
-  () => resolvedIndustry,
+  resolvedIndustry,
   (val) => {
     if (val && wizard.analysisTarget === 'stock' && !industryProfileResult.value) {
       promptDesignApi.checkIndustryProfile(val).then((r) => (industryProfileResult.value = r))

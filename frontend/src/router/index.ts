@@ -890,7 +890,7 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes,
-  scrollBehavior(to, from, savedPosition) {
+  scrollBehavior(_to, _from, savedPosition) {
     if (savedPosition) {
       return savedPosition
     } else {
@@ -900,7 +900,7 @@ const router = createRouter({
 })
 
 // 全局前置守卫
-router.beforeEach(async (to, from, next) => {
+router.beforeEach(async (to, _from, next) => {
   // 开始进度条
   NProgress.start()
 
@@ -1007,7 +1007,7 @@ router.beforeEach(async (to, from, next) => {
 })
 
 // 全局后置守卫
-router.afterEach((to, from) => {
+router.afterEach((_to, _from) => {
   // 结束进度条
   NProgress.done()
 
@@ -1025,7 +1025,7 @@ router.onError((error) => {
 })
 
 // 路由守卫：检查高级课程权限
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, _from, next) => {
   // 检查是否需要高级学员权限
   if (to.meta.requiresPro) {
     // 动态导入License Store（避免循环依赖）

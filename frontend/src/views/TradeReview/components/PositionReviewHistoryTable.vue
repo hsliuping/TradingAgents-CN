@@ -45,6 +45,8 @@
 </template>
 
 <script setup lang="ts">
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
 interface PositionReviewItem {
   id: string
   code: string
@@ -77,7 +79,7 @@ const getReviewTypeLabel = (type: string) => {
   return map[type] || type
 }
 
-const getScoreType = (score: number) => {
+const getScoreType = (score: number): TagType => {
   if (score >= 80) return 'success'
   if (score >= 60) return 'warning'
   return 'danger'

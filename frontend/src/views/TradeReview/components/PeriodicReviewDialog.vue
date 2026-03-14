@@ -7,7 +7,7 @@
   >
     <el-form :model="form" label-width="100px">
       <el-form-item label="复盘周期" required>
-        <el-radio-group v-model="form.period_type" @change="updateDateRange">
+        <el-radio-group v-model="form.period_type" @change="handlePeriodTypeChange">
           <el-radio value="week">周度</el-radio>
           <el-radio value="month">月度</el-radio>
           <el-radio value="quarter">季度</el-radio>
@@ -161,6 +161,13 @@ const updateDateRange = (type: PeriodType) => {
   
   const formatDate = (d: Date) => d.toISOString().split('T')[0]
   dateRange.value = [formatDate(start), formatDate(end)]
+}
+
+const handlePeriodTypeChange = (type: string | number | boolean | undefined) => {
+  if (typeof type !== 'string') {
+    return
+  }
+  updateDateRange(type as PeriodType)
 }
 
 const submit = async () => {

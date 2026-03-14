@@ -33,6 +33,8 @@ export interface JobStatus {
   next_run_time?: string
   last_run_time?: string
   trigger?: string
+  func?: string
+  kwargs?: Record<string, unknown>
   display_name?: string
   description?: string
   has_suspended_execution?: boolean  // 是否有挂起的执行记录

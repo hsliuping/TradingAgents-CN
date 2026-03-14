@@ -72,9 +72,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Search } from '@element-plus/icons-vue'
-import { agentApi, type AgentMetadata, type AgentCategory, type AgentToolsConfig, type AgentToolsUpdate } from '@/api/agents'
-import { toolsApi, type ToolMetadata } from '@/api/tools'
+import { agentApi, type AgentMetadata, type AgentCategory } from '@/api/agents'
 
 const router = useRouter()
 
@@ -82,11 +80,6 @@ const loading = ref(false)
 const agents = ref<AgentMetadata[]>([])
 const categories = ref<AgentCategory[]>([])
 const currentCategory = ref('')
-
-const getCategoryName = (categoryId: string) => {
-  const category = categories.value.find(c => c.id === categoryId)
-  return category ? category.name : categoryId
-}
 
 // 获取分类的 v2.0 agent 数量
 const getCategoryCount = (categoryId: string) => {

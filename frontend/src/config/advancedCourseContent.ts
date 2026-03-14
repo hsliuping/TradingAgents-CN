@@ -75,7 +75,7 @@ export async function getCourseContent(filename: string): Promise<string> {
  * 同步获取课程内容（用于预加载）
  * 注意：这需要预先导入所有文件
  */
-export function getCourseContentSync(filename: string): string | null {
+export function getCourseContentSync(_filename: string): string | null {
   // 这个方法需要预先导入所有文件，暂时不使用
   return null
 }

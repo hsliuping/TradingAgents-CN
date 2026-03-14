@@ -2,8 +2,8 @@
   <div class="condition-display">
     <template v-if="isObject(condition)">
       <div v-for="(value, key) in condition" :key="key" class="condition-item">
-        <span class="condition-key">{{ formatKey(key as string) }}：</span>
-        <span class="condition-value">{{ formatValue(value, key as string) }}</span>
+        <span class="condition-key">{{ formatKey(String(key)) }}：</span>
+        <span class="condition-value">{{ formatValue(value, String(key)) }}</span>
       </div>
     </template>
     <template v-else>

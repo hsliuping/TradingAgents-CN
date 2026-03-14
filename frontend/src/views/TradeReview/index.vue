@@ -421,7 +421,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, type TabPaneName } from 'element-plus'
 import { TrendCharts, Refresh, Search, RefreshRight, Goods, Wallet } from '@element-plus/icons-vue'
 import { reviewApi, type ReviewListItem, type TradingStatistics, type ReviewableStock, type ReviewType, type PeriodicReviewListItem } from '@/api/review'
 import { portfolioApi } from '@/api/portfolio'
@@ -430,8 +430,6 @@ import ReviewHistoryTable from './components/ReviewHistoryTable.vue'
 import CaseLibraryTable from './components/CaseLibraryTable.vue'
 import ReviewableTradesTable from './components/ReviewableTradesTable.vue'
 import ReviewDetailDialog from './components/ReviewDetailDialog.vue'
-import PeriodicReviewDialog from './components/PeriodicReviewDialog.vue'
-import PeriodicReviewDetailDialog from './components/PeriodicReviewDetailDialog.vue'
 import PositionChangesTable from './components/PositionChangesTable.vue'
 import HistoryPositionsTable from './components/HistoryPositionsTable.vue'
 import PositionReviewHistoryTable from './components/PositionReviewHistoryTable.vue'
@@ -552,9 +550,6 @@ const periodicReviews = ref<PeriodicReviewListItem[]>([])
 const periodicTotal = ref(0)
 const periodicPage = ref(1)
 const periodicPageSize = ref(10)
-const showPeriodicDialog = ref(false)
-const showPeriodicDetailDialog = ref(false)
-const selectedPeriodicReviewId = ref('')
 
 // ============== 持仓复盘相关状态 ==============
 const positionTab = ref('positions')
@@ -626,7 +621,6 @@ const positionPeriodicReviews = ref<PeriodicReviewListItem[]>([])
 const positionPeriodicTotal = ref(0)
 const positionPeriodicPage = ref(1)
 const positionPeriodicPageSize = ref(10)
-const showPositionPeriodicDialog = ref(false)
 
 // 持仓操作案例库
 const positionCases = ref<ReviewListItem[]>([])
@@ -820,7 +814,7 @@ const startReview = async (code: string) => {
             market: position.market || 'CN',
             type: 'current',
             quantity: position.quantity,
-            cost_price: position.cost_price || position.avg_cost,
+            cost_price: position.cost_price || position.original_avg_cost || 0,
             unrealized_pnl: position.unrealized_pnl || 0
           }
         }
@@ -903,59 +897,9 @@ const loadPeriodicReviews = async () => {
   }
 }
 
-const getPeriodTypeLabel = (type: string) => {
-  const map: Record<string, string> = {
-    week: '周度',
-    month: '月度',
-    quarter: '季度',
-    year: '年度'
-  }
-  return map[type] || type
-}
-
-const formatDate = (dateStr?: string) => {
-  if (!dateStr) return '-'
-  return dateStr.split('T')[0]
-}
-
-const formatDateTime = (dateStr?: string) => {
-  if (!dateStr) return '-'
-  const d = new Date(dateStr)
-  return d.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
-
-const getScoreType = (score: number) => {
-  if (score >= 80) return 'success'
-  if (score >= 60) return 'warning'
-  return 'danger'
-}
-
-const viewPeriodicDetail = (reviewId: string) => {
-  selectedPeriodicReviewId.value = reviewId
-  showPeriodicDetailDialog.value = true
-}
-
-const handlePeriodicSuccess = (reviewId: string) => {
-  showPeriodicDialog.value = false
-  selectedPeriodicReviewId.value = reviewId
-  showPeriodicDetailDialog.value = true
-  loadPeriodicReviews()
-}
-
-const handlePeriodicPageChange = (page: number) => {
-  periodicPage.value = page
-  loadPeriodicReviews()
-}
-
 // ============== 持仓复盘相关方法 ==============
-const handleSourceChange = (source: ReviewSourceType) => {
-  if (source === 'paper') {
+const handleSourceChange = (source: TabPaneName) => {
+  if (String(source) === 'paper') {
     refreshData()
     loadPeriodicReviews()
   } else {
@@ -1196,15 +1140,6 @@ const handleReviewSuccess = (reviewId: string) => {
   }
 }
 
-// 模拟交易复盘成功回调（保留以兼容）
-const handlePaperReviewSuccess = handleReviewSuccess
-
-// 用户持仓复盘成功回调（保留以兼容）
-const handleRealPositionReviewSuccess = handleReviewSuccess
-
-// 保留旧函数名以兼容（用户持仓）
-const handlePositionReviewSuccess = handleReviewSuccess
-
 const applyPositionFilter = () => {
   loadPositionChanges()
   loadHistoryPositions()
@@ -1231,18 +1166,6 @@ const loadPositionPeriodicReviews = async () => {
   } finally {
     loading.value.positionPeriodic = false
   }
-}
-
-const handlePositionPeriodicSuccess = (reviewId: string) => {
-  showPositionPeriodicDialog.value = false
-  selectedPeriodicReviewId.value = reviewId
-  showPeriodicDetailDialog.value = true
-  loadPositionPeriodicReviews()
-}
-
-const handlePositionPeriodicPageChange = (page: number) => {
-  positionPeriodicPage.value = page
-  loadPositionPeriodicReviews()
 }
 
 // 持仓操作案例库相关方法

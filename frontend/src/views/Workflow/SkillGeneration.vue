@@ -336,7 +336,7 @@ const testLoading = ref(false)
 const testParamsList = computed(() => {
   const row = testSkillRow.value
   if (!row) return []
-  const params = row.parameters || row.metadata?.parameters || []
+  const params = row.parameters || []
   return Array.isArray(params) ? params : []
 })
 
@@ -415,7 +415,7 @@ const handleTest = (row: ExternalSkill) => {
   testResult.value = null
   testLoading.value = false
   // 初始化参数：从 test_input 或 parameters 的 default
-  const params = row.parameters || row.metadata?.parameters || []
+  const params = row.parameters || []
   const defaults = (row as any).test_input || {}
   const init: Record<string, any> = {}
   for (const p of Array.isArray(params) ? params : []) {

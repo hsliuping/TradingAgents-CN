@@ -423,7 +423,6 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, ArrowRight, Check, DocumentChecked, VideoPlay, Lock, InfoFilled, Star } from '@element-plus/icons-vue'
 import { workflowApi, type WorkflowDefinition, type NodeDefinition, type EdgeDefinition, type ValidationResult } from '@/api/workflow'
 import { agentApi, type AgentMetadata, type AgentCategory, type AgentToolsConfig } from '@/api/agents'
-import { type ToolMetadata } from '@/api/tools'
 import { TemplatesApi, type TemplateItem } from '@/api/templates'
 import { useAuthStore } from '@/stores/auth'
 import { useLicenseStore } from '@/stores/license'
@@ -440,7 +439,6 @@ const workflow = ref<WorkflowDefinition | null>(null)
 const nodes = ref<NodeDefinition[]>([])
 const edges = ref<EdgeDefinition[]>([])
 const agents = ref<AgentMetadata[]>([])
-const allTools = ref<ToolMetadata[]>([])
 const categories = ref<AgentCategory[]>([])
 const selectedNode = ref<NodeDefinition | null>(null)
 const isEditMode = ref(true)
@@ -877,7 +875,7 @@ const toggleTool = (toolId: string, enabled: boolean) => {
 
 const getToolDataSources = (): string => {
   if (!agentToolsConfig.value) return ''
-  const sources = new Set(agentToolsConfig.value.available_tools.map((t: ToolMetadata) => t.data_source))
+  const sources = new Set(agentToolsConfig.value.available_tools.map(t => t.data_source))
   return Array.from(sources).filter(Boolean).join(', ')
 }
 

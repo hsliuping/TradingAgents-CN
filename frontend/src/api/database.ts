@@ -156,7 +156,7 @@ export const databaseApi = {
   }): Promise<Blob> {
     return ApiClient.post('/api/system/database/export', options, {
       responseType: 'blob'
-    })
+    }) as any
   },
 
   // 清理旧数据

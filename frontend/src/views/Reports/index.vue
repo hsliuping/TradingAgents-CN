@@ -216,6 +216,22 @@ import {
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
+type ElTagType = 'primary' | 'success' | 'info' | 'warning' | 'danger'
+
+interface ReportListItem {
+  id: string | number
+  title?: string
+  stock_code: string
+  stock_name?: string
+  analysis_date?: string
+  type: string
+  format: string
+  status: string
+  model_info?: string
+  research_depth?: number
+  created_at: string
+}
+
 // 使用路由和认证store
 const router = useRouter()
 const authStore = useAuthStore()
@@ -225,15 +241,15 @@ const loading = ref(false)
 const searchKeyword = ref('')
 const marketFilter = ref('')
 const dateRange = ref<[string, string] | null>(null)
-const selectedReports = ref([])
+const selectedReports = ref<ReportListItem[]>([])
 const currentPage = ref(1)
 const pageSize = ref(20)
 const totalReports = ref(0)
 
-const reports = ref([])
+const reports = ref<ReportListItem[]>([])
 
 // 计算属性
-const filteredReports = computed(() => {
+const filteredReports = computed<ReportListItem[]>(() => {
   // 现在数据直接从API获取，不需要前端筛选
   return reports.value
 })
@@ -272,7 +288,7 @@ const fetchReports = async () => {
     const result = await response.json()
 
     if (result.success) {
-      reports.value = result.data.reports
+      reports.value = Array.isArray(result.data?.reports) ? result.data.reports as ReportListItem[] : []
       totalReports.value = result.data.total
     } else {
       throw new Error(result.message || '获取报告列表失败')
@@ -304,7 +320,7 @@ const handleMarketChange = () => {
 const MAX_BATCH_EXPORT = 10
 let isCorrectingSelection = false
 
-const handleSelectionChange = (selection: any[]) => {
+const handleSelectionChange = (selection: ReportListItem[]) => {
   if (isCorrectingSelection) return
   if (selection.length > MAX_BATCH_EXPORT) {
     isCorrectingSelection = true
@@ -313,7 +329,7 @@ const handleSelectionChange = (selection: any[]) => {
     ElMessage.warning(`最多选择 ${MAX_BATCH_EXPORT} 个报告`)
     nextTick(() => {
       tableRef.value?.clearSelection()
-      toKeep.forEach((row: any) => tableRef.value?.toggleRowSelection(row, true))
+      toKeep.forEach((row) => tableRef.value?.toggleRowSelection(row, true))
       isCorrectingSelection = false
     })
   } else {
@@ -321,19 +337,22 @@ const handleSelectionChange = (selection: any[]) => {
   }
 }
 
-const isRowSelectable = (row: any) => {
+const isRowSelectable = (row: ReportListItem) => {
   if (selectedReports.value.length < MAX_BATCH_EXPORT) return true
-  return selectedReports.value.some((r: any) => r.id === row.id)
+  return selectedReports.value.some((r) => r.id === row.id)
 }
 
-const tableRef = ref()
+const tableRef = ref<{
+  clearSelection: () => void
+  toggleRowSelection: (row: ReportListItem, selected?: boolean) => void
+} | null>(null)
 
-const viewReport = (report: any) => {
+const viewReport = (report: ReportListItem) => {
   // 跳转到报告详情页面
   router.push(`/reports/view/${report.id}`)
 }
 
-const downloadReport = async (report: any, format: string = 'markdown') => {
+const downloadReport = async (report: ReportListItem, format: string = 'markdown') => {
   try {
     // 显示加载提示
     const loadingMsg = ElMessage({
@@ -421,7 +440,7 @@ const getFileExtension = (format: string): string => {
   return extensions[format] || 'txt'
 }
 
-const deleteReport = async (report: any) => {
+const deleteReport = async (report: ReportListItem) => {
   try {
     await ElMessageBox.confirm(
       `确定要删除报告 "${report.title}" 吗？`,
@@ -454,8 +473,8 @@ const deleteReport = async (report: any) => {
     } else {
       throw new Error(result.message || '删除失败')
     }
-  } catch (error) {
-    if (error.message !== 'cancel') {
+  } catch (error: unknown) {
+    if (!(error instanceof Error && error.message === 'cancel')) {
       console.error('删除报告失败:', error)
       ElMessage.error('删除报告失败')
     }
@@ -466,7 +485,7 @@ const batchExporting = ref(false)
 
 const exportSelected = async (format: string = 'markdown') => {
   const toExport = selectedReports.value
-    .filter((r: any) => r.status === 'completed')
+    .filter((r) => r.status === 'completed')
     .slice(0, MAX_BATCH_EXPORT)
   if (toExport.length === 0) {
     ElMessage.warning('请选择已完成的报告进行导出')
@@ -513,8 +532,8 @@ const refreshReports = () => {
   fetchReports()
 }
 
-const getTypeColor = (type: string) => {
-  const colorMap: Record<string, string> = {
+const getTypeColor = (type: string): ElTagType => {
+  const colorMap: Record<string, ElTagType> = {
     single: 'primary',
     batch: 'success',
     portfolio: 'warning'
@@ -531,8 +550,8 @@ const getTypeText = (type: string) => {
   return textMap[type] || type
 }
 
-const getStatusType = (status: string) => {
-  const statusMap: Record<string, string> = {
+const getStatusType = (status: string): ElTagType => {
+  const statusMap: Record<string, ElTagType> = {
     completed: 'success',
     processing: 'warning',
     failed: 'danger'

@@ -725,6 +725,7 @@ const evaluationDialogVisible = ref(false)
 const optimizationDialogVisible = ref(false)
 const applyingOptimization = ref(false)
 const publishing = ref(false)
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
 
 // 评估历史相关
 const historyDialogVisible = ref(false)
@@ -960,8 +961,8 @@ function getStyleLabel(style: string) {
   return map[style] || style
 }
 
-function getStyleType(style: string) {
-  const map: Record<string, string> = {
+function getStyleType(style: string): TagType {
+  const map: Record<string, TagType> = {
     short_term: 'danger',
     medium_term: 'warning',
     long_term: 'success'
@@ -978,8 +979,8 @@ function getRiskLabel(risk: string) {
   return map[risk] || risk
 }
 
-function getRiskType(risk: string) {
-  const map: Record<string, string> = {
+function getRiskType(risk: string): TagType {
+  const map: Record<string, TagType> = {
     conservative: 'success',
     balanced: 'warning',
     aggressive: 'danger'
@@ -993,8 +994,8 @@ function formatDateTime(dateStr: string) {
   return date.toLocaleString('zh-CN')
 }
 
-function getGradeTagType(grade: string): string {
-  const gradeMap: Record<string, string> = {
+function getGradeTagType(grade: string): TagType {
+  const gradeMap: Record<string, TagType> = {
     '优秀': 'success',
     '良好': 'primary',
     '中等': 'warning',
@@ -1032,22 +1033,6 @@ function getDimensionColor(score: number): string {
 function formatDelta(delta: number): string {
   if (delta > 0) return `+${delta}`
   return String(delta)
-}
-
-function getScoreTagType(score: number): string {
-  if (score >= 90) return 'success'
-  if (score >= 80) return 'primary'
-  if (score >= 70) return 'warning'
-  if (score >= 60) return 'info'
-  return 'danger'
-}
-
-function getScoreLevel(score: number): string {
-  if (score >= 90) return '优秀'
-  if (score >= 80) return '良好'
-  if (score >= 70) return '中等'
-  if (score >= 60) return '及格'
-  return '不及格'
 }
 
 // 版本管理相关函数

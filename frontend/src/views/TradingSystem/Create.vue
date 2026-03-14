@@ -164,7 +164,7 @@
           </div>
         </el-alert>
 
-        <el-form :model="formData.position" label-width="120px" label-position="top">
+        <el-form :model="positionConfig" label-width="120px" label-position="top">
           <el-row :gutter="20">
             <el-col :span="8">
               <el-form-item label="单只股票仓位上限">
@@ -176,12 +176,12 @@
             </el-col>
             <el-col :span="8">
               <el-form-item label="最大持股数">
-                <el-input-number v-model="formData.position.max_holdings" :min="1" :max="50" />
+                <el-input-number v-model="positionConfig.max_holdings" :min="1" :max="50" />
               </el-form-item>
             </el-col>
             <el-col :span="8">
               <el-form-item label="最小持股数">
-                <el-input-number v-model="formData.position.min_holdings" :min="1" :max="20" />
+                <el-input-number v-model="positionConfig.min_holdings" :min="1" :max="20" />
               </el-form-item>
             </el-col>
           </el-row>
@@ -242,8 +242,8 @@
 
         <el-descriptions :column="2" border>
           <el-descriptions-item label="系统名称">{{ formData.name }}</el-descriptions-item>
-          <el-descriptions-item label="交易风格">{{ getStyleLabel(formData.style) }}</el-descriptions-item>
-          <el-descriptions-item label="风险偏好">{{ getRiskLabel(formData.risk_profile) }}</el-descriptions-item>
+          <el-descriptions-item label="交易风格">{{ getStyleLabel(formData.style || '') }}</el-descriptions-item>
+          <el-descriptions-item label="风险偏好">{{ getRiskLabel(formData.risk_profile || '') }}</el-descriptions-item>
           <el-descriptions-item label="单只仓位上限">{{ positionMaxPerStock }}%</el-descriptions-item>
         </el-descriptions>
         
@@ -462,7 +462,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
@@ -540,6 +540,7 @@ const riskRuleStyle = ref<'conservative' | 'balanced' | 'aggressive'>('balanced'
 
 // 发布相关
 const publishing = ref(false)
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
 
 // 仓位百分比（用于滑块）
 const positionMaxPerStock = computed({
@@ -549,6 +550,13 @@ const positionMaxPerStock = computed({
       formData.value.position.max_per_stock = val / 100
     }
   }
+})
+
+const positionConfig = computed(() => {
+  if (!formData.value.position) {
+    formData.value.position = { max_per_stock: 0.2, max_holdings: 10, min_holdings: 3 }
+  }
+  return formData.value.position
 })
 
 // 是否可以下一步
@@ -753,31 +761,31 @@ function selectTemplate(template: TradingSystemTemplate) {
 }
 
 // 工具函数
-function getStyleLabel(style: string) {
+function getStyleLabel(style: string | undefined) {
   const map: Record<string, string> = {
     short_term: '短线',
     medium_term: '中线',
     long_term: '长线'
   }
-  return map[style] || style
+  return style ? (map[style] || style) : ''
 }
 
-function getRiskLabel(risk: string) {
+function getRiskLabel(risk: string | undefined) {
   const map: Record<string, string> = {
     conservative: '保守',
     balanced: '中性',
     aggressive: '激进'
   }
-  return map[risk] || risk
+  return risk ? (map[risk] || risk) : ''
 }
 
-function getRiskType(risk: string) {
-  const map: Record<string, string> = {
+function getRiskType(risk: string | undefined): TagType {
+  const map: Record<string, TagType> = {
     conservative: 'success',
     balanced: 'warning',
     aggressive: 'danger'
   }
-  return map[risk] || 'info'
+  return risk ? (map[risk] || 'info') : 'info'
 }
 
 // AI评估功能
@@ -948,8 +956,8 @@ function handleGoBackToEdit() {
   // 这里简单处理，关闭对话框即可
 }
 
-function getGradeTagType(grade: string): string {
-  const gradeMap: Record<string, string> = {
+function getGradeTagType(grade: string): TagType {
+  const gradeMap: Record<string, TagType> = {
     '优秀': 'success',
     '良好': 'primary',
     '中等': 'warning',
@@ -987,22 +995,6 @@ function getDimensionColor(score: number): string {
 function formatDelta(delta: number): string {
   if (delta > 0) return `+${delta}`
   return String(delta)
-}
-
-function getScoreTagType(score: number): string {
-  if (score >= 90) return 'success'
-  if (score >= 80) return 'primary'
-  if (score >= 70) return 'warning'
-  if (score >= 60) return 'info'
-  return 'danger'
-}
-
-function getScoreLevel(score: number): string {
-  if (score >= 90) return '优秀'
-  if (score >= 80) return '良好'
-  if (score >= 70) return '中等'
-  if (score >= 60) return '及格'
-  return '不及格'
 }
 </script>
 

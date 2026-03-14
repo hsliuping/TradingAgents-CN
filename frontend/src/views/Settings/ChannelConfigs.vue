@@ -135,11 +135,20 @@ const eventTypes = [
   { value: 'system', label: '系统通知' },
 ]
 
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
 const typeLabel = (type: string) =>
   ({ feishu: '飞书', dingtalk: '钉钉', wechatwork: '企业微信', email: '邮件' }[type] || type)
 
-const typeTagColor = (type: string) =>
-  ({ feishu: 'primary', dingtalk: 'warning', wechatwork: 'success', email: 'info' }[type] || '')
+const typeTagColor = (type: string): TagType => {
+  const tagMap: Record<string, TagType> = {
+    feishu: 'primary',
+    dingtalk: 'warning',
+    wechatwork: 'success',
+    email: 'info'
+  }
+  return tagMap[type] || 'info'
+}
 
 const eventLabel = (evt: string) =>
   ({ analysis_complete: '分析完成', alert: '预警', skill_gap: '工具缺口', system: '系统' }[evt] || evt)

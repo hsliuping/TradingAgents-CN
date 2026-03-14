@@ -964,7 +964,7 @@ const loadWorkflowsList = async () => {
 }
 
 // 加载提示词模板列表（含多流程支持）
-const loadPromptTemplates = async (agentId: string) => {
+const loadPromptTemplates = async (_agentId: string) => {
   promptLoading.value = true
   try {
     if (!agent.value?.id) {

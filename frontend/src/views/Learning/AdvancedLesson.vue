@@ -80,12 +80,15 @@ const lessonTitle = computed(() => lesson.value?.title || '')
 const lessonOrder = computed(() => lesson.value?.order || 0)
 
 // 获取相邻课程
-const { prev: prevLesson, next: nextLesson } = computed(() => {
+const adjacentLessons = computed(() => {
   if (!categoryId.value || !lessonId.value) {
     return { prev: null, next: null }
   }
   return getAdjacentLessons(categoryId.value, lessonId.value)
 })
+
+const prevLesson = computed(() => adjacentLessons.value.prev)
+const nextLesson = computed(() => adjacentLessons.value.next)
 
 // 课程内容
 const lessonContent = ref('')
@@ -113,7 +116,7 @@ const loadLesson = async () => {
     }
 
     // 转换为HTML
-    const html = marked(markdown)
+    const html = marked.parse(markdown) as string
     lessonContent.value = html
 
     // 提取目录

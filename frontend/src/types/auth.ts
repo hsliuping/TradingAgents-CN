@@ -24,6 +24,12 @@ export interface User {
   failed_analyses: number
 }
 
+export interface AssistantSettings {
+  name?: string
+  tone?: string
+  custom_instructions?: string
+}
+
 // 用户偏好设置
 export interface UserPreferences {
   // 分析偏好
@@ -47,6 +53,11 @@ export interface UserPreferences {
   desktop_notifications?: boolean
   analysis_complete_notification?: boolean
   system_maintenance_notification?: boolean
+  assistant_settings?: AssistantSettings
+}
+
+export interface UserUpdatePayload extends Partial<Omit<User, 'preferences'>> {
+  preferences?: Partial<UserPreferences>
 }
 
 // 登录表单

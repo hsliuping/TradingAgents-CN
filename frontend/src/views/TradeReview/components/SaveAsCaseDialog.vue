@@ -50,7 +50,7 @@ const props = defineProps<{
   modelValue: boolean
   reviewId: string
   stockCode?: string
-  source?: 'paper' | 'position'  // 数据源: paper(模拟交易) 或 position(持仓操作)
+  source?: 'paper' | 'position' | 'real'  // 数据源: paper(模拟交易) 或 position(持仓操作)
 }>()
 
 const emit = defineEmits<{

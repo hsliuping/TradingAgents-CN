@@ -498,24 +498,6 @@ const formatTime = (time: string | Date) => {
   return date.toLocaleString('zh-CN')
 }
 
-// 获取模板文件下载URL
-const getTemplateUrl = (type: 'json' | 'csv') => {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
-  return `${baseUrl}/api/social-media/download-template/${type}`
-}
-
-// 获取API指南下载URL
-const getApiGuideUrl = () => {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
-  return `${baseUrl}/api/social-media/download-api-guide`
-}
-
-// 获取API示例代码下载URL
-const getApiExampleUrl = () => {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
-  return `${baseUrl}/api/social-media/download-api-example`
-}
-
 // 查看API指南
 const viewApiGuide = () => {
   router.push({ name: 'SocialMediaApiGuide' })

@@ -7,6 +7,8 @@
 
 import { ApiClient } from './request'
 
+export type TaskTagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
 // ==================== 类型定义 ====================
 
 /**
@@ -172,7 +174,7 @@ export const TaskStatusNames: Record<TaskStatus, string> = {
 /**
  * 任务状态颜色映射
  */
-export const TaskStatusColors: Record<TaskStatus, string> = {
+export const TaskStatusColors: Record<TaskStatus, TaskTagType> = {
   [TaskStatus.PENDING]: 'info',
   [TaskStatus.PROCESSING]: 'warning',
   [TaskStatus.COMPLETED]: 'success',

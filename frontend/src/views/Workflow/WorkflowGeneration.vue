@@ -286,8 +286,8 @@
                   </div>
                   <div v-if="report.prompts_default?.length" class="default-prompts">
                     <p class="sub-label">使用默认提示词：</p>
-                    <div v-for="a in report.prompts_default" :key="a.agent_id || a" class="default-item">
-                      <el-tag size="small" type="info">{{ a.agent_id || a }}</el-tag>
+                    <div v-for="a in report.prompts_default" :key="getDefaultPromptKey(a)" class="default-item">
+                      <el-tag size="small" type="info">{{ getDefaultPromptAgentId(a) }}</el-tag>
                       <span v-if="a.reason" class="default-reason">{{ a.reason }}</span>
                     </div>
                   </div>
@@ -705,16 +705,22 @@ const getStatusLabel = (status: string): string => {
 }
 
 /** 获取状态标签类型 */
-const getStatusTagType = (status: string): string => {
-  const map: Record<string, string> = {
+type ElTagType = 'primary' | 'success' | 'info' | 'warning' | 'danger'
+
+const getStatusTagType = (status: string): ElTagType => {
+  const map: Record<string, ElTagType> = {
     gathering: 'warning',
     planning: 'info',
     completed: 'success',
     published: 'success',
     failed: 'danger',
   }
-  return map[status] || ''
+  return map[status] || 'info'
 }
+
+const getDefaultPromptKey = (item: { agent_id: string; name: string; reason: string }) => item.agent_id || item.name
+
+const getDefaultPromptAgentId = (item: { agent_id: string; name: string; reason: string }) => item.agent_id || item.name
 
 /** 从路由参数恢复会话 */
 const initFromRoute = async () => {

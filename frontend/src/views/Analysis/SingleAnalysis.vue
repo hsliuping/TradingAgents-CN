@@ -826,8 +826,6 @@ import {
   Cpu,
   QuestionFilled,
   ArrowDown,
-  PieChart,
-  Grid,
   Plus,
   DocumentChecked,
 } from '@element-plus/icons-vue'
@@ -841,8 +839,8 @@ import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import { ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
 import { marked } from 'marked'
-import { recommendModels, validateModels, type ModelRecommendationResponse } from '@/api/modelCapabilities'
-import { validateStockCode, getStockCodeFormatHelp, getStockCodeExamples } from '@/utils/stockValidator'
+import { recommendModels } from '@/api/modelCapabilities'
+import { validateStockCode, getStockCodeFormatHelp } from '@/utils/stockValidator'
 import { normalizeMarketForAnalysis, getMarketByStockCode } from '@/utils/market'
 
 // 配置marked选项
@@ -872,7 +870,6 @@ interface AnalysisForm {
 }
 
 // 使用store
-const appStore = useAppStore()
 const authStore = useAuthStore()
 const router = useRouter()
 const route = useRoute()
@@ -1709,10 +1706,10 @@ const getAnalysisReports = (data: any) => {
   const reports: Array<{title: string, content: any}> = []
 
   // 🔥 优化：只从 reports 字段获取数据（统一数据源）
-  let reportsData = null
+  let reportsData: Record<string, any> | null = null
   if (data && data.reports && typeof data.reports === 'object' && Object.keys(data.reports).length > 0) {
     reportsData = data.reports
-    console.log('✅ 使用 data.reports:', Object.keys(reportsData))
+    console.log('✅ 使用 data.reports:', Object.keys(reportsData || {}))
   } else {
     console.warn('⚠️ data.reports 为空或不存在，无法获取报告数据')
     return reports
@@ -1769,7 +1766,7 @@ const getAnalysisReports = (data: any) => {
       return
     }
     
-    const content = reportsData[mapping.key]
+    const content = reportsData?.[mapping.key]
     if (content) {
       console.log(`📊 找到报告: ${mapping.key} -> ${mapping.title}`)
       reports.push({
@@ -2207,7 +2204,7 @@ const goSimOrder = async () => {
       confirmButtonText: '确认下单',
       cancelButtonText: '取消',
       type: 'warning',
-      beforeClose: (action, instance, done) => {
+      beforeClose: (action, _instance, done) => {
         if (action === 'confirm') {
           // 验证输入
           if (tradeForm.quantity < 100 || tradeForm.quantity % 100 !== 0) {
@@ -2574,11 +2571,6 @@ const isQuickAnalysisRole = (roles: string[] | undefined): boolean => {
 /**
  * 判断是否适合深度分析
  */
-const isDeepAnalysisRole = (roles: string[] | undefined): boolean => {
-  if (!roles || !Array.isArray(roles)) return false
-  return roles.includes('deep_analysis') || roles.includes('both')
-}
-
 /**
  * 显示分析深度的模型推荐说明
  */

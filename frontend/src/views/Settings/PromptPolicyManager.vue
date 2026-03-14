@@ -217,14 +217,16 @@ const groupedPolicies = computed(() => {
   return list
 })
 
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
 function scopeLabel(s: string) {
   const m: Record<string, string> = { general: '通用', industry: '行业', stock: '个股' }
   return m[s] || s
 }
 
-function scopeTagType(s: string) {
-  const m: Record<string, string> = { general: 'info', industry: 'warning', stock: 'success' }
-  return m[s] || ''
+function scopeTagType(s: string): TagType {
+  const m: Record<string, TagType> = { general: 'info', industry: 'warning', stock: 'success' }
+  return m[s] || 'info'
 }
 
 function injectionModeLabel(m: string) {
