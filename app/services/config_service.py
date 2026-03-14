@@ -1050,16 +1050,20 @@ class ConfigService:
                     "messages": [
                         {"role": "user", "content": "Hello, please respond with 'OK' if you can read this."}
                     ],
-                    "max_tokens": 200,  # 增加到200，给推理模型（如o1/gpt-5）足够空间
-                    "temperature": 0.1
+                    "max_tokens": llm_config.max_tokens,
+                    "temperature": llm_config.temperature
                 }
 
                 logger.info(f"🌐 发送测试请求到: {url}")
                 logger.info(f"📦 使用模型: {llm_config.model_name}")
+                logger.info(
+                    f"📦 使用测试参数: max_tokens={llm_config.max_tokens}, "
+                    f"temperature={llm_config.temperature}, timeout={llm_config.timeout}"
+                )
                 logger.info(f"📦 请求数据: {data}")
 
                 # 发送测试请求
-                response = requests.post(url, json=data, headers=headers, timeout=15)
+                response = requests.post(url, json=data, headers=headers, timeout=llm_config.timeout)
                 response_time = time.time() - start_time
 
                 logger.info(f"📡 收到响应: HTTP {response.status_code}")
@@ -3738,11 +3742,88 @@ class ConfigService:
         """测试具体厂家的连接"""
         import asyncio
 
+        def normalize_provider_aliases(value: Any) -> set[str]:
+            provider_value = getattr(value, "value", value)
+            normalized = str(provider_value or "").strip().lower()
+
+            if not normalized:
+                return set()
+
+            alias_groups = {
+                "kimi": {"kimi", "moonshot"},
+                "moonshot": {"kimi", "moonshot"},
+            }
+            return alias_groups.get(normalized, {normalized})
+
         # 获取厂家的配置信息（包括 test_model）
         db = await self._get_db()
         providers_collection = db.llm_providers
         provider_data = await providers_collection.find_one({"name": provider_name})
         test_model = provider_data.get("test_model") if provider_data else None
+
+        llm_temperature = 0.1
+        llm_max_tokens = 200
+        llm_timeout = 15
+
+        try:
+            system_config = await self.get_system_config()
+            llm_configs = system_config.llm_configs if system_config else []
+            provider_aliases = normalize_provider_aliases(provider_name)
+
+            def matches_provider(llm: Any) -> bool:
+                llm_provider_aliases = normalize_provider_aliases(getattr(llm, "provider", None))
+                return bool(provider_aliases & llm_provider_aliases)
+
+            candidate_configs = [
+                llm for llm in llm_configs
+                if matches_provider(llm)
+            ]
+
+            matched_llm_config = None
+            if test_model:
+                matched_llm_config = next(
+                    (
+                        llm for llm in candidate_configs
+                        if llm.model_name == test_model
+                    ),
+                    None
+                )
+
+            if matched_llm_config is None:
+                matched_llm_config = next(
+                    (
+                        llm for llm in candidate_configs
+                        if llm.enabled
+                    ),
+                    None
+                )
+
+            if matched_llm_config is not None:
+                llm_temperature = matched_llm_config.temperature
+                llm_max_tokens = matched_llm_config.max_tokens
+                llm_timeout = matched_llm_config.timeout
+                logger.info(
+                    f"🔧 [{display_name}] API测试使用配置参数: "
+                    f"model={matched_llm_config.model_name}, "
+                    f"temperature={llm_temperature}, max_tokens={llm_max_tokens}, timeout={llm_timeout}"
+                )
+            else:
+                candidate_summary = [
+                    {
+                        "provider": getattr(llm, "provider", None),
+                        "model_name": getattr(llm, "model_name", None),
+                        "enabled": getattr(llm, "enabled", None),
+                    }
+                    for llm in candidate_configs
+                ]
+                logger.info(
+                    f"⚠️ [{display_name}] 未找到匹配的模型配置，使用测试默认值: "
+                    f"temperature={llm_temperature}, max_tokens={llm_max_tokens}, timeout={llm_timeout}; "
+                    f"provider_name={provider_name}, provider_aliases={sorted(provider_aliases)}, "
+                    f"test_model={test_model}, candidate_configs={candidate_summary}"
+                )
+        except Exception as config_error:
+            logger.warning(f"⚠️ [{display_name}] 读取模型测试配置失败，回退默认测试参数: {config_error}")
 
         try:
             # 聚合渠道（使用 OpenAI 兼容 API）
@@ -3750,7 +3831,8 @@ class ConfigService:
                 # 获取厂家的 base_url
                 base_url = provider_data.get("default_base_url") if provider_data else None
                 return await asyncio.get_event_loop().run_in_executor(
-                    None, self._test_openai_compatible_api, api_key, display_name, base_url, provider_name, test_model
+                    None, self._test_openai_compatible_api, api_key, display_name, base_url, provider_name, test_model,
+                    llm_temperature, llm_max_tokens, llm_timeout
                 )
             elif provider_name == "google":
                 # 获取厂家的 base_url
@@ -3781,7 +3863,8 @@ class ConfigService:
                     }
 
                 return await asyncio.get_event_loop().run_in_executor(
-                    None, self._test_openai_compatible_api, api_key, display_name, base_url, provider_name, test_model
+                    None, self._test_openai_compatible_api, api_key, display_name, base_url, provider_name, test_model,
+                    llm_temperature, llm_max_tokens, llm_timeout
                 )
             else:
                 # 🔧 对于未知的自定义厂家，使用 OpenAI 兼容 API 测试
@@ -3796,7 +3879,8 @@ class ConfigService:
                     }
 
                 return await asyncio.get_event_loop().run_in_executor(
-                    None, self._test_openai_compatible_api, api_key, display_name, base_url, provider_name, test_model
+                    None, self._test_openai_compatible_api, api_key, display_name, base_url, provider_name, test_model,
+                    llm_temperature, llm_max_tokens, llm_timeout
                 )
         except Exception as e:
             return {
@@ -4729,7 +4813,17 @@ class ConfigService:
 
         return filtered
 
-    def _test_openai_compatible_api(self, api_key: str, display_name: str, base_url: str = None, provider_name: str = None, test_model: str = None) -> dict:
+    def _test_openai_compatible_api(
+        self,
+        api_key: str,
+        display_name: str,
+        base_url: str = None,
+        provider_name: str = None,
+        test_model: str = None,
+        temperature: float = 0.1,
+        max_tokens: int = 200,
+        timeout: int = 15,
+    ) -> dict:
         """测试 OpenAI 兼容 API（用于聚合渠道和自定义厂家）"""
         try:
             import requests
@@ -4790,11 +4884,11 @@ class ConfigService:
                 "messages": [
                     {"role": "user", "content": "Hello, please respond with 'OK' if you can read this."}
                 ],
-                "max_tokens": 200,  # 增加到200，给推理模型（如o1/gpt-5）足够空间
-                "temperature": 0.1
+                "max_tokens": max_tokens,
+                "temperature": temperature
             }
 
-            response = requests.post(url, json=data, headers=headers, timeout=15)
+            response = requests.post(url, json=data, headers=headers, timeout=timeout)
 
             if response.status_code == 200:
                 result = response.json()
