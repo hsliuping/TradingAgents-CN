@@ -63,11 +63,6 @@ const props = defineProps<{
   symbol: string
 }>()
 
-const emit = defineEmits<{
-  (e: 'deposit'): void
-  (e: 'withdraw'): void
-}>()
-
 const formatMoney = (val: number) => {
   return val.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }

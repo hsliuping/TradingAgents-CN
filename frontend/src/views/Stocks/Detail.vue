@@ -423,15 +423,19 @@ const activeReportTab = ref('')
 const reportKeys = computed(() => Object.keys(lastAnalysis.value?.reports || {}))
 
 // 股票代码（从路由参数获取）
-const code = computed(() => {
-  const routeCode = String(route.params.code || '').toUpperCase()
-  if (!routeCode) {
+watch(
+  () => route.params.code,
+  (value) => {
+    if (String(value || '').trim()) {
+      return
+    }
     ElMessage.error('股票代码不能为空')
     router.push({ name: 'Dashboard' })
-    return ''
-  }
-  return routeCode
-})
+  },
+  { immediate: true }
+)
+
+const code = computed(() => String(route.params.code || '').toUpperCase())
 const symbol = computed(() => code.value.split('.')[0])  // 提取6位代码
 const stockName = ref('')
 const market = ref('')

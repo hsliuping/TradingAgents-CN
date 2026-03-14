@@ -148,11 +148,12 @@ const updateDateRange = (type: PeriodType) => {
       end = new Date()
       start = new Date(now.getFullYear(), now.getMonth(), 1)
       break
-    case 'quarter':
+    case 'quarter': {
       end = new Date()
       const quarter = Math.floor(now.getMonth() / 3)
       start = new Date(now.getFullYear(), quarter * 3, 1)
       break
+    }
     case 'year':
       end = new Date()
       start = new Date(now.getFullYear(), 0, 1)

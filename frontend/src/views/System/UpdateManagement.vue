@@ -404,7 +404,7 @@ const renderMarkdown = (text: string): string => {
     .replace(/^### (.+)$/gm, '<h5>$1</h5>')
     .replace(/^## (.+)$/gm, '<h4>$1</h4>')
     .replace(/^# (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^\- (.+)$/gm, '<li>$1</li>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
     .replace(/\n/g, '<br>')

@@ -2767,7 +2767,9 @@ onMounted(async () => {
     if (!exists && workflows.value.length > 0) {
       selectedWorkflowId.value = workflowsSorted.value[0]?.id || workflows.value[0].id
     }
-  } catch {}
+  } catch (error) {
+    console.debug('[SingleAnalysis] 加载工作流模板失败，保留当前默认模板:', error)
+  }
 })
 
 </script>

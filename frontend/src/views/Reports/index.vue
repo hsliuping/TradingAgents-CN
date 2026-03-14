@@ -383,7 +383,7 @@ const downloadReport = async (report: ReportListItem, format: string = 'markdown
     const ext = getFileExtension(format)
     // 清理股票名称中的特殊字符（用于文件名）
     const cleanStockName = (report.stock_name || '')
-      .replace(/[\/\\:*?"<>|]/g, '') // 移除文件名不允许的字符
+      .replace(/[/\\:*?"<>|]/g, '') // 移除文件名不允许的字符
       .replace(/\s+/g, '_') // 空格替换为下划线
       .trim()
     // 构建文件名：股票代码_股票名称_分析报告_日期
@@ -506,7 +506,7 @@ const exportSelected = async (format: string = 'markdown') => {
         const a = document.createElement('a')
         a.href = url
         const ext = getFileExtension(format)
-        const cleanStockName = (report.stock_name || '').replace(/[\/\\:*?"<>|]/g, '').replace(/\s+/g, '_').trim()
+        const cleanStockName = (report.stock_name || '').replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, '_').trim()
         const fileName = cleanStockName
           ? `${report.stock_code}_${cleanStockName}_分析报告_${report.analysis_date}.${ext}`
           : `${report.stock_code}_分析报告_${report.analysis_date}.${ext}`

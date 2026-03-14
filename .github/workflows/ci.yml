@@ -54,6 +54,9 @@ jobs:
       - name: 安装前端依赖
         run: npm ci --no-audit --no-fund
 
+      - name: 前端 Lint
+        run: npm run lint
+
       - name: 前端类型检查
         run: npm run type-check
 

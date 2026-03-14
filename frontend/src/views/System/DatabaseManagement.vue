@@ -541,17 +541,24 @@ const cdCommand = computed(() => {
   return `cd ${connectionInfo.value?.install_dir || 'C:\\TradingAgentsCN'}`
 })
 
+const bracketedPasteStart = `${String.fromCharCode(27)}[200~`
+const bracketedPasteEnd = `${String.fromCharCode(27)}[201~`
+const controlCharactersRegex = new RegExp(
+  `[${String.fromCharCode(0)}-${String.fromCharCode(31)}${String.fromCharCode(127)}-${String.fromCharCode(159)}]`,
+  'g'
+)
+
 // 清理文本，移除可能的转义序列和特殊字符
 const cleanText = (text: string): string => {
   // 移除所有可能的转义序列和控制字符
   return text
-    .replace(/\u001b\[200~/g, '')  // 移除 ESC[200~ (Bracketed Paste Mode 开始)
-    .replace(/\u001b\[201~/g, '')   // 移除 ESC[201~ (Bracketed Paste Mode 结束)
-    .replace(/\^\[\[200~/g, '')     // 移除文字形式的 ^[[200~
-    .replace(/\^\[\[201~/g, '')     // 移除文字形式的 ^[[201~
-    .replace(/\x1b\[200~/g, '')     // 移除十六进制形式的 ESC[200~
-    .replace(/\x1b\[201~/g, '')     // 移除十六进制形式的 ESC[201~
-    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // 移除所有控制字符（包括 ESC）
+    .split('\u001b[200~').join('')
+    .split('\u001b[201~').join('')
+    .split('^[[200~').join('')
+    .split('^[[201~').join('')
+    .split(bracketedPasteStart).join('')
+    .split(bracketedPasteEnd).join('')
+    .replace(controlCharactersRegex, '')
     .trim()
 }
 

@@ -524,7 +524,9 @@ onMounted(async () => {
       console.error('❌ [模板调试] 获取LLM配置失败:', e)
       availableModels.value = []
     }
-  } catch {}
+  } catch (error) {
+    console.debug('[模板调试] 初始化可用模型失败，保留默认 provider:', error)
+  }
 })
 
 watch(() => form.value.llm.model, (newModel) => {

@@ -287,7 +287,9 @@ const loadList = async () => {
         const endIdx = startIdx + pageSize.value
         tasks = allTasks.slice(startIdx, endIdx)
         total.value = allTasks.length
-      } catch {}
+      } catch (error) {
+        console.debug('[TaskCenter] 回退任务列表加载失败:', error)
+      }
     } else {
       total.value = body.total ?? tasks.length
     }

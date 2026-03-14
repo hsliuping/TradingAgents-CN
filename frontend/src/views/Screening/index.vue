@@ -696,7 +696,11 @@ const ensureAiSocket = async (): Promise<WebSocket> => {
   return await new Promise<WebSocket>((resolve, reject) => {
     try {
       if (aiSocket.value) {
-        try { aiSocket.value.close() } catch {}
+        try {
+          aiSocket.value.close()
+        } catch (error) {
+          console.debug('[Screening] 关闭旧 AI Socket 失败:', error)
+        }
       }
 
       const token = authStore.token || localStorage.getItem('auth-token') || ''
@@ -1212,7 +1216,11 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (aiSocket.value) {
-    try { aiSocket.value.close() } catch {}
+    try {
+      aiSocket.value.close()
+    } catch (error) {
+      console.debug('[Screening] 页面卸载时关闭 AI Socket 失败:', error)
+    }
     aiSocket.value = null
     aiSocketConnected.value = false
   }
