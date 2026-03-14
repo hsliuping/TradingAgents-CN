@@ -1,4 +1,4 @@
-const fallbackVersion = '2.0.1'
+const fallbackVersion = '3.0.0'
 
 const appVersion = (import.meta.env.VITE_APP_VERSION || '').trim() || fallbackVersion
 

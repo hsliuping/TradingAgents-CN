@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Proprietary-red.svg)](./LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-2.0.1-green.svg)](./VERSION)
+[![Version](https://img.shields.io/badge/Version-3.0.0-green.svg)](./VERSION)
 [![Documentation](https://img.shields.io/badge/docs-中文文档-green.svg)](./docs/)
 [![Original](https://img.shields.io/badge/基于-TauricResearch/TradingAgents-orange.svg)](https://github.com/TauricResearch/TradingAgents)
 
@@ -18,9 +18,16 @@
 
 **🎯 我们的定位与使命**: 专注学习与研究，提供中文化学习中心与工具，合规友好，支持 A股/港股/美股 的分析与教学，推动 AI 金融技术在中文社区的普及与正确使用。
 
-## 🎉 v2.0.1 稳定版发布 - 专业版持续演进
+## 🎉 V3.0 发布主线 - 从分析工具走向 AI 助手
 
-> 🚀 **当前版本**: TradingAgents-CN Pro v2.0.1 已发布，聚焦交易计划能力升级、Windows 安装与更新流程完善，以及稳定性修复。
+> 🚀 **当前版本**: TradingAgents-CN Pro v3.0.0，聚焦统一 AI 助手入口、自然语言选股、Agent 自主规划分析与 Skill 能力扩展。
+
+### 🌟 V3.0 四个核心能力
+
+- **统一 AI 助手入口**：将分析、报告、自选股、持仓等操作收拢到统一入口，减少页面切换成本
+- **自然语言选股**：直接用自然语言描述选股需求，输出结构化候选结果并无缝进入后续分析
+- **Agent 自主规划分析**：根据问题自动识别分析路径，组合工具与能力完成复杂任务
+- **Skill 能力扩展**：围绕自然语言需求自动生成、测试、验证并注册新能力，持续扩展系统边界
 
 ### ✨ 核心特性
 
@@ -60,13 +67,20 @@
 
 ### 📊 技术栈升级
 
-| 组件 | v0.1.x | v2.0.1 |
+| 组件 | v0.1.x | v3.0.0 |
 |------|--------|--------|
 | **后端框架** | Streamlit | FastAPI + Uvicorn |
 | **前端框架** | Streamlit | Vue 3 + Vite + Element Plus |
 | **数据库** | 可选 MongoDB | MongoDB + Redis |
 | **API 架构** | 单体应用 | RESTful API + WebSocket |
 | **部署方式** | 本地/Docker | Docker 多架构 + GitHub Actions |
+
+### 🧭 V3.0 推荐体验路径
+
+1. 从统一 AI 助手入口发起任务或问题
+2. 使用自然语言描述选股或分析需求
+3. 让 Agent 自动规划分析路径并生成结果
+4. 按需扩展 Skill，把高频需求沉淀为新能力
 
 
 

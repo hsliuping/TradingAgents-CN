@@ -14,7 +14,6 @@ import router from './router'
 import { setupGlobalComponents } from './components'
 import { useAuthStore } from './stores/auth'
 import { useAppStore } from './stores/app'
-import { setupTokenRefreshTimer } from './utils/auth'
 import './styles/index.scss'
 import './styles/dark-theme.scss'
 
@@ -123,6 +122,7 @@ const initApp = async () => {
 
       // 如果用户已登录，启动 token 自动刷新定时器
       if (authStore.isAuthenticated) {
+        const { setupTokenRefreshTimer } = await import('./utils/auth')
         setupTokenRefreshTimer()
       }
     } else {
@@ -146,7 +146,7 @@ initApp()
 
 // 开发环境下的调试信息
 if (import.meta.env.DEV) {
-  console.log('🚀 TradingAgents-CN v1.0.1 前端应用已启动')
+  console.log('🚀 TradingAgents-CN v3.0.0 前端应用已启动')
   console.log('📊 当前环境:', import.meta.env.MODE)
   console.log('🔗 API地址:', import.meta.env.VITE_API_BASE_URL || '/api')
 }
