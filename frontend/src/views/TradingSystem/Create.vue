@@ -507,6 +507,10 @@ const systemId = computed(() => route.params.id as string)
 // 当前步骤
 const currentStep = ref(0)
 
+function createDefaultPositionConfig() {
+  return { max_per_stock: 0.2, max_holdings: 10, min_holdings: 3 }
+}
+
 // 表单数据
 const formData = ref<TradingSystemCreatePayload>({
   name: '',
@@ -515,7 +519,7 @@ const formData = ref<TradingSystemCreatePayload>({
   risk_profile: 'balanced',
   stock_selection: { must_have: [], exclude: [], bonus: [] },
   timing: { entry_signals: [] },
-  position: { max_per_stock: 0.2, max_holdings: 10, min_holdings: 3 },
+  position: createDefaultPositionConfig(),
   holding: { add_conditions: [], reduce_conditions: [] },
   risk_management: {
     stop_loss: { type: 'percentage', percentage: 0.08 },
@@ -552,12 +556,7 @@ const positionMaxPerStock = computed({
   }
 })
 
-const positionConfig = computed(() => {
-  if (!formData.value.position) {
-    formData.value.position = { max_per_stock: 0.2, max_holdings: 10, min_holdings: 3 }
-  }
-  return formData.value.position
-})
+const positionConfig = computed(() => formData.value.position || createDefaultPositionConfig())
 
 // 是否可以下一步
 const canNext = computed(() => {
@@ -623,7 +622,7 @@ onMounted(async () => {
         risk_profile: sourceData.risk_profile,
         stock_selection: sourceData.stock_selection || { must_have: [], exclude: [], bonus: [] },
         timing: sourceData.timing || { entry_signals: [] },
-        position: sourceData.position || { max_per_stock: 0.2, max_holdings: 10, min_holdings: 3 },
+        position: sourceData.position || createDefaultPositionConfig(),
         holding: sourceData.holding || { add_conditions: [], reduce_conditions: [] },
         risk_management: sourceData.risk_management || {
           stop_loss: { type: 'percentage', percentage: 0.08 },

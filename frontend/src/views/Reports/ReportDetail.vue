@@ -423,7 +423,7 @@ const downloadReport = async (format: string = 'markdown') => {
     const ext = getFileExtension(format)
     // 清理股票名称中的特殊字符（用于文件名）
     const cleanStockName = (currentReport.stock_name || '')
-      .replace(/[\/\\:*?"<>|]/g, '') // 移除文件名不允许的字符
+      .replace(/[/\\:*?"<>|]/g, '') // 移除文件名不允许的字符
       .replace(/\s+/g, '_') // 空格替换为下划线
       .trim()
     // 构建文件名：股票代码_股票名称_分析报告_日期

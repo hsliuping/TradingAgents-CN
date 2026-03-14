@@ -1434,7 +1434,7 @@ const formatScheduleDescription = (trigger?: string): string => {
   const parts = cron.split(' ')
   if (parts.length !== 5) return cron
   
-  const [minute, hour, _day, _month, dayOfWeek] = parts
+  const [minute, hour, , , dayOfWeek] = parts
   
   // 解析时间
   const hourNum = parseInt(hour)

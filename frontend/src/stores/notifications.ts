@@ -77,7 +77,11 @@ export const useNotificationStore = defineStore('notifications', () => {
     try {
       // 若已存在连接，先关闭
       if (ws.value) {
-        try { ws.value.close() } catch {}
+        try {
+          ws.value.close()
+        } catch (error) {
+          console.debug('[WS] 关闭旧连接失败:', error)
+        }
         ws.value = null
       }
       if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null }
@@ -186,7 +190,11 @@ export const useNotificationStore = defineStore('notifications', () => {
     }
 
     if (ws.value) {
-      try { ws.value.close() } catch {}
+      try {
+        ws.value.close()
+      } catch (error) {
+        console.debug('[WS] 断开连接时关闭失败:', error)
+      }
       ws.value = null
     }
 

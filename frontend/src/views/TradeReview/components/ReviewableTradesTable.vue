@@ -20,7 +20,7 @@
       </el-table-column>
       <el-table-column prop="market" label="市场" width="70" align="center">
         <template #default="{ row }">
-          <el-tag size="small" :type="getMarketType(row.market) as 'primary' | 'success' | 'warning' | 'info' | 'danger'">{{ row.market || 'CN' }}</el-tag>
+          <el-tag size="small" :type="getMarketType(row.market)">{{ row.market || 'CN' }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="buy_count" label="买入" width="70" align="center" />
@@ -100,6 +100,8 @@ import { useLicenseStore } from '@/stores/license'
 import { ElMessage } from 'element-plus'
 import type { ReviewableStock } from '@/api/review'
 
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
 defineProps<{
   stocks: ReviewableStock[]
   loading: boolean
@@ -156,8 +158,8 @@ const formatPnl = (value?: number) => {
   return prefix + value.toFixed(2)
 }
 
-const getMarketType = (market?: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' => {
-  const map: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
+const getMarketType = (market?: string): TagType => {
+  const map: Record<string, TagType> = {
     CN: 'danger',
     HK: 'warning',
     US: 'primary'

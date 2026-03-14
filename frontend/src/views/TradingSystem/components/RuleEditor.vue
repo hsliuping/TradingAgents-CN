@@ -29,7 +29,7 @@
         <div v-for="(item, index) in modelValue.must_have" :key="index" class="rule-row">
           <el-input v-model="item.rule" placeholder="例如：市值 > 50亿" class="rule-input" />
           <el-input v-model="item.description" placeholder="说明为什么需要这个条件" class="desc-input" />
-          <el-button type="danger" text @click="removeRule('must_have', index)">
+          <el-button type="danger" text @click="removeRule('must_have', Number(index))">
             <el-icon><Delete /></el-icon>
           </el-button>
         </div>
@@ -44,7 +44,7 @@
         <div v-for="(item, index) in modelValue.exclude" :key="index" class="rule-row">
           <el-input v-model="item.rule" placeholder="例如：ST股票、次新股" class="rule-input" />
           <el-input v-model="item.description" placeholder="说明为什么要排除" class="desc-input" />
-          <el-button type="danger" text @click="removeRule('exclude', index)">
+          <el-button type="danger" text @click="removeRule('exclude', Number(index))">
             <el-icon><Delete /></el-icon>
           </el-button>
         </div>
@@ -59,7 +59,7 @@
         <div v-for="(item, index) in modelValue.bonus" :key="index" class="rule-row">
           <el-input v-model="item.rule" placeholder="例如：机构持续加仓、行业景气度上行" class="rule-input" />
           <el-input v-model="item.description" placeholder="说明为什么这是加分项" class="desc-input" />
-          <el-button type="danger" text @click="removeRule('bonus', index)">
+          <el-button type="danger" text @click="removeRule('bonus', Number(index))">
             <el-icon><Delete /></el-icon>
           </el-button>
         </div>
@@ -91,14 +91,20 @@
           <h4>市场环境</h4>
         </div>
         <div class="rule-row timing-row">
-          <el-input v-model="modelValue.market_condition.rule" placeholder="例如：市场环境" class="rule-input" />
           <el-input
-            v-model="modelValue.market_condition.description"
+            :model-value="modelValue.market_condition.rule"
+            placeholder="例如：市场环境"
+            class="rule-input"
+            @update:model-value="(val) => updateNestedField('market_condition', 'rule', val)"
+          />
+          <el-input
+            :model-value="modelValue.market_condition.description"
             type="textarea"
             :rows="2"
             :autosize="{ minRows: 2, maxRows: 4 }"
             placeholder="例如：指数站上20日均线且成交额回升，涨跌家数明显改善"
             class="desc-input"
+            @update:model-value="(val) => updateNestedField('market_condition', 'description', val)"
           />
           <div class="row-action-placeholder"></div>
         </div>
@@ -126,7 +132,7 @@
             placeholder="例如：股价突破20日均线且成交量放大，回踩不破并出现放量阳线"
             class="desc-input"
           />
-          <el-button type="danger" text @click="removeRule('entry_signals', index)">
+          <el-button type="danger" text @click="removeRule('entry_signals', Number(index))">
             <el-icon><Delete /></el-icon>
           </el-button>
         </div>
@@ -149,7 +155,7 @@
             placeholder="例如：突破后1-2日内回踩关键位不破，且量能维持在均量以上"
             class="desc-input"
           />
-          <el-button type="danger" text @click="removeRule('confirmation', index)">
+          <el-button type="danger" text @click="removeRule('confirmation', Number(index))">
             <el-icon><Delete /></el-icon>
           </el-button>
         </div>
@@ -180,7 +186,7 @@
         <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item label="止损类型">
-              <el-select v-model="modelValue.stop_loss.type" placeholder="选择止损方式" @change="handleStopLossTypeChange">
+              <el-select :model-value="modelValue.stop_loss.type" placeholder="选择止损方式" @update:model-value="handleStopLossTypeChange">
                 <el-option label="固定比例止损" value="percentage" />
                 <el-option label="技术位止损" value="technical" />
                 <el-option label="ATR止损" value="atr" />
@@ -194,19 +200,27 @@
             </el-form-item>
             <el-form-item v-if="modelValue.stop_loss.type === 'technical'" label="技术位说明">
               <el-input
-                v-model="modelValue.stop_loss.description"
+                :model-value="modelValue.stop_loss.description"
                 type="textarea"
                 :rows="2"
                 placeholder="例如：跌破20日均线且收盘确认，次日开盘执行止损"
+                @update:model-value="(val) => updateNestedField('stop_loss', 'description', val)"
               />
             </el-form-item>
             <el-form-item v-if="modelValue.stop_loss.type === 'atr'" label="ATR倍数">
-              <el-input-number v-model="modelValue.stop_loss.atr_multiplier" :min="0.5" :max="5" :step="0.1" :precision="1" />
+              <el-input-number
+                :model-value="modelValue.stop_loss.atr_multiplier"
+                :min="0.5"
+                :max="5"
+                :step="0.1"
+                :precision="1"
+                @update:model-value="(val) => updateNestedField('stop_loss', 'atr_multiplier', val)"
+              />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="止盈类型">
-              <el-select v-model="modelValue.take_profit.type" placeholder="选择止盈方式" @change="handleTakeProfitTypeChange">
+              <el-select :model-value="modelValue.take_profit.type" placeholder="选择止盈方式" @update:model-value="handleTakeProfitTypeChange">
                 <el-option label="固定比例止盈" value="percentage" />
                 <el-option label="移动止盈" value="trailing" />
                 <el-option label="分批止盈" value="scaled" />
@@ -230,7 +244,11 @@
                 <span class="inline-unit">%</span>
               </el-form-item>
               <el-form-item label="跟踪基准">
-                <el-select v-model="modelValue.take_profit.reference" placeholder="选择跟踪基准">
+                <el-select
+                  :model-value="modelValue.take_profit.reference"
+                  placeholder="选择跟踪基准"
+                  @update:model-value="(val) => updateNestedField('take_profit', 'reference', val)"
+                >
                   <el-option label="最高价回撤" value="highest_price" />
                   <el-option label="5日均线" value="ma5" />
                   <el-option label="10日均线" value="ma10" />
@@ -252,7 +270,7 @@
                   <div v-for="(level, index) in modelValue.take_profit.levels" :key="index" class="dynamic-row">
                     <el-input-number
                       :model-value="toPercent(level.target_profit_pct)"
-                      @update:model-value="(val) => updateScaledLevel(index, 'target_profit_pct', fromPercent(val))"
+                      @update:model-value="(val) => updateScaledLevel(Number(index), 'target_profit_pct', fromPercent(val))"
                       :min="1"
                       :max="300"
                       :step="1"
@@ -260,13 +278,13 @@
                     <span class="inline-unit">% 盈利时</span>
                     <el-input-number
                       :model-value="toPercent(level.sell_ratio)"
-                      @update:model-value="(val) => updateScaledLevel(index, 'sell_ratio', fromPercent(val))"
+                      @update:model-value="(val) => updateScaledLevel(Number(index), 'sell_ratio', fromPercent(val))"
                       :min="1"
                       :max="100"
                       :step="1"
                     />
                     <span class="inline-unit">% 仓位</span>
-                    <el-button type="danger" text @click="removeScaledLevel(index)">
+                    <el-button type="danger" text @click="removeScaledLevel(Number(index))">
                       <el-icon><Delete /></el-icon>
                     </el-button>
                   </div>
@@ -282,12 +300,18 @@
         <el-row :gutter="20">
           <el-col :span="12">
             <el-form-item label="是否启用时间止损">
-              <el-switch v-model="modelValue.time_stop.enabled" />
+              <el-switch :model-value="modelValue.time_stop.enabled" @update:model-value="(val) => updateNestedField('time_stop', 'enabled', val)" />
             </el-form-item>
           </el-col>
           <el-col :span="12" v-if="modelValue.time_stop.enabled">
             <el-form-item label="最大持有天数">
-              <el-input-number v-model="modelValue.time_stop.max_holding_days" :min="1" :max="365" :step="1" />
+              <el-input-number
+                :model-value="modelValue.time_stop.max_holding_days"
+                :min="1"
+                :max="365"
+                :step="1"
+                @update:model-value="(val) => updateNestedField('time_stop', 'max_holding_days', val)"
+              />
             </el-form-item>
           </el-col>
         </el-row>
@@ -297,11 +321,11 @@
             <div v-for="(condition, index) in modelValue.logical_stop.conditions" :key="index" class="dynamic-row">
               <el-input
                 :model-value="condition"
-                @update:model-value="(val) => updateLogicalCondition(index, val)"
+                @update:model-value="(val) => updateLogicalCondition(Number(index), val)"
                 placeholder="例如：业绩预告低于预期且跌破季线"
                 class="desc-input"
               />
-              <el-button type="danger" text @click="removeLogicalCondition(index)">
+              <el-button type="danger" text @click="removeLogicalCondition(Number(index))">
                 <el-icon><Delete /></el-icon>
               </el-button>
             </div>
@@ -343,7 +367,7 @@
         <div v-for="(item, index) in modelValue.must_do" :key="index" class="rule-row">
           <el-input v-model="item.rule" placeholder="例如：严格执行止损、每次交易前检查选股条件" class="rule-input" />
           <el-input v-model="item.description" placeholder="详细描述" class="desc-input" />
-          <el-button type="danger" text @click="removeRule('must_do', index)">
+          <el-button type="danger" text @click="removeRule('must_do', Number(index))">
             <el-icon><Delete /></el-icon>
           </el-button>
         </div>
@@ -358,7 +382,7 @@
         <div v-for="(item, index) in modelValue.must_not" :key="index" class="rule-row">
           <el-input v-model="item.rule" placeholder="例如：追涨杀跌、重仓单只股票、频繁交易" class="rule-input" />
           <el-input v-model="item.description" placeholder="说明为什么禁止" class="desc-input" />
-          <el-button type="danger" text @click="removeRule('must_not', index)">
+          <el-button type="danger" text @click="removeRule('must_not', Number(index))">
             <el-icon><Delete /></el-icon>
           </el-button>
         </div>
@@ -389,6 +413,13 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits(['update:modelValue'])
+
+function updateNestedField(field: string, key: string, value: unknown) {
+  const newValue = { ...props.modelValue }
+  const currentField = newValue[field] && typeof newValue[field] === 'object' ? newValue[field] : {}
+  newValue[field] = { ...currentField, [key]: value }
+  emit('update:modelValue', newValue)
+}
 
 function isLikelyCategoryLabel(text: string): boolean {
   const value = String(text || '').trim()
