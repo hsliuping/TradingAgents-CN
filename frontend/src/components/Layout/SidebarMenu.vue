@@ -36,11 +36,6 @@
       <template #title>智能助手</template>
     </el-menu-item>
 
-    <el-menu-item index="/backtest">
-      <el-icon><TrendCharts /></el-icon>
-      <template #title>策略回测</template>
-    </el-menu-item>
-
     <el-menu-item index="/reports">
       <el-icon><Document /></el-icon>
       <template #title>分析报告</template>
