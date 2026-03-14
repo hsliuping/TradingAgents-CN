@@ -7,14 +7,17 @@
 import asyncio
 import logging
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # 智能助手整体超时（LLM + 多轮工具调用），默认 120 秒
 ASSISTANT_TIMEOUT_SECONDS = int(os.environ.get("ASSISTANT_TIMEOUT_SECONDS", "120"))
 
 # 会话历史最大条数（每用户）
 ASSISTANT_CONVERSATION_LIMIT = 100
+ASSISTANT_DEFAULT_THREAD_ID = "default"
+ASSISTANT_MAX_CONTEXT_MESSAGES = 10
 
 from core.tools import get_tool_registry, tool_metadata_list_to_openai
 from core.tools.context import set_current_user_id
@@ -537,47 +540,271 @@ class IntelligentAssistantService:
             }
 
 
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _generate_thread_id() -> str:
+    return f"thr_{uuid.uuid4().hex[:12]}"
+
+
+def _thread_doc_to_item(doc: Dict[str, Any]) -> Dict[str, Any]:
+    summary = doc.get("current_summary") or {}
+    updated_at = doc.get("updated_at")
+    if isinstance(updated_at, datetime):
+        updated_at = updated_at.isoformat()
+    return {
+        "thread_id": doc.get("thread_id", ASSISTANT_DEFAULT_THREAD_ID),
+        "title": doc.get("title") or "默认主题",
+        "topic_type": doc.get("topic_type") or "general",
+        "pinned": bool(doc.get("pinned", False)),
+        "archived": bool(doc.get("archived", False)),
+        "message_count": int(doc.get("message_count", 0)),
+        "last_user_message": doc.get("last_user_message", ""),
+        "updated_at": updated_at,
+        "current_summary": {
+            "abstract": summary.get("abstract") or ""
+        } if summary else None,
+    }
+
+
+async def _create_thread_document(
+    db,
+    user_id: str,
+    thread_id: str,
+    title: str,
+    topic_type: str = "general",
+) -> Dict[str, Any]:
+    now = _now_utc()
+    doc = {
+        "thread_id": thread_id,
+        "user_id": user_id,
+        "title": title,
+        "topic_type": topic_type,
+        "pinned": thread_id == ASSISTANT_DEFAULT_THREAD_ID,
+        "archived": False,
+        "message_count": 0,
+        "last_user_message": "",
+        "current_summary": {"abstract": ""},
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.assistant_threads.update_one(
+        {"user_id": user_id, "thread_id": thread_id},
+        {"$setOnInsert": doc},
+        upsert=True,
+    )
+    return await db.assistant_threads.find_one({"user_id": user_id, "thread_id": thread_id})
+
+
+async def _migrate_legacy_conversation_if_needed(db, user_id: str, thread_id: str) -> None:
+    if thread_id != ASSISTANT_DEFAULT_THREAD_ID:
+        return
+
+    message_count = await db.assistant_thread_messages.count_documents({
+        "user_id": user_id,
+        "thread_id": thread_id,
+    })
+    if message_count > 0:
+        return
+
+    legacy_doc = await db.assistant_conversations.find_one({"user_id": user_id})
+    legacy_messages = (legacy_doc or {}).get("messages") or []
+    if not legacy_messages:
+        return
+
+    now = _now_utc()
+    payload = []
+    last_user_message = ""
+    for idx, message in enumerate(legacy_messages):
+        content = (message.get("content") or "").strip()
+        if not content:
+            continue
+        role = message.get("role") or "assistant"
+        if role == "user":
+            last_user_message = content
+        payload.append({
+            "message_id": f"legacy_{idx}_{uuid.uuid4().hex[:8]}",
+            "thread_id": thread_id,
+            "user_id": user_id,
+            "role": role,
+            "content": content,
+            "tools_used": message.get("tools_used") or [],
+            "created_at": now,
+        })
+
+    if not payload:
+        return
+
+    await db.assistant_thread_messages.insert_many(payload)
+    abstract = ""
+    for message in reversed(payload):
+        if message["role"] == "assistant":
+            abstract = message["content"][:120]
+            break
+
+    await db.assistant_threads.update_one(
+        {"user_id": user_id, "thread_id": thread_id},
+        {
+            "$set": {
+                "message_count": len(payload),
+                "last_user_message": last_user_message,
+                "current_summary.abstract": abstract,
+                "updated_at": now,
+            }
+        },
+    )
+
+
+async def get_or_create_assistant_thread(
+    db,
+    user_id: str,
+    conversation_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    thread_id = (conversation_id or ASSISTANT_DEFAULT_THREAD_ID).strip() if conversation_id else ASSISTANT_DEFAULT_THREAD_ID
+    doc = await db.assistant_threads.find_one({"user_id": user_id, "thread_id": thread_id})
+    if doc is None:
+        title = "默认主题" if thread_id == ASSISTANT_DEFAULT_THREAD_ID else f"新主题 {datetime.now().strftime('%m-%d %H:%M')}"
+        doc = await _create_thread_document(db, user_id, thread_id, title)
+    await _migrate_legacy_conversation_if_needed(db, user_id, thread_id)
+    return await db.assistant_threads.find_one({"user_id": user_id, "thread_id": thread_id})
+
+
+async def list_assistant_threads(db, user_id: str) -> List[Dict[str, Any]]:
+    await get_or_create_assistant_thread(db, user_id)
+    items: List[Dict[str, Any]] = []
+    cursor = db.assistant_threads.find({
+        "user_id": user_id,
+        "archived": {"$ne": True},
+    }).sort([("pinned", -1), ("updated_at", -1)])
+    async for doc in cursor:
+        items.append(_thread_doc_to_item(doc))
+    return items
+
+
+async def create_assistant_thread(db, user_id: str, title: Optional[str] = None) -> Dict[str, Any]:
+    thread_id = _generate_thread_id()
+    thread_title = (title or "").strip() or f"新主题 {datetime.now().strftime('%m-%d %H:%M')}"
+    doc = await _create_thread_document(db, user_id, thread_id, thread_title)
+    return _thread_doc_to_item(doc)
+
+
+async def get_assistant_thread_messages(
+    db,
+    user_id: str,
+    conversation_id: Optional[str] = None,
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    thread = await get_or_create_assistant_thread(db, user_id, conversation_id)
+    messages: List[Dict[str, Any]] = []
+    cursor = db.assistant_thread_messages.find({
+        "user_id": user_id,
+        "thread_id": thread["thread_id"],
+    }).sort("created_at", 1)
+    async for doc in cursor:
+        messages.append({
+            "role": doc.get("role", "assistant"),
+            "content": doc.get("content", ""),
+            "tools_used": doc.get("tools_used") or None,
+        })
+    return _thread_doc_to_item(thread), messages
+
+
+async def append_assistant_message(
+    db,
+    user_id: str,
+    role: str,
+    content: str,
+    conversation_id: Optional[str] = None,
+    tools_used: Optional[List[str]] = None,
+) -> str:
+    thread = await get_or_create_assistant_thread(db, user_id, conversation_id)
+    thread_id = thread["thread_id"]
+    text = (content or "").strip()
+    if not text:
+        return thread_id
+
+    await db.assistant_thread_messages.insert_one({
+        "message_id": f"msg_{uuid.uuid4().hex}",
+        "thread_id": thread_id,
+        "user_id": user_id,
+        "role": role,
+        "content": text,
+        "tools_used": tools_used or [],
+        "created_at": _now_utc(),
+    })
+
+    updates: Dict[str, Any] = {"updated_at": _now_utc()}
+    if role == "user":
+        updates["last_user_message"] = text[:200]
+    elif role == "assistant":
+        updates["current_summary.abstract"] = text[:120]
+
+    await db.assistant_threads.update_one(
+        {"user_id": user_id, "thread_id": thread_id},
+        {
+            "$set": updates,
+            "$inc": {"message_count": 1},
+        },
+    )
+    return thread_id
+
+
 async def save_assistant_message(
     db,
     user_id: str,
     user_content: str,
     assistant_content: str,
     tools_used: List[str],
+    conversation_id: Optional[str] = None,
 ) -> None:
     """将会话追加写入 MongoDB"""
-    now = datetime.now(timezone.utc)
-    user_msg = {"role": "user", "content": user_content}
-    assistant_msg = {"role": "assistant", "content": assistant_content}
-    if tools_used:
-        assistant_msg["tools_used"] = tools_used
-    await db.assistant_conversations.update_one(
-        {"user_id": user_id},
-        {
-            "$push": {
-                "messages": {
-                    "$each": [user_msg, assistant_msg],
-                    "$slice": -ASSISTANT_CONVERSATION_LIMIT,
-                }
-            },
-            "$set": {"updated_at": now},
-        },
-        upsert=True,
+    thread_id = await append_assistant_message(
+        db,
+        user_id=user_id,
+        role="user",
+        content=user_content,
+        conversation_id=conversation_id,
+    )
+    await append_assistant_message(
+        db,
+        user_id=user_id,
+        role="assistant",
+        content=assistant_content,
+        conversation_id=thread_id,
+        tools_used=tools_used,
     )
 
 
-async def get_assistant_conversation(db, user_id: str) -> List[Dict[str, Any]]:
+async def get_assistant_conversation(
+    db,
+    user_id: str,
+    conversation_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """获取用户的智能助手会话历史"""
-    doc = await db.assistant_conversations.find_one({"user_id": user_id})
-    if not doc or not doc.get("messages"):
-        return []
-    return doc["messages"]
+    _, messages = await get_assistant_thread_messages(db, user_id, conversation_id)
+    return messages
 
 
-async def clear_assistant_conversation(db, user_id: str) -> None:
+async def clear_assistant_conversation(
+    db,
+    user_id: str,
+    conversation_id: Optional[str] = None,
+) -> None:
     """清空用户的智能助手会话"""
-    await db.assistant_conversations.update_one(
-        {"user_id": user_id},
-        {"$set": {"messages": [], "updated_at": datetime.now(timezone.utc)}},
+    thread = await get_or_create_assistant_thread(db, user_id, conversation_id)
+    await db.assistant_thread_messages.delete_many(
+        {"user_id": user_id, "thread_id": thread["thread_id"]}
+    )
+    await db.assistant_threads.update_one(
+        {"user_id": user_id, "thread_id": thread["thread_id"]},
+        {
+            "$set": {
+                "message_count": 0,
+                "last_user_message": "",
+                "current_summary.abstract": "",
+                "updated_at": _now_utc(),
+            }
+        },
     )
 
 
@@ -681,10 +908,9 @@ async def chat_with_assistant(
     history_messages: Optional[List[Message]] = None
     if user_id:
         try:
-            raw_history = await get_assistant_conversation(db, user_id)
+            raw_history = await get_assistant_conversation(db, user_id, conversation_id)
             if raw_history:
-                # 取最近 10 条，截断过长内容
-                recent = raw_history[-10:]
+                recent = raw_history[-ASSISTANT_MAX_CONTEXT_MESSAGES:]
                 history_messages = []
                 for m in recent:
                     role = MessageRole.USER if m.get("role") == "user" else MessageRole.ASSISTANT
@@ -706,7 +932,11 @@ async def chat_with_assistant(
                 user_content=user_message.strip(),
                 assistant_content=result["reply"],
                 tools_used=result.get("tools_used") or [],
+                conversation_id=conversation_id,
             )
         except Exception as e:
             logger.warning("[智能助手] 保存会话失败: %s", e)
+    if user_id:
+        thread = await get_or_create_assistant_thread(db, user_id, conversation_id)
+        result["conversation_id"] = thread["thread_id"]
     return result

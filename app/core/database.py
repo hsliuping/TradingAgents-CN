@@ -534,9 +534,19 @@ async def create_database_indexes(db):
         await market_quotes.create_index([("amount", -1)])
         await market_quotes.create_index([("updated_at", -1)])
 
-        # assistant_conversations 智能助手会话
+        # assistant_conversations 智能助手旧会话（兼容）
         assistant_conv = db["assistant_conversations"]
         await assistant_conv.create_index([("user_id", 1)], unique=True)
+
+        # assistant_threads 智能助手主题会话
+        assistant_threads = db["assistant_threads"]
+        await assistant_threads.create_index([("user_id", 1), ("thread_id", 1)], unique=True)
+        await assistant_threads.create_index([("user_id", 1), ("updated_at", -1)])
+
+        # assistant_thread_messages 智能助手主题消息
+        assistant_thread_messages = db["assistant_thread_messages"]
+        await assistant_thread_messages.create_index([("thread_id", 1), ("created_at", 1)])
+        await assistant_thread_messages.create_index([("user_id", 1), ("thread_id", 1), ("created_at", -1)])
 
         # ETF 集合索引
         etf_basic = db["etf_basic_info"]

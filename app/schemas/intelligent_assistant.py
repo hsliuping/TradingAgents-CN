@@ -17,6 +17,7 @@ class ChatResponse(BaseModel):
     reply: str = Field(..., description="助手回复内容")
     tools_used: List[str] = Field(default_factory=list, description="本次回复使用的工具列表")
     data_refs: Optional[List] = Field(None, description="引用的数据，预留")
+    conversation_id: Optional[str] = Field(None, description="实际使用的主题会话 ID")
 
 
 class PlannedAnalysisResponse(ChatResponse):
@@ -37,3 +38,38 @@ class MessageItem(BaseModel):
 class ConversationResponse(BaseModel):
     """会话历史响应"""
     messages: List[MessageItem] = Field(default_factory=list, description="消息列表")
+    conversation_id: Optional[str] = Field(None, description="当前主题会话 ID")
+
+
+class AssistantThreadSummary(BaseModel):
+    """主题摘要（MVP 仅保留摘要文本）"""
+    abstract: str = Field("", description="摘要文本")
+
+
+class AssistantThreadItem(BaseModel):
+    """助手主题会话"""
+    thread_id: str = Field(..., description="主题会话 ID")
+    title: str = Field(..., description="主题标题")
+    topic_type: str = Field("general", description="主题类型")
+    pinned: bool = Field(False, description="是否置顶")
+    archived: bool = Field(False, description="是否归档")
+    message_count: int = Field(0, description="消息数量")
+    last_user_message: str = Field("", description="最近一条用户消息")
+    updated_at: Optional[str] = Field(None, description="更新时间")
+    current_summary: Optional[AssistantThreadSummary] = Field(None, description="当前摘要")
+
+
+class AssistantThreadListResponse(BaseModel):
+    """主题会话列表响应"""
+    items: List[AssistantThreadItem] = Field(default_factory=list, description="主题会话列表")
+    total: int = Field(0, description="总数")
+
+
+class CreateAssistantThreadRequest(BaseModel):
+    """创建主题会话请求"""
+    title: Optional[str] = Field(None, description="主题标题")
+
+
+class AssistantThreadMessagesResponse(ConversationResponse):
+    """主题消息列表响应"""
+    thread: Optional[AssistantThreadItem] = Field(None, description="主题信息")
