@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { useStorage } from '@vueuse/core'
 import { authApi } from '@/api/auth'
-import type { User, LoginForm, RegisterForm } from '@/types/auth'
+import type { User, LoginForm, RegisterForm, UserUpdatePayload } from '@/types/auth'
 
 export interface AuthState {
   // 认证状态
@@ -174,7 +174,7 @@ export const useAuthStore = defineStore('auth', {
     },
     
     // 设置API请求头
-    setAuthHeader(token: string | null) {
+    setAuthHeader(_token: string | null) {
       // 这里会在API模块中设置Authorization头
       // 具体实现在api/request.ts中
     },
@@ -345,7 +345,7 @@ export const useAuthStore = defineStore('auth', {
     },
     
     // 更新用户信息
-    async updateUserInfo(userInfo: Partial<User>) {
+    async updateUserInfo(userInfo: UserUpdatePayload) {
       try {
         const response = await authApi.updateUserInfo(userInfo)
 
@@ -411,7 +411,8 @@ export const useAuthStore = defineStore('auth', {
       try {
         const response = await authApi.changePassword({
           old_password: oldPassword,
-          new_password: newPassword
+          new_password: newPassword,
+          confirm_password: newPassword
         })
 
         if (response.success) {
@@ -456,10 +457,10 @@ export const useAuthStore = defineStore('auth', {
             console.log('🔄 Token无效，尝试刷新...')
             await this.refreshAccessToken()
           }
-        } catch (error) {
+        } catch (error: unknown) {
           console.error('❌ 检查认证状态失败:', error)
           // 如果是网络错误或超时，不清除认证信息，只是标记为未认证
-          if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+          if ((error as any)?.code === 'ECONNABORTED' || (error as any)?.message?.includes('timeout')) {
             console.warn('⚠️ 网络超时，保留认证信息但标记为未认证状态')
             this.isAuthenticated = false
           } else {

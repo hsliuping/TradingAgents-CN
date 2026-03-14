@@ -105,7 +105,7 @@ export const useLicenseStore = defineStore('license', () => {
     return error.value?.includes('网络') ?? false
   })
 
-  const hasFeature = (feature: ProFeature) => {
+  const hasFeature = (_feature: ProFeature) => {
     if (!licenseInfo.value?.is_valid) return false
     // trial、pro、enterprise 用户拥有所有 PRO 功能
     if (['trial', 'pro', 'enterprise'].includes(licenseInfo.value.plan)) {
@@ -136,7 +136,7 @@ export const useLicenseStore = defineStore('license', () => {
       console.log('🔄 License Store: 开始验证许可证...', { force })
       // 调用 /status 接口获取授权状态，force=true 时强制刷新（跳过后端缓存）
       // 注意：设备ID由后端基于硬件信息自动生成，前端不需要传递
-      const response = await request.get('/api/license/status', {
+      const response: any = await request.get('/api/license/status', {
         params: { force_refresh: force }
       })
       console.log('📋 License Store: 收到响应', response)

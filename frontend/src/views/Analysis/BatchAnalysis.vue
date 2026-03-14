@@ -288,9 +288,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Files, TrendCharts, Check, Close, PieChart, Grid } from '@element-plus/icons-vue'
+import { Files, TrendCharts, Check, Close } from '@element-plus/icons-vue'
 import { ANALYSTS, DEFAULT_ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
 import { configApi } from '@/api/config'
 import { useRouter, useRoute } from 'vue-router'
@@ -329,18 +329,6 @@ const batchForm = reactive({
   engine: 'v2' as 'legacy' | 'v2'  // 默认使用 v2.0 引擎（推荐）
 })
 
-// 获取当前深度的完整描述
-const currentDepthLabel = computed(() => {
-  const depthLabels: Record<string, string> = {
-    '1': '1级 - 快速分析',
-    '2': '2级 - 基础分析',
-    '3': '3级 - 标准分析',
-    '4': '4级 - 深度分析',
-    '5': '5级 - 全面分析'
-  }
-  return depthLabels[batchForm.depth] || '3级 - 标准分析'
-})
-
 // 使用通用校验器规范化代码，自动识别市场
 const normalizeCodeSmart = (raw: string): { symbol?: string; error?: string } => {
   const code = String(raw || '').trim()
@@ -363,7 +351,7 @@ const parseStockCodes = () => {
   const normalized: string[] = []
   const invalid: string[] = []
   for (const c of codes) {
-    const { symbol, error } = normalizeCodeSmart(c)
+    const { symbol } = normalizeCodeSmart(c)
     if (symbol) normalized.push(symbol)
     else invalid.push(c)
   }
@@ -527,7 +515,7 @@ const submitBatchAnalysis = async () => {
     submitting.value = true
 
     // 准备批量分析请求参数（真实API调用）
-    const batchRequest = {
+    const batchRequest: Parameters<typeof analysisApi.startBatchAnalysis>[0] = {
       title: '',  // 基础信息已移除，不再使用
       description: '',  // 基础信息已移除，不再使用
       symbols: symbols.value,
@@ -588,24 +576,6 @@ const submitBatchAnalysis = async () => {
   } finally {
     submitting.value = false
   }
-}
-
-const resetForm = () => {
-  // 从用户偏好加载默认值
-  const authStore = useAuthStore()
-  const userPrefs = authStore.user?.preferences
-
-  Object.assign(batchForm, {
-    title: '',
-    description: '',
-    depth: userPrefs?.default_depth ? convertDepthToNumber(userPrefs.default_depth) : '3',
-    analysts: userPrefs?.default_analysts ? [...userPrefs.default_analysts] : [...DEFAULT_ANALYSTS],
-    includeSentiment: true,
-    includeRisk: true,
-    language: 'zh-CN',
-    engine: 'v2' as 'legacy' | 'v2'  // 🔥 固定使用 v2.0 引擎（旧版引擎已隐藏）
-  })
-  clearStocks()
 }
 
 // 将数字深度转换为中文描述（与后端保持一致）

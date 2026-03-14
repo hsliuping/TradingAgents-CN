@@ -162,7 +162,7 @@
                 </div>
                 <div class="item-status">
                   <el-tag
-                    :type="item.status === '已配置' ? 'success' : item.enabled ? 'warning' : 'info'"
+                    :type="item.status === '已配置' ? 'success' : item.is_active ? 'warning' : 'info'"
                     size="small"
                   >
                     {{ item.status }}

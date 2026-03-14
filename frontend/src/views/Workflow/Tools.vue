@@ -608,7 +608,7 @@ const openEditTool = async (tool: ToolMetadata) => {
     // 转换 headers 为 list
     const headersList = []
     if (definition.implementation && definition.implementation.headers) {
-      for (const [key, value] of Object.entries(definition.implementation.headers)) {
+      for (const [key] of Object.entries(definition.implementation.headers)) {
         headersList.push({ key, value: definition.implementation.headers[key] })
       }
     }

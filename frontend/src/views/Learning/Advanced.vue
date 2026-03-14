@@ -67,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { advancedCourseCategories } from '@/config/advancedCourses'
 import { ArrowRight } from '@element-plus/icons-vue'

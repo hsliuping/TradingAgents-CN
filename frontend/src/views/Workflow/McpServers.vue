@@ -66,7 +66,7 @@
           <el-switch
             v-model="row.is_enabled"
             :loading="togglingId === row.server_id"
-            @change="(val: boolean) => handleToggle(row, val)"
+            @change="(val) => handleToggle(row, Boolean(val))"
             size="small"
           />
         </template>
@@ -719,7 +719,7 @@ const executeAIMappingSuggestion = async (dmIdx: number) => {
       aiMappingDialog.collectionFields = result.collection_fields || []
       aiMappingDialog.collectionFieldDescriptions = result.collection_field_descriptions || {}
     } else {
-      ElMessage.error(result.error || 'AI 推断失败')
+      ElMessage.error('AI 推断失败')
       aiMappingDialog.visible = false
     }
   } catch (e: any) {

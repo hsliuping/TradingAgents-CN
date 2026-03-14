@@ -403,7 +403,7 @@ const exportHistory = () => {
   ElMessage.info('导出功能开发中...')
 }
 
-const viewTaskDetail = (task: any) => {
+const viewTaskDetail = (_task: any) => {
   ElMessage.info('任务详情功能开发中...')
 }
 

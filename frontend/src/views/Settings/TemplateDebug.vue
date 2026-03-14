@@ -179,7 +179,6 @@ import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import { marked } from 'marked'
 import { ArrowLeft } from '@element-plus/icons-vue'
-import { useLicenseStore } from '@/stores/license'
 
 // 配置 marked 选项
 marked.setOptions({ breaks: true, gfm: true })
@@ -216,7 +215,6 @@ const availableModels = ref<any[]>([])
 const availableAgents = ref<any[]>([])
 const availableWorkflows = ref<WorkflowInfo[]>([])  // 🆕 可用工作流列表
 
-const licenseStore = useLicenseStore()
 const router = useRouter()
 
 // 🆕 按类型分组的工作流
@@ -244,7 +242,8 @@ const selectedWorkflowDesc = computed(() => {
 })
 
 // 🆕 格式化 Agent 报告标签
-const formatAgentReportLabel = (key: string): string => {
+const formatAgentReportLabel = (key: string | number): string => {
+  const normalizedKey = String(key)
   const labels: Record<string, string> = {
     'market_report': '市场分析',
     'fundamentals_report': '基本面分析',
@@ -256,7 +255,7 @@ const formatAgentReportLabel = (key: string): string => {
     'trading_decision': '交易决策',
     'final_report': '最终报告'
   }
-  return labels[key] || key
+  return labels[normalizedKey] || normalizedKey
 }
 
 // 🆕 加载可用的工作流

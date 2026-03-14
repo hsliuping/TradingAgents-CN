@@ -272,7 +272,7 @@ const stopDrag = () => {
 }
 
 // 创建连接
-const startConnection = (event: MouseEvent, node: NodeDefinition) => {
+const startConnection = (_event: MouseEvent, node: NodeDefinition) => {
   if (props.readonly) return
 
   connectingFrom.value = node

@@ -486,10 +486,10 @@
 import { ref, computed, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh, Collection, TrendCharts, Download, Star, Setting, Connection, Warning, User } from '@element-plus/icons-vue'
+import { Search, Refresh, TrendCharts, Download, Star, Connection, Warning, User } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import type { StockInfo } from '@/types/analysis'
-import { screeningApi, type FieldConfigResponse, type FieldInfo, type ScreeningMessageItem, type ScreeningWsEnvelope, type ScreeningWsProgressData, type StockRecommendation } from '@/api/screening'
+import { screeningApi, type FieldConfigResponse, type ScreeningMessageItem, type ScreeningWsEnvelope, type ScreeningWsProgressData, type StockRecommendation } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
 import { getCurrentDataSource } from '@/api/sync'
 import { useAuthStore } from '@/stores/auth'
@@ -577,7 +577,7 @@ const buildToolSummaryText = (tool?: string, summary?: Record<string, number>) =
 const loadAiConversation = async () => {
   try {
     const res = await screeningApi.getIntelligentConversation()
-    const msgs = res.messages ?? (res as any)?.data?.messages ?? []
+    const msgs = (res as any)?.data?.messages ?? []
     if (msgs.length) {
       aiMessages.value = msgs.map((m: ScreeningMessageItem) => ({
         role: m.role,
@@ -986,19 +986,6 @@ const performScreening = async () => {
   } finally {
     screeningLoading.value = false
   }
-}
-
-const generateMockResults = (): StockInfo[] => {
-  const mockStocks = [
-    { symbol: '000001', code: '000001', name: '平安银行', industry: '银行', close: 12.50, pct_chg: 2.1, total_mv: 2400, pe: 5.2, pb: 0.8 },
-    { symbol: '000002', code: '000002', name: '万科A', industry: '房地产', close: 18.30, pct_chg: -1.5, total_mv: 2100, pe: 8.5, pb: 1.2 },
-    { symbol: '000858', code: '000858', name: '五粮液', industry: '食品饮料', close: 168.50, pct_chg: 3.2, total_mv: 6500, pe: 25.3, pb: 4.5 }
-  ]
-
-  return mockStocks.map(stock => ({
-    ...stock,
-    market: filters.market
-  }))
 }
 
 const resetFilters = () => {

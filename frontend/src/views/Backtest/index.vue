@@ -359,7 +359,7 @@
           <!-- 优化说明 -->
           <div class="preview-section">
             <h4>优化说明</h4>
-            <p class="opt-summary">{{ optimizedStrategy.optimization_summary || '已根据评估结果优化策略' }}</p>
+            <p class="opt-summary">{{ (optimizedStrategy as any)?.optimization_summary || '已根据评估结果优化策略' }}</p>
           </div>
 
           <!-- 代码对比/预览 -->
@@ -420,7 +420,7 @@
           <el-scrollbar v-if="sessions.length" max-height="400">
             <div
               v-for="s in sessions"
-              :key="s.id"
+              :key="String(s.id || '')"
               class="session-item"
               @click="selectSession(s)"
             >
@@ -431,7 +431,7 @@
                 </span>
                 <span>{{ s.status }} · {{ formatDate(s.created_at) }}</span>
               </div>
-              <el-button type="danger" link size="small" @click.stop="deleteSession(s.id)">
+              <el-button type="danger" link size="small" @click.stop="deleteSession(String(s.id || ''))">
                 删除
               </el-button>
             </div>
@@ -447,7 +447,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { TrendCharts, Checked } from '@element-plus/icons-vue'
-import { backtestApi, type StrategyPython, type BacktestSummary, type OptimizationResult, type EvaluationResult } from '@/api/backtest'
+import { backtestApi, type StrategyPython, type BacktestSummary, type EvaluationResult } from '@/api/backtest'
 
 const currentStep = ref(0)
 const description = ref('')
@@ -785,13 +785,6 @@ const onConfirmOptimization = async () => {
 
   // 执行回测
   await onRun()
-}
-
-/** 获取评分颜色 */
-const getScoreType = (score: number) => {
-  if (score >= 80) return 'success'
-  if (score >= 60) return 'warning'
-  return 'danger'
 }
 
 /** 获取评分进度条颜色 */

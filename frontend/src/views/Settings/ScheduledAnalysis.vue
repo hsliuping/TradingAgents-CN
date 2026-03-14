@@ -331,7 +331,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { debounce } from 'lodash-es'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
@@ -349,7 +349,6 @@ import {
   type ScheduledAnalysisConfig,
   type ScheduledAnalysisConfigCreate,
   type ScheduledAnalysisConfigUpdate,
-  type ScheduledAnalysisTimeSlot,
   type ScheduledAnalysisHistory
 } from '@/api/scheduled-analysis'
 import { getWatchlistGroups, type WatchlistGroup } from '@/api/watchlist-groups'
@@ -478,7 +477,6 @@ const updateCronFromUi = (slot: any) => {
 
 // 快速预设
 const applyPreset = (slot: any, type: string) => {
-  const now = new Date()
   let hour = 9
   let minute = 0
   let days = [1, 2, 3, 4, 5] // 工作日

@@ -34,7 +34,7 @@ jobs:
           pytest -q tests/config/test_settings.py tests/config/test_logging_config.py tests/middleware/test_trace_id.py
 
   frontend-quality:
-    name: Frontend Smoke Checks
+    name: Frontend Quality Checks
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -54,8 +54,8 @@ jobs:
       - name: 安装前端依赖
         run: npm ci --no-audit --no-fund
 
-      - name: 关键文件 lint
-        run: npx eslint --config .eslintrc.cjs --no-ignore src/views/Workflow/McpServers.vue src/api/mcp.ts
+      - name: 前端类型检查
+        run: npm run type-check
 
-      - name: 构建 smoke
+      - name: 前端构建
         run: npm exec vite build

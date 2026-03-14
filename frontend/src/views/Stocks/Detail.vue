@@ -185,7 +185,7 @@
               <!-- 报告列表预览 -->
               <div class="reports-preview">
                 <el-tag
-                  v-for="(content, key) in lastAnalysis.reports"
+                  v-for="key in reportKeys"
                   :key="key"
                   size="small"
                   effect="plain"
@@ -318,14 +318,14 @@
     >
       <el-tabs v-model="activeReportTab" type="border-card">
         <el-tab-pane
-          v-for="(content, key) in lastAnalysis?.reports"
+          v-for="key in reportKeys"
           :key="key"
           :label="formatReportName(key)"
           :name="key"
         >
           <div class="report-content">
             <el-scrollbar height="500px">
-              <div class="markdown-body" v-html="renderMarkdown(getReportContent(content))"></div>
+              <div class="markdown-body" v-html="renderMarkdown(getReportContent(lastAnalysis?.reports?.[key]))"></div>
             </el-scrollbar>
           </div>
         </el-tab-pane>
@@ -401,7 +401,6 @@ import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
 import { favoritesApi } from '@/api/favorites'
-import { useNotificationStore } from '@/stores/notifications'
 
 
 echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
@@ -414,7 +413,6 @@ const router = useRouter()
 const analysisStatus = ref<'idle' | 'running' | 'completed' | 'failed'>('idle')
 const analysisProgress = ref(0)
 const analysisMessage = ref('')
-const currentTaskId = ref<string | null>(null)
 const lastAnalysis = ref<any | null>(null)
 const lastTaskInfo = ref<any | null>(null) // 保存任务信息（包含 end_time 等）
 
@@ -422,15 +420,7 @@ const lastTaskInfo = ref<any | null>(null) // 保存任务信息（包含 end_ti
 const showReportsDialog = ref(false)
 const activeReportTab = ref('')
 
-const notifStore = useNotificationStore()
-
-const lastAnalysisTagType = computed(() => {
-  const reco = String(lastAnalysis.value?.recommendation || '').toLowerCase()
-  if (reco.includes('买') || reco.includes('buy') || reco.includes('增持') || reco.includes('强')) return 'success'
-  if (reco.includes('卖') || reco.includes('sell')) return 'danger'
-  if (reco.includes('减持') || reco.includes('谨慎')) return 'warning'
-  return 'info'
-})
+const reportKeys = computed(() => Object.keys(lastAnalysis.value?.reports || {}))
 
 // 股票代码（从路由参数获取）
 const code = computed(() => {
@@ -984,11 +974,6 @@ function goPaperTrading() {
   router.push({ name: 'PaperTradingHome', query: { code: code.value } })
 }
 
-function scrollToDetail() {
-  const el = document.getElementById('analysis-detail')
-  if (el) el.scrollIntoView({ behavior: 'smooth' })
-}
-
 // 获取最新的历史分析报告
 async function fetchLatestAnalysis() {
   try {
@@ -1246,7 +1231,7 @@ function getReportContent(reportData: any): string {
 function renderMarkdown(content: string): string {
   if (!content) return '<p>暂无内容</p>'
   try {
-    return marked(content)
+    return marked.parse(content, { async: false }) as string
   } catch (e) {
     console.error('Markdown渲染失败:', e)
     return `<pre>${content}</pre>`

@@ -585,7 +585,7 @@ const addForm = ref({
 })
 
 // 股票代码验证器
-const validateStockCode = (rule: any, value: any, callback: any) => {
+const validateStockCode = (_rule: any, value: any, callback: any) => {
   if (!value) {
     callback(new Error('请输入股票代码'))
     return
@@ -651,7 +651,7 @@ const filteredFavorites = computed<FavoriteItem[]>(() => {
   if (searchKeyword.value) {
     const keyword = searchKeyword.value.toLowerCase()
     result = result.filter((item: FavoriteItem) =>
-      item.stock_code.toLowerCase().includes(keyword) ||
+      String(item.stock_code || item.symbol || '').toLowerCase().includes(keyword) ||
       item.stock_name.toLowerCase().includes(keyword)
     )
   }
@@ -690,12 +690,6 @@ const filteredFavorites = computed<FavoriteItem[]>(() => {
 // 判断是否有A股自选股
 const hasAStocks = computed(() => {
   return favorites.value.some(item => item.market === 'A股')
-})
-
-// 判断选中的股票是否都是A股
-const selectedStocksAreAllAShares = computed(() => {
-  if (selectedStocks.value.length === 0) return false
-  return selectedStocks.value.every(item => item.market === 'A股')
 })
 
 // 方法
@@ -979,7 +973,7 @@ const handleUpdateFavorite = async () => {
 
 const editFavorite = (row: any) => {
   editForm.value = {
-    stock_code: row.stock_code,
+    stock_code: row.stock_code || row.symbol || '',
     stock_name: row.stock_name,
     market: row.market || 'A股',
     tags: Array.isArray(row.tags) ? [...row.tags] : [],
@@ -1030,8 +1024,8 @@ const handleSelectionChange = (selection: FavoriteItem[]) => {
 // 显示单个股票同步对话框
 const showSingleSyncDialog = (row: FavoriteItem) => {
   currentSyncStock.value = {
-    stock_code: row.stock_code,
-    stock_name: row.stock_name
+    stock_code: row.stock_code || row.symbol || '',
+    stock_name: row.stock_name || ''
   }
   singleSyncDialogVisible.value = true
 }
@@ -1157,14 +1151,14 @@ const handleBatchSync = async () => {
       ElMessage.warning('没有A股股票可以同步')
       return
     }
-    symbols = aStocks.map(stock => stock.stock_code)
+    symbols = aStocks.map(stock => stock.stock_code || stock.symbol || '').filter((symbol): symbol is string => Boolean(symbol))
   } else {
     // 选中同步：使用选中的股票
     if (selectedStocks.value.length === 0) {
       ElMessage.warning('请先选择要同步的股票')
       return
     }
-    symbols = selectedStocks.value.map(stock => stock.stock_code)
+    symbols = selectedStocks.value.map(stock => stock.stock_code || stock.symbol || '').filter((symbol): symbol is string => Boolean(symbol))
   }
 
   batchSyncLoading.value = true

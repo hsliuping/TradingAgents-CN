@@ -149,15 +149,8 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { List, Refresh, Download } from '@element-plus/icons-vue'
 import { analysisApi } from '@/api/analysis'
-import { marked } from 'marked'
 import TaskResultDialog from '@/components/Global/TaskResultDialog.vue'
 import TaskReportDialog from '@/components/Global/TaskReportDialog.vue'
-
-
-marked.setOptions({ breaks: true, gfm: true })
-const renderMarkdown = (s: string) => {
-  try { return marked.parse(s||'') as string } catch { return s }
-}
 
 const router = useRouter()
 const route = useRoute()
@@ -196,7 +189,6 @@ const connectTaskWebSocket = (taskId: string) => {
   }
 
   try {
-    const token = localStorage.getItem('token') || ''
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
     const wsUrl = `${wsProtocol}//${host}/api/ws/task/${taskId}`
@@ -370,7 +362,10 @@ const openResult = async (row:any) => {
 
 const openReport = (row:any) => {
   const id = row?.task_id || row?.analysis_id || row?.id
-  if (!id) return ElMessage.warning('未找到报告ID')
+  if (!id) {
+    ElMessage.warning('未找到报告ID')
+    return
+  }
   router.push({ name: 'ReportDetail', params: { id } })
 }
 

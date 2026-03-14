@@ -199,7 +199,7 @@ import { ArrowLeft, ArrowDown, User, MagicStick, Loading, CircleCheck, MoreFille
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import { skillGenerationApi } from '@/api/skillGeneration'
-import type { BoundaryCheck, ConfirmResult, SessionDetail } from '@/api/skillGeneration'
+import type { BoundaryCheck, ConfirmResult } from '@/api/skillGeneration'
 
 marked.setOptions({ breaks: true, gfm: true })
 

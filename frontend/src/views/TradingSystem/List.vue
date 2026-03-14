@@ -136,7 +136,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import {
@@ -220,8 +220,10 @@ function getStyleLabel(style: string) {
   return map[style] || style
 }
 
-function getStyleType(style: string) {
-  const map: Record<string, string> = {
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
+function getStyleType(style: string): TagType {
+  const map: Record<string, TagType> = {
     short_term: 'danger',
     medium_term: 'warning',
     long_term: 'success'
@@ -238,8 +240,8 @@ function getRiskLabel(risk: string) {
   return map[risk] || risk
 }
 
-function getRiskType(risk: string) {
-  const map: Record<string, string> = {
+function getRiskType(risk: string): TagType {
+  const map: Record<string, TagType> = {
     conservative: 'success',
     balanced: 'warning',
     aggressive: 'danger'

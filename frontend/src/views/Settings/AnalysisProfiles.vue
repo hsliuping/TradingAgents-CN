@@ -134,7 +134,7 @@
               <div class="card-title">📋 当前草案</div>
               <div class="card-subtitle">结构化查看当前版本，随时微调后再保存</div>
             </div>
-            <el-tag v-if="draftPreview" :type="overallTagType" effect="dark">{{ draftPreview.coverage_summary.overall_label }}</el-tag>
+            <el-tag v-if="draftPreview" :type="overallBadgeType" effect="dark">{{ draftPreview.coverage_summary.overall_label }}</el-tag>
           </div>
         </template>
 
@@ -150,7 +150,7 @@
             </el-descriptions-item>
           </el-descriptions>
 
-          <el-alert :type="overallTagType" :closable="false" show-icon class="summary-alert">
+          <el-alert :type="overallAlertType" :closable="false" show-icon class="summary-alert">
             <template #title>{{ draftPreview.coverage_summary.overall_label }}</template>
             <template #default>
               <ul class="summary-list">
@@ -382,6 +382,9 @@ import { ChatDotRound, Delete, Edit, MagicStick, Plus, Promotion, RefreshRight, 
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { analysisProfilesApi, type GeneratePreview, type IndustryProfile } from '@/api/analysisProfiles'
 
+type ElTagType = 'primary' | 'success' | 'info' | 'warning' | 'danger'
+type ElAlertType = 'success' | 'info' | 'warning' | 'error'
+
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -422,25 +425,32 @@ function cloneDeep<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
-const statusTagType = (status?: string) => {
+const statusTagType = (status?: string): ElTagType => {
   if (status === 'directly_usable') return 'success'
   if (status === 'partially_usable') return 'warning'
   if (status === 'external_required') return 'danger'
   return 'info'
 }
 
-const sourceTagType = (type?: string) => {
-  if (type === 'builtin') return ''
+const sourceTagType = (type?: string): ElTagType => {
+  if (type === 'builtin') return 'info'
   if (type === 'mcp') return 'warning'
   if (type === 'skill') return 'success'
   return 'info'
 }
 
-const overallTagType = computed(() => {
+const overallBadgeType = computed<ElTagType>(() => {
   const status = draftPreview.value?.coverage_summary?.overall_status
   if (status === 'ready') return 'success'
   if (status === 'review_needed') return 'warning'
   return 'danger'
+})
+
+const overallAlertType = computed<ElAlertType>(() => {
+  const status = draftPreview.value?.coverage_summary?.overall_status
+  if (status === 'ready') return 'success'
+  if (status === 'review_needed') return 'warning'
+  return 'error'
 })
 
 const currentIndustryLabel = computed(() => {

@@ -204,7 +204,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { InfoFilled, Clock, Setting, DataAnalysis, Warning, Document } from '@element-plus/icons-vue'
@@ -237,10 +237,7 @@ const hasResult = computed(() => {
 // 判断是否是单股分析任务
 const isStockAnalysisTask = computed(() => {
   const taskType = props.taskDetail?.task_type
-  // 兼容字符串和枚举值，以及中文名称
-  const isStockAnalysis = taskType === TaskType.STOCK_ANALYSIS || 
-                          taskType === 'stock_analysis' ||
-                          taskType === '股票分析'
+  const isStockAnalysis = taskType === TaskType.STOCK_ANALYSIS
   
   // 调试日志
   if (process.env.NODE_ENV === 'development') {

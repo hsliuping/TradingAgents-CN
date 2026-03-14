@@ -493,9 +493,9 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import type { FormRules } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
-import { authApi } from '@/api/auth'
 import {
   Setting,
   User,
@@ -662,8 +662,10 @@ const handleMenuSelect = (index: string) => {
   activeTab.value = index
 }
 
-const handleThemeChange = (theme: string) => {
-  appStore.setTheme(theme as any)
+const handleThemeChange = (theme: string | number | boolean | undefined) => {
+  if (typeof theme === 'string') {
+    appStore.setTheme(theme as any)
+  }
 }
 
 const saveGeneralSettings = async () => {
@@ -817,17 +819,19 @@ const changePasswordForm = ref({
   confirmPassword: ''
 })
 
-const validateConfirmPassword = (rule: any, value: any, callback: any) => {
+const validateConfirmPassword = (_rule: any, value: string, callback: (error?: string | Error) => void) => {
   if (value === '') {
     callback(new Error('请再次输入新密码'))
-  } else if (value !== changePasswordForm.value.newPassword) {
-    callback(new Error('两次输入的密码不一致'))
-  } else {
-    callback()
+    return
   }
+  if (value !== changePasswordForm.value.newPassword) {
+    callback(new Error('两次输入的密码不一致'))
+    return
+  }
+  callback()
 }
 
-const changePasswordRules = {
+const changePasswordRules: FormRules = {
   oldPassword: [
     { required: true, message: '请输入当前密码', trigger: 'blur' }
   ],

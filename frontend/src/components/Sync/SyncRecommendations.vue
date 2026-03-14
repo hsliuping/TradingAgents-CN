@@ -87,7 +87,7 @@
                       <div class="action-controls">
                         <el-switch
                           :model-value="!task.paused"
-                          @change="(value: boolean) => handleToggleTask(task.id, value)"
+                          @change="(value) => handleToggleTask(task.id, Boolean(value))"
                           :loading="taskToggling[task.id]"
                           active-text="启用"
                           inactive-text="暂停"
@@ -186,7 +186,7 @@
                         {{ taskProgress[task.id].processed_items }}/{{ taskProgress[task.id].total_items }}
                       </span>
                     </div>
-                    <div v-if="taskProgress[task.id].status === 'running' || taskProgress[task.id].status === 'suspended'" class="progress-details">
+                    <div v-if="shouldShowProgressDetails(task.id)" class="progress-details">
                       <span v-if="taskProgress[task.id].started_at" class="progress-time">
                         开始时间: {{ formatTime(taskProgress[task.id].started_at) }}
                       </span>
@@ -194,10 +194,10 @@
                         完成度: {{ taskProgress[task.id].progress || 0 }}%
                       </span>
                       <span v-if="taskProgress[task.id].started_at" class="progress-elapsed">
-                        已用时间: {{ calculateElapsedTime(taskProgress[task.id].started_at) }}
+                        已用时间: {{ calculateElapsedTime(taskProgress[task.id].started_at!) }}
                       </span>
                       <span v-if="taskProgress[task.id].started_at && (taskProgress[task.id].progress || 0) > 0" class="progress-remaining">
-                        剩余时间: {{ calculateRemainingTime(taskProgress[task.id].started_at, taskProgress[task.id].progress || 0) }}
+                        剩余时间: {{ calculateRemainingTime(taskProgress[task.id].started_at!, taskProgress[task.id].progress || 0) }}
                       </span>
                       <el-button
                         v-if="taskProgress[task.id].execution_id"
@@ -275,7 +275,7 @@
                       <div class="action-controls">
                         <el-switch
                           :model-value="!task.paused"
-                          @change="(value: boolean) => handleToggleTask(task.id, value)"
+                          @change="(value) => handleToggleTask(task.id, Boolean(value))"
                           :loading="taskToggling[task.id]"
                           active-text="启用"
                           inactive-text="暂停"
@@ -374,7 +374,7 @@
                         {{ taskProgress[task.id].processed_items }}/{{ taskProgress[task.id].total_items }}
                       </span>
                     </div>
-                    <div v-if="taskProgress[task.id].status === 'running' || taskProgress[task.id].status === 'suspended'" class="progress-details">
+                    <div v-if="shouldShowProgressDetails(task.id)" class="progress-details">
                       <span v-if="taskProgress[task.id].started_at" class="progress-time">
                         开始时间: {{ formatTime(taskProgress[task.id].started_at) }}
                       </span>
@@ -382,10 +382,10 @@
                         完成度: {{ taskProgress[task.id].progress || 0 }}%
                       </span>
                       <span v-if="taskProgress[task.id].started_at" class="progress-elapsed">
-                        已用时间: {{ calculateElapsedTime(taskProgress[task.id].started_at) }}
+                        已用时间: {{ calculateElapsedTime(taskProgress[task.id].started_at!) }}
                       </span>
                       <span v-if="taskProgress[task.id].started_at && (taskProgress[task.id].progress || 0) > 0" class="progress-remaining">
-                        剩余时间: {{ calculateRemainingTime(taskProgress[task.id].started_at, taskProgress[task.id].progress || 0) }}
+                        剩余时间: {{ calculateRemainingTime(taskProgress[task.id].started_at!, taskProgress[task.id].progress || 0) }}
                       </span>
                       <el-button
                         v-if="taskProgress[task.id].execution_id"
@@ -463,7 +463,7 @@
                       <div class="action-controls">
                         <el-switch
                           :model-value="!task.paused"
-                          @change="(value: boolean) => handleToggleTask(task.id, value)"
+                          @change="(value) => handleToggleTask(task.id, Boolean(value))"
                           :loading="taskToggling[task.id]"
                           active-text="启用"
                           inactive-text="暂停"
@@ -562,7 +562,7 @@
                         {{ taskProgress[task.id].processed_items }}/{{ taskProgress[task.id].total_items }}
                       </span>
                     </div>
-                    <div v-if="taskProgress[task.id].status === 'running' || taskProgress[task.id].status === 'suspended'" class="progress-details">
+                    <div v-if="shouldShowProgressDetails(task.id)" class="progress-details">
                       <span v-if="taskProgress[task.id].started_at" class="progress-time">
                         开始时间: {{ formatTime(taskProgress[task.id].started_at) }}
                       </span>
@@ -570,10 +570,10 @@
                         完成度: {{ taskProgress[task.id].progress || 0 }}%
                       </span>
                       <span v-if="taskProgress[task.id].started_at" class="progress-elapsed">
-                        已用时间: {{ calculateElapsedTime(taskProgress[task.id].started_at) }}
+                        已用时间: {{ calculateElapsedTime(taskProgress[task.id].started_at!) }}
                       </span>
                       <span v-if="taskProgress[task.id].started_at && (taskProgress[task.id].progress || 0) > 0" class="progress-remaining">
-                        剩余时间: {{ calculateRemainingTime(taskProgress[task.id].started_at, taskProgress[task.id].progress || 0) }}
+                        剩余时间: {{ calculateRemainingTime(taskProgress[task.id].started_at!, taskProgress[task.id].progress || 0) }}
                       </span>
                       <el-button
                         v-if="taskProgress[task.id].execution_id"
@@ -892,6 +892,11 @@ const isTaskRunning = (jobId: string): boolean => {
   return taskProgress.value[jobId]?.status === 'running'
 }
 
+const shouldShowProgressDetails = (jobId: string): boolean => {
+  const status = taskProgress.value[jobId]?.status as string | undefined
+  return status === 'running' || status === 'suspended'
+}
+
 const getTaskRunningHint = (jobId: string): string => {
   const task = allTasks.value.find(item => item.id === jobId)
   const taskName = task?.display_name || task?.name || jobId
@@ -1169,8 +1174,6 @@ const handleTriggerTask = async (jobId: string, fullSync: boolean = false) => {
           // 用户选择重新开始，先清除挂起任务
           if (suspendedExec.execution_id) {
             try {
-              const { cancelSuspendedExecution } = await import('@/api/scheduler')
-              // 🔥 使用统一的取消接口，后端会根据状态自动处理
               const { cancelExecution } = await import('@/api/scheduler')
               await cancelExecution(suspendedExec.execution_id)
               ElMessage.success('已清除挂起任务，将重新开始执行')
@@ -1302,7 +1305,7 @@ const startProgressPolling = () => {
       
       // 检查是否有运行中的任务（包括 suspended 状态）
       const progress = taskProgress.value[task.id]
-      if (progress && (progress.status === 'running' || progress.status === 'suspended')) {
+      if (progress && shouldShowProgressDetails(task.id)) {
         hasRunningTask = true
       }
     }
@@ -1431,7 +1434,7 @@ const formatScheduleDescription = (trigger?: string): string => {
   const parts = cron.split(' ')
   if (parts.length !== 5) return cron
   
-  const [minute, hour, day, month, dayOfWeek] = parts
+  const [minute, hour, _day, _month, dayOfWeek] = parts
   
   // 解析时间
   const hourNum = parseInt(hour)

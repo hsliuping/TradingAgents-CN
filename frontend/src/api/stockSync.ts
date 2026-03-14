@@ -28,6 +28,7 @@ export interface SyncResult {
   records?: number
   message?: string
   error?: string
+  data_source_used?: string
 }
 
 export interface SingleStockSyncResponse {

@@ -164,7 +164,7 @@ export class OperationLogsApi {
     if (params.action_type) queryParams.append('action_type', params.action_type)
     
     const url = `/api/system/logs/export/csv${queryParams.toString() ? '?' + queryParams.toString() : ''}`
-    return ApiClient.get(url, { responseType: 'blob' })
+    return ApiClient.get(url, { responseType: 'blob' }) as any
   }
 }
 

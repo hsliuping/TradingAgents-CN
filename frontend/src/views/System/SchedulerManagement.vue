@@ -667,7 +667,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type TabPaneName } from 'element-plus'
 import {
   Timer,
   List,
@@ -744,7 +744,7 @@ const historyTotal = ref(0)
 const historyPage = ref(1)
 const historyPageSize = ref(20)
 const currentHistoryJobId = ref<string | null>(null)
-const activeHistoryTab = ref('manual')
+const activeHistoryTab = ref<TabPaneName>('manual')
 
 // 任务执行监控
 const executionLoading = ref(false)
@@ -965,11 +965,11 @@ const showEditDialog = (job: Job) => {
   editForm.showAdvanced = false
 
   // 判断是否支持CRON（cron触发器）
-  const isCronTrigger = job.trigger && job.trigger.includes('cron[')
+  const isCronTrigger = Boolean(job.trigger?.includes('cron['))
   editForm.supports_cron = isCronTrigger
 
   if (isCronTrigger) {
-    const cronExpr = extractCronFromTrigger(job.trigger)
+    const cronExpr = extractCronFromTrigger(job.trigger ?? '')
     editForm.cron_expression = cronExpr
     editForm.original_cron = cronExpr
     // 解析CRON到UI选择器
@@ -1184,8 +1184,8 @@ const handleHistoryPageChange = (page: number) => {
   loadHistory()
 }
 
-const handleHistoryTabChange = (tabName: string) => {
-  if (tabName === 'execution') {
+const handleHistoryTabChange = (tabName: TabPaneName) => {
+  if (String(tabName) === 'execution') {
     executionPage.value = 1
     loadExecutions()
   } else {
@@ -1515,28 +1515,6 @@ const calculateEstimatedCompletionTime = (row: JobExecution): string => {
   }
 }
 
-const calculateRunningTime = (startTime: string) => {
-  try {
-    const start = new Date(startTime)
-    const now = new Date()
-    const seconds = Math.floor((now.getTime() - start.getTime()) / 1000)
-
-    if (seconds < 60) {
-      return `${seconds}秒`
-    } else if (seconds < 3600) {
-      const minutes = Math.floor(seconds / 60)
-      const remainingSeconds = seconds % 60
-      return `${minutes}分${remainingSeconds}秒`
-    } else {
-      const hours = Math.floor(seconds / 3600)
-      const minutes = Math.floor((seconds % 3600) / 60)
-      return `${hours}小时${minutes}分`
-    }
-  } catch (error) {
-    return '-'
-  }
-}
-
 const formatTrigger = (trigger: string) => {
   // 简化触发器显示
   if (trigger.includes('cron')) {
@@ -1546,16 +1524,6 @@ const formatTrigger = (trigger: string) => {
     return trigger.replace(/interval\[|\]/g, '')
   }
   return trigger
-}
-
-const formatAction = (action: string) => {
-  const actionMap: Record<string, string> = {
-    pause: '暂停',
-    resume: '恢复',
-    trigger: '手动触发',
-    execute: '执行'
-  }
-  return actionMap[action] || action
 }
 
 const handleSearch = () => {

@@ -87,6 +87,8 @@ export interface AITradeReview {
   timing_score?: number
   position_score?: number
   discipline_score?: number
+  emotion_score?: number
+  attribution_score?: number
   summary: string
   strengths: string[]
   weaknesses: string[]
@@ -94,6 +96,7 @@ export interface AITradeReview {
   timing_analysis?: string
   position_analysis?: string
   emotion_analysis?: string
+  attribution_analysis?: string
   actual_pnl?: number
   optimal_pnl?: number
   missed_profit?: number
@@ -107,6 +110,8 @@ export interface TradeReviewReport {
   review_id: string
   review_type: ReviewType
   status: ReviewStatus
+  source?: 'paper' | 'position' | 'real'
+  error_message?: string
   trade_info: TradeInfo
   market_snapshot: MarketSnapshot
   ai_review: AITradeReview
@@ -176,7 +181,7 @@ export interface CreateTradeReviewRequest {
 export interface SaveAsCaseRequest {
   review_id: string
   tags?: string[]
-  source?: 'paper' | 'position'  // 数据源: paper(模拟交易) 或 position(持仓操作)
+  source?: 'paper' | 'position' | 'real'  // 数据源: paper(模拟交易) 或 position(持仓操作)
 }
 
 /** 复盘历史筛选参数 */

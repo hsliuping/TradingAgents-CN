@@ -475,7 +475,8 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Plus, DataAnalysis, PieChart, List, Clock, ArrowDown, Document } from '@element-plus/icons-vue'
+import { Refresh, Plus, PieChart, List, Clock, ArrowDown } from '@element-plus/icons-vue'
+import type { TabPaneName } from 'element-plus'
 import { portfolioApi, type PositionItem, type PortfolioStats, type PortfolioAnalysisReport } from '@/api/portfolio'
 import AddPositionDialog from './components/AddPositionDialog.vue'
 import AnalysisResultDialog from './components/AnalysisResultDialog.vue'
@@ -494,7 +495,6 @@ const router = useRouter()
 
 // 状态
 const loading = ref(false)
-const analyzing = ref(false)
 const positions = ref<PositionItem[]>([])
 const stats = ref<PortfolioStats | null>(null)
 const accountCardRef = ref<InstanceType<typeof AccountCard> | null>(null)
@@ -638,7 +638,7 @@ const aggregatePositionsByCode = (positions: PositionItem[]): AggregatedPosition
 
   // 合并每组的数据
   const aggregated: AggregatedPosition[] = []
-  for (const [code, positionList] of map.entries()) {
+  for (const [, positionList] of map.entries()) {
     const totalQuantity = positionList.reduce((sum, p) => sum + p.quantity, 0)
     const totalCostDiluted = positionList.reduce((sum, p) => sum + (p.cost_price * p.quantity), 0)
     const totalCostOriginal = positionList.reduce((sum, p) => {
@@ -757,7 +757,7 @@ const loadStats = async () => {
 }
 
 // Tab 切换
-const handleTabChange = (tabName: string) => {
+const handleTabChange = (_tabName: TabPaneName) => {
   selectedMarket.value = 'all'
   paperSelectedMarket.value = 'all'
   filterPositions()
@@ -882,26 +882,6 @@ const goToStockDetail = (code: string) => {
     name: 'StockDetail',
     params: { code }
   })
-}
-
-// AI分析（整体持仓）
-const startAnalysis = async () => {
-  if (!positions.value.length) {
-    ElMessage.warning('请先添加持仓数据')
-    return
-  }
-
-  analyzing.value = true
-  try {
-    const res = await portfolioApi.analyzePortfolio({ include_paper: activeTab.value !== 'real' })
-    analysisReport.value = res.data || null
-    showAnalysisDialog.value = true
-    ElMessage.success('分析完成')
-  } catch (e: any) {
-    ElMessage.error(e.message || '分析失败')
-  } finally {
-    analyzing.value = false
-  }
 }
 
 // 单股持仓分析

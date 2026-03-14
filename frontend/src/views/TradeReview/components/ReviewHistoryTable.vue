@@ -72,6 +72,8 @@ import { computed } from 'vue'
 import type { ReviewListItem, ReviewType, ReviewStatus } from '@/api/review'
 import { formatDateTime } from '@/utils/datetime'
 
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
 const props = defineProps<{
   items: ReviewListItem[]
   loading: boolean
@@ -97,7 +99,7 @@ const formatPnl = (value: number) => {
   return prefix + value.toFixed(2)
 }
 
-const getScoreType = (score: number) => {
+const getScoreType = (score: number): TagType => {
   if (score >= 80) return 'success'
   if (score >= 60) return 'warning'
   return 'danger'
@@ -112,8 +114,8 @@ const getReviewTypeLabel = (type: ReviewType) => {
   return map[type] || type
 }
 
-const getStatusType = (status: ReviewStatus) => {
-  const map: Record<string, string> = {
+const getStatusType = (status: ReviewStatus): TagType => {
+  const map: Record<string, TagType> = {
     pending: 'info',
     processing: 'warning',
     completed: 'success',

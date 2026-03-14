@@ -24,9 +24,9 @@
         >
           <el-option
             v-for="system in tradingSystems"
-            :key="system.id"
+            :key="String(system.id || system.name)"
             :label="system.name"
-            :value="system.id"
+            :value="String(system.id || '')"
           >
             <div style="display: flex; justify-content: space-between; align-items: center">
               <span>{{ system.name }}</span>
@@ -154,11 +154,10 @@
 
 <script setup lang="ts">
 import { ref, watch, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { DataAnalysis } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionChange } from '@/api/portfolio'
-import { reviewApi, type TradeReviewReport, type ReviewListItem } from '@/api/review'
+import { reviewApi, type TradeReviewReport } from '@/api/review'
 import * as tradingSystemApi from '@/api/tradingSystem'
 import type { TradingSystem } from '@/api/tradingSystem'
 
@@ -175,7 +174,6 @@ const props = defineProps<{
 }>()
 const emit = defineEmits(['update:modelValue'])
 
-const router = useRouter()
 const visible = ref(props.modelValue)
 const loading = ref(false)
 const analyzing = ref(false)
