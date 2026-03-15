@@ -18,6 +18,8 @@ from app.schemas.intelligent_assistant import ChatRequest
 from app.schemas.intelligent_screening import (
     ScreeningChatResponse,
     ScreeningConversationResponse,
+    ScreeningConversationListResponse,
+    ScreeningConversationSummary,
     ScreeningMessageItem,
 )
 from app.services.intelligent_screening_service import IntelligentScreeningService
@@ -43,7 +45,7 @@ async def chat(
     """
     user_id = str(user.get("_id", user.get("id", "")))
     service = IntelligentScreeningService(db)
-    result = await service.chat(user_id, req.message)
+    result = await service.chat(user_id, req.message, conversation_id=req.conversation_id)
     return result
 
 
@@ -104,6 +106,7 @@ async def websocket_chat(
                 continue
 
             message = str(payload.get("message") or "").strip()
+            conversation_id = payload.get("conversation_id")
             if not message:
                 await websocket.send_json({
                     "type": "error",
@@ -125,7 +128,12 @@ async def websocket_chat(
             })
 
             try:
-                result = await service.chat(user_id, message, progress_callback=progress_sender)
+                result = await service.chat(
+                    user_id,
+                    message,
+                    conversation_id=conversation_id,
+                    progress_callback=progress_sender,
+                )
                 await websocket.send_json({"type": "final", "data": result})
             except Exception as e:
                 logger.exception("[智能筛选WS] 处理失败")
@@ -142,13 +150,14 @@ async def websocket_chat(
 
 @router.get("/conversation", response_model=ScreeningConversationResponse, summary="获取筛选对话历史")
 async def get_conversation(
+    conversation_id: str | None = Query(None),
     user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
     """获取当前用户的智能筛选对话历史"""
     user_id = str(user.get("_id", user.get("id", "")))
     service = IntelligentScreeningService(db)
-    messages = await service.get_conversation(user_id)
+    resolved_conversation_id, messages = await service.get_conversation(user_id, conversation_id)
     items = []
     for m in messages:
         items.append(ScreeningMessageItem(
@@ -159,17 +168,31 @@ async def get_conversation(
             phase=m.get("phase"),
             is_fallback=m.get("is_fallback"),
         ))
-    return ScreeningConversationResponse(messages=items)
+    return ScreeningConversationResponse(conversation_id=resolved_conversation_id, messages=items)
+
+
+@router.get("/conversations", response_model=ScreeningConversationListResponse, summary="获取筛选历史会话列表")
+async def list_conversations(
+    user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """获取当前用户的智能筛选历史会话列表"""
+    user_id = str(user.get("_id", user.get("id", "")))
+    service = IntelligentScreeningService(db)
+    conversations = await service.list_conversations(user_id)
+    items = [ScreeningConversationSummary(**item) for item in conversations]
+    return ScreeningConversationListResponse(items=items)
 
 
 @router.delete("/conversation", summary="清空筛选对话历史")
 async def clear_conversation(
+    conversation_id: str | None = Query(None),
     user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
     """清空当前用户的智能筛选对话历史"""
     user_id = str(user.get("_id", user.get("id", "")))
     service = IntelligentScreeningService(db)
-    await service.clear_conversation(user_id)
+    await service.clear_conversation(user_id, conversation_id)
     return {"message": "已清空智能筛选对话"}
 

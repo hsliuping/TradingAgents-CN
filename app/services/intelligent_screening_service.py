@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -246,10 +247,59 @@ class IntelligentScreeningService:
         except Exception as e:
             logger.debug("[智能筛选] 进度推送失败(忽略): %s", e)
 
+    def _build_conversation_title(self, message: str) -> str:
+        text = re.sub(r"\s+", " ", (message or "").strip())
+        if not text:
+            return "未命名筛选"
+        return text[:30]
+
+    def _format_dt(self, value: Any) -> Optional[str]:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, str):
+            return value
+        return None
+
+    async def _ensure_conversation_doc_identity(self, doc: Optional[dict]) -> Optional[dict]:
+        if not doc:
+            return None
+
+        messages = doc.get("messages") or []
+        first_user_message = next(
+            (item.get("content", "") for item in messages if item.get("role") == "user"),
+            "",
+        )
+        updates: Dict[str, Any] = {}
+        if not doc.get("conversation_id"):
+            updates["conversation_id"] = uuid.uuid4().hex
+        if not doc.get("title"):
+            updates["title"] = self._build_conversation_title(first_user_message)
+
+        if updates:
+            await self._db.screening_conversations.update_one({"_id": doc["_id"]}, {"$set": updates})
+            doc.update(updates)
+
+        return doc
+
+    async def _get_conversation_doc(self, user_id: str, conversation_id: Optional[str] = None) -> Optional[dict]:
+        if conversation_id:
+            doc = await self._db.screening_conversations.find_one({
+                "user_id": user_id,
+                "conversation_id": conversation_id,
+            })
+            return await self._ensure_conversation_doc_identity(doc)
+
+        doc = await self._db.screening_conversations.find_one(
+            {"user_id": user_id},
+            sort=[("updated_at", -1), ("created_at", -1)],
+        )
+        return await self._ensure_conversation_doc_identity(doc)
+
     async def chat(
         self,
         user_id: str,
         message: str,
+        conversation_id: Optional[str] = None,
         progress_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
     ) -> Dict[str, Any]:
         """
@@ -265,13 +315,16 @@ class IntelligentScreeningService:
                 "tools_used": [],
                 "stocks": [],
                 "phase": "result",
+                "conversation_id": conversation_id,
                 "is_fallback": False,
             }
 
         set_current_user_id(user_id)
 
         # 1. 获取历史对话
-        history = await self._get_context_messages(user_id)
+        resolved_conversation_id, history = await self._get_context_messages(user_id, conversation_id)
+        if not resolved_conversation_id:
+            resolved_conversation_id = conversation_id or uuid.uuid4().hex
 
         # 2. 判断当前应进入哪个阶段
         phase = self._determine_phase(history, message)
@@ -372,7 +425,7 @@ class IntelligentScreeningService:
                     f"且本轮处理已超时（超过 {timeout_seconds} 秒）。",
                 )
                 await self._save_message(
-                    user_id, message, reply, tools_used, fallback_stocks, "result", is_fallback=True,
+                    user_id, resolved_conversation_id, message, reply, tools_used, fallback_stocks, "result", is_fallback=True,
                 )
                 await self._emit_progress(
                     progress_callback,
@@ -386,6 +439,7 @@ class IntelligentScreeningService:
                     "tools_used": tools_used,
                     "stocks": fallback_stocks,
                     "phase": "result",
+                    "conversation_id": resolved_conversation_id,
                     "is_fallback": True,
                 }
 
@@ -396,8 +450,14 @@ class IntelligentScreeningService:
                 "• 指定行业后再筛选\n"
                 "• 稍后重试"
             )
-            await self._save_message(user_id, message, reply, tools_used, [], "result")
-            return {"reply": reply, "tools_used": tools_used, "stocks": [], "phase": "result"}
+            await self._save_message(user_id, resolved_conversation_id, message, reply, tools_used, [], "result")
+            return {
+                "reply": reply,
+                "tools_used": tools_used,
+                "stocks": [],
+                "phase": "result",
+                "conversation_id": resolved_conversation_id,
+            }
         except Exception as e:
             logger.exception("[智能筛选] 对话失败")
             await self._emit_progress(
@@ -407,8 +467,14 @@ class IntelligentScreeningService:
                 message=f"处理失败：{str(e)}",
             )
             reply = f"处理您的请求时发生错误：{str(e)}。请稍后重试。"
-            await self._save_message(user_id, message, reply, tools_used, [], "result")
-            return {"reply": reply, "tools_used": tools_used, "stocks": [], "phase": "result"}
+            await self._save_message(user_id, resolved_conversation_id, message, reply, tools_used, [], "result")
+            return {
+                "reply": reply,
+                "tools_used": tools_used,
+                "stocks": [],
+                "phase": "result",
+                "conversation_id": resolved_conversation_id,
+            }
 
         # 提取股票（仅 result 阶段）
         stocks = self._extract_stocks(reply) if phase == "result" else []
@@ -429,21 +495,23 @@ class IntelligentScreeningService:
                     message=f"未查到符合条件的股票，已改为返回 {len(fallback_stocks)} 只优质股替代候选",
                     stocks=fallback_stocks,
                 )
-                await self._save_message(user_id, message, reply, tools_used, stocks, phase, is_fallback=True)
+                await self._save_message(user_id, resolved_conversation_id, message, reply, tools_used, stocks, phase, is_fallback=True)
                 return {
                     "reply": reply,
                     "tools_used": tools_used,
                     "stocks": stocks,
                     "phase": phase,
+                    "conversation_id": resolved_conversation_id,
                     "is_fallback": True,
                 }
 
-        await self._save_message(user_id, message, reply, tools_used, stocks, phase)
+        await self._save_message(user_id, resolved_conversation_id, message, reply, tools_used, stocks, phase)
         return {
             "reply": reply,
             "tools_used": tools_used,
             "stocks": stocks,
             "phase": phase,
+            "conversation_id": resolved_conversation_id,
             "is_fallback": False,
         }
 
@@ -488,13 +556,13 @@ class IntelligentScreeningService:
         # last_phase == "result" → 在结果基础上调整 → 直接再次执行
         return "result"
 
-    async def _get_context_messages(self, user_id: str) -> list:
+    async def _get_context_messages(self, user_id: str, conversation_id: Optional[str] = None) -> tuple[str, list]:
         """获取最近 N 条对话历史，用于传给 LLM 作为上下文"""
-        doc = await self._db.screening_conversations.find_one({"user_id": user_id})
+        doc = await self._get_conversation_doc(user_id, conversation_id)
         if not doc or not doc.get("messages"):
-            return []
+            return conversation_id or "", []
         messages = doc["messages"]
-        return messages[-MAX_CONTEXT_MESSAGES:]
+        return doc.get("conversation_id", conversation_id or ""), messages[-MAX_CONTEXT_MESSAGES:]
 
     def _build_tool_summary(self, tools: Optional[list] = None) -> str:
         """将当前注册的工具列表转为文字说明，供 planning 阶段系统提示词使用"""
@@ -734,7 +802,7 @@ class IntelligentScreeningService:
         return []
 
     async def _save_message(
-        self, user_id: str, user_msg: str, assistant_reply: str,
+        self, user_id: str, conversation_id: str, user_msg: str, assistant_reply: str,
         tools_used: List[str], stocks: list, phase: str, is_fallback: bool = False,
     ) -> None:
         """持久化对话消息到 screening_conversations"""
@@ -750,7 +818,7 @@ class IntelligentScreeningService:
             "timestamp": now,
         }
         await self._db.screening_conversations.update_one(
-            {"user_id": user_id},
+            {"user_id": user_id, "conversation_id": conversation_id},
             {
                 "$push": {
                     "messages": {
@@ -759,7 +827,11 @@ class IntelligentScreeningService:
                     }
                 },
                 "$set": {"updated_at": now},
-                "$setOnInsert": {"created_at": now},
+                "$setOnInsert": {
+                    "conversation_id": conversation_id,
+                    "title": self._build_conversation_title(user_msg),
+                    "created_at": now,
+                },
             },
             upsert=True,
         )
@@ -846,14 +918,54 @@ class IntelligentScreeningService:
 
         return {"reply": reply, "stocks": stocks, "phase": "result"}
 
-    async def get_conversation(self, user_id: str) -> list:
+    async def get_conversation(self, user_id: str, conversation_id: Optional[str] = None) -> tuple[Optional[str], list]:
         """获取完整对话历史"""
-        doc = await self._db.screening_conversations.find_one({"user_id": user_id})
+        doc = await self._get_conversation_doc(user_id, conversation_id)
         if not doc:
-            return []
-        return doc.get("messages", [])
+            return conversation_id, []
+        return doc.get("conversation_id"), doc.get("messages", [])
 
-    async def clear_conversation(self, user_id: str) -> None:
+    async def list_conversations(self, user_id: str) -> list:
+        """获取会话列表摘要"""
+        cursor = self._db.screening_conversations.find({"user_id": user_id}).sort([
+            ("updated_at", -1),
+            ("created_at", -1),
+        ])
+        docs = await cursor.to_list(length=100)
+
+        items = []
+        for raw_doc in docs:
+            doc = await self._ensure_conversation_doc_identity(raw_doc)
+            messages = doc.get("messages") or []
+            preview = ""
+            for item in reversed(messages):
+                content = str(item.get("content") or "").strip()
+                if content:
+                    preview = re.sub(r"\s+", " ", content)[:80]
+                    break
+
+            items.append({
+                "conversation_id": doc.get("conversation_id"),
+                "title": doc.get("title") or self._build_conversation_title(preview),
+                "preview": preview,
+                "message_count": len(messages),
+                "created_at": self._format_dt(doc.get("created_at")),
+                "updated_at": self._format_dt(doc.get("updated_at")),
+            })
+
+        return items
+
+    async def clear_conversation(self, user_id: str, conversation_id: Optional[str] = None) -> None:
         """清空对话历史"""
-        await self._db.screening_conversations.delete_one({"user_id": user_id})
+        if conversation_id:
+            await self._db.screening_conversations.delete_one({
+                "user_id": user_id,
+                "conversation_id": conversation_id,
+            })
+            return
+
+        doc = await self._get_conversation_doc(user_id, None)
+        if not doc:
+            return
+        await self._db.screening_conversations.delete_one({"_id": doc["_id"]})
 

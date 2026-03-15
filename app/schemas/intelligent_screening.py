@@ -40,6 +40,7 @@ class ScreeningChatResponse(BaseModel):
     tools_used: List[str] = Field(default_factory=list, description="使用的工具列表")
     stocks: List[StockRecommendation] = Field(default_factory=list, description="推荐的股票列表")
     phase: str = Field("result", description="当前阶段: confirmation=需求确认, planning=执行规划, result=筛选结果")
+    conversation_id: Optional[str] = Field(None, description="当前会话 ID")
     is_fallback: bool = Field(False, description="是否为降级候选结果（LLM超时后由数据库粗筛兜底）")
 
 
@@ -55,5 +56,21 @@ class ScreeningMessageItem(BaseModel):
 
 class ScreeningConversationResponse(BaseModel):
     """筛选对话历史响应"""
+    conversation_id: Optional[str] = Field(None, description="当前会话 ID")
     messages: List[ScreeningMessageItem] = Field(default_factory=list)
+
+
+class ScreeningConversationSummary(BaseModel):
+    """筛选会话摘要"""
+    conversation_id: str = Field(..., description="会话 ID")
+    title: str = Field("", description="会话标题")
+    preview: str = Field("", description="最近一条消息摘要")
+    message_count: int = Field(0, description="消息数")
+    created_at: Optional[str] = Field(None, description="创建时间")
+    updated_at: Optional[str] = Field(None, description="更新时间")
+
+
+class ScreeningConversationListResponse(BaseModel):
+    """筛选会话列表响应"""
+    items: List[ScreeningConversationSummary] = Field(default_factory=list)
 
