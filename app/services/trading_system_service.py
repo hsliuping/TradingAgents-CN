@@ -61,6 +61,27 @@ class TradingSystemService:
             return status == TradingSystemStatus.PUBLISHED
         return str(status) == TradingSystemStatus.PUBLISHED.value
 
+    def get_system_validation_warnings(self, system: Optional[TradingSystem]) -> List[str]:
+        """返回交易计划的规则与可执行性提醒。"""
+        if not system:
+            return []
+
+        warnings: List[str] = []
+        risk_mgmt = getattr(system, "risk_management", None)
+        take_profit = getattr(risk_mgmt, "take_profit", {}) or {}
+
+        if take_profit.get("type") == "scaled":
+            levels = take_profit.get("levels", []) if isinstance(take_profit.get("levels"), list) else []
+            total_ratio = sum(float(item.get("sell_ratio", 0)) for item in levels)
+            if total_ratio > 1.0001:
+                warnings.append(f"当前分批止盈总卖出比例为 {total_ratio * 100:.1f}%，超过了100%上限。")
+
+            warnings.append(
+                "A股普通买卖默认按100股整数倍成交。当前分批止盈规则是按仓位比例描述，实际执行时需要结合持仓股数按整手取整，避免出现30股、60股、80股这类常规无法成交的数量。"
+            )
+
+        return warnings
+
     def create_system(self, user_id: str, system_data: TradingSystemCreate) -> TradingSystem:
         """创建交易计划
         

@@ -161,4 +161,5 @@ def run_recent_information_search(query: str) -> str:
 def search_recent_information(
     query: Annotated[str, "搜索关键词，例如：比亚迪 伯克希尔 减持 持股比例，或 宁德时代 最新 公告"],
 ) -> str:
+    """搜索近期公开信息，用于最新事实确认类问题。"""
     return run_recent_information_search(query)

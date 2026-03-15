@@ -10,6 +10,8 @@ export interface ChatRequest {
   analysis_type?: 'general' | 'industry' | 'stock'
   industry?: string
   stock_symbol?: string
+  workflow_id?: string
+  node_id?: string
 }
 
 export interface ChatResponse {
@@ -27,6 +29,11 @@ export interface DiffRequest {
   agent_name: string
   proposed_template?: Record<string, string>
   proposed_policy?: Record<string, unknown>
+  analysis_type?: 'general' | 'industry' | 'stock'
+  industry?: string
+  stock_symbol?: string
+  workflow_id?: string
+  node_id?: string
 }
 
 export interface DiffResponse {
@@ -34,6 +41,36 @@ export interface DiffResponse {
   before: { template: Record<string, string>; assembled: string }
   after: { template: Record<string, string>; assembled: string }
   diff_summary: string
+}
+
+export interface ApplyRequest extends DiffRequest {
+  session_id?: string
+}
+
+export interface ApplyResponse {
+  success: boolean
+  applied: boolean
+  review_status: string
+  template_action: string
+  template?: {
+    template_id: string
+    template_name: string
+    version: number
+  } | null
+  policies: Array<Record<string, unknown>>
+  validation_result: {
+    passed: boolean
+    summary: string
+    checks: Record<string, unknown>
+  }
+  diff: DiffResponse
+}
+
+export interface RollbackResponse {
+  success: boolean
+  rolled_back: boolean
+  review_status: string
+  summary: string[]
 }
 
 // ==================== API 函数 ====================
@@ -98,6 +135,14 @@ export const promptDesignApi = {
   /** 修改前后对比 */
   diff: (data: DiffRequest): Promise<DiffResponse> =>
     request.post('/api/v1/prompt-design/diff', data),
+
+  /** 确认并应用结构化修改 */
+  apply: (data: ApplyRequest): Promise<ApplyResponse> =>
+    request.post('/api/v1/prompt-design/apply', data),
+
+  /** 回退最近一次应用 */
+  rollback: (session_id: string): Promise<RollbackResponse> =>
+    request.post('/api/v1/prompt-design/rollback', { session_id }),
 }
 
 export default promptDesignApi

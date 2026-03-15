@@ -176,8 +176,9 @@
           <p><strong>建议：</strong></p>
           <ul>
             <li><strong>止损：</strong>短线 5-8%，中线 10-15%，长线 20-25%</li>
-            <li><strong>止盈：</strong>可以使用移动止盈（如跌破5日线）或分批止盈（涨20%卖1/3，涨40%卖1/3）</li>
+            <li><strong>止盈：</strong>可以使用移动止盈，或分批止盈后按持仓整手数量换算执行数量</li>
             <li><strong>盈亏比：</strong>建议至少 1:2（止损10%，止盈至少20%）</li>
+            <li><strong>A股执行：</strong>普通买卖默认按100股整数倍成交，零股卖出不是常规默认场景</li>
           </ul>
         </div>
       </el-alert>
@@ -259,6 +260,14 @@
             <template v-if="modelValue.take_profit.type === 'scaled'">
               <el-form-item label="分批止盈规则">
                 <div class="dynamic-list">
+                  <el-alert
+                    title="A股执行提醒"
+                    type="warning"
+                    :closable="false"
+                    class="ratio-alert"
+                  >
+                    分批止盈这里配置的是“仓位比例”，不是最终下单股数。A股普通买卖应按100股整数倍执行，实际卖出时需要结合持仓股数按整手取整。
+                  </el-alert>
                   <el-alert
                     :type="scaledSellRatioExceed ? 'error' : 'success'"
                     :closable="false"

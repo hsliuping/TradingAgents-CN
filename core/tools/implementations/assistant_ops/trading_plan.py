@@ -130,6 +130,11 @@ async def get_active_trading_plan() -> str:
         lines.append(_fmt_rules_section("复盘规则", system.review))
         lines.append(_fmt_rules_section("纪律规则", system.discipline))
 
+        warnings = service.get_system_validation_warnings(system)
+        if warnings:
+            lines.append("\n【执行提醒】")
+            lines.extend([f"- {item}" for item in warnings])
+
         return "\n".join(line for line in lines if line)
     except Exception as e:
         logger.exception("[get_active_trading_plan] 获取投资计划失败: %s", e)

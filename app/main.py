@@ -401,18 +401,23 @@ async def lifespan(app: FastAPI):
         qq_cfg_doc = await gw_db.system_configs.find_one({"config_key": "gateway_qq"})
         if qq_cfg_doc and qq_cfg_doc.get("config_value"):
             qq_cfg = qq_cfg_doc["config_value"]
-            connection_mode = qq_cfg.get("connection_mode", "webhook")
+            connection_mode = qq_cfg.get("connection_mode") or "websocket"
+            if not qq_cfg.get("connection_mode"):
+                logger.warning("⚠️ Gateway QQ Bot 未配置 connection_mode，按兼容策略默认使用 WebSocket 模式")
 
-            # 注册适配器（Webhook 和 WebSocket 模式都需要，用于发送回复）
-            qq_adapter = QQAdapter(config=qq_cfg)
-            gateway_router.register_adapter(qq_adapter)
-
-            if connection_mode == "websocket" and qq_cfg.get("enabled", True):
-                # WebSocket 模式：启动后台 WS 客户端
-                await gateway_router.start_ws_client(qq_cfg, gw_db)
-                logger.info("✅ Gateway QQ Bot 已启动（WebSocket 模式）")
+            if qq_cfg.get("enabled", True) and (not qq_cfg.get("app_id") or not qq_cfg.get("app_secret")):
+                logger.warning("⚠️ Gateway QQ Bot 已启用但缺少 app_id 或 app_secret，跳过启动")
             else:
-                logger.info("✅ Gateway QQ Bot 适配器已注册（Webhook 模式）")
+                # 注册适配器（Webhook 和 WebSocket 模式都需要，用于发送回复）
+                qq_adapter = QQAdapter(config=qq_cfg)
+                gateway_router.register_adapter(qq_adapter)
+
+                if connection_mode == "websocket" and qq_cfg.get("enabled", True):
+                    # WebSocket 模式：启动后台 WS 客户端
+                    await gateway_router.start_ws_client(qq_cfg, gw_db)
+                    logger.info("✅ Gateway QQ Bot 已启动（WebSocket 模式）")
+                else:
+                    logger.info("✅ Gateway QQ Bot 适配器已注册（Webhook 模式）")
         else:
             logger.info("ℹ️ Gateway QQ Bot 未配置（跳过），需在 system_configs 中添加 config_key='gateway_qq'")
     except Exception as e:

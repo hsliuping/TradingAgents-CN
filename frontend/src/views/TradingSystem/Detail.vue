@@ -110,6 +110,21 @@
       </el-descriptions>
     </el-card>
 
+    <el-alert
+      v-if="system?.validation_warnings?.length"
+      type="warning"
+      :closable="false"
+      show-icon
+      class="validation-warning-card"
+    >
+      <template #title>交易计划执行提醒</template>
+      <template #default>
+        <div v-for="(warning, index) in system.validation_warnings" :key="index" class="validation-warning-item">
+          {{ warning }}
+        </div>
+      </template>
+    </el-alert>
+
     <!-- 规则模块 -->
     <div v-if="system" class="rules-section">
       <!-- 选股规则 -->
@@ -1184,6 +1199,14 @@ async function viewHistoryDetail(evaluationId: string) {
 
 .info-card {
   margin-bottom: 24px;
+}
+
+.validation-warning-card {
+  margin-bottom: 24px;
+}
+
+.validation-warning-item {
+  line-height: 1.7;
 }
 
 .rules-section {
