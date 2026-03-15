@@ -394,8 +394,10 @@ async def lifespan(app: FastAPI):
         from app.core.database import get_mongo_db
         from core.gateway.router import gateway_router
         from core.gateway.adapters.qq import QQAdapter
+        from core.gateway.session import SessionManager
 
         gw_db = get_mongo_db()
+        await SessionManager(gw_db).ensure_indexes()
         qq_cfg_doc = await gw_db.system_configs.find_one({"config_key": "gateway_qq"})
         if qq_cfg_doc and qq_cfg_doc.get("config_value"):
             qq_cfg = qq_cfg_doc["config_value"]
@@ -896,6 +898,29 @@ async def lifespan(app: FastAPI):
             name="交易日历缓存刷新（每日18:30）"
         )
         logger.info("🗓️ 交易日历缓存刷新任务已配置（每日 18:30 执行）")
+
+        # 外部渠道零星会话定期沉淀到研究主题
+        if settings.IM_TOPIC_DIGEST_ENABLED:
+            from app.core.database import get_mongo_db as _get_db
+            from app.services.im_topic_digest_service import IMTopicDigestService
+
+            digest_service = IMTopicDigestService(_get_db())
+
+            async def _run_im_topic_digest():
+                await digest_service.run_once(
+                    min_messages=settings.IM_TOPIC_DIGEST_MIN_MESSAGES,
+                    lookback_limit=settings.IM_TOPIC_DIGEST_LOOKBACK_LIMIT,
+                )
+
+            scheduler.add_job(
+                _run_im_topic_digest,
+                CronTrigger.from_crontab(settings.IM_TOPIC_DIGEST_CRON, timezone=settings.TIMEZONE),
+                id="im_topic_digest",
+                name="外部会话沉淀到研究主题",
+            )
+            logger.info("🧩 外部会话沉淀任务已配置: %s", settings.IM_TOPIC_DIGEST_CRON)
+        else:
+            logger.info("⏸️ 外部会话沉淀任务已关闭")
 
         scheduler.start()
 

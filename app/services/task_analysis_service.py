@@ -302,6 +302,43 @@ class TaskAnalysisService:
                 except Exception as profile_err:
                     self.logger.warning(f"⚠️ 更新用户画像失败(忽略): {profile_err}")
 
+                # 🔗 将已完成报告自动挂回当前研究主题；若无主题则进入“报告收纳”
+                try:
+                    from app.services.intelligent_assistant_service import write_report_back_to_assistant_thread
+
+                    preferred_thread_id = ((task.task_params or {}).get("_assistant_thread_id") or "").strip() or None
+                    report_summary = (
+                        formatted_result.get("summary")
+                        or formatted_result.get("executive_summary")
+                        or formatted_result.get("recommendation")
+                        or ""
+                    )
+                    writeback_message = (
+                        f"【分析报告已归档】{_stock_name}({_symbol})\n"
+                        f"任务ID: {task.task_id}\n"
+                        f"摘要: {(report_summary or '分析已完成，可在关联报告中查看。')[:300]}"
+                    )
+                    await write_report_back_to_assistant_thread(
+                        db=self.db,
+                        user_id=str(task.user_id),
+                        preferred_thread_id=preferred_thread_id,
+                        report_ref={
+                            "ref_type": "stock_report",
+                            "report_key": str(task.task_id),
+                            "source_collection": "unified_analysis_tasks",
+                            "title": f"{_stock_name}({_symbol}) 分析报告",
+                            "symbol": _symbol,
+                            "summary": (report_summary or "")[:400],
+                            "status": "completed",
+                            "task_id": str(task.task_id),
+                            "analysis_id": saved_analysis_id,
+                            "created_at": task.completed_at or now_tz(),
+                        },
+                        summary_message=writeback_message,
+                    )
+                except Exception as writeback_err:
+                    self.logger.warning(f"⚠️ 回写研究主题失败(忽略): {writeback_err}")
+
             # 保存到数据库（包含更新后的 analysis_id）
             await self._update_task(task)
 

@@ -19,6 +19,11 @@ _current_im_channel: contextvars.ContextVar[Optional[Dict[str, str]]] = contextv
     'current_im_channel', default=None
 )
 
+# 当前智能助手主题 ID（在 IntelligentAssistantService.chat 入口设置）
+_current_assistant_thread_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    'current_assistant_thread_id', default=None
+)
+
 
 def set_current_user_id(user_id: str) -> contextvars.Token:
     """设置当前用户 ID
@@ -79,4 +84,14 @@ def get_current_im_channel() -> Optional[Dict[str, str]]:
         {"channel_type": "qq", "channel_id": "c2c:xxx"} 或 None（非 IM 渠道）
     """
     return _current_im_channel.get()
+
+
+def set_current_assistant_thread_id(thread_id: Optional[str]) -> contextvars.Token:
+    """设置当前智能助手主题 ID"""
+    return _current_assistant_thread_id.set(thread_id)
+
+
+def get_current_assistant_thread_id() -> Optional[str]:
+    """获取当前智能助手主题 ID"""
+    return _current_assistant_thread_id.get()
 

@@ -234,6 +234,12 @@ class Settings(BaseSettings):
     FAVORITES_DATA_SYNC_ENABLED: bool = Field(default=True, description="启用自选股A股数据同步")
     FAVORITES_DATA_SYNC_CRON: str = Field(default="0 19 * * 1-5", description="自选股A股数据同步CRON表达式（交易日晚上7点）")
 
+    # 外部渠道无主题会话沉淀任务
+    IM_TOPIC_DIGEST_ENABLED: bool = Field(default=True, description="启用外部会话定期沉淀到研究主题")
+    IM_TOPIC_DIGEST_CRON: str = Field(default="30 22 * * *", description="外部会话沉淀CRON表达式，默认每日22:30")
+    IM_TOPIC_DIGEST_MIN_MESSAGES: int = Field(default=6, ge=2, le=100, description="触发沉淀所需的最少新增消息数")
+    IM_TOPIC_DIGEST_LOOKBACK_LIMIT: int = Field(default=20, ge=6, le=200, description="每次沉淀读取的最大消息数")
+
     # Tushare数据初始化配置
     TUSHARE_INIT_HISTORICAL_DAYS: int = Field(default=365, ge=1, le=3650, description="初始化历史数据天数")
     TUSHARE_INIT_BATCH_SIZE: int = Field(default=100, ge=10, le=1000, description="初始化批处理大小")

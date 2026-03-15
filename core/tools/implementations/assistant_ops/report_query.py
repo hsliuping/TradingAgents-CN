@@ -12,7 +12,7 @@ from typing import Annotated, Optional
 from langchain_core.tools import tool
 
 from core.tools.base import register_tool
-from core.tools.context import require_current_user_id
+from core.tools.context import get_current_assistant_thread_id, require_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -125,8 +125,11 @@ async def get_report_detail(
 ) -> str:
     """获取指定分析任务的完整报告，格式化为 Markdown。"""
     try:
+        from app.core.database import get_mongo_db
         from app.services.task_analysis_service import get_task_analysis_service
+        from app.services.intelligent_assistant_service import attach_report_ref_to_thread
 
+        user_id = require_current_user_id()
         service = get_task_analysis_service()
         task = await service.get_task(task_id)
         if not task:
@@ -150,6 +153,24 @@ async def get_report_detail(
             lines.append("\n## 关键要点\n" + "\n".join(f"- {kp}" for kp in kps))
         if r.get("summary"):
             lines.append(f"\n## 摘要\n{r['summary']}")
+
+        db = get_mongo_db()
+        await attach_report_ref_to_thread(
+            db,
+            user_id,
+            get_current_assistant_thread_id(),
+            {
+                "ref_type": "stock_report",
+                "report_key": task.task_id,
+                "source_collection": "unified_analysis_tasks",
+                "title": f"{sym} 分析报告",
+                "symbol": sym,
+                "summary": (r.get("summary") or r.get("recommendation") or "")[:400],
+                "status": task.status,
+                "task_id": task.task_id,
+                "created_at": getattr(task, "created_at", None),
+            },
+        )
 
         lines.append(f"\n---\n_任务ID: {task.task_id} | 耗时: {task.execution_time:.1f}s_")
         return "\n".join(lines)
@@ -207,6 +228,7 @@ async def get_latest_report(
     try:
         from bson import ObjectId
         from app.core.database import get_mongo_db
+        from app.services.intelligent_assistant_service import attach_report_ref_to_thread
 
         user_id = require_current_user_id()
         db = get_mongo_db()
@@ -267,6 +289,23 @@ async def get_latest_report(
         if summary:
             lines.append(f"\n【综合摘要】\n{summary}")
 
+        await attach_report_ref_to_thread(
+            db,
+            user_id,
+            get_current_assistant_thread_id(),
+            {
+                "ref_type": "stock_report",
+                "report_key": task_id,
+                "source_collection": "unified_analysis_tasks",
+                "title": f"{actual_symbol} 分析报告",
+                "symbol": actual_symbol,
+                "summary": (summary or rec or reasoning or "")[:400],
+                "status": doc.get("status") or "completed",
+                "task_id": task_id,
+                "created_at": created,
+            },
+        )
+
         # ── 第二部分：各分析师摘录（按优先级，受总字数限制） ──
         reports: dict = r.get("reports") or {}
         if reports:
@@ -292,3 +331,122 @@ async def get_latest_report(
     except Exception as e:
         logger.exception("[get_latest_report] 获取最新报告失败: %s", e)
         return f"获取最新报告时出错: {str(e)}"
+
+
+@tool
+@register_tool(
+    tool_id="search_attachable_reports",
+    name="搜索可关联旧报告",
+    description="搜索当前主题下可手动关联的旧报告。适合用户说‘把宁德时代旧报告挂到当前主题前，先查一下有哪些旧报告可选’。",
+    category="assistant_ops",
+    is_online=True,
+    auto_register=True,
+)
+async def search_attachable_reports(
+    keyword: Annotated[Optional[str], "股票代码、公司名或报告关键词，如 宁德时代 / 比亚迪 / 300750"] = None,
+    report_type: Annotated[str, "报告类型：stock_report 单股报告；position_report 持仓报告"] = "stock_report",
+    limit: Annotated[int, "返回数量上限，默认 5"] = 5,
+) -> str:
+    """搜索当前主题可关联的旧报告。"""
+    try:
+        from app.core.database import get_mongo_db
+        from app.services.intelligent_assistant_service import search_assistant_attachable_reports
+
+        user_id = require_current_user_id()
+        thread_id = get_current_assistant_thread_id()
+        if not thread_id:
+            return "当前没有选中的研究主题，无法搜索可关联报告。"
+
+        db = get_mongo_db()
+        items = await search_assistant_attachable_reports(
+            db,
+            user_id,
+            thread_id,
+            ref_type=(report_type or "stock_report").strip() or "stock_report",
+            keyword=(keyword or "").strip() or None,
+            limit=max(1, min(limit, 10)),
+        )
+        if not items:
+            target = (keyword or "历史报告").strip() or "历史报告"
+            return f"未找到与“{target}”匹配的可关联旧报告。"
+
+        lines = [f"找到 {len(items)} 条可关联旧报告："]
+        for item in items:
+            title = item.get("title") or "未命名报告"
+            symbol = item.get("symbol") or ""
+            created_at = item.get("created_at")
+            if hasattr(created_at, "strftime"):
+                created_text = created_at.strftime("%Y-%m-%d %H:%M")
+            else:
+                created_text = str(created_at)[:16] if created_at else "未知时间"
+            report_key = item.get("report_key") or ""
+            lines.append(f"- {title} | {symbol} | {created_text} | key={report_key}")
+        lines.append("如需直接挂到当前主题，可继续说：把这份旧报告关联到当前主题。")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.exception("[search_attachable_reports] 搜索可关联旧报告失败: %s", e)
+        return f"搜索可关联旧报告时出错: {str(e)}"
+
+
+@tool
+@register_tool(
+    tool_id="attach_existing_report_to_current_topic",
+    name="关联旧报告到当前主题",
+    description="把用户历史上已经生成过的旧报告直接挂到当前研究主题。适合用户说‘把宁德时代旧报告关联到当前主题’。默认关联最新匹配的一份。",
+    category="assistant_ops",
+    is_online=True,
+    auto_register=True,
+)
+async def attach_existing_report_to_current_topic(
+    keyword: Annotated[str, "股票代码、公司名或报告关键词，如 宁德时代 / 比亚迪 / 300750"],
+    report_type: Annotated[str, "报告类型：stock_report 单股报告；position_report 持仓报告"] = "stock_report",
+) -> str:
+    """根据关键词将最新匹配的旧报告挂到当前主题。"""
+    try:
+        from app.core.database import get_mongo_db
+        from app.services.intelligent_assistant_service import (
+            attach_existing_report_to_thread,
+            search_assistant_attachable_reports,
+        )
+
+        user_id = require_current_user_id()
+        thread_id = get_current_assistant_thread_id()
+        if not thread_id:
+            return "当前没有选中的研究主题，无法关联旧报告。"
+
+        keyword_clean = (keyword or "").strip()
+        if not keyword_clean:
+            return "请提供股票代码、公司名或报告关键词，例如：宁德时代、比亚迪、300750。"
+
+        db = get_mongo_db()
+        matches = await search_assistant_attachable_reports(
+            db,
+            user_id,
+            thread_id,
+            ref_type=(report_type or "stock_report").strip() or "stock_report",
+            keyword=keyword_clean,
+            limit=3,
+        )
+        if not matches:
+            return f"未找到与“{keyword_clean}”匹配的旧报告，暂时无法关联。"
+
+        target = matches[0]
+        attached_ref = await attach_existing_report_to_thread(
+            db,
+            user_id,
+            thread_id,
+            target.get("ref_type") or report_type,
+            target.get("report_key") or "",
+        )
+        if not attached_ref:
+            return f"找到了“{keyword_clean}”的旧报告，但关联失败。"
+
+        title = attached_ref.get("title") or keyword_clean
+        report_key = attached_ref.get("report_key") or ""
+        extra = ""
+        if len(matches) > 1:
+            extra = f"\n另外还找到 {len(matches) - 1} 条相近历史报告，如需可继续指定日期或让我继续关联。"
+        return f"已将旧报告《{title}》关联到当前主题。\n报告标识: {report_key}{extra}"
+    except Exception as e:
+        logger.exception("[attach_existing_report_to_current_topic] 关联旧报告失败: %s", e)
+        return f"关联旧报告时出错: {str(e)}"

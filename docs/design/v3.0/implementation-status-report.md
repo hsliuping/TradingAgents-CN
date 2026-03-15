@@ -9,7 +9,7 @@
 ## 一、Phase 1：分析助理操作工具升级
 
 | 设计项 | 设计文档 | 实现状态 | 代码位置 |
-|--------|----------|----------|----------|
+| -------- | ---------- | ---------- | ---------- |
 | 分析触发 3 工具 | implementation-plan §1.3.2 | ✅ 已实现 | `core/tools/implementations/assistant_ops/analysis_trigger.py`：`trigger_stock_analysis`、`trigger_batch_analysis`、`get_analysis_status` |
 | 报告查询 3 工具 | implementation-plan §1.3.3 | ✅ 已实现 | `core/tools/implementations/assistant_ops/report_query.py`：`search_reports`、`get_report_detail`、`get_latest_report` |
 | 定时任务 3 工具 | implementation-plan §1.3.4 | ✅ 已实现 | `core/tools/implementations/assistant_ops/schedule_manager.py`：`list_scheduled_configs`、`create_scheduled_analysis`、`toggle_scheduled_config` |
@@ -28,7 +28,7 @@
 ## 二、Phase 2：MCP Server
 
 | 设计项 | 设计文档 | 实现状态 | 代码位置 |
-|--------|----------|----------|----------|
+| -------- | ---------- | ---------- | ---------- |
 | FastMCP 入口 | implementation-plan §2.3.1、mcp-support §7 | ✅ 已实现 | `core/mcp/server.py`、`core/mcp/__main__.py` |
 | analyze_stock（wait/非阻塞） | implementation-plan §2.3.2、mcp-support §7.2 | ✅ 已实现 | `core/mcp/server.py`：`analyze_stock`，内部 `set_current_user_id`、create_and_execute_task / create_task + asyncio.create_task |
 | get_report | implementation-plan §2.3.2 | ✅ 已实现 | `core/mcp/server.py`：`get_report(task_id_or_symbol)` |
@@ -46,7 +46,7 @@
 ## 三、Phase 3：Gateway（IM 接入）
 
 | 设计项 | 设计文档 | 实现状态 | 代码位置 |
-|--------|----------|----------|----------|
+| -------- | ---------- | ---------- | ---------- |
 | Gateway 基础框架 | implementation-plan §3.3.1 | ✅ 已实现 | `core/gateway/router.py`、`models.py`、`session.py`、`user_mapping.py` |
 | GatewayMessage / GatewayResponse | implementation-plan §3.3.1 | ✅ 已实现 | `core/gateway/models.py` |
 | Webhook 路由 POST /api/gateway/{platform} | implementation-plan §3.3.1 | ✅ 已实现 | `app/routers/gateway.py`：`gateway_webhook`，委托 `gateway_router.handle_webhook` |
@@ -64,22 +64,25 @@
 ## 四、智能助手 v3.0（记忆、画像、格式、RAG）
 
 | 设计项 | 设计文档 | 实现状态 | 代码位置 |
-|--------|----------|----------|----------|
+| -------- | ---------- | ---------- | ---------- |
 | 滑动窗口记忆（最近 10 条） | intelligent-assistant §8.4 | ✅ 已实现 | `intelligent_assistant_service.py`：`get_assistant_conversation`，`chat_with_assistant` 中取最近 10 条、截断 800 字，注入 `history_messages` |
 | 结构化用户画像（assistant_user_profiles） | intelligent-assistant §8.5 | ✅ 已实现 | `assistant_user_profiles` 集合；`load_user_profile`、`_build_profile_block`；系统提示词中注入「你对该用户的了解」 |
 | 分析完成后更新画像（recently_analyzed） | intelligent-assistant §8.5 | ✅ 已实现 | `task_analysis_service.py`：`update_user_profile`；`intelligent_assistant_service.py` 内 `update_user_profile_after_analysis` |
 | 意图驱动 / 先确认再执行（提示词约束） | intelligent-assistant §3.3 | ✅ 已实现 | `_get_system_prompt()` 中描述「主动确认」「明确+轻量直接执行、模糊或有副作用先确认」 |
 | IM 格式适配（is_im） | intelligent-assistant §3、notification | ✅ 已实现 | `chat(..., is_im=...)`；Gateway 调用时传 `is_im=True` |
 | RAG 金融知识检索 | intelligent-assistant §8.6 | ✅ 已实现 | `core/knowledge/financial_knowledge_manager.py`（FinancialKnowledgeManager）；`intelligent_assistant_service` 中注入知识片段 |
+| 主题会话列表（assistant_threads） | intelligent-assistant §3.4、§8.6 | ✅ 已实现 | `intelligent_assistant_service.py`：`list_assistant_threads`、`create_assistant_thread`、`get_assistant_thread_messages`；router 暴露 `/api/assistant/threads*` |
+| 结构化主题摘要与快照（assistant_thread_checkpoints） | intelligent-assistant §8.6 | ✅ 已实现 | `intelligent_assistant_service.py`：`summarize_assistant_thread`、`_build_thread_summary_from_messages`；`database.py` 创建索引 |
+| 手动总结接口与摘要侧栏 | intelligent-assistant §2.2、§2.3、§8.6 | ✅ 已实现 | `app/routers/intelligent_assistant.py`：`/threads/{thread_id}/summarize`；`frontend/src/views/Assistant/index.vue`：摘要侧栏与“手动总结”按钮 |
 
-**小结**: 智能助手 v3.0 的记忆、画像、确认原则、IM 适配与 RAG 均已在代码中实现。
+**小结**: 智能助手 v3.0 的记忆、画像、确认原则、IM 适配、RAG，以及主题会话摘要能力均已在代码中实现。
 
 ---
 
 ## 五、统一通知架构
 
 | 设计项 | 设计文档 | 实现状态 | 代码位置 |
-|--------|----------|----------|----------|
+| -------- | ---------- | ---------- | ---------- |
 | NotificationsService.create_and_publish | notification-architecture §3.1 | ✅ 已实现 | `app/services/notifications_service.py`：写 MongoDB、WebSocket、再调 ChannelNotifier |
 | ChannelNotifier.dispatch | notification-architecture §3.2 | ✅ 已实现 | `app/services/channel_notifier.py`：按 `user_channel_configs` 与 event_type 分发 |
 | QQ IM 渠道（_im_channel） | notification-architecture §3.2 | ✅ 已实现 | `channel_notifier.py`：检测 `metadata._im_channel`，调用 `GatewayRouter.send_im_notification` |
@@ -92,14 +95,14 @@
 ## 六、AI 工作流架构师
 
 | 设计项 | 设计文档 | 实现状态 | 代码位置 |
-|--------|----------|----------|----------|
+| -------- | ---------- | ---------- | ---------- |
 | ResourceCollector | ai-workflow-generation §4.1 | ✅ 已实现 | `core/workflow/generator/resource_collector.py`：collect_all、external_skills 等 |
 | WorkflowPlanner（chat / generate_blueprint / generate_optimization） | ai-workflow-generation §4.2 | ✅ 已实现 | `core/workflow/generator/workflow_planner.py` |
 | PromptGenerator（工作流专属提示词） | ai-workflow-generation §4.3 | ✅ 已实现 | `core/workflow/generator/prompt_generator.py` |
 | SkillOrchestrator（缺失 Skill 创建 + 绑定） | ai-workflow-generation §4.4 | ✅ 已实现 | `core/workflow/generator/skill_orchestrator.py`：create_missing_skills、bind_skills_to_agents、bind_additional_tools_to_nodes |
 | WorkflowGenerationService（start/respond/confirm_and_create/optimize/confirm_optimization/publish） | ai-workflow-generation §5 | ✅ 已实现 | `app/services/workflow_generation_service.py` |
 | API：sessions/start、respond、confirm、optimize、confirm-optimization、publish、list、get、history、delete | ai-workflow-generation §6 | ✅ 已实现 | `app/routers/workflow_generation.py` |
-| 三层配置（Node > Workflow > Agent）| ai-workflow-generation §4.5 决策 5 | ✅ 已实现 | `core/config/binding_manager.py`：`get_tools_for_node`；workflow builder 使用该接口 |
+| 三层配置（Node > Workflow > Agent） | ai-workflow-generation §4.5 决策 5 | ✅ 已实现 | `core/config/binding_manager.py`：`get_tools_for_node`；workflow builder 使用该接口 |
 | UniversalAgent + AgentFactory 数据库回落 | ai-workflow-generation §4.5 决策 6 | ✅ 已实现 | `core/agents/universal.py`、`core/agents/factory.py`：未注册 agent_id 时从 agent_configs 创建 UniversalAgent |
 | 会话集合 workflow_generation_sessions | ai-workflow-generation §3.9 | ✅ 已实现 | 服务层使用 SESSION_COLLECTION |
 
@@ -110,7 +113,7 @@
 ## 七、Skill 自动生成系统
 
 | 设计项 | 设计文档 | 实现状态 | 代码位置 |
-|--------|----------|----------|----------|
+| -------- | ---------- | ---------- | ---------- |
 | RequirementAnalyzer（需求沟通、清晰度、边界） | skill-generation-system §2 | ✅ 已实现 | `core/tools/external/requirement_analyzer.py` |
 | CodeGenerator | skill-generation-system §2 | ✅ 已实现 | `core/tools/external/code_generator.py` |
 | StaticValidator | skill-generation-system §2 | ✅ 已实现 | `core/tools/external/static_validator.py` |
@@ -127,7 +130,7 @@
 ## 八、数据架构与 MCP 数据源（规划）
 
 | 设计项 | 设计文档 | 实现状态 | 说明 |
-|--------|----------|----------|------|
+| -------- | ---------- | ---------- | ------ |
 | 配置/市场/分析/交易等集合与 Redis 键 | data-architecture-plan §1–3 | ✅ 已实现 | 现有 MongoDB/Redis 使用与设计一致 |
 | 降级链、datasource_groupings | data-architecture-plan §4 | ✅ 已实现 | 现有数据源与优先级逻辑存在 |
 | MCP 数据源类接入降级链、mcp_documents、mcp_audit_logs | data-architecture-plan §7、§8 | ⚠️ 部分/规划 | MCP Client 与审计有实现；数据源类 MCP 写入集合、降级链扩展为规划内容，需按设计补充 |
@@ -137,7 +140,7 @@
 ## 九、分层提示词架构（prompt-layered-architecture）
 
 | 设计项 | 设计文档 | 实现状态 | 说明 |
-|--------|----------|----------|------|
+| -------- | ---------- | ---------- | ------ |
 | 五层语义（基础角色 / 场景 / 画像 / 能力 / 任务） | prompt-layered-architecture §3 | ⚠️ 部分 | `prompt_assembly_service`、`prompt_injection_policy_service` 存在，是否完全按五层组装需对照 prompt-layered-implementation-plan 逐项核对 |
 | 行业/个股画像、能力块注入 | prompt-layered-architecture §3.2 | ⚠️ 部分 | 有 analysis_profile、injection_policy 等，与设计文档的完全分层是否一致需进一步对照 |
 
@@ -146,7 +149,7 @@
 ## 十、汇总表
 
 | 模块 | 设计要点 | 状态 | 备注 |
-|------|----------|------|------|
+| ------ | ---------- | ------ | ------ |
 | Phase 1 分析助理操作工具 | 12+ 工具、context、提示词 | ✅ 全部实现 | 另含持仓/复盘/投资计划/止盈风险 |
 | Phase 2 MCP Server | 6 工具 + auth + 配额 | ✅ 已实现 | screen_stocks、get_market_overview 已补全 |
 | Phase 3 Gateway | 框架、Session、用户映射、QQ | ✅ 已实现 | 飞书、钉钉未实现（设计为后续扩展） |

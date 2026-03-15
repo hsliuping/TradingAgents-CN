@@ -1264,6 +1264,38 @@ class UnifiedAnalysisService:
                 result=result
             )
 
+            if report.status.value == "completed":
+                try:
+                    from app.services.intelligent_assistant_service import write_report_back_to_assistant_thread
+
+                    preferred_thread_id = ((task_params or {}).get("_assistant_thread_id") or "").strip() or None
+                    report_summary = ((report.ai_analysis.action_reason if report.ai_analysis else "") or "")[:400]
+                    writeback_message = (
+                        f"【持仓分析已归档】{code}({market})\n"
+                        f"任务ID: {task_id}\n"
+                        f"摘要: {(report_summary or '持仓分析已完成，可在关联报告中查看。')[:300]}"
+                    )
+                    await write_report_back_to_assistant_thread(
+                        db=get_mongo_db(),
+                        user_id=user_id,
+                        preferred_thread_id=preferred_thread_id,
+                        report_ref={
+                            "ref_type": "position_report",
+                            "report_key": str(report.analysis_id or task_id),
+                            "source_collection": "position_analysis_reports",
+                            "title": f"{code} 持仓分析报告",
+                            "symbol": code,
+                            "summary": report_summary,
+                            "status": report.status.value,
+                            "task_id": task_id,
+                            "analysis_id": str(report.analysis_id),
+                            "created_at": now_tz(),
+                        },
+                        summary_message=writeback_message,
+                    )
+                except Exception as writeback_err:
+                    logger.warning(f"⚠️ [持仓分析] 回写研究主题失败（已忽略）: {writeback_err}")
+
             logger.info(f"✅ [持仓分析] 执行完成: {task_id} - {code}")
             return result
 

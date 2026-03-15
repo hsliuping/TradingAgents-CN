@@ -542,11 +542,17 @@ async def create_database_indexes(db):
         assistant_threads = db["assistant_threads"]
         await assistant_threads.create_index([("user_id", 1), ("thread_id", 1)], unique=True)
         await assistant_threads.create_index([("user_id", 1), ("updated_at", -1)])
+        await assistant_threads.create_index([("user_id", 1), ("parent_thread_id", 1), ("updated_at", -1)])
 
         # assistant_thread_messages 智能助手主题消息
         assistant_thread_messages = db["assistant_thread_messages"]
         await assistant_thread_messages.create_index([("thread_id", 1), ("created_at", 1)])
         await assistant_thread_messages.create_index([("user_id", 1), ("thread_id", 1), ("created_at", -1)])
+
+        # assistant_thread_checkpoints 智能助手主题摘要快照
+        assistant_thread_checkpoints = db["assistant_thread_checkpoints"]
+        await assistant_thread_checkpoints.create_index([("thread_id", 1), ("created_at", -1)])
+        await assistant_thread_checkpoints.create_index([("user_id", 1), ("thread_id", 1), ("created_at", -1)])
 
         # ETF 集合索引
         etf_basic = db["etf_basic_info"]

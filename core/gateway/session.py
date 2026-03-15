@@ -23,6 +23,11 @@ SESSION_TTL_SECONDS = 7 * 24 * 3600
 COLLECTION_NAME = "gateway_sessions"
 
 
+def build_session_key(user_id: str, channel_type: str, channel_id: str) -> str:
+    """构造 Gateway Session Key。"""
+    return f"{user_id}:{channel_type}:{channel_id}"
+
+
 class SessionManager:
     """
     Gateway Session 管理器
@@ -59,7 +64,7 @@ class SessionManager:
         channel_id: str,
     ) -> Dict[str, Any]:
         """获取或创建 Session"""
-        session_key = f"{user_id}:{channel_type}:{channel_id}"
+        session_key = build_session_key(user_id, channel_type, channel_id)
         now = datetime.now(timezone.utc)
 
         session = await self.collection.find_one({"session_key": session_key})
@@ -85,6 +90,22 @@ class SessionManager:
         await self.collection.insert_one(new_session)
         logger.info("[SessionManager] 新建 Session: %s", session_key)
         return new_session
+
+    async def get_current_topic_id(self, session_key: str) -> Optional[str]:
+        """获取当前 Session 绑定的研究主题 ID。"""
+        session = await self.collection.find_one(
+            {"session_key": session_key},
+            {"context.current_topic_id": 1},
+        )
+        if not session:
+            return None
+        context = session.get("context") or {}
+        current_topic_id = (context.get("current_topic_id") or "").strip()
+        return current_topic_id or None
+
+    async def set_current_topic_id(self, session_key: str, topic_id: Optional[str]) -> None:
+        """设置当前 Session 绑定的研究主题 ID。"""
+        await self.update_context(session_key, {"current_topic_id": topic_id or None})
 
     async def append_message(
         self,

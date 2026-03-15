@@ -3,9 +3,9 @@
 ## 📋 文档信息
 
 | 项目 | 内容 |
-|------|------|
+| ------ | ------ |
 | 版本 | v3.0 |
-| 状态 | v1.0 ✅ / v2.0 ✅ / v3.0 实施中 |
+| 状态 | v1.0 ✅ / v2.0 ✅ / v3.0 核心能力已实现，持续优化中 |
 | 日期 | 2026-03 |
 | 目标 | 从"数据教练"→"全能操作员"→"全生命周期投资助手"，覆盖选股→持仓→复盘→纪律全流程 |
 
@@ -18,14 +18,14 @@
 ### 1.1 角色演进
 
 | 阶段 | 角色定位 | 能力范围 |
-|------|---------|---------|
+| ------ | --------- | --------- |
 | **v1.0（已实现）** | 数据教练 | 调用数据工具回答问题、规划分析 |
 | **v2.0（已实现）** | 全能操作员 | 触发分析流、查报告、管定时任务、管自选股、Gateway + MCP 多通道接入 |
-| **v3.0（实施中）** | 全生命周期投资助手 | 在 v2.0 基础上新增：持仓分析、交易复盘、投资计划、用户画像、意图驱动路由、IM 格式适配 |
+| **v3.0（核心能力已实现）** | 全生命周期投资助手 | 在 v2.0 基础上新增：持仓分析、交易复盘、投资计划、用户画像、意图驱动路由、IM 格式适配、主题会话摘要 |
 
 ### 1.2 三层架构定位
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │  Layer 1: 接入层                                             │
 │  ┌──────────┐  ┌──────────┐  ┌───────────┐  ┌───────────┐  │
@@ -70,33 +70,38 @@
 ### 2.1 后端
 
 | 模块 | 实现位置 | 说明 |
-|------|----------|------|
+| ------ | ---------- | ------ |
 | **API 路由** | `app/routers/intelligent_assistant.py` | 统一前缀 `/api/assistant` |
 | **智能助手服务** | `app/services/intelligent_assistant_service.py` | ReAct 模式、LLM 配置、RAG 知识检索 |
 | **规划分析服务** | `app/services/planned_analysis_service.py` | 种子流程匹配 → LLM 规划 → ReAct 回退 |
-| **请求/响应模型** | `app/schemas/intelligent_assistant.py` | ChatRequest、ChatResponse、PlannedAnalysisResponse |
+| **请求/响应模型** | `app/schemas/intelligent_assistant.py` | ChatRequest、ChatResponse、PlannedAnalysisResponse、AssistantThread* |
 
 ### 2.2 前端
 
 | 模块 | 实现位置 | 说明 |
-|------|----------|------|
-| **助手页面** | `frontend/src/views/Assistant/index.vue` | 对话界面、模式切换（快速/深度） |
-| **API** | `frontend/src/api/assistant.ts` | chat、planned-analysis、conversation |
+| ------ | ---------- | ------ |
+| **助手页面** | `frontend/src/views/Assistant/index.vue` | 对话界面、模式切换（快速/深度）、主题列表、摘要侧栏 |
+| **API** | `frontend/src/api/assistant.ts` | chat、planned-analysis、threads、summarize、conversation |
 | **侧边栏** | `SidebarMenu.vue` | 智能助手入口 |
 
-### 2.3 API 端点（v1.0）
+### 2.3 API 端点（当前）
 
 | 方法 | 路径 | 说明 |
-|------|------|------|
+| ------ | ------ | ------ |
+| GET | /api/assistant/threads | 获取当前用户的主题会话列表 |
+| POST | /api/assistant/threads | 创建主题会话 |
+| GET | /api/assistant/threads/{thread_id}/messages | 获取指定主题消息 |
+| DELETE | /api/assistant/threads/{thread_id}/messages | 清空指定主题消息 |
+| POST | /api/assistant/threads/{thread_id}/summarize | 手动触发主题摘要更新 |
 | POST | /api/assistant/chat | 智能助手对话（ReAct 模式） |
 | POST | /api/assistant/planned-analysis | 规划分析（Plan-then-Execute） |
-| GET | /api/assistant/conversation | 获取会话历史 |
-| DELETE | /api/assistant/conversation | 清空会话 |
+| GET | /api/assistant/conversation | 获取当前主题会话历史（兼容接口，支持 `conversation_id`） |
+| DELETE | /api/assistant/conversation | 清空当前主题会话（兼容接口，支持 `conversation_id`） |
 
 ### 2.4 规划分析三级保障
 
 | 级别 | 说明 |
-|------|------|
+| ------ | ------ |
 | 1. 种子流程匹配 | 匹配预设种子流程（如单股分析、板块分析），执行固定工作流 |
 | 2. LLM 自主规划 | 无匹配时，LLM 规划多步骤执行计划，并行执行 |
 | 3. ReAct 回退 | 规划失败时，回退到 ReAct 模式逐步调用工具 |
@@ -114,14 +119,14 @@
 
 ### 3.1 核心变化
 
-| 维度 | v1.0 | v2.0（已实现） | v3.0（实施中） |
-|------|------|------|------|
+| 维度 | v1.0 | v2.0（已实现） | v3.0（核心能力已实现） |
+| ------ | ------ | ------ | ------ |
 | **角色** | 数据教练 | 全能操作员 | 全生命周期投资助手 |
 | **工具范围** | 数据查询 | +操作工具（分析、报告、定时、自选股） | +持仓分析、交易复盘、投资计划 |
 | **接入通道** | 仅 Web UI | +Gateway + MCP Server | +QQ Bot WebSocket 模式 |
-| **会话管理** | 无状态 | 按用户×通道隔离 | +滑动窗口记忆+结构化用户画像 |
+| **会话管理** | 无状态 | 按用户×通道隔离 | +主题会话 + 滑动窗口记忆 + 结构化用户画像 |
 | **输出格式** | 纯 Markdown | +卡片消息+MCP Response | +IM 竖排格式适配 |
-| **行为模式** | 问答 | 操作员模式 | +意图驱动路由+先确认再执行 |
+| **行为模式** | 问答 | 操作员模式 | +意图驱动路由 + 先确认再执行 + 主题摘要承接 |
 
 ### 3.2 操作工具定义（~20 个）
 
@@ -130,13 +135,14 @@
 #### 📊 分析触发类
 
 | 工具名 | 功能 | 内部调用 | 参数 |
-|--------|------|---------|------|
+| -------- | ------ | --------- | ------ |
 | `trigger_stock_analysis` | 触发单只股票分析 | `TaskAnalysisService.create_and_execute_task()` | symbol, depth?, workflow_id? |
 | `trigger_batch_analysis` | 触发批量股票分析 | `TaskAnalysisService.create_and_execute_task()` × N | symbols[], depth? |
 | `get_analysis_status` | 查询分析任务状态 | `TaskAnalysisService.get_task()` | task_id |
 
 **示例对话**：
-```
+
+```text
 用户: "帮我分析一下贵州茅台"
 助理: [调用 trigger_stock_analysis(symbol="600519")]
       "已为您创建贵州茅台(600519)的分析任务，任务ID: xxx，预计 3 分钟完成。"
@@ -149,13 +155,14 @@
 #### 📝 报告查询类
 
 | 工具名 | 功能 | 内部调用 | 参数 |
-|--------|------|---------|------|
+| -------- | ------ | --------- | ------ |
 | `search_reports` | 搜索历史分析报告 | `db.analysis_reports.find()` | keyword?, symbol?, date_range? |
 | `get_report_detail` | 获取报告详情 | `db.analysis_reports.find_one()` | report_id or task_id |
 | `get_latest_report` | 获取某只股票最新报告 | `db.unified_analysis_tasks.find_one(sort)` | symbol |
 
 **示例对话**：
-```
+
+```text
 用户: "上周分析过哪些股票？"
 助理: [调用 search_reports(date_range="last_week")]
       "上周共分析了 8 只股票：贵州茅台(600519)、宁德时代(300750)..."
@@ -171,13 +178,14 @@
 #### ⏰ 定时任务管理类
 
 | 工具名 | 功能 | 内部调用 | 参数 |
-|--------|------|---------|------|
+| -------- | ------ | --------- | ------ |
 | `list_scheduled_configs` | 查看定时分析配置 | `db.scheduled_analysis_configs.find()` | — |
 | `create_scheduled_analysis` | 创建定时分析 | 调用 ScheduledAnalysis API | name, cron, group_ids, depth? |
 | `toggle_scheduled_config` | 启用/禁用定时配置 | `db.scheduled_analysis_configs.update_one()` | config_id, enabled |
 
 **示例对话**：
-```
+
+```text
 用户: "帮我设置每天早上9点分析科技股分组"
 助理: [调用 create_scheduled_analysis(name="每日科技股分析", cron="0 9 * * 1-5", group_ids=["group_tech"])]
       "已创建定时分析配置 '每日科技股分析'，将在每个交易日 9:00 自动分析科技股分组中的所有股票。"
@@ -186,13 +194,14 @@
 #### 📁 自选股管理类
 
 | 工具名 | 功能 | 内部调用 | 参数 |
-|--------|------|---------|------|
+| -------- | ------ | --------- | ------ |
 | `list_watchlist_groups` | 查看自选股分组 | `db.watchlist_groups.find()` | — |
 | `add_stock_to_watchlist` | 添加股票到分组 | `db.watchlist_groups.update_one($addToSet)` | group_name, symbol |
 | `remove_stock_from_watchlist` | 从分组移除股票 | `db.watchlist_groups.update_one($pull)` | group_name, symbol |
 
 **示例对话**：
-```
+
+```text
 用户: "把比亚迪加到科技股分组里"
 助理: [调用 add_stock_to_watchlist(group_name="科技股", symbol="002594")]
       "已将比亚迪(002594)添加到「科技股」分组。该分组现有 12 只股票。"
@@ -201,12 +210,13 @@
 #### 💼 持仓分析类（v3.0 新增）
 
 | 工具名 | 功能 | 内部调用 | 参数 |
-|--------|------|---------|------|
+| -------- | ------ | --------- | ------ |
 | `list_positions` | 查看持仓列表 | `PortfolioService.get_positions()` | account_type（all/real/paper） |
 | `get_position_analysis` | 获取持仓 AI 分析报告 | `PortfolioService.get_position_analysis()` | symbol |
 
 **示例对话**：
-```
+
+```text
 用户: "我现在持仓了哪些股票？"
 助理: [调用 list_positions(account_type="all")]
       "您当前持仓 5 只股票：
@@ -217,12 +227,13 @@
 #### 📋 交易复盘类（v3.0 新增）
 
 | 工具名 | 功能 | 内部调用 | 参数 |
-|--------|------|---------|------|
+| -------- | ------ | --------- | ------ |
 | `list_trade_reviews` | 查看复盘历史 | `TradeReviewService.get_review_history()` | symbol?, source? |
 | `get_trade_review_detail` | 获取完整复盘报告 | `TradeReviewService.get_review()` | review_id |
 
 **示例对话**：
-```
+
+```text
 用户: "我最近有做过什么复盘吗？"
 助理: [调用 list_trade_reviews()]
       "最近 3 次复盘：
@@ -233,12 +244,13 @@
 #### 📖 投资计划类（v3.0 新增）
 
 | 工具名 | 功能 | 内部调用 | 参数 |
-|--------|------|---------|------|
+| -------- | ------ | --------- | ------ |
 | `list_trading_plans` | 查看投资计划列表 | `TradingSystemService.list_systems()` | — |
 | `get_active_trading_plan` | 获取当前激活计划规则 | `TradingSystemService.get_active_system()` | — |
 
 **示例对话**：
-```
+
+```text
 用户: "我现在用的是什么交易策略？"
 助理: [调用 get_active_trading_plan()]
       "当前激活计划：价值投资策略 v2
@@ -251,7 +263,7 @@
 
 #### 先确认再执行原则
 
-```
+```text
 用户消息
     │
     ▼
@@ -289,13 +301,20 @@ session_key = f"{user_id}:{channel_type}:{channel_id}"
 ```
 
 每个 Session 独立维护：
+
 - 对话历史（conversation_history）
 - 上下文状态（当前关注的股票、上一次分析的任务ID等）
 - 通道特性（输出格式偏好：Markdown / 卡片消息）
 
+当前 Web 端在 Session 之上已引入“主题会话”模型：
+
+- `conversation_id` 实际对应 `thread_id`
+- 每个主题维护 `title`、`message_count`、`last_user_message`、`current_summary`
+- 对话保存后会自动刷新主题摘要，也支持用户手动触发总结
+
 ### 3.5 系统提示词升级
 
-```
+```text
 你是 TradingAgents-CN 的分析助理，一个专业的 A 股多智能体分析系统的操作员。
 
 你的能力：
@@ -323,7 +342,7 @@ Gateway 是接入层的适配器，负责将各 IM 平台的消息转换为统�
 
 ### 4.2 架构
 
-```
+```text
 飞书 Event Callback ──→ ┐
 QQ Bot WebSocket    ──→ ├─→ GatewayRouter ──→ AnalysisAssistant ──→ 格式化 ──→ 回复
 钉钉 Webhook 回调   ──→ ┤
@@ -355,7 +374,7 @@ class GatewayResponse(BaseModel):
 
 ### 4.4 用户身份映射
 
-```
+```text
 平台用户标识 ──→ user_identity_mappings 集合 ──→ 系统 user_id
 
 db.user_identity_mappings:
@@ -393,7 +412,7 @@ class BaseGatewayAdapter(ABC):
 
 ### 4.6 完整消息处理流程
 
-```
+```text
 1. IM 平台推送 Webhook 回调到 /api/gateway/{platform}
 2. GatewayRouter 选择对应的 Adapter 解析消息
 3. 通过 user_identity_mappings 映射到系统用户
@@ -413,7 +432,7 @@ class BaseGatewayAdapter(ABC):
 MCP Server 暴露的是"分析流能力"而非原始工具：
 
 | MCP Tool | 对应助理操作 |
-|----------|-------------|
+| ---------- | ------------- |
 | `analyze_stock` | `trigger_stock_analysis` + 等待完成 + 返回报告 |
 | `screen_stocks` | 调用筛选工作流 + 返回结果 |
 | `get_market_overview` | 调用市场概览流程 |
@@ -449,7 +468,7 @@ MCP Server 暴露的是"分析流能力"而非原始工具：
 - [x] 分析完成后 QQ IM 主动推送通知
 - [ ] 飞书 / 钉钉 / 企业微信适配器（后续扩展）
 
-### Phase 4: 全生命周期集成（v3.0，进行中）
+### Phase 4: 全生命周期集成（v3.0 核心能力已完成，增量优化中）
 
 - [x] 持仓分析工具（`position_analysis.py`：list_positions, get_position_analysis）
 - [x] 交易复盘工具（`trade_review_ops.py`：list_trade_reviews, get_trade_review_detail）
@@ -459,6 +478,8 @@ MCP Server 暴露的是"分析流能力"而非原始工具：
 - [x] 用户画像注入系统提示词
 - [x] 意图驱动路由 + 先确认再执行原则
 - [x] RAG 金融知识检索（`FinancialKnowledgeManager`）
+- [x] 主题会话列表与摘要侧栏（`assistant_threads` + Web UI）
+- [x] 主题摘要快照与手动总结接口（`assistant_thread_checkpoints` / `summarize_assistant_thread`）
 - [ ] 助手设置个性化 UI（名字、语气、自定义指令）
 - [ ] 更多 IM 平台适配
 
@@ -481,7 +502,7 @@ v1.0 的助手每次对话都是无状态的：LLM 不知道上一轮说了什�
 ### 8.2 记忆方案评估
 
 | 方案 | 原理 | 优点 | 缺点 | 适用场景 |
-|------|------|------|------|---------|
+| ------ | ------ | ------ | ------ | --------- |
 | **滑动窗口（当前）** | 最近 N 条原始消息注入 context | 实现简单，零延迟 | Token 随轮次增长；跨会话归零 | 短对话、快速上线 |
 | **摘要记忆** | 超过阈值时 LLM 自动摘要 | Token 可控，不丢语义 | 摘要本身有信息损耗 | 中长对话 |
 | **向量检索记忆（RAG）** | 对话 embedding 后按需检索 | 长期记忆、Token 高效 | 需向量库基础设施，有检索延迟 | 长期用户 |
@@ -493,6 +514,7 @@ v1.0 的助手每次对话都是无状态的：LLM 不知道上一轮说了什�
 Cognee 是一个知识图谱记忆引擎（2026年2月完成 $7.5M 种子轮），能把非结构化文本自动转化为实体+关系图谱，适合"谁说了什么关于哪只股票"这类推理。
 
 **评估结论：当前阶段不引入 Cognee**，原因：
+
 1. 现有 Qdrant 向量基础设施（`core/memory/`、`core/knowledge/`）运行稳定，金融知识 RAG 已满足需求
 2. Cognee 需额外引入图数据库（NetworkX/Neo4j），增加运维复杂度
 3. 本项目最大痛点是"用户画像缺失"而非"记忆检索不精准"，结构化画像可低成本解决
@@ -502,7 +524,7 @@ Cognee 是一个知识图谱记忆引擎（2026年2月完成 $7.5M 种子轮）�
 
 **实现文件**：`app/services/intelligent_assistant_service.py`
 
-```
+```text
 chat_with_assistant()
     │
     ├── get_assistant_conversation(db, user_id)   ← 从 MongoDB 读历史
@@ -514,7 +536,7 @@ chat_with_assistant()
                 [SystemMessage] → [历史1, 历史2, ..., 历史N] → [当前用户消息]
 ```
 
-**局限**：只能记住本次会话，用户下次打开仍需从头说明背景。
+**局限**：滑动窗口只能覆盖当前主题附近的短期上下文；跨主题承接仍需依赖用户画像与主题摘要，不等同于长期记忆。
 
 ### 8.5 已实现：结构化用户画像（v3.0 第二步）
 
@@ -547,7 +569,7 @@ MongoDB 集合：`assistant_user_profiles`
 #### 更新时机
 
 | 触发事件 | 更新内容 |
-|---------|---------|
+| --------- | --------- |
 | 分析任务完成 | 追加到 `recently_analyzed`（保留最近 20 条） |
 | 添加/移除自选股 | 同步更新 `watchlist_symbols` |
 | 助手识别到用户偏好关键词 | 更新 `preference`（可选，LLM 提取） |
@@ -556,7 +578,7 @@ MongoDB 集合：`assistant_user_profiles`
 
 每次对话时，在系统提示词末尾注入用户画像摘要：
 
-```
+```text
 【你对该用户的了解】
 - 最近分析：贵州茅台(600519) · 2026-03-04 · 结论：买入
 - 自选股：茅台、宁德时代、比亚迪（共 3 只）
@@ -569,10 +591,17 @@ MongoDB 集合：`assistant_user_profiles`
 - 历史消息提供对话上下文，画像提供跨会话持久偏好
 - 两者同时注入，画像放在系统提示词，历史放在 user/assistant 轮次之间
 
-### 8.6 实现状态
+### 8.6 实现状态（含主题会话摘要）
+
+除滑动窗口和用户画像外，当前实现还补上了面向长链路研究的主题会话承接能力：
+
+- `assistant_threads`：按用户维护多主题会话，支持标题、最近消息、消息数和当前摘要
+- `assistant_thread_checkpoints`：存储主题摘要快照，区分自动摘要与手动总结
+- 每次保存对话后自动更新 `current_summary`，前端侧边栏展示摘要、已确认事实、待解决问题、建议下一步与聚焦度
+- 提供 `/api/assistant/threads/{thread_id}/summarize` 接口，允许用户在研究中途手动收口
 
 | 功能 | 状态 | 文件 |
-|------|------|------|
+| ------ | ------ | ------ |
 | 滑动窗口记忆（最近 10 条） | ✅ 已实现 | `intelligent_assistant_service.py` |
 | 主动调工具（get_latest_report）提示词规则 | ✅ 已实现 | `intelligent_assistant_service.py` `_get_system_prompt` |
 | 结构化用户画像存储 | ✅ 已实现 | `assistant_user_profiles` 集合 |
@@ -580,6 +609,9 @@ MongoDB 集合：`assistant_user_profiles`
 | 分析完成后自动更新画像 | ✅ 已实现 | `task_analysis_service.py` `update_user_profile` |
 | RAG 金融知识检索 | ✅ 已实现 | `core/knowledge/financial_knowledge_manager.py` |
 | IM 渠道格式适配 | ✅ 已实现 | `intelligent_assistant_service.py` `is_im` 参数 |
+| 主题会话列表 / 消息读取 | ✅ 已实现 | `app/routers/intelligent_assistant.py`、`frontend/src/api/assistant.ts` |
+| 结构化主题摘要（abstract / facts / questions / actions / focus） | ✅ 已实现 | `summarize_assistant_thread`、`assistant_thread_checkpoints` |
+| 手动总结入口与摘要侧栏 | ✅ 已实现 | `frontend/src/views/Assistant/index.vue` |
 | 持仓分析工具 | ✅ 已实现 | `core/tools/implementations/assistant_ops/position_analysis.py` |
 | 交易复盘工具 | ✅ 已实现 | `core/tools/implementations/assistant_ops/trade_review_ops.py` |
 | 投资计划工具 | ✅ 已实现 | `core/tools/implementations/assistant_ops/trading_plan.py` |
