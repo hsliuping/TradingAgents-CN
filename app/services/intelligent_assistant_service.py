@@ -11,6 +11,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from bson import ObjectId
+
 # 智能助手整体超时（LLM + 多轮工具调用），默认 120 秒
 ASSISTANT_TIMEOUT_SECONDS = int(os.environ.get("ASSISTANT_TIMEOUT_SECONDS", "120"))
 
@@ -18,9 +20,11 @@ ASSISTANT_TIMEOUT_SECONDS = int(os.environ.get("ASSISTANT_TIMEOUT_SECONDS", "120
 ASSISTANT_CONVERSATION_LIMIT = 100
 ASSISTANT_DEFAULT_THREAD_ID = "default"
 ASSISTANT_MAX_CONTEXT_MESSAGES = 10
+ASSISTANT_MAX_REPORT_REFS = 12
+ASSISTANT_REPORT_INBOX_TITLE = "报告收纳"
 
 from core.tools import get_tool_registry, tool_metadata_list_to_openai
-from core.tools.context import set_current_user_id
+from core.tools.context import set_current_assistant_thread_id, set_current_user_id
 from core.llm import UnifiedLLMClient
 from core.llm.models import LLMConfig, LLMProvider, Message, MessageRole
 
@@ -47,6 +51,26 @@ def _should_force_tool_retry(user_message: str) -> bool:
 
     # 至少满足：个人+领域，或 领域+查询
     return (has_personal and has_domain) or (has_domain and has_query)
+
+
+def _should_use_recent_search(user_message: str) -> bool:
+    """判断是否属于应优先走近期搜索的事实确认类问题。"""
+    text = (user_message or "").strip().lower()
+    if not text:
+        return False
+
+    recency_markers = [
+        "截至目前", "截至现在", "最新", "近期", "最近", "刚刚", "今日", "现在",
+        "确认", "核实", "联网", "公告", "新闻", "消息", "进展",
+    ]
+    fact_markers = [
+        "持股", "持股比例", "减持", "增持", "伯克希尔", "巴菲特", "公告",
+        "有没有", "是否", "还持有", "变化", "最新情况",
+    ]
+
+    has_recency = any(marker in text for marker in recency_markers)
+    has_fact = any(marker in text for marker in fact_markers)
+    return has_recency and has_fact
 
 
 def _get_latest_trade_date() -> str:
@@ -98,7 +122,13 @@ def _build_profile_block(user_profile: Optional[dict]) -> str:
     return "\n".join(lines) + "\n" if len(lines) > 1 else ""
 
 
-def _get_system_prompt(knowledge_snippets: str = "", assistant_settings: dict = None, is_im: bool = False, user_profile: Optional[dict] = None) -> str:
+def _get_system_prompt(
+    knowledge_snippets: str = "",
+    assistant_settings: dict = None,
+    is_im: bool = False,
+    user_profile: Optional[dict] = None,
+    current_topic_title: Optional[str] = None,
+) -> str:
     """生成包含当前日期的系统提示词
 
     Args:
@@ -142,6 +172,15 @@ def _get_system_prompt(knowledge_snippets: str = "", assistant_settings: dict = 
 - 列表用"• 内容"格式，每条不超过20个汉字
 - 回答总字数控制在400字以内，突出关键结论
 - 数字分析结果直接给出，无需铺垫性语句
+"""
+
+    topic_block = ""
+    if current_topic_title:
+        topic_block = f"""
+【当前外部会话绑定主题】
+- 当前研究主题：{current_topic_title}
+- 当用户提到“这个主题”“当前主题”“继续这个方向”时，默认指这个主题
+- 如果用户明确要求切换到别的主题，请先调用主题切换工具，再继续后续操作
 """
 
     return f"""你是 TradingAgents-CN 平台的**{assistant_name}（操作员）**，同时具备投资教练能力。你既能帮用户执行操作（触发分析、查报告、管理定时任务、管理自选股），也能教用户投资分析方法。
@@ -233,8 +272,11 @@ def _get_system_prompt(knowledge_snippets: str = "", assistant_settings: dict = 
 - **严禁**根据训练数据回答行情、大盘、市场等需要实时数据的问题，**必须**通过调用工具获取
 - 根据每个工具的描述，**自主选择**最合适的工具；若一次调用不足，可继续调用其他工具
 - 所有需要 curr_date 或 trade_date 的工具，**必须**传入上述日期
+- 对“截至目前”“最新”“近期是否有变化”“请确认最新口径”“最新公告/持股比例/减持进展”这类问题，优先调用“近期信息搜索”或相关新闻工具，先检索近期公开信息，再回答
 - **板块/行业类问题**优先使用板块级别工具，无需股票代码
 - **操作类请求**（分析、报告、定时、自选股）优先使用 assistant_ops 类工具
+- 对“分析某只股票”“看看持仓”“查一下报告”这类零星查询，直接完成查询或分析，不要为了记录上下文而新建研究主题
+{topic_block}
 {im_block}"""
 
 
@@ -402,7 +444,16 @@ class IntelligentAssistantService:
         logger.info(f"[智能助手] 已加载 {len(self._openai_tools)} 个工具")
         return True
 
-    async def chat(self, user_message: str, conversation_id: Optional[str] = None, assistant_settings: dict = None, is_im: bool = False, history_messages: Optional[List[Message]] = None, user_profile: Optional[dict] = None) -> Dict[str, Any]:
+    async def chat(
+        self,
+        user_message: str,
+        conversation_id: Optional[str] = None,
+        assistant_settings: dict = None,
+        is_im: bool = False,
+        history_messages: Optional[List[Message]] = None,
+        user_profile: Optional[dict] = None,
+        current_topic_title: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         处理用户对话
 
@@ -432,6 +483,26 @@ class IntelligentAssistantService:
                 "data_refs": None,
             }
 
+        # 快路径：对“最新/截至目前/近期确认”类事实问题，优先直接执行近期搜索工具，
+        # 避免模型在首轮未触发工具时退回训练期知识。
+        if _should_use_recent_search(user_message):
+            try:
+                from core.tools.implementations.assistant_ops.recent_search import run_recent_information_search
+
+                tool_result = run_recent_information_search(user_message.strip())
+                if inspect.isawaitable(tool_result):
+                    tool_result = await tool_result
+                tool_text = str(tool_result or "").strip()
+                if tool_text:
+                    logger.info("[智能助手] 命中近期搜索快路径，直接返回搜索结果")
+                    return {
+                        "reply": tool_text,
+                        "tools_used": ["search_recent_information"],
+                        "data_refs": None,
+                    }
+            except Exception as e:
+                logger.warning(f"[智能助手] 近期搜索快路径失败，回退常规对话: {e}")
+
         # RAG 动态知识检索（优雅降级：不可用时返回空字符串）
         knowledge_snippets = ""
         try:
@@ -447,7 +518,16 @@ class IntelligentAssistantService:
 
         # 构建消息列表：系统提示 + 历史记录 + 当前用户消息
         messages = [
-            Message(role=MessageRole.SYSTEM, content=_get_system_prompt(knowledge_snippets, assistant_settings, is_im=is_im, user_profile=user_profile)),
+            Message(
+                role=MessageRole.SYSTEM,
+                content=_get_system_prompt(
+                    knowledge_snippets,
+                    assistant_settings,
+                    is_im=is_im,
+                    user_profile=user_profile,
+                    current_topic_title=current_topic_title,
+                ),
+            ),
         ]
         if history_messages:
             messages.extend(history_messages)
@@ -548,23 +628,854 @@ def _generate_thread_id() -> str:
     return f"thr_{uuid.uuid4().hex[:12]}"
 
 
+def _normalize_thread_title(title: str) -> str:
+    text = (title or "").strip().lower()
+    if not text:
+        return ""
+
+    replacements = {
+        "新能源汽车": "新能源车",
+        "新能源汽車": "新能源车",
+        "个股": "公司",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
+    for token in ["（", "）", "(", ")", "-", "_", " ", "　", "/", "\\", "·", "、"]:
+        text = text.replace(token, "")
+
+    removable_suffixes = [
+        "研究主题",
+        "产业链研究",
+        "行业研究",
+        "板块研究",
+        "公司研究",
+        "个股研究",
+        "深度研究",
+        "专题研究",
+        "课题研究",
+        "产业链",
+        "行业",
+        "板块",
+        "研究",
+        "分析",
+        "跟踪",
+        "专题",
+        "主题",
+    ]
+    changed = True
+    while changed and len(text) > 2:
+        changed = False
+        for suffix in removable_suffixes:
+            if text.endswith(suffix) and len(text) > len(suffix) + 1:
+                text = text[: -len(suffix)]
+                changed = True
+                break
+
+    return text
+
+
+def _thread_titles_match(first: str, second: str) -> bool:
+    normalized_first = _normalize_thread_title(first)
+    normalized_second = _normalize_thread_title(second)
+    if not normalized_first or not normalized_second:
+        return False
+    return normalized_first == normalized_second
+
+
+def _find_similar_thread(
+    docs: List[Dict[str, Any]],
+    title: str,
+    parent_thread_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    normalized_parent_id = (parent_thread_id or "").strip() or None
+    candidates = [
+        doc for doc in docs
+        if (doc.get("parent_thread_id") or None) == normalized_parent_id
+    ]
+    for doc in candidates:
+        if _thread_titles_match(doc.get("title") or "", title):
+            return doc
+    return None
+
+
+def _is_external_session_thread_id(thread_id: Optional[str]) -> bool:
+    return bool(thread_id and ":" in thread_id)
+
+
+def _is_visible_assistant_topic(doc: Dict[str, Any]) -> bool:
+    if doc.get("archived") is True:
+        return False
+    if (doc.get("topic_type") or "") == "im_session":
+        return False
+    return not _is_external_session_thread_id(doc.get("thread_id"))
+
+
 def _thread_doc_to_item(doc: Dict[str, Any]) -> Dict[str, Any]:
     summary = doc.get("current_summary") or {}
     updated_at = doc.get("updated_at")
     if isinstance(updated_at, datetime):
         updated_at = updated_at.isoformat()
+    report_refs = []
+    for ref in doc.get("report_refs") or []:
+        created_at = ref.get("created_at")
+        linked_at = ref.get("linked_at")
+        if isinstance(created_at, datetime):
+            created_at = created_at.isoformat()
+        if isinstance(linked_at, datetime):
+            linked_at = linked_at.isoformat()
+        report_refs.append({
+            "ref_type": ref.get("ref_type") or "unknown",
+            "report_key": ref.get("report_key") or "",
+            "source_collection": ref.get("source_collection") or "",
+            "title": ref.get("title") or "未命名报告",
+            "symbol": ref.get("symbol") or None,
+            "summary": ref.get("summary") or "",
+            "status": ref.get("status") or None,
+            "task_id": ref.get("task_id") or None,
+            "analysis_id": ref.get("analysis_id") or None,
+            "created_at": created_at,
+            "linked_at": linked_at,
+        })
     return {
         "thread_id": doc.get("thread_id", ASSISTANT_DEFAULT_THREAD_ID),
         "title": doc.get("title") or "默认主题",
+        "parent_thread_id": doc.get("parent_thread_id"),
         "topic_type": doc.get("topic_type") or "general",
         "pinned": bool(doc.get("pinned", False)),
         "archived": bool(doc.get("archived", False)),
         "message_count": int(doc.get("message_count", 0)),
         "last_user_message": doc.get("last_user_message", ""),
         "updated_at": updated_at,
+        "report_refs": report_refs,
         "current_summary": {
-            "abstract": summary.get("abstract") or ""
+            "abstract": summary.get("abstract") or "",
+            "confirmed_facts": summary.get("confirmed_facts") or [],
+            "open_questions": summary.get("open_questions") or [],
+            "next_actions": summary.get("next_actions") or [],
+            "focus_score": float(summary.get("focus_score") or 0.0),
         } if summary else None,
+    }
+
+
+def serialize_assistant_report_ref(ref: Dict[str, Any]) -> Dict[str, Any]:
+    created_at = ref.get("created_at")
+    linked_at = ref.get("linked_at")
+    return {
+        "ref_type": ref.get("ref_type") or "unknown",
+        "report_key": ref.get("report_key") or "",
+        "source_collection": ref.get("source_collection") or "",
+        "title": ref.get("title") or "未命名报告",
+        "symbol": ref.get("symbol") or None,
+        "summary": ref.get("summary") or "",
+        "status": ref.get("status") or None,
+        "task_id": ref.get("task_id") or None,
+        "analysis_id": ref.get("analysis_id") or None,
+        "created_at": _to_iso_datetime(created_at),
+        "linked_at": _to_iso_datetime(linked_at),
+    }
+
+
+def _normalize_summary_items(items: List[str], limit: int = 3) -> List[str]:
+    normalized: List[str] = []
+    seen = set()
+    for item in items:
+        text = (item or "").strip().replace("\n", " ")
+        if not text:
+            continue
+        text = text[:120]
+        if text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+        if len(normalized) >= limit:
+            break
+    return normalized
+
+
+def _normalize_report_ref_item(report_ref: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    ref_type = (report_ref.get("ref_type") or "").strip()
+    report_key = (report_ref.get("report_key") or report_ref.get("task_id") or report_ref.get("analysis_id") or "").strip()
+    if not ref_type or not report_key:
+        return None
+
+    now = _now_utc()
+    created_at = report_ref.get("created_at")
+    if not isinstance(created_at, datetime):
+        created_at = now
+
+    return {
+        "ref_type": ref_type,
+        "report_key": report_key,
+        "source_collection": (report_ref.get("source_collection") or "").strip(),
+        "title": (report_ref.get("title") or "未命名报告").strip(),
+        "symbol": (report_ref.get("symbol") or "").strip() or None,
+        "summary": (report_ref.get("summary") or "").strip()[:600],
+        "status": (report_ref.get("status") or "").strip() or None,
+        "task_id": (report_ref.get("task_id") or "").strip() or None,
+        "analysis_id": (report_ref.get("analysis_id") or "").strip() or None,
+        "created_at": created_at,
+        "linked_at": now,
+    }
+
+
+async def attach_report_ref_to_thread(
+    db,
+    user_id: str,
+    thread_id: Optional[str],
+    report_ref: Dict[str, Any],
+) -> bool:
+    normalized_thread_id = (thread_id or "").strip()
+    if not normalized_thread_id or _is_external_session_thread_id(normalized_thread_id):
+        return False
+
+    normalized_ref = _normalize_report_ref_item(report_ref)
+    if not normalized_ref:
+        return False
+
+    thread = await db.assistant_threads.find_one({
+        "user_id": user_id,
+        "thread_id": normalized_thread_id,
+        "archived": {"$ne": True},
+    })
+    if not thread or (thread.get("topic_type") or "") == "im_session":
+        return False
+
+    existing_refs = thread.get("report_refs") or []
+    merged_refs = [
+        ref for ref in existing_refs
+        if not (
+            (ref.get("ref_type") or "") == normalized_ref["ref_type"]
+            and (ref.get("report_key") or "") == normalized_ref["report_key"]
+        )
+    ]
+    merged_refs.insert(0, normalized_ref)
+    merged_refs = merged_refs[:ASSISTANT_MAX_REPORT_REFS]
+
+    await db.assistant_threads.update_one(
+        {"user_id": user_id, "thread_id": normalized_thread_id},
+        {
+            "$set": {
+                "report_refs": merged_refs,
+                "updated_at": _now_utc(),
+            }
+        },
+    )
+    return True
+
+
+async def resolve_thread_for_report_writeback(
+    db,
+    user_id: str,
+    preferred_thread_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    normalized_thread_id = (preferred_thread_id or "").strip()
+    if normalized_thread_id and not _is_external_session_thread_id(normalized_thread_id):
+        thread = await db.assistant_threads.find_one({
+            "user_id": user_id,
+            "thread_id": normalized_thread_id,
+            "archived": {"$ne": True},
+        })
+        if thread and (thread.get("topic_type") or "") != "im_session":
+            return thread
+
+    fallback_thread = await create_assistant_thread(
+        db,
+        user_id=user_id,
+        title=ASSISTANT_REPORT_INBOX_TITLE,
+        parent_thread_id=None,
+    )
+    thread = await db.assistant_threads.find_one({
+        "user_id": user_id,
+        "thread_id": fallback_thread["thread_id"],
+        "archived": {"$ne": True},
+    })
+    return thread or fallback_thread
+
+
+async def write_report_back_to_assistant_thread(
+    db,
+    user_id: str,
+    report_ref: Dict[str, Any],
+    preferred_thread_id: Optional[str] = None,
+    summary_message: Optional[str] = None,
+) -> Optional[str]:
+    target_thread = await resolve_thread_for_report_writeback(db, user_id, preferred_thread_id)
+    if not target_thread:
+        return None
+
+    target_thread_id = target_thread.get("thread_id")
+    attached = await attach_report_ref_to_thread(db, user_id, target_thread_id, report_ref)
+    if not attached:
+        return None
+
+    text = (summary_message or "").strip()
+    if text:
+        await append_assistant_message(
+            db,
+            user_id=user_id,
+            role="assistant",
+            content=text,
+            conversation_id=target_thread_id,
+            tools_used=["report_writeback"],
+        )
+        await summarize_assistant_thread(
+            db,
+            user_id=user_id,
+            conversation_id=target_thread_id,
+            summary_type="report_writeback",
+        )
+
+    return target_thread_id
+
+
+def _to_iso_datetime(value: Any) -> Optional[str]:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    text = str(value or "").strip()
+    return text or None
+
+
+def _build_stock_report_detail_content(task: Any) -> str:
+    result = task.result or {}
+    symbol = task.task_params.get("symbol", "未知") if task.task_params else "未知"
+    lines = [f"# {symbol} 分析报告"]
+
+    recommendation = result.get("recommendation")
+    if recommendation:
+        lines.append(f"\n## 投资建议\n{recommendation}")
+
+    summary = result.get("summary") or result.get("executive_summary")
+    if summary:
+        lines.append(f"\n## 摘要\n{summary}")
+
+    decision = result.get("decision") or {}
+    if decision:
+        decision_lines: List[str] = []
+        if decision.get("action"):
+            decision_lines.append(f"- 操作观点: {decision['action']}")
+        if decision.get("confidence") is not None:
+            decision_lines.append(f"- 置信度: {decision['confidence']}")
+        if decision.get("risk_score") is not None:
+            decision_lines.append(f"- 风险分: {decision['risk_score']}")
+        reasoning = decision.get("reasoning")
+        if reasoning:
+            decision_lines.append(f"- 决策依据: {reasoning}")
+        if decision_lines:
+            lines.append("\n## 决策信息\n" + "\n".join(decision_lines))
+
+    key_points = result.get("key_points") or []
+    if key_points:
+        lines.append("\n## 关键要点\n" + "\n".join(f"- {item}" for item in key_points[:8]))
+
+    reports = result.get("reports") or {}
+    if reports:
+        lines.append("\n## 分析师摘录")
+        for key, text in reports.items():
+            cleaned = str(text or "").strip()
+            if not cleaned:
+                continue
+            lines.append(f"\n### {key}\n{cleaned[:1500]}")
+
+    lines.append(f"\n---\n任务ID: {task.task_id}")
+    return "\n".join(lines)
+
+
+def _build_stock_report_detail_content_from_doc(report_doc: Dict[str, Any]) -> str:
+    stock_symbol = (report_doc.get("stock_symbol") or "未知").strip() or "未知"
+    stock_name = (report_doc.get("stock_name") or "").strip()
+    title = f"{stock_name}({stock_symbol})" if stock_name else stock_symbol
+    lines = [f"# {title} 分析报告"]
+
+    recommendation = str(report_doc.get("recommendation") or "").strip()
+    if recommendation:
+        lines.append(f"\n## 投资建议\n{recommendation}")
+
+    summary = str(report_doc.get("summary") or "").strip()
+    if summary:
+        lines.append(f"\n## 摘要\n{summary}")
+
+    decision = report_doc.get("decision") or {}
+    if isinstance(decision, dict) and decision:
+        decision_lines: List[str] = []
+        if decision.get("action"):
+            decision_lines.append(f"- 操作观点: {decision['action']}")
+        if decision.get("confidence") is not None:
+            decision_lines.append(f"- 置信度: {decision['confidence']}")
+        if decision.get("risk_score") is not None:
+            decision_lines.append(f"- 风险分: {decision['risk_score']}")
+        reasoning = decision.get("reasoning")
+        if reasoning:
+            decision_lines.append(f"- 决策依据: {reasoning}")
+        if decision_lines:
+            lines.append("\n## 决策信息\n" + "\n".join(decision_lines))
+
+    key_points = report_doc.get("key_points") or []
+    if key_points:
+        lines.append("\n## 关键要点\n" + "\n".join(f"- {item}" for item in key_points[:8]))
+
+    reports = report_doc.get("reports") or {}
+    if isinstance(reports, dict) and reports:
+        lines.append("\n## 分析师摘录")
+        for key, text in reports.items():
+            cleaned = str(text or "").strip()
+            if not cleaned:
+                continue
+            lines.append(f"\n### {key}\n{cleaned[:1500]}")
+
+    if report_doc.get("analysis_id"):
+        lines.append(f"\n---\n分析ID: {report_doc['analysis_id']}")
+    if report_doc.get("task_id"):
+        lines.append(f"任务ID: {report_doc['task_id']}")
+    return "\n".join(lines)
+
+
+def _build_position_report_detail_content(report: Dict[str, Any]) -> str:
+    code = report.get("code") or "未知"
+    name = report.get("name") or code
+    lines = [f"# {name}({code}) 持仓分析报告"]
+
+    status = report.get("status")
+    action = report.get("action")
+    confidence = report.get("confidence")
+    meta: List[str] = []
+    if status:
+        meta.append(f"- 状态: {status}")
+    if action:
+        meta.append(f"- 操作建议: {action}")
+    if confidence is not None:
+        meta.append(f"- 置信度: {confidence}")
+    if meta:
+        lines.append("\n## 核心结论\n" + "\n".join(meta))
+
+    summary = report.get("summary") or {}
+    summary_lines: List[str] = []
+    if summary.get("quantity") is not None:
+        summary_lines.append(f"- 持仓数量: {summary['quantity']}")
+    if summary.get("cost_price") is not None:
+        summary_lines.append(f"- 成本价: {summary['cost_price']}")
+    if summary.get("current_price") is not None:
+        summary_lines.append(f"- 当前价: {summary['current_price']}")
+    if summary.get("unrealized_pnl") is not None:
+        summary_lines.append(f"- 浮动盈亏: {summary['unrealized_pnl']}")
+    if summary.get("unrealized_pnl_pct") is not None:
+        summary_lines.append(f"- 盈亏比例: {summary['unrealized_pnl_pct']}%")
+    if summary_lines:
+        lines.append("\n## 持仓概览\n" + "\n".join(summary_lines))
+
+    targets = report.get("price_targets") or {}
+    target_lines: List[str] = []
+    for label, key in (("目标价", "target_price"), ("止损价", "stop_loss"), ("止盈价", "take_profit_price")):
+        if targets.get(key) is not None:
+            target_lines.append(f"- {label}: {targets[key]}")
+    if target_lines:
+        lines.append("\n## 目标价位\n" + "\n".join(target_lines))
+
+    action_reason = str(report.get("action_reason") or "").strip()
+    if action_reason:
+        lines.append(f"\n## 分析详情\n{action_reason}")
+
+    detailed = str(report.get("detailed_analysis") or "").strip()
+    if detailed:
+        lines.append(f"\n## 详细分析\n{detailed}")
+
+    analysis_id = report.get("analysis_id")
+    if analysis_id:
+        lines.append(f"\n---\n分析ID: {analysis_id}")
+    return "\n".join(lines)
+
+
+async def get_assistant_thread_report_detail(
+    db,
+    user_id: str,
+    thread_id: str,
+    ref_type: str,
+    report_key: str,
+) -> Dict[str, Any]:
+    thread = await db.assistant_threads.find_one({
+        "user_id": user_id,
+        "thread_id": thread_id,
+        "archived": {"$ne": True},
+    })
+    if not thread:
+        raise ValueError("主题不存在或已删除")
+
+    target_ref = None
+    for ref in thread.get("report_refs") or []:
+        if (ref.get("ref_type") or "") == ref_type and (ref.get("report_key") or "") == report_key:
+            target_ref = ref
+            break
+    if not target_ref:
+        raise ValueError("当前主题下未找到对应的关联报告")
+
+    detail = {
+        "ref_type": target_ref.get("ref_type") or ref_type,
+        "report_key": target_ref.get("report_key") or report_key,
+        "title": target_ref.get("title") or "未命名报告",
+        "symbol": target_ref.get("symbol") or None,
+        "status": target_ref.get("status") or None,
+        "task_id": target_ref.get("task_id") or None,
+        "analysis_id": target_ref.get("analysis_id") or None,
+        "created_at": _to_iso_datetime(target_ref.get("created_at")),
+        "linked_at": _to_iso_datetime(target_ref.get("linked_at")),
+        "content": (target_ref.get("summary") or "").strip(),
+        "content_format": "markdown",
+    }
+
+    if ref_type == "stock_report":
+        from app.services.task_analysis_service import get_task_analysis_service
+
+        task_id = (target_ref.get("task_id") or report_key or "").strip()
+        task = await get_task_analysis_service().get_task(task_id) if task_id else None
+        if task and str(task.user_id) == str(user_id):
+            detail["status"] = str(task.status)
+            detail["created_at"] = _to_iso_datetime(task.created_at)
+            detail["content"] = _build_stock_report_detail_content(task)
+            return detail
+
+        analysis_key = (target_ref.get("analysis_id") or report_key or task_id or "").strip()
+        report_doc = await db.analysis_reports.find_one(_build_analysis_report_lookup_query(user_id, analysis_key))
+        if not report_doc:
+            raise ValueError("原始报告不存在或已被删除")
+        detail["status"] = report_doc.get("status") or detail["status"]
+        detail["task_id"] = report_doc.get("task_id") or detail["task_id"]
+        detail["analysis_id"] = report_doc.get("analysis_id") or detail["analysis_id"]
+        detail["created_at"] = _to_iso_datetime(report_doc.get("created_at"))
+        detail["content"] = _build_stock_report_detail_content_from_doc(report_doc)
+        return detail
+
+    if ref_type == "position_report":
+        from app.services.portfolio_service import get_portfolio_service
+
+        analysis_id = (target_ref.get("analysis_id") or report_key or "").strip()
+        report = await get_portfolio_service().get_position_analysis_by_id(user_id, analysis_id)
+        if not report:
+            raise ValueError("原始持仓报告不存在或已被删除")
+        detail["created_at"] = _to_iso_datetime(report.get("created_at"))
+        detail["content"] = _build_position_report_detail_content(report)
+        detail["status"] = report.get("status") or detail["status"]
+        return detail
+
+    if ref_type == "position_task":
+        task_id = (target_ref.get("task_id") or report_key or "").strip()
+        task_doc = await db.unified_analysis_tasks.find_one({"task_id": task_id})
+        if not task_doc:
+            raise ValueError("原始任务不存在或已被删除")
+        if str(task_doc.get("user_id")) != str(user_id):
+            raise ValueError("无权访问该任务")
+
+        result = task_doc.get("result") or {}
+        analysis_id = (result.get("analysis_id") or target_ref.get("analysis_id") or "").strip()
+        if analysis_id:
+            from app.services.portfolio_service import get_portfolio_service
+
+            report = await get_portfolio_service().get_position_analysis_by_id(user_id, analysis_id)
+            if report:
+                detail["analysis_id"] = analysis_id
+                detail["created_at"] = _to_iso_datetime(report.get("created_at"))
+                detail["status"] = report.get("status") or detail["status"]
+                detail["content"] = _build_position_report_detail_content(report)
+                return detail
+
+        status = task_doc.get("status") or detail["status"] or "unknown"
+        detail["status"] = str(status)
+        detail["created_at"] = _to_iso_datetime(task_doc.get("created_at"))
+        detail["content"] = (
+            f"# {detail['title']}\n\n"
+            f"- 任务状态: {status}\n"
+            f"- 任务ID: {task_id}\n\n"
+            f"{(target_ref.get('summary') or '该任务尚未生成完整报告，后续完成后可在这里查看。').strip()}"
+        )
+        return detail
+
+    return detail
+
+
+def _build_stock_report_ref_from_task(task: Any, stock_name: Optional[str] = None) -> Dict[str, Any]:
+    result = task.result or {}
+    task_params = task.task_params or {}
+    symbol = (task_params.get("symbol") or "").strip()
+    display_name = (stock_name or "").strip()
+    title_prefix = f"{display_name}({symbol})" if display_name and symbol else display_name or symbol or "未知标的"
+    return {
+        "ref_type": "stock_report",
+        "report_key": task.task_id,
+        "source_collection": "unified_analysis_tasks",
+        "title": f"{title_prefix} 分析报告",
+        "symbol": symbol or None,
+        "summary": ((result.get("summary") or result.get("recommendation") or "")[:400]).strip(),
+        "status": str(task.status),
+        "task_id": task.task_id,
+        "created_at": getattr(task, "created_at", None),
+    }
+
+
+def _build_stock_report_ref_from_analysis_doc(report_doc: Dict[str, Any]) -> Dict[str, Any]:
+    stock_symbol = (report_doc.get("stock_symbol") or "").strip()
+    stock_name = (report_doc.get("stock_name") or "").strip()
+    title_prefix = f"{stock_name}({stock_symbol})" if stock_name and stock_symbol else stock_name or stock_symbol or "未知标的"
+    report_key = (report_doc.get("task_id") or report_doc.get("analysis_id") or str(report_doc.get("_id") or "")).strip()
+    return {
+        "ref_type": "stock_report",
+        "report_key": report_key,
+        "source_collection": "analysis_reports",
+        "title": f"{title_prefix} 分析报告",
+        "symbol": stock_symbol or None,
+        "summary": ((report_doc.get("summary") or report_doc.get("recommendation") or "")[:400]).strip(),
+        "status": report_doc.get("status") or "completed",
+        "task_id": (report_doc.get("task_id") or "").strip() or None,
+        "analysis_id": (report_doc.get("analysis_id") or "").strip() or None,
+        "created_at": report_doc.get("created_at"),
+    }
+
+
+def _build_analysis_report_lookup_query(user_id: str, report_key: str) -> Dict[str, Any]:
+    report_query = {
+        "$or": [
+            {"task_id": report_key},
+            {"analysis_id": report_key},
+        ]
+    }
+    if ObjectId.is_valid(report_key):
+        report_query["$or"].append({"_id": ObjectId(report_key)})
+
+    return {
+        "$and": [
+            {"$or": [{"user_id": user_id}, {"user_id": str(user_id)}]},
+            report_query,
+        ]
+    }
+
+
+def _build_position_report_ref_from_report(report: Dict[str, Any]) -> Dict[str, Any]:
+    code = (report.get("code") or "").strip()
+    name = (report.get("name") or "").strip()
+    title_prefix = f"{name}({code})" if name and code else name or code or "未知持仓"
+    return {
+        "ref_type": "position_report",
+        "report_key": report.get("analysis_id") or "",
+        "source_collection": "position_analysis_reports",
+        "title": f"{title_prefix} 持仓分析",
+        "symbol": code or None,
+        "summary": ((report.get("summary") or report.get("action_reason") or "")[:400]).strip(),
+        "status": report.get("status") or None,
+        "analysis_id": report.get("analysis_id") or None,
+        "created_at": report.get("created_at"),
+    }
+
+
+async def search_assistant_attachable_reports(
+    db,
+    user_id: str,
+    thread_id: str,
+    ref_type: str = "stock_report",
+    keyword: Optional[str] = None,
+    limit: int = 8,
+) -> List[Dict[str, Any]]:
+    thread = await db.assistant_threads.find_one({
+        "user_id": user_id,
+        "thread_id": thread_id,
+        "archived": {"$ne": True},
+    })
+    if not thread or (thread.get("topic_type") or "") == "im_session":
+        raise ValueError("当前主题不存在或不支持关联报告")
+
+    normalized_type = (ref_type or "stock_report").strip() or "stock_report"
+    normalized_keyword = (keyword or "").strip()
+    limit = max(1, min(limit, 20))
+
+    if normalized_type == "position_report":
+        from app.services.portfolio_service import get_portfolio_service
+
+        query: Dict[str, Any] = {
+            "user_id": user_id,
+            "analysis_id": {"$exists": True, "$ne": ""},
+        }
+        if normalized_keyword:
+            query["$or"] = [
+                {"code": {"$regex": normalized_keyword, "$options": "i"}},
+                {"name": {"$regex": normalized_keyword, "$options": "i"}},
+                {"summary": {"$regex": normalized_keyword, "$options": "i"}},
+                {"analysis_id": {"$regex": normalized_keyword, "$options": "i"}},
+            ]
+
+        docs = await db.position_analysis_reports.find(query).sort("created_at", -1).limit(limit).to_list(length=limit)
+        service = get_portfolio_service()
+        results: List[Dict[str, Any]] = []
+        for doc in docs:
+            analysis_id = (doc.get("analysis_id") or "").strip()
+            if not analysis_id:
+                continue
+            report = await service.get_position_analysis_by_id(user_id, analysis_id)
+            if not report:
+                continue
+            results.append(_normalize_report_ref_item(_build_position_report_ref_from_report(report)))
+        return [item for item in results if item][:limit]
+
+    from app.services.task_analysis_service import get_task_analysis_service
+
+    service = get_task_analysis_service()
+    results: List[Dict[str, Any]] = []
+    seen_keys = set()
+
+    if normalized_keyword:
+        analysis_query: Dict[str, Any] = {
+            "$and": [
+                {"$or": [{"user_id": user_id}, {"user_id": str(user_id)}]},
+                {
+                    "$or": [
+                        {"stock_symbol": {"$regex": normalized_keyword, "$options": "i"}},
+                        {"stock_name": {"$regex": normalized_keyword, "$options": "i"}},
+                        {"summary": {"$regex": normalized_keyword, "$options": "i"}},
+                        {"analysis_id": {"$regex": normalized_keyword, "$options": "i"}},
+                        {"task_id": {"$regex": normalized_keyword, "$options": "i"}},
+                    ]
+                },
+            ]
+        }
+        analysis_docs = await db.analysis_reports.find(analysis_query).sort("created_at", -1).limit(limit * 3).to_list(length=limit * 3)
+        for doc in analysis_docs:
+            ref = _normalize_report_ref_item(_build_stock_report_ref_from_analysis_doc(doc))
+            ref_key = (ref or {}).get("report_key") if ref else None
+            if not ref_key or ref_key in seen_keys:
+                continue
+            if ref:
+                results.append(ref)
+                seen_keys.add(ref_key)
+            if len(results) >= limit:
+                return results[:limit]
+
+    task_query: Dict[str, Any] = {
+        "$and": [
+            {"status": "completed"},
+            {"$or": [{"user_id": user_id}, {"user_id": ObjectId(user_id)}]},
+        ]
+    }
+    if normalized_keyword:
+        task_query["$and"].append({
+            "$or": [
+                {"task_params.symbol": {"$regex": normalized_keyword, "$options": "i"}},
+                {"result.summary": {"$regex": normalized_keyword, "$options": "i"}},
+                {"result.recommendation": {"$regex": normalized_keyword, "$options": "i"}},
+                {"task_id": {"$regex": normalized_keyword, "$options": "i"}},
+            ]
+        })
+
+    task_docs = await db.unified_analysis_tasks.find(task_query).sort("created_at", -1).limit(limit * 2).to_list(length=limit * 2)
+    for doc in task_docs:
+        task_id = (doc.get("task_id") or "").strip()
+        if not task_id or task_id in seen_keys:
+            continue
+        task = await service.get_task(task_id)
+        if not task or str(task.user_id) != str(user_id) or str(task.status) != "completed":
+            continue
+        ref = _normalize_report_ref_item(_build_stock_report_ref_from_task(task))
+        if ref:
+            results.append(ref)
+            seen_keys.add(task_id)
+        if len(results) >= limit:
+            break
+
+    return results[:limit]
+
+
+async def attach_existing_report_to_thread(
+    db,
+    user_id: str,
+    thread_id: str,
+    ref_type: str,
+    report_key: str,
+) -> Dict[str, Any]:
+    normalized_type = (ref_type or "").strip()
+    normalized_key = (report_key or "").strip()
+    if not normalized_type or not normalized_key:
+        raise ValueError("报告类型和报告标识不能为空")
+
+    if normalized_type == "position_report":
+        from app.services.portfolio_service import get_portfolio_service
+
+        report = await get_portfolio_service().get_position_analysis_by_id(user_id, normalized_key)
+        if not report:
+            raise ValueError("未找到可关联的持仓报告")
+        ref = _normalize_report_ref_item(_build_position_report_ref_from_report(report))
+    else:
+        from app.services.task_analysis_service import get_task_analysis_service
+
+        task = await get_task_analysis_service().get_task(normalized_key)
+        if task and str(task.user_id) == str(user_id) and str(task.status) == "completed":
+            ref = _normalize_report_ref_item(_build_stock_report_ref_from_task(task))
+        else:
+            report_doc = await db.analysis_reports.find_one(_build_analysis_report_lookup_query(user_id, normalized_key))
+            if not report_doc:
+                raise ValueError("未找到可关联的历史分析报告")
+            ref = _normalize_report_ref_item(_build_stock_report_ref_from_analysis_doc(report_doc))
+
+    if not ref:
+        raise ValueError("报告信息不完整，无法关联")
+
+    attached = await attach_report_ref_to_thread(db, user_id, thread_id, ref)
+    if not attached:
+        raise ValueError("当前主题不支持关联该报告")
+    return ref
+
+
+def _extract_sentences(text: str) -> List[str]:
+    raw = (text or "").replace("\r", "\n")
+    fragments: List[str] = []
+    for chunk in raw.split("\n"):
+        chunk = chunk.strip(" -•\t")
+        if not chunk:
+            continue
+        parts = [part.strip() for part in chunk.replace("！", "。").replace("？", "。").split("。")]
+        for part in parts:
+            if part:
+                fragments.append(part)
+    return fragments
+
+
+def _build_thread_summary_from_messages(messages: List[Dict[str, Any]], title: str = "") -> Dict[str, Any]:
+    user_messages = [m.get("content", "").strip() for m in messages if m.get("role") == "user" and m.get("content")]
+    assistant_messages = [m.get("content", "").strip() for m in messages if m.get("role") == "assistant" and m.get("content")]
+
+    latest_user = user_messages[-1] if user_messages else ""
+    latest_assistant = assistant_messages[-1] if assistant_messages else ""
+    abstract = latest_assistant[:160] or latest_user[:160] or (title[:160] if title else "") or "当前主题尚未形成摘要"
+
+    confirmed_candidates: List[str] = []
+    for content in reversed(assistant_messages[-4:]):
+        confirmed_candidates.extend(_extract_sentences(content))
+
+    question_candidates: List[str] = []
+    for content in reversed(user_messages[-4:]):
+        question_candidates.extend(_extract_sentences(content))
+
+    next_actions: List[str] = []
+    if latest_user:
+        next_actions.append(f"围绕“{latest_user[:40]}”继续追问或补数")
+    if latest_assistant:
+        next_actions.append("结合当前结论继续细化估值、行业或风险主线")
+    if not next_actions:
+        next_actions.append("继续在当前主题下补充问题或触发深度分析")
+
+    total_messages = len(messages)
+    assistant_ratio = len(assistant_messages) / total_messages if total_messages else 0
+    focus_score = 0.55
+    if total_messages >= 4:
+        focus_score += 0.1
+    if total_messages >= 8:
+        focus_score += 0.05
+    if latest_user and title and any(token for token in title.split() if token and token in latest_user):
+        focus_score += 0.1
+    if assistant_ratio >= 0.4:
+        focus_score += 0.1
+    focus_score = min(round(focus_score, 2), 0.95)
+
+    return {
+        "abstract": abstract,
+        "confirmed_facts": _normalize_summary_items(confirmed_candidates),
+        "open_questions": _normalize_summary_items(question_candidates),
+        "next_actions": _normalize_summary_items(next_actions),
+        "focus_score": focus_score,
     }
 
 
@@ -573,6 +1484,7 @@ async def _create_thread_document(
     user_id: str,
     thread_id: str,
     title: str,
+    parent_thread_id: Optional[str] = None,
     topic_type: str = "general",
 ) -> Dict[str, Any]:
     now = _now_utc()
@@ -580,12 +1492,20 @@ async def _create_thread_document(
         "thread_id": thread_id,
         "user_id": user_id,
         "title": title,
+        "parent_thread_id": parent_thread_id,
         "topic_type": topic_type,
         "pinned": thread_id == ASSISTANT_DEFAULT_THREAD_ID,
         "archived": False,
         "message_count": 0,
         "last_user_message": "",
-        "current_summary": {"abstract": ""},
+        "report_refs": [],
+        "current_summary": {
+            "abstract": "",
+            "confirmed_facts": [],
+            "open_questions": [],
+            "next_actions": [],
+            "focus_score": 0.0,
+        },
         "created_at": now,
         "updated_at": now,
     }
@@ -649,7 +1569,13 @@ async def _migrate_legacy_conversation_if_needed(db, user_id: str, thread_id: st
             "$set": {
                 "message_count": len(payload),
                 "last_user_message": last_user_message,
-                "current_summary.abstract": abstract,
+                "current_summary": {
+                    "abstract": abstract,
+                    "confirmed_facts": [],
+                    "open_questions": [],
+                    "next_actions": [],
+                    "focus_score": 0.5,
+                },
                 "updated_at": now,
             }
         },
@@ -662,10 +1588,22 @@ async def get_or_create_assistant_thread(
     conversation_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     thread_id = (conversation_id or ASSISTANT_DEFAULT_THREAD_ID).strip() if conversation_id else ASSISTANT_DEFAULT_THREAD_ID
+    topic_type = "im_session" if _is_external_session_thread_id(thread_id) else "general"
     doc = await db.assistant_threads.find_one({"user_id": user_id, "thread_id": thread_id})
     if doc is None:
-        title = "默认主题" if thread_id == ASSISTANT_DEFAULT_THREAD_ID else f"新主题 {datetime.now().strftime('%m-%d %H:%M')}"
-        doc = await _create_thread_document(db, user_id, thread_id, title)
+        title = "默认主题" if thread_id == ASSISTANT_DEFAULT_THREAD_ID else ("外部会话" if topic_type == "im_session" else f"新主题 {datetime.now().strftime('%m-%d %H:%M')}")
+        doc = await _create_thread_document(db, user_id, thread_id, title, topic_type=topic_type)
+    elif topic_type == "im_session" and doc.get("topic_type") != "im_session":
+        await db.assistant_threads.update_one(
+            {"user_id": user_id, "thread_id": thread_id},
+            {
+                "$set": {
+                    "topic_type": "im_session",
+                    "title": doc.get("title") or "外部会话",
+                    "updated_at": _now_utc(),
+                }
+            },
+        )
     await _migrate_legacy_conversation_if_needed(db, user_id, thread_id)
     return await db.assistant_threads.find_one({"user_id": user_id, "thread_id": thread_id})
 
@@ -676,17 +1614,98 @@ async def list_assistant_threads(db, user_id: str) -> List[Dict[str, Any]]:
     cursor = db.assistant_threads.find({
         "user_id": user_id,
         "archived": {"$ne": True},
-    }).sort([("pinned", -1), ("updated_at", -1)])
+    }).sort([("pinned", -1), ("parent_thread_id", 1), ("updated_at", -1)])
     async for doc in cursor:
-        items.append(_thread_doc_to_item(doc))
+        if _is_visible_assistant_topic(doc):
+            items.append(_thread_doc_to_item(doc))
     return items
 
 
-async def create_assistant_thread(db, user_id: str, title: Optional[str] = None) -> Dict[str, Any]:
+async def create_assistant_thread(
+    db,
+    user_id: str,
+    title: Optional[str] = None,
+    parent_thread_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    normalized_parent_id = (parent_thread_id or "").strip() or None
+    if normalized_parent_id:
+        parent = await db.assistant_threads.find_one({
+            "user_id": user_id,
+            "thread_id": normalized_parent_id,
+            "archived": {"$ne": True},
+        })
+        if not parent:
+            raise ValueError("父主题不存在或已删除")
+
     thread_id = _generate_thread_id()
     thread_title = (title or "").strip() or f"新主题 {datetime.now().strftime('%m-%d %H:%M')}"
-    doc = await _create_thread_document(db, user_id, thread_id, thread_title)
+    existing_docs = await db.assistant_threads.find({
+        "user_id": user_id,
+        "archived": {"$ne": True},
+    }).to_list(length=None)
+    existing_docs = [doc for doc in existing_docs if _is_visible_assistant_topic(doc)]
+    similar_doc = _find_similar_thread(existing_docs, thread_title, normalized_parent_id)
+    if similar_doc:
+        return _thread_doc_to_item(similar_doc)
+
+    doc = await _create_thread_document(
+        db,
+        user_id,
+        thread_id,
+        thread_title,
+        parent_thread_id=normalized_parent_id,
+        topic_type="subtopic" if normalized_parent_id else "general",
+    )
     return _thread_doc_to_item(doc)
+
+
+async def delete_assistant_thread(db, user_id: str, thread_id: str) -> List[str]:
+    normalized_thread_id = (thread_id or "").strip()
+    if not normalized_thread_id:
+        raise ValueError("主题 ID 不能为空")
+    if normalized_thread_id == ASSISTANT_DEFAULT_THREAD_ID:
+        raise ValueError("默认主题不能删除")
+
+    docs = await db.assistant_threads.find({
+        "user_id": user_id,
+        "archived": {"$ne": True},
+    }).to_list(length=None)
+    docs = [doc for doc in docs if _is_visible_assistant_topic(doc)]
+
+    by_id = {doc.get("thread_id"): doc for doc in docs}
+    if normalized_thread_id not in by_id:
+        raise ValueError("主题不存在或已删除")
+
+    children_by_parent: Dict[str, List[str]] = {}
+    for doc in docs:
+        parent_id = doc.get("parent_thread_id")
+        child_id = doc.get("thread_id")
+        if parent_id and child_id:
+            children_by_parent.setdefault(parent_id, []).append(child_id)
+
+    pending = [normalized_thread_id]
+    deleted_ids: List[str] = []
+    while pending:
+        current_id = pending.pop()
+        if current_id in deleted_ids:
+            continue
+        deleted_ids.append(current_id)
+        pending.extend(children_by_parent.get(current_id, []))
+
+    await db.assistant_thread_messages.delete_many({
+        "user_id": user_id,
+        "thread_id": {"$in": deleted_ids},
+    })
+    await db.assistant_thread_checkpoints.delete_many({
+        "user_id": user_id,
+        "thread_id": {"$in": deleted_ids},
+    })
+    await db.assistant_threads.delete_many({
+        "user_id": user_id,
+        "thread_id": {"$in": deleted_ids},
+    })
+
+    return deleted_ids
 
 
 async def get_assistant_thread_messages(
@@ -749,6 +1768,40 @@ async def append_assistant_message(
     return thread_id
 
 
+async def summarize_assistant_thread(
+    db,
+    user_id: str,
+    conversation_id: Optional[str] = None,
+    summary_type: str = "manual",
+) -> Dict[str, Any]:
+    thread = await get_or_create_assistant_thread(db, user_id, conversation_id)
+    _, messages = await get_assistant_thread_messages(db, user_id, thread["thread_id"])
+    summary = _build_thread_summary_from_messages(messages[-12:], thread.get("title") or "")
+    now = _now_utc()
+
+    await db.assistant_threads.update_one(
+        {"user_id": user_id, "thread_id": thread["thread_id"]},
+        {
+            "$set": {
+                "current_summary": summary,
+                "updated_at": now,
+            }
+        },
+    )
+
+    await db.assistant_thread_checkpoints.insert_one({
+        "checkpoint_id": f"chk_{uuid.uuid4().hex[:12]}",
+        "thread_id": thread["thread_id"],
+        "user_id": user_id,
+        "summary_type": summary_type,
+        "summary_text": summary.get("abstract", ""),
+        "structured_summary": summary,
+        "created_at": now,
+    })
+
+    return summary
+
+
 async def save_assistant_message(
     db,
     user_id: str,
@@ -772,6 +1825,12 @@ async def save_assistant_message(
         content=assistant_content,
         conversation_id=thread_id,
         tools_used=tools_used,
+    )
+    await summarize_assistant_thread(
+        db,
+        user_id=user_id,
+        conversation_id=thread_id,
+        summary_type="auto",
     )
 
 
@@ -801,7 +1860,13 @@ async def clear_assistant_conversation(
             "$set": {
                 "message_count": 0,
                 "last_user_message": "",
-                "current_summary.abstract": "",
+                "current_summary": {
+                    "abstract": "",
+                    "confirmed_facts": [],
+                    "open_questions": [],
+                    "next_actions": [],
+                    "focus_score": 0.0,
+                },
                 "updated_at": _now_utc(),
             }
         },
@@ -878,6 +1943,7 @@ async def chat_with_assistant(
     user_message: str,
     user_id: Optional[str] = None,
     conversation_id: Optional[str] = None,
+    current_thread_id: Optional[str] = None,
     is_im: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -888,6 +1954,10 @@ async def chat_with_assistant(
     # 设置用户上下文，供 assistant_ops 工具获取当前用户
     if user_id:
         set_current_user_id(user_id)
+    if current_thread_id:
+        set_current_assistant_thread_id(current_thread_id)
+    elif conversation_id:
+        set_current_assistant_thread_id(conversation_id)
 
     # 加载用户助理个性化设置
     assistant_settings = None
@@ -896,6 +1966,7 @@ async def chat_with_assistant(
 
     # 加载用户画像（跨会话持久记忆）
     user_profile: Optional[dict] = None
+    current_topic_title: Optional[str] = None
     if user_id:
         try:
             user_profile = await load_user_profile(db, user_id)
@@ -903,6 +1974,21 @@ async def chat_with_assistant(
                 logger.info(f"[智能助手] ✅ 用户画像加载成功，最近分析 {len(user_profile['recently_analyzed'])} 条")
         except Exception as e:
             logger.warning(f"[智能助手] 加载用户画像失败（已跳过）: {e}")
+
+    if user_id and current_thread_id:
+        try:
+            current_topic = await db.assistant_threads.find_one(
+                {
+                    "user_id": user_id,
+                    "thread_id": current_thread_id,
+                    "archived": {"$ne": True},
+                },
+                {"title": 1},
+            )
+            if current_topic:
+                current_topic_title = (current_topic.get("title") or "").strip() or None
+        except Exception as e:
+            logger.warning(f"[智能助手] 加载当前主题失败（已跳过）: {e}")
 
     # 加载最近会话历史（最多 10 条，注入到 LLM 上下文）
     history_messages: Optional[List[Message]] = None
@@ -923,7 +2009,15 @@ async def chat_with_assistant(
             logger.warning(f"[智能助手] 加载历史会话失败（已跳过）: {e}")
 
     service = IntelligentAssistantService(db)
-    result = await service.chat(user_message, conversation_id, assistant_settings, is_im=is_im, history_messages=history_messages, user_profile=user_profile)
+    result = await service.chat(
+        user_message,
+        conversation_id,
+        assistant_settings,
+        is_im=is_im,
+        history_messages=history_messages,
+        user_profile=user_profile,
+        current_topic_title=current_topic_title,
+    )
     if user_id and result.get("reply"):
         try:
             await save_assistant_message(

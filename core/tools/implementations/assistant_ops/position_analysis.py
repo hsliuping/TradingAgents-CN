@@ -11,7 +11,7 @@ from typing import Annotated, Optional
 from langchain_core.tools import tool
 
 from core.tools.base import register_tool
-from core.tools.context import require_current_user_id
+from core.tools.context import get_current_assistant_thread_id, require_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,8 @@ async def get_position_analysis(
     """获取指定股票持仓的最新 AI 分析报告。"""
     try:
         from app.services.portfolio_service import get_portfolio_service
+        from app.services.intelligent_assistant_service import attach_report_ref_to_thread
+        from app.core.database import get_mongo_db
 
         user_id = require_current_user_id()
         service = get_portfolio_service()
@@ -123,6 +125,24 @@ async def get_position_analysis(
         if created:
             lines.append(f"\n报告时间: {created[:16] if isinstance(created, str) else created}")
 
+        await attach_report_ref_to_thread(
+            get_mongo_db(),
+            user_id,
+            get_current_assistant_thread_id(),
+            {
+                "ref_type": "position_report",
+                "report_key": (report.get("analysis_id") or report.get("task_id") or f"{code}_{market}_{position_type}"),
+                "source_collection": "position_analysis_reports",
+                "title": f"{name}({code}) 持仓分析报告",
+                "symbol": code,
+                "summary": (reason or report.get("summary") or "")[:400],
+                "status": status or "completed",
+                "task_id": report.get("task_id"),
+                "analysis_id": report.get("analysis_id"),
+                "created_at": report.get("created_at"),
+            },
+        )
+
         return "\n".join(lines)
     except Exception as e:
         logger.exception("[get_position_analysis] 获取持仓分析报告失败: %s", e)
@@ -146,6 +166,8 @@ async def trigger_position_analysis(
 ) -> str:
     """对某只持仓股票发起一次新的 AI 分析，后台异步执行，返回任务ID。"""
     try:
+        from app.core.database import get_mongo_db
+        from app.services.intelligent_assistant_service import attach_report_ref_to_thread
         from app.services.unified_analysis_service import get_unified_analysis_service
 
         user_id = require_current_user_id()
@@ -164,6 +186,9 @@ async def trigger_position_analysis(
             "analysis_focus": analysis_focus,
             "position_type": position_type,
         }
+        current_thread_id = (get_current_assistant_thread_id() or "").strip()
+        if current_thread_id:
+            task_params["_assistant_thread_id"] = current_thread_id
 
         result = await unified_service.create_position_analysis_task(
             user_id=user_id,
@@ -187,6 +212,22 @@ async def trigger_position_analysis(
         bg_task.add_done_callback(
             lambda t: logger.error("[trigger_position_analysis] ❌ 后台执行异常: %s", t.exception())
             if not t.cancelled() and t.exception() else None
+        )
+
+        await attach_report_ref_to_thread(
+            get_mongo_db(),
+            user_id,
+            get_current_assistant_thread_id(),
+            {
+                "ref_type": "position_task",
+                "report_key": task_id,
+                "source_collection": "position_analysis_reports",
+                "title": f"{code} 持仓分析任务",
+                "symbol": code,
+                "summary": f"已发起 {code} 的持仓分析任务，等待生成正式报告。",
+                "status": "running",
+                "task_id": task_id,
+            },
         )
 
         return (

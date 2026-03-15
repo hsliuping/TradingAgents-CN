@@ -13,7 +13,7 @@ from typing import Annotated, Optional
 from langchain_core.tools import tool
 
 from core.tools.base import register_tool
-from core.tools.context import get_current_im_channel, require_current_user_id
+from core.tools.context import get_current_assistant_thread_id, get_current_im_channel, require_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,9 @@ async def trigger_stock_analysis(
         if im_channel:
             task_params["_im_channel"] = im_channel
             logger.info("[trigger_stock_analysis] IM 渠道回调: %s", im_channel)
+        current_thread_id = (get_current_assistant_thread_id() or "").strip()
+        if current_thread_id:
+            task_params["_assistant_thread_id"] = current_thread_id
 
         task = await service.create_task(
             user_id=ObjectId(user_id),
@@ -116,10 +119,14 @@ async def trigger_batch_analysis(
 
     task_ids = []
     for sym in symbol_list:
+        task_params = {"symbol": sym, "market_type": "cn", "research_depth": _depth_label(depth)}
+        current_thread_id = (get_current_assistant_thread_id() or "").strip()
+        if current_thread_id:
+            task_params["_assistant_thread_id"] = current_thread_id
         task = await service.create_task(
             user_id=ObjectId(user_id),
             task_type=AnalysisTaskType.STOCK_ANALYSIS,
-            task_params={"symbol": sym, "market_type": "cn", "research_depth": _depth_label(depth)},
+            task_params=task_params,
             engine_type="auto",
             batch_id=batch_id,
         )

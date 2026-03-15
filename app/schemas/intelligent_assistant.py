@@ -42,20 +42,41 @@ class ConversationResponse(BaseModel):
 
 
 class AssistantThreadSummary(BaseModel):
-    """主题摘要（MVP 仅保留摘要文本）"""
+    """主题摘要"""
     abstract: str = Field("", description="摘要文本")
+    confirmed_facts: List[str] = Field(default_factory=list, description="已确认事实")
+    open_questions: List[str] = Field(default_factory=list, description="待解决问题")
+    next_actions: List[str] = Field(default_factory=list, description="建议下一步")
+    focus_score: float = Field(0.0, description="聚焦度评分")
+
+
+class AssistantThreadReportRef(BaseModel):
+    """主题关联报告引用"""
+    ref_type: str = Field(..., description="引用类型，如 stock_report / position_report / position_task")
+    report_key: str = Field(..., description="报告唯一键")
+    source_collection: str = Field("", description="来源集合")
+    title: str = Field(..., description="报告标题")
+    symbol: Optional[str] = Field(None, description="关联股票代码")
+    summary: str = Field("", description="报告摘要")
+    status: Optional[str] = Field(None, description="报告状态")
+    task_id: Optional[str] = Field(None, description="分析任务 ID")
+    analysis_id: Optional[str] = Field(None, description="持仓分析 ID")
+    created_at: Optional[str] = Field(None, description="报告创建时间")
+    linked_at: Optional[str] = Field(None, description="挂载到主题的时间")
 
 
 class AssistantThreadItem(BaseModel):
     """助手主题会话"""
     thread_id: str = Field(..., description="主题会话 ID")
     title: str = Field(..., description="主题标题")
+    parent_thread_id: Optional[str] = Field(None, description="父主题 ID")
     topic_type: str = Field("general", description="主题类型")
     pinned: bool = Field(False, description="是否置顶")
     archived: bool = Field(False, description="是否归档")
     message_count: int = Field(0, description="消息数量")
     last_user_message: str = Field("", description="最近一条用户消息")
     updated_at: Optional[str] = Field(None, description="更新时间")
+    report_refs: List[AssistantThreadReportRef] = Field(default_factory=list, description="关联报告引用")
     current_summary: Optional[AssistantThreadSummary] = Field(None, description="当前摘要")
 
 
@@ -68,8 +89,59 @@ class AssistantThreadListResponse(BaseModel):
 class CreateAssistantThreadRequest(BaseModel):
     """创建主题会话请求"""
     title: Optional[str] = Field(None, description="主题标题")
+    parent_thread_id: Optional[str] = Field(None, description="父主题 ID")
 
 
 class AssistantThreadMessagesResponse(ConversationResponse):
     """主题消息列表响应"""
     thread: Optional[AssistantThreadItem] = Field(None, description="主题信息")
+
+
+class ThreadSummarizeResponse(BaseModel):
+    """主题总结响应"""
+    conversation_id: str = Field(..., description="主题会话 ID")
+    summary: AssistantThreadSummary = Field(..., description="最新摘要")
+
+
+class ThreadDeleteResponse(BaseModel):
+    """主题删除响应"""
+    success: bool = Field(True, description="是否删除成功")
+    deleted_thread_ids: List[str] = Field(default_factory=list, description="被删除的主题 ID 列表")
+
+
+class AssistantThreadReportDetail(BaseModel):
+    """主题关联报告详情"""
+    ref_type: str = Field(..., description="引用类型")
+    report_key: str = Field(..., description="报告唯一键")
+    title: str = Field(..., description="报告标题")
+    symbol: Optional[str] = Field(None, description="股票代码")
+    status: Optional[str] = Field(None, description="状态")
+    task_id: Optional[str] = Field(None, description="任务 ID")
+    analysis_id: Optional[str] = Field(None, description="分析 ID")
+    created_at: Optional[str] = Field(None, description="报告创建时间")
+    linked_at: Optional[str] = Field(None, description="挂载时间")
+    content: str = Field("", description="详情正文")
+    content_format: str = Field("markdown", description="正文格式")
+
+
+class AssistantThreadReportDetailResponse(BaseModel):
+    """主题关联报告详情响应"""
+    detail: AssistantThreadReportDetail = Field(..., description="报告详情")
+
+
+class AssistantThreadReportSearchResponse(BaseModel):
+    """主题可关联报告搜索响应"""
+    items: List[AssistantThreadReportRef] = Field(default_factory=list, description="可关联报告列表")
+    total: int = Field(0, description="结果数量")
+
+
+class AssistantThreadAttachReportRequest(BaseModel):
+    """主题手动关联旧报告请求"""
+    ref_type: str = Field(..., description="引用类型")
+    report_key: str = Field(..., description="报告唯一键")
+
+
+class AssistantThreadAttachReportResponse(BaseModel):
+    """主题手动关联旧报告响应"""
+    success: bool = Field(True, description="是否关联成功")
+    attached_ref: AssistantThreadReportRef = Field(..., description="已关联的报告引用")

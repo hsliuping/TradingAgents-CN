@@ -146,17 +146,21 @@ class GatewayRouter:
     ) -> GatewayResponse:
         """调用 IntelligentAssistantService 处理消息"""
         from app.services.intelligent_assistant_service import chat_with_assistant
+        from core.gateway.session import SessionManager, build_session_key
         from core.tools.context import set_current_im_channel
 
-        session_key = f"{user_id}:{message.channel_type}:{message.channel_id}"
-
-        # 设置 IM 渠道上下文，供 assistant_ops 工具（如 trigger_stock_analysis）在
-        # 创建后台任务时保存回调渠道信息，任务完成后可主动推送通知到此渠道
         channel_type_str = (
             message.channel_type.value
             if hasattr(message.channel_type, "value")
             else str(message.channel_type)
         )
+        session_key = build_session_key(user_id, channel_type_str, message.channel_id)
+        session_manager = SessionManager(db)
+        session = await session_manager.get_or_create(user_id, channel_type_str, message.channel_id)
+        current_topic_id = ((session.get("context") or {}).get("current_topic_id") or "").strip() or None
+
+        # 设置 IM 渠道上下文，供 assistant_ops 工具（如 trigger_stock_analysis）在
+        # 创建后台任务时保存回调渠道信息，任务完成后可主动推送通知到此渠道
         set_current_im_channel(channel_type_str, message.channel_id)
 
         result = await chat_with_assistant(
@@ -164,6 +168,7 @@ class GatewayRouter:
             user_message=message.content,
             user_id=user_id,
             conversation_id=session_key,
+            current_thread_id=current_topic_id,
             is_im=True,  # IM 渠道：注入移动端格式规范，LLM 避免输出表格和 Markdown
         )
 
@@ -193,7 +198,9 @@ class GatewayRouter:
                 "直接发送文字即可与分析助理对话，例如：\n"
                 "• 分析贵州茅台\n"
                 "• 上周分析过哪些股票\n"
-                "• 查看我的自选股"
+                "• 查看我的自选股\n"
+                "• 当前主题是什么\n"
+                "• 切换到新能源车研究"
             )
             resp = GatewayResponse(
                 channel_type=message.channel_type,

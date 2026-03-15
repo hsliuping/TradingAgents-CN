@@ -57,7 +57,7 @@
 
       <!-- 页面内容 -->
       <main class="main-content">
-        <div class="content-wrapper">
+        <div class="content-wrapper" :class="{ 'content-wrapper--full': isFullWidthRoute }">
           <router-view v-slot="{ Component, route }">
             <transition
               :name="route.meta.transition || 'fade'"
@@ -105,6 +105,8 @@ const keepAliveComponents = computed(() => [
   'AnalysisHistory',
   'QueueManagement'
 ])
+
+const isFullWidthRoute = computed(() => route.path.startsWith('/assistant'))
 
 // 移动端判断
 const isMobile = computed(() => width.value < 768)
@@ -246,6 +248,11 @@ watch(() => route.fullPath, () => {
   .content-wrapper {
     max-width: 1400px;
     margin: 0 auto;
+
+    &.content-wrapper--full {
+      max-width: none;
+      width: 100%;
+    }
   }
 }
 

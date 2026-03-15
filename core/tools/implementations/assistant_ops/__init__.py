@@ -18,4 +18,6 @@ from core.tools.implementations.assistant_ops import position_analysis  # noqa: 
 from core.tools.implementations.assistant_ops import trade_review_ops  # noqa: F401
 from core.tools.implementations.assistant_ops import trading_plan  # noqa: F401
 from core.tools.implementations.assistant_ops import risk_alerts  # noqa: F401
+from core.tools.implementations.assistant_ops import topic_manager  # noqa: F401
+from core.tools.implementations.assistant_ops import recent_search  # noqa: F401
 from .gain_alerts import set_stop_gain_alert, list_stop_gain_alerts, clear_stop_gain_alert

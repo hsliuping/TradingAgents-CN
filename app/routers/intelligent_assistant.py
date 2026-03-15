@@ -10,24 +10,36 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.routers.auth_db import get_current_user
 from app.core.database import get_mongo_db
 from app.schemas.intelligent_assistant import (
+    AssistantThreadAttachReportRequest,
+    AssistantThreadAttachReportResponse,
     AssistantThreadItem,
     AssistantThreadListResponse,
     AssistantThreadMessagesResponse,
+    AssistantThreadReportSearchResponse,
     ChatRequest,
     ChatResponse,
     ConversationResponse,
     CreateAssistantThreadRequest,
     PlannedAnalysisResponse,
+    ThreadDeleteResponse,
+    ThreadSummarizeResponse,
+    AssistantThreadReportDetailResponse,
 )
 from app.services.intelligent_assistant_service import (
     chat_with_assistant,
     create_assistant_thread,
+    delete_assistant_thread,
     get_assistant_conversation,
     get_assistant_thread_messages,
     get_or_create_assistant_thread,
     list_assistant_threads,
     clear_assistant_conversation,
+    attach_existing_report_to_thread,
     save_assistant_message,
+    search_assistant_attachable_reports,
+    serialize_assistant_report_ref,
+    summarize_assistant_thread,
+    get_assistant_thread_report_detail,
 )
 from app.services.planned_analysis_service import PlannedAnalysisService
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -83,8 +95,26 @@ async def create_thread(
 ):
     """创建主题会话"""
     user_id = str(current_user["id"])
-    item = await create_assistant_thread(db, user_id, request.title)
-    return AssistantThreadItem(**item)
+    try:
+        item = await create_assistant_thread(db, user_id, request.title, request.parent_thread_id)
+        return AssistantThreadItem(**item)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/threads/{thread_id}", response_model=ThreadDeleteResponse)
+async def delete_thread(
+    thread_id: str,
+    current_user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """删除指定主题及其子主题"""
+    user_id = str(current_user["id"])
+    try:
+        deleted_ids = await delete_assistant_thread(db, user_id, thread_id)
+        return ThreadDeleteResponse(success=True, deleted_thread_ids=deleted_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/threads/{thread_id}/messages", response_model=AssistantThreadMessagesResponse)
@@ -103,6 +133,94 @@ async def get_thread_messages(
     )
 
 
+@router.get(
+    "/threads/{thread_id}/reports/{ref_type}/{report_key}",
+    response_model=AssistantThreadReportDetailResponse,
+)
+async def get_thread_report_detail(
+    thread_id: str,
+    ref_type: str,
+    report_key: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    try:
+        detail = await get_assistant_thread_report_detail(
+            db,
+            str(current_user["id"]),
+            thread_id,
+            ref_type,
+            report_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"获取关联报告详情失败: {exc}") from exc
+
+    return AssistantThreadReportDetailResponse(detail=detail)
+
+
+@router.get(
+    "/threads/{thread_id}/report-candidates",
+    response_model=AssistantThreadReportSearchResponse,
+)
+async def get_thread_report_candidates(
+    thread_id: str,
+    ref_type: str = Query("stock_report"),
+    keyword: Optional[str] = Query(None),
+    limit: int = Query(8, ge=1, le=20),
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    try:
+        items = await search_assistant_attachable_reports(
+            db,
+            str(current_user["id"]),
+            thread_id,
+            ref_type=ref_type,
+            keyword=keyword,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"搜索可关联报告失败: {exc}") from exc
+
+    return AssistantThreadReportSearchResponse(
+        items=[serialize_assistant_report_ref(item) for item in items],
+        total=len(items),
+    )
+
+
+@router.post(
+    "/threads/{thread_id}/report-links",
+    response_model=AssistantThreadAttachReportResponse,
+)
+async def attach_thread_report(
+    thread_id: str,
+    request: AssistantThreadAttachReportRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    try:
+        attached_ref = await attach_existing_report_to_thread(
+            db,
+            str(current_user["id"]),
+            thread_id,
+            request.ref_type,
+            request.report_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"关联旧报告失败: {exc}") from exc
+
+    return AssistantThreadAttachReportResponse(
+        success=True,
+        attached_ref=serialize_assistant_report_ref(attached_ref),
+    )
+
+
 @router.delete("/threads/{thread_id}/messages")
 async def clear_thread_messages(
     thread_id: str,
@@ -113,6 +231,18 @@ async def clear_thread_messages(
     user_id = str(current_user["id"])
     await clear_assistant_conversation(db, user_id, thread_id)
     return {"success": True}
+
+
+@router.post("/threads/{thread_id}/summarize", response_model=ThreadSummarizeResponse)
+async def summarize_thread(
+    thread_id: str,
+    current_user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """手动触发指定主题的摘要更新"""
+    user_id = str(current_user["id"])
+    summary = await summarize_assistant_thread(db, user_id, thread_id, summary_type="manual")
+    return ThreadSummarizeResponse(conversation_id=thread_id, summary=summary)
 
 
 @router.post("/chat", response_model=ChatResponse)

@@ -55,17 +55,65 @@ export interface ConversationResponse {
 
 export interface AssistantThreadSummary {
   abstract: string
+  confirmed_facts: string[]
+  open_questions: string[]
+  next_actions: string[]
+  focus_score: number
+}
+
+export interface AssistantThreadReportRef {
+  ref_type: string
+  report_key: string
+  source_collection: string
+  title: string
+  symbol?: string | null
+  summary: string
+  status?: string | null
+  task_id?: string | null
+  analysis_id?: string | null
+  created_at?: string | null
+  linked_at?: string | null
+}
+
+export interface AssistantThreadReportDetail {
+  ref_type: string
+  report_key: string
+  title: string
+  symbol?: string | null
+  status?: string | null
+  task_id?: string | null
+  analysis_id?: string | null
+  created_at?: string | null
+  linked_at?: string | null
+  content: string
+  content_format: string
+}
+
+export interface AssistantThreadReportDetailResponse {
+  detail: AssistantThreadReportDetail
+}
+
+export interface AssistantThreadReportSearchResponse {
+  items: AssistantThreadReportRef[]
+  total: number
+}
+
+export interface AssistantThreadAttachReportResponse {
+  success: boolean
+  attached_ref: AssistantThreadReportRef
 }
 
 export interface AssistantThreadItem {
   thread_id: string
   title: string
+  parent_thread_id?: string | null
   topic_type: string
   pinned: boolean
   archived: boolean
   message_count: number
   last_user_message: string
   updated_at?: string
+  report_refs: AssistantThreadReportRef[]
   current_summary?: AssistantThreadSummary
 }
 
@@ -78,6 +126,16 @@ export interface AssistantThreadMessagesResponse extends ConversationResponse {
   thread?: AssistantThreadItem
 }
 
+export interface ThreadSummarizeResponse {
+  conversation_id: string
+  summary: AssistantThreadSummary
+}
+
+export interface ThreadDeleteResponse {
+  success: boolean
+  deleted_thread_ids: string[]
+}
+
 export const assistantApi = {
   /** 获取主题列表 */
   async getThreads(): Promise<AssistantThreadListResponse> {
@@ -86,9 +144,18 @@ export const assistantApi = {
   },
 
   /** 创建新主题 */
-  async createThread(title?: string): Promise<AssistantThreadItem> {
-    const res = await request.post<AssistantThreadItem>('/api/assistant/threads', { title })
+  async createThread(title?: string, parentThreadId?: string): Promise<AssistantThreadItem> {
+    const res = await request.post<AssistantThreadItem>('/api/assistant/threads', {
+      title,
+      parent_thread_id: parentThreadId
+    })
     return res as unknown as AssistantThreadItem
+  },
+
+  /** 删除主题及其子主题 */
+  async deleteThread(threadId: string): Promise<ThreadDeleteResponse> {
+    const res = await request.delete<ThreadDeleteResponse>(`/api/assistant/threads/${threadId}`)
+    return res as unknown as ThreadDeleteResponse
   },
 
   /** 获取指定主题消息 */
@@ -97,9 +164,46 @@ export const assistantApi = {
     return res as unknown as AssistantThreadMessagesResponse
   },
 
+  /** 获取主题关联报告详情 */
+  async getThreadReportDetail(threadId: string, refType: string, reportKey: string): Promise<AssistantThreadReportDetailResponse> {
+    const encodedRefType = encodeURIComponent(refType)
+    const encodedReportKey = encodeURIComponent(reportKey)
+    const res = await request.get<AssistantThreadReportDetailResponse>(
+      `/api/assistant/threads/${threadId}/reports/${encodedRefType}/${encodedReportKey}`
+    )
+    return res as unknown as AssistantThreadReportDetailResponse
+  },
+
+  /** 搜索可关联旧报告 */
+  async getThreadReportCandidates(threadId: string, refType: string, keyword?: string, limit = 8): Promise<AssistantThreadReportSearchResponse> {
+    const res = await request.get<AssistantThreadReportSearchResponse>(`/api/assistant/threads/${threadId}/report-candidates`, {
+      params: {
+        ref_type: refType,
+        keyword,
+        limit,
+      }
+    })
+    return res as unknown as AssistantThreadReportSearchResponse
+  },
+
+  /** 手动关联旧报告 */
+  async attachThreadReport(threadId: string, refType: string, reportKey: string): Promise<AssistantThreadAttachReportResponse> {
+    const res = await request.post<AssistantThreadAttachReportResponse>(`/api/assistant/threads/${threadId}/report-links`, {
+      ref_type: refType,
+      report_key: reportKey,
+    })
+    return res as unknown as AssistantThreadAttachReportResponse
+  },
+
   /** 清空指定主题 */
   async clearThreadMessages(threadId: string): Promise<void> {
     await request.delete(`/api/assistant/threads/${threadId}/messages`)
+  },
+
+  /** 手动总结指定主题 */
+  async summarizeThread(threadId: string): Promise<ThreadSummarizeResponse> {
+    const res = await request.post<ThreadSummarizeResponse>(`/api/assistant/threads/${threadId}/summarize`)
+    return res as unknown as ThreadSummarizeResponse
   },
 
   /** 获取会话历史 */
