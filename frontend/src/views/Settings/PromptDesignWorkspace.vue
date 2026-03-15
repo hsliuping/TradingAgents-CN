@@ -262,8 +262,64 @@
           />
           <el-button type="primary" :loading="generating" :disabled="!chatInput.trim()" @click="sendChat">发送</el-button>
         </div>
+
+        <div v-if="pendingChanges" class="change-action-panel">
+          <el-alert
+            type="success"
+            :closable="false"
+            show-icon
+            title="AI 已生成结构化修改建议，可先预览再应用"
+          />
+          <div class="change-summary">
+            <span v-if="pendingTemplateFields.length">模板字段：{{ pendingTemplateFields.join('、') }}</span>
+            <span v-if="pendingPolicyScopes.length">策略场景：{{ pendingPolicyScopes.join('、') }}</span>
+          </div>
+          <div class="change-buttons">
+            <el-button :loading="diffLoading" @click="previewSuggestedChanges">预览变更</el-button>
+            <el-button type="primary" :loading="applyLoading" @click="applySuggestedChanges">确认应用</el-button>
+          </div>
+        </div>
+
+        <div v-if="lastApplyResult?.validation_result" class="validation-panel">
+          <el-alert
+            :type="lastApplyResult.validation_result.passed ? 'success' : 'warning'"
+            :closable="false"
+            show-icon
+            :title="lastApplyResult.validation_result.passed ? '自动验证通过' : '自动验证存在提醒'"
+          >
+            <template #default>
+              {{ lastApplyResult.validation_result.summary }}
+            </template>
+          </el-alert>
+          <div class="change-buttons" style="margin-top: 10px;">
+            <el-button type="danger" plain :loading="rollbackLoading" @click="rollbackAppliedChanges">
+              回退最近一次应用
+            </el-button>
+          </div>
+        </div>
       </div>
     </el-card>
+
+    <el-dialog
+      v-model="diffDialogVisible"
+      title="提示词修改前后对比"
+      width="1000px"
+      destroy-on-close
+    >
+      <div v-if="diffResult" class="diff-dialog-body">
+        <div class="diff-summary">{{ diffResult.diff_summary }}</div>
+        <div class="diff-columns">
+          <div class="diff-column">
+            <div class="diff-title">修改前</div>
+            <el-input :model-value="diffResult.before.assembled" type="textarea" :rows="20" readonly />
+          </div>
+          <div class="diff-column">
+            <div class="diff-title">修改后</div>
+            <el-input :model-value="diffResult.after.assembled" type="textarea" :rows="20" readonly />
+          </div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -271,10 +327,13 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Delete, MagicStick, Plus } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { analysisProfilesApi } from '@/api/analysisProfiles'
 import {
   promptDesignApi,
+  type ApplyResponse,
+  type ChatResponse,
+  type DiffResponse,
   type WorkflowNode,
   type WorkflowItem,
   type StockIndustryResult,
@@ -295,6 +354,13 @@ const chatMessages = ref<Array<{ role: 'user' | 'assistant'; content: string }>>
 const generating = ref(false)
 const sessionId = ref('')
 const selectedNodeForChat = ref<WorkflowNode | null>(null)
+const pendingChanges = ref<ChatResponse['suggested_changes'] | null>(null)
+const diffLoading = ref(false)
+const applyLoading = ref(false)
+const diffDialogVisible = ref(false)
+const diffResult = ref<DiffResponse | null>(null)
+const lastApplyResult = ref<ApplyResponse | null>(null)
+const rollbackLoading = ref(false)
 
 const createIndustryDialogVisible = ref(false)
 const createFormSubmitting = ref(false)
@@ -330,6 +396,21 @@ const resolvedIndustry = computed(() => {
 const selectedNodeLabel = computed(() => selectedNodeForChat.value?.label || '')
 
 const hasNodeToOptimize = computed(() => promptNodes.value.some((n) => n.optimize))
+const pendingTemplateFields = computed(() => Object.keys(pendingChanges.value?.template_changes || {}))
+const pendingPolicyScopes = computed(() => Object.keys(pendingChanges.value?.policy_changes || {}))
+
+const buildPromptContext = () => {
+  if (!selectedNodeForChat.value) return null
+  return {
+    agent_type: resolveAgentType(selectedNodeForChat.value.agent_id),
+    agent_name: selectedNodeForChat.value.agent_id,
+    analysis_type: wizard.analysisTarget,
+    industry: resolvedIndustry.value || undefined,
+    stock_symbol: wizard.stockSymbol || undefined,
+    workflow_id: wizard.workflowId || undefined,
+    node_id: selectedNodeForChat.value.node_id || undefined,
+  }
+}
 
 const lookupStockIndustry = async () => {
   if (!wizard.stockSymbol?.trim()) {
@@ -535,6 +616,9 @@ const startNodeOptimization = () => {
   chatMessages.value = []
   sessionId.value = ''
   chatInput.value = ''
+  pendingChanges.value = null
+  diffResult.value = null
+  lastApplyResult.value = null
   chatMessages.value.push({
     role: 'assistant',
     content: `已选择节点「${toOptimize.label}」，用途：${toOptimize.focus || '请描述优化意图'}`,
@@ -544,8 +628,8 @@ const startNodeOptimization = () => {
 const sendChat = async () => {
   const text = chatInput.value.trim()
   if (!text || !selectedNodeForChat.value) return
-  const node = selectedNodeForChat.value
-  const agentType = resolveAgentType(node.agent_id)
+  const context = buildPromptContext()
+  if (!context) return
 
   chatMessages.value.push({ role: 'user', content: text })
   chatInput.value = ''
@@ -554,20 +638,113 @@ const sendChat = async () => {
     const res = await promptDesignApi.chat({
       session_id: sessionId.value || undefined,
       message: text,
-      agent_type: agentType,
-      agent_name: node.agent_id,
-      analysis_type: wizard.analysisTarget,
-      industry: resolvedIndustry.value || undefined,
-      stock_symbol: wizard.stockSymbol || undefined,
+      ...context,
     })
     if (res.success) {
       sessionId.value = res.session_id
       chatMessages.value.push({ role: 'assistant', content: res.ai_message })
+      pendingChanges.value = res.suggested_changes || null
+      if (res.suggested_changes) {
+        ElMessage.success('已生成结构化修改建议，可先预览再应用')
+      }
     }
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || '发送失败')
   } finally {
     generating.value = false
+  }
+}
+
+const previewSuggestedChanges = async () => {
+  if (!pendingChanges.value) return
+  const context = buildPromptContext()
+  if (!context) return
+  diffLoading.value = true
+  try {
+    diffResult.value = await promptDesignApi.diff({
+      ...context,
+      proposed_template: pendingChanges.value.template_changes,
+      proposed_policy: pendingChanges.value.policy_changes,
+    })
+    diffDialogVisible.value = true
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '预览变更失败')
+  } finally {
+    diffLoading.value = false
+  }
+}
+
+const applySuggestedChanges = async () => {
+  if (!pendingChanges.value) return
+  const context = buildPromptContext()
+  if (!context) return
+
+  try {
+    await ElMessageBox.confirm('确认应用这次提示词优化建议吗？系统会写入模板或注入策略。', '应用提示词修改', {
+      confirmButtonText: '确认应用',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+
+  applyLoading.value = true
+  try {
+    const res = await promptDesignApi.apply({
+      session_id: sessionId.value || undefined,
+      ...context,
+      proposed_template: pendingChanges.value.template_changes,
+      proposed_policy: pendingChanges.value.policy_changes,
+    })
+    if (res.success) {
+      pendingChanges.value = null
+      lastApplyResult.value = res
+      diffResult.value = res.diff
+      diffDialogVisible.value = true
+      chatMessages.value.push({
+        role: 'assistant',
+        content: `已应用提示词修改。模板动作：${res.template_action}${res.template?.template_name ? `，模板：${res.template.template_name}` : ''}。自动验证：${res.validation_result.summary}`,
+      })
+      ElMessage.success(res.validation_result.passed ? '提示词修改已应用，自动验证通过' : '提示词修改已应用，请关注验证提醒')
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '应用修改失败')
+  } finally {
+    applyLoading.value = false
+  }
+}
+
+const rollbackAppliedChanges = async () => {
+  if (!sessionId.value) return
+
+  try {
+    await ElMessageBox.confirm('确认回退当前会话最近一次已应用的提示词修改吗？', '回退提示词修改', {
+      confirmButtonText: '确认回退',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+
+  rollbackLoading.value = true
+  try {
+    const res = await promptDesignApi.rollback(sessionId.value)
+    if (res.success) {
+      const summary = Array.isArray(res.summary) ? res.summary.join('；') : '已完成回退'
+      chatMessages.value.push({
+        role: 'assistant',
+        content: `已回退最近一次提示词应用。${summary}`,
+      })
+      lastApplyResult.value = null
+      pendingChanges.value = null
+      ElMessage.success('最近一次提示词应用已回退')
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '回退失败')
+  } finally {
+    rollbackLoading.value = false
   }
 }
 
@@ -671,6 +848,55 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   margin-top: 16px;
+}
+
+.change-action-panel {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+}
+
+.change-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.change-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.diff-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.validation-panel {
+  margin-top: 14px;
+}
+
+.diff-summary {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.diff-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.diff-title {
+  font-weight: 600;
+  margin-bottom: 8px;
 }
 
 .chat-input-row .el-input {

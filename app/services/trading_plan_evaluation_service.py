@@ -154,6 +154,7 @@ class TradingPlanEvaluationService:
 1. 所有百分比字段使用0-1小数（例如8%写0.08）。
 2. 如果take_profit.type是scaled，levels里sell_ratio总和必须<=1。
 3. 数值务实可执行，避免极端值。
+4. 面向A股场景设计规则：普通买卖按100股整数倍成交，只有配股等历史原因形成的零股才可卖出；因此不要隐含会导致30股、60股、80股这类普通交易无法执行的分批卖出表达，分批止盈更适合输出“卖出1手/2手/若干整手”或“按持仓整手数量取整后执行”的规则。
 
 风格偏好：{risk_style_map.get(risk_style, risk_style_map['balanced'])}
 

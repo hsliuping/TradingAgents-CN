@@ -59,6 +59,7 @@ class PromptAssemblyService:
         stock_symbol: Optional[str] = None,
         agent_type: Optional[str] = None,
         agent_name: Optional[str] = None,
+        policy_override: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         构建 analysis_context_block（分析上下文块）
@@ -77,7 +78,7 @@ class PromptAssemblyService:
             return ""
 
         # Phase 2: 策略控制 - injection_mode=none 时不注入
-        policy = self._get_policy_sync(agent_type, agent_name, analysis_type)
+        policy = policy_override if policy_override is not None else self._get_policy_sync(agent_type, agent_name, analysis_type)
         if policy and policy.get("injection_mode") == "none":
             logger.info(f"📋 [策略] {agent_type}/{agent_name} scope={analysis_type} injection_mode=none，跳过上下文块")
             return ""
@@ -149,6 +150,7 @@ class PromptAssemblyService:
         stock_symbol: Optional[str] = None,
         agent_type: Optional[str] = None,
         agent_name: Optional[str] = None,
+        policy_override: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         构建 capability_block（能力边界说明块）
@@ -166,7 +168,7 @@ class PromptAssemblyService:
             格式化的能力边界说明文本
         """
         # Phase 2: 策略控制 - include_capability_block=False 时不注入
-        policy = self._get_policy_sync(agent_type, agent_name, analysis_type)
+        policy = policy_override if policy_override is not None else self._get_policy_sync(agent_type, agent_name, analysis_type)
         if policy and policy.get("include_capability_block") is False:
             logger.info(f"🔧 [策略] {agent_type}/{agent_name} scope={analysis_type} include_capability_block=False，跳过能力块")
             return ""
@@ -254,6 +256,10 @@ class PromptAssemblyService:
         task_description: str = "",
         include_capability: bool = True,
         variables: Optional[Dict[str, Any]] = None,
+        workflow_id: Optional[str] = None,
+        node_id: Optional[str] = None,
+        template_override: Optional[Dict[str, Any]] = None,
+        policy_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         完整组装入口：选模板 → 生成三块 → 变量替换 → 返回最终 Prompt
@@ -279,7 +285,12 @@ class PromptAssemblyService:
             }
         """
         # 1. 获取模板
-        template = self.template_client.get_effective_template(agent_type, agent_name)
+        template = template_override or self.template_client.get_effective_template(
+            agent_type,
+            agent_name,
+            workflow_id=workflow_id,
+            node_id=node_id,
+        )
         if not template:
             logger.warning(f"⚠️ 未找到模板: {agent_type}/{agent_name}")
             template = {}
@@ -287,7 +298,8 @@ class PromptAssemblyService:
         template_id = template.get("template_id", "")
         
         # 2. 获取策略（Phase 2）
-        policy = self._get_policy_sync(agent_type, agent_name, analysis_type)
+        policy_override = (policy_overrides or {}).get(analysis_type)
+        policy = policy_override if policy_override is not None else self._get_policy_sync(agent_type, agent_name, analysis_type)
         effective_include_capability = include_capability
         if policy and policy.get("include_capability_block") is False:
             effective_include_capability = False
@@ -296,10 +308,12 @@ class PromptAssemblyService:
         context_block = self.build_analysis_context_block(
             analysis_type, industry, stock_symbol,
             agent_type=agent_type, agent_name=agent_name,
+            policy_override=policy,
         )
         capability_block = self.build_capability_block(
             analysis_type, industry, stock_symbol,
             agent_type=agent_type, agent_name=agent_name,
+            policy_override=policy,
         ) if effective_include_capability else ""
         task_block = self.build_task_block(task_description, analysis_type)
         

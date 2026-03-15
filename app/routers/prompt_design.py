@@ -12,6 +12,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, Field
 
 from app.core.database import get_mongo_db
+from app.routers.auth_db import get_current_user
 from app.services.prompt_design_assistant_service import PromptDesignAssistantService
 
 logger = logging.getLogger("webapi")
@@ -30,6 +31,8 @@ class ChatRequest(BaseModel):
     analysis_type: str = Field(default="industry", description="分析场景: general/industry/stock")
     industry: Optional[str] = Field(None, description="行业（用于预览）")
     stock_symbol: Optional[str] = Field(None, description="个股（用于预览）")
+    workflow_id: Optional[str] = Field(None, description="工作流 ID")
+    node_id: Optional[str] = Field(None, description="节点 ID")
 
 
 class DiffRequest(BaseModel):
@@ -38,6 +41,30 @@ class DiffRequest(BaseModel):
     agent_name: str = Field(..., description="Agent 名称")
     proposed_template: Optional[dict] = Field(None, description="建议的模板修改")
     proposed_policy: Optional[dict] = Field(None, description="建议的策略修改")
+    analysis_type: str = Field(default="industry", description="分析场景: general/industry/stock")
+    industry: Optional[str] = Field(None, description="行业（用于预览）")
+    stock_symbol: Optional[str] = Field(None, description="个股（用于预览）")
+    workflow_id: Optional[str] = Field(None, description="工作流 ID")
+    node_id: Optional[str] = Field(None, description="节点 ID")
+
+
+class ApplyRequest(BaseModel):
+    """应用请求"""
+    session_id: Optional[str] = Field(None, description="对话会话 ID")
+    agent_type: str = Field(..., description="Agent 类型")
+    agent_name: str = Field(..., description="Agent 名称")
+    proposed_template: Optional[dict] = Field(None, description="建议的模板修改")
+    proposed_policy: Optional[dict] = Field(None, description="建议的策略修改")
+    analysis_type: str = Field(default="industry", description="分析场景: general/industry/stock")
+    industry: Optional[str] = Field(None, description="行业（用于预览）")
+    stock_symbol: Optional[str] = Field(None, description="个股（用于预览）")
+    workflow_id: Optional[str] = Field(None, description="工作流 ID")
+    node_id: Optional[str] = Field(None, description="节点 ID")
+
+
+class RollbackRequest(BaseModel):
+    """回退请求"""
+    session_id: str = Field(..., description="对话会话 ID")
 
 
 # ==================== 端点 ====================
@@ -50,6 +77,7 @@ def _get_service(db: AsyncIOMotorDatabase) -> PromptDesignAssistantService:
 async def chat(
     req: ChatRequest,
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     与 AI 助手对话，描述优化意图，获取修改建议。
@@ -65,6 +93,9 @@ async def chat(
             analysis_type=req.analysis_type,
             industry=req.industry,
             stock_symbol=req.stock_symbol,
+            user_id=str(current_user["id"]),
+            workflow_id=req.workflow_id,
+            node_id=req.node_id,
         )
         return {"success": True, **result}
     except ValueError as e:
@@ -214,6 +245,7 @@ async def get_workflow_prompt_nodes(
 async def get_diff(
     req: DiffRequest,
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     获取修改前后的 Prompt 对比预览。
@@ -225,8 +257,65 @@ async def get_diff(
             agent_name=req.agent_name,
             proposed_template=req.proposed_template,
             proposed_policy=req.proposed_policy,
+            analysis_type=req.analysis_type,
+            industry=req.industry,
+            stock_symbol=req.stock_symbol,
+            user_id=str(current_user["id"]),
+            workflow_id=req.workflow_id,
+            node_id=req.node_id,
         )
         return {"success": True, **result}
     except Exception as e:
         logger.error(f"❌ 获取对比失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/apply", summary="确认并应用修改")
+async def apply_changes(
+    req: ApplyRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """将结构化提示词建议真正写入模板或注入策略。"""
+    try:
+        svc = _get_service(db)
+        result = await svc.apply_changes(
+            session_id=req.session_id,
+            agent_type=req.agent_type,
+            agent_name=req.agent_name,
+            user_id=str(current_user["id"]),
+            proposed_template=req.proposed_template,
+            proposed_policy=req.proposed_policy,
+            analysis_type=req.analysis_type,
+            industry=req.industry,
+            stock_symbol=req.stock_symbol,
+            workflow_id=req.workflow_id,
+            node_id=req.node_id,
+        )
+        return {"success": True, **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ 应用 Prompt 修改失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/rollback", summary="回退最近一次应用")
+async def rollback_changes(
+    req: RollbackRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """回退当前会话最近一次已应用的提示词修改。"""
+    try:
+        svc = _get_service(db)
+        result = await svc.rollback_changes(
+            session_id=req.session_id,
+            user_id=str(current_user["id"]),
+        )
+        return {"success": True, **result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ 回退 Prompt 修改失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

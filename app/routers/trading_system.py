@@ -77,6 +77,13 @@ def format_user_error(prefix: str, exc: Exception, context: Optional[dict] = Non
     return f"{prefix}：{detail}"
 
 
+def serialize_system(service: TradingSystemService, system: TradingSystem) -> dict:
+    """序列化交易计划，并附带规则告警。"""
+    data = system.dict()
+    data["validation_warnings"] = service.get_system_validation_warnings(system)
+    return data
+
+
 @router.post("", response_model=ApiResponse)
 async def create_trading_system(
     system_data: TradingSystemCreate,
@@ -87,7 +94,7 @@ async def create_trading_system(
     try:
         user_id = current_user["id"]
         system = service.create_system(user_id, system_data)
-        return ok(data={"system": system.dict()}, message="交易计划创建成功")
+        return ok(data={"system": serialize_system(service, system)}, message="交易计划创建成功")
     except Exception as e:
         logger.error(f"创建交易计划失败: {e}")
         return error(message=f"创建交易计划失败: {str(e)}")
@@ -112,7 +119,7 @@ async def list_trading_systems(
         for idx, s in enumerate(systems):
             logger.info(f"序列化第 {idx+1} 个系统: {s.name}")
             try:
-                system_dict = s.dict()
+                system_dict = serialize_system(service, s)
                 logger.info(f"系统 {s.name} 序列化后的键: {list(system_dict.keys())}")
                 systems_dict.append(system_dict)
             except Exception as e:
@@ -140,7 +147,7 @@ async def get_active_trading_system(
         system = service.get_active_system(user_id)
         if not system:
             return ok(data={"system": None}, message="未找到激活的交易计划")
-        return ok(data={"system": system.dict()})
+        return ok(data={"system": serialize_system(service, system)})
     except Exception as e:
         logger.error(f"获取激活交易计划失败: {e}")
         return error(message=f"获取激活交易计划失败: {str(e)}")
@@ -158,7 +165,7 @@ async def get_trading_system(
         system = service.get_effective_system(system_id, user_id)
         if not system:
             return error(message="交易计划不存在")
-        return ok(data={"system": system.dict()})
+        return ok(data={"system": serialize_system(service, system)})
     except Exception as e:
         logger.error(f"获取交易计划详情失败: {e}")
         return error(message=f"获取交易计划详情失败: {str(e)}")
@@ -180,7 +187,7 @@ async def update_trading_system(
             return error(message="交易计划不存在")
         
         message = "草稿已保存" if save_as_draft else "交易计划更新成功"
-        return ok(data={"system": system.dict()}, message=message)
+        return ok(data={"system": serialize_system(service, system)}, message=message)
     except Exception as e:
         logger.error(f"更新交易计划失败: {e}")
         return error(message=f"更新交易计划失败: {str(e)}")
@@ -207,7 +214,7 @@ async def publish_trading_system(
         if not system:
             return error(message="交易计划不存在")
         return ok(
-            data={"system": system.dict()},
+            data={"system": serialize_system(service, system)},
             message=f"交易计划已发布，版本号：v{system.version}"
         )
     except Exception as e:
@@ -245,7 +252,7 @@ async def activate_trading_system(
         system = service.activate_system(system_id, user_id)
         if not system:
             return error(message="交易计划不存在")
-        return ok(data={"system": system.dict()}, message="交易计划激活成功")
+        return ok(data={"system": serialize_system(service, system)}, message="交易计划激活成功")
     except Exception as e:
         logger.error(f"激活交易计划失败: {e}")
         return error(message=f"激活交易计划失败: {str(e)}")

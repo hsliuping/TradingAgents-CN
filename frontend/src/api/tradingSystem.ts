@@ -92,6 +92,7 @@ export interface TradingSystem {
   // 草稿数据（仅在已发布版本中存在）
   draft_data?: TradingSystemUpdatePayload | null
   draft_updated_at?: string | null
+  validation_warnings?: string[]
 
   created_at: string
   updated_at: string
