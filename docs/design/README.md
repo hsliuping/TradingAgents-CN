@@ -41,6 +41,16 @@
 |------|------|------|
 | [v1.0.1/](v1.0.1/) | 提示词模版系统v1.0.1 - 支持所有13个Agent | ✅ 设计完成 |
 | [v0.1.16/](v0.1.16/) | v0.1.16 版本的设计文档 | ✅ 完成 |
+| [v3.0/](v3.0/) | v3.0 阶段的助手、工作流、通知与受控成长设计 | ✅ 持续更新 |
+
+### 🤖 智能助手与成长设计
+
+| 文档 | 描述 | 状态 |
+|------|------|------|
+| [v3.0/intelligent-assistant.md](v3.0/intelligent-assistant.md) | 智能助手 v3.0 总体设计与能力清单 | ✅ 持续优化 |
+| [v3.0/assistant-research-workbench-design.md](v3.0/assistant-research-workbench-design.md) | 助手研究工作台与主题线程设计 | ✅ 设计完成 |
+| [v3.0/controlled-growth-agent-design.md](v3.0/controlled-growth-agent-design.md) | 在 3.0 中落地受控成长 Agent 的设计方案 | ✅ 新增 |
+| [v3.0/agent-capability-audit.md](v3.0/agent-capability-audit.md) | 流程 Agent 基类、元数据与能力矩阵审计 | ✅ 新增 |
 
 ## 🎯 重点设计文档
 
