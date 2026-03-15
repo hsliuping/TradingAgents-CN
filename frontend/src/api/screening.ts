@@ -87,6 +87,7 @@ export interface ScreeningChatResponse {
   tools_used: string[]
   stocks: StockRecommendation[]
   phase: 'confirmation' | 'planning' | 'result'
+  conversation_id?: string
   is_fallback?: boolean
 }
 
@@ -100,7 +101,21 @@ export interface ScreeningMessageItem {
 }
 
 export interface ScreeningConversationResponse {
+  conversation_id?: string
   messages: ScreeningMessageItem[]
+}
+
+export interface ScreeningConversationSummary {
+  conversation_id: string
+  title: string
+  preview: string
+  message_count: number
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ScreeningConversationListResponse {
+  items: ScreeningConversationSummary[]
 }
 
 export interface ScreeningWsEnvelope<T = any> {
@@ -127,16 +142,22 @@ export const screeningApi = {
   getIndustries: () => ApiClient.get<IndustriesResponse>('/api/screening/industries'),
 
   // 智能筛选
-  intelligentChat: (message: string) =>
-    ApiClient.post<ScreeningChatResponse>('/api/screening/intelligent/chat', { message }, { timeout: 180000 }),
+  intelligentChat: (message: string, conversation_id?: string) =>
+    ApiClient.post<ScreeningChatResponse>('/api/screening/intelligent/chat', { message, conversation_id }, { timeout: 180000 }),
   getIntelligentChatWsUrl: (token: string) => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
     return `${wsProtocol}//${host}/api/screening/intelligent/ws?token=${encodeURIComponent(token)}`
   },
-  getIntelligentConversation: () =>
-    ApiClient.get<ScreeningConversationResponse>('/api/screening/intelligent/conversation'),
-  clearIntelligentConversation: () =>
-    ApiClient.delete('/api/screening/intelligent/conversation'),
+  listIntelligentConversations: () =>
+    ApiClient.get<ScreeningConversationListResponse>('/api/screening/intelligent/conversations'),
+  getIntelligentConversation: (conversation_id?: string) =>
+    ApiClient.get<ScreeningConversationResponse>(conversation_id
+      ? `/api/screening/intelligent/conversation?conversation_id=${encodeURIComponent(conversation_id)}`
+      : '/api/screening/intelligent/conversation'),
+  clearIntelligentConversation: (conversation_id?: string) =>
+    ApiClient.delete(conversation_id
+      ? `/api/screening/intelligent/conversation?conversation_id=${encodeURIComponent(conversation_id)}`
+      : '/api/screening/intelligent/conversation'),
 }
 

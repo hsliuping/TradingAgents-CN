@@ -28,6 +28,41 @@ class FavoritesService:
             self.db = get_mongo_db()
         return self.db
 
+    async def _ensure_tags_exist(self, user_id: str, tags: Optional[List[str]]) -> List[str]:
+        """确保自选股中使用到的标签已同步到 user_tags 集合。"""
+        normalized_tags: List[str] = []
+        seen = set()
+        for item in tags or []:
+            tag_name = str(item or "").strip()
+            if not tag_name or tag_name in seen:
+                continue
+            seen.add(tag_name)
+            normalized_tags.append(tag_name)
+
+        if not normalized_tags:
+            return []
+
+        try:
+            from app.services.tags_service import tags_service
+
+            existing_tags = {
+                tag.get("name")
+                for tag in await tags_service.list_tags(user_id)
+                if tag.get("name")
+            }
+            for tag_name in normalized_tags:
+                if tag_name in existing_tags:
+                    continue
+                try:
+                    await tags_service.create_tag(user_id=user_id, name=tag_name)
+                    existing_tags.add(tag_name)
+                except Exception:
+                    logger.debug("[FavoritesService] 创建缺失标签失败: %s", tag_name, exc_info=True)
+        except Exception:
+            logger.warning("[FavoritesService] 自动补建标签失败，继续保存自选股", exc_info=True)
+
+        return normalized_tags
+
     def _is_valid_object_id(self, user_id: str) -> bool:
         """
         检查是否是有效的ObjectId格式
@@ -284,12 +319,14 @@ class FavoritesService:
             db = await self._get_db()
             logger.info(f"🔧 [add_favorite] 数据库连接获取成功")
 
+            normalized_tags = await self._ensure_tags_exist(user_id, tags)
+
             favorite_stock = {
                 "stock_code": stock_code,
                 "stock_name": stock_name,
                 "market": market,
                 "added_at": datetime.utcnow(),
-                "tags": tags or [],
+                "tags": normalized_tags,
                 "notes": notes,
                 "alert_price_high": alert_price_high,
                 "alert_price_low": alert_price_low
@@ -390,7 +427,8 @@ class FavoritesService:
         prefix = "favorite_stocks.$." if is_oid else "favorites.$."
         update_fields: Dict[str, Any] = {}
         if tags is not None:
-            update_fields[prefix + "tags"] = tags
+            normalized_tags = await self._ensure_tags_exist(user_id, tags)
+            update_fields[prefix + "tags"] = normalized_tags
         if notes is not None:
             update_fields[prefix + "notes"] = notes
         if alert_price_high is not None:

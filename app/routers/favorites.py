@@ -19,7 +19,8 @@ router = APIRouter(prefix="/favorites", tags=["自选股管理"])
 
 class AddFavoriteRequest(BaseModel):
     """添加到研究列表请求"""
-    stock_code: str
+    stock_code: Optional[str] = None
+    symbol: Optional[str] = None
     stock_name: str
     market: str = "A股"
     tags: List[str] = []
@@ -77,14 +78,21 @@ async def add_favorite(
     logger = logging.getLogger("webapi")
 
     try:
-        logger.info(f"📝 添加到研究列表请求: user_id={current_user['id']}, stock_code={request.stock_code}, stock_name={request.stock_name}")
+        stock_code = (request.stock_code or request.symbol or "").strip()
+        if not stock_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="股票代码不能为空"
+            )
+
+        logger.info(f"📝 添加到研究列表请求: user_id={current_user['id']}, stock_code={stock_code}, stock_name={request.stock_name}")
 
         # 检查是否已存在
-        is_fav = await favorites_service.is_favorite(current_user["id"], request.stock_code)
+        is_fav = await favorites_service.is_favorite(current_user["id"], stock_code)
         logger.info(f"🔍 检查是否已存在: {is_fav}")
 
         if is_fav:
-            logger.warning(f"⚠️ 股票已在自选股中: {request.stock_code}")
+            logger.warning(f"⚠️ 股票已在自选股中: {stock_code}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="该股票已在自选股中"
@@ -94,7 +102,7 @@ async def add_favorite(
         logger.info(f"➕ 开始添加到研究列表...")
         success = await favorites_service.add_favorite(
             user_id=current_user["id"],
-            stock_code=request.stock_code,
+            stock_code=stock_code,
             stock_name=request.stock_name,
             market=request.market,
             tags=request.tags,
@@ -106,7 +114,7 @@ async def add_favorite(
         logger.info(f"✅ 添加结果: success={success}")
 
         if success:
-            return ok({"stock_code": request.stock_code}, "添加成功")
+            return ok({"stock_code": stock_code}, "添加成功")
         else:
             logger.error(f"❌ 添加失败: success=False")
             raise HTTPException(

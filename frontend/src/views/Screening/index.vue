@@ -377,8 +377,38 @@
       <!-- 智能筛选 Tab -->
       <el-tab-pane label="智能筛选" name="intelligent">
         <div class="intelligent-screening">
-          <div class="chat-body">
-            <div ref="aiMessagesContainer" class="messages-container">
+          <div class="chat-layout">
+            <aside class="history-panel" v-loading="aiHistoryLoading">
+              <div class="history-header">
+                <div>
+                  <div class="history-title">筛选历史</div>
+                  <div class="history-subtitle">按会话查看之前的智能筛选记录</div>
+                </div>
+                <el-button type="primary" size="small" @click="startNewAiConversation">新建</el-button>
+              </div>
+              <div v-if="aiConversationList.length === 0" class="history-empty">
+                暂无历史会话
+              </div>
+              <div v-else class="history-list">
+                <button
+                  v-for="item in aiConversationList"
+                  :key="item.conversation_id"
+                  type="button"
+                  :class="['history-item', { active: item.conversation_id === aiCurrentConversationId }]"
+                  @click="openAiConversation(item.conversation_id)"
+                >
+                  <div class="history-item-title">{{ item.title || '未命名筛选' }}</div>
+                  <div class="history-item-preview">{{ item.preview || '暂无摘要' }}</div>
+                  <div class="history-item-meta">
+                    <span>{{ formatAiConversationTime(item.updated_at) }}</span>
+                    <span>{{ item.message_count }} 条</span>
+                  </div>
+                </button>
+              </div>
+            </aside>
+
+            <div class="chat-body">
+              <div ref="aiMessagesContainer" class="messages-container">
               <el-empty
                 v-if="aiMessages.length === 0 && !aiLoading"
                 description="输入选股需求开始对话，例如：帮我选几只低估值的银行股"
@@ -463,16 +493,17 @@
                 </div>
               </div>
             </div>
-            <div class="input-area">
-              <div class="input-row">
-                <el-input v-model="aiInput" type="textarea" :rows="2" :autosize="{ minRows: 2, maxRows: 5 }"
-                  placeholder="输入选股需求，如：帮我选几只低估值的银行股、PE低于20的消费股"
-                  :disabled="aiLoading" @keydown.enter.ctrl="handleAiSend" />
-                <el-button type="primary" :loading="aiLoading" :disabled="!aiInput.trim()" class="send-btn" @click="handleAiSend">发送</el-button>
-              </div>
-              <div class="input-tip-row">
-                <span class="input-tip">Ctrl+Enter 发送</span>
-                <el-button v-if="aiMessages.length > 0 && !aiLoading" type="default" size="small" link @click="handleClearAi">清空对话</el-button>
+              <div class="input-area">
+                <div class="input-row">
+                  <el-input v-model="aiInput" type="textarea" :rows="2" :autosize="{ minRows: 2, maxRows: 5 }"
+                    placeholder="输入选股需求，如：帮我选几只低估值的银行股、PE低于20的消费股"
+                    :disabled="aiLoading" @keydown.enter.ctrl="handleAiSend" />
+                  <el-button type="primary" :loading="aiLoading" :disabled="!aiInput.trim()" class="send-btn" @click="handleAiSend">发送</el-button>
+                </div>
+                <div class="input-tip-row">
+                  <span class="input-tip">Ctrl+Enter 发送</span>
+                  <el-button v-if="aiMessages.length > 0 && !aiLoading" type="default" size="small" link @click="handleClearAi">清空当前会话</el-button>
+                </div>
               </div>
             </div>
           </div>
@@ -489,7 +520,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, TrendCharts, Download, Star, Connection, Warning, User } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import type { StockInfo } from '@/types/analysis'
-import { screeningApi, type FieldConfigResponse, type ScreeningMessageItem, type ScreeningWsEnvelope, type ScreeningWsProgressData, type StockRecommendation } from '@/api/screening'
+import { screeningApi, type FieldConfigResponse, type ScreeningConversationSummary, type ScreeningMessageItem, type ScreeningWsEnvelope, type ScreeningWsProgressData, type StockRecommendation } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
 import { getCurrentDataSource } from '@/api/sync'
 import { useAuthStore } from '@/stores/auth'
@@ -518,10 +549,13 @@ interface AiDisplayMessage {
 const aiMessages = ref<AiDisplayMessage[]>([])
 const aiInput = ref('')
 const aiLoading = ref(false)
+const aiHistoryLoading = ref(false)
 const aiMessagesContainer = ref<HTMLElement | null>(null)
 const aiSocket = ref<WebSocket | null>(null)
 const aiSocketConnected = ref(false)
 const aiPendingAssistantIndex = ref<number | null>(null)
+const aiConversationList = ref<ScreeningConversationSummary[]>([])
+const aiCurrentConversationId = ref<string | null>(null)
 const authStore = useAuthStore()
 
 const scrollAiToBottom = () => {
@@ -542,6 +576,28 @@ const getPhaseLabel = (phase?: AiDisplayMessage['phase']) => {
 const formatAiAmountYi = (value?: number | null) => {
   if (value == null || Number.isNaN(value)) return ''
   return `${(value / 100000000).toFixed(2)}亿`
+}
+
+const formatAiConversationTime = (value?: string) => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+const createAiConversationId = () => `screening-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+const unwrapApiPayload = <T,>(response: T | { data?: T } | null | undefined): T | null => {
+  if (!response) return null
+  if (typeof response === 'object' && response !== null && 'data' in response) {
+    return ((response as { data?: T }).data ?? null) as T | null
+  }
+  return response as T
 }
 
 const buildToolSummaryText = (tool?: string, summary?: Record<string, number>) => {
@@ -574,10 +630,13 @@ const buildToolSummaryText = (tool?: string, summary?: Record<string, number>) =
   return ''
 }
 
-const loadAiConversation = async () => {
+const loadAiConversation = async (conversationId?: string | null) => {
   try {
-    const res = await screeningApi.getIntelligentConversation()
-    const msgs = (res as any)?.data?.messages ?? []
+    const res = await screeningApi.getIntelligentConversation(conversationId || undefined)
+    const payload = unwrapApiPayload(res as any)
+    const resolvedConversationId = payload?.conversation_id || null
+    const msgs = payload?.messages ?? []
+    aiCurrentConversationId.value = resolvedConversationId
     if (msgs.length) {
       aiMessages.value = msgs.map((m: ScreeningMessageItem) => ({
         role: m.role,
@@ -589,8 +648,48 @@ const loadAiConversation = async () => {
         progressSteps: undefined,
       }))
       scrollAiToBottom()
+      return
     }
+    aiMessages.value = []
   } catch { /* 静默 */ }
+}
+
+const loadAiConversationList = async (preferredConversationId?: string | null) => {
+  aiHistoryLoading.value = true
+  try {
+    const res = await screeningApi.listIntelligentConversations()
+    const payload = unwrapApiPayload(res as any)
+    const items = payload?.items ?? []
+    aiConversationList.value = items
+
+    const targetConversationId = preferredConversationId
+      || aiCurrentConversationId.value
+      || items[0]?.conversation_id
+      || null
+
+    if (targetConversationId) {
+      await loadAiConversation(targetConversationId)
+    } else {
+      aiCurrentConversationId.value = null
+      aiMessages.value = []
+    }
+  } catch {
+    aiConversationList.value = []
+  } finally {
+    aiHistoryLoading.value = false
+  }
+}
+
+const openAiConversation = async (conversationId: string) => {
+  if (!conversationId || conversationId === aiCurrentConversationId.value) return
+  await loadAiConversation(conversationId)
+}
+
+const startNewAiConversation = () => {
+  aiCurrentConversationId.value = createAiConversationId()
+  aiMessages.value = []
+  aiInput.value = ''
+  aiPendingAssistantIndex.value = null
 }
 
 const updatePendingAssistantMessage = (patch: Partial<AiDisplayMessage>) => {
@@ -667,6 +766,7 @@ const handleAiWebSocketMessage = (envelope: ScreeningWsEnvelope<any>) => {
 
   if (envelope.type === 'final') {
     const data = envelope.data
+    aiCurrentConversationId.value = data.conversation_id || aiCurrentConversationId.value
     updatePendingAssistantMessage({
       content: data.reply,
       tools_used: data.tools_used?.length ? data.tools_used : undefined,
@@ -676,6 +776,7 @@ const handleAiWebSocketMessage = (envelope: ScreeningWsEnvelope<any>) => {
     })
     aiPendingAssistantIndex.value = null
     aiLoading.value = false
+    void loadAiConversationList(aiCurrentConversationId.value)
     return
   }
 
@@ -765,7 +866,11 @@ const sendAiMessage = async (text: string) => {
     scrollAiToBottom()
 
     const socket = await ensureAiSocket()
-    socket.send(JSON.stringify({ type: 'chat', message: text }))
+    socket.send(JSON.stringify({
+      type: 'chat',
+      message: text,
+      conversation_id: aiCurrentConversationId.value,
+    }))
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? e.message : '请求失败，请稍后重试'
     ElMessage.error(errMsg)
@@ -782,13 +887,16 @@ const sendAiMessage = async (text: string) => {
 const handleAiSend = () => sendAiMessage(aiInput.value)
 
 const handleClearAi = () => {
-  ElMessageBox.confirm('确定清空智能筛选的对话记录吗？', '提示', {
+  ElMessageBox.confirm('确定清空当前筛选会话吗？', '提示', {
     confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning'
   }).then(async () => {
     try {
-      await screeningApi.clearIntelligentConversation()
+      const clearedConversationId = aiCurrentConversationId.value
+      await screeningApi.clearIntelligentConversation(clearedConversationId || undefined)
       aiMessages.value = []
-      ElMessage.success('已清空对话')
+      aiCurrentConversationId.value = null
+      await loadAiConversationList()
+      ElMessage.success('已清空当前会话')
     } catch (e: unknown) {
       ElMessage.error(e instanceof Error ? e.message : '清空失败')
     }
@@ -1210,8 +1318,8 @@ onMounted(() => {
   loadFavorites()
   // 加载当前数据源
   loadCurrentDataSource()
-  // 加载智能筛选对话历史
-  loadAiConversation()
+  // 加载智能筛选会话历史
+  loadAiConversationList()
 })
 
 onUnmounted(() => {
@@ -1296,11 +1404,119 @@ onUnmounted(() => {
   }
 
   .intelligent-screening {
+    .chat-layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 16px;
+      min-height: 0;
+      height: calc(100vh - 220px);
+    }
+
+    .history-panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: 8px;
+      background: var(--el-bg-color);
+      padding: 14px;
+    }
+
+    .history-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .history-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+    }
+
+    .history-subtitle {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+      line-height: 1.5;
+    }
+
+    .history-empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 120px;
+      color: var(--el-text-color-secondary);
+      font-size: 13px;
+    }
+
+    .history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 0;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+
+    .history-item {
+      appearance: none;
+      width: 100%;
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: 10px;
+      background: var(--el-fill-color-extra-light);
+      padding: 12px;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
+
+      &:hover {
+        border-color: var(--el-color-primary-light-5);
+        background: var(--el-color-primary-light-9);
+      }
+
+      &.active {
+        border-color: var(--el-color-primary);
+        background: rgba(64, 158, 255, 0.08);
+        transform: translateY(-1px);
+      }
+    }
+
+    .history-item-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+      line-height: 1.5;
+      margin-bottom: 6px;
+    }
+
+    .history-item-preview {
+      font-size: 12px;
+      color: var(--el-text-color-regular);
+      line-height: 1.6;
+      min-height: 38px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .history-item-meta {
+      margin-top: 8px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--el-text-color-secondary);
+    }
+
     .chat-body {
       display: flex;
       flex-direction: column;
       min-height: 0;
-      height: calc(100vh - 220px);
+      height: 100%;
       border: 1px solid var(--el-border-color-lighter);
       border-radius: 8px;
       background: var(--el-bg-color);
@@ -1567,6 +1783,21 @@ onUnmounted(() => {
       }
 
       :deep(.el-textarea__inner) { resize: none; }
+    }
+
+    @media (max-width: 1100px) {
+      .chat-layout {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
+
+      .history-panel {
+        max-height: 240px;
+      }
+
+      .chat-body {
+        height: calc(100vh - 340px);
+      }
     }
   }
 }
