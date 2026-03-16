@@ -58,6 +58,11 @@ class PositionAnalystV2(ResearcherAgent):
         version="2.0.0",
         license_tier=LicenseTier.FREE,
         default_tools=[],
+        growth_role="extractor",
+        growth_outputs=["position_analysis"],
+        memory_scope_hint="pattern",
+        review_level="auto_pending",
+        growth_source_type="review_report",
     )
 
     researcher_type = "review_position"

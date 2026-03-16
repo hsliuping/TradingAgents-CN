@@ -67,6 +67,11 @@ class FundamentalsAnalystAgentV2(BaseAgent):
         requires_tools=True,
         output_field="fundamentals_report",
         report_label="【基本面分析 v2】",
+        growth_role="extractor",
+        growth_outputs=["fundamentals_report"],
+        memory_scope_hint="object_tracking",
+        review_level="auto_pending",
+        growth_source_type="analysis_report",
     )
 
     def __init__(

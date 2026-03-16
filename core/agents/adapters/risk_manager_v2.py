@@ -86,6 +86,11 @@ class RiskManagerV2(ManagerAgent):
         requires_tools=False,
         output_field="risk_assessment",
         report_label="【风险评估 v2】",
+        growth_role="optimizer",
+        growth_outputs=["risk_assessment", "risk_debate_state", "final_trade_decision"],
+        memory_scope_hint="pattern",
+        review_level="manual_required",
+        growth_source_type="manager_decision",
     )
 
     # 管理者类型

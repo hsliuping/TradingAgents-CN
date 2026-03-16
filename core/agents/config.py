@@ -25,6 +25,36 @@ class LicenseTier(str, Enum):
     ENTERPRISE = "enterprise"  # 企业版
 
 
+class GrowthRole(str, Enum):
+    """成长角色声明"""
+    NONE = "none"
+    EXTRACTOR = "extractor"
+    REVIEWER = "reviewer"
+    OPTIMIZER = "optimizer"
+
+
+class GrowthMemoryScope(str, Enum):
+    """成长产物的记忆范围提示"""
+    NONE = "none"
+    OBJECT_TRACKING = "object_tracking"
+    PATTERN = "pattern"
+    RESEARCH_ASSET = "research_asset"
+
+
+class GrowthReviewLevel(str, Enum):
+    """成长产物的审核等级"""
+    AUTO_PENDING = "auto_pending"
+    MANUAL_REQUIRED = "manual_required"
+
+
+class GrowthSourceType(str, Enum):
+    """成长产物来源类型"""
+    NONE = "none"
+    ANALYSIS_REPORT = "analysis_report"
+    REVIEW_REPORT = "review_report"
+    MANAGER_DECISION = "manager_decision"
+
+
 class AgentInput(BaseModel):
     """智能体输入定义"""
     name: str
@@ -114,6 +144,13 @@ class AgentMetadata(BaseModel):
     report_label: str = ""            # 报告标签，如 "【市场分析】"
     node_name: str = ""               # 工作流节点名称，如 "Market Analyst"
     execution_order: int = 100        # 执行顺序（越小越先执行）
+
+    # 🆕 成长能力声明
+    growth_role: GrowthRole = GrowthRole.NONE
+    growth_outputs: List[str] = Field(default_factory=list)
+    memory_scope_hint: GrowthMemoryScope = GrowthMemoryScope.NONE
+    review_level: GrowthReviewLevel = GrowthReviewLevel.MANUAL_REQUIRED
+    growth_source_type: GrowthSourceType = GrowthSourceType.NONE
 
     class Config:
         use_enum_values = True
@@ -594,6 +631,11 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【市场分析 v2】",
         node_name="市场分析师 v2",
         execution_order=10,
+        growth_role="extractor",
+        growth_outputs=["market_analysis"],
+        memory_scope_hint="object_tracking",
+        review_level="auto_pending",
+        growth_source_type="analysis_report",
     ),
     "fundamentals_analyst_v2": AgentMetadata(
         id="fundamentals_analyst_v2",
@@ -618,6 +660,11 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【基本面分析 v2】",
         node_name="基本面分析师 v2",
         execution_order=40,
+        growth_role="extractor",
+        growth_outputs=["fundamentals_report"],
+        memory_scope_hint="object_tracking",
+        review_level="auto_pending",
+        growth_source_type="analysis_report",
     ),
     "etf_analyst_v2": AgentMetadata(
         id="etf_analyst_v2",
@@ -642,6 +689,11 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【ETF 分析 v2】",
         node_name="ETF 分析师 v2",
         execution_order=40,
+        growth_role="extractor",
+        growth_outputs=["fundamentals_report"],
+        memory_scope_hint="object_tracking",
+        review_level="auto_pending",
+        growth_source_type="analysis_report",
     ),
     "news_analyst_v2": AgentMetadata(
         id="news_analyst_v2",
@@ -666,6 +718,11 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【新闻分析 v2】",
         node_name="新闻分析师 v2",
         execution_order=30,
+        growth_role="extractor",
+        growth_outputs=["news_report"],
+        memory_scope_hint="object_tracking",
+        review_level="manual_required",
+        growth_source_type="analysis_report",
     ),
     "social_analyst_v2": AgentMetadata(
         id="social_analyst_v2",
@@ -690,6 +747,11 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【舆情分析 v2】",
         node_name="社交媒体分析师 v2",
         execution_order=20,
+        growth_role="extractor",
+        growth_outputs=["sentiment_report"],
+        memory_scope_hint="object_tracking",
+        review_level="manual_required",
+        growth_source_type="analysis_report",
     ),
     "index_analyst_v2": AgentMetadata(
         id="index_analyst_v2",
@@ -720,6 +782,11 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【大盘分析 v2】",
         node_name="大盘分析师 v2",
         execution_order=1,  # 最先执行
+        growth_role="extractor",
+        growth_outputs=["index_report"],
+        memory_scope_hint="object_tracking",
+        review_level="auto_pending",
+        growth_source_type="analysis_report",
     ),
 
     # 🆕 筹码分布分析师 Agent

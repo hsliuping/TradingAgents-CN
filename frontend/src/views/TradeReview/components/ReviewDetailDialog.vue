@@ -223,6 +223,10 @@
           <div class="suggestions markdown-content" v-html="renderMarkdown((report.ai_review?.suggestions || []).join('\n\n'))"></div>
         </div>
 
+        <div class="section">
+          <TaskGrowthPanel :task-id="growthTaskId" />
+        </div>
+
         <!-- 详细分析 -->
         <el-collapse class="section">
           <el-collapse-item title="时机分析" name="timing" v-if="report.ai_review?.timing_analysis">
@@ -287,6 +291,7 @@ import { ElMessage } from 'element-plus'
 import { CircleCheck, Warning, Pointer, Document, Loading, InfoFilled, Clock } from '@element-plus/icons-vue'
 import { reviewApi, type TradeReviewReport } from '@/api/review'
 import { marked } from 'marked'
+import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
 import SaveAsCaseDialog from './SaveAsCaseDialog.vue'
 
 // 配置 marked 选项
@@ -309,6 +314,7 @@ const visible = computed({
 const loading = ref(false)
 const report = ref<TradeReviewReport | null>(null)
 const saveCaseDialogVisible = ref(false)
+const growthTaskId = computed(() => props.reviewId || report.value?.task_id || null)
 
 const loadReport = async () => {
   if (!props.reviewId) return

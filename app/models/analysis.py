@@ -9,6 +9,7 @@ from enum import Enum
 from bson import ObjectId
 from .user import PyObjectId
 from app.utils.timezone import now_tz
+from .agent_growth import TaskGrowthContext
 
 
 class AnalysisStatus(str, Enum):
@@ -330,6 +331,7 @@ class UnifiedAnalysisTask(BaseModel):
 
     # 结果
     result: Optional[Dict[str, Any]] = Field(None, description="分析结果（JSON格式）")
+    growth_context: Optional[TaskGrowthContext] = Field(None, description="成长提取结果摘要")
 
     # 元数据
     created_at: datetime = Field(default_factory=now_tz, description="创建时间")

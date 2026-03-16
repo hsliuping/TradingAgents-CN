@@ -89,12 +89,13 @@ class UniversalAgent(BaseAgent):
 
         try:
             context = state.get("context")
+            prompt_variables = self._build_prompt_variables(state)
 
             # 1. 系统提示词（从模板系统，三层优先级）
             system_prompt = self._get_prompt_from_template(
                 agent_type="universal",
                 agent_name=self.agent_id,
-                variables={},
+                variables=prompt_variables,
                 state=state,
                 context=context,
                 fallback_prompt=None,
@@ -108,7 +109,7 @@ class UniversalAgent(BaseAgent):
             user_prompt = self._get_prompt_from_template(
                 agent_type="universal",
                 agent_name=self.agent_id,
-                variables={},
+                variables=prompt_variables,
                 state=state,
                 context=context,
                 fallback_prompt=None,
@@ -117,6 +118,8 @@ class UniversalAgent(BaseAgent):
 
             if not user_prompt:
                 user_prompt = self._build_default_user_prompt(state)
+            else:
+                user_prompt = self._ensure_runtime_context(user_prompt, state)
 
             messages = [
                 SystemMessage(content=system_prompt),
@@ -139,13 +142,72 @@ class UniversalAgent(BaseAgent):
                 logger.warning(f"[UniversalAgent:{self.agent_id}] 无工具，直接调用 LLM")
                 response = self._llm.invoke(messages)
                 report = response.content if hasattr(response, "content") else str(response)
+                self._last_llm_debug = {
+                    "response_type": type(response).__name__,
+                    "final_response_content": report,
+                    "tool_mode": False,
+                    "tool_trace": list(self._last_tool_debug),
+                }
+
+            is_debug_mode = bool(getattr(context, 'is_debug_mode', False)) if context else False
+            if is_debug_mode:
+                logger.info(f"[UniversalAgent:{self.agent_id}] 调试模式 Prompt - system:\n{system_prompt}")
+                logger.info(f"[UniversalAgent:{self.agent_id}] 调试模式 Prompt - user:\n{user_prompt}")
+                logger.info(f"[UniversalAgent:{self.agent_id}] 调试模式 LLM 最终返回:\n{self._last_llm_debug.get('final_response_content', report)}")
 
             logger.info(f"[UniversalAgent:{self.agent_id}] ✅ 执行完成，输出到 '{self._output_field}'")
-            return {self._output_field: report}
+            result = {self._output_field: report}
+            if is_debug_mode:
+                result["__debug_prompt__"] = {
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                    "llm_final_response": self._last_llm_debug.get("final_response_content", report),
+                    "response_type": self._last_llm_debug.get("response_type"),
+                    "tool_mode": self._last_llm_debug.get("tool_mode"),
+                    "tool_trace": self._last_llm_debug.get("tool_trace", []),
+                }
+            return result
 
         except Exception as e:
             logger.error(f"[UniversalAgent:{self.agent_id}] ❌ 执行失败: {e}", exc_info=True)
             return {self._output_field: f"执行失败: {str(e)}"}
+
+    def _build_prompt_variables(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        ticker = state.get("ticker") or state.get("stock_symbol") or state.get("company_of_interest", "")
+        analysis_date = state.get("analysis_date") or state.get("trade_date", "")
+        return {
+            "ticker": ticker,
+            "stock_symbol": state.get("stock_symbol") or ticker,
+            "company_of_interest": state.get("company_of_interest") or ticker,
+            "analysis_date": analysis_date,
+            "trade_date": state.get("trade_date") or analysis_date,
+            "market_type": state.get("market_type", ""),
+            "task_description": state.get("task_description", ""),
+        }
+
+    def _ensure_runtime_context(self, user_prompt: str, state: Dict[str, Any]) -> str:
+        ticker = state.get("ticker") or state.get("stock_symbol") or state.get("company_of_interest", "")
+        analysis_date = state.get("analysis_date") or state.get("trade_date", "")
+        market_type = state.get("market_type", "")
+        task_description = state.get("task_description", "")
+
+        context_lines = []
+        if ticker:
+            context_lines.append(f"- 股票代码: {ticker}")
+        if analysis_date:
+            context_lines.append(f"- 分析日期: {analysis_date}")
+        if market_type:
+            context_lines.append(f"- 市场: {market_type}")
+        if task_description:
+            context_lines.append(f"- 任务目标: {task_description}")
+
+        if not context_lines:
+            return user_prompt
+
+        context_block = "\n\n本次任务输入:\n" + "\n".join(context_lines)
+        if ticker and str(ticker) in user_prompt:
+            return user_prompt
+        return f"{user_prompt.rstrip()}{context_block}"
 
     def _build_default_system_prompt(self) -> str:
         """构建默认系统提示词（当模板系统无对应模板时使用）"""

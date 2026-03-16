@@ -214,6 +214,12 @@
         <div class="summary-content markdown-content" v-html="renderMarkdown(report.summary)"></div>
       </el-card>
 
+      <TaskGrowthPanel
+        v-if="growthTaskId"
+        class="growth-card"
+        :task-id="growthTaskId"
+      />
+
       <!-- 报告模块 -->
       <el-card class="modules-card" shadow="never">
         <template #header>
@@ -265,6 +271,7 @@ import { ElMessage, ElMessageBox, ElInputNumber } from 'element-plus'
 import { paperApi } from '@/api/paper'
 import { stocksApi } from '@/api/stocks'
 import { configApi, type LLMConfig } from '@/api/config'
+import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
 import {
   Document,
   Calendar,
@@ -298,6 +305,7 @@ interface ReportDecision {
 interface ReportDetailData {
   id: string | number
   analysis_id?: string | number
+  task_id?: string
   stock_symbol: string
   stock_name?: string
   status: string
@@ -327,6 +335,7 @@ const loading = ref(true)
 const report = ref<ReportDetailData | null>(null)
 const activeModule = ref('')
 const llmConfigs = ref<LLMConfig[]>([]) // 存储所有模型配置
+const growthTaskId = computed(() => report.value?.task_id || null)
 
 // 获取模型配置列表
 const fetchLLMConfigs = async () => {
@@ -1272,6 +1281,7 @@ onMounted(() => {
 
     .summary-card,
     .metrics-card,
+    .growth-card,
     .modules-card {
       margin-bottom: 24px;
 

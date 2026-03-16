@@ -54,6 +54,11 @@ class TechnicalAnalystV2(ResearcherAgent):
         version="2.0.0",
         license_tier=LicenseTier.FREE,
         default_tools=["get_stock_market_data_unified"],  # 🔧 修复：当没有缓存时需要调用工具获取市场数据
+        growth_role="extractor",
+        growth_outputs=["technical_analysis"],
+        memory_scope_hint="object_tracking",
+        review_level="auto_pending",
+        growth_source_type="analysis_report",
     )
 
     # 研究员类型

@@ -59,6 +59,11 @@ class RiskAssessorV2(ResearcherAgent):
         version="2.0.0",
         license_tier=LicenseTier.FREE,
         default_tools=[],  # 不需要工具
+        growth_role="extractor",
+        growth_outputs=["risk_analysis"],
+        memory_scope_hint="pattern",
+        review_level="auto_pending",
+        growth_source_type="analysis_report",
     )
 
     # 研究员类型

@@ -562,6 +562,38 @@ async def create_database_indexes(db):
         await etf_daily.create_index([("code", 1), ("trade_date", -1)])
         await etf_daily.create_index([("symbol", 1), ("trade_date", -1)])
 
+        # 工作流成长集合索引
+        growth_memories = db["agent_memory_items"]
+        await growth_memories.create_index([("memory_id", 1)], unique=True)
+        await growth_memories.create_index([("user_id", 1), ("status", 1), ("updated_at", -1)])
+        await growth_memories.create_index([("user_id", 1), ("source_id", 1), ("created_at", -1)])
+        await growth_memories.create_index([("user_id", 1), ("object_type", 1), ("object_key", 1), ("status", 1)])
+
+        growth_suggestions = db["agent_growth_suggestions"]
+        await growth_suggestions.create_index([("suggestion_id", 1)], unique=True)
+        await growth_suggestions.create_index([("user_id", 1), ("status", 1), ("updated_at", -1)])
+        await growth_suggestions.create_index([("user_id", 1), ("source_id", 1), ("created_at", -1)])
+
+        # Agent 工坊集合索引
+        agent_specs = db["agent_specs"]
+        await agent_specs.create_index([("spec_id", 1)], unique=True)
+        await agent_specs.create_index([("owner_user_id", 1), ("status", 1), ("updated_at", -1)])
+        await agent_specs.create_index([("latest_session_id", 1)])
+
+        agent_workshop_sessions = db["agent_workshop_sessions"]
+        await agent_workshop_sessions.create_index([("session_id", 1)], unique=True)
+        await agent_workshop_sessions.create_index([("user_id", 1), ("stage", 1), ("updated_at", -1)])
+        await agent_workshop_sessions.create_index([("spec_id", 1), ("updated_at", -1)])
+
+        agent_versions = db["agent_versions"]
+        await agent_versions.create_index([("version_id", 1)], unique=True)
+        await agent_versions.create_index([("spec_id", 1), ("version", -1)], unique=True)
+        await agent_versions.create_index([("spec_id", 1), ("status", 1), ("updated_at", -1)])
+
+        agent_evaluations = db["agent_evaluations"]
+        await agent_evaluations.create_index([("evaluation_id", 1)], unique=True)
+        await agent_evaluations.create_index([("version_id", 1), ("created_at", -1)])
+
         logger.info("✅ 数据库索引创建完成")
 
     except Exception as e:

@@ -16,6 +16,7 @@ export type TaskTagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
  */
 export enum TaskType {
   STOCK_ANALYSIS = 'stock_analysis',
+  ETF_ANALYSIS = 'etf_analysis',
   POSITION_ANALYSIS = 'position_analysis',
   TRADE_REVIEW = 'trade_review',
   PORTFOLIO_HEALTH = 'portfolio_health',
@@ -80,6 +81,15 @@ export interface TaskDetail {
   max_retries: number
   tokens_used: number
   cost: number
+  growth_context?: {
+    memory_items_count: number
+    suggestions_count: number
+    memory_item_ids: string[]
+    suggestion_ids: string[]
+    extracted_at: string
+    source_type: string
+    source_id?: string
+  } | null
 }
 
 /**
@@ -151,6 +161,7 @@ export function resumeTask(taskId: string) {
  */
 export const TaskTypeNames: Record<TaskType, string> = {
   [TaskType.STOCK_ANALYSIS]: '股票分析',
+  [TaskType.ETF_ANALYSIS]: 'ETF 分析',
   [TaskType.POSITION_ANALYSIS]: '持仓分析',
   [TaskType.TRADE_REVIEW]: '交易复盘',
   [TaskType.PORTFOLIO_HEALTH]: '组合健康度',

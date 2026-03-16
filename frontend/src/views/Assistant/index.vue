@@ -321,12 +321,17 @@
             :title="reportDetailError"
             show-icon
           />
+          <TaskGrowthPanel
+            v-else-if="activeReportTaskId"
+            class="assistant-growth-panel"
+            :task-id="activeReportTaskId"
+          />
           <div
-            v-else-if="activeReportDetail?.content"
+            v-if="activeReportDetail?.content"
             class="report-dialog-content markdown-content"
             v-html="renderMarkdown(activeReportDetail.content)"
           ></div>
-          <div v-else class="report-dialog-summary">{{ activeReportRef.summary || '当前仅记录了该报告的引用，尚未保存更多摘要内容。' }}</div>
+          <div v-else-if="!activeReportTaskId" class="report-dialog-summary">{{ activeReportRef.summary || '当前仅记录了该报告的引用，尚未保存更多摘要内容。' }}</div>
         </div>
       </template>
     </el-dialog>
@@ -399,6 +404,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ChatDotRound, DataAnalysis, Delete, Document, FolderOpened, Plus, QuestionFilled, User } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
+import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
 
 import { assistantApi } from '@/api/assistant'
 import type {
@@ -468,6 +474,7 @@ let loadingTimer: ReturnType<typeof setInterval> | null = null
 const currentThread = computed(() => threads.value.find(item => item.thread_id === selectedThreadId.value) || null)
 const currentSummary = computed<AssistantThreadSummary | null>(() => currentThread.value?.current_summary || null)
 const currentReportRefs = computed<AssistantThreadReportRef[]>(() => currentThread.value?.report_refs || [])
+const activeReportTaskId = computed(() => activeReportDetail.value?.task_id || activeReportRef.value?.task_id || null)
 const focusPercent = computed(() => Math.max(0, Math.min(100, Math.round((currentSummary.value?.focus_score || 0) * 100))))
 
 const threadLookup = computed(() => {
@@ -1586,6 +1593,10 @@ onBeforeUnmount(() => {
   line-height: 1.7;
   font-size: 13px;
   color: var(--el-text-color-regular);
+}
+
+.assistant-growth-panel {
+  margin-bottom: 4px;
 }
 
 .attach-report-toolbar {

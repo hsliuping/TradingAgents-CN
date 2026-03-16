@@ -108,6 +108,7 @@ export interface AITradeReview {
 /** 复盘报告 */
 export interface TradeReviewReport {
   review_id: string
+  task_id?: string
   review_type: ReviewType
   status: ReviewStatus
   source?: 'paper' | 'position' | 'real'

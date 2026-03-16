@@ -62,6 +62,11 @@ class ActionAdvisorV2(ManagerAgent):
         version="2.0.0",
         license_tier=LicenseTier.FREE,
         default_tools=[],  # 不需要工具
+        growth_role="optimizer",
+        growth_outputs=["action_advice"],
+        memory_scope_hint="research_asset",
+        review_level="manual_required",
+        growth_source_type="manager_decision",
     )
 
     # 管理者类型

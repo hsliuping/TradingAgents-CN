@@ -62,6 +62,11 @@ class ReviewManagerV2(ManagerAgent):
         version="2.0.0",
         license_tier=LicenseTier.FREE,
         default_tools=[],
+        growth_role="optimizer",
+        growth_outputs=["review_summary"],
+        memory_scope_hint="research_asset",
+        review_level="manual_required",
+        growth_source_type="manager_decision",
     )
 
     manager_type = "review_manager"

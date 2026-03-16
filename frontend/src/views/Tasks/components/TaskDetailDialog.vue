@@ -129,8 +129,23 @@
             <el-descriptions-item label="用户ID">
               <el-text copyable>{{ taskDetail.user_id }}</el-text>
             </el-descriptions-item>
+            <el-descriptions-item label="候选记忆数">
+              {{ growthSummary.memory_items_count }}
+            </el-descriptions-item>
+            <el-descriptions-item label="成长建议数">
+              {{ growthSummary.suggestions_count }}
+            </el-descriptions-item>
           </el-descriptions>
         </el-card>
+
+        <TaskGrowthPanel
+          class="section-card"
+          :task-id="taskDetail.task_id"
+          :initial-context="growthContext"
+          close-on-navigate
+          @navigated="visible = false"
+          @updated="handleGrowthUpdated"
+        />
 
         <!-- 错误信息 -->
         <el-card v-if="taskDetail.error_message" shadow="never" class="section-card error-card">
@@ -204,11 +219,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { InfoFilled, Clock, Setting, DataAnalysis, Warning, Document } from '@element-plus/icons-vue'
 import { TaskType, TaskTypeNames, TaskStatusNames, TaskStatusColors, type TaskDetail } from '@/api/unifiedTasks'
+import type { TaskGrowthContextPayload } from '@/api/workflowGrowth'
+import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
 import { convertAnalystIdsToNames } from '@/constants/analysts'
 
 const props = defineProps<{
@@ -228,6 +245,17 @@ const visible = computed({
 
 const loading = ref(false)
 const router = useRouter()
+const growthContext = ref<TaskGrowthContextPayload | null>(null)
+const growthSummary = computed(() => {
+  const direct = growthContext.value?.summary
+  const fromTask = props.taskDetail?.growth_context
+  const fromResult = props.taskDetail?.result?.growth_context
+
+  return {
+    memory_items_count: direct?.memory_items_count ?? fromTask?.memory_items_count ?? fromResult?.memory_items_count ?? 0,
+    suggestions_count: direct?.suggestions_count ?? fromTask?.suggestions_count ?? fromResult?.suggestions_count ?? 0
+  }
+})
 
 // 判断是否有结果数据
 const hasResult = computed(() => {
@@ -237,7 +265,7 @@ const hasResult = computed(() => {
 // 判断是否是单股分析任务
 const isStockAnalysisTask = computed(() => {
   const taskType = props.taskDetail?.task_type
-  const isStockAnalysis = taskType === TaskType.STOCK_ANALYSIS
+  const isStockAnalysis = taskType === TaskType.STOCK_ANALYSIS || taskType === TaskType.ETF_ANALYSIS
   
   // 调试日志
   if (process.env.NODE_ENV === 'development') {
@@ -250,6 +278,10 @@ const isStockAnalysisTask = computed(() => {
   
   return isStockAnalysis
 })
+
+const handleGrowthUpdated = (context: TaskGrowthContextPayload | null) => {
+  growthContext.value = context
+}
 
 // 获取报告ID（从任务结果中提取）
 const reportId = computed(() => {
@@ -390,58 +422,78 @@ const formatTime = (time: string) => {
     second: '2-digit'
   })
 }
+
+watch(
+  () => [props.modelValue, props.taskDetail?.growth_context, props.taskDetail?.result?.growth_context],
+  ([visible]) => {
+    if (visible) {
+      growthContext.value = (props.taskDetail?.growth_context as TaskGrowthContextPayload | null)
+        || (props.taskDetail?.result?.growth_context as TaskGrowthContextPayload | null)
+        || null
+    }
+  },
+  { immediate: true }
+)
+
 </script>
 
 <style scoped lang="scss">
-.task-detail {
-  .section-card {
-    margin-bottom: 16px;
+  .growth-item {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 14px 16px;
+    background: linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
+  }
 
-    &:last-child {
-      margin-bottom: 0;
-    }
+  .growth-item-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
 
-    .card-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
+  .growth-item-title-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    h4 {
+      margin: 0;
+      font-size: 15px;
       font-weight: 600;
-      font-size: 16px;
-      width: 100%;
-      
-      // 确保按钮显示
-      .el-button {
-        flex-shrink: 0;
-        margin-left: auto;
-      }
-    }
-
-    &.error-card {
-      border-color: #f56c6c;
+      color: #1f2937;
     }
   }
 
-  .json-content {
-    background-color: #f5f7fa;
-    padding: 12px;
-    border-radius: 4px;
-    font-size: 12px;
-    line-height: 1.6;
-    overflow-x: auto;
-    max-height: 400px;
-    overflow-y: auto;
-    margin: 0;
+  .growth-item-tags,
+  .growth-actions,
+  .growth-evidence {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
-  :deep(.el-descriptions__label) {
-    font-weight: 600;
-    width: 150px;
+  .growth-summary-text {
+    margin: 0 0 10px;
+    color: #4b5563;
+    line-height: 1.7;
   }
 
-  :deep(.el-descriptions__content) {
-    word-break: break-word;
+  .growth-content {
+    white-space: pre-wrap;
+    line-height: 1.7;
+    color: #1f2937;
   }
-}
+
+  .growth-evidence {
+    margin-top: 10px;
+    align-items: center;
+  }
+
+  .growth-meta-label {
+    color: #6b7280;
+    font-size: 13px;
+  }
 </style>
 

@@ -69,6 +69,8 @@ class BaseAgent(ABC):
         self._tools: Dict[str, Callable] = {}  # 旧版工具字典
         self._langchain_tools: List[BaseTool] = []  # 新版 LangChain 工具列表
         self._prompt_template: Optional[str] = None
+        self._last_llm_debug: Dict[str, Any] = {}
+        self._last_tool_debug: List[Dict[str, Any]] = []
 
         # v2.0: 动态加载工具
         if tool_ids is not None:
@@ -318,6 +320,64 @@ class BaseAgent(ABC):
         Returns:
             更新后的状态字典
         """
+
+    def describe_capabilities(self) -> Dict[str, Any]:
+        """返回当前 Agent 的结构化能力声明。"""
+        metadata = self.get_metadata()
+        growth_outputs = list(metadata.growth_outputs or [])
+        if not growth_outputs and metadata.output_field:
+            growth_outputs = [metadata.output_field]
+
+        return {
+            "agent_id": metadata.id,
+            "category": metadata.category,
+            "reads_from": list(metadata.reads_from or []),
+            "output_field": metadata.output_field,
+            "requires_tools": metadata.requires_tools,
+            "default_tools": list(metadata.default_tools or []),
+            "max_tool_calls": metadata.max_tool_calls,
+            "growth_role": metadata.growth_role,
+            "growth_outputs": growth_outputs,
+            "memory_scope_hint": metadata.memory_scope_hint,
+            "review_level": metadata.review_level,
+            "growth_source_type": metadata.growth_source_type,
+        }
+
+    def get_growth_artifacts(
+        self,
+        result: Dict[str, Any],
+        state: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """基于元数据返回适合进入成长抽取的候选产物。"""
+        metadata = self.get_metadata()
+        candidate_fields = list(metadata.growth_outputs or [])
+        if not candidate_fields and metadata.output_field:
+            candidate_fields = [metadata.output_field]
+
+        artifacts: List[Dict[str, Any]] = []
+        source_state = state or {}
+        for field_name in candidate_fields:
+            value = result.get(field_name)
+            if value is None:
+                value = source_state.get(field_name)
+            if value in (None, "", [], {}):
+                continue
+
+            artifacts.append(
+                {
+                    "field": field_name,
+                    "content": value,
+                    "review_level": metadata.review_level,
+                    "memory_scope_hint": metadata.memory_scope_hint,
+                    "growth_source_type": metadata.growth_source_type,
+                }
+            )
+
+        return artifacts
+
+    def get_review_requirement(self) -> str:
+        """返回成长产物的审核要求。"""
+        return str(self.get_metadata().review_level)
         pass
     
     def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -416,6 +476,7 @@ class BaseAgent(ABC):
             raise ValueError("LLM 未配置，无法执行工具调用")
 
         current_messages = list(messages)
+        self._last_tool_debug = []
 
         logger.info(f"🚀 [{self.agent_id}] 开始工具调用循环，最大迭代次数: {max_iterations}")
         logger.info(f"🔧 [{self.agent_id}] 可用工具数量: {len(self._langchain_tools) if self._langchain_tools else 0}")
@@ -881,6 +942,12 @@ class BaseAgent(ABC):
                         return "分析报告生成失败：LLM 持续返回工具调用而不是报告内容。请更换模型或重试。"
 
                 content = final_response.content if hasattr(final_response, 'content') else str(final_response)
+                self._last_llm_debug = {
+                    "response_type": type(final_response).__name__,
+                    "final_response_content": content,
+                    "tool_mode": True,
+                    "tool_trace": list(self._last_tool_debug),
+                }
                 logger.info(f"✅ [{self.agent_id}] 报告生成完成，长度: {len(content)} 字符")
                 logger.debug(f"🔍 [{self.agent_id}] 报告内容预览: {content[:200] if content else '(空)'}")
                 if not content or len(content.strip()) == 0:
@@ -896,6 +963,12 @@ class BaseAgent(ABC):
             else:
                 # 没有工具调用，直接返回内容
                 content = response.content if hasattr(response, 'content') else str(response)
+                self._last_llm_debug = {
+                    "response_type": type(response).__name__,
+                    "final_response_content": content,
+                    "tool_mode": False,
+                    "tool_trace": list(self._last_tool_debug),
+                }
                 logger.info(f"📝 [{self.agent_id}] 直接响应（无工具调用），长度: {len(content)} 字符")
                 return content
 
@@ -919,6 +992,7 @@ class BaseAgent(ABC):
             tool_name = tool_call.get('name')
             tool_args = tool_call.get('args', {})
             tool_id = tool_call.get('id')
+            tool_success = False
 
             logger.info(f"🔧 [{self.agent_id}] 执行工具: {tool_name}")
             logger.info(f"🔧 [{self.agent_id}] 工具参数: {tool_args}")
@@ -980,6 +1054,7 @@ class BaseAgent(ABC):
                         else:
                             logger.info(f"✅ [{self.agent_id}] 工具 {tool_name} 执行成功，返回类型: {type(tool_result).__name__}")
                             logger.info(f"📄 [{self.agent_id}] 工具 {tool_name} 返回内容: {str(tool_result)[:200]}...")
+                        tool_success = True
 
                     except Exception as e:
                         logger.error(f"❌ [{self.agent_id}] 工具 {tool_name} 执行失败: {e}")
@@ -1016,9 +1091,19 @@ class BaseAgent(ABC):
                 except Exception:
                     pass
 
+            tool_result_text = str(tool_result)
+            self._last_tool_debug.append({
+                "tool_name": tool_name,
+                "tool_args": tool_args,
+                "success": tool_success,
+                "result_preview": tool_result_text[:800],
+                "result_length": len(tool_result_text),
+                "tool_call_id": tool_id,
+            })
+
             # 创建工具消息
             tool_messages.append(ToolMessage(
-                content=str(tool_result),
+                content=tool_result_text,
                 tool_call_id=tool_id
             ))
 

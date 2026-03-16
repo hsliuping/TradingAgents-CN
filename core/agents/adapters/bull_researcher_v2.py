@@ -84,6 +84,11 @@ class BullResearcherV2(ResearcherAgent):
         requires_tools=False,
         output_field="bull_report",
         report_label="【看涨观点 v2】",
+        growth_role="reviewer",
+        growth_outputs=["bull_report"],
+        memory_scope_hint="pattern",
+        review_level="manual_required",
+        growth_source_type="analysis_report",
     )
     
     # 研究员类型
