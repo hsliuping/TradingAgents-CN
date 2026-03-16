@@ -10,6 +10,10 @@
         <span class="subtitle">设计和管理 AI 多智能体协作分析流程</span>
       </div>
       <div class="header-right">
+        <el-button @click="router.push('/workflow/agent-workshop')">
+          <el-icon><SetUp /></el-icon>
+          Agent 工坊
+        </el-button>
         <el-button type="success" @click="router.push('/workflow/workflow-generation/create')">
           <el-icon><MagicStick /></el-icon>
           AI 智能创建
@@ -19,6 +23,27 @@
           新建分析流程
         </el-button>
       </div>
+    </div>
+
+    <div class="section workshop-entry-section">
+      <el-card class="workshop-entry-card" shadow="hover">
+        <div class="workshop-entry-content">
+          <div>
+            <div class="workshop-entry-title">
+              <el-icon><SetUp /></el-icon>
+              <span>Agent 工坊</span>
+            </div>
+            <p class="workshop-entry-desc">
+              用规格定义、缺口评估、版本生成、Benchmark 和 production review，验证新的 Agent 生命周期闭环。
+            </p>
+          </div>
+          <div class="workshop-entry-actions">
+            <el-button type="primary" @click="router.push('/workflow/agent-workshop')">
+              进入工坊
+            </el-button>
+          </div>
+        </div>
+      </el-card>
     </div>
 
     <!-- 系统分析流模板 -->
@@ -966,6 +991,43 @@ onMounted(() => {
       font-size: 14px;
     }
   }
+}
+
+.workshop-entry-section {
+  margin-bottom: 24px;
+}
+
+.workshop-entry-card {
+  border: 1px solid rgba(64, 158, 255, 0.18);
+  background: linear-gradient(135deg, rgba(236, 245, 255, 0.95), rgba(245, 247, 250, 0.98));
+}
+
+.workshop-entry-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.workshop-entry-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2d3d;
+}
+
+.workshop-entry-desc {
+  margin: 0;
+  color: #5c6b77;
+  line-height: 1.7;
+}
+
+.workshop-entry-actions {
+  flex-shrink: 0;
 }
 
 // 模板卡片

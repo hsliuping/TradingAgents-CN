@@ -631,6 +631,12 @@
                   </div>
                 </div>
 
+                <TaskGrowthPanel
+                  v-if="growthTaskId"
+                  class="growth-panel-section"
+                  :task-id="growthTaskId"
+                />
+
                 <!-- 详细分析报告 -->
                 <div v-if="analysisResults.state || analysisResults.reports" class="reports-section">
                   <h4>📋 详细分析报告</h4>
@@ -837,6 +843,7 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
+import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
 import { ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
 import { marked } from 'marked'
 import { recommendModels } from '@/api/modelCapabilities'
@@ -885,6 +892,7 @@ const analysisStatus = ref('idle') // 'idle', 'running', 'completed', 'failed'
 const showResults = ref(false)
 const analysisResults = ref<any>(null)
 const activeReportTab = ref('') // 当前激活的报告标签页
+const growthTaskId = computed(() => analysisResults.value?.task_id || currentTaskId.value || null)
 const progressInfo = ref({
   progress: 0,
   currentStep: '',
@@ -3959,5 +3967,9 @@ onMounted(async () => {
     line-height: 1.6;
     color: #e6a23c;
   }
+}
+
+.growth-panel-section {
+  margin-bottom: 24px;
 }
 </style>

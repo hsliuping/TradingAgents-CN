@@ -339,7 +339,6 @@ class TaskAnalysisService:
                 except Exception as writeback_err:
                     self.logger.warning(f"⚠️ 回写研究主题失败(忽略): {writeback_err}")
 
-            # 保存到数据库（包含更新后的 analysis_id）
             await self._update_task(task)
 
             # 🔑 关键：更新内存状态为完成
@@ -354,6 +353,14 @@ class TaskAnalysisService:
                 current_step_name="已完成",  # 🔑 传递步骤名称
                 current_step_description="分析完成",  # 🔑 传递步骤描述
                 result_data=task.result
+            )
+
+            # 成长提取改为后台执行，避免阻塞主任务完成时间。
+            self._schedule_growth_extraction(
+                task_id=task.task_id,
+                raw_result=result,
+                formatted_result=formatted_result,
+                analysis_id=saved_analysis_id,
             )
 
             self.logger.info(f"✅ 任务完成: {task.task_id}")
@@ -1810,6 +1817,64 @@ class TaskAnalysisService:
             {"$set": doc}
         )
         self.logger.debug(f"💾 任务已更新: {task.task_id}")
+
+    def _schedule_growth_extraction(
+        self,
+        task_id: str,
+        raw_result: Dict[str, Any],
+        formatted_result: Dict[str, Any],
+        analysis_id: Optional[str],
+    ) -> None:
+        """异步调度成长提取，避免阻塞任务主链路。"""
+        try:
+            asyncio.create_task(
+                self._extract_growth_in_background(
+                    task_id=task_id,
+                    raw_result=raw_result,
+                    formatted_result=formatted_result,
+                    analysis_id=analysis_id,
+                )
+            )
+        except Exception as exc:
+            self.logger.warning(f"⚠️ 调度成长提取任务失败(忽略): {exc}")
+
+    async def _extract_growth_in_background(
+        self,
+        task_id: str,
+        raw_result: Dict[str, Any],
+        formatted_result: Dict[str, Any],
+        analysis_id: Optional[str],
+    ) -> None:
+        """后台提取成长产物并回写任务，不影响主任务完成时间。"""
+        try:
+            task = await self.get_task(task_id)
+            if not task:
+                self.logger.warning(f"⚠️ 后台成长提取跳过：任务不存在 {task_id}")
+                return
+
+            from app.services.workflow_growth_service import get_workflow_growth_service
+
+            growth_context = await get_workflow_growth_service().process_completed_task(
+                task=task,
+                raw_result=raw_result,
+                formatted_result=formatted_result,
+                analysis_id=analysis_id,
+            )
+
+            update_fields: Dict[str, Any] = {
+                "growth_context": growth_context.model_dump(mode="python"),
+                "updated_at": now_tz(),
+            }
+            if task.result is not None:
+                update_fields["result.growth_context"] = growth_context.model_dump(mode="json")
+
+            await self.collection.update_one(
+                {"task_id": task_id},
+                {"$set": update_fields}
+            )
+            self.logger.info(f"✅ 后台成长提取完成: {task_id}")
+        except Exception as exc:
+            self.logger.warning(f"⚠️ 后台成长提取失败(忽略): {task_id} - {exc}")
 
     async def _save_to_analysis_reports(self, task: UnifiedAnalysisTask, result: Dict[str, Any]) -> Optional[str]:
         """保存分析结果到 analysis_reports 集合（兼容旧版 API）

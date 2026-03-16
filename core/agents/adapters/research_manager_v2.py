@@ -84,6 +84,11 @@ class ResearchManagerV2(ManagerAgent):
         requires_tools=False,
         output_field="investment_advice",
         report_label="【投资分析观点 v2】",
+        growth_role="optimizer",
+        growth_outputs=["investment_plan", "investment_debate_state"],
+        memory_scope_hint="research_asset",
+        review_level="manual_required",
+        growth_source_type="manager_decision",
     )
     
     # 管理者类型

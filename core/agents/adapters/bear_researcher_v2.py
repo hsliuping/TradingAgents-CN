@@ -82,6 +82,11 @@ class BearResearcherV2(ResearcherAgent):
         requires_tools=False,
         output_field="bear_report",
         report_label="【看跌观点 v2】",
+        growth_role="reviewer",
+        growth_outputs=["bear_report"],
+        memory_scope_hint="pattern",
+        review_level="manual_required",
+        growth_source_type="analysis_report",
     )
 
     # 研究员类型

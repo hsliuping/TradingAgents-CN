@@ -156,6 +156,11 @@ class IndexAnalystV2(AnalystAgent):
         requires_tools=True,
         output_field="index_report",
         report_label="【大盘分析 v2】",
+        growth_role="extractor",
+        growth_outputs=["index_report"],
+        memory_scope_hint="object_tracking",
+        review_level="auto_pending",
+        growth_source_type="analysis_report",
     )
 
     # 分析师类型

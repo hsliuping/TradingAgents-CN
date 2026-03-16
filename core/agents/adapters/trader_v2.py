@@ -81,6 +81,11 @@ class TraderV2(TraderAgent):
         requires_tools=False,
         output_field="trader_investment_plan",
         report_label="【交易分析计划 v2】",
+        growth_role="optimizer",
+        growth_outputs=["trader_investment_plan"],
+        memory_scope_hint="pattern",
+        review_level="manual_required",
+        growth_source_type="manager_decision",
     )
 
     # 输出字段名（与报告格式化器期望的字段名一致）

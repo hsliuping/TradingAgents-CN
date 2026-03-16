@@ -68,6 +68,11 @@ class SocialMediaAnalystV2(AnalystAgent):
         requires_tools=True,
         output_field="sentiment_report",
         report_label="【社交媒体分析 v2】",
+        growth_role="extractor",
+        growth_outputs=["sentiment_report"],
+        memory_scope_hint="object_tracking",
+        review_level="manual_required",
+        growth_source_type="analysis_report",
     )
 
     # 分析师类型

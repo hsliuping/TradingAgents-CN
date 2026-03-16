@@ -93,6 +93,11 @@ class RiskyAnalystV2(ResearcherAgent):
         requires_tools=False,
         output_field="risky_opinion",
         report_label="【激进风险评估】",
+        growth_role="reviewer",
+        growth_outputs=["risky_opinion"],
+        memory_scope_hint="pattern",
+        review_level="manual_required",
+        growth_source_type="manager_decision",
     )
 
     # 研究立场（风险分析师使用 "risky"）

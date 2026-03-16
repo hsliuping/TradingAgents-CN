@@ -186,6 +186,7 @@ export interface PositionRiskMetrics {
 /** 单股持仓分析结果 */
 export interface PositionAnalysisResult {
   analysis_id: string
+  task_id?: string
   position_id: string
   code: string
   name?: string

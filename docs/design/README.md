@@ -51,6 +51,7 @@
 | [v3.0/assistant-research-workbench-design.md](v3.0/assistant-research-workbench-design.md) | 助手研究工作台与主题线程设计 | ✅ 设计完成 |
 | [v3.0/controlled-growth-agent-design.md](v3.0/controlled-growth-agent-design.md) | 在 3.0 中落地受控成长 Agent 的设计方案 | ✅ 新增 |
 | [v3.0/agent-capability-audit.md](v3.0/agent-capability-audit.md) | 流程 Agent 基类、元数据与能力矩阵审计 | ✅ 新增 |
+| [v3.0/agent-workshop-iterative-design.md](v3.0/agent-workshop-iterative-design.md) | Agent 工坊、版本生成、评估与迭代设计 | ✅ 新增 |
 
 ## 🎯 重点设计文档
 

@@ -77,6 +77,11 @@ class MarketAnalystV2(AnalystAgent):
         requires_tools=True,
         output_field="market_report",
         report_label="【市场分析 v2】",
+        growth_role="extractor",
+        growth_outputs=["market_report"],
+        memory_scope_hint="object_tracking",
+        review_level="auto_pending",
+        growth_source_type="analysis_report",
     )
 
     # 分析师类型

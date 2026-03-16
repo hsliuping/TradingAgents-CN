@@ -104,6 +104,10 @@
         <div class="markdown-content" v-html="renderMarkdown(report.detailed_analysis)"></div>
       </div>
 
+      <div class="section">
+        <TaskGrowthPanel :task-id="growthTaskId" />
+      </div>
+
       <!-- 分析时间 -->
       <div class="section">
         <el-descriptions :column="2" border size="small">
@@ -120,9 +124,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { type PositionAnalysisResult } from '@/api/portfolio'
 import { marked } from 'marked'
+import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
 
 type PositionSnapshot = {
   code?: string
@@ -149,6 +154,7 @@ const emit = defineEmits<{
 }>()
 
 const visible = ref(false)
+const growthTaskId = computed(() => props.report?.task_id || props.report?.analysis_id || null)
 
 watch(() => props.modelValue, (val) => {
   visible.value = val

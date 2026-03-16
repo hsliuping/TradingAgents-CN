@@ -839,6 +839,27 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'agent-workshop',
+        name: 'AgentWorkshop',
+        component: () => import('@/views/Workflow/AgentWorkshopManager.vue'),
+        meta: {
+          title: 'Agent 工坊',
+          requiresAuth: true,
+          requiresPro: true
+        }
+      },
+      {
+        path: 'agent-workshop/create',
+        name: 'AgentWorkshopCreate',
+        component: () => import('@/views/Workflow/AgentWorkshop.vue'),
+        meta: {
+          title: 'Agent 工坊工作页',
+          requiresAuth: true,
+          requiresPro: true,
+          hideInMenu: true
+        }
+      },
+      {
         path: 'agents/:id',
         name: 'AgentDetail',
         component: () => import('@/views/Workflow/AgentDetail.vue'),
