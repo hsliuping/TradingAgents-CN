@@ -20,6 +20,42 @@ from .validator import WorkflowValidator, ValidationResult
 logger = logging.getLogger(__name__)
 
 
+def _prepare_workflow_runtime_inputs(
+    inputs: Dict[str, Any],
+    workflow_id: Optional[str],
+    execution_id: str,
+) -> Dict[str, Any]:
+    """向工作流初始 state 注入轻量运行时上下文，不污染返回结果。"""
+    prepared_inputs = inputs.copy() if inputs else {}
+    runtime_context = dict(prepared_inputs.get("_workflow_runtime") or {})
+    context = prepared_inputs.get("context")
+
+    context_user_id = None
+    context_thread_id = None
+    if isinstance(context, dict):
+        context_user_id = context.get("user_id")
+        context_thread_id = context.get("thread_id") or context.get("session_id")
+    elif context is not None:
+        context_user_id = getattr(context, "user_id", None)
+        context_thread_id = getattr(context, "thread_id", None) or getattr(context, "session_id", None)
+
+    if workflow_id and not runtime_context.get("workflow_id"):
+        runtime_context["workflow_id"] = workflow_id
+    if execution_id and not runtime_context.get("execution_id"):
+        runtime_context["execution_id"] = execution_id
+    if prepared_inputs.get("user_id") and not runtime_context.get("user_id"):
+        runtime_context["user_id"] = prepared_inputs.get("user_id")
+    if context_user_id and not runtime_context.get("user_id"):
+        runtime_context["user_id"] = context_user_id
+    if prepared_inputs.get("thread_id") and not runtime_context.get("thread_id"):
+        runtime_context["thread_id"] = prepared_inputs.get("thread_id")
+    if context_thread_id and not runtime_context.get("thread_id"):
+        runtime_context["thread_id"] = context_thread_id
+
+    prepared_inputs["_workflow_runtime"] = runtime_context
+    return prepared_inputs
+
+
 class ProgressCallback(Protocol):
     """进度回调协议"""
     def __call__(
@@ -216,6 +252,12 @@ class WorkflowEngine:
             self._report_progress(5, "编译工作流...", "compile")
             self.compile()
 
+        runtime_inputs = _prepare_workflow_runtime_inputs(
+            inputs,
+            self._definition.id if self._definition else None,
+            self._task_id,
+        )
+
         # 创建执行记录
         execution = self._create_execution(inputs)
         self._report_progress(10, "开始执行工作流", "start")
@@ -230,7 +272,7 @@ class WorkflowEngine:
             # stream_mode 应该作为关键字参数传递，而不是放在 config 字典中
             final_state = inputs.copy() if inputs else {}
 
-            for chunk in self._compiled_graph.stream(inputs, config=config, stream_mode="updates"):
+            for chunk in self._compiled_graph.stream(runtime_inputs, config=config, stream_mode="updates"):
                 # chunk 格式: {node_name: state_update}
                 if isinstance(chunk, dict):
                     for node_name, node_update in chunk.items():
@@ -467,6 +509,12 @@ class WorkflowEngine:
             self._report_progress(5, "编译工作流...", "compile")
             self.compile()
 
+        runtime_inputs = _prepare_workflow_runtime_inputs(
+            inputs,
+            self._definition.id if self._definition else None,
+            self._task_id,
+        )
+
         execution = self._create_execution(inputs)
         self._report_progress(10, "开始执行工作流", "start")
 
@@ -480,7 +528,7 @@ class WorkflowEngine:
             # stream_mode 应该作为关键字参数传递，而不是放在 config 字典中
             final_state = inputs.copy() if inputs else {}
 
-            async for chunk in self._compiled_graph.astream(inputs, config=config, stream_mode="updates"):
+            async for chunk in self._compiled_graph.astream(runtime_inputs, config=config, stream_mode="updates"):
                 # chunk 格式: {node_name: state_update}
                 if isinstance(chunk, dict):
                     for node_name, node_update in chunk.items():
@@ -545,13 +593,19 @@ class WorkflowEngine:
         """
         if self._compiled_graph is None:
             self.compile()
+
+        runtime_inputs = _prepare_workflow_runtime_inputs(
+            inputs,
+            self._definition.id if self._definition else None,
+            self._task_id,
+        )
         
         execution = self._create_execution(inputs)
         execution.state = WorkflowExecutionState.RUNNING
         execution.started_at = datetime.now().isoformat()
         
         try:
-            async for event in self._compiled_graph.astream(inputs, config):
+            async for event in self._compiled_graph.astream(runtime_inputs, config):
                 # 包装事件
                 yield {
                     "type": "node_output",

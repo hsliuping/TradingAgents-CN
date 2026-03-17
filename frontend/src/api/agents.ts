@@ -10,7 +10,9 @@ export interface AgentMetadata {
   name: string
   description: string
   category: 'analyst' | 'researcher' | 'trader' | 'risk' | 'manager' | 'post_processor'
+  version?: string
   license_tier: 'free' | 'basic' | 'pro' | 'enterprise'
+  maintenance_status?: 'maintained' | 'unmaintained'
   inputs: string[]
   outputs: string[]
   icon: string

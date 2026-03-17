@@ -31,6 +31,18 @@
     <div class="main-content">
       <!-- 步骤 0: 需求沟通 -->
       <div v-if="wizardStep === 0" class="wizard-chat">
+        <div v-if="handoffContext" class="handoff-card">
+          <div class="handoff-title">来自上游工坊的交接</div>
+          <div class="handoff-text">
+            <span v-if="handoffContext.source === 'agent_workshop'">当前不是从零新建 Skill，而是在承接 Agent 工坊识别出的执行能力缺口。</span>
+            <span v-else>当前会话来自上游流程交接。</span>
+          </div>
+          <div class="handoff-meta">
+            <span v-if="handoffContext.source_name">上游对象：{{ handoffContext.source_name }}</span>
+            <span v-if="handoffContext.target_capability">目标能力：{{ handoffContext.target_capability }}</span>
+          </div>
+          <div v-if="handoffContext.handoff_intent" class="handoff-note">{{ handoffContext.handoff_intent }}</div>
+        </div>
         <div ref="chatContainer" class="chat-messages">
           <!-- 首次进入时的引导语 -->
           <div v-if="chatMessages.length === 0 && !chatLoading" class="requirement-guide">
@@ -120,6 +132,9 @@
       <div v-if="wizardStep === 1" class="wizard-spec-confirm">
         <div class="spec-confirm-card">
           <h3>📄 工具规格确认</h3>
+          <div v-if="handoffContext" class="handoff-inline-note">
+            当前规格来自上游交接：先判断复用已有能力，再决定是否新增最小实现单元。
+          </div>
           <el-descriptions v-if="specPreview" :column="1" border size="small">
             <el-descriptions-item label="工具 ID">{{ specPreview.tool_id }}</el-descriptions-item>
             <el-descriptions-item label="名称">{{ specPreview.display_name }}</el-descriptions-item>
@@ -143,7 +158,198 @@
               复杂度 {{ boundaryCheck?.complexity_score }}/5，在 Skill 范围内
             </el-alert>
           </div>
-          <div class="spec-confirm-actions">
+          <div
+            v-if="backendRecommendations && (backendRecommendations.stock_collections?.length || backendRecommendations.external_sources?.length)"
+            ref="recommendationCardRef"
+            :class="['spec-recommendation-card', { 'spec-recommendation-card-highlight': highlightRecommendationCard } ]"
+          >
+            <div class="spec-catalog-header">
+              <div>
+                <h4>系统建议</h4>
+                <p>这份建议由后端统一选择器生成，会和需求分析、规格确认、代码生成共用同一套命中逻辑。</p>
+              </div>
+            </div>
+            <div class="recommendation-grid">
+              <div class="recommendation-block">
+                <div class="recommendation-label">推荐分类 / 主来源</div>
+                <div class="recommendation-value">
+                  {{ backendRecommendations.category_hint || '-' }}
+                  <span v-if="backendRecommendations.data_source_hint"> · {{ backendRecommendations.data_source_hint }}</span>
+                </div>
+              </div>
+              <div class="recommendation-block">
+                <div class="recommendation-label">推荐复用本地集合</div>
+                <div class="tag-wrap" v-if="backendRecommendations.stock_collections?.length">
+                  <el-tag v-for="entry in backendRecommendations.stock_collections" :key="`rec-stock-${entry}`" class="tag-item" type="success" effect="plain">{{ entry }}</el-tag>
+                </div>
+                <div v-else class="recommendation-empty">当前没有明显命中的本地集合</div>
+              </div>
+              <div class="recommendation-block">
+                <div class="recommendation-label">推荐外部来源</div>
+                <div class="tag-wrap" v-if="backendRecommendations.external_sources?.length">
+                  <el-tag v-for="entry in backendRecommendations.external_sources" :key="`rec-source-${entry}`" class="tag-item" type="warning" effect="plain">{{ entry }}</el-tag>
+                </div>
+                <div v-else class="recommendation-empty">当前优先本地即可，外部来源不是必需</div>
+              </div>
+              <div v-if="matchedStockCollections.length || matchedExternalSources.length" class="recommendation-block">
+                <div class="recommendation-label">快速定位</div>
+                <div class="recommendation-actions">
+                  <el-button v-if="matchedStockCollections.length" size="small" type="success" plain @click="focusFirstMatchedStockCard">定位本地命中</el-button>
+                  <el-button v-if="matchedExternalSources.length" size="small" type="warning" plain @click="focusFirstMatchedExternalCard">定位外部命中</el-button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="spec-catalog-card">
+            <div class="spec-catalog-header">
+              <div>
+                <h4>本地股票数据目录</h4>
+                <p>这里展示当前 Skill 生成器参考的股票核心集合和关键字段，确认规格时可以直接核对是否优先复用数据库现有数据。</p>
+              </div>
+              <el-button text @click="loadStockDataCatalog" :loading="stockCatalogLoading">刷新目录</el-button>
+            </div>
+            <div v-if="stockCatalogDoc" class="catalog-summary">
+              当前已整理 {{ stockCatalogCollections.length }} 个核心集合，建议优先复用封装函数，不要直接臆造字段名。
+            </div>
+            <div v-if="matchedStockCollections.length" class="catalog-match-summary">
+              本次规格命中集合：{{ matchedStockCollections.map(item => item.collection).join('、') }}
+            </div>
+            <el-collapse v-model="stockCatalogExpanded">
+              <el-collapse-item name="stock-data-catalog" title="查看集合与字段目录">
+                <div v-if="stockCatalogCollections.length" class="catalog-collection-list">
+                  <div
+                    v-for="item in stockCatalogCollections"
+                    :key="item.collection"
+                    :ref="(el) => setStockCardRef(item.collection, el)"
+                    :class="['catalog-collection-card', { 'catalog-collection-card-recommended': isStockCollectionMatched(item) } ]"
+                  >
+                    <div class="catalog-collection-topbar">
+                      <div>
+                        <div class="catalog-collection-title">{{ item.collection }}</div>
+                        <div v-if="isStockCollectionMatched(item)" class="catalog-match-label">本次命中</div>
+                      </div>
+                      <div class="catalog-collection-actions">
+                        <el-button size="small" text @click="insertCatalogIntoRequirement(item)">插入到需求</el-button>
+                        <el-button size="small" text @click="copyCatalogCollectionName(item.collection)">复制集合名</el-button>
+                        <el-button size="small" text @click="copyCatalogQueryKeys(item)">复制查询键</el-button>
+                        <el-button size="small" text @click="copyCatalogPreferredAccess(item)">复制访问函数</el-button>
+                        <el-button size="small" text @click="copyCatalogFieldNames(item)">复制字段名</el-button>
+                        <el-button size="small" text @click="copyCatalogFieldDescriptions(item)">复制字段说明</el-button>
+                      </div>
+                    </div>
+                    <div class="catalog-collection-purpose">{{ item.purpose }}</div>
+                    <div class="tag-wrap" v-if="item.preferred_access?.length">
+                      <el-tag v-for="entry in item.preferred_access" :key="`${item.collection}-access-${entry}`" class="tag-item" type="success" effect="plain">{{ entry }}</el-tag>
+                    </div>
+                    <div class="tag-wrap" v-if="item.query_keys?.length" style="margin-top: 8px;">
+                      <el-tag v-for="entry in item.query_keys" :key="`${item.collection}-query-${entry}`" class="tag-item" type="info" effect="plain">{{ entry }}</el-tag>
+                    </div>
+                    <el-table :data="item.fields" size="small" border stripe class="catalog-field-table">
+                      <el-table-column prop="name" label="字段" width="180" />
+                      <el-table-column prop="type" label="类型" width="140" />
+                      <el-table-column prop="description" label="说明" min-width="320" />
+                    </el-table>
+                    <div v-if="item.notes?.length" class="catalog-notes">
+                      <div v-for="entry in item.notes" :key="`${item.collection}-note-${entry}`" class="catalog-note-item">{{ entry }}</div>
+                    </div>
+                  </div>
+                </div>
+                <el-empty v-else description="当前还没有加载到股票数据目录" />
+              </el-collapse-item>
+            </el-collapse>
+          </div>
+          <div class="spec-catalog-card">
+            <div class="spec-catalog-header">
+              <div>
+                <h4>外部接口与数据源目录</h4>
+                <p>这里只展示当前系统优先支持的外部来源。需要在线补数时，应先选最匹配的一两个来源，不要把所有 API 一起塞进需求。</p>
+              </div>
+              <el-button text @click="loadExternalDataSourceCatalog" :loading="externalSourceCatalogLoading">刷新目录</el-button>
+            </div>
+            <div v-if="externalSourceCatalogDoc" class="catalog-summary">
+              当前已整理 {{ externalSourceCatalogSources.length }} 个核心外部来源，建议按需求精确选用，并保留本地优先、外部降级的策略。
+            </div>
+            <div v-if="matchedExternalSources.length" class="catalog-match-summary">
+              本次规格命中来源：{{ matchedExternalSources.map(item => item.display_name).join('、') }}
+            </div>
+            <el-collapse v-model="externalSourceCatalogExpanded">
+              <el-collapse-item name="external-data-source-catalog" title="查看外部来源目录">
+                <div v-if="externalSourceCatalogSources.length" class="catalog-collection-list">
+                  <div
+                    v-for="item in externalSourceCatalogSources"
+                    :key="item.source_id"
+                    :ref="(el) => setExternalSourceCardRef(item.source_id, el)"
+                    :class="['catalog-collection-card', { 'catalog-collection-card-recommended': isExternalSourceMatched(item) } ]"
+                  >
+                    <div class="catalog-collection-topbar">
+                      <div>
+                        <div class="catalog-collection-title">{{ item.display_name }}</div>
+                        <div class="catalog-collection-purpose">{{ item.source_id }} · {{ item.source_type }}</div>
+                        <div v-if="isExternalSourceMatched(item)" class="catalog-match-label">本次命中</div>
+                      </div>
+                      <div class="catalog-collection-actions">
+                        <el-button size="small" text @click="insertExternalSourceIntoRequirement(item)">插入到需求</el-button>
+                        <el-button size="small" text @click="copyExternalSourceName(item)">复制来源名</el-button>
+                        <el-button size="small" text @click="copyExternalSourceInterfaces(item)">复制接口</el-button>
+                        <el-button size="small" text @click="copyExternalSourcePreferredFor(item)">复制适用场景</el-button>
+                        <el-button size="small" text @click="copyExternalSourceConstraints(item)">复制约束</el-button>
+                      </div>
+                    </div>
+                    <div class="tag-wrap" v-if="item.markets?.length" style="margin-top: 10px;">
+                      <el-tag v-for="entry in item.markets" :key="`${item.source_id}-market-${entry}`" class="tag-item" type="warning" effect="plain">{{ entry }}</el-tag>
+                    </div>
+                    <div class="tag-wrap" v-if="item.categories?.length" style="margin-top: 8px;">
+                      <el-tag v-for="entry in item.categories" :key="`${item.source_id}-category-${entry}`" class="tag-item" type="info" effect="plain">{{ entry }}</el-tag>
+                    </div>
+                    <div v-if="item.preferred_for?.length" class="catalog-notes">
+                      <div v-for="entry in item.preferred_for" :key="`${item.source_id}-preferred-${entry}`" class="catalog-note-item">推荐场景：{{ entry }}</div>
+                    </div>
+                    <div v-if="item.interfaces?.length" class="catalog-notes">
+                      <div v-for="entry in item.interfaces" :key="`${item.source_id}-interface-${entry}`" class="catalog-note-item">推荐接口：{{ entry }}</div>
+                    </div>
+                    <div v-if="item.constraints?.length" class="catalog-notes">
+                      <div v-for="entry in item.constraints" :key="`${item.source_id}-constraint-${entry}`" class="catalog-note-item">约束：{{ entry }}</div>
+                    </div>
+                    <div v-if="item.notes?.length" class="catalog-notes">
+                      <div v-for="entry in item.notes" :key="`${item.source_id}-note-${entry}`" class="catalog-note-item">说明：{{ entry }}</div>
+                    </div>
+                  </div>
+                </div>
+                <el-empty v-else description="当前还没有加载到外部接口与数据源目录" />
+              </el-collapse-item>
+            </el-collapse>
+          </div>
+          <div v-if="specPreview" class="spec-preflight-card">
+            <div class="spec-catalog-header">
+              <div>
+                <h4>生成前检查</h4>
+                <p>当前生成会优先按下面的复用策略执行。确认无误后再进入代码生成与验证流程。</p>
+              </div>
+            </div>
+            <div class="preflight-grid">
+              <div class="recommendation-block">
+                <div class="recommendation-label">优先复用本地集合</div>
+                <div v-if="preflightLocalCollections.length" class="tag-wrap">
+                  <el-tag v-for="entry in preflightLocalCollections" :key="`preflight-local-${entry}`" class="tag-item" type="success" effect="plain">{{ entry }}</el-tag>
+                </div>
+                <div v-else class="recommendation-empty">当前没有明确命中的本地集合，生成时会更多依赖需求描述和目录上下文。</div>
+              </div>
+              <div class="recommendation-block">
+                <div class="recommendation-label">候选外部来源</div>
+                <div v-if="preflightExternalSources.length" class="tag-wrap">
+                  <el-tag v-for="entry in preflightExternalSources" :key="`preflight-source-${entry}`" class="tag-item" type="warning" effect="plain">{{ entry }}</el-tag>
+                </div>
+                <div v-else class="recommendation-empty">当前优先本地数据即可，外部来源不是必须项。</div>
+              </div>
+              <div class="recommendation-block">
+                <div class="recommendation-label">生成提醒</div>
+                <div class="preflight-notes">
+                  <div v-for="entry in preflightNotes" :key="entry" class="catalog-note-item">{{ entry }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div ref="confirmActionsRef" :class="['spec-confirm-actions', { 'spec-confirm-actions-highlight': highlightConfirmActions } ]">
             <el-button @click="wizardStep = 0">✏️ 返回修改</el-button>
             <el-button type="primary" @click="handleConfirmAndGenerate" :loading="specConfirmLoading">
               ✅ 确认并生成
@@ -187,6 +393,30 @@
             <el-button @click="goBack">返回列表</el-button>
           </template>
         </el-result>
+        <div v-if="genResult?.success && (preflightLocalCollections.length || preflightExternalSources.length)" class="done-context-card">
+          <div class="spec-catalog-header">
+            <div>
+              <h4>本次生成采用的复用策略</h4>
+              <p>以下内容来自生成前统一选择器，用于说明本次代码生成优先参考了哪些本地集合和外部来源。</p>
+            </div>
+          </div>
+          <div class="preflight-grid">
+            <div class="recommendation-block">
+              <div class="recommendation-label">本地集合</div>
+              <div v-if="preflightLocalCollections.length" class="tag-wrap">
+                <el-tag v-for="entry in preflightLocalCollections" :key="`done-local-${entry}`" class="tag-item" type="success" effect="plain">{{ entry }}</el-tag>
+              </div>
+              <div v-else class="recommendation-empty">本次没有明确锁定本地集合。</div>
+            </div>
+            <div class="recommendation-block">
+              <div class="recommendation-label">外部来源</div>
+              <div v-if="preflightExternalSources.length" class="tag-wrap">
+                <el-tag v-for="entry in preflightExternalSources" :key="`done-source-${entry}`" class="tag-item" type="warning" effect="plain">{{ entry }}</el-tag>
+              </div>
+              <div v-else class="recommendation-empty">本次策略偏向本地优先，外部来源非必需。</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -196,10 +426,17 @@
 import { ref, nextTick, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ArrowDown, User, MagicStick, Loading, CircleCheck, MoreFilled, WarningFilled } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import { skillGenerationApi } from '@/api/skillGeneration'
-import type { BoundaryCheck, ConfirmResult } from '@/api/skillGeneration'
+import type {
+  BoundaryCheck,
+  ConfirmResult,
+  ExternalDataSourceCatalogItem,
+  SkillHandoffContext,
+  SkillGenerationRecommendations,
+  StockDataCatalogCollection,
+} from '@/api/skillGeneration'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -220,6 +457,10 @@ const chatMessages = ref<ChatMsg[]>([])
 const chatLoading = ref(false)
 const userInput = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
+const recommendationCardRef = ref<HTMLElement | null>(null)
+const confirmActionsRef = ref<HTMLElement | null>(null)
+const stockCardRefs = ref<Record<string, HTMLElement | null>>({})
+const externalSourceCardRefs = ref<Record<string, HTMLElement | null>>({})
 const sessionId = ref('')
 const currentRound = ref(0)
 const expectedRounds = ref(3)
@@ -233,6 +474,119 @@ const canConfirm = computed(() => chatMessages.value.length >= 2)
 const specPreview = ref<Record<string, any> | null>(null)
 const specConfirmLoading = ref(false)
 const pipelineMessage = ref('')
+const stockCatalogLoading = ref(false)
+const stockCatalogDoc = ref('')
+const stockCatalogCollections = ref<StockDataCatalogCollection[]>([])
+const stockCatalogExpanded = ref<string[]>(['stock-data-catalog'])
+const externalSourceCatalogLoading = ref(false)
+const externalSourceCatalogDoc = ref('')
+const externalSourceCatalogSources = ref<ExternalDataSourceCatalogItem[]>([])
+const externalSourceCatalogExpanded = ref<string[]>(['external-data-source-catalog'])
+const backendRecommendations = ref<SkillGenerationRecommendations | null>(null)
+const handoffContext = ref<SkillHandoffContext | null>(null)
+const highlightRecommendationCard = ref(false)
+const highlightConfirmActions = ref(false)
+
+const getRouteHandoffContext = (): SkillHandoffContext | null => {
+  const sourceSpecId = typeof route.query.from_agent_workshop === 'string' ? route.query.from_agent_workshop.trim() : ''
+  const targetCapability = typeof route.query.skill_name === 'string' ? route.query.skill_name.trim() : ''
+  const sourceName = typeof route.query.source_name === 'string' ? route.query.source_name.trim() : ''
+  const handoffIntent = typeof route.query.handoff_intent === 'string' ? route.query.handoff_intent.trim() : ''
+  if (!sourceSpecId && !targetCapability) return null
+
+  return {
+    source: sourceSpecId ? 'agent_workshop' : '',
+    source_spec_id: sourceSpecId,
+    source_name: sourceName,
+    target_capability: targetCapability,
+    handoff_intent: handoffIntent || '先判断复用已有能力还是新增最小实现单元，再决定是否需要独立 Skill。',
+  }
+}
+
+const preflightLocalCollections = computed(() => backendRecommendations.value?.stock_collections || [])
+const preflightExternalSources = computed(() => backendRecommendations.value?.external_sources || [])
+const preflightNotes = computed(() => {
+  const notes: string[] = []
+  if (preflightLocalCollections.value.length) {
+    notes.push(`优先复用本地集合：${preflightLocalCollections.value.join('、')}`)
+  } else {
+    notes.push('当前没有明确命中的本地集合，生成器会根据需求描述和目录信息决定是否直连外部来源。')
+  }
+
+  if (preflightExternalSources.value.length) {
+    notes.push(`如本地数据不足，将优先考虑这些外部来源：${preflightExternalSources.value.join('、')}`)
+  } else {
+    notes.push('当前推荐策略偏向本地优先，外部来源更多作为可选补充。')
+  }
+
+  notes.push('本次仍会经过代码生成、静态校验、沙箱执行和质量评估，不会跳过验证。')
+  return notes
+})
+
+const normalizeSpecText = (spec: Record<string, any> | null) => {
+  if (!spec) return ''
+  const parts = [
+    spec.category,
+    spec.description,
+    spec.data_source,
+    ...(Array.isArray(spec.constraints) ? spec.constraints : []),
+    ...((spec.parameters || []).map((item: any) => item?.name).filter(Boolean)),
+    ...((spec.expected_output?.fields || []).filter(Boolean)),
+  ]
+  return parts.join('\n').toLowerCase()
+}
+
+const specPreviewText = computed(() => normalizeSpecText(specPreview.value))
+const recommendedStockCollectionSet = computed(() => new Set((backendRecommendations.value?.stock_collections || []).map(item => item.toLowerCase())))
+const recommendedExternalSourceSet = computed(() => new Set((backendRecommendations.value?.external_sources || []).map(item => item.toLowerCase())))
+
+const isStockCollectionMatched = (item: StockDataCatalogCollection) => {
+  if (recommendedStockCollectionSet.value.has(item.collection.toLowerCase())) return true
+
+  const spec = specPreview.value
+  const text = specPreviewText.value
+  if (!spec || !text) return false
+
+  if (text.includes(item.collection.toLowerCase())) return true
+  if ((item.preferred_access || []).some(entry => text.includes(entry.toLowerCase()))) return true
+  if ((item.query_keys || []).some(entry => text.includes(entry.toLowerCase()) && !['symbol', 'code'].includes(entry.toLowerCase()))) return true
+
+  const category = String(spec.category || '').toLowerCase()
+  const purpose = String(item.purpose || '').toLowerCase()
+  if (category && purpose.includes(category)) return true
+
+  if (item.collection === 'stock_news' && (category === 'news' || text.includes('新闻') || text.includes('publish_time'))) return true
+  if (item.collection === 'stock_financial_data' && (category === 'fundamentals' || text.includes('财务') || text.includes('report_period'))) return true
+  if (item.collection === 'stock_daily_quotes' && (category === 'technical' || text.includes('日线') || text.includes('trade_date'))) return true
+  if (item.collection === 'market_quotes' && (category === 'market' || text.includes('实时') || text.includes('snapshot'))) return true
+  if (item.collection === 'stock_basic_info' && ['fundamentals', 'market', 'technical', 'news'].includes(category)) return true
+
+  return false
+}
+
+const isExternalSourceMatched = (item: ExternalDataSourceCatalogItem) => {
+  if (recommendedExternalSourceSet.value.has(item.source_id.toLowerCase())) return true
+
+  const spec = specPreview.value
+  const text = specPreviewText.value
+  if (!spec || !text) return false
+
+  if (text.includes(item.source_id.toLowerCase()) || text.includes(item.display_name.toLowerCase())) return true
+  if ((item.categories || []).some(entry => text.includes(entry.toLowerCase()))) return true
+  if ((item.interfaces || []).some(entry => text.includes(entry.toLowerCase()))) return true
+
+  const category = String(spec.category || '').toLowerCase()
+  if (item.source_id === 'tushare' && (category === 'fundamentals' || text.includes('分红') || text.includes('report_period'))) return true
+  if (item.source_id === 'akshare' && ((category === 'technical' || category === 'market') || text.includes('免费'))) return true
+  if (item.source_id === 'google_news' && (text.includes('港股') || text.includes('google news'))) return true
+  if (item.source_id === 'finnhub' && (text.includes('美股') || text.includes('company news'))) return true
+  if (item.source_id === 'eastmoney_via_akshare' && (text.includes('东方财富') || text.includes('东财'))) return true
+
+  return false
+}
+
+const matchedStockCollections = computed(() => stockCatalogCollections.value.filter(item => isStockCollectionMatched(item)))
+const matchedExternalSources = computed(() => externalSourceCatalogSources.value.filter(item => isExternalSourceMatched(item)))
 
 const genProgress = ref(0)
 const genSteps = ref([
@@ -256,6 +610,248 @@ const goBack = () => {
   router.push('/workflow/skill-generation')
 }
 
+const copyText = async (text: string, successMessage: string) => {
+  const normalized = text.trim()
+  if (!normalized) return
+
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(normalized)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = normalized
+      textarea.setAttribute('readonly', 'true')
+      textarea.style.position = 'absolute'
+      textarea.style.left = '-9999px'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+    ElMessage.success(successMessage)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '复制失败')
+  }
+}
+
+const copyCatalogCollectionName = async (collectionName: string) => {
+  await copyText(collectionName, `已复制集合名：${collectionName}`)
+}
+
+const copyCatalogFieldNames = async (item: StockDataCatalogCollection) => {
+  const fieldNames = (item.fields || []).map(field => field.name).filter(Boolean)
+  await copyText(fieldNames.join(', '), `已复制 ${item.collection} 的字段名`)
+}
+
+const copyCatalogQueryKeys = async (item: StockDataCatalogCollection) => {
+  const queryKeys = (item.query_keys || []).filter(Boolean)
+  await copyText(queryKeys.join(', '), `已复制 ${item.collection} 的查询键`)
+}
+
+const copyCatalogPreferredAccess = async (item: StockDataCatalogCollection) => {
+  const preferredAccess = (item.preferred_access || []).filter(Boolean)
+  await copyText(preferredAccess.join(', '), `已复制 ${item.collection} 的推荐访问函数`)
+}
+
+const copyCatalogFieldDescriptions = async (item: StockDataCatalogCollection) => {
+  const fieldDescriptions = (item.fields || [])
+    .filter(field => field?.name)
+    .map(field => `${field.name} (${field.type}): ${field.description}`)
+  await copyText(fieldDescriptions.join('\n'), `已复制 ${item.collection} 的字段说明`)
+}
+
+const copyExternalSourceName = async (item: ExternalDataSourceCatalogItem) => {
+  await copyText(item.display_name, `已复制来源名：${item.display_name}`)
+}
+
+const copyExternalSourceInterfaces = async (item: ExternalDataSourceCatalogItem) => {
+  await copyText((item.interfaces || []).join('\n'), `已复制 ${item.display_name} 的推荐接口`)
+}
+
+const copyExternalSourcePreferredFor = async (item: ExternalDataSourceCatalogItem) => {
+  await copyText((item.preferred_for || []).join('\n'), `已复制 ${item.display_name} 的适用场景`)
+}
+
+const copyExternalSourceConstraints = async (item: ExternalDataSourceCatalogItem) => {
+  await copyText((item.constraints || []).join('\n'), `已复制 ${item.display_name} 的约束说明`)
+}
+
+const buildCatalogRequirementSnippet = (item: StockDataCatalogCollection) => {
+  const queryKeys = (item.query_keys || []).filter(Boolean)
+  const preferredAccess = (item.preferred_access || []).filter(Boolean)
+  const fieldDescriptions = (item.fields || [])
+    .filter(field => field?.name)
+    .map(field => `- ${field.name} (${field.type}): ${field.description}`)
+
+  return [
+    `请优先复用本地股票数据集合 ${item.collection}。`,
+    preferredAccess.length ? `推荐访问函数：${preferredAccess.join('、')}。` : '',
+    queryKeys.length ? `常用查询键：${queryKeys.join('、')}。` : '',
+    fieldDescriptions.length ? `关键字段：\n${fieldDescriptions.join('\n')}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+const insertCatalogIntoRequirement = async (item: StockDataCatalogCollection) => {
+  const snippet = buildCatalogRequirementSnippet(item)
+  if (!snippet.trim()) return
+
+  userInput.value = userInput.value.trim()
+    ? `${userInput.value.trim()}\n\n${snippet}`
+    : snippet
+
+  if (wizardStep.value !== 0) {
+    wizardStep.value = 0
+    await nextTick()
+  }
+
+  ElMessage.success(`已将 ${item.collection} 的目录信息插入到需求输入框`)
+}
+
+const buildExternalSourceRequirementSnippet = (item: ExternalDataSourceCatalogItem) => {
+  const markets = (item.markets || []).filter(Boolean)
+  const categories = (item.categories || []).filter(Boolean)
+  const preferredFor = (item.preferred_for || []).filter(Boolean)
+  const interfaces = (item.interfaces || []).filter(Boolean)
+  const constraints = (item.constraints || []).filter(Boolean)
+
+  return [
+    `若需要外部在线数据，请优先使用 ${item.display_name}（${item.source_id}）。`,
+    markets.length ? `覆盖市场：${markets.join('、')}。` : '',
+    categories.length ? `适用分类：${categories.join('、')}。` : '',
+    preferredFor.length ? `推荐场景：${preferredFor.join('；')}。` : '',
+    interfaces.length ? `优先接口：${interfaces.join('；')}。` : '',
+    constraints.length ? `使用约束：${constraints.join('；')}。` : '',
+  ].filter(Boolean).join('\n')
+}
+
+const insertExternalSourceIntoRequirement = async (item: ExternalDataSourceCatalogItem) => {
+  const snippet = buildExternalSourceRequirementSnippet(item)
+  if (!snippet.trim()) return
+
+  userInput.value = userInput.value.trim()
+    ? `${userInput.value.trim()}\n\n${snippet}`
+    : snippet
+
+  if (wizardStep.value !== 0) {
+    wizardStep.value = 0
+    await nextTick()
+  }
+
+  ElMessage.success(`已将 ${item.display_name} 的目录信息插入到需求输入框`)
+}
+
+const loadStockDataCatalog = async () => {
+  stockCatalogLoading.value = true
+  try {
+    const res = await skillGenerationApi.getStockDataCatalog()
+    stockCatalogCollections.value = res.collections || []
+    stockCatalogDoc.value = res.doc || ''
+  } catch (e: any) {
+    ElMessage.error(e?.message || '加载股票数据目录失败')
+  } finally {
+    stockCatalogLoading.value = false
+  }
+}
+
+const loadExternalDataSourceCatalog = async () => {
+  externalSourceCatalogLoading.value = true
+  try {
+    const res = await skillGenerationApi.getExternalDataSourceCatalog()
+    externalSourceCatalogSources.value = res.sources || []
+    externalSourceCatalogDoc.value = res.doc || ''
+  } catch (e: any) {
+    ElMessage.error(e?.message || '加载外部接口与数据源目录失败')
+  } finally {
+    externalSourceCatalogLoading.value = false
+  }
+}
+
+const getPrefillDescription = () => {
+  const raw = route.query.description
+  if (typeof raw === 'string') return raw.trim()
+  return ''
+}
+
+const shouldFocusRecommendations = () => route.query.focus === 'recommendations'
+const shouldFocusConfirmActions = () => route.query.focus === 'confirm'
+
+const setStockCardRef = (collection: string, el: Element | null) => {
+  stockCardRefs.value[collection] = el instanceof HTMLElement ? el : null
+}
+
+const setExternalSourceCardRef = (sourceId: string, el: Element | null) => {
+  externalSourceCardRefs.value[sourceId] = el instanceof HTMLElement ? el : null
+}
+
+const scrollElementIntoView = async (element: HTMLElement | null) => {
+  await nextTick()
+  if (!element) return
+  element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+const focusFirstMatchedStockCard = async () => {
+  if (!matchedStockCollections.value.length) return
+  stockCatalogExpanded.value = ['stock-data-catalog']
+  await nextTick()
+  const firstMatch = matchedStockCollections.value[0]
+  await scrollElementIntoView(stockCardRefs.value[firstMatch.collection] || null)
+}
+
+const focusFirstMatchedExternalCard = async () => {
+  if (!matchedExternalSources.value.length) return
+  externalSourceCatalogExpanded.value = ['external-data-source-catalog']
+  await nextTick()
+  const firstMatch = matchedExternalSources.value[0]
+  await scrollElementIntoView(externalSourceCardRefs.value[firstMatch.source_id] || null)
+}
+
+const focusRecommendationCard = async () => {
+  if (!shouldFocusRecommendations()) return
+  await nextTick()
+  if (!recommendationCardRef.value) return
+
+  recommendationCardRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  highlightRecommendationCard.value = true
+  window.setTimeout(() => {
+    highlightRecommendationCard.value = false
+  }, 2200)
+}
+
+const focusConfirmActions = async () => {
+  if (!shouldFocusConfirmActions()) return
+  await nextTick()
+  if (!confirmActionsRef.value) return
+
+  confirmActionsRef.value.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  highlightConfirmActions.value = true
+  window.setTimeout(() => {
+    highlightConfirmActions.value = false
+  }, 2200)
+}
+
+const focusRecommendationFlow = async () => {
+  if (!shouldFocusRecommendations()) return
+  stockCatalogExpanded.value = ['stock-data-catalog']
+  externalSourceCatalogExpanded.value = ['external-data-source-catalog']
+  await focusRecommendationCard()
+  if (matchedStockCollections.value.length) {
+    window.setTimeout(() => {
+      void focusFirstMatchedStockCard()
+    }, 450)
+    return
+  }
+  if (matchedExternalSources.value.length) {
+    window.setTimeout(() => {
+      void focusFirstMatchedExternalCard()
+    }, 450)
+  }
+}
+
+const focusConfirmFlow = async () => {
+  if (!shouldFocusConfirmActions()) return
+  await focusConfirmActions()
+}
+
 /** 初始化：新建或恢复草稿 */
 const initFromRoute = async () => {
   const sid = route.query.sessionId as string
@@ -266,6 +862,7 @@ const initFromRoute = async () => {
       currentRound.value = session.current_round
       expectedRounds.value = Math.max(3, session.rounds?.length || 0)
       boundaryCheck.value = session.boundary_check || null
+      handoffContext.value = session.handoff_context || getRouteHandoffContext()
 
       chatMessages.value = []
       for (const round of (session.rounds || [])) {
@@ -281,6 +878,12 @@ const initFromRoute = async () => {
       if (session.status === 'confirmed') {
         wizardStep.value = 1
         specPreview.value = session.spec || null
+        backendRecommendations.value = session.recommendations || null
+        if (shouldFocusConfirmActions()) {
+          await focusConfirmFlow()
+        } else {
+          await focusRecommendationFlow()
+        }
       } else {
         wizardStep.value = 0
       }
@@ -292,6 +895,13 @@ const initFromRoute = async () => {
     }
   } else {
     wizardStep.value = 0
+    handoffContext.value = getRouteHandoffContext()
+    const prefillDescription = getPrefillDescription()
+    if (prefillDescription) {
+      userInput.value = prefillDescription
+      await nextTick()
+      await handleChatSend()
+    }
   }
 }
 
@@ -306,7 +916,10 @@ const handleChatSend = async () => {
 
   try {
     if (!sessionId.value) {
-      const res = await skillGenerationApi.startSession({ description: text })
+      const res = await skillGenerationApi.startSession({
+        description: text,
+        handoff_context: handoffContext.value || undefined,
+      })
       sessionId.value = res.session_id
       currentRound.value = res.current_round
       expectedRounds.value = res.expected_rounds
@@ -343,6 +956,7 @@ const handleViewSpec = async () => {
   try {
     const res = await skillGenerationApi.previewSpec(sessionId.value, confirmMessage)
     specPreview.value = res.spec
+    backendRecommendations.value = res.recommendations || null
     wizardStep.value = 1
   } catch (e: any) {
     ElMessage.error(e?.message || '获取规格失败')
@@ -354,6 +968,26 @@ const handleViewSpec = async () => {
 /** 确认并生成：调用 confirmSpec，若返回 generating 则轮询 */
 const handleConfirmAndGenerate = async () => {
   if (!sessionId.value) return
+  const confirmationText = [
+    preflightLocalCollections.value.length
+      ? `优先复用本地集合：${preflightLocalCollections.value.join('、')}`
+      : '当前没有明确命中的本地集合。',
+    preflightExternalSources.value.length
+      ? `候选外部来源：${preflightExternalSources.value.join('、')}`
+      : '当前优先本地数据，外部来源不是必须项。',
+    '确认后将开始代码生成、静态校验、沙箱执行和质量评估。',
+  ].join('\n')
+
+  try {
+    await ElMessageBox.confirm(confirmationText, '生成前确认', {
+      confirmButtonText: '继续生成',
+      cancelButtonText: '返回检查',
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+
   specConfirmLoading.value = true
   wizardStep.value = 2
   genSteps.value.forEach(s => s.status = 'pending')
@@ -430,7 +1064,9 @@ const handleConfirmAndGenerate = async () => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadStockDataCatalog()
+  await loadExternalDataSourceCatalog()
   initFromRoute()
 })
 </script>
@@ -507,6 +1143,43 @@ onMounted(() => {
   border-radius: 8px;
   background: var(--el-fill-color-lighter);
   margin-bottom: 12px;
+}
+
+.handoff-card {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid #d7e3f7;
+  background: linear-gradient(135deg, #f7fbff 0%, #eef5ff 100%);
+}
+
+.handoff-title {
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1f3b63;
+}
+
+.handoff-text {
+  font-size: 14px;
+  color: #30445f;
+  line-height: 1.7;
+}
+
+.handoff-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: #58708f;
+}
+
+.handoff-note {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #405a7d;
+  line-height: 1.6;
 }
 
 /* 需求提交引导语 */
@@ -730,6 +1403,17 @@ onMounted(() => {
   margin: 0 0 16px;
   font-size: 16px;
 }
+
+.handoff-inline-note {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f6f8fc;
+  color: #52627a;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .spec-params-section {
   margin-top: 16px;
 }
@@ -740,11 +1424,203 @@ onMounted(() => {
 .spec-boundary-warn {
   margin-top: 16px;
 }
+
+.spec-catalog-card {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--el-fill-color-lighter);
+}
+
+.spec-recommendation-card {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid var(--el-color-primary-light-5);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--el-color-primary-light-9), var(--el-bg-color));
+}
+
+.spec-recommendation-card-highlight {
+  box-shadow: 0 0 0 2px var(--el-color-warning-light-5), 0 10px 24px rgba(0, 0, 0, 0.08);
+  transition: box-shadow 0.3s ease;
+}
+
+.recommendation-grid {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.recommendation-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.recommendation-block {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-bg-color);
+}
+
+.recommendation-label {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 8px;
+}
+
+.recommendation-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.recommendation-empty {
+  font-size: 13px;
+  color: var(--el-text-color-placeholder);
+}
+
+.spec-catalog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+
+  h4 {
+    margin: 0;
+    font-size: 15px;
+  }
+
+  p {
+    margin: 6px 0 0;
+    color: var(--el-text-color-secondary);
+    line-height: 1.6;
+    font-size: 13px;
+  }
+}
+
+.catalog-summary {
+  margin: 12px 0 0;
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+}
+
+.catalog-match-summary {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--el-color-primary);
+  font-weight: 500;
+}
+
+.catalog-collection-list {
+  display: grid;
+  gap: 16px;
+}
+
+.catalog-collection-card {
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+}
+
+.catalog-collection-card-recommended {
+  border-color: var(--el-color-primary-light-5);
+  box-shadow: 0 0 0 1px var(--el-color-primary-light-8) inset;
+}
+
+.catalog-collection-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.catalog-collection-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  justify-content: flex-end;
+}
+
+.catalog-collection-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.catalog-match-label {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-color-primary);
+  font-weight: 500;
+}
+
+.catalog-collection-purpose {
+  margin-top: 8px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.6;
+}
+
+.catalog-field-table {
+  margin-top: 12px;
+}
+
+.catalog-notes {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.catalog-note-item {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
 .spec-confirm-actions {
   margin-top: 20px;
   display: flex;
   gap: 12px;
   justify-content: flex-end;
+}
+
+.spec-confirm-actions-highlight {
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--el-color-success-light-9);
+  box-shadow: 0 0 0 2px var(--el-color-success-light-5);
+  transition: box-shadow 0.3s ease, background 0.3s ease;
+}
+
+.spec-preflight-card {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid var(--el-color-warning-light-5);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--el-color-warning-light-9), var(--el-bg-color));
+}
+
+.preflight-grid {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.preflight-notes {
+  display: grid;
+  gap: 8px;
+}
+
+.done-context-card {
+  margin: 20px auto 0;
+  max-width: 760px;
+  padding: 18px;
+  border: 1px solid var(--el-color-success-light-5);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--el-color-success-light-9), var(--el-bg-color));
 }
 
 /* ========== 生成进度 ========== */

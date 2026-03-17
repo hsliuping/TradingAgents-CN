@@ -13,9 +13,18 @@ import logging
 import re
 import uuid
 from datetime import datetime
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from core.llm import UnifiedLLMClient, Message
+
+from .external_data_source_catalog import (
+    render_external_data_source_doc,
+    select_relevant_external_data_sources,
+)
+from .stock_data_catalog import (
+    render_stock_data_collection_doc,
+    select_relevant_stock_collections,
+)
 
 from .skill_spec import (
     BoundaryCheck,
@@ -23,10 +32,33 @@ from .skill_spec import (
     ConversationRound,
     SessionStatus,
     SkillCreationSession,
+    SkillHandoffContext,
     SkillSpec,
 )
 
 logger = logging.getLogger(__name__)
+
+
+SKILL_SEMANTICS_GUIDANCE = (
+    "Skill 的语义：Skill 是一个可复用、可验证、边界清晰的功能实现单元，"
+    "不等于只能做数据获取。Skill 可以做数据获取、字段整理、格式转换、指标计算、规则判断、"
+    "轻量聚合、模板化说明生成等确定性能力。\n"
+    "Agent/Workflow 的语义：负责需求理解、任务规划、多 Skill 编排、开放式追问、主观综合判断、"
+    "研究结论整合、投资建议生成等高层决策与推理。\n"
+    "判断边界的核心标准不是“是否有计算”或“是否有解释”，而是该能力是否确定、可验证、可复用，"
+    "且是否仍然围绕单一明确目标。若解释文本完全基于固定规则和输入数据生成，也可以属于 Skill 输出的一部分。"
+)
+
+SKILL_BOUNDARY_EXAMPLES = (
+    "可视为单个 Skill 的例子：\n"
+    "- 根据历史 PB 分位数计算估值通道，并输出当前 PB、分位点、对应价格区间\n"
+    "- 获取财报后计算同比/环比增速并返回结构化结果\n"
+    "- 聚合同一目标所需的紧密相关数据并输出标准化摘要\n\n"
+    "应交给 Agent/Workflow 的例子：\n"
+    "- 结合宏观、行业、财报、新闻给出主观投资结论\n"
+    "- 调用多个彼此独立的 Skill 后生成完整研究报告\n"
+    "- 在多个候选方法之间做开放式策略选择并解释取舍\n"
+)
 
 
 class RequirementAnalyzer:
@@ -55,17 +87,309 @@ class RequirementAnalyzer:
             self._client = UnifiedLLMClient.from_provider(self._provider, **kwargs)
         return self._client
 
+    @staticmethod
+    def _extract_tool_id_hint(text: str) -> str:
+        match = re.search(r"(?:skill|工具)[:：]\s*([a-zA-Z][a-zA-Z0-9_]*)", text or "", re.IGNORECASE)
+        if match:
+            return match.group(1)
+        if "pb" in (text or "").lower() or "市净率" in (text or ""):
+            return "calculate_pb_valuation_band"
+        return "new_skill"
+
+    def _build_fallback_blueprint(self, text: str) -> Dict[str, Any]:
+        normalized = (text or "").lower()
+        recommendations = self.build_recommendations(conversation=text)
+        tool_id = self._extract_tool_id_hint(text)
+        category = recommendations.get("category_hint") or self._infer_category_hint(text)
+        data_source_hint = recommendations.get("data_source_hint") or ""
+        external_sources = recommendations.get("external_sources") or []
+        primary_source = data_source_hint or (external_sources[0] if external_sources else "待确认")
+
+        if "pb" in normalized or "市净率" in text or "估值" in text:
+            return {
+                "tool_id": tool_id,
+                "display_name": "PB估值区间计算",
+                "description": "基于历史PB分位数及可选行业PB统计，输出股票估值区间与结构化依据。",
+                "category": "fundamentals",
+                "data_source": primary_source,
+                "parameters": [
+                    {"name": "symbol", "type": "string", "description": "股票代码", "required": True},
+                    {"name": "market", "type": "string", "description": "市场标识，如 CN/HK/US", "required": False, "default": "CN"},
+                    {"name": "lookback_years", "type": "integer", "description": "历史回溯年数", "required": False, "default": 5},
+                    {"name": "valuation_method", "type": "string", "description": "估值方法：historical_percentile 或 historical_plus_industry", "required": False, "default": "historical_percentile"},
+                    {"name": "include_industry_comparison", "type": "boolean", "description": "是否输出行业PB统计", "required": False, "default": True},
+                ],
+                "fields": [
+                    "symbol", "current_pb", "pb_p20", "pb_p50", "pb_p80",
+                    "valuation_lower", "valuation_mid", "valuation_upper",
+                    "industry_pb_median", "industry_pb_mean", "peer_sample_size",
+                    "assumptions", "invalidation_conditions", "data_as_of",
+                ],
+                "constraints": [
+                    "仅输出结构化、可验证的估值结果，不生成开放式投资建议。",
+                    "估值区间必须基于固定算法，不允许临时主观设定。",
+                    "若存在行业对比，仅返回统计结果和样本规模，不展开长篇行业分析。",
+                ],
+                "test_input": {
+                    "symbol": "600519.SH",
+                    "market": "CN",
+                    "lookback_years": 5,
+                    "valuation_method": "historical_percentile",
+                    "include_industry_comparison": True,
+                },
+                "recommendations": recommendations,
+            }
+
+        return {
+            "tool_id": tool_id,
+            "display_name": "新建功能 Skill",
+            "description": "围绕单一明确目标提供可复用、可验证的结构化能力。",
+            "category": category or "utility",
+            "data_source": primary_source,
+            "parameters": [
+                {"name": "symbol", "type": "string", "description": "查询对象标识", "required": True},
+            ],
+            "fields": ["result", "data_as_of"],
+            "constraints": [
+                "保持单一明确目标，避免扩展为开放式分析工作流。",
+                "输出需结构化且可验证。",
+            ],
+            "test_input": {"symbol": "600519.SH"},
+            "recommendations": recommendations,
+        }
+
+    def _build_fallback_round1_response(self, user_message: str) -> str:
+        blueprint = self._build_fallback_blueprint(user_message)
+        recommendations = blueprint.get("recommendations") or {}
+        stock_collections = recommendations.get("stock_collections") or []
+        external_sources = recommendations.get("external_sources") or []
+        return (
+            "当前需求分析模型响应超时，我先按系统规则给你一个可继续执行的收敛草案，避免会话直接失败。\n\n"
+            "## 初步理解\n"
+            f"- 候选 tool_id: {blueprint['tool_id']}\n"
+            f"- 功能定位: {blueprint['description']}\n"
+            f"- 分类: {blueprint['category']}\n"
+            f"- 主数据源: {blueprint['data_source']}\n"
+            f"- 推荐复用的本地集合: {'、'.join(stock_collections) if stock_collections else '待确认'}\n"
+            f"- 推荐外部来源: {'、'.join(external_sources) if external_sources else '待确认'}\n\n"
+            "## 我帮你先收敛的职责边界\n"
+            "- 这个 Skill 聚焦单一、确定性的估值/计算能力。\n"
+            "- 可以包含必要的数据获取、字段整理和固定算法计算。\n"
+            "- 不承担开放式研究报告、主观投资结论和多阶段编排。\n\n"
+            "## 请优先确认这 4 项\n"
+            "1. 估值方法是否固定为 historical_percentile，还是使用 historical_plus_industry？\n"
+            f"2. 主数据源是否使用 {blueprint['data_source']}？如果不是，请直接指定。\n"
+            "3. assumptions 和 invalidation_conditions 是否接受以结构化字段列表返回，而不是长文解释？\n"
+            "4. 行业背景是否仅限返回同行 PB 统计结果，而不展开长篇行业分析？"
+        )
+
+    def _build_fallback_round2_response(self, session: SkillCreationSession, user_message: str) -> str:
+        history = self._collect_conversation(session, user_message)
+        blueprint = self._build_fallback_blueprint(history)
+        parameter_names = "、".join(item["name"] for item in blueprint["parameters"])
+        output_fields = "、".join(blueprint["fields"])
+        return (
+            "需求分析模型再次超时，我先基于当前对话把技术规格收敛到可确认状态。\n\n"
+            "## 当前收敛结果\n"
+            f"- tool_id: {blueprint['tool_id']}\n"
+            f"- description: {blueprint['description']}\n"
+            f"- data_source: {blueprint['data_source']}\n"
+            f"- 参数建议: {parameter_names}\n"
+            f"- 输出字段建议: {output_fields}\n\n"
+            "## 待你拍板\n"
+            "1. valuation_method 用哪个固定枚举值作为默认值？\n"
+            "2. 是否保留 include_industry_comparison 参数？\n"
+            "3. 输出里是否需要 industry_pb_median、industry_pb_mean、peer_sample_size 这三项？\n"
+            "4. 如果数据不足，是返回部分结果并附错误字段，还是直接失败？"
+        )
+
+    def _build_fallback_spec_confirmation(self, history: str) -> str:
+        blueprint = self._build_fallback_blueprint(history)
+        parameters = "、".join(f"{item['name']}({item['type']})" for item in blueprint["parameters"])
+        fields = "、".join(blueprint["fields"])
+        constraints = "；".join(blueprint["constraints"])
+        recommendations = blueprint.get("recommendations") or {}
+        return (
+            "## Skill 规格确认\n"
+            f"- **tool_id**: {blueprint['tool_id']}\n"
+            f"- **名称**: {blueprint['display_name']}\n"
+            f"- **描述**: {blueprint['description']}\n"
+            f"- **分类**: {blueprint['category']}\n"
+            f"- **数据源**: {blueprint['data_source']}\n"
+            f"- **推荐复用的本地集合**: {'、'.join(recommendations.get('stock_collections') or []) or '无'}\n"
+            f"- **推荐外部来源**: {'、'.join(recommendations.get('external_sources') or []) or '无'}\n"
+            f"- **参数**: {parameters}\n"
+            f"- **返回字段**: {fields}\n"
+            f"- **约束**: {constraints}\n\n"
+            "以上规格由超时降级策略生成，用于保证流程可继续。以上规格是否正确？确认后将开始生成代码。"
+        )
+
+    def _generate_fallback_spec(self, conversation: str) -> Optional[SkillSpec]:
+        blueprint = self._build_fallback_blueprint(conversation)
+        try:
+            return SkillSpec(
+                tool_id=blueprint["tool_id"],
+                display_name=blueprint["display_name"],
+                description=blueprint["description"],
+                category=blueprint["category"],
+                data_source=blueprint["data_source"] if blueprint["data_source"] != "待确认" else "",
+                parameters=[
+                    {
+                        "name": item["name"],
+                        "type": item["type"],
+                        "description": item["description"],
+                        "required": item.get("required", True),
+                        "default": item.get("default"),
+                    }
+                    for item in blueprint["parameters"]
+                ],
+                expected_output={
+                    "type": "dict",
+                    "fields": blueprint["fields"],
+                    "description": blueprint["description"],
+                },
+                constraints=blueprint["constraints"],
+                test_input=blueprint["test_input"],
+            )
+        except Exception as e:
+            logger.error(f"启发式 SkillSpec 生成失败: {e}")
+            return None
+
+    @staticmethod
+    def _infer_category_hint(text: str) -> str:
+        normalized = (text or "").lower()
+        keyword_map = {
+            "news": ["新闻", "快讯", "公告", "headline", "news", "舆情", "事件"],
+            "fundamentals": ["财务", "报表", "营收", "净利润", "分红", "估值", "基本面", "roe"],
+            "technical": ["技术指标", "均线", "macd", "rsi", "k线", "日线", "走势", "波动率"],
+            "market": ["行情", "盘口", "资金流", "成交额", "实时", "quote", "snapshot"],
+            "social": ["情绪", "社交", "讨论", "论坛"],
+        }
+        for category, keywords in keyword_map.items():
+            if any(keyword in normalized for keyword in keywords):
+                return category
+        return "utility"
+
+    @staticmethod
+    def _infer_data_source_hint(text: str) -> str:
+        normalized = (text or "").lower()
+        for source in ("tushare", "akshare", "finnhub", "google news", "google", "eastmoney", "东方财富"):
+            if source.lower() in normalized:
+                return source
+        return ""
+
+    def _build_catalog_context(self, text: str) -> str:
+        category = self._infer_category_hint(text)
+        data_source = self._infer_data_source_hint(text)
+        local_collections = select_relevant_stock_collections(
+            category=category,
+            description=text,
+            data_source=data_source,
+            max_items=3,
+        )
+        external_sources = select_relevant_external_data_sources(
+            category=category,
+            description=text,
+            data_source=data_source,
+            max_items=3,
+        )
+        local_doc = render_stock_data_collection_doc(
+            collections=local_collections,
+            focus_summary="、".join(item["collection"] for item in local_collections),
+        )
+        external_doc = render_external_data_source_doc(
+            sources=external_sources,
+            focus_summary="、".join(item["display_name"] for item in external_sources),
+        )
+        return f"{local_doc}\n\n{external_doc}"
+
+    def build_recommendations(
+        self,
+        *,
+        spec: Optional[SkillSpec] = None,
+        conversation: str = "",
+    ) -> Dict[str, Any]:
+        if spec is not None:
+            category = getattr(spec, "category", "") or self._infer_category_hint(getattr(spec, "description", ""))
+            data_source = getattr(spec, "data_source", "") or self._infer_data_source_hint(getattr(spec, "description", ""))
+            description = getattr(spec, "description", "")
+            constraints = getattr(spec, "constraints", []) or []
+            expected_output = getattr(spec, "expected_output", None)
+            expected_fields = getattr(expected_output, "fields", []) if expected_output else []
+            parameter_names = [getattr(param, "name", "") for param in getattr(spec, "parameters", []) or []]
+        else:
+            category = self._infer_category_hint(conversation)
+            data_source = self._infer_data_source_hint(conversation)
+            description = conversation
+            constraints = []
+            expected_fields = []
+            parameter_names = []
+
+        local_collections = select_relevant_stock_collections(
+            category=category,
+            description=description,
+            data_source=data_source,
+            constraints=constraints,
+            expected_fields=expected_fields,
+            parameter_names=parameter_names,
+            max_items=3,
+        )
+        external_sources = select_relevant_external_data_sources(
+            category=category,
+            description=description,
+            data_source=data_source,
+            constraints=constraints,
+            expected_fields=expected_fields,
+            parameter_names=parameter_names,
+            max_items=3,
+        )
+        return {
+            "category_hint": category,
+            "data_source_hint": data_source,
+            "stock_collections": [item["collection"] for item in local_collections],
+            "external_sources": [item["source_id"] for item in external_sources],
+        }
+
     # ==================== 会话管理 ====================
 
-    def create_session(self, user_id: str = "") -> SkillCreationSession:
+    def create_session(
+        self,
+        user_id: str = "",
+        handoff_context: Optional[SkillHandoffContext] = None,
+    ) -> SkillCreationSession:
         """创建新的 Skill 创建会话"""
         return SkillCreationSession(
             session_id=str(uuid.uuid4()),
             user_id=user_id,
             status=SessionStatus.GATHERING,
+            handoff_context=handoff_context,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
         )
+
+    @staticmethod
+    def _build_handoff_context_text(session: SkillCreationSession) -> str:
+        context = session.handoff_context
+        if not context:
+            return ""
+
+        lines = [
+            "当前这次会话来自上游流程交接，不是凭空新建需求。",
+            f"- 来源: {context.source or 'unknown'}",
+        ]
+        if context.source_name:
+            lines.append(f"- 上游对象: {context.source_name}")
+        if context.source_spec_id:
+            lines.append(f"- 上游规格 ID: {context.source_spec_id}")
+        if context.target_capability:
+            lines.append(f"- 待补目标能力: {context.target_capability}")
+        if context.handoff_intent:
+            lines.append(f"- 上游交接意图: {context.handoff_intent}")
+        lines.extend([
+            "- 你要先判断现有工具或已有 Skill 是否可复用。",
+            "- 只有确实缺实现时，才把需求收敛成一个新增的最小能力单元。",
+        ])
+        return "\n".join(lines)
 
     def process_user_input(
         self,
@@ -89,7 +413,11 @@ class RequirementAnalyzer:
             clarity = self._assess_clarity(user_message)
             session.clarity_level = clarity
 
-            boundary = self._check_boundary(user_message)
+            boundary_context = self._build_handoff_context_text(session)
+            boundary = self._check_boundary(
+                user_message,
+                conversation_context=boundary_context or None,
+            )
             session.boundary_check = boundary
 
             # 如果超出边界，返回拆分建议
@@ -119,7 +447,7 @@ class RequirementAnalyzer:
             ai_msg = self._build_spec_confirmation(session, user_message)
         elif session.current_round == 1:
             # 第 1 轮：初步理解 + 功能点拆解
-            ai_msg = self._build_round1_response(user_message)
+            ai_msg = self._build_round1_response(session, user_message)
         else:
             # 第 2 轮：技术细化
             ai_msg = self._build_round2_response(session, user_message)
@@ -206,23 +534,37 @@ class RequirementAnalyzer:
         client = self._get_client()
         if conversation_context:
             prompt = (
-                "你是 Skill 边界检测专家。一个 Skill 应该只做一件事：从一个数据源获取数据并返回。\n\n"
+                "你是 Skill 边界检测专家。一个 Skill 应该聚焦一个明确、可复用的功能单元。"
+                "它可以包含必要的数据获取、清洗转换、格式整理、确定性计算、规则判断或轻量聚合；"
+                "但不应承载开放式研究、主观投资结论、跨多个独立目标的长链路编排。\n\n"
+                f"{SKILL_SEMANTICS_GUIDANCE}\n\n"
+                f"{SKILL_BOUNDARY_EXAMPLES}\n"
                 "**重要**：用户经过多轮对话后，需求可能已显著调整，例如：\n"
                 "- 选择了某个子方案（如「方案A/B/C」）\n"
                 "- 改为通过 API 获取（而非 PDF 解析）\n"
                 "- 缩小了范围或简化了实现方式\n\n"
                 "你必须基于**用户最新一轮的明确选择**重新评估，而非沿用首轮的判断。"
-                "若用户已选择通过 API、或选择了较简单的子方案，则复杂度应降低，concerns 和 decomposition_suggestions 需相应更新。\n\n"
+                "若用户已将需求收敛为单一明确能力，即使内部需要组合紧密相关的数据来源或做确定性计算，也不应机械判为越界。"
+                "只有当需求同时包含多个彼此独立的功能目标、开放式分析结论或多阶段工作流时，才建议拆分。"
+                "不要因为出现“计算”“估值区间”“解释假设”“行业背景”这些词就自动判定为 Agent 职责，必须结合其是否确定、可验证来判断。\n\n"
                 f"对话历史:\n{conversation_context}\n\n"
+                "若判定超出边界：concerns 必须聚焦真正的越界点，decomposition_suggestions 必须按功能边界拆分，"
+                "不要输出“Skill 只能取数”或“凡是解释都归 Agent”这类错误前提。\n\n"
                 "请用 JSON 回复（不要其他内容）：\n"
                 '{"within_boundary": true/false, "complexity_score": 1-5, '
                 '"concerns": ["问题1", ...], "decomposition_suggestions": ["建议1", ...]}'
             )
         else:
             prompt = (
-                "你是 Skill 边界检测专家。一个 Skill 应该只做一件事：从一个数据源获取数据并返回。\n"
+                "你是 Skill 边界检测专家。一个 Skill 应该聚焦一个明确、可复用的功能单元。"
+                "它可以包含必要的数据获取、清洗转换、格式整理、确定性计算、规则判断或轻量聚合；"
+                "但不应承载开放式研究、主观投资结论、跨多个独立目标的长链路编排。\n"
+                f"{SKILL_SEMANTICS_GUIDANCE}\n\n"
+                f"{SKILL_BOUNDARY_EXAMPLES}\n"
                 "以下需求是否超出了单个 Skill 的范围？\n\n"
                 f"需求: {user_message}\n\n"
+                "若判定超出边界：concerns 必须聚焦真正的越界点，decomposition_suggestions 必须按功能边界拆分，"
+                "不要输出“Skill 只能取数”或“凡是解释都归 Agent”这类错误前提。\n\n"
                 "请用 JSON 回复（不要其他内容）：\n"
                 '{"within_boundary": true/false, "complexity_score": 1-5, '
                 '"concerns": ["问题1", ...], "decomposition_suggestions": ["建议1", ...]}'
@@ -250,15 +592,19 @@ class RequirementAnalyzer:
             return 2
         return 3
 
-    def _build_round1_response(self, user_message: str) -> str:
+    def _build_round1_response(self, session: SkillCreationSession, user_message: str) -> str:
         """第 1 轮：初步理解 + 功能点拆解 + 数据源引导"""
         client = self._get_client()
+        catalog_context = self._build_catalog_context(user_message)
+        handoff_context = self._build_handoff_context_text(session)
         prompt = (
             "你是 Skill 需求分析专家，不仅理解用户需求，更要主动给出专业建议。\n\n"
             "## 项目背景\n"
             "你所在的是 **TradingAgents-CN**：面向中文用户的多智能体股票分析学习平台。"
-            "平台专注 A股/港股/美股 的合规研究与策略实验，使用 AI Agent 调用各类数据获取工具（Skill）进行分析。"
-            "用户正在创建的 Skill 将作为 Agent 可调用的数据获取工具，用于获取行情、财报、新闻、资金流等金融数据。\n\n"
+            "平台专注 A股/港股/美股 的合规研究与策略实验，使用 AI Agent 调用各类可复用 Skill 完成分析。"
+            "用户正在创建的 Skill 将作为 Agent 可调用的可复用功能工具，可用于数据获取、清洗转换、指标计算、规则判断、结构化汇总等明确且可验证的能力。"
+            "Skill 不等于只能取数，但应避免把开放式研究、主观投资结论或完整多阶段工作流塞进单个 Skill。\n\n"
+            f"{SKILL_SEMANTICS_GUIDANCE}\n\n"
             "## 你的任务\n"
             "1. 复述你的理解\n"
             "2. 用表格列出功能点（目标市场、数据源、输入参数、返回字段、调用方式）\n"
@@ -268,12 +614,19 @@ class RequirementAnalyzer:
             "   - 若用户说「不确定」「不知道」「没有」「都可以」："
             "结合你对 A股/中国金融数据生态的了解，根据用户需求类型（财报、新闻、行情、资金流等），"
             "推荐 2-3 个合适的数据源，简要说明各自特点和适用场景，让用户选择。\n"
+            "   - 优先在系统当前可复用的本地集合/外部来源里做建议，不要泛泛推荐一长串不在系统内的接口。\n"
             "   - 不要只说「需通过参数传入数据源」而不给建议，这样用户会不知道如何操作。\n\n"
             "5. 提出其他需要确认的问题\n\n"
+            f"上游交接上下文:\n{handoff_context or '无'}\n\n"
+            f"当前按需求命中的数据上下文:\n{catalog_context}\n\n"
             f"用户描述: {user_message}"
         )
-        response = client.chat([Message(role="user", content=prompt)])
-        return response.content or "请补充更多需求细节。"
+        try:
+            response = client.chat([Message(role="user", content=prompt)])
+            return response.content or self._build_fallback_round1_response(user_message)
+        except Exception as e:
+            logger.warning(f"第1轮需求分析失败，使用降级响应: {e}")
+            return self._build_fallback_round1_response(user_message)
 
     def _build_round2_response(
         self, session: SkillCreationSession, user_message: str
@@ -281,6 +634,8 @@ class RequirementAnalyzer:
         """第 2 轮：技术细化"""
         history = self._collect_conversation(session, user_message)
         client = self._get_client()
+        catalog_context = self._build_catalog_context(history)
+        handoff_context = self._build_handoff_context_text(session)
         prompt = (
             "你是 Skill 需求分析专家，所在项目是 **TradingAgents-CN**（A股/港股/美股多智能体股票分析平台）。"
             "正在进行第 2 轮技术细化。\n\n"
@@ -289,12 +644,19 @@ class RequirementAnalyzer:
             "2. **主动建议**：根据用户需求给出技术方案建议（如推荐实现方式、边界情况处理）\n"
             "3. **若数据源仍未明确**：结合你对 A股/中国金融数据生态的了解，"
             "根据需求类型给出 2-3 个具体数据源推荐及理由，让用户选择\n"
+            "   - 推荐时优先引用当前系统已整理的本地集合和外部来源，不要脱离系统现状给建议。\n"
             "4. 给出推荐方案让用户选择（而不是问开放性问题）\n"
             "5. 列出最终的参数和返回字段清单\n\n"
+            f"上游交接上下文:\n{handoff_context or '无'}\n\n"
+            f"当前按需求命中的数据上下文:\n{catalog_context}\n\n"
             f"对话历史:\n{history}"
         )
-        response = client.chat([Message(role="user", content=prompt)])
-        return response.content or "请确认技术方案。"
+        try:
+            response = client.chat([Message(role="user", content=prompt)])
+            return response.content or self._build_fallback_round2_response(session, user_message)
+        except Exception as e:
+            logger.warning(f"第2轮需求分析失败，使用降级响应: {e}")
+            return self._build_fallback_round2_response(session, user_message)
 
     def _build_spec_confirmation(
         self, session: SkillCreationSession, user_message: str
@@ -302,6 +664,8 @@ class RequirementAnalyzer:
         """最后一轮：生成规格确认摘要"""
         history = self._collect_conversation(session, user_message)
         client = self._get_client()
+        catalog_context = self._build_catalog_context(history)
+        handoff_context = self._build_handoff_context_text(session)
         prompt = (
             "你是 Skill 需求分析专家，请根据所有对话内容生成最终的规格确认摘要。\n"
             "用以下格式输出：\n"
@@ -311,14 +675,23 @@ class RequirementAnalyzer:
             "- **描述**: xxx\n"
             "- **分类**: xxx\n"
             "- **数据源**: xxx\n"
+            "- **推荐复用的本地集合**: 列表\n"
+            "- **推荐外部来源**: 列表（若本地即可满足，可写无或仅作为降级来源）\n"
             "- **参数**: 列表\n"
             "- **返回字段**: 列表\n"
             "- **约束**: 列表\n\n"
+            "要求：推荐复用项必须优先引用当前系统已命中的集合与外部来源，不要编造系统里没有整理过的数据源。\n\n"
             "最后问用户: '以上规格是否正确？确认后将开始生成代码。'\n\n"
+            f"上游交接上下文:\n{handoff_context or '无'}\n\n"
+            f"当前按需求命中的数据上下文:\n{catalog_context}\n\n"
             f"对话历史:\n{history}"
         )
-        response = client.chat([Message(role="user", content=prompt)])
-        return response.content or "请确认以上规格。"
+        try:
+            response = client.chat([Message(role="user", content=prompt)])
+            return response.content or self._build_fallback_spec_confirmation(history)
+        except Exception as e:
+            logger.warning(f"规格确认摘要生成失败，使用降级响应: {e}")
+            return self._build_fallback_spec_confirmation(history)
 
     @staticmethod
     def _build_boundary_warning(check: BoundaryCheck) -> str:
@@ -331,8 +704,10 @@ class RequirementAnalyzer:
             "⚠️ 你的需求包含了多个功能层级，建议拆分：\n\n"
             f"**关注点：**\n{concerns}\n\n"
             f"**建议拆分为：**\n{suggestions}\n\n"
-            "每个 Skill 只做一件事（获取一类数据），分析和决策由 Agent/Workflow 完成。\n"
-            "请选择一个 Skill 开始创建，或者告诉我你想要的是哪个功能。"
+            "每个 Skill 应聚焦一个明确功能，可以包含必要的数据获取与确定性处理；"
+            "开放式分析、投资结论和多阶段编排由 Agent/Workflow 完成。\n"
+            "若你的目标本身是一个可验证的确定性功能，也可以继续收敛为单个 Skill，而不是被迫拆成“纯取数层”。\n"
+            "请选择一个明确的能力单元开始创建，或者告诉我你想先落哪一段功能。"
         )
 
     # ==================== 对话收集 & 规格生成 ====================
@@ -343,6 +718,9 @@ class RequirementAnalyzer:
     ) -> str:
         """收集所有对话历史为格式化字符串"""
         parts = []
+        handoff_context = RequirementAnalyzer._build_handoff_context_text(session)
+        if handoff_context:
+            parts.append(f"[系统交接上下文]:\n{handoff_context}")
         for r in session.rounds:
             parts.append(f"[用户 - 第{r.round_number}轮]: {r.user_message}")
             parts.append(f"[AI - 第{r.round_number}轮]: {r.ai_message}")
@@ -353,13 +731,18 @@ class RequirementAnalyzer:
     def _generate_spec(self, conversation: str) -> Optional[SkillSpec]:
         """通过 LLM 将对话转化为结构化 SkillSpec"""
         client = self._get_client()
+        catalog_context = self._build_catalog_context(conversation)
         prompt = (
             "你是 Skill 规格生成器。请根据以下对话内容，"
             "提取出一个结构化的 Skill 规格（JSON 格式）。\n\n"
             "**重要**：\n"
             "1. 若对话中有「[用户 - 最新]」或用户明确选择方案（如选 A/B/C），必须严格按用户选择生成，不可忽略。\n"
-            "2. data_source 填写对话中确定的具体数据源标识；用户已选择则用其选择，否则用 AI 推荐的主数据源。\n"
-            "3. 不要写「需通过参数传入」等模糊描述。\n\n"
+            "2. Skill 可以是明确的功能实现，不局限于纯数据查询；允许必要的确定性计算、格式整理和轻量聚合。\n"
+            "3. data_source 填写对话中确定的主数据源标识；若实现会组合紧密相关的数据来源，则填写主数据源，并在 constraints 中说明附加来源或降级策略。\n"
+            "4. 不要写「需通过参数传入」等模糊描述。\n\n"
+            "5. 优先让 spec 与当前系统可复用的本地集合、外部来源保持一致；若本地可满足，不要强行指定外部源。\n\n"
+            f"{SKILL_SEMANTICS_GUIDANCE}\n\n"
+            f"当前按需求命中的数据上下文:\n{catalog_context}\n\n"
             f"对话内容:\n{conversation}\n\n"
             "请严格用以下 JSON 格式输出（不要其他内容）：\n"
             "{\n"
@@ -390,4 +773,4 @@ class RequirementAnalyzer:
                 return SkillSpec(**data)
         except Exception as e:
             logger.error(f"SkillSpec 生成失败: {e}")
-        return None
+        return self._generate_fallback_spec(conversation)

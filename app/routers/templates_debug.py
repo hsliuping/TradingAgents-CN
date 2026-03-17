@@ -1,12 +1,82 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
+from typing import Optional, Dict, Any, List
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
 from app.routers.auth_db import get_current_user
+from app.core.database import get_mongo_db
 from app.core.permissions import require_pro
 from app.services.license_service import LicenseInfo
 from tradingagents.agents.utils.agent_context import AgentContext
 
 router = APIRouter(prefix="/api/templates/debug", tags=["templates-debug"])
+
+
+def _build_input_contract(metadata: Any) -> List[Dict[str, Any]]:
+    inputs = getattr(metadata, "inputs", None) or []
+    input_contract: List[Dict[str, Any]] = []
+
+    for item in inputs:
+        name = getattr(item, "name", "")
+        if not name:
+            continue
+        source = str(getattr(item, "source", "request") or "request")
+        state_field = getattr(item, "state_field", None)
+        source_state_fields = getattr(item, "source_state_fields", None) or []
+        producer_hint = getattr(item, "producer_hint", None)
+        input_contract.append({
+            "name": str(name),
+            "type": str(getattr(item, "type", "string") or "string"),
+            "description": str(getattr(item, "description", "") or ""),
+            "required": bool(getattr(item, "required", True)),
+            "source": source,
+            "state_field": str(state_field or (name if source == "state" else "")),
+            "source_state_fields": [str(field) for field in source_state_fields if str(field or "").strip()],
+            "producer_hint": str(producer_hint or ""),
+        })
+
+    return input_contract
+
+
+def _build_debug_inputs(metadata: Any) -> List[Dict[str, str]]:
+    base_input_names = {
+        "ticker",
+        "stock_symbol",
+        "company_of_interest",
+        "analysis_date",
+        "trade_date",
+        "market_type",
+        "context",
+        "workflow_id",
+    }
+    input_contract = _build_input_contract(metadata)
+    debug_inputs: List[Dict[str, str]] = []
+
+    state_inputs = [item for item in input_contract if item.get("source") == "state"]
+    if state_inputs:
+        return [
+            {
+                "name": str(item.get("name", "")),
+                "type": str(item.get("type", "string") or "string"),
+                "description": str(item.get("description", "") or ""),
+            }
+            for item in state_inputs
+            if item.get("name")
+        ]
+
+    inputs = getattr(metadata, "inputs", None) or []
+    for item in inputs:
+        name = getattr(item, "name", "")
+        if not name or name in base_input_names:
+            continue
+        debug_inputs.append({
+            "name": str(name),
+            "type": str(getattr(item, "type", "string") or "string"),
+            "description": str(getattr(item, "description", "") or ""),
+        })
+
+    return debug_inputs
 
 @router.get("/agents")
 async def list_debug_agents():
@@ -18,12 +88,12 @@ async def list_debug_agents():
         logger.info("开始获取调试agents列表...")
         # v1.0 硬编码的agent类型
         v1_agents = [
-            {"id": "market", "name": "市场分析师", "version": "v1.0", "category": "analyst"},
-            {"id": "fundamentals", "name": "基本面分析师", "version": "v1.0", "category": "analyst"},
-            {"id": "news", "name": "新闻分析师", "version": "v1.0", "category": "analyst"},
-            {"id": "social", "name": "社交媒体分析师", "version": "v1.0", "category": "analyst"},
-            {"id": "index_analyst", "name": "指数分析师", "version": "v1.0", "category": "analyst"},
-            {"id": "sector_analyst", "name": "行业分析师", "version": "v1.0", "category": "analyst"},
+            {"id": "market", "name": "市场分析师", "version": "v1.0", "category": "analyst", "maintenance_status": "unmaintained"},
+            {"id": "fundamentals", "name": "基本面分析师", "version": "v1.0", "category": "analyst", "maintenance_status": "unmaintained"},
+            {"id": "news", "name": "新闻分析师", "version": "v1.0", "category": "analyst", "maintenance_status": "unmaintained"},
+            {"id": "social", "name": "社交媒体分析师", "version": "v1.0", "category": "analyst", "maintenance_status": "unmaintained"},
+            {"id": "index_analyst", "name": "指数分析师", "version": "v1.0", "category": "analyst", "maintenance_status": "unmaintained"},
+            {"id": "sector_analyst", "name": "行业分析师", "version": "v1.0", "category": "analyst", "maintenance_status": "unmaintained"},
         ]
 
         # v2.0 注册的agents
@@ -34,15 +104,24 @@ async def list_debug_agents():
 
             for metadata in registry.list_all():
                 try:
-                    # 包含分析师、管理者、交易员类别的agents
+                    # 包含可直接单点调试的 v2 agent 类别
                     category_value = getattr(metadata.category, 'value', str(metadata.category))
-                    if category_value in ["analyst", "manager", "trader"]:
+                    if category_value in ["analyst", "researcher", "risk", "manager", "trader"]:
+                        debug_inputs = _build_debug_inputs(metadata)
+                        input_contract = _build_input_contract(metadata)
                         v2_agents.append({
                             "id": metadata.id,
                             "name": metadata.name,
                             "version": "v2.0",
                             "category": category_value,
-                            "description": getattr(metadata, 'description', '')
+                            "description": getattr(metadata, 'description', ''),
+                            "debug_inputs": debug_inputs,
+                            "input_contract": input_contract,
+                            "maturity_level": getattr(metadata, 'maturity_level', 'stable'),
+                            "input_mode": getattr(metadata, 'input_mode', 'standalone'),
+                            "debug_replay_mode": getattr(metadata, 'debug_replay_mode', 'direct'),
+                            "maintenance_status": getattr(metadata, 'maintenance_status', 'maintained'),
+                            "callable_surfaces": list(getattr(metadata, 'callable_surfaces', []) or []),
                         })
                 except Exception as e:
                     logger.warning(f"处理agent metadata失败: {metadata.id if hasattr(metadata, 'id') else 'unknown'}, 错误: {e}")
@@ -84,6 +163,7 @@ class AnalystDebugRequest(BaseModel):
     stock: DebugStock
     dataopts: Optional[Dict[str, Any]] = None
     prompt_overrides: Optional[Dict[str, Any]] = None
+    extra_state: Optional[Dict[str, Any]] = None
 
 
 class WorkflowDebugRequest(BaseModel):
@@ -93,6 +173,156 @@ class WorkflowDebugRequest(BaseModel):
     stock: DebugStock
     dataopts: Optional[Dict[str, Any]] = None
     prompt_overrides: Optional[Dict[str, Any]] = None
+
+
+def _serialize_debug_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _serialize_debug_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_serialize_debug_value(item) for item in value]
+    return value
+
+
+def _extract_invocation_summary(doc: Dict[str, Any]) -> str:
+    result = doc.get("result") if isinstance(doc.get("result"), dict) else {}
+    output_text = result.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text.strip()[:300]
+    error_message = result.get("error_message")
+    if isinstance(error_message, str) and error_message.strip():
+        return error_message.strip()[:300]
+    structured_output = result.get("structured_output")
+    if isinstance(structured_output, dict):
+        for key in ("final_report", "analysis_report", "summary", "report"):
+            value = structured_output.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()[:300]
+    return ""
+
+
+def _normalize_invocation_doc(source_collection: str, doc: Dict[str, Any]) -> Dict[str, Any]:
+    request = doc.get("request") if isinstance(doc.get("request"), dict) else {}
+    result = doc.get("result") if isinstance(doc.get("result"), dict) else {}
+    provenance = request.get("provenance") if isinstance(request.get("provenance"), dict) else {}
+    payload = request.get("payload") if isinstance(request.get("payload"), dict) else {}
+
+    source_type = provenance.get("source_type")
+    source_id = provenance.get("source_id")
+    workflow_id = doc.get("workflow_id") or provenance.get("workflow_id")
+    execution_id = doc.get("execution_id") or provenance.get("session_id")
+    thread_id = doc.get("thread_id") or provenance.get("thread_id")
+    step_id = doc.get("step_id") or provenance.get("step_id")
+    symbol = payload.get("symbol") or payload.get("ticker") or payload.get("stock_symbol")
+
+    return {
+        "invocation_id": doc.get("invocation_id"),
+        "root_invocation_id": doc.get("root_invocation_id") or request.get("metadata", {}).get("root_invocation_id"),
+        "parent_invocation_id": doc.get("parent_invocation_id") or request.get("metadata", {}).get("parent_invocation_id"),
+        "source_collection": source_collection,
+        "source_type": source_type,
+        "source_id": source_id or doc.get("source_agent_id") or workflow_id,
+        "target_type": doc.get("target_type") or request.get("target_type"),
+        "target_id": doc.get("target_id") or request.get("target_id"),
+        "status": doc.get("status") or result.get("status"),
+        "user_id": doc.get("user_id") or provenance.get("user_id"),
+        "workflow_id": workflow_id,
+        "execution_id": execution_id,
+        "thread_id": thread_id,
+        "step_id": step_id,
+        "symbol": symbol,
+        "summary": _extract_invocation_summary(doc),
+        "output_field": result.get("output_field"),
+        "error_message": result.get("error_message"),
+        "started_at": _serialize_debug_value(result.get("started_at")),
+        "completed_at": _serialize_debug_value(result.get("completed_at")),
+        "created_at": _serialize_debug_value(doc.get("created_at")),
+        "updated_at": _serialize_debug_value(doc.get("updated_at")),
+        "request": _serialize_debug_value(request),
+        "result": _serialize_debug_value(result),
+    }
+
+
+def _build_invocation_chain(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    sorted_items = sorted(
+        items,
+        key=lambda item: item.get("created_at") or item.get("updated_at") or "",
+    )
+    latest_item = sorted_items[-1] if sorted_items else {}
+    root_item = next(
+        (item for item in sorted_items if item.get("invocation_id") == item.get("root_invocation_id")),
+        sorted_items[0] if sorted_items else {},
+    )
+    status_counts: Dict[str, int] = {}
+    for item in sorted_items:
+        status = str(item.get("status") or "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+    return {
+        "root_invocation_id": root_item.get("root_invocation_id") or root_item.get("invocation_id"),
+        "symbol": root_item.get("symbol") or latest_item.get("symbol"),
+        "workflow_id": root_item.get("workflow_id") or latest_item.get("workflow_id"),
+        "thread_id": root_item.get("thread_id") or latest_item.get("thread_id"),
+        "latest_created_at": latest_item.get("created_at") or latest_item.get("updated_at"),
+        "summary": latest_item.get("summary") or root_item.get("summary") or "",
+        "status_counts": status_counts,
+        "items": sorted_items,
+        "count": len(sorted_items),
+    }
+
+
+def _group_invocation_chains(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for item in items:
+        root_id = item.get("root_invocation_id") or item.get("invocation_id") or "unknown"
+        grouped.setdefault(str(root_id), []).append(item)
+
+    chains = [_build_invocation_chain(chain_items) for chain_items in grouped.values()]
+    chains.sort(key=lambda chain: chain.get("latest_created_at") or "", reverse=True)
+    return chains
+
+
+def _build_invocation_query(
+    *,
+    user_id: str,
+    target_id: Optional[str],
+    status: Optional[str],
+    symbol: Optional[str],
+    workflow_id: Optional[str],
+    execution_id: Optional[str],
+    thread_id: Optional[str],
+    root_invocation_id: Optional[str],
+    source_collection: str,
+) -> Dict[str, Any]:
+    query: Dict[str, Any] = {"user_id": user_id}
+
+    if target_id:
+        query["target_id"] = target_id.strip()
+    if status:
+        query["status"] = status.strip()
+    if symbol:
+        query["request.payload.symbol"] = symbol.strip()
+    if root_invocation_id:
+        query["root_invocation_id"] = root_invocation_id.strip()
+
+    if source_collection == "workflow_agent_invocations":
+        if workflow_id:
+            query["workflow_id"] = workflow_id.strip()
+        if execution_id:
+            query["execution_id"] = execution_id.strip()
+    elif source_collection == "agent_agent_invocations":
+        if workflow_id:
+            query["workflow_id"] = workflow_id.strip()
+        if execution_id:
+            query["execution_id"] = execution_id.strip()
+        if thread_id:
+            query["thread_id"] = thread_id.strip()
+    elif source_collection == "assistant_agent_invocations":
+        if thread_id:
+            query["thread_id"] = thread_id.strip()
+
+    return query
 
 @router.post("/analyst")
 async def debug_analyst(
@@ -409,6 +639,9 @@ async def _debug_v1_agent(req: AnalystDebugRequest, ctx: AgentContext, cfg: dict
         agent_context=ctx.__dict__
     )
 
+    if req.extra_state:
+        initial_state.update(req.extra_state)
+
     # 🔥 执行图
     # 注意：graph.invoke() 是同步阻塞调用，但对于调试接口来说，这是可以接受的
     # 因为调试接口本身就是同步等待结果的
@@ -630,6 +863,9 @@ async def _debug_v2_agent(req: AnalystDebugRequest, ctx: AgentContext, cfg: dict
             "skip_cache": True,  # 🔥 调试模式跳过缓存
             "prompt_overrides": req.prompt_overrides or {}
         }
+
+        if req.extra_state:
+            inputs.update(req.extra_state)
         
         # 🔥 准备工作流系统变量（和单股分析一样）
         try:
@@ -1010,4 +1246,117 @@ async def debug_workflow(
         raise
     except Exception as e:
         logger.error(f"❌ [工作流调试] 执行失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/invocations")
+async def list_invocations(
+    source_type: Optional[str] = Query(None, description="来源类型: assistant/workflow/agent"),
+    target_id: Optional[str] = Query(None, description="目标 Agent ID"),
+    root_invocation_id: Optional[str] = Query(None, description="根调用 ID"),
+    workflow_id: Optional[str] = Query(None, description="工作流 ID"),
+    execution_id: Optional[str] = Query(None, description="执行 ID"),
+    thread_id: Optional[str] = Query(None, description="助手线程 ID"),
+    symbol: Optional[str] = Query(None, description="股票代码"),
+    status: Optional[str] = Query(None, description="调用状态"),
+    group_by_root: bool = Query(False, description="是否按 root 调用链分组"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    user: dict = Depends(get_current_user),
+    license: LicenseInfo = Depends(require_pro),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """统一查询 Assistant、Workflow、Agent 三类调用记录。"""
+    import logging
+
+    logger = logging.getLogger("webapi")
+
+    source_to_collection = {
+        "assistant": "assistant_agent_invocations",
+        "workflow": "workflow_agent_invocations",
+        "agent": "agent_agent_invocations",
+    }
+
+    if source_type and source_type not in source_to_collection:
+        raise HTTPException(status_code=400, detail="source_type 仅支持 assistant/workflow/agent")
+
+    target_collections: List[str] = (
+        [source_to_collection[source_type]]
+        if source_type
+        else [
+            "assistant_agent_invocations",
+            "workflow_agent_invocations",
+            "agent_agent_invocations",
+        ]
+    )
+
+    fetch_limit = min(max(page * page_size * (20 if group_by_root else 1), 50 if not group_by_root else 200), 2000 if group_by_root else 200)
+    normalized_items: List[Dict[str, Any]] = []
+    total = 0
+    user_id = str(user["id"])
+
+    try:
+        for collection_name in target_collections:
+            query = _build_invocation_query(
+                user_id=user_id,
+                target_id=target_id,
+                status=status,
+                symbol=symbol,
+                workflow_id=workflow_id,
+                execution_id=execution_id,
+                thread_id=thread_id,
+                root_invocation_id=root_invocation_id,
+                source_collection=collection_name,
+            )
+            total += await db[collection_name].count_documents(query)
+            docs = await db[collection_name].find(query).sort("created_at", -1).limit(fetch_limit).to_list(length=fetch_limit)
+            normalized_items.extend(
+                _normalize_invocation_doc(collection_name, doc)
+                for doc in docs
+            )
+
+        normalized_items.sort(
+            key=lambda item: item.get("created_at") or item.get("updated_at") or "",
+            reverse=True,
+        )
+
+        start_index = (page - 1) * page_size
+        end_index = start_index + page_size
+
+        chains: List[Dict[str, Any]] = []
+        page_items = normalized_items[start_index:end_index]
+        if group_by_root:
+            chains = _group_invocation_chains(normalized_items)
+            total = len(chains)
+            page_chains = chains[start_index:end_index]
+            page_items = [item for chain in page_chains for item in chain.get("items", [])]
+            chains = page_chains
+
+        logger.info(
+            "[调用记录] 查询完成 user_id=%s source_type=%s total=%s page=%s page_size=%s group_by_root=%s",
+            user_id,
+            source_type or "all",
+            total,
+            page,
+            page_size,
+            group_by_root,
+        )
+
+        return {
+            "success": True,
+            "data": {
+                "items": page_items,
+                "chains": chains,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "group_by_root": group_by_root,
+                "has_more": end_index < total,
+            },
+            "message": "调用记录查询成功",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"调用记录查询失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

@@ -74,7 +74,7 @@ export interface AgentWorkshopGapAnalysis {
   reusable_modules: string[]
   existing_tools: string[]
   suggested_tools: string[]
-  suggested_skills: string[]
+  suggested_capabilities: string[]
   manual_dependencies: string[]
   blocking_gaps: string[]
   fallback_strategy: string[]
@@ -156,10 +156,15 @@ export interface AgentVersion {
   spec_id: string
   version: number
   status: string
-  agent_metadata: Record<string, any>
+  agent_metadata: Record<string, any> & {
+    id?: string
+    name?: string
+    version?: string
+    maintenance_status?: 'maintained' | 'unmaintained'
+  }
   prompt_template_ref: Record<string, any>
   required_tools: string[]
-  required_skills: string[]
+  required_capabilities: string[]
   output_schema: Record<string, any>
   evaluation_policy: Record<string, any>
   published_from_session_id?: string | null
@@ -251,7 +256,9 @@ export interface AgentWorkshopDebugVersionResult {
     template_name?: string
   }
   metadata?: {
+    agent_id?: string
     agent_name?: string
+    maintenance_status?: 'maintained' | 'unmaintained'
     required_tools?: string[]
     user_goal?: string
   }

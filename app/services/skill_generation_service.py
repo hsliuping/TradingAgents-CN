@@ -17,6 +17,7 @@ from core.tools.external import (
     IterationController,
     RequirementAnalyzer,
     SkillCreationSession,
+    SkillHandoffContext,
     SkillParameter,
     SkillSpec,
     SessionStatus,
@@ -62,10 +63,84 @@ class SkillGenerationService:
             llm_client=coding_llm_client, provider=provider, model=model
         )
 
+    def _build_session_recommendations(
+        self,
+        *,
+        spec: Optional[SkillSpec] = None,
+        session: Optional[SkillCreationSession] = None,
+    ) -> Dict[str, Any]:
+        if spec is not None:
+            return self._analyzer.build_recommendations(spec=spec)
+        conversation = ""
+        if session is not None:
+            conversation = self._analyzer._collect_conversation(session)
+        return self._analyzer.build_recommendations(conversation=conversation)
+
+    @staticmethod
+    def _has_generation_context(context: Optional[Dict[str, Any]]) -> bool:
+        if not context:
+            return False
+        return bool(
+            context.get("category_hint")
+            or context.get("data_source_hint")
+            or context.get("stock_collections")
+            or context.get("external_sources")
+        )
+
+    def _build_spec_from_skill_doc(self, doc: Dict[str, Any]) -> Optional[SkillSpec]:
+        try:
+            params = [SkillParameter(**p) for p in doc.get("parameters", [])]
+            expected_output_data = doc.get("expected_output", {})
+            expected_output = ExpectedOutput(**expected_output_data) if expected_output_data else ExpectedOutput()
+            return SkillSpec(
+                tool_id=doc.get("tool_id", ""),
+                display_name=doc.get("display_name", ""),
+                description=doc.get("description", ""),
+                category=doc.get("category", "other"),
+                data_source=doc.get("data_source", ""),
+                parameters=params,
+                expected_output=expected_output,
+                test_input=doc.get("test_input", {}),
+            )
+        except Exception:
+            return None
+
+    async def _hydrate_skill_generation_context(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+        context = doc.get("generation_context")
+        if self._has_generation_context(context):
+            return doc
+
+        metadata = dict(doc.get("metadata") or {})
+        metadata_context = metadata.get("generation_context")
+        if self._has_generation_context(metadata_context):
+            doc["generation_context"] = metadata_context
+            return doc
+
+        recommendations: Optional[Dict[str, Any]] = None
+        session_id = doc.get("session_id")
+        if session_id:
+            session = await self._load_session(session_id)
+            if session:
+                spec = session.spec if isinstance(session.spec, SkillSpec) else None
+                recommendations = self._build_session_recommendations(spec=spec, session=session)
+
+        if not self._has_generation_context(recommendations):
+            spec = self._build_spec_from_skill_doc(doc)
+            if spec is not None:
+                recommendations = self._build_session_recommendations(spec=spec)
+
+        if self._has_generation_context(recommendations):
+            doc["generation_context"] = recommendations
+
+        return doc
+
     # ==================== 需求沟通 ====================
 
     async def start_session(
-        self, description: str, user_id: str = ""
+        self,
+        description: str,
+        user_id: str = "",
+        handoff_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         开始创建会话：提交初始需求
@@ -74,7 +149,8 @@ class SkillGenerationService:
             包含 session_id, ai_message, clarity_level 等信息的 dict
         """
         # 创建会话
-        session = self._analyzer.create_session(user_id=user_id)
+        context = SkillHandoffContext(**handoff_context) if handoff_context else None
+        session = self._analyzer.create_session(user_id=user_id, handoff_context=context)
 
         # 处理第一轮输入（会做清晰度评估和边界检测）
         session, ai_message = await asyncio.get_event_loop().run_in_executor(
@@ -145,7 +221,12 @@ class SkillGenerationService:
         spec = await asyncio.get_event_loop().run_in_executor(
             None, self._analyzer.preview_spec, session, user_message
         )
-        return spec.model_dump() if spec else None
+        if not spec:
+            return None
+        return {
+            "spec": spec.model_dump(),
+            "recommendations": self._build_session_recommendations(spec=spec),
+        }
 
     async def confirm_spec(
         self, session_id: str, user_message: str = "确认"
@@ -249,6 +330,18 @@ class SkillGenerationService:
         if not doc:
             return None
         doc.pop("_id", None)
+        try:
+            session = SkillCreationSession(**doc)
+            spec = session.spec if isinstance(session.spec, SkillSpec) else None
+            doc["recommendations"] = self._build_session_recommendations(spec=spec, session=session)
+        except Exception:
+            rounds = doc.get("rounds", []) or []
+            conversation = "\n\n".join(
+                f"[用户 - 第{item.get('round_number', '?')}轮]: {item.get('user_message', '')}\n"
+                f"[AI - 第{item.get('round_number', '?')}轮]: {item.get('ai_message', '')}"
+                for item in rounds
+            )
+            doc["recommendations"] = self._analyzer.build_recommendations(conversation=conversation)
         return doc
 
     async def list_sessions(
@@ -280,6 +373,18 @@ class SkillGenerationService:
         )
         async for doc in cursor:
             doc.pop("_id", None)
+            try:
+                session = SkillCreationSession(**doc)
+                spec = session.spec if isinstance(session.spec, SkillSpec) else None
+                doc["recommendations"] = self._build_session_recommendations(spec=spec, session=session)
+            except Exception:
+                rounds = doc.get("rounds", []) or []
+                conversation = "\n\n".join(
+                    f"[用户 - 第{item.get('round_number', '?')}轮]: {item.get('user_message', '')}\n"
+                    f"[AI - 第{item.get('round_number', '?')}轮]: {item.get('ai_message', '')}"
+                    for item in rounds
+                )
+                doc["recommendations"] = self._analyzer.build_recommendations(conversation=conversation)
             sessions.append(doc)
 
         return {
@@ -321,6 +426,7 @@ class SkillGenerationService:
         )
         async for doc in cursor:
             doc.pop("_id", None)
+            doc = await self._hydrate_skill_generation_context(doc)
             skills.append(doc)
 
         return {
@@ -336,6 +442,7 @@ class SkillGenerationService:
         if not doc:
             return None
         doc.pop("_id", None)
+        doc = await self._hydrate_skill_generation_context(doc)
         return doc
 
     async def get_skill_code(self, skill_id: str) -> Optional[str]:
@@ -541,16 +648,22 @@ class SkillGenerationService:
         optimize_session.pipeline_result = result
         await self._save_session(optimize_session)
 
+        generation_context = None
+
         # 如果成功，更新 Skill
         if result.success:
             version = skill_doc.get("version", 1) + 1
             now = datetime.utcnow().isoformat()
+            generation_context = self._build_session_recommendations(spec=spec, session=optimize_session)
+            metadata = dict(result.final_metadata or {})
+            metadata["generation_context"] = generation_context
             await self._db[SKILL_COLLECTION].update_one(
                 {"tool_id": skill_id},
                 {
                     "$set": {
                         "code": result.final_code,
-                        "metadata": result.final_metadata,
+                        "metadata": metadata,
+                        "generation_context": generation_context,
                         "version": version,
                         "optimize_feedback": feedback,
                         "generation_rounds": result.total_rounds,
@@ -582,6 +695,7 @@ class SkillGenerationService:
                 if result.iterations and result.iterations[-1].eval_score
                 else None
             ),
+            "generation_context": generation_context,
             "error": result.error,
         }
 
@@ -638,6 +752,9 @@ class SkillGenerationService:
     ) -> str:
         """保存生成的 Skill 到 external_skills 集合"""
         now = datetime.utcnow().isoformat()
+        generation_context = self._build_session_recommendations(spec=spec, session=session)
+        metadata = dict(result.final_metadata or {})
+        metadata["generation_context"] = generation_context
         skill_doc = {
             "tool_id": spec.tool_id,
             "display_name": spec.display_name,
@@ -647,8 +764,9 @@ class SkillGenerationService:
             "parameters": [p.model_dump() for p in spec.parameters],
             "expected_output": spec.expected_output.model_dump(),
             "code": result.final_code,
-            "metadata": result.final_metadata,
+            "metadata": metadata,
             "test_input": spec.test_input,
+            "generation_context": generation_context,
             "status": "active",
             "source": "generated",
             "session_id": session.session_id,

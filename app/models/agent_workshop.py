@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.models.user import PyObjectId
 from app.utils.timezone import now_tz
@@ -93,7 +93,11 @@ class AgentWorkshopGapAnalysis(BaseModel):
     reusable_modules: List[str] = Field(default_factory=list)
     existing_tools: List[str] = Field(default_factory=list)
     suggested_tools: List[str] = Field(default_factory=list)
-    suggested_skills: List[str] = Field(default_factory=list)
+    suggested_capabilities: List[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("suggested_capabilities", "suggested_skills"),
+        serialization_alias="suggested_capabilities",
+    )
     manual_dependencies: List[str] = Field(default_factory=list)
     blocking_gaps: List[str] = Field(default_factory=list)
     fallback_strategy: List[str] = Field(default_factory=list)
@@ -140,7 +144,11 @@ class AgentVersion(BaseModel):
     agent_metadata: Dict[str, Any] = Field(default_factory=dict)
     prompt_template_ref: Dict[str, Any] = Field(default_factory=dict)
     required_tools: List[str] = Field(default_factory=list)
-    required_skills: List[str] = Field(default_factory=list)
+    required_capabilities: List[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("required_capabilities", "required_skills"),
+        serialization_alias="required_capabilities",
+    )
     output_schema: Dict[str, Any] = Field(default_factory=dict)
     evaluation_policy: Dict[str, Any] = Field(default_factory=dict)
     published_from_session_id: Optional[str] = None

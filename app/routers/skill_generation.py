@@ -14,6 +14,14 @@ from pydantic import BaseModel, Field
 from app.core.database import get_mongo_db
 from app.core.response import ok, fail
 from app.services.skill_generation_service import SkillGenerationService
+from core.tools.external.external_data_source_catalog import (
+    EXTERNAL_DATA_SOURCE_CATALOG,
+    EXTERNAL_DATA_SOURCE_DOC,
+)
+from core.tools.external.stock_data_catalog import (
+    STOCK_DATA_COLLECTION_CATALOG,
+    STOCK_DATA_COLLECTION_DOC,
+)
 
 logger = logging.getLogger("webapi")
 
@@ -28,6 +36,7 @@ class StartSessionRequest(BaseModel):
     """开始创建会话"""
     description: str = Field(..., min_length=2, description="需求描述")
     user_id: str = Field(default="", description="用户 ID")
+    handoff_context: Optional[Dict[str, Any]] = Field(default=None, description="来自上游工坊的交接上下文")
     provider: str = Field(default="deepseek", description="LLM 提供商（回退用）")
     model: Optional[str] = Field(default=None, description="模型名称（回退用）")
     reasoning_model: Optional[str] = Field(default=None, description="需求分析模型（覆盖系统默认的深度推理模型）")
@@ -172,6 +181,24 @@ async def list_available_models(
         return ok({"models": [], "default_reasoning_model": None, "default_coding_model": None})
 
 
+@router.get("/catalog/stock-data")
+async def get_stock_data_catalog():
+    """获取 Skill 生成器使用的股票数据集合目录。"""
+    return ok({
+        "collections": STOCK_DATA_COLLECTION_CATALOG,
+        "doc": STOCK_DATA_COLLECTION_DOC,
+    })
+
+
+@router.get("/catalog/external-data-sources")
+async def get_external_data_source_catalog():
+    """获取 Skill 生成器使用的外部接口与数据源目录。"""
+    return ok({
+        "sources": EXTERNAL_DATA_SOURCE_CATALOG,
+        "doc": EXTERNAL_DATA_SOURCE_DOC,
+    })
+
+
 # =============================================================================
 # 需求沟通 API
 # =============================================================================
@@ -191,7 +218,9 @@ async def start_session(
             coding_model=req.coding_model,
         )
         result = await svc.start_session(
-            description=req.description, user_id=req.user_id
+            description=req.description,
+            user_id=req.user_id,
+            handoff_context=req.handoff_context,
         )
         return ok(result)
     except Exception as e:
@@ -226,10 +255,10 @@ async def preview_spec(
     """预览 Skill 规格（不执行管线），用于规格确认步骤展示"""
     try:
         svc = await _get_service_with_llm(db)
-        spec = await svc.preview_spec(session_id, req.message)
-        if spec is None:
+        result = await svc.preview_spec(session_id, req.message)
+        if result is None:
             raise HTTPException(status_code=400, detail="规格生成失败，请重新描述需求")
-        return ok({"spec": spec})
+        return ok(result)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

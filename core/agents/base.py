@@ -6,7 +6,9 @@ v2.0 新增：标准化工具调用循环处理
 """
 
 import logging
+import uuid
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Callable
 from app.utils.api_key_utils import truncate_api_key
 
@@ -14,12 +16,24 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage, HumanMessage
 from langchain_core.tools import BaseTool
 
+from ..collaboration_runtime import (
+    InvocationArtifactRef,
+    InvocationPolicy,
+    InvocationProvenance,
+    InvocationRequest,
+    InvocationResult,
+    InvocationSourceType,
+    InvocationStatus,
+    InvocationTargetType,
+    utc_now,
+)
 from .config import AgentMetadata, AgentConfig
 
 logger = logging.getLogger(__name__)
 
 # 默认配置
 DEFAULT_MAX_TOOL_ITERATIONS = 3  # 最大工具调用迭代次数
+_DEFAULT_AGENT_CALLABLE_SURFACES = {"assistant", "workflow", "agent"}
 
 
 class BaseAgent(ABC):
@@ -308,6 +322,398 @@ class BaseAgent(ABC):
         tool_def = self._llm_client.register_tool(func, name, description)
         tool_name = tool_def["function"]["name"]
         self._tools[tool_name] = func
+
+    def _normalize_callable_surfaces(self, raw_surfaces: Optional[List[Any]]) -> set:
+        normalized = {
+            str(item).strip().lower()
+            for item in (raw_surfaces or [])
+            if str(item).strip()
+        }
+        return normalized or set(_DEFAULT_AGENT_CALLABLE_SURFACES)
+
+    def _ensure_agent_surface_access(self, target_agent_id: str) -> None:
+        from app.core.database import get_mongo_db_sync
+
+        from .registry import get_registry
+
+        registry = get_registry()
+        metadata = registry.get_metadata(target_agent_id)
+        metadata_surfaces = getattr(metadata, "callable_surfaces", None)
+        db_surfaces = None
+
+        try:
+            db = get_mongo_db_sync()
+            if db is not None:
+                doc = db.agent_configs.find_one(
+                    {"agent_id": target_agent_id},
+                    {"metadata.callable_surfaces": 1},
+                ) or {}
+                db_surfaces = ((doc.get("metadata") or {}).get("callable_surfaces"))
+        except Exception as exc:
+            logger.warning("[BaseAgent] 读取 Agent 调用面配置失败 %s: %s", target_agent_id, exc)
+
+        allowed_surfaces = self._normalize_callable_surfaces(db_surfaces or metadata_surfaces)
+        if "agent" not in allowed_surfaces:
+            raise ValueError(f"Agent {target_agent_id} 当前不允许从 agent 入口直接调用")
+
+    def _extract_runtime_context(self, state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        runtime_context: Dict[str, Any] = {}
+        if not isinstance(state, dict):
+            return runtime_context
+
+        runtime_context.update(dict(state.get("_workflow_runtime") or {}))
+
+        lineage = state.get("invocation_lineage")
+        if isinstance(lineage, dict):
+            for field_name in ("current_invocation_id", "parent_invocation_id", "root_invocation_id"):
+                field_value = lineage.get(field_name)
+                if field_value and not runtime_context.get(field_name):
+                    runtime_context[field_name] = field_value
+
+        invocation_provenance = state.get("invocation_provenance")
+        if isinstance(invocation_provenance, dict):
+            provenance_metadata = invocation_provenance.get("metadata") if isinstance(invocation_provenance.get("metadata"), dict) else {}
+            for field_name in ("root_invocation_id", "parent_invocation_id"):
+                field_value = provenance_metadata.get(field_name)
+                if field_value and not runtime_context.get(field_name):
+                    runtime_context[field_name] = field_value
+
+        if state.get("workflow_id") and not runtime_context.get("workflow_id"):
+            runtime_context["workflow_id"] = state.get("workflow_id")
+        if state.get("node_id") and not runtime_context.get("node_id"):
+            runtime_context["node_id"] = state.get("node_id")
+        if state.get("user_id") and not runtime_context.get("user_id"):
+            runtime_context["user_id"] = state.get("user_id")
+        if state.get("thread_id") and not runtime_context.get("thread_id"):
+            runtime_context["thread_id"] = state.get("thread_id")
+
+        context = state.get("context")
+        if isinstance(context, dict):
+            if context.get("workflow_id") and not runtime_context.get("workflow_id"):
+                runtime_context["workflow_id"] = context.get("workflow_id")
+            if context.get("node_id") and not runtime_context.get("node_id"):
+                runtime_context["node_id"] = context.get("node_id")
+            if context.get("user_id") and not runtime_context.get("user_id"):
+                runtime_context["user_id"] = context.get("user_id")
+            if context.get("session_id") and not runtime_context.get("session_id"):
+                runtime_context["session_id"] = context.get("session_id")
+            if context.get("thread_id") and not runtime_context.get("thread_id"):
+                runtime_context["thread_id"] = context.get("thread_id")
+            extra = context.get("extra") if isinstance(context.get("extra"), dict) else {}
+            for field_name in ("invocation_id", "root_invocation_id", "parent_invocation_id"):
+                field_value = extra.get(field_name)
+                target_field = "current_invocation_id" if field_name == "invocation_id" else field_name
+                if field_value and not runtime_context.get(target_field):
+                    runtime_context[target_field] = field_value
+        elif context is not None:
+            for field_name in ("workflow_id", "node_id", "user_id", "session_id", "thread_id"):
+                field_value = getattr(context, field_name, None)
+                if field_value and not runtime_context.get(field_name):
+                    runtime_context[field_name] = field_value
+            extra = getattr(context, "extra", None)
+            if isinstance(extra, dict):
+                for field_name in ("invocation_id", "root_invocation_id", "parent_invocation_id"):
+                    field_value = extra.get(field_name)
+                    target_field = "current_invocation_id" if field_name == "invocation_id" else field_name
+                    if field_value and not runtime_context.get(target_field):
+                        runtime_context[target_field] = field_value
+
+        return runtime_context
+
+    def _sanitize_invocation_value(self, value: Any, max_text_length: int = 3000, depth: int = 0) -> Any:
+        if isinstance(value, str):
+            return value[:max_text_length]
+        if isinstance(value, (int, float, bool)) or value is None:
+            return value
+        if depth >= 1:
+            return str(value)[:max_text_length]
+        if isinstance(value, list):
+            return [self._sanitize_invocation_value(item, max_text_length=max_text_length, depth=depth + 1) for item in value[:10]]
+        if isinstance(value, dict):
+            sanitized: Dict[str, Any] = {}
+            for key, item in list(value.items())[:20]:
+                sanitized[str(key)] = self._sanitize_invocation_value(item, max_text_length=max_text_length, depth=depth + 1)
+            return sanitized
+        return str(value)[:max_text_length]
+
+    def _build_agent_invocation_payload(
+        self,
+        state: Optional[Dict[str, Any]],
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        prepared_payload = dict(payload or {})
+        if not isinstance(state, dict):
+            return prepared_payload or {"raw_state": self._sanitize_invocation_value(state)}
+
+        preferred_keys = [
+            "symbol",
+            "ticker",
+            "stock_symbol",
+            "stock_code",
+            "trade_date",
+            "analysis_date",
+            "market_type",
+            "task",
+            "task_description",
+            "query",
+        ]
+        for key in preferred_keys:
+            if key in state and key not in prepared_payload:
+                prepared_payload[key] = self._sanitize_invocation_value(state.get(key))
+
+        if prepared_payload:
+            return prepared_payload
+
+        snapshot: Dict[str, Any] = {}
+        for key, value in state.items():
+            if str(key).startswith("_") or key in {"messages", "context"}:
+                continue
+            snapshot[str(key)] = self._sanitize_invocation_value(value)
+            if len(snapshot) >= 12:
+                break
+        return {"state_snapshot": snapshot}
+
+    def _resolve_agent_output_field(self, target_agent_id: str) -> Optional[str]:
+        from app.core.database import get_mongo_db_sync
+
+        from .registry import get_registry
+
+        try:
+            db = get_mongo_db_sync()
+            if db is not None:
+                doc = db.agent_configs.find_one(
+                    {"agent_id": target_agent_id},
+                    {"output_field": 1, "metadata.output_field": 1},
+                ) or {}
+                if doc.get("output_field"):
+                    return str(doc["output_field"])
+                if (doc.get("metadata") or {}).get("output_field"):
+                    return str(doc["metadata"]["output_field"])
+        except Exception as exc:
+            logger.warning("[BaseAgent] 读取 Agent 输出字段失败 %s: %s", target_agent_id, exc)
+
+        metadata = get_registry().get_metadata(target_agent_id)
+        if metadata and getattr(metadata, "output_field", None):
+            return str(metadata.output_field)
+        outputs = getattr(metadata, "outputs", None) or []
+        if outputs and getattr(outputs[0], "name", None):
+            return str(outputs[0].name)
+        return None
+
+    def _extract_invocation_output_text(self, result: Dict[str, Any], output_field: Optional[str]) -> str:
+        candidate_fields = [
+            output_field,
+            "final_report",
+            "analysis_report",
+            "summary",
+            "analysis_result",
+        ]
+        for field_name in candidate_fields:
+            if not field_name:
+                continue
+            value = result.get(field_name)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if isinstance(value, dict):
+                for nested_key in ("content", "markdown", "text", "message", "report"):
+                    nested_value = value.get(nested_key)
+                    if isinstance(nested_value, str) and nested_value.strip():
+                        return nested_value.strip()
+
+        for value in result.values():
+            if isinstance(value, str) and value.strip() and len(value.strip()) > 20:
+                return value.strip()
+        return ""
+
+    def _sanitize_structured_output(self, result: Any) -> Dict[str, Any]:
+        if not isinstance(result, dict):
+            return {"raw_result": self._sanitize_invocation_value(result, max_text_length=4000)}
+
+        sanitized: Dict[str, Any] = {}
+        for key, value in result.items():
+            if key == "messages":
+                continue
+            sanitized[str(key)] = self._sanitize_invocation_value(value, max_text_length=4000)
+        return sanitized
+
+    def _persist_agent_invocation_record(
+        self,
+        request: InvocationRequest,
+        result: InvocationResult,
+    ) -> None:
+        from app.core.database import get_mongo_db_sync
+
+        try:
+            db = get_mongo_db_sync()
+            if db is None:
+                return
+            db.agent_agent_invocations.update_one(
+                {"invocation_id": request.invocation_id},
+                {
+                    "$set": {
+                        "invocation_id": request.invocation_id,
+                        "root_invocation_id": request.metadata.get("root_invocation_id") or request.provenance.metadata.get("root_invocation_id") or request.invocation_id,
+                        "parent_invocation_id": request.metadata.get("parent_invocation_id") or request.provenance.metadata.get("parent_invocation_id"),
+                        "source_agent_id": request.provenance.source_id,
+                        "workflow_id": request.provenance.workflow_id,
+                        "execution_id": request.provenance.session_id,
+                        "step_id": request.provenance.step_id,
+                        "user_id": request.provenance.user_id,
+                        "thread_id": request.provenance.thread_id,
+                        "target_type": request.target_type.value,
+                        "target_id": request.target_id,
+                        "status": result.status.value,
+                        "request": request.to_python_dict(),
+                        "result": result.to_python_dict(),
+                        "updated_at": datetime.utcnow(),
+                    },
+                    "$setOnInsert": {"created_at": datetime.utcnow()},
+                },
+                upsert=True,
+            )
+        except Exception as exc:
+            logger.warning("[BaseAgent] 持久化 Agent 调用记录失败 %s -> %s: %s", request.provenance.source_id, request.target_id, exc)
+
+    def invoke_agent(
+        self,
+        *,
+        target_agent_id: str,
+        state: Dict[str, Any],
+        payload: Optional[Dict[str, Any]] = None,
+        config: Optional[AgentConfig] = None,
+        tool_ids: Optional[List[str]] = None,
+        visible_to_caller: bool = True,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """在 Agent 内部统一调用另一个 Agent，并记录协作运行时。"""
+        from .factory import AgentFactory
+
+        if self._llm is None:
+            raise ValueError(f"Agent {self.agent_id} 当前没有可复用的 LLM，无法委托调用 {target_agent_id}")
+
+        self._ensure_agent_surface_access(target_agent_id)
+
+        runtime_context = self._extract_runtime_context(state)
+        invocation_id = f"ginv_{uuid.uuid4().hex}"
+        source_node_id = runtime_context.get("node_id") or self.agent_id
+        execution_id = runtime_context.get("execution_id") or runtime_context.get("session_id")
+        parent_invocation_id = runtime_context.get("current_invocation_id") or runtime_context.get("parent_invocation_id")
+        root_invocation_id = runtime_context.get("root_invocation_id") or parent_invocation_id or invocation_id
+        invocation_request = InvocationRequest(
+            invocation_id=invocation_id,
+            target_type=InvocationTargetType.AGENT,
+            target_id=target_agent_id,
+            action="execute",
+            payload=self._build_agent_invocation_payload(state, payload),
+            provenance=InvocationProvenance(
+                source_type=InvocationSourceType.AGENT,
+                source_id=self.agent_id,
+                user_id=runtime_context.get("user_id"),
+                session_id=execution_id,
+                thread_id=runtime_context.get("thread_id"),
+                workflow_id=runtime_context.get("workflow_id"),
+                step_id=source_node_id,
+                trigger="agent_delegate",
+                metadata={
+                    "target_agent_id": target_agent_id,
+                    "source_node_id": source_node_id,
+                    "root_invocation_id": root_invocation_id,
+                    "parent_invocation_id": parent_invocation_id,
+                    **(metadata or {}),
+                },
+            ),
+            policy=InvocationPolicy(
+                idempotency_key=f"{self.agent_id}:{target_agent_id}:{execution_id or invocation_id}",
+                timeout_seconds=int((config or self.config).timeout if (config or self.config) else 180),
+                lane=f"agent.{runtime_context.get('workflow_id') or self.agent_id}",
+                visible_to_caller=visible_to_caller,
+            ),
+            metadata={
+                "invocation_source": "agent",
+                "source_agent_id": self.agent_id,
+                "root_invocation_id": root_invocation_id,
+                "parent_invocation_id": parent_invocation_id,
+                **(metadata or {}),
+            },
+        )
+        started_at = utc_now()
+        output_field = self._resolve_agent_output_field(target_agent_id)
+
+        try:
+            delegated_agent = AgentFactory().create(
+                target_agent_id,
+                config=config or AgentConfig(),
+                llm=self._llm,
+                tool_ids=tool_ids,
+                memory=getattr(self, "memory", None) or getattr(self, "_memory", None),
+            )
+            delegated_state = dict(state or {})
+            delegated_state["node_id"] = target_agent_id
+            delegated_state["invocation_provenance"] = invocation_request.provenance.to_python_dict()
+            delegated_state["invocation_lineage"] = {
+                "current_invocation_id": invocation_request.invocation_id,
+                "parent_invocation_id": parent_invocation_id,
+                "root_invocation_id": root_invocation_id,
+            }
+
+            raw_result = delegated_agent(delegated_state)
+            result = raw_result if isinstance(raw_result, dict) else {
+                (output_field or f"{target_agent_id}_report"): raw_result
+            }
+
+            invocation_result = InvocationResult(
+                invocation_id=invocation_request.invocation_id,
+                target_type=InvocationTargetType.AGENT,
+                target_id=target_agent_id,
+                status=InvocationStatus.SUCCEEDED,
+                started_at=started_at,
+                output_text=self._extract_invocation_output_text(result, output_field),
+                structured_output=self._sanitize_structured_output(result),
+                output_field=output_field,
+                artifacts=[
+                    InvocationArtifactRef(
+                        ref_type="agent_agent_invocation",
+                        artifact_key=invocation_request.invocation_id,
+                        title=f"Agent委托调用：{self.agent_id} -> {target_agent_id}",
+                        summary=self._extract_invocation_output_text(result, output_field)[:300],
+                        source_collection="agent_agent_invocations",
+                        output_field=output_field,
+                        metadata={
+                            "source_agent_id": self.agent_id,
+                            "target_agent_id": target_agent_id,
+                            "workflow_id": runtime_context.get("workflow_id"),
+                        },
+                    )
+                ],
+                metadata={
+                    "source_agent_id": self.agent_id,
+                    "workflow_id": runtime_context.get("workflow_id"),
+                    "root_invocation_id": root_invocation_id,
+                    "parent_invocation_id": parent_invocation_id,
+                    **(metadata or {}),
+                },
+            )
+            self._persist_agent_invocation_record(invocation_request, invocation_result)
+            return result
+        except Exception as exc:
+            invocation_result = InvocationResult(
+                invocation_id=invocation_request.invocation_id,
+                target_type=InvocationTargetType.AGENT,
+                target_id=target_agent_id,
+                status=InvocationStatus.FAILED,
+                started_at=started_at,
+                output_field=output_field,
+                error_message=str(exc),
+                metadata={
+                    "source_agent_id": self.agent_id,
+                    "workflow_id": runtime_context.get("workflow_id"),
+                    "root_invocation_id": root_invocation_id,
+                    "parent_invocation_id": parent_invocation_id,
+                    **(metadata or {}),
+                },
+            )
+            self._persist_agent_invocation_record(invocation_request, invocation_result)
+            raise
     
     @abstractmethod
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -341,6 +747,11 @@ class BaseAgent(ABC):
             "memory_scope_hint": metadata.memory_scope_hint,
             "review_level": metadata.review_level,
             "growth_source_type": metadata.growth_source_type,
+            "maturity_level": metadata.maturity_level,
+            "input_mode": metadata.input_mode,
+            "debug_replay_mode": metadata.debug_replay_mode,
+            "maintenance_status": metadata.maintenance_status,
+            "callable_surfaces": list(metadata.callable_surfaces or []),
         }
 
     def get_growth_artifacts(

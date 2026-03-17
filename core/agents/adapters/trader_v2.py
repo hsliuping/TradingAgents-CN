@@ -73,7 +73,15 @@ class TraderV2(TraderAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_advice", type="string", description="投资分析观点"),
+            AgentInput(name="investment_plan", type="string", description="投资计划", source="state", state_field="investment_advice", source_state_fields=["investment_plan"], producer_hint="research_manager_v2"),
+            AgentInput(name="market_report", type="string", description="市场分析报告", required=False, source="state", state_field="market_report", producer_hint="market_analyst_v2"),
+            AgentInput(name="fundamentals_report", type="string", description="基本面分析报告", required=False, source="state", state_field="fundamentals_report", producer_hint="fundamentals_analyst_v2"),
+            AgentInput(name="news_report", type="string", description="新闻分析报告", required=False, source="state", state_field="news_report", producer_hint="news_analyst_v2"),
+            AgentInput(name="sentiment_report", type="string", description="情绪分析报告", required=False, source="state", state_field="sentiment_report", producer_hint="social_analyst_v2"),
+            AgentInput(name="index_report", type="string", description="大盘分析报告", required=False, source="state", state_field="index_report", producer_hint="index_analyst_v2"),
+            AgentInput(name="sector_report", type="string", description="板块分析报告", required=False, source="state", state_field="sector_report", producer_hint="sector_analyst_v2"),
+            AgentInput(name="bull_report", type="string", description="看涨研究报告", required=False, source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
+            AgentInput(name="bear_report", type="string", description="看跌研究报告", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
         ],
         outputs=[
             AgentOutput(name="trader_investment_plan", type="string", description="交易分析计划"),
@@ -86,6 +94,10 @@ class TraderV2(TraderAgent):
         memory_scope_hint="pattern",
         review_level="manual_required",
         growth_source_type="manager_decision",
+        maturity_level="stable",
+        input_mode="upstream-dependent",
+        debug_replay_mode="requires_chain_prefill",
+        callable_surfaces=["assistant", "workflow", "agent"],
     )
 
     # 输出字段名（与报告格式化器期望的字段名一致）

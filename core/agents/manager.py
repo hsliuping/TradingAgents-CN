@@ -73,6 +73,27 @@ class ManagerAgent(BaseAgent):
         self.debate_history = []
         
         logger.debug(f"ManagerAgent '{self.agent_id}' 初始化完成")
+
+    def delegate_to_agent(
+        self,
+        target_agent_id: str,
+        state: Dict[str, Any],
+        payload: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """管理者语义化包装：把专项任务委托给子 Agent 执行。"""
+        logger.info(f"[ManagerAgent] {self.agent_id} 开始委托子 Agent: {target_agent_id}")
+        result = self.invoke_agent(
+            target_agent_id=target_agent_id,
+            state=state,
+            payload=payload,
+            metadata={
+                "manager_type": self.manager_type,
+                **(metadata or {}),
+            },
+        )
+        logger.info(f"[ManagerAgent] {self.agent_id} 委托子 Agent 完成: {target_agent_id}")
+        return result
     
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """

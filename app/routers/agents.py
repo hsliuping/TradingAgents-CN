@@ -55,7 +55,9 @@ class AgentMetadata(BaseModel):
     name: str
     description: str
     category: str
+    version: Optional[str] = None
     license_tier: str
+    maintenance_status: Optional[str] = None
     inputs: List[str] = []
     outputs: List[str] = []
     icon: str = "📦"

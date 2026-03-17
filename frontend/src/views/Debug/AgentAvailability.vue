@@ -25,6 +25,13 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="维护状态" width="120">
+          <template #default="{ row }">
+            <el-tag :type="row.maintenance_status === 'unmaintained' ? 'danger' : 'success'" effect="plain">
+              {{ row.maintenance_status === 'unmaintained' ? '停止维护' : '维护中' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="是否可用" width="120">
           <template #default="{ row }">
             <el-tag :type="isAvailable(row) ? 'success' : 'danger'">
@@ -68,13 +75,13 @@ const getCheckLogic = (agent: any) => {
   }
   const tier = agent.license_tier.toLowerCase()
   if (tier === 'free') {
-    return 'tier=free → 可用'
+    return `tier=free → 可用；maintenance=${agent.maintenance_status || 'maintained'}`
   }
   if (tier === 'basic') {
-    return 'tier=basic → 可用'
+    return `tier=basic → 可用；maintenance=${agent.maintenance_status || 'maintained'}`
   }
   if (['pro', 'enterprise'].includes(tier)) {
-    return `tier=${tier} → isPro=${licenseStore.isPro} → ${licenseStore.isPro ? '可用' : '锁定'}`
+    return `tier=${tier} → isPro=${licenseStore.isPro} → ${licenseStore.isPro ? '可用' : '锁定'}；maintenance=${agent.maintenance_status || 'maintained'}`
   }
   return '未知逻辑'
 }

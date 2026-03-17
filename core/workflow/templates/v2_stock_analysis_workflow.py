@@ -140,7 +140,10 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             agent_id="research_manager_v2",
             label="研究经理 v2.0",
             position=Position(x=400, y=480),
-            config={"role": "综合看多看空观点，做出投资决策"},
+            config={
+                "role": "综合看多看空观点，做出投资决策",
+                "delegated_agent_ids": ["chip_distribution_analyst_v2"],
+            },
         ),
 
         # === 阶段5: 交易员（先制定初步计划）===

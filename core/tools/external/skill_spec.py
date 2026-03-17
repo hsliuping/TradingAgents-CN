@@ -69,12 +69,16 @@ class SkillSpec(BaseModel):
 
     从用户自然语言需求经过多轮对话后锁定的结构化规格，
     是代码生成阶段的唯一输入。
+
+    Skill 表示一个可复用、可验证、边界清晰的功能实现单元，
+    不局限于纯数据查询，也可以包含必要的数据整理、确定性计算、
+    规则判断、轻量聚合或模板化说明生成。
     """
     tool_id: str                           # 如 "get_eastmoney_news"
     display_name: str                      # 如 "东方财富个股新闻"
-    description: str                       # 功能描述
+    description: str                       # 功能描述（单一明确功能）
     category: str = "utility"              # 分类: news, market, fundamentals 等
-    data_source: str = ""                  # 数据源标识
+    data_source: str = ""                  # 主数据源标识；若有附加来源应在 constraints 中说明
     parameters: List[SkillParameter] = Field(default_factory=list)
     expected_output: ExpectedOutput = Field(default_factory=ExpectedOutput)
     constraints: List[str] = Field(default_factory=list)    # 行为约束
@@ -175,6 +179,15 @@ class ConversationRound(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
+class SkillHandoffContext(BaseModel):
+    """来自上游工坊或流程的交接上下文。"""
+    source: str = ""
+    source_spec_id: str = ""
+    source_name: str = ""
+    target_capability: str = ""
+    handoff_intent: str = ""
+
+
 class SkillCreationSession(BaseModel):
     """
     Skill 创建会话 — 对应 MongoDB skill_creation_sessions 集合
@@ -189,6 +202,7 @@ class SkillCreationSession(BaseModel):
     current_round: int = 0
     clarity_level: Optional[ClarityLevel] = None
     boundary_check: Optional[BoundaryCheck] = None
+    handoff_context: Optional[SkillHandoffContext] = None
     # 规格
     spec: Optional[SkillSpec] = None
     spec_confirmed: bool = False

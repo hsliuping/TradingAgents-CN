@@ -81,10 +81,16 @@ class RiskyAnalystV2(ResearcherAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_plan", type="string", description="投资计划"),
-            AgentInput(name="bull_opinion", type="string", description="看涨观点", required=False),
-            AgentInput(name="bear_opinion", type="string", description="看跌观点", required=False),
-            AgentInput(name="risk_debate_state", type="dict", description="辩论状态", required=False),
+            AgentInput(name="investment_plan", type="string", description="投资计划", source="state", state_field="investment_plan", source_state_fields=["trader_investment_plan"], producer_hint="research_manager_v2"),
+            AgentInput(name="bull_opinion", type="string", description="看涨观点", required=False, source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
+            AgentInput(name="bear_opinion", type="string", description="看跌观点", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
+            AgentInput(name="risk_debate_state", type="dict", description="辩论状态", required=False, source="state", state_field="risk_debate_state", producer_hint="risk_manager_v2"),
+            AgentInput(name="market_report", type="string", description="市场分析报告", required=False, source="state", state_field="market_report", producer_hint="market_analyst_v2"),
+            AgentInput(name="fundamentals_report", type="string", description="基本面分析报告", required=False, source="state", state_field="fundamentals_report", producer_hint="fundamentals_analyst_v2"),
+            AgentInput(name="news_report", type="string", description="新闻分析报告", required=False, source="state", state_field="news_report", producer_hint="news_analyst_v2"),
+            AgentInput(name="sentiment_report", type="string", description="情绪分析报告", required=False, source="state", state_field="sentiment_report", producer_hint="social_analyst_v2"),
+            AgentInput(name="index_report", type="string", description="大盘分析报告", required=False, source="state", state_field="index_report", producer_hint="index_analyst_v2"),
+            AgentInput(name="sector_report", type="string", description="板块分析报告", required=False, source="state", state_field="sector_report", producer_hint="sector_analyst_v2"),
         ],
         outputs=[
             AgentOutput(name="risky_opinion", type="string", description="激进风险观点"),
@@ -98,6 +104,10 @@ class RiskyAnalystV2(ResearcherAgent):
         memory_scope_hint="pattern",
         review_level="manual_required",
         growth_source_type="manager_decision",
+        maturity_level="stable",
+        input_mode="upstream-dependent",
+        debug_replay_mode="requires_chain_prefill",
+        callable_surfaces=["assistant", "workflow", "agent"],
     )
 
     # 研究立场（风险分析师使用 "risky"）

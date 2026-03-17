@@ -75,8 +75,8 @@ class ResearchManagerV2(ManagerAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="bull_report", type="string", description="看涨观点报告"),
-            AgentInput(name="bear_report", type="string", description="看跌观点报告"),
+            AgentInput(name="bull_report", type="string", description="看涨观点报告", source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
+            AgentInput(name="bear_report", type="string", description="看跌观点报告", source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
         ],
         outputs=[
             AgentOutput(name="investment_advice", type="string", description="投资分析观点"),
@@ -89,6 +89,10 @@ class ResearchManagerV2(ManagerAgent):
         memory_scope_hint="research_asset",
         review_level="manual_required",
         growth_source_type="manager_decision",
+        maturity_level="stable",
+        input_mode="upstream-dependent",
+        debug_replay_mode="requires_chain_prefill",
+        callable_surfaces=["assistant", "workflow", "agent"],
     )
     
     # 管理者类型
@@ -99,6 +103,38 @@ class ResearchManagerV2(ManagerAgent):
 
     # 是否启用辩论
     enable_debate = True
+
+    def _run_delegated_research_agents(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        node_config = state.get("node_config") or {}
+        delegated_agent_ids = node_config.get("delegated_agent_ids") or []
+        if not isinstance(delegated_agent_ids, list):
+            return {}
+
+        delegated_outputs: Dict[str, Any] = {}
+        for target_agent_id in delegated_agent_ids:
+            normalized_target = str(target_agent_id or "").strip()
+            if not normalized_target or normalized_target == self.agent_id:
+                continue
+
+            if normalized_target == "chip_distribution_analyst_v2" and (state.get("chip_report") or delegated_outputs.get("chip_report")):
+                logger.info("[ResearchManagerV2] 已存在 chip_report，跳过委托 chip_distribution_analyst_v2")
+                continue
+
+            logger.info("[ResearchManagerV2] 委托补充研究 Agent: %s", normalized_target)
+            delegate_result = self.delegate_to_agent(
+                normalized_target,
+                {**state, **delegated_outputs},
+                payload={
+                    "task_description": "补充筹码分布与持仓成本结构上下文，供研究经理做综合投资判断",
+                },
+                metadata={
+                    "delegation_role": "research_enrichment",
+                },
+            )
+            if isinstance(delegate_result, dict):
+                delegated_outputs.update(delegate_result)
+
+        return delegated_outputs
 
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -133,6 +169,11 @@ class ResearchManagerV2(ManagerAgent):
             logger.info(f"📉 看跌报告前200字符: {bear_report_str[:200]}...")
         else:
             logger.warning("⚠️ 看跌报告为空或过短！")
+
+        delegated_outputs = self._run_delegated_research_agents(state)
+        if delegated_outputs:
+            logger.info(f"🔗 [ResearchManagerV2] 已收到委托结果字段: {list(delegated_outputs.keys())}")
+            state = {**state, **delegated_outputs}
 
         # 调用父类方法获取基本输出
         logger.info("🚀 调用父类 execute 方法...")
@@ -171,6 +212,7 @@ class ResearchManagerV2(ManagerAgent):
 
         # 返回包含 investment_debate_state 的结果
         return {
+            **delegated_outputs,
             **result,
             "investment_debate_state": new_debate_state,
         }
@@ -477,6 +519,7 @@ class ResearchManagerV2(ManagerAgent):
         return [
             "bull_report",
             "bear_report",
+            "chip_report",
         ]
     
     def _get_company_name(self, ticker: str, market_info: dict) -> str:

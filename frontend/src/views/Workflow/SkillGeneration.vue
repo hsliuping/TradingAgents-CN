@@ -24,18 +24,41 @@
     <!-- 未完成的草稿 -->
     <div v-if="draftSessions.length > 0" class="draft-section">
       <div class="section-header">
-        <h2>📝 未完成的草稿</h2>
-        <el-button text size="small" @click="loadDrafts">
-          <el-icon><Refresh /></el-icon>
-          刷新
-        </el-button>
+        <div class="draft-section-title">
+          <h2>📝 未完成的草稿</h2>
+          <span class="draft-section-subtitle">按系统推荐的分类与来源筛选，默认优先展示命中更明确的草稿</span>
+        </div>
+        <div class="draft-toolbar">
+          <el-select v-model="draftCategoryFilter" clearable placeholder="推荐分类" size="small" style="width: 130px">
+            <el-option v-for="item in availableDraftCategoryHints" :key="`draft-category-${item}`" :label="item" :value="item" />
+          </el-select>
+          <el-select v-model="draftSourceFilter" clearable placeholder="推荐来源" size="small" style="width: 140px">
+            <el-option v-for="item in availableDraftSourceHints" :key="`draft-source-${item}`" :label="item" :value="item" />
+          </el-select>
+          <el-switch v-model="draftHighMatchOnly" inline-prompt active-text="高匹配" inactive-text="全部" size="small" />
+          <el-button text size="small" @click="resetDraftFilters" :disabled="!draftCategoryFilter && !draftSourceFilter">清空筛选</el-button>
+          <el-button text size="small" @click="loadDrafts">
+            <el-icon><Refresh /></el-icon>
+            刷新
+          </el-button>
+        </div>
+      </div>
+      <div v-if="displayedDraftSessions.length !== draftSessions.length" class="draft-filter-summary">
+        当前显示 {{ displayedDraftSessions.length }} / {{ draftSessions.length }} 个草稿
       </div>
       <div class="draft-cards">
-        <div v-for="draft in draftSessions" :key="draft.session_id" class="draft-card">
+        <div v-for="draft in displayedDraftSessions" :key="draft.session_id" class="draft-card">
           <div class="draft-card-header">
-            <el-tag :type="draft.status === 'gathering' ? 'warning' : 'info'" size="small">
-              {{ draft.status === 'gathering' ? '需求沟通中' : draft.status === 'confirmed' ? '已确认待生成' : draft.status }}
-            </el-tag>
+            <div class="draft-card-statuses">
+              <el-tag :type="draft.status === 'gathering' ? 'warning' : 'info'" size="small">
+                {{ draft.status === 'gathering' ? '需求沟通中' : draft.status === 'confirmed' ? '已确认待生成' : draft.status }}
+              </el-tag>
+              <el-tooltip :content="getDraftMatchTooltip(draft)" placement="top" :show-after="200">
+                <el-tag :type="getDraftMatchTagType(draft)" size="small" effect="plain" class="draft-match-tag">
+                  {{ getDraftMatchLabel(draft) }}
+                </el-tag>
+              </el-tooltip>
+            </div>
             <span class="draft-time">{{ formatTime(draft.updated_at) }}</span>
           </div>
           <div class="draft-card-body">
@@ -44,10 +67,38 @@
               <span>已对话 {{ draft.rounds?.length || 0 }} 轮</span>
               <span v-if="draft.clarity_level">· 清晰度: {{ draft.clarity_level }}</span>
             </div>
+            <div v-if="draft.recommendations?.stock_collections?.length || draft.recommendations?.external_sources?.length" class="draft-recommendations">
+              <div v-if="draft.recommendations?.stock_collections?.length" class="draft-recommendation-row">
+                <span class="draft-recommendation-label">本地:</span>
+                <el-tag v-for="entry in draft.recommendations.stock_collections.slice(0, 2)" :key="`${draft.session_id}-stock-${entry}`" size="small" type="success" effect="plain">{{ entry }}</el-tag>
+              </div>
+              <div v-if="draft.recommendations?.external_sources?.length" class="draft-recommendation-row">
+                <span class="draft-recommendation-label">外部:</span>
+                <el-tag v-for="entry in draft.recommendations.external_sources.slice(0, 2)" :key="`${draft.session_id}-source-${entry}`" size="small" type="warning" effect="plain">{{ entry }}</el-tag>
+              </div>
+            </div>
           </div>
           <div class="draft-card-footer">
-            <el-button type="primary" size="small" @click="() => goToCreate(draft.session_id)">
-              继续完善
+            <el-button :type="draft.status === 'confirmed' ? 'success' : 'primary'" size="small" @click="() => goToCreate(draft.session_id)">
+              {{ getDraftPrimaryActionLabel(draft) }}
+            </el-button>
+            <el-button
+              v-if="draft.status === 'confirmed' && isHighMatchDraft(draft)"
+              type="warning"
+              size="small"
+              plain
+              @click="() => goToCreateWithFocus(draft.session_id, 'recommendations')"
+            >
+              聚焦建议
+            </el-button>
+            <el-button
+              v-if="draft.status === 'confirmed' && isHighMatchDraft(draft)"
+              type="success"
+              size="small"
+              plain
+              @click="() => goToCreateWithFocus(draft.session_id, 'confirm')"
+            >
+              继续生成
             </el-button>
             <el-button type="danger" size="small" text @click="handleDeleteDraft(draft)">
               删除
@@ -89,6 +140,54 @@
           <template #default="{ row }">
             <span v-if="row.final_score != null">{{ row.final_score }}/10</span>
             <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="复用策略" min-width="220">
+          <template #default="{ row }">
+            <div v-if="hasGenerationContext(row)" class="strategy-cell">
+              <div class="strategy-head">
+                <el-tag v-if="row.generation_context?.category_hint" size="small" type="success" effect="plain">
+                  {{ row.generation_context.category_hint }}
+                </el-tag>
+                <el-tag v-if="row.generation_context?.data_source_hint" size="small" type="warning" effect="plain">
+                  {{ row.generation_context.data_source_hint }}
+                </el-tag>
+              </div>
+              <el-popover placement="top-start" :width="340" trigger="hover">
+                <template #reference>
+                  <el-button text size="small" class="strategy-trigger">
+                    {{ getGenerationStrategySummary(row) }}
+                  </el-button>
+                </template>
+                <div class="strategy-popover">
+                  <div v-if="row.generation_context?.stock_collections?.length" class="strategy-popover-row">
+                    <span class="strategy-popover-label">本地集合</span>
+                    <el-tag
+                      v-for="entry in row.generation_context.stock_collections"
+                      :key="`${row.tool_id}-stock-${entry}`"
+                      size="small"
+                      type="success"
+                      effect="plain"
+                    >
+                      {{ entry }}
+                    </el-tag>
+                  </div>
+                  <div v-if="row.generation_context?.external_sources?.length" class="strategy-popover-row">
+                    <span class="strategy-popover-label">外部来源</span>
+                    <el-tag
+                      v-for="entry in row.generation_context.external_sources"
+                      :key="`${row.tool_id}-source-${entry}`"
+                      size="small"
+                      type="warning"
+                      effect="plain"
+                    >
+                      {{ entry }}
+                    </el-tag>
+                  </div>
+                </div>
+              </el-popover>
+            </div>
+            <span v-else class="strategy-empty">未记录</span>
           </template>
         </el-table-column>
         <el-table-column prop="generation_rounds" label="轮次" width="70" align="center" />
@@ -196,35 +295,72 @@
         <el-icon class="is-loading" :size="24"><Loading /></el-icon>
         <p>加载中...</p>
       </div>
-      <div v-else-if="historySections.length === 0" style="text-align: center; padding: 40px; color: var(--el-text-color-secondary);">
-        暂无沟通记录
-      </div>
-      <div v-else class="history-chat-messages">
-        <div v-for="(section, sIdx) in historySections" :key="sIdx" class="history-section">
-          <!-- 分段标题 -->
-          <div class="history-section-header">
-            <el-tag :type="section.type === 'creation' ? 'primary' : 'warning'" size="small">{{ section.label }}</el-tag>
-            <span class="history-section-time" v-if="section.created_at">{{ section.created_at.replace('T', ' ').slice(0, 19) }}</span>
+      <div v-else>
+        <div v-if="historySkillRow && hasGenerationContext(historySkillRow)" class="history-strategy-panel">
+          <div class="history-strategy-title">本次生成采用的复用策略</div>
+          <div class="history-strategy-tags">
+            <el-tag v-if="historySkillRow.generation_context?.category_hint" size="small" type="success" effect="plain">
+              {{ historySkillRow.generation_context.category_hint }}
+            </el-tag>
+            <el-tag v-if="historySkillRow.generation_context?.data_source_hint" size="small" type="warning" effect="plain">
+              {{ historySkillRow.generation_context.data_source_hint }}
+            </el-tag>
           </div>
-          <div v-if="section.feedback" class="history-section-feedback">
-            <strong>优化需求：</strong>{{ section.feedback }}
+          <div v-if="historySkillRow.generation_context?.stock_collections?.length" class="strategy-detail-row">
+            <span class="strategy-detail-label">本地集合</span>
+            <el-tag
+              v-for="entry in historySkillRow.generation_context.stock_collections"
+              :key="`history-stock-${entry}`"
+              size="small"
+              type="success"
+              effect="plain"
+            >
+              {{ entry }}
+            </el-tag>
           </div>
-          <!-- 各轮对话 -->
-          <div v-for="(r, idx) in section.rounds" :key="idx" class="history-round">
-            <!-- 用户消息 -->
-            <div class="chat-msg chat-user">
-              <div class="msg-avatar"><el-icon><User /></el-icon></div>
-              <div class="msg-bubble">
-                <div class="msg-meta">用户 · 第{{ r.round_number }}轮</div>
-                <div class="msg-text" v-html="renderMarkdown(r.user_message)"></div>
-              </div>
+          <div v-if="historySkillRow.generation_context?.external_sources?.length" class="strategy-detail-row">
+            <span class="strategy-detail-label">外部来源</span>
+            <el-tag
+              v-for="entry in historySkillRow.generation_context.external_sources"
+              :key="`history-source-${entry}`"
+              size="small"
+              type="warning"
+              effect="plain"
+            >
+              {{ entry }}
+            </el-tag>
+          </div>
+        </div>
+        <div v-if="historySections.length === 0" style="text-align: center; padding: 40px; color: var(--el-text-color-secondary);">
+          暂无沟通记录
+        </div>
+        <div v-else class="history-chat-messages">
+          <div v-for="(section, sIdx) in historySections" :key="sIdx" class="history-section">
+            <!-- 分段标题 -->
+            <div class="history-section-header">
+              <el-tag :type="section.type === 'creation' ? 'primary' : 'warning'" size="small">{{ section.label }}</el-tag>
+              <span class="history-section-time" v-if="section.created_at">{{ section.created_at.replace('T', ' ').slice(0, 19) }}</span>
             </div>
-            <!-- AI 回复 -->
-            <div class="chat-msg chat-ai">
-              <div class="msg-avatar"><el-icon><MagicStick /></el-icon></div>
-              <div class="msg-bubble">
-                <div class="msg-meta">AI · 第{{ r.round_number }}轮</div>
-                <div class="msg-text" v-html="renderMarkdown(r.ai_message)"></div>
+            <div v-if="section.feedback" class="history-section-feedback">
+              <strong>优化需求：</strong>{{ section.feedback }}
+            </div>
+            <!-- 各轮对话 -->
+            <div v-for="(r, idx) in section.rounds" :key="idx" class="history-round">
+              <!-- 用户消息 -->
+              <div class="chat-msg chat-user">
+                <div class="msg-avatar"><el-icon><User /></el-icon></div>
+                <div class="msg-bubble">
+                  <div class="msg-meta">用户 · 第{{ r.round_number }}轮</div>
+                  <div class="msg-text" v-html="renderMarkdown(r.user_message)"></div>
+                </div>
+              </div>
+              <!-- AI 回复 -->
+              <div class="chat-msg chat-ai">
+                <div class="msg-avatar"><el-icon><MagicStick /></el-icon></div>
+                <div class="msg-bubble">
+                  <div class="msg-meta">AI · 第{{ r.round_number }}轮</div>
+                  <div class="msg-text" v-html="renderMarkdown(r.ai_message)"></div>
+                </div>
               </div>
             </div>
           </div>
@@ -238,6 +374,41 @@
         <el-alert type="info" :closable="false" style="margin-bottom: 16px">
           <template #title>描述你希望改进的地方，AI 将基于原始需求和当前代码重新生成</template>
         </el-alert>
+        <div v-if="optimizeSkillRow && hasGenerationContext(optimizeSkillRow)" class="optimize-strategy-panel">
+          <div class="history-strategy-title">当前复用策略</div>
+          <div class="history-strategy-tags">
+            <el-tag v-if="optimizeSkillRow.generation_context?.category_hint" size="small" type="success" effect="plain">
+              {{ optimizeSkillRow.generation_context.category_hint }}
+            </el-tag>
+            <el-tag v-if="optimizeSkillRow.generation_context?.data_source_hint" size="small" type="warning" effect="plain">
+              {{ optimizeSkillRow.generation_context.data_source_hint }}
+            </el-tag>
+          </div>
+          <div v-if="optimizeSkillRow.generation_context?.stock_collections?.length" class="strategy-detail-row">
+            <span class="strategy-detail-label">本地集合</span>
+            <el-tag
+              v-for="entry in optimizeSkillRow.generation_context.stock_collections"
+              :key="`optimize-stock-${entry}`"
+              size="small"
+              type="success"
+              effect="plain"
+            >
+              {{ entry }}
+            </el-tag>
+          </div>
+          <div v-if="optimizeSkillRow.generation_context?.external_sources?.length" class="strategy-detail-row">
+            <span class="strategy-detail-label">外部来源</span>
+            <el-tag
+              v-for="entry in optimizeSkillRow.generation_context.external_sources"
+              :key="`optimize-source-${entry}`"
+              size="small"
+              type="warning"
+              effect="plain"
+            >
+              {{ entry }}
+            </el-tag>
+          </div>
+        </div>
         <el-input
           v-model="optimizeFeedback"
           type="textarea"
@@ -265,6 +436,43 @@
             ? `版本: v${optimizeResult.version} · 耗时 ${optimizeResult.total_time}s · 评分 ${optimizeResult.final_score ?? '-'}/10`
             : optimizeResult?.error || '请修改反馈后重试'"
         >
+          <template v-if="optimizeResult?.success && hasRecommendationContext(optimizeResult.generation_context)" #default>
+            <div class="optimize-result-strategy-panel">
+              <div class="history-strategy-title">本轮优化采用的复用策略</div>
+              <div class="history-strategy-tags">
+                <el-tag v-if="optimizeResult.generation_context?.category_hint" size="small" type="success" effect="plain">
+                  {{ optimizeResult.generation_context.category_hint }}
+                </el-tag>
+                <el-tag v-if="optimizeResult.generation_context?.data_source_hint" size="small" type="warning" effect="plain">
+                  {{ optimizeResult.generation_context.data_source_hint }}
+                </el-tag>
+              </div>
+              <div v-if="optimizeResult.generation_context?.stock_collections?.length" class="strategy-detail-row">
+                <span class="strategy-detail-label">本地集合</span>
+                <el-tag
+                  v-for="entry in optimizeResult.generation_context.stock_collections"
+                  :key="`optimize-result-stock-${entry}`"
+                  size="small"
+                  type="success"
+                  effect="plain"
+                >
+                  {{ entry }}
+                </el-tag>
+              </div>
+              <div v-if="optimizeResult.generation_context?.external_sources?.length" class="strategy-detail-row">
+                <span class="strategy-detail-label">外部来源</span>
+                <el-tag
+                  v-for="entry in optimizeResult.generation_context.external_sources"
+                  :key="`optimize-result-source-${entry}`"
+                  size="small"
+                  type="warning"
+                  effect="plain"
+                >
+                  {{ entry }}
+                </el-tag>
+              </div>
+            </div>
+          </template>
           <template #extra>
             <el-button v-if="optimizeResult?.success" type="primary" @click="optimizeDialogVisible = false; loadSkills()">
               完成
@@ -345,6 +553,7 @@ const historyDialogVisible = ref(false)
 const historyDialogTitle = ref('')
 const historyLoading = ref(false)
 const historySections = ref<HistorySection[]>([])
+const historySkillRow = ref<ExternalSkill | null>(null)
 
 // 优化
 const optimizeDialogVisible = ref(false)
@@ -354,9 +563,118 @@ const optimizeFeedback = ref('')
 const optimizeStep = ref<'input' | 'running' | 'done'>('input')
 const optimizeProgress = ref(0)
 const optimizeResult = ref<OptimizeResult | null>(null)
+const optimizeSkillRow = ref<ExternalSkill | null>(null)
 
 // 草稿
 const draftSessions = ref<SessionDetail[]>([])
+const draftCategoryFilter = ref('')
+const draftSourceFilter = ref('')
+const draftHighMatchOnly = ref(false)
+
+const clarityScoreMap: Record<string, number> = {
+  high: 3,
+  medium: 2,
+  low: 1,
+}
+
+const getDraftRecommendationWeight = (draft: SessionDetail) => {
+  const recommendationCount = (draft.recommendations?.stock_collections?.length || 0)
+    + (draft.recommendations?.external_sources?.length || 0)
+  const clarityScore = clarityScoreMap[String(draft.clarity_level || '').toLowerCase()] || 0
+  const confirmedScore = draft.status === 'confirmed' ? 4 : 0
+  return confirmedScore + recommendationCount * 2 + clarityScore
+}
+
+const getDraftMatchLabel = (draft: SessionDetail) => {
+  const score = getDraftRecommendationWeight(draft)
+  if (score >= 10) return '高匹配'
+  if (score >= 6) return '中匹配'
+  return '低匹配'
+}
+
+const getDraftMatchTagType = (draft: SessionDetail): 'success' | 'warning' | 'info' => {
+  const score = getDraftRecommendationWeight(draft)
+  if (score >= 10) return 'success'
+  if (score >= 6) return 'warning'
+  return 'info'
+}
+
+const getDraftMatchTooltip = (draft: SessionDetail) => {
+  const stockCount = draft.recommendations?.stock_collections?.length || 0
+  const sourceCount = draft.recommendations?.external_sources?.length || 0
+  const clarity = String(draft.clarity_level || 'unknown')
+  const score = getDraftRecommendationWeight(draft)
+  return `匹配度 ${score} 分：状态=${draft.status}，清晰度=${clarity}，本地推荐=${stockCount}，外部推荐=${sourceCount}`
+}
+
+const getDraftPrimaryActionLabel = (draft: SessionDetail) => {
+  if (draft.status === 'confirmed') {
+    return isHighMatchDraft(draft) ? '进入确认' : '查看规格'
+  }
+  return isHighMatchDraft(draft) ? '继续沟通' : '继续完善'
+}
+
+const isHighMatchDraft = (draft: SessionDetail) => getDraftRecommendationWeight(draft) >= 10
+
+const availableDraftCategoryHints = computed(() => {
+  return Array.from(new Set(
+    draftSessions.value
+      .map(item => item.recommendations?.category_hint)
+      .filter((item): item is string => !!item)
+  ))
+})
+
+const availableDraftSourceHints = computed(() => {
+  return Array.from(new Set(
+    draftSessions.value
+      .map(item => item.recommendations?.data_source_hint)
+      .filter((item): item is string => !!item)
+  ))
+})
+
+const displayedDraftSessions = computed(() => {
+  return [...draftSessions.value]
+    .filter(draft => {
+      const categoryMatched = !draftCategoryFilter.value
+        || draft.recommendations?.category_hint === draftCategoryFilter.value
+      const sourceMatched = !draftSourceFilter.value
+        || draft.recommendations?.data_source_hint === draftSourceFilter.value
+      const matchLevelMatched = !draftHighMatchOnly.value || isHighMatchDraft(draft)
+      return categoryMatched && sourceMatched && matchLevelMatched
+    })
+    .sort((left, right) => {
+      const scoreDiff = getDraftRecommendationWeight(right) - getDraftRecommendationWeight(left)
+      if (scoreDiff !== 0) return scoreDiff
+      return new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
+    })
+})
+
+const hasGenerationContext = (row: ExternalSkill | null | undefined) => {
+  return !!(
+    row?.generation_context?.category_hint
+    || row?.generation_context?.data_source_hint
+    || row?.generation_context?.stock_collections?.length
+    || row?.generation_context?.external_sources?.length
+  )
+}
+
+const hasRecommendationContext = (context?: OptimizeResult['generation_context'] | null) => {
+  return !!(
+    context?.category_hint
+    || context?.data_source_hint
+    || context?.stock_collections?.length
+    || context?.external_sources?.length
+  )
+}
+
+const getGenerationStrategySummary = (row: ExternalSkill) => {
+  const stockCount = row.generation_context?.stock_collections?.length || 0
+  const sourceCount = row.generation_context?.external_sources?.length || 0
+  const parts: string[] = []
+  if (stockCount) parts.push(`${stockCount} 个本地集合`)
+  if (sourceCount) parts.push(`${sourceCount} 个外部来源`)
+  return parts.join(' · ') || '已记录策略'
+}
 
 // ==================== 方法 ====================
 
@@ -367,6 +685,10 @@ const goToCreate = (sessionId?: string) => {
   } else {
     router.push('/workflow/skill-generation/create')
   }
+}
+
+const goToCreateWithFocus = (sessionId: string, focus: 'recommendations' | 'confirm') => {
+  router.push({ path: '/workflow/skill-generation/create', query: { sessionId, focus } })
 }
 
 /** 加载 Skill 列表 */
@@ -484,6 +806,7 @@ const handleDelete = (row: ExternalSkill) => {
 /** 查看沟通记录 */
 const showHistoryDialog = async (row: ExternalSkill) => {
   historyDialogTitle.value = row.display_name || row.tool_id
+  historySkillRow.value = row
   historySections.value = []
   historyLoading.value = true
   historyDialogVisible.value = true
@@ -501,6 +824,7 @@ const showHistoryDialog = async (row: ExternalSkill) => {
 const showOptimizeDialog = (row: ExternalSkill) => {
   optimizeSkillId.value = row.tool_id
   optimizeSkillName.value = row.display_name || row.tool_id
+  optimizeSkillRow.value = row
   optimizeFeedback.value = ''
   optimizeStep.value = 'input'
   optimizeProgress.value = 0
@@ -532,6 +856,7 @@ const handleOptimize = async () => {
       status: 'failed', skill_id: optimizeSkillId.value,
       optimize_session_id: '', success: false, version: 0,
       total_rounds: 0, total_time: 0, final_score: null,
+      generation_context: null,
       error: e?.message || '优化失败',
     }
     optimizeStep.value = 'done'
@@ -549,6 +874,12 @@ const loadDrafts = async () => {
     // 静默失败，不影响主流程
     draftSessions.value = []
   }
+}
+
+const resetDraftFilters = () => {
+  draftCategoryFilter.value = ''
+  draftSourceFilter.value = ''
+  draftHighMatchOnly.value = false
 }
 
 /** 获取草稿预览文字 */
@@ -616,9 +947,45 @@ onActivated(() => { loadSkills(); loadDrafts() })
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
     margin-bottom: 12px;
     h2 { font-size: 16px; margin: 0; }
   }
+}
+
+.draft-section-title {
+  display: grid;
+  gap: 4px;
+}
+
+.draft-section-subtitle {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.draft-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.draft-card-statuses {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.draft-match-tag {
+  cursor: help;
+}
+
+.draft-filter-summary {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .draft-cards {
@@ -664,6 +1031,24 @@ onActivated(() => { loadSkills(); loadDrafts() })
   }
 }
 
+.draft-recommendations {
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.draft-recommendation-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.draft-recommendation-label {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+
 .draft-card-footer {
   display: flex;
   justify-content: space-between;
@@ -687,6 +1072,50 @@ onActivated(() => { loadSkills(); loadDrafts() })
 .skill-name-cell {
   display: flex;
   align-items: center;
+}
+
+.strategy-cell {
+  display: grid;
+  gap: 6px;
+}
+
+.strategy-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.strategy-trigger {
+  justify-content: flex-start;
+  padding: 0;
+  height: auto;
+  color: var(--el-text-color-regular);
+}
+
+.strategy-empty {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+}
+
+.strategy-popover {
+  display: grid;
+  gap: 10px;
+}
+
+.strategy-popover-row,
+.strategy-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.strategy-popover-label,
+.strategy-detail-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  min-width: 56px;
 }
 
 /* ========== 沟通记录（复用 chat-msg 样式） ========== */
@@ -720,6 +1149,41 @@ onActivated(() => { loadSkills(); loadDrafts() })
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
   background: var(--el-fill-color-lighter);
+}
+
+.history-strategy-panel,
+.optimize-strategy-panel {
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+  display: grid;
+  gap: 10px;
+}
+
+.optimize-result-strategy-panel {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+  display: grid;
+  gap: 10px;
+  text-align: left;
+}
+
+.history-strategy-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+}
+
+.history-strategy-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .history-section {
