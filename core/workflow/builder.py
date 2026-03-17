@@ -11,6 +11,8 @@
 
 import logging
 import os
+import uuid
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from app.utils.api_key_utils import truncate_api_key
@@ -28,6 +30,17 @@ from .models import (
     EdgeType,
 )
 from ..agents import AgentRegistry, AgentFactory, AgentConfig
+from ..collaboration_runtime import (
+    InvocationArtifactRef,
+    InvocationPolicy,
+    InvocationProvenance,
+    InvocationRequest,
+    InvocationResult,
+    InvocationSourceType,
+    InvocationStatus,
+    InvocationTargetType,
+    utc_now,
+)
 
 # 分析师类型映射 - 需要工具节点支持的智能体
 # 注意: index_analyst 和 sector_analyst 是"自包含"分析师，
@@ -43,6 +56,8 @@ ANALYST_TOOL_MAPPING = {
     "etf_analyst_v2": "fundamentals",  # ETF 分析师复用 fundamentals 消息槽
     "social_analyst_v2": "social",
 }
+
+_DEFAULT_CALLABLE_SURFACES = {"assistant", "workflow"}
 
 
 class LegacyDependencyProvider:
@@ -1065,7 +1080,8 @@ class WorkflowBuilder:
         node_id: str,
         node_label: str,
         agent_id: str,
-        analyst_type: str
+        analyst_type: str,
+        output_field: Optional[str] = None,
     ) -> Callable:
         """
         为分析师创建包装器，使用独立的消息历史
@@ -1113,7 +1129,15 @@ class WorkflowBuilder:
             analyst_state = {**state, "messages": analyst_messages}
 
             # 调用分析师节点
-            result = analyst_node(analyst_state)
+            result = self._execute_agent_node_with_runtime(
+                state=analyst_state,
+                agent_callable=analyst_node,
+                agent_id=agent_id,
+                node_id=node_id,
+                node_label=node_label,
+                output_field=output_field,
+                legacy_adapter=True,
+            )
 
             # 打印返回结果中的计数器
             for key in ["market_tool_call_count", "sentiment_tool_call_count", "news_tool_call_count", "fundamentals_tool_call_count"]:
@@ -1473,23 +1497,19 @@ class WorkflowBuilder:
             logger.info(f"=" * 80)
 
             # 包装以添加日志
-            def logged_agent(state, _agent=agent, _id=node_id, _label=node_label, _agent_id=agent_id):
-                logger.info(f"[节点执行] 🚀 {_id} ({_label}) - 开始执行")
-                # 🆕 注入 node_id 到 state，用于加载节点专属提示词
-                if isinstance(state, dict) and state.get('node_id') != _id:
-                    state = {**state, 'node_id': _id}
-                result = _agent(state)
-                # 🔍 调试：打印返回结果
-                if isinstance(result, dict):
-                    result_keys = list(result.keys())
-                    logger.info(f"[节点执行] 📝 {_id} ({_label}) - Agent返回字段: {result_keys}")
-                    # 检查是否包含分析结果
-                    for key in ['timing_analysis', 'position_analysis', 'emotion_analysis', 'attribution_analysis', 'review_summary']:
-                        if key in result:
-                            content = result[key]
-                            logger.info(f"[节点执行] ✅ {_id} 包含 {key}: {len(content) if isinstance(content, str) else 'N/A'} 字符")
-                logger.info(f"[节点执行] ✅ {_id} ({_label}) - 执行完成")
-                return result
+            self._ensure_workflow_surface_access(agent_id, db_agent_config)
+            output_field = self._resolve_agent_output_field(agent_id, node.config, db_agent_config)
+
+            def logged_agent(state, _agent=agent, _id=node_id, _label=node_label, _agent_id=agent_id, _output_field=output_field):
+                return self._execute_agent_node_with_runtime(
+                    state=state,
+                    agent_callable=_agent,
+                    agent_id=_agent_id,
+                    node_id=_id,
+                    node_label=_label,
+                    output_field=_output_field,
+                    node_config=node.config,
+                )
             return logged_agent
 
         # 尝试使用遗留适配器
@@ -1498,19 +1518,32 @@ class WorkflowBuilder:
             self._agents[node.id] = legacy_node
             logger.info(f"[智能体创建] ✅ 使用遗留适配器创建: {agent_id} -> node_id: {node.id}")
 
+            self._ensure_workflow_surface_access(agent_id, db_agent_config)
+            output_field = self._resolve_agent_output_field(agent_id, node.config, db_agent_config)
+
             # 检查是否是分析师节点（需要独立消息历史）
             if agent_id in ANALYST_TOOL_MAPPING:
                 analyst_type = ANALYST_TOOL_MAPPING[agent_id]
-                return self._create_analyst_wrapper(legacy_node, node_id, node_label, agent_id, analyst_type)
+                return self._create_analyst_wrapper(
+                    legacy_node,
+                    node_id,
+                    node_label,
+                    agent_id,
+                    analyst_type,
+                    output_field=output_field,
+                )
 
-            def logged_legacy(state, _node=legacy_node, _id=node_id, _label=node_label, _agent_id=agent_id):
-                logger.info(f"[节点执行] 🚀 {_id} ({_label}) - 开始执行 (遗留适配器: {_agent_id})")
-                result = _node(state)
-                # 打印返回结果的键，方便调试
-                if isinstance(result, dict):
-                    logger.info(f"[节点执行] 📝 {_id} ({_label}) - 返回字段: {list(result.keys())}")
-                logger.info(f"[节点执行] ✅ {_id} ({_label}) - 执行完成")
-                return result
+            def logged_legacy(state, _node=legacy_node, _id=node_id, _label=node_label, _agent_id=agent_id, _output_field=output_field):
+                return self._execute_agent_node_with_runtime(
+                    state=state,
+                    agent_callable=_node,
+                    agent_id=_agent_id,
+                    node_id=_id,
+                    node_label=_label,
+                    output_field=_output_field,
+                    node_config=node.config,
+                    legacy_adapter=True,
+                )
             return logged_legacy
 
         # 智能体未实现，返回占位函数
@@ -1535,6 +1568,381 @@ class WorkflowBuilder:
             return doc is not None
         except Exception:
             return False
+
+    def _normalize_callable_surfaces(self, raw_surfaces: Optional[List[Any]]) -> Set[str]:
+        normalized = {
+            str(item).strip().lower()
+            for item in (raw_surfaces or [])
+            if str(item).strip()
+        }
+        return normalized or set(_DEFAULT_CALLABLE_SURFACES)
+
+    def _ensure_workflow_surface_access(
+        self,
+        agent_id: str,
+        db_agent_config: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        metadata = self.registry.get_metadata(agent_id)
+        metadata_surfaces = getattr(metadata, "callable_surfaces", None)
+        db_surfaces = ((db_agent_config or {}).get("metadata") or {}).get("callable_surfaces")
+        allowed_surfaces = self._normalize_callable_surfaces(db_surfaces or metadata_surfaces)
+
+        if "workflow" not in allowed_surfaces:
+            raise ValueError(f"Agent {agent_id} 当前不允许从 workflow 入口直接调用")
+
+    def _resolve_agent_output_field(
+        self,
+        agent_id: str,
+        node_config: Optional[Dict[str, Any]] = None,
+        db_agent_config: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        config = node_config or {}
+        if config.get("output_field"):
+            return str(config["output_field"])
+
+        if (db_agent_config or {}).get("output_field"):
+            return str(db_agent_config["output_field"])
+
+        db_metadata = (db_agent_config or {}).get("metadata") or {}
+        if db_metadata.get("output_field"):
+            return str(db_metadata["output_field"])
+
+        metadata = self.registry.get_metadata(agent_id)
+        if metadata and getattr(metadata, "output_field", None):
+            return str(metadata.output_field)
+        if metadata and getattr(metadata, "outputs", None):
+            outputs = getattr(metadata, "outputs", []) or []
+            if outputs and getattr(outputs[0], "name", None):
+                return str(outputs[0].name)
+        return None
+
+    def _sanitize_runtime_value(self, value: Any, max_text_length: int = 2000, depth: int = 0) -> Any:
+        if isinstance(value, str):
+            return value[:max_text_length]
+        if isinstance(value, (int, float, bool)) or value is None:
+            return value
+        if depth >= 1:
+            return str(value)[:max_text_length]
+        if isinstance(value, list):
+            return [self._sanitize_runtime_value(item, max_text_length=max_text_length, depth=depth + 1) for item in value[:10]]
+        if isinstance(value, dict):
+            sanitized: Dict[str, Any] = {}
+            for key, item in list(value.items())[:20]:
+                sanitized[str(key)] = self._sanitize_runtime_value(item, max_text_length=max_text_length, depth=depth + 1)
+            return sanitized
+        return str(value)[:max_text_length]
+
+    def _build_workflow_payload(self, state: Any) -> Dict[str, Any]:
+        if not isinstance(state, dict):
+            return {"raw_state": self._sanitize_runtime_value(state)}
+
+        payload: Dict[str, Any] = {}
+        preferred_keys = [
+            "symbol",
+            "ticker",
+            "stock_symbol",
+            "stock_code",
+            "trade_date",
+            "analysis_date",
+            "market_type",
+            "task",
+            "task_description",
+            "query",
+        ]
+
+        for key in preferred_keys:
+            if key in state:
+                payload[key] = self._sanitize_runtime_value(state.get(key))
+
+        if not payload:
+            snapshot = {}
+            for key, value in state.items():
+                if key.startswith("_") or key == "messages":
+                    continue
+                snapshot[key] = self._sanitize_runtime_value(value)
+                if len(snapshot) >= 12:
+                    break
+            payload["state_snapshot"] = snapshot
+
+        return payload
+
+    def _extract_report_text(self, result: Dict[str, Any], output_field: Optional[str]) -> str:
+        candidate_fields = [
+            output_field,
+            "final_report",
+            "analysis_report",
+            "summary",
+            "analysis_result",
+        ]
+        for field_name in candidate_fields:
+            if not field_name:
+                continue
+            value = result.get(field_name)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if isinstance(value, dict):
+                for nested_key in ("content", "markdown", "text", "message", "report"):
+                    nested_value = value.get(nested_key)
+                    if isinstance(nested_value, str) and nested_value.strip():
+                        return nested_value.strip()
+
+        for value in result.values():
+            if isinstance(value, str) and value.strip() and len(value.strip()) > 20:
+                return value.strip()
+        return ""
+
+    def _sanitize_structured_output(self, result: Any) -> Dict[str, Any]:
+        if not isinstance(result, dict):
+            return {"raw_result": self._sanitize_runtime_value(result, max_text_length=4000)}
+
+        sanitized: Dict[str, Any] = {}
+        for key, value in result.items():
+            if key == "messages":
+                continue
+            sanitized[str(key)] = self._sanitize_runtime_value(value, max_text_length=4000)
+        return sanitized
+
+    def _build_workflow_invocation_request(
+        self,
+        *,
+        state: Any,
+        agent_id: str,
+        node_id: str,
+        node_label: str,
+        output_field: Optional[str],
+        timeout_seconds: int,
+    ) -> InvocationRequest:
+        runtime_context = {}
+        user_id = None
+        thread_id = None
+        execution_id = None
+        parent_invocation_id = None
+        root_invocation_id = None
+        if isinstance(state, dict):
+            runtime_context = dict(state.get("_workflow_runtime") or {})
+            user_id = state.get("user_id") or runtime_context.get("user_id")
+            thread_id = state.get("thread_id") or runtime_context.get("thread_id")
+            execution_id = state.get("execution_id") or runtime_context.get("execution_id")
+            lineage = state.get("invocation_lineage") if isinstance(state.get("invocation_lineage"), dict) else {}
+            parent_invocation_id = lineage.get("current_invocation_id") or lineage.get("parent_invocation_id")
+            root_invocation_id = lineage.get("root_invocation_id")
+            if not user_id:
+                context = state.get("context")
+                if isinstance(context, dict):
+                    user_id = context.get("user_id")
+                    thread_id = thread_id or context.get("thread_id") or context.get("session_id")
+                    execution_id = execution_id or context.get("request_id")
+                    extra = context.get("extra") if isinstance(context.get("extra"), dict) else {}
+                    parent_invocation_id = parent_invocation_id or context.get("request_id") or extra.get("invocation_id")
+                    root_invocation_id = root_invocation_id or extra.get("root_invocation_id") or parent_invocation_id
+                elif context is not None:
+                    user_id = getattr(context, "user_id", None)
+                    thread_id = thread_id or getattr(context, "thread_id", None) or getattr(context, "session_id", None)
+                    execution_id = execution_id or getattr(context, "request_id", None)
+                    extra = getattr(context, "extra", None)
+                    if isinstance(extra, dict):
+                        parent_invocation_id = parent_invocation_id or getattr(context, "request_id", None) or extra.get("invocation_id")
+                        root_invocation_id = root_invocation_id or extra.get("root_invocation_id") or parent_invocation_id
+
+        workflow_id = runtime_context.get("workflow_id") or self._workflow_id
+        execution_id = execution_id or runtime_context.get("execution_id")
+        invocation_id = f"winv_{uuid.uuid4().hex}"
+        idempotency_key = f"{execution_id}:{node_id}" if execution_id else invocation_id
+
+        return InvocationRequest(
+            invocation_id=invocation_id,
+            target_type=InvocationTargetType.AGENT,
+            target_id=agent_id,
+            action="execute",
+            payload=self._build_workflow_payload(state),
+            provenance=InvocationProvenance(
+                source_type=InvocationSourceType.WORKFLOW,
+                source_id=workflow_id,
+                user_id=user_id,
+                session_id=execution_id,
+                thread_id=thread_id,
+                workflow_id=workflow_id,
+                step_id=node_id,
+                trigger="workflow_node",
+                metadata={
+                    "node_label": node_label,
+                    "state_keys": [
+                        key for key in list(state.keys())[:30]
+                        if isinstance(state, dict) and not str(key).startswith("_")
+                    ] if isinstance(state, dict) else [],
+                },
+            ),
+            policy=InvocationPolicy(
+                idempotency_key=idempotency_key,
+                timeout_seconds=timeout_seconds,
+                lane=f"workflow.{workflow_id or 'default'}",
+                visible_to_caller=True,
+            ),
+            metadata={
+                "invocation_source": "workflow_builder",
+                "node_id": node_id,
+                "node_label": node_label,
+                "output_field": output_field,
+                "root_invocation_id": root_invocation_id or parent_invocation_id or invocation_id,
+                "parent_invocation_id": parent_invocation_id,
+            },
+        )
+
+    def _persist_workflow_invocation_record(
+        self,
+        request: InvocationRequest,
+        result: InvocationResult,
+    ) -> None:
+        db = getattr(self.binding_manager, "_db", None)
+        if db is None:
+            return
+
+        db.workflow_agent_invocations.update_one(
+            {"invocation_id": request.invocation_id},
+            {
+                "$set": {
+                    "invocation_id": request.invocation_id,
+                    "root_invocation_id": request.metadata.get("root_invocation_id") or request.invocation_id,
+                    "parent_invocation_id": request.metadata.get("parent_invocation_id"),
+                    "workflow_id": request.provenance.workflow_id,
+                    "execution_id": request.provenance.session_id,
+                    "thread_id": request.provenance.thread_id,
+                    "step_id": request.provenance.step_id,
+                    "user_id": request.provenance.user_id,
+                    "target_type": request.target_type.value,
+                    "target_id": request.target_id,
+                    "status": result.status.value,
+                    "request": request.to_python_dict(),
+                    "result": result.to_python_dict(),
+                    "updated_at": datetime.utcnow(),
+                },
+                "$setOnInsert": {"created_at": datetime.utcnow()},
+            },
+            upsert=True,
+        )
+
+    def _execute_agent_node_with_runtime(
+        self,
+        *,
+        state: Any,
+        agent_callable: Callable,
+        agent_id: str,
+        node_id: str,
+        node_label: str,
+        output_field: Optional[str],
+        node_config: Optional[Dict[str, Any]] = None,
+        legacy_adapter: bool = False,
+    ) -> Dict[str, Any]:
+        logger.info(
+            f"[节点执行] 🚀 {node_id} ({node_label}) - 开始执行"
+            + (f" (遗留适配器: {agent_id})" if legacy_adapter else "")
+        )
+
+        agent_metadata = self.registry.get_metadata(agent_id)
+        agent_version = getattr(agent_metadata, "version", None)
+        raw_maintenance_status = getattr(agent_metadata, "maintenance_status", None)
+        if raw_maintenance_status is not None:
+            agent_maintenance_status = getattr(raw_maintenance_status, "value", str(raw_maintenance_status))
+        else:
+            normalized_version = str(agent_version or "").lower()
+            agent_maintenance_status = "unmaintained" if normalized_version.startswith(("1", "v1")) else "maintained"
+
+        invocation_request = self._build_workflow_invocation_request(
+            state=state,
+            agent_id=agent_id,
+            node_id=node_id,
+            node_label=node_label,
+            output_field=output_field,
+            timeout_seconds=180,
+        )
+        started_at = utc_now()
+
+        try:
+            agent_state = state
+            if isinstance(state, dict):
+                agent_state = {
+                    **state,
+                    "node_id": node_id,
+                    "node_config": dict(node_config or {}),
+                    "invocation_provenance": invocation_request.provenance.to_python_dict(),
+                    "invocation_lineage": {
+                        "current_invocation_id": invocation_request.invocation_id,
+                        "parent_invocation_id": invocation_request.metadata.get("parent_invocation_id"),
+                        "root_invocation_id": invocation_request.metadata.get("root_invocation_id") or invocation_request.invocation_id,
+                    },
+                }
+
+            raw_result = agent_callable(agent_state)
+            result = raw_result if isinstance(raw_result, dict) else {
+                (output_field or f"{agent_id}_report"): raw_result
+            }
+
+            logger.info(f"[节点执行] 📝 {node_id} ({node_label}) - 返回字段: {list(result.keys())}")
+
+            invocation_result = InvocationResult(
+                invocation_id=invocation_request.invocation_id,
+                target_type=InvocationTargetType.AGENT,
+                target_id=agent_id,
+                status=InvocationStatus.SUCCEEDED,
+                started_at=started_at,
+                output_text=self._extract_report_text(result, output_field),
+                structured_output=self._sanitize_structured_output(result),
+                output_field=output_field,
+                artifacts=[
+                    InvocationArtifactRef(
+                        ref_type="workflow_agent_invocation",
+                        artifact_key=invocation_request.invocation_id,
+                        title=f"Workflow节点调用：{node_label}",
+                        summary=self._extract_report_text(result, output_field)[:300],
+                        source_collection="workflow_agent_invocations",
+                        output_field=output_field,
+                        metadata={
+                            "agent_id": agent_id,
+                            "agent_version": agent_version,
+                            "maintenance_status": agent_maintenance_status,
+                            "node_id": node_id,
+                            "workflow_id": invocation_request.provenance.workflow_id,
+                        },
+                    )
+                ],
+                metadata={
+                    "node_id": node_id,
+                    "node_label": node_label,
+                    "workflow_id": invocation_request.provenance.workflow_id,
+                    "execution_id": invocation_request.provenance.session_id,
+                    "agent_version": agent_version,
+                    "maintenance_status": agent_maintenance_status,
+                    "legacy_adapter": legacy_adapter,
+                    "root_invocation_id": invocation_request.metadata.get("root_invocation_id") or invocation_request.invocation_id,
+                    "parent_invocation_id": invocation_request.metadata.get("parent_invocation_id"),
+                },
+            )
+            self._persist_workflow_invocation_record(invocation_request, invocation_result)
+
+            logger.info(f"[节点执行] ✅ {node_id} ({node_label}) - 执行完成")
+            return result
+        except Exception as exc:
+            invocation_result = InvocationResult(
+                invocation_id=invocation_request.invocation_id,
+                target_type=InvocationTargetType.AGENT,
+                target_id=agent_id,
+                status=InvocationStatus.FAILED,
+                started_at=started_at,
+                output_field=output_field,
+                error_message=str(exc),
+                metadata={
+                    "node_id": node_id,
+                    "node_label": node_label,
+                    "workflow_id": invocation_request.provenance.workflow_id,
+                    "execution_id": invocation_request.provenance.session_id,
+                    "agent_version": agent_version,
+                    "maintenance_status": agent_maintenance_status,
+                    "legacy_adapter": legacy_adapter,
+                },
+            )
+            self._persist_workflow_invocation_record(invocation_request, invocation_result)
+            logger.exception(f"[节点执行] ❌ {node_id} ({node_label}) - 执行失败: {exc}")
+            raise
 
     def _try_create_legacy_agent(self, agent_id: str) -> Optional[Callable]:
         """

@@ -1,5 +1,34 @@
 import { ApiClient, type ApiResponse } from './request'
 
+export interface DebugAgentInputField {
+  name: string
+  type: string
+  description?: string
+}
+
+export interface DebugAgentInputContractField extends DebugAgentInputField {
+  required?: boolean
+  source?: 'request' | 'state' | 'context'
+  state_field?: string
+  source_state_fields?: string[]
+  producer_hint?: string
+}
+
+export interface DebugAgentInfo {
+  id: string
+  name: string
+  version: string
+  category: string
+  description?: string
+  debug_inputs?: DebugAgentInputField[]
+  input_contract?: DebugAgentInputContractField[]
+  maturity_level?: 'experimental' | 'internal' | 'stable'
+  input_mode?: 'standalone' | 'upstream-dependent' | 'mixed'
+  debug_replay_mode?: 'direct' | 'requires_extra_state' | 'requires_chain_prefill'
+  maintenance_status?: 'maintained' | 'unmaintained'
+  callable_surfaces?: string[]
+}
+
 export interface AnalystDebugPayload {
   analyst_type: 'fundamentals' | 'market' | 'news' | 'social' | 'index_analyst' | 'sector_analyst'
   agent_version?: string
@@ -9,6 +38,7 @@ export interface AnalystDebugPayload {
   llm: { provider: string; model: string; temperature?: number; max_tokens?: number; backend_url?: string; api_key?: string }
   stock: { symbol: string; market_type?: string; analysis_date?: string }
   dataopts?: Record<string, any>
+  extra_state?: Record<string, any>
 }
 
 // 🆕 工作流调试请求类型
@@ -30,17 +60,60 @@ export interface WorkflowInfo {
   tags?: string[]
 }
 
+export interface TemplateDebugInvocationRecord {
+  invocation_id: string
+  root_invocation_id?: string
+  parent_invocation_id?: string
+  source_collection: string
+  source_type?: 'assistant' | 'workflow' | 'agent'
+  source_id?: string
+  target_type?: string
+  target_id?: string
+  status?: string
+  user_id?: string
+  workflow_id?: string
+  execution_id?: string
+  thread_id?: string
+  step_id?: string
+  symbol?: string
+  summary?: string
+  output_field?: string
+  error_message?: string
+  started_at?: string
+  completed_at?: string
+  created_at?: string
+  updated_at?: string
+  request?: Record<string, any>
+  result?: Record<string, any>
+}
+
+export interface TemplateDebugInvocationChain {
+  root_invocation_id: string
+  symbol?: string
+  workflow_id?: string
+  thread_id?: string
+  latest_created_at?: string
+  summary?: string
+  status_counts: Record<string, number>
+  count: number
+  items: TemplateDebugInvocationRecord[]
+}
+
+export interface TemplateDebugInvocationListResult {
+  items: TemplateDebugInvocationRecord[]
+  chains?: TemplateDebugInvocationChain[]
+  total: number
+  page: number
+  page_size: number
+  group_by_root?: boolean
+  has_more: boolean
+}
+
 export const TemplatesDebugApi = {
   /**
    * 获取所有可用于调试的agents
    */
-  async listDebugAgents(): Promise<ApiResponse<Array<{
-    id: string
-    name: string
-    version: string
-    category: string
-    description?: string
-  }>>> {
+  async listDebugAgents(): Promise<ApiResponse<DebugAgentInfo[]>> {
     return ApiClient.get('/api/templates/debug/agents')
   },
 
@@ -79,5 +152,24 @@ export const TemplatesDebugApi = {
       timeout: 15 * 60 * 1000,  // 15 分钟超时（完整工作流可能需要更长时间）
       retryCount: 0  // 禁用重试
     })
+  },
+
+  /**
+   * 查询统一调用记录
+   */
+  async listInvocations(params: {
+    source_type?: 'assistant' | 'workflow' | 'agent'
+    target_id?: string
+    root_invocation_id?: string
+    workflow_id?: string
+    execution_id?: string
+    thread_id?: string
+    symbol?: string
+    status?: string
+    group_by_root?: boolean
+    page?: number
+    page_size?: number
+  }): Promise<ApiResponse<TemplateDebugInvocationListResult>> {
+    return ApiClient.get('/api/templates/debug/invocations', { params })
   }
 }

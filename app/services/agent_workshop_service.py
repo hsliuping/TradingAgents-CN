@@ -34,7 +34,7 @@ from app.models.agent_workshop import (
 )
 from app.services.prompt_template_service import PromptTemplateService
 from app.utils.timezone import now_tz
-from core.agents.config import AgentCategory, AgentInput, AgentMetadata, AgentOutput, LicenseTier
+from core.agents.config import AgentCategory, AgentInput, AgentMaintenanceStatus, AgentMetadata, AgentOutput, LicenseTier
 from core.llm import UnifiedLLMClient, Message
 from core.tools import get_tool_registry
 from core.tools.config import ToolCategory
@@ -192,11 +192,30 @@ class AgentWorkshopService:
             raise ValueError(f"会话 {session_id} 不存在")
         self._ensure_session_can_continue(session)
 
+        logger.info(
+            "[AgentWorkshop] 开始缺口分析: session_id=%s spec_id=%s spec_name=%s %s",
+            session.session_id,
+            session.spec_id,
+            session.current_spec_snapshot.name,
+            self._format_gap_analysis_llm_log(),
+        )
+
         gap_report = await self._build_gap_analysis(session.current_spec_snapshot)
         session.stage = AgentWorkshopStage.GAP_ANALYSIS
         session.gap_report = gap_report
         session.updated_at = now_tz()
         await self._save_session(session)
+
+        logger.info(
+            "[AgentWorkshop] 缺口分析完成: session_id=%s spec_id=%s mode=%s existing_tools=%s suggested_tools=%s blocking_gaps=%s %s",
+            session.session_id,
+            session.spec_id,
+            self._detect_gap_analysis_mode(gap_report),
+            len(gap_report.existing_tools or []),
+            len(gap_report.suggested_tools or []),
+            len(gap_report.blocking_gaps or []),
+            self._format_gap_analysis_llm_log(),
+        )
 
         return {
             "session_id": session_id,
@@ -245,7 +264,7 @@ class AgentWorkshopService:
         version_id = f"{spec.spec_id}_v{version_number}"
 
         required_tools = self._select_required_tools(spec, session.gap_report)
-        required_skills = self._select_required_skills(session.gap_report)
+        required_capabilities = self._select_required_capabilities(session.gap_report, session.tooling_plan)
         output_schema = self._build_output_schema(spec)
         evaluation_policy = self._build_evaluation_policy(spec)
         prompt_template = await self._create_prompt_template(version_id, spec, required_tools)
@@ -259,7 +278,7 @@ class AgentWorkshopService:
             agent_metadata=metadata,
             prompt_template_ref=prompt_template,
             required_tools=required_tools,
-            required_skills=required_skills,
+            required_capabilities=required_capabilities,
             output_schema=output_schema,
             evaluation_policy=evaluation_policy,
             published_from_session_id=session.session_id,
@@ -734,7 +753,9 @@ class AgentWorkshopService:
                 "template_name": version.prompt_template_ref.get("template_name"),
             },
             "metadata": {
+                "agent_id": version.agent_metadata.get("id") or version.version_id,
                 "agent_name": version.agent_metadata.get("name") or spec.name,
+                "maintenance_status": version.agent_metadata.get("maintenance_status") or AgentMaintenanceStatus.MAINTAINED.value,
                 "required_tools": version.required_tools,
                 "user_goal": user_goal,
             },
@@ -922,6 +943,49 @@ class AgentWorkshopService:
         ])
         return "\n".join(lines)
 
+    def _build_project_background_context(self) -> str:
+        lines = [
+            "当前项目背景：",
+            "- 这是 TradingAgents-CN，一个面向投研和交易分析场景的多智能体金融分析系统。",
+            "- 系统已经具备单股分析、ETF 分析、持仓分析、交易复盘、组合健康度、智能助手、Prompt 设计、工作流生成、能力生成与任务中心等模块。",
+            "- 系统里的 Agent 不是独立 App，也不是一次性的聊天角色，而是可以被接入现有分析流、全新自定义流程、智能助手调用链、提示词系统、工具注册表、调试链路和评估链路的可运行能力单元。",
+            "- Agent 工坊的目的，是围绕某个新 Agent 做完整生命周期闭环：需求澄清、规格定义、能力缺口识别、版本草案生成、真实结果评估、再迭代。",
+            "- 这里之所以要生成 Agent，不是为了展示一个概念，而是为了给现有系统补一个可复用、可评估、可继续迭代的新角色能力。",
+            "- 因此你在需求沟通时，要优先考虑这个 Agent 如何嵌入现有系统：它服务什么分析场景，复用哪些现有能力，还缺哪些可调用能力，以及它更适合被单独调用、被助手调用、还是被编排进某条工作流。",
+            "- 对用户来说，Agent 工坊的价值不是从零造一个全新系统，而是基于现有金融分析系统，补齐一个更专业、更可复核的新 Agent。",
+        ]
+        return "\n".join(lines)
+
+    def _build_application_scene_context(self) -> str:
+        lines = [
+            "当前系统中的典型接入场景：",
+            "- 单股分析 / ETF 分析：适合能输出结构化观点、估值、风险拆解、催化剂分析、结论摘要的 Agent。",
+            "- 批量分析 / 股票筛选：适合能做标准化打分、排序、初筛、信号归类、候选池比较的 Agent。",
+            "- 智能助手：适合能被助手直接调用、一次性交付完整能力结果的 Agent。这里不必预设助手一定要先组装多个工具；Agent 本身就可以是被调用的完整能力单元。",
+            "- 持仓分析 / 组合健康度：适合能做仓位诊断、集中度检查、风险暴露识别、再平衡建议的 Agent。",
+            "- 操作复盘 / 交易计划：适合能复盘买卖逻辑、检查纪律执行、提炼经验教训、生成计划模板的 Agent。",
+            "- 分析报告 / 任务中心：适合能把中间结果整理成报告卡片、阶段结论、异步任务产物或可追踪检查项的 Agent。",
+            "- 多 Agent 编排 / 自定义流程：适合放入新建工作流中的专用角色，例如研究员、评审者、风险把关者、估值汇总者。",
+            "- 这些场景只是帮助理解典型用法，不是限制条件。新 Agent 既可能复用到现有页面，也可能进入全新自定义流程，或被智能助手直接当作完整能力调用。",
+            "- 需求沟通时请主动补齐这些关键落点：核心使用方式、触发入口、上游输入、依赖能力、输出形态、下游消费方、是否需要进入调试或评估链路。",
+        ]
+        return "\n".join(lines)
+
+    def _build_agent_role_pattern_context(self) -> str:
+        lines = [
+            "当前系统里已有的典型 Agent 角色模式：",
+            "- 单股/行业研究链路常见角色：市场分析师、基本面分析师、新闻分析师、社媒分析师、大盘分析师、板块分析师、ETF 分析师。适合做分维度观察、形成结构化子结论。",
+            "- 观点对抗链路常见角色：看涨研究员、看跌研究员。适合把同一标的拆成多空两套论证，再交给管理者汇总。",
+            "- 管理汇总链路常见角色：研究经理、风险管理者。适合做跨分析师整合、冲突裁决、风险兜底、结论收束。",
+            "- 风险辩论链路常见角色：激进风险分析师、保守风险分析师、中性风险分析师。适合围绕仓位、风险承受和交易约束给出不同风险立场。",
+            "- 复盘链路常见角色：时机分析师、仓位分析师、情绪分析师、归因分析师、复盘总结师。适合解释交易为什么做、哪里做对/做错、后续如何改。",
+            "- 持仓/组合链路常见角色：技术面分析师、基本面分析师、风险评估师、操作建议师。适合对现有持仓做诊断、归因和调仓建议。",
+            "- 后处理链路常见角色：数据准备器、报告生成器。适合把上游结果规整成统一输入或可展示报告。",
+            "- 如果用户提的是一个新 Agent，你应先判断它更像哪一类角色：独立分析师、对抗研究员、管理者、风险辩论者、复盘分析者、持仓顾问，还是后处理器。",
+            "- 如果用户描述其实是某个既有角色的细分能力升级，例如估值、筹码、情绪、归因，请优先建议做成现有角色的增强版或专用子角色，而不是凭空创造难落地的大而全新物种。",
+        ]
+        return "\n".join(lines)
+
     async def _analyze_requirement_turn(
         self,
         messages: List[str],
@@ -940,21 +1004,34 @@ class AgentWorkshopService:
             f"第{idx + 1}轮用户输入：\n{item.strip()}" for idx, item in enumerate(messages) if item and item.strip()
         )
         capability_snapshot = await self._collect_capability_snapshot()
+        project_background_context = self._build_project_background_context()
+        application_scene_context = self._build_application_scene_context()
+        agent_role_pattern_context = self._build_agent_role_pattern_context()
         capability_context = self._build_capability_context(capability_snapshot)
 
         prompt = "\n".join([
-            "你是 Agent 工坊里的需求澄清助手。",
-            "你的任务不是套用固定模板，而是根据用户多轮输入，动态判断需求是否清楚、是否可做，并整理出一版 Agent 规格草案。",
+            "你是 Agent 工坊里的金融行业专家兼需求澄清助手。",
+            "你的任务不是套用固定模板，而是根据用户多轮输入，动态判断需求是否清楚、是否可做，并整理出一版 Agent 规格草案。你要像资深金融产品专家一样，先给可落地建议，再只追问少数真正会影响设计分叉的点。",
             "要求：",
-            "1. 严禁使用硬编码的行业默认规则去替用户补需求。用户没说清楚的地方，要追问，不要自作主张。",
-            "2. 如果用户后续补充了限制、目标、输出、方法、样本或验收标准，必须覆盖到结果里。",
-            "3. 如果需求明显超出当前 Agent 工坊范围、互相矛盾、或不可落地，请直接判定 not-feasible，并用口语化中文说明为什么做不到。",
-            "4. 如果只是信息不够，请判定 need-clarification，并提出最多 3 个最关键的问题。",
-            "5. 只有当需求已经足够清楚且可以进入下一步时，才判定 feasible。",
-            "6. response_message 必须是直接给用户看的口语化中文，不要写“字段”“schema”“规格化”等系统术语。",
-            "7. 输出必须是纯 JSON，不要 markdown，不要额外解释。",
-            "8. 对股票分析类 Agent，要把现有项目的行情/财务/行业基础能力视为默认可复用前提，不要把用户当成要从零造数据底座。",
-            "9. 如果用户已经明确说要基于现有项目能力做 Agent，就不要再追问‘数据从哪来’这类基础设施问题，除非用户需求里真的涉及新的外部数据依赖。",
+            "1. 你不能把本应由专家判断的内容全部反问给用户。对于行业常识、常见金融分析框架、默认展示结构、常用评分口径，你应先给出推荐方案和理由，再只追问会导致设计分叉的关键点。",
+            "2. 不要用僵硬的硬编码模板替用户做决定，但可以基于金融行业常见最佳实践，主动补成一版可执行草案，并明确哪些是你的推荐默认值。",
+            "3. 如果用户后续补充了限制、目标、输出、方法、样本或验收标准，必须覆盖到结果里。",
+            "4. 如果需求明显超出当前 Agent 工坊范围、互相矛盾、或不可落地，请直接判定 not-feasible，并用口语化中文说明为什么做不到。",
+            "5. 如果只是信息不够，请判定 need-clarification，但必须先给出推荐方案，再提出最多 2 个最关键的问题。不要把零散小问题全部丢给用户。",
+            "6. 只有当需求已经足够清楚且可以进入下一步时，才判定 feasible。",
+            "7. response_message 必须是直接给用户看的口语化中文，不要写“字段”“schema”“规格化”等系统术语；语气要像专家在给方案，不要像客服在收集需求。",
+            "8. 输出必须是纯 JSON，不要 markdown，不要额外解释。",
+            "9. 对股票分析类 Agent，要把现有项目的行情/财务/行业基础能力视为默认可复用前提，不要把用户当成要从零造数据底座。",
+            "10. 如果用户已经明确说要基于现有项目能力做 Agent，就不要再追问‘数据从哪来’这类基础设施问题，除非用户需求里真的涉及新的外部数据依赖。",
+            "11. response_message 里要优先包含：你的理解、你的推荐默认方案、为什么这样更合理；如果还有关键分歧，再补少量确认问题。",
+            "12. 你要把新 Agent 理解成系统里的可运行能力单元，但不要默认它必须挂到现有页面或既有流程；它也可能进入新的自定义工作流，或被智能助手直接调用来一次性完成完整能力。",
+            "13. 讨论接入方式时，请把“被助手直接调用”“进入新建流程编排”“复用到现有模块”都视为平级选项，根据用户目标推荐最合适的一种，而不是强行收敛到既有流程节点。",
+            "",
+            project_background_context,
+            "",
+            application_scene_context,
+            "",
+            agent_role_pattern_context,
             "",
             capability_context,
             "",
@@ -982,6 +1059,8 @@ class AgentWorkshopService:
             '  "feasibility_status": "feasible | need-clarification | not-feasible",',
             '  "response_message": "直接给用户看的中文回复",',
             '  "refusal_reason": "若做不到，说明原因；否则为空字符串",',
+            '  "expert_recommendations": [],',
+            '  "assumed_defaults": [],',
             '  "pending_questions": [],',
             '  "completeness_score": 0.0,',
             '  "name": "",',
@@ -1000,23 +1079,30 @@ class AgentWorkshopService:
         ])
 
         response = await client.achat([
-            Message(role="system", content="你擅长把用户需求澄清成可执行的 Agent 设计输入。你不会乱补默认规则；不清楚就追问，做不到就直接说明。只输出纯 JSON。"),
+            Message(role="system", content="你擅长把用户需求澄清成可执行的 Agent 设计输入。你是金融行业专家，正在为 TradingAgents-CN 这个多智能体金融分析系统设计新 Agent。你不会把本应由专家补充的判断都丢给用户；你会结合项目背景、现有模块和可复用能力，先给推荐方案和默认设计，再只追问少数关键分歧。只输出纯 JSON。"),
             Message(role="user", content=prompt),
         ])
         data = json.loads(self._strip_markdown_fence((response.content or "").strip()))
 
         feasibility_status = self._normalize_feasibility_status(data.get("feasibility_status"))
         completeness_score = self._pick_float(data.get("completeness_score"), 0.0)
-        pending_questions = self._pick_list(data.get("pending_questions"), [])[:3]
+        pending_questions = self._pick_list(data.get("pending_questions"), [])[:2]
         refusal_reason = self._pick_str(data.get("refusal_reason"), "")
+        expert_recommendations = self._dedupe([
+            *self._pick_list(data.get("expert_recommendations"), []),
+            *self._pick_list(data.get("assumed_defaults"), []),
+        ])
         spec = self._merge_llm_spec_data(data, base_spec, fallback_spec_id=fallback_spec_id)
+        if not expert_recommendations:
+            expert_recommendations = self._build_expert_recommendations(spec)
         ai_message = self._compose_turn_message(
             self._pick_str(
             data.get("response_message"),
-            self._build_fallback_turn_message(spec, pending_questions, completeness_score, feasibility_status, refusal_reason),
+            self._build_fallback_turn_message(spec, pending_questions, completeness_score, feasibility_status, refusal_reason, expert_recommendations),
             ),
             pending_questions,
             feasibility_status,
+            expert_recommendations,
         )
 
         spec.owner_user_id = user_id
@@ -1141,6 +1227,7 @@ class AgentWorkshopService:
         return {
             "summary": f"当前工坊已识别 {len(gap_report.blocking_gaps)} 个阻塞缺口，建议先补工具再继续追求精确输出。",
             "missing_capabilities": self._dedupe([
+                *gap_report.suggested_capabilities,
                 *gap_report.blocking_gaps,
                 *gap_report.manual_dependencies,
             ]),
@@ -1183,7 +1270,13 @@ class AgentWorkshopService:
 
         return {
             "summary": self._pick_str(data.get("summary"), "工具需求草案已生成。"),
-            "missing_capabilities": self._pick_list(data.get("missing_capabilities"), gap_report.blocking_gaps),
+            "missing_capabilities": self._pick_list(
+                data.get("missing_capabilities"),
+                self._dedupe([
+                    *gap_report.suggested_capabilities,
+                    *gap_report.blocking_gaps,
+                ]),
+            ),
             "draft_tools": draft_tools,
             "implementation_order": self._pick_list(data.get("implementation_order"), []),
             "notes": self._pick_list(data.get("notes"), []),
@@ -1409,19 +1502,42 @@ class AgentWorkshopService:
         completeness_score: float,
         feasibility_status: str,
         refusal_reason: str,
+        expert_recommendations: List[str],
     ) -> str:
         if feasibility_status == "not-feasible":
             return refusal_reason or "这类需求当前没法稳定落到 Agent 工坊里，我建议先把目标收窄一点，再继续讨论。"
         if feasibility_status == "need-clarification":
-            question_block = "\n".join(f"{idx + 1}. {item}" for idx, item in enumerate(pending_questions[:3]))
-            return (
-                f"我大概理解了你想做一个“{spec.name}”，但现在信息还不够，我不想替你脑补规则。"
-                f"\n\n还需要你先确认这几件事：\n{question_block}"
-            ).strip()
+            recommendation_block = "\n".join(f"- {item}" for item in expert_recommendations[:3])
+            question_block = "\n".join(f"{idx + 1}. {item}" for idx, item in enumerate(pending_questions[:2]))
+            message_parts = [
+                f"我先按你的目标补成一版可执行草案，当前我建议把“{spec.name}”先这样设计：",
+            ]
+            if recommendation_block:
+                message_parts.append(recommendation_block)
+            if question_block:
+                message_parts.append(f"还剩 1 到 2 个关键点需要你拍板：\n{question_block}")
+            return "\n\n".join(message_parts).strip()
         return f"我已经把这个 Agent 的核心需求整理出来了，当前大概有 {int(completeness_score * 100)}%，可以往下一步走。"
 
-    def _compose_turn_message(self, message: str, pending_questions: List[str], feasibility_status: str) -> str:
+    def _compose_turn_message(
+        self,
+        message: str,
+        pending_questions: List[str],
+        feasibility_status: str,
+        expert_recommendations: Optional[List[str]] = None,
+    ) -> str:
         base_message = (message or "").strip()
+        recommendation_items = [item for item in (expert_recommendations or []) if item]
+
+        if recommendation_items:
+            contains_recommendation_text = any(item in base_message for item in recommendation_items)
+            contains_recommendation_header = any(token in base_message for token in ["建议", "推荐", "默认", "我会先按"])
+            if not contains_recommendation_text and not contains_recommendation_header:
+                recommendation_block = "\n".join(f"- {item}" for item in recommendation_items[:3])
+                if recommendation_block:
+                    prefix = "我先给你一个推荐方案："
+                    base_message = f"{base_message}\n\n{prefix}\n{recommendation_block}".strip() if base_message else f"{prefix}\n{recommendation_block}"
+
         if feasibility_status != "need-clarification" or not pending_questions:
             return base_message
 
@@ -1434,9 +1550,30 @@ class AgentWorkshopService:
         question_block = "\n".join(f"{idx + 1}. {question}" for idx, question in enumerate(pending_questions[:3]))
         separator = "\n\n" if base_message else ""
         if base_message and not base_message.rstrip().endswith((":", "：", "?", "？")):
-            base_message = f"{base_message}\n\n我还需要你确认这几件事："
+            base_message = f"{base_message}\n\n还需要你确认这几个关键点："
             separator = "\n"
         return f"{base_message}{separator}{question_block}".strip()
+
+    def _build_expert_recommendations(self, spec: AgentSpec) -> List[str]:
+        if self._is_valuation_spec(spec):
+            return self._dedupe([
+                "默认采用 PB、PE、DCF 三种方法并行，先给方法结论，再做综合估值汇总。",
+                "页面先展示综合结论卡、各方法估值区间、关键假设、失效条件和数据依据，这样最符合金融分析阅读习惯。",
+                "评分先默认拆成估值吸引力、基本面质量和安全边际三部分，避免只给单一总分却没有解释。",
+                "“需要考虑”的因素先默认纳入宏观利率、行业景气、资产负债表风险和现金流质量，而不是泛泛罗列所有可能因素。",
+            ])
+
+        recommendations: List[str] = []
+        if spec.primary_goal:
+            recommendations.append(f"我建议先围绕“{spec.primary_goal}”收敛设计，避免功能边界过宽。")
+        if spec.outputs:
+            recommendations.append(f"输出先默认做成结构化卡片，核心包括：{'、'.join(spec.outputs[:4])}。")
+        if spec.responsibilities:
+            recommendations.append(f"职责先聚焦在：{'、'.join(spec.responsibilities[:3])}，暂时不要把相邻能力混进来。")
+        if spec.non_goals:
+            recommendations.append(f"边界上我建议继续明确不做：{'、'.join(spec.non_goals[:3])}。")
+
+        return self._dedupe(recommendations[:4])
 
     def _pick_list(self, value: Any, fallback: List[str]) -> List[str]:
         if not isinstance(value, list):
@@ -1455,8 +1592,157 @@ class AgentWorkshopService:
             "non_goals": spec.non_goals[:3],
         }
 
+    def _build_required_capability_label(self, tool_id: str, tool_name: str = "") -> str:
+        capability_map = {
+            "calculate_pb_valuation": "PB 估值区间计算",
+            "calculate_pe_valuation": "PE 估值区间计算",
+            "calculate_dcf_valuation": "DCF 现金流折现估值",
+            "calculate_weighted_valuation": "多方法综合估值汇总",
+        }
+        if tool_id in capability_map:
+            return capability_map[tool_id]
+
+        normalized_name = str(tool_name or "").replace("工具", "").strip()
+        if normalized_name:
+            return f"{normalized_name}能力"
+
+        normalized_tool_id = str(tool_id or "").strip()
+        if not normalized_tool_id:
+            return "待补可调用能力"
+        return f"{normalized_tool_id} 可调用能力"
+
     async def _build_gap_analysis(self, spec: AgentSpec) -> AgentWorkshopGapAnalysis:
         capability_snapshot = await self._collect_capability_snapshot()
+        try:
+            return await self._build_gap_analysis_with_llm(spec, capability_snapshot)
+        except Exception as exc:
+            logger.warning("[AgentWorkshop] 生成缺口分析时 LLM 失败，使用规则兜底: %s", exc, exc_info=True)
+            gap_report = self._build_gap_analysis_fallback(spec, capability_snapshot)
+            logger.info(
+                "[AgentWorkshop] 缺口分析规则兜底完成: spec_id=%s spec_name=%s existing_tools=%s suggested_tools=%s blocking_gaps=%s %s",
+                spec.spec_id,
+                spec.name,
+                len(gap_report.existing_tools or []),
+                len(gap_report.suggested_tools or []),
+                len(gap_report.blocking_gaps or []),
+                self._format_gap_analysis_llm_log(),
+            )
+            return gap_report
+
+    def _format_gap_analysis_llm_log(self) -> str:
+        provider = self._pick_str(self._llm_client_meta.get("provider") if self._llm_client_meta else None, "unknown")
+        model = self._pick_str(self._llm_client_meta.get("model") if self._llm_client_meta else None, "unknown")
+        timeout = self._llm_client_meta.get("timeout") if self._llm_client_meta else "unknown"
+        return f"provider={provider} model={model} timeout={timeout}s"
+
+    def _detect_gap_analysis_mode(self, gap_report: AgentWorkshopGapAnalysis) -> str:
+        notes = gap_report.notes or []
+        if any("推理模型生成" in note for note in notes):
+            return "llm"
+        if any("规则兜底生成" in note for note in notes):
+            return "fallback"
+        return "unknown"
+
+    async def _build_gap_analysis_with_llm(
+        self,
+        spec: AgentSpec,
+        capability_snapshot: Dict[str, Any],
+    ) -> AgentWorkshopGapAnalysis:
+        client = await self._ensure_llm_client()
+        capability_context = self._build_capability_context(capability_snapshot)
+        reusable_modules = [
+            "workflow-generation",
+            "skill-generation",
+            "skill-gaps",
+            "prompt-design",
+            "report-templates",
+        ]
+        known_tools = self._dedupe([
+            *capability_snapshot.get("builtin_data_tools", []),
+            *capability_snapshot.get("builtin_analysis_tools", []),
+            *capability_snapshot.get("external_data_skills", []),
+            *capability_snapshot.get("external_analysis_skills", []),
+            *capability_snapshot.get("valuation_tools", []),
+            *capability_snapshot.get("valuation_skills", []),
+        ])
+        prompt = "\n".join([
+            "你是 Agent 工坊中的资源缺口分析专家。",
+            "你的任务是基于当前 Agent 规格和系统现有能力，判断哪些能力已可直接复用，哪些地方是真缺口。",
+            "不要机械地把问题拆成数据获取、分析、报告三层；要根据 Agent 的实际目标判断最小闭环。",
+            "如果某项能力可以通过现有工具组合或通过 Prompt/模板约束解决，就不要夸大成阻塞缺口。",
+            "只有当当前系统确实缺少关键可调用能力，且会直接影响 Agent 的目标达成时，才列入 blocking_gaps。",
+            "existing_tools/reusable_modules 必须只使用提供给你的名称，不能编造。",
+            "suggested_tools/suggested_capabilities 应尽量少而精，优先补最小闭环，不要一次性铺太大能力面。",
+            "只输出合法 JSON，不要输出 Markdown 或额外解释。",
+            json.dumps({
+                "reusable_modules": reusable_modules,
+                "existing_tools": [],
+                "suggested_tools": [],
+                "suggested_capabilities": [],
+                "manual_dependencies": [],
+                "blocking_gaps": [],
+                "fallback_strategy": [],
+                "build_recommendations": [],
+                "notes": [],
+            }, ensure_ascii=False, indent=2),
+            "\n当前 Agent 规格：",
+            json.dumps({
+                "name": spec.name,
+                "domain": spec.domain,
+                "primary_goal": spec.primary_goal,
+                "responsibilities": spec.responsibilities,
+                "non_goals": spec.non_goals,
+                "inputs": spec.inputs,
+                "outputs": spec.outputs,
+                "success_criteria": spec.success_criteria,
+                "constraints": spec.constraints,
+                "preferred_methods": spec.preferred_methods,
+                "sample_symbols": spec.sample_symbols,
+            }, ensure_ascii=False, indent=2),
+            "\n系统能力快照：",
+            capability_context,
+            "\n分析要求：",
+            "1. existing_tools 只列真正能直接支撑当前 Agent 目标的能力，不要为了凑数把所有相关工具都放进去。",
+            "2. suggested_tools 只列当前闭环最缺的 1-4 个工具/Skill。",
+            "3. blocking_gaps 要写成‘为什么现有能力还不够’，不是重复需求描述。",
+            "4. fallback_strategy 要写成没补齐前 Agent 如何安全降级，不要写空话。",
+            "5. build_recommendations 要给出实现顺序和边界控制建议。",
+        ])
+        response = await client.achat([
+            Message(role="system", content="你擅长将 Agent 能力缺口分析成可执行的建设计划，只输出合法 JSON。"),
+            Message(role="user", content=prompt),
+        ])
+        raw = response.content or ""
+        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not json_match:
+            raise ValueError("gap analysis LLM 未返回合法 JSON")
+        data = json.loads(json_match.group())
+
+        known_tool_set = set(known_tools)
+        known_module_set = set(reusable_modules)
+        existing_tools = [item for item in self._pick_list(data.get("existing_tools"), []) if item in known_tool_set]
+        modules = [item for item in self._pick_list(data.get("reusable_modules"), reusable_modules) if item in known_module_set]
+        notes = self._pick_list(data.get("notes"), [])
+        notes.append(
+            f"缺口分析由推理模型生成：provider={self._llm_client_meta.get('provider')} model={self._llm_client_meta.get('model')} timeout={self._llm_client_meta.get('timeout')}s"
+        )
+        return AgentWorkshopGapAnalysis(
+            reusable_modules=self._dedupe(modules)[:8],
+            existing_tools=self._dedupe(existing_tools)[:12],
+            suggested_tools=self._dedupe(self._pick_list(data.get("suggested_tools"), []))[:8],
+            suggested_capabilities=self._dedupe(self._pick_list(data.get("suggested_capabilities"), []))[:8],
+            manual_dependencies=self._dedupe(self._pick_list(data.get("manual_dependencies"), []))[:8],
+            blocking_gaps=self._dedupe(self._pick_list(data.get("blocking_gaps"), []))[:8],
+            fallback_strategy=self._dedupe(self._pick_list(data.get("fallback_strategy"), []))[:8],
+            build_recommendations=self._dedupe(self._pick_list(data.get("build_recommendations"), []))[:10],
+            notes=self._dedupe(notes)[:10],
+        )
+
+    def _build_gap_analysis_fallback(
+        self,
+        spec: AgentSpec,
+        capability_snapshot: Dict[str, Any],
+    ) -> AgentWorkshopGapAnalysis:
         available_data_tools = capability_snapshot.get("builtin_data_tools", [])
         available_analysis_tools = capability_snapshot.get("builtin_analysis_tools", [])
         available_external_data = capability_snapshot.get("external_data_skills", [])
@@ -1476,7 +1762,7 @@ class AgentWorkshopService:
 
         existing_tools: List[str] = []
         suggested_tools: List[str] = []
-        suggested_skills: List[str] = []
+        suggested_capabilities: List[str] = []
         manual_dependencies: List[str] = []
         blocking_gaps: List[str] = []
         fallback_strategy: List[str] = []
@@ -1511,10 +1797,9 @@ class AgentWorkshopService:
                         "当前只能拿到估值证据数据，不能把精确估值数字当作可复核结果。",
                     ])
                     suggested_tools.extend(missing_calc_tools)
-                    suggested_skills.extend([
-                        "估值方法选择器 Skill",
-                        "可比公司筛选 Skill",
-                        "敏感性分析 Skill",
+                    suggested_capabilities.extend([
+                        self._build_required_capability_label(tool_id)
+                        for tool_id in missing_calc_tools
                     ])
                     manual_dependencies.extend([
                         "统一行业可比公司映射规则",
@@ -1531,24 +1816,26 @@ class AgentWorkshopService:
                         "再补 calculate_dcf_valuation，用于现金流折现的结构化计算。",
                         "最后补 calculate_weighted_valuation，把多方法结果汇总成综合估值区间。",
                         "让每个估值数字输出来源工具、关键参数和中间过程，供工坊评估与复盘。",
+                        "方法选择、可比公司筛选、敏感性分析这类方法层能力，当前先视为工具设计说明或 Prompt 约束，不单独作为第二层待补实体。",
                     ])
                 else:
                     notes.append(f"已发现直接估值计算工具: {', '.join(existing_calc_tools)}")
                     build_recommendations.append("下一步重点检查这些工具的输入参数口径是否统一，以及输出是否带来源标签。")
         else:
-            suggested_skills.append("领域专属分析 Skill")
-            notes.append("当前为通用 Agent 草案，后续需要结合具体领域再细化工具缺口。")
+            notes.append("当前为通用 Agent 草案，后续需要结合具体领域再细化可调用能力缺口。")
 
         notes.append(
             f"当前已识别到 {len(available_data_tools) + len(available_external_data)} 个取数类能力，"
             f"{len(available_analysis_tools) + len(available_external_analysis)} 个分析类能力。"
         )
 
+        notes.append("当前缺口分析由规则兜底生成，建议结合推理模型结果复核。")
+
         return AgentWorkshopGapAnalysis(
             reusable_modules=reusable_modules,
             existing_tools=self._dedupe(existing_tools)[:12],
             suggested_tools=self._dedupe(suggested_tools),
-            suggested_skills=self._dedupe(suggested_skills),
+            suggested_capabilities=self._dedupe(suggested_capabilities),
             manual_dependencies=self._dedupe(manual_dependencies),
             blocking_gaps=self._dedupe(blocking_gaps),
             fallback_strategy=self._dedupe(fallback_strategy),
@@ -1595,10 +1882,33 @@ class AgentWorkshopService:
                 if len(selected) >= (6 if self._is_valuation_spec(spec) else 4):
                     break
 
-            return selected[: (6 if self._is_valuation_spec(spec) else 4)]
+        return selected[: (6 if self._is_valuation_spec(spec) else 4)]
 
-    def _select_required_skills(self, gap_report: AgentWorkshopGapAnalysis) -> List[str]:
-        return gap_report.suggested_skills[:3]
+    def _select_required_capabilities(
+        self,
+        gap_report: AgentWorkshopGapAnalysis,
+        tooling_plan: Optional[Dict[str, Any]] = None,
+    ) -> List[str]:
+        selected: List[str] = []
+        selected.extend(gap_report.suggested_capabilities or [])
+
+        if isinstance(tooling_plan, dict):
+            selected.extend(self._pick_list(tooling_plan.get("missing_capabilities"), []))
+            draft_tools = tooling_plan.get("draft_tools") if isinstance(tooling_plan.get("draft_tools"), list) else []
+            for item in draft_tools[:8]:
+                if not isinstance(item, dict):
+                    continue
+                selected.append(
+                    self._build_required_capability_label(
+                        self._pick_str(item.get("tool_id"), ""),
+                        self._pick_str(item.get("tool_name"), ""),
+                    )
+                )
+
+        for tool_id in gap_report.suggested_tools or []:
+            selected.append(self._build_required_capability_label(tool_id))
+
+        return self._dedupe([item for item in selected if item])[:8]
 
     def _build_output_schema(self, spec: AgentSpec) -> Dict[str, Any]:
         properties = {
@@ -1762,6 +2072,7 @@ class AgentWorkshopService:
             description=spec.primary_goal or spec.name,
             category=category,
             version=f"0.{version_id.split('_v')[-1]}.0",
+            maintenance_status=AgentMaintenanceStatus.MAINTAINED,
             inputs=inputs,
             outputs=outputs,
             tools=required_tools,
@@ -1874,6 +2185,27 @@ class AgentWorkshopService:
             output_text = self._normalize_output_text(provided.get("output_text"), provided.get("output_payload"))
             has_runtime_output = bool(output_text.strip())
 
+            if has_runtime_output:
+                output_coverage_detail = self._analyze_expected_outputs_runtime(
+                    case.expected_outputs or spec.outputs,
+                    provided.get("output_payload"),
+                    output_text,
+                )
+            else:
+                schema_props = set((version.output_schema.get("properties") or {}).keys())
+                expected_outputs = case.expected_outputs or spec.outputs
+                matched_outputs = [item for item in expected_outputs if item in schema_props]
+                output_coverage_detail = {
+                    "matched": matched_outputs,
+                    "missing": [item for item in expected_outputs if item not in matched_outputs],
+                    "score": round(len(matched_outputs) / len(expected_outputs), 2) if expected_outputs else 0.6,
+                    "notes": ["当前未提供实际输出，字段覆盖度按版本草案的 output schema 估算。"],
+                }
+
+            keyword_detail = self._analyze_keywords(case.required_keywords, output_text, has_runtime_output)
+            method_detail = self._analyze_keywords(case.expected_methods, output_text, has_runtime_output)
+            forbidden_detail = self._analyze_forbidden_keywords(case.forbidden_keywords, output_text, has_runtime_output)
+
             output_coverage = self._score_expected_outputs(case, provided.get("output_payload"), output_text, spec, version, has_runtime_output)
             keyword_quality = self._score_keywords(case.required_keywords, output_text, has_runtime_output)
             method_quality = self._score_keywords(case.expected_methods, output_text, has_runtime_output)
@@ -1898,10 +2230,25 @@ class AgentWorkshopService:
             case_results.append({
                 "case_id": case.case_id,
                 "title": case.title,
+                "input_payload": case.input_payload,
                 "has_runtime_output": has_runtime_output,
                 "output_coverage": output_coverage,
                 "quality_score": quality_score,
                 "constraint_score": constraint_score,
+                "output_excerpt": self._truncate_text(output_text, 1200),
+                "expected_outputs": case.expected_outputs,
+                "expected_methods": case.expected_methods,
+                "required_keywords": case.required_keywords,
+                "forbidden_keywords": case.forbidden_keywords,
+                "output_coverage_detail": output_coverage_detail,
+                "keyword_detail": keyword_detail,
+                "method_detail": method_detail,
+                "forbidden_detail": forbidden_detail,
+                "notes": self._dedupe([
+                    *(output_coverage_detail.get("notes") or []),
+                    *(forbidden_detail.get("notes") or []),
+                    *( ["当前样本尚未粘贴真实输出，只能按版本草案做静态覆盖评估。"] if not has_runtime_output else [] ),
+                ]),
             })
 
         scores = {
@@ -2744,8 +3091,8 @@ class AgentWorkshopService:
             issues.append("输出 Schema 还不完整，当前版本没有覆盖所有核心输出字段。")
         if scores.get("explainability", 0) < 0.75:
             issues.append("Prompt 草案对假设披露、推理透明度和失效条件约束还不够强。")
-        if spec.domain == "stock_analysis" and not version.required_skills:
-            issues.append("估值相关 Skill 缺口尚未真正补齐，当前版本仍偏配置草案。")
+        if spec.domain == "stock_analysis" and not version.required_capabilities:
+            issues.append("估值相关可调用能力缺口尚未真正补齐，当前版本仍偏配置草案。")
         if user_feedback.strip():
             issues.append(f"用户补充反馈待吸收：{user_feedback.strip()}")
         return issues
@@ -2767,7 +3114,7 @@ class AgentWorkshopService:
         if scores.get("explainability", 0) < 0.85:
             recommendations.append("加强 Prompt 中对关键假设、敏感性分析和失效条件的硬约束。")
         if spec.domain == "stock_analysis":
-            recommendations.append("把缺口分析中的估值 Skill 转成可执行的 Skill 生成任务。")
+            recommendations.append("把缺口分析中的估值能力草案转成可执行的 Skill 生成任务，并注册为可调用能力。")
         if not version.required_tools:
             recommendations.append("补齐至少一组可运行的数据工具绑定，再进入 testing。")
         return self._dedupe(recommendations)

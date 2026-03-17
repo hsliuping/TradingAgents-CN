@@ -42,8 +42,15 @@
       </div>
     </div>
 
+    <el-alert
+      v-if="workflow && !isCurrentWorkflowV2"
+      title="当前工作流属于 v1.0 遗留流程，已停止维护；建议迁移到 v2.0 工作流后继续编辑。"
+      type="warning"
+      :closable="false"
+      class="legacy-workflow-alert"
+    />
+
     <div class="editor-main">
-      <!-- 左侧节点面板 -->
       <div class="node-panel" :class="{ collapsed: !nodePanelExpanded }" v-if="isEditMode">
         <!-- 面板头部 -->
         <div class="panel-header">
@@ -468,10 +475,51 @@ const newConnectionTarget = ref('')
 // 计算属性
 const workflowId = computed(() => route.params.id as string)
 
+const isCurrentWorkflowV2 = computed(() => {
+  const wf = workflow.value
+  if (!wf) {
+    return true
+  }
+  const version = String(wf.version || '').toLowerCase()
+  const id = String(wf.id || '').toLowerCase()
+  return version.startsWith('2') || id.endsWith('_v2') || id.startsWith('v2_') || id === 'v2_stock_analysis'
+})
+
+const inferAgentMaintenanceStatus = (agent: AgentMetadata): 'maintained' | 'unmaintained' => {
+  if (agent.maintenance_status === 'maintained' || agent.maintenance_status === 'unmaintained') {
+    return agent.maintenance_status
+  }
+
+  const version = String(agent.version || '').toLowerCase()
+  if (version.startsWith('1') || version.startsWith('v1')) {
+    return 'unmaintained'
+  }
+
+  const id = String(agent.id || '').toLowerCase()
+  const name = String(agent.name || '').toLowerCase()
+  if (id.includes('_v2') || id.startsWith('v2_') || name.includes('v2.0')) {
+    return 'maintained'
+  }
+
+  return 'unmaintained'
+}
+
+const filterAgentsForCurrentWorkflow = (categoryIds?: string[]) => {
+  return agents.value.filter(agent => {
+    if (categoryIds?.length && !categoryIds.includes(agent.category)) {
+      return false
+    }
+    const maintenanceStatus = inferAgentMaintenanceStatus(agent)
+    return isCurrentWorkflowV2.value
+      ? maintenanceStatus === 'maintained'
+      : maintenanceStatus === 'unmaintained'
+  })
+}
+
 const getAgentsByCategory = (categoryId: string) => {
   const wf = workflow.value
   const workflowType = wf?.config?.workflow_type || wf?.id
-  const isV2 = (wf?.version?.startsWith('2') || /_v2$/.test(wf?.id || ''))
+  const isV2 = isCurrentWorkflowV2.value
 
   const v1Agents: Record<string, string[]> = {
     trade_review: ['timing_analyst', 'position_analyst', 'emotion_analyst', 'attribution_analyst', 'review_manager'],
@@ -491,27 +539,15 @@ const getAgentsByCategory = (categoryId: string) => {
 
   // 🔥 如果是 v2.0 工作流，但没有预定义的 allowedAgents，则过滤出所有 v2.0 的 Agent
   if (allowedAgents.length === 0 && isV2) {
-    return agents.value.filter(a => {
-      if (a.category !== categoryId) return false
-      // 判断是否为 v2.0 Agent（ID 包含 _v2 或 v2_，或名称包含 v2.0）
-      const id = (a.id || '').toLowerCase()
-      const name = (a.name || '').toLowerCase()
-      return id.includes('_v2') || id.startsWith('v2_') || name.includes('v2.0')
-    })
+    return filterAgentsForCurrentWorkflow([categoryId])
   }
 
   // 🔥 如果是 v1.0 工作流，但没有预定义的 allowedAgents，则过滤出所有 v1.0 的 Agent
   if (allowedAgents.length === 0 && !isV2) {
-    return agents.value.filter(a => {
-      if (a.category !== categoryId) return false
-      // 判断是否为 v1.0 Agent（ID 不包含 _v2 或 v2_，且名称不包含 v2.0）
-      const id = (a.id || '').toLowerCase()
-      const name = (a.name || '').toLowerCase()
-      return !id.includes('_v2') && !id.startsWith('v2_') && !name.includes('v2.0')
-    })
+    return filterAgentsForCurrentWorkflow([categoryId])
   }
 
-  return agents.value.filter(a =>
+  return filterAgentsForCurrentWorkflow([categoryId]).filter(a =>
     a.category === categoryId && allowedAgents.includes(a.id)
   )
 }
@@ -542,7 +578,7 @@ const getNodeTypeName = (type: string) => {
 // 可用的辩论参与者
 const availableParticipants = computed(() => {
   const currentParticipants = nodeConfig.value.participants || []
-  return agents.value.filter(a =>
+  return filterAgentsForCurrentWorkflow(['researcher', 'risk']).filter(a =>
     ['researcher', 'risk'].includes(a.category) &&
     !currentParticipants.includes(a.id)
   )
@@ -1133,6 +1169,10 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   background: var(--el-bg-color);
+}
+
+.legacy-workflow-alert {
+  margin: 0 16px 12px;
 }
 
 .editor-toolbar {

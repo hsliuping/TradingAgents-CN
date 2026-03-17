@@ -74,10 +74,10 @@ class RiskManagerV2(ManagerAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_plan", type="string", description="投资计划"),
-            AgentInput(name="risky_opinion", type="string", description="激进风险观点", required=False),
-            AgentInput(name="safe_opinion", type="string", description="保守风险观点", required=False),
-            AgentInput(name="neutral_opinion", type="string", description="中性风险观点", required=False),
+            AgentInput(name="investment_plan", type="string", description="投资计划", source="state", state_field="investment_plan", producer_hint="research_manager_v2"),
+            AgentInput(name="risky_opinion", type="string", description="激进风险观点", required=False, source="state", state_field="risky_opinion", producer_hint="risky_analyst_v2"),
+            AgentInput(name="safe_opinion", type="string", description="保守风险观点", required=False, source="state", state_field="safe_opinion", producer_hint="safe_analyst_v2"),
+            AgentInput(name="neutral_opinion", type="string", description="中性风险观点", required=False, source="state", state_field="neutral_opinion", producer_hint="neutral_analyst_v2"),
         ],
         outputs=[
             AgentOutput(name="risk_assessment", type="string", description="风险评估报告"),
@@ -91,6 +91,10 @@ class RiskManagerV2(ManagerAgent):
         memory_scope_hint="pattern",
         review_level="manual_required",
         growth_source_type="manager_decision",
+        maturity_level="stable",
+        input_mode="upstream-dependent",
+        debug_replay_mode="requires_chain_prefill",
+        callable_surfaces=["assistant", "workflow", "agent"],
     )
 
     # 管理者类型

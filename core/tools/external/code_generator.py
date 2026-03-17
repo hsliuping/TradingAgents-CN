@@ -18,7 +18,9 @@ from core.llm import UnifiedLLMClient, Message
 
 from .skill_spec import GeneratedCode, SkillSpec, TestCase
 from .symbol_utils import SYMBOL_NORMALIZE_INLINE
+from .external_data_source_catalog import build_external_data_source_doc_for_skill
 from .local_data import LOCAL_DATA_API_DOC
+from .stock_data_catalog import build_stock_data_collection_doc_for_skill
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +160,8 @@ class CodeGenerator:
     def _build_system_prompt(self, spec: SkillSpec) -> str:
         """构建系统提示词"""
         template_code = self._get_builtin_template(spec.category)
+        stock_data_doc = build_stock_data_collection_doc_for_skill(spec)
+        external_source_doc = build_external_data_source_doc_for_skill(spec)
         template_section = ""
         if template_code:
             # 截取前 80 行作为参考，并去掉装饰器相关行
@@ -181,6 +185,10 @@ class CodeGenerator:
         return f"""你是一个专业的 Python 工具函数生成器。你的任务是根据用户的需求规格书（SkillSpec），生成一个完整的、可直接运行的纯 Python 函数。
 
 {LOCAL_DATA_API_DOC}
+
+{stock_data_doc}
+
+{external_source_doc}
 
 ⚠️ 关键要求：
 - 不要使用 @tool、@register_tool 等任何装饰器

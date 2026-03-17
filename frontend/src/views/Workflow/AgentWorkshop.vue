@@ -68,7 +68,10 @@
             <div class="focus-card-inner">
               <div>
                 <div class="focus-label">当前 Agent</div>
-                <div class="focus-title">{{ selectedSpecName }}</div>
+                <div class="focus-title-row">
+                  <div class="focus-title">{{ selectedSpecName }}</div>
+                  <el-tag v-if="workshopMaintenanceStatus === 'unmaintained'" type="danger" effect="plain">停止维护</el-tag>
+                </div>
                 <div class="focus-subtitle">{{ focusSubtitle }}</div>
               </div>
               <div class="focus-metrics">
@@ -112,6 +115,13 @@
             :title="currentSession.refusal_reason || '当前需求超出 Agent 工坊可支持范围，先调整目标再继续。'"
           />
           <el-alert
+            v-else-if="workshopMaintenanceStatus === 'unmaintained'"
+            class="status-alert"
+            type="warning"
+            :closable="false"
+            title="当前识别到的运行 Agent 属于 v1.0 遗留实现，已停止维护；如继续演进，建议迁移到 v2.0 Agent 标识和运行时。"
+          />
+          <el-alert
             v-else-if="currentSession?.feasibility_status === 'need-clarification'"
             class="status-alert"
             type="warning"
@@ -153,9 +163,14 @@
                   />
                   <div class="action-row between">
                     <div class="hint-text">按 Ctrl + Enter 也可以发送</div>
-                    <el-button type="primary" :disabled="!replyMessage.trim()" :loading="responding" @click="handleRespond">
-                      继续讨论
-                    </el-button>
+                    <div class="session-toolbar-actions">
+                      <el-button type="primary" :disabled="!replyMessage.trim()" :loading="responding" @click="handleRespond">
+                        继续讨论
+                      </el-button>
+                      <el-button type="success" plain :disabled="!currentSession || responding" :loading="previewing" @click="handlePreviewSpec">
+                        下一步
+                      </el-button>
+                    </div>
                   </div>
                 </div>
               </template>
@@ -229,13 +244,23 @@
                     <el-tag v-for="item in gapReport.existing_tools" :key="item" class="tag-item" type="info">{{ item }}</el-tag>
                   </div>
                 </div>
-                <div class="field-block" v-if="gapReport.suggested_tools.length">
-                  <div class="field-label">建议补齐的工具</div>
-                  <div v-for="item in gapReport.suggested_tools" :key="item" class="pending-item">{{ item }}</div>
+                <div class="field-block" v-if="gapReport.suggested_tools.length || gapReport.suggested_capabilities.length">
+                  <div class="field-label">怎么理解这些缺口</div>
+                  <div class="note-item">
+                    这里展示的是 Agent 还缺的执行能力，不等于它们天然就是一个独立 Skill。<br>
+                    当前点“生成能力”时，会借用能力工坊的生成流程先做规格澄清；但真正要补的，仍然是那些输入输出明确、能被 Agent 直接调用的最小能力单元。是否最终落成新的 Skill，要看现有工具能不能复用、是否真的缺实现。
+                  </div>
                 </div>
-                <div class="field-block" v-if="gapReport.suggested_skills.length">
-                  <div class="field-label">建议补齐的 Skill</div>
-                  <div v-for="item in gapReport.suggested_skills" :key="item" class="pending-item">{{ item }}</div>
+                <div class="field-block" v-if="gapReport.suggested_tools.length">
+                  <div class="field-label">建议优先补齐的执行能力</div>
+                  <div v-for="item in gapReport.suggested_tools" :key="item" class="pending-item descriptive-item">
+                    <div class="descriptive-title">{{ item }}</div>
+                    <div class="descriptive-text">{{ getSuggestedToolDescription(item) }}</div>
+                    <div class="inline-actions breakdown-actions">
+                      <el-button size="small" type="primary" plain :loading="skillGenerating[item]" @click="handleCreateSkillSession(item)">生成能力</el-button>
+                      <el-button size="small" @click="goToSkillWorkshop(item)">去能力工坊</el-button>
+                    </div>
+                  </div>
                 </div>
                 <div class="field-block" v-if="gapReport.blocking_gaps.length">
                   <div class="field-label">当前阻塞缺口</div>
@@ -278,6 +303,10 @@
                       <div class="runtime-meta-row">
                         <span>工具 ID：{{ item.tool_id }}</span>
                         <span>优先级：{{ item.priority }}</span>
+                      </div>
+                      <div class="inline-actions breakdown-actions">
+                        <el-button size="small" type="primary" plain :loading="skillGenerating[item.tool_id]" @click="handleCreateSkillSession(item)">生成能力</el-button>
+                        <el-button size="small" @click="goToSkillWorkshop(item)">去能力工坊</el-button>
                       </div>
                       <div class="note-item compact-note">{{ item.why_needed }}</div>
                       <div class="breakdown-group" v-if="item.solves_gaps?.length">
@@ -340,6 +369,7 @@
                   <el-tag effect="plain">{{ latestVersion.version_id }}</el-tag>
                   <el-tag type="warning" effect="plain">{{ latestVersion.status }}</el-tag>
                   <el-tag type="success" effect="plain">v{{ latestVersion.version }}</el-tag>
+                  <el-tag v-if="workshopMaintenanceStatus === 'unmaintained'" type="danger" effect="plain">停止维护</el-tag>
                 </div>
 
                 <div class="field-block">
@@ -348,9 +378,17 @@
                     <el-tag v-for="item in latestVersion.required_tools" :key="item" class="tag-item" type="info">{{ item }}</el-tag>
                   </div>
                 </div>
-                <div class="field-block" v-if="latestVersion.required_skills?.length">
-                  <div class="field-label">待补 Skill</div>
-                  <div v-for="item in latestVersion.required_skills" :key="item" class="pending-item">{{ item }}</div>
+                <div class="field-block" v-if="latestVersion.required_capabilities?.length">
+                  <div class="field-label">待补执行能力</div>
+                  <div class="note-item">这些是版本草案里已经识别出来、需要显式挂接的执行能力，不表示它们一定都要新建成独立 Skill；也可能是复用已有工具、补一个最小实现单元，或做成新的可注册能力。</div>
+                  <div v-for="item in latestVersion.required_capabilities" :key="item" class="pending-item descriptive-item">
+                    <div class="descriptive-title">{{ item }}</div>
+                    <div class="descriptive-text">版本草案已经把这项能力识别为需要补齐或显式挂接的执行能力，不再只停留在抽象需求层；后续应先判断复用，再决定是否新增实现。</div>
+                    <div class="inline-actions breakdown-actions">
+                      <el-button size="small" type="primary" plain :loading="skillGenerating[item]" @click="handleCreateSkillSession(item)">生成能力</el-button>
+                      <el-button size="small" @click="goToSkillWorkshop(item)">去能力工坊</el-button>
+                    </div>
+                  </div>
                 </div>
                 <div class="field-block">
                   <div class="field-label">Prompt 草案</div>
@@ -371,6 +409,14 @@
                   <div class="tag-wrap">
                     <el-tag v-for="item in latestVersion.evaluation_policy?.dimensions || []" :key="item" class="tag-item">{{ item }}</el-tag>
                   </div>
+                </div>
+                <div class="field-block" v-if="versionSampleSets.length">
+                  <div class="field-label">可用样本评估集</div>
+                  <div v-for="item in versionSampleSets" :key="item.sample_set_id" class="note-item descriptive-item">
+                    <div class="descriptive-title">{{ item.name }} <span class="inline-muted">({{ item.cases.length }} 个样本)</span></div>
+                    <div class="descriptive-text">{{ item.description || '可用于样本基准评估。' }}</div>
+                  </div>
+                  <div v-if="sampleSets.length > versionSampleSets.length" class="note-item compact-note">还有 {{ sampleSets.length - versionSampleSets.length }} 套样本集可在评估弹窗中选择。</div>
                 </div>
                 <div class="action-row right">
                   <el-button type="primary" plain @click="handleIterateVersion" :loading="iteratingVersion">基于当前结果发起下一轮迭代</el-button>
@@ -397,7 +443,16 @@
                   <el-tag :type="latestEvaluation.decision === 'pass' ? 'success' : latestEvaluation.decision === 'reject' ? 'danger' : 'warning'" effect="plain">
                     {{ evaluationDecisionText }}
                   </el-tag>
-                  <el-tag effect="plain">真实结果调试</el-tag>
+                  <el-tag effect="plain">{{ evaluationTypeText }}</el-tag>
+                  <el-tag v-if="latestEvaluation.sample_set_id" type="info" effect="plain">{{ latestEvaluationSampleSet?.name || latestEvaluation.sample_set_id }}</el-tag>
+                </div>
+                <div class="field-block" v-if="latestEvaluation.sample_set_id">
+                  <div class="field-label">本次评估样本集</div>
+                  <div class="note-item">{{ latestEvaluationSampleSet?.description || '本次评估使用了已配置的样本基准集。' }}</div>
+                  <div class="runtime-meta-row">
+                    <span>样本集 ID：{{ latestEvaluation.sample_set_id }}</span>
+                    <span v-if="latestEvaluationSampleSet">样本数：{{ latestEvaluationSampleSet.cases.length }}</span>
+                  </div>
                 </div>
                 <div class="field-block" v-if="displayedRawBackendResult">
                   <div class="field-label">后端原始返回</div>
@@ -444,6 +499,61 @@
                       <div v-if="item.notes.length" class="breakdown-group">
                         <div class="breakdown-label">说明</div>
                         <div v-for="entry in item.notes" :key="entry" class="note-item compact-note">{{ entry }}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="field-block" v-if="benchmarkCaseResultCards.length">
+                  <div class="field-label">样本逐条复盘</div>
+                  <div class="breakdown-grid">
+                    <div v-for="item in benchmarkCaseResultCards" :key="item.caseId" class="breakdown-card">
+                      <div class="breakdown-title">{{ item.title }}</div>
+                      <div class="runtime-meta-row">
+                        <span>字段覆盖：{{ item.outputCoverage }}</span>
+                        <span>内容质量：{{ item.qualityScore }}</span>
+                        <span>边界控制：{{ item.constraintScore }}</span>
+                      </div>
+                      <div class="note-item compact-note" v-if="item.scenarioText">场景：{{ item.scenarioText }}</div>
+                      <div class="note-item compact-note" v-if="item.outputExcerpt">输出摘录：{{ item.outputExcerpt }}</div>
+                      <div class="breakdown-group" v-if="item.outputMatched.length || item.outputMissing.length">
+                        <div class="breakdown-label">输出字段</div>
+                        <div class="tag-wrap" v-if="item.outputMatched.length">
+                          <el-tag v-for="entry in item.outputMatched" :key="`${item.caseId}-out-hit-${entry}`" class="tag-item" type="success" effect="plain">{{ entry }}</el-tag>
+                        </div>
+                        <div class="tag-wrap" v-if="item.outputMissing.length">
+                          <el-tag v-for="entry in item.outputMissing" :key="`${item.caseId}-out-miss-${entry}`" class="tag-item" type="warning" effect="plain">{{ entry }}</el-tag>
+                        </div>
+                      </div>
+                      <div class="breakdown-group" v-if="item.methodMatched.length || item.methodMissing.length">
+                        <div class="breakdown-label">方法覆盖</div>
+                        <div class="tag-wrap" v-if="item.methodMatched.length">
+                          <el-tag v-for="entry in item.methodMatched" :key="`${item.caseId}-method-hit-${entry}`" class="tag-item" type="success" effect="plain">{{ entry }}</el-tag>
+                        </div>
+                        <div class="tag-wrap" v-if="item.methodMissing.length">
+                          <el-tag v-for="entry in item.methodMissing" :key="`${item.caseId}-method-miss-${entry}`" class="tag-item" type="warning" effect="plain">{{ entry }}</el-tag>
+                        </div>
+                      </div>
+                      <div class="breakdown-group" v-if="item.keywordMatched.length || item.keywordMissing.length">
+                        <div class="breakdown-label">关键披露</div>
+                        <div class="tag-wrap" v-if="item.keywordMatched.length">
+                          <el-tag v-for="entry in item.keywordMatched" :key="`${item.caseId}-keyword-hit-${entry}`" class="tag-item" type="success" effect="plain">{{ entry }}</el-tag>
+                        </div>
+                        <div class="tag-wrap" v-if="item.keywordMissing.length">
+                          <el-tag v-for="entry in item.keywordMissing" :key="`${item.caseId}-keyword-miss-${entry}`" class="tag-item" type="warning" effect="plain">{{ entry }}</el-tag>
+                        </div>
+                      </div>
+                      <div class="breakdown-group" v-if="item.forbiddenMatched.length || item.forbiddenSafe.length">
+                        <div class="breakdown-label">边界检查</div>
+                        <div class="tag-wrap" v-if="item.forbiddenMatched.length">
+                          <el-tag v-for="entry in item.forbiddenMatched" :key="`${item.caseId}-forbidden-hit-${entry}`" class="tag-item" type="danger" effect="plain">{{ entry }}</el-tag>
+                        </div>
+                        <div class="tag-wrap" v-if="item.forbiddenSafe.length">
+                          <el-tag v-for="entry in item.forbiddenSafe" :key="`${item.caseId}-forbidden-safe-${entry}`" class="tag-item" effect="plain">{{ entry }}</el-tag>
+                        </div>
+                      </div>
+                      <div class="breakdown-group" v-if="item.notes.length">
+                        <div class="breakdown-label">说明</div>
+                        <div v-for="entry in item.notes" :key="`${item.caseId}-note-${entry}`" class="note-item compact-note">{{ entry }}</div>
                       </div>
                     </div>
                   </div>
@@ -538,9 +648,81 @@
           <el-alert
             type="info"
             :closable="false"
-            title="先做一次真实调试运行，确认输出没问题后，再单独发起结果评估。"
+            :title="evaluationForm.evaluation_type === 'benchmark' ? '样本基准评估用于检查输出结构、边界和方法覆盖；你可以按样本逐条粘贴结果，再统一评估。' : '先做一次真实调试运行，确认输出没问题后，再单独发起结果评估。'"
           />
 
+          <el-form-item label="评估方式" style="margin-top: 16px;">
+            <el-radio-group v-model="evaluationForm.evaluation_type">
+              <el-radio-button label="production-review">真实结果评估</el-radio-button>
+              <el-radio-button label="benchmark">样本基准评估</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+
+          <template v-if="evaluationForm.evaluation_type === 'benchmark'">
+            <el-form-item label="样本集">
+              <el-select
+                v-model="evaluationForm.sample_set_id"
+                placeholder="请选择样本集"
+                style="width: 360px"
+                :loading="loadingSampleSets"
+              >
+                <el-option
+                  v-for="item in sampleSets"
+                  :key="item.sample_set_id"
+                  :label="item.name"
+                  :value="item.sample_set_id"
+                />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item v-if="selectedSampleSet" label="样本说明">
+              <div class="benchmark-sample-block">
+                <div class="note-item">{{ selectedSampleSet.description }}</div>
+                <div class="note-item compact-note">共 {{ selectedSampleSet.cases.length }} 个样本</div>
+              </div>
+            </el-form-item>
+
+            <el-form-item v-if="selectedSampleSet?.cases?.length" label="样本输出">
+              <div class="benchmark-case-list">
+                <div
+                  v-for="item in benchmarkCaseOutputs"
+                  :key="item.case_id"
+                  class="benchmark-case-card"
+                >
+                  <div class="breakdown-title">{{ item.title }}</div>
+                  <div class="note-item compact-note" v-if="item.scenarioText">场景：{{ item.scenarioText }}</div>
+                  <div class="tag-wrap" v-if="item.expectedOutputs.length">
+                    <el-tag v-for="entry in item.expectedOutputs" :key="entry" class="tag-item" type="success" effect="plain">{{ entry }}</el-tag>
+                  </div>
+                  <div class="tag-wrap" v-if="item.expectedMethods.length">
+                    <el-tag v-for="entry in item.expectedMethods" :key="entry" class="tag-item" type="info" effect="plain">{{ entry }}</el-tag>
+                  </div>
+                  <div class="tag-wrap" v-if="item.requiredKeywords.length">
+                    <el-tag v-for="entry in item.requiredKeywords" :key="entry" class="tag-item" effect="plain">{{ entry }}</el-tag>
+                  </div>
+                  <el-input
+                    v-model="item.output_text"
+                    type="textarea"
+                    :rows="5"
+                    resize="vertical"
+                    placeholder="粘贴这个样本对应的 Agent 输出结果"
+                  />
+                </div>
+              </div>
+            </el-form-item>
+
+            <el-form-item label="补充反馈">
+              <el-input
+                v-model="evaluationForm.user_feedback"
+                type="textarea"
+                :rows="3"
+                resize="vertical"
+                placeholder="可选，填写你对这组 benchmark 输出的主观评价。"
+              />
+            </el-form-item>
+          </template>
+
+          <template v-else>
           <el-form-item label="模型名称" style="margin-top: 16px;">
             <DeepModelSelector
               v-model="evaluationForm.llm.model"
@@ -605,11 +787,12 @@
               placeholder="可选，填写你对这次样本或运行结果的主观评价。"
             />
           </el-form-item>
+          </template>
         </el-form>
       </div>
       <template #footer>
         <el-button @click="evaluateDialogVisible = false">取消</el-button>
-        <el-button type="primary" plain :loading="debuggingVersion" @click="handleDebugVersion">调试运行</el-button>
+        <el-button v-if="evaluationForm.evaluation_type !== 'benchmark'" type="primary" plain :loading="debuggingVersion" @click="handleDebugVersion">调试运行</el-button>
         <el-button type="primary" :loading="evaluatingVersion" :disabled="!canSubmitEvaluation" @click="handleEvaluateVersion">结果评估</el-button>
       </template>
     </el-dialog>
@@ -622,13 +805,16 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
+import { skillGenerationApi } from '@/api/skillGeneration'
 import agentWorkshopApi, {
+  type AgentBenchmarkSampleSet,
   type AgentEvaluationReport,
   type AgentSpec,
   type AgentWorkshopDebugVersionResult,
   type AgentWorkshopGapAnalysis,
   type AgentWorkshopPreviewResult,
   type AgentWorkshopSessionDetail,
+  type AgentWorkshopToolingPlanItem,
   type AgentWorkshopToolingPlan,
   type AgentWorkshopValuationTraceabilityItem,
   type AgentVersion,
@@ -651,6 +837,8 @@ const latestVersion = ref<AgentVersion | null>(null)
 const latestEvaluation = ref<AgentEvaluationReport | null>(null)
 const latestDebugResult = ref<AgentWorkshopDebugVersionResult | null>(null)
 const availableModels = ref<LLMConfig[]>([])
+const sampleSets = ref<AgentBenchmarkSampleSet[]>([])
+const loadingSampleSets = ref(false)
 
 const evaluateDialogVisible = ref(false)
 const evaluationForm = ref({
@@ -687,6 +875,7 @@ const iteratingVersion = ref(false)
 const loadingSpecs = ref(false)
 const loadingSessionList = ref(false)
 const loadingCurrentSession = ref(false)
+const skillGenerating = ref<Record<string, boolean>>({})
 const activeStep = ref<FlowStep>('discuss')
 
 const flowSteps: Array<{ key: FlowStep; index: string; title: string; description: string }> = [
@@ -701,6 +890,52 @@ const canAdvance = computed(() => currentSession.value?.feasibility_status === '
 const hasWorkspaceContext = computed(() => Boolean(currentSession.value || displaySpec.value || latestVersion.value || latestEvaluation.value))
 const selectedSpecId = computed(() => displaySpec.value?.spec_id || currentSession.value?.current_spec_snapshot?.spec_id || latestVersion.value?.spec_id || '')
 const selectedSpecName = computed(() => displaySpec.value?.name || latestVersion.value?.agent_metadata?.name || '未命名 Agent')
+const isV2AgentId = (agentId?: string) => {
+  const normalized = String(agentId || '').toLowerCase()
+  return normalized.includes('_v2') || normalized.startsWith('v2_')
+}
+const explicitWorkshopMaintenanceStatus = computed(() => {
+  const versionStatus = latestVersion.value?.agent_metadata?.maintenance_status
+  if (versionStatus === 'maintained' || versionStatus === 'unmaintained') {
+    return versionStatus
+  }
+  const debugStatus = latestDebugResult.value?.metadata?.maintenance_status
+  if (debugStatus === 'maintained' || debugStatus === 'unmaintained') {
+    return debugStatus
+  }
+  return ''
+})
+const workshopRuntimeAgentId = computed(() => {
+  const metadataId = latestVersion.value?.agent_metadata?.id
+  if (typeof metadataId === 'string' && metadataId.trim()) {
+    return metadataId.trim()
+  }
+  const debugMetadataId = latestDebugResult.value?.metadata?.agent_id
+  if (typeof debugMetadataId === 'string' && debugMetadataId.trim()) {
+    return debugMetadataId.trim()
+  }
+  const debugRuntimeId = latestDebugResult.value?.runtime_agent_id
+  if (typeof debugRuntimeId === 'string' && debugRuntimeId.trim()) {
+    return debugRuntimeId.trim()
+  }
+  return ''
+})
+const workshopMaintenanceStatus = computed(() => {
+  if (explicitWorkshopMaintenanceStatus.value === 'maintained' || explicitWorkshopMaintenanceStatus.value === 'unmaintained') {
+    return explicitWorkshopMaintenanceStatus.value
+  }
+  const runtimeVersion = String(latestVersion.value?.agent_metadata?.version || '').toLowerCase()
+  if (runtimeVersion.startsWith('1') || runtimeVersion.startsWith('v1')) {
+    return 'unmaintained'
+  }
+  if (runtimeVersion.startsWith('2') || runtimeVersion.startsWith('v2')) {
+    return 'maintained'
+  }
+  if (!workshopRuntimeAgentId.value) {
+    return 'maintained'
+  }
+  return isV2AgentId(workshopRuntimeAgentId.value) ? 'maintained' : 'unmaintained'
+})
 const displayedRuntimeResult = computed(() => {
   const detailRuntime = latestEvaluation.value?.details?.runtime_result
   if (detailRuntime && typeof detailRuntime === 'object') {
@@ -775,6 +1010,12 @@ const evaluationDecisionText = computed(() => {
   if (decision === 'reject') return '拒绝'
   if (decision === 'revise') return '需要修改'
   return decision || ''
+})
+const evaluationTypeText = computed(() => {
+  const type = latestEvaluation.value?.evaluation_type
+  if (type === 'benchmark') return '样本基准评估'
+  if (type === 'production-review') return '真实结果调试'
+  return type || '结果评估'
 })
 const llmReview = computed(() => {
   const review = latestEvaluation.value?.details?.llm_review
@@ -892,7 +1133,66 @@ const ruleBreakdownCards = computed(() => {
     })
     .filter(item => item.matched.length || item.missing.length || item.notes.length)
 })
-  const canSubmitEvaluation = computed(() => Boolean(evaluationForm.value.runtime_result.output_text?.trim()))
+const selectedSampleSet = computed(() => {
+  return sampleSets.value.find(item => item.sample_set_id === evaluationForm.value.sample_set_id) || null
+})
+const latestEvaluationSampleSet = computed(() => {
+  const sampleSetId = latestEvaluation.value?.sample_set_id
+  if (!sampleSetId) return null
+  return sampleSets.value.find(item => item.sample_set_id === sampleSetId) || null
+})
+const versionSampleSets = computed(() => sampleSets.value.slice(0, 3))
+const benchmarkCaseResultCards = computed(() => {
+  const caseResults = latestEvaluation.value?.details?.case_results
+  if (!Array.isArray(caseResults)) return []
+
+  return caseResults.map((item: any) => {
+    const inputPayload = item?.input_payload && typeof item.input_payload === 'object' ? item.input_payload : {}
+    const scenarioText = [inputPayload.stock_symbol, inputPayload.market_type, inputPayload.scenario].filter(Boolean).join(' / ')
+    const outputDetail = item?.output_coverage_detail && typeof item.output_coverage_detail === 'object' ? item.output_coverage_detail : {}
+    const keywordDetail = item?.keyword_detail && typeof item.keyword_detail === 'object' ? item.keyword_detail : {}
+    const methodDetail = item?.method_detail && typeof item.method_detail === 'object' ? item.method_detail : {}
+    const forbiddenDetail = item?.forbidden_detail && typeof item.forbidden_detail === 'object' ? item.forbidden_detail : {}
+
+    return {
+      caseId: item?.case_id || '',
+      title: item?.title || '未命名样本',
+      scenarioText,
+      outputCoverage: item?.output_coverage ?? '-',
+      qualityScore: item?.quality_score ?? '-',
+      constraintScore: item?.constraint_score ?? '-',
+      outputExcerpt: typeof item?.output_excerpt === 'string' ? item.output_excerpt.trim() : '',
+      outputMatched: Array.isArray(outputDetail.matched) ? outputDetail.matched.filter(Boolean) : [],
+      outputMissing: Array.isArray(outputDetail.missing) ? outputDetail.missing.filter(Boolean) : [],
+      keywordMatched: Array.isArray(keywordDetail.matched) ? keywordDetail.matched.filter(Boolean) : [],
+      keywordMissing: Array.isArray(keywordDetail.missing) ? keywordDetail.missing.filter(Boolean) : [],
+      methodMatched: Array.isArray(methodDetail.matched) ? methodDetail.matched.filter(Boolean) : [],
+      methodMissing: Array.isArray(methodDetail.missing) ? methodDetail.missing.filter(Boolean) : [],
+      forbiddenMatched: Array.isArray(forbiddenDetail.matched) ? forbiddenDetail.matched.filter(Boolean) : [],
+      forbiddenSafe: Array.isArray(forbiddenDetail.missing) ? forbiddenDetail.missing.filter(Boolean) : [],
+      notes: [
+        ...(Array.isArray(outputDetail.notes) ? outputDetail.notes.filter(Boolean) : []),
+        ...(Array.isArray(forbiddenDetail.notes) ? forbiddenDetail.notes.filter(Boolean) : []),
+        ...(Array.isArray(item?.notes) ? item.notes.filter(Boolean) : []),
+      ].filter(Boolean),
+    }
+  }).filter((item: any) => item.caseId)
+})
+const benchmarkCaseOutputs = ref<Array<{
+  case_id: string
+  title: string
+  scenarioText: string
+  expectedOutputs: string[]
+  expectedMethods: string[]
+  requiredKeywords: string[]
+  output_text: string
+}>>([])
+const canSubmitEvaluation = computed(() => {
+  if (evaluationForm.value.evaluation_type === 'benchmark') {
+    return benchmarkCaseOutputs.value.some(item => item.output_text.trim())
+  }
+  return Boolean(evaluationForm.value.runtime_result.output_text?.trim())
+})
 const activeStepLabel = computed(() => flowSteps.find(item => item.key === activeStep.value)?.title || '聊需求')
 const focusSubtitle = computed(() => {
   if (currentSession.value?.feasibility_status === 'not-feasible') {
@@ -978,6 +1278,62 @@ const resetEvaluationForm = () => {
       user_goal: '',
       output_text: '',
     },
+  }
+  benchmarkCaseOutputs.value = []
+}
+
+const syncBenchmarkCaseOutputs = () => {
+  const sampleSet = selectedSampleSet.value
+  if (!sampleSet) {
+    benchmarkCaseOutputs.value = []
+    return
+  }
+
+  const previousMap = new Map(benchmarkCaseOutputs.value.map(item => [item.case_id, item.output_text]))
+  benchmarkCaseOutputs.value = sampleSet.cases.map(item => {
+    const inputPayload = item.input_payload || {}
+    const scenarioParts = [inputPayload.stock_symbol, inputPayload.market_type, inputPayload.scenario].filter(Boolean)
+    return {
+      case_id: item.case_id,
+      title: item.title,
+      scenarioText: scenarioParts.join(' / '),
+      expectedOutputs: item.expected_outputs || [],
+      expectedMethods: item.expected_methods || [],
+      requiredKeywords: item.required_keywords || [],
+      output_text: previousMap.get(item.case_id) || '',
+    }
+  })
+}
+
+const loadSampleSets = async (specId?: string) => {
+  if (!specId) {
+    sampleSets.value = []
+    evaluationForm.value.sample_set_id = ''
+    benchmarkCaseOutputs.value = []
+    return
+  }
+
+  loadingSampleSets.value = true
+  try {
+    const result = await agentWorkshopApi.listSampleSets(specId)
+    sampleSets.value = result.items || []
+    if (!sampleSets.value.length) {
+      evaluationForm.value.sample_set_id = ''
+      benchmarkCaseOutputs.value = []
+      return
+    }
+
+    if (!sampleSets.value.some(item => item.sample_set_id === evaluationForm.value.sample_set_id)) {
+      evaluationForm.value.sample_set_id = sampleSets.value[0].sample_set_id
+    }
+    syncBenchmarkCaseOutputs()
+  } catch (error: any) {
+    sampleSets.value = []
+    evaluationForm.value.sample_set_id = ''
+    benchmarkCaseOutputs.value = []
+    ElMessage.error(error?.message || '加载样本集失败')
+  } finally {
+    loadingSampleSets.value = false
   }
 }
 
@@ -1297,6 +1653,7 @@ const openEvaluateDialog = async () => {
   if (!latestVersion.value?.spec_id) return
   resetEvaluationForm()
   latestDebugResult.value = null
+  await loadSampleSets(latestVersion.value.spec_id)
   evaluateDialogVisible.value = true
   syncActiveStep('evaluate')
 }
@@ -1346,6 +1703,33 @@ const handleEvaluateVersion = async () => {
   if (!latestVersion.value?.version_id) return
   evaluatingVersion.value = true
   try {
+    const evaluationType = evaluationForm.value.evaluation_type
+
+    if (evaluationType === 'benchmark') {
+      if (!evaluationForm.value.sample_set_id) {
+        ElMessage.warning('请先选择样本集')
+        return
+      }
+      if (!benchmarkCaseOutputs.value.some(item => item.output_text.trim())) {
+        ElMessage.warning('请至少填写一个样本输出结果')
+        return
+      }
+
+      const result = await agentWorkshopApi.evaluateVersion(latestVersion.value.version_id, {
+        evaluation_type: 'benchmark',
+        sample_set_id: evaluationForm.value.sample_set_id,
+        user_feedback: evaluationForm.value.user_feedback || '',
+        benchmark_outputs: benchmarkCaseOutputs.value
+          .filter(item => item.output_text.trim())
+          .map(item => ({ case_id: item.case_id, output_text: item.output_text.trim() })),
+      })
+      latestEvaluation.value = result.evaluation
+      latestVersion.value = await agentWorkshopApi.getVersion(latestVersion.value.version_id)
+      syncActiveStep('evaluate')
+      ElMessage.success('样本基准评估完成')
+      return
+    }
+
     if (!evaluationForm.value.runtime_result.output_text?.trim()) {
       ElMessage.warning('请先完成调试运行并生成结果')
       return
@@ -1446,6 +1830,18 @@ const openSpec = async (spec: AgentSpec) => {
   }
 }
 
+watch(() => evaluationForm.value.sample_set_id, () => {
+  if (evaluationForm.value.evaluation_type === 'benchmark') {
+    syncBenchmarkCaseOutputs()
+  }
+})
+
+watch(() => evaluationForm.value.evaluation_type, (value) => {
+  if (value === 'benchmark') {
+    syncBenchmarkCaseOutputs()
+  }
+})
+
 const fillExample = (type: 'valuation' | 'industry' | 'watcher') => {
   if (type === 'valuation') {
     description.value = '我要做一个新的股票估值分析师，它要能根据行情、财务数据和行业背景给出估值区间，解释关键假设，说明失效条件，但不要直接给买卖建议。'
@@ -1456,6 +1852,148 @@ const fillExample = (type: 'valuation' | 'industry' | 'watcher') => {
     return
   }
   description.value = '我想做一个财报跟踪助手，负责跟踪重点公司的季报变化、提炼异常指标、总结风险提示，但不做独立投资建议。'
+}
+
+const getSuggestedToolDescription = (toolId: string) => {
+  const toolDraft = toolingPlan.value?.draft_tools?.find(item => item.tool_id === toolId)
+  if (toolDraft?.why_needed) {
+    return toolDraft.why_needed
+  }
+
+  const descriptionMap: Record<string, string> = {
+    calculate_pb_valuation: '根据每股净资产和同行 PB 参考值，输出可追溯的 PB 估值区间。',
+    calculate_pe_valuation: '根据 EPS 与同行 PE 参考值，输出可追溯的 PE 估值区间。',
+    calculate_dcf_valuation: '根据现金流预测、折现率和终值假设，输出 DCF 估值结果。',
+    calculate_weighted_valuation: '把 PB、PE、DCF 等单方法结果按权重汇总成综合估值区间。',
+  }
+
+  return descriptionMap[toolId] || '这是一个需要被 Agent 直接调用的具体能力，目标是把某个估值步骤做成可复核的结构化计算。'
+}
+
+const getSortedToolDrafts = () => {
+  const priorityOrder: Record<string, number> = { P0: 0, P1: 1, P2: 2 }
+  return [...(toolingPlan.value?.draft_tools || [])].sort((left, right) => {
+    const leftPriority = priorityOrder[left.priority] ?? 99
+    const rightPriority = priorityOrder[right.priority] ?? 99
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority
+    return (left.tool_id || '').localeCompare(right.tool_id || '')
+  })
+}
+
+const findConcreteToolDraft = (target: string | AgentWorkshopToolingPlanItem) => {
+  if (typeof target !== 'string') return target
+
+  const normalizedTarget = target.trim().toLowerCase()
+  const drafts = getSortedToolDrafts()
+  const exact = drafts.find(item =>
+    item.tool_id?.toLowerCase() === normalizedTarget ||
+    item.tool_name?.toLowerCase() === normalizedTarget,
+  )
+  if (exact) return exact
+
+  if (normalizedTarget.includes('skill')) {
+    return drafts[0] || null
+  }
+
+  return null
+}
+
+const buildToolDraftSkillDescription = (toolDraft: AgentWorkshopToolingPlanItem) => {
+  const spec = displaySpec.value
+  const version = latestVersion.value
+  const gapNotes = gapReport.value?.blocking_gaps || []
+  const recommendations = gapReport.value?.build_recommendations || []
+  const toolHints = version?.required_tools || []
+  const inputLines = (toolDraft.inputs || []).map(field => `- ${field.name}: ${field.type}${field.required ? '，必填' : '，可选'}${field.description ? `，${field.description}` : ''}`)
+  const outputLines = (toolDraft.outputs || []).map(field => `- ${field.name}: ${field.type}${field.description ? `，${field.description}` : ''}`)
+
+  return [
+    `我要补齐一个 Agent 可直接调用的执行能力：${toolDraft.tool_id}。`,
+    spec?.name ? `它服务于 Agent：${spec.name}。` : '',
+    spec?.primary_goal ? `Agent 目标：${spec.primary_goal}` : '',
+    spec?.domain ? `业务领域：${spec.domain}` : '',
+    toolHints.length ? `当前 Agent 已绑定工具：${toolHints.join('、')}` : '',
+    gapNotes.length ? `当前识别到的关键缺口：${gapNotes.slice(0, 3).join('；')}` : '',
+    recommendations.length ? `实现建议：${recommendations.slice(0, 3).join('；')}` : '',
+    `这项能力的目标是：${toolDraft.why_needed}`,
+    toolDraft.solves_gaps?.length ? `它要解决的问题：${toolDraft.solves_gaps.join('；')}` : '',
+    toolDraft.dependencies?.length ? `依赖数据或前置条件：${toolDraft.dependencies.join('、')}` : '',
+    inputLines.length ? `建议输入参数：\n${inputLines.join('\n')}` : '',
+    outputLines.length ? `建议输出结构：\n${outputLines.join('\n')}` : '',
+    toolDraft.acceptance_criteria?.length ? `验收标准：${toolDraft.acceptance_criteria.join('；')}` : '',
+    toolDraft.fallback_before_ready ? `未完成前的降级策略：${toolDraft.fallback_before_ready}` : '',
+    '请先判断这项能力能否直接复用现有工具或已有 Skill；如果不能，再把它收敛成一个新增的最小实现单元。不要泛化成大而全的综合能力。重点只描述这个单一能力的输入参数、输出结构、依赖数据、调用边界和计算职责。',
+  ].filter(Boolean).join('\n')
+}
+
+const buildSkillGenerationDescription = (target: string | AgentWorkshopToolingPlanItem) => {
+  const concreteTool = findConcreteToolDraft(target)
+  if (concreteTool) {
+    return buildToolDraftSkillDescription(concreteTool)
+  }
+
+  const skillName = (typeof target === 'string' ? target : (target.tool_name || target.tool_id || '')).trim()
+  const spec = displaySpec.value
+  return [
+    `我要补齐一个 Agent 可直接调用的执行能力：${skillName}。`,
+    spec?.name ? `它服务于 Agent：${spec.name}。` : '',
+    spec?.primary_goal ? `Agent 目标：${spec.primary_goal}` : '',
+    '请先判断这项能力是否可以复用现有工具或已有 Skill；如果不能，再把它澄清成一个新增的最小实现单元，并主动收敛职责边界，不要泛化成过大的能力集合。',
+  ].filter(Boolean).join('\n')
+}
+
+const goToSkillWorkshop = (target?: string | AgentWorkshopToolingPlanItem) => {
+  const description = target ? buildSkillGenerationDescription(target) : ''
+  if (!description) {
+    router.push('/workflow/skill-generation/create')
+    return
+  }
+
+  router.push({
+    path: '/workflow/skill-generation/create',
+    query: {
+      description,
+      from_agent_workshop: selectedSpecId.value || '',
+      source_name: selectedSpecName.value || '',
+      skill_name: typeof target === 'string' ? target : (target?.tool_id || target?.tool_name || ''),
+      handoff_intent: '先判断复用已有能力还是新增最小实现单元，再决定是否需要独立 Skill。',
+    }
+  })
+}
+
+const handleCreateSkillSession = async (target: string | AgentWorkshopToolingPlanItem) => {
+  const normalizedSkillName = (typeof target === 'string' ? target : (target.tool_id || target.tool_name || '')).trim()
+  if (!normalizedSkillName) return
+
+  skillGenerating.value = {
+    ...skillGenerating.value,
+    [normalizedSkillName]: true,
+  }
+
+  try {
+    const session = await skillGenerationApi.startSession({
+      description: buildSkillGenerationDescription(target),
+      handoff_context: {
+        source: 'agent_workshop',
+        source_spec_id: selectedSpecId.value || '',
+        source_name: selectedSpecName.value || '',
+        target_capability: normalizedSkillName,
+        handoff_intent: '先判断复用已有能力还是新增最小实现单元，再决定是否需要独立 Skill。',
+      },
+    })
+    ElMessage.success(`已为“${normalizedSkillName}”创建能力会话`)
+    router.push({
+      path: '/workflow/skill-generation/create',
+      query: { sessionId: session.session_id }
+    })
+  } catch (error: any) {
+    ElMessage.error(error?.message || `创建能力会话失败：${normalizedSkillName}`)
+  } finally {
+    skillGenerating.value = {
+      ...skillGenerating.value,
+      [normalizedSkillName]: false,
+    }
+  }
 }
 
 watch(
@@ -1598,6 +2136,13 @@ onMounted(async () => {
   font-size: 26px;
   font-weight: 700;
   color: #123f39;
+}
+
+.focus-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .focus-subtitle {
@@ -1949,6 +2494,50 @@ onMounted(async () => {
   background: #f6f7f2;
   color: #4e5b57;
   line-height: 1.6;
+}
+
+.actionable-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.descriptive-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.descriptive-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 240px;
+}
+
+.descriptive-title {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.descriptive-text {
+  color: #6b7280;
+  line-height: 1.6;
+  font-size: 13px;
+}
+
+.inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.breakdown-actions {
+  margin: 10px 0 12px;
 }
 
 .empty-stage-card {

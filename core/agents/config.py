@@ -55,6 +55,40 @@ class GrowthSourceType(str, Enum):
     MANAGER_DECISION = "manager_decision"
 
 
+class AgentMaturityLevel(str, Enum):
+    """Agent 平台成熟度等级"""
+    EXPERIMENTAL = "experimental"
+    INTERNAL = "internal"
+    STABLE = "stable"
+
+
+class AgentInputMode(str, Enum):
+    """Agent 输入模式声明"""
+    STANDALONE = "standalone"
+    UPSTREAM_DEPENDENT = "upstream-dependent"
+    MIXED = "mixed"
+
+
+class AgentDebugReplayMode(str, Enum):
+    """Agent 调试重放模式"""
+    DIRECT = "direct"
+    REQUIRES_EXTRA_STATE = "requires_extra_state"
+    REQUIRES_CHAIN_PREFILL = "requires_chain_prefill"
+
+
+class AgentMaintenanceStatus(str, Enum):
+    """Agent 维护状态声明"""
+    MAINTAINED = "maintained"
+    UNMAINTAINED = "unmaintained"
+
+
+class AgentInputSource(str, Enum):
+    """Agent 输入来源声明"""
+    REQUEST = "request"
+    STATE = "state"
+    CONTEXT = "context"
+
+
 class AgentInput(BaseModel):
     """智能体输入定义"""
     name: str
@@ -62,6 +96,10 @@ class AgentInput(BaseModel):
     description: str
     required: bool = True
     default: Optional[Any] = None
+    source: AgentInputSource = AgentInputSource.REQUEST
+    state_field: Optional[str] = None
+    source_state_fields: List[str] = Field(default_factory=list)
+    producer_hint: Optional[str] = None
 
 
 class AgentOutput(BaseModel):
@@ -152,6 +190,13 @@ class AgentMetadata(BaseModel):
     review_level: GrowthReviewLevel = GrowthReviewLevel.MANUAL_REQUIRED
     growth_source_type: GrowthSourceType = GrowthSourceType.NONE
 
+    # 🆕 平台治理声明
+    maturity_level: AgentMaturityLevel = AgentMaturityLevel.STABLE
+    input_mode: AgentInputMode = AgentInputMode.STANDALONE
+    debug_replay_mode: AgentDebugReplayMode = AgentDebugReplayMode.DIRECT
+    maintenance_status: AgentMaintenanceStatus = AgentMaintenanceStatus.MAINTAINED
+    callable_surfaces: List[str] = Field(default_factory=lambda: ["assistant", "workflow", "agent"])
+
     class Config:
         use_enum_values = True
 
@@ -197,6 +242,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="市场分析师",
         description="分析市场数据、价格走势和技术指标",
         category=AgentCategory.ANALYST,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="📈",
         color="#2ecc71",
         tags=["技术分析", "市场数据"],
@@ -222,6 +268,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="基本面分析师",
         description="分析公司财务数据和基本面指标",
         category=AgentCategory.ANALYST,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="📊",
         color="#3498db",
         tags=["基本面", "财务分析"],
@@ -240,6 +287,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="新闻分析师",
         description="分析财经新闻和事件影响",
         category=AgentCategory.ANALYST,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="📰",
         color="#9b59b6",
         tags=["新闻", "事件驱动"],
@@ -258,6 +306,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="社交媒体分析师",
         description="分析社交媒体情绪和舆论",
         category=AgentCategory.ANALYST,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="💬",
         color="#e74c3c",
         tags=["情绪分析", "舆情"],
@@ -276,6 +325,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="行业/板块分析师",
         description="分析行业趋势、板块轮动和行业对比",
         category=AgentCategory.ANALYST,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         license_tier=LicenseTier.PRO,
         icon="🏭",
         color="#f39c12",
@@ -295,6 +345,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="大盘/指数分析师",
         description="分析大盘指数、市场环境和系统性风险",
         category=AgentCategory.ANALYST,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         license_tier=LicenseTier.PRO,
         icon="🌐",
         color="#1abc9c",
@@ -314,6 +365,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="看涨研究员",
         description="从乐观角度分析投资机会",
         category=AgentCategory.RESEARCHER,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="🐂",
         color="#27ae60",
         tags=["看涨", "机会"],
@@ -325,6 +377,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="看跌研究员",
         description="从谨慎角度分析投资风险",
         category=AgentCategory.RESEARCHER,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="🐻",
         color="#c0392b",
         tags=["看跌", "风险"],
@@ -336,6 +389,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="交易员",
         description="综合分析结果做出交易决策",
         category=AgentCategory.TRADER,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="💰",
         color="#f1c40f",
         tags=["交易", "决策"],
@@ -347,6 +401,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="持仓分析师",
         description="基于单股分析报告和持仓信息，提供个性化的持仓操作建议",
         category=AgentCategory.TRADER,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="💼",
         color="#2980b9",
         tags=["持仓", "操作建议", "风险评估"],
@@ -359,6 +414,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="激进风险分析师",
         description="从激进角度评估交易计划，关注高收益机会，容忍较高风险",
         category=AgentCategory.RISK,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="🔥",
         color="#e74c3c",
         tags=["风险", "激进", "收益"],
@@ -370,6 +426,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="保守风险分析师",
         description="从保守角度评估交易计划，优先资本保护，规避潜在风险",
         category=AgentCategory.RISK,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="🛡️",
         color="#27ae60",
         tags=["风险", "保守", "保护"],
@@ -381,6 +438,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="中性风险分析师",
         description="从中性角度评估交易计划，平衡收益与风险，寻求最优解",
         category=AgentCategory.RISK,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="⚖️",
         color="#3498db",
         tags=["风险", "中性", "平衡"],
@@ -392,6 +450,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="风险经理",
         description="综合三方风险分析师观点，做出最终风险调整决策",
         category=AgentCategory.MANAGER,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="👨‍⚖️",
         color="#9b59b6",
         tags=["风险", "裁决", "决策"],
@@ -403,6 +462,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="研究经理",
         description="综合多空研究员观点，形成投资建议",
         category=AgentCategory.MANAGER,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="👔",
         color="#9b59b6",
         tags=["管理", "综合", "决策"],
@@ -415,6 +475,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="时机分析师",
         description="分析买入卖出时机，评估交易时机选择的合理性",
         category=AgentCategory.ANALYST,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="⏰",
         color="#e67e22",
         tags=["复盘", "时机", "买卖点"],
@@ -441,6 +502,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="仓位分析师",
         description="分析仓位控制和加减仓策略的合理性",
         category=AgentCategory.ANALYST,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="📊",
         color="#3498db",
         tags=["复盘", "仓位", "资金管理"],
@@ -467,6 +529,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="情绪分析师",
         description="分析交易中的情绪化操作和纪律执行情况",
         category=AgentCategory.ANALYST,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="🧠",
         color="#9b59b6",
         tags=["复盘", "情绪", "纪律"],
@@ -493,6 +556,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="归因分析师",
         description="分析收益来源，区分大盘/行业/个股Alpha贡献",
         category=AgentCategory.ANALYST,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="🎯",
         color="#1abc9c",
         tags=["复盘", "归因", "Alpha"],
@@ -519,6 +583,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="复盘总结师",
         description="综合所有分析维度，生成完整复盘报告和改进建议",
         category=AgentCategory.MANAGER,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="📝",
         color="#2c3e50",
         tags=["复盘", "总结", "建议"],
@@ -545,6 +610,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="持仓技术面分析师",
         description="分析K线走势、技术指标、支撑阻力位，评估技术面状态",
         category=AgentCategory.ANALYST,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="📈",
         color="#2ecc71",
         tags=["持仓分析", "技术面", "趋势"],
@@ -561,6 +627,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="持仓基本面分析师",
         description="分析财务数据、估值水平、行业地位，评估基本面价值",
         category=AgentCategory.ANALYST,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="📊",
         color="#3498db",
         tags=["持仓分析", "基本面", "估值"],
@@ -577,6 +644,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="持仓风险评估师",
         description="评估持仓风险、设置止损止盈、分析仓位合理性",
         category=AgentCategory.ANALYST,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="⚠️",
         color="#e74c3c",
         tags=["持仓分析", "风险", "止损"],
@@ -593,6 +661,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="持仓操作建议师",
         description="综合技术面、基本面、风险评估，给出持仓操作建议",
         category=AgentCategory.MANAGER,
+        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
         icon="💡",
         color="#9b59b6",
         tags=["持仓分析", "建议", "决策"],

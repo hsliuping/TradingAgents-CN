@@ -16,8 +16,19 @@
         <el-tag :type="agent?.license_tier === 'free' ? 'info' : 'success'">
           {{ agent?.license_tier }}
         </el-tag>
+        <el-tag v-if="agentMaintenanceStatus === 'unmaintained'" type="danger" effect="plain">
+          停止维护
+        </el-tag>
       </div>
     </div>
+
+    <el-alert
+      v-if="agentMaintenanceStatus === 'unmaintained'"
+      title="当前 Agent 属于 v1.0 遗留实现，已停止维护；建议优先使用对应的 v2.0 Agent。"
+      type="warning"
+      :closable="false"
+      class="maintenance-alert"
+    />
 
     <!-- 主内容区域 -->
     <div class="page-content" v-loading="loading">
@@ -40,6 +51,12 @@
               <div class="info-item">
                 <span class="label">分类</span>
                 <el-tag>{{ getCategoryName(agent?.category) }}</el-tag>
+              </div>
+              <div class="info-item">
+                <span class="label">维护状态</span>
+                <el-tag :type="agentMaintenanceStatus === 'unmaintained' ? 'danger' : 'success'" effect="plain">
+                  {{ agentMaintenanceStatus === 'unmaintained' ? '停止维护' : '维护中' }}
+                </el-tag>
               </div>
               <div class="info-item">
                 <span class="label">标签</span>
@@ -788,6 +805,29 @@ const parsedOutputs = computed(() => {
 const goBack = () => {
   router.back()
 }
+
+const isV2AgentId = (agentId?: string) => {
+  const normalized = String(agentId || '').toLowerCase()
+  return normalized.includes('_v2') || normalized.startsWith('v2_')
+}
+
+const agentMaintenanceStatus = computed(() => {
+  const explicitStatus = agent.value?.maintenance_status
+  if (explicitStatus === 'maintained' || explicitStatus === 'unmaintained') {
+    return explicitStatus
+  }
+  const version = String(agent.value?.version || '').toLowerCase()
+  if (version.startsWith('1') || version.startsWith('v1')) {
+    return 'unmaintained'
+  }
+  if (version.startsWith('2') || version.startsWith('v2')) {
+    return 'maintained'
+  }
+  if (!agent.value?.id) {
+    return 'maintained'
+  }
+  return isV2AgentId(agent.value.id) ? 'maintained' : 'unmaintained'
+})
 
 // 判断是否可以调试提示词（仅单股分析的六个分析师）
 const canDebugPrompt = computed(() => {
@@ -1716,6 +1756,10 @@ onMounted(() => {
         }
       }
     }
+  }
+
+  .maintenance-alert {
+    margin: 16px 24px 0;
   }
 }
 </style>

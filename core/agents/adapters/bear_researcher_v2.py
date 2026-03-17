@@ -72,9 +72,9 @@ class BearResearcherV2(ResearcherAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="market_report", type="string", description="市场分析报告", required=False),
-            AgentInput(name="news_report", type="string", description="新闻分析报告", required=False),
-            AgentInput(name="fundamentals_report", type="string", description="基本面分析报告", required=False),
+            AgentInput(name="market_report", type="string", description="市场分析报告", required=False, source="state", state_field="market_report", producer_hint="market_analyst_v2"),
+            AgentInput(name="news_report", type="string", description="新闻分析报告", required=False, source="state", state_field="news_report", producer_hint="news_analyst_v2"),
+            AgentInput(name="fundamentals_report", type="string", description="基本面分析报告", required=False, source="state", state_field="fundamentals_report", producer_hint="fundamentals_analyst_v2"),
         ],
         outputs=[
             AgentOutput(name="bear_report", type="string", description="看跌观点报告"),
@@ -87,6 +87,10 @@ class BearResearcherV2(ResearcherAgent):
         memory_scope_hint="pattern",
         review_level="manual_required",
         growth_source_type="analysis_report",
+        maturity_level="stable",
+        input_mode="upstream-dependent",
+        debug_replay_mode="requires_chain_prefill",
+        callable_surfaces=["assistant", "workflow", "agent"],
     )
 
     # 研究员类型

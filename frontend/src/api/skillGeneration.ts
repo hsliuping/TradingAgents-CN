@@ -6,12 +6,21 @@ import request from './request'
 export interface StartSessionRequest {
   description: string
   user_id?: string
+  handoff_context?: SkillHandoffContext
   provider?: string
   model?: string
   /** 需求分析模型（覆盖系统默认的深度推理模型） */
   reasoning_model?: string
   /** 代码生成模型（覆盖系统默认的编程模型） */
   coding_model?: string
+}
+
+export interface SkillHandoffContext {
+  source: string
+  source_spec_id?: string
+  source_name?: string
+  target_capability?: string
+  handoff_intent?: string
 }
 
 /** 可用模型项 */
@@ -85,6 +94,7 @@ export interface ExternalSkill {
   generation_rounds: number
   generation_time: number
   final_score: number | null
+  generation_context?: SkillGenerationRecommendations | null
   created_at: string
   updated_at: string
 }
@@ -96,6 +106,50 @@ export interface SkillParameter {
   description: string
   required: boolean
   default?: any
+}
+
+export interface StockDataCatalogField {
+  name: string
+  type: string
+  description: string
+}
+
+export interface StockDataCatalogCollection {
+  collection: string
+  purpose: string
+  preferred_access: string[]
+  query_keys: string[]
+  notes: string[]
+  fields: StockDataCatalogField[]
+}
+
+export interface StockDataCatalogResult {
+  collections: StockDataCatalogCollection[]
+  doc: string
+}
+
+export interface ExternalDataSourceCatalogItem {
+  source_id: string
+  display_name: string
+  source_type: string
+  markets: string[]
+  categories: string[]
+  preferred_for: string[]
+  interfaces: string[]
+  constraints: string[]
+  notes: string[]
+}
+
+export interface ExternalDataSourceCatalogResult {
+  sources: ExternalDataSourceCatalogItem[]
+  doc: string
+}
+
+export interface SkillGenerationRecommendations {
+  category_hint: string
+  data_source_hint: string
+  stock_collections: string[]
+  external_sources: string[]
 }
 
 /** 分页列表 */
@@ -133,8 +187,10 @@ export interface SessionDetail {
   current_round: number
   clarity_level: string | null
   boundary_check: BoundaryCheck | null
+  handoff_context?: SkillHandoffContext | null
   spec: Record<string, any> | null
   spec_confirmed: boolean
+  recommendations?: SkillGenerationRecommendations | null
   pipeline_result: Record<string, any> | null
   pipeline_stage?: string
   pipeline_message?: string
@@ -154,6 +210,7 @@ export interface OptimizeResult {
   total_rounds: number
   total_time: number
   final_score: number | null
+  generation_context?: SkillGenerationRecommendations | null
   error: string | null
 }
 
@@ -194,6 +251,18 @@ export const skillGenerationApi = {
     return (res as any).data
   },
 
+  /** 获取股票数据集合目录 */
+  getStockDataCatalog: async (): Promise<StockDataCatalogResult> => {
+    const res = await request.get<ApiOk<StockDataCatalogResult>>(`${BASE}/catalog/stock-data`)
+    return (res as any).data
+  },
+
+  /** 获取外部接口与数据源目录 */
+  getExternalDataSourceCatalog: async (): Promise<ExternalDataSourceCatalogResult> => {
+    const res = await request.get<ApiOk<ExternalDataSourceCatalogResult>>(`${BASE}/catalog/external-data-sources`)
+    return (res as any).data
+  },
+
   // ---------- 需求沟通 ----------
 
   /** 开始创建会话 */
@@ -209,8 +278,8 @@ export const skillGenerationApi = {
   },
 
   /** 预览规格（不执行管线），用于规格确认步骤 */
-  previewSpec: async (sessionId: string, message: string = '确认'): Promise<{ spec: Record<string, any> }> => {
-    const res = await request.post<ApiOk<{ spec: Record<string, any> }>>(`${BASE}/sessions/${sessionId}/preview-spec`, { message })
+  previewSpec: async (sessionId: string, message: string = '确认'): Promise<{ spec: Record<string, any>; recommendations?: SkillGenerationRecommendations | null }> => {
+    const res = await request.post<ApiOk<{ spec: Record<string, any>; recommendations?: SkillGenerationRecommendations | null }>>(`${BASE}/sessions/${sessionId}/preview-spec`, { message })
     return (res as any).data
   },
 

@@ -11,6 +11,7 @@ from ..agents import (
     AgentFactory,
     AgentMetadata,
     AgentCategory,
+    AgentMaintenanceStatus,
     LicenseTier,
     get_registry,
 )
@@ -166,13 +167,16 @@ class AgentAPI:
         # 处理枚举值：可能是枚举类型也可能是字符串（use_enum_values=True）
         category = metadata.category.value if hasattr(metadata.category, 'value') else metadata.category
         license_tier = metadata.license_tier.value if hasattr(metadata.license_tier, 'value') else metadata.license_tier
+        maintenance_status = self._resolve_maintenance_status(metadata)
 
         return {
             "id": metadata.id,
             "name": metadata.name,
             "description": metadata.description,
             "category": category,
+            "version": metadata.version,
             "license_tier": license_tier,
+            "maintenance_status": maintenance_status,
             "inputs": metadata.inputs,
             "outputs": metadata.outputs,
             "icon": metadata.icon,
@@ -182,6 +186,20 @@ class AgentAPI:
             "default_tools": metadata.default_tools,
             "max_tool_calls": metadata.max_tool_calls,
         }
+
+    def _resolve_maintenance_status(self, metadata: AgentMetadata) -> str:
+        """统一计算 Agent 维护状态。"""
+        raw_status = getattr(metadata, "maintenance_status", None)
+        if raw_status:
+            status_value = raw_status.value if hasattr(raw_status, 'value') else str(raw_status)
+            if status_value == AgentMaintenanceStatus.UNMAINTAINED.value:
+                return status_value
+
+        version = str(getattr(metadata, "version", "") or "").strip().lower()
+        if version.startswith("1") or version.startswith("v1"):
+            return AgentMaintenanceStatus.UNMAINTAINED.value
+
+        return AgentMaintenanceStatus.MAINTAINED.value
     
     def _get_category_name(self, category: AgentCategory) -> str:
         """获取类别的中文名称"""

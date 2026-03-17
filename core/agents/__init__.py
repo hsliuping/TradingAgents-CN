@@ -11,7 +11,7 @@ v2.0 新特性:
 from .base import BaseAgent
 from .registry import AgentRegistry, get_registry, register_agent
 from .factory import AgentFactory, create_agent, create_agent_with_dynamic_tools
-from .config import AgentMetadata, AgentConfig, AgentCategory, LicenseTier, BUILTIN_AGENTS
+from .config import AgentMetadata, AgentConfig, AgentCategory, AgentMaintenanceStatus, LicenseTier, BUILTIN_AGENTS
 from .universal import UniversalAgent
 
 # v2.0 新增：Agent基类
@@ -81,6 +81,7 @@ __all__ = [
     "AgentMetadata",
     "AgentConfig",
     "AgentCategory",
+    "AgentMaintenanceStatus",
     "LicenseTier",
     "BUILTIN_AGENTS",
     # 筹码分布分析师

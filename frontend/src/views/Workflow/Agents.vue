@@ -34,7 +34,10 @@
             </div>
             <div class="agent-title">
               <h3>{{ agent.name }}</h3>
-<el-tag size="small" :type="getLicenseType(agent.license_tier) || undefined">{{ agent.license_tier }}</el-tag>
+              <div class="agent-title-tags">
+                <el-tag size="small" :type="getLicenseType(agent.license_tier) || undefined">{{ agent.license_tier }}</el-tag>
+                <el-tag v-if="agent.maintenance_status === 'unmaintained'" size="small" type="danger" effect="plain">停止维护</el-tag>
+              </div>
             </div>
           </div>
           
@@ -81,13 +84,42 @@ const agents = ref<AgentMetadata[]>([])
 const categories = ref<AgentCategory[]>([])
 const currentCategory = ref('')
 
-// 获取分类的 v2.0 agent 数量
-const getCategoryCount = (categoryId: string) => {
-  const v2Agents = agents.value.filter(isV2Agent)
-  if (!categoryId) {
-    return v2Agents.length
+const inferAgentMaintenanceStatus = (agent: AgentMetadata): 'maintained' | 'unmaintained' => {
+  if (agent.maintenance_status === 'maintained' || agent.maintenance_status === 'unmaintained') {
+    return agent.maintenance_status
   }
-  return v2Agents.filter(a => a.category === categoryId).length
+
+  const version = String(agent.version || '').toLowerCase()
+  if (version.startsWith('1') || version.startsWith('v1')) {
+    return 'unmaintained'
+  }
+
+  const id = (agent.id || '').toLowerCase()
+  const name = (agent.name || '').toLowerCase()
+  const tags = Array.isArray(agent.tags) ? agent.tags : []
+
+  if (id.includes('_v2') || id.startsWith('v2_')) {
+    return 'maintained'
+  }
+
+  if (name.includes('v2.0') || name.includes(' v2')) {
+    return 'maintained'
+  }
+
+  if (tags.some(tag => String(tag).toLowerCase().includes('v2'))) {
+    return 'maintained'
+  }
+
+  return 'unmaintained'
+}
+
+// 获取分类的维护中 agent 数量
+const getCategoryCount = (categoryId: string) => {
+  const maintainedAgents = agents.value.filter(agent => inferAgentMaintenanceStatus(agent) === 'maintained')
+  if (!categoryId) {
+    return maintainedAgents.length
+  }
+  return maintainedAgents.filter(a => a.category === categoryId).length
 }
 
 const getLicenseType = (tier: string) => {
@@ -100,40 +132,14 @@ const getLicenseType = (tier: string) => {
   }
 }
 
-// 判断是否为 v2.0 agent
-const isV2Agent = (agent: AgentMetadata): boolean => {
-  const id = (agent.id || '').toLowerCase()
-  const name = (agent.name || '').toLowerCase()
-  const tags = Array.isArray(agent.tags) ? agent.tags : []
-  
-  // 1. ID 明确包含 _v2 或 v2_（最可靠的判断方式）
-  if (id.includes('_v2') || id.startsWith('v2_')) {
-    return true
-  }
-  
-  // 2. 名称包含 v2.0 或 v2
-  if (name.includes('v2.0') || name.includes(' v2')) {
-    return true
-  }
-  
-  // 3. tags 包含 v2 相关标签
-  if (tags.some(tag => String(tag).toLowerCase().includes('v2'))) {
-    return true
-  }
-  
-  // 默认：过滤掉非v2.0的agent
-  return false
-}
-
 const filteredAgents = computed(() => {
-  // 🔥 只显示v2.0的agent，屏蔽非v2.0的agent
-  const v2Agents = agents.value.filter(isV2Agent)
-  
+  const maintainedAgents = agents.value.filter(agent => inferAgentMaintenanceStatus(agent) === 'maintained')
+
   // 再根据分类过滤
   if (!currentCategory.value) {
-    return v2Agents
+    return maintainedAgents
   }
-  return v2Agents.filter(a => a.category === currentCategory.value)
+  return maintainedAgents.filter(a => a.category === currentCategory.value)
 })
 
 const loadData = async () => {
@@ -246,6 +252,13 @@ onMounted(() => {
         margin: 0 0 8px 0;
         font-size: 16px;
         line-height: 1.4;
+      }
+
+      .agent-title-tags {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
       }
     }
   }
