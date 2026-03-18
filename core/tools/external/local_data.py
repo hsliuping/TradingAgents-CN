@@ -199,6 +199,30 @@ def get_market_quotes(symbol: str) -> Optional[Dict[str, Any]]:
     return doc
 
 
+def get_latest_stock_price(symbol: str) -> Optional[float]:
+    """
+    获取股票最新可用价格。
+
+    优先使用 market_quotes，其次回退到 stock_basic_info 中的 close/current_price/pre_close。
+    若无正数价格则返回 None。
+    """
+    symbol = str(symbol).strip().zfill(6)
+
+    quotes = get_market_quotes(symbol) or {}
+    for field in ("current_price", "close", "pre_close", "open"):
+        value = quotes.get(field)
+        if isinstance(value, (int, float)) and value > 0:
+            return float(value)
+
+    basic_info = get_stock_basic_info(symbol) or {}
+    for field in ("current_price", "close", "pre_close", "open"):
+        value = basic_info.get(field)
+        if isinstance(value, (int, float)) and value > 0:
+            return float(value)
+
+    return None
+
+
 def get_stock_financial_data(
     symbol: str,
     start_date: Optional[str] = None,
@@ -220,16 +244,51 @@ def get_stock_financial_data(
     symbol = str(symbol).strip().zfill(6)
     db = _get_db()
     col = db[_COL_FINANCIAL]
-    query = {"symbol": symbol}
+    query: Dict[str, Any] = {"$or": [{"symbol": symbol}, {"code": symbol}]}
     if start_date or end_date:
-        q = {}
+        q: Dict[str, str] = {}
         if start_date:
             q["$gte"] = start_date.replace("-", "")[:8]
         if end_date:
             q["$lte"] = end_date.replace("-", "")[:8]
-        query["report_date"] = q
-    cursor = col.find(query, {"_id": 0}).sort("report_date", -1).limit(limit)
-    return list(cursor)
+        query["$and"] = [{"$or": [{"report_period": q}, {"report_date": q}]}]
+
+    # 财务数据历史上同时存在 report_period / report_date 两种口径，
+    # 这里统一拉取后在 Python 侧兼容排序，避免生成的 Skill 因字段差异取到错误记录。
+    items = list(col.find(query, {"_id": 0}).limit(max(limit * 3, 50)))
+    items.sort(
+        key=lambda item: str(item.get("report_period") or item.get("report_date") or ""),
+        reverse=True,
+    )
+    return items[:limit]
+
+
+def get_stock_valuation_context(symbol: str, financial_limit: int = 8) -> Dict[str, Any]:
+    """
+    获取估值场景的标准输入上下文。
+
+    返回值包含：
+    - basic_info: 基础信息
+    - market_quotes: 实时行情
+    - current_price: 最新可用价格
+    - pe_ttm / pb / ps_ttm: 常用估值指标
+    - financial_data: 最近若干期财务数据
+    """
+    symbol = str(symbol).strip().zfill(6)
+    basic_info = get_stock_basic_info(symbol) or {}
+    market_quotes = get_market_quotes(symbol) or {}
+    financial_data = get_stock_financial_data(symbol, limit=financial_limit)
+    current_price = get_latest_stock_price(symbol)
+
+    return {
+        "basic_info": basic_info,
+        "market_quotes": market_quotes,
+        "current_price": current_price,
+        "pe_ttm": basic_info.get("pe_ttm") or basic_info.get("pe"),
+        "pb": basic_info.get("pb") or basic_info.get("pb_mrq"),
+        "ps_ttm": basic_info.get("ps_ttm") or basic_info.get("ps"),
+        "financial_data": financial_data,
+    }
 
 
 # 供代码生成器 Prompt 引用的文档
@@ -258,16 +317,38 @@ LOCAL_DATA_API_DOC = """
 4. get_market_quotes(symbol) -> dict | None
    - 实时行情：close、pct_chg、volume、amount
 
-5. get_stock_financial_data(symbol, start_date=None, end_date=None, limit=20) -> list
-   - 财务数据：report_date、各项财务指标
+5. get_latest_stock_price(symbol) -> float | None
+   - 标准价格入口：优先 market_quotes，再回退 basic_info
+   - 估值类 Skill 优先用这个函数取 current_price，不要把价格默默设成 0
 
-示例：先查本地，无数据再调外部 API
+6. get_stock_financial_data(symbol, start_date=None, end_date=None, limit=20) -> list
+   - 财务数据：兼容 report_period / report_date 两种报告期字段
+
+7. get_stock_valuation_context(symbol, financial_limit=8) -> dict
+   - 估值场景标准入口：一次返回 basic_info、market_quotes、current_price、pe_ttm、pb、ps_ttm、financial_data
+
+示例1：先查本地，无数据再调外部 API
     from core.tools.external.local_data import get_stock_basic_info, get_stock_daily_quotes
     info = get_stock_basic_info("600519")
     if info:
-        # 使用本地数据
         ...
     else:
-        # 降级到 akshare 等
         ...
+
+示例2：估值类 Skill 的推荐写法
+    from core.tools.external.local_data import get_stock_valuation_context
+    ctx = get_stock_valuation_context("600519")
+    current_price = ctx["current_price"]
+    if current_price is None or current_price <= 0:
+        return {"status": "error", "message": "未获取到有效现价，无法估值"}
+
+    pe_ttm = ctx["pe_ttm"]
+    pb = ctx["pb"]
+    ps_ttm = ctx["ps_ttm"]
+    financial_data = ctx["financial_data"]
+
+硬规则：
+- 估值类 Skill 不允许把 current_price 默默设为 0 后继续计算
+- fair_value、valuation_range 若缺少必要输入，应返回 invalid / error，而不是输出 0
+- 财务数据排序优先使用 report_period，其次兼容 report_date
 """

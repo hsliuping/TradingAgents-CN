@@ -383,16 +383,121 @@
           :title="genResult?.success ? '🎉 Skill 创建成功！' : '❌ 生成失败'"
           :sub-title="genResult?.success
             ? `工具 ID: ${genResult.skill_id} · 耗时 ${genResult.total_time}s · 评分 ${genResult.final_score ?? '-'}/10`
-            : genResult?.error || '请重试或修改需求'"
+            : genResult?.error || '请根据下面的失败信息补充修正意见，然后重新生成'"
         >
           <template #extra>
             <el-button v-if="genResult?.success" type="primary" @click="goBack">
               查看 Skill 列表
             </el-button>
-            <el-button v-else @click="wizardStep = 0">返回修改需求</el-button>
+            <el-button v-else @click="wizardStep = 1">返回规格确认</el-button>
             <el-button @click="goBack">返回列表</el-button>
           </template>
         </el-result>
+        <div v-if="!genResult?.success" class="repair-card">
+          <div class="spec-catalog-header">
+            <div>
+              <h4>先让 AI 说明修正计划，再决定是否重跑</h4>
+              <p>这里会自动带上静态验证、沙箱执行、评估阶段的失败信息。你先补充你认为不对的地方，AI 会先回复它理解到的问题和修正计划；确认没偏后，再按这份计划继续生成。</p>
+            </div>
+          </div>
+          <div v-if="pipelineFailureSummary.length" class="repair-summary-list">
+            <div v-for="entry in pipelineFailureSummary" :key="entry" class="catalog-note-item">{{ entry }}</div>
+          </div>
+          <el-input
+            v-model="repairFeedback"
+            type="textarea"
+            :rows="4"
+            resize="vertical"
+            placeholder="例如：当前 price 被默默置为 0 还继续估值，这是错的；请优先用本地实时行情取价格，拿不到有效现价就直接返回 error。"
+          />
+          <div v-if="repairPlan" class="repair-plan-card">
+            <div class="repair-plan-header">
+              <h5>AI 理解的问题与修正计划</h5>
+              <span v-if="repairPlanStale" class="repair-plan-stale">你已修改修正意见，请重新生成计划</span>
+            </div>
+            <div class="markdown-body repair-plan-markdown" v-html="renderMarkdown(repairPlan)" />
+          </div>
+          <div class="repair-actions">
+            <el-button @click="wizardStep = 1">回到规格确认</el-button>
+            <el-button :loading="repairPlanning" :disabled="!repairFeedback.trim() || !sessionId" @click="handlePreviewRepairPlan">
+              {{ repairPlan ? '重新生成修正计划' : '让 AI 先给修正计划' }}
+            </el-button>
+            <el-button type="primary" :loading="repairing" :disabled="!canConfirmRepair" @click="handleRepairAndRegenerate">
+              确认按这个计划重跑
+            </el-button>
+          </div>
+        </div>
+        <div v-if="genResult?.success" class="test-run-card">
+          <div class="spec-catalog-header">
+            <div>
+              <h4>立即测试这个 Skill</h4>
+              <p>这里会直接调用测试接口运行刚生成的 Skill，用当前规格里的默认 test_input 验证是否能执行、是否真的拿到数据。</p>
+            </div>
+          </div>
+          <div v-if="generatedTestParams.length" class="test-run-form">
+            <el-form label-width="120px" size="default">
+              <el-form-item v-for="p in generatedTestParams" :key="p.name" :label="p.name" :required="p.required">
+                <el-input
+                  v-if="p.type === 'string' || !p.type"
+                  v-model="generatedTestArgs[p.name]"
+                  :placeholder="p.description || `请输入 ${p.name}`"
+                  clearable
+                />
+                <el-input-number
+                  v-else-if="p.type === 'integer' || p.type === 'int'"
+                  v-model="generatedTestArgs[p.name]"
+                  :placeholder="p.description"
+                  controls-position="right"
+                  style="width: 100%"
+                />
+                <el-input-number
+                  v-else-if="p.type === 'float' || p.type === 'number'"
+                  v-model="generatedTestArgs[p.name]"
+                  :placeholder="p.description"
+                  :precision="2"
+                  controls-position="right"
+                  style="width: 100%"
+                />
+                <el-switch v-else-if="p.type === 'boolean' || p.type === 'bool'" v-model="generatedTestArgs[p.name]" />
+                <el-input
+                  v-else
+                  v-model="generatedTestArgs[p.name]"
+                  :placeholder="p.description || `请输入 ${p.name}`"
+                  clearable
+                />
+              </el-form-item>
+            </el-form>
+          </div>
+          <div v-else class="test-params-empty">当前规格没有显式参数，将直接使用默认测试输入执行。</div>
+          <div class="test-run-actions">
+            <el-button @click="resetGeneratedTestArgs">恢复默认参数</el-button>
+            <el-button type="primary" :loading="generatedTestLoading" :disabled="!generatedSkillId" @click="runGeneratedSkillTest">
+              运行测试
+            </el-button>
+          </div>
+          <div v-if="generatedTestResult" class="test-run-result">
+            <div class="test-run-summary">
+              <el-tag :type="generatedTestResult.success ? 'success' : 'danger'">{{ generatedTestResult.success ? '执行成功' : '执行失败' }}</el-tag>
+              <el-tag :type="generatedTestDataState.type" effect="plain">{{ generatedTestDataState.label }}</el-tag>
+            </div>
+            <el-descriptions :column="1" border size="small">
+              <el-descriptions-item label="执行时长">{{ generatedTestResult.execution_time }}s</el-descriptions-item>
+              <el-descriptions-item label="结果说明">{{ generatedTestDataState.description }}</el-descriptions-item>
+              <el-descriptions-item v-if="generatedTestResult.error" label="错误">
+                <span class="test-run-error">{{ generatedTestResult.error }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="输出">
+                <pre class="test-run-pre">{{ generatedTestResultText }}</pre>
+              </el-descriptions-item>
+              <el-descriptions-item v-if="generatedTestResult.stdout" label="stdout">
+                <pre class="test-run-pre">{{ generatedTestResult.stdout }}</pre>
+              </el-descriptions-item>
+              <el-descriptions-item v-if="generatedTestResult.stderr" label="stderr">
+                <pre class="test-run-pre">{{ generatedTestResult.stderr }}</pre>
+              </el-descriptions-item>
+            </el-descriptions>
+          </div>
+        </div>
         <div v-if="genResult?.success && (preflightLocalCollections.length || preflightExternalSources.length)" class="done-context-card">
           <div class="spec-catalog-header">
             <div>
@@ -433,9 +538,11 @@ import type {
   BoundaryCheck,
   ConfirmResult,
   ExternalDataSourceCatalogItem,
+  PipelineResultDetail,
   SkillHandoffContext,
   SkillGenerationRecommendations,
   StockDataCatalogCollection,
+  TestResult,
 } from '@/api/skillGeneration'
 
 marked.setOptions({ breaks: true, gfm: true })
@@ -499,7 +606,7 @@ const getRouteHandoffContext = (): SkillHandoffContext | null => {
     source_spec_id: sourceSpecId,
     source_name: sourceName,
     target_capability: targetCapability,
-    handoff_intent: handoffIntent || '先判断复用已有能力还是新增最小实现单元，再决定是否需要独立 Skill。',
+    handoff_intent: handoffIntent || '当前是从 Agent 创建流程里补能力缺口，不是普通 Skill 脑暴。必须优先保留上游目标能力；若需要拆成 Skill，只能定义成该 Agent 能力里的最小确定性子能力。',
   }
 }
 
@@ -597,6 +704,138 @@ const genSteps = ref([
   { label: '质量评估', status: 'pending' },
 ])
 const genResult = ref<ConfirmResult | null>(null)
+const repairing = ref(false)
+const repairPlanning = ref(false)
+const repairFeedback = ref('')
+const repairPlan = ref('')
+const repairPlanFeedback = ref('')
+const generatedTestLoading = ref(false)
+const generatedTestArgs = ref<Record<string, any>>({})
+const generatedTestResult = ref<TestResult | null>(null)
+
+const sessionPipelineResult = ref<PipelineResultDetail | null>(null)
+
+const repairPlanStale = computed(() => {
+  const feedback = repairFeedback.value.trim()
+  return !!repairPlan.value.trim() && !!feedback && repairPlanFeedback.value !== feedback
+})
+
+const canConfirmRepair = computed(() => {
+  return !!sessionId.value && !!repairPlan.value.trim() && !repairPlanStale.value
+})
+
+const generatedSkillSpec = computed(() => genResult.value?.spec || specPreview.value || null)
+const generatedSkillId = computed(() => genResult.value?.skill_id || '')
+const generatedTestParams = computed(() => {
+  const spec = generatedSkillSpec.value
+  return Array.isArray(spec?.parameters) ? spec.parameters : []
+})
+const generatedTestDefaults = computed(() => {
+  const spec = generatedSkillSpec.value
+  return spec?.test_input && typeof spec.test_input === 'object' ? spec.test_input : {}
+})
+const generatedTestResultText = computed(() => {
+  if (!generatedTestResult.value) return ''
+  return JSON.stringify(generatedTestResult.value.output, null, 2)
+})
+const generatedTestDataState = computed(() => {
+  const result = generatedTestResult.value
+  if (!result) {
+    return {
+      label: '尚未测试',
+      type: 'info' as const,
+      description: '运行一次测试后，这里会告诉你是否真正拿到了有效数据。',
+    }
+  }
+
+  if (!result.success) {
+    return {
+      label: '未拿到数据',
+      type: 'danger' as const,
+      description: result.error || '测试执行失败，当前无法确认是否能正常拿到数据。',
+    }
+  }
+
+  const output = result.output
+  const hasData = (
+    output !== null &&
+    output !== undefined &&
+    (!(Array.isArray(output)) || output.length > 0) &&
+    (typeof output !== 'object' || Array.isArray(output) || Object.keys(output).length > 0) &&
+    (typeof output !== 'string' || output.trim().length > 0)
+  )
+
+  return hasData
+    ? {
+        label: '已拿到数据',
+        type: 'success' as const,
+        description: '测试已跑通，返回结果中包含有效输出。',
+      }
+    : {
+        label: '执行成功但无数据',
+        type: 'warning' as const,
+        description: '代码已经执行成功，但当前输出为空，需要继续确认查询参数或数据来源是否正确。',
+      }
+})
+
+const pipelineFailureSummary = computed(() => {
+  const result = sessionPipelineResult.value
+  if (!result) return []
+
+  const lines: string[] = []
+  if (result.error) {
+    lines.push(`最终错误：${result.error}`)
+  }
+
+  for (const iteration of result.iterations || []) {
+    const prefix = `第${iteration.round_number}轮`
+    if (iteration.validation?.errors?.length) {
+      for (const error of iteration.validation.errors.slice(0, 5)) {
+        lines.push(`${prefix} 静态验证：${error}`)
+      }
+    }
+    if (iteration.sandbox && iteration.sandbox.success === false && iteration.sandbox.error) {
+      lines.push(`${prefix} 沙箱执行：${iteration.sandbox.error}`)
+    }
+    if (iteration.eval_score && typeof iteration.eval_score.total === 'number') {
+      lines.push(
+        `${prefix} 评估分数不足：total=${iteration.eval_score.total}，` +
+        `executability=${iteration.eval_score.executability ?? '-'}，` +
+        `authenticity=${iteration.eval_score.authenticity ?? '-'}，` +
+        `completeness=${iteration.eval_score.completeness ?? '-'}，` +
+        `relevance=${iteration.eval_score.relevance ?? '-'}，` +
+        `format_quality=${iteration.eval_score.format_quality ?? '-'}`
+      )
+    }
+    if (iteration.feedback) {
+      lines.push(`${prefix} 系统反馈：${iteration.feedback}`)
+    }
+  }
+
+  return Array.from(new Set(lines))
+})
+
+const buildGeneratedTestArgs = () => {
+  const defaults = generatedTestDefaults.value || {}
+  const init: Record<string, any> = {}
+  for (const p of generatedTestParams.value) {
+    init[p.name] = defaults[p.name] ?? p.default ?? (p.type === 'boolean' || p.type === 'bool' ? false : '')
+  }
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!(key in init)) init[key] = value
+  }
+  return init
+}
+
+const resetGeneratedTestArgs = () => {
+  generatedTestArgs.value = buildGeneratedTestArgs()
+}
+
+const prepareGeneratedTestPanel = () => {
+  generatedTestResult.value = null
+  generatedTestLoading.value = false
+  resetGeneratedTestArgs()
+}
 
 // ==================== 方法 ====================
 
@@ -990,6 +1229,8 @@ const handleConfirmAndGenerate = async () => {
 
   specConfirmLoading.value = true
   wizardStep.value = 2
+  repairFeedback.value = ''
+  sessionPipelineResult.value = null
   genSteps.value.forEach(s => s.status = 'pending')
   genProgress.value = 0
   pipelineMessage.value = ''
@@ -1007,6 +1248,7 @@ const handleConfirmAndGenerate = async () => {
       const pollInterval = 1500
       const poll = async () => {
         const session = await skillGenerationApi.getSession(sessionId.value)
+        sessionPipelineResult.value = (session.pipeline_result || null) as PipelineResultDetail | null
         const stage = session.pipeline_stage
         const msg = session.pipeline_message
         const prog = session.pipeline_progress ?? 0
@@ -1040,6 +1282,7 @@ const handleConfirmAndGenerate = async () => {
             final_score: finalScore,
             error: pr?.error ?? null,
           }
+          if (session.status === 'completed') prepareGeneratedTestPanel()
           wizardStep.value = 3
           return
         }
@@ -1050,6 +1293,7 @@ const handleConfirmAndGenerate = async () => {
       genProgress.value = 100
       genSteps.value.forEach(s => s.status = 'done')
       genResult.value = res
+      if (res.success) prepareGeneratedTestPanel()
       wizardStep.value = 3
     }
   } catch (e: any) {
@@ -1061,6 +1305,124 @@ const handleConfirmAndGenerate = async () => {
     wizardStep.value = 3
   } finally {
     specConfirmLoading.value = false
+  }
+}
+
+const handleRepairAndRegenerate = async () => {
+  if (!sessionId.value || !repairFeedback.value.trim() || !canConfirmRepair.value) return
+  repairing.value = true
+  try {
+    await skillGenerationApi.repairSession(
+      sessionId.value,
+      repairFeedback.value.trim(),
+      repairPlan.value.trim(),
+    )
+    wizardStep.value = 2
+    genProgress.value = 0
+    pipelineMessage.value = '已确认修正计划，正在重新生成...'
+    genSteps.value.forEach(s => s.status = 'pending')
+    sessionPipelineResult.value = null
+    repairPlan.value = ''
+    repairPlanFeedback.value = ''
+
+    const pollInterval = 1500
+    const poll = async () => {
+      const session = await skillGenerationApi.getSession(sessionId.value)
+      sessionPipelineResult.value = (session.pipeline_result || null) as PipelineResultDetail | null
+      const stage = session.pipeline_stage
+      const msg = session.pipeline_message
+      const prog = session.pipeline_progress ?? 0
+      const stageToStep: Record<string, number> = {
+        code_generation: 0,
+        static_validation: 1,
+        sandbox_execution: 2,
+        output_evaluation: 3,
+      }
+      if (stage && stageToStep[stage] !== undefined) {
+        pipelineMessage.value = msg || stage
+        genProgress.value = Math.round(prog * 100) / 100
+        const idx = stageToStep[stage]
+        genSteps.value.forEach((s, i) => {
+          s.status = i < idx ? 'done' : i === idx ? 'running' : 'pending'
+        })
+      }
+
+      if (session.status === 'completed' || session.status === 'failed') {
+        const pr = session.pipeline_result as PipelineResultDetail | null
+        const lastIter = pr?.iterations?.[pr.iterations.length - 1]
+        const score = lastIter?.eval_score
+        const finalScore = typeof score?.total === 'number' ? score.total : null
+        genProgress.value = 100
+        genSteps.value.forEach(s => s.status = 'done')
+        genResult.value = {
+          status: session.status,
+          session_id: sessionId.value,
+          skill_id: pr?.tool_id ?? null,
+          spec: session.spec ?? null,
+          success: session.status === 'completed',
+          total_rounds: pr?.total_rounds ?? 0,
+          total_time: pr?.total_time ?? 0,
+          final_score: finalScore,
+          error: pr?.error ?? null,
+        }
+        if (session.status === 'completed') prepareGeneratedTestPanel()
+        wizardStep.value = 3
+        return
+      }
+      setTimeout(poll, pollInterval)
+    }
+
+    setTimeout(poll, 1500)
+  } catch (e: any) {
+    ElMessage.error(e?.message || '重新生成失败')
+  } finally {
+    repairing.value = false
+  }
+}
+
+const runGeneratedSkillTest = async () => {
+  if (!generatedSkillId.value) return
+  generatedTestLoading.value = true
+  generatedTestResult.value = null
+  try {
+    const args: Record<string, any> = {}
+    for (const p of generatedTestParams.value) {
+      let value = generatedTestArgs.value[p.name]
+      if (value === '' || value === undefined) value = p.default
+      if (p.type === 'integer' || p.type === 'int') args[p.name] = value != null ? Number(value) : undefined
+      else if (p.type === 'float' || p.type === 'number') args[p.name] = value != null ? Number(value) : undefined
+      else if (p.type === 'boolean' || p.type === 'bool') args[p.name] = !!value
+      else args[p.name] = value
+    }
+    for (const [key, value] of Object.entries(generatedTestDefaults.value || {})) {
+      if (!(key in args) || args[key] === undefined || args[key] === '') args[key] = value
+    }
+    generatedTestResult.value = await skillGenerationApi.testSkill(generatedSkillId.value, args)
+  } catch (e: any) {
+    generatedTestResult.value = {
+      success: false,
+      output: null,
+      stdout: '',
+      stderr: '',
+      execution_time: 0,
+      error: e?.message || '测试请求失败',
+    }
+  } finally {
+    generatedTestLoading.value = false
+  }
+}
+
+const handlePreviewRepairPlan = async () => {
+  if (!sessionId.value || !repairFeedback.value.trim()) return
+  repairPlanning.value = true
+  try {
+    const res = await skillGenerationApi.previewRepairSession(sessionId.value, repairFeedback.value.trim())
+    repairPlan.value = res.ai_message || ''
+    repairPlanFeedback.value = repairFeedback.value.trim()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '生成修正计划失败')
+  } finally {
+    repairPlanning.value = false
   }
 }
 
@@ -1387,13 +1749,18 @@ onMounted(async () => {
 
 /* ========== 规格确认 ========== */
 .wizard-spec-confirm {
+  flex: 1;
+  min-height: 0;
   display: flex;
   justify-content: center;
+  align-items: flex-start;
+  overflow-y: auto;
   padding: 24px;
 }
 .spec-confirm-card {
   max-width: 640px;
   width: 100%;
+  margin: 0 auto;
   padding: 20px;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
@@ -1582,6 +1949,7 @@ onMounted(async () => {
 }
 .spec-confirm-actions {
   margin-top: 20px;
+  padding-bottom: 8px;
   display: flex;
   gap: 12px;
   justify-content: flex-end;
@@ -1662,9 +2030,122 @@ onMounted(async () => {
 
 /* ========== 完成 ========== */
 .wizard-done {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  padding: 40px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.test-run-card {
+  margin: 20px auto 0;
+  max-width: 760px;
+  width: 100%;
+  padding: 18px;
+  border: 1px solid var(--el-color-primary-light-5);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--el-color-primary-light-9), var(--el-bg-color));
+}
+
+.test-run-form {
+  margin-top: 12px;
+}
+
+.test-run-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.test-run-result {
+  margin-top: 18px;
+}
+
+.test-run-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.test-run-pre {
+  margin: 0;
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.test-run-error {
+  color: var(--el-color-danger);
+}
+
+.test-params-empty {
+  margin-top: 12px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.repair-card {
+  margin: 20px auto 0;
+  max-width: 760px;
+  padding: 18px;
+  border: 1px solid var(--el-color-danger-light-5);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--el-color-danger-light-9), var(--el-bg-color));
+}
+
+.repair-summary-list {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.repair-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.repair-plan-card {
+  margin-top: 16px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(36, 99, 235, 0.18);
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.92) 0%, rgba(248, 250, 252, 0.98) 100%);
+}
+
+.repair-plan-header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 40px;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.repair-plan-header h5 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e3a8a;
+}
+
+.repair-plan-stale {
+  font-size: 12px;
+  color: #b45309;
+}
+
+.repair-plan-markdown {
+  color: #1f2937;
 }
 </style>

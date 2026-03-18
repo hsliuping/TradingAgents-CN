@@ -57,6 +57,52 @@ class AgentWorkshopService:
         self._llm_client: Optional[UnifiedLLMClient] = None
         self._llm_client_meta: Dict[str, Any] = {}
 
+    def _serialize_log_payload(self, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            return str(value)
+
+    def _format_log_context(self, context: Optional[Dict[str, Any]] = None) -> str:
+        if not context:
+            return ""
+        parts: List[str] = []
+        for key, value in context.items():
+            if value is None:
+                continue
+            text = str(value).strip()
+            if not text:
+                continue
+            parts.append(f"{key}={text}")
+        return " ".join(parts)
+
+    def _log_llm_exchange(
+        self,
+        stage: str,
+        system_prompt: str,
+        user_prompt: str,
+        raw_response: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        context_text = self._format_log_context(context)
+        prefix = f"[AgentWorkshop][{stage}]"
+        if context_text:
+            prefix = f"{prefix} {context_text}"
+        logger.info("%s system_prompt:\n%s", prefix, system_prompt or "")
+        logger.info("%s user_prompt:\n%s", prefix, user_prompt or "")
+        logger.info("%s raw_response:\n%s", prefix, raw_response or "")
+
+    def _log_generated_result(self, stage: str, result: Any, context: Optional[Dict[str, Any]] = None) -> None:
+        context_text = self._format_log_context(context)
+        prefix = f"[AgentWorkshop][{stage}]"
+        if context_text:
+            prefix = f"{prefix} {context_text}"
+        logger.info("%s generated_result:\n%s", prefix, self._serialize_log_payload(result))
+
     async def start_session(self, description: str, user_id: str = "") -> Dict[str, Any]:
         turn_result = await self._analyze_requirement_turn([description], user_id=user_id)
         spec = turn_result["spec"]
@@ -737,7 +783,7 @@ class AgentWorkshopService:
         else:
             report = self._extract_runtime_report(result, output_field)
 
-        return {
+        debug_result = {
             "version_id": version.version_id,
             "spec_id": version.spec_id,
             "symbol": symbol,
@@ -760,6 +806,24 @@ class AgentWorkshopService:
                 "user_goal": user_goal,
             },
         }
+        self._log_generated_result(
+            "runtime_debug_execution",
+            {
+                "inputs": inputs,
+                "debug_prompt": debug_prompt,
+                "raw_result": result if isinstance(result, dict) else {"raw": str(result)},
+                "extracted_report": report,
+                "output_field": output_field,
+            },
+            context={
+                "version_id": version.version_id,
+                "spec_id": version.spec_id,
+                "spec_name": spec.name,
+                "symbol": symbol,
+                "analysis_date": analysis_date,
+            },
+        )
+        return debug_result
 
     async def _save_session(self, session: AgentWorkshopSession) -> None:
         doc, set_on_insert = self._prepare_upsert_doc(session.model_dump(mode="json", by_alias=True))
@@ -912,15 +976,57 @@ class AgentWorkshopService:
         ]).lower()
         return spec.domain == "stock_analysis" and self._looks_like_valuation_capability(searchable)
 
-    def _build_valuation_hard_rules(self, spec: AgentSpec) -> List[str]:
-        if not self._is_valuation_spec(spec):
-            return []
-        return [
-            "- PB/PE/DCF/综合估值区间必须来自工具计算或可追溯的工具结果汇总，不能由模型自行臆测。",
-            "- 如果没有工具计算结果或缺少关键输入参数，禁止输出任何精确估值区间、目标价、加权结果。",
-            "- 允许输出方向性判断，但必须明确说明当前缺少工具化计算结果，暂不提供精确区间。",
-            "- 每个估值数字都必须标明来源工具、关键输入参数或引用的工具结果。",
+    def _build_valuation_requirement_text(self, spec: AgentSpec) -> str:
+        return " ".join([
+            spec.name,
+            spec.primary_goal,
+            *spec.responsibilities,
+            *spec.constraints,
+            *spec.outputs,
+            *spec.success_criteria,
+            *spec.preferred_methods,
+        ]).lower()
+
+    def _get_numeric_traceability_policy(self, spec: AgentSpec) -> Dict[str, Any]:
+        text = self._build_valuation_requirement_text(spec)
+        numeric_output_keywords = [
+            "估值", "valuation", "价格", "目标价", "区间", "范围", "分数", "评分", "打分", "排序", "排名",
+            "权重", "仓位", "收益率", "回报率", "波动率", "概率", "比率", "倍数", "数值", "百分比",
+            "score", "rating", "rank", "price", "target", "range", "interval", "ratio", "return", "yield", "weight", "probability",
         ]
+        exact_numeric_keywords = [
+            "精确", "具体数值", "目标价", "价格区间", "估值区间", "打分", "评分", "权重", "排序", "排名",
+            "fair value", "target price", "valuation_range", "weighted_range", "score", "rank",
+        ]
+        source_label_keywords = [
+            "来源", "来源标签", "关键输入参数", "可追溯", "依据", "计算过程", "原始数据", "数据源",
+        ]
+
+        enabled = any(keyword in text for keyword in numeric_output_keywords)
+        requires_exact_numeric_outputs = any(keyword in text for keyword in exact_numeric_keywords)
+        requires_source_labels = requires_exact_numeric_outputs or any(keyword in text for keyword in source_label_keywords)
+
+        return {
+            "enabled": enabled,
+            "requires_exact_numeric_outputs": requires_exact_numeric_outputs,
+            "requires_source_labels": requires_source_labels,
+            "trace_numeric_if_present": enabled,
+        }
+
+    def _build_numeric_traceability_rules(self, spec: AgentSpec) -> List[str]:
+        policy = self._get_numeric_traceability_policy(spec)
+        if not policy["enabled"]:
+            return []
+
+        rules = [
+            "- 所有数值类输出都必须来自数据源直接返回，或基于原始数据/工具结果的可追溯计算，不能由模型自行估算。",
+            "- 如果当前规格只需要定性判断、框架解读或方向性结论，可以不输出精确数值；但只要输出数字，就必须满足可追溯要求。",
+        ]
+        if policy["requires_exact_numeric_outputs"]:
+            rules.append("- 当前规格要求精确数值、区间、评分、排序或权重结果时，若缺少原始数据、工具计算结果或关键输入参数，必须明确降级，禁止继续输出看似精确的数字。")
+        if policy["requires_source_labels"]:
+            rules.append("- 每个关键数值都必须标明来源数据、来源工具、关键输入参数或引用的上游计算结果。")
+        return rules
 
     def _build_capability_context(self, snapshot: Dict[str, Any]) -> str:
         def format_items(title: str, items: List[str]) -> List[str]:
@@ -986,6 +1092,20 @@ class AgentWorkshopService:
         ]
         return "\n".join(lines)
 
+    def _build_solution_design_context(self, spec: AgentSpec) -> str:
+        lines = [
+            "你现在不是在做抽象的能力分类，而是在为 TradingAgents-CN 设计一个能落地的 Agent 方案。",
+            "你必须同时扮演金融行业专家和系统架构师：既理解投研/交易分析场景下用户真正要什么，也理解当前系统里已有什么能力、什么适合复用、什么需要补。",
+            "你的设计判断必须同时基于四个维度：",
+            f"- 业务目标：{spec.primary_goal or spec.name or '待确认'}",
+            f"- 用户真正要的交付：{'；'.join(spec.outputs[:6]) if spec.outputs else '需结合 responsibilities / success_criteria 判断'}",
+            f"- 关键约束与边界：{'；'.join(self._dedupe([*spec.constraints, *spec.non_goals])[:8]) if (spec.constraints or spec.non_goals) else '暂无显式约束'}",
+            f"- 成功标准：{'；'.join(spec.success_criteria[:6]) if spec.success_criteria else '暂无显式成功标准'}",
+            "设计时不要只盯着单个字段，要结合当前系统现状、用户目标、输出方式、约束边界、可复用能力和潜在运行链路来判断缺口。",
+            "如果规格里已经明确了背景、客户需求、约束和输出方式，这些信息都必须进入你的判断，而不是只围绕 suggested_tools 做机械补全。",
+        ]
+        return "\n".join(lines)
+
     async def _analyze_requirement_turn(
         self,
         messages: List[str],
@@ -1010,12 +1130,18 @@ class AgentWorkshopService:
         capability_context = self._build_capability_context(capability_snapshot)
 
         prompt = "\n".join([
-            "你是 Agent 工坊里的金融行业专家兼需求澄清助手。",
+            "你正在 TradingAgents-CN 的 Agent 工坊中工作。这个系统是一个面向投研、交易分析、Agent 编排与能力复用的多智能体金融分析系统。",
+            "你当前扮演的角色不是通用问答助手，而是 Agent 工坊里的金融行业专家兼需求澄清助手，负责把用户想要的新 Agent 需求整理成可执行的设计输入。",
+            "你对系统现状的理解，必须优先来自项目背景、典型接入场景、已有角色模式、能力快照、用户输入和现有草案，而不是凭空假设系统里已经有或没有某种能力。",
             "你的任务不是套用固定模板，而是根据用户多轮输入，动态判断需求是否清楚、是否可做，并整理出一版 Agent 规格草案。你要像资深金融产品专家一样，先给可落地建议，再只追问少数真正会影响设计分叉的点。",
             "要求：",
             "1. 你不能把本应由专家判断的内容全部反问给用户。对于行业常识、常见金融分析框架、默认展示结构、常用评分口径，你应先给出推荐方案和理由，再只追问会导致设计分叉的关键点。",
             "2. 不要用僵硬的硬编码模板替用户做决定，但可以基于金融行业常见最佳实践，主动补成一版可执行草案，并明确哪些是你的推荐默认值。",
             "3. 如果用户后续补充了限制、目标、输出、方法、样本或验收标准，必须覆盖到结果里。",
+            "3.1 任何用户明确给出的数字型要求都必须原样保留，禁止擅自泛化。例如用户说“三种估值方式”，结果里不能偷换成“多种估值方法”。",
+            "3.2 任何用户明确给出的交付方式都必须落到结构化字段里。例如用户说“根据这三种估值方式分别返回数据，并进行解读”，你就必须在 responsibilities、outputs、success_criteria 或 constraints 中明确体现“分别返回三种方法结果”和“对三种结果做解读”，不能只保留一个模糊的总目标。",
+            "3.3 任何用户明确给出的非目标和禁止项都必须保留在 non_goals 或 constraints 中。例如“不直接给买卖建议”不能在整理过程中弱化或遗漏。",
+            "3.4 primary_goal 可以概括，但不得吞掉关键限定词；如果用户要求里含有具体数量、方法清单、返回方式、解释要求，这些必须出现在 responsibilities / outputs / success_criteria / preferred_methods 中，而不是只剩一个抽象摘要。",
             "4. 如果需求明显超出当前 Agent 工坊范围、互相矛盾、或不可落地，请直接判定 not-feasible，并用口语化中文说明为什么做不到。",
             "5. 如果只是信息不够，请判定 need-clarification，但必须先给出推荐方案，再提出最多 2 个最关键的问题。不要把零散小问题全部丢给用户。",
             "6. 只有当需求已经足够清楚且可以进入下一步时，才判定 feasible。",
@@ -1076,13 +1202,27 @@ class AgentWorkshopService:
             '  "preferred_methods": [],',
             '  "sample_symbols": []',
             "}",
+            "自检要求：输出前请检查，用户原始需求里凡是出现了明确数量（如三种）、明确方法（如 DCF/PE-PB/PEG）、明确交付动作（如分别返回/进行解读）、明确禁止项（如不要直接给买卖建议），都必须在 JSON 中找到对应落点；找不到就说明你整理丢了。",
         ])
 
+        system_prompt = "你正在 TradingAgents-CN 的 Agent 工坊中工作。TradingAgents-CN 是一个面向投研、交易分析、Agent 编排与能力复用的多智能体金融分析系统。你当前角色是金融行业专家兼系统架构视角下的需求澄清助手，职责是把用户需求整理成可执行的 Agent 设计输入。你的判断依据只能来自用户输入、系统背景、典型场景、已有角色模式、能力快照和当前草案，不能凭空假设系统现状。你会先给推荐方案和默认设计，再只追问少数关键分歧。只输出纯 JSON。"
         response = await client.achat([
-            Message(role="system", content="你擅长把用户需求澄清成可执行的 Agent 设计输入。你是金融行业专家，正在为 TradingAgents-CN 这个多智能体金融分析系统设计新 Agent。你不会把本应由专家补充的判断都丢给用户；你会结合项目背景、现有模块和可复用能力，先给推荐方案和默认设计，再只追问少数关键分歧。只输出纯 JSON。"),
+            Message(role="system", content=system_prompt),
             Message(role="user", content=prompt),
         ])
-        data = json.loads(self._strip_markdown_fence((response.content or "").strip()))
+        raw_content = (response.content or "").strip()
+        self._log_llm_exchange(
+            "requirement_clarification",
+            system_prompt,
+            prompt,
+            raw_content,
+            context={
+                "spec_id": base_spec.spec_id,
+                "spec_name": base_spec.name,
+                "user_id": user_id,
+            },
+        )
+        data = json.loads(self._strip_markdown_fence(raw_content))
 
         feasibility_status = self._normalize_feasibility_status(data.get("feasibility_status"))
         completeness_score = self._pick_float(data.get("completeness_score"), 0.0)
@@ -1106,7 +1246,7 @@ class AgentWorkshopService:
         )
 
         spec.owner_user_id = user_id
-        return {
+        result = {
             "spec": spec,
             "pending_questions": pending_questions,
             "completeness_score": completeness_score,
@@ -1114,6 +1254,23 @@ class AgentWorkshopService:
             "feasibility_status": feasibility_status,
             "refusal_reason": refusal_reason,
         }
+        self._log_generated_result(
+            "requirement_clarification",
+            {
+                "spec": spec.model_dump(mode="json"),
+                "pending_questions": pending_questions,
+                "completeness_score": completeness_score,
+                "ai_message": ai_message,
+                "feasibility_status": feasibility_status,
+                "refusal_reason": refusal_reason,
+            },
+            context={
+                "spec_id": spec.spec_id,
+                "spec_name": spec.name,
+                "user_id": user_id,
+            },
+        )
+        return result
 
     async def _ensure_llm_client(self) -> UnifiedLLMClient:
         if self._llm_client is not None:
@@ -1150,11 +1307,16 @@ class AgentWorkshopService:
         gap_report: AgentWorkshopGapAnalysis,
     ) -> Dict[str, Any]:
         client = await self._ensure_llm_client()
+        design_context = self._build_solution_design_context(spec)
         prompt = "\n".join([
-            "你是 Agent 生命周期工坊里的工具架构师。",
+            "你正在 TradingAgents-CN 的 Agent 生命周期工坊中工作。这个系统是一个面向投研、交易分析、Agent 编排与能力复用的多智能体金融分析系统。",
+            "你当前角色是金融行业专家兼系统架构师，负责把 Agent 规格和缺口分析转成可执行的工具与能力方案。",
+            "你对系统现状的理解，必须来自当前规格、缺口分析、系统背景、典型接入场景、已有角色模式和已知能力信息，不能自己脑补系统已有能力。",
             "请基于当前 Agent 规格和缺口分析，产出一份工具需求草案。",
+            "你不能脱离业务背景机械列工具，而要先理解这个客户真正要交付什么结果、当前系统已有何种能力、还缺哪一层能力，最后再决定工具方案。",
             "重点不是重复描述问题，而是回答 4 件事：缺什么工具、为什么缺、没补齐前如何降级、下一步先实现什么。",
             "只输出 JSON，不要输出 Markdown 或额外解释。",
+            design_context,
             "JSON 结构必须如下：",
             json.dumps({
                 "summary": "",
@@ -1176,6 +1338,12 @@ class AgentWorkshopService:
                 "implementation_order": [],
                 "notes": [],
             }, ensure_ascii=False, indent=2),
+            "系统背景：",
+            self._build_project_background_context(),
+            "典型接入场景：",
+            self._build_application_scene_context(),
+            "典型角色模式：",
+            self._build_agent_role_pattern_context(),
             "Agent 规格：",
             json.dumps({
                 "name": spec.name,
@@ -1191,13 +1359,33 @@ class AgentWorkshopService:
             json.dumps(gap_report.model_dump(mode="json"), ensure_ascii=False, indent=2),
         ])
 
+        system_prompt = "你正在 TradingAgents-CN 的 Agent 生命周期工坊中工作。TradingAgents-CN 是一个面向投研、交易分析、Agent 编排与能力复用的多智能体金融分析系统。你当前角色是金融行业专家兼系统架构师，负责把 Agent 规格和缺口分析转成可执行的工具与能力方案。你的判断依据只能来自规格、缺口分析、系统背景、典型场景、角色模式和已知能力快照，不能凭空假设系统现状。只输出合法 JSON。"
         response = await client.achat([
-            Message(role="system", content="你擅长把工具缺口转成可执行的工具设计草案，只输出合法 JSON。"),
+            Message(role="system", content=system_prompt),
             Message(role="user", content=prompt),
         ])
         raw_content = (response.content or "").strip()
+        self._log_llm_exchange(
+            "tooling_plan",
+            system_prompt,
+            prompt,
+            raw_content,
+            context={
+                "spec_id": spec.spec_id,
+                "spec_name": spec.name,
+            },
+        )
         data = self._load_json_response(raw_content)
-        return self._normalize_tooling_plan(data, spec, gap_report, raw_content)
+        normalized_plan = self._normalize_tooling_plan(data, spec, gap_report, raw_content)
+        self._log_generated_result(
+            "tooling_plan",
+            normalized_plan,
+            context={
+                "spec_id": spec.spec_id,
+                "spec_name": spec.name,
+            },
+        )
+        return normalized_plan
 
     def _build_tooling_plan_fallback(
         self,
@@ -1209,22 +1397,11 @@ class AgentWorkshopService:
             for tool_id in (gap_report.suggested_tools or [])[:6]
         ]
 
-        if not draft_tools and self._is_valuation_spec(spec):
-            draft_tools = [
-                self._build_tool_blueprint(tool_id, spec, gap_report)
-                for tool_id in [
-                    "calculate_pb_valuation",
-                    "calculate_pe_valuation",
-                    "calculate_dcf_valuation",
-                    "calculate_weighted_valuation",
-                ]
-            ]
-
         implementation_order = [
             f"{item.get('priority', 'P1')} - {item.get('tool_name') or item.get('tool_id')}"
             for item in draft_tools
         ]
-        return {
+        result = {
             "summary": f"当前工坊已识别 {len(gap_report.blocking_gaps)} 个阻塞缺口，建议先补工具再继续追求精确输出。",
             "missing_capabilities": self._dedupe([
                 *gap_report.suggested_capabilities,
@@ -1239,6 +1416,15 @@ class AgentWorkshopService:
             ]),
             "generated_by": "fallback",
         }
+        self._log_generated_result(
+            "tooling_plan_fallback",
+            result,
+            context={
+                "spec_id": spec.spec_id,
+                "spec_name": spec.name,
+            },
+        )
+        return result
 
     def _normalize_tooling_plan(
         self,
@@ -1305,91 +1491,7 @@ class AgentWorkshopService:
         spec: AgentSpec,
         gap_report: AgentWorkshopGapAnalysis,
     ) -> Dict[str, Any]:
-        blueprints = {
-            "calculate_pb_valuation": {
-                "tool_name": "PB 估值计算工具",
-                "priority": "P0",
-                "why_needed": "把市净率估值从文本推断升级为可复核的结构化计算。",
-                "solves_gaps": ["缺少直接输出 PB 估值区间的专用计算工具。"],
-                "dependencies": ["每股净资产或净资产口径", "同行 PB 参考值", "目标安全边际参数"],
-                "inputs": [
-                    {"name": "ticker", "type": "string", "required": True, "description": "股票代码"},
-                    {"name": "analysis_date", "type": "string", "required": True, "description": "分析日期"},
-                    {"name": "peer_pb_reference", "type": "array", "required": True, "description": "同行 PB 参考值列表"},
-                    {"name": "book_value_per_share", "type": "number", "required": True, "description": "每股净资产"},
-                ],
-                "outputs": [
-                    {"name": "valuation_range", "type": "object", "description": "PB 估值区间"},
-                    {"name": "calculation_steps", "type": "array", "description": "关键计算过程"},
-                ],
-                "acceptance_criteria": [
-                    "输出低/中/高三档 PB 假设与对应价格区间。",
-                    "能回溯关键输入参数与采用的同行参考口径。",
-                ],
-            },
-            "calculate_pe_valuation": {
-                "tool_name": "PE 估值计算工具",
-                "priority": "P0",
-                "why_needed": "为盈利类估值提供可追溯的目标价区间。",
-                "solves_gaps": ["缺少直接输出 PE 估值区间的专用计算工具。"],
-                "dependencies": ["EPS 口径定义", "同行 PE 参考值", "盈利预测来源"],
-                "inputs": [
-                    {"name": "ticker", "type": "string", "required": True, "description": "股票代码"},
-                    {"name": "analysis_date", "type": "string", "required": True, "description": "分析日期"},
-                    {"name": "eps", "type": "number", "required": True, "description": "每股收益"},
-                    {"name": "peer_pe_reference", "type": "array", "required": True, "description": "同行 PE 参考值列表"},
-                ],
-                "outputs": [
-                    {"name": "valuation_range", "type": "object", "description": "PE 估值区间"},
-                    {"name": "assumption_summary", "type": "array", "description": "采用的盈利与估值假设"},
-                ],
-                "acceptance_criteria": [
-                    "明确区分 TTM 与 forward EPS 口径。",
-                    "输出价格区间及对应的 PE 假设。",
-                ],
-            },
-            "calculate_dcf_valuation": {
-                "tool_name": "DCF 估值计算工具",
-                "priority": "P1",
-                "why_needed": "把 DCF 从模型想象的区间变成有参数、有过程的折现计算。",
-                "solves_gaps": ["缺少直接输出 DCF 估值区间的专用计算工具。"],
-                "dependencies": ["自由现金流预测", "折现率", "永续增长率", "股本"],
-                "inputs": [
-                    {"name": "ticker", "type": "string", "required": True, "description": "股票代码"},
-                    {"name": "forecast_cashflows", "type": "array", "required": True, "description": "预测期现金流"},
-                    {"name": "discount_rate", "type": "number", "required": True, "description": "折现率"},
-                    {"name": "terminal_growth_rate", "type": "number", "required": True, "description": "永续增长率"},
-                ],
-                "outputs": [
-                    {"name": "valuation_range", "type": "object", "description": "DCF 估值区间"},
-                    {"name": "scenario_table", "type": "array", "description": "不同参数情景下的估值结果"},
-                ],
-                "acceptance_criteria": [
-                    "输出基础/乐观/保守三个场景。",
-                    "展示关键输入参数和终值计算方式。",
-                ],
-            },
-            "calculate_weighted_valuation": {
-                "tool_name": "综合估值汇总工具",
-                "priority": "P1",
-                "why_needed": "把多种估值方法的结果汇总为统一的综合估值区间。",
-                "solves_gaps": ["缺少综合估值区间和权重汇总工具。"],
-                "dependencies": ["PB/PE/DCF 等单方法结果", "权重配置规则"],
-                "inputs": [
-                    {"name": "valuation_results", "type": "array", "required": True, "description": "各方法的估值结果"},
-                    {"name": "weights", "type": "object", "required": True, "description": "各方法权重"},
-                ],
-                "outputs": [
-                    {"name": "weighted_range", "type": "object", "description": "综合估值区间"},
-                    {"name": "weight_breakdown", "type": "array", "description": "权重与贡献拆解"},
-                ],
-                "acceptance_criteria": [
-                    "输出综合区间、方法权重和各方法贡献。",
-                    "权重和结果都可回溯到单方法工具输出。",
-                ],
-            },
-        }
-        blueprint = blueprints.get(tool_id, {
+        blueprint = {
             "tool_name": tool_id,
             "priority": "P1",
             "why_needed": "用于补齐当前工坊识别到的能力缺口。",
@@ -1398,7 +1500,7 @@ class AgentWorkshopService:
             "inputs": [],
             "outputs": [],
             "acceptance_criteria": ["能稳定补齐当前缺口，并输出可复核结果。"],
-        })
+        }
         return {
             "tool_id": tool_id,
             "tool_name": blueprint["tool_name"],
@@ -1593,15 +1695,6 @@ class AgentWorkshopService:
         }
 
     def _build_required_capability_label(self, tool_id: str, tool_name: str = "") -> str:
-        capability_map = {
-            "calculate_pb_valuation": "PB 估值区间计算",
-            "calculate_pe_valuation": "PE 估值区间计算",
-            "calculate_dcf_valuation": "DCF 现金流折现估值",
-            "calculate_weighted_valuation": "多方法综合估值汇总",
-        }
-        if tool_id in capability_map:
-            return capability_map[tool_id]
-
         normalized_name = str(tool_name or "").replace("工具", "").strip()
         if normalized_name:
             return f"{normalized_name}能力"
@@ -1650,6 +1743,7 @@ class AgentWorkshopService:
     ) -> AgentWorkshopGapAnalysis:
         client = await self._ensure_llm_client()
         capability_context = self._build_capability_context(capability_snapshot)
+        design_context = self._build_solution_design_context(spec)
         reusable_modules = [
             "workflow-generation",
             "skill-generation",
@@ -1666,14 +1760,19 @@ class AgentWorkshopService:
             *capability_snapshot.get("valuation_skills", []),
         ])
         prompt = "\n".join([
-            "你是 Agent 工坊中的资源缺口分析专家。",
+            "你正在 TradingAgents-CN 的 Agent 工坊中做资源缺口分析。这个系统是一个面向投研、交易分析、Agent 编排与能力复用的多智能体金融分析系统。",
+            "你当前角色是金融行业专家兼系统架构师，负责判断当前 Agent 目标在系统内哪些能力已可复用，哪些地方是真缺口。",
+            "你对系统现状的理解，必须来自当前规格、项目背景、典型接入场景、已有角色模式和能力快照，不能凭工具名联想不存在的能力，也不能脑补未提供的系统状态。",
             "你的任务是基于当前 Agent 规格和系统现有能力，判断哪些能力已可直接复用，哪些地方是真缺口。",
+            "你不能只盯着工具名做机械匹配，而要先理解这个客户想要什么结果、当前系统处在什么基础上、现有能力能否支撑交付、哪些约束会影响设计。",
             "不要机械地把问题拆成数据获取、分析、报告三层；要根据 Agent 的实际目标判断最小闭环。",
             "如果某项能力可以通过现有工具组合或通过 Prompt/模板约束解决，就不要夸大成阻塞缺口。",
             "只有当当前系统确实缺少关键可调用能力，且会直接影响 Agent 的目标达成时，才列入 blocking_gaps。",
             "existing_tools/reusable_modules 必须只使用提供给你的名称，不能编造。",
             "suggested_tools/suggested_capabilities 应尽量少而精，优先补最小闭环，不要一次性铺太大能力面。",
+            "如果当前规格要求输出精确数值、区间、评分、排序或权重，Prompt/模板约束不能替代数据链路或工具计算链路；若能力不足，应明确指出缺的是数据源、工具还是来源标注能力。",
             "只输出合法 JSON，不要输出 Markdown 或额外解释。",
+            design_context,
             json.dumps({
                 "reusable_modules": reusable_modules,
                 "existing_tools": [],
@@ -1685,6 +1784,12 @@ class AgentWorkshopService:
                 "build_recommendations": [],
                 "notes": [],
             }, ensure_ascii=False, indent=2),
+            "系统背景：",
+            self._build_project_background_context(),
+            "典型接入场景：",
+            self._build_application_scene_context(),
+            "典型角色模式：",
+            self._build_agent_role_pattern_context(),
             "\n当前 Agent 规格：",
             json.dumps({
                 "name": spec.name,
@@ -1707,12 +1812,24 @@ class AgentWorkshopService:
             "3. blocking_gaps 要写成‘为什么现有能力还不够’，不是重复需求描述。",
             "4. fallback_strategy 要写成没补齐前 Agent 如何安全降级，不要写空话。",
             "5. build_recommendations 要给出实现顺序和边界控制建议。",
+            "6. 如果用户明确要求多步或多方法分别返回结果，不能只建议补一个上游接口；要把真正缺少的能力层讲清楚。",
         ])
+        system_prompt = "你正在 TradingAgents-CN 的 Agent 工坊中做资源缺口分析。TradingAgents-CN 是一个面向投研、交易分析、Agent 编排与能力复用的多智能体金融分析系统。你当前角色是金融行业专家兼系统架构师，负责把 Agent 的业务目标、系统现状和约束边界分析成可执行的缺口建设计划。你的判断依据只能来自当前规格、系统背景、典型场景、角色模式和能力快照，不能凭空补系统能力。只输出合法 JSON。"
         response = await client.achat([
-            Message(role="system", content="你擅长将 Agent 能力缺口分析成可执行的建设计划，只输出合法 JSON。"),
+            Message(role="system", content=system_prompt),
             Message(role="user", content=prompt),
         ])
         raw = response.content or ""
+        self._log_llm_exchange(
+            "gap_analysis",
+            system_prompt,
+            prompt,
+            raw,
+            context={
+                "spec_id": spec.spec_id,
+                "spec_name": spec.name,
+            },
+        )
         json_match = re.search(r"\{.*\}", raw, re.DOTALL)
         if not json_match:
             raise ValueError("gap analysis LLM 未返回合法 JSON")
@@ -1726,7 +1843,7 @@ class AgentWorkshopService:
         notes.append(
             f"缺口分析由推理模型生成：provider={self._llm_client_meta.get('provider')} model={self._llm_client_meta.get('model')} timeout={self._llm_client_meta.get('timeout')}s"
         )
-        return AgentWorkshopGapAnalysis(
+        gap_report = AgentWorkshopGapAnalysis(
             reusable_modules=self._dedupe(modules)[:8],
             existing_tools=self._dedupe(existing_tools)[:12],
             suggested_tools=self._dedupe(self._pick_list(data.get("suggested_tools"), []))[:8],
@@ -1737,6 +1854,15 @@ class AgentWorkshopService:
             build_recommendations=self._dedupe(self._pick_list(data.get("build_recommendations"), []))[:10],
             notes=self._dedupe(notes)[:10],
         )
+        self._log_generated_result(
+            "gap_analysis",
+            gap_report.model_dump(mode="json"),
+            context={
+                "spec_id": spec.spec_id,
+                "spec_name": spec.name,
+            },
+        )
+        return gap_report
 
     def _build_gap_analysis_fallback(
         self,
@@ -1747,10 +1873,6 @@ class AgentWorkshopService:
         available_analysis_tools = capability_snapshot.get("builtin_analysis_tools", [])
         available_external_data = capability_snapshot.get("external_data_skills", [])
         available_external_analysis = capability_snapshot.get("external_analysis_skills", [])
-        valuation_capabilities = self._dedupe([
-            *capability_snapshot.get("valuation_tools", []),
-            *capability_snapshot.get("valuation_skills", []),
-        ])
 
         reusable_modules = [
             "workflow-generation",
@@ -1774,55 +1896,16 @@ class AgentWorkshopService:
             existing_tools.extend(available_analysis_tools[:4])
             existing_tools.extend(available_external_data[:4])
             existing_tools.extend(available_external_analysis[:4])
-
-            if self._is_valuation_spec(spec):
-                notes.append("工坊会优先判断：现有能力能否支撑结果，哪些地方必须补工具，哪些地方只能先降级。")
-                direct_calc_tools = [
-                    "calculate_pb_valuation",
-                    "calculate_pe_valuation",
-                    "calculate_dcf_valuation",
-                    "calculate_weighted_valuation",
-                ]
-                existing_calc_tools = [tool for tool in direct_calc_tools if tool in valuation_capabilities]
-                missing_calc_tools = [tool for tool in direct_calc_tools if tool not in valuation_capabilities]
-
-                if valuation_capabilities:
-                    notes.append("系统已经发现一批与估值相关的现有能力，可优先复用而不是从零设计。")
-                else:
-                    notes.append("现有注册能力里，直接面向估值的 Skill/Tool 还不够集中，建议补齐专门的估值能力层。")
-
-                if missing_calc_tools:
-                    blocking_gaps.extend([
-                        "缺少直接输出 PB/PE/DCF/综合估值区间的专用计算工具。",
-                        "当前只能拿到估值证据数据，不能把精确估值数字当作可复核结果。",
-                    ])
-                    suggested_tools.extend(missing_calc_tools)
-                    suggested_capabilities.extend([
-                        self._build_required_capability_label(tool_id)
-                        for tool_id in missing_calc_tools
-                    ])
-                    manual_dependencies.extend([
-                        "统一行业可比公司映射规则",
-                        "估值报告展示模板",
-                        "估值计算输入口径定义（TTM/预测、股本、折现率等）",
-                    ])
-                    fallback_strategy.extend([
-                        "降级为定性估值分析：允许输出方法比较、关键假设、风险和方向性判断。",
-                        "禁止输出精确目标价、估值区间和加权汇总结果。",
-                        "在报告中明确说明：当前缺少工具化估值计算能力，数字结果暂不提供。",
-                    ])
-                    build_recommendations.extend([
-                        "优先补 calculate_pb_valuation 和 calculate_pe_valuation，先把相对估值工具链闭环。",
-                        "再补 calculate_dcf_valuation，用于现金流折现的结构化计算。",
-                        "最后补 calculate_weighted_valuation，把多方法结果汇总成综合估值区间。",
-                        "让每个估值数字输出来源工具、关键参数和中间过程，供工坊评估与复盘。",
-                        "方法选择、可比公司筛选、敏感性分析这类方法层能力，当前先视为工具设计说明或 Prompt 约束，不单独作为第二层待补实体。",
-                    ])
-                else:
-                    notes.append(f"已发现直接估值计算工具: {', '.join(existing_calc_tools)}")
-                    build_recommendations.append("下一步重点检查这些工具的输入参数口径是否统一，以及输出是否带来源标签。")
         else:
             notes.append("当前为通用 Agent 草案，后续需要结合具体领域再细化可调用能力缺口。")
+
+        numeric_policy = self._get_numeric_traceability_policy(spec)
+        if numeric_policy["enabled"]:
+            notes.append("当前需求包含数值类输出，工坊会优先检查数据源、工具计算链路和来源标注是否充分。")
+            if numeric_policy["requires_exact_numeric_outputs"]:
+                blocking_gaps.append("若要输出精确数值结果，必须先确认现有能力是否具备稳定的数据链路或可复核的计算链路。")
+                fallback_strategy.append("在链路未确认前，先降级为定性判断或框架说明，不输出不可追溯的精确数字。")
+                build_recommendations.append("优先让 LLM 根据当前规格和通用数值原则判断需要补的数据链路或计算能力，不要预设固定工具方案。")
 
         notes.append(
             f"当前已识别到 {len(available_data_tools) + len(available_external_data)} 个取数类能力，"
@@ -1831,7 +1914,7 @@ class AgentWorkshopService:
 
         notes.append("当前缺口分析由规则兜底生成，建议结合推理模型结果复核。")
 
-        return AgentWorkshopGapAnalysis(
+        gap_report = AgentWorkshopGapAnalysis(
             reusable_modules=reusable_modules,
             existing_tools=self._dedupe(existing_tools)[:12],
             suggested_tools=self._dedupe(suggested_tools),
@@ -1842,6 +1925,15 @@ class AgentWorkshopService:
             build_recommendations=self._dedupe(build_recommendations),
             notes=notes,
         )
+        self._log_generated_result(
+            "gap_analysis_fallback",
+            gap_report.model_dump(mode="json"),
+            context={
+                "spec_id": spec.spec_id,
+                "spec_name": spec.name,
+            },
+        )
+        return gap_report
 
     async def get_capability_snapshot(self) -> Dict[str, Any]:
         snapshot = await self._collect_capability_snapshot()
@@ -1936,12 +2028,13 @@ class AgentWorkshopService:
             "benchmark_hint": spec.sample_symbols,
             "minimum_score": 0.75,
         }
-        if self._is_valuation_spec(spec):
-            policy["numeric_traceability_required"] = True
-            policy["valuation_numeric_policy"] = {
-                "exact_ranges_must_come_from_tools": True,
-                "llm_must_not_invent_numeric_ranges": True,
-                "require_source_labels": True,
+        numeric_policy = self._get_numeric_traceability_policy(spec)
+        if numeric_policy["enabled"]:
+            policy["numeric_traceability_required"] = numeric_policy["trace_numeric_if_present"]
+            policy["numeric_traceability_policy"] = {
+                "exact_numeric_must_come_from_data_or_tools": numeric_policy["requires_exact_numeric_outputs"],
+                "llm_must_not_invent_numbers": True,
+                "require_source_labels": numeric_policy["requires_source_labels"],
             }
         return policy
 
@@ -1954,40 +2047,60 @@ class AgentWorkshopService:
         constraint_lines = [f"- {item}" for item in spec.constraints]
         output_fields = "\n".join(f"- {item}" for item in spec.outputs)
         tools_text = "\n".join(f"- {item}" for item in required_tools) if required_tools else "- 当前版本尚未绑定工具"
-        valuation_rules = self._build_valuation_hard_rules(spec)
-        if valuation_rules:
-            constraint_lines.extend(valuation_rules)
+        numeric_rules = self._build_numeric_traceability_rules(spec)
+        numeric_policy = self._get_numeric_traceability_policy(spec)
+        if numeric_rules:
+            constraint_lines.extend(numeric_rules)
         constraints = "\n".join(self._dedupe(constraint_lines))
 
         tool_guidance = f"优先使用以下工具获取事实依据：\n{tools_text}"
-        if valuation_rules:
-            tool_guidance = f"{tool_guidance}\n\n估值数字规则：\n" + "\n".join(valuation_rules)
+        if numeric_rules:
+            tool_guidance = f"{tool_guidance}\n\n数值输出总原则：\n" + "\n".join(numeric_rules)
 
         output_format = (
             "请输出结构化结果，至少包含以下字段：\n"
             f"{output_fields or '- summary'}"
         )
-        if valuation_rules:
+        if numeric_policy["enabled"] and numeric_policy["requires_exact_numeric_outputs"]:
             output_format = "\n\n".join([
                 output_format,
-                "若输出 PB/PE/DCF/综合估值区间，必须同时给出每个数字的来源标签、所依据的工具结果和关键输入参数。若没有工具计算结果，只能给方向性判断，禁止输出精确区间。",
+                "若当前规格要求输出评分、排序、区间、目标值、权重等精确数值，必须同时给出每个数字的来源数据、所依据的工具结果和关键输入参数。若没有足够依据，只能输出定性判断，禁止伪造精确数字。",
             ])
 
         content = TemplateContent(
             system_prompt=(
-                f"你是{spec.name}。你的唯一任务是围绕用户目标输出稳定、可解释、可复核的专业结论。"
-                f"\n你必须坚持角色边界，不扩展到未授权的交易建议或其他职责。"
+                f"你正在 TradingAgents-CN 中运行。TradingAgents-CN 是一个面向投研、交易分析与 Agent 编排场景的多智能体金融分析系统，系统内已有行情、财务、新闻、研究、筛选、复盘、报告、工作流与工具注册等能力模块。"
+                f"\n你的角色是{spec.name}。你不是通用聊天助手，而是这个系统里的专业金融分析 Agent，负责在当前规格定义的职责范围内，为用户完成可落地、可复核的分析交付。"
+                f"\n你的能力边界来自四类信息：输入上下文、当前版本绑定的可用工具、上游传入的结构化数据/中间结果、以及当前任务的明确约束。凡是不在这四类信息里的能力、数据和系统状态，你都不能自行假设为已知。"
+                f"\n你理解系统现状的方式，不是凭空脑补，而是优先依据当前任务输入、可用工具列表、上游上下文、显式约束以及工具调用返回结果来判断：现在系统已经提供了什么、还缺什么、这次任务能做到哪里。"
+                f"\n你必须体现该角色对应的金融行业专业判断，但所有事实、数字、结论都必须建立在输入信息、可追溯数据和工具结果之上；不得把本应由数据或工具支撑的内容改成主观臆测。"
+                f"\n你必须坚持角色边界，不扩展到未授权的交易建议或其他职责；如果当前信息或能力不足，就明确说明依据不足和降级边界。"
             ),
-            user_prompt="请基于输入标的、上下文数据和可用工具完成本次分析。",
+            user_prompt="请先识别本次任务所在的业务场景、你的角色职责、当前可用能力和已知系统现状，再结合输入标的、业务目标、上下文数据与可用工具，完成一次面向真实业务交付的分析。",
             tool_guidance=tool_guidance,
             analysis_requirements=(
                 f"主要目标：{spec.primary_goal}\n\n"
+                f"业务交付：\n{output_fields or '- 待补充'}\n\n"
                 f"职责范围：\n{responsibilities or '- 待补充'}\n\n"
                 f"成功标准：\n{success_criteria or '- 待补充'}\n\n"
                 f"非目标：\n{non_goals or '- 无'}"
             ),
             output_format=output_format,
             constraints=constraints or "- 不得伪造数据\n- 必须显式说明关键假设和不确定性来源",
+        )
+        self._log_generated_result(
+            "runtime_prompt_template_content",
+            {
+                "version_id": version_id,
+                "spec_id": spec.spec_id,
+                "required_tools": required_tools,
+                "template_content": content.model_dump(mode="json"),
+            },
+            context={
+                "version_id": version_id,
+                "spec_id": spec.spec_id,
+                "spec_name": spec.name,
+            },
         )
 
         template = await prompt_service.create_template(
@@ -2009,11 +2122,21 @@ class AgentWorkshopService:
                 "status": "draft",
             }
 
-        return {
+        result = {
             "template_id": str(template.id),
             "template_name": template.template_name,
             "status": template.status,
         }
+        self._log_generated_result(
+            "runtime_prompt_template_ref",
+            result,
+            context={
+                "version_id": version_id,
+                "spec_id": spec.spec_id,
+                "spec_name": spec.name,
+            },
+        )
+        return result
 
     async def _ensure_runtime_agent_config(self, version: AgentVersion, spec: AgentSpec) -> None:
         output_field = version.agent_metadata.get("output_field") or (spec.outputs[0] if spec.outputs else "analysis_result")
@@ -2388,8 +2511,8 @@ class AgentWorkshopService:
         if scores["runtime_constraint_control"] < 0.8:
             issues.append("运行结果出现了越界表达，和规格中的非目标不一致。")
         if valuation_guardrail["violation"]:
-            issues.append("估值数字违反工具化硬约束：输出了精确区间，但没有提供可追溯的工具计算依据。")
-            issues.append("当前更核心的问题不是文案表达，而是缺少直接估值计算工具，导致 Agent 只能生成看似合理但不可复核的数字。")
+            issues.append("数值类结果违反可追溯硬约束：输出了精确数字或区间，但没有提供可追溯的数据源或工具计算依据。")
+            issues.append("当前更核心的问题不是文案表达，而是缺少可复核的数据链路或直接计算工具，导致 Agent 只能生成看似合理但不可复核的数字。")
         if user_feedback.strip():
             issues.append(f"用户反馈中提到的问题待处理：{user_feedback.strip()}")
 
@@ -2397,8 +2520,8 @@ class AgentWorkshopService:
             "把当前运行结果中缺失的输出字段补进 Prompt 和输出 Schema。",
             "为真实任务结果增加结构化字段，避免只返回长文本。",
             "把这次 production review 中暴露的问题加入下一轮 benchmark 回归。",
-            *( ["对估值类数字增加工具计算结果、输入参数和来源标签；没有工具计算时不要输出精确区间。"] if valuation_guardrail["violation"] else [] ),
-            *( ["下一轮工坊应优先补估值计算工具，而不是继续微调 Prompt 让模型自己编数字。"] if valuation_guardrail["violation"] else [] ),
+            *( ["对数值类结果增加原始数据、工具计算结果、输入参数和来源标签；没有足够依据时不要输出精确数字。"] if valuation_guardrail["violation"] else [] ),
+            *( ["下一轮工坊应优先补数据链路或直接计算工具，而不是继续微调 Prompt 让模型自己编数字。"] if valuation_guardrail["violation"] else [] ),
         ])
         details = {
             "mode": "production-review",
@@ -2433,7 +2556,8 @@ class AgentWorkshopService:
         return scores, issues, recommendations, details
 
     def _analyze_valuation_numeric_guardrail(self, spec: AgentSpec, runtime_result: Dict[str, Any], output_text: str) -> Dict[str, Any]:
-        if not self._is_valuation_spec(spec):
+        policy = self._get_numeric_traceability_policy(spec)
+        if not policy["enabled"]:
             return {"violation": False, "penalty": 0.0, "matched": [], "missing": [], "notes": []}
 
         range_mentions = self._extract_valuation_range_mentions(output_text)
@@ -2441,9 +2565,12 @@ class AgentWorkshopService:
             return {
                 "violation": False,
                 "penalty": 0.0,
-                "matched": ["未输出精确估值区间，符合当前工具化约束。"],
+                "matched": ["未检测到需要追溯的精确数值或区间，符合当前规格下的数值约束。"],
                 "missing": [],
-                "notes": ["估值类 Agent 在缺少工具计算时，应避免给出精确目标价或区间。"],
+                "notes": [
+                    "若规格只要求定性判断或框架解读，不输出精确数值是允许的。",
+                    "若后续要输出精确数值或区间，则必须先补齐数据源或工具计算依据。",
+                ],
             }
 
         payload = runtime_result.get("output_payload") if isinstance(runtime_result.get("output_payload"), dict) else {}
@@ -2459,7 +2586,11 @@ class AgentWorkshopService:
             ]
         )
         has_calc_source_label = any(keyword in output_text for keyword in ["来源工具", "计算依据", "输入参数", "工具计算", "数据来源"])
-        calc_tool_names = {"calculate_pb_valuation", "calculate_pe_valuation", "calculate_dcf_valuation", "calculate_weighted_valuation"}
+        calc_tool_names = {
+            item.get("tool_name")
+            for item in tool_trace
+            if isinstance(item, dict) and item.get("tool_name")
+        }
         used_calc_tools = [
             item.get("tool_name") for item in tool_trace
             if isinstance(item, dict) and item.get("tool_name") in calc_tool_names and item.get("success")
@@ -2468,36 +2599,58 @@ class AgentWorkshopService:
         violation = bool(range_mentions) and not has_traceable_evidence
 
         notes = [
-            "估值类数字必须来自工具计算或结构化计算结果，不能只由模型根据文本自行给出。",
+            "数值类结果一旦出现，就必须来自数据源、工具计算或结构化计算结果，不能只由模型根据文本自行给出。",
             *( [f"检测到精确区间: {'；'.join(range_mentions[:4])}"] if range_mentions else [] ),
             *( ["当前输出中虽然有来源标签文本，但未发现结构化工具计算结果。"] if has_calc_source_label and not has_traceable_evidence else [] ),
-            *( [f"已识别到计算工具: {', '.join(used_calc_tools)}"] if used_calc_tools else ["当前未识别到专门的估值计算工具轨迹。"] ),
+            *( [f"已识别到可用工具轨迹: {', '.join(used_calc_tools)}"] if used_calc_tools else ["当前未识别到可支撑这些数字的工具轨迹。"] ),
         ]
+        if not policy["requires_exact_numeric_outputs"]:
+            notes.append("当前规格本身未强制要求精确数值；本次拦截是因为实际输出出现了不可追溯的精确数字。")
         return {
             "violation": violation,
             "penalty": 0.6 if violation else 0.0,
-            "matched": (["估值数字具备工具化或结构化计算依据。"] if has_traceable_evidence else []),
-            "missing": (["精确估值区间缺少工具计算依据。"] if violation else []),
+            "matched": (["数值结果具备可追溯的数据或工具依据。"] if has_traceable_evidence else []),
+            "missing": (["精确数值或区间缺少可追溯的数据或工具依据。"] if violation else []),
             "notes": notes,
         }
 
     def _extract_valuation_range_mentions(self, output_text: str) -> List[str]:
         if not output_text:
             return []
-        pattern = re.compile(r"(?:PB|PE|DCF|市净率|市盈率|现金流折现|综合估值)[^\n：:]{0,24}?(\d+(?:\.\d+)?\s*[-~至]\s*\d+(?:\.\d+)?)", re.IGNORECASE)
-        matches = [match.group(0).strip() for match in pattern.finditer(output_text)]
+        patterns = [
+            re.compile(r"[^\n]{0,24}?(\d+(?:\.\d+)?\s*[-~至]\s*\d+(?:\.\d+)?)(?:\s*(?:元|分|%|倍|分数|评分|名|位))?", re.IGNORECASE),
+            re.compile(r"(?:评分|打分|排序|排名|权重|仓位|收益率|回报率|波动率|概率|目标价|价格区间|估值区间|score|rank|rating|weight|price|target|range)[^\n：:]{0,24}?(\d+(?:\.\d+)?)", re.IGNORECASE),
+        ]
+        matches: List[str] = []
+        for pattern in patterns:
+            matches.extend(match.group(0).strip() for match in pattern.finditer(output_text))
         return self._dedupe(matches)
 
     def _build_valuation_traceability(self, spec: AgentSpec, runtime_result: Dict[str, Any], output_text: str) -> Dict[str, Any]:
-        if not self._is_valuation_spec(spec):
-            return {"enabled": False, "items": [], "summary": "当前版本不是估值类，不启用数值来源追踪。"}
+        if not self._get_numeric_traceability_policy(spec)["enabled"]:
+            return {"enabled": False, "items": [], "summary": "当前版本未启用数值来源追踪。"}
 
         debug_prompt = self._extract_runtime_debug_prompt(runtime_result)
         tool_trace = debug_prompt.get("tool_trace") if isinstance(debug_prompt, dict) else []
         used_tool_names = [item.get("tool_name") for item in tool_trace if isinstance(item, dict) and item.get("tool_name")]
         range_mentions = self._extract_valuation_range_mentions(output_text)
+        has_source_labels = any(keyword in output_text for keyword in ["来源", "数据源", "计算依据", "输入参数", "工具计算"])
+        source_type = "tool_or_data_backed" if used_tool_names or has_source_labels else "unverified"
+        judgement = "具备可追溯依据" if source_type == "tool_or_data_backed" else "证据不足"
+        note = (
+            f"检测到工具轨迹: {', '.join(str(name) for name in used_tool_names if name)}"
+            if used_tool_names else
+            ("输出中包含来源/依据说明。" if has_source_labels else "未检测到可支撑这些数字的工具轨迹或来源说明。")
+        )
         items = [
-            self._build_valuation_source_item(self._infer_valuation_method_key(mention), mention, used_tool_names)
+            {
+                "label": "数值结果",
+                "value": mention,
+                "source_type": source_type,
+                "judgement": judgement,
+                "evidence_tools": self._dedupe([str(name) for name in used_tool_names if name]),
+                "notes": [note],
+            }
             for mention in range_mentions
         ]
 
@@ -2505,76 +2658,16 @@ class AgentWorkshopService:
             return {
                 "enabled": True,
                 "items": [],
-                "summary": "当前输出里没有识别到精确估值区间。",
+                "summary": "当前输出里没有识别到需要追踪的精确数值或区间。",
                 "used_tools": self._dedupe([str(name) for name in used_tool_names if name]),
             }
 
-        unresolved = [item for item in items if item.get("source_type") != "tool_calculated"]
+        unresolved = [item for item in items if item.get("source_type") == "unverified"]
         return {
             "enabled": True,
             "items": items,
-            "summary": "已识别的估值数字全部来自工具计算。" if not unresolved else "检测到估值区间，但其中部分仍不是工具直接计算结果。",
+            "summary": "已识别的数值结果均具备可追溯依据。" if not unresolved else "检测到精确数值，但其中部分仍缺少可追溯依据。",
             "used_tools": self._dedupe([str(name) for name in used_tool_names if name]),
-        }
-
-    def _infer_valuation_method_key(self, mention: str) -> str:
-        text = str(mention or "").lower()
-        if "pb" in text or "市净率" in text:
-            return "pb"
-        if "pe" in text or "市盈率" in text:
-            return "pe"
-        if "dcf" in text or "现金流折现" in text:
-            return "dcf"
-        if "综合估值" in text:
-            return "weighted"
-        return "unknown"
-
-    def _build_valuation_source_item(self, method_key: str, mention: str, used_tool_names: List[Any]) -> Dict[str, Any]:
-        method_label_map = {
-            "pb": "PB 估值区间",
-            "pe": "PE 估值区间",
-            "dcf": "DCF 估值区间",
-            "weighted": "综合估值区间",
-            "unknown": "估值区间",
-        }
-        direct_calc_tools = {
-            "pb": ["calculate_pb_valuation"],
-            "pe": ["calculate_pe_valuation"],
-            "dcf": ["calculate_dcf_valuation"],
-            "weighted": ["calculate_weighted_valuation"],
-        }
-        evidence_tools = {
-            "pb": ["get_peer_comparison", "get_stock_fundamentals_unified", "get_balance_sheet_analysis"],
-            "pe": ["get_peer_comparison", "get_stock_fundamentals_unified", "get_income_analysis"],
-            "dcf": ["get_cashflow_analysis", "get_income_analysis", "get_stock_fundamentals_unified"],
-            "weighted": ["get_peer_comparison", "get_cashflow_analysis", "get_stock_fundamentals_unified"],
-            "unknown": [],
-        }
-
-        used_tools = [str(name) for name in used_tool_names if name]
-        calc_hits = [tool for tool in direct_calc_tools.get(method_key, []) if tool in used_tools]
-        evidence_hits = [tool for tool in evidence_tools.get(method_key, []) if tool in used_tools]
-
-        if calc_hits:
-            source_type = "tool_calculated"
-            judgement = "工具计算"
-            notes = [f"检测到直接计算工具: {', '.join(calc_hits)}"]
-        elif evidence_hits:
-            source_type = "llm_inferred_from_tool_data"
-            judgement = "模型基于工具数据推导"
-            notes = [f"只检测到证据类工具: {', '.join(evidence_hits)}，未检测到直接估值计算工具。"]
-        else:
-            source_type = "unverified"
-            judgement = "证据不足"
-            notes = ["未检测到可支撑该数字的直接计算工具或关键证据工具。"]
-
-        return {
-            "label": method_label_map.get(method_key, "估值区间"),
-            "value": mention,
-            "source_type": source_type,
-            "judgement": judgement,
-            "evidence_tools": self._dedupe([*calc_hits, *evidence_hits]),
-            "notes": notes,
         }
 
     async def _judge_runtime_result_with_llm(
@@ -2639,8 +2732,11 @@ class AgentWorkshopService:
         }
 
         prompt = "\n".join([
-            "你是 Agent 生命周期工坊里的高级评审官。",
-            "你的任务不是做关键词匹配，而是基于完整证据评估这个 Agent 版本在一次真实调试运行中的质量。",
+            "你正在 TradingAgents-CN 的 Agent 生命周期工坊中做运行评审。这个系统是一个面向投研、交易分析、Agent 编排与能力复用的多智能体金融分析系统。",
+            "你当前角色是高级评审官，同时具备金融行业专家和系统架构评审者视角，负责评估某个 Agent 版本在一次真实调试运行中的交付质量。",
+            "你对系统现状和运行表现的理解，必须来自版本信息、运行上下文、prompt 调试信息、工具轨迹、运行输出、规则信号与用户反馈，不能把未出现的工具使用、数据来源或系统能力当成既成事实。",
+            "你的任务不是做关键词匹配，而是基于完整证据评估这个 Agent 版本在一次真实调试运行中的质量，并判断它是否真的符合业务目标、系统现状和约束边界。",
+            "你既要看结论在金融业务上是否像样，也要看它在系统实现上是否可复核、可执行、可持续迭代。",
             "你必须覆盖以下维度：",
             "1. runtime_goal_alignment: 输出是否真正回应用户目标。",
             "2. runtime_output_quality: 输出质量是否完整、专业、可用，而不是只看字段命中。",
@@ -2678,13 +2774,39 @@ class AgentWorkshopService:
             json.dumps(judge_input, ensure_ascii=False, indent=2),
         ])
 
+        system_prompt = "你正在 TradingAgents-CN 的 Agent 生命周期工坊中做运行评审。TradingAgents-CN 是一个面向投研、交易分析、Agent 编排与能力复用的多智能体金融分析系统。你当前角色是严谨的运行评审专家，同时具备金融行业和系统架构评审视角。你的判断依据只能来自版本信息、运行上下文、prompt 调试信息、工具轨迹、运行输出、规则信号和用户反馈，不能把证据中没有出现的系统能力、工具使用或数据来源当成事实。你只输出合法 JSON，并且会明确区分已有证据和证据不足。"
         response = await client.achat([
-            Message(role="system", content="你是严谨的 Agent 运行评审专家。你只输出合法 JSON，并且会明确区分已有证据和证据不足。"),
+            Message(role="system", content=system_prompt),
             Message(role="user", content=prompt),
         ])
         raw_content = (response.content or "").strip()
+        self._log_llm_exchange(
+            "runtime_review",
+            system_prompt,
+            prompt,
+            raw_content,
+            context={
+                "version_id": version.version_id,
+                "spec_id": spec.spec_id,
+                "spec_name": spec.name,
+                "symbol": runtime_result.get("symbol"),
+                "analysis_date": runtime_result.get("analysis_date"),
+            },
+        )
         data = self._load_json_response(raw_content)
-        return self._normalize_runtime_llm_review(data, raw_content)
+        normalized_review = self._normalize_runtime_llm_review(data, raw_content)
+        self._log_generated_result(
+            "runtime_review",
+            normalized_review,
+            context={
+                "version_id": version.version_id,
+                "spec_id": spec.spec_id,
+                "spec_name": spec.name,
+                "symbol": runtime_result.get("symbol"),
+                "analysis_date": runtime_result.get("analysis_date"),
+            },
+        )
+        return normalized_review
 
     def _normalize_runtime_llm_review(self, data: Dict[str, Any], raw_content: str) -> Dict[str, Any]:
         dimension_keys = [

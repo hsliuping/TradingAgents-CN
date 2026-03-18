@@ -55,6 +55,10 @@ CODING_PATTERNS = """\
 # 股票代码参数名（用于判断是否需要注入多格式支持）
 SYMBOL_PARAM_NAMES = frozenset({"symbol", "stock_code", "code", "stock_symbol"})
 
+VALUATION_KEYWORDS = (
+    "估值", "valuation", "pe", "pb", "ps", "dcf", "市盈率", "市净率", "市销率",
+)
+
 
 class CodeGenerator:
     """
@@ -253,6 +257,36 @@ class CodeGenerator:
 
         constraints_desc = "\n".join(f"  - {c}" for c in spec.constraints) or "  无"
 
+        is_valuation_skill = any(keyword in (spec.description or "").lower() for keyword in VALUATION_KEYWORDS)
+        valuation_section = ""
+        if is_valuation_skill:
+            valuation_section = """
+
+【⚠️ 估值类 Skill 实现范式 — 必须遵守】
+- 优先调用 from core.tools.external.local_data import get_stock_valuation_context
+- current_price 必须来自 get_stock_valuation_context()['current_price'] 或 get_latest_stock_price(symbol)
+- 若 current_price 缺失、<=0，必须直接返回 error/invalid，禁止默认设为 0 后继续估值
+- 财务数据必须优先使用 local_data 返回的 financial_data，并兼容 report_period / report_date
+- PE/PB/PS 估值若缺少必要输入，应返回 invalid，禁止输出 fair_value=0
+- DCF 若缺少 total_shares/净利润/有效增长率，必须明确返回 invalid 或降级说明，禁止静默返回 0
+- 不要只从 basic_info 生拼价格字段；价格优先级应为 market_quotes -> basic_info
+
+推荐骨架：
+```python
+from core.tools.external.local_data import get_stock_valuation_context
+
+ctx = get_stock_valuation_context(symbol)
+current_price = ctx["current_price"]
+if current_price is None or current_price <= 0:
+    return {"status": "error", "message": f"未获取到股票 {symbol} 的有效现价，无法估值"}
+
+pe_ttm = ctx["pe_ttm"]
+pb = ctx["pb"]
+ps_ttm = ctx["ps_ttm"]
+financial_data = ctx["financial_data"]
+```
+"""
+
         symbol_section = ""
         needs_norm, param_name = self._needs_symbol_normalize(spec)
         if needs_norm and param_name:
@@ -283,6 +317,7 @@ class CodeGenerator:
 
 【行为约束】
 {constraints_desc}
+{valuation_section}
 {symbol_section}
 
 【⚠️ 严禁模拟/占位 — 必须真实实现】

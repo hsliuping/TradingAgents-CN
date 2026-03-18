@@ -197,6 +197,7 @@ STOCK_DATA_COLLECTION_CATALOG: List[CollectionCatalog] = [
         "notes": [
             "这是统一财务主表，基础元数据字段比较稳定，明细指标允许因 source 不同而扩展。",
             "生成 Skill 时应优先依赖 report_period / report_type / data_source 做过滤。",
+            "历史数据中也可能出现 report_date 字段，生成 Skill 时要兼容 report_period / report_date 两种口径。",
             "如果只需要最近几期财务数据，优先用 get_stock_financial_data，而不是自己做复杂聚合。",
         ],
         "fields": [
@@ -446,7 +447,7 @@ def render_stock_data_collection_doc(
         "【使用原则】",
         "1. 优先本地数据，后补外部 API。",
         "2. 需要基础信息时优先 stock_basic_info；需要最新价格时优先 market_quotes；需要区间行情时优先 stock_daily_quotes。",
-        "3. 财务数据按 report_period 倒序取最近几期，不要混用不同数据源口径后直接做精确结论。",
+        "3. 财务数据按 report_period 倒序取最近几期；若历史记录使用 report_date，也要兼容该字段。",
         "4. 新闻数据按 symbol + publish_time 过滤，并控制 limit，避免一次返回过多正文。",
         "5. 若集合字段与当前 Skill 需求不完全匹配，优先在返回结果中做二次整理，不要猜测数据库里还有未声明字段。",
     ]

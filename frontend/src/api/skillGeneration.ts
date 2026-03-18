@@ -71,6 +71,48 @@ export interface ConfirmResult {
   error: string | null
 }
 
+export interface RepairPlanResult {
+  status: string
+  session_id: string
+  ai_message: string
+}
+
+export interface IterationRoundDetail {
+  round_number: number
+  feedback?: string
+  decision?: string
+  validation?: {
+    passed?: boolean
+    errors?: string[]
+    warnings?: string[]
+  } | null
+  sandbox?: {
+    success?: boolean
+    error?: string | null
+    stdout?: string
+    stderr?: string
+  } | null
+  eval_score?: {
+    executability?: number
+    authenticity?: number
+    completeness?: number
+    relevance?: number
+    format_quality?: number
+    total?: number
+  } | null
+}
+
+export interface PipelineResultDetail {
+  success?: boolean
+  tool_id?: string
+  final_code?: string
+  final_metadata?: Record<string, any>
+  iterations?: IterationRoundDetail[]
+  total_rounds?: number
+  total_time?: number
+  error?: string | null
+}
+
 /** 边界检测 */
 export interface BoundaryCheck {
   within_boundary: boolean
@@ -286,6 +328,18 @@ export const skillGenerationApi = {
   /** 确认规格并生成（异步，返回 generating 后需轮询 getSession 获取最终结果） */
   confirmSpec: async (sessionId: string, message: string = '确认'): Promise<ConfirmResult> => {
     const res = await request.post<ApiOk<ConfirmResult>>(`${BASE}/sessions/${sessionId}/confirm`, { message })
+    return (res as any).data
+  },
+
+  /** 先让 AI 解释它理解到的问题和修正计划 */
+  previewRepairSession: async (sessionId: string, feedback: string): Promise<RepairPlanResult> => {
+    const res = await request.post<ApiOk<RepairPlanResult>>(`${BASE}/sessions/${sessionId}/repair-plan`, { feedback })
+    return (res as any).data
+  },
+
+  /** 当修正计划确认后，再真正重新生成 */
+  repairSession: async (sessionId: string, feedback: string, repairPlan: string = ''): Promise<ConfirmResult> => {
+    const res = await request.post<ApiOk<ConfirmResult>>(`${BASE}/sessions/${sessionId}/repair`, { feedback, repair_plan: repairPlan })
     return (res as any).data
   },
 
