@@ -232,6 +232,18 @@
 
               <div v-if="!gapReport" class="empty-state compact">规格确认后，在这里看可复用能力和还缺什么。</div>
               <div v-else class="gap-panel">
+                <div class="runtime-meta-row">
+                  <span v-if="gapReport.generated_by === 'llm'">生成方式：LLM 缺口分析</span>
+                  <span v-else-if="gapReport.generated_by === 'llm_failed'">生成方式：LLM 失败，未做兜底</span>
+                </div>
+                <div v-if="gapReport.error_message" class="field-block">
+                  <div class="field-label">缺口分析失败原因</div>
+                  <div class="note-item error-note">{{ gapReport.error_message }}</div>
+                </div>
+                <div v-if="gapReport.raw_response" class="field-block">
+                  <div class="field-label">LLM 原始响应摘要</div>
+                  <pre class="runtime-raw-response">{{ gapReport.raw_response }}</pre>
+                </div>
                 <div class="field-block">
                   <div class="field-label">可复用模块</div>
                   <div class="tag-wrap">
@@ -287,7 +299,15 @@
                   <div class="note-item" v-if="toolingPlan.summary">{{ toolingPlan.summary }}</div>
                   <div class="runtime-meta-row">
                     <span v-if="toolingPlan.generated_by === 'llm'">生成方式：LLM 草案</span>
-                    <span v-else-if="toolingPlan.generated_by">生成方式：规则兜底</span>
+                    <span v-else-if="toolingPlan.generated_by === 'llm_failed'">生成方式：LLM 失败，未做兜底</span>
+                  </div>
+                  <div class="field-block" v-if="toolingPlan.error_message">
+                    <div class="field-label">工具草案失败原因</div>
+                    <div class="note-item error-note">{{ toolingPlan.error_message }}</div>
+                  </div>
+                  <div class="field-block" v-if="toolingPlan.raw_response">
+                    <div class="field-label">LLM 原始响应摘要</div>
+                    <pre class="runtime-raw-response">{{ toolingPlan.raw_response }}</pre>
                   </div>
                   <div class="field-block" v-if="toolingPlan.missing_capabilities?.length">
                     <div class="field-label">待补能力</div>
@@ -475,6 +495,10 @@
                 <div class="field-block evaluation-note-block">
                   <div class="field-label">评估依据</div>
                   <div class="note-item">当前评分以 LLM 评审为主，重点判断结果是否真的完成任务、分析过程是否合理、工具选择是否合适、提示词设计是否清晰。规则扫描只作为辅助证据，不再直接代表最终评语。</div>
+                </div>
+                <div class="field-block" v-if="latestEvaluation.details?.llm_review_error">
+                  <div class="field-label">LLM 评审失败原因</div>
+                  <div class="note-item error-note">{{ latestEvaluation.details.llm_review_error }}</div>
                 </div>
                 <div class="field-block" v-if="llmReviewSummary">
                   <div class="field-label">LLM 评审结论</div>
@@ -1854,20 +1878,65 @@ const fillExample = (type: 'valuation' | 'industry' | 'watcher') => {
   description.value = '我想做一个财报跟踪助手，负责跟踪重点公司的季报变化、提炼异常指标、总结风险提示，但不做独立投资建议。'
 }
 
+const humanizeToolId = (toolId: string) => {
+  const normalized = String(toolId || '').trim().toLowerCase()
+  if (!normalized) return '待澄清能力'
+
+  const aliases: Record<string, string> = {
+    stock_valuation_calculator: '股票估值计算',
+    get_analyst_forecast: '分析师预测获取',
+    get_market_quotes: '行情获取',
+    get_stock_fundamentals: '基本面数据获取',
+    peer_comparison: '可比公司对比',
+  }
+  if (aliases[normalized]) return aliases[normalized]
+
+  return normalized
+    .replace(/^(get_|fetch_|query_|load_|calculate_|build_)/, '')
+    .split('_')
+    .filter(Boolean)
+    .map(part => {
+      const tokenMap: Record<string, string> = {
+        stock: '股票',
+        valuation: '估值',
+        calculator: '计算',
+        analyst: '分析师',
+        forecast: '预测',
+        market: '行情',
+        quote: '报价',
+        quotes: '报价',
+        fundamentals: '基本面',
+        fundamental: '基本面',
+        peer: '可比对象',
+        comparison: '对比',
+        risk: '风险',
+        score: '评分',
+        ranking: '排序',
+      }
+      return tokenMap[part] || part.toUpperCase()
+    })
+    .join('')
+}
+
 const getSuggestedToolDescription = (toolId: string) => {
   const toolDraft = toolingPlan.value?.draft_tools?.find(item => item.tool_id === toolId)
+  if (toolDraft?.capability_description) {
+    return toolDraft.capability_description
+  }
   if (toolDraft?.why_needed) {
     return toolDraft.why_needed
   }
 
-  const descriptionMap: Record<string, string> = {
-    calculate_pb_valuation: '根据每股净资产和同行 PB 参考值，输出可追溯的 PB 估值区间。',
-    calculate_pe_valuation: '根据 EPS 与同行 PE 参考值，输出可追溯的 PE 估值区间。',
-    calculate_dcf_valuation: '根据现金流预测、折现率和终值假设，输出 DCF 估值结果。',
-    calculate_weighted_valuation: '把 PB、PE、DCF 等单方法结果按权重汇总成综合估值区间。',
+  if (toolDraft?.solves_gaps?.length) {
+    return `这是一个面向“${humanizeToolId(toolId)}”的候选执行能力，主要用于解决：${toolDraft.solves_gaps.slice(0, 2).join('；')}。具体输入、输出、数据来源和调用边界还需要在能力工坊里继续澄清。`
   }
 
-  return descriptionMap[toolId] || '这是一个需要被 Agent 直接调用的具体能力，目标是把某个估值步骤做成可复核的结构化计算。'
+  const blockingGaps = gapReport.value?.blocking_gaps || []
+  if (blockingGaps.length) {
+    return `这是一个面向“${humanizeToolId(toolId)}”的候选执行能力，目的是补齐 Agent 当前缺少的一段可直接调用的执行链路。它应被收敛成输入输出明确、结果可复核的最小能力单元；具体功能边界会结合当前缺口继续澄清。`
+  }
+
+  return `这是一个面向“${humanizeToolId(toolId)}”的候选执行能力，用来给 Agent 提供可直接调用的结构化结果。当前名称只是能力草案，还需要在能力工坊里进一步明确它的输入参数、输出结构、依赖数据和调用边界。`
 }
 
 const getSortedToolDrafts = () => {
@@ -1898,15 +1967,122 @@ const findConcreteToolDraft = (target: string | AgentWorkshopToolingPlanItem) =>
   return null
 }
 
+const collectKeywordTokens = (value: string) => {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9\u4e00-\u9fa5]+/)
+    .map(item => item.trim())
+    .filter(item => item.length >= 2)
+}
+
+const getToolScopeHints = (toolDraft: AgentWorkshopToolingPlanItem) => {
+  const toolKey = `${toolDraft.tool_id || ''} ${toolDraft.tool_name || ''}`.toLowerCase()
+
+  if (toolKey.includes('pe_relative') || (toolKey.includes('pe') && toolKey.includes('relative'))) {
+    return {
+      keywords: ['pe', '相对估值', '市盈率', '同行', '同业', '可比公司', 'peer'],
+      scopeLines: [
+        '只实现 PE 相对估值这一段执行链路，不扩展为 DCF、PEG 或三种方法综合结论。',
+        '围绕可比公司/同行对比完成估值，输出 PE 估值数值与估值区间。',
+        '需要说明可比对象选择依据、核心参数/倍数选择依据，以及方法失效边界。',
+      ],
+      nonGoalLines: [
+        '不负责 DCF 估值计算。',
+        '不负责 PEG 估值计算。',
+        '不负责三种估值结果的综合汇总。',
+        '不输出直接买卖建议。',
+      ],
+    }
+  }
+
+  if (toolKey.includes('dcf')) {
+    return {
+      keywords: ['dcf', '折现', '现金流', '自由现金流', 'discount'],
+      scopeLines: [
+        '只实现 DCF 估值这一段执行链路，不扩展为 PE、PEG 或三种方法综合结论。',
+        '围绕现金流折现法完成估值，输出 DCF 估值数值与估值区间。',
+        '需要说明现金流预测、折现率、终值等关键假设及方法失效边界。',
+      ],
+      nonGoalLines: [
+        '不负责 PE 相对估值计算。',
+        '不负责 PEG 估值计算。',
+        '不负责三种估值结果的综合汇总。',
+        '不输出直接买卖建议。',
+      ],
+    }
+  }
+
+  if (toolKey.includes('peg')) {
+    return {
+      keywords: ['peg', '增长', 'growth'],
+      scopeLines: [
+        '只实现 PEG 估值这一段执行链路，不扩展为 DCF、PE 或三种方法综合结论。',
+        '围绕 PEG 估值法完成估值，输出 PEG 估值数值与估值区间。',
+        '需要说明增长率假设、PE 与增长匹配关系，以及方法失效边界。',
+      ],
+      nonGoalLines: [
+        '不负责 DCF 估值计算。',
+        '不负责 PE 相对估值计算。',
+        '不负责三种估值结果的综合汇总。',
+        '不输出直接买卖建议。',
+      ],
+    }
+  }
+
+  return {
+    keywords: [],
+    scopeLines: [
+      '这次只补齐当前点选的单一执行能力，不要扩展成整个 Agent 的完整能力集合。',
+    ],
+    nonGoalLines: [
+      '不把当前子能力泛化成覆盖整个 Agent 的大而全方案。',
+    ],
+  }
+}
+
+const pickRelevantSpecLines = (lines: string[], toolDraft: AgentWorkshopToolingPlanItem, fallbackCount = 2) => {
+  if (!lines.length) return []
+
+  const scopeHints = getToolScopeHints(toolDraft)
+  const keywordSet = new Set<string>(scopeHints.keywords)
+  ;[
+    toolDraft.tool_id,
+    toolDraft.tool_name,
+    toolDraft.capability_description,
+    toolDraft.why_needed,
+    ...(toolDraft.solves_gaps || []),
+    ...(toolDraft.acceptance_criteria || []),
+    ...(toolDraft.outputs || []).map(field => `${field.name} ${field.description || ''}`),
+  ].filter(Boolean).forEach(item => {
+    for (const token of collectKeywordTokens(String(item))) {
+      keywordSet.add(token)
+    }
+  })
+
+  const keywords = Array.from(keywordSet)
+  if (!keywords.length) return lines.slice(0, fallbackCount)
+
+  const matched = lines.filter(line => {
+    const normalizedLine = line.toLowerCase()
+    return keywords.some(keyword => normalizedLine.includes(keyword.toLowerCase()))
+  })
+
+  return matched.length ? matched : lines.slice(0, fallbackCount)
+}
+
 const buildToolDraftSkillDescription = (toolDraft: AgentWorkshopToolingPlanItem) => {
   const spec = displaySpec.value
   const version = latestVersion.value
   const gapNotes = gapReport.value?.blocking_gaps || []
   const recommendations = gapReport.value?.build_recommendations || []
   const toolHints = version?.required_tools || []
-  const responsibilityLines = (spec?.responsibilities || []).map(item => `- ${item}`)
-  const specOutputLines = (spec?.outputs || []).map(item => `- ${item}`)
-  const nonGoalLines = (spec?.non_goals || []).map(item => `- ${item}`)
+  const scopeHints = getToolScopeHints(toolDraft)
+  const responsibilityLines = pickRelevantSpecLines(spec?.responsibilities || [], toolDraft, 3).map(item => `- ${item}`)
+  const specOutputLines = pickRelevantSpecLines(spec?.outputs || [], toolDraft, 3).map(item => `- ${item}`)
+  const nonGoalLines = [
+    ...(pickRelevantSpecLines(spec?.non_goals || [], toolDraft, 2)),
+    ...scopeHints.nonGoalLines,
+  ].filter((item, index, array) => array.indexOf(item) === index).map(item => `- ${item}`)
   const inputLines = (toolDraft.inputs || []).map(field => `- ${field.name}: ${field.type}${field.required ? '，必填' : '，可选'}${field.description ? `，${field.description}` : ''}`)
   const outputLines = (toolDraft.outputs || []).map(field => `- ${field.name}: ${field.type}${field.description ? `，${field.description}` : ''}`)
 
@@ -1915,19 +2091,24 @@ const buildToolDraftSkillDescription = (toolDraft: AgentWorkshopToolingPlanItem)
     spec?.name ? `它服务于 Agent：${spec.name}。` : '',
     spec?.primary_goal ? `Agent 目标：${spec.primary_goal}` : '',
     spec?.domain ? `业务领域：${spec.domain}` : '',
-    responsibilityLines.length ? `Agent 已确认职责：\n${responsibilityLines.join('\n')}` : '',
-    specOutputLines.length ? `Agent 期望输出：\n${specOutputLines.join('\n')}` : '',
-    nonGoalLines.length ? `Agent 明确非目标：\n${nonGoalLines.join('\n')}` : '',
+    '注意：当前只是从这个 Agent 中拆出一个要补齐的子能力，不是重新定义整个 Agent。下面会同时给你上游 Agent 背景和这个子能力自己的明确范围。',
+    responsibilityLines.length ? `上游 Agent 背景中，与当前子能力直接相关的职责：\n${responsibilityLines.join('\n')}` : '',
+    specOutputLines.length ? `上游 Agent 背景中，与当前子能力直接相关的输出：\n${specOutputLines.join('\n')}` : '',
+    nonGoalLines.length ? `当前子能力必须继承的边界与非目标：\n${nonGoalLines.join('\n')}` : '',
     toolHints.length ? `当前 Agent 已绑定工具：${toolHints.join('、')}` : '',
     gapNotes.length ? `当前识别到的关键缺口：${gapNotes.slice(0, 3).join('；')}` : '',
     recommendations.length ? `实现建议：${recommendations.slice(0, 3).join('；')}` : '',
+    `这项子能力的名称说明：${toolDraft.tool_name || toolDraft.tool_id}`,
+    toolDraft.capability_description ? `这项子能力的功能说明：${toolDraft.capability_description}` : '',
     `这项能力的目标是：${toolDraft.why_needed}`,
     toolDraft.solves_gaps?.length ? `它要解决的问题：${toolDraft.solves_gaps.join('；')}` : '',
+    scopeHints.scopeLines.length ? `这项子能力本次必须收敛到的职责范围：\n${scopeHints.scopeLines.map(item => `- ${item}`).join('\n')}` : '',
     toolDraft.dependencies?.length ? `依赖数据或前置条件：${toolDraft.dependencies.join('、')}` : '',
     inputLines.length ? `建议输入参数：\n${inputLines.join('\n')}` : '',
     outputLines.length ? `建议输出结构：\n${outputLines.join('\n')}` : '',
     toolDraft.acceptance_criteria?.length ? `验收标准：${toolDraft.acceptance_criteria.join('；')}` : '',
     toolDraft.fallback_before_ready ? `未完成前的降级策略：${toolDraft.fallback_before_ready}` : '',
+    `本次不要偏题：你要补的是“${toolDraft.tool_id}”这一段最小执行能力，不是整个股票估值分析 Agent，也不是三种估值方法的总控流程。`,
     '请先判断这项能力能否直接复用现有工具或已有 Skill；如果不能，再把它收敛成一个新增的最小实现单元。不要泛化成大而全的综合能力。重点只描述这个单一能力的输入参数、输出结构、依赖数据、调用边界和计算职责。',
   ].filter(Boolean).join('\n')
 }
@@ -1968,6 +2149,7 @@ const goToSkillWorkshop = (target?: string | AgentWorkshopToolingPlanItem) => {
       from_agent_workshop: selectedSpecId.value || '',
       source_name: selectedSpecName.value || '',
       skill_name: typeof target === 'string' ? target : (target?.tool_id || target?.tool_name || ''),
+      target_capability: typeof target === 'string' ? target : (target?.tool_id || target?.tool_name || ''),
       handoff_intent: '当前是从 Agent 创建流程里补能力缺口，不是普通 Skill 脑暴。必须优先保留上游目标能力；若需要拆成 Skill，只能定义成该 Agent 能力里的最小确定性子能力。',
     }
   })
@@ -2377,6 +2559,26 @@ onMounted(async () => {
   margin-bottom: 10px;
   color: #5d746e;
   font-size: 13px;
+}
+
+.runtime-raw-response {
+  margin: 0;
+  padding: 16px;
+  border-radius: 14px;
+  background: #0f1720;
+  border: 1px solid #243341;
+  color: #d8e4ec;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.error-note {
+  color: #b42318;
 }
 
 .runtime-report-box {

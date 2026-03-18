@@ -596,7 +596,9 @@ const highlightConfirmActions = ref(false)
 
 const getRouteHandoffContext = (): SkillHandoffContext | null => {
   const sourceSpecId = typeof route.query.from_agent_workshop === 'string' ? route.query.from_agent_workshop.trim() : ''
-  const targetCapability = typeof route.query.skill_name === 'string' ? route.query.skill_name.trim() : ''
+  const targetCapability = typeof route.query.target_capability === 'string'
+    ? route.query.target_capability.trim()
+    : (typeof route.query.skill_name === 'string' ? route.query.skill_name.trim() : '')
   const sourceName = typeof route.query.source_name === 'string' ? route.query.source_name.trim() : ''
   const handoffIntent = typeof route.query.handoff_intent === 'string' ? route.query.handoff_intent.trim() : ''
   if (!sourceSpecId && !targetCapability) return null

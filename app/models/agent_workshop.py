@@ -103,6 +103,9 @@ class AgentWorkshopGapAnalysis(BaseModel):
     fallback_strategy: List[str] = Field(default_factory=list)
     build_recommendations: List[str] = Field(default_factory=list)
     notes: List[str] = Field(default_factory=list)
+    generated_by: str = ""
+    error_message: str = ""
+    raw_response: str = ""
 
 
 class AgentWorkshopSession(BaseModel):

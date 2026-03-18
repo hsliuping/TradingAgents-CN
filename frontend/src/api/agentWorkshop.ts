@@ -80,6 +80,9 @@ export interface AgentWorkshopGapAnalysis {
   fallback_strategy: string[]
   build_recommendations: string[]
   notes: string[]
+  generated_by?: string
+  error_message?: string
+  raw_response?: string
 }
 
 export interface AgentWorkshopToolSchemaField {
@@ -92,6 +95,7 @@ export interface AgentWorkshopToolSchemaField {
 export interface AgentWorkshopToolingPlanItem {
   tool_id: string
   tool_name: string
+  capability_description?: string
   priority: string
   why_needed: string
   solves_gaps: string[]
@@ -109,6 +113,7 @@ export interface AgentWorkshopToolingPlan {
   implementation_order: string[]
   notes: string[]
   generated_by?: string
+  error_message?: string
   raw_response?: string
 }
 
