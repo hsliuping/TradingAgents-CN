@@ -452,6 +452,23 @@ class ConfigService:
                     enabled=False,
                     priority=2,
                     description="Tushare专业金融数据接口"
+                ),
+                DataSourceConfig(
+                    name="QMT",
+                    type=DataSourceType.QMT,
+                    endpoint="miniqmt://local",
+                    timeout=15,
+                    rate_limit=600,
+                    enabled=False,
+                    priority=2,
+                    description="QMT / MiniQMT 本地数据接口",
+                    config_params={
+                        "listen_port_range": "58620-58650",
+                        "init_markets": "SH,SZ,BJ",
+                        "auto_download_history": True,
+                        "auto_download_financial": False,
+                        "auto_download_sector": True,
+                    }
                 )
             ],
             default_data_source="AKShare",
@@ -1465,6 +1482,91 @@ class ConfigService:
                         "response_time": time.time() - start_time,
                         "details": None
                     }
+
+            elif ds_type == "qmt":
+                original_env: Dict[str, Optional[str]] = {}
+                temp_env = {
+                    "QMT_TOKEN": ds_config.api_key or "",
+                }
+                qmt_param_map = {
+                    "data_dir": "QMT_DATA_DIR",
+                    "listen_port": "QMT_LISTEN_PORT",
+                    "listen_port_range": "QMT_LISTEN_PORT_RANGE",
+                    "init_markets": "QMT_INIT_MARKETS",
+                    "kline_mirror_markets": "QMT_KLINE_MIRROR_MARKETS",
+                    "allow_optimize_addresses": "QMT_ALLOW_OPTIMIZE_ADDRESSES",
+                    "history_start_time": "QMT_HISTORY_START_TIME",
+                    "start_local_service": "QMT_START_LOCAL_SERVICE",
+                    "kline_mirror_enabled": "QMT_KLINE_MIRROR_ENABLED",
+                    "auto_download_history": "QMT_AUTO_DOWNLOAD_HISTORY",
+                    "auto_download_financial": "QMT_AUTO_DOWNLOAD_FINANCIAL",
+                    "auto_download_sector": "QMT_AUTO_DOWNLOAD_SECTOR",
+                }
+
+                for key, env_key in qmt_param_map.items():
+                    value = (ds_config.config_params or {}).get(key)
+                    if value is None:
+                        continue
+                    if isinstance(value, list):
+                        temp_env[env_key] = ",".join(str(item) for item in value)
+                    elif isinstance(value, bool):
+                        temp_env[env_key] = str(value).lower()
+                    else:
+                        temp_env[env_key] = str(value)
+
+                try:
+                    for env_key, env_value in temp_env.items():
+                        original_env[env_key] = os.getenv(env_key)
+                        if env_value:
+                            os.environ[env_key] = env_value
+
+                    from app.services.data_sources.qmt_adapter import QMTAdapter
+
+                    adapter = QMTAdapter()
+                    available = adapter.is_available()
+                    if not available:
+                        return {
+                            "success": False,
+                            "message": "QMT 不可用：请确认 xtquant 已安装、MiniQMT 已启动，且本地行情连接参数正确",
+                            "response_time": time.time() - start_time,
+                            "details": {
+                                "type": ds_type,
+                                "tested_params": sorted(list((ds_config.config_params or {}).keys())),
+                            }
+                        }
+
+                    stock_df = adapter.get_stock_list()
+                    stock_count = len(stock_df) if stock_df is not None else 0
+                    return {
+                        "success": True,
+                        "message": "成功连接到 QMT 数据源",
+                        "response_time": time.time() - start_time,
+                        "details": {
+                            "type": ds_type,
+                            "test_result": f"QMT 可用，股票列表检测返回 {stock_count} 条记录",
+                            "stock_count": stock_count,
+                        }
+                    }
+                except ImportError:
+                    return {
+                        "success": False,
+                        "message": "xtquant 库未安装，请先安装并确认运行环境支持 MiniQMT",
+                        "response_time": time.time() - start_time,
+                        "details": None
+                    }
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "message": f"QMT 测试失败: {str(e)}",
+                        "response_time": time.time() - start_time,
+                        "details": None
+                    }
+                finally:
+                    for env_key, env_value in original_env.items():
+                        if env_value is None:
+                            os.environ.pop(env_key, None)
+                        else:
+                            os.environ[env_key] = env_value
 
             elif ds_type == "local":
                 # 本地数据源 - 直接连接数据库检查是否有本地数据

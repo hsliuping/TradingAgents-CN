@@ -71,7 +71,7 @@ from app.worker.baostock_sync_service import (
     run_baostock_historical_sync,
     run_baostock_status_check
 )
-from app.worker.qmt_sync_service import run_qmt_basic_info_sync
+from app.worker.qmt_sync_service import run_qmt_basic_info_sync, run_qmt_quotes_sync, run_qmt_historical_sync, run_qmt_financial_sync, run_qmt_status_check
 from app.worker.favorites_sync_task import run_favorites_data_sync
 from app.worker.etf_sync_service import run_etf_sync
 # 港股和美股改为按需获取+缓存模式，不再需要定时同步任务
@@ -790,11 +790,59 @@ async def lifespan(app: FastAPI):
             name="股票基础信息同步（QMT）",
             kwargs={"force_update": False}
         )
-        if not settings.QMT_UNIFIED_ENABLED:
+        if not (settings.QMT_UNIFIED_ENABLED and settings.QMT_BASIC_INFO_SYNC_ENABLED):
             scheduler.pause_job("qmt_basic_info_sync")
             logger.info("⏸️ QMT 基础信息同步已添加但暂停（需在 .env 设置 QMT_UNIFIED_ENABLED=true 并确保 MiniQMT 运行）")
         else:
             logger.info("📋 QMT 基础信息同步已配置")
+
+        scheduler.add_job(
+            run_qmt_quotes_sync,
+            CronTrigger.from_crontab(settings.QMT_QUOTES_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="qmt_quotes_sync",
+            name="实时行情同步（QMT）"
+        )
+        if not (settings.QMT_UNIFIED_ENABLED and settings.QMT_QUOTES_SYNC_ENABLED):
+            scheduler.pause_job("qmt_quotes_sync")
+            logger.info(f"⏸️ QMT 行情同步已添加但暂停: {settings.QMT_QUOTES_SYNC_CRON}")
+        else:
+            logger.info(f"📈 QMT 行情同步已配置: {settings.QMT_QUOTES_SYNC_CRON}")
+
+        scheduler.add_job(
+            run_qmt_historical_sync,
+            CronTrigger.from_crontab(settings.QMT_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="qmt_historical_sync",
+            name="历史数据同步（QMT）"
+        )
+        if not (settings.QMT_UNIFIED_ENABLED and settings.QMT_HISTORICAL_SYNC_ENABLED):
+            scheduler.pause_job("qmt_historical_sync")
+            logger.info(f"⏸️ QMT 历史数据同步已添加但暂停: {settings.QMT_HISTORICAL_SYNC_CRON}")
+        else:
+            logger.info(f"📊 QMT 历史数据同步已配置: {settings.QMT_HISTORICAL_SYNC_CRON}")
+
+        scheduler.add_job(
+            run_qmt_financial_sync,
+            CronTrigger.from_crontab(settings.QMT_FINANCIAL_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="qmt_financial_sync",
+            name="财务数据同步（QMT）"
+        )
+        if not (settings.QMT_UNIFIED_ENABLED and settings.QMT_FINANCIAL_SYNC_ENABLED):
+            scheduler.pause_job("qmt_financial_sync")
+            logger.info(f"⏸️ QMT 财务数据同步已添加但暂停: {settings.QMT_FINANCIAL_SYNC_CRON}")
+        else:
+            logger.info(f"💰 QMT 财务数据同步已配置: {settings.QMT_FINANCIAL_SYNC_CRON}")
+
+        scheduler.add_job(
+            run_qmt_status_check,
+            CronTrigger.from_crontab(settings.QMT_STATUS_CHECK_CRON, timezone=settings.TIMEZONE),
+            id="qmt_status_check",
+            name="数据源状态检查（QMT）"
+        )
+        if not (settings.QMT_UNIFIED_ENABLED and settings.QMT_STATUS_CHECK_ENABLED):
+            scheduler.pause_job("qmt_status_check")
+            logger.info(f"⏸️ QMT 状态检查已添加但暂停: {settings.QMT_STATUS_CHECK_CRON}")
+        else:
+            logger.info(f"🔍 QMT 状态检查已配置: {settings.QMT_STATUS_CHECK_CRON}")
 
         # 自选股A股数据同步任务配置
         logger.info("🔄 配置自选股A股数据同步任务...")

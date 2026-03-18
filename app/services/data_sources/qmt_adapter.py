@@ -8,8 +8,9 @@ QMT (迅投 MiniQMT) 数据源适配器
   3. 交易功能需要登录券商账户（本适配器不涉及交易）
 新闻不支持，统一使用 AKShare 数据源。
 """
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 import logging
+import os
 from datetime import datetime, timedelta
 import pandas as pd
 
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 # xtquant 可选依赖，未安装时适配器不可用
 _xtdata = None
+_xtdatacenter = None
 
 
 def _get_xtdata():
@@ -34,15 +36,30 @@ def _get_xtdata():
     return _xtdata
 
 
+def _get_xtdatacenter():
+    """延迟导入 xtquant.xtdatacenter"""
+    global _xtdatacenter
+    if _xtdatacenter is None:
+        try:
+            from xtquant import xtdatacenter as xtdc  # type: ignore
+            _xtdatacenter = xtdc
+        except ImportError:
+            logger.debug("xtquant.xtdatacenter 未安装，跳过 QMT 主动初始化")
+            return None
+    return _xtdatacenter
+
+
 def _normalize_code(code: str) -> str:
     """将 6 位代码转为 xtdata 格式：000001.SZ / 600000.SH"""
     code = str(code).strip().replace(".SH", "").replace(".SZ", "").replace(".BJ", "")
     code = "".join(filter(str.isdigit, code)).zfill(6)
     if not code or len(code) != 6:
         return ""
+    if code.startswith(("50", "51", "52", "56", "58")):
+        return f"{code}.SH"
     if code.startswith(("60", "68", "90")):
         return f"{code}.SH"
-    if code.startswith(("00", "30", "20", "15", "16")):
+    if code.startswith(("00", "30", "20", "15", "16", "18")):
         return f"{code}.SZ"
     if code.startswith(("8", "4", "92")):
         return f"{code}.BJ"
@@ -61,6 +78,8 @@ class QMTAdapter(DataSourceAdapter):
     def __init__(self):
         super().__init__()
         self._available: Optional[bool] = None
+        self._bootstrapped = False
+        self._sector_data_prepared = False
 
     @property
     def name(self) -> str:
@@ -77,6 +96,177 @@ class QMTAdapter(DataSourceAdapter):
         except (ValueError, TypeError):
             return None
 
+    def _get_runtime_setting(self, name: str, default: Any = None) -> Any:
+        env_value = os.getenv(name)
+        if env_value not in (None, ""):
+            return env_value
+
+        try:
+            from app.core.config import settings as app_settings
+            return getattr(app_settings, name)
+        except Exception:
+            return default
+
+    def _parse_bool(self, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        if isinstance(value, (int, float)):
+            return bool(value)
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    def _parse_list(self, value: Any) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        raw = str(value).replace(";", ",").replace("\n", ",")
+        return [item.strip() for item in raw.split(",") if item.strip()]
+
+    def _parse_port_range(self, value: Any) -> Optional[Tuple[int, int]]:
+        if value is None or value == "":
+            return None
+        if isinstance(value, (list, tuple)) and len(value) == 2:
+            try:
+                return int(value[0]), int(value[1])
+            except (TypeError, ValueError):
+                return None
+
+        text = str(value).strip()
+        delimiter = "-" if "-" in text else "," if "," in text else None
+        if not delimiter:
+            return None
+        parts = [part.strip() for part in text.split(delimiter) if part.strip()]
+        if len(parts) != 2:
+            return None
+        try:
+            return int(parts[0]), int(parts[1])
+        except ValueError:
+            return None
+
+    def _bootstrap_connection(self) -> None:
+        if self._bootstrapped:
+            return
+
+        self._bootstrapped = True
+
+        xt = _get_xtdata()
+        xtdc = _get_xtdatacenter()
+        if xt is None or xtdc is None:
+            return
+
+        data_dir = self._get_runtime_setting("QMT_DATA_DIR", "")
+        token = self._get_runtime_setting("QMT_TOKEN", "")
+        init_markets = self._parse_list(self._get_runtime_setting("QMT_INIT_MARKETS", ""))
+        optimize_addresses = self._parse_list(self._get_runtime_setting("QMT_ALLOW_OPTIMIZE_ADDRESSES", ""))
+        mirror_markets = self._parse_list(self._get_runtime_setting("QMT_KLINE_MIRROR_MARKETS", ""))
+        mirror_enabled = self._parse_bool(self._get_runtime_setting("QMT_KLINE_MIRROR_ENABLED", False))
+        start_local_service = self._parse_bool(self._get_runtime_setting("QMT_START_LOCAL_SERVICE", False))
+        listen_port = self._get_runtime_setting("QMT_LISTEN_PORT", 0)
+        listen_port_range = self._parse_port_range(self._get_runtime_setting("QMT_LISTEN_PORT_RANGE", "58620-58650"))
+
+        should_initialize = any(
+            [
+                data_dir,
+                token,
+                init_markets,
+                optimize_addresses,
+                mirror_markets,
+                mirror_enabled,
+                listen_port,
+                listen_port_range,
+            ]
+        )
+        if not should_initialize:
+            return
+
+        try:
+            if data_dir:
+                xtdc.set_data_home_dir(str(data_dir))
+            if token:
+                xtdc.set_token(str(token))
+            if optimize_addresses:
+                xtdc.set_allow_optmize_address(optimize_addresses)
+            if mirror_markets:
+                xtdc.set_kline_mirror_markets(mirror_markets)
+            elif mirror_enabled:
+                xtdc.set_kline_mirror_enabled(True)
+            if init_markets:
+                xtdc.set_init_markets(init_markets)
+
+            xtdc.init(start_local_service=start_local_service)
+
+            port = 0
+            try:
+                port = int(listen_port or 0)
+            except (TypeError, ValueError):
+                port = 0
+
+            if port > 0:
+                listen_result = xtdc.listen(port=port)
+            elif listen_port_range:
+                listen_result = xtdc.listen(port=listen_port_range)
+            else:
+                listen_result = xtdc.listen(port=(58620, 58650))
+
+            if isinstance(listen_result, tuple):
+                connect_port = int(listen_result[-1])
+            else:
+                connect_port = int(listen_result)
+
+            xt.connect(port=connect_port)
+            logger.info(f"QMT: 已根据配置初始化连接，端口 {connect_port}")
+        except Exception as e:
+            logger.warning(f"QMT: 主动初始化连接失败，将回退到现有 MiniQMT 连接: {e}")
+
+    def _prepare_sector_data(self) -> None:
+        if self._sector_data_prepared:
+            return
+
+        if not self._parse_bool(self._get_runtime_setting("QMT_AUTO_DOWNLOAD_SECTOR", True)):
+            self._sector_data_prepared = True
+            return
+
+        xt = _get_xtdata()
+        if xt is None:
+            return
+
+        try:
+            xt.download_sector_data()
+        except Exception as e:
+            logger.debug(f"QMT: 下载板块数据失败，将继续尝试读取本地缓存: {e}")
+        finally:
+            self._sector_data_prepared = True
+
+    def _download_history_if_needed(self, xt_code: str, xt_period: str) -> None:
+        if not self._parse_bool(self._get_runtime_setting("QMT_AUTO_DOWNLOAD_HISTORY", True)):
+            return
+
+        xt = _get_xtdata()
+        if xt is None:
+            return
+
+        start_time = str(self._get_runtime_setting("QMT_HISTORY_START_TIME", "") or "")
+        try:
+            xt.download_history_data(xt_code, period=xt_period, start_time=start_time, incrementally=True)
+        except TypeError:
+            try:
+                xt.download_history_data(xt_code, period=xt_period, start_time=start_time)
+            except Exception as e:
+                logger.debug(f"QMT: 自动下载历史数据失败 {xt_code}: {e}")
+        except Exception as e:
+            logger.debug(f"QMT: 自动下载历史数据失败 {xt_code}: {e}")
+
+    def _download_financial_if_needed(self, code: str, table_list: Optional[List[str]], start_time: str, end_time: str) -> None:
+        if not self._parse_bool(self._get_runtime_setting("QMT_AUTO_DOWNLOAD_FINANCIAL", False)):
+            return
+        self.download_financial_data([code], table_list=table_list, start_time=start_time, end_time=end_time)
+
+    def _is_etf_code(self, code: str) -> bool:
+        code = str(code).strip().zfill(6)
+        return code.startswith(("50", "51", "52", "56", "58", "15", "16", "18"))
+
     def is_available(self) -> bool:
         """检查 xtquant 是否可用且 MiniQMT 已连接"""
         # 快速短路：如果 QMT 在配置中未启用，直接返回 False（跳过约 2 秒连接超时）
@@ -86,6 +276,8 @@ class QMTAdapter(DataSourceAdapter):
                 return False
         except Exception:
             pass
+
+        self._bootstrap_connection()
 
         xt = _get_xtdata()
         if xt is None:
@@ -110,6 +302,7 @@ class QMTAdapter(DataSourceAdapter):
         if xt is None:
             return None
         try:
+            self._prepare_sector_data()
             # 沪深 A 股：通过板块获取
             sh_stocks = xt.get_stock_list_in_sector("沪深A股", 0) or []
             if not sh_stocks:
@@ -154,6 +347,75 @@ class QMTAdapter(DataSourceAdapter):
             return None
         except Exception as e:
             logger.error(f"QMT: 获取股票列表失败: {e}")
+            return None
+
+    def get_etf_list(self) -> Optional[pd.DataFrame]:
+        """获取 ETF 列表（通过 QMT 板块列表和代码前缀过滤）"""
+        if not self.is_available():
+            return None
+        xt = _get_xtdata()
+        if xt is None:
+            return None
+
+        try:
+            self._prepare_sector_data()
+            sector_candidates = [
+                "沪深ETF",
+                "ETF",
+                "沪市ETF",
+                "深市ETF",
+                "上证ETF",
+                "深证ETF",
+                "场内基金",
+            ]
+
+            etf_codes: List[str] = []
+            for sector_name in sector_candidates:
+                try:
+                    sector_codes = xt.get_stock_list_in_sector(sector_name, 0) or []
+                    if sector_codes:
+                        etf_codes.extend(list(sector_codes))
+                except Exception:
+                    continue
+
+            unique_codes: List[str] = []
+            seen_codes = set()
+            for xt_code in etf_codes:
+                code6 = _code_to_6digit(xt_code)
+                if not self._is_etf_code(code6):
+                    continue
+                if code6 in seen_codes:
+                    continue
+                seen_codes.add(code6)
+                unique_codes.append(xt_code)
+
+            if not unique_codes:
+                logger.warning("QMT: 未获取到 ETF 列表")
+                return None
+
+            rows = []
+            for xt_code in unique_codes:
+                code6 = _code_to_6digit(xt_code)
+                try:
+                    detail = xt.get_instrument_detail(xt_code)
+                    name = ""
+                    if detail and isinstance(detail, dict):
+                        name = detail.get("InstrumentName", "") or detail.get("name", "")
+                    elif detail and hasattr(detail, "InstrumentName"):
+                        name = getattr(detail, "InstrumentName", "")
+                    rows.append({
+                        "symbol": code6,
+                        "code": code6,
+                        "ts_code": xt_code,
+                        "name": name or code6,
+                        "fund_type": "ETF",
+                    })
+                except Exception:
+                    rows.append({"symbol": code6, "code": code6, "ts_code": xt_code, "name": code6, "fund_type": "ETF"})
+
+            return pd.DataFrame(rows) if rows else None
+        except Exception as e:
+            logger.error(f"QMT: 获取 ETF 列表失败: {e}")
             return None
 
     def get_daily_basic(self, trade_date: str) -> Optional[pd.DataFrame]:
@@ -292,6 +554,8 @@ class QMTAdapter(DataSourceAdapter):
                 "60m": "1h",
             }
             xt_period = period_map.get(period, "1d")
+
+            self._download_history_if_needed(xt_code, xt_period)
 
             # 根据官方文档，使用 get_market_data_ex 接口
             # 传入空的 field_list 表示获取所有字段
@@ -470,6 +734,8 @@ class QMTAdapter(DataSourceAdapter):
                     'Income',           # 利润表
                     'Balance',          # 资产负债表
                 ]
+
+            self._download_financial_if_needed(code, table_list, start_time, end_time)
 
             # 获取财务数据
             data = xt.get_financial_data(

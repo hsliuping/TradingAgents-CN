@@ -336,6 +336,43 @@ class UnifiedConfigManager:
             )
             data_sources.append(tushare_config)
 
+        try:
+            from app.core.config import settings as runtime_settings
+
+            qmt_enabled = bool(getattr(runtime_settings, "QMT_UNIFIED_ENABLED", False))
+            qmt_token = getattr(runtime_settings, "QMT_TOKEN", "")
+            qmt_data_dir = getattr(runtime_settings, "QMT_DATA_DIR", "")
+            qmt_config_params = {
+                "listen_port_range": getattr(runtime_settings, "QMT_LISTEN_PORT_RANGE", "58620-58650"),
+                "init_markets": getattr(runtime_settings, "QMT_INIT_MARKETS", "SH,SZ,BJ"),
+                "auto_download_history": getattr(runtime_settings, "QMT_AUTO_DOWNLOAD_HISTORY", True),
+                "auto_download_financial": getattr(runtime_settings, "QMT_AUTO_DOWNLOAD_FINANCIAL", False),
+                "auto_download_sector": getattr(runtime_settings, "QMT_AUTO_DOWNLOAD_SECTOR", True),
+            }
+            if qmt_data_dir:
+                qmt_config_params["data_dir"] = qmt_data_dir
+            if getattr(runtime_settings, "QMT_ALLOW_OPTIMIZE_ADDRESSES", ""):
+                qmt_config_params["allow_optimize_addresses"] = getattr(runtime_settings, "QMT_ALLOW_OPTIMIZE_ADDRESSES", "")
+            if getattr(runtime_settings, "QMT_KLINE_MIRROR_MARKETS", ""):
+                qmt_config_params["kline_mirror_markets"] = getattr(runtime_settings, "QMT_KLINE_MIRROR_MARKETS", "")
+            if getattr(runtime_settings, "QMT_HISTORY_START_TIME", ""):
+                qmt_config_params["history_start_time"] = getattr(runtime_settings, "QMT_HISTORY_START_TIME", "")
+
+            if qmt_enabled or qmt_token or qmt_data_dir:
+                qmt_config = DataSourceConfig(
+                    name="QMT",
+                    type=DataSourceType.QMT,
+                    api_key=qmt_token or None,
+                    endpoint="miniqmt://local",
+                    enabled=qmt_enabled,
+                    priority=2,
+                    description="QMT / MiniQMT 本地数据接口",
+                    config_params=qmt_config_params,
+                )
+                data_sources.append(qmt_config)
+        except Exception:
+            pass
+
         # 按优先级排序
         data_sources.sort(key=lambda x: x.priority, reverse=True)
         return data_sources
@@ -403,6 +440,43 @@ class UnifiedConfigManager:
                 description="Tushare专业金融数据接口"
             )
             data_sources.append(tushare_config)
+
+        try:
+            from app.core.config import settings as runtime_settings
+
+            qmt_enabled = bool(getattr(runtime_settings, "QMT_UNIFIED_ENABLED", False))
+            qmt_token = getattr(runtime_settings, "QMT_TOKEN", "")
+            qmt_data_dir = getattr(runtime_settings, "QMT_DATA_DIR", "")
+            qmt_config_params = {
+                "listen_port_range": getattr(runtime_settings, "QMT_LISTEN_PORT_RANGE", "58620-58650"),
+                "init_markets": getattr(runtime_settings, "QMT_INIT_MARKETS", "SH,SZ,BJ"),
+                "auto_download_history": getattr(runtime_settings, "QMT_AUTO_DOWNLOAD_HISTORY", True),
+                "auto_download_financial": getattr(runtime_settings, "QMT_AUTO_DOWNLOAD_FINANCIAL", False),
+                "auto_download_sector": getattr(runtime_settings, "QMT_AUTO_DOWNLOAD_SECTOR", True),
+            }
+            if qmt_data_dir:
+                qmt_config_params["data_dir"] = qmt_data_dir
+            if getattr(runtime_settings, "QMT_ALLOW_OPTIMIZE_ADDRESSES", ""):
+                qmt_config_params["allow_optimize_addresses"] = getattr(runtime_settings, "QMT_ALLOW_OPTIMIZE_ADDRESSES", "")
+            if getattr(runtime_settings, "QMT_KLINE_MIRROR_MARKETS", ""):
+                qmt_config_params["kline_mirror_markets"] = getattr(runtime_settings, "QMT_KLINE_MIRROR_MARKETS", "")
+            if getattr(runtime_settings, "QMT_HISTORY_START_TIME", ""):
+                qmt_config_params["history_start_time"] = getattr(runtime_settings, "QMT_HISTORY_START_TIME", "")
+
+            if qmt_enabled or qmt_token or qmt_data_dir:
+                qmt_config = DataSourceConfig(
+                    name="QMT",
+                    type=DataSourceType.QMT,
+                    api_key=qmt_token or None,
+                    endpoint="miniqmt://local",
+                    enabled=qmt_enabled,
+                    priority=2,
+                    description="QMT / MiniQMT 本地数据接口",
+                    config_params=qmt_config_params,
+                )
+                data_sources.append(qmt_config)
+        except Exception:
+            pass
 
         # Finnhub (如果有配置)
         if settings.get("finnhub_api_key"):

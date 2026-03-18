@@ -88,7 +88,7 @@ class FinancialDataService:
         Args:
             symbol: 股票代码
             financial_data: 财务数据字典
-            data_source: 数据源 (tushare/akshare/baostock)
+            data_source: 数据源 (tushare/akshare/baostock/qmt)
             market: 市场类型 (CN/HK/US)
             report_period: 报告期 (YYYYMMDD)
             report_type: 报告类型 (quarterly/annual)
@@ -312,6 +312,10 @@ class FinancialDataService:
                 return self._standardize_baostock_data(
                     symbol, financial_data, market, report_period, report_type, now
                 )
+            elif data_source == "qmt":
+                return self._standardize_qmt_data(
+                    symbol, financial_data, market, report_period, report_type, now
+                )
             else:
                 logger.warning(f"⚠️ 不支持的数据源: {data_source}")
                 return None
@@ -410,6 +414,36 @@ class FinancialDataService:
 
         # 合并BaoStock财务数据
         base_data.update(financial_data)
+        return base_data
+
+    def _standardize_qmt_data(
+        self,
+        symbol: str,
+        financial_data: Dict[str, Any],
+        market: str,
+        report_period: str,
+        report_type: str,
+        now: datetime
+    ) -> Dict[str, Any]:
+        """标准化QMT财务数据"""
+        base_data = {
+            "code": symbol,
+            "symbol": symbol,
+            "full_symbol": self._get_full_symbol(symbol, market),
+            "market": market,
+            "report_period": report_period or financial_data.get("report_period") or self._generate_current_period(),
+            "report_type": report_type or financial_data.get("report_type", "quarterly"),
+            "data_source": "qmt",
+            "created_at": now,
+            "updated_at": now,
+            "version": 1
+        }
+
+        exclude_fields = {"symbol", "data_source", "updated_at"}
+        for key, value in financial_data.items():
+            if key not in exclude_fields:
+                base_data[key] = value
+
         return base_data
     
     def _get_full_symbol(self, symbol: str, market: str) -> str:

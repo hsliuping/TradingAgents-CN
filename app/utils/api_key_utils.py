@@ -115,6 +115,7 @@ def get_env_api_key_for_datasource(ds_type: str) -> Optional[str]:
     # 数据源类型到环境变量名的映射
     env_key_map = {
         "tushare": "TUSHARE_TOKEN",
+        "qmt": "QMT_TOKEN",
         "finnhub": "FINNHUB_API_KEY",
         "polygon": "POLYGON_API_KEY",
         "iex": "IEX_API_KEY",
