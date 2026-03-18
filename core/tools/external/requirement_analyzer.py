@@ -38,6 +38,8 @@ from .skill_spec import (
 
 logger = logging.getLogger(__name__)
 
+ANALYZER_LLM_TIMEOUT_SECONDS = 180
+
 
 SKILL_SEMANTICS_GUIDANCE = (
     "Skill 的语义：Skill 是一个可复用、可验证、边界清晰的功能实现单元，"
@@ -81,11 +83,25 @@ class RequirementAnalyzer:
     def _get_client(self) -> UnifiedLLMClient:
         """懒加载 LLM 客户端"""
         if self._client is None:
-            kwargs = {}
+            kwargs = {"timeout": ANALYZER_LLM_TIMEOUT_SECONDS}
             if self._model:
                 kwargs["model"] = self._model
             self._client = UnifiedLLMClient.from_provider(self._provider, **kwargs)
+        else:
+            adapter = getattr(self._client, "_adapter", None)
+            config = getattr(adapter, "config", None)
+            if config and getattr(config, "timeout", 0) < ANALYZER_LLM_TIMEOUT_SECONDS:
+                config.timeout = ANALYZER_LLM_TIMEOUT_SECONDS
+                try:
+                    adapter.initialize()
+                except Exception as e:
+                    logger.warning(f"更新需求分析 LLM 超时时间失败: {e}")
         return self._client
+
+    @staticmethod
+    def _raise_analysis_error(stage: str, error: Optional[Exception] = None) -> None:
+        detail = str(error) if error else "LLM 未返回有效内容"
+        raise RuntimeError(f"{stage}失败：{detail}")
 
     @staticmethod
     def _extract_tool_id_hint(text: str) -> str:
@@ -391,6 +407,23 @@ class RequirementAnalyzer:
         ])
         return "\n".join(lines)
 
+    @staticmethod
+    def _build_handoff_guardrails(session: SkillCreationSession) -> str:
+        context = session.handoff_context
+        if not context:
+            return ""
+
+        target_capability = context.target_capability or "上游指定能力"
+        source_name = context.source_name or context.source or "上游 Agent 创建流程"
+        return (
+            "## 上游交接约束（必须遵守）\n"
+            f"- 这次需求来自 {source_name} 的能力缺口交接，不是普通的从零自由脑暴。\n"
+            f"- 你必须围绕上游指定的目标能力“{target_capability}”继续收敛，除非用户明确改题。\n"
+            "- 不要把上游已经确认的目标能力偷偷改写成另一个你更熟悉的实现，比如把“估值分析”擅自收缩成“PB估值区间计算”。\n"
+            "- 若你判断完整目标更像 Agent/Workflow 而不是单个 Skill，要明确指出这是 Agent 级目标，并把当前 Skill 只定位为其中一个确定性的子能力；不要假装整个目标已经被一个 Skill 完整覆盖。\n"
+            "- 若存在可复用的现有 Skill，应优先指出复用方案；若不存在，再定义新增 Skill 的最小职责边界。\n"
+        )
+
     def process_user_input(
         self,
         session: SkillCreationSession,
@@ -597,6 +630,7 @@ class RequirementAnalyzer:
         client = self._get_client()
         catalog_context = self._build_catalog_context(user_message)
         handoff_context = self._build_handoff_context_text(session)
+        handoff_guardrails = self._build_handoff_guardrails(session)
         prompt = (
             "你是 Skill 需求分析专家，不仅理解用户需求，更要主动给出专业建议。\n\n"
             "## 项目背景\n"
@@ -617,16 +651,20 @@ class RequirementAnalyzer:
             "   - 优先在系统当前可复用的本地集合/外部来源里做建议，不要泛泛推荐一长串不在系统内的接口。\n"
             "   - 不要只说「需通过参数传入数据源」而不给建议，这样用户会不知道如何操作。\n\n"
             "5. 提出其他需要确认的问题\n\n"
+            f"{handoff_guardrails}\n"
             f"上游交接上下文:\n{handoff_context or '无'}\n\n"
             f"当前按需求命中的数据上下文:\n{catalog_context}\n\n"
             f"用户描述: {user_message}"
         )
         try:
             response = client.chat([Message(role="user", content=prompt)])
-            return response.content or self._build_fallback_round1_response(user_message)
+            content = (response.content or "").strip()
+            if content:
+                return content
+            self._raise_analysis_error("第1轮需求分析")
         except Exception as e:
-            logger.warning(f"第1轮需求分析失败，使用降级响应: {e}")
-            return self._build_fallback_round1_response(user_message)
+            logger.error(f"第1轮需求分析失败: {e}")
+            self._raise_analysis_error("第1轮需求分析", e)
 
     def _build_round2_response(
         self, session: SkillCreationSession, user_message: str
@@ -636,6 +674,7 @@ class RequirementAnalyzer:
         client = self._get_client()
         catalog_context = self._build_catalog_context(history)
         handoff_context = self._build_handoff_context_text(session)
+        handoff_guardrails = self._build_handoff_guardrails(session)
         prompt = (
             "你是 Skill 需求分析专家，所在项目是 **TradingAgents-CN**（A股/港股/美股多智能体股票分析平台）。"
             "正在进行第 2 轮技术细化。\n\n"
@@ -647,16 +686,20 @@ class RequirementAnalyzer:
             "   - 推荐时优先引用当前系统已整理的本地集合和外部来源，不要脱离系统现状给建议。\n"
             "4. 给出推荐方案让用户选择（而不是问开放性问题）\n"
             "5. 列出最终的参数和返回字段清单\n\n"
+            f"{handoff_guardrails}\n"
             f"上游交接上下文:\n{handoff_context or '无'}\n\n"
             f"当前按需求命中的数据上下文:\n{catalog_context}\n\n"
             f"对话历史:\n{history}"
         )
         try:
             response = client.chat([Message(role="user", content=prompt)])
-            return response.content or self._build_fallback_round2_response(session, user_message)
+            content = (response.content or "").strip()
+            if content:
+                return content
+            self._raise_analysis_error("第2轮需求分析")
         except Exception as e:
-            logger.warning(f"第2轮需求分析失败，使用降级响应: {e}")
-            return self._build_fallback_round2_response(session, user_message)
+            logger.error(f"第2轮需求分析失败: {e}")
+            self._raise_analysis_error("第2轮需求分析", e)
 
     def _build_spec_confirmation(
         self, session: SkillCreationSession, user_message: str
@@ -666,6 +709,7 @@ class RequirementAnalyzer:
         client = self._get_client()
         catalog_context = self._build_catalog_context(history)
         handoff_context = self._build_handoff_context_text(session)
+        handoff_guardrails = self._build_handoff_guardrails(session)
         prompt = (
             "你是 Skill 需求分析专家，请根据所有对话内容生成最终的规格确认摘要。\n"
             "用以下格式输出：\n"
@@ -682,16 +726,20 @@ class RequirementAnalyzer:
             "- **约束**: 列表\n\n"
             "要求：推荐复用项必须优先引用当前系统已命中的集合与外部来源，不要编造系统里没有整理过的数据源。\n\n"
             "最后问用户: '以上规格是否正确？确认后将开始生成代码。'\n\n"
+            f"{handoff_guardrails}\n"
             f"上游交接上下文:\n{handoff_context or '无'}\n\n"
             f"当前按需求命中的数据上下文:\n{catalog_context}\n\n"
             f"对话历史:\n{history}"
         )
         try:
             response = client.chat([Message(role="user", content=prompt)])
-            return response.content or self._build_fallback_spec_confirmation(history)
+            content = (response.content or "").strip()
+            if content:
+                return content
+            self._raise_analysis_error("规格确认摘要生成")
         except Exception as e:
-            logger.warning(f"规格确认摘要生成失败，使用降级响应: {e}")
-            return self._build_fallback_spec_confirmation(history)
+            logger.error(f"规格确认摘要生成失败: {e}")
+            self._raise_analysis_error("规格确认摘要生成", e)
 
     @staticmethod
     def _build_boundary_warning(check: BoundaryCheck) -> str:
@@ -732,6 +780,13 @@ class RequirementAnalyzer:
         """通过 LLM 将对话转化为结构化 SkillSpec"""
         client = self._get_client()
         catalog_context = self._build_catalog_context(conversation)
+        handoff_guardrails = ""
+        if "[系统交接上下文]:" in conversation:
+            handoff_guardrails = (
+                "6. 这次会话带有上游交接上下文，必须保留上游指定能力，不要把它改写成另一个更窄、更偷懒的实现。\n"
+                "7. 若原目标显然是 Agent/Workflow 级目标，当前 SkillSpec 只能定义为其中一个确定性的子能力，并在 description/constraints 中明确这一点。\n"
+                "8. 禁止把“估值分析”“研究分析”“多维判断”这类目标直接偷换成单一 PB/PE 指标计算器，除非用户明确只要这个子功能。\n\n"
+            )
         prompt = (
             "你是 Skill 规格生成器。请根据以下对话内容，"
             "提取出一个结构化的 Skill 规格（JSON 格式）。\n\n"
@@ -741,6 +796,7 @@ class RequirementAnalyzer:
             "3. data_source 填写对话中确定的主数据源标识；若实现会组合紧密相关的数据来源，则填写主数据源，并在 constraints 中说明附加来源或降级策略。\n"
             "4. 不要写「需通过参数传入」等模糊描述。\n\n"
             "5. 优先让 spec 与当前系统可复用的本地集合、外部来源保持一致；若本地可满足，不要强行指定外部源。\n\n"
+            f"{handoff_guardrails}"
             f"{SKILL_SEMANTICS_GUIDANCE}\n\n"
             f"当前按需求命中的数据上下文:\n{catalog_context}\n\n"
             f"对话内容:\n{conversation}\n\n"
@@ -771,6 +827,8 @@ class RequirementAnalyzer:
             if json_match:
                 data = json.loads(json_match.group())
                 return SkillSpec(**data)
+            self._raise_analysis_error("SkillSpec 生成", ValueError("LLM 未返回合法 JSON"))
         except Exception as e:
             logger.error(f"SkillSpec 生成失败: {e}")
-        return self._generate_fallback_spec(conversation)
+            self._raise_analysis_error("SkillSpec 生成", e)
+        return None

@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from core.llm import Message
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from core.tools.external import (
@@ -75,6 +76,226 @@ class SkillGenerationService:
         if session is not None:
             conversation = self._analyzer._collect_conversation(session)
         return self._analyzer.build_recommendations(conversation=conversation)
+
+    @staticmethod
+    def _get_last_generated_code(pipeline_result: Optional[PipelineResult]) -> str:
+        if not pipeline_result:
+            return ""
+        if pipeline_result.final_code:
+            return pipeline_result.final_code
+        for iteration in reversed(pipeline_result.iterations or []):
+            generated = iteration.generated_code
+            if generated and generated.code:
+                return generated.code
+        return ""
+
+    @staticmethod
+    def _build_pipeline_failure_feedback(
+        pipeline_result: Optional[PipelineResult],
+        user_feedback: str = "",
+    ) -> str:
+        if not pipeline_result:
+            return user_feedback.strip()
+
+        parts: List[str] = ["=== 上一轮生成失败信息 ==="]
+        if pipeline_result.error:
+            parts.append(f"最终错误：{pipeline_result.error}")
+
+        for iteration in pipeline_result.iterations or []:
+            parts.append(f"\n[第{iteration.round_number}轮 | 决策={iteration.decision or 'UNKNOWN'}]")
+            if iteration.validation and iteration.validation.errors:
+                parts.append("静态验证问题：")
+                parts.extend(f"- {item}" for item in iteration.validation.errors[:5])
+            if iteration.sandbox and not iteration.sandbox.success:
+                parts.append(f"沙箱执行问题：{iteration.sandbox.error or '未知错误'}")
+            if iteration.eval_score:
+                parts.append(
+                    "评估分数："
+                    f"total={iteration.eval_score.total}, "
+                    f"executability={iteration.eval_score.executability}, "
+                    f"authenticity={iteration.eval_score.authenticity}, "
+                    f"completeness={iteration.eval_score.completeness}, "
+                    f"relevance={iteration.eval_score.relevance}, "
+                    f"format_quality={iteration.eval_score.format_quality}"
+                )
+            if iteration.feedback:
+                parts.append(f"系统反馈：{iteration.feedback}")
+
+        if user_feedback.strip():
+            parts.append(f"\n=== 用户补充修正意见 ===\n{user_feedback.strip()}")
+
+        return "\n".join(parts)
+
+    @staticmethod
+    def _build_repair_plan_fallback(
+        spec: SkillSpec,
+        feedback: str,
+        pipeline_feedback: str,
+    ) -> str:
+        return "\n".join([
+            "## 我理解到的问题",
+            f"- 当前 Skill 的目标仍然是：{spec.description}",
+            f"- 你强调的新问题是：{feedback.strip() or '请按失败信息修正'}",
+            "- 我会优先修复静态校验、沙箱执行和评分阶段已经暴露出的确定性错误，不会改动已确认的需求边界。",
+            "",
+            "## 修正计划",
+            "1. 先根据上一轮失败信息定位最先导致失败的根因，优先消除阻断执行的问题。",
+            "2. 保留现有 Skill 规格和目标输出，避免把修正过程扩展成新的需求。",
+            "3. 基于上一轮代码定向修改，而不是重新从零生成。",
+            "4. 对关键输入、关键数据缺失场景显式返回 error / invalid，避免用伪造默认值继续输出。",
+            "5. 修正后重新通过静态校验、沙箱执行和质量评估。",
+            "",
+            "## 重新生成时的重点检查项",
+            pipeline_feedback.strip() or "- 以上一轮失败会话的静态验证、沙箱和评估错误为主进行逐项修复。",
+            "",
+            "如果这份计划没有偏差，你再确认让我按这个计划重新生成。",
+        ])
+
+    def _generate_repair_plan_message(
+        self,
+        session: SkillCreationSession,
+        feedback: str,
+    ) -> str:
+        spec = session.spec
+        if not spec:
+            return "当前会话还没有可用的 Skill 规格，无法生成修正计划。"
+
+        pipeline_feedback = self._build_pipeline_failure_feedback(session.pipeline_result, feedback)
+        last_code = self._get_last_generated_code(session.pipeline_result)
+        code_excerpt = (last_code or "")[:12000]
+        prompt = f"""
+你现在是 Skill 生成失败后的修正协作者。先不要输出代码，而是先向用户说明：
+1. 你理解到上一轮生成哪里出错了
+2. 你准备怎么修
+3. 重新生成时会重点检查什么
+
+请严格遵守：
+- 不要重新定义需求，不要扩展到新的功能范围
+- 不要输出完整代码
+- 不要承诺无法验证的内容
+- 用中文回答
+- 输出结构固定为：
+  ## 我理解到的问题
+  ## 修正计划
+  ## 重新生成时的重点检查项
+
+=== 当前 Skill 规格 ===
+tool_id: {spec.tool_id}
+display_name: {spec.display_name}
+description: {spec.description}
+category: {spec.category}
+data_source: {spec.data_source}
+test_input: {spec.test_input}
+
+=== 上一轮失败信息 ===
+{pipeline_feedback}
+
+=== 上一轮最后生成代码（截断） ===
+{code_excerpt or '无'}
+
+请给出一份让用户可以确认的修正计划。
+""".strip()
+
+        try:
+            client = self._analyzer._get_client()
+            response = client.chat([Message(role="user", content=prompt)])
+            content = (getattr(response, "content", "") or "").strip()
+            if content:
+                return content
+        except Exception as e:
+            logger.warning(f"生成修正计划失败，使用回退方案: {e}")
+
+        return self._build_repair_plan_fallback(spec, feedback, pipeline_feedback)
+
+    async def _launch_pipeline_task(
+        self,
+        *,
+        session: SkillCreationSession,
+        spec: SkillSpec,
+        initial_feedback: str = "",
+        initial_code: str = "",
+    ) -> Dict[str, Any]:
+        session.status = SessionStatus.GENERATING
+        session.pipeline_result = None
+        await self._save_session(session)
+        await self._db[SESSION_COLLECTION].update_one(
+            {"session_id": session.session_id},
+            {
+                "$set": {
+                    "pipeline_stage": "code_generation",
+                    "pipeline_message": "准备开始生成...",
+                    "pipeline_iteration": 0,
+                    "pipeline_progress": 0,
+                    "updated_at": datetime.utcnow(),
+                }
+            },
+        )
+
+        from app.core.database import get_mongo_db_sync
+        sync_db = get_mongo_db_sync()
+        session_id = session.session_id
+
+        def _progress_cb(stage: str, message: str, iteration: int, progress: float):
+            try:
+                sync_db[SESSION_COLLECTION].update_one(
+                    {"session_id": session_id},
+                    {
+                        "$set": {
+                            "pipeline_stage": stage,
+                            "pipeline_message": message,
+                            "pipeline_iteration": iteration,
+                            "pipeline_progress": progress,
+                            "updated_at": datetime.utcnow(),
+                        }
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"更新 pipeline 进度失败: {e}")
+
+        async def _run_pipeline():
+            try:
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self._controller.run(
+                        spec,
+                        initial_feedback=initial_feedback,
+                        initial_code=initial_code,
+                        progress_callback=_progress_cb,
+                    ),
+                )
+                session.status = SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
+                session.pipeline_result = result
+                await self._save_session(session)
+
+                if result.success:
+                    await self._save_skill(session, spec, result)
+            except Exception as e:
+                logger.error(f"管线执行异常: {e}", exc_info=True)
+                await self._db[SESSION_COLLECTION].update_one(
+                    {"session_id": session_id},
+                    {
+                        "$set": {
+                            "status": "failed",
+                            "pipeline_stage": "error",
+                            "pipeline_message": str(e),
+                            "updated_at": datetime.utcnow(),
+                        }
+                    },
+                )
+
+        asyncio.create_task(_run_pipeline())
+
+        return {
+            "status": "generating",
+            "session_id": session_id,
+            "skill_id": None,
+            "spec": spec.model_dump() if spec else None,
+            "success": False,
+            "total_rounds": 0,
+            "total_time": 0,
+            "final_score": None,
+            "error": None,
+        }
 
     @staticmethod
     def _has_generation_context(context: Optional[Dict[str, Any]]) -> bool:
@@ -252,74 +473,87 @@ class SkillGenerationService:
                 "message": "规格生成失败，请重新描述需求",
             }
 
-        # 更新会话状态为生成中
-        session.status = SessionStatus.GENERATING
+        return await self._launch_pipeline_task(session=session, spec=spec)
+
+    async def repair_session(
+        self,
+        session_id: str,
+        feedback: str,
+        repair_plan: str = "",
+    ) -> Dict[str, Any]:
+        """
+        基于当前失败会话重新修正并生成。
+
+        使用上一轮的失败原因、最后生成代码和用户补充意见作为新的初始反馈。
+        """
+        session = await self._load_session(session_id)
+        if not session:
+            raise ValueError(f"会话 {session_id} 不存在")
+        if not session.spec_confirmed or not session.spec:
+            raise ValueError("当前会话还没有确认规格，无法进入修正模式")
+        if session.status != SessionStatus.FAILED:
+            raise ValueError("只有失败的创建会话才能确认修正并重跑")
+
+        merged_feedback = feedback.strip()
+        if repair_plan.strip():
+            merged_feedback = (
+                f"{merged_feedback}\n\n=== 已确认的修正计划 ===\n{repair_plan.strip()}"
+            )
+
+        session.rounds.append(ConversationRound(
+            round_number=len(session.rounds) + 1,
+            user_message=f"[修正] {feedback}",
+            ai_message=(
+                "已确认修正计划，开始基于失败原因重新生成..."
+                if repair_plan.strip() else
+                "已接收修正意见，开始基于失败原因重新生成..."
+            ),
+        ))
+
+        initial_feedback = self._build_pipeline_failure_feedback(session.pipeline_result, merged_feedback)
+        initial_code = self._get_last_generated_code(session.pipeline_result)
+
+        return await self._launch_pipeline_task(
+            session=session,
+            spec=session.spec,
+            initial_feedback=initial_feedback,
+            initial_code=initial_code,
+        )
+
+    async def preview_repair_session(
+        self,
+        session_id: str,
+        feedback: str,
+    ) -> Dict[str, Any]:
+        """
+        先生成 AI 修正计划，等待用户确认后再重跑。
+        """
+        session = await self._load_session(session_id)
+        if not session:
+            raise ValueError(f"会话 {session_id} 不存在")
+        if not session.spec_confirmed or not session.spec:
+            raise ValueError("当前会话还没有确认规格，无法生成修正计划")
+        if session.status != SessionStatus.FAILED:
+            raise ValueError("只有失败的创建会话才能先生成修正计划")
+
+        ai_message = await asyncio.get_event_loop().run_in_executor(
+            None,
+            self._generate_repair_plan_message,
+            session,
+            feedback,
+        )
+
+        session.rounds.append(ConversationRound(
+            round_number=len(session.rounds) + 1,
+            user_message=f"[修正讨论] {feedback}",
+            ai_message=ai_message,
+        ))
         await self._save_session(session)
 
-        # 定义进度回调：使用同步 MongoDB 在 executor 线程中更新文档
-        from app.core.database import get_mongo_db_sync
-        sync_db = get_mongo_db_sync()
-
-        def _progress_cb(stage: str, message: str, iteration: int, progress: float):
-            try:
-                sync_db[SESSION_COLLECTION].update_one(
-                    {"session_id": session_id},
-                    {
-                        "$set": {
-                            "pipeline_stage": stage,
-                            "pipeline_message": message,
-                            "pipeline_iteration": iteration,
-                            "pipeline_progress": progress,
-                            "updated_at": datetime.utcnow(),
-                        }
-                    },
-                )
-            except Exception as e:
-                logger.warning(f"更新 pipeline 进度失败: {e}")
-
-        # 在后台执行管线，立即返回
-        async def _run_pipeline():
-            try:
-                result = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: self._controller.run(
-                        spec, progress_callback=_progress_cb
-                    ),
-                )
-                session.status = (
-                    SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
-                )
-                session.pipeline_result = result
-                await self._save_session(session)
-
-                if result.success:
-                    await self._save_skill(session, spec, result)
-            except Exception as e:
-                logger.error(f"管线执行异常: {e}", exc_info=True)
-                await self._db[SESSION_COLLECTION].update_one(
-                    {"session_id": session_id},
-                    {
-                        "$set": {
-                            "status": "failed",
-                            "pipeline_stage": "error",
-                            "pipeline_message": str(e),
-                            "updated_at": datetime.utcnow(),
-                        }
-                    },
-                )
-
-        asyncio.create_task(_run_pipeline())
-
         return {
-            "status": "generating",
+            "status": "repair-planned",
             "session_id": session_id,
-            "skill_id": None,
-            "spec": spec.model_dump() if spec else None,
-            "success": False,
-            "total_rounds": 0,
-            "total_time": 0,
-            "final_score": None,
-            "error": None,
+            "ai_message": ai_message,
         }
 
     # ==================== Skill 管理 ====================

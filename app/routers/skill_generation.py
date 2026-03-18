@@ -68,6 +68,12 @@ class OptimizeSkillRequest(BaseModel):
     feedback: str = Field(..., min_length=2, description="优化需求描述")
 
 
+class RepairSessionRequest(BaseModel):
+    """基于失败结果修正当前创建会话"""
+    feedback: str = Field(..., min_length=2, description="告诉 AI 本轮生成哪里有问题，以及你希望怎么改")
+    repair_plan: Optional[str] = Field(default="", description="用户确认通过的修正计划文本")
+
+
 # =============================================================================
 # 辅助函数
 # =============================================================================
@@ -281,6 +287,42 @@ async def confirm_spec(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"❌ 规格确认失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sessions/{session_id}/repair")
+async def repair_session(
+    session_id: str,
+    req: RepairSessionRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """当生成/验证失败后，基于失败原因和用户反馈重新修正并生成"""
+    try:
+        svc = await _get_service_with_llm(db)
+        result = await svc.repair_session(session_id, req.feedback, req.repair_plan or "")
+        return ok(result)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ 会话修正失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sessions/{session_id}/repair-plan")
+async def preview_repair_session(
+    session_id: str,
+    req: RepairSessionRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """失败后先生成 AI 修正计划，待用户确认后再触发重跑"""
+    try:
+        svc = await _get_service_with_llm(db)
+        result = await svc.preview_repair_session(session_id, req.feedback)
+        return ok(result)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ 生成修正计划失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

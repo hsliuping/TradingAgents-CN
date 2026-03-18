@@ -1904,6 +1904,9 @@ const buildToolDraftSkillDescription = (toolDraft: AgentWorkshopToolingPlanItem)
   const gapNotes = gapReport.value?.blocking_gaps || []
   const recommendations = gapReport.value?.build_recommendations || []
   const toolHints = version?.required_tools || []
+  const responsibilityLines = (spec?.responsibilities || []).map(item => `- ${item}`)
+  const specOutputLines = (spec?.outputs || []).map(item => `- ${item}`)
+  const nonGoalLines = (spec?.non_goals || []).map(item => `- ${item}`)
   const inputLines = (toolDraft.inputs || []).map(field => `- ${field.name}: ${field.type}${field.required ? '，必填' : '，可选'}${field.description ? `，${field.description}` : ''}`)
   const outputLines = (toolDraft.outputs || []).map(field => `- ${field.name}: ${field.type}${field.description ? `，${field.description}` : ''}`)
 
@@ -1912,6 +1915,9 @@ const buildToolDraftSkillDescription = (toolDraft: AgentWorkshopToolingPlanItem)
     spec?.name ? `它服务于 Agent：${spec.name}。` : '',
     spec?.primary_goal ? `Agent 目标：${spec.primary_goal}` : '',
     spec?.domain ? `业务领域：${spec.domain}` : '',
+    responsibilityLines.length ? `Agent 已确认职责：\n${responsibilityLines.join('\n')}` : '',
+    specOutputLines.length ? `Agent 期望输出：\n${specOutputLines.join('\n')}` : '',
+    nonGoalLines.length ? `Agent 明确非目标：\n${nonGoalLines.join('\n')}` : '',
     toolHints.length ? `当前 Agent 已绑定工具：${toolHints.join('、')}` : '',
     gapNotes.length ? `当前识别到的关键缺口：${gapNotes.slice(0, 3).join('；')}` : '',
     recommendations.length ? `实现建议：${recommendations.slice(0, 3).join('；')}` : '',
@@ -1934,10 +1940,16 @@ const buildSkillGenerationDescription = (target: string | AgentWorkshopToolingPl
 
   const skillName = (typeof target === 'string' ? target : (target.tool_name || target.tool_id || '')).trim()
   const spec = displaySpec.value
+  const responsibilityLines = (spec?.responsibilities || []).map(item => `- ${item}`)
+  const specOutputLines = (spec?.outputs || []).map(item => `- ${item}`)
+  const nonGoalLines = (spec?.non_goals || []).map(item => `- ${item}`)
   return [
     `我要补齐一个 Agent 可直接调用的执行能力：${skillName}。`,
     spec?.name ? `它服务于 Agent：${spec.name}。` : '',
     spec?.primary_goal ? `Agent 目标：${spec.primary_goal}` : '',
+    responsibilityLines.length ? `Agent 已确认职责：\n${responsibilityLines.join('\n')}` : '',
+    specOutputLines.length ? `Agent 期望输出：\n${specOutputLines.join('\n')}` : '',
+    nonGoalLines.length ? `Agent 明确非目标：\n${nonGoalLines.join('\n')}` : '',
     '请先判断这项能力是否可以复用现有工具或已有 Skill；如果不能，再把它澄清成一个新增的最小实现单元，并主动收敛职责边界，不要泛化成过大的能力集合。',
   ].filter(Boolean).join('\n')
 }
@@ -1956,7 +1968,7 @@ const goToSkillWorkshop = (target?: string | AgentWorkshopToolingPlanItem) => {
       from_agent_workshop: selectedSpecId.value || '',
       source_name: selectedSpecName.value || '',
       skill_name: typeof target === 'string' ? target : (target?.tool_id || target?.tool_name || ''),
-      handoff_intent: '先判断复用已有能力还是新增最小实现单元，再决定是否需要独立 Skill。',
+      handoff_intent: '当前是从 Agent 创建流程里补能力缺口，不是普通 Skill 脑暴。必须优先保留上游目标能力；若需要拆成 Skill，只能定义成该 Agent 能力里的最小确定性子能力。',
     }
   })
 }
@@ -1978,7 +1990,7 @@ const handleCreateSkillSession = async (target: string | AgentWorkshopToolingPla
         source_spec_id: selectedSpecId.value || '',
         source_name: selectedSpecName.value || '',
         target_capability: normalizedSkillName,
-        handoff_intent: '先判断复用已有能力还是新增最小实现单元，再决定是否需要独立 Skill。',
+        handoff_intent: '当前是从 Agent 创建流程里补能力缺口，不是普通 Skill 脑暴。必须优先保留上游目标能力；若需要拆成 Skill，只能定义成该 Agent 能力里的最小确定性子能力。',
       },
     })
     ElMessage.success(`已为“${normalizedSkillName}”创建能力会话`)
