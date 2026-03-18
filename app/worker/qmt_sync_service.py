@@ -10,10 +10,14 @@ QMT (迅投 MiniQMT) 数据同步服务
 """
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
+import pandas as pd
 
 from app.core.database import get_mongo_db
+from app.core.config import settings
+from app.services.historical_data_service import get_historical_data_service
+from app.services.financial_data_service import get_financial_data_service
 from app.services.data_sources.qmt_adapter import QMTAdapter
 
 logger = logging.getLogger(__name__)
@@ -33,6 +37,8 @@ class QMTSyncService:
     def __init__(self):
         self.adapter = QMTAdapter()
         self.db = None
+        self.historical_service = None
+        self.financial_service = None
         self.batch_size = 200
         self._current_job_id = None
 
@@ -40,12 +46,105 @@ class QMTSyncService:
         """初始化同步服务"""
         try:
             self.db = get_mongo_db()
+            self.historical_service = await get_historical_data_service()
+            self.financial_service = await get_financial_data_service()
             if not self.adapter.is_available():
                 raise RuntimeError("❌ QMT 不可用，请确保 MiniQMT 客户端已启动")
             logger.info("✅ QMT 同步服务初始化完成")
         except Exception as e:
             logger.error(f"❌ QMT 同步服务初始化失败: {e}")
             raise
+
+    async def _get_qmt_symbols(self, symbols: Optional[List[str]] = None) -> List[str]:
+        if symbols:
+            return [str(symbol).zfill(6) for symbol in symbols if str(symbol).strip()]
+
+        db_symbols = []
+        cursor = self.db.stock_basic_info.find({"source": "qmt"}, {"code": 1})
+        async for doc in cursor:
+            code = str(doc.get("code", "")).zfill(6)
+            if len(code) == 6:
+                db_symbols.append(code)
+
+        if db_symbols:
+            return db_symbols
+
+        df = self.adapter.get_stock_list()
+        if df is None or df.empty:
+            return []
+
+        return [str(code).zfill(6) for code in df["symbol"].tolist() if str(code).strip()]
+
+    def _normalize_period(self, period: str) -> str:
+        period_map = {
+            "daily": "day",
+            "weekly": "week",
+            "monthly": "month",
+            "day": "day",
+            "week": "week",
+            "month": "month",
+        }
+        return period_map.get(period, period)
+
+    def _normalize_financial_period(self, value: Any, fallback_index: Any = None) -> str:
+        if value is None or value == "":
+            value = fallback_index
+        if value is None or value == "":
+            return datetime.utcnow().strftime("%Y%m%d")
+        try:
+            parsed = pd.to_datetime(value)
+            return parsed.strftime("%Y%m%d")
+        except Exception:
+            text = str(value).strip().replace("-", "").replace("/", "")
+            digits = "".join(ch for ch in text if ch.isdigit())
+            if len(digits) >= 8:
+                return digits[:8]
+            return datetime.utcnow().strftime("%Y%m%d")
+
+    def _build_financial_payloads(self, symbol: str, financial_tables: Dict[str, pd.DataFrame]) -> List[Dict[str, Any]]:
+        grouped_payloads: Dict[str, Dict[str, Any]] = {}
+        period_fields = [
+            "report_period", "report_time", "m_timetag", "endDate", "end_date",
+            "REPORT_PERIOD", "REPORT_TIME", "publish_date", "announce_time", "ann_date"
+        ]
+
+        for table_name, frame in financial_tables.items():
+            if frame is None or frame.empty:
+                continue
+
+            normalized_frame = frame.copy()
+            for index_value, row in normalized_frame.iterrows():
+                row_dict = {}
+                for key, value in row.items():
+                    if hasattr(value, "item"):
+                        try:
+                            value = value.item()
+                        except Exception:
+                            pass
+                    if pd.isna(value):
+                        continue
+                    row_dict[str(key)] = value
+
+                period_value = None
+                for field_name in period_fields:
+                    if field_name in row_dict and row_dict[field_name] not in (None, ""):
+                        period_value = row_dict[field_name]
+                        break
+                report_period = self._normalize_financial_period(period_value, index_value)
+
+                payload = grouped_payloads.setdefault(
+                    report_period,
+                    {
+                        "symbol": symbol,
+                        "report_period": report_period,
+                        "report_type": "annual" if report_period.endswith("1231") else "quarterly",
+                        "tables": [],
+                    },
+                )
+                payload[table_name] = row_dict
+                payload["tables"].append(table_name)
+
+        return list(grouped_payloads.values())
 
     async def sync_stock_basic_info(
         self,
@@ -197,6 +296,202 @@ class QMTSyncService:
             logger.error(f"QMT 实时行情同步失败: {e}")
             return {"success_count": 0, "error": str(e)}
 
+    async def sync_historical_data(
+        self,
+        days: int = 365,
+        batch_size: int = 100,
+        period: str = "daily",
+        incremental: bool = True,
+        symbols: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        self._current_job_id = self._current_job_id or "qmt_historical_sync"
+        stats = {
+            "total_processed": 0,
+            "success_count": 0,
+            "error_count": 0,
+            "skipped_count": 0,
+            "historical_records": 0,
+            "start_time": datetime.utcnow(),
+            "end_time": None,
+            "duration": 0,
+            "errors": [],
+        }
+
+        try:
+            symbol_list = await self._get_qmt_symbols(symbols)
+            if not symbol_list:
+                logger.warning("⚠️ QMT 历史同步未获取到股票列表")
+                return stats
+
+            stats["total_processed"] = len(symbol_list)
+            normalized_period = self._normalize_period(period)
+            end_date = datetime.utcnow().date()
+            start_date = end_date - timedelta(days=max(days, 1))
+
+            for index in range(0, len(symbol_list), batch_size):
+                batch = symbol_list[index:index + batch_size]
+                for symbol in batch:
+                    try:
+                        limit = max(days + 5, 30)
+                        records = self.adapter.get_kline(symbol, period=normalized_period, limit=limit)
+                        if not records:
+                            stats["skipped_count"] += 1
+                            continue
+
+                        df = pd.DataFrame(records)
+                        if df.empty:
+                            stats["skipped_count"] += 1
+                            continue
+
+                        date_column = "date" if "date" in df.columns else "time" if "time" in df.columns else None
+                        if date_column:
+                            parsed_dates = pd.to_datetime(df[date_column], errors="coerce")
+                            df = df.assign(date=parsed_dates.dt.strftime("%Y-%m-%d"))
+                            df = df[parsed_dates.notna()]
+                            if incremental:
+                                df = df[(parsed_dates.dt.date >= start_date) & (parsed_dates.dt.date <= end_date)]
+
+                        if df.empty:
+                            stats["skipped_count"] += 1
+                            continue
+
+                        if "pre_close" not in df.columns and "close" in df.columns:
+                            df["pre_close"] = pd.to_numeric(df["close"], errors="coerce").shift(1)
+
+                        saved_count = await self.historical_service.save_historical_data(
+                            symbol=symbol,
+                            data=df,
+                            data_source="qmt",
+                            market="CN",
+                            period=period,
+                            overwrite=True,
+                        )
+                        if saved_count > 0:
+                            stats["success_count"] += 1
+                            stats["historical_records"] += saved_count
+                        else:
+                            stats["skipped_count"] += 1
+                    except Exception as e:
+                        stats["error_count"] += 1
+                        stats["errors"].append({"symbol": symbol, "error": str(e), "context": "sync_historical_data"})
+
+                if index + batch_size < len(symbol_list):
+                    await asyncio.sleep(0.1)
+
+            stats["end_time"] = datetime.utcnow()
+            stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
+            return stats
+        except Exception as e:
+            logger.error(f"❌ QMT 历史数据同步失败: {e}")
+            stats["errors"].append({"error": str(e), "context": "sync_historical_data"})
+            return stats
+
+    async def sync_financial_data(
+        self,
+        symbols: Optional[List[str]] = None,
+        batch_size: int = 50,
+        start_time: str = "",
+        end_time: str = "",
+    ) -> Dict[str, Any]:
+        self._current_job_id = self._current_job_id or "qmt_financial_sync"
+        stats = {
+            "total_symbols": 0,
+            "success_count": 0,
+            "error_count": 0,
+            "skipped_count": 0,
+            "saved_records": 0,
+            "start_time": datetime.utcnow(),
+            "end_time": None,
+            "duration": 0,
+            "errors": [],
+        }
+
+        try:
+            symbol_list = await self._get_qmt_symbols(symbols)
+            if not symbol_list:
+                logger.warning("⚠️ QMT 财务同步未获取到股票列表")
+                return stats
+
+            stats["total_symbols"] = len(symbol_list)
+            for index in range(0, len(symbol_list), batch_size):
+                batch = symbol_list[index:index + batch_size]
+                for symbol in batch:
+                    try:
+                        financial_tables = self.adapter.get_financial_data(
+                            symbol,
+                            start_time=start_time,
+                            end_time=end_time,
+                        )
+                        if not financial_tables:
+                            stats["skipped_count"] += 1
+                            continue
+
+                        payloads = self._build_financial_payloads(symbol, financial_tables)
+                        if not payloads:
+                            stats["skipped_count"] += 1
+                            continue
+
+                        saved_for_symbol = 0
+                        for payload in payloads:
+                            saved_for_symbol += await self.financial_service.save_financial_data(
+                                symbol=symbol,
+                                financial_data=payload,
+                                data_source="qmt",
+                                market="CN",
+                                report_period=payload.get("report_period"),
+                                report_type=payload.get("report_type", "quarterly"),
+                            )
+
+                        if saved_for_symbol > 0:
+                            stats["success_count"] += 1
+                            stats["saved_records"] += saved_for_symbol
+                        else:
+                            stats["skipped_count"] += 1
+                    except Exception as e:
+                        stats["error_count"] += 1
+                        stats["errors"].append({"symbol": symbol, "error": str(e), "context": "sync_financial_data"})
+
+                if index + batch_size < len(symbol_list):
+                    await asyncio.sleep(0.1)
+
+            stats["end_time"] = datetime.utcnow()
+            stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
+            return stats
+        except Exception as e:
+            logger.error(f"❌ QMT 财务数据同步失败: {e}")
+            stats["errors"].append({"error": str(e), "context": "sync_financial_data"})
+            return stats
+
+
+async def _check_task_running(job_id: str) -> tuple[bool, Optional[str]]:
+    try:
+        from pymongo import MongoClient
+        from app.services.scheduler_service import get_utc8_now
+
+        sync_client = MongoClient(settings.MONGO_URI)
+        sync_db = sync_client[settings.MONGODB_DATABASE]
+        threshold_time = get_utc8_now() - timedelta(minutes=30)
+
+        running_instance = sync_db.scheduler_executions.find_one(
+            {
+                "job_id": job_id,
+                "status": "running",
+                "timestamp": {"$gte": threshold_time},
+            },
+            sort=[("timestamp", -1)],
+        )
+
+        if running_instance:
+            instance_id = str(running_instance.get("_id"))
+            sync_client.close()
+            return True, instance_id
+
+        sync_client.close()
+        return False, None
+    except Exception as e:
+        logger.warning(f"⚠️ 检查 QMT 任务运行状态失败 {job_id}: {e}")
+        return False, None
+
 
 async def get_qmt_sync_service() -> QMTSyncService:
     """获取 QMT 同步服务单例"""
@@ -211,3 +506,65 @@ async def run_qmt_basic_info_sync(force_update: bool = False, job_id: str = None
     """运行 QMT 股票基础信息同步"""
     service = await get_qmt_sync_service()
     return await service.sync_stock_basic_info(force_update=force_update, job_id=job_id)
+
+
+async def run_qmt_quotes_sync(symbols: Optional[List[str]] = None, force: bool = False) -> Dict[str, Any]:
+    """运行 QMT 实时行情同步"""
+    service = await get_qmt_sync_service()
+    return await service.sync_realtime_quotes(symbols=symbols, force=force)
+
+
+async def run_qmt_historical_sync(incremental: bool = True, **kwargs) -> Dict[str, Any]:
+    job_id = "qmt_historical_sync"
+    manual_trigger = kwargs.get("_manual_trigger", False)
+    force_execute = kwargs.get("_force_execute", False)
+    if not manual_trigger and not force_execute:
+        is_running, instance_id = await _check_task_running(job_id)
+        if is_running:
+            logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={instance_id}），跳过本次执行")
+            return {"skipped": True, "reason": "已有实例在运行", "running_instance_id": instance_id}
+
+    service = await get_qmt_sync_service()
+    service._current_job_id = job_id
+    return await service.sync_historical_data(
+        days=kwargs.get("days", settings.QMT_HISTORICAL_SYNC_DAYS),
+        batch_size=kwargs.get("batch_size", settings.QMT_HISTORICAL_BATCH_SIZE),
+        period=kwargs.get("period", "daily"),
+        incremental=incremental,
+        symbols=kwargs.get("symbols"),
+    )
+
+
+async def run_qmt_financial_sync(**kwargs) -> Dict[str, Any]:
+    job_id = "qmt_financial_sync"
+    manual_trigger = kwargs.get("_manual_trigger", False)
+    force_execute = kwargs.get("_force_execute", False)
+    if not manual_trigger and not force_execute:
+        is_running, instance_id = await _check_task_running(job_id)
+        if is_running:
+            logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={instance_id}），跳过本次执行")
+            return {"skipped": True, "reason": "已有实例在运行", "running_instance_id": instance_id}
+
+    service = await get_qmt_sync_service()
+    service._current_job_id = job_id
+    return await service.sync_financial_data(
+        symbols=kwargs.get("symbols"),
+        batch_size=kwargs.get("batch_size", settings.QMT_FINANCIAL_BATCH_SIZE),
+        start_time=kwargs.get("start_time", ""),
+        end_time=kwargs.get("end_time", ""),
+    )
+
+
+async def run_qmt_status_check() -> Dict[str, Any]:
+    """检查 QMT 可用状态"""
+    adapter = QMTAdapter()
+    available = adapter.is_available()
+    latest_trade_date = adapter.find_latest_trade_date() if available else None
+    result = {
+        "available": available,
+        "latest_trade_date": latest_trade_date,
+        "checked_at": datetime.utcnow().isoformat(),
+        "source": "qmt",
+    }
+    logger.info(f"QMT 状态检查结果: {result}")
+    return result

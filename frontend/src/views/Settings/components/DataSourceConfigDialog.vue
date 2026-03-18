@@ -377,6 +377,12 @@ const dataSourceTypes = [
     register_url: 'http://baostock.com/',
     register_guide: 'BaoStock 是开源免费的证券数据平台，无需注册即可使用。访问官网了解更多：'
   },
+  {
+    label: 'QMT / MiniQMT',
+    value: 'qmt',
+    register_url: 'https://dict.thinktrader.net/nativeApi/code_examples.html',
+    register_guide: 'QMT 需要本地安装并启动 MiniQMT/xtquant。可在自定义参数中配置 data_dir、listen_port_range、init_markets、auto_download_history 等参数。'
+  },
 
   // 美股数据源
   {

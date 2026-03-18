@@ -1132,7 +1132,7 @@ async def retry_failed_symbols(
             raise HTTPException(status_code=400, detail="执行记录中没有任务ID")
         
         # 🔥 检查任务类型，只支持历史数据同步任务
-        supported_jobs = ["tushare_historical_sync", "akshare_historical_sync", "baostock_historical_sync", "qmt_basic_info_sync"]
+        supported_jobs = ["tushare_historical_sync", "akshare_historical_sync", "baostock_historical_sync", "qmt_basic_info_sync", "qmt_historical_sync"]
         if job_id not in supported_jobs:
             raise HTTPException(
                 status_code=400, 

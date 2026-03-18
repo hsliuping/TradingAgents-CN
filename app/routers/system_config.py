@@ -196,7 +196,7 @@ async def validate_config():
                     }
 
                     # 某些数据源不需要 API Key（如 AKShare）
-                    if ds_config.type in ["akshare", "yahoo"]:
+                    if ds_config.type in ["akshare", "yahoo", "baostock", "local", "qmt"]:
                         validation_item["has_api_key"] = True
                         validation_item["status"] = "已配置（无需密钥）"
                         validation_item["source"] = "builtin"

@@ -15,6 +15,7 @@ from typing import Dict, Any, List, Optional, Callable
 
 from app.core.database import get_mongo_db
 from app.core.data_source_priority import get_enabled_data_sources_async
+from app.services.data_sources.qmt_adapter import QMTAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,9 @@ logger = logging.getLogger(__name__)
 ETF_BASIC_INFO_COLLECTION = "etf_basic_info"
 ETF_DAILY_QUOTES_COLLECTION = "etf_daily_quotes"
 DEFAULT_SOURCE_PRIORITY = ["akshare"]  # 统一配置获取失败时的默认值
+
+ETF_SH_PREFIXES = ("50", "51", "52", "56", "58")
+ETF_SZ_PREFIXES = ("15", "16", "18")
 
 
 def _normalize_etf_code(s: str) -> str:
@@ -36,11 +40,15 @@ def _get_full_symbol(code: str) -> str:
     """根据代码前缀生成完整代码"""
     if not code or len(code) != 6:
         return ""
-    if code.startswith(("50", "51", "52")):
+    if code.startswith(ETF_SH_PREFIXES):
         return f"{code}.SH"
-    if code.startswith(("15", "16")):
+    if code.startswith(ETF_SZ_PREFIXES):
         return f"{code}.SZ"
     return f"{code}.SH"
+
+
+def _is_etf_code(code: str) -> bool:
+    return bool(code) and len(code) == 6 and code.startswith(ETF_SH_PREFIXES + ETF_SZ_PREFIXES)
 
 
 def _normalize_source_name(name: str) -> str:
@@ -65,7 +73,7 @@ def _fetch_etf_spot_list_akshare() -> List[Dict[str, Any]]:
             code = _normalize_etf_code(raw_code)
             if not code or len(code) != 6:
                 continue
-            if not (code.startswith(("50", "51", "52")) or code.startswith(("15", "16"))):
+            if not _is_etf_code(code):
                 continue
 
             full_symbol = _get_full_symbol(code)
@@ -115,7 +123,7 @@ def _fetch_etf_spot_list_tushare() -> List[Dict[str, Any]]:
             code = _normalize_etf_code(ts_code)
             if not code or len(code) != 6:
                 continue
-            if not (code.startswith(("50", "51", "52")) or code.startswith(("15", "16"))):
+            if not _is_etf_code(code):
                 continue
 
             full_symbol = ts_code if "." in ts_code else _get_full_symbol(code)
@@ -251,14 +259,117 @@ def _fetch_etf_hist_akshare(symbol: str, start_date: str, end_date: str) -> List
         return []
 
 
+def _fetch_etf_spot_list_qmt() -> List[Dict[str, Any]]:
+    """从 QMT 获取 ETF 基础信息与近实时快照"""
+    try:
+        adapter = QMTAdapter()
+        if not adapter.is_available():
+            return []
+
+        df = adapter.get_etf_list()
+        if df is None or df.empty:
+            return []
+
+        quotes = adapter.get_realtime_quotes() or {}
+        rows = []
+        for _, r in df.iterrows():
+            code = _normalize_etf_code(r.get("code") or r.get("symbol") or "")
+            if not _is_etf_code(code):
+                continue
+            quote = quotes.get(code, {})
+            rows.append({
+                "code": code,
+                "name": str(r.get("name", "") or code),
+                "full_symbol": str(r.get("ts_code", "") or _get_full_symbol(code)),
+                "latest_price": quote.get("close"),
+                "change_pct": quote.get("pct_chg"),
+                "volume": None,
+                "amount": quote.get("amount"),
+                "fund_scale": None,
+                "track_index": "",
+                "fund_type": str(r.get("fund_type", "ETF") or "ETF"),
+            })
+        return rows
+    except Exception as e:
+        logger.warning(f"QMT ETF 列表获取失败: {e}")
+        return []
+
+
+def _fetch_etf_hist_qmt(symbol: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
+    """从 QMT 获取单只 ETF 历史日线"""
+    try:
+        adapter = QMTAdapter()
+        if not adapter.is_available():
+            return []
+
+        code = _normalize_etf_code(symbol)
+        if not _is_etf_code(code):
+            return []
+
+        start_dt = datetime.strptime(start_date, "%Y%m%d")
+        end_dt = datetime.strptime(end_date, "%Y%m%d")
+        limit = max((end_dt - start_dt).days + 5, 30)
+        items = adapter.get_kline(code, period="day", limit=limit)
+        if not items:
+            return []
+
+        records = []
+        previous_close = None
+        for item in items:
+            trade_date = str(item.get("date") or item.get("time") or "")
+            if not trade_date:
+                continue
+            if len(trade_date) >= 10:
+                normalized_date = trade_date[:10].replace("/", "-")
+            elif len(trade_date) == 8 and trade_date.isdigit():
+                normalized_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+            else:
+                normalized_date = trade_date
+
+            compact_date = normalized_date.replace("-", "")
+            if compact_date < start_date or compact_date > end_date:
+                continue
+
+            close_value = item.get("close")
+            record = {
+                "symbol": code,
+                "code": code,
+                "full_symbol": _get_full_symbol(code),
+                "trade_date": normalized_date,
+                "open": item.get("open"),
+                "high": item.get("high"),
+                "low": item.get("low"),
+                "close": close_value,
+                "volume": item.get("volume"),
+                "amount": item.get("amount"),
+                "pct_chg": None,
+                "data_source": "qmt",
+            }
+
+            if previous_close not in (None, 0) and close_value is not None:
+                try:
+                    record["pct_chg"] = round((float(close_value) - float(previous_close)) / float(previous_close) * 100, 4)
+                except (TypeError, ValueError, ZeroDivisionError):
+                    record["pct_chg"] = None
+
+            previous_close = close_value if close_value is not None else previous_close
+            records.append(record)
+        return records
+    except Exception as e:
+        logger.warning(f"QMT ETF 历史日线获取失败 {symbol}: {e}")
+        return []
+
+
 # 数据源与 fetcher 映射（可扩展 Tushare 等）
 _FETCH_BASIC: Dict[str, Callable] = {
     "akshare": _fetch_etf_spot_list_akshare,
     "tushare": _fetch_etf_spot_list_tushare,
+    "qmt": _fetch_etf_spot_list_qmt,
 }
 _FETCH_HIST: Dict[str, Callable[[str, str, str], List[Dict[str, Any]]]] = {
     "akshare": _fetch_etf_hist_akshare,
     "tushare": _fetch_etf_hist_tushare,
+    "qmt": _fetch_etf_hist_qmt,
 }
 
 

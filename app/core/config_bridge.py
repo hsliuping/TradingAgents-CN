@@ -219,6 +219,20 @@ def bridge_config_to_env():
                         continue
                     bridged_count += 1
 
+                # QMT Quote Token（可选）
+                elif ds_config.type.value == 'qmt':
+                    existing_token = os.getenv('QMT_TOKEN')
+
+                    if ds_config.api_key and not ds_config.api_key.startswith("your_"):
+                        os.environ['QMT_TOKEN'] = ds_config.api_key
+                        logger.info(f"  ✓ 使用数据库中的 QMT_TOKEN (长度: {len(ds_config.api_key)})")
+                        if existing_token and existing_token != ds_config.api_key:
+                            logger.info("  ℹ️  已覆盖 .env 文件中的 QMT_TOKEN")
+                        bridged_count += 1
+                    elif existing_token and not existing_token.startswith("your_"):
+                        logger.info(f"  ✓ 使用 .env 文件中的 QMT_TOKEN (长度: {len(existing_token)})")
+                        bridged_count += 1
+
         # 4. 桥接数据源细节配置（超时、重试、缓存等）
         bridged_count += _bridge_datasource_details(data_source_configs)
 
@@ -346,6 +360,38 @@ def _bridge_datasource_details(data_source_configs) -> int:
             os.environ[env_key] = str(ds_config.config_params['cache_enabled']).lower()
             logger.debug(f"  ✓ 桥接 {env_key}: {ds_config.config_params['cache_enabled']}")
             bridged_count += 1
+
+        if source_type == "QMT" and ds_config.config_params:
+            qmt_param_map = {
+                'data_dir': 'QMT_DATA_DIR',
+                'listen_port': 'QMT_LISTEN_PORT',
+                'listen_port_range': 'QMT_LISTEN_PORT_RANGE',
+                'init_markets': 'QMT_INIT_MARKETS',
+                'kline_mirror_markets': 'QMT_KLINE_MIRROR_MARKETS',
+                'allow_optimize_addresses': 'QMT_ALLOW_OPTIMIZE_ADDRESSES',
+                'history_start_time': 'QMT_HISTORY_START_TIME',
+                'start_local_service': 'QMT_START_LOCAL_SERVICE',
+                'kline_mirror_enabled': 'QMT_KLINE_MIRROR_ENABLED',
+                'auto_download_history': 'QMT_AUTO_DOWNLOAD_HISTORY',
+                'auto_download_financial': 'QMT_AUTO_DOWNLOAD_FINANCIAL',
+                'auto_download_sector': 'QMT_AUTO_DOWNLOAD_SECTOR',
+            }
+
+            for param_key, env_key in qmt_param_map.items():
+                if param_key not in ds_config.config_params:
+                    continue
+
+                value = ds_config.config_params[param_key]
+                if isinstance(value, list):
+                    normalized = ",".join(str(item) for item in value)
+                elif isinstance(value, bool):
+                    normalized = str(value).lower()
+                else:
+                    normalized = str(value)
+
+                os.environ[env_key] = normalized
+                logger.debug(f"  ✓ 桥接 {env_key}: {normalized}")
+                bridged_count += 1
 
     if bridged_count > 0:
         logger.info(f"  ✓ 桥接数据源细节配置: {bridged_count} 项")
