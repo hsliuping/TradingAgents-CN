@@ -47,6 +47,13 @@ VERSION_COLLECTION = "agent_versions"
 EVALUATION_COLLECTION = "agent_evaluations"
 
 
+class AgentWorkshopLLMStageError(Exception):
+    def __init__(self, stage: str, message: str, raw_response: str = ""):
+        super().__init__(message)
+        self.stage = stage
+        self.raw_response = raw_response
+
+
 class AgentWorkshopService:
     """Agent 工坊服务层"""
 
@@ -283,8 +290,14 @@ class AgentWorkshopService:
         try:
             tooling_plan = await self._generate_tooling_plan_with_llm(spec, session.gap_report)
         except Exception as exc:
-            logger.warning("[AgentWorkshop] 生成工具需求草案时 LLM 失败，使用规则兜底: %s", exc, exc_info=True)
-            tooling_plan = self._build_tooling_plan_fallback(spec, session.gap_report)
+            logger.warning("[AgentWorkshop] 生成工具需求草案时 LLM 失败，直接暴露错误: %s", exc, exc_info=True)
+            raw_response = exc.raw_response if isinstance(exc, AgentWorkshopLLMStageError) else ""
+            tooling_plan = self._build_tooling_plan_error_report(
+                spec,
+                session.gap_report,
+                error_message=str(exc),
+                raw_response=raw_response,
+            )
 
         session.tooling_plan = tooling_plan
         session.updated_at = now_tz()
@@ -1222,28 +1235,28 @@ class AgentWorkshopService:
                 "user_id": user_id,
             },
         )
-        data = json.loads(self._strip_markdown_fence(raw_content))
+        try:
+            data = json.loads(self._strip_markdown_fence(raw_content))
+            if not isinstance(data, dict):
+                raise ValueError("requirement clarification LLM 返回的不是 JSON object")
 
-        feasibility_status = self._normalize_feasibility_status(data.get("feasibility_status"))
-        completeness_score = self._pick_float(data.get("completeness_score"), 0.0)
-        pending_questions = self._pick_list(data.get("pending_questions"), [])[:2]
-        refusal_reason = self._pick_str(data.get("refusal_reason"), "")
-        expert_recommendations = self._dedupe([
-            *self._pick_list(data.get("expert_recommendations"), []),
-            *self._pick_list(data.get("assumed_defaults"), []),
-        ])
-        spec = self._merge_llm_spec_data(data, base_spec, fallback_spec_id=fallback_spec_id)
-        if not expert_recommendations:
-            expert_recommendations = self._build_expert_recommendations(spec)
-        ai_message = self._compose_turn_message(
-            self._pick_str(
-            data.get("response_message"),
-            self._build_fallback_turn_message(spec, pending_questions, completeness_score, feasibility_status, refusal_reason, expert_recommendations),
-            ),
-            pending_questions,
-            feasibility_status,
-            expert_recommendations,
-        )
+            feasibility_status = self._require_feasibility_status(data, "requirement_clarification")
+            completeness_score = self._require_score_field(data, "completeness_score", "requirement_clarification")
+            pending_questions = self._require_list_field(data, "pending_questions", "requirement_clarification")[:2]
+            refusal_reason = self._require_string_field(data, "refusal_reason", "requirement_clarification", allow_empty=True)
+            expert_recommendations = self._dedupe([
+                *self._require_list_field(data, "expert_recommendations", "requirement_clarification"),
+                *self._require_list_field(data, "assumed_defaults", "requirement_clarification"),
+            ])
+            spec = self._merge_llm_spec_data(data, base_spec, fallback_spec_id=fallback_spec_id)
+            ai_message = self._compose_turn_message(
+                self._require_string_field(data, "response_message", "requirement_clarification"),
+                pending_questions,
+                feasibility_status,
+                expert_recommendations,
+            )
+        except Exception as exc:
+            raise AgentWorkshopLLMStageError("requirement_clarification", str(exc), raw_response=raw_content) from exc
 
         spec.owner_user_id = user_id
         result = {
@@ -1315,6 +1328,7 @@ class AgentWorkshopService:
             "请基于当前 Agent 规格和缺口分析，产出一份工具需求草案。",
             "你不能脱离业务背景机械列工具，而要先理解这个客户真正要交付什么结果、当前系统已有何种能力、还缺哪一层能力，最后再决定工具方案。",
             "重点不是重复描述问题，而是回答 4 件事：缺什么工具、为什么缺、没补齐前如何降级、下一步先实现什么。",
+            "draft_tools 里的 capability_description 必须是一句直接给界面展示的功能说明，用中文写清这个能力具体做什么、产出什么结果、补的是哪一段执行链路。不要写空话，也不要只重复 tool_id。",
             "只输出 JSON，不要输出 Markdown 或额外解释。",
             design_context,
             "JSON 结构必须如下：",
@@ -1325,6 +1339,7 @@ class AgentWorkshopService:
                     {
                         "tool_id": "",
                         "tool_name": "",
+                        "capability_description": "",
                         "priority": "P0 | P1 | P2",
                         "why_needed": "",
                         "solves_gaps": [],
@@ -1360,23 +1375,27 @@ class AgentWorkshopService:
         ])
 
         system_prompt = "你正在 TradingAgents-CN 的 Agent 生命周期工坊中工作。TradingAgents-CN 是一个面向投研、交易分析、Agent 编排与能力复用的多智能体金融分析系统。你当前角色是金融行业专家兼系统架构师，负责把 Agent 规格和缺口分析转成可执行的工具与能力方案。你的判断依据只能来自规格、缺口分析、系统背景、典型场景、角色模式和已知能力快照，不能凭空假设系统现状。只输出合法 JSON。"
-        response = await client.achat([
-            Message(role="system", content=system_prompt),
-            Message(role="user", content=prompt),
-        ])
-        raw_content = (response.content or "").strip()
-        self._log_llm_exchange(
-            "tooling_plan",
-            system_prompt,
-            prompt,
-            raw_content,
-            context={
-                "spec_id": spec.spec_id,
-                "spec_name": spec.name,
-            },
-        )
-        data = self._load_json_response(raw_content)
-        normalized_plan = self._normalize_tooling_plan(data, spec, gap_report, raw_content)
+        raw_content = ""
+        try:
+            response = await client.achat([
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=prompt),
+            ])
+            raw_content = (response.content or "").strip()
+            self._log_llm_exchange(
+                "tooling_plan",
+                system_prompt,
+                prompt,
+                raw_content,
+                context={
+                    "spec_id": spec.spec_id,
+                    "spec_name": spec.name,
+                },
+            )
+            data = self._load_json_response(raw_content)
+            normalized_plan = self._normalize_tooling_plan(data, spec, gap_report, raw_content)
+        except Exception as exc:
+            raise AgentWorkshopLLMStageError("tooling_plan", str(exc), raw_response=raw_content) from exc
         self._log_generated_result(
             "tooling_plan",
             normalized_plan,
@@ -1387,37 +1406,32 @@ class AgentWorkshopService:
         )
         return normalized_plan
 
-    def _build_tooling_plan_fallback(
+    def _build_tooling_plan_error_report(
         self,
         spec: AgentSpec,
         gap_report: AgentWorkshopGapAnalysis,
+        error_message: str,
+        raw_response: str = "",
     ) -> Dict[str, Any]:
-        draft_tools = [
-            self._build_tool_blueprint(tool_id, spec, gap_report)
-            for tool_id in (gap_report.suggested_tools or [])[:6]
-        ]
+        raw_excerpt = (raw_response or "").strip()
+        if len(raw_excerpt) > 1200:
+            raw_excerpt = f"{raw_excerpt[:1200]}\n... [truncated]"
 
-        implementation_order = [
-            f"{item.get('priority', 'P1')} - {item.get('tool_name') or item.get('tool_id')}"
-            for item in draft_tools
-        ]
         result = {
-            "summary": f"当前工坊已识别 {len(gap_report.blocking_gaps)} 个阻塞缺口，建议先补工具再继续追求精确输出。",
-            "missing_capabilities": self._dedupe([
-                *gap_report.suggested_capabilities,
-                *gap_report.blocking_gaps,
-                *gap_report.manual_dependencies,
-            ]),
-            "draft_tools": draft_tools,
-            "implementation_order": implementation_order,
-            "notes": self._dedupe([
-                *gap_report.fallback_strategy,
-                *gap_report.build_recommendations,
-            ]),
-            "generated_by": "fallback",
+            "summary": "工具需求草案生成失败，未做规则兜底。",
+            "missing_capabilities": [],
+            "draft_tools": [],
+            "implementation_order": [],
+            "notes": [
+                "当前工具需求草案未采用规则兜底；请直接根据失败信息、日志和原始响应修正提示词或输出约束。",
+                *self._dedupe(gap_report.blocking_gaps or [])[:4],
+            ],
+            "generated_by": "llm_failed",
+            "error_message": error_message,
+            "raw_response": raw_excerpt,
         }
         self._log_generated_result(
-            "tooling_plan_fallback",
+            "tooling_plan_error",
             result,
             context={
                 "spec_id": spec.spec_id,
@@ -1433,55 +1447,56 @@ class AgentWorkshopService:
         gap_report: AgentWorkshopGapAnalysis,
         raw_content: str,
     ) -> Dict[str, Any]:
-        raw_tools = data.get("draft_tools") if isinstance(data.get("draft_tools"), list) else []
+        raw_tools = data.get("draft_tools")
+        if not isinstance(raw_tools, list):
+            raise ValueError("tooling_plan 缺少数组字段 draft_tools")
         draft_tools = []
         for item in raw_tools[:8]:
             if not isinstance(item, dict):
-                continue
+                raise ValueError("tooling_plan draft_tools 中存在非 object 项")
+            normalized_tool_id = self._require_string_field(item, "tool_id", "tooling_plan")
+            normalized_tool_name = self._require_string_field(item, "tool_name", "tooling_plan")
+            normalized_why_needed = self._require_string_field(item, "why_needed", "tooling_plan")
+            normalized_solves_gaps = self._require_list_field(item, "solves_gaps", "tooling_plan")
             draft_tools.append({
-                "tool_id": self._pick_str(item.get("tool_id"), "tool_to_define"),
-                "tool_name": self._pick_str(item.get("tool_name"), self._pick_str(item.get("tool_id"), "待定义工具")),
-                "priority": self._pick_str(item.get("priority"), "P1"),
-                "why_needed": self._pick_str(item.get("why_needed"), "用于补齐当前工坊识别到的能力缺口。"),
-                "solves_gaps": self._pick_list(item.get("solves_gaps"), []),
-                "fallback_before_ready": self._pick_str(item.get("fallback_before_ready"), "缺少该工具前，先降级执行并明确说明结果边界。"),
-                "dependencies": self._pick_list(item.get("dependencies"), []),
-                "inputs": self._normalize_tool_schema_items(item.get("inputs"), kind="input"),
-                "outputs": self._normalize_tool_schema_items(item.get("outputs"), kind="output"),
-                "acceptance_criteria": self._pick_list(item.get("acceptance_criteria"), []),
+                "tool_id": normalized_tool_id,
+                "tool_name": normalized_tool_name,
+                "capability_description": self._require_string_field(item, "capability_description", "tooling_plan"),
+                "priority": self._require_one_of(item, "priority", "tooling_plan", ["P0", "P1", "P2"]),
+                "why_needed": normalized_why_needed,
+                "solves_gaps": normalized_solves_gaps,
+                "fallback_before_ready": self._require_string_field(item, "fallback_before_ready", "tooling_plan"),
+                "dependencies": self._require_list_field(item, "dependencies", "tooling_plan"),
+                "inputs": self._normalize_tool_schema_items(item.get("inputs"), kind="input", strict_stage="tooling_plan"),
+                "outputs": self._normalize_tool_schema_items(item.get("outputs"), kind="output", strict_stage="tooling_plan"),
+                "acceptance_criteria": self._require_list_field(item, "acceptance_criteria", "tooling_plan"),
             })
 
         if not draft_tools:
-            return self._build_tooling_plan_fallback(spec, gap_report)
+            raise ValueError("tooling plan LLM 未返回有效的 draft_tools")
 
         return {
-            "summary": self._pick_str(data.get("summary"), "工具需求草案已生成。"),
-            "missing_capabilities": self._pick_list(
-                data.get("missing_capabilities"),
-                self._dedupe([
-                    *gap_report.suggested_capabilities,
-                    *gap_report.blocking_gaps,
-                ]),
-            ),
+            "summary": self._require_string_field(data, "summary", "tooling_plan"),
+            "missing_capabilities": self._require_list_field(data, "missing_capabilities", "tooling_plan"),
             "draft_tools": draft_tools,
-            "implementation_order": self._pick_list(data.get("implementation_order"), []),
-            "notes": self._pick_list(data.get("notes"), []),
+            "implementation_order": self._require_list_field(data, "implementation_order", "tooling_plan"),
+            "notes": self._require_list_field(data, "notes", "tooling_plan"),
             "generated_by": "llm",
             "raw_response": raw_content,
         }
 
-    def _normalize_tool_schema_items(self, value: Any, kind: str) -> List[Dict[str, Any]]:
+    def _normalize_tool_schema_items(self, value: Any, kind: str, strict_stage: str) -> List[Dict[str, Any]]:
         if not isinstance(value, list):
-            return []
+            raise ValueError(f"{strict_stage} 缺少数组字段 {kind}s")
         normalized: List[Dict[str, Any]] = []
         for item in value[:12]:
             if not isinstance(item, dict):
-                continue
+                raise ValueError(f"{strict_stage} 的 {kind}s 中存在非 object 项")
             normalized.append({
-                "name": self._pick_str(item.get("name"), f"{kind}_field"),
-                "type": self._pick_str(item.get("type"), "string"),
+                "name": self._require_string_field(item, "name", strict_stage),
+                "type": self._require_string_field(item, "type", strict_stage),
                 "required": bool(item.get("required", kind == "input")),
-                "description": self._pick_str(item.get("description"), ""),
+                "description": self._require_string_field(item, "description", strict_stage),
             })
         return normalized
 
@@ -1504,6 +1519,12 @@ class AgentWorkshopService:
         return {
             "tool_id": tool_id,
             "tool_name": blueprint["tool_name"],
+            "capability_description": self._build_tool_capability_description(
+                tool_id,
+                blueprint["tool_name"],
+                blueprint["why_needed"],
+                blueprint["solves_gaps"],
+            ),
             "priority": blueprint["priority"],
             "why_needed": blueprint["why_needed"],
             "solves_gaps": blueprint["solves_gaps"],
@@ -1514,9 +1535,24 @@ class AgentWorkshopService:
             "acceptance_criteria": blueprint["acceptance_criteria"],
         }
 
+    def _build_tool_capability_description(
+        self,
+        tool_id: str,
+        tool_name: str,
+        why_needed: str,
+        solves_gaps: List[str],
+    ) -> str:
+        title = self._pick_str(tool_name, self._pick_str(tool_id, "待定义能力"))
+        reason = self._pick_str(why_needed, "")
+        if reason and all(keyword not in reason for keyword in ["缺口", "补齐", "能力"]):
+            return reason
+        if solves_gaps:
+            return f"这个能力用于让 Agent 在“{title}”这段执行链路中稳定产出结构化结果，主要解决：{solves_gaps[0]}"
+        return f"这个能力用于让 Agent 在“{title}”这段执行链路中稳定产出可直接消费的结构化结果。"
+
     def _merge_llm_spec_data(self, data: Dict[str, Any], fallback_spec: AgentSpec, fallback_spec_id: Optional[str] = None) -> AgentSpec:
-        name = self._pick_str(data.get("name"), fallback_spec.name)
-        domain = self._pick_domain(data.get("domain"), fallback_spec.domain)
+        name = self._require_string_field(data, "name", "requirement_clarification")
+        domain = self._require_domain_field(data, "domain", "requirement_clarification")
         resolved_spec_id = fallback_spec_id or fallback_spec.spec_id
         if not resolved_spec_id or resolved_spec_id.startswith("agent-workshop-"):
             resolved_spec_id = self._slugify(name or fallback_spec.name or f"agent-workshop-{uuid.uuid4().hex[:8]}")
@@ -1525,16 +1561,16 @@ class AgentWorkshopService:
             spec_id=resolved_spec_id,
             name=name,
             domain=domain,
-            target_users=self._pick_list(data.get("target_users"), fallback_spec.target_users),
-            primary_goal=self._pick_str(data.get("primary_goal"), fallback_spec.primary_goal),
-            responsibilities=self._pick_list(data.get("responsibilities"), fallback_spec.responsibilities),
-            non_goals=self._pick_list(data.get("non_goals"), fallback_spec.non_goals),
-            inputs=self._pick_list(data.get("inputs"), fallback_spec.inputs),
-            outputs=self._pick_list(data.get("outputs"), fallback_spec.outputs),
-            success_criteria=self._pick_list(data.get("success_criteria"), fallback_spec.success_criteria),
-            constraints=self._pick_list(data.get("constraints"), fallback_spec.constraints),
-            preferred_methods=self._pick_list(data.get("preferred_methods"), fallback_spec.preferred_methods),
-            sample_symbols=self._pick_list(data.get("sample_symbols"), fallback_spec.sample_symbols),
+            target_users=self._require_list_field(data, "target_users", "requirement_clarification"),
+            primary_goal=self._require_string_field(data, "primary_goal", "requirement_clarification"),
+            responsibilities=self._require_list_field(data, "responsibilities", "requirement_clarification"),
+            non_goals=self._require_list_field(data, "non_goals", "requirement_clarification"),
+            inputs=self._require_list_field(data, "inputs", "requirement_clarification"),
+            outputs=self._require_list_field(data, "outputs", "requirement_clarification"),
+            success_criteria=self._require_list_field(data, "success_criteria", "requirement_clarification"),
+            constraints=self._require_list_field(data, "constraints", "requirement_clarification"),
+            preferred_methods=self._require_list_field(data, "preferred_methods", "requirement_clarification"),
+            sample_symbols=self._require_list_field(data, "sample_symbols", "requirement_clarification"),
             status=fallback_spec.status,
             source=fallback_spec.source,
             owner_user_id=fallback_spec.owner_user_id,
@@ -1551,6 +1587,53 @@ class AgentWorkshopService:
         if content.endswith("```"):
             content = content[:-3]
         return content.strip()
+
+    def _require_string_field(self, data: Dict[str, Any], key: str, stage: str, allow_empty: bool = False) -> str:
+        value = data.get(key)
+        if not isinstance(value, str):
+            raise ValueError(f"{stage} 缺少字符串字段 {key}")
+        text = value.strip()
+        if not allow_empty and not text:
+            raise ValueError(f"{stage} 字段 {key} 不能为空")
+        return text
+
+    def _require_list_field(self, data: Dict[str, Any], key: str, stage: str) -> List[str]:
+        value = data.get(key)
+        if not isinstance(value, list):
+            raise ValueError(f"{stage} 缺少数组字段 {key}")
+        normalized: List[str] = []
+        for item in value:
+            if not isinstance(item, (str, int, float)):
+                raise ValueError(f"{stage} 字段 {key} 必须是字符串数组")
+            text = str(item).strip()
+            if not text:
+                raise ValueError(f"{stage} 字段 {key} 里存在空项")
+            normalized.append(text)
+        return self._dedupe(normalized)
+
+    def _require_score_field(self, data: Dict[str, Any], key: str, stage: str) -> float:
+        if key not in data:
+            raise ValueError(f"{stage} 缺少数值字段 {key}")
+        try:
+            value = float(data.get(key))
+        except (TypeError, ValueError):
+            raise ValueError(f"{stage} 字段 {key} 不是合法数值")
+        return max(0.0, min(1.0, round(value, 2)))
+
+    def _require_domain_field(self, data: Dict[str, Any], key: str, stage: str) -> str:
+        value = self._require_string_field(data, key, stage)
+        if value not in {"stock_analysis", "general"}:
+            raise ValueError(f"{stage} 字段 {key} 必须是 stock_analysis 或 general")
+        return value
+
+    def _require_one_of(self, data: Dict[str, Any], key: str, stage: str, allowed: List[str]) -> str:
+        value = self._require_string_field(data, key, stage)
+        if value not in allowed:
+            raise ValueError(f"{stage} 字段 {key} 必须是 {' / '.join(allowed)}")
+        return value
+
+    def _require_feasibility_status(self, data: Dict[str, Any], stage: str) -> str:
+        return self._require_one_of(data, "feasibility_status", stage, ["feasible", "need-clarification", "not-feasible"])
 
     def _pick_str(self, value: Any, fallback: str) -> str:
         if isinstance(value, str) and value.strip():
@@ -1709,18 +1792,76 @@ class AgentWorkshopService:
         try:
             return await self._build_gap_analysis_with_llm(spec, capability_snapshot)
         except Exception as exc:
-            logger.warning("[AgentWorkshop] 生成缺口分析时 LLM 失败，使用规则兜底: %s", exc, exc_info=True)
-            gap_report = self._build_gap_analysis_fallback(spec, capability_snapshot)
-            logger.info(
-                "[AgentWorkshop] 缺口分析规则兜底完成: spec_id=%s spec_name=%s existing_tools=%s suggested_tools=%s blocking_gaps=%s %s",
-                spec.spec_id,
-                spec.name,
-                len(gap_report.existing_tools or []),
-                len(gap_report.suggested_tools or []),
-                len(gap_report.blocking_gaps or []),
-                self._format_gap_analysis_llm_log(),
+            logger.warning("[AgentWorkshop] 生成缺口分析时 LLM 失败，直接暴露错误: %s", exc, exc_info=True)
+            raw_response = exc.raw_response if isinstance(exc, AgentWorkshopLLMStageError) else ""
+            gap_report = self._build_gap_analysis_error_report(
+                spec,
+                capability_snapshot,
+                error_message=str(exc),
+                raw_response=raw_response,
             )
             return gap_report
+
+    def _build_gap_analysis_error_report(
+        self,
+        spec: AgentSpec,
+        capability_snapshot: Dict[str, Any],
+        error_message: str,
+        raw_response: str = "",
+    ) -> AgentWorkshopGapAnalysis:
+        reusable_modules = [
+            "workflow-generation",
+            "skill-generation",
+            "skill-gaps",
+            "prompt-design",
+            "report-templates",
+        ]
+        existing_tools: List[str] = []
+        if spec.domain == "stock_analysis":
+            existing_tools.extend(capability_snapshot.get("builtin_data_tools", [])[:6])
+            existing_tools.extend(capability_snapshot.get("builtin_analysis_tools", [])[:4])
+            existing_tools.extend(capability_snapshot.get("external_data_skills", [])[:4])
+            existing_tools.extend(capability_snapshot.get("external_analysis_skills", [])[:4])
+
+        raw_excerpt = (raw_response or "").strip()
+        if len(raw_excerpt) > 1200:
+            raw_excerpt = f"{raw_excerpt[:1200]}\n... [truncated]"
+
+        notes = [
+            "当前缺口分析未采用规则兜底；以下内容用于直接暴露 LLM 失败现场，便于继续修正提示词或输出约束。",
+            f"缺口分析调用信息：{self._format_gap_analysis_llm_log()}",
+        ]
+        if raw_excerpt:
+            notes.append("LLM 已返回内容，但未通过当前 gap analysis 的结构校验。")
+        else:
+            notes.append("LLM 未返回可解析的 gap analysis 内容。")
+
+        gap_report = AgentWorkshopGapAnalysis(
+            reusable_modules=reusable_modules,
+            existing_tools=self._dedupe(existing_tools)[:12],
+            suggested_tools=[],
+            suggested_capabilities=[],
+            manual_dependencies=[],
+            blocking_gaps=[f"缺口分析生成失败：{error_message}"],
+            fallback_strategy=[],
+            build_recommendations=[
+                "先查看日志中的 gap_analysis system_prompt、user_prompt 和 raw_response，确认是提示词约束不够还是模型未按 JSON 返回。",
+                "确认修复前，不要根据这次失败结果继续补能力，以免把错误分析继续传递到后续流程。",
+            ],
+            notes=notes,
+            generated_by="llm_failed",
+            error_message=error_message,
+            raw_response=raw_excerpt,
+        )
+        self._log_generated_result(
+            "gap_analysis_error",
+            gap_report.model_dump(mode="json"),
+            context={
+                "spec_id": spec.spec_id,
+                "spec_name": spec.name,
+            },
+        )
+        return gap_report
 
     def _format_gap_analysis_llm_log(self) -> str:
         provider = self._pick_str(self._llm_client_meta.get("provider") if self._llm_client_meta else None, "unknown")
@@ -1730,10 +1871,10 @@ class AgentWorkshopService:
 
     def _detect_gap_analysis_mode(self, gap_report: AgentWorkshopGapAnalysis) -> str:
         notes = gap_report.notes or []
+        if gap_report.generated_by:
+            return gap_report.generated_by
         if any("推理模型生成" in note for note in notes):
             return "llm"
-        if any("规则兜底生成" in note for note in notes):
-            return "fallback"
         return "unknown"
 
     async def _build_gap_analysis_with_llm(
@@ -1759,6 +1900,7 @@ class AgentWorkshopService:
             *capability_snapshot.get("valuation_tools", []),
             *capability_snapshot.get("valuation_skills", []),
         ])
+
         prompt = "\n".join([
             "你正在 TradingAgents-CN 的 Agent 工坊中做资源缺口分析。这个系统是一个面向投研、交易分析、Agent 编排与能力复用的多智能体金融分析系统。",
             "你当前角色是金融行业专家兼系统架构师，负责判断当前 Agent 目标在系统内哪些能力已可复用，哪些地方是真缺口。",
@@ -1815,118 +1957,63 @@ class AgentWorkshopService:
             "6. 如果用户明确要求多步或多方法分别返回结果，不能只建议补一个上游接口；要把真正缺少的能力层讲清楚。",
         ])
         system_prompt = "你正在 TradingAgents-CN 的 Agent 工坊中做资源缺口分析。TradingAgents-CN 是一个面向投研、交易分析、Agent 编排与能力复用的多智能体金融分析系统。你当前角色是金融行业专家兼系统架构师，负责把 Agent 的业务目标、系统现状和约束边界分析成可执行的缺口建设计划。你的判断依据只能来自当前规格、系统背景、典型场景、角色模式和能力快照，不能凭空补系统能力。只输出合法 JSON。"
-        response = await client.achat([
-            Message(role="system", content=system_prompt),
-            Message(role="user", content=prompt),
-        ])
-        raw = response.content or ""
-        self._log_llm_exchange(
-            "gap_analysis",
-            system_prompt,
-            prompt,
-            raw,
-            context={
-                "spec_id": spec.spec_id,
-                "spec_name": spec.name,
-            },
-        )
-        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if not json_match:
-            raise ValueError("gap analysis LLM 未返回合法 JSON")
-        data = json.loads(json_match.group())
+
+        raw = ""
+        try:
+            response = await client.achat([
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=prompt),
+            ])
+            raw = response.content or ""
+            self._log_llm_exchange(
+                "gap_analysis",
+                system_prompt,
+                prompt,
+                raw,
+                context={
+                    "spec_id": spec.spec_id,
+                    "spec_name": spec.name,
+                },
+            )
+            json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if not json_match:
+                raise ValueError("gap analysis LLM 未返回合法 JSON")
+            data = json.loads(json_match.group())
+        except Exception as exc:
+            raise AgentWorkshopLLMStageError("gap_analysis", str(exc), raw_response=raw) from exc
 
         known_tool_set = set(known_tools)
         known_module_set = set(reusable_modules)
-        existing_tools = [item for item in self._pick_list(data.get("existing_tools"), []) if item in known_tool_set]
-        modules = [item for item in self._pick_list(data.get("reusable_modules"), reusable_modules) if item in known_module_set]
-        notes = self._pick_list(data.get("notes"), [])
+        existing_tools = self._require_list_field(data, "existing_tools", "gap_analysis")
+        invalid_tools = [item for item in existing_tools if item not in known_tool_set]
+        if invalid_tools:
+            raise ValueError(f"gap_analysis existing_tools 包含未定义能力: {', '.join(invalid_tools)}")
+
+        modules = self._require_list_field(data, "reusable_modules", "gap_analysis")
+        invalid_modules = [item for item in modules if item not in known_module_set]
+        if invalid_modules:
+            raise ValueError(f"gap_analysis reusable_modules 包含未定义模块: {', '.join(invalid_modules)}")
+
+        notes = self._require_list_field(data, "notes", "gap_analysis")
         notes.append(
             f"缺口分析由推理模型生成：provider={self._llm_client_meta.get('provider')} model={self._llm_client_meta.get('model')} timeout={self._llm_client_meta.get('timeout')}s"
         )
         gap_report = AgentWorkshopGapAnalysis(
             reusable_modules=self._dedupe(modules)[:8],
             existing_tools=self._dedupe(existing_tools)[:12],
-            suggested_tools=self._dedupe(self._pick_list(data.get("suggested_tools"), []))[:8],
-            suggested_capabilities=self._dedupe(self._pick_list(data.get("suggested_capabilities"), []))[:8],
-            manual_dependencies=self._dedupe(self._pick_list(data.get("manual_dependencies"), []))[:8],
-            blocking_gaps=self._dedupe(self._pick_list(data.get("blocking_gaps"), []))[:8],
-            fallback_strategy=self._dedupe(self._pick_list(data.get("fallback_strategy"), []))[:8],
-            build_recommendations=self._dedupe(self._pick_list(data.get("build_recommendations"), []))[:10],
+            suggested_tools=self._dedupe(self._require_list_field(data, "suggested_tools", "gap_analysis"))[:8],
+            suggested_capabilities=self._dedupe(self._require_list_field(data, "suggested_capabilities", "gap_analysis"))[:8],
+            manual_dependencies=self._dedupe(self._require_list_field(data, "manual_dependencies", "gap_analysis"))[:8],
+            blocking_gaps=self._dedupe(self._require_list_field(data, "blocking_gaps", "gap_analysis"))[:8],
+            fallback_strategy=self._dedupe(self._require_list_field(data, "fallback_strategy", "gap_analysis"))[:8],
+            build_recommendations=self._dedupe(self._require_list_field(data, "build_recommendations", "gap_analysis"))[:10],
             notes=self._dedupe(notes)[:10],
+            generated_by="llm",
+            error_message="",
+            raw_response=raw,
         )
         self._log_generated_result(
             "gap_analysis",
-            gap_report.model_dump(mode="json"),
-            context={
-                "spec_id": spec.spec_id,
-                "spec_name": spec.name,
-            },
-        )
-        return gap_report
-
-    def _build_gap_analysis_fallback(
-        self,
-        spec: AgentSpec,
-        capability_snapshot: Dict[str, Any],
-    ) -> AgentWorkshopGapAnalysis:
-        available_data_tools = capability_snapshot.get("builtin_data_tools", [])
-        available_analysis_tools = capability_snapshot.get("builtin_analysis_tools", [])
-        available_external_data = capability_snapshot.get("external_data_skills", [])
-        available_external_analysis = capability_snapshot.get("external_analysis_skills", [])
-
-        reusable_modules = [
-            "workflow-generation",
-            "skill-generation",
-            "skill-gaps",
-            "prompt-design",
-            "report-templates",
-        ]
-
-        existing_tools: List[str] = []
-        suggested_tools: List[str] = []
-        suggested_capabilities: List[str] = []
-        manual_dependencies: List[str] = []
-        blocking_gaps: List[str] = []
-        fallback_strategy: List[str] = []
-        build_recommendations: List[str] = []
-        notes: List[str] = []
-
-        if spec.domain == "stock_analysis":
-            existing_tools.extend(available_data_tools[:6])
-            existing_tools.extend(available_analysis_tools[:4])
-            existing_tools.extend(available_external_data[:4])
-            existing_tools.extend(available_external_analysis[:4])
-        else:
-            notes.append("当前为通用 Agent 草案，后续需要结合具体领域再细化可调用能力缺口。")
-
-        numeric_policy = self._get_numeric_traceability_policy(spec)
-        if numeric_policy["enabled"]:
-            notes.append("当前需求包含数值类输出，工坊会优先检查数据源、工具计算链路和来源标注是否充分。")
-            if numeric_policy["requires_exact_numeric_outputs"]:
-                blocking_gaps.append("若要输出精确数值结果，必须先确认现有能力是否具备稳定的数据链路或可复核的计算链路。")
-                fallback_strategy.append("在链路未确认前，先降级为定性判断或框架说明，不输出不可追溯的精确数字。")
-                build_recommendations.append("优先让 LLM 根据当前规格和通用数值原则判断需要补的数据链路或计算能力，不要预设固定工具方案。")
-
-        notes.append(
-            f"当前已识别到 {len(available_data_tools) + len(available_external_data)} 个取数类能力，"
-            f"{len(available_analysis_tools) + len(available_external_analysis)} 个分析类能力。"
-        )
-
-        notes.append("当前缺口分析由规则兜底生成，建议结合推理模型结果复核。")
-
-        gap_report = AgentWorkshopGapAnalysis(
-            reusable_modules=reusable_modules,
-            existing_tools=self._dedupe(existing_tools)[:12],
-            suggested_tools=self._dedupe(suggested_tools),
-            suggested_capabilities=self._dedupe(suggested_capabilities),
-            manual_dependencies=self._dedupe(manual_dependencies),
-            blocking_gaps=self._dedupe(blocking_gaps),
-            fallback_strategy=self._dedupe(fallback_strategy),
-            build_recommendations=self._dedupe(build_recommendations),
-            notes=notes,
-        )
-        self._log_generated_result(
-            "gap_analysis_fallback",
             gap_report.model_dump(mode="json"),
             context={
                 "spec_id": spec.spec_id,
@@ -2418,16 +2505,31 @@ class AgentWorkshopService:
             )
         except Exception as exc:
             llm_review_error = str(exc)
-            logger.warning("[AgentWorkshop] LLM 结果评估失败，降级到规则评估: %s", exc, exc_info=True)
+            logger.warning("[AgentWorkshop] LLM 结果评估失败，直接暴露错误: %s", exc, exc_info=True)
 
         if not llm_review:
-            fallback_details = dict(rule_details)
-            fallback_details.update({
-                "evaluation_engine": "rules-fallback",
-                "judge_model": self._llm_client_meta,
-                "llm_review_error": llm_review_error or "LLM 评审未返回有效结果，已回退到规则评估。",
-            })
-            return rule_scores, rule_issues, rule_recommendations, fallback_details
+            failed_details = {
+                "mode": "production-review",
+                "evaluation_engine": "llm_failed",
+                "judge_model": {
+                    **self._llm_client_meta,
+                    "fallback_used": False,
+                },
+                "runtime_result": runtime_result,
+                "parsed_output_excerpt": rule_details.get("parsed_output_excerpt", ""),
+                "valuation_traceability": rule_details.get("valuation_traceability", {}),
+                "llm_review_error": llm_review_error or "LLM 评审未返回有效结果。",
+                "rule_review": {
+                    "scores": rule_scores,
+                    "score_breakdown": rule_details.get("score_breakdown", {}),
+                    "issues": rule_issues,
+                    "recommendations": rule_recommendations,
+                },
+            }
+            return {}, [f"LLM 结果评估失败：{failed_details['llm_review_error']}"], [
+                "先查看 runtime_review 的 system_prompt、user_prompt 和 raw_response，确认评审提示词或输出约束哪里失效。",
+                "修复前不要把这次 production-review 当成有效评估结论；规则检查只保留在下方作为辅助证据。",
+            ], failed_details
 
         llm_scores = llm_review.get("scores") or {}
         scores = {
@@ -2775,26 +2877,30 @@ class AgentWorkshopService:
         ])
 
         system_prompt = "你正在 TradingAgents-CN 的 Agent 生命周期工坊中做运行评审。TradingAgents-CN 是一个面向投研、交易分析、Agent 编排与能力复用的多智能体金融分析系统。你当前角色是严谨的运行评审专家，同时具备金融行业和系统架构评审视角。你的判断依据只能来自版本信息、运行上下文、prompt 调试信息、工具轨迹、运行输出、规则信号和用户反馈，不能把证据中没有出现的系统能力、工具使用或数据来源当成事实。你只输出合法 JSON，并且会明确区分已有证据和证据不足。"
-        response = await client.achat([
-            Message(role="system", content=system_prompt),
-            Message(role="user", content=prompt),
-        ])
-        raw_content = (response.content or "").strip()
-        self._log_llm_exchange(
-            "runtime_review",
-            system_prompt,
-            prompt,
-            raw_content,
-            context={
-                "version_id": version.version_id,
-                "spec_id": spec.spec_id,
-                "spec_name": spec.name,
-                "symbol": runtime_result.get("symbol"),
-                "analysis_date": runtime_result.get("analysis_date"),
-            },
-        )
-        data = self._load_json_response(raw_content)
-        normalized_review = self._normalize_runtime_llm_review(data, raw_content)
+        raw_content = ""
+        try:
+            response = await client.achat([
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=prompt),
+            ])
+            raw_content = (response.content or "").strip()
+            self._log_llm_exchange(
+                "runtime_review",
+                system_prompt,
+                prompt,
+                raw_content,
+                context={
+                    "version_id": version.version_id,
+                    "spec_id": spec.spec_id,
+                    "spec_name": spec.name,
+                    "symbol": runtime_result.get("symbol"),
+                    "analysis_date": runtime_result.get("analysis_date"),
+                },
+            )
+            data = self._load_json_response(raw_content)
+            normalized_review = self._normalize_runtime_llm_review(data, raw_content)
+        except Exception as exc:
+            raise AgentWorkshopLLMStageError("runtime_review", str(exc), raw_response=raw_content) from exc
         self._log_generated_result(
             "runtime_review",
             normalized_review,
@@ -2817,8 +2923,12 @@ class AgentWorkshopService:
             "runtime_prompt_quality",
             "runtime_constraint_control",
         ]
-        source_scores = data.get("scores") if isinstance(data.get("scores"), dict) else {}
-        source_dimensions = data.get("dimensions") if isinstance(data.get("dimensions"), dict) else {}
+        source_scores = data.get("scores")
+        if not isinstance(source_scores, dict):
+            raise ValueError("runtime_review 缺少对象字段 scores")
+        source_dimensions = data.get("dimensions")
+        if not isinstance(source_dimensions, dict):
+            raise ValueError("runtime_review 缺少对象字段 dimensions")
 
         normalized_dimensions: Dict[str, Any] = {}
         normalized_scores: Dict[str, float] = {}
@@ -2826,16 +2936,15 @@ class AgentWorkshopService:
         all_recommendations: List[str] = []
 
         for key in dimension_keys:
-            raw_dimension = source_dimensions.get(key) if isinstance(source_dimensions.get(key), dict) else {}
-            score = self._clamp_score(
-                raw_dimension.get("score", source_scores.get(key, 0.0)),
-                fallback=0.0,
-            )
-            evidence = self._pick_list(raw_dimension.get("evidence"), [])[:6]
-            problems = self._pick_list(raw_dimension.get("problems"), [])[:6]
-            suggestions = self._pick_list(raw_dimension.get("suggestions"), [])[:6]
-            notes = self._pick_list(raw_dimension.get("notes"), [])[:6]
-            judgement = self._pick_str(raw_dimension.get("judgement"), "")
+            raw_dimension = source_dimensions.get(key)
+            if not isinstance(raw_dimension, dict):
+                raise ValueError(f"runtime_review 缺少维度对象 {key}")
+            score = self._require_score_field(raw_dimension, "score", f"runtime_review.{key}")
+            evidence = self._require_list_field(raw_dimension, "evidence", f"runtime_review.{key}")[:6]
+            problems = self._require_list_field(raw_dimension, "problems", f"runtime_review.{key}")[:6]
+            suggestions = self._require_list_field(raw_dimension, "suggestions", f"runtime_review.{key}")[:6]
+            notes = self._require_list_field(raw_dimension, "notes", f"runtime_review.{key}")[:6]
+            judgement = self._require_string_field(raw_dimension, "judgement", f"runtime_review.{key}")
 
             normalized_dimensions[key] = {
                 "score": score,
@@ -2850,11 +2959,11 @@ class AgentWorkshopService:
             all_recommendations.extend(suggestions)
 
         return {
-            "summary": self._pick_str(data.get("summary"), "LLM 已完成运行评审。"),
+            "summary": self._require_string_field(data, "summary", "runtime_review"),
             "scores": normalized_scores,
             "dimensions": normalized_dimensions,
-            "issues": self._dedupe([*self._pick_list(data.get("issues"), []), *all_issues]),
-            "recommendations": self._dedupe([*self._pick_list(data.get("recommendations"), []), *all_recommendations]),
+            "issues": self._dedupe([*self._require_list_field(data, "issues", "runtime_review"), *all_issues]),
+            "recommendations": self._dedupe([*self._require_list_field(data, "recommendations", "runtime_review"), *all_recommendations]),
             "raw_response": raw_content,
         }
 
