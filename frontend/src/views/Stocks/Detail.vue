@@ -1162,6 +1162,11 @@ function formatNewsTime(dateStr: string | null | undefined): string {
 
 // 格式化报告名称
 function formatReportName(key: string): string {
+  const isEtfAnalysis = Array.isArray(lastAnalysis.value?.analysts) && lastAnalysis.value.analysts.includes('etf_analyst')
+  if (key === 'fundamentals_report' && isEtfAnalysis) {
+    return '📊 ETF 分析'
+  }
+
   // 完整的13个报告映射
   const nameMap: Record<string, string> = {
     // 🆕 宏观分析师团队 (2个)

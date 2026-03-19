@@ -149,7 +149,8 @@ async def save_analysis_report(
     source: str = "api",
     engine: str = "v2",
     user_id: Optional[str] = None,
-    performance_metrics: Dict[str, Any] = None
+    performance_metrics: Dict[str, Any] = None,
+    task_type: Optional[str] = None
 ) -> str:
     """
     保存分析报告到 analysis_reports 集合（统一方法）
@@ -195,6 +196,7 @@ async def save_analysis_report(
         "status": "completed",
         "source": source,
         "engine": engine,
+        "task_type": task_type,
 
         # 分析结果摘要
         "summary": summary or "分析完成",
