@@ -969,7 +969,7 @@ async def add_data_source_config(
             elif not is_valid_api_key(api_key):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="API Key 无效：长度必须大于 10 个字符，且不能是占位符"
+                    detail="API Key 无效：长度必须至少 5 个字符，且不能是占位符"
                 )
             # 有效的完整密钥，保留
 
@@ -985,7 +985,7 @@ async def add_data_source_config(
             elif not is_valid_api_key(api_secret):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="API Secret 无效：长度必须大于 10 个字符，且不能是占位符"
+                    detail="API Secret 无效：长度必须至少 5 个字符，且不能是占位符"
                 )
 
         ds_config = DataSourceConfig(**_req)
@@ -1475,12 +1475,12 @@ async def update_data_source_config(
                     # 如果是新输入的密钥，必须验证有效性
                     elif not is_valid_api_key(api_key):
                         logger.error(f"❌ [API Key 验证] 验证失败: '{api_key}' (长度: {len(api_key)})")
-                        logger.error(f"   - 长度检查: {len(api_key)} > 10? {len(api_key) > 10}")
+                        logger.error(f"   - 长度检查: {len(api_key)} >= 5? {len(api_key) >= 5}")
                         logger.error(f"   - 占位符前缀检查: startswith('your_')? {api_key.startswith('your_')}, startswith('your-')? {api_key.startswith('your-')}")
                         logger.error(f"   - 占位符后缀检查: endswith('_here')? {api_key.endswith('_here')}, endswith('-here')? {api_key.endswith('-here')}")
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"API Key 无效：长度必须大于 10 个字符，且不能是占位符（当前长度: {len(api_key)}）"
+                            detail=f"API Key 无效：长度必须至少 5 个字符，且不能是占位符（当前长度: {len(api_key)}）"
                         )
                     else:
                         logger.info(f"✅ [API Key 验证] 验证通过，将更新密钥 (长度: {len(api_key)})")
@@ -1531,10 +1531,10 @@ async def update_data_source_config(
                     # 如果是新输入的密钥，必须验证有效性
                     elif not is_valid_api_key(api_secret):
                         logger.error(f"❌ [API Secret 验证] 验证失败: '{api_secret}' (长度: {len(api_secret)})")
-                        logger.error(f"   - 长度检查: {len(api_secret)} > 10? {len(api_secret) > 10}")
+                        logger.error(f"   - 长度检查: {len(api_secret)} >= 5? {len(api_secret) >= 5}")
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"API Secret 无效：长度必须大于 10 个字符，且不能是占位符（当前长度: {len(api_secret)}）"
+                            detail=f"API Secret 无效：长度必须至少 5 个字符，且不能是占位符（当前长度: {len(api_secret)}）"
                         )
                     else:
                         logger.info(f"✅ [API Secret 验证] 验证通过，将更新密钥 (长度: {len(api_secret)})")
