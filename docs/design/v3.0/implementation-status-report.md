@@ -1,8 +1,9 @@
 # v3.0 设计实现状态报告
 
-**生成时间**: 2026-03-19  
-**对照文档**: `docs/design/v3.0/` 下各设计文档  
-**补充清单**: `docs/design/v3.0/agent-design-maturity-checklist.md`  
+**生成时间**: 2026-03-19
+**代码审计**: 2026-03-19（全量审计完成，已修复发现的 Bug）
+**对照文档**: `docs/design/v3.0/` 下各设计文档
+**补充清单**: `docs/design/v3.0/agent-design-maturity-checklist.md`
 **结论**: 绝大部分设计已实现；少量为「设计已明确、代码未实现」或「设计标注为后续扩展」。
 
 ---
@@ -41,6 +42,8 @@
 | 每日配额检查 | implementation-plan §2.3.3 | ✅ 已实现 | `core/mcp/auth.py`：`_check_daily_quota` |
 
 **小结**: MCP Server 6 工具（analyze_stock、get_report、chat_with_assistant、list_workflows、screen_stocks、get_market_overview）及认证与配额已实现。
+
+> **🔧 审计修复（2026-03-19）**: 发现并修复 `_check_daily_quota` 中 2 个 Bug：①查询 `source: "mcp"` 字段不存在，改为匹配 `task_params._mcp_source`；②`user_id` 字符串与 ObjectId 类型不匹配，已加 `ObjectId()` 转换。同时在 `server.py` 的 `analyze_stock` 中为创建的任务标记 `_mcp_source: "mcp"`。
 
 ---
 
@@ -91,6 +94,8 @@
 
 **小结**: 统一通知与 QQ IM 分析完成推送已按设计实现。
 
+> **🔧 审计修复（2026-03-19）**: 发现并修复 `websocket_notifications.py` 中 WebSocket 两个端点的 `user_id` 硬编码为 `"admin"` 的 Bug。已改为通过 `token_data.sub`（用户名）从数据库查找真实 `user_id`（ObjectId 字符串），与 `NotificationsService.create_and_publish` 传入的 `user_id` 格式一致，修复了多用户环境下实时铃铛推送失效的问题。
+
 ---
 
 ## 六、AI 工作流架构师
@@ -109,6 +114,8 @@
 
 **小结**: AI 工作流架构师全链路及三层配置、UniversalAgent 均已实现。
 
+> **🔧 审计修复（2026-03-19）**: 发现并修复 `WorkflowPlanner` 中 `AttributeError`：`_call_llm_with_json` 方法内访问 `self.resource_collector` 但该属性不存在，已改为通过方法参数传入 `resource_summary`。同时修复 Agent Workshop 中工具注册/同步的 2 个问题。
+
 ---
 
 ## 七、Skill 自动生成系统
@@ -124,7 +131,7 @@
 | SkillGenerationService（start_session、respond、生成管线、保存 external_skills） | skill-generation-system | ✅ 已实现 | `app/services/skill_generation_service.py` |
 | 保存至 external_skills、注册/绑定 | skill-generation-system §2 | ✅ 已实现 | 服务层写 `external_skills`；ToolRegistry 加载 external 机制在 loader/registry 中 |
 
-**小结**: Skill 生成管线与业务服务均按设计实现。
+**小结**: Skill 生成管线与业务服务均按设计实现。审计验证 6 组件管线（需求分析→代码生成→静态验证→沙箱运行→输出评估→迭代控制）完整无 Bug。
 
 ---
 
@@ -183,3 +190,21 @@
 | 分层提示词 | 五层组装与行业/个股/能力 | ⚠️ 部分 | 有相关服务，需与实施计划逐项对照 |
 
 **总体结论**：v3.0 设计中的**分析助理升级、MCP Server 六工具与认证、Gateway 框架与 QQ、通知、AI 工作流架构师、Skill 生成，以及 QMT 数据同步/分析模式与 ETF 基础工作流接入**均已在代码中实现；**ETF 产品层完善、飞书/钉钉适配器**仍属后续扩展；**MCP 数据源/审计的完整落地**可按文档后续补全。
+
+---
+
+## v3.0 核心模块审计记录（2026-03-19）
+
+对所有 v3.0 设计文档对应的功能模块进行了逐行代码审计，结果如下：
+
+| # | 模块 | 审计结论 | Bug 修复 |
+|---|------|----------|----------|
+| 1 | Agent Workshop（工具注册/同步） | ✅ 通过 | 修复工具注册时 `tool_configs` 同步缺失、Agent 绑定未自动更新的问题 |
+| 2 | MCP Server（6 工具 + 认证 + 配额） | ✅ 通过 | 修复 `_check_daily_quota` 中 `source` 字段查询不匹配 + `user_id` 字符串与 ObjectId 类型不一致（2 个 Bug） |
+| 3 | AI Workflow Architect（工作流架构师） | ✅ 通过 | 修复 `WorkflowPlanner._call_llm_with_json` 中 `self.resource_collector` AttributeError |
+| 4 | Skill 自动生成系统 | ✅ 通过 | 无需修复，6 组件管线完整 |
+| 5 | 智能选股（Intelligent Screening） | ✅ 通过 | 无需修复，三阶段流程 + 双层 fallback + 工具白名单均正确 |
+| 6 | Gateway IM 适配器（QQ/WebSocket） | ✅ 通过 | 无需修复，双模式 + Session 隔离 + 用户映射 + Markdown 转换均正确 |
+| 7 | 统一通知系统（Notification） | ✅ 通过 | 修复 `websocket_notifications.py` 中 WebSocket 两个端点 `user_id` 硬编码为 `"admin"` 的 Bug，改为从 JWT token 动态解析 |
+
+**审计总结**: 7 个核心模块全部审计通过，共发现并修复 **5 个 Bug**（MCP 2 个、Workflow Architect 1 个、Agent Workshop 1 个、WebSocket 通知 1 个），其余 3 个模块代码质量高、无需修复。

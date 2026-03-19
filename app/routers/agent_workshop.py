@@ -342,6 +342,64 @@ async def iterate_version(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/versions/{version_id}/publish")
+async def publish_version(
+    version_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    try:
+        svc = _get_service(db)
+        result = await svc.publish_version(version_id)
+        return ok(result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Agent 工坊版本发布失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class UpdateVersionPromptRequest(BaseModel):
+    content: dict = Field(..., description="提示词内容（6 字段结构）")
+    status: Optional[str] = Field(default=None, description="模板状态: draft, active")
+
+
+@router.get("/versions/{version_id}/prompt")
+async def get_version_prompt(
+    version_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    try:
+        svc = _get_service(db)
+        result = await svc.get_version_prompt(version_id)
+        return ok(result)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Agent 工坊获取版本提示词失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/versions/{version_id}/prompt")
+async def update_version_prompt(
+    version_id: str,
+    req: UpdateVersionPromptRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    try:
+        svc = _get_service(db)
+        result = await svc.update_version_prompt(
+            version_id,
+            content=req.content,
+            status=req.status,
+        )
+        return ok(result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Agent 工坊更新版本提示词失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/versions/{version_id}/debug")
 async def debug_version(
     version_id: str,

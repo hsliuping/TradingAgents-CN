@@ -181,11 +181,17 @@ Agent 工坊以“规格驱动”代替“硬编码驱动”。
 
 - `session_id`
 - `spec_id`
+- `user_id`
 - `stage`: gathering / planning / gap-analysis / building / evaluating / completed
 - `messages`
 - `current_spec_snapshot`
 - `gap_report`
 - `proposed_version`
+- `tooling_plan` — 工具需求草案（由 LLM 生成的工具补齐方案）
+- `feasibility_status` — 可行性判断（feasible / needs_discussion / infeasible）
+- `refusal_reason` — 若需求不可行，说明拒绝原因
+- `pending_questions` — 当前待澄清问题列表
+- `completeness_score` — 规格完整度评分（0~1）
 
 ### 4.3 AgentVersion
 
@@ -209,12 +215,14 @@ Agent 工坊以“规格驱动”代替“硬编码驱动”。
     "get_stock_market_data_unified",
     "get_financials"
   ],
-  "required_skills": [],
+  "required_capabilities": [],
   "output_schema": {},
   "evaluation_policy": {},
   "published_from_session_id": "aws_001"
 }
 ```
+
+> **实现说明**：代码中字段名为 `required_capabilities`（带 `alias="required_skills"` 兼容旧数据）。缺口分析输出中同样使用 `suggested_capabilities`（alias `suggested_skills`）。
 
 ### 4.4 AgentEvaluationReport
 
@@ -275,6 +283,7 @@ Agent 工坊以“规格驱动”代替“硬编码驱动”。
 
 - 判断当前系统能否支撑该 Agent
 - 识别工具、Skill、Prompt、报告模板缺口
+- **生成工具需求草案**（tooling plan）— 基于缺口分析，由 LLM 自动规划所需工具的补齐方案
 
 输出应至少包含：
 
@@ -283,6 +292,7 @@ Agent 工坊以“规格驱动”代替“硬编码驱动”。
 3. 缺失工具清单
 4. 可通过 Skill 自动补齐的缺口
 5. 需要人工新增的数据源或业务逻辑
+6. **工具需求草案**（draft_tools）— 每个缺失工具的名称、用途、参数、优先级和补齐建议
 
 与现有系统关系：
 
@@ -407,63 +417,54 @@ Prompt 是否漏约束、是否引导偏题、是否存在冗余指令
 
 ---
 
-## 7. API 设计建议
+## 7. API 设计
 
-建议新增前缀：`/api/agent-workshop`
+前缀：`/api/agent-workshop`
 
 ### 7.1 会话相关
 
-- `POST /api/agent-workshop/sessions/start`
-  启动 Agent 工坊会话
-
-- `POST /api/agent-workshop/sessions/{session_id}/respond`
-  用户回复，推进规格讨论
-
-- `GET /api/agent-workshop/sessions/{session_id}`
-  获取会话详情
+- `POST /sessions/start` — 启动 Agent 工坊会话
+- `POST /sessions/{session_id}/respond` — 用户回复，推进规格讨论
+- `GET /sessions/{session_id}` — 获取会话详情
+- `GET /sessions` — 会话列表（支持 stage、user_id 筛选与分页）
+- `DELETE /sessions/{session_id}` — 删除会话
 
 ### 7.2 规格与版本
 
-- `POST /api/agent-workshop/sessions/{session_id}/preview-spec`
-  预览 AgentSpec
+- `POST /sessions/{session_id}/preview-spec` — 预览 AgentSpec
+- `POST /sessions/{session_id}/analyze-gaps` — 生成资源缺口报告
+- `POST /sessions/{session_id}/generate-tooling-plan` — 生成工具需求草案
+- `POST /sessions/{session_id}/build-version` — 生成 AgentVersion 草案
+- `GET /specs` — 规格列表（支持 status、user_id 筛选与分页）
+- `GET /specs/{spec_id}` — 获取规格详情
+- `DELETE /specs/{spec_id}` — 删除规格（级联删除关联版本、评估、Prompt 模板）
+- `GET /specs/{spec_id}/sample-sets` — 获取规格的标准样本集
+- `GET /versions` — 版本列表（支持 spec_id、status 筛选与分页）
+- `GET /versions/{version_id}` — 获取版本详情
+- `POST /versions/{version_id}/publish` — 发布版本（testing → active）
 
-- `POST /api/agent-workshop/sessions/{session_id}/analyze-gaps`
-  生成资源缺口报告
+### 7.3 评估与调试
 
-- `POST /api/agent-workshop/sessions/{session_id}/build-version`
-  生成 AgentVersion 草案
+- `POST /versions/{version_id}/evaluate` — 对某版 Agent 进行评估（支持 sandbox / benchmark / production-review）
+- `GET /versions/{version_id}/evaluations` — 获取评估历史
+- `POST /versions/{version_id}/iterate` — 基于评估结果发起下一轮迭代
+- `POST /versions/{version_id}/debug` — 沙箱调试（指定 LLM、股票、目标，实时执行 Agent 并返回结果）
 
-- `POST /api/agent-workshop/versions/{version_id}/publish`
-  发布版本
+### 7.4 系统能力
 
-### 7.3 评估相关
-
-- `POST /api/agent-workshop/versions/{version_id}/evaluate`
-  对某版 Agent 进行评估
-
-- `GET /api/agent-workshop/versions/{version_id}/evaluations`
-  获取评估历史
-
-- `POST /api/agent-workshop/versions/{version_id}/iterate`
-  基于评估结果发起下一轮迭代
+- `GET /capability-snapshot` — 获取当前系统能力快照（可用 Agent、工具、Skill 等汇总）
 
 ---
 
 ## 8. 前端设计建议
 
-建议新增页面：
+实际前端页面：
 
 1. `frontend/src/views/Workflow/AgentWorkshop.vue`
    Agent 工坊首页，展示所有 Spec、版本、状态
 
-2. `frontend/src/views/Workflow/AgentWorkshopCreate.vue`
-   创建新 Agent，会话式定义规格
-
-3. `frontend/src/views/Workflow/AgentVersionDetail.vue`
-   查看版本详情、Prompt、工具绑定、评估结果
-
-4. `frontend/src/views/Workflow/AgentEvaluation.vue`
-   查看测试样本、评分、问题与建议
+2. `frontend/src/views/Workflow/AgentWorkshopManager.vue`
+   创建与管理 Agent，会话式定义规格、版本详情、评估结果（合并了原设计中的 Create / VersionDetail / Evaluation 三个页面）
 
 页面复用策略：
 
@@ -517,11 +518,49 @@ Prompt 是否漏约束、是否引导偏题、是否存在冗余指令
 - 发布审批
 - 生产反馈回流
 
+> **实现状态**（2026-03-19 更新）：
+> - ✅ 版本发布 API `POST /versions/{version_id}/publish`（testing → active）已实现
+> - ✅ 发布时自动归档之前的 active 版本
+> - ✅ 发布后更新 Spec 的 `current_version_id` 和状态
+> - ⚠️ 发布审批流程（多人审批）尚未实现
+> - ⚠️ 灰度策略（按比例放量）尚未实现
+> - ⚠️ 生产反馈自动回流机制尚未实现
+
 ---
 
-## 10. 关键决策
+## 10. 实现补充说明
 
-### 10.1 不直接修改原有 Agent
+以下特性在实现过程中被增加，超出原始设计范围：
+
+### 10.0.1 数值可追溯策略
+
+代码中通过 `_get_numeric_traceability_policy` 自动检测 Agent 是否涉及数值输出（如估值、评分），并在 Prompt 中注入"所有数值必须标注来源"的约束，防止 LLM 编造数据。
+
+### 10.0.2 能力快照
+
+`GET /capability-snapshot` 返回系统当前可用的 Agent、工具、Skill、Prompt 模板汇总，帮助规格讨论器更准确地判断可行性。
+
+### 10.0.3 工具需求草案
+
+`POST /sessions/{session_id}/generate-tooling-plan` 在缺口分析基础上，由 LLM 生成更详细的工具补齐方案（包含每个缺失工具的参数设计、优先级和实现建议）。
+
+### 10.0.4 沙箱调试
+
+`POST /versions/{version_id}/debug` 支持指定 LLM 配置和股票标的，实时执行 Agent 版本并返回完整调试结果（含 Prompt、LLM 原始响应、工具调用轨迹）。
+
+### 10.0.5 级联删除
+
+`DELETE /specs/{spec_id}` 会级联删除关联的所有版本、评估报告和 Prompt 模板，防止孤立数据。
+
+### 10.0.6 标准样本集
+
+`GET /specs/{spec_id}/sample-sets` 根据 Spec 的 `sample_symbols` 和评估维度自动生成标准样本集，供 benchmark 评估使用。
+
+---
+
+## 11. 关键决策
+
+### 11.1 不直接修改原有 Agent
 
 原则：
 
@@ -529,7 +568,7 @@ Prompt 是否漏约束、是否引导偏题、是否存在冗余指令
 - 新 Agent 一律先以版本草案方式存在
 - 经评估通过后再进入 active
 
-### 10.2 先做“独立 Agent 工坊”，再考虑接入主流程
+### 11.2 先做“独立 Agent 工坊”，再考虑接入主流程
 
 股票估值分析师试点不应直接插入原始单股分析主工作流。
 
@@ -540,7 +579,7 @@ Prompt 是否漏约束、是否引导偏题、是否存在冗余指令
 3. 单独评估
 4. 通过后再决定是否纳入某条工作流
 
-### 10.3 Prompt、工具、Skill、评估必须分层
+### 11.3 Prompt、工具、Skill、评估必须分层
 
 不要把“生成 Agent”简化为“生成 Prompt”。
 
@@ -556,7 +595,7 @@ Prompt 是否漏约束、是否引导偏题、是否存在冗余指令
 
 ---
 
-## 11. 预期收益
+## 12. 预期收益
 
 引入 Agent 工坊后，系统会获得三种新的能力：
 

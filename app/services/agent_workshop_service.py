@@ -591,9 +591,76 @@ class AgentWorkshopService:
             version.updated_at = now_tz()
             await self._save_version(version)
 
+        # 更新关联 session 的 stage 为 EVALUATING
+        if spec.latest_session_id:
+            session_doc = await self._db[SESSION_COLLECTION].find_one({"session_id": spec.latest_session_id})
+            if session_doc:
+                session = AgentWorkshopSession(**session_doc)
+                session.stage = AgentWorkshopStage.EVALUATING
+                session.updated_at = now_tz()
+                await self._save_session(session)
+
         return {
             "version_id": version.version_id,
             "evaluation": report,
+        }
+
+    async def publish_version(self, version_id: str) -> Dict[str, Any]:
+        """将版本从 testing 状态发布为 active，并更新关联 Spec 的 current_version_id"""
+        version_doc = await self._db[VERSION_COLLECTION].find_one({"version_id": version_id})
+        if not version_doc:
+            raise ValueError(f"版本 {version_id} 不存在")
+
+        version = AgentVersion(**version_doc)
+        if version.status != AgentVersionStatus.TESTING:
+            raise ValueError(
+                f"版本 {version_id} 当前状态为 {version.status.value}，只有 testing 状态的版本可以发布"
+            )
+
+        spec_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": version.spec_id})
+        if not spec_doc:
+            raise ValueError(f"规格 {version.spec_id} 不存在")
+        spec = AgentSpec(**spec_doc)
+
+        # 将之前 active 的版本归档
+        await self._db[VERSION_COLLECTION].update_many(
+            {"spec_id": spec.spec_id, "status": AgentVersionStatus.ACTIVE.value},
+            {"$set": {"status": AgentVersionStatus.ARCHIVED.value, "updated_at": now_tz().isoformat()}},
+        )
+
+        # 更新版本状态为 active
+        version.status = AgentVersionStatus.ACTIVE
+        version.updated_at = now_tz()
+        await self._save_version(version)
+
+        # 注册到 agent_configs，确保发布的 Agent 能被工作流引擎调度
+        await self._ensure_runtime_agent_config(version, spec)
+
+        # 更新 Spec 的 current_version_id 和状态
+        spec.current_version_id = version.version_id
+        spec.status = AgentSpecStatus.ACTIVE
+        await self._save_spec(spec)
+
+        # 更新关联 session 的 stage 为 COMPLETED
+        if spec.latest_session_id:
+            session_doc = await self._db[SESSION_COLLECTION].find_one({"session_id": spec.latest_session_id})
+            if session_doc:
+                session = AgentWorkshopSession(**session_doc)
+                session.stage = AgentWorkshopStage.COMPLETED
+                session.updated_at = now_tz()
+                await self._save_session(session)
+
+        logger.info(
+            "[AgentWorkshop] 版本发布成功: version_id=%s spec_id=%s",
+            version.version_id,
+            spec.spec_id,
+        )
+
+        return {
+            "version_id": version.version_id,
+            "spec_id": spec.spec_id,
+            "status": version.status.value,
+            "previous_active_archived": True,
         }
 
     async def list_evaluations(
@@ -668,6 +735,117 @@ class AgentWorkshopService:
             "session_id": result["session_id"],
             "spec_id": result["spec_id"],
             "ai_message": result["ai_message"],
+        }
+
+    async def get_version_prompt(self, version_id: str) -> Dict[str, Any]:
+        """获取版本关联的提示词模板完整内容"""
+        version_doc = await self._db[VERSION_COLLECTION].find_one({"version_id": version_id})
+        if not version_doc:
+            raise ValueError(f"版本 {version_id} 不存在")
+        version = AgentVersion(**version_doc)
+
+        template_id = str(version.prompt_template_ref.get("template_id") or "").strip()
+        if not template_id:
+            return {
+                "version_id": version_id,
+                "template_id": None,
+                "template_name": version.prompt_template_ref.get("template_name"),
+                "status": version.prompt_template_ref.get("status"),
+                "content": None,
+                "message": "当前版本没有关联的提示词模板",
+            }
+
+        prompt_service = PromptTemplateService(db=self._db)
+        template = await prompt_service.get_template(template_id)
+        if not template:
+            return {
+                "version_id": version_id,
+                "template_id": template_id,
+                "template_name": version.prompt_template_ref.get("template_name"),
+                "status": version.prompt_template_ref.get("status"),
+                "content": None,
+                "message": "提示词模板已被删除或不可访问",
+            }
+
+        return {
+            "version_id": version_id,
+            "template_id": str(template.id),
+            "template_name": template.template_name,
+            "status": template.status,
+            "version": template.version,
+            "content": template.content.model_dump() if template.content else None,
+            "remark": template.remark,
+            "created_at": template.created_at.isoformat() if template.created_at else None,
+            "updated_at": template.updated_at.isoformat() if template.updated_at else None,
+        }
+
+    async def update_version_prompt(
+        self,
+        version_id: str,
+        content: Dict[str, str],
+        status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """更新版本关联的提示词模板内容，供用户在发布前审阅和调整"""
+        version_doc = await self._db[VERSION_COLLECTION].find_one({"version_id": version_id})
+        if not version_doc:
+            raise ValueError(f"版本 {version_id} 不存在")
+        version = AgentVersion(**version_doc)
+
+        if version.status == AgentVersionStatus.ACTIVE:
+            raise ValueError("已发布的版本不允许修改提示词，请创建新版本")
+        if version.status == AgentVersionStatus.ARCHIVED:
+            raise ValueError("已归档的版本不允许修改提示词")
+
+        template_id = str(version.prompt_template_ref.get("template_id") or "").strip()
+        if not template_id:
+            raise ValueError("当前版本没有关联的提示词模板，请先构建版本")
+
+        prompt_service = PromptTemplateService(db=self._db)
+        template = await prompt_service.get_template(template_id)
+        if not template:
+            raise ValueError("提示词模板不存在或已被删除")
+
+        from app.models.prompt_template import PromptTemplateUpdate, TemplateContent
+        update_data = PromptTemplateUpdate(
+            content=TemplateContent(**content),
+            status=status or template.status,
+        )
+
+        # 工坊生成的模板 is_system=True（无 created_by），直接更新数据库绕过权限
+        update_doc = {
+            "content": update_data.content.model_dump(),
+            "updated_at": now_tz(),
+        }
+        if status:
+            update_doc["status"] = status
+        update_doc["version"] = template.version + 1
+
+        from bson import ObjectId as BsonObjectId
+        await self._db["prompt_templates"].update_one(
+            {"_id": BsonObjectId(template_id)},
+            {"$set": update_doc},
+        )
+
+        # 同步更新 version 的 prompt_template_ref 状态
+        if status and status != version.prompt_template_ref.get("status"):
+            version.prompt_template_ref["status"] = status
+            version.updated_at = now_tz()
+            await self._save_version(version)
+
+        logger.info(
+            "[AgentWorkshop] 版本提示词已更新: version_id=%s template_id=%s",
+            version_id,
+            template_id,
+        )
+
+        updated_template = await prompt_service.get_template(template_id)
+        return {
+            "version_id": version_id,
+            "template_id": template_id,
+            "template_name": updated_template.template_name if updated_template else None,
+            "status": updated_template.status if updated_template else status,
+            "version": updated_template.version if updated_template else template.version + 1,
+            "content": updated_template.content.model_dump() if updated_template and updated_template.content else content,
         }
 
     async def debug_version(

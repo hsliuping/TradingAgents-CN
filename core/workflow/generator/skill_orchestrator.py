@@ -154,13 +154,13 @@ class SkillOrchestrator:
         Returns:
             成功创建的绑定数量
         """
-        if not blueprint.agent_reshaping:
+        if not blueprint.gap_analysis or not blueprint.gap_analysis.agent_reshaping:
             return 0
 
         bound_count = 0
         now = datetime.utcnow().isoformat()
 
-        for reshaping in blueprint.agent_reshaping:
+        for reshaping in blueprint.gap_analysis.agent_reshaping:
             if not reshaping.additional_tools:
                 continue
             if not reshaping.node_id:
