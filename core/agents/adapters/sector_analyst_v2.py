@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional
 from core.agents.analyst import AnalystAgent
 from core.agents.config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from core.agents.registry import register_agent
+from core.agents.utils.data_source_mode import resolve_market_data_mode
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +222,35 @@ class SectorAnalystV2(AnalystAgent):
     # 输出字段名
     output_field = "sector_report"
 
+    def _get_tool_ids_for_mode(self, mode: str) -> list[str]:
+        if mode == "qmt":
+            return ["get_sector_analysis_qmt"]
+        return ["get_sector_data", "get_fund_flow_data"]
+
+    def _prepare_analysis_mode(self, state: Dict[str, Any]) -> str:
+        mode = resolve_market_data_mode(state)
+        state["_analysis_data_source"] = mode
+        state["analysis_method"] = "qmt_sector_structure" if mode == "qmt" else "tushare_sector_full"
+        self._load_tools_v2(self._get_tool_ids_for_mode(mode))
+        return mode
+
+    def _apply_mode_prompt_suffix(self, prompt: str, mode: str, prompt_type: str) -> str:
+        if mode != "qmt":
+            return prompt
+
+        suffix = """
+
+## QMT 模式约束
+当前分析数据源为 QMT，请遵循以下要求：
+1. 重点分析行业内部强弱、龙头带动、扩散度和成交活跃度。
+2. 不要要求或假设存在同花顺板块资金净流入、概念板块官方排名等 Tushare 专属统计。
+3. 如果行业分类来自本地 stock_basic_info，必须明确说明“行业映射来自本地，行情来自 QMT”。
+4. 优先使用 get_sector_analysis_qmt 获取完整板块结构分析数据。
+"""
+        if prompt_type == "user":
+            suffix += "\n5. 报告应突出结构强弱和龙头扩散，不要把代理指标表述成官方板块资金流。\n"
+        return f"{prompt}{suffix}"
+
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行板块分析（带缓存）
@@ -234,6 +264,8 @@ class SectorAnalystV2(AnalystAgent):
         Returns:
             更新后的状态字典，包含 sector_report
         """
+        analysis_mode = self._prepare_analysis_mode(state)
+
         # 提取参数
         ticker = state.get("ticker") or state.get("company_of_interest")
         if not ticker and "trade_info" in state:
@@ -274,7 +306,7 @@ class SectorAnalystV2(AnalystAgent):
         # 因此，每次分析都必须重新生成，不能使用缓存（调试模式下也跳过缓存）
         logger.info(f"🏭 [板块分析师v2] 跳过缓存检查（行业报告不支持缓存），直接生成新报告")
 
-        logger.info(f"🏭 [板块分析师v2] 开始分析 {ticker} @ {analysis_date}")
+        logger.info(f"🏭 [板块分析师v2] 开始分析 {ticker} @ {analysis_date}, mode={analysis_mode}")
 
         # 调用父类的 execute 方法执行实际分析
         result = super().execute(state)
@@ -329,6 +361,8 @@ class SectorAnalystV2(AnalystAgent):
             fallback_prompt=None,
             prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )
+        mode = state.get("_analysis_data_source", "tushare")
+        prompt = self._apply_mode_prompt_suffix(prompt, mode, "system")
         
         logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
 
@@ -336,6 +370,25 @@ class SectorAnalystV2(AnalystAgent):
             return prompt
 
         # 降级：使用默认提示词（包含工具信息）
+        mode = state.get("_analysis_data_source", "tushare")
+        if mode == "qmt":
+            return f"""您是一位专业的{market_type}板块/行业分析师。
+
+## 您的职责
+基于 QMT 行情和本地行业映射，分析行业内部强弱、龙头带动、扩散度与活跃度变化。
+
+## 可用工具
+您可以调用以下工具获取真实板块数据：
+{tool_descriptions}
+
+## ⚠️ 重要规则
+1. 必须调用工具，不要臆造同花顺板块资金流或官方概念板块排名。
+2. 结论必须明确说明哪些来自 QMT 行情，哪些来自本地行业映射。
+3. 重点分析龙头、扩散、结构分层与成交活跃度。
+
+## 输出格式
+请使用中文输出结构化报告，并明确代理指标与官方统计口径的区别。"""
+
         return f"""您是一位专业的{market_type}板块/行业分析师。
 
 ## 您的职责
@@ -444,6 +497,8 @@ class SectorAnalystV2(AnalystAgent):
             fallback_prompt=None,
             prompt_type="user"  # 🔑 明确指定获取用户提示词
         )
+        mode = state.get("_analysis_data_source", "tushare")
+        prompt = self._apply_mode_prompt_suffix(prompt, mode, "user")
         
         if prompt:
             logger.info(f"✅ 从模板系统获取板块分析师 v2.0 用户提示词 (长度: {len(prompt)})")
@@ -453,6 +508,23 @@ class SectorAnalystV2(AnalystAgent):
         # 降级：使用默认提示词（不再检查 tool_data，因为工具数据会通过 ToolMessage 传递）
         logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
         # 🔑 关键：在默认提示词中明确告诉LLM要使用什么参数调用工具
+        if mode == "qmt":
+            return f"""## 分析任务
+
+    请对 **{ticker}（{company_name}）** 所属行业/板块进行 QMT 结构型板块分析。
+
+    **分析日期**: {analysis_date}
+    **股票代码**: {ticker}
+    **市场**: {market_type}
+    **数据源模式**: QMT
+
+    **重要提示**：调用工具时，必须使用以下参数：
+    - get_sector_analysis_qmt: ticker='{ticker}', trade_date='{analysis_date}', lookback_days=20, top_n=10
+
+    **必须使用上述参数值**，不要编造板块资金流、概念排名或官方板块指数统计。
+
+    请基于 QMT 行情和行业内部结构数据，分析龙头强度、板块扩散度和活跃度。"""
+
         return f"""## 分析任务
 
 请对 **{ticker}（{company_name}）** 所属的行业/板块进行全面分析。

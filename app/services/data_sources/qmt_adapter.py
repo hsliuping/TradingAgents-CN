@@ -51,7 +51,14 @@ def _get_xtdatacenter():
 
 def _normalize_code(code: str) -> str:
     """将 6 位代码转为 xtdata 格式：000001.SZ / 600000.SH"""
-    code = str(code).strip().replace(".SH", "").replace(".SZ", "").replace(".BJ", "")
+    raw_code = str(code).strip().upper()
+    if raw_code.endswith((".SH", ".SZ", ".BJ")):
+        suffix = raw_code[-3:]
+        digits = "".join(filter(str.isdigit, raw_code[:-3])).zfill(6)
+        if len(digits) == 6:
+            return f"{digits}{suffix}"
+
+    code = raw_code.replace(".SH", "").replace(".SZ", "").replace(".BJ", "")
     code = "".join(filter(str.isdigit, code)).zfill(6)
     if not code or len(code) != 6:
         return ""

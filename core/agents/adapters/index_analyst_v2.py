@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from core.agents.analyst import AnalystAgent
 from core.agents.config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from core.agents.registry import register_agent
+from core.agents.utils.data_source_mode import resolve_market_data_mode
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +170,44 @@ class IndexAnalystV2(AnalystAgent):
     # 输出字段名
     output_field = "index_report"
 
+    def _get_tool_ids_for_mode(self, mode: str) -> list[str]:
+        if mode == "qmt":
+            return ["get_market_overview_qmt"]
+        return [
+            "get_index_data",
+            "get_market_breadth",
+            "get_market_environment",
+            "identify_market_cycle",
+            "get_north_flow",
+            "get_margin_trading",
+            "get_limit_stats",
+            "get_index_technical",
+        ]
+
+    def _prepare_analysis_mode(self, state: Dict[str, Any]) -> str:
+        mode = resolve_market_data_mode(state)
+        state["_analysis_data_source"] = mode
+        state["analysis_method"] = "qmt_market_structure" if mode == "qmt" else "tushare_market_full"
+        self._load_tools_v2(self._get_tool_ids_for_mode(mode))
+        return mode
+
+    def _apply_mode_prompt_suffix(self, prompt: str, mode: str, prompt_type: str) -> str:
+        if mode != "qmt":
+            return prompt
+
+        suffix = """
+
+## QMT 模式约束
+当前分析数据源为 QMT，请遵循以下要求：
+1. 重点分析指数趋势、市场扩散、成交活跃度、风格切换与盘面结构。
+2. 不要要求或假设存在北向资金、两融、涨跌停官方统计、指数估值快照。
+3. 如果缺少官方统计口径，必须明确说明当前结论基于 QMT 行情口径与快照代理指标。
+4. 优先使用 get_market_overview_qmt 获取完整盘面分析数据。
+"""
+        if prompt_type == "user":
+            suffix += "\n5. 报告应突出交易盘面视角，不要将 QMT 代理指标表述成 Tushare 官方统计。\n"
+        return f"{prompt}{suffix}"
+
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行大盘分析（带缓存）
@@ -182,6 +221,8 @@ class IndexAnalystV2(AnalystAgent):
         Returns:
             更新后的状态字典，包含 index_report
         """
+        analysis_mode = self._prepare_analysis_mode(state)
+
         # 提取分析日期
         raw_date = (
             state.get("analysis_date") or
@@ -231,7 +272,7 @@ class IndexAnalystV2(AnalystAgent):
                     "index_report": cached_report,
                 }
 
-        logger.info(f"🌐 [大盘分析师v2] 开始分析 @ {analysis_date}")
+        logger.info(f"🌐 [大盘分析师v2] 开始分析 @ {analysis_date}, mode={analysis_mode}")
 
         # 调用父类的 execute 方法执行实际分析
         result = super().execute(state)
@@ -288,6 +329,8 @@ class IndexAnalystV2(AnalystAgent):
             fallback_prompt=None,
             prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )
+        mode = state.get("_analysis_data_source", "tushare")
+        prompt = self._apply_mode_prompt_suffix(prompt, mode, "system")
         
         logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
 
@@ -295,6 +338,25 @@ class IndexAnalystV2(AnalystAgent):
             return prompt
 
         # 降级：使用默认提示词（包含工具信息）
+        mode = state.get("_analysis_data_source", "tushare")
+        if mode == "qmt":
+            return f"""您是一位专业的{market_type}大盘分析师。
+
+    ## 您的职责
+    基于 QMT 行情口径分析指数趋势、市场扩散、活跃度和风格切换，为交易决策提供盘面级背景判断。
+
+    ## 可用工具
+    您可以调用以下工具获取真实市场数据：
+    {tool_descriptions}
+
+    ## ⚠️ 重要规则
+    1. 必须调用工具，不要臆造北向资金、两融、涨跌停官方统计等 QMT 不提供的数据。
+    2. 结论必须明确标注为“QMT 行情口径”或“快照代理指标”。
+    3. 重点做趋势、扩散、活跃度、大小盘/成长风格切换分析。
+
+    ## 输出格式
+    请使用中文输出结构化报告，并明确哪些判断基于代理指标。"""
+
         return f"""您是一位专业的{market_type}大盘分析师。
 
 ## 您的职责
@@ -403,6 +465,8 @@ class IndexAnalystV2(AnalystAgent):
             fallback_prompt=None,
             prompt_type="user"  # 🔑 明确指定获取用户提示词
         )
+        mode = state.get("_analysis_data_source", "tushare")
+        prompt = self._apply_mode_prompt_suffix(prompt, mode, "user")
         
         if prompt:
             logger.info(f"✅ 从模板系统获取大盘分析师 v2.0 用户提示词 (长度: {len(prompt)})")
@@ -412,6 +476,21 @@ class IndexAnalystV2(AnalystAgent):
         # 降级：使用默认提示词（不再检查 tool_data，因为工具数据会通过 ToolMessage 传递）
         logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
         # 🔑 关键：在默认提示词中明确告诉LLM要使用什么参数调用工具
+        if mode == "qmt":
+            return f"""## 分析任务
+
+    请对 **{ticker}（{company_name}）** 所在的{market_type}市场进行 QMT 盘面型大盘分析。
+
+    **分析日期**: {analysis_date}
+    **数据源模式**: QMT
+
+    **重要提示**：调用工具时，必须使用以下参数：
+    - get_market_overview_qmt: trade_date='{analysis_date}', lookback_days=60
+
+    **必须使用上述参数值**，不要编造北向资金、两融、涨跌停官方统计或指数估值数据。
+
+    请基于 QMT 指数走势、快照代理指标、风格切换和市场扩散度生成详细报告。"""
+
         return f"""## 分析任务
 
 请对 **{ticker}（{company_name}）** 所在的{market_type}市场进行全面的大盘分析。

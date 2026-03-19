@@ -1,6 +1,6 @@
 # v3.0 设计实现状态报告
 
-**生成时间**: 2026-03-10  
+**生成时间**: 2026-03-19  
 **对照文档**: `docs/design/v3.0/` 下各设计文档  
 **补充清单**: `docs/design/v3.0/agent-design-maturity-checklist.md`  
 **结论**: 绝大部分设计已实现；少量为「设计已明确、代码未实现」或「设计标注为后续扩展」。
@@ -147,7 +147,27 @@
 
 ---
 
-## 十、汇总表
+## 十、QMT 数据源与 ETF 同步
+
+| 设计项 | 设计文档 | 实现状态 | 代码位置 |
+| -------- | ---------- | ---------- | ---------- |
+| QMT 数据源适配器 | qmt-support §2、§3 | ✅ 已实现并增强 | `app/services/data_sources/qmt_adapter.py`：支持股票列表、ETF 列表、实时行情、K 线、财务数据、`xtdatacenter` 初始化、自动下载板块/历史/财务数据 |
+| QMT 大盘/板块分析模式 | qmt-support §5 | ✅ 已实现 | `core/agents/utils/data_source_mode.py`：分析模式判定；`core/agents/adapters/index_analyst_v2.py`、`core/agents/adapters/sector_analyst_v2.py`：运行时切换 QMT/Tushare 工具与提示词；`core/tools/qmt_market_tools.py`：QMT 原生市场分析逻辑 |
+| QMT 统一配置与桥接 | qmt-support §2、§5 | ✅ 已实现 | `app/core/config.py`、`app/core/unified_config.py`、`app/core/config_bridge.py`：新增运行时配置、数据源默认配置、env 桥接 |
+| QMT 配置测试与前端配置 | qmt-support §3、§7 | ✅ 已实现 | `app/services/config_service.py`：QMT 连通性测试；`frontend/src/views/Settings/components/DataSourceConfigDialog.vue`：QMT 配置入口 |
+| QMT 基础/行情/历史/财务/状态同步 | qmt-support §2、§3 | ✅ 已实现 | `app/worker/qmt_sync_service.py`、`app/main.py`：5 类同步与状态检查任务；`app/routers/scheduler.py`：支持 `qmt_historical_sync` 重试 |
+| QMT 历史数据入库 | qmt-support §4 | ✅ 已实现 | `app/worker/qmt_sync_service.py` 调用 `app/services/historical_data_service.py`，写入 `stock_daily_quotes` |
+| QMT 财务数据入库 | qmt-support §4、data-source-standard-layer §5.4 | ✅ 已实现 | `app/worker/qmt_sync_service.py`、`app/services/financial_data_service.py`：QMT 财务标准化并写入 `stock_financial_data` |
+| ETF 独立集合与同步服务 | beijing-exchange-etf-support §2.4、§3 | ✅ 已实现 | `app/worker/etf_sync_service.py`：同步 `etf_basic_info`、`etf_daily_quotes` |
+| QMT 接入 ETF 同步链路 | beijing-exchange-etf-support §2.2、§2.3 | ✅ 已实现 | `app/services/data_sources/qmt_adapter.py`：`get_etf_list()`；`app/worker/etf_sync_service.py`：QMT ETF 列表与历史日线接入 |
+| ETF 分析工作流与路由 | beijing-exchange-etf-support §2.4、§2.5、§2.6 | ✅ 已部分实现 | `core/workflow/templates/v2_etf_analysis_workflow.py`、`app/services/workflow_registry.py`、`app/routers/analysis.py`：已具备 ETF 工作流、任务类型与分析路由 |
+| ETF 分析工具与提示词成熟度 | beijing-exchange-etf-support §2.4、§2.5、§2.6 | ⚠️ 部分实现 | `core/agents/adapters/etf_analyst_v2.py`、`core/tools/implementations/fundamentals/etf_fundamentals.py`：已存在 ETF 分析师与基础工具，但产品层成熟度仍弱于普通股票主流程 |
+
+**小结**: QMT 已从“部分接入”提升为同时覆盖“同步 + 分析模式”的数据源，ETF 也已具备独立工作流雏形；当前主要缺口是 ETF 产品层成熟度与更完整的 QMT 统计口径扩展。
+
+---
+
+## 十一、汇总表
 
 | 模块 | 设计要点 | 状态 | 备注 |
 | ------ | ---------- | ------ | ------ |
@@ -159,6 +179,7 @@
 | AI 工作流架构师 | 资源收集、规划、提示词、Skill 编排、三层配置、UniversalAgent | ✅ 已实现 | — |
 | Skill 生成系统 | 需求分析→代码→验证→沙箱→评估→迭代→入库 | ✅ 已实现 | — |
 | 数据架构 | 存储与降级链 | ✅ 已实现 | MCP 数据源类与审计扩展为部分/规划 |
+| QMT 与 ETF | QMT 配置桥接、5 类同步任务、历史/财务入库、QMT 分析模式、ETF 数据同步与基础工作流 | ✅ 已部分完整实现 | ETF 产品层与更完整 QMT 统计口径仍需继续补强 |
 | 分层提示词 | 五层组装与行业/个股/能力 | ⚠️ 部分 | 有相关服务，需与实施计划逐项对照 |
 
-**总体结论**：v3.0 设计中的**分析助理升级、MCP Server 六工具与认证、Gateway 框架与 QQ、通知、AI 工作流架构师、Skill 生成、分层提示词优化**均已在代码中实现；**飞书/钉钉适配器**为设计中的后续扩展；**MCP 数据源/审计的完整落地**可按文档后续补全。
+**总体结论**：v3.0 设计中的**分析助理升级、MCP Server 六工具与认证、Gateway 框架与 QQ、通知、AI 工作流架构师、Skill 生成，以及 QMT 数据同步/分析模式与 ETF 基础工作流接入**均已在代码中实现；**ETF 产品层完善、飞书/钉钉适配器**仍属后续扩展；**MCP 数据源/审计的完整落地**可按文档后续补全。
