@@ -347,6 +347,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ 工作流注册表初始化失败: {e}")
 
+    # 确保 ETF 工作流专属提示词模板存在
+    try:
+        from app.services.etf_workflow_prompt_template_service import ensure_etf_workflow_prompt_templates
+
+        await ensure_etf_workflow_prompt_templates()
+        logger.info("✅ ETF 工作流提示词模板初始化完成")
+    except Exception as e:
+        logger.error(f"❌ ETF 工作流提示词模板初始化失败: {e}")
+
     # 🔥 初始化 Skills（从数据库加载已启用的可执行 Skills 到 ToolRegistry）
     try:
         from app.core.database import get_mongo_db

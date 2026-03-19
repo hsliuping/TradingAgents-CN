@@ -92,14 +92,42 @@ if (-not $SkipBuild) {
 Write-Host ""
 
 # ============================================================================
-# Step 3: 准备安装程序资源
+# Step 3: 构建安装器内容包（portable 7z）
 # ============================================================================
 
-Write-Host "[3/5] Preparing installer resources..." -ForegroundColor Yellow
+Write-Host "[3/5] Building installer payload package..." -ForegroundColor Yellow
+Write-Host ""
+
+$portablePackageScript = Join-Path $PSScriptRoot "build_portable_package.ps1"
+if (-not (Test-Path $portablePackageScript)) {
+    Write-Host "ERROR: Portable package script not found: $portablePackageScript" -ForegroundColor Red
+    exit 1
+}
+
+if ($Version) {
+    & powershell -ExecutionPolicy Bypass -File $portablePackageScript -Version $Version -SkipSync -SkipEmbeddedPython -SkipFrontendBuild -Format 7z
+} else {
+    & powershell -ExecutionPolicy Bypass -File $portablePackageScript -SkipSync -SkipEmbeddedPython -SkipFrontendBuild -Format 7z
+}
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Portable package build failed" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "  ✅ Installer payload package built successfully" -ForegroundColor Green
+Write-Host ""
+
+# ============================================================================
+# Step 4: 准备安装程序资源
+# ============================================================================
+
+Write-Host "[4/6] Preparing installer resources..." -ForegroundColor Yellow
 Write-Host ""
 
 $installerDir = Join-Path $root "scripts\windows-installer\nsis"
 $portableDir = Join-Path $root "release\TradingAgentsCN-portable"
+$packagesDir = Join-Path $root "release\packages"
 $licenseFile = Join-Path $root "LICENSE"
 
 # 检查必要文件
@@ -141,10 +169,10 @@ Write-Host "  ✅ Resources prepared" -ForegroundColor Green
 Write-Host ""
 
 # ============================================================================
-# Step 4: 编译NSIS脚本
+# Step 5: 编译NSIS脚本
 # ============================================================================
 
-Write-Host "[4/5] Compiling NSIS script..." -ForegroundColor Yellow
+Write-Host "[5/6] Compiling NSIS script..." -ForegroundColor Yellow
 Write-Host ""
 
 $nsiScript = Join-Path $installerDir "installer.nsi"
@@ -163,7 +191,36 @@ if (-not $Version) {
     }
 }
 
+$buildInfoFile = Join-Path $root "BUILD_INFO"
+$portablePackagePath = Join-Path $packagesDir "TradingAgentsCN-Portable-latest-installer.7z"
+$portableZipPath = Join-Path $packagesDir "TradingAgentsCN-Portable-latest.zip"
+
+if (Test-Path $buildInfoFile) {
+    try {
+        $buildInfo = Get-Content $buildInfoFile -Raw | ConvertFrom-Json
+        if ($buildInfo.full_version) {
+            $candidate7z = Join-Path $packagesDir "TradingAgentsCN-Portable-$($buildInfo.full_version)-installer.7z"
+            if (Test-Path $candidate7z) {
+                $portablePackagePath = $candidate7z
+            }
+
+            $candidateZip = Join-Path $packagesDir "TradingAgentsCN-Portable-$($buildInfo.full_version).zip"
+            if (Test-Path $candidateZip) {
+                $portableZipPath = $candidateZip
+            }
+        }
+    } catch {
+        Write-Host "  Warning: Failed to parse BUILD_INFO, falling back to latest package aliases" -ForegroundColor Yellow
+    }
+}
+
+if (-not (Test-Path $portablePackagePath)) {
+    Write-Host "ERROR: Portable installer package not found: $portablePackagePath" -ForegroundColor Red
+    exit 1
+}
+
 Write-Host "  NSIS script: $nsiScript" -ForegroundColor Gray
+Write-Host "  Installer payload: $portablePackagePath" -ForegroundColor Gray
 Write-Host "  Compiling..." -ForegroundColor Gray
 Write-Host ""
 
@@ -172,8 +229,20 @@ $nsisArgs = @(
     "/V4",  # 详细输出
     "/DPRODUCT_VERSION=$Version",
     "/DPROJECT_ROOT=$root",
+    "/DPACKAGE_7Z=$portablePackagePath",
     $nsiScript
 )
+
+if (Test-Path $portableZipPath) {
+    $nsisArgs = @(
+        "/V4",
+        "/DPRODUCT_VERSION=$Version",
+        "/DPROJECT_ROOT=$root",
+        "/DPACKAGE_ZIP=$portableZipPath",
+        "/DPACKAGE_7Z=$portablePackagePath",
+        $nsiScript
+    )
+}
 
 $process = Start-Process -FilePath $nsisPath -ArgumentList $nsisArgs -Wait -PassThru -NoNewWindow
 
@@ -186,10 +255,10 @@ Write-Host "  ✅ NSIS compilation completed" -ForegroundColor Green
 Write-Host ""
 
 # ============================================================================
-# Step 5: 验证安装程序
+# Step 6: 验证安装程序
 # ============================================================================
 
-Write-Host "[5/5] Verifying installer..." -ForegroundColor Yellow
+Write-Host "[6/6] Verifying installer..." -ForegroundColor Yellow
 Write-Host ""
 
 $installerVersion = $Version

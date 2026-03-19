@@ -30,6 +30,7 @@ from core.workflow.templates import (
     POSITION_ANALYSIS_WORKFLOW,
     POSITION_ANALYSIS_WORKFLOW_V2,
     V2_STOCK_ANALYSIS_WORKFLOW,
+    V2_ETF_ANALYSIS_WORKFLOW,
 )
 from ..workflow.default_workflow_provider import get_default_workflow_provider
 
@@ -376,6 +377,12 @@ class WorkflowAPI:
     
     def get_templates(self) -> List[Dict[str, Any]]:
         """获取预定义模板"""
+        provider = get_default_workflow_provider()
+        try:
+            provider.ensure_system_workflows_exist()
+        except Exception as e:
+            logger.warning(f"确保系统工作流存在失败（忽略）: {e}")
+
         return [
             DEFAULT_WORKFLOW.to_dict(),
             SIMPLE_WORKFLOW.to_dict(),
@@ -385,6 +392,7 @@ class WorkflowAPI:
             POSITION_ANALYSIS_WORKFLOW.to_dict(),
             POSITION_ANALYSIS_WORKFLOW_V2.to_dict(),
             V2_STOCK_ANALYSIS_WORKFLOW.to_dict(),
+            V2_ETF_ANALYSIS_WORKFLOW.to_dict(),
         ]
     
     # ==================== 执行操作 ====================

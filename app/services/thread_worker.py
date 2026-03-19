@@ -14,6 +14,7 @@ from app.core.database import get_mongo_db, get_redis_client
 from app.services.queue_service import QueueService
 from app.services.task_analysis_service import TaskAnalysisService
 from app.models.analysis import UnifiedAnalysisTask, AnalysisTaskType, AnalysisStatus
+from tradingagents.utils.stock_utils import StockUtils, SecurityType
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,35 @@ class ThreadWorker:
             # 🔍 调试：打印参数内容
             logger.info(f"🔍 [DEBUG] 任务参数: {parameters_dict}")
 
+            # 检查引擎类型（默认使用 v2 引擎）
+            engine_type = parameters_dict.get("engine", "v2")
+
+            existing_task = None
+            if engine_type == "v2":
+                existing_task = await self.task_service.get_task(task_id)
+                if existing_task:
+                    from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
+                    from app.utils.timezone import now_tz
+
+                    existing_task.status = AnalysisStatus.PROCESSING
+                    if not existing_task.started_at:
+                        existing_task.started_at = now_tz()
+                    existing_task.progress = max(existing_task.progress or 0, 1)
+                    existing_task.current_step = "数据准备"
+                    existing_task.message = "正在准备分析所需数据..."
+                    await self.task_service._update_task(existing_task)
+
+                    memory_manager = get_memory_state_manager()
+                    await memory_manager.update_task_status(
+                        task_id=task_id,
+                        status=TaskStatus.RUNNING,
+                        progress=existing_task.progress,
+                        message=existing_task.message,
+                        current_step="data_preparation",
+                        current_step_name="数据准备",
+                        current_step_description=existing_task.message
+                    )
+
             # 📡 JIT 数据同步：分析前主动拉取最新行情，确保不使用陈旧数据
             try:
                 from app.worker.analysis_worker import jit_sync_stock_data
@@ -167,28 +197,31 @@ class ThreadWorker:
             except Exception as jit_err:
                 logger.warning(f"⚠️ [ThreadWorker] JIT 数据同步异常（继续分析）: {jit_err}")
 
-            # 检查引擎类型（默认使用 v2 引擎）
-            engine_type = parameters_dict.get("engine", "v2")
-
             logger.info(f"🔧 使用 {engine_type} 引擎执行任务: {task_id}")
 
             if engine_type == "v2":
                 # 使用 v2.0 统一任务引擎
                 from bson import ObjectId
 
-                # 🔥 检查任务是否已经在数据库中（可能是从 analysis_service 创建的）
-                existing_task = await self.task_service.get_task(task_id)
-
                 if existing_task:
                     # 任务已存在，直接执行
-                    logger.info(f"📋 任务已存在，直接执行: {task_id}")
+                    logger.info(f"📋 任务已存在，直接执行: {task_id} (task_type={existing_task.task_type})")
                     await self.task_service.execute_task(existing_task)
                 else:
                     # 任务不存在，创建并执行
-                    logger.info(f"📋 任务不存在，创建并执行: {task_id}")
+                    sec_type = StockUtils.identify_security_type(stock_code)
+                    requested_market = parameters_dict.get("market_type")
+                    if requested_market == "ETF" or sec_type == SecurityType.FUND:
+                        inferred_task_type = AnalysisTaskType.ETF_ANALYSIS
+                        parameters_dict.setdefault("selected_analysts", ["etf", "market", "news"])
+                        logger.info(f"📋 任务不存在，按 ETF 流程重建任务: {task_id}")
+                    else:
+                        inferred_task_type = AnalysisTaskType.STOCK_ANALYSIS
+                        logger.info(f"📋 任务不存在，按股票流程重建任务: {task_id}")
+
                     await self.task_service.create_and_execute_task(
                         user_id=ObjectId(user_id) if user_id else ObjectId(),
-                        task_type=AnalysisTaskType.STOCK_ANALYSIS,
+                        task_type=inferred_task_type,
                         task_params={
                             "symbol": stock_code,
                             "stock_code": stock_code,

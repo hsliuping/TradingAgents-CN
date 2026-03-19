@@ -48,6 +48,7 @@ async def jit_sync_stock_data(stock_code: str, parameters_dict: Dict[str, Any]) 
     """
     import pandas as pd
     from app.services.data_validation_service import DataValidationResult
+    from tradingagents.utils.stock_utils import StockUtils, SecurityType
 
     if not stock_code:
         return DataValidationResult(
@@ -64,6 +65,23 @@ async def jit_sync_stock_data(stock_code: str, parameters_dict: Dict[str, Any]) 
         "cn": "cn", "hk": "hk", "us": "us"
     }
     market_type = market_type_map.get(market_type, "cn")
+
+    # ETF/FUND 使用独立的数据链路，不应套用个股行情 JIT 硬校验
+    sec_type = StockUtils.identify_security_type(stock_code)
+    if parameters_dict.get("market_type") == "ETF" or sec_type == SecurityType.FUND:
+        logger.info(f"ℹ️ {stock_code} 识别为 ETF/FUND，跳过股票行情 JIT 校验，使用 ETF 专用数据链路")
+        return DataValidationResult(
+            is_valid=True,
+            message="ETF/FUND 证券，跳过股票行情 JIT 校验，使用 ETF 专用数据链路",
+            missing_data=[],
+            details={
+                "symbol": stock_code,
+                "market_type": parameters_dict.get("market_type", market_type),
+                "security_type": sec_type.value if hasattr(sec_type, "value") else str(sec_type),
+                "skipped": True,
+                "reason": "etf_specialized_data_path"
+            }
+        )
 
     # 目前只对 A 股做主动拉取（HK/US 可后续扩展）
     if market_type != "cn":
@@ -697,6 +715,42 @@ class AnalysisWorker:
             if isinstance(parameters_dict, str):
                 import json
                 parameters_dict = json.loads(parameters_dict)
+
+            # 检查引擎类型（默认使用 v2 引擎）
+            engine_type = parameters_dict.get("engine", "v2")
+
+            task_service = None
+            task = None
+
+            # v2 任务在数据准备前先推进状态，避免前端长时间停留在 pending/初始化
+            if engine_type == "v2":
+                from app.services.task_analysis_service import get_task_analysis_service
+                from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
+                from app.utils.timezone import now_tz
+
+                task_service = get_task_analysis_service()
+                task = await task_service.get_task(task_id)
+                if not task:
+                    raise ValueError(f"任务不存在: {task_id}")
+
+                task.status = AnalysisStatus.PROCESSING
+                if not task.started_at:
+                    task.started_at = now_tz()
+                task.progress = max(task.progress or 0, 1)
+                task.current_step = "数据准备"
+                task.message = "正在准备分析所需数据..."
+                await task_service._update_task(task)
+
+                memory_manager = get_memory_state_manager()
+                await memory_manager.update_task_status(
+                    task_id=task_id,
+                    status=TaskStatus.RUNNING,
+                    progress=task.progress,
+                    message=task.message,
+                    current_step="data_preparation",
+                    current_step_name="数据准备",
+                    current_step_description=task.message
+                )
             
             # 数据校验：检查股票数据是否存在且新鲜（防止用陈旧数据分析）
             validation_result = await self._validate_task_data(stock_code, parameters_dict)
@@ -722,22 +776,11 @@ class AnalysisWorker:
 
                 # 抛出异常，让上层统一处理（记录日志、释放 current_task 等）
                 raise ValueError(error_message)
-            
-            # 检查引擎类型（默认使用 v2 引擎）
-            engine_type = parameters_dict.get("engine", "v2")
 
             if engine_type == "v2":
                 # v2 引擎：使用统一任务服务
                 logger.info(f"🔧 [Worker] 使用 v2 引擎执行任务: {task_id}")
-                from app.services.task_analysis_service import get_task_analysis_service
                 from app.services.memory_state_manager import get_memory_state_manager
-                
-                task_service = get_task_analysis_service()
-                
-                # 获取任务对象
-                task = await task_service.get_task(task_id)
-                if not task:
-                    raise ValueError(f"任务不存在: {task_id}")
                 
                 # 🔥 关键：确保任务在内存状态管理器中存在（Worker 进程和 API 进程是分开的）
                 memory_manager = get_memory_state_manager()
