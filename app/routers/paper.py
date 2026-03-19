@@ -8,6 +8,7 @@ import re
 from app.routers.auth_db import get_current_user
 from app.core.database import get_mongo_db
 from app.core.response import ok
+from app.services.database.serialization import serialize_document
 
 router = APIRouter(prefix="/paper", tags=["paper"])
 logger = logging.getLogger("webapi")
@@ -114,6 +115,10 @@ async def _get_or_create_account(user_id: str) -> Dict[str, Any]:
                 acc = await db["paper_accounts"].find_one({"user_id": user_id})
         except Exception as e:
             logger.error(f"❌ 账户结构迁移失败 user_id={user_id}: {e}")
+
+    if acc:
+        acc = serialize_document(acc)
+
     return acc
 
 
