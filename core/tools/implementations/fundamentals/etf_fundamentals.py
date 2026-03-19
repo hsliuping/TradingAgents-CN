@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 ETF_BASIC_COLLECTION = "etf_basic_info"
 ETF_DAILY_COLLECTION = "etf_daily_quotes"
+ETF_DEFAULT_SOURCE_PRIORITY = ["local", "tushare", "akshare"]
+ETF_SUPPORTED_ONLINE_SOURCES = {"tushare", "akshare"}
 
 
 def _is_missing(value) -> bool:
@@ -50,6 +52,33 @@ def _format_value(value, suffix: str = "") -> str:
     if _is_missing(value):
         return "-"
     return f"{value}{suffix}"
+
+
+def _normalize_source_name(name: str) -> str:
+    return str(name or "").strip().lower()
+
+
+def _get_etf_source_priority() -> list:
+    """获取 ETF 可用数据源优先级，遵循统一配置。"""
+    try:
+        from app.core.data_source_priority import get_enabled_data_sources_sync
+
+        enabled_sources = get_enabled_data_sources_sync("a_shares")
+        priority = []
+        for source in enabled_sources:
+            normalized = _normalize_source_name(source)
+            if normalized == "local" or normalized in ETF_SUPPORTED_ONLINE_SOURCES:
+                if normalized not in priority:
+                    priority.append(normalized)
+
+        if priority:
+            logger.info(f"📊 [ETF 基本面] 数据源优先级: {priority}")
+            return priority
+    except Exception as e:
+        logger.warning(f"⚠️ [ETF 基本面] 获取统一数据源优先级失败: {e}")
+
+    logger.info(f"📊 [ETF 基本面] 使用默认数据源优先级: {ETF_DEFAULT_SOURCE_PRIORITY}")
+    return ETF_DEFAULT_SOURCE_PRIORITY.copy()
 
 
 def _normalize_etf_symbol(symbol: str) -> str:
@@ -336,6 +365,37 @@ def _fetch_etf_hist_akshare(symbol: str, days: int = 30) -> list:
         return []
 
 
+def _merge_missing_fields(target: dict, extra: Optional[dict]) -> dict:
+    if not extra:
+        return target
+    for key, value in extra.items():
+        target[key] = _coalesce(target.get(key), value)
+    return target
+
+
+def _fetch_etf_online_bundle(symbol: str, source: str, include_hist: bool = True) -> Tuple[Optional[dict], list]:
+    """按指定在线数据源获取 ETF 数据，避免跨源无序回退。"""
+    normalized = _normalize_source_name(source)
+    hist = []
+
+    if normalized == "tushare":
+        spot = _fetch_etf_data_tushare(symbol)
+        if spot and include_hist:
+            hist = _fetch_etf_hist_tushare(symbol, days=30)
+        return spot, hist
+
+    if normalized == "akshare":
+        spot = _fetch_etf_data_akshare(symbol)
+        spot = _merge_missing_fields(spot or {}, _fetch_etf_valuation_akshare(symbol))
+        if not spot:
+            return None, []
+        if include_hist:
+            hist = _fetch_etf_hist_akshare(symbol, days=30)
+        return spot, hist
+
+    return None, []
+
+
 @tool
 @register_tool(
     tool_id="get_etf_fundamentals",
@@ -361,8 +421,12 @@ def get_etf_fundamentals(
     if not (code.startswith(("50", "51", "52")) or code.startswith(("15", "16"))):
         return f"❌ {ticker} 不是 ETF 代码。ETF 代码通常为 50/51/52 开头（沪市）或 15/16 开头（深市）"
 
+    source_priority = _get_etf_source_priority()
+    online_sources = [source for source in source_priority if source in ETF_SUPPORTED_ONLINE_SOURCES]
+
     spot = None
     hist = []
+    spot_source = "local"
     basic_local, daily_local = _fetch_etf_from_local(code)
     if basic_local and daily_local:
         spot = {
@@ -402,22 +466,24 @@ def get_etf_fundamentals(
         logger.info(f"📊 [ETF 基本面] 使用本地数据: {code}")
 
     if not spot:
-        spot = _fetch_etf_data_akshare(ticker)
-        if spot:
-            hist = _fetch_etf_hist_akshare(ticker, days=30)
-        else:
-            spot = _fetch_etf_data_tushare(ticker)
-            hist = _fetch_etf_hist_tushare(ticker, days=30) if spot else []
+        spot_source = None
+        for source in online_sources:
+            source_spot, source_hist = _fetch_etf_online_bundle(ticker, source, include_hist=True)
+            if source_spot:
+                spot = source_spot
+                hist = source_hist
+                spot_source = source
+                logger.info(f"📊 [ETF 基本面] 使用在线数据源: {source}")
+                break
 
-    tushare_profile = _fetch_etf_data_tushare(ticker)
-    akshare_valuation = _fetch_etf_valuation_akshare(ticker)
     spot = spot or {}
 
-    for extra in (tushare_profile, akshare_valuation):
-        if not extra:
-            continue
-        for key, value in extra.items():
-            spot[key] = _coalesce(spot.get(key), value)
+    if spot_source == "local" and online_sources:
+        # 本地命中时，仅使用最高优先级在线数据源做一次补充，避免次优源额外报错。
+        enrichment_source = online_sources[0]
+        enrichment_spot, _ = _fetch_etf_online_bundle(ticker, enrichment_source, include_hist=False)
+        spot = _merge_missing_fields(spot, enrichment_spot)
+        logger.info(f"📊 [ETF 基本面] 本地数据补充来源: {enrichment_source}")
 
     lines = [
         f"# {ticker} ETF 基本面分析数据",
