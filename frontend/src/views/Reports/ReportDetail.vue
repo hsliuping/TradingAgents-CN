@@ -813,6 +813,7 @@ const formatAnalysts = (analysts: string[] = []) => {
     // 分析师团队
     'market_analyst': '市场技术分析师',
     'fundamentals_analyst': '基本面分析师',
+    'etf_analyst': 'ETF 分析师',
     'news_analyst': '新闻事件分析师',
     'sentiment_analyst': '市场情绪分析师',
     
@@ -828,6 +829,7 @@ const formatAnalysts = (analysts: string[] = []) => {
     // 兼容旧格式（不带_analyst后缀）
     'market': '市场分析师',
     'fundamentals': '基本面分析师',
+    'etf': 'ETF 分析师',
     'news': '新闻分析师',
     'social': '社媒分析师',
     'sentiment': '情绪分析师',
@@ -943,7 +945,16 @@ const orderedModuleNames = computed(() => {
   return [...ordered, ...remaining]
 })
 
+const isEtfReport = computed(() => {
+  const analysts = report.value?.analysts || []
+  return report.value?.task_type === 'etf_analysis' || analysts.includes('etf_analyst')
+})
+
 const getModuleDisplayName = (moduleName: string) => {
+  if (moduleName === 'fundamentals_report' && isEtfReport.value) {
+    return '📊 ETF 分析'
+  }
+
   // 统一与单股分析的中文标签映射（完整的15个报告）
   const nameMap: Record<string, string> = {
     // 🆕 宏观分析师团队 (2个) - 优先显示

@@ -1723,6 +1723,8 @@ const getAnalysisReports = (data: any) => {
     return reports
   }
 
+  const isEtfAnalysis = data?.task_type === 'etf_analysis' || (Array.isArray(data?.analysts) && data.analysts.includes('etf_analyst'))
+
   // 定义报告映射（按照完整的分析流程顺序）
   const reportMappings = [
     // 第一阶段：宏观分析师团队 (2个)
@@ -1731,7 +1733,7 @@ const getAnalysisReports = (data: any) => {
 
     // 第二阶段：分析师团队 (4个)
     { key: 'market_report', title: '📈 市场技术分析', category: '分析师团队' },
-    { key: 'fundamentals_report', title: '💰 基本面分析', category: '分析师团队' },
+    { key: 'fundamentals_report', title: isEtfAnalysis ? '📊 ETF 分析' : '💰 基本面分析', category: '分析师团队' },
     { key: 'sentiment_report', title: '💭 市场情绪分析', category: '分析师团队' },
     { key: 'news_report', title: '📰 新闻事件分析', category: '分析师团队' },
 
@@ -1803,6 +1805,7 @@ const getReportIcon = (title: string) => {
     // 分析师团队图标
     '📈 市场技术分析': '📈',
     '💰 基本面分析': '💰',
+    '📊 ETF 分析': '📊',
     '📰 新闻事件分析': '📰',
     '💭 市场情绪分析': '💭',
     '💡 初步投资建议': '💡',  // 🔑 更新

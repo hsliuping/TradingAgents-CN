@@ -1905,13 +1905,16 @@ class TaskAnalysisService:
             def _get_analysts_from_reports(reports_dict: Dict[str, Any]) -> List[str]:
                 """根据实际保存的报告动态生成分析师列表"""
                 analysts = []
+                fundamentals_analyst_id = (
+                    "etf_analyst" if task.task_type == AnalysisTaskType.ETF_ANALYSIS else "fundamentals_analyst"
+                )
                 analyst_mapping = {
                     "index_report": "index_analyst",
                     "sector_report": "sector_analyst",
                     "market_report": "market_analyst",
                     "sentiment_report": "sentiment_analyst",
                     "news_report": "news_analyst",
-                    "fundamentals_report": "fundamentals_analyst",
+                    "fundamentals_report": fundamentals_analyst_id,
                     "bull_researcher": "bull_researcher",
                     "bear_researcher": "bear_researcher",
                     "risky_analyst": "risky_analyst",
@@ -1973,7 +1976,8 @@ class TaskAnalysisService:
                 source="api",
                 engine="v2" if task.engine_type in ["auto", "workflow"] else (task.engine_type or "v2"),
                 user_id=str(task.user_id) if task.user_id else None,
-                performance_metrics=result.get("performance_metrics", {})
+                performance_metrics=result.get("performance_metrics", {}),
+                task_type=str(task.task_type),
             )
 
             self.logger.info(f"✅ 分析结果已保存到 analysis_reports: analysis_id={analysis_id}, task_id={task.task_id}")
