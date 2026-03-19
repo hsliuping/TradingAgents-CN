@@ -199,18 +199,18 @@
             <div class="debug-contract-field">
               <div class="debug-contract-meta">
                 <el-tag size="small" type="info" effect="plain">
-                  来源 {{ formatInputContractSource(input.source) }}
+                  来源 {{ formatInputContractSource((input as any).source) }}
                 </el-tag>
                 <el-tag size="small" effect="plain">
                   注入 state.{{ input.name }}
                 </el-tag>
-                <el-tag v-if="input.state_field" size="small" effect="plain">
+                <el-tag v-if="(input as any).state_field" size="small" effect="plain">
                   来源字段 {{ buildInputSourceFieldLabel(input) }}
                 </el-tag>
-                <el-tag v-if="input.producer_hint" size="small" type="warning" effect="plain">
-                  上游 {{ input.producer_hint }}
+                <el-tag v-if="(input as any).producer_hint" size="small" type="warning" effect="plain">
+                  上游 {{ (input as any).producer_hint }}
                 </el-tag>
-                <el-tag v-if="input.required === false" size="small" type="success" effect="plain">
+                <el-tag v-if="(input as any).required === false" size="small" type="success" effect="plain">
                   可选
                 </el-tag>
               </div>
@@ -1061,12 +1061,12 @@ const getAgentMaintenanceTagType = (value?: DebugAgentInfo['maintenance_status']
   return 'success'
 }
 
-const getAgentCategoryTagType = (value?: DebugAgentInfo['category']) => {
+const getAgentCategoryTagType = (value?: DebugAgentInfo['category']): 'primary' | 'success' | 'warning' | 'info' | 'danger' => {
   if (value === 'researcher') return 'success'
   if (value === 'risk') return 'danger'
   if (value === 'manager') return 'warning'
   if (value === 'trader') return 'info'
-  return ''
+  return 'primary'
 }
 
 const buildAgentGovernanceHint = (agent: DebugAgentInfo): string => {

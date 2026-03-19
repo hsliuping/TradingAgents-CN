@@ -528,7 +528,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted, computed, watch } from 'vue'
+import { ref, nextTick, onMounted, computed, watch, type ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ArrowDown, User, MagicStick, Loading, CircleCheck, MoreFilled, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -1016,12 +1016,14 @@ const getPrefillDescription = () => {
 const shouldFocusRecommendations = () => route.query.focus === 'recommendations'
 const shouldFocusConfirmActions = () => route.query.focus === 'confirm'
 
-const setStockCardRef = (collection: string, el: Element | null) => {
-  stockCardRefs.value[collection] = el instanceof HTMLElement ? el : null
+const setStockCardRef = (collection: string, el: Element | ComponentPublicInstance | null) => {
+  const htmlEl = el instanceof HTMLElement ? el : (el as any)?.$el instanceof HTMLElement ? (el as any).$el : null
+  stockCardRefs.value[collection] = htmlEl
 }
 
-const setExternalSourceCardRef = (sourceId: string, el: Element | null) => {
-  externalSourceCardRefs.value[sourceId] = el instanceof HTMLElement ? el : null
+const setExternalSourceCardRef = (sourceId: string, el: Element | ComponentPublicInstance | null) => {
+  const htmlEl = el instanceof HTMLElement ? el : (el as any)?.$el instanceof HTMLElement ? (el as any).$el : null
+  externalSourceCardRefs.value[sourceId] = htmlEl
 }
 
 const scrollElementIntoView = async (element: HTMLElement | null) => {

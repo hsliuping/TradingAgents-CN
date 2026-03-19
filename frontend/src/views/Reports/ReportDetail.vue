@@ -319,6 +319,7 @@ interface ReportDetailData {
   risk_level?: string
   key_points?: string[]
   summary?: string
+  task_type?: string
   decision?: ReportDecision
 }
 
