@@ -64,6 +64,8 @@ Function ValidateInstallDirPath
  Push $2
  Push $3
  Push $4
+ Push $5
+ Push $6
 
  StrLen $1 $0
  ${If} $1 < 4
@@ -84,40 +86,51 @@ Function ValidateInstallDirPath
   Goto done
  ${EndIf}
 
- ${If} $2 >= "A"
- ${AndIf} $2 <= "Z"
- ${OrIf} $2 >= "a"
- ${AndIf} $2 <= "z"
- ${Else}
-  StrCpy $0 1
-  Goto done
- ${EndIf}
+ StrCpy $5 "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+ StrCpy $6 0
+ drive_letter_loop:
+  StrCpy $3 $5 1 $6
+  ${If} $3 == ""
+   StrCpy $0 1
+   Goto done
+  ${EndIf}
 
- StrCpy $4 3
+  ${If} $2 == $3
+   Goto validate_path_chars
+  ${EndIf}
+
+  IntOp $6 $6 + 1
+  Goto drive_letter_loop
+
+ validate_path_chars:
+ StrCpy $5 "\ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
+ StrCpy $6 3
  loop_chars:
-  ${If} $4 >= $1
-    StrCpy $0 0
+  StrCpy $2 $0 1 $6
+  ${If} $2 == ""
+   StrCpy $0 0
+   Goto done
+  ${EndIf}
+
+  StrCpy $4 0
+ allowed_chars_loop:
+   StrCpy $3 $5 1 $4
+   ${If} $3 == ""
+    StrCpy $0 1
     Goto done
-  ${EndIf}
+   ${EndIf}
 
-  StrCpy $2 $0 1 $4
-  ${If} $2 == "\\"
-  ${OrIf} $2 == "_"
-  ${OrIf} $2 == "-"
-  ${OrIf} $2 == "."
-  ${OrIf} $2 >= "0"
-  ${AndIf} $2 <= "9"
-  ${OrIf} $2 >= "A"
-  ${AndIf} $2 <= "Z"
-  ${OrIf} $2 >= "a"
-  ${AndIf} $2 <= "z"
-    IntOp $4 $4 + 1
+   ${If} $2 == $3
+    IntOp $6 $6 + 1
     Goto loop_chars
-  ${EndIf}
+   ${EndIf}
 
-  StrCpy $0 1
+   IntOp $4 $4 + 1
+   Goto allowed_chars_loop
 
  done:
+ Pop $6
+ Pop $5
  Pop $4
  Pop $3
  Pop $2
@@ -133,27 +146,6 @@ Function DirectoryPageLeave
   MessageBox MB_ICONSTOP "Installation path must use English characters only and cannot contain spaces, Chinese characters, or other special characters.$\r$\n$\r$\nPlease use a path such as C:\\TradingAgentsCN or D:\\TradingAgentsCN99."
   Abort
  ${EndIf}
-FunctionEnd
-
-; Generate random 4-digit port in safe range (avoiding common ports)
-; Uses ranges: 4100-4999, 5100-5999, 6100-6299, 7100-7999, 9100-9999
-; Avoids: 3000, 3306, 5000, 6000, 6379, 7000, 8000-9000, etc.
-Function GenerateRandomPort
- Push $0
- Push $1
-
- ; Get tick count as seed
- System::Call 'kernel32::GetTickCount()i.r0'
-
- ; Generate random port in range 4100-4999 (900 ports)
- IntOp $1 $0 % 900
- IntOp $1 $1 + 4100
-
- ; Return value in $0
- StrCpy $0 $1
-
- Pop $1
- Exch $0
 FunctionEnd
 
 Function .onInit
@@ -358,7 +350,6 @@ FunctionEnd
 Page custom PortsPage PortsPageLeave
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE DirectoryPageLeave
 !insertmacro MUI_PAGE_DIRECTORY
-!undef MUI_PAGE_CUSTOMFUNCTION_LEAVE
 Page custom InstallModePage InstallModePageLeave
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
@@ -388,12 +379,10 @@ SetOutPath "$TEMP\TradingAgentsCN-Install"
 File "${SEVENZIP_DIR}\7z.exe"
 File "${SEVENZIP_DIR}\7z.dll"
 
-; Extract the portable package 7z file (stored without compression)
+; Extract the portable package 7z file (already compressed, zlib won't recompress significantly)
 DetailPrint "Extracting portable package..."
 SetOutPath "$INSTDIR"
-SetCompress off
 File /oname=package.7z "${PACKAGE_7Z}"
-SetCompress auto
 
 ; Extract 7z using 7z.exe (-aoa = overwrite all existing files, ensure old files are replaced)
 DetailPrint "Unpacking files (this may take a few minutes)..."
@@ -517,13 +506,13 @@ CreateShortcut "$DESKTOP\TradingAgentsCN.lnk" \
 
 ; Method 2: Use PowerShell to set admin privilege flag (optional)
 DetailPrint "Setting admin privileges for shortcuts..."
-nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $lnkPath = \"$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk\"; if (Test-Path $lnkPath) { $bytes = [System.IO.File]::ReadAllBytes($lnkPath); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($lnkPath, $bytes); Write-Host \"Start shortcut admin flag set\" } } catch { Write-Host \"Error: $_\" }"'
+nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $$lnkPath = \"$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk\"; if (Test-Path $$lnkPath) { $$bytes = [System.IO.File]::ReadAllBytes($$lnkPath); $$bytes[0x15] = $$bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($$lnkPath, $$bytes); Write-Host \"Start shortcut admin flag set\" } } catch { Write-Host \"Error: $$_\" }"'
 Pop $0
 
-nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $lnkPath = \"$SMPROGRAMS\TradingAgentsCN\Stop TradingAgentsCN.lnk\"; if (Test-Path $lnkPath) { $bytes = [System.IO.File]::ReadAllBytes($lnkPath); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($lnkPath, $bytes); Write-Host \"Stop shortcut admin flag set\" } } catch { Write-Host \"Error: $_\" }"'
+nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $$lnkPath = \"$SMPROGRAMS\TradingAgentsCN\Stop TradingAgentsCN.lnk\"; if (Test-Path $$lnkPath) { $$bytes = [System.IO.File]::ReadAllBytes($$lnkPath); $$bytes[0x15] = $$bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($$lnkPath, $$bytes); Write-Host \"Stop shortcut admin flag set\" } } catch { Write-Host \"Error: $$_\" }"'
 Pop $0
 
-nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $lnkPath = \"$DESKTOP\TradingAgentsCN.lnk\"; if (Test-Path $lnkPath) { $bytes = [System.IO.File]::ReadAllBytes($lnkPath); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($lnkPath, $bytes); Write-Host \"Desktop shortcut admin flag set\" } } catch { Write-Host \"Error: $_\" }"'
+nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $$lnkPath = \"$DESKTOP\TradingAgentsCN.lnk\"; if (Test-Path $$lnkPath) { $$bytes = [System.IO.File]::ReadAllBytes($$lnkPath); $$bytes[0x15] = $$bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($$lnkPath, $$bytes); Write-Host \"Desktop shortcut admin flag set\" } } catch { Write-Host \"Error: $$_\" }"'
 Pop $0
 
 DetailPrint "Shortcuts created successfully!"

@@ -599,6 +599,19 @@ function Create-ZipPackage {
     return $fileInfo
 }
 
+function Update-LatestPackageAlias {
+    param(
+        [Parameter(Mandatory=$true)]
+        [System.IO.FileInfo]$PackageFile,
+        [Parameter(Mandatory=$true)]
+        [string]$AliasName
+    )
+
+    $aliasPath = Join-Path $packagesDir $AliasName
+    Copy-Item -Path $PackageFile.FullName -Destination $aliasPath -Force
+    Write-Host "    Updated latest alias: $AliasName" -ForegroundColor Gray
+}
+
 try {
     Write-Host ""
     Write-Host "  Compressing files (this may take several minutes)..." -ForegroundColor Gray
@@ -610,6 +623,7 @@ try {
         if (Test-Path $7zPath) { Remove-Item $7zPath -Force }
         $pkg = Create-7zPackage -TempDir $tempDir -OutputPath $7zPath -ExcludeVendors7zip $true
         $createdPackages += $pkg
+        Update-LatestPackageAlias -PackageFile $pkg -AliasName "TradingAgentsCN-Portable-latest-installer.7z"
     }
 
     if ($Format -eq "zip" -or $Format -eq "both") {
@@ -617,6 +631,7 @@ try {
         if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
         $pkg = Create-ZipPackage -TempDir $tempDir -OutputPath $zipPath
         $createdPackages += $pkg
+        Update-LatestPackageAlias -PackageFile $pkg -AliasName "TradingAgentsCN-Portable-latest.zip"
     }
 
     Write-Host ""

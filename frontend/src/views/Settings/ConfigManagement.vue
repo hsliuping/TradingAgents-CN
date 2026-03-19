@@ -612,19 +612,25 @@
                 placeholder="选择快速分析模型"
                 filterable
               >
-                <el-option
-                  v-for="model in availableModelsForProvider(systemSettings.default_provider)"
-                  :key="`${model.provider}/${model.model_name}`"
-                  :label="model.model_display_name || model.model_name"
-                  :value="model.model_name"
+                <el-option-group
+                  v-for="group in groupedAvailableModels"
+                  :key="group.provider"
+                  :label="group.providerLabel"
                 >
-                  <div style="display: flex; flex-direction: column;">
-                    <span>{{ model.model_display_name || model.model_name }}</span>
-                    <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
-                  </div>
-                </el-option>
+                  <el-option
+                    v-for="model in group.models"
+                    :key="`${model.provider}/${model.model_name}`"
+                    :label="model.model_display_name || model.model_name"
+                    :value="model.model_name"
+                  >
+                    <div style="display: flex; flex-direction: column;">
+                      <span>{{ model.model_display_name || model.model_name }}</span>
+                      <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
+                    </div>
+                  </el-option>
+                </el-option-group>
               </el-select>
-              <div class="setting-description">用于市场分析、新闻分析、基本面分析、研究员等，响应速度快（推荐：qwen-turbo）</div>
+              <div class="setting-description">用于市场分析、新闻分析、基本面分析、研究员等，响应速度快。可从所有已启用供应商的模型中选择</div>
             </el-form-item>
 
             <el-form-item label="深度决策模型">
@@ -634,19 +640,25 @@
                 placeholder="选择深度决策模型"
                 filterable
               >
-                <el-option
-                  v-for="model in availableModelsForProvider(systemSettings.default_provider)"
-                  :key="`${model.provider}/${model.model_name}`"
-                  :label="model.model_display_name || model.model_name"
-                  :value="model.model_name"
+                <el-option-group
+                  v-for="group in groupedAvailableModels"
+                  :key="group.provider"
+                  :label="group.providerLabel"
                 >
-                  <div style="display: flex; flex-direction: column;">
-                    <span>{{ model.model_display_name || model.model_name }}</span>
-                    <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
-                  </div>
-                </el-option>
+                  <el-option
+                    v-for="model in group.models"
+                    :key="`${model.provider}/${model.model_name}`"
+                    :label="model.model_display_name || model.model_name"
+                    :value="model.model_name"
+                  >
+                    <div style="display: flex; flex-direction: column;">
+                      <span>{{ model.model_display_name || model.model_name }}</span>
+                      <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
+                    </div>
+                  </el-option>
+                </el-option-group>
               </el-select>
-              <div class="setting-description">用于研究管理者综合决策、风险管理者最终评估，推理能力强（推荐：qwen-max）</div>
+              <div class="setting-description">用于研究管理者综合决策、风险管理者最终评估，推理能力强。可从所有已启用供应商的模型中选择</div>
             </el-form-item>
 
             <el-form-item label="深度推理模型">
@@ -657,19 +669,25 @@
                 filterable
                 clearable
               >
-                <el-option
-                  v-for="model in availableModelsForProvider(systemSettings.default_provider)"
-                  :key="`${model.provider}/${model.model_name}`"
-                  :label="model.model_display_name || model.model_name"
-                  :value="model.model_name"
+                <el-option-group
+                  v-for="group in groupedAvailableModels"
+                  :key="group.provider"
+                  :label="group.providerLabel"
                 >
-                  <div style="display: flex; flex-direction: column;">
-                    <span>{{ model.model_display_name || model.model_name }}</span>
-                    <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
-                  </div>
-                </el-option>
+                  <el-option
+                    v-for="model in group.models"
+                    :key="`${model.provider}/${model.model_name}`"
+                    :label="model.model_display_name || model.model_name"
+                    :value="model.model_name"
+                  >
+                    <div style="display: flex; flex-direction: column;">
+                      <span>{{ model.model_display_name || model.model_name }}</span>
+                      <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
+                    </div>
+                  </el-option>
+                </el-option-group>
               </el-select>
-              <div class="setting-description">用于智能助手规划、策略生成等强推理场景。未配置时使用深度决策模型</div>
+              <div class="setting-description">用于智能助手规划、策略生成等强推理场景。未配置时使用深度决策模型，可从所有已启用供应商的模型中选择</div>
             </el-form-item>
 
             <el-form-item label="编程模型">
@@ -680,19 +698,25 @@
                 filterable
                 clearable
               >
-                <el-option
-                  v-for="model in availableModelsForProvider(systemSettings.default_provider)"
-                  :key="`${model.provider}/${model.model_name}`"
-                  :label="model.model_display_name || model.model_name"
-                  :value="model.model_name"
+                <el-option-group
+                  v-for="group in groupedAvailableModels"
+                  :key="group.provider"
+                  :label="group.providerLabel"
                 >
-                  <div style="display: flex; flex-direction: column;">
-                    <span>{{ model.model_display_name || model.model_name }}</span>
-                    <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
-                  </div>
-                </el-option>
+                  <el-option
+                    v-for="model in group.models"
+                    :key="`${model.provider}/${model.model_name}`"
+                    :label="model.model_display_name || model.model_name"
+                    :value="model.model_name"
+                  >
+                    <div style="display: flex; flex-direction: column;">
+                      <span>{{ model.model_display_name || model.model_name }}</span>
+                      <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
+                    </div>
+                  </el-option>
+                </el-option-group>
               </el-select>
-              <div class="setting-description">用于策略 DSL 生成，擅长 JSON 输出。未配置时使用深度推理/深度决策模型</div>
+              <div class="setting-description">用于策略 DSL 生成，擅长 JSON 输出。未配置时使用深度推理/深度决策模型，可从所有已启用供应商的模型中选择</div>
             </el-form-item>
 
             <!-- 🔥 新增：默认 Embedding 模型配置 -->
@@ -1495,21 +1519,38 @@ const sortedProviders = computed(() => {
   })
 })
 
-// 函数：根据厂家获取可用的模型
-const availableModelsForProvider = (providerId: string) => {
-  console.log('🔍 获取厂家模型:', providerId)
-  console.log('📊 所有大模型配置:', llmConfigs.value)
-  if (!providerId) {
-    console.log('⚠️ 厂家ID为空')
-    return []
+const allEnabledModels = computed(() => {
+  return llmConfigs.value.filter(config => config.enabled)
+})
+
+const groupedAvailableModels = computed(() => {
+  const groups = new Map<string, { provider: string; providerLabel: string; models: LLMConfig[] }>()
+
+  for (const model of allEnabledModels.value) {
+    const providerLabel = providerInfoMap.value[model.provider]?.display_name || model.provider_name || model.provider
+    const existingGroup = groups.get(model.provider)
+
+    if (existingGroup) {
+      existingGroup.models.push(model)
+      continue
+    }
+
+    groups.set(model.provider, {
+      provider: model.provider,
+      providerLabel,
+      models: [model]
+    })
   }
-  const models = llmConfigs.value.filter(config => {
-    console.log(`检查模型: ${config.model_name}, provider: ${config.provider}, enabled: ${config.enabled}`)
-    return config.provider === providerId && config.enabled
-  })
-  console.log(`✅ 找到 ${models.length} 个可用模型:`, models)
-  return models
-}
+
+  return Array.from(groups.values()).map(group => ({
+    ...group,
+    models: [...group.models].sort((left, right) => {
+      const leftName = left.model_display_name || left.model_name
+      const rightName = right.model_display_name || right.model_name
+      return leftName.localeCompare(rightName)
+    })
+  }))
+})
 
 // 🔥 新增：支持 embedding 的厂家和模型列表（从后端获取）
 const embeddingProviders = ref<Array<{
@@ -2568,34 +2609,29 @@ const migrateLegacyConfig = async () => {
   }
 }
 
-// 监听供应商变化，自动清空不匹配的模型选择
+// 仅当模型本身不再可用时清空，默认供应商变化不应限制模型选择范围
 watch(
-  () => systemSettings.value.default_provider,
-  (newProvider, oldProvider) => {
-    if (newProvider !== oldProvider && newProvider) {
-      const availableModels = availableModelsForProvider(newProvider)
-      const quickModel = systemSettings.value.quick_analysis_model
-      const deepModel = systemSettings.value.deep_analysis_model
-      const reasoningModel = systemSettings.value.deep_reasoning_model
-      const codingModel = systemSettings.value.coding_model
+  allEnabledModels,
+  (availableModels) => {
+    const quickModel = systemSettings.value.quick_analysis_model
+    const deepModel = systemSettings.value.deep_analysis_model
+    const reasoningModel = systemSettings.value.deep_reasoning_model
+    const codingModel = systemSettings.value.coding_model
 
-      // 如果当前选择的快速分析模型不属于新供应商，清空
-      if (quickModel && !availableModels.find(m => m.model_name === quickModel)) {
-        systemSettings.value.quick_analysis_model = ''
-      }
+    if (quickModel && !availableModels.find(m => m.model_name === quickModel)) {
+      systemSettings.value.quick_analysis_model = ''
+    }
 
-      // 如果当前选择的深度决策模型不属于新供应商，清空
-      if (deepModel && !availableModels.find(m => m.model_name === deepModel)) {
-        systemSettings.value.deep_analysis_model = ''
-      }
+    if (deepModel && !availableModels.find(m => m.model_name === deepModel)) {
+      systemSettings.value.deep_analysis_model = ''
+    }
 
-      if (reasoningModel && !availableModels.find(m => m.model_name === reasoningModel)) {
-        systemSettings.value.deep_reasoning_model = ''
-      }
+    if (reasoningModel && !availableModels.find(m => m.model_name === reasoningModel)) {
+      systemSettings.value.deep_reasoning_model = ''
+    }
 
-      if (codingModel && !availableModels.find(m => m.model_name === codingModel)) {
-        systemSettings.value.coding_model = ''
-      }
+    if (codingModel && !availableModels.find(m => m.model_name === codingModel)) {
+      systemSettings.value.coding_model = ''
     }
   }
 )

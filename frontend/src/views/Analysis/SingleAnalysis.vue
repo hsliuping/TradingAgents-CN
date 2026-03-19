@@ -1350,7 +1350,7 @@ const submitAnalysis = async () => {
         const status = response.data // 响应拦截器已返回 response.data
         console.log('🔄 立即查询状态:', status)
         console.log('🔄 当前 analysisStatus:', analysisStatus.value)
-        if (status.status === 'running') {
+        if (status.status === 'pending' || status.status === 'running') {
           analysisStatus.value = 'running'
           console.log('✅ 设置 analysisStatus 为 running')
           updateProgressInfo(status)
@@ -1481,7 +1481,7 @@ const startPollingTaskStatus = () => {
           showClose: true
         })
 
-      } else if (status.status === 'running') {
+      } else if (status.status === 'pending' || status.status === 'running') {
         // 分析进行中，更新进度
         console.log('🔄 轮询中设置 analysisStatus 为 running')
         analysisStatus.value = 'running'
@@ -2292,7 +2292,7 @@ const handleVisibilityChange = () => {
           const response = await analysisApi.getTaskStatus(currentTaskId.value)
           const status = response.data // 响应拦截器已返回 response.data
           console.log('🔄 页面恢复查询状态:', status)
-          if (status.status === 'running') {
+          if (status.status === 'pending' || status.status === 'running') {
             analysisStatus.value = 'running'
             updateProgressInfo(status)
           }
@@ -2500,7 +2500,7 @@ const restoreTaskFromCache = async () => {
       console.log('✅ 任务已完成，显示结果')
       return true
 
-    } else if (status.status === 'running') {
+    } else if (status.status === 'pending' || status.status === 'running') {
       // 任务仍在运行，恢复进度显示
       currentTaskId.value = cached.taskId
       analysisStatus.value = 'running'

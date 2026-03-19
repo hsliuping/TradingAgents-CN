@@ -504,6 +504,7 @@ const getTemplateIcon = (id: string) => {
   if (id === 'position_analysis') return 'SetUp'
   if (id === 'position_analysis_v2') return 'SetUp'
   if (id === 'v2_stock_analysis') return 'TrendCharts'
+  if (id === 'v2_etf_analysis') return 'DataAnalysis'
   return 'SetUp'
 }
 
@@ -516,6 +517,7 @@ const getTemplateColor = (id: string) => {
   if (id === 'position_analysis') return '#409EFF'
   if (id === 'position_analysis_v2') return '#409EFF'
   if (id === 'v2_stock_analysis') return '#9C27B0'
+  if (id === 'v2_etf_analysis') return '#14B8A6'
   return '#409EFF'
 }
 
@@ -903,6 +905,11 @@ const isStockAnalysisWorkflow = (workflow: WorkflowSummary | WorkflowDefinition)
   // 单股分析流程的判断条件
   // 1. ID是 v2_stock_analysis
   if (id === 'v2_stock_analysis') {
+    return true
+  }
+
+  // 1.1 ETF 分析流程
+  if (id === 'v2_etf_analysis' || name.includes('etf分析')) {
     return true
   }
 

@@ -51,6 +51,8 @@ Function ValidateInstallDirPath
  Push $2
  Push $3
  Push $4
+ Push $5
+ Push $6
 
  StrLen $1 $0
  ${If} $1 < 4
@@ -71,40 +73,51 @@ Function ValidateInstallDirPath
   Goto done
  ${EndIf}
 
- ${If} $2 >= "A"
- ${AndIf} $2 <= "Z"
- ${OrIf} $2 >= "a"
- ${AndIf} $2 <= "z"
- ${Else}
-  StrCpy $0 1
-  Goto done
- ${EndIf}
+ StrCpy $5 "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+ StrCpy $6 0
+ drive_letter_loop:
+  StrCpy $3 $5 1 $6
+  ${If} $3 == ""
+   StrCpy $0 1
+   Goto done
+  ${EndIf}
 
- StrCpy $4 3
+  ${If} $2 == $3
+   Goto validate_path_chars
+  ${EndIf}
+
+  IntOp $6 $6 + 1
+  Goto drive_letter_loop
+
+ validate_path_chars:
+ StrCpy $5 "\ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
+ StrCpy $6 3
  loop_chars:
-  ${If} $4 >= $1
-    StrCpy $0 0
+  StrCpy $2 $0 1 $6
+  ${If} $2 == ""
+   StrCpy $0 0
+   Goto done
+  ${EndIf}
+
+  StrCpy $4 0
+ allowed_chars_loop:
+   StrCpy $3 $5 1 $4
+   ${If} $3 == ""
+    StrCpy $0 1
     Goto done
-  ${EndIf}
+   ${EndIf}
 
-  StrCpy $2 $0 1 $4
-  ${If} $2 == "\\"
-  ${OrIf} $2 == "_"
-  ${OrIf} $2 == "-"
-  ${OrIf} $2 == "."
-  ${OrIf} $2 >= "0"
-  ${AndIf} $2 <= "9"
-  ${OrIf} $2 >= "A"
-  ${AndIf} $2 <= "Z"
-  ${OrIf} $2 >= "a"
-  ${AndIf} $2 <= "z"
-    IntOp $4 $4 + 1
+   ${If} $2 == $3
+    IntOp $6 $6 + 1
     Goto loop_chars
-  ${EndIf}
+   ${EndIf}
 
-  StrCpy $0 1
+   IntOp $4 $4 + 1
+   Goto allowed_chars_loop
 
  done:
+ Pop $6
+ Pop $5
  Pop $4
  Pop $3
  Pop $2
@@ -220,10 +233,7 @@ Section "Install"
  CreateDirectory "$INSTDIR\data\redis"
 
  DetailPrint "Configuring ports..."
- nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Content \"$INSTDIR\.env\") -replace \"BACKEND_PORT=.*\", \"BACKEND_PORT=$BackendPort\" | Set-Content \"$INSTDIR\.env\""'
- nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Content \"$INSTDIR\.env\") -replace \"MONGO_PORT=.*\", \"MONGO_PORT=$MongoPort\" | Set-Content \"$INSTDIR\.env\""'
- nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Content \"$INSTDIR\.env\") -replace \"REDIS_PORT=.*\", \"REDIS_PORT=$RedisPort\" | Set-Content \"$INSTDIR\.env\""'
- nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "(Get-Content \"$INSTDIR\.env\") -replace \"NGINX_PORT=.*\", \"NGINX_PORT=$NginxPort\" | Set-Content \"$INSTDIR\.env\""'
+ nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$$envFile = \"$INSTDIR\.env\"; if (Test-Path $$envFile) { $$content = Get-Content $$envFile -Raw -Encoding UTF8; $$content = $$content -replace \"PORT=.*\", \"PORT=$BackendPort\"; $$content = $$content -replace \"API_PORT=.*\", \"API_PORT=$BackendPort\"; $$content = $$content -replace \"MONGODB_PORT=.*\", \"MONGODB_PORT=$MongoPort\"; $$content = $$content -replace \"REDIS_PORT=.*\", \"REDIS_PORT=$RedisPort\"; $$content = $$content -replace \"NGINX_PORT=.*\", \"NGINX_PORT=$NginxPort\"; $$utf8 = New-Object System.Text.UTF8Encoding $$false; [System.IO.File]::WriteAllText($$envFile, $$content, $$utf8) }"'
 
  WriteUninstaller "$INSTDIR\Uninstall.exe"
 
