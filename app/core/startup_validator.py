@@ -149,8 +149,8 @@ class StartupValidator:
         if api_key.endswith('_here') or api_key.endswith('-here'):
             return False
 
-        # 检查长度（大多数 API Key 都 > 10 个字符）
-        if len(api_key) <= 10:
+        # 检查长度（允许较短的测试 Key，但仍需排除明显无效值）
+        if len(api_key) < 5:
             return False
 
         return True

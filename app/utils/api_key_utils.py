@@ -14,7 +14,7 @@ def is_valid_api_key(api_key: Optional[str]) -> bool:
     
     有效的 API Key 必须满足：
     1. 不能为空
-    2. 长度必须 > 10
+    2. 长度必须 >= 5
     3. 不能是占位符（前缀：your_, your-）
     4. 不能是占位符（后缀：_here, -here）
     5. 不能是截断的密钥（包含 '...'）
@@ -34,8 +34,8 @@ def is_valid_api_key(api_key: Optional[str]) -> bool:
     if not api_key:
         return False
     
-    # 2. 长度必须 > 10
-    if len(api_key) <= 10:
+    # 2. 长度必须 >= 5
+    if len(api_key) < 5:
         return False
     
     # 3. 不能是占位符（前缀）
