@@ -715,7 +715,16 @@ const exportData = async () => {
       'scheduler_metadata',         // 调度器元数据
 
       // 其他配置
-      'watchlist_groups'            // 自选股分组
+      'watchlist_groups',           // 自选股分组
+
+      // v3.0 新增集合
+      'external_skills',            // Skill 自动生成系统产出的外部技能
+      'workflow_generation_sessions', // AI 工作流架构师会话记录
+      'assistant_user_profiles',    // 智能助手用户画像
+      'assistant_threads',          // 智能助手主题会话
+      'assistant_thread_checkpoints', // 主题会话摘要快照
+      'user_identity_mappings',     // Gateway IM 用户身份映射
+      'user_channel_configs'        // 通知渠道配置
 
       // 注意: 不包含 market_quotes 和 stock_basic_info（数据量大，不适合演示系统）
     ]

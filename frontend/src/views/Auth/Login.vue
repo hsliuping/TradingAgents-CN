@@ -3,7 +3,7 @@
     <div class="login-container">
       <div class="login-header">
         <img src="/favicon.ico" alt="TradingAgents-CN" class="logo" />
-        <h1 class="title">TradingAgents-CN 2.0</h1>
+        <h1 class="title">TradingAgents-CN 3.0</h1>
         <p class="subtitle">多智能体股票分析学习平台</p>
       </div>
 
