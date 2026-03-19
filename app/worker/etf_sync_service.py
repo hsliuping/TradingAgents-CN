@@ -28,6 +28,21 @@ ETF_SH_PREFIXES = ("50", "51", "52", "56", "58")
 ETF_SZ_PREFIXES = ("15", "16", "18")
 
 
+def _is_missing(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() in {"", "-", "--", "None", "nan", "NaN"}
+    return False
+
+
+def _coalesce(*values):
+    for value in values:
+        if not _is_missing(value):
+            return value
+    return None
+
+
 def _normalize_etf_code(s: str) -> str:
     """标准化 ETF 代码为 6 位"""
     if not s:
@@ -95,6 +110,41 @@ def _fetch_etf_spot_list_akshare() -> List[Dict[str, Any]]:
         return []
 
 
+def _fetch_etf_valuation_map_akshare() -> Dict[str, Dict[str, Any]]:
+    """从 AKShare 获取 ETF 净值、折溢价和申赎状态映射。"""
+    try:
+        import akshare as ak
+
+        valuation_df = ak.fund_etf_fund_daily_em()
+        if valuation_df is None or valuation_df.empty:
+            return {}
+
+        code_col = "基金代码" if "基金代码" in valuation_df.columns else "代码"
+        valuation_df["code_clean"] = valuation_df[code_col].astype(str).str.extract(r"(\d{6})", expand=False).fillna("")
+        unit_nav_col = next((col for col in valuation_df.columns if str(col).endswith("单位净值")), None)
+        accum_nav_col = next((col for col in valuation_df.columns if str(col).endswith("累计净值")), None)
+
+        result: Dict[str, Dict[str, Any]] = {}
+        for _, row in valuation_df.iterrows():
+            code = _normalize_etf_code(row.get("code_clean"))
+            if not _is_etf_code(code):
+                continue
+            result[code] = {
+                "unit_nav": row.get(unit_nav_col) if unit_nav_col else None,
+                "accum_nav": row.get(accum_nav_col) if accum_nav_col else None,
+                "nav_change_value": row.get("增长值"),
+                "nav_growth_rate": row.get("增长率"),
+                "market_price": row.get("市价"),
+                "premium_discount_rate": row.get("折价率"),
+                "fund_type": row.get("类型"),
+            }
+
+        return result
+    except Exception as e:
+        logger.warning(f"AKShare ETF 估值映射获取失败: {e}")
+        return {}
+
+
 def _get_tushare_pro_api():
     """获取 Tushare pro_api（复用单例，避免重复连接）"""
     try:
@@ -138,6 +188,19 @@ def _fetch_etf_spot_list_tushare() -> List[Dict[str, Any]]:
                 "fund_scale": r.get("issue_amount"),
                 "track_index": str(r.get("benchmark", "") or ""),
                 "fund_type": str(r.get("fund_type", "ETF") or "ETF"),
+                "management": r.get("management"),
+                "custodian": r.get("custodian"),
+                "management_fee": r.get("m_fee"),
+                "custodian_fee": r.get("c_fee"),
+                "found_date": r.get("found_date"),
+                "list_date": r.get("list_date"),
+                "issue_date": r.get("issue_date"),
+                "due_date": r.get("due_date"),
+                "invest_type": r.get("invest_type"),
+                "status": r.get("status"),
+                "min_amount": r.get("min_amount"),
+                "purchase_start_date": r.get("purc_startdate"),
+                "redemption_start_date": r.get("redm_startdate"),
             })
         return rows
     except Exception as e:
@@ -415,6 +478,7 @@ class EtfSyncService:
         try:
             loop = asyncio.get_running_loop()
             rows = await loop.run_in_executor(None, fetch_fn)
+            valuation_map = await loop.run_in_executor(None, _fetch_etf_valuation_map_akshare) if source == "akshare" else {}
             if not rows:
                 logger.warning(f"⚠️ [{source}] 未获取到 ETF 列表")
                 return stats
@@ -434,14 +498,38 @@ class EtfSyncService:
                             stats["skipped_count"] += 1
                             continue
 
+                    valuation = valuation_map.get(code, {})
+
                     doc = {
                         "code": code,
                         "symbol": code,
                         "name": r.get("name", ""),
                         "full_symbol": r.get("full_symbol", _get_full_symbol(code)),
-                        "fund_type": r.get("fund_type", "ETF"),
+                        "fund_type": _coalesce(r.get("fund_type"), valuation.get("fund_type"), "ETF"),
                         "fund_scale": r.get("fund_scale"),
                         "track_index": r.get("track_index", ""),
+                        "management": r.get("management"),
+                        "custodian": r.get("custodian"),
+                        "management_fee": r.get("management_fee"),
+                        "custodian_fee": r.get("custodian_fee"),
+                        "found_date": r.get("found_date"),
+                        "list_date": r.get("list_date"),
+                        "issue_date": r.get("issue_date"),
+                        "due_date": r.get("due_date"),
+                        "invest_type": r.get("invest_type"),
+                        "status": r.get("status"),
+                        "min_amount": r.get("min_amount"),
+                        "purchase_start_date": r.get("purchase_start_date"),
+                        "redemption_start_date": r.get("redemption_start_date"),
+                        "unit_nav": valuation.get("unit_nav"),
+                        "accum_nav": valuation.get("accum_nav"),
+                        "nav_change_value": valuation.get("nav_change_value"),
+                        "nav_growth_rate": valuation.get("nav_growth_rate"),
+                        "market_price": valuation.get("market_price"),
+                        "premium_discount_rate": valuation.get("premium_discount_rate"),
+                        "latest_nav_date": valuation.get("latest_nav_date"),
+                        "purchase_status": valuation.get("purchase_status"),
+                        "redemption_status": valuation.get("redemption_status"),
                         "source": source,
                         "updated_at": now,
                     }
