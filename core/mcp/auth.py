@@ -123,18 +123,21 @@ class MCPApiKeyVerifier:
             return self._config_cache  # 降级使用旧缓存
 
     async def _check_daily_quota(self, user_id: str, daily_quota: int) -> bool:
-        """检查用户今日分析次数是否在配额内"""
+        """检查用户今日 MCP 分析次数是否在配额内"""
         try:
+            from bson import ObjectId
             from app.core.database import get_mongo_db
             db = get_mongo_db()
 
             today_start = datetime.now(timezone.utc).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
+            # user_id 在数据库中存储为 ObjectId，需要转换
+            # 通过 task_params._mcp_source 标记来源（analyze_stock 创建时写入）
             count = await db.unified_analysis_tasks.count_documents({
-                "user_id": user_id,
+                "user_id": ObjectId(user_id),
                 "created_at": {"$gte": today_start},
-                "source": "mcp",
+                "task_params._mcp_source": True,
             })
             return count < daily_quota
         except Exception as e:

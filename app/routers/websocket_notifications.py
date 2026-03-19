@@ -10,6 +10,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPExcept
 from datetime import datetime
 
 from app.services.auth_service import AuthService
+from app.services.user_service import user_service
 
 router = APIRouter()
 logger = logging.getLogger("webapi.websocket")
@@ -136,9 +137,14 @@ async def websocket_notifications_endpoint(
     if not token_data:
         await websocket.close(code=1008, reason="Unauthorized")
         return
-    
-    user_id = "admin"  # 从 token_data 中获取
-    
+
+    # 从 token_data.sub（用户名）查找数据库用户，获取真实 user_id
+    user = await user_service.get_user_by_username(token_data.sub)
+    if not user:
+        await websocket.close(code=1008, reason="User not found")
+        return
+    user_id = str(user.id)
+
     # 连接 WebSocket
     await manager.connect(websocket, user_id)
     
@@ -226,8 +232,13 @@ async def websocket_task_progress_endpoint(
     if not token_data:
         await websocket.close(code=1008, reason="Unauthorized")
         return
-    
-    user_id = "admin"
+
+    # 从 token_data.sub（用户名）查找数据库用户，获取真实 user_id
+    user = await user_service.get_user_by_username(token_data.sub)
+    if not user:
+        await websocket.close(code=1008, reason="User not found")
+        return
+    user_id = str(user.id)
     channel = f"task_progress:{task_id}"
     
     # 连接 WebSocket

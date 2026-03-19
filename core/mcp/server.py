@@ -112,7 +112,7 @@ async def analyze_stock(
         task = await service.create_and_execute_task(
             user_id=ObjectId(mcp_user_id),
             task_type=AnalysisTaskType.STOCK_ANALYSIS,
-            task_params={"symbol": symbol, "market_type": "cn", "research_depth": depth_label},
+            task_params={"symbol": symbol, "market_type": "cn", "research_depth": depth_label, "_mcp_source": True},
             engine_type="auto",
             workflow_id=workflow_id,
         )
@@ -122,7 +122,7 @@ async def analyze_stock(
         task = await service.create_task(
             user_id=ObjectId(mcp_user_id),
             task_type=AnalysisTaskType.STOCK_ANALYSIS,
-            task_params={"symbol": symbol, "market_type": "cn", "research_depth": depth_label},
+            task_params={"symbol": symbol, "market_type": "cn", "research_depth": depth_label, "_mcp_source": True},
             engine_type="auto",
             workflow_id=workflow_id,
         )
