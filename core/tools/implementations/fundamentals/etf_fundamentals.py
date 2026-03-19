@@ -1,14 +1,15 @@
 """
 ETF 基本面数据工具
 
-获取 ETF 的净值、规模、费率、跟踪误差等指标（ETF 无 PE/PB/ROE）
-支持本地数据优先：若 etf_basic_info、etf_daily_quotes 有数据则使用，否则回退到 AKShare 在线接口
+获取 ETF 的净值、规模、费率、折溢价、申赎状态等指标（ETF 无 PE/PB/ROE）。
+支持本地数据优先：若 etf_basic_info、etf_daily_quotes 有数据则使用，否则回退到 AKShare / Tushare 在线接口。
 """
 
 import logging
-from typing import Annotated, Optional, Tuple
-from langchain_core.tools import tool
 from datetime import datetime, timedelta
+from typing import Annotated, Optional, Tuple
+
+from langchain_core.tools import tool
 
 from core.tools.base import register_tool
 
@@ -16,6 +17,39 @@ logger = logging.getLogger(__name__)
 
 ETF_BASIC_COLLECTION = "etf_basic_info"
 ETF_DAILY_COLLECTION = "etf_daily_quotes"
+
+
+def _is_missing(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() in {"", "-", "--", "None", "nan", "NaN"}
+    return False
+
+
+def _coalesce(*values):
+    for value in values:
+        if not _is_missing(value):
+            return value
+    return None
+
+
+def _normalize_date(value) -> Optional[str]:
+    if _is_missing(value):
+        return None
+    text = str(value).strip()
+    if len(text) >= 10 and len(text) > 4 and text[4] in {"-", "/"}:
+        return text[:10].replace("/", "-")
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if len(digits) == 8:
+        return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
+    return text or None
+
+
+def _format_value(value, suffix: str = "") -> str:
+    if _is_missing(value):
+        return "-"
+    return f"{value}{suffix}"
 
 
 def _normalize_etf_symbol(symbol: str) -> str:
@@ -48,13 +82,10 @@ def _get_etf_full_symbol(symbol: str) -> str:
 
 
 def _fetch_etf_from_local(code: str) -> Tuple[Optional[dict], list]:
-    """
-    从本地 MongoDB 获取 ETF 基础信息和日线数据。
-    Returns:
-        (basic_info_dict, daily_records_list)
-    """
+    """从本地 MongoDB 获取 ETF 基础信息和日线数据。"""
     try:
         from app.core.database import get_mongo_db_sync
+
         db = get_mongo_db_sync()
         if not db:
             return None, []
@@ -65,7 +96,7 @@ def _fetch_etf_from_local(code: str) -> Tuple[Optional[dict], list]:
 
         cursor = db[ETF_DAILY_COLLECTION].find(
             {"code": code},
-            {"_id": 0, "trade_date": 1, "close": 1, "pct_chg": 1, "volume": 1, "amount": 1}
+            {"_id": 0, "trade_date": 1, "close": 1, "pct_chg": 1, "volume": 1, "amount": 1, "unit_nav": 1, "accum_nav": 1},
         ).sort("trade_date", -1).limit(30)
         daily = list(cursor)
         return basic, daily
@@ -75,51 +106,109 @@ def _fetch_etf_from_local(code: str) -> Tuple[Optional[dict], list]:
 
 
 def _fetch_etf_data_akshare(symbol: str) -> Optional[dict]:
-    """从 AKShare 获取 ETF 数据"""
+    """从 AKShare 获取 ETF 实时行情数据。"""
     try:
         import akshare as ak
+
         code = _normalize_etf_symbol(symbol)
         full = _get_etf_full_symbol(symbol)
         if not full:
             return None
 
-        # 获取 ETF 实时行情（东方财富）
         df = ak.fund_etf_spot_em()
         if df is None or df.empty:
             return None
 
-        # 列名可能是 代码/基金代码、名称/基金名称 等
         code_col = "代码" if "代码" in df.columns else "基金代码"
         name_col = "名称" if "名称" in df.columns else "基金名称"
-        df["code_clean"] = df[code_col].astype(str).str.replace(".", "").str.zfill(6)
+        df["code_clean"] = df[code_col].astype(str).str.extract(r"(\d{6})", expand=False).fillna("")
         row = df[df["code_clean"] == code]
-        if row.empty:
-            row = df[df[code_col].astype(str).str.contains(code, na=False)]
         if row.empty:
             return None
 
-        r = row.iloc[0]
-        # 兼容多种列名
+        record = row.iloc[0]
         return {
-            "name": r.get(name_col, r.get("名称", "")),
+            "name": record.get(name_col, record.get("名称", "")),
             "code": code,
             "full_symbol": full,
-            "latest_price": r.get("最新价", r.get("当前-单位净值", r.get("最新-单位净值"))),
-            "change_pct": r.get("涨跌幅", r.get("增长率")),
-            "volume": r.get("成交量"),
-            "amount": r.get("成交额"),
-            "fund_scale": r.get("规模"),
-            "track_index": r.get("跟踪指数", ""),
+            "latest_price": record.get("最新价", record.get("当前-单位净值", record.get("最新-单位净值"))),
+            "change_pct": record.get("涨跌幅", record.get("增长率")),
+            "volume": record.get("成交量"),
+            "amount": record.get("成交额"),
+            "fund_scale": record.get("规模"),
+            "track_index": record.get("跟踪指数", ""),
+            "fund_type": record.get("基金类型", ""),
         }
     except Exception as e:
         logger.warning(f"AKShare ETF 数据获取失败: {e}")
         return None
 
 
+def _fetch_etf_valuation_akshare(symbol: str) -> Optional[dict]:
+    """从 AKShare 获取 ETF 净值、折溢价和场内申赎状态。"""
+    try:
+        import akshare as ak
+
+        code = _normalize_etf_symbol(symbol)
+        if not code:
+            return None
+
+        valuation_df = ak.fund_etf_fund_daily_em()
+        if valuation_df is None or valuation_df.empty:
+            return None
+
+        code_col = "基金代码" if "基金代码" in valuation_df.columns else "代码"
+        valuation_df["code_clean"] = valuation_df[code_col].astype(str).str.extract(r"(\d{6})", expand=False).fillna("")
+        row = valuation_df[valuation_df["code_clean"] == code]
+        if row.empty:
+            return None
+
+        record = row.iloc[0]
+        unit_nav_col = next((col for col in valuation_df.columns if str(col).endswith("单位净值")), None)
+        accum_nav_col = next((col for col in valuation_df.columns if str(col).endswith("累计净值")), None)
+
+        result = {
+            "unit_nav": record.get(unit_nav_col) if unit_nav_col else None,
+            "accum_nav": record.get(accum_nav_col) if accum_nav_col else None,
+            "nav_change_value": record.get("增长值"),
+            "nav_growth_rate": record.get("增长率"),
+            "market_price": record.get("市价"),
+            "premium_discount_rate": record.get("折价率"),
+            "fund_type": record.get("类型"),
+        }
+
+        try:
+            info_df = ak.fund_etf_fund_info_em(
+                fund=code,
+                start_date=(datetime.now() - timedelta(days=30)).strftime("%Y%m%d"),
+                end_date=datetime.now().strftime("%Y%m%d"),
+            )
+            if info_df is not None and not info_df.empty:
+                latest = info_df.iloc[0]
+                result.update(
+                    {
+                        "latest_nav_date": latest.get("净值日期"),
+                        "purchase_status": latest.get("申购状态"),
+                        "redemption_status": latest.get("赎回状态"),
+                        "unit_nav": _coalesce(result.get("unit_nav"), latest.get("单位净值")),
+                        "accum_nav": _coalesce(result.get("accum_nav"), latest.get("累计净值")),
+                        "nav_growth_rate": _coalesce(result.get("nav_growth_rate"), latest.get("日增长率")),
+                    }
+                )
+        except Exception as exc:
+            logger.warning(f"AKShare ETF 申赎状态获取失败: {exc}")
+
+        return result
+    except Exception as e:
+        logger.warning(f"AKShare ETF 估值数据获取失败: {e}")
+        return None
+
+
 def _fetch_etf_data_tushare(symbol: str) -> Optional[dict]:
-    """从 Tushare 获取 ETF 数据（fund_basic + 最新 fund_daily）"""
+    """从 Tushare 获取 ETF 数据（fund_basic + 最新 fund_daily）。"""
     try:
         from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+
         provider = get_tushare_provider()
         if not provider or not provider.api:
             return None
@@ -133,7 +222,7 @@ def _fetch_etf_data_tushare(symbol: str) -> Optional[dict]:
         if df_basic is None or df_basic.empty:
             return None
 
-        r = df_basic.iloc[0]
+        record = df_basic.iloc[0]
         end = datetime.now().strftime("%Y%m%d")
         start = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
         df_daily = provider.api.fund_daily(ts_code=full, start_date=start, end_date=end)
@@ -142,28 +231,41 @@ def _fetch_etf_data_tushare(symbol: str) -> Optional[dict]:
         volume = None
         amount = None
         if df_daily is not None and not df_daily.empty:
-            d = df_daily.iloc[0]
-            latest_price = d.get("close")
-            change_pct = d.get("pct_chg")
-            vol = d.get("vol")
-            amt = d.get("amount")
-            volume = vol
-            if amt is not None:
+            latest = df_daily.iloc[0]
+            latest_price = latest.get("close")
+            change_pct = latest.get("pct_chg")
+            volume = latest.get("vol")
+            amount = latest.get("amount")
+            if amount is not None:
                 try:
-                    amount = float(amt) * 1000
+                    amount = float(amount) * 1000
                 except (TypeError, ValueError):
-                    amount = amt
+                    pass
 
         return {
-            "name": r.get("name", ""),
+            "name": record.get("name", ""),
             "code": code,
             "full_symbol": full,
             "latest_price": latest_price,
             "change_pct": change_pct,
             "volume": volume,
             "amount": amount,
-            "fund_scale": r.get("issue_amount"),
-            "track_index": str(r.get("benchmark", "") or ""),
+            "fund_scale": record.get("issue_amount"),
+            "track_index": str(record.get("benchmark", "") or ""),
+            "management": record.get("management"),
+            "custodian": record.get("custodian"),
+            "fund_type": record.get("fund_type"),
+            "management_fee": record.get("m_fee"),
+            "custodian_fee": record.get("c_fee"),
+            "found_date": record.get("found_date"),
+            "list_date": record.get("list_date"),
+            "issue_date": record.get("issue_date"),
+            "due_date": record.get("due_date"),
+            "invest_type": record.get("invest_type"),
+            "status": record.get("status"),
+            "min_amount": record.get("min_amount"),
+            "purchase_start_date": record.get("purc_startdate"),
+            "redemption_start_date": record.get("redm_startdate"),
         }
     except Exception as e:
         logger.warning(f"Tushare ETF 数据获取失败: {e}")
@@ -171,9 +273,10 @@ def _fetch_etf_data_tushare(symbol: str) -> Optional[dict]:
 
 
 def _fetch_etf_hist_tushare(symbol: str, days: int = 30) -> list:
-    """从 Tushare 获取 ETF 历史数据"""
+    """从 Tushare 获取 ETF 历史数据。"""
     try:
         from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+
         provider = get_tushare_provider()
         if not provider or not provider.api:
             return []
@@ -190,22 +293,24 @@ def _fetch_etf_hist_tushare(symbol: str, days: int = 30) -> list:
             return []
 
         records = []
-        for _, r in df.iterrows():
-            td = r.get("trade_date")
-            if td:
-                td = str(td)
-                if len(td) == 8:
-                    td = f"{td[:4]}-{td[4:6]}-{td[6:8]}"
-            records.append({
-                "日期": td,
-                "date": td,
-                "trade_date": td,
-                "收盘": r.get("close"),
-                "close": r.get("close"),
-                "涨跌幅": r.get("pct_chg"),
-                "pct_chg": r.get("pct_chg"),
-                "增长率": r.get("pct_chg"),
-            })
+        for _, record in df.iterrows():
+            trade_date = record.get("trade_date")
+            if trade_date:
+                trade_date = str(trade_date)
+                if len(trade_date) == 8:
+                    trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+            records.append(
+                {
+                    "日期": trade_date,
+                    "date": trade_date,
+                    "trade_date": trade_date,
+                    "收盘": record.get("close"),
+                    "close": record.get("close"),
+                    "涨跌幅": record.get("pct_chg"),
+                    "pct_chg": record.get("pct_chg"),
+                    "增长率": record.get("pct_chg"),
+                }
+            )
         return records
     except Exception as e:
         logger.warning(f"Tushare ETF 历史数据获取失败: {e}")
@@ -213,15 +318,15 @@ def _fetch_etf_hist_tushare(symbol: str, days: int = 30) -> list:
 
 
 def _fetch_etf_hist_akshare(symbol: str, days: int = 30) -> list:
-    """从 AKShare 获取 ETF 历史数据"""
+    """从 AKShare 获取 ETF 历史数据。"""
     try:
         import akshare as ak
+
         code = _normalize_etf_symbol(symbol)
         if not code:
             return []
         end = datetime.now().strftime("%Y%m%d")
         start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-        # fund_etf_hist_em 参数: symbol 为 6 位代码
         df = ak.fund_etf_hist_em(symbol=code, period="daily", start_date=start, end_date=end)
         if df is None or df.empty:
             return []
@@ -235,45 +340,27 @@ def _fetch_etf_hist_akshare(symbol: str, days: int = 30) -> list:
 @register_tool(
     tool_id="get_etf_fundamentals",
     name="ETF 基本面数据",
-    description="获取 ETF 的净值、规模、跟踪指数、涨跌幅等。ETF 无 PE/PB/ROE，使用净值、规模、费率、跟踪误差等指标。",
+    description="获取 ETF 的净值、规模、费率、折溢价、申赎状态、跟踪指数、涨跌幅等。",
     category="fundamentals",
     is_online=True,
-    auto_register=True
+    auto_register=True,
 )
 def get_etf_fundamentals(
     ticker: Annotated[str, "ETF 代码（如 510050、159919）"],
     start_date: Annotated[Optional[str], "开始日期，格式：YYYY-MM-DD"] = None,
     end_date: Annotated[Optional[str], "结束日期，格式：YYYY-MM-DD"] = None,
-    curr_date: Annotated[Optional[str], "当前日期，格式：YYYY-MM-DD"] = None
+    curr_date: Annotated[Optional[str], "当前日期，格式：YYYY-MM-DD"] = None,
 ) -> str:
-    """
-    获取 ETF 基本面分析数据
-
-    ETF 与股票不同，没有 PE/PB/ROE。本工具返回：
-    - 最新价、涨跌幅
-    - 规模、跟踪指数
-    - 近期走势摘要
-
-    Args:
-        ticker: ETF 代码（如 510050 上证50ETF、159919 沪深300ETF）
-        start_date: 开始日期（可选）
-        end_date: 结束日期（可选）
-        curr_date: 当前日期（可选）
-
-    Returns:
-        str: ETF 基本面分析数据（格式化文本）
-    """
+    """获取 ETF 基本面分析数据。"""
     logger.info(f"📊 [ETF 基本面] 分析: {ticker}")
 
     code = _normalize_etf_symbol(ticker)
     if not code or len(code) != 6:
         return f"❌ 无效的 ETF 代码: {ticker}，请输入 6 位数字（如 510050、159919）"
 
-    # 验证是否为 ETF 代码
     if not (code.startswith(("50", "51", "52")) or code.startswith(("15", "16"))):
         return f"❌ {ticker} 不是 ETF 代码。ETF 代码通常为 50/51/52 开头（沪市）或 15/16 开头（深市）"
 
-    # 优先使用本地数据（需同时有基础信息和日线）
     spot = None
     hist = []
     basic_local, daily_local = _fetch_etf_from_local(code)
@@ -288,8 +375,30 @@ def get_etf_fundamentals(
             "amount": daily_local[0].get("amount") if daily_local else None,
             "fund_scale": basic_local.get("fund_scale"),
             "track_index": basic_local.get("track_index", ""),
+            "management": basic_local.get("management"),
+            "custodian": basic_local.get("custodian"),
+            "fund_type": basic_local.get("fund_type"),
+            "management_fee": basic_local.get("management_fee"),
+            "custodian_fee": basic_local.get("custodian_fee"),
+            "found_date": basic_local.get("found_date"),
+            "list_date": basic_local.get("list_date"),
+            "issue_date": basic_local.get("issue_date"),
+            "due_date": basic_local.get("due_date"),
+            "invest_type": basic_local.get("invest_type"),
+            "status": basic_local.get("status"),
+            "min_amount": basic_local.get("min_amount"),
+            "purchase_start_date": basic_local.get("purchase_start_date"),
+            "redemption_start_date": basic_local.get("redemption_start_date"),
+            "unit_nav": basic_local.get("unit_nav") or (daily_local[0].get("unit_nav") if daily_local else None),
+            "accum_nav": basic_local.get("accum_nav") or (daily_local[0].get("accum_nav") if daily_local else None),
+            "market_price": basic_local.get("market_price"),
+            "premium_discount_rate": basic_local.get("premium_discount_rate"),
+            "nav_growth_rate": basic_local.get("nav_growth_rate"),
+            "latest_nav_date": basic_local.get("latest_nav_date"),
+            "purchase_status": basic_local.get("purchase_status"),
+            "redemption_status": basic_local.get("redemption_status"),
         }
-        hist = [{"日期": d.get("trade_date"), "收盘": d.get("close"), "涨跌幅": d.get("pct_chg")} for d in daily_local]
+        hist = [{"日期": item.get("trade_date"), "收盘": item.get("close"), "涨跌幅": item.get("pct_chg")} for item in daily_local]
         logger.info(f"📊 [ETF 基本面] 使用本地数据: {code}")
 
     if not spot:
@@ -300,6 +409,16 @@ def get_etf_fundamentals(
             spot = _fetch_etf_data_tushare(ticker)
             hist = _fetch_etf_hist_tushare(ticker, days=30) if spot else []
 
+    tushare_profile = _fetch_etf_data_tushare(ticker)
+    akshare_valuation = _fetch_etf_valuation_akshare(ticker)
+    spot = spot or {}
+
+    for extra in (tushare_profile, akshare_valuation):
+        if not extra:
+            continue
+        for key, value in extra.items():
+            spot[key] = _coalesce(spot.get(key), value)
+
     lines = [
         f"# {ticker} ETF 基本面分析数据",
         f"**分析日期**: {curr_date or datetime.now().strftime('%Y-%m-%d')}",
@@ -307,37 +426,63 @@ def get_etf_fundamentals(
     ]
 
     if spot:
-        lines.extend([
-            "## ETF 基本信息",
-            f"- 名称: {spot.get('name', '-')}",
-            f"- 代码: {spot.get('code', '-')}",
-            f"- 完整代码: {spot.get('full_symbol', '-')}",
-            "",
-            "## 当前行情",
-            f"- 最新价: {spot.get('latest_price', '-')}",
-            f"- 涨跌幅: {spot.get('change_pct', '-')}%",
-            f"- 成交量: {spot.get('volume', '-')}",
-            f"- 成交额: {spot.get('amount', '-')}",
-            f"- 规模: {spot.get('fund_scale', '-')}",
-            f"- 跟踪指数: {spot.get('track_index', '-')}",
-            "",
-        ])
+        lines.extend(
+            [
+                "## ETF 基本信息",
+                f"- 名称: {_format_value(spot.get('name'))}",
+                f"- 代码: {_format_value(spot.get('code'))}",
+                f"- 完整代码: {_format_value(spot.get('full_symbol'))}",
+                f"- 基金类型: {_format_value(spot.get('fund_type'))}",
+                f"- 跟踪指数: {_format_value(spot.get('track_index'))}",
+                f"- 管理人: {_format_value(spot.get('management'))}",
+                f"- 托管人: {_format_value(spot.get('custodian'))}",
+                f"- 成立日期: {_format_value(_normalize_date(spot.get('found_date')))}",
+                f"- 上市日期: {_format_value(_normalize_date(spot.get('list_date')))}",
+                "",
+                "## 当前行情",
+                f"- 最新价: {_format_value(spot.get('latest_price'))}",
+                f"- 涨跌幅: {_format_value(spot.get('change_pct'), '%')}",
+                f"- 成交量: {_format_value(spot.get('volume'))}",
+                f"- 成交额: {_format_value(spot.get('amount'))}",
+                f"- 规模: {_format_value(spot.get('fund_scale'))}",
+                "",
+                "## ETF 深属性",
+                f"- 单位净值: {_format_value(spot.get('unit_nav'))}",
+                f"- 累计净值: {_format_value(spot.get('accum_nav'))}",
+                f"- 净值日期: {_format_value(_normalize_date(spot.get('latest_nav_date')))}",
+                f"- 场内市价: {_format_value(spot.get('market_price'))}",
+                f"- 折溢价率: {_format_value(spot.get('premium_discount_rate'), '%')}",
+                f"- 净值增长率: {_format_value(spot.get('nav_growth_rate'), '%')}",
+                f"- 管理费: {_format_value(spot.get('management_fee'), '%')}",
+                f"- 托管费: {_format_value(spot.get('custodian_fee'), '%')}",
+                f"- 起购金额: {_format_value(spot.get('min_amount'))}",
+                f"- 申购开始日: {_format_value(_normalize_date(spot.get('purchase_start_date')))}",
+                f"- 赎回开始日: {_format_value(_normalize_date(spot.get('redemption_start_date')))}",
+                f"- 申购状态: {_format_value(spot.get('purchase_status'))}",
+                f"- 赎回状态: {_format_value(spot.get('redemption_status'))}",
+                f"- 投资类型: {_format_value(spot.get('invest_type'))}",
+                f"- 基金状态: {_format_value(spot.get('status'))}",
+                "- 跟踪误差: 暂无直接数据源",
+                "- 申赎清单结构: 暂无直接数据源",
+                "",
+            ]
+        )
     else:
         lines.append("## 当前行情\n⚠️ 未能获取实时数据，请检查网络或数据源。\n")
 
     if hist:
         lines.append("## 近期走势")
         recent = hist[:5] if len(hist) >= 5 else hist
-        for h in reversed(recent):
-            date = h.get("日期", h.get("date", h.get("trade_date", "-")))
-            close = h.get("收盘", h.get("close", "-"))
-            pct = h.get("涨跌幅", h.get("pct_chg", h.get("增长率", "-")))
+        for item in reversed(recent):
+            date = item.get("日期", item.get("date", item.get("trade_date", "-")))
+            close = item.get("收盘", item.get("close", "-"))
+            pct = item.get("涨跌幅", item.get("pct_chg", item.get("增长率", "-")))
             lines.append(f"- {date}: 收盘 {close}, 涨跌幅 {pct}%")
         lines.append("")
     else:
         lines.append("## 近期走势\n⚠️ 未能获取历史数据。\n")
 
     lines.append("---")
-    lines.append("*说明: ETF 无 PE/PB/ROE 等个股估值指标，分析时请关注净值、规模、跟踪指数、跟踪误差等。*")
+    lines.append("*说明: ETF 无 PE/PB/ROE 等个股估值指标，分析时请关注净值、规模、费率、折溢价、申赎状态、跟踪指数等。跟踪误差与申赎清单结构当前暂无直接数据源。*")
 
     return "\n".join(lines)
