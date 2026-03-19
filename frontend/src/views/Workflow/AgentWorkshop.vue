@@ -826,7 +826,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import { skillGenerationApi } from '@/api/skillGeneration'
@@ -1276,10 +1276,10 @@ const syncActiveStep = (preferred?: FlowStep) => {
   activeStep.value = 'discuss'
 }
 
-const formatTime = (value?: string) => {
-  if (!value) return '-'
-  return value.replace('T', ' ').slice(0, 19)
-}
+// const formatTime = (value?: string) => {
+//   if (!value) return '-'
+//   return value.replace('T', ' ').slice(0, 19)
+// }
 
 const resetEvaluationForm = () => {
   evaluationForm.value = {
@@ -1638,40 +1638,40 @@ const handleBuildVersion = async () => {
   }
 }
 
-const handleDeleteSpec = async (spec: AgentSpec) => {
-  try {
-    await ElMessageBox.confirm(
-      `确定删除“${spec.name}”吗？这会同时删除它的会话、版本和评估记录。`,
-      '删除 Agent 草案',
-      {
-        type: 'warning',
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        confirmButtonClass: 'el-button--danger',
-      }
-    )
-
-    await agentWorkshopApi.deleteSpec(spec.spec_id)
-
-    if (currentSession.value?.spec_id === spec.spec_id) {
-      currentSession.value = null
-      previewResult.value = null
-      gapReport.value = null
-      latestVersion.value = null
-      latestEvaluation.value = null
-      replyMessage.value = ''
-    }
-
-    await refreshAll()
-    syncActiveStep()
-    ElMessage.success('测试 Agent 已删除')
-  } catch (error: any) {
-    if (error === 'cancel' || error?.message === 'cancel') {
-      return
-    }
-    ElMessage.error(error?.message || '删除规格失败')
-  }
-}
+// const handleDeleteSpec = async (spec: AgentSpec) => {
+//   try {
+//     await ElMessageBox.confirm(
+//       `确定删除“${spec.name}”吗？这会同时删除它的会话、版本和评估记录。`,
+//       '删除 Agent 草案',
+//       {
+//         type: 'warning',
+//         confirmButtonText: '删除',
+//         cancelButtonText: '取消',
+//         confirmButtonClass: 'el-button--danger',
+//       }
+//     )
+//
+//     await agentWorkshopApi.deleteSpec(spec.spec_id)
+//
+//     if (currentSession.value?.spec_id === spec.spec_id) {
+//       currentSession.value = null
+//       previewResult.value = null
+//       gapReport.value = null
+//       latestVersion.value = null
+//       latestEvaluation.value = null
+//       replyMessage.value = ''
+//     }
+//
+//     await refreshAll()
+//     syncActiveStep()
+//     ElMessage.success('测试 Agent 已删除')
+//   } catch (error: any) {
+//     if (error === 'cancel' || error?.message === 'cancel') {
+//       return
+//     }
+//     ElMessage.error(error?.message || '删除规格失败')
+//   }
+// }
 
 const openEvaluateDialog = async () => {
   if (!latestVersion.value?.spec_id) return

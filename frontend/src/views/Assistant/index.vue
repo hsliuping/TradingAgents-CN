@@ -11,7 +11,7 @@
         </el-tag>
       </div>
       <div class="header-right">
-        <el-button size="small" @click="handleCreateThread">
+        <el-button size="small" @click="handleCreateThread()">
           <el-icon><Plus /></el-icon>
           新主题
         </el-button>
