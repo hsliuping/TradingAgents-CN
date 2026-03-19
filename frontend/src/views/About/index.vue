@@ -6,7 +6,7 @@
         <div class="hero-text">
           <h1 class="hero-title">
             TradingAgents-CN
-            <span class="version-badge">v2.0</span>
+            <span class="version-badge">v3.0</span>
           </h1>
           <p class="hero-subtitle">
             AI辅助股票分析技术学习平台
@@ -501,7 +501,7 @@
       <div class="version-info" v-loading="systemInfoLoading">
         <div class="version-card">
           <div class="version-main">
-            <div class="version-number">{{ systemInfo.version || 'v2.0' }}</div>
+            <div class="version-number">{{ systemInfo.version || 'v3.0' }}</div>
             <div class="version-status">正式版</div>
           </div>
           <div class="version-details">

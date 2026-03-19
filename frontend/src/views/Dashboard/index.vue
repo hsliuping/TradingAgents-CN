@@ -12,7 +12,11 @@
         </p>
       </div>
       <div class="welcome-actions">
-        <el-button type="primary" size="large" @click="quickAnalysis">
+        <el-button type="primary" size="large" @click="goToAssistant">
+          <el-icon><ChatDotRound /></el-icon>
+          智能助手
+        </el-button>
+        <el-button size="large" @click="quickAnalysis">
           <el-icon><TrendCharts /></el-icon>
           快速分析
         </el-button>
@@ -27,6 +31,35 @@
       </div>
     </div>
 
+
+    <!-- v3.0 智能助手推荐卡片 -->
+    <el-card class="assistant-highlight-card">
+      <div class="learning-highlight">
+        <div class="learning-icon assistant-icon">
+          <el-icon size="48"><ChatDotRound /></el-icon>
+        </div>
+        <div class="learning-content">
+          <h2>🤖 智能助手 <span class="new-badge">v3.0 NEW</span></h2>
+          <p class="learning-description">
+            <strong>🎯 AI 对话式股票分析助手</strong> — 通过自然语言对话，智能调用多种分析工具，为您提供个性化的投资研究支持。支持 QQ 频道接入、MCP 工具扩展、自动 Skill 生成等 v3.0 全新能力。
+          </p>
+          <div class="learning-features">
+            <span class="feature-tag highlight">💬 对话式分析</span>
+            <span class="feature-tag">🔧 MCP 工具扩展</span>
+            <span class="feature-tag">🏭 Agent 工坊</span>
+            <span class="feature-tag">📱 QQ 频道接入</span>
+            <span class="feature-tag">⚡ Skill 自动生成</span>
+            <span class="feature-tag">🔍 智能选股</span>
+          </div>
+        </div>
+        <div class="learning-action">
+          <el-button type="primary" size="large" @click="goToAssistant">
+            <el-icon><ChatDotRound /></el-icon>
+            开始对话
+          </el-button>
+        </div>
+      </div>
+    </el-card>
 
     <!-- 学习中心推荐卡片 -->
     <el-card class="learning-highlight-card">
@@ -142,8 +175,60 @@
           </div>
         </el-card>
 
-        <!-- v2.0 核心功能 -->
-        <el-card class="v2-features-card" header="v2.0 核心功能" style="margin-top: 24px;">
+        <!-- v3.0 核心功能 -->
+        <el-card class="v2-features-card v3-features-card" style="margin-top: 24px;">
+          <template #header>
+            <span>v3.0 核心功能 <el-tag size="small" type="success" effect="dark" style="margin-left: 8px;">NEW</el-tag></span>
+          </template>
+          <div class="quick-actions">
+            <div class="action-item" @click="goToAssistant">
+              <div class="action-icon v3-icon">
+                <el-icon><ChatDotRound /></el-icon>
+              </div>
+              <div class="action-content">
+                <h3>智能助手 <el-tag size="small" type="success">v3.0</el-tag></h3>
+                <p>AI 对话式分析助手，自然语言驱动的投资研究</p>
+              </div>
+              <el-icon class="action-arrow"><ArrowRight /></el-icon>
+            </div>
+
+            <div class="action-item" @click="goToScreening">
+              <div class="action-icon v3-icon">
+                <el-icon><Filter /></el-icon>
+              </div>
+              <div class="action-content">
+                <h3>智能选股 <el-tag size="small" type="success">v3.0</el-tag></h3>
+                <p>自然语言描述选股条件，AI 自动筛选</p>
+              </div>
+              <el-icon class="action-arrow"><ArrowRight /></el-icon>
+            </div>
+
+            <div class="action-item" @click="goToAgentWorkshop">
+              <div class="action-icon v3-icon">
+                <el-icon><MagicStick /></el-icon>
+              </div>
+              <div class="action-content">
+                <h3>Agent 工坊 <el-tag size="small" type="success">v3.0</el-tag></h3>
+                <p>可视化创建和管理自定义 AI 智能体</p>
+              </div>
+              <el-icon class="action-arrow"><ArrowRight /></el-icon>
+            </div>
+
+            <div class="action-item" @click="goToMcpServers">
+              <div class="action-icon v3-icon">
+                <el-icon><Connection /></el-icon>
+              </div>
+              <div class="action-content">
+                <h3>MCP 服务器 <el-tag size="small" type="success">v3.0</el-tag></h3>
+                <p>管理外部工具服务器，扩展 AI 能力边界</p>
+              </div>
+              <el-icon class="action-arrow"><ArrowRight /></el-icon>
+            </div>
+          </div>
+        </el-card>
+
+        <!-- 流程配置 -->
+        <el-card class="v2-features-card" header="流程配置" style="margin-top: 24px;">
           <div class="quick-actions">
             <div class="action-item" @click="goToWorkflow">
               <div class="action-icon">
@@ -414,7 +499,11 @@ import {
   SetUp,
   UserFilled,
   Tools,
-  EditPen
+  EditPen,
+  ChatDotRound,
+  Filter,
+  MagicStick,
+  Connection
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { AnalysisTask, AnalysisStatus } from '@/types/analysis'
@@ -514,6 +603,18 @@ const goToTools = () => {
 
 const goToPrompts = () => {
   router.push('/settings/templates')
+}
+
+const goToAssistant = () => {
+  router.push('/assistant')
+}
+
+const goToAgentWorkshop = () => {
+  router.push('/workflow/agent-workshop')
+}
+
+const goToMcpServers = () => {
+  router.push('/workflow/mcp-servers')
 }
 
 const viewAnalysis = (analysis: AnalysisTask) => {
@@ -805,6 +906,28 @@ onMounted(async () => {
     }
   }
 
+  .assistant-highlight-card {
+    margin-bottom: 24px;
+    border: 2px solid #10b981;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.15);
+
+    .assistant-icon {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+    }
+
+    .new-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      color: white;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+      vertical-align: middle;
+      margin-left: 8px;
+    }
+  }
+
   .learning-highlight-card {
     margin-bottom: 24px;
     border: 2px solid var(--el-color-primary);
@@ -910,6 +1033,11 @@ onMounted(async () => {
           justify-content: center;
           color: var(--el-color-primary);
           font-size: 20px;
+
+          &.v3-icon {
+            background: rgba(16, 185, 129, 0.1);
+            color: #10b981;
+          }
         }
 
         .action-content {
@@ -938,6 +1066,15 @@ onMounted(async () => {
           transform: translateX(4px);
         }
       }
+    }
+  }
+
+  .v3-features-card {
+    border: 1px solid rgba(16, 185, 129, 0.3);
+
+    .action-item:hover {
+      border-color: #10b981 !important;
+      background-color: rgba(16, 185, 129, 0.05) !important;
     }
   }
 
