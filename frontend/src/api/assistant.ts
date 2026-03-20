@@ -7,6 +7,8 @@ import { request } from './request'
 export interface ChatRequest {
   message: string
   conversation_id?: string
+  quick_model?: string
+  deep_model?: string
 }
 
 export interface ChatResponse {
@@ -218,19 +220,23 @@ export const assistantApi = {
   },
 
   /** 发送对话消息 */
-  async chat(message: string, conversationId?: string): Promise<ChatResponse> {
+  async chat(message: string, conversationId?: string, quickModel?: string, deepModel?: string): Promise<ChatResponse> {
     const res = await request.post<ChatResponse>('/api/assistant/chat', {
       message,
-      conversation_id: conversationId
+      conversation_id: conversationId,
+      quick_model: quickModel,
+      deep_model: deepModel,
     })
     return res as unknown as ChatResponse
   },
 
   /** 规划分析（Plan-then-Execute 模式） */
-  async plannedAnalysis(message: string, conversationId?: string): Promise<PlannedAnalysisResponse> {
+  async plannedAnalysis(message: string, conversationId?: string, quickModel?: string, deepModel?: string): Promise<PlannedAnalysisResponse> {
     const res = await request.post<PlannedAnalysisResponse>('/api/assistant/planned-analysis', {
       message,
-      conversation_id: conversationId
+      conversation_id: conversationId,
+      quick_model: quickModel,
+      deep_model: deepModel,
     })
     return res as unknown as PlannedAnalysisResponse
   }

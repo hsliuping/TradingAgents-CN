@@ -268,6 +268,8 @@ async def assistant_chat(
             user_message=request.message.strip(),
             user_id=user_id,
             conversation_id=request.conversation_id,
+            quick_model=request.quick_model,
+            deep_model=request.deep_model,
         )
         return ChatResponse(**result)
     except Exception as e:
@@ -293,7 +295,13 @@ async def planned_analysis(
     user_id = str(current_user["id"])
 
     try:
-        service = PlannedAnalysisService(db)
+        service = PlannedAnalysisService(
+            db,
+            preferred_models={
+                "quick_model": request.quick_model,
+                "deep_model": request.deep_model,
+            },
+        )
         result = await service.analyze(
             question=request.message.strip(),
             user_id=user_id,
