@@ -29,6 +29,85 @@
       </div>
     </div>
 
+    <section class="assistant-llm-panel">
+      <div class="assistant-llm-header">
+        <div>
+          <div class="assistant-llm-title">LLM 选择</div>
+          <div class="assistant-llm-subtitle">快速对话使用快速模型，深度分析使用深度模型，可独立指定</div>
+        </div>
+        <el-tag size="small" :type="analysisMode === 'react' ? 'success' : 'warning'" effect="plain">
+          当前模式：{{ analysisMode === 'react' ? '快速对话 → 快速模型' : '深度分析 → 深度模型' }}
+        </el-tag>
+      </div>
+      <div class="assistant-llm-grid">
+        <div class="assistant-llm-item">
+          <div class="assistant-llm-label">快速对话模型</div>
+          <el-select
+            v-model="assistantModelSettings.quickModel"
+            filterable
+            clearable
+            placeholder="选择快速对话模型"
+            :loading="modelsLoading"
+          >
+            <el-option
+              v-for="model in quickAssistantModels"
+              :key="`assistant-quick-${model.provider}/${model.model_name}`"
+              :label="model.model_display_name || model.model_name"
+              :value="model.model_name"
+            >
+              <div class="assistant-model-option">
+                <span class="assistant-model-name">{{ model.model_display_name || model.model_name }}</span>
+                <div class="assistant-model-meta">
+                  <el-tag
+                    v-if="model.capability_level"
+                    :type="getCapabilityTagType(model.capability_level)"
+                    size="small"
+                    effect="plain"
+                  >
+                    {{ getCapabilityText(model.capability_level) }}
+                  </el-tag>
+                  <span class="assistant-model-provider">{{ model.provider }}</span>
+                </div>
+              </div>
+            </el-option>
+          </el-select>
+        </div>
+
+        <div class="assistant-llm-item">
+          <div class="assistant-llm-label">深度分析模型</div>
+          <el-select
+            v-model="assistantModelSettings.deepModel"
+            filterable
+            clearable
+            placeholder="选择深度分析模型"
+            :loading="modelsLoading"
+          >
+            <el-option
+              v-for="model in deepAssistantModels"
+              :key="`assistant-deep-${model.provider}/${model.model_name}`"
+              :label="model.model_display_name || model.model_name"
+              :value="model.model_name"
+            >
+              <div class="assistant-model-option">
+                <span class="assistant-model-name">{{ model.model_display_name || model.model_name }}</span>
+                <div class="assistant-model-meta">
+                  <el-tag
+                    v-if="model.capability_level"
+                    :type="getCapabilityTagType(model.capability_level)"
+                    size="small"
+                    effect="plain"
+                  >
+                    {{ getCapabilityText(model.capability_level) }}
+                  </el-tag>
+                  <span class="assistant-model-provider">{{ model.provider }}</span>
+                </div>
+              </div>
+            </el-option>
+          </el-select>
+        </div>
+      </div>
+    </section>
+
     <div class="workspace-body">
       <aside class="thread-sidebar">
         <div class="sidebar-header">
@@ -407,6 +486,7 @@ import { marked } from 'marked'
 import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
 
 import { assistantApi } from '@/api/assistant'
+import { configApi } from '@/api/config'
 import type {
   AssistantThreadItem,
   AssistantThreadReportSearchResponse,
@@ -415,6 +495,7 @@ import type {
   AssistantThreadSummary,
   MessageItem,
 } from '@/api/assistant'
+import type { LLMConfig } from '@/api/config'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -455,6 +536,12 @@ const loadingSeconds = ref(0)
 const threads = ref<AssistantThreadItem[]>([])
 const selectedThreadId = ref<string>('')
 const messages = ref<DisplayMessage[]>([])
+const modelsLoading = ref(false)
+const availableModels = ref<LLMConfig[]>([])
+const assistantModelSettings = ref({
+  quickModel: '',
+  deepModel: '',
+})
 const messagesContainer = ref<HTMLElement | null>(null)
 const reportDialogVisible = ref(false)
 const activeReportRef = ref<AssistantThreadReportRef | null>(null)
@@ -476,6 +563,14 @@ const currentSummary = computed<AssistantThreadSummary | null>(() => currentThre
 const currentReportRefs = computed<AssistantThreadReportRef[]>(() => currentThread.value?.report_refs || [])
 const activeReportTaskId = computed(() => activeReportDetail.value?.task_id || activeReportRef.value?.task_id || null)
 const focusPercent = computed(() => Math.max(0, Math.min(100, Math.round((currentSummary.value?.focus_score || 0) * 100))))
+const quickAssistantModels = computed(() => {
+  const matched = availableModels.value.filter(model => isQuickAnalysisRole(model.suitable_roles))
+  return matched.length ? matched : availableModels.value
+})
+const deepAssistantModels = computed(() => {
+  const matched = availableModels.value.filter(model => isDeepAnalysisRole(model.suitable_roles))
+  return matched.length ? matched : availableModels.value
+})
 
 const threadLookup = computed(() => {
   const map = new Map<string, AssistantThreadItem>()
@@ -555,6 +650,76 @@ const loadingHint = computed(() => {
   if (loadingSeconds.value < 10) return '正在调用数据与分析工具'
   return '正在整理答案'
 })
+
+const getCapabilityText = (level: number): string => {
+  const texts: Record<number, string> = {
+    1: '⚡基础',
+    2: '📊标准',
+    3: '🎯高级',
+    4: '🔥专业',
+    5: '👑旗舰'
+  }
+  return texts[level] || '📊标准'
+}
+
+const getCapabilityTagType = (level: number): 'success' | 'info' | 'warning' | 'danger' => {
+  if (level >= 4) return 'danger'
+  if (level >= 3) return 'warning'
+  if (level >= 2) return 'success'
+  return 'info'
+}
+
+const isQuickAnalysisRole = (roles?: string[]): boolean => {
+  if (!roles || !Array.isArray(roles)) return false
+  return roles.includes('quick_analysis') || roles.includes('both')
+}
+
+const isDeepAnalysisRole = (roles?: string[]): boolean => {
+  if (!roles || !Array.isArray(roles)) return false
+  return roles.includes('deep_analysis') || roles.includes('both')
+}
+
+const ensureAssistantModelSelections = async () => {
+  const enabledModels = availableModels.value
+  const defaultModels = await configApi.getDefaultModels()
+  const quickCandidates = quickAssistantModels.value
+  const deepCandidates = deepAssistantModels.value
+
+  if (!assistantModelSettings.value.quickModel || !enabledModels.find(model => model.model_name === assistantModelSettings.value.quickModel)) {
+    assistantModelSettings.value.quickModel = defaultModels.quick_analysis_model
+  }
+  if (!assistantModelSettings.value.deepModel || !enabledModels.find(model => model.model_name === assistantModelSettings.value.deepModel)) {
+    assistantModelSettings.value.deepModel = defaultModels.deep_analysis_model
+  }
+
+  if (assistantModelSettings.value.quickModel && !enabledModels.find(model => model.model_name === assistantModelSettings.value.quickModel)) {
+    assistantModelSettings.value.quickModel = quickCandidates[0]?.model_name || enabledModels[0]?.model_name || ''
+  }
+  if (assistantModelSettings.value.deepModel && !enabledModels.find(model => model.model_name === assistantModelSettings.value.deepModel)) {
+    assistantModelSettings.value.deepModel = deepCandidates[0]?.model_name || enabledModels[0]?.model_name || ''
+  }
+
+  if (!assistantModelSettings.value.quickModel) {
+    assistantModelSettings.value.quickModel = quickCandidates[0]?.model_name || enabledModels[0]?.model_name || ''
+  }
+  if (!assistantModelSettings.value.deepModel) {
+    assistantModelSettings.value.deepModel = deepCandidates[0]?.model_name || enabledModels[0]?.model_name || ''
+  }
+}
+
+const loadModels = async () => {
+  modelsLoading.value = true
+  try {
+    const llmConfigs = await configApi.getLLMConfigs()
+    availableModels.value = (llmConfigs || []).filter(item => item.enabled)
+    await ensureAssistantModelSelections()
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : '加载可用模型失败'
+    ElMessage.error(errMsg)
+  } finally {
+    modelsLoading.value = false
+  }
+}
 
 const startLoadingIndicator = () => {
   loadingSeconds.value = 0
@@ -829,7 +994,12 @@ const handleSend = async () => {
 
   try {
     if (analysisMode.value === 'planned') {
-      const res = await assistantApi.plannedAnalysis(text, selectedThreadId.value)
+      const res = await assistantApi.plannedAnalysis(
+        text,
+        selectedThreadId.value,
+        assistantModelSettings.value.quickModel,
+        assistantModelSettings.value.deepModel,
+      )
       if (res.conversation_id) selectedThreadId.value = res.conversation_id
       messages.value.push({
         role: 'assistant',
@@ -840,7 +1010,12 @@ const handleSend = async () => {
         step_results: res.step_results,
       })
     } else {
-      const res = await assistantApi.chat(text, selectedThreadId.value)
+      const res = await assistantApi.chat(
+        text,
+        selectedThreadId.value,
+        assistantModelSettings.value.quickModel,
+        assistantModelSettings.value.deepModel,
+      )
       if (res.conversation_id) selectedThreadId.value = res.conversation_id
       messages.value.push({
         role: 'assistant',
@@ -866,6 +1041,7 @@ const handleSend = async () => {
 }
 
 onMounted(async () => {
+  await loadModels()
   await loadThreads()
 })
 
@@ -883,6 +1059,77 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+.assistant-llm-panel {
+  flex-shrink: 0;
+  margin-top: 12px;
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(245, 247, 250, 0.96), rgba(255, 250, 240, 0.96));
+}
+
+.assistant-llm-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.assistant-llm-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.assistant-llm-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.assistant-llm-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.assistant-llm-item {
+  min-width: 0;
+}
+
+.assistant-llm-label {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #374151;
+}
+
+.assistant-model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.assistant-model-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.assistant-model-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.assistant-model-provider {
+  font-size: 12px;
+  color: #6b7280;
+}
+
 .page-header {
   display: flex;
   align-items: center;
@@ -892,6 +1139,12 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--el-border-color-lighter);
   gap: 16px;
   flex-wrap: wrap;
+}
+
+@media (max-width: 960px) {
+  .assistant-llm-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .header-left,

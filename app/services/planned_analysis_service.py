@@ -198,18 +198,25 @@ class PlannedAnalysisService:
     若规划失败，回退到 ReAct 模式（复用 IntelligentAssistantService）。
     """
 
-    def __init__(self, db):
+    def __init__(self, db, preferred_models: Optional[Dict[str, Any]] = None):
         self._db = db
         self._llm_client: Optional[UnifiedLLMClient] = None
         self._tool_functions: Optional[Dict[str, Any]] = None
         self._openai_tools: Optional[List[Dict[str, Any]]] = None
+        self._preferred_models = preferred_models or {}
 
     async def _ensure_client(self) -> bool:
         """确保 LLM 客户端和工具已加载"""
         if self._llm_client is not None:
             return True
 
-        llm_config = await _get_assistant_llm_config(self._db)
+        llm_config = await _get_assistant_llm_config(
+            self._db,
+            preferred_models={
+                "quick_model": self._preferred_models.get("deep_model") or self._preferred_models.get("quick_model"),
+                "deep_model": self._preferred_models.get("deep_model"),
+            },
+        )
         if not llm_config:
             return False
 
@@ -468,7 +475,13 @@ class PlannedAnalysisService:
     ) -> PlannedAnalysisResult:
         """第三级回退：使用现有 ReAct 模式"""
         logger.info("[规划分析] 回退到 ReAct 模式")
-        react_service = IntelligentAssistantService(self._db)
+        react_service = IntelligentAssistantService(
+            self._db,
+            preferred_models={
+                "quick_model": self._preferred_models.get("deep_model") or self._preferred_models.get("quick_model"),
+                "deep_model": self._preferred_models.get("deep_model"),
+            },
+        )
         result = await react_service.chat(question, conversation_id)
         return PlannedAnalysisResult(
             reply=result.get("reply", ""),

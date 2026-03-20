@@ -35,6 +35,7 @@ export interface LLMProvider {
 
 export interface LLMConfig {
   provider: string
+  provider_name?: string
   model_name: string
   model_display_name?: string  // 新增：模型显示名称
   api_key?: string  // 可选，优先从厂家配置获取

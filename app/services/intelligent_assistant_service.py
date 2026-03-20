@@ -300,6 +300,29 @@ def _resolve_models(config_doc) -> tuple:
     )
 
 
+def _normalize_model_name(model_name: Optional[str]) -> Optional[str]:
+    if not model_name:
+        return None
+    text = str(model_name).strip()
+    return text or None
+
+
+def _normalize_preferred_models(preferred_models: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    if not preferred_models:
+        return {}
+
+    normalized: Dict[str, str] = {}
+    quick_model = _normalize_model_name(preferred_models.get("quick_model"))
+    deep_model = _normalize_model_name(preferred_models.get("deep_model"))
+
+    if quick_model:
+        normalized["quick_model"] = quick_model
+    if deep_model:
+        normalized["deep_model"] = deep_model
+
+    return normalized
+
+
 async def _get_llm_config_for_model(db, target_model: str, purpose: str = "") -> Optional[LLMConfig]:
     """根据模型名获取 LLM 配置（内部复用逻辑）"""
     if not target_model:
@@ -337,7 +360,11 @@ async def _get_llm_config_for_model(db, target_model: str, purpose: str = "") ->
     )
 
 
-async def _get_assistant_llm_config(db, use_reasoning_model: bool = False) -> Optional[LLMConfig]:
+async def _get_assistant_llm_config(
+    db,
+    use_reasoning_model: bool = False,
+    preferred_models: Optional[Dict[str, Any]] = None,
+) -> Optional[LLMConfig]:
     """
     从数据库获取智能助手使用的 LLM 配置
     优先使用深度思考模型（deep_analysis_model），以保证时间逻辑、财报披露等推理准确
@@ -355,19 +382,29 @@ async def _get_assistant_llm_config(db, use_reasoning_model: bool = False) -> Op
     llm_configs = config_doc.get("llm_configs", [])
     default_llm = config_doc.get("default_llm")
     quick_model, deep_model, reasoning_model, _ = _resolve_models(config_doc)
+    normalized_preferred_models = _normalize_preferred_models(preferred_models)
+    preferred_quick_model = normalized_preferred_models.get("quick_model")
+    preferred_deep_model = normalized_preferred_models.get("deep_model")
 
-    if use_reasoning_model and reasoning_model:
+    if use_reasoning_model and preferred_deep_model:
+        target_model = preferred_deep_model
+        logger.info(f"[智能助手] 使用用户选择的深度模型: {target_model}")
+    elif use_reasoning_model and reasoning_model:
         target_model = reasoning_model
         logger.info(f"[智能助手] 使用深度推理模型: {target_model}")
     else:
-        target_model = deep_model or quick_model or default_llm
-        if deep_model:
+        target_model = preferred_quick_model or preferred_deep_model or deep_model or quick_model or default_llm
+        if preferred_quick_model:
+            logger.info(f"[智能助手] 使用用户选择的快速模型: {preferred_quick_model}")
+        elif preferred_deep_model:
+            logger.info(f"[智能助手] 快速模型未指定，回退到用户选择的深度模型: {preferred_deep_model}")
+        elif deep_model:
             logger.info(f"[智能助手] 使用深度分析模型: {deep_model}")
         elif quick_model:
             logger.info(f"[智能助手] 深度模型未配置，使用快速模型: {quick_model}")
 
     if not target_model:
-        target_model = deep_model or quick_model or default_llm
+        target_model = preferred_deep_model or preferred_quick_model or deep_model or quick_model or default_llm
     if not target_model and llm_configs:
         for cfg in llm_configs:
             if cfg.get("enabled", True):
@@ -414,19 +451,29 @@ async def get_coding_llm_config(db=None):
 class IntelligentAssistantService:
     """智能助手服务"""
 
-    def __init__(self, db):
+    def __init__(
+        self,
+        db,
+        preferred_models: Optional[Dict[str, Any]] = None,
+        prefer_reasoning_model: bool = False,
+    ):
         self._db = db
         self._llm_client: Optional[UnifiedLLMClient] = None
         self._openai_tools: Optional[List[Dict[str, Any]]] = None
         self._tool_functions: Optional[Dict[str, Any]] = None
+        self._preferred_models = _normalize_preferred_models(preferred_models)
+        self._prefer_reasoning_model = prefer_reasoning_model
 
     async def _ensure_client(self) -> bool:
         """确保 LLM 客户端和工具已加载"""
         if self._llm_client is not None:
             return True
 
-        # 智能助手使用深度推理模型（deep_reasoning_model），未配置时回退到深度分析模型
-        llm_config = await _get_assistant_llm_config(self._db, use_reasoning_model=True)
+        llm_config = await _get_assistant_llm_config(
+            self._db,
+            use_reasoning_model=self._prefer_reasoning_model,
+            preferred_models=self._preferred_models,
+        )
         if not llm_config:
             return False
 
@@ -1953,6 +2000,8 @@ async def chat_with_assistant(
     conversation_id: Optional[str] = None,
     current_thread_id: Optional[str] = None,
     is_im: bool = False,
+    quick_model: Optional[str] = None,
+    deep_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     便捷函数：使用智能助手进行对话
@@ -2016,7 +2065,13 @@ async def chat_with_assistant(
         except Exception as e:
             logger.warning(f"[智能助手] 加载历史会话失败（已跳过）: {e}")
 
-    service = IntelligentAssistantService(db)
+    service = IntelligentAssistantService(
+        db,
+        preferred_models={
+            "quick_model": quick_model,
+            "deep_model": deep_model,
+        },
+    )
     result = await service.chat(
         user_message,
         conversation_id,

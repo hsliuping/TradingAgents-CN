@@ -10,6 +10,8 @@ class ChatRequest(BaseModel):
     """智能助手对话请求"""
     message: str = Field(..., description="用户输入的问题")
     conversation_id: Optional[str] = Field(None, description="会话 ID，预留用于多轮对话")
+    quick_model: Optional[str] = Field(None, description="快速对话模式使用的模型")
+    deep_model: Optional[str] = Field(None, description="深度分析模式使用的模型")
 
 
 class ChatResponse(BaseModel):
