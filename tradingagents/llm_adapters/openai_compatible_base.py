@@ -394,6 +394,43 @@ class ChatZhipuOpenAI(OpenAICompatibleBase):
         return max(1, len(text) // 2)
 
 
+class ChatMiniMaxOpenAI(OpenAICompatibleBase):
+    """MiniMax OpenAI兼容适配器"""
+
+    def __init__(
+        self,
+        model: str = "MiniMax-M2.7",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        temperature: float = 0.1,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ):
+        if base_url is None:
+            env_base_url = os.getenv("MINIMAX_BASE_URL")
+            if env_base_url and not env_base_url.startswith('your_') and not env_base_url.startswith('your-'):
+                base_url = env_base_url
+            else:
+                base_url = "https://api.minimax.io/v1"
+
+        # MiniMax temperature 范围: (0.0, 1.0]
+        if temperature <= 0.0:
+            temperature = 0.01
+        elif temperature > 1.0:
+            temperature = 1.0
+
+        super().__init__(
+            provider_name="minimax",
+            model=model,
+            api_key_env_var="MINIMAX_API_KEY",
+            base_url=base_url,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+
+
 class ChatCustomOpenAI(OpenAICompatibleBase):
     """自定义OpenAI端点适配器（代理/聚合平台）"""
 
@@ -470,6 +507,15 @@ OPENAI_COMPATIBLE_PROVIDERS = {
             "glm-4": {"context_length": 128000, "supports_function_calling": True},
             "glm-4-plus": {"context_length": 128000, "supports_function_calling": True},
             "glm-3-turbo": {"context_length": 128000, "supports_function_calling": True}
+        }
+    },
+    "minimax": {
+        "adapter_class": ChatMiniMaxOpenAI,
+        "base_url": "https://api.minimax.io/v1",
+        "api_key_env": "MINIMAX_API_KEY",
+        "models": {
+            "MiniMax-M2.7": {"context_length": 204800, "supports_function_calling": True},
+            "MiniMax-M2.7-highspeed": {"context_length": 204800, "supports_function_calling": True}
         }
     },
     "custom_openai": {

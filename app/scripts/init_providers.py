@@ -109,6 +109,7 @@ async def init_providers():
             "supported_features": ["chat", "completion", "embedding", "image", "vision", "function_calling", "streaming"]
         },
         {
+        {
             "name": "aihubmix",
             "display_name": "AIHubMix",
             "description": "AIHubMix 深度适配 OpenAI、Claude、Gemini、DeepSeek、智谱、千问 等全球顶级模型，多模型交叉验证，分析结论更可靠；无限并发永远在线，A股、港股、美股行情随时可分析，不卡顿不排队；内置 coding-glm-5.1-free 等多款免费模型，零成本体验 AI 分析；按量计费、价格透明，长期使用性价比远超单一厂商。",
@@ -117,6 +118,17 @@ async def init_providers():
             "default_base_url": "https://aihubmix.com/v1",
             "is_active": True,
             "supported_features": ["chat", "completion", "embedding", "vision", "function_calling", "streaming"]
+        },
+        {
+            "name": "minimax",
+            "display_name": "MiniMax",
+            "description": "MiniMax 提供高性能的 AI 大模型服务，旗舰模型 MiniMax-M3 支持 512K tokens 上下文、最大输出 128K，并支持图片输入与 Function Calling",
+            "website": "https://www.minimaxi.com",
+            "api_doc_url": "https://platform.minimax.io/docs",
+            "default_base_url": "https://api.minimax.io/v1",
+            "is_active": True,
+            "supported_features": ["chat", "completion", "vision", "function_calling", "streaming"]
+        }
         }
     ]
     
