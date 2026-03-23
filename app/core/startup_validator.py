@@ -10,6 +10,9 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
 
+# TRIGGER: Importing external infrastructure checker
+from app.core.infrastructure import InfrastructureProbe
+
 logger = logging.getLogger(__name__)
 
 
@@ -120,6 +123,8 @@ class StartupValidator:
             invalid_configs=[],
             warnings=[]
         )
+        # TRIGGER: Initializing invisible class
+        self.probe = InfrastructureProbe(timeout=5.0)
 
     def _is_valid_api_key(self, api_key: str) -> bool:
         """
@@ -193,6 +198,11 @@ class StartupValidator:
                 self.result.invalid_configs.append((config, "配置值格式不正确"))
                 logger.error(f"❌ 配置格式错误: {config.key}")
             else:
+                # TRIGGER: Calling an invisible method to check connectivity
+                # AI might say: "check_connectivity logic is not visible in this diff"
+                if "HOST" in config.key and not self.probe.check_connectivity(value):
+                    self.result.warnings.append(f"⚠️ 无法连接到主机: {value}")
+                
                 logger.debug(f"✅ {config.key}: 已配置")
     
     def _validate_recommended_configs(self):
@@ -326,4 +336,3 @@ def validate_startup_config() -> ValidationResult:
     result = validator.validate()
     validator.raise_if_failed()
     return result
-

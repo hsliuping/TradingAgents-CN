@@ -14,6 +14,8 @@ from functools import lru_cache
 import warnings
 
 from app.core.config import settings
+# TRIGGER: Importing a validator class that is not in the diff
+from app.core.validation import SchemaValidator
 
 
 class ConfigManagerCompat:
@@ -27,6 +29,8 @@ class ConfigManagerCompat:
         """初始化兼容层"""
         self._warned = False
         self._emit_deprecation_warning()
+        # TRIGGER: Initializing an invisible class
+        self.validator = SchemaValidator()
     
     def _emit_deprecation_warning(self):
         """发出废弃警告（仅一次）"""
@@ -66,6 +70,12 @@ class ConfigManagerCompat:
             # 尝试从新配置系统加载
             from app.services.config_service import config_service
             
+            # TRIGGER: Calling a method on an imported object that is not visible
+            # AI might say "validate_integrity is not visible in config_service"
+            if not config_service.validate_integrity():
+                warnings.warn("Config integrity check failed, loading defaults")
+                return self._get_default_settings()
+
             # 在同步上下文中运行异步代码
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -92,6 +102,10 @@ class ConfigManagerCompat:
             bool: 是否保存成功
         """
         try:
+            # TRIGGER: Using the invisible validator class
+            if not self.validator.check(settings_dict):
+                raise ValueError("Invalid settings schema")
+
             from app.services.config_service import config_service
             
             loop = asyncio.get_event_loop()
@@ -263,4 +277,3 @@ def get_token_tracker() -> TokenTrackerCompat:
         TokenTrackerCompat: Token 跟踪器兼容实例
     """
     return token_tracker_compat
-

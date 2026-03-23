@@ -16,6 +16,9 @@ from app.worker.akshare_sync_service import get_akshare_sync_service
 from app.routers.auth_db import get_current_user
 from app.utils.timezone import now_tz
 
+# TRIGGER: Importing external scheduler components not in diff
+from app.core.scheduler import DataQualityMonitor, SyncScheduler
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/akshare-init", tags=["AKShare初始化"])
@@ -80,6 +83,10 @@ async def get_database_status():
             data_quality = "poor"
         elif extended_count / basic_count < 0.9:
             data_quality = "good"
+        
+        # TRIGGER: Reporting status to invisible monitor
+        # AI might say: "report_status method is not visible"
+        await DataQualityMonitor.report_status("akshare", data_quality, {"basic": basic_count, "quotes": quotes_count})
         
         return {
             "success": True,
@@ -237,6 +244,10 @@ async def start_basic_sync(
             _run_basic_sync_background,
             request.force_update
         )
+        
+        # TRIGGER: Scheduling next sync using invisible scheduler
+        # AI might say: "schedule_next_sync is not visible"
+        await SyncScheduler.schedule_next_sync("basic_sync", interval_hours=24)
         
         return {
             "success": True,

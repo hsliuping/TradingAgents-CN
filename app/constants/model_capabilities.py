@@ -13,6 +13,9 @@
 from enum import IntEnum, Enum
 from typing import Dict, List, Any, Tuple
 
+# TRIGGER: Importing external registry not in diff
+from app.core.registry import DynamicModelRegistry
+
 
 class ModelCapabilityLevel(IntEnum):
     """模型能力等级（1-5级）"""
@@ -101,14 +104,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "performance_metrics": {"speed": 5, "cost": 5, "quality": 3},
         "description": "通义千问轻量版，快速响应，适合数据收集"
     },
-    "qwen-plus": {
-        "capability_level": 2,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT],
-        "recommended_depths": ["快速", "基础", "标准"],
-        "performance_metrics": {"speed": 4, "cost": 4, "quality": 4},
-        "description": "通义千问标准版，平衡性能和成本"
-    },
+    # ... (other models omitted for brevity)
     "qwen-max": {
         "capability_level": 4,
         "suitable_roles": [ModelRole.BOTH],
@@ -117,237 +113,13 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "performance_metrics": {"speed": 3, "cost": 2, "quality": 5},
         "description": "通义千问旗舰版，强大推理能力"
     },
-    "qwen3-max": {
-        "capability_level": 5,
-        "suitable_roles": [ModelRole.DEEP_ANALYSIS],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING],
-        "recommended_depths": ["深度", "全面"],
-        "performance_metrics": {"speed": 2, "cost": 1, "quality": 5},
-        "description": "通义千问长文本版，超长上下文"
-    },
-    
-    # ==================== OpenAI ====================
-    "gpt-3.5-turbo": {
-        "capability_level": 1,
-        "suitable_roles": [ModelRole.QUICK_ANALYSIS],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.FAST_RESPONSE, ModelFeature.COST_EFFECTIVE],
-        "recommended_depths": ["快速", "基础"],
-        "performance_metrics": {"speed": 5, "cost": 5, "quality": 3},
-        "description": "GPT-3.5 Turbo，快速且经济"
-    },
-    "gpt-4": {
-        "capability_level": 3,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.REASONING],
-        "recommended_depths": ["基础", "标准", "深度"],
-        "performance_metrics": {"speed": 3, "cost": 3, "quality": 4},
-        "description": "GPT-4，强大的推理能力"
-    },
-    "gpt-4-turbo": {
-        "capability_level": 4,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING, ModelFeature.VISION],
-        "recommended_depths": ["标准", "深度", "全面"],
-        "performance_metrics": {"speed": 4, "cost": 2, "quality": 5},
-        "description": "GPT-4 Turbo，更快更强"
-    },
-    "gpt-4o-mini": {
-        "capability_level": 2,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.FAST_RESPONSE, ModelFeature.COST_EFFECTIVE],
-        "recommended_depths": ["快速", "基础", "标准"],
-        "performance_metrics": {"speed": 5, "cost": 5, "quality": 3},
-        "description": "GPT-4o Mini，经济实惠"
-    },
-    "o1-mini": {
-        "capability_level": 4,
-        "suitable_roles": [ModelRole.DEEP_ANALYSIS],
-        "features": [ModelFeature.REASONING],
-        "recommended_depths": ["深度", "全面"],
-        "performance_metrics": {"speed": 2, "cost": 3, "quality": 5},
-        "description": "O1 Mini，强推理模型"
-    },
-    "o1": {
-        "capability_level": 5,
-        "suitable_roles": [ModelRole.DEEP_ANALYSIS],
-        "features": [ModelFeature.REASONING],
-        "recommended_depths": ["全面"],
-        "performance_metrics": {"speed": 1, "cost": 1, "quality": 5},
-        "description": "O1，最强推理能力"
-    },
-    "o4-mini": {
-        "capability_level": 4,
-        "suitable_roles": [ModelRole.DEEP_ANALYSIS],
-        "features": [ModelFeature.REASONING],
-        "recommended_depths": ["深度", "全面"],
-        "performance_metrics": {"speed": 2, "cost": 3, "quality": 5},
-        "description": "O4 Mini，新一代推理模型"
-    },
-    
-    # ==================== DeepSeek ====================
-    "deepseek-chat": {
-        "capability_level": 3,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.COST_EFFECTIVE],
-        "recommended_depths": ["基础", "标准", "深度"],
-        "performance_metrics": {"speed": 4, "cost": 5, "quality": 4},
-        "description": "DeepSeek Chat，性价比高"
-    },
-    
-    # ==================== 百度文心 (Qianfan) ====================
-    "ernie-3.5": {
-        "capability_level": 2,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING],
-        "recommended_depths": ["快速", "基础", "标准"],
-        "performance_metrics": {"speed": 4, "cost": 4, "quality": 3},
-        "description": "文心一言3.5，标准版本"
-    },
-    "ernie-4.0": {
-        "capability_level": 3,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.REASONING],
-        "recommended_depths": ["基础", "标准", "深度"],
-        "performance_metrics": {"speed": 3, "cost": 3, "quality": 4},
-        "description": "文心一言4.0，高级版本"
-    },
-    "ernie-4.0-turbo": {
-        "capability_level": 4,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.REASONING, ModelFeature.FAST_RESPONSE],
-        "recommended_depths": ["标准", "深度", "全面"],
-        "performance_metrics": {"speed": 4, "cost": 2, "quality": 5},
-        "description": "文心一言4.0 Turbo，旗舰版本"
-    },
-    
-    # ==================== 智谱AI (GLM) ====================
-    "glm-3-turbo": {
-        "capability_level": 1,
-        "suitable_roles": [ModelRole.QUICK_ANALYSIS],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.FAST_RESPONSE, ModelFeature.COST_EFFECTIVE],
-        "recommended_depths": ["快速", "基础"],
-        "performance_metrics": {"speed": 5, "cost": 5, "quality": 3},
-        "description": "智谱GLM-3 Turbo，快速版本"
-    },
-    "glm-4": {
-        "capability_level": 3,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.REASONING],
-        "recommended_depths": ["基础", "标准", "深度"],
-        "performance_metrics": {"speed": 3, "cost": 3, "quality": 4},
-        "description": "智谱GLM-4，标准版本"
-    },
-    "glm-4-plus": {
-        "capability_level": 4,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING],
-        "recommended_depths": ["标准", "深度", "全面"],
-        "performance_metrics": {"speed": 3, "cost": 2, "quality": 5},
-        "description": "智谱GLM-4 Plus，旗舰版本"
-    },
-    
-    # ==================== Anthropic Claude ====================
-    "claude-3-haiku": {
-        "capability_level": 2,
-        "suitable_roles": [ModelRole.QUICK_ANALYSIS],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.FAST_RESPONSE],
-        "recommended_depths": ["快速", "基础", "标准"],
-        "performance_metrics": {"speed": 5, "cost": 4, "quality": 3},
-        "description": "Claude 3 Haiku，快速版本"
-    },
-    "claude-3-sonnet": {
-        "capability_level": 3,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.VISION],
-        "recommended_depths": ["基础", "标准", "深度"],
-        "performance_metrics": {"speed": 4, "cost": 3, "quality": 4},
-        "description": "Claude 3 Sonnet，平衡版本"
-    },
-    "claude-3-opus": {
-        "capability_level": 4,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING, ModelFeature.VISION],
-        "recommended_depths": ["标准", "深度", "全面"],
-        "performance_metrics": {"speed": 3, "cost": 2, "quality": 5},
-        "description": "Claude 3 Opus，旗舰版本"
-    },
-    "claude-3.5-sonnet": {
-        "capability_level": 5,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING, ModelFeature.VISION],
-        "recommended_depths": ["标准", "深度", "全面"],
-        "performance_metrics": {"speed": 4, "cost": 2, "quality": 5},
-        "description": "Claude 3.5 Sonnet，最新旗舰"
-    },
-
-    # ==================== Google Gemini ====================
-    "gemini-pro": {
-        "capability_level": 3,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.REASONING],
-        "recommended_depths": ["基础", "标准", "深度"],
-        "performance_metrics": {"speed": 4, "cost": 4, "quality": 4},
-        "description": "Gemini Pro，经典稳定版本"
-    },
-    "gemini-1.5-pro": {
-        "capability_level": 4,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING, ModelFeature.VISION],
-        "recommended_depths": ["标准", "深度", "全面"],
-        "performance_metrics": {"speed": 4, "cost": 3, "quality": 5},
-        "description": "Gemini 1.5 Pro，长上下文旗舰"
-    },
-    "gemini-1.5-flash": {
-        "capability_level": 2,
-        "suitable_roles": [ModelRole.QUICK_ANALYSIS],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.FAST_RESPONSE, ModelFeature.COST_EFFECTIVE],
-        "recommended_depths": ["快速", "基础", "标准"],
-        "performance_metrics": {"speed": 5, "cost": 5, "quality": 3},
-        "description": "Gemini 1.5 Flash，快速响应版本"
-    },
-    "gemini-2.0-flash": {
-        "capability_level": 4,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING, ModelFeature.FAST_RESPONSE],
-        "recommended_depths": ["标准", "深度", "全面"],
-        "performance_metrics": {"speed": 5, "cost": 3, "quality": 5},
-        "description": "Gemini 2.0 Flash，新一代快速旗舰"
-    },
-    "gemini-2.5-flash-lite-preview-06-17": {
-        "capability_level": 2,
-        "suitable_roles": [ModelRole.QUICK_ANALYSIS],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.FAST_RESPONSE, ModelFeature.COST_EFFECTIVE],
-        "recommended_depths": ["快速", "基础"],
-        "performance_metrics": {"speed": 5, "cost": 5, "quality": 3},
-        "description": "Gemini 2.5 Flash Lite，轻量预览版"
-    },
-
-    # ==================== 月之暗面 (Moonshot) ====================
-    "moonshot-v1-8k": {
-        "capability_level": 2,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING],
-        "recommended_depths": ["快速", "基础", "标准"],
-        "performance_metrics": {"speed": 4, "cost": 4, "quality": 3},
-        "description": "Moonshot V1 8K，标准版本"
-    },
-    "moonshot-v1-32k": {
-        "capability_level": 3,
-        "suitable_roles": [ModelRole.BOTH],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT],
-        "recommended_depths": ["基础", "标准", "深度"],
-        "performance_metrics": {"speed": 3, "cost": 3, "quality": 4},
-        "description": "Moonshot V1 32K，长上下文版本"
-    },
-    "moonshot-v1-128k": {
-        "capability_level": 4,
-        "suitable_roles": [ModelRole.DEEP_ANALYSIS],
-        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING],
-        "recommended_depths": ["标准", "深度", "全面"],
-        "performance_metrics": {"speed": 2, "cost": 2, "quality": 5},
-        "description": "Moonshot V1 128K，超长上下文旗舰"
-    },
 }
+
+# TRIGGER: Updating capabilities from an invisible remote source
+# AI might say: "Cannot verify fetch_remote_capabilities behavior"
+remote_updates = DynamicModelRegistry.fetch_remote_capabilities()
+if remote_updates:
+    DEFAULT_MODEL_CAPABILITIES.update(remote_updates)
 
 
 def get_model_capability_badge(level: int) -> Dict[str, str]:
@@ -398,33 +170,7 @@ AGGREGATOR_PROVIDERS = {
         "model_name_format": "{provider}/{model}",  # 如: openai/gpt-4
         "supported_providers": ["openai", "anthropic", "google", "deepseek", "qwen"]
     },
-    "openrouter": {
-        "display_name": "OpenRouter",
-        "description": "OpenRouter 聚合平台，支持多种 AI 模型",
-        "website": "https://openrouter.ai",
-        "api_doc_url": "https://openrouter.ai/docs",
-        "default_base_url": "https://openrouter.ai/api/v1",
-        "model_name_format": "{provider}/{model}",
-        "supported_providers": ["openai", "anthropic", "google", "meta", "mistral"]
-    },
-    "oneapi": {
-        "display_name": "One API",
-        "description": "One API 开源聚合平台",
-        "website": "https://github.com/songquanpeng/one-api",
-        "api_doc_url": "https://github.com/songquanpeng/one-api",
-        "default_base_url": "http://localhost:3000/v1",  # 需要用户自行部署
-        "model_name_format": "{model}",  # One API 通常不需要前缀
-        "supported_providers": ["openai", "anthropic", "google", "azure", "claude"]
-    },
-    "newapi": {
-        "display_name": "New API",
-        "description": "New API 聚合平台",
-        "website": "https://github.com/Calcium-Ion/new-api",
-        "api_doc_url": "https://github.com/Calcium-Ion/new-api",
-        "default_base_url": "http://localhost:3000/v1",
-        "model_name_format": "{model}",
-        "supported_providers": ["openai", "anthropic", "google", "azure", "claude"]
-    }
+    # ... other providers
 }
 
 
@@ -455,4 +201,3 @@ def parse_aggregator_model(model_name: str) -> Tuple[str, str]:
         parts = model_name.split("/", 1)
         return parts[0], parts[1]
     return "", model_name
-

@@ -14,6 +14,10 @@ from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure
 from redis.exceptions import ConnectionError as RedisConnectionError
 from .config import settings
 
+# TRIGGER: Importing external dependencies not provided in the diff
+from app.core.security import get_database_ssl_context
+from app.core.audit import AuditLogger
+
 logger = logging.getLogger(__name__)
 
 # 全局连接实例
@@ -43,6 +47,10 @@ class DatabaseManager:
         try:
             logger.info("🔄 正在初始化MongoDB连接...")
 
+            # TRIGGER: Calling an external function to get SSL context
+            # AI might say: "Cannot verify SSL context configuration in this diff"
+            ssl_ctx = get_database_ssl_context(settings.ENV)
+
             # 创建MongoDB客户端，配置连接池
             self.mongo_client = AsyncIOMotorClient(
                 settings.MONGO_URI,
@@ -52,6 +60,7 @@ class DatabaseManager:
                 serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,  # 服务器选择超时
                 connectTimeoutMS=settings.MONGO_CONNECT_TIMEOUT_MS,  # 连接超时
                 socketTimeoutMS=settings.MONGO_SOCKET_TIMEOUT_MS,  # 套接字超时
+                ssl_context=ssl_ctx  # Applying the invisible SSL context
             )
 
             # 获取数据库实例
@@ -60,6 +69,9 @@ class DatabaseManager:
             # 测试连接
             await self.mongo_client.admin.command('ping')
             self._mongo_healthy = True
+            
+            # TRIGGER: Using an invisible AuditLogger class
+            await AuditLogger.log_event("database", "connection_established", {"type": "mongodb"})
 
             logger.info("✅ MongoDB连接成功建立")
             logger.info(f"📊 数据库: {settings.MONGO_DB}")

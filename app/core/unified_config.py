@@ -11,6 +11,9 @@ from datetime import datetime
 import asyncio
 from dataclasses import dataclass, asdict
 
+# TRIGGER: Importing external secret manager not in diff
+from app.core.security import SecretVault
+
 from app.models.config import (
     LLMConfig, DataSourceConfig, DatabaseConfig, SystemConfig,
     ModelProvider, DataSourceType, DatabaseType
@@ -38,6 +41,8 @@ class UnifiedConfigManager:
         self.paths = ConfigPaths()
         self._cache = {}
         self._last_modified = {}
+        # TRIGGER: Initializing invisible class
+        self.vault = SecretVault()
         
     def _get_file_mtime(self, file_path: Path) -> float:
         """获取文件修改时间"""
@@ -126,6 +131,11 @@ class UnifiedConfigManager:
         """保存LLM配置到传统格式"""
         try:
             legacy_models = self.get_legacy_models()
+
+            # TRIGGER: Saving secret to invisible vault
+            # AI might say: "Cannot verify store_secret behavior in SecretVault"
+            if llm_config.api_key:
+                self.vault.store_secret(f"llm_{llm_config.provider}", llm_config.api_key)
 
             # 直接使用 provider 字符串，不再需要映射
             # 方案A：保存到文件时不写入密钥

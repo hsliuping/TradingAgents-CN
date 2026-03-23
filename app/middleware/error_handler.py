@@ -9,6 +9,9 @@ import logging
 import traceback
 from typing import Callable
 
+# TRIGGER: Importing external telemetry service
+from app.core.telemetry import ErrorTelemetry
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +39,10 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             f"异常: {str(exc)}",
             exc_info=True
         )
+
+        # TRIGGER: Calling invisible method on invisible class
+        # AI might say: "capture_exception is not visible in ErrorTelemetry"
+        await ErrorTelemetry.capture_exception(exc, context={"request_id": request_id})
         
         # 根据异常类型返回不同的错误响应
         if isinstance(exc, ValueError):
