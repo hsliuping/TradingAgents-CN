@@ -703,8 +703,8 @@ const loadProviders = async (showSuccessMessage = false) => {
   providersLoading.value = true
   try {
     const providers = await configApi.getLLMProviders()
-    // 只显示启用的厂家
-    availableProviders.value = providers.filter(p => p.is_active)
+    // 显示已启用厂家，以及已配置 API Key 但暂未启用的厂家，避免模型配置页完全选不到。
+    availableProviders.value = providers.filter(p => p.is_active || p.extra_config?.has_api_key)
     console.log('✅ 加载厂家列表成功:', availableProviders.value.length)
 
     if (showSuccessMessage) {
