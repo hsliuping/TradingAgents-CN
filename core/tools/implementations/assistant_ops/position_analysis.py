@@ -50,10 +50,11 @@ async def list_positions(
 
             src_label = "实盘" if p.source == "real" else "模拟"
             price_str = f"现价: {p.current_price:.2f}" if p.current_price else "现价: --"
+            mv_str = f"{p.market_value:.2f}" if p.market_value is not None else "--"
             lines.append(
                 f"[{src_label}] {p.code} {p.name or ''} | "
                 f"数量: {p.quantity} | 成本: {p.cost_price:.2f} | {price_str} | "
-                f"市值: {p.market_value:.2f}{pnl_str}"
+                f"市值: {mv_str}{pnl_str}"
             )
         return "\n".join(lines)
     except Exception as e:
