@@ -1477,14 +1477,15 @@ class TaskAnalysisService:
             "analysts": task.task_params.get("selected_analysts", []),
             "research_depth": task.task_params.get("research_depth", "快速"),
             "reports": reports,
-            # ❌ 移除以下字段（默认不返回，可通过查询参数获取）
-            # "state": raw_result,  # 改为可选，不默认返回
-            # "detailed_analysis": raw_result,  # 改为可选，不默认返回
-            "decision": formatted_decision,  # 🔑 关键：决策信息（已格式化，使用合规术语）
-            "model_info": model_info,  # 🔥 关键：模型信息
-            "quick_model": quick_model,  # 🔥 关键：快速模型
-            "deep_model": deep_model,  # 🔥 关键：深度模型
+            "decision": formatted_decision,
+            "model_info": model_info,
+            "quick_model": quick_model,
+            "deep_model": deep_model,
         }
+
+        # 透传工作流引擎生成的 report_manifest（自定义工作流产出物描述）
+        if raw_result.get("report_manifest"):
+            formatted_result["report_manifest"] = raw_result["report_manifest"]
 
         # 🔥 调试日志：打印 decision 对象的完整内容
         self.logger.info(f"✅ 格式化结果完成: {len(reports)} 个报告")

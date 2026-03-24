@@ -935,11 +935,18 @@ const orderedModuleNames = computed(() => {
 
   const availableModules = Object.keys(report.value.reports)
 
-  // 按照 moduleOrder 的顺序过滤出存在的模块
+  // 动态模式：使用 report_manifest
+  const manifest = report.value?.report_manifest as Array<{
+    field: string; display_name: string; order: number
+  }> | undefined
+  if (manifest && manifest.length > 0) {
+    const sorted = [...manifest].sort((a, b) => a.order - b.order)
+    return sorted.map(m => m.field).filter(f => availableModules.includes(f))
+  }
+
+  // 旧逻辑：按 moduleOrder 排序
   const ordered = moduleOrder.filter(name => availableModules.includes(name))
 
-  // 添加不在 moduleOrder 中但存在的模块（放在最后）
-  // 🔑 排除 investment_plan（已隐藏，与研究经理分析内容相同）
   const hiddenModules = ['investment_plan']
   const remaining = availableModules.filter(name => !moduleOrder.includes(name) && !hiddenModules.includes(name))
 
@@ -952,54 +959,46 @@ const isEtfReport = computed(() => {
 })
 
 const getModuleDisplayName = (moduleName: string) => {
+  // 动态模式：优先从 report_manifest 获取 display_name
+  const manifest = report.value?.report_manifest as Array<{
+    field: string; display_name: string
+  }> | undefined
+  if (manifest) {
+    const item = manifest.find(m => m.field === moduleName)
+    if (item?.display_name) return item.display_name
+  }
+
   if (moduleName === 'fundamentals_report' && isEtfReport.value) {
     return '📊 ETF 分析'
   }
 
-  // 统一与单股分析的中文标签映射（完整的15个报告）
   const nameMap: Record<string, string> = {
-    // 🆕 宏观分析师团队 (2个) - 优先显示
     index_report: '📊 大盘指数分析',
     sector_report: '🏭 行业板块分析',
-
-    // 分析师团队 (4个)
     market_report: '📈 市场技术分析',
     sentiment_report: '💭 市场情绪分析',
     news_report: '📰 新闻事件分析',
     fundamentals_report: '💰 基本面分析',
-
-    // 研究团队 (3个)
     bull_researcher: '🐂 多头研究员',
     bear_researcher: '🐻 空头研究员',
     research_team_decision: '🔬 研究经理分析',
-    // v2.0 直出字段
     bull_report: '🐂 看涨研究',
     bear_report: '🐻 看跌研究',
-
-    // 交易团队 (1个)
     trader_investment_plan: '💼 交易员计划',
-
-    // 风险管理团队 (4个)
     risky_analyst: '⚡ 激进分析师',
     safe_analyst: '🛡️ 保守分析师',
     neutral_analyst: '⚖️ 中性分析师',
     risk_management_decision: '⚠️ 风险经理',
-    // v2.0 风险观点与评估直出字段
     risky_opinion: '🔥 激进风险观点',
     safe_opinion: '🛡️ 保守风险观点',
     neutral_opinion: '⚖️ 中性风险观点',
     risk_assessment: '⚠️ 风险评估',
-
-    // 🔑 关键决策字段（重命名）
-    investment_plan: '💡 初步投资建议',  // 研究经理的初步建议
-    final_trade_decision: '🎯 最终分析结果',  // 风险管理后的最终决策
-
-    // 兼容旧字段
+    investment_plan: '💡 初步投资建议',
+    final_trade_decision: '🎯 最终分析结果',
     investment_debate_state: '🔬 研究团队分析（旧）',
     risk_debate_state: '⚖️ 风险管理团队（旧）',
     detailed_analysis: '📄 详细分析'
   }
-  // 未匹配到时，做一个友好的回退：下划线转空格
   return nameMap[moduleName] || moduleName.replace(/_/g, ' ')
 }
 

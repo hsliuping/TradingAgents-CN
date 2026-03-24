@@ -566,7 +566,9 @@ class UnifiedAnalysisService:
             quick_model = "Unknown"
             deep_model = "Unknown"
 
-        # 使用公共工具格式化结果
+        # 从 raw_result 中提取 report_manifest（由 WorkflowEngine 动态生成）
+        report_manifest = raw_result.get("report_manifest")
+
         result = format_analysis_result(
             raw_result=raw_result,
             stock_code=stock_code,
@@ -577,9 +579,10 @@ class UnifiedAnalysisService:
             research_depth=research_depth,
             quick_model=quick_model,
             deep_model=deep_model,
+            report_manifest=report_manifest,
         )
 
-        logger.info(f"✅ [统一引擎] 格式化结果完成: reports={len(result.get('reports', {}))}个")
+        logger.info(f"[统一引擎] 格式化结果完成: reports={len(result.get('reports', {}))}个")
         return result
 
     async def analyze_batch(
