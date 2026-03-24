@@ -2481,6 +2481,18 @@ class PortfolioService:
                     return float(daily["close"])
                 except (ValueError, TypeError):
                     pass
+
+            # 回退到 etf_daily_quotes（ETF 行情）
+            etf_daily = await self.db["etf_daily_quotes"].find_one(
+                {"code": code6},
+                sort=[("trade_date", -1)],
+                projection={"_id": 0, "close": 1}
+            )
+            if etf_daily and etf_daily.get("close"):
+                try:
+                    return float(etf_daily["close"])
+                except (ValueError, TypeError):
+                    pass
         else:
             # 港股/美股
             try:
@@ -2520,6 +2532,7 @@ class PortfolioService:
         collection_map = {"CN": "stock_daily_quotes", "HK": "stock_daily_quotes_hk", "US": "stock_daily_quotes_us"}
         coll_name = collection_map.get(market, "stock_daily_quotes")
         coll = self.db[coll_name]
+        doc = None
         for date_cond in date_conds:
             doc = await coll.find_one(
                 {"$or": symbol_conds, **date_cond},
@@ -2527,6 +2540,15 @@ class PortfolioService:
             )
             if doc:
                 break
+        # 回退到 etf_daily_quotes（ETF 行情）
+        if not doc and market == "CN":
+            for date_cond in date_conds:
+                doc = await self.db["etf_daily_quotes"].find_one(
+                    {"code": code6, **date_cond},
+                    {"_id": 0, "high": 1, "low": 1, "open": 1, "close": 1}
+                )
+                if doc:
+                    break
         if not doc:
             raise ValueError(
                 f"股票 {code} 在 {buy_date_str} 无历史数据，无法校验价格。请先同步该日历史数据，或暂不填写买入日期。"
@@ -2553,14 +2575,20 @@ class PortfolioService:
             )
 
     async def _get_stock_name(self, code: str, market: str) -> Optional[str]:
-        """获取股票名称"""
+        """获取股票名称（含 ETF 回退）"""
         if market == "CN":
             basic = await self.db["stock_basic_info"].find_one(
                 {"$or": [{"code": code}, {"symbol": code}]},
                 {"_id": 0, "name": 1}
             )
-            if basic:
-                return basic.get("name")
+            if basic and basic.get("name"):
+                return basic["name"]
+            # 回退到 etf_basic_info
+            etf = await self.db["etf_basic_info"].find_one(
+                {"code": code}, {"_id": 0, "name": 1}
+            )
+            if etf and etf.get("name"):
+                return etf["name"]
         return None
 
     async def _get_stock_industry(self, code: str, market: str) -> Optional[str]:
