@@ -14,15 +14,7 @@ from typing import Any, AsyncIterator, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-_RETRYABLE_KEYWORDS = (
-    "choices", "null value", "connection", "timeout", "rate limit",
-    "too many requests", "server error", "500", "502", "503", "529",
-)
-
-
-def _is_retryable(exc: Exception) -> bool:
-    msg = str(exc).lower()
-    return any(kw in msg for kw in _RETRYABLE_KEYWORDS)
+from core.utils.retry import is_retryable as _is_retryable, retry_sync, retry_async
 
 from .models import LLMConfig, LLMProvider, LLMResponse, Message, ToolCall, ToolResult
 from .providers.base import BaseAdapter
@@ -234,26 +226,13 @@ class UnifiedLLMClient:
         **kwargs,
     ) -> LLMResponse:
         """同步调用适配器，带指数退避重试。"""
-        max_retries = self._max_retries
-        last_err: Optional[Exception] = None
-        for attempt in range(max_retries + 1):
-            try:
-                if attempt > 0:
-                    wait = min(2 ** attempt, 10)
-                    logger.info(
-                        f"⏳ [UnifiedLLM] 等待 {wait}s 后重试（第 {attempt}/{max_retries} 次）..."
-                    )
-                    time.sleep(wait)
-                return self._adapter.chat(messages, tools, **kwargs)
-            except Exception as e:
-                last_err = e
-                if _is_retryable(e) and attempt < max_retries:
-                    logger.warning(
-                        f"⚠️ [UnifiedLLM] LLM 调用失败（可重试）: {e}"
-                    )
-                    continue
-                raise
-        raise last_err  # pragma: no cover
+        return retry_sync(
+            self._adapter.chat,
+            messages, tools,
+            max_retries=self._max_retries,
+            label="UnifiedLLM",
+            **kwargs,
+        )
 
     async def _aretry_chat(
         self,
@@ -262,26 +241,13 @@ class UnifiedLLMClient:
         **kwargs,
     ) -> LLMResponse:
         """异步调用适配器，带指数退避重试。"""
-        max_retries = self._max_retries
-        last_err: Optional[Exception] = None
-        for attempt in range(max_retries + 1):
-            try:
-                if attempt > 0:
-                    wait = min(2 ** attempt, 10)
-                    logger.info(
-                        f"⏳ [UnifiedLLM] 等待 {wait}s 后重试（第 {attempt}/{max_retries} 次）..."
-                    )
-                    await asyncio.sleep(wait)
-                return await self._adapter.achat(messages, tools, **kwargs)
-            except Exception as e:
-                last_err = e
-                if _is_retryable(e) and attempt < max_retries:
-                    logger.warning(
-                        f"⚠️ [UnifiedLLM] LLM 调用失败（可重试）: {e}"
-                    )
-                    continue
-                raise
-        raise last_err  # pragma: no cover
+        return await retry_async(
+            self._adapter.achat,
+            messages, tools,
+            max_retries=self._max_retries,
+            label="UnifiedLLM",
+            **kwargs,
+        )
 
     def chat(
         self,

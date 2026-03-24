@@ -1130,34 +1130,40 @@ elif _mcp_import_error is not None:
         _mcp_import_error,
     )
 
-# 安全中间件
+# ---- 中间件注册（add_middleware 是 LIFO，最先添加的在最内层）----
+
+# [1] 认证守卫（最内层 — Session/CORS 已就绪后才执行）
+from app.middleware.auth_guard import AuthGuardMiddleware
+app.add_middleware(AuthGuardMiddleware)
+
+# [2] 安全中间件
 if not settings.DEBUG:
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=settings.ALLOWED_HOSTS
     )
 
-# CORS中间件
+# [3] CORS中间件
+_use_credentials = "*" not in settings.ALLOWED_ORIGINS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=_use_credentials,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# Session 中间件（用于 Web 前端的 Cookie 认证）
-# 注意：必须在 CORS 中间件之后添加
+# [4] Session 中间件
 app.add_middleware(
     SessionMiddleware,
-    secret_key=settings.JWT_SECRET,  # 使用相同的密钥
-    session_cookie="tradingagents_session",  # Cookie 名称
-    max_age=3600,  # 1 小时过期
-    same_site="lax",  # CSRF 保护
-    https_only=False if settings.DEBUG else True,  # 生产环境使用 HTTPS
+    secret_key=settings.JWT_SECRET,
+    session_cookie="tradingagents_session",
+    max_age=3600,
+    same_site="lax",
+    https_only=False if settings.DEBUG else True,
 )
 
-# 操作日志中间件
+# [5] 操作日志中间件
 app.add_middleware(OperationLogMiddleware)
 
 
@@ -1206,9 +1212,39 @@ async def log_requests(request: Request, call_next):
 from app.middleware.request_id import RequestIDMiddleware
 app.add_middleware(RequestIDMiddleware)
 
+from fastapi.exceptions import HTTPException as FastAPIHTTPException
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """对 >=500 的 HTTPException 隐藏内部细节，防止泄漏堆栈/SQL 等信息。"""
+    request_id = getattr(request.state, "request_id", None)
+    if exc.status_code >= 500:
+        logging.error("HTTPException %s: %s", exc.status_code, exc.detail, exc_info=False)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": "INTERNAL_SERVER_ERROR",
+                    "message": "Internal server error occurred",
+                    "request_id": request_id,
+                }
+            },
+        )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "code": f"HTTP_{exc.status_code}",
+                "message": exc.detail,
+                "request_id": request_id,
+            }
+        },
+    )
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logging.error(f"Unhandled exception: {exc}", exc_info=True)
+    logging.error("Unhandled exception: %s", exc, exc_info=True)
     return JSONResponse(
         status_code=500,
         content={
