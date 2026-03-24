@@ -244,6 +244,16 @@ async def get_quote(
     if not b:
         b = await db["stock_basic_info"].find_one({"code": code6}, {"_id": 0})
 
+    # ETF 回退：stock_basic_info 未命中时查 etf_basic_info + etf_daily_quotes
+    if not b:
+        b = await db["etf_basic_info"].find_one({"code": code6}, {"_id": 0})
+    if not q:
+        etf_q = await db["etf_daily_quotes"].find_one(
+            {"code": code6}, sort=[("trade_date", -1)], projection={"_id": 0}
+        )
+        if etf_q:
+            q = etf_q
+
     if not q and not b:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该股票的任何信息")
 
