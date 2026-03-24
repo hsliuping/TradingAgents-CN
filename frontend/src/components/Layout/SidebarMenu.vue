@@ -36,6 +36,11 @@
       <template #title>智能助手</template>
     </el-menu-item>
 
+    <el-menu-item index="/memory">
+      <el-icon><Coin /></el-icon>
+      <template #title>AI 记忆</template>
+    </el-menu-item>
+
     <el-menu-item index="/reports">
       <el-icon><Document /></el-icon>
       <template #title>分析报告</template>
@@ -231,7 +236,8 @@ import {
   DocumentChecked,
   Key,
   Tickets,
-  ChatDotRound
+  ChatDotRound,
+  Coin,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

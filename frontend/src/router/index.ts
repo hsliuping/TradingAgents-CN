@@ -275,6 +275,28 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/memory',
+    name: 'Memory',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: 'AI 记忆',
+      icon: 'Coin',
+      requiresAuth: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'MemoryHome',
+        component: () => import('@/views/Memory/index.vue'),
+        meta: {
+          title: 'AI 记忆管理',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
+  {
     path: '/backtest',
     name: 'Backtest',
     component: () => import('@/layouts/BasicLayout.vue'),

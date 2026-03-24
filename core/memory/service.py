@@ -268,6 +268,78 @@ class MemoryService:
             logger.warning("[MemoryService] get_user_summary 失败: %s", e)
             return ""
 
+    async def get_all(
+        self,
+        *,
+        user_id: str = "",
+        scopes: Optional[List[str]] = None,
+        limit: int = 50,
+        page: int = 1,
+    ) -> Dict[str, Any]:
+        """
+        获取用户的所有记忆（分页）。
+
+        Returns:
+            {"items": [MemoryItem, ...], "total": int}
+        """
+        if not await self._ensure_init():
+            return {"items": [], "total": 0}
+
+        kwargs: Dict[str, Any] = {"limit": 200}
+        if user_id:
+            kwargs["user_id"] = user_id
+        if scopes:
+            kwargs["filters"] = {"scope": {"$in": scopes}}
+
+        try:
+            results = await self._mem.get_all(**kwargs)
+            raw_list = results.get("results", []) if isinstance(results, dict) else results
+            all_items = [
+                MemoryItem.from_mem0(raw)
+                for raw in raw_list
+                if isinstance(raw, dict)
+            ]
+            total = len(all_items)
+            start = (page - 1) * limit
+            end = start + limit
+            return {"items": all_items[start:end], "total": total}
+        except Exception as e:
+            logger.warning("[MemoryService] get_all 失败: %s", e)
+            return {"items": [], "total": 0}
+
+    async def delete_memory(self, memory_id: str) -> bool:
+        """删除单条记忆"""
+        if not await self._ensure_init():
+            return False
+        try:
+            await self._mem.delete(memory_id)
+            logger.info("[MemoryService] 已删除记忆: %s", memory_id)
+            return True
+        except Exception as e:
+            logger.warning("[MemoryService] delete 失败: %s", e)
+            return False
+
+    async def delete_all_user_memories(self, user_id: str) -> int:
+        """清除用户的全部记忆，返回删除数量"""
+        if not await self._ensure_init():
+            return 0
+        try:
+            results = await self._mem.get_all(user_id=user_id, limit=500)
+            raw_list = results.get("results", []) if isinstance(results, dict) else results
+            count = 0
+            for raw in raw_list:
+                if isinstance(raw, dict) and raw.get("id"):
+                    try:
+                        await self._mem.delete(raw["id"])
+                        count += 1
+                    except Exception:
+                        pass
+            logger.info("[MemoryService] 已清除用户 %s 的 %d 条记忆", user_id, count)
+            return count
+        except Exception as e:
+            logger.warning("[MemoryService] delete_all 失败: %s", e)
+            return 0
+
     async def health_check(self) -> Dict[str, Any]:
         """连通性检查"""
         if not await self._ensure_init():
