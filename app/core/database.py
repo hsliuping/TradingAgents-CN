@@ -594,6 +594,43 @@ async def create_database_indexes(db):
         await agent_evaluations.create_index([("evaluation_id", 1)], unique=True)
         await agent_evaluations.create_index([("version_id", 1), ("created_at", -1)])
 
+        # scheduler_executions（高频查询，此前无索引）
+        sched_exec = db["scheduler_executions"]
+        await sched_exec.create_index([("job_id", 1), ("status", 1), ("timestamp", -1)])
+        await sched_exec.create_index([("status", 1), ("timestamp", -1)])
+        await sched_exec.create_index([("updated_at", -1)])
+
+        sched_hist = db["scheduler_history"]
+        await sched_hist.create_index([("job_id", 1), ("timestamp", -1)])
+
+        # 持仓 & 交易相关
+        real_pos = db["real_positions"]
+        await real_pos.create_index([("user_id", 1), ("code", 1), ("market", 1)])
+
+        pos_changes = db["position_changes"]
+        await pos_changes.create_index([("user_id", 1), ("created_at", -1)])
+        await pos_changes.create_index([("user_id", 1), ("code", 1), ("market", 1), ("created_at", -1)])
+
+        real_accts = db["real_accounts"]
+        await real_accts.create_index([("user_id", 1)])
+
+        # 分析报告
+        reports = db["analysis_reports"]
+        await reports.create_index([("user_id", 1), ("created_at", -1)])
+        await reports.create_index([("user_id", 1), ("task_id", 1)])
+
+        pos_reports = db["position_analysis_reports"]
+        await pos_reports.create_index([("user_id", 1), ("created_at", -1)])
+
+        # 统一任务中心
+        unified_tasks = db["unified_analysis_tasks"]
+        await unified_tasks.create_index([("user_id", 1), ("created_at", -1)])
+        await unified_tasks.create_index([("task_id", 1)], unique=True)
+
+        # 系统配置（对齐实际查询字段 config_key）
+        sys_cfg = db["system_configs"]
+        await sys_cfg.create_index([("config_key", 1)], unique=True, sparse=True)
+
         logger.info("✅ 数据库索引创建完成")
 
     except Exception as e:

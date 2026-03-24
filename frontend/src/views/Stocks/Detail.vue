@@ -211,7 +211,8 @@
               </el-select>
             </div>
           </template>
-          <el-empty v-if="newsItems.length === 0" description="暂无新闻" />
+          <div v-if="newsLoading" v-loading="true" style="min-height: 120px" />
+          <el-empty v-else-if="newsItems.length === 0" description="暂无新闻" />
           <div v-else class="news-list">
             <div v-for="(n, i) in filteredNews" :key="i" class="news-item">
               <div class="row">
@@ -875,6 +876,7 @@ async function fetchKline() {
 // 新闻
 const newsFilter = ref('all')
 const newsItems = ref<any[]>([])
+const newsLoading = ref(true)
 const newsSource = ref<string | undefined>(undefined)
 
 function cleanTitle(s: any): string {
@@ -883,6 +885,7 @@ function cleanTitle(s: any): string {
 }
 
 async function fetchNews() {
+  newsLoading.value = true
   try {
     const res = await stocksApi.getNews(code.value, 30, 50, true)
     const d: any = (res as any)?.data || {}
@@ -898,6 +901,8 @@ async function fetchNews() {
     newsSource.value = d.source
   } catch (e) {
     console.error('获取新闻失败', e)
+  } finally {
+    newsLoading.value = false
   }
 }
 

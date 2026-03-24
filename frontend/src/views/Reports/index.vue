@@ -185,6 +185,14 @@
             </el-button>
           </template>
         </el-table-column>
+
+        <template #empty>
+          <el-empty v-if="!loading" description="暂无分析报告" :image-size="120">
+            <template #description>
+              <p>暂无分析报告，执行一次股票分析即可生成报告</p>
+            </template>
+          </el-empty>
+        </template>
       </el-table>
 
       <!-- 分页 -->

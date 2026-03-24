@@ -12,7 +12,15 @@
       </div>
     </div>
 
-    <el-row :gutter="20">
+    <!-- 工作流加载失败 -->
+    <el-result v-if="workflowLoadError" icon="error" title="工作流加载失败" :sub-title="workflowLoadError">
+      <template #extra>
+        <el-button type="primary" @click="loadWorkflow">重试</el-button>
+        <el-button @click="goBack">返回</el-button>
+      </template>
+    </el-result>
+
+    <el-row v-else :gutter="20" v-loading="workflowLoading" element-loading-text="加载工作流配置...">
       <!-- 左侧：输入参数 -->
       <el-col :span="8">
         <el-card class="input-card">
@@ -228,6 +236,8 @@ const router = useRouter()
 
 // 状态
 const workflow = ref<WorkflowDefinition | null>(null)
+const workflowLoading = ref(true)
+const workflowLoadError = ref<string | null>(null)
 const executing = ref(false)
 const executionResult = ref<any>(null)
 const executionError = ref<string | null>(null)
@@ -319,9 +329,10 @@ const loadModels = async () => {
 
 // 加载工作流
 const loadWorkflow = async () => {
+  workflowLoading.value = true
+  workflowLoadError.value = null
   try {
     workflow.value = await workflowApi.get(workflowId.value)
-    // 根据节点生成执行步骤
     if (workflow.value?.nodes) {
       executionSteps.value = workflow.value.nodes
         .filter(n => n.type !== 'start' && n.type !== 'end')
@@ -331,8 +342,11 @@ const loadWorkflow = async () => {
           status: 'pending'
         }))
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('加载工作流失败:', error)
+    workflowLoadError.value = error?.message || '无法加载工作流配置，请检查网络或稍后重试'
+  } finally {
+    workflowLoading.value = false
   }
 }
 

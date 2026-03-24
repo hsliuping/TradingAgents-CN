@@ -61,8 +61,11 @@ export default defineConfig({
       }
     }
   },
+  esbuild: {
+    drop: process.env.NODE_ENV === 'production' ? ['console', 'debugger'] : [],
+  },
   build: {
-    target: 'es2020',  // 支持 nullish coalescing operator (??) 和 optional chaining (?.)
+    target: 'es2020',
     outDir: 'dist',
     assetsDir: 'assets',
     sourcemap: false,
