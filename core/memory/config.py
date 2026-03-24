@@ -115,12 +115,13 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
     """
     db_settings, llm_configs = _read_system_settings(db)
 
-    # --- Vector Store: 复用现有 Qdrant ---
-    qdrant_path = _env("QDRANT_DATA_DIR", "./data/qdrant")
+    # --- Vector Store: 独立子目录，避免与现有 QdrantAdapter 文件锁冲突 ---
+    qdrant_base = _env("QDRANT_DATA_DIR", "./data/qdrant")
+    mem0_qdrant_path = os.path.join(qdrant_base, "mem0")
     vector_store = {
         "provider": "qdrant",
         "config": {
-            "path": qdrant_path,
+            "path": mem0_qdrant_path,
             "collection_name": _QDRANT_COLLECTION,
             "on_disk": True,
         },

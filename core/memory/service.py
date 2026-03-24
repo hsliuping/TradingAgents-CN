@@ -9,10 +9,12 @@ MemoryService — mem0 统一记忆适配层
 - 降级容错：mem0 不可用时返回空结果，不阻塞主流程
 - 通过 metadata.scope 实现记忆分类过滤
 - 单例 + 延迟初始化
+- MEM0_ENABLED 环境变量总开关
 """
 
 import asyncio
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from .models import MemoryItem, MemoryScope, StoreResult
@@ -21,12 +23,21 @@ logger = logging.getLogger(__name__)
 
 _instance: Optional["MemoryService"] = None
 
+_STORE_MAX_CONTENT_CHARS = 3000
+
+
+def _is_mem0_enabled() -> bool:
+    val = (os.environ.get("MEM0_ENABLED") or "true").strip().lower()
+    return val in ("true", "1", "yes", "on")
+
 
 def get_memory_service(db=None) -> "MemoryService":
     """获取全局 MemoryService 单例（延迟初始化）"""
     global _instance
     if _instance is None:
         _instance = MemoryService(db=db)
+    elif db is not None and _instance._db is None:
+        _instance._db = db
     return _instance
 
 
@@ -37,41 +48,46 @@ class MemoryService:
         self._db = db
         self._mem: Any = None
         self._init_error: str = ""
-        self._initializing = False
+        self._init_lock = asyncio.Lock()
 
     @property
     def available(self) -> bool:
         return self._mem is not None
 
     async def _ensure_init(self) -> bool:
-        """延迟初始化 mem0 AsyncMemory 实例"""
+        """延迟初始化 mem0 AsyncMemory 实例（asyncio.Lock 保证并发安全）"""
         if self._mem is not None:
             return True
         if self._init_error:
             return False
-        if self._initializing:
+
+        if not _is_mem0_enabled():
+            self._init_error = "MEM0_ENABLED=false，记忆层已禁用"
             return False
 
-        self._initializing = True
-        try:
-            from mem0 import AsyncMemory
-            from .config import build_mem0_config
-
-            config = build_mem0_config(self._db)
-            if not config.get("llm", {}).get("config", {}).get("api_key"):
-                self._init_error = "缺少 LLM API Key，mem0 记忆层不可用"
-                logger.warning("[MemoryService] %s", self._init_error)
+        async with self._init_lock:
+            if self._mem is not None:
+                return True
+            if self._init_error:
                 return False
 
-            self._mem = AsyncMemory.from_config(config)
-            logger.info("[MemoryService] mem0 AsyncMemory 初始化成功")
-            return True
-        except Exception as e:
-            self._init_error = str(e)
-            logger.warning("[MemoryService] mem0 初始化失败（已降级）: %s", e)
-            return False
-        finally:
-            self._initializing = False
+            try:
+                from mem0 import AsyncMemory
+                from .config import build_mem0_config
+
+                config = build_mem0_config(self._db)
+                if not config.get("llm", {}).get("config", {}).get("api_key"):
+                    self._init_error = "缺少 LLM API Key，mem0 记忆层不可用"
+                    logger.warning("[MemoryService] %s", self._init_error)
+                    return False
+
+                self._mem = AsyncMemory.from_config(config)
+                logger.info("[MemoryService] mem0 AsyncMemory 初始化成功")
+                return True
+            except Exception as e:
+                self._init_error = str(e)
+                logger.warning("[MemoryService] mem0 初始化失败（已降级）: %s", e)
+                return False
 
     # ------------------------------------------------------------------
     #  写入
@@ -101,6 +117,8 @@ class MemoryService:
         if not await self._ensure_init():
             return StoreResult(success=False, error=self._init_error or "mem0 不可用")
 
+        truncated = _truncate_messages(messages)
+
         merged_meta = {"scope": scope}
         if metadata:
             merged_meta.update(metadata)
@@ -114,7 +132,7 @@ class MemoryService:
             kwargs["run_id"] = session_id
 
         try:
-            result = await self._mem.add(messages, **kwargs)
+            result = await self._mem.add(truncated, **kwargs)
             ids = []
             count = 0
             if isinstance(result, dict):
@@ -255,14 +273,14 @@ class MemoryService:
         if not await self._ensure_init():
             return {"ok": False, "error": self._init_error}
         try:
-            result = await self._mem.get_all(user_id="__health_check__", limit=1)
+            await self._mem.get_all(user_id="__health_check__", limit=1)
             return {"ok": True, "mem0_version": _get_mem0_version()}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
 
 # ------------------------------------------------------------------
-#  内部常量
+#  内部工具函数
 # ------------------------------------------------------------------
 
 _SCOPE_LABEL = {
@@ -273,6 +291,20 @@ _SCOPE_LABEL = {
     MemoryScope.AGENT_EXPERIENCE: "经验",
     MemoryScope.TRADE_PATTERN: "交易",
 }
+
+
+def _truncate_messages(
+    messages: List[Dict[str, str]],
+    max_chars: int = _STORE_MAX_CONTENT_CHARS,
+) -> List[Dict[str, str]]:
+    """截断过长的消息内容，避免事实提取阶段浪费 LLM token"""
+    result = []
+    for msg in messages:
+        content = msg.get("content", "")
+        if len(content) > max_chars:
+            content = content[:max_chars] + "...(已截断)"
+        result.append({**msg, "content": content})
+    return result
 
 
 def _get_mem0_version() -> str:
