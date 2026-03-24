@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
     name="获取交易记录",
     description="从数据库获取交易记录，支持用户持仓(position_changes)和模拟交易(paper_trades)",
     category="trade_review",
-    is_online=False
+    is_online=False,
+    timeout_tier="light",
 )
 def get_trade_records(
     user_id: Annotated[str, "用户ID"],

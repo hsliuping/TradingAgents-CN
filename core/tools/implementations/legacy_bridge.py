@@ -70,7 +70,8 @@ def get_realtime_stock_news_bridge(ticker: str, curr_date: str) -> str:
     name="OpenAI 股票新闻分析 (Legacy)",
     description="使用 OpenAI 接口获取并分析股票新闻（旧版接口）",
     category="news",
-    is_online=True
+    is_online=True,
+    timeout_tier="heavy",
 )
 def get_stock_news_openai_bridge(ticker: str, curr_date: str) -> str:
     return _invoke_legacy_tool(Toolkit.get_stock_news_openai, ticker=ticker, curr_date=curr_date)
@@ -80,7 +81,8 @@ def get_stock_news_openai_bridge(ticker: str, curr_date: str) -> str:
     name="OpenAI 宏观新闻分析 (Legacy)",
     description="使用 OpenAI 接口获取并分析宏观经济新闻（旧版接口）",
     category="news",
-    is_online=True
+    is_online=True,
+    timeout_tier="heavy",
 )
 def get_global_news_openai_bridge(curr_date: str) -> str:
     return _invoke_legacy_tool(Toolkit.get_global_news_openai, curr_date=curr_date)

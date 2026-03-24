@@ -182,6 +182,7 @@
           </div>
           <div class="chat-panel-actions">
             <el-tag v-if="loading" type="info" size="small">思考中...</el-tag>
+            <el-tag v-else-if="streaming" type="success" size="small">回复中...</el-tag>
             <el-button
               v-else-if="selectedThreadId"
               type="default"
@@ -204,7 +205,7 @@
             <div
               v-for="(msg, idx) in messages"
               :key="idx"
-              :class="['message-item', msg.role === 'user' ? 'message-user' : 'message-assistant']"
+              :class="['message-item', msg.role === 'user' ? 'message-user' : 'message-assistant', streaming && idx === messages.length - 1 && msg.role === 'assistant' ? 'streaming-message' : '']"
             >
               <template v-if="msg.role === 'user'">
                 <div class="message-content">
@@ -272,13 +273,13 @@
               :rows="2"
               :autosize="{ minRows: 2, maxRows: 5 }"
               placeholder="输入您的问题，如：宁德时代估值和行业景气度是否背离？"
-              :disabled="loading"
+              :disabled="loading || streaming"
               @keydown.enter.ctrl="handleSend"
             />
             <el-button
               type="primary"
               :loading="loading"
-              :disabled="!inputMessage.trim() || !selectedThreadId"
+              :disabled="!inputMessage.trim() || !selectedThreadId || streaming"
               class="send-btn"
               @click="handleSend"
             >
@@ -529,10 +530,13 @@ interface ThreadTreeNode extends AssistantThreadItem {
 
 const inputMessage = ref('')
 const loading = ref(false)
+const streaming = ref(false)
 const sidebarLoading = ref(false)
 const summaryLoading = ref(false)
 const analysisMode = ref<'react' | 'planned'>('react')
 const loadingSeconds = ref(0)
+const streamingToolHint = ref('')
+let activeStreamController: AbortController | null = null
 const threads = ref<AssistantThreadItem[]>([])
 const selectedThreadId = ref<string>('')
 const messages = ref<DisplayMessage[]>([])
@@ -641,6 +645,7 @@ const buildThreadPath = (threadId?: string) => {
 const currentThreadPath = computed(() => buildThreadPath(selectedThreadId.value))
 
 const loadingHint = computed(() => {
+  if (streamingToolHint.value) return streamingToolHint.value
   if (analysisMode.value === 'planned') {
     if (loadingSeconds.value < 4) return '正在规划分析步骤'
     if (loadingSeconds.value < 10) return '正在并行执行多智能体分析'
@@ -868,6 +873,12 @@ const loadThreads = async (preferredThreadId?: string) => {
 
 const selectThread = async (threadId: string) => {
   if (!threadId) return
+  if (activeStreamController) {
+    activeStreamController.abort()
+    activeStreamController = null
+    streaming.value = false
+    streamingToolHint.value = ''
+  }
   selectedThreadId.value = threadId
   try {
     const res = await assistantApi.getThreadMessages(threadId)
@@ -982,47 +993,23 @@ const handleClear = async () => {
   }).catch(() => {})
 }
 
-const handleSend = async () => {
-  const text = inputMessage.value.trim()
-  if (!text || loading.value || !selectedThreadId.value) return
-
-  messages.value.push({ role: 'user', content: text })
-  inputMessage.value = ''
-  loading.value = true
-  startLoadingIndicator()
-  scrollToBottom()
-
+const handleSendPlanned = async (text: string) => {
   try {
-    if (analysisMode.value === 'planned') {
-      const res = await assistantApi.plannedAnalysis(
-        text,
-        selectedThreadId.value,
-        assistantModelSettings.value.quickModel,
-        assistantModelSettings.value.deepModel,
-      )
-      if (res.conversation_id) selectedThreadId.value = res.conversation_id
-      messages.value.push({
-        role: 'assistant',
-        content: res.reply,
-        tools_used: res.tools_used?.length ? res.tools_used : undefined,
-        source: res.source,
-        supplemented: res.supplemented,
-        step_results: res.step_results,
-      })
-    } else {
-      const res = await assistantApi.chat(
-        text,
-        selectedThreadId.value,
-        assistantModelSettings.value.quickModel,
-        assistantModelSettings.value.deepModel,
-      )
-      if (res.conversation_id) selectedThreadId.value = res.conversation_id
-      messages.value.push({
-        role: 'assistant',
-        content: res.reply,
-        tools_used: res.tools_used?.length ? res.tools_used : undefined,
-      })
-    }
+    const res = await assistantApi.plannedAnalysis(
+      text,
+      selectedThreadId.value,
+      assistantModelSettings.value.quickModel,
+      assistantModelSettings.value.deepModel,
+    )
+    if (res.conversation_id) selectedThreadId.value = res.conversation_id
+    messages.value.push({
+      role: 'assistant',
+      content: res.reply,
+      tools_used: res.tools_used?.length ? res.tools_used : undefined,
+      source: res.source,
+      supplemented: res.supplemented,
+      step_results: res.step_results,
+    })
     await loadThreads(selectedThreadId.value)
     scrollToBottom()
   } catch (error: unknown) {
@@ -1040,6 +1027,101 @@ const handleSend = async () => {
   }
 }
 
+const handleSendStream = (text: string) => {
+  let streamMsgIdx = -1
+  let firstTokenReceived = false
+
+  activeStreamController = assistantApi.chatStream(
+    text,
+    selectedThreadId.value,
+    assistantModelSettings.value.quickModel,
+    assistantModelSettings.value.deepModel,
+    {
+      onToken(content: string) {
+        if (!firstTokenReceived) {
+          firstTokenReceived = true
+          loading.value = false
+          streaming.value = true
+          streamingToolHint.value = ''
+          messages.value.push({ role: 'assistant', content: '' })
+          streamMsgIdx = messages.value.length - 1
+        }
+        messages.value[streamMsgIdx].content += content
+        scrollToBottom()
+      },
+      onToolEvent(event: Record<string, any>) {
+        const eName = event.event || ''
+        if (eName === 'tool_started') {
+          streamingToolHint.value = `正在调用 ${event.tool}...`
+        } else if (eName === 'tool_completed') {
+          const summary = event.summary ? ` (${JSON.stringify(event.summary)})` : ''
+          streamingToolHint.value = `${event.tool} 完成${summary}`
+        } else if (eName === 'tool_round_started') {
+          streamingToolHint.value = `第 ${event.round} 轮工具调用（${event.tool_count} 个工具）`
+        }
+      },
+      onDone(data) {
+        if ((data as any).error) {
+          // error 事件已处理过 UI 状态，只做最终清理
+          loading.value = false
+          streaming.value = false
+          streamingToolHint.value = ''
+          activeStreamController = null
+          stopLoadingIndicator()
+          return
+        }
+        if (data.conversation_id) selectedThreadId.value = data.conversation_id
+        if (streamMsgIdx >= 0 && data.tools_used?.length) {
+          messages.value[streamMsgIdx].tools_used = data.tools_used
+        }
+        loading.value = false
+        streaming.value = false
+        streamingToolHint.value = ''
+        activeStreamController = null
+        stopLoadingIndicator()
+        loadThreads(selectedThreadId.value)
+        scrollToBottom()
+      },
+      onError(msg: string) {
+        if (!firstTokenReceived) {
+          messages.value.push({
+            role: 'assistant',
+            content: `抱歉，处理您的请求时出错：${msg}`,
+            tools_used: [],
+          })
+        } else if (streamMsgIdx >= 0 && !messages.value[streamMsgIdx].content.trim()) {
+          messages.value[streamMsgIdx].content = `抱歉，处理您的请求时出错：${msg}`
+        }
+        ElMessage.error(msg)
+        loading.value = false
+        streaming.value = false
+        streamingToolHint.value = ''
+        activeStreamController = null
+        stopLoadingIndicator()
+        scrollToBottom()
+      },
+    },
+  )
+}
+
+const handleSend = async () => {
+  const text = inputMessage.value.trim()
+  if (!text || loading.value || streaming.value || !selectedThreadId.value) return
+
+  messages.value.push({ role: 'user', content: text })
+  inputMessage.value = ''
+  loading.value = true
+  streamingToolHint.value = ''
+  startLoadingIndicator()
+  scrollToBottom()
+
+  if (analysisMode.value === 'planned') {
+    await handleSendPlanned(text)
+  } else {
+    handleSendStream(text)
+  }
+}
+
 onMounted(async () => {
   await loadModels()
   await loadThreads()
@@ -1047,6 +1129,10 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopLoadingIndicator()
+  if (activeStreamController) {
+    activeStreamController.abort()
+    activeStreamController = null
+  }
 })
 </script>
 
@@ -1534,6 +1620,18 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
   margin-top: 2px;
   padding-left: 2px;
+}
+
+.streaming-message .message-text.markdown-content::after {
+  content: '▌';
+  animation: streaming-cursor 0.8s steps(2) infinite;
+  color: var(--el-color-primary);
+  font-weight: 300;
+}
+
+@keyframes streaming-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 .thinking-bubble {

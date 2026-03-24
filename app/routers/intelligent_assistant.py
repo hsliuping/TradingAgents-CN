@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from app.routers.auth_db import get_current_user
 from app.core.database import get_mongo_db
@@ -27,6 +28,7 @@ from app.schemas.intelligent_assistant import (
 )
 from app.services.intelligent_assistant_service import (
     chat_with_assistant,
+    stream_chat_with_assistant,
     create_assistant_thread,
     delete_assistant_thread,
     get_assistant_conversation,
@@ -275,6 +277,50 @@ async def assistant_chat(
     except Exception as e:
         logger.exception("[智能助手 API] 处理失败")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/chat/stream")
+async def assistant_chat_stream(
+    request: ChatRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """
+    智能助手流式对话接口 (SSE)
+
+    返回 Server-Sent Events 流，实时推送工具调用进度和回复内容。
+    事件类型：tool_started / tool_completed / token / done / error
+    """
+    if not request.message or not request.message.strip():
+        raise HTTPException(status_code=400, detail="消息不能为空")
+
+    user_id = str(current_user["id"])
+
+    async def event_generator():
+        try:
+            async for chunk in stream_chat_with_assistant(
+                db=db,
+                user_message=request.message.strip(),
+                user_id=user_id,
+                conversation_id=request.conversation_id,
+                quick_model=request.quick_model,
+                deep_model=request.deep_model,
+            ):
+                yield chunk
+        except Exception as e:
+            logger.exception("[智能助手 API·流式] 处理失败")
+            import json
+            yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/planned-analysis", response_model=PlannedAnalysisResponse)

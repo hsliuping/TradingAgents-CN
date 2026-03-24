@@ -23,7 +23,8 @@ def _sum_currencies(d: Dict[str, float]) -> float:
     name="获取账户信息",
     description="获取用户的资金账户信息，包括现金、持仓市值、总资产等",
     category="trade_review",
-    is_online=False
+    is_online=False,
+    timeout_tier="light",
 )
 def get_account_info(
     user_id: Annotated[str, "用户ID"]

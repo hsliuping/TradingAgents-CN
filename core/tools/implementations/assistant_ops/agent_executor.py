@@ -372,6 +372,7 @@ async def _write_invocation_ref_to_thread(
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def list_callable_agents(
     keyword: Annotated[Optional[str], "按关键词筛选 Agent，可传估值、复盘、风险、ETF、情绪等；为空则列出全部常用 Agent"] = None,
@@ -401,6 +402,7 @@ async def list_callable_agents(
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="heavy",
 )
 async def execute_callable_agent(
     agent_identifier: Annotated[str, "Agent 的 ID 或名称，例如 valuation_analyst_v1、股票估值分析师"],

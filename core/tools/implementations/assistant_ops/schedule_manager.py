@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def list_scheduled_configs() -> str:
     """列出当前用户的所有定时分析配置摘要。"""
@@ -61,6 +62,7 @@ async def list_scheduled_configs() -> str:
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def create_scheduled_analysis(
     name: Annotated[str, "配置名称，如「每日早盘分析」"],
@@ -139,6 +141,7 @@ async def create_scheduled_analysis(
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def toggle_scheduled_config(
     config_id: Annotated[str, "定时分析配置ID"],

@@ -234,6 +234,7 @@ async def _resolve_target_thread_id(db, user_id: str, title: Optional[str]) -> O
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def list_assistant_topics() -> str:
     """查看当前用户的研究主题树。"""
@@ -260,6 +261,7 @@ async def list_assistant_topics() -> str:
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def create_assistant_topic(
     title: Annotated[str, "要创建的主题名称，如 电池行业跟踪 或 券商板块研究"],
@@ -294,6 +296,7 @@ async def create_assistant_topic(
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def create_assistant_subtopic(
     title: Annotated[str, "子主题名称，如 宁德时代、估值拆解、风险点"],
@@ -339,6 +342,7 @@ async def create_assistant_subtopic(
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def get_current_assistant_topic() -> str:
     """查看当前外部会话绑定的研究主题。"""
@@ -364,6 +368,7 @@ async def get_current_assistant_topic() -> str:
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def switch_assistant_topic(
     title: Annotated[str, "要切换到的主题标题，如 新能源车研究、宁德时代、券商板块研究"],
@@ -405,6 +410,7 @@ async def switch_assistant_topic(
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def delete_assistant_topic(
     title: Annotated[Optional[str], "可选，要删除的主题标题；不填时默认删除当前主题"] = None,

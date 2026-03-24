@@ -71,7 +71,8 @@ SUPPORTED_FIELDS_DOC = """
     ),
     category="screening",
     is_online=False,
-    auto_register=True
+    auto_register=True,
+    timeout_tier="light",
 )
 def screen_stocks_by_criteria(
     conditions_json: Annotated[
