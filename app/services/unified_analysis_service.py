@@ -420,6 +420,21 @@ class UnifiedAnalysisService:
                 except Exception as e:
                     logger.warning(f"⚠️ 成长记忆召回失败（不影响分析）: {e}")
 
+            # 5.6 mem0: 召回该用户对该股票的历史分析记忆
+            if user_id:
+                try:
+                    mem0_block = await _recall_analysis_memory(
+                        self._get_db(), user_id, stock_code,
+                    )
+                    if mem0_block:
+                        existing = inputs.get("growth_memory_recall", "")
+                        inputs["growth_memory_recall"] = (
+                            f"{existing}\n\n{mem0_block}" if existing else mem0_block
+                        )
+                        logger.info(f"📝 注入 mem0 分析记忆: {len(mem0_block)} 字符")
+                except Exception as e:
+                    logger.debug(f"[mem0] 分析记忆召回失败（已忽略）: {e}")
+
             # 6. 执行工作流
             result = await engine.execute_async(
                 inputs=inputs,
@@ -782,6 +797,16 @@ class UnifiedAnalysisService:
             # 保存分析结果到数据库
             await self._save_analysis_result(task_id, user_id, stock_code, result, parameters)
 
+            # mem0: 异步存储分析洞察
+            asyncio.create_task(
+                _store_analysis_insight(
+                    self._get_db(), user_id, stock_code,
+                    result.get("summary", ""),
+                    result.get("recommendation", ""),
+                    task_id,
+                )
+            )
+
             # 🔥 更新内存管理器状态为 COMPLETED
             await memory_manager.update_task_status(
                 task_id=task_id,
@@ -933,6 +958,16 @@ class UnifiedAnalysisService:
 
             await asyncio.to_thread(progress_tracker.mark_completed)
             await self._save_analysis_result(task_id, user_id, stock_code, result, parameters)
+
+            # mem0: 异步存储分析洞察
+            asyncio.create_task(
+                _store_analysis_insight(
+                    self._get_db(), user_id, stock_code,
+                    result.get("summary", ""),
+                    result.get("recommendation", ""),
+                    task_id,
+                )
+            )
 
             await memory_manager.update_task_status(
                 task_id=task_id,
@@ -1818,3 +1853,48 @@ def get_unified_analysis_service() -> UnifiedAnalysisService:
     if _unified_service is None:
         _unified_service = UnifiedAnalysisService()
     return _unified_service
+
+
+# ------------------------------------------------------------------
+#  mem0 统一记忆层 — 工作流分析集成
+# ------------------------------------------------------------------
+
+async def _recall_analysis_memory(db, user_id: str, stock_code: str) -> str:
+    """从 mem0 召回该用户对该股票的历史分析记忆"""
+    try:
+        from core.memory.service import get_memory_service
+        svc = get_memory_service(db)
+        return await svc.recall_formatted(
+            query=f"分析 {stock_code} 股票",
+            user_id=user_id,
+            scopes=["analysis_insight", "agent_experience", "user_preference"],
+            limit=5,
+            max_chars=1500,
+        )
+    except Exception as e:
+        logger.debug("[mem0] 分析记忆召回失败: %s", e)
+        return ""
+
+
+async def _store_analysis_insight(
+    db, user_id: str, stock_code: str,
+    summary: str, recommendation: str, task_id: str,
+) -> None:
+    """将分析结论写入 mem0 analysis_insight（异步，不阻塞主流程）"""
+    if not summary and not recommendation:
+        return
+    try:
+        from core.memory.service import get_memory_service
+        svc = get_memory_service(db)
+        content = f"分析 {stock_code}: {summary}"
+        if recommendation:
+            content += f" 建议: {recommendation}"
+        await svc.store(
+            [{"role": "assistant", "content": content}],
+            user_id=user_id,
+            agent_id="workflow_analyst",
+            scope="analysis_insight",
+            metadata={"symbol": stock_code, "task_id": task_id},
+        )
+    except Exception as e:
+        logger.debug("[mem0] 分析洞察存储失败（已忽略）: %s", e)

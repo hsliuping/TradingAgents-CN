@@ -38,6 +38,15 @@
         <el-tag size="small" :type="analysisMode === 'react' ? 'success' : 'warning'" effect="plain">
           当前模式：{{ analysisMode === 'react' ? '快速对话 → 快速模型' : '深度分析 → 深度模型' }}
         </el-tag>
+        <el-tooltip :content="memoryStatusTip" placement="bottom">
+          <el-tag
+            size="small"
+            :type="memoryStatus === 'ok' ? 'success' : memoryStatus === 'off' ? 'info' : 'danger'"
+            effect="plain"
+          >
+            {{ memoryStatus === 'ok' ? '🧠 记忆已启用' : memoryStatus === 'off' ? '🧠 记忆未启用' : '🧠 记忆不可用' }}
+          </el-tag>
+        </el-tooltip>
       </div>
       <div class="assistant-llm-grid">
         <div class="assistant-llm-item">
@@ -1122,9 +1131,31 @@ const handleSend = async () => {
   }
 }
 
+// ---- mem0 记忆状态 ----
+const memoryStatus = ref<'ok' | 'off' | 'error'>('off')
+const memoryStatusTip = ref('正在检测记忆层...')
+
+async function loadMemoryStatus() {
+  try {
+    const res = await assistantApi.getMemoryHealth()
+    const data = (res as any)?.data ?? res
+    if (data?.ok) {
+      memoryStatus.value = 'ok'
+      memoryStatusTip.value = `mem0 记忆层运行正常 (${data.mem0_version || 'unknown'})`
+    } else {
+      memoryStatus.value = data?.error?.includes('禁用') ? 'off' : 'error'
+      memoryStatusTip.value = data?.error || '记忆层不可用'
+    }
+  } catch {
+    memoryStatus.value = 'off'
+    memoryStatusTip.value = '记忆层未配置'
+  }
+}
+
 onMounted(async () => {
   await loadModels()
   await loadThreads()
+  loadMemoryStatus()
 })
 
 onBeforeUnmount(() => {

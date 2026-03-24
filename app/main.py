@@ -1467,6 +1467,9 @@ register_router_with_log(app, prompt_design_router.router, "Prompt 设计助手�
 from app.routers import gateway as gateway_router
 register_router_with_log(app, gateway_router.router, "Gateway IM 平台接入 (gateway)", tags=["gateway"])
 
+from app.routers import memory as memory_router
+register_router_with_log(app, memory_router.router, "mem0 统一记忆层 (memory)", tags=["memory"])
+
 # 路由注册完成，打印总结
 logger.info("=" * 70)
 logger.info("✅ 路由注册完成")
