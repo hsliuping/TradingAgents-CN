@@ -195,17 +195,48 @@ class FavoritesService:
                 basic_docs = await cursor.to_list(length=None)
                 basic_map = {str(d.get("code")).zfill(6): d for d in (basic_docs or [])}
 
+                # 收集 stock_basic_info 中未命中的代码，稍后查 etf_basic_info
+                missing_codes = []
                 for it in items:
                     code = it.get("stock_code")
                     basic = basic_map.get(code)
                     if basic:
-                        # market 字段表示板块（主板、创业板、科创板等）
                         it["board"] = basic.get("market", "-")
-                        # sse 字段表示交易所（上海证券交易所、深圳证券交易所等）
                         it["exchange"] = basic.get("sse", "-")
                     else:
-                        it["board"] = "-"
-                        it["exchange"] = "-"
+                        missing_codes.append(code)
+
+                # 从 etf_basic_info 补充 ETF 的板块/交易所信息
+                if missing_codes:
+                    etf_coll = db["etf_basic_info"]
+                    etf_cursor = etf_coll.find(
+                        {"code": {"$in": missing_codes}},
+                        {"code": 1, "name": 1, "_id": 0}
+                    )
+                    etf_docs = await etf_cursor.to_list(length=None)
+                    etf_set = {str(d.get("code")).zfill(6) for d in (etf_docs or [])}
+                    etf_name_map = {
+                        str(d.get("code")).zfill(6): d.get("name")
+                        for d in (etf_docs or [])
+                    }
+
+                    for it in items:
+                        code = it.get("stock_code")
+                        if code in basic_map:
+                            continue
+                        if code in etf_set:
+                            it["board"] = "ETF"
+                            if code.startswith(("50", "51", "52")):
+                                it["exchange"] = "上海证券交易所"
+                            elif code.startswith(("15", "16")):
+                                it["exchange"] = "深圳证券交易所"
+                            else:
+                                it["exchange"] = "-"
+                            if not it.get("stock_name") or it["stock_name"] == code:
+                                it["stock_name"] = etf_name_map.get(code) or it.get("stock_name", code)
+                        else:
+                            it["board"] = "-"
+                            it["exchange"] = "-"
             except Exception as e:
                 # 查询失败时设置默认值
                 for it in items:
