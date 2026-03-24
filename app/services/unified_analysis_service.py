@@ -404,6 +404,22 @@ class UnifiedAnalysisService:
                 user_id=user_id,
             )
 
+            # 5.5 注入已批准的成长记忆（Memory Recall）
+            if user_id and inputs.get("memory_enabled", False):
+                try:
+                    from app.services.workflow_growth_service import get_workflow_growth_service
+                    growth_svc = get_workflow_growth_service()
+                    recall_text = await growth_svc.build_recall_context(
+                        user_id=user_id,
+                        ticker=stock_code,
+                        workflow_id=workflow.id,
+                    )
+                    if recall_text:
+                        inputs["growth_memory_recall"] = recall_text
+                        logger.info(f"📝 注入成长记忆召回: {len(recall_text)} 字符")
+                except Exception as e:
+                    logger.warning(f"⚠️ 成长记忆召回失败（不影响分析）: {e}")
+
             # 6. 执行工作流
             result = await engine.execute_async(
                 inputs=inputs,
@@ -470,6 +486,21 @@ class UnifiedAnalysisService:
                 parameters=parameters,
                 user_id=user_id,
             )
+
+            # 5.5 注入已批准的成长记忆（同步路径）
+            if user_id and inputs.get("memory_enabled", False):
+                try:
+                    from app.services.workflow_growth_service import build_recall_context_sync
+                    recall_text = build_recall_context_sync(
+                        user_id=user_id,
+                        ticker=stock_code,
+                        workflow_id=workflow.id,
+                    )
+                    if recall_text:
+                        inputs["growth_memory_recall"] = recall_text
+                        logger.info(f"📝 [同步] 注入成长记忆召回: {len(recall_text)} 字符")
+                except Exception as e:
+                    logger.warning(f"⚠️ [同步] 成长记忆召回失败（不影响分析）: {e}")
 
             # 6. 同步执行
             result = engine.execute(

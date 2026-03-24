@@ -398,6 +398,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Skills 初始化失败: {e}")
 
+    # 🔥 加载 AI 生成的外部 Skills（external_skills 集合）到 ToolRegistry
+    try:
+        from app.core.database import get_mongo_db
+        from core.tools.registry import get_tool_registry
+        from core.tools.external_skill_loader import load_external_skills_to_registry
+
+        ext_db = get_mongo_db()
+        ext_registry = get_tool_registry()
+        ext_count = await load_external_skills_to_registry(ext_db, ext_registry)
+        if ext_count > 0:
+            logger.info(f"✅ 外部 Skills 加载完成，共注册 {ext_count} 个 AI 生成的 Skill")
+    except Exception as e:
+        logger.warning(f"⚠️ 外部 Skills 加载失败: {e}")
+
     # 🔥 注册 Gateway IM 适配器（QQ Bot 等）
     try:
         from app.core.database import get_mongo_db
@@ -429,6 +443,37 @@ async def lifespan(app: FastAPI):
                     logger.info("✅ Gateway QQ Bot 适配器已注册（Webhook 模式）")
         else:
             logger.info("ℹ️ Gateway QQ Bot 未配置（跳过），需在 system_configs 中添加 config_key='gateway_qq'")
+
+        # 注册飞书适配器
+        try:
+            from core.gateway.adapters.feishu import FeishuAdapter
+            feishu_cfg_doc = await gw_db.system_configs.find_one({"config_key": "gateway_feishu"})
+            if feishu_cfg_doc and feishu_cfg_doc.get("config_value"):
+                feishu_cfg = feishu_cfg_doc["config_value"]
+                if feishu_cfg.get("enabled", False) and feishu_cfg.get("app_id") and feishu_cfg.get("app_secret"):
+                    feishu_adapter = FeishuAdapter(config=feishu_cfg)
+                    gateway_router.register_adapter(feishu_adapter)
+                    logger.info("✅ Gateway 飞书 Bot 适配器已注册")
+                elif feishu_cfg.get("enabled", False):
+                    logger.warning("⚠️ Gateway 飞书 Bot 已启用但缺少 app_id 或 app_secret，跳过")
+        except Exception as e:
+            logger.warning(f"⚠️ 飞书适配器注册失败: {e}")
+
+        # 注册钉钉适配器
+        try:
+            from core.gateway.adapters.dingtalk import DingTalkAdapter
+            dingtalk_cfg_doc = await gw_db.system_configs.find_one({"config_key": "gateway_dingtalk"})
+            if dingtalk_cfg_doc and dingtalk_cfg_doc.get("config_value"):
+                dingtalk_cfg = dingtalk_cfg_doc["config_value"]
+                if dingtalk_cfg.get("enabled", False) and dingtalk_cfg.get("app_key") and dingtalk_cfg.get("app_secret"):
+                    dingtalk_adapter = DingTalkAdapter(config=dingtalk_cfg)
+                    gateway_router.register_adapter(dingtalk_adapter)
+                    logger.info("✅ Gateway 钉钉 Bot 适配器已注册")
+                elif dingtalk_cfg.get("enabled", False):
+                    logger.warning("⚠️ Gateway 钉钉 Bot 已启用但缺少 app_key 或 app_secret，跳过")
+        except Exception as e:
+            logger.warning(f"⚠️ 钉钉适配器注册失败: {e}")
+
     except Exception as e:
         logger.warning(f"⚠️ Gateway 适配器注册失败: {e}")
 

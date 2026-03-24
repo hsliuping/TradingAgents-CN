@@ -226,6 +226,38 @@ class ToolRegistry:
                 tools.append(tool)
         return tools
 
+    def register_external_skill(
+        self,
+        tool_id: str,
+        func: Callable,
+        display_name: str,
+        description: str,
+        category: str = "external",
+        parameters: Optional[List] = None,
+    ) -> None:
+        """
+        注册 AI 生成的外部 Skill 到工具注册表。
+
+        生成的 Skill 通过沙箱包装后注册为可被 Agent 调用的工具。
+        """
+        self.register_function(
+            tool_id=tool_id,
+            func=func,
+            name=display_name,
+            category=category,
+            description=description,
+            is_online=True,
+            override=True,
+            parameters=parameters,
+        )
+        if tool_id in self._tools:
+            self._tools[tool_id].source = "generated"
+        logger.info(f"注册外部 Skill: {tool_id}")
+
+    def get_external_skills(self) -> List:
+        """获取所有 AI 生成的外部 Skill"""
+        return [t for t in self._tools.values() if getattr(t, 'source', '') == 'generated']
+
 
 # 全局注册表实例
 _global_registry: Optional[ToolRegistry] = None

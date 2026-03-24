@@ -37,12 +37,18 @@ logger = logging.getLogger("webapi")
 # ===== Gateway 平台配置端点 =====
 
 class GatewayConfigRequest(BaseModel):
-    """Gateway 平台配置请求"""
-    app_id: str = Field(..., description="平台 AppID")
-    app_secret: str = Field(..., description="平台 AppSecret")
+    """Gateway 平台配置请求（通用字段 + 平台专属可选字段）"""
+    app_id: Optional[str] = Field(None, description="平台 AppID（QQ / 飞书）")
+    app_secret: Optional[str] = Field(None, description="平台 AppSecret")
     bot_secret: Optional[str] = Field(None, description="Webhook 签名密钥（QQ Bot 的 bot_secret）")
     connection_mode: str = Field(default="websocket", description="连接模式: webhook 或 websocket")
     enabled: bool = Field(default=True, description="是否启用")
+    # 飞书专属
+    verification_token: Optional[str] = Field(None, description="飞书事件订阅验证 Token")
+    encrypt_key: Optional[str] = Field(None, description="飞书事件加密密钥")
+    # 钉钉专属
+    app_key: Optional[str] = Field(None, description="钉钉 AppKey")
+    robot_code: Optional[str] = Field(None, description="钉钉机器人编码")
 
 
 @router.get("/gateway/{platform}", summary="获取 Gateway 平台配置")
@@ -55,25 +61,26 @@ async def get_gateway_config(
         from app.core.database import get_mongo_db
         db = get_mongo_db()
         doc = await db.system_configs.find_one({"config_key": f"gateway_{platform}"})
+
+        if platform == "feishu":
+            empty = {"platform": platform, "app_id": "", "app_secret": "",
+                     "verification_token": "", "encrypt_key": "",
+                     "enabled": False, "configured": False}
+        elif platform == "dingtalk":
+            empty = {"platform": platform, "app_key": "", "app_secret": "",
+                     "robot_code": "", "enabled": False, "configured": False}
+        else:
+            empty = {"platform": platform, "app_id": "", "app_secret": "",
+                     "bot_secret": "", "connection_mode": "websocket",
+                     "enabled": False, "configured": False}
+
         if not doc or not doc.get("config_value"):
-            return ok(data={
-                "platform": platform,
-                "app_id": "",
-                "app_secret": "",
-                "bot_secret": "",
-                "enabled": False,
-                "configured": False,
-            })
+            return ok(data=empty)
+
         cfg = doc["config_value"]
-        return ok(data={
-            "platform": platform,
-            "app_id": cfg.get("app_id", ""),
-            "app_secret": cfg.get("app_secret", ""),
-            "bot_secret": cfg.get("bot_secret", ""),
-            "connection_mode": cfg.get("connection_mode", "websocket"),
-            "enabled": cfg.get("enabled", True),
-            "configured": True,
-        })
+        result = {**empty, **{k: cfg[k] for k in cfg if k in empty}, "configured": True}
+        result["enabled"] = cfg.get("enabled", True)
+        return ok(data=result)
     except Exception as e:
         logger.error(f"❌ 获取 Gateway {platform} 配置失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -89,13 +96,31 @@ async def update_gateway_config(
     try:
         from app.core.database import get_mongo_db
         db = get_mongo_db()
-        config_value = {
-            "app_id": req.app_id,
-            "app_secret": req.app_secret,
-            "bot_secret": req.bot_secret or "",
-            "connection_mode": req.connection_mode,
-            "enabled": req.enabled,
-        }
+
+        if platform == "feishu":
+            config_value = {
+                "app_id": req.app_id or "",
+                "app_secret": req.app_secret or "",
+                "verification_token": req.verification_token or "",
+                "encrypt_key": req.encrypt_key or "",
+                "enabled": req.enabled,
+            }
+        elif platform == "dingtalk":
+            config_value = {
+                "app_key": req.app_key or "",
+                "app_secret": req.app_secret or "",
+                "robot_code": req.robot_code or "",
+                "enabled": req.enabled,
+            }
+        else:
+            config_value = {
+                "app_id": req.app_id or "",
+                "app_secret": req.app_secret or "",
+                "bot_secret": req.bot_secret or "",
+                "connection_mode": req.connection_mode,
+                "enabled": req.enabled,
+            }
+
         await db.system_configs.update_one(
             {"config_key": f"gateway_{platform}"},
             {"$set": {
@@ -107,8 +132,15 @@ async def update_gateway_config(
             upsert=True,
         )
 
-        # 热重载适配器
-        if req.enabled and req.app_id and req.app_secret:
+        has_credentials = req.enabled and req.app_secret
+        if platform == "qq":
+            has_credentials = has_credentials and req.app_id
+        elif platform == "feishu":
+            has_credentials = has_credentials and req.app_id
+        elif platform == "dingtalk":
+            has_credentials = has_credentials and req.app_key
+
+        if has_credentials:
             try:
                 from core.gateway.router import gateway_router
                 if platform == "qq":
@@ -116,21 +148,29 @@ async def update_gateway_config(
                     adapter = QQAdapter(config=config_value)
                     gateway_router.register_adapter(adapter)
                     logger.info(f"✅ Gateway {platform} 适配器已热重载")
-
-                    # WebSocket 模式切换
                     if req.connection_mode == "websocket":
                         await gateway_router.start_ws_client(config_value, db)
                         logger.info(f"✅ Gateway {platform} WebSocket 客户端已启动")
                     else:
                         await gateway_router.stop_ws_client()
                         logger.info(f"✅ Gateway {platform} 切换为 Webhook 模式")
+                elif platform == "feishu":
+                    from core.gateway.adapters.feishu import FeishuAdapter
+                    adapter = FeishuAdapter(config=config_value)
+                    gateway_router.register_adapter(adapter)
+                    logger.info(f"✅ Gateway feishu 适配器已热重载")
+                elif platform == "dingtalk":
+                    from core.gateway.adapters.dingtalk import DingTalkAdapter
+                    adapter = DingTalkAdapter(config=config_value)
+                    gateway_router.register_adapter(adapter)
+                    logger.info(f"✅ Gateway dingtalk 适配器已热重载")
             except Exception as reload_err:
                 logger.warning(f"⚠️ Gateway {platform} 适配器热重载失败: {reload_err}")
         else:
-            # 禁用时停止 WebSocket
             try:
                 from core.gateway.router import gateway_router
-                await gateway_router.stop_ws_client()
+                if platform == "qq":
+                    await gateway_router.stop_ws_client()
             except Exception:
                 pass
 
@@ -162,13 +202,13 @@ async def test_gateway_connection(
             return fail(message=f"Gateway {platform} 尚未配置，请先保存配置")
 
         cfg = doc["config_value"]
-        app_id = cfg.get("app_id", "")
-        app_secret = cfg.get("app_secret", "")
-        if not app_id or not app_secret:
-            return fail(message="AppID 或 AppSecret 为空，请先完善配置")
+        import httpx
 
         if platform == "qq":
-            import httpx
+            app_id = cfg.get("app_id", "")
+            app_secret = cfg.get("app_secret", "")
+            if not app_id or not app_secret:
+                return fail(message="AppID 或 AppSecret 为空，请先完善配置")
             QQ_TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken"
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.post(QQ_TOKEN_URL, json={
@@ -194,6 +234,53 @@ async def test_gateway_connection(
                 except Exception:
                     err_msg = resp.text
                 return fail(message=f"QQ 平台返回 {resp.status_code}：{err_msg}")
+
+        elif platform == "feishu":
+            app_id = cfg.get("app_id", "")
+            app_secret = cfg.get("app_secret", "")
+            if not app_id or not app_secret:
+                return fail(message="App ID 或 App Secret 为空，请先完善配置")
+            FEISHU_TOKEN_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(FEISHU_TOKEN_URL, json={
+                    "app_id": app_id,
+                    "app_secret": app_secret,
+                })
+            data = resp.json()
+            if data.get("code") == 0 and data.get("tenant_access_token"):
+                expire = data.get("expire", 7200)
+                logger.info(f"✅ Gateway feishu 连接测试成功，Token 有效期 {expire}s")
+                return ok(
+                    data={"expires_in": expire},
+                    message=f"飞书连接成功！Tenant Access Token 有效期 {expire} 秒",
+                )
+            else:
+                err_msg = data.get("msg", str(data))
+                return fail(message=f"飞书凭证无效：{err_msg}")
+
+        elif platform == "dingtalk":
+            app_key = cfg.get("app_key", "")
+            app_secret = cfg.get("app_secret", "")
+            if not app_key or not app_secret:
+                return fail(message="AppKey 或 AppSecret 为空，请先完善配置")
+            DINGTALK_TOKEN_URL = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(DINGTALK_TOKEN_URL, json={
+                    "appKey": app_key,
+                    "appSecret": app_secret,
+                })
+            data = resp.json()
+            if data.get("accessToken"):
+                expire_in = data.get("expireIn", 7200)
+                logger.info(f"✅ Gateway dingtalk 连接测试成功，Token 有效期 {expire_in}s")
+                return ok(
+                    data={"expires_in": expire_in},
+                    message=f"钉钉连接成功！Access Token 有效期 {expire_in} 秒",
+                )
+            else:
+                err_msg = data.get("message", data.get("msg", str(data)))
+                return fail(message=f"钉钉凭证无效：{err_msg}")
+
         else:
             return fail(message=f"暂不支持测试 {platform} 平台连接")
 

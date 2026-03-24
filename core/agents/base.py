@@ -1578,6 +1578,17 @@ class BaseAgent(ABC):
                         else:
                             logger.info(f"📊 [系统变量] 自动提取 {var}: {state[var]}")
 
+            # 🆕 注入已批准的成长记忆（如果工作流传入了 growth_memory_recall）
+            if state and "growth_memory_recall" not in variables:
+                recall = None
+                runtime = state.get("_workflow_runtime")
+                if isinstance(runtime, dict):
+                    recall = runtime.get("growth_memory_recall")
+                if not recall:
+                    recall = state.get("growth_memory_recall")
+                if recall:
+                    variables["growth_memory_recall"] = recall
+
             # 🆕 分层提示词组装：始终注入三块（analysis_context_block / capability_block / task_block）
             # 设计文档 §5：通用分析也注入能力块；analysis_type 可推断
             industry = state.get("industry") if state else None

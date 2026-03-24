@@ -52,6 +52,9 @@ def _prepare_workflow_runtime_inputs(
     if context_thread_id and not runtime_context.get("thread_id"):
         runtime_context["thread_id"] = context_thread_id
 
+    if prepared_inputs.get("growth_memory_recall"):
+        runtime_context["growth_memory_recall"] = prepared_inputs["growth_memory_recall"]
+
     prepared_inputs["_workflow_runtime"] = runtime_context
     return prepared_inputs
 
