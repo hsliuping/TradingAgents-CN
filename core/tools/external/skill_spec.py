@@ -140,6 +140,14 @@ class SandboxResult(BaseModel):
     error: Optional[str] = None
 
 
+class ReflectionResult(BaseModel):
+    """LLM 反思分析结果 — 在迭代失败时对根因进行深度分析"""
+    root_cause: str = ""
+    fix_plan: List[str] = Field(default_factory=list)
+    should_retry: bool = True
+    confidence: float = 0.5
+
+
 class IterationRound(BaseModel):
     """单轮迭代记录"""
     round_number: int = 1
@@ -147,6 +155,7 @@ class IterationRound(BaseModel):
     validation: Optional[ValidationResult] = None
     sandbox: Optional[SandboxResult] = None
     eval_score: Optional[EvalScore] = None
+    reflection: Optional[ReflectionResult] = None
     feedback: str = ""                     # 给下一轮的反馈
     decision: str = ""                     # PASS / RETRY / FAIL
 
@@ -208,6 +217,7 @@ class SkillCreationSession(BaseModel):
     spec_confirmed: bool = False
     # 生成结果
     pipeline_result: Optional[PipelineResult] = None
+    pipeline_history: List[PipelineResult] = Field(default_factory=list)
     # 时间
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

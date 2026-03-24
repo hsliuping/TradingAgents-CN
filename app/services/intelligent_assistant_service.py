@@ -132,6 +132,7 @@ def _get_system_prompt(
     is_im: bool = False,
     user_profile: Optional[dict] = None,
     current_topic_title: Optional[str] = None,
+    memory_block: str = "",
 ) -> str:
     """生成包含当前日期的系统提示词
 
@@ -273,6 +274,7 @@ def _get_system_prompt(
 
 {knowledge_snippets}
 {_build_profile_block(user_profile)}
+{memory_block}
 【合规原则】
 - 你是助理+教练，不是投顾：**教分析方法，不给"买入/卖出/持有"的直接建议**
 - 所有观点必须有工具返回的数据支撑，不做主观臆断
@@ -513,6 +515,7 @@ class IntelligentAssistantService:
         history_messages: Optional[List[Message]] = None,
         user_profile: Optional[dict] = None,
         current_topic_title: Optional[str] = None,
+        memory_block: str = "",
     ) -> Dict[str, Any]:
         """
         处理用户对话
@@ -522,6 +525,7 @@ class IntelligentAssistantService:
             conversation_id: 会话 ID（首版未使用，预留）
             assistant_settings: 用户助理个性化设置
             is_im: 是否来自 IM 渠道，为 True 时注入移动端格式规范到 system prompt
+            memory_block: mem0 召回的格式化记忆文本
 
         Returns:
             {"reply": str, "tools_used": List[str], "data_refs": Optional[List]}
@@ -586,6 +590,7 @@ class IntelligentAssistantService:
                     is_im=is_im,
                     user_profile=user_profile,
                     current_topic_title=current_topic_title,
+                    memory_block=memory_block,
                 ),
             ),
         ]
@@ -706,6 +711,7 @@ class IntelligentAssistantService:
         history_messages: Optional[List[Message]] = None,
         user_profile: Optional[dict] = None,
         current_topic_title: Optional[str] = None,
+        memory_block: str = "",
     ) -> AsyncGenerator[str, None]:
         """流式对话 — 返回 SSE 格式的 async generator"""
 
@@ -754,6 +760,7 @@ class IntelligentAssistantService:
                     knowledge_snippets, assistant_settings,
                     is_im=is_im, user_profile=user_profile,
                     current_topic_title=current_topic_title,
+                    memory_block=memory_block,
                 ),
             ),
         ]
@@ -2188,6 +2195,55 @@ async def _load_assistant_settings(db, user_id: str) -> Optional[dict]:
     return None
 
 
+# ------------------------------------------------------------------
+#  mem0 统一记忆层 — 助手对话集成
+# ------------------------------------------------------------------
+
+async def _recall_memory_block(db, user_id: str, user_message: str) -> str:
+    """从 mem0 召回与当前用户/问题相关的记忆，格式化为可注入 prompt 的文本。"""
+    try:
+        from core.memory.service import get_memory_service
+        svc = get_memory_service(db)
+        return await svc.recall_formatted(
+            query=user_message,
+            user_id=user_id,
+            scopes=["conversation", "user_preference", "analysis_insight", "trade_pattern"],
+            limit=8,
+            max_chars=2000,
+        )
+    except Exception as e:
+        logger.debug("[mem0] 记忆召回失败（已忽略）: %s", e)
+        return ""
+
+
+async def _store_conversation_memory(
+    db, user_id: str, thread_id: str,
+    user_msg: str, assistant_msg: str,
+    tools_used: List[str],
+) -> None:
+    """异步将本轮对话写入 mem0（不阻塞主流程）"""
+    try:
+        from core.memory.service import get_memory_service
+        svc = get_memory_service(db)
+        messages = [
+            {"role": "user", "content": user_msg},
+            {"role": "assistant", "content": assistant_msg},
+        ]
+        meta = {}
+        if tools_used:
+            meta["tools_used"] = ",".join(tools_used[:5])
+        await svc.store(
+            messages,
+            user_id=user_id,
+            agent_id="assistant",
+            session_id=thread_id,
+            scope="conversation",
+            metadata=meta if meta else None,
+        )
+    except Exception as e:
+        logger.debug("[mem0] 记忆存储失败（已忽略）: %s", e)
+
+
 async def chat_with_assistant(
     db,
     user_message: str,
@@ -2260,6 +2316,11 @@ async def chat_with_assistant(
         except Exception as e:
             logger.warning(f"[智能助手] 加载历史会话失败（已跳过）: {e}")
 
+    # mem0 记忆召回（降级安全）
+    memory_block = ""
+    if user_id:
+        memory_block = await _recall_memory_block(db, user_id, user_message)
+
     service = IntelligentAssistantService(
         db,
         preferred_models={
@@ -2275,6 +2336,7 @@ async def chat_with_assistant(
         history_messages=history_messages,
         user_profile=user_profile,
         current_topic_title=current_topic_title,
+        memory_block=memory_block,
     )
     if user_id and result.get("reply"):
         try:
@@ -2288,6 +2350,15 @@ async def chat_with_assistant(
             )
         except Exception as e:
             logger.warning("[智能助手] 保存会话失败: %s", e)
+
+        # mem0 记忆存储（异步后台，不阻塞响应）
+        asyncio.create_task(
+            _store_conversation_memory(
+                db, user_id, conversation_id or "",
+                user_message, result["reply"],
+                result.get("tools_used") or [],
+            )
+        )
     if user_id:
         thread = await get_or_create_assistant_thread(db, user_id, conversation_id)
         result["conversation_id"] = thread["thread_id"]
@@ -2357,6 +2428,11 @@ async def stream_chat_with_assistant(
         except Exception:
             pass
 
+    # mem0 记忆召回
+    memory_block = ""
+    if user_id:
+        memory_block = await _recall_memory_block(db, user_id, user_message)
+
     service = IntelligentAssistantService(
         db,
         preferred_models={"quick_model": quick_model, "deep_model": deep_model},
@@ -2372,6 +2448,7 @@ async def stream_chat_with_assistant(
         history_messages=history_messages,
         user_profile=user_profile,
         current_topic_title=current_topic_title,
+        memory_block=memory_block,
     ):
         if event_str.startswith("event: done\n"):
             try:
@@ -2402,6 +2479,15 @@ async def stream_chat_with_assistant(
             )
         except Exception as e:
             logger.warning("[智能助手·流式] 保存会话失败: %s", e)
+
+        # mem0 记忆存储（异步后台）
+        asyncio.create_task(
+            _store_conversation_memory(
+                db, user_id, conversation_id or "",
+                user_message, collected_reply,
+                collected_tools,
+            )
+        )
 
     conv_id = conversation_id
     if user_id:

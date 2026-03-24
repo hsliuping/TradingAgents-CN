@@ -1,15 +1,26 @@
 """
-迭代控制器 — 编排完整的 Skill 生成管线
+迭代控制器 — Agent 驱动的 Skill 生成管线
 
-流程：CodeGenerator → StaticValidator → SandboxRunner → OutputEvaluator
-决策：PASS（评分 >= 7.0） / RETRY（< 7.0 且未超 3 轮） / FAIL（超过 3 轮）
+借鉴 OpenClaw Agent Loop 思想：LLM 主导迭代过程，可以看到完整的执行上下文
+（sandbox stdout/stderr/output），在每轮失败后先做反思分析再定向修复。
+
+管线流程：
+  CodeGenerator → StaticValidator → SandboxRunner → OutputEvaluator
+                                                      ↓ (PASS后)
+                                                  边缘测试验证
+
+迭代决策：
+  PASS  — 评分 >= 8.0 且边缘测试通过
+  RETRY — 评分不足、沙箱失败或边缘测试失败，且未超轮次上限
+  FAIL  — 超过 8 轮仍未通过，并附带每轮失败原因
 """
 
+import json
 import logging
 import time
-from typing import Callable, Optional
+from typing import Any, Callable, Dict, List, Optional
 
-from core.llm import UnifiedLLMClient
+from core.llm import UnifiedLLMClient, Message
 
 from .code_generator import CodeGenerator
 from .output_evaluator import OutputEvaluator
@@ -18,17 +29,16 @@ from .skill_spec import (
     GeneratedCode,
     IterationRound,
     PipelineResult,
+    ReflectionResult,
+    SandboxResult,
     SkillSpec,
 )
 from .static_validator import StaticValidator
 
 logger = logging.getLogger(__name__)
 
-# 最大迭代轮次
-MAX_ITERATIONS = 3
-
-# 通过阈值（加权总分），5.0 可接受：真实调用数据源但无数据时 Judge 易给 5-6 分
-PASS_THRESHOLD = 5.0
+MAX_ITERATIONS = 8
+PASS_THRESHOLD = 8.0
 
 
 class IterationController:
@@ -36,7 +46,7 @@ class IterationController:
     迭代控制器
 
     编排 CodeGenerator → StaticValidator → SandboxRunner → OutputEvaluator
-    的完整管线，支持最多 3 轮自动重试。
+    的完整管线，在每轮失败时插入 LLM 反思步骤，最多 5 轮自动重试。
     """
 
     def __init__(
@@ -47,14 +57,6 @@ class IterationController:
         max_iterations: int = MAX_ITERATIONS,
         skip_judge: bool = False,
     ):
-        """
-        Args:
-            llm_client: 共享的 LLM 客户端
-            provider: LLM 提供商
-            model: 模型名称
-            max_iterations: 最大迭代轮次
-            skip_judge: 跳过 Judge LLM 评分（节省成本）
-        """
         self._generator = CodeGenerator(
             llm_client=llm_client, provider=provider, model=model
         )
@@ -66,7 +68,18 @@ class IterationController:
             model=model,
             skip_judge=skip_judge,
         )
+        self._llm_client = llm_client
+        self._provider = provider
+        self._model = model
         self._max_iterations = max_iterations
+
+    def _get_client(self) -> UnifiedLLMClient:
+        if self._llm_client is None:
+            kwargs = {}
+            if self._model:
+                kwargs["model"] = self._model
+            self._llm_client = UnifiedLLMClient.from_provider(self._provider, **kwargs)
+        return self._llm_client
 
     def run(
         self, spec: SkillSpec,
@@ -79,15 +92,15 @@ class IterationController:
 
         Args:
             spec: Skill 规格书（已确认）
-            initial_feedback: 初始反馈（优化场景使用，包含原始对话+代码+用户反馈）
-            initial_code: 初始代码（优化场景使用，即当前代码）
-            progress_callback: 进度回调 (stage, message, iteration, progress) 用于前端轮询同步
+            initial_feedback: 初始反馈（优化场景使用）
+            initial_code: 初始代码（优化场景使用）
+            progress_callback: 进度回调 (stage, message, iteration, progress)
 
         Returns:
             PipelineResult: 管线最终结果
         """
         start_time = time.time()
-        iterations = []
+        iterations: List[IterationRound] = []
         feedback = initial_feedback
         previous_code = initial_code
 
@@ -112,7 +125,7 @@ class IterationController:
                 )
                 iteration.generated_code = generated
                 logger.info(f"✅ 代码生成完成 ({generated.generation_time}s)")
-                _report("code_generation", f"代码生成完成 ({generated.generation_time}s)", round_num, 0.25)
+                _report("code_generation", f"代码生成完成 ({generated.generation_time}s)", round_num, 0.2)
             except Exception as e:
                 logger.error(f"❌ 代码生成失败: {e}")
                 iteration.decision = "FAIL"
@@ -121,48 +134,109 @@ class IterationController:
                 break
 
             # ===== 阶段 2: 静态验证 =====
-            _report("static_validation", "正在语法检查...", round_num, 0.3)
+            _report("static_validation", "正在语法检查...", round_num, 0.25)
             validation = self._validator.validate(generated, spec)
             iteration.validation = validation
 
             if not validation.passed:
-                feedback = self._build_feedback("静态验证", validation.errors)
+                feedback = self._build_rich_feedback(
+                    stage="静态验证",
+                    errors=validation.errors,
+                    code=generated.code,
+                    spec=spec,
+                )
                 previous_code = generated.code
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
-                _report("static_validation", f"静态验证失败，重试中...", round_num, 0.4)
+                _report("static_validation", "静态验证失败，重试中...", round_num, 0.3)
                 logger.warning(f"⚠️ 静态验证失败: {validation.errors}")
                 continue
 
             logger.info("✅ 静态验证通过")
-            _report("static_validation", "语法检查通过", round_num, 0.45)
+            _report("static_validation", "语法检查通过", round_num, 0.35)
 
             # ===== 阶段 3: 沙箱执行 =====
-            _report("sandbox_execution", "正在沙箱执行...", round_num, 0.5)
+            _report("sandbox_execution", "正在沙箱执行...", round_num, 0.4)
             sandbox = self._runner.run(generated.code, spec)
             iteration.sandbox = sandbox
 
             if not sandbox.success:
-                feedback = self._build_feedback("沙箱执行", [sandbox.error or "未知错误"])
+                _report("reflection", "正在分析失败原因...", round_num, 0.5)
+                reflection = self._reflect_on_failure(
+                    spec=spec,
+                    code=generated.code,
+                    stage="沙箱执行",
+                    error=sandbox.error or "未知错误",
+                    stdout=sandbox.stdout,
+                    stderr=sandbox.stderr,
+                    output=sandbox.output,
+                )
+                iteration.reflection = reflection
+
+                feedback = self._build_rich_feedback(
+                    stage="沙箱执行",
+                    errors=[sandbox.error or "未知错误"],
+                    code=generated.code,
+                    spec=spec,
+                    stdout=sandbox.stdout,
+                    stderr=sandbox.stderr,
+                    output=sandbox.output,
+                    reflection=reflection,
+                )
                 previous_code = generated.code
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
-                _report("sandbox_execution", f"沙箱执行失败，重试中...", round_num, 0.6)
+                _report("sandbox_execution", "沙箱执行失败，反思后重试中...", round_num, 0.55)
                 logger.warning(f"⚠️ 沙箱执行失败: {sandbox.error}")
                 continue
 
             logger.info(f"✅ 沙箱执行成功 ({sandbox.execution_time}s)")
-            _report("sandbox_execution", f"沙箱执行成功 ({sandbox.execution_time}s)", round_num, 0.7)
+            _report("sandbox_execution", f"沙箱执行成功 ({sandbox.execution_time}s)", round_num, 0.6)
 
             # ===== 阶段 4: 输出评估 =====
-            _report("output_evaluation", "正在质量评估...", round_num, 0.75)
+            _report("output_evaluation", "正在质量评估...", round_num, 0.65)
             eval_score = self._evaluator.evaluate(sandbox, spec, generated.code)
             iteration.eval_score = eval_score
             logger.info(f"📊 评估总分: {eval_score.total}")
 
             if eval_score.total >= PASS_THRESHOLD:
+                # ===== 阶段 5: 边缘测试验证 =====
+                _report("edge_testing", "正在执行边缘测试验证...", round_num, 0.8)
+                edge_failures = self._run_edge_tests(generated.code, spec)
+
+                if edge_failures:
+                    logger.warning(f"⚠️ 边缘测试发现 {len(edge_failures)} 个问题")
+                    _report("reflection", "边缘测试失败，正在分析...", round_num, 0.85)
+                    reflection = self._reflect_on_failure(
+                        spec=spec,
+                        code=generated.code,
+                        stage="边缘测试",
+                        error="\n".join(edge_failures),
+                        stdout=sandbox.stdout,
+                        stderr="",
+                        output=sandbox.output,
+                    )
+                    iteration.reflection = reflection
+
+                    feedback = self._build_rich_feedback(
+                        stage="边缘测试",
+                        errors=edge_failures,
+                        code=generated.code,
+                        spec=spec,
+                        stdout=sandbox.stdout,
+                        output=sandbox.output,
+                        reflection=reflection,
+                    )
+                    previous_code = generated.code
+                    iteration.decision = "RETRY"
+                    iteration.feedback = feedback
+                    iterations.append(iteration)
+                    _report("edge_testing", "边缘测试失败，反思后重试中...", round_num, 0.9)
+                    continue
+
+                # 全部通过
                 iteration.decision = "PASS"
                 iterations.append(iteration)
                 _report("output_evaluation", f"评估通过，总分: {eval_score.total}", round_num, 1.0)
@@ -177,15 +251,36 @@ class IterationController:
                     total_time=round(time.time() - start_time, 2),
                 )
             else:
-                feedback = self._build_eval_feedback(eval_score)
+                _report("reflection", f"评分不足 ({eval_score.total}/10)，正在分析...", round_num, 0.75)
+                reflection = self._reflect_on_failure(
+                    spec=spec,
+                    code=generated.code,
+                    stage="质量评估",
+                    error=f"评分 {eval_score.total}/10 低于阈值 {PASS_THRESHOLD}",
+                    stdout=sandbox.stdout,
+                    stderr=sandbox.stderr,
+                    output=sandbox.output,
+                )
+                iteration.reflection = reflection
+
+                feedback = self._build_rich_feedback(
+                    stage="质量评估",
+                    errors=self._build_eval_errors(eval_score),
+                    code=generated.code,
+                    spec=spec,
+                    stdout=sandbox.stdout,
+                    stderr=sandbox.stderr,
+                    output=sandbox.output,
+                    reflection=reflection,
+                )
                 previous_code = generated.code
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
-                _report("output_evaluation", f"评分不足 ({eval_score.total}/10)，重试中...", round_num, 0.85)
+                _report("output_evaluation", f"评分不足 ({eval_score.total}/10)，反思后重试中...", round_num, 0.8)
                 logger.warning(f"⚠️ 评分不足 ({eval_score.total} < {PASS_THRESHOLD})，重试")
 
-        # 所有轮次用尽，仍未通过
+        failure_summary = self._build_failure_summary(iterations)
         logger.error(f"❌ Skill 生成失败 — {self._max_iterations} 轮迭代后仍未通过")
         return PipelineResult(
             success=False,
@@ -193,26 +288,276 @@ class IterationController:
             iterations=iterations,
             total_rounds=self._max_iterations,
             total_time=round(time.time() - start_time, 2),
-            error=f"经过 {self._max_iterations} 轮迭代后仍未达到质量标准",
+            error=failure_summary,
         )
 
     async def arun(self, spec: SkillSpec) -> PipelineResult:
-        """异步版本的 run（当前为同步包装，后续可改为全异步）"""
-        # TODO: 实现全异步版本（agenerate → avalidate → arun → aevaluate）
+        """异步版本的 run"""
         import asyncio
         return await asyncio.get_event_loop().run_in_executor(None, self.run, spec)
+
+    # ==================== 反思机制 ====================
+
+    def _reflect_on_failure(
+        self,
+        *,
+        spec: SkillSpec,
+        code: str,
+        stage: str,
+        error: str,
+        stdout: str = "",
+        stderr: str = "",
+        output: Any = None,
+    ) -> ReflectionResult:
+        """
+        LLM 反思 — 在每轮失败后分析根因并制定修复计划。
+
+        借鉴 OpenClaw 的 Agent Loop：让 LLM 看到完整的执行上下文后
+        做出判断，而非机械地转发错误消息。
+        """
+        output_preview = ""
+        if output is not None:
+            try:
+                output_preview = json.dumps(output, ensure_ascii=False, indent=2, default=str)[:2000]
+            except Exception:
+                output_preview = str(output)[:2000]
+
+        prompt = f"""你是一位资深 Python 开发者。一个自动生成的工具函数在「{stage}」阶段失败了。
+请分析根因并给出精准的修复计划。
+
+【Skill 目标】
+- tool_id: {spec.tool_id}
+- 功能: {spec.description}
+- 数据源: {spec.data_source or '未指定'}
+
+【生成的代码】（截断前 3000 字符）
+```python
+{code[:3000]}
+```
+
+【失败信息】
+{error}
+
+【标准输出 stdout】
+{(stdout or '(空)')[:1500]}
+
+【标准错误 stderr】
+{(stderr or '(空)')[:1500]}
+
+【函数返回值】
+{output_preview or '(空)'}
+
+请用 JSON 格式回复，不要输出其他内容：
+{{"root_cause": "一句话说明根因", "fix_plan": ["修复步骤1", "修复步骤2", ...], "should_retry": true/false, "confidence": 0.0-1.0}}
+"""
+        try:
+            client = self._get_client()
+            response = client.chat([Message(role="user", content=prompt)])
+            raw = (response.content or "").strip()
+
+            import re
+            json_match = re.search(r"\{[^}]+\}", raw, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group())
+                return ReflectionResult(
+                    root_cause=data.get("root_cause", "未知"),
+                    fix_plan=data.get("fix_plan", []),
+                    should_retry=data.get("should_retry", True),
+                    confidence=float(data.get("confidence", 0.5)),
+                )
+        except Exception as e:
+            logger.warning(f"LLM 反思分析失败，使用默认反馈: {e}")
+
+        return ReflectionResult(
+            root_cause=f"{stage}阶段失败: {error[:200]}",
+            fix_plan=["修复上述报错", "确保代码可正常执行"],
+            should_retry=True,
+            confidence=0.3,
+        )
+
+    # ==================== 边缘测试 ====================
+
+    def _run_edge_tests(self, code: str, spec: SkillSpec) -> List[str]:
+        """
+        在主测试通过后，运行额外的边缘测试场景：
+        1. 空/无效参数测试 — 函数不应崩溃
+        2. LLM 生成的测试用例 — 检查是否有 mock 数据
+        """
+        failures: List[str] = []
+
+        edge_inputs = self._generate_edge_inputs(spec)
+        for label, test_input in edge_inputs:
+            try:
+                result = self._runner.run(code, spec, test_input=test_input)
+                if not result.success:
+                    failures.append(f"边缘测试「{label}」执行崩溃: {result.error or '未知'}")
+                elif result.output is not None:
+                    output_str = json.dumps(result.output, ensure_ascii=False, default=str)
+                    if self._looks_like_mock_data(output_str):
+                        failures.append(f"边缘测试「{label}」返回疑似模拟数据")
+            except Exception as e:
+                failures.append(f"边缘测试「{label}」异常: {e}")
+
+        return failures
+
+    @staticmethod
+    def _generate_edge_inputs(spec: SkillSpec) -> List[tuple]:
+        """根据 spec 参数定义生成边缘测试输入"""
+        edges: List[tuple] = []
+
+        has_symbol = any(
+            p.name in ("symbol", "ticker", "stock_code", "code")
+            for p in spec.parameters
+        )
+        if has_symbol:
+            edge_args = dict(spec.test_input) if spec.test_input else {}
+            symbol_key = next(
+                (p.name for p in spec.parameters
+                 if p.name in ("symbol", "ticker", "stock_code", "code")),
+                None,
+            )
+            if symbol_key:
+                edge_args[symbol_key] = "999999"
+                edges.append(("不存在的股票代码", edge_args))
+
+        return edges
+
+    @staticmethod
+    def _looks_like_mock_data(output_str: str) -> bool:
+        mock_indicators = [
+            '"mock"', '"模拟"', '"fake"', '"dummy"', '"placeholder"',
+            '"示例数据"', '"测试数据"', '"sample"',
+            "_generate_mock", "generate_fake", "random.uniform",
+        ]
+        lower = output_str.lower()
+        return any(ind.lower() in lower for ind in mock_indicators)
+
+    # ==================== 失败报告 ====================
+
+    @staticmethod
+    def _build_failure_summary(iterations: List[IterationRound]) -> str:
+        """
+        汇总所有迭代轮次的失败原因，生成结构化的失败报告。
+        """
+        parts = [f"经过 {len(iterations)} 轮迭代仍未达到质量标准（≥{PASS_THRESHOLD}/10 分）。各轮失败原因如下：\n"]
+
+        for it in iterations:
+            header = f"【第 {it.round_number} 轮 — 决策: {it.decision or 'UNKNOWN'}】"
+            parts.append(header)
+
+            if it.validation and not it.validation.passed:
+                parts.append(f"  静态验证失败:")
+                for err in it.validation.errors[:3]:
+                    parts.append(f"    - {err}")
+
+            if it.sandbox and not it.sandbox.success:
+                parts.append(f"  沙箱执行失败: {it.sandbox.error or '未知错误'}")
+
+            if it.eval_score:
+                parts.append(
+                    f"  评分: 总分={it.eval_score.total}, "
+                    f"可执行性={it.eval_score.executability}, "
+                    f"真实性={it.eval_score.authenticity}, "
+                    f"完整性={it.eval_score.completeness}, "
+                    f"相关性={it.eval_score.relevance}, "
+                    f"格式={it.eval_score.format_quality}"
+                )
+                weak = []
+                if it.eval_score.executability < 8.0:
+                    weak.append(f"可执行性({it.eval_score.executability})")
+                if it.eval_score.authenticity < 8.0:
+                    weak.append(f"真实性({it.eval_score.authenticity})")
+                if it.eval_score.completeness < 8.0:
+                    weak.append(f"完整性({it.eval_score.completeness})")
+                if it.eval_score.relevance < 8.0:
+                    weak.append(f"相关性({it.eval_score.relevance})")
+                if it.eval_score.format_quality < 8.0:
+                    weak.append(f"格式质量({it.eval_score.format_quality})")
+                if weak:
+                    parts.append(f"  不达标维度: {', '.join(weak)}")
+
+            if it.reflection and it.reflection.root_cause:
+                parts.append(f"  根因分析: {it.reflection.root_cause}")
+
+            parts.append("")
+
+        return "\n".join(parts).strip()
 
     # ==================== 反馈构建 ====================
 
     @staticmethod
+    def _build_rich_feedback(
+        *,
+        stage: str,
+        errors: List[str],
+        code: str,
+        spec: SkillSpec,
+        stdout: str = "",
+        stderr: str = "",
+        output: Any = None,
+        reflection: Optional[ReflectionResult] = None,
+    ) -> str:
+        """
+        构建丰富的反馈上下文 — 包含完整的执行信息和 LLM 反思分析。
+        """
+        parts = [f"【{stage}失败 — 第 N 轮迭代反馈】"]
+
+        parts.append("\n## 错误详情")
+        for e in errors[:8]:
+            parts.append(f"  - {e}")
+
+        if stdout:
+            parts.append(f"\n## 标准输出 (stdout 截断)\n{stdout[:1500]}")
+
+        if stderr:
+            parts.append(f"\n## 标准错误 (stderr 截断)\n{stderr[:1500]}")
+
+        if output is not None:
+            try:
+                output_str = json.dumps(output, ensure_ascii=False, indent=2, default=str)[:2000]
+            except Exception:
+                output_str = str(output)[:2000]
+            parts.append(f"\n## 函数实际返回值\n{output_str}")
+
+        if reflection:
+            parts.append(f"\n## AI 根因分析\n{reflection.root_cause}")
+            if reflection.fix_plan:
+                parts.append("\n## 修复计划")
+                for i, step in enumerate(reflection.fix_plan, 1):
+                    parts.append(f"  {i}. {step}")
+
+        parts.append("\n## 修复要求")
+        parts.append("请根据以上完整的执行上下文，定向修复代码中的问题。")
+        parts.append("优先解决导致失败的根因，不要重新设计整体架构。")
+        parts.append("保留已经正确工作的部分，只修改有问题的代码。")
+
+        return "\n".join(parts)
+
+    @staticmethod
+    def _build_eval_errors(score) -> List[str]:
+        """根据评分构建具体问题列表"""
+        errors = []
+        if score.executability < 7.0:
+            errors.append(f"可执行性不足 ({score.executability}/10)")
+        if score.authenticity < 7.0:
+            errors.append(f"返回数据不够真实 ({score.authenticity}/10)")
+        if score.completeness < 7.0:
+            errors.append(f"功能不够完整 ({score.completeness}/10)")
+        if score.relevance < 7.0:
+            errors.append(f"与需求相关性不足 ({score.relevance}/10)")
+        if score.format_quality < 7.0:
+            errors.append(f"输出格式质量不足 ({score.format_quality}/10)")
+        return errors or [f"综合评分 {score.total}/10 低于阈值 {PASS_THRESHOLD}"]
+
+    @staticmethod
     def _build_feedback(stage: str, errors: list) -> str:
-        """构建反馈消息"""
+        """旧版简单反馈（保留兼容性）"""
         error_lines = "\n".join(f"  - {e}" for e in errors[:5])
         return f"【{stage}失败】\n{error_lines}"
 
     @staticmethod
     def _build_eval_feedback(score) -> str:
-        """根据评分构建详细反馈"""
+        """旧版评分反馈（保留兼容性）"""
         parts = []
         if score.executability < 7.0:
             parts.append(f"可执行性不足 ({score.executability}/10)")
