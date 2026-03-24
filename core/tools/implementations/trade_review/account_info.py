@@ -4,11 +4,18 @@
 获取用户的资金账户信息，用于仓位分析
 """
 
+import asyncio
 import logging
-from typing import Dict, Any, Annotated
+from typing import Any, Annotated, Dict
+
 from core.tools.base import register_tool
 
 logger = logging.getLogger(__name__)
+
+
+def _sum_currencies(d: Dict[str, float]) -> float:
+    """将多币种字典汇总为单一数值（简化展示）"""
+    return round(sum(v for v in d.values() if isinstance(v, (int, float))), 2)
 
 
 @register_tool(
@@ -32,34 +39,44 @@ def get_account_info(
     """
     try:
         from app.services.portfolio_service import get_portfolio_service
-        import asyncio
 
         async def _fetch_account():
             service = get_portfolio_service()
-            account_summary = await service.get_account_summary(user_id)
-            return account_summary
+            return await service.get_account_summary(user_id)
 
-        # 在同步上下文中运行异步代码
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        import threading
 
-        account_summary = loop.run_until_complete(_fetch_account())
+        container = {}
+
+        def _run_in_thread():
+            try:
+                container["result"] = asyncio.run(_fetch_account())
+            except Exception as exc:
+                container["error"] = exc
+
+        t = threading.Thread(target=_run_in_thread)
+        t.start()
+        t.join(timeout=30)
+        if "error" in container:
+            raise container["error"]
+        account_summary = container["result"]
 
         account_info = {
             "total_assets": account_summary.total_assets,
             "cash": account_summary.cash,
             "positions_value": account_summary.positions_value,
-            "total_pnl": account_summary.total_pnl,
-            "total_pnl_pct": account_summary.total_pnl_pct,
+            "profit": account_summary.profit,
+            "profit_pct": account_summary.profit_pct,
             "initial_capital": account_summary.initial_capital,
             "total_deposit": account_summary.total_deposit,
-            "total_withdraw": account_summary.total_withdraw
+            "total_withdraw": account_summary.total_withdraw,
+            "total_assets_sum": _sum_currencies(account_summary.total_assets),
+            "cash_sum": _sum_currencies(account_summary.cash),
+            "positions_value_sum": _sum_currencies(account_summary.positions_value),
+            "profit_sum": _sum_currencies(account_summary.profit),
         }
 
-        logger.info(f"✅ 获取账户信息成功: 总资产={account_info['total_assets']}")
+        logger.info("✅ 获取账户信息成功: 总资产=%s", account_info["total_assets"])
 
         return {
             "success": True,
