@@ -265,6 +265,8 @@ export const assistantApi = {
     if (token) headers['Authorization'] = `Bearer ${token}`
     if (appToken) headers['X-App-Token'] = appToken
 
+    const IDLE_TIMEOUT_MS = 90_000
+
     fetch(`${baseUrl}/api/assistant/chat/stream`, {
       method: 'POST',
       headers,
@@ -279,62 +281,82 @@ export const assistantApi = {
     })
       .then(async (response) => {
         if (!response.ok) {
-          callbacks?.onError?.(`HTTP ${response.status}: ${response.statusText}`)
+          if (response.status === 401) {
+            callbacks?.onError?.('登录已过期，请重新登录')
+          } else {
+            callbacks?.onError?.(`HTTP ${response.status}: ${response.statusText}`)
+          }
           return
         }
 
         const reader = response.body!.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
+        let idleTimer: ReturnType<typeof setTimeout> | null = null
 
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
+        const resetIdle = () => {
+          if (idleTimer) clearTimeout(idleTimer)
+          idleTimer = setTimeout(() => {
+            callbacks?.onError?.('连接超时：服务器长时间未响应，请重试')
+            controller.abort()
+          }, IDLE_TIMEOUT_MS)
+        }
 
-          buffer += decoder.decode(value, { stream: true })
-          const parts = buffer.split('\n\n')
-          buffer = parts.pop() || ''
+        resetIdle()
 
-          for (const part of parts) {
-            if (!part.trim() || part.startsWith(': ')) continue
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
 
-            let eventType = ''
-            let eventData = ''
+            resetIdle()
+            buffer += decoder.decode(value, { stream: true })
+            const parts = buffer.split('\n\n')
+            buffer = parts.pop() || ''
 
-            for (const line of part.split('\n')) {
-              if (line.startsWith('event: ')) {
-                eventType = line.slice(7)
-              } else if (line.startsWith('data: ')) {
-                eventData = line.slice(6)
+            for (const part of parts) {
+              if (!part.trim() || part.startsWith(': ')) continue
+
+              let eventType = ''
+              let eventData = ''
+
+              for (const line of part.split('\n')) {
+                if (line.startsWith('event: ')) {
+                  eventType = line.slice(7)
+                } else if (line.startsWith('data: ')) {
+                  eventData = line.slice(6)
+                }
               }
-            }
 
-            if (!eventData) continue
+              if (!eventData) continue
 
-            try {
-              const data = JSON.parse(eventData)
-              switch (eventType) {
-                case 'token':
-                  callbacks?.onToken?.(data.content || '')
-                  break
-                case 'done':
-                  callbacks?.onDone?.(data)
-                  break
-                case 'error':
-                  callbacks?.onError?.(data.message || '未知错误')
-                  break
-                default:
-                  callbacks?.onToolEvent?.({ ...data, event: eventType || data.event })
+              try {
+                const data = JSON.parse(eventData)
+                switch (eventType) {
+                  case 'token':
+                    callbacks?.onToken?.(data.content || '')
+                    break
+                  case 'done':
+                    callbacks?.onDone?.(data)
+                    break
+                  case 'error':
+                    callbacks?.onError?.(data.message || '未知错误')
+                    break
+                  default:
+                    callbacks?.onToolEvent?.({ ...data, event: eventType || data.event })
+                }
+              } catch {
+                // Ignore malformed JSON
               }
-            } catch {
-              // Ignore malformed JSON
             }
           }
+        } finally {
+          if (idleTimer) clearTimeout(idleTimer)
         }
       })
       .catch((err) => {
         if (err.name !== 'AbortError') {
-          callbacks?.onError?.(err.message || '网络请求失败')
+          callbacks?.onError?.(err.message || '网络请求失败，请检查网络连接后重试')
         }
       })
 
