@@ -47,7 +47,7 @@
     </div>
 
     <!-- 系统分析流模板 -->
-    <div class="section">
+    <div class="section" v-loading="loading" element-loading-text="加载分析流...">
       <div class="section-header">
         <h2>
           <el-icon><Promotion /></el-icon>
@@ -56,7 +56,8 @@
         <span class="section-desc">基于 TradingAgents 论文设计的多智能体协作分析流程</span>
       </div>
 
-      <el-row :gutter="20">
+      <el-empty v-if="!loading && sortedTemplates.length === 0" description="暂无可用模板" />
+      <el-row v-else :gutter="20">
         <el-col v-for="template in sortedTemplates" :key="template.id" :xs="24" :md="12">
           <el-card class="template-card" shadow="hover">
             <div class="template-header">
