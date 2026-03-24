@@ -357,6 +357,7 @@ async def _get_llm_config_for_model(db, target_model: str, purpose: str = "") ->
         temperature=float(model_config.get("temperature", 0.2)),
         max_tokens=int(model_config.get("max_tokens", 4000)),
         timeout=int(model_config.get("timeout", 60)),
+        retry_times=int(model_config.get("retry_times", 3)),
     )
 
 

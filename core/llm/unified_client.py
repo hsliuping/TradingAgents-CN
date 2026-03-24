@@ -9,9 +9,20 @@ import inspect
 import json
 import logging
 import re
+import time
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+_RETRYABLE_KEYWORDS = (
+    "choices", "null value", "connection", "timeout", "rate limit",
+    "too many requests", "server error", "500", "502", "503", "529",
+)
+
+
+def _is_retryable(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(kw in msg for kw in _RETRYABLE_KEYWORDS)
 
 from .models import LLMConfig, LLMProvider, LLMResponse, Message, ToolCall, ToolResult
 from .providers.base import BaseAdapter
@@ -212,6 +223,66 @@ class UnifiedLLMClient:
 
         return {}
 
+    @property
+    def _max_retries(self) -> int:
+        return getattr(self._adapter.config, "retry_times", 3)
+
+    def _retry_chat(
+        self,
+        messages: List[Message],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        **kwargs,
+    ) -> LLMResponse:
+        """同步调用适配器，带指数退避重试。"""
+        max_retries = self._max_retries
+        last_err: Optional[Exception] = None
+        for attempt in range(max_retries + 1):
+            try:
+                if attempt > 0:
+                    wait = min(2 ** attempt, 10)
+                    logger.info(
+                        f"⏳ [UnifiedLLM] 等待 {wait}s 后重试（第 {attempt}/{max_retries} 次）..."
+                    )
+                    time.sleep(wait)
+                return self._adapter.chat(messages, tools, **kwargs)
+            except Exception as e:
+                last_err = e
+                if _is_retryable(e) and attempt < max_retries:
+                    logger.warning(
+                        f"⚠️ [UnifiedLLM] LLM 调用失败（可重试）: {e}"
+                    )
+                    continue
+                raise
+        raise last_err  # pragma: no cover
+
+    async def _aretry_chat(
+        self,
+        messages: List[Message],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        **kwargs,
+    ) -> LLMResponse:
+        """异步调用适配器，带指数退避重试。"""
+        max_retries = self._max_retries
+        last_err: Optional[Exception] = None
+        for attempt in range(max_retries + 1):
+            try:
+                if attempt > 0:
+                    wait = min(2 ** attempt, 10)
+                    logger.info(
+                        f"⏳ [UnifiedLLM] 等待 {wait}s 后重试（第 {attempt}/{max_retries} 次）..."
+                    )
+                    await asyncio.sleep(wait)
+                return await self._adapter.achat(messages, tools, **kwargs)
+            except Exception as e:
+                last_err = e
+                if _is_retryable(e) and attempt < max_retries:
+                    logger.warning(
+                        f"⚠️ [UnifiedLLM] LLM 调用失败（可重试）: {e}"
+                    )
+                    continue
+                raise
+        raise last_err  # pragma: no cover
+
     def chat(
         self,
         messages: List[Message],
@@ -230,7 +301,7 @@ class UnifiedLLMClient:
             max_tool_rounds: 最大工具调用轮次
             **kwargs: 其他参数
         """
-        response = self._adapter.chat(messages, tools, **kwargs)
+        response = self._retry_chat(messages, tools, **kwargs)
         
         if auto_execute_tools and response.has_tool_calls:
             return self._execute_tool_loop(
@@ -257,7 +328,7 @@ class UnifiedLLMClient:
             tools_used: 可选，用于收集各轮工具调用名称（智能助手展示执行步骤用）
             dry_run: 若为 True，工具调用只记日志并返回模拟结果，不真正执行函数（用于意图路由测试）
         """
-        response = await self._adapter.achat(messages, tools, **kwargs)
+        response = await self._aretry_chat(messages, tools, **kwargs)
 
         if auto_execute_tools and response.has_tool_calls:
             return await self._aexecute_tool_loop(
@@ -310,8 +381,7 @@ class UnifiedLLMClient:
                     name=result.name
                 ))
             
-            # 继续对话
-            current_response = self._adapter.chat(current_messages, tools, **kwargs)
+            current_response = self._retry_chat(current_messages, tools, **kwargs)
             rounds += 1
 
         return current_response
@@ -395,7 +465,7 @@ class UnifiedLLMClient:
                     model=current_response.model,
                 )
 
-            current_response = await self._adapter.achat(current_messages, tools, **kwargs)
+            current_response = await self._aretry_chat(current_messages, tools, **kwargs)
             await self._emit_progress(progress_callback, {
                 "event": "tool_round_completed",
                 "round": rounds + 1,
@@ -428,8 +498,7 @@ class UnifiedLLMClient:
                     "请根据上面已经获取到的所有数据，直接生成完整的分析回复。"
                 ),
             ))
-            # 不传 tools 参数，强制纯文本回复
-            current_response = await self._adapter.achat(
+            current_response = await self._aretry_chat(
                 current_messages, tools=None, **kwargs
             )
             logger.info("[UnifiedLLM] ✅ 最终综合完成")
