@@ -110,6 +110,25 @@
           </template>
           
           <div v-if="executionResult" class="result-content">
+            <!-- 降级节点警告 -->
+            <el-alert
+              v-if="executionResult.degraded_nodes && Object.keys(executionResult.degraded_nodes).length > 0"
+              type="warning"
+              :closable="false"
+              show-icon
+              style="margin-bottom: 16px"
+            >
+              <template #title>
+                部分分析节点执行失败（已降级）
+              </template>
+              <div style="margin-top: 4px; font-size: 13px; line-height: 1.6">
+                <div v-for="(info, nodeId) in executionResult.degraded_nodes" :key="nodeId">
+                  <strong>{{ info.label || nodeId }}</strong>：{{ info.error ? info.error.substring(0, 120) : '未知错误' }}
+                </div>
+                <div style="margin-top: 4px; color: #909399">其余节点的分析结果不受影响，请参考其他报告。</div>
+              </div>
+            </el-alert>
+
             <!-- 最终分析结果 -->
             <div class="decision-box" v-if="hasContent(getReportField('final_trade_decision'))">
               <h4>最终分析结果</h4>

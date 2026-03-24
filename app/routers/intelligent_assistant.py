@@ -2,6 +2,7 @@
 智能助手 API 路由
 """
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -296,21 +297,34 @@ async def assistant_chat_stream(
 
     user_id = str(current_user["id"])
 
+    _HEARTBEAT_INTERVAL = 15  # seconds
+
     async def event_generator():
+        import json as _json
+        gen = stream_chat_with_assistant(
+            db=db,
+            user_message=request.message.strip(),
+            user_id=user_id,
+            conversation_id=request.conversation_id,
+            quick_model=request.quick_model,
+            deep_model=request.deep_model,
+        )
         try:
-            async for chunk in stream_chat_with_assistant(
-                db=db,
-                user_message=request.message.strip(),
-                user_id=user_id,
-                conversation_id=request.conversation_id,
-                quick_model=request.quick_model,
-                deep_model=request.deep_model,
-            ):
-                yield chunk
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(
+                        gen.__anext__(), timeout=_HEARTBEAT_INTERVAL
+                    )
+                    yield chunk
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                except StopAsyncIteration:
+                    break
         except Exception as e:
             logger.exception("[智能助手 API·流式] 处理失败")
-            import json
-            yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
+            yield f"event: error\ndata: {_json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
+        finally:
+            await gen.aclose()
 
     return StreamingResponse(
         event_generator(),

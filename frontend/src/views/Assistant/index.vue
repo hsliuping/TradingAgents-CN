@@ -1098,8 +1098,13 @@ const handleSendStream = (text: string) => {
             content: `抱歉，处理您的请求时出错：${msg}`,
             tools_used: [],
           })
-        } else if (streamMsgIdx >= 0 && !messages.value[streamMsgIdx].content.trim()) {
-          messages.value[streamMsgIdx].content = `抱歉，处理您的请求时出错：${msg}`
+        } else if (streamMsgIdx >= 0) {
+          const existing = messages.value[streamMsgIdx].content.trim()
+          if (!existing) {
+            messages.value[streamMsgIdx].content = `抱歉，处理您的请求时出错：${msg}`
+          } else {
+            messages.value[streamMsgIdx].content += `\n\n---\n⚠️ 响应中断：${msg}`
+          }
         }
         ElMessage.error(msg)
         loading.value = false
