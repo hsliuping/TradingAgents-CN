@@ -122,7 +122,7 @@ class DatabaseScreeningService:
         source: Optional[str] = None
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
-        基于数据库进行股票筛选
+        基于数据库进行股票筛选（两阶段：基础筛选 → 行情筛选）
 
         Args:
             conditions: 筛选条件列表
@@ -136,93 +136,97 @@ class DatabaseScreeningService:
         """
         try:
             db = get_mongo_db()
-            
-            # 🔥 使用统一的数据源优先级管理函数
+
             if not source:
                 from app.core.data_source_priority import get_preferred_data_source_async
                 source = await get_preferred_data_source_async(market_category="a_shares")
                 logger.info(f"✅ [database_screening] 最终使用的数据源: {source}")
 
-            # 构建查询条件（现在视图已包含实时行情数据，可以直接查询所有字段）
-            query = await self._build_query(conditions)
+            # 分离基础条件和行情条件
+            basic_conditions, quote_conditions = self._separate_conditions(conditions)
 
-            # 🔥 添加数据源筛选
+            # 构建基础查询（仅包含非行情字段）
+            query = await self._build_query(basic_conditions)
             query["source"] = source
-
-            logger.info(f"📋 数据库查询条件: {query}")
-            logger.info(f"📋 查询参数: limit={limit}, offset={offset}, order_by={order_by}")
 
             # 构建排序条件
             sort_conditions = self._build_sort_conditions(order_by)
+
+            logger.info(f"📋 基础查询条件: {query}")
+            logger.info(f"📋 行情筛选条件: {quote_conditions}")
             logger.info(f"📋 排序条件: {sort_conditions}")
 
-            # 🔥 性能优化：检测是否为简单查询（只有 source 条件）
-            # 视图查询包含多个 $lookup，性能很差。对于简单查询，直接查询底层集合
-            has_real_conditions = len(query) > 1 or (len(query) == 1 and "source" not in query)
-            
-            # 判断是否需要实时行情数据（查询条件中包含行情字段）
-            needs_quote_data = any(
-                condition.get("field") if isinstance(condition, dict) else getattr(condition, "field", None)
-                in ["pct_chg", "amount", "close", "volume"]
-                for condition in conditions
-            )
-            
-            # 🔥 关键优化：对于简单查询（只有 source + 排序），直接查询 stock_basic_info
-            # 这样可以利用索引，避免视图的聚合管道开销
-            if not has_real_conditions and not needs_quote_data:
-                logger.info("⚡ 使用快速路径：直接查询 stock_basic_info（避免视图聚合管道）")
-                return await self._query_basic_info_directly(
+            has_real_conditions = any(k != "source" for k in query)
+            has_quote_conditions = len(quote_conditions) > 0
+
+            # 快速路径：无基础筛选 + 无行情筛选 → 直接查 stock_basic_info
+            if not has_real_conditions and not has_quote_conditions:
+                logger.info("⚡ 使用快速路径：直接查询 stock_basic_info")
+                results, total_count = await self._query_basic_info_directly(
                     db, source, sort_conditions, limit, offset
                 )
-            
-            # 复杂查询使用视图
-            collection = db[self.collection_name]
-            
+                codes = [r.get("code") for r in results if r.get("code")]
+                if codes:
+                    await self._enrich_with_quote_data(results, codes)
+                return results, total_count
+
+            # 有行情条件时需要两阶段筛选：
+            # 第 1 阶段 — 基础筛选（stock_basic_info 或 view）
+            if has_quote_conditions:
+                # 行情筛选时先宽松取基础结果（多取一些供二次过滤）
+                phase1_limit = min(max(limit * 20, 2000), 10000)
+                logger.info(f"📋 第 1 阶段取 {phase1_limit} 条候选用于行情过滤")
+            else:
+                phase1_limit = limit
+
+            # 决定使用视图还是 stock_basic_info
             if has_real_conditions:
-                # 有筛选条件，需要精确统计
+                collection = db["stock_basic_info"]
                 total_count = await collection.count_documents(query)
             else:
-                # 没有筛选条件，使用估算值或跳过统计
-                # 对于无条件查询，返回 limit + offset 作为估算值，或者使用一个合理的上限
-                # 这样可以避免扫描所有文档，大幅提升性能
-                total_count = min(limit + offset + 1000, 10000)  # 最多返回10000作为估算值
-                logger.info(f"⚡ 无条件查询优化：跳过 count_documents，使用估算值 {total_count}")
-                
-                # 🔥 对于无条件查询，限制最大返回数量，避免查询过慢
-                # 如果用户需要更多数据，应该添加筛选条件
-                if limit > 200:
-                    logger.warning(f"⚠️ 无条件查询 limit={limit} 过大，限制为200以提升性能")
-                    limit = 200
+                collection = db["stock_basic_info"]
+                total_count = min(phase1_limit + offset + 1000, 10000)
 
-            # 执行查询
             cursor = collection.find(query)
-
-            # 应用排序
             if sort_conditions:
                 cursor = cursor.sort(sort_conditions)
-                # 🔥 提示：确保排序字段有索引（如 total_mv），否则性能会很差
-                # 索引应该在数据库初始化时创建
+            if not has_quote_conditions:
+                cursor = cursor.skip(offset)
+            cursor = cursor.limit(phase1_limit)
 
-            # 应用分页
-            cursor = cursor.skip(offset).limit(limit)
-
-            # 获取结果
             results = []
             codes = []
             async for doc in cursor:
-                # 转换结果格式
                 result = self._format_result(doc)
                 results.append(result)
                 codes.append(doc.get("code"))
 
-            # 批量查询财务数据（ROE等）- 如果视图中没有包含
+            # 批量补充财务数据
             if codes:
                 await self._enrich_with_financial_data(results, codes)
 
-            logger.info(f"✅ 数据库筛选完成: 总数={total_count}, 返回={len(results)}, 数据源={source}")
+            # 批量补充行情数据（保证 close/pct_chg 始终可显示）
+            if codes:
+                await self._enrich_with_quote_data(results, codes)
 
+            # 第 2 阶段 — 行情条件过滤
+            if has_quote_conditions:
+                results = self._apply_quote_filter(results, quote_conditions)
+                total_count = len(results)
+                # 排序字段可能是行情字段，需在内存中重新排序
+                if order_by:
+                    sort_field = order_by[0].get("field", "total_mv")
+                    sort_dir = order_by[0].get("direction", "desc")
+                    reverse = sort_dir.lower() == "desc"
+                    results.sort(
+                        key=lambda x: x.get(sort_field) if isinstance(x.get(sort_field), (int, float)) else float("-inf"),
+                        reverse=reverse,
+                    )
+                results = results[offset:offset + limit]
+
+            logger.info(f"✅ 数据库筛选完成: 总数={total_count}, 返回={len(results)}, 数据源={source}")
             return results, total_count
-            
+
         except Exception as e:
             logger.error(f"❌ 数据库筛选失败: {e}")
             raise Exception(f"数据库筛选失败: {str(e)}")
@@ -632,6 +636,95 @@ class DatabaseScreeningService:
                 basic_conditions.append(condition)
 
         return basic_conditions, quote_conditions
+
+    async def _enrich_with_quote_data(
+        self,
+        results: List[Dict[str, Any]],
+        codes: List[str],
+    ) -> None:
+        """
+        批量从 market_quotes 补充行情数据到结果中。
+        保证 close / pct_chg / amount / volume 始终有值可显示。
+        """
+        try:
+            db = get_mongo_db()
+            quotes_collection = db["market_quotes"]
+            quotes_cursor = quotes_collection.find({"code": {"$in": codes}})
+            quotes_map: Dict[str, Dict[str, Any]] = {}
+            async for quote in quotes_cursor:
+                code = quote.get("code")
+                if code:
+                    quotes_map[code] = {
+                        "close": quote.get("close"),
+                        "pct_chg": quote.get("pct_chg"),
+                        "amount": quote.get("amount"),
+                        "volume": quote.get("volume"),
+                        "open": quote.get("open"),
+                        "high": quote.get("high"),
+                        "low": quote.get("low"),
+                        "pre_close": quote.get("pre_close"),
+                        "trade_date": quote.get("trade_date"),
+                    }
+
+            for result in results:
+                code = result.get("code")
+                qd = quotes_map.get(code)
+                if qd:
+                    for k, v in qd.items():
+                        if v is not None and result.get(k) is None:
+                            result[k] = v
+
+            logger.debug(f"✅ 行情数据补充完成: {len(quotes_map)}/{len(codes)} 只股票有行情")
+        except Exception as e:
+            logger.warning(f"⚠️ 补充行情数据失败: {e}")
+
+    def _apply_quote_filter(
+        self,
+        results: List[Dict[str, Any]],
+        quote_conditions: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """在内存中根据行情条件过滤结果（results 已通过 _enrich_with_quote_data 补充行情）"""
+        filtered = []
+        for result in results:
+            match = True
+            for condition in quote_conditions:
+                field = condition.get("field") if isinstance(condition, dict) else condition.field
+                operator = condition.get("operator") if isinstance(condition, dict) else condition.operator
+                value = condition.get("value") if isinstance(condition, dict) else condition.value
+
+                field_value = result.get(field)
+                if field_value is None:
+                    match = False
+                    break
+
+                if operator == "between" and isinstance(value, list) and len(value) == 2:
+                    if not (value[0] <= field_value <= value[1]):
+                        match = False
+                elif operator == ">":
+                    if not (field_value > value):
+                        match = False
+                elif operator == "<":
+                    if not (field_value < value):
+                        match = False
+                elif operator == ">=":
+                    if not (field_value >= value):
+                        match = False
+                elif operator == "<=":
+                    if not (field_value <= value):
+                        match = False
+                elif operator == "==":
+                    if field_value != value:
+                        match = False
+                elif operator == "!=":
+                    if field_value == value:
+                        match = False
+
+                if not match:
+                    break
+
+            if match:
+                filtered.append(result)
+        return filtered
 
     async def _filter_by_quotes(
         self,
