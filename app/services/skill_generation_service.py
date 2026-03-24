@@ -90,24 +90,42 @@ class SkillGenerationService:
         return ""
 
     @staticmethod
-    def _build_pipeline_failure_feedback(
-        pipeline_result: Optional[PipelineResult],
-        user_feedback: str = "",
-    ) -> str:
-        if not pipeline_result:
-            return user_feedback.strip()
+    def _format_single_pipeline(
+        pipeline_result: PipelineResult,
+        label: str = "",
+        compact: bool = False,
+    ) -> List[str]:
+        """
+        将单次管线结果格式化为结构化文本行列表。
 
-        parts: List[str] = ["=== 上一轮生成失败信息 ==="]
+        Args:
+            compact: True 时只保留根因分析和评分，省略 stdout/stderr/feedback
+                     等大体积字段，用于压缩历史管线。
+        """
+        parts: List[str] = []
+        if label:
+            parts.append(f"\n{'='*20} {label} {'='*20}")
         if pipeline_result.error:
-            parts.append(f"最终错误：{pipeline_result.error}")
+            parts.append(f"最终结论：{pipeline_result.error}")
 
         for iteration in pipeline_result.iterations or []:
             parts.append(f"\n[第{iteration.round_number}轮 | 决策={iteration.decision or 'UNKNOWN'}]")
+
             if iteration.validation and iteration.validation.errors:
                 parts.append("静态验证问题：")
-                parts.extend(f"- {item}" for item in iteration.validation.errors[:5])
+                parts.extend(f"- {item}" for item in iteration.validation.errors[:3])
+
             if iteration.sandbox and not iteration.sandbox.success:
-                parts.append(f"沙箱执行问题：{iteration.sandbox.error or '未知错误'}")
+                parts.append(f"沙箱执行失败：{iteration.sandbox.error or '未知错误'}")
+
+            if not compact and iteration.sandbox and iteration.sandbox.success and iteration.sandbox.output is not None:
+                import json as _json
+                try:
+                    out_str = _json.dumps(iteration.sandbox.output, ensure_ascii=False, default=str)[:800]
+                except Exception:
+                    out_str = str(iteration.sandbox.output)[:800]
+                parts.append(f"沙箱返回值（截断）：{out_str}")
+
             if iteration.eval_score:
                 parts.append(
                     "评估分数："
@@ -118,11 +136,118 @@ class SkillGenerationService:
                     f"relevance={iteration.eval_score.relevance}, "
                     f"format_quality={iteration.eval_score.format_quality}"
                 )
-            if iteration.feedback:
-                parts.append(f"系统反馈：{iteration.feedback}")
+
+            if iteration.reflection and iteration.reflection.root_cause:
+                parts.append(f"根因分析：{iteration.reflection.root_cause}")
+                if iteration.reflection.fix_plan:
+                    parts.append("修复计划：" + " → ".join(iteration.reflection.fix_plan[:5]))
+
+            if not compact and iteration.feedback:
+                parts.append(f"系统反馈（截断）：{iteration.feedback[:500]}")
+
+        return parts
+
+    @staticmethod
+    def _extract_lessons(results: List[PipelineResult]) -> List[str]:
+        """从管线结果列表中提取去重的关键教训。"""
+        lessons: List[str] = []
+        for pr in results:
+            for it in pr.iterations or []:
+                if it.reflection and it.reflection.root_cause:
+                    lessons.append(it.reflection.root_cause)
+        return list(dict.fromkeys(lessons))[:15]
+
+    @staticmethod
+    def _build_pipeline_failure_feedback(
+        pipeline_result: Optional[PipelineResult],
+        user_feedback: str = "",
+    ) -> str:
+        if not pipeline_result:
+            return user_feedback.strip()
+
+        parts: List[str] = ["=== 上一轮管线失败信息 ==="]
+        parts.extend(
+            SkillGenerationService._format_single_pipeline(pipeline_result, compact=False)
+        )
 
         if user_feedback.strip():
             parts.append(f"\n=== 用户补充修正意见 ===\n{user_feedback.strip()}")
+
+        return "\n".join(parts)
+
+    # 经验反馈的 token 预算（按 1 中文字 ≈ 2 token 估算，8K token ≈ 4K 字符）
+    _EXPERIENCE_CHAR_BUDGET = 6000
+
+    @staticmethod
+    def _build_accumulated_experience(
+        pipeline_history: List[PipelineResult],
+        current_pipeline: Optional[PipelineResult],
+        user_feedback: str = "",
+    ) -> str:
+        """
+        构建累积经验反馈 — 渐进式压缩策略：
+
+        1. 最近一次管线：完整详情（stdout/返回值/反馈）
+        2. 更早的管线：仅保留根因分析和评分（compact 模式）
+        3. 全量教训去重汇总
+        4. 如果仍然超预算，从最早的历史开始裁剪
+        """
+        history = list(pipeline_history or [])
+        all_results = list(history)
+        if current_pipeline is not None:
+            all_results.append(current_pipeline)
+
+        if not all_results:
+            return user_feedback.strip()
+
+        budget = SkillGenerationService._EXPERIENCE_CHAR_BUDGET
+        parts: List[str] = [
+            f"=== 累积生成经验（共 {len(all_results)} 次尝试）===",
+            "请从历史教训中吸取经验，避免重复犯错。\n",
+        ]
+
+        # ---- 关键教训汇总（始终保留，最高优先级）----
+        lessons = SkillGenerationService._extract_lessons(all_results)
+        if lessons:
+            parts.append(f"=== 关键教训总结（{len(lessons)} 条，必须遵守）===")
+            for i, lesson in enumerate(lessons, 1):
+                parts.append(f"{i}. {lesson}")
+            parts.append("")
+
+        # ---- 最近一次管线：完整详情 ----
+        latest = all_results[-1]
+        success_label = "✅ 成功" if latest.success else "❌ 失败"
+        latest_label = f"最近一次尝试（第 {len(all_results)} 次, {latest.total_rounds} 轮, {latest.total_time}s, {success_label}）"
+        latest_lines = SkillGenerationService._format_single_pipeline(latest, latest_label, compact=False)
+        parts.extend(latest_lines)
+
+        # ---- 更早的管线：compact 模式，从最近往最早填充 ----
+        older = all_results[:-1]
+        if older:
+            parts.append(f"\n=== 更早的 {len(older)} 次尝试（摘要）===")
+
+            current_len = sum(len(p) for p in parts)
+            remaining = budget - current_len - 300  # 预留尾部空间
+
+            included = 0
+            for pr in reversed(older):
+                idx = older.index(pr) + 1
+                s_label = "✅" if pr.success else "❌"
+                pr_label = f"第 {idx} 次（{pr.total_rounds} 轮, {s_label}）"
+                pr_lines = SkillGenerationService._format_single_pipeline(pr, pr_label, compact=True)
+                block = "\n".join(pr_lines)
+                if current_len + len(block) > remaining and included > 0:
+                    parts.append(f"（更早的 {len(older) - included} 次尝试因篇幅省略，教训已汇总在上方）")
+                    break
+                parts.extend(pr_lines)
+                current_len += len(block)
+                included += 1
+
+        if user_feedback.strip():
+            parts.append(f"\n=== 用户本轮补充意见 ===\n{user_feedback.strip()}")
+
+        parts.append("\n=== 要求 ===")
+        parts.append("请结合以上教训，避免重复之前的错误，定向修复并生成高质量代码。")
 
         return "\n".join(parts)
 
@@ -160,13 +285,19 @@ class SkillGenerationService:
         if not spec:
             return "当前会话还没有可用的 Skill 规格，无法生成修正计划。"
 
-        pipeline_feedback = self._build_pipeline_failure_feedback(session.pipeline_result, feedback)
+        accumulated_exp = self._build_accumulated_experience(
+            pipeline_history=session.pipeline_history,
+            current_pipeline=session.pipeline_result,
+            user_feedback=feedback,
+        )
         last_code = self._get_last_generated_code(session.pipeline_result)
         code_excerpt = (last_code or "")[:12000]
+        attempt_count = len(session.pipeline_history) + (1 if session.pipeline_result else 0)
         prompt = f"""
-你现在是 Skill 生成失败后的修正协作者。先不要输出代码，而是先向用户说明：
-1. 你理解到上一轮生成哪里出错了
-2. 你准备怎么修
+你现在是 Skill 生成失败后的修正协作者。该 Skill 已经经过 {attempt_count} 次生成尝试，均未达标。
+先不要输出代码，而是先向用户说明：
+1. 从所有历史尝试中你总结出的关键问题是什么
+2. 你准备怎么修（避免重复之前犯过的错误）
 3. 重新生成时会重点检查什么
 
 请严格遵守：
@@ -175,7 +306,7 @@ class SkillGenerationService:
 - 不要承诺无法验证的内容
 - 用中文回答
 - 输出结构固定为：
-  ## 我理解到的问题
+  ## 历史尝试中的关键问题
   ## 修正计划
   ## 重新生成时的重点检查项
 
@@ -187,10 +318,10 @@ category: {spec.category}
 data_source: {spec.data_source}
 test_input: {spec.test_input}
 
-=== 上一轮失败信息 ===
-{pipeline_feedback}
+=== 累积经验（共 {attempt_count} 次尝试）===
+{accumulated_exp}
 
-=== 上一轮最后生成代码（截断） ===
+=== 最近一次生成的代码（截断） ===
 {code_excerpt or '无'}
 
 请给出一份让用户可以确认的修正计划。
@@ -216,6 +347,8 @@ test_input: {spec.test_input}
         initial_code: str = "",
     ) -> Dict[str, Any]:
         session.status = SessionStatus.GENERATING
+        if session.pipeline_result is not None:
+            session.pipeline_history.append(session.pipeline_result)
         session.pipeline_result = None
         await self._save_session(session)
         await self._db[SESSION_COLLECTION].update_one(
@@ -254,11 +387,23 @@ test_input: {spec.test_input}
 
         async def _run_pipeline():
             try:
+                # mem0: 召回同类 Skill 的历史教训，注入到 initial_feedback
+                enriched_feedback = initial_feedback
+                try:
+                    mem0_lessons = await _recall_skill_lessons(self._db, spec)
+                    if mem0_lessons:
+                        enriched_feedback = (
+                            f"{mem0_lessons}\n\n{initial_feedback}" if initial_feedback
+                            else mem0_lessons
+                        )
+                except Exception as e:
+                    logger.debug("[mem0] Skill 教训召回失败（已忽略）: %s", e)
+
                 result = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: self._controller.run(
                         spec,
-                        initial_feedback=initial_feedback,
+                        initial_feedback=enriched_feedback,
                         initial_code=initial_code,
                         progress_callback=_progress_cb,
                     ),
@@ -269,6 +414,12 @@ test_input: {spec.test_input}
 
                 if result.success:
                     await self._save_skill(session, spec, result)
+
+                # mem0: 将本次迭代教训写入记忆
+                try:
+                    await _store_skill_lessons(self._db, spec, result)
+                except Exception as e:
+                    logger.debug("[mem0] Skill 教训存储失败（已忽略）: %s", e)
             except Exception as e:
                 logger.error(f"管线执行异常: {e}", exc_info=True)
                 await self._db[SESSION_COLLECTION].update_one(
@@ -484,7 +635,8 @@ test_input: {spec.test_input}
         """
         基于当前失败会话重新修正并生成。
 
-        使用上一轮的失败原因、最后生成代码和用户补充意见作为新的初始反馈。
+        使用累积的所有历史管线经验 + 用户补充意见作为新一轮的初始反馈，
+        确保 LLM 能吸取之前每次尝试的教训，而不是只看到最近一次失败。
         """
         session = await self._load_session(session_id)
         if not session:
@@ -500,17 +652,22 @@ test_input: {spec.test_input}
                 f"{merged_feedback}\n\n=== 已确认的修正计划 ===\n{repair_plan.strip()}"
             )
 
+        attempt_count = len(session.pipeline_history) + (1 if session.pipeline_result else 0)
         session.rounds.append(ConversationRound(
             round_number=len(session.rounds) + 1,
             user_message=f"[修正] {feedback}",
             ai_message=(
-                "已确认修正计划，开始基于失败原因重新生成..."
+                f"已确认修正计划，结合前 {attempt_count} 次经验重新生成..."
                 if repair_plan.strip() else
-                "已接收修正意见，开始基于失败原因重新生成..."
+                f"已接收修正意见，结合前 {attempt_count} 次经验重新生成..."
             ),
         ))
 
-        initial_feedback = self._build_pipeline_failure_feedback(session.pipeline_result, merged_feedback)
+        initial_feedback = self._build_accumulated_experience(
+            pipeline_history=session.pipeline_history,
+            current_pipeline=session.pipeline_result,
+            user_feedback=merged_feedback,
+        )
         initial_code = self._get_last_generated_code(session.pipeline_result)
 
         return await self._launch_pipeline_task(
@@ -1026,4 +1183,65 @@ test_input: {spec.test_input}
             logger.warning(f"⚠️ Skill '{spec.tool_id}' 热注册失败（重启后生效）: {e}")
 
         return spec.tool_id
+
+
+# ------------------------------------------------------------------
+#  mem0 统一记忆层 — Skill 生成集成
+# ------------------------------------------------------------------
+
+async def _recall_skill_lessons(db, spec: SkillSpec) -> str:
+    """从 mem0 召回同类 Skill 的历史教训"""
+    try:
+        from core.memory.service import get_memory_service
+        svc = get_memory_service(db)
+        query = f"{spec.description} {spec.data_source} {spec.category}"
+        return await svc.recall_formatted(
+            query=query.strip(),
+            agent_id="skill_generator",
+            scopes=["skill_lesson"],
+            limit=10,
+            max_chars=2000,
+        )
+    except Exception as e:
+        logger.debug("[mem0] Skill 教训召回失败: %s", e)
+        return ""
+
+
+async def _store_skill_lessons(db, spec: SkillSpec, result: PipelineResult) -> None:
+    """将本次管线中的迭代教训写入 mem0"""
+    try:
+        from core.memory.service import get_memory_service
+        svc = get_memory_service(db)
+
+        lessons = []
+        for it in (result.iterations or []):
+            if it.reflection and it.reflection.root_cause:
+                lessons.append(
+                    f"Skill '{spec.tool_id}' ({spec.category}/{spec.data_source}) "
+                    f"第{it.round_number}轮失败: {it.reflection.root_cause}"
+                )
+
+        if result.success:
+            lessons.append(
+                f"Skill '{spec.tool_id}' 最终在第{result.total_rounds}轮通过"
+            )
+
+        if not lessons:
+            return
+
+        messages = [{"role": "system", "content": "\n".join(lessons)}]
+        await svc.store(
+            messages,
+            agent_id="skill_generator",
+            scope="skill_lesson",
+            metadata={
+                "tool_id": spec.tool_id,
+                "category": spec.category,
+                "data_source": spec.data_source,
+                "success": result.success,
+                "total_rounds": result.total_rounds,
+            },
+        )
+    except Exception as e:
+        logger.debug("[mem0] Skill 教训存储失败: %s", e)
 

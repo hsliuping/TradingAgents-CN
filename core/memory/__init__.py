@@ -1,21 +1,33 @@
 """
-Memory 模块 v2.0
+Memory 模块 v2.0 / v3.0
 
-提供多后端向量记忆系统（支持 Qdrant 和 ChromaDB）
+v2.0: 多后端向量记忆系统（Qdrant / ChromaDB）— 用于 Agent 历史经验
+v3.0: mem0 统一记忆层 — 跨子系统的智能记忆存储与召回
 """
 
 from .memory_manager import MemoryManager, AgentMemory, VectorStoreManager
 from .chromadb_config import get_optimal_chromadb_client, is_windows_11
 
+# v3.0 统一记忆层
+from .models import MemoryItem, MemoryScope, StoreResult
+from .service import MemoryService, get_memory_service
+
 # 向后兼容：ChromaDBManager 已重命名为 VectorStoreManager
 ChromaDBManager = VectorStoreManager
 
 __all__ = [
+    # v2.0
     'MemoryManager',
     'AgentMemory',
     'VectorStoreManager',
-    'ChromaDBManager',  # 向后兼容
+    'ChromaDBManager',
     'get_optimal_chromadb_client',
     'is_windows_11',
+    # v3.0 mem0 统一记忆层
+    'MemoryService',
+    'get_memory_service',
+    'MemoryItem',
+    'MemoryScope',
+    'StoreResult',
 ]
 
