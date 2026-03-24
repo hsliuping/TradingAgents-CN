@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def list_positions(
     source: Annotated[str, "数据来源：all=全部, real=实盘持仓, paper=模拟持仓"] = "all",
@@ -70,6 +71,7 @@ async def list_positions(
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def get_position_analysis(
     code: Annotated[str, "股票代码，如 600519、00700"],
@@ -158,6 +160,7 @@ async def get_position_analysis(
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def trigger_position_analysis(
     code: Annotated[str, "股票代码，如 600519、00700"],

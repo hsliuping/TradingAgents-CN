@@ -79,7 +79,8 @@ def register_tool(
     category: str = "general",
     is_online: bool = True,
     auto_register: bool = True,
-    parameters: Optional[List] = None,  # 🔑 新增：支持传递参数定义
+    parameters: Optional[List] = None,
+    timeout_tier: str = "",
     **kwargs
 ):
     """
@@ -130,18 +131,17 @@ def register_tool(
         
         # 如果是函数
         else:
-            # 保留原函数的元数据
             func = obj
             func._tool_id = tool_id
             func._tool_name = name or tool_id
             func._tool_description = description or func.__doc__ or ""
             func._tool_category = category
             func._tool_is_online = is_online
-            func._tool_parameters = parameters  # 🔑 新增：保存参数定义
+            func._tool_parameters = parameters
+            func._tool_timeout_tier = timeout_tier
             
-            # 自动注册
             if auto_register:
-                _auto_register_function(func, parameters=parameters, **kwargs)
+                _auto_register_function(func, parameters=parameters, timeout_tier=timeout_tier, **kwargs)
             
             return func
     
@@ -240,21 +240,19 @@ def _extract_parameters_from_signature(func: Callable) -> List:
     return params
 
 
-def _auto_register_function(func: Callable, parameters: Optional[List] = None, **kwargs):
+def _auto_register_function(func: Callable, parameters: Optional[List] = None, timeout_tier: str = "", **kwargs):
     """自动注册工具函数到 ToolRegistry"""
     try:
         from core.tools.registry import ToolRegistry
 
         registry = ToolRegistry()
 
-        # 🔑 如果未显式传参数定义，从函数签名自动提取
         if parameters is None:
             extracted = _extract_parameters_from_signature(func)
             if extracted:
                 parameters = extracted
                 logger.debug(f"自动提取 {func._tool_id} 的 {len(extracted)} 个参数定义")
 
-        # 注册
         registry.register_function(
             tool_id=func._tool_id,
             func=func,
@@ -263,6 +261,7 @@ def _auto_register_function(func: Callable, parameters: Optional[List] = None, *
             description=func._tool_description,
             is_online=func._tool_is_online,
             parameters=parameters,
+            timeout_tier=timeout_tier,
             **kwargs
         )
 

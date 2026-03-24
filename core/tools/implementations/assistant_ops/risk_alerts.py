@@ -34,6 +34,7 @@ def _normalize_market(market: str) -> str:
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def set_stop_loss_alert(
     symbol: Annotated[str, "股票代码，如 300033、00700、AAPL"],
@@ -92,6 +93,7 @@ async def set_stop_loss_alert(
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def list_stop_loss_alerts() -> str:
     """查看已配置的止损提醒列表。"""
@@ -126,6 +128,7 @@ async def list_stop_loss_alerts() -> str:
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def clear_stop_loss_alert(
     symbol: Annotated[str, "股票代码，如 300033、00700、AAPL"],

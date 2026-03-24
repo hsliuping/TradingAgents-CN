@@ -123,7 +123,8 @@ class ToolRegistry:
         is_online: bool = True,
         is_legacy: bool = False,
         override: bool = False,
-        parameters: Optional[List] = None,  # 🔑 新增：支持传递参数定义
+        parameters: Optional[List] = None,
+        timeout_tier: str = "",
         **kwargs
     ) -> None:
         """
@@ -139,35 +140,38 @@ class ToolRegistry:
             is_legacy: 是否为旧工具适配
             override: 是否覆盖已有工具
             parameters: 参数定义列表（可选，如果提供则覆盖元数据中的参数）
+            timeout_tier: 超时分层 light/medium/heavy
         """
-        # 如果工具已注册但没有函数实现，则添加函数实现
         if tool_id in self._tools:
             if tool_id not in self._functions:
-                # 元数据已存在，只添加函数实现
                 self._functions[tool_id] = func
-                # 🔑 如果提供了参数定义，更新元数据
                 if parameters is not None:
                     self._tools[tool_id].parameters = parameters
+                if timeout_tier:
+                    self._tools[tool_id].timeout_tier = timeout_tier
                 logger.debug(f"为已注册工具添加函数实现: {tool_id}")
                 return
             elif not override:
                 logger.warning(f"工具 '{tool_id}' 已注册，跳过")
                 return
 
-        # 创建元数据
+        from .config import ToolTimeoutTier
+        effective_tier = timeout_tier or ToolTimeoutTier.MEDIUM
+
         metadata = ToolMetadata(
             id=tool_id,
             name=name,
             description=description,
             category=category,
             is_online=is_online,
-            parameters=parameters or [],  # 🔑 新增：设置参数定义
+            parameters=parameters or [],
+            timeout_tier=effective_tier,
         )
 
         self._tools[tool_id] = metadata
         self._functions[tool_id] = func
 
-        logger.debug(f"注册工具函数: {tool_id} (legacy={is_legacy}, parameters={len(parameters) if parameters else 0})")
+        logger.debug(f"注册工具函数: {tool_id} (legacy={is_legacy}, tier={effective_tier})")
 
     def get_function(self, tool_id: str) -> Optional[Callable]:
         """获取工具的函数实现"""

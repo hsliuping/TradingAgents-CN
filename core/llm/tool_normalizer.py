@@ -178,16 +178,31 @@ class ToolCallNormalizer:
             )
 
     @staticmethod
+    def _get_tool_timeout(tool_name: str) -> int:
+        """根据工具注册表中的 timeout_tier 返回超时秒数"""
+        try:
+            from core.tools import get_tool_registry, TOOL_TIMEOUT_SECONDS
+            from core.tools.config import ToolTimeoutTier
+            meta = get_tool_registry().get(tool_name)
+            if meta:
+                tier = getattr(meta, "timeout_tier", ToolTimeoutTier.MEDIUM)
+                return TOOL_TIMEOUT_SECONDS.get(tier, TOOL_TIMEOUT_SECONDS[ToolTimeoutTier.MEDIUM])
+        except Exception:
+            pass
+        return 45  # 默认 medium
+
+    @staticmethod
     async def aexecute_tool_call(
         tool_call: ToolCall,
         tools: Dict[str, Callable],
         **context
     ) -> ToolResult:
         """
-        异步执行工具调用，正确处理异步和同步工具函数。
+        异步执行工具调用，正确处理异步和同步工具函数，并按分层超时保护。
 
         - 异步工具：直接 await 调用
         - 同步工具：在线程池中运行，避免阻塞事件循环
+        - 超时保护：根据工具 timeout_tier（light=15s, medium=45s, heavy=180s）
 
         Args:
             tool_call: 工具调用对象
@@ -208,20 +223,22 @@ class ToolCallNormalizer:
                 is_error=True
             )
 
+        timeout_seconds = ToolCallNormalizer._get_tool_timeout(tool_call.name)
+
         try:
             func = tools[tool_call.name]
             kwargs = {**tool_call.arguments, **context}
-            # 规范化股票代码
             for key in ('ticker', 'symbol'):
                 if key in kwargs and kwargs[key]:
                     kwargs[key] = normalize_ticker_for_engine(str(kwargs[key]))
 
             if inspect.iscoroutinefunction(func):
-                # 异步工具：直接 await，保留当前事件循环上下文（ContextVar 等）
-                result = await func(**kwargs)
+                result = await asyncio.wait_for(func(**kwargs), timeout=timeout_seconds)
             else:
-                # 同步工具：放入线程池，避免阻塞
-                result = await asyncio.to_thread(func, **kwargs)
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(func, **kwargs),
+                    timeout=timeout_seconds,
+                )
 
             if not isinstance(result, str):
                 result = json.dumps(result, ensure_ascii=False, default=str)
@@ -231,6 +248,17 @@ class ToolCallNormalizer:
                 name=tool_call.name,
                 content=result,
                 is_error=False
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[ToolNormalizer] 工具 %s 执行超时（%ds），已中断",
+                tool_call.name, timeout_seconds,
+            )
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_call.name,
+                content=f"工具执行超时（已超过 {timeout_seconds} 秒限制），请尝试简化参数或稍后重试。",
+                is_error=True
             )
         except Exception as e:
             logger.exception("[ToolNormalizer] 工具 %s 异步执行异常: %s", tool_call.name, e)

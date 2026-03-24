@@ -60,6 +60,7 @@ def _fmt_rules_section(title: str, rules) -> str:
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def list_trading_plans() -> str:
     """列出用户的所有个人交易计划。"""
@@ -98,6 +99,7 @@ async def list_trading_plans() -> str:
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def get_active_trading_plan() -> str:
     """获取当前激活的投资计划完整详情。"""

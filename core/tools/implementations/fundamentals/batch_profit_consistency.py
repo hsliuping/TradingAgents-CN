@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
     category="screening",
     is_online=False,
     auto_register=True,
+    timeout_tier="light",
 )
 def batch_check_profit_consistency(
     stock_codes_json: Annotated[

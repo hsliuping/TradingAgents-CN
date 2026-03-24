@@ -5,16 +5,20 @@
 """
 
 import asyncio
+import inspect
+import json
 import logging
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from bson import ObjectId
 
-# 智能助手整体超时（LLM + 多轮工具调用），默认 120 秒
-ASSISTANT_TIMEOUT_SECONDS = int(os.environ.get("ASSISTANT_TIMEOUT_SECONDS", "120"))
+# 智能助手整体超时（LLM + 多轮工具调用），默认 300 秒
+ASSISTANT_TIMEOUT_SECONDS = int(os.environ.get("ASSISTANT_TIMEOUT_SECONDS", "300"))
+# 当对话中使用了重型工具（Agent 调用等）时，额外追加的超时余量
+ASSISTANT_HEAVY_TOOL_EXTRA_SECONDS = 120
 
 # 会话历史最大条数（每用户）
 ASSISTANT_CONVERSATION_LIMIT = 100
@@ -592,6 +596,23 @@ class IntelligentAssistantService:
 
         tools_used: List[str] = []
 
+        def _effective_timeout() -> int:
+            """根据已调用工具的 tier 动态计算总超时"""
+            base = ASSISTANT_TIMEOUT_SECONDS
+            if not tools_used:
+                return base
+            try:
+                from core.tools import get_tool_registry
+                from core.tools.config import ToolTimeoutTier
+                registry = get_tool_registry()
+                for name in tools_used:
+                    meta = registry.get(name)
+                    if meta and getattr(meta, "timeout_tier", "") == ToolTimeoutTier.HEAVY:
+                        return base + ASSISTANT_HEAVY_TOOL_EXTRA_SECONDS
+            except Exception:
+                pass
+            return base
+
         async def _do_chat():
             nonlocal tools_used
             resp = await self._llm_client.achat(
@@ -643,7 +664,7 @@ class IntelligentAssistantService:
         try:
             content = await asyncio.wait_for(
                 _do_chat(),
-                timeout=ASSISTANT_TIMEOUT_SECONDS,
+                timeout=_effective_timeout(),
             )
             reply = content or "抱歉，暂时无法生成回答，请稍后再试。"
             if tools_used:
@@ -657,9 +678,10 @@ class IntelligentAssistantService:
                 "data_refs": None,
             }
         except asyncio.TimeoutError:
-            logger.warning(f"[智能助手] 请求超时（{ASSISTANT_TIMEOUT_SECONDS}s）")
+            timeout_used = _effective_timeout()
+            logger.warning(f"[智能助手] 请求超时（{timeout_used}s）")
             return {
-                "reply": f"抱歉，处理您的问题用时过长（已超过 {ASSISTANT_TIMEOUT_SECONDS} 秒），为避免长时间等待已中断。\n\n"
+                "reply": f"抱歉，处理您的问题用时过长（已超过 {timeout_used} 秒），为避免长时间等待已中断。\n\n"
                 "建议您：\n"
                 "• 尝试将问题拆分得更具体一些\n"
                 "• 检查网络连接是否稳定\n"
@@ -674,6 +696,178 @@ class IntelligentAssistantService:
                 "tools_used": tools_used,
                 "data_refs": None,
             }
+
+    async def chat_stream(
+        self,
+        user_message: str,
+        conversation_id: Optional[str] = None,
+        assistant_settings: dict = None,
+        is_im: bool = False,
+        history_messages: Optional[List[Message]] = None,
+        user_profile: Optional[dict] = None,
+        current_topic_title: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """流式对话 — 返回 SSE 格式的 async generator"""
+
+        def _sse(event: str, data: dict) -> str:
+            return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+        from app.services.planned_analysis_service import _check_unsupported_asset
+        unsupported_msg = _check_unsupported_asset(user_message)
+        if unsupported_msg:
+            yield _sse("token", {"content": unsupported_msg})
+            yield _sse("done", {"tools_used": []})
+            return
+
+        if not await self._ensure_client():
+            yield _sse("token", {"content": "智能助手暂时不可用，请检查 LLM 配置是否已在「设置」中正确配置。"})
+            yield _sse("done", {"tools_used": []})
+            return
+
+        if _should_use_recent_search(user_message):
+            try:
+                from core.tools.implementations.assistant_ops.recent_search import run_recent_information_search
+                tool_result = run_recent_information_search(user_message.strip())
+                if inspect.isawaitable(tool_result):
+                    tool_result = await tool_result
+                tool_text = str(tool_result or "").strip()
+                if tool_text:
+                    logger.info("[智能助手·流式] 命中近期搜索快路径")
+                    yield _sse("token", {"content": tool_text})
+                    yield _sse("done", {"tools_used": ["search_recent_information"]})
+                    return
+            except Exception as e:
+                logger.warning(f"[智能助手·流式] 近期搜索快路径失败，回退常规对话: {e}")
+
+        knowledge_snippets = ""
+        try:
+            from core.knowledge import FinancialKnowledgeManager
+            km = FinancialKnowledgeManager(db=self._db)
+            knowledge_snippets = km.retrieve_for_prompt(user_message)
+        except Exception:
+            pass
+
+        messages = [
+            Message(
+                role=MessageRole.SYSTEM,
+                content=_get_system_prompt(
+                    knowledge_snippets, assistant_settings,
+                    is_im=is_im, user_profile=user_profile,
+                    current_topic_title=current_topic_title,
+                ),
+            ),
+        ]
+        if history_messages:
+            messages.extend(history_messages)
+        messages.append(Message(role=MessageRole.USER, content=user_message.strip()))
+
+        tools_used: List[str] = []
+        event_queue: asyncio.Queue = asyncio.Queue()
+
+        async def _progress(payload):
+            await event_queue.put(payload)
+
+        async def _do_chat():
+            nonlocal tools_used
+            resp = await self._llm_client.achat(
+                messages,
+                tools=self._openai_tools,
+                auto_execute_tools=True,
+                max_tool_rounds=8,
+                tools_used=tools_used,
+                dry_run=False,
+                progress_callback=_progress,
+            )
+            if not tools_used and _should_force_tool_retry(user_message):
+                logger.warning("[智能助手·流式] 首轮未调用工具，触发工具重试兜底")
+                retry_messages = list(messages)
+                retry_messages.append(Message(
+                    role=MessageRole.USER,
+                    content=(
+                        "请不要直接根据上下文猜测或编造结果。"
+                        "这类问题必须先调用相关工具获取真实数据，再基于工具返回回答。"
+                        "如果工具返回为空，再明确说明为空。"
+                    ),
+                ))
+                try:
+                    resp = await self._llm_client.achat(
+                        retry_messages,
+                        tools=self._openai_tools,
+                        auto_execute_tools=True,
+                        max_tool_rounds=8,
+                        tools_used=tools_used,
+                        dry_run=False,
+                        progress_callback=_progress,
+                        tool_choice="required",
+                    )
+                except Exception:
+                    resp = await self._llm_client.achat(
+                        retry_messages,
+                        tools=self._openai_tools,
+                        auto_execute_tools=True,
+                        max_tool_rounds=8,
+                        tools_used=tools_used,
+                        dry_run=False,
+                        progress_callback=_progress,
+                    )
+            return resp.content
+
+        def _stream_effective_timeout() -> int:
+            base = ASSISTANT_TIMEOUT_SECONDS
+            if not tools_used:
+                return base
+            try:
+                from core.tools import get_tool_registry
+                from core.tools.config import ToolTimeoutTier
+                registry = get_tool_registry()
+                for name in tools_used:
+                    meta = registry.get(name)
+                    if meta and getattr(meta, "timeout_tier", "") == ToolTimeoutTier.HEAVY:
+                        return base + ASSISTANT_HEAVY_TOOL_EXTRA_SECONDS
+            except Exception:
+                pass
+            return base
+
+        task = asyncio.create_task(
+            asyncio.wait_for(_do_chat(), timeout=_stream_effective_timeout())
+        )
+
+        try:
+            while not task.done():
+                try:
+                    payload = await asyncio.wait_for(event_queue.get(), timeout=1.0)
+                    yield _sse(payload.get("event", "progress"), payload)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+
+            while not event_queue.empty():
+                payload = event_queue.get_nowait()
+                yield _sse(payload.get("event", "progress"), payload)
+
+            content = task.result()
+            reply = content or "抱歉，暂时无法生成回答，请稍后再试。"
+
+            CHUNK_SIZE = 40
+            for i in range(0, len(reply), CHUNK_SIZE):
+                yield _sse("token", {"content": reply[i:i + CHUNK_SIZE]})
+                await asyncio.sleep(0.015)
+
+            yield _sse("done", {"tools_used": tools_used})
+        except asyncio.CancelledError:
+            if not task.done():
+                task.cancel()
+            yield _sse("error", {"message": "请求已取消"})
+            yield _sse("done", {"tools_used": tools_used, "error": True})
+        except asyncio.TimeoutError:
+            timeout_used = _stream_effective_timeout()
+            logger.warning(f"[智能助手·流式] 请求超时（{timeout_used}s）")
+            yield _sse("error", {"message": f"处理超时（已超过 {timeout_used} 秒），请尝试更简短的问题。"})
+            yield _sse("done", {"tools_used": tools_used, "error": True})
+        except Exception as e:
+            logger.exception("[智能助手·流式] 对话失败")
+            yield _sse("error", {"message": f"处理请求时发生错误：{str(e)}"})
+            yield _sse("done", {"tools_used": tools_used, "error": True})
 
 
 def _now_utc() -> datetime:
@@ -2098,3 +2292,120 @@ async def chat_with_assistant(
         thread = await get_or_create_assistant_thread(db, user_id, conversation_id)
         result["conversation_id"] = thread["thread_id"]
     return result
+
+
+async def stream_chat_with_assistant(
+    db,
+    user_message: str,
+    user_id: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+    current_thread_id: Optional[str] = None,
+    quick_model: Optional[str] = None,
+    deep_model: Optional[str] = None,
+) -> AsyncGenerator[str, None]:
+    """
+    流式便捷函数：使用智能助手进行流式对话，返回 SSE 事件字符串的 async generator。
+    """
+    def _sse(event: str, data: dict) -> str:
+        return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    if user_id:
+        set_current_user_id(user_id)
+    if current_thread_id:
+        set_current_assistant_thread_id(current_thread_id)
+    elif conversation_id:
+        set_current_assistant_thread_id(conversation_id)
+
+    assistant_settings = None
+    if user_id:
+        assistant_settings = await _load_assistant_settings(db, user_id)
+
+    user_profile: Optional[dict] = None
+    current_topic_title: Optional[str] = None
+    if user_id:
+        try:
+            user_profile = await load_user_profile(db, user_id)
+        except Exception:
+            pass
+
+    if user_id and (current_thread_id or conversation_id):
+        tid = current_thread_id or conversation_id
+        try:
+            current_topic = await db.assistant_threads.find_one(
+                {"user_id": user_id, "thread_id": tid, "archived": {"$ne": True}},
+                {"title": 1},
+            )
+            if current_topic:
+                current_topic_title = (current_topic.get("title") or "").strip() or None
+        except Exception:
+            pass
+
+    history_messages: Optional[List[Message]] = None
+    if user_id:
+        try:
+            raw_history = await get_assistant_conversation(db, user_id, conversation_id)
+            if raw_history:
+                recent = raw_history[-ASSISTANT_MAX_CONTEXT_MESSAGES:]
+                history_messages = []
+                for m in recent:
+                    role = MessageRole.USER if m.get("role") == "user" else MessageRole.ASSISTANT
+                    content = (m.get("content") or "").strip()
+                    if content:
+                        history_messages.append(Message(role=role, content=content[:800]))
+                if not history_messages:
+                    history_messages = None
+        except Exception:
+            pass
+
+    service = IntelligentAssistantService(
+        db,
+        preferred_models={"quick_model": quick_model, "deep_model": deep_model},
+    )
+
+    collected_reply = ""
+    collected_tools: List[str] = []
+
+    async for event_str in service.chat_stream(
+        user_message,
+        conversation_id,
+        assistant_settings,
+        history_messages=history_messages,
+        user_profile=user_profile,
+        current_topic_title=current_topic_title,
+    ):
+        if event_str.startswith("event: done\n"):
+            try:
+                data_line = event_str.split("\ndata: ", 1)[1].rstrip("\n")
+                data = json.loads(data_line)
+                collected_tools = data.get("tools_used", [])
+            except Exception:
+                pass
+            continue
+        if event_str.startswith("event: token\n"):
+            try:
+                data_line = event_str.split("\ndata: ", 1)[1].rstrip("\n")
+                data = json.loads(data_line)
+                collected_reply += data.get("content", "")
+            except Exception:
+                pass
+        yield event_str
+
+    if user_id and collected_reply:
+        try:
+            await save_assistant_message(
+                db,
+                user_id=user_id,
+                user_content=user_message.strip(),
+                assistant_content=collected_reply,
+                tools_used=collected_tools,
+                conversation_id=conversation_id,
+            )
+        except Exception as e:
+            logger.warning("[智能助手·流式] 保存会话失败: %s", e)
+
+    conv_id = conversation_id
+    if user_id:
+        thread = await get_or_create_assistant_thread(db, user_id, conversation_id)
+        conv_id = thread["thread_id"]
+
+    yield _sse("done", {"tools_used": collected_tools, "conversation_id": conv_id})

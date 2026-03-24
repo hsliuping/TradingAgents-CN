@@ -48,6 +48,7 @@ def _parse_tags(tags: str) -> list[str]:
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def add_stocks_to_favorites(
     stocks_json: Annotated[

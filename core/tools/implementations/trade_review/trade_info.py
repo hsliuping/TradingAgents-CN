@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
     name="构建交易信息",
     description="从交易记录构建完整的交易信息对象，包含统计数据和时间信息",
     category="trade_review",
-    is_online=False
+    is_online=False,
+    timeout_tier="light",
 )
 def build_trade_info(
     trade_records: Annotated[List[Dict[str, Any]], "交易记录列表"],

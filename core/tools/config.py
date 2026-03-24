@@ -24,6 +24,20 @@ class ToolCategory(str, Enum):
     EXTERNAL = "external"       # AI 生成的外部 Skill
 
 
+class ToolTimeoutTier(str, Enum):
+    """工具超时分层：按执行耗时分为轻量/中等/重型"""
+    LIGHT = "light"    # DB 查询、列表操作等（15 秒）
+    MEDIUM = "medium"  # 外部 API 调用（45 秒）
+    HEAVY = "heavy"    # 子 Agent / 工作流引擎执行（180 秒）
+
+
+TOOL_TIMEOUT_SECONDS: Dict[str, int] = {
+    ToolTimeoutTier.LIGHT: 15,
+    ToolTimeoutTier.MEDIUM: 45,
+    ToolTimeoutTier.HEAVY: 180,
+}
+
+
 class ToolParameter(BaseModel):
     """工具参数定义"""
     name: str
@@ -52,7 +66,8 @@ class ToolMetadata(BaseModel):
     is_online: bool = True            # 是否需要在线访问
     
     # 配置
-    timeout: int = 30                 # 超时时间（秒）
+    timeout: int = 30                 # 超时时间（秒）—— 旧字段，保留兼容
+    timeout_tier: str = ToolTimeoutTier.MEDIUM  # 超时分层：light / medium / heavy
     rate_limit: Optional[int] = None  # 频率限制（每分钟调用次数）
     
     # 显示
@@ -663,6 +678,7 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
         category=ToolCategory.TRADE_REVIEW,
         data_source="database",
         is_online=False,
+        timeout_tier=ToolTimeoutTier.LIGHT,
         icon="📋",
         color="#95a5a6",
         parameters=[
@@ -678,6 +694,7 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
         category=ToolCategory.TRADE_REVIEW,
         data_source="internal",
         is_online=False,
+        timeout_tier=ToolTimeoutTier.LIGHT,
         icon="🔧",
         color="#95a5a6",
         parameters=[
@@ -692,6 +709,7 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
         category=ToolCategory.TRADE_REVIEW,
         data_source="database",
         is_online=False,
+        timeout_tier=ToolTimeoutTier.LIGHT,
         icon="💳",
         color="#95a5a6",
         parameters=[

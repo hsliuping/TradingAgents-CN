@@ -138,6 +138,13 @@ export interface ThreadDeleteResponse {
   deleted_thread_ids: string[]
 }
 
+export interface StreamCallbacks {
+  onToken?: (content: string) => void
+  onToolEvent?: (event: Record<string, any>) => void
+  onDone?: (data: { tools_used: string[]; conversation_id?: string }) => void
+  onError?: (message: string) => void
+}
+
 export const assistantApi = {
   /** 获取主题列表 */
   async getThreads(): Promise<AssistantThreadListResponse> {
@@ -239,5 +246,98 @@ export const assistantApi = {
       deep_model: deepModel,
     })
     return res as unknown as PlannedAnalysisResponse
-  }
+  },
+
+  /** 流式对话（SSE）— 快速对话模式使用 */
+  chatStream(
+    message: string,
+    conversationId?: string,
+    quickModel?: string,
+    deepModel?: string,
+    callbacks?: StreamCallbacks,
+  ): AbortController {
+    const controller = new AbortController()
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
+    const token = localStorage.getItem('auth-token') || ''
+    const appToken = localStorage.getItem('app-token') || ''
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    if (appToken) headers['X-App-Token'] = appToken
+
+    fetch(`${baseUrl}/api/assistant/chat/stream`, {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      body: JSON.stringify({
+        message,
+        conversation_id: conversationId,
+        quick_model: quickModel,
+        deep_model: deepModel,
+      }),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          callbacks?.onError?.(`HTTP ${response.status}: ${response.statusText}`)
+          return
+        }
+
+        const reader = response.body!.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const parts = buffer.split('\n\n')
+          buffer = parts.pop() || ''
+
+          for (const part of parts) {
+            if (!part.trim() || part.startsWith(': ')) continue
+
+            let eventType = ''
+            let eventData = ''
+
+            for (const line of part.split('\n')) {
+              if (line.startsWith('event: ')) {
+                eventType = line.slice(7)
+              } else if (line.startsWith('data: ')) {
+                eventData = line.slice(6)
+              }
+            }
+
+            if (!eventData) continue
+
+            try {
+              const data = JSON.parse(eventData)
+              switch (eventType) {
+                case 'token':
+                  callbacks?.onToken?.(data.content || '')
+                  break
+                case 'done':
+                  callbacks?.onDone?.(data)
+                  break
+                case 'error':
+                  callbacks?.onError?.(data.message || '未知错误')
+                  break
+                default:
+                  callbacks?.onToolEvent?.({ ...data, event: eventType || data.event })
+              }
+            } catch {
+              // Ignore malformed JSON
+            }
+          }
+        }
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          callbacks?.onError?.(err.message || '网络请求失败')
+        }
+      })
+
+    return controller
+  },
 }

@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def list_watchlist_groups() -> str:
     """列出当前用户的所有自选股分组及每组股票数量。"""
@@ -58,6 +59,7 @@ async def list_watchlist_groups() -> str:
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def add_stock_to_watchlist(
     group_name: Annotated[str, "自选股分组名称，如「科技股」"],
@@ -131,6 +133,7 @@ async def add_stock_to_watchlist(
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def remove_stock_from_watchlist(
     group_name: Annotated[str, "自选股分组名称"],

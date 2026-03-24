@@ -33,6 +33,7 @@ def _depth_label(depth: int) -> str:
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def trigger_stock_analysis(
     symbol: Annotated[str, "股票代码，6位数字，如 000001、600519"],
@@ -97,6 +98,7 @@ async def trigger_stock_analysis(
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def trigger_batch_analysis(
     symbols: Annotated[str, "股票代码列表，用逗号分隔，如 000001,600519,000858"],
@@ -150,6 +152,7 @@ async def trigger_batch_analysis(
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    timeout_tier="light",
 )
 async def get_analysis_status(
     task_id: Annotated[str, "分析任务ID"],
