@@ -39,6 +39,7 @@
             <el-option label="创业板" value="创业板" />
             <el-option label="科创板" value="科创板" />
             <el-option label="北交所" value="北交所" />
+            <el-option label="ETF" value="ETF" />
           </el-select>
         </el-col>
 
@@ -880,7 +881,7 @@ const handleMarketChange = () => {
 const getStockCodePlaceholder = () => {
   const market = addForm.value.market
   if (market === 'A股') {
-    return '请输入6位数字代码，如：000001'
+    return '请输入6位数字代码，如：000001 或 ETF 代码如 510300'
   } else if (market === '港股') {
     return '请输入4位数字代码，如：0700'
   } else if (market === '美股') {
@@ -893,7 +894,7 @@ const getStockCodePlaceholder = () => {
 const getStockCodeHint = () => {
   const market = addForm.value.market
   if (market === 'A股') {
-    return '输入代码后失焦，将自动填充股票名称'
+    return '支持股票和 ETF 代码，输入后失焦将自动填充名称'
   } else if (market === '港股') {
     return '港股不支持自动获取名称，请手动输入'
   } else if (market === '美股') {

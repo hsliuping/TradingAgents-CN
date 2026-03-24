@@ -77,6 +77,10 @@ class StockDataService:
                         logger.warning(f"⚠️ 使用旧数据（无 source 字段）: {symbol6}")
 
             if not doc:
+                # stock_basic_info 中未找到，尝试 etf_basic_info 回退
+                etf_doc = await self._get_etf_as_basic_info(db, symbol6)
+                if etf_doc:
+                    return etf_doc
                 return None
 
             # 数据标准化处理
@@ -86,6 +90,59 @@ class StockDataService:
 
         except Exception as e:
             logger.error(f"获取股票基础信息失败 symbol={symbol}, source={source}: {e}")
+            return None
+
+    async def _get_etf_as_basic_info(
+        self, db, symbol6: str
+    ) -> Optional[StockBasicInfoExtended]:
+        """从 etf_basic_info 集合查找 ETF，转换为 StockBasicInfoExtended 格式返回。"""
+        try:
+            doc = await db["etf_basic_info"].find_one(
+                {"code": symbol6}, {"_id": 0}
+            )
+            if not doc:
+                return None
+
+            if doc.get("code", "").startswith(("50", "51", "52")):
+                full_symbol = f"{symbol6}.SH"
+                exchange = "SSE"
+                exchange_name = "上海证券交易所"
+            elif doc.get("code", "").startswith(("15", "16")):
+                full_symbol = f"{symbol6}.SZ"
+                exchange = "SZSE"
+                exchange_name = "深圳证券交易所"
+            else:
+                full_symbol = f"{symbol6}.SH"
+                exchange = "SSE"
+                exchange_name = "上海证券交易所"
+
+            standardized = {
+                "symbol": symbol6,
+                "code": symbol6,
+                "full_symbol": doc.get("full_symbol") or full_symbol,
+                "name": doc.get("name", symbol6),
+                "area": None,
+                "industry": doc.get("fund_type") or "ETF",
+                "market": exchange_name,
+                "sse": "ETF",
+                "source": "etf_basic_info",
+                "market_info": {
+                    "market": "CN",
+                    "exchange": exchange,
+                    "exchange_name": exchange_name,
+                    "currency": "CNY",
+                    "timezone": "Asia/Shanghai",
+                    "trading_hours": {
+                        "open": "09:30",
+                        "close": "15:00",
+                        "lunch_break": ["11:30", "13:00"],
+                    },
+                },
+            }
+            logger.info(f"📊 [ETF 回退] 从 etf_basic_info 找到: {symbol6} -> {standardized['name']}")
+            return StockBasicInfoExtended(**standardized)
+        except Exception as e:
+            logger.debug(f"etf_basic_info 查询失败: {e}")
             return None
     
     async def get_market_quotes(self, symbol: str) -> Optional[MarketQuotesExtended]:
