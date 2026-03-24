@@ -340,4 +340,22 @@ export const assistantApi = {
 
     return controller
   },
+
+  // ---- mem0 统一记忆层 ----
+
+  getMemoryHealth() {
+    return request.get<{ ok: boolean; mem0_version?: string; error?: string }>(
+      '/api/memory/health',
+    )
+  },
+
+  getMemoryStats() {
+    return request.get<{
+      enabled: boolean
+      available?: boolean
+      user_id?: string
+      scopes?: Record<string, number>
+      message?: string
+    }>('/api/memory/stats')
+  },
 }
