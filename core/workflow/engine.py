@@ -319,12 +319,12 @@ class WorkflowEngine:
                             try:
                                 # 🔍 调试：打印节点更新的字段
                                 update_keys = list(node_update.keys())
-                                logger.info(f"[执行引擎] 📝 节点 {node_name} 返回字段: {update_keys}")
+                                logger.debug(f"[执行引擎] 📝 节点 {node_name} 返回字段: {update_keys}")
                                 # 检查是否有 index_report 或 sector_report
                                 if "index_report" in node_update:
-                                    logger.info(f"[执行引擎] ✅ 检测到 index_report ({len(str(node_update['index_report']))} 字符)")
+                                    logger.debug(f"[执行引擎] ✅ 检测到 index_report ({len(str(node_update['index_report']))} 字符)")
                                 if "sector_report" in node_update:
-                                    logger.info(f"[执行引擎] ✅ 检测到 sector_report ({len(str(node_update['sector_report']))} 字符)")
+                                    logger.debug(f"[执行引擎] ✅ 检测到 sector_report ({len(str(node_update['sector_report']))} 字符)")
                                 final_state.update(node_update)
                             except Exception:
                                 final_state[node_name] = node_update
@@ -881,6 +881,14 @@ class WorkflowEngine:
                 if sections:
                     result["final_trade_decision"] = "\n\n".join(sections)
 
+        node_errors = result.get("_node_errors")
+        if node_errors:
+            result["degraded_nodes"] = node_errors
+            logger.warning(
+                f"[WorkflowEngine] 工作流存在降级节点: "
+                f"{list(node_errors.keys())}"
+            )
+
         logger.info(
             f"[WorkflowEngine] 动态产出物收集完成: "
             f"{len(structured)} 个报告, {len(manifest)} 条 manifest"
@@ -917,6 +925,13 @@ class WorkflowEngine:
             if final_trade_decision:
                 result["final_trade_decision"] = final_trade_decision
 
+        node_errors = result.get("_node_errors")
+        if node_errors:
+            result["degraded_nodes"] = node_errors
+            logger.warning(
+                f"[WorkflowEngine] 内置工作流存在降级节点: "
+                f"{list(node_errors.keys())}"
+            )
         return result
 
     def _generate_final_trade_decision(self, state: Dict[str, Any]) -> str:
@@ -935,10 +950,10 @@ class WorkflowEngine:
             最终分析结果文本（Markdown 格式）
         """
         # 🔍 调试：打印 state 中的关键字段
-        logger.info(f"🔍 [WorkflowEngine] state 中的字段: {list(state.keys())}")
-        logger.info(f"🔍 [WorkflowEngine] investment_plan 存在: {'investment_plan' in state}")
-        logger.info(f"🔍 [WorkflowEngine] trader_investment_plan 存在: {'trader_investment_plan' in state}")
-        logger.info(f"🔍 [WorkflowEngine] risk_assessment 存在: {'risk_assessment' in state}")
+        logger.debug(f"🔍 [WorkflowEngine] state 中的字段: {list(state.keys())}")
+        logger.debug(f"🔍 [WorkflowEngine] investment_plan 存在: {'investment_plan' in state}")
+        logger.debug(f"🔍 [WorkflowEngine] trader_investment_plan 存在: {'trader_investment_plan' in state}")
+        logger.debug(f"🔍 [WorkflowEngine] risk_assessment 存在: {'risk_assessment' in state}")
 
         # 提取各个报告
         investment_plan = self._extract_text_from_state(state, "investment_plan")
@@ -946,9 +961,9 @@ class WorkflowEngine:
         risk_assessment = self._extract_text_from_state(state, "risk_assessment")
 
         # 🔍 调试：打印提取结果
-        logger.info(f"🔍 [WorkflowEngine] investment_plan 长度: {len(investment_plan)}")
-        logger.info(f"🔍 [WorkflowEngine] trader_plan 长度: {len(trader_plan)}")
-        logger.info(f"🔍 [WorkflowEngine] risk_assessment 长度: {len(risk_assessment)}")
+        logger.debug(f"🔍 [WorkflowEngine] investment_plan 长度: {len(investment_plan)}")
+        logger.debug(f"🔍 [WorkflowEngine] trader_plan 长度: {len(trader_plan)}")
+        logger.debug(f"🔍 [WorkflowEngine] risk_assessment 长度: {len(risk_assessment)}")
 
         # 如果三个都为空，返回空字符串
         if not any([investment_plan, trader_plan, risk_assessment]):
@@ -972,7 +987,7 @@ class WorkflowEngine:
         final_decision = "\n\n".join(sections)
         logger.info(f"✅ [WorkflowEngine] 生成 final_trade_decision，包含 {len(sections)} 个部分")
         logger.info(f"✅ [WorkflowEngine] 生成 final_trade_decision，长度: {len(final_decision)}")
-        logger.info(f"🔍 [WorkflowEngine] final_trade_decision 内容前500字符:\n{final_decision[:500]}")
+        logger.debug(f"🔍 [WorkflowEngine] final_trade_decision 内容前500字符:\n{final_decision[:500]}")
 
         return final_decision
 
@@ -990,33 +1005,33 @@ class WorkflowEngine:
         value = state.get(field)
 
         # 🔍 调试日志
-        logger.info(f"🔍 [_extract_text_from_state] 提取字段: {field}")
-        logger.info(f"🔍 [_extract_text_from_state] 值类型: {type(value)}")
+        logger.debug(f"🔍 [_extract_text_from_state] 提取字段: {field}")
+        logger.debug(f"🔍 [_extract_text_from_state] 值类型: {type(value)}")
 
         if value is None:
-            logger.info(f"🔍 [_extract_text_from_state] {field} 为 None，返回空字符串")
+            logger.debug(f"🔍 [_extract_text_from_state] {field} 为 None，返回空字符串")
             return ""
 
         if isinstance(value, str):
-            logger.info(f"🔍 [_extract_text_from_state] {field} 是字符串，长度: {len(value)}")
-            logger.info(f"🔍 [_extract_text_from_state] {field} 内容前200字符: {value[:200]}")
+            logger.debug(f"🔍 [_extract_text_from_state] {field} 是字符串，长度: {len(value)}")
+            logger.debug(f"🔍 [_extract_text_from_state] {field} 内容前200字符: {value[:200]}")
             return value.strip()
 
         if isinstance(value, dict):
-            logger.info(f"🔍 [_extract_text_from_state] {field} 是字典，字段: {list(value.keys())}")
+            logger.debug(f"🔍 [_extract_text_from_state] {field} 是字典，字段: {list(value.keys())}")
             # 尝试从字典中提取文本
             for key in ("content", "markdown", "text", "message", "report"):
                 text = value.get(key)
                 if isinstance(text, str) and text.strip():
-                    logger.info(f"🔍 [_extract_text_from_state] 从 {field}.{key} 提取到文本，长度: {len(text)}")
-                    logger.info(f"🔍 [_extract_text_from_state] 内容前200字符: {text[:200]}")
+                    logger.debug(f"🔍 [_extract_text_from_state] 从 {field}.{key} 提取到文本，长度: {len(text)}")
+                    logger.debug(f"🔍 [_extract_text_from_state] 内容前200字符: {text[:200]}")
                     return text.strip()
 
-            logger.info(f"🔍 [_extract_text_from_state] {field} 字典中未找到文本字段")
+            logger.debug(f"🔍 [_extract_text_from_state] {field} 字典中未找到文本字段")
 
         # 其他类型转为字符串
         result = str(value).strip()
-        logger.info(f"🔍 [_extract_text_from_state] {field} 转为字符串，长度: {len(result)}")
+        logger.debug(f"🔍 [_extract_text_from_state] {field} 转为字符串，长度: {len(result)}")
         return result
 
     @property

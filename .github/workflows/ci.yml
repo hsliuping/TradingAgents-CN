@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  backend-smoke:
-    name: Backend Smoke Tests
+  backend-tests:
+    name: Backend Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -23,15 +23,28 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
 
-      - name: 安装最小测试依赖
+      - name: 安装测试依赖
         run: |
           python -m pip install --upgrade pip
-          pip install fastapi pydantic pydantic-settings python-multipart concurrent-log-handler pytest httpx
+          pip install fastapi pydantic pydantic-settings python-multipart concurrent-log-handler pytest pytest-cov pytest-asyncio httpx
 
-      - name: 运行后端 smoke 测试
+      - name: 运行后端测试（含覆盖率）
         run: |
-          pytest -q tests/config/test_settings.py tests/config/test_logging_config.py tests/middleware/test_trace_id.py
+          pytest -q --tb=short --co -q 2>/dev/null | head -20 || true
+          pytest -q --tb=short \
+            --cov=app --cov=core \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=10
+
+      - name: 上传覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
 
   frontend-quality:
     name: Frontend Quality Checks

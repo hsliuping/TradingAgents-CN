@@ -1339,17 +1339,11 @@ class WorkflowBuilder:
         # 🔥 从数据库加载 Agent 配置
         db_agent_config = self.agent_config_manager.get_agent_config(agent_id)
         if db_agent_config:
-            logger.info(f"[智能体创建] 📋 从数据库加载 Agent 配置: {agent_id}")
-            # 提取执行配置（temperature, max_iterations, timeout等）
+            logger.debug(f"[智能体创建] 从数据库加载 Agent 配置: {agent_id}")
             execution_config = db_agent_config.get('config', {})
-            logger.info(f"[智能体创建]    - 执行配置: {execution_config}")
-            # 🔥 记录 temperature 配置（如果存在）
-            if 'temperature' in execution_config:
-                logger.info(f"[智能体创建] 🌡️ Agent 配置的 temperature: {execution_config['temperature']}")
-            else:
-                logger.info(f"[智能体创建] 🌡️ Agent 配置中没有 temperature，将使用 LLM 默认值")
+            logger.debug(f"[智能体创建] 执行配置: {execution_config}")
         else:
-            logger.info(f"[智能体创建] 📋 未找到数据库配置，使用默认配置: {agent_id}")
+            logger.debug(f"[智能体创建] 未找到数据库配置，使用默认配置: {agent_id}")
             execution_config = {}
 
         # 合并节点配置（优先级：node.config > 数据库配置 > 默认配置）
@@ -1384,10 +1378,7 @@ class WorkflowBuilder:
         # 首先尝试使用新架构创建智能体（已注册 OR 数据库中有 agent_configs 记录）
         if self.registry.is_registered(agent_id) or self._has_agent_config_in_db(agent_id):
             logger.info(f"=" * 80)
-            logger.info(f"[智能体创建] 🚀 开始创建 Agent: {agent_id}")
-            logger.info(f"   - 节点 ID: {node_id}")
-            logger.info(f"   - 节点标签: {node_label}")
-            logger.info(f"   - 工作流 ID: {self._workflow_id or 'N/A'}")
+            logger.info(f"[智能体创建] 开始创建 Agent: {agent_id} (node={node_id})")
 
             # 🆕 三层优先级工具查询：node > workflow > agent默认
             tool_ids = self.binding_manager.get_tools_for_node(
@@ -1405,65 +1396,28 @@ class WorkflowBuilder:
             # 1. 管理者（research_manager, risk_manager）- 需要综合大量信息做决策
             # 2. 风险分析师（risky/safe/neutral_analyst_v2）- 需要处理大量分析报告
             # 其他 agent（普通分析师、研究员）使用快速模型
-            llm_type = "quick"  # 默认使用快速模型
-            if agent_id in [
-                "research_manager_v2", "risk_manager_v2",  # v2.0 管理者
-                "risky_analyst_v2", "safe_analyst_v2", "neutral_analyst_v2",  # v2.0 风险分析师
-                "research_manager", "risk_manager"  # 旧版管理者
-            ]:
-                llm_type = "deep"  # 使用深度模型
-                logger.info(f"[智能体创建] 🔧 {agent_id} 使用深度分析模型 (deep_think_llm)")
-            else:
-                logger.info(f"[智能体创建] 🔧 {agent_id} 使用快速分析模型 (quick_think_llm)")
-
-            # 获取 LLM 实例
-            # 🔥 优先使用 Agent 配置的 temperature（如果存在）
+            _DEEP_AGENTS = {
+                "research_manager_v2", "risk_manager_v2",
+                "risky_analyst_v2", "safe_analyst_v2", "neutral_analyst_v2",
+                "research_manager", "risk_manager",
+            }
+            llm_type = "deep" if agent_id in _DEEP_AGENTS else "quick"
             agent_temperature = execution_config.get("temperature")
-            logger.info(f"[智能体创建] 🌡️ Temperature 优先级检查:")
-            logger.info(f"   - Agent 配置中的 temperature: {agent_temperature}")
-            logger.info(f"   - LLM 类型: {llm_type}")
-            
+
             if self.llm_override:
                 llm = self.llm_override
-                logger.info(f"[智能体创建] 🤖 LLM 实例: {type(llm).__name__ if llm else 'None'}")
-                logger.info(f"[智能体创建]    - 使用自定义 LLM (llm_override)，忽略 temperature 配置")
             elif agent_temperature is not None:
-                # Agent 配置中有 temperature，创建新的 LLM 实例
-                logger.info(f"[智能体创建] ✅ 检测到 Agent 配置的 temperature={agent_temperature}，创建自定义 LLM 实例")
                 llm = self._legacy_provider.get_llm(llm_type, temperature=agent_temperature)
-                logger.info(f"[智能体创建] 🤖 LLM 实例: {type(llm).__name__ if llm else 'None'}")
-                logger.info(f"[智能体创建]    - ✅ 成功使用 Agent 配置的温度: {agent_temperature}")
-                # 验证 LLM 实例的 temperature（如果 LLM 支持）
-                if hasattr(llm, 'temperature'):
-                    logger.info(f"[智能体创建]    - 验证: LLM 实例的 temperature={llm.temperature}")
             else:
-                # 使用默认 LLM 实例
-                logger.info(f"[智能体创建] ⚠️ Agent 配置中没有 temperature，使用默认 LLM 实例")
                 llm = self._legacy_provider.get_llm(llm_type)
-                logger.info(f"[智能体创建] 🤖 LLM 实例: {type(llm).__name__ if llm else 'None'}")
-                logger.info(f"[智能体创建]    - 使用 LegacyProvider 的 {llm_type} LLM (默认温度)")
-                # 验证默认 LLM 的 temperature（如果 LLM 支持）
-                if hasattr(llm, 'temperature'):
-                    logger.info(f"[智能体创建]    - 验证: 默认 LLM 的 temperature={llm.temperature}")
+            logger.debug(f"[智能体创建] LLM: type={llm_type}, temp={agent_temperature}")
 
-            # 🆕 获取 Agent 的记忆实例（如果记忆系统可用）
             agent_memory = None
             if self.memory_manager:
                 try:
                     agent_memory = self.memory_manager.get_agent_memory(agent_id)
-                    logger.info(f"[智能体创建] 🧠 为 {agent_id} 创建记忆实例")
                 except Exception as mem_error:
-                    logger.warning(f"[智能体创建] ⚠️ 获取记忆实例失败: {mem_error}")
-
-            # 创建 Agent（使用 v2.0 方式，传入 LLM、工具列表和记忆）
-            logger.info(f"[智能体创建] 📦 调用 factory.create()...")
-            logger.info(f"   - agent_id: {agent_id}")
-            # 🔥 排除 llm_provider 和 llm_model，因为这些不应该在 Agent 配置中
-            config_dict_log = config.model_dump(exclude={'llm_provider', 'llm_model'}) if config else None
-            logger.info(f"   - config: {config_dict_log}")
-            logger.info(f"   - llm: {type(llm).__name__ if llm else 'None'}")
-            logger.info(f"   - tool_ids: {tool_ids}")
-            logger.info(f"   - memory: {type(agent_memory).__name__ if agent_memory else 'None'}")
+                    logger.warning(f"[智能体创建] 获取记忆实例失败: {mem_error}")
 
             agent = self.factory.create(
                 agent_id,
@@ -1473,28 +1427,12 @@ class WorkflowBuilder:
                 memory=agent_memory
             )
 
-            logger.info(f"[智能体创建] ✅ Agent 实例创建成功: {type(agent).__name__}")
-
-            # 如果是旧版 Agent，还需要设置 toolkit 依赖
             if hasattr(agent, 'set_dependencies'):
                 toolkit = self._legacy_provider.get_toolkit()
                 agent.set_dependencies(llm, toolkit)
-                logger.info(f"[智能体创建] ✅ 为 {agent_id} 设置了额外的 toolkit 依赖")
-            else:
-                logger.info(f"[智能体创建] ✅ {agent_id} 使用 v2.0 方式创建，无需额外设置依赖")
 
             self._agents[node.id] = agent
-
-            # 🔍 打印 Agent 的最终状态
-            logger.info(f"[智能体创建] 📊 Agent 最终状态:")
-            logger.info(f"   - Agent ID: {agent_id}")
-            logger.info(f"   - Agent 类型: {type(agent).__name__}")
-            logger.info(f"   - 是否有 LLM: {hasattr(agent, '_llm') and agent._llm is not None}")
-            logger.info(f"   - 是否有工具: {hasattr(agent, '_tools') and agent._tools is not None}")
-            if hasattr(agent, '_tools') and agent._tools:
-                logger.info(f"   - 工具数量: {len(agent._tools)}")
-                logger.info(f"   - 工具列表: {[t.name if hasattr(t, 'name') else str(t) for t in agent._tools]}")
-            logger.info(f"=" * 80)
+            logger.info(f"[智能体创建] {agent_id} -> {type(agent).__name__} (tools={len(getattr(agent, '_tools', []) or [])})")
 
             # 包装以添加日志
             self._ensure_workflow_surface_access(agent_id, db_agent_config)
@@ -1942,7 +1880,28 @@ class WorkflowBuilder:
             )
             self._persist_workflow_invocation_record(invocation_request, invocation_result)
             logger.exception(f"[节点执行] ❌ {node_id} ({node_label}) - 执行失败: {exc}")
-            raise
+
+            field_key = output_field or f"{agent_id}_report"
+            degraded = {
+                field_key: (
+                    f"[{node_label} 执行失败]\n\n"
+                    f"该分析节点在运行过程中遇到错误，已跳过。\n"
+                    f"错误摘要: {type(exc).__name__}\n\n"
+                    f"其余节点的分析结果不受影响，请参考其他报告。"
+                ),
+                f"_node_errors": {
+                    **(state.get("_node_errors", {}) if isinstance(state, dict) else {}),
+                    node_id: {
+                        "agent_id": agent_id,
+                        "label": node_label,
+                        "error": str(exc)[:500],
+                    },
+                },
+            }
+            logger.warning(
+                f"[节点执行] ⚠️ {node_id} ({node_label}) - 降级处理，工作流继续执行"
+            )
+            return degraded
 
     def _try_create_legacy_agent(self, agent_id: str) -> Optional[Callable]:
         """

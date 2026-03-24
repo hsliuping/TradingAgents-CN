@@ -1,7 +1,8 @@
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
 import os
+import sys
 import warnings
 
 # Legacy env var aliases (deprecated): map API_HOST/PORT/DEBUG -> HOST/PORT/DEBUG
@@ -24,7 +25,14 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=True)
     HOST: str = Field(default="0.0.0.0")
     PORT: int = Field(default=8000)
-    ALLOWED_ORIGINS: List[str] = Field(default_factory=lambda: ["*"])
+    ALLOWED_ORIGINS: List[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:3000",
+        ]
+    )
     ALLOWED_HOSTS: List[str] = Field(default_factory=lambda: ["*"])
 
     # MongoDB配置
@@ -378,6 +386,44 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """是否为生产环境"""
         return not self.DEBUG
+
+    _DEFAULT_SECRETS = frozenset({
+        "change-me-in-production",
+        "change-me-csrf-secret",
+    })
+
+    @model_validator(mode="after")
+    def _check_secrets(self) -> "Settings":
+        if not self.DEBUG:
+            if self.JWT_SECRET in self._DEFAULT_SECRETS:
+                print(
+                    "\n!!! FATAL: JWT_SECRET is still the default value. "
+                    "Set a strong random secret in .env before running in production.\n",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            if self.CSRF_SECRET in self._DEFAULT_SECRETS:
+                print(
+                    "\n!!! FATAL: CSRF_SECRET is still the default value. "
+                    "Set a strong random secret in .env before running in production.\n",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+        else:
+            if self.JWT_SECRET in self._DEFAULT_SECRETS:
+                warnings.warn(
+                    "JWT_SECRET is using the default value. "
+                    "This is acceptable in DEBUG mode only.",
+                    stacklevel=2,
+                )
+        if "*" in self.ALLOWED_ORIGINS and not self.DEBUG:
+            print(
+                "\n!!! FATAL: ALLOWED_ORIGINS contains '*' in production. "
+                "Specify explicit origins in .env.\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return self
 
     # Ignore any extra environment variables present in .env or process env
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
