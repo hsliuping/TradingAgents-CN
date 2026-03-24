@@ -10,6 +10,8 @@ from datetime import datetime
 from typing import Any, AsyncIterator, Callable, Dict, Optional, Protocol
 
 from .models import (
+    NodeType,
+    OutputStrategy,
     WorkflowDefinition,
     WorkflowExecution,
     WorkflowExecutionState,
@@ -18,6 +20,29 @@ from .builder import WorkflowBuilder
 from .validator import WorkflowValidator, ValidationResult
 
 logger = logging.getLogger(__name__)
+
+_BUILTIN_REPORT_FIELDS = [
+    "market_report",
+    "sentiment_report",
+    "news_report",
+    "fundamentals_report",
+    "index_report",
+    "sector_report",
+    "bull_report",
+    "bear_report",
+    "investment_plan",
+    "trader_investment_plan",
+    "final_trade_decision",
+]
+
+_AGENT_CATEGORY_DISPLAY = {
+    "analyst": "分析师团队",
+    "researcher": "研究团队",
+    "trader": "交易团队",
+    "risk": "风险管理团队",
+    "manager": "决策层",
+    "post_processor": "后处理",
+}
 
 
 def _prepare_workflow_runtime_inputs(
@@ -308,62 +333,7 @@ class WorkflowEngine:
 
             # 使用累积的最终状态
             result = final_state
-
-            def _extract_text(v):
-                if isinstance(v, str):
-                    return v
-                if isinstance(v, dict):
-                    for k in ("content", "markdown", "text", "message", "report"):
-                        x = v.get(k)
-                        if isinstance(x, str) and x.strip():
-                            return x
-                return "" if v is None else str(v)
-
-            fields = [
-                "market_report",
-                "sentiment_report",
-                "news_report",
-                "fundamentals_report",
-                "index_report",
-                "sector_report",
-                "bull_report",
-                "bear_report",
-                "investment_plan",
-                "trader_investment_plan",
-                "final_trade_decision",
-            ]
-            structured = {}
-            for f in fields:
-                if f in result:
-                    text = _extract_text(result.get(f))
-                    success = bool(isinstance(text, str) and text.strip())
-                    d = {"content": text, "success": success}
-                    if f == "bull_report":
-                        d["stance"] = "bull"
-                    if f == "bear_report":
-                        d["stance"] = "bear"
-                    structured[f] = d
-            result["structured_reports"] = structured
-
-            # 🔥 修改：优先使用 RiskManagerV2 生成的结构化 final_trade_decision
-            # 只有当 final_trade_decision 不存在或不是字典时，才进行拼接
-            existing_ftd = result.get("final_trade_decision")
-            # 🔥 修复：检查 action 或 analysis_view 字段（兼容新旧字段名）
-            has_action = existing_ftd and isinstance(existing_ftd, dict) and (
-                existing_ftd.get("action") or existing_ftd.get("analysis_view")
-            )
-            if has_action:
-                # ✅ RiskManagerV2 已经生成了结构化的 final_trade_decision，保留它
-                action = existing_ftd.get("action") or existing_ftd.get("analysis_view")
-                logger.info(f"✅ [WorkflowEngine] 使用 RiskManagerV2 生成的 final_trade_decision: action/analysis_view={action}, confidence={existing_ftd.get('confidence')}")
-            else:
-                # ⚠️ 没有结构化的 final_trade_decision，使用旧的拼接逻辑
-                final_trade_decision = self._generate_final_trade_decision(result)
-                if final_trade_decision:
-                    result["final_trade_decision"] = final_trade_decision
-                    logger.info(f"✅ [WorkflowEngine] 生成拼接的 final_trade_decision，长度: {len(final_trade_decision)}")
-                    # 🔥 打印完整内容（不截断）
-                    logger.info(f"🔍 [WorkflowEngine] final_trade_decision 完整内容:\n{final_trade_decision}")
+            result = self._build_output_results(result)
 
             execution.state = WorkflowExecutionState.COMPLETED
             execution.outputs = result
@@ -482,11 +452,25 @@ class WorkflowEngine:
         if node_name in node_mapping:
             return node_mapping[node_name]
 
-        # 未知节点，使用默认进度
-        logger.debug(f"[进度] 未知节点: {node_name}")
-        # 尝试生成一个友好的中文名称
+        # 动态推导：从工作流定义中查找节点信息
+        if self._definition:
+            agent_nodes = [
+                n for n in self._definition.nodes
+                if (n.type.value if hasattr(n.type, "value") else n.type)
+                   not in ("start", "end")
+            ]
+            total = max(len(agent_nodes), 1)
+            for i, node in enumerate(agent_nodes):
+                agent_id = node.agent_id or ""
+                if agent_id == node_name or node.label == node_name or node.id == node_name:
+                    progress = int(10 + (80 * ((i + 1) / total)))
+                    meta = self._lookup_agent_metadata(agent_id) if agent_id else None
+                    label = (meta.node_name if meta and meta.node_name
+                             else node.label or agent_id.replace("_", " ").title())
+                    return (progress, f"正在执行: {label}", label)
+
         friendly_name = node_name.replace("_v2", "").replace("_", " ").title()
-        return (50, f"🔍 正在执行: {friendly_name}", friendly_name)
+        return (50, f"正在执行: {friendly_name}", friendly_name)
 
     async def execute_async(
         self,
@@ -560,6 +544,7 @@ class WorkflowEngine:
 
             # 使用累积的最终状态
             result = final_state
+            result = self._build_output_results(result)
 
             execution.state = WorkflowExecutionState.COMPLETED
             execution.outputs = result
@@ -662,6 +647,277 @@ class WorkflowEngine:
     def definition(self) -> Optional[WorkflowDefinition]:
         """当前加载的工作流定义"""
         return self._definition
+
+    # ------------------------------------------------------------------
+    # 动态产出物收集
+    # ------------------------------------------------------------------
+
+    def _is_builtin_workflow(self, definition: WorkflowDefinition) -> bool:
+        """判断是否为内置工作流（使用标准报告字段的旧工作流）"""
+        if not definition:
+            return True
+        agent_ids = self._extract_agent_ids(definition)
+        if not agent_ids:
+            return True
+        has_builtin_agents = any(
+            aid.endswith("_v2") or aid in (
+                "market_analyst", "fundamentals_analyst", "news_analyst",
+                "social_analyst", "bull_researcher", "bear_researcher",
+                "research_manager", "trader", "risk_manager",
+                "risky_analyst", "safe_analyst", "neutral_analyst",
+            )
+            for aid in agent_ids
+        )
+        strategy = getattr(definition.output_config, "strategy", "auto")
+        if strategy != "auto":
+            return False
+        return has_builtin_agents
+
+    def _lookup_agent_metadata(self, agent_id: str):
+        """查询 Agent 元数据：优先 DB，再 fallback 到 registry"""
+        try:
+            from core.agents.registry import get_registry
+            metadata = get_registry().get_metadata(agent_id)
+            if metadata:
+                return metadata
+        except Exception:
+            pass
+
+        try:
+            from core.agents.config import AGENT_METADATA_REGISTRY
+            return AGENT_METADATA_REGISTRY.get(agent_id)
+        except Exception:
+            pass
+        return None
+
+    def _collect_output_manifest(
+        self,
+        state: Dict[str, Any],
+        definition: WorkflowDefinition,
+    ):
+        """
+        根据 output_config 从 state 中收集产出物。
+
+        Returns:
+            (structured_reports, report_manifest)
+        """
+        output_config = definition.output_config
+        strategy = output_config.strategy
+
+        if strategy == OutputStrategy.SPECIFIED and output_config.fields:
+            return self._collect_specified(state, output_config)
+        elif strategy == OutputStrategy.LAST_NODE:
+            return self._collect_last_node(state, definition)
+        elif strategy == OutputStrategy.COLLECT_ALL:
+            return self._collect_all_agents(state, definition)
+        else:
+            return self._collect_auto(state, definition)
+
+    def _collect_auto(self, state, definition):
+        """AUTO 策略：自动从工作流拓扑和 Agent 声明推导产出物"""
+        agent_nodes = [n for n in definition.nodes if n.agent_id]
+        if not agent_nodes:
+            return {}, []
+
+        field_infos = []
+        for node in agent_nodes:
+            meta = self._lookup_agent_metadata(node.agent_id)
+            field_name = (meta.output_field if meta and meta.output_field
+                          else f"{node.agent_id}_report")
+            display_name = ""
+            if meta:
+                display_name = meta.report_label or meta.node_name
+            display_name = display_name or node.label or node.agent_id.replace("_", " ").title()
+
+            cat = ""
+            if meta:
+                cat_val = meta.category.value if hasattr(meta.category, "value") else str(meta.category)
+                cat = _AGENT_CATEGORY_DISPLAY.get(cat_val, cat_val)
+            cat = cat or "其他"
+
+            order = meta.execution_order if meta else 100
+            field_infos.append({
+                "field": field_name,
+                "display_name": display_name.strip("【】"),
+                "category": cat,
+                "order": order,
+                "is_primary": False,
+                "format_hint": "markdown",
+                "agent_id": node.agent_id,
+            })
+
+        if field_infos:
+            primary = max(field_infos, key=lambda f: f["order"])
+            primary["is_primary"] = True
+
+        return self._extract_from_state(state, field_infos)
+
+    def _collect_all_agents(self, state, definition):
+        """COLLECT_ALL 策略：收集所有 Agent 节点的 output_field"""
+        return self._collect_auto(state, definition)
+
+    def _collect_last_node(self, state, definition):
+        """LAST_NODE 策略：只收集 END 节点直接前驱的 Agent 输出"""
+        end_nodes = definition.get_end_nodes()
+        predecessor_agent_ids = set()
+        for end_node in end_nodes:
+            incoming = definition.get_edges_to(end_node.id)
+            for edge in incoming:
+                src_node = definition.get_node(edge.source)
+                if src_node and src_node.agent_id:
+                    predecessor_agent_ids.add(src_node.agent_id)
+
+        if not predecessor_agent_ids:
+            return self._collect_auto(state, definition)
+
+        agent_nodes = [
+            n for n in definition.nodes
+            if n.agent_id and n.agent_id in predecessor_agent_ids
+        ]
+        field_infos = []
+        for node in agent_nodes:
+            meta = self._lookup_agent_metadata(node.agent_id)
+            field_name = (meta.output_field if meta and meta.output_field
+                          else f"{node.agent_id}_report")
+            display_name = ""
+            if meta:
+                display_name = meta.report_label or meta.node_name
+            display_name = display_name or node.label or node.agent_id.replace("_", " ").title()
+            cat_val = (meta.category.value if meta and hasattr(meta.category, "value")
+                       else str(meta.category) if meta else "")
+            field_infos.append({
+                "field": field_name,
+                "display_name": display_name.strip("【】"),
+                "category": _AGENT_CATEGORY_DISPLAY.get(cat_val, cat_val) or "其他",
+                "order": meta.execution_order if meta else 100,
+                "is_primary": True,
+                "format_hint": "markdown",
+                "agent_id": node.agent_id,
+            })
+
+        return self._extract_from_state(state, field_infos)
+
+    def _collect_specified(self, state, output_config):
+        """SPECIFIED 策略：使用用户手动指定的字段列表"""
+        field_infos = []
+        for fc in output_config.fields:
+            field_infos.append({
+                "field": fc.field_name,
+                "display_name": fc.display_name or fc.field_name.replace("_", " ").title(),
+                "category": fc.category or "其他",
+                "order": fc.order,
+                "is_primary": fc.is_primary,
+                "format_hint": fc.format_hint or "markdown",
+                "agent_id": "",
+            })
+        if field_infos and not any(f["is_primary"] for f in field_infos):
+            max_order = max(field_infos, key=lambda f: f["order"])
+            max_order["is_primary"] = True
+        return self._extract_from_state(state, field_infos)
+
+    @staticmethod
+    def _extract_text_value(v) -> str:
+        if isinstance(v, str):
+            return v
+        if isinstance(v, dict):
+            for k in ("content", "markdown", "text", "message", "report"):
+                x = v.get(k)
+                if isinstance(x, str) and x.strip():
+                    return x
+        return "" if v is None else str(v)
+
+    def _extract_from_state(self, state, field_infos):
+        """从 state 中提取字段内容，构建 structured_reports 和 report_manifest"""
+        structured = {}
+        manifest = []
+
+        for info in sorted(field_infos, key=lambda f: f["order"]):
+            field = info["field"]
+            raw = state.get(field)
+            text = self._extract_text_value(raw)
+            has_content = bool(isinstance(text, str) and text.strip())
+
+            structured[field] = {"content": text, "success": has_content}
+            manifest.append({
+                "field": field,
+                "display_name": info["display_name"],
+                "category": info["category"],
+                "order": info["order"],
+                "is_primary": info["is_primary"],
+                "format_hint": info["format_hint"],
+                "agent_id": info.get("agent_id", ""),
+                "has_content": has_content,
+            })
+
+        return structured, manifest
+
+    def _build_output_results(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        在 execute 完成后构建产出物。
+        内置工作流走旧逻辑，自定义工作流走动态收集。
+        """
+        definition = self._definition
+        if not definition:
+            return result
+
+        if self._is_builtin_workflow(definition):
+            return self._build_builtin_output(result)
+
+        structured, manifest = self._collect_output_manifest(result, definition)
+        result["structured_reports"] = structured
+        result["report_manifest"] = manifest
+
+        if not result.get("final_trade_decision"):
+            primary_items = [m for m in manifest if m.get("is_primary") and m.get("has_content")]
+            if primary_items:
+                pf = primary_items[0]["field"]
+                result["final_trade_decision"] = self._extract_text_value(result.get(pf))
+            elif manifest:
+                sections = []
+                for m in manifest:
+                    if m.get("has_content"):
+                        text = self._extract_text_value(result.get(m["field"]))
+                        sections.append(f"## {m['display_name']}\n\n{text}")
+                if sections:
+                    result["final_trade_decision"] = "\n\n".join(sections)
+
+        logger.info(
+            f"[WorkflowEngine] 动态产出物收集完成: "
+            f"{len(structured)} 个报告, {len(manifest)} 条 manifest"
+        )
+        return result
+
+    def _build_builtin_output(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """内置工作流的旧产出物逻辑（完全兼容）"""
+        structured = {}
+        for f in _BUILTIN_REPORT_FIELDS:
+            if f in result:
+                text = self._extract_text_value(result.get(f))
+                success = bool(isinstance(text, str) and text.strip())
+                d = {"content": text, "success": success}
+                if f == "bull_report":
+                    d["stance"] = "bull"
+                if f == "bear_report":
+                    d["stance"] = "bear"
+                structured[f] = d
+        result["structured_reports"] = structured
+
+        existing_ftd = result.get("final_trade_decision")
+        has_action = existing_ftd and isinstance(existing_ftd, dict) and (
+            existing_ftd.get("action") or existing_ftd.get("analysis_view")
+        )
+        if has_action:
+            action = existing_ftd.get("action") or existing_ftd.get("analysis_view")
+            logger.info(
+                f"[WorkflowEngine] 使用 RiskManagerV2 的 final_trade_decision: "
+                f"action={action}, confidence={existing_ftd.get('confidence')}"
+            )
+        else:
+            final_trade_decision = self._generate_final_trade_decision(result)
+            if final_trade_decision:
+                result["final_trade_decision"] = final_trade_decision
+
+        return result
 
     def _generate_final_trade_decision(self, state: Dict[str, Any]) -> str:
         """

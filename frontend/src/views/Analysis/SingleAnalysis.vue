@@ -1706,49 +1706,52 @@ const formatRiskLevel = (riskScore: number | null | undefined): string => {
 
 // 获取分析报告
 const getAnalysisReports = (data: any) => {
-  console.log('📊 getAnalysisReports 输入数据:', data)
-  console.log('📊 data.reports 存在:', !!data?.reports)
-  console.log('📊 data.reports 类型:', typeof data?.reports)
-  console.log('📊 data.reports 内容:', data?.reports)
-  console.log('📊 data.reports 键:', data?.reports ? Object.keys(data.reports) : '无')
   const reports: Array<{title: string, content: any}> = []
 
-  // 🔥 优化：只从 reports 字段获取数据（统一数据源）
   let reportsData: Record<string, any> | null = null
   if (data && data.reports && typeof data.reports === 'object' && Object.keys(data.reports).length > 0) {
     reportsData = data.reports
-    console.log('✅ 使用 data.reports:', Object.keys(reportsData || {}))
   } else {
-    console.warn('⚠️ data.reports 为空或不存在，无法获取报告数据')
     return reports
   }
 
+  // 动态模式：使用 report_manifest（自定义工作流产出物描述）
+  const manifest = data?.report_manifest as Array<{
+    field: string; display_name: string; category: string; order: number; is_primary: boolean
+  }> | undefined
+  if (manifest && manifest.length > 0) {
+    const sorted = [...manifest].sort((a, b) => a.order - b.order)
+    for (const m of sorted) {
+      const content = reportsData[m.field]
+      if (content) {
+        reports.push({
+          title: m.display_name || m.field.replace(/_/g, ' '),
+          content,
+        })
+      }
+    }
+    if (reports.length > 0 && !activeReportTab.value) {
+      activeReportTab.value = '0'
+    }
+    return reports
+  }
+
+  // --- 旧逻辑：内置工作流使用硬编码映射 ---
   const isEtfAnalysis = data?.task_type === 'etf_analysis' || (Array.isArray(data?.analysts) && data.analysts.includes('etf_analyst'))
 
-  // 定义报告映射（按照完整的分析流程顺序）
   const reportMappings = [
-    // 第一阶段：宏观分析师团队 (2个)
     { key: 'index_report', title: '📊 大盘指数分析', category: '宏观分析师' },
     { key: 'sector_report', title: '🏭 行业板块分析', category: '宏观分析师' },
-
-    // 第二阶段：分析师团队 (4个)
     { key: 'market_report', title: '📈 市场技术分析', category: '分析师团队' },
     { key: 'fundamentals_report', title: isEtfAnalysis ? '📊 ETF 分析' : '💰 基本面分析', category: '分析师团队' },
     { key: 'sentiment_report', title: '💭 市场情绪分析', category: '分析师团队' },
     { key: 'news_report', title: '📰 新闻事件分析', category: '分析师团队' },
-
-    // 第三阶段：研究团队（多空辩论 + 初步建议）
     { key: 'bull_researcher', title: '🐂 多头研究员', category: '研究团队' },
     { key: 'bull_report', title: '🐂 看涨研究', category: '研究团队' },
     { key: 'bear_researcher', title: '🐻 空头研究员', category: '研究团队' },
     { key: 'bear_report', title: '🐻 看跌研究', category: '研究团队' },
     { key: 'research_team_decision', title: '🔬 研究经理分析', category: '研究团队' },
-    // { key: 'investment_plan', title: '💡 初步投资建议', category: '研究团队' },  // 🔑 已隐藏：与研究经理分析内容相同
-
-    // 第四阶段：交易团队 (1个)
     { key: 'trader_investment_plan', title: '💼 交易员计划', category: '交易团队' },
-
-    // 第五阶段：风险管理团队（风险辩论）
     { key: 'risky_analyst', title: '⚡ 激进分析师', category: '风险管理团队' },
     { key: 'risky_opinion', title: '🔥 激进风险观点', category: '风险管理团队' },
     { key: 'safe_analyst', title: '🛡️ 保守分析师', category: '风险管理团队' },
@@ -1757,32 +1760,18 @@ const getAnalysisReports = (data: any) => {
     { key: 'neutral_opinion', title: '⚖️ 中性风险观点', category: '风险管理团队' },
     { key: 'risk_management_decision', title: '⚠️ 风险经理', category: '风险管理团队' },
     { key: 'risk_assessment', title: '⚠️ 风险评估', category: '风险管理团队' },
-
-    // 第六阶段：最终决策
-    { key: 'final_trade_decision', title: '🎯 最终分析结果', category: '最终决策' },  // 🔑 风险管理后的最终决策
-
-    // 兼容旧格式
+    { key: 'final_trade_decision', title: '🎯 最终分析结果', category: '最终决策' },
     { key: 'investment_debate_state', title: '🔬 研究团队分析（旧）', category: '其他' },
     { key: 'risk_debate_state', title: '⚖️ 风险管理团队（旧）', category: '其他' }
   ]
 
-  // 🔑 需要隐藏的字段列表
-  const hiddenKeys = ['investment_plan']  // 已隐藏：与研究经理分析内容相同
+  const hiddenKeys = ['investment_plan']
 
-  // 遍历所有可能的报告
   reportMappings.forEach(mapping => {
-    // 跳过隐藏的字段
-    if (hiddenKeys.includes(mapping.key)) {
-      return
-    }
-    
+    if (hiddenKeys.includes(mapping.key)) return
     const content = reportsData?.[mapping.key]
     if (content) {
-      console.log(`📊 找到报告: ${mapping.key} -> ${mapping.title}`)
-      reports.push({
-        title: mapping.title,
-        content: content
-      })
+      reports.push({ title: mapping.title, content })
     }
   })
 

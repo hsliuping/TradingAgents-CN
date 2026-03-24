@@ -77,6 +77,34 @@ class EdgeDefinition(BaseModel):
         use_enum_values = True
 
 
+class OutputStrategy(str, Enum):
+    """产出物组装策略"""
+    AUTO = "auto"
+    COLLECT_ALL = "collect_all"
+    SPECIFIED = "specified"
+    LAST_NODE = "last_node"
+
+
+class OutputFieldConfig(BaseModel):
+    """单个输出字段的配置"""
+    field_name: str
+    display_name: str = ""
+    category: str = ""
+    order: int = 0
+    is_primary: bool = False
+    format_hint: str = "markdown"    # markdown | json_to_markdown | plain
+
+
+class WorkflowOutputConfig(BaseModel):
+    """工作流产出物配置"""
+    strategy: OutputStrategy = OutputStrategy.AUTO
+    fields: List[OutputFieldConfig] = Field(default_factory=list)
+    primary_field: str = ""
+
+    class Config:
+        use_enum_values = True
+
+
 class WorkflowDefinition(BaseModel):
     """
     工作流定义
@@ -99,6 +127,11 @@ class WorkflowDefinition(BaseModel):
     
     # 配置
     config: Dict[str, Any] = Field(default_factory=dict)
+    
+    # 产出物配置
+    output_config: WorkflowOutputConfig = Field(
+        default_factory=WorkflowOutputConfig
+    )
     
     # 标签
     tags: List[str] = Field(default_factory=list)

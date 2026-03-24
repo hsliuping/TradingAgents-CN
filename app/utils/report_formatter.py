@@ -38,12 +38,21 @@ STANDARD_REPORT_FIELDS = [
 ]
 
 
-def extract_reports_from_state(state: Any) -> Dict[str, str]:
+def extract_reports_from_state(
+    state: Any,
+    report_fields: "Optional[List[str]]" = None,
+    report_manifest: "Optional[List[Dict[str, Any]]]" = None,
+) -> Dict[str, str]:
     """
-    从 state 中提取所有报告内容
+    从 state 中提取所有报告内容。
+
+    当 report_fields 不为空时，使用它替代 STANDARD_REPORT_FIELDS（动态工作流模式）。
+    当 report_manifest 提供 format_hint 时，据此决定是否做 JSON->Markdown 转换。
 
     Args:
         state: 分析状态对象（可以是字典或对象）
+        report_fields: 动态字段列表（自定义工作流传入）
+        report_manifest: 完整 manifest 列表，提供 format_hint 等元数据
 
     Returns:
         包含所有报告的字典
@@ -53,67 +62,63 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
     if state is None:
         return reports
 
-    # 🔥 调试日志：显示 state 的顶层字段
-    if isinstance(state, dict):
-        logger.info(f"🔍 [ReportFormatter] state 顶层字段: {list(state.keys())}")
-        # 🔥 检查 index_report 和 sector_report 是否存在
-        if "index_report" in state:
-            logger.info(f"🔍 [ReportFormatter] index_report 存在，长度: {len(str(state.get('index_report', '')))}")
-        else:
-            logger.warning(f"⚠️ [ReportFormatter] index_report 字段不存在于 state 中")
-        if "sector_report" in state:
-            logger.info(f"🔍 [ReportFormatter] sector_report 存在，长度: {len(str(state.get('sector_report', '')))}")
-        else:
-            logger.warning(f"⚠️ [ReportFormatter] sector_report 字段不存在于 state 中")
+    # 动态模式：使用传入的字段列表
+    if report_fields:
+        hint_map = {}
+        if report_manifest:
+            hint_map = {m["field"]: m.get("format_hint", "markdown") for m in report_manifest}
 
-    # 1. 提取标准报告字段
+        for field in report_fields:
+            value = _get_field_value(state, field)
+            if not (value and isinstance(value, str) and len(value.strip()) > 10):
+                continue
+            hint = hint_map.get(field, "markdown")
+            if hint == "json_to_markdown":
+                reports[field] = _convert_json_to_markdown(value.strip(), "final_decision")
+            elif hint == "plain":
+                reports[field] = value.strip()
+            else:
+                reports[field] = _remove_author_signature(value.strip())
+
+        logger.info(f"[ReportFormatter] 动态提取 {len(reports)} 个报告: {list(reports.keys())}")
+        return reports
+
+    # --- 旧逻辑：内置工作流模式 ---
+    if isinstance(state, dict):
+        logger.info(f"[ReportFormatter] state 顶层字段: {list(state.keys())}")
+
     for field in STANDARD_REPORT_FIELDS:
         value = _get_field_value(state, field)
         if value and isinstance(value, str) and len(value.strip()) > 10:
-            # 🔥 对于可能包含 JSON 的字段，转换为 Markdown
             if field == 'final_trade_decision':
                 markdown_value = _convert_json_to_markdown(value.strip(), "final_decision")
                 reports[field] = markdown_value
-                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
             elif field == 'research_team_decision':
-                logger.info(f"🔍 [ReportFormatter] 检测到 research_team_decision 字段，准备转换 JSON")
-                logger.info(f"🔍 [ReportFormatter] 原始内容前500字符: {value.strip()[:500]}")
                 markdown_value = _convert_json_to_markdown(value.strip(), "final_decision")
                 reports[field] = markdown_value
-                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
-                logger.info(f"📊 [ReportFormatter] 转换后内容前500字符: {markdown_value[:500]}")
             elif field == 'risk_management_decision':
                 markdown_value = _convert_json_to_markdown(value.strip(), "risk")
                 reports[field] = markdown_value
-                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
             else:
-                # 🔥 清理AI生成的署名信息
                 cleaned_value = _remove_author_signature(value.strip())
                 reports[field] = cleaned_value
-                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(cleaned_value)} (已清理署名)")
+                logger.info(f"[ReportFormatter] 提取报告: {field} - 长度: {len(cleaned_value)}")
         elif field in ['index_report', 'sector_report']:
-            # 特别记录宏观报告的提取失败
-            logger.warning(f"⚠️ [ReportFormatter] 宏观报告 {field} 未能提取: value={type(value)}, 内容长度={len(str(value)) if value else 0}")
+            logger.warning(f"[ReportFormatter] 宏观报告 {field} 未能提取")
 
     # 2. 提取研究团队辩论状态报告（investment_debate_state）
     debate_state = _get_field_value(state, 'investment_debate_state')
     if debate_state:
         _extract_investment_debate_reports(debate_state, reports)
-    else:
-        logger.warning("⚠️ [ReportFormatter] investment_debate_state 不存在或为空")
 
     # 3. 提取风险管理团队辩论状态报告（risk_debate_state）
     risk_state = _get_field_value(state, 'risk_debate_state')
     if risk_state:
         _extract_risk_debate_reports(risk_state, reports)
-    else:
-        logger.warning("⚠️ [ReportFormatter] risk_debate_state 不存在或为空")
 
-    # 🔥 备选方案：直接从顶层 state 查找 bull_report, bear_report 等字段
-    # 新工作流可能将报告存储在不同位置
     _extract_alternative_reports(state, reports)
 
-    logger.info(f"📊 [ReportFormatter] 提取到 {len(reports)} 个报告: {list(reports.keys())}")
+    logger.info(f"[ReportFormatter] 提取到 {len(reports)} 个报告: {list(reports.keys())}")
     return reports
 
 
@@ -1039,6 +1044,7 @@ def format_analysis_result(
     quick_model: str = "Unknown",
     deep_model: str = "Unknown",
     execution_time: float = 0,
+    report_manifest: "Optional[List[Dict[str, Any]]]" = None,
 ) -> Dict[str, Any]:
     """
     统一的分析结果格式化函数
@@ -1054,16 +1060,17 @@ def format_analysis_result(
         quick_model: 快速分析模型
         deep_model: 深度分析模型
         execution_time: 执行时间（秒）
+        report_manifest: 动态产出物 manifest（自定义工作流传入）
 
     Returns:
         格式化后的完整分析结果
     """
     # 1. 从 raw_result 中提取报告
-    logger.info(f"🔍 [ReportFormatter] ========== 开始格式化分析结果 ==========")
-    logger.info(f"🔍 [ReportFormatter] stock_code={stock_code}, stock_name={stock_name}")
-    
-    reports = extract_reports_from_state(raw_result)
-    logger.info(f"🔍 [ReportFormatter] 提取到 {len(reports)} 个报告: {list(reports.keys())}")
+    logger.info(f"[ReportFormatter] 开始格式化: stock_code={stock_code}, stock_name={stock_name}")
+
+    report_fields = [m["field"] for m in report_manifest] if report_manifest else None
+    reports = extract_reports_from_state(raw_result, report_fields=report_fields, report_manifest=report_manifest)
+    logger.info(f"[ReportFormatter] 提取到 {len(reports)} 个报告: {list(reports.keys())}")
     for report_name, report_content in reports.items():
         if isinstance(report_content, str):
             logger.info(f"🔍 [ReportFormatter] reports['{report_name}'] 长度: {len(report_content)}, 前100字符: {report_content[:100]}")
@@ -1212,11 +1219,11 @@ def format_analysis_result(
         "performance_metrics": raw_result.get("performance_metrics", {}),
     }
 
-    # 🔥 最终结果日志
-    logger.info(f"🔍 [ReportFormatter] ========== 最终格式化结果 ==========")
-    logger.info(f"🔍 [ReportFormatter] result.decision.reasoning 长度: {len(formatted_decision.get('reasoning', ''))}, 内容: {formatted_decision.get('reasoning', '')[:300]}")
-    logger.info(f"🔍 [ReportFormatter] result.summary 长度: {len(summary)}, 内容: {summary[:300]}")
-    logger.info(f"🔍 [ReportFormatter] result.recommendation 长度: {len(recommendation)}, 内容: {recommendation[:300]}")
-    logger.info(f"🔍 [ReportFormatter] ========== 格式化完成 ==========")
-    logger.info(f"✅ [ReportFormatter] 格式化完成: decision.action={formatted_decision.get('action')}, reports={len(reports)}个")
+    if report_manifest:
+        result["report_manifest"] = report_manifest
+
+    logger.info(
+        f"[ReportFormatter] 格式化完成: action={formatted_decision.get('action')}, "
+        f"reports={len(reports)}个, manifest={'有' if report_manifest else '无'}"
+    )
     return result

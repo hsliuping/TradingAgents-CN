@@ -10,6 +10,9 @@ from .models import (
     EdgeDefinition,
     NodeType,
     EdgeType,
+    OutputStrategy,
+    OutputFieldConfig,
+    WorkflowOutputConfig,
 )
 from .engine import WorkflowEngine
 from .builder import WorkflowBuilder
@@ -21,6 +24,9 @@ __all__ = [
     "EdgeDefinition",
     "NodeType",
     "EdgeType",
+    "OutputStrategy",
+    "OutputFieldConfig",
+    "WorkflowOutputConfig",
     "WorkflowEngine",
     "WorkflowBuilder",
     "WorkflowValidator",
