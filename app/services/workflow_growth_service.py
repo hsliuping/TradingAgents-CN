@@ -234,6 +234,112 @@ class WorkflowGrowthService:
             },
         }
 
+    async def build_recall_context(
+        self,
+        user_id: str,
+        ticker: Optional[str] = None,
+        workflow_id: Optional[str] = None,
+        max_items: int = 10,
+        max_chars: int = 3000,
+    ) -> str:
+        """
+        为即将执行的工作流构建已批准记忆的召回上下文。
+
+        按优先级查询: object_tracking（与标的相关）> workflow_pattern >
+        research_asset，拼接为结构化文本注入工作流输入。
+
+        Returns:
+            可直接注入提示词的 Markdown 文本，无记忆时返回空字符串
+        """
+        query: Dict[str, Any] = {
+            "user_id": user_id,
+            "status": GrowthMemoryStatus.APPROVED.value,
+        }
+
+        recall_items: List[Dict[str, Any]] = []
+
+        # 优先级 1: 与当前标的相关的 object_tracking 记忆
+        if ticker:
+            obj_query = {**query, "object_key": ticker}
+            docs = await (
+                self.memory_collection
+                .find(obj_query)
+                .sort("updated_at", -1)
+                .limit(max_items)
+                .to_list(length=max_items)
+            )
+            recall_items.extend(docs)
+
+        remaining = max_items - len(recall_items)
+
+        # 优先级 2: workflow_pattern 记忆
+        if remaining > 0 and workflow_id:
+            wf_query = {
+                **query,
+                "scope": GrowthMemoryScope.WORKFLOW_PATTERN.value,
+                "source_workflow_id": workflow_id,
+            }
+            seen_ids = {str(d.get("_id")) for d in recall_items}
+            docs = await (
+                self.memory_collection
+                .find(wf_query)
+                .sort("updated_at", -1)
+                .limit(remaining)
+                .to_list(length=remaining)
+            )
+            for d in docs:
+                if str(d.get("_id")) not in seen_ids:
+                    recall_items.append(d)
+
+        remaining = max_items - len(recall_items)
+
+        # 优先级 3: research_asset 记忆
+        if remaining > 0:
+            ra_query = {
+                **query,
+                "scope": GrowthMemoryScope.RESEARCH_ASSET.value,
+            }
+            seen_ids = {str(d.get("_id")) for d in recall_items}
+            docs = await (
+                self.memory_collection
+                .find(ra_query)
+                .sort("updated_at", -1)
+                .limit(remaining)
+                .to_list(length=remaining)
+            )
+            for d in docs:
+                if str(d.get("_id")) not in seen_ids:
+                    recall_items.append(d)
+
+        if not recall_items:
+            return ""
+
+        # 拼接为结构化文本
+        lines = ["## 历史研究记忆（已审核批准）\n"]
+        total_chars = 0
+        for item in recall_items:
+            title = item.get("title", "")
+            summary = item.get("summary") or item.get("content", "")
+            scope = item.get("scope", "")
+            obj_key = item.get("object_key", "")
+
+            if len(summary) > 500:
+                summary = summary[:500] + "…"
+
+            entry = f"- **{title}**"
+            if obj_key:
+                entry += f" [{obj_key}]"
+            if scope:
+                entry += f" ({scope})"
+            entry += f"\n  {summary}\n"
+
+            if total_chars + len(entry) > max_chars:
+                break
+            lines.append(entry)
+            total_chars += len(entry)
+
+        return "\n".join(lines)
+
     async def _get_task_growth_context(self, user_id: str, task_id: str) -> TaskGrowthContext:
         memories = await self.memory_collection.count_documents({"user_id": user_id, "source_id": task_id})
         suggestions = await self.suggestion_collection.count_documents({"user_id": user_id, "source_id": task_id})
@@ -1020,3 +1126,93 @@ def get_workflow_growth_service() -> WorkflowGrowthService:
     if _workflow_growth_service is None:
         _workflow_growth_service = WorkflowGrowthService()
     return _workflow_growth_service
+
+
+def build_recall_context_sync(
+    user_id: str,
+    ticker: Optional[str] = None,
+    workflow_id: Optional[str] = None,
+    max_items: int = 10,
+    max_chars: int = 3000,
+) -> str:
+    """
+    同步版本的记忆召回，供同步工作流执行路径使用。
+    通过 pymongo 同步查询，避免在非 asyncio 线程中调用异步代码。
+    """
+    from app.core.database import get_mongo_db_sync
+
+    db = get_mongo_db_sync()
+    collection = db.agent_memory_items
+
+    recall_items: List[Dict[str, Any]] = []
+
+    base_query: Dict[str, Any] = {
+        "user_id": user_id,
+        "status": GrowthMemoryStatus.APPROVED.value,
+    }
+
+    if ticker:
+        obj_query = {**base_query, "object_key": ticker}
+        docs = list(
+            collection.find(obj_query).sort("updated_at", -1).limit(max_items)
+        )
+        recall_items.extend(docs)
+
+    remaining = max_items - len(recall_items)
+
+    if remaining > 0 and workflow_id:
+        wf_query = {
+            **base_query,
+            "scope": GrowthMemoryScope.WORKFLOW_PATTERN.value,
+            "source_workflow_id": workflow_id,
+        }
+        seen_ids = {str(d.get("_id")) for d in recall_items}
+        docs = list(
+            collection.find(wf_query).sort("updated_at", -1).limit(remaining)
+        )
+        for d in docs:
+            if str(d.get("_id")) not in seen_ids:
+                recall_items.append(d)
+
+    remaining = max_items - len(recall_items)
+
+    if remaining > 0:
+        ra_query = {
+            **base_query,
+            "scope": GrowthMemoryScope.RESEARCH_ASSET.value,
+        }
+        seen_ids = {str(d.get("_id")) for d in recall_items}
+        docs = list(
+            collection.find(ra_query).sort("updated_at", -1).limit(remaining)
+        )
+        for d in docs:
+            if str(d.get("_id")) not in seen_ids:
+                recall_items.append(d)
+
+    if not recall_items:
+        return ""
+
+    lines = ["## 历史研究记忆（已审核批准）\n"]
+    total_chars = 0
+    for item in recall_items:
+        title = item.get("title", "")
+        summary = item.get("summary") or item.get("content", "")
+        scope = item.get("scope", "")
+        obj_key = item.get("object_key", "")
+
+        if len(summary) > 500:
+            summary = summary[:500] + "…"
+
+        entry = f"- **{title}**"
+        if obj_key:
+            entry += f" [{obj_key}]"
+        if scope:
+            entry += f" ({scope})"
+        entry += f"\n  {summary}\n"
+
+        if total_chars + len(entry) > max_chars:
+            break
+        lines.append(entry)
+        total_chars += len(entry)
+
+    return "\n".join(lines)

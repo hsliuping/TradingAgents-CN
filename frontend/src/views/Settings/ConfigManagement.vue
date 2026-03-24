@@ -91,7 +91,7 @@
               show-icon
               style="margin-bottom: 20px"
             >
-              配置 IM 平台（QQ Bot 等）的接入凭据。配置保存后适配器将自动热重载，无需重启服务。
+              配置 IM 平台（QQ Bot / 飞书 / 钉钉）的接入凭据。配置保存后适配器将自动热重载，无需重启服务。
             </el-alert>
 
             <!-- QQ Bot 配置 -->
@@ -144,6 +144,90 @@
                   测试连接
                 </el-button>
                 <el-tag v-if="gatewayQQConfig.configured" type="success" style="margin-left: 12px">已配置</el-tag>
+                <el-tag v-else type="info" style="margin-left: 12px">未配置</el-tag>
+              </el-form-item>
+            </el-form>
+
+            <el-divider />
+
+            <!-- 飞书 Bot 配置 -->
+            <h4 style="margin-bottom: 16px;">飞书 Bot</h4>
+            <el-form :model="gatewayFeishuConfig" label-width="160px" style="max-width: 600px">
+              <el-form-item label="App ID" required>
+                <el-input v-model="gatewayFeishuConfig.app_id" placeholder="飞书开放平台应用的 App ID" />
+              </el-form-item>
+              <el-form-item label="App Secret" required>
+                <el-input
+                  v-model="gatewayFeishuConfig.app_secret"
+                  placeholder="飞书开放平台应用的 App Secret"
+                  show-password
+                />
+              </el-form-item>
+              <el-form-item label="Verification Token">
+                <el-input v-model="gatewayFeishuConfig.verification_token" placeholder="事件订阅验证 Token（可选）" />
+                <div class="form-tip">飞书开放平台 → 应用 → 事件订阅 → Verification Token</div>
+              </el-form-item>
+              <el-form-item label="Encrypt Key">
+                <el-input
+                  v-model="gatewayFeishuConfig.encrypt_key"
+                  placeholder="事件加密密钥（可选）"
+                  show-password
+                />
+                <div class="form-tip">启用后飞书事件推送会加密，需要在飞书后台同时配置</div>
+              </el-form-item>
+              <el-form-item label="启用">
+                <el-switch v-model="gatewayFeishuConfig.enabled" />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" @click="handleSaveGatewayConfig('feishu')" :loading="gatewaySaving">
+                  保存配置
+                </el-button>
+                <el-button
+                  @click="handleTestGatewayConnection('feishu')"
+                  :loading="gatewayTesting"
+                  :disabled="!gatewayFeishuConfig.configured"
+                >
+                  测试连接
+                </el-button>
+                <el-tag v-if="gatewayFeishuConfig.configured" type="success" style="margin-left: 12px">已配置</el-tag>
+                <el-tag v-else type="info" style="margin-left: 12px">未配置</el-tag>
+              </el-form-item>
+            </el-form>
+
+            <el-divider />
+
+            <!-- 钉钉 Bot 配置 -->
+            <h4 style="margin-bottom: 16px;">钉钉 Bot</h4>
+            <el-form :model="gatewayDingtalkConfig" label-width="160px" style="max-width: 600px">
+              <el-form-item label="AppKey" required>
+                <el-input v-model="gatewayDingtalkConfig.app_key" placeholder="钉钉开放平台应用的 AppKey" />
+              </el-form-item>
+              <el-form-item label="AppSecret" required>
+                <el-input
+                  v-model="gatewayDingtalkConfig.app_secret"
+                  placeholder="钉钉开放平台应用的 AppSecret"
+                  show-password
+                />
+              </el-form-item>
+              <el-form-item label="机器人编码 (Robot Code)">
+                <el-input v-model="gatewayDingtalkConfig.robot_code" placeholder="用于主动发消息（可选）" />
+                <div class="form-tip">钉钉开放平台 → 应用 → 机器人 → 机器人编码，主动发消息时必填</div>
+              </el-form-item>
+              <el-form-item label="启用">
+                <el-switch v-model="gatewayDingtalkConfig.enabled" />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" @click="handleSaveGatewayConfig('dingtalk')" :loading="gatewaySaving">
+                  保存配置
+                </el-button>
+                <el-button
+                  @click="handleTestGatewayConnection('dingtalk')"
+                  :loading="gatewayTesting"
+                  :disabled="!gatewayDingtalkConfig.configured"
+                >
+                  测试连接
+                </el-button>
+                <el-tag v-if="gatewayDingtalkConfig.configured" type="success" style="margin-left: 12px">已配置</el-tag>
                 <el-tag v-else type="info" style="margin-left: 12px">未配置</el-tag>
               </el-form-item>
             </el-form>
@@ -1462,6 +1546,28 @@ const gatewayQQConfig = ref<GatewayConfig>({
   enabled: false,
   configured: false,
 })
+const gatewayFeishuConfig = ref<GatewayConfig>({
+  platform: 'feishu',
+  app_id: '',
+  app_secret: '',
+  bot_secret: '',
+  connection_mode: 'webhook',
+  enabled: false,
+  configured: false,
+  verification_token: '',
+  encrypt_key: '',
+})
+const gatewayDingtalkConfig = ref<GatewayConfig>({
+  platform: 'dingtalk',
+  app_id: '',
+  app_secret: '',
+  bot_secret: '',
+  connection_mode: 'webhook',
+  enabled: false,
+  configured: false,
+  app_key: '',
+  robot_code: '',
+})
 
 // 测试状态
 const testingProviders = ref<Record<string, boolean>>({})
@@ -1494,7 +1600,11 @@ const loadTabData = async (tab: string) => {
       await loadEmbeddingProviders()  // 🔥 新增：加载 Embedding 厂家列表
       break
     case 'gateway':
-      await fetchGatewayConfig('qq')
+      await Promise.all([
+        fetchGatewayConfig('qq'),
+        fetchGatewayConfig('feishu'),
+        fetchGatewayConfig('dingtalk'),
+      ])
       break
     case 'api-keys':
       await loadProviders()
@@ -2355,6 +2465,10 @@ const fetchGatewayConfig = async (platform: string) => {
     const data = await configApi.getGatewayConfig(platform)
     if (platform === 'qq') {
       gatewayQQConfig.value = data
+    } else if (platform === 'feishu') {
+      gatewayFeishuConfig.value = data
+    } else if (platform === 'dingtalk') {
+      gatewayDingtalkConfig.value = data
     }
   } catch (error: any) {
     console.error(`获取 Gateway ${platform} 配置失败:`, error)
@@ -2365,26 +2479,55 @@ const fetchGatewayConfig = async (platform: string) => {
 }
 
 const handleSaveGatewayConfig = async (platform: string) => {
-  const cfg = platform === 'qq' ? gatewayQQConfig.value : null
-  if (!cfg) return
+  let req: GatewayConfigRequest
 
-  if (!cfg.app_id || !cfg.app_secret) {
-    ElMessage.warning('AppID 和 AppSecret 不能为空')
-    return
-  }
-
-  try {
-    gatewaySaving.value = true
-    const req: GatewayConfigRequest = {
+  if (platform === 'qq') {
+    const cfg = gatewayQQConfig.value
+    if (!cfg.app_id || !cfg.app_secret) {
+      ElMessage.warning('AppID 和 AppSecret 不能为空')
+      return
+    }
+    req = {
       app_id: cfg.app_id,
       app_secret: cfg.app_secret,
       bot_secret: cfg.bot_secret || undefined,
       connection_mode: cfg.connection_mode || 'websocket',
       enabled: cfg.enabled,
     }
+  } else if (platform === 'feishu') {
+    const cfg = gatewayFeishuConfig.value
+    if (!cfg.app_id || !cfg.app_secret) {
+      ElMessage.warning('App ID 和 App Secret 不能为空')
+      return
+    }
+    req = {
+      app_id: cfg.app_id,
+      app_secret: cfg.app_secret,
+      verification_token: cfg.verification_token || undefined,
+      encrypt_key: cfg.encrypt_key || undefined,
+      enabled: cfg.enabled,
+    }
+  } else if (platform === 'dingtalk') {
+    const cfg = gatewayDingtalkConfig.value
+    if (!cfg.app_key || !cfg.app_secret) {
+      ElMessage.warning('AppKey 和 AppSecret 不能为空')
+      return
+    }
+    req = {
+      app_key: cfg.app_key,
+      app_secret: cfg.app_secret,
+      robot_code: cfg.robot_code || undefined,
+      enabled: cfg.enabled,
+    }
+  } else {
+    return
+  }
+
+  try {
+    gatewaySaving.value = true
     await configApi.updateGatewayConfig(platform, req)
-    ElMessage.success(`Gateway ${platform.toUpperCase()} 配置已保存`)
-    // 刷新显示 configured 状态
+    const labels: Record<string, string> = { qq: 'QQ', feishu: '飞书', dingtalk: '钉钉' }
+    ElMessage.success(`${labels[platform] || platform} Gateway 配置已保存`)
     await fetchGatewayConfig(platform)
   } catch (error: any) {
     console.error(`保存 Gateway ${platform} 配置失败:`, error)

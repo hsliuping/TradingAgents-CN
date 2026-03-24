@@ -21,6 +21,7 @@ class ToolCategory(str, Enum):
     UTILITY = "utility"         # 通用工具（Skill 扩展）
     KNOWLEDGE = "knowledge"     # 知识型（Skill 扩展）
     MCP = "mcp"                 # MCP 外部工具
+    EXTERNAL = "external"       # AI 生成的外部 Skill
 
 
 class ToolParameter(BaseModel):
@@ -42,6 +43,9 @@ class ToolMetadata(BaseModel):
     
     # 参数定义
     parameters: List[ToolParameter] = Field(default_factory=list)
+    
+    # 来源标识
+    source: str = "builtin"           # builtin / generated / mcp / skill
     
     # 数据源信息
     data_source: str = ""             # 数据来源

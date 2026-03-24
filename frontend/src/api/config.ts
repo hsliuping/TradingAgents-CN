@@ -160,14 +160,26 @@ export interface GatewayConfig {
   connection_mode: string   // 'webhook' | 'websocket'
   enabled: boolean
   configured: boolean
+  // 飞书专属
+  verification_token?: string
+  encrypt_key?: string
+  // 钉钉专属
+  app_key?: string
+  robot_code?: string
 }
 
 export interface GatewayConfigRequest {
-  app_id: string
-  app_secret: string
+  app_id?: string
+  app_secret?: string
   bot_secret?: string
-  connection_mode: string   // 'webhook' | 'websocket'
+  connection_mode?: string   // 'webhook' | 'websocket'
   enabled: boolean
+  // 飞书专属
+  verification_token?: string
+  encrypt_key?: string
+  // 钉钉专属
+  app_key?: string
+  robot_code?: string
 }
 
 // 系统设置元数据

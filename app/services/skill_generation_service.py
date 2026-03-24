@@ -1017,5 +1017,13 @@ test_input: {spec.test_input}
         }
         await self._db[SKILL_COLLECTION].insert_one(skill_doc)
         logger.info(f"✅ Skill '{spec.tool_id}' 已保存到数据库")
+
+        try:
+            from core.tools.registry import get_tool_registry
+            from core.tools.external_skill_loader import register_single_external_skill
+            register_single_external_skill(None, get_tool_registry(), skill_doc)
+        except Exception as e:
+            logger.warning(f"⚠️ Skill '{spec.tool_id}' 热注册失败（重启后生效）: {e}")
+
         return spec.tool_id
 
