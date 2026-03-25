@@ -78,7 +78,7 @@ def _resolve_embedding_from_db(db_settings: dict) -> dict:
 
     provider_name, model_name = default_emb.split(":", 1)
     sync_db = _get_sync_db()
-    if not sync_db:
+    if sync_db is None:
         return {}
 
     try:

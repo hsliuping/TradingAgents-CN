@@ -44,6 +44,29 @@ export interface PlannedAnalysisResponse extends ChatResponse {
   supplemented: boolean
 }
 
+export interface PlannedAnalysisPlan {
+  question: string
+  template_id?: string
+  source: string
+  steps: Array<{
+    id: number
+    tool: string
+    args: Record<string, any>
+    intent: string
+    depends_on: number[]
+  }>
+}
+
+export interface PlannedStepResult {
+  step_id: number
+  tool: string
+  intent: string
+  success: boolean
+  result?: any
+  error?: string
+  duration_ms: number
+}
+
 export interface MessageItem {
   role: 'user' | 'assistant'
   content: string
@@ -141,8 +164,124 @@ export interface ThreadDeleteResponse {
 export interface StreamCallbacks {
   onToken?: (content: string) => void
   onToolEvent?: (event: Record<string, any>) => void
-  onDone?: (data: { tools_used: string[]; conversation_id?: string }) => void
+  onDone?: (data: {
+    tools_used: string[]
+    conversation_id?: string
+    plan?: PlannedAnalysisPlan
+    step_results?: PlannedStepResult[]
+    source?: 'seed_flow' | 'llm_plan' | 'react'
+    supplemented?: boolean
+    error?: boolean
+    reply?: string
+  }) => void
   onError?: (message: string) => void
+}
+
+function createAssistantStream(
+  path: string,
+  payload: ChatRequest,
+  callbacks?: StreamCallbacks,
+): AbortController {
+  const controller = new AbortController()
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
+  const token = localStorage.getItem('auth-token') || ''
+  const appToken = localStorage.getItem('app-token') || ''
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  if (appToken) headers['X-App-Token'] = appToken
+
+  const IDLE_TIMEOUT_MS = 90_000
+
+  fetch(`${baseUrl}${path}`, {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify(payload),
+    signal: controller.signal,
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        if (response.status === 401) {
+          callbacks?.onError?.('登录已过期，请重新登录')
+        } else {
+          callbacks?.onError?.(`HTTP ${response.status}: ${response.statusText}`)
+        }
+        return
+      }
+
+      const reader = response.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let idleTimer: ReturnType<typeof setTimeout> | null = null
+
+      const resetIdle = () => {
+        if (idleTimer) clearTimeout(idleTimer)
+        idleTimer = setTimeout(() => {
+          callbacks?.onError?.('连接超时：服务器长时间未响应，请重试')
+          controller.abort()
+        }, IDLE_TIMEOUT_MS)
+      }
+
+      resetIdle()
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          resetIdle()
+          buffer += decoder.decode(value, { stream: true })
+          const parts = buffer.split('\n\n')
+          buffer = parts.pop() || ''
+
+          for (const part of parts) {
+            if (!part.trim() || part.startsWith(': ')) continue
+
+            let eventType = ''
+            let eventData = ''
+
+            for (const line of part.split('\n')) {
+              if (line.startsWith('event: ')) {
+                eventType = line.slice(7)
+              } else if (line.startsWith('data: ')) {
+                eventData = line.slice(6)
+              }
+            }
+
+            if (!eventData) continue
+
+            try {
+              const data = JSON.parse(eventData)
+              switch (eventType) {
+                case 'token':
+                  callbacks?.onToken?.(data.content || '')
+                  break
+                case 'done':
+                  callbacks?.onDone?.(data)
+                  break
+                case 'error':
+                  callbacks?.onError?.(data.message || '未知错误')
+                  break
+                default:
+                  callbacks?.onToolEvent?.({ ...data, event: eventType || data.event })
+              }
+            } catch {
+              // Ignore malformed JSON
+            }
+          }
+        }
+      } finally {
+        if (idleTimer) clearTimeout(idleTimer)
+      }
+    })
+    .catch((err) => {
+      if (err.name !== 'AbortError') {
+        callbacks?.onError?.(err.message || '网络请求失败，请检查网络连接后重试')
+      }
+    })
+
+  return controller
 }
 
 export const assistantApi = {
@@ -256,111 +395,35 @@ export const assistantApi = {
     deepModel?: string,
     callbacks?: StreamCallbacks,
   ): AbortController {
-    const controller = new AbortController()
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
-    const token = localStorage.getItem('auth-token') || ''
-    const appToken = localStorage.getItem('app-token') || ''
-
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (token) headers['Authorization'] = `Bearer ${token}`
-    if (appToken) headers['X-App-Token'] = appToken
-
-    const IDLE_TIMEOUT_MS = 90_000
-
-    fetch(`${baseUrl}/api/assistant/chat/stream`, {
-      method: 'POST',
-      headers,
-      credentials: 'include',
-      body: JSON.stringify({
+    return createAssistantStream(
+      '/api/assistant/chat/stream',
+      {
         message,
         conversation_id: conversationId,
         quick_model: quickModel,
         deep_model: deepModel,
-      }),
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          if (response.status === 401) {
-            callbacks?.onError?.('登录已过期，请重新登录')
-          } else {
-            callbacks?.onError?.(`HTTP ${response.status}: ${response.statusText}`)
-          }
-          return
-        }
+      },
+      callbacks,
+    )
+  },
 
-        const reader = response.body!.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-        let idleTimer: ReturnType<typeof setTimeout> | null = null
-
-        const resetIdle = () => {
-          if (idleTimer) clearTimeout(idleTimer)
-          idleTimer = setTimeout(() => {
-            callbacks?.onError?.('连接超时：服务器长时间未响应，请重试')
-            controller.abort()
-          }, IDLE_TIMEOUT_MS)
-        }
-
-        resetIdle()
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-
-            resetIdle()
-            buffer += decoder.decode(value, { stream: true })
-            const parts = buffer.split('\n\n')
-            buffer = parts.pop() || ''
-
-            for (const part of parts) {
-              if (!part.trim() || part.startsWith(': ')) continue
-
-              let eventType = ''
-              let eventData = ''
-
-              for (const line of part.split('\n')) {
-                if (line.startsWith('event: ')) {
-                  eventType = line.slice(7)
-                } else if (line.startsWith('data: ')) {
-                  eventData = line.slice(6)
-                }
-              }
-
-              if (!eventData) continue
-
-              try {
-                const data = JSON.parse(eventData)
-                switch (eventType) {
-                  case 'token':
-                    callbacks?.onToken?.(data.content || '')
-                    break
-                  case 'done':
-                    callbacks?.onDone?.(data)
-                    break
-                  case 'error':
-                    callbacks?.onError?.(data.message || '未知错误')
-                    break
-                  default:
-                    callbacks?.onToolEvent?.({ ...data, event: eventType || data.event })
-                }
-              } catch {
-                // Ignore malformed JSON
-              }
-            }
-          }
-        } finally {
-          if (idleTimer) clearTimeout(idleTimer)
-        }
-      })
-      .catch((err) => {
-        if (err.name !== 'AbortError') {
-          callbacks?.onError?.(err.message || '网络请求失败，请检查网络连接后重试')
-        }
-      })
-
-    return controller
+  plannedAnalysisStream(
+    message: string,
+    conversationId?: string,
+    quickModel?: string,
+    deepModel?: string,
+    callbacks?: StreamCallbacks,
+  ): AbortController {
+    return createAssistantStream(
+      '/api/assistant/planned-analysis/stream',
+      {
+        message,
+        conversation_id: conversationId,
+        quick_model: quickModel,
+        deep_model: deepModel,
+      },
+      callbacks,
+    )
   },
 
   // ---- mem0 统一记忆层 ----

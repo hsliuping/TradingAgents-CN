@@ -135,6 +135,7 @@ marshmallow==3.26.1
 matplotlib==3.10.6
 mcp==1.14.1
 mdurl==0.1.2
+mem0ai==1.0.7
 mini-racer==0.12.4
 mmh3==5.2.0
 monotonic==1.6

@@ -45,6 +45,7 @@ from app.services.intelligent_assistant_service import (
     get_assistant_thread_report_detail,
 )
 from app.services.planned_analysis_service import PlannedAnalysisService
+from app.services.planned_analysis_service import stream_planned_analysis_with_assistant
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
@@ -397,3 +398,53 @@ async def planned_analysis(
     except Exception as e:
         logger.exception("[规划分析 API] 处理失败")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/planned-analysis/stream")
+async def planned_analysis_stream(
+    request: ChatRequest,
+    current_user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """规划分析流式接口 (SSE)。"""
+    if not request.message or not request.message.strip():
+        raise HTTPException(status_code=400, detail="消息不能为空")
+
+    user_id = str(current_user["id"])
+    _HEARTBEAT_INTERVAL = 15
+
+    async def event_generator():
+        import json as _json
+
+        gen = stream_planned_analysis_with_assistant(
+            db=db,
+            user_message=request.message.strip(),
+            user_id=user_id,
+            conversation_id=request.conversation_id,
+            quick_model=request.quick_model,
+            deep_model=request.deep_model,
+        )
+        try:
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(gen.__anext__(), timeout=_HEARTBEAT_INTERVAL)
+                    yield chunk
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                except StopAsyncIteration:
+                    break
+        except Exception as e:
+            logger.exception("[规划分析 API·流式] 处理失败")
+            yield f"event: error\ndata: {_json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
+        finally:
+            await gen.aclose()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
