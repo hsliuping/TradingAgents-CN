@@ -13,6 +13,7 @@ MemoryService — mem0 统一记忆适配层
 """
 
 import asyncio
+import inspect
 import logging
 import os
 from typing import Any, Dict, List, Optional
@@ -81,7 +82,39 @@ class MemoryService:
                     logger.warning("[MemoryService] %s", self._init_error)
                     return False
 
-                self._mem = AsyncMemory.from_config(config)
+                env_backup = {
+                    "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY"),
+                    "OPENAI_BASE_URL": os.environ.get("OPENAI_BASE_URL"),
+                    "OPENAI_API_BASE": os.environ.get("OPENAI_API_BASE"),
+                    "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY"),
+                }
+
+                llm_cfg = config.get("llm", {}).get("config", {})
+                embedder_cfg = config.get("embedder", {}).get("config", {})
+                selected_api_key = llm_cfg.get("api_key") or embedder_cfg.get("api_key") or ""
+                selected_base_url = llm_cfg.get("openai_base_url") or embedder_cfg.get("openai_base_url") or ""
+
+                if selected_api_key:
+                    os.environ["OPENAI_API_KEY"] = selected_api_key
+                if selected_base_url:
+                    os.environ["OPENAI_BASE_URL"] = selected_base_url
+                    os.environ["OPENAI_API_BASE"] = selected_base_url
+
+                if selected_base_url and "openrouter.ai" not in selected_base_url.lower():
+                    os.environ.pop("OPENROUTER_API_KEY", None)
+
+                try:
+                    mem_client = AsyncMemory.from_config(config)
+                    if inspect.isawaitable(mem_client):
+                        mem_client = await mem_client
+                finally:
+                    for key, value in env_backup.items():
+                        if value is None:
+                            os.environ.pop(key, None)
+                        else:
+                            os.environ[key] = value
+
+                self._mem = mem_client
                 logger.info("[MemoryService] mem0 AsyncMemory 初始化成功")
                 return True
             except Exception as e:
@@ -102,6 +135,7 @@ class MemoryService:
         session_id: str = "",
         scope: str = MemoryScope.CONVERSATION,
         metadata: Optional[Dict[str, Any]] = None,
+        infer: bool = True,
     ) -> StoreResult:
         """
         存储记忆 — mem0 自动调用 LLM 提取事实并向量化。
@@ -115,6 +149,10 @@ class MemoryService:
             metadata: 附加元数据（symbol, task_id 等）
         """
         if not await self._ensure_init():
+            logger.info(
+                "[MemoryService] store SKIP — user=%s agent=%s scope=%s error=%s",
+                user_id, agent_id, scope, self._init_error or "mem0 不可用",
+            )
             return StoreResult(success=False, error=self._init_error or "mem0 不可用")
 
         truncated = _truncate_messages(messages)
@@ -130,6 +168,7 @@ class MemoryService:
             kwargs["agent_id"] = agent_id
         if session_id:
             kwargs["run_id"] = session_id
+        kwargs["infer"] = infer
 
         try:
             result = await self._mem.add(truncated, **kwargs)
@@ -151,6 +190,10 @@ class MemoryService:
             logger.debug(
                 "[MemoryService] store OK — scope=%s user=%s agent=%s facts=%d",
                 scope, user_id, agent_id, count,
+            )
+            logger.info(
+                "[MemoryService] store RESULT — user=%s agent=%s scope=%s facts=%d ids=%d",
+                user_id, agent_id, scope, count, len(ids),
             )
             return StoreResult(memory_ids=ids, facts_extracted=count)
         except Exception as e:
@@ -189,8 +232,13 @@ class MemoryService:
         if agent_id:
             kwargs["agent_id"] = agent_id
 
-        if scopes:
-            kwargs["filters"] = {"scope": {"$in": scopes}}
+        scope_filter = _build_mem0_scope_filter(scopes)
+        if scope_filter:
+            kwargs["filters"] = scope_filter
+        elif _normalize_scopes(scopes):
+            # mem0 qdrant backend only supports scalar MatchValue filters, not Mongo-style $in.
+            # For multiple scopes, fetch a larger candidate set and filter client-side.
+            kwargs["limit"] = max(limit * 5, 20)
 
         try:
             results = await self._mem.search(query, **kwargs)
@@ -199,6 +247,7 @@ class MemoryService:
             for raw in raw_list:
                 if isinstance(raw, dict):
                     items.append(MemoryItem.from_mem0(raw))
+            items = _filter_items_by_scopes(items, scopes)
             return items[:limit]
         except Exception as e:
             logger.warning("[MemoryService] recall 失败（已降级）: %s", e)
@@ -253,13 +302,20 @@ class MemoryService:
             return ""
 
         kwargs: Dict[str, Any] = {"user_id": user_id, "limit": 50}
-        if scopes:
-            kwargs["filters"] = {"scope": {"$in": scopes}}
+        scope_filter = _build_mem0_scope_filter(scopes)
+        if scope_filter:
+            kwargs["filters"] = scope_filter
 
         try:
             results = await self._mem.get_all(**kwargs)
             raw_list = results.get("results", []) if isinstance(results, dict) else results
-            facts = [r.get("memory", "") for r in raw_list if isinstance(r, dict) and r.get("memory")]
+            items = [
+                MemoryItem.from_mem0(r)
+                for r in raw_list
+                if isinstance(r, dict)
+            ]
+            items = _filter_items_by_scopes(items, scopes)
+            facts = [item.memory for item in items if item.memory]
             if not facts:
                 return ""
             summary_lines = [f"- {f}" for f in facts[:30]]
@@ -283,13 +339,18 @@ class MemoryService:
             {"items": [MemoryItem, ...], "total": int}
         """
         if not await self._ensure_init():
+            logger.info(
+                "[MemoryService] get_all SKIP — user=%s scopes=%s error=%s",
+                user_id, scopes, self._init_error or "mem0 不可用",
+            )
             return {"items": [], "total": 0}
 
         kwargs: Dict[str, Any] = {"limit": 200}
         if user_id:
             kwargs["user_id"] = user_id
-        if scopes:
-            kwargs["filters"] = {"scope": {"$in": scopes}}
+        scope_filter = _build_mem0_scope_filter(scopes)
+        if scope_filter:
+            kwargs["filters"] = scope_filter
 
         try:
             results = await self._mem.get_all(**kwargs)
@@ -299,9 +360,14 @@ class MemoryService:
                 for raw in raw_list
                 if isinstance(raw, dict)
             ]
+            all_items = _filter_items_by_scopes(all_items, scopes)
             total = len(all_items)
             start = (page - 1) * limit
             end = start + limit
+            logger.info(
+                "[MemoryService] get_all RESULT — user=%s scopes=%s total=%d page=%d limit=%d",
+                user_id, scopes, total, page, limit,
+            )
             return {"items": all_items[start:end], "total": total}
         except Exception as e:
             logger.warning("[MemoryService] get_all 失败: %s", e)
@@ -363,6 +429,31 @@ _SCOPE_LABEL = {
     MemoryScope.AGENT_EXPERIENCE: "经验",
     MemoryScope.TRADE_PATTERN: "交易",
 }
+
+
+def _normalize_scopes(scopes: Optional[List[str]]) -> List[str]:
+    if not scopes:
+        return []
+    normalized: List[str] = []
+    for scope in scopes:
+        value = str(scope or "").strip()
+        if value:
+            normalized.append(value)
+    return normalized
+
+
+def _build_mem0_scope_filter(scopes: Optional[List[str]]) -> Optional[Dict[str, str]]:
+    normalized = _normalize_scopes(scopes)
+    if len(normalized) == 1:
+        return {"scope": normalized[0]}
+    return None
+
+
+def _filter_items_by_scopes(items: List[MemoryItem], scopes: Optional[List[str]]) -> List[MemoryItem]:
+    normalized = set(_normalize_scopes(scopes))
+    if not normalized:
+        return items
+    return [item for item in items if (item.scope or "") in normalized]
 
 
 def _truncate_messages(

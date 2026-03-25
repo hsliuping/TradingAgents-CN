@@ -9,6 +9,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
@@ -33,6 +34,63 @@ from core.llm import UnifiedLLMClient
 from core.llm.models import LLMConfig, LLMProvider, Message, MessageRole
 
 logger = logging.getLogger(__name__)
+
+_MEMORY_FACT_KEYWORDS = [
+    "结论", "营收", "收入", "净利润", "扣非", "毛利率", "现金流", "分红", "股息率", "估值",
+    "预期", "超预期", "低于预期", "价格战", "成本", "销量", "增长", "下滑", "风险", "压力",
+    "支撑", "阻力", "走势", "震荡", "偏弱", "偏强", "回调", "反弹", "逻辑", "原因",
+]
+
+
+def _extract_memory_subject(user_msg: str, assistant_msg: str) -> str:
+    title_match = re.search(r"##\s*[📌✅⚠️🔍💡]*\s*([A-Za-z0-9\u4e00-\u9fff]{2,20})(?:[（(][^\n]{0,20}[)）])?(?:——|\-|：|:)", assistant_msg or "")
+    if title_match:
+        return title_match.group(1).strip()
+
+    user_match = re.search(r"([A-Za-z0-9\u4e00-\u9fff]{2,20})(?:股票|走势|业绩|表现|分红|怎么看|为什么|如何)", user_msg or "")
+    if user_match:
+        return user_match.group(1).strip()
+
+    return ""
+
+
+def _clean_memory_line(text: str) -> str:
+    cleaned = (text or "").strip()
+    cleaned = re.sub(r"^#+\s*", "", cleaned)
+    cleaned = re.sub(r"^[>\-*\d\.\s✅⚠️📌🔍💡]+", "", cleaned)
+    cleaned = re.sub(r"\*+", "", cleaned)
+    cleaned = re.sub(r"`+", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip(" |：:-")
+
+
+def _build_fallback_memory_facts(user_msg: str, assistant_msg: str, limit: int = 5) -> List[str]:
+    subject = _extract_memory_subject(user_msg, assistant_msg)
+    candidates: List[str] = []
+
+    for raw_line in (assistant_msg or "").splitlines():
+        line = _clean_memory_line(raw_line)
+        if not line or len(line) < 10:
+            continue
+        if line.startswith("|") or set(line) <= {"-", "|", ":", " "}:
+            continue
+        if "数据来源" in line:
+            continue
+        if any(keyword in line for keyword in _MEMORY_FACT_KEYWORDS):
+            if subject and subject not in line and len(line) < 70:
+                line = f"{subject}：{line}"
+            candidates.append(line[:120])
+
+    seen = set()
+    facts: List[str] = []
+    for item in candidates:
+        if item in seen:
+            continue
+        seen.add(item)
+        facts.append(item)
+        if len(facts) >= limit:
+            break
+    return facts
 
 
 def _should_force_tool_retry(user_message: str) -> bool:
@@ -202,7 +260,7 @@ def _get_system_prompt(
 - **进度查询**：查询已发起的分析任务执行状态（排队中/运行中/已完成/失败）
 - **报告查阅**：已生成的报告保存在数据库中，随时可读取、解读、搜索历史报告
 - **定时分析**：创建周期性自动分析计划（如每天早9点分析自选股），管理已有的定时分析配置（仅限分析任务，不支持闹钟等无关功能）
-- **自选股管理**：查看、添加、移除自选股分组
+- **股票关注列表管理**：查看股票关注列表（即自选股）、按标签理解用户关注池，并可添加/移除自选股或管理自选股分组
 - **数据查询**：直接获取个股行情、财务报表（利润表/资产负债表/现金流）、技术指标（MACD/RSI/布林带等）、新闻资讯等原始数据
 - **持仓分析**：查看用户的持仓列表（实盘/模拟），获取某只持仓股票的最新 AI 分析报告，或发起一次新的持仓分析任务（含操作建议、目标价位、风险评估）
 - **交易复盘**：查看复盘历史，获取复盘报告详情，或对指定交易发起一次新的 AI 复盘分析（评分、总结、改进建议、经验教训）
@@ -250,6 +308,15 @@ def _get_system_prompt(
 - **触发分析任务**：如果用户指令明确（如「帮我分析600519」）可直接执行；如果模糊则先确认
 - **删除/移除操作**：先告知用户将要做什么，得到确认后再执行
 - **复杂多步任务**：先向用户说明你的执行方案，用户确认后再逐步执行
+
+【股票关注列表 / 自选股 / 标签 / 定时分析配置（必须严格区分）】
+- “股票关注列表” 就是“自选股列表”，主数据来源是 `user_favorites`；每只股票可以带 `tags` 标签。
+- `watchlist_groups` 是可选的“自选股分组/组织方式”，不是股票关注列表本体。
+- `scheduled_analysis_configs` 才表示“哪些分组会在什么时间被自动分析”。
+- 用户问“我关注列表里有哪些股票 / 股票关注列表 / 自选股 / 我关注了哪些股票”时，应优先查看股票关注列表（自选股）本身；如果用户提到某个标签，再按标签筛选。
+- 用户问“分组里有哪些股票”时，再查看自选股分组。
+- 用户问“哪些股票会被自动分析 / 定时分析列表 / 自动分析计划 / 定时任务”时，才去查看定时分析配置。
+- 除非工具结果明确显示某个自选股分组已被配置到定时分析中，否则不要擅自把“已关注/已加入自选股”解释成“会自动定时分析”。
 
 【教练能力 —— 保留原有教学风格】
 - 教方法，不给答案：带用户走分析流程，而非直接下结论
@@ -2230,16 +2297,52 @@ async def _store_conversation_memory(
             {"role": "assistant", "content": assistant_msg},
         ]
         meta = {}
+        meta["source_agent"] = "assistant"
         if tools_used:
             meta["tools_used"] = ",".join(tools_used[:5])
-        await svc.store(
+        logger.info(
+            "[mem0] 对话记忆提交内容 — user=%s thread=%s user_msg=%s assistant_msg=%s tools=%s",
+            user_id,
+            thread_id,
+            (user_msg or "").replace("\n", "\\n")[:300],
+            (assistant_msg or "").replace("\n", "\\n")[:600],
+            ",".join(tools_used[:5]) if tools_used else "",
+        )
+        result = await svc.store(
             messages,
             user_id=user_id,
-            agent_id="assistant",
             session_id=thread_id,
             scope="conversation",
             metadata=meta if meta else None,
         )
+        logger.info(
+            "[mem0] 对话记忆写入结果 — user=%s thread=%s scope=conversation facts=%d success=%s error=%s",
+            user_id,
+            thread_id,
+            result.facts_extracted,
+            result.success,
+            result.error or "",
+        )
+        if result.success and result.facts_extracted == 0:
+            fallback_facts = _build_fallback_memory_facts(user_msg, assistant_msg)
+            if fallback_facts:
+                fallback_result = await svc.store(
+                    [{"role": "assistant", "content": fact} for fact in fallback_facts],
+                    user_id=user_id,
+                    session_id=thread_id,
+                    scope="analysis_insight",
+                    metadata={"fallback": "rule_based", **meta} if meta else {"fallback": "rule_based"},
+                    infer=False,
+                )
+                logger.info(
+                    "[mem0] 对话记忆兜底写入结果 — user=%s thread=%s facts=%d success=%s error=%s fallback_facts=%s",
+                    user_id,
+                    thread_id,
+                    fallback_result.facts_extracted,
+                    fallback_result.success,
+                    fallback_result.error or "",
+                    json.dumps(fallback_facts, ensure_ascii=False),
+                )
     except Exception as e:
         logger.debug("[mem0] 记忆存储失败（已忽略）: %s", e)
 

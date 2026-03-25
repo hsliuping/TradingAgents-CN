@@ -57,6 +57,9 @@ Var hNginxEdit
 Var InstallMode
 Var hUpgradeRadio
 Var hOverwriteRadio
+Var VCRedistInstalled
+Var VCRedistExitCode
+Var MongoRuntimeOk
 
 Function ValidateInstallDirPath
  Exch $0
@@ -136,6 +139,37 @@ Function ValidateInstallDirPath
  Pop $2
  Pop $1
  Exch $0
+FunctionEnd
+
+Function CheckVCRedistX64Installed
+ Push $0
+
+ StrCpy $VCRedistInstalled "0"
+ SetRegView 64
+ ClearErrors
+ ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" "Installed"
+ ${IfNot} ${Errors}
+  ${If} $0 == 1
+   StrCpy $VCRedistInstalled "1"
+  ${EndIf}
+ ${EndIf}
+
+ Pop $0
+FunctionEnd
+
+Function VerifyMongoRuntime
+ Push $0
+
+ StrCpy $MongoRuntimeOk "0"
+ ${If} ${FileExists} "$INSTDIR\vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\mongod.exe"
+  nsExec::ExecToLog '"$INSTDIR\vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\mongod.exe" --version'
+  Pop $0
+  ${If} $0 == 0
+   StrCpy $MongoRuntimeOk "1"
+  ${EndIf}
+ ${EndIf}
+
+ Pop $0
 FunctionEnd
 
 Function DirectoryPageLeave
@@ -409,16 +443,43 @@ ${If} $InstallMode == 1
 ${EndIf}
 
 ; Install Visual C++ Redistributable (required by MongoDB 8.0)
-DetailPrint "Installing Visual C++ Redistributable..."
-nsExec::ExecToLog '"$INSTDIR\vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\vc_redist.x64.exe" /quiet /norestart'
-Pop $0
-${If} $0 == 0
-  DetailPrint "Visual C++ Redistributable installed successfully"
-${ElseIf} $0 == 3010
-  DetailPrint "Visual C++ Redistributable installed (reboot may be needed)"
+DetailPrint "Checking Visual C++ Redistributable (x64) for MongoDB 8.0..."
+Call CheckVCRedistX64Installed
+${If} $VCRedistInstalled == "1"
+  DetailPrint "Visual C++ Redistributable (x64) already installed"
 ${Else}
-  DetailPrint "Visual C++ Redistributable returned code: $0 (may already be installed)"
+  DetailPrint "Installing Visual C++ Redistributable (x64)..."
+  ExecWait '"$INSTDIR\vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\vc_redist.x64.exe" /quiet /norestart' $VCRedistExitCode
+  ${If} $VCRedistExitCode == 0
+    DetailPrint "Visual C++ Redistributable installed successfully"
+  ${ElseIf} $VCRedistExitCode == 3010
+    DetailPrint "Visual C++ Redistributable installed, but Windows restart is required"
+  ${ElseIf} $VCRedistExitCode == 1638
+    DetailPrint "Visual C++ Redistributable reported another version is already installed; verifying runtime state"
+  ${Else}
+    MessageBox MB_ICONSTOP "Microsoft Visual C++ Redistributable (x64) installation failed. Exit code: $VCRedistExitCode.$\r$\n$\r$\nPlease restart Windows and run the installer again, or manually run:$\r$\n$INSTDIR\vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\vc_redist.x64.exe"
+    Abort
+  ${EndIf}
 ${EndIf}
+
+DetailPrint "Re-checking Visual C++ Redistributable (x64) installation state..."
+Call CheckVCRedistX64Installed
+${If} $VCRedistInstalled != "1"
+  MessageBox MB_ICONSTOP "Microsoft Visual C++ Redistributable (x64) is still not detected after installation.$\r$\n$\r$\nPlease restart Windows and run the installer again, or manually run:$\r$\n$INSTDIR\vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\vc_redist.x64.exe"
+  Abort
+${EndIf}
+
+DetailPrint "Verifying MongoDB runtime dependencies..."
+Call VerifyMongoRuntime
+${If} $MongoRuntimeOk != "1"
+  ${If} $VCRedistExitCode == 3010
+    MessageBox MB_ICONSTOP "MongoDB runtime verification failed because Windows restart is still required after installing Microsoft Visual C++ Redistributable.$\r$\n$\r$\nPlease restart Windows first, then run TradingAgentsCN again."
+  ${Else}
+    MessageBox MB_ICONSTOP "MongoDB runtime verification failed after installing Microsoft Visual C++ Redistributable.$\r$\n$\r$\nPlease manually run:$\r$\n$INSTDIR\vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\vc_redist.x64.exe$\r$\n$\r$\nThen restart Windows and try the installer again."
+  ${EndIf}
+  Abort
+${EndIf}
+DetailPrint "MongoDB runtime verification passed"
 
 ; Install PDF/Word export dependencies (GTK3, wkhtmltopdf, Pandoc) - silent install if bundled
 ; .exe: NSIS installer uses /S ; .msi: msiexec /i path /quiet

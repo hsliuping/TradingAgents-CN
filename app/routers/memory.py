@@ -21,6 +21,10 @@ ALL_SCOPES = [
 ]
 
 
+def _resolve_user_id(user: dict) -> str:
+    return str(user.get("user_id") or user.get("id") or "")
+
+
 @router.get("/health")
 async def memory_health(db: AsyncIOMotorDatabase = Depends(get_mongo_db)):
     """mem0 记忆层健康检查"""
@@ -37,7 +41,8 @@ async def memory_stats(
 ):
     """获取当前用户的记忆统计（按 scope 计数）"""
     from core.memory.service import get_memory_service, _is_mem0_enabled
-    user_id = user.get("user_id", "")
+    user_id = _resolve_user_id(user)
+    logger.info("[memory-api] stats request — resolved_user_id=%s", user_id)
 
     if not _is_mem0_enabled():
         return {
@@ -91,7 +96,11 @@ async def memory_list(
 ):
     """分页获取当前用户的记忆列表"""
     from core.memory.service import get_memory_service
-    user_id = user.get("user_id", "")
+    user_id = _resolve_user_id(user)
+    logger.info(
+        "[memory-api] list request — resolved_user_id=%s scope=%s page=%d page_size=%d",
+        user_id, scope, page, page_size,
+    )
     svc = get_memory_service(db)
 
     scopes = [scope] if scope else None
@@ -119,7 +128,11 @@ async def memory_recall(
 ):
     """语义搜索记忆"""
     from core.memory.service import get_memory_service
-    user_id = user.get("user_id", "")
+    user_id = _resolve_user_id(user)
+    logger.info(
+        "[memory-api] recall request — resolved_user_id=%s scope=%s limit=%d query=%s",
+        user_id, scope, limit, query[:80],
+    )
     svc = get_memory_service(db)
 
     scopes = [scope] if scope else None
@@ -158,7 +171,7 @@ async def memory_delete_all(
 ):
     """清除当前用户的全部记忆"""
     from core.memory.service import get_memory_service
-    user_id = user.get("user_id", "")
+    user_id = _resolve_user_id(user)
     svc = get_memory_service(db)
     count = await svc.delete_all_user_memories(user_id)
     return {"success": True, "data": {"deleted": count}}

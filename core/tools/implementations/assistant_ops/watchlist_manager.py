@@ -20,14 +20,14 @@ logger = logging.getLogger(__name__)
 @register_tool(
     tool_id="list_watchlist_groups",
     name="查看自选股分组",
-    description="列出用户的所有自选股分组，显示分组名称、股票数量和前几只股票代码预览。",
+    description="列出用户的自选股分组，显示分组名称、股票数量和股票代码预览。注意：这是分组视图，不等于完整的股票关注列表本体，也不等于定时分析配置。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
 )
 async def list_watchlist_groups() -> str:
-    """列出当前用户的所有自选股分组及每组股票数量。"""
+    """列出当前用户的自选股分组及每组股票数量。"""
     from app.core.database import get_mongo_db
 
     user_id = require_current_user_id()
@@ -47,15 +47,20 @@ async def list_watchlist_groups() -> str:
         groups.append(f"  {active} [{gid[:8]}] {name}（{len(stocks)}只）: {preview}")
 
     if not groups:
-        return "📂 暂无自选股分组。你可以让我帮你创建一个。"
-    return f"📂 共 {len(groups)} 个自选股分组：\n" + "\n".join(groups)
+        return "📂 暂无自选股分组。你可以让我帮你创建一个。\n\n提示：分组只是组织方式；若要查看完整股票关注列表，请使用“查看股票关注列表”。"
+    return (
+        f"📂 共 {len(groups)} 个自选股分组：\n"
+        + "\n".join(groups)
+        + "\n\n说明：以上是你的自选股分组视图，不等于完整股票关注列表，也不等于定时分析配置。"
+        + "若要查看完整关注股票，请调用“查看股票关注列表”；若要查看自动分析计划，请调用“查看定时分析配置”。"
+    )
 
 
 @tool
 @register_tool(
     tool_id="add_stock_to_watchlist",
-    name="添加股票到自选股",
-    description="将一只或多只股票添加到指定名称的自选股分组。分组不存在时自动创建新分组。",
+    name="添加股票到自选股分组",
+    description="将一只或多只股票添加到指定名称的自选股分组。分组不存在时自动创建新分组。注意：这只是分组管理，不代表会自动进入定时分析。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -128,8 +133,8 @@ async def add_stock_to_watchlist(
 @tool
 @register_tool(
     tool_id="remove_stock_from_watchlist",
-    name="从自选股移除股票",
-    description="从指定名称的自选股分组中移除一只或多只股票。不会删除分组本身。",
+    name="从自选股分组移除股票",
+    description="从指定名称的自选股分组中移除一只或多只股票。不会删除分组本身，也不会影响已有定时分析配置。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
