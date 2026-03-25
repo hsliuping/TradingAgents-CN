@@ -60,6 +60,7 @@ from .interface import (
     get_google_news,
     get_reddit_global_news,
     get_reddit_company_news,
+    get_adanos_social_sentiment,
     # Financial statements functions
     get_simfin_balance_sheet,
     get_simfin_cashflow,
@@ -92,6 +93,7 @@ __all__ = [
     "get_google_news",
     "get_reddit_global_news",
     "get_reddit_company_news",
+    "get_adanos_social_sentiment",
     # Financial statements functions
     "get_simfin_balance_sheet",
     "get_simfin_cashflow",

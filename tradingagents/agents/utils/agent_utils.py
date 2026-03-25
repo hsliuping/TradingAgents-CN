@@ -1318,45 +1318,31 @@ class Toolkit:
             result_data = []
 
             if is_china or is_hk:
-                # 中国A股和港股：使用社交媒体情绪分析
+                # 中国A股和港股：优先使用本地中文市场情绪，再补充全球舆情
                 logger.info(f"🇨🇳🇭🇰 [统一情绪工具] 处理中文市场情绪...")
 
                 try:
-                    # 可以集成微博、雪球、东方财富等中文社交媒体情绪
-                    # 目前使用基础的情绪分析
-                    sentiment_summary = f"""
-## 中文市场情绪分析
-
-**股票**: {ticker} ({market_info['market_name']})
-**分析日期**: {curr_date}
-
-### 市场情绪概况
-- 由于中文社交媒体情绪数据源暂未完全集成，当前提供基础分析
-- 建议关注雪球、东方财富、同花顺等平台的讨论热度
-- 港股市场还需关注香港本地财经媒体情绪
-
-### 情绪指标
-- 整体情绪: 中性
-- 讨论热度: 待分析
-- 投资者信心: 待评估
-
-*注：完整的中文社交媒体情绪分析功能正在开发中*
-"""
-                    result_data.append(sentiment_summary)
+                    chinese_sentiment = interface.get_chinese_social_sentiment(ticker, curr_date)
+                    result_data.append(f"## 中文市场情绪\n{chinese_sentiment}")
                 except Exception as e:
                     result_data.append(f"## 中文市场情绪\n获取失败: {e}")
 
+                if interface.is_adanos_social_sentiment_enabled() and interface.supports_adanos_social_sentiment_ticker(ticker):
+                    try:
+                        global_sentiment = interface.get_adanos_social_sentiment(ticker, curr_date, 7)
+                        result_data.append(f"## 全球社交情绪补充\n{global_sentiment}")
+                    except Exception as e:
+                        result_data.append(f"## 全球社交情绪补充\n获取失败: {e}")
+
             else:
-                # 美股：使用Reddit情绪分析
+                # 美股：使用 Adanos 多源社交情绪
                 logger.info(f"🇺🇸 [统一情绪工具] 处理美股情绪...")
 
                 try:
-                    from tradingagents.dataflows.interface import get_reddit_sentiment
-
-                    sentiment_data = get_reddit_sentiment(ticker, curr_date)
-                    result_data.append(f"## 美股Reddit情绪\n{sentiment_data}")
+                    sentiment_data = interface.get_adanos_social_sentiment(ticker, curr_date, 7)
+                    result_data.append(f"## 美股社交情绪（Adanos）\n{sentiment_data}")
                 except Exception as e:
-                    result_data.append(f"## 美股Reddit情绪\n获取失败: {e}")
+                    result_data.append(f"## 美股社交情绪（Adanos）\n获取失败: {e}")
 
             # 组合所有数据
             combined_result = f"""# {ticker} 情绪分析
@@ -1367,7 +1353,7 @@ class Toolkit:
 {chr(10).join(result_data)}
 
 ---
-*数据来源: 根据股票类型自动选择最适合的情绪数据源*
+*数据来源: 中文市场优先使用本地财经情绪分析，并在支持时补充 Adanos 全球舆情；美股优先使用 Adanos 多源社交情绪*
 """
 
             logger.info(f"😊 [统一情绪工具] 数据获取完成，总长度: {len(combined_result)}")

@@ -13,6 +13,11 @@ from .news.google_news import *
 
 
 from .news.chinese_finance import get_chinese_social_sentiment
+from .adanos_social import (
+    get_adanos_social_sentiment as _get_adanos_social_sentiment,
+    is_adanos_social_sentiment_enabled as _is_adanos_social_sentiment_enabled,
+    supports_adanos_social_sentiment_ticker as _supports_adanos_social_sentiment_ticker,
+)
 
 # 导入 Finnhub 工具（支持新旧路径）
 
@@ -1943,3 +1948,22 @@ def get_stock_data_by_market(symbol: str, start_date: str = None, end_date: str 
     except Exception as e:
         logger.error(f"❌ 获取股票数据失败: {e}")
         return f"❌ 获取股票{symbol}数据失败: {e}"
+
+
+def is_adanos_social_sentiment_enabled() -> bool:
+    """检查是否已启用 Adanos 全球社交情绪补充。"""
+    return _is_adanos_social_sentiment_enabled()
+
+
+def supports_adanos_social_sentiment_ticker(ticker: str) -> bool:
+    """检查股票代码是否适用于 Adanos 逐股舆情查询。"""
+    return _supports_adanos_social_sentiment_ticker(ticker)
+
+
+def get_adanos_social_sentiment(
+    ticker: str,
+    curr_date: str,
+    look_back_days: int = 7,
+) -> str:
+    """获取 Adanos 全球社交情绪补充报告。"""
+    return _get_adanos_social_sentiment(ticker, curr_date, look_back_days)
