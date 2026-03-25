@@ -42,6 +42,54 @@ def _parse_tags(tags: str) -> list[str]:
 
 @tool
 @register_tool(
+    tool_id="list_favorite_stocks",
+    name="查看股票关注列表",
+    description="查看用户的股票关注列表（即自选股列表），可选按标签筛选。会返回股票代码、名称、市场和已有标签。",
+    category="assistant_ops",
+    is_online=True,
+    auto_register=True,
+    timeout_tier="light",
+)
+async def list_favorite_stocks(
+    tag: Annotated[str, "可选，按标签筛选，例如 巴菲特；留空表示查看全部关注股票"] = "",
+) -> str:
+    """查看当前用户的股票关注列表（即自选股），支持按标签筛选。"""
+    from app.services.favorites_service import favorites_service
+
+    user_id = require_current_user_id()
+    favorites = await favorites_service.get_user_favorites(user_id)
+
+    normalized_tag = str(tag or "").strip()
+    if normalized_tag:
+        favorites = [
+            item for item in favorites
+            if normalized_tag in list(item.get("tags") or [])
+        ]
+
+    if not favorites:
+        if normalized_tag:
+            return f"📂 你的股票关注列表中没有标签为「{normalized_tag}」的股票。"
+        return "📂 你的股票关注列表目前为空，还没有添加任何自选股。"
+
+    lines = []
+    for item in favorites:
+        code = item.get("stock_code") or "-"
+        name = item.get("stock_name") or code
+        market = item.get("market") or "A股"
+        tags = list(item.get("tags") or [])
+        tag_text = f" | 标签: {', '.join(tags)}" if tags else ""
+        lines.append(f"- {name} ({code}) | {market}{tag_text}")
+
+    header = (
+        f"📂 你的股票关注列表（标签：{normalized_tag}，共 {len(favorites)} 只）"
+        if normalized_tag else
+        f"📂 你的股票关注列表（共 {len(favorites)} 只）"
+    )
+    return header + "\n" + "\n".join(lines)
+
+
+@tool
+@register_tool(
     tool_id="add_stocks_to_favorites",
     name="批量添加股票到自选股",
     description="将一只或多只股票批量添加到用户自选股列表，适合在智能选股完成后一次保存推荐结果；支持通过 tags 参数同时给这些股票打标签，并为已在自选股中的股票补充标签。",

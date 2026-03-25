@@ -40,15 +40,15 @@ class MemoryItem(BaseModel):
         """将 mem0 SDK 返回的 dict 归一化为 MemoryItem"""
         meta = raw.get("metadata") or {}
         return cls(
-            id=raw.get("id", ""),
-            memory=raw.get("memory", ""),
-            user_id=raw.get("user_id") or meta.get("user_id", ""),
-            agent_id=raw.get("agent_id") or meta.get("agent_id", ""),
-            scope=meta.get("scope", default_scope),
-            score=raw.get("score", 0.0),
+            id=str(raw.get("id") or ""),
+            memory=str(raw.get("memory") or ""),
+            user_id=str(raw.get("user_id") or meta.get("user_id") or ""),
+            agent_id=str(raw.get("agent_id") or meta.get("agent_id") or ""),
+            scope=str(meta.get("scope") or default_scope or ""),
+            score=float(raw.get("score") or 0.0),
             metadata=meta,
-            created_at=raw.get("created_at", ""),
-            updated_at=raw.get("updated_at", ""),
+            created_at=str(raw.get("created_at") or ""),
+            updated_at=str(raw.get("updated_at") or ""),
         )
 
 

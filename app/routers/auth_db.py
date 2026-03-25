@@ -107,6 +107,7 @@ async def get_current_user(
                 logger.debug(f"✅ JWT 认证成功，用户: {token_data.sub}")
                 return {
                     "id": str(user.id),
+                    "user_id": str(user.id),
                     "username": user.username,
                     "email": user.email,
                     "name": user.username,
@@ -125,6 +126,7 @@ async def get_current_user(
             logger.debug(f"✅ Session 认证成功，用户: {user.username}")
             return {
                 "id": str(user.id),
+                "user_id": str(user.id),
                 "username": user.username,
                 "email": user.email,
                 "name": user.username,
@@ -144,7 +146,7 @@ async def get_current_user(
 
 async def get_current_user_id(user: dict = Depends(get_current_user)) -> str:
     """从当前用户提取 user_id"""
-    return user.get("id", "")
+    return user.get("user_id") or user.get("id", "")
 
 @router.post("/login")
 async def login(payload: LoginRequest, request: Request):

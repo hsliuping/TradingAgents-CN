@@ -44,6 +44,9 @@ Var hNginxEdit
 Var hDetectBtn
 Var LaunchCheckbox
 Var LaunchCheckboxState
+Var VCRedistInstalled
+Var VCRedistExitCode
+Var MongoRuntimeOk
 
 Function ValidateInstallDirPath
  Exch $0
@@ -123,6 +126,37 @@ Function ValidateInstallDirPath
  Pop $2
  Pop $1
  Exch $0
+FunctionEnd
+
+Function CheckVCRedistX64Installed
+ Push $0
+
+ StrCpy $VCRedistInstalled "0"
+ SetRegView 64
+ ClearErrors
+ ReadRegDWORD $0 HKLM "SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" "Installed"
+ ${IfNot} ${Errors}
+  ${If} $0 == 1
+   StrCpy $VCRedistInstalled "1"
+  ${EndIf}
+ ${EndIf}
+
+ Pop $0
+FunctionEnd
+
+Function VerifyMongoRuntime
+ Push $0
+
+ StrCpy $MongoRuntimeOk "0"
+ ${If} ${FileExists} "$INSTDIR\vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\mongod.exe"
+  nsExec::ExecToLog '"$INSTDIR\vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\mongod.exe" --version'
+  Pop $0
+  ${If} $0 == 0
+   StrCpy $MongoRuntimeOk "1"
+  ${EndIf}
+ ${EndIf}
+
+ Pop $0
 FunctionEnd
 
 Function DirectoryPageLeave
@@ -231,6 +265,44 @@ Section "Install"
  CreateDirectory "$INSTDIR\data"
  CreateDirectory "$INSTDIR\data\mongodb"
  CreateDirectory "$INSTDIR\data\redis"
+
+ DetailPrint "Checking Visual C++ Redistributable (x64) for MongoDB 8.0..."
+ Call CheckVCRedistX64Installed
+ ${If} $VCRedistInstalled == "1"
+  DetailPrint "Visual C++ Redistributable (x64) already installed"
+ ${Else}
+  DetailPrint "Installing Visual C++ Redistributable (x64)..."
+  ExecWait '"$INSTDIR\vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\vc_redist.x64.exe" /quiet /norestart' $VCRedistExitCode
+  ${If} $VCRedistExitCode == 0
+   DetailPrint "Visual C++ Redistributable installed successfully"
+  ${ElseIf} $VCRedistExitCode == 3010
+   DetailPrint "Visual C++ Redistributable installed, but Windows restart is required"
+  ${ElseIf} $VCRedistExitCode == 1638
+   DetailPrint "Visual C++ Redistributable reported another version is already installed; verifying runtime state"
+  ${Else}
+   MessageBox MB_ICONSTOP "Microsoft Visual C++ Redistributable (x64) installation failed. Exit code: $VCRedistExitCode.$\r$\n$\r$\nPlease restart Windows and run the installer again, or manually run:$\r$\n$INSTDIR\vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\vc_redist.x64.exe"
+   Abort
+  ${EndIf}
+ ${EndIf}
+
+ DetailPrint "Re-checking Visual C++ Redistributable (x64) installation state..."
+ Call CheckVCRedistX64Installed
+ ${If} $VCRedistInstalled != "1"
+  MessageBox MB_ICONSTOP "Microsoft Visual C++ Redistributable (x64) is still not detected after installation.$\r$\n$\r$\nPlease restart Windows and run the installer again, or manually run:$\r$\n$INSTDIR\vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\vc_redist.x64.exe"
+  Abort
+ ${EndIf}
+
+ DetailPrint "Verifying MongoDB runtime dependencies..."
+ Call VerifyMongoRuntime
+ ${If} $MongoRuntimeOk != "1"
+  ${If} $VCRedistExitCode == 3010
+   MessageBox MB_ICONSTOP "MongoDB runtime verification failed because Windows restart is still required after installing Microsoft Visual C++ Redistributable.$\r$\n$\r$\nPlease restart Windows first, then run TradingAgentsCN again."
+  ${Else}
+   MessageBox MB_ICONSTOP "MongoDB runtime verification failed after installing Microsoft Visual C++ Redistributable.$\r$\n$\r$\nPlease manually run:$\r$\n$INSTDIR\vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\vc_redist.x64.exe$\r$\n$\r$\nThen restart Windows and try the installer again."
+  ${EndIf}
+  Abort
+ ${EndIf}
+ DetailPrint "MongoDB runtime verification passed"
 
  DetailPrint "Configuring ports..."
  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$$envFile = \"$INSTDIR\.env\"; if (Test-Path $$envFile) { $$content = Get-Content $$envFile -Raw -Encoding UTF8; $$content = $$content -replace \"PORT=.*\", \"PORT=$BackendPort\"; $$content = $$content -replace \"API_PORT=.*\", \"API_PORT=$BackendPort\"; $$content = $$content -replace \"MONGODB_PORT=.*\", \"MONGODB_PORT=$MongoPort\"; $$content = $$content -replace \"REDIS_PORT=.*\", \"REDIS_PORT=$RedisPort\"; $$content = $$content -replace \"NGINX_PORT=.*\", \"NGINX_PORT=$NginxPort\"; $$utf8 = New-Object System.Text.UTF8Encoding $$false; [System.IO.File]::WriteAllText($$envFile, $$content, $$utf8) }"'
