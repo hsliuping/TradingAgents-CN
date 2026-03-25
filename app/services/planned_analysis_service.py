@@ -15,7 +15,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, AsyncIterator, Dict, List, Optional
 
 from core.agents.plan_executor import PlanExecutor
 from core.agents.planner import Planner
@@ -36,10 +36,16 @@ from app.services.intelligent_assistant_service import (
     _get_system_prompt,
     _get_latest_trade_date,
     get_assistant_conversation,
+    get_or_create_assistant_thread,
     IntelligentAssistantService,
+    save_assistant_message,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 # ============================================================
@@ -268,7 +274,7 @@ class PlannedAnalysisService:
             logger.info(f"[规划分析] 检测到不支持的品种类型，直接返回提示")
             return PlannedAnalysisResult(
                 reply=unsupported_msg,
-                source=PlanSource.SEED,
+                source=PlanSource.SEED_FLOW,
             )
 
         if not await self._ensure_client():
@@ -295,6 +301,181 @@ class PlannedAnalysisService:
                 reply=f"处理您的请求时发生错误：{str(e)}。请检查网络和 LLM 配置后重试。",
                 source=PlanSource.REACT_FALLBACK,
             )
+
+    async def analyze_stream(
+        self,
+        question: str,
+        user_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """流式执行规划分析，输出 SSE 事件。"""
+        unsupported_msg = _check_unsupported_asset(question)
+        if unsupported_msg:
+            yield _sse("token", {"content": unsupported_msg})
+            yield _sse(
+                "done",
+                {
+                    "reply": unsupported_msg,
+                    "tools_used": [],
+                    "source": PlanSource.SEED_FLOW.value,
+                    "supplemented": False,
+                },
+            )
+            return
+
+        if not await self._ensure_client():
+            message = "智能分析暂时不可用，请检查 LLM 配置是否已在「设置」中正确配置。"
+            yield _sse("token", {"content": message})
+            yield _sse(
+                "done",
+                {
+                    "reply": message,
+                    "tools_used": [],
+                    "source": PlanSource.REACT_FALLBACK.value,
+                    "supplemented": False,
+                },
+            )
+            return
+
+        tools_used: List[str] = []
+        collected_step_results: List[StepResult] = []
+        supplemented = False
+        plan: Optional[AnalysisPlan] = None
+
+        try:
+            context_messages = await self._get_context_messages(user_id, conversation_id)
+
+            curr_date = _get_latest_trade_date()
+            trade_date = curr_date
+
+            knowledge_snippets = ""
+            try:
+                from core.knowledge import FinancialKnowledgeManager
+                km = FinancialKnowledgeManager(db=self._db)
+                knowledge_snippets = km.retrieve_for_prompt(question)
+            except Exception as e:
+                logger.debug(f"[规划分析] 知识检索跳过: {e}")
+
+            yield _sse("plan_started", {"message": "正在规划分析步骤"})
+
+            planner = Planner(
+                llm_client=self._llm_client,
+                curr_date=curr_date,
+                trade_date=trade_date,
+            )
+            plan = await planner.plan(question, context_messages, knowledge_snippets=knowledge_snippets)
+
+            if plan.source == PlanSource.REACT_FALLBACK:
+                yield _sse(
+                    "mode_switch",
+                    {"source": PlanSource.REACT_FALLBACK.value, "message": "规划失败，回退到 ReAct 模式"},
+                )
+                react_service = IntelligentAssistantService(
+                    self._db,
+                    preferred_models={
+                        "quick_model": self._preferred_models.get("deep_model") or self._preferred_models.get("quick_model"),
+                        "deep_model": self._preferred_models.get("deep_model"),
+                    },
+                )
+                async for event_str in react_service.chat_stream(question, conversation_id):
+                    yield event_str
+                return
+
+            yield _sse(
+                "plan_ready",
+                {
+                    "plan": plan.dict(),
+                    "source": plan.source.value,
+                },
+            )
+
+            executor = PlanExecutor()
+            step_queue: asyncio.Queue = asyncio.Queue()
+
+            def _on_step_started(step_id: int, tool: str, intent: str):
+                step_queue.put_nowait(
+                    {
+                        "event": "step_started",
+                        "step_id": step_id,
+                        "tool": tool,
+                        "intent": intent,
+                    }
+                )
+
+            def _on_step_completed(sr: StepResult):
+                tools_used.append(sr.tool)
+                step_queue.put_nowait(
+                    {
+                        "event": "step_completed",
+                        "step_result": sr.dict(),
+                    }
+                )
+
+            execute_task = asyncio.create_task(
+                executor.execute(
+                    plan,
+                    on_step_started=_on_step_started,
+                    on_step_completed=_on_step_completed,
+                )
+            )
+
+            while not execute_task.done() or not step_queue.empty():
+                try:
+                    payload = await asyncio.wait_for(step_queue.get(), timeout=0.3)
+                    event_name = payload.pop("event", "progress")
+                    if event_name == "step_completed":
+                        step_result = payload.get("step_result")
+                        if step_result:
+                            collected_step_results.append(StepResult(**step_result))
+                    yield _sse(event_name, payload)
+                except asyncio.TimeoutError:
+                    continue
+
+            step_results = await execute_task
+            collected_step_results = step_results
+
+            yield _sse("synthesis_started", {"message": "正在汇总结论并生成报告"})
+            reply_parts: List[str] = []
+            async for chunk in self._stream_synthesize_chunks(question, plan, collected_step_results):
+                reply_parts.append(chunk)
+                yield _sse("token", {"content": chunk})
+            reply = "".join(reply_parts)
+
+            if "[NEED_SUPPLEMENT]" in reply:
+                reply = reply.replace("[NEED_SUPPLEMENT]", "").strip()
+                yield _sse("supplement_started", {"message": "正在补充缺失数据"})
+                supplement_result = await self._try_supplement(question, reply, plan, tools_used)
+                if supplement_result:
+                    for sr in supplement_result:
+                        collected_step_results.append(sr)
+                        yield _sse("step_completed", {"step_result": sr.dict()})
+
+                    yield _sse("synthesis_started", {"message": "补充完成，正在重新整理答案"})
+                    reply_parts = []
+                    async for chunk in self._stream_synthesize_chunks(question, plan, collected_step_results):
+                        reply_parts.append(chunk)
+                        yield _sse("token", {"content": chunk})
+                    reply = "".join(reply_parts).replace("[NEED_SUPPLEMENT]", "").strip()
+                    supplemented = True
+
+            yield _sse(
+                "done",
+                {
+                    "reply": reply,
+                    "tools_used": list(set(tools_used)),
+                    "step_results": [sr.dict() for sr in collected_step_results],
+                    "plan": plan.dict() if plan else None,
+                    "source": plan.source.value if plan else PlanSource.LLM_PLAN.value,
+                    "supplemented": supplemented,
+                },
+            )
+        except asyncio.CancelledError:
+            yield _sse("error", {"message": "请求已取消"})
+            yield _sse("done", {"tools_used": list(set(tools_used)), "error": True})
+        except Exception as e:
+            logger.exception("[规划分析] 流式分析失败")
+            yield _sse("error", {"message": f"处理请求时发生错误：{str(e)}"})
+            yield _sse("done", {"tools_used": list(set(tools_used)), "error": True})
 
     # ----------------------------------------------------------
     # 内部实现
@@ -403,6 +584,37 @@ class PlannedAnalysisService:
                     parts.append(f"### {sr.intent}\n{str(sr.result)[:1000]}\n")
             parts.append("\n> ⚠️ 综合分析生成失败，以上为原始数据摘要。")
             return "\n".join(parts)
+
+    async def _stream_synthesize_chunks(
+        self,
+        question: str,
+        plan: AnalysisPlan,
+        step_results: List[StepResult],
+    ) -> AsyncIterator[str]:
+        """综合阶段流式输出 token。"""
+        system_prompt = _get_system_prompt()
+        synth_prompt = _build_synthesize_prompt(question, plan, step_results)
+
+        messages = [
+            Message(role=MessageRole.SYSTEM, content=system_prompt),
+            Message(role=MessageRole.USER, content=synth_prompt),
+        ]
+
+        try:
+            has_chunk = False
+            async for chunk in self._llm_client.astream(messages):
+                if chunk:
+                    has_chunk = True
+                    yield chunk
+            if not has_chunk:
+                fallback = await self._synthesize(question, plan, step_results)
+                for i in range(0, len(fallback), 120):
+                    yield fallback[i:i + 120]
+        except Exception as e:
+            logger.warning(f"[规划分析] 综合流式输出失败，回退到非流式综合: {e}")
+            fallback = await self._synthesize(question, plan, step_results)
+            for i in range(0, len(fallback), 120):
+                yield fallback[i:i + 120]
 
     async def _try_supplement(
         self,
@@ -523,4 +735,111 @@ class PlannedAnalysisService:
         except Exception as e:
             logger.warning(f"[规划分析] 获取会话历史失败: {e}")
             return None
+
+
+async def stream_planned_analysis_with_assistant(
+    db,
+    user_message: str,
+    user_id: str,
+    conversation_id: Optional[str] = None,
+    quick_model: Optional[str] = None,
+    deep_model: Optional[str] = None,
+) -> AsyncGenerator[str, None]:
+    """对外提供带持久化的规划分析流式接口。"""
+    service = PlannedAnalysisService(
+        db,
+        preferred_models={
+            "quick_model": quick_model,
+            "deep_model": deep_model,
+        },
+    )
+
+    collected_reply = ""
+    collected_tools: List[str] = []
+    collected_plan: Optional[Dict[str, Any]] = None
+    collected_step_results: List[Dict[str, Any]] = []
+    source = PlanSource.LLM_PLAN.value
+    supplemented = False
+
+    async for event_str in service.analyze_stream(
+        question=user_message.strip(),
+        user_id=user_id,
+        conversation_id=conversation_id,
+    ):
+        if event_str.startswith("event: done\n"):
+            try:
+                data_line = event_str.split("\ndata: ", 1)[1].rstrip("\n")
+                data = json.loads(data_line)
+                collected_tools = data.get("tools_used", [])
+                collected_reply = data.get("reply", collected_reply)
+                collected_plan = data.get("plan")
+                collected_step_results = data.get("step_results", [])
+                source = data.get("source", source)
+                supplemented = data.get("supplemented", supplemented)
+            except Exception:
+                pass
+            continue
+        if event_str.startswith("event: token\n"):
+            try:
+                data_line = event_str.split("\ndata: ", 1)[1].rstrip("\n")
+                data = json.loads(data_line)
+                collected_reply += data.get("content", "")
+            except Exception:
+                pass
+        elif event_str.startswith("event: plan_ready\n"):
+            try:
+                data_line = event_str.split("\ndata: ", 1)[1].rstrip("\n")
+                data = json.loads(data_line)
+                collected_plan = data.get("plan")
+                source = data.get("source", source)
+            except Exception:
+                pass
+        elif event_str.startswith("event: mode_switch\n"):
+            try:
+                data_line = event_str.split("\ndata: ", 1)[1].rstrip("\n")
+                data = json.loads(data_line)
+                source = data.get("source", source)
+            except Exception:
+                pass
+        elif event_str.startswith("event: step_completed\n"):
+            try:
+                data_line = event_str.split("\ndata: ", 1)[1].rstrip("\n")
+                data = json.loads(data_line)
+                step_result = data.get("step_result")
+                if step_result:
+                    collected_step_results.append(step_result)
+            except Exception:
+                pass
+        yield event_str
+
+    if user_id and collected_reply:
+        try:
+            await save_assistant_message(
+                db,
+                user_id=user_id,
+                user_content=user_message.strip(),
+                assistant_content=collected_reply,
+                tools_used=collected_tools,
+                conversation_id=conversation_id,
+            )
+        except Exception as e:
+            logger.warning("[规划分析·流式] 保存会话失败: %s", e)
+
+    conv_id = conversation_id
+    if user_id:
+        thread = await get_or_create_assistant_thread(db, user_id, conversation_id)
+        conv_id = thread["thread_id"]
+
+    yield _sse(
+        "done",
+        {
+            "reply": collected_reply,
+            "tools_used": collected_tools,
+            "conversation_id": conv_id,
+            "plan": collected_plan,
+            "step_results": collected_step_results,
+            "source": source,
+            "supplemented": supplemented,
+        },
+    )
 

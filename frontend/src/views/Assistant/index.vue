@@ -229,10 +229,21 @@
                   <el-icon><ChatDotRound /></el-icon>
                 </div>
                 <div class="message-content">
-                  <div class="message-text markdown-content" v-html="renderMarkdown(msg.content)"></div>
+                  <div class="message-text markdown-content" v-html="renderMarkdown(msg.content || (streaming && idx === messages.length - 1 ? loadingHint : ''))"></div>
                   <div v-if="msg.tools_used?.length" class="message-tools">
                     <el-tag v-for="tool in msg.tools_used" :key="tool" size="small" type="info">{{ tool }}</el-tag>
                   </div>
+                  <el-collapse v-if="msg.plan" class="step-results-collapse">
+                    <el-collapse-item :title="`查看分析计划 (${msg.plan.steps.length})`" name="plan">
+                      <div v-for="step in msg.plan.steps" :key="step.id" class="step-item">
+                        <div class="step-header">
+                          <span class="step-label">步骤 {{ step.id }}</span>
+                          <span class="step-intent">{{ step.intent }}</span>
+                          <el-tag size="small" type="info">{{ step.tool }}</el-tag>
+                        </div>
+                      </div>
+                    </el-collapse-item>
+                  </el-collapse>
                   <div v-if="msg.source" class="message-plan-info">
                     <el-tag :type="msg.source === 'seed_flow' ? 'success' : msg.source === 'llm_plan' ? 'primary' : 'warning'" size="small" effect="plain">
                       {{ msg.source === 'seed_flow' ? '🌱 种子流程' : msg.source === 'llm_plan' ? '🧠 LLM 规划' : '⚡ ReAct' }}
@@ -499,6 +510,8 @@ import { assistantApi } from '@/api/assistant'
 import { configApi } from '@/api/config'
 import type {
   AssistantThreadItem,
+  PlannedAnalysisPlan,
+  PlannedStepResult,
   AssistantThreadReportSearchResponse,
   AssistantThreadReportDetail,
   AssistantThreadReportRef,
@@ -522,15 +535,10 @@ interface DisplayMessage {
   role: 'user' | 'assistant'
   content: string
   tools_used?: string[]
-  source?: string
+  plan?: PlannedAnalysisPlan
+  source?: 'seed_flow' | 'llm_plan' | 'react'
   supplemented?: boolean
-  step_results?: Array<{
-    step_id: number
-    tool: string
-    intent: string
-    success: boolean
-    duration_ms: number
-  }>
+  step_results?: PlannedStepResult[]
 }
 
 interface ThreadTreeNode extends AssistantThreadItem {
@@ -756,6 +764,32 @@ const scrollToBottom = () => {
       messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
     }
   })
+}
+
+const ensureStreamingAssistantMessage = () => {
+  const lastMessage = messages.value[messages.value.length - 1]
+  if (lastMessage?.role === 'assistant') {
+    return messages.value.length - 1
+  }
+
+  loading.value = false
+  streaming.value = true
+  messages.value.push({ role: 'assistant', content: '', tools_used: [], step_results: [] })
+  return messages.value.length - 1
+}
+
+const upsertStepResult = (streamMsgIdx: number, stepResult: PlannedStepResult) => {
+  const current = messages.value[streamMsgIdx]
+  if (!current) return
+
+  const results = [...(current.step_results || [])]
+  const index = results.findIndex(item => item.step_id === stepResult.step_id)
+  if (index >= 0) {
+    results[index] = stepResult
+  } else {
+    results.push(stepResult)
+  }
+  current.step_results = results.sort((left, right) => left.step_id - right.step_id)
 }
 
 const formatTime = (value?: string) => {
@@ -1002,38 +1036,122 @@ const handleClear = async () => {
   }).catch(() => {})
 }
 
-const handleSendPlanned = async (text: string) => {
-  try {
-    const res = await assistantApi.plannedAnalysis(
-      text,
-      selectedThreadId.value,
-      assistantModelSettings.value.quickModel,
-      assistantModelSettings.value.deepModel,
-    )
-    if (res.conversation_id) selectedThreadId.value = res.conversation_id
-    messages.value.push({
-      role: 'assistant',
-      content: res.reply,
-      tools_used: res.tools_used?.length ? res.tools_used : undefined,
-      source: res.source,
-      supplemented: res.supplemented,
-      step_results: res.step_results,
-    })
-    await loadThreads(selectedThreadId.value)
-    scrollToBottom()
-  } catch (error: unknown) {
-    const errMsg = error instanceof Error ? error.message : '请求失败，请稍后重试'
-    ElMessage.error(errMsg)
-    messages.value.push({
-      role: 'assistant',
-      content: `抱歉，处理您的请求时出错：${errMsg}`,
-      tools_used: [],
-    })
-    scrollToBottom()
-  } finally {
-    loading.value = false
-    stopLoadingIndicator()
-  }
+const handleSendPlanned = (text: string) => {
+  let streamMsgIdx = -1
+  let firstEventReceived = false
+
+  activeStreamController = assistantApi.plannedAnalysisStream(
+    text,
+    selectedThreadId.value,
+    assistantModelSettings.value.quickModel,
+    assistantModelSettings.value.deepModel,
+    {
+      onToken(content: string) {
+        if (!firstEventReceived) {
+          firstEventReceived = true
+          streamMsgIdx = ensureStreamingAssistantMessage()
+        }
+        if (streamMsgIdx < 0) {
+          streamMsgIdx = ensureStreamingAssistantMessage()
+        }
+        messages.value[streamMsgIdx].content += content
+        scrollToBottom()
+      },
+      onToolEvent(event: Record<string, any>) {
+        if (!firstEventReceived) {
+          firstEventReceived = true
+          streamMsgIdx = ensureStreamingAssistantMessage()
+        }
+        if (streamMsgIdx < 0) {
+          streamMsgIdx = ensureStreamingAssistantMessage()
+        }
+
+        const current = messages.value[streamMsgIdx]
+        const eventName = event.event || ''
+        if (eventName === 'plan_started') {
+          streamingToolHint.value = event.message || '正在规划分析步骤'
+        } else if (eventName === 'plan_ready') {
+          current.plan = event.plan
+          current.source = event.source
+          streamingToolHint.value = event.plan?.steps?.length
+            ? `已生成 ${event.plan.steps.length} 个分析步骤`
+            : '分析计划已生成'
+        } else if (eventName === 'step_started') {
+          streamingToolHint.value = `正在执行步骤 ${event.step_id}: ${event.intent || event.tool}`
+        } else if (eventName === 'step_completed') {
+          if (event.step_result) {
+            upsertStepResult(streamMsgIdx, event.step_result as PlannedStepResult)
+            streamingToolHint.value = event.step_result.success
+              ? `步骤 ${event.step_result.step_id} 已完成`
+              : `步骤 ${event.step_result.step_id} 执行失败`
+          }
+        } else if (eventName === 'synthesis_started') {
+          streamingToolHint.value = event.message || '正在汇总结论并生成报告'
+        } else if (eventName === 'supplement_started') {
+          streamingToolHint.value = event.message || '正在补充缺失数据'
+        } else if (eventName === 'mode_switch') {
+          current.source = event.source
+          streamingToolHint.value = event.message || '已切换分析模式'
+        }
+        scrollToBottom()
+      },
+      onDone(data) {
+        if ((data as any).error) {
+          loading.value = false
+          streaming.value = false
+          streamingToolHint.value = ''
+          activeStreamController = null
+          stopLoadingIndicator()
+          return
+        }
+
+        if (streamMsgIdx < 0) {
+          streamMsgIdx = ensureStreamingAssistantMessage()
+        }
+
+        if (data.conversation_id) selectedThreadId.value = data.conversation_id
+        messages.value[streamMsgIdx].tools_used = data.tools_used?.length ? data.tools_used : undefined
+        messages.value[streamMsgIdx].source = data.source
+        messages.value[streamMsgIdx].supplemented = data.supplemented
+        messages.value[streamMsgIdx].plan = data.plan
+        messages.value[streamMsgIdx].step_results = data.step_results
+        if (!messages.value[streamMsgIdx].content && data.reply) {
+          messages.value[streamMsgIdx].content = data.reply
+        }
+
+        loading.value = false
+        streaming.value = false
+        streamingToolHint.value = ''
+        activeStreamController = null
+        stopLoadingIndicator()
+        loadThreads(selectedThreadId.value)
+        scrollToBottom()
+      },
+      onError(msg: string) {
+        if (!firstEventReceived) {
+          messages.value.push({
+            role: 'assistant',
+            content: `抱歉，处理您的请求时出错：${msg}`,
+            tools_used: [],
+          })
+        } else if (streamMsgIdx >= 0) {
+          const existing = messages.value[streamMsgIdx].content.trim()
+          if (!existing) {
+            messages.value[streamMsgIdx].content = `抱歉，处理您的请求时出错：${msg}`
+          } else {
+            messages.value[streamMsgIdx].content += `\n\n---\n⚠️ 响应中断：${msg}`
+          }
+        }
+        ElMessage.error(msg)
+        loading.value = false
+        streaming.value = false
+        streamingToolHint.value = ''
+        activeStreamController = null
+        stopLoadingIndicator()
+        scrollToBottom()
+      },
+    },
+  )
 }
 
 const handleSendStream = (text: string) => {
@@ -1130,7 +1248,7 @@ const handleSend = async () => {
   scrollToBottom()
 
   if (analysisMode.value === 'planned') {
-    await handleSendPlanned(text)
+    handleSendPlanned(text)
   } else {
     handleSendStream(text)
   }
