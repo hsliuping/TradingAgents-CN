@@ -305,8 +305,8 @@ graph TD
 
 ## 📚 相关文档
 
-- [系统配置指南](../user-guide/system-configuration.md)
-- [LLM厂家配置](../user-guide/llm-provider-configuration.md)
+- [系统配置指南](../guides/config-management-guide.md)
+- [LLM厂家配置](../configuration/llm-config.md)
 - [代理配置指南](./proxy-configuration.md)
 
 ---
