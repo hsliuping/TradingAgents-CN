@@ -5,18 +5,30 @@
 """
 
 import os
+import shlex
 import subprocess
 import sys
 from datetime import datetime
 
-def run_command(cmd, capture_output=True):
-    """执行命令"""
+def run_command(cmd, capture_output=True, suppress_stderr=False):
+    """执行命令 - 安全版本，避免shell注入攻击"""
     try:
+        # 将命令字符串转换为参数列表以避免shell注入
+        if isinstance(cmd, str):
+            cmd_list = shlex.split(cmd)
+        else:
+            cmd_list = cmd
+            
+        # 根据需要设置stderr处理
+        stderr_handling = subprocess.DEVNULL if suppress_stderr else subprocess.PIPE
+        
         if capture_output:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            result = subprocess.run(cmd_list, shell=False, capture_output=True, text=True, 
+                                   stderr=stderr_handling if suppress_stderr else subprocess.PIPE)
             return result.returncode == 0, result.stdout, result.stderr
         else:
-            result = subprocess.run(cmd, shell=True)
+            result = subprocess.run(cmd_list, shell=False,
+                                   stderr=stderr_handling if suppress_stderr else None)
             return result.returncode == 0, "", ""
     except Exception as e:
         return False, "", str(e)
@@ -77,7 +89,7 @@ def explore_container_filesystem(container_name):
                     print(f"   {line}")
             
             # 查找.log文件
-            success, output, error = run_command(f"docker exec {container_name} find {location} -maxdepth 2 -name '*.log' -type f 2>/dev/null")
+            success, output, error = run_command(f"docker exec {container_name} find {location} -maxdepth 2 -name *.log -type f", suppress_stderr=True)
             if success and output.strip():
                 log_files = output.strip().split('\n')
                 for log_file in log_files:
