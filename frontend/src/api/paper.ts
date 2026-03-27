@@ -44,6 +44,7 @@ export interface PlaceOrderPayload {
   code: string
   side: 'buy' | 'sell'
   quantity: number
+  market?: string
   price?: number  // 可选：指定价格
   analysis_id?: string
 }

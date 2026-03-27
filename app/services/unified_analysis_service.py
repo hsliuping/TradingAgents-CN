@@ -39,6 +39,13 @@ from core.workflow.models import WorkflowDefinition
 
 logger = logging.getLogger(__name__)
 
+ETF_CODE_PREFIXES = ("50", "51", "52", "56", "58", "15", "16", "18")
+
+
+def _is_cn_etf_symbol(code: Optional[str]) -> bool:
+    code_str = str(code or "").strip()
+    return len(code_str) == 6 and code_str.isdigit() and code_str.startswith(ETF_CODE_PREFIXES)
+
 
 class UnifiedAnalysisService:
     """
@@ -141,7 +148,6 @@ class UnifiedAnalysisService:
 
         try:
             from tradingagents.utils.stock_utils import StockUtils
-            from app.core.database import get_mongo_db
 
             market_info = StockUtils.get_market_info(stock_code)
             is_china = market_info.get('is_china', False)
@@ -152,7 +158,7 @@ class UnifiedAnalysisService:
 
             if is_china:
                 try:
-                    db = get_mongo_db()
+                    db = self._get_db()
 
                     # 优先从 stock_basic_info 获取
                     stock_info = db.stock_basic_info.find_one(
@@ -177,7 +183,7 @@ class UnifiedAnalysisService:
 
             if is_china:
                 try:
-                    db = get_mongo_db()
+                    db = self._get_db()
                     logger.info(f"🔍 [价格查询] 开始查询股票 {stock_code} 的价格...")
 
                     # 优先从 market_quotes 获取最新价格
@@ -1130,6 +1136,29 @@ class UnifiedAnalysisService:
             return ""
 
         try:
+            db = self._get_db()
+            code_str = str(stock_code).strip().zfill(6)
+
+            if db is not None:
+                if _is_cn_etf_symbol(code_str):
+                    etf_doc = db.etf_basic_info.find_one(
+                        {"code": code_str},
+                        {"name": 1, "fund_name": 1, "etf_name": 1, "_id": 0}
+                    )
+                    if etf_doc:
+                        etf_name = etf_doc.get("name") or etf_doc.get("fund_name") or etf_doc.get("etf_name")
+                        if etf_name:
+                            return etf_name
+
+                stock_doc = db.stock_basic_info.find_one(
+                    {"$or": [{"code": code_str}, {"symbol": code_str}]},
+                    {"name": 1, "stock_name": 1, "_id": 0}
+                )
+                if stock_doc:
+                    stock_name = stock_doc.get("name") or stock_doc.get("stock_name")
+                    if stock_name:
+                        return stock_name
+
             # 优先尝试从 data_source_manager 获取结构化数据
             try:
                 from tradingagents.dataflows.data_source_manager import get_china_stock_info_unified as get_info_dict
@@ -1153,7 +1182,7 @@ class UnifiedAnalysisService:
         except Exception as e:
             logger.warning(f"⚠️ 解析股票名称失败: {stock_code} - {e}")
 
-        return f"股票{stock_code}"
+        return f"{'ETF' if _is_cn_etf_symbol(stock_code) else '股票'}{stock_code}"
 
     # ==================== 持仓分析相关方法 ====================
 

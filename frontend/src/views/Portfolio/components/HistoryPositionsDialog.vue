@@ -20,7 +20,7 @@
       <el-table-column prop="name" label="名称" width="100" />
       <el-table-column prop="market" label="市场" width="70">
         <template #default="{ row }">
-          <el-tag :type="getMarketTagType(row.market)" size="small">{{ getMarketName(row.market) }}</el-tag>
+          <el-tag :type="getMarketTagType(row.market, row.code)" size="small">{{ getMarketName(row.market, row.code) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="买入" width="140">
@@ -85,6 +85,7 @@ import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { portfolioApi, type HistoryPositionItem } from '@/api/portfolio'
+import { getMarketByStockCode } from '@/utils/market'
 
 const router = useRouter()
 
@@ -135,8 +136,14 @@ const formatDate = (dt?: string) => {
   return new Date(dt).toLocaleDateString('zh-CN')
 }
 
-const getMarketName = (m: string) => ({ CN: 'A股', HK: '港股', US: '美股' }[m] || m)
-const getMarketTagType = (m: string) => ({ CN: 'danger', HK: 'warning', US: 'primary' }[m] || 'info') as any
+const getMarketName = (m: string, code?: string) => {
+  if (m === 'CN' && code && getMarketByStockCode(code) === 'ETF') return 'ETF'
+  return ({ CN: 'A股', HK: '港股', US: '美股' }[m] || m)
+}
+const getMarketTagType = (m: string, code?: string) => {
+  if (m === 'CN' && code && getMarketByStockCode(code) === 'ETF') return 'success'
+  return ({ CN: 'danger', HK: 'warning', US: 'primary' }[m] || 'info') as any
+}
 const getCurrencySymbol = (c: string) => ({ CNY: '¥', HKD: 'HK$', USD: '$' }[c] || c)
 </script>
 

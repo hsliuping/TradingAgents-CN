@@ -3,13 +3,20 @@
     <!-- 顶部：代码 / 名称 / 操作 -->
     <div class="header">
       <div class="title">
-        <div class="code">{{ code }}</div>
-        <div class="name">{{ stockName || '-' }}</div>
-        <el-tag size="small">{{ market || '-' }}</el-tag>
+        <div class="title-main">
+          <div class="code">{{ code }}</div>
+          <div class="name">{{ stockName || '-' }}</div>
+          <el-tag size="small">{{ marketLabel }}</el-tag>
+        </div>
+        <div v-if="isEtf" class="title-meta">
+          <el-tag v-if="etfBasics.fundType" size="small" effect="plain" type="success">{{ etfBasics.fundType }}</el-tag>
+          <el-tag v-if="etfBasics.trackIndex" size="small" effect="plain" type="info">跟踪 {{ etfBasics.trackIndex }}</el-tag>
+          <span v-if="etfBasics.management" class="meta-text">管理人：{{ etfBasics.management }}</span>
+        </div>
       </div>
       <div class="actions">
         <el-button @click="onToggleFavorite">
-          <el-icon><Star /></el-icon> {{ isFav ? '已自选' : '加自选' }}
+          <el-icon><Star /></el-icon> {{ favoriteButtonText }}
         </el-button>
         <!-- 🔥 港股和美股不显示"同步数据"按钮 -->
         <el-button
@@ -18,7 +25,7 @@
           @click="showSyncDialog"
           :loading="syncLoading"
         >
-          <el-icon><Refresh /></el-icon> 同步数据
+          <el-icon><Refresh /></el-icon> {{ syncButtonText }}
         </el-button>
         <el-button type="warning" @click="clearCache" :loading="clearCacheLoading">
           <el-icon><Delete /></el-icon> 清除缓存
@@ -113,7 +120,7 @@
         <el-card shadow="hover">
           <template #header>
             <div class="card-hd">
-              <div>价格K线</div>
+              <div>{{ klineCardTitle }}</div>
               <div class="periods">
                 <el-segmented v-model="period" :options="periodOptions" size="small" />
               </div>
@@ -203,7 +210,7 @@
         <el-card shadow="hover" class="news-card">
           <template #header>
             <div class="card-hd">
-              <div>近期新闻与公告</div>
+              <div>{{ newsCardTitle }}</div>
               <el-select v-model="newsFilter" size="small" style="width: 160px">
                 <el-option label="全部" value="all" />
                 <el-option label="新闻" value="news" />
@@ -241,10 +248,22 @@
       </el-col>
 
       <el-col :span="6">
-        <!-- 基本面快照 -->
+        <!-- 基础快照 -->
         <el-card shadow="hover">
-          <template #header><div class="card-hd">基本面快照</div></template>
-          <div class="facts">
+          <template #header><div class="card-hd">{{ isEtf ? 'ETF基础快照' : '基本面快照' }}</div></template>
+          <div v-if="isEtf" class="facts">
+            <div class="fact"><span>基金类型</span><b>{{ etfBasics.fundType || '-' }}</b></div>
+            <div class="fact"><span>跟踪指数</span><b>{{ etfBasics.trackIndex || '-' }}</b></div>
+            <div class="fact"><span>基金规模</span><b>{{ fmtText(etfBasics.fundScale) }}</b></div>
+            <div class="fact"><span>基金份额</span><b>{{ fmtText(etfBasics.fundShare) }}</b></div>
+            <div class="fact"><span>份额日期</span><b>{{ formatDateValue(etfBasics.fundShareDate) }}</b></div>
+            <div class="fact"><span>管理人</span><b>{{ etfBasics.management || '-' }}</b></div>
+            <div class="fact"><span>托管人</span><b>{{ etfBasics.custodian || '-' }}</b></div>
+            <div class="fact"><span>管理费</span><b>{{ fmtLoosePercent(etfBasics.managementFee) }}</b></div>
+            <div class="fact"><span>托管费</span><b>{{ fmtLoosePercent(etfBasics.custodianFee) }}</b></div>
+            <div class="fact"><span>数据更新时间</span><b>{{ formatDateValue(etfBasics.updatedAt) }}</b></div>
+          </div>
+          <div v-else class="facts">
             <div class="fact"><span>行业</span><b>{{ basics.industry }}</b></div>
             <div class="fact"><span>板块</span><b>{{ basics.sector }}</b></div>
             <div class="fact"><span>总市值</span><b>{{ fmtAmount(basics.marketCap) }}</b></div>
@@ -272,8 +291,18 @@
         </el-card>
 
         <el-card shadow="hover" class="financial-card">
-          <template #header><div class="card-hd">财务明细快照</div></template>
-          <div class="facts">
+          <template #header><div class="card-hd">{{ isEtf ? 'ETF估值快照' : '财务明细快照' }}</div></template>
+          <div v-if="isEtf" class="facts">
+            <div class="fact"><span>场内价格</span><b>{{ fmtPrice(etfBasics.marketPrice ?? quote.price) }}</b></div>
+            <div class="fact"><span>单位净值</span><b>{{ fmtPrice(etfBasics.unitNav) }}</b></div>
+            <div class="fact"><span>累计净值</span><b>{{ fmtPrice(etfBasics.accumNav) }}</b></div>
+            <div class="fact"><span>净值增长率</span><b>{{ fmtLoosePercent(etfBasics.navGrowthRate) }}</b></div>
+            <div class="fact"><span>折溢价率</span><b>{{ fmtLoosePercent(etfBasics.premiumDiscountRate) }}</b></div>
+            <div class="fact"><span>净值日期</span><b>{{ formatDateValue(etfBasics.latestNavDate) }}</b></div>
+            <div class="fact"><span>申购状态</span><b>{{ etfBasics.purchaseStatus || '-' }}</b></div>
+            <div class="fact"><span>赎回状态</span><b>{{ etfBasics.redemptionStatus || '-' }}</b></div>
+          </div>
+          <div v-else class="facts">
             <div class="fact"><span>公告日期</span><b>{{ financialSnapshot.annDate || '-' }}</b></div>
             <div class="fact"><span>数据源</span><b>{{ financialSnapshot.dataSource || '-' }}</b></div>
             <div class="fact"><span>毛利率</span><b>{{ fmtPercent(financialSnapshot.grossMargin) }}</b></div>
@@ -284,7 +313,7 @@
             <div class="fact"><span>总资产</span><b>{{ fmtAmount(financialSnapshot.totalAssets) }}</b></div>
             <div class="fact"><span>总负债</span><b>{{ fmtAmount(financialSnapshot.totalLiab) }}</b></div>
           </div>
-          <div v-if="financialRawSections.length" class="raw-section-summary">
+          <div v-if="!isEtf && financialRawSections.length" class="raw-section-summary">
             <div class="raw-title">raw_data 分组</div>
             <div class="raw-tags">
               <el-tag v-for="section in financialRawSections" :key="section.key" size="small" type="info" effect="plain">
@@ -299,10 +328,10 @@
 
         <!-- 快捷操作 -->
         <el-card shadow="hover" class="actions-card">
-          <template #header><div class="card-hd">快捷操作</div></template>
+          <template #header><div class="card-hd">{{ quickActionTitle }}</div></template>
           <div class="quick-actions">
-            <el-button type="primary" @click="onAnalyze" :icon="TrendCharts" plain>发起分析</el-button>
-            <el-button @click="onToggleFavorite" :icon="Star">{{ isFav ? '移出自选' : '股票关注列表' }}</el-button>
+            <el-button type="primary" @click="onAnalyze" :icon="TrendCharts" plain>{{ analyzeButtonText }}</el-button>
+            <el-button @click="onToggleFavorite" :icon="Star">{{ quickFavoriteButtonText }}</el-button>
             <el-button type="success" :icon="CreditCard" @click="goPaperTrading">模拟交易</el-button>
           </div>
         </el-card>
@@ -341,21 +370,21 @@
     <!-- 数据同步对话框 -->
     <el-dialog
       v-model="syncDialogVisible"
-      title="同步股票数据"
+      :title="syncDialogTitle"
       width="500px"
     >
       <el-form :model="syncForm" label-width="120px">
-        <el-form-item label="股票代码">
+        <el-form-item :label="securityCodeLabel">
           <el-input v-model="code" disabled />
         </el-form-item>
-        <el-form-item label="股票名称">
+        <el-form-item :label="isEtf ? 'ETF名称' : '股票名称'">
           <el-input v-model="stockName" disabled />
         </el-form-item>
         <el-form-item label="同步内容">
           <el-checkbox-group v-model="syncForm.syncTypes">
             <el-checkbox label="realtime">实时行情</el-checkbox>
             <el-checkbox label="historical">历史行情数据</el-checkbox>
-            <el-checkbox label="financial">财务数据</el-checkbox>
+            <el-checkbox v-if="!isEtf" label="financial">财务数据</el-checkbox>
             <el-checkbox label="basic">基础数据</el-checkbox>
           </el-checkbox-group>
         </el-form-item>
@@ -391,6 +420,7 @@ import { TrendCharts, Star, Refresh, Link, Document, Clock, Reading, CreditCard,
 import { marked } from 'marked'
 import { stocksApi } from '@/api/stocks'
 import { analysisApi } from '@/api/analysis'
+import { fetchTaskResultWithRetry, hasTaskResultContent, mergeTaskResult } from '@/utils/taskResult'
 import { ApiClient } from '@/api/request'
 import { stockSyncApi } from '@/api/stockSync'
 import { clearAllCache } from '@/api/cache'
@@ -402,12 +432,14 @@ import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
 import { favoritesApi } from '@/api/favorites'
+import { useAuthStore } from '@/stores/auth'
 
 
 echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 
 
 // 分析状态
@@ -441,6 +473,32 @@ const symbol = computed(() => code.value.split('.')[0])  // 提取6位代码
 const stockName = ref('')
 const market = ref('')
 const isFav = ref(false)
+
+const ETF_CODE_PREFIXES = ['50', '51', '52', '56', '58', '15', '16', '18']
+
+function isLikelyEtfCode(value: string): boolean {
+  const text = String(value || '').trim()
+  return /^\d{6}$/.test(text) && ETF_CODE_PREFIXES.some(prefix => text.startsWith(prefix))
+}
+
+const isEtf = computed(() => market.value === 'ETF' || isLikelyEtfCode(symbol.value))
+const marketLabel = computed(() => isEtf.value ? 'ETF' : (market.value || '-'))
+const securityName = computed(() => isEtf.value ? 'ETF' : '股票')
+const securityCodeLabel = computed(() => `${securityName.value}代码`)
+const syncDialogTitle = computed(() => `同步${securityName.value}数据`)
+const syncButtonText = computed(() => isEtf.value ? '同步ETF数据' : '同步数据')
+const favoriteButtonText = computed(() => {
+  if (isEtf.value) return isFav.value ? '已关注ETF' : '关注ETF'
+  return isFav.value ? '已自选' : '加自选'
+})
+const quickFavoriteButtonText = computed(() => {
+  if (isEtf.value) return isFav.value ? '取消ETF关注' : '加入ETF关注'
+  return isFav.value ? '移出自选' : '股票关注列表'
+})
+const analyzeButtonText = computed(() => isEtf.value ? '发起ETF分析' : '发起分析')
+const quickActionTitle = computed(() => isEtf.value ? 'ETF快捷操作' : '快捷操作')
+const newsCardTitle = computed(() => isEtf.value ? 'ETF新闻与公告' : '近期新闻与公告')
+const klineCardTitle = computed(() => isEtf.value ? 'ETF价格走势' : '价格K线')
 
 // ECharts K线配置
 const kOption = ref<EChartsOption>({
@@ -532,6 +590,12 @@ const syncForm = reactive({
   days: 365
 })
 
+watch(isEtf, (value) => {
+  if (value) {
+    syncForm.syncTypes = syncForm.syncTypes.filter(type => type !== 'financial')
+  }
+}, { immediate: true })
+
 // 清除缓存
 const clearCacheLoading = ref(false)
 
@@ -561,7 +625,7 @@ async function handleSync() {
 
     if (res.success) {
       const data = res.data
-      let message = `股票 ${code.value} 数据同步完成\n`
+      let message = `${isEtf.value ? 'ETF' : '股票'} ${code.value} 数据同步完成\n`
 
       if (data.realtime_sync) {
         if (data.realtime_sync.success) {
@@ -689,12 +753,33 @@ async function fetchQuote() {
     quote.updatedAt = d.updated_at || null  // 🔥 数据更新时间
 
     if (d.name) stockName.value = d.name
-    if (d.market) market.value = d.market
+    market.value = d.market || (isLikelyEtfCode(symbol.value) ? 'ETF' : market.value)
     lastRefreshAt.value = new Date()
   } catch (e) {
     console.error('获取报价失败', e)
   }
 }
+
+const etfBasics = reactive({
+  fundType: '',
+  trackIndex: '',
+  fundScale: '' as string | number,
+  fundShare: '' as string | number,
+  fundShareDate: '',
+  management: '',
+  custodian: '',
+  managementFee: null as string | number | null,
+  custodianFee: null as string | number | null,
+  unitNav: NaN,
+  accumNav: NaN,
+  navGrowthRate: null as string | number | null,
+  premiumDiscountRate: null as string | number | null,
+  latestNavDate: '',
+  purchaseStatus: '',
+  redemptionStatus: '',
+  marketPrice: NaN,
+  updatedAt: ''
+})
 
 async function fetchFundamentals() {
   try {
@@ -702,7 +787,30 @@ async function fetchFundamentals() {
     const f: any = (res as any)?.data || {}
     // 基本面快照映射（以后台为准）
     if (f.name) stockName.value = f.name
-    if (f.market) market.value = f.market
+    market.value = f.market || (isLikelyEtfCode(symbol.value) ? 'ETF' : market.value)
+
+    if (f.security_type === 'ETF' || market.value === 'ETF' || isLikelyEtfCode(symbol.value)) {
+      etfBasics.fundType = f.fund_type || f.industry || ''
+      etfBasics.trackIndex = f.track_index || f.sector || ''
+      etfBasics.fundScale = f.fund_scale || ''
+      etfBasics.fundShare = f.fund_share || ''
+      etfBasics.fundShareDate = f.fund_share_date || ''
+      etfBasics.management = f.management || ''
+      etfBasics.custodian = f.custodian || ''
+      etfBasics.managementFee = f.management_fee ?? null
+      etfBasics.custodianFee = f.custodian_fee ?? null
+      etfBasics.unitNav = Number.isFinite(f.unit_nav) ? Number(f.unit_nav) : NaN
+      etfBasics.accumNav = Number.isFinite(f.accum_nav) ? Number(f.accum_nav) : NaN
+      etfBasics.navGrowthRate = f.nav_growth_rate ?? null
+      etfBasics.premiumDiscountRate = f.premium_discount_rate ?? null
+      etfBasics.latestNavDate = f.latest_nav_date || ''
+      etfBasics.purchaseStatus = f.purchase_status || ''
+      etfBasics.redemptionStatus = f.redemption_status || ''
+      etfBasics.marketPrice = Number.isFinite(f.market_price) ? Number(f.market_price) : NaN
+      etfBasics.updatedAt = f.updated_at || ''
+      return
+    }
+
     basics.industry = f.industry || basics.industry
     basics.sector = f.sector || basics.sector || '—'
     // 后端 total_mv 单位：亿元，这里转为元以便与金额格式化函数配合
@@ -731,6 +839,11 @@ async function fetchFundamentals() {
 }
 
 async function fetchFinancials() {
+  if (isLikelyEtfCode(symbol.value) || market.value === 'ETF') {
+    financialRawSections.value = []
+    return
+  }
+
   try {
     const res = await stocksApi.getFinancials(code.value, { includeRaw: true })
     const d: any = (res as any)?.data || {}
@@ -776,6 +889,44 @@ async function fetchSyncStatus() {
 }
 
 let timer: any = null
+
+let authReadyPromise: Promise<void> | null = null
+
+async function ensureAuthReady() {
+  if (authReadyPromise) {
+    await authReadyPromise
+    return
+  }
+
+  authReadyPromise = (async () => {
+    const storedToken = localStorage.getItem('auth-token')
+    const storedRefreshToken = localStorage.getItem('refresh-token')
+
+    if (!authStore.token && storedToken) {
+      authStore.token = storedToken
+      authStore.isAuthenticated = true
+    }
+
+    if (!authStore.refreshToken && storedRefreshToken) {
+      authStore.refreshToken = storedRefreshToken
+    }
+
+    if (authStore.token) {
+      try {
+        await authStore.checkAuthStatus()
+      } catch (error) {
+        console.warn('详情页认证状态恢复失败:', error)
+      }
+    }
+  })()
+
+  try {
+    await authReadyPromise
+  } finally {
+    authReadyPromise = null
+  }
+}
+
 async function checkFavorite() {
   try {
     const res: any = await favoritesApi.check(code.value)
@@ -786,6 +937,8 @@ async function checkFavorite() {
   }
 }
 onMounted(async () => {
+  await ensureAuthReady()
+
   // 首次加载：打通后端（并行）
   await Promise.all([
     fetchQuote(),
@@ -824,6 +977,8 @@ function periodLabelToParam(p: string): string {
 watch(period, () => { fetchKline() })
 
 async function fetchKline() {
+  await ensureAuthReady()
+
   try {
     const param = periodLabelToParam(period.value)
     const res = await stocksApi.getKline(code.value, param as any, 200, 'none')
@@ -980,7 +1135,7 @@ async function onToggleFavorite() {
 }
 
 function goPaperTrading() {
-  router.push({ name: 'PaperTradingHome', query: { code: code.value } })
+  router.push({ name: 'PaperTradingHome', query: { code: code.value, market: market.value } })
 }
 
 // 获取最新的历史分析报告
@@ -1025,33 +1180,25 @@ async function fetchLatestAnalysis() {
       // 保存任务信息（包含 end_time 等）
       lastTaskInfo.value = latestTask
 
-      // 优先使用 result_data 字段（后端实际返回的字段名）
-      if (latestTask.result_data) {
-        lastAnalysis.value = latestTask.result_data
-        analysisStatus.value = 'completed'
-        console.log('✅ 加载历史分析报告成功 (result_data):', latestTask.result_data)
-        console.log('🔍 [fetchLatestAnalysis] lastAnalysis.value.reports:', lastAnalysis.value?.reports)
-      }
-      // 兼容旧的 result 字段
-      else if (latestTask.result) {
-        lastAnalysis.value = latestTask.result
-        analysisStatus.value = 'completed'
-        console.log('✅ 加载历史分析报告成功 (result):', latestTask.result)
-        console.log('🔍 [fetchLatestAnalysis] lastAnalysis.value.reports:', lastAnalysis.value?.reports)
-      }
-      // 否则尝试通过 task_id 获取结果
-      else if (latestTask.task_id) {
+      const seedResult = mergeTaskResult(latestTask.result_data, latestTask.result)
+
+      if (latestTask.task_id && !hasTaskResultContent(seedResult)) {
         console.log('🔍 [fetchLatestAnalysis] 通过task_id获取结果:', latestTask.task_id)
         try {
-          const resultResp: any = await analysisApi.getTaskResult(latestTask.task_id)
-          console.log('🔍 [fetchLatestAnalysis] getTaskResult响应:', resultResp)
-          lastAnalysis.value = resultResp?.data || resultResp
+          lastAnalysis.value = await fetchTaskResultWithRetry(latestTask.task_id, {
+            seedData: seedResult
+          })
           analysisStatus.value = 'completed'
           console.log('✅ 通过 task_id 加载分析报告成功:', lastAnalysis.value)
           console.log('🔍 [fetchLatestAnalysis] lastAnalysis.value.reports:', lastAnalysis.value?.reports)
         } catch (e) {
           console.warn('⚠️ 获取任务结果失败:', e)
         }
+      } else if (hasTaskResultContent(seedResult)) {
+        lastAnalysis.value = seedResult
+        analysisStatus.value = 'completed'
+        console.log('✅ 加载历史分析报告成功:', seedResult)
+        console.log('🔍 [fetchLatestAnalysis] lastAnalysis.value.reports:', lastAnalysis.value?.reports)
       }
     } else {
       console.log('ℹ️ 该股票暂无历史分析报告')
@@ -1066,6 +1213,20 @@ async function fetchLatestAnalysis() {
 function fmtPrice(v: any) { const n = Number(v); return Number.isFinite(n) ? n.toFixed(2) : '-' }
 function fmtPercent(v: any) { const n = Number(v); return Number.isFinite(n) ? `${n>0?'+':''}${n.toFixed(2)}%` : '-' }
 function fmtRatio(v: any) { const n = Number(v); return Number.isFinite(n) ? n.toFixed(2) : '-' }
+function fmtText(v: any) {
+  if (v === null || v === undefined || v === '') return '-'
+  return String(v)
+}
+function fmtLoosePercent(v: any) {
+  if (v === null || v === undefined || v === '') return '-'
+  if (typeof v === 'string' && v.includes('%')) return v
+  const n = Number(v)
+  return Number.isFinite(n) ? `${n > 0 ? '+' : ''}${n.toFixed(2)}%` : String(v)
+}
+function formatDateValue(v: any) {
+  if (v === null || v === undefined || v === '') return '-'
+  return String(v)
+}
 function fmtVolume(v: any) {
   const n = Number(v)
   if (!Number.isFinite(n)) return '-'
@@ -1317,7 +1478,10 @@ function exportReport() {
 }
 
 .header { display: flex; justify-content: space-between; align-items: center; }
-.title { display: flex; align-items: center; gap: 12px; }
+.title { display: flex; flex-direction: column; gap: 8px; }
+.title-main { display: flex; align-items: center; gap: 12px; }
+.title-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.meta-text { font-size: 12px; color: var(--el-text-color-secondary); }
 .code { font-size: 22px; font-weight: 700; }
 .name { font-size: 18px; color: var(--el-text-color-regular); }
 .actions { display: flex; gap: 8px; }
@@ -1371,6 +1535,8 @@ function exportReport() {
 
 @media (max-width: 1024px) {
   .stats { grid-template-columns: repeat(4, 1fr); }
+  .header { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .actions { flex-wrap: wrap; }
 }
 
 /* 报告相关样式 */

@@ -236,11 +236,13 @@
           <el-input v-model="order.code" placeholder="A股: 600519 | 港股: 0700 | 美股: AAPL" @input="detectMarket" />
         </el-form-item>
         <el-form-item label="市场" v-if="detectedMarket">
-          <el-tag v-if="detectedMarket === 'CN'" type="success">🇨🇳 A股市场 (CNY)</el-tag>
+          <el-tag v-if="detectedMarket === 'ETF'" type="success">📈 ETF 基金 (CNY)</el-tag>
+          <el-tag v-else-if="detectedMarket === 'CN'" type="success">🇨🇳 A股市场 (CNY)</el-tag>
           <el-tag v-else-if="detectedMarket === 'HK'" type="warning">🇭🇰 港股市场 (HKD)</el-tag>
           <el-tag v-else-if="detectedMarket === 'US'" type="info">🇺🇸 美股市场 (USD)</el-tag>
           <div style="margin-top: 8px; font-size: 12px; color: #909399">
-            <span v-if="detectedMarket === 'CN'">💡 A股T+1，今天买入明天可卖</span>
+            <span v-if="detectedMarket === 'ETF'">💡 场内 ETF 按 A 股规则模拟，T+1，今天买入明天可卖</span>
+            <span v-else-if="detectedMarket === 'CN'">💡 A股T+1，今天买入明天可卖</span>
             <span v-else-if="detectedMarket === 'HK'">💡 港股T+0，买入后立即可卖</span>
             <span v-else-if="detectedMarket === 'US'">💡 美股T+0，买入后立即可卖 | 零佣金</span>
           </div>
@@ -352,6 +354,7 @@ import { paperApi } from '@/api/paper'
 import { analysisApi } from '@/api/analysis'
 import { stocksApi } from '@/api/stocks'
 import { formatDateTime } from '@/utils/datetime'
+import { getMarketByStockCode, normalizeMarketForAnalysis } from '@/utils/market'
 
 // 路由与初始化
 const route = useRoute()
@@ -476,7 +479,7 @@ function detectMarket() {
 
   // A股：6位数字
   if (/^\d{6}$/.test(code)) {
-    detectedMarket.value = 'CN'
+    detectedMarket.value = getMarketByStockCode(code) === 'ETF' ? 'ETF' : 'CN'
     fetchPriceInfo()
     return
   }
@@ -579,7 +582,8 @@ async function submitOrder() {
     const payload: any = { 
       side: order.value.side as 'buy' | 'sell', 
       code: order.value.code, 
-      quantity: Number(order.value.qty)
+      quantity: Number(order.value.qty),
+      market: detectedMarket.value || undefined
     }
     
     // 🔥 如果指定了价格，添加到 payload
@@ -736,19 +740,7 @@ function goAnalysisWithCode(stockCode: string) {
 // 根据股票代码判断市场
 function getMarketByCode(code: string): string {
   if (!code) return 'A股'
-
-  // 6位数字 = A股
-  if (/^\d{6}$/.test(code)) {
-    return 'A股'
-  }
-
-  // 包含 .HK = 港股
-  if (code.includes('.HK') || code.includes('.hk')) {
-    return '港股'
-  }
-
-  // 其他 = 美股
-  return '美股'
+  return getMarketByStockCode(code)
 }
 
 // 查看股票详情（跳转到股票详情页）
@@ -778,7 +770,8 @@ async function sellPosition(position: any) {
     const payload = {
       side: 'sell' as const,
       code: position.code,
-      quantity: position.quantity
+      quantity: position.quantity,
+      market: getMarketByStockCode(position.code) === 'ETF' ? 'ETF' : position.market
     }
 
     const res = await paperApi.placeOrder(payload)
@@ -816,6 +809,20 @@ onMounted(() => {
     order.value.code = qCode
     hasPrefill = true
   }
+  const qMarket = String(route.query.market || '').trim()
+  if (qMarket) {
+    const normalizedMarket = normalizeMarketForAnalysis(qMarket)
+    if (normalizedMarket === 'ETF') {
+      detectedMarket.value = 'ETF'
+    } else if (normalizedMarket === '港股') {
+      detectedMarket.value = 'HK'
+    } else if (normalizedMarket === '美股') {
+      detectedMarket.value = 'US'
+    } else if (normalizedMarket === 'A股') {
+      detectedMarket.value = 'CN'
+    }
+    hasPrefill = true
+  }
   const qSide = String(route.query.side || '').trim().toLowerCase()
   if (qSide === 'buy' || qSide === 'sell') {
     order.value.side = qSide as 'buy' | 'sell'
@@ -836,6 +843,11 @@ onMounted(() => {
   }
   if (hasPrefill) {
     orderDialog.value = true
+    if (!detectedMarket.value && qCode) {
+      detectMarket()
+    } else if (qCode && detectedMarket.value) {
+      fetchPriceInfo()
+    }
   }
   refreshAll()
 })

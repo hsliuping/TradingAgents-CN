@@ -11,6 +11,10 @@
         </el-tag>
       </div>
       <div class="header-right">
+        <el-button size="small" @click="settingsDialogVisible = true">
+          <el-icon><Setting /></el-icon>
+          助手设置
+        </el-button>
         <el-button size="small" @click="handleCreateThread()">
           <el-icon><Plus /></el-icon>
           新主题
@@ -28,94 +32,6 @@
         </el-tooltip>
       </div>
     </div>
-
-    <section class="assistant-llm-panel">
-      <div class="assistant-llm-header">
-        <div>
-          <div class="assistant-llm-title">LLM 选择</div>
-          <div class="assistant-llm-subtitle">快速对话使用快速模型，深度分析使用深度模型，可独立指定</div>
-        </div>
-        <el-tag size="small" :type="analysisMode === 'react' ? 'success' : 'warning'" effect="plain">
-          当前模式：{{ analysisMode === 'react' ? '快速对话 → 快速模型' : '深度分析 → 深度模型' }}
-        </el-tag>
-        <el-tooltip :content="memoryStatusTip" placement="bottom">
-          <el-tag
-            size="small"
-            :type="memoryStatus === 'ok' ? 'success' : memoryStatus === 'off' ? 'info' : 'danger'"
-            effect="plain"
-          >
-            {{ memoryStatus === 'ok' ? '🧠 记忆已启用' : memoryStatus === 'off' ? '🧠 记忆未启用' : '🧠 记忆不可用' }}
-          </el-tag>
-        </el-tooltip>
-      </div>
-      <div class="assistant-llm-grid">
-        <div class="assistant-llm-item">
-          <div class="assistant-llm-label">快速对话模型</div>
-          <el-select
-            v-model="assistantModelSettings.quickModel"
-            filterable
-            clearable
-            placeholder="选择快速对话模型"
-            :loading="modelsLoading"
-          >
-            <el-option
-              v-for="model in quickAssistantModels"
-              :key="`assistant-quick-${model.provider}/${model.model_name}`"
-              :label="model.model_display_name || model.model_name"
-              :value="model.model_name"
-            >
-              <div class="assistant-model-option">
-                <span class="assistant-model-name">{{ model.model_display_name || model.model_name }}</span>
-                <div class="assistant-model-meta">
-                  <el-tag
-                    v-if="model.capability_level"
-                    :type="getCapabilityTagType(model.capability_level)"
-                    size="small"
-                    effect="plain"
-                  >
-                    {{ getCapabilityText(model.capability_level) }}
-                  </el-tag>
-                  <span class="assistant-model-provider">{{ model.provider }}</span>
-                </div>
-              </div>
-            </el-option>
-          </el-select>
-        </div>
-
-        <div class="assistant-llm-item">
-          <div class="assistant-llm-label">深度分析模型</div>
-          <el-select
-            v-model="assistantModelSettings.deepModel"
-            filterable
-            clearable
-            placeholder="选择深度分析模型"
-            :loading="modelsLoading"
-          >
-            <el-option
-              v-for="model in deepAssistantModels"
-              :key="`assistant-deep-${model.provider}/${model.model_name}`"
-              :label="model.model_display_name || model.model_name"
-              :value="model.model_name"
-            >
-              <div class="assistant-model-option">
-                <span class="assistant-model-name">{{ model.model_display_name || model.model_name }}</span>
-                <div class="assistant-model-meta">
-                  <el-tag
-                    v-if="model.capability_level"
-                    :type="getCapabilityTagType(model.capability_level)"
-                    size="small"
-                    effect="plain"
-                  >
-                    {{ getCapabilityText(model.capability_level) }}
-                  </el-tag>
-                  <span class="assistant-model-provider">{{ model.provider }}</span>
-                </div>
-              </div>
-            </el-option>
-          </el-select>
-        </div>
-      </div>
-    </section>
 
     <div class="workspace-body">
       <aside class="thread-sidebar">
@@ -397,6 +313,68 @@
     </div>
 
     <el-dialog
+      v-model="settingsDialogVisible"
+      width="760px"
+      title="助手设置"
+      destroy-on-close
+    >
+      <section class="assistant-llm-panel assistant-llm-panel-dialog">
+        <div class="assistant-llm-header">
+          <div>
+            <div class="assistant-llm-title">助手模型</div>
+            <div class="assistant-llm-subtitle">智能助手优先使用系统“深度推理模型”，以获得更强的推理与工具调用能力</div>
+          </div>
+          <el-tag size="small" :type="analysisMode === 'react' ? 'success' : 'warning'" effect="plain">
+            当前模式：{{ analysisMode === 'react' ? '快速对话 → 推理模型' : '深度分析 → 推理模型' }}
+          </el-tag>
+          <el-tooltip :content="memoryStatusTip" placement="bottom">
+            <el-tag
+              size="small"
+              :type="memoryStatus === 'ok' ? 'success' : memoryStatus === 'off' ? 'info' : 'danger'"
+              effect="plain"
+            >
+              {{ memoryStatus === 'ok' ? '🧠 记忆已启用' : memoryStatus === 'off' ? '🧠 记忆未启用' : '🧠 记忆不可用' }}
+            </el-tag>
+          </el-tooltip>
+        </div>
+        <div class="assistant-llm-grid">
+          <div class="assistant-llm-item">
+            <div class="assistant-llm-label">助手推理模型</div>
+            <el-select
+              v-model="assistantModel"
+              filterable
+              clearable
+              placeholder="选择助手推理模型"
+              :loading="modelsLoading"
+            >
+              <el-option
+                v-for="model in assistantReasoningModels"
+                :key="`assistant-reasoning-${model.provider}/${model.model_name}`"
+                :label="model.model_display_name || model.model_name"
+                :value="model.model_name"
+              >
+                <div class="assistant-model-option">
+                  <span class="assistant-model-name">{{ model.model_display_name || model.model_name }}</span>
+                  <div class="assistant-model-meta">
+                    <el-tag
+                      v-if="model.capability_level"
+                      :type="getCapabilityTagType(model.capability_level)"
+                      size="small"
+                      effect="plain"
+                    >
+                      {{ getCapabilityText(model.capability_level) }}
+                    </el-tag>
+                    <span class="assistant-model-provider">{{ model.provider }}</span>
+                  </div>
+                </div>
+              </el-option>
+            </el-select>
+          </div>
+        </div>
+      </section>
+    </el-dialog>
+
+    <el-dialog
       v-model="reportDialogVisible"
       width="760px"
       title="关联报告详情"
@@ -501,7 +479,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { ChatDotRound, DataAnalysis, Delete, Document, FolderOpened, Plus, QuestionFilled, User } from '@element-plus/icons-vue'
+import { ChatDotRound, DataAnalysis, Delete, Document, FolderOpened, Plus, QuestionFilled, Setting, User } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
@@ -559,11 +537,9 @@ const selectedThreadId = ref<string>('')
 const messages = ref<DisplayMessage[]>([])
 const modelsLoading = ref(false)
 const availableModels = ref<LLMConfig[]>([])
-const assistantModelSettings = ref({
-  quickModel: '',
-  deepModel: '',
-})
+const assistantModel = ref('')
 const messagesContainer = ref<HTMLElement | null>(null)
+const settingsDialogVisible = ref(false)
 const reportDialogVisible = ref(false)
 const activeReportRef = ref<AssistantThreadReportRef | null>(null)
 const activeReportDetail = ref<AssistantThreadReportDetail | null>(null)
@@ -584,13 +560,29 @@ const currentSummary = computed<AssistantThreadSummary | null>(() => currentThre
 const currentReportRefs = computed<AssistantThreadReportRef[]>(() => currentThread.value?.report_refs || [])
 const activeReportTaskId = computed(() => activeReportDetail.value?.task_id || activeReportRef.value?.task_id || null)
 const focusPercent = computed(() => Math.max(0, Math.min(100, Math.round((currentSummary.value?.focus_score || 0) * 100))))
-const quickAssistantModels = computed(() => {
-  const matched = availableModels.value.filter(model => isQuickAnalysisRole(model.suitable_roles))
-  return matched.length ? matched : availableModels.value
-})
-const deepAssistantModels = computed(() => {
-  const matched = availableModels.value.filter(model => isDeepAnalysisRole(model.suitable_roles))
-  return matched.length ? matched : availableModels.value
+const isReasoningModel = (model: LLMConfig): boolean => {
+  const features = Array.isArray(model.features) ? model.features : []
+  return features.includes('reasoning') || Number(model.capability_level || 0) >= 4
+}
+
+const sortAssistantModels = (models: LLMConfig[]): LLMConfig[] => {
+  return [...models].sort((left, right) => {
+    const reasoningGap = Number(isReasoningModel(right)) - Number(isReasoningModel(left))
+    if (reasoningGap !== 0) return reasoningGap
+
+    const capabilityGap = Number(right.capability_level || 0) - Number(left.capability_level || 0)
+    if (capabilityGap !== 0) return capabilityGap
+
+    return String(left.model_display_name || left.model_name).localeCompare(
+      String(right.model_display_name || right.model_name),
+      'zh-CN'
+    )
+  })
+}
+
+const assistantReasoningModels = computed(() => {
+  const matched = availableModels.value.filter(model => isReasoningModel(model) || isDeepAnalysisRole(model.suitable_roles))
+  return sortAssistantModels(matched.length ? matched : availableModels.value)
 })
 
 const threadLookup = computed(() => {
@@ -704,28 +696,20 @@ const isDeepAnalysisRole = (roles?: string[]): boolean => {
 const ensureAssistantModelSelections = async () => {
   const enabledModels = availableModels.value
   const defaultModels = await configApi.getDefaultModels()
-  const quickCandidates = quickAssistantModels.value
-  const deepCandidates = deepAssistantModels.value
+  const reasoningDefault = defaultModels.deep_reasoning_model || defaultModels.deep_analysis_model || ''
+  const assistantDefault = reasoningDefault || defaultModels.deep_analysis_model || defaultModels.quick_analysis_model
+  const reasoningCandidates = assistantReasoningModels.value
 
-  if (!assistantModelSettings.value.quickModel || !enabledModels.find(model => model.model_name === assistantModelSettings.value.quickModel)) {
-    assistantModelSettings.value.quickModel = defaultModels.quick_analysis_model
-  }
-  if (!assistantModelSettings.value.deepModel || !enabledModels.find(model => model.model_name === assistantModelSettings.value.deepModel)) {
-    assistantModelSettings.value.deepModel = defaultModels.deep_analysis_model
+  if (!assistantModel.value || !enabledModels.find(model => model.model_name === assistantModel.value)) {
+    assistantModel.value = assistantDefault
   }
 
-  if (assistantModelSettings.value.quickModel && !enabledModels.find(model => model.model_name === assistantModelSettings.value.quickModel)) {
-    assistantModelSettings.value.quickModel = quickCandidates[0]?.model_name || enabledModels[0]?.model_name || ''
-  }
-  if (assistantModelSettings.value.deepModel && !enabledModels.find(model => model.model_name === assistantModelSettings.value.deepModel)) {
-    assistantModelSettings.value.deepModel = deepCandidates[0]?.model_name || enabledModels[0]?.model_name || ''
+  if (assistantModel.value && !enabledModels.find(model => model.model_name === assistantModel.value)) {
+    assistantModel.value = reasoningCandidates[0]?.model_name || enabledModels[0]?.model_name || ''
   }
 
-  if (!assistantModelSettings.value.quickModel) {
-    assistantModelSettings.value.quickModel = quickCandidates[0]?.model_name || enabledModels[0]?.model_name || ''
-  }
-  if (!assistantModelSettings.value.deepModel) {
-    assistantModelSettings.value.deepModel = deepCandidates[0]?.model_name || enabledModels[0]?.model_name || ''
+  if (!assistantModel.value) {
+    assistantModel.value = reasoningCandidates[0]?.model_name || enabledModels[0]?.model_name || ''
   }
 }
 
@@ -1043,8 +1027,7 @@ const handleSendPlanned = (text: string) => {
   activeStreamController = assistantApi.plannedAnalysisStream(
     text,
     selectedThreadId.value,
-    assistantModelSettings.value.quickModel,
-    assistantModelSettings.value.deepModel,
+    assistantModel.value,
     {
       onToken(content: string) {
         if (!firstEventReceived) {
@@ -1161,8 +1144,7 @@ const handleSendStream = (text: string) => {
   activeStreamController = assistantApi.chatStream(
     text,
     selectedThreadId.value,
-    assistantModelSettings.value.quickModel,
-    assistantModelSettings.value.deepModel,
+    assistantModel.value,
     {
       onToken(content: string) {
         if (!firstTokenReceived) {
@@ -1301,12 +1283,14 @@ onBeforeUnmount(() => {
 
 .assistant-llm-panel {
   flex-shrink: 0;
-  margin-top: 12px;
-  margin-bottom: 12px;
   padding: 14px 16px;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 14px;
   background: linear-gradient(135deg, rgba(245, 247, 250, 0.96), rgba(255, 250, 240, 0.96));
+}
+
+.assistant-llm-panel-dialog {
+  margin: 0;
 }
 
 .assistant-llm-header {

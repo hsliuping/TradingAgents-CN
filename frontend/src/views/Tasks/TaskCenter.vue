@@ -149,6 +149,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { List, Refresh, Download } from '@element-plus/icons-vue'
 import { analysisApi } from '@/api/analysis'
+import { fetchTaskResultWithRetry } from '@/utils/taskResult'
 import TaskResultDialog from '@/components/Global/TaskResultDialog.vue'
 import TaskReportDialog from '@/components/Global/TaskReportDialog.vue'
 
@@ -353,8 +354,9 @@ const currentRow = ref<any>(null)
 const openResult = async (row:any) => {
   currentRow.value = row
   try {
-    const res = await analysisApi.getTaskResult(row.task_id)
-    const body = (res as any)?.data?.data || {}
+    const body = await fetchTaskResultWithRetry(row.task_id, {
+      seedData: row.result_data
+    })
     currentResult.value = body
     resultVisible.value = true
   } catch (e:any) {

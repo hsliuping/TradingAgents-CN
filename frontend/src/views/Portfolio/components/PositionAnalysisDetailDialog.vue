@@ -16,7 +16,7 @@
         >
           <template #title>
             <span style="font-size: 14px;">
-              <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。
+              <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI证券分析技术，不作为真实交易操盘指导。
             </span>
           </template>
         </el-alert>
@@ -26,8 +26,8 @@
       <div class="section">
         <h3>📊 持仓快照</h3>
         <el-descriptions :column="2" border size="small">
-          <el-descriptions-item label="股票代码">{{ report.position_snapshot?.code || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="股票名称">{{ report.position_snapshot?.name || '-' }}</el-descriptions-item>
+          <el-descriptions-item :label="securityCodeLabel">{{ report.position_snapshot?.code || '-' }}</el-descriptions-item>
+          <el-descriptions-item :label="securityNameLabel">{{ report.position_snapshot?.name || '-' }}</el-descriptions-item>
           <el-descriptions-item label="持仓数量">{{ report.position_snapshot?.quantity || 0 }} 股</el-descriptions-item>
           <el-descriptions-item label="成本价">¥{{ (report.position_snapshot?.cost_price || 0).toFixed(2) }}</el-descriptions-item>
           <el-descriptions-item label="当前价">¥{{ (report.position_snapshot?.current_price || 0).toFixed(2) }}</el-descriptions-item>
@@ -38,7 +38,7 @@
               ({{ formatPct(report.position_snapshot?.unrealized_pnl_pct || 0) }})
             </span>
           </el-descriptions-item>
-          <el-descriptions-item label="所属行业">{{ report.position_snapshot?.industry || '未知' }}</el-descriptions-item>
+          <el-descriptions-item :label="industryLabel">{{ industryValue }}</el-descriptions-item>
         </el-descriptions>
       </div>
 
@@ -128,6 +128,7 @@ import { computed, ref, watch } from 'vue'
 import { type PositionAnalysisResult } from '@/api/portfolio'
 import { marked } from 'marked'
 import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
+import { getMarketByStockCode } from '@/utils/market'
 
 type PositionSnapshot = {
   code?: string
@@ -155,6 +156,17 @@ const emit = defineEmits<{
 
 const visible = ref(false)
 const growthTaskId = computed(() => props.report?.task_id || props.report?.analysis_id || null)
+const isEtfReport = computed(() => {
+  const code = props.report?.position_snapshot?.code
+  return !!code && getMarketByStockCode(code) === 'ETF'
+})
+const securityCodeLabel = computed(() => isEtfReport.value ? 'ETF代码' : '股票代码')
+const securityNameLabel = computed(() => isEtfReport.value ? 'ETF名称' : '股票名称')
+const industryLabel = computed(() => isEtfReport.value ? '产品分类' : '所属行业')
+const industryValue = computed(() => {
+  if (isEtfReport.value) return 'ETF/基金'
+  return props.report?.position_snapshot?.industry || '未知'
+})
 
 watch(() => props.modelValue, (val) => {
   visible.value = val

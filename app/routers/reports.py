@@ -18,8 +18,31 @@ import logging
 
 logger = logging.getLogger("webapi")
 
+ETF_CODE_PREFIXES = ("50", "51", "52", "56", "58", "15", "16", "18")
+
 # 股票名称缓存
 _stock_name_cache = {}
+
+
+def _is_cn_etf_symbol(stock_code: str) -> bool:
+    code_str = str(stock_code or "").strip().zfill(6)
+    return len(code_str) == 6 and code_str.isdigit() and code_str.startswith(ETF_CODE_PREFIXES)
+
+
+def _is_invalid_stock_name(stock_code: str, stock_name: Optional[str]) -> bool:
+    if not stock_name:
+        return True
+    code_str = str(stock_code or "").strip().zfill(6)
+    name = str(stock_name).strip()
+    generic_names = {
+        code_str,
+        stock_code,
+        f"股票{code_str}",
+        f"股票{stock_code}",
+        f"ETF{code_str}",
+        f"ETF{stock_code}",
+    }
+    return name in generic_names
 
 def get_stock_name(stock_code: str) -> str:
     """
@@ -39,6 +62,17 @@ def get_stock_name(stock_code: str) -> str:
 
         db = get_mongo_db_sync()
         code6 = str(stock_code).zfill(6)
+
+        if _is_cn_etf_symbol(code6):
+            etf_info = db.etf_basic_info.find_one(
+                {"code": code6},
+                {"name": 1, "fund_name": 1, "etf_name": 1}
+            )
+            if etf_info:
+                etf_name = etf_info.get("name") or etf_info.get("fund_name") or etf_info.get("etf_name")
+                if etf_name:
+                    _stock_name_cache[stock_code] = etf_name
+                    return etf_name
 
         # 🔥 按数据源优先级查询
         config = UnifiedConfigManager()
@@ -176,7 +210,7 @@ async def get_reports_list(
             stock_code = doc.get("stock_symbol", "")
             # 🔥 优先使用MongoDB中保存的股票名称，如果没有则查询
             stock_name = doc.get("stock_name")
-            if not stock_name:
+            if _is_invalid_stock_name(stock_code, stock_name):
                 stock_name = get_stock_name(stock_code)
 
             # 🔥 获取市场类型，如果没有则根据股票代码推断
@@ -309,7 +343,7 @@ async def get_report_detail(
                 tasks_doc.get("stock_code", "")
             )
             stock_name = r.get("stock_name")
-            if not stock_name:
+            if _is_invalid_stock_name(stock_symbol, stock_name):
                 stock_name = get_stock_name(stock_symbol)
 
             # 🔥 清理 reports 中的重复数据（如果存在）
@@ -355,7 +389,7 @@ async def get_report_detail(
             # 转换为详细格式（analysis_reports 命中）
             stock_symbol = doc.get("stock_symbol", "")
             stock_name = doc.get("stock_name")
-            if not stock_name:
+            if _is_invalid_stock_name(stock_symbol, stock_name):
                 stock_name = get_stock_name(stock_symbol)
 
             # 获取时间（数据库中是 UTC 时间，需要转换为 UTC+8）

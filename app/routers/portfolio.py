@@ -502,7 +502,7 @@ async def check_stock_analysis_cache(
         portfolio_service = get_portfolio_service()
         
         # 将市场代码转换为中文名称（A股/港股/美股）
-        market_name = convert_market_code_to_name(data.market)
+        market_name = convert_market_code_to_name(data.market, data.code)
         
         logger.info(f"🔍 [检查缓存] 检查单股分析报告缓存: code={data.code}, market={data.market} -> {market_name}")
         

@@ -57,10 +57,10 @@ export const getMarketByStockCode = (stockCode: string): string => {
     return '港股'
   }
 
-  // 6位数字：先判断 ETF（50/51/52/15/16），否则 A股
+  // 6位数字：先判断 ETF（与后端识别规则保持一致），否则 A股
   if (/^\d{6}$/.test(code)) {
     const prefix = code.substring(0, 2)
-    if (['50', '51', '52', '15', '16'].includes(prefix)) {
+    if (['50', '51', '52', '56', '58', '15', '16', '18'].includes(prefix)) {
       return 'ETF'
     }
     return 'A股'

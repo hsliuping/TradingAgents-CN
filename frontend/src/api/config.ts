@@ -569,10 +569,11 @@ export const configApi = {
   },
 
   // 获取默认模型配置
-  getDefaultModels(): Promise<{ quick_analysis_model: string; deep_analysis_model: string }> {
+  getDefaultModels(): Promise<{ quick_analysis_model: string; deep_analysis_model: string; deep_reasoning_model?: string }> {
     return ApiClient.get('/api/config/settings').then((settings: any) => ({
       quick_analysis_model: settings.data?.quick_analysis_model || settings.quick_analysis_model || 'qwen-turbo',
-      deep_analysis_model: settings.data?.deep_analysis_model || settings.deep_analysis_model || 'qwen-max'
+      deep_analysis_model: settings.data?.deep_analysis_model || settings.deep_analysis_model || 'qwen-max',
+      deep_reasoning_model: settings.data?.deep_reasoning_model || settings.deep_reasoning_model || ''
     }))
   },
 

@@ -11,7 +11,7 @@
       <div class="stock-info">
         <span class="stock-code">{{ stockInfo.code }}</span>
         <span class="stock-name">{{ stockInfo.name }}</span>
-        <el-tag :type="getMarketTagType(stockInfo.market)" size="small">{{ getMarketName(stockInfo.market) }}</el-tag>
+        <el-tag :type="getMarketTagType(stockInfo.market, stockInfo.code)" size="small">{{ getMarketName(stockInfo.market, stockInfo.code) }}</el-tag>
       </div>
       <div class="analysis-controls">
         <el-select
@@ -160,6 +160,7 @@ import { portfolioApi, type PositionChange } from '@/api/portfolio'
 import { reviewApi, type TradeReviewReport } from '@/api/review'
 import * as tradingSystemApi from '@/api/tradingSystem'
 import type { TradingSystem } from '@/api/tradingSystem'
+import { getMarketByStockCode } from '@/utils/market'
 
 interface StockInfo {
   code: string
@@ -306,8 +307,14 @@ const formatDateTime = (dt: string) => {
   return d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-const getMarketName = (m: string) => ({ CN: 'A股', HK: '港股', US: '美股' }[m] || m)
-const getMarketTagType = (m: string) => ({ CN: 'danger', HK: 'warning', US: 'primary' }[m] || 'info') as any
+const getMarketName = (m: string, code?: string) => {
+  if (m === 'CN' && code && getMarketByStockCode(code) === 'ETF') return 'ETF'
+  return ({ CN: 'A股', HK: '港股', US: '美股' }[m] || m)
+}
+const getMarketTagType = (m: string, code?: string) => {
+  if (m === 'CN' && code && getMarketByStockCode(code) === 'ETF') return 'success'
+  return ({ CN: 'danger', HK: 'warning', US: 'primary' }[m] || 'info') as any
+}
 const getCurrencySymbol = (c: string) => ({ CNY: '¥', HKD: 'HK$', USD: '$' }[c] || c)
 const getChangeTypeName = (t: string) => ({ buy: '买入', add: '加仓', reduce: '减仓', sell: '卖出', adjust: '调整', dividend: '分红', split: '拆股', merge: '合股' }[t] || t)
 const getChangeTypeTag = (t: string) => ({ buy: 'success', add: 'primary', reduce: 'warning', sell: 'danger', adjust: 'info', dividend: '', split: '', merge: '' }[t] || 'info') as any

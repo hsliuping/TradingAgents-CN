@@ -111,8 +111,19 @@ def _should_force_tool_retry(user_message: str) -> bool:
     has_domain = any(k in text for k in domain_markers)
     has_query = any(k in text for k in query_markers)
 
+    market_markers = [
+        "大盘", "指数", "上证", "深证", "创业板", "沪深300", "中证", "点位", "收盘", "开盘",
+        "成交额", "量能", "涨跌家数", "北向", "南向", "主力资金", "技术面", "技术指标",
+        "macd", "rsi", "kdj", "boll", "布林", "均线", "ma", "ema", "超买", "超卖",
+        "背离", "支撑", "阻力", "回调", "反弹", "突破", "压力位", "自然周期",
+    ]
+    recency_markers = ["最新", "当前", "现在", "今日", "今天", "近期", "最近", "截至目前", "今年", "本周", "本月"]
+
+    has_market = any(k in text for k in market_markers)
+    has_recency = any(k in text for k in recency_markers)
+
     # 至少满足：个人+领域，或 领域+查询
-    return (has_personal and has_domain) or (has_domain and has_query)
+    return (has_personal and has_domain) or (has_domain and has_query) or (has_market and has_recency)
 
 
 def _should_use_recent_search(user_message: str) -> bool:
@@ -329,6 +340,9 @@ def _get_system_prompt(
 - 调用所有需要 curr_date 或 trade_date 参数的工具时，**必须传入交易日**
 - 回答涉及年份、季度等问题时，**必须基于当前日期推理**
 - 严禁使用训练数据中的历史日期回答
+- 严禁直接引用模型训练记忆中的指数点位、涨跌幅、MACD、RSI、均线、成交额、财报数字等；这类数字**只能**来自本次工具返回
+- 如果工具返回的数据日期不是当前问题要求的时间范围，必须明确说明“数据日期”，不能冒充成当前/今年/最新口径
+- 如果没有拿到真实数据，必须直接说明“无法基于实时数据确认”，不能用历史记忆补答案
 
 【A股交易执行规则】
 - 讨论A股买卖数量时，默认遵守整手交易：普通买入/卖出应为100股整数倍。
@@ -350,6 +364,7 @@ def _get_system_prompt(
 
 【工具使用原则】
 - **严禁**根据训练数据回答行情、大盘、市场等需要实时数据的问题，**必须**通过调用工具获取
+- 对“大盘现在多少点”“今年高点/低点”“MACD/RSI 是否超买”“技术面怎么看”“市场是否放量”“最近是否突破/回调”这类问题，必须先调用工具，再回答
 - 根据每个工具的描述，**自主选择**最合适的工具；若一次调用不足，可继续调用其他工具
 - 所有需要 curr_date 或 trade_date 的工具，**必须**传入上述日期
 - 对“截至目前”“最新”“近期是否有变化”“请确认最新口径”“最新公告/持股比例/减持进展”这类问题，优先调用“近期信息搜索”或相关新闻工具，先检索近期公开信息，再回答
@@ -385,15 +400,50 @@ def _normalize_preferred_models(preferred_models: Optional[Dict[str, Any]]) -> D
         return {}
 
     normalized: Dict[str, str] = {}
+    unified_model = _normalize_model_name(preferred_models.get("model"))
     quick_model = _normalize_model_name(preferred_models.get("quick_model"))
     deep_model = _normalize_model_name(preferred_models.get("deep_model"))
+
+    if unified_model:
+        normalized["model"] = unified_model
 
     if quick_model:
         normalized["quick_model"] = quick_model
     if deep_model:
         normalized["deep_model"] = deep_model
 
+    if unified_model and not quick_model:
+        normalized["quick_model"] = unified_model
+    if unified_model and not deep_model:
+        normalized["deep_model"] = unified_model
+
     return normalized
+
+
+def _get_preferred_assistant_model(preferred_models: Optional[Dict[str, Any]]) -> Optional[str]:
+    normalized = _normalize_preferred_models(preferred_models)
+    return (
+        normalized.get("model")
+        or normalized.get("deep_model")
+        or normalized.get("quick_model")
+    )
+
+
+def _build_assistant_model_preferences(
+    model: Optional[str] = None,
+    quick_model: Optional[str] = None,
+    deep_model: Optional[str] = None,
+) -> Dict[str, str]:
+    assistant_model = _get_preferred_assistant_model(
+        {
+            "model": model,
+            "quick_model": quick_model,
+            "deep_model": deep_model,
+        }
+    )
+    if not assistant_model:
+        return {}
+    return {"model": assistant_model}
 
 
 async def _get_llm_config_for_model(db, target_model: str, purpose: str = "") -> Optional[LLMConfig]:
@@ -456,29 +506,25 @@ async def _get_assistant_llm_config(
     llm_configs = config_doc.get("llm_configs", [])
     default_llm = config_doc.get("default_llm")
     quick_model, deep_model, reasoning_model, _ = _resolve_models(config_doc)
-    normalized_preferred_models = _normalize_preferred_models(preferred_models)
-    preferred_quick_model = normalized_preferred_models.get("quick_model")
-    preferred_deep_model = normalized_preferred_models.get("deep_model")
+    preferred_assistant_model = _get_preferred_assistant_model(preferred_models)
 
-    if use_reasoning_model and preferred_deep_model:
-        target_model = preferred_deep_model
-        logger.info(f"[智能助手] 使用用户选择的深度模型: {target_model}")
+    if use_reasoning_model and preferred_assistant_model:
+        target_model = preferred_assistant_model
+        logger.info(f"[智能助手] 使用用户选择的助手模型: {target_model}")
     elif use_reasoning_model and reasoning_model:
         target_model = reasoning_model
         logger.info(f"[智能助手] 使用深度推理模型: {target_model}")
     else:
-        target_model = preferred_quick_model or preferred_deep_model or deep_model or quick_model or default_llm
-        if preferred_quick_model:
-            logger.info(f"[智能助手] 使用用户选择的快速模型: {preferred_quick_model}")
-        elif preferred_deep_model:
-            logger.info(f"[智能助手] 快速模型未指定，回退到用户选择的深度模型: {preferred_deep_model}")
+        target_model = preferred_assistant_model or deep_model or quick_model or default_llm
+        if preferred_assistant_model:
+            logger.info(f"[智能助手] 使用用户选择的助手模型: {preferred_assistant_model}")
         elif deep_model:
             logger.info(f"[智能助手] 使用深度分析模型: {deep_model}")
         elif quick_model:
             logger.info(f"[智能助手] 深度模型未配置，使用快速模型: {quick_model}")
 
     if not target_model:
-        target_model = preferred_deep_model or preferred_quick_model or deep_model or quick_model or default_llm
+        target_model = preferred_assistant_model or deep_model or quick_model or default_llm
     if not target_model and llm_configs:
         for cfg in llm_configs:
             if cfg.get("enabled", True):
@@ -535,7 +581,7 @@ class IntelligentAssistantService:
         self._llm_client: Optional[UnifiedLLMClient] = None
         self._openai_tools: Optional[List[Dict[str, Any]]] = None
         self._tool_functions: Optional[Dict[str, Any]] = None
-        self._preferred_models = _normalize_preferred_models(preferred_models)
+        self._preferred_model = _get_preferred_assistant_model(preferred_models)
         self._prefer_reasoning_model = prefer_reasoning_model
 
     async def _ensure_client(self) -> bool:
@@ -546,7 +592,7 @@ class IntelligentAssistantService:
         llm_config = await _get_assistant_llm_config(
             self._db,
             use_reasoning_model=self._prefer_reasoning_model,
-            preferred_models=self._preferred_models,
+            preferred_models={"model": self._preferred_model} if self._preferred_model else None,
         )
         if not llm_config:
             return False
@@ -705,7 +751,8 @@ class IntelligentAssistantService:
                     content=(
                         "请不要直接根据上下文猜测或编造结果。"
                         "这类问题必须先调用相关工具获取真实数据，再基于工具返回回答。"
-                        "如果工具返回为空，再明确说明为空。"
+                        "尤其不能直接编造指数点位、涨跌幅、MACD、RSI、均线、成交额等实时数字。"
+                        "如果工具返回为空或日期不匹配，再明确说明数据为空或数据日期不匹配。"
                     ),
                 ))
 
@@ -860,7 +907,8 @@ class IntelligentAssistantService:
                     content=(
                         "请不要直接根据上下文猜测或编造结果。"
                         "这类问题必须先调用相关工具获取真实数据，再基于工具返回回答。"
-                        "如果工具返回为空，再明确说明为空。"
+                        "尤其不能直接编造指数点位、涨跌幅、MACD、RSI、均线、成交额等实时数字。"
+                        "如果工具返回为空或日期不匹配，再明确说明数据为空或数据日期不匹配。"
                     ),
                 ))
                 try:
@@ -2354,6 +2402,7 @@ async def chat_with_assistant(
     conversation_id: Optional[str] = None,
     current_thread_id: Optional[str] = None,
     is_im: bool = False,
+    model: Optional[str] = None,
     quick_model: Optional[str] = None,
     deep_model: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -2426,10 +2475,11 @@ async def chat_with_assistant(
 
     service = IntelligentAssistantService(
         db,
-        preferred_models={
-            "quick_model": quick_model,
-            "deep_model": deep_model,
-        },
+        preferred_models=_build_assistant_model_preferences(
+            model=model,
+            quick_model=quick_model,
+            deep_model=deep_model,
+        ),
     )
     result = await service.chat(
         user_message,
@@ -2474,6 +2524,7 @@ async def stream_chat_with_assistant(
     user_id: Optional[str] = None,
     conversation_id: Optional[str] = None,
     current_thread_id: Optional[str] = None,
+    model: Optional[str] = None,
     quick_model: Optional[str] = None,
     deep_model: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
@@ -2538,7 +2589,11 @@ async def stream_chat_with_assistant(
 
     service = IntelligentAssistantService(
         db,
-        preferred_models={"quick_model": quick_model, "deep_model": deep_model},
+        preferred_models=_build_assistant_model_preferences(
+            model=model,
+            quick_model=quick_model,
+            deep_model=deep_model,
+        ),
     )
 
     collected_reply = ""

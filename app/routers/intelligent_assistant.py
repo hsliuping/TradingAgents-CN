@@ -52,6 +52,17 @@ router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 logger = logging.getLogger(__name__)
 
 
+def _resolve_requested_model(request: ChatRequest) -> tuple[Optional[str], Optional[str]]:
+    unified_model = (request.model or "").strip() or None
+    if unified_model:
+        return unified_model, unified_model
+
+    quick_model = (request.quick_model or "").strip() or None
+    deep_model = (request.deep_model or "").strip() or None
+    fallback_model = deep_model or quick_model
+    return quick_model or fallback_model, deep_model or fallback_model
+
+
 @router.get("/conversation", response_model=ConversationResponse)
 async def get_conversation(
     current_user=Depends(get_current_user),
@@ -265,6 +276,7 @@ async def assistant_chat(
         raise HTTPException(status_code=400, detail="消息不能为空")
 
     user_id = str(current_user["id"])
+    quick_model, deep_model = _resolve_requested_model(request)
 
     try:
         result = await chat_with_assistant(
@@ -272,8 +284,7 @@ async def assistant_chat(
             user_message=request.message.strip(),
             user_id=user_id,
             conversation_id=request.conversation_id,
-            quick_model=request.quick_model,
-            deep_model=request.deep_model,
+            model=deep_model or quick_model,
         )
         return ChatResponse(**result)
     except Exception as e:
@@ -297,6 +308,7 @@ async def assistant_chat_stream(
         raise HTTPException(status_code=400, detail="消息不能为空")
 
     user_id = str(current_user["id"])
+    quick_model, deep_model = _resolve_requested_model(request)
 
     _HEARTBEAT_INTERVAL = 15  # seconds
 
@@ -307,8 +319,7 @@ async def assistant_chat_stream(
             user_message=request.message.strip(),
             user_id=user_id,
             conversation_id=request.conversation_id,
-            quick_model=request.quick_model,
-            deep_model=request.deep_model,
+            model=deep_model or quick_model,
         )
         try:
             while True:
@@ -354,13 +365,13 @@ async def planned_analysis(
         raise HTTPException(status_code=400, detail="消息不能为空")
 
     user_id = str(current_user["id"])
+    quick_model, deep_model = _resolve_requested_model(request)
 
     try:
         service = PlannedAnalysisService(
             db,
             preferred_models={
-                "quick_model": request.quick_model,
-                "deep_model": request.deep_model,
+                "model": deep_model or quick_model,
             },
         )
         result = await service.analyze(
@@ -411,6 +422,7 @@ async def planned_analysis_stream(
         raise HTTPException(status_code=400, detail="消息不能为空")
 
     user_id = str(current_user["id"])
+    quick_model, deep_model = _resolve_requested_model(request)
     _HEARTBEAT_INTERVAL = 15
 
     async def event_generator():
@@ -421,8 +433,7 @@ async def planned_analysis_stream(
             user_message=request.message.strip(),
             user_id=user_id,
             conversation_id=request.conversation_id,
-            quick_model=request.quick_model,
-            deep_model=request.deep_model,
+            model=deep_model or quick_model,
         )
         try:
             while True:

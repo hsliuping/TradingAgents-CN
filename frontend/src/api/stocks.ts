@@ -24,6 +24,25 @@ export interface FundamentalsResponse {
   industry?: string
   market?: string
   sector?: string  // 板块
+  security_type?: string
+  fund_type?: string
+  track_index?: string
+  fund_scale?: string | number
+  fund_share?: string | number
+  fund_share_date?: string
+  management?: string
+  custodian?: string
+  management_fee?: string | number
+  custodian_fee?: string | number
+  unit_nav?: number
+  accum_nav?: number
+  nav_change_value?: number
+  nav_growth_rate?: string | number
+  market_price?: number
+  premium_discount_rate?: string | number
+  latest_nav_date?: string
+  purchase_status?: string
+  redemption_status?: string
   pe?: number
   pb?: number
   ps?: number      // 🔥 新增：市销率

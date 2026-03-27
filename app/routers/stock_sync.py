@@ -13,6 +13,7 @@ from app.core.database import get_mongo_db
 from app.worker.tushare_sync_service import get_tushare_sync_service
 from app.worker.akshare_sync_service import get_akshare_sync_service
 from app.worker.financial_data_sync_service import get_financial_sync_service
+from app.worker.etf_sync_service import get_etf_sync_service
 from app.services.data_validation_service import get_data_validation_service
 import logging
 import asyncio
@@ -23,6 +24,14 @@ from fastapi import Query
 logger = logging.getLogger("webapi")
 
 router = APIRouter(prefix="/api/stock-sync", tags=["股票数据同步"])
+
+
+ETF_CODE_PREFIXES = ("50", "51", "52", "56", "58", "15", "16", "18")
+
+
+def _is_cn_etf_symbol(symbol: str) -> bool:
+    text = str(symbol or "").strip()
+    return len(text) == 6 and text.isdigit() and text.startswith(ETF_CODE_PREFIXES)
 
 
 async def _sync_latest_to_market_quotes(symbol: str) -> None:
@@ -140,6 +149,9 @@ async def sync_single_stock(
     """
     try:
         logger.info(f"📊 开始同步单个股票: {request.symbol} (数据源: {request.data_source})")
+        is_etf = _is_cn_etf_symbol(request.symbol)
+        if is_etf:
+            logger.info(f"📈 {request.symbol} 识别为 ETF，历史/基础同步将走 ETF 专用同步服务")
 
         result = {
             "symbol": request.symbol,
@@ -197,39 +209,55 @@ async def sync_single_stock(
         # 同步历史数据
         if request.sync_historical:
             try:
-                if request.data_source == "tushare":
-                    service = await get_tushare_sync_service()
-                elif request.data_source == "akshare":
-                    service = await get_akshare_sync_service()
+                if is_etf:
+                    etf_service = await get_etf_sync_service()
+                    hist_result = await etf_service._sync_daily_by_source(
+                        request.data_source,
+                        [request.symbol],
+                        request.days,
+                        True
+                    )
+
+                    result["historical_sync"] = {
+                        "success": hist_result.get("success_count", 0) > 0,
+                        "records": hist_result.get("records_inserted", 0),
+                        "message": f"同步了 {hist_result.get('records_inserted', 0)} 条 ETF 历史记录"
+                    }
+                    logger.info(f"✅ {request.symbol} ETF 历史数据同步完成: {hist_result.get('records_inserted', 0)} 条记录")
                 else:
-                    raise ValueError(f"不支持的数据源: {request.data_source}")
+                    if request.data_source == "tushare":
+                        service = await get_tushare_sync_service()
+                    elif request.data_source == "akshare":
+                        service = await get_akshare_sync_service()
+                    else:
+                        raise ValueError(f"不支持的数据源: {request.data_source}")
 
-                # 计算日期范围
-                end_date = datetime.now().strftime('%Y-%m-%d')
-                start_date = (datetime.now() - timedelta(days=request.days)).strftime('%Y-%m-%d')
+                    # 计算日期范围
+                    end_date = datetime.now().strftime('%Y-%m-%d')
+                    start_date = (datetime.now() - timedelta(days=request.days)).strftime('%Y-%m-%d')
 
-                # 同步历史数据
-                hist_result = await service.sync_historical_data(
-                    symbols=[request.symbol],
-                    start_date=start_date,
-                    end_date=end_date,
-                    incremental=False
-                )
+                    # 同步历史数据
+                    hist_result = await service.sync_historical_data(
+                        symbols=[request.symbol],
+                        start_date=start_date,
+                        end_date=end_date,
+                        incremental=False
+                    )
 
-                result["historical_sync"] = {
-                    "success": hist_result.get("success_count", 0) > 0,
-                    "records": hist_result.get("total_records", 0),
-                    "message": f"同步了 {hist_result.get('total_records', 0)} 条历史记录"
-                }
-                logger.info(f"✅ {request.symbol} 历史数据同步完成: {hist_result.get('total_records', 0)} 条记录")
+                    result["historical_sync"] = {
+                        "success": hist_result.get("success_count", 0) > 0,
+                        "records": hist_result.get("total_records", 0),
+                        "message": f"同步了 {hist_result.get('total_records', 0)} 条历史记录"
+                    }
+                    logger.info(f"✅ {request.symbol} 历史数据同步完成: {hist_result.get('total_records', 0)} 条记录")
 
-                # 🔥 同步最新历史数据到 market_quotes
-                if hist_result.get("success_count", 0) > 0:
-                    try:
-                        await _sync_latest_to_market_quotes(request.symbol)
-                        logger.info(f"✅ {request.symbol} 最新数据已同步到 market_quotes")
-                    except Exception as e:
-                        logger.warning(f"⚠️ {request.symbol} 同步到 market_quotes 失败: {e}")
+                    # 🔥 同步最新历史数据到 market_quotes
+                    if hist_result.get("success_count", 0) > 0:
+                        try:
+                            await _sync_latest_to_market_quotes(request.symbol)
+                            logger.info(f"✅ {request.symbol} 最新数据已同步到 market_quotes")
+                        except Exception as e:
+                            logger.warning(f"⚠️ {request.symbol} 同步到 market_quotes 失败: {e}")
 
                 # 🔥 【已禁用】如果没有勾选实时行情，但在交易时间内，自动同步实时行情
                 # 用户反馈：不希望自动同步实时行情，应该严格按照用户的选择
@@ -288,7 +316,21 @@ async def sync_single_stock(
             try:
                 # 🔥 同步单个股票的基础数据
                 # 参考 basics_sync_service 的实现逻辑
-                if request.data_source == "tushare":
+                if is_etf:
+                    etf_service = await get_etf_sync_service()
+                    basic_result = await etf_service._sync_basic_by_source(
+                        request.data_source,
+                        True,
+                        [request.symbol],
+                    )
+                    success = basic_result.get("success_count", 0) > 0
+                    result["basic_sync"] = {
+                        "success": success,
+                        "message": "ETF 基础数据同步成功" if success else "ETF 基础数据同步失败",
+                        "error": None if success else "; ".join(item.get("error", "未知错误") for item in basic_result.get("errors", [])[:3])
+                    }
+                    logger.info(f"✅ {request.symbol} ETF 基础数据同步完成: {success}")
+                elif request.data_source == "tushare":
                     from app.services.basics_sync import (
                         fetch_stock_basic_df,
                         find_latest_trade_date,
@@ -533,7 +575,7 @@ async def sync_single_stock(
 
         return ok(
             data=result,
-            message=f"股票 {request.symbol} 数据同步{'成功' if overall_success else '部分失败'}"
+            message=f"{'ETF' if is_etf else '股票'} {request.symbol} 数据同步{'成功' if overall_success else '部分失败'}"
         )
         
     except Exception as e:

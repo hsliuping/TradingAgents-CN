@@ -68,6 +68,7 @@
                   <el-radio-group v-model="selectedMarket" size="small" @change="filterPositions">
                     <el-radio-button value="all">全部</el-radio-button>
                     <el-radio-button value="CN">A股</el-radio-button>
+                    <el-radio-button value="ETF">ETF</el-radio-button>
                     <el-radio-button value="HK">港股</el-radio-button>
                     <el-radio-button value="US">美股</el-radio-button>
                   </el-radio-group>
@@ -82,6 +83,9 @@
                       <el-tag :type="getMarketTagType(market)" size="small">{{ getMarketName(market) }}</el-tag>
                       <span class="market-summary">
                         {{ getPositionsByMarket(realPositions, market).length }}只 |
+                        <template v-if="getEtfCountByMarket(realPositions, market) > 0">
+                          ETF {{ getEtfCountByMarket(realPositions, market) }}只 |
+                        </template>
                         市值: {{ getCurrencySymbol(market) }}{{ formatNumber(getMarketValue(realPositions, market)) }}
                       </span>
                     </div>
@@ -91,9 +95,12 @@
                           <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.code }}</el-button>
                         </template>
                       </el-table-column>
-                      <el-table-column label="名称" width="120">
+                      <el-table-column label="名称" width="170">
                         <template #default="{ row }">
-                          <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.name }}</el-button>
+                          <div class="name-cell">
+                            <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.name }}</el-button>
+                            <el-tag v-if="isEtfPosition(row)" type="success" size="small" effect="plain">ETF</el-tag>
+                          </div>
                         </template>
                       </el-table-column>
                       <el-table-column prop="quantity" label="数量" width="80" align="right" />
@@ -158,9 +165,17 @@
                       <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.code }}</el-button>
                     </template>
                   </el-table-column>
-                  <el-table-column label="名称" width="120">
+                  <el-table-column label="名称" width="170">
                     <template #default="{ row }">
-                      <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.name }}</el-button>
+                      <div class="name-cell">
+                        <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.name }}</el-button>
+                        <el-tag v-if="isEtfPosition(row)" type="success" size="small" effect="plain">ETF</el-tag>
+                      </div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="市场" width="90">
+                    <template #default="{ row }">
+                      <el-tag :type="getDisplayMarketTagType(row.market, row.code)" size="small">{{ getDisplayMarketName(row.market, row.code) }}</el-tag>
                     </template>
                   </el-table-column>
                   <el-table-column prop="quantity" label="数量" width="80" align="right" />
@@ -286,6 +301,7 @@
                   <el-radio-group v-model="paperSelectedMarket" size="small">
                     <el-radio-button value="all">全部</el-radio-button>
                     <el-radio-button value="CN">A股</el-radio-button>
+                    <el-radio-button value="ETF">ETF</el-radio-button>
                     <el-radio-button value="HK">港股</el-radio-button>
                     <el-radio-button value="US">美股</el-radio-button>
                   </el-radio-group>
@@ -300,6 +316,9 @@
                       <el-tag :type="getMarketTagType(market)" size="small">{{ getMarketName(market) }}</el-tag>
                       <span class="market-summary">
                         {{ getPositionsByMarket(paperPositions, market).length }}只 |
+                        <template v-if="getEtfCountByMarket(paperPositions, market) > 0">
+                          ETF {{ getEtfCountByMarket(paperPositions, market) }}只 |
+                        </template>
                         市值: {{ getCurrencySymbol(market) }}{{ formatNumber(getMarketValue(paperPositions, market)) }}
                       </span>
                     </div>
@@ -309,9 +328,12 @@
                           <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.code }}</el-button>
                         </template>
                       </el-table-column>
-                      <el-table-column label="名称" width="120">
+                      <el-table-column label="名称" width="170">
                         <template #default="{ row }">
-                          <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.name }}</el-button>
+                          <div class="name-cell">
+                            <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.name }}</el-button>
+                            <el-tag v-if="isEtfPosition(row)" type="success" size="small" effect="plain">ETF</el-tag>
+                          </div>
                         </template>
                       </el-table-column>
                       <el-table-column prop="quantity" label="数量" width="80" align="right" />
@@ -354,9 +376,17 @@
                       <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.code }}</el-button>
                     </template>
                   </el-table-column>
-                  <el-table-column label="名称" width="120">
+                  <el-table-column label="名称" width="170">
                     <template #default="{ row }">
-                      <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.name }}</el-button>
+                      <div class="name-cell">
+                        <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.name }}</el-button>
+                        <el-tag v-if="isEtfPosition(row)" type="success" size="small" effect="plain">ETF</el-tag>
+                      </div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="市场" width="90">
+                    <template #default="{ row }">
+                      <el-tag :type="getDisplayMarketTagType(row.market, row.code)" size="small">{{ getDisplayMarketName(row.market, row.code) }}</el-tag>
                     </template>
                   </el-table-column>
                   <el-table-column prop="quantity" label="数量" width="80" align="right" />
@@ -489,6 +519,7 @@ import PositionDetailsDialog from './components/PositionDetailsDialog.vue'
 import PositionOperationDialog from './components/PositionOperationDialog.vue'
 import StockOperationHistoryDialog from './components/StockOperationHistoryDialog.vue'
 import AccountCard from './components/AccountCard.vue'
+import { getMarketByStockCode } from '@/utils/market'
 
 // Router
 const router = useRouter()
@@ -499,8 +530,8 @@ const positions = ref<PositionItem[]>([])
 const stats = ref<PortfolioStats | null>(null)
 const accountCardRef = ref<InstanceType<typeof AccountCard> | null>(null)
 const activeTab = ref<'real' | 'paper'>('real')
-const selectedMarket = ref<'all' | 'CN' | 'HK' | 'US'>('all')
-const paperSelectedMarket = ref<'all' | 'CN' | 'HK' | 'US'>('all')
+const selectedMarket = ref<'all' | 'CN' | 'ETF' | 'HK' | 'US'>('all')
+const paperSelectedMarket = ref<'all' | 'CN' | 'ETF' | 'HK' | 'US'>('all')
 const showAddDialog = ref(false)
 const showAnalysisDialog = ref(false)
 const showPositionAnalysisDialog = ref(false)
@@ -581,6 +612,38 @@ const formatPct = (val?: number) => {
 const pnlClass = (val?: number) => {
   if (val === undefined || val === null) return ''
   return val >= 0 ? 'profit' : 'loss'
+}
+
+const isEtfCode = (code?: string) => getMarketByStockCode(code || '') === 'ETF'
+
+const isEtfPosition = (position: Pick<PositionItem, 'code' | 'market'>) => {
+  return position.market === 'CN' && isEtfCode(position.code)
+}
+
+const getDisplayMarketName = (market: string, code?: string) => {
+  if (market === 'CN' && isEtfCode(code)) return 'ETF'
+  return getMarketName(market)
+}
+
+const getDisplayMarketTagType = (market: string, code?: string) => {
+  if (market === 'CN' && isEtfCode(code)) return 'success'
+  return getMarketTagType(market)
+}
+
+const getEtfCountByMarket = (positions: PositionItem[], market: string) => {
+  return positions.filter(p => p.market === market && isEtfPosition(p)).length
+}
+
+const getIndustryCategory = (position: PositionItem) => {
+  if (isEtfPosition(position)) return 'ETF/基金'
+  return position.industry || '未知'
+}
+
+const matchesSelectedMarket = (position: PositionItem, selected: string) => {
+  if (selected === 'all') return true
+  if (selected === 'ETF') return isEtfPosition(position)
+  if (selected === 'CN') return position.market === 'CN' && !isEtfPosition(position)
+  return position.market === selected
 }
 
 // 市场相关方法
@@ -706,7 +769,7 @@ const calculateIndustryDistribution = (positions: PositionItem[]): IndustryItem[
 
   const industryMap: Record<string, number> = {}
   positions.forEach(p => {
-    const industry = p.industry || '未知'
+    const industry = getIndustryCategory(p)
     industryMap[industry] = (industryMap[industry] || 0) + getPositionValue(p)
   })
 
@@ -770,7 +833,7 @@ const filterPositions = () => {
   if (selectedMarket.value === 'all') {
     filtered = realPositions.value
   } else {
-    filtered = realPositions.value.filter(p => p.market === selectedMarket.value)
+    filtered = realPositions.value.filter(p => matchesSelectedMarket(p, selectedMarket.value))
   }
   // 单市场显示时也需要聚合
   filteredPositions.value = aggregatePositionsByCode(filtered) as any
@@ -782,7 +845,7 @@ const filterPaperPositions = () => {
   if (paperSelectedMarket.value === 'all') {
     filtered = paperPositions.value
   } else {
-    filtered = paperPositions.value.filter(p => p.market === paperSelectedMarket.value)
+    filtered = paperPositions.value.filter(p => matchesSelectedMarket(p, paperSelectedMarket.value))
   }
   // 单市场显示时也需要聚合
   filteredPaperPositions.value = aggregatePositionsByCode(filtered) as any
@@ -878,9 +941,11 @@ const onPositionSaved = () => {
 
 // 跳转到股票详情页面
 const goToStockDetail = (code: string) => {
+  const market = getMarketByStockCode(code)
   router.push({
     name: 'StockDetail',
-    params: { code }
+    params: { code },
+    query: market === 'ETF' ? { market: 'ETF' } : undefined
   })
 }
 
@@ -1059,6 +1124,12 @@ onMounted(() => {
 }
 
 .industry-item {
+
+.name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
   display: flex;
   align-items: center;
   margin-bottom: 12px;

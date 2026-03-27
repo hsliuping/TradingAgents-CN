@@ -6,7 +6,7 @@
         <div class="title-section">
           <h1 class="page-title">
             <el-icon class="title-icon"><Document /></el-icon>
-            单股分析
+            {{ analysisForm.market === 'ETF' ? 'ETF分析' : '单股分析' }}
           </h1>
           
           <!-- 风险提示 -->
@@ -18,14 +18,14 @@
             >
               <template #title>
                 <span style="font-size: 14px;">
-                  <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。
+                  <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI证券分析技术，不作为真实交易操盘指导。
                 </span>
               </template>
             </el-alert>
           </div>
           
           <p class="page-description">
-            AI驱动的智能股票分析，多维度评估投资价值与风险
+            AI驱动的智能证券分析，多维度评估投资价值与风险
           </p>
         </div>
       </div>
@@ -45,12 +45,12 @@
             </template>
 
             <el-form :model="analysisForm" label-width="100px" class="analysis-form">
-              <!-- 股票信息 -->
+              <!-- 标的信息 -->
               <div class="form-section">
-                <h4 class="section-title">📊 股票信息</h4>
+                <h4 class="section-title">📊 {{ analysisForm.market === 'ETF' ? 'ETF信息' : '股票信息' }}</h4>
                 <el-row :gutter="16">
                   <el-col :span="12">
-                    <el-form-item label="股票代码" required>
+                    <el-form-item :label="analysisForm.market === 'ETF' ? 'ETF代码' : '股票代码'" required>
                       <el-input
                         v-model="analysisForm.stockCode"
                         placeholder="如：000001、512400(ETF)、AAPL、700"
@@ -551,11 +551,11 @@
                         <div class="disclaimer-text">
                           <p style="margin: 0 0 8px 0;"><strong>⚠️ 重要风险提示与免责声明</strong></p>
                           <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
-                            <li><strong>平台性质：</strong>本平台为AI辅助分析技术学习平台，专注于AI技术在股票分析领域的应用验证和技术学习。</li>
-                            <li><strong>分析目的：</strong>所有分析结论仅用于学习和验证AI辅助分析技术，不作为真实炒股操盘指导或投资依据。</li>
+                            <li><strong>平台性质：</strong>本平台为AI辅助分析技术学习平台，专注于AI技术在证券与ETF分析领域的应用验证和技术学习。</li>
+                            <li><strong>分析目的：</strong>所有分析结论仅用于学习和验证AI辅助分析技术，不作为真实交易操盘指导或投资依据。</li>
                             <li><strong>非投资建议：</strong>所有分析结果、评分、建议仅为技术验证参考，不构成任何买卖建议或投资决策依据。</li>
                             <li><strong>数据局限性：</strong>分析基于历史数据和公开信息，可能存在延迟、不完整或不准确的情况，无法预测未来市场走势。</li>
-                            <li><strong>投资风险：</strong>股票投资存在市场风险、流动性风险、政策风险等多种风险，可能导致本金损失。</li>
+                            <li><strong>投资风险：</strong>股票与ETF投资均存在市场风险、流动性风险、政策风险等多种风险，可能导致本金损失。</li>
                             <li><strong>独立决策：</strong>投资者应基于自身风险承受能力、投资目标和财务状况独立做出投资决策。</li>
                             <li><strong>责任声明：</strong>使用本平台产生的任何投资决策及其后果由使用者自行承担，本平台不承担任何责任。</li>
                           </ul>
@@ -866,6 +866,7 @@ import { marked } from 'marked'
 import { recommendModels } from '@/api/modelCapabilities'
 import { validateStockCode, getStockCodeFormatHelp } from '@/utils/stockValidator'
 import { normalizeMarketForAnalysis, getMarketByStockCode } from '@/utils/market'
+import { fetchTaskResultWithRetry, hasTaskResultContent, mergeTaskResult } from '@/utils/taskResult'
 
 // 配置marked选项
 marked.setOptions({
@@ -920,6 +921,30 @@ const progressInfo = ref({
   totalTime: 0         // 预计总时长（秒）
 })
 const pollingTimer = ref<any>(null)
+
+const applyAnalysisResult = (result: any) => {
+  analysisResults.value = result
+  activeReportTab.value = ''
+}
+
+const loadCompletedAnalysisResult = async (taskId: string, status?: any) => {
+  const statusResult = status?.result_data && typeof status.result_data === 'object' ? status.result_data : null
+  const finalResult = await fetchTaskResultWithRetry(taskId, {
+    seedData: statusResult,
+    isComplete: result => {
+      const merged = mergeTaskResult(statusResult, result)
+      console.log('📦 获取分析结果尝试:', {
+        hasContent: hasTaskResultContent(merged),
+        hasDecision: !!merged?.decision,
+        hasSummary: !!merged?.summary,
+        reportCount: Object.keys(merged?.reports || {}).length
+      })
+      return hasTaskResultContent(merged)
+    }
+  })
+
+  return mergeTaskResult(statusResult, finalResult)
+}
 
 // 分析步骤定义（动态生成）
 const analysisSteps = ref<any[]>([])
@@ -1016,6 +1041,21 @@ const onStockCodeInput = () => {
   stockCodeHelp.value = getStockCodeFormatHelp(analysisForm.market)
 }
 
+const ETF_ANALYST_NAMES = ['ETF分析师', '市场分析师', '新闻分析师']
+
+const normalizeSelectedAnalystsForMarket = (market: MarketType, analysts: string[]) => {
+  if (market === 'ETF') {
+    return [...ETF_ANALYST_NAMES]
+  }
+
+  const disallowedAnalysts = ['ETF分析师']
+  if (market !== 'A股') {
+    disallowedAnalysts.push('大盘分析师', '板块分析师')
+  }
+
+  return analysts.filter(name => !disallowedAnalysts.includes(name))
+}
+
 // 🔥 根据市场类型过滤可用的分析师（大盘和板块分析师仅支持A股，ETF 仅显示 etf/market/news）
 const availableAnalysts = computed(() => {
   const isAStock = analysisForm.market === 'A股'
@@ -1024,6 +1064,7 @@ const availableAnalysts = computed(() => {
 
   return ANALYSTS.filter(analyst => {
     if (isETF) return etfAnalystIds.includes(analyst.id)
+    if (analyst.id === 'etf') return false
     return true
   }).map(analyst => {
     const isMacroAnalyst = analyst.id === 'index_analyst' || analyst.id === 'sector_analyst'
@@ -1046,17 +1087,14 @@ const onMarketChange = () => {
 
   // 🔥 ETF 市场：固定使用 ETF / 市场 / 新闻 分析师
   if (analysisForm.market === 'ETF') {
-    analysisForm.selectedAnalysts = ['ETF分析师', '市场分析师', '新闻分析师']
+    analysisForm.selectedAnalysts = [...ETF_ANALYST_NAMES]
     return
   }
 
-  // 🔥 如果切换到港股或美股，自动移除大盘和板块分析师
-  if (analysisForm.market !== 'A股') {
-    const macroAnalysts = ['大盘分析师', '板块分析师']
-    analysisForm.selectedAnalysts = analysisForm.selectedAnalysts.filter(
-      name => !macroAnalysts.includes(name)
-    )
-  }
+  analysisForm.selectedAnalysts = normalizeSelectedAnalystsForMarket(
+    analysisForm.market,
+    analysisForm.selectedAnalysts
+  )
 }
 
 // 验证股票代码输入
@@ -1201,7 +1239,7 @@ const formatValidationDetails = (details: any) => {
       title: '基础信息',
       data: [
         { label: '状态', value: basicInfo.exists ? '✅ 存在' : '❌ 不存在' },
-        { label: '股票名称', value: basicInfo.name || '-' },
+        { label: analysisForm.market === 'ETF' ? 'ETF名称' : '股票名称', value: basicInfo.name || '-' },
         { label: '上市日期', value: basicInfo.list_date || '-' }
       ]
     })
@@ -1344,6 +1382,8 @@ const submitAnalysis = async () => {
 
     analysisStatus.value = 'running'
     showResults.value = false
+    analysisResults.value = null
+    activeReportTab.value = ''
     progressInfo.value = {
       progress: 0,
       currentStep: '正在初始化分析...',
@@ -1417,43 +1457,31 @@ const startPollingTaskStatus = () => {
       console.log('🔍 当前状态:', status.status, '进度:', status.progress)
 
       if (status.status === 'completed') {
+        if (pollingTimer.value) {
+          clearInterval(pollingTimer.value)
+          pollingTimer.value = null
+        }
+
         // 分析完成，调用专门的结果API获取完整数据
         console.log('🎉 分析完成，正在获取完整结果...')
 
         try {
-          const resultResponse = await fetch(`/api/analysis/tasks/${currentTaskId.value}/result`, {
-            headers: {
-              'Authorization': `Bearer ${authStore.token}`,
-              'Content-Type': 'application/json'
-            }
+          const finalResult = await loadCompletedAnalysisResult(currentTaskId.value, status)
+          applyAnalysisResult(finalResult)
+          console.log('✅ 获取完整分析结果成功:', finalResult)
+
+          // 添加调试信息
+          console.log('🔍 完整结果数据结构:', {
+            hasDecision: !!finalResult?.decision,
+            hasState: !!finalResult?.state,
+            hasReports: !!finalResult?.reports,
+            hasSummary: !!finalResult?.summary,
+            hasRecommendation: !!finalResult?.recommendation,
+            keys: Object.keys(finalResult || {})
           })
-
-          if (resultResponse.ok) {
-            const resultData = await resultResponse.json()
-            if (resultData.success) {
-              analysisResults.value = resultData.data
-              console.log('✅ 获取完整分析结果成功:', resultData.data)
-
-              // 添加调试信息
-              console.log('🔍 完整结果数据结构:', {
-                hasDecision: !!resultData.data?.decision,
-                hasState: !!resultData.data?.state,
-                hasReports: !!resultData.data?.reports,
-                hasSummary: !!resultData.data?.summary,
-                hasRecommendation: !!resultData.data?.recommendation,
-                keys: Object.keys(resultData.data || {})
-              })
-            } else {
-              console.error('❌ 获取分析结果失败:', resultData.message)
-              analysisResults.value = status.result_data // 回退到状态中的数据
-            }
-          } else {
-            console.error('❌ 结果API调用失败:', resultResponse.status)
-            analysisResults.value = status.result_data // 回退到状态中的数据
-          }
         } catch (error) {
           console.error('❌ 获取分析结果异常:', error)
-          analysisResults.value = status.result_data // 回退到状态中的数据
+          applyAnalysisResult(status.result_data || null)
         }
 
         analysisStatus.value = 'completed'
@@ -1461,11 +1489,6 @@ const startPollingTaskStatus = () => {
         progressInfo.value.progress = 100
         progressInfo.value.currentStep = '分析完成'
         progressInfo.value.message = '分析已完成！'
-
-        if (pollingTimer.value) {
-          clearInterval(pollingTimer.value)
-          pollingTimer.value = null
-        }
 
         // 任务完成后保持缓存，以便刷新后能看到结果
         // clearTaskCache() // 不清除，让用户能在30分钟内刷新查看结果
@@ -2256,6 +2279,7 @@ const goSimOrder = async () => {
       code: code,
       side: recommendation.action,
       quantity: tradeForm.quantity,
+      market: analysisForm.market === 'ETF' ? 'ETF' : analysisForm.market === '港股' ? 'HK' : analysisForm.market === '美股' ? 'US' : 'CN',
       analysis_id: analysisId ? String(analysisId) : undefined
     })
 
@@ -2493,7 +2517,7 @@ const restoreTaskFromCache = async () => {
       currentTaskId.value = cached.taskId
       analysisStatus.value = 'completed'
       showResults.value = true
-      analysisResults.value = status.result_data
+      applyAnalysisResult(await loadCompletedAnalysisResult(cached.taskId, status))
       progressInfo.value.progress = 100
       progressInfo.value.currentStep = '分析完成'
       progressInfo.value.message = '分析已完成'
@@ -2720,7 +2744,10 @@ onMounted(async () => {
 
     // 加载默认分析师
     if (userPrefs.default_analysts && userPrefs.default_analysts.length > 0) {
-      analysisForm.selectedAnalysts = [...userPrefs.default_analysts]
+      analysisForm.selectedAnalysts = normalizeSelectedAnalystsForMarket(
+        analysisForm.market,
+        [...userPrefs.default_analysts]
+      )
     }
 
     console.log('✅ 已加载用户偏好设置:', {
@@ -2753,7 +2780,12 @@ onMounted(async () => {
       const detectedMarket = getMarketByStockCode(analysisForm.stockCode)
       analysisForm.market = detectedMarket as MarketType
       if (detectedMarket === 'ETF') {
-        analysisForm.selectedAnalysts = ['ETF分析师', '市场分析师', '新闻分析师']
+        analysisForm.selectedAnalysts = [...ETF_ANALYST_NAMES]
+      } else {
+        analysisForm.selectedAnalysts = normalizeSelectedAnalystsForMarket(
+          detectedMarket as MarketType,
+          analysisForm.selectedAnalysts
+        )
       }
       console.log('🔍 自动识别市场类型:', analysisForm.stockCode, '->', detectedMarket)
     }
@@ -2762,11 +2794,11 @@ onMounted(async () => {
     analysisForm.market = normalizeMarketForAnalysis(q.market) as MarketType
     // 🔥 如果从路由参数设置市场类型，也需要同步分析师
     if (analysisForm.market === 'ETF') {
-      analysisForm.selectedAnalysts = ['ETF分析师', '市场分析师', '新闻分析师']
-    } else if (analysisForm.market !== 'A股') {
-      const macroAnalysts = ['大盘分析师', '板块分析师']
-      analysisForm.selectedAnalysts = analysisForm.selectedAnalysts.filter(
-        name => !macroAnalysts.includes(name)
+      analysisForm.selectedAnalysts = [...ETF_ANALYST_NAMES]
+    } else {
+      analysisForm.selectedAnalysts = normalizeSelectedAnalystsForMarket(
+        analysisForm.market,
+        analysisForm.selectedAnalysts
       )
     }
   }

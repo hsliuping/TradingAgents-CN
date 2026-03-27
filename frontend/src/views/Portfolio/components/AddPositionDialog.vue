@@ -8,7 +8,7 @@
   >
     <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
       <el-form-item label="股票代码" prop="code">
-        <el-input v-model="form.code" placeholder="如: 600519" :disabled="isEdit" />
+        <el-input v-model="form.code" placeholder="如: 600519、510300、AAPL" :disabled="isEdit" />
       </el-form-item>
       <el-form-item label="股票名称" prop="name">
         <el-input 
@@ -26,9 +26,13 @@
       <el-form-item label="市场" prop="market">
         <el-select v-model="form.market" style="width: 100%">
           <el-option label="A股" value="CN" />
+          <el-option label="ETF" value="ETF" />
           <el-option label="港股" value="HK" />
           <el-option label="美股" value="US" />
         </el-select>
+        <div v-if="form.market === 'ETF'" style="font-size: 12px; color: #909399; margin-top: 4px;">
+          ETF 持仓会按 A股账户（CNY）入库和计价，但前端会保留 ETF 语义。
+        </div>
       </el-form-item>
       <el-form-item label="持仓数量" prop="quantity">
         <el-input-number v-model="form.quantity" :min="1" :step="100" style="width: 100%" />
@@ -59,6 +63,7 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionItem, type PositionCreatePayload } from '@/api/portfolio'
 import { stocksApi } from '@/api/stocks'
+import { getMarketByStockCode } from '@/utils/market'
 
 const props = defineProps<{
   visible: boolean
@@ -78,6 +83,13 @@ let fetchStockNameTimer: ReturnType<typeof setTimeout> | null = null
 const lastFetchedCode = ref<string>('')
 
 const isEdit = computed(() => !!props.editData)
+
+const normalizeUiMarket = (market?: string, code?: string) => {
+  if (market === 'CN' && code && getMarketByStockCode(code) === 'ETF') return 'ETF'
+  return market || 'CN'
+}
+
+const normalizeSubmitMarket = (market?: string) => market === 'ETF' ? 'CN' : (market || 'CN')
 
 const form = ref<PositionCreatePayload & { buy_date?: Date | string }>({
   code: '',
@@ -110,8 +122,8 @@ const fetchStockName = async (code: string) => {
   
   // 🔥 修复问题1：对于A股市场，只有当代码长度为6位时才查询
   const trimmedCode = code.trim()
-  if (form.value.market === 'CN' && trimmedCode.length !== 6) {
-    // A股代码必须是6位，未输入完整时不查询
+  if ((form.value.market === 'CN' || form.value.market === 'ETF') && trimmedCode.length !== 6) {
+    // A股/ETF 代码必须是6位，未输入完整时不查询
     return
   }
   
@@ -148,6 +160,7 @@ const fetchStockName = async (code: string) => {
           if (res.data.market) {
             const marketMap: Record<string, string> = {
               'A股': 'CN',
+              'ETF': 'ETF',
               '港股': 'HK',
               '美股': 'US'
             }
@@ -203,7 +216,7 @@ watch(() => props.visible, (val) => {
     form.value = {
       code: props.editData.code,
       name: props.editData.name || '',
-      market: props.editData.market || 'CN',
+      market: normalizeUiMarket(props.editData.market, props.editData.code),
       quantity: props.editData.quantity,
       cost_price: props.editData.cost_price,
       buy_date: props.editData.buy_date || undefined,
@@ -241,7 +254,7 @@ const handleSubmit = async () => {
     const payload: PositionCreatePayload = {
       code: form.value.code,
       name: form.value.name || undefined,
-      market: form.value.market,
+      market: normalizeSubmitMarket(form.value.market),
       quantity: form.value.quantity,
       cost_price: form.value.cost_price,
       buy_date: form.value.buy_date ? new Date(form.value.buy_date).toISOString().split('T')[0] : undefined,

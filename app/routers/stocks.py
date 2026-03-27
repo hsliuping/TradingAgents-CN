@@ -4,6 +4,7 @@
 - 所有端点均需鉴权 (Bearer Token)
 - 路径前缀在 main.py 中挂载为 /api，当前路由自身前缀为 /stocks
 """
+from datetime import date, datetime
 from typing import Optional, Dict, Any, List, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 import logging
@@ -124,6 +125,137 @@ def _zfill_code(code: str) -> str:
         return s.zfill(6)
     except Exception:
         return str(code)
+
+
+ETF_CODE_PREFIXES = ("50", "51", "52", "56", "58", "15", "16", "18")
+
+
+def _is_cn_etf_code(code: str) -> bool:
+    code_str = str(code or "").strip()
+    return len(code_str) == 6 and code_str.isdigit() and code_str.startswith(ETF_CODE_PREFIXES)
+
+
+def _get_etf_market_label(code: str) -> str:
+    return "ETF"
+
+
+def _parse_trade_date(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    for fmt in ("%Y%m%d", "%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _build_etf_fundamentals_data(etf_doc: Dict[str, Any], latest_quote: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    latest_quote = latest_quote or {}
+    return {
+        "code": etf_doc.get("code"),
+        "name": etf_doc.get("name"),
+        "industry": etf_doc.get("fund_type") or "ETF",
+        "market": _get_etf_market_label(etf_doc.get("code")),
+        "sector": etf_doc.get("track_index") or "ETF",
+        "security_type": "ETF",
+        "fund_type": etf_doc.get("fund_type") or "ETF",
+        "track_index": etf_doc.get("track_index"),
+        "fund_scale": etf_doc.get("fund_scale"),
+        "fund_share": etf_doc.get("fund_share"),
+        "fund_share_date": etf_doc.get("fund_share_date"),
+        "management": etf_doc.get("management"),
+        "custodian": etf_doc.get("custodian"),
+        "management_fee": etf_doc.get("management_fee"),
+        "custodian_fee": etf_doc.get("custodian_fee"),
+        "unit_nav": _pick_first_value(etf_doc.get("unit_nav"), latest_quote.get("unit_nav")),
+        "accum_nav": _pick_first_value(etf_doc.get("accum_nav"), latest_quote.get("accum_nav")),
+        "nav_change_value": etf_doc.get("nav_change_value"),
+        "nav_growth_rate": etf_doc.get("nav_growth_rate"),
+        "market_price": _pick_first_value(latest_quote.get("close"), etf_doc.get("market_price")),
+        "premium_discount_rate": etf_doc.get("premium_discount_rate"),
+        "latest_nav_date": etf_doc.get("latest_nav_date"),
+        "purchase_status": etf_doc.get("purchase_status"),
+        "redemption_status": etf_doc.get("redemption_status"),
+        "updated_at": _pick_first_value(latest_quote.get("updated_at"), etf_doc.get("updated_at")),
+    }
+
+
+async def _get_etf_basic_info_by_sources(db, code6: str, preferred_sources: List[str]) -> Optional[Dict[str, Any]]:
+    for source in preferred_sources:
+        doc = await db["etf_basic_info"].find_one(
+            {"code": code6, "source": source},
+            {"_id": 0},
+            sort=[("updated_at", -1)]
+        )
+        if doc:
+            return doc
+
+    return await db["etf_basic_info"].find_one(
+        {"code": code6},
+        {"_id": 0},
+        sort=[("updated_at", -1)]
+    )
+
+
+def _aggregate_etf_kline_rows(rows: List[Dict[str, Any]], period: str, limit: int) -> List[Dict[str, Any]]:
+    parsed_rows = []
+    for row in rows:
+        trade_date = _parse_trade_date(row.get("trade_date"))
+        if not trade_date:
+            continue
+        parsed_rows.append((trade_date, row))
+
+    parsed_rows.sort(key=lambda item: item[0])
+    if not parsed_rows:
+        return []
+
+    def build_bar(bar_rows: List[Dict[str, Any]], label: str) -> Dict[str, Any]:
+        opens = [float(r["open"]) for r in bar_rows if r.get("open") is not None]
+        highs = [float(r["high"]) for r in bar_rows if r.get("high") is not None]
+        lows = [float(r["low"]) for r in bar_rows if r.get("low") is not None]
+        closes = [float(r["close"]) for r in bar_rows if r.get("close") is not None]
+        volumes = [float(r["volume"]) for r in bar_rows if r.get("volume") is not None]
+        amounts = [float(r["amount"]) for r in bar_rows if r.get("amount") is not None]
+
+        return {
+            "time": label,
+            "open": opens[0] if opens else None,
+            "high": max(highs) if highs else None,
+            "low": min(lows) if lows else None,
+            "close": closes[-1] if closes else None,
+            "volume": sum(volumes) if volumes else None,
+            "amount": sum(amounts) if amounts else None,
+        }
+
+    if period == "day":
+        items = []
+        for trade_date, row in parsed_rows[-limit:]:
+            items.append({
+                "time": trade_date.strftime("%Y-%m-%d"),
+                "open": row.get("open"),
+                "high": row.get("high"),
+                "low": row.get("low"),
+                "close": row.get("close"),
+                "volume": row.get("volume"),
+                "amount": row.get("amount"),
+            })
+        return items
+
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for trade_date, row in parsed_rows:
+        if period == "week":
+            iso_year, iso_week, _ = trade_date.isocalendar()
+            key = f"{iso_year}-W{iso_week:02d}"
+        else:
+            key = trade_date.strftime("%Y-%m")
+        grouped.setdefault(key, []).append(row)
+
+    items = [build_bar(bar_rows, key) for key, bar_rows in grouped.items()]
+    return items[-limit:]
 
 
 def _detect_market_and_code(code: str) -> Tuple[str, str]:
@@ -299,7 +431,7 @@ async def get_quote(
     data = {
         "code": code6,
         "name": (b or {}).get("name"),
-        "market": (b or {}).get("market"),
+        "market": _get_etf_market_label(code6) if _is_cn_etf_code(code6) else (b or {}).get("market"),
         "price": close,
         "change_percent": pct,
         "amount": (q or {}).get("amount"),
@@ -362,6 +494,32 @@ async def get_fundamentals(
     # A股：使用现有逻辑
     db = get_mongo_db()
     code6 = normalized_code
+
+    if _is_cn_etf_code(code6):
+        if source:
+            etf_doc = await db["etf_basic_info"].find_one(
+                {"code": code6, "source": source},
+                {"_id": 0},
+                sort=[("updated_at", -1)]
+            )
+        else:
+            etf_source_priority = [src for src in await _get_cn_source_priority() if src in ["tushare", "akshare", "baostock", "qmt"]]
+            if not etf_source_priority:
+                etf_source_priority = ["tushare", "akshare", "qmt"]
+            etf_doc = await _get_etf_basic_info_by_sources(db, code6, etf_source_priority)
+
+        latest_quote = await db["etf_daily_quotes"].find_one(
+            {"code": code6},
+            {"_id": 0},
+            sort=[("trade_date", -1)]
+        )
+
+        if not etf_doc:
+            if source:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"未找到该 ETF 在数据源 {source} 中的基础信息")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该 ETF 的基础信息")
+
+        return ok(data=_build_etf_fundamentals_data(etf_doc, latest_quote))
 
     # 1. 获取基础信息（支持数据源筛选）
     query = {"code": code6}
@@ -709,6 +867,36 @@ async def get_kline(
 
     # A股：使用现有逻辑
     code_padded = normalized_code
+
+    if _is_cn_etf_code(code_padded):
+        db = get_mongo_db()
+        rows = await db["etf_daily_quotes"].find(
+            {"code": code_padded},
+            {"_id": 0}
+        ).sort("trade_date", 1).to_list(length=2000)
+
+        if not rows:
+            etf_exists = await db["etf_basic_info"].find_one({"code": code_padded}, {"_id": 1})
+            if not etf_exists:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该 ETF 的K线数据")
+            return ok(data={
+                "code": code_padded,
+                "period": period,
+                "items": [],
+                "source": "etf_daily_quotes"
+            })
+
+        if period not in {"day", "week", "month"}:
+            period = "day"
+
+        items = _aggregate_etf_kline_rows(rows, period, limit)
+        return ok(data={
+            "code": code_padded,
+            "period": period,
+            "items": items,
+            "source": "etf_daily_quotes"
+        })
+
     adj_norm = None if adj in (None, "none", "", "null") else adj
     items = None
     source = None
@@ -739,7 +927,6 @@ async def get_kline(
 
         if preferred_source == 'local':
             logger.info(f"🔍 优先数据源为 local，尝试从 stock_daily_quotes 获取 K 线数据")
-            from app.core.database import get_mongo_db
             db = get_mongo_db()
             collection = db.stock_daily_quotes
 

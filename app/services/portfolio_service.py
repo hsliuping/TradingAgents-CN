@@ -46,6 +46,8 @@ from app.utils.timezone import now_tz
 
 logger = logging.getLogger("app.services.portfolio_service")
 
+ETF_CODE_PREFIXES = ("50", "51", "52", "56", "58", "15", "16", "18")
+
 # 市场代码映射：前端/数据库使用的代码 -> 单股分析服务使用的中文名称
 MARKET_CODE_TO_NAME = {
     "CN": "A股",
@@ -61,8 +63,17 @@ MARKET_NAME_TO_CODE = {
 }
 
 
-def convert_market_code_to_name(market_code: str) -> str:
+def _is_cn_etf_symbol(code: str) -> bool:
+    code_str = str(code or "").strip().upper().zfill(6)
+    return len(code_str) == 6 and code_str.isdigit() and code_str.startswith(ETF_CODE_PREFIXES)
+
+
+def convert_market_code_to_name(market_code: str, stock_code: Optional[str] = None) -> str:
     """将市场代码转换为中文名称（用于单股分析服务）"""
+    if str(market_code).upper() == "ETF":
+        return "ETF"
+    if str(market_code).upper() == "CN" and stock_code and _is_cn_etf_symbol(stock_code):
+        return "ETF"
     return MARKET_CODE_TO_NAME.get(market_code, market_code)
 
 
@@ -2447,7 +2458,7 @@ class PortfolioService:
     async def _get_stock_price(self, code: str, market: str) -> Optional[float]:
         """获取股票最新价格"""
         code6 = str(code).strip().zfill(6)
-        if market == "CN":
+        if market in {"CN", "ETF"}:
             # A股从数据库获取：1) market_quotes 2) stock_basic_info 3) stock_daily_quotes 历史数据
             q = await self.db["market_quotes"].find_one(
                 {"$or": [{"code": code}, {"code": code6}, {"symbol": code}, {"symbol": code6}]},
@@ -2529,8 +2540,9 @@ class PortfolioService:
         code6 = str(code).strip().zfill(6)
         symbol_conds = [{"symbol": code}, {"symbol": code6}, {"code": code}, {"code": code6}]
         date_conds = [{"trade_date": buy_date_str}, {"trade_date": buy_date_compact}]
+        normalized_market = "CN" if market == "ETF" else market
         collection_map = {"CN": "stock_daily_quotes", "HK": "stock_daily_quotes_hk", "US": "stock_daily_quotes_us"}
-        coll_name = collection_map.get(market, "stock_daily_quotes")
+        coll_name = collection_map.get(normalized_market, "stock_daily_quotes")
         coll = self.db[coll_name]
         doc = None
         for date_cond in date_conds:
@@ -2541,7 +2553,7 @@ class PortfolioService:
             if doc:
                 break
         # 回退到 etf_daily_quotes（ETF 行情）
-        if not doc and market == "CN":
+        if not doc and normalized_market == "CN":
             for date_cond in date_conds:
                 doc = await self.db["etf_daily_quotes"].find_one(
                     {"code": code6, **date_cond},
@@ -2576,7 +2588,7 @@ class PortfolioService:
 
     async def _get_stock_name(self, code: str, market: str) -> Optional[str]:
         """获取股票名称（含 ETF 回退）"""
-        if market == "CN":
+        if market in {"CN", "ETF"}:
             basic = await self.db["stock_basic_info"].find_one(
                 {"$or": [{"code": code}, {"symbol": code}]},
                 {"_id": 0, "name": 1}
@@ -2756,7 +2768,7 @@ class PortfolioService:
             start_time = datetime.now()
 
             # 将市场代码转换为中文名称（用于缓存查询）
-            market_name = convert_market_code_to_name(position.market)
+            market_name = convert_market_code_to_name(position.market, position.code)
 
             # 检查是否有缓存的单股分析报告（只读取缓存，不创建新任务）
             logger.info(f"📊 [持仓分析] 检查单股分析报告缓存 - {position.code} (市场: {position.market} -> {market_name})")
@@ -3102,17 +3114,18 @@ class PortfolioService:
             logger.info(f"📊 [持仓分析] 查询用户持仓: {code} ({market})")
 
         # 查询该股票的所有持仓记录
+        storage_market = "CN" if market == "ETF" else market
         positions = await self.db[collection].find({
             "user_id": user_id,
             "code": code,
-            "market": market
+            "market": storage_market
         }).to_list(None)
 
         if not positions:
             report = PositionAnalysisReport(
                 analysis_id=analysis_id,
                 user_id=user_id,
-                position_id=f"{code}_{market}",  # 使用股票代码作为标识
+                position_id=f"{code}_{storage_market}",  # 使用股票代码作为标识
                 status=PortfolioAnalysisStatus.FAILED,
                 error_message=f"未找到 {code} 的持仓记录"
             )
@@ -3128,7 +3141,7 @@ class PortfolioService:
         avg_cost_price = total_cost / total_quantity if total_quantity > 0 else 0
 
         # 获取当前价格
-        current_price = await self._get_stock_price(code, market)
+        current_price = await self._get_stock_price(code, storage_market)
         # 🔥 修复：确保 market_value、unrealized_pnl 和 unrealized_pnl_pct 不为 None（模拟持仓分析时可能为 None）
         if current_price and current_price > 0:
             market_value = current_price * total_quantity
@@ -3140,8 +3153,8 @@ class PortfolioService:
             unrealized_pnl_pct = 0.0
 
         # 获取股票名称和行业
-        name = positions[0].get("name") or await self._get_stock_name(code, market)
-        industry = positions[0].get("industry") or await self._get_stock_industry(code, market)
+        name = positions[0].get("name") or await self._get_stock_name(code, storage_market)
+        industry = positions[0].get("industry") or await self._get_stock_industry(code, storage_market)
 
         # 计算持仓天数（使用最早的建仓日期）
         holding_days = None
@@ -3165,7 +3178,7 @@ class PortfolioService:
         snapshot = PositionSnapshot(
             code=code,
             name=name,
-            market=market,
+            market=storage_market,
             quantity=total_quantity,
             cost_price=round(avg_cost_price, 4),
             current_price=current_price if current_price else 0.0,
@@ -3191,7 +3204,7 @@ class PortfolioService:
         report = PositionAnalysisReport(
             analysis_id=analysis_id,
             user_id=user_id,
-            position_id=f"{code}_{market}",  # 使用股票代码作为标识
+            position_id=f"{code}_{storage_market}",  # 使用股票代码作为标识
             position_snapshot=snapshot,
             status=PortfolioAnalysisStatus.PROCESSING
         )
@@ -3200,7 +3213,7 @@ class PortfolioService:
             start_time = datetime.now()
 
             # 将市场代码转换为中文名称（单股分析服务需要）
-            market_name = convert_market_code_to_name(market)
+            market_name = convert_market_code_to_name(market, code)
 
             # 检查是否有缓存的单股分析报告（只读取缓存，不创建新任务）
             stock_analysis_report = None
@@ -3613,7 +3626,8 @@ class PortfolioService:
             market_type_map = {
                 "A股": "cn",
                 "港股": "hk",
-                "美股": "us"
+                "美股": "us",
+                "ETF": "cn"
             }
             market_type = market_type_map.get(market, "cn")
 

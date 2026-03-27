@@ -27,6 +27,26 @@ _instance: Optional["MemoryService"] = None
 _STORE_MAX_CONTENT_CHARS = 3000
 
 
+def _validate_embedder_config(config: Dict[str, Any]) -> str:
+    embedder = config.get("embedder") or {}
+    provider = str(embedder.get("provider") or "").strip().lower()
+    embedder_cfg = embedder.get("config") or {}
+    model = str(embedder_cfg.get("model") or "").strip()
+
+    if not provider:
+        return "缺少可用的 Embedding 配置"
+    if not model:
+        return "Embedding 模型未配置"
+
+    if provider in {"openai", "gemini", "azure_openai", "together"} and not str(embedder_cfg.get("api_key") or "").strip():
+        return f"Embedding provider {provider} 缺少 API Key"
+
+    if provider == "openai" and not str(embedder_cfg.get("openai_base_url") or "").strip():
+        return "OpenAI 兼容 Embedding 缺少 base_url"
+
+    return ""
+
+
 def _is_mem0_enabled() -> bool:
     val = (os.environ.get("MEM0_ENABLED") or "true").strip().lower()
     return val in ("true", "1", "yes", "on")
@@ -79,6 +99,12 @@ class MemoryService:
                 config = build_mem0_config(self._db)
                 if not config.get("llm", {}).get("config", {}).get("api_key"):
                     self._init_error = "缺少 LLM API Key，mem0 记忆层不可用"
+                    logger.warning("[MemoryService] %s", self._init_error)
+                    return False
+
+                embedder_error = _validate_embedder_config(config)
+                if embedder_error:
+                    self._init_error = f"{embedder_error}，mem0 记忆层不可用"
                     logger.warning("[MemoryService] %s", self._init_error)
                     return False
 
@@ -408,13 +434,30 @@ class MemoryService:
 
     async def health_check(self) -> Dict[str, Any]:
         """连通性检查"""
+        from .config import describe_mem0_config
+
+        diagnostics = describe_mem0_config(self._db)
         if not await self._ensure_init():
-            return {"ok": False, "error": self._init_error}
+            return {
+                "ok": False,
+                "error": self._init_error,
+                "mem0_version": _get_mem0_version(),
+                "diagnostics": diagnostics,
+            }
         try:
             await self._mem.get_all(user_id="__health_check__", limit=1)
-            return {"ok": True, "mem0_version": _get_mem0_version()}
+            return {
+                "ok": True,
+                "mem0_version": _get_mem0_version(),
+                "diagnostics": diagnostics,
+            }
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            return {
+                "ok": False,
+                "error": str(e),
+                "mem0_version": _get_mem0_version(),
+                "diagnostics": diagnostics,
+            }
 
 
 # ------------------------------------------------------------------

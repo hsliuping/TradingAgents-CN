@@ -95,11 +95,11 @@
               <div class="disclaimer-text">
                 <p style="margin: 0 0 8px 0;"><strong>⚠️ 重要风险提示与免责声明</strong></p>
                 <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
-                  <li><strong>平台性质：</strong>本平台为AI辅助分析技术学习平台，专注于AI技术在股票分析领域的应用验证和技术学习。</li>
-                  <li><strong>分析目的：</strong>所有分析结论仅用于学习和验证AI辅助分析技术，不作为真实炒股操盘指导或投资依据。</li>
+                  <li><strong>平台性质：</strong>本平台为AI辅助分析技术学习平台，专注于AI技术在证券与ETF分析领域的应用验证和技术学习。</li>
+                  <li><strong>分析目的：</strong>所有分析结论仅用于学习和验证AI辅助分析技术，不作为真实交易操盘指导或投资依据。</li>
                   <li><strong>非投资建议：</strong>所有分析结果、评分、建议仅为技术验证参考，不构成任何买卖建议或投资决策依据。</li>
                   <li><strong>数据局限性：</strong>分析基于历史数据和公开信息，可能存在延迟、不完整或不准确的情况，无法预测未来市场走势。</li>
-                  <li><strong>投资风险：</strong>股票投资存在市场风险、流动性风险、政策风险等多种风险，可能导致本金损失。</li>
+                  <li><strong>投资风险：</strong>股票与ETF投资均存在市场风险、流动性风险、政策风险等多种风险，可能导致本金损失。</li>
                   <li><strong>独立决策：</strong>投资者应基于自身风险承受能力、投资目标和财务状况独立做出投资决策。</li>
                   <li><strong>责任声明：</strong>使用本平台产生的任何投资决策及其后果由使用者自行承担，本平台不承担任何责任。</li>
                 </ul>
@@ -648,12 +648,12 @@ const applyToTrading = async () => {
             h('div', { style: 'color: #606266; font-size: 12px; line-height: 1.6;' }, [
               h('p', { style: 'margin: 4px 0;' }, '• 本交易基于AI分析结果，仅供参考，不构成投资建议'),
               h('p', { style: 'margin: 4px 0;' }, '• 模拟交易使用虚拟资金，与实盘存在显著差异'),
-              h('p', { style: 'margin: 4px 0;' }, '• 股票投资存在市场风险，可能导致本金损失'),
+              h('p', { style: 'margin: 4px 0;' }, '• 股票与ETF投资均存在市场风险，可能导致本金损失'),
               h('p', { style: 'margin: 4px 0;' }, '• 请勿将模拟结果作为实盘投资决策依据')
             ])
           ]),
           h('p', [
-            h('strong', '股票代码：'),
+            h('strong', getMarketByStockCode(currentReport.stock_symbol) === 'ETF' ? 'ETF代码：' : '标的代码：'),
             h('span', currentReport.stock_symbol)
           ]),
           h('p', [
@@ -764,6 +764,7 @@ const applyToTrading = async () => {
       code: currentReport.stock_symbol,
       side: recommendation.action,
       quantity: tradeForm.quantity,
+      market: getMarketByStockCode(currentReport.stock_symbol) === 'ETF' ? 'ETF' : getMarketByStockCode(currentReport.stock_symbol) === '港股' ? 'HK' : getMarketByStockCode(currentReport.stock_symbol) === '美股' ? 'US' : 'CN',
       analysis_id: String(currentReport.analysis_id || currentReport.id)
     })
 

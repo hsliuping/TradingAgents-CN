@@ -33,6 +33,8 @@ from app.services.memory_state_manager import get_memory_state_manager, TaskStat
 from app.services.redis_progress_tracker import RedisProgressTracker, get_progress_by_id
 from app.services.progress_log_handler import register_analysis_tracker, unregister_analysis_tracker
 
+ETF_CODE_PREFIXES = ("50", "51", "52", "56", "58", "15", "16", "18")
+
 # 股票基础信息获取（用于补充显示名称）
 try:
     from tradingagents.dataflows.data_source_manager import get_data_source_manager
@@ -43,11 +45,62 @@ try:
 except Exception:
     _get_stock_info_safe = None
 
+try:
+    from tradingagents.config.database_manager import get_mongodb_client, get_database_manager
+except Exception:
+    get_mongodb_client = None
+    get_database_manager = None
+
 # 设置日志
 logger = logging.getLogger("app.services.simple_analysis_service")
 
 # 配置服务实例
 config_service = ConfigService()
+
+
+def _is_cn_etf_symbol(code: Optional[str]) -> bool:
+    code_str = str(code or "").strip()
+    return len(code_str) == 6 and code_str.isdigit() and code_str.startswith(ETF_CODE_PREFIXES)
+
+
+def _get_cached_security_name(code: Optional[str]) -> Optional[str]:
+    if not code or get_mongodb_client is None:
+        return None
+
+    code_str = str(code).strip().zfill(6)
+
+    try:
+        client = get_mongodb_client()
+        if not client:
+            return None
+
+        db_name = "tradingagents"
+        if get_database_manager is not None:
+            try:
+                db_name = get_database_manager().mongodb_config.get("database", "tradingagents")
+            except Exception:
+                pass
+
+        db = client[db_name]
+
+        if _is_cn_etf_symbol(code_str):
+            doc = db["etf_basic_info"].find_one(
+                {"code": code_str},
+                {"name": 1, "fund_name": 1, "etf_name": 1, "symbol": 1, "_id": 0}
+            )
+            if doc:
+                return doc.get("name") or doc.get("fund_name") or doc.get("etf_name")
+
+        doc = db["stock_basic_info"].find_one(
+            {"$or": [{"code": code_str}, {"symbol": code_str}]},
+            {"name": 1, "stock_name": 1, "_id": 0}
+        )
+        if doc:
+            return doc.get("name") or doc.get("stock_name")
+    except Exception as e:
+        logger.debug(f"读取缓存名称失败（忽略）: {code_str} - {e}")
+
+    return None
 
 
 async def get_provider_by_model_name(model_name: str) -> str:
@@ -696,6 +749,11 @@ class SimpleAnalysisService:
             return self._stock_name_cache[code]
         name = None
         try:
+            name = _get_cached_security_name(code)
+            if name:
+                self._stock_name_cache[code] = name
+                return name
+
             if _get_stock_info_safe:
                 info = _get_stock_info_safe(code)
                 if isinstance(info, dict):
@@ -703,7 +761,7 @@ class SimpleAnalysisService:
         except Exception as e:
             logger.warning(f"⚠️ 获取股票名称失败: {code} - {e}")
         if not name:
-            name = f"股票{code}"
+            name = f"{'ETF' if _is_cn_etf_symbol(code) else '股票'}{code}"
         # 写缓存
         self._stock_name_cache[code] = name
         return name
@@ -2686,25 +2744,33 @@ class SimpleAnalysisService:
             stock_name = stock_symbol  # 默认使用股票代码
             try:
                 if market_info.get("market") == "china_a":
+                    if _is_cn_etf_symbol(stock_symbol):
+                        cached_name = _get_cached_security_name(stock_symbol)
+                        if cached_name:
+                            stock_name = cached_name
+                            logger.info(f"✅ 获取ETF名称: {stock_symbol} -> {stock_name}")
+                        else:
+                            stock_name = f"ETF{stock_symbol}"
                     # A股：使用统一接口获取股票信息
-                    from tradingagents.dataflows.interface import get_china_stock_info_unified
-                    stock_info = get_china_stock_info_unified(stock_symbol)
-                    logger.debug(f"📊 获取股票信息返回: {stock_info[:200] if stock_info else 'None'}...")
-
-                    if stock_info and "股票名称:" in stock_info:
-                        stock_name = stock_info.split("股票名称:")[1].split("\n")[0].strip()
-                        logger.info(f"✅ 获取A股名称: {stock_symbol} -> {stock_name}")
                     else:
-                        # 降级方案：尝试直接从数据源管理器获取
-                        logger.warning(f"⚠️ 无法从统一接口解析股票名称: {stock_symbol}，尝试降级方案")
-                        try:
-                            from tradingagents.dataflows.data_source_manager import get_china_stock_info_unified as get_info_dict
-                            info_dict = get_info_dict(stock_symbol)
-                            if info_dict and info_dict.get('name'):
-                                stock_name = info_dict['name']
-                                logger.info(f"✅ 降级方案成功获取股票名称: {stock_symbol} -> {stock_name}")
-                        except Exception as fallback_e:
-                            logger.error(f"❌ 降级方案也失败: {fallback_e}")
+                        from tradingagents.dataflows.interface import get_china_stock_info_unified
+                        stock_info = get_china_stock_info_unified(stock_symbol)
+                        logger.debug(f"📊 获取股票信息返回: {stock_info[:200] if stock_info else 'None'}...")
+
+                        if stock_info and "股票名称:" in stock_info:
+                            stock_name = stock_info.split("股票名称:")[1].split("\n")[0].strip()
+                            logger.info(f"✅ 获取A股名称: {stock_symbol} -> {stock_name}")
+                        else:
+                            # 降级方案：尝试直接从数据源管理器获取
+                            logger.warning(f"⚠️ 无法从统一接口解析股票名称: {stock_symbol}，尝试降级方案")
+                            try:
+                                from tradingagents.dataflows.data_source_manager import get_china_stock_info_unified as get_info_dict
+                                info_dict = get_info_dict(stock_symbol)
+                                if info_dict and info_dict.get('name'):
+                                    stock_name = info_dict['name']
+                                    logger.info(f"✅ 降级方案成功获取股票名称: {stock_symbol} -> {stock_name}")
+                            except Exception as fallback_e:
+                                logger.error(f"❌ 降级方案也失败: {fallback_e}")
 
                 elif market_info.get("market") == "hong_kong":
                     # 港股：使用改进的港股工具
