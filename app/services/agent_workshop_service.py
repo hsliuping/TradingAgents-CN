@@ -2183,15 +2183,23 @@ class AgentWorkshopService:
 
         known_tool_set = set(known_tools)
         known_module_set = set(reusable_modules)
-        existing_tools = self._require_list_field(data, "existing_tools", "gap_analysis")
-        invalid_tools = [item for item in existing_tools if item not in known_tool_set]
+        existing_tools_raw = self._require_list_field(data, "existing_tools", "gap_analysis")
+        invalid_tools = [item for item in existing_tools_raw if item not in known_tool_set]
+        existing_tools = [item for item in existing_tools_raw if item in known_tool_set]
         if invalid_tools:
-            raise ValueError(f"gap_analysis existing_tools 包含未定义能力: {', '.join(invalid_tools)}")
+            logger.warning(
+                "[AgentWorkshop] gap_analysis existing_tools 中过滤掉 LLM 幻觉工具: %s",
+                ", ".join(invalid_tools),
+            )
 
-        modules = self._require_list_field(data, "reusable_modules", "gap_analysis")
-        invalid_modules = [item for item in modules if item not in known_module_set]
+        modules_raw = self._require_list_field(data, "reusable_modules", "gap_analysis")
+        invalid_modules = [item for item in modules_raw if item not in known_module_set]
+        modules = [item for item in modules_raw if item in known_module_set]
         if invalid_modules:
-            raise ValueError(f"gap_analysis reusable_modules 包含未定义模块: {', '.join(invalid_modules)}")
+            logger.warning(
+                "[AgentWorkshop] gap_analysis reusable_modules 中过滤掉未定义模块: %s",
+                ", ".join(invalid_modules),
+            )
 
         notes = self._require_list_field(data, "notes", "gap_analysis")
         notes.append(
