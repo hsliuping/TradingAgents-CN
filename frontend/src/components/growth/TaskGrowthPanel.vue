@@ -231,28 +231,64 @@ const ACTION_MODE_LABELS: Record<string, string> = {
 }
 
 const safeParseJson = (value: string): Record<string, any> | null => {
+  if (!value) return null
+  // 直接尝试 JSON.parse
   try {
     const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    // ignore
+  }
+  // 尝试将 Python 风格单引号转为双引号
+  try {
+    // 将外层单引号键值对转为双引号（简单启发式）
+    const fixed = value
+      .replace(/'/g, '"')                     // 所有单引号→双引号
+      .replace(/None/g, 'null')               // Python None→null
+      .replace(/True/g, 'true')               // Python True→true
+      .replace(/False/g, 'false')             // Python False→false
+    const parsed = JSON.parse(fixed)
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
   } catch {
     return null
   }
 }
 
+/**
+ * 从 content 字符串中提取可用的 JSON 对象。
+ * 支持：
+ *  - 标准 JSON
+ *  - markdown ```json ... ``` 代码块（可嵌套在外层字典值中）
+ *  - Python repr 格式的字典（单引号）
+ *  - 外层 {'key': '```json\n{...}```'} 嵌套结构
+ */
 const extractJsonLikeObject = (content: string): Record<string, any> | null => {
   if (!content) return null
 
-  const fencedMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  if (fencedMatch?.[1]) {
-    const parsed = safeParseJson(fencedMatch[1].trim())
+  // 1. 尝试从 markdown 代码块提取（可能有多个，取最深层包含完整 JSON 的那个）
+  const fencedRegex = /```(?:json)?\s*([\s\S]*?)```/gi
+  let fencedMatch: RegExpExecArray | null
+  while ((fencedMatch = fencedRegex.exec(content)) !== null) {
+    const inner = fencedMatch[1].trim()
+    const parsed = safeParseJson(inner)
     if (parsed) return parsed
   }
 
+  // 2. 尝试提取 {...} 区间
   const firstBrace = content.indexOf('{')
   const lastBrace = content.lastIndexOf('}')
   if (firstBrace >= 0 && lastBrace > firstBrace) {
-    const parsed = safeParseJson(content.slice(firstBrace, lastBrace + 1).trim())
-    if (parsed) return parsed
+    const slice = content.slice(firstBrace, lastBrace + 1).trim()
+    const parsed = safeParseJson(slice)
+    if (parsed) {
+      // 如果解析结果只有一个 key，且其 value 是字符串包含 JSON，递归提取
+      const keys = Object.keys(parsed)
+      if (keys.length === 1 && typeof parsed[keys[0]] === 'string') {
+        const inner = extractJsonLikeObject(parsed[keys[0]])
+        if (inner) return inner
+      }
+      return parsed
+    }
   }
 
   return null
@@ -268,14 +304,42 @@ const formatMetricValue = (key: string, value: unknown): string => {
   return String(value)
 }
 
+/**
+ * 清理原始 content 文本，去除代码块标记、Python dict 包装等，使其可读。
+ */
 const cleanGrowthText = (content: string): string => {
   if (!content) return ''
 
-  let normalized = content.replace(/```json\s*/gi, '').replace(/```/g, '')
-  normalized = normalized.replace(/^\s*['"]?[a-zA-Z_]+['"]?\s*:\s*/m, '')
-  normalized = normalized.replace(/\r/g, '').trim()
+  let text = content
 
-  return normalized
+  // 去除外层 Python dict wrapper: {'some_key': '...'}
+  const outerDictMatch = text.match(/^\s*\{['"]\w+['"]\s*:\s*['"]([\s\S]*)['"]\s*\}\s*$/)
+  if (outerDictMatch) {
+    text = outerDictMatch[1]
+  }
+
+  // 去除 markdown 代码块标记
+  text = text.replace(/```json\s*/gi, '').replace(/```/g, '')
+
+  // 去除转义换行
+  text = text.replace(/\\n/g, '\n').replace(/\\t/g, '  ')
+
+  // 尝试格式化内嵌 JSON
+  const braceStart = text.indexOf('{')
+  const braceEnd = text.lastIndexOf('}')
+  if (braceStart >= 0 && braceEnd > braceStart) {
+    const jsonSlice = text.slice(braceStart, braceEnd + 1)
+    const parsed = safeParseJson(jsonSlice)
+    if (parsed) {
+      return Object.entries(parsed)
+        .map(([k, v]) => `${FIELD_LABELS[k] || k}：${formatMetricValue(k, v)}`)
+        .join('\n\n')
+    }
+  }
+
+  // 最终清理
+  text = text.replace(/\r/g, '').trim()
+  return text
 }
 
 const getFormattedMemoryContent = (item: GrowthMemoryItem): FormattedGrowthContent => {
