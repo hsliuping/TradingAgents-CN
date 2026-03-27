@@ -1778,15 +1778,36 @@ class AgentWorkshopService:
     def _require_list_field(self, data: Dict[str, Any], key: str, stage: str) -> List[str]:
         value = data.get(key)
         if not isinstance(value, list):
+            # 兼容 LLM 返回单个字符串的情况
+            if isinstance(value, str) and value.strip():
+                return [value.strip()]
             raise ValueError(f"{stage} 缺少数组字段 {key}")
         normalized: List[str] = []
         for item in value:
-            if not isinstance(item, (str, int, float)):
-                raise ValueError(f"{stage} 字段 {key} 必须是字符串数组")
-            text = str(item).strip()
-            if not text:
-                raise ValueError(f"{stage} 字段 {key} 里存在空项")
-            normalized.append(text)
+            if isinstance(item, (str, int, float)):
+                text = str(item).strip()
+            elif isinstance(item, dict):
+                # LLM 可能返回 {"question": "xxx"} 形式，尝试提取文本
+                text = ""
+                for k in ("question", "text", "content", "message", "value"):
+                    if isinstance(item.get(k), str) and item[k].strip():
+                        text = item[k].strip()
+                        break
+                if not text:
+                    # 回退：取第一个非空字符串值
+                    for v in item.values():
+                        if isinstance(v, str) and v.strip():
+                            text = v.strip()
+                            break
+                if not text:
+                    continue  # 跳过无法提取文本的字典项
+            elif isinstance(item, list):
+                # 跳过嵌套数组
+                continue
+            else:
+                text = str(item).strip()
+            if text:
+                normalized.append(text)
         return self._dedupe(normalized)
 
     def _require_score_field(self, data: Dict[str, Any], key: str, stage: str) -> float:
