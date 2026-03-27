@@ -122,21 +122,27 @@ class OpenAICompatAdapter(BaseAdapter):
         tools: Optional[List[Dict[str, Any]]] = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """构建请求参数"""
+        """构建请求参数
+
+        支持通过 kwargs 覆盖 temperature / max_tokens 等参数，
+        优先级：kwargs > self.config。
+        """
         request_kwargs = {
             "model": self.config.model,
             "messages": self._convert_messages(messages),
-            "temperature": kwargs.get("temperature", self.config.temperature),
+            "temperature": kwargs.pop("temperature", self.config.temperature),
         }
-        
-        if self.config.max_tokens:
-            request_kwargs["max_tokens"] = self.config.max_tokens
-        
+
+        # max_tokens: kwargs 优先，其次 config
+        max_tokens = kwargs.pop("max_tokens", None) or self.config.max_tokens
+        if max_tokens:
+            request_kwargs["max_tokens"] = max_tokens
+
         if tools:
             request_kwargs["tools"] = self.convert_tools_to_provider_format(tools)
             if self.config.tool_choice:
                 request_kwargs["tool_choice"] = self.config.tool_choice
-        
+
         return request_kwargs
     
     def chat(

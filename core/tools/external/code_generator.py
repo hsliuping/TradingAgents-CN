@@ -121,8 +121,8 @@ class CodeGenerator:
             Message(role="user", content=user_prompt),
         ]
 
-        # 调用 LLM
-        response = client.chat(messages)
+        # 调用 LLM — 代码生成需要较大的输出空间，显式设置 max_tokens
+        response = client.chat(messages, max_tokens=4096)
         raw = response.content or ""
 
         # 解析结果
@@ -150,7 +150,7 @@ class CodeGenerator:
             Message(role="user", content=user_prompt),
         ]
 
-        response = await client.achat(messages)
+        response = await client.achat(messages, max_tokens=4096)
         raw = response.content or ""
 
         result = self._parse_response(raw, spec)
@@ -330,16 +330,24 @@ financial_data = ctx["financial_data"]
 {json.dumps(spec.test_input, ensure_ascii=False) if spec.test_input else '无'}
 """
         if feedback and previous_code:
+            # 截断 previous_code 避免多轮迭代后 prompt 过长（保留前 150 行）
+            code_lines = previous_code.split("\n")
+            if len(code_lines) > 150:
+                truncated_code = "\n".join(code_lines[:150]) + "\n# ... (已截断，共 {} 行)".format(len(code_lines))
+            else:
+                truncated_code = previous_code
+            # 截断 feedback 避免累积过长
+            truncated_feedback = feedback[:3000] if len(feedback) > 3000 else feedback
             prompt += f"""
 【⚠️ 迭代修复 — 上一轮代码有问题，请定向修复】
 
 上一轮代码：
 ```python
-{previous_code}
+{truncated_code}
 ```
 
 完整执行上下文与反馈：
-{feedback}
+{truncated_feedback}
 
 【修复要求 — 极其重要】
 1. **定向修复**：只修改有问题的代码，保留已正确工作的部分

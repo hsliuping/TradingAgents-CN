@@ -118,9 +118,11 @@ class GoogleAdapter(BaseAdapter):
         generation_config = {
             "temperature": kwargs.get("temperature", self.config.temperature),
         }
-        if self.config.max_tokens:
-            generation_config["max_output_tokens"] = self.config.max_tokens
-        
+        # max_tokens: kwargs 优先，其次 config
+        max_tokens = kwargs.get("max_tokens") or self.config.max_tokens
+        if max_tokens:
+            generation_config["max_output_tokens"] = max_tokens
+
         # 创建带系统指令的模型实例
         model = self._model
         if system_instruction:
@@ -157,9 +159,11 @@ class GoogleAdapter(BaseAdapter):
         generation_config = {
             "temperature": kwargs.get("temperature", self.config.temperature),
         }
-        if self.config.max_tokens:
-            generation_config["max_output_tokens"] = self.config.max_tokens
-        
+        # max_tokens: kwargs 优先，其次 config
+        max_tokens = kwargs.get("max_tokens") or self.config.max_tokens
+        if max_tokens:
+            generation_config["max_output_tokens"] = max_tokens
+
         model = self._model
         if system_instruction:
             model = genai.GenerativeModel(
