@@ -122,7 +122,7 @@ class CodeGenerator:
         ]
 
         # 调用 LLM — 代码生成需要较大的输出空间，显式设置 max_tokens
-        response = client.chat(messages, max_tokens=4096)
+        response = client.chat(messages, max_tokens=8192)
         raw = response.content or ""
 
         # 解析结果
@@ -150,7 +150,7 @@ class CodeGenerator:
             Message(role="user", content=user_prompt),
         ]
 
-        response = await client.achat(messages, max_tokens=4096)
+        response = await client.achat(messages, max_tokens=8192)
         raw = response.content or ""
 
         result = self._parse_response(raw, spec)
