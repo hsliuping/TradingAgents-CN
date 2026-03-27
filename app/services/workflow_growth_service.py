@@ -1047,8 +1047,49 @@ class WorkflowGrowthService:
             return str(value)
         return str(value).strip()
 
+    @staticmethod
+    def _strip_markdown(text: str) -> str:
+        """去除 Markdown 格式标记，保留纯文本内容。"""
+        import re
+        # 去除代码块
+        text = re.sub(r'```[\s\S]*?```', ' ', text)
+        # 去除行内代码
+        text = re.sub(r'`[^`]+`', lambda m: m.group(0).strip('`'), text)
+        # 去除表格分隔行 |---|---|
+        text = re.sub(r'\|[\s\-:]+\|[\s\-:|]*', ' ', text)
+        # 去除表格行开头和结尾的 |
+        text = re.sub(r'^\s*\||\|\s*$', ' ', text, flags=re.MULTILINE)
+        # 去除表格内部的 | 分隔符
+        text = re.sub(r'\|', '，', text)
+        # 去除标题标记 ##
+        text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+        # 去除加粗 **text** 和 __text__
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+        text = re.sub(r'__(.+?)__', r'\1', text)
+        # 去除斜体 *text* 和 _text_（注意不要误伤下划线变量名）
+        text = re.sub(r'(?<!\w)\*(.+?)\*(?!\w)', r'\1', text)
+        # 去除列表标记 - 和 *
+        text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
+        # 去除有序列表标记 1.
+        text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+        # 去除 emoji
+        text = re.sub(r'[📊📈📉🔍✅❌⚠️💡🎯🔥📋🔑💰📌🏆🔧⬆⬇➡️▲▼●◆■□★☆]', '', text)
+        # 去除图片和链接语法
+        text = re.sub(r'!\[.*?\]\(.*?\)', '', text)
+        text = re.sub(r'\[(.+?)\]\(.*?\)', r'\1', text)
+        # 压缩多余空白
+        text = re.sub(r'[ \t]+', ' ', text)
+        text = re.sub(r'\n\s*\n', '\n', text)
+        return text.strip()
+
     def _summarize_text(self, value: str, limit: int = 180) -> str:
-        text = self._extract_text(value).replace("\r", " ").replace("\n", " ").strip()
+        text = self._extract_text(value)
+        # 先去除 Markdown 格式标记，再做摘要截断
+        text = self._strip_markdown(text)
+        text = text.replace("\r", " ").replace("\n", " ").strip()
+        # 压缩连续空格
+        import re
+        text = re.sub(r' {2,}', ' ', text)
         if len(text) <= limit:
             return text
         return text[:limit].rstrip() + "..."
