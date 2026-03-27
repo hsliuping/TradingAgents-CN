@@ -122,8 +122,26 @@ class CodeGenerator:
         ]
 
         # 调用 LLM — 代码生成需要较大的输出空间，显式设置 max_tokens
+        logger.info(
+            f"\n{'─'*50}\n"
+            f"📤 [CodeGenerator] LLM 输入 (tool_id={spec.tool_id})\n"
+            f"{'─'*50}\n"
+            f"🔧 System Prompt ({len(system_prompt)} 字符):\n{system_prompt[:2000]}\n"
+            f"{'...(截断)' if len(system_prompt) > 2000 else ''}\n"
+            f"📝 User Prompt ({len(user_prompt)} 字符):\n{user_prompt[:3000]}\n"
+            f"{'...(截断)' if len(user_prompt) > 3000 else ''}\n"
+            f"{'─'*50}"
+        )
         response = client.chat(messages, max_tokens=8192)
         raw = response.content or ""
+        logger.info(
+            f"\n{'─'*50}\n"
+            f"📥 [CodeGenerator] LLM 输出 ({len(raw)} 字符)\n"
+            f"{'─'*50}\n"
+            f"{raw[:3000]}\n"
+            f"{'...(截断)' if len(raw) > 3000 else ''}\n"
+            f"{'─'*50}"
+        )
 
         # 解析结果
         result = self._parse_response(raw, spec)
@@ -150,8 +168,26 @@ class CodeGenerator:
             Message(role="user", content=user_prompt),
         ]
 
+        logger.info(
+            f"\n{'─'*50}\n"
+            f"📤 [CodeGenerator.async] LLM 输入 (tool_id={spec.tool_id})\n"
+            f"{'─'*50}\n"
+            f"🔧 System Prompt ({len(system_prompt)} 字符):\n{system_prompt[:2000]}\n"
+            f"{'...(截断)' if len(system_prompt) > 2000 else ''}\n"
+            f"📝 User Prompt ({len(user_prompt)} 字符):\n{user_prompt[:3000]}\n"
+            f"{'...(截断)' if len(user_prompt) > 3000 else ''}\n"
+            f"{'─'*50}"
+        )
         response = await client.achat(messages, max_tokens=8192)
         raw = response.content or ""
+        logger.info(
+            f"\n{'─'*50}\n"
+            f"📥 [CodeGenerator.async] LLM 输出 ({len(raw)} 字符)\n"
+            f"{'─'*50}\n"
+            f"{raw[:3000]}\n"
+            f"{'...(截断)' if len(raw) > 3000 else ''}\n"
+            f"{'─'*50}"
+        )
 
         result = self._parse_response(raw, spec)
         result.generation_time = round(time.time() - start, 2)

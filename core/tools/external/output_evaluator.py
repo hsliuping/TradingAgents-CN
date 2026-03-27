@@ -173,9 +173,24 @@ class OutputEvaluator:
 
         try:
             import re
+            logger.info(
+                f"\n{'─'*50}\n"
+                f"📤 [OutputEvaluator] Judge LLM 输入 ({len(prompt)} 字符)\n"
+                f"{'─'*50}\n"
+                f"{prompt[:3000]}\n"
+                f"{'...(截断)' if len(prompt) > 3000 else ''}\n"
+                f"{'─'*50}"
+            )
             messages = [Message(role="user", content=prompt)]
             response = client.chat(messages)
             raw = response.content or ""
+            logger.info(
+                f"\n{'─'*50}\n"
+                f"📥 [OutputEvaluator] Judge LLM 输出 ({len(raw)} 字符)\n"
+                f"{'─'*50}\n"
+                f"{raw}\n"
+                f"{'─'*50}"
+            )
 
             json_match = re.search(r"\{[^}]+\}", raw, re.DOTALL)
             if json_match:
@@ -186,6 +201,8 @@ class OutputEvaluator:
                 score.relevance = float(scores.get("relevance", score.relevance))
                 score.format_quality = float(scores.get("format_quality", score.format_quality))
                 logger.info(f"🎯 Judge LLM 评分: {score.total}")
+            else:
+                logger.warning(f"⚠️ Judge LLM 输出中未找到 JSON: {raw[:500]}")
         except Exception as e:
             logger.warning(f"Judge LLM 评分失败，保留基础检查分数: {e}")
 

@@ -422,8 +422,23 @@ class IterationController:
 """
         try:
             client = self._get_client()
+            logger.info(
+                f"\n{'─'*50}\n"
+                f"📤 [Reflection] LLM 输入 ({len(prompt)} 字符)\n"
+                f"{'─'*50}\n"
+                f"{prompt[:3000]}\n"
+                f"{'...(截断)' if len(prompt) > 3000 else ''}\n"
+                f"{'─'*50}"
+            )
             response = client.chat([Message(role="user", content=prompt)])
             raw = (response.content or "").strip()
+            logger.info(
+                f"\n{'─'*50}\n"
+                f"📥 [Reflection] LLM 输出 ({len(raw)} 字符)\n"
+                f"{'─'*50}\n"
+                f"{raw}\n"
+                f"{'─'*50}"
+            )
 
             import re
             json_match = re.search(r"\{[^}]+\}", raw, re.DOTALL)
