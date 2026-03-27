@@ -340,51 +340,58 @@ async def get_quote(
     # A股：使用现有逻辑
     db = get_mongo_db()
     code6 = normalized_code
+    is_etf = _is_cn_etf_code(code6)
 
-    # 行情
-    q = await db["market_quotes"].find_one({"code": code6}, {"_id": 0})
-
-    # 🔥 调试日志：查看查询结果
-    logger.info(f"🔍 查询 market_quotes: code={code6}")
-    if q:
-        logger.info(f"  ✅ 找到数据: volume={q.get('volume')}, amount={q.get('amount')}, volume_ratio={q.get('volume_ratio')}")
-    else:
-        logger.info(f"  ❌ 未找到数据")
-
-    # 🔥 基础信息 - 按数据源优先级查询
-    from app.core.unified_config import UnifiedConfigManager
-    config = UnifiedConfigManager()
-    data_source_configs = await config.get_data_source_configs_async()
-
-    # 提取启用的数据源，按优先级排序
-    enabled_sources = [
-        ds.type.lower() for ds in data_source_configs
-        if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
-    ]
-
-    if not enabled_sources:
-        enabled_sources = ['tushare', 'akshare', 'baostock']
-
-    # 按优先级查询基础信息
+    q = None
     b = None
-    for src in enabled_sources:
-        b = await db["stock_basic_info"].find_one({"code": code6, "source": src}, {"_id": 0})
-        if b:
-            break
 
-    # 如果所有数据源都没有，尝试不带 source 条件查询（兼容旧数据）
-    if not b:
-        b = await db["stock_basic_info"].find_one({"code": code6}, {"_id": 0})
-
-    # ETF 回退：stock_basic_info 未命中时查 etf_basic_info + etf_daily_quotes
-    if not b:
-        b = await db["etf_basic_info"].find_one({"code": code6}, {"_id": 0})
-    if not q:
+    if is_etf:
+        # ETF：直接查 etf_daily_quotes + etf_basic_info（ETF 不存在于 market_quotes）
         etf_q = await db["etf_daily_quotes"].find_one(
             {"code": code6}, sort=[("trade_date", -1)], projection={"_id": 0}
         )
         if etf_q:
             q = etf_q
+        b = await db["etf_basic_info"].find_one({"code": code6}, {"_id": 0})
+        logger.debug(f"🔍 ETF 查询: code={code6}, quote={'✅' if q else '❌'}, basic={'✅' if b else '❌'}")
+    else:
+        # 股票：查 market_quotes
+        q = await db["market_quotes"].find_one({"code": code6}, {"_id": 0})
+        if q:
+            logger.debug(f"🔍 market_quotes: code={code6} ✅ volume={q.get('volume')}, amount={q.get('amount')}")
+        else:
+            logger.debug(f"🔍 market_quotes: code={code6} ❌ 未找到，将尝试回退")
+
+        # 基础信息 - 按数据源优先级查询
+        from app.core.unified_config import UnifiedConfigManager
+        config = UnifiedConfigManager()
+        data_source_configs = await config.get_data_source_configs_async()
+
+        enabled_sources = [
+            ds.type.lower() for ds in data_source_configs
+            if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
+        ]
+        if not enabled_sources:
+            enabled_sources = ['tushare', 'akshare', 'baostock']
+
+        for src in enabled_sources:
+            b = await db["stock_basic_info"].find_one({"code": code6, "source": src}, {"_id": 0})
+            if b:
+                break
+
+        # 兼容旧数据（不带 source 条件）
+        if not b:
+            b = await db["stock_basic_info"].find_one({"code": code6}, {"_id": 0})
+
+        # 回退：stock_basic_info 未命中时查 etf_basic_info + etf_daily_quotes
+        if not b:
+            b = await db["etf_basic_info"].find_one({"code": code6}, {"_id": 0})
+        if not q:
+            etf_q = await db["etf_daily_quotes"].find_one(
+                {"code": code6}, sort=[("trade_date", -1)], projection={"_id": 0}
+            )
+            if etf_q:
+                q = etf_q
 
     if not q and not b:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该股票的任何信息")
@@ -417,13 +424,13 @@ async def get_quote(
     try:
         high = (q or {}).get("high")
         low = (q or {}).get("low")
-        logger.info(f"🔍 计算振幅: high={high}, low={low}, prev_close={prev_close}")
+        logger.debug(f"🔍 计算振幅: high={high}, low={low}, prev_close={prev_close}")
         if high is not None and low is not None and prev_close is not None and prev_close > 0:
             amplitude = round((float(high) - float(low)) / float(prev_close) * 100, 2)
             amplitude_date = (q or {}).get("trade_date")  # 来自实时数据
-            logger.info(f"  ✅ 振幅计算成功: {amplitude}%")
+            logger.debug(f"  ✅ 振幅计算成功: {amplitude}%")
         else:
-            logger.warning(f"  ⚠️ 数据不完整，无法计算振幅")
+            logger.debug(f"  ⚠️ 数据不完整，无法计算振幅")
     except Exception as e:
         logger.warning(f"  ❌ 计算振幅失败: {e}")
         amplitude = None
