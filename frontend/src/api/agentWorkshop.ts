@@ -70,11 +70,17 @@ export interface AgentSpec {
   updated_at: string
 }
 
+export interface SuggestedToolItem {
+  tool_id: string
+  description?: string
+  why_needed?: string
+}
+
 export interface AgentWorkshopGapAnalysis {
   reusable_modules: string[]
   existing_tools: string[]
-  suggested_tools: string[]
-  suggested_capabilities: string[]
+  suggested_tools: SuggestedToolItem[]
+  suggested_capabilities: SuggestedToolItem[]
   manual_dependencies: string[]
   blocking_gaps: string[]
   fallback_strategy: string[]

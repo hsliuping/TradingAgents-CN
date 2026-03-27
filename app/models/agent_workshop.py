@@ -87,13 +87,21 @@ class AgentSpec(BaseModel):
     )
 
 
+class SuggestedToolItem(BaseModel):
+    """建议补齐的工具/能力条目"""
+
+    tool_id: str = ""
+    description: str = ""
+    why_needed: str = ""
+
+
 class AgentWorkshopGapAnalysis(BaseModel):
     """资源缺口分析结果"""
 
     reusable_modules: List[str] = Field(default_factory=list)
     existing_tools: List[str] = Field(default_factory=list)
-    suggested_tools: List[str] = Field(default_factory=list)
-    suggested_capabilities: List[str] = Field(
+    suggested_tools: List[SuggestedToolItem] = Field(default_factory=list)
+    suggested_capabilities: List[SuggestedToolItem] = Field(
         default_factory=list,
         validation_alias=AliasChoices("suggested_capabilities", "suggested_skills"),
         serialization_alias="suggested_capabilities",

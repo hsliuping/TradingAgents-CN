@@ -31,6 +31,7 @@ from app.models.agent_workshop import (
     AgentWorkshopMessage,
     AgentWorkshopSession,
     AgentWorkshopStage,
+    SuggestedToolItem,
 )
 from app.services.prompt_template_service import PromptTemplateService
 from app.utils.timezone import now_tz
@@ -1810,6 +1811,34 @@ class AgentWorkshopService:
                 normalized.append(text)
         return self._dedupe(normalized)
 
+    def _parse_suggested_items(self, raw_list: Any) -> List[SuggestedToolItem]:
+        """将 LLM 返回的 suggested_tools / suggested_capabilities 解析为 SuggestedToolItem 列表。
+
+        兼容两种格式：
+        - 结构化对象：[{"tool_id": "...", "description": "...", "why_needed": "..."}]
+        - 旧版纯字符串：["tool_id_1", "tool_id_2"]
+        """
+        if not isinstance(raw_list, list):
+            if isinstance(raw_list, str) and raw_list.strip():
+                return [SuggestedToolItem(tool_id=raw_list.strip())]
+            return []
+        results: List[SuggestedToolItem] = []
+        seen_ids: set = set()
+        for item in raw_list:
+            if isinstance(item, dict):
+                tool_id = str(item.get("tool_id", item.get("id", item.get("name", "")))).strip()
+                description = str(item.get("description", item.get("desc", ""))).strip()
+                why_needed = str(item.get("why_needed", item.get("reason", ""))).strip()
+                if tool_id and tool_id not in seen_ids:
+                    seen_ids.add(tool_id)
+                    results.append(SuggestedToolItem(tool_id=tool_id, description=description, why_needed=why_needed))
+            elif isinstance(item, str) and item.strip():
+                tool_id = item.strip()
+                if tool_id not in seen_ids:
+                    seen_ids.add(tool_id)
+                    results.append(SuggestedToolItem(tool_id=tool_id))
+        return results
+
     def _require_score_field(self, data: Dict[str, Any], key: str, stage: str) -> float:
         if key not in data:
             raise ValueError(f"{stage} 缺少数值字段 {key}")
@@ -2120,7 +2149,7 @@ class AgentWorkshopService:
             "",
             f"【合法模块清单 - reusable_modules 只能从此列表原样复制】\n{modules_enum_lines}",
             "",
-            "suggested_tools/suggested_capabilities 应尽量少而精，优先补最小闭环，不要一次性铺太大能力面。",
+            "suggested_tools/suggested_capabilities 应尽量少而精，优先补最小闭环，不要一次性铺太大能力面。每个条目必须是结构化对象，包含 tool_id（简洁的蛇形命名）、description（一句话说明该能力做什么）、why_needed（为什么当前系统缺这项能力）。",
             "如果当前规格要求输出精确数值、区间、评分、排序或权重，Prompt/模板约束不能替代数据链路或工具计算链路；若能力不足，应明确指出缺的是数据源、工具还是来源标注能力。",
             "只输出合法 JSON，不要输出 Markdown 或额外解释。",
             design_context,
@@ -2128,8 +2157,8 @@ class AgentWorkshopService:
             json.dumps({
                 "reusable_modules": ["只能从【合法模块清单】中选"],
                 "existing_tools": ["只能从【合法工具清单】中选，必须使用完整的 'tool_id | tool_name' 格式"],
-                "suggested_tools": [],
-                "suggested_capabilities": [],
+                "suggested_tools": [{"tool_id": "示例_tool_id", "description": "一句话说明该能力做什么", "why_needed": "为什么当前系统缺这项能力"}],
+                "suggested_capabilities": [{"tool_id": "示例_capability_id", "description": "一句话说明该能力做什么", "why_needed": "为什么当前系统缺这项能力"}],
                 "manual_dependencies": [],
                 "blocking_gaps": [],
                 "fallback_strategy": [],
@@ -2160,7 +2189,7 @@ class AgentWorkshopService:
             capability_context,
             "\n分析要求：",
             "1. existing_tools 只能从上方【合法工具清单】中原样复制，不能改写、缩写或编造任何名称。只列真正能直接支撑当前 Agent 目标的能力。",
-            "2. suggested_tools 只列当前闭环最缺的 1-4 个工具/Skill。",
+            "2. suggested_tools 只列当前闭环最缺的 1-4 个工具/Skill，每个必须是 {tool_id, description, why_needed} 对象。tool_id 用蛇形命名，description 用一句话说明功能，why_needed 说明为什么现有能力不够。suggested_capabilities 同理。",
             "3. blocking_gaps 要写成‘为什么现有能力还不够’，不是重复需求描述。",
             "4. fallback_strategy 要写成没补齐前 Agent 如何安全降级，不要写空话。",
             "5. build_recommendations 要给出实现顺序和边界控制建议。",
@@ -2216,11 +2245,14 @@ class AgentWorkshopService:
         notes.append(
             f"缺口分析由推理模型生成：provider={self._llm_client_meta.get('provider')} model={self._llm_client_meta.get('model')} timeout={self._llm_client_meta.get('timeout')}s"
         )
+        suggested_tools = self._parse_suggested_items(data.get("suggested_tools", []))[:8]
+        suggested_capabilities = self._parse_suggested_items(data.get("suggested_capabilities", data.get("suggested_skills", [])))[:8]
+
         gap_report = AgentWorkshopGapAnalysis(
             reusable_modules=self._dedupe(modules)[:8],
             existing_tools=self._dedupe(existing_tools)[:12],
-            suggested_tools=self._dedupe(self._require_list_field(data, "suggested_tools", "gap_analysis"))[:8],
-            suggested_capabilities=self._dedupe(self._require_list_field(data, "suggested_capabilities", "gap_analysis"))[:8],
+            suggested_tools=suggested_tools,
+            suggested_capabilities=suggested_capabilities,
             manual_dependencies=self._dedupe(self._require_list_field(data, "manual_dependencies", "gap_analysis"))[:8],
             blocking_gaps=self._dedupe(self._require_list_field(data, "blocking_gaps", "gap_analysis"))[:8],
             fallback_strategy=self._dedupe(self._require_list_field(data, "fallback_strategy", "gap_analysis"))[:8],
@@ -2287,7 +2319,10 @@ class AgentWorkshopService:
         tooling_plan: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
         selected: List[str] = []
-        selected.extend(gap_report.suggested_capabilities or [])
+        for cap_item in gap_report.suggested_capabilities or []:
+            cap_id = cap_item.tool_id if isinstance(cap_item, SuggestedToolItem) else str(cap_item)
+            if cap_id:
+                selected.append(self._build_required_capability_label(cap_id))
 
         if isinstance(tooling_plan, dict):
             selected.extend(self._pick_list(tooling_plan.get("missing_capabilities"), []))
@@ -2302,8 +2337,9 @@ class AgentWorkshopService:
                     )
                 )
 
-        for tool_id in gap_report.suggested_tools or []:
-            selected.append(self._build_required_capability_label(tool_id))
+        for tool_item in gap_report.suggested_tools or []:
+            tid = tool_item.tool_id if isinstance(tool_item, SuggestedToolItem) else str(tool_item)
+            selected.append(self._build_required_capability_label(tid))
 
         return self._dedupe([item for item in selected if item])[:8]
 

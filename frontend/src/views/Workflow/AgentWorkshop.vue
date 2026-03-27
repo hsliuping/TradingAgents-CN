@@ -265,12 +265,13 @@
                 </div>
                 <div class="field-block" v-if="gapReport.suggested_tools.length">
                   <div class="field-label">建议优先补齐的执行能力</div>
-                  <div v-for="item in gapReport.suggested_tools" :key="item" class="pending-item descriptive-item">
-                    <div class="descriptive-title">{{ item }}</div>
-                    <div class="descriptive-text">{{ getSuggestedToolDescription(item) }}</div>
+                  <div v-for="item in gapReport.suggested_tools" :key="item.tool_id" class="pending-item descriptive-item">
+                    <div class="descriptive-title">{{ item.tool_id }}</div>
+                    <div class="descriptive-text">{{ item.description || getSuggestedToolDescription(item.tool_id) }}</div>
+                    <div v-if="item.why_needed" class="descriptive-text" style="color: var(--el-text-color-secondary); font-size: 12px;">缺口原因：{{ item.why_needed }}</div>
                     <div class="inline-actions breakdown-actions">
-                      <el-button size="small" type="primary" plain :loading="skillGenerating[item]" @click="handleCreateSkillSession(item)">生成能力</el-button>
-                      <el-button size="small" @click="goToSkillWorkshop(item)">去能力工坊</el-button>
+                      <el-button size="small" type="primary" plain :loading="skillGenerating[item.tool_id]" @click="handleCreateSkillSession(item.tool_id)">生成能力</el-button>
+                      <el-button size="small" @click="goToSkillWorkshop(item.tool_id)">去能力工坊</el-button>
                     </div>
                   </div>
                 </div>
@@ -2144,11 +2145,16 @@ const buildSkillGenerationDescription = (target: string | AgentWorkshopToolingPl
 
   const responsibilityLines = filterLines(spec?.responsibilities || [], 2).map(item => `- ${item}`)
   const nonGoalLines = filterLines(spec?.non_goals || [], 2).map(item => `- ${item}`)
-  const toolDescription = getSuggestedToolDescription(skillName)
+
+  // Prefer structured description from gap report, fallback to heuristic
+  const suggestedItem = (gapReport.value?.suggested_tools || []).find(t => t.tool_id === skillName)
+  const toolDescription = suggestedItem?.description || getSuggestedToolDescription(skillName)
+  const whyNeeded = suggestedItem?.why_needed || ''
 
   return [
     `我要补齐一个 Agent 可直接调用的执行能力：${skillName}。`,
     toolDescription ? `功能说明：${toolDescription}` : '',
+    whyNeeded ? `缺口原因：${whyNeeded}` : '',
     spec?.name ? `它服务于 Agent：${spec.name}。` : '',
     spec?.primary_goal ? `Agent 目标：${spec.primary_goal}` : '',
     responsibilityLines.length ? `与该能力相关的 Agent 职责：\n${responsibilityLines.join('\n')}` : '',
