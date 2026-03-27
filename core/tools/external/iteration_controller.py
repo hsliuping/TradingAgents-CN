@@ -112,7 +112,11 @@ class IterationController:
                     logger.warning(f"progress_callback 异常: {e}")
 
         for round_num in range(1, self._max_iterations + 1):
-            logger.info(f"🔄 Skill 生成管线 — 第 {round_num}/{self._max_iterations} 轮")
+            logger.info(
+                f"\n{'='*60}\n"
+                f"🔄 Skill 生成管线 — 第 {round_num}/{self._max_iterations} 轮 | tool_id={spec.tool_id}\n"
+                f"{'='*60}"
+            )
             _report("iteration", f"第 {round_num}/{self._max_iterations} 轮", round_num, 0)
 
             iteration = IterationRound(round_number=round_num)
@@ -124,10 +128,19 @@ class IterationController:
                     spec, feedback=feedback, previous_code=previous_code
                 )
                 iteration.generated_code = generated
-                logger.info(f"✅ 代码生成完成 ({generated.generation_time}s)")
+                # 详细日志：代码摘要
+                code_lines = generated.code.split("\n") if generated.code else []
+                logger.info(
+                    f"✅ [第{round_num}轮] 代码生成完成\n"
+                    f"   ⏱️  耗时: {generated.generation_time}s\n"
+                    f"   📏 代码行数: {len(code_lines)}\n"
+                    f"   📝 代码前5行:\n"
+                    + "\n".join(f"      | {line}" for line in code_lines[:5])
+                    + (f"\n      | ... (共 {len(code_lines)} 行)" if len(code_lines) > 5 else "")
+                )
                 _report("code_generation", f"代码生成完成 ({generated.generation_time}s)", round_num, 0.2)
             except Exception as e:
-                logger.error(f"❌ 代码生成失败: {e}")
+                logger.error(f"❌ [第{round_num}轮] 代码生成失败: {e}")
                 iteration.decision = "FAIL"
                 iteration.feedback = f"代码生成失败: {e}"
                 iterations.append(iteration)
@@ -150,10 +163,13 @@ class IterationController:
                 iteration.feedback = feedback
                 iterations.append(iteration)
                 _report("static_validation", "静态验证失败，重试中...", round_num, 0.3)
-                logger.warning(f"⚠️ 静态验证失败: {validation.errors}")
+                logger.warning(
+                    f"⚠️ [第{round_num}轮] 静态验证失败:\n"
+                    + "\n".join(f"   ❌ {err}" for err in validation.errors[:5])
+                )
                 continue
 
-            logger.info("✅ 静态验证通过")
+            logger.info(f"✅ [第{round_num}轮] 静态验证通过")
             _report("static_validation", "语法检查通过", round_num, 0.35)
 
             # ===== 阶段 3: 沙箱执行 =====
@@ -163,6 +179,11 @@ class IterationController:
 
             if not sandbox.success:
                 _report("reflection", "正在分析失败原因...", round_num, 0.5)
+                logger.warning(
+                    f"⚠️ [第{round_num}轮] 沙箱执行失败:\n"
+                    f"   错误: {sandbox.error or '未知错误'}\n"
+                    f"   stderr: {(sandbox.stderr or '(空)')[:500]}"
+                )
                 reflection = self._reflect_on_failure(
                     spec=spec,
                     code=generated.code,
@@ -173,6 +194,12 @@ class IterationController:
                     output=sandbox.output,
                 )
                 iteration.reflection = reflection
+                logger.info(
+                    f"🔍 [第{round_num}轮] 反思结果:\n"
+                    f"   根因: {reflection.root_cause}\n"
+                    f"   修复计划: {reflection.fix_plan}\n"
+                    f"   置信度: {reflection.confidence}"
+                )
 
                 feedback = self._build_rich_feedback(
                     stage="沙箱执行",
@@ -189,17 +216,34 @@ class IterationController:
                 iteration.feedback = feedback
                 iterations.append(iteration)
                 _report("sandbox_execution", "沙箱执行失败，反思后重试中...", round_num, 0.55)
-                logger.warning(f"⚠️ 沙箱执行失败: {sandbox.error}")
                 continue
 
-            logger.info(f"✅ 沙箱执行成功 ({sandbox.execution_time}s)")
+            # 详细日志：沙箱执行结果
+            output_preview = ""
+            if sandbox.output is not None:
+                try:
+                    output_preview = json.dumps(sandbox.output, ensure_ascii=False, default=str)[:500]
+                except Exception:
+                    output_preview = str(sandbox.output)[:500]
+            logger.info(
+                f"✅ [第{round_num}轮] 沙箱执行成功\n"
+                f"   ⏱️  耗时: {sandbox.execution_time}s\n"
+                f"   📤 返回值预览: {output_preview or '(空)'}\n"
+                f"   📺 stdout: {(sandbox.stdout or '(空)')[:300]}"
+            )
             _report("sandbox_execution", f"沙箱执行成功 ({sandbox.execution_time}s)", round_num, 0.6)
 
             # ===== 阶段 4: 输出评估 =====
             _report("output_evaluation", "正在质量评估...", round_num, 0.65)
             eval_score = self._evaluator.evaluate(sandbox, spec, generated.code)
             iteration.eval_score = eval_score
-            logger.info(f"📊 评估总分: {eval_score.total}")
+            logger.info(
+                f"📊 [第{round_num}轮] 评估得分:\n"
+                f"   总分: {eval_score.total}/10 (阈值: {PASS_THRESHOLD})\n"
+                f"   可执行性: {eval_score.executability} | 真实性: {eval_score.authenticity}\n"
+                f"   完整性: {eval_score.completeness} | 相关性: {eval_score.relevance}\n"
+                f"   格式质量: {eval_score.format_quality}"
+            )
 
             if eval_score.total >= PASS_THRESHOLD:
                 # ===== 阶段 5: 边缘测试验证 =====
@@ -207,7 +251,10 @@ class IterationController:
                 edge_failures = self._run_edge_tests(generated.code, spec)
 
                 if edge_failures:
-                    logger.warning(f"⚠️ 边缘测试发现 {len(edge_failures)} 个问题")
+                    logger.warning(
+                        f"⚠️ [第{round_num}轮] 边缘测试发现 {len(edge_failures)} 个问题:\n"
+                        + "\n".join(f"   ❌ {f}" for f in edge_failures[:5])
+                    )
                     _report("reflection", "边缘测试失败，正在分析...", round_num, 0.85)
                     reflection = self._reflect_on_failure(
                         spec=spec,
@@ -240,7 +287,17 @@ class IterationController:
                 iteration.decision = "PASS"
                 iterations.append(iteration)
                 _report("output_evaluation", f"评估通过，总分: {eval_score.total}", round_num, 1.0)
-                logger.info(f"🎉 Skill 生成成功！总分: {eval_score.total}")
+                total_time = round(time.time() - start_time, 2)
+                logger.info(
+                    f"\n{'='*60}\n"
+                    f"🎉 Skill 生成成功！\n"
+                    f"   tool_id: {spec.tool_id}\n"
+                    f"   总分: {eval_score.total}/10\n"
+                    f"   迭代轮数: {round_num}\n"
+                    f"   总耗时: {total_time}s\n"
+                    f"   代码行数: {len(generated.code.split(chr(10)))}\n"
+                    f"{'='*60}"
+                )
                 return PipelineResult(
                     success=True,
                     tool_id=spec.tool_id,
@@ -262,6 +319,12 @@ class IterationController:
                     output=sandbox.output,
                 )
                 iteration.reflection = reflection
+                logger.info(
+                    f"🔍 [第{round_num}轮] 反思结果:\n"
+                    f"   根因: {reflection.root_cause}\n"
+                    f"   修复计划: {reflection.fix_plan}\n"
+                    f"   置信度: {reflection.confidence}"
+                )
 
                 feedback = self._build_rich_feedback(
                     stage="质量评估",
@@ -278,10 +341,17 @@ class IterationController:
                 iteration.feedback = feedback
                 iterations.append(iteration)
                 _report("output_evaluation", f"评分不足 ({eval_score.total}/10)，反思后重试中...", round_num, 0.8)
-                logger.warning(f"⚠️ 评分不足 ({eval_score.total} < {PASS_THRESHOLD})，重试")
+                logger.warning(f"⚠️ [第{round_num}轮] 评分不足 ({eval_score.total} < {PASS_THRESHOLD})，进入下一轮")
 
         failure_summary = self._build_failure_summary(iterations)
-        logger.error(f"❌ Skill 生成失败 — {self._max_iterations} 轮迭代后仍未通过")
+        total_time = round(time.time() - start_time, 2)
+        logger.error(
+            f"\n{'='*60}\n"
+            f"❌ Skill 生成失败 — {self._max_iterations} 轮迭代后仍未通过\n"
+            f"   tool_id: {spec.tool_id}\n"
+            f"   总耗时: {total_time}s\n"
+            f"{'='*60}"
+        )
         return PipelineResult(
             success=False,
             tool_id=spec.tool_id,
