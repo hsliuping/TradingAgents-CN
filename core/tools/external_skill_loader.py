@@ -15,9 +15,15 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from core.python_runtime import resolve_python_executable
+
 logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = str(Path(__file__).parent.parent.parent)
+_PYTHON_EXECUTABLE = resolve_python_executable(
+    _PROJECT_ROOT,
+    env_var_names=("TRADINGAGENTS_SANDBOX_PYTHON_EXE", "TRADINGAGENTS_PYTHON_EXE"),
+)
 
 _DECORATOR_PATTERNS = [
     r"^\s*@tool\b.*$",
@@ -53,7 +59,13 @@ def _build_sandbox_wrapper(code: str, func_name: str, timeout: int = 30) -> Call
         args_json = json.dumps(kwargs, ensure_ascii=False, default=str)
         script = f"""
 import json
+import os
 import sys
+
+PROJECT_ROOT = r\"{_PROJECT_ROOT}\"
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+os.chdir(PROJECT_ROOT)
 
 {clean_code}
 
@@ -93,11 +105,11 @@ if __name__ == "__main__":
 
         try:
             proc = subprocess.run(
-                [sys.executable, temp_path],
+                [_PYTHON_EXECUTABLE, temp_path],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                cwd=tempfile.gettempdir(),
+                cwd=_PROJECT_ROOT,
                 env=env,
             )
             stdout = proc.stdout.strip()

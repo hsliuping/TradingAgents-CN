@@ -66,10 +66,11 @@ STOCK_DATA_COLLECTION_CATALOG: List[CollectionCatalog] = [
     {
         "collection": "stock_basic_info",
         "purpose": "股票基础信息、行业归属、静态估值和部分交易指标。",
-        "preferred_access": ["get_stock_basic_info"],
+        "preferred_access": ["get_stock_basic_info", "get_industry_peer_basic_info", "summarize_industry_valuation"],
         "query_keys": ["symbol", "code", "source"],
         "notes": [
             "A 股核心基础表，优先用 get_stock_basic_info 访问。",
+            "若需求是同行筛选、行业样本或 PB/PE/PS 相对估值，优先用 get_industry_peer_basic_info / summarize_industry_valuation。",
             "同一股票可能按 source 保留多份记录，查询时通常需要结合 source 或优先级策略。",
             "除标准字段外，允许保留数据源扩展字段。",
         ],
@@ -437,6 +438,7 @@ def render_stock_data_collection_doc(
         "以下目录是当前系统中最重要的股票数据 MongoDB 集合说明，供生成 Skill 时参考。",
         "生成 Skill 时，优先调用 local_data.py 中的封装函数；只有封装函数无法满足时，才考虑直接查询集合。",
         "如果直接查 MongoDB，必须严格使用以下字段名，不要臆造不存在的列。",
+        "严禁在生成代码中自行创建 MongoClient、硬编码数据库名或发明项目中不存在的数据库 helper。",
         "",
     ]
     if focus_summary:
@@ -447,6 +449,7 @@ def render_stock_data_collection_doc(
         "【使用原则】",
         "1. 优先本地数据，后补外部 API。",
         "2. 需要基础信息时优先 stock_basic_info；需要最新价格时优先 market_quotes；需要区间行情时优先 stock_daily_quotes。",
+        "3. 需要行业同行样本、集合字段复用或 PB/PE/PS 行业统计时，优先使用 get_industry_peer_basic_info / summarize_industry_valuation。",
         "3. 财务数据按 report_period 倒序取最近几期；若历史记录使用 report_date，也要兼容该字段。",
         "4. 新闻数据按 symbol + publish_time 过滤，并控制 limit，避免一次返回过多正文。",
         "5. 若集合字段与当前 Skill 需求不完全匹配，优先在返回结果中做二次整理，不要猜测数据库里还有未声明字段。",

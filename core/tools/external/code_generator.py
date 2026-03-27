@@ -19,10 +19,13 @@ from core.llm import UnifiedLLMClient, Message
 from .skill_spec import GeneratedCode, SkillSpec, TestCase
 from .symbol_utils import SYMBOL_NORMALIZE_INLINE
 from .external_data_source_catalog import build_external_data_source_doc_for_skill
-from .local_data import LOCAL_DATA_API_DOC
+from core.skill_runtime.data_access import LOCAL_DATA_API_DOC
+from core.skill_runtime.project_access import PROJECT_DATA_ACCESS_DOC
 from .stock_data_catalog import build_stock_data_collection_doc_for_skill
 
 logger = logging.getLogger(__name__)
+
+CODEGEN_LLM_TIMEOUT_SECONDS = 240
 
 # ==================== 内置工具模板映射 ====================
 
@@ -45,11 +48,12 @@ CODING_PATTERNS = """\
 3. 返回类型：返回 dict（结构化数据，必须包含 status 和 data 字段）或 str（Markdown 格式）
 4. 错误处理：所有外部调用用 try/except 包裹，出错时返回 {"status": "error", "message": "..."}
 5. 日志规范：使用 logger = logging.getLogger(__name__)，关键步骤用 emoji 日志
-6. 导入规范：只使用标准库和常见第三方库（requests, pandas, akshare 等）；允许 from core.tools.external.local_data import ... 获取本地数据库数据；禁止其他 from core.xxx import
+6. 导入规范：只使用标准库和常见第三方库（requests, pandas, akshare 等）；只允许从 core.skill_runtime.data_access 或 core.skill_runtime.project_access 导入项目运行时能力；严禁直接导入 tradingagents.dataflows.interface、tradingagents.dataflows.providers 及其任何子模块；禁止臆造其他未文档化项目接口
 7. 函数体 < 100 行，超过说明做的事太多
 8. 股票代码参数：本系统传递的股票代码为 6 位纯数字（如 600519、000001），不带 .SH/.SZ 后缀。生成的函数参数必须接收此格式；若数据源 API 需要其他格式（如 600519.SH），需在函数内部自行转换，不要要求调用方传入带后缀的格式。
 9. 禁止模拟数据：严禁使用 mock、模拟、假数据、占位数据。必须真实调用数据源（API、akshare、tushare、本地数据库等）获取数据。若无数据则返回 {"status": "success", "data": [], "message": "未找到xxx数据"}，绝不可返回伪造数据。
 10. 禁止占位代码：严禁写「这里需要实际的 API 调用」「由于无法直接调用」「需要配置 API 密钥」等注释后不实现。必须写出可执行的完整 API 调用（requests.get/post 等）。若某 API 需付费 Token，改用 akshare、tushare 等免费替代方案实现，不得用占位逻辑替代。
+11. 禁止自造项目能力：不要自行创建 MongoClient、不要硬编码数据库名、不要发明 get_mongo_connection 或未文档化 provider 方法；优先复用提示词中给出的 local_data helper 和外部数据源入口。
 """
 
 # 股票代码参数名（用于判断是否需要注入多格式支持）
@@ -86,10 +90,19 @@ class CodeGenerator:
     def _get_client(self) -> UnifiedLLMClient:
         """懒加载 LLM 客户端"""
         if self._client is None:
-            kwargs = {}
+            kwargs = {"timeout": CODEGEN_LLM_TIMEOUT_SECONDS}
             if self._model:
                 kwargs["model"] = self._model
             self._client = UnifiedLLMClient.from_provider(self._provider, **kwargs)
+        else:
+            adapter = getattr(self._client, "_adapter", None)
+            config = getattr(adapter, "config", None)
+            if config and getattr(config, "timeout", 0) < CODEGEN_LLM_TIMEOUT_SECONDS:
+                config.timeout = CODEGEN_LLM_TIMEOUT_SECONDS
+                try:
+                    adapter.initialize()
+                except Exception as e:
+                    logger.warning(f"更新代码生成 LLM 超时时间失败: {e}")
         return self._client
 
     def generate(
@@ -226,13 +239,18 @@ class CodeGenerator:
 
 {LOCAL_DATA_API_DOC}
 
+{PROJECT_DATA_ACCESS_DOC}
+
 {stock_data_doc}
 
 {external_source_doc}
 
 ⚠️ 关键要求：
 - 不要使用 @tool、@register_tool 等任何装饰器
-- 不要 from core.xxx import 任何模块
+- 生成的 Skill 若要访问项目能力，只能导入 core.skill_runtime.data_access 和 core.skill_runtime.project_access 这两个公开接口
+- 不要直接导入 core.skill_runtime.catalog、core.skill_runtime.external_sources、core.skill_runtime.sync_wrappers 等内部实现模块
+- 不要直接导入 tradingagents.dataflows.interface、tradingagents.dataflows.providers 或其任意子模块
+- 除上述公开接口外，不要 from core.xxx import 其他模块
 - 不要 from langchain_core.xxx import 任何模块
 - 生成的代码必须是独立可运行的纯 Python 函数
 
@@ -275,6 +293,49 @@ class CodeGenerator:
                     return True, name
         return False, None
 
+    @staticmethod
+    def _format_previous_code_for_prompt(
+        previous_code: str,
+        *,
+        full_code_line_limit: int = 260,
+        head_lines: int = 140,
+        tail_lines: int = 100,
+    ) -> str:
+        """优先保留完整上一轮代码，超长时退化为首尾关键片段。"""
+        if not previous_code:
+            return ""
+
+        code_lines = previous_code.splitlines()
+        if len(code_lines) <= full_code_line_limit:
+            return previous_code
+
+        return (
+            "\n".join(code_lines[:head_lines])
+            + f"\n# ... (中间省略，共 {len(code_lines)} 行) ...\n"
+            + "\n".join(code_lines[-tail_lines:])
+        )
+
+    @staticmethod
+    def _truncate_feedback_for_prompt(
+        feedback: str,
+        *,
+        max_chars: int = 6000,
+        head_chars: int = 3500,
+    ) -> str:
+        """保留反馈开头的执行上下文和结尾的根因/修复计划，避免关键信息丢失。"""
+        if len(feedback) <= max_chars:
+            return feedback
+
+        tail_chars = max_chars - head_chars - 24
+        if tail_chars <= 0:
+            return feedback[:max_chars]
+
+        return (
+            feedback[:head_chars]
+            + "\n... (中间省略) ...\n"
+            + feedback[-tail_chars:]
+        )
+
     def _build_user_prompt(
         self, spec: SkillSpec, feedback: str = "", previous_code: str = ""
     ) -> str:
@@ -299,17 +360,17 @@ class CodeGenerator:
             valuation_section = """
 
 【⚠️ 估值类 Skill 实现范式 — 必须遵守】
-- 优先调用 from core.tools.external.local_data import get_stock_valuation_context
+- 优先调用 from core.skill_runtime.data_access import get_stock_valuation_context
 - current_price 必须来自 get_stock_valuation_context()['current_price'] 或 get_latest_stock_price(symbol)
 - 若 current_price 缺失、<=0，必须直接返回 error/invalid，禁止默认设为 0 后继续估值
-- 财务数据必须优先使用 local_data 返回的 financial_data，并兼容 report_period / report_date
+- 财务数据必须优先使用 core.skill_runtime.data_access 返回的 financial_data，并兼容 report_period / report_date
 - PE/PB/PS 估值若缺少必要输入，应返回 invalid，禁止输出 fair_value=0
 - DCF 若缺少 total_shares/净利润/有效增长率，必须明确返回 invalid 或降级说明，禁止静默返回 0
 - 不要只从 basic_info 生拼价格字段；价格优先级应为 market_quotes -> basic_info
 
 推荐骨架：
 ```python
-from core.tools.external.local_data import get_stock_valuation_context
+from core.skill_runtime.data_access import get_stock_valuation_context
 
 ctx = get_stock_valuation_context(symbol)
 current_price = ctx["current_price"]
@@ -356,6 +417,14 @@ financial_data = ctx["financial_data"]
 {valuation_section}
 {symbol_section}
 
+【⚠️ Skill Runtime 接口约束 — 必须遵守】
+- 本项目给生成 Skill 的正式运行时接口只有两个：core.skill_runtime.data_access 与 core.skill_runtime.project_access
+- 数据库 helper、外部数据源桥接、同步包装器都已经收口到 skill_runtime 内部；生成的代码不要直接导入其内部细分模块
+- 如果需要本地数据库数据，优先用 core.skill_runtime.data_access
+- 如果需要外部数据源桥接、同步 wrapper 或通用集合查询，优先用 core.skill_runtime.project_access
+- 严禁直接导入 tradingagents.dataflows.interface、tradingagents.dataflows.providers 或其任意子模块，即使你知道这些内部实现存在，也不能在生成代码中直接使用
+- 若某项能力当前在 skill_runtime 公开接口中不存在，也不要绕过公开接口直连内部 provider；应改用现有公开接口重构方案，或返回清晰的降级结果
+
 【⚠️ 严禁模拟/占位 — 必须真实实现】
 - 禁止 mock、模拟、假数据、占位数据、_generate_mock_data 等
 - 禁止占位注释：如「这里需要实际的 API 调用」「由于无法直接调用」「需要配置密钥」等，必须写出可执行的 requests.get/post 或 akshare 等真实调用
@@ -366,14 +435,8 @@ financial_data = ctx["financial_data"]
 {json.dumps(spec.test_input, ensure_ascii=False) if spec.test_input else '无'}
 """
         if feedback and previous_code:
-            # 截断 previous_code 避免多轮迭代后 prompt 过长（保留前 150 行）
-            code_lines = previous_code.split("\n")
-            if len(code_lines) > 150:
-                truncated_code = "\n".join(code_lines[:150]) + "\n# ... (已截断，共 {} 行)".format(len(code_lines))
-            else:
-                truncated_code = previous_code
-            # 截断 feedback 避免累积过长
-            truncated_feedback = feedback[:3000] if len(feedback) > 3000 else feedback
+            truncated_code = self._format_previous_code_for_prompt(previous_code)
+            truncated_feedback = self._truncate_feedback_for_prompt(feedback)
             prompt += f"""
 【⚠️ 迭代修复 — 上一轮代码有问题，请定向修复】
 

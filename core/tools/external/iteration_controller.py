@@ -313,10 +313,11 @@ class IterationController:
                     spec=spec,
                     code=generated.code,
                     stage="质量评估",
-                    error=f"评分 {eval_score.total}/10 低于阈值 {PASS_THRESHOLD}",
+                    error="\n".join(self._build_eval_errors(eval_score)),
                     stdout=sandbox.stdout,
                     stderr=sandbox.stderr,
                     output=sandbox.output,
+                    extra_context=self._build_eval_reflection_context(eval_score),
                 )
                 iteration.reflection = reflection
                 logger.info(
@@ -378,6 +379,7 @@ class IterationController:
         stdout: str = "",
         stderr: str = "",
         output: Any = None,
+        extra_context: str = "",
     ) -> ReflectionResult:
         """
         LLM 反思 — 在每轮失败后分析根因并制定修复计划。
@@ -392,6 +394,9 @@ class IterationController:
             except Exception:
                 output_preview = str(output)[:2000]
 
+        code_context = self._format_code_for_prompt(code)
+        extra_context_block = f"\n【补充上下文】\n{extra_context}\n" if extra_context else ""
+
         prompt = f"""你是一位资深 Python 开发者。一个自动生成的工具函数在「{stage}」阶段失败了。
 请分析根因并给出精准的修复计划。
 
@@ -400,10 +405,12 @@ class IterationController:
 - 功能: {spec.description}
 - 数据源: {spec.data_source or '未指定'}
 
-【生成的代码】（截断前 3000 字符）
+【生成的代码】
 ```python
-{code[:3000]}
+{code_context}
 ```
+
+{extra_context_block}
 
 【失败信息】
 {error}
@@ -567,6 +574,71 @@ class IterationController:
             parts.append("")
 
         return "\n".join(parts).strip()
+
+    @staticmethod
+    def _format_code_for_prompt(
+        code: str,
+        *,
+        max_chars: int = 12000,
+        full_code_line_limit: int = 260,
+        head_lines: int = 140,
+        tail_lines: int = 100,
+    ) -> str:
+        """为反思阶段优先保留完整代码，超长时再保留首尾关键片段。"""
+        if not code:
+            return ""
+
+        lines = code.splitlines()
+        if len(code) <= max_chars and len(lines) <= full_code_line_limit:
+            return code
+
+        if len(lines) <= head_lines + tail_lines:
+            combined = code
+        else:
+            combined = (
+                "\n".join(lines[:head_lines])
+                + f"\n# ... (中间省略，共 {len(lines)} 行) ...\n"
+                + "\n".join(lines[-tail_lines:])
+            )
+
+        if len(combined) <= max_chars:
+            return combined
+
+        keep_each_side = max((max_chars - 32) // 2, 1000)
+        return (
+            combined[:keep_each_side]
+            + "\n# ... (中间省略) ...\n"
+            + combined[-keep_each_side:]
+        )
+
+    @staticmethod
+    def _build_eval_reflection_context(score) -> str:
+        """把评估分项显式传给反思模型，避免它只看到总分不足。"""
+        lines = [
+            f"- 总分: {score.total}/10（阈值: {PASS_THRESHOLD}）",
+            f"- 可执行性: {score.executability}/10",
+            f"- 真实性: {score.authenticity}/10",
+            f"- 完整性: {score.completeness}/10",
+            f"- 相关性: {score.relevance}/10",
+            f"- 格式质量: {score.format_quality}/10",
+        ]
+
+        weak_dims = []
+        if score.executability < PASS_THRESHOLD:
+            weak_dims.append(f"可执行性({score.executability})")
+        if score.authenticity < PASS_THRESHOLD:
+            weak_dims.append(f"真实性({score.authenticity})")
+        if score.completeness < PASS_THRESHOLD:
+            weak_dims.append(f"完整性({score.completeness})")
+        if score.relevance < PASS_THRESHOLD:
+            weak_dims.append(f"相关性({score.relevance})")
+        if score.format_quality < PASS_THRESHOLD:
+            weak_dims.append(f"格式质量({score.format_quality})")
+
+        if weak_dims:
+            lines.append(f"- 不达标维度: {', '.join(weak_dims)}")
+
+        return "\n".join(lines)
 
     # ==================== 反馈构建 ====================
 

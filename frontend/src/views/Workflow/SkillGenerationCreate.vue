@@ -701,7 +701,6 @@ const genProgress = ref(0)
 const genSteps = ref([
   { label: '生成代码', status: 'pending' },
   { label: '语法检查', status: 'pending' },
-  { label: '安全扫描', status: 'pending' },
   { label: '沙箱执行', status: 'pending' },
   { label: '质量评估', status: 'pending' },
 ])
@@ -837,6 +836,38 @@ const prepareGeneratedTestPanel = () => {
   generatedTestResult.value = null
   generatedTestLoading.value = false
   resetGeneratedTestArgs()
+}
+
+const normalizePipelineProgress = (progress?: number | null) => {
+  if (typeof progress !== 'number' || Number.isNaN(progress)) return 0
+  const normalized = progress <= 1 ? progress * 100 : progress
+  return Math.max(0, Math.min(100, normalized))
+}
+
+const updateGenerationProgressUI = (stage?: string, message?: string, progress?: number | null) => {
+  const stageToStep: Record<string, number> = {
+    code_generation: 0,
+    static_validation: 1,
+    sandbox_execution: 2,
+    output_evaluation: 3,
+    edge_testing: 3,
+    reflection: 3,
+    error: 3,
+  }
+
+  pipelineMessage.value = message || stage || ''
+
+  const normalizedProgress = normalizePipelineProgress(progress)
+  if (normalizedProgress > 0 || progress === 0) {
+    genProgress.value = Math.round(normalizedProgress * 100) / 100
+  }
+
+  if (!stage || stageToStep[stage] === undefined) return
+
+  const idx = stageToStep[stage]
+  genSteps.value.forEach((s, i) => {
+    s.status = i < idx ? 'done' : i === idx ? 'running' : 'pending'
+  })
 }
 
 // ==================== 方法 ====================
@@ -1239,13 +1270,6 @@ const handleConfirmAndGenerate = async () => {
   genProgress.value = 0
   pipelineMessage.value = ''
 
-  const stageToStep: Record<string, number> = {
-    code_generation: 0,
-    static_validation: 1,
-    sandbox_execution: 2,
-    output_evaluation: 3,
-  }
-
   try {
     const res = await skillGenerationApi.confirmSpec(sessionId.value, '确认')
     if (res.status === 'generating') {
@@ -1256,14 +1280,7 @@ const handleConfirmAndGenerate = async () => {
         const stage = session.pipeline_stage
         const msg = session.pipeline_message
         const prog = session.pipeline_progress ?? 0
-        if (stage && stageToStep[stage] !== undefined) {
-          pipelineMessage.value = msg || stage
-          genProgress.value = Math.round(prog * 100) / 100
-          const idx = stageToStep[stage]
-          genSteps.value.forEach((s, i) => {
-            s.status = i < idx ? 'done' : i === idx ? 'running' : 'pending'
-          })
-        }
+        updateGenerationProgressUI(stage, msg, prog)
         if (session.status === 'completed' || session.status === 'failed') {
           const pr = session.pipeline_result
           const lastIter = pr?.iterations?.[pr.iterations.length - 1]
@@ -1273,8 +1290,12 @@ const handleConfirmAndGenerate = async () => {
             (es.completeness || 0) * 0.2 + (es.relevance || 0) * 0.2 +
             (es.format_quality || 0) * 0.1
           ) : null
-          genProgress.value = 100
-          genSteps.value.forEach(s => s.status = 'done')
+          if (session.status === 'completed') {
+            genProgress.value = 100
+            genSteps.value.forEach(s => s.status = 'done')
+          } else {
+            pipelineMessage.value = pr?.error || msg || stage || '生成失败'
+          }
           genResult.value = {
             status: session.status,
             session_id: sessionId.value,
@@ -1336,28 +1357,19 @@ const handleRepairAndRegenerate = async () => {
       const stage = session.pipeline_stage
       const msg = session.pipeline_message
       const prog = session.pipeline_progress ?? 0
-      const stageToStep: Record<string, number> = {
-        code_generation: 0,
-        static_validation: 1,
-        sandbox_execution: 2,
-        output_evaluation: 3,
-      }
-      if (stage && stageToStep[stage] !== undefined) {
-        pipelineMessage.value = msg || stage
-        genProgress.value = Math.round(prog * 100) / 100
-        const idx = stageToStep[stage]
-        genSteps.value.forEach((s, i) => {
-          s.status = i < idx ? 'done' : i === idx ? 'running' : 'pending'
-        })
-      }
+      updateGenerationProgressUI(stage, msg, prog)
 
       if (session.status === 'completed' || session.status === 'failed') {
         const pr = session.pipeline_result as PipelineResultDetail | null
         const lastIter = pr?.iterations?.[pr.iterations.length - 1]
         const score = lastIter?.eval_score
         const finalScore = typeof score?.total === 'number' ? score.total : null
-        genProgress.value = 100
-        genSteps.value.forEach(s => s.status = 'done')
+        if (session.status === 'completed') {
+          genProgress.value = 100
+          genSteps.value.forEach(s => s.status = 'done')
+        } else {
+          pipelineMessage.value = pr?.error || msg || stage || '生成失败'
+        }
         genResult.value = {
           status: session.status,
           session_id: sessionId.value,

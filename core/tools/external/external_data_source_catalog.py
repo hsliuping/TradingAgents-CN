@@ -32,6 +32,12 @@ EXTERNAL_DATA_SOURCE_CATALOG: List[ExternalSourceCatalog] = [
             "provider.get_historical_data(symbol, start_date, end_date)",
             "直接 import akshare as ak 调公开接口",
         ],
+        "usage_examples": [
+            "from tradingagents.dataflows.providers.china.akshare import get_akshare_provider",
+            "provider = get_akshare_provider()",
+            "news_df = provider.get_stock_news_sync(symbol, limit=10)",
+            "# 或者直接 import akshare as ak 调公开免费接口",
+        ],
         "constraints": [
             "字段名经常带中文列名，返回后要立刻标准化。",
             "不同接口返回结构不完全一致，不能假设所有字段长期稳定。",
@@ -59,6 +65,12 @@ EXTERNAL_DATA_SOURCE_CATALOG: List[ExternalSourceCatalog] = [
             "provider.get_historical_data(symbol, start_date, end_date)",
             "get_tushare_provider()",
         ],
+        "usage_examples": [
+            "from tradingagents.dataflows.providers.china.tushare import get_tushare_provider",
+            "provider = get_tushare_provider()",
+            "# 优先先读本地缓存；确需在线补数时再调用 provider 的标准方法",
+            "# 生成同步 Skill 时，不要发明未文档化的 tushare 调用路径",
+        ],
         "constraints": [
             "部分接口需要 token、积分或更高权限。",
             "若需求能由本地缓存满足，不要直接把 Skill 设计成每次都在线打 Tushare。",
@@ -83,6 +95,10 @@ EXTERNAL_DATA_SOURCE_CATALOG: List[ExternalSourceCatalog] = [
             "AKShareProvider.get_stock_news_sync(symbol)",
             "akshare 东方财富相关接口",
         ],
+        "usage_examples": [
+            "import akshare as ak",
+            "# 直接调用 AKShare 的东财公开接口后，立刻把中文列名标准化",
+        ],
         "constraints": [
             "本质上依赖公开网页接口，稳定性弱于数据库和正式 API。",
             "适合做新闻/行情补充，不适合作为唯一高可靠源。",
@@ -103,6 +119,10 @@ EXTERNAL_DATA_SOURCE_CATALOG: List[ExternalSourceCatalog] = [
         ],
         "interfaces": [
             "tradingagents.dataflows.interface.get_google_news(query, date)",
+        ],
+        "usage_examples": [
+            "from tradingagents.dataflows.interface import get_google_news",
+            "news = get_google_news(query, curr_date)",
         ],
         "constraints": [
             "返回质量依赖搜索结果，必须设置超时保护。",
@@ -125,6 +145,10 @@ EXTERNAL_DATA_SOURCE_CATALOG: List[ExternalSourceCatalog] = [
         ],
         "interfaces": [
             "tradingagents.dataflows.interface.get_finnhub_news(symbol, start_date, end_date)",
+        ],
+        "usage_examples": [
+            "from tradingagents.dataflows.interface import get_finnhub_news",
+            "news = get_finnhub_news(symbol, curr_date, look_back_days)",
         ],
         "constraints": [
             "通常依赖外部配置或配额，生成 Skill 时应保留失败降级路径。",
@@ -290,6 +314,10 @@ def _render_source_block(item: ExternalSourceCatalog) -> str:
     ]
     for entry in item.get("interfaces", []):
         lines.append(f"    - {entry}")
+    if item.get("usage_examples"):
+        lines.append("  调用示例:")
+        for entry in item["usage_examples"]:
+            lines.append(f"    - {entry}")
     if item.get("constraints"):
         lines.append("  约束:")
         for entry in item["constraints"]:
@@ -311,6 +339,7 @@ def render_external_data_source_doc(
         "以下目录仅描述当前系统中优先支持、且适合 Skill 自动生成时复用的外部数据源。",
         "优先顺序始终是：先本地库，再选择最匹配的外部来源，不要同时臆造多个不确定接口。",
         "如果需求已经能被本地缓存满足，就不要把 Skill 设计成必须实时依赖外部 API。",
+        "外部数据源必须调用项目中已文档化的入口，不要发明未声明的 provider 方法或第三方返回字段。",
         "",
     ]
     if focus_summary:
@@ -323,6 +352,7 @@ def render_external_data_source_doc(
         "2. 港股/美股新闻优先考虑 Google News 或 Finnhub，并保留超时与失败降级。",
         "3. 需要精确字段契约时，优先使用 Provider 封装或已有接口函数，不要直接猜测原始网页字段。",
         "4. 如果某来源有权限/积分门槛，Skill 中必须提供本地缓存或免费来源的备选路径。",
+        "5. 生成代码时优先照着上述 import 和调用示例写，不要自己杜撰 get_mongo_connection、provider.fetch_xxx 之类项目中不存在的方法。",
     ]
     return "\n".join(header + body + footer)
 

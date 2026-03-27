@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from core.python_runtime import resolve_python_executable
 from .skill_spec import SandboxResult, SkillSpec
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,10 @@ class SandboxRunner:
         self.timeout = timeout
         # 项目根目录（用于设置 PYTHONPATH）
         self._project_root = str(Path(__file__).parent.parent.parent.parent)
+        self._python_executable = resolve_python_executable(
+            self._project_root,
+            env_var_names=("TRADINGAGENTS_SANDBOX_PYTHON_EXE", "TRADINGAGENTS_PYTHON_EXE"),
+        )
 
     def run(
         self,
@@ -117,7 +122,13 @@ class SandboxRunner:
         # 用 textwrap.dedent 确保缩进一致
         script = textwrap.dedent(f"""\
             import json
+            import os
             import sys
+
+            PROJECT_ROOT = r"{self._project_root}"
+            if PROJECT_ROOT not in sys.path:
+                sys.path.insert(0, PROJECT_ROOT)
+            os.chdir(PROJECT_ROOT)
 
             # ===== 生成的代码 =====
             {textwrap.indent(clean_code, '            ').strip()}
@@ -166,12 +177,13 @@ class SandboxRunner:
         env["PYTHONPATH"] = self._project_root + (os.pathsep + existing if existing else "")
 
         try:
+            logger.debug("Skill 沙箱使用 Python: %s", self._python_executable)
             proc = subprocess.run(
-                [sys.executable, temp_path],
+                [self._python_executable, temp_path],
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
-                cwd=tempfile.gettempdir(),
+                cwd=self._project_root,
                 env=env,
             )
 

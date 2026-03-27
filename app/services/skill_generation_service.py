@@ -7,6 +7,7 @@ Skill 生成服务 — 业务逻辑层
 import asyncio
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from core.llm import Message
@@ -27,9 +28,13 @@ from core.tools.external import (
 
 logger = logging.getLogger("webapi")
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SKILL_CODE_SNAPSHOT_DIR = PROJECT_ROOT / "data" / "code" / "skill"
+
 # MongoDB 集合名
 SESSION_COLLECTION = "skill_creation_sessions"
 SKILL_COLLECTION = "external_skills"
+SKILL_PIPELINE_MAX_ITERATIONS = 5
 
 
 class SkillGenerationService:
@@ -61,7 +66,10 @@ class SkillGenerationService:
             llm_client=reasoning_llm_client, provider=provider, model=model
         )
         self._controller = IterationController(
-            llm_client=coding_llm_client, provider=provider, model=model
+            llm_client=coding_llm_client,
+            provider=provider,
+            model=model,
+            max_iterations=SKILL_PIPELINE_MAX_ITERATIONS,
         )
 
     def _build_session_recommendations(
@@ -88,6 +96,45 @@ class SkillGenerationService:
             if generated and generated.code:
                 return generated.code
         return ""
+
+    @staticmethod
+    def _persist_generated_code_snapshots(
+        *,
+        session_id: str,
+        tool_id: str,
+        attempt_number: int,
+        pipeline_result: Optional[PipelineResult],
+    ) -> List[Path]:
+        if not pipeline_result:
+            return []
+
+        session_dir = SKILL_CODE_SNAPSHOT_DIR / tool_id / session_id
+        attempt_dir = session_dir / f"attempt_{attempt_number:02d}"
+        attempt_dir.mkdir(parents=True, exist_ok=True)
+
+        written_files: List[Path] = []
+
+        for iteration in pipeline_result.iterations or []:
+            generated = iteration.generated_code
+            code = (generated.code if generated and generated.code else "").strip()
+            if not code:
+                continue
+
+            round_path = attempt_dir / f"round_{iteration.round_number:02d}.py"
+            round_path.write_text(code + "\n", encoding="utf-8")
+            written_files.append(round_path)
+
+        latest_code = SkillGenerationService._get_last_generated_code(pipeline_result).strip()
+        if latest_code:
+            attempt_latest_path = attempt_dir / "latest.py"
+            attempt_latest_path.write_text(latest_code + "\n", encoding="utf-8")
+            written_files.append(attempt_latest_path)
+
+            session_latest_path = session_dir / "latest.py"
+            session_latest_path.write_text(latest_code + "\n", encoding="utf-8")
+            written_files.append(session_latest_path)
+
+        return written_files
 
     @staticmethod
     def _format_single_pipeline(
@@ -350,6 +397,7 @@ test_input: {spec.test_input}
         if session.pipeline_result is not None:
             session.pipeline_history.append(session.pipeline_result)
         session.pipeline_result = None
+        attempt_number = len(session.pipeline_history) + 1
         await self._save_session(session)
         await self._db[SESSION_COLLECTION].update_one(
             {"session_id": session.session_id},
@@ -411,6 +459,21 @@ test_input: {spec.test_input}
                 session.status = SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
                 session.pipeline_result = result
                 await self._save_session(session)
+
+                try:
+                    written_files = self._persist_generated_code_snapshots(
+                        session_id=session.session_id,
+                        tool_id=spec.tool_id,
+                        attempt_number=attempt_number,
+                        pipeline_result=result,
+                    )
+                    if written_files:
+                        logger.info(
+                            "📝 Skill 代码快照已保存: %s",
+                            str((SKILL_CODE_SNAPSHOT_DIR / spec.tool_id / session.session_id).resolve()),
+                        )
+                except Exception as e:
+                    logger.warning("⚠️ 保存 Skill 代码快照失败: %s", e)
 
                 if result.success:
                     await self._save_skill(session, spec, result)

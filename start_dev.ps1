@@ -46,13 +46,20 @@ Write-Host ""
 
 # Detect Python executable
 $pythonExe = $null
-$venvPaths = @(
-    (Join-Path $root "env\Scripts\python.exe"),      # 优先使用 env
+$pythonCandidates = @()
+
+if ($env:TRADINGAGENTS_PYTHON_EXE -and (Test-Path $env:TRADINGAGENTS_PYTHON_EXE)) {
+    $pythonCandidates += $env:TRADINGAGENTS_PYTHON_EXE
+}
+
+$pythonCandidates += @(
+    (Join-Path $root "release\TradingAgentsCN-portable\vendors\python\python.exe"),
+    (Join-Path $root "env\Scripts\python.exe"),
     (Join-Path $root "venv\Scripts\python.exe"),
     (Join-Path $root "vendors\python\python.exe")
 )
 
-foreach ($path in $venvPaths) {
+foreach ($path in $pythonCandidates) {
     if (Test-Path $path) {
         $pythonExe = $path
         Write-Host "[OK] Found Python: $path" -ForegroundColor Green

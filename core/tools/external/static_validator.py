@@ -58,7 +58,15 @@ PLACEHOLDER_PATTERNS: Set[str] = {
 
 # 允许的 core 子模块（生成的 Skill 可从此处获取本地数据）
 ALLOWED_CORE_IMPORTS: Set[str] = {
-    "core.tools.external.local_data",
+    "core.skill_runtime.data_access",
+    "core.skill_runtime.project_access",
+}
+
+# 禁止直接导入的项目内部实现模块。
+# 生成的 Skill 若需要这些能力，必须通过 core.skill_runtime 的公开接口访问。
+BLOCKED_IMPORT_PREFIXES: Set[str] = {
+    "tradingagents.dataflows.providers",
+    "tradingagents.dataflows.interface",
 }
 
 # 依赖白名单：允许导入的第三方库
@@ -186,6 +194,16 @@ class StaticValidator:
                     imported_modules.append(top_level)
 
         for full_mod in set(imported_full):
+            blocked_prefix = next(
+                (prefix for prefix in BLOCKED_IMPORT_PREFIXES if full_mod == prefix or full_mod.startswith(prefix + ".")),
+                None,
+            )
+            if blocked_prefix:
+                result.errors.append(
+                    f"禁止直接导入: {full_mod}（请改用 core.skill_runtime.data_access 或 core.skill_runtime.project_access）"
+                )
+                continue
+
             if full_mod in ALLOWED_CORE_IMPORTS:
                 continue
             top_level = full_mod.split(".")[0]

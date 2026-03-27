@@ -20,36 +20,54 @@
     result = controller.run(spec)
 """
 
-# 数据模型
-from .skill_spec import (
-    BoundaryCheck,
-    ClarityLevel,
-    ConversationRound,
-    EvalScore,
-    ExpectedOutput,
-    GeneratedCode,
-    IterationRound,
-    PipelineResult,
-    ReflectionResult,
-    SandboxResult,
-    SessionStatus,
-    SkillCreationSession,
-    SkillHandoffContext,
-    SkillParameter,
-    SkillSource,
-    SkillSpec,
-    SkillStatus,
-    TestCase,
-    ValidationResult,
-)
+from importlib import import_module
+from typing import Dict
 
-# 管线模块
-from .code_generator import CodeGenerator
-from .iteration_controller import IterationController
-from .output_evaluator import OutputEvaluator
-from .requirement_analyzer import RequirementAnalyzer
-from .sandbox_runner import SandboxRunner
-from .static_validator import StaticValidator
+
+_EXPORT_MAP: Dict[str, str] = {
+    # 数据模型
+    "BoundaryCheck": ".skill_spec",
+    "ClarityLevel": ".skill_spec",
+    "ConversationRound": ".skill_spec",
+    "EvalScore": ".skill_spec",
+    "ExpectedOutput": ".skill_spec",
+    "GeneratedCode": ".skill_spec",
+    "IterationRound": ".skill_spec",
+    "PipelineResult": ".skill_spec",
+    "ReflectionResult": ".skill_spec",
+    "SandboxResult": ".skill_spec",
+    "SessionStatus": ".skill_spec",
+    "SkillCreationSession": ".skill_spec",
+    "SkillHandoffContext": ".skill_spec",
+    "SkillParameter": ".skill_spec",
+    "SkillSource": ".skill_spec",
+    "SkillSpec": ".skill_spec",
+    "SkillStatus": ".skill_spec",
+    "TestCase": ".skill_spec",
+    "ValidationResult": ".skill_spec",
+    # 管线模块
+    "CodeGenerator": ".code_generator",
+    "IterationController": ".iteration_controller",
+    "OutputEvaluator": ".output_evaluator",
+    "RequirementAnalyzer": ".requirement_analyzer",
+    "SandboxRunner": ".sandbox_runner",
+    "StaticValidator": ".static_validator",
+}
+
+
+def __getattr__(name: str):
+    module_name = _EXPORT_MAP.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    module = import_module(module_name, __name__)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(list(globals().keys()) + list(__all__))
 
 __all__ = [
     # 数据模型
