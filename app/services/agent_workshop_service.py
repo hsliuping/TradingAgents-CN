@@ -2100,6 +2100,10 @@ class AgentWorkshopService:
             *capability_snapshot.get("valuation_skills", []),
         ])
 
+        # 构建合法工具清单，每行一个，供 LLM 明确选择
+        tools_enum_lines = "\n".join(f"  - {t}" for t in known_tools) if known_tools else "  （暂无）"
+        modules_enum_lines = "\n".join(f"  - {m}" for m in reusable_modules)
+
         prompt = "\n".join([
             "你正在 TradingAgents-CN 的 Agent 工坊中做资源缺口分析。这个系统是一个面向投研、交易分析、Agent 编排与能力复用的多智能体金融分析系统。",
             "你当前角色是金融行业专家兼系统架构师，负责判断当前 Agent 目标在系统内哪些能力已可复用，哪些地方是真缺口。",
@@ -2109,14 +2113,21 @@ class AgentWorkshopService:
             "不要机械地把问题拆成数据获取、分析、报告三层；要根据 Agent 的实际目标判断最小闭环。",
             "如果某项能力可以通过现有工具组合或通过 Prompt/模板约束解决，就不要夸大成阻塞缺口。",
             "只有当当前系统确实缺少关键可调用能力，且会直接影响 Agent 的目标达成时，才列入 blocking_gaps。",
-            "existing_tools/reusable_modules 必须只使用提供给你的名称，不能编造。",
+            "",
+            "⚠️ 关键约束：existing_tools 和 reusable_modules 字段只能从下方【合法清单】中选择，严禁编造或联想任何不在清单中的名称。",
+            "",
+            f"【合法工具清单 - existing_tools 只能从此列表原样复制】\n{tools_enum_lines}",
+            "",
+            f"【合法模块清单 - reusable_modules 只能从此列表原样复制】\n{modules_enum_lines}",
+            "",
             "suggested_tools/suggested_capabilities 应尽量少而精，优先补最小闭环，不要一次性铺太大能力面。",
             "如果当前规格要求输出精确数值、区间、评分、排序或权重，Prompt/模板约束不能替代数据链路或工具计算链路；若能力不足，应明确指出缺的是数据源、工具还是来源标注能力。",
             "只输出合法 JSON，不要输出 Markdown 或额外解释。",
             design_context,
+            "输出格式（填充以下 JSON 结构）：",
             json.dumps({
-                "reusable_modules": reusable_modules,
-                "existing_tools": [],
+                "reusable_modules": ["只能从【合法模块清单】中选"],
+                "existing_tools": ["只能从【合法工具清单】中选，必须使用完整的 'tool_id | tool_name' 格式"],
                 "suggested_tools": [],
                 "suggested_capabilities": [],
                 "manual_dependencies": [],
@@ -2145,10 +2156,10 @@ class AgentWorkshopService:
                 "preferred_methods": spec.preferred_methods,
                 "sample_symbols": spec.sample_symbols,
             }, ensure_ascii=False, indent=2),
-            "\n系统能力快照：",
+            "\n系统能力快照（概览）：",
             capability_context,
             "\n分析要求：",
-            "1. existing_tools 只列真正能直接支撑当前 Agent 目标的能力，不要为了凑数把所有相关工具都放进去。",
+            "1. existing_tools 只能从上方【合法工具清单】中原样复制，不能改写、缩写或编造任何名称。只列真正能直接支撑当前 Agent 目标的能力。",
             "2. suggested_tools 只列当前闭环最缺的 1-4 个工具/Skill。",
             "3. blocking_gaps 要写成‘为什么现有能力还不够’，不是重复需求描述。",
             "4. fallback_strategy 要写成没补齐前 Agent 如何安全降级，不要写空话。",
