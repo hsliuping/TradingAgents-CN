@@ -56,7 +56,7 @@
                   </div>
                   <el-collapse>
                     <el-collapse-item title="查看完整内容" :name="item.memory_id">
-                      <div class="growth-content">{{ getFormattedMemoryContent(item).displayText }}</div>
+                      <div class="growth-content markdown-body" v-html="renderMarkdown(getFormattedMemoryContent(item).displayText)"></div>
                     </el-collapse-item>
                   </el-collapse>
                   <div v-if="item.evidence_refs?.length" class="growth-evidence">
@@ -136,6 +136,18 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Collection } from '@element-plus/icons-vue'
+import { marked } from 'marked'
+
+marked.setOptions({ breaks: true, gfm: true })
+
+const renderMarkdown = (content: string): string => {
+  if (!content?.trim()) return ''
+  try {
+    return marked.parse(content) as string
+  } catch {
+    return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
+  }
+}
 import {
   getTaskGrowthContext,
   approveGrowthMemory,
@@ -693,9 +705,71 @@ watch(
   }
 
   .growth-content {
-    white-space: pre-wrap;
     line-height: 1.7;
     color: #374151;
+    font-size: 14px;
+
+    :deep(h1), :deep(h2), :deep(h3), :deep(h4) {
+      margin: 12px 0 8px;
+      font-weight: 600;
+      color: #1f2937;
+    }
+    :deep(h2) { font-size: 16px; }
+    :deep(h3) { font-size: 15px; }
+    :deep(h4) { font-size: 14px; }
+
+    :deep(p) {
+      margin: 6px 0;
+    }
+
+    :deep(ul), :deep(ol) {
+      padding-left: 20px;
+      margin: 6px 0;
+    }
+
+    :deep(table) {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8px 0;
+      font-size: 13px;
+
+      th, td {
+        border: 1px solid #e5e7eb;
+        padding: 6px 10px;
+        text-align: left;
+      }
+      th {
+        background: #f9fafb;
+        font-weight: 600;
+      }
+    }
+
+    :deep(code) {
+      background: #f3f4f6;
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-size: 13px;
+    }
+
+    :deep(pre) {
+      background: #f3f4f6;
+      padding: 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 8px 0;
+
+      code {
+        background: none;
+        padding: 0;
+      }
+    }
+
+    :deep(blockquote) {
+      border-left: 3px solid #d1d5db;
+      padding-left: 12px;
+      margin: 8px 0;
+      color: #6b7280;
+    }
   }
 
   .growth-meta-label {
