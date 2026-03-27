@@ -285,7 +285,7 @@ import {
   InfoFilled,
   Coin
 } from '@element-plus/icons-vue'
-import axios from 'axios'
+import { ApiClient } from '@/api/request'
 
 // 类型定义
 interface ConfigItem {
@@ -348,16 +348,16 @@ const hasRecommendedWarnings = computed(() => {
 const handleValidate = async () => {
   validating.value = true
   try {
-    const response = await axios.get('/api/system/config/validate')
+    const response: any = await ApiClient.get('/api/system/config/validate')
 
-    console.log('🔍 配置验证响应:', response.data)
+    console.log('🔍 配置验证响应:', response)
 
-    if (response.data.success) {
-      validationResult.value = response.data.data
+    if (response.success) {
+      validationResult.value = response.data
 
       // 提取环境变量验证结果和 MongoDB 验证结果
-      envValidation.value = response.data.data.env_validation || null
-      mongodbValidation.value = response.data.data.mongodb_validation || null
+      envValidation.value = response.data.env_validation || null
+      mongodbValidation.value = response.data.mongodb_validation || null
 
       console.log('🔍 环境变量验证:', envValidation.value)
       console.log('🔍 MongoDB 验证:', mongodbValidation.value)
@@ -370,7 +370,7 @@ const handleValidate = async () => {
         ElMessage.warning('配置验证失败，请检查缺少的配置项')
       }
     } else {
-      ElMessage.error(response.data.message || '验证失败')
+      ElMessage.error(response.message || '验证失败')
     }
   } catch (error: any) {
     console.error('配置验证失败:', error)
