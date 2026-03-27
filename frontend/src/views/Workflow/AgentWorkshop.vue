@@ -2121,17 +2121,39 @@ const buildSkillGenerationDescription = (target: string | AgentWorkshopToolingPl
 
   const skillName = (typeof target === 'string' ? target : (target.tool_name || target.tool_id || '')).trim()
   const spec = displaySpec.value
-  const responsibilityLines = (spec?.responsibilities || []).map(item => `- ${item}`)
-  const specOutputLines = (spec?.outputs || []).map(item => `- ${item}`)
-  const nonGoalLines = (spec?.non_goals || []).map(item => `- ${item}`)
+
+  // Build keyword set from skill name for filtering relevant spec lines
+  const skillKeywords = new Set<string>()
+  for (const token of collectKeywordTokens(skillName)) {
+    skillKeywords.add(token)
+  }
+  // Also add human-readable alias tokens
+  const humanized = humanizeToolId(skillName)
+  for (const token of collectKeywordTokens(humanized)) {
+    skillKeywords.add(token)
+  }
+  const keywords = Array.from(skillKeywords)
+
+  const filterLines = (lines: string[], fallbackCount = 2) => {
+    if (!lines.length || !keywords.length) return lines.slice(0, fallbackCount)
+    const matched = lines.filter(line =>
+      keywords.some(kw => line.toLowerCase().includes(kw.toLowerCase())),
+    )
+    return matched.length ? matched : lines.slice(0, fallbackCount)
+  }
+
+  const responsibilityLines = filterLines(spec?.responsibilities || [], 2).map(item => `- ${item}`)
+  const nonGoalLines = filterLines(spec?.non_goals || [], 2).map(item => `- ${item}`)
+  const toolDescription = getSuggestedToolDescription(skillName)
+
   return [
     `我要补齐一个 Agent 可直接调用的执行能力：${skillName}。`,
+    toolDescription ? `功能说明：${toolDescription}` : '',
     spec?.name ? `它服务于 Agent：${spec.name}。` : '',
     spec?.primary_goal ? `Agent 目标：${spec.primary_goal}` : '',
-    responsibilityLines.length ? `Agent 已确认职责：\n${responsibilityLines.join('\n')}` : '',
-    specOutputLines.length ? `Agent 期望输出：\n${specOutputLines.join('\n')}` : '',
-    nonGoalLines.length ? `Agent 明确非目标：\n${nonGoalLines.join('\n')}` : '',
-    '请先判断这项能力是否可以复用现有工具或已有 Skill；如果不能，再把它澄清成一个新增的最小实现单元，并主动收敛职责边界，不要泛化成过大的能力集合。',
+    responsibilityLines.length ? `与该能力相关的 Agent 职责：\n${responsibilityLines.join('\n')}` : '',
+    nonGoalLines.length ? `边界约束：\n${nonGoalLines.join('\n')}` : '',
+    '请把它澄清成一个最小实现单元，收敛职责边界，不要泛化。',
   ].filter(Boolean).join('\n')
 }
 
