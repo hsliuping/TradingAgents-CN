@@ -38,9 +38,11 @@ class AKShareAdapter(DataSourceAdapter):
         if not code:
             return ""
         code = str(code).zfill(6)
-        if code.startswith(("60", "68", "90")):
+        # 上交所：60/68（A股）、50/51/52/58/56（ETF/LOF等）、11（国债/可转债）、90（B股）
+        if code.startswith(("60", "68", "90", "50", "51", "52", "58", "56", "11")):
             return f"{code}.SH"
-        if code.startswith(("00", "30", "20")):
+        # 深交所：00/30（A股）、15/16/12（ETF/LOF/可转债等）、20（B股）
+        if code.startswith(("00", "30", "20", "15", "16", "12")):
             return f"{code}.SZ"
         if code.startswith(("8", "4", "92")):
             return f"{code}.BJ"

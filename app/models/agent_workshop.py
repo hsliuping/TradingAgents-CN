@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from bson import ObjectId
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from app.models.user import PyObjectId
 from app.utils.timezone import now_tz
@@ -110,6 +110,22 @@ class AgentWorkshopGapAnalysis(BaseModel):
     blocking_gaps: List[str] = Field(default_factory=list)
     fallback_strategy: List[str] = Field(default_factory=list)
     build_recommendations: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_string_arrays(cls, data: Any) -> Any:
+        """兼容旧格式：将纯字符串数组自动转换为 SuggestedToolItem 对象数组"""
+        if isinstance(data, dict):
+            for key in ("suggested_tools", "suggested_capabilities", "suggested_skills"):
+                items = data.get(key)
+                if isinstance(items, list):
+                    data[key] = [
+                        {"tool_id": item, "description": "", "why_needed": ""}
+                        if isinstance(item, str)
+                        else item
+                        for item in items
+                    ]
+        return data
     notes: List[str] = Field(default_factory=list)
     generated_by: str = ""
     error_message: str = ""

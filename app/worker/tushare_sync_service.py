@@ -1404,10 +1404,12 @@ class TushareSyncService:
             Tushare 格式代码（如 300750.SZ）
         """
         try:
-            # 简单的转换逻辑：根据代码前缀判断市场
-            if symbol.startswith(('60', '68')):
+            # 根据代码前缀判断市场
+            # 上交所：60/68（A股）、50/51/52/58/56（ETF/LOF/可转债等）、11（国债/可转债）
+            if symbol.startswith(('60', '68', '50', '51', '52', '58', '56', '11')):
                 return f"{symbol}.SH"
-            elif symbol.startswith(('00', '30')):
+            # 深交所：00/30（A股）、15/16/12（ETF/LOF/可转债等）
+            elif symbol.startswith(('00', '30', '15', '16', '12')):
                 return f"{symbol}.SZ"
             elif symbol.startswith(('8', '4', '92')):
                 return f"{symbol}.BJ"  # 北交所（8/4 旧号段，920 为 2025-10 起统一号段）
