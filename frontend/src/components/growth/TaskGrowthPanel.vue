@@ -1,26 +1,27 @@
 <template>
-  <el-card shadow="never" class="growth-panel">
-    <template #header>
-      <div class="card-header">
-        <div class="header-main">
-          <el-icon><Collection /></el-icon>
-          <span>{{ title }}</span>
-        </div>
-        <el-button v-if="taskId" size="small" @click="refreshGrowthContext" :loading="growthLoading">
-          刷新提炼项
-        </el-button>
-      </div>
-    </template>
+  <div class="growth-panel">
+    <el-collapse v-model="activeCollapse" class="growth-collapse">
+      <el-collapse-item name="growth">
+        <template #title>
+          <div class="collapse-title">
+            <el-icon><Collection /></el-icon>
+            <span>{{ title }}</span>
+            <el-tag type="info" size="small" class="collapse-tag">记忆 {{ growthSummary.memory_items_count }}</el-tag>
+            <el-tag type="warning" size="small" class="collapse-tag">建议 {{ growthSummary.suggestions_count }}</el-tag>
+          </div>
+        </template>
 
-    <div class="growth-summary-bar">
-      <el-tag type="info">候选记忆 {{ growthSummary.memory_items_count }}</el-tag>
-      <el-tag type="warning">成长建议 {{ growthSummary.suggestions_count }}</el-tag>
-    </div>
+        <div class="growth-panel-body">
+          <div class="growth-toolbar">
+            <el-button v-if="taskId" size="small" @click.stop="refreshGrowthContext" :loading="growthLoading">
+              刷新提炼项
+            </el-button>
+          </div>
 
-    <el-skeleton :loading="growthLoading" animated :rows="4">
-      <template #default>
-        <template v-if="taskId">
-          <el-tabs class="growth-tabs">
+          <el-skeleton :loading="growthLoading" animated :rows="4">
+            <template #default>
+              <template v-if="taskId">
+                <el-tabs class="growth-tabs">
             <el-tab-pane :label="`成长记忆 (${growthMemories.length})`" name="memories">
               <div v-if="growthMemories.length" class="growth-list">
                 <div v-for="item in growthMemories" :key="item.memory_id" class="growth-item">
@@ -120,11 +121,14 @@
               <el-empty v-else description="当前任务还没有成长建议" />
             </el-tab-pane>
           </el-tabs>
-        </template>
-        <el-empty v-else description="当前页面没有关联任务，无法加载成长上下文" />
-      </template>
-    </el-skeleton>
-  </el-card>
+              </template>
+              <el-empty v-else description="当前页面没有关联任务，无法加载成长上下文" />
+            </template>
+          </el-skeleton>
+        </div>
+      </el-collapse-item>
+    </el-collapse>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -180,6 +184,7 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
+const activeCollapse = ref<string[]>([])  // 默认折叠（空数组 = 无展开项）
 const growthLoading = ref(false)
 const growthContext = ref<TaskGrowthContextPayload | null>(props.initialContext)
 
@@ -500,26 +505,48 @@ watch(
 
 <style scoped lang="scss">
 .growth-panel {
-  .card-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    font-weight: 600;
-    font-size: 16px;
-    width: 100%;
+  .growth-collapse {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    overflow: hidden;
+
+    :deep(.el-collapse-item__header) {
+      padding: 12px 16px;
+      font-size: 16px;
+      font-weight: 600;
+      height: auto;
+      line-height: 1.5;
+      background: #fafafa;
+      border-bottom: none;
+    }
+
+    :deep(.el-collapse-item__wrap) {
+      border-top: 1px solid #e5e7eb;
+    }
+
+    :deep(.el-collapse-item__content) {
+      padding: 0;
+    }
   }
 
-  .header-main {
+  .collapse-title {
     display: flex;
     align-items: center;
     gap: 8px;
   }
 
-  .growth-summary-bar {
+  .collapse-tag {
+    margin-left: 4px;
+  }
+
+  .growth-panel-body {
+    padding: 16px;
+  }
+
+  .growth-toolbar {
     display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
+    justify-content: flex-end;
+    margin-bottom: 12px;
   }
 
   .growth-tabs {
