@@ -124,6 +124,9 @@ class ImplementationFact(BaseModel):
     source: str = ""
     fact: str = ""
     evidence: str = ""
+    field: str = ""
+    description: str = ""
+    coverage: float | None = None
 
 
 class ImplementationIssue(BaseModel):

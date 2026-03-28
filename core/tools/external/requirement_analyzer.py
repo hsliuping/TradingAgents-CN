@@ -895,7 +895,12 @@ class RequirementAnalyzer:
         if report.schema_facts:
             fact_lines = []
             for f in report.schema_facts:
-                line = f"  • [{f.source}] {f.field}: {f.description}"
+                # field/description 为新增可选字段，回退到 fact
+                label = f.field if f.field else f.fact
+                desc = f.description if f.description else ""
+                line = f"  • [{f.source}] {label}"
+                if desc:
+                    line += f": {desc}"
                 if f.coverage is not None:
                     line += f" (覆盖率 {f.coverage:.0%})"
                 fact_lines.append(line)
