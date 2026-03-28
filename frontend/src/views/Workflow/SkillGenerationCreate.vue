@@ -374,6 +374,12 @@
             <span>{{ s.label }}</span>
           </div>
         </div>
+        <div v-if="reconnaissanceProgressDetails.length" class="gen-detail-panel">
+          <div class="gen-detail-title">侦察摘要</div>
+          <div v-for="(entry, idx) in reconnaissanceProgressDetails" :key="`recon-${idx}-${entry.message}`" class="gen-detail-item">
+            {{ entry.message }}
+          </div>
+        </div>
       </div>
 
       <!-- 步骤 3: 完成 -->
@@ -581,6 +587,7 @@ const canConfirm = computed(() => chatMessages.value.length >= 2)
 const specPreview = ref<Record<string, any> | null>(null)
 const specConfirmLoading = ref(false)
 const pipelineMessage = ref('')
+const pipelineDetails = ref<Array<{ stage: string; message: string; iteration: number; progress: number; timestamp?: string }>>([])
 const stockCatalogLoading = ref(false)
 const stockCatalogDoc = ref('')
 const stockCatalogCollections = ref<StockDataCatalogCollection[]>([])
@@ -699,6 +706,7 @@ const matchedExternalSources = computed(() => externalSourceCatalogSources.value
 
 const genProgress = ref(0)
 const genSteps = ref([
+  { label: '侦察分析', status: 'pending' },
   { label: '生成代码', status: 'pending' },
   { label: '语法检查', status: 'pending' },
   { label: '沙箱执行', status: 'pending' },
@@ -738,6 +746,12 @@ const generatedTestDefaults = computed(() => {
 const generatedTestResultText = computed(() => {
   if (!generatedTestResult.value) return ''
   return JSON.stringify(generatedTestResult.value.output, null, 2)
+})
+
+const reconnaissanceProgressDetails = computed(() => {
+  return (pipelineDetails.value || [])
+    .filter(item => item?.stage === 'reconnaissance' && item?.message)
+    .slice(-6)
 })
 const generatedTestDataState = computed(() => {
   const result = generatedTestResult.value
@@ -846,13 +860,14 @@ const normalizePipelineProgress = (progress?: number | null) => {
 
 const updateGenerationProgressUI = (stage?: string, message?: string, progress?: number | null) => {
   const stageToStep: Record<string, number> = {
-    code_generation: 0,
-    static_validation: 1,
-    sandbox_execution: 2,
-    output_evaluation: 3,
-    edge_testing: 3,
-    reflection: 3,
-    error: 3,
+    reconnaissance: 0,
+    code_generation: 1,
+    static_validation: 2,
+    sandbox_execution: 3,
+    output_evaluation: 4,
+    edge_testing: 4,
+    reflection: 4,
+    error: 4,
   }
 
   pipelineMessage.value = message || stage || ''
@@ -1269,6 +1284,7 @@ const handleConfirmAndGenerate = async () => {
   genSteps.value.forEach(s => s.status = 'pending')
   genProgress.value = 0
   pipelineMessage.value = ''
+  pipelineDetails.value = []
 
   try {
     const res = await skillGenerationApi.confirmSpec(sessionId.value, '确认')
@@ -1277,6 +1293,7 @@ const handleConfirmAndGenerate = async () => {
       const poll = async () => {
         const session = await skillGenerationApi.getSession(sessionId.value)
         sessionPipelineResult.value = (session.pipeline_result || null) as PipelineResultDetail | null
+        pipelineDetails.value = Array.isArray(session.pipeline_details) ? session.pipeline_details : []
         const stage = session.pipeline_stage
         const msg = session.pipeline_message
         const prog = session.pipeline_progress ?? 0
@@ -1346,6 +1363,7 @@ const handleRepairAndRegenerate = async () => {
     genProgress.value = 0
     pipelineMessage.value = '已确认修正计划，正在重新生成...'
     genSteps.value.forEach(s => s.status = 'pending')
+    pipelineDetails.value = []
     sessionPipelineResult.value = null
     repairPlan.value = ''
     repairPlanFeedback.value = ''
@@ -1354,6 +1372,7 @@ const handleRepairAndRegenerate = async () => {
     const poll = async () => {
       const session = await skillGenerationApi.getSession(sessionId.value)
       sessionPipelineResult.value = (session.pipeline_result || null) as PipelineResultDetail | null
+      pipelineDetails.value = Array.isArray(session.pipeline_details) ? session.pipeline_details : []
       const stage = session.pipeline_stage
       const msg = session.pipeline_message
       const prog = session.pipeline_progress ?? 0
@@ -2021,6 +2040,29 @@ onMounted(async () => {
     .gen-desc { color: var(--el-text-color-secondary); font-size: 14px; }
   }
 }
+
+  .gen-detail-panel {
+    margin: 24px auto 0;
+    max-width: 760px;
+    text-align: left;
+    background: #f6f8fb;
+    border: 1px solid #d9e2f2;
+    border-radius: 14px;
+    padding: 16px 18px;
+  }
+
+  .gen-detail-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #244a7c;
+    margin-bottom: 10px;
+  }
+
+  .gen-detail-item {
+    color: var(--el-text-color-regular);
+    font-size: 13px;
+    line-height: 1.7;
+  }
 
 .gen-spinner { animation: spin 1.5s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

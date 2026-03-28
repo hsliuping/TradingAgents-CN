@@ -27,6 +27,9 @@ from .external_sources import (
 from .project_access import (
     PROJECT_DATA_ACCESS_DOC,
     aggregate_stock_collection,
+    inspect_field_coverage,
+    inspect_stock_collection_schema,
+    inspect_symbol_documents,
     query_stock_collection,
 )
 from .sync_wrappers import normalize_tabular_result, run_async_in_sync
@@ -35,6 +38,9 @@ __all__ = [
     "LOCAL_DATA_API_DOC",
     "PROJECT_DATA_ACCESS_DOC",
     "aggregate_stock_collection",
+    "inspect_field_coverage",
+    "inspect_stock_collection_schema",
+    "inspect_symbol_documents",
     "get_external_financial_data",
     "get_external_historical_data",
     "get_external_query_news",

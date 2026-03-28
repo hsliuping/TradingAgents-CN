@@ -238,6 +238,13 @@ export interface SessionDetail {
   pipeline_message?: string
   pipeline_iteration?: number
   pipeline_progress?: number
+  pipeline_details?: Array<{
+    stage: string
+    message: string
+    iteration: number
+    progress: number
+    timestamp?: string
+  }>
   created_at: string
   updated_at: string
 }

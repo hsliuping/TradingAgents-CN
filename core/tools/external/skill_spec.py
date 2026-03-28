@@ -110,6 +110,52 @@ class ValidationResult(BaseModel):
     details: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ImplementationHelper(BaseModel):
+    """侦察阶段确认可复用的运行时 helper。"""
+    module: str = ""
+    name: str = ""
+    reason: str = ""
+
+
+class ImplementationFact(BaseModel):
+    """侦察阶段确认的结构化事实。"""
+    source: str = ""
+    fact: str = ""
+    evidence: str = ""
+
+
+class ImplementationIssue(BaseModel):
+    """实现阶段的限制、禁止路径或运行时缺口。"""
+    path: str = ""
+    reason: str = ""
+    severity: str = "info"  # info, warning, error
+
+
+class ValidationCheck(BaseModel):
+    """业务验收或生成前侦察建议的检查项。"""
+    name: str = ""
+    description: str = ""
+    required: bool = True
+    check_type: str = "required_field"  # required_field, required_non_empty_payload, custom
+    field: str = ""
+    value_path: str = "data"  # output, data
+    forbid_null: bool = True
+
+
+class ImplementationFactReport(BaseModel):
+    """前置侦察层输出的结构化实现事实报告。"""
+    task_summary: str = ""
+    recommended_strategy: str = ""
+    available_helpers: List[ImplementationHelper] = Field(default_factory=list)
+    schema_facts: List[ImplementationFact] = Field(default_factory=list)
+    sample_fields: Dict[str, List[str]] = Field(default_factory=dict)
+    blocked_paths: List[ImplementationIssue] = Field(default_factory=list)
+    runtime_gaps: List[ImplementationIssue] = Field(default_factory=list)
+    validation_checks: List[ValidationCheck] = Field(default_factory=list)
+    confidence: float = 0.0
+    notes: List[str] = Field(default_factory=list)
+
+
 class EvalScore(BaseModel):
     """评估打分"""
     executability: float = 0.0      # 可执行性 (0-10)
@@ -148,6 +194,22 @@ class ReflectionResult(BaseModel):
     confidence: float = 0.5
 
 
+class BusinessRuleFailure(BaseModel):
+    """业务验收失败项。"""
+    rule_id: str = ""
+    message: str = ""
+    severity: str = "error"  # warning, error
+
+
+class BusinessVerificationResult(BaseModel):
+    """业务验收结果。"""
+    passed: bool = True
+    business_score: float = 0.0
+    failures: List[BusinessRuleFailure] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
 class IterationRound(BaseModel):
     """单轮迭代记录"""
     round_number: int = 1
@@ -155,6 +217,7 @@ class IterationRound(BaseModel):
     validation: Optional[ValidationResult] = None
     sandbox: Optional[SandboxResult] = None
     eval_score: Optional[EvalScore] = None
+    business_verification: Optional[BusinessVerificationResult] = None
     reflection: Optional[ReflectionResult] = None
     feedback: str = ""                     # 给下一轮的反馈
     decision: str = ""                     # PASS / RETRY / FAIL
@@ -197,6 +260,15 @@ class SkillHandoffContext(BaseModel):
     handoff_intent: str = ""
 
 
+class PipelineProgressEvent(BaseModel):
+    """生成管线进度事件。"""
+    stage: str = ""
+    message: str = ""
+    iteration: int = 0
+    progress: float = 0.0
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
 class SkillCreationSession(BaseModel):
     """
     Skill 创建会话 — 对应 MongoDB skill_creation_sessions 集合
@@ -218,6 +290,11 @@ class SkillCreationSession(BaseModel):
     # 生成结果
     pipeline_result: Optional[PipelineResult] = None
     pipeline_history: List[PipelineResult] = Field(default_factory=list)
+    pipeline_stage: str = ""
+    pipeline_message: str = ""
+    pipeline_iteration: int = 0
+    pipeline_progress: float = 0.0
+    pipeline_details: List[PipelineProgressEvent] = Field(default_factory=list)
     # 时间
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

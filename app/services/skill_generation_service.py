@@ -407,6 +407,7 @@ test_input: {spec.test_input}
                     "pipeline_message": "准备开始生成...",
                     "pipeline_iteration": 0,
                     "pipeline_progress": 0,
+                    "pipeline_details": [],
                     "updated_at": datetime.utcnow(),
                 }
             },
@@ -427,7 +428,19 @@ test_input: {spec.test_input}
                             "pipeline_iteration": iteration,
                             "pipeline_progress": progress,
                             "updated_at": datetime.utcnow(),
-                        }
+                        },
+                        "$push": {
+                            "pipeline_details": {
+                                "$each": [{
+                                    "stage": stage,
+                                    "message": message,
+                                    "iteration": iteration,
+                                    "progress": progress,
+                                    "timestamp": datetime.utcnow(),
+                                }],
+                                "$slice": -30,
+                            }
+                        },
                     },
                 )
             except Exception as e:
@@ -493,7 +506,19 @@ test_input: {spec.test_input}
                             "pipeline_stage": "error",
                             "pipeline_message": str(e),
                             "updated_at": datetime.utcnow(),
-                        }
+                        },
+                        "$push": {
+                            "pipeline_details": {
+                                "$each": [{
+                                    "stage": "error",
+                                    "message": str(e),
+                                    "iteration": 0,
+                                    "progress": 0,
+                                    "timestamp": datetime.utcnow(),
+                                }],
+                                "$slice": -30,
+                            }
+                        },
                     },
                 )
 

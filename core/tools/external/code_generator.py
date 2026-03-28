@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from core.llm import UnifiedLLMClient, Message
 
-from .skill_spec import GeneratedCode, SkillSpec, TestCase
+from .skill_spec import GeneratedCode, ImplementationFactReport, SkillSpec, TestCase
 from .symbol_utils import SYMBOL_NORMALIZE_INLINE
 from .external_data_source_catalog import build_external_data_source_doc_for_skill
 from core.skill_runtime.data_access import LOCAL_DATA_API_DOC
@@ -110,6 +110,7 @@ class CodeGenerator:
         spec: SkillSpec,
         feedback: str = "",
         previous_code: str = "",
+        fact_report: Optional[ImplementationFactReport] = None,
     ) -> GeneratedCode:
         """
         生成 Skill 代码
@@ -127,7 +128,7 @@ class CodeGenerator:
 
         # 构建 Prompt
         system_prompt = self._build_system_prompt(spec)
-        user_prompt = self._build_user_prompt(spec, feedback, previous_code)
+        user_prompt = self._build_user_prompt(spec, feedback, previous_code, fact_report)
 
         messages = [
             Message(role="system", content=system_prompt),
@@ -168,13 +169,14 @@ class CodeGenerator:
         spec: SkillSpec,
         feedback: str = "",
         previous_code: str = "",
+        fact_report: Optional[ImplementationFactReport] = None,
     ) -> GeneratedCode:
         """异步版本的 generate"""
         start = time.time()
         client = self._get_client()
 
         system_prompt = self._build_system_prompt(spec)
-        user_prompt = self._build_user_prompt(spec, feedback, previous_code)
+        user_prompt = self._build_user_prompt(spec, feedback, previous_code, fact_report)
 
         messages = [
             Message(role="system", content=system_prompt),
@@ -336,8 +338,58 @@ class CodeGenerator:
             + feedback[-tail_chars:]
         )
 
+    @staticmethod
+    def _build_fact_report_block(fact_report: Optional[ImplementationFactReport]) -> str:
+        if not fact_report:
+            return ""
+
+        lines = ["\n【已查证实现事实】"]
+        if fact_report.task_summary:
+            lines.append(f"- 任务摘要: {fact_report.task_summary}")
+        if fact_report.recommended_strategy:
+            lines.append(f"- 推荐策略: {fact_report.recommended_strategy}")
+        if fact_report.available_helpers:
+            helper_text = "；".join(
+                f"{item.module}.{item.name}（{item.reason}）"
+                for item in fact_report.available_helpers[:6]
+            )
+            lines.append(f"- 推荐 helper: {helper_text}")
+        if fact_report.schema_facts:
+            fact_text = "；".join(
+                f"{item.source}: {item.fact}"
+                for item in fact_report.schema_facts[:6]
+            )
+            lines.append(f"- 已确认事实: {fact_text}")
+        if fact_report.blocked_paths:
+            blocked_text = "；".join(
+                f"{item.path}（{item.reason}）"
+                for item in fact_report.blocked_paths[:5]
+            )
+            lines.append(f"- 禁止路径: {blocked_text}")
+        if fact_report.runtime_gaps:
+            gap_text = "；".join(
+                f"{item.path or item.reason}"
+                for item in fact_report.runtime_gaps[:4]
+            )
+            lines.append(f"- runtime 缺口: {gap_text}")
+        if fact_report.validation_checks:
+            check_text = "；".join(
+                check.description or check.name
+                for check in fact_report.validation_checks[:6]
+            )
+            lines.append(f"- 业务验收关注点: {check_text}")
+        if fact_report.notes:
+            note_text = "；".join(fact_report.notes[:4])
+            lines.append(f"- 备注: {note_text}")
+        lines.append("- 生成代码时必须严格基于这些已查证事实实现，不要自行猜测新的内部接口、provider 方法或字段口径")
+        return "\n".join(lines)
+
     def _build_user_prompt(
-        self, spec: SkillSpec, feedback: str = "", previous_code: str = ""
+        self,
+        spec: SkillSpec,
+        feedback: str = "",
+        previous_code: str = "",
+        fact_report: Optional[ImplementationFactReport] = None,
     ) -> str:
         """构建用户提示词"""
         params_desc = "\n".join(
@@ -397,6 +449,8 @@ financial_data = ctx["financial_data"]
 {SYMBOL_NORMALIZE_INLINE}
 """
 
+        fact_report_block = self._build_fact_report_block(fact_report)
+
         prompt = f"""请根据以下 Skill 规格书生成 Python 工具函数代码：
 
 【基本信息】
@@ -416,6 +470,7 @@ financial_data = ctx["financial_data"]
 {constraints_desc}
 {valuation_section}
 {symbol_section}
+{fact_report_block}
 
 【⚠️ Skill Runtime 接口约束 — 必须遵守】
 - 本项目给生成 Skill 的正式运行时接口只有两个：core.skill_runtime.data_access 与 core.skill_runtime.project_access
