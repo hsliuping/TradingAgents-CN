@@ -15,7 +15,9 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from core.tools.external import (
     ConversationRound,
+    DefaultReconnaissanceController,
     ExpectedOutput,
+    ImplementationFactReport,
     IterationController,
     RequirementAnalyzer,
     SkillCreationSession,
@@ -65,11 +67,16 @@ class SkillGenerationService:
         self._analyzer = RequirementAnalyzer(
             llm_client=reasoning_llm_client, provider=provider, model=model
         )
+        self._reconnaissance = DefaultReconnaissanceController(
+            llm_client=coding_llm_client, provider=provider, model=model,
+            analyzer=self._analyzer,
+        )
         self._controller = IterationController(
             llm_client=coding_llm_client,
             provider=provider,
             model=model,
             max_iterations=SKILL_PIPELINE_MAX_ITERATIONS,
+            reconnaissance_controller=self._reconnaissance,
         )
 
     def _build_session_recommendations(
@@ -392,6 +399,7 @@ test_input: {spec.test_input}
         spec: SkillSpec,
         initial_feedback: str = "",
         initial_code: str = "",
+        fact_report: Optional[ImplementationFactReport] = None,
     ) -> Dict[str, Any]:
         session.status = SessionStatus.GENERATING
         if session.pipeline_result is not None:
@@ -460,6 +468,8 @@ test_input: {spec.test_input}
                 except Exception as e:
                     logger.debug("[mem0] Skill 教训召回失败（已忽略）: %s", e)
 
+                # 捕获 fact_report 到局部变量，避免 lambda 闭包问题
+                _fr = fact_report
                 result = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: self._controller.run(
@@ -467,6 +477,7 @@ test_input: {spec.test_input}
                         initial_feedback=enriched_feedback,
                         initial_code=initial_code,
                         progress_callback=_progress_cb,
+                        fact_report=_fr,
                     ),
                 )
                 session.status = SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
@@ -674,18 +685,39 @@ test_input: {spec.test_input}
         """
         仅生成 SkillSpec 预览，不修改会话状态。
         用于规格确认步骤展示。
+
+        流程：先生成草稿 spec → 运行侦察 → 基于侦察事实重新生成 enriched spec。
         """
         session = await self._load_session(session_id)
         if not session:
             raise ValueError(f"会话 {session_id} 不存在")
-        spec = await asyncio.get_event_loop().run_in_executor(
+
+        # 第一遍：生成草稿 spec（无侦察事实）
+        draft_spec = await asyncio.get_event_loop().run_in_executor(
             None, self._analyzer.preview_spec, session, user_message
         )
-        if not spec:
+        if not draft_spec:
             return None
+
+        # 运行侦察层：基于草稿 spec 探测真实数据可用性
+        fact_report = await asyncio.get_event_loop().run_in_executor(
+            None, self._reconnaissance.analyze, draft_spec
+        )
+        logger.info("🧭 侦察完成 (preview)，置信度: %.0f%%", fact_report.confidence * 100)
+
+        # 第二遍：基于侦察事实重新生成 enriched spec
+        enriched_spec = await asyncio.get_event_loop().run_in_executor(
+            None, self._analyzer.preview_spec, session, user_message, fact_report
+        )
+        final_spec = enriched_spec or draft_spec
+
+        # 缓存 fact_report 到 session，confirm_spec 时复用
+        session.fact_report = fact_report
+        await self._save_session(session)
+
         return {
-            "spec": spec.model_dump(),
-            "recommendations": self._build_session_recommendations(spec=spec),
+            "spec": final_spec.model_dump(),
+            "recommendations": self._build_session_recommendations(spec=final_spec),
         }
 
     async def confirm_spec(
@@ -694,6 +726,9 @@ test_input: {spec.test_input}
         """
         确认规格并触发代码生成
 
+        流程：复用 preview 阶段缓存的 fact_report，若无则现场侦察。
+        将 fact_report 同时注入 spec 生成和管线执行，实现"侦察→定规→生成"闭环。
+
         Returns:
             包含 status, spec, generation_result 等信息的 dict
         """
@@ -701,9 +736,22 @@ test_input: {spec.test_input}
         if not session:
             raise ValueError(f"会话 {session_id} 不存在")
 
-        # 生成 SkillSpec
+        # 复用 preview 阶段缓存的 fact_report，若无则先跑侦察
+        fact_report = session.fact_report
+        if fact_report is None:
+            # 需要先生成草稿 spec 用于侦察
+            draft_spec = await asyncio.get_event_loop().run_in_executor(
+                None, self._analyzer.preview_spec, session, user_message
+            )
+            if draft_spec:
+                fact_report = await asyncio.get_event_loop().run_in_executor(
+                    None, self._reconnaissance.analyze, draft_spec
+                )
+                logger.info("🧭 侦察完成 (confirm)，置信度: %.0f%%", fact_report.confidence * 100)
+
+        # 基于侦察事实生成最终 SkillSpec
         session, spec = await asyncio.get_event_loop().run_in_executor(
-            None, self._analyzer.confirm_spec, session, user_message
+            None, self._analyzer.confirm_spec, session, user_message, fact_report
         )
 
         if not spec:
@@ -712,7 +760,10 @@ test_input: {spec.test_input}
                 "message": "规格生成失败，请重新描述需求",
             }
 
-        return await self._launch_pipeline_task(session=session, spec=spec)
+        # fact_report 同时传递给管线，跳过内部重复侦察
+        return await self._launch_pipeline_task(
+            session=session, spec=spec, fact_report=fact_report
+        )
 
     async def repair_session(
         self,

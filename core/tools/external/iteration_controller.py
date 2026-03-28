@@ -99,6 +99,7 @@ class IterationController:
         initial_feedback: str = "",
         initial_code: str = "",
         progress_callback: Optional[Callable[[str, str, int, float], None]] = None,
+        fact_report: Optional[ImplementationFactReport] = None,
     ) -> PipelineResult:
         """
         执行完整的生成管线
@@ -108,6 +109,7 @@ class IterationController:
             initial_feedback: 初始反馈（优化场景使用）
             initial_code: 初始代码（优化场景使用）
             progress_callback: 进度回调 (stage, message, iteration, progress)
+            fact_report: 预构建的侦察报告（侦察前置模式），为 None 时内部自动执行侦察
 
         Returns:
             PipelineResult: 管线最终结果
@@ -117,7 +119,6 @@ class IterationController:
         iterations: List[IterationRound] = []
         feedback = initial_feedback
         previous_code = initial_code
-        fact_report: Optional[ImplementationFactReport] = None
 
         def _report(stage: str, message: str, it: int, prog: float):
             if progress_callback:
@@ -126,25 +127,36 @@ class IterationController:
                 except Exception as e:
                     logger.warning(f"progress_callback 异常: {e}")
 
-        try:
-            _report("reconnaissance", "正在整理实现事实...", 0, 0.03)
-            fact_report = self._reconnaissance.analyze(spec)
+        if fact_report is not None:
+            # 侦察前置模式：复用上游已完成的侦察报告
             logger.info(
-                "🧭 前置侦察完成 | strategy=%s | helpers=%d | checks=%d",
+                "🧭 复用上游侦察报告 | strategy=%s | helpers=%d | checks=%d",
                 fact_report.recommended_strategy or "(none)",
                 len(fact_report.available_helpers),
                 len(fact_report.validation_checks),
             )
-            # 侦察报告即时落盘
+            _report("reconnaissance", "复用已有侦察报告", 0, 0.08)
             self._persist_fact_report(spec.tool_id, run_id, fact_report)
+        else:
+            # 内部侦察模式（向后兼容）
+            try:
+                _report("reconnaissance", "正在整理实现事实...", 0, 0.03)
+                fact_report = self._reconnaissance.analyze(spec)
+                logger.info(
+                    "🧭 前置侦察完成 | strategy=%s | helpers=%d | checks=%d",
+                    fact_report.recommended_strategy or "(none)",
+                    len(fact_report.available_helpers),
+                    len(fact_report.validation_checks),
+                )
+                self._persist_fact_report(spec.tool_id, run_id, fact_report)
 
-            for idx, update in enumerate(self._build_reconnaissance_updates(fact_report), start=1):
-                logger.info("🧭 侦察摘要[%d]: %s", idx, update)
-                _report("reconnaissance", update, 0, min(0.03 + idx * 0.01, 0.08))
-            _report("reconnaissance", "实现事实整理完成", 0, 0.08)
-        except Exception as e:
-            logger.warning(f"⚠️ 前置侦察失败，继续使用原有生成流程: {e}")
-            _report("reconnaissance", "实现事实整理失败，降级为原流程", 0, 0.08)
+                for idx, update in enumerate(self._build_reconnaissance_updates(fact_report), start=1):
+                    logger.info("🧭 侦察摘要[%d]: %s", idx, update)
+                    _report("reconnaissance", update, 0, min(0.03 + idx * 0.01, 0.08))
+                _report("reconnaissance", "实现事实整理完成", 0, 0.08)
+            except Exception as e:
+                logger.warning(f"⚠️ 前置侦察失败，继续使用原有生成流程: {e}")
+                _report("reconnaissance", "实现事实整理失败，降级为原流程", 0, 0.08)
 
         for round_num in range(1, self._max_iterations + 1):
             logger.info(

@@ -30,6 +30,7 @@ from .skill_spec import (
     BoundaryCheck,
     ClarityLevel,
     ConversationRound,
+    ImplementationFactReport,
     SessionStatus,
     SkillCreationSession,
     SkillHandoffContext,
@@ -495,7 +496,10 @@ class RequirementAnalyzer:
         return session, ai_msg
 
     def confirm_spec(
-        self, session: SkillCreationSession, user_message: str
+        self,
+        session: SkillCreationSession,
+        user_message: str,
+        fact_report: Optional[ImplementationFactReport] = None,
     ) -> Tuple[SkillCreationSession, Optional[SkillSpec]]:
         """
         用户确认规格后，生成 SkillSpec
@@ -503,6 +507,7 @@ class RequirementAnalyzer:
         Args:
             session: 当前会话
             user_message: 用户的确认消息（"确认" / 补充修改）
+            fact_report: 侦察报告（侦察前置模式），用于增强 spec 生成
 
         Returns:
             (更新后的会话, 生成的 SkillSpec 或 None)
@@ -511,7 +516,7 @@ class RequirementAnalyzer:
         conversation = self._collect_conversation(session, user_message)
 
         # LLM 生成结构化 SkillSpec
-        spec = self._generate_spec(conversation)
+        spec = self._generate_spec(conversation, fact_report=fact_report)
 
         if spec:
             session.spec = spec
@@ -522,14 +527,17 @@ class RequirementAnalyzer:
         return session, spec
 
     def preview_spec(
-        self, session: SkillCreationSession, user_message: str = "确认"
+        self,
+        session: SkillCreationSession,
+        user_message: str = "确认",
+        fact_report: Optional[ImplementationFactReport] = None,
     ) -> Optional[SkillSpec]:
         """
         仅生成 SkillSpec 预览，不修改会话状态。
         用于规格确认步骤展示，用户确认后再调用 confirm_spec 执行管线。
         """
         conversation = self._collect_conversation(session, user_message)
-        return self._generate_spec(conversation)
+        return self._generate_spec(conversation, fact_report=fact_report)
 
     # ==================== 清晰度评估 ====================
 
@@ -776,8 +784,17 @@ class RequirementAnalyzer:
             parts.append(f"[用户 - 最新]: {current_message}")
         return "\n\n".join(parts)
 
-    def _generate_spec(self, conversation: str) -> Optional[SkillSpec]:
-        """通过 LLM 将对话转化为结构化 SkillSpec"""
+    def _generate_spec(
+        self,
+        conversation: str,
+        fact_report: Optional[ImplementationFactReport] = None,
+    ) -> Optional[SkillSpec]:
+        """通过 LLM 将对话转化为结构化 SkillSpec
+
+        Args:
+            conversation: 收集的对话内容
+            fact_report: 侦察报告（侦察前置模式），包含真实字段可用性
+        """
         client = self._get_client()
         catalog_context = self._build_catalog_context(conversation)
         handoff_guardrails = ""
@@ -787,6 +804,12 @@ class RequirementAnalyzer:
                 "7. 若原目标显然是 Agent/Workflow 级目标，当前 SkillSpec 只能定义为其中一个确定性的子能力，并在 description/constraints 中明确这一点。\n"
                 "8. 禁止把“估值分析”“研究分析”“多维判断”这类目标直接偷换成单一 PB/PE 指标计算器，除非用户明确只要这个子功能。\n\n"
             )
+
+        # 侦察事实注入：将真实的字段可用性、Helper 函数信息注入 prompt
+        recon_context = ""
+        if fact_report:
+            recon_context = self._build_recon_context_for_spec(fact_report)
+
         prompt = (
             "你是 Skill 规格生成器。请根据以下对话内容，"
             "提取出一个结构化的 Skill 规格（JSON 格式）。\n\n"
@@ -799,7 +822,21 @@ class RequirementAnalyzer:
             f"{handoff_guardrails}"
             f"{SKILL_SEMANTICS_GUIDANCE}\n\n"
             f"当前按需求命中的数据上下文:\n{catalog_context}\n\n"
-            f"对话内容:\n{conversation}\n\n"
+        )
+
+        # 插入侦察事实上下文
+        if recon_context:
+            prompt += (
+                f"### 侦察层发现的实现事实（真实数据源探测结果）\n"
+                f"{recon_context}\n\n"
+                "**基于侦察事实的约束**：\n"
+                "- expected_output.fields 只能包含侦察证实可获取的字段，不要凭想象添加数据源中不存在的字段。\n"
+                "- 若某字段覆盖率低或不可用，应在 constraints 中注明降级策略，而非标记为必填。\n"
+                "- 优先使用侦察发现的 Helper 函数，而非猜测 API 调用方式。\n\n"
+            )
+
+        prompt += f"对话内容:\n{conversation}\n\n"
+        prompt += (
             "请严格用以下 JSON 格式输出（不要其他内容）：\n"
             "{\n"
             '  "tool_id": "snake_case_id",\n'
@@ -832,3 +869,54 @@ class RequirementAnalyzer:
             logger.error(f"SkillSpec 生成失败: {e}")
             self._raise_analysis_error("SkillSpec 生成", e)
         return None
+
+    @staticmethod
+    def _build_recon_context_for_spec(report: ImplementationFactReport) -> str:
+        """将侦察报告转化为 spec 生成 prompt 可消费的文本上下文。"""
+        parts = []
+
+        if report.recommended_strategy:
+            parts.append(f"- 推荐实现策略: {report.recommended_strategy}")
+
+        if report.confidence:
+            parts.append(f"- 侦察置信度: {report.confidence:.0%}")
+
+        # 可用 Helper 函数
+        if report.available_helpers:
+            helper_lines = []
+            for h in report.available_helpers:
+                sig = f"  • {h.name}({h.signature})" if h.signature else f"  • {h.name}"
+                if h.description:
+                    sig += f" — {h.description}"
+                helper_lines.append(sig)
+            parts.append("- 可用 Helper 函数:\n" + "\n".join(helper_lines))
+
+        # 数据库字段实况
+        if report.schema_facts:
+            fact_lines = []
+            for f in report.schema_facts:
+                line = f"  • [{f.source}] {f.field}: {f.description}"
+                if f.coverage is not None:
+                    line += f" (覆盖率 {f.coverage:.0%})"
+                fact_lines.append(line)
+            parts.append("- 数据库字段实况:\n" + "\n".join(fact_lines))
+
+        # 样本字段
+        if report.sample_fields:
+            for collection, fields in report.sample_fields.items():
+                parts.append(f"- {collection} 的实际字段: {', '.join(fields[:20])}")
+
+        # 受阻路径
+        if report.blocked_paths:
+            block_lines = [f"  ⚠️ {b.description}" for b in report.blocked_paths]
+            parts.append("- 受阻路径（不可用）:\n" + "\n".join(block_lines))
+
+        # 运行时缺口
+        if report.runtime_gaps:
+            gap_lines = [f"  ⚠️ {g.description}" for g in report.runtime_gaps]
+            parts.append("- 运行时缺口:\n" + "\n".join(gap_lines))
+
+        if report.notes:
+            parts.append("- 备注: " + "; ".join(report.notes))
+
+        return "\n".join(parts) if parts else ""

@@ -287,6 +287,8 @@ class SkillCreationSession(BaseModel):
     # 规格
     spec: Optional[SkillSpec] = None
     spec_confirmed: bool = False
+    # 侦察报告（侦察前置模式缓存）
+    fact_report: Optional[ImplementationFactReport] = None
     # 生成结果
     pipeline_result: Optional[PipelineResult] = None
     pipeline_history: List[PipelineResult] = Field(default_factory=list)
