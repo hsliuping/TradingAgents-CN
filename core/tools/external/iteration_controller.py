@@ -45,6 +45,8 @@ logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 8
 PASS_THRESHOLD = 8.0
+# 连续相同失败检测阈值：连续 N 轮业务验收失败项完全一致则判定为不可恢复
+_STALE_FAILURE_THRESHOLD = 3
 
 # 快照落盘根目录（与 SkillGenerationService 保持一致）
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -264,6 +266,17 @@ class IterationController:
                     reflection=reflection,
                 )
                 previous_code = generated.code
+                # ---- 提前退出：反思建议放弃 ----
+                if not reflection.should_retry:
+                    iteration.decision = "FAIL"
+                    iteration.feedback = feedback
+                    iterations.append(iteration)
+                    self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
+                    _report("sandbox_execution", "反思判定不可修复，提前终止", round_num, 0.55)
+                    logger.warning(
+                        f"🛑 [第{round_num}轮] 反思建议放弃 (should_retry=False): {reflection.root_cause}"
+                    )
+                    break
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
@@ -423,6 +436,31 @@ class IterationController:
                     reflection=reflection,
                 )
                 previous_code = generated.code
+
+                # ---- 提前退出：反思建议放弃 ----
+                if not reflection.should_retry:
+                    iteration.decision = "FAIL"
+                    iteration.feedback = feedback
+                    iterations.append(iteration)
+                    self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
+                    _report("output_evaluation", "反思判定不可修复，提前终止", round_num, 0.8)
+                    logger.warning(
+                        f"🛑 [第{round_num}轮] 反思建议放弃 (should_retry=False): {reflection.root_cause}"
+                    )
+                    break
+
+                # ---- 提前退出：连续相同失败检测 ----
+                if self._detect_stale_failures(iterations):
+                    iteration.decision = "FAIL"
+                    iteration.feedback = feedback + "\n\n[系统] 连续多轮业务验收失败项完全相同，判定为数据源不可用，提前终止。"
+                    iterations.append(iteration)
+                    self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
+                    _report("output_evaluation", "连续相同失败，数据不可用，提前终止", round_num, 0.8)
+                    logger.warning(
+                        f"🛑 [第{round_num}轮] 连续 {_STALE_FAILURE_THRESHOLD} 轮相同业务验收失败，判定为不可恢复"
+                    )
+                    break
+
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
@@ -447,6 +485,34 @@ class IterationController:
             total_time=round(time.time() - start_time, 2),
             error=failure_summary,
         )
+
+    # ==================== 提前退出检测 ====================
+
+    @staticmethod
+    def _detect_stale_failures(iterations: List[IterationRound]) -> bool:
+        """
+        检测连续 N 轮业务验收的失败项是否完全相同。
+        如果是，说明失败原因是外部数据不可用，继续迭代不会改善。
+        """
+        if len(iterations) < _STALE_FAILURE_THRESHOLD:
+            return False
+
+        recent = iterations[-_STALE_FAILURE_THRESHOLD:]
+
+        # 提取每轮的失败 rule_id 集合
+        failure_sets: List[frozenset] = []
+        for it in recent:
+            if it.business_verification and not it.business_verification.passed:
+                rule_ids = frozenset(f.rule_id for f in it.business_verification.failures)
+                failure_sets.append(rule_ids)
+            else:
+                return False  # 有一轮通过了或没有业务验收，不算连续
+
+        if len(failure_sets) < _STALE_FAILURE_THRESHOLD:
+            return False
+
+        # 所有集合相同
+        return len(set(failure_sets)) == 1
 
     # ==================== 即时落盘 ====================
 
@@ -668,6 +734,11 @@ class IterationController:
 3. 最后才考虑「返回状态码/格式」调整
 ⚠️ 禁止在 fix_plan 中仅调整 status 字段值（如从 success 改 error 或反之），这会导致振荡。
    如果上一轮的反思已经建议过调整 status，本轮必须从数据获取层面寻找根因。
+
+【should_retry 判定准则】
+- should_retry: true — 失败原因是代码 Bug、参数错误、格式不对等可通过修改代码解决的问题
+- should_retry: false — 失败原因是外部数据源确实不提供所需数据（如该股票在 Tushare 中无增长率数据），
+  或所需数据在当前数据源中根本不存在。此时继续迭代无法改善结果，应提前终止。
 
 请用 JSON 格式回复，不要输出其他内容：
 {{"root_cause": "一句话说明根因", "fix_plan": ["修复步骤1", "修复步骤2", ...], "should_retry": true/false, "confidence": 0.0-1.0}}
