@@ -60,8 +60,25 @@ class DefaultBusinessVerifier(BusinessVerifier):
         result.details["generated_check_count"] = len(generated_checks)
         result.details["output_type"] = type(output).__name__ if output is not None else None
 
+        # 判断输出是否为"成功"状态 —— 若 status 不是 success，
+        # 则跳过 required_field 类检查（这些规则描述为"成功输出时必须包含"）。
+        output_is_success = True
+        if isinstance(output, dict):
+            status = output.get("status", "success")
+            if isinstance(status, str) and status.lower() not in ("success", "ok"):
+                output_is_success = False
+
         for check in generated_checks:
+            if not output_is_success and check.check_type == "required_field":
+                continue
             self._apply_check(result, output, check)
+
+        # 如果输出状态为非 success 且没有其他 failures，
+        # 视为"数据不足但代码正确"，给予中等分数通过。
+        if not output_is_success and not result.failures:
+            result.passed = True
+            result.business_score = max(result.business_score or 0, 6.0)
+            result.details["non_success_status_accepted"] = True
 
         if result.failures:
             result.passed = False

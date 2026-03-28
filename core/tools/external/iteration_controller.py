@@ -650,6 +650,13 @@ class IterationController:
 【函数返回值】
 {output_preview or '(空)'}
 
+【修复优先级原则 — 严格遵守】
+1. 优先修复「数据获取/业务逻辑」问题（如数据源调用参数错误、字段解析遗漏、返回结构不完整）
+2. 其次修复「异常处理/边界情况」（如缺少 fallback、空值未处理）
+3. 最后才考虑「返回状态码/格式」调整
+⚠️ 禁止在 fix_plan 中仅调整 status 字段值（如从 success 改 error 或反之），这会导致振荡。
+   如果上一轮的反思已经建议过调整 status，本轮必须从数据获取层面寻找根因。
+
 请用 JSON 格式回复，不要输出其他内容：
 {{"root_cause": "一句话说明根因", "fix_plan": ["修复步骤1", "修复步骤2", ...], "should_retry": true/false, "confidence": 0.0-1.0}}
 """
@@ -948,6 +955,7 @@ class IterationController:
         parts.append("请根据以上完整的执行上下文，定向修复代码中的问题。")
         parts.append("优先解决导致失败的根因，不要重新设计整体架构。")
         parts.append("保留已经正确工作的部分，只修改有问题的代码。")
+        parts.append("⚠️ 优先修复数据获取和业务逻辑问题，不要仅仅调整 status 字段值来规避验收。")
 
         return "\n".join(parts)
 
