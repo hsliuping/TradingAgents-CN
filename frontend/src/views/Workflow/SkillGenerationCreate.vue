@@ -11,7 +11,7 @@
         <h1>🛠️ 创建新 Skill</h1>
       </div>
       <div class="header-right">
-        <el-button v-if="wizardStep < 2 && sessionId" text size="small" @click="goBack">
+        <el-button v-if="wizardStep < 3 && sessionId" text size="small" @click="goBack">
           保存草稿
         </el-button>
       </div>
@@ -21,6 +21,7 @@
     <div class="steps-bar">
       <el-steps :active="wizardStep" finish-status="success" align-center>
         <el-step title="需求沟通" />
+        <el-step title="侦察分析" />
         <el-step title="规格确认" />
         <el-step title="代码生成" />
         <el-step title="完成" />
@@ -128,8 +129,18 @@
         </div>
       </div>
 
-      <!-- 步骤 1: 规格确认 -->
-      <div v-if="wizardStep === 1" class="wizard-spec-confirm">
+      <!-- 步骤 1: 侦察分析 -->
+      <div v-if="wizardStep === 1" class="wizard-generating">
+        <div class="gen-status">
+          <el-icon class="gen-spinner" :size="40"><Loading /></el-icon>
+          <h3>正在侦察数据环境...</h3>
+          <p class="gen-desc">AI 正在探测本地数据库和外部数据源的字段可用性，生成基于事实的工具规格</p>
+        </div>
+        <el-progress :percentage="50" :indeterminate="true" :stroke-width="14" style="margin: 24px auto; max-width: 500px;" />
+      </div>
+
+      <!-- 步骤 2: 规格确认 -->
+      <div v-if="wizardStep === 2" class="wizard-spec-confirm">
         <div class="spec-confirm-card">
           <h3>📄 工具规格确认</h3>
           <div v-if="handoffContext" class="handoff-inline-note">
@@ -358,8 +369,8 @@
         </div>
       </div>
 
-      <!-- 步骤 2: 生成进度 -->
-      <div v-if="wizardStep === 2" class="wizard-generating">
+      <!-- 步骤 3: 生成进度 -->
+      <div v-if="wizardStep === 3" class="wizard-generating">
         <div class="gen-status">
           <el-icon class="gen-spinner" :size="40"><Loading /></el-icon>
           <h3>正在生成 Skill...</h3>
@@ -382,8 +393,8 @@
         </div>
       </div>
 
-      <!-- 步骤 3: 完成 -->
-      <div v-if="wizardStep === 3" class="wizard-done">
+      <!-- 步骤 4: 完成 -->
+      <div v-if="wizardStep === 4" class="wizard-done">
         <el-result
           :icon="genResult?.success ? 'success' : 'error'"
           :title="genResult?.success ? '🎉 Skill 创建成功！' : '❌ 生成失败'"
@@ -395,7 +406,7 @@
             <el-button v-if="genResult?.success" type="primary" @click="goBack">
               查看 Skill 列表
             </el-button>
-            <el-button v-else @click="wizardStep = 1">返回规格确认</el-button>
+            <el-button v-else @click="wizardStep = 2">返回规格确认</el-button>
             <el-button @click="goBack">返回列表</el-button>
           </template>
         </el-result>
@@ -424,7 +435,7 @@
             <div class="markdown-body repair-plan-markdown" v-html="renderMarkdown(repairPlan)" />
           </div>
           <div class="repair-actions">
-            <el-button @click="wizardStep = 1">回到规格确认</el-button>
+            <el-button @click="wizardStep = 2">回到规格确认</el-button>
             <el-button :loading="repairPlanning" :disabled="!repairFeedback.trim() || !sessionId" @click="handlePreviewRepairPlan">
               {{ repairPlan ? '重新生成修正计划' : '让 AI 先给修正计划' }}
             </el-button>
@@ -1165,7 +1176,7 @@ const initFromRoute = async () => {
       userInput.value = ''
 
       if (session.status === 'confirmed') {
-        wizardStep.value = 1
+        wizardStep.value = 2
         specPreview.value = session.spec || null
         backendRecommendations.value = session.recommendations || null
         if (shouldFocusConfirmActions()) {
@@ -1232,7 +1243,7 @@ const handleChatSend = async () => {
   }
 }
 
-/** 查看规格：调用 previewSpec，进入步骤 1 */
+/** 查看规格：先进入侦察分析步骤，完成后进入规格确认 */
 const handleViewSpec = async () => {
   if (!sessionId.value) return
   const confirmMessage = userInput.value?.trim() || '确认'
@@ -1242,13 +1253,15 @@ const handleViewSpec = async () => {
     scrollChat()
   }
   chatLoading.value = true
+  wizardStep.value = 1 // 先展示侦察分析进度
   try {
     const res = await skillGenerationApi.previewSpec(sessionId.value, confirmMessage)
     specPreview.value = res.spec
     backendRecommendations.value = res.recommendations || null
-    wizardStep.value = 1
+    wizardStep.value = 2 // 侦察完成，进入规格确认
   } catch (e: any) {
     ElMessage.error(e?.message || '获取规格失败')
+    wizardStep.value = 0 // 失败回到需求沟通
   } finally {
     chatLoading.value = false
   }
@@ -1278,7 +1291,7 @@ const handleConfirmAndGenerate = async () => {
   }
 
   specConfirmLoading.value = true
-  wizardStep.value = 2
+  wizardStep.value = 3
   repairFeedback.value = ''
   sessionPipelineResult.value = null
   genSteps.value.forEach(s => s.status = 'pending')
@@ -1325,7 +1338,7 @@ const handleConfirmAndGenerate = async () => {
             error: pr?.error ?? null,
           }
           if (session.status === 'completed') prepareGeneratedTestPanel()
-          wizardStep.value = 3
+          wizardStep.value = 4
           return
         }
         setTimeout(poll, pollInterval)
@@ -1336,7 +1349,7 @@ const handleConfirmAndGenerate = async () => {
       genSteps.value.forEach(s => s.status = 'done')
       genResult.value = res
       if (res.success) prepareGeneratedTestPanel()
-      wizardStep.value = 3
+      wizardStep.value = 4
     }
   } catch (e: any) {
     genResult.value = {
@@ -1344,7 +1357,7 @@ const handleConfirmAndGenerate = async () => {
       spec: null, success: false, total_rounds: 0, total_time: 0,
       final_score: null, error: e?.message || '生成失败'
     }
-    wizardStep.value = 3
+    wizardStep.value = 4
   } finally {
     specConfirmLoading.value = false
   }
@@ -1359,7 +1372,7 @@ const handleRepairAndRegenerate = async () => {
       repairFeedback.value.trim(),
       repairPlan.value.trim(),
     )
-    wizardStep.value = 2
+    wizardStep.value = 3
     genProgress.value = 0
     pipelineMessage.value = '已确认修正计划，正在重新生成...'
     genSteps.value.forEach(s => s.status = 'pending')
@@ -1401,7 +1414,7 @@ const handleRepairAndRegenerate = async () => {
           error: pr?.error ?? null,
         }
         if (session.status === 'completed') prepareGeneratedTestPanel()
-        wizardStep.value = 3
+        wizardStep.value = 4
         return
       }
       setTimeout(poll, pollInterval)
