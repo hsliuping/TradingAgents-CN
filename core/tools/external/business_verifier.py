@@ -166,7 +166,12 @@ class DefaultBusinessVerifier(BusinessVerifier):
         if value_path == "output":
             return output
         if isinstance(output, dict):
-            return output.get(value_path)
+            nested = output.get(value_path)
+            if nested is not None:
+                return nested
+            # 回退：若 output 中没有名为 value_path 的嵌套 key，
+            # 则将 output 本身视为目标（兼容扁平输出结构）。
+            return output
         return None
 
     @staticmethod
