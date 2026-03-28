@@ -392,11 +392,19 @@ class DefaultReconnaissanceController(ReconnaissanceController):
             "你是一个 Skill 代码生成前置侦察 Agent。\n"
             "你的任务是通过调用工具，收集足够的实现事实，帮助后续的代码生成器写出正确、可运行的 Python 函数。\n\n"
             "## 工作流程\n"
+            "### 第一阶段：本地数据探索\n"
             "1. 先用 list_available_collections 了解有哪些本地集合可用。\n"
             "2. 用 inspect_collection_schema 查看与任务相关的集合字段结构。\n"
             "3. 如果任务涉及具体股票，用 inspect_symbol_sample 查看样本数据，确认字段名和数据格式。\n"
-            "4. 用 check_field_coverage 检查关键字段的覆盖率，判断数据可靠性。\n"
-            "5. 用 list_runtime_functions 和 describe_runtime_helper 查看可复用的 helper 函数。\n\n"
+            "4. 用 check_field_coverage 检查关键字段的覆盖率，判断数据可靠性。\n\n"
+            "### 第二阶段：外部资源探索\n"
+            "5. 用 list_external_data_sources 查看当前已配置的外部数据源（如 akshare、tushare、baostock）。\n"
+            "   如果任务需要历史 K 线、实时行情、宏观数据等本地集合缺失的数据，外部数据源可能是关键实现路径。\n"
+            "6. 用 list_mcp_tools 查看通过 MCP (Model Context Protocol) 注册的外部工具。\n"
+            "   MCP 工具可能提供额外的数据获取或计算能力，如果有匹配任务需求的 MCP 工具，应优先推荐。\n\n"
+            "### 第三阶段：Runtime Helper 探索\n"
+            "7. 用 list_runtime_functions 和 describe_runtime_helper 查看可复用的 helper 函数。\n"
+            "   重点关注 'data_access'（本地数据）、'project_access'（项目数据）、'external_sources'（外部数据源封装）三个模块。\n\n"
             "## 输出格式\n"
             "探索完成后，请输出一份 JSON 对象（用 ```json 包裹），包含以下字段：\n"
             "```\n"
@@ -407,7 +415,7 @@ class DefaultReconnaissanceController(ReconnaissanceController):
             '    {"module": "模块路径", "name": "函数名", "reason": "推荐理由"}\n'
             "  ],\n"
             '  "schema_facts": [\n'
-            '    {"source": "集合/模块名", "fact": "发现的事实", "evidence": "证据来源"}\n'
+            '    {"source": "集合/模块名/MCP工具名", "fact": "发现的事实", "evidence": "证据来源"}\n'
             "  ],\n"
             '  "sample_fields": {"集合名": ["字段1", "字段2"]},\n'
             '  "blocked_paths": [\n'
@@ -427,6 +435,7 @@ class DefaultReconnaissanceController(ReconnaissanceController):
             "- 只做只读探测，不修改任何数据。\n"
             "- 探测时优先关注与任务直接相关的集合和函数。\n"
             "- 如果发现某个关键字段覆盖率很低或不存在，务必在 runtime_gaps 中标注。\n"
+            "- 如果发现 MCP 工具或外部数据源能满足需求，在 schema_facts 和 recommended_strategy 中明确说明。\n"
             "- 生成的 Skill 不应直接导入内部 provider，应通过 skill_runtime 公开接口访问数据。\n"
         )
 

@@ -136,6 +136,63 @@ def list_runtime_functions(module: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 工具 7: 列出已配置的外部数据源
+# ---------------------------------------------------------------------------
+
+def list_external_data_sources(market_category: str = "a_shares") -> str:
+    """列出当前系统已配置并启用的外部数据源（如 akshare、tushare、baostock）。
+    参数 market_category: 市场类别，默认 'a_shares'，可选 'hk_stocks'、'us_stocks'。
+    返回 JSON 对象，包含 supported(该市场支持的全部数据源)和 configured(当前已启用的数据源)。
+    外部数据源的函数可通过 list_runtime_functions('external_sources') 查看。"""
+    from core.skill_runtime.catalog import (
+        list_supported_external_sources,
+        list_configured_external_sources,
+    )
+    supported = list_supported_external_sources(market_category)
+    configured = list_configured_external_sources(market_category)
+    return json.dumps({
+        "market_category": market_category,
+        "supported_sources": supported,
+        "configured_sources": configured,
+        "hint": "使用 list_runtime_functions('external_sources') 查看可调用的外部数据获取函数",
+    }, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# 工具 8: 列出已注册的 MCP 工具
+# ---------------------------------------------------------------------------
+
+def list_mcp_tools() -> str:
+    """列出当前通过 MCP (Model Context Protocol) 服务器注册到系统的所有工具。
+    MCP 工具是外部服务动态注册的能力，可能提供额外的数据获取或计算功能。
+    返回 JSON 数组，每项包含 tool_id、name、description。
+    若无 MCP 工具则返回空数组。"""
+    try:
+        from core.tools.registry import get_tool_registry
+        registry = get_tool_registry()
+        mcp_tools = [t for t in registry.list_all() if t.category == "mcp"]
+        items = []
+        for t in mcp_tools:
+            item: Dict[str, Any] = {
+                "tool_id": t.id,
+                "name": t.name,
+                "description": t.description or "",
+            }
+            # 如果有参数定义，也附带
+            if t.parameters:
+                item["parameters"] = [
+                    {"name": p.name, "type": p.type, "description": getattr(p, "description", "")}
+                    for p in t.parameters
+                    if hasattr(p, "name")
+                ]
+            items.append(item)
+        return json.dumps(items, ensure_ascii=False, default=str)
+    except Exception as exc:
+        logger.warning(f"[recon] 列出 MCP 工具失败: {exc}")
+        return json.dumps([], ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
 # 工具注册表（供 ReconnaissanceController 使用）
 # ---------------------------------------------------------------------------
 
@@ -146,6 +203,8 @@ RECON_TOOLS: List[callable] = [
     inspect_symbol_sample,
     describe_runtime_helper,
     list_runtime_functions,
+    list_external_data_sources,
+    list_mcp_tools,
 ]
 """侦察阶段可用的全部工具函数列表。"""
 
