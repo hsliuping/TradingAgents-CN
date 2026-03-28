@@ -18,6 +18,7 @@
 import json
 import logging
 import time
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from core.llm import UnifiedLLMClient, Message
@@ -43,6 +44,10 @@ logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 8
 PASS_THRESHOLD = 8.0
+
+# 快照落盘根目录（与 SkillGenerationService 保持一致）
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_SNAPSHOT_DIR = _PROJECT_ROOT / "data" / "code" / "skill"
 
 
 class IterationController:
@@ -128,6 +133,9 @@ class IterationController:
                 len(fact_report.available_helpers),
                 len(fact_report.validation_checks),
             )
+            # 侦察报告即时落盘
+            self._persist_fact_report(spec.tool_id, fact_report)
+
             for idx, update in enumerate(self._build_reconnaissance_updates(fact_report), start=1):
                 logger.info("🧭 侦察摘要[%d]: %s", idx, update)
                 _report("reconnaissance", update, 0, min(0.03 + idx * 0.01, 0.08))
@@ -172,6 +180,7 @@ class IterationController:
                 iteration.decision = "FAIL"
                 iteration.feedback = f"代码生成失败: {e}"
                 iterations.append(iteration)
+                self._persist_round_snapshot(spec.tool_id, round_num, iteration, fact_report)
                 break
 
             # ===== 阶段 2: 静态验证 =====
@@ -190,6 +199,7 @@ class IterationController:
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
+                self._persist_round_snapshot(spec.tool_id, round_num, iteration, fact_report)
                 _report("static_validation", "静态验证失败，重试中...", round_num, 0.3)
                 logger.warning(
                     f"⚠️ [第{round_num}轮] 静态验证失败:\n"
@@ -243,6 +253,7 @@ class IterationController:
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
+                self._persist_round_snapshot(spec.tool_id, round_num, iteration, fact_report)
                 _report("sandbox_execution", "沙箱执行失败，反思后重试中...", round_num, 0.55)
                 continue
 
@@ -321,12 +332,14 @@ class IterationController:
                     iteration.decision = "RETRY"
                     iteration.feedback = feedback
                     iterations.append(iteration)
+                    self._persist_round_snapshot(spec.tool_id, round_num, iteration, fact_report)
                     _report("edge_testing", "边缘测试失败，反思后重试中...", round_num, 0.9)
                     continue
 
                 # 全部通过
                 iteration.decision = "PASS"
                 iterations.append(iteration)
+                self._persist_round_snapshot(spec.tool_id, round_num, iteration, fact_report)
                 _report("output_evaluation", f"评估通过，总分: {eval_score.total}", round_num, 1.0)
                 total_time = round(time.time() - start_time, 2)
                 logger.info(
@@ -399,6 +412,7 @@ class IterationController:
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
+                self._persist_round_snapshot(spec.tool_id, round_num, iteration, fact_report)
                 _report("output_evaluation", f"{reason}，反思后重试中...", round_num, 0.8)
                 logger.warning(f"⚠️ [第{round_num}轮] {reason}，进入下一轮")
 
@@ -419,6 +433,119 @@ class IterationController:
             total_time=round(time.time() - start_time, 2),
             error=failure_summary,
         )
+
+    # ==================== 即时落盘 ====================
+
+    @staticmethod
+    def _get_snapshot_dir(tool_id: str) -> Path:
+        """获取当前 Skill 的快照目录，延迟创建。"""
+        d = _SNAPSHOT_DIR / tool_id
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    @staticmethod
+    def _persist_fact_report(
+        tool_id: str,
+        fact_report: ImplementationFactReport,
+    ) -> Optional[Path]:
+        """侦察完成后立即落盘 fact_report.json。"""
+        try:
+            d = IterationController._get_snapshot_dir(tool_id)
+            path = d / "fact_report.json"
+            data = fact_report.model_dump(mode="json")
+            path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            logger.info("📝 侦察报告已落盘: %s", path)
+            return path
+        except Exception as exc:
+            logger.warning("⚠️ 侦察报告落盘失败: %s", exc)
+            return None
+
+    @staticmethod
+    def _persist_round_snapshot(
+        tool_id: str,
+        round_num: int,
+        iteration: IterationRound,
+        fact_report: Optional[ImplementationFactReport] = None,
+    ) -> Optional[Path]:
+        """每轮迭代结束后立即落盘该轮完整快照（含代码、评分、反思等）。"""
+        try:
+            d = IterationController._get_snapshot_dir(tool_id)
+            snapshot: Dict[str, Any] = {
+                "round_number": round_num,
+                "decision": iteration.decision,
+                "feedback_excerpt": (iteration.feedback or "")[:2000],
+            }
+            # 生成的代码
+            if iteration.generated_code:
+                g = iteration.generated_code
+                snapshot["generated_code"] = {
+                    "code_lines": len((g.code or "").split("\n")),
+                    "generation_time": g.generation_time,
+                    "metadata": g.metadata,
+                }
+                # 同时保存完整代码文件
+                code_path = d / f"round_{round_num:02d}.py"
+                code_path.write_text(
+                    (g.code or "") + "\n", encoding="utf-8"
+                )
+            # 静态验证
+            if iteration.validation:
+                snapshot["validation"] = {
+                    "passed": iteration.validation.passed,
+                    "errors": iteration.validation.errors[:10],
+                }
+            # 沙箱执行
+            if iteration.sandbox:
+                sb = iteration.sandbox
+                snapshot["sandbox"] = {
+                    "success": sb.success,
+                    "execution_time": sb.execution_time,
+                    "error": (sb.error or "")[:500],
+                    "stdout_excerpt": (sb.stdout or "")[:500],
+                    "output_excerpt": str(sb.output)[:1000] if sb.output else None,
+                }
+            # 评估得分
+            if iteration.eval_score:
+                snapshot["eval_score"] = iteration.eval_score.model_dump()
+            # 业务验收
+            if iteration.business_verification:
+                bv = iteration.business_verification
+                snapshot["business_verification"] = {
+                    "passed": bv.passed,
+                    "business_score": bv.business_score,
+                    "failures": bv.failures[:10],
+                }
+            # 反思
+            if iteration.reflection:
+                r = iteration.reflection
+                snapshot["reflection"] = {
+                    "root_cause": r.root_cause,
+                    "fix_plan": r.fix_plan,
+                    "should_retry": r.should_retry,
+                    "confidence": r.confidence,
+                }
+            # 附带当轮的侦察报告引用（置信度+策略摘要即可）
+            if fact_report:
+                snapshot["fact_report_summary"] = {
+                    "confidence": fact_report.confidence,
+                    "strategy": (fact_report.recommended_strategy or "")[:200],
+                    "helpers_count": len(fact_report.available_helpers),
+                    "checks_count": len(fact_report.validation_checks),
+                }
+
+            path = d / f"round_{round_num:02d}_snapshot.json"
+            path.write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            logger.info("📝 第%d轮快照已落盘: %s", round_num, path)
+            return path
+        except Exception as exc:
+            logger.warning("⚠️ 第%d轮快照落盘失败: %s", round_num, exc)
+            return None
 
     @staticmethod
     def _build_reconnaissance_updates(fact_report: ImplementationFactReport) -> List[str]:
