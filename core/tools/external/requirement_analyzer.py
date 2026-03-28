@@ -104,6 +104,95 @@ class RequirementAnalyzer:
         detail = str(error) if error else "LLM 未返回有效内容"
         raise RuntimeError(f"{stage}失败：{detail}")
 
+    # ==================== 健壮 JSON 解析 ====================
+
+    @staticmethod
+    def _parse_llm_json(raw: str) -> Optional[Dict[str, Any]]:
+        """从 LLM 输出中提取 JSON 对象，多策略容错。
+
+        策略顺序：
+        1. 提取 ```json ... ``` Markdown 代码块
+        2. 用大括号深度匹配找到最外层 { ... }
+        3. 修复常见 LLM JSON 错误后重试（尾随逗号、单引号等）
+
+        Returns:
+            解析成功返回 dict，全部策略失败返回 None。
+        """
+        if not raw or not raw.strip():
+            return None
+
+        text = raw.strip()
+
+        # 策略 1: 提取 ```json ... ``` 代码块
+        json_blocks = re.findall(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+        for block in json_blocks:
+            result = RequirementAnalyzer._try_parse_json(block.strip())
+            if result is not None:
+                return result
+
+        # 策略 2: 大括号深度匹配（比贪婪正则 `\{.*\}` 精准得多）
+        brace_start = text.find("{")
+        if brace_start >= 0:
+            depth = 0
+            for i in range(brace_start, len(text)):
+                if text[i] == "{":
+                    depth += 1
+                elif text[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        result = RequirementAnalyzer._try_parse_json(text[brace_start:i + 1])
+                        if result is not None:
+                            return result
+                        break  # 匹配到最外层但解析失败，进入修复策略
+
+        # 策略 3: 修复常见 LLM JSON 错误后重试
+        if brace_start >= 0:
+            # 重新提取最外层
+            depth = 0
+            end_idx = -1
+            for i in range(brace_start, len(text)):
+                if text[i] == "{":
+                    depth += 1
+                elif text[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end_idx = i
+                        break
+            if end_idx > brace_start:
+                candidate = text[brace_start:end_idx + 1]
+                candidate = RequirementAnalyzer._fix_common_json_errors(candidate)
+                result = RequirementAnalyzer._try_parse_json(candidate)
+                if result is not None:
+                    return result
+
+        return None
+
+    @staticmethod
+    def _try_parse_json(text: str) -> Optional[Dict[str, Any]]:
+        """尝试解析 JSON，失败返回 None。"""
+        try:
+            data = json.loads(text)
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return None
+
+    @staticmethod
+    def _fix_common_json_errors(text: str) -> str:
+        """修复 LLM 常见的 JSON 格式错误。"""
+        # 移除尾随逗号: ,} 和 ,]
+        text = re.sub(r",\s*}", "}", text)
+        text = re.sub(r",\s*]", "]", text)
+        # 替换单引号为双引号（简单场景）
+        # 仅在值不含单引号的情况下安全替换
+        # text = text.replace("'", '"')  # 不安全，先注释
+        # 修复 true/false 大小写问题
+        text = re.sub(r"\bTrue\b", "true", text)
+        text = re.sub(r"\bFalse\b", "false", text)
+        text = re.sub(r"\bNone\b", "null", text)
+        return text
+
     @staticmethod
     def _extract_tool_id_hint(text: str) -> str:
         match = re.search(r"(?:skill|工具)[:：]\s*([a-zA-Z][a-zA-Z0-9_]*)", text or "", re.IGNORECASE)
@@ -613,9 +702,8 @@ class RequirementAnalyzer:
         try:
             response = client.chat([Message(role="user", content=prompt)])
             raw = response.content or "{}"
-            json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
+            data = self._parse_llm_json(raw)
+            if data:
                 return BoundaryCheck(**data)
         except Exception as e:
             logger.warning(f"边界检测失败: {e}")
@@ -857,17 +945,43 @@ class RequirementAnalyzer:
             '  "test_input": {"param1": "测试值"}\n'
             "}"
         )
-        try:
-            response = client.chat([Message(role="user", content=prompt)])
-            raw = response.content or ""
-            json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-                return SkillSpec(**data)
-            self._raise_analysis_error("SkillSpec 生成", ValueError("LLM 未返回合法 JSON"))
-        except Exception as e:
-            logger.error(f"SkillSpec 生成失败: {e}")
-            self._raise_analysis_error("SkillSpec 生成", e)
+        # 带 1 次重试的 JSON 解析
+        max_attempts = 2
+        last_raw = ""
+        last_error: Optional[Exception] = None
+
+        for attempt in range(max_attempts):
+            try:
+                if attempt == 0:
+                    response = client.chat([Message(role="user", content=prompt)])
+                else:
+                    # 第 2 次：将上次失败的输出反馈给 LLM，要求修正
+                    retry_prompt = (
+                        f"你上次的输出无法被解析为合法 JSON，请修正后重新输出。\n"
+                        f"上次输出（截断）:\n{last_raw[:800]}\n\n"
+                        f"错误: {last_error}\n\n"
+                        "请只输出纯 JSON，不要包含任何 Markdown 标记或解释文字。"
+                    )
+                    response = client.chat([
+                        Message(role="user", content=prompt),
+                        Message(role="assistant", content=last_raw[:1000]),
+                        Message(role="user", content=retry_prompt),
+                    ])
+
+                last_raw = response.content or ""
+                data = self._parse_llm_json(last_raw)
+                if data:
+                    return SkillSpec(**data)
+
+                last_error = ValueError("LLM 未返回合法 JSON")
+                logger.warning(f"SkillSpec JSON 解析失败 (attempt {attempt + 1}/{max_attempts}): {last_error}")
+
+            except Exception as e:
+                last_error = e
+                logger.warning(f"SkillSpec 生成异常 (attempt {attempt + 1}/{max_attempts}): {e}")
+
+        logger.error(f"SkillSpec 生成最终失败: {last_error}")
+        self._raise_analysis_error("SkillSpec 生成", last_error)
         return None
 
     @staticmethod
