@@ -290,7 +290,7 @@ class DefaultReconnaissanceController(ReconnaissanceController):
             return
 
         if top_fields:
-            report.sample_fields[collection] = top_fields[:60]
+            report.sample_fields[collection] = top_fields
             preview_fields = ", ".join(top_fields[:6])
             report.schema_facts.append(
                 ImplementationFact(source=collection, fact=f"样本字段包括: {preview_fields}", evidence="inspect_stock_collection_schema")
@@ -314,7 +314,7 @@ class DefaultReconnaissanceController(ReconnaissanceController):
             )
             return
         if symbol_docs:
-            symbol_fields = list(symbol_docs[0].keys())[:30]
+            symbol_fields = list(symbol_docs[0].keys())
             report.notes.append(f"{collection} 中存在 {symbol} 的样本记录，首条字段: {', '.join(symbol_fields)}")
             # 将符号样本中的特有字段合并到 sample_fields
             existing = set(report.sample_fields.get(collection, []))
