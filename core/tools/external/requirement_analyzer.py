@@ -702,6 +702,7 @@ class RequirementAnalyzer:
         try:
             response = client.chat([Message(role="user", content=prompt)])
             raw = response.content or "{}"
+            logger.info(f"边界检测 LLM 原始返回 ({len(raw)} 字符):\n{raw}")
             data = self._parse_llm_json(raw)
             if data:
                 return BoundaryCheck(**data)
@@ -969,6 +970,7 @@ class RequirementAnalyzer:
                     ])
 
                 last_raw = response.content or ""
+                logger.info(f"SkillSpec LLM 原始返回 (attempt {attempt + 1}/{max_attempts}, {len(last_raw)} 字符):\n{last_raw}")
                 data = self._parse_llm_json(last_raw)
                 if data:
                     return SkillSpec(**data)
