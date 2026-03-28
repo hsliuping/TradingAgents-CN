@@ -114,6 +114,8 @@ class ImplementationHelper(BaseModel):
     """侦察阶段确认可复用的运行时 helper。"""
     module: str = ""
     name: str = ""
+    signature: str = ""
+    description: str = ""
     reason: str = ""
 
 

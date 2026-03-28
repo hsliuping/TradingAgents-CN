@@ -142,6 +142,8 @@ class DefaultReconnaissanceController(ReconnaissanceController):
                 ImplementationHelper(
                     module="core.skill_runtime.data_access",
                     name="get_stock_valuation_context",
+                    signature="symbol: str, *, lookback_days: int = 90",
+                    description="估值类 Skill 的标准输入入口，可一次获得现价、估值指标和财务数据",
                     reason="估值类 Skill 的标准输入入口，可一次获得现价、估值指标和财务数据",
                 )
             )
@@ -150,6 +152,8 @@ class DefaultReconnaissanceController(ReconnaissanceController):
                 ImplementationHelper(
                     module="core.skill_runtime.data_access",
                     name="summarize_industry_valuation",
+                    signature="industry: str, *, top_n: int = 10",
+                    description="相对估值和行业统计优先复用现有行业估值汇总 helper",
                     reason="相对估值和行业统计优先复用现有行业估值汇总 helper",
                 )
             )
