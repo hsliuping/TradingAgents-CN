@@ -96,6 +96,29 @@
         />
       </el-form-item>
 
+      <el-alert
+        title="🔒 安全提示"
+        type="info"
+        description="页面不会回显真实密钥；保存后只显示脱敏状态。留空时优先沿用数据库已有值，否则回退到环境变量。"
+        show-icon
+        :closable="false"
+        class="mb-2"
+      />
+
+      <el-form-item label="密钥状态">
+        <el-tag :type="formData.extra_config?.has_api_key ? 'success' : 'danger'" size="small">
+          {{ formData.extra_config?.has_api_key ? '已配置' : '未配置' }}
+        </el-tag>
+        <el-tag
+          v-if="formData.extra_config?.has_api_key"
+          :type="formData.extra_config?.source === 'environment' ? 'warning' : 'success'"
+          size="small"
+          class="ml-2"
+        >
+          {{ formData.extra_config?.source === 'environment' ? 'ENV' : 'DB' }}
+        </el-tag>
+      </el-form-item>
+
       <!-- API Key 输入框 -->
       <el-form-item label="API Key" prop="api_key">
         <el-input
@@ -106,7 +129,7 @@
           clearable
         />
         <div class="form-tip">
-          优先级：数据库配置 > 环境变量。留空则使用 .env 文件中的配置
+          优先级：数据库配置 > 环境变量。编辑时留空会保留已有配置；新建时留空则走环境变量
         </div>
       </el-form-item>
 
@@ -201,7 +224,7 @@
       <el-form-item label="自定义参数">
         <div class="config-params">
           <div
-            v-for="(value, key, index) in formData.config_params"
+            v-for="(_value, key, index) in formData.config_params"
             :key="index"
             class="param-item"
           >
@@ -345,7 +368,8 @@ const defaultFormData = {
   priority: 0,
   config_params: {} as Record<string, any>,
   description: '',
-  market_categories: [] as string[]
+  market_categories: [] as string[],
+  extra_config: {} as Record<string, any>
 }
 
 const formData = ref({ ...defaultFormData })
@@ -440,7 +464,7 @@ const rules: FormRules = {
   // API Key 验证规则
   api_key: [
     {
-      validator: (rule: any, value: string, callback: any) => {
+      validator: (_rule: any, value: string, callback: any) => {
         // 如果为空，允许（表示使用环境变量）
         if (!value || value.trim() === '') {
           callback()
@@ -570,6 +594,7 @@ const handleSubmit = async () => {
     // 🔥 修复：直接发送截断的 API Key 给后端
     // 后端会判断截断值是否与数据库中的原值匹配
     const payload: any = { ...formData.value }
+    delete payload.extra_config
 
     // 添加日志，显示发送的 API Key
     if (payload.api_key) {
@@ -650,6 +675,7 @@ const handleTest = async () => {
     // 🔥 修复：直接发送截断的 API Key 给后端
     // 后端会判断截断值是否与数据库中的原值匹配
     const testPayload: any = { ...formData.value }
+    delete testPayload.extra_config
 
     // 添加日志，显示发送的 API Key
     if (testPayload.api_key) {

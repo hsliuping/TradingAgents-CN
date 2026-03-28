@@ -1,13 +1,15 @@
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage, AIMessage
-from typing import List
+from typing import Any, Dict, List, Optional
 from typing import Annotated
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import RemoveMessage
 from langchain_core.tools import tool
 from datetime import date, timedelta, datetime
+from concurrent.futures import ThreadPoolExecutor
 import functools
 import pandas as pd
 import os
+import re
 from dateutil.relativedelta import relativedelta
 from langchain_openai import ChatOpenAI
 import tradingagents.dataflows.interface as interface
@@ -37,6 +39,314 @@ def create_msg_delete():
         return {"messages": removal_operations + [placeholder]}
     
     return delete_messages
+
+
+def _strip_market_suffix_for_news(ticker: str) -> str:
+    return (
+        str(ticker)
+        .strip()
+        .replace(".SH", "")
+        .replace(".SZ", "")
+        .replace(".SS", "")
+        .replace(".HK", "")
+        .replace(".hk", "")
+        .replace(".XSHE", "")
+        .replace(".XSHG", "")
+    )
+
+
+def _resolve_company_name_for_news(ticker: str, market_info: Dict[str, Any]) -> str:
+    try:
+        if market_info["is_china"]:
+            from tradingagents.dataflows.interface import get_china_stock_info_unified
+
+            stock_info = get_china_stock_info_unified(ticker)
+            if stock_info and "股票名称:" in stock_info:
+                return stock_info.split("股票名称:")[1].split("\n")[0].strip()
+        elif market_info["is_hk"]:
+            from tradingagents.dataflows.providers.hk.improved_hk import (
+                get_hk_company_name_improved,
+            )
+
+            return get_hk_company_name_improved(ticker)
+        elif market_info["is_us"]:
+            return ticker.upper()
+    except Exception as exc:
+        logger.warning(f"⚠️ [统一新闻工具] 获取公司名称失败: {ticker}, error={exc}")
+
+    if market_info.get("is_china"):
+        try:
+            from tradingagents.dataflows.providers.china.akshare import AKShareProvider
+
+            provider = AKShareProvider()
+            stock_df = provider.get_stock_list_sync()
+            clean_ticker = _strip_market_suffix_for_news(ticker).zfill(6)
+            if stock_df is not None and not stock_df.empty:
+                matched = stock_df[stock_df["code"].astype(str).str.zfill(6) == clean_ticker]
+                if not matched.empty:
+                    company_name = str(matched.iloc[0].get("name", "") or "").strip()
+                    if company_name:
+                        logger.info(
+                            "📰 [统一新闻工具] A股公司名已通过 AKShare fallback 补齐: %s -> %s",
+                            clean_ticker,
+                            company_name,
+                        )
+                        return company_name
+        except Exception as exc:
+            logger.warning(
+                f"⚠️ [统一新闻工具] AKShare fallback 获取公司名称失败: {ticker}, error={exc}"
+            )
+
+    return ""
+
+
+def _company_name_is_usable_for_news(company_name: str, ticker: str) -> bool:
+    if not company_name:
+        return False
+
+    normalized = company_name.strip()
+    if not normalized:
+        return False
+
+    generic_prefixes = (
+        f"股票{ticker}",
+        f"股票代码{ticker}",
+        f"港股{_strip_market_suffix_for_news(ticker)}",
+        f"美股{ticker}",
+    )
+    return normalized not in generic_prefixes
+
+
+def _build_google_query_candidates_for_news(
+    ticker: str, market_info: Dict[str, Any], company_name: str
+) -> List[str]:
+    clean_code = _strip_market_suffix_for_news(ticker)
+    queries: List[str] = []
+    usable_name = company_name.strip() if _company_name_is_usable_for_news(company_name, ticker) else ""
+
+    if market_info["is_china"]:
+        queries.extend(
+            [
+                f"{clean_code} 股票 新闻",
+                f"{clean_code} 公司 财报 新闻",
+                f"{clean_code} 公告 业绩 新闻",
+            ]
+        )
+        if usable_name:
+            queries.extend(
+                [
+                    f"{usable_name} 股票 新闻",
+                    f"{usable_name} 财报 公告 新闻",
+                    f"{usable_name} 公司 新闻",
+                ]
+            )
+    elif market_info["is_hk"]:
+        queries.extend(
+            [
+                f"{clean_code} 港股 股票 新闻",
+                f"{clean_code} 港股 公司 财报 新闻",
+                f"{clean_code} HK stock news",
+                f"{clean_code} HK earnings news",
+            ]
+        )
+        if usable_name:
+            queries.extend(
+                [
+                    f"{usable_name} 港股 新闻",
+                    f"{usable_name} 港股 财报 新闻",
+                    f"{usable_name} HK news",
+                    f"{usable_name} stock earnings news",
+                ]
+            )
+    else:
+        queries.extend(
+            [
+                f"{ticker} stock news",
+                f"{ticker} earnings news",
+                f"{ticker} company news",
+            ]
+        )
+
+    deduped_queries: List[str] = []
+    seen = set()
+    for query in queries:
+        normalized = " ".join(query.split())
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            deduped_queries.append(normalized)
+    return deduped_queries
+
+
+def _parse_news_datetime_for_sort(value: Any) -> Optional[datetime]:
+    if value is None or value == "":
+        return None
+
+    try:
+        parsed = pd.to_datetime(value, errors="coerce")
+        if pd.isna(parsed):
+            return None
+        if hasattr(parsed, "tz_localize") and parsed.tzinfo is not None:
+            parsed = parsed.tz_localize(None)
+        return parsed.to_pydatetime().replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+def _normalize_news_item_for_tool(
+    raw_item: Dict[str, Any], default_source: str, source_type: str
+) -> Dict[str, Any]:
+    return {
+        "title": str(raw_item.get("title", "") or "").strip(),
+        "summary": str(
+            raw_item.get("summary", "")
+            or raw_item.get("snippet", "")
+            or raw_item.get("content", "")
+            or ""
+        ).strip(),
+        "url": str(raw_item.get("url", "") or raw_item.get("link", "") or "").strip(),
+        "source": str(raw_item.get("source", "") or default_source).strip() or default_source,
+        "publish_time": str(
+            raw_item.get("publish_time", "")
+            or raw_item.get("date", "")
+            or raw_item.get("发布时间", "")
+            or raw_item.get("时间", "")
+            or ""
+        ).strip(),
+        "source_type": source_type,
+    }
+
+
+def _calculate_news_relevance_score(
+    item: Dict[str, Any],
+    ticker: str,
+    market_info: Dict[str, Any],
+    company_name: str,
+    start_date: datetime,
+) -> float:
+    publish_dt = _parse_news_datetime_for_sort(item.get("publish_time"))
+    if publish_dt and publish_dt < start_date:
+        return -1.0
+
+    text = " ".join(
+        [
+            str(item.get("title", "") or ""),
+            str(item.get("summary", "") or ""),
+            str(item.get("url", "") or ""),
+            str(item.get("source", "") or ""),
+        ]
+    )
+    text_lower = text.lower()
+    score = 0.0
+
+    clean_code = _strip_market_suffix_for_news(ticker)
+    if clean_code and clean_code in text:
+        score += 4.5
+    if ticker.lower() in text_lower:
+        score += 4.0
+
+    if market_info["is_hk"]:
+        hk_aliases = {
+            clean_code,
+            clean_code.lstrip("0"),
+            f"{clean_code}.hk",
+            f"({clean_code})",
+            f"({clean_code}.hk)",
+        }
+        for alias in hk_aliases:
+            alias = alias.strip().lower()
+            if alias and alias in text_lower:
+                score += 2.0
+        if ".hk" in text_lower or "港股" in text:
+            score += 0.5
+
+    if market_info["is_china"]:
+        a_aliases = {
+            clean_code,
+            f"{clean_code}.sh",
+            f"{clean_code}.sz",
+            f"({clean_code})",
+        }
+        for alias in a_aliases:
+            alias = alias.strip().lower()
+            if alias and alias in text_lower:
+                score += 1.5
+
+    if _company_name_is_usable_for_news(company_name, ticker):
+        normalized_name = company_name.strip().lower()
+        if normalized_name in text_lower:
+            score += 4.0
+
+    if publish_dt:
+        age_days = max((datetime.now() - publish_dt).total_seconds() / 86400, 0)
+        score += max(0.0, 2.0 - min(age_days, 2.0))
+
+    return score if score >= 3.5 else -1.0
+
+
+def _filter_sort_news_items_for_tool(
+    items: List[Dict[str, Any]],
+    ticker: str,
+    market_info: Dict[str, Any],
+    company_name: str,
+    start_date: datetime,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    filtered: List[Dict[str, Any]] = []
+    seen = set()
+
+    for item in items:
+        normalized = _normalize_news_item_for_tool(
+            item,
+            default_source=str(item.get("source", "") or "未知来源"),
+            source_type=str(item.get("source_type", "") or "unknown"),
+        )
+        if not normalized["title"]:
+            continue
+
+        relevance_score = _calculate_news_relevance_score(
+            normalized, ticker, market_info, company_name, start_date
+        )
+        if relevance_score < 0:
+            continue
+
+        dedupe_key = (
+            normalized["title"].strip().lower(),
+            normalized["url"].strip().lower(),
+            normalized["source"].strip().lower(),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        normalized["relevance_score"] = relevance_score
+        normalized["publish_dt"] = _parse_news_datetime_for_sort(normalized["publish_time"])
+        filtered.append(normalized)
+
+    filtered.sort(
+        key=lambda item: (
+            item.get("publish_dt") or datetime.min,
+            item.get("relevance_score", 0),
+        ),
+        reverse=True,
+    )
+    return filtered[:limit]
+
+
+def _format_news_section_for_tool(section_title: str, items: List[Dict[str, Any]]) -> str:
+    lines = [f"## {section_title}"]
+    for item in items:
+        title = item.get("title", "")
+        publish_time = item.get("publish_time", "") or "未知时间"
+        url = item.get("url", "")
+        source = item.get("source", "") or "未知来源"
+        summary = item.get("summary", "")
+        if url:
+            lines.append(f"- **{title}** [{publish_time}]({url}) | 来源: {source}")
+        else:
+            lines.append(f"- **{title}** [{publish_time}] | 来源: {source}")
+        if summary:
+            lines.append(f"  摘要: {summary[:220]}")
+    return "\n".join(lines)
 
 
 class Toolkit:
@@ -1179,6 +1489,8 @@ class Toolkit:
             is_china = market_info['is_china']
             is_hk = market_info['is_hk']
             is_us = market_info['is_us']
+            clean_ticker = _strip_market_suffix_for_news(ticker)
+            company_name = _resolve_company_name_for_news(ticker, market_info)
 
             logger.info(f"📰 [统一新闻工具] 股票类型: {market_info['market_name']}")
 
@@ -1186,71 +1498,277 @@ class Toolkit:
             end_date = datetime.strptime(curr_date, '%Y-%m-%d')
             start_date = end_date - timedelta(days=7)
             start_date_str = start_date.strftime('%Y-%m-%d')
+            google_queries = _build_google_query_candidates_for_news(
+                ticker, market_info, company_name
+            )
 
             result_data = []
 
-            if is_china or is_hk:
-                # 中国A股和港股：使用AKShare东方财富新闻和Google新闻（中文搜索）
-                logger.info(f"🇨🇳🇭🇰 [统一新闻工具] 处理中文新闻...")
+            def _run_hk_news_service_sync(code: str) -> Dict[str, Any]:
+                import asyncio
+                import threading
+                from app.services.foreign_stock_service import ForeignStockService
 
-                # 1. 尝试获取AKShare东方财富新闻
+                async def _fetch():
+                    service = ForeignStockService()
+                    return await service.get_hk_news(code, days=7, limit=20)
+
                 try:
-                    # 处理股票代码
-                    clean_ticker = ticker.replace('.SH', '').replace('.SZ', '').replace('.SS', '')\
-                                   .replace('.HK', '').replace('.XSHE', '').replace('.XSHG', '')
-                    
-                    logger.info(f"🇨🇳🇭🇰 [统一新闻工具] 尝试获取东方财富新闻: {clean_ticker}")
+                    asyncio.get_running_loop()
+                except RuntimeError:
+                    return asyncio.run(_fetch())
 
-                    # 通过 AKShare Provider 获取新闻
-                    from tradingagents.dataflows.providers.china.akshare import AKShareProvider
+                result_holder: Dict[str, Any] = {}
+                error_holder: Dict[str, Exception] = {}
 
-                    provider = AKShareProvider()
+                def _worker():
+                    try:
+                        result_holder["value"] = asyncio.run(_fetch())
+                    except Exception as exc:
+                        error_holder["error"] = exc
 
-                    # 获取东方财富新闻
-                    news_df = provider.get_stock_news_sync(symbol=clean_ticker)
+                worker = threading.Thread(target=_worker, daemon=True)
+                worker.start()
+                worker.join()
 
-                    if news_df is not None and not news_df.empty:
-                        # 格式化东方财富新闻
-                        em_news_items = []
+                if "error" in error_holder:
+                    raise error_holder["error"]
+
+                return result_holder.get("value", {})
+
+            def _fetch_native_news() -> Dict[str, Any]:
+                if is_china:
+                    try:
+                        from tradingagents.dataflows.providers.china.akshare import AKShareProvider
+
+                        provider = AKShareProvider()
+                        news_df = provider.get_stock_news_sync(symbol=clean_ticker, limit=20)
+                        if news_df is None or news_df.empty:
+                            return {
+                                "section_title": "A股原生新闻源（AKShare/东方财富）",
+                                "source": "akshare",
+                                "items": [],
+                                "error": "原生新闻源返回空结果",
+                            }
+
+                        items = []
                         for _, row in news_df.iterrows():
-                            # AKShare 返回的字段名
-                            news_title = row.get('新闻标题', '') or row.get('标题', '')
-                            news_time = row.get('发布时间', '') or row.get('时间', '')
-                            news_url = row.get('新闻链接', '') or row.get('链接', '')
+                            items.append(
+                                {
+                                    "title": row.get("新闻标题", "") or row.get("标题", ""),
+                                    "summary": row.get("新闻内容", "") or row.get("内容", ""),
+                                    "url": row.get("新闻链接", "") or row.get("链接", ""),
+                                    "source": "AKShare-东方财富",
+                                    "publish_time": row.get("发布时间", "") or row.get("时间", ""),
+                                    "source_type": "native",
+                                }
+                            )
 
-                            news_item = f"- **{news_title}** [{news_time}]({news_url})"
-                            em_news_items.append(news_item)
-                        
-                        # 添加到结果中
-                        if em_news_items:
-                            em_news_text = "\n".join(em_news_items)
-                            result_data.append(f"## 东方财富新闻\n{em_news_text}")
-                            logger.info(f"🇨🇳🇭🇰 [统一新闻工具] 成功获取{len(em_news_items)}条东方财富新闻")
-                except Exception as em_e:
-                    logger.error(f"❌ [统一新闻工具] 东方财富新闻获取失败: {em_e}")
-                    result_data.append(f"## 东方财富新闻\n获取失败: {em_e}")
+                        return {
+                            "section_title": "A股原生新闻源（AKShare/东方财富）",
+                            "source": "akshare",
+                            "items": items,
+                            "error": None,
+                        }
+                    except Exception as exc:
+                        return {
+                            "section_title": "A股原生新闻源（AKShare/东方财富）",
+                            "source": "akshare",
+                            "items": [],
+                            "error": str(exc),
+                        }
 
-                # 2. 获取Google新闻作为补充
-                try:
-                    # 获取公司中文名称用于搜索
-                    if is_china:
-                        # A股使用股票代码搜索，添加更多中文关键词
-                        clean_ticker = ticker.replace('.SH', '').replace('.SZ', '').replace('.SS', '')\
-                                       .replace('.XSHE', '').replace('.XSHG', '')
-                        search_query = f"{clean_ticker} 股票 公司 财报 新闻"
-                        logger.info(f"🇨🇳 [统一新闻工具] A股Google新闻搜索关键词: {search_query}")
-                    else:
-                        # 港股使用代码搜索
-                        search_query = f"{ticker} 港股"
-                        logger.info(f"🇭🇰 [统一新闻工具] 港股Google新闻搜索关键词: {search_query}")
+                if is_hk:
+                    try:
+                        from app.services.foreign_stock_service import ForeignStockService
 
-                    from tradingagents.dataflows.interface import get_google_news
-                    news_data = get_google_news(search_query, curr_date)
-                    result_data.append(f"## Google新闻\n{news_data}")
-                    logger.info(f"🇨🇳🇭🇰 [统一新闻工具] 成功获取Google新闻")
-                except Exception as google_e:
-                    logger.error(f"❌ [统一新闻工具] Google新闻获取失败: {google_e}")
-                    result_data.append(f"## Google新闻\n获取失败: {google_e}")
+                        service = ForeignStockService()
+                        result = _run_hk_news_service_sync(clean_ticker)
+                        source = (
+                            result.get("source", "none")
+                            if isinstance(result, dict)
+                            else "none"
+                        )
+                        items = result.get("items", []) if isinstance(result, dict) else []
+
+                        if not items:
+                            fallback_errors = []
+                            for fallback_source, handler_name in (
+                                ("akshare", "_get_hk_news_from_akshare"),
+                                ("finnhub", "_get_hk_news_from_finnhub"),
+                            ):
+                                handler = getattr(service, handler_name, None)
+                                if not handler:
+                                    continue
+                                try:
+                                    items = handler(clean_ticker, 7, 20)
+                                    if items:
+                                        source = fallback_source
+                                        break
+                                except Exception as fallback_error:
+                                    fallback_errors.append(
+                                        f"{fallback_source}: {fallback_error}"
+                                    )
+
+                            error = (
+                                "; ".join(fallback_errors)
+                                if fallback_errors and not items
+                                else "原生新闻源返回空结果"
+                            )
+                        else:
+                            error = None
+
+                        return {
+                            "section_title": f"港股原生新闻源（ForeignStockService/{source}）",
+                            "source": source,
+                            "items": [
+                                {
+                                    **item,
+                                    "source_type": "native",
+                                }
+                                for item in items
+                            ],
+                            "error": error,
+                        }
+                    except Exception as exc:
+                        return {
+                            "section_title": "港股原生新闻源（ForeignStockService）",
+                            "source": "none",
+                            "items": [],
+                            "error": str(exc),
+                        }
+
+                return {
+                    "section_title": "美股原生新闻源（Finnhub）",
+                    "source": "finnhub",
+                    "items": [],
+                    "error": "当前仅对A股和港股应用统一新闻并列编排",
+                }
+
+            def _fetch_google_news_bundle() -> Dict[str, Any]:
+                if not google_queries:
+                    return {
+                        "section_title": "Google新闻（多关键词聚合）",
+                        "source": "google_rss",
+                        "items": [],
+                        "queries": [],
+                        "error": "未生成有效的 Google 查询关键词",
+                    }
+
+                from tradingagents.dataflows.news.google_news import getNewsData
+
+                items: List[Dict[str, Any]] = []
+                query_errors: List[str] = []
+
+                def _fetch_single_query(query: str) -> List[Dict[str, Any]]:
+                    return getNewsData(query, start_date_str, curr_date)
+
+                with ThreadPoolExecutor(max_workers=min(4, len(google_queries))) as executor:
+                    future_to_query = {
+                        executor.submit(_fetch_single_query, query): query
+                        for query in google_queries
+                    }
+                    for future, query in future_to_query.items():
+                        try:
+                            query_items = future.result() or []
+                            for item in query_items:
+                                items.append(
+                                    {
+                                        **item,
+                                        "source_type": "google",
+                                    }
+                                )
+                        except Exception as exc:
+                            query_errors.append(f"{query}: {exc}")
+
+                return {
+                    "section_title": "Google新闻（多关键词聚合）",
+                    "source": "google_rss",
+                    "items": items,
+                    "queries": google_queries,
+                    "error": "; ".join(query_errors) if query_errors else None,
+                }
+
+            if is_china or is_hk:
+                logger.info(
+                    f"🌐 [统一新闻工具] 启动并列新闻获取: ticker={ticker}, native+google, queries={google_queries}"
+                )
+
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    native_future = executor.submit(_fetch_native_news)
+                    google_future = executor.submit(_fetch_google_news_bundle)
+                    native_result = native_future.result()
+                    google_result = google_future.result()
+
+                native_items = _filter_sort_news_items_for_tool(
+                    native_result.get("items", []),
+                    ticker=ticker,
+                    market_info=market_info,
+                    company_name=company_name,
+                    start_date=start_date,
+                    limit=12,
+                )
+                google_items = _filter_sort_news_items_for_tool(
+                    google_result.get("items", []),
+                    ticker=ticker,
+                    market_info=market_info,
+                    company_name=company_name,
+                    start_date=start_date,
+                    limit=12,
+                )
+
+                if native_items:
+                    result_data.append(
+                        _format_news_section_for_tool(
+                            native_result["section_title"], native_items
+                        )
+                    )
+                else:
+                    result_data.append(
+                        f"## {native_result['section_title']}\n"
+                        f"无高相关结果。"
+                        + (
+                            f" 错误: {native_result['error']}"
+                            if native_result.get("error")
+                            else ""
+                        )
+                    )
+
+                if google_items:
+                    google_section = _format_news_section_for_tool(
+                        google_result["section_title"], google_items
+                    )
+                    if google_result.get("queries"):
+                        google_section += "\n关键词: " + " | ".join(
+                            google_result["queries"][:6]
+                        )
+                    result_data.append(google_section)
+                else:
+                    result_data.append(
+                        f"## {google_result['section_title']}\n"
+                        f"无高相关结果。"
+                        + (
+                            f" 错误: {google_result['error']}"
+                            if google_result.get("error")
+                            else ""
+                        )
+                    )
+
+                if not native_items and not google_items:
+                    error_lines = [
+                        f"# {ticker} 新闻分析",
+                        "",
+                        f"**股票类型**: {market_info['market_name']}",
+                        f"**分析日期**: {curr_date}",
+                        f"**新闻时间范围**: {start_date_str} 至 {curr_date}",
+                        "",
+                        "## 获取失败",
+                        "原生路径与 Google 新闻都未返回有效的高相关近期新闻，请手动处理。",
+                        f"- 原生路径状态: {native_result.get('error') or '空结果'}",
+                        f"- Google状态: {google_result.get('error') or '空结果'}",
+                        "- Google关键词: " + " | ".join(google_queries[:8]),
+                    ]
+                    return "\n".join(error_lines)
 
             else:
                 # 美股：使用Finnhub新闻

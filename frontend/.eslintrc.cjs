@@ -1,5 +1,9 @@
 /* eslint-env node */
-require('@rushstack/eslint-patch/modern-module-resolution')
+try {
+  require('@rushstack/eslint-patch/modern-module-resolution')
+} catch (error) {
+  // Optional in this repository: missing patch should not block lint execution.
+}
 
 module.exports = {
   root: true,

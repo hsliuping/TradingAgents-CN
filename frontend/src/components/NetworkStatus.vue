@@ -20,58 +20,36 @@
       show-icon
     >
       <template #default>
-        <span>无法连接到后端服务，请检查服务是否正常运行</span>
-        <el-button 
-          type="primary" 
-          size="small" 
-          @click="retryConnection"
-          :loading="retrying"
-          style="margin-left: 10px;"
-        >
-          重试连接
-        </el-button>
+        <div class="api-connection-message">
+          <span>无法连接到后端服务，请检查服务是否正常运行</span>
+          <span class="api-connection-tip">系统会自动重连，恢复后此提示会自动消失</span>
+        </div>
       </template>
     </el-alert>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 
 const appStore = useAppStore()
-const retrying = ref(false)
 
 // 只在有网络问题时显示状态
 const showStatus = computed(() => {
   return !appStore.isOnline || !appStore.apiConnected
 })
 
-// 重试连接
-const retryConnection = async () => {
-  retrying.value = true
-  try {
-    await appStore.checkApiConnection()
-    if (appStore.apiConnected) {
-      console.log('✅ API连接恢复')
-    }
-  } catch (error) {
-    console.error('❌ 重试连接失败:', error)
-  } finally {
-    retrying.value = false
-  }
-}
-
 // 定期检查API连接状态
 let checkInterval: number | null = null
 
 onMounted(() => {
-  // 每30秒检查一次API连接状态
+  // 自动轮询重连；仅在网络在线且后端未连接时触发
   checkInterval = window.setInterval(() => {
     if (appStore.isOnline && !appStore.apiConnected) {
       appStore.checkApiConnection()
     }
-  }, 30000)
+  }, 15000)
 })
 
 onUnmounted(() => {
@@ -97,6 +75,19 @@ onUnmounted(() => {
 .network-status :deep(.el-alert__content) {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+}
+
+.api-connection-message {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+
+.api-connection-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 </style>

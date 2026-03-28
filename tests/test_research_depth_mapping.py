@@ -3,7 +3,28 @@
 验证前端数字等级到后端中文等级的转换
 """
 import pytest
+import app.services.simple_analysis_service as simple_analysis_service
 from app.services.simple_analysis_service import create_analysis_config
+
+
+@pytest.fixture(autouse=True)
+def stub_model_provider_lookup(monkeypatch):
+    """避免测试因 MongoDB 查询模型配置而长时间阻塞。"""
+
+    def _fake_provider_info(model_name: str):
+        return {
+            "provider": "dashscope",
+            "backend_url": "https://dashscope.aliyuncs.com/api/v1",
+            "api_key": None,
+            "model_name": model_name,
+        }
+
+    monkeypatch.setattr(
+        simple_analysis_service,
+        "get_provider_and_url_by_model_sync",
+        _fake_provider_info,
+        raising=True,
+    )
 
 
 class TestResearchDepthMapping:
@@ -191,4 +212,3 @@ class TestResearchDepthMapping:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])
-

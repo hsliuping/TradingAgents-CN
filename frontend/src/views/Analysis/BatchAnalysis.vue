@@ -290,7 +290,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Files, TrendCharts, Check, Close } from '@element-plus/icons-vue'
 import { ANALYSTS, DEFAULT_ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
@@ -313,8 +313,8 @@ const invalidCodes = ref<string[]>([])
 
 // 模型设置
 const modelSettings = ref({
-  quickAnalysisModel: 'qwen-turbo',
-  deepAnalysisModel: 'qwen-max'
+  quickAnalysisModel: '',
+  deepAnalysisModel: ''
 })
 
 // 可用的模型列表（从配置中获取）
@@ -352,7 +352,7 @@ const parseStockCodes = () => {
   const normalized: string[] = []
   const invalid: string[] = []
   for (const c of codes) {
-    const { symbol, error } = normalizeCodeSmart(c)
+    const { symbol } = normalizeCodeSmart(c)
     if (symbol) normalized.push(symbol)
     else invalid.push(c)
   }
@@ -386,11 +386,10 @@ const initializeModelSettings = async () => {
       deep: modelSettings.value.deepAnalysisModel,
       available: availableModels.value.length
     })
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('加载默认模型配置失败:', error)
-    // 使用硬编码的默认值
-    modelSettings.value.quickAnalysisModel = 'qwen-turbo'
-    modelSettings.value.deepAnalysisModel = 'qwen-max'
+    modelSettings.value.quickAnalysisModel = ''
+    modelSettings.value.deepAnalysisModel = ''
   }
 }
 
@@ -546,28 +545,14 @@ const submitBatchAnalysis = async () => {
       }
     })
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     // 处理错误
     if (error !== 'cancel') {
-      ElMessage.error(error.message || '批量分析提交失败')
+      ElMessage.error(error instanceof Error ? error.message : '批量分析提交失败')
     }
   } finally {
     submitting.value = false
   }
-}
-
-const resetForm = () => {
-  // 从用户偏好加载默认值
-  const authStore = useAuthStore()
-  const userPrefs = authStore.user?.preferences
-
-  Object.assign(batchForm, {
-    title: '',
-    description: '',
-    depth: userPrefs?.default_depth || '3',
-    analysts: userPrefs?.default_analysts ? [...userPrefs.default_analysts] : [...DEFAULT_ANALYSTS]
-  })
-  clearStocks()
 }
 
 </script>

@@ -3,11 +3,13 @@
 基于现有MongoDB集合，提供标准化的数据访问服务
 """
 import logging
+import asyncio
 from datetime import datetime, date
 from typing import Optional, Dict, Any, List
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.database import get_mongo_db
+from app.services.market_metadata_service import infer_market_metadata
 from app.models.stock_models import (
     StockBasicInfoExtended, 
     MarketQuotesExtended,
@@ -29,7 +31,48 @@ class StockDataService:
     def __init__(self):
         self.basic_info_collection = "stock_basic_info"
         self.market_quotes_collection = "market_quotes"
-    
+
+    async def _fetch_a_share_basic_info_from_akshare(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """通过 AKShare 兜底获取 A 股基础信息。"""
+        try:
+            from app.services.data_sources.akshare_adapter import AKShareAdapter
+
+            adapter = AKShareAdapter()
+            stock_df = await asyncio.to_thread(adapter.get_stock_list)
+            if stock_df is None or stock_df.empty:
+                logger.warning("AKShare fallback 股票列表为空: %s", symbol)
+                return None
+
+            symbol6 = str(symbol).zfill(6)
+            matched = stock_df[stock_df["symbol"].astype(str).str.zfill(6) == symbol6]
+            if matched.empty:
+                logger.info("AKShare fallback 未找到股票代码: %s", symbol6)
+                return None
+
+            row = matched.iloc[0]
+            inferred = infer_market_metadata("A股", symbol6)
+            basic_info = {
+                "symbol": symbol6,
+                "code": symbol6,
+                "name": str(row.get("name", "") or "").strip(),
+                "area": str(row.get("area", "") or "").strip(),
+                "industry": str(row.get("industry", "") or "").strip(),
+                "market": str(row.get("market", "") or "").strip() or inferred.get("board"),
+                "sse": inferred.get("exchange"),
+                "sec": "stock_cn",
+                "full_symbol": str(row.get("ts_code", "") or "").strip() or inferred.get("full_symbol"),
+                "source": "akshare",
+            }
+
+            if not basic_info["name"]:
+                logger.warning("AKShare fallback 命中股票但名称为空: %s", symbol6)
+                return None
+
+            return basic_info
+        except Exception as e:
+            logger.warning("AKShare fallback 获取股票基础信息失败 symbol=%s: %s", symbol, e)
+            return None
+
     async def get_stock_basic_info(
         self,
         symbol: str,
@@ -77,7 +120,13 @@ class StockDataService:
                         logger.warning(f"⚠️ 使用旧数据（无 source 字段）: {symbol6}")
 
             if not doc:
-                return None
+                fallback_doc = await self._fetch_a_share_basic_info_from_akshare(symbol6)
+                if fallback_doc:
+                    await self.update_stock_basic_info(symbol6, fallback_doc, source="akshare")
+                    doc = fallback_doc
+                    logger.info(f"✅ 使用 AKShare fallback 获取并缓存股票基础信息: {symbol6}")
+                else:
+                    return None
 
             # 数据标准化处理
             standardized_doc = self._standardize_basic_info(doc)
@@ -203,26 +252,27 @@ class StockDataService:
         try:
             db = get_mongo_db()
             symbol6 = str(symbol).zfill(6)
+            payload = dict(update_data)
 
             # 添加更新时间
-            update_data["updated_at"] = datetime.utcnow()
+            payload["updated_at"] = datetime.utcnow()
 
             # 确保symbol字段存在
-            if "symbol" not in update_data:
-                update_data["symbol"] = symbol6
+            if "symbol" not in payload:
+                payload["symbol"] = symbol6
 
             # 🔥 确保 code 字段存在
-            if "code" not in update_data:
-                update_data["code"] = symbol6
+            if "code" not in payload:
+                payload["code"] = symbol6
 
             # 🔥 确保 source 字段存在
-            if "source" not in update_data:
-                update_data["source"] = source
+            if "source" not in payload:
+                payload["source"] = source
 
             # 🔥 执行更新 (使用 code + source 联合查询)
             result = await db[self.basic_info_collection].update_one(
                 {"code": symbol6, "source": source},
-                {"$set": update_data},
+                {"$set": payload},
                 upsert=True
             )
 
@@ -248,20 +298,21 @@ class StockDataService:
         try:
             db = get_mongo_db()
             symbol6 = str(symbol).zfill(6)
+            payload = dict(quote_data)
 
             # 添加更新时间
-            quote_data["updated_at"] = datetime.utcnow()
+            payload["updated_at"] = datetime.utcnow()
 
             # 🔥 确保 symbol 和 code 字段都存在（兼容旧索引）
-            if "symbol" not in quote_data:
-                quote_data["symbol"] = symbol6
-            if "code" not in quote_data:
-                quote_data["code"] = symbol6  # code 和 symbol 使用相同的值
+            if "symbol" not in payload:
+                payload["symbol"] = symbol6
+            if "code" not in payload:
+                payload["code"] = symbol6  # code 和 symbol 使用相同的值
 
             # 执行更新 (使用symbol字段作为查询条件)
             result = await db[self.market_quotes_collection].update_one(
                 {"symbol": symbol6},
-                {"$set": quote_data},
+                {"$set": payload},
                 upsert=True
             )
 
@@ -288,50 +339,31 @@ class StockDataService:
             result["code"] = doc["code"]
         
         # 生成完整代码 (优先使用已有的full_symbol)
+        inferred = infer_market_metadata("A股", symbol)
+
         if "full_symbol" not in result or not result["full_symbol"]:
-            if symbol and len(symbol) == 6:
-                # 根据代码判断交易所
-                if symbol.startswith(('60', '68', '90')):
-                    result["full_symbol"] = f"{symbol}.SS"
-                    exchange = "SSE"
-                    exchange_name = "上海证券交易所"
-                elif symbol.startswith(('00', '30', '20')):
-                    result["full_symbol"] = f"{symbol}.SZ"
-                    exchange = "SZSE"
-                    exchange_name = "深圳证券交易所"
-                else:
-                    result["full_symbol"] = f"{symbol}.SZ"  # 默认深交所
-                    exchange = "SZSE"
-                    exchange_name = "深圳证券交易所"
-            else:
-                exchange = "SZSE"
-                exchange_name = "深圳证券交易所"
-        else:
-            # 从full_symbol解析交易所
-            full_symbol = result["full_symbol"]
-            if ".SS" in full_symbol or ".SH" in full_symbol:
-                exchange = "SSE"
-                exchange_name = "上海证券交易所"
-            else:
-                exchange = "SZSE"
-                exchange_name = "深圳证券交易所"
-            
-            # 添加市场信息
-            result["market_info"] = {
-                "market": "CN",
-                "exchange": exchange,
-                "exchange_name": exchange_name,
-                "currency": "CNY",
-                "timezone": "Asia/Shanghai",
-                "trading_hours": {
-                    "open": "09:30",
-                    "close": "15:00",
-                    "lunch_break": ["11:30", "13:00"]
-                }
+            result["full_symbol"] = inferred.get("full_symbol") or result.get("full_symbol")
+
+        exchange = inferred.get("exchange_code") or "SZSE"
+        exchange_name = inferred.get("exchange") or "深圳证券交易所"
+
+        result["market_info"] = {
+            "market": "CN",
+            "exchange": exchange,
+            "exchange_name": exchange_name,
+            "currency": "CNY",
+            "timezone": "Asia/Shanghai",
+            "trading_hours": {
+                "open": "09:30",
+                "close": "15:00",
+                "lunch_break": ["11:30", "13:00"]
             }
+        }
         
         # 字段映射和标准化
-        result["board"] = doc.get("sse")  # 板块标准化
+        result["board"] = doc.get("market") or inferred.get("board")  # 板块标准化
+        result["market"] = doc.get("market") or inferred.get("board")
+        result["sse"] = doc.get("sse") or inferred.get("exchange")
         result["sector"] = doc.get("sec")  # 所属板块标准化
         result["status"] = "L"  # 默认上市状态
         result["data_version"] = 1

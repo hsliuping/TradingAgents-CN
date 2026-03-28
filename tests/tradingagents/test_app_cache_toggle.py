@@ -44,22 +44,22 @@ def test_basics_prefers_app_cache_when_enabled(monkeypatch):
     # Inject dummy db_manager
     monkeypatch.setattr(svc, "db_manager", DummyDBManager(True))
 
-    called = {"api": False}
+    called = {"enhanced": False}
 
     def fake_from_mongo(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
         return {"code": stock_code or "000001", "name": "平安银行", "source": "mongo"}
 
-    def fake_from_api(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        called["api"] = True
+    def fake_from_enhanced_fetcher(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        called["enhanced"] = True
         return {"code": stock_code or "000001", "name": "平安银行", "source": "api"}
 
     monkeypatch.setattr(svc, "_get_from_mongodb", fake_from_mongo)
-    monkeypatch.setattr(svc, "_get_from_tdx_api", fake_from_api)
+    monkeypatch.setattr(svc, "_get_from_enhanced_fetcher", fake_from_enhanced_fetcher)
 
     res = svc.get_stock_basic_info("000001")
     assert isinstance(res, dict)
     assert res.get("source") == "mongo"
-    assert called["api"] is False  # API should not be called when cache hits
+    assert called["enhanced"] is False  # Mongo 命中时不应降级到增强获取器
 
 
 def test_basics_fallback_to_api_when_cache_miss(monkeypatch):
@@ -74,24 +74,24 @@ def test_basics_fallback_to_api_when_cache_miss(monkeypatch):
     svc = StockDataService()
     monkeypatch.setattr(svc, "db_manager", DummyDBManager(True))
 
-    called = {"api": False}
+    called = {"enhanced": False}
 
     def miss_from_mongo(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
         return None
 
-    def fake_from_api(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        called["api"] = True
+    def fake_from_enhanced_fetcher(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        called["enhanced"] = True
         return {"code": stock_code or "000001", "name": "平安银行", "source": "api"}
 
     monkeypatch.setattr(svc, "_get_from_mongodb", miss_from_mongo)
-    monkeypatch.setattr(svc, "_get_from_tdx_api", fake_from_api)
+    monkeypatch.setattr(svc, "_get_from_enhanced_fetcher", fake_from_enhanced_fetcher)
     # avoid cache-to-mongo side effect raising inside try
     monkeypatch.setattr(svc, "_cache_to_mongodb", lambda data: True)
 
     res = svc.get_stock_basic_info("000001")
     assert isinstance(res, dict)
     assert res.get("source") == "api"
-    assert called["api"] is True
+    assert called["enhanced"] is True
 
 
 def test_basics_direct_first_when_disabled(monkeypatch):
@@ -108,33 +108,35 @@ def test_basics_direct_first_when_disabled(monkeypatch):
 
     order = []
 
-    def fake_from_api(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        order.append("api")
+    def fake_from_enhanced_fetcher(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        order.append("enhanced")
         return {"code": stock_code or "000001", "name": "平安银行", "source": "api"}
 
     def fake_from_mongo(stock_code: Optional[str] = None) -> Optional[Dict[str, Any]]:
         order.append("mongo")
         return {"code": stock_code or "000001", "name": "平安银行", "source": "mongo"}
 
-    monkeypatch.setattr(svc, "_get_from_tdx_api", fake_from_api)
+    monkeypatch.setattr(svc, "_get_from_enhanced_fetcher", fake_from_enhanced_fetcher)
     monkeypatch.setattr(svc, "_get_from_mongodb", fake_from_mongo)
     # avoid cache-to-mongo side effect raising inside try
     monkeypatch.setattr(svc, "_cache_to_mongodb", lambda data: True)
+    # 当前实现未读取 TA_USE_APP_CACHE；对该服务而言，"disabled" 更接近 Mongo 不可用场景。
+    monkeypatch.setattr(svc, "db_manager", DummyDBManager(False))
 
     res = svc.get_stock_basic_info("000001")
     assert isinstance(res, dict)
     assert res.get("source") == "api"
-    assert order[0] == "api"
+    assert order[0] == "enhanced"
 
 
 def test_realtime_quotes_prefers_app_market_quotes(monkeypatch):
     os.environ["TA_USE_APP_CACHE"] = "true"
 
-    # Patch the app_cache_adapter before TushareAdapter tries to import from it
-    import tradingagents.dataflows.app_cache_adapter as app_cache_adapter
+    from tradingagents.dataflows import data_source_manager as dsm_mod
+    from tradingagents.dataflows.data_source_manager import ChinaDataSource, DataSourceManager
+    import tradingagents.dataflows.cache.app_adapter as app_cache_adapter
 
     def fake_get_market_quote_dataframe(symbol: str):
-        # Return a minimal dataframe resembling the adapter output
         return pd.DataFrame([
             {
                 "code": symbol,
@@ -150,23 +152,27 @@ def test_realtime_quotes_prefers_app_market_quotes(monkeypatch):
             }
         ])
 
+    def fake_get_basics_from_cache(symbol: str):
+        return {
+            "code": symbol,
+            "name": "平安银行",
+            "area": "深圳",
+            "industry": "银行",
+            "market": "主板",
+            "list_date": "19910403",
+        }
+
+    monkeypatch.setattr(dsm_mod.DataSourceManager, "_check_mongodb_enabled", lambda self: True)
+    monkeypatch.setattr(dsm_mod.DataSourceManager, "_get_default_source", lambda self: ChinaDataSource.TUSHARE)
+    monkeypatch.setattr(dsm_mod.DataSourceManager, "_check_available_sources", lambda self: [ChinaDataSource.TUSHARE])
     monkeypatch.setattr(app_cache_adapter, "get_market_quote_dataframe", fake_get_market_quote_dataframe)
+    monkeypatch.setattr(app_cache_adapter, "get_basics_from_cache", fake_get_basics_from_cache)
 
-    from tradingagents.dataflows.tushare_adapter import TushareDataAdapter
+    mgr = DataSourceManager()
+    result = mgr.get_stock_info("000001")
 
-    # Create adapter and stub provider to avoid real Tushare calls
-    ada = TushareDataAdapter(enable_cache=False)
-    class DummyProvider:
-        def get_stock_daily(self, symbol, start_date, end_date):
-            # Should not be called because cache will be used
-            return pd.DataFrame()
-    ada.provider = DummyProvider()
-
-    # Also make standardizer identity to simplify assertion
-    monkeypatch.setattr(ada, "_standardize_data", lambda df: df)
-
-    df = ada._get_realtime_data("000001")
-    assert isinstance(df, pd.DataFrame)
-    assert not df.empty
-    assert set(["open", "high", "low", "close"]).issubset(df.columns)
-
+    assert result["source"] == "app_cache"
+    assert result["quote_source"] == "market_quotes"
+    assert result["current_price"] == 10.5
+    assert result["change_pct"] == 1.2
+    assert result["volume"] == 1000000

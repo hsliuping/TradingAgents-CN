@@ -38,7 +38,16 @@ from .reflection import Reflector
 from .signal_processing import SignalProcessor
 
 
-def create_llm_by_provider(provider: str, model: str, backend_url: str, temperature: float, max_tokens: int, timeout: int, api_key: str = None):
+def create_llm_by_provider(
+    provider: str,
+    model: str,
+    backend_url: str,
+    temperature: float,
+    max_tokens: int,
+    timeout: int,
+    api_key: str = None,
+    retry_times: int = 3,
+):
     """
     根据 provider 创建对应的 LLM 实例
 
@@ -58,6 +67,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
     from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
 
     logger.info(f"🔧 [创建LLM] provider={provider}, model={model}, url={backend_url}")
+    logger.info(f"🔁 [创建LLM] retry_times={retry_times}, timeout={timeout}s")
     logger.info(f"🔑 [API Key] 来源: {'数据库配置' if api_key else '环境变量'}")
 
     if provider.lower() == "google":
@@ -73,7 +83,8 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             base_url=backend_url if backend_url else None,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=timeout
+            timeout=timeout,
+            max_retries=retry_times,
         )
 
     elif provider.lower() == "dashscope":
@@ -87,7 +98,8 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             base_url=backend_url if backend_url else None,  # 如果有自定义 URL 则使用
             temperature=temperature,
             max_tokens=max_tokens,
-            request_timeout=timeout
+            request_timeout=timeout,
+            max_retries=retry_times,
         )
 
     elif provider.lower() == "deepseek":
@@ -137,7 +149,8 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             api_key=api_key,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=timeout
+            timeout=timeout,
+            max_retries=retry_times,
         )
 
     elif provider.lower() == "anthropic":
@@ -146,7 +159,8 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             base_url=backend_url,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=timeout
+            timeout=timeout,
+            max_retries=retry_times,
         )
 
     elif provider.lower() in ["qianfan", "custom_openai"]:
@@ -186,7 +200,8 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             api_key=custom_api_key,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=timeout
+            timeout=timeout,
+            max_retries=retry_times,
         )
 
 
@@ -227,11 +242,13 @@ class TradingAgentsGraph:
         quick_max_tokens = quick_config.get("max_tokens", 4000)
         quick_temperature = quick_config.get("temperature", 0.7)
         quick_timeout = quick_config.get("timeout", 180)
+        quick_retries = max(int(quick_config.get("retry_times", 3) or 3), 0)
 
         # 读取深度模型参数
         deep_max_tokens = deep_config.get("max_tokens", 4000)
         deep_temperature = deep_config.get("temperature", 0.7)
         deep_timeout = deep_config.get("timeout", 180)
+        deep_retries = max(int(deep_config.get("retry_times", 3) or 3), 0)
 
         # 🔧 检查是否为混合模式（快速模型和深度模型来自不同厂家）
         quick_provider = self.config.get("quick_provider")
@@ -253,7 +270,8 @@ class TradingAgentsGraph:
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
                 timeout=quick_timeout,
-                api_key=self.config.get("quick_api_key")  # 🔥 传递 API Key
+                api_key=self.config.get("quick_api_key"),  # 🔥 传递 API Key
+                retry_times=quick_retries,
             )
 
             self.deep_thinking_llm = create_llm_by_provider(
@@ -263,28 +281,31 @@ class TradingAgentsGraph:
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
                 timeout=deep_timeout,
-                api_key=self.config.get("deep_api_key")  # 🔥 传递 API Key
+                api_key=self.config.get("deep_api_key"),  # 🔥 传递 API Key
+                retry_times=deep_retries,
             )
 
             logger.info(f"✅ [混合模式] LLM 实例创建成功")
 
         elif self.config["llm_provider"].lower() == "openai":
-            logger.info(f"🔧 [OpenAI-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
-            logger.info(f"🔧 [OpenAI-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
+            logger.info(f"🔧 [OpenAI-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s, retries={quick_retries}")
+            logger.info(f"🔧 [OpenAI-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s, retries={deep_retries}")
 
             self.deep_thinking_llm = ChatOpenAI(
                 model=self.config["deep_think_llm"],
                 base_url=self.config["backend_url"],
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
-                timeout=deep_timeout
+                timeout=deep_timeout,
+                max_retries=deep_retries,
             )
             self.quick_thinking_llm = ChatOpenAI(
                 model=self.config["quick_think_llm"],
                 base_url=self.config["backend_url"],
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
-                timeout=quick_timeout
+                timeout=quick_timeout,
+                max_retries=quick_retries,
             )
         elif self.config["llm_provider"] == "siliconflow":
             # SiliconFlow支持：使用OpenAI兼容API

@@ -12,7 +12,7 @@
 2. **不要在代码中硬编码API密钥**
    ```python
    # ❌ 错误做法
-   api_key = "sk-1234567890abcdef"
+   api_key = "sk-test-placeholder-001"
    
    # ✅ 正确做法
    api_key = os.getenv("DASHSCOPE_API_KEY")

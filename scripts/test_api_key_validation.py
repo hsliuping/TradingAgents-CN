@@ -33,13 +33,13 @@ def test_api_key_validation():
         ("your-test-key", False, "占位符 - your- 前缀"),
         ("some_key_here", False, "占位符 - _here 后缀"),
         ("some-key-here", False, "占位符 - -here 后缀"),
-        ("sk-990547695d6046cf9be4e8d095235d91", True, "有效的 API Key"),
-        ("sk-c64f9c504be1496f943843f553e3d6ee", True, "有效的 API Key"),
-        ("AIzaSyC3JdZVjblI0rfT_SNXXL5a4kvZ13_12CE", True, "有效的 Google API Key"),
-        ("bce-v3/ALTAK-ZV1T8VLLSFYvSPAzVthhY/d364f2499819c1e08dd2e84c7cc5a9ab6bac895f", True, "有效的千帆 API Key"),
-        ("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", True, "有效的 OpenRouter API Key"),
-        ('"sk-990547695d6046cf9be4e8d095235d91"', True, "带引号的有效 API Key"),
-        ("'sk-990547695d6046cf9be4e8d095235d91'", True, "带单引号的有效 API Key"),
+        ("sk-test-placeholder-valid-001234567890", True, "有效格式占位 Key"),
+        ("sk-test-placeholder-valid-abcdef123456", True, "有效格式占位 Key"),
+        ("AIzaSyTEST_PLACEHOLDER_google_valid_001", True, "有效格式占位 Google API Key"),
+        ("bce-v3/PLACEHOLDER_ACCESS_KEY/PLACEHOLDER_SECRET_KEY_001", True, "有效格式占位千帆 API Key"),
+        ("sk-or-v1-test-placeholder-valid-001234567890abcdef", True, "有效格式占位 OpenRouter API Key"),
+        ('"sk-test-placeholder-valid-001234567890"', True, "带引号的有效格式占位 Key"),
+        ("'sk-test-placeholder-valid-001234567890'", True, "带单引号的有效格式占位 Key"),
     ]
     
     print("\n" + "=" * 80)
@@ -73,4 +73,3 @@ def test_api_key_validation():
 if __name__ == "__main__":
     success = test_api_key_validation()
     sys.exit(0 if success else 1)
-

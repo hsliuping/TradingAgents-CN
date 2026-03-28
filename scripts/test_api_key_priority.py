@@ -37,13 +37,13 @@ async def test_api_key_validation():
     
     # 测试用例
     test_cases = [
-        ("sk-1234567890abcdef", True, "有效的 Key"),
+        ("sk-test-placeholder-valid-001234", True, "有效格式占位 Key"),
         ("your_api_key_here", False, "占位符 (your_)"),
         ("your-api-key-here", False, "占位符 (your-)"),
         ("short", False, "长度不够"),
         ("", False, "空字符串"),
         (None, False, "None"),
-        ("  sk-1234567890abcdef  ", True, "有空格但有效"),
+        ("  sk-test-placeholder-valid-001234  ", True, "有空格但有效"),
     ]
     
     print("\n📋 测试用例：")
@@ -124,4 +124,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

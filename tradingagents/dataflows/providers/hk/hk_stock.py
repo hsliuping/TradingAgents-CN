@@ -183,11 +183,32 @@ class HKStockProvider:
 
             ticker = yf.Ticker(symbol)
 
-            # 获取最新的历史数据（1天）
-            data = ticker.history(period="1d", timeout=self.timeout)
+            # 使用2天窗口，便于同时拿到昨收并计算涨跌幅
+            data = ticker.history(period="2d", timeout=self.timeout)
 
             if not data.empty:
                 latest = data.iloc[-1]
+                previous = data.iloc[-2] if len(data) >= 2 else None
+                pre_close = None
+                change_percent = None
+
+                if previous is not None:
+                    try:
+                        pre_close = float(previous['Close'])
+                    except Exception:
+                        pre_close = None
+
+                try:
+                    latest_close = float(latest['Close'])
+                except Exception:
+                    latest_close = None
+
+                if latest_close is not None and pre_close not in (None, 0, 0.0):
+                    try:
+                        change_percent = round((latest_close / pre_close - 1.0) * 100.0, 4)
+                    except Exception:
+                        change_percent = None
+
                 return {
                     'symbol': symbol,
                     'price': latest['Close'],
@@ -195,6 +216,9 @@ class HKStockProvider:
                     'high': latest['High'],
                     'low': latest['Low'],
                     'volume': latest['Volume'],
+                    'pre_close': pre_close,
+                    'change_percent': change_percent,
+                    'trade_date': data.index[-1].strftime('%Y-%m-%d'),
                     'timestamp': data.index[-1].strftime('%Y-%m-%d %H:%M:%S'),
                     'currency': 'HKD'
                 }

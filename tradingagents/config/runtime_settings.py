@@ -34,58 +34,39 @@ def _get_system_settings_sync() -> dict:
     """最佳努力获取后端动态 system_settings。
     - 若后端不可用/未安装，返回空 dict
     - 若当前有事件循环在运行，为避免死锁/嵌套，直接返回空 dict
-
-    注意：为了避免事件循环冲突，当前实现总是返回空字典，
-    依赖环境变量和默认值进行配置。
     """
-    # 临时解决方案：完全禁用动态配置获取，避免事件循环冲突
-    # TODO: 未来可以考虑使用线程池或其他方式来安全获取动态配置
-    _logger.debug("动态配置获取已禁用，使用环境变量和默认值")
-    return {}
+    if _get_event_loop_running():
+        _logger.debug("事件循环正在运行，跳过动态配置获取")
+        return {}
 
-    # 以下代码暂时注释，避免事件循环冲突
-    # # 第一次检查
-    # if _get_event_loop_running():
-    #     _logger.debug("事件循环正在运行，跳过动态配置获取")
-    #     return {}
+    try:
+        # 延迟导入，避免对 app 层形成硬依赖。
+        from app.services.config_provider import provider as config_provider  # type: ignore
 
-    # try:
-    #     # 延迟导入，避免硬依赖
-    #     from app.services.config_provider import provider as config_provider  # type: ignore
+        if _get_event_loop_running():
+            _logger.debug("导入后检测到事件循环，跳过动态配置获取")
+            return {}
 
-    #     # 第二次检查：确保导入过程中没有启动事件循环
-    #     if _get_event_loop_running():
-    #         _logger.debug("导入后检测到事件循环，跳过动态配置获取")
-    #         return {}
+        settings = asyncio.run(config_provider.get_effective_system_settings())
+        return settings or {}
 
-    #     # 第三次检查：在调用asyncio.run之前再次确认
-    #     try:
-    #         # 尝试获取当前事件循环，如果成功说明有循环在运行
-    #         current_loop = asyncio.get_running_loop()
-    #         if current_loop and current_loop.is_running():
-    #             _logger.debug("asyncio.run调用前检测到运行中的事件循环，跳过")
-    #             return {}
-    #     except RuntimeError:
-    #         # 没有运行中的事件循环，可以安全调用asyncio.run
-    #         pass
-
-    #     # 使用 asyncio.run 进行一次性同步调用
-    #     return asyncio.run(config_provider.get_effective_system_settings()) or {}
-
-    # except RuntimeError as e:
-    #     error_msg = str(e).lower()
-    #     if any(keyword in error_msg for keyword in [
-    #         "cannot be called from a running event loop",
-    #         "got future attached to a different loop",
-    #         "task was destroyed but it is pending"
-    #     ]):
-    #         _logger.debug(f"检测到事件循环冲突，跳过动态配置获取: {e}")
-    #         return {}
-    #     _logger.debug(f"获取动态配置失败（RuntimeError）: {e}")
-    #     return {}
-    # except Exception as e:
-    #     _logger.debug(f"获取动态配置失败: {e}")
-    #     return {}
+    except RuntimeError as e:
+        error_msg = str(e).lower()
+        if any(
+            keyword in error_msg
+            for keyword in (
+                "cannot be called from a running event loop",
+                "got future attached to a different loop",
+                "task was destroyed but it is pending",
+            )
+        ):
+            _logger.debug(f"检测到事件循环冲突，跳过动态配置获取: {e}")
+            return {}
+        _logger.debug(f"获取动态配置失败（RuntimeError）: {e}")
+        return {}
+    except Exception as e:
+        _logger.debug(f"获取动态配置失败: {e}")
+        return {}
 
 
 def _coerce(value: Any, caster: Callable[[Any], Any], default: Any) -> Any:

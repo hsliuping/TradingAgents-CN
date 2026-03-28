@@ -1181,6 +1181,9 @@ class TushareProvider(BaseStockDataProvider):
         """标准化实时行情数据"""
         ts_code = raw_data.get('ts_code', '')
         symbol = ts_code.split('.')[0] if '.' in ts_code else ts_code
+        raw_volume = raw_data.get('vol')
+        if raw_volume is None:
+            raw_volume = raw_data.get('volume')
 
         return {
             # 基础字段
@@ -1203,7 +1206,7 @@ class TushareProvider(BaseStockDataProvider):
 
             # 成交数据
             # 🔥 成交量单位转换：Tushare 返回的是手，需要转换为股
-            "volume": self._convert_to_float(raw_data.get('vol')) * 100 if raw_data.get('vol') else None,
+            "volume": self._convert_to_float(raw_volume) * 100 if raw_volume is not None else None,
             # 🔥 成交额单位转换：Tushare daily 接口返回的是千元，需要转换为元
             "amount": self._convert_to_float(raw_data.get('amount')) * 1000 if raw_data.get('amount') else None,
 

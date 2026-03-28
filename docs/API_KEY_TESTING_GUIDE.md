@@ -15,8 +15,8 @@
 ### 场景 1：MongoDB 有 Key，.env 也有 Key
 
 **初始状态**：
-- MongoDB `deepseek` 厂家：`api_key = "sk-abc123...xyz789"`
-- .env 文件：`DEEPSEEK_API_KEY=sk-def456...uvw012`
+- MongoDB `deepseek` 厂家：`api_key = "sk-testp...der001"`
+- .env 文件：`DEEPSEEK_API_KEY=sk-envpl...env001`
 
 **测试步骤**：
 1. 访问"设置 → 配置验证"
@@ -35,7 +35,7 @@
 
 **初始状态**：
 - MongoDB `dashscope` 厂家：`api_key = ""` 或 `null`
-- .env 文件：`DASHSCOPE_API_KEY=sk-ghi789...rst345`
+- .env 文件：`DASHSCOPE_API_KEY=sk-envpl...env002`
 
 **测试步骤**：
 1. 访问"设置 → 配置验证"
@@ -73,7 +73,7 @@
 ### 场景 4：编辑厂家 - MongoDB 有 Key
 
 **初始状态**：
-- MongoDB `deepseek` 厂家：`api_key = "sk-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz"`
+- MongoDB `deepseek` 厂家：`api_key = "sk-test-placeholder-provider-001234567890"`
 
 **测试步骤**：
 1. 访问"设置 → 大模型厂家管理"
@@ -81,7 +81,7 @@
 3. 查看 API Key 输入框
 
 **预期结果**：
-- ✅ API Key 输入框显示：`sk-abc1...4yz`（前6位 + "..." + 后6位）
+- ✅ API Key 输入框显示：`sk-tes...567890`（前6位 + "..." + 后6位）
 - ✅ 用户知道已有配置
 
 ---
@@ -90,7 +90,7 @@
 
 **初始状态**：
 - MongoDB `dashscope` 厂家：`api_key = ""` 或 `null`
-- .env 文件：`DASHSCOPE_API_KEY=sk-def456ghi789jkl012mno345pqr678stu901vwx234yz567`
+- .env 文件：`DASHSCOPE_API_KEY=sk-test-placeholder-env-002345678901`
 
 **测试步骤**：
 1. 访问"设置 → 大模型厂家管理"
@@ -98,7 +98,7 @@
 3. 查看 API Key 输入框
 
 **预期结果**：
-- ✅ API Key 输入框显示：`sk-def4...z567`（前6位 + "..." + 后6位）
+- ✅ API Key 输入框显示：`sk-tes...678901`（前6位 + "..." + 后6位）
 - ✅ 用户知道环境变量中已有配置
 
 ---
@@ -106,8 +106,8 @@
 ### 场景 6：用户清空 MongoDB 中的 Key
 
 **初始状态**：
-- MongoDB `deepseek` 厂家：`api_key = "sk-abc123...xyz789"`
-- .env 文件：`DEEPSEEK_API_KEY=sk-def456...uvw012`
+- MongoDB `deepseek` 厂家：`api_key = "sk-testp...der001"`
+- .env 文件：`DEEPSEEK_API_KEY=sk-envpl...env001`
 
 **测试步骤**：
 1. 访问"设置 → 大模型厂家管理"
@@ -131,12 +131,12 @@
 
 **初始状态**：
 - MongoDB `dashscope` 厂家：`api_key = ""` 或 `null`
-- .env 文件：`DASHSCOPE_API_KEY=sk-old123...old789`
+- .env 文件：`DASHSCOPE_API_KEY=sk-oldpl...old001`
 
 **测试步骤**：
 1. 访问"设置 → 大模型厂家管理"
 2. 点击"编辑" `dashscope` 厂家
-3. 填写新的 API Key：`sk-new456ghi789jkl012mno345pqr678stu901vwx234yz567`
+3. 填写新的 API Key：`sk-test-placeholder-new-003456789012`
 4. 点击"保存"
 5. 访问"设置 → 配置验证"
 6. 点击"验证配置"按钮
@@ -154,12 +154,12 @@
 ### 场景 8：用户不修改缩略 Key（保持原值）
 
 **初始状态**：
-- MongoDB `deepseek` 厂家：`api_key = "sk-abc123def456ghi789jkl012mno345pqr678stu901vwx234yz"`
+- MongoDB `deepseek` 厂家：`api_key = "sk-test-placeholder-provider-001234567890"`
 
 **测试步骤**：
 1. 访问"设置 → 大模型厂家管理"
 2. 点击"编辑" `deepseek` 厂家
-3. API Key 输入框显示：`sk-abc1...4yz`
+3. API Key 输入框显示：`sk-tes...567890`
 4. 不修改 API Key，修改其他字段（如 `display_name`）
 5. 点击"保存"
 
@@ -174,7 +174,7 @@
 
 **初始状态**：
 - MongoDB `tushare` 数据源：`api_key = ""` 或 `null`
-- .env 文件：`TUSHARE_TOKEN=d1el869r01qghj41hahgd1el869r01qghj41hai0`
+- .env 文件：`TUSHARE_TOKEN=tushare_test_placeholder_token_001`
 
 **测试步骤**：
 1. 访问"设置 → 数据源管理"
@@ -182,7 +182,7 @@
 3. 查看 API Key 输入框
 
 **预期结果**：
-- ✅ API Key 输入框显示：`d1el86...j41hai0`（前6位 + "..." + 后6位）
+- ✅ API Key 输入框显示：`tushar...oken_001`（前6位 + "..." + 后6位）
 - ✅ 用户知道环境变量中已有配置
 
 ---
@@ -191,7 +191,7 @@
 
 **初始状态**：
 - MongoDB `tushare` 数据源：`api_key = ""` 或 `null`
-- .env 文件：`TUSHARE_TOKEN=d1el869r01qghj41hahgd1el869r01qghj41hai0`
+- .env 文件：`TUSHARE_TOKEN=tushare_test_placeholder_token_001`
 
 **测试步骤**：
 1. 访问"设置 → 配置验证"
@@ -215,8 +215,8 @@
 ```
 🔧 开始桥接配置到环境变量...
   📊 从数据库读取到 8 个厂家配置
-  ✓ 使用 .env 文件中的 DEEPSEEK_API_KEY (长度: 64)
-  ✓ 使用数据库厂家配置的 DASHSCOPE_API_KEY (长度: 56)
+  ✓ 使用 .env 文件中的 DEEPSEEK_API_KEY (长度: 32)
+  ✓ 使用数据库厂家配置的 DASHSCOPE_API_KEY (长度: 36)
   📊 从数据库读取到 3 个数据源配置
   ✓ 使用 .env 文件中的 TUSHARE_TOKEN (长度: 40)
 ```
@@ -237,7 +237,7 @@
 {
   "id": "...",
   "name": "deepseek",
-  "api_key": "sk-abc1...4yz",  // 缩略格式
+  "api_key": "sk-tes...567890",  // 缩略格式
   "extra_config": {
     "has_api_key": true
   }
@@ -320,4 +320,3 @@
 1. 点击"重载配置"按钮
 2. 或重启后端服务
 3. 再次点击"验证配置"按钮
-

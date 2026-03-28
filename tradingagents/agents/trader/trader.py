@@ -4,6 +4,7 @@ import json
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
+from tradingagents.agents.utils.streaming_utils import stream_text_response
 logger = get_logger("default")
 
 
@@ -100,7 +101,7 @@ def create_trader(llm, memory):
         logger.debug(f"💰 [DEBUG] 准备调用LLM，系统提示包含货币: {currency}")
         logger.debug(f"💰 [DEBUG] 系统提示中的关键部分: 目标价格({currency})")
 
-        result = llm.invoke(messages)
+        result = stream_text_response(llm, messages, "Trader")
 
         logger.debug(f"💰 [DEBUG] LLM调用完成")
         logger.debug(f"💰 [DEBUG] 交易员回复长度: {len(result.content)}")

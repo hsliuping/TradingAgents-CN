@@ -36,6 +36,7 @@ class TaskState:
     end_time: Optional[datetime] = None
     result_data: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
+    error_details: Optional[Dict[str, Any]] = None
     
     # 分析参数
     parameters: Optional[Dict[str, Any]] = None
@@ -185,7 +186,8 @@ class MemoryStateManager:
         message: Optional[str] = None,
         current_step: Optional[str] = None,
         result_data: Optional[Dict[str, Any]] = None,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        error_details: Optional[Dict[str, Any]] = None
     ) -> bool:
         """更新任务状态"""
         with self._lock:
@@ -213,6 +215,8 @@ class MemoryStateManager:
                 task.result_data = result_data
             if error_message is not None:
                 task.error_message = error_message
+            if error_details is not None:
+                task.error_details = error_details
                 
             # 如果任务完成或失败，设置结束时间
             if status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:

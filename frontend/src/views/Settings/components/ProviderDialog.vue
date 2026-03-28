@@ -102,7 +102,7 @@
       <el-alert
         title="🔒 安全提示"
         type="info"
-        description="敏感密钥通过环境变量/运维配置注入，出于安全考虑，此处不存储或展示真实密钥。"
+        description="页面不会回显真实密钥；保存后只显示脱敏状态。留空时优先沿用数据库已有值，否则回退到环境变量。"
         show-icon
         :closable="false"
         class="mb-2"
@@ -112,7 +112,7 @@
           {{ props.provider?.extra_config?.has_api_key ? '已配置' : '未配置' }}
         </el-tag>
         <el-tag v-if="props.provider?.extra_config?.has_api_key" :type="props.provider?.extra_config?.source === 'environment' ? 'warning' : 'success'" size="small" class="ml-2">
-          {{ props.provider?.extra_config?.source === 'environment' ? 'ENV' : '已配置' }}
+          {{ props.provider?.extra_config?.source === 'environment' ? 'ENV' : 'DB' }}
         </el-tag>
       </el-form-item>
 
@@ -126,7 +126,7 @@
           clearable
         />
         <div class="form-tip">
-          优先级：数据库配置 > 环境变量。留空则使用 .env 文件中的配置
+          优先级：数据库配置 > 环境变量。编辑时留空会保留已有配置；新建时留空则走环境变量
         </div>
       </el-form-item>
 

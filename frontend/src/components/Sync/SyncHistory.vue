@@ -121,6 +121,9 @@ import { ElMessage } from 'element-plus'
 import { Clock, Refresh, SuccessFilled, CircleCloseFilled, Warning } from '@element-plus/icons-vue'
 import { getSyncHistory, type SyncStatus } from '@/api/sync'
 
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+type TimelineType = 'primary' | 'success' | 'warning' | 'danger' | 'info'
+
 // 响应式数据
 const loading = ref(false)
 const loadingMore = ref(false)
@@ -199,8 +202,8 @@ const refreshHistory = async () => {
 }
 
 // 获取状态类型
-const getStatusType = (status: string) => {
-  const typeMap: Record<string, string> = {
+const getStatusType = (status: string): TagType => {
+  const typeMap: Record<string, TagType> = {
     idle: 'info',
     running: 'warning',
     success: 'success',
@@ -225,8 +228,8 @@ const getStatusText = (status: string) => {
 }
 
 // 获取时间线类型
-const getTimelineType = (status: string) => {
-  const typeMap: Record<string, string> = {
+const getTimelineType = (status: string): TimelineType => {
+  const typeMap: Record<string, TimelineType> = {
     success: 'success',
     success_with_errors: 'warning',
     failed: 'danger',

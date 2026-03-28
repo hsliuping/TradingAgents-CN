@@ -16,6 +16,8 @@ import os
 import sys
 from datetime import datetime, timedelta
 
+import pytest
+
 # 添加项目根目录到路径
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.insert(0, project_root)
@@ -25,19 +27,39 @@ from tradingagents.utils.logging_manager import get_logger
 logger = get_logger('test')
 
 
-def test_config_loading():
+@pytest.fixture()
+def lookback_days() -> int:
+    """读取当前配置中的市场分析回溯天数。"""
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    return settings.MARKET_ANALYST_LOOKBACK_DAYS
+
+
+@pytest.fixture()
+def date_range(lookback_days: int):
+    """根据当前配置生成统一的日期范围。"""
+    from tradingagents.utils.dataflow_utils import get_trading_date_range
+
+    target_date = datetime.now().strftime("%Y-%m-%d")
+    start_date, end_date = get_trading_date_range(target_date, lookback_days=lookback_days)
+    actual_days = (
+        datetime.strptime(end_date, "%Y-%m-%d") - datetime.strptime(start_date, "%Y-%m-%d")
+    ).days
+    return start_date, end_date, actual_days
+
+
+def test_config_loading(lookback_days: int):
     """测试1：验证配置加载"""
     print("\n" + "=" * 80)
     print("测试1：验证配置加载")
     print("=" * 80)
     
     try:
-        from app.core.config import get_settings
-        settings = get_settings()
-        lookback_days = settings.MARKET_ANALYST_LOOKBACK_DAYS
-        
         print(f"✅ 配置加载成功")
         print(f"📅 MARKET_ANALYST_LOOKBACK_DAYS = {lookback_days}天")
+        assert isinstance(lookback_days, int)
+        assert lookback_days > 0
         
         # 验证配置值
         if lookback_days == 250:
@@ -49,29 +71,21 @@ def test_config_loading():
         else:
             print(f"⚠️  配置值：{lookback_days}天（自定义配置）")
         
-        return lookback_days
     except Exception as e:
         print(f"❌ 配置加载失败: {e}")
-        return None
+        raise
 
 
-def test_date_range_calculation(lookback_days):
+def test_date_range_calculation(lookback_days: int, date_range):
     """测试2：验证日期范围计算"""
     print("\n" + "=" * 80)
     print("测试2：验证日期范围计算")
     print("=" * 80)
     
     try:
-        from tradingagents.utils.dataflow_utils import get_trading_date_range
-        
         # 使用今天作为目标日期
         target_date = datetime.now().strftime("%Y-%m-%d")
-        start_date, end_date = get_trading_date_range(target_date, lookback_days=lookback_days)
-        
-        # 计算实际天数
-        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-        actual_days = (end_dt - start_dt).days
+        start_date, end_date, actual_days = date_range
         
         print(f"✅ 日期范围计算成功")
         print(f"📅 目标日期: {target_date}")
@@ -81,20 +95,18 @@ def test_date_range_calculation(lookback_days):
         print(f"📅 实际天数: {actual_days}天")
         
         # 验证实际天数是否符合预期
+        assert actual_days == lookback_days
         if actual_days >= lookback_days:
             print(f"✅ 实际天数 ({actual_days}) >= 配置天数 ({lookback_days})")
         else:
             print(f"⚠️  实际天数 ({actual_days}) < 配置天数 ({lookback_days})")
-        
-        return start_date, end_date, actual_days
     except Exception as e:
         print(f"❌ 日期范围计算失败: {e}")
-        import traceback
-        traceback.print_exc()
-        return None, None, None
+        raise
 
 
-def test_data_fetching(start_date, end_date):
+@pytest.mark.integration
+def test_data_fetching(date_range):
     """测试3：验证数据获取"""
     print("\n" + "=" * 80)
     print("测试3：验证数据获取（模拟市场分析师调用）")
@@ -102,6 +114,7 @@ def test_data_fetching(start_date, end_date):
     
     try:
         from tradingagents.dataflows.interface import get_china_stock_data_unified
+        start_date, end_date, _ = date_range
         
         # 使用一个常见的A股股票代码进行测试
         test_ticker = "300750"  # 平安银行
@@ -146,19 +159,15 @@ def test_data_fetching(start_date, end_date):
             print(result[-500:])
             print("-" * 80)
             
-            return True
+            assert len(found_indicators) >= 1
         else:
-            print(f"❌ 数据获取失败")
-            print(f"错误信息: {result}")
-            return False
+            pytest.fail(f"数据获取失败: {result}")
     except Exception as e:
         print(f"❌ 数据获取异常: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+        raise
 
 
-def test_technical_indicators_accuracy(lookback_days):
+def test_technical_indicators_accuracy(lookback_days: int):
     """测试4：验证技术指标准确性要求"""
     print("\n" + "=" * 80)
     print("测试4：验证技术指标准确性要求")
@@ -209,7 +218,7 @@ def test_technical_indicators_accuracy(lookback_days):
     else:
         print(f"⚠️  部分技术指标未达到推荐级要求")
     
-    return all_passed
+    assert all_passed or lookback_days >= min(req["min"] for req in requirements.values())
 
 
 def main():
@@ -258,4 +267,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

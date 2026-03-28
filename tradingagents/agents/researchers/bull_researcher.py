@@ -4,6 +4,7 @@ import json
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
+from tradingagents.agents.utils.streaming_utils import stream_text_response
 logger = get_logger("default")
 
 
@@ -125,7 +126,7 @@ def create_bull_researcher(llm, memory):
 请确保所有回答都使用中文。
 """
 
-        response = llm.invoke(prompt)
+        response = stream_text_response(llm, prompt, "Bull Researcher")
 
         argument = f"Bull Analyst: {response.content}"
 

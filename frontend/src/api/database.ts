@@ -154,9 +154,7 @@ export const databaseApi = {
     format?: string
     sanitize?: boolean  // 是否脱敏（清空敏感字段，用于演示系统）
   }): Promise<Blob> {
-    return ApiClient.post('/api/system/database/export', options, {
-      responseType: 'blob'
-    })
+    return ApiClient.postBlob('/api/system/database/export', options)
   },
 
   // 清理旧数据

@@ -1,52 +1,83 @@
 """
-测试真实导出数据的脱敏功能
+测试真实导出数据样本的脱敏功能。
 """
+
+from __future__ import annotations
+
 import json
+from pathlib import Path
+
 from app.services.database.backups import _sanitize_document
 
 
-def test_sanitize_real_export_file():
-    """测试对真实导出文件的脱敏"""
-    # 读取真实导出文件
-    with open("install/database_export_config_2025-10-25.json", "r", encoding="utf-8") as f:
-        export_data = json.load(f)
-    
-    # 对 data 部分进行脱敏
+def _load_export_sample() -> dict:
+    """优先读取仓库现有导出样本；不存在时使用内置最小样本。"""
+    project_root = Path(__file__).resolve().parent.parent
+    candidate_paths = [
+        project_root / "install" / "database_export_config.json",
+        project_root / "install" / "database_export_config_2025-11-13.json",
+        project_root / "install" / "database_export_config_2025-10-25.json",
+    ]
+
+    for path in candidate_paths:
+        if path.exists():
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and "data" in payload:
+                return payload
+
+    return {
+        "export_info": {"source": "generated-test-sample"},
+        "data": {
+            "system_configs": [
+                {
+                    "llm_configs": [
+                        {"provider": "openai", "api_key": "sk-test-secret"},
+                        {"provider": "dashscope", "api_key": "dashscope-secret"},
+                    ],
+                    "system_settings": {
+                        "finnhub_api_key": "finnhub-secret",
+                        "tushare_token": "tushare-secret",
+                        "reddit_client_secret": "reddit-secret",
+                    },
+                }
+            ],
+            "llm_providers": [
+                {"name": "openai", "api_key": "provider-secret"},
+                {"name": "dashscope", "api_key": "provider-secret-2"},
+            ],
+            "users": [{"username": "demo"}],
+        },
+    }
+
+
+def test_sanitize_real_export_file(tmp_path: Path):
+    """测试对真实导出结构的脱敏。"""
+    export_data = _load_export_sample()
+
     sanitized_data = _sanitize_document(export_data["data"])
-    
-    # 验证 system_configs 中的 api_key 被清空
+
     for config in sanitized_data.get("system_configs", []):
         for llm_config in config.get("llm_configs", []):
-            assert llm_config.get("api_key") == "", f"api_key 应该被清空，但实际值为: {llm_config.get('api_key')}"
-        
-        # 验证 system_settings 中的敏感字段被清空
+            assert llm_config.get("api_key") == ""
+
         system_settings = config.get("system_settings", {})
         for key in ["finnhub_api_key", "tushare_token", "reddit_client_secret"]:
             if key in system_settings:
-                assert system_settings[key] == "", f"{key} 应该被清空，但实际值为: {system_settings[key]}"
-    
-    # 验证 llm_providers 中的 api_key 被清空
+                assert system_settings[key] == ""
+
     for provider in sanitized_data.get("llm_providers", []):
-        assert provider.get("api_key") == "", f"llm_providers 的 api_key 应该被清空，但实际值为: {provider.get('api_key')}"
-    
-    # 输出统计信息
-    print("\n✅ 脱敏测试通过！")
-    print(f"- system_configs 数量: {len(sanitized_data.get('system_configs', []))}")
-    print(f"- llm_providers 数量: {len(sanitized_data.get('llm_providers', []))}")
-    print(f"- users 数量: {len(sanitized_data.get('users', []))}")
-    
-    # 保存脱敏后的文件用于对比
+        assert provider.get("api_key") == ""
+
     sanitized_export = {
-        "export_info": export_data["export_info"],
-        "data": sanitized_data
+        "export_info": export_data.get("export_info", {}),
+        "data": sanitized_data,
     }
-    
-    with open("install/database_export_config_2025-10-25_SANITIZED.json", "w", encoding="utf-8") as f:
-        json.dump(sanitized_export, f, ensure_ascii=False, indent=2)
-    
-    print("✅ 脱敏后的文件已保存到: install/database_export_config_2025-10-25_SANITIZED.json")
 
+    output_path = tmp_path / "database_export_config_sanitized.json"
+    output_path.write_text(
+        json.dumps(sanitized_export, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
-if __name__ == "__main__":
-    test_sanitize_real_export_file()
-
+    assert output_path.exists()
+    assert json.loads(output_path.read_text(encoding="utf-8"))["data"] == sanitized_data

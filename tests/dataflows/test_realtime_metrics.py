@@ -30,67 +30,91 @@ def test_validate_pe_pb():
     assert validate_pe_pb(None, None) == True
 
 
-def test_calculate_realtime_pe_pb_with_mock_data(monkeypatch):
+def test_calculate_realtime_pe_pb_with_mock_data():
     """测试实时PE/PB计算（使用mock数据）"""
-    # Mock MongoDB数据
     class MockCollection:
-        def find_one(self, query):
-            code = query.get("code")
-            if code == "000001":
-                if "market_quotes" in str(self):
-                    # 返回实时行情
-                    return {
-                        "code": "000001",
-                        "close": 10.5,
-                        "updated_at": "2025-10-14T10:30:00"
-                    }
-                else:
-                    # 返回基础信息
-                    return {
-                        "code": "000001",
-                        "total_share": 100000,  # 10万万股 = 10亿股
-                        "net_profit": 50000,    # 5万万元 = 5亿元
-                        "total_hldr_eqy_exc_min_int": 200000  # 20万万元 = 20亿元
-                    }
-            return None
-    
+        def __init__(self, document=None):
+            self.document = document
+
+        def find_one(self, *args, **kwargs):
+            return self.document
+
+        def find(self, *args, **kwargs):
+            return []
+
     class MockDB:
+        def __init__(self):
+            self.market_quotes = MockCollection(
+                {
+                    "code": "000001",
+                    "close": 10.5,
+                    "pre_close": 10.0,
+                    "updated_at": "2025-10-14T10:30:00",
+                }
+            )
+            self.stock_basic_info = MockCollection(
+                {
+                    "code": "000001",
+                    "source": "tushare",
+                    "pe_ttm": 20.0,
+                    "pe": 19.5,
+                    "pb": 0.5,
+                    "total_mv": 100.0,
+                    "total_share": 100000,
+                    "updated_at": "2025-10-13T16:00:00",
+                }
+            )
+            self.stock_financial_data = MockCollection(
+                {
+                    "code": "000001",
+                    "report_period": "2025Q3",
+                    "total_equity": 20000000000,
+                }
+            )
+
         def __getitem__(self, name):
-            return MockCollection()
-    
+            return getattr(self, name)
+
     class MockClient:
+        def __init__(self):
+            self.db = MockDB()
+
         def __getitem__(self, name):
-            return MockDB()
-    
-    # 执行测试
+            assert name == "tradingagents"
+            return self.db
+
     result = calculate_realtime_pe_pb("000001", MockClient())
-    
-    # 验证结果
+
     assert result is not None
     assert result["price"] == 10.5
-    assert result["is_realtime"] == True
-    assert result["source"] == "realtime_calculated"
-    
-    # 验证PE计算：市值 = 10.5 * 100000 = 1050000万元，PE = 1050000 / 50000 = 21
+    assert result["is_realtime"] is True
+    assert result["source"] == "realtime_calculated_from_market_quotes"
     assert result["pe"] == 21.0
-    
-    # 验证PB计算：PB = 1050000 / 200000 = 5.25
-    assert result["pb"] == 5.25
+    assert result["pb"] == 0.53
+    assert result["market_cap"] == 105.0
+    assert result["ttm_net_profit"] == 5.0
 
 
-def test_calculate_realtime_pe_pb_missing_data(monkeypatch):
+def test_calculate_realtime_pe_pb_missing_data():
     """测试缺少数据时的处理"""
     class MockCollection:
         def find_one(self, query):
             return None
     
     class MockDB:
+        market_quotes = MockCollection()
+        stock_basic_info = MockCollection()
+        stock_financial_data = MockCollection()
+
         def __getitem__(self, name):
-            return MockCollection()
-    
+            return getattr(self, name)
+
     class MockClient:
+        def __init__(self):
+            self.db = MockDB()
+
         def __getitem__(self, name):
-            return MockDB()
+            return self.db
     
     # 执行测试
     result = calculate_realtime_pe_pb("999999", MockClient())
@@ -117,7 +141,7 @@ def test_get_pe_pb_with_fallback_success(monkeypatch):
     monkeypatch.setattr(metrics_module, "calculate_realtime_pe_pb", mock_calculate)
     
     # 执行测试
-    result = get_pe_pb_with_fallback("000001", None)
+    result = get_pe_pb_with_fallback("000001", object())
     
     # 验证结果
     assert result["pe"] == 22.5
@@ -133,23 +157,35 @@ def test_get_pe_pb_with_fallback_to_static(monkeypatch):
     
     # Mock静态数据获取
     class MockCollection:
+        def __init__(self, document):
+            self.document = document
+
         def find_one(self, query):
-            return {
-                "code": "000001",
-                "pe": 20.0,
-                "pb": 3.0,
-                "pe_ttm": 21.0,
-                "pb_mrq": 3.1,
-                "updated_at": "2025-10-13T16:00:00"
-            }
-    
+            return self.document
+
     class MockDB:
+        def __init__(self):
+            self.stock_basic_info = MockCollection(
+                {
+                    "code": "000001",
+                    "source": "tushare",
+                    "pe": 20.0,
+                    "pb": 3.0,
+                    "pe_ttm": 21.0,
+                    "pb_mrq": 3.1,
+                    "updated_at": "2025-10-13T16:00:00",
+                }
+            )
+
         def __getitem__(self, name):
-            return MockCollection()
-    
+            return getattr(self, name)
+
     class MockClient:
+        def __init__(self):
+            self.db = MockDB()
+
         def __getitem__(self, name):
-            return MockDB()
+            return self.db
     
     import tradingagents.dataflows.realtime_metrics as metrics_module
     monkeypatch.setattr(metrics_module, "calculate_realtime_pe_pb", mock_calculate)
@@ -160,10 +196,9 @@ def test_get_pe_pb_with_fallback_to_static(monkeypatch):
     # 验证结果
     assert result["pe"] == 20.0
     assert result["pb"] == 3.0
-    assert result["is_realtime"] == False
+    assert result["is_realtime"] is False
     assert result["source"] == "daily_basic"
 
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

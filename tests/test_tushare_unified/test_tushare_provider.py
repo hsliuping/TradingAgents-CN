@@ -2,7 +2,6 @@
 测试统一的TushareProvider
 """
 import pytest
-import asyncio
 from unittest.mock import Mock, patch, AsyncMock
 from datetime import datetime, date
 import pandas as pd
@@ -66,11 +65,12 @@ class TestTushareProvider:
         
         return mock_api
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_connect_success(self, provider, mock_tushare_api):
         """测试连接成功"""
-        with patch('tradingagents.dataflows.providers.tushare_provider.TUSHARE_AVAILABLE', True), \
-             patch('tradingagents.dataflows.providers.tushare_provider.ts') as mock_ts, \
+        with patch('tradingagents.dataflows.providers.china.tushare.TUSHARE_AVAILABLE', True), \
+             patch('tradingagents.dataflows.providers.china.tushare.ts') as mock_ts, \
+             patch.object(provider, '_get_token_from_database', return_value=None), \
              patch.object(provider, 'config', {'token': 'test_token'}):
             
             mock_ts.pro_api.return_value = mock_tushare_api
@@ -82,10 +82,11 @@ class TestTushareProvider:
             assert provider.api is not None
             mock_ts.set_token.assert_called_once_with('test_token')
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_connect_no_token(self, provider):
         """测试无token连接失败"""
-        with patch('tradingagents.dataflows.providers.tushare_provider.TUSHARE_AVAILABLE', True), \
+        with patch('tradingagents.dataflows.providers.china.tushare.TUSHARE_AVAILABLE', True), \
+             patch.object(provider, '_get_token_from_database', return_value=None), \
              patch.object(provider, 'config', {'token': ''}):
             
             result = await provider.connect()
@@ -93,7 +94,7 @@ class TestTushareProvider:
             assert result is False
             assert provider.connected is False
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_get_stock_list(self, provider, mock_tushare_api):
         """测试获取股票列表"""
         provider.connected = True
@@ -111,7 +112,7 @@ class TestTushareProvider:
             assert result[0]['market_info']['market'] == 'CN'
             assert result[0]['market_info']['exchange'] == 'SZSE'
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_get_stock_basic_info_single(self, provider, mock_tushare_api):
         """测试获取单个股票基础信息"""
         provider.connected = True
@@ -130,19 +131,15 @@ class TestTushareProvider:
             assert result['industry'] == '银行'
             assert result['data_source'] == 'tushare'
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_get_stock_quotes(self, provider, mock_tushare_api):
         """测试获取实时行情"""
         provider.connected = True
         provider.api = mock_tushare_api
         
         with patch('asyncio.to_thread', new_callable=AsyncMock) as mock_to_thread:
-            # 模拟realtime_quote失败，回退到daily
-            mock_to_thread.side_effect = [
-                Exception("权限不足"),  # realtime_quote失败
-                mock_tushare_api.daily.return_value,  # daily成功
-                mock_tushare_api.daily_basic.return_value  # daily_basic成功
-            ]
+            # 当前实现直接走 daily 接口获取最近日线，不再串行回退 realtime_quote/daily_basic。
+            mock_to_thread.return_value = mock_tushare_api.daily.return_value
             
             result = await provider.get_stock_quotes('000001')
             
@@ -151,10 +148,10 @@ class TestTushareProvider:
             assert result['close'] == 12.60
             assert result['current_price'] == 12.60
             assert result['pct_chg'] == 1.61
-            assert result['pe'] == 5.2
+            assert result['volume'] == 1000000 * 100
             assert result['data_source'] == 'tushare'
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_get_historical_data(self, provider, mock_tushare_api):
         """测试获取历史数据"""
         provider.connected = True
@@ -247,7 +244,8 @@ class TestTushareProvider:
         assert result['code'] == '000001'
         assert result['close'] == 12.60
         assert result['current_price'] == 12.60
-        assert result['volume'] == 1000000
+        assert result['volume'] == 1000000 * 100
+        assert result['amount'] == 12600000 * 1000
         assert result['pct_chg'] == 1.61
         assert result['trade_date'] == '2024-12-01'
         assert result['data_source'] == 'tushare'

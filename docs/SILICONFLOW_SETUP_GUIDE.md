@@ -105,9 +105,9 @@
 SILICONFLOW_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-**示例**（使用您提供的百炼 Key 格式）：
+**示例**（占位格式示例）：
 ```bash
-SILICONFLOW_API_KEY=sk-990547695d6046cf9be4e8d095235d91
+SILICONFLOW_API_KEY=sk-test-placeholder-siliconflow-001
 ```
 
 #### 步骤 2：重启后端服务
@@ -296,4 +296,3 @@ curl https://api.siliconflow.cn/v1/chat/completions \
 恭喜！您已经成功配置了硅基流动。现在可以在 TradingAgents-CN 中使用硅基流动的模型进行 AI 分析了。
 
 如有任何问题，请参考上方的常见问题或查阅官方文档。
-

@@ -55,16 +55,30 @@ const routes: RouteRecordRaw[] = [
     name: 'Analysis',
     component: () => import('@/layouts/BasicLayout.vue'),
     redirect: '/analysis/single',
+    meta: {
+      title: '股票分析',
+      icon: 'TrendCharts',
+      requiresAuth: true,
+      transition: 'slide-up'
+    },
     children: [
       {
         path: 'single',
         name: 'SingleAnalysis',
-        component: () => import('@/views/Analysis/SingleAnalysis.vue')
+        component: () => import('@/views/Analysis/SingleAnalysis.vue'),
+        meta: {
+          title: '单股分析',
+          requiresAuth: true
+        }
       },
       {
         path: 'batch',
         name: 'BatchAnalysis',
-        component: () => import('@/views/Analysis/BatchAnalysis.vue')
+        component: () => import('@/views/Analysis/BatchAnalysis.vue'),
+        meta: {
+          title: '批量分析',
+          requiresAuth: true
+        }
       },
 
     ]
@@ -228,7 +242,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Reports/ReportDetail.vue'),
         meta: {
           title: '报告详情',
-          requiresAuth: true
+          requiresAuth: true,
+          hideInMenu: true
         }
       },
       {
@@ -237,7 +252,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Reports/TokenStatistics.vue'),
         meta: {
           title: 'Token统计',
-          requiresAuth: true
+          requiresAuth: true,
+          hideInMenu: true
         }
       }
     ]
@@ -398,7 +414,7 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes,
-  scrollBehavior(to, from, savedPosition) {
+  scrollBehavior(_to, _from, savedPosition) {
     if (savedPosition) {
       return savedPosition
     } else {
@@ -408,7 +424,7 @@ const router = createRouter({
 })
 
 // 全局前置守卫
-router.beforeEach(async (to, from, next) => {
+router.beforeEach(async (to, _from, next) => {
   // 开始进度条
   NProgress.start()
 
@@ -458,7 +474,7 @@ router.beforeEach(async (to, from, next) => {
 })
 
 // 全局后置守卫
-router.afterEach((to, from) => {
+router.afterEach(() => {
   // 结束进度条
   NProgress.done()
 

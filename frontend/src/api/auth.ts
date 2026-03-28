@@ -5,9 +5,13 @@ import type {
   LoginResponse, 
   RefreshTokenResponse,
   User,
-  UserPermissions,
+  UserPreferences,
   ChangePasswordForm
 } from '@/types/auth'
+
+export type UserInfoUpdatePayload = Omit<Partial<User>, 'preferences'> & {
+  preferences?: Partial<UserPreferences>
+}
 
 export const authApi = {
   // 登录
@@ -41,7 +45,7 @@ export const authApi = {
   //   ApiClient.get<UserPermissions>('/api/auth/permissions'),
 
   // 更新用户信息
-  updateUserInfo: (data: Partial<User>) =>
+  updateUserInfo: (data: UserInfoUpdatePayload) =>
     ApiClient.put<User>('/api/auth/me', data),
 
   // 修改密码

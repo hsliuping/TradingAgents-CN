@@ -185,7 +185,7 @@
               <!-- 报告列表预览 -->
               <div class="reports-preview">
                 <el-tag
-                  v-for="(content, key) in lastAnalysis.reports"
+                  v-for="(_content, key) in lastAnalysis.reports"
                   :key="key"
                   size="small"
                   effect="plain"
@@ -333,9 +333,16 @@
         </el-form-item>
         <el-form-item label="数据源">
           <el-radio-group v-model="syncForm.dataSource">
-            <el-radio label="tushare">Tushare</el-radio>
+            <el-radio v-if="singleStockSourceMode === 'normal'" label="tushare">Tushare</el-radio>
             <el-radio label="akshare">AKShare</el-radio>
+            <el-radio v-if="singleStockSourceMode === 'mixed'" label="mixed">实时AKShare+其他Tushare</el-radio>
           </el-radio-group>
+          <div
+            v-if="singleStockRealtimeRequiresAkshare"
+            style="margin-top: 6px; color: #e6a23c; font-size: 12px; line-height: 1.5;"
+          >
+            {{ singleStockSyncSourceHint }}
+          </div>
         </el-form-item>
         <el-form-item label="历史数据天数" v-if="syncForm.syncTypes.includes('historical')">
           <el-input-number v-model="syncForm.days" :min="1" :max="3650" />
@@ -374,7 +381,6 @@ import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
 import { favoritesApi } from '@/api/favorites'
-import { useNotificationStore } from '@/stores/notifications'
 
 
 echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
@@ -387,23 +393,12 @@ const router = useRouter()
 const analysisStatus = ref<'idle' | 'running' | 'completed' | 'failed'>('idle')
 const analysisProgress = ref(0)
 const analysisMessage = ref('')
-const currentTaskId = ref<string | null>(null)
 const lastAnalysis = ref<any | null>(null)
 const lastTaskInfo = ref<any | null>(null) // 保存任务信息（包含 end_time 等）
 
 // 报告对话框
 const showReportsDialog = ref(false)
 const activeReportTab = ref('')
-
-const notifStore = useNotificationStore()
-
-const lastAnalysisTagType = computed(() => {
-  const reco = String(lastAnalysis.value?.recommendation || '').toLowerCase()
-  if (reco.includes('买') || reco.includes('buy') || reco.includes('增持') || reco.includes('强')) return 'success'
-  if (reco.includes('卖') || reco.includes('sell')) return 'danger'
-  if (reco.includes('减持') || reco.includes('谨慎')) return 'warning'
-  return 'info'
-})
 
 // 股票代码（从路由参数获取）
 const code = computed(() => {
@@ -504,11 +499,51 @@ const syncStatus = ref<any>(null)
 // 数据同步对话框
 const syncDialogVisible = ref(false)
 const syncLoading = ref(false)
+type SingleStockDataSource = 'tushare' | 'akshare' | 'mixed'
+type SingleStockSourceMode = 'normal' | 'realtime_only' | 'mixed'
 const syncForm = reactive({
   syncTypes: ['realtime'],  // 默认选中实时行情
-  dataSource: 'tushare' as 'tushare' | 'akshare',
+  dataSource: 'akshare' as SingleStockDataSource,
   days: 365
 })
+const singleStockRealtimeRequiresAkshare = computed(() => syncForm.syncTypes.includes('realtime'))
+const singleStockMixedSync = computed(
+  () => syncForm.syncTypes.includes('realtime') && syncForm.syncTypes.some((type) => type !== 'realtime')
+)
+const singleStockSourceMode = computed<SingleStockSourceMode>(() => {
+  if (!singleStockRealtimeRequiresAkshare.value) {
+    return 'normal'
+  }
+  return singleStockMixedSync.value ? 'mixed' : 'realtime_only'
+})
+const singleStockSyncSourceHint = computed(() => (
+  singleStockMixedSync.value ? '实时 AKShare，其他 Tushare。' : '仅支持 AKShare。'
+))
+
+watch(
+  () => syncForm.syncTypes.slice(),
+  (types) => {
+    const hasRealtime = types.includes('realtime')
+    const hasOtherTypes = types.some((type) => type !== 'realtime')
+
+    if (hasRealtime && !hasOtherTypes) {
+      syncForm.dataSource = 'akshare'
+      return
+    }
+
+    if (hasRealtime && hasOtherTypes) {
+      if (syncForm.dataSource === 'tushare') {
+        syncForm.dataSource = 'mixed'
+      }
+      return
+    }
+
+    if (!hasRealtime && syncForm.dataSource === 'mixed') {
+      syncForm.dataSource = 'tushare'
+    }
+  },
+  { deep: true }
+)
 
 // 清除缓存
 const clearCacheLoading = ref(false)
@@ -543,12 +578,7 @@ async function handleSync() {
 
       if (data.realtime_sync) {
         if (data.realtime_sync.success) {
-          // 🔥 如果切换了数据源，显示提示信息
-          if (data.realtime_sync.data_source_used && data.realtime_sync.data_source_used !== syncForm.dataSource) {
-            message += `✅ 实时行情同步成功（已自动切换到 ${data.realtime_sync.data_source_used.toUpperCase()} 数据源）\n`
-          } else {
-            message += `✅ 实时行情同步成功\n`
-          }
+          message += `✅ 实时行情同步成功\n`
         } else {
           message += `❌ 实时行情同步失败: ${data.realtime_sync.error || '未知错误'}\n`
         }
@@ -556,7 +586,11 @@ async function handleSync() {
 
       if (data.historical_sync) {
         if (data.historical_sync.success) {
-          message += `✅ 历史数据: ${data.historical_sync.records || 0} 条记录\n`
+          message += `✅ 历史数据: ${data.historical_sync.records || 0} 条记录`
+          if (data.historical_sync.data_source_used) {
+            message += `（${String(data.historical_sync.data_source_used).toUpperCase()}）`
+          }
+          message += '\n'
         } else {
           message += `❌ 历史数据同步失败: ${data.historical_sync.error || '未知错误'}\n`
         }
@@ -564,7 +598,11 @@ async function handleSync() {
 
       if (data.financial_sync) {
         if (data.financial_sync.success) {
-          message += `✅ 财务数据同步成功\n`
+          message += '✅ 财务数据同步成功'
+          if (data.financial_sync.data_source_used) {
+            message += `（${String(data.financial_sync.data_source_used).toUpperCase()}）`
+          }
+          message += '\n'
         } else {
           message += `❌ 财务数据同步失败: ${data.financial_sync.error || '未知错误'}\n`
         }
@@ -572,7 +610,11 @@ async function handleSync() {
 
       if (data.basic_sync) {
         if (data.basic_sync.success) {
-          message += `✅ 基础数据同步成功\n`
+          message += '✅ 基础数据同步成功'
+          if (data.basic_sync.data_source_used) {
+            message += `（${String(data.basic_sync.data_source_used).toUpperCase()}）`
+          }
+          message += '\n'
         } else {
           message += `❌ 基础数据同步失败: ${data.basic_sync.error || '未知错误'}\n`
         }
@@ -891,11 +933,6 @@ function goPaperTrading() {
   router.push({ name: 'PaperTradingHome', query: { code: code.value } })
 }
 
-function scrollToDetail() {
-  const el = document.getElementById('analysis-detail')
-  if (el) el.scrollIntoView({ behavior: 'smooth' })
-}
-
 // 获取最新的历史分析报告
 async function fetchLatestAnalysis() {
   try {
@@ -1078,7 +1115,8 @@ function formatNewsTime(dateStr: string | null | undefined): string {
 }
 
 // 格式化报告名称
-function formatReportName(key: string): string {
+function formatReportName(key: string | number): string {
+  const reportKey = String(key)
   // 完整的13个报告映射
   const nameMap: Record<string, string> = {
     // 分析师团队 (4个)
@@ -1109,14 +1147,54 @@ function formatReportName(key: string): string {
     'investment_debate_state': '🔬 研究团队决策（旧）',
     'risk_debate_state': '⚖️ 风险管理团队（旧）'
   }
-  return nameMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return nameMap[reportKey] || reportKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+}
+
+function normalizeDisplayReportContent(content: string): string {
+  const titleMap: Record<string, string> = {
+    market_report: '市场技术分析',
+    sentiment_report: '市场情绪分析',
+    news_report: '新闻事件分析',
+    fundamentals_report: '基本面分析',
+    bull_researcher: '多头研究观点',
+    bear_researcher: '空头研究观点',
+    research_team_decision: '研究经理综合决策',
+    trader_investment_plan: '交易员执行计划',
+    risky_analyst: '激进风险评估',
+    safe_analyst: '保守风险评估',
+    neutral_analyst: '中性风险评估',
+    risk_management_decision: '风险管理决策',
+    final_trade_decision: '最终交易决策'
+  }
+
+  let normalized = content.trim()
+  Object.entries(titleMap).forEach(([key, title]) => {
+    const aliases = [
+      key,
+      key.replace(/_/g, ' '),
+      key === 'risky_analyst' ? 'aggressive analyst' : '',
+      key === 'safe_analyst' ? 'conservative analyst' : '',
+      key === 'neutral_analyst' ? 'neutral analyst' : ''
+    ].filter(Boolean)
+
+    aliases.forEach((alias) => {
+      const pattern = new RegExp(`^(#{1,6}\\\\s*)?${alias.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\\\s*$`, 'gim')
+      normalized = normalized.replace(pattern, `## ${title}`)
+    })
+  })
+
+  normalized = normalized.replace(/^\s*[0-9一二三]+[\)\.、：:\-）]\s*(aggressive(?:\s+analyst|\s+risk\s+assessment)?|risky(?:\s+analyst)?)\s*$/gim, '### 激进风险评估')
+  normalized = normalized.replace(/^\s*[0-9一二三]+[\)\.、：:\-）]\s*(conservative(?:\s+analyst|\s+risk\s+assessment)?|safe(?:\s+analyst)?)\s*$/gim, '### 保守风险评估')
+  normalized = normalized.replace(/^\s*[0-9一二三]+[\)\.、：:\-）]\s*(neutral(?:\s+analyst|\s+risk\s+assessment)?)\s*$/gim, '### 中性风险评估')
+
+  return normalized
 }
 
 // 渲染Markdown
-function renderMarkdown(content: string): string {
+function renderMarkdown(content: string | number): string {
   if (!content) return '<p>暂无内容</p>'
   try {
-    return marked(content)
+    return String(marked.parse(normalizeDisplayReportContent(String(content)), { async: false }))
   } catch (e) {
     console.error('Markdown渲染失败:', e)
     return `<pre>${content}</pre>`
@@ -1124,9 +1202,9 @@ function renderMarkdown(content: string): string {
 }
 
 // 打开指定报告
-function openReport(reportKey: string) {
+function openReport(reportKey: string | number) {
   showReportsDialog.value = true
-  activeReportTab.value = reportKey
+  activeReportTab.value = String(reportKey)
 }
 
 // 导出报告

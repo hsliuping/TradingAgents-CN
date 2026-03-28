@@ -196,6 +196,21 @@ import {
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
+interface ReportListItem {
+  id: string
+  title: string
+  stock_code: string
+  stock_name: string
+  type: string
+  format: string
+  status: string
+  model_info?: string
+  analysis_date?: string
+  created_at: string
+}
+
 // 使用路由和认证store
 const router = useRouter()
 const authStore = useAuthStore()
@@ -205,12 +220,12 @@ const loading = ref(false)
 const searchKeyword = ref('')
 const marketFilter = ref('')
 const dateRange = ref<[string, string] | null>(null)
-const selectedReports = ref([])
+const selectedReports = ref<ReportListItem[]>([])
 const currentPage = ref(1)
 const pageSize = ref(20)
 const totalReports = ref(0)
 
-const reports = ref([])
+const reports = ref<ReportListItem[]>([])
 
 // 计算属性
 const filteredReports = computed(() => {
@@ -333,7 +348,12 @@ const downloadReport = async (report: any, format: string = 'markdown') => {
     // 显示详细错误信息
     if (error.message && error.message.includes('pandoc')) {
       ElMessage.error({
-        message: 'PDF/Word 导出需要安装 pandoc 工具',
+        message: 'Word 导出需要安装 pandoc 工具',
+        duration: 5000
+      })
+    } else if (error.message && (error.message.includes('pdfkit') || error.message.includes('wkhtmltopdf'))) {
+      ElMessage.error({
+        message: 'PDF 导出需要安装 pdfkit 和 wkhtmltopdf',
         duration: 5000
       })
     } else {
@@ -398,7 +418,8 @@ const deleteReport = async (report: any) => {
       throw new Error(result.message || '删除失败')
     }
   } catch (error) {
-    if (error.message !== 'cancel') {
+    const errorMessage = error instanceof Error ? error.message : ''
+    if (errorMessage !== 'cancel') {
       console.error('删除报告失败:', error)
       ElMessage.error('删除报告失败')
     }
@@ -413,8 +434,8 @@ const refreshReports = () => {
   fetchReports()
 }
 
-const getTypeColor = (type: string) => {
-  const colorMap: Record<string, string> = {
+const getTypeColor = (type: string): TagType => {
+  const colorMap: Record<string, TagType> = {
     single: 'primary',
     batch: 'success',
     portfolio: 'warning'
@@ -431,8 +452,8 @@ const getTypeText = (type: string) => {
   return textMap[type] || type
 }
 
-const getStatusType = (status: string) => {
-  const statusMap: Record<string, string> = {
+const getStatusType = (status: string): TagType => {
+  const statusMap: Record<string, TagType> = {
     completed: 'success',
     processing: 'warning',
     failed: 'danger'

@@ -7,6 +7,7 @@ import asyncio
 import uuid
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable
 from pathlib import Path
@@ -168,7 +169,7 @@ class AnalysisService:
             progress_tracker.update_progress("💰 预估分析成本")
 
             # 根据模型名称动态查找供应商（同步版本）
-            llm_provider = "dashscope"  # 默认使用dashscope
+            llm_provider = "openai"  # 默认使用 OpenAI / GPT-5.4
 
             # 参数配置
             progress_tracker.update_progress("⚙️ 配置分析参数")
@@ -293,7 +294,7 @@ class AnalysisService:
                 logger.warning(f"⚠️ 从 MongoDB 读取模型配置失败: {e}，将使用默认参数")
 
             # 根据模型名称动态查找供应商（同步版本）
-            llm_provider = "dashscope"  # 默认使用dashscope
+            llm_provider = "openai"  # 默认使用 OpenAI / GPT-5.4
 
             # 使用标准配置函数创建完整配置
             from app.services.simple_analysis_service import create_analysis_config
@@ -356,7 +357,7 @@ class AnalysisService:
                 task_id=task.task_id,
                 analysts=task.parameters.selected_analysts or ["market", "fundamentals"],
                 research_depth=task.parameters.research_depth or "标准",
-                llm_provider="dashscope"
+                llm_provider="openai"
             )
 
             # 缓存进度跟踪器
@@ -392,7 +393,7 @@ class AnalysisService:
                 deep_model = getattr(task.parameters, 'deep_analysis_model', None)
 
                 # 优先使用深度分析模型，如果没有则使用快速分析模型
-                model_name = deep_model or quick_model or "qwen-plus"
+                model_name = deep_model or quick_model or "gpt-5.4"
 
                 # 根据模型名称确定供应商
                 from app.services.simple_analysis_service import get_provider_by_model_name
@@ -451,12 +452,26 @@ class AnalysisService:
             except Exception:
                 effective_settings = {}
 
+            default_model = (
+                effective_settings.get("default_model")
+                or os.getenv("TRADINGAGENTS_DEFAULT_MODEL")
+                or ""
+            )
+
             # 填充分析参数中的模型（若请求未显式提供）
             params = request.parameters or AnalysisParameters()
             if not getattr(params, 'quick_analysis_model', None):
-                params.quick_analysis_model = effective_settings.get("quick_analysis_model", "qwen-turbo")
+                params.quick_analysis_model = (
+                    effective_settings.get("quick_analysis_model")
+                    or effective_settings.get("quick_think_llm")
+                    or default_model
+                )
             if not getattr(params, 'deep_analysis_model', None):
-                params.deep_analysis_model = effective_settings.get("deep_analysis_model", "qwen-max")
+                params.deep_analysis_model = (
+                    effective_settings.get("deep_analysis_model")
+                    or effective_settings.get("deep_think_llm")
+                    or default_model
+                )
 
             # 应用系统级并发与可见性超时（若提供）
             try:
@@ -530,11 +545,25 @@ class AnalysisService:
             except Exception:
                 effective_settings = {}
 
+            default_model = (
+                effective_settings.get("default_model")
+                or os.getenv("TRADINGAGENTS_DEFAULT_MODEL")
+                or ""
+            )
+
             params = request.parameters or AnalysisParameters()
             if not getattr(params, 'quick_analysis_model', None):
-                params.quick_analysis_model = effective_settings.get("quick_analysis_model", "qwen-turbo")
+                params.quick_analysis_model = (
+                    effective_settings.get("quick_analysis_model")
+                    or effective_settings.get("quick_think_llm")
+                    or default_model
+                )
             if not getattr(params, 'deep_analysis_model', None):
-                params.deep_analysis_model = effective_settings.get("deep_analysis_model", "qwen-max")
+                params.deep_analysis_model = (
+                    effective_settings.get("deep_analysis_model")
+                    or effective_settings.get("deep_think_llm")
+                    or default_model
+                )
 
             try:
                 self.queue_service.user_concurrent_limit = int(effective_settings.get("max_concurrent_tasks", DEFAULT_USER_CONCURRENT_LIMIT))

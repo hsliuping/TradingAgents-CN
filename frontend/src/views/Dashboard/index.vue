@@ -235,49 +235,49 @@
               <div class="account-section-title">🇨🇳 A股账户</div>
               <div class="account-item">
                 <div class="account-label">现金</div>
-                <div class="account-value">¥{{ formatMoney(paperAccount.cash?.CNY || paperAccount.cash) }}</div>
+                <div class="account-value">¥{{ formatMoney(getCurrencyValue(paperAccount.cash, 'CNY')) }}</div>
               </div>
               <div class="account-item">
                 <div class="account-label">持仓市值</div>
-                <div class="account-value">¥{{ formatMoney(paperAccount.positions_value?.CNY || paperAccount.positions_value) }}</div>
+                <div class="account-value">¥{{ formatMoney(getCurrencyValue(paperAccount.positions_value, 'CNY')) }}</div>
               </div>
               <div class="account-item">
                 <div class="account-label">总资产</div>
-                <div class="account-value primary">¥{{ formatMoney(paperAccount.equity?.CNY || paperAccount.equity) }}</div>
+                <div class="account-value primary">¥{{ formatMoney(getCurrencyValue(paperAccount.equity, 'CNY')) }}</div>
               </div>
             </div>
 
             <!-- 港股账户 -->
-            <div class="account-section" v-if="paperAccount.cash?.HKD !== undefined">
+            <div class="account-section" v-if="hasCurrencyValue(paperAccount.cash, 'HKD')">
               <div class="account-section-title">🇭🇰 港股账户</div>
               <div class="account-item">
                 <div class="account-label">现金</div>
-                <div class="account-value">HK${{ formatMoney(paperAccount.cash.HKD) }}</div>
+                <div class="account-value">HK${{ formatMoney(getCurrencyValue(paperAccount.cash, 'HKD')) }}</div>
               </div>
               <div class="account-item">
                 <div class="account-label">持仓市值</div>
-                <div class="account-value">HK${{ formatMoney(paperAccount.positions_value?.HKD || 0) }}</div>
+                <div class="account-value">HK${{ formatMoney(getCurrencyValue(paperAccount.positions_value, 'HKD')) }}</div>
               </div>
               <div class="account-item">
                 <div class="account-label">总资产</div>
-                <div class="account-value primary">HK${{ formatMoney(paperAccount.equity?.HKD || 0) }}</div>
+                <div class="account-value primary">HK${{ formatMoney(getCurrencyValue(paperAccount.equity, 'HKD')) }}</div>
               </div>
             </div>
 
             <!-- 美股账户 -->
-            <div class="account-section" v-if="paperAccount.cash?.USD !== undefined">
+            <div class="account-section" v-if="hasCurrencyValue(paperAccount.cash, 'USD')">
               <div class="account-section-title">🇺🇸 美股账户</div>
               <div class="account-item">
                 <div class="account-label">现金</div>
-                <div class="account-value">${{ formatMoney(paperAccount.cash.USD) }}</div>
+                <div class="account-value">${{ formatMoney(getCurrencyValue(paperAccount.cash, 'USD')) }}</div>
               </div>
               <div class="account-item">
                 <div class="account-label">持仓市值</div>
-                <div class="account-value">${{ formatMoney(paperAccount.positions_value?.USD || 0) }}</div>
+                <div class="account-value">${{ formatMoney(getCurrencyValue(paperAccount.positions_value, 'USD')) }}</div>
               </div>
               <div class="account-item">
                 <div class="account-label">总资产</div>
-                <div class="account-value primary">${{ formatMoney(paperAccount.equity?.USD || 0) }}</div>
+                <div class="account-value primary">${{ formatMoney(getCurrencyValue(paperAccount.equity, 'USD')) }}</div>
               </div>
             </div>
           </div>
@@ -318,7 +318,7 @@ import MultiSourceSyncCard from '@/components/Dashboard/MultiSourceSyncCard.vue'
 import { favoritesApi } from '@/api/favorites'
 import { analysisApi } from '@/api/analysis'
 import { newsApi } from '@/api/news'
-import { paperApi, type PaperAccountSummary } from '@/api/paper'
+import { paperApi, type PaperAccountSummary, type CurrencyAmount } from '@/api/paper'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -332,19 +332,6 @@ const userStats = ref({
   concurrentLimit: 3
 })
 
-const systemStatus = ref({
-  api: true,
-  queue: true,
-  database: true
-})
-
-const queueStats = ref({
-  pending: 0,
-  processing: 0,
-  completed: 0,
-  failed: 0
-})
-
 const recentAnalyses = ref<AnalysisTask[]>([])
 
 // 自选股数据
@@ -352,7 +339,6 @@ const favoriteStocks = ref<any[]>([])
 
 // 市场快讯数据
 const marketNews = ref<any[]>([])
-const syncingNews = ref(false)
 
 // 模拟交易账户数据
 const paperAccount = ref<PaperAccountSummary | null>(null)
@@ -574,38 +560,15 @@ const formatMoney = (value: number) => {
   return value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
-// 获取盈亏样式类
-const getPnlClass = (pnl: number) => {
-  if (pnl > 0) return 'price-up'
-  if (pnl < 0) return 'price-down'
-  return 'price-neutral'
+const hasCurrencyValue = (value: number | CurrencyAmount, currency: keyof CurrencyAmount) => {
+  return typeof value === 'object' && value !== null && value[currency] !== undefined
 }
 
-const syncMarketNews = async () => {
-  try {
-    syncingNews.value = true
-    ElMessage.info('正在同步市场新闻，请稍候...')
-
-    // 调用同步API（后台任务）
-    const response = await newsApi.syncMarketNews(24, 50)
-
-    if (response.success) {
-      ElMessage.success('新闻同步任务已启动，请稍后刷新查看')
-
-      // 等待3秒后自动刷新新闻列表
-      setTimeout(async () => {
-        await loadMarketNews()
-        if (marketNews.value.length > 0) {
-          ElMessage.success(`成功加载 ${marketNews.value.length} 条市场新闻`)
-        }
-      }, 3000)
-    }
-  } catch (error) {
-    console.error('同步市场快讯失败:', error)
-    ElMessage.error('同步市场新闻失败，请稍后重试')
-  } finally {
-    syncingNews.value = false
+const getCurrencyValue = (value: number | CurrencyAmount, currency: keyof CurrencyAmount) => {
+  if (typeof value === 'number') {
+    return currency === 'CNY' ? value : 0
   }
+  return value?.[currency] ?? 0
 }
 
 // 生命周期

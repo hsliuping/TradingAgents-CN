@@ -48,7 +48,7 @@ async def test_add_provider_with_key():
         website="https://test.com",
         api_doc_url="https://test.com/docs",
         default_base_url="https://api.test.com/v1",
-        api_key="sk-test-key-1234567890abcdef",  # 有效的 Key
+        api_key="sk-test-placeholder-edit-001234567890",  # 有效格式占位 Key
         supported_features=["chat"],
         is_active=True
     )
@@ -95,7 +95,7 @@ async def test_update_provider_key(provider_id: str):
     
     try:
         # 更新 API Key
-        new_key = "sk-updated-key-9876543210fedcba"
+        new_key = "sk-test-placeholder-updated-009876543210"
         update_data = {"api_key": new_key}
         
         success = await config_service.update_llm_provider(provider_id, update_data)
@@ -224,4 +224,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

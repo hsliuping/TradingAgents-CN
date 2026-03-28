@@ -16,12 +16,12 @@ def main():
     print("=" * 50)
     
     # 确保在项目根目录
-    project_root = Path(__file__).parent
+    project_root = Path(__file__).resolve().parents[2]
     os.chdir(project_root)
     
     # 检查Python版本
-    if sys.version_info < (3, 8):
-        print("❌ Python 3.8+ is required")
+    if sys.version_info < (3, 10):
+        print("❌ Python 3.10+ is required")
         sys.exit(1)
     
     # 检查app目录是否存在
@@ -34,8 +34,10 @@ def main():
     print("-" * 50)
     
     try:
-        # 使用 python -m app 启动
-        subprocess.run([sys.executable, "-m", "app"], check=True)
+        subprocess.run(
+            [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"],
+            check=True,
+        )
     except KeyboardInterrupt:
         print("\n🛑 Server stopped by user")
     except subprocess.CalledProcessError as e:

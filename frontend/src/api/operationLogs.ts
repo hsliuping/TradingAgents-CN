@@ -4,6 +4,8 @@
 
 import { ApiClient } from './request'
 
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
 // 操作日志数据类型
 export interface OperationLog {
   id: string
@@ -164,7 +166,7 @@ export class OperationLogsApi {
     if (params.action_type) queryParams.append('action_type', params.action_type)
     
     const url = `/api/system/logs/export/csv${queryParams.toString() ? '?' + queryParams.toString() : ''}`
-    return ApiClient.get(url, { responseType: 'blob' })
+    return ApiClient.getBlob(url)
   }
 }
 
@@ -221,7 +223,7 @@ export const getActionTypeName = (actionType: string): string => {
   return ActionTypeNames[actionType as keyof typeof ActionTypeNames] || actionType
 }
 
-export const getActionTypeTagColor = (actionType: string): string => {
+export const getActionTypeTagColor = (actionType: string): TagType => {
   return ActionTypeTagColors[actionType as keyof typeof ActionTypeTagColors] || 'info'
 }
 

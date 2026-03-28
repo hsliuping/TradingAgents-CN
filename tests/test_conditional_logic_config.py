@@ -8,6 +8,33 @@ from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 
 
+@pytest.fixture(autouse=True)
+def stub_graph_llms(monkeypatch):
+    """这些测试只关心配置传递，不需要真实 LLM 初始化。"""
+    import tradingagents.graph.trading_graph as trading_graph_module
+    import app.services.simple_analysis_service as simple_analysis_service
+
+    class _DummyLLM:
+        def __init__(self, *args, **kwargs):
+            self.kwargs = kwargs
+
+        def bind_tools(self, tools):
+            return self
+
+    monkeypatch.setattr(trading_graph_module, "ChatDashScopeOpenAI", _DummyLLM, raising=True)
+    monkeypatch.setattr(trading_graph_module, "ChatGoogleOpenAI", _DummyLLM, raising=True)
+    monkeypatch.setattr(
+        simple_analysis_service,
+        "get_provider_and_url_by_model_sync",
+        lambda model_name: {
+            "provider": "dashscope",
+            "backend_url": "https://dashscope.aliyuncs.com/api/v1",
+            "api_key": "sk-test-placeholder-001",
+        },
+        raising=True,
+    )
+
+
 class TestConditionalLogicConfig:
     """测试 ConditionalLogic 配置传递"""
 
@@ -120,4 +147,3 @@ class TestDebateRoundsProgression:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])
-

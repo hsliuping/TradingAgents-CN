@@ -5,9 +5,13 @@ TradingAgents-CN v1.0.0-preview 前端启动脚本
 
 import subprocess
 import sys
-import os
 import time
+import shutil
 from pathlib import Path
+
+
+def get_project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
 
 def check_node_version():
     """检查Node.js版本"""
@@ -46,11 +50,19 @@ def check_npm():
         print("❌ npm未安装")
         return False
 
+def detect_frontend_runner():
+    """优先使用 pnpm，没有再退回 corepack+yarn。"""
+    if shutil.which('pnpm'):
+        return ['pnpm']
+    if shutil.which('corepack'):
+        return ['corepack', 'yarn']
+    return None
+
 def install_dependencies():
     """安装依赖"""
     print("📦 安装前端依赖...")
     
-    frontend_dir = Path(__file__).parent / "frontend"
+    frontend_dir = get_project_root() / "frontend"
     
     try:
         # 检查package.json是否存在
@@ -58,9 +70,14 @@ def install_dependencies():
             print("❌ package.json不存在")
             return False
         
+        runner = detect_frontend_runner()
+        if not runner:
+            print("❌ 未找到 pnpm 或 corepack，无法安装前端依赖")
+            return False
+
         # 安装依赖
         result = subprocess.run(
-            ['npm', 'install'],
+            runner + ['install', '--frozen-lockfile'],
             cwd=frontend_dir,
             capture_output=True,
             text=True
@@ -81,12 +98,17 @@ def start_dev_server():
     """启动开发服务器"""
     print("🚀 启动前端开发服务器...")
     
-    frontend_dir = Path(__file__).parent / "frontend"
+    frontend_dir = get_project_root() / "frontend"
     
     try:
+        runner = detect_frontend_runner()
+        if not runner:
+            print("❌ 未找到 pnpm 或 corepack，无法启动前端开发服务器")
+            return False
+
         # 启动开发服务器
         process = subprocess.Popen(
-            ['npm', 'run', 'dev'],
+            runner + ['dev', '--host', '0.0.0.0', '--port', '3000'],
             cwd=frontend_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -131,7 +153,7 @@ def main():
         sys.exit(1)
     
     # 检查前端目录
-    frontend_dir = Path(__file__).parent / "frontend"
+    frontend_dir = get_project_root() / "frontend"
     if not frontend_dir.exists():
         print("❌ frontend目录不存在")
         sys.exit(1)

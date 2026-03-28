@@ -3,6 +3,7 @@ import json
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
+from tradingagents.agents.utils.streaming_utils import stream_text_response
 logger = get_logger("default")
 
 
@@ -79,7 +80,7 @@ def create_research_manager(llm, memory):
         # ⏱️ 记录开始时间
         start_time = time.time()
 
-        response = llm.invoke(prompt)
+        response = stream_text_response(llm, prompt, "Research Manager")
 
         # ⏱️ 记录结束时间
         elapsed_time = time.time() - start_time

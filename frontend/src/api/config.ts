@@ -80,6 +80,13 @@ export interface DataSourceConfig {
   market_categories?: string[]  // 所属市场分类列表
   display_name?: string         // 显示名称
   provider?: string            // 数据提供商
+  extra_config?: {
+    has_api_key?: boolean
+    has_api_secret?: boolean
+    source?: 'environment' | 'database'
+    secret_source?: 'database'
+    [key: string]: any
+  }
   created_at?: string
   updated_at?: string
 }
@@ -145,6 +152,7 @@ export interface ConfigTestResponse {
   success: boolean
   message: string
   details?: Record<string, any>
+  response_time?: number
 }
 
 
@@ -157,23 +165,41 @@ export interface SettingMeta {
   has_value: boolean
 }
 
+type ModelCatalogEntry = {
+  provider: string
+  provider_name: string
+  models: Array<{
+    name: string
+    display_name: string
+    description?: string
+    context_length?: number
+    max_tokens?: number
+    input_price_per_1k?: number
+    output_price_per_1k?: number
+    currency?: string
+    is_deprecated?: boolean
+    release_date?: string
+    capabilities?: string[]
+  }>
+}
+
 // 配置管理API
 export const configApi = {
   // 获取系统配置
   getSystemConfig(): Promise<SystemConfig> {
-    return ApiClient.get('/api/config/system')
+    return ApiClient.getData('/api/config/system')
   },
 
   // ========== 大模型厂家管理 ==========
 
   // 获取所有大模型厂家
   getLLMProviders(): Promise<LLMProvider[]> {
-    return ApiClient.get('/api/config/llm/providers')
+    return ApiClient.getData('/api/config/llm/providers')
   },
 
   // 添加大模型厂家
   addLLMProvider(provider: Partial<LLMProvider>): Promise<{ message: string; id: string }> {
-    return ApiClient.post('/api/config/llm/providers', provider)
+    return ApiClient.postData('/api/config/llm/providers', provider)
   },
 
   // 更新大模型厂家
@@ -212,51 +238,19 @@ export const configApi = {
     provider_name: string
     models: Array<{ name: string; display_name: string }>
   }>> {
-    return ApiClient.get('/api/config/models')
+    return ApiClient.getData('/api/config/models')
   },
 
   // ========== 模型目录管理 ==========
 
   // 获取所有模型目录
-  getModelCatalog(): Promise<Array<{
-    provider: string
-    provider_name: string
-    models: Array<{
-      name: string
-      display_name: string
-      description?: string
-      context_length?: number
-      max_tokens?: number
-      input_price_per_1k?: number
-      output_price_per_1k?: number
-      currency?: string
-      is_deprecated?: boolean
-      release_date?: string
-      capabilities?: string[]
-    }>
-  }>> {
-    return ApiClient.get('/api/config/model-catalog')
+  getModelCatalog(): Promise<ModelCatalogEntry[]> {
+    return ApiClient.getData('/api/config/model-catalog')
   },
 
   // 获取指定厂家的模型目录
-  getProviderModelCatalog(provider: string): Promise<{
-    provider: string
-    provider_name: string
-    models: Array<{
-      name: string
-      display_name: string
-      description?: string
-      context_length?: number
-      max_tokens?: number
-      input_price_per_1k?: number
-      output_price_per_1k?: number
-      currency?: string
-      is_deprecated?: boolean
-      release_date?: string
-      capabilities?: string[]
-    }>
-  }> {
-    return ApiClient.get(`/api/config/model-catalog/${provider}`)
+  getProviderModelCatalog(provider: string): Promise<ModelCatalogEntry> {
+    return ApiClient.getData(`/api/config/model-catalog/${provider}`)
   },
 
   // 保存模型目录
@@ -295,12 +289,12 @@ export const configApi = {
 
   // 获取所有大模型配置
   getLLMConfigs(): Promise<LLMConfig[]> {
-    return ApiClient.get('/api/config/llm')
+    return ApiClient.getData('/api/config/llm')
   },
 
   // 添加或更新大模型配置
   updateLLMConfig(config: Partial<LLMConfig>): Promise<{ message: string; model_name: string }> {
-    return ApiClient.post('/api/config/llm', config)
+    return ApiClient.postData('/api/config/llm', config)
   },
 
   // 删除大模型配置
@@ -310,22 +304,22 @@ export const configApi = {
 
   // 设置默认大模型
   setDefaultLLM(name: string): Promise<{ message: string; default_llm: string }> {
-    return ApiClient.post('/api/config/llm/set-default', { name })
+    return ApiClient.postData('/api/config/llm/set-default', { name })
   },
 
   // 获取所有数据源配置
   getDataSourceConfigs(): Promise<DataSourceConfig[]> {
-    return ApiClient.get('/api/config/datasource')
+    return ApiClient.getData('/api/config/datasource')
   },
 
   // 添加数据源配置
   addDataSourceConfig(config: Partial<DataSourceConfig>): Promise<{ message: string; name: string }> {
-    return ApiClient.post('/api/config/datasource', config)
+    return ApiClient.postData('/api/config/datasource', config)
   },
 
   // 设置默认数据源
   setDefaultDataSource(name: string): Promise<{ message: string; default_data_source: string }> {
-    return ApiClient.post('/api/config/datasource/set-default', { name })
+    return ApiClient.postData('/api/config/datasource/set-default', { name })
   },
 
   // 更新数据源配置
@@ -340,11 +334,11 @@ export const configApi = {
 
   // 市场分类管理
   getMarketCategories(): Promise<MarketCategory[]> {
-    return ApiClient.get('/api/config/market-categories')
+    return ApiClient.getData('/api/config/market-categories')
   },
 
   addMarketCategory(category: Partial<MarketCategory>): Promise<{ message: string; id: string }> {
-    return ApiClient.post('/api/config/market-categories', category)
+    return ApiClient.postData('/api/config/market-categories', category)
   },
 
   updateMarketCategory(id: string, category: Partial<MarketCategory>): Promise<{ message: string }> {
@@ -357,7 +351,7 @@ export const configApi = {
 
   // 数据源分组管理
   getDataSourceGroupings(): Promise<DataSourceGrouping[]> {
-    return ApiClient.get('/api/config/datasource-groupings')
+    return ApiClient.getData('/api/config/datasource-groupings')
   },
 
   addDataSourceToCategory(dataSourceName: string, categoryId: string, priority?: number): Promise<{ message: string }> {
@@ -386,7 +380,7 @@ export const configApi = {
 
   // 获取系统设置元数据
   getSystemSettingsMeta(): Promise<{ items: SettingMeta[] }> {
-    return ApiClient.get('/api/config/settings/meta').then((r: any) => r.data)
+    return ApiClient.getData('/api/config/settings/meta')
   },
 
 
@@ -394,12 +388,12 @@ export const configApi = {
 
   // 获取所有数据库配置
   getDatabaseConfigs(): Promise<DatabaseConfig[]> {
-    return ApiClient.get('/api/config/database')
+    return ApiClient.getData('/api/config/database')
   },
 
   // 获取指定的数据库配置
   getDatabaseConfig(dbName: string): Promise<DatabaseConfig> {
-    return ApiClient.get(`/api/config/database/${encodeURIComponent(dbName)}`)
+    return ApiClient.getData(`/api/config/database/${encodeURIComponent(dbName)}`)
   },
 
   // 添加数据库配置
@@ -424,15 +418,31 @@ export const configApi = {
 
   // 获取系统设置
   getSystemSettings(): Promise<Record<string, any>> {
-    return ApiClient.get('/api/config/settings')
+    return ApiClient.getData('/api/config/settings')
   },
 
   // 获取默认模型配置
   getDefaultModels(): Promise<{ quick_analysis_model: string; deep_analysis_model: string }> {
-    return ApiClient.get('/api/config/settings').then(settings => ({
-      quick_analysis_model: settings.quick_analysis_model || 'qwen-turbo',
-      deep_analysis_model: settings.deep_analysis_model || 'qwen-max'
-    }))
+    return ApiClient.getData<Record<string, any>>('/api/config/settings').then(settings => {
+      const defaultModel =
+        settings.quick_analysis_model ||
+        settings.quick_think_llm ||
+        settings.default_model ||
+        settings.deep_analysis_model ||
+        settings.deep_think_llm ||
+        ''
+
+      return {
+        quick_analysis_model:
+          settings.quick_analysis_model ||
+          settings.quick_think_llm ||
+          defaultModel,
+        deep_analysis_model:
+          settings.deep_analysis_model ||
+          settings.deep_think_llm ||
+          defaultModel
+      }
+    })
   },
 
   // 更新系统设置
@@ -447,7 +457,7 @@ export const configApi = {
 
   // 导出配置
   exportConfig(): Promise<{ message: string; data: any; exported_at: string }> {
-    return ApiClient.post('/api/config/export')
+    return ApiClient.postData('/api/config/export')
   },
 
   // 导入配置

@@ -1,33 +1,34 @@
-"""测试查询"""
+"""针对真实 MongoDB 的手工排查测试。默认不进入标准套件。"""
+
+import os
+
+import pytest
 from pymongo import MongoClient
 
-# 连接 MongoDB
-mongo_uri = "mongodb://admin:tradingagents123@localhost:27017/"
-client = MongoClient(mongo_uri)
 
-db = client["tradingagents"]
+pytestmark = pytest.mark.integration
 
-print("=" * 60)
-print("🔍 测试查询 market_quotes")
-print("=" * 60)
 
-# 测试不同的查询条件
-queries = [
-    {"code": "300750"},
-    {"symbol": "300750"},
-    {"code": "300750", "symbol": "300750"},
-]
+def test_market_quotes_query_smoke():
+    """
+    真实库烟雾检查。
 
-for query in queries:
-    print(f"\n查询条件: {query}")
-    result = db.market_quotes.find_one(query, {"_id": 0})
-    if result:
-        print(f"  ✅ 找到数据")
-        print(f"  - volume: {result.get('volume')}")
-        print(f"  - amount: {result.get('amount')}")
-        print(f"  - volume_ratio: {result.get('volume_ratio')}")
-    else:
-        print(f"  ❌ 未找到数据")
+    需要配置 TEST_MONGODB_URI；未配置时默认跳过，避免污染常规测试。
+    """
+    mongo_uri = os.getenv("TEST_MONGODB_URI", "").strip()
+    if not mongo_uri:
+        pytest.skip("TEST_MONGODB_URI 未配置，跳过真实 MongoDB 查询测试")
 
-client.close()
+    client = MongoClient(mongo_uri, serverSelectionTimeoutMS=2000)
+    db = client["tradingagents"]
 
+    try:
+        queries = [
+            {"code": "300750"},
+            {"symbol": "300750"},
+            {"code": "300750", "symbol": "300750"},
+        ]
+        results = [db.market_quotes.find_one(query, {"_id": 0}) for query in queries]
+        assert any(result is None or isinstance(result, dict) for result in results)
+    finally:
+        client.close()

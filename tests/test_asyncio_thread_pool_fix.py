@@ -6,8 +6,11 @@
 """
 
 import asyncio
-import pytest
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
+
+import pandas as pd
+
 from tradingagents.dataflows.data_source_manager import DataSourceManager
 
 
@@ -44,35 +47,43 @@ def test_asyncio_in_thread_pool():
 
 def test_data_source_manager_in_thread_pool():
     """测试 DataSourceManager 在线程池中的使用"""
-    
+
+    class _FakeProvider:
+        async def get_historical_data(self, symbol, start_date, end_date):
+            return pd.DataFrame(
+                [
+                    {"date": "2025-01-02", "open": 10.0, "close": 10.2, "high": 10.3, "low": 9.9, "volume": 1000},
+                    {"date": "2025-01-03", "open": 10.2, "close": 10.4, "high": 10.5, "low": 10.1, "volume": 1200},
+                ]
+            )
+
+        async def get_stock_basic_info(self, symbol):
+            return {"name": "平安银行"}
+
     def get_stock_data():
         """在线程池中获取股票数据"""
         manager = DataSourceManager()
-        # 这应该不会抛出 RuntimeError
-        # 注意：实际数据获取可能失败（如果没有配置API key），但不应该是事件循环错误
-        try:
-            result = manager.get_stock_data(
+
+        with patch.object(manager, "_get_cached_data", return_value=None), patch.object(
+            manager,
+            "_get_tushare_adapter",
+            return_value=_FakeProvider(),
+        ), patch.object(manager, "_save_to_cache", return_value=None):
+            result = manager._get_tushare_data(
                 symbol="000001",
                 start_date="2025-01-01",
                 end_date="2025-01-10",
-                period="daily"
+                period="daily",
             )
             return result
-        except Exception as e:
-            # 如果是事件循环错误，测试失败
-            if "There is no current event loop" in str(e):
-                raise AssertionError(f"事件循环错误未修复: {e}")
-            # 其他错误（如API配置问题）可以接受
-            return f"其他错误（可接受）: {type(e).__name__}"
-    
+
     # 在线程池中执行
     with ThreadPoolExecutor(max_workers=2) as executor:
         future = executor.submit(get_stock_data)
-        result = future.result(timeout=30)
-        
-        # 验证不是事件循环错误
+        result = future.result(timeout=40)
+
         assert "There is no current event loop" not in str(result)
-        print(f"✅ 测试通过，结果: {result[:200] if isinstance(result, str) else result}")
+        assert "平安银行" in result
 
 
 def test_multiple_threads():
@@ -120,4 +131,3 @@ if __name__ == "__main__":
     print("✅ 测试3通过\n")
     
     print("🎉 所有测试通过！")
-

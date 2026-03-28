@@ -128,7 +128,7 @@ BAOSTOCK_UNIFIED_ENABLED=true
   {
     "provider": "dashscope",
     "model_name": "qwen-turbo",
-    "api_key": "sk-xxx",
+    "api_key": "sk-test-placeholder-001",
     "max_tokens": 4000,
     "temperature": 0.7,
     "enabled": true
@@ -160,7 +160,7 @@ BAOSTOCK_UNIFIED_ENABLED=true
     {
       "provider": "OPENAI",
       "model_name": "gpt-3.5-turbo",
-      "api_key": "sk-xxx",
+      "api_key": "sk-test-placeholder-001",
       "api_base": "https://api.openai.com/v1",
       "max_tokens": 4000,
       "temperature": 0.7,
@@ -1336,4 +1336,3 @@ if __name__ == "__main__":
 ---
 
 **建议**: 从创建配置验证器和更新文档开始，这些改动风险小、收益大，可以立即改善用户体验。
-

@@ -161,7 +161,9 @@ class ConditionalLogic:
         logger.info(f"🤖 [条件判断] 最后一条消息详细内容:")
         logger.info(f"🤖 [条件判断] - 消息类型: {type(last_message).__name__}")
         if hasattr(last_message, 'content'):
-            content_preview = last_message.content[:300] + "..." if len(last_message.content) > 300 else last_message.content
+            raw_content = getattr(last_message, "content", "")
+            content_text = raw_content if isinstance(raw_content, str) else str(raw_content)
+            content_preview = content_text[:300] + "..." if len(content_text) > 300 else content_text
             logger.info(f"🤖 [条件判断] - 内容预览: {content_preview}")
         
         # 🔍 [调试日志] 打印tool_calls的详细信息

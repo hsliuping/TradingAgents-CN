@@ -1,6 +1,6 @@
 import axios from 'axios'
 import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import router from '@/router'
@@ -467,9 +467,9 @@ export const testApiConnection = async (): Promise<boolean> => {
     const response = await request.get('/api/health', {
       timeout: 5000,
       skipErrorHandler: true
-    })
+    } as RequestConfig)
 
-    console.log('🔍 [API_TEST] 健康检查成功:', response.data)
+    console.log('🔍 [API_TEST] 健康检查成功:', response)
     return true
   } catch (error: any) {
     console.error('🔍 [API_TEST] 健康检查失败:', error)
@@ -564,6 +564,74 @@ export class ApiClient {
     })
   }
 
+  // 直接返回业务 data 字段
+  static async getData<T = any>(
+    url: string,
+    params?: any,
+    config?: RequestConfig
+  ): Promise<T> {
+    const response = await this.get<T>(url, params, config)
+    return response.data
+  }
+
+  static async postData<T = any>(
+    url: string,
+    data?: any,
+    config?: RequestConfig
+  ): Promise<T> {
+    const response = await this.post<T>(url, data, config)
+    return response.data
+  }
+
+  static async putData<T = any>(
+    url: string,
+    data?: any,
+    config?: RequestConfig
+  ): Promise<T> {
+    const response = await this.put<T>(url, data, config)
+    return response.data
+  }
+
+  static async deleteData<T = any>(
+    url: string,
+    config?: RequestConfig
+  ): Promise<T> {
+    const response = await this.delete<T>(url, config)
+    return response.data
+  }
+
+  static async patchData<T = any>(
+    url: string,
+    data?: any,
+    config?: RequestConfig
+  ): Promise<T> {
+    const response = await this.patch<T>(url, data, config)
+    return response.data
+  }
+
+  static async getBlob(
+    url: string,
+    params?: any,
+    config?: RequestConfig
+  ): Promise<Blob> {
+    return await request.get(url, {
+      params,
+      responseType: 'blob',
+      ...config
+    } as RequestConfig) as Blob
+  }
+
+  static async postBlob(
+    url: string,
+    data?: any,
+    config?: RequestConfig
+  ): Promise<Blob> {
+    return await request.post(url, data, {
+      responseType: 'blob',
+      ...config
+    } as RequestConfig) as Blob
+  }
+
   // 下载文件
   static async download(
     url: string,
@@ -571,12 +639,7 @@ export class ApiClient {
     config?: RequestConfig
   ): Promise<void> {
     // 对于 blob 响应，响应拦截器返回的就是 blob 数据
-    const blobData = await request.get(url, {
-      responseType: 'blob',
-      ...config
-    })
-
-    const blob = new Blob([blobData])
+    const blob = await this.getBlob(url, undefined, config)
     const downloadUrl = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = downloadUrl

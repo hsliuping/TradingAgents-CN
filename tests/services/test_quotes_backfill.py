@@ -39,6 +39,34 @@ def test_offhours_backfill_when_empty(monkeypatch):
             self.last_ops = ops
             return _FakeResult(len(ops))
 
+        def find(self, query):
+            class _FakeCursor:
+                async def to_list(self, length=None):
+                    return [
+                        {
+                            "symbol": "000001",
+                            "trade_date": "20250102",
+                            "period": "daily",
+                            "close": 10.2,
+                            "pct_chg": 0.2,
+                            "amount": 1.1e8,
+                            "volume": 123456,
+                            "pre_close": 10.0,
+                        },
+                        {
+                            "symbol": "600000",
+                            "trade_date": "20250102",
+                            "period": "daily",
+                            "close": 9.7,
+                            "pct_chg": -0.4,
+                            "amount": 7.1e7,
+                            "volume": 654321,
+                            "pre_close": 9.74,
+                        },
+                    ]
+
+            return _FakeCursor()
+
     class _FakeDB:
         def __init__(self):
             self._coll = _FakeColl()
@@ -62,4 +90,3 @@ def test_offhours_backfill_when_empty(monkeypatch):
         assert len(fake_db._coll.last_ops) == 2
 
     asyncio.run(_run())
-

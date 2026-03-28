@@ -15,6 +15,8 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+from app.utils.report_language_utils import get_report_section_title, normalize_report_markdown
+
 logger = logging.getLogger(__name__)
 
 # 检查依赖是否可用
@@ -84,6 +86,7 @@ class ReportExporter:
         research_depth = report_doc.get("research_depth", 1)
         reports = report_doc.get("reports", {})
         summary = report_doc.get("summary", "")
+        language = report_doc.get("language", "zh-CN")
         
         content_parts = []
         
@@ -136,7 +139,7 @@ class ReportExporter:
                     title = module_titles.get(module_key, module_key)
                     content_parts.append(f"## {title}")
                     content_parts.append("")
-                    content_parts.append(module_content)
+                    content_parts.append(normalize_report_markdown(module_content, module_key, language))
                     content_parts.append("")
                     content_parts.append("---")
                     content_parts.append("")
@@ -145,9 +148,9 @@ class ReportExporter:
         for module_key, module_content in reports.items():
             if module_key not in module_order:
                 if isinstance(module_content, str) and module_content.strip():
-                    content_parts.append(f"## {module_key}")
+                    content_parts.append(f"## {get_report_section_title(module_key, language)}")
                     content_parts.append("")
-                    content_parts.append(module_content)
+                    content_parts.append(normalize_report_markdown(module_content, module_key, language))
                     content_parts.append("")
                     content_parts.append("---")
                     content_parts.append("")
@@ -665,4 +668,3 @@ pre, code {
 
 # 创建全局导出器实例
 report_exporter = ReportExporter()
-

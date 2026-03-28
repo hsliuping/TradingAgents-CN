@@ -149,15 +149,9 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { List, Refresh, Download } from '@element-plus/icons-vue'
 import { analysisApi } from '@/api/analysis'
-import { marked } from 'marked'
 import TaskResultDialog from '@/components/Global/TaskResultDialog.vue'
 import TaskReportDialog from '@/components/Global/TaskReportDialog.vue'
-
-
-marked.setOptions({ breaks: true, gfm: true })
-const renderMarkdown = (s: string) => {
-  try { return marked.parse(s||'') as string } catch { return s }
-}
+import { formatDateTime } from '@/utils/datetime'
 
 const router = useRouter()
 const route = useRoute()
@@ -196,7 +190,6 @@ const connectTaskWebSocket = (taskId: string) => {
   }
 
   try {
-    const token = localStorage.getItem('token') || ''
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
     const wsUrl = `${wsProtocol}//${host}/api/ws/task/${taskId}`
@@ -365,11 +358,14 @@ const openResult = async (row:any) => {
 
 const openReport = (row:any) => {
   const id = row?.task_id || row?.analysis_id || row?.id
-  if (!id) return ElMessage.warning('未找到报告ID')
+  if (!id) {
+    ElMessage.warning('未找到报告ID')
+    return
+  }
   router.push({ name: 'ReportDetail', params: { id } })
 }
 
-const retryTask = (row:any) => { ElMessage.info('重试功能待实现') }
+const retryTask = (_row:any) => { ElMessage.info('重试功能待实现') }
 
 // 显示错误详情
 const showErrorDetail = async (row: any) => {
@@ -523,8 +519,6 @@ const getStatusType = (status:string): 'success' | 'info' | 'warning' | 'danger'
   }
   return map[status] || 'info'
 }
-import { formatDateTime } from '@/utils/datetime'
-
 const getStatusText = (status:string) => ({ pending:'等待中', processing:'处理中', completed:'已完成', failed:'失败', cancelled:'已取消' } as any)[status] || status
 const formatTime = (t:string) => t ? formatDateTime(t) : '-'
 </script>
@@ -539,4 +533,3 @@ const formatTime = (t:string) => t ? formatDateTime(t) : '-'
   .pagination-wrapper { display:flex; justify-content:center; margin-top: 16px; }
 }
 </style>
-

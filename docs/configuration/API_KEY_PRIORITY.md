@@ -54,7 +54,7 @@ else:
 
 ```bash
 # .env 文件
-DEEPSEEK_API_KEY=sk-real-key-from-env-12345678
+DEEPSEEK_API_KEY=sk-test-placeholder-env-001
 ```
 
 **结果**：使用环境变量的 Key
@@ -65,7 +65,7 @@ DEEPSEEK_API_KEY=sk-real-key-from-env-12345678
 // MongoDB llm_providers 集合
 {
   "name": "deepseek",
-  "api_key": "sk-real-key-from-db-87654321"
+  "api_key": "sk-test-placeholder-db-001"
 }
 ```
 
@@ -75,14 +75,14 @@ DEEPSEEK_API_KEY=sk-real-key-from-env-12345678
 
 ```bash
 # .env 文件
-DEEPSEEK_API_KEY=sk-env-key-12345678
+DEEPSEEK_API_KEY=sk-test-placeholder-env-002
 ```
 
 ```javascript
 // MongoDB
 {
   "name": "deepseek",
-  "api_key": "sk-db-key-87654321"  // 有效的 Key
+  "api_key": "sk-test-placeholder-db-002"  // 有效格式占位 Key
 }
 ```
 
@@ -92,7 +92,7 @@ DEEPSEEK_API_KEY=sk-env-key-12345678
 
 ```bash
 # .env 文件
-DEEPSEEK_API_KEY=sk-env-key-12345678
+DEEPSEEK_API_KEY=sk-test-placeholder-env-003
 ```
 
 ```javascript
@@ -149,13 +149,13 @@ api_key = "1234567890"
 
 ```python
 # ✅ 标准格式
-api_key = "sk-1234567890abcdef"
+api_key = "sk-test-placeholder-valid-001"
 
 # ✅ 长格式
-api_key = "sk-proj-1234567890abcdefghijklmnopqrstuvwxyz"
+api_key = "sk-proj-test-placeholder-valid-001234567890"
 
 # ✅ 其他格式（只要长度 > 10）
-api_key = "AIzaSyD1234567890"
+api_key = "AIzaSyTEST_PLACEHOLDER_valid_001"
 ```
 
 ## 🛠️ 实现细节
@@ -302,7 +302,7 @@ python scripts/test_api_key_priority.py
 官网: https://custom.com
 API文档: https://custom.com/docs
 默认API地址: https://api.custom.com/v1
-API Key: sk-custom-key-1234567890abcdef
+API Key: sk-test-placeholder-custom-001234567890
 ```
 
 ### 配置检查
@@ -328,4 +328,3 @@ API Key: sk-custom-key-1234567890abcdef
 - [配置管理系统](./CONFIG_MIGRATION_PLAN.md)
 - [厂家配置管理](../fixes/data-source/PROVIDER_ID_FIX.md)
 - [环境变量配置](.env.example)
-

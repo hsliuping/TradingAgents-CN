@@ -76,7 +76,7 @@ async def submit_single_analysis(
                     user_id,
                     request
                 )
-                logger.info(f"✅ [BackgroundTask] 分析任务完成: {task_id}")
+                logger.info(f"ℹ️ [BackgroundTask] 分析任务后台执行结束: {task_id}")
             except Exception as e:
                 logger.error(f"❌ [BackgroundTask] 分析任务失败: {task_id}, 错误: {e}", exc_info=True)
 
@@ -152,8 +152,8 @@ async def get_task_status_new(
                     "task_id": task_id,
                     "status": status,
                     "progress": progress,
-                    "message": f"任务{status}中...",
-                    "current_step": status,
+                    "message": task_result.get("error_message") or task_result.get("message") or f"任务{status}中...",
+                    "current_step": task_result.get("current_step") or status,
                     "start_time": start_time,
                     "end_time": task_result.get("completed_at"),
                     "elapsed_time": elapsed_time,
@@ -162,6 +162,8 @@ async def get_task_status_new(
                     "symbol": task_result.get("symbol") or task_result.get("stock_code"),
                     "stock_code": task_result.get("symbol") or task_result.get("stock_code"),  # 兼容字段
                     "stock_symbol": task_result.get("symbol") or task_result.get("stock_code"),
+                    "error_message": task_result.get("error_message") or task_result.get("last_error"),
+                    "error_details": task_result.get("error_details"),
                     "source": "mongodb_tasks"  # 标记数据来源
                 }
 

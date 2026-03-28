@@ -1,7 +1,16 @@
 import { defineStore } from 'pinia'
 import { useStorage } from '@vueuse/core'
+import { ElMessage } from 'element-plus'
 import { authApi } from '@/api/auth'
+import type { UserInfoUpdatePayload } from '@/api/auth'
 import type { User, LoginForm, RegisterForm } from '@/types/auth'
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  return fallback
+}
 
 export interface AuthState {
   // 认证状态
@@ -25,8 +34,8 @@ export interface AuthState {
 
 export const useAuthStore = defineStore('auth', {
   state: (): AuthState => {
-    const token = useStorage('auth-token', null).value || null
-    const refreshToken = useStorage('refresh-token', null).value || null
+    const storedToken = useStorage<string | null>('auth-token', null).value
+    const storedRefreshToken = useStorage<string | null>('refresh-token', null).value
 
     // 验证token格式
     const isValidToken = (token: string | null): boolean => {
@@ -40,8 +49,8 @@ export const useAuthStore = defineStore('auth', {
       return token.split('.').length === 3
     }
 
-    const validToken = isValidToken(token) ? token : null
-    const validRefreshToken = isValidToken(refreshToken) ? refreshToken : null
+    const validToken = isValidToken(storedToken) ? storedToken : null
+    const validRefreshToken = isValidToken(storedRefreshToken) ? storedRefreshToken : null
 
     // 如果token无效，清除相关数据
     if (!validToken || !validRefreshToken) {
@@ -174,7 +183,7 @@ export const useAuthStore = defineStore('auth', {
     },
     
     // 设置API请求头
-    setAuthHeader(token: string | null) {
+    setAuthHeader(_token: string | null) {
       // 这里会在API模块中设置Authorization头
       // 具体实现在api/request.ts中
     },
@@ -215,7 +224,7 @@ export const useAuthStore = defineStore('auth', {
           // 不在这里显示错误消息，由调用方显示
           return false
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('登录失败:', error)
         // 不在这里显示错误消息，由调用方显示
         return false
@@ -236,9 +245,9 @@ export const useAuthStore = defineStore('auth', {
           ElMessage.error(response.message || '注册失败')
           return false
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('注册失败:', error)
-        ElMessage.error(error.message || '注册失败，请重试')
+        ElMessage.error(getErrorMessage(error, '注册失败，请重试'))
         return false
       }
     },
@@ -294,11 +303,16 @@ export const useAuthStore = defineStore('auth', {
           console.error('❌ Token刷新失败:', response.message)
           throw new Error(response.message || 'Token刷新失败')
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('❌ Token刷新异常:', error)
 
         // 如果是网络错误或服务器错误，不要立即清除认证信息
-        if (error.code === 'NETWORK_ERROR' || error.response?.status >= 500) {
+        const errorCode = typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: string }).code : undefined
+        const responseStatus = typeof error === 'object' && error !== null && 'response' in error
+          ? ((error as { response?: { status?: number } }).response?.status)
+          : undefined
+
+        if (errorCode === 'NETWORK_ERROR' || (typeof responseStatus === 'number' && responseStatus >= 500)) {
           console.warn('⚠️ 网络或服务器错误，保留认证信息')
           return false
         }
@@ -345,7 +359,7 @@ export const useAuthStore = defineStore('auth', {
     },
     
     // 更新用户信息
-    async updateUserInfo(userInfo: Partial<User>) {
+    async updateUserInfo(userInfo: UserInfoUpdatePayload) {
       try {
         const response = await authApi.updateUserInfo(userInfo)
 
@@ -361,9 +375,9 @@ export const useAuthStore = defineStore('auth', {
           ElMessage.error(response.message || '更新失败')
           return false
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('更新用户信息失败:', error)
-        ElMessage.error(error.message || '更新失败，请重试')
+        ElMessage.error(getErrorMessage(error, '更新失败，请重试'))
         return false
       }
     },
@@ -411,7 +425,8 @@ export const useAuthStore = defineStore('auth', {
       try {
         const response = await authApi.changePassword({
           old_password: oldPassword,
-          new_password: newPassword
+          new_password: newPassword,
+          confirm_password: newPassword
         })
 
         if (response.success) {
@@ -421,9 +436,9 @@ export const useAuthStore = defineStore('auth', {
           ElMessage.error(response.message || '密码修改失败')
           return false
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('修改密码失败:', error)
-        ElMessage.error(error.message || '修改密码失败，请重试')
+        ElMessage.error(getErrorMessage(error, '修改密码失败，请重试'))
         return false
       }
     },
@@ -456,10 +471,12 @@ export const useAuthStore = defineStore('auth', {
             console.log('🔄 Token无效，尝试刷新...')
             await this.refreshAccessToken()
           }
-        } catch (error) {
+        } catch (error: unknown) {
           console.error('❌ 检查认证状态失败:', error)
+          const errorCode = typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: string }).code : undefined
+          const errorMessage = getErrorMessage(error, '')
           // 如果是网络错误或超时，不清除认证信息，只是标记为未认证
-          if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+          if (errorCode === 'ECONNABORTED' || errorMessage.includes('timeout')) {
             console.warn('⚠️ 网络超时，保留认证信息但标记为未认证状态')
             this.isAuthenticated = false
           } else {

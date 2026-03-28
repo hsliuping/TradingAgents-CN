@@ -21,7 +21,7 @@
       :class="{ 'drag-active': isDragging }"
     >
       <div
-        v-for="(item, index) in dataSources"
+        v-for="item in dataSources"
         :key="item.name"
         class="datasource-item"
         :data-id="item.name"
@@ -39,6 +39,13 @@
                 size="small"
               >
                 {{ item.enabled ? '启用' : '禁用' }}
+              </el-tag>
+              <el-tag
+                v-if="item.extra_config?.has_api_key"
+                :type="item.extra_config?.source === 'environment' ? 'warning' : 'success'"
+                size="small"
+              >
+                {{ item.extra_config?.source === 'environment' ? 'ENV' : 'DB' }}
               </el-tag>
               <el-tag type="info" size="small">
                 优先级: {{ item.priority }}

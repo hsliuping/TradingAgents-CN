@@ -2,6 +2,7 @@ import time
 import json
 
 # 导入统一日志系统
+from tradingagents.agents.utils.streaming_utils import stream_text_response
 from tradingagents.utils.logging_init import get_logger
 logger = get_logger("default")
 
@@ -54,7 +55,7 @@ def create_risky_debator(llm):
         import time
         llm_start_time = time.time()
 
-        response = llm.invoke(prompt)
+        response = stream_text_response(llm, prompt, "Risky Analyst")
 
         llm_elapsed = time.time() - llm_start_time
         logger.info(f"⏱️ [Risky Analyst] LLM调用完成，耗时: {llm_elapsed:.2f}秒")

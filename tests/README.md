@@ -1,6 +1,13 @@
 # TradingAgents-CN 测试目录
 
-这个目录包含了TradingAgents-CN项目的所有测试文件，用于验证功能正确性、API集成和模型测试。
+这个目录包含 TradingAgents-CN 的标准测试套件、历史测试脚本和外部集成测试。
+
+当前约定：
+
+- 默认标准套件不依赖任何真实 API Key
+- 需要真实 Key 的测试必须显式标记为 `integration`
+- 未配置所需环境变量时，这类测试应显示为 `skipped`，而不是 `failed`
+- 真实密钥绝不写入仓库，只能通过本地环境变量提供
 
 ## 目录结构
 
@@ -49,41 +56,59 @@ tests/
 ### 🧪 功能测试
 - `test_analysis.py` - 基础分析功能测试
 - `test_format_fix.py` - 格式化修复测试
-- `test_progress.py` - 进度跟踪测试
+- `test_progress_time_calculation.py` - 进度时间估算相关测试
 
 ## 运行测试
 
-### 运行所有测试
-```bash
-# 从项目根目录运行
-python -m pytest tests/
+### 默认标准套件
 
-# 或者直接运行特定测试
-cd tests
-python test_chinese_output.py
+从项目根目录运行：
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
 ```
 
-### 运行特定类别的测试
+默认会执行当前维护中的标准测试集合：
+
+- `tests/system/`
+- `tests/unit/`
+- `tests/test_recent_changes_unittest.py`
+- `tests/test_progress_time_calculation.py`
+
+这部分测试不需要任何真实 provider key，目标是保持稳定全绿。
+
+### 前端校验现状
+
+前端当前维护的是工程校验脚本，而不是正式测试套件：
+
+- `pnpm lint`
+- `pnpm type-check`
+- `pnpm build`
+
+目前仓库里没有接入统一的 `vitest/jest/playwright` 标准入口，因此不要把前端工程校验等同于“前端全量测试”。
+
+### 运行外部集成测试
+
+只有在你主动提供测试专用环境变量时，才建议运行外部集成测试：
+
 ```bash
-# API测试
-python tests/test_all_apis.py
+export TEST_DASHSCOPE_API_KEY=your_real_test_key
+export TEST_FINNHUB_API_KEY=your_real_test_key
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q -m integration
+```
 
-# Gemini模型测试
-python tests/test_gemini_correct.py
+如果没有配置这些变量，对应测试应自动 `skipped`。
 
-# Web界面测试
-python tests/test_web_interface.py
+如果你要单独运行带 `@pytest.mark.anyio` 的异步测试文件，请直接使用常规 `pytest` 入口，不要再额外设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`，否则 `anyio` 插件不会被加载。
 
-# 阿里百炼集成测试
+### 运行历史脚本式测试
+
+历史目录中有大量脚本式文件，适合人工排查，不属于默认标准套件。需要时可以单独运行：
+
+```bash
 python tests/integration/test_dashscope_integration.py
-
-# Tushare数据接口测试
-python tests/fast_tdx_test.py
-python tests/test_tdx_integration.py
-
-# Redis性能测试
-python tests/quick_redis_test.py
-python tests/test_redis_performance.py
+python tests/test_all_apis.py
+python tests/test_web_interface.py
 ```
 
 ### 诊断工具
@@ -100,23 +125,21 @@ python tests/check_gemini_models.py
 
 ## 测试环境要求
 
-### 必需的环境变量
-在运行测试前，请确保在`.env`文件中配置了以下API密钥：
+### 测试专用环境变量
+
+优先使用 `.env.example` 里预留的 `TEST_*` 变量，而不是直接复用生产/开发环境密钥。
+
+在没有真实 key 的情况下，外部测试应跳过。
 
 ```env
-# 阿里百炼API（必需）
-DASHSCOPE_API_KEY=your_dashscope_key
-
-# Google AI API（可选，用于Gemini测试）
-GOOGLE_API_KEY=your_google_key
-
-# 金融数据API（可选）
-FINNHUB_API_KEY=your_finnhub_key
-
-# Reddit API（可选）
-REDDIT_CLIENT_ID=your_reddit_id
-REDDIT_CLIENT_SECRET=your_reddit_secret
-REDDIT_USER_AGENT=your_user_agent
+TEST_DASHSCOPE_API_KEY=
+TEST_FINNHUB_API_KEY=
+TEST_OPENAI_API_KEY=
+TEST_TUSHARE_TOKEN=
+TEST_GOOGLE_API_KEY=
+TEST_REDDIT_CLIENT_ID=
+TEST_REDDIT_CLIENT_SECRET=
+TEST_REDDIT_USER_AGENT=
 ```
 
 ### Python依赖
@@ -142,52 +165,31 @@ pip install -r requirements.txt
 ### 测试模板
 
 ```python
-#!/usr/bin/env python3
-"""
-新功能测试
-"""
+import pytest
 
-import os
-import sys
-from pathlib import Path
-from dotenv import load_dotenv
+pytestmark = pytest.mark.integration
 
-# 添加项目根目录到Python路径
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+def test_live_provider_call():
+    """
+    需要环境变量：
+    - TEST_OPENAI_API_KEY
+    未配置时应 skipped，不应 failed。
+    """
+    from tests.conftest import require_env
 
-# 加载环境变量
-load_dotenv(project_root / ".env", override=True)
-
-def test_new_feature():
-    """测试新功能"""
-    try:
-        print("🧪 测试新功能")
-        print("=" * 50)
-
-        # 测试代码
-
-        print("✅ 测试成功")
-        return True
-    except Exception as e:
-        print(f"❌ 测试失败: {e}")
-        return False
-
-def main():
-    """主测试函数"""
-    print("🧪 新功能测试")
-    print("=" * 60)
-
-    success = test_new_feature()
-
-    if success:
-        print("🎉 所有测试通过！")
-    else:
-        print("❌ 测试失败")
-
-if __name__ == "__main__":
-    main()
+    api_key = require_env("TEST_OPENAI_API_KEY")
+    assert api_key
 ```
+
+## 编写要求
+
+需要真实外部服务的测试请遵循：
+
+1. 文件顶部注明需要哪些环境变量
+2. 使用 `pytest.mark.integration`
+3. 通过 `tests.conftest.require_env()` 读取环境变量
+4. 未配置时自动跳过，不得直接报错
+5. 不要在仓库里写入任何真实 key 或长得像真实 key 的样例
 
 ## 最近更新
 

@@ -2119,6 +2119,14 @@ class OptimizedChinaDataProvider:
 # 全局实例
 _china_data_provider = None
 
+
+class OptimizedChinaDataFlow(OptimizedChinaDataProvider):
+    """
+    旧类名兼容层。
+    """
+
+    pass
+
 def get_optimized_china_data_provider() -> OptimizedChinaDataProvider:
     """获取全局A股数据提供器实例"""
     global _china_data_provider

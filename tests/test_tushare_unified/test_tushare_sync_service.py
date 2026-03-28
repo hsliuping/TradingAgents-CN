@@ -2,7 +2,6 @@
 测试TushareSyncService
 """
 import pytest
-import asyncio
 from unittest.mock import Mock, patch, AsyncMock
 from datetime import datetime, timedelta
 
@@ -16,11 +15,15 @@ class TestTushareSyncService:
     def sync_service(self):
         """创建TushareSyncService实例"""
         with patch('app.worker.tushare_sync_service.get_mongo_db') as mock_get_db, \
-             patch('app.worker.tushare_sync_service.get_stock_data_service') as mock_get_service:
+             patch('app.worker.tushare_sync_service.get_stock_data_service') as mock_get_service, \
+             patch('app.worker.tushare_sync_service.get_historical_data_service', new_callable=AsyncMock) as mock_get_historical_service, \
+             patch('app.worker.tushare_sync_service.get_news_data_service', new_callable=AsyncMock) as mock_get_news_service:
 
             # 模拟数据库和服务
             mock_get_db.return_value = Mock()
             mock_get_service.return_value = Mock()
+            mock_get_historical_service.return_value = Mock()
+            mock_get_news_service.return_value = Mock()
 
             service = TushareSyncService()
 
@@ -28,7 +31,7 @@ class TestTushareSyncService:
             service.provider = Mock()
             service.provider.is_available.return_value = True
 
-            return service
+            yield service
     
     @pytest.fixture
     def mock_stock_list(self):
@@ -56,7 +59,7 @@ class TestTushareSyncService:
             }
         ]
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_initialize_success(self, sync_service):
         """测试初始化成功"""
         sync_service.provider.connect = AsyncMock(return_value=True)
@@ -65,7 +68,7 @@ class TestTushareSyncService:
         
         sync_service.provider.connect.assert_called_once()
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_initialize_failure(self, sync_service):
         """测试初始化失败"""
         sync_service.provider.connect = AsyncMock(return_value=False)
@@ -73,7 +76,7 @@ class TestTushareSyncService:
         with pytest.raises(RuntimeError, match="Tushare连接失败"):
             await sync_service.initialize()
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_sync_stock_basic_info_success(self, sync_service, mock_stock_list):
         """测试同步股票基础信息成功"""
         # 模拟获取股票列表
@@ -95,7 +98,7 @@ class TestTushareSyncService:
         assert "duration" in result
         sync_service.provider.get_stock_list.assert_called_once_with(market="CN")
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_sync_stock_basic_info_no_data(self, sync_service):
         """测试同步股票基础信息无数据"""
         sync_service.provider.get_stock_list = AsyncMock(return_value=None)
@@ -106,7 +109,7 @@ class TestTushareSyncService:
         assert result["success_count"] == 0
         assert result["error_count"] == 0
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_process_basic_info_batch_success(self, sync_service, mock_stock_list):
         """测试处理基础信息批次成功"""
         # 模拟数据库操作
@@ -120,7 +123,7 @@ class TestTushareSyncService:
         assert result["skipped_count"] == 0
         assert len(result["errors"]) == 0
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_process_basic_info_batch_skip_fresh_data(self, sync_service, mock_stock_list):
         """测试跳过新鲜数据"""
         # 模拟存在新鲜数据
@@ -134,31 +137,23 @@ class TestTushareSyncService:
         assert result["error_count"] == 0
         assert result["skipped_count"] == 2
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_sync_realtime_quotes_success(self, sync_service):
         """测试同步实时行情成功"""
-        # 模拟数据库查询
-        mock_cursor = AsyncMock()
-        mock_cursor.__aiter__.return_value = [
-            {"code": "000001"},
-            {"code": "000002"}
-        ]
-        sync_service.db.stock_basic_info.find.return_value = mock_cursor
-        
-        # 模拟批量处理
-        sync_service._process_quotes_batch = AsyncMock(return_value={
-            "success_count": 2,
-            "error_count": 0,
-            "errors": []
+        sync_service.provider.get_realtime_quotes_batch = AsyncMock(return_value={
+            "000001": {"code": "000001", "close": 12.6},
+            "000002": {"code": "000002", "close": 23.4},
         })
-        
-        result = await sync_service.sync_realtime_quotes()
-        
+        sync_service.stock_service.update_market_quotes = AsyncMock(return_value=True)
+
+        result = await sync_service.sync_realtime_quotes(force=True)
+
         assert result["total_processed"] == 2
         assert result["success_count"] == 2
         assert result["error_count"] == 0
+        sync_service.provider.get_realtime_quotes_batch.assert_called_once()
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_process_quotes_batch_success(self, sync_service):
         """测试处理行情批次成功"""
         batch = ["000001", "000002"]
@@ -172,7 +167,7 @@ class TestTushareSyncService:
         assert result["error_count"] == 0
         assert len(result["errors"]) == 0
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_get_and_save_quotes_success(self, sync_service):
         """测试获取并保存行情成功"""
         mock_quotes = {
@@ -191,7 +186,7 @@ class TestTushareSyncService:
         sync_service.provider.get_stock_quotes.assert_called_once_with("000001")
         sync_service.stock_service.update_market_quotes.assert_called_once_with("000001", mock_quotes)
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_get_and_save_quotes_no_data(self, sync_service):
         """测试获取行情无数据"""
         sync_service.provider.get_stock_quotes = AsyncMock(return_value=None)
@@ -200,7 +195,7 @@ class TestTushareSyncService:
         
         assert result is False
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_sync_historical_data_success(self, sync_service):
         """测试同步历史数据成功"""
         # 模拟数据库查询
@@ -229,7 +224,7 @@ class TestTushareSyncService:
         assert result["total_records"] == 2
         assert result["error_count"] == 0
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_sync_financial_data_success(self, sync_service):
         """测试同步财务数据成功"""
         # 模拟数据库查询
@@ -269,7 +264,7 @@ class TestTushareSyncService:
         # 测试None
         assert sync_service._is_data_fresh(None, hours=24) is False
     
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_get_sync_status_success(self, sync_service):
         """测试获取同步状态成功"""
         # 模拟数据库查询

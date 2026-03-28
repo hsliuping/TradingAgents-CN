@@ -35,12 +35,19 @@ class UserService:
     def close(self):
         """关闭数据库连接"""
         if hasattr(self, 'client') and self.client:
-            self.client.close()
-            logger.info("✅ UserService MongoDB 连接已关闭")
+            try:
+                self.client.close()
+            except Exception:
+                pass
+            finally:
+                self.client = None
 
     def __del__(self):
         """析构函数，确保连接被关闭"""
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
     
     @staticmethod
     def hash_password(password: str) -> str:
@@ -285,7 +292,7 @@ class UserService:
             logger.error(f"❌ 重置密码失败: {e}")
             return False
     
-    async def create_admin_user(self, username: str = "admin", password: str = "admin123", email: str = "admin@tradingagents.cn") -> Optional[User]:
+    async def create_admin_user(self, username: str = "admin", password: str = "change_me_admin_password", email: str = "admin@tradingagents.cn") -> Optional[User]:
         """创建管理员用户"""
         try:
             # 检查是否已存在管理员

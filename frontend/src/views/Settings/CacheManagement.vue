@@ -210,6 +210,7 @@ import {
   Refresh
 } from '@element-plus/icons-vue'
 import * as cacheApi from '@/api/cache'
+import type { CacheDetailItem, CacheStats } from '@/api/cache'
 
 // 响应式数据
 const statsLoading = ref(false)
@@ -223,7 +224,7 @@ const pageSize = ref(20)
 const totalItems = ref(0)
 
 // 缓存统计数据
-const cacheStats = ref({
+const cacheStats = ref<CacheStats>({
   totalFiles: 0,
   totalSize: 0,
   maxSize: 1024 * 1024 * 1024, // 1GB
@@ -233,7 +234,7 @@ const cacheStats = ref({
 })
 
 // 缓存详情数据
-const cacheDetails = ref([])
+const cacheDetails = ref<CacheDetailItem[]>([])
 
 // 清理天数标记
 const cleanupMarks = {
@@ -268,8 +269,8 @@ const getProgressColor = (percentage: number): string => {
   return '#f56c6c'
 }
 
-const getCacheTypeTag = (type: string): string => {
-  const typeMap = {
+const getCacheTypeTag = (type: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' => {
+  const typeMap: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
     'stock': 'primary',
     'news': 'success',
     'analysis': 'warning'
@@ -364,7 +365,7 @@ const loadCacheDetails = async () => {
   }
 }
 
-const deleteCacheItem = async (item: any) => {
+const deleteCacheItem = async (item: CacheDetailItem) => {
   try {
     await ElMessageBox.confirm(
       `确定要删除 ${item.symbol} 的${item.type}缓存吗？`,

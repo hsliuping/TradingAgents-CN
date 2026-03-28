@@ -1,27 +1,31 @@
-import io
-import json
-import logging
+import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.main import app
-from app.services.auth_service import AuthService
+from app.routers import system_config as system_config_router
+from app.routers.auth_db import get_current_user
 
 
-def _auth_headers() -> dict:
-    token = AuthService.create_access_token(sub="admin")
-    return {"Authorization": f"Bearer {token}"}
+@pytest.fixture()
+def client() -> TestClient:
+    app = FastAPI()
+    app.include_router(system_config_router.router, prefix="/api/system")
+    with TestClient(app) as client:
+        yield client
 
 
-def test_config_summary_requires_auth():
-    client = TestClient(app)
+def test_config_summary_requires_auth(client: TestClient):
     resp = client.get("/api/system/config/summary")
     assert resp.status_code == 401
 
 
-def test_config_summary_masks_sensitive_fields_with_auth():
-    client = TestClient(app)
-
-    resp = client.get("/api/system/config/summary", headers=_auth_headers())
+def test_config_summary_masks_sensitive_fields_with_auth(client: TestClient):
+    client.app.dependency_overrides[get_current_user] = lambda: {
+        "id": "u1",
+        "username": "admin",
+        "is_admin": True,
+    }
+    resp = client.get("/api/system/config/summary")
     assert resp.status_code == 200
     data = resp.json()
 
@@ -44,15 +48,10 @@ def test_config_summary_masks_sensitive_fields_with_auth():
     assert "REDIS_URL" in s
     if any(x in s["MONGO_URI"] for x in ["@", ":***@"]):
         assert ":***@" in s["MONGO_URI"]
-    if ":" in s["REDIS_URL"]:
-        # If password was present, it must be masked
-        assert "redis://:" in s["REDIS_URL"]
-        # When password exists, it should be masked to *** before @
-        # This assertion won't fail if no password exists (no '@' in URL)
-        if "@" in s["REDIS_URL"]:
-            assert "redis://:***@" in s["REDIS_URL"]
+    # Redis URL 仅在配置了密码时才会出现认证段
+    if "@" in s["REDIS_URL"]:
+        assert "redis://:***@" in s["REDIS_URL"]
 
     # A few non-sensitive keys should be present for sanity
     for key in ["DEBUG", "HOST", "PORT", "MONGODB_HOST", "REDIS_HOST"]:
         assert key in s
-

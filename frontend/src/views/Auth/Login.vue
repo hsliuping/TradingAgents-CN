@@ -102,6 +102,13 @@ const loginRules = {
   ]
 }
 
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message
+  }
+  return ''
+}
+
 const handleLogin = async () => {
   // 防止重复提交
   if (loginLoading.value) {
@@ -133,10 +140,11 @@ const handleLogin = async () => {
       ElMessage.error('用户名或密码错误')
     }
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('登录失败:', error)
     // 只有在不是表单验证错误时才显示错误消息
-    if (error.message && !error.message.includes('validate')) {
+    const message = getErrorMessage(error)
+    if (message && !message.includes('validate')) {
       ElMessage.error('登录失败，请重试')
     }
   } finally {

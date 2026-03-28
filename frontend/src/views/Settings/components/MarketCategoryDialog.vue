@@ -116,6 +116,15 @@ const defaultFormData = {
 
 const formData = ref({ ...defaultFormData })
 
+const buildFormData = (category?: MarketCategory | null) => ({
+  id: category?.id ?? defaultFormData.id,
+  name: category?.name ?? defaultFormData.name,
+  display_name: category?.display_name ?? defaultFormData.display_name,
+  description: category?.description ?? defaultFormData.description,
+  enabled: category?.enabled ?? defaultFormData.enabled,
+  sort_order: category?.sort_order ?? defaultFormData.sort_order
+})
+
 // 表单验证规则
 const rules: FormRules = {
   id: [
@@ -131,11 +140,7 @@ const rules: FormRules = {
 watch(
   () => props.category,
   (category) => {
-    if (category) {
-      formData.value = { ...category }
-    } else {
-      formData.value = { ...defaultFormData }
-    }
+    formData.value = buildFormData(category)
   },
   { immediate: true }
 )
@@ -145,11 +150,7 @@ watch(
   () => props.visible,
   (visible) => {
     if (visible) {
-      if (props.category) {
-        formData.value = { ...props.category }
-      } else {
-        formData.value = { ...defaultFormData }
-      }
+      formData.value = buildFormData(props.category)
     }
   }
 )

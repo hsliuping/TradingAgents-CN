@@ -251,6 +251,7 @@ class DataSourceConfig(BaseModel):
     market_categories: Optional[List[str]] = Field(default_factory=list, description="所属市场分类列表")
     display_name: Optional[str] = Field(None, description="显示名称")
     provider: Optional[str] = Field(None, description="数据提供商")
+    extra_config: Dict[str, Any] = Field(default_factory=dict, description="额外展示配置")
     created_at: Optional[datetime] = Field(default_factory=now_tz, description="创建时间")
     updated_at: Optional[datetime] = Field(default_factory=now_tz, description="更新时间")
 

@@ -6,6 +6,7 @@
 import asyncio
 import uuid
 import logging
+import re
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from pathlib import Path
@@ -32,6 +33,7 @@ from app.services.config_service import ConfigService
 from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
 from app.services.redis_progress_tracker import RedisProgressTracker, get_progress_by_id
 from app.services.progress_log_handler import register_analysis_tracker, unregister_analysis_tracker
+from app.utils.report_language_utils import normalize_reports_dict
 
 # 股票基础信息获取（用于补充显示名称）
 try:
@@ -48,6 +50,199 @@ logger = logging.getLogger("app.services.simple_analysis_service")
 
 # 配置服务实例
 config_service = ConfigService()
+
+
+STAGE_EXECUTION_MODE_MAP: Dict[str, str] = {
+    "initialization": "system",
+    "data_preparation": "system",
+    "configuration": "system",
+    "engine_initialization": "system",
+    "agent_analysis": "system",
+    "result_processing": "system",
+    "failed": "system",
+    "completed": "system",
+    "📊 市场分析师": "invoke",
+    "💼 基本面分析师": "invoke",
+    "📰 新闻分析师": "invoke",
+    "💬 社交媒体分析师": "invoke",
+    "🐂 看涨研究员": "stream",
+    "🐻 看跌研究员": "stream",
+    "👔 研究经理": "stream",
+    "💼 交易员决策": "stream",
+    "🔥 激进风险评估": "stream",
+    "🛡️ 保守风险评估": "stream",
+    "⚖️ 中性风险评估": "stream",
+    "🎯 风险经理": "invoke",
+    "📊 生成报告": "system",
+}
+
+STAGE_LABEL_MAP: Dict[str, str] = {
+    "initialization": "初始化",
+    "data_preparation": "数据准备",
+    "configuration": "参数配置",
+    "engine_initialization": "引擎初始化",
+    "agent_analysis": "智能体分析",
+    "result_processing": "结果处理",
+    "failed": "失败收尾",
+    "completed": "完成收尾",
+}
+
+
+def _format_elapsed_seconds(seconds: Optional[float]) -> str:
+    if seconds is None:
+        return "未知"
+    if seconds < 60:
+        return f"{seconds:.1f} 秒"
+    minutes = int(seconds // 60)
+    remain = seconds % 60
+    return f"{minutes} 分 {remain:.1f} 秒"
+
+
+def _extract_parameter_issue(error_message: str) -> Optional[str]:
+    patterns = [
+        r"(股票代码不能为空)",
+        r"(股票代码无效[^。\n]*)",
+        r"(symbol[^。\n]*不能为空)",
+        r"(stock[_ ]?code[^。\n]*不能为空)",
+        r"(Missing required parameter[^。\n]*)",
+        r"(Input should be[^。\n]*)",
+        r"(field required[^。\n]*)",
+        r"(422[^。\n]*)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, error_message, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def _classify_failure_reason(error_message: str, formatted_error: Dict[str, str]) -> str:
+    parameter_issue = _extract_parameter_issue(error_message)
+    if parameter_issue:
+        return f"参数校验失败：{parameter_issue}"
+
+    category = formatted_error.get("category", "")
+    if category:
+        return category
+
+    lowered = error_message.lower()
+    if "504" in lowered or "timeout" in lowered:
+        return "调用超时"
+    if "404" in lowered:
+        return "资源不存在"
+    if "401" in lowered or "403" in lowered:
+        return "鉴权失败"
+    return "运行时异常"
+
+
+def _resolve_current_stage_details(progress_tracker: Optional[RedisProgressTracker]) -> Dict[str, Any]:
+    progress_data = getattr(progress_tracker, "progress_data", {}) or {}
+    raw_stage = (
+        progress_data.get("last_real_node")
+        or progress_data.get("current_step_name")
+        or progress_data.get("last_message")
+        or ""
+    )
+    stage_name = STAGE_LABEL_MAP.get(raw_stage, raw_stage or "未知阶段")
+    execution_mode = STAGE_EXECUTION_MODE_MAP.get(raw_stage, "unknown")
+
+    last_real_node_at = progress_data.get("last_real_node_at")
+    stage_started_at = None
+    if isinstance(last_real_node_at, datetime):
+        stage_started_at = last_real_node_at
+    elif isinstance(last_real_node_at, str):
+        try:
+            stage_started_at = datetime.fromisoformat(last_real_node_at)
+        except ValueError:
+            stage_started_at = None
+
+    return {
+        "stage_key": raw_stage or None,
+        "stage_name": stage_name,
+        "execution_mode": execution_mode,
+        "stage_started_at": stage_started_at,
+        "progress_percentage": progress_data.get("progress_percentage"),
+        "last_message": progress_data.get("last_message"),
+    }
+
+
+def _build_error_details(
+    *,
+    error_message: str,
+    formatted_error: Dict[str, str],
+    progress_tracker: Optional[RedisProgressTracker],
+    request: Optional[SingleAnalysisRequest],
+    task_started_at: Optional[datetime],
+    quick_model: Optional[str] = None,
+    deep_model: Optional[str] = None,
+    quick_provider: Optional[str] = None,
+    deep_provider: Optional[str] = None,
+) -> Dict[str, Any]:
+    stage_details = _resolve_current_stage_details(progress_tracker)
+    progress_data = getattr(progress_tracker, "progress_data", {}) or {}
+    now = datetime.now()
+    total_elapsed_seconds = (now - task_started_at).total_seconds() if task_started_at else None
+    stage_started_at = stage_details.get("stage_started_at")
+    stage_elapsed_seconds = (now - stage_started_at).total_seconds() if stage_started_at else None
+
+    parameter_issue = _extract_parameter_issue(error_message)
+
+    return {
+        "failure_reason": _classify_failure_reason(error_message, formatted_error),
+        "parameter_issue": parameter_issue,
+        "stage": stage_details["stage_name"],
+        "stage_key": stage_details["stage_key"],
+        "execution_mode": stage_details["execution_mode"],
+        "stage_elapsed_seconds": stage_elapsed_seconds,
+        "stage_elapsed_human": _format_elapsed_seconds(stage_elapsed_seconds),
+        "task_elapsed_seconds": total_elapsed_seconds,
+        "task_elapsed_human": _format_elapsed_seconds(total_elapsed_seconds),
+        "progress_percentage": stage_details.get("progress_percentage"),
+        "last_message": stage_details.get("last_message"),
+        "formatted_category": formatted_error.get("category"),
+        "technical_detail": formatted_error.get("technical_detail") or error_message,
+        "quick_model": quick_model or progress_data.get("quick_model"),
+        "deep_model": deep_model or progress_data.get("deep_model"),
+        "quick_provider": quick_provider or progress_data.get("quick_provider"),
+        "deep_provider": deep_provider or progress_data.get("deep_provider"),
+        "symbol": request.get_symbol() if request else None,
+        "market_type": request.parameters.market_type if request and request.parameters else None,
+    }
+
+
+def _build_user_friendly_error_message(
+    formatted_error: Dict[str, str],
+    error_details: Dict[str, Any],
+) -> str:
+    lines = [
+        formatted_error["title"],
+        "",
+        formatted_error["message"],
+        "",
+        f"阶段: {error_details.get('stage') or '未知阶段'}",
+        f"调用方式: {error_details.get('execution_mode') or 'unknown'}",
+        f"当前阶段已运行: {error_details.get('stage_elapsed_human') or '未知'}",
+        f"任务总耗时: {error_details.get('task_elapsed_human') or '未知'}",
+    ]
+
+    if error_details.get("parameter_issue"):
+        lines.append(f"参数问题: {error_details['parameter_issue']}")
+
+    if error_details.get("quick_model") or error_details.get("deep_model"):
+        lines.append(
+            f"模型: quick={error_details.get('quick_model') or '-'} / deep={error_details.get('deep_model') or '-'}"
+        )
+
+    lines.extend(
+        [
+            "",
+            f"💡 {formatted_error['suggestion']}",
+            "",
+            f"技术细节: {error_details.get('technical_detail') or '未知'}",
+        ]
+    )
+
+    return "\n".join(lines)
 
 
 async def get_provider_by_model_name(model_name: str) -> str:
@@ -323,7 +518,7 @@ def _get_default_backend_url(provider: str) -> str:
         "302ai": "https://api.302.ai/v1",
     }
 
-    url = default_urls.get(provider, "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    url = default_urls.get(provider, "https://api.openai.com/v1")
     logger.info(f"🔧 [默认URL] {provider} -> {url}")
     return url
 
@@ -348,6 +543,7 @@ def _get_default_provider_by_model(model_name: str) -> str:
         'gpt-4-turbo': 'openai',
         'gpt-4o': 'openai',
         'gpt-4o-mini': 'openai',
+        'gpt-5.4': 'openai',
 
         # Google
         'gemini-pro': 'google',
@@ -364,7 +560,7 @@ def _get_default_provider_by_model(model_name: str) -> str:
         'chatglm3-6b': 'zhipu'
     }
 
-    provider = model_provider_map.get(model_name, 'dashscope')  # 默认使用阿里百炼
+    provider = model_provider_map.get(model_name, 'openai')  # 默认使用 OpenAI
     logger.info(f"🔧 使用默认映射: {model_name} -> {provider}")
     return provider
 
@@ -552,6 +748,21 @@ def create_analysis_config(
 
         logger.info(f"⚠️  使用回退的 backend_url: {config['backend_url']}")
 
+    backend_url = str(config.get("backend_url") or "").strip().lower()
+    uses_custom_openai_gateway = (
+        llm_provider == "openai" and
+        bool(backend_url) and
+        "api.openai.com" not in backend_url
+    )
+
+    if uses_custom_openai_gateway and config.get("memory_enabled"):
+        # OpenAI兼容网关经常不支持 /embeddings，直接关闭记忆避免额外失败点。
+        config["memory_enabled"] = False
+        logger.warning(
+            f"⚠️ 检测到自定义OpenAI兼容网关({config['backend_url']})，"
+            "已自动关闭记忆功能以避免 embeddings 接口不可用导致的额外失败"
+        )
+
     # 添加分析师配置
     config["selected_analysts"] = selected_analysts
     config["debug"] = False
@@ -561,6 +772,9 @@ def create_analysis_config(
 
     # 🔧 添加模型配置参数（max_tokens、temperature、timeout、retry_times）
     if quick_model_config:
+        quick_model_config = dict(quick_model_config)
+        if uses_custom_openai_gateway:
+            quick_model_config["retry_times"] = max(int(quick_model_config.get("retry_times", 3) or 3), 6)
         config["quick_model_config"] = quick_model_config
         logger.info(f"🔧 [快速模型配置] max_tokens={quick_model_config.get('max_tokens')}, "
                    f"temperature={quick_model_config.get('temperature')}, "
@@ -568,6 +782,9 @@ def create_analysis_config(
                    f"retry_times={quick_model_config.get('retry_times')}")
 
     if deep_model_config:
+        deep_model_config = dict(deep_model_config)
+        if uses_custom_openai_gateway:
+            deep_model_config["retry_times"] = max(int(deep_model_config.get("retry_times", 3) or 3), 6)
         config["deep_model_config"] = deep_model_config
         logger.info(f"🔧 [深度模型配置] max_tokens={deep_model_config.get('max_tokens')}, "
                    f"temperature={deep_model_config.get('temperature')}, "
@@ -826,8 +1043,11 @@ class SimpleAnalysisService:
             traceback.print_exc()
 
         progress_tracker = None
+        task_started_at = None
         try:
             logger.info(f"🚀 开始后台执行分析任务: {task_id}")
+            task_state = await self.memory_manager.get_task(task_id)
+            task_started_at = task_state.start_time if task_state else None
 
             # 🔍 验证股票代码是否存在
             logger.info(f"🔍 开始验证股票代码: {stock_code}")
@@ -873,13 +1093,29 @@ class SimpleAnalysisService:
                     f"{validation_result.error_message}\n\n"
                     f"💡 {validation_result.suggestion}"
                 )
+                error_details = {
+                    "failure_reason": "参数校验失败",
+                    "parameter_issue": validation_result.error_message,
+                    "stage": "股票代码校验",
+                    "stage_key": "stock_validation",
+                    "execution_mode": "system",
+                    "stage_elapsed_seconds": None,
+                    "stage_elapsed_human": "未知",
+                    "task_elapsed_seconds": (datetime.now() - task_started_at).total_seconds() if task_started_at else None,
+                    "task_elapsed_human": _format_elapsed_seconds((datetime.now() - task_started_at).total_seconds() if task_started_at else None),
+                    "technical_detail": validation_result.error_message,
+                    "suggestion": validation_result.suggestion,
+                    "symbol": stock_code,
+                    "market_type": market_type,
+                }
 
                 # 更新任务状态为失败
                 await self.memory_manager.update_task_status(
                     task_id=task_id,
                     status=AnalysisStatus.FAILED,
                     progress=0,
-                    error_message=user_friendly_error
+                    error_message=user_friendly_error,
+                    error_details=error_details
                 )
 
                 # 更新MongoDB状态
@@ -887,7 +1123,8 @@ class SimpleAnalysisService:
                     task_id,
                     AnalysisStatus.FAILED,
                     0,
-                    error_message=user_friendly_error
+                    error_message=user_friendly_error,
+                    error_details=error_details
                 )
 
                 return
@@ -905,7 +1142,7 @@ class SimpleAnalysisService:
                     task_id=task_id,
                     analysts=request.parameters.selected_analysts or ["market", "fundamentals"],
                     research_depth=request.parameters.research_depth or "标准",
-                    llm_provider="dashscope"
+                    llm_provider="openai"
                 )
                 logger.info(f"✅ [线程] 进度跟踪器创建完成: {task_id}")
                 return tracker
@@ -1001,9 +1238,9 @@ class SimpleAnalysisService:
                     payload=NotificationCreate(
                         user_id=str(user_id),
                         type='analysis',
-                        title=f"{request.stock_code} 分析完成",
+                        title=f"{stock_code} 分析完成",
                         content=summary,
-                        link=f"/stocks/{request.stock_code}",
+                        link=f"/stocks/{stock_code}",
                         source='analysis'
                     )
                 )
@@ -1021,20 +1258,27 @@ class SimpleAnalysisService:
             # 收集上下文信息
             error_context = {}
             if hasattr(request, 'parameters') and request.parameters:
-                if hasattr(request.parameters, 'quick_model'):
-                    error_context['model'] = request.parameters.quick_model
-                if hasattr(request.parameters, 'deep_model'):
-                    error_context['model'] = request.parameters.deep_model
+                if getattr(request.parameters, 'quick_analysis_model', None):
+                    error_context['model'] = request.parameters.quick_analysis_model
+                if getattr(request.parameters, 'deep_analysis_model', None):
+                    error_context['model'] = request.parameters.deep_analysis_model
+            if progress_tracker:
+                progress_data = getattr(progress_tracker, "progress_data", {}) or {}
+                if progress_data.get("deep_provider"):
+                    error_context["llm_provider"] = progress_data["deep_provider"]
+                elif progress_data.get("quick_provider"):
+                    error_context["llm_provider"] = progress_data["quick_provider"]
 
             # 格式化错误
             formatted_error = ErrorFormatter.format_error(str(e), error_context)
-
-            # 构建用户友好的错误消息
-            user_friendly_error = (
-                f"{formatted_error['title']}\n\n"
-                f"{formatted_error['message']}\n\n"
-                f"💡 {formatted_error['suggestion']}"
+            error_details = _build_error_details(
+                error_message=str(e),
+                formatted_error=formatted_error,
+                progress_tracker=progress_tracker,
+                request=request,
+                task_started_at=task_started_at,
             )
+            user_friendly_error = _build_user_friendly_error_message(formatted_error, error_details)
 
             # 标记进度跟踪器失败
             if progress_tracker:
@@ -1047,11 +1291,18 @@ class SimpleAnalysisService:
                 progress=0,
                 message="分析失败",
                 current_step="failed",
-                error_message=user_friendly_error
+                error_message=user_friendly_error,
+                error_details=error_details
             )
 
             # 同步更新MongoDB状态为失败
-            await self._update_task_status(task_id, AnalysisStatus.FAILED, 0, user_friendly_error)
+            await self._update_task_status(
+                task_id,
+                AnalysisStatus.FAILED,
+                0,
+                error_message=user_friendly_error,
+                error_details=error_details
+            )
         finally:
             # 清理进度跟踪器缓存
             if task_id in self._progress_trackers:
@@ -1068,10 +1319,12 @@ class SimpleAnalysisService:
         progress_tracker: Optional[RedisProgressTracker] = None
     ) -> Dict[str, Any]:
         """同步执行分析（在共享线程池中运行）"""
+        stock_code = request.get_symbol()
+
         # 🔧 使用共享线程池，支持多个任务并发执行
         # 不再每次创建新的线程池，避免串行执行
         loop = asyncio.get_event_loop()
-        logger.info(f"🚀 [线程池] 提交分析任务到共享线程池: {task_id} - {request.stock_code}")
+        logger.info(f"🚀 [线程池] 提交分析任务到共享线程池: {task_id} - {stock_code}")
         result = await loop.run_in_executor(
             self._thread_pool,  # 使用共享线程池
             self._run_analysis_sync,
@@ -1092,13 +1345,17 @@ class SimpleAnalysisService:
     ) -> Dict[str, Any]:
         """同步执行分析的具体实现"""
         try:
+            stock_code = request.get_symbol()
+            if not stock_code:
+                raise ValueError("股票代码不能为空")
+
             # 在线程中重新初始化日志系统
             from tradingagents.utils.logging_init import init_logging, get_logger
             init_logging()
             thread_logger = get_logger('analysis_thread')
 
-            thread_logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {request.stock_code}")
-            logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {request.stock_code}")
+            thread_logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {stock_code}")
+            logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {stock_code}")
 
             # 🔧 根据 RedisProgressTracker 的步骤权重计算准确的进度
             # 基础准备阶段 (10%): 0.03 + 0.02 + 0.01 + 0.02 + 0.02 = 0.10
@@ -1228,6 +1485,14 @@ class SimpleAnalysisService:
             else:
                 logger.info(f"✅ [混合模式] 快速模型({quick_provider}) 和 深度模型({deep_provider}) 来自不同厂家")
 
+            if progress_tracker:
+                progress_tracker.progress_data.update({
+                    "quick_model": quick_model,
+                    "deep_model": deep_model,
+                    "quick_provider": quick_provider,
+                    "deep_provider": deep_provider,
+                })
+
             # 获取市场类型
             market_type = request.parameters.market_type if request.parameters else "A股"
             logger.info(f"📊 [市场类型] 使用市场类型: {market_type}")
@@ -1292,87 +1557,7 @@ class SimpleAnalysisService:
             # 注意：不要手动设置过高的进度，让 graph_progress_callback 来更新实际的分析进度
             update_progress_sync(10, "🤖 开始多智能体协作分析", "agent_analysis")
 
-            # 启动一个异步任务来模拟进度更新
-            import threading
-            import time
-
-            def simulate_progress():
-                """模拟TradingAgents内部进度"""
-                try:
-                    if not progress_tracker:
-                        return
-
-                    # 分析师阶段 - 根据选择的分析师数量动态调整
-                    analysts = request.parameters.selected_analysts if request.parameters else ["market", "fundamentals"]
-
-                    # 模拟分析师执行
-                    for i, analyst in enumerate(analysts):
-                        time.sleep(15)  # 每个分析师大约15秒
-                        if analyst == "market":
-                            progress_tracker.update_progress("📊 市场分析师正在分析")
-                        elif analyst == "fundamentals":
-                            progress_tracker.update_progress("💼 基本面分析师正在分析")
-                        elif analyst == "news":
-                            progress_tracker.update_progress("📰 新闻分析师正在分析")
-                        elif analyst == "social":
-                            progress_tracker.update_progress("💬 社交媒体分析师正在分析")
-
-                    # 研究团队阶段
-                    time.sleep(10)
-                    progress_tracker.update_progress("🐂 看涨研究员构建论据")
-
-                    time.sleep(8)
-                    progress_tracker.update_progress("🐻 看跌研究员识别风险")
-
-                    # 辩论阶段 - 根据5个级别确定辩论轮次
-                    research_depth = request.parameters.research_depth if request.parameters else "标准"
-                    if research_depth == "快速":
-                        debate_rounds = 1
-                    elif research_depth == "基础":
-                        debate_rounds = 1
-                    elif research_depth == "标准":
-                        debate_rounds = 1
-                    elif research_depth == "深度":
-                        debate_rounds = 2
-                    elif research_depth == "全面":
-                        debate_rounds = 3
-                    else:
-                        debate_rounds = 1  # 默认
-
-                    for round_num in range(debate_rounds):
-                        time.sleep(12)
-                        progress_tracker.update_progress(f"🎯 研究辩论 第{round_num+1}轮")
-
-                    time.sleep(8)
-                    progress_tracker.update_progress("👔 研究经理形成共识")
-
-                    # 交易员阶段
-                    time.sleep(10)
-                    progress_tracker.update_progress("💼 交易员制定策略")
-
-                    # 风险管理阶段
-                    time.sleep(8)
-                    progress_tracker.update_progress("🔥 激进风险评估")
-
-                    time.sleep(6)
-                    progress_tracker.update_progress("🛡️ 保守风险评估")
-
-                    time.sleep(6)
-                    progress_tracker.update_progress("⚖️ 中性风险评估")
-
-                    time.sleep(8)
-                    progress_tracker.update_progress("🎯 风险经理制定策略")
-
-                    # 最终阶段
-                    time.sleep(5)
-                    progress_tracker.update_progress("📡 信号处理")
-
-                except Exception as e:
-                    logger.warning(f"⚠️ 进度模拟失败: {e}")
-
-            # 启动进度模拟线程
-            progress_thread = threading.Thread(target=simulate_progress, daemon=True)
-            progress_thread.start()
+            logger.info("✅ 使用真实节点进度")
 
             # 定义进度回调函数，用于接收 LangGraph 的实时进度
             # 节点进度映射表（与 RedisProgressTracker 的步骤权重对应）
@@ -1401,7 +1586,7 @@ class SimpleAnalysisService:
                 """接收 LangGraph 的进度更新
 
                 根据节点名称直接映射到进度百分比，确保与 RedisProgressTracker 的步骤权重一致
-                注意：只在进度增加时更新，避免覆盖 RedisProgressTracker 的虚拟步骤进度
+                注意：只在进度增加时更新，避免覆盖准备阶段的固定进度
                 """
                 try:
                     logger.info(f"🎯🎯🎯 [Graph进度回调被调用] message={message}")
@@ -1413,10 +1598,13 @@ class SimpleAnalysisService:
                     progress_pct = node_progress_map.get(message)
 
                     if progress_pct is not None:
+                        progress_tracker.progress_data["last_real_node"] = message
+                        progress_tracker.progress_data["last_real_node_at"] = datetime.now().isoformat()
+
                         # 获取当前进度（使用 progress_data 属性）
                         current_progress = progress_tracker.progress_data.get('progress_percentage', 0)
 
-                        # 只在进度增加时更新，避免覆盖虚拟步骤的进度
+                        # 只在进度增加时更新，避免覆盖准备阶段的固定进度
                         if int(progress_pct) > current_progress:
                             # 更新 Redis 进度跟踪器
                             progress_tracker.update_progress({
@@ -1427,9 +1615,6 @@ class SimpleAnalysisService:
 
                             # 🔥 同时更新内存和 MongoDB
                             try:
-                                import asyncio
-                                from datetime import datetime
-
                                 # 尝试获取当前运行的事件循环
                                 try:
                                     loop = asyncio.get_running_loop()
@@ -1500,7 +1685,7 @@ class SimpleAnalysisService:
 
             # 执行实际分析，传递进度回调和task_id
             state, decision = trading_graph.propagate(
-                request.stock_code,
+                stock_code,
                 analysis_date,
                 progress_callback=graph_progress_callback,
                 task_id=task_id
@@ -1525,6 +1710,7 @@ class SimpleAnalysisService:
 
             # 从state中提取reports字段
             reports = {}
+            report_language = request.parameters.language if request.parameters else "zh-CN"
             try:
                 # 定义所有可能的报告字段
                 report_fields = [
@@ -1658,6 +1844,8 @@ class SimpleAnalysisService:
                 except Exception as fallback_error:
                     logger.warning(f"⚠️ 降级提取也失败: {fallback_error}")
 
+            reports = normalize_reports_dict(reports, report_language)
+
             # 🔥 格式化decision数据（参考web目录的实现）
             formatted_decision = {}
             try:
@@ -1770,7 +1958,7 @@ class SimpleAnalysisService:
 
             # 5. 最后的备用方案
             if not summary:
-                summary = f"对{request.stock_code}的分析已完成，请查看详细报告。"
+                summary = f"对{stock_code}的分析已完成，请查看详细报告。"
                 logger.warning(f"⚠️ [SUMMARY] 使用备用摘要")
 
             if not recommendation:
@@ -1783,8 +1971,9 @@ class SimpleAnalysisService:
             # 构建结果
             result = {
                 "analysis_id": str(uuid.uuid4()),
-                "stock_code": request.stock_code,
-                "stock_symbol": request.stock_code,  # 添加stock_symbol字段以保持兼容性
+                "symbol": stock_code,
+                "stock_code": stock_code,
+                "stock_symbol": stock_code,  # 添加stock_symbol字段以保持兼容性
                 "analysis_date": analysis_date,
                 "summary": summary,
                 "recommendation": recommendation,
@@ -1798,6 +1987,7 @@ class SimpleAnalysisService:
                 # 添加分析师信息
                 "analysts": request.parameters.selected_analysts if request.parameters else [],
                 "research_depth": request.parameters.research_depth if request.parameters else "快速",
+                "language": report_language,
                 # 添加提取的报告内容
                 "reports": reports,
                 # 🔥 关键修复：添加格式化后的decision字段！
@@ -1821,30 +2011,7 @@ class SimpleAnalysisService:
 
         except Exception as e:
             logger.error(f"❌ [线程池] 分析执行失败: {task_id} - {e}")
-
-            # 格式化错误信息为用户友好的提示
-            from ..utils.error_formatter import ErrorFormatter
-
-            # 收集上下文信息
-            error_context = {}
-            if request and hasattr(request, 'parameters') and request.parameters:
-                if hasattr(request.parameters, 'quick_model'):
-                    error_context['model'] = request.parameters.quick_model
-                if hasattr(request.parameters, 'deep_model'):
-                    error_context['model'] = request.parameters.deep_model
-
-            # 格式化错误
-            formatted_error = ErrorFormatter.format_error(str(e), error_context)
-
-            # 构建用户友好的错误消息
-            user_friendly_error = (
-                f"{formatted_error['title']}\n\n"
-                f"{formatted_error['message']}\n\n"
-                f"💡 {formatted_error['suggestion']}"
-            )
-
-            # 抛出包含友好错误信息的异常
-            raise Exception(user_friendly_error) from e
+            raise
 
     async def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """获取任务状态"""
@@ -2100,9 +2267,14 @@ class SimpleAnalysisService:
                 query = {"$or": or_conditions}
 
                 if task_status:
-                    # 使用映射后的状态值（TaskStatus枚举的value）
-                    query["status"] = task_status.value
-                    logger.info(f"📋 [Tasks] 添加状态过滤: {task_status.value}")
+                    # processing 在 MongoDB 中历史上可能被存成 processing 或 running，查询时两者都兼容
+                    if status == "processing":
+                        query["status"] = {"$in": ["processing", "running"]}
+                        logger.info("📋 [Tasks] 添加状态过滤: processing/running")
+                    else:
+                        # 使用映射后的状态值（TaskStatus枚举的value）
+                        query["status"] = task_status.value
+                        logger.info(f"📋 [Tasks] 添加状态过滤: {task_status.value}")
 
                 logger.info(f"📋 [Tasks] MongoDB 查询条件: {query}")
                 # 读取更多数据用于合并
@@ -2341,7 +2513,8 @@ class SimpleAnalysisService:
         task_id: str,
         status: AnalysisStatus,
         progress: int,
-        error_message: str = None
+        error_message: str = None,
+        error_details: Optional[Dict[str, Any]] = None
     ):
         """更新任务状态"""
         try:
@@ -2358,6 +2531,10 @@ class SimpleAnalysisService:
                 update_data["completed_at"] = datetime.utcnow()
             elif status == AnalysisStatus.FAILED:
                 update_data["last_error"] = error_message
+                update_data["error_message"] = error_message
+                update_data["error_details"] = error_details
+                update_data["message"] = "分析失败"
+                update_data["current_step"] = "failed"
                 update_data["completed_at"] = datetime.utcnow()
 
             await db.analysis_tasks.update_one(
@@ -2392,9 +2569,10 @@ class SimpleAnalysisService:
             timestamp = datetime.utcnow()  # 存储 UTC 时间（标准做法）
             stock_symbol = result.get('stock_symbol') or result.get('stock_code', 'UNKNOWN')
             analysis_id = f"{stock_symbol}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
+            report_language = result.get("language", "zh-CN")
 
             # 处理reports字段 - 从state中提取所有分析报告
-            reports = {}
+            reports = normalize_reports_dict(result.get("reports", {}), report_language)
             if 'state' in result:
                 try:
                     state = result['state']
@@ -2523,6 +2701,8 @@ class SimpleAnalysisService:
                         except Exception as fallback_error:
                             logger.warning(f"⚠️ 降级提取也失败: {fallback_error}")
 
+            reports = normalize_reports_dict(reports, report_language)
+
             # 🔥 根据股票代码推断市场类型
             from tradingagents.utils.stock_utils import StockUtils
             market_info = StockUtils.get_market_info(stock_symbol)
@@ -2589,6 +2769,7 @@ class SimpleAnalysisService:
                 "market_type": market_type,  # 🔥 添加市场类型字段
                 "model_info": result.get("model_info", "Unknown"),  # 🔥 添加模型信息字段
                 "analysis_date": timestamp.strftime('%Y-%m-%d'),
+                "language": report_language,
                 "timestamp": timestamp,
                 "status": "completed",
                 "source": "api",
@@ -2635,6 +2816,7 @@ class SimpleAnalysisService:
                         "stock_symbol": stock_symbol,
                         "stock_code": result.get('stock_code', stock_symbol),
                         "analysis_date": result.get('analysis_date'),
+                        "language": report_language,
                         "summary": result.get("summary", ""),
                         "recommendation": result.get("recommendation", ""),
                         "confidence_score": result.get("confidence_score", 0.0),

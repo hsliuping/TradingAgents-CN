@@ -235,17 +235,41 @@ class UnifiedConfigManager:
         settings["quick_analysis_model"] = model_name
         return self.save_system_settings(settings)
 
+    def _get_first_enabled_model_name(self) -> str:
+        """获取第一个启用的模型名，作为最后兜底。"""
+        try:
+            for config in self.get_llm_configs():
+                if getattr(config, "enabled", True) and getattr(config, "model_name", ""):
+                    return config.model_name
+        except Exception as e:
+            print(f"获取启用模型失败: {e}")
+        return ""
+
     def get_quick_analysis_model(self) -> str:
         """获取快速分析模型"""
         settings = self.get_system_settings()
         # 优先读取新字段名，如果不存在则读取旧字段名（向后兼容）
-        return settings.get("quick_analysis_model") or settings.get("quick_think_llm", "qwen-turbo")
+        return (
+            settings.get("quick_analysis_model")
+            or settings.get("quick_think_llm")
+            or settings.get("default_model")
+            or settings.get("deep_analysis_model")
+            or settings.get("deep_think_llm")
+            or self._get_first_enabled_model_name()
+        )
 
     def get_deep_analysis_model(self) -> str:
         """获取深度分析模型"""
         settings = self.get_system_settings()
         # 优先读取新字段名，如果不存在则读取旧字段名（向后兼容）
-        return settings.get("deep_analysis_model") or settings.get("deep_think_llm", "qwen-max")
+        return (
+            settings.get("deep_analysis_model")
+            or settings.get("deep_think_llm")
+            or settings.get("default_model")
+            or settings.get("quick_analysis_model")
+            or settings.get("quick_think_llm")
+            or self._get_first_enabled_model_name()
+        )
 
     def set_analysis_models(self, quick_model: str, deep_model: str) -> bool:
         """设置分析模型"""
@@ -446,7 +470,7 @@ class UnifiedConfigManager:
                 llm_configs=self.get_llm_configs(),
                 default_llm=self.get_default_model(),
                 data_source_configs=self.get_data_source_configs(),
-                default_data_source="AKShare",
+                default_data_source="Tushare",
                 database_configs=self.get_database_configs(),
                 system_settings=self.get_system_settings()
             )

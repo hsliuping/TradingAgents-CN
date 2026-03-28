@@ -141,7 +141,7 @@
           </template>
           <div class="model-ranking">
             <div
-              v-for="(model, index) in modelRanking"
+              v-for="(model, index) in modelRankingItems"
               :key="model.name"
               class="ranking-item"
             >
@@ -156,7 +156,7 @@
               </div>
               <div class="usage-bar">
                 <el-progress
-                  :percentage="(model.requests / modelRanking[0].requests) * 100"
+                  :percentage="modelRankingItems.length > 0 ? (model.requests / modelRankingItems[0].requests) * 100 : 0"
                   :show-text="false"
                   :stroke-width="6"
                 />
@@ -186,7 +186,7 @@
       </template>
 
       <el-table
-        :data="filteredRecords"
+        :data="filteredRecordItems"
         v-loading="loading"
         style="width: 100%"
         :default-sort="{ prop: 'timestamp', order: 'descending' }"
@@ -259,7 +259,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, nextTick } from 'vue'
+import { ref, reactive, onMounted, nextTick, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   Coin,
@@ -268,6 +268,25 @@ import {
   Search
 } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
+
+interface TokenRecord {
+  timestamp: string
+  provider: string
+  model: string
+  stock_symbol: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cost: number
+  duration: number
+}
+
+interface ModelRankingItem {
+  name: string
+  requests: number
+  tokens: number
+  cost: number
+}
 
 // 响应式数据
 const loading = ref(false)
@@ -279,9 +298,9 @@ const pageSize = ref(20)
 const totalRecords = ref(0)
 
 // 图表引用
-const tokenTrendChart = ref()
-const costDistributionChart = ref()
-const providerChart = ref()
+const tokenTrendChart = ref<HTMLDivElement | null>(null)
+const costDistributionChart = ref<HTMLDivElement | null>(null)
+const providerChart = ref<HTMLDivElement | null>(null)
 
 // 数据
 const overview = reactive({
@@ -295,9 +314,11 @@ const overview = reactive({
   avgCostChange: 0
 })
 
-const records = ref([])
-const filteredRecords = ref([])
-const modelRanking = ref([])
+const records = ref<TokenRecord[]>([])
+const filteredRecords = ref<TokenRecord[]>([])
+const modelRanking = ref<ModelRankingItem[]>([])
+const filteredRecordItems = computed<TokenRecord[]>(() => filteredRecords.value)
+const modelRankingItems = computed<ModelRankingItem[]>(() => modelRanking.value)
 
 // 方法
 const formatNumber = (num: number): string => {
@@ -326,7 +347,7 @@ const formatDateTime = (timestamp: string): string => {
 }
 
 const getProviderName = (provider: string): string => {
-  const names = {
+  const names: Record<string, string> = {
     'dashscope': '阿里百炼',
     'openai': 'OpenAI',
     'google': 'Google',
@@ -447,7 +468,7 @@ const exportData = () => {
   ElMessage.info('导出功能开发中...')
 }
 
-const viewDetails = (row: any) => {
+const viewDetails = (_row: TokenRecord) => {
   ElMessage.info('详情功能开发中...')
 }
 

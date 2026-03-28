@@ -193,6 +193,8 @@ import {
   type DataSourceStatus 
 } from '@/api/sync'
 
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
 // Props
 interface Props {
   autoRefresh?: boolean
@@ -444,8 +446,8 @@ const showSyncCompletionNotification = (status: string) => {
 }
 
 // 获取状态类型
-const getStatusType = (status?: string) => {
-  const typeMap: Record<string, string> = {
+const getStatusType = (status?: string): TagType => {
+  const typeMap: Record<string, TagType> = {
     idle: 'info',
     running: 'warning',
     success: 'success',

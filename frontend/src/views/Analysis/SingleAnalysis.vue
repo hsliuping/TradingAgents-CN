@@ -341,6 +341,38 @@
                   </div>
                 </el-card>
               </div>
+
+              <div v-else-if="analysisStatus === 'failed'" class="progress-section">
+                <el-card class="progress-card failed-progress-card" shadow="hover">
+                  <template #header>
+                    <div class="progress-header">
+                      <h4>
+                        <el-icon>
+                          <WarningFilled />
+                        </el-icon>
+                        分析未完成
+                      </h4>
+                    </div>
+                  </template>
+
+                  <div class="progress-content">
+                    <div class="current-task-info failed-task-info">
+                      <div class="task-title">
+                        <el-icon class="task-icon">
+                          <WarningFilled />
+                        </el-icon>
+                        {{ progressInfo.currentStep || '分析失败' }}
+                      </div>
+                      <div
+                        class="task-description failed-message"
+                        style="white-space: pre-wrap; line-height: 1.7;"
+                      >
+                        {{ progressInfo.message || '任务执行过程中发生错误' }}
+                      </div>
+                    </div>
+                  </div>
+                </el-card>
+              </div>
             </el-form>
           </el-card>
         </el-col>
@@ -688,7 +720,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, computed, h } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, h, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox, ElInputNumber } from 'element-plus'
 import {
@@ -714,8 +746,8 @@ import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import { ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
 import { marked } from 'marked'
-import { recommendModels, validateModels, type ModelRecommendationResponse } from '@/api/modelCapabilities'
-import { validateStockCode, getStockCodeFormatHelp, getStockCodeExamples } from '@/utils/stockValidator'
+import { recommendModels } from '@/api/modelCapabilities'
+import { validateStockCode, getStockCodeFormatHelp } from '@/utils/stockValidator'
 import { normalizeMarketForAnalysis, getMarketByStockCode } from '@/utils/market'
 
 // 配置marked选项
@@ -784,8 +816,8 @@ const generateStepsFromBackend = (backendSteps: any[]) => {
 
 // 模型设置
 const modelSettings = ref({
-  quickAnalysisModel: 'qwen-turbo',
-  deepAnalysisModel: 'qwen-max'
+  quickAnalysisModel: '',
+  deepAnalysisModel: ''
 })
 
 // 可用的模型列表（从配置中获取）
@@ -831,10 +863,118 @@ const disabledDate = (time: Date) => {
   return time.getTime() > Date.now()
 }
 
+const resetAnalysisState = (clearCache = true) => {
+  if (clearCache) {
+    clearTaskCache()
+  }
+
+  analysisStatus.value = 'idle'
+  showResults.value = false
+  analysisResults.value = null
+  currentTaskId.value = ''
+  activeReportTab.value = ''
+  analysisSteps.value = []
+  progressInfo.value = {
+    progress: 0,
+    currentStep: '',
+    currentStepDescription: '',
+    message: '',
+    elapsedTime: 0,
+    remainingTime: 0,
+    totalTime: 0
+  }
+
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
+}
+
+const setFailedState = (errorMessage: string, clearCache = true) => {
+  analysisStatus.value = 'failed'
+  showResults.value = false
+  progressInfo.value.currentStep = '分析失败'
+  progressInfo.value.currentStepDescription = '任务执行未能完成，请查看错误详情'
+  progressInfo.value.message = errorMessage
+
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
+
+  if (clearCache) {
+    clearTaskCache()
+  }
+}
+
+const applyValidatedSymbol = (rawCode: string, marketHint?: MarketType) => {
+  const validation = validateStockCode(rawCode, marketHint || analysisForm.market)
+  if (!validation.valid) {
+    analysisForm.symbol = ''
+    return validation
+  }
+
+  const normalizedCode = validation.normalizedCode || rawCode.trim().toUpperCase()
+  analysisForm.stockCode = normalizedCode
+  analysisForm.symbol = normalizedCode
+
+  if (validation.market && validation.market !== analysisForm.market) {
+    analysisForm.market = validation.market
+  }
+
+  return validation
+}
+
+const applyRouteQueryToForm = (query: Record<string, any>) => {
+  const routeStock = String(query?.stock ?? query?.stock_code ?? '').trim()
+  const routeMarket = query?.market ? normalizeMarketForAnalysis(query.market) as MarketType : null
+
+  if (routeMarket) {
+    analysisForm.market = routeMarket
+  }
+
+  if (!routeStock) {
+    return false
+  }
+
+  analysisForm.stockCode = routeStock
+  analysisForm.symbol = ''
+  stockCodeError.value = ''
+
+  if (!routeMarket) {
+    analysisForm.market = getMarketByStockCode(routeStock) as MarketType
+  }
+
+  const validation = applyValidatedSymbol(routeStock, analysisForm.market)
+  if (!validation.valid) {
+    stockCodeError.value = validation.message || '股票代码格式不正确'
+  }
+
+  return true
+}
+
+const loadAnalysisResult = async (taskId: string, fallbackData?: any) => {
+  const response = await analysisApi.getTaskResult(taskId)
+  if (response?.success && response.data) {
+    return response.data
+  }
+
+  if (response?.data) {
+    return response.data
+  }
+
+  if (fallbackData) {
+    return fallbackData
+  }
+
+  throw new Error(response?.message || '分析已完成，但未获取到报告数据')
+}
+
 // 股票代码输入时的处理
 const onStockCodeInput = () => {
   // 清除错误信息
   stockCodeError.value = ''
+  analysisForm.symbol = ''
   // 显示格式提示
   stockCodeHelp.value = getStockCodeFormatHelp(analysisForm.market)
 }
@@ -866,6 +1006,7 @@ const validateStockCodeInput = () => {
   if (!validation.valid) {
     stockCodeError.value = validation.message || '股票代码格式不正确'
     stockCodeHelp.value = ''
+    analysisForm.symbol = ''
   } else {
     stockCodeError.value = ''
     stockCodeHelp.value = `✓ ${validation.market}代码格式正确`
@@ -879,6 +1020,9 @@ const validateStockCodeInput = () => {
     // 标准化代码
     if (validation.normalizedCode) {
       analysisForm.stockCode = validation.normalizedCode
+      analysisForm.symbol = validation.normalizedCode
+    } else {
+      analysisForm.symbol = code.toUpperCase()
     }
   }
 
@@ -922,7 +1066,8 @@ const submitAnalysis = async () => {
   }
 
   // 使用标准化后的代码
-  analysisForm.symbol = validation.normalizedCode || stockCode.toUpperCase()
+  analysisForm.stockCode = validation.normalizedCode || stockCode.toUpperCase()
+  analysisForm.symbol = analysisForm.stockCode
 
   if (analysisForm.selectedAnalysts.length === 0) {
     ElMessage.warning('请至少选择一个分析师')
@@ -1057,39 +1202,26 @@ const startPollingTaskStatus = () => {
         console.log('🎉 分析完成，正在获取完整结果...')
 
         try {
-          const resultResponse = await fetch(`/api/analysis/tasks/${currentTaskId.value}/result`, {
-            headers: {
-              'Authorization': `Bearer ${authStore.token}`,
-              'Content-Type': 'application/json'
-            }
+          analysisResults.value = await loadAnalysisResult(currentTaskId.value, status.result_data)
+          console.log('✅ 获取完整分析结果成功:', analysisResults.value)
+          console.log('🔍 完整结果数据结构:', {
+            hasDecision: !!analysisResults.value?.decision,
+            hasState: !!analysisResults.value?.state,
+            hasReports: !!analysisResults.value?.reports,
+            hasSummary: !!analysisResults.value?.summary,
+            hasRecommendation: !!analysisResults.value?.recommendation,
+            keys: Object.keys(analysisResults.value || {})
           })
-
-          if (resultResponse.ok) {
-            const resultData = await resultResponse.json()
-            if (resultData.success) {
-              analysisResults.value = resultData.data
-              console.log('✅ 获取完整分析结果成功:', resultData.data)
-
-              // 添加调试信息
-              console.log('🔍 完整结果数据结构:', {
-                hasDecision: !!resultData.data?.decision,
-                hasState: !!resultData.data?.state,
-                hasReports: !!resultData.data?.reports,
-                hasSummary: !!resultData.data?.summary,
-                hasRecommendation: !!resultData.data?.recommendation,
-                keys: Object.keys(resultData.data || {})
-              })
-            } else {
-              console.error('❌ 获取分析结果失败:', resultData.message)
-              analysisResults.value = status.result_data // 回退到状态中的数据
-            }
-          } else {
-            console.error('❌ 结果API调用失败:', resultResponse.status)
-            analysisResults.value = status.result_data // 回退到状态中的数据
-          }
         } catch (error) {
           console.error('❌ 获取分析结果异常:', error)
-          analysisResults.value = status.result_data // 回退到状态中的数据
+          const fallbackResult = status.result_data || null
+          if (fallbackResult) {
+            analysisResults.value = fallbackResult
+          } else {
+            setFailedState(error instanceof Error ? error.message : '分析已完成，但报告数据读取失败')
+            ElMessage.error(error instanceof Error ? error.message : '分析已完成，但报告数据读取失败')
+            return
+          }
         }
 
         analysisStatus.value = 'completed'
@@ -1110,20 +1242,8 @@ const startPollingTaskStatus = () => {
 
       } else if (status.status === 'failed') {
         // 分析失败
-        analysisStatus.value = 'failed'
-        progressInfo.value.currentStep = '分析失败'
-
-        // 格式化错误消息（保留换行符）
         const errorMessage = status.error_message || '分析过程中发生错误'
-        progressInfo.value.message = errorMessage
-
-        if (pollingTimer.value) {
-          clearInterval(pollingTimer.value)
-          pollingTimer.value = null
-        }
-
-        // 任务失败时清除缓存
-        clearTaskCache()
+        setFailedState(errorMessage)
 
         // 显示友好的错误提示（使用 dangerouslyUseHTMLString 支持换行）
         ElMessage({
@@ -1207,27 +1327,7 @@ const updateProgressInfo = (status: any) => {
 
 // 重新开始分析
 const restartAnalysis = () => {
-  // 清除任务缓存
-  clearTaskCache()
-
-  analysisStatus.value = 'idle'
-  showResults.value = false
-  analysisResults.value = null
-  currentTaskId.value = ''
-  progressInfo.value = {
-    progress: 0,
-    currentStep: '',
-    currentStepDescription: '',
-    message: '',
-    elapsedTime: 0,
-    remainingTime: 0,
-    totalTime: 0
-  }
-
-  if (pollingTimer.value) {
-    clearInterval(pollingTimer.value)
-    pollingTimer.value = null
-  }
+  resetAnalysisState(true)
 }
 
 
@@ -1350,6 +1450,46 @@ const getReportDescription = (title: string) => {
   return descMap[title] || '详细分析报告'
 }
 
+const REPORT_CONTENT_TITLE_MAP: Record<string, string> = {
+  market_report: '市场技术分析',
+  sentiment_report: '市场情绪分析',
+  news_report: '新闻事件分析',
+  fundamentals_report: '基本面分析',
+  bull_researcher: '多头研究观点',
+  bear_researcher: '空头研究观点',
+  research_team_decision: '研究经理综合决策',
+  trader_investment_plan: '交易员执行计划',
+  risky_analyst: '激进风险评估',
+  safe_analyst: '保守风险评估',
+  neutral_analyst: '中性风险评估',
+  risk_management_decision: '风险管理决策',
+  final_trade_decision: '最终交易决策'
+}
+
+const normalizeDisplayReportContent = (content: string) => {
+  let normalized = content.trim()
+  Object.entries(REPORT_CONTENT_TITLE_MAP).forEach(([key, title]) => {
+    const aliases = [
+      key,
+      key.replace(/_/g, ' '),
+      key === 'risky_analyst' ? 'aggressive analyst' : '',
+      key === 'safe_analyst' ? 'conservative analyst' : '',
+      key === 'neutral_analyst' ? 'neutral analyst' : ''
+    ].filter(Boolean)
+
+    aliases.forEach((alias) => {
+      const pattern = new RegExp(`^(#{1,6}\\\\s*)?${alias.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\\\s*$`, 'gim')
+      normalized = normalized.replace(pattern, `## ${title}`)
+    })
+  })
+
+  normalized = normalized.replace(/^\s*[0-9一二三]+[\)\.、：:\-）]\s*(aggressive(?:\s+analyst|\s+risk\s+assessment)?|risky(?:\s+analyst)?)\s*$/gim, '### 激进风险评估')
+  normalized = normalized.replace(/^\s*[0-9一二三]+[\)\.、：:\-）]\s*(conservative(?:\s+analyst|\s+risk\s+assessment)?|safe(?:\s+analyst)?)\s*$/gim, '### 保守风险评估')
+  normalized = normalized.replace(/^\s*[0-9一二三]+[\)\.、：:\-）]\s*(neutral(?:\s+analyst|\s+risk\s+assessment)?)\s*$/gim, '### 中性风险评估')
+
+  return normalized
+}
+
 // 格式化报告内容
 const formatReportContent = (content: any) => {
   console.log('🎨 [DEBUG] formatReportContent 被调用:', {
@@ -1384,6 +1524,8 @@ const formatReportContent = (content: any) => {
   }
 
   try {
+    stringContent = normalizeDisplayReportContent(stringContent)
+
     // 使用marked库将Markdown转换为HTML
     const htmlContent = marked.parse(stringContent) as string
 
@@ -1454,7 +1596,12 @@ const downloadReport = async (format: string = 'markdown') => {
     // 显示详细错误信息
     if (err.message && err.message.includes('pandoc')) {
       ElMessage.error({
-        message: 'PDF/Word 导出需要安装 pandoc 工具',
+        message: 'Word 导出需要安装 pandoc 工具',
+        duration: 5000
+      })
+    } else if (err.message && (err.message.includes('pdfkit') || err.message.includes('wkhtmltopdf'))) {
+      ElMessage.error({
+        message: 'PDF 导出需要安装 pdfkit 和 wkhtmltopdf',
         duration: 5000
       })
     } else {
@@ -1698,7 +1845,7 @@ const goSimOrder = async () => {
       confirmButtonText: '确认下单',
       cancelButtonText: '取消',
       type: 'warning',
-      beforeClose: (action, instance, done) => {
+      beforeClose: (action, _instance, done) => {
         if (action === 'confirm') {
           // 验证输入
           if (tradeForm.quantity < 100 || tradeForm.quantity % 100 !== 0) {
@@ -1900,8 +2047,8 @@ const initializeModelSettings = async () => {
     })))
   } catch (error) {
     console.error('加载默认模型配置失败:', error)
-    modelSettings.value.quickAnalysisModel = 'qwen-turbo'
-    modelSettings.value.deepAnalysisModel = 'qwen-max'
+    modelSettings.value.quickAnalysisModel = ''
+    modelSettings.value.deepAnalysisModel = ''
   }
 }
 
@@ -1968,17 +2115,16 @@ const restoreTaskFromCache = async () => {
     if (status.status === 'completed') {
       // 任务已完成，显示结果
       currentTaskId.value = cached.taskId
-      analysisStatus.value = 'completed'
-      showResults.value = true
-      analysisResults.value = status.result_data
-      progressInfo.value.progress = 100
-      progressInfo.value.currentStep = '分析完成'
-      progressInfo.value.message = '分析已完成'
-
-      // 恢复分析参数
       if (cached.taskData.parameters) {
         Object.assign(analysisForm, cached.taskData.parameters)
       }
+      analysisResults.value = await loadAnalysisResult(cached.taskId, status.result_data)
+      analysisStatus.value = 'completed'
+      showResults.value = true
+      progressInfo.value.progress = 100
+      progressInfo.value.currentStep = '分析完成'
+      progressInfo.value.currentStepDescription = '已恢复最近一次分析结果'
+      progressInfo.value.message = '分析已完成'
 
       console.log('✅ 任务已完成，显示结果')
       return true
@@ -2003,12 +2149,7 @@ const restoreTaskFromCache = async () => {
 
     } else if (status.status === 'failed') {
       // 任务失败
-      analysisStatus.value = 'failed'
-      progressInfo.value.currentStep = '分析失败'
-      progressInfo.value.message = status.error_message || '分析过程中发生错误'
-
-      // 清除缓存
-      clearTaskCache()
+      setFailedState(status.error_message || '分析过程中发生错误')
 
       console.log('❌ 任务失败')
       return true
@@ -2060,14 +2201,6 @@ const getCapabilityTagType = (level: number): 'success' | 'info' | 'warning' | '
 const isQuickAnalysisRole = (roles: string[] | undefined): boolean => {
   if (!roles || !Array.isArray(roles)) return false
   return roles.includes('quick_analysis') || roles.includes('both')
-}
-
-/**
- * 判断是否适合深度分析
- */
-const isDeepAnalysisRole = (roles: string[] | undefined): boolean => {
-  if (!roles || !Array.isArray(roles)) return false
-  return roles.includes('deep_analysis') || roles.includes('both')
 }
 
 /**
@@ -2169,7 +2302,6 @@ const applyRecommendedModels = () => {
 }
 
 // 监听分析深度变化
-import { watch } from 'vue'
 watch(() => analysisForm.researchDepth, () => {
   checkModelSuitability()
 })
@@ -2179,13 +2311,27 @@ watch([() => modelSettings.value.quickAnalysisModel, () => modelSettings.value.d
   checkModelSuitability()
 })
 
+watch(
+  () => [route.query.stock, route.query.stock_code, route.query.market],
+  ([stock, stockCode, market], [prevStock, prevStockCode, prevMarket]) => {
+    const nextCode = String(stock ?? stockCode ?? '').trim()
+    const prevCode = String(prevStock ?? prevStockCode ?? '').trim()
+    const marketChanged = String(market ?? '') !== String(prevMarket ?? '')
+
+    if (!nextCode && !marketChanged) {
+      return
+    }
+
+    if (nextCode !== prevCode || marketChanged) {
+      resetAnalysisState(true)
+      applyRouteQueryToForm(route.query as Record<string, any>)
+    }
+  }
+)
+
 // 页面初始化
 onMounted(async () => {
   initializeModelSettings()
-
-  // 🆕 从用户偏好加载默认设置
-  const authStore = useAuthStore()
-  const appStore = useAppStore()
 
   // 优先从 authStore.user.preferences 读取，其次从 appStore.preferences 读取
   const userPrefs = authStore.user?.preferences
@@ -2223,21 +2369,11 @@ onMounted(async () => {
 
   // 接收一次路由参数（从筛选页带入）- 路由参数优先级最高
   const q = route.query as any
-  const hasNewStock = !!q?.stock
+  const hasNewStock = applyRouteQueryToForm(q)
   if (hasNewStock) {
-    analysisForm.stockCode = String(q.stock)
-    // 🔥 关键修复：如果有新的股票代码，清除旧任务缓存
     clearTaskCache()
-    console.log('🔄 检测到新股票代码，已清除旧任务缓存:', q.stock)
-
-    // 🆕 自动识别市场类型（如果URL中没有明确指定market参数）
-    if (!q?.market) {
-      const detectedMarket = getMarketByStockCode(analysisForm.stockCode)
-      analysisForm.market = detectedMarket as MarketType
-      console.log('🔍 自动识别市场类型:', analysisForm.stockCode, '->', detectedMarket)
-    }
+    console.log('🔄 检测到新股票代码，已清除旧任务缓存:', q.stock || q.stock_code)
   }
-  if (q?.market) analysisForm.market = normalizeMarketForAnalysis(q.market) as MarketType
 
   // 尝试恢复任务状态（仅当没有新股票代码时）
   if (!hasNewStock) {

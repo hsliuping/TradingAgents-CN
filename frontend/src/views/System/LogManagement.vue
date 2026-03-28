@@ -199,6 +199,8 @@ import { ElMessage } from 'element-plus'
 import { Refresh, Download, Search, View, Delete } from '@element-plus/icons-vue'
 import { LogsApi, type LogFileInfo, type LogContentResponse, type LogStatistics } from '@/api/logs'
 
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
 // 数据
 const loading = ref(false)
 const viewLoading = ref(false)
@@ -353,15 +355,15 @@ const exportLogs = async () => {
   }
 }
 
-const getLogTypeColor = (type: string) => {
-  const colors: Record<string, string> = {
+const getLogTypeColor = (type: string): TagType => {
+  const colors: Record<string, TagType> = {
     error: 'danger',
     webapi: 'primary',
     worker: 'success',
     access: 'info',
-    other: ''
+    other: 'info'
   }
-  return colors[type] || ''
+  return colors[type] || 'info'
 }
 
 const formatDate = (dateStr: string) => {
@@ -434,4 +436,3 @@ onMounted(() => {
   }
 }
 </style>
-

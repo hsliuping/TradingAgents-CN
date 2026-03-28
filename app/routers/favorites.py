@@ -2,15 +2,17 @@
 自选股管理API路由
 """
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 import logging
 
 from app.routers.auth_db import get_current_user
+from app.routers.stock_sync import _delete_sync_history_for_symbol, _delete_synced_data_for_symbol
 from app.models.user import User, FavoriteStock
 from app.services.favorites_service import favorites_service
 from app.core.response import ok
+from app.core.database import get_mongo_db
 
 logger = logging.getLogger("webapi")
 
@@ -41,7 +43,7 @@ class FavoriteStockResponse(BaseModel):
     stock_code: str
     stock_name: str
     market: str
-    added_at: str
+    currency: Optional[str] = None
     tags: List[str]
     notes: str
     alert_price_high: Optional[float]
@@ -50,6 +52,8 @@ class FavoriteStockResponse(BaseModel):
     current_price: Optional[float] = None
     change_percent: Optional[float] = None
     volume: Optional[int] = None
+    quote_trade_date: Optional[str] = None
+    quote_updated_at: Optional[str] = None
 
 
 @router.get("/", response_model=dict)
@@ -161,6 +165,7 @@ async def update_favorite(
 @router.delete("/{stock_code}", response_model=dict)
 async def remove_favorite(
     stock_code: str,
+    cleanup_related: bool = False,
     current_user: dict = Depends(get_current_user)
 ):
     """从自选股中移除股票"""
@@ -168,7 +173,59 @@ async def remove_favorite(
         success = await favorites_service.remove_favorite(current_user["id"], stock_code)
 
         if success:
-            return ok({"stock_code": stock_code}, "移除成功")
+            cleanup_result = None
+
+            if cleanup_related:
+                db = get_mongo_db()
+                try:
+                    history_deleted_count = await _delete_sync_history_for_symbol(
+                        db,
+                        current_user=current_user,
+                        symbol=stock_code,
+                    )
+                    data_cleanup = await _delete_synced_data_for_symbol(
+                        db,
+                        symbol=stock_code,
+                        delete_types=["historical", "financial", "basic", "realtime_cache"],
+                        delete_display_cache=True,
+                    )
+                    cleanup_result = {
+                        "success": True,
+                        "history_deleted_count": history_deleted_count,
+                        "data_deleted_count": data_cleanup["deleted_count"],
+                        "data_details": data_cleanup["details"],
+                    }
+                    logger.info(
+                        "🧹 删除自选股联动清理完成: user_id=%s, stock_code=%s, history_deleted=%s, data_deleted=%s",
+                        current_user["id"],
+                        stock_code,
+                        history_deleted_count,
+                        data_cleanup["deleted_count"],
+                    )
+                except Exception as cleanup_error:
+                    logger.error(
+                        "❌ 删除自选股后的联动清理失败: stock_code=%s, error=%s",
+                        stock_code,
+                        cleanup_error,
+                        exc_info=True,
+                    )
+                    cleanup_result = {
+                        "success": False,
+                        "error": str(cleanup_error),
+                    }
+
+            message = "移除成功"
+            if cleanup_related:
+                if cleanup_result and cleanup_result.get("success"):
+                    message = "移除成功，并已清理相关同步历史和数据"
+                else:
+                    message = "自选股已移除，但相关同步历史和数据清理失败，请稍后手动处理"
+
+            return ok({
+                "stock_code": stock_code,
+                "cleanup_related": cleanup_related,
+                "cleanup": cleanup_result,
+            }, message)
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -245,42 +302,127 @@ async def sync_favorites_realtime(
                 "message": "没有自选股需要同步"
             })
 
-        # 提取股票代码列表
-        symbols = [fav.get("stock_code") or fav.get("symbol") for fav in favorites]
-        symbols = [s for s in symbols if s]  # 过滤空值
+        grouped_symbols: Dict[str, List[str]] = {
+            "A股": [],
+            "港股": [],
+            "美股": [],
+        }
+        symbols: List[str] = []
+        for fav in favorites:
+            symbol = fav.get("stock_code") or fav.get("symbol")
+            if not symbol:
+                continue
+            market = fav.get("market") or "A股"
+            grouped_symbols.setdefault(market, []).append(symbol)
+            symbols.append(symbol)
 
         logger.info(f"🎯 需要同步的股票: {len(symbols)} 只 - {symbols}")
 
-        # 根据数据源选择同步服务
-        if request.data_source == "tushare":
-            from app.worker.tushare_sync_service import get_tushare_sync_service
-            service = await get_tushare_sync_service()
-        elif request.data_source == "akshare":
-            from app.worker.akshare_sync_service import get_akshare_sync_service
-            service = await get_akshare_sync_service()
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"不支持的数据源: {request.data_source}"
+        success_count = 0
+        failed_count = 0
+        details: Dict[str, Dict[str, int]] = {}
+
+        a_share_symbols = grouped_symbols.get("A股", [])
+        if a_share_symbols:
+            if request.data_source == "tushare":
+                from app.worker.tushare_sync_service import get_tushare_sync_service
+                try:
+                    service = await get_tushare_sync_service()
+                except Exception as e:
+                    logger.warning(f"⚠️ Tushare 服务不可用，自动回退到 AKShare: {e}")
+                    from app.worker.akshare_sync_service import get_akshare_sync_service
+                    service = await get_akshare_sync_service()
+                    request.data_source = "akshare"
+            elif request.data_source == "akshare":
+                from app.worker.akshare_sync_service import get_akshare_sync_service
+                service = await get_akshare_sync_service()
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"不支持的数据源: {request.data_source}"
+                )
+
+            if not service:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"{request.data_source} 服务不可用"
+                )
+
+            logger.info(f"🔄 调用 {request.data_source} 同步 A 股实时行情...")
+            sync_result = await service.sync_realtime_quotes(
+                symbols=a_share_symbols,
+                force=True
             )
+            a_share_success = sync_result.get("success_count", 0)
+            a_share_failed = sync_result.get("failed_count", sync_result.get("error_count", 0))
+            success_count += a_share_success
+            failed_count += a_share_failed
+            details["A股"] = {
+                "total": len(a_share_symbols),
+                "success_count": a_share_success,
+                "failed_count": a_share_failed,
+            }
 
-        if not service:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"{request.data_source} 服务不可用"
-            )
+        foreign_symbols = {
+            "港股": ("HK", grouped_symbols.get("港股", [])),
+            "美股": ("US", grouped_symbols.get("美股", [])),
+        }
+        if any(symbol_list for _, symbol_list in foreign_symbols.values()):
+            from app.services.foreign_stock_service import ForeignStockService
 
-        # 同步实时行情
-        logger.info(f"🔄 调用 {request.data_source} 同步服务...")
-        sync_result = await service.sync_realtime_quotes(
-            symbols=symbols,
-            force=True  # 强制执行，跳过交易时间检查
-        )
+            foreign_service = ForeignStockService(db=get_mongo_db())
 
-        success_count = sync_result.get("success_count", 0)
-        failed_count = sync_result.get("failed_count", 0)
+            for market_label, (market_code, market_symbols) in foreign_symbols.items():
+                if not market_symbols:
+                    continue
+
+                market_success = 0
+                market_failed = 0
+                for symbol in market_symbols:
+                    try:
+                        await foreign_service.get_quote(market_code, symbol, force_refresh=True)
+                        market_success += 1
+                    except Exception as exc:
+                        logger.warning(
+                            "⚠️ 自选股实时行情强制刷新失败，尝试回退缓存: market=%s, symbol=%s, error=%s",
+                            market_label,
+                            symbol,
+                            exc,
+                        )
+                        try:
+                            await foreign_service.get_quote(market_code, symbol, force_refresh=False)
+                            market_success += 1
+                            logger.info(
+                                "✅ 自选股实时行情已回退缓存: market=%s, symbol=%s",
+                                market_label,
+                                symbol,
+                            )
+                        except Exception as cache_exc:
+                            market_failed += 1
+                            logger.warning(
+                                "⚠️ 自选股实时行情刷新失败: market=%s, symbol=%s, refresh_error=%s, cache_error=%s",
+                                market_label,
+                                symbol,
+                                exc,
+                                cache_exc,
+                            )
+
+                success_count += market_success
+                failed_count += market_failed
+                details[market_label] = {
+                    "total": len(market_symbols),
+                    "success_count": market_success,
+                    "failed_count": market_failed,
+                }
 
         logger.info(f"✅ 自选股实时行情同步完成: 成功 {success_count}/{len(symbols)} 只")
+
+        message_parts = []
+        for market_label in ["A股", "港股", "美股"]:
+            market_detail = details.get(market_label)
+            if not market_detail:
+                continue
+            message_parts.append(f"{market_label}成功 {market_detail['success_count']} / {market_detail['total']}")
 
         return ok({
             "total": len(symbols),
@@ -288,7 +430,8 @@ async def sync_favorites_realtime(
             "failed_count": failed_count,
             "symbols": symbols,
             "data_source": request.data_source,
-            "message": f"同步完成: 成功 {success_count} 只，失败 {failed_count} 只"
+            "details": details,
+            "message": "；".join(message_parts) if message_parts else f"同步完成: 成功 {success_count} 只，失败 {failed_count} 只"
         })
 
     except HTTPException:

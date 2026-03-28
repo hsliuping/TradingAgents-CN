@@ -69,8 +69,8 @@ def truncate_key(key: str) -> str:
 ```
 
 **示例**：
-- 输入：`d1el869r01qghj41hahgd1el869r01qghj41hai0`
-- 输出：`d1el86...j41hai0`
+- 输入：`tushare_test_placeholder_token_001`
+- 输出：`tushar...oken_001`
 
 ### 1.4 API Key 更新逻辑规则
 
@@ -158,7 +158,7 @@ LLMProviderResponse 构造
     └─ 数据库没有 API Key → 返回 None
     ↓
 前端显示在编辑对话框
-    ├─ 有缩略 Key → 显示 "sk-99054..."
+    ├─ 有缩略 Key → 显示 "sk-tes..."
     └─ 没有 Key → 显示空白
 ```
 
@@ -181,7 +181,7 @@ LLMProviderResponse 构造
     └─ 返回脱敏后的配置列表
     ↓
 前端显示在编辑对话框
-    ├─ 有缩略 Key → 显示 "d1el86...j41hai0"
+    ├─ 有缩略 Key → 显示 "tushar...oken_001"
     └─ 没有 Key → 显示空白
 ```
 
@@ -195,9 +195,9 @@ LLMProviderResponse 构造
 用户在编辑对话框中修改 API Key
     ↓
 前端提交 PUT /api/config/llm/providers/{id}
-    ├─ 用户输入新 Key → payload.api_key = "sk-new123..."
+    ├─ 用户输入新 Key → payload.api_key = "sk-test-placeholder-new-001..."
     ├─ 用户清空 Key → payload.api_key = ""
-    └─ 用户未修改（显示截断 Key） → payload.api_key = "sk-99054..."
+    └─ 用户未修改（显示截断 Key） → payload.api_key = "sk-tes..."
     ↓
 后端 update_llm_provider()
     ├─ 检查 api_key 是否包含 "..."
@@ -562,4 +562,3 @@ def should_skip_api_key_update(api_key: str) -> bool:
 3. **低优先级**：文档完善
    - 更新用户手册，说明配置优先级
    - 更新开发文档，说明 API Key 处理流程
-

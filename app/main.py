@@ -19,56 +19,31 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 import logging
+import os
 import time
 from datetime import datetime
 from contextlib import asynccontextmanager
 import asyncio
 from pathlib import Path
 
+from dotenv import load_dotenv
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
-from app.routers import auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
-from app.routers import sync as sync_router, multi_source_sync
-from app.routers import stocks as stocks_router
-from app.routers import stock_data as stock_data_router
-from app.routers import stock_sync as stock_sync_router
-from app.routers import multi_market_stocks as multi_market_stocks_router
-from app.routers import notifications as notifications_router
-from app.routers import websocket_notifications as websocket_notifications_router
-from app.routers import scheduler as scheduler_router
-from app.services.basics_sync_service import get_basics_sync_service
-from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
-from app.services.scheduler_service import set_scheduler_instance
-from app.worker.tushare_sync_service import (
-    run_tushare_basic_info_sync,
-    run_tushare_quotes_sync,
-    run_tushare_historical_sync,
-    run_tushare_financial_sync,
-    run_tushare_status_check
-)
-from app.worker.akshare_sync_service import (
-    run_akshare_basic_info_sync,
-    run_akshare_quotes_sync,
-    run_akshare_historical_sync,
-    run_akshare_financial_sync,
-    run_akshare_status_check
-)
-from app.worker.baostock_sync_service import (
-    run_baostock_basic_info_sync,
-    run_baostock_daily_quotes_sync,
-    run_baostock_historical_sync,
-    run_baostock_status_check
-)
-# 港股和美股改为按需获取+缓存模式，不再需要定时同步任务
-# from app.worker.hk_sync_service import ...
-# from app.worker.us_sync_service import ...
+from app.routers import auth_db as auth, health
 from app.middleware.operation_log_middleware import OperationLogMiddleware
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
-from app.services.quotes_ingestion_service import QuotesIngestionService
-from app.routers import paper as paper_router
+
+APP_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(APP_ROOT / ".env", override=False)
+load_dotenv(APP_ROOT / ".env.local", override=True)
+
+
+MINIMAL_STARTUP = os.getenv("TRADINGAGENTS_MINIMAL_STARTUP", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 
 def get_version() -> str:
@@ -203,7 +178,7 @@ async def _print_config_summary(logger):
                     if len(enabled_sources) > 3:
                         logger.info(f"  • ... and {len(enabled_sources) - 3} more")
             else:
-                logger.info("Data Sources: Using default (AKShare)")
+                logger.info("Data Sources: Using default (Tushare)")
         except Exception as e:
             logger.warning(f"⚠️  Failed to check data source configs: {e}")
 
@@ -228,6 +203,22 @@ async def lifespan(app: FastAPI):
         raise
 
     await init_db()
+
+    if MINIMAL_STARTUP:
+        logger.warning("Minimal startup mode enabled; skipping AI config bridge and scheduler initialization")
+        logger.info("TradingAgents FastAPI backend started (minimal mode)")
+        try:
+            yield
+        finally:
+            try:
+                from app.services.user_service import user_service
+                user_service.close()
+            except Exception as e:
+                logger.warning(f"UserService cleanup error: {e}")
+
+            await close_db()
+            logger.info("TradingAgents FastAPI backend stopped")
+        return
 
     #  配置桥接：将统一配置写入环境变量，供 TradingAgents 核心库使用
     try:
@@ -268,12 +259,39 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Startup backfill failed (ignored): {e}")
 
     # 启动每日定时任务：可配置
-    scheduler: AsyncIOScheduler | None = None
+    scheduler = None
     try:
         from croniter import croniter
     except Exception:
         croniter = None  # 可选依赖
     try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        from apscheduler.triggers.interval import IntervalTrigger
+        from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
+        from app.services.scheduler_service import set_scheduler_instance
+        from app.services.quotes_ingestion_service import QuotesIngestionService
+        from app.worker.tushare_sync_service import (
+            run_tushare_basic_info_sync,
+            run_tushare_quotes_sync,
+            run_tushare_historical_sync,
+            run_tushare_financial_sync,
+            run_tushare_status_check,
+        )
+        from app.worker.akshare_sync_service import (
+            run_akshare_basic_info_sync,
+            run_akshare_quotes_sync,
+            run_akshare_historical_sync,
+            run_akshare_financial_sync,
+            run_akshare_status_check,
+        )
+        from app.worker.baostock_sync_service import (
+            run_baostock_basic_info_sync,
+            run_baostock_daily_quotes_sync,
+            run_baostock_historical_sync,
+            run_baostock_status_check,
+        )
+
         scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
 
         # 使用多数据源同步服务（支持自动切换）
@@ -685,49 +703,139 @@ async def test_log():
 # 注册路由
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
-app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
-app.include_router(reports.router, tags=["reports"])
-app.include_router(screening.router, prefix="/api/screening", tags=["screening"])
-app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
-app.include_router(favorites.router, prefix="/api", tags=["favorites"])
-app.include_router(stocks_router.router, prefix="/api", tags=["stocks"])
-app.include_router(multi_market_stocks_router.router, prefix="/api", tags=["multi-market"])
-app.include_router(stock_data_router.router, tags=["stock-data"])
-app.include_router(stock_sync_router.router, tags=["stock-sync"])
-app.include_router(tags.router, prefix="/api", tags=["tags"])
-app.include_router(config.router, prefix="/api", tags=["config"])
-app.include_router(model_capabilities.router, tags=["model-capabilities"])
-app.include_router(usage_statistics.router, tags=["usage-statistics"])
-app.include_router(database.router, prefix="/api/system", tags=["database"])
-app.include_router(cache.router, tags=["cache"])
-app.include_router(operation_logs.router, prefix="/api/system", tags=["operation_logs"])
-app.include_router(logs.router, prefix="/api/system", tags=["logs"])
-# 新增：系统配置只读摘要
-from app.routers import system_config as system_config_router
-app.include_router(system_config_router.router, prefix="/api/system", tags=["system"])
 
-# 通知模块（REST + SSE）
-app.include_router(notifications_router.router, prefix="/api", tags=["notifications"])
 
-# 🔥 WebSocket 通知模块（替代 SSE + Redis PubSub）
-app.include_router(websocket_notifications_router.router, prefix="/api", tags=["websocket"])
+def include_optional_router(module_path: str, *, prefix: str | None = None, tags: list[str] | None = None) -> bool:
+    """Best-effort router registration for minimal startup mode."""
+    logger = logging.getLogger("app.main")
 
-# 定时任务管理
-app.include_router(scheduler_router.router, tags=["scheduler"])
+    try:
+        module = __import__(module_path, fromlist=["router"])
+        router = getattr(module, "router")
 
-app.include_router(sse.router, prefix="/api/stream", tags=["streaming"])
-app.include_router(sync_router.router)
-app.include_router(multi_source_sync.router)
-app.include_router(paper_router.router, prefix="/api", tags=["paper"])
-app.include_router(tushare_init.router, prefix="/api", tags=["tushare-init"])
-app.include_router(akshare_init.router, prefix="/api", tags=["akshare-init"])
-app.include_router(baostock_init.router, prefix="/api", tags=["baostock-init"])
-app.include_router(historical_data.router, tags=["historical-data"])
-app.include_router(multi_period_sync.router, tags=["multi-period-sync"])
-app.include_router(financial_data.router, tags=["financial-data"])
-app.include_router(news_data.router, tags=["news-data"])
-app.include_router(social_media.router, tags=["social-media"])
-app.include_router(internal_messages.router, tags=["internal-messages"])
+        include_kwargs = {}
+        if prefix is not None:
+            include_kwargs["prefix"] = prefix
+        if tags is not None:
+            include_kwargs["tags"] = tags
+
+        app.include_router(router, **include_kwargs)
+        logger.info(f"Registered optional router in minimal mode: {module_path}")
+        return True
+    except Exception as e:
+        logger.warning(f"Skipping optional router in minimal mode: {module_path} ({e})")
+        return False
+
+
+if MINIMAL_STARTUP:
+    logging.getLogger("app.main").warning("Registering minimal route set only")
+    from app.routers import favorites, stock_sync as stock_sync_router
+
+    app.include_router(favorites.router, prefix="/api", tags=["favorites"])
+    app.include_router(stock_sync_router.router)
+    include_optional_router("app.routers.analysis", prefix="/api/analysis", tags=["analysis"])
+    include_optional_router("app.routers.reports", tags=["reports"])
+    include_optional_router("app.routers.screening", prefix="/api/screening", tags=["screening"])
+    include_optional_router("app.routers.queue", prefix="/api/queue", tags=["queue"])
+    include_optional_router("app.routers.config", prefix="/api", tags=["config"])
+    include_optional_router("app.routers.tags", prefix="/api", tags=["tags"])
+    include_optional_router("app.routers.model_capabilities", tags=["model-capabilities"])
+    include_optional_router("app.routers.usage_statistics", tags=["usage-statistics"])
+    include_optional_router("app.routers.database", prefix="/api/system", tags=["database"])
+    include_optional_router("app.routers.cache", tags=["cache"])
+    include_optional_router("app.routers.operation_logs", prefix="/api/system", tags=["operation_logs"])
+    include_optional_router("app.routers.logs", prefix="/api/system", tags=["logs"])
+    include_optional_router("app.routers.system_config", prefix="/api/system", tags=["system"])
+    include_optional_router("app.routers.stocks", prefix="/api", tags=["stocks"])
+    include_optional_router("app.routers.multi_market_stocks", prefix="/api", tags=["multi-market"])
+    include_optional_router("app.routers.stock_data", tags=["stock-data"])
+    include_optional_router("app.routers.notifications", prefix="/api", tags=["notifications"])
+    include_optional_router("app.routers.websocket_notifications", prefix="/api", tags=["websocket"])
+    include_optional_router("app.routers.scheduler", tags=["scheduler"])
+    include_optional_router("app.routers.sse", prefix="/api/stream", tags=["streaming"])
+    include_optional_router("app.routers.sync")
+    include_optional_router("app.routers.multi_source_sync")
+    include_optional_router("app.routers.paper", prefix="/api", tags=["paper"])
+    include_optional_router("app.routers.tushare_init", prefix="/api", tags=["tushare-init"])
+    include_optional_router("app.routers.akshare_init", prefix="/api", tags=["akshare-init"])
+    include_optional_router("app.routers.baostock_init", prefix="/api", tags=["baostock-init"])
+    include_optional_router("app.routers.historical_data", tags=["historical-data"])
+    include_optional_router("app.routers.multi_period_sync", tags=["multi-period-sync"])
+    include_optional_router("app.routers.financial_data", tags=["financial-data"])
+    include_optional_router("app.routers.news_data", tags=["news-data"])
+    include_optional_router("app.routers.social_media", tags=["social-media"])
+    include_optional_router("app.routers.internal_messages", tags=["internal-messages"])
+else:
+    from app.routers import (
+        analysis,
+        screening,
+        queue,
+        sse,
+        favorites,
+        config,
+        reports,
+        database,
+        operation_logs,
+        tags,
+        tushare_init,
+        akshare_init,
+        baostock_init,
+        historical_data,
+        multi_period_sync,
+        financial_data,
+        news_data,
+        social_media,
+        internal_messages,
+        usage_statistics,
+        model_capabilities,
+        cache,
+        logs,
+    )
+    from app.routers import sync as sync_router, multi_source_sync
+    from app.routers import stocks as stocks_router
+    from app.routers import stock_data as stock_data_router
+    from app.routers import stock_sync as stock_sync_router
+    from app.routers import multi_market_stocks as multi_market_stocks_router
+    from app.routers import notifications as notifications_router
+    from app.routers import websocket_notifications as websocket_notifications_router
+    from app.routers import scheduler as scheduler_router
+    from app.routers import paper as paper_router
+    from app.routers import system_config as system_config_router
+
+    app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
+    app.include_router(reports.router, tags=["reports"])
+    app.include_router(screening.router, prefix="/api/screening", tags=["screening"])
+    app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
+    app.include_router(favorites.router, prefix="/api", tags=["favorites"])
+    app.include_router(stocks_router.router, prefix="/api", tags=["stocks"])
+    app.include_router(multi_market_stocks_router.router, prefix="/api", tags=["multi-market"])
+    app.include_router(stock_data_router.router, tags=["stock-data"])
+    app.include_router(stock_sync_router.router, tags=["stock-sync"])
+    app.include_router(tags.router, prefix="/api", tags=["tags"])
+    app.include_router(config.router, prefix="/api", tags=["config"])
+    app.include_router(model_capabilities.router, tags=["model-capabilities"])
+    app.include_router(usage_statistics.router, tags=["usage-statistics"])
+    app.include_router(database.router, prefix="/api/system", tags=["database"])
+    app.include_router(cache.router, tags=["cache"])
+    app.include_router(operation_logs.router, prefix="/api/system", tags=["operation_logs"])
+    app.include_router(logs.router, prefix="/api/system", tags=["logs"])
+    app.include_router(system_config_router.router, prefix="/api/system", tags=["system"])
+    app.include_router(notifications_router.router, prefix="/api", tags=["notifications"])
+    app.include_router(websocket_notifications_router.router, prefix="/api", tags=["websocket"])
+    app.include_router(scheduler_router.router, tags=["scheduler"])
+    app.include_router(sse.router, prefix="/api/stream", tags=["streaming"])
+    app.include_router(sync_router.router)
+    app.include_router(multi_source_sync.router)
+    app.include_router(paper_router.router, prefix="/api", tags=["paper"])
+    app.include_router(tushare_init.router, prefix="/api", tags=["tushare-init"])
+    app.include_router(akshare_init.router, prefix="/api", tags=["akshare-init"])
+    app.include_router(baostock_init.router, prefix="/api", tags=["baostock-init"])
+    app.include_router(historical_data.router, tags=["historical-data"])
+    app.include_router(multi_period_sync.router, tags=["multi-period-sync"])
+    app.include_router(financial_data.router, tags=["financial-data"])
+    app.include_router(news_data.router, tags=["news-data"])
+    app.include_router(social_media.router, tags=["social-media"])
+    app.include_router(internal_messages.router, tags=["internal-messages"])
 
 
 @app.get("/")

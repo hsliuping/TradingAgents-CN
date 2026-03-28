@@ -162,7 +162,7 @@
                 </div>
                 <div class="item-status">
                   <el-tag
-                    :type="item.status === '已配置' ? 'success' : item.enabled ? 'warning' : 'info'"
+                    :type="item.status === '已配置' ? 'success' : 'warning'"
                     size="small"
                   >
                     {{ item.status }}
@@ -633,4 +633,3 @@ onMounted(() => {
   }
 }
 </style>
-

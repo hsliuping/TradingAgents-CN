@@ -36,35 +36,39 @@ export interface AppState {
   apiVersion: string
 }
 
+const themeStorage = useStorage<'light' | 'dark' | 'auto'>('app-theme', 'auto')
+const languageStorage = useStorage<'zh-CN' | 'en-US'>('app-language', 'zh-CN')
+const sidebarCollapsedStorage = useStorage<boolean>('sidebar-collapsed', false)
+const sidebarWidthStorage = useStorage<number>('sidebar-width', 240)
+const preferencesStorage = useStorage<AppState['preferences']>('user-preferences', {
+  defaultMarket: 'A股',
+  defaultDepth: '3',
+  autoRefresh: true,
+  refreshInterval: 30,
+  showWelcome: true
+})
+
+const isAbortError = (error: unknown): error is DOMException => {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
 export const useAppStore = defineStore('app', {
   state: (): AppState => ({
     loading: false,
     loadingProgress: 0,
-    theme: (useStorage('app-theme', 'auto').value || 'auto') as 'light' | 'dark' | 'auto',
-    language: (useStorage('app-language', 'zh-CN').value || 'zh-CN') as 'zh-CN' | 'en-US',
+    theme: themeStorage.value,
+    language: languageStorage.value,
 
     isOnline: navigator.onLine,
     apiConnected: false,
     lastApiCheck: 0,
 
-    sidebarCollapsed: useStorage('sidebar-collapsed', false).value || false,
-    sidebarWidth: useStorage('sidebar-width', 240).value || 240,
+    sidebarCollapsed: sidebarCollapsedStorage.value,
+    sidebarWidth: sidebarWidthStorage.value,
 
     currentRoute: null,
 
-    preferences: useStorage('user-preferences', {
-      defaultMarket: 'A股',
-      defaultDepth: '3',  // 3级为标准分析（推荐）
-      autoRefresh: true,
-      refreshInterval: 30,
-      showWelcome: true
-    }).value || {
-      defaultMarket: 'A股',
-      defaultDepth: '3',  // 3级为标准分析（推荐）
-      autoRefresh: true,
-      refreshInterval: 30,
-      showWelcome: true
-    },
+    preferences: preferencesStorage.value,
 
     version: '0.1.16',
     buildTime: new Date().toISOString(),
@@ -185,7 +189,7 @@ export const useAppStore = defineStore('app', {
     resetPreferences() {
       this.preferences = {
         defaultMarket: 'A股',
-        defaultDepth: '标准',
+        defaultDepth: '3',
         autoRefresh: true,
         refreshInterval: 30,
         showWelcome: true
@@ -219,8 +223,8 @@ export const useAppStore = defineStore('app', {
         const connected = response.ok
         this.setApiConnected(connected)
         return connected
-      } catch (error) {
-        if (error.name === 'AbortError') {
+      } catch (error: unknown) {
+        if (isAbortError(error)) {
           console.warn('API连接检查超时')
         } else {
           console.warn('API连接检查失败:', error)
@@ -250,8 +254,8 @@ export const useAppStore = defineStore('app', {
         } else {
           this.setApiConnected(false)
         }
-      } catch (error) {
-        if (error.name === 'AbortError') {
+      } catch (error: unknown) {
+        if (isAbortError(error)) {
           console.warn('获取API版本超时')
         } else {
           console.warn('获取API版本失败:', error)

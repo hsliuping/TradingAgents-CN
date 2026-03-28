@@ -105,12 +105,15 @@ def _sanitize_datasource_configs(items):
         result = []
         for item in items:
             data = item.model_dump()
+            extra_config = dict(data.get("extra_config") or {})
 
             # 处理 API Key
             db_key = data.get("api_key")
             if is_valid_api_key(db_key):
                 # 数据库中有有效的 API Key，返回缩略版本
                 data["api_key"] = truncate_api_key(db_key)
+                extra_config["source"] = "database"
+                extra_config["has_api_key"] = True
             else:
                 # 数据库中没有有效的 API Key，尝试从环境变量读取
                 ds_type = data.get("type")
@@ -119,17 +122,26 @@ def _sanitize_datasource_configs(items):
                     if env_key:
                         # 环境变量中有有效的 API Key，返回缩略版本
                         data["api_key"] = truncate_api_key(env_key)
+                        extra_config["source"] = "environment"
+                        extra_config["has_api_key"] = True
                     else:
                         data["api_key"] = None
+                        extra_config["has_api_key"] = False
                 else:
                     data["api_key"] = None
+                    extra_config["has_api_key"] = False
 
             # 处理 API Secret（同样的逻辑）
             db_secret = data.get("api_secret")
             if is_valid_api_key(db_secret):
                 data["api_secret"] = truncate_api_key(db_secret)
+                extra_config["secret_source"] = "database"
+                extra_config["has_api_secret"] = True
             else:
                 data["api_secret"] = None
+                extra_config["has_api_secret"] = False
+
+            data["extra_config"] = extra_config
 
             result.append(DataSourceConfig(**data))
 
@@ -280,11 +292,32 @@ async def add_llm_provider(
     request: LLMProviderRequest,
     current_user: User = Depends(get_current_user)
 ):
-    """添加大模型厂家（方案A：REST不接受密钥，强制清洗）"""
+    """添加大模型厂家"""
     try:
+        from app.utils.api_key_utils import should_skip_api_key_update, is_valid_api_key
+
         sanitized = request.model_dump()
+
         if 'api_key' in sanitized:
-            sanitized['api_key'] = ""
+            api_key = sanitized.get('api_key')
+            if api_key is None or should_skip_api_key_update(api_key) or api_key == '':
+                sanitized['api_key'] = ""
+            elif not is_valid_api_key(api_key):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="API Key 无效：长度必须大于 10 个字符，且不能是占位符"
+                )
+
+        if 'api_secret' in sanitized:
+            api_secret = sanitized.get('api_secret')
+            if api_secret is None or should_skip_api_key_update(api_secret) or api_secret == '':
+                sanitized['api_secret'] = ""
+            elif not is_valid_api_key(api_secret):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="API Secret 无效：长度必须大于 10 个字符，且不能是占位符"
+                )
+
         provider = LLMProvider(**sanitized)
         provider_id = await config_service.add_llm_provider(provider)
 
@@ -305,6 +338,8 @@ async def add_llm_provider(
             "message": "厂家添加成功",
             "data": {"id": str(provider_id)}
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -2,7 +2,28 @@
 测试5个研究深度级别的配置
 """
 import pytest
+import app.services.simple_analysis_service as simple_analysis_service
 from app.services.simple_analysis_service import create_analysis_config
+
+
+@pytest.fixture(autouse=True)
+def stub_model_provider_lookup(monkeypatch):
+    """避免测试因 MongoDB 查询模型配置而长时间阻塞。"""
+
+    def _fake_provider_info(model_name: str):
+        return {
+            "provider": "dashscope",
+            "backend_url": "https://dashscope.aliyuncs.com/api/v1",
+            "api_key": None,
+            "model_name": model_name,
+        }
+
+    monkeypatch.setattr(
+        simple_analysis_service,
+        "get_provider_and_url_by_model_sync",
+        _fake_provider_info,
+        raising=True,
+    )
 
 
 class TestResearchDepth5Levels:
@@ -22,7 +43,7 @@ class TestResearchDepth5Levels:
         assert config["max_debate_rounds"] == 1
         assert config["max_risk_discuss_rounds"] == 1
         assert config["memory_enabled"] is False  # 快速分析禁用记忆
-        assert config["online_tools"] is False  # 快速分析禁用在线工具
+        assert config["online_tools"] is True  # A股快速分析当前走统一在线工具链
         assert config["quick_think_llm"] == "qwen-turbo"
         assert config["deep_think_llm"] == "qwen-plus"
 
@@ -151,9 +172,9 @@ class TestResearchDepth5Levels:
         assert configs[3]["risk_rounds"] == 2  # 深度
         assert configs[4]["risk_rounds"] == 3  # 全面
         
-        # 验证记忆和在线工具（快速分析禁用，其他启用）
+        # 验证记忆和在线工具（快速分析禁用记忆，但保留统一在线工具）
         assert configs[0]["memory"] is False  # 快速
-        assert configs[0]["online"] is False  # 快速
+        assert configs[0]["online"] is True   # 快速
         for i in range(1, 5):
             assert configs[i]["memory"] is True
             assert configs[i]["online"] is True
@@ -182,4 +203,3 @@ class TestAnalysisParametersDefault:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

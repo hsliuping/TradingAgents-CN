@@ -401,13 +401,13 @@ class ConfigService:
             llm_configs=[
                 LLMConfig(
                     provider=ModelProvider.OPENAI,
-                    model_name="gpt-3.5-turbo",
+                    model_name="gpt-5.4",
                     api_key="your-openai-api-key",
                     api_base="https://api.openai.com/v1",
                     max_tokens=4000,
                     temperature=0.7,
-                    enabled=False,
-                    description="OpenAI GPT-3.5 Turbo模型"
+                    enabled=True,
+                    description="OpenAI GPT-5.4模型（默认）"
                 ),
                 LLMConfig(
                     provider=ModelProvider.ZHIPU,
@@ -416,7 +416,7 @@ class ConfigService:
                     api_base="https://open.bigmodel.cn/api/paas/v4",
                     max_tokens=4000,
                     temperature=0.7,
-                    enabled=True,
+                    enabled=False,
                     description="智谱AI GLM-4模型（推荐）"
                 ),
                 LLMConfig(
@@ -430,7 +430,7 @@ class ConfigService:
                     description="阿里云通义千问模型"
                 )
             ],
-            default_llm="glm-4",
+            default_llm="gpt-5.4",
             data_source_configs=[
                 DataSourceConfig(
                     name="AKShare",
@@ -454,7 +454,7 @@ class ConfigService:
                     description="Tushare专业金融数据接口"
                 )
             ],
-            default_data_source="AKShare",
+            default_data_source="Tushare",
             database_configs=[
                 DatabaseConfig(
                     name="MongoDB主库",
@@ -2446,6 +2446,15 @@ class ConfigService:
                 "provider": "openai",
                 "provider_name": "OpenAI",
                 "models": [
+                    {
+                        "name": "gpt-5.4",
+                        "display_name": "GPT-5.4 - 默认主模型",
+                        "input_price_per_1k": 0.0,
+                        "output_price_per_1k": 0.0,
+                        "context_length": 400000,
+                        "currency": "USD",
+                        "description": "默认推荐模型；实际价格与上下文能力以接入网关或官方配置为准"
+                    },
                     {
                         "name": "gpt-4o",
                         "display_name": "GPT-4o - 最新旗舰",

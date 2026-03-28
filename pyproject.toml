@@ -95,3 +95,17 @@ tradingagents = "main:main"
 [tool.setuptools.packages.find]
 include = ["tradingagents*"]
 exclude = ["tests*", "docs*", "scripts*", "data*", "logs*", "reports*", "results*", "eval_results*", "upstream_contribution*"]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests/system",
+    "tests/unit",
+    "tests/test_recent_changes_unittest.py",
+    "tests/test_progress_time_calculation.py",
+]
+python_files = ["test_*.py"]
+addopts = "-m \"not integration\" -k \"not (test_server_config or test_stock_codes)\""
+markers = [
+    "anyio: 标记基于 anyio 的异步测试",
+    "integration: 标记集成/端到端测试（默认跳过）",
+]

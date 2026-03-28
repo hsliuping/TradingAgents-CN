@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """
 阿里百炼大模型集成测试脚本
-用于验证 TradingAgents 中的阿里百炼集成是否正常工作
+
+需要环境变量：
+- TEST_DASHSCOPE_API_KEY
+- TEST_FINNHUB_API_KEY
+
+未配置时应 skipped，而不是 failed。
 """
 
 import os
 import sys
 from pathlib import Path
+
+import pytest
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent.parent
@@ -16,6 +23,10 @@ from dotenv import load_dotenv
 
 # 加载 .env 文件
 load_dotenv()
+
+from tests.conftest import require_env
+
+pytestmark = pytest.mark.integration
 
 def test_import():
     """测试导入是否正常"""
@@ -35,23 +46,12 @@ def test_import():
 def test_api_key():
     """测试API密钥配置"""
     print("\n🔍 测试2: 检查API密钥配置...")
-    
-    dashscope_key = os.getenv('DASHSCOPE_API_KEY')
-    finnhub_key = os.getenv('FINNHUB_API_KEY')
-    
-    if not dashscope_key:
-        print("❌ 未找到 DASHSCOPE_API_KEY 环境变量")
-        print("💡 请设置: set DASHSCOPE_API_KEY=your_api_key")
-        return False
-    else:
-        print(f"✅ DASHSCOPE_API_KEY: {dashscope_key[:10]}...")
-    
-    if not finnhub_key:
-        print("❌ 未找到 FINNHUB_API_KEY 环境变量")
-        print("💡 请设置: set FINNHUB_API_KEY=your_api_key")
-        return False
-    else:
-        print(f"✅ FINNHUB_API_KEY: {finnhub_key[:10]}...")
+
+    dashscope_key = require_env("TEST_DASHSCOPE_API_KEY")
+    finnhub_key = require_env("TEST_FINNHUB_API_KEY")
+
+    print(f"✅ TEST_DASHSCOPE_API_KEY: {dashscope_key[:10]}...")
+    print(f"✅ TEST_FINNHUB_API_KEY: {finnhub_key[:10]}...")
     
     return True
 
@@ -64,7 +64,7 @@ def test_dashscope_connection():
         from dashscope import Generation
         
         # 设置API密钥
-        dashscope.api_key = os.getenv('DASHSCOPE_API_KEY')
+        dashscope.api_key = require_env("TEST_DASHSCOPE_API_KEY")
         
         # 测试简单调用
         response = Generation.call(

@@ -115,8 +115,8 @@ python scripts/test_api_key_validation.py
 - ✅ `your_openai_api_key_here` → 无效（占位符）
 - ✅ `your_dashscope_api_key_here` → 无效（占位符）
 - ✅ `your_anthropic_api_key_here` → 无效（占位符）
-- ✅ `sk-990547695d6046cf9be4e8d095235d91` → 有效
-- ✅ `AIzaSyC3JdZVjblI0rfT_SNXXL5a4kvZ13_12CE` → 有效
+- ✅ `sk-test-placeholder-valid-001234567890` → 有效
+- ✅ `AIzaSyTEST_PLACEHOLDER_valid_001` → 有效
 
 ### 集成测试
 
@@ -175,7 +175,7 @@ python scripts/test_env_validation.py
    OPENAI_API_KEY=your_openai_api_key_here
    
    # ✅ 正确：使用真实 API Key
-   OPENAI_API_KEY=sk-proj-abc123def456...
+   OPENAI_API_KEY=sk-proj-test-placeholder-valid-001...
    ```
 
 3. **保存并重启后端服务**
@@ -230,4 +230,3 @@ A: 请访问对应服务商的官网：
 3. **文档完善**
    - 更新配置指南，明确说明占位符的问题
    - 添加常见配置错误的排查指南
-

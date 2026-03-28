@@ -63,7 +63,6 @@ class FavoriteStock(BaseModel):
     stock_code: str = Field(..., description="股票代码")
     stock_name: str = Field(..., description="股票名称")
     market: str = Field(..., description="市场类型")
-    added_at: datetime = Field(default_factory=now_tz, description="添加时间")
     tags: List[str] = Field(default_factory=list, description="用户标签")
     notes: str = Field(default="", description="用户备注")
     alert_price_high: Optional[float] = Field(None, description="价格上限提醒")

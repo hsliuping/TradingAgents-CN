@@ -10,6 +10,11 @@ export interface StockValidationResult {
   normalizedCode?: string
 }
 
+export interface StockMarketMetadata {
+  exchange: string
+  board: string
+}
+
 /**
  * A股代码格式验证
  * 格式：6位数字
@@ -214,3 +219,80 @@ export function formatStockCode(code: string, market: 'A股' | '美股' | '港�
   return validation.normalizedCode || code
 }
 
+/**
+ * 根据市场和股票代码推断交易所与板块
+ */
+export function inferStockMarketMetadata(
+  market: 'A股' | '美股' | '港股',
+  stockCode: string
+): StockMarketMetadata {
+  const raw = String(stockCode || '').trim().toUpperCase()
+  if (!raw) {
+    return { exchange: '', board: '' }
+  }
+
+  const normalizedCode = raw.endsWith('.HK') ? raw.slice(0, -3) : raw
+
+  if (market === '港股') {
+    return {
+      exchange: '香港交易所',
+      board: ''
+    }
+  }
+
+  if (market === '美股') {
+    return {
+      exchange: '',
+      board: ''
+    }
+  }
+
+  if (!/^\d+$/.test(normalizedCode)) {
+    return {
+      exchange: '',
+      board: ''
+    }
+  }
+
+  const code = normalizedCode.padStart(6, '0')
+
+  if (/^(430|440|830|831|832|833|835|836|837|838|839|870|871|872|873|874|875|876|877|878|879|880|881|882|883|884|885|886|887|888|889)/.test(code) || ['4', '8'].includes(code[0])) {
+    return {
+      exchange: '北京证券交易所',
+      board: '北交所'
+    }
+  }
+
+  if (code.startsWith('68')) {
+    return {
+      exchange: '上海证券交易所',
+      board: '科创板'
+    }
+  }
+
+  if (code.startsWith('30')) {
+    return {
+      exchange: '深圳证券交易所',
+      board: '创业板'
+    }
+  }
+
+  if (code.startsWith('60')) {
+    return {
+      exchange: '上海证券交易所',
+      board: '主板'
+    }
+  }
+
+  if (/^(00|001|002|003|20)/.test(code)) {
+    return {
+      exchange: '深圳证券交易所',
+      board: '主板'
+    }
+  }
+
+  return {
+    exchange: '',
+    board: ''
+  }
+}

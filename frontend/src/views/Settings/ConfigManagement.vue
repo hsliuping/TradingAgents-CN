@@ -421,6 +421,13 @@
                       <el-tag :type="dataSource.enabled ? 'success' : 'danger'" size="small">
                         {{ dataSource.enabled ? '启用' : '禁用' }}
                       </el-tag>
+                      <el-tag
+                        v-if="dataSource.extra_config?.has_api_key"
+                        :type="dataSource.extra_config?.source === 'environment' ? 'warning' : 'success'"
+                        size="small"
+                      >
+                        {{ dataSource.extra_config?.source === 'environment' ? 'ENV' : 'DB' }}
+                      </el-tag>
                       <span class="item-type">{{ dataSource.type }}</span>
                     </div>
                     <div class="item-actions">
@@ -849,6 +856,62 @@
 
             <el-divider />
 
+            <el-row :gutter="24" style="margin-bottom: 16px;">
+              <el-col :span="12">
+                <h4>🗂️ 数据源密钥状态</h4>
+                <div
+                  v-for="dataSource in dataSourceConfigs"
+                  :key="dataSource.name"
+                  class="api-key-item"
+                >
+                  <el-icon><DataBoard /></el-icon>
+                  <span class="key-name">{{ dataSource.display_name || dataSource.name }}</span>
+                  <el-tag :type="getDataSourceKeyStatusType(dataSource)" size="small">
+                    {{ getDataSourceKeyStatusText(dataSource) }}
+                  </el-tag>
+                  <el-button
+                    v-if="needsDataSourceKeyConfig(dataSource)"
+                    size="small"
+                    type="primary"
+                    link
+                    @click="editDataSourceConfig(dataSource)"
+                  >
+                    配置
+                  </el-button>
+                </div>
+
+                <div v-if="dataSourceConfigs.length === 0" class="empty-state">
+                  <el-empty description="暂无数据源配置">
+                    <el-button type="primary" @click="activeTab = 'datasource'">
+                      添加数据源
+                    </el-button>
+                  </el-empty>
+                </div>
+              </el-col>
+
+              <el-col :span="12">
+                <h4>📈 数据源统计</h4>
+                <div class="stats-grid">
+                  <div class="stat-item">
+                    <div class="stat-number">{{ dataSourceConfigs.length }}</div>
+                    <div class="stat-label">总数据源数</div>
+                  </div>
+                  <div class="stat-item">
+                    <div class="stat-number">{{ configuredDataSourcesCount }}</div>
+                    <div class="stat-label">已配置密钥</div>
+                  </div>
+                  <div class="stat-item">
+                    <div class="stat-number">{{ enabledDataSourcesCount }}</div>
+                    <div class="stat-label">启用数据源</div>
+                  </div>
+                  <div class="stat-item">
+                    <div class="stat-number">{{ defaultDataSource || '-' }}</div>
+                    <div class="stat-label">默认数据源</div>
+                  </div>
+                </div>
+              </el-col>
+            </el-row>
+
             <div class="api-key-help">
               <h4>💡 配置说明</h4>
               <el-row :gutter="16">
@@ -881,7 +944,7 @@
                   <el-alert
                     title="🔒 安全提示"
                     type="warning"
-                    description="敏感密钥通过环境变量/运维配置注入，后端响应已统一脱敏；请勿在界面或导出文件中保存真实密钥。"
+                    description="页面不会回显真实密钥；保存后仅展示脱敏状态。数据库配置优先于环境变量，请勿导出真实密钥。"
                     show-icon
                     :closable="false"
                   />
@@ -1088,9 +1151,7 @@ import {
   Key,
   OfficeBuilding,
   CircleCheck,
-  Collection,
-  Star,
-  Money
+  Collection
 } from '@element-plus/icons-vue'
 
 import {
@@ -1111,6 +1172,12 @@ import DataSourceConfigDialog from './components/DataSourceConfigDialog.vue'
 import MarketCategoryManagement from './components/MarketCategoryManagement.vue'
 import DataSourceGroupingDialog from './components/DataSourceGroupingDialog.vue'
 import SortableDataSourceList from './components/SortableDataSourceList.vue'
+
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+type GroupedDataSource = DataSourceConfig & {
+  priority: number
+  enabled: boolean
+}
 
 // 响应式数据
 const activeTab = ref('validation')
@@ -1206,6 +1273,7 @@ const loadTabData = async (tab: string) => {
     case 'api-keys':
       await loadProviders()
       await loadLLMConfigs()
+      await loadDataSourceConfigs()
       break
   }
 }
@@ -1388,7 +1456,7 @@ const buildDataSourceGroups = () => {
           }
           return null
         })
-        .filter(Boolean)
+        .filter((item): item is GroupedDataSource => item !== null)
         .sort((a, b) => b.priority - a.priority) // 按优先级降序排列
 
       groups.push({
@@ -1434,8 +1502,8 @@ const loadSystemSettings = async () => {
     ])
     // 确保有默认值
     systemSettings.value = {
-      quick_analysis_model: 'qwen-turbo',
-      deep_analysis_model: 'qwen-max',
+      quick_analysis_model: '',
+      deep_analysis_model: '',
       default_analysis_timeout: 300,
       enable_cache: true,
       cache_ttl: 3600,
@@ -1547,14 +1615,9 @@ const loadProviderInfoMap = async () => {
   }
 }
 
-// 刷新大模型配置数据
-const refreshLLMConfigs = () => {
-  buildLLMConfigGroups()
-}
-
 // 获取厂家标签类型
-const getProviderTagType = (provider: string) => {
-  const typeMap: Record<string, string> = {
+const getProviderTagType = (provider: string): TagType => {
+  const typeMap: Record<string, TagType> = {
     'openai': 'primary',
     'google': 'success',
     'anthropic': 'warning',
@@ -1580,15 +1643,15 @@ const getCapabilityLevelText = (level: number) => {
 }
 
 // 🆕 获取能力等级标签类型
-const getCapabilityLevelType = (level: number) => {
-  const typeMap: Record<number, string> = {
+const getCapabilityLevelType = (level: number): TagType => {
+  const typeMap: Record<number, TagType> = {
     1: 'info',
-    2: '',
+    2: 'primary',
     3: 'success',
     4: 'warning',
     5: 'danger'
   }
-  return typeMap[level] || ''
+  return typeMap[level] || 'info'
 }
 
 // 🆕 获取角色文本
@@ -1616,7 +1679,7 @@ const addModelToProvider = (providerRow: any) => {
   currentLLMConfig.value = {
     provider: providerRow.provider,
     model_name: '',
-    display_name: '',
+    model_display_name: '',
     description: '',
     enabled: true,
     max_tokens: 4000,
@@ -1705,6 +1768,14 @@ const activeProvidersCount = computed(() => {
   return providers.value.filter(p => p.is_active).length
 })
 
+const configuredDataSourcesCount = computed(() => {
+  return dataSourceConfigs.value.filter(ds => ds.extra_config?.has_api_key === true).length
+})
+
+const enabledDataSourcesCount = computed(() => {
+  return dataSourceConfigs.value.filter(ds => ds.enabled).length
+})
+
 // 获取密钥状态类型
 const getKeyStatusType = (provider: LLMProvider) => {
   if (!provider.extra_config?.has_api_key) {
@@ -1727,6 +1798,27 @@ const getKeyStatusText = (provider: LLMProvider) => {
   }
 
   return '已配置'
+}
+
+const needsDataSourceKeyConfig = (dataSource: DataSourceConfig) => {
+  return dataSource.type !== 'akshare' && dataSource.type !== 'baostock' && dataSource.type !== 'local_file'
+}
+
+const getDataSourceKeyStatusType = (dataSource: DataSourceConfig) => {
+  if (dataSource.extra_config?.has_api_key) {
+    return dataSource.enabled ? 'success' : 'warning'
+  }
+  return needsDataSourceKeyConfig(dataSource) ? 'info' : undefined
+}
+
+const getDataSourceKeyStatusText = (dataSource: DataSourceConfig) => {
+  if (dataSource.extra_config?.has_api_key) {
+    if (!dataSource.enabled) {
+      return dataSource.extra_config?.source === 'environment' ? 'ENV(禁用)' : 'DB(禁用)'
+    }
+    return dataSource.extra_config?.source === 'environment' ? '已配置(环境变量)' : '已配置(数据库)'
+  }
+  return needsDataSourceKeyConfig(dataSource) ? '未配置' : '无需密钥'
 }
 
 // 从环境变量迁移
@@ -1777,18 +1869,6 @@ const editLLMConfig = (config: LLMConfig) => {
 
 const handleLLMConfigSuccess = () => {
   loadLLMConfigs()
-}
-
-// 设置默认LLM
-const setDefaultLLM = async (modelName: string) => {
-  try {
-    await configApi.setDefaultLLM(modelName)
-    defaultLLM.value = modelName
-    buildLLMConfigGroups() // 重新构建分组以更新排序
-    ElMessage.success('默认大模型设置成功')
-  } catch (error) {
-    ElMessage.error('设置默认大模型失败')
-  }
 }
 
 // 测试LLM配置
@@ -1913,16 +1993,6 @@ const handleMarketCategorySuccess = () => {
 const handleDataSourceGroupingSuccess = () => {
   loadDataSourceGroupings()
   buildDataSourceGroups()
-}
-
-const setDefaultDataSource = async (name: string) => {
-  try {
-    await configApi.setDefaultDataSource(name)
-    defaultDataSource.value = name
-    ElMessage.success('默认数据源设置成功')
-  } catch (error) {
-    ElMessage.error('设置默认数据源失败')
-  }
 }
 
 const testDataSource = async (config: DataSourceConfig) => {

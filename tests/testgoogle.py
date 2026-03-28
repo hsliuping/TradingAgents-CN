@@ -2,7 +2,7 @@ import requests
 import json
 
 # 配置
-API_KEY = "AIzaSyC3JdZVjblI0rfT_SNXXL5a4kvZ13_12CE"  # 请替换为您的真实API密钥
+API_KEY = "AIzaSyTEST_PLACEHOLDER_google_api_key_001"  # 请替换为您的真实API密钥
 MODEL_NAME = "gemini-2.0-flash"  # 指定使用的模型
 url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent"
 
