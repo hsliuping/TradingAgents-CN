@@ -913,12 +913,12 @@ class RequirementAnalyzer:
 
         # 受阻路径
         if report.blocked_paths:
-            block_lines = [f"  ⚠️ {b.description}" for b in report.blocked_paths]
+            block_lines = [f"  ⚠️ [{b.severity}] {b.path}: {b.reason}" for b in report.blocked_paths]
             parts.append("- 受阻路径（不可用）:\n" + "\n".join(block_lines))
 
         # 运行时缺口
         if report.runtime_gaps:
-            gap_lines = [f"  ⚠️ {g.description}" for g in report.runtime_gaps]
+            gap_lines = [f"  ⚠️ [{g.severity}] {g.path}: {g.reason}" for g in report.runtime_gaps]
             parts.append("- 运行时缺口:\n" + "\n".join(gap_lines))
 
         if report.notes:
