@@ -340,49 +340,101 @@ class CodeGenerator:
 
     @staticmethod
     def _build_fact_report_block(fact_report: Optional[ImplementationFactReport]) -> str:
+        """将侦察层产出的事实报告格式化为结构化 Prompt 区块。
+
+        分为多个子区块，让 LLM 清晰区分不同类型的实现事实：
+        - 策略概要：总体实现方向
+        - 可用 Helper：推荐调用的函数及签名
+        - 数据库字段事实：集合中实际存在的字段名
+        - 已确认事实：schema 探测发现的具体事实
+        - 禁止路径 & 缺口：必须规避的实现路径
+        - 验收条件：生成代码必须满足的业务检查
+        """
         if not fact_report:
             return ""
 
-        lines = ["\n【已查证实现事实】"]
+        sections: list[str] = []
+
+        # ── 区块 1: 策略概要 ──
+        summary_lines: list[str] = []
         if fact_report.task_summary:
-            lines.append(f"- 任务摘要: {fact_report.task_summary}")
+            summary_lines.append(f"任务: {fact_report.task_summary}")
         if fact_report.recommended_strategy:
-            lines.append(f"- 推荐策略: {fact_report.recommended_strategy}")
+            summary_lines.append(f"推荐策略: {fact_report.recommended_strategy}")
+        if summary_lines:
+            sections.append("▸ 策略概要\n" + "\n".join(f"  {l}" for l in summary_lines))
+
+        # ── 区块 2: 可用 Helper 函数 ──
         if fact_report.available_helpers:
-            helper_text = "；".join(
-                f"{item.module}.{item.name}（{item.reason}）"
-                for item in fact_report.available_helpers[:6]
+            helper_lines: list[str] = []
+            for h in fact_report.available_helpers[:8]:
+                line = f"  from {h.module} import {h.name}"
+                if h.reason:
+                    line += f"  # {h.reason}"
+                helper_lines.append(line)
+            sections.append("▸ 可用 Helper（优先使用这些函数获取数据）\n" + "\n".join(helper_lines))
+
+        # ── 区块 3: 数据库集合字段（来自 sample_fields）──
+        if fact_report.sample_fields:
+            field_lines: list[str] = []
+            for coll, fields in list(fact_report.sample_fields.items())[:4]:
+                field_lines.append(f"  {coll}: {', '.join(fields[:15])}")
+            sections.append(
+                "▸ 数据库集合实际字段（侦察已验证存在，请直接使用这些字段名）\n"
+                + "\n".join(field_lines)
             )
-            lines.append(f"- 推荐 helper: {helper_text}")
+
+        # ── 区块 4: 已确认的 Schema 事实 ──
         if fact_report.schema_facts:
-            fact_text = "；".join(
-                f"{item.source}: {item.fact}"
-                for item in fact_report.schema_facts[:6]
-            )
-            lines.append(f"- 已确认事实: {fact_text}")
+            fact_lines: list[str] = []
+            for f in fact_report.schema_facts[:10]:
+                evidence_tag = f" [{f.evidence}]" if f.evidence else ""
+                fact_lines.append(f"  • [{f.source}] {f.fact}{evidence_tag}")
+            sections.append("▸ 已确认事实\n" + "\n".join(fact_lines))
+
+        # ── 区块 5: 禁止路径 ──
         if fact_report.blocked_paths:
-            blocked_text = "；".join(
-                f"{item.path}（{item.reason}）"
+            blocked_lines = [
+                f"  ✘ {item.path}: {item.reason} ({item.severity})"
                 for item in fact_report.blocked_paths[:5]
-            )
-            lines.append(f"- 禁止路径: {blocked_text}")
+            ]
+            sections.append("▸ 禁止路径（不要使用以下方式实现）\n" + "\n".join(blocked_lines))
+
+        # ── 区块 6: Runtime 缺口 ──
         if fact_report.runtime_gaps:
-            gap_text = "；".join(
-                f"{item.path or item.reason}"
+            gap_lines = [
+                f"  ⚠ {item.path or '(未知)'}: {item.reason}"
                 for item in fact_report.runtime_gaps[:4]
-            )
-            lines.append(f"- runtime 缺口: {gap_text}")
+            ]
+            sections.append("▸ Runtime 缺口（需注意的限制）\n" + "\n".join(gap_lines))
+
+        # ── 区块 7: 验收条件（代码必须满足）──
         if fact_report.validation_checks:
-            check_text = "；".join(
-                check.description or check.name
-                for check in fact_report.validation_checks[:6]
+            check_lines: list[str] = []
+            for vc in fact_report.validation_checks[:8]:
+                desc = vc.description or vc.name
+                field_tag = f" [字段: {vc.field}]" if vc.field else ""
+                check_lines.append(f"  ☑ {desc}{field_tag}")
+            sections.append(
+                "▸ 验收条件（生成代码的输出必须满足以下检查）\n"
+                + "\n".join(check_lines)
             )
-            lines.append(f"- 业务验收关注点: {check_text}")
+
+        # ── 区块 8: 备注 ──
         if fact_report.notes:
-            note_text = "；".join(fact_report.notes[:4])
-            lines.append(f"- 备注: {note_text}")
-        lines.append("- 生成代码时必须严格基于这些已查证事实实现，不要自行猜测新的内部接口、provider 方法或字段口径")
-        return "\n".join(lines)
+            note_lines = [f"  - {n}" for n in fact_report.notes[:4]]
+            sections.append("▸ 侦察备注\n" + "\n".join(note_lines))
+
+        if not sections:
+            return ""
+
+        header = (
+            "\n【已查证实现事实 — 侦察层产出，置信度 {:.0%}】\n"
+            "以下事实来自前置侦察层的实际探测。生成代码时必须严格基于这些事实实现，\n"
+            "不要自行猜测新的内部接口、provider 方法或字段名称。"
+        ).format(fact_report.confidence)
+
+        return header + "\n\n" + "\n\n".join(sections)
 
     def _build_user_prompt(
         self,
