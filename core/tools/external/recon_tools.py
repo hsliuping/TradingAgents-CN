@@ -35,6 +35,7 @@ def inspect_collection_schema(collection: str, sample_size: int = 20) -> str:
     参数 sample_size: 采样文档数（默认 20，最大 100）。
     返回 JSON 对象，包含 sample_count、top_level_fields 等。"""
     from core.skill_runtime.project_access import inspect_stock_collection_schema
+    sample_size = int(sample_size) if not isinstance(sample_size, int) else sample_size
     result = inspect_stock_collection_schema(collection, sample_size=sample_size)
     return json.dumps(result, ensure_ascii=False, default=str)
 
@@ -50,6 +51,7 @@ def check_field_coverage(collection: str, fields: str, sample_size: int = 50) ->
     参数 sample_size: 采样文档数（默认 50）。
     返回 JSON 对象，包含每个字段的 non_null_coverage 比率。"""
     from core.skill_runtime.project_access import inspect_field_coverage as _inspect
+    sample_size = int(sample_size) if not isinstance(sample_size, int) else sample_size
     field_list = [f.strip() for f in fields.split(",") if f.strip()]
     if not field_list:
         return json.dumps({"error": "fields 参数不能为空"}, ensure_ascii=False)
@@ -68,6 +70,7 @@ def inspect_symbol_sample(collection: str, symbol: str, limit: int = 2) -> str:
     参数 limit: 返回文档数（默认 2，最大 5）。
     返回 JSON 数组，每项为一条文档。"""
     from core.skill_runtime.project_access import inspect_symbol_documents
+    limit = int(limit) if not isinstance(limit, int) else limit
     docs = inspect_symbol_documents(collection, symbol, limit=min(limit, 5))
     return json.dumps(docs, ensure_ascii=False, default=str)
 
