@@ -350,6 +350,30 @@ class UnifiedLLMClient:
             current_response = self._retry_chat(current_messages, tools, **kwargs)
             rounds += 1
 
+        # ── 最终综合：当工具轮次耗尽但 LLM 仍想调用工具时，强制生成文本回复 ──
+        if current_response.has_tool_calls:
+            logger.warning(
+                f"[UnifiedLLM·同步] 工具调用轮次已达上限 ({max_rounds})，"
+                f"LLM 仍请求工具调用，启动最终综合..."
+            )
+            # 不能把带 tool_calls 的 assistant 消息直接加入历史，
+            # 否则 API 会要求紧跟对应的 tool response 消息（400 错误）。
+            if current_response.content:
+                current_messages.append(Message(
+                    role="assistant",
+                    content=current_response.content,
+                ))
+            current_messages.append(Message(
+                role="user",
+                content=(
+                    "工具调用次数已达到上限，请不要再调用任何工具。"
+                    "请根据上面已经获取到的所有数据，直接生成完整的分析回复。"
+                ),
+            ))
+            current_response = self._retry_chat(
+                current_messages, tools=None, **kwargs
+            )
+
         return current_response
 
     async def _aexecute_tool_loop(
