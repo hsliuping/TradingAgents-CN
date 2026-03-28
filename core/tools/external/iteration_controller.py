@@ -18,6 +18,7 @@
 import json
 import logging
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -112,6 +113,7 @@ class IterationController:
             PipelineResult: 管线最终结果
         """
         start_time = time.time()
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         iterations: List[IterationRound] = []
         feedback = initial_feedback
         previous_code = initial_code
@@ -134,7 +136,7 @@ class IterationController:
                 len(fact_report.validation_checks),
             )
             # 侦察报告即时落盘
-            self._persist_fact_report(spec.tool_id, fact_report)
+            self._persist_fact_report(spec.tool_id, run_id, fact_report)
 
             for idx, update in enumerate(self._build_reconnaissance_updates(fact_report), start=1):
                 logger.info("🧭 侦察摘要[%d]: %s", idx, update)
@@ -180,7 +182,7 @@ class IterationController:
                 iteration.decision = "FAIL"
                 iteration.feedback = f"代码生成失败: {e}"
                 iterations.append(iteration)
-                self._persist_round_snapshot(spec.tool_id, round_num, iteration, fact_report)
+                self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
                 break
 
             # ===== 阶段 2: 静态验证 =====
@@ -199,7 +201,7 @@ class IterationController:
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
-                self._persist_round_snapshot(spec.tool_id, round_num, iteration, fact_report)
+                self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
                 _report("static_validation", "静态验证失败，重试中...", round_num, 0.3)
                 logger.warning(
                     f"⚠️ [第{round_num}轮] 静态验证失败:\n"
@@ -253,7 +255,7 @@ class IterationController:
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
-                self._persist_round_snapshot(spec.tool_id, round_num, iteration, fact_report)
+                self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
                 _report("sandbox_execution", "沙箱执行失败，反思后重试中...", round_num, 0.55)
                 continue
 
@@ -332,14 +334,14 @@ class IterationController:
                     iteration.decision = "RETRY"
                     iteration.feedback = feedback
                     iterations.append(iteration)
-                    self._persist_round_snapshot(spec.tool_id, round_num, iteration, fact_report)
+                    self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
                     _report("edge_testing", "边缘测试失败，反思后重试中...", round_num, 0.9)
                     continue
 
                 # 全部通过
                 iteration.decision = "PASS"
                 iterations.append(iteration)
-                self._persist_round_snapshot(spec.tool_id, round_num, iteration, fact_report)
+                self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
                 _report("output_evaluation", f"评估通过，总分: {eval_score.total}", round_num, 1.0)
                 total_time = round(time.time() - start_time, 2)
                 logger.info(
@@ -412,7 +414,7 @@ class IterationController:
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
-                self._persist_round_snapshot(spec.tool_id, round_num, iteration, fact_report)
+                self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
                 _report("output_evaluation", f"{reason}，反思后重试中...", round_num, 0.8)
                 logger.warning(f"⚠️ [第{round_num}轮] {reason}，进入下一轮")
 
@@ -437,20 +439,21 @@ class IterationController:
     # ==================== 即时落盘 ====================
 
     @staticmethod
-    def _get_snapshot_dir(tool_id: str) -> Path:
-        """获取当前 Skill 的快照目录，延迟创建。"""
-        d = _SNAPSHOT_DIR / tool_id
+    def _get_snapshot_dir(tool_id: str, run_id: str) -> Path:
+        """获取当前运行批次的快照目录: data/code/skill/{tool_id}/{run_id}/"""
+        d = _SNAPSHOT_DIR / tool_id / run_id
         d.mkdir(parents=True, exist_ok=True)
         return d
 
     @staticmethod
     def _persist_fact_report(
         tool_id: str,
+        run_id: str,
         fact_report: ImplementationFactReport,
     ) -> Optional[Path]:
         """侦察完成后立即落盘 fact_report.json。"""
         try:
-            d = IterationController._get_snapshot_dir(tool_id)
+            d = IterationController._get_snapshot_dir(tool_id, run_id)
             path = d / "fact_report.json"
             data = fact_report.model_dump(mode="json")
             path.write_text(
@@ -466,13 +469,14 @@ class IterationController:
     @staticmethod
     def _persist_round_snapshot(
         tool_id: str,
+        run_id: str,
         round_num: int,
         iteration: IterationRound,
         fact_report: Optional[ImplementationFactReport] = None,
     ) -> Optional[Path]:
         """每轮迭代结束后立即落盘该轮完整快照（含代码、评分、反思等）。"""
         try:
-            d = IterationController._get_snapshot_dir(tool_id)
+            d = IterationController._get_snapshot_dir(tool_id, run_id)
             snapshot: Dict[str, Any] = {
                 "round_number": round_num,
                 "decision": iteration.decision,
