@@ -407,10 +407,15 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
             )
 
         # 扣除资金（从对应货币账户）
-        new_cash = round(available_cash - total_cost, 2)
+        total_cost = round(-total_cost, 2)
         await db["paper_accounts"].update_one(
             {"user_id": current_user["id"]},
-            {"$set": {f"cash.{currency}": new_cash, "updated_at": now_iso}}
+            {
+                "$inc": {
+                    f"cash.{currency}": total_cost,
+                },
+                "$set": {"updated_at": now_iso}
+            }
         )
 
         # 更新/创建持仓：加权平均成本
