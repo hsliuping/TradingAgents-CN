@@ -85,7 +85,14 @@
                   </el-col>
                 </el-row>
 
-                <el-form-item label="分析日期">
+                <el-form-item label="分析模式">
+                  <el-radio-group v-model="analysisMode" size="large" style="width: 100%">
+                    <el-radio-button value="single">单日分析</el-radio-button>
+                    <el-radio-button value="range">区间分析</el-radio-button>
+                  </el-radio-group>
+                </el-form-item>
+
+                <el-form-item v-if="analysisMode === 'single'" label="分析日期">
                   <el-date-picker
                     v-model="analysisForm.analysisDate"
                     type="date"
@@ -95,6 +102,53 @@
                     :disabled-date="disabledDate"
                   />
                 </el-form-item>
+
+                <el-form-item v-else label="日期区间">
+                  <el-date-picker
+                    v-model="dateRange"
+                    type="daterange"
+                    range-separator="至"
+                    start-placeholder="起始日期"
+                    end-placeholder="结束日期"
+                    size="large"
+                    style="width: 100%"
+                    :disabled-date="disabledDate"
+                    @change="onDateRangeChange"
+                  />
+                </el-form-item>
+
+                <div v-if="analysisMode === 'range' && tradingDaysPreview" class="trading-days-preview">
+                  <el-alert
+                    v-if="tradingDaysPreview.exceeds_limit"
+                    type="error"
+                    :closable="false"
+                    show-icon
+                  >
+                    <template #title>
+                      区间内共 {{ tradingDaysPreview.count }} 个交易日，超过最大限制 {{ tradingDaysPreview.max_allowed }} 天，请缩小范围
+                    </template>
+                  </el-alert>
+                  <el-alert
+                    v-else-if="tradingDaysPreview.count > 0"
+                    type="info"
+                    :closable="false"
+                    show-icon
+                  >
+                    <template #title>
+                      共 {{ tradingDaysPreview.count }} 个交易日，预计耗时 {{ estimatedTime }}
+                    </template>
+                  </el-alert>
+                  <el-alert
+                    v-else
+                    type="warning"
+                    :closable="false"
+                    show-icon
+                  >
+                    <template #title>
+                      该区间内无交易日
+                    </template>
+                  </el-alert>
+                </div>
               </div>
 
               <!-- 分析深度 -->
@@ -170,12 +224,12 @@
                     size="large"
                     @click="submitAnalysis"
                     :loading="submitting"
-                    :disabled="!analysisForm.stockCode.trim()"
+                    :disabled="!analysisForm.stockCode.trim() || (analysisMode === 'range' && (!tradingDaysPreview || tradingDaysPreview.count === 0 || tradingDaysPreview.exceeds_limit))"
                     class="submit-btn large-analysis-btn"
                     style="width: 280px; height: 56px; font-size: 18px; font-weight: 700; border-radius: 16px;"
                   >
                     <el-icon><TrendCharts /></el-icon>
-                    开始智能分析
+                    {{ analysisMode === 'range' ? `开始区间分析（${tradingDaysPreview?.count || 0}天）` : '开始智能分析' }}
                   </el-button>
 
                   <el-button
@@ -228,8 +282,46 @@
                 </div>
               </div>
 
-              <!-- 分析进度显示 -->
-              <div v-if="analysisStatus === 'running'" class="progress-section">
+              <!-- 区间分析进度显示 -->
+              <div v-if="analysisMode === 'range' && dateRangeTasks.length > 0 && analysisStatus === 'running'" class="progress-section">
+                <el-card class="progress-card" shadow="hover">
+                  <template #header>
+                    <div class="progress-header">
+                      <h4>
+                        <el-icon class="rotating-icon"><Loading /></el-icon>
+                        区间分析进行中（{{ dateRangeTasks.filter(t => t.status === 'completed').length }}/{{ dateRangeTasks.length }}）
+                      </h4>
+                    </div>
+                  </template>
+                  <div class="progress-content">
+                    <el-progress
+                      :percentage="dateRangeTotalProgress"
+                      :stroke-width="12"
+                      :show-text="true"
+                      class="main-progress-bar"
+                      style="margin-bottom: 16px;"
+                    />
+                    <el-table :data="dateRangeTasks" stripe style="width: 100%" max-height="400">
+                      <el-table-column prop="date" label="交易日" width="130" />
+                      <el-table-column label="状态" width="110">
+                        <template #default="{ row }">
+                          <el-tag :type="row.status === 'completed' ? 'success' : row.status === 'failed' ? 'danger' : row.status === 'running' ? 'warning' : 'info'" size="small">
+                            {{ row.status === 'completed' ? '已完成' : row.status === 'failed' ? '失败' : row.status === 'running' ? '分析中' : '等待中' }}
+                          </el-tag>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="进度" min-width="180">
+                        <template #default="{ row }">
+                          <el-progress :percentage="row.progress" :stroke-width="8" :show-text="true" :status="row.status === 'completed' ? 'success' : row.status === 'failed' ? 'exception' : undefined" />
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                  </div>
+                </el-card>
+              </div>
+
+              <!-- 单日分析进度显示 -->
+              <div v-if="analysisMode === 'single' && analysisStatus === 'running'" class="progress-section">
                 <el-card class="progress-card" shadow="hover">
                   <template #header>
                     <div class="progress-header">
@@ -477,7 +569,106 @@
         </el-col>
       </el-row>
 
-      <!-- 分析结果显示 -->
+      <!-- 区间分析完成后的任务列表 -->
+      <div v-if="analysisMode === 'range' && dateRangeTasks.length > 0 && analysisStatus === 'completed'" class="results-section">
+        <el-row :gutter="24">
+          <el-col :span="24">
+            <el-card class="results-card" shadow="hover">
+              <template #header>
+                <div class="results-header">
+                  <h3>📊 区间分析结果</h3>
+                  <div class="result-meta">
+                    <el-tag type="success">{{ analysisForm.symbol || analysisForm.stockCode }}</el-tag>
+                    <el-tag>{{ dateRangeTasks[0]?.date }} ~ {{ dateRangeTasks[dateRangeTasks.length - 1]?.date }}</el-tag>
+                    <el-tag type="info">共 {{ dateRangeTasks.length }} 个交易日</el-tag>
+                  </div>
+                </div>
+              </template>
+
+              <div class="results-content">
+                <!-- 汇总概览 -->
+                <div v-if="dateRangeSummary" class="overview-section" style="margin-bottom: 24px;">
+                  <h4>📈 区间汇总</h4>
+                  <el-row :gutter="16">
+                    <el-col :span="6">
+                      <div class="summary-stat-card">
+                        <div class="stat-label">分析完成</div>
+                        <div class="stat-value" style="color: #67c23a;">{{ dateRangeSummary.completed }} / {{ dateRangeSummary.total }}</div>
+                      </div>
+                    </el-col>
+                    <el-col :span="6">
+                      <div class="summary-stat-card">
+                        <div class="stat-label">买入建议</div>
+                        <div class="stat-value" style="color: #e6a23c;">{{ dateRangeSummary.buyCount }}</div>
+                      </div>
+                    </el-col>
+                    <el-col :span="6">
+                      <div class="summary-stat-card">
+                        <div class="stat-label">卖出建议</div>
+                        <div class="stat-value" style="color: #f56c6c;">{{ dateRangeSummary.sellCount }}</div>
+                      </div>
+                    </el-col>
+                    <el-col :span="6">
+                      <div class="summary-stat-card">
+                        <div class="stat-label">持有建议</div>
+                        <div class="stat-value" style="color: #409eff;">{{ dateRangeSummary.holdCount }}</div>
+                      </div>
+                    </el-col>
+                  </el-row>
+                </div>
+
+                <!-- 每日结果列表 -->
+                <el-table :data="dateRangeTasks" stripe style="width: 100%">
+                  <el-table-column prop="date" label="交易日" width="130" sortable />
+                  <el-table-column label="状态" width="100">
+                    <template #default="{ row }">
+                      <el-tag :type="row.status === 'completed' ? 'success' : row.status === 'failed' ? 'danger' : 'info'" size="small">
+                        {{ row.status === 'completed' ? '成功' : row.status === 'failed' ? '失败' : '未完成' }}
+                      </el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="分析倾向" width="120">
+                    <template #default="{ row }">
+                      <el-tag v-if="row.result?.decision?.action" :type="getActionTagType(row.result.decision.action)" size="small">
+                        {{ row.result.decision.action }}
+                      </el-tag>
+                      <span v-else style="color: #c0c4cc;">-</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="置信度" width="100">
+                    <template #default="{ row }">
+                      <span v-if="row.result?.decision?.confidence">{{ (row.result.decision.confidence * 100).toFixed(1) }}%</span>
+                      <span v-else style="color: #c0c4cc;">-</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="摘要" min-width="250">
+                    <template #default="{ row }">
+                      <span v-if="row.result?.summary" style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">{{ row.result.summary }}</span>
+                      <span v-else style="color: #c0c4cc;">-</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="120" fixed="right">
+                    <template #default="{ row }">
+                      <el-button v-if="row.status === 'completed'" type="primary" size="small" link @click="viewDateRangeTaskResult(row)">
+                        查看详情
+                      </el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+
+                <div style="margin-top: 16px; text-align: center;">
+                  <el-button type="primary" @click="restartAnalysis">
+                    <el-icon><Refresh /></el-icon>
+                    重新分析
+                  </el-button>
+                </div>
+              </div>
+            </el-card>
+          </el-col>
+        </el-row>
+      </div>
+
+      <!-- 分析结果显示（单日 / 区间中点击查看详情） -->
       <div v-if="showResults && analysisResults" class="results-section">
         <el-row :gutter="24">
           <el-col :span="24">
@@ -688,7 +879,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, computed, h } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, h, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox, ElInputNumber } from 'element-plus'
 import {
@@ -705,7 +896,7 @@ import {
   QuestionFilled,
   ArrowDown,
 } from '@element-plus/icons-vue'
-import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
+import { analysisApi, type SingleAnalysisRequest, type DateRangeAnalysisRequest, type DateRangeTaskMapping, type TradingDaysPreview } from '@/api/analysis'
 import { paperApi } from '@/api/paper'
 import { stocksApi } from '@/api/stocks'
 import { useAppStore } from '@/stores/app'
@@ -764,6 +955,33 @@ const progressInfo = ref({
   totalTime: 0         // 预计总时长（秒）
 })
 const pollingTimer = ref<any>(null)
+
+// 区间分析相关状态
+const analysisMode = ref<'single' | 'range'>('single')
+const dateRange = ref<[Date, Date] | null>(null)
+const tradingDaysPreview = ref<TradingDaysPreview | null>(null)
+const tradingDaysLoading = ref(false)
+const dateRangeBatchId = ref('')
+const dateRangeTasks = ref<Array<{
+  date: string
+  taskId: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  progress: number
+  result: any
+}>>([])
+const dateRangePollingTimer = ref<any>(null)
+
+const estimatedTime = computed(() => {
+  if (!tradingDaysPreview.value) return ''
+  const count = tradingDaysPreview.value.count
+  const depthIdx = analysisForm.researchDepth
+  const minPerTask = [2, 4, 6, 10, 15][depthIdx - 1] || 6
+  const maxPerTask = [4, 6, 10, 15, 25][depthIdx - 1] || 10
+  const concurrency = 3
+  const minTotal = Math.ceil(count / concurrency) * minPerTask
+  const maxTotal = Math.ceil(count / concurrency) * maxPerTask
+  return `${minTotal}-${maxTotal} 分钟`
+})
 
 // 分析步骤定义（动态生成）
 const analysisSteps = ref<any[]>([])
@@ -829,6 +1047,25 @@ const depthOptions = [
 // 禁用日期
 const disabledDate = (time: Date) => {
   return time.getTime() > Date.now()
+}
+
+// 日期区间变更时获取交易日预览
+const onDateRangeChange = async (val: [Date, Date] | null) => {
+  tradingDaysPreview.value = null
+  if (!val || !val[0] || !val[1]) return
+
+  const startDate = val[0].toISOString().split('T')[0]
+  const endDate = val[1].toISOString().split('T')[0]
+  tradingDaysLoading.value = true
+
+  try {
+    const resp = await analysisApi.getTradingDays(startDate, endDate, analysisForm.market)
+    tradingDaysPreview.value = resp.data
+  } catch (e: any) {
+    console.error('获取交易日预览失败:', e)
+  } finally {
+    tradingDaysLoading.value = false
+  }
 }
 
 // 股票代码输入时的处理
@@ -932,14 +1169,20 @@ const submitAnalysis = async () => {
   submitting.value = true
 
   try {
-    // 确保 analysisDate 是 Date 对象
+    // 区间分析模式
+    if (analysisMode.value === 'range') {
+      await submitDateRangeAnalysis()
+      return
+    }
+
+    // 单日分析模式（原有逻辑）
     const analysisDate = analysisForm.analysisDate instanceof Date
       ? analysisForm.analysisDate
       : new Date(analysisForm.analysisDate)
 
     const request: SingleAnalysisRequest = {
       symbol: analysisForm.symbol,
-      stock_code: analysisForm.symbol,  // 兼容字段
+      stock_code: analysisForm.symbol,
       parameters: {
         market_type: analysisForm.market,
         analysis_date: analysisDate.toISOString().split('T')[0],
@@ -961,7 +1204,6 @@ const submitAnalysis = async () => {
 
     ElMessage.success('分析任务已提交，正在处理中...')
 
-    // 响应拦截器已返回 response.data，所以直接访问 response.data.task_id
     currentTaskId.value = response.data.task_id
 
     if (!currentTaskId.value) {
@@ -972,7 +1214,6 @@ const submitAnalysis = async () => {
 
     console.log('✅ 任务ID设置成功:', currentTaskId.value)
 
-    // 保存任务状态到缓存
     saveTaskToCache(currentTaskId.value, {
       parameters: { ...analysisForm },
       submitTime: new Date().toISOString()
@@ -990,17 +1231,14 @@ const submitAnalysis = async () => {
       totalTime: 0
     }
 
-    // 初始化空的步骤列表，等待后端数据
     analysisSteps.value = []
 
-    // 开始轮询任务状态
     startPollingTaskStatus()
 
-    // 立即查询一次状态（不等待第一次轮询）
     setTimeout(async () => {
       try {
         const response = await analysisApi.getTaskStatus(currentTaskId.value)
-        const status = response.data // 响应拦截器已返回 response.data
+        const status = response.data
         console.log('🔄 立即查询状态:', status)
         console.log('🔄 当前 analysisStatus:', analysisStatus.value)
         if (status.status === 'running') {
@@ -1011,7 +1249,7 @@ const submitAnalysis = async () => {
       } catch (error) {
         console.error('立即查询状态失败:', error)
       }
-    }, 1000) // 1秒后查询
+    }, 1000)
 
   } catch (error: any) {
     ElMessage.error(error.message || '提交分析失败')
@@ -1019,6 +1257,200 @@ const submitAnalysis = async () => {
     submitting.value = false
   }
 }
+
+// 提交区间分析
+const submitDateRangeAnalysis = async () => {
+  if (!dateRange.value || !dateRange.value[0] || !dateRange.value[1]) {
+    ElMessage.warning('请选择日期区间')
+    return
+  }
+
+  if (tradingDaysPreview.value?.exceeds_limit) {
+    ElMessage.error('交易日数量超过限制，请缩小日期范围')
+    return
+  }
+
+  if (!tradingDaysPreview.value || tradingDaysPreview.value.count === 0) {
+    ElMessage.warning('该区间内无交易日')
+    return
+  }
+
+  const startDate = dateRange.value[0].toISOString().split('T')[0]
+  const endDate = dateRange.value[1].toISOString().split('T')[0]
+
+  const req: DateRangeAnalysisRequest = {
+    symbol: analysisForm.symbol,
+    stock_code: analysisForm.symbol,
+    start_date: startDate,
+    end_date: endDate,
+    parameters: {
+      market_type: analysisForm.market,
+      research_depth: getDepthDescription(analysisForm.researchDepth),
+      selected_analysts: convertAnalystNamesToIds(analysisForm.selectedAnalysts),
+      include_sentiment: analysisForm.includeSentiment,
+      include_risk: analysisForm.includeRisk,
+      language: analysisForm.language,
+      quick_analysis_model: modelSettings.value.quickAnalysisModel,
+      deep_analysis_model: modelSettings.value.deepAnalysisModel
+    }
+  }
+
+  const response = await analysisApi.startDateRangeAnalysis(req)
+  const data = response.data
+
+  ElMessage.success(`区间分析已提交，共 ${data.total_tasks} 个交易日正在并行分析`)
+
+  dateRangeBatchId.value = data.batch_id
+  dateRangeTasks.value = data.mapping.map((m: DateRangeTaskMapping) => ({
+    date: m.date,
+    taskId: m.task_id,
+    status: 'pending' as const,
+    progress: 0,
+    result: null
+  }))
+
+  analysisStatus.value = 'running'
+  showResults.value = false
+  startDateRangePolling()
+}
+
+// 区间分析轮询
+const startDateRangePolling = () => {
+  if (dateRangePollingTimer.value) {
+    clearInterval(dateRangePollingTimer.value)
+  }
+
+  dateRangePollingTimer.value = setInterval(async () => {
+    try {
+      let allDone = true
+      for (const task of dateRangeTasks.value) {
+        if (task.status === 'completed' || task.status === 'failed') continue
+        allDone = false
+
+        try {
+          const resp = await analysisApi.getTaskStatus(task.taskId)
+          const s = resp.data
+          task.status = s.status === 'completed' ? 'completed'
+            : s.status === 'failed' ? 'failed'
+            : s.status === 'running' ? 'running'
+            : 'pending'
+          task.progress = s.progress || 0
+        } catch {
+          // 单个任务查询失败不中断整体轮询
+        }
+      }
+
+      if (allDone) {
+        clearInterval(dateRangePollingTimer.value!)
+        dateRangePollingTimer.value = null
+
+        const failedCount = dateRangeTasks.value.filter(t => t.status === 'failed').length
+        if (failedCount === dateRangeTasks.value.length) {
+          analysisStatus.value = 'failed'
+          ElMessage.error('所有区间分析任务均失败')
+        } else {
+          analysisStatus.value = 'completed'
+          showResults.value = true
+          ElMessage.success(`区间分析完成（${dateRangeTasks.value.length - failedCount}/${dateRangeTasks.value.length} 成功）`)
+          await loadDateRangeResults()
+        }
+      }
+    } catch (error) {
+      console.error('区间分析轮询失败:', error)
+    }
+  }, 3000)
+}
+
+// 加载区间分析所有完成任务的结果
+const loadDateRangeResults = async () => {
+  for (const task of dateRangeTasks.value) {
+    if (task.status !== 'completed' || task.result) continue
+    try {
+      const res = await fetch(`/api/analysis/tasks/${task.taskId}/result`, {
+        headers: {
+          'Authorization': `Bearer ${authStore.token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      if (res.ok) {
+        const json = await res.json()
+        if (json.success && json.data) {
+          task.result = json.data
+        } else {
+          task.result = json.data || json
+        }
+      } else {
+        console.error(`加载任务 ${task.taskId} 结果失败: HTTP ${res.status}`)
+      }
+    } catch (e) {
+      console.error(`加载任务 ${task.taskId} 结果异常:`, e)
+    }
+  }
+}
+
+// 查看区间中某个日期的详细结果
+const viewDateRangeTaskResult = async (task: typeof dateRangeTasks.value[0]) => {
+  if (task.result) {
+    analysisResults.value = task.result
+    showResults.value = true
+    await nextTick()
+    document.querySelector('.results-section:last-of-type')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    return
+  }
+  if (task.status !== 'completed') return
+
+  try {
+    const res = await fetch(`/api/analysis/tasks/${task.taskId}/result`, {
+      headers: {
+        'Authorization': `Bearer ${authStore.token}`,
+        'Content-Type': 'application/json'
+      }
+    })
+    if (res.ok) {
+      const json = await res.json()
+      task.result = json.success && json.data ? json.data : (json.data || json)
+      analysisResults.value = task.result
+      showResults.value = true
+      await nextTick()
+      document.querySelector('.results-section:last-of-type')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    } else {
+      ElMessage.error(`加载结果失败 (HTTP ${res.status})`)
+    }
+  } catch (e) {
+    ElMessage.error('加载结果失败')
+    console.error('加载区间任务结果异常:', e)
+  }
+}
+
+// 区间分析汇总数据
+const dateRangeSummary = computed(() => {
+  if (dateRangeTasks.value.length === 0) return null
+  const completed = dateRangeTasks.value.filter(t => t.status === 'completed')
+  let buyCount = 0
+  let sellCount = 0
+  let holdCount = 0
+  for (const t of completed) {
+    const action = t.result?.decision?.action || ''
+    if (action.includes('买') || action.toLowerCase().includes('buy')) buyCount++
+    else if (action.includes('卖') || action.toLowerCase().includes('sell')) sellCount++
+    else if (action.includes('持') || action.toLowerCase().includes('hold')) holdCount++
+  }
+  return {
+    total: dateRangeTasks.value.length,
+    completed: completed.length,
+    failed: dateRangeTasks.value.filter(t => t.status === 'failed').length,
+    buyCount,
+    sellCount,
+    holdCount
+  }
+})
+
+// 区间分析总进度
+const dateRangeTotalProgress = computed(() => {
+  if (dateRangeTasks.value.length === 0) return 0
+  const completed = dateRangeTasks.value.filter(t => t.status === 'completed' || t.status === 'failed').length
+  return Math.round((completed / dateRangeTasks.value.length) * 100)
+})
 
 // 轮询任务状态
 const startPollingTaskStatus = () => {
@@ -1228,6 +1660,12 @@ const restartAnalysis = () => {
     clearInterval(pollingTimer.value)
     pollingTimer.value = null
   }
+  if (dateRangePollingTimer.value) {
+    clearInterval(dateRangePollingTimer.value)
+    dateRangePollingTimer.value = null
+  }
+  dateRangeTasks.value = []
+  dateRangeBatchId.value = ''
 }
 
 
@@ -1759,6 +2197,10 @@ onUnmounted(() => {
   if (pollingTimer.value) {
     clearInterval(pollingTimer.value)
     pollingTimer.value = null
+  }
+  if (dateRangePollingTimer.value) {
+    clearInterval(dateRangePollingTimer.value)
+    dateRangePollingTimer.value = null
   }
 })
 
@@ -2809,6 +3251,30 @@ onMounted(async () => {
 /* 为当前步骤图标添加脉冲效果 */
 .step-current .step-icon {
   animation: pulse 2s ease-in-out infinite;
+}
+
+/* 区间分析交易日预览 */
+.trading-days-preview {
+  margin-top: 8px;
+}
+
+/* 区间汇总卡片 */
+.summary-stat-card {
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+
+  .stat-label {
+    font-size: 13px;
+    color: var(--el-text-color-secondary);
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-size: 24px;
+    font-weight: 700;
+  }
 }
 </style>
 

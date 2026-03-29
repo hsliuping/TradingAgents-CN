@@ -18,9 +18,12 @@ from app.services.analysis_service import get_analysis_service
 from app.services.simple_analysis_service import get_simple_analysis_service
 from app.services.websocket_manager import get_websocket_manager
 from app.models.analysis import (
-    SingleAnalysisRequest, BatchAnalysisRequest, AnalysisParameters,
-    AnalysisTaskResponse, AnalysisBatchResponse, AnalysisHistoryQuery
+    SingleAnalysisRequest, BatchAnalysisRequest, DateRangeAnalysisRequest,
+    AnalysisParameters, AnalysisTaskResponse, AnalysisBatchResponse,
+    AnalysisHistoryQuery
 )
+from app.utils.trading_calendar import get_trading_days
+from app.core.config import settings
 
 router = APIRouter()
 logger = logging.getLogger("webapi")
@@ -767,6 +770,151 @@ async def list_user_tasks(
     except Exception as e:
         logger.error(f"❌ 获取任务列表失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/trading-days", response_model=Dict[str, Any])
+async def preview_trading_days(
+    start_date: str = Query(..., description="起始日期 YYYY-MM-DD"),
+    end_date: str = Query(..., description="结束日期 YYYY-MM-DD"),
+    market_type: str = Query(default="A股", description="市场类型"),
+    user: dict = Depends(get_current_user)
+):
+    """预览指定日期范围内的交易日列表"""
+    try:
+        trading_days = get_trading_days(start_date, end_date, market_type)
+        max_days = settings.DATERANGE_MAX_TRADING_DAYS
+        return {
+            "success": True,
+            "data": {
+                "trading_days": trading_days,
+                "count": len(trading_days),
+                "max_allowed": max_days,
+                "exceeds_limit": len(trading_days) > max_days
+            }
+        }
+    except Exception as e:
+        logger.error(f"❌ 获取交易日列表失败: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/date-range", response_model=Dict[str, Any])
+async def submit_date_range_analysis(
+    request: DateRangeAnalysisRequest,
+    user: dict = Depends(get_current_user)
+):
+    """提交区间分析任务 - 对同一股票在多个交易日并行执行分析"""
+    try:
+        symbol = request.get_symbol()
+        if not symbol:
+            raise ValueError("股票代码不能为空")
+
+        logger.info(f"🎯 [区间分析] 收到请求: symbol={symbol}, "
+                    f"range={request.start_date}~{request.end_date}")
+
+        market_type = request.parameters.market_type if request.parameters else "A股"
+        trading_days = get_trading_days(request.start_date, request.end_date, market_type)
+
+        if not trading_days:
+            raise ValueError(f"在 {request.start_date} 至 {request.end_date} 期间未找到交易日")
+
+        max_days = settings.DATERANGE_MAX_TRADING_DAYS
+        if len(trading_days) > max_days:
+            raise ValueError(
+                f"区间内共 {len(trading_days)} 个交易日，超过最大限制 {max_days} 天。"
+                f"请缩小日期范围"
+            )
+
+        logger.info(f"📅 [区间分析] 共 {len(trading_days)} 个交易日: "
+                    f"{trading_days[0]} ~ {trading_days[-1]}")
+
+        simple_service = get_simple_analysis_service()
+        batch_id = str(uuid.uuid4())
+        task_ids: List[str] = []
+        mapping: List[Dict[str, str]] = []
+        single_requests: List[SingleAnalysisRequest] = []
+
+        for trade_date in trading_days:
+            params = AnalysisParameters(
+                **(request.parameters.model_dump() if request.parameters else {})
+            )
+            params.analysis_date = datetime.strptime(trade_date, "%Y-%m-%d")
+
+            single_req = SingleAnalysisRequest(
+                symbol=symbol,
+                stock_code=symbol,
+                parameters=params
+            )
+
+            create_res = await simple_service.create_analysis_task(
+                user["id"], single_req
+            )
+            task_id = create_res.get("task_id")
+            if not task_id:
+                raise RuntimeError(
+                    f"创建任务失败：未返回task_id (date={trade_date})"
+                )
+            task_ids.append(task_id)
+            single_requests.append(single_req)
+            mapping.append({
+                "date": trade_date,
+                "task_id": task_id
+            })
+            logger.info(f"✅ [区间分析] 已创建任务: {task_id} - {symbol}@{trade_date}")
+
+        max_concurrent = settings.DATERANGE_MAX_CONCURRENT
+        stagger_delay = settings.DATERANGE_STAGGER_DELAY
+        user_id = user["id"]
+
+        async def run_concurrent_analysis():
+            """并行执行所有交易日的分析任务，带交错延迟和信号量限流"""
+            semaphore = asyncio.Semaphore(max_concurrent)
+
+            async def run_with_throttle(
+                idx: int, tid: str, req: SingleAnalysisRequest, uid: str
+            ):
+                await asyncio.sleep(idx * stagger_delay)
+                async with semaphore:
+                    try:
+                        logger.info(f"🚀 [区间并发] 开始执行: {tid} (第{idx+1}个)")
+                        await simple_service.execute_analysis_background(
+                            tid, uid, req
+                        )
+                        logger.info(f"✅ [区间并发] 完成: {tid}")
+                    except Exception as e:
+                        logger.error(
+                            f"❌ [区间并发] 失败: {tid}, 错误: {e}",
+                            exc_info=True
+                        )
+
+            tasks = [
+                asyncio.create_task(
+                    run_with_throttle(i, task_ids[i], single_requests[i], uid=user_id)
+                )
+                for i in range(len(trading_days))
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.info(f"🎉 [区间分析] 全部任务执行完成: batch_id={batch_id}")
+
+        asyncio.create_task(run_concurrent_analysis())
+        logger.info(f"🚀 [区间分析] 已启动 {len(task_ids)} 个并行任务")
+
+        return {
+            "success": True,
+            "data": {
+                "batch_id": batch_id,
+                "total_tasks": len(task_ids),
+                "trading_days": trading_days,
+                "task_ids": task_ids,
+                "mapping": mapping,
+                "status": "submitted"
+            },
+            "message": f"区间分析任务已提交，共{len(trading_days)}个交易日，正在并行执行"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ [区间分析] 提交失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/batch", response_model=Dict[str, Any])
 async def submit_batch_analysis(
