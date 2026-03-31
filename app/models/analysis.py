@@ -8,6 +8,11 @@ from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from enum import Enum
 from bson import ObjectId
 from .user import PyObjectId
+from app.core.dashscope_modes import (
+    DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+    get_dashscope_default_deep_model,
+    get_dashscope_default_model,
+)
 from app.utils.timezone import now_tz
 
 
@@ -49,8 +54,8 @@ class AnalysisParameters(BaseModel):
     include_risk: bool = True
     language: str = "zh-CN"
     # 模型配置
-    quick_analysis_model: Optional[str] = "qwen-turbo"
-    deep_analysis_model: Optional[str] = "qwen-max"
+    quick_analysis_model: Optional[str] = get_dashscope_default_model(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
+    deep_analysis_model: Optional[str] = get_dashscope_default_deep_model(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
 
 
 class AnalysisResult(BaseModel):

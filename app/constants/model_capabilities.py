@@ -109,6 +109,14 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "performance_metrics": {"speed": 4, "cost": 4, "quality": 4},
         "description": "通义千问标准版，平衡性能和成本"
     },
+    "qwen-plus-latest": {
+        "capability_level": 2,
+        "suitable_roles": [ModelRole.BOTH],
+        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT],
+        "recommended_depths": ["快速", "基础", "标准"],
+        "performance_metrics": {"speed": 4, "cost": 4, "quality": 4},
+        "description": "通义千问 Plus 最新版，适合日常分析与稳态升级"
+    },
     "qwen-max": {
         "capability_level": 4,
         "suitable_roles": [ModelRole.BOTH],
@@ -116,6 +124,22 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "recommended_depths": ["标准", "深度", "全面"],
         "performance_metrics": {"speed": 3, "cost": 2, "quality": 5},
         "description": "通义千问旗舰版，强大推理能力"
+    },
+    "qwen-max-latest": {
+        "capability_level": 4,
+        "suitable_roles": [ModelRole.BOTH],
+        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING],
+        "recommended_depths": ["标准", "深度", "全面"],
+        "performance_metrics": {"speed": 3, "cost": 2, "quality": 5},
+        "description": "通义千问 Max 最新版，适合复杂推理与深度分析"
+    },
+    "qwen-max-longcontext": {
+        "capability_level": 4,
+        "suitable_roles": [ModelRole.BOTH],
+        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING],
+        "recommended_depths": ["标准", "深度", "全面"],
+        "performance_metrics": {"speed": 3, "cost": 2, "quality": 5},
+        "description": "通义千问 Max 长上下文版，适合长文档和大规模上下文"
     },
     "qwen3-max": {
         "capability_level": 5,

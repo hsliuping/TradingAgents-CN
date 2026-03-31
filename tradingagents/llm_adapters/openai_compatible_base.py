@@ -10,6 +10,13 @@ from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatResult
 from langchain_openai import ChatOpenAI
 from langchain_core.callbacks import CallbackManagerForLLMRun
+from app.core.dashscope_modes import (
+    DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+    get_dashscope_base_url_for_mode,
+    get_dashscope_default_model,
+    get_dashscope_mode_from_base_url,
+    normalize_dashscope_base_url,
+)
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import setup_llm_logging
@@ -29,6 +36,21 @@ except ImportError:
     logger.warning("⚠️ Token跟踪功能未启用")
 
 
+DASHSCOPE_COMPATIBLE_BASE_URL = get_dashscope_base_url_for_mode(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
+
+
+def _get_dashscope_base_url() -> str:
+    """获取 DashScope 默认端点，支持通过环境变量切换到 Coding Plan。"""
+    return normalize_dashscope_base_url(os.getenv("DASHSCOPE_BASE_URL", DASHSCOPE_COMPATIBLE_BASE_URL))
+
+
+def _get_dashscope_default_model() -> str:
+    """根据环境变量和端点选择 DashScope 默认模型。"""
+    env_model = os.getenv("DASHSCOPE_DEFAULT_MODEL")
+    if env_model:
+        return env_model
+
+    return get_dashscope_default_model(get_dashscope_mode_from_base_url(_get_dashscope_base_url()))
 class OpenAICompatibleBase(ChatOpenAI):
     """
     OpenAI兼容适配器基类

@@ -98,6 +98,43 @@ python demo_dashscope.py
 | **通义千问 Max** | `qwen-max` | 最强性能 | 最复杂任务、高质量输出 |
 | **通义千问 Max 长文本** | `qwen-max-longcontext` | 超长上下文 | 长文档分析、大量数据处理 |
 
+### DashScope 双端点模式
+
+当前版本在同一个 `dashscope` 厂家下支持两种端点模式：
+
+#### 1. 阿里百炼（兼容模式，默认）
+
+- 默认端点：`https://dashscope.aliyuncs.com/compatible-mode/v1`
+- 默认快速模型：`qwen-turbo`
+- 默认深度模型：`qwen-max`
+- 适合保留原有阿里百炼 OpenAI 兼容接入方式
+
+#### 2. 千问 Coding Plan（可选）
+
+- 端点：`https://coding.dashscope.aliyuncs.com/v1`
+- 推荐快速模型：`qwen3.5-plus`
+- 推荐深度模型：`qwen3-max-2026-01-23`
+- 可选编码模型：`qwen3-coder-next`、`qwen3-coder-plus`
+
+### 使用说明
+
+- DashScope 仍然只有一个 provider id：`dashscope`
+- 厂家级配置用于设置默认测试端点
+- 模型级配置继续通过 `api_base` 保存实际调用端点
+- 因此兼容模式模型和 Coding Plan 模型可以同时保留、同时使用
+
+### Web 配置入口
+
+- **厂家管理**：可切换 DashScope 默认端点模式
+- **模型配置**：可为单个 DashScope 模型选择所属端点模式
+- **配置向导**：首次配置时可直接选择兼容模式或 Coding Plan
+
+### 迁移说明
+
+- 已有安装在启动时会自动执行一次幂等迁移
+- 默认行为会恢复到阿里百炼兼容模式
+- 迁移完成后，用户后续主动切换到 Coding Plan 的选择会被保留
+
 ### 推荐配置
 
 #### 经济型配置（成本优先）

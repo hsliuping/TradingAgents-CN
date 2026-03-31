@@ -21,6 +21,9 @@ export interface LLMProvider {
   extra_config?: {
     has_api_key?: boolean
     source?: 'environment' | 'database'
+    endpoint_mode?: string
+    endpoint_modes?: string[]
+    base_url_map?: Record<string, string>
     [key: string]: any
   }
   // 🆕 聚合渠道支持
@@ -62,6 +65,21 @@ export interface LLMConfig {
     cost?: number  // 成本(1-5)
     quality?: number  // 质量(1-5)
   }
+}
+
+export interface ModelCatalogModel {
+  name: string
+  display_name: string
+  description?: string
+  context_length?: number
+  max_tokens?: number
+  input_price_per_1k?: number
+  output_price_per_1k?: number
+  currency?: string
+  is_deprecated?: boolean
+  release_date?: string
+  capabilities?: string[]
+  endpoint_mode?: string
 }
 
 export interface DataSourceConfig {
@@ -210,7 +228,7 @@ export const configApi = {
   getAvailableModels(): Promise<Array<{
     provider: string
     provider_name: string
-    models: Array<{ name: string; display_name: string }>
+    models: Array<{ name: string; display_name: string; endpoint_mode?: string }>
   }>> {
     return ApiClient.get('/api/config/models')
   },
@@ -221,19 +239,7 @@ export const configApi = {
   getModelCatalog(): Promise<Array<{
     provider: string
     provider_name: string
-    models: Array<{
-      name: string
-      display_name: string
-      description?: string
-      context_length?: number
-      max_tokens?: number
-      input_price_per_1k?: number
-      output_price_per_1k?: number
-      currency?: string
-      is_deprecated?: boolean
-      release_date?: string
-      capabilities?: string[]
-    }>
+    models: ModelCatalogModel[]
   }>> {
     return ApiClient.get('/api/config/model-catalog')
   },
@@ -242,19 +248,7 @@ export const configApi = {
   getProviderModelCatalog(provider: string): Promise<{
     provider: string
     provider_name: string
-    models: Array<{
-      name: string
-      display_name: string
-      description?: string
-      context_length?: number
-      max_tokens?: number
-      input_price_per_1k?: number
-      output_price_per_1k?: number
-      currency?: string
-      is_deprecated?: boolean
-      release_date?: string
-      capabilities?: string[]
-    }>
+    models: ModelCatalogModel[]
   }> {
     return ApiClient.get(`/api/config/model-catalog/${provider}`)
   },
@@ -263,7 +257,7 @@ export const configApi = {
   saveModelCatalog(catalog: {
     provider: string
     provider_name: string
-    models: Array<{ name: string; display_name: string; description?: string }>
+    models: Array<{ name: string; display_name: string; description?: string; endpoint_mode?: string }>
   }): Promise<{ success: boolean; message: string }> {
     return ApiClient.post('/api/config/model-catalog', catalog)
   },

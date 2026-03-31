@@ -30,6 +30,10 @@ import { ElMessage } from 'element-plus'
 import NetworkStatus from '@/components/NetworkStatus.vue'
 import axios from 'axios'
 import { configApi } from '@/api/config'
+import {
+  buildDashScopeExtraConfig,
+  getDashScopeBaseUrlForMode
+} from '@/constants/dashscope'
 
 // 需要缓存的组件
 const keepAliveComponents = computed(() => [
@@ -79,7 +83,10 @@ const handleWizardComplete = async (data: any) => {
         // 先添加厂家（如果不存在）
         const providerMap: Record<string, { name: string; base_url?: string }> = {
           deepseek: { name: 'DeepSeek', base_url: 'https://api.deepseek.com' },
-          dashscope: { name: '通义千问', base_url: 'https://dashscope.aliyuncs.com/api/v1' },
+          dashscope: {
+            name: '阿里百炼',
+            base_url: getDashScopeBaseUrlForMode(data.llm.endpointMode)
+          },
           openai: { name: 'OpenAI', base_url: 'https://api.openai.com/v1' },
           google: { name: 'Google Gemini', base_url: 'https://generativelanguage.googleapis.com/v1' }
         }
@@ -93,6 +100,9 @@ const handleWizardComplete = async (data: any) => {
               name: data.llm.provider,
               display_name: providerInfo.name,
               default_base_url: providerInfo.base_url,
+              extra_config: data.llm.provider === 'dashscope'
+                ? buildDashScopeExtraConfig(data.llm.endpointMode)
+                : undefined,
               is_active: true,
               supported_features: ['chat', 'completion'] // 添加默认支持的功能
             })
@@ -106,6 +116,9 @@ const handleWizardComplete = async (data: any) => {
             await configApi.updateLLMConfig({
               provider: data.llm.provider,
               model_name: data.llm.modelName,
+              api_base: data.llm.provider === 'dashscope'
+                ? getDashScopeBaseUrlForMode(data.llm.endpointMode)
+                : undefined,
               enabled: true
             })
 

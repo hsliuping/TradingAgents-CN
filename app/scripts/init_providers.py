@@ -11,6 +11,10 @@ from datetime import datetime
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
+from app.core.dashscope_modes import (
+    DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+    get_dashscope_base_url_for_mode,
+)
 from app.core.database import init_db, get_mongo_db
 from app.models.config import LLMProvider
 
@@ -81,7 +85,7 @@ async def init_providers():
             "description": "阿里云百炼大模型服务平台，提供通义千问等模型",
             "website": "https://bailian.console.aliyun.com",
             "api_doc_url": "https://help.aliyun.com/zh/dashscope/",
-            "default_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "default_base_url": get_dashscope_base_url_for_mode(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE),
             "is_active": True,
             "supported_features": ["chat", "completion", "embedding", "function_calling", "streaming"]
         },

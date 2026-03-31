@@ -174,7 +174,7 @@
 
           <el-table :data="formData.models" border max-height="400">
             <el-table-column label="模型名称" width="200">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <el-input
                   v-model="row.name"
                   placeholder="如: qwen-turbo"
@@ -183,7 +183,7 @@
               </template>
             </el-table-column>
             <el-table-column label="显示名称" width="280">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <el-input
                   v-model="row.display_name"
                   placeholder="如: Qwen Turbo - 快速经济"
@@ -192,7 +192,7 @@
               </template>
             </el-table-column>
             <el-table-column label="输入价格/1K" width="180">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <div style="display: flex; align-items: center; gap: 4px;">
                   <el-input-number
                     v-model="row.input_price_per_1k"
@@ -207,7 +207,7 @@
               </template>
             </el-table-column>
             <el-table-column label="输出价格/1K" width="180">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <div style="display: flex; align-items: center; gap: 4px;">
                   <el-input-number
                     v-model="row.output_price_per_1k"
@@ -222,7 +222,7 @@
               </template>
             </el-table-column>
             <el-table-column label="上下文长度" width="150">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <el-input
                   v-model.number="row.context_length"
                   placeholder="1000000"
@@ -232,7 +232,7 @@
               </template>
             </el-table-column>
             <el-table-column label="货币单位" width="120">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <el-select
                   v-model="row.currency"
                   size="small"
@@ -241,6 +241,20 @@
                   <el-option label="CNY" value="CNY" />
                   <el-option label="USD" value="USD" />
                   <el-option label="EUR" value="EUR" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="端点模式" width="180">
+              <template #default="{ row }">
+                <el-select
+                  v-model="row.endpoint_mode"
+                  size="small"
+                  :disabled="formData.provider !== 'dashscope'"
+                  placeholder="自动推断"
+                >
+                  <el-option label="自动推断" value="" />
+                  <el-option label="阿里百炼（兼容模式）" value="compatible" />
+                  <el-option label="千问 Coding Plan" value="coding_plan" />
                 </el-select>
               </template>
             </el-table-column>
@@ -273,7 +287,6 @@ import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, Refresh, Document } from '@element-plus/icons-vue'
 import { configApi, type LLMProvider } from '@/api/config'
-import axios from 'axios'
 
 // 数据
 const loading = ref(false)
@@ -306,6 +319,7 @@ interface ModelInfo {
   is_deprecated?: boolean
   release_date?: string
   capabilities?: string[]
+  endpoint_mode?: string
 }
 
 const formData = ref({
@@ -411,7 +425,8 @@ const handleAddModel = () => {
     input_price_per_1k: null,
     output_price_per_1k: null,
     context_length: null,
-    currency: 'CNY'
+    currency: 'CNY',
+    endpoint_mode: formData.value.provider === 'dashscope' ? 'compatible' : ''
   })
 }
 
@@ -625,4 +640,3 @@ onMounted(() => {
   }
 }
 </style>
-

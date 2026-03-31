@@ -229,6 +229,13 @@ async def lifespan(app: FastAPI):
 
     await init_db()
 
+    try:
+        from app.services.config_service import config_service
+        migration_result = await config_service.migrate_dashscope_dual_mode_config()
+        logger.info(f"✅ DashScope 双模式迁移完成: {migration_result}")
+    except Exception as e:
+        logger.warning(f"⚠️  DashScope 双模式迁移失败: {e}")
+
     #  配置桥接：将统一配置写入环境变量，供 TradingAgents 核心库使用
     try:
         from app.core.config_bridge import bridge_config_to_env

@@ -9,6 +9,14 @@ from typing import Any, Dict, List, Optional, Union, Sequence
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import BaseTool
 from pydantic import Field, SecretStr
+from app.core.dashscope_modes import (
+    DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+    get_dashscope_base_url_for_mode,
+    get_dashscope_default_deep_model,
+    get_dashscope_default_model,
+    get_dashscope_mode_from_base_url,
+    normalize_dashscope_base_url,
+)
 from ..config.config_manager import token_tracker
 
 # 导入日志模块
@@ -16,6 +24,28 @@ from tradingagents.utils.logging_manager import get_logger
 logger = get_logger('agents')
 
 
+DASHSCOPE_COMPATIBLE_BASE_URL = get_dashscope_base_url_for_mode(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
+DASHSCOPE_DEFAULT_MODEL = get_dashscope_default_model(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
+DASHSCOPE_DEFAULT_DEEP_MODEL = get_dashscope_default_deep_model(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
+
+
+def _is_coding_plan_base_url(base_url: Optional[str]) -> bool:
+    """判断是否为 DashScope Coding Plan 专用端点。"""
+    return get_dashscope_mode_from_base_url(base_url) != DASHSCOPE_ENDPOINT_MODE_COMPATIBLE
+
+
+def _get_default_dashscope_base_url() -> str:
+    """获取 DashScope 默认地址，优先读取环境变量。"""
+    return normalize_dashscope_base_url(os.getenv("DASHSCOPE_BASE_URL", DASHSCOPE_COMPATIBLE_BASE_URL))
+
+
+def _get_default_dashscope_model(base_url: Optional[str] = None) -> str:
+    """根据端点推断默认模型。"""
+    env_model = os.getenv("DASHSCOPE_DEFAULT_MODEL")
+    if env_model:
+        return env_model
+
+    return get_dashscope_default_model(get_dashscope_mode_from_base_url(base_url or _get_default_dashscope_base_url()))
 class ChatDashScopeOpenAI(ChatOpenAI):
     """
     阿里百炼 OpenAI 兼容适配器

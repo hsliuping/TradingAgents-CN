@@ -21,6 +21,7 @@ sys.path.insert(0, str(project_root))
 from app.core.logging_config import setup_logging
 from app.core.database import init_db, close_db, get_redis_client
 from app.core.config import settings
+from app.core.dashscope_modes import DASHSCOPE_ENDPOINT_MODE_COMPATIBLE, get_dashscope_default_model
 
 # Redis keys (must match queue_service)
 READY_LIST = "qa:ready"
@@ -30,6 +31,7 @@ SET_COMPLETED = "qa:completed"
 SET_FAILED = "qa:failed"
 
 logger = logging.getLogger("worker")
+DEFAULT_DASHSCOPE_MODEL = get_dashscope_default_model(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
 
 
 async def publish_progress(task_id: str, message: str, step: Optional[int] = None, total_steps: Optional[int] = None):
@@ -83,7 +85,7 @@ async def process_task(task_id: str) -> None:
         analysts = params.get("analysts", ["Bull Analyst", "Bear Analyst", "Research Manager"])
         research_depth = params.get("research_depth", 2)
         llm_provider = params.get("llm_provider", "dashscope")
-        llm_model = params.get("llm_model", "qwen-plus")
+        llm_model = params.get("llm_model", DEFAULT_DASHSCOPE_MODEL)
         market_type = params.get("market_type", "美股")
         analysis_date = params.get("analysis_date", datetime.now().strftime("%Y-%m-%d"))
 
