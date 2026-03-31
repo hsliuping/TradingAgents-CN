@@ -92,11 +92,28 @@
         />
       </el-form-item>
 
+      <el-form-item v-if="isDashscopeProvider" label="端点模式">
+        <el-radio-group v-model="dashscopeEndpointMode" @change="handleDashScopeModeChange">
+          <el-radio-button
+            v-for="option in dashscopeModeOptions"
+            :key="option.value"
+            :label="option.value"
+          >
+            {{ option.label }}
+          </el-radio-button>
+        </el-radio-group>
+        <div class="form-tip">同一个 `dashscope` 厂商下可切换原版兼容模式和千问 Coding Plan。</div>
+      </el-form-item>
+
       <el-form-item label="默认API地址" prop="default_base_url">
         <el-input
           v-model="formData.default_base_url"
           placeholder="https://api.openai.com/v1"
+          :disabled="isDashscopeProvider"
         />
+        <div class="form-tip" v-if="isDashscopeProvider">
+          DashScope 的默认地址由端点模式自动维护，避免模型和端点错配。
+        </div>
       </el-form-item>
 
       <el-alert
@@ -182,11 +199,21 @@ import { ElMessage } from 'element-plus'
 import { Link } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { configApi, type LLMProvider } from '@/api/config'
+import {
+  DASHSCOPE_ENDPOINT_MODE_CODING_PLAN,
+  DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+  type DashScopeEndpointMode,
+  DASHSCOPE_MODE_LABELS,
+  buildDashScopeExtraConfig,
+  getDashScopeBaseUrlForMode,
+  getDashScopeModeFromBaseUrl
+} from '@/constants/dashscope'
 
 // 表单数据类型（扩展 LLMProvider，添加临时字段）
 interface ProviderFormData extends Partial<LLMProvider> {
   api_key?: string
   api_secret?: string
+  extra_config?: Record<string, any>
 }
 
 interface Props {
@@ -207,15 +234,22 @@ const emit = defineEmits<{
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
 const selectedPreset = ref('')
+const dashscopeEndpointMode = ref<DashScopeEndpointMode>(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
 
 // 是否为编辑模式
 const isEdit = computed(() => !!props.provider?.id)
+const isDashscopeProvider = computed(() => formData.value.name === 'dashscope')
 
 // 是否需要API Secret（某些厂家需要）
 const needsApiSecret = computed(() => {
-  const providersNeedSecret = ['baidu', 'dashscope', 'qianfan']
+  const providersNeedSecret = ['baidu', 'qianfan']
   return providersNeedSecret.includes(formData.value.name || '')
 })
+
+const dashscopeModeOptions = [
+  { value: DASHSCOPE_ENDPOINT_MODE_COMPATIBLE, label: DASHSCOPE_MODE_LABELS[DASHSCOPE_ENDPOINT_MODE_COMPATIBLE] },
+  { value: DASHSCOPE_ENDPOINT_MODE_CODING_PLAN as DashScopeEndpointMode, label: DASHSCOPE_MODE_LABELS.coding_plan }
+]
 
 // 当前选中的预设厂家信息
 const currentPresetInfo = computed(() => {
@@ -234,11 +268,11 @@ const openRegisterUrl = () => {
 const presetProviders = [
   {
     name: 'dashscope',
-    display_name: '阿里云百炼',
+    display_name: '阿里百炼',
     description: '阿里云百炼大模型服务平台，提供通义千问等模型',
     website: 'https://bailian.console.aliyun.com',
     api_doc_url: 'https://help.aliyun.com/zh/dashscope/',
-    default_base_url: 'https://dashscope.aliyuncs.com/api/v1',
+    default_base_url: getDashScopeBaseUrlForMode(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE),
     supported_features: ['chat', 'completion', 'embedding', 'function_calling', 'streaming'],
     register_url: 'https://account.aliyun.com/register/qr_register.htm',
     register_guide: '如果您还没有阿里云账号，请先注册并开通百炼服务：'
@@ -376,16 +410,46 @@ const resetForm = () => {
     is_active: true
   }
   selectedPreset.value = ''
+  dashscopeEndpointMode.value = DASHSCOPE_ENDPOINT_MODE_COMPATIBLE
+}
+
+const syncDashScopeMode = (mode?: string | null) => {
+  const normalizedMode = (mode || DASHSCOPE_ENDPOINT_MODE_COMPATIBLE) as DashScopeEndpointMode
+  dashscopeEndpointMode.value = normalizedMode
+  formData.value.default_base_url = getDashScopeBaseUrlForMode(normalizedMode)
+  formData.value.extra_config = buildDashScopeExtraConfig(normalizedMode, formData.value.extra_config)
+}
+
+const handleDashScopeModeChange = (mode: string | number | boolean | undefined) => {
+  syncDashScopeMode(
+    typeof mode === 'string' ? mode : DASHSCOPE_ENDPOINT_MODE_COMPATIBLE
+  )
 }
 
 // 监听props变化，更新表单数据
 watch(() => props.provider, (newProvider) => {
   if (newProvider && Object.keys(newProvider).length > 0) {
     formData.value = { ...newProvider }
+    if (newProvider.name === 'dashscope') {
+      syncDashScopeMode(
+        newProvider.extra_config?.endpoint_mode || getDashScopeModeFromBaseUrl(newProvider.default_base_url)
+      )
+    }
   } else {
     resetForm()
   }
 }, { immediate: true, deep: true })
+
+watch(
+  () => formData.value.name,
+  (providerName, previousName) => {
+    if (providerName === 'dashscope' && previousName !== 'dashscope') {
+      syncDashScopeMode(
+        formData.value.extra_config?.endpoint_mode || DASHSCOPE_ENDPOINT_MODE_COMPATIBLE
+      )
+    }
+  }
+)
 
 // 处理预设选择
 const handlePresetChange = (presetName: string) => {
@@ -396,6 +460,9 @@ const handlePresetChange = (presetName: string) => {
     formData.value = {
       ...preset,
       is_active: true
+    }
+    if (preset.name === 'dashscope') {
+      syncDashScopeMode(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
     }
   }
 }
@@ -443,6 +510,14 @@ const handleSubmit = async () => {
       if (apiSecret.includes('...') || apiSecret.startsWith('your_') || apiSecret.startsWith('your-')) {
         delete payload.api_secret
       }
+    }
+
+    if (payload.name === 'dashscope') {
+      payload.default_base_url = getDashScopeBaseUrlForMode(dashscopeEndpointMode.value)
+      payload.extra_config = buildDashScopeExtraConfig(
+        dashscopeEndpointMode.value,
+        payload.extra_config || {}
+      )
     }
 
     if (isEdit.value) {

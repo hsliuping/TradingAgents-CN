@@ -79,6 +79,7 @@ class ModelInfo(BaseModel):
     is_deprecated: bool = Field(default=False, description="是否已废弃")
     release_date: Optional[str] = Field(None, description="发布日期")
     capabilities: List[str] = Field(default_factory=list, description="能力标签(如: vision, function_calling)")
+    endpoint_mode: Optional[str] = Field(None, description="端点模式（如 compatible / coding_plan）")
 
     # 🆕 聚合渠道模型映射支持
     original_provider: Optional[str] = Field(None, description="原厂商标识（用于聚合渠道）")

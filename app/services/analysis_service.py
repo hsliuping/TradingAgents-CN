@@ -11,6 +11,11 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable
 from pathlib import Path
 import sys
+from app.core.dashscope_modes import (
+    DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+    get_dashscope_default_deep_model,
+    get_dashscope_default_model,
+)
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
@@ -41,6 +46,9 @@ from app.models.config import UsageRecord
 
 import logging
 logger = logging.getLogger(__name__)
+
+DASHSCOPE_DEFAULT_QUICK_MODEL = get_dashscope_default_model(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
+DASHSCOPE_DEFAULT_DEEP_MODEL = get_dashscope_default_deep_model(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
 
 
 class AnalysisService:
@@ -392,7 +400,7 @@ class AnalysisService:
                 deep_model = getattr(task.parameters, 'deep_analysis_model', None)
 
                 # 优先使用深度分析模型，如果没有则使用快速分析模型
-                model_name = deep_model or quick_model or "qwen-plus"
+                model_name = deep_model or quick_model or DASHSCOPE_DEFAULT_QUICK_MODEL
 
                 # 根据模型名称确定供应商
                 from app.services.simple_analysis_service import get_provider_by_model_name
@@ -454,9 +462,9 @@ class AnalysisService:
             # 填充分析参数中的模型（若请求未显式提供）
             params = request.parameters or AnalysisParameters()
             if not getattr(params, 'quick_analysis_model', None):
-                params.quick_analysis_model = effective_settings.get("quick_analysis_model", "qwen-turbo")
+                params.quick_analysis_model = effective_settings.get("quick_analysis_model", DASHSCOPE_DEFAULT_QUICK_MODEL)
             if not getattr(params, 'deep_analysis_model', None):
-                params.deep_analysis_model = effective_settings.get("deep_analysis_model", "qwen-max")
+                params.deep_analysis_model = effective_settings.get("deep_analysis_model", DASHSCOPE_DEFAULT_DEEP_MODEL)
 
             # 应用系统级并发与可见性超时（若提供）
             try:
@@ -532,9 +540,9 @@ class AnalysisService:
 
             params = request.parameters or AnalysisParameters()
             if not getattr(params, 'quick_analysis_model', None):
-                params.quick_analysis_model = effective_settings.get("quick_analysis_model", "qwen-turbo")
+                params.quick_analysis_model = effective_settings.get("quick_analysis_model", DASHSCOPE_DEFAULT_QUICK_MODEL)
             if not getattr(params, 'deep_analysis_model', None):
-                params.deep_analysis_model = effective_settings.get("deep_analysis_model", "qwen-max")
+                params.deep_analysis_model = effective_settings.get("deep_analysis_model", DASHSCOPE_DEFAULT_DEEP_MODEL)
 
             try:
                 self.queue_service.user_concurrent_limit = int(effective_settings.get("max_concurrent_tasks", DEFAULT_USER_CONCURRENT_LIMIT))

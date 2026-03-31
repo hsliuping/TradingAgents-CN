@@ -126,6 +126,24 @@
               />
             </el-form-item>
 
+            <el-form-item
+              v-if="wizardData.llm.provider === 'dashscope'"
+              label="端点模式"
+            >
+              <el-radio-group
+                v-model="wizardData.llm.endpointMode"
+                @change="handleDashScopeModeChange"
+              >
+                <el-radio-button
+                  v-for="option in dashscopeModeOptions"
+                  :key="option.value"
+                  :label="option.value"
+                >
+                  {{ option.label }}
+                </el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+
             <el-form-item v-if="wizardData.llm.provider" label="模型名称">
               <el-select
                 v-model="wizardData.llm.modelName"
@@ -322,6 +340,13 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Setting, CircleCheck } from '@element-plus/icons-vue'
+import {
+  DASHSCOPE_ENDPOINT_MODE_CODING_PLAN,
+  DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+  type DashScopeEndpointMode,
+  DASHSCOPE_MODE_LABELS,
+  getDashScopeDefaultModel
+} from '@/constants/dashscope'
 
 // 类型定义
 interface DataSourceConfig {
@@ -344,6 +369,7 @@ interface WizardData {
     provider: string
     apiKey: string
     modelName: string
+    endpointMode: DashScopeEndpointMode
   }
   datasource: DataSourceConfig
 }
@@ -383,7 +409,8 @@ const wizardData = ref<WizardData>({
   llm: {
     provider: '',
     apiKey: '',
-    modelName: ''
+    modelName: '',
+    endpointMode: DASHSCOPE_ENDPOINT_MODE_COMPATIBLE
   },
   datasource: {
     type: 'akshare',
@@ -395,15 +422,19 @@ const wizardData = ref<WizardData>({
 // 可用模型列表
 const availableModels = computed(() => {
   const provider = wizardData.value.llm.provider
-  const models: Record<string, Array<{ label: string; value: string }>> = {
+  const models: Record<string, Array<{ label: string; value: string; mode?: DashScopeEndpointMode }>> = {
     deepseek: [
       { label: 'deepseek-chat', value: 'deepseek-chat' },
       { label: 'deepseek-coder', value: 'deepseek-coder' }
     ],
     dashscope: [
-      { label: 'qwen-turbo', value: 'qwen-turbo' },
-      { label: 'qwen-plus', value: 'qwen-plus' },
-      { label: 'qwen-max', value: 'qwen-max' }
+      { label: 'qwen-turbo', value: 'qwen-turbo', mode: 'compatible' },
+      { label: 'qwen-plus', value: 'qwen-plus', mode: 'compatible' },
+      { label: 'qwen-max', value: 'qwen-max', mode: 'compatible' },
+      { label: 'qwen-max-longcontext', value: 'qwen-max-longcontext', mode: 'compatible' },
+      { label: 'qwen3.5-plus', value: 'qwen3.5-plus', mode: 'coding_plan' },
+      { label: 'qwen3-max-2026-01-23', value: 'qwen3-max-2026-01-23', mode: 'coding_plan' },
+      { label: 'qwen3-coder-plus', value: 'qwen3-coder-plus', mode: 'coding_plan' }
     ],
     openai: [
       { label: 'gpt-3.5-turbo', value: 'gpt-3.5-turbo' },
@@ -415,8 +446,17 @@ const availableModels = computed(() => {
       { label: 'gemini-2.5-pro', value: 'gemini-2.5-pro' }
     ]
   }
-  return models[provider] || []
+  const providerModels = models[provider] || []
+  if (provider !== 'dashscope') {
+    return providerModels
+  }
+  return providerModels.filter((model: any) => model.mode === wizardData.value.llm.endpointMode)
 })
+
+const dashscopeModeOptions = [
+  { value: DASHSCOPE_ENDPOINT_MODE_COMPATIBLE, label: DASHSCOPE_MODE_LABELS[DASHSCOPE_ENDPOINT_MODE_COMPATIBLE] },
+  { value: DASHSCOPE_ENDPOINT_MODE_CODING_PLAN, label: DASHSCOPE_MODE_LABELS.coding_plan }
+]
 
 // 数据源相关的计算属性，用于双向绑定
 const datasourceType = computed({
@@ -442,16 +482,27 @@ const datasourceApiKey = computed({
 
 // 方法
 const handleProviderChange = () => {
+  if (wizardData.value.llm.provider === 'dashscope') {
+    wizardData.value.llm.endpointMode = DASHSCOPE_ENDPOINT_MODE_COMPATIBLE
+  }
   wizardData.value.llm.modelName = ''
   if (availableModels.value.length > 0) {
     wizardData.value.llm.modelName = availableModels.value[0].value
   }
 }
 
+const handleDashScopeModeChange = (mode: string | number | boolean | undefined) => {
+  const nextMode = typeof mode === 'string' ? (mode as DashScopeEndpointMode) : DASHSCOPE_ENDPOINT_MODE_COMPATIBLE
+  wizardData.value.llm.endpointMode = nextMode
+  wizardData.value.llm.modelName = getDashScopeDefaultModel(nextMode)
+}
+
 const getProviderName = (provider: string) => {
   const names: Record<string, string> = {
     deepseek: 'DeepSeek',
-    dashscope: '通义千问',
+    dashscope: wizardData.value.llm.provider === 'dashscope'
+      ? DASHSCOPE_MODE_LABELS[wizardData.value.llm.endpointMode]
+      : '通义千问',
     openai: 'OpenAI',
     google: 'Google Gemini'
   }

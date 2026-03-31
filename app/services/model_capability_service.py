@@ -12,6 +12,11 @@ from app.constants.model_capabilities import (
     ModelRole,
     ModelFeature
 )
+from app.core.dashscope_modes import (
+    DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+    get_dashscope_default_deep_model,
+    get_dashscope_default_model,
+)
 from app.core.unified_config import unified_config
 import logging
 import re
@@ -401,7 +406,10 @@ class ModelCapabilityService:
             return quick_model, deep_model
         except Exception as e:
             logger.error(f"获取默认模型失败: {e}")
-            return "qwen-turbo", "qwen-plus"
+            return (
+                get_dashscope_default_model(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE),
+                get_dashscope_default_deep_model(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE),
+            )
     
     def _recommend_model(self, model_type: str, min_level: int) -> str:
         """推荐满足要求的模型"""
@@ -427,4 +435,3 @@ def get_model_capability_service() -> ModelCapabilityService:
     if _model_capability_service is None:
         _model_capability_service = ModelCapabilityService()
     return _model_capability_service
-

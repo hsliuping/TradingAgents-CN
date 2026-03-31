@@ -5,12 +5,29 @@
 import time
 import asyncio
 import logging
+import os
+from copy import deepcopy
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from app.utils.timezone import now_tz
 from bson import ObjectId
 
 from app.core.database import get_mongo_db
+from app.core.dashscope_modes import (
+    DASHSCOPE_BASE_URL_MAP,
+    DASHSCOPE_ENDPOINT_MODE_CODING_PLAN,
+    DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+    DASHSCOPE_ENDPOINT_MODES,
+    DASHSCOPE_MODELS_BY_MODE,
+    build_dashscope_extra_config,
+    get_dashscope_base_url_for_model,
+    get_dashscope_base_url_for_mode,
+    get_dashscope_default_deep_model,
+    get_dashscope_default_model,
+    get_dashscope_mode_from_base_url,
+    get_dashscope_mode_from_model,
+    normalize_dashscope_base_url,
+)
 from app.core.unified_config import unified_config
 from app.models.config import (
     SystemConfig, LLMConfig, DataSourceConfig, DatabaseConfig,
@@ -21,6 +38,26 @@ from app.models.config import (
 logger = logging.getLogger(__name__)
 
 
+def _get_default_dashscope_base_url() -> str:
+    """获取 DashScope 默认端点，支持通过环境变量切换到 Coding Plan。"""
+    return normalize_dashscope_base_url(
+        os.getenv("DASHSCOPE_BASE_URL", get_dashscope_base_url_for_mode(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE))
+    )
+
+
+def _is_coding_plan_base_url(base_url: Optional[str]) -> bool:
+    """判断当前 DashScope 地址是否为 Coding Plan 端点。"""
+    return get_dashscope_mode_from_base_url(base_url) == DASHSCOPE_ENDPOINT_MODE_CODING_PLAN
+
+
+def _get_default_dashscope_model(base_url: Optional[str] = None) -> str:
+    """根据 DashScope 端点选择默认模型。"""
+    env_model = os.getenv("DASHSCOPE_DEFAULT_MODEL")
+    if env_model:
+        return env_model
+
+    normalized_base_url = normalize_dashscope_base_url(base_url or _get_default_dashscope_base_url())
+    return get_dashscope_default_model(get_dashscope_mode_from_base_url(normalized_base_url))
 class ConfigService:
     """配置管理服务类"""
 
@@ -38,6 +75,371 @@ class ConfigService:
                 # 否则使用全局函数
                 self.db = get_mongo_db()
         return self.db
+
+    def _get_dashscope_provider_payload(self, existing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """构造 DashScope 厂家默认配置，并保留已有的 API Key/描述等信息。"""
+        existing = existing or {}
+        endpoint_mode = existing.get("extra_config", {}).get("endpoint_mode")
+        if endpoint_mode not in DASHSCOPE_ENDPOINT_MODES:
+            endpoint_mode = DASHSCOPE_ENDPOINT_MODE_COMPATIBLE
+
+        payload = {
+            "name": "dashscope",
+            "display_name": existing.get("display_name") or "阿里百炼",
+            "description": existing.get("description") or "阿里云百炼大模型服务平台，提供通义千问等模型",
+            "website": existing.get("website") or "https://bailian.console.aliyun.com",
+            "api_doc_url": existing.get("api_doc_url") or "https://help.aliyun.com/zh/dashscope/",
+            "default_base_url": get_dashscope_base_url_for_mode(endpoint_mode),
+            "is_active": existing.get("is_active", True),
+            "supported_features": existing.get("supported_features") or ["chat", "completion", "embedding", "function_calling", "streaming"],
+            "api_key": existing.get("api_key"),
+            "api_secret": existing.get("api_secret"),
+            "extra_config": build_dashscope_extra_config(
+                endpoint_mode=endpoint_mode,
+                existing=existing.get("extra_config"),
+            ),
+        }
+        return payload
+
+    def _get_default_dashscope_catalog_models(self) -> List[Dict[str, Any]]:
+        """返回 DashScope 的默认模型目录，包含兼容模式与 Coding Plan。"""
+        return [
+            {
+                "name": "qwen-turbo",
+                "display_name": "Qwen Turbo - 阿里百炼（兼容模式）",
+                "input_price_per_1k": 0.0003,
+                "output_price_per_1k": 0.0003,
+                "context_length": 1000000,
+                "currency": "CNY",
+                "description": "阿里百炼兼容模式默认快速模型",
+                "endpoint_mode": DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+            },
+            {
+                "name": "qwen-plus",
+                "display_name": "Qwen Plus - 阿里百炼（兼容模式）",
+                "context_length": 32768,
+                "currency": "CNY",
+                "description": "阿里百炼兼容模式平衡模型",
+                "endpoint_mode": DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+            },
+            {
+                "name": "qwen-plus-latest",
+                "display_name": "Qwen Plus Latest - 阿里百炼（兼容模式）",
+                "context_length": 32768,
+                "currency": "CNY",
+                "description": "阿里百炼兼容模式最新 Plus 模型",
+                "endpoint_mode": DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+            },
+            {
+                "name": "qwen-max",
+                "display_name": "Qwen Max - 阿里百炼（兼容模式）",
+                "input_price_per_1k": 0.02,
+                "output_price_per_1k": 0.06,
+                "context_length": 8192,
+                "currency": "CNY",
+                "description": "阿里百炼兼容模式默认深度模型",
+                "endpoint_mode": DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+            },
+            {
+                "name": "qwen-max-latest",
+                "display_name": "Qwen Max Latest - 阿里百炼（兼容模式）",
+                "context_length": 32768,
+                "currency": "CNY",
+                "description": "阿里百炼兼容模式最新 Max 模型",
+                "endpoint_mode": DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+            },
+            {
+                "name": "qwen-max-longcontext",
+                "display_name": "Qwen Max LongContext - 阿里百炼（兼容模式）",
+                "context_length": 1000000,
+                "currency": "CNY",
+                "description": "阿里百炼兼容模式长上下文模型",
+                "endpoint_mode": DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+            },
+            {
+                "name": "qwen3.5-plus",
+                "display_name": "Qwen3.5 Plus - 千问 Coding Plan",
+                "context_length": 131072,
+                "currency": "CNY",
+                "description": "适用于 DashScope Coding Plan 的通用高质量模型",
+                "endpoint_mode": DASHSCOPE_ENDPOINT_MODE_CODING_PLAN,
+            },
+            {
+                "name": "qwen3-max-2026-01-23",
+                "display_name": "Qwen3 Max - 千问 Coding Plan",
+                "context_length": 131072,
+                "currency": "CNY",
+                "description": "适用于 DashScope Coding Plan 的深度推理模型",
+                "endpoint_mode": DASHSCOPE_ENDPOINT_MODE_CODING_PLAN,
+            },
+            {
+                "name": "qwen3-coder-next",
+                "display_name": "Qwen3 Coder Next - 千问 Coding Plan",
+                "context_length": 131072,
+                "currency": "CNY",
+                "description": "适用于 DashScope Coding Plan 的编码任务模型",
+                "endpoint_mode": DASHSCOPE_ENDPOINT_MODE_CODING_PLAN,
+            },
+            {
+                "name": "qwen3-coder-plus",
+                "display_name": "Qwen3 Coder Plus - 千问 Coding Plan",
+                "context_length": 131072,
+                "currency": "CNY",
+                "description": "适用于 DashScope Coding Plan 的复杂编排模型",
+                "endpoint_mode": DASHSCOPE_ENDPOINT_MODE_CODING_PLAN,
+            },
+        ]
+
+    def _normalize_dashscope_model_catalog_data(self, catalog_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """合并现有 DashScope 模型目录与标准模型清单。"""
+        catalog_data = deepcopy(catalog_data or {})
+        existing_models = {
+            model.get("name"): dict(model)
+            for model in catalog_data.get("models", [])
+            if model.get("name")
+        }
+
+        normalized_models = []
+        for default_model in self._get_default_dashscope_catalog_models():
+            merged = dict(default_model)
+            merged.update(existing_models.get(default_model["name"], {}))
+            merged["endpoint_mode"] = get_dashscope_mode_from_model(
+                merged.get("name"),
+                merged.get("base_url"),
+            )
+            normalized_models.append(merged)
+
+        default_names = {model["name"] for model in self._get_default_dashscope_catalog_models()}
+        for model_name, existing_model in existing_models.items():
+            if model_name in default_names:
+                continue
+            merged = dict(existing_model)
+            merged["endpoint_mode"] = get_dashscope_mode_from_model(
+                merged.get("name"),
+                merged.get("base_url"),
+            )
+            normalized_models.append(merged)
+
+        return {
+            "provider": "dashscope",
+            "provider_name": catalog_data.get("provider_name") or "阿里百炼",
+            "models": normalized_models,
+        }
+
+    def _normalize_dashscope_system_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        """恢复 DashScope 的默认系统设置，并保留用户的非默认显式选择。"""
+        normalized = dict(settings or {})
+        migration_flag = normalized.get("_dashscope_dual_mode_migrated") is True
+        quick_default_compatible = get_dashscope_default_model(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
+        deep_default_compatible = get_dashscope_default_deep_model(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
+        quick_default_coding = get_dashscope_default_model(DASHSCOPE_ENDPOINT_MODE_CODING_PLAN)
+        deep_default_coding = get_dashscope_default_deep_model(DASHSCOPE_ENDPOINT_MODE_CODING_PLAN)
+
+        quick_model = normalized.get("quick_analysis_model") or normalized.get("quick_think_llm")
+        deep_model = normalized.get("deep_analysis_model") or normalized.get("deep_think_llm")
+
+        if not quick_model or (not migration_flag and quick_model == quick_default_coding):
+            quick_model = quick_default_compatible
+        if not deep_model or (not migration_flag and deep_model == deep_default_coding):
+            deep_model = deep_default_compatible
+
+        normalized["quick_analysis_model"] = quick_model
+        normalized["deep_analysis_model"] = deep_model
+        normalized["quick_think_llm"] = quick_model
+        normalized["deep_think_llm"] = deep_model
+
+        backend_url = normalized.get("backend_url")
+        expected_backend_url = get_dashscope_base_url_for_model(quick_model, backend_url)
+        should_update_backend_url = (
+            quick_model in DASHSCOPE_MODELS_BY_MODE[DASHSCOPE_ENDPOINT_MODE_COMPATIBLE]
+            or quick_model in DASHSCOPE_MODELS_BY_MODE[DASHSCOPE_ENDPOINT_MODE_CODING_PLAN]
+            or (backend_url and normalize_dashscope_base_url(backend_url) in DASHSCOPE_BASE_URL_MAP.values())
+        )
+        if should_update_backend_url and (
+            not backend_url or normalize_dashscope_base_url(backend_url) != expected_backend_url
+        ):
+            normalized["backend_url"] = expected_backend_url
+
+        quick_backend_url = normalized.get("quick_backend_url")
+        expected_quick_backend_url = get_dashscope_base_url_for_model(quick_model, quick_backend_url or backend_url)
+        should_update_quick_backend_url = (
+            quick_model in DASHSCOPE_MODELS_BY_MODE[DASHSCOPE_ENDPOINT_MODE_COMPATIBLE]
+            or quick_model in DASHSCOPE_MODELS_BY_MODE[DASHSCOPE_ENDPOINT_MODE_CODING_PLAN]
+            or (quick_backend_url and normalize_dashscope_base_url(quick_backend_url) in DASHSCOPE_BASE_URL_MAP.values())
+        )
+        if should_update_quick_backend_url and (
+            not quick_backend_url or normalize_dashscope_base_url(quick_backend_url) != expected_quick_backend_url
+        ):
+            normalized["quick_backend_url"] = expected_quick_backend_url
+
+        deep_backend_url = normalized.get("deep_backend_url")
+        expected_deep_backend_url = get_dashscope_base_url_for_model(deep_model, deep_backend_url or backend_url)
+        should_update_deep_backend_url = (
+            deep_model in DASHSCOPE_MODELS_BY_MODE[DASHSCOPE_ENDPOINT_MODE_COMPATIBLE]
+            or deep_model in DASHSCOPE_MODELS_BY_MODE[DASHSCOPE_ENDPOINT_MODE_CODING_PLAN]
+            or (deep_backend_url and normalize_dashscope_base_url(deep_backend_url) in DASHSCOPE_BASE_URL_MAP.values())
+        )
+        if should_update_deep_backend_url and (
+            not deep_backend_url or normalize_dashscope_base_url(deep_backend_url) != expected_deep_backend_url
+        ):
+            normalized["deep_backend_url"] = expected_deep_backend_url
+
+        normalized["_dashscope_dual_mode_migrated"] = True
+        return normalized
+
+    def _prepare_dashscope_provider_for_migration(self, existing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """迁移 DashScope 厂家配置，但不要覆盖用户在迁移后的主动选择。"""
+        provider_source = dict(existing or {})
+        extra_config = dict(provider_source.get("extra_config") or {})
+
+        if not extra_config.get("dual_mode_migrated"):
+            extra_config["endpoint_mode"] = DASHSCOPE_ENDPOINT_MODE_COMPATIBLE
+
+        extra_config["dual_mode_migrated"] = True
+        provider_source["extra_config"] = extra_config
+        return self._get_dashscope_provider_payload(provider_source)
+
+    def _ensure_dashscope_llm_configs(self, llm_configs: List[LLMConfig]) -> List[LLMConfig]:
+        """确保 DashScope 的原版与 Coding Plan 基础模型都存在且端点正确。"""
+        normalized_configs: List[LLMConfig] = []
+        index_by_key: Dict[tuple[str, str], int] = {}
+
+        for config in llm_configs:
+            key = (
+                str(config.provider.value if hasattr(config.provider, "value") else config.provider),
+                config.model_name,
+            )
+            config_copy = config.model_copy(deep=True)
+            if key[0] == "dashscope":
+                config_copy.api_base = get_dashscope_base_url_for_model(config_copy.model_name, config_copy.api_base)
+            if key not in index_by_key:
+                index_by_key[key] = len(normalized_configs)
+                normalized_configs.append(config_copy)
+            else:
+                normalized_configs[index_by_key[key]] = config_copy
+
+        baseline_configs = [
+            {
+                "model_name": get_dashscope_default_model(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE),
+                "max_tokens": 4000,
+                "description": "阿里百炼（兼容模式）默认快速模型",
+            },
+            {
+                "model_name": get_dashscope_default_deep_model(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE),
+                "max_tokens": 8000,
+                "description": "阿里百炼（兼容模式）默认深度模型",
+            },
+            {
+                "model_name": get_dashscope_default_model(DASHSCOPE_ENDPOINT_MODE_CODING_PLAN),
+                "max_tokens": 4000,
+                "description": "千问 Coding Plan 默认快速模型",
+            },
+            {
+                "model_name": get_dashscope_default_deep_model(DASHSCOPE_ENDPOINT_MODE_CODING_PLAN),
+                "max_tokens": 8000,
+                "description": "千问 Coding Plan 默认深度模型",
+            },
+        ]
+
+        for baseline in baseline_configs:
+            key = ("dashscope", baseline["model_name"])
+            if key in index_by_key:
+                existing = normalized_configs[index_by_key[key]]
+                existing.api_base = get_dashscope_base_url_for_model(existing.model_name, existing.api_base)
+                existing.description = existing.description or baseline["description"]
+                continue
+
+            normalized_configs.append(
+                LLMConfig(
+                    provider=ModelProvider.DASHSCOPE,
+                    model_name=baseline["model_name"],
+                    api_key="",
+                    api_base=get_dashscope_base_url_for_model(baseline["model_name"]),
+                    max_tokens=baseline["max_tokens"],
+                    temperature=0.7,
+                    enabled=True,
+                    description=baseline["description"],
+                )
+            )
+
+        return normalized_configs
+
+    async def migrate_dashscope_dual_mode_config(self) -> Dict[str, Any]:
+        """幂等修复 DashScope 为“兼容模式默认 + Coding Plan 可选”结构。"""
+        db = await self._get_db()
+        providers_collection = db.llm_providers
+        model_catalog_collection = db.model_catalog
+        changes = {
+            "provider_updated": False,
+            "catalog_updated": False,
+            "system_config_updated": False,
+        }
+
+        provider_doc = await providers_collection.find_one({"name": "dashscope"})
+        normalized_provider = self._prepare_dashscope_provider_for_migration(provider_doc)
+        if not provider_doc:
+            payload = dict(normalized_provider)
+            payload["created_at"] = now_tz()
+            payload["updated_at"] = now_tz()
+            await providers_collection.insert_one(payload)
+            changes["provider_updated"] = True
+        else:
+            provider_updates = {}
+            for key, value in normalized_provider.items():
+                if provider_doc.get(key) != value:
+                    provider_updates[key] = value
+            if provider_updates:
+                provider_updates["updated_at"] = now_tz()
+                await providers_collection.update_one({"_id": provider_doc["_id"]}, {"$set": provider_updates})
+                changes["provider_updated"] = True
+
+        catalog_doc = await model_catalog_collection.find_one({"provider": "dashscope"})
+        normalized_catalog = self._normalize_dashscope_model_catalog_data(catalog_doc)
+        if not catalog_doc or catalog_doc.get("models") != normalized_catalog["models"] or catalog_doc.get("provider_name") != normalized_catalog["provider_name"]:
+            await model_catalog_collection.replace_one(
+                {"provider": "dashscope"},
+                {
+                    **normalized_catalog,
+                    "created_at": catalog_doc.get("created_at") if catalog_doc else now_tz(),
+                    "updated_at": now_tz(),
+                },
+                upsert=True,
+            )
+            changes["catalog_updated"] = True
+
+        config = await self.get_system_config()
+        if config:
+            updated = False
+
+            normalized_settings = self._normalize_dashscope_system_settings(config.system_settings)
+            if normalized_settings != config.system_settings:
+                config.system_settings = normalized_settings
+                updated = True
+
+            normalized_llm_configs = self._ensure_dashscope_llm_configs(config.llm_configs)
+            if [item.model_dump() for item in normalized_llm_configs] != [item.model_dump() for item in config.llm_configs]:
+                config.llm_configs = normalized_llm_configs
+                updated = True
+
+            if config.default_llm in {
+                get_dashscope_default_model(DASHSCOPE_ENDPOINT_MODE_CODING_PLAN),
+                get_dashscope_default_deep_model(DASHSCOPE_ENDPOINT_MODE_CODING_PLAN),
+            }:
+                config.default_llm = get_dashscope_default_model(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
+                updated = True
+
+            if updated:
+                await self.save_system_config(config)
+                try:
+                    unified_config.sync_to_legacy_format(config)
+                except Exception as sync_error:
+                    logger.warning(f"⚠️ DashScope 迁移后同步文件配置失败: {sync_error}")
+                changes["system_config_updated"] = True
+
+        return {
+            "success": True,
+            **changes,
+        }
 
     # ==================== 市场分类管理 ====================
 
@@ -851,6 +1253,13 @@ class ConfigService:
     async def update_llm_config(self, llm_config: LLMConfig) -> bool:
         """更新大模型配置"""
         try:
+            provider_str = llm_config.provider.value if hasattr(llm_config.provider, "value") else str(llm_config.provider)
+            if provider_str == "dashscope":
+                llm_config.api_base = get_dashscope_base_url_for_model(
+                    llm_config.model_name,
+                    llm_config.api_base,
+                )
+
             # 直接保存到统一配置管理器
             success = unified_config.save_llm_config(llm_config)
             if not success:
@@ -946,7 +1355,16 @@ class ConfigService:
             elif provider_str == "dashscope":
                 # DashScope 使用专门的测试方法
                 logger.info(f"🔍 使用 DashScope 专用测试方法")
-                result = self._test_dashscope_api(api_key, f"{provider_str} {llm_config.model_name}", llm_config.model_name)
+                dashscope_base_url = get_dashscope_base_url_for_model(
+                    llm_config.model_name,
+                    api_base,
+                )
+                result = self._test_dashscope_api(
+                    api_key,
+                    f"{provider_str} {llm_config.model_name}",
+                    dashscope_base_url,
+                    llm_config.model_name,
+                )
                 result["response_time"] = time.time() - start_time
                 return result
             else:
@@ -2305,6 +2723,8 @@ class ConfigService:
 
             doc = await catalog_collection.find_one({"provider": provider})
             if doc:
+                if provider == "dashscope":
+                    doc = self._normalize_dashscope_model_catalog_data(doc)
                 return ModelCatalog(**doc)
             return None
         except Exception as e:
@@ -2316,6 +2736,12 @@ class ConfigService:
         try:
             db = await self._get_db()
             catalog_collection = db.model_catalog
+
+            if catalog.provider == "dashscope":
+                normalized_catalog = self._normalize_dashscope_model_catalog_data(
+                    catalog.model_dump(by_alias=True, exclude={"id"})
+                )
+                catalog = ModelCatalog(**normalized_catalog)
 
             catalog.updated_at = now_tz()
 
@@ -2373,74 +2799,8 @@ class ConfigService:
         return [
             {
                 "provider": "dashscope",
-                "provider_name": "通义千问",
-                "models": [
-                    {
-                        "name": "qwen-turbo",
-                        "display_name": "Qwen Turbo - 快速经济 (1M上下文)",
-                        "input_price_per_1k": 0.0003,
-                        "output_price_per_1k": 0.0003,
-                        "context_length": 1000000,
-                        "currency": "CNY",
-                        "description": "Qwen2.5-Turbo，支持100万tokens超长上下文"
-                    },
-                    {
-                        "name": "qwen-plus",
-                        "display_name": "Qwen Plus - 平衡推荐",
-                        "input_price_per_1k": 0.0008,
-                        "output_price_per_1k": 0.002,
-                        "context_length": 32768,
-                        "currency": "CNY"
-                    },
-                    {
-                        "name": "qwen-plus-latest",
-                        "display_name": "Qwen Plus Latest - 最新平衡",
-                        "input_price_per_1k": 0.0008,
-                        "output_price_per_1k": 0.002,
-                        "context_length": 32768,
-                        "currency": "CNY"
-                    },
-                    {
-                        "name": "qwen-max",
-                        "display_name": "Qwen Max - 最强性能",
-                        "input_price_per_1k": 0.02,
-                        "output_price_per_1k": 0.06,
-                        "context_length": 8192,
-                        "currency": "CNY"
-                    },
-                    {
-                        "name": "qwen-max-latest",
-                        "display_name": "Qwen Max Latest - 最新旗舰",
-                        "input_price_per_1k": 0.02,
-                        "output_price_per_1k": 0.06,
-                        "context_length": 8192,
-                        "currency": "CNY"
-                    },
-                    {
-                        "name": "qwen-long",
-                        "display_name": "Qwen Long - 长文本",
-                        "input_price_per_1k": 0.0005,
-                        "output_price_per_1k": 0.002,
-                        "context_length": 1000000,
-                        "currency": "CNY"
-                    },
-                    {
-                        "name": "qwen-vl-plus",
-                        "display_name": "Qwen VL Plus - 视觉理解",
-                        "input_price_per_1k": 0.008,
-                        "output_price_per_1k": 0.008,
-                        "context_length": 8192,
-                        "currency": "CNY"
-                    },
-                    {
-                        "name": "qwen-vl-max",
-                        "display_name": "Qwen VL Max - 视觉旗舰",
-                        "input_price_per_1k": 0.02,
-                        "output_price_per_1k": 0.02,
-                        "context_length": 8192,
-                        "currency": "CNY"
-                    }
-                ]
+                "provider_name": "阿里百炼",
+                "models": self._get_default_dashscope_catalog_models(),
             },
             {
                 "provider": "openai",
@@ -2689,7 +3049,8 @@ class ConfigService:
                             "context_length": model.context_length,
                             "input_price_per_1k": model.input_price_per_1k,
                             "output_price_per_1k": model.output_price_per_1k,
-                            "is_deprecated": model.is_deprecated
+                            "is_deprecated": model.is_deprecated,
+                            "endpoint_mode": model.endpoint_mode,
                         }
                         for model in catalog.models
                     ]
@@ -2761,6 +3122,12 @@ class ConfigService:
 
             for provider_data in providers_data:
                 provider = LLMProvider(**provider_data)
+                if provider.name == "dashscope":
+                    provider.default_base_url = normalize_dashscope_base_url(provider.default_base_url)
+                    provider.extra_config = build_dashscope_extra_config(
+                        endpoint_mode=provider.extra_config.get("endpoint_mode"),
+                        existing=provider.extra_config,
+                    )
 
                 # 🔥 判断数据库中的 API Key 是否有效
                 db_key_valid = self._is_valid_api_key(provider.api_key)
@@ -2887,6 +3254,11 @@ class ConfigService:
 
             # 修复：删除 _id 字段，让 MongoDB 自动生成 ObjectId
             provider_data = provider.model_dump(by_alias=True, exclude_unset=True)
+            if provider_data.get("name") == "dashscope":
+                provider_data = {
+                    **provider_data,
+                    **self._get_dashscope_provider_payload(provider_data),
+                }
             if "_id" in provider_data:
                 del provider_data["_id"]
 
@@ -2901,6 +3273,19 @@ class ConfigService:
         try:
             db = await self._get_db()
             providers_collection = db.llm_providers
+
+            existing = None
+            try:
+                existing = await providers_collection.find_one({"_id": ObjectId(provider_id)})
+            except Exception:
+                existing = await providers_collection.find_one({"_id": provider_id})
+            if not existing:
+                existing = await providers_collection.find_one({"_id": provider_id})
+
+            merged = dict(existing or {})
+            merged.update(update_data)
+            if merged.get("name") == "dashscope":
+                update_data = self._get_dashscope_provider_payload(merged)
 
             update_data["updated_at"] = now_tz()
 
@@ -3159,7 +3544,7 @@ class ConfigService:
                     "description": "阿里云百炼大模型服务平台，提供通义千问等模型",
                     "website": "https://bailian.console.aliyun.com",
                     "api_doc_url": "https://help.aliyun.com/zh/dashscope/",
-                    "default_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "default_base_url": get_dashscope_base_url_for_mode(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE),
                     "supported_features": ["chat", "completion", "embedding", "function_calling", "streaming"]
                 },
                 {
@@ -3187,12 +3572,23 @@ class ConfigService:
                 if existing:
                     # 如果已存在但没有API密钥，且环境变量中有密钥，则更新
                     if not existing.get("api_key") and api_key:
+                        extra_config = dict(existing.get("extra_config") or {})
+                        extra_config["migrated_from"] = "environment"
+                        if provider_config["name"] == "dashscope":
+                            extra_config = build_dashscope_extra_config(
+                                endpoint_mode=extra_config.get("endpoint_mode"),
+                                existing=extra_config,
+                            )
                         update_data = {
                             "api_key": api_key,
                             "is_active": True,
-                            "extra_config": {"migrated_from": "environment"},
+                            "extra_config": extra_config,
                             "updated_at": now_tz()
                         }
+                        if provider_config["name"] == "dashscope":
+                            update_data["default_base_url"] = get_dashscope_base_url_for_mode(
+                                DASHSCOPE_ENDPOINT_MODE_COMPATIBLE
+                            )
                         await providers_collection.update_one(
                             {"name": provider_config["name"]},
                             {"$set": update_data}
@@ -3213,6 +3609,11 @@ class ConfigService:
                     "created_at": now_tz(),
                     "updated_at": now_tz()
                 }
+                if provider_config["name"] == "dashscope":
+                    provider_data = {
+                        **provider_data,
+                        **self._get_dashscope_provider_payload(provider_data),
+                    }
 
                 await providers_collection.insert_one(provider_data)
                 migrated_count += 1
@@ -3331,7 +3732,13 @@ class ConfigService:
             elif provider_name == "deepseek":
                 return await asyncio.get_event_loop().run_in_executor(None, self._test_deepseek_api, api_key, display_name)
             elif provider_name == "dashscope":
-                return await asyncio.get_event_loop().run_in_executor(None, self._test_dashscope_api, api_key, display_name)
+                db = await self._get_db()
+                providers_collection = db.llm_providers
+                provider_data = await providers_collection.find_one({"name": provider_name})
+                base_url = provider_data.get("default_base_url") if provider_data else None
+                return await asyncio.get_event_loop().run_in_executor(
+                    None, self._test_dashscope_api, api_key, display_name, base_url
+                )
             elif provider_name == "openrouter":
                 return await asyncio.get_event_loop().run_in_executor(None, self._test_openrouter_api, api_key, display_name)
             elif provider_name == "openai":
@@ -3604,20 +4011,30 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    def _test_dashscope_api(self, api_key: str, display_name: str, model_name: str = None) -> dict:
+    def _test_dashscope_api(
+        self,
+        api_key: str,
+        display_name: str,
+        base_url: str = None,
+        model_name: str = None
+    ) -> dict:
         """测试阿里云百炼API"""
         try:
             import requests
 
+            if not base_url:
+                base_url = _get_default_dashscope_base_url()
+
+            base_url = normalize_dashscope_base_url(base_url).rstrip("/")
             # 如果没有指定模型，使用默认模型
             if not model_name:
-                model_name = "qwen-turbo"
+                model_name = _get_default_dashscope_model(base_url)
                 logger.info(f"⚠️ 未指定模型，使用默认模型: {model_name}")
 
             logger.info(f"🔍 [DashScope 测试] 使用模型: {model_name}")
 
             # 使用阿里云百炼的OpenAI兼容接口
-            url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+            url = f"{base_url}/chat/completions"
 
             headers = {
                 "Content-Type": "application/json",

@@ -41,6 +41,21 @@
         </div>
       </el-form-item>
 
+      <el-form-item v-if="isDashscopeProvider" label="端点模式">
+        <el-radio-group v-model="dashscopeEndpointMode" @change="handleDashScopeModeChange">
+          <el-radio-button
+            v-for="option in dashscopeModeOptions"
+            :key="option.value"
+            :label="option.value"
+          >
+            {{ option.label }}
+          </el-radio-button>
+        </el-radio-group>
+        <div class="form-tip">
+          同一 `dashscope` 厂商下按模型族选择原版兼容模式或千问 Coding Plan。
+        </div>
+      </el-form-item>
+
       <el-form-item label="选择模型" v-if="modelOptions.length > 0">
         <el-select
           v-model="selectedModelKey"
@@ -90,9 +105,11 @@
         <el-input
           v-model="formData.api_base"
           placeholder="可选，自定义API端点（留空使用厂家默认地址）"
+          :disabled="isDashscopeProvider"
         />
         <div class="form-tip">
           💡 API密钥已在厂家配置中设置，此处只需配置模型参数
+          <template v-if="isDashscopeProvider">。DashScope 会根据端点模式自动写入正确地址。</template>
         </div>
       </el-form-item>
 
@@ -352,7 +369,17 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
-import { configApi, type LLMProvider, type LLMConfig, validateLLMConfig } from '@/api/config'
+import { configApi, type LLMProvider, type LLMConfig, type ModelCatalogModel, validateLLMConfig } from '@/api/config'
+import {
+  DASHSCOPE_ENDPOINT_MODE_CODING_PLAN,
+  DASHSCOPE_ENDPOINT_MODE_COMPATIBLE,
+  type DashScopeEndpointMode,
+  DASHSCOPE_MODE_LABELS,
+  getDashScopeBaseUrlForModel,
+  getDashScopeBaseUrlForMode,
+  getDashScopeDefaultModel,
+  getDashScopeModeFromModel
+} from '@/constants/dashscope'
 
 // Props
 interface Props {
@@ -375,12 +402,14 @@ const formRef = ref<FormInstance>()
 const loading = ref(false)
 const providersLoading = ref(false)
 const availableProviders = ref<LLMProvider[]>([])
+const dashscopeEndpointMode = ref<DashScopeEndpointMode>(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
 
 // Computed
 const isEdit = computed(() => !!props.config)
+const isDashscopeProvider = computed(() => formData.value.provider === 'dashscope')
 
 // 表单数据
-const defaultFormData = {
+const defaultFormData: LLMConfig = {
   provider: '',
   model_name: '',
   model_display_name: '',  // 新增：模型显示名称
@@ -410,10 +439,14 @@ const defaultFormData = {
   }
 }
 
-const formData = ref({ ...defaultFormData })
+const formData = ref<LLMConfig>({ ...defaultFormData })
 
 // 用于跟踪当前选择的模型（用于下拉列表）
 const selectedModelKey = ref<string>('')
+const dashscopeModeOptions = [
+  { value: DASHSCOPE_ENDPOINT_MODE_COMPATIBLE, label: DASHSCOPE_MODE_LABELS[DASHSCOPE_ENDPOINT_MODE_COMPATIBLE] },
+  { value: DASHSCOPE_ENDPOINT_MODE_CODING_PLAN, label: DASHSCOPE_MODE_LABELS.coding_plan }
+]
 
 // 表单验证规则
 const rules: FormRules = {
@@ -430,28 +463,14 @@ const rules: FormRules = {
 const modelOptions = ref<Array<{ label: string; value: string }>>([])
 
 // 从后端获取的模型目录（包含完整信息）
-interface ModelInfo {
-  name: string
-  display_name: string
-  description?: string
-  context_length?: number
-  max_tokens?: number
-  input_price_per_1k?: number
-  output_price_per_1k?: number
-  currency?: string
-  is_deprecated?: boolean
-  release_date?: string
-  capabilities?: string[]
-}
-
-const modelCatalog = ref<Record<string, Array<ModelInfo>>>({})
+const modelCatalog = ref<Record<string, Array<ModelCatalogModel>>>({})
 
 // 加载模型目录
 const loadModelCatalog = async () => {
   try {
     const catalog = await configApi.getModelCatalog()
     // 转换为 provider -> models 的映射
-    const catalogMap: Record<string, Array<ModelInfo>> = {}
+    const catalogMap: Record<string, Array<ModelCatalogModel>> = {}
     catalog.forEach(item => {
       catalogMap[item.provider] = item.models
     })
@@ -470,7 +489,14 @@ const getModelOptions = (provider: string) => {
   // 优先从后端获取的目录中查找
   const models = modelCatalog.value[provider]
   if (models && models.length > 0) {
-    return models.map(m => ({
+    const filteredModels = provider === 'dashscope'
+      ? models.filter(model => {
+          const modelMode = model.endpoint_mode || getDashScopeModeFromModel(model.name)
+          return modelMode === dashscopeEndpointMode.value
+        })
+      : models
+
+    return filteredModels.map(m => ({
       label: m.display_name,
       value: m.name
     }))
@@ -481,15 +507,43 @@ const getModelOptions = (provider: string) => {
 }
 
 // 根据供应商和模型名称获取模型详细信息
-const getModelInfo = (provider: string, modelName: string): ModelInfo | null => {
+const getModelInfo = (provider: string, modelName: string): ModelCatalogModel | null => {
   const models = modelCatalog.value[provider]
   if (!models) return null
 
   return models.find(m => m.name === modelName) || null
 }
 
+const syncDashScopeMode = (mode?: string | null, preserveModel = false) => {
+  const normalizedMode = (mode || DASHSCOPE_ENDPOINT_MODE_COMPATIBLE) as DashScopeEndpointMode
+  dashscopeEndpointMode.value = normalizedMode
+  formData.value.api_base = getDashScopeBaseUrlForMode(normalizedMode)
+  modelOptions.value = getModelOptions('dashscope')
+
+  const currentModel = formData.value.model_name
+  const hasCurrentModel = modelOptions.value.some(model => model.value === currentModel)
+  if (!preserveModel || !hasCurrentModel) {
+    formData.value.model_name = getDashScopeDefaultModel(normalizedMode)
+    selectedModelKey.value = formData.value.model_name
+    if (modelOptions.value.some(model => model.value === formData.value.model_name)) {
+      handleModelSelect(formData.value.model_name)
+    }
+  } else {
+    selectedModelKey.value = currentModel
+  }
+}
+
 // 处理供应商变更
 const handleProviderChange = async (provider: string) => {
+  formData.value.model_name = ''
+  selectedModelKey.value = ''
+  formData.value.input_price_per_1k = 0
+  formData.value.output_price_per_1k = 0
+  formData.value.currency = 'CNY'
+  formData.value.api_base = provider === 'dashscope'
+    ? getDashScopeBaseUrlForMode(dashscopeEndpointMode.value)
+    : ''
+
   // 先尝试从已加载的目录中获取
   modelOptions.value = getModelOptions(provider)
 
@@ -507,11 +561,24 @@ const handleProviderChange = async (provider: string) => {
     }
   }
 
-  formData.value.model_name = ''
-  // 清空价格信息
-  formData.value.input_price_per_1k = 0
-  formData.value.output_price_per_1k = 0
-  formData.value.currency = 'CNY'
+  if (provider === 'dashscope') {
+    const defaultModel = getDashScopeDefaultModel(dashscopeEndpointMode.value)
+    if (modelOptions.value.some(model => model.value === defaultModel)) {
+      formData.value.model_name = defaultModel
+      selectedModelKey.value = defaultModel
+      handleModelSelect(defaultModel)
+    }
+  } else if (modelOptions.value.length > 0) {
+    formData.value.model_name = modelOptions.value[0].value
+    selectedModelKey.value = modelOptions.value[0].value
+    handleModelSelect(modelOptions.value[0].value)
+  }
+}
+
+const handleDashScopeModeChange = (mode: string | number | boolean | undefined) => {
+  syncDashScopeMode(
+    typeof mode === 'string' ? mode : DASHSCOPE_ENDPOINT_MODE_COMPATIBLE
+  )
 }
 
 // 处理从下拉列表选择模型
@@ -528,6 +595,12 @@ const handleModelSelect = (modelCode: string) => {
     // 自动填充模型代码和显示名称
     formData.value.model_name = selectedModel.value
     formData.value.model_display_name = selectedModel.label
+    if (formData.value.provider === 'dashscope') {
+      formData.value.api_base = getDashScopeBaseUrlForModel(
+        selectedModel.value,
+        getDashScopeBaseUrlForMode(dashscopeEndpointMode.value)
+      )
+    }
 
     console.log('📋 选择模型:', {
       code: selectedModel.value,
@@ -579,7 +652,14 @@ watch(
         recommended_depths: config.recommended_depths || defaultFormData.recommended_depths,
         performance_metrics: config.performance_metrics || defaultFormData.performance_metrics
       }
-      modelOptions.value = getModelOptions(config.provider)
+      if (config.provider === 'dashscope') {
+        syncDashScopeMode(
+          getDashScopeModeFromModel(config.model_name, config.api_base),
+          true
+        )
+      } else {
+        modelOptions.value = getModelOptions(config.provider)
+      }
 
       // 如果有 model_name，尝试在下拉列表中选中它
       if (config.model_name) {
@@ -587,9 +667,9 @@ watch(
       }
 
       console.log('📝 编辑模式加载配置:', formData.value)
-    } else {
-      formData.value = { ...defaultFormData }
-      modelOptions.value = getModelOptions('dashscope')
+      } else {
+        formData.value = { ...defaultFormData }
+      syncDashScopeMode(DASHSCOPE_ENDPOINT_MODE_COMPATIBLE)
       selectedModelKey.value = ''
     }
   },
@@ -625,7 +705,18 @@ watch(
           recommended_depths: props.config.recommended_depths || defaultFormData.recommended_depths,
           performance_metrics: props.config.performance_metrics || defaultFormData.performance_metrics
         }
-        modelOptions.value = getModelOptions(props.config.provider)
+        if (props.config.provider === 'dashscope') {
+          syncDashScopeMode(
+            getDashScopeModeFromModel(props.config.model_name, props.config.api_base),
+            true
+          )
+          formData.value.api_base = getDashScopeBaseUrlForModel(
+            props.config.model_name,
+            props.config.api_base
+          )
+        } else {
+          modelOptions.value = getModelOptions(props.config.provider)
+        }
 
         // 如果有 model_name，尝试在下拉列表中选中它
         if (props.config.model_name) {
@@ -642,6 +733,7 @@ watch(
         } else {
           modelOptions.value = []
         }
+        dashscopeEndpointMode.value = DASHSCOPE_ENDPOINT_MODE_COMPATIBLE
         selectedModelKey.value = ''
       }
     }
@@ -677,6 +769,12 @@ const handleSubmit = async () => {
 
     // 准备提交数据，移除api_key字段（由后端从厂家配置获取）
     const submitData = { ...formData.value }
+    if (submitData.provider === 'dashscope') {
+      submitData.api_base = getDashScopeBaseUrlForModel(
+        submitData.model_name,
+        getDashScopeBaseUrlForMode(dashscopeEndpointMode.value)
+      )
+    }
     // 使用类型安全的方式移除api_key字段（如果存在的话）
     if ('api_key' in submitData) {
       delete (submitData as any).api_key  // 不发送api_key，让后端从厂家配置获取
