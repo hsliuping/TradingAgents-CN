@@ -188,6 +188,54 @@
                 </div>
               </div>
 
+              <div
+                v-if="analysisForm.market === 'A股' && (factorPreviewLoading || factorPreview || analysisFactorWarningEntries.length || analysisFactorDiagnosticEntries.length)"
+                class="form-section"
+              >
+                <h4 class="section-title">🧭 因子口径提示</h4>
+                <div class="factor-preview-card">
+                  <div class="factor-preview-meta">
+                    <span>最新财报期：{{ analysisFactorReportPeriod || '-' }}</span>
+                    <el-tag v-if="factorPreviewLoading" size="small" type="info">加载中</el-tag>
+                  </div>
+                  <div v-if="analysisFactorWarningEntries.length || analysisFactorDiagnosticEntries.length" class="factor-preview-tags">
+                    <el-popover
+                      v-for="warning in analysisFactorWarningEntries"
+                      :key="warning.key"
+                      placement="top-start"
+                      width="320"
+                      trigger="hover"
+                    >
+                      <template #reference>
+                        <el-tag :type="warning.tagType" effect="plain" class="factor-preview-tag">{{ warning.label }}</el-tag>
+                      </template>
+                      <div class="factor-preview-popover">
+                        <div class="factor-preview-popover-title">{{ warning.label }}</div>
+                        <div v-for="condition in warning.conditions" :key="condition" class="factor-preview-line">{{ condition }}</div>
+                      </div>
+                    </el-popover>
+                    <el-popover
+                      v-for="diagnostic in analysisFactorDiagnosticEntries"
+                      :key="diagnostic.key"
+                      placement="top-start"
+                      width="340"
+                      trigger="hover"
+                    >
+                      <template #reference>
+                        <el-tag :type="diagnostic.tagType" effect="plain" class="factor-preview-tag">{{ diagnostic.label }}</el-tag>
+                      </template>
+                      <div class="factor-preview-popover">
+                        <div class="factor-preview-popover-title">{{ diagnostic.label }}</div>
+                        <div class="factor-preview-line">状态：{{ diagnostic.state }}</div>
+                        <div v-if="diagnostic.reason" class="factor-preview-line">原因：{{ diagnostic.reason }}</div>
+                        <div v-if="diagnostic.missingInputs.length" class="factor-preview-line">缺失输入：{{ diagnostic.missingInputs.join('、') }}</div>
+                      </div>
+                    </el-popover>
+                  </div>
+                  <el-empty v-else-if="factorPreview && !factorPreviewLoading" description="当前无额外口径提示" :image-size="56" />
+                </div>
+              </div>
+
 
 
               <!-- 操作按钮 -->
@@ -855,7 +903,7 @@ import {
 import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
 import { workflowApi, type WorkflowDefinition } from '@/api/workflow'
 import { paperApi } from '@/api/paper'
-import { stocksApi } from '@/api/stocks'
+import { stocksApi, type FundamentalsResponse } from '@/api/stocks'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { configApi } from '@/api/config'
@@ -867,6 +915,8 @@ import { recommendModels } from '@/api/modelCapabilities'
 import { validateStockCode, getStockCodeFormatHelp } from '@/utils/stockValidator'
 import { normalizeMarketForAnalysis, getMarketByStockCode } from '@/utils/market'
 import { fetchTaskResultWithRetry, hasTaskResultContent, mergeTaskResult } from '@/utils/taskResult'
+import type { StockInfo } from '@/types/analysis'
+import { getFactorDiagnosticEntries, getFactorWarningEntries } from '@/utils/factorPresentation'
 
 // 配置marked选项
 marked.setOptions({
@@ -903,6 +953,8 @@ const submitting = ref(false)
 const validatingData = ref(false)
 const showValidationDialog = ref(false)
 const validationResult = ref<any>(null)
+const factorPreviewLoading = ref(false)
+const factorPreview = ref<FundamentalsResponse | null>(null)
 
 // 分析进度和结果相关状态
 const currentTaskId = ref('')
@@ -1033,10 +1085,52 @@ const disabledDate = (time: Date) => {
   return time.getTime() > Date.now()
 }
 
+const factorPreviewRow = computed<StockInfo>(() => ({
+  symbol: analysisForm.stockCode || '',
+  name: analysisForm.stockCode || '',
+  market: analysisForm.market,
+  report_period: factorPreview.value?.report_period,
+  factor_diagnostics: factorPreview.value?.factor_diagnostics || {},
+  factor_warnings: factorPreview.value?.factor_warnings || {},
+}))
+
+const analysisFactorWarningEntries = computed(() => getFactorWarningEntries(factorPreviewRow.value))
+const analysisFactorDiagnosticEntries = computed(() => getFactorDiagnosticEntries(factorPreviewRow.value))
+const analysisFactorReportPeriod = computed(() => factorPreview.value?.report_period || '')
+
+const clearFactorPreview = () => {
+  factorPreview.value = null
+}
+
+const fetchFactorPreview = async (normalizedCode?: string) => {
+  if (analysisForm.market !== 'A股') {
+    clearFactorPreview()
+    return
+  }
+
+  const targetCode = String(normalizedCode || analysisForm.stockCode || '').trim()
+  if (!targetCode) {
+    clearFactorPreview()
+    return
+  }
+
+  factorPreviewLoading.value = true
+  try {
+    const response = await stocksApi.getFundamentals(targetCode)
+    factorPreview.value = ((response as any)?.data || null) as FundamentalsResponse | null
+  } catch (error) {
+    console.warn('获取因子预览失败', error)
+    clearFactorPreview()
+  } finally {
+    factorPreviewLoading.value = false
+  }
+}
+
 // 股票代码输入时的处理
 const onStockCodeInput = () => {
   // 清除错误信息
   stockCodeError.value = ''
+  clearFactorPreview()
   // 显示格式提示
   stockCodeHelp.value = getStockCodeFormatHelp(analysisForm.market)
 }
@@ -1077,6 +1171,7 @@ const availableAnalysts = computed(() => {
 
 // 市场类型变更时的处理
 const onMarketChange = () => {
+  clearFactorPreview()
   // 重新验证股票代码
   if (analysisForm.stockCode.trim()) {
     validateStockCodeInput()
@@ -1214,6 +1309,7 @@ const handleValidateData = async () => {
 
     if (response.data) {
       const result = response.data
+      await fetchFactorPreview(normalizedCode)
       
       // 显示校验结果对话框
       showValidationResultDialog(result)
@@ -1324,6 +1420,7 @@ const submitAnalysis = async () => {
 
   // 使用标准化后的代码
   analysisForm.symbol = validation.normalizedCode || stockCode.toUpperCase()
+  await fetchFactorPreview(analysisForm.symbol)
 
   if (analysisForm.selectedAnalysts.length === 0) {
     ElMessage.warning('请至少选择一个分析师')
@@ -1759,7 +1856,7 @@ const getAnalysisReports = (data: any) => {
   const manifest = data?.report_manifest as Array<{
     field: string; display_name: string; category: string; order: number; is_primary: boolean
   }> | undefined
-  if (manifest && manifest.length > 0) {
+  if (reportsData && manifest && manifest.length > 0) {
     const sorted = [...manifest].sort((a, b) => a.order - b.order)
     for (const m of sorted) {
       const content = reportsData[m.field]
@@ -2803,6 +2900,10 @@ onMounted(async () => {
     }
   }
 
+  if (analysisForm.market === 'A股' && analysisForm.stockCode) {
+    await fetchFactorPreview(analysisForm.stockCode)
+  }
+
   // 尝试恢复任务状态（仅当没有新股票代码时）
   if (!hasNewStock) {
     await restoreTaskFromCache()
@@ -2910,6 +3011,50 @@ onMounted(async () => {
           margin: 0 0 16px 0;
           padding-bottom: 8px;
           border-bottom: 2px solid #e2e8f0;
+        }
+
+        .factor-preview-card {
+          padding: 16px;
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          background: #f8fafc;
+        }
+
+        .factor-preview-meta {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 12px;
+          font-size: 13px;
+          color: #475569;
+        }
+
+        .factor-preview-tags {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .factor-preview-tag {
+          cursor: help;
+        }
+
+        .factor-preview-popover {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          line-height: 1.6;
+        }
+
+        .factor-preview-popover-title {
+          font-weight: 600;
+          color: #1e293b;
+        }
+
+        .factor-preview-line {
+          font-size: 13px;
+          color: #475569;
         }
       }
 

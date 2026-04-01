@@ -62,9 +62,37 @@ class MultiSourceBasicsSyncService:
         self._lock = asyncio.Lock()
         self._running = False
         self._last_status: Optional[Dict[str, Any]] = None
+        self._current_task: Optional[asyncio.Task] = None
+
+    async def start_background_sync(self, force: bool = False, preferred_sources: List[str] = None) -> Dict[str, Any]:
+        """后台启动同步任务，立即返回当前状态，避免阻塞前端请求。"""
+        async with self._lock:
+            if self._running:
+                status = await self.get_status()
+                status["launch_mode"] = "already_running"
+                return status
+
+            loop = asyncio.get_running_loop()
+            self._current_task = loop.create_task(
+                self.run_full_sync(force=force, preferred_sources=preferred_sources)
+            )
+
+        status = {
+            "job": JOB_KEY,
+            "status": "queued",
+            "message": "同步任务已提交到后台执行",
+            "started_at": datetime.now().isoformat(),
+            "launch_mode": "background",
+            "preferred_sources": preferred_sources or [],
+        }
+        self._last_status = status
+        return status
 
     async def get_status(self) -> Dict[str, Any]:
         """获取同步状态"""
+        if self._last_status and self._last_status.get("status") == "queued":
+            return self._last_status
+
         db = get_mongo_db()
         doc = await db[STATUS_COLLECTION].find_one({"job": JOB_KEY})
         

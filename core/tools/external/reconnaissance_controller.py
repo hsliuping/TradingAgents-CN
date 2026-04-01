@@ -10,18 +10,24 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import time
+from functools import wraps
 from typing import Any, Dict, List, Optional
 
 from .recon_tools import RECON_TOOLS
 from .requirement_analyzer import RequirementAnalyzer
+from .data_contracts import build_data_contract_doc_for_skill
+from .financial_schema_context import build_schema_generated_checks, resolve_financial_schema_context
+from core.skill_runtime import build_factor_catalog_prompt_context
 from .skill_spec import (
     ImplementationFact,
     ImplementationFactReport,
     ImplementationHelper,
     ImplementationIssue,
+    ReconToolTrace,
     SkillSpec,
     ValidationCheck,
 )
@@ -29,7 +35,7 @@ from .skill_spec import (
 logger = logging.getLogger(__name__)
 
 # LLM 侦察最大工具调用轮数
-MAX_RECON_TOOL_ROUNDS = 6
+MAX_RECON_TOOL_ROUNDS = 10
 
 
 class ReconnaissanceController:
@@ -181,7 +187,20 @@ class DefaultReconnaissanceController(ReconnaissanceController):
 
     @staticmethod
     def _infer_validation_checks(spec: SkillSpec) -> list[ValidationCheck]:
-        checks: list[ValidationCheck] = []
+        if spec.validation_checks:
+            return list(spec.validation_checks)
+
+        checks: list[ValidationCheck] = [
+            ValidationCheck(
+                name="status_success",
+                description="输出状态必须为 success/ok，不能以 error 或伪成功结束",
+                check_type="status_success",
+                rule_level="output",
+                blocking=True,
+                value_path="output",
+                forbid_null=False,
+            )
+        ]
         if spec.expected_output.fields:
             for field_name in spec.expected_output.fields:
                 checks.append(
@@ -189,6 +208,8 @@ class DefaultReconnaissanceController(ReconnaissanceController):
                         name=f"required_field:{field_name}",
                         description=f"成功输出时必须包含字段 {field_name}",
                         check_type="required_field",
+                        rule_level="data",
+                        blocking=True,
                         field=field_name,
                         value_path="data",
                         forbid_null=True,
@@ -200,6 +221,8 @@ class DefaultReconnaissanceController(ReconnaissanceController):
                     name="required_non_empty_payload",
                     description="成功输出时必须返回非空 data 负载",
                     check_type="required_non_empty_payload",
+                    rule_level="data",
+                    blocking=True,
                     value_path="data",
                     forbid_null=True,
                 )
@@ -214,6 +237,119 @@ class DefaultReconnaissanceController(ReconnaissanceController):
         if spec.expected_output.fields:
             notes.append(f"期望输出字段: {', '.join(spec.expected_output.fields)}")
         return notes
+
+    @staticmethod
+    def _enrich_schema_bundle_guidance(
+        report: ImplementationFactReport,
+        schema_context: Dict[str, Any],
+    ) -> None:
+        report.schema_bundle_context = dict(schema_context)
+        report.confidence = max(report.confidence, 0.72)
+
+        method = schema_context.get("method") or {}
+        contract = schema_context.get("contract") or {}
+        verifier_rule = schema_context.get("verifier_rule") or {}
+        applicability_rules = schema_context.get("applicability_rules") or {}
+
+        method_id = str(schema_context.get("method_id") or method.get("id") or "")
+        method_name = str(method.get("name") or method_id or "schema_method")
+        method_objective = str(method.get("objective") or "").strip()
+        if method_name:
+            if method_objective:
+                report.schema_facts.append(
+                    ImplementationFact(
+                        source=method_id or method_name,
+                        fact=f"优先按 {method_name} 组织实现: {method_objective}",
+                        evidence="financial_schema_bundle",
+                    )
+                )
+            report.recommended_strategy = (
+                f"{report.recommended_strategy}；按 {method_name} 组织输入校验、指标计算和输出结论"
+                if report.recommended_strategy
+                else f"按 {method_name} 组织输入校验、指标计算和输出结论"
+            )
+
+        required_metrics = list(method.get("required_metrics") or [])
+        if required_metrics:
+            report.schema_facts.append(
+                ImplementationFact(
+                    source=method_id or method_name,
+                    fact=f"方法要求优先获取指标: {', '.join(required_metrics)}",
+                    evidence="financial_schema_bundle",
+                )
+            )
+
+        required_fields = list(method.get("required_fields") or [])
+        if required_fields:
+            report.schema_facts.append(
+                ImplementationFact(
+                    source=method_id or method_name,
+                    fact=f"方法要求检查输入字段: {', '.join(required_fields)}",
+                    evidence="financial_schema_bundle",
+                )
+            )
+
+        contract_id = str(schema_context.get("contract_id") or contract.get("id") or "")
+        contract_required_fields = [
+            str((field_def or {}).get("field_name") or "").strip()
+            for field_def in contract.get("required_fields") or []
+            if str((field_def or {}).get("field_name") or "").strip()
+        ]
+        if contract_required_fields:
+            report.schema_facts.append(
+                ImplementationFact(
+                    source=contract_id or "output_contract",
+                    fact=f"输出必须覆盖契约字段: {', '.join(contract_required_fields)}",
+                    evidence="financial_schema_bundle",
+                )
+            )
+
+        narrative_requirements = [str(item).strip() for item in contract.get("narrative_requirements") or [] if str(item).strip()]
+        if narrative_requirements:
+            report.notes.append(f"schema 输出叙述要求: {'; '.join(narrative_requirements[:4])}")
+
+        prohibited_patterns = [str(item).strip() for item in contract.get("prohibited_patterns") or [] if str(item).strip()]
+        if prohibited_patterns:
+            for pattern in prohibited_patterns[:3]:
+                report.blocked_paths.append(
+                    ImplementationIssue(
+                        path=f"schema_contract:{contract_id or 'output_contract'}",
+                        reason=pattern,
+                        severity="error",
+                    )
+                )
+
+        verifier_id = str(schema_context.get("verifier_rule_id") or verifier_rule.get("id") or "")
+        failure_message = str(verifier_rule.get("failure_message") or "").strip()
+        if failure_message:
+            report.notes.append(f"schema verifier 失败语义: {failure_message}")
+        remediation_hint = str(verifier_rule.get("remediation_hint") or "").strip()
+        if remediation_hint:
+            report.notes.append(f"schema verifier 修复提示: {remediation_hint}")
+
+        for rule_id, rule_object in applicability_rules.items():
+            human_description = str(rule_object.get("human_description") or rule_id).strip()
+            report.schema_facts.append(
+                ImplementationFact(
+                    source=rule_id,
+                    fact=f"适用性规则: {human_description}",
+                    evidence="financial_schema_bundle",
+                )
+            )
+            rationale = str(rule_object.get("rationale") or "").strip()
+            if rationale:
+                report.notes.append(f"{rule_id}: {rationale}")
+
+        existing_names = {item.name for item in report.validation_checks if item.name}
+        for check in build_schema_generated_checks(schema_context):
+            if check.name and check.name in existing_names:
+                continue
+            report.validation_checks.append(check)
+            if check.name:
+                existing_names.add(check.name)
+
+        if verifier_id:
+            report.notes.append(f"schema profile: {schema_context.get('profile')} / {verifier_id}")
 
     # ================================================================
     # Phase 1: 规则基线（零 LLM 成本）
@@ -243,10 +379,14 @@ class DefaultReconnaissanceController(ReconnaissanceController):
                     evidence="RequirementAnalyzer.build_recommendations",
                 )
             )
-            self._enrich_collection_facts(report, collection, symbol,
-                                          inspect_stock_collection_schema,
-                                          inspect_field_coverage,
-                                          inspect_symbol_documents)
+            self._enrich_collection_facts(
+                report,
+                collection,
+                symbol,
+                inspect_stock_collection_schema,
+                inspect_field_coverage,
+                inspect_symbol_documents,
+            )
 
         for source in recommendations.get("external_sources") or []:
             report.schema_facts.append(
@@ -261,6 +401,9 @@ class DefaultReconnaissanceController(ReconnaissanceController):
         report.blocked_paths.extend(self._infer_blocked_paths(spec))
         report.validation_checks.extend(self._infer_validation_checks(spec))
         report.notes.extend(self._infer_notes(spec, recommendations))
+        schema_context = resolve_financial_schema_context(spec)
+        if schema_context:
+            self._enrich_schema_bundle_guidance(report, schema_context)
         if report.sample_fields:
             report.confidence = max(report.confidence, 0.65)
         return report
@@ -317,10 +460,23 @@ class DefaultReconnaissanceController(ReconnaissanceController):
                 ImplementationIssue(path=collection, reason=f"无法读取 symbol={symbol} 的样本: {exc}", severity="warning")
             )
             return
-        if symbol_docs:
-            symbol_fields = list(symbol_docs[0].keys())
-            report.notes.append(f"{collection} 中存在 {symbol} 的样本记录，首条字段: {', '.join(symbol_fields)}")
-            # 将符号样本中的特有字段合并到 sample_fields
+        symbol_documents = []
+        if isinstance(symbol_docs, dict):
+            symbol_documents = list(symbol_docs.get("documents") or [])
+        elif isinstance(symbol_docs, list):
+            symbol_documents = list(symbol_docs)
+
+        if symbol_documents:
+            first_doc = symbol_documents[0] if isinstance(symbol_documents[0], dict) else {}
+            symbol_fields = list(first_doc.keys())
+            matched_count = None
+            if isinstance(symbol_docs, dict):
+                matched_count = symbol_docs.get("matching_document_count")
+
+            matched_text = f"，命中 {matched_count} 条" if matched_count is not None else ""
+            report.notes.append(
+                f"{collection} 中存在 {symbol} 的样本记录{matched_text}，首条摘要字段: {', '.join(symbol_fields)}"
+            )
             existing = set(report.sample_fields.get(collection, []))
             new_fields = [f for f in symbol_fields if f not in existing]
             if new_fields and collection in report.sample_fields:
@@ -339,10 +495,11 @@ class DefaultReconnaissanceController(ReconnaissanceController):
         from core.llm import Message
 
         start_time = time.time()
+        tool_traces: List[ReconToolTrace] = []
 
         # 注册侦察工具
         tool_defs = []
-        for func in RECON_TOOLS:
+        for func in self._build_traced_tools(tool_traces):
             td = client.register_tool(func)
             tool_defs.append(td)
 
@@ -369,12 +526,16 @@ class DefaultReconnaissanceController(ReconnaissanceController):
         )
 
         # 执行工具调用循环
-        response = client.chat(
-            messages,
-            tools=tool_defs,
-            auto_execute_tools=True,
-            max_tool_rounds=MAX_RECON_TOOL_ROUNDS,
-        )
+        try:
+            response = client.chat(
+                messages,
+                tools=tool_defs,
+                auto_execute_tools=True,
+                max_tool_rounds=MAX_RECON_TOOL_ROUNDS,
+            )
+        except Exception:
+            self._log_tool_trace_summary(spec.tool_id, tool_traces, failed=True)
+            raise
 
         elapsed = time.time() - start_time
         raw_output = response.content or ""
@@ -390,9 +551,114 @@ class DefaultReconnaissanceController(ReconnaissanceController):
 
         # 解析 LLM 输出为 ImplementationFactReport
         report = self._parse_llm_report(raw_output, spec, rule_report)
+        report.tool_traces = tool_traces
         report.confidence = max(report.confidence, 0.75)
+        report.notes.append(f"工具调用次数: {len(tool_traces)}")
         report.notes.append(f"侦察耗时: {elapsed:.1f}s（LLM 驱动）")
+        self._log_tool_trace_summary(spec.tool_id, tool_traces, failed=False)
         return report
+
+    @staticmethod
+    def _truncate_log_text(text: str, limit: int = 1600) -> str:
+        raw = str(text or "")
+        if len(raw) <= limit:
+            return raw
+        head = raw[:1000]
+        tail = raw[-400:]
+        return f"{head}\n...(中间省略 {len(raw) - 1400} 字符)...\n{tail}"
+
+    @classmethod
+    def _log_tool_trace_summary(
+        cls,
+        tool_id: str,
+        tool_traces: List[ReconToolTrace],
+        *,
+        failed: bool,
+    ) -> None:
+        if not tool_traces:
+            logger.info("🧭 [侦察层] 无工具调用轨迹 | tool_id=%s | failed=%s", tool_id, failed)
+            return
+
+        logger.info(
+            "🧭 [侦察层] 工具调用轨迹汇总 | tool_id=%s | count=%s | failed=%s",
+            tool_id,
+            len(tool_traces),
+            failed,
+        )
+        for index, trace in enumerate(tool_traces, start=1):
+            logger.info(
+                "🧭 [侦察层] 工具轨迹[%s] | tool=%s | success=%s | duration_ms=%s | result_chars=%s | args=%s\n%s",
+                index,
+                trace.tool_name,
+                trace.success,
+                trace.duration_ms,
+                trace.result_chars,
+                json.dumps(trace.arguments or {}, ensure_ascii=False, default=str),
+                cls._truncate_log_text(trace.result_preview or trace.error or ""),
+            )
+
+    @staticmethod
+    def _build_traced_tools(tool_traces: List[ReconToolTrace]) -> List[callable]:
+        traced_tools: List[callable] = []
+
+        for func in RECON_TOOLS:
+            @wraps(func)
+            def traced_func(*args, __func=func, **kwargs):
+                started = time.time()
+                arguments: Dict[str, Any] = {}
+                try:
+                    bound = inspect.signature(__func).bind_partial(*args, **kwargs)
+                    arguments = dict(bound.arguments)
+                except Exception:
+                    arguments = {"args": list(args), **kwargs}
+
+                try:
+                    logger.info(
+                        "🧭 [侦察层] 调用工具 | tool=%s | args=%s",
+                        __func.__name__,
+                        json.dumps(arguments, ensure_ascii=False, default=str),
+                    )
+                    result = __func(*args, **kwargs)
+                    preview = str(result)
+                    logger.info(
+                        "🧭 [侦察层] 工具返回 | tool=%s | chars=%s\n%s",
+                        __func.__name__,
+                        len(preview),
+                        DefaultReconnaissanceController._truncate_log_text(preview),
+                    )
+                    tool_traces.append(
+                        ReconToolTrace(
+                            tool_name=__func.__name__,
+                            arguments=arguments,
+                            success=True,
+                            duration_ms=round((time.time() - started) * 1000, 2),
+                            result_chars=len(preview),
+                            result_preview=preview[:400],
+                        )
+                    )
+                    return result
+                except Exception as exc:
+                    logger.warning(
+                        "🧭 [侦察层] 工具异常 | tool=%s | args=%s | error=%s",
+                        __func.__name__,
+                        json.dumps(arguments, ensure_ascii=False, default=str),
+                        exc,
+                    )
+                    tool_traces.append(
+                        ReconToolTrace(
+                            tool_name=__func.__name__,
+                            arguments=arguments,
+                            success=False,
+                            duration_ms=round((time.time() - started) * 1000, 2),
+                            result_chars=0,
+                            error=str(exc),
+                        )
+                    )
+                    raise
+
+            traced_tools.append(traced_func)
+
+        return traced_tools
 
     # ================================================================
     # Prompt 构建 & 输出解析
@@ -402,7 +668,8 @@ class DefaultReconnaissanceController(ReconnaissanceController):
     def _build_recon_system_prompt() -> str:
         return (
             "你是一个 Skill 代码生成前置侦察 Agent。\n"
-            "你的任务是通过调用工具，收集足够的实现事实，帮助后续的代码生成器写出正确、可运行的 Python 函数。\n\n"
+            "你的任务是通过调用工具，收集最少但足够的实现事实，帮助后续代码生成器写出正确、可运行的 Python 函数。\n"
+            "你不是在写研究报告，也不是在写方案说明书。你的职责只有三个：确认数据路径、确认 helper、确认禁止路径。\n\n"
             "## 工作流程\n"
             "### 第一阶段：本地数据探索\n"
             "1. 先用 list_available_collections 了解有哪些本地集合可用。\n"
@@ -418,11 +685,11 @@ class DefaultReconnaissanceController(ReconnaissanceController):
             "7. 用 list_runtime_functions 和 describe_runtime_helper 查看可复用的 helper 函数。\n"
             "   重点关注 'data_access'（本地数据）、'project_access'（项目数据）、'external_sources'（外部数据源封装）三个模块。\n\n"
             "## 输出格式\n"
-            "探索完成后，请输出一份 JSON 对象（用 ```json 包裹），包含以下字段：\n"
-            "```\n"
+            "探索完成后，只输出一个纯 JSON 对象，不要前言、不要总结、不要 Markdown 代码块、不要解释性文字。\n"
+            "JSON 只包含以下字段：\n"
             "{\n"
-            '  "task_summary": "一句话总结任务需求",\n'
-            '  "recommended_strategy": "推荐的实现策略（数据来源、计算路径）",\n'
+            '  "task_summary": "一句话总结任务需求（不超过50字）",\n'
+            '  "recommended_strategy": "推荐实现路径（不超过120字）",\n'
             '  "available_helpers": [\n'
             '    {"module": "模块路径", "name": "函数名", "reason": "推荐理由"}\n'
             "  ],\n"
@@ -437,22 +704,39 @@ class DefaultReconnaissanceController(ReconnaissanceController):
             '    {"path": "缺口描述", "reason": "原因", "severity": "warning"}\n'
             "  ],\n"
             '  "validation_checks": [\n'
-            '    {"name": "检查名", "description": "描述", "check_type": "类型"}\n'
+            '    {"name": "检查名", "description": "描述", "check_type": "status_success|required_field|required_non_empty_payload|input_validation|data_validation|custom", "rule_level": "input|output|data|business|warning", "blocking": true}\n'
             "  ],\n"
             '  "confidence": 0.0到1.0之间的置信度,\n'
             '  "notes": ["额外备注"]\n'
             "}\n"
-            "```\n\n"
+            "\n"
+            "## 输出收敛要求\n"
+            "- task_summary 只写结果，不写背景。\n"
+            "- recommended_strategy 只写最终推荐路径，不写推理过程。\n"
+            "- available_helpers 最多 4 个。\n"
+            "- schema_facts 最多 6 条，只保留对代码实现真正有影响的事实。\n"
+            "- sample_fields 每个集合最多 8 个字段。\n"
+            "- blocked_paths 最多 4 条。\n"
+            "- runtime_gaps 最多 4 条。\n"
+            "- validation_checks 只补充规格里没有但确实必须新增的规则；不要把已有规格规则原样重写一遍。\n"
+            "- notes 最多 3 条。\n\n"
             "## 重要约束\n"
             "- 只做只读探测，不修改任何数据。\n"
             "- 探测时优先关注与任务直接相关的集合和函数。\n"
             "- 如果发现某个关键字段覆盖率很低或不存在，务必在 runtime_gaps 中标注。\n"
             "- 如果发现 MCP 工具或外部数据源能满足需求，在 schema_facts 和 recommended_strategy 中明确说明。\n"
             "- 生成的 Skill 不应直接导入内部 provider，应通过 skill_runtime 公开接口访问数据。\n"
+            "- 不要输出‘完美’、‘我已经完成探索’、‘现在开始生成报告’之类前言。\n"
         )
 
     @staticmethod
     def _build_recon_user_prompt(spec: SkillSpec, rule_report: ImplementationFactReport) -> str:
+        data_contract_doc = build_data_contract_doc_for_skill(spec)
+        factor_catalog_doc = build_factor_catalog_prompt_context(
+            spec.description,
+            category=spec.category,
+            expected_fields=list(spec.expected_output.fields or []),
+        )
         parts = [
             f"## 待实现的 Skill\n"
             f"- tool_id: {spec.tool_id}\n"
@@ -475,10 +759,18 @@ class DefaultReconnaissanceController(ReconnaissanceController):
         if rule_report.available_helpers:
             helper_lines = [f"  - {h.module}.{h.name}: {h.reason}" for h in rule_report.available_helpers[:5]]
             parts.append(f"\n## 规则基线推荐 Helper\n" + "\n".join(helper_lines))
+        if data_contract_doc:
+            parts.append(f"\n## 任务相关数据契约\n{data_contract_doc}")
+        if factor_catalog_doc:
+            parts.append(
+                "\n## 任务相关因子白名单\n"
+                f"{factor_catalog_doc}\n"
+                "请重点验证这些因子对应的 helper、字段路径和可复用 bundle 是否已经足够，不要把 catalog 里已有因子误判成新缺口。"
+            )
 
         parts.append(
             "\n## 请求\n"
-            "请通过工具调用，系统性地探索上述 Skill 的实现路径，然后输出结构化的侦察报告 JSON。"
+            "请先依据数据契约理解字段层级，再通过工具调用验证关键路径。输出时只保留会影响代码实现的最小事实集，不要写成长篇方案说明。"
         )
         return "\n".join(parts)
 
@@ -526,6 +818,7 @@ class DefaultReconnaissanceController(ReconnaissanceController):
             recommended_strategy=parsed.get("recommended_strategy", rule_report.recommended_strategy),
             confidence=float(parsed.get("confidence", 0.75)),
         )
+        expected_fields = set(spec.expected_output.fields or [])
 
         # available_helpers
         for h in parsed.get("available_helpers") or []:
@@ -579,14 +872,36 @@ class DefaultReconnaissanceController(ReconnaissanceController):
         # validation_checks
         for vc in parsed.get("validation_checks") or []:
             if isinstance(vc, dict):
+                raw_type = str(vc.get("check_type", "custom") or "custom").strip().lower()
+                field_name = str(vc.get("field", "") or "").strip()
+
+                if raw_type in ("business", "business_check", "custom"):
+                    report.notes.append(
+                        f"忽略不可执行的业务描述规则: {vc.get('description') or vc.get('name') or raw_type}"
+                    )
+                    continue
+
+                normalized_type = raw_type
+                if raw_type in ("input_validation", "input", "input_check", "output", "output_check", "status"):
+                    normalized_type = "status_success"
+                elif raw_type in ("data_validation", "data", "data_check"):
+                    normalized_type = "required_field" if field_name else "required_non_empty_payload"
+
+                if normalized_type == "required_field" and field_name and expected_fields and field_name not in expected_fields:
+                    report.notes.append(f"忽略未纳入规格输出的侦察字段规则: {field_name}")
+                    continue
+
                 report.validation_checks.append(
                     ValidationCheck(
-                        name=vc.get("name", ""),
+                        name=vc.get("name", "") or (f"required_field:{field_name}" if normalized_type == "required_field" and field_name else normalized_type),
                         description=vc.get("description", ""),
-                        check_type=vc.get("check_type", "custom"),
-                        field=vc.get("field", ""),
-                        value_path=vc.get("value_path", "data"),
-                        forbid_null=vc.get("forbid_null", False),
+                        required=vc.get("required", True),
+                        check_type=normalized_type,
+                        rule_level="output" if normalized_type == "status_success" else "data",
+                        blocking=vc.get("blocking", True),
+                        field=field_name,
+                        value_path="output" if normalized_type == "status_success" else vc.get("value_path", "data"),
+                        forbid_null=False if normalized_type == "status_success" else vc.get("forbid_null", False),
                     )
                 )
 
@@ -600,5 +915,21 @@ class DefaultReconnaissanceController(ReconnaissanceController):
             report.blocked_paths.extend(rule_report.blocked_paths)
         if not report.validation_checks and rule_report.validation_checks:
             report.validation_checks.extend(rule_report.validation_checks)
+
+        existing_names = {item.name for item in report.validation_checks if item.name}
+        for base_check in spec.validation_checks:
+            if base_check.name and base_check.name in existing_names:
+                continue
+            report.validation_checks.append(base_check)
+
+        deduped_checks: list[ValidationCheck] = []
+        seen_names: set[str] = set()
+        for check in report.validation_checks:
+            dedupe_name = check.name or f"{check.check_type}:{check.field}"
+            if dedupe_name in seen_names:
+                continue
+            seen_names.add(dedupe_name)
+            deduped_checks.append(check)
+        report.validation_checks = deduped_checks
 
         return report

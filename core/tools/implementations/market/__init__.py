@@ -3,6 +3,7 @@
 from .stock_market_data import get_stock_market_data_unified
 from .china_market_overview import get_china_market_overview
 from .technical_indicators import get_technical_indicators
+from .technical_factor_bundle_tool import get_technical_factor_bundle_tool
 from .qmt_market_tools import get_market_overview_qmt, get_sector_analysis_qmt
 
 # 大盘/指数分析工具
@@ -31,6 +32,7 @@ __all__ = [
     "get_stock_market_data_unified",
     "get_china_market_overview",
     "get_technical_indicators",
+    "get_technical_factor_bundle_tool",
     # 大盘/指数分析工具
     "get_index_data",
     "get_market_breadth",

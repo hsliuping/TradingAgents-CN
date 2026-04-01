@@ -19,6 +19,30 @@ from .external_sources import (
 )
 
 
+_SCALAR_PREVIEW_LIMIT = 160
+_FIELD_PREVIEW_LIMIT = 20
+_NESTED_KEY_PREVIEW_LIMIT = 12
+_LIST_PREVIEW_LIMIT = 3
+_SUMMARY_PRIORITY_FIELDS = (
+    "symbol",
+    "code",
+    "name",
+    "ts_code",
+    "report_period",
+    "report_date",
+    "ann_date",
+    "publish_time",
+    "trade_date",
+    "end_date",
+    "industry",
+    "pe",
+    "pb",
+    "peg",
+    "roe",
+    "market_value",
+)
+
+
 def _get_collection_metadata(collection: str) -> Dict[str, Any]:
     for item in list_supported_stock_collections():
         if item.get("collection") == collection:
@@ -30,6 +54,107 @@ def _strip_object_id(doc: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(doc or {})
     normalized.pop("_id", None)
     return normalized
+
+
+def _is_non_empty_value(value: Any) -> bool:
+    return value not in (None, "", [], {})
+
+
+def _truncate_text(value: str, limit: int = _SCALAR_PREVIEW_LIMIT) -> str:
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit]}...({len(value)} chars)"
+
+
+def _summarize_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return _truncate_text(value)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        keys = sorted(str(key) for key in value.keys())
+        return {
+            "type": "object",
+            "key_count": len(keys),
+            "sample_keys": keys[:_NESTED_KEY_PREVIEW_LIMIT],
+        }
+    if isinstance(value, list):
+        item_types = sorted({type(item).__name__ for item in value[:_LIST_PREVIEW_LIMIT]})
+        return {
+            "type": "array",
+            "length": len(value),
+            "item_types": item_types,
+        }
+    return _truncate_text(str(value))
+
+
+def _build_scalar_preview(doc: Dict[str, Any]) -> Dict[str, Any]:
+    preview: Dict[str, Any] = {}
+
+    for field_name in _SUMMARY_PRIORITY_FIELDS:
+        if field_name in doc and _is_non_empty_value(doc.get(field_name)):
+            preview[field_name] = _summarize_value(doc.get(field_name))
+
+    if len(preview) >= _FIELD_PREVIEW_LIMIT:
+        return preview
+
+    for field_name in sorted(doc.keys()):
+        if field_name in preview:
+            continue
+        value = doc.get(field_name)
+        if not _is_non_empty_value(value):
+            continue
+        if isinstance(value, (dict, list)):
+            continue
+        preview[field_name] = _summarize_value(value)
+        if len(preview) >= _FIELD_PREVIEW_LIMIT:
+            break
+
+    return preview
+
+
+def _build_nested_field_summary(doc: Dict[str, Any]) -> Dict[str, Any]:
+    nested_fields: Dict[str, Any] = {}
+    for field_name, value in doc.items():
+        if isinstance(value, dict):
+            nested_fields[field_name] = _summarize_value(value)
+        elif isinstance(value, list):
+            nested_fields[field_name] = _summarize_value(value)
+    return nested_fields
+
+
+def _build_document_summary(doc: Dict[str, Any]) -> Dict[str, Any]:
+    field_names = sorted(doc.keys())
+    summary: Dict[str, Any] = {
+        "field_count": len(field_names),
+        "non_null_field_count": sum(1 for value in doc.values() if _is_non_empty_value(value)),
+        "fields": field_names[:_FIELD_PREVIEW_LIMIT],
+    }
+    remaining_field_count = max(0, len(field_names) - _FIELD_PREVIEW_LIMIT)
+    if remaining_field_count:
+        summary["truncated_field_count"] = remaining_field_count
+
+    scalar_preview = _build_scalar_preview(doc)
+    if scalar_preview:
+        summary["scalar_preview"] = scalar_preview
+
+    nested_fields = _build_nested_field_summary(doc)
+    if nested_fields:
+        summary["nested_fields"] = nested_fields
+
+    return summary
+
+
+def _get_document_count(collection_ref: Any, filters: Dict[str, Any]) -> Dict[str, Any]:
+    if filters:
+        return {
+            "matching_document_count": collection_ref.count_documents(filters),
+            "matching_count_is_estimated": False,
+        }
+    return {
+        "matching_document_count": collection_ref.estimated_document_count(),
+        "matching_count_is_estimated": True,
+    }
 
 
 def query_stock_collection(
@@ -74,16 +199,18 @@ def inspect_stock_collection_schema(
     sample_size: int = 20,
     filters: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """返回集合样本中的顶层字段和覆盖率摘要。"""
+    """返回集合样本中的顶层字段、覆盖率、条数和结构摘要。"""
     collection_name = str(collection or "").strip()
     if collection_name not in SUPPORTED_COLLECTIONS:
         raise ValueError(f"unsupported collection: {collection_name}")
 
     capped_sample_size = max(1, min(int(sample_size), 100))
     db = _get_db()
+    collection_ref = db[collection_name]
+    normalized_filters = filters or {}
     docs = [
         _strip_object_id(item)
-        for item in db[collection_name].find(filters or {}, {"_id": 0}).limit(capped_sample_size)
+        for item in collection_ref.find(normalized_filters, {"_id": 0}).limit(capped_sample_size)
     ]
 
     field_counter: Counter[str] = Counter()
@@ -103,15 +230,18 @@ def inspect_stock_collection_schema(
         if sample_count > 0
     }
     metadata = _get_collection_metadata(collection_name)
+    sample_summaries = [_build_document_summary(item) for item in docs[: min(3, sample_count)]]
+    count_summary = _get_document_count(collection_ref, normalized_filters)
 
     return {
         "collection": collection_name,
+        **count_summary,
         "sample_count": sample_count,
         "query_keys": metadata.get("query_keys", []),
         "preferred_access": metadata.get("preferred_access", []),
         "top_level_fields": [field_name for field_name, _ in ordered_fields],
         "field_coverage": field_coverage,
-        "sample_documents": docs[: min(3, sample_count)],
+        "sample_document_summaries": sample_summaries,
     }
 
 
@@ -119,8 +249,8 @@ def inspect_symbol_documents(
     collection: str,
     symbol: str,
     limit: int = 5,
-) -> List[Dict[str, Any]]:
-    """返回指定 symbol 在集合中的样本文档。"""
+) -> Dict[str, Any]:
+    """返回指定 symbol 在集合中的样本文档摘要，而不是完整文档。"""
     collection_name = str(collection or "").strip()
     if collection_name not in SUPPORTED_COLLECTIONS:
         raise ValueError(f"unsupported collection: {collection_name}")
@@ -130,7 +260,8 @@ def inspect_symbol_documents(
     db = _get_db()
 
     filters: Dict[str, Any] = {"$or": [{"symbol": normalized_symbol}, {"code": normalized_symbol}]}
-    cursor = db[collection_name].find(filters, {"_id": 0})
+    collection_ref = db[collection_name]
+    cursor = collection_ref.find(filters, {"_id": 0})
 
     if collection_name == "stock_daily_quotes":
         cursor = cursor.sort("trade_date", -1)
@@ -139,7 +270,14 @@ def inspect_symbol_documents(
     elif collection_name == "stock_news":
         cursor = cursor.sort("publish_time", -1)
 
-    return [_strip_object_id(item) for item in cursor.limit(capped_limit)]
+    docs = [_strip_object_id(item) for item in cursor.limit(capped_limit)]
+    return {
+        "collection": collection_name,
+        "symbol": normalized_symbol,
+        "matching_document_count": collection_ref.count_documents(filters),
+        "returned_summary_count": len(docs),
+        "documents": [_build_document_summary(item) for item in docs],
+    }
 
 
 def inspect_field_coverage(
@@ -220,10 +358,10 @@ PROJECT_DATA_ACCESS_DOC = """
 侦察/诊断专用接口（前置分析可用，最终 Skill 主逻辑通常不应依赖）：
 
 4. inspect_stock_collection_schema(collection, sample_size=20, filters=None) -> dict
-    - 返回集合样本中的字段列表、字段覆盖率和少量样本文档
+    - 返回集合样本中的字段列表、字段覆盖率、估算/匹配条数和少量样本摘要
 
-5. inspect_symbol_documents(collection, symbol, limit=5) -> list[dict]
-    - 返回指定 symbol 在集合中的最新样本文档
+5. inspect_symbol_documents(collection, symbol, limit=5) -> dict
+    - 返回指定 symbol 在集合中的最新样本文档摘要、命中条数和字段结构
 
 6. inspect_field_coverage(collection, fields, filters=None, sample_size=50) -> dict
     - 返回给定字段的出现率和非空覆盖率

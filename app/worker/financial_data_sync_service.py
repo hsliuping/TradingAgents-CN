@@ -107,9 +107,9 @@ class FinancialDataSyncService:
         if data_sources is None:
             data_sources = ["tushare", "akshare", "baostock"]
         if report_types is None:
-            report_types = ["quarterly", "annual"]  # 同时同步季报和年报
+            report_types = ["quarterly", "annual"]
         
-        logger.info(f"🔄 开始财务数据同步（线程池模式）: 数据源={data_sources}, 报告类型={report_types}")
+        logger.info(f"🔄 开始财务数据同步（线程池模式）: 数据源={data_sources}, 报告类型过滤={report_types}")
         
         # 获取股票列表
         if symbols is None:
@@ -700,23 +700,19 @@ class FinancialDataSyncService:
                 logger.debug(f"⚠️ {symbol} 无财务数据 ({data_source})")
                 return False
             
-            # 为每种报告类型保存数据
             saved_count = 0
-            for report_type in report_types:
-                try:
-                    count = await financial_service.save_financial_data(
-                        symbol=symbol,
-                        financial_data=financial_data,
-                        data_source=data_source,
-                        report_type=report_type
-                    )
-                    saved_count += count
-                except RuntimeError as e:
-                    # 🔥 捕获事件循环关闭错误
-                    if "shutdown" in str(e).lower() or "closed" in str(e).lower():
-                        logger.warning(f"⚠️ {symbol} 保存财务数据时事件循环已关闭 ({data_source}): {e}")
-                        break
-                    raise
+            try:
+                saved_count = await financial_service.save_financial_data(
+                    symbol=symbol,
+                    financial_data=financial_data,
+                    data_source=data_source,
+                )
+            except RuntimeError as e:
+                # 🔥 捕获事件循环关闭错误
+                if "shutdown" in str(e).lower() or "closed" in str(e).lower():
+                    logger.warning(f"⚠️ {symbol} 保存财务数据时事件循环已关闭 ({data_source}): {e}")
+                    return False
+                raise
             
             return saved_count > 0
             
@@ -819,16 +815,11 @@ class FinancialDataSyncService:
                 logger.debug(f"⚠️ {symbol} 无财务数据 ({data_source})")
                 return False
             
-            # 为每种报告类型保存数据
-            saved_count = 0
-            for report_type in report_types:
-                count = await self.financial_service.save_financial_data(
-                    symbol=symbol,
-                    financial_data=financial_data,
-                    data_source=data_source,
-                    report_type=report_type
-                )
-                saved_count += count
+            saved_count = await self.financial_service.save_financial_data(
+                symbol=symbol,
+                financial_data=financial_data,
+                data_source=data_source,
+            )
             
             return saved_count > 0
             

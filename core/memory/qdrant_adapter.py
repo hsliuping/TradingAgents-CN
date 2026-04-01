@@ -31,12 +31,13 @@ class QdrantAdapter:
         if not self._initialized:
             try:
                 from qdrant_client import QdrantClient
-                from qdrant_client.models import Distance, VectorParams, PointStruct
+                from qdrant_client.models import Distance, VectorParams, PointStruct, PointIdsList
 
                 self.QdrantClient = QdrantClient
                 self.Distance = Distance
                 self.VectorParams = VectorParams
                 self.PointStruct = PointStruct
+                self.PointIdsList = PointIdsList
 
                 # 确定数据目录
                 data_dir = os.getenv("QDRANT_DATA_DIR", "./data/qdrant")
@@ -177,6 +178,22 @@ class QdrantCollection:
 
         except Exception as e:
             logger.error(f"❌ [Qdrant] 添加文档失败: {e}")
+            return False
+
+    def delete_ids(self, ids: List[str]) -> bool:
+        """按文档 ID 删除点。"""
+        if not ids:
+            return True
+        try:
+            logger.debug(f"🔒 [Qdrant] 准备按 ID 删除文档 (collection={self.collection_name}, count={len(ids)})")
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=self.adapter.PointIdsList(points=ids),
+            )
+            logger.debug(f"✅ [Qdrant] 按 ID 删除文档成功 (collection={self.collection_name}, count={len(ids)})")
+            return True
+        except Exception as e:
+            logger.error(f"❌ [Qdrant] 按 ID 删除文档失败: {e}")
             return False
 
     def query(

@@ -25,6 +25,13 @@ from .stock_data_catalog import (
     render_stock_data_collection_doc,
     select_relevant_stock_collections,
 )
+from .financial_schema_context import (
+    build_schema_constraint_hints,
+    build_schema_generated_checks,
+    get_contract_required_fields,
+    resolve_financial_schema_context,
+)
+from core.skill_runtime import build_factor_catalog_prompt_context, infer_recommended_factor_packs
 
 from .skill_spec import (
     BoundaryCheck,
@@ -34,7 +41,9 @@ from .skill_spec import (
     SessionStatus,
     SkillCreationSession,
     SkillHandoffContext,
+    SkillParameter,
     SkillSpec,
+    ValidationCheck,
 )
 
 logger = logging.getLogger(__name__)
@@ -211,6 +220,35 @@ class RequirementAnalyzer:
         external_sources = recommendations.get("external_sources") or []
         primary_source = data_source_hint or (external_sources[0] if external_sources else "待确认")
 
+        if "peg" in normalized:
+            return {
+                "tool_id": tool_id if tool_id != "new_skill" else "calculate_peg_valuation",
+                "display_name": "PEG估值计算",
+                "description": "根据股票代码获取PE(TTM)和盈利增长率，计算PEG指标并输出结构化估值结论。",
+                "category": "fundamentals",
+                "data_source": primary_source,
+                "parameters": [
+                    {"name": "symbol", "type": "string", "description": "股票代码", "required": True},
+                    {"name": "growth_years", "type": "integer", "description": "增长口径参数，当前仅支持1，表示同口径同比，不代表连续年报年数", "required": False, "default": 1},
+                ],
+                "fields": [
+                    "symbol", "name", "industry", "current_price", "pe_ttm",
+                    "earnings_growth_rate", "peg_ratio", "valuation_level",
+                    "assumptions", "failure_reason",
+                ],
+                "constraints": [
+                    "仅输出结构化、可验证的 PEG 结果，不生成开放式投资建议。",
+                    "输出字段名必须稳定，使用 earnings_growth_rate 和 peg_ratio，不要改写成 growth_rate 或 peg。",
+                    "growth_years 当前仅支持1，表示同口径同比；不得把 financial_indicators 的季度 end_date 序列误当作连续年报序列。",
+                    "若增长率缺失、非正或接近0，应返回失效原因，不允许伪造默认值继续估值。",
+                ],
+                "test_input": {
+                    "symbol": "600519.SH",
+                    "growth_years": 1,
+                },
+                "recommendations": recommendations,
+            }
+
         if "pb" in normalized or "市净率" in text or "估值" in text:
             return {
                 "tool_id": tool_id,
@@ -333,6 +371,10 @@ class RequirementAnalyzer:
     def _generate_fallback_spec(self, conversation: str) -> Optional[SkillSpec]:
         blueprint = self._build_fallback_blueprint(conversation)
         try:
+            validation_checks = self._build_default_validation_checks(
+                expected_fields=blueprint["fields"],
+                category=blueprint["category"],
+            )
             return SkillSpec(
                 tool_id=blueprint["tool_id"],
                 display_name=blueprint["display_name"],
@@ -354,12 +396,334 @@ class RequirementAnalyzer:
                     "fields": blueprint["fields"],
                     "description": blueprint["description"],
                 },
+                validation_checks=validation_checks,
                 constraints=blueprint["constraints"],
                 test_input=blueprint["test_input"],
             )
         except Exception as e:
             logger.error(f"启发式 SkillSpec 生成失败: {e}")
             return None
+
+    @staticmethod
+    def _build_default_validation_checks(
+        expected_fields: list[str],
+        category: str = "",
+    ) -> list[dict[str, Any]]:
+        checks: list[dict[str, Any]] = [
+            {
+                "name": "status_success",
+                "description": "输出状态必须为 success/ok，不能返回 error 或伪成功结果",
+                "required": True,
+                "check_type": "status_success",
+                "rule_level": "output",
+                "blocking": True,
+                "value_path": "output",
+                "forbid_null": False,
+            }
+        ]
+
+        if expected_fields:
+            for field_name in expected_fields:
+                checks.append(
+                    {
+                        "name": f"required_field:{field_name}",
+                        "description": f"成功输出时必须包含字段 {field_name}",
+                        "required": True,
+                        "check_type": "required_field",
+                        "rule_level": "data",
+                        "blocking": True,
+                        "field": field_name,
+                        "value_path": "data",
+                        "forbid_null": True,
+                    }
+                )
+        else:
+            checks.append(
+                {
+                    "name": "required_non_empty_payload",
+                    "description": "成功输出时必须返回非空 data 负载",
+                    "required": True,
+                    "check_type": "required_non_empty_payload",
+                    "rule_level": "data",
+                    "blocking": True,
+                    "value_path": "data",
+                    "forbid_null": True,
+                }
+            )
+
+        normalized = (category or "").lower()
+        if normalized in ("fundamentals", "market", "technical", "utility", "news", "social"):
+            checks.append(
+                {
+                    "name": "data_payload_object",
+                    "description": "成功输出时 data 应为结构化对象或对象列表，不能只返回空文本说明",
+                    "required": False,
+                    "check_type": "required_non_empty_payload",
+                    "rule_level": "data",
+                    "blocking": False,
+                    "value_path": "data",
+                    "forbid_null": True,
+                }
+            )
+
+        return checks
+
+    @staticmethod
+    def _normalize_validation_check_type(check_type: str, rule_level: str = "") -> str:
+        normalized = (check_type or "").strip().lower()
+        level = (rule_level or "").strip().lower()
+
+        if normalized in ("status_success", "required_field", "required_non_empty_payload", "schema_condition"):
+            return normalized
+        if normalized in ("input", "input_check", "input_validation", "output", "output_check", "status"):
+            return "status_success"
+        if normalized in ("data", "data_check", "data_validation"):
+            return "required_field"
+        if normalized in ("business", "business_check", "custom"):
+            return "custom"
+        if level == "output":
+            return "status_success"
+        if level == "data":
+            return "required_field"
+        if level in ("business", "warning"):
+            return "custom"
+        return normalized or "custom"
+
+    def _sanitize_validation_checks(
+        self,
+        checks: list[ValidationCheck],
+        expected_fields: list[str],
+    ) -> list[ValidationCheck]:
+        sanitized: list[ValidationCheck] = []
+        seen_names: set[str] = set()
+
+        for check in checks:
+            normalized_type = self._normalize_validation_check_type(check.check_type, check.rule_level)
+
+            if normalized_type == "custom":
+                continue
+
+            if normalized_type == "status_success":
+                normalized_check = ValidationCheck(
+                    name=check.name or "status_success",
+                    description=check.description or "输出状态必须为 success/ok",
+                    required=True,
+                    check_type="status_success",
+                    rule_level="output",
+                    blocking=True,
+                    value_path="output",
+                    forbid_null=False,
+                )
+            elif normalized_type == "required_non_empty_payload":
+                normalized_check = ValidationCheck(
+                    name=check.name or "required_non_empty_payload",
+                    description=check.description or "成功输出时必须返回非空 data 负载",
+                    required=check.required,
+                    check_type="required_non_empty_payload",
+                    rule_level="data",
+                    blocking=check.blocking,
+                    value_path=check.value_path or "data",
+                    forbid_null=True,
+                )
+            elif normalized_type == "schema_condition":
+                normalized_check = ValidationCheck(
+                    name=check.name or "schema_condition",
+                    description=check.description or "必须满足 schema 适用性规则",
+                    required=check.required,
+                    check_type="schema_condition",
+                    rule_level=check.rule_level or "method",
+                    blocking=check.blocking,
+                    field=check.field,
+                    value_path=check.value_path or "data",
+                    forbid_null=check.forbid_null,
+                    params=dict(check.params or {}),
+                )
+            else:
+                field_name = (check.field or "").strip()
+                if not field_name:
+                    continue
+                if expected_fields and field_name not in expected_fields:
+                    continue
+                normalized_check = ValidationCheck(
+                    name=check.name or f"required_field:{field_name}",
+                    description=check.description or f"成功输出时必须包含字段 {field_name}",
+                    required=check.required,
+                    check_type="required_field",
+                    rule_level="data",
+                    blocking=check.blocking,
+                    field=field_name,
+                    value_path=check.value_path or "data",
+                    forbid_null=True,
+                )
+
+            dedupe_name = normalized_check.name or f"{normalized_check.check_type}:{normalized_check.field}"
+            if dedupe_name in seen_names:
+                continue
+            seen_names.add(dedupe_name)
+            sanitized.append(normalized_check)
+
+        return sanitized
+
+    @staticmethod
+    def _enforce_known_skill_contracts(spec: SkillSpec) -> SkillSpec:
+        tool_id = (spec.tool_id or "").strip().lower()
+        description = (spec.description or "").lower()
+        schema_context = resolve_financial_schema_context(spec)
+
+        if tool_id == "calculate_peg_valuation" or "peg" in tool_id or "peg" in description:
+            if (schema_context or {}).get("profile") == "peg":
+                spec.category = "valuation"
+                if not spec.expected_output.description:
+                    spec.expected_output.description = "返回 PEG 估值结果及关键依据"
+            else:
+                spec.category = "fundamentals"
+                canonical_fields = [
+                    "symbol",
+                    "name",
+                    "industry",
+                    "current_price",
+                    "pe_ttm",
+                    "earnings_growth_rate",
+                    "peg_ratio",
+                    "valuation_level",
+                    "assumptions",
+                    "failure_reason",
+                ]
+                alias_map = {
+                    "growth_rate": "earnings_growth_rate",
+                    "earnings_growth": "earnings_growth_rate",
+                    "peg": "peg_ratio",
+                    "failure_reasons": "failure_reason",
+                    "invalidation_conditions": "failure_reason",
+                }
+                normalized_fields: list[str] = []
+                seen_fields: set[str] = set()
+                for field in list(spec.expected_output.fields or []) + canonical_fields:
+                    normalized_field = alias_map.get(field, field)
+                    if normalized_field in seen_fields:
+                        continue
+                    seen_fields.add(normalized_field)
+                    normalized_fields.append(normalized_field)
+                spec.expected_output.type = "dict"
+                spec.expected_output.fields = normalized_fields
+                if not spec.expected_output.description:
+                    spec.expected_output.description = "返回 PEG 估值结果及关键依据"
+
+            has_growth_years = any(param.name == "growth_years" for param in spec.parameters)
+            if not has_growth_years:
+                spec.parameters.append(
+                    SkillParameter(
+                        name="growth_years",
+                        type="integer",
+                        description="增长口径参数，当前仅支持1，表示同口径同比，不代表连续年报年数",
+                        required=False,
+                        default=1,
+                    )
+                )
+            if "growth_years" not in spec.test_input:
+                spec.test_input["growth_years"] = 1
+
+        return spec
+
+    def _ensure_spec_validation_checks(self, spec: SkillSpec) -> SkillSpec:
+        spec = self._enforce_known_skill_contracts(spec)
+        spec = self._align_spec_with_schema_contract(spec)
+        existing_checks = list(spec.validation_checks or [])
+        if not existing_checks:
+            spec.validation_checks = [
+                ValidationCheck(**item)
+                for item in self._build_default_validation_checks(
+                    expected_fields=list(spec.expected_output.fields or []),
+                    category=spec.category,
+                )
+            ]
+            spec.validation_checks = self._sanitize_validation_checks(
+                list(spec.validation_checks or []),
+                list(spec.expected_output.fields or []),
+            )
+            return spec
+
+        existing_checks = self._sanitize_validation_checks(
+            existing_checks,
+            list(spec.expected_output.fields or []),
+        )
+
+        normalized_names = {check.name for check in existing_checks if check.name}
+        if "status_success" not in normalized_names:
+            existing_checks.insert(
+                0,
+                ValidationCheck(**self._build_default_validation_checks([], spec.category)[0]),
+            )
+
+        has_data_check = any(
+            check.check_type in ("required_field", "required_non_empty_payload")
+            for check in existing_checks
+        )
+        if not has_data_check:
+            fallback_checks = self._build_default_validation_checks(
+                expected_fields=list(spec.expected_output.fields or []),
+                category=spec.category,
+            )[1:]
+            existing_checks.extend(ValidationCheck(**item) for item in fallback_checks)
+
+        spec.validation_checks = self._sanitize_validation_checks(
+            existing_checks,
+            list(spec.expected_output.fields or []),
+        )
+        return spec
+
+    @staticmethod
+    def _align_spec_with_schema_contract(spec: SkillSpec) -> SkillSpec:
+        schema_context = resolve_financial_schema_context(spec)
+        if not schema_context:
+            return spec
+
+        contract_required_fields = get_contract_required_fields(schema_context)
+        if contract_required_fields:
+            existing_fields = [str(field).strip() for field in list(spec.expected_output.fields or []) if str(field).strip()]
+            merged_fields = []
+            seen_fields = set()
+            for field_name in contract_required_fields + existing_fields:
+                if not field_name or field_name in seen_fields:
+                    continue
+                seen_fields.add(field_name)
+                merged_fields.append(field_name)
+            spec.expected_output.type = "dict"
+            spec.expected_output.fields = merged_fields
+
+        contract = schema_context.get("contract") or {}
+        if not (spec.expected_output.description or "").strip():
+            contract_name = str(contract.get("name") or schema_context.get("contract_id") or "").strip()
+            method_name = str((schema_context.get("method") or {}).get("name") or "").strip()
+            description_parts = [item for item in [contract_name, method_name] if item]
+            if description_parts:
+                spec.expected_output.description = "；".join(description_parts) + " 的结构化输出"
+
+        schema_constraints = build_schema_constraint_hints(schema_context)
+        if schema_constraints:
+            existing_constraints = [str(item).strip() for item in list(spec.constraints or []) if str(item).strip()]
+            merged_constraints = []
+            seen_constraints = set()
+            for item in existing_constraints + schema_constraints:
+                if not item or item in seen_constraints:
+                    continue
+                seen_constraints.add(item)
+                merged_constraints.append(item)
+            spec.constraints = merged_constraints
+
+        schema_checks = build_schema_generated_checks(schema_context)
+        if schema_checks:
+            existing_checks = list(spec.validation_checks or [])
+            existing_names = {check.name for check in existing_checks if check.name}
+            for check in schema_checks:
+                if check.name and check.name in existing_names:
+                    continue
+                existing_checks.append(check)
+                if check.name:
+                    existing_names.add(check.name)
+            spec.validation_checks = existing_checks
+
+        return spec
 
     @staticmethod
     def _infer_category_hint(text: str) -> str:
@@ -407,7 +771,14 @@ class RequirementAnalyzer:
             sources=external_sources,
             focus_summary="、".join(item["display_name"] for item in external_sources),
         )
-        return f"{local_doc}\n\n{external_doc}"
+        factor_doc = build_factor_catalog_prompt_context(
+            text,
+            category=category,
+        )
+        sections = [local_doc, external_doc]
+        if factor_doc:
+            sections.append(factor_doc)
+        return "\n\n".join(section for section in sections if section.strip())
 
     def build_recommendations(
         self,
@@ -454,6 +825,11 @@ class RequirementAnalyzer:
             "data_source_hint": data_source,
             "stock_collections": [item["collection"] for item in local_collections],
             "external_sources": [item["source_id"] for item in external_sources],
+            "recommended_factor_packs": infer_recommended_factor_packs(
+                description,
+                category=category,
+                expected_fields=list(expected_fields or []),
+            ),
         }
 
     # ==================== 会话管理 ====================
@@ -908,6 +1284,8 @@ class RequirementAnalyzer:
             "3. data_source 填写对话中确定的主数据源标识；若实现会组合紧密相关的数据来源，则填写主数据源，并在 constraints 中说明附加来源或降级策略。\n"
             "4. 不要写「需通过参数传入」等模糊描述。\n\n"
             "5. 优先让 spec 与当前系统可复用的本地集合、外部来源保持一致；若本地可满足，不要强行指定外部源。\n\n"
+            "5.1 如果这是估值类或方法型 Skill，expected_output.fields 必须优先贴近系统已有 schema 契约，不要自造一套字段名。\n"
+            "5.2 constraints 应明确写出方法适用边界、禁止模式和必要叙述要求，而不是泛泛地写‘返回估值结果’。\n\n"
             f"{handoff_guardrails}"
             f"{SKILL_SEMANTICS_GUIDANCE}\n\n"
             f"当前按需求命中的数据上下文:\n{catalog_context}\n\n"
@@ -920,6 +1298,7 @@ class RequirementAnalyzer:
                 f"{recon_context}\n\n"
                 "**基于侦察事实的约束**：\n"
                 "- expected_output.fields 只能包含侦察证实可获取的字段，不要凭想象添加数据源中不存在的字段。\n"
+                "- 如果侦察上下文已经提供金融 schema 方法/契约/规则，expected_output.fields 与 constraints 必须优先对齐这些 schema 对象。\n"
                 "- 若某字段覆盖率低或不可用，应在 constraints 中注明降级策略，而非标记为必填。\n"
                 "- 优先使用侦察发现的 Helper 函数，而非猜测 API 调用方式。\n\n"
             )
@@ -931,7 +1310,7 @@ class RequirementAnalyzer:
             '  "tool_id": "snake_case_id",\n'
             '  "display_name": "中文显示名称",\n'
             '  "description": "功能描述",\n'
-            '  "category": "news|market|fundamentals|social|technical|utility",\n'
+            '  "category": "news|market|fundamentals|social|technical|utility|valuation",\n'
             '  "data_source": "对话中确定的数据源标识",\n'
             '  "parameters": [\n'
             '    {"name": "param1", "type": "string", "description": "说明", '
@@ -942,6 +1321,10 @@ class RequirementAnalyzer:
             '    "fields": ["field1", "field2"],\n'
             '    "description": "输出描述"\n'
             "  },\n"
+            '  "validation_checks": [\n'
+            '    {"name": "status_success", "description": "输出状态必须成功", "required": true, "check_type": "status_success", "rule_level": "output", "blocking": true, "value_path": "output", "forbid_null": false},\n'
+            '    {"name": "required_field:field1", "description": "成功输出时 field1 不可缺失", "required": true, "check_type": "required_field", "rule_level": "data", "blocking": true, "field": "field1", "value_path": "data", "forbid_null": true}\n'
+            "  ],\n"
             '  "constraints": ["约束1"],\n'
             '  "test_input": {"param1": "测试值"}\n'
             "}"
@@ -973,7 +1356,7 @@ class RequirementAnalyzer:
                 logger.info(f"SkillSpec LLM 原始返回 (attempt {attempt + 1}/{max_attempts}, {len(last_raw)} 字符):\n{last_raw}")
                 data = self._parse_llm_json(last_raw)
                 if data:
-                    return SkillSpec(**data)
+                    return self._ensure_spec_validation_checks(SkillSpec(**data))
 
                 last_error = ValueError("LLM 未返回合法 JSON")
                 logger.warning(f"SkillSpec JSON 解析失败 (attempt {attempt + 1}/{max_attempts}): {last_error}")
@@ -1026,6 +1409,41 @@ class RequirementAnalyzer:
         if report.sample_fields:
             for collection, fields in report.sample_fields.items():
                 parts.append(f"- {collection} 的实际字段: {', '.join(fields[:20])}")
+
+        schema_bundle_context = report.schema_bundle_context or {}
+        method = schema_bundle_context.get("method") or {}
+        contract = schema_bundle_context.get("contract") or {}
+        verifier_rule = schema_bundle_context.get("verifier_rule") or {}
+        applicability_rules = schema_bundle_context.get("applicability_rules") or {}
+        schema_lines = []
+        if method:
+            schema_lines.append(
+                f"  • 方法: {method.get('name') or schema_bundle_context.get('method_id')}"
+            )
+            if method.get("required_fields"):
+                schema_lines.append(
+                    f"  • 方法前置字段: {', '.join(list(method.get('required_fields') or [])[:6])}"
+                )
+        if contract:
+            contract_fields = [
+                str((item or {}).get("field_name") or "").strip()
+                for item in contract.get("required_fields") or []
+                if str((item or {}).get("field_name") or "").strip()
+            ]
+            if contract_fields:
+                schema_lines.append(f"  • 输出契约字段: {', '.join(contract_fields[:8])}")
+        if applicability_rules:
+            schema_lines.append(
+                "  • 适用性规则: "
+                + "；".join(
+                    str((rule or {}).get("human_description") or rule_id)
+                    for rule_id, rule in list(applicability_rules.items())[:4]
+                )
+            )
+        if verifier_rule and verifier_rule.get("failure_message"):
+            schema_lines.append(f"  • 验收失败语义: {verifier_rule.get('failure_message')}")
+        if schema_lines:
+            parts.append("- 金融 schema 指南:\n" + "\n".join(schema_lines))
 
         # 受阻路径
         if report.blocked_paths:

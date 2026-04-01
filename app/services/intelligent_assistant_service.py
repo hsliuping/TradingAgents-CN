@@ -377,14 +377,12 @@ def _get_system_prompt(
 
 
 def _resolve_models(config_doc) -> tuple:
-    """从配置文档解析模型名：优先 default_models，否则 system_settings"""
-    default_models = config_doc.get("default_models") or {}
-    system_settings = config_doc.get("system_settings") or {}
+    """从配置文档解析默认模型选择，优先 config_id，其次兼容旧 model_name。"""
     return (
-        default_models.get("quick_analysis_model") or system_settings.get("quick_analysis_model"),
-        default_models.get("deep_analysis_model") or system_settings.get("deep_analysis_model"),
-        default_models.get("deep_reasoning_model") or system_settings.get("deep_reasoning_model"),
-        default_models.get("coding_model") or system_settings.get("coding_model"),
+        _resolve_model_selection(config_doc, "quick_analysis_model"),
+        _resolve_model_selection(config_doc, "deep_analysis_model"),
+        _resolve_model_selection(config_doc, "deep_reasoning_model"),
+        _resolve_model_selection(config_doc, "coding_model"),
     )
 
 
@@ -393,6 +391,103 @@ def _normalize_model_name(model_name: Optional[str]) -> Optional[str]:
         return None
     text = str(model_name).strip()
     return text or None
+
+
+def _normalize_config_id(config_id: Optional[str]) -> Optional[str]:
+    if not config_id:
+        return None
+    text = str(config_id).strip()
+    return text or None
+
+
+def _get_config_setting_value(config_doc: Dict[str, Any], key: str) -> Any:
+    default_models = config_doc.get("default_models") or {}
+    system_settings = config_doc.get("system_settings") or {}
+    return default_models.get(key) or system_settings.get(key)
+
+
+def _get_default_provider(config_doc: Dict[str, Any]) -> str:
+    return str(_get_config_setting_value(config_doc, "default_provider") or "").strip().lower()
+
+
+def _select_llm_config_from_doc(
+    config_doc: Dict[str, Any],
+    *,
+    config_id: Optional[str] = None,
+    model_name: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    llm_configs = [cfg for cfg in (config_doc.get("llm_configs") or []) if cfg.get("enabled", True)]
+    normalized_config_id = _normalize_config_id(config_id)
+    normalized_model_name = _normalize_model_name(model_name)
+
+    if normalized_config_id:
+        exact_config = next(
+            (
+                cfg
+                for cfg in llm_configs
+                if _normalize_config_id(cfg.get("config_id")) == normalized_config_id
+            ),
+            None,
+        )
+        if exact_config is not None:
+            return exact_config
+
+    if not normalized_model_name:
+        return None
+
+    model_configs = [cfg for cfg in llm_configs if _normalize_model_name(cfg.get("model_name")) == normalized_model_name]
+    if not model_configs:
+        return None
+
+    preferred_provider = _get_default_provider(config_doc)
+    if preferred_provider:
+        preferred_config = next(
+            (
+                cfg
+                for cfg in model_configs
+                if str(cfg.get("provider") or "").strip().lower() == preferred_provider
+            ),
+            None,
+        )
+        if preferred_config is not None:
+            return preferred_config
+
+    return model_configs[0]
+
+
+def _resolve_model_selection(config_doc: Dict[str, Any], model_key: str) -> Optional[Dict[str, Any]]:
+    config_id = _normalize_config_id(_get_config_setting_value(config_doc, f"{model_key}_config_id"))
+    model_name = _normalize_model_name(_get_config_setting_value(config_doc, model_key))
+    matched_config = _select_llm_config_from_doc(
+        config_doc,
+        config_id=config_id,
+        model_name=model_name,
+    )
+    if matched_config is not None:
+        return {
+            "config_id": _normalize_config_id(matched_config.get("config_id")),
+            "model_name": _normalize_model_name(matched_config.get("model_name")),
+            "provider": str(matched_config.get("provider") or "").strip().lower(),
+        }
+    if not config_id and not model_name:
+        return None
+    return {
+        "config_id": config_id,
+        "model_name": model_name,
+        "provider": None,
+    }
+
+
+def _selection_model_name(selection: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not selection:
+        return None
+    return _normalize_model_name(selection.get("model_name"))
+
+
+def _selection_config_id(selection: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not selection:
+        return None
+    return _normalize_config_id(selection.get("config_id"))
 
 
 def _normalize_preferred_models(preferred_models: Optional[Dict[str, Any]]) -> Dict[str, str]:
@@ -446,9 +541,14 @@ def _build_assistant_model_preferences(
     return {"model": assistant_model}
 
 
-async def _get_llm_config_for_model(db, target_model: str, purpose: str = "") -> Optional[LLMConfig]:
-    """根据模型名获取 LLM 配置（内部复用逻辑）"""
-    if not target_model:
+async def _get_llm_config_for_model(
+    db,
+    target_model: Optional[str],
+    target_config_id: Optional[str] = None,
+    purpose: str = "",
+) -> Optional[LLMConfig]:
+    """根据模型选择获取 LLM 配置，优先 config_id，兼容旧 model_name。"""
+    if not target_model and not target_config_id:
         return None
     config_doc = await db.system_configs.find_one(
         {"is_active": True},
@@ -456,16 +556,27 @@ async def _get_llm_config_for_model(db, target_model: str, purpose: str = "") ->
     )
     if not config_doc or "llm_configs" not in config_doc:
         return None
-    llm_configs = config_doc.get("llm_configs", [])
-    model_configs = [c for c in llm_configs if c.get("model_name") == target_model and c.get("enabled", True)]
-    if not model_configs:
+    model_config = _select_llm_config_from_doc(
+        config_doc,
+        config_id=target_config_id,
+        model_name=target_model,
+    )
+    if model_config is None:
         return None
-    model_config = model_configs[0]
+
+    resolved_model_name = _normalize_model_name(model_config.get("model_name")) or _normalize_model_name(target_model)
+    if not resolved_model_name:
+        return None
+
     from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
-    provider_info = get_provider_and_url_by_model_sync(target_model)
+    provider_info = get_provider_and_url_by_model_sync(
+        resolved_model_name,
+        preferred_provider=str(model_config.get("provider") or _get_default_provider(config_doc) or "").strip().lower(),
+        preferred_config_id=_normalize_config_id(model_config.get("config_id")) or target_config_id,
+    )
     if not provider_info:
         return None
-    provider_str = (provider_info.get("provider") or model_config.get("provider", "")).lower()
+    provider_str = str(model_config.get("provider") or provider_info.get("provider") or "").lower()
     provider_map = {
         "openai": LLMProvider.OPENAI, "deepseek": LLMProvider.DEEPSEEK,
         "dashscope": LLMProvider.DASHSCOPE, "qwen": LLMProvider.DASHSCOPE,
@@ -473,9 +584,9 @@ async def _get_llm_config_for_model(db, target_model: str, purpose: str = "") ->
         "anthropic": LLMProvider.ANTHROPIC, "siliconflow": LLMProvider.SILICONFLOW,
         "ollama": LLMProvider.OLLAMA, "openrouter": LLMProvider.OPENROUTER,
     }
-    provider = provider_map.get(provider_str, LLMProvider.DEEPSEEK)
+    provider = provider_map.get(provider_str, LLMProvider.DASHSCOPE)
     return LLMConfig(
-        provider=provider, model=target_model,
+        provider=provider, model=resolved_model_name,
         api_key=provider_info.get("api_key"), base_url=provider_info.get("backend_url"),
         temperature=float(model_config.get("temperature", 0.2)),
         max_tokens=int(model_config.get("max_tokens", 4000)),
@@ -505,22 +616,30 @@ async def _get_assistant_llm_config(
 
     llm_configs = config_doc.get("llm_configs", [])
     default_llm = config_doc.get("default_llm")
-    quick_model, deep_model, reasoning_model, _ = _resolve_models(config_doc)
+    quick_selection, deep_selection, reasoning_selection, _ = _resolve_models(config_doc)
+    quick_model = _selection_model_name(quick_selection)
+    deep_model = _selection_model_name(deep_selection)
+    reasoning_model = _selection_model_name(reasoning_selection)
     preferred_assistant_model = _get_preferred_assistant_model(preferred_models)
+    target_config_id: Optional[str] = None
 
     if use_reasoning_model and preferred_assistant_model:
         target_model = preferred_assistant_model
         logger.info(f"[智能助手] 使用用户选择的助手模型: {target_model}")
-    elif use_reasoning_model and reasoning_model:
-        target_model = reasoning_model
+    elif use_reasoning_model and reasoning_selection:
+        target_model = _selection_model_name(reasoning_selection)
+        target_config_id = _selection_config_id(reasoning_selection)
         logger.info(f"[智能助手] 使用深度推理模型: {target_model}")
     else:
-        target_model = preferred_assistant_model or deep_model or quick_model or default_llm
+        target_selection = deep_selection or quick_selection
+        target_model = preferred_assistant_model or _selection_model_name(target_selection) or default_llm
+        if not preferred_assistant_model and target_selection is not None:
+            target_config_id = _selection_config_id(target_selection)
         if preferred_assistant_model:
             logger.info(f"[智能助手] 使用用户选择的助手模型: {preferred_assistant_model}")
-        elif deep_model:
+        elif deep_selection:
             logger.info(f"[智能助手] 使用深度分析模型: {deep_model}")
-        elif quick_model:
+        elif quick_selection:
             logger.info(f"[智能助手] 深度模型未配置，使用快速模型: {quick_model}")
 
     if not target_model:
@@ -529,13 +648,14 @@ async def _get_assistant_llm_config(
         for cfg in llm_configs:
             if cfg.get("enabled", True):
                 target_model = cfg.get("model_name")
+                target_config_id = _normalize_config_id(cfg.get("config_id"))
                 break
 
     if not target_model:
         logger.warning("[智能助手] 未找到可用的模型配置")
         return None
 
-    return await _get_llm_config_for_model(db, target_model)
+    return await _get_llm_config_for_model(db, target_model, target_config_id=target_config_id)
 
 
 async def get_reasoning_llm_config(db=None):
@@ -561,11 +681,16 @@ async def get_coding_llm_config(db=None):
     )
     if not config_doc or "llm_configs" not in config_doc:
         return await get_reasoning_llm_config(db)
-    _, deep_model, reasoning_model, coding_model = _resolve_models(config_doc)
-    target_model = coding_model or reasoning_model or deep_model
+    _, deep_selection, reasoning_selection, coding_selection = _resolve_models(config_doc)
+    deep_model = _selection_model_name(deep_selection)
+    reasoning_model = _selection_model_name(reasoning_selection)
+    coding_model = _selection_model_name(coding_selection)
+    target_selection = coding_selection or reasoning_selection or deep_selection
+    target_model = _selection_model_name(target_selection)
+    target_config_id = _selection_config_id(target_selection)
     if target_model:
         logger.info(f"[编程模型] 使用: {target_model} (coding={bool(coding_model)}, reasoning={bool(reasoning_model)})")
-    return await _get_llm_config_for_model(db, target_model) if target_model else await get_reasoning_llm_config(db)
+    return await _get_llm_config_for_model(db, target_model, target_config_id=target_config_id) if target_model else await get_reasoning_llm_config(db)
 
 
 class IntelligentAssistantService:

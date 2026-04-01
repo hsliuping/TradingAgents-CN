@@ -33,6 +33,12 @@
 - [ ] 已准备好自选股分组与标签示例
 - [ ] 已准备好持仓或复盘示例数据
 
+### 5. 因子回归校验
+
+- [ ] 直播前执行一次 `python scripts/run_factor_validations.py`
+- [ ] 确认基本面与技术因子校验都返回通过
+- [ ] 若技术因子失败，先重跑 `python scripts/materialize_technical_indicators.py` 再复验
+
 ### 4. 页面与展示效果
 
 - [ ] 默认进入页面内容正常

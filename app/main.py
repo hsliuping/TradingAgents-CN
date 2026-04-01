@@ -82,6 +82,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from app.services.quotes_ingestion_service import QuotesIngestionService
+from app.services.capability_index_service import CapabilityIndexService
 from app.routers import paper as paper_router
 from app.routers import portfolio as portfolio_router
 from app.routers import review as review_router
@@ -913,6 +914,46 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"⭐ 自选股A股数据同步已配置: {settings.FAVORITES_DATA_SYNC_CRON} (历史数据+财务数据)")
 
+        # 技术指标物化任务配置（写入 stock_technical_indicators）
+        logger.info("🔄 配置技术指标物化任务...")
+
+        async def run_technical_indicator_materialization_job():
+            try:
+                logger.info("📐 开始技术指标物化任务...")
+                from app.services.technical_indicator_materialization_service import materialize_technical_indicators
+
+                result = await asyncio.to_thread(
+                    materialize_technical_indicators,
+                    500,
+                    lambda message: logger.info(f"[technical_materialization] {message}"),
+                )
+                logger.info(
+                    "✅ 技术指标物化完成: processed=%s written=%s",
+                    result.get("processed", 0),
+                    result.get("written", 0),
+                )
+            except asyncio.CancelledError:
+                logger.info("ℹ️ 技术指标物化任务在应用关闭过程中被取消")
+                return
+            except Exception as e:
+                logger.error(f"❌ 技术指标物化失败: {e}", exc_info=True)
+
+        scheduler.add_job(
+            run_technical_indicator_materialization_job,
+            CronTrigger.from_crontab(settings.TECHNICAL_INDICATORS_MATERIALIZATION_CRON, timezone=settings.TIMEZONE),
+            id="technical_indicators_materialization",
+            name="技术指标物化（MA/MACD/RSI/KDJ）",
+        )
+        if not settings.TECHNICAL_INDICATORS_MATERIALIZATION_ENABLED:
+            scheduler.pause_job("technical_indicators_materialization")
+            logger.info(
+                f"⏸️ 技术指标物化任务已添加但暂停: {settings.TECHNICAL_INDICATORS_MATERIALIZATION_CRON}"
+            )
+        else:
+            logger.info(
+                f"📐 技术指标物化任务已配置: {settings.TECHNICAL_INDICATORS_MATERIALIZATION_CRON}"
+            )
+
         # ETF 数据同步任务配置（etf_basic_info + etf_daily_quotes）
         scheduler.add_job(
             run_etf_sync,
@@ -1064,6 +1105,19 @@ async def lifespan(app: FastAPI):
             await _mcp_svc.restore_enabled_servers()
     except Exception as e:
         logger.warning(f"⚠️ 恢复 MCP 工具失败（不影响启动）: {e}")
+
+    try:
+        capability_db = get_mongo_db()
+        capability_index = CapabilityIndexService(capability_db)
+        sync_result = await capability_index.ensure_index()
+        logger.info(
+            "✅ CapabilityIndex 初始化完成: mode=%s indexed=%s total=%s",
+            sync_result.sync_mode,
+            sync_result.indexed_documents,
+            sync_result.total_documents,
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ CapabilityIndex 初始化失败: {e}")
 
     try:
         yield

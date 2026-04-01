@@ -81,6 +81,7 @@ class SkillSpec(BaseModel):
     data_source: str = ""                  # 主数据源标识；若有附加来源应在 constraints 中说明
     parameters: List[SkillParameter] = Field(default_factory=list)
     expected_output: ExpectedOutput = Field(default_factory=ExpectedOutput)
+    validation_checks: List["ValidationCheck"] = Field(default_factory=list)
     constraints: List[str] = Field(default_factory=list)    # 行为约束
     test_input: Dict[str, Any] = Field(default_factory=dict)  # 测试输入
     test_expected: Dict[str, Any] = Field(default_factory=dict)  # 测试期望
@@ -136,27 +137,43 @@ class ImplementationIssue(BaseModel):
     severity: str = "info"  # info, warning, error
 
 
+class ReconToolTrace(BaseModel):
+    """侦察阶段的工具调用轨迹。"""
+    tool_name: str = ""
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+    success: bool = True
+    duration_ms: float = 0.0
+    result_chars: int = 0
+    result_preview: str = ""
+    error: str = ""
+
+
 class ValidationCheck(BaseModel):
     """业务验收或生成前侦察建议的检查项。"""
     name: str = ""
     description: str = ""
     required: bool = True
     check_type: str = "required_field"  # required_field, required_non_empty_payload, custom
+    rule_level: str = "data"  # input, output, data, business, warning
+    blocking: bool = True
     field: str = ""
     value_path: str = "data"  # output, data
     forbid_null: bool = True
+    params: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ImplementationFactReport(BaseModel):
     """前置侦察层输出的结构化实现事实报告。"""
     task_summary: str = ""
     recommended_strategy: str = ""
+    schema_bundle_context: Dict[str, Any] = Field(default_factory=dict)
     available_helpers: List[ImplementationHelper] = Field(default_factory=list)
     schema_facts: List[ImplementationFact] = Field(default_factory=list)
     sample_fields: Dict[str, List[str]] = Field(default_factory=dict)
     blocked_paths: List[ImplementationIssue] = Field(default_factory=list)
     runtime_gaps: List[ImplementationIssue] = Field(default_factory=list)
     validation_checks: List[ValidationCheck] = Field(default_factory=list)
+    tool_traces: List[ReconToolTrace] = Field(default_factory=list)
     confidence: float = 0.0
     notes: List[str] = Field(default_factory=list)
 

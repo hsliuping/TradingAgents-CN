@@ -165,20 +165,16 @@ async def run_stock_basics_sync(
         if preferred_sources and isinstance(preferred_sources, str):
             sources_list = [s.strip() for s in preferred_sources.split(",") if s.strip()]
 
-        # 运行同步（同步执行，前端已设置10分钟超时）
-        result = await service.run_full_sync(force=force, preferred_sources=sources_list)
+        # 改为后台执行，避免前端请求长时间阻塞
+        result = await service.start_background_sync(force=force, preferred_sources=sources_list)
 
-        # 判断是否成功
-        success = result.get("status") in ["success", "success_with_errors"]
-        message = "Synchronization completed successfully"
+        success = result.get("status") in ["queued", "running", "success", "success_with_errors"]
+        message = "Synchronization task accepted"
 
-        if result.get("status") == "success_with_errors":
-            message = f"Synchronization completed with {result.get('errors', 0)} errors"
-        elif result.get("status") == "failed":
-            message = f"Synchronization failed: {result.get('message', 'Unknown error')}"
-            success = False
-        elif result.get("status") == "running":
+        if result.get("launch_mode") == "already_running":
             message = "Synchronization is already running"
+        elif result.get("status") == "queued":
+            message = "Synchronization started in background"
 
         return SyncResponse(
             success=success,

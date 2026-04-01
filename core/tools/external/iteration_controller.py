@@ -137,7 +137,6 @@ class IterationController:
                 len(fact_report.available_helpers),
                 len(fact_report.validation_checks),
             )
-            _report("reconnaissance", "复用已有侦察报告", 0, 0.08)
             self._persist_fact_report(spec.tool_id, run_id, fact_report)
         else:
             # 内部侦察模式（向后兼容）
@@ -190,9 +189,32 @@ class IterationController:
                     + "\n".join(f"      | {line}" for line in code_lines[:5])
                     + (f"\n      | ... (共 {len(code_lines)} 行)" if len(code_lines) > 5 else "")
                 )
+                self._persist_stage_artifact(
+                    tool_id=spec.tool_id,
+                    run_id=run_id,
+                    round_num=round_num,
+                    stage="code_generation",
+                    payload={
+                        "success": True,
+                        "generation_time": generated.generation_time,
+                        "code_lines": len(code_lines),
+                        "metadata": generated.metadata or {},
+                    },
+                    code=generated.code,
+                )
                 _report("code_generation", f"代码生成完成 ({generated.generation_time}s)", round_num, 0.2)
             except Exception as e:
                 logger.error(f"❌ [第{round_num}轮] 代码生成失败: {e}")
+                self._persist_stage_artifact(
+                    tool_id=spec.tool_id,
+                    run_id=run_id,
+                    round_num=round_num,
+                    stage="code_generation",
+                    payload={
+                        "success": False,
+                        "error": str(e),
+                    },
+                )
                 iteration.decision = "FAIL"
                 iteration.feedback = f"代码生成失败: {e}"
                 iterations.append(iteration)
@@ -203,6 +225,18 @@ class IterationController:
             _report("static_validation", "正在语法检查...", round_num, 0.25)
             validation = self._validator.validate(generated, spec)
             iteration.validation = validation
+            self._persist_stage_artifact(
+                tool_id=spec.tool_id,
+                run_id=run_id,
+                round_num=round_num,
+                stage="static_validation",
+                payload={
+                    "passed": validation.passed,
+                    "errors": validation.errors[:20],
+                    "warnings": (validation.warnings or [])[:20],
+                },
+                code=generated.code,
+            )
 
             if not validation.passed:
                 feedback = self._build_rich_feedback(
@@ -230,6 +264,21 @@ class IterationController:
             _report("sandbox_execution", "正在沙箱执行...", round_num, 0.4)
             sandbox = self._runner.run(generated.code, spec)
             iteration.sandbox = sandbox
+            self._persist_stage_artifact(
+                tool_id=spec.tool_id,
+                run_id=run_id,
+                round_num=round_num,
+                stage="sandbox_execution",
+                payload={
+                    "success": sandbox.success,
+                    "execution_time": sandbox.execution_time,
+                    "error": sandbox.error,
+                    "stdout": sandbox.stdout,
+                    "stderr": sandbox.stderr,
+                    "output": sandbox.output,
+                },
+                code=generated.code,
+            )
 
             if not sandbox.success:
                 _report("reflection", "正在分析失败原因...", round_num, 0.5)
@@ -303,6 +352,16 @@ class IterationController:
             _report("output_evaluation", "正在质量评估...", round_num, 0.65)
             eval_score = self._evaluator.evaluate(sandbox, spec, generated.code)
             iteration.eval_score = eval_score
+            self._persist_stage_artifact(
+                tool_id=spec.tool_id,
+                run_id=run_id,
+                round_num=round_num,
+                stage="output_evaluation",
+                payload={
+                    "eval_score": iteration.eval_score.model_dump(),
+                },
+                code=generated.code,
+            )
             logger.info(
                 f"📊 [第{round_num}轮] 评估得分:\n"
                 f"   总分: {eval_score.total}/10 (阈值: {PASS_THRESHOLD})\n"
@@ -317,12 +376,57 @@ class IterationController:
                 fact_report,
             )
             iteration.business_verification = business_verification
+            self._persist_stage_artifact(
+                tool_id=spec.tool_id,
+                run_id=run_id,
+                round_num=round_num,
+                stage="business_verification",
+                payload={
+                    "passed": business_verification.passed,
+                    "business_score": business_verification.business_score,
+                    "failures": [failure.model_dump() for failure in business_verification.failures[:20]],
+                    "warnings": business_verification.warnings[:20],
+                    "details": business_verification.details,
+                },
+                code=generated.code,
+            )
             logger.info(
                 f"🧪 [第{round_num}轮] 业务验收:\n"
                 f"   通过: {business_verification.passed}\n"
                 f"   业务分: {business_verification.business_score}\n"
                 f"   失败项: {len(business_verification.failures)}"
             )
+
+            if self._is_systemic_business_verifier_failure(business_verification):
+                system_reflection = ReflectionResult(
+                    root_cause="系统级业务验收规则配置错误，当前失败并非代码实现缺陷。",
+                    fix_plan=[
+                        "清洗或降级不可执行的抽象 validation_checks（如 business/custom）。",
+                        "仅保留 status_success、required_field、required_non_empty_payload 等可执行规则。",
+                        "修复系统规则后再重新发起生成。",
+                    ],
+                    should_retry=False,
+                    confidence=0.99,
+                )
+                iteration.reflection = system_reflection
+                iteration.decision = "FAIL"
+                iteration.feedback = self._build_rich_feedback(
+                    stage="质量评估/业务验收",
+                    errors=self._build_business_errors(business_verification),
+                    code=generated.code,
+                    spec=spec,
+                    stdout=sandbox.stdout,
+                    stderr=sandbox.stderr,
+                    output=sandbox.output,
+                    reflection=system_reflection,
+                )
+                iterations.append(iteration)
+                self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
+                _report("output_evaluation", "检测到系统级验收规则错误，终止重试", round_num, 0.8)
+                logger.warning(
+                    f"🛑 [第{round_num}轮] 检测到系统级业务验收错误，停止继续让模型修代码"
+                )
+                break
 
             if eval_score.total >= PASS_THRESHOLD and business_verification.passed:
                 # ===== 阶段 5: 边缘测试验证 =====
@@ -630,6 +734,45 @@ class IterationController:
             return None
 
     @staticmethod
+    def _persist_stage_artifact(
+        tool_id: str,
+        run_id: str,
+        round_num: int,
+        stage: str,
+        payload: Dict[str, Any],
+        code: str = "",
+    ) -> Optional[Path]:
+        """阶段一完成就立即落盘，便于定位卡在哪一步。"""
+        try:
+            d = IterationController._get_snapshot_dir(tool_id, run_id)
+            stage_payload = {
+                "tool_id": tool_id,
+                "run_id": run_id,
+                "round_number": round_num,
+                "stage": stage,
+                "updated_at": datetime.utcnow().isoformat(),
+                **payload,
+            }
+            path = d / f"round_{round_num:02d}_{stage}.json"
+            path.write_text(
+                json.dumps(stage_payload, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            latest_path = d / "latest_stage.json"
+            latest_path.write_text(
+                json.dumps(stage_payload, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            if code:
+                code_path = d / f"round_{round_num:02d}.py"
+                code_path.write_text((code or "") + ("" if code.endswith("\n") else "\n"), encoding="utf-8")
+            logger.info("📝 阶段结果已落盘: %s", path)
+            return path
+        except Exception as exc:
+            logger.warning("⚠️ 阶段结果落盘失败(stage=%s, round=%s): %s", stage, round_num, exc)
+            return None
+
+    @staticmethod
     def _build_reconnaissance_updates(fact_report: ImplementationFactReport) -> List[str]:
         updates: List[str] = []
         if fact_report.recommended_strategy:
@@ -927,6 +1070,13 @@ class IterationController:
         return "\n".join(lines)
 
     @staticmethod
+    def _is_systemic_business_verifier_failure(result: BusinessVerificationResult) -> bool:
+        unsupported = result.details.get("unsupported_rule_types") or []
+        if unsupported:
+            return True
+        return any("未支持的业务验收规则类型" in failure.message for failure in result.failures)
+
+    @staticmethod
     def _format_code_for_prompt(
         code: str,
         *,
@@ -994,6 +1144,32 @@ class IterationController:
     # ==================== 反馈构建 ====================
 
     @staticmethod
+    def _summarize_text(
+        text: Any,
+        *,
+        max_chars: int,
+        head_chars: Optional[int] = None,
+        separator: str = "\n... (中间省略) ...\n",
+    ) -> str:
+        """长文本默认保留首尾，避免执行尾部异常信息被截断。"""
+        if text is None:
+            return ""
+
+        text_str = str(text)
+        if len(text_str) <= max_chars:
+            return text_str
+
+        if head_chars is None:
+            head_chars = max_chars // 2
+
+        head_chars = max(1, min(head_chars, max_chars - len(separator) - 1))
+        tail_chars = max_chars - head_chars - len(separator)
+        if tail_chars <= 0:
+            return text_str[:max_chars]
+
+        return text_str[:head_chars] + separator + text_str[-tail_chars:]
+
+    @staticmethod
     def _build_rich_feedback(
         *,
         stage: str,
@@ -1015,16 +1191,34 @@ class IterationController:
             parts.append(f"  - {e}")
 
         if stdout:
-            parts.append(f"\n## 标准输出 (stdout 截断)\n{stdout[:1500]}")
+            stdout_excerpt = IterationController._summarize_text(
+                stdout,
+                max_chars=2200,
+                head_chars=1200,
+            )
+            parts.append(f"\n## 标准输出 (stdout 摘要)\n{stdout_excerpt}")
 
         if stderr:
-            parts.append(f"\n## 标准错误 (stderr 截断)\n{stderr[:1500]}")
+            stderr_excerpt = IterationController._summarize_text(
+                stderr,
+                max_chars=2200,
+                head_chars=1200,
+            )
+            parts.append(f"\n## 标准错误 (stderr 摘要)\n{stderr_excerpt}")
 
         if output is not None:
             try:
-                output_str = json.dumps(output, ensure_ascii=False, indent=2, default=str)[:2000]
+                output_str = IterationController._summarize_text(
+                    json.dumps(output, ensure_ascii=False, indent=2, default=str),
+                    max_chars=2500,
+                    head_chars=1500,
+                )
             except Exception:
-                output_str = str(output)[:2000]
+                output_str = IterationController._summarize_text(
+                    output,
+                    max_chars=2500,
+                    head_chars=1500,
+                )
             parts.append(f"\n## 函数实际返回值\n{output_str}")
 
         if reflection:

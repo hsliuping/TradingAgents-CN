@@ -144,6 +144,32 @@ class SkillGenerationService:
         return written_files
 
     @staticmethod
+    def _summarize_text(
+        text: Any,
+        *,
+        max_chars: int,
+        head_chars: Optional[int] = None,
+        separator: str = "\n... (中间省略) ...\n",
+    ) -> str:
+        """长文本摘要默认保留首尾，避免只看到前半段导致误判。"""
+        if text is None:
+            return ""
+
+        text_str = str(text)
+        if len(text_str) <= max_chars:
+            return text_str
+
+        if head_chars is None:
+            head_chars = max_chars // 2
+
+        head_chars = max(1, min(head_chars, max_chars - len(separator) - 1))
+        tail_chars = max_chars - head_chars - len(separator)
+        if tail_chars <= 0:
+            return text_str[:max_chars]
+
+        return text_str[:head_chars] + separator + text_str[-tail_chars:]
+
+    @staticmethod
     def _format_single_pipeline(
         pipeline_result: PipelineResult,
         label: str = "",
@@ -175,10 +201,18 @@ class SkillGenerationService:
             if not compact and iteration.sandbox and iteration.sandbox.success and iteration.sandbox.output is not None:
                 import json as _json
                 try:
-                    out_str = _json.dumps(iteration.sandbox.output, ensure_ascii=False, default=str)[:800]
+                    out_str = SkillGenerationService._summarize_text(
+                        _json.dumps(iteration.sandbox.output, ensure_ascii=False, default=str),
+                        max_chars=1200,
+                        head_chars=700,
+                    )
                 except Exception:
-                    out_str = str(iteration.sandbox.output)[:800]
-                parts.append(f"沙箱返回值（截断）：{out_str}")
+                    out_str = SkillGenerationService._summarize_text(
+                        iteration.sandbox.output,
+                        max_chars=1200,
+                        head_chars=700,
+                    )
+                parts.append(f"沙箱返回值（摘要）：{out_str}")
 
             if iteration.eval_score:
                 parts.append(
@@ -197,7 +231,12 @@ class SkillGenerationService:
                     parts.append("修复计划：" + " → ".join(iteration.reflection.fix_plan[:5]))
 
             if not compact and iteration.feedback:
-                parts.append(f"系统反馈（截断）：{iteration.feedback[:500]}")
+                feedback_excerpt = SkillGenerationService._summarize_text(
+                    iteration.feedback,
+                    max_chars=1200,
+                    head_chars=700,
+                )
+                parts.append(f"系统反馈（摘要）：{feedback_excerpt}")
 
         return parts
 
@@ -344,8 +383,16 @@ class SkillGenerationService:
             current_pipeline=session.pipeline_result,
             user_feedback=feedback,
         )
+        pipeline_feedback = self._build_pipeline_failure_feedback(
+            session.pipeline_result,
+            feedback,
+        )
         last_code = self._get_last_generated_code(session.pipeline_result)
-        code_excerpt = (last_code or "")[:12000]
+        code_excerpt = self._summarize_text(
+            last_code,
+            max_chars=12000,
+            head_chars=7000,
+        )
         attempt_count = len(session.pipeline_history) + (1 if session.pipeline_result else 0)
         prompt = f"""
 你现在是 Skill 生成失败后的修正协作者。该 Skill 已经经过 {attempt_count} 次生成尝试，均未达标。
@@ -375,7 +422,7 @@ test_input: {spec.test_input}
 === 累积经验（共 {attempt_count} 次尝试）===
 {accumulated_exp}
 
-=== 最近一次生成的代码（截断） ===
+=== 最近一次生成的代码（摘要，保留首尾） ===
 {code_excerpt or '无'}
 
 请给出一份让用户可以确认的修正计划。
@@ -711,13 +758,16 @@ test_input: {spec.test_input}
         )
         final_spec = enriched_spec or draft_spec
 
-        # 缓存 fact_report 到 session，confirm_spec 时复用
+        # 缓存 spec 与 fact_report 到 session，confirm_spec 时直接复用，
+        # 避免再次调用 LLM 生成规格导致前端长时间停留在 0%。
+        session.spec = final_spec
         session.fact_report = fact_report
         await self._save_session(session)
 
         return {
             "spec": final_spec.model_dump(),
             "recommendations": self._build_session_recommendations(spec=final_spec),
+            "fact_report": fact_report.model_dump() if fact_report else None,
         }
 
     async def confirm_spec(
@@ -749,10 +799,26 @@ test_input: {spec.test_input}
                 )
                 logger.info("🧭 侦察完成 (confirm)，置信度: %.0f%%", fact_report.confidence * 100)
 
-        # 基于侦察事实生成最终 SkillSpec
-        session, spec = await asyncio.get_event_loop().run_in_executor(
-            None, self._analyzer.confirm_spec, session, user_message, fact_report
+        # 如果 preview 阶段已经缓存了规格，并且当前只是常规“确认”，
+        # 则直接复用，避免 confirm 时再次调用 LLM 生成 SkillSpec。
+        normalized_message = (user_message or "").strip()
+        can_reuse_preview_spec = bool(
+            session.spec
+            and fact_report is not None
+            and normalized_message in ("", "确认", "确认生成", "继续生成")
         )
+
+        if can_reuse_preview_spec:
+            spec = session.spec
+            session.spec_confirmed = True
+            session.status = SessionStatus.CONFIRMED
+            session.updated_at = datetime.utcnow()
+            await self._save_session(session)
+        else:
+            # 基于侦察事实生成最终 SkillSpec
+            session, spec = await asyncio.get_event_loop().run_in_executor(
+                None, self._analyzer.confirm_spec, session, user_message, fact_report
+            )
 
         if not spec:
             return {
@@ -1317,7 +1383,9 @@ test_input: {spec.test_input}
         try:
             from core.tools.registry import get_tool_registry
             from core.tools.external_skill_loader import register_single_external_skill
+            from app.services.capability_index_service import CapabilityIndexService
             register_single_external_skill(None, get_tool_registry(), skill_doc)
+            await CapabilityIndexService(self._db).ensure_index()
         except Exception as e:
             logger.warning(f"⚠️ Skill '{spec.tool_id}' 热注册失败（重启后生效）: {e}")
 

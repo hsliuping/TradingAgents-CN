@@ -107,7 +107,7 @@ class ChromaDBCollection:
             logger.debug(f"🔒 [ChromaDB] 准备获取锁 - add (collection={self.collection_name})")
             with ChromaDBAdapter._chroma_operation_lock:
                 logger.debug(f"🔓 [ChromaDB] 已获取锁 - add (collection={self.collection_name})")
-                self.collection.add(
+                self.collection.upsert(
                     documents=documents,
                     embeddings=embeddings,
                     metadatas=metadatas,
@@ -176,6 +176,22 @@ class ChromaDBCollection:
             return True
         except Exception as e:
             logger.error(f"❌ [ChromaDB] 删除集合失败: {e}")
+            return False
+
+    def delete_ids(self, ids: List[str]) -> bool:
+        """按文档 ID 删除集合中的部分文档。"""
+        if not ids:
+            return True
+        try:
+            logger.debug(f"🔒 [ChromaDB] 准备获取锁 - delete_ids (collection={self.collection_name}, count={len(ids)})")
+            with ChromaDBAdapter._chroma_operation_lock:
+                logger.debug(f"🔓 [ChromaDB] 已获取锁 - delete_ids (collection={self.collection_name})")
+                self.collection.delete(ids=ids)
+                logger.debug(f"✅ [ChromaDB] delete_ids 操作完成 (collection={self.collection_name}, count={len(ids)})")
+            logger.debug(f"🔓 [ChromaDB] 已释放锁 - delete_ids (collection={self.collection_name})")
+            return True
+        except Exception as e:
+            logger.error(f"❌ [ChromaDB] 按 ID 删除文档失败: {e}")
             return False
 
     def get_backend_name(self) -> str:

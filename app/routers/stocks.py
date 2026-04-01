@@ -13,6 +13,7 @@ import re
 from app.routers.auth_db import get_current_user
 from app.core.database import get_mongo_db
 from app.core.response import ok
+from core.skill_runtime.fundamental_factors import get_fundamental_factor_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,96 @@ def _build_financial_raw_data(financial_data: Optional[Dict[str, Any]]) -> Dict[
         if raw_data.get(group):
             result[group] = raw_data.get(group)
     return result
+
+
+def _get_p0_fundamental_snapshot(symbol: str) -> Dict[str, Any]:
+    try:
+        return get_fundamental_factor_snapshot(symbol) or {}
+    except Exception as e:
+        logger.warning("获取 P0 基本面 snapshot 失败 %s: %s", symbol, e)
+        return {}
+
+
+def _merge_snapshot_fields_into_fundamentals(data: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    if not snapshot:
+        return data
+
+    factors = snapshot.get("factors") or {}
+    if factors.get("pe") is not None:
+        data["pe"] = factors.get("pe")
+    if factors.get("pe_ttm") is not None:
+        data["pe_ttm"] = factors.get("pe_ttm")
+    if factors.get("pb") is not None:
+        data["pb"] = factors.get("pb")
+    if factors.get("pb_mrq") is not None:
+        data["pb_mrq"] = factors.get("pb_mrq")
+    if factors.get("ps_ttm") is not None:
+        data["ps_ttm"] = factors.get("ps_ttm")
+        if data.get("ps") is None:
+            data["ps"] = factors.get("ps_ttm")
+
+    fundamentals_field_map = {
+        "dividend_yield": "dividend_yield",
+        "roe": "roe",
+        "roa": "roa",
+        "gross_margin": "gross_margin",
+        "netprofit_margin": "netprofit_margin",
+        "debt_to_assets": "debt_ratio",
+        "assets_to_eqt": "assets_to_eqt",
+        "current_ratio": "current_ratio",
+        "quick_ratio": "quick_ratio",
+        "cash_ratio": "cash_ratio",
+        "revenue_ttm": "revenue_ttm",
+        "net_profit_ttm": "net_profit_ttm",
+        "n_cashflow_act": "n_cashflow_act",
+    }
+    for snapshot_field, response_field in fundamentals_field_map.items():
+        if factors.get(snapshot_field) is not None:
+            data[response_field] = factors.get(snapshot_field)
+
+    if factors.get("debt_to_assets") is not None:
+        data["debt_to_assets"] = factors.get("debt_to_assets")
+
+    if snapshot.get("report_period"):
+        data["report_period"] = snapshot.get("report_period")
+    if snapshot.get("data_source"):
+        data["financial_data_source"] = snapshot.get("data_source")
+
+    if snapshot.get("factor_diagnostics"):
+        data["factor_diagnostics"] = snapshot.get("factor_diagnostics")
+    if snapshot.get("factor_warnings"):
+        data["factor_warnings"] = snapshot.get("factor_warnings")
+
+    return data
+
+
+def _merge_snapshot_fields_into_financial_summary(summary: Dict[str, Any], snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    if not snapshot:
+        return summary
+
+    factors = snapshot.get("factors") or {}
+    summary_field_map = {
+        "roe": "roe",
+        "roa": "roa",
+        "gross_margin": "gross_margin",
+        "netprofit_margin": "netprofit_margin",
+        "debt_to_assets": "debt_to_assets",
+        "assets_to_eqt": "assets_to_eqt",
+        "current_ratio": "current_ratio",
+        "quick_ratio": "quick_ratio",
+        "cash_ratio": "cash_ratio",
+        "revenue_ttm": "revenue_ttm",
+        "net_profit_ttm": "net_profit_ttm",
+        "n_cashflow_act": "n_cashflow_act",
+    }
+    for snapshot_field, summary_field in summary_field_map.items():
+        if factors.get(snapshot_field) is not None:
+            summary[summary_field] = factors.get(snapshot_field)
+
+    if snapshot.get("report_period"):
+        summary["report_period"] = snapshot.get("report_period")
+
+    return summary
 
 
 async def _get_cn_source_priority() -> List[str]:
@@ -501,6 +592,7 @@ async def get_fundamentals(
     # A股：使用现有逻辑
     db = get_mongo_db()
     code6 = normalized_code
+    p0_snapshot = _get_p0_fundamental_snapshot(code6)
 
     if _is_cn_etf_code(code6):
         if source:
@@ -743,6 +835,8 @@ async def get_fundamentals(
     if data["dividend_yield"] is None:
         data["dividend_yield"] = b.get("dividend_yield")
 
+    data = _merge_snapshot_fields_into_fundamentals(data, p0_snapshot)
+
     return ok(data)
 
 
@@ -799,6 +893,8 @@ async def get_financials(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该股票的财务数据")
 
     summary = _build_financial_summary(financial_data)
+    p0_snapshot = _get_p0_fundamental_snapshot(normalized_code)
+    summary = _merge_snapshot_fields_into_financial_summary(summary, p0_snapshot)
     raw_data = _build_financial_raw_data(financial_data) if include_raw else {}
     available_fields = sorted(
         key for key in financial_data.keys()
@@ -809,10 +905,13 @@ async def get_financials(
         "code": normalized_code,
         "name": financial_data.get("name"),
         "data_source": financial_data.get("data_source"),
-        "report_period": financial_data.get("report_period"),
+        "report_period": p0_snapshot.get("report_period") or financial_data.get("report_period"),
         "report_type": financial_data.get("report_type"),
         "ann_date": financial_data.get("ann_date"),
         "summary": summary,
+        "factor_snapshot": p0_snapshot.get("factors") or {},
+        "factor_diagnostics": p0_snapshot.get("factor_diagnostics") or {},
+        "factor_warnings": p0_snapshot.get("factor_warnings") or {},
         "raw_data": raw_data,
         "available_fields": available_fields,
     })

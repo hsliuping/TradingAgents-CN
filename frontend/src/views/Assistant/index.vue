@@ -683,11 +683,6 @@ const getCapabilityTagType = (level: number): 'success' | 'info' | 'warning' | '
   return 'info'
 }
 
-const isQuickAnalysisRole = (roles?: string[]): boolean => {
-  if (!roles || !Array.isArray(roles)) return false
-  return roles.includes('quick_analysis') || roles.includes('both')
-}
-
 const isDeepAnalysisRole = (roles?: string[]): boolean => {
   if (!roles || !Array.isArray(roles)) return false
   return roles.includes('deep_analysis') || roles.includes('both')

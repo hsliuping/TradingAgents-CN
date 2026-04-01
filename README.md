@@ -82,6 +82,15 @@
 3. 让 Agent 自动规划分析路径并生成结果
 4. 按需扩展 Skill，把高频需求沉淀为新能力
 
+### 🧩 因子治理说明
+
+- **基本面因子**：P0 基本面字段已经纳入统一的 schema、catalog、runtime semantic contract 和回归校验链。
+- **技术因子**：首批进入同级治理的字段为 `ma20`、`rsi14`、`kdj_k`、`kdj_d`、`kdj_j`、`dif`、`dea`、`macd_hist`。
+- **当前 screening 暴露范围**：上述 8 个技术字段已经进入 `stock_technical_indicators`、`stock_screening_view`、数据库筛选和增强筛选数据库路径。
+- **为什么 `ma60` 暂不进入 screening**：`ma60` 已登记在技术因子 schema/catalog 中，但当前首批物化与公开 screening 字段只覆盖已完成数据库链路验证的技术因子；`ma60` 暂未加入公开 screening，避免出现“catalog 已宣称可筛选、但数据库视图与回归链未覆盖”的语义漂移。
+- **统一校验入口**：本地可直接运行 `python scripts/run_factor_validations.py`，或在 VS Code 中执行任务 `Run Factor Validations`。技术因子专项校验脚本为 `scripts/validate_technical_factors.py`。
+- **详细说明**：见 [docs/architecture/technical-factor-governance.md](docs/architecture/technical-factor-governance.md)。
+
 
 
 #### 📥 安装部署

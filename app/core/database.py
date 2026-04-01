@@ -324,7 +324,8 @@ async def create_stock_screening_view(db):
             logger.info("📋 视图 stock_screening_view 已存在，先删除后重建以同步最新字段")
             await db["stock_screening_view"].drop()
 
-        # 创建视图：将 stock_basic_info、market_quotes 和 stock_financial_data 关联
+        # 创建视图：将 stock_basic_info、market_quotes、stock_financial_periods
+        # 和技术指标快照统一关联
         pipeline = [
             # 第一步：关联实时行情数据 (market_quotes)
             {
@@ -342,10 +343,10 @@ async def create_stock_screening_view(db):
                     "preserveNullAndEmptyArrays": True
                 }
             },
-            # 第三步：关联财务数据 (stock_financial_data)
+            # 第三步：关联财务数据 (stock_financial_periods)
             {
                 "$lookup": {
-                    "from": "stock_financial_data",
+                    "from": "stock_financial_periods",
                     "let": {"stock_code": "$code", "stock_source": "$source"},
                     "pipeline": [
                         {
@@ -353,12 +354,12 @@ async def create_stock_screening_view(db):
                                 "$expr": {
                                     "$and": [
                                         {"$eq": ["$code", "$$stock_code"]},
-                                        {"$eq": ["$data_source", "$$stock_source"]}
+                                        {"$eq": ["$source", "$$stock_source"]}
                                     ]
                                 }
                             }
                         },
-                        {"$sort": {"report_period": -1}},
+                        {"$sort": {"report_period": -1, "ann_date": -1, "updated_at": -1}},
                         {"$limit": 1}
                     ],
                     "as": "financial_data"
@@ -371,7 +372,36 @@ async def create_stock_screening_view(db):
                     "preserveNullAndEmptyArrays": True
                 }
             },
-            # 第五步：重新组织字段结构
+            # 第五步：关联技术指标快照 (stock_technical_indicators)
+            {
+                "$lookup": {
+                    "from": "stock_technical_indicators",
+                    "let": {"stock_code": "$code", "stock_source": "$source"},
+                    "pipeline": [
+                        {
+                            "$match": {
+                                "$expr": {
+                                    "$and": [
+                                        {"$eq": ["$code", "$$stock_code"]},
+                                        {"$eq": ["$source", "$$stock_source"]}
+                                    ]
+                                }
+                            }
+                        },
+                        {"$sort": {"trade_date": -1, "updated_at": -1}},
+                        {"$limit": 1}
+                    ],
+                    "as": "technical_data"
+                }
+            },
+            # 第六步：展开 technical_data 数组
+            {
+                "$unwind": {
+                    "path": "$technical_data",
+                    "preserveNullAndEmptyArrays": True
+                }
+            },
+            # 第七步：重新组织字段结构
             {
                 "$project": {
                     # 基础信息字段
@@ -389,7 +419,51 @@ async def create_stock_screening_view(db):
                     "pe": 1,
                     "pb": 1,
                     "pe_ttm": 1,
-                    "pb_mrq": 1,
+                    "pb_mrq": {
+                        "$ifNull": [
+                            "$pb_mrq",
+                            {
+                                "$cond": [
+                                    {
+                                        "$and": [
+                                            {"$ne": ["$total_mv", None]},
+                                            {"$gt": ["$total_mv", 0]},
+                                            {"$ne": [
+                                                {
+                                                    "$ifNull": [
+                                                        "$financial_data.total_equity",
+                                                        "$financial_data.raw_data.balance_sheet.total_hldr_eqy_exc_min_int"
+                                                    ]
+                                                },
+                                                None
+                                            ]},
+                                            {"$gt": [
+                                                {
+                                                    "$ifNull": [
+                                                        "$financial_data.total_equity",
+                                                        "$financial_data.raw_data.balance_sheet.total_hldr_eqy_exc_min_int"
+                                                    ]
+                                                },
+                                                0
+                                            ]}
+                                        ]
+                                    },
+                                    {
+                                        "$divide": [
+                                            {"$multiply": ["$total_mv", 100000000]},
+                                            {
+                                                "$ifNull": [
+                                                    "$financial_data.total_equity",
+                                                    "$financial_data.raw_data.balance_sheet.total_hldr_eqy_exc_min_int"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    None
+                                ]
+                            }
+                        ]
+                    },
                     # 财务指标
                     "roe": "$financial_data.roe",
                     "roa": "$financial_data.roa",
@@ -447,23 +521,831 @@ async def create_stock_screening_view(db):
                         ]
                     },
                     "dividend_yield_ttm": "$dividend_yield_ttm",
+                    "oper_profit": "$financial_data.oper_profit",
+                    "total_equity": {
+                        "$ifNull": [
+                            "$financial_data.total_equity",
+                            "$financial_data.raw_data.balance_sheet.total_hldr_eqy_exc_min_int"
+                        ]
+                    },
+                    "total_liab": {
+                        "$ifNull": [
+                            "$financial_data.total_liab",
+                            "$financial_data.raw_data.balance_sheet.total_liab"
+                        ]
+                    },
+                    "money_cap": {
+                        "$ifNull": [
+                            "$financial_data.money_cap",
+                            "$financial_data.raw_data.balance_sheet.money_cap"
+                        ]
+                    },
+                    "total_ncl": {
+                        "$ifNull": [
+                            "$financial_data.total_ncl",
+                            "$financial_data.raw_data.balance_sheet.total_ncl"
+                        ]
+                    },
+                    "accounts_receiv": {
+                        "$ifNull": [
+                            "$financial_data.accounts_receiv",
+                            "$financial_data.raw_data.balance_sheet.accounts_receiv"
+                        ]
+                    },
+                    "inventories": {
+                        "$ifNull": [
+                            "$financial_data.inventories",
+                            "$financial_data.raw_data.balance_sheet.inventories"
+                        ]
+                    },
+                    "oper_cost": {
+                        "$ifNull": [
+                            "$financial_data.oper_cost",
+                            "$financial_data.raw_data.income_statement.oper_cost"
+                        ]
+                    },
+                    "fin_exp": {
+                        "$ifNull": [
+                            "$financial_data.fin_exp",
+                            "$financial_data.raw_data.income_statement.fin_exp"
+                        ]
+                    },
                     "revenue_ttm": "$financial_data.revenue_ttm",
                     "net_profit_ttm": "$financial_data.net_profit_ttm",
                     "n_cashflow_act": "$financial_data.n_cashflow_act",
+                    "n_cashflow_inv_act": "$financial_data.n_cashflow_inv_act",
+                    "revenue_yoy": {
+                        "$ifNull": [
+                            "$financial_data.revenue_yoy",
+                            "$financial_data.financial_indicators.revenue_yoy"
+                        ]
+                    },
+                    "net_profit_yoy": {
+                        "$ifNull": [
+                            "$financial_data.net_profit_yoy",
+                            "$financial_data.financial_indicators.net_profit_yoy"
+                        ]
+                    },
+                    "oper_profit_yoy": {
+                        "$ifNull": [
+                            "$financial_data.oper_profit_yoy",
+                            "$financial_data.financial_indicators.oper_profit_yoy"
+                        ]
+                    },
+                    "peg": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": ["$pe_ttm", None]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.net_profit_yoy",
+                                                "$financial_data.financial_indicators.net_profit_yoy"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$gt": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.net_profit_yoy",
+                                                "$financial_data.financial_indicators.net_profit_yoy"
+                                            ]
+                                        },
+                                        0
+                                    ]}
+                                ]
+                            },
+                            {
+                                "$divide": [
+                                    "$pe_ttm",
+                                    {
+                                        "$ifNull": [
+                                            "$financial_data.net_profit_yoy",
+                                            "$financial_data.financial_indicators.net_profit_yoy"
+                                        ]
+                                    }
+                                ]
+                            },
+                            None
+                        ]
+                    },
+                    "roic": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": ["$financial_data.oper_profit", None]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.total_equity",
+                                                "$financial_data.raw_data.balance_sheet.total_hldr_eqy_exc_min_int"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.total_liab",
+                                                "$financial_data.raw_data.balance_sheet.total_liab"
+                                            ]
+                                        },
+                                        None
+                                    ]}
+                                ]
+                            },
+                            {
+                                "$multiply": [
+                                    {
+                                        "$divide": [
+                                            {
+                                                "$multiply": [
+                                                    "$financial_data.oper_profit",
+                                                    {
+                                                        "$subtract": [
+                                                            1,
+                                                            {
+                                                                "$min": [
+                                                                    0.35,
+                                                                    {
+                                                                        "$max": [
+                                                                            0,
+                                                                            {
+                                                                                "$cond": [
+                                                                                    {
+                                                                                        "$and": [
+                                                                                            {"$ne": ["$financial_data.total_profit", None]},
+                                                                                            {"$gt": ["$financial_data.total_profit", 0]},
+                                                                                            {"$ne": ["$financial_data.net_profit", None]}
+                                                                                        ]
+                                                                                    },
+                                                                                    {
+                                                                                        "$subtract": [
+                                                                                            1,
+                                                                                            {
+                                                                                                "$divide": [
+                                                                                                    "$financial_data.net_profit",
+                                                                                                    "$financial_data.total_profit"
+                                                                                                ]
+                                                                                            }
+                                                                                        ]
+                                                                                    },
+                                                                                    0.25
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "$subtract": [
+                                                    {
+                                                        "$add": [
+                                                            {
+                                                                "$ifNull": [
+                                                                    "$financial_data.total_equity",
+                                                                    "$financial_data.raw_data.balance_sheet.total_hldr_eqy_exc_min_int"
+                                                                ]
+                                                            },
+                                                            {
+                                                                "$ifNull": [
+                                                                    "$financial_data.total_liab",
+                                                                    "$financial_data.raw_data.balance_sheet.total_liab"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "$ifNull": [
+                                                            {
+                                                                "$ifNull": [
+                                                                    "$financial_data.money_cap",
+                                                                    "$financial_data.raw_data.balance_sheet.money_cap"
+                                                                ]
+                                                            },
+                                                            0
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    100
+                                ]
+                            },
+                            None
+                        ]
+                    },
+                    "asset_turnover": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.revenue_ttm",
+                                                "$financial_data.revenue"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.total_assets",
+                                                "$financial_data.raw_data.balance_sheet.total_assets"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.total_assets",
+                                                "$financial_data.raw_data.balance_sheet.total_assets"
+                                            ]
+                                        },
+                                        0
+                                    ]}
+                                ]
+                            },
+                            {
+                                "$divide": [
+                                    {
+                                        "$ifNull": [
+                                            "$financial_data.revenue_ttm",
+                                            "$financial_data.revenue"
+                                        ]
+                                    },
+                                    {
+                                        "$ifNull": [
+                                            "$financial_data.total_assets",
+                                            "$financial_data.raw_data.balance_sheet.total_assets"
+                                        ]
+                                    }
+                                ]
+                            },
+                            None
+                        ]
+                    },
+                    "gross_profit_to_assets": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.revenue_ttm",
+                                                "$financial_data.revenue"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.gross_margin",
+                                                "$financial_data.financial_indicators.gross_margin"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.total_assets",
+                                                "$financial_data.raw_data.balance_sheet.total_assets"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.total_assets",
+                                                "$financial_data.raw_data.balance_sheet.total_assets"
+                                            ]
+                                        },
+                                        0
+                                    ]}
+                                ]
+                            },
+                            {
+                                "$multiply": [
+                                    {
+                                        "$divide": [
+                                            {
+                                                "$multiply": [
+                                                    {
+                                                        "$ifNull": [
+                                                            "$financial_data.revenue_ttm",
+                                                            "$financial_data.revenue"
+                                                        ]
+                                                    },
+                                                    {
+                                                        "$divide": [
+                                                            {
+                                                                "$ifNull": [
+                                                                    "$financial_data.gross_margin",
+                                                                    "$financial_data.financial_indicators.gross_margin"
+                                                                ]
+                                                            },
+                                                            100
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "$ifNull": [
+                                                    "$financial_data.total_assets",
+                                                    "$financial_data.raw_data.balance_sheet.total_assets"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    100
+                                ]
+                            },
+                            None
+                        ]
+                    },
+                    "interest_coverage": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": ["$financial_data.oper_profit", None]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.fin_exp",
+                                                "$financial_data.raw_data.income_statement.fin_exp"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$gt": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.fin_exp",
+                                                "$financial_data.raw_data.income_statement.fin_exp"
+                                            ]
+                                        },
+                                        0
+                                    ]}
+                                ]
+                            },
+                            {
+                                "$divide": [
+                                    "$financial_data.oper_profit",
+                                    {
+                                        "$ifNull": [
+                                            "$financial_data.fin_exp",
+                                            "$financial_data.raw_data.income_statement.fin_exp"
+                                        ]
+                                    }
+                                ]
+                            },
+                            None
+                        ]
+                    },
+                    "inventory_turnover": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.inventories",
+                                                "$financial_data.raw_data.balance_sheet.inventories"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$gt": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.inventories",
+                                                "$financial_data.raw_data.balance_sheet.inventories"
+                                            ]
+                                        },
+                                        0
+                                    ]}
+                                ]
+                            },
+                            {
+                                "$divide": [
+                                    {
+                                        "$ifNull": [
+                                            "$financial_data.oper_cost",
+                                            {
+                                                "$cond": [
+                                                    {
+                                                        "$and": [
+                                                            {"$ne": [
+                                                                {
+                                                                    "$ifNull": [
+                                                                        "$financial_data.revenue_ttm",
+                                                                        "$financial_data.revenue"
+                                                                    ]
+                                                                },
+                                                                None
+                                                            ]},
+                                                            {"$ne": [
+                                                                {
+                                                                    "$ifNull": [
+                                                                        "$financial_data.gross_margin",
+                                                                        "$financial_data.financial_indicators.gross_margin"
+                                                                    ]
+                                                                },
+                                                                None
+                                                            ]}
+                                                        ]
+                                                    },
+                                                    {
+                                                        "$multiply": [
+                                                            {
+                                                                "$ifNull": [
+                                                                    "$financial_data.revenue_ttm",
+                                                                    "$financial_data.revenue"
+                                                                ]
+                                                            },
+                                                            {
+                                                                "$subtract": [
+                                                                    1,
+                                                                    {
+                                                                        "$divide": [
+                                                                            {
+                                                                                "$ifNull": [
+                                                                                    "$financial_data.gross_margin",
+                                                                                    "$financial_data.financial_indicators.gross_margin"
+                                                                                ]
+                                                                            },
+                                                                            100
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    None
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "$ifNull": [
+                                            "$financial_data.inventories",
+                                            "$financial_data.raw_data.balance_sheet.inventories"
+                                        ]
+                                    }
+                                ]
+                            },
+                            None
+                        ]
+                    },
+                    "receivable_turnover": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.revenue_ttm",
+                                                "$financial_data.revenue"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.accounts_receiv",
+                                                "$financial_data.raw_data.balance_sheet.accounts_receiv"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$gt": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.accounts_receiv",
+                                                "$financial_data.raw_data.balance_sheet.accounts_receiv"
+                                            ]
+                                        },
+                                        0
+                                    ]}
+                                ]
+                            },
+                            {
+                                "$divide": [
+                                    {
+                                        "$ifNull": [
+                                            "$financial_data.revenue_ttm",
+                                            "$financial_data.revenue"
+                                        ]
+                                    },
+                                    {
+                                        "$ifNull": [
+                                            "$financial_data.accounts_receiv",
+                                            "$financial_data.raw_data.balance_sheet.accounts_receiv"
+                                        ]
+                                    }
+                                ]
+                            },
+                            None
+                        ]
+                    },
+                    "net_cash_position": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.money_cap",
+                                                "$financial_data.raw_data.balance_sheet.money_cap"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.total_assets",
+                                                "$financial_data.raw_data.balance_sheet.total_assets"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$gt": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.total_assets",
+                                                "$financial_data.raw_data.balance_sheet.total_assets"
+                                            ]
+                                        },
+                                        0
+                                    ]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.total_ncl",
+                                                "$financial_data.raw_data.balance_sheet.total_ncl"
+                                            ]
+                                        },
+                                        None
+                                    ]}
+                                ]
+                            },
+                            {
+                                "$multiply": [
+                                    {
+                                        "$divide": [
+                                            {
+                                                "$subtract": [
+                                                    {
+                                                        "$ifNull": [
+                                                            "$financial_data.money_cap",
+                                                            "$financial_data.raw_data.balance_sheet.money_cap"
+                                                        ]
+                                                    },
+                                                    {
+                                                        "$max": [
+                                                            0,
+                                                            {
+                                                                "$ifNull": [
+                                                                    "$financial_data.total_ncl",
+                                                                    "$financial_data.raw_data.balance_sheet.total_ncl"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "$ifNull": [
+                                                    "$financial_data.total_assets",
+                                                    "$financial_data.raw_data.balance_sheet.total_assets"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    100
+                                ]
+                            },
+                            None
+                        ]
+                    },
+                    "fcf": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": ["$financial_data.n_cashflow_act", None]},
+                                    {"$ne": ["$financial_data.n_cashflow_inv_act", None]}
+                                ]
+                            },
+                            {
+                                "$add": [
+                                    "$financial_data.n_cashflow_act",
+                                    "$financial_data.n_cashflow_inv_act"
+                                ]
+                            },
+                            None
+                        ]
+                    },
+                    "fcf_yield": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": ["$total_mv", None]},
+                                    {"$gt": ["$total_mv", 0]},
+                                    {"$ne": ["$financial_data.n_cashflow_act", None]},
+                                    {"$ne": ["$financial_data.n_cashflow_inv_act", None]}
+                                ]
+                            },
+                            {
+                                "$multiply": [
+                                    {
+                                        "$divide": [
+                                            {
+                                                "$add": [
+                                                    "$financial_data.n_cashflow_act",
+                                                    "$financial_data.n_cashflow_inv_act"
+                                                ]
+                                            },
+                                            {"$multiply": ["$total_mv", 100000000]}
+                                        ]
+                                    },
+                                    100
+                                ]
+                            },
+                            None
+                        ]
+                    },
+                    "cash_conversion": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": ["$financial_data.n_cashflow_act", None]},
+                                    {"$ne": ["$financial_data.net_profit", None]},
+                                    {"$ne": ["$financial_data.net_profit", 0]}
+                                ]
+                            },
+                            {
+                                "$divide": [
+                                    "$financial_data.n_cashflow_act",
+                                    "$financial_data.net_profit"
+                                ]
+                            },
+                            None
+                        ]
+                    },
+                    "accrual_ratio": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": ["$financial_data.net_profit", None]},
+                                    {"$ne": ["$financial_data.n_cashflow_act", None]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.total_assets",
+                                                "$financial_data.raw_data.balance_sheet.total_assets"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.total_assets",
+                                                "$financial_data.raw_data.balance_sheet.total_assets"
+                                            ]
+                                        },
+                                        0
+                                    ]}
+                                ]
+                            },
+                            {
+                                "$multiply": [
+                                    {
+                                        "$divide": [
+                                            {
+                                                "$subtract": [
+                                                    "$financial_data.net_profit",
+                                                    "$financial_data.n_cashflow_act"
+                                                ]
+                                            },
+                                            {
+                                                "$ifNull": [
+                                                    "$financial_data.total_assets",
+                                                    "$financial_data.raw_data.balance_sheet.total_assets"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    100
+                                ]
+                            },
+                            None
+                        ]
+                    },
+                    "ocf_yield": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": ["$total_mv", None]},
+                                    {"$gt": ["$total_mv", 0]},
+                                    {"$ne": ["$financial_data.n_cashflow_act", None]}
+                                ]
+                            },
+                            {
+                                "$multiply": [
+                                    {
+                                        "$divide": [
+                                            "$financial_data.n_cashflow_act",
+                                            {"$multiply": ["$total_mv", 100000000]}
+                                        ]
+                                    },
+                                    100
+                                ]
+                            },
+                            None
+                        ]
+                    },
+                    "fcf_margin": {
+                        "$cond": [
+                            {
+                                "$and": [
+                                    {"$ne": ["$financial_data.n_cashflow_act", None]},
+                                    {"$ne": ["$financial_data.n_cashflow_inv_act", None]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.revenue_ttm",
+                                                "$financial_data.revenue"
+                                            ]
+                                        },
+                                        None
+                                    ]},
+                                    {"$ne": [
+                                        {
+                                            "$ifNull": [
+                                                "$financial_data.revenue_ttm",
+                                                "$financial_data.revenue"
+                                            ]
+                                        },
+                                        0
+                                    ]}
+                                ]
+                            },
+                            {
+                                "$multiply": [
+                                    {
+                                        "$divide": [
+                                            {
+                                                "$add": [
+                                                    "$financial_data.n_cashflow_act",
+                                                    "$financial_data.n_cashflow_inv_act"
+                                                ]
+                                            },
+                                            {
+                                                "$ifNull": [
+                                                    "$financial_data.revenue_ttm",
+                                                    "$financial_data.revenue"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    100
+                                ]
+                            },
+                            None
+                        ]
+                    },
+                    "working_capital_change": "$financial_data.working_capital_change",
+                    "revenue_cagr_3y": "$financial_data.revenue_cagr_3y",
+                    "profit_cagr_3y": "$financial_data.profit_cagr_3y",
                     "net_working_capital": {
                         "$cond": [
                             {
                                 "$and": [
-                                    {"$ne": [{"$ifNull": ["$financial_data.total_cur_assets", "$financial_data.balance_sheet.total_cur_assets"]}, None]},
-                                    {"$ne": [{"$ifNull": ["$financial_data.total_cur_liab", "$financial_data.balance_sheet.total_cur_liab"]}, None]}
+                                    {"$ne": [{"$ifNull": ["$financial_data.total_cur_assets", "$financial_data.raw_data.balance_sheet.total_cur_assets"]}, None]},
+                                    {"$ne": [{"$ifNull": ["$financial_data.total_cur_liab", "$financial_data.raw_data.balance_sheet.total_cur_liab"]}, None]}
                                 ]
                             },
                             {
                                 "$divide": [
                                     {
                                         "$subtract": [
-                                            {"$ifNull": ["$financial_data.total_cur_assets", "$financial_data.balance_sheet.total_cur_assets"]},
-                                            {"$ifNull": ["$financial_data.total_cur_liab", "$financial_data.balance_sheet.total_cur_liab"]}
+                                            {"$ifNull": ["$financial_data.total_cur_assets", "$financial_data.raw_data.balance_sheet.total_cur_assets"]},
+                                            {"$ifNull": ["$financial_data.total_cur_liab", "$financial_data.raw_data.balance_sheet.total_cur_liab"]}
                                         ]
                                     },
                                     100000000
@@ -493,10 +1375,21 @@ async def create_stock_screening_view(db):
                     "amount": "$quote_data.amount",
                     "volume": "$quote_data.volume",
                     "trade_date": "$quote_data.trade_date",
+                    # 技术指标快照
+                    "ma20": "$technical_data.ma20",
+                    "rsi14": "$technical_data.rsi14",
+                    "kdj_k": "$technical_data.kdj_k",
+                    "kdj_d": "$technical_data.kdj_d",
+                    "kdj_j": "$technical_data.kdj_j",
+                    "dif": "$technical_data.dif",
+                    "dea": "$technical_data.dea",
+                    "macd_hist": "$technical_data.macd_hist",
+                    "technical_trade_date": "$technical_data.trade_date",
                     # 时间戳
                     "updated_at": 1,
                     "quote_updated_at": "$quote_data.updated_at",
-                    "financial_updated_at": "$financial_data.updated_at"
+                    "financial_updated_at": "$financial_data.updated_at",
+                    "technical_updated_at": "$technical_data.updated_at"
                 }
             }
         ]
@@ -533,6 +1426,33 @@ async def create_database_indexes(db):
         await market_quotes.create_index([("pct_chg", -1)])
         await market_quotes.create_index([("amount", -1)])
         await market_quotes.create_index([("updated_at", -1)])
+
+        # stock_financial_periods 的索引
+        financial_periods = db["stock_financial_periods"]
+        await financial_periods.create_index([
+            ("symbol", 1),
+            ("source", 1),
+            ("report_period", -1),
+            ("ann_date", -1),
+        ], unique=True)
+        await financial_periods.create_index([("code", 1), ("source", 1), ("report_period", -1)])
+        await financial_periods.create_index([("symbol", 1), ("report_period", -1)])
+        await financial_periods.create_index([("symbol", 1), ("source", 1), ("updated_at", -1)])
+
+        # stock_technical_indicators 的索引
+        technical_indicators = db["stock_technical_indicators"]
+        await technical_indicators.create_index([
+            ("code", 1),
+            ("source", 1),
+            ("trade_date", -1),
+        ], unique=True)
+        await technical_indicators.create_index([("symbol", 1), ("source", 1), ("trade_date", -1)])
+        await technical_indicators.create_index([("source", 1), ("updated_at", -1)])
+
+        # screening_presets 用户筛选方案
+        screening_presets = db["screening_presets"]
+        await screening_presets.create_index([("user_id", 1), ("name", 1)], unique=True)
+        await screening_presets.create_index([("user_id", 1), ("updated_at", -1)])
 
         # assistant_conversations 智能助手旧会话（兼容）
         assistant_conv = db["assistant_conversations"]

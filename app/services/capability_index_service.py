@@ -1,0 +1,601 @@
+import hashlib
+import json
+import logging
+import uuid
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from app.models.capability_index import (
+    CapabilityDocument,
+    CapabilityIndexSyncResult,
+    CapabilitySearchHit,
+)
+from core.llm.embedding_manager import EmbeddingManager
+from core.memory.memory_manager import VectorStoreManager
+from core.tools import get_tool_registry
+
+logger = logging.getLogger(__name__)
+
+CAPABILITY_INDEX_COLLECTION = "capability_registry"
+CAPABILITY_INDEX_STATE_COLLECTION = "capability_index_state"
+CAPABILITY_INDEX_STATE_KEY = "default"
+CAPABILITY_INDEX_TOP_K = 24
+
+
+class CapabilityIndexService:
+    """统一能力索引服务。"""
+
+    def __init__(self, db: AsyncIOMotorDatabase):
+        self._db = db
+        self._embedding_manager = EmbeddingManager(db=db)
+        self._vector_store_manager = VectorStoreManager()
+        self._collection = None
+        self._cached_documents: Dict[str, CapabilityDocument] = {}
+
+    async def ensure_index(self, force: bool = False) -> CapabilityIndexSyncResult:
+        documents, fingerprint, document_hashes = await self._collect_source_documents()
+        state = await self._load_state()
+        current_fingerprint = str(state.get("fingerprint") or "") if state else ""
+        collection_count = int(state.get("indexed_documents") or 0) if state else 0
+        previous_hashes = state.get("document_hashes") or {} if state else {}
+
+        if not force and current_fingerprint == fingerprint and collection_count > 0:
+            self._cached_documents = {doc.capability_id: doc for doc in documents}
+            return CapabilityIndexSyncResult(
+                collection_name=CAPABILITY_INDEX_COLLECTION,
+                fingerprint=fingerprint,
+                total_documents=len(documents),
+                indexed_documents=collection_count,
+                skipped_documents=max(len(documents) - collection_count, 0),
+                vector_backend=self._vector_store_manager.backend,
+                sync_mode="no_change",
+            )
+
+        if force or not previous_hashes:
+            result = self._rebuild_index(documents, fingerprint)
+        else:
+            result = self._sync_index_incrementally(
+                documents=documents,
+                fingerprint=fingerprint,
+                document_hashes=document_hashes,
+                previous_hashes=previous_hashes,
+                expected_count=collection_count,
+            )
+
+        await self._save_state(result, document_hashes)
+        self._cached_documents = {doc.capability_id: doc for doc in documents}
+        return result
+
+    async def search_capabilities(
+        self,
+        query: str,
+        top_k: int = CAPABILITY_INDEX_TOP_K,
+        bindable_only: bool = False,
+        source_types: Optional[List[str]] = None,
+    ) -> List[CapabilitySearchHit]:
+        await self.ensure_index()
+        documents = list(self._cached_documents.values())
+        if not documents:
+            return []
+
+        hits = self._vector_search(query, top_k=max(top_k * 2, top_k))
+        if not hits:
+            hits = self._lexical_search(query, documents, top_k=max(top_k * 2, top_k))
+
+        filtered: List[CapabilitySearchHit] = []
+        allowed_sources = set(source_types or [])
+        for hit in hits:
+            capability = hit.capability
+            if bindable_only and not capability.bindable:
+                continue
+            if allowed_sources and capability.source_type not in allowed_sources:
+                continue
+            filtered.append(hit)
+            if len(filtered) >= top_k:
+                break
+        return filtered
+
+    async def list_capabilities(self) -> List[CapabilityDocument]:
+        await self.ensure_index()
+        return list(self._cached_documents.values())
+
+    async def rebuild_index(self) -> CapabilityIndexSyncResult:
+        return await self.ensure_index(force=True)
+
+    async def get_index_state(self) -> Dict[str, Any]:
+        state = await self._load_state()
+        return state or {}
+
+    async def _collect_source_documents(self) -> Tuple[List[CapabilityDocument], str, Dict[str, str]]:
+        registry_docs = self._build_registry_documents()
+        await self._merge_skills_documents(registry_docs)
+        await self._merge_external_skills_documents(registry_docs)
+
+        documents = sorted(registry_docs.values(), key=lambda item: (item.source_type, item.capability_id))
+        payload = [
+            {
+                "capability_id": doc.capability_id,
+                "registry_tool_id": doc.registry_tool_id,
+                "source_type": doc.source_type,
+                "status": doc.status,
+                "bindable": doc.bindable,
+                "fc_enabled": doc.fc_enabled,
+                "category": doc.category,
+                "name": doc.name,
+                "description": doc.description,
+                "when_to_use": doc.when_to_use,
+                "returns": doc.returns,
+                "related_tools": doc.related_tools,
+                "coverage_terms": doc.coverage_terms,
+                "data_source": doc.data_source,
+            }
+            for doc in documents
+        ]
+        fingerprint = hashlib.sha1(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        document_hashes = {
+            doc.capability_id: hashlib.sha1(
+                json.dumps(doc.model_dump(mode="json"), ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            for doc in documents
+        }
+        return documents, fingerprint, document_hashes
+
+    def _build_registry_documents(self) -> Dict[str, CapabilityDocument]:
+        registry = get_tool_registry()
+        documents: Dict[str, CapabilityDocument] = {}
+        for tool in registry.list_all():
+            tool_id = str(tool.id or "").strip()
+            if not tool_id:
+                continue
+            source_type = "mcp_tool" if str(tool.category) == "mcp" else "builtin_tool"
+            coverage_terms = self._extract_coverage_terms(self._build_searchable_text(
+                tool_id,
+                str(tool.name or ""),
+                str(tool.description or ""),
+                str(tool.when_to_use or ""),
+                str(tool.when_not_to_use or ""),
+                str(tool.returns or ""),
+                str(tool.data_source or ""),
+                " ".join(tool.related_tools or []),
+            ))
+            doc = CapabilityDocument(
+                capability_id=tool_id,
+                registry_tool_id=tool_id,
+                source_type=source_type,
+                status="active",
+                bindable=True,
+                fc_enabled=bool(tool.fc_enabled),
+                category=str(tool.category or ""),
+                name=str(tool.name or tool_id),
+                label=f"{tool_id} | {tool.name}",
+                description=str(tool.description or ""),
+                when_to_use=str(tool.when_to_use or ""),
+                when_not_to_use=str(tool.when_not_to_use or ""),
+                returns=str(tool.returns or ""),
+                related_tools=[str(item) for item in (tool.related_tools or []) if str(item).strip()],
+                coverage_terms=coverage_terms,
+                retrieval_text=self._build_retrieval_text(
+                    tool_id=tool_id,
+                    name=str(tool.name or tool_id),
+                    source_type=source_type,
+                    category=str(tool.category or ""),
+                    description=str(tool.description or ""),
+                    when_to_use=str(tool.when_to_use or ""),
+                    when_not_to_use=str(tool.when_not_to_use or ""),
+                    returns=str(tool.returns or ""),
+                    related_tools=[str(item) for item in (tool.related_tools or []) if str(item).strip()],
+                    data_source=str(tool.data_source or ""),
+                    coverage_terms=coverage_terms,
+                ),
+                data_source=str(tool.data_source or ""),
+                metadata={
+                    "is_online": bool(tool.is_online),
+                    "timeout_tier": str(tool.timeout_tier or ""),
+                    "parameters": [p.model_dump(mode="json") for p in (tool.parameters or [])],
+                },
+            )
+            documents[tool_id] = doc
+        return documents
+
+    async def _merge_skills_documents(self, documents: Dict[str, CapabilityDocument]) -> None:
+        cursor = self._db.skills.find({"enabled": True})
+        async for doc in cursor:
+            skill_name = str(doc.get("name") or "").strip()
+            if not skill_name:
+                continue
+            tool_id = skill_name.replace("-", "_")
+            description = str(doc.get("description") or "").strip()
+            implementation = doc.get("implementation")
+            parameters = doc.get("parameters") or []
+            bindable = bool(implementation and parameters and tool_id in documents)
+
+            base = documents.get(tool_id)
+            merged = self._merge_capability_document(
+                base=base,
+                capability_id=tool_id,
+                registry_tool_id=tool_id if tool_id in documents else None,
+                source_type="skill",
+                status="active",
+                bindable=bindable,
+                fc_enabled=bool(base.fc_enabled) if base else True,
+                category=str(doc.get("category") or getattr(base, "category", "utility") or "utility"),
+                name=skill_name,
+                label=(base.label if base else f"{tool_id} | {skill_name}"),
+                description=description or (base.description if base else ""),
+                when_to_use=str(doc.get("when_to_use") or getattr(base, "when_to_use", "") or ""),
+                when_not_to_use=str(doc.get("when_not_to_use") or getattr(base, "when_not_to_use", "") or ""),
+                returns=str(doc.get("returns") or getattr(base, "returns", "") or ""),
+                related_tools=list(getattr(base, "related_tools", []) or []),
+                data_source=str(doc.get("data_source") or getattr(base, "data_source", "") or ""),
+                metadata={
+                    **(base.metadata if base else {}),
+                    "skill_type": doc.get("skill_type"),
+                    "source_url": doc.get("source_url"),
+                },
+            )
+            documents[tool_id] = merged
+
+    async def _merge_external_skills_documents(self, documents: Dict[str, CapabilityDocument]) -> None:
+        cursor = self._db.external_skills.find({"status": {"$in": ["active", "draft"]}})
+        async for doc in cursor:
+            tool_id = str(doc.get("tool_id") or "").strip()
+            if not tool_id:
+                continue
+            status = str(doc.get("status") or "draft")
+            display_name = str(doc.get("display_name") or tool_id).strip()
+            description = str(doc.get("description") or "").strip()
+            base = documents.get(tool_id)
+            bindable = status == "active" and tool_id in documents
+            merged = self._merge_capability_document(
+                base=base,
+                capability_id=tool_id,
+                registry_tool_id=tool_id if tool_id in documents else None,
+                source_type="external_skill",
+                status=status,
+                bindable=bindable,
+                fc_enabled=bool(base.fc_enabled) if base else True,
+                category=str(doc.get("category") or getattr(base, "category", "external") or "external"),
+                name=display_name,
+                label=(base.label if base else f"{tool_id} | {display_name}"),
+                description=description or (base.description if base else ""),
+                when_to_use=str(doc.get("when_to_use") or getattr(base, "when_to_use", "") or ""),
+                when_not_to_use=str(doc.get("when_not_to_use") or getattr(base, "when_not_to_use", "") or ""),
+                returns=str(doc.get("returns") or getattr(base, "returns", "") or ""),
+                related_tools=list(getattr(base, "related_tools", []) or []),
+                data_source=str(doc.get("data_source") or getattr(base, "data_source", "") or ""),
+                metadata={
+                    **(base.metadata if base else {}),
+                    "session_id": doc.get("session_id"),
+                    "source": doc.get("source"),
+                },
+            )
+            documents[tool_id] = merged
+
+    def _merge_capability_document(
+        self,
+        base: Optional[CapabilityDocument],
+        capability_id: str,
+        registry_tool_id: Optional[str],
+        source_type: str,
+        status: str,
+        bindable: bool,
+        fc_enabled: bool,
+        category: str,
+        name: str,
+        label: str,
+        description: str,
+        when_to_use: str,
+        when_not_to_use: str,
+        returns: str,
+        related_tools: List[str],
+        data_source: str,
+        metadata: Dict[str, Any],
+    ) -> CapabilityDocument:
+        searchable = self._build_searchable_text(
+            capability_id,
+            name,
+            description,
+            when_to_use,
+            when_not_to_use,
+            returns,
+            data_source,
+            " ".join(related_tools),
+        )
+        coverage_terms = self._extract_coverage_terms(searchable)
+        return CapabilityDocument(
+            capability_id=capability_id,
+            registry_tool_id=registry_tool_id,
+            source_type=source_type,
+            status=status,
+            bindable=bindable,
+            fc_enabled=fc_enabled,
+            category=category,
+            name=name,
+            label=label,
+            description=description,
+            when_to_use=when_to_use,
+            when_not_to_use=when_not_to_use,
+            returns=returns,
+            related_tools=related_tools,
+            coverage_terms=coverage_terms,
+            retrieval_text=self._build_retrieval_text(
+                tool_id=capability_id,
+                name=name,
+                source_type=source_type,
+                category=category,
+                description=description,
+                when_to_use=when_to_use,
+                when_not_to_use=when_not_to_use,
+                returns=returns,
+                related_tools=related_tools,
+                data_source=data_source,
+                coverage_terms=coverage_terms,
+            ),
+            data_source=data_source,
+            metadata=metadata,
+        )
+
+    def _build_retrieval_text(
+        self,
+        tool_id: str,
+        name: str,
+        source_type: str,
+        category: str,
+        description: str,
+        when_to_use: str,
+        when_not_to_use: str,
+        returns: str,
+        related_tools: List[str],
+        data_source: str,
+        coverage_terms: List[str],
+    ) -> str:
+        parts = [
+            f"tool_id: {tool_id}",
+            f"name: {name}",
+            f"source_type: {source_type}",
+            f"category: {category}",
+            f"description: {description}",
+            f"when_to_use: {when_to_use}",
+            f"when_not_to_use: {when_not_to_use}",
+            f"returns: {returns}",
+            f"related_tools: {' '.join(related_tools)}",
+            f"data_source: {data_source}",
+            f"coverage_terms: {' '.join(coverage_terms)}",
+        ]
+        return "\n".join(part for part in parts if part.strip())
+
+    def _build_searchable_text(self, *parts: str) -> str:
+        return " ".join(str(part or "").strip() for part in parts if str(part or "").strip()).lower()
+
+    def _extract_coverage_terms(self, text: str) -> List[str]:
+        import re
+
+        searchable = str(text or "").lower()
+        patterns = [
+            (r"(?<![a-z0-9])(valuation|valuations)(?![a-z0-9])", "valuation"),
+            (r"(?<![a-z0-9])dcf(?![a-z0-9])", "dcf"),
+            (r"(?<![a-z0-9])pe(?![a-z0-9])|市盈率|pe_ttm", "pe"),
+            (r"(?<![a-z0-9])pb(?![a-z0-9])|市净率|pb_mrq", "pb"),
+            (r"(?<![a-z0-9])peg(?![a-z0-9])", "peg"),
+            (r"(?<![a-z0-9])ps(?![a-z0-9])", "ps"),
+            (r"ev/?ebitda", "ev_ebitda"),
+            (r"可比公司|同业对比|peer comparison|peer", "peer_comparison"),
+            (r"估值|估价|定价|目标价|价格区间|估值区间|相对估值", "valuation_cn"),
+            (r"增长|growth|营收同比|净利润同比", "growth"),
+            (r"现金流|cashflow|fcf|ocf", "cashflow"),
+            (r"roe|roa|毛利率|净利率|piotroski|altman|beneish", "quality"),
+            (r"ma20|rsi14|kdj|macd|技术指标|technical", "technical"),
+        ]
+        matched: List[str] = []
+        for pattern, normalized in patterns:
+            if re.search(pattern, searchable):
+                matched.append(normalized)
+        return self._dedupe(matched)
+
+    def _rebuild_index(
+        self,
+        documents: List[CapabilityDocument],
+        fingerprint: str,
+    ) -> CapabilityIndexSyncResult:
+        try:
+            self._vector_store_manager.delete_collection(CAPABILITY_INDEX_COLLECTION)
+        except Exception:
+            pass
+
+        self._collection = self._vector_store_manager.get_or_create_collection(
+            CAPABILITY_INDEX_COLLECTION,
+            vector_size=self._embedding_manager.get_embedding_dimension(),
+        )
+
+        indexed = 0
+        skipped = 0
+        for document in documents:
+            embedding, provider = self._embedding_manager.get_embedding(document.retrieval_text)
+            if embedding is None:
+                skipped += 1
+                continue
+            metadata = document.model_dump(mode="json")
+            metadata["embedding_provider"] = provider
+            self._collection.add(
+                documents=[document.retrieval_text],
+                embeddings=[embedding],
+                metadatas=[metadata],
+                ids=[str(uuid.uuid5(uuid.NAMESPACE_DNS, document.capability_id))],
+            )
+            indexed += 1
+
+        return CapabilityIndexSyncResult(
+            collection_name=CAPABILITY_INDEX_COLLECTION,
+            fingerprint=fingerprint,
+            total_documents=len(documents),
+            indexed_documents=indexed,
+            skipped_documents=skipped,
+            vector_backend=self._vector_store_manager.backend,
+            sync_mode="full_rebuild",
+        )
+
+    def _sync_index_incrementally(
+        self,
+        documents: List[CapabilityDocument],
+        fingerprint: str,
+        document_hashes: Dict[str, str],
+        previous_hashes: Dict[str, str],
+        expected_count: int,
+    ) -> CapabilityIndexSyncResult:
+        self._collection = self._vector_store_manager.get_or_create_collection(
+            CAPABILITY_INDEX_COLLECTION,
+            vector_size=self._embedding_manager.get_embedding_dimension(),
+        )
+
+        current_count = self._collection.count()
+        if expected_count > 0 and current_count == 0 and documents:
+            logger.warning(
+                "[CapabilityIndex] 检测到状态存在但向量集合为空，回退为全量重建: expected=%s actual=%s",
+                expected_count,
+                current_count,
+            )
+            return self._rebuild_index(documents, fingerprint)
+
+        docs_by_id = {doc.capability_id: doc for doc in documents}
+        deleted_ids = sorted(set(previous_hashes.keys()) - set(document_hashes.keys()))
+        changed_ids = sorted(
+            capability_id
+            for capability_id, doc_hash in document_hashes.items()
+            if previous_hashes.get(capability_id) != doc_hash
+        )
+
+        deleted_count = 0
+        if deleted_ids:
+            point_ids = [self._build_point_id(capability_id) for capability_id in deleted_ids]
+            if not self._collection.delete_ids(point_ids):
+                logger.warning("[CapabilityIndex] 增量删除失败，回退为全量重建")
+                return self._rebuild_index(documents, fingerprint)
+            deleted_count = len(deleted_ids)
+
+        upserted = 0
+        skipped = 0
+        if changed_ids:
+            upsert_documents: List[str] = []
+            upsert_embeddings: List[List[float]] = []
+            upsert_metadatas: List[Dict[str, Any]] = []
+            upsert_ids: List[str] = []
+
+            for capability_id in changed_ids:
+                document = docs_by_id[capability_id]
+                embedding, provider = self._embedding_manager.get_embedding(document.retrieval_text)
+                if embedding is None:
+                    skipped += 1
+                    continue
+                metadata = document.model_dump(mode="json")
+                metadata["embedding_provider"] = provider
+                upsert_documents.append(document.retrieval_text)
+                upsert_embeddings.append(embedding)
+                upsert_metadatas.append(metadata)
+                upsert_ids.append(self._build_point_id(document.capability_id))
+
+            if upsert_ids and not self._collection.add(
+                documents=upsert_documents,
+                embeddings=upsert_embeddings,
+                metadatas=upsert_metadatas,
+                ids=upsert_ids,
+            ):
+                logger.warning("[CapabilityIndex] 增量 upsert 失败，回退为全量重建")
+                return self._rebuild_index(documents, fingerprint)
+            upserted = len(upsert_ids)
+
+        indexed_documents = self._collection.count()
+        return CapabilityIndexSyncResult(
+            collection_name=CAPABILITY_INDEX_COLLECTION,
+            fingerprint=fingerprint,
+            total_documents=len(documents),
+            indexed_documents=indexed_documents,
+            skipped_documents=skipped,
+            vector_backend=self._vector_store_manager.backend,
+            sync_mode="incremental_sync",
+        )
+
+    def _build_point_id(self, capability_id: str) -> str:
+        return str(uuid.uuid5(uuid.NAMESPACE_DNS, capability_id))
+
+    def _vector_search(self, query: str, top_k: int) -> List[CapabilitySearchHit]:
+        if not query.strip():
+            return []
+        try:
+            if self._collection is None:
+                self._collection = self._vector_store_manager.get_or_create_collection(
+                    CAPABILITY_INDEX_COLLECTION,
+                    vector_size=self._embedding_manager.get_embedding_dimension(),
+                )
+            query_embedding, _provider = self._embedding_manager.get_embedding(query)
+            if query_embedding is None:
+                return []
+            result = self._collection.query(query_embeddings=[query_embedding], n_results=top_k)
+            hits: List[CapabilitySearchHit] = []
+            documents = result.get("documents", [[]])[0]
+            metadatas = result.get("metadatas", [[]])[0]
+            distances = result.get("distances", [[]])[0]
+            for _doc_text, metadata, distance in zip(documents, metadatas, distances):
+                capability = CapabilityDocument.model_validate(metadata)
+                hits.append(CapabilitySearchHit(capability=capability, score=round(1.0 - float(distance), 4)))
+            return hits
+        except Exception as exc:
+            logger.warning("[CapabilityIndex] 向量检索失败，回退词法检索: %s", exc)
+            return []
+
+    def _lexical_search(
+        self,
+        query: str,
+        documents: Iterable[CapabilityDocument],
+        top_k: int,
+    ) -> List[CapabilitySearchHit]:
+        tokens = [token for token in self._tokenize(query) if token]
+        scored: List[CapabilitySearchHit] = []
+        for doc in documents:
+            haystack = self._build_searchable_text(
+                doc.capability_id,
+                doc.name,
+                doc.description,
+                doc.when_to_use,
+                doc.returns,
+                " ".join(doc.coverage_terms),
+            )
+            score = 0.0
+            for token in tokens:
+                if token in haystack:
+                    score += 1.0
+            if score > 0:
+                scored.append(CapabilitySearchHit(capability=doc, score=score / max(len(tokens), 1)))
+        scored.sort(key=lambda item: (-item.score, item.capability.label))
+        return scored[:top_k]
+
+    def _tokenize(self, text: str) -> List[str]:
+        import re
+
+        pieces = re.split(r"[^0-9A-Za-z\u4e00-\u9fff_]+", str(text or "").lower())
+        return [piece for piece in pieces if piece and len(piece) > 1]
+
+    def _dedupe(self, items: List[str]) -> List[str]:
+        seen = set()
+        results = []
+        for item in items:
+            if item in seen:
+                continue
+            seen.add(item)
+            results.append(item)
+        return results
+
+    async def _load_state(self) -> Optional[Dict[str, Any]]:
+        return await self._db[CAPABILITY_INDEX_STATE_COLLECTION].find_one({"_id": CAPABILITY_INDEX_STATE_KEY})
+
+    async def _save_state(self, result: CapabilityIndexSyncResult, document_hashes: Dict[str, str]) -> None:
+        payload = result.model_dump(mode="json")
+        payload["_id"] = CAPABILITY_INDEX_STATE_KEY
+        payload["document_hashes"] = document_hashes
+        await self._db[CAPABILITY_INDEX_STATE_COLLECTION].update_one(
+            {"_id": CAPABILITY_INDEX_STATE_KEY},
+            {"$set": payload},
+            upsert=True,
+        )

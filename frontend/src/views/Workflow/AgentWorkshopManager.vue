@@ -122,7 +122,7 @@
                   <span>{{ formatTime(spec.updated_at) }}</span>
                 </div>
                 <div class="spec-card-tags" v-if="spec.outputs?.length">
-                  <el-tag v-for="item in spec.outputs.slice(0, 4)" :key="item" size="small" effect="plain">{{ item }}</el-tag>
+                  <el-tag v-for="item in getSpecOutputTags(spec).slice(0, 4)" :key="item" size="small" effect="plain">{{ item }}</el-tag>
                 </div>
                 <div class="spec-card-actions">
                   <el-button type="primary" size="small" @click="openSpec(spec)">进入工坊</el-button>
@@ -145,7 +145,7 @@ import { computed, onActivated, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
-import agentWorkshopApi, { type AgentSpec, type AgentWorkshopSessionDetail } from '@/api/agentWorkshop'
+import agentWorkshopApi, { type AgentSpec, type AgentSpecIOItem, type AgentWorkshopSessionDetail } from '@/api/agentWorkshop'
 
 const router = useRouter()
 
@@ -156,6 +156,19 @@ const searchKeyword = ref('')
 
 const draftSessions = ref<AgentWorkshopSessionDetail[]>([])
 const specs = ref<AgentSpec[]>([])
+
+const getSpecIoText = (item?: AgentSpecIOItem | null) => {
+  if (!item) return ''
+  if (typeof item === 'string') return item.trim()
+  const name = String(item.name || '').trim()
+  const description = String(item.description || '').trim()
+  if (name && description && description !== name) {
+    return `${name}：${description}`
+  }
+  return name || description
+}
+
+const getSpecOutputTags = (spec: AgentSpec) => (spec.outputs || []).map(item => getSpecIoText(item)).filter(Boolean)
 
 const testingCount = computed(() => specs.value.filter(item => item.status === 'testing').length)
 const normalizedSearch = computed(() => searchKeyword.value.trim().toLowerCase())
@@ -174,7 +187,7 @@ const filteredSpecs = computed(() => {
       item.domain,
       item.primary_goal,
       item.current_version_id,
-      ...(item.outputs || []),
+      ...getSpecOutputTags(item),
     ]
       .filter(Boolean)
       .join(' ')

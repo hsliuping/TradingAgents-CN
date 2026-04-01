@@ -149,6 +149,10 @@ class ToolRegistry:
                     self._tools[tool_id].parameters = parameters
                 if timeout_tier:
                     self._tools[tool_id].timeout_tier = timeout_tier
+                metadata_fields = getattr(ToolMetadata, "model_fields", {})
+                for key, value in kwargs.items():
+                    if key in metadata_fields:
+                        setattr(self._tools[tool_id], key, value)
                 logger.debug(f"为已注册工具添加函数实现: {tool_id}")
                 return
             elif not override:
@@ -158,14 +162,22 @@ class ToolRegistry:
         from .config import ToolTimeoutTier
         effective_tier = timeout_tier or ToolTimeoutTier.MEDIUM
 
+        metadata_fields = getattr(ToolMetadata, "model_fields", {})
+        metadata_payload = {
+            "id": tool_id,
+            "name": name,
+            "description": description,
+            "category": category,
+            "is_online": is_online,
+            "parameters": parameters or [],
+            "timeout_tier": effective_tier,
+        }
+        for key, value in kwargs.items():
+            if key in metadata_fields:
+                metadata_payload[key] = value
+
         metadata = ToolMetadata(
-            id=tool_id,
-            name=name,
-            description=description,
-            category=category,
-            is_online=is_online,
-            parameters=parameters or [],
-            timeout_tier=effective_tier,
+            **metadata_payload,
         )
 
         self._tools[tool_id] = metadata

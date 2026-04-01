@@ -193,6 +193,7 @@ class DatabaseType(str, Enum):
 
 class LLMConfig(BaseModel):
     """大模型配置"""
+    config_id: Optional[str] = Field(None, description="模型配置唯一ID")
     provider: str = Field(default="openai", description="供应商标识（支持动态添加）")
     model_name: str = Field(..., description="模型名称/代码")
     model_display_name: Optional[str] = Field(None, description="模型显示名称")
@@ -364,6 +365,7 @@ class SystemConfig(BaseModel):
 
 class LLMConfigRequest(BaseModel):
     """大模型配置请求"""
+    config_id: Optional[str] = None
     provider: str = Field(..., description="供应商标识（支持动态添加）")
     model_name: str
     model_display_name: Optional[str] = None  # 新增：模型显示名称

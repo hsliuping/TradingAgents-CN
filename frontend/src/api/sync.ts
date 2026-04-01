@@ -117,7 +117,7 @@ export const runStockBasicsSync = (params?: {
 
   const url = `/api/sync/multi-source/stock_basics/run${queryParams.toString() ? '?' + queryParams.toString() : ''}`
   return ApiClient.post(url, undefined, {
-    timeout: 600000 // 🔥 同步操作需要更长时间，设置为10分钟（BaoStock需要逐个获取估值数据）
+    timeout: 30000
   })
 }
 

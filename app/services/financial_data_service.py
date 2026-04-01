@@ -335,13 +335,20 @@ class FinancialDataService:
     ) -> Dict[str, Any]:
         """标准化Tushare财务数据"""
         # Tushare数据已经在provider中进行了标准化，直接使用
+        resolved_period = report_period or financial_data.get("report_period")
+        resolved_report_type = self._resolve_report_type(
+            resolved_period,
+            financial_data.get("report_type"),
+            report_type,
+        )
+
         base_data = {
             "code": symbol,  # 添加 code 字段以兼容唯一索引
             "symbol": symbol,
             "full_symbol": self._get_full_symbol(symbol, market),
             "market": market,
-            "report_period": report_period or financial_data.get("report_period"),
-            "report_type": report_type or financial_data.get("report_type", "quarterly"),
+            "report_period": resolved_period,
+            "report_type": resolved_report_type,
             "data_source": "tushare",
             "created_at": now,
             "updated_at": now,
@@ -372,13 +379,16 @@ class FinancialDataService:
     ) -> Dict[str, Any]:
         """标准化AKShare财务数据"""
         # AKShare数据需要从多个数据集中提取关键指标
+        resolved_period = report_period or self._extract_latest_period(financial_data)
+        resolved_report_type = self._resolve_report_type(resolved_period, None, report_type)
+
         base_data = {
             "code": symbol,  # 添加 code 字段以兼容唯一索引
             "symbol": symbol,
             "full_symbol": self._get_full_symbol(symbol, market),
             "market": market,
-            "report_period": report_period or self._extract_latest_period(financial_data),
-            "report_type": report_type,
+            "report_period": resolved_period,
+            "report_type": resolved_report_type,
             "data_source": "akshare",
             "created_at": now,
             "updated_at": now,
@@ -387,6 +397,7 @@ class FinancialDataService:
 
         # 提取关键财务指标
         base_data.update(self._extract_akshare_indicators(financial_data))
+        base_data["raw_data"] = financial_data
         return base_data
     
     def _standardize_baostock_data(
@@ -399,13 +410,16 @@ class FinancialDataService:
         now: datetime
     ) -> Dict[str, Any]:
         """标准化BaoStock财务数据"""
+        resolved_period = report_period or self._extract_baostock_period(financial_data)
+        resolved_report_type = self._resolve_report_type(resolved_period, None, report_type)
+
         base_data = {
             "code": symbol,  # 添加 code 字段以兼容唯一索引
             "symbol": symbol,
             "full_symbol": self._get_full_symbol(symbol, market),
             "market": market,
-            "report_period": report_period or self._generate_current_period(),
-            "report_type": report_type,
+            "report_period": resolved_period,
+            "report_type": resolved_report_type,
             "data_source": "baostock",
             "created_at": now,
             "updated_at": now,
@@ -426,13 +440,20 @@ class FinancialDataService:
         now: datetime
     ) -> Dict[str, Any]:
         """标准化QMT财务数据"""
+        resolved_period = report_period or financial_data.get("report_period") or self._generate_current_period()
+        resolved_report_type = self._resolve_report_type(
+            resolved_period,
+            financial_data.get("report_type"),
+            report_type,
+        )
+
         base_data = {
             "code": symbol,
             "symbol": symbol,
             "full_symbol": self._get_full_symbol(symbol, market),
             "market": market,
-            "report_period": report_period or financial_data.get("report_period") or self._generate_current_period(),
-            "report_type": report_type or financial_data.get("report_type", "quarterly"),
+            "report_period": resolved_period,
+            "report_type": resolved_report_type,
             "data_source": "qmt",
             "created_at": now,
             "updated_at": now,
@@ -470,6 +491,46 @@ class FinancialDataService:
         
         # 如果无法提取，使用当前季度
         return self._generate_current_period()
+
+    def _extract_baostock_period(self, financial_data: Dict[str, Any]) -> str:
+        """从 BaoStock 财务数据中提取报告期"""
+        for key in [
+            'profit_data',
+            'operation_data',
+            'growth_data',
+            'balance_data',
+            'cash_flow_data',
+        ]:
+            dataset = financial_data.get(key)
+            if not dataset:
+                continue
+            if isinstance(dataset, list) and dataset:
+                dataset = dataset[0]
+            if isinstance(dataset, dict):
+                for field in ['statDate', 'pubDate', 'report_date', 'report_period']:
+                    value = dataset.get(field)
+                    if value:
+                        return str(value).replace('-', '')
+        return self._generate_current_period()
+
+    def _resolve_report_type(
+        self,
+        report_period: Optional[str],
+        explicit_report_type: Optional[str],
+        fallback_report_type: Optional[str],
+    ) -> str:
+        """根据报告期推断报告类型，避免统一同步时被固定写成 quarterly。"""
+        if explicit_report_type:
+            return explicit_report_type
+
+        normalized_period = str(report_period or '').replace('-', '')
+        if len(normalized_period) >= 8 and normalized_period.endswith('1231'):
+            return 'annual'
+
+        if fallback_report_type:
+            return fallback_report_type
+
+        return 'quarterly'
     
     def _extract_akshare_indicators(self, financial_data: Dict[str, Any]) -> Dict[str, Any]:
         """从AKShare数据中提取关键财务指标"""

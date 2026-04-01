@@ -5,6 +5,7 @@
 import time
 import asyncio
 import logging
+import uuid
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from app.utils.timezone import now_tz
@@ -38,6 +39,144 @@ class ConfigService:
                 # 否则使用全局函数
                 self.db = get_mongo_db()
         return self.db
+
+    @staticmethod
+    def _read_llm_config_field(llm_config: Any, field_name: str) -> Any:
+        if isinstance(llm_config, dict):
+            return llm_config.get(field_name)
+        return getattr(llm_config, field_name, None)
+
+    @staticmethod
+    def _write_llm_config_field(llm_config: Any, field_name: str, value: Any) -> None:
+        if isinstance(llm_config, dict):
+            llm_config[field_name] = value
+            return
+        setattr(llm_config, field_name, value)
+
+    def _build_deterministic_llm_config_id(self, llm_config: Any, index: int) -> str:
+        provider = str(self._read_llm_config_field(llm_config, "provider") or "").strip().lower()
+        model_name = str(self._read_llm_config_field(llm_config, "model_name") or "").strip()
+        api_base = str(self._read_llm_config_field(llm_config, "api_base") or "").strip()
+        description = str(self._read_llm_config_field(llm_config, "description") or "").strip()
+        seed = f"tradingagents-llm-config|{provider}|{model_name}|{api_base}|{description}|{index}"
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, seed))
+
+    def _ensure_llm_config_ids(self, llm_configs: List[Any]) -> bool:
+        changed = False
+        seen_ids = set()
+
+        for index, llm_config in enumerate(llm_configs):
+            raw_config_id = self._read_llm_config_field(llm_config, "config_id")
+            config_id = str(raw_config_id or "").strip()
+
+            if not config_id or config_id in seen_ids:
+                candidate = self._build_deterministic_llm_config_id(llm_config, index)
+                suffix = 1
+                while candidate in seen_ids:
+                    suffix += 1
+                    candidate = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{candidate}|{suffix}"))
+                self._write_llm_config_field(llm_config, "config_id", candidate)
+                config_id = candidate
+                changed = True
+
+            seen_ids.add(config_id)
+
+        return changed
+
+    def _select_llm_config(
+        self,
+        llm_configs: List[Any],
+        *,
+        config_id: Optional[str] = None,
+        model_name: Optional[str] = None,
+        preferred_provider: Optional[str] = None,
+    ) -> Optional[Any]:
+        normalized_config_id = str(config_id or "").strip()
+        normalized_model_name = str(model_name or "").strip()
+        normalized_provider = str(preferred_provider or "").strip().lower()
+
+        if normalized_config_id:
+            for llm_config in llm_configs:
+                existing_config_id = str(self._read_llm_config_field(llm_config, "config_id") or "").strip()
+                if existing_config_id == normalized_config_id:
+                    return llm_config
+
+        if not normalized_model_name:
+            return None
+
+        candidates = [
+            llm_config
+            for llm_config in llm_configs
+            if str(self._read_llm_config_field(llm_config, "model_name") or "").strip() == normalized_model_name
+        ]
+        if not candidates:
+            return None
+
+        if normalized_provider:
+            for llm_config in candidates:
+                provider = str(self._read_llm_config_field(llm_config, "provider") or "").strip().lower()
+                if provider == normalized_provider:
+                    return llm_config
+
+        return candidates[0]
+
+    def _normalize_default_model_settings(
+        self,
+        settings: Dict[str, Any],
+        existing_settings: Dict[str, Any],
+        llm_configs: List[Any],
+    ) -> Dict[str, Any]:
+        normalized_settings = dict(settings)
+        preferred_provider = str(
+            normalized_settings.get("default_provider")
+            or existing_settings.get("default_provider")
+            or ""
+        ).strip().lower()
+        field_pairs = [
+            ("quick_analysis_model", "quick_analysis_model_config_id"),
+            ("deep_analysis_model", "deep_analysis_model_config_id"),
+            ("deep_reasoning_model", "deep_reasoning_model_config_id"),
+            ("coding_model", "coding_model_config_id"),
+        ]
+
+        for model_key, config_id_key in field_pairs:
+            raw_config_id = normalized_settings.get(config_id_key)
+            raw_model_name = normalized_settings.get(model_key)
+            config_id_present = config_id_key in normalized_settings
+            model_name_present = model_key in normalized_settings
+            config_id = str(raw_config_id or "").strip()
+            model_name = str(raw_model_name or "").strip()
+
+            if config_id_present and not config_id:
+                normalized_settings[config_id_key] = ""
+                normalized_settings[model_key] = ""
+                continue
+
+            if model_name_present and not model_name and not config_id:
+                normalized_settings[config_id_key] = ""
+                normalized_settings[model_key] = ""
+                continue
+
+            if not config_id_present and not model_name_present:
+                continue
+
+            matched_config = self._select_llm_config(
+                llm_configs,
+                config_id=config_id,
+                model_name=model_name,
+                preferred_provider=preferred_provider,
+            )
+            if matched_config is None:
+                if config_id_present:
+                    normalized_settings[config_id_key] = ""
+                if model_name_present:
+                    normalized_settings[model_key] = ""
+                continue
+
+            normalized_settings[config_id_key] = str(self._read_llm_config_field(matched_config, "config_id") or "")
+            normalized_settings[model_key] = str(self._read_llm_config_field(matched_config, "model_name") or "")
+
+        return normalized_settings
 
     # ==================== 市场分类管理 ====================
 
@@ -373,7 +512,9 @@ class ConfigService:
 
             if config_data:
                 print(f"📊 从数据库获取配置，版本: {config_data.get('version', 0)}, LLM配置数量: {len(config_data.get('llm_configs', []))}")
-                return SystemConfig(**config_data)
+                config = SystemConfig(**config_data)
+                self._ensure_llm_config_ids(config.llm_configs)
+                return config
 
             # 如果没有配置，创建默认配置
             print("⚠️ 数据库中没有配置，创建默认配置")
@@ -534,6 +675,7 @@ class ConfigService:
         """保存系统配置到数据库"""
         try:
             print(f"💾 开始保存配置，LLM配置数量: {len(config.llm_configs)}")
+            self._ensure_llm_config_ids(config.llm_configs)
 
             # 保存到数据库
             db = await self._get_db()
@@ -688,6 +830,13 @@ class ConfigService:
             config = await self.get_system_config()
             if not config:
                 return False
+
+            self._ensure_llm_config_ids(config.llm_configs)
+            settings = self._normalize_default_model_settings(
+                settings,
+                config.system_settings,
+                config.llm_configs,
+            )
 
             # 打印更新前的系统设置
             print(f"📝 更新前 system_settings 包含 {len(config.system_settings)} 项")
@@ -887,19 +1036,38 @@ class ConfigService:
     async def update_llm_config(self, llm_config: LLMConfig) -> bool:
         """更新大模型配置"""
         try:
+            config = await self.get_system_config()
+            if not config:
+                return False
+
+            self._ensure_llm_config_ids(config.llm_configs)
+            if not llm_config.config_id:
+                matched_config = self._select_llm_config(
+                    config.llm_configs,
+                    model_name=llm_config.model_name,
+                    preferred_provider=llm_config.provider,
+                )
+                if matched_config is not None:
+                    llm_config.config_id = self._read_llm_config_field(matched_config, "config_id")
+
+            if not llm_config.config_id:
+                llm_config.config_id = self._build_deterministic_llm_config_id(llm_config, len(config.llm_configs))
+
             # 直接保存到统一配置管理器
             success = unified_config.save_llm_config(llm_config)
             if not success:
                 return False
 
-            # 同时更新数据库配置
-            config = await self.get_system_config()
-            if not config:
-                return False
-
             # 查找并更新对应的LLM配置
             for i, existing_config in enumerate(config.llm_configs):
-                if existing_config.model_name == llm_config.model_name:
+                same_config_id = bool(llm_config.config_id) and existing_config.config_id == llm_config.config_id
+                same_provider_model = (
+                    existing_config.provider == llm_config.provider
+                    and existing_config.model_name == llm_config.model_name
+                )
+                if same_config_id or same_provider_model:
+                    if not llm_config.config_id:
+                        llm_config.config_id = existing_config.config_id
                     config.llm_configs[i] = llm_config
                     break
             else:

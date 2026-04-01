@@ -34,6 +34,7 @@ export interface LLMProvider {
 }
 
 export interface LLMConfig {
+  config_id?: string
   provider: string
   provider_name?: string
   model_name: string
@@ -569,11 +570,25 @@ export const configApi = {
   },
 
   // 获取默认模型配置
-  getDefaultModels(): Promise<{ quick_analysis_model: string; deep_analysis_model: string; deep_reasoning_model?: string }> {
+  getDefaultModels(): Promise<{
+    quick_analysis_model: string
+    quick_analysis_model_config_id?: string
+    deep_analysis_model: string
+    deep_analysis_model_config_id?: string
+    deep_reasoning_model?: string
+    deep_reasoning_model_config_id?: string
+    coding_model?: string
+    coding_model_config_id?: string
+  }> {
     return ApiClient.get('/api/config/settings').then((settings: any) => ({
       quick_analysis_model: settings.data?.quick_analysis_model || settings.quick_analysis_model || 'qwen-turbo',
+      quick_analysis_model_config_id: settings.data?.quick_analysis_model_config_id || settings.quick_analysis_model_config_id || '',
       deep_analysis_model: settings.data?.deep_analysis_model || settings.deep_analysis_model || 'qwen-max',
-      deep_reasoning_model: settings.data?.deep_reasoning_model || settings.deep_reasoning_model || ''
+      deep_analysis_model_config_id: settings.data?.deep_analysis_model_config_id || settings.deep_analysis_model_config_id || '',
+      deep_reasoning_model: settings.data?.deep_reasoning_model || settings.deep_reasoning_model || '',
+      deep_reasoning_model_config_id: settings.data?.deep_reasoning_model_config_id || settings.deep_reasoning_model_config_id || '',
+      coding_model: settings.data?.coding_model || settings.coding_model || '',
+      coding_model_config_id: settings.data?.coding_model_config_id || settings.coding_model_config_id || ''
     }))
   },
 

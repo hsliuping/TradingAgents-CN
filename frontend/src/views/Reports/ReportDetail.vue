@@ -321,6 +321,13 @@ interface ReportDetailData {
   summary?: string
   task_type?: string
   decision?: ReportDecision
+  report_manifest?: Array<{
+    field: string
+    display_name: string
+    category?: string
+    order: number
+    is_primary?: boolean
+  }>
 }
 
 // 路由和认证

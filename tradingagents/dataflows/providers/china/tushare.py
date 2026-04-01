@@ -759,7 +759,7 @@ class TushareProvider(BaseStockDataProvider):
             return None
     
     async def get_financial_data(self, symbol: str, report_type: str = "quarterly",
-                                period: str = None, limit: int = 4) -> Optional[Dict[str, Any]]:
+                                period: str = None, limit: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """
         获取财务数据
 
@@ -767,7 +767,7 @@ class TushareProvider(BaseStockDataProvider):
             symbol: 股票代码
             report_type: 报告类型 (quarterly/annual)
             period: 指定报告期 (YYYYMMDD格式)，为空则获取最新数据
-            limit: 获取记录数量，默认4条（最近4个季度）
+            limit: 获取记录数量，None 表示拉取该股票可获取的全部报告期
 
         Returns:
             财务数据字典，包含利润表、资产负债表、现金流量表和财务指标
@@ -782,8 +782,10 @@ class TushareProvider(BaseStockDataProvider):
             # 构建查询参数
             query_params = {
                 'ts_code': ts_code,
-                'limit': limit
             }
+
+            if limit is not None:
+                query_params['limit'] = limit
 
             # 如果指定了报告期，添加期间参数
             if period:

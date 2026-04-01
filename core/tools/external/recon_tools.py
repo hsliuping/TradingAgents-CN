@@ -33,7 +33,8 @@ def inspect_collection_schema(collection: str, sample_size: int = 20) -> str:
     """查看指定集合的顶层字段和覆盖率摘要。
     参数 collection: 集合名称（如 stock_basic_info, market_quotes, stock_financial_data 等）。
     参数 sample_size: 采样文档数（默认 20，最大 100）。
-    返回 JSON 对象，包含 sample_count、top_level_fields 等。"""
+    返回 JSON 对象，包含 matching_document_count、sample_count、top_level_fields、field_coverage、sample_document_summaries 等。
+    只返回结构摘要，不返回完整样本文档。"""
     from core.skill_runtime.project_access import inspect_stock_collection_schema
     sample_size = int(sample_size) if not isinstance(sample_size, int) else sample_size
     result = inspect_stock_collection_schema(collection, sample_size=sample_size)
@@ -64,11 +65,12 @@ def check_field_coverage(collection: str, fields: str, sample_size: int = 50) ->
 # ---------------------------------------------------------------------------
 
 def inspect_symbol_sample(collection: str, symbol: str, limit: int = 2) -> str:
-    """查看指定股票在某个集合中的样本文档。
+    """查看指定股票在某个集合中的样本文档摘要。
     参数 collection: 集合名称。
     参数 symbol: 6 位股票代码，例如 '600519'。
     参数 limit: 返回文档数（默认 2，最大 5）。
-    返回 JSON 数组，每项为一条文档。"""
+    返回 JSON 对象，包含 matching_document_count、returned_summary_count、documents。
+    documents 仅包含字段概览、非空字段数、标识字段预览和嵌套结构摘要，不返回完整原文。"""
     from core.skill_runtime.project_access import inspect_symbol_documents
     limit = int(limit) if not isinstance(limit, int) else limit
     docs = inspect_symbol_documents(collection, symbol, limit=min(limit, 5))

@@ -177,14 +177,14 @@
             </el-card>
           </div>
 
-          <div v-else-if="activeStep === 'spec'" class="step-layout two-columns">
+          <div v-else-if="activeStep === 'spec'" class="step-layout single-column">
             <el-card class="step-card" shadow="never">
               <template #header>
                 <div class="card-header">
                   <span>确认规格</span>
                   <div class="session-toolbar-actions">
                     <el-button size="small" type="success" @click="handlePreviewSpec" :loading="previewing" :disabled="!currentSession">刷新规格</el-button>
-                    <el-button size="small" type="warning" @click="handleAnalyzeGaps" :loading="analyzing" :disabled="!canAdvance">做缺口分析</el-button>
+                    <el-button size="small" type="primary" @click="goToGapStep" :disabled="!displaySpec">进入能力检查</el-button>
                   </div>
                 </div>
               </template>
@@ -203,7 +203,7 @@
                 <div class="field-block">
                   <div class="field-label">输出</div>
                   <div class="tag-wrap">
-                    <el-tag v-for="item in displaySpec.outputs" :key="item" class="tag-item" type="success">{{ item }}</el-tag>
+                    <el-tag v-for="item in displaySpecOutputTags" :key="item" class="tag-item" type="success">{{ item }}</el-tag>
                   </div>
                 </div>
                 <div class="field-block">
@@ -212,18 +212,53 @@
                     <el-tag v-for="item in displaySpec.non_goals" :key="item" class="tag-item" type="warning">{{ item }}</el-tag>
                   </div>
                 </div>
-                <div class="field-block" v-if="previewResult?.pending_questions?.length">
-                  <div class="field-label">还要确认</div>
-                  <div v-for="question in previewResult.pending_questions" :key="question" class="pending-item">{{ question }}</div>
+                <div class="field-block spec-confirm-block" v-if="currentSession">
+                  <div class="field-label">最后确认一下</div>
+                  <div class="note-item">
+                    这里不用把需求重新说一遍。现在只要做两件事：
+                    如果当前草案没问题，直接继续；如果有不对的地方，补一句你想改什么。
+                  </div>
+                  <div v-if="specPendingQuestions.length" class="confirm-question-list">
+                    <div v-for="(question, index) in specPendingQuestions" :key="`confirm-${question}`" class="confirm-question-item">
+                      <span class="confirm-question-index">{{ index + 1 }}</span>
+                      <span>{{ question }}</span>
+                    </div>
+                  </div>
+                  <el-input
+                    v-model="specFeedbackMessage"
+                    type="textarea"
+                    :rows="4"
+                    resize="none"
+                    placeholder="例如：整体没问题，继续。或者：输出里请单列三种估值方法结果，不要只给一个综合结论。"
+                  />
+                  <div class="action-row between">
+                    <el-button text @click="fillSpecDefaultReply">帮我填入默认回复</el-button>
+                    <div class="session-toolbar-actions">
+                      <el-button @click="activeStep = 'discuss'">回讨论区详细补充</el-button>
+                      <el-button type="success" plain :loading="confirmingSpec" @click="handleAcceptRecommendedSpec">按当前方案继续</el-button>
+                      <el-button type="primary" :disabled="!specFeedbackMessage.trim()" :loading="confirmingSpec" @click="handleSubmitSpecFeedback">提交修改并刷新</el-button>
+                    </div>
+                  </div>
+                </div>
+                <div class="field-block">
+                  <div class="field-label">进入下一步前</div>
+                  <div class="note-item">
+                    这一步只确认“这个 Agent 要做什么、产出什么”。下一步才会检查现有能力够不够、还缺什么工具。
+                  </div>
                 </div>
               </div>
             </el-card>
 
+          </div>
+
+          <div v-else-if="activeStep === 'gap'" class="step-layout single-column">
             <el-card class="step-card" shadow="never">
               <template #header>
                 <div class="card-header">
-                  <span>缺口分析</span>
+                  <span>工具缺口与能力检查</span>
                   <div class="session-toolbar-actions">
+                    <el-button size="small" @click="activeStep = 'spec'">返回规格确认</el-button>
+                    <el-button size="small" type="warning" @click="handleAnalyzeGaps" :loading="analyzing" :disabled="!canAdvance">{{ gapReport ? '重新发现缺口' : '做缺口分析' }}</el-button>
                     <el-button size="small" type="warning" plain @click="handleGenerateToolingPlan" :loading="generatingToolPlan" :disabled="!currentSession">生成工具需求草案</el-button>
                     <el-button size="small" type="primary" @click="handleBuildVersion" :loading="buildingVersion" :disabled="!canAdvance">生成版本草案</el-button>
                   </div>
@@ -236,6 +271,26 @@
                   <span v-if="gapReport.generated_by === 'llm'">生成方式：LLM 缺口分析</span>
                   <span v-else-if="gapReport.generated_by === 'llm_failed'">生成方式：LLM 失败，未做兜底</span>
                 </div>
+                <div class="gap-stage-summary">
+                  <div class="gap-stage-card">
+                    <div class="gap-stage-kicker">第一步</div>
+                    <div class="gap-stage-title">先看现有可复用能力</div>
+                    <div class="gap-stage-text">先确认系统已经有什么，避免把可复用能力误判成新缺口。</div>
+                    <div class="gap-stage-metric">当前识别 {{ reusableCapabilityCount }} 项可复用能力</div>
+                  </div>
+                  <div class="gap-stage-card">
+                    <div class="gap-stage-kicker">第二步</div>
+                    <div class="gap-stage-title">再看真正缺什么</div>
+                    <div class="gap-stage-text">只把现有能力覆盖不了的最小能力单元算作缺口，不做大而全联想。</div>
+                    <div class="gap-stage-metric">当前识别 {{ missingCapabilityCount }} 项待补缺口/待实现项</div>
+                  </div>
+                  <div class="gap-stage-card">
+                    <div class="gap-stage-kicker">第三步</div>
+                    <div class="gap-stage-title">最后落成工具草案</div>
+                    <div class="gap-stage-text">把真正缺的能力继续收敛成工具需求草案，再决定是否进入版本组装。</div>
+                    <div class="gap-stage-metric">{{ toolingPlan ? '已生成工具草案' : '尚未生成工具草案' }}</div>
+                  </div>
+                </div>
                 <div v-if="gapReport.error_message" class="field-block">
                   <div class="field-label">缺口分析失败原因</div>
                   <div class="note-item error-note">{{ gapReport.error_message }}</div>
@@ -245,10 +300,8 @@
                   <pre class="runtime-raw-response">{{ gapReport.raw_response }}</pre>
                 </div>
                 <div class="field-block">
-                  <div class="field-label">可复用模块</div>
-                  <div class="tag-wrap">
-                    <el-tag v-for="item in gapReport.reusable_modules" :key="item" class="tag-item">{{ item }}</el-tag>
-                  </div>
+                  <div class="field-label">第一步：现有可复用能力</div>
+                  <div class="note-item">这一段只回答“现在已经能直接用什么”。如果这里已经能覆盖，就不应该再进入新增能力实现。</div>
                 </div>
                 <div class="field-block" v-if="gapReport.existing_tools.length">
                   <div class="field-label">已发现工具</div>
@@ -256,21 +309,42 @@
                     <el-tag v-for="item in gapReport.existing_tools" :key="item" class="tag-item" type="info">{{ item }}</el-tag>
                   </div>
                 </div>
+                <div class="field-block">
+                  <div class="field-label">第二步：真正缺口</div>
+                  <div class="note-item">这一段只回答“现有能力为什么还不够”。只有这里识别出来的项，才值得进入能力工坊或工具实现。</div>
+                </div>
                 <div class="field-block" v-if="gapReport.suggested_tools.length || gapReport.suggested_capabilities.length">
                   <div class="field-label">怎么理解这些缺口</div>
                   <div class="note-item">
                     这里展示的是 Agent 还缺的执行能力，不等于它们天然就是一个独立 Skill。<br>
-                    当前点“生成能力”时，会借用能力工坊的生成流程先做规格澄清；但真正要补的，仍然是那些输入输出明确、能被 Agent 直接调用的最小能力单元。是否最终落成新的 Skill，要看现有工具能不能复用、是否真的缺实现。
+                    当前点“去能力工坊”时，会把上游 Agent 的目标和缺口上下文一并带过去；但真正要补的，仍然是那些输入输出明确、能被 Agent 直接调用的最小能力单元。是否最终落成新的 Skill，要看现有工具能不能复用、是否真的缺实现。
                   </div>
                 </div>
-                <div class="field-block" v-if="gapReport.suggested_tools.length">
+                <div class="field-block" v-if="pendingSuggestedTools.length">
                   <div class="field-label">建议优先补齐的执行能力</div>
-                  <div v-for="item in gapReport.suggested_tools" :key="item.tool_id" class="pending-item descriptive-item">
+                  <div v-for="item in pendingSuggestedTools" :key="item.tool_id" class="pending-item descriptive-item">
                     <div class="descriptive-title">{{ item.tool_id }}</div>
                     <div class="descriptive-text">{{ item.description || getSuggestedToolDescription(item.tool_id) }}</div>
                     <div v-if="item.why_needed" class="descriptive-text" style="color: var(--el-text-color-secondary); font-size: 12px;">缺口原因：{{ item.why_needed }}</div>
                     <div class="inline-actions breakdown-actions">
-                      <el-button size="small" type="primary" plain :loading="skillGenerating[item.tool_id]" @click="handleCreateSkillSession(item.tool_id)">生成能力</el-button>
+                      <el-button size="small" @click="goToSkillWorkshop(item.tool_id)">去能力工坊</el-button>
+                    </div>
+                  </div>
+                </div>
+                <div class="field-block" v-if="resolvedSuggestedTools.length">
+                  <div class="field-label">已在能力工坊生成的能力</div>
+                  <div class="note-item">这些能力已经在当前系统能力快照里可见，当前缺口展示可能还是旧结果。建议重新发现缺口，刷新这一步的判断。</div>
+                  <div class="action-row" style="margin-bottom: 12px;">
+                    <el-button size="small" type="warning" plain @click="handleAnalyzeGaps" :loading="analyzing" :disabled="!currentSession">重新发现缺口</el-button>
+                  </div>
+                  <div v-for="item in resolvedSuggestedTools" :key="`resolved-${item.tool_id}`" class="pending-item descriptive-item">
+                    <div class="descriptive-title">
+                      {{ item.tool_id }}
+                      <el-tag size="small" type="success" effect="plain" style="margin-left: 8px;">已在能力工坊生成</el-tag>
+                    </div>
+                    <div class="descriptive-text">{{ item.description || getSuggestedToolDescription(item.tool_id) }}</div>
+                    <div v-if="item.why_needed" class="descriptive-text" style="color: var(--el-text-color-secondary); font-size: 12px;">原缺口原因：{{ item.why_needed }}</div>
+                    <div class="inline-actions breakdown-actions">
                       <el-button size="small" @click="goToSkillWorkshop(item.tool_id)">去能力工坊</el-button>
                     </div>
                   </div>
@@ -296,7 +370,7 @@
                   <div v-for="item in gapReport.notes" :key="item" class="note-item">{{ item }}</div>
                 </div>
                 <div class="field-block" v-if="toolingPlan">
-                  <div class="field-label">工具需求草案</div>
+                  <div class="field-label">第三步：工具需求草案</div>
                   <div class="note-item" v-if="toolingPlan.summary">{{ toolingPlan.summary }}</div>
                   <div class="runtime-meta-row">
                     <span v-if="toolingPlan.generated_by === 'llm'">生成方式：LLM 草案</span>
@@ -324,9 +398,9 @@
                       <div class="runtime-meta-row">
                         <span>工具 ID：{{ item.tool_id }}</span>
                         <span>优先级：{{ item.priority }}</span>
+                        <span v-if="isCapabilityAlreadyGenerated(item)">已在能力工坊生成</span>
                       </div>
                       <div class="inline-actions breakdown-actions">
-                        <el-button size="small" type="primary" plain :loading="skillGenerating[item.tool_id]" @click="handleCreateSkillSession(item)">生成能力</el-button>
                         <el-button size="small" @click="goToSkillWorkshop(item)">去能力工坊</el-button>
                       </div>
                       <div class="note-item compact-note">{{ item.why_needed }}</div>
@@ -369,6 +443,7 @@
                 </div>
               </div>
             </el-card>
+
           </div>
 
           <div v-else-if="activeStep === 'version'" class="step-layout single-column">
@@ -377,8 +452,9 @@
                 <div class="card-header">
                   <span>版本草案</span>
                   <div class="session-toolbar-actions">
+                    <el-button size="small" @click="activeStep = 'gap'">返回能力检查</el-button>
                     <el-button size="small" type="primary" @click="handleBuildVersion" :loading="buildingVersion" :disabled="!canAdvance">重新生成</el-button>
-                    <el-button size="small" type="success" plain @click="openEvaluateDialog" :disabled="!latestVersion">真实结果调试</el-button>
+                    <el-button size="small" type="success" plain @click="openEvaluateDialog" :disabled="!latestVersion">调试运行与评估</el-button>
                   </div>
                 </div>
               </template>
@@ -395,18 +471,43 @@
 
                 <div class="field-block">
                   <div class="field-label">默认工具</div>
-                  <div class="tag-wrap">
-                    <el-tag v-for="item in latestVersion.required_tools" :key="item" class="tag-item" type="info">{{ item }}</el-tag>
+                  <div v-if="versionDefaultToolCards.length" class="default-tool-list">
+                    <div v-for="item in versionDefaultToolCards" :key="item.id" class="default-tool-card">
+                      <div class="default-tool-header">
+                        <div class="default-tool-name-row">
+                          <span class="default-tool-name">{{ item.name }}</span>
+                          <span class="default-tool-id">{{ item.id }}</span>
+                        </div>
+                      </div>
+                      <div class="default-tool-description">{{ item.description }}</div>
+                    </div>
+                  </div>
+                  <div v-else class="note-item compact-note">
+                    当前版本尚未绑定默认工具。
                   </div>
                 </div>
-                <div class="field-block" v-if="latestVersion.required_capabilities?.length">
+                <div class="field-block" v-if="pendingVersionCapabilities.length">
                   <div class="field-label">待补执行能力</div>
                   <div class="note-item">这些是版本草案里已经识别出来、需要显式挂接的执行能力，不表示它们一定都要新建成独立 Skill；也可能是复用已有工具、补一个最小实现单元，或做成新的可注册能力。</div>
-                  <div v-for="item in latestVersion.required_capabilities" :key="item" class="pending-item descriptive-item">
-                    <div class="descriptive-title">{{ item }}</div>
+                  <div v-for="item in pendingVersionCapabilities" :key="item" class="pending-item descriptive-item">
+                    <div class="descriptive-title">
+                      {{ item }}
+                    </div>
                     <div class="descriptive-text">版本草案已经把这项能力识别为需要补齐或显式挂接的执行能力，不再只停留在抽象需求层；后续应先判断复用，再决定是否新增实现。</div>
                     <div class="inline-actions breakdown-actions">
-                      <el-button size="small" type="primary" plain :loading="skillGenerating[item]" @click="handleCreateSkillSession(item)">生成能力</el-button>
+                      <el-button size="small" @click="goToSkillWorkshop(item)">去能力工坊</el-button>
+                    </div>
+                  </div>
+                </div>
+                <div class="field-block" v-if="resolvedVersionCapabilities.length">
+                  <div class="field-label">已补齐但当前版本尚未刷新</div>
+                  <div class="note-item">这些能力已经在能力工坊中生成成功，但当前版本草案仍是旧快照。重新生成版本后，这里会自动收敛。</div>
+                  <div v-for="item in resolvedVersionCapabilities" :key="`resolved-version-${item}`" class="pending-item descriptive-item">
+                    <div class="descriptive-title">
+                      {{ item }}
+                      <el-tag size="small" type="success" effect="plain" style="margin-left: 8px;">已在能力工坊生成</el-tag>
+                    </div>
+                    <div class="inline-actions breakdown-actions">
                       <el-button size="small" @click="goToSkillWorkshop(item)">去能力工坊</el-button>
                     </div>
                   </div>
@@ -417,6 +518,11 @@
                     模板：{{ latestVersion.prompt_template_ref?.template_name || '未生成' }}
                     <br>
                     模板 ID：{{ latestVersion.prompt_template_ref?.template_id || '无' }}
+                  </div>
+                  <div v-if="latestVersionPrompt?.message && !promptSections.length" class="note-item compact-note">{{ latestVersionPrompt.message }}</div>
+                  <div v-for="section in promptSections" :key="section.key" class="field-block" style="margin-top: 12px;">
+                    <div class="field-label">{{ section.label }}</div>
+                    <pre class="runtime-raw-response">{{ section.value }}</pre>
                   </div>
                 </div>
                 <div class="field-block">
@@ -431,14 +537,6 @@
                     <el-tag v-for="item in latestVersion.evaluation_policy?.dimensions || []" :key="item" class="tag-item">{{ item }}</el-tag>
                   </div>
                 </div>
-                <div class="field-block" v-if="versionSampleSets.length">
-                  <div class="field-label">可用样本评估集</div>
-                  <div v-for="item in versionSampleSets" :key="item.sample_set_id" class="note-item descriptive-item">
-                    <div class="descriptive-title">{{ item.name }} <span class="inline-muted">({{ item.cases.length }} 个样本)</span></div>
-                    <div class="descriptive-text">{{ item.description || '可用于样本基准评估。' }}</div>
-                  </div>
-                  <div v-if="sampleSets.length > versionSampleSets.length" class="note-item compact-note">还有 {{ sampleSets.length - versionSampleSets.length }} 套样本集可在评估弹窗中选择。</div>
-                </div>
                 <div class="action-row right">
                   <el-button type="primary" plain @click="handleIterateVersion" :loading="iteratingVersion">基于当前结果发起下一轮迭代</el-button>
                 </div>
@@ -452,7 +550,7 @@
                 <div class="card-header">
                   <span>评估与迭代</span>
                   <div class="session-toolbar-actions">
-                    <el-button size="small" type="success" plain @click="openEvaluateDialog" :disabled="!latestVersion">真实结果调试</el-button>
+                    <el-button size="small" type="success" plain @click="openEvaluateDialog" :disabled="!latestVersion">调试运行与评估</el-button>
                     <el-button size="small" type="primary" plain @click="handleIterateVersion" :loading="iteratingVersion" :disabled="!latestVersion">开始下一轮</el-button>
                   </div>
                 </div>
@@ -465,15 +563,6 @@
                     {{ evaluationDecisionText }}
                   </el-tag>
                   <el-tag effect="plain">{{ evaluationTypeText }}</el-tag>
-                  <el-tag v-if="latestEvaluation.sample_set_id" type="info" effect="plain">{{ latestEvaluationSampleSet?.name || latestEvaluation.sample_set_id }}</el-tag>
-                </div>
-                <div class="field-block" v-if="latestEvaluation.sample_set_id">
-                  <div class="field-label">本次评估样本集</div>
-                  <div class="note-item">{{ latestEvaluationSampleSet?.description || '本次评估使用了已配置的样本基准集。' }}</div>
-                  <div class="runtime-meta-row">
-                    <span>样本集 ID：{{ latestEvaluation.sample_set_id }}</span>
-                    <span v-if="latestEvaluationSampleSet">样本数：{{ latestEvaluationSampleSet.cases.length }}</span>
-                  </div>
                 </div>
                 <div class="field-block" v-if="displayedRawBackendResult">
                   <div class="field-label">后端原始返回</div>
@@ -485,7 +574,7 @@
                   <div class="raw-result-box">{{ displayedRawBackendResult }}</div>
                 </div>
                 <div class="field-block" v-if="displayedRuntimeOutput">
-                  <div class="field-label">本次真实输出</div>
+                  <div class="field-label">本次调试输出</div>
                   <div class="runtime-meta-row">
                     <span v-if="displayedRuntimeSymbol">标的：{{ displayedRuntimeSymbol }}</span>
                     <span v-if="displayedRuntimeDate">日期：{{ displayedRuntimeDate }}</span>
@@ -524,61 +613,6 @@
                       <div v-if="item.notes.length" class="breakdown-group">
                         <div class="breakdown-label">说明</div>
                         <div v-for="entry in item.notes" :key="entry" class="note-item compact-note">{{ entry }}</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div class="field-block" v-if="benchmarkCaseResultCards.length">
-                  <div class="field-label">样本逐条复盘</div>
-                  <div class="breakdown-grid">
-                    <div v-for="item in benchmarkCaseResultCards" :key="item.caseId" class="breakdown-card">
-                      <div class="breakdown-title">{{ item.title }}</div>
-                      <div class="runtime-meta-row">
-                        <span>字段覆盖：{{ item.outputCoverage }}</span>
-                        <span>内容质量：{{ item.qualityScore }}</span>
-                        <span>边界控制：{{ item.constraintScore }}</span>
-                      </div>
-                      <div class="note-item compact-note" v-if="item.scenarioText">场景：{{ item.scenarioText }}</div>
-                      <div class="note-item compact-note" v-if="item.outputExcerpt">输出摘录：{{ item.outputExcerpt }}</div>
-                      <div class="breakdown-group" v-if="item.outputMatched.length || item.outputMissing.length">
-                        <div class="breakdown-label">输出字段</div>
-                        <div class="tag-wrap" v-if="item.outputMatched.length">
-                          <el-tag v-for="entry in item.outputMatched" :key="`${item.caseId}-out-hit-${entry}`" class="tag-item" type="success" effect="plain">{{ entry }}</el-tag>
-                        </div>
-                        <div class="tag-wrap" v-if="item.outputMissing.length">
-                          <el-tag v-for="entry in item.outputMissing" :key="`${item.caseId}-out-miss-${entry}`" class="tag-item" type="warning" effect="plain">{{ entry }}</el-tag>
-                        </div>
-                      </div>
-                      <div class="breakdown-group" v-if="item.methodMatched.length || item.methodMissing.length">
-                        <div class="breakdown-label">方法覆盖</div>
-                        <div class="tag-wrap" v-if="item.methodMatched.length">
-                          <el-tag v-for="entry in item.methodMatched" :key="`${item.caseId}-method-hit-${entry}`" class="tag-item" type="success" effect="plain">{{ entry }}</el-tag>
-                        </div>
-                        <div class="tag-wrap" v-if="item.methodMissing.length">
-                          <el-tag v-for="entry in item.methodMissing" :key="`${item.caseId}-method-miss-${entry}`" class="tag-item" type="warning" effect="plain">{{ entry }}</el-tag>
-                        </div>
-                      </div>
-                      <div class="breakdown-group" v-if="item.keywordMatched.length || item.keywordMissing.length">
-                        <div class="breakdown-label">关键披露</div>
-                        <div class="tag-wrap" v-if="item.keywordMatched.length">
-                          <el-tag v-for="entry in item.keywordMatched" :key="`${item.caseId}-keyword-hit-${entry}`" class="tag-item" type="success" effect="plain">{{ entry }}</el-tag>
-                        </div>
-                        <div class="tag-wrap" v-if="item.keywordMissing.length">
-                          <el-tag v-for="entry in item.keywordMissing" :key="`${item.caseId}-keyword-miss-${entry}`" class="tag-item" type="warning" effect="plain">{{ entry }}</el-tag>
-                        </div>
-                      </div>
-                      <div class="breakdown-group" v-if="item.forbiddenMatched.length || item.forbiddenSafe.length">
-                        <div class="breakdown-label">边界检查</div>
-                        <div class="tag-wrap" v-if="item.forbiddenMatched.length">
-                          <el-tag v-for="entry in item.forbiddenMatched" :key="`${item.caseId}-forbidden-hit-${entry}`" class="tag-item" type="danger" effect="plain">{{ entry }}</el-tag>
-                        </div>
-                        <div class="tag-wrap" v-if="item.forbiddenSafe.length">
-                          <el-tag v-for="entry in item.forbiddenSafe" :key="`${item.caseId}-forbidden-safe-${entry}`" class="tag-item" effect="plain">{{ entry }}</el-tag>
-                        </div>
-                      </div>
-                      <div class="breakdown-group" v-if="item.notes.length">
-                        <div class="breakdown-label">说明</div>
-                        <div v-for="entry in item.notes" :key="`${item.caseId}-note-${entry}`" class="note-item compact-note">{{ entry }}</div>
                       </div>
                     </div>
                   </div>
@@ -667,87 +701,14 @@
       </section>
     </div>
 
-    <el-dialog v-model="evaluateDialogVisible" title="真实结果调试" width="860px" destroy-on-close>
+    <el-dialog v-model="evaluateDialogVisible" title="调试运行与结果评估" width="860px" destroy-on-close>
       <div class="evaluation-dialog">
         <el-form label-width="120px">
           <el-alert
             type="info"
             :closable="false"
-            :title="evaluationForm.evaluation_type === 'benchmark' ? '样本基准评估用于检查输出结构、边界和方法覆盖；你可以按样本逐条粘贴结果，再统一评估。' : '先做一次真实调试运行，确认输出没问题后，再单独发起结果评估。'"
+            title="先做一次调试运行，确认输出没问题后，再发起结果评估。当前 Agent 工坊暂不提供样本基准评估入口。"
           />
-
-          <el-form-item label="评估方式" style="margin-top: 16px;">
-            <el-radio-group v-model="evaluationForm.evaluation_type">
-              <el-radio-button label="production-review">真实结果评估</el-radio-button>
-              <el-radio-button label="benchmark">样本基准评估</el-radio-button>
-            </el-radio-group>
-          </el-form-item>
-
-          <template v-if="evaluationForm.evaluation_type === 'benchmark'">
-            <el-form-item label="样本集">
-              <el-select
-                v-model="evaluationForm.sample_set_id"
-                placeholder="请选择样本集"
-                style="width: 360px"
-                :loading="loadingSampleSets"
-              >
-                <el-option
-                  v-for="item in sampleSets"
-                  :key="item.sample_set_id"
-                  :label="item.name"
-                  :value="item.sample_set_id"
-                />
-              </el-select>
-            </el-form-item>
-
-            <el-form-item v-if="selectedSampleSet" label="样本说明">
-              <div class="benchmark-sample-block">
-                <div class="note-item">{{ selectedSampleSet.description }}</div>
-                <div class="note-item compact-note">共 {{ selectedSampleSet.cases.length }} 个样本</div>
-              </div>
-            </el-form-item>
-
-            <el-form-item v-if="selectedSampleSet?.cases?.length" label="样本输出">
-              <div class="benchmark-case-list">
-                <div
-                  v-for="item in benchmarkCaseOutputs"
-                  :key="item.case_id"
-                  class="benchmark-case-card"
-                >
-                  <div class="breakdown-title">{{ item.title }}</div>
-                  <div class="note-item compact-note" v-if="item.scenarioText">场景：{{ item.scenarioText }}</div>
-                  <div class="tag-wrap" v-if="item.expectedOutputs.length">
-                    <el-tag v-for="entry in item.expectedOutputs" :key="entry" class="tag-item" type="success" effect="plain">{{ entry }}</el-tag>
-                  </div>
-                  <div class="tag-wrap" v-if="item.expectedMethods.length">
-                    <el-tag v-for="entry in item.expectedMethods" :key="entry" class="tag-item" type="info" effect="plain">{{ entry }}</el-tag>
-                  </div>
-                  <div class="tag-wrap" v-if="item.requiredKeywords.length">
-                    <el-tag v-for="entry in item.requiredKeywords" :key="entry" class="tag-item" effect="plain">{{ entry }}</el-tag>
-                  </div>
-                  <el-input
-                    v-model="item.output_text"
-                    type="textarea"
-                    :rows="5"
-                    resize="vertical"
-                    placeholder="粘贴这个样本对应的 Agent 输出结果"
-                  />
-                </div>
-              </div>
-            </el-form-item>
-
-            <el-form-item label="补充反馈">
-              <el-input
-                v-model="evaluationForm.user_feedback"
-                type="textarea"
-                :rows="3"
-                resize="vertical"
-                placeholder="可选，填写你对这组 benchmark 输出的主观评价。"
-              />
-            </el-form-item>
-          </template>
-
-          <template v-else>
           <el-form-item label="模型名称" style="margin-top: 16px;">
             <DeepModelSelector
               v-model="evaluationForm.llm.model"
@@ -779,7 +740,7 @@
               :rows="10"
               resize="vertical"
               readonly
-              placeholder="点击下方按钮后，这里会自动显示本次真实调试输出。"
+              placeholder="点击下方按钮后，这里会自动显示本次调试运行输出。"
             />
           </el-form-item>
 
@@ -809,15 +770,14 @@
               type="textarea"
               :rows="3"
               resize="vertical"
-              placeholder="可选，填写你对这次样本或运行结果的主观评价。"
+              placeholder="可选，填写你对这次调试结果的主观评价。"
             />
           </el-form-item>
-          </template>
         </el-form>
       </div>
       <template #footer>
         <el-button @click="evaluateDialogVisible = false">取消</el-button>
-        <el-button v-if="evaluationForm.evaluation_type !== 'benchmark'" type="primary" plain :loading="debuggingVersion" @click="handleDebugVersion">调试运行</el-button>
+        <el-button type="primary" plain :loading="debuggingVersion" @click="handleDebugVersion">调试运行</el-button>
         <el-button type="primary" :loading="evaluatingVersion" :disabled="!canSubmitEvaluation" @click="handleEvaluateVersion">结果评估</el-button>
       </template>
     </el-dialog>
@@ -830,15 +790,18 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
-import { skillGenerationApi } from '@/api/skillGeneration'
+import { toolsApi, type ToolMetadata } from '@/api/tools'
 import agentWorkshopApi, {
-  type AgentBenchmarkSampleSet,
   type AgentEvaluationReport,
   type AgentSpec,
+  type AgentSpecIOItem,
+  type AgentWorkshopCapabilitySnapshot,
   type AgentWorkshopDebugVersionResult,
   type AgentWorkshopGapAnalysis,
   type AgentWorkshopPreviewResult,
   type AgentWorkshopSessionDetail,
+  type AgentWorkshopVersionPrompt,
+  type SuggestedToolItem,
   type AgentWorkshopToolingPlanItem,
   type AgentWorkshopToolingPlan,
   type AgentWorkshopValuationTraceabilityItem,
@@ -846,10 +809,11 @@ import agentWorkshopApi, {
 } from '@/api/agentWorkshop'
 import { configApi, type LLMConfig } from '@/api/config'
 
-type FlowStep = 'discuss' | 'spec' | 'version' | 'evaluate'
+type FlowStep = 'discuss' | 'spec' | 'gap' | 'version' | 'evaluate'
 
 const description = ref('')
 const replyMessage = ref('')
+const specFeedbackMessage = ref('')
 
 const route = useRoute()
 const router = useRouter()
@@ -858,17 +822,16 @@ const specs = ref<AgentSpec[]>([])
 const currentSession = ref<AgentWorkshopSessionDetail | null>(null)
 const previewResult = ref<AgentWorkshopPreviewResult | null>(null)
 const gapReport = ref<AgentWorkshopGapAnalysis | null>(null)
+const capabilitySnapshot = ref<AgentWorkshopCapabilitySnapshot | null>(null)
 const latestVersion = ref<AgentVersion | null>(null)
+const latestVersionPrompt = ref<AgentWorkshopVersionPrompt | null>(null)
 const latestEvaluation = ref<AgentEvaluationReport | null>(null)
 const latestDebugResult = ref<AgentWorkshopDebugVersionResult | null>(null)
 const availableModels = ref<LLMConfig[]>([])
-const sampleSets = ref<AgentBenchmarkSampleSet[]>([])
-const loadingSampleSets = ref(false)
+const toolCatalog = ref<ToolMetadata[]>([])
 
 const evaluateDialogVisible = ref(false)
 const evaluationForm = ref({
-  evaluation_type: 'production-review',
-  sample_set_id: '',
   user_feedback: '',
   llm: {
     provider: 'custom_openai',
@@ -894,27 +857,121 @@ const previewing = ref(false)
 const analyzing = ref(false)
 const buildingVersion = ref(false)
 const generatingToolPlan = ref(false)
+const confirmingSpec = ref(false)
 const debuggingVersion = ref(false)
 const evaluatingVersion = ref(false)
 const iteratingVersion = ref(false)
 const loadingSpecs = ref(false)
 const loadingSessionList = ref(false)
 const loadingCurrentSession = ref(false)
-const skillGenerating = ref<Record<string, boolean>>({})
 const activeStep = ref<FlowStep>('discuss')
 
 const flowSteps: Array<{ key: FlowStep; index: string; title: string; description: string }> = [
   { key: 'discuss', index: '01', title: '聊需求', description: '先把目标、边界和输出讲清楚' },
-  { key: 'spec', index: '02', title: '看规格', description: '确认职责、输出和待补能力' },
-  { key: 'version', index: '03', title: '生成版本', description: '组装工具、Prompt 和输出结构' },
-  { key: 'evaluate', index: '04', title: '评估迭代', description: '看结果，再决定下一轮怎么改' },
+  { key: 'spec', index: '02', title: '看规格', description: '先确认职责、输出和待确认项' },
+  { key: 'gap', index: '03', title: '查缺口', description: '单独检查能力缺口和可复用能力' },
+  { key: 'version', index: '04', title: '生成版本', description: '确认工具方案后再组装版本结构' },
+  { key: 'evaluate', index: '05', title: '评估迭代', description: '看结果，再决定下一轮怎么改' },
 ]
 
+const getSpecIoText = (item?: AgentSpecIOItem | null) => {
+  if (!item) return ''
+  if (typeof item === 'string') return item.trim()
+  const name = String(item.name || '').trim()
+  const description = String(item.description || '').trim()
+  if (name && description && description !== name) {
+    return `${name}：${description}`
+  }
+  return name || description
+}
+
 const displaySpec = computed(() => previewResult.value?.spec || currentSession.value?.current_spec_snapshot || null)
+const displaySpecOutputTags = computed(() => (displaySpec.value?.outputs || []).map(item => getSpecIoText(item)).filter(Boolean))
 const canAdvance = computed(() => currentSession.value?.feasibility_status === 'feasible' && (currentSession.value?.completeness_score || 0) >= 0.75)
 const hasWorkspaceContext = computed(() => Boolean(currentSession.value || displaySpec.value || latestVersion.value || latestEvaluation.value))
 const selectedSpecId = computed(() => displaySpec.value?.spec_id || currentSession.value?.current_spec_snapshot?.spec_id || latestVersion.value?.spec_id || '')
 const selectedSpecName = computed(() => displaySpec.value?.name || latestVersion.value?.agent_metadata?.name || '未命名 Agent')
+const normalizeCapabilityId = (value?: string) => String(value || '').trim().toLowerCase().split('|')[0].trim().replace(/-/g, '_')
+const parseToolLabel = (value?: string) => {
+  const raw = String(value || '').trim()
+  if (!raw) {
+    return { id: '', name: '' }
+  }
+  if (!raw.includes('|')) {
+    return { id: raw, name: '' }
+  }
+  const [toolId, toolName] = raw.split('|', 2)
+  return {
+    id: String(toolId || '').trim(),
+    name: String(toolName || '').trim(),
+  }
+}
+const toolCatalogMap = computed(() => {
+  const entries = toolCatalog.value.map(item => [item.id, item] as const)
+  return new Map(entries)
+})
+const gapExistingToolLabelMap = computed(() => {
+  const entries = (gapReport.value?.existing_tools || [])
+    .map(item => parseToolLabel(item))
+    .filter(item => item.id)
+    .map(item => [item.id, item.name] as const)
+  return new Map(entries)
+})
+const versionDefaultToolCards = computed(() => {
+  return (latestVersion.value?.required_tools || []).map(toolId => {
+    const metadata = toolCatalogMap.value.get(toolId)
+    const fallbackName = gapExistingToolLabelMap.value.get(toolId) || toolId
+    return {
+      id: toolId,
+      name: metadata?.name || fallbackName,
+      description: metadata?.description || '当前版本已绑定该工具，但工具注册表中暂未返回更详细的使用说明。',
+    }
+  })
+})
+const existingCapabilityIds = computed(() => {
+  const snapshot = capabilitySnapshot.value
+  if (!snapshot) return new Set<string>()
+  const ids = [
+    ...(snapshot.external_skill_tool_ids || []),
+    ...(snapshot.external_data_skills || []),
+    ...(snapshot.external_analysis_skills || []),
+  ].map(item => normalizeCapabilityId(item)).filter(Boolean)
+  return new Set(ids)
+})
+const dedupeSuggestedItems = (items: SuggestedToolItem[]) => {
+  const seen = new Set<string>()
+  return items.filter(item => {
+    const key = normalizeCapabilityId(item.tool_id)
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+const isCapabilityAlreadyGenerated = (target?: string | AgentWorkshopToolingPlanItem) => {
+  const value = typeof target === 'string' ? target : (target?.tool_id || target?.tool_name || '')
+  return existingCapabilityIds.value.has(normalizeCapabilityId(value))
+}
+const pendingSuggestedTools = computed(() => dedupeSuggestedItems((gapReport.value?.suggested_tools || []).filter(item => !isCapabilityAlreadyGenerated(item.tool_id))))
+const resolvedSuggestedTools = computed(() => dedupeSuggestedItems((gapReport.value?.suggested_tools || []).filter(item => isCapabilityAlreadyGenerated(item.tool_id))))
+const normalizeCapabilityLabel = (value?: string) => normalizeCapabilityId(String(value || '').replace(/\s+可调用能力$/, '').trim())
+const pendingVersionCapabilities = computed(() => {
+  return (latestVersion.value?.required_capabilities || []).filter(item => !existingCapabilityIds.value.has(normalizeCapabilityLabel(item)))
+})
+const resolvedVersionCapabilities = computed(() => {
+  return (latestVersion.value?.required_capabilities || []).filter(item => existingCapabilityIds.value.has(normalizeCapabilityLabel(item)))
+})
+const promptSections = computed(() => {
+  const content = latestVersionPrompt.value?.content
+  if (!content) return []
+  return [
+    { key: 'system_prompt', label: 'System Prompt', value: content.system_prompt || '' },
+    { key: 'user_prompt', label: 'User Prompt', value: content.user_prompt || '' },
+    { key: 'tool_guidance', label: '工具指引', value: content.tool_guidance || '' },
+    { key: 'analysis_requirements', label: '分析要求', value: content.analysis_requirements || '' },
+    { key: 'output_format', label: '输出格式', value: content.output_format || '' },
+    { key: 'constraints', label: '约束', value: content.constraints || '' },
+  ].filter(item => item.value)
+})
 const isV2AgentId = (agentId?: string) => {
   const normalized = String(agentId || '').toLowerCase()
   return normalized.includes('_v2') || normalized.startsWith('v2_')
@@ -1038,8 +1095,7 @@ const evaluationDecisionText = computed(() => {
 })
 const evaluationTypeText = computed(() => {
   const type = latestEvaluation.value?.evaluation_type
-  if (type === 'benchmark') return '样本基准评估'
-  if (type === 'production-review') return '真实结果调试'
+  if (type === 'production-review') return '结果评估'
   return type || '结果评估'
 })
 const llmReview = computed(() => {
@@ -1158,64 +1214,7 @@ const ruleBreakdownCards = computed(() => {
     })
     .filter(item => item.matched.length || item.missing.length || item.notes.length)
 })
-const selectedSampleSet = computed(() => {
-  return sampleSets.value.find(item => item.sample_set_id === evaluationForm.value.sample_set_id) || null
-})
-const latestEvaluationSampleSet = computed(() => {
-  const sampleSetId = latestEvaluation.value?.sample_set_id
-  if (!sampleSetId) return null
-  return sampleSets.value.find(item => item.sample_set_id === sampleSetId) || null
-})
-const versionSampleSets = computed(() => sampleSets.value.slice(0, 3))
-const benchmarkCaseResultCards = computed(() => {
-  const caseResults = latestEvaluation.value?.details?.case_results
-  if (!Array.isArray(caseResults)) return []
-
-  return caseResults.map((item: any) => {
-    const inputPayload = item?.input_payload && typeof item.input_payload === 'object' ? item.input_payload : {}
-    const scenarioText = [inputPayload.stock_symbol, inputPayload.market_type, inputPayload.scenario].filter(Boolean).join(' / ')
-    const outputDetail = item?.output_coverage_detail && typeof item.output_coverage_detail === 'object' ? item.output_coverage_detail : {}
-    const keywordDetail = item?.keyword_detail && typeof item.keyword_detail === 'object' ? item.keyword_detail : {}
-    const methodDetail = item?.method_detail && typeof item.method_detail === 'object' ? item.method_detail : {}
-    const forbiddenDetail = item?.forbidden_detail && typeof item.forbidden_detail === 'object' ? item.forbidden_detail : {}
-
-    return {
-      caseId: item?.case_id || '',
-      title: item?.title || '未命名样本',
-      scenarioText,
-      outputCoverage: item?.output_coverage ?? '-',
-      qualityScore: item?.quality_score ?? '-',
-      constraintScore: item?.constraint_score ?? '-',
-      outputExcerpt: typeof item?.output_excerpt === 'string' ? item.output_excerpt.trim() : '',
-      outputMatched: Array.isArray(outputDetail.matched) ? outputDetail.matched.filter(Boolean) : [],
-      outputMissing: Array.isArray(outputDetail.missing) ? outputDetail.missing.filter(Boolean) : [],
-      keywordMatched: Array.isArray(keywordDetail.matched) ? keywordDetail.matched.filter(Boolean) : [],
-      keywordMissing: Array.isArray(keywordDetail.missing) ? keywordDetail.missing.filter(Boolean) : [],
-      methodMatched: Array.isArray(methodDetail.matched) ? methodDetail.matched.filter(Boolean) : [],
-      methodMissing: Array.isArray(methodDetail.missing) ? methodDetail.missing.filter(Boolean) : [],
-      forbiddenMatched: Array.isArray(forbiddenDetail.matched) ? forbiddenDetail.matched.filter(Boolean) : [],
-      forbiddenSafe: Array.isArray(forbiddenDetail.missing) ? forbiddenDetail.missing.filter(Boolean) : [],
-      notes: [
-        ...(Array.isArray(outputDetail.notes) ? outputDetail.notes.filter(Boolean) : []),
-        ...(Array.isArray(forbiddenDetail.notes) ? forbiddenDetail.notes.filter(Boolean) : []),
-        ...(Array.isArray(item?.notes) ? item.notes.filter(Boolean) : []),
-      ].filter(Boolean),
-    }
-  }).filter((item: any) => item.caseId)
-})
-const benchmarkCaseOutputs = ref<Array<{
-  case_id: string
-  title: string
-  scenarioText: string
-  expectedOutputs: string[]
-  expectedMethods: string[]
-  requiredKeywords: string[]
-  output_text: string
-}>>([])
 const canSubmitEvaluation = computed(() => {
-  if (evaluationForm.value.evaluation_type === 'benchmark') {
-    return benchmarkCaseOutputs.value.some(item => item.output_text.trim())
-  }
   return Boolean(evaluationForm.value.runtime_result.output_text?.trim())
 })
 const activeStepLabel = computed(() => flowSteps.find(item => item.key === activeStep.value)?.title || '聊需求')
@@ -1252,6 +1251,22 @@ const statusTagType = computed(() => {
   return 'warning'
 })
 const toolingPlan = computed<AgentWorkshopToolingPlan | null>(() => currentSession.value?.tooling_plan || null)
+const specPendingQuestions = computed(() => {
+  if (previewResult.value?.pending_questions?.length) {
+    return previewResult.value.pending_questions
+  }
+  return currentSession.value?.pending_questions || []
+})
+const reusableCapabilityCount = computed(() => {
+  if (!gapReport.value) return 0
+  return gapReport.value.existing_tools?.length || 0
+})
+const missingCapabilityCount = computed(() => {
+  if (!gapReport.value) return 0
+  return pendingSuggestedTools.value.length
+    + (gapReport.value.blocking_gaps?.length || 0)
+    + (toolingPlan.value?.missing_capabilities?.length || 0)
+})
 
 const syncActiveStep = (preferred?: FlowStep) => {
   if (preferred) {
@@ -1269,12 +1284,26 @@ const syncActiveStep = (preferred?: FlowStep) => {
     return
   }
 
-  if (previewResult.value || gapReport.value || displaySpec.value) {
+  if (latestVersion.value) {
+    activeStep.value = 'version'
+    return
+  }
+
+  if (gapReport.value || toolingPlan.value) {
+    activeStep.value = 'gap'
+    return
+  }
+
+  if (previewResult.value || displaySpec.value) {
     activeStep.value = 'spec'
     return
   }
 
   activeStep.value = 'discuss'
+}
+
+const goToGapStep = () => {
+  activeStep.value = 'gap'
 }
 
 // const formatTime = (value?: string) => {
@@ -1284,8 +1313,6 @@ const syncActiveStep = (preferred?: FlowStep) => {
 
 const resetEvaluationForm = () => {
   evaluationForm.value = {
-    evaluation_type: 'production-review',
-    sample_set_id: '',
     user_feedback: '',
     llm: {
       provider: 'custom_openai',
@@ -1304,62 +1331,6 @@ const resetEvaluationForm = () => {
       output_text: '',
     },
   }
-  benchmarkCaseOutputs.value = []
-}
-
-const syncBenchmarkCaseOutputs = () => {
-  const sampleSet = selectedSampleSet.value
-  if (!sampleSet) {
-    benchmarkCaseOutputs.value = []
-    return
-  }
-
-  const previousMap = new Map(benchmarkCaseOutputs.value.map(item => [item.case_id, item.output_text]))
-  benchmarkCaseOutputs.value = sampleSet.cases.map(item => {
-    const inputPayload = item.input_payload || {}
-    const scenarioParts = [inputPayload.stock_symbol, inputPayload.market_type, inputPayload.scenario].filter(Boolean)
-    return {
-      case_id: item.case_id,
-      title: item.title,
-      scenarioText: scenarioParts.join(' / '),
-      expectedOutputs: item.expected_outputs || [],
-      expectedMethods: item.expected_methods || [],
-      requiredKeywords: item.required_keywords || [],
-      output_text: previousMap.get(item.case_id) || '',
-    }
-  })
-}
-
-const loadSampleSets = async (specId?: string) => {
-  if (!specId) {
-    sampleSets.value = []
-    evaluationForm.value.sample_set_id = ''
-    benchmarkCaseOutputs.value = []
-    return
-  }
-
-  loadingSampleSets.value = true
-  try {
-    const result = await agentWorkshopApi.listSampleSets(specId)
-    sampleSets.value = result.items || []
-    if (!sampleSets.value.length) {
-      evaluationForm.value.sample_set_id = ''
-      benchmarkCaseOutputs.value = []
-      return
-    }
-
-    if (!sampleSets.value.some(item => item.sample_set_id === evaluationForm.value.sample_set_id)) {
-      evaluationForm.value.sample_set_id = sampleSets.value[0].sample_set_id
-    }
-    syncBenchmarkCaseOutputs()
-  } catch (error: any) {
-    sampleSets.value = []
-    evaluationForm.value.sample_set_id = ''
-    benchmarkCaseOutputs.value = []
-    ElMessage.error(error?.message || '加载样本集失败')
-  } finally {
-    loadingSampleSets.value = false
-  }
 }
 
 const clearWorkspace = () => {
@@ -1367,11 +1338,24 @@ const clearWorkspace = () => {
   previewResult.value = null
   gapReport.value = null
   latestVersion.value = null
+  latestVersionPrompt.value = null
   latestEvaluation.value = null
   latestDebugResult.value = null
   replyMessage.value = ''
+  specFeedbackMessage.value = ''
   resetEvaluationForm()
   syncActiveStep('discuss')
+}
+
+const buildDefaultSpecConfirmationMessage = () => {
+  if (specPendingQuestions.value.length) {
+    return '整体方向没问题。上面这些待确认项如果我没有单独说明，就先按你推荐的方案继续。'
+  }
+  return '整体方向没问题，请按当前方案继续。'
+}
+
+const fillSpecDefaultReply = () => {
+  specFeedbackMessage.value = buildDefaultSpecConfirmationMessage()
 }
 
 const syncEvaluationModelConfig = () => {
@@ -1415,6 +1399,7 @@ const startNewDraft = () => {
 const loadLatestVersion = async (specId?: string) => {
   if (!specId) {
     latestVersion.value = null
+    latestVersionPrompt.value = null
     latestEvaluation.value = null
     syncActiveStep()
     return
@@ -1423,13 +1408,31 @@ const loadLatestVersion = async (specId?: string) => {
     const result = await agentWorkshopApi.listVersions({ spec_id: specId, page: 1, page_size: 1 })
     latestVersion.value = result.items?.[0] || null
     if (latestVersion.value?.version_id) {
-      await loadLatestEvaluation(latestVersion.value.version_id)
+      await Promise.all([
+        loadLatestEvaluation(latestVersion.value.version_id),
+        loadLatestVersionPrompt(latestVersion.value.version_id),
+      ])
+    } else {
+      latestVersionPrompt.value = null
     }
   } catch {
     latestVersion.value = null
+    latestVersionPrompt.value = null
     latestEvaluation.value = null
   } finally {
     syncActiveStep()
+  }
+}
+
+const loadLatestVersionPrompt = async (versionId?: string) => {
+  if (!versionId) {
+    latestVersionPrompt.value = null
+    return
+  }
+  try {
+    latestVersionPrompt.value = await agentWorkshopApi.getVersionPrompt(versionId)
+  } catch {
+    latestVersionPrompt.value = null
   }
 }
 
@@ -1461,8 +1464,24 @@ const loadSpecs = async () => {
   }
 }
 
+const loadCapabilitySnapshot = async () => {
+  try {
+    capabilitySnapshot.value = await agentWorkshopApi.getCapabilitySnapshot()
+  } catch {
+    capabilitySnapshot.value = null
+  }
+}
+
+const loadToolCatalog = async () => {
+  try {
+    toolCatalog.value = await toolsApi.listTools()
+  } catch {
+    toolCatalog.value = []
+  }
+}
+
 const initFromRoute = async () => {
-  await loadSpecs()
+  await Promise.all([loadSpecs(), loadCapabilitySnapshot(), loadToolCatalog()])
 
   const sessionId = typeof route.query.sessionId === 'string' ? route.query.sessionId : ''
   const specId = typeof route.query.specId === 'string' ? route.query.specId : ''
@@ -1475,7 +1494,7 @@ const initFromRoute = async () => {
       currentSession.value = await agentWorkshopApi.getSession(sessionId)
       gapReport.value = currentSession.value.gap_report || null
       await loadLatestVersion(currentSession.value.current_spec_snapshot?.spec_id)
-      syncActiveStep(currentSession.value.gap_report ? 'spec' : 'discuss')
+      syncActiveStep(currentSession.value.gap_report ? 'gap' : 'discuss')
     } catch (error: any) {
       ElMessage.error(error?.message || '加载工坊会话失败')
     } finally {
@@ -1512,8 +1531,12 @@ const refreshSession = async () => {
   if (!currentSession.value?.session_id) return
   loadingCurrentSession.value = true
   try {
-    currentSession.value = await agentWorkshopApi.getSession(currentSession.value.session_id)
-    gapReport.value = currentSession.value.gap_report || gapReport.value
+    const [session] = await Promise.all([
+      agentWorkshopApi.getSession(currentSession.value.session_id),
+      loadCapabilitySnapshot(),
+    ])
+    currentSession.value = session
+    gapReport.value = currentSession.value.gap_report || null
     await loadLatestVersion(currentSession.value.current_spec_snapshot?.spec_id)
   } catch (error: any) {
     ElMessage.error(error?.message || '刷新会话失败')
@@ -1590,6 +1613,38 @@ const handlePreviewSpec = async () => {
   }
 }
 
+const submitSpecFeedback = async (message: string) => {
+  if (!currentSession.value?.session_id) return
+  confirmingSpec.value = true
+  try {
+    await agentWorkshopApi.respondToSession(currentSession.value.session_id, message)
+    currentSession.value = await agentWorkshopApi.getSession(currentSession.value.session_id)
+    previewResult.value = await agentWorkshopApi.previewSpec(currentSession.value.session_id)
+    gapReport.value = currentSession.value.gap_report || null
+    specFeedbackMessage.value = ''
+    await loadSpecs()
+    const canMoveToGap = previewResult.value?.readiness === 'ready'
+      && currentSession.value?.feasibility_status === 'feasible'
+      && (currentSession.value?.completeness_score || 0) >= 0.75
+    syncActiveStep(canMoveToGap ? 'gap' : 'spec')
+    ElMessage.success('规格确认信息已更新')
+  } catch (error: any) {
+    ElMessage.error(error?.message || '更新规格确认失败')
+  } finally {
+    confirmingSpec.value = false
+  }
+}
+
+const handleAcceptRecommendedSpec = async () => {
+  await submitSpecFeedback(buildDefaultSpecConfirmationMessage())
+}
+
+const handleSubmitSpecFeedback = async () => {
+  const message = specFeedbackMessage.value.trim()
+  if (!message) return
+  await submitSpecFeedback(message)
+}
+
 const handleAnalyzeGaps = async () => {
   if (!currentSession.value?.session_id) return
   analyzing.value = true
@@ -1597,7 +1652,7 @@ const handleAnalyzeGaps = async () => {
     const result = await agentWorkshopApi.analyzeGaps(currentSession.value.session_id)
     gapReport.value = result.gap_report
     await refreshSession()
-    syncActiveStep('spec')
+    syncActiveStep('gap')
     ElMessage.success('缺口分析完成')
   } catch (error: any) {
     ElMessage.error(error?.message || '缺口分析失败')
@@ -1612,7 +1667,7 @@ const handleGenerateToolingPlan = async () => {
   try {
     await agentWorkshopApi.generateToolingPlan(currentSession.value.session_id)
     await refreshSession()
-    syncActiveStep('spec')
+    syncActiveStep('gap')
     ElMessage.success('工具需求草案已生成')
   } catch (error: any) {
     ElMessage.error(error?.message || '生成工具需求草案失败')
@@ -1678,7 +1733,6 @@ const openEvaluateDialog = async () => {
   if (!latestVersion.value?.spec_id) return
   resetEvaluationForm()
   latestDebugResult.value = null
-  await loadSampleSets(latestVersion.value.spec_id)
   evaluateDialogVisible.value = true
   syncActiveStep('evaluate')
 }
@@ -1728,33 +1782,6 @@ const handleEvaluateVersion = async () => {
   if (!latestVersion.value?.version_id) return
   evaluatingVersion.value = true
   try {
-    const evaluationType = evaluationForm.value.evaluation_type
-
-    if (evaluationType === 'benchmark') {
-      if (!evaluationForm.value.sample_set_id) {
-        ElMessage.warning('请先选择样本集')
-        return
-      }
-      if (!benchmarkCaseOutputs.value.some(item => item.output_text.trim())) {
-        ElMessage.warning('请至少填写一个样本输出结果')
-        return
-      }
-
-      const result = await agentWorkshopApi.evaluateVersion(latestVersion.value.version_id, {
-        evaluation_type: 'benchmark',
-        sample_set_id: evaluationForm.value.sample_set_id,
-        user_feedback: evaluationForm.value.user_feedback || '',
-        benchmark_outputs: benchmarkCaseOutputs.value
-          .filter(item => item.output_text.trim())
-          .map(item => ({ case_id: item.case_id, output_text: item.output_text.trim() })),
-      })
-      latestEvaluation.value = result.evaluation
-      latestVersion.value = await agentWorkshopApi.getVersion(latestVersion.value.version_id)
-      syncActiveStep('evaluate')
-      ElMessage.success('样本基准评估完成')
-      return
-    }
-
     if (!evaluationForm.value.runtime_result.output_text?.trim()) {
       ElMessage.warning('请先完成调试运行并生成结果')
       return
@@ -1854,18 +1881,6 @@ const openSpec = async (spec: AgentSpec) => {
     ElMessage.error(error?.message || '打开规格失败')
   }
 }
-
-watch(() => evaluationForm.value.sample_set_id, () => {
-  if (evaluationForm.value.evaluation_type === 'benchmark') {
-    syncBenchmarkCaseOutputs()
-  }
-})
-
-watch(() => evaluationForm.value.evaluation_type, (value) => {
-  if (value === 'benchmark') {
-    syncBenchmarkCaseOutputs()
-  }
-})
 
 const fillExample = (type: 'valuation' | 'industry' | 'watcher') => {
   if (type === 'valuation') {
@@ -2041,8 +2056,9 @@ const getToolScopeHints = (toolDraft: AgentWorkshopToolingPlanItem) => {
   }
 }
 
-const pickRelevantSpecLines = (lines: string[], toolDraft: AgentWorkshopToolingPlanItem, fallbackCount = 2) => {
-  if (!lines.length) return []
+const pickRelevantSpecLines = (lines: Array<string | AgentSpecIOItem>, toolDraft: AgentWorkshopToolingPlanItem, fallbackCount = 2) => {
+  const normalizedLines = lines.map(item => getSpecIoText(item as AgentSpecIOItem)).filter(Boolean)
+  if (!normalizedLines.length) return []
 
   const scopeHints = getToolScopeHints(toolDraft)
   const keywordSet = new Set<string>(scopeHints.keywords)
@@ -2061,14 +2077,14 @@ const pickRelevantSpecLines = (lines: string[], toolDraft: AgentWorkshopToolingP
   })
 
   const keywords = Array.from(keywordSet)
-  if (!keywords.length) return lines.slice(0, fallbackCount)
+  if (!keywords.length) return normalizedLines.slice(0, fallbackCount)
 
-  const matched = lines.filter(line => {
+  const matched = normalizedLines.filter(line => {
     const normalizedLine = line.toLowerCase()
     return keywords.some(keyword => normalizedLine.includes(keyword.toLowerCase()))
   })
 
-  return matched.length ? matched : lines.slice(0, fallbackCount)
+  return matched.length ? matched : normalizedLines.slice(0, fallbackCount)
 }
 
 const buildToolDraftSkillDescription = (toolDraft: AgentWorkshopToolingPlanItem) => {
@@ -2183,46 +2199,20 @@ const goToSkillWorkshop = (target?: string | AgentWorkshopToolingPlanItem) => {
   })
 }
 
-const handleCreateSkillSession = async (target: string | AgentWorkshopToolingPlanItem) => {
-  const normalizedSkillName = (typeof target === 'string' ? target : (target.tool_id || target.tool_name || '')).trim()
-  if (!normalizedSkillName) return
-
-  skillGenerating.value = {
-    ...skillGenerating.value,
-    [normalizedSkillName]: true,
-  }
-
-  try {
-    const session = await skillGenerationApi.startSession({
-      description: buildSkillGenerationDescription(target),
-      handoff_context: {
-        source: 'agent_workshop',
-        source_spec_id: selectedSpecId.value || '',
-        source_name: selectedSpecName.value || '',
-        target_capability: normalizedSkillName,
-        handoff_intent: '当前是从 Agent 创建流程里补能力缺口，不是普通 Skill 脑暴。必须优先保留上游目标能力；若需要拆成 Skill，只能定义成该 Agent 能力里的最小确定性子能力。',
-      },
-    })
-    ElMessage.success(`已为“${normalizedSkillName}”创建能力会话`)
-    router.push({
-      path: '/workflow/skill-generation/create',
-      query: { sessionId: session.session_id }
-    })
-  } catch (error: any) {
-    ElMessage.error(error?.message || `创建能力会话失败：${normalizedSkillName}`)
-  } finally {
-    skillGenerating.value = {
-      ...skillGenerating.value,
-      [normalizedSkillName]: false,
-    }
-  }
-}
-
 watch(
   () => `${route.query.sessionId || ''}|${route.query.specId || ''}`,
   async () => {
     await initFromRoute()
   }
+)
+
+watch(
+  () => specPendingQuestions.value.join('|'),
+  (value) => {
+    if (!value || specFeedbackMessage.value.trim()) return
+    specFeedbackMessage.value = buildDefaultSpecConfirmationMessage()
+  },
+  { immediate: true }
 )
 
 watch(
@@ -2317,6 +2307,49 @@ onMounted(async () => {
   }
 }
 
+.default-tool-list {
+  display: grid;
+  gap: 12px;
+}
+
+.default-tool-card {
+  padding: 14px 16px;
+  border: 1px solid #dce8e3;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fbfefd 0%, #f4faf7 100%);
+}
+
+.default-tool-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.default-tool-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.default-tool-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #123f39;
+}
+
+.default-tool-id {
+  font-size: 12px;
+  color: #6b7f79;
+}
+
+.default-tool-description {
+  margin-top: 8px;
+  line-height: 1.7;
+  color: #4f6761;
+}
+
 .examples {
   margin-top: 18px;
   display: flex;
@@ -2402,7 +2435,7 @@ onMounted(async () => {
 
 .flow-switcher {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -2468,6 +2501,82 @@ onMounted(async () => {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+
+.spec-confirm-block {
+  padding: 16px;
+  border: 1px solid #dbe7e2;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fbfefd 0%, #f4faf7 100%);
+}
+
+.gap-stage-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.gap-stage-card {
+  padding: 14px 16px;
+  border: 1px solid #dbe7e2;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fbfefd 0%, #f4faf7 100%);
+}
+
+.gap-stage-kicker {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b7f79;
+}
+
+.gap-stage-title {
+  margin-top: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #123f39;
+}
+
+.gap-stage-text {
+  margin-top: 8px;
+  line-height: 1.7;
+  color: #55726b;
+}
+
+.gap-stage-metric {
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f5a4e;
+}
+.confirm-question-list {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.confirm-question-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(18, 63, 57, 0.04);
+  color: #35524c;
+  line-height: 1.7;
+}
+.confirm-question-index {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #dbeee8;
+  color: #0f5a4e;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  margin-top: 2px;
 }
 
 .step-layout {

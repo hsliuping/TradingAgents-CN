@@ -288,6 +288,43 @@
             <div class="fact"><span>流动比率</span><b>{{ fmtRatio(basics.currentRatio) }}</b></div>
             <div class="fact"><span>最新财报期</span><b>{{ basics.reportPeriod || '-' }}</b></div>
           </div>
+          <div v-if="!isEtf && (detailFactorWarningEntries.length || detailFactorDiagnosticEntries.length)" class="factor-hints">
+            <div class="factor-hints-title">提示信息</div>
+            <div class="factor-hints-list">
+              <el-popover
+                v-for="warning in detailFactorWarningEntries"
+                :key="warning.key"
+                placement="top-start"
+                width="320"
+                trigger="hover"
+              >
+                <template #reference>
+                  <el-tag :type="warning.tagType" effect="plain" class="factor-hint-tag">{{ warning.label }}</el-tag>
+                </template>
+                <div class="factor-hint-popover">
+                  <div class="factor-hint-popover-title">{{ warning.label }}</div>
+                  <div v-for="condition in warning.conditions" :key="condition" class="factor-hint-line">{{ condition }}</div>
+                </div>
+              </el-popover>
+              <el-popover
+                v-for="diagnostic in detailFactorDiagnosticEntries"
+                :key="diagnostic.key"
+                placement="top-start"
+                width="340"
+                trigger="hover"
+              >
+                <template #reference>
+                  <el-tag :type="diagnostic.tagType" effect="plain" class="factor-hint-tag">{{ diagnostic.label }}</el-tag>
+                </template>
+                <div class="factor-hint-popover">
+                  <div class="factor-hint-popover-title">{{ diagnostic.label }}</div>
+                  <div class="factor-hint-line">状态：{{ diagnostic.state }}</div>
+                  <div v-if="diagnostic.reason" class="factor-hint-line">原因：{{ diagnostic.reason }}</div>
+                  <div v-if="diagnostic.missingInputs.length" class="factor-hint-line">缺失输入：{{ diagnostic.missingInputs.join('、') }}</div>
+                </div>
+              </el-popover>
+            </div>
+          </div>
         </el-card>
 
         <el-card shadow="hover" class="financial-card">
@@ -433,6 +470,8 @@ import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
 import { favoritesApi } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
+import type { StockInfo } from '@/types/analysis'
+import { getFactorDiagnosticEntries, getFactorWarningEntries } from '@/utils/factorPresentation'
 
 
 echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
@@ -790,6 +829,8 @@ async function fetchFundamentals() {
     market.value = f.market || (isLikelyEtfCode(symbol.value) ? 'ETF' : market.value)
 
     if (f.security_type === 'ETF' || market.value === 'ETF' || isLikelyEtfCode(symbol.value)) {
+      detailFactorDiagnostics.value = {}
+      detailFactorWarnings.value = {}
       etfBasics.fundType = f.fund_type || f.industry || ''
       etfBasics.trackIndex = f.track_index || f.sector || ''
       etfBasics.fundScale = f.fund_scale || ''
@@ -828,6 +869,8 @@ async function fetchFundamentals() {
     basics.dividendYield = Number.isFinite(ff.dividend_yield) ? Number(ff.dividend_yield) : basics.dividendYield
     basics.currentRatio = Number.isFinite(ff.current_ratio) ? Number(ff.current_ratio) : basics.currentRatio
     basics.reportPeriod = ff.report_period || basics.reportPeriod
+    detailFactorDiagnostics.value = f.factor_diagnostics || {}
+    detailFactorWarnings.value = f.factor_warnings || {}
 
     // 获取PE/PB的实时标识
     basics.peIsRealtime = ff.pe_is_realtime || false
@@ -855,6 +898,12 @@ async function fetchFinancials() {
     basics.reportPeriod = summary.report_period || d.report_period || basics.reportPeriod
     basics.roe = Number.isFinite(summary.roe) ? Number(summary.roe) : basics.roe
     basics.debtRatio = Number.isFinite(summary.debt_to_assets) ? Number(summary.debt_to_assets) : basics.debtRatio
+    if (Object.keys(detailFactorDiagnostics.value || {}).length === 0 && d.factor_diagnostics) {
+      detailFactorDiagnostics.value = d.factor_diagnostics
+    }
+    if (Object.keys(detailFactorWarnings.value || {}).length === 0 && d.factor_warnings) {
+      detailFactorWarnings.value = d.factor_warnings
+    }
 
     financialSnapshot.annDate = summary.ann_date || d.ann_date || ''
     financialSnapshot.dataSource = summary.data_source || d.data_source || ''
@@ -1098,6 +1147,8 @@ const financialSnapshot = reactive({
 })
 
 const financialRawSections = ref<Array<{ key: string; label: string; count: number }>>([])
+const detailFactorDiagnostics = ref<StockInfo['factor_diagnostics']>({})
+const detailFactorWarnings = ref<StockInfo['factor_warnings']>({})
 
 const financialRawLabels: Record<string, string> = {
   income_statement: '利润表',
@@ -1106,6 +1157,17 @@ const financialRawLabels: Record<string, string> = {
   financial_indicators: '财务指标',
   main_business: '主营业务',
 }
+
+const detailFactorRow = computed<StockInfo>(() => ({
+  symbol: symbol.value,
+  name: stockName.value || code.value,
+  market: market.value || 'CN',
+  factor_diagnostics: detailFactorDiagnostics.value,
+  factor_warnings: detailFactorWarnings.value,
+}))
+
+const detailFactorWarningEntries = computed(() => getFactorWarningEntries(detailFactorRow.value))
+const detailFactorDiagnosticEntries = computed(() => getFactorDiagnosticEntries(detailFactorRow.value))
 
 // 操作
 function onAnalyze() {
@@ -1496,6 +1558,46 @@ function exportReport() {
 .stats { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; margin-top: 6px; }
 .stats .item { display: flex; flex-direction: column; font-size: 12px; color: var(--el-text-color-secondary); }
 .stats .item b { color: var(--el-text-color-primary); font-size: 14px; }
+
+.factor-hints {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+.factor-hints-title {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.factor-hints-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.factor-hint-tag {
+  cursor: help;
+}
+
+.factor-hint-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  line-height: 1.6;
+}
+
+.factor-hint-popover-title {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.factor-hint-line {
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+}
 
 .body { margin-top: 4px; }
 .card-hd { display: flex; align-items: center; justify-content: space-between; }

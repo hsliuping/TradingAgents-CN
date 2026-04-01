@@ -17,6 +17,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 # 复用智能助手的基础设施
+from app.services.factor_registry_service import build_screening_fields_markdown
 from app.services.intelligent_assistant_service import (
     _get_assistant_llm_config,
     _get_latest_trade_date,
@@ -622,6 +623,7 @@ class IntelligentScreeningService:
 """
 
         if phase == "planning":
+            screening_fields_markdown = build_screening_fields_markdown(public_only=True)
             return f"""你是一位专业的 A 股选股专家。用户已确认选股需求，请制定详细的执行计划。
 
 ## 可用工具清单（严格限于以下工具，不得使用其他工具名）
@@ -630,33 +632,7 @@ class IntelligentScreeningService:
 
 ## `screen_stocks_by_criteria` 支持的筛选字段
 
-- pe / pe_ttm     市盈率（TTM）
-- pb / pb_mrq     市净率
-- roe             净资产收益率（%）
-- roa             总资产收益率（%）
-- gross_margin    毛利率（%）
-- netprofit_margin 净利率（%）
-- total_mv        总市值（亿元）
-- circ_mv         流通市值（亿元）
-- turnover_rate   换手率（%）
-- volume_ratio    量比
-- pct_chg         当日涨跌幅（%）
-- amount          成交额（万元）
-- close           收盘价（元）
-- industry        行业名称（使用 == 或 in 操作符）
-- keyword         股票代码或名称模糊搜索
-- debt_to_assets       资产负债率（%）
-- assets_to_eqt        权益乘数
-- current_ratio        流动比率（> 1 表示流动性良好）
-- quick_ratio          速动比率
-- cash_ratio           现金比率
-- dividend_yield       股息率（%）
-- revenue_ttm          滚动12个月营收（元）
-- net_profit_ttm       滚动12个月净利润（元）
-- n_cashflow_act       经营活动现金流净额（元）
-- report_period        最新财报期（如 20250930）
-- net_working_capital  净营运资本（亿元，> 0 表示流动资产超过流动负债）
-- is_st                是否ST股（True/False，使用 == 操作符，例如 {{"field":"is_st","operator":"==","value":false}}）
+{screening_fields_markdown}
 
 支持的操作符：> < >= <= == != between in not_in contains
 

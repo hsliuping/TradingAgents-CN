@@ -15,7 +15,12 @@ sys.path.insert(0, str(project_root))
 import asyncio
 import logging
 from motor.motor_asyncio import AsyncIOMotorClient
-from app.core.database import init_database, get_mongo_db, close_database
+from app.core.database import (
+    init_database,
+    get_mongo_db,
+    close_database,
+    create_stock_screening_view as create_stock_screening_view_in_db,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,192 +30,7 @@ async def create_stock_screening_view():
     """创建股票筛选视图"""
     try:
         db = get_mongo_db()
-        
-        # 检查视图是否已存在
-        collections = await db.list_collection_names()
-        if "stock_screening_view" in collections:
-            logger.info("📋 视图 stock_screening_view 已存在，先删除...")
-            await db.drop_collection("stock_screening_view")
-        
-        # 创建视图：将 stock_basic_info、market_quotes 和 stock_financial_data 关联
-        pipeline = [
-            # 第一步：关联实时行情数据 (market_quotes)
-            {
-                "$lookup": {
-                    "from": "market_quotes",
-                    "localField": "code",
-                    "foreignField": "code",
-                    "as": "quote_data"
-                }
-            },
-            # 第二步：展开 quote_data 数组
-            {
-                "$unwind": {
-                    "path": "$quote_data",
-                    "preserveNullAndEmptyArrays": True
-                }
-            },
-            # 第三步：关联财务数据 (stock_financial_data)
-            {
-                "$lookup": {
-                    "from": "stock_financial_data",
-                    "let": {"stock_code": "$code", "stock_source": "$source"},
-                    "pipeline": [
-                        {
-                            "$match": {
-                                "$expr": {
-                                    "$and": [
-                                        {"$eq": ["$code", "$$stock_code"]},
-                                        {"$eq": ["$data_source", "$$stock_source"]}
-                                    ]
-                                }
-                            }
-                        },
-                        {"$sort": {"report_period": -1}},
-                        {"$limit": 1}
-                    ],
-                    "as": "financial_data"
-                }
-            },
-            # 第四步：展开 financial_data 数组
-            {
-                "$unwind": {
-                    "path": "$financial_data",
-                    "preserveNullAndEmptyArrays": True
-                }
-            },
-            # 第五步：重新组织字段结构，将行情数据和财务数据提升到顶层
-            {
-                "$project": {
-                    # 基础信息字段
-                    "code": 1,
-                    "name": 1,
-                    "industry": 1,
-                    "area": 1,
-                    "market": 1,
-                    "list_date": 1,
-                    "source": 1,
-
-                    # 市值信息
-                    "total_mv": 1,
-                    "circ_mv": 1,
-
-                    # 估值指标（从 stock_basic_info）
-                    "pe": 1,
-                    "pb": 1,
-                    "pe_ttm": 1,
-                    "pb_mrq": 1,
-
-                    # 财务指标（从 financial_data 提升到顶层）
-                    "roe": "$financial_data.roe",
-                    "roa": "$financial_data.roa",
-                    "netprofit_margin": "$financial_data.netprofit_margin",
-                    "gross_margin": "$financial_data.gross_margin",
-                    "report_period": "$financial_data.report_period",
-
-                    # 新增财务指标：兼容 flat（baostock/tushare 合并存储）和 nested（financial_indicators 子文档）两种存储方式
-                    # 资产负债率 (%)
-                    "debt_to_assets": {
-                        "$ifNull": [
-                            "$financial_data.financial_indicators.debt_to_assets",
-                            "$financial_data.debt_to_assets"
-                        ]
-                    },
-                    # 流动比率
-                    "current_ratio": {
-                        "$ifNull": [
-                            "$financial_data.financial_indicators.current_ratio",
-                            "$financial_data.current_ratio"
-                        ]
-                    },
-                    # 股息率 (%)
-                    "dividend_yield": {
-                        "$ifNull": [
-                            "$financial_data.financial_indicators.dividend_yield",
-                            "$financial_data.dividend_yield"
-                        ]
-                    },
-                    # 净营运资本（亿元）= (流动资产 - 流动负债) / 1e8，两个字段都存在才计算
-                    # 兼容 flat (baostock) 和 nested balance_sheet (tushare) 两种存储路径
-                    "net_working_capital": {
-                        "$let": {
-                            "vars": {
-                                "cur_assets": {
-                                    "$ifNull": [
-                                        "$financial_data.balance_sheet.total_cur_assets",
-                                        "$financial_data.total_cur_assets"
-                                    ]
-                                },
-                                "cur_liab": {
-                                    "$ifNull": [
-                                        "$financial_data.balance_sheet.total_cur_liab",
-                                        "$financial_data.total_cur_liab"
-                                    ]
-                                }
-                            },
-                            "in": {
-                                "$cond": {
-                                    "if": {
-                                        "$and": [
-                                            {"$ne": ["$$cur_assets", None]},
-                                            {"$ne": ["$$cur_liab", None]}
-                                        ]
-                                    },
-                                    "then": {
-                                        "$divide": [
-                                            {"$subtract": ["$$cur_assets", "$$cur_liab"]},
-                                            100000000
-                                        ]
-                                    },
-                                    "else": None
-                                }
-                            }
-                        }
-                    },
-                    # ST 状态：名称包含 "ST" 则为 True
-                    "is_st": {
-                        "$cond": {
-                            "if": {
-                                "$regexMatch": {
-                                    "input": {"$ifNull": ["$name", ""]},
-                                    "regex": "ST"
-                                }
-                            },
-                            "then": True,
-                            "else": False
-                        }
-                    },
-
-                    # 交易指标
-                    "turnover_rate": 1,
-                    "volume_ratio": 1,
-
-                    # 实时行情数据（从 quote_data 提升到顶层）
-                    "close": "$quote_data.close",
-                    "open": "$quote_data.open",
-                    "high": "$quote_data.high",
-                    "low": "$quote_data.low",
-                    "pre_close": "$quote_data.pre_close",
-                    "pct_chg": "$quote_data.pct_chg",
-                    "amount": "$quote_data.amount",
-                    "volume": "$quote_data.volume",
-                    "trade_date": "$quote_data.trade_date",
-
-                    # 时间戳
-                    "updated_at": 1,
-                    "quote_updated_at": "$quote_data.updated_at",
-                    "financial_updated_at": "$financial_data.updated_at"
-                }
-            }
-        ]
-        
-        # 创建视图
-        await db.command({
-            "create": "stock_screening_view",
-            "viewOn": "stock_basic_info",
-            "pipeline": pipeline
-        })
-        
+        await create_stock_screening_view_in_db(db)
         logger.info("✅ 视图 stock_screening_view 创建成功！")
 
         # 测试查询视图（用 find + limit 取少量数据，避免 count_documents 全表扫描超时）

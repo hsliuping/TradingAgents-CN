@@ -15,6 +15,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, Field
 
 from app.core.database import get_mongo_db
+from app.services.capability_index_service import CapabilityIndexService
 from app.services.mcp_service import MCPService
 
 logger = logging.getLogger("webapi")
@@ -85,6 +86,13 @@ async def get_service(db: AsyncIOMotorDatabase = Depends(get_mongo_db)) -> MCPSe
     return MCPService(db)
 
 
+async def _sync_capability_index(db: AsyncIOMotorDatabase):
+    try:
+        await CapabilityIndexService(db).ensure_index()
+    except Exception as e:
+        logger.warning(f"⚠️ CapabilityIndex 同步失败: {e}")
+
+
 # =============================================================================
 # 端点
 # =============================================================================
@@ -101,12 +109,14 @@ async def list_mcp_servers(svc: MCPService = Depends(get_service)):
 async def create_mcp_server(
     body: MCPServerCreateRequest,
     svc: MCPService = Depends(get_service),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
     """添加一个新的 MCP 服务器配置"""
     data = body.model_dump()
     # 将嵌套模型转为 dict
     data["connection"] = body.connection.model_dump(exclude_none=True)
     doc = await svc.create_server(data)
+    await _sync_capability_index(db)
     return {"server": doc}
 
 
@@ -123,6 +133,7 @@ async def update_mcp_server(
     server_id: str,
     body: MCPServerUpdateRequest,
     svc: MCPService = Depends(get_service),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
     data = body.model_dump(exclude_none=True)
     if "connection" in data:
@@ -130,14 +141,20 @@ async def update_mcp_server(
     doc = await svc.update_server(server_id, data)
     if doc is None:
         raise HTTPException(status_code=404, detail=f"MCP 服务器不存在: {server_id}")
+    await _sync_capability_index(db)
     return {"server": doc}
 
 
 @router.delete("/servers/{server_id}", summary="删除 MCP 服务器配置")
-async def delete_mcp_server(server_id: str, svc: MCPService = Depends(get_service)):
+async def delete_mcp_server(
+    server_id: str,
+    svc: MCPService = Depends(get_service),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
     ok = await svc.delete_server(server_id)
     if not ok:
         raise HTTPException(status_code=404, detail=f"MCP 服务器不存在: {server_id}")
+    await _sync_capability_index(db)
     return {"success": True, "message": f"已删除 MCP 服务器: {server_id}"}
 
 
@@ -149,7 +166,11 @@ async def test_mcp_connection(server_id: str, svc: MCPService = Depends(get_serv
 
 
 @router.post("/servers/{server_id}/discover", summary="发现并同步 MCP 工具")
-async def discover_mcp_tools(server_id: str, svc: MCPService = Depends(get_service)):
+async def discover_mcp_tools(
+    server_id: str,
+    svc: MCPService = Depends(get_service),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
     """
     连接 MCP 服务器，获取工具列表并缓存到数据库。
     若服务器已启用，工具将同步注册到 ToolRegistry。
@@ -157,6 +178,7 @@ async def discover_mcp_tools(server_id: str, svc: MCPService = Depends(get_servi
     result = await svc.discover_tools(server_id)
     if not result["success"]:
         raise HTTPException(status_code=502, detail=result.get("error", "工具发现失败"))
+    await _sync_capability_index(db)
     return result
 
 
@@ -165,6 +187,7 @@ async def toggle_mcp_server(
     server_id: str,
     body: MCPToggleRequest,
     svc: MCPService = Depends(get_service),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
     """
     启用服务器时，已发现的工具会注册到 ToolRegistry；
@@ -174,6 +197,7 @@ async def toggle_mcp_server(
     if doc is None:
         raise HTTPException(status_code=404, detail=f"MCP 服务器不存在: {server_id}")
     action = "启用" if body.enabled else "禁用"
+    await _sync_capability_index(db)
     return {"server": doc, "message": f"已{action} MCP 服务器: {server_id}"}
 
 

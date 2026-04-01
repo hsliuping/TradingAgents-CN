@@ -7,375 +7,14 @@
         股票筛选
       </h1>
       <p class="page-description">
-        通过多维度筛选条件，快速找到符合投资策略的优质股票
+        默认通过智能对话引导你完成选股；只有在需要精细手动配置时，再进入高级模式
       </p>
     </div>
 
     <!-- Tab 切换 -->
     <el-tabs v-model="activeTab" class="screening-tabs">
-      <el-tab-pane label="传统筛选" name="traditional">
-
-    <!-- 筛选条件面板 -->
-    <el-card class="filter-panel" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <span>筛选条件</span>
-            <el-tag v-if="currentDataSource" type="info" size="small" effect="plain">
-              <el-icon style="vertical-align: middle; margin-right: 4px;"><Connection /></el-icon>
-              当前数据源: {{ currentDataSource.name }}
-              <span v-if="currentDataSource.token_source_display" style="margin-left: 4px; opacity: 0.8;">
-                ({{ currentDataSource.token_source_display }})
-              </span>
-            </el-tag>
-            <el-tag v-else type="warning" size="small">
-              <el-icon style="vertical-align: middle; margin-right: 4px;"><Warning /></el-icon>
-              无可用数据源
-            </el-tag>
-          </div>
-          <div class="header-actions">
-            <el-button type="text" @click="resetFilters">
-              <el-icon><Refresh /></el-icon>
-              重置
-            </el-button>
-          </div>
-        </div>
-      </template>
-
-      <el-form :model="filters" label-width="120px" class="filter-form">
-        <el-row :gutter="24">
-          <!-- 股票代码/名称 -->
-          <el-col :span="8">
-            <el-form-item label="股票代码/名称">
-              <el-input
-                v-model="filters.keyword"
-                placeholder="请输入股票代码或名称"
-                clearable
-              />
-            </el-form-item>
-          </el-col>
-
-          <el-col :span="8">
-            <el-form-item label="行业分类">
-              <el-select
-                v-model="filters.industry"
-                placeholder="选择行业"
-                multiple
-                collapse-tags
-                collapse-tags-tooltip
-              >
-                <el-option
-                  v-for="industry in industryOptions"
-                  :key="industry.value"
-                  :label="industry.label"
-                  :value="industry.value"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-
-          <!-- 基础信息 -->
-          <el-col :span="8">
-            <el-form-item label="市场类型">
-              <el-select v-model="filters.market" placeholder="选择市场" disabled>
-                <el-option label="A股" value="A股" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="24">
-          <el-col :span="8">
-            <el-form-item label="市值范围">
-              <el-select v-model="filters.marketCapRange" placeholder="选择市值范围">
-                <el-option label="小盘股 (< 100亿)" value="small" />
-                <el-option label="中盘股 (100-500亿)" value="medium" />
-                <el-option label="大盘股 (> 500亿)" value="large" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-
-          <!-- 财务指标 -->
-          <el-col :span="8">
-            <el-form-item label="市盈率 (PE)">
-              <el-input-number
-                v-model="filters.peRatio.min"
-                placeholder="最小值"
-                :min="0"
-                :precision="2"
-                style="width: 45%"
-              />
-              <span style="margin: 0 8px">-</span>
-              <el-input-number
-                v-model="filters.peRatio.max"
-                placeholder="最大值"
-                :min="0"
-                :precision="2"
-                style="width: 45%"
-              />
-            </el-form-item>
-          </el-col>
-
-          <el-col :span="8">
-            <el-form-item label="市净率 (PB)">
-              <el-input-number
-                v-model="filters.pbRatio.min"
-                placeholder="最小值"
-                :min="0"
-                :precision="2"
-                style="width: 45%"
-              />
-              <span style="margin: 0 8px">-</span>
-              <el-input-number
-                v-model="filters.pbRatio.max"
-                placeholder="最大值"
-                :min="0"
-                :precision="2"
-                style="width: 45%"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="24">
-          <el-col :span="8">
-            <el-form-item label="ROE (%)">
-              <el-input-number
-                v-model="filters.roe.min"
-                placeholder="最小值"
-                :min="0"
-                :max="100"
-                :precision="2"
-                style="width: 45%"
-              />
-              <span style="margin: 0 8px">-</span>
-              <el-input-number
-                v-model="filters.roe.max"
-                placeholder="最大值"
-                :min="0"
-                :max="100"
-                :precision="2"
-                style="width: 45%"
-              />
-            </el-form-item>
-          </el-col>
-
-          <!-- 技术指标 -->
-          <el-col :span="8">
-            <el-form-item label="涨跌幅 (%)">
-              <el-input-number
-                v-model="filters.changePercent.min"
-                placeholder="最小值"
-                :precision="2"
-                style="width: 45%"
-              />
-              <span style="margin: 0 8px">-</span>
-              <el-input-number
-                v-model="filters.changePercent.max"
-                placeholder="最大值"
-                :precision="2"
-                style="width: 45%"
-              />
-            </el-form-item>
-          </el-col>
-
-          <el-col :span="8">
-            <el-form-item label="成交量">
-              <el-select v-model="filters.volumeLevel" placeholder="选择成交量水平">
-                <el-option label="活跃 (高成交量)" value="high" />
-                <el-option label="正常 (中等成交量)" value="medium" />
-                <el-option label="清淡 (低成交量)" value="low" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <!-- 技术形态暂不实现，先隐藏 -->
-        <el-row :gutter="24" v-if="false">
-          <el-col :span="8">
-            <el-form-item label="技术形态">
-              <el-select
-                v-model="filters.technicalPattern"
-                placeholder="选择技术形态"
-                multiple
-                collapse-tags
-              >
-                <el-option label="突破上升趋势" value="breakout_up" />
-                <el-option label="回调买入机会" value="pullback" />
-                <el-option label="底部反转" value="bottom_reversal" />
-                <el-option label="强势整理" value="consolidation" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <!-- 筛选按钮 -->
-        <el-row>
-          <el-col :span="24">
-            <div class="filter-actions">
-              <el-button
-                type="primary"
-                @click="performScreening"
-                :loading="screeningLoading"
-                size="large"
-              >
-                <el-icon><Search /></el-icon>
-                开始筛选
-              </el-button>
-              <el-button @click="resetFilters" size="large">
-                重置条件
-              </el-button>
-            </div>
-          </el-col>
-        </el-row>
-      </el-form>
-    </el-card>
-
-    <!-- 筛选结果 -->
-    <el-card v-if="screeningResults.length > 0" class="results-panel" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>筛选结果 ({{ screeningResults.length }}只股票)</span>
-          <div class="header-actions">
-            <el-button
-              type="primary"
-              @click="batchAnalyze"
-              :disabled="selectedStocks.length === 0"
-            >
-              <el-icon><TrendCharts /></el-icon>
-              批量分析 ({{ selectedStocks.length }})
-            </el-button>
-            <el-button type="text" @click="exportResults">
-              <el-icon><Download /></el-icon>
-              导出结果
-            </el-button>
-          </div>
-        </div>
-      </template>
-
-      <!-- 结果表格 -->
-      <el-table
-        :data="paginatedResults"
-        @selection-change="handleSelectionChange"
-        stripe
-        style="width: 100%"
-      >
-        <el-table-column type="selection" width="55" />
-
-        <el-table-column prop="code" label="股票代码" width="120">
-          <template #default="{ row }">
-            <el-link type="primary" @click="viewStockDetail(row)">
-              {{ row.symbol }}
-            </el-link>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="name" label="股票名称" width="150" />
-
-        <el-table-column prop="industry" label="行业" width="120" />
-
-        <el-table-column prop="close" label="当前价格" width="100" align="right">
-          <template #default="{ row }">
-            <span v-if="row.close">¥{{ row.close?.toFixed(2) }}</span>
-            <span v-else class="text-gray-400">-</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="pct_chg" label="涨跌幅" width="100" align="right">
-          <template #default="{ row }">
-            <span v-if="row.pct_chg !== null && row.pct_chg !== undefined" :class="getChangeClass(row.pct_chg)">
-              {{ row.pct_chg > 0 ? '+' : '' }}{{ row.pct_chg?.toFixed(2) }}%
-            </span>
-            <span v-else class="text-gray-400">-</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="total_mv" label="市值" width="120" align="right">
-          <template #default="{ row }">
-            {{ formatMarketCap(row.total_mv) }}
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="pe" label="市盈率" width="130" align="right">
-          <template #default="{ row }">
-            <span v-if="row.pe">
-              {{ row.pe?.toFixed(2) }}
-              <el-tag v-if="row.pe_is_realtime" type="success" size="small" style="margin-left: 4px">实时</el-tag>
-            </span>
-            <span v-else class="text-gray-400">-</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="pb" label="市净率" width="130" align="right">
-          <template #default="{ row }">
-            <span v-if="row.pb">
-              {{ row.pb?.toFixed(2) }}
-              <el-tag v-if="row.pe_is_realtime" type="success" size="small" style="margin-left: 4px">实时</el-tag>
-            </span>
-            <span v-else class="text-gray-400">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="roe" label="ROE(%)" width="110" align="right">
-          <template #default="{ row }">
-            <span v-if="row.roe !== null && row.roe !== undefined">{{ row.roe?.toFixed(2) }}%</span>
-            <span v-else class="text-gray-400">-</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="board" label="板块" width="100">
-          <template #default="{ row }">
-            {{ row.board || '-' }}
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="exchange" label="交易所" width="140">
-          <template #default="{ row }">
-            {{ row.exchange || '-' }}
-          </template>
-        </el-table-column>
-
-        <el-table-column label="操作" width="180" fixed="right">
-          <template #default="{ row }">
-            <el-button type="text" size="small" @click="analyzeSingle(row)">
-              分析
-            </el-button>
-            <el-button type="text" size="small" @click="toggleFavorite(row)">
-              <el-icon><Star /></el-icon>
-              {{ isFavorited(row.symbol) ? '取消自选' : '股票关注列表' }}
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <!-- 分页 -->
-      <div class="pagination-wrapper">
-        <el-pagination
-          v-model:current-page="currentPage"
-          v-model:page-size="pageSize"
-          :page-sizes="[20, 50, 100]"
-          :total="screeningResults.length"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="handleSizeChange"
-          @current-change="handleCurrentChange"
-        />
-      </div>
-    </el-card>
-
-    <!-- 空状态 -->
-    <el-empty
-      v-else-if="!screeningLoading && hasSearched"
-      description="未找到符合条件的股票"
-      :image-size="200"
-    >
-      <el-button type="primary" @click="resetFilters">
-        重新筛选
-      </el-button>
-    </el-empty>
-
-      </el-tab-pane>
-
-      <!-- 智能筛选 Tab -->
       <el-tab-pane label="智能筛选" name="intelligent">
+
         <div class="intelligent-screening">
           <div class="chat-layout">
             <aside class="history-panel" v-loading="aiHistoryLoading">
@@ -508,7 +147,539 @@
             </div>
           </div>
         </div>
+
       </el-tab-pane>
+
+      <el-tab-pane label="高级模式" name="traditional">
+
+    <!-- 筛选条件面板 -->
+    <el-card class="filter-panel" shadow="never" v-loading="fieldsLoading">
+      <template #header>
+        <div class="card-header">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span>筛选条件</span>
+            <el-tag v-if="currentDataSource" type="info" size="small" effect="plain">
+              <el-icon style="vertical-align: middle; margin-right: 4px;"><Connection /></el-icon>
+              当前数据源: {{ currentDataSource.name }}
+              <span v-if="currentDataSource.token_source_display" style="margin-left: 4px; opacity: 0.8;">
+                ({{ currentDataSource.token_source_display }})
+              </span>
+            </el-tag>
+            <el-tag v-else type="warning" size="small">
+              <el-icon style="vertical-align: middle; margin-right: 4px;"><Warning /></el-icon>
+              无可用数据源
+            </el-tag>
+          </div>
+          <div class="header-actions">
+            <el-select
+              v-model="selectedPresetId"
+              placeholder="选择筛选方案"
+              clearable
+              :loading="presetsLoading"
+              style="width: 180px"
+              @change="handlePresetSelect"
+            >
+              <el-option
+                v-for="preset in savedFilterPresets"
+                :key="preset.id"
+                :label="preset.name"
+                :value="preset.id"
+              />
+            </el-select>
+            <el-button type="text" :loading="presetsLoading" @click="saveCurrentPreset">
+              保存方案
+            </el-button>
+            <el-button type="text" :disabled="!selectedPresetId || presetsLoading" @click="deleteCurrentPreset">
+              删除方案
+            </el-button>
+            <el-button type="text" @click="resetFilters">
+              <el-icon><Refresh /></el-icon>
+              重置
+            </el-button>
+          </div>
+        </div>
+      </template>
+
+      <el-form :model="basicFilters" label-width="120px" class="filter-form">
+        <el-row :gutter="24" class="filter-summary-row">
+          <el-col :span="8">
+            <el-form-item label="市场类型">
+              <el-select v-model="basicFilters.market" placeholder="选择市场" disabled>
+                <el-option label="A股" value="A股" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="16">
+            <div class="registry-hint">
+              当前采用引导式筛选。先按思路选择核心条件，需要更细时再展开高级条件。全部可用字段共 {{ totalVisibleFieldCount }} 个。
+            </div>
+          </el-col>
+        </el-row>
+
+        <div class="guided-panel">
+          <div class="guided-panel-header">
+            <div>
+              <div class="guided-panel-title">第 1 步：先选筛选思路</div>
+              <div class="guided-panel-subtitle">不默认展示整版指标，只展示当前思路最常用的一组核心字段。</div>
+            </div>
+            <el-tag type="success" effect="plain" size="small">{{ currentGuideMode.label }}</el-tag>
+          </div>
+          <div class="guide-mode-grid">
+            <button
+              v-for="mode in guidedScreeningModes"
+              :key="mode.id"
+              type="button"
+              :class="['guide-mode-card', { active: mode.id === selectedGuideModeId }]"
+              @click="selectedGuideModeId = mode.id"
+            >
+              <div class="guide-mode-title">{{ mode.label }}</div>
+              <div class="guide-mode-description">{{ mode.description }}</div>
+              <div class="guide-mode-meta">{{ mode.hint }}</div>
+            </button>
+          </div>
+        </div>
+
+        <el-empty
+          v-if="!filterCategorySections.length && !fieldsLoading"
+          description="暂无可用筛选字段"
+          :image-size="80"
+        />
+
+        <div v-if="activeConditionSummaries.length" class="active-summary-panel">
+          <div class="active-summary-header">
+            <span>当前生效条件</span>
+            <el-tag size="small" type="success" effect="plain">{{ activeConditionSummaries.length }}项</el-tag>
+          </div>
+          <div class="active-summary-tags">
+            <el-tag
+              v-for="summary in activeConditionSummaries"
+              :key="summary"
+              size="small"
+              effect="plain"
+            >
+              {{ summary }}
+            </el-tag>
+          </div>
+        </div>
+
+        <div v-if="guidedFieldSections.length" class="guided-core-panel">
+          <div class="guided-core-header">
+            <div>
+              <div class="guided-core-title">第 2 步：只调整核心条件</div>
+              <div class="guided-core-subtitle">当前策略下优先展示 {{ guidedFieldCount }} 个高频字段，先把关键条件定下来。</div>
+            </div>
+          </div>
+
+          <div
+            v-for="category in guidedFieldSections"
+            :key="category.key"
+            class="guided-section"
+          >
+            <div class="guided-section-header">
+              <span>{{ category.label }}</span>
+              <el-tag size="small" type="info" effect="plain">{{ category.fields.length }}项</el-tag>
+            </div>
+
+            <el-row :gutter="24">
+              <el-col
+                v-for="field in category.fields"
+                :key="field.name"
+                :span="8"
+              >
+                <el-form-item :label="buildFieldLabel(field)" class="dynamic-field-item">
+                  <template v-if="field.name === 'industry'">
+                    <el-select
+                      v-model="fieldFilters[field.name].selectedValues"
+                      placeholder="选择行业"
+                      multiple
+                      filterable
+                      clearable
+                      collapse-tags
+                      collapse-tags-tooltip
+                    >
+                      <el-option
+                        v-for="industry in industryOptions"
+                        :key="industry.value"
+                        :label="industry.label"
+                        :value="industry.value"
+                      />
+                    </el-select>
+                  </template>
+
+                  <template v-else-if="isBooleanField(field)">
+                    <el-select
+                      v-model="fieldFilters[field.name].booleanValue"
+                      placeholder="不限"
+                      clearable
+                    >
+                      <el-option label="否" value="false" />
+                      <el-option label="是" value="true" />
+                    </el-select>
+                  </template>
+
+                  <template v-else-if="isNumericField(field)">
+                    <div class="range-inputs">
+                      <el-input-number
+                        v-model="fieldFilters[field.name].min"
+                        placeholder="最小值"
+                        :controls="false"
+                        style="width: 45%"
+                      />
+                      <span class="range-separator">-</span>
+                      <el-input-number
+                        v-model="fieldFilters[field.name].max"
+                        placeholder="最大值"
+                        :controls="false"
+                        style="width: 45%"
+                      />
+                    </div>
+                  </template>
+
+                  <template v-else>
+                    <div class="string-inputs">
+                      <el-select v-model="fieldFilters[field.name].operator" style="width: 120px">
+                        <el-option
+                          v-for="operator in getTextOperators(field)"
+                          :key="operator"
+                          :label="formatOperatorLabel(operator)"
+                          :value="operator"
+                        />
+                      </el-select>
+                      <el-input
+                        v-model="fieldFilters[field.name].scalarValue"
+                        :placeholder="buildFieldPlaceholder(field, fieldFilters[field.name].operator)"
+                        clearable
+                      />
+                    </div>
+                  </template>
+
+                  <div v-if="field.description" class="field-help">{{ field.description }}</div>
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </div>
+        </div>
+
+        <div v-if="advancedFilterSections.length" class="advanced-filter-panel">
+          <div class="advanced-filter-header">
+            <div>
+              <div class="advanced-filter-title">第 3 步：需要时再展开高级条件</div>
+              <div class="advanced-filter-subtitle">剩余字段都收在这里，默认不打扰用户视线。</div>
+            </div>
+            <el-button text @click="toggleAdvancedFilters">
+              {{ showAdvancedFilters ? '收起高级条件' : `展开高级条件（${advancedFieldCount} 项）` }}
+            </el-button>
+          </div>
+
+          <el-collapse v-if="showAdvancedFilters" v-model="activeFilterCategories" class="dynamic-filter-groups">
+          <el-collapse-item
+            v-for="category in advancedFilterSections"
+            :key="category.key"
+            :name="category.key"
+          >
+            <template #title>
+              <div class="group-title">
+                <span>{{ category.label }}</span>
+                <el-tag size="small" type="info" effect="plain">{{ category.fields.length }}项</el-tag>
+              </div>
+            </template>
+
+            <el-row :gutter="24">
+              <el-col
+                v-for="field in category.fields"
+                :key="field.name"
+                :span="8"
+              >
+                <el-form-item :label="buildFieldLabel(field)" class="dynamic-field-item">
+                  <template v-if="field.name === 'industry'">
+                    <el-select
+                      v-model="fieldFilters[field.name].selectedValues"
+                      placeholder="选择行业"
+                      multiple
+                      filterable
+                      clearable
+                      collapse-tags
+                      collapse-tags-tooltip
+                    >
+                      <el-option
+                        v-for="industry in industryOptions"
+                        :key="industry.value"
+                        :label="industry.label"
+                        :value="industry.value"
+                      />
+                    </el-select>
+                  </template>
+
+                  <template v-else-if="isBooleanField(field)">
+                    <el-select
+                      v-model="fieldFilters[field.name].booleanValue"
+                      placeholder="不限"
+                      clearable
+                    >
+                      <el-option label="否" value="false" />
+                      <el-option label="是" value="true" />
+                    </el-select>
+                  </template>
+
+                  <template v-else-if="isNumericField(field)">
+                    <div class="range-inputs">
+                      <el-input-number
+                        v-model="fieldFilters[field.name].min"
+                        placeholder="最小值"
+                        :controls="false"
+                        style="width: 45%"
+                      />
+                      <span class="range-separator">-</span>
+                      <el-input-number
+                        v-model="fieldFilters[field.name].max"
+                        placeholder="最大值"
+                        :controls="false"
+                        style="width: 45%"
+                      />
+                    </div>
+                  </template>
+
+                  <template v-else>
+                    <div class="string-inputs">
+                      <el-select v-model="fieldFilters[field.name].operator" style="width: 120px">
+                        <el-option
+                          v-for="operator in getTextOperators(field)"
+                          :key="operator"
+                          :label="formatOperatorLabel(operator)"
+                          :value="operator"
+                        />
+                      </el-select>
+                      <el-input
+                        v-model="fieldFilters[field.name].scalarValue"
+                        :placeholder="buildFieldPlaceholder(field, fieldFilters[field.name].operator)"
+                        clearable
+                      />
+                    </div>
+                  </template>
+
+                  <div v-if="field.description" class="field-help">{{ field.description }}</div>
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </el-collapse-item>
+          </el-collapse>
+        </div>
+
+        <!-- 筛选按钮 -->
+        <el-row>
+          <el-col :span="24">
+            <div class="filter-actions">
+              <el-button
+                type="primary"
+                @click="performScreening"
+                :loading="screeningLoading"
+                size="large"
+              >
+                <el-icon><Search /></el-icon>
+                开始筛选
+              </el-button>
+              <el-button @click="resetFilters" size="large">
+                重置条件
+              </el-button>
+            </div>
+          </el-col>
+        </el-row>
+      </el-form>
+    </el-card>
+
+    <!-- 筛选结果 -->
+    <el-card v-if="screeningResults.length > 0" class="results-panel" shadow="never">
+      <template #header>
+        <div class="card-header">
+          <span>筛选结果 ({{ screeningResults.length }}只股票)</span>
+          <div class="header-actions">
+            <el-button
+              type="primary"
+              @click="batchAnalyze"
+              :disabled="selectedStocks.length === 0"
+            >
+              <el-icon><TrendCharts /></el-icon>
+              批量分析 ({{ selectedStocks.length }})
+            </el-button>
+            <el-button type="text" @click="exportResults">
+              <el-icon><Download /></el-icon>
+              导出结果
+            </el-button>
+          </div>
+        </div>
+      </template>
+
+      <!-- 结果表格 -->
+      <el-table
+        :data="paginatedResults"
+        @selection-change="handleSelectionChange"
+        stripe
+        style="width: 100%"
+      >
+        <el-table-column type="selection" width="55" />
+
+        <el-table-column prop="code" label="股票代码" width="120">
+          <template #default="{ row }">
+            <el-link type="primary" @click="viewStockDetail(row)">
+              {{ row.symbol }}
+            </el-link>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="name" label="股票名称" width="150" />
+
+        <el-table-column prop="industry" label="行业" width="120" />
+
+        <el-table-column prop="close" label="当前价格" width="100" align="right">
+          <template #default="{ row }">
+            <span v-if="row.close">¥{{ row.close?.toFixed(2) }}</span>
+            <span v-else class="text-gray-400">-</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="pct_chg" label="涨跌幅" width="100" align="right">
+          <template #default="{ row }">
+            <span v-if="row.pct_chg !== null && row.pct_chg !== undefined" :class="getChangeClass(row.pct_chg)">
+              {{ row.pct_chg > 0 ? '+' : '' }}{{ row.pct_chg?.toFixed(2) }}%
+            </span>
+            <span v-else class="text-gray-400">-</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="total_mv" label="市值" width="120" align="right">
+          <template #default="{ row }">
+            {{ formatMarketCap(row.total_mv) }}
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="pe" label="市盈率" width="130" align="right">
+          <template #default="{ row }">
+            <span v-if="row.pe">
+              {{ row.pe?.toFixed(2) }}
+              <el-tag v-if="row.pe_is_realtime" type="success" size="small" style="margin-left: 4px">实时</el-tag>
+            </span>
+            <span v-else class="text-gray-400">-</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="pb" label="市净率" width="130" align="right">
+          <template #default="{ row }">
+            <span v-if="row.pb">
+              {{ row.pb?.toFixed(2) }}
+              <el-tag v-if="row.pe_is_realtime" type="success" size="small" style="margin-left: 4px">实时</el-tag>
+            </span>
+            <span v-else class="text-gray-400">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="roe" label="ROE(%)" width="110" align="right">
+          <template #default="{ row }">
+            <span v-if="row.roe !== null && row.roe !== undefined">{{ row.roe?.toFixed(2) }}%</span>
+            <span v-else class="text-gray-400">-</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="提示信息" min-width="260">
+          <template #default="{ row }">
+            <div v-if="getFactorWarningEntries(row).length || getFactorDiagnosticEntries(row).length" class="warning-cell">
+              <el-tooltip
+                v-for="warning in getFactorWarningEntries(row)"
+                :key="warning.key"
+                effect="light"
+                placement="top"
+              >
+                <template #content>
+                  <div class="warning-tooltip">
+                    <div class="warning-tooltip-title">{{ warning.label }}</div>
+                    <div
+                      v-for="condition in warning.conditions"
+                      :key="condition"
+                      class="warning-tooltip-line"
+                    >
+                      {{ condition }}
+                    </div>
+                  </div>
+                </template>
+                <el-tag :type="warning.tagType" size="small" effect="plain">
+                  {{ warning.label }}
+                </el-tag>
+              </el-tooltip>
+              <el-tooltip
+                v-for="diagnostic in getFactorDiagnosticEntries(row)"
+                :key="diagnostic.key"
+                effect="light"
+                placement="top"
+              >
+                <template #content>
+                  <div class="warning-tooltip">
+                    <div class="warning-tooltip-title">{{ diagnostic.label }}</div>
+                    <div class="warning-tooltip-line">状态：{{ diagnostic.state }}</div>
+                    <div v-if="diagnostic.reason" class="warning-tooltip-line">原因：{{ diagnostic.reason }}</div>
+                    <div v-if="diagnostic.missingInputs.length" class="warning-tooltip-line">
+                      缺失输入：{{ diagnostic.missingInputs.join('、') }}
+                    </div>
+                  </div>
+                </template>
+                <el-tag :type="diagnostic.tagType" size="small" effect="plain">
+                  {{ diagnostic.label }}
+                </el-tag>
+              </el-tooltip>
+            </div>
+            <span v-else class="text-gray-400">-</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="board" label="板块" width="100">
+          <template #default="{ row }">
+            {{ row.board || '-' }}
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="exchange" label="交易所" width="140">
+          <template #default="{ row }">
+            {{ row.exchange || '-' }}
+          </template>
+        </el-table-column>
+
+        <el-table-column label="操作" width="180" fixed="right">
+          <template #default="{ row }">
+            <el-button type="text" size="small" @click="analyzeSingle(row)">
+              分析
+            </el-button>
+            <el-button type="text" size="small" @click="toggleFavorite(row)">
+              <el-icon><Star /></el-icon>
+              {{ isFavorited(row.symbol) ? '取消自选' : '股票关注列表' }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!-- 分页 -->
+      <div class="pagination-wrapper">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[20, 50, 100]"
+          :total="screeningResults.length"
+          layout="total, sizes, prev, pager, next, jumper"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
+    </el-card>
+
+    <!-- 空状态 -->
+    <el-empty
+      v-else-if="!screeningLoading && hasSearched"
+      description="未找到符合条件的股票"
+      :image-size="200"
+    >
+      <el-button type="primary" @click="resetFilters">
+        重新筛选
+      </el-button>
+    </el-empty>
+
+      </el-tab-pane>
+
     </el-tabs>
   </div>
 </template>
@@ -520,10 +691,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, TrendCharts, Download, Star, Connection, Warning, User } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import type { StockInfo } from '@/types/analysis'
-import { screeningApi, type FieldConfigResponse, type ScreeningConversationSummary, type ScreeningMessageItem, type ScreeningWsEnvelope, type ScreeningWsProgressData, type StockRecommendation } from '@/api/screening'
+import { screeningApi, type FieldConfigResponse, type FieldInfo, type ScreeningConditionItem, type ScreeningConversationSummary, type ScreeningMessageItem, type ScreeningPreset, type ScreeningWsEnvelope, type ScreeningWsProgressData, type StockRecommendation } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
 import { getCurrentDataSource } from '@/api/sync'
 import { useAuthStore } from '@/stores/auth'
+import { getFactorDiagnosticEntries, getFactorWarningEntries } from '@/utils/factorPresentation'
 import { normalizeMarketForAnalysis, exchangeCodeToMarket, getMarketByStockCode } from '@/utils/market'
 
 // Markdown 渲染
@@ -534,7 +706,7 @@ const renderScreeningMarkdown = (content: string): string => {
 }
 
 // Tab 状态
-const activeTab = ref('traditional')
+const activeTab = ref('intelligent')
 
 // ---- 智能筛选 ----
 interface AiDisplayMessage {
@@ -934,23 +1106,76 @@ const currentDataSource = ref<{
 // 字段配置
 const fieldConfig = ref<FieldConfigResponse | null>(null)
 const fieldsLoading = ref(false)
+const activeFilterCategories = ref<string[]>(['basic', 'market_value', 'financial', 'trading', 'price', 'technical'])
 
-// 筛选条件
-const filters = reactive({
-  keyword: '',
+type DynamicFieldState = {
+  operator: string
+  scalarValue: string
+  min: number | null
+  max: number | null
+  selectedValues: string[]
+  booleanValue: '' | 'true' | 'false'
+}
+
+type SavedFilterPreset = ScreeningPreset
+
+const FILTER_PRESET_STORAGE_KEY = 'screening-filter-presets'
+
+const fieldFilters = reactive<Record<string, DynamicFieldState>>({})
+const savedFilterPresets = ref<SavedFilterPreset[]>([])
+const selectedPresetId = ref<string>('')
+const presetsLoading = ref(false)
+
+// 基础筛选条件
+const basicFilters = reactive({
   market: 'A股',
-  industry: [] as string[],
-  marketCapRange: '',
-  peRatio: { min: null, max: null },
-  pbRatio: { min: null, max: null },
-  roe: { min: null, max: null },
-  changePercent: { min: null, max: null },
-  volumeLevel: '',
-  technicalPattern: [] as string[]
 })
 
 // 行业选项（动态加载）
 const industryOptions = ref<Array<{label: string, value: string, count?: number}>>([])
+
+type GuidedScreeningMode = {
+  id: string
+  label: string
+  description: string
+  hint: string
+  fieldNames: string[]
+}
+
+const guidedScreeningModes: GuidedScreeningMode[] = [
+  {
+    id: 'balanced',
+    label: '稳妥入门',
+    description: '先看行业、估值、盈利和市值，适合大多数用户快速起步。',
+    hint: '适合第一次使用',
+    fieldNames: ['industry', 'pe_ttm', 'pb_mrq', 'roe', 'total_mv'],
+  },
+  {
+    id: 'value',
+    label: '低估值',
+    description: '重点看 PE、PB 和市值，适合找相对便宜的公司。',
+    hint: '偏价值风格',
+    fieldNames: ['industry', 'pe_ttm', 'pb_mrq', 'pe', 'pb', 'total_mv'],
+  },
+  {
+    id: 'quality',
+    label: '高质量',
+    description: '优先看 ROE 和估值，快速筛掉盈利质量偏弱的标的。',
+    hint: '偏基本面',
+    fieldNames: ['industry', 'roe', 'pe_ttm', 'pb_mrq', 'total_mv'],
+  },
+  {
+    id: 'momentum',
+    label: '趋势动量',
+    description: '只展示走势和交易活跃度相关的核心字段。',
+    hint: '偏交易节奏',
+    fieldNames: ['industry', 'pct_chg', 'turnover_rate', 'volume_ratio', 'rsi14', 'ma20', 'macd_hist'],
+  },
+]
+
+const defaultGuidedFieldNames = ['industry', 'pe_ttm', 'pb_mrq', 'roe', 'total_mv', 'pct_chg']
+const selectedGuideModeId = ref<GuidedScreeningMode['id']>('balanced')
+const showAdvancedFilters = ref(false)
 
 // 计算属性
 const paginatedResults = computed(() => {
@@ -959,96 +1184,488 @@ const paginatedResults = computed(() => {
   return screeningResults.value.slice(start, end)
 })
 
+const categoryOrder = computed(() => fieldConfig.value?.ui_metadata?.category_order || ['basic', 'market_value', 'financial', 'trading', 'price', 'technical'])
+const categoryLabels = computed(() => fieldConfig.value?.ui_metadata?.category_labels || {})
+const hiddenFieldNames = computed(() => new Set(fieldConfig.value?.ui_metadata?.hidden_fields || ['code', 'market']))
+const currentGuideMode = computed(() =>
+  guidedScreeningModes.find((mode) => mode.id === selectedGuideModeId.value) || guidedScreeningModes[0]
+)
+
+const isFieldVisible = (fieldName: string) => !hiddenFieldNames.value.has(fieldName)
+
+const buildFieldSections = (fieldNames: string[]) => {
+  if (!fieldConfig.value) return [] as Array<{ key: string; label: string; fields: FieldInfo[] }>
+
+  const allowedFieldNames = new Set(fieldNames)
+  const visibleFieldsByCategory = fieldConfig.value.ui_metadata?.visible_fields_by_category || fieldConfig.value.categories
+
+  return categoryOrder.value
+    .map((categoryKey) => {
+      const categoryFieldNames = visibleFieldsByCategory[categoryKey] || []
+      const fields = categoryFieldNames
+        .filter((fieldName) => allowedFieldNames.has(fieldName))
+        .map((fieldName) => fieldConfig.value?.fields[fieldName])
+        .filter((field): field is FieldInfo => {
+          if (!field) return false
+          return isFieldVisible(field.name)
+        })
+
+      return {
+        key: categoryKey,
+        label: categoryLabels.value[categoryKey] || categoryKey,
+        fields,
+      }
+    })
+    .filter((section) => section.fields.length > 0)
+}
+
+const resolveGuidedFieldNames = (preferredFieldNames: string[]) => {
+  if (!fieldConfig.value) return [] as string[]
+
+  const visibleFieldNames = new Set(
+    Object.values(fieldConfig.value.fields)
+      .filter((field) => isFieldVisible(field.name))
+      .map((field) => field.name)
+  )
+
+  const resolvedPreferred = preferredFieldNames.filter((fieldName) => visibleFieldNames.has(fieldName))
+  if (resolvedPreferred.length > 0) return resolvedPreferred
+
+  return defaultGuidedFieldNames.filter((fieldName) => visibleFieldNames.has(fieldName))
+}
+
+const createEmptyFieldState = (field: FieldInfo): DynamicFieldState => {
+  let operator = field.supported_operators[0] || 'contains'
+  if (field.name === 'keyword') operator = 'contains'
+  if (field.name === 'industry') operator = 'in'
+  if (field.name === 'is_st') operator = '=='
+  if (field.data_type === 'string' && field.supported_operators.includes('contains')) operator = 'contains'
+
+  return {
+    operator,
+    scalarValue: '',
+    min: null,
+    max: null,
+    selectedValues: [],
+    booleanValue: '',
+  }
+}
+
+const resetFieldFilters = (config: FieldConfigResponse | null = fieldConfig.value) => {
+  Object.keys(fieldFilters).forEach((key) => {
+    delete fieldFilters[key]
+  })
+
+  if (!config) return
+
+  activeFilterCategories.value = []
+
+  Object.values(config.fields)
+    .filter((field) => isFieldVisible(field.name))
+    .forEach((field) => {
+      fieldFilters[field.name] = createEmptyFieldState(field)
+    })
+}
+
+const filterCategorySections = computed(() => {
+  if (!fieldConfig.value) return [] as Array<{ key: string; label: string; fields: FieldInfo[] }>
+
+  const visibleFieldsByCategory = fieldConfig.value.ui_metadata?.visible_fields_by_category || fieldConfig.value.categories
+
+  return categoryOrder.value
+    .map((categoryKey) => {
+      const fieldNames = visibleFieldsByCategory[categoryKey] || []
+      const fields = fieldNames
+        .map((fieldName) => fieldConfig.value?.fields[fieldName])
+        .filter((field): field is FieldInfo => {
+          if (!field) return false
+          return isFieldVisible(field.name)
+        })
+
+      return {
+        key: categoryKey,
+        label: categoryLabels.value[categoryKey] || categoryKey,
+        fields,
+      }
+    })
+    .filter((section) => section.fields.length > 0)
+})
+
+const guidedFieldSections = computed(() =>
+  buildFieldSections(resolveGuidedFieldNames(currentGuideMode.value.fieldNames))
+)
+
+const guidedFieldNameSet = computed(() => new Set(
+  guidedFieldSections.value.flatMap((section) => section.fields.map((field) => field.name))
+))
+
+const guidedFieldCount = computed(() =>
+  guidedFieldSections.value.reduce((total, section) => total + section.fields.length, 0)
+)
+
+const advancedFilterSections = computed(() =>
+  filterCategorySections.value
+    .map((section) => ({
+      ...section,
+      fields: section.fields.filter((field) => !guidedFieldNameSet.value.has(field.name)),
+    }))
+    .filter((section) => section.fields.length > 0)
+)
+
+const advancedFieldCount = computed(() =>
+  advancedFilterSections.value.reduce((total, section) => total + section.fields.length, 0)
+)
+
+const totalVisibleFieldCount = computed(() =>
+  filterCategorySections.value.reduce((total, section) => total + section.fields.length, 0)
+)
+
+const activeConditionSummaries = computed(() => {
+  if (!fieldConfig.value) return [] as string[]
+
+  return buildDynamicConditions().map((condition) => {
+    const field = fieldConfig.value?.fields[condition.field]
+    const label = field?.display_name || condition.field
+    const value = condition.value
+
+    if (Array.isArray(value)) {
+      if (condition.operator === 'between') {
+        return `${label}: ${value[0]} - ${value[1]}`
+      }
+      return `${label} ${formatOperatorLabel(condition.operator)} ${value.join('、')}`
+    }
+
+    if (typeof value === 'boolean') {
+      return `${label}: ${value ? '是' : '否'}`
+    }
+
+    return `${label} ${formatOperatorLabel(condition.operator)} ${value}`
+  })
+})
+
+const isNumericField = (field: FieldInfo) => field.data_type === 'number'
+const isBooleanField = (field: FieldInfo) => field.data_type === 'boolean' || field.name === 'is_st'
+
+const getTextOperators = (field: FieldInfo) => {
+  const operators = field.supported_operators.filter((operator) => ['contains', '==', '!=', 'in', 'not_in'].includes(operator))
+  return operators.length ? operators : field.supported_operators
+}
+
+const formatOperatorLabel = (operator: string) => {
+  const labels: Record<string, string> = {
+    contains: '包含',
+    '==': '等于',
+    '!=': '不等于',
+    in: '属于',
+    not_in: '不属于',
+  }
+  return labels[operator] || operator
+}
+
+const toggleAdvancedFilters = () => {
+  showAdvancedFilters.value = !showAdvancedFilters.value
+  activeFilterCategories.value = showAdvancedFilters.value
+    ? advancedFilterSections.value.map((section) => section.key)
+    : []
+}
+
+const buildFieldLabel = (field: FieldInfo) => field.unit ? `${field.display_name} (${field.unit})` : field.display_name
+
+const buildFieldPlaceholder = (field: FieldInfo, operator: string) => {
+  if (operator === 'in' || operator === 'not_in') {
+    return `请输入${field.display_name}，多个值用逗号分隔`
+  }
+  if (field.name === 'keyword') {
+    return '请输入股票代码或名称'
+  }
+  return `请输入${field.display_name}`
+}
+
+const parseMultiValueText = (value: string) =>
+  value
+    .split(/[\n,，、]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+const cloneFieldFilters = (): Record<string, DynamicFieldState> => {
+  const snapshot: Record<string, DynamicFieldState> = {}
+  Object.entries(fieldFilters).forEach(([fieldName, state]) => {
+    snapshot[fieldName] = {
+      operator: state.operator,
+      scalarValue: state.scalarValue,
+      min: state.min,
+      max: state.max,
+      selectedValues: [...state.selectedValues],
+      booleanValue: state.booleanValue,
+    }
+  })
+  return snapshot
+}
+
+const sortSavedPresets = (presets: SavedFilterPreset[]) =>
+  [...presets].sort((a, b) => {
+    const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime()
+    const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime()
+    return timeB - timeA
+  })
+
+const normalizeSavedPreset = (preset: Partial<SavedFilterPreset> | null | undefined): SavedFilterPreset | null => {
+  if (!preset?.id || !preset?.name) return null
+
+  return {
+    id: preset.id,
+    name: preset.name,
+    basicFilters: preset.basicFilters || { market: 'A股' },
+    fieldFilters: preset.fieldFilters || {},
+    createdAt: preset.createdAt,
+    updatedAt: preset.updatedAt,
+  }
+}
+
+const upsertSavedPreset = (preset: SavedFilterPreset) => {
+  const existingIndex = savedFilterPresets.value.findIndex((item) => item.id === preset.id)
+  if (existingIndex >= 0) {
+    savedFilterPresets.value.splice(existingIndex, 1, preset)
+  } else {
+    savedFilterPresets.value.unshift(preset)
+  }
+  savedFilterPresets.value = sortSavedPresets(savedFilterPresets.value)
+}
+
+const loadLegacyLocalPresets = (): SavedFilterPreset[] => {
+  try {
+    const raw = localStorage.getItem(FILTER_PRESET_STORAGE_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch (error) {
+    console.warn('加载筛选方案失败:', error)
+    return []
+  }
+}
+
+const migrateLegacyLocalPresets = async () => {
+  const legacyPresets = loadLegacyLocalPresets()
+  if (!legacyPresets.length) return
+
+  let migratedCount = 0
+  for (const legacyPreset of legacyPresets) {
+    const normalizedPreset = normalizeSavedPreset(legacyPreset)
+    if (!normalizedPreset) continue
+
+    const payload = {
+      name: normalizedPreset.name,
+      basicFilters: normalizedPreset.basicFilters,
+      fieldFilters: normalizedPreset.fieldFilters,
+    }
+
+    const existing = savedFilterPresets.value.find((item) => item.name === normalizedPreset.name)
+    const response = existing
+      ? await screeningApi.updatePreset(existing.id, payload)
+      : await screeningApi.createPreset(payload)
+
+    const migratedPreset = normalizeSavedPreset(unwrapApiPayload((response as any))?.preset)
+    if (migratedPreset) {
+      upsertSavedPreset(migratedPreset)
+      migratedCount += 1
+    }
+  }
+
+  localStorage.removeItem(FILTER_PRESET_STORAGE_KEY)
+  if (migratedCount > 0) {
+    ElMessage.success(`已迁移 ${migratedCount} 个本地筛选方案到账号`) 
+  }
+}
+
+const loadSavedPresets = async () => {
+  presetsLoading.value = true
+  try {
+    const response = await screeningApi.listPresets()
+    const payload = unwrapApiPayload(response as any)
+    savedFilterPresets.value = sortSavedPresets(
+      (payload?.items || [])
+        .map((item: SavedFilterPreset) => normalizeSavedPreset(item))
+        .filter((item: SavedFilterPreset | null): item is SavedFilterPreset => !!item)
+    )
+
+    try {
+      await migrateLegacyLocalPresets()
+    } catch (migrationError) {
+      console.warn('迁移本地筛选方案失败:', migrationError)
+    }
+  } catch (error) {
+    console.warn('加载账号筛选方案失败:', error)
+    savedFilterPresets.value = []
+  } finally {
+    presetsLoading.value = false
+  }
+}
+
+const applyPreset = (preset: SavedFilterPreset) => {
+  basicFilters.market = preset.basicFilters.market || 'A股'
+  resetFieldFilters()
+
+  Object.entries(preset.fieldFilters || {}).forEach(([fieldName, state]) => {
+    if (!fieldFilters[fieldName]) return
+    fieldFilters[fieldName] = {
+      operator: state.operator || fieldFilters[fieldName].operator,
+      scalarValue: state.scalarValue || '',
+      min: state.min ?? null,
+      max: state.max ?? null,
+      selectedValues: Array.isArray(state.selectedValues) ? [...state.selectedValues] : [],
+      booleanValue: state.booleanValue || '',
+    }
+  })
+}
+
+const handlePresetSelect = (presetId?: string) => {
+  if (!presetId) return
+  const preset = savedFilterPresets.value.find((item) => item.id === presetId)
+  if (!preset) return
+  applyPreset(preset)
+  ElMessage.success(`已加载筛选方案：${preset.name}`)
+}
+
+const saveCurrentPreset = async () => {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入筛选方案名称', '保存筛选方案', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputValue: selectedPresetId.value
+        ? savedFilterPresets.value.find((item) => item.id === selectedPresetId.value)?.name || ''
+        : '',
+      inputPlaceholder: '例如：低估值高ROE',
+    })
+
+    const name = String(value || '').trim()
+    if (!name) return
+
+    const existing = savedFilterPresets.value.find((item) => item.name === name)
+    const response = existing
+      ? await screeningApi.updatePreset(existing.id, {
+        name,
+        basicFilters: { market: basicFilters.market },
+        fieldFilters: cloneFieldFilters(),
+      })
+      : await screeningApi.createPreset({
+        name,
+        basicFilters: { market: basicFilters.market },
+        fieldFilters: cloneFieldFilters(),
+      })
+
+    const preset = normalizeSavedPreset(unwrapApiPayload((response as any))?.preset)
+    if (!preset) {
+      throw new Error('筛选方案保存失败')
+    }
+
+    upsertSavedPreset({
+      id: preset.id,
+      name,
+      basicFilters: { market: basicFilters.market },
+      fieldFilters: cloneFieldFilters(),
+      createdAt: preset.createdAt,
+      updatedAt: preset.updatedAt,
+    })
+    selectedPresetId.value = preset.id
+    ElMessage.success(`已保存筛选方案：${name}`)
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(error instanceof Error ? error.message : '保存筛选方案失败')
+  }
+}
+
+const deleteCurrentPreset = async () => {
+  const preset = savedFilterPresets.value.find((item) => item.id === selectedPresetId.value)
+  if (!preset) return
+
+  try {
+    await ElMessageBox.confirm(`确定删除筛选方案“${preset.name}”吗？`, '删除筛选方案', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+
+    await screeningApi.deletePreset(preset.id)
+    savedFilterPresets.value = savedFilterPresets.value.filter((item) => item.id !== preset.id)
+    selectedPresetId.value = ''
+    ElMessage.success(`已删除筛选方案：${preset.name}`)
+  } catch {
+    // 用户取消
+  }
+}
+
+const buildDynamicConditions = (): ScreeningConditionItem[] => {
+  if (!fieldConfig.value) return []
+
+  const conditions: ScreeningConditionItem[] = []
+  for (const field of Object.values(fieldConfig.value.fields).filter((item) => isFieldVisible(item.name))) {
+    const state = fieldFilters[field.name]
+    if (!state) continue
+
+    if (field.name === 'industry') {
+      if (state.selectedValues.length) {
+        conditions.push({ field: field.name, operator: 'in', value: state.selectedValues })
+      }
+      continue
+    }
+
+    if (isBooleanField(field)) {
+      if (state.booleanValue !== '') {
+        conditions.push({ field: field.name, operator: '==', value: state.booleanValue === 'true' })
+      }
+      continue
+    }
+
+    if (isNumericField(field)) {
+      if (state.min != null && state.max != null) {
+        conditions.push({ field: field.name, operator: 'between', value: [state.min, state.max] })
+      } else if (state.min != null) {
+        conditions.push({ field: field.name, operator: '>=', value: state.min })
+      } else if (state.max != null) {
+        conditions.push({ field: field.name, operator: '<=', value: state.max })
+      }
+      continue
+    }
+
+    const rawValue = state.scalarValue.trim()
+    if (!rawValue) continue
+
+    if (state.operator === 'in' || state.operator === 'not_in') {
+      const values = parseMultiValueText(rawValue)
+      if (values.length) {
+        conditions.push({ field: field.name, operator: state.operator, value: values })
+      }
+      continue
+    }
+
+    conditions.push({ field: field.name, operator: state.operator, value: rawValue })
+  }
+
+  return conditions
+}
+
 // 方法
 const performScreening = async () => {
   screeningLoading.value = true
   hasSearched.value = true
 
   try {
-    // 基于用户真实选择构建 conditions（只拼选中的项，不注入默认技术条件）
-    const children: any[] = []
-
-    // 股票代码/名称搜索
-    if (filters.keyword) {
-      // 使用后端支持的虚拟字段 keyword，后端会自动匹配 symbol 或 name
-      children.push({ field: 'keyword', op: 'contains', value: filters.keyword })
-    }
-
-    // 市场类型（仅作为演示，实际后端暂用CN）
-    if (filters.market) {
-      // 可作为 universe 选择；当未实现时可忽略
-    }
-
-    // 行业分类（如果用户选择了行业）
-    if (filters.industry && filters.industry.length > 0) {
-      // 直接使用数据库中的行业名称，无需映射
-      children.push({ field: 'industry', op: 'in', value: filters.industry })
-    }
-
-    // 市值范围映射为区间（单位：亿元 → 转换为万元以匹配后端 market_cap 单位）
-    const capRangeMap: Record<string, [number, number] | null> = {
-      small: [0, 100 * 10000], // <100亿 → < 100*1e4 万元
-      medium: [100 * 10000, 500 * 10000],
-      large: [500 * 10000, Number.MAX_SAFE_INTEGER],
-    }
-    const cap = filters.marketCapRange ? capRangeMap[filters.marketCapRange] : null
-    if (cap) {
-      children.push({ field: 'market_cap', op: 'between', value: cap })
-    }
-    // 市盈率/市净率/ROE 条件（仅当填写任一端时才拼接）
-    if (filters.peRatio.min != null || filters.peRatio.max != null) {
-      const lo = filters.peRatio.min ?? 0
-      const hi = filters.peRatio.max ?? Number.MAX_SAFE_INTEGER
-      children.push({ field: 'pe', op: 'between', value: [lo, hi] })
-    }
-    if (filters.pbRatio.min != null || filters.pbRatio.max != null) {
-      const lo = filters.pbRatio.min ?? 0
-      const hi = filters.pbRatio.max ?? Number.MAX_SAFE_INTEGER
-      children.push({ field: 'pb', op: 'between', value: [lo, hi] })
-    }
-    if (filters.roe.min != null || filters.roe.max != null) {
-      const lo = filters.roe.min ?? 0
-      const hi = filters.roe.max ?? 100
-      children.push({ field: 'roe', op: 'between', value: [lo, hi] })
-    }
-
-    // 涨跌幅条件
-    if (filters.changePercent.min != null || filters.changePercent.max != null) {
-      const lo = filters.changePercent.min ?? -100
-      const hi = filters.changePercent.max ?? 100
-      children.push({ field: 'pct_chg', op: 'between', value: [lo, hi] })
-    }
-
-    // 成交量条件（映射为成交额范围，单位：元）
-    if (filters.volumeLevel) {
-      const volumeRangeMap: Record<string, [number, number]> = {
-        high: [1000000000, Number.MAX_SAFE_INTEGER],    // 高成交量：>10亿元
-        medium: [300000000, 1000000000],                 // 中等成交量：3亿-10亿元
-        low: [0, 300000000]                              // 低成交量：<3亿元
-      }
-      const volumeRange = volumeRangeMap[filters.volumeLevel]
-      if (volumeRange) {
-        children.push({ field: 'amount', op: 'between', value: volumeRange })
-      }
-    }
-
-    // 明确指定：不加任何技术指标相关条件
+    const conditions = buildDynamicConditions()
 
     const payload = {
       market: 'CN' as const,
       date: undefined,
       adj: 'qfq' as const,
-      conditions: { logic: 'AND', children },
-      order_by: [{ field: 'market_cap', direction: 'desc' as const }],
+      conditions,
+      order_by: [{ field: 'total_mv', direction: 'desc' as const }],
       limit: 500,
       offset: 0,
+      use_database_optimization: true,
     }
 
     // 调试日志：打印请求payload
     console.log('🔍 筛选请求 payload:', JSON.stringify(payload, null, 2))
-    console.log('🔍 筛选条件 children:', children)
+    console.log('🔍 筛选条件 conditions:', conditions)
 
-    const res = await screeningApi.run(payload, { timeout: 120000 })
+    const res = await screeningApi.runEnhanced(payload, { timeout: 120000 })
     const data = (res as any)?.data || res // ApiClient封装会返回 {success,data} 格式
     const items = data?.items || []
 
@@ -1090,6 +1707,8 @@ const performScreening = async () => {
       dif: it.dif,
       dea: it.dea,
       macd_hist: it.macd_hist,
+      factor_diagnostics: it.factor_diagnostics,
+      factor_warnings: it.factor_warnings,
     }))
 
     ElMessage.success(`筛选完成，找到 ${screeningResults.value.length} 只股票`)
@@ -1101,18 +1720,10 @@ const performScreening = async () => {
 }
 
 const resetFilters = () => {
-  Object.assign(filters, {
-    keyword: '',
-    market: 'A股',
-    industry: [],
-    marketCapRange: '',
-    peRatio: { min: null, max: null },
-    pbRatio: { min: null, max: null },
-    roe: { min: null, max: null },
-    changePercent: { min: null, max: null },
-    volumeLevel: '',
-    technicalPattern: []
-  })
+  basicFilters.market = 'A股'
+  resetFieldFilters()
+  selectedGuideModeId.value = 'balanced'
+  showAdvancedFilters.value = false
 
   screeningResults.value = []
   selectedStocks.value = []
@@ -1146,7 +1757,7 @@ const batchAnalyze = async () => {
       name: 'BatchAnalysis',
       query: {
         stocks: selectedStocks.value.map(s => s.symbol).join(','),
-        market: normalizeMarketForAnalysis(filters.market)
+        market: normalizeMarketForAnalysis(basicFilters.market)
       }
     })
   } catch {
@@ -1160,7 +1771,7 @@ const analyzeSingle = (stock: StockInfo) => {
     name: 'SingleAnalysis',
     query: {
       stock: stock.symbol,
-      market: normalizeMarketForAnalysis((stock as any).market || filters.market)
+      market: normalizeMarketForAnalysis((stock as any).market || basicFilters.market)
     }
   })
 }
@@ -1249,10 +1860,11 @@ const loadFieldConfig = async () => {
   fieldsLoading.value = true
   try {
     const response = await screeningApi.getFields()
-    fieldConfig.value = response.data || response
-    console.log('字段配置加载成功:', fieldConfig.value)
+    fieldConfig.value = response
+    resetFieldFilters(fieldConfig.value)
+    console.log('因子注册表字段配置加载成功:', fieldConfig.value)
   } catch (error) {
-    console.error('加载字段配置失败:', error)
+    console.error('加载因子注册表字段配置失败:', error)
     ElMessage.error('加载字段配置失败')
   } finally {
     fieldsLoading.value = false
@@ -1312,6 +1924,7 @@ const loadCurrentDataSource = async () => {
 // 生命周期
 onMounted(() => {
   // 加载字段配置和行业列表
+  void loadSavedPresets()
   loadFieldConfig()
   loadIndustries()
   // 初始化自选状态
@@ -1371,16 +1984,229 @@ onUnmounted(() => {
     }
 
     .filter-form {
+      .filter-summary-row {
+        margin-bottom: 8px;
+      }
+
+      .active-summary-panel {
+        margin-bottom: 16px;
+        padding: 12px;
+        border: 1px solid var(--el-border-color-lighter);
+        border-radius: 10px;
+        background: var(--el-fill-color-extra-light);
+      }
+
+      .active-summary-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+        color: var(--el-text-color-primary);
+        font-weight: 600;
+      }
+
+      .active-summary-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .registry-hint {
+        min-height: 32px;
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        border-radius: 8px;
+        background: var(--el-fill-color-light);
+        color: var(--el-text-color-regular);
+      }
+
+      .guided-panel,
+      .guided-core-panel,
+      .advanced-filter-panel {
+        margin-bottom: 16px;
+        padding: 16px;
+        border: 1px solid var(--el-border-color-lighter);
+        border-radius: 12px;
+        background: var(--el-bg-color-page);
+      }
+
+      .guided-panel-header,
+      .guided-core-header,
+      .advanced-filter-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 14px;
+      }
+
+      .guided-panel-title,
+      .guided-core-title,
+      .advanced-filter-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--el-text-color-primary);
+      }
+
+      .guided-panel-subtitle,
+      .guided-core-subtitle,
+      .advanced-filter-subtitle {
+        margin-top: 4px;
+        color: var(--el-text-color-secondary);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .guide-mode-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .guide-mode-card {
+        appearance: none;
+        width: 100%;
+        padding: 14px;
+        text-align: left;
+        border: 1px solid var(--el-border-color);
+        border-radius: 12px;
+        background: var(--el-bg-color);
+        cursor: pointer;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+
+        &:hover {
+          border-color: var(--el-color-primary-light-5);
+          transform: translateY(-1px);
+        }
+
+        &.active {
+          border-color: var(--el-color-primary);
+          box-shadow: 0 10px 24px rgba(64, 158, 255, 0.12);
+          background: rgba(64, 158, 255, 0.05);
+        }
+      }
+
+      .guide-mode-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--el-text-color-primary);
+      }
+
+      .guide-mode-description {
+        margin-top: 8px;
+        font-size: 13px;
+        line-height: 1.6;
+        color: var(--el-text-color-regular);
+      }
+
+      .guide-mode-meta {
+        margin-top: 10px;
+        font-size: 12px;
+        color: var(--el-color-primary);
+      }
+
+      .guided-section + .guided-section {
+        margin-top: 16px;
+      }
+
+      .guided-section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+        font-weight: 600;
+        color: var(--el-text-color-primary);
+      }
+
+      .dynamic-filter-groups {
+        margin-bottom: 16px;
+      }
+
+      .group-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .dynamic-field-item {
+        :deep(.el-form-item__content) {
+          display: flex;
+          flex-direction: column;
+          align-items: stretch;
+          gap: 8px;
+        }
+      }
+
+      .range-inputs,
+      .string-inputs {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+      }
+
+      .range-separator {
+        color: var(--el-text-color-secondary);
+      }
+
+      .field-help {
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--el-text-color-secondary);
+      }
+
       .filter-actions {
         display: flex;
         justify-content: center;
         gap: 16px;
         margin-top: 24px;
       }
+
+      @media (max-width: 1200px) {
+        .guide-mode-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 768px) {
+        .guided-panel-header,
+        .guided-core-header,
+        .advanced-filter-header {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .guide-mode-grid {
+          grid-template-columns: 1fr;
+        }
+      }
     }
   }
 
   .results-panel {
+    .warning-cell {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .warning-tooltip {
+      max-width: 320px;
+    }
+
+    .warning-tooltip-title {
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: var(--el-text-color-primary);
+    }
+
+    .warning-tooltip-line {
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--el-text-color-regular);
+    }
+
     .pagination-wrapper {
       display: flex;
       justify-content: center;

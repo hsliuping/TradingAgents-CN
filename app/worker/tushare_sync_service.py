@@ -1552,16 +1552,17 @@ class TushareSyncService:
 
     # ==================== 财务数据同步 ====================
 
-    async def sync_financial_data(self, symbols: List[str] = None, limit: int = 20, job_id: str = None) -> Dict[str, Any]:
+    async def sync_financial_data(self, symbols: List[str] = None, limit: int = None, job_id: str = None) -> Dict[str, Any]:
         """
         同步财务数据
 
         Args:
             symbols: 股票代码列表，None表示同步所有股票
-            limit: 获取财报期数，默认20期（约5年数据）
+            limit: 获取财报期数，None 表示同步该股票可获取的全部报告期
             job_id: 任务ID（用于进度跟踪）
         """
-        logger.info(f"🔄 开始同步财务数据 (获取最近 {limit} 期)...")
+        limit_text = "全部报告期" if limit is None else f"最近 {limit} 期"
+        logger.info(f"🔄 开始同步财务数据 (获取{limit_text})...")
 
         stats = {
             "total_processed": 0,

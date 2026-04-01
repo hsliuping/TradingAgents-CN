@@ -12,6 +12,8 @@
 
 import json
 import logging
+import queue
+import threading
 from typing import Any, Optional
 
 from core.llm import UnifiedLLMClient, Message
@@ -19,6 +21,9 @@ from core.llm import UnifiedLLMClient, Message
 from .skill_spec import EvalScore, SandboxResult, SkillSpec
 
 logger = logging.getLogger(__name__)
+
+JUDGE_LLM_TIMEOUT_SECONDS = 25
+JUDGE_LLM_MAX_TOKENS = 300
 
 
 class OutputEvaluator:
@@ -150,7 +155,6 @@ class OutputEvaluator:
         score: EvalScore,
     ) -> None:
         """Judge LLM 深度评分"""
-        client = self._get_client()
         output_preview = self._format_output_preview(result.output)
 
         prompt = (
@@ -181,9 +185,14 @@ class OutputEvaluator:
                 f"{'...(截断)' if len(prompt) > 3000 else ''}\n"
                 f"{'─'*50}"
             )
-            messages = [Message(role="user", content=prompt)]
-            response = client.chat(messages)
-            raw = response.content or ""
+            raw = self._call_judge_llm(prompt, spec.tool_id)
+            if raw is None:
+                logger.warning(
+                    "Judge LLM 评分超时（%ss），跳过深度评分并保留基础检查分数 | tool_id=%s",
+                    JUDGE_LLM_TIMEOUT_SECONDS,
+                    spec.tool_id,
+                )
+                return
             logger.info(
                 f"\n{'─'*50}\n"
                 f"📥 [OutputEvaluator] Judge LLM 输出 ({len(raw)} 字符)\n"
@@ -205,6 +214,37 @@ class OutputEvaluator:
                 logger.warning(f"⚠️ Judge LLM 输出中未找到 JSON: {raw[:500]}")
         except Exception as e:
             logger.warning(f"Judge LLM 评分失败，保留基础检查分数: {e}")
+
+    def _call_judge_llm(self, prompt: str, tool_id: str) -> Optional[str]:
+        result_queue: "queue.Queue[tuple[str, Any]]" = queue.Queue(maxsize=1)
+
+        def _worker() -> None:
+            try:
+                client = self._get_client()
+                messages = [Message(role="user", content=prompt)]
+                response = client.chat(messages, temperature=0.0, max_tokens=JUDGE_LLM_MAX_TOKENS)
+                result_queue.put(("ok", response.content or ""))
+            except Exception as exc:
+                result_queue.put(("error", exc))
+
+        worker = threading.Thread(
+            target=_worker,
+            name=f"skill-judge-{tool_id}",
+            daemon=True,
+        )
+        worker.start()
+        worker.join(JUDGE_LLM_TIMEOUT_SECONDS)
+
+        if worker.is_alive():
+            return None
+
+        if result_queue.empty():
+            raise RuntimeError("Judge LLM 未返回结果")
+
+        status, payload = result_queue.get_nowait()
+        if status == "error":
+            raise payload
+        return str(payload)
 
     # ==================== 工具方法 ====================
 

@@ -242,6 +242,10 @@ class Settings(BaseSettings):
     FAVORITES_DATA_SYNC_ENABLED: bool = Field(default=True, description="启用自选股A股数据同步")
     FAVORITES_DATA_SYNC_CRON: str = Field(default="0 19 * * 1-5", description="自选股A股数据同步CRON表达式（交易日晚上7点）")
 
+    # 技术指标物化任务配置
+    TECHNICAL_INDICATORS_MATERIALIZATION_ENABLED: bool = Field(default=True, description="启用技术指标物化任务")
+    TECHNICAL_INDICATORS_MATERIALIZATION_CRON: str = Field(default="20 18 * * 1-5", description="技术指标物化CRON表达式（默认交易日18:20）")
+
     # 外部渠道无主题会话沉淀任务
     IM_TOPIC_DIGEST_ENABLED: bool = Field(default=True, description="启用外部会话定期沉淀到研究主题")
     IM_TOPIC_DIGEST_CRON: str = Field(default="30 22 * * *", description="外部会话沉淀CRON表达式，默认每日22:30")

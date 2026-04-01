@@ -8,6 +8,19 @@ from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 
 from app.core.database import get_mongo_db
+from core.skill_runtime.fundamental_factors import (
+    _build_factor_diagnostics,
+    _build_growth_factor_warnings,
+    _build_quality_factor_warnings,
+    _build_value_factor_warnings,
+    _compute_cagr,
+    _compute_yoy_growth,
+    _estimate_altman_z_score,
+    _estimate_beneish_m_score,
+    _estimate_interest_coverage,
+    _estimate_piotroski_f_score,
+    _estimate_roic,
+)
 # from app.models.screening import ScreeningCondition  # 避免循环导入
 
 logger = logging.getLogger(__name__)
@@ -39,6 +52,7 @@ class DatabaseScreeningService:
             "pe": "pe",                  # 市盈率
             "pb": "pb",                  # 市净率
             "pe_ttm": "pe_ttm",         # 滚动市盈率
+            "ps_ttm": "ps_ttm",         # 滚动市销率
             "pb_mrq": "pb_mrq",         # 最新市净率
             "roe": "roe",                # 净资产收益率（最近一期）
             "roa": "roa",                # 总资产收益率
@@ -47,10 +61,40 @@ class DatabaseScreeningService:
             "revenue_ttm": "revenue_ttm",            # 滚动营收
             "net_profit_ttm": "net_profit_ttm",      # 滚动净利润
             "n_cashflow_act": "n_cashflow_act",      # 经营现金流净额
+            "revenue_yoy": "revenue_yoy",            # 营收同比 (%)
+            "net_profit_yoy": "net_profit_yoy",      # 净利润同比 (%)
+            "oper_profit_yoy": "oper_profit_yoy",    # 营业利润同比 (%)
+            "peg": "peg",                            # PEG
+            "roic": "roic",                          # ROIC (%)
+            "cash_conversion": "cash_conversion",    # 利润现金转换率
+            "accrual_ratio": "accrual_ratio",        # 应计利润比率 (%)
+            "asset_turnover": "asset_turnover",      # 资产周转率
+            "gross_profit_to_assets": "gross_profit_to_assets",  # 毛利/总资产 (%)
+            "interest_coverage": "interest_coverage",  # 利息保障倍数
+            "inventory_turnover": "inventory_turnover",  # 存货周转率
+            "receivable_turnover": "receivable_turnover",  # 应收账款周转率
+            "net_cash_position": "net_cash_position",  # 净现金头寸代理 (%)
+            "fcf": "fcf",                            # 自由现金流
+            "fcf_yield": "fcf_yield",                # 自由现金流收益率 (%)
+            "fcf_margin": "fcf_margin",              # 自由现金流率 (%)
+            "ocf_yield": "ocf_yield",                # 经营现金流收益率 (%)
+            "revenue_cagr_3y": "revenue_cagr_3y",    # 三年营收复合增速 (%)
+            "profit_cagr_3y": "profit_cagr_3y",      # 三年利润复合增速 (%)
+            "working_capital_change": "working_capital_change",  # 营运资本变动 (亿元)
 
             # 交易指标
             "turnover_rate": "turnover_rate",  # 换手率%
             "volume_ratio": "volume_ratio",    # 量比
+
+            # 技术指标（来自技术快照物化集合）
+            "ma20": "ma20",
+            "rsi14": "rsi14",
+            "kdj_k": "kdj_k",
+            "kdj_d": "kdj_d",
+            "kdj_j": "kdj_j",
+            "dif": "dif",
+            "dea": "dea",
+            "macd_hist": "macd_hist",
 
             # 扩展财务指标（来自 stock_screening_view 的计算字段）
             "debt_to_assets": "debt_to_assets",      # 资产负债率 (%)
@@ -181,7 +225,7 @@ class DatabaseScreeningService:
 
             # 决定使用视图还是 stock_basic_info
             if has_real_conditions:
-                collection = db["stock_basic_info"]
+                collection = db[self.collection_name]
                 total_count = await collection.count_documents(query)
             else:
                 collection = db["stock_basic_info"]
@@ -362,43 +406,190 @@ class DatabaseScreeningService:
         """
         try:
             db = get_mongo_db()
-            financial_collection = db['stock_financial_data']
+            financial_collection = db['stock_financial_periods']
+            basic_info_collection = db['stock_basic_info']
 
             # 🔥 使用统一的数据源优先级管理函数
             from app.core.data_source_priority import get_preferred_data_source_async
             preferred_source = await get_preferred_data_source_async(market_category="a_shares")
+            basic_info_map: Dict[str, Dict[str, Any]] = {}
+            basic_info_cursor = basic_info_collection.find(
+                {"code": {"$in": codes}, "source": preferred_source},
+                {
+                    "_id": 0,
+                    "code": 1,
+                    "source": 1,
+                    "pe": 1,
+                    "pe_ttm": 1,
+                    "pb": 1,
+                    "pb_mrq": 1,
+                    "ps": 1,
+                    "ps_ttm": 1,
+                    "dividend_yield": 1,
+                    "total_mv": 1,
+                    "market_cap": 1,
+                },
+            )
+            async for basic_info_doc in basic_info_cursor:
+                basic_info_map[basic_info_doc.get("code")] = basic_info_doc
+
+            def build_snapshot_record(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+                raw_balance = snapshot.get("raw_balance_sheet") or {}
+                raw_income = snapshot.get("raw_income_statement") or {}
+                raw_cashflow = snapshot.get("raw_cashflow_statement") or {}
+                raw_indicators = snapshot.get("raw_financial_indicators") or {}
+                return {
+                    "report_period": snapshot.get("report_period"),
+                    "revenue_ttm": snapshot.get("revenue_ttm"),
+                    "revenue": snapshot.get("revenue"),
+                    "oper_rev": snapshot.get("oper_rev"),
+                    "net_profit_ttm": snapshot.get("net_profit_ttm"),
+                    "net_profit": snapshot.get("net_profit"),
+                    "net_income": snapshot.get("net_income"),
+                    "total_profit": snapshot.get("total_profit"),
+                    "oper_profit": snapshot.get("oper_profit"),
+                    "operating_profit": snapshot.get("operating_profit"),
+                    "ebit": snapshot.get("ebit"),
+                    "oper_cost": snapshot.get("oper_cost"),
+                    "oper_exp": snapshot.get("oper_exp"),
+                    "admin_exp": snapshot.get("admin_exp"),
+                    "rd_exp": snapshot.get("rd_exp"),
+                    "fin_exp": snapshot.get("fin_exp"),
+                    "roe": snapshot.get("roe"),
+                    "roa": snapshot.get("roa"),
+                    "gross_margin": snapshot.get("gross_margin"),
+                    "netprofit_margin": snapshot.get("netprofit_margin"),
+                    "debt_to_assets": snapshot.get("debt_to_assets"),
+                    "assets_to_eqt": snapshot.get("assets_to_eqt"),
+                    "current_ratio": snapshot.get("current_ratio"),
+                    "quick_ratio": snapshot.get("quick_ratio"),
+                    "cash_ratio": snapshot.get("cash_ratio"),
+                    "total_assets": snapshot.get("total_assets"),
+                    "total_cur_assets": snapshot.get("total_cur_assets"),
+                    "total_nca": snapshot.get("total_nca"),
+                    "total_cur_liab": snapshot.get("total_cur_liab"),
+                    "total_liab": snapshot.get("total_liab"),
+                    "total_equity": snapshot.get("total_equity"),
+                    "total_ncl": snapshot.get("total_ncl"),
+                    "money_cap": snapshot.get("money_cap"),
+                    "fix_assets": snapshot.get("fix_assets"),
+                    "accounts_receiv": snapshot.get("accounts_receiv"),
+                    "inventories": snapshot.get("inventories"),
+                    "n_cashflow_act": snapshot.get("n_cashflow_act"),
+                    "n_cashflow_inv_act": snapshot.get("n_cashflow_inv_act"),
+                    "n_cashflow_fin_act": snapshot.get("n_cashflow_fin_act"),
+                    "balance_sheet": raw_balance,
+                    "income_statement": raw_income,
+                    "cashflow_statement": raw_cashflow,
+                    "financial_indicators": raw_indicators,
+                    "raw_data": {
+                        "balance_sheet": [raw_balance] if raw_balance else [],
+                        "income_statement": [raw_income] if raw_income else [],
+                        "cashflow_statement": [raw_cashflow] if raw_cashflow else [],
+                        "financial_indicators": [raw_indicators] if raw_indicators else [],
+                    },
+                }
 
             # 批量查询最新的财务数据
             # 按 code 分组，取每个 code 的最新一期数据（只查询优先级最高的数据源）
             pipeline = [
-                {"$match": {"code": {"$in": codes}, "data_source": preferred_source}},
-                {"$sort": {"code": 1, "report_period": -1}},
+                {"$match": {"code": {"$in": codes}, "source": preferred_source}},
+                {"$sort": {"code": 1, "report_period": -1, "ann_date": -1}},
                 {"$group": {
                     "_id": "$code",
                     "roe": {"$first": "$roe"},
                     "roa": {"$first": "$roa"},
+                    "net_profit": {"$first": "$net_profit"},
+                    "total_profit": {"$first": "$total_profit"},
+                    "oper_profit": {"$first": "$oper_profit"},
                     "netprofit_margin": {"$first": "$netprofit_margin"},
                     "gross_margin": {"$first": "$gross_margin"},
+                    "netprofit_margin": {"$first": "$netprofit_margin"},
+                    "revenue": {"$first": "$revenue"},
+                    "oper_rev": {"$first": "$oper_rev"},
+                    "net_income": {"$first": "$net_income"},
+                    "total_assets": {"$first": "$total_assets"},
+                    "total_nca": {"$first": "$total_nca"},
+                    "fix_assets": {"$first": "$fix_assets"},
+                    "oper_cost": {"$first": "$oper_cost"},
+                    "oper_exp": {"$first": "$oper_exp"},
+                    "admin_exp": {"$first": "$admin_exp"},
+                    "rd_exp": {"$first": "$rd_exp"},
+                    "fin_exp": {"$first": "$fin_exp"},
+                    "ebit": {"$first": "$ebit"},
+                    "operating_profit": {"$first": "$operating_profit"},
+                    "pe_ttm": {"$first": "$pe_ttm"},
                     "revenue_ttm": {"$first": "$revenue_ttm"},
                     "net_profit_ttm": {"$first": "$net_profit_ttm"},
                     "n_cashflow_act": {"$first": "$n_cashflow_act"},
-                    "assets_to_eqt_fi": {"$first": "$financial_indicators.assets_to_eqt"},
-                    "assets_to_eqt_flat": {"$first": "$assets_to_eqt"},
-                    # 扩展财务指标：兼容 flat 和 nested 两种存储方式
-                    "debt_to_assets_fi": {"$first": "$financial_indicators.debt_to_assets"},
-                    "debt_to_assets_flat": {"$first": "$debt_to_assets"},
-                    "current_ratio_fi": {"$first": "$financial_indicators.current_ratio"},
-                    "current_ratio_flat": {"$first": "$current_ratio"},
-                    "quick_ratio_fi": {"$first": "$financial_indicators.quick_ratio"},
-                    "quick_ratio_flat": {"$first": "$quick_ratio"},
-                    "cash_ratio_fi": {"$first": "$financial_indicators.cash_ratio"},
-                    "cash_ratio_flat": {"$first": "$cash_ratio"},
-                    "dividend_yield_fi": {"$first": "$financial_indicators.dividend_yield"},
-                    "dividend_yield_flat": {"$first": "$dividend_yield"},
-                    "total_cur_assets_bs": {"$first": "$balance_sheet.total_cur_assets"},
-                    "total_cur_assets_flat": {"$first": "$total_cur_assets"},
-                    "total_cur_liab_bs": {"$first": "$balance_sheet.total_cur_liab"},
-                    "total_cur_liab_flat": {"$first": "$total_cur_liab"},
+                    "n_cashflow_inv_act": {"$first": "$n_cashflow_inv_act"},
+                    "n_cashflow_fin_act": {"$first": "$n_cashflow_fin_act"},
+                    "revenue_yoy": {"$first": "$revenue_yoy"},
+                    "net_profit_yoy": {"$first": "$net_profit_yoy"},
+                    "oper_profit_yoy": {"$first": "$oper_profit_yoy"},
+                    "roe": {"$first": "$roe"},
+                    "roa": {"$first": "$roa"},
+                    "assets_to_eqt": {"$first": "$assets_to_eqt"},
+                    "debt_to_assets": {"$first": "$debt_to_assets"},
+                    "current_ratio": {"$first": "$current_ratio"},
+                    "quick_ratio": {"$first": "$quick_ratio"},
+                    "cash_ratio": {"$first": "$cash_ratio"},
+                    "dividend_yield": {"$first": "$dividend_yield"},
+                    "total_cur_assets": {"$first": "$total_cur_assets"},
+                    "total_cur_liab": {"$first": "$total_cur_liab"},
+                    "total_liab": {"$first": "$total_liab"},
+                    "total_equity": {"$first": "$total_equity"},
+                    "money_cap": {"$first": "$money_cap"},
+                    "total_ncl": {"$first": "$total_ncl"},
+                    "accounts_receiv": {"$first": "$accounts_receiv"},
+                    "inventories": {"$first": "$inventories"},
+                    "period_snapshots": {
+                        "$push": {
+                            "total_cur_assets": "$total_cur_assets",
+                            "total_cur_liab": "$total_cur_liab",
+                            "total_assets": "$total_assets",
+                            "total_liab": "$total_liab",
+                            "total_ncl": "$total_ncl",
+                            "fix_assets": "$fix_assets",
+                            "accounts_receiv": "$accounts_receiv",
+                            "inventories": "$inventories",
+                            "revenue_ttm": "$revenue_ttm",
+                            "revenue": "$revenue",
+                            "oper_rev": "$oper_rev",
+                            "net_profit_ttm": "$net_profit_ttm",
+                            "net_profit": "$net_profit",
+                            "net_income": "$net_income",
+                            "total_profit": "$total_profit",
+                            "oper_profit": "$oper_profit",
+                            "operating_profit": "$operating_profit",
+                            "ebit": "$ebit",
+                            "oper_cost": "$oper_cost",
+                            "oper_exp": "$oper_exp",
+                            "admin_exp": "$admin_exp",
+                            "rd_exp": "$rd_exp",
+                            "fin_exp": "$fin_exp",
+                            "roe": "$roe",
+                            "roa": "$roa",
+                            "gross_margin": "$gross_margin",
+                            "netprofit_margin": "$netprofit_margin",
+                            "debt_to_assets": "$debt_to_assets",
+                            "assets_to_eqt": "$assets_to_eqt",
+                            "current_ratio": "$current_ratio",
+                            "quick_ratio": "$quick_ratio",
+                            "cash_ratio": "$cash_ratio",
+                            "n_cashflow_act": "$n_cashflow_act",
+                            "n_cashflow_inv_act": "$n_cashflow_inv_act",
+                            "n_cashflow_fin_act": "$n_cashflow_fin_act",
+                            "total_nca": "$total_nca",
+                            "total_equity": "$total_equity",
+                            "money_cap": "$money_cap",
+                            "raw_balance_sheet": "$raw_data.balance_sheet",
+                            "raw_income_statement": "$raw_data.income_statement",
+                            "raw_cashflow_statement": "$raw_data.cashflow_statement",
+                            "raw_financial_indicators": "$raw_data.financial_indicators",
+                            "report_period": "$report_period"
+                        }
+                    },
                     "report_period": {"$first": "$report_period"},
                 }}
             ]
@@ -406,35 +597,137 @@ class DatabaseScreeningService:
             financial_data_map = {}
             async for doc in financial_collection.aggregate(pipeline):
                 code = doc.get("_id")
-                # 合并 flat 和 nested 字段，优先使用 nested（financial_indicators）
-                debt_to_assets = doc.get("debt_to_assets_fi") or doc.get("debt_to_assets_flat")
-                assets_to_eqt = doc.get("assets_to_eqt_fi") or doc.get("assets_to_eqt_flat")
-                current_ratio = doc.get("current_ratio_fi") or doc.get("current_ratio_flat")
-                quick_ratio = doc.get("quick_ratio_fi") or doc.get("quick_ratio_flat")
-                cash_ratio = doc.get("cash_ratio_fi") or doc.get("cash_ratio_flat")
-                dividend_yield = doc.get("dividend_yield_fi") or doc.get("dividend_yield_flat")
-                # 计算净营运资本
-                total_cur_assets = doc.get("total_cur_assets_flat") or doc.get("total_cur_assets_bs")
-                total_cur_liab = doc.get("total_cur_liab_flat") or doc.get("total_cur_liab_bs")
+                debt_to_assets = doc.get("debt_to_assets")
+                assets_to_eqt = doc.get("assets_to_eqt")
+                current_ratio = doc.get("current_ratio")
+                quick_ratio = doc.get("quick_ratio")
+                cash_ratio = doc.get("cash_ratio")
+                dividend_yield = doc.get("dividend_yield")
+                total_cur_assets = doc.get("total_cur_assets")
+                total_cur_liab = doc.get("total_cur_liab")
+                total_liab = doc.get("total_liab")
+                total_equity = doc.get("total_equity")
+                money_cap = doc.get("money_cap")
+                total_ncl = doc.get("total_ncl")
+                accounts_receiv = doc.get("accounts_receiv")
+                inventories = doc.get("inventories")
                 net_working_capital = None
                 if total_cur_assets is not None and total_cur_liab is not None:
                     net_working_capital = (total_cur_assets - total_cur_liab) / 1e8
+                working_capital_change = None
+                period_snapshots = doc.get("period_snapshots") or []
+                if len(period_snapshots) > 1:
+                    current_snapshot = period_snapshots[0] or {}
+                    previous_snapshot = period_snapshots[1] or {}
+                    current_nwc = None
+                    previous_nwc = None
+                    if current_snapshot.get("total_cur_assets") is not None and current_snapshot.get("total_cur_liab") is not None:
+                        current_nwc = current_snapshot.get("total_cur_assets") - current_snapshot.get("total_cur_liab")
+                    if previous_snapshot.get("total_cur_assets") is not None and previous_snapshot.get("total_cur_liab") is not None:
+                        previous_nwc = previous_snapshot.get("total_cur_assets") - previous_snapshot.get("total_cur_liab")
+                    if current_nwc is not None and previous_nwc is not None:
+                        working_capital_change = (current_nwc - previous_nwc) / 1e8
+                fcf = None
+                if doc.get("n_cashflow_act") is not None and doc.get("n_cashflow_inv_act") is not None:
+                    fcf = doc.get("n_cashflow_act") + doc.get("n_cashflow_inv_act")
+                cash_conversion = None
+                if doc.get("n_cashflow_act") is not None and doc.get("net_profit") not in (None, 0):
+                    cash_conversion = doc.get("n_cashflow_act") / doc.get("net_profit")
+                accrual_ratio = None
+                if doc.get("net_profit") is not None and doc.get("n_cashflow_act") is not None and doc.get("total_assets") not in (None, 0):
+                    accrual_ratio = (doc.get("net_profit") - doc.get("n_cashflow_act")) / doc.get("total_assets") * 100
+                revenue_base = doc.get("revenue_ttm") if doc.get("revenue_ttm") not in (None, 0) else doc.get("revenue")
+                fcf_margin = None
+                if fcf is not None and revenue_base not in (None, 0):
+                    fcf_margin = fcf / revenue_base * 100
+                asset_turnover = None
+                if revenue_base not in (None, 0) and doc.get("total_assets") not in (None, 0):
+                    asset_turnover = revenue_base / doc.get("total_assets")
+                gross_profit_to_assets = None
+                if revenue_base not in (None, 0) and doc.get("gross_margin") is not None and doc.get("total_assets") not in (None, 0):
+                    gross_profit_to_assets = revenue_base * doc.get("gross_margin") / 100 / doc.get("total_assets") * 100
+                interest_coverage = None
+                inventory_turnover = None
+                cost_base = doc.get("oper_cost")
+                if cost_base in (None, 0) and revenue_base not in (None, 0) and doc.get("gross_margin") is not None:
+                    cost_base = revenue_base * (1 - doc.get("gross_margin") / 100)
+                if cost_base not in (None, 0) and inventories not in (None, 0):
+                    inventory_turnover = cost_base / inventories
+                receivable_turnover = None
+                if revenue_base not in (None, 0) and accounts_receiv not in (None, 0):
+                    receivable_turnover = revenue_base / accounts_receiv
+                net_cash_position = None
+                if money_cap is not None and doc.get("total_assets") not in (None, 0):
+                    debt_proxy = total_ncl
+                    if debt_proxy is None and total_liab is not None and total_cur_liab is not None:
+                        debt_proxy = total_liab - total_cur_liab
+                    if debt_proxy is not None:
+                        net_cash_position = (money_cap - max(debt_proxy, 0)) / doc.get("total_assets") * 100
+                financial_records = [build_snapshot_record(snapshot) for snapshot in period_snapshots if snapshot]
+                revenue_yoy = None
+                net_profit_yoy = None
+                oper_profit_yoy = None
+                revenue_cagr_3y = None
+                profit_cagr_3y = None
+                roic = None
+                piotroski_f_score = None
+                beneish_m_score = None
+                if financial_records:
+                    latest_financial = financial_records[0]
+                    factor_context = {
+                        "symbol": code,
+                        "basic_info": {},
+                        "market_quotes": {},
+                        "financial_records": financial_records,
+                        "latest_financial": latest_financial,
+                        "current_price": None,
+                    }
+                    revenue_yoy = _compute_yoy_growth(financial_records, "revenue")
+                    net_profit_yoy = _compute_yoy_growth(financial_records, "net_profit")
+                    oper_profit_yoy = _compute_yoy_growth(financial_records, "oper_profit")
+                    revenue_cagr_3y = _compute_cagr(financial_records, (("revenue_ttm",), ("revenue",), ("oper_rev",)), 3)
+                    profit_cagr_3y = _compute_cagr(financial_records, (("net_profit_ttm",), ("net_profit",), ("net_income",)), 3)
+                    roic = _estimate_roic(latest_financial)
+                    interest_coverage = _estimate_interest_coverage(latest_financial)
+                    piotroski_f_score = _estimate_piotroski_f_score(factor_context)
+                    beneish_m_score = _estimate_beneish_m_score(factor_context)
                 financial_data_map[code] = {
                     "roe": doc.get("roe"),
                     "roa": doc.get("roa"),
                     "netprofit_margin": doc.get("netprofit_margin"),
                     "gross_margin": doc.get("gross_margin"),
                     "revenue_ttm": doc.get("revenue_ttm"),
+                    "revenue_yoy": revenue_yoy,
                     "net_profit_ttm": doc.get("net_profit_ttm"),
+                    "net_profit_yoy": net_profit_yoy,
+                    "oper_profit_yoy": oper_profit_yoy,
                     "n_cashflow_act": doc.get("n_cashflow_act"),
+                    "fcf": fcf,
+                    "fcf_margin": fcf_margin,
+                    "cash_conversion": cash_conversion,
+                    "accrual_ratio": accrual_ratio,
+                    "asset_turnover": asset_turnover,
+                    "gross_profit_to_assets": gross_profit_to_assets,
+                    "interest_coverage": interest_coverage,
+                    "inventory_turnover": inventory_turnover,
+                    "receivable_turnover": receivable_turnover,
+                    "net_cash_position": net_cash_position,
+                    "piotroski_f_score": piotroski_f_score,
+                    "beneish_m_score": beneish_m_score,
                     "debt_to_assets": debt_to_assets,
                     "assets_to_eqt": assets_to_eqt,
                     "current_ratio": current_ratio,
                     "quick_ratio": quick_ratio,
                     "cash_ratio": cash_ratio,
                     "dividend_yield": dividend_yield,
+                    "total_equity": total_equity,
+                    "roic": roic,
+                    "revenue_cagr_3y": revenue_cagr_3y,
+                    "profit_cagr_3y": profit_cagr_3y,
+                    "working_capital_change": working_capital_change,
                     "net_working_capital": net_working_capital,
                     "report_period": doc.get("report_period"),
+                    "_financial_records": financial_records,
                 }
 
             # 填充财务数据到结果中
@@ -442,6 +735,12 @@ class DatabaseScreeningService:
                 code = result.get("code")
                 if code in financial_data_map:
                     financial_data = financial_data_map[code]
+                    raw_basic_info = dict(basic_info_map.get(code) or {})
+                    basic_info_context = {
+                        **raw_basic_info,
+                        "total_mv": raw_basic_info.get("total_mv", result.get("total_mv")),
+                        "market_cap": raw_basic_info.get("market_cap", result.get("total_mv")),
+                    }
                     # 只更新空缺字段（视图中已有的优先）
                     if result.get("roe") is None:
                         result["roe"] = financial_data.get("roe")
@@ -457,22 +756,141 @@ class DatabaseScreeningService:
                         result["cash_ratio"] = financial_data.get("cash_ratio")
                     if result.get("dividend_yield") is None:
                         result["dividend_yield"] = financial_data.get("dividend_yield")
+                    if result.get("pb_mrq") is None:
+                        total_mv = result.get("total_mv")
+                        total_equity = financial_data.get("total_equity")
+                        if total_mv not in (None, 0) and total_equity not in (None, 0):
+                            result["pb_mrq"] = (total_mv * 100000000) / total_equity
                     if result.get("net_working_capital") is None:
                         result["net_working_capital"] = financial_data.get("net_working_capital")
                     if result.get("roa") is None:
                         result["roa"] = financial_data.get("roa")
                     if result.get("gross_margin") is None:
                         result["gross_margin"] = financial_data.get("gross_margin")
+                    if result.get("asset_turnover") is None:
+                        result["asset_turnover"] = financial_data.get("asset_turnover")
+                    if result.get("gross_profit_to_assets") is None:
+                        result["gross_profit_to_assets"] = financial_data.get("gross_profit_to_assets")
+                    if result.get("interest_coverage") is None:
+                        result["interest_coverage"] = financial_data.get("interest_coverage")
+                    if result.get("inventory_turnover") is None:
+                        result["inventory_turnover"] = financial_data.get("inventory_turnover")
+                    if result.get("receivable_turnover") is None:
+                        result["receivable_turnover"] = financial_data.get("receivable_turnover")
+                    if result.get("net_cash_position") is None:
+                        result["net_cash_position"] = financial_data.get("net_cash_position")
+                    if result.get("piotroski_f_score") is None:
+                        result["piotroski_f_score"] = financial_data.get("piotroski_f_score")
+                    if result.get("beneish_m_score") is None:
+                        result["beneish_m_score"] = financial_data.get("beneish_m_score")
                     if result.get("netprofit_margin") is None:
                         result["netprofit_margin"] = financial_data.get("netprofit_margin")
                     if result.get("revenue_ttm") is None:
                         result["revenue_ttm"] = financial_data.get("revenue_ttm")
+                    if financial_data.get("revenue_yoy") is not None:
+                        result["revenue_yoy"] = financial_data.get("revenue_yoy")
                     if result.get("net_profit_ttm") is None:
                         result["net_profit_ttm"] = financial_data.get("net_profit_ttm")
+                    if financial_data.get("net_profit_yoy") is not None:
+                        result["net_profit_yoy"] = financial_data.get("net_profit_yoy")
+                    if financial_data.get("oper_profit_yoy") is not None:
+                        result["oper_profit_yoy"] = financial_data.get("oper_profit_yoy")
+                    if financial_data.get("revenue_cagr_3y") is not None:
+                        result["revenue_cagr_3y"] = financial_data.get("revenue_cagr_3y")
+                    if financial_data.get("profit_cagr_3y") is not None:
+                        result["profit_cagr_3y"] = financial_data.get("profit_cagr_3y")
                     if result.get("n_cashflow_act") is None:
                         result["n_cashflow_act"] = financial_data.get("n_cashflow_act")
+                    if result.get("fcf") is None:
+                        result["fcf"] = financial_data.get("fcf")
+                    if result.get("fcf_margin") is None:
+                        result["fcf_margin"] = financial_data.get("fcf_margin")
+                    if result.get("cash_conversion") is None:
+                        result["cash_conversion"] = financial_data.get("cash_conversion")
+                    if result.get("accrual_ratio") is None:
+                        result["accrual_ratio"] = financial_data.get("accrual_ratio")
+                    if financial_data.get("roic") is not None:
+                        result["roic"] = financial_data.get("roic")
+                    if result.get("peg") is None:
+                        pe_ttm = result.get("pe_ttm")
+                        growth = financial_data.get("net_profit_yoy")
+                        if pe_ttm not in (None, 0) and growth not in (None, 0) and growth > 0:
+                            result["peg"] = pe_ttm / growth
+                    if result.get("fcf_yield") is None:
+                        fcf = financial_data.get("fcf")
+                        total_mv = result.get("total_mv")
+                        if fcf is not None and total_mv not in (None, 0):
+                            result["fcf_yield"] = fcf / (total_mv * 1e8) * 100
+                    if result.get("ocf_yield") is None:
+                        ocf = financial_data.get("n_cashflow_act")
+                        total_mv = result.get("total_mv")
+                        if ocf is not None and total_mv not in (None, 0):
+                            result["ocf_yield"] = ocf / (total_mv * 1e8) * 100
+                    if financial_data.get("working_capital_change") is not None:
+                        result["working_capital_change"] = financial_data.get("working_capital_change")
                     if result.get("report_period") is None:
                         result["report_period"] = financial_data.get("report_period")
+                    if result.get("altman_z_score") is None:
+                        total_mv = result.get("total_mv")
+                        financial_records = financial_data.get("_financial_records") or []
+                        if total_mv not in (None, 0) and financial_records:
+                            altman_context = {
+                                "symbol": code,
+                                "basic_info": {"total_mv": total_mv},
+                                "market_quotes": {},
+                                "financial_records": financial_records,
+                                "latest_financial": financial_records[0],
+                                "current_price": None,
+                            }
+                            result["altman_z_score"] = _estimate_altman_z_score(altman_context)
+
+                    financial_records = financial_data.get("_financial_records") or []
+                    if financial_records:
+                        latest_financial = financial_records[0]
+                        diagnostics_context = {
+                            "symbol": code,
+                            "basic_info": basic_info_context,
+                            "market_quotes": {},
+                            "financial_records": financial_records,
+                            "latest_financial": latest_financial,
+                            "current_price": None,
+                        }
+                        cautious_factor_values = {
+                            "piotroski_f_score": result.get("piotroski_f_score"),
+                            "altman_z_score": result.get("altman_z_score"),
+                            "beneish_m_score": result.get("beneish_m_score"),
+                        }
+                        factor_diagnostics = _build_factor_diagnostics(diagnostics_context, cautious_factor_values)
+                        null_factor_diagnostics = {
+                            field_name: diagnostic
+                            for field_name, diagnostic in factor_diagnostics.items()
+                            if result.get(field_name) is None
+                        }
+                        if null_factor_diagnostics:
+                            result["factor_diagnostics"] = null_factor_diagnostics
+
+                        factor_values_for_warnings = {
+                            "pe_ttm": result.get("pe_ttm"),
+                            "pb": result.get("pb"),
+                            "pb_mrq": result.get("pb_mrq"),
+                            "ps_ttm": result.get("ps_ttm"),
+                            "dividend_yield": result.get("dividend_yield"),
+                            "industry_pe_median": result.get("industry_pe_median"),
+                            "industry_pb_median": result.get("industry_pb_median"),
+                            "roic": result.get("roic"),
+                            "interest_coverage": result.get("interest_coverage"),
+                            "inventory_turnover": result.get("inventory_turnover"),
+                            "net_cash_position": result.get("net_cash_position"),
+                            "net_profit_ttm": result.get("net_profit_ttm"),
+                            "fcf": result.get("fcf"),
+                        }
+                        factor_warnings = {
+                            **_build_value_factor_warnings(diagnostics_context, factor_values_for_warnings, {}, {}),
+                            **_build_quality_factor_warnings(diagnostics_context, factor_values_for_warnings),
+                            **_build_growth_factor_warnings(diagnostics_context, factor_values_for_warnings),
+                        }
+                        if factor_warnings:
+                            result["factor_warnings"] = factor_warnings
 
             logger.debug(f"✅ 已填充 {len(financial_data_map)} 条财务数据")
 
@@ -512,14 +930,38 @@ class DatabaseScreeningService:
             "pe": doc.get("pe"),
             "pb": doc.get("pb"),
             "pe_ttm": doc.get("pe_ttm"),
+            "ps_ttm": doc.get("ps_ttm"),
             "pb_mrq": doc.get("pb_mrq"),
             "roe": doc.get("roe"),
             "roa": doc.get("roa"),
             "gross_margin": doc.get("gross_margin"),
             "netprofit_margin": doc.get("netprofit_margin"),
+            "peg": doc.get("peg"),
+            "roic": doc.get("roic"),
+            "asset_turnover": doc.get("asset_turnover"),
+            "gross_profit_to_assets": doc.get("gross_profit_to_assets"),
+            "interest_coverage": doc.get("interest_coverage"),
+            "inventory_turnover": doc.get("inventory_turnover"),
+            "receivable_turnover": doc.get("receivable_turnover"),
+            "net_cash_position": doc.get("net_cash_position"),
+            "piotroski_f_score": doc.get("piotroski_f_score"),
+            "altman_z_score": doc.get("altman_z_score"),
+            "beneish_m_score": doc.get("beneish_m_score"),
+            "revenue_cagr_3y": doc.get("revenue_cagr_3y"),
+            "profit_cagr_3y": doc.get("profit_cagr_3y"),
             "revenue_ttm": doc.get("revenue_ttm"),
+            "revenue_yoy": doc.get("revenue_yoy"),
             "net_profit_ttm": doc.get("net_profit_ttm"),
+            "net_profit_yoy": doc.get("net_profit_yoy"),
+            "oper_profit_yoy": doc.get("oper_profit_yoy"),
             "n_cashflow_act": doc.get("n_cashflow_act"),
+            "fcf": doc.get("fcf"),
+            "fcf_yield": doc.get("fcf_yield"),
+            "fcf_margin": doc.get("fcf_margin"),
+            "ocf_yield": doc.get("ocf_yield"),
+            "cash_conversion": doc.get("cash_conversion"),
+            "accrual_ratio": doc.get("accrual_ratio"),
+            "working_capital_change": doc.get("working_capital_change"),
 
             # 扩展财务指标（来自 stock_screening_view 新增计算字段）
             "debt_to_assets": doc.get("debt_to_assets"),      # 资产负债率 (%)
@@ -545,15 +987,15 @@ class DatabaseScreeningService:
             "high": doc.get("high"),                # 最高价
             "low": doc.get("low"),                  # 最低价
 
-            # 技术指标（基础信息筛选时为None）
-            "ma20": None,
-            "rsi14": None,
-            "kdj_k": None,
-            "kdj_d": None,
-            "kdj_j": None,
-            "dif": None,
-            "dea": None,
-            "macd_hist": None,
+            # 技术指标（来自物化技术快照）
+            "ma20": doc.get("ma20"),
+            "rsi14": doc.get("rsi14"),
+            "kdj_k": doc.get("kdj_k"),
+            "kdj_d": doc.get("kdj_d"),
+            "kdj_j": doc.get("kdj_j"),
+            "dif": doc.get("dif"),
+            "dea": doc.get("dea"),
+            "macd_hist": doc.get("macd_hist"),
 
             # 元数据
             "source": doc.get("source", "database"),
