@@ -5,11 +5,14 @@ import pytest
 from app.models.capability_index import CapabilityDocument, CapabilitySearchHit
 from core.agents.config import AgentCategory, AgentInput, AgentMetadata, AgentOutput, LicenseTier
 from core.tools.implementations.agent_builder.nanobot_agent_builder_tools import (
+    analyze_agent_workshop_gaps,
     bind_agent_tools_and_validate_candidate,
+    build_agent_workshop_version,
     create_or_update_agent_workshop_draft,
     create_or_update_runtime_agent_config,
     create_or_update_universal_agent_prompt_template,
     generate_confirmed_candidate_agent,
+    generate_agent_workshop_tooling_plan,
     get_agent_blueprint_details,
     inspect_agent_blueprints,
     inspect_agent_workshop_assets,
@@ -401,6 +404,113 @@ async def test_create_or_update_agent_workshop_draft_creates_visible_spec_and_se
     session_doc = fake_db["agent_workshop_sessions"]._items[0]
     assert session_doc["spec_id"] == "spec_nanobot_valuation_candidate_v1"
     assert session_doc["user_id"] == "user_001"
+
+
+@pytest.mark.asyncio
+async def test_analyze_agent_workshop_gaps_bridges_to_workshop_service(monkeypatch):
+    class _FakeWorkshopService:
+        def __init__(self, db):
+            self.db = db
+
+        async def analyze_gaps(self, session_id):
+            assert session_id == "session_gap_001"
+            return {
+                "session_id": session_id,
+                "spec_id": "spec_nanobot_valuation_candidate_v1",
+                "gap_report": {
+                    "existing_tools": ["get_value_factor_bundle_tool"],
+                    "suggested_tools": ["get_peer_comparison_tool"],
+                    "blocking_gaps": ["缺少行业对比能力"],
+                },
+            }
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.AgentWorkshopService",
+        _FakeWorkshopService,
+    )
+
+    raw = await analyze_agent_workshop_gaps.ainvoke({"session_id": "session_gap_001"})
+    payload = json.loads(raw)
+
+    assert payload["status"] == "ok"
+    assert payload["spec_id"] == "spec_nanobot_valuation_candidate_v1"
+    assert payload["summary"]["existing_tools"] == 1
+    assert payload["summary"]["blocking_gaps"] == 1
+
+
+@pytest.mark.asyncio
+async def test_generate_agent_workshop_tooling_plan_bridges_to_workshop_service(monkeypatch):
+    class _FakeWorkshopService:
+        def __init__(self, db):
+            self.db = db
+
+        async def generate_tooling_plan(self, session_id):
+            assert session_id == "session_tooling_001"
+            return {
+                "session_id": session_id,
+                "spec_id": "spec_nanobot_valuation_candidate_v1",
+                "tooling_plan": {
+                    "missing_capabilities": ["industry_compare", "historical_band"],
+                    "tool_suggestions": [{"tool_id": "get_peer_comparison_tool"}],
+                },
+            }
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.AgentWorkshopService",
+        _FakeWorkshopService,
+    )
+
+    raw = await generate_agent_workshop_tooling_plan.ainvoke({"session_id": "session_tooling_001"})
+    payload = json.loads(raw)
+
+    assert payload["status"] == "ok"
+    assert payload["spec_id"] == "spec_nanobot_valuation_candidate_v1"
+    assert payload["summary"]["missing_capabilities"] == 2
+
+
+@pytest.mark.asyncio
+async def test_build_agent_workshop_version_bridges_to_workshop_service(monkeypatch):
+    class _FakeWorkshopService:
+        def __init__(self, db):
+            self.db = db
+
+        async def build_version(self, session_id):
+            assert session_id == "session_version_001"
+            return {
+                "session_id": session_id,
+                "spec_id": "spec_nanobot_valuation_candidate_v1",
+                "version": {
+                    "version_id": "spec_nanobot_valuation_candidate_v1_v1",
+                    "required_tools": ["get_value_factor_bundle_tool", "get_peer_comparison_tool"],
+                    "required_capabilities": ["industry_compare"],
+                },
+            }
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.AgentWorkshopService",
+        _FakeWorkshopService,
+    )
+
+    raw = await build_agent_workshop_version.ainvoke({"session_id": "session_version_001"})
+    payload = json.loads(raw)
+
+    assert payload["status"] == "ok"
+    assert payload["spec_id"] == "spec_nanobot_valuation_candidate_v1"
+    assert payload["summary"]["version_id"] == "spec_nanobot_valuation_candidate_v1_v1"
+    assert payload["summary"]["required_tools"] == 2
+    assert payload["summary"]["required_capabilities"] == 1
 
 
 @pytest.mark.asyncio

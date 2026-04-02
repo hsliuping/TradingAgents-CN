@@ -135,19 +135,26 @@
                 <div class="card-header">
                   <span>讨论需求</span>
                   <div class="session-toolbar-actions">
-                    <el-button size="small" @click="refreshSession" :loading="loadingCurrentSession">刷新会话</el-button>
-                    <el-button size="small" type="success" @click="handlePreviewSpec" :loading="previewing" :disabled="!currentSession">进入规格确认</el-button>
+                    <el-button size="small" @click="refreshSession" :loading="loadingCurrentSession">{{ isNanobotDiscussionSession ? '检查 Draft' : '刷新会话' }}</el-button>
+                    <el-button size="small" type="success" @click="handlePreviewSpec" :loading="previewing" :disabled="!currentSession">{{ isNanobotDiscussionSession ? (replyMessage.trim() ? '发送并打开 Draft' : '打开已生成 Draft') : '进入规格确认' }}</el-button>
                   </div>
                 </div>
               </template>
 
               <div v-if="!currentSession" class="empty-state compact">当前没有进行中的会话。</div>
               <template v-else>
+                <el-alert
+                  v-if="nanobotDraftLink && isNanobotDiscussionSession"
+                  class="status-alert"
+                  type="success"
+                  :closable="false"
+                  :title="`Nanobot 已同步 Draft：${nanobotDraftLink.specName}。你可以继续在这里讨论，确认后再进入规格确认。`"
+                />
                 <div class="chat-panel">
-                  <div v-for="(message, index) in currentSession.messages" :key="index" :class="['chat-row', message.role]">
+                  <div v-for="(message, index) in displayedDiscussionMessages" :key="index" :class="['chat-row', message.role]">
                     <div class="bubble">
-                      <div class="bubble-role">{{ message.role === 'assistant' ? '工坊助手' : '你' }}</div>
-                      <div class="bubble-content">{{ message.content }}</div>
+                      <div class="bubble-role">{{ message.role === 'assistant' ? (isNanobotDiscussionSession ? 'Nanobot' : '工坊助手') : '你' }}</div>
+                      <div class="bubble-content markdown-body" v-html="renderMarkdown(message.content)"></div>
                     </div>
                   </div>
                 </div>
@@ -168,7 +175,7 @@
                         继续讨论
                       </el-button>
                       <el-button type="success" plain :disabled="!currentSession || responding" :loading="previewing" @click="handlePreviewSpec">
-                        下一步
+                        {{ isNanobotDiscussionSession ? (replyMessage.trim() ? '发送并下一步' : '检查并下一步') : '下一步' }}
                       </el-button>
                     </div>
                   </div>
@@ -191,6 +198,29 @@
 
               <div v-if="!displaySpec" class="empty-state compact">先完成一轮需求讨论，再生成规格快照。</div>
               <div v-else class="spec-panel">
+                <div v-if="hasNanobotDiscussionContext" class="field-block discussion-summary-block">
+                  <div class="field-label">Nanobot 讨论承接</div>
+                  <div class="discussion-summary-grid">
+                    <div class="discussion-summary-card" v-if="nanobotDiscussionLeadMessage">
+                      <div class="discussion-summary-title">原始需求</div>
+                      <div class="note-item markdown-body" v-html="renderMarkdown(nanobotDiscussionLeadMessage)"></div>
+                    </div>
+                    <div class="discussion-summary-card" v-if="nanobotDiscussionLatestAssistantMessage">
+                      <div class="discussion-summary-title">Nanobot 最近结论</div>
+                      <div class="note-item markdown-body" v-html="renderMarkdown(nanobotDiscussionLatestAssistantMessage)"></div>
+                    </div>
+                  </div>
+                  <div v-if="nanobotDiscussionRecentMessages.length" class="discussion-timeline">
+                    <div v-for="(message, index) in nanobotDiscussionRecentMessages" :key="`spec-discussion-${index}`" class="discussion-timeline-item">
+                      <div class="discussion-timeline-role">{{ message.role === 'assistant' ? 'Nanobot' : '你' }}</div>
+                      <div class="discussion-timeline-content markdown-body" v-html="renderMarkdown(message.content)"></div>
+                    </div>
+                  </div>
+                  <div class="action-row between">
+                    <div class="hint-text">这里保留讨论上下文承接。回讨论区继续补充时，不会丢前面的 Nanobot 对话。</div>
+                    <el-button @click="activeStep = 'discuss'">回讨论区继续补充</el-button>
+                  </div>
+                </div>
                 <div class="spec-title">{{ displaySpec.name }}</div>
                 <div class="spec-goal">{{ displaySpec.primary_goal }}</div>
 
@@ -863,6 +893,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
+import { marked } from 'marked'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import { toolsApi, type ToolMetadata } from '@/api/tools'
 import agentWorkshopApi, {
@@ -870,6 +901,7 @@ import agentWorkshopApi, {
   type AgentSpec,
   type AgentSpecIOItem,
   type AgentWorkshopCapabilitySnapshot,
+  type AgentWorkshopMessage,
   type AgentWorkshopDebugVersionResult,
   type AgentWorkshopGapAnalysis,
   type AgentWorkshopPreviewResult,
@@ -881,9 +913,13 @@ import agentWorkshopApi, {
   type AgentWorkshopValuationTraceabilityItem,
   type AgentVersion,
 } from '@/api/agentWorkshop'
+import embeddedNanobotApi, { type EmbeddedNanobotChatResponse } from '@/api/embeddedNanobot'
 import { configApi, type LLMConfig } from '@/api/config'
 
 type FlowStep = 'discuss' | 'spec' | 'gap' | 'version' | 'evaluate'
+type SessionMode = 'workshop' | 'nanobot'
+
+marked.setOptions({ breaks: true, gfm: true })
 
 const description = ref('')
 const replyMessage = ref('')
@@ -894,6 +930,10 @@ const router = useRouter()
 
 const specs = ref<AgentSpec[]>([])
 const currentSession = ref<AgentWorkshopSessionDetail | null>(null)
+const currentSessionMode = ref<SessionMode>('workshop')
+const currentNanobotSessionKey = ref('')
+const nanobotDiscussionMessages = ref<AgentWorkshopMessage[]>([])
+const nanobotDraftLink = ref<{ specId: string; specName: string; sessionId?: string } | null>(null)
 const previewResult = ref<AgentWorkshopPreviewResult | null>(null)
 const gapReport = ref<AgentWorkshopGapAnalysis | null>(null)
 const capabilitySnapshot = ref<AgentWorkshopCapabilitySnapshot | null>(null)
@@ -959,10 +999,38 @@ const getSpecIoText = (item?: AgentSpecIOItem | null) => {
   return name || description
 }
 
+const renderMarkdown = (content: string): string => {
+  try {
+    return marked.parse(content || '') as string
+  } catch {
+    return String(content || '')
+  }
+}
+
 const displaySpec = computed(() => previewResult.value?.spec || currentSession.value?.current_spec_snapshot || null)
 const displaySpecOutputTags = computed(() => (displaySpec.value?.outputs || []).map(item => getSpecIoText(item)).filter(Boolean))
 const canAdvance = computed(() => currentSession.value?.feasibility_status === 'feasible' && (currentSession.value?.completeness_score || 0) >= 0.75)
-const hasWorkspaceContext = computed(() => Boolean(currentSession.value || displaySpec.value || latestVersion.value || latestEvaluation.value))
+const hasNanobotDiscussionContext = computed(() => Boolean(currentNanobotSessionKey.value || nanobotDiscussionMessages.value.length))
+const hasWorkspaceContext = computed(() => Boolean(currentSession.value || displaySpec.value || latestVersion.value || latestEvaluation.value || hasNanobotDiscussionContext.value))
+const isNanobotDiscussionSession = computed(() => hasNanobotDiscussionContext.value && activeStep.value === 'discuss')
+const displayedDiscussionMessages = computed(() => {
+  if (hasNanobotDiscussionContext.value) {
+    return nanobotDiscussionMessages.value
+  }
+  return currentSession.value?.messages || []
+})
+const nanobotDiscussionLeadMessage = computed(() => {
+  const firstUserMessage = nanobotDiscussionMessages.value.find(item => item.role === 'user')
+  return firstUserMessage?.content || ''
+})
+const nanobotDiscussionLatestAssistantMessage = computed(() => {
+  const messages = [...nanobotDiscussionMessages.value].reverse()
+  const latestAssistantMessage = messages.find(item => item.role === 'assistant')
+  return latestAssistantMessage?.content || ''
+})
+const nanobotDiscussionRecentMessages = computed(() => {
+  return nanobotDiscussionMessages.value.slice(-4)
+})
 const selectedSpecId = computed(() => displaySpec.value?.spec_id || currentSession.value?.current_spec_snapshot?.spec_id || latestVersion.value?.spec_id || '')
 const selectedSpecName = computed(() => displaySpec.value?.name || latestVersion.value?.agent_metadata?.name || '未命名 Agent')
 const normalizeCapabilityId = (value?: string) => String(value || '').trim().toLowerCase().split('|')[0].trim().replace(/-/g, '_')
@@ -1469,8 +1537,13 @@ const resetEvaluationForm = () => {
   }
 }
 
-const clearWorkspace = () => {
+const clearWorkspace = (preserveNanobotState = false) => {
+  const previousNanobotSessionKey = currentNanobotSessionKey.value
   currentSession.value = null
+  currentSessionMode.value = 'workshop'
+  currentNanobotSessionKey.value = ''
+  nanobotDiscussionMessages.value = []
+  nanobotDraftLink.value = null
   previewResult.value = null
   gapReport.value = null
   latestVersion.value = null
@@ -1481,6 +1554,9 @@ const clearWorkspace = () => {
   specFeedbackMessage.value = ''
   resetEvaluationForm()
   syncActiveStep('discuss')
+  if (!preserveNanobotState && previousNanobotSessionKey) {
+    removeNanobotDiscussionState(previousNanobotSessionKey)
+  }
 }
 
 const buildDefaultSpecConfirmationMessage = () => {
@@ -1560,6 +1636,260 @@ const loadLatestVersion = async (specId?: string) => {
   }
 }
 
+const NANOBOT_WORKSHOP_SESSION_PREFIX = 'embedded:agent-workshop:'
+const NANOBOT_WORKSHOP_SKILLS = ['nanobot-agent-design']
+const NANOBOT_DISCUSSION_STORAGE_PREFIX = 'agent-workshop:nanobot:'
+
+const getNanobotDiscussionStorageKey = (sessionKey?: string) => {
+  const normalized = String(sessionKey || '').trim()
+  return normalized ? `${NANOBOT_DISCUSSION_STORAGE_PREFIX}${normalized}` : ''
+}
+
+const persistNanobotDiscussionState = () => {
+  if (typeof window === 'undefined') return
+  const storageKey = getNanobotDiscussionStorageKey(currentNanobotSessionKey.value)
+  if (!storageKey) return
+  window.sessionStorage.setItem(storageKey, JSON.stringify({
+    sessionKey: currentNanobotSessionKey.value,
+    messages: nanobotDiscussionMessages.value,
+    draftLink: nanobotDraftLink.value,
+  }))
+}
+
+const removeNanobotDiscussionState = (sessionKey?: string) => {
+  if (typeof window === 'undefined') return
+  const storageKey = getNanobotDiscussionStorageKey(sessionKey)
+  if (!storageKey) return
+  window.sessionStorage.removeItem(storageKey)
+}
+
+const restoreNanobotDiscussionState = (sessionKey?: string) => {
+  if (typeof window === 'undefined') return false
+  const storageKey = getNanobotDiscussionStorageKey(sessionKey)
+  if (!storageKey) return false
+  const raw = window.sessionStorage.getItem(storageKey)
+  if (!raw) return false
+  try {
+    const parsed = JSON.parse(raw) as {
+      sessionKey?: string
+      messages?: AgentWorkshopMessage[]
+      draftLink?: { specId: string; specName: string; sessionId?: string } | null
+    }
+    currentNanobotSessionKey.value = String(parsed.sessionKey || sessionKey || '').trim()
+    nanobotDiscussionMessages.value = Array.isArray(parsed.messages) ? parsed.messages : []
+    nanobotDraftLink.value = parsed.draftLink || null
+    currentSessionMode.value = currentNanobotSessionKey.value ? 'nanobot' : 'workshop'
+    return Boolean(currentNanobotSessionKey.value)
+  } catch {
+    return false
+  }
+}
+
+const syncNanobotDiscussionRoute = () => {
+  const nextQuery: Record<string, any> = { ...route.query }
+  if (currentNanobotSessionKey.value) {
+    nextQuery.nanobotSessionKey = currentNanobotSessionKey.value
+  } else {
+    delete nextQuery.nanobotSessionKey
+  }
+  router.replace({ path: '/workflow/agent-workshop/create', query: nextQuery })
+}
+
+const createEmptySpecSnapshot = (): AgentSpec => ({
+  spec_id: '',
+  name: 'Nanobot 需求讨论中',
+  domain: 'general',
+  target_users: [],
+  primary_goal: '',
+  responsibilities: [],
+  non_goals: [],
+  inputs: [],
+  outputs: [],
+  success_criteria: [],
+  constraints: [],
+  preferred_methods: [],
+  sample_symbols: [],
+  status: 'draft',
+  source: 'nanobot',
+  owner_user_id: '',
+  latest_session_id: '',
+  current_version_id: null,
+  version_count: 0,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+})
+
+const upsertNanobotDiscussionSession = (payload: {
+  sessionKey: string
+  userMessage: string
+  assistantMessage: string
+}) => {
+  const now = new Date().toISOString()
+  const previousMessages = [...nanobotDiscussionMessages.value]
+  const nextMessages = [
+    ...previousMessages,
+    { role: 'user', content: payload.userMessage, timestamp: now },
+    { role: 'assistant', content: payload.assistantMessage || 'Nanobot 已处理当前需求。', timestamp: now },
+  ]
+
+  nanobotDiscussionMessages.value = nextMessages
+
+  currentSession.value = {
+    session_id: payload.sessionKey,
+    spec_id: '',
+    user_id: '',
+    stage: 'planning',
+    current_round: Math.max(1, Math.ceil(nextMessages.length / 2)),
+    messages: nextMessages,
+    current_spec_snapshot: createEmptySpecSnapshot(),
+    pending_questions: [],
+    completeness_score: 0,
+    feasibility_status: 'need-clarification',
+    refusal_reason: '',
+    gap_report: null,
+    tooling_plan: null,
+    created_at: currentSession.value?.created_at || now,
+    updated_at: now,
+  }
+  currentSessionMode.value = 'nanobot'
+  currentNanobotSessionKey.value = payload.sessionKey
+  previewResult.value = null
+  gapReport.value = null
+  latestVersion.value = null
+  latestVersionPrompt.value = null
+  latestEvaluation.value = null
+  latestDebugResult.value = null
+  persistNanobotDiscussionState()
+}
+
+const findLatestNanobotSpec = (afterMs?: number) => {
+  const sortedSpecs = [...specs.value].sort((left, right) => {
+    const leftTime = Date.parse(left.updated_at || left.created_at || '') || 0
+    const rightTime = Date.parse(right.updated_at || right.created_at || '') || 0
+    return rightTime - leftTime
+  })
+
+  return sortedSpecs.find(item => {
+    if (item.source !== 'nanobot') return false
+    if (!afterMs) return true
+    const updatedAt = Date.parse(item.updated_at || item.created_at || '') || 0
+    return updatedAt >= afterMs - 5000
+  }) || null
+}
+
+const syncWorkshopDraftAfterNanobot = async (options?: {
+  response?: EmbeddedNanobotChatResponse
+  requestedAtMs?: number
+  force?: boolean
+  silent?: boolean
+  openIfFound?: boolean
+}) => {
+  const toolsUsed = options?.response?.tools_used || []
+  const shouldCheckDraft = Boolean(options?.force || toolsUsed.some(toolId => (
+    toolId === 'create_or_update_agent_workshop_draft' || toolId === 'generate_confirmed_candidate_agent'
+  )))
+
+  if (!shouldCheckDraft) {
+    return false
+  }
+
+  await loadSpecs()
+  const matchedSpec = findLatestNanobotSpec(options?.requestedAtMs)
+  if (!matchedSpec) {
+    if (options?.force && !options?.silent) {
+      ElMessage.warning('Nanobot 还没有同步出可打开的 Draft，请继续补充需求后再试。')
+    }
+    return false
+  }
+
+  nanobotDraftLink.value = {
+    specId: matchedSpec.spec_id,
+    specName: matchedSpec.name,
+    sessionId: matchedSpec.latest_session_id,
+  }
+  persistNanobotDiscussionState()
+
+  if (options?.openIfFound) {
+    await openSpec(matchedSpec)
+    currentSessionMode.value = 'workshop'
+    syncActiveStep('spec')
+  }
+
+  if (!options?.silent) {
+    ElMessage.success(options?.openIfFound ? '已进入 Agent Workshop 规格确认' : 'Nanobot 已同步 Draft，可继续讨论或进入规格确认')
+  }
+  return true
+}
+
+const sendWorkshopMessageToNanobot = async (message: string) => {
+  const normalizedMessage = message.trim()
+  if (!normalizedMessage) return null
+
+  const requestedAtMs = Date.now()
+  const sessionKey = currentNanobotSessionKey.value || `${NANOBOT_WORKSHOP_SESSION_PREFIX}${requestedAtMs}`
+  const response = await embeddedNanobotApi.chat({
+    message: normalizedMessage,
+    session_key: sessionKey,
+    channel: 'agent_workshop',
+    chat_id: sessionKey,
+    skill_names: NANOBOT_WORKSHOP_SKILLS,
+  })
+
+  upsertNanobotDiscussionSession({
+    sessionKey: response.session_key || sessionKey,
+    userMessage: normalizedMessage,
+    assistantMessage: response.content,
+  })
+  syncNanobotDiscussionRoute()
+
+  const switchedToDraft = await syncWorkshopDraftAfterNanobot({
+    response,
+    requestedAtMs,
+    silent: true,
+    openIfFound: false,
+  })
+
+  return {
+    response,
+    switchedToDraft,
+  }
+}
+
+const sendWorkshopStageCommandToNanobot = async (options: {
+  expectedToolId: string
+  message: string
+  successMessage: string
+  refreshVersion?: boolean
+  nextStep?: FlowStep
+  routeToSession?: boolean
+}) => {
+  if (!currentSession.value?.session_id) return false
+
+  const result = await sendWorkshopMessageToNanobot(options.message)
+  const toolsUsed = result?.response?.tools_used || []
+  if (!toolsUsed.includes(options.expectedToolId)) {
+    throw new Error('Nanobot 这次没有真正执行对应阶段工具，请稍后重试。')
+  }
+
+  await refreshSession()
+  await loadSpecs()
+  if (options.refreshVersion) {
+    await loadLatestVersion(currentSession.value?.current_spec_snapshot?.spec_id)
+  }
+  if (options.routeToSession && currentSession.value?.session_id) {
+    router.replace({
+      path: '/workflow/agent-workshop/create',
+      query: {
+        sessionId: currentSession.value.session_id,
+        ...(currentNanobotSessionKey.value ? { nanobotSessionKey: currentNanobotSessionKey.value } : {}),
+      },
+    })
+  }
+  syncActiveStep(options.nextStep)
+  ElMessage.success(options.successMessage)
+  return true
+}
+
 const loadLatestVersionPrompt = async (versionId?: string) => {
   if (!versionId) {
     latestVersionPrompt.value = null
@@ -1621,16 +1951,22 @@ const initFromRoute = async () => {
 
   const sessionId = typeof route.query.sessionId === 'string' ? route.query.sessionId : ''
   const specId = typeof route.query.specId === 'string' ? route.query.specId : ''
+  const nanobotSessionKey = typeof route.query.nanobotSessionKey === 'string' ? route.query.nanobotSessionKey : ''
 
-  clearWorkspace()
+  clearWorkspace(true)
+
+  if (nanobotSessionKey) {
+    restoreNanobotDiscussionState(nanobotSessionKey)
+  }
 
   if (sessionId) {
     loadingSessionList.value = true
     try {
       currentSession.value = await agentWorkshopApi.getSession(sessionId)
+      currentSessionMode.value = 'workshop'
       gapReport.value = currentSession.value.gap_report || null
       await loadLatestVersion(currentSession.value.current_spec_snapshot?.spec_id)
-      syncActiveStep(currentSession.value.gap_report ? 'gap' : 'discuss')
+      syncActiveStep()
     } catch (error: any) {
       ElMessage.error(error?.message || '加载工坊会话失败')
     } finally {
@@ -1665,6 +2001,10 @@ const initFromRoute = async () => {
 
 const refreshSession = async () => {
   if (!currentSession.value?.session_id) return
+  if (isNanobotDiscussionSession.value) {
+    await syncWorkshopDraftAfterNanobot({ force: true })
+    return
+  }
   loadingCurrentSession.value = true
   try {
     const [session] = await Promise.all([
@@ -1700,16 +2040,13 @@ const handleStartSession = async () => {
   if (!description.value.trim()) return
   starting.value = true
   try {
-    const result = await agentWorkshopApi.startSession({ description: description.value.trim() })
-    currentSession.value = await agentWorkshopApi.getSession(result.session_id)
-    previewResult.value = null
-    gapReport.value = null
-    latestVersion.value = null
-    latestEvaluation.value = null
+    clearWorkspace()
+    const result = await sendWorkshopMessageToNanobot(description.value.trim())
+    if (!result) return
     await loadSpecs()
-    router.replace({ path: '/workflow/agent-workshop/create', query: { sessionId: result.session_id } })
+    router.replace({ path: '/workflow/agent-workshop/create' })
     syncActiveStep('discuss')
-    ElMessage.success('工坊会话已创建')
+    ElMessage.success(result.switchedToDraft ? '已同步 Nanobot Draft，可继续讨论' : '已接入 Nanobot 开始讨论')
   } catch (error: any) {
     ElMessage.error(error?.message || '创建会话失败')
   } finally {
@@ -1721,10 +2058,16 @@ const handleRespond = async () => {
   if (!currentSession.value?.session_id || !replyMessage.value.trim()) return
   responding.value = true
   try {
-    await agentWorkshopApi.respondToSession(currentSession.value.session_id, replyMessage.value.trim())
+    if (isNanobotDiscussionSession.value) {
+      const result = await sendWorkshopMessageToNanobot(replyMessage.value.trim())
+      if (!result) return
+      await loadSpecs()
+    } else {
+      await agentWorkshopApi.respondToSession(currentSession.value.session_id, replyMessage.value.trim())
+      await refreshSession()
+      await loadSpecs()
+    }
     replyMessage.value = ''
-    await refreshSession()
-    await loadSpecs()
     syncActiveStep('discuss')
   } catch (error: any) {
     ElMessage.error(error?.message || '回复失败')
@@ -1735,6 +2078,24 @@ const handleRespond = async () => {
 
 const handlePreviewSpec = async () => {
   if (!currentSession.value?.session_id) return
+  if (isNanobotDiscussionSession.value) {
+    previewing.value = true
+    try {
+      if (replyMessage.value.trim()) {
+        const result = await sendWorkshopMessageToNanobot(replyMessage.value.trim())
+        replyMessage.value = ''
+      }
+      const switched = await syncWorkshopDraftAfterNanobot({ force: true, openIfFound: true })
+      if (!switched) {
+        ElMessage.warning('还没有可打开的 Draft。请先按 Nanobot 的提示补充或确认需求。')
+      }
+    } catch (error: any) {
+      ElMessage.error(error?.message || '打开 Draft 失败')
+    } finally {
+      previewing.value = false
+    }
+    return
+  }
   previewing.value = true
   try {
     previewResult.value = await agentWorkshopApi.previewSpec(currentSession.value.session_id)
@@ -1753,12 +2114,29 @@ const submitSpecFeedback = async (message: string) => {
   if (!currentSession.value?.session_id) return
   confirmingSpec.value = true
   try {
-    await agentWorkshopApi.respondToSession(currentSession.value.session_id, message)
-    currentSession.value = await agentWorkshopApi.getSession(currentSession.value.session_id)
-    previewResult.value = await agentWorkshopApi.previewSpec(currentSession.value.session_id)
-    gapReport.value = currentSession.value.gap_report || null
-    specFeedbackMessage.value = ''
-    await loadSpecs()
+    if (currentNanobotSessionKey.value) {
+      const result = await sendWorkshopMessageToNanobot(message)
+      const switched = await syncWorkshopDraftAfterNanobot({
+        response: result?.response,
+        force: true,
+        openIfFound: true,
+        silent: true,
+      })
+      specFeedbackMessage.value = ''
+      await loadSpecs()
+      if (!switched) {
+        ElMessage.warning('Nanobot 已收到修改意见，但还没有同步出新的规格草案。请继续补充或稍后重试。')
+        syncActiveStep('spec')
+        return
+      }
+    } else {
+      await agentWorkshopApi.respondToSession(currentSession.value.session_id, message)
+      currentSession.value = await agentWorkshopApi.getSession(currentSession.value.session_id)
+      previewResult.value = await agentWorkshopApi.previewSpec(currentSession.value.session_id)
+      gapReport.value = currentSession.value.gap_report || null
+      specFeedbackMessage.value = ''
+      await loadSpecs()
+    }
     const canMoveToGap = previewResult.value?.readiness === 'ready'
       && currentSession.value?.feasibility_status === 'feasible'
       && (currentSession.value?.completeness_score || 0) >= 0.75
@@ -1785,6 +2163,21 @@ const handleAnalyzeGaps = async () => {
   if (!currentSession.value?.session_id) return
   analyzing.value = true
   try {
+    if (currentNanobotSessionKey.value) {
+      await sendWorkshopStageCommandToNanobot({
+        expectedToolId: 'analyze_agent_workshop_gaps',
+        message: [
+          '继续当前 Agent Workshop 会话，直接执行缺口分析。',
+          `请调用 analyze_agent_workshop_gaps(session_id='${currentSession.value.session_id}')。`,
+          '执行后请用中文总结：现有可复用能力、主要阻塞缺口、建议补齐方向。不要反问。',
+        ].join('\n'),
+        successMessage: '缺口分析完成',
+        nextStep: 'gap',
+      })
+      gapReport.value = currentSession.value?.gap_report || null
+      return
+    }
+
     const result = await agentWorkshopApi.analyzeGaps(currentSession.value.session_id)
     gapReport.value = result.gap_report
     await refreshSession()
@@ -1801,6 +2194,20 @@ const handleGenerateToolingPlan = async () => {
   if (!currentSession.value?.session_id) return
   generatingToolPlan.value = true
   try {
+    if (currentNanobotSessionKey.value) {
+      await sendWorkshopStageCommandToNanobot({
+        expectedToolId: 'generate_agent_workshop_tooling_plan',
+        message: [
+          '继续当前 Agent Workshop 会话，直接生成工具需求草案。',
+          `请调用 generate_agent_workshop_tooling_plan(session_id='${currentSession.value.session_id}')。`,
+          '执行后请用中文总结：缺哪些能力、优先补哪些工具、哪些可以先复用。不要反问。',
+        ].join('\n'),
+        successMessage: '工具需求草案已生成',
+        nextStep: 'gap',
+      })
+      return
+    }
+
     await agentWorkshopApi.generateToolingPlan(currentSession.value.session_id)
     await refreshSession()
     syncActiveStep('gap')
@@ -1816,11 +2223,33 @@ const handleBuildVersion = async () => {
   if (!currentSession.value?.session_id) return
   buildingVersion.value = true
   try {
+    if (currentNanobotSessionKey.value) {
+      await sendWorkshopStageCommandToNanobot({
+        expectedToolId: 'build_agent_workshop_version',
+        message: [
+          '继续当前 Agent Workshop 会话，直接生成版本草案。',
+          `请调用 build_agent_workshop_version(session_id='${currentSession.value.session_id}')。`,
+          '执行后请用中文总结：版本定位、关键工具、输出结构、验证重点。不要反问。',
+        ].join('\n'),
+        successMessage: '版本草案已生成',
+        refreshVersion: true,
+        nextStep: 'version',
+        routeToSession: true,
+      })
+      return
+    }
+
     const result = await agentWorkshopApi.buildVersion(currentSession.value.session_id)
     latestVersion.value = result.version
     await refreshSession()
     await loadSpecs()
-    router.replace({ path: '/workflow/agent-workshop/create', query: { sessionId: currentSession.value.session_id } })
+    router.replace({
+      path: '/workflow/agent-workshop/create',
+      query: {
+        sessionId: currentSession.value.session_id,
+        ...(currentNanobotSessionKey.value ? { nanobotSessionKey: currentNanobotSessionKey.value } : {}),
+      },
+    })
     syncActiveStep('version')
     ElMessage.success('版本草案已生成')
   } catch (error: any) {
@@ -1982,6 +2411,7 @@ const handleIterateVersion = async () => {
 const openSpec = async (spec: AgentSpec) => {
   try {
     const detail = await agentWorkshopApi.getSpec(spec.spec_id)
+    currentSessionMode.value = 'workshop'
     previewResult.value = {
       spec: detail,
       completeness_score: currentSession.value?.current_spec_snapshot?.spec_id === spec.spec_id
@@ -2004,13 +2434,13 @@ const openSpec = async (spec: AgentSpec) => {
       currentSession.value = await agentWorkshopApi.getSession(detail.latest_session_id)
       gapReport.value = currentSession.value.gap_report || null
       await loadLatestVersion(detail.spec_id)
-      router.replace({ path: '/workflow/agent-workshop/create', query: { sessionId: detail.latest_session_id } })
+      router.replace({ path: '/workflow/agent-workshop/create', query: { sessionId: detail.latest_session_id, ...(currentNanobotSessionKey.value ? { nanobotSessionKey: currentNanobotSessionKey.value } : {}) } })
     } else {
       currentSession.value = null
       gapReport.value = null
       latestVersion.value = null
       latestEvaluation.value = null
-      router.replace({ path: '/workflow/agent-workshop/create', query: { specId: detail.spec_id } })
+      router.replace({ path: '/workflow/agent-workshop/create', query: { specId: detail.spec_id, ...(currentNanobotSessionKey.value ? { nanobotSessionKey: currentNanobotSessionKey.value } : {}) } })
     }
     syncActiveStep('spec')
   } catch (error: any) {
@@ -2336,7 +2766,7 @@ const goToSkillWorkshop = (target?: string | AgentWorkshopToolingPlanItem) => {
 }
 
 watch(
-  () => `${route.query.sessionId || ''}|${route.query.specId || ''}`,
+  () => `${route.query.sessionId || ''}|${route.query.specId || ''}|${route.query.nanobotSessionKey || ''}`,
   async () => {
     await initFromRoute()
   }
@@ -2646,6 +3076,57 @@ onMounted(async () => {
   background: linear-gradient(180deg, #fbfefd 0%, #f4faf7 100%);
 }
 
+.discussion-summary-block {
+  padding: 16px;
+  border: 1px solid #dbe7e2;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fbfefd 0%, #f4faf7 100%);
+}
+
+.discussion-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.discussion-summary-card {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(15, 61, 54, 0.08);
+}
+
+.discussion-summary-title {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f5a4e;
+}
+
+.discussion-timeline {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.discussion-timeline-item {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(15, 61, 54, 0.04);
+}
+
+.discussion-timeline-role {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f5a4e;
+}
+
+.discussion-timeline-content {
+  line-height: 1.65;
+  color: #35524c;
+}
+
 .gap-stage-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2776,9 +3257,83 @@ onMounted(async () => {
 }
 
 .bubble-content {
-  white-space: pre-wrap;
+  white-space: normal;
   line-height: 1.65;
   color: inherit;
+}
+
+.bubble-content:deep(p),
+.bubble-content:deep(ul),
+.bubble-content:deep(ol),
+.bubble-content:deep(table),
+.bubble-content:deep(blockquote),
+.bubble-content:deep(pre) {
+  margin: 0 0 12px;
+}
+
+.bubble-content:deep(*:last-child) {
+  margin-bottom: 0;
+}
+
+.bubble-content:deep(h1),
+.bubble-content:deep(h2),
+.bubble-content:deep(h3),
+.bubble-content:deep(h4) {
+  margin: 0 0 10px;
+  line-height: 1.4;
+  color: inherit;
+}
+
+.bubble-content:deep(ul),
+.bubble-content:deep(ol) {
+  padding-left: 20px;
+}
+
+.bubble-content:deep(li) {
+  margin-bottom: 6px;
+}
+
+.bubble-content:deep(code) {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(15, 61, 54, 0.08);
+  font-size: 12px;
+}
+
+.chat-row.user .bubble-content:deep(code) {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.bubble-content:deep(pre) {
+  overflow: auto;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(15, 61, 54, 0.08);
+}
+
+.chat-row.user .bubble-content:deep(pre) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.bubble-content:deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.bubble-content:deep(th),
+.bubble-content:deep(td) {
+  padding: 8px 10px;
+  border: 1px solid rgba(15, 61, 54, 0.12);
+  text-align: left;
+  vertical-align: top;
+}
+
+.bubble-content:deep(blockquote) {
+  padding-left: 12px;
+  border-left: 3px solid rgba(15, 61, 54, 0.2);
+  color: inherit;
+  opacity: 0.88;
 }
 
 .composer {

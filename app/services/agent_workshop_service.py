@@ -732,6 +732,13 @@ class AgentWorkshopService:
 
         version_docs = await self._db[VERSION_COLLECTION].find({"spec_id": spec_id}).to_list(length=200)
         version_ids = [item.get("version_id") for item in version_docs if item.get("version_id")]
+        runtime_agent_ids: List[str] = []
+
+        for item in version_docs:
+            agent_metadata = item.get("agent_metadata") or {}
+            agent_id = str(agent_metadata.get("id") or item.get("version_id") or "").strip()
+            if agent_id:
+                runtime_agent_ids.append(agent_id)
 
         prompt_template_ids: List[str] = []
         for item in version_docs:
@@ -744,6 +751,8 @@ class AgentWorkshopService:
         deleted_versions = await self._db[VERSION_COLLECTION].delete_many({"spec_id": spec_id})
         deleted_evaluations = await self._db[EVALUATION_COLLECTION].delete_many({"version_id": {"$in": version_ids}}) if version_ids else None
         deleted_prompts = await self._db["prompt_templates"].delete_many({"_id": {"$in": prompt_template_ids}}) if prompt_template_ids else None
+        deleted_runtime_configs = await self._db["agent_configs"].delete_many({"agent_id": {"$in": runtime_agent_ids}}) if runtime_agent_ids else None
+        deleted_runtime_bindings = await self._db["tool_agent_bindings"].delete_many({"agent_id": {"$in": runtime_agent_ids}}) if runtime_agent_ids else None
         deleted_spec = await self._db[SPEC_COLLECTION].delete_one({"spec_id": spec_id})
 
         return {
@@ -753,6 +762,8 @@ class AgentWorkshopService:
             "deleted_versions": deleted_versions.deleted_count,
             "deleted_evaluations": deleted_evaluations.deleted_count if deleted_evaluations is not None else 0,
             "deleted_prompts": deleted_prompts.deleted_count if deleted_prompts is not None else 0,
+            "deleted_runtime_configs": deleted_runtime_configs.deleted_count if deleted_runtime_configs is not None else 0,
+            "deleted_runtime_bindings": deleted_runtime_bindings.deleted_count if deleted_runtime_bindings is not None else 0,
         }
 
     async def list_sample_sets(self, spec_id: str) -> Dict[str, Any]:

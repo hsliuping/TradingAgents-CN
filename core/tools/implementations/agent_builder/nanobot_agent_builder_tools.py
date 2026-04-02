@@ -92,6 +92,12 @@ def _parse_json_tool_result(raw: str) -> dict[str, Any]:
         return {"status": "error", "message": f"工具返回无法解析为 JSON: {exc}", "raw": raw}
 
 
+def _read_mapping_or_attr(value: Any, field: str, default: Any = None) -> Any:
+    if isinstance(value, dict):
+        return value.get(field, default)
+    return getattr(value, field, default)
+
+
 def _looks_unspecified(value: str) -> bool:
     text = str(value or "").strip().lower()
     if not text:
@@ -320,6 +326,33 @@ def _format_runtime_agent_config(doc: dict[str, Any], bound_tools: list[str], re
         "metadata": doc.get("metadata") or {},
         "updated_at": doc.get("updated_at"),
     }
+
+
+async def _is_orphaned_workshop_runtime_agent(doc: dict[str, Any], db: Any) -> bool:
+    metadata = doc.get("metadata") or {}
+    source = str(metadata.get("source") or "").strip().lower()
+    if source != "agent_workshop":
+        return False
+
+    version_id = str(metadata.get("version_id") or "").strip()
+    spec_id = str(metadata.get("spec_id") or "").strip()
+    if not version_id and not spec_id:
+        return False
+
+    try:
+        if version_id:
+            version_doc = await _get_collection(db, "agent_versions").find_one({"version_id": version_id}, {"_id": 1})
+            if version_doc:
+                return False
+        if spec_id:
+            spec_doc = await _get_collection(db, "agent_specs").find_one({"spec_id": spec_id}, {"_id": 1})
+            if spec_doc:
+                return False
+    except Exception as exc:
+        logger.warning("检查工坊运行时 Agent 是否失联失败: %s", exc)
+        return False
+
+    return True
 
 
 def _format_agent_spec(doc: dict[str, Any]) -> dict[str, Any]:
@@ -746,6 +779,8 @@ async def inspect_runtime_agent_configs(
             agent_id = str(doc.get("agent_id") or "").strip()
             if not agent_id:
                 continue
+            if await _is_orphaned_workshop_runtime_agent(doc, db):
+                continue
             registry_metadata = registry.get_metadata(agent_id)
             if not include_builtin_overrides and registry_metadata is not None:
                 continue
@@ -1129,6 +1164,139 @@ async def create_or_update_agent_workshop_draft(
 
 @tool
 @register_tool(
+    tool_id="analyze_agent_workshop_gaps",
+    name="执行 Agent 工坊缺口分析",
+    description="让 Nanobot 直接触发 Agent 工坊会话的缺口分析阶段，并返回结构化缺口摘要。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="当 Agent 工坊 Draft 已经确认到可以进入缺口分析，且希望继续由 Nanobot 主导后续阶段时使用。",
+    when_not_to_use="不适合在还没有有效 session_id 或规格尚未成形时调用。",
+    returns="返回 JSON 字符串，包含 session_id、spec_id 与 gap_report 摘要。",
+    example="analyze_agent_workshop_gaps(session_id='session_123')",
+    related_tools=["generate_agent_workshop_tooling_plan", "build_agent_workshop_version"],
+)
+async def analyze_agent_workshop_gaps(
+    session_id: Annotated[str, "Agent 工坊会话 ID"],
+) -> str:
+    """执行 Agent 工坊缺口分析并返回结构化结果。"""
+    try:
+        clean_session_id = str(session_id or "").strip()
+        if not clean_session_id:
+            return _json_response({"status": "error", "message": "session_id 不能为空"})
+
+        db = get_mongo_db()
+        result = await AgentWorkshopService(db=db).analyze_gaps(clean_session_id)
+        gap_report = result.get("gap_report") if isinstance(result, dict) else None
+        return _json_response({
+            "status": "ok",
+            "session_id": clean_session_id,
+            "spec_id": result.get("spec_id") if isinstance(result, dict) else "",
+            "gap_report": gap_report,
+            "summary": {
+                "existing_tools": len(_read_mapping_or_attr(gap_report, "existing_tools", []) or []),
+                "suggested_tools": len(_read_mapping_or_attr(gap_report, "suggested_tools", []) or []),
+                "blocking_gaps": len(_read_mapping_or_attr(gap_report, "blocking_gaps", []) or []),
+            },
+        })
+    except Exception as exc:
+        logger.error("执行 Agent 工坊缺口分析失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"执行 Agent 工坊缺口分析失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="generate_agent_workshop_tooling_plan",
+    name="生成 Agent 工坊工具需求草案",
+    description="让 Nanobot 直接触发 Agent 工坊工具需求草案生成，并返回结构化工具计划。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="当缺口分析已经完成，下一步需要产出工具需求草案，且希望保持 Nanobot 为主导入口时使用。",
+    when_not_to_use="不适合在 session_id 无效或缺口分析前置状态异常时调用。",
+    returns="返回 JSON 字符串，包含 session_id、spec_id 与 tooling_plan。",
+    example="generate_agent_workshop_tooling_plan(session_id='session_123')",
+    related_tools=["analyze_agent_workshop_gaps", "build_agent_workshop_version"],
+)
+async def generate_agent_workshop_tooling_plan(
+    session_id: Annotated[str, "Agent 工坊会话 ID"],
+) -> str:
+    """生成 Agent 工坊工具需求草案并返回结构化结果。"""
+    try:
+        clean_session_id = str(session_id or "").strip()
+        if not clean_session_id:
+            return _json_response({"status": "error", "message": "session_id 不能为空"})
+
+        db = get_mongo_db()
+        result = await AgentWorkshopService(db=db).generate_tooling_plan(clean_session_id)
+        tooling_plan = result.get("tooling_plan") if isinstance(result, dict) else None
+        missing_capabilities = []
+        if isinstance(tooling_plan, dict):
+            missing_capabilities = tooling_plan.get("missing_capabilities") or []
+        else:
+            missing_capabilities = getattr(tooling_plan, "missing_capabilities", []) or []
+
+        return _json_response({
+            "status": "ok",
+            "session_id": clean_session_id,
+            "spec_id": result.get("spec_id") if isinstance(result, dict) else "",
+            "tooling_plan": tooling_plan,
+            "summary": {
+                "missing_capabilities": len(missing_capabilities),
+            },
+        })
+    except Exception as exc:
+        logger.error("生成 Agent 工坊工具需求草案失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"生成 Agent 工坊工具需求草案失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="build_agent_workshop_version",
+    name="生成 Agent 工坊版本草案",
+    description="让 Nanobot 直接触发 Agent 工坊版本草案生成，并返回生成后的版本信息。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="当规格、缺口与工具计划已经足够明确，希望继续由 Nanobot 生成版本草案时使用。",
+    when_not_to_use="不适合在 session_id 缺失或规格尚未准备好时调用。",
+    returns="返回 JSON 字符串，包含 session_id、spec_id 和 version。",
+    example="build_agent_workshop_version(session_id='session_123')",
+    related_tools=["analyze_agent_workshop_gaps", "generate_agent_workshop_tooling_plan"],
+)
+async def build_agent_workshop_version(
+    session_id: Annotated[str, "Agent 工坊会话 ID"],
+) -> str:
+    """生成 Agent 工坊版本草案并返回结构化结果。"""
+    try:
+        clean_session_id = str(session_id or "").strip()
+        if not clean_session_id:
+            return _json_response({"status": "error", "message": "session_id 不能为空"})
+
+        db = get_mongo_db()
+        result = await AgentWorkshopService(db=db).build_version(clean_session_id)
+        version = result.get("version") if isinstance(result, dict) else None
+        return _json_response({
+            "status": "ok",
+            "session_id": clean_session_id,
+            "spec_id": result.get("spec_id") if isinstance(result, dict) else "",
+            "version": version,
+            "summary": {
+                "version_id": _read_mapping_or_attr(version, "version_id", None) if version is not None else None,
+                "required_tools": len(_read_mapping_or_attr(version, "required_tools", []) or []) if version is not None else 0,
+                "required_capabilities": len(_read_mapping_or_attr(version, "required_capabilities", []) or []) if version is not None else 0,
+            },
+        })
+    except Exception as exc:
+        logger.error("生成 Agent 工坊版本草案失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"生成 Agent 工坊版本草案失败: {exc}"})
+
+
+@tool
+@register_tool(
     tool_id="create_or_update_universal_agent_prompt_template",
     name="创建或更新 UniversalAgent 提示词模板",
     description="为配置式 UniversalAgent 候选创建或更新默认提示词模板，使运行时能够直接按 agent_id 读取模板。",
@@ -1501,6 +1669,9 @@ __all__ = [
     "prepare_agent_requirement_intake",
     "prepare_agent_generation_confirmation",
     "create_or_update_agent_workshop_draft",
+    "analyze_agent_workshop_gaps",
+    "generate_agent_workshop_tooling_plan",
+    "build_agent_workshop_version",
     "create_or_update_runtime_agent_config",
     "create_or_update_universal_agent_prompt_template",
     "bind_agent_tools_and_validate_candidate",
