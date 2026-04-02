@@ -2,6 +2,13 @@
 
 ## 1. 背景与问题定义
 
+配套专题目录：
+
+- [同步运行时接口专题总览](runtime-interfaces/README.md)
+- [Skill 运行时同步接口总览](runtime-interfaces/skill-runtime-overview.md)
+- [本地数据库访问接口设计](runtime-interfaces/local-data-access-design.md)
+- [项目查询接口与暴露治理](runtime-interfaces/project-access-and-governance.md)
+
 当前 Skill 生成管线的核心流程是：需求分析 -> 代码生成 -> 静态验证 -> 沙箱执行 -> 输出评估 -> 迭代修复。
 
 这套流程在以下场景中工作良好：
@@ -277,6 +284,122 @@ Prompt 中应新增一个显式部分：
 ```
 
 这样代码生成器的角色从“探索 + 实现”收缩为“基于事实实现”。
+
+## 8.1 当前实现中的数据库访问链路
+
+除了“侦察先于固化”的总体设计原则，当前代码实现还明确规定了生成 Skill 访问数据库的正式路径。
+
+这一部分需要单独写清楚，否则容易误解成“LLM 在生成代码时自己创建 MongoClient 直连数据库”。当前实现并不是这样。
+
+### 8.1.1 生成代码只能通过 skill_runtime 公开接口访问项目数据
+
+当前 Skill 代码生成 Prompt 已明确注入两类运行时文档：
+
+1. `core.skill_runtime.data_access`
+2. `core.skill_runtime.project_access`
+
+它们是生成 Skill 在运行时访问项目数据和项目能力的正式公开门面。
+
+约束如下：
+
+1. 若需要本地股票数据库数据，优先使用 `core.skill_runtime.data_access`
+2. 若需要通用集合查询、只读 schema 侦察、外部数据源同步 wrapper，则使用 `core.skill_runtime.project_access`
+3. 不允许直接导入 `tradingagents.dataflows.interface`
+4. 不允许直接导入 `tradingagents.dataflows.providers.*`
+5. 不允许直接导入 `core.skill_runtime.catalog`、`external_sources`、`sync_wrappers` 等内部细分模块作为最终 Skill 依赖
+6. 不允许自行 `import pymongo` / `MongoClient`
+7. 不允许硬编码数据库名或手写新的数据库连接逻辑
+
+换言之，生成 Skill 查询 MongoDB 的正确方式，不是自己建连接，而是调用 skill_runtime 中已经公开并约束好的 helper。
+
+### 8.1.2 代码生成阶段如何获得这些约束
+
+当前 `CodeGenerator` 在系统 Prompt 中会注入：
+
+1. 本地数据访问文档
+2. 项目数据访问文档
+3. 股票集合目录与数据契约
+4. 外部数据源目录
+
+因此，生成器不是在“闭眼猜数据库结构”，而是在已有运行时文档和侦察结论的基础上生成代码。
+
+对估值类与财务类 Skill，生成器当前会优先引导使用如下 helper：
+
+1. `get_stock_basic_info(...)`
+2. `get_stock_daily_quotes(...)`
+3. `get_market_quotes(...)`
+4. `get_latest_stock_price(...)`
+5. `get_stock_financial_data(...)`
+6. `get_stock_financial_periods(...)`
+7. `get_stock_valuation_context(...)`
+8. `summarize_industry_valuation(...)`
+9. `query_stock_collection(...)`
+10. `aggregate_stock_collection(...)`
+
+这意味着“数据库访问能力”本质上已经被收口成一组受控的运行时 API，而不是交由生成代码自由发挥。
+
+### 8.1.3 侦察层如何辅助数据库访问路径选择
+
+当前侦察层的数据库相关工具，职责不是替代最终 Skill 查询数据库，而是帮助确认：
+
+1. 允许访问哪些集合
+2. 集合中真实有哪些字段
+3. 字段覆盖率是否足够支撑目标实现
+4. 某只股票在对应集合中的样本结构是什么
+
+典型侦察能力包括：
+
+1. `list_supported_stock_collections()`
+2. `inspect_stock_collection_schema(...)`
+3. `inspect_symbol_documents(...)`
+4. `inspect_field_coverage(...)`
+5. `describe_runtime_helper(...)`
+6. `list_runtime_functions(...)`
+
+因此当前链路是：
+
+1. 侦察层确认集合、字段、helper 是否存在
+2. 事实报告给出推荐实现路径
+3. CodeGenerator 基于事实报告和 skill_runtime 文档生成代码
+4. 最终 Skill 通过公开 helper 间接访问数据库
+
+### 8.1.4 静态验证如何强制执行这条规则
+
+当前实现不是只靠 Prompt 约束，还增加了静态验证硬规则。
+
+静态验证器会：
+
+1. 仅允许导入 `core.skill_runtime.data_access`
+2. 仅允许导入 `core.skill_runtime.project_access`
+3. 拒绝直接导入 `tradingagents.dataflows.providers.*`
+4. 拒绝直接导入 `tradingagents.dataflows.interface`
+5. 拒绝其他未允许的 `core.*` 模块
+
+因此，哪怕模型在生成代码时尝试绕过公开接口，静态验证阶段也会阻止这类实现进入后续执行和注册环节。
+
+### 8.1.5 沙箱执行与正式注册时的运行方式
+
+当前生成 Skill 不会在主进程内直接 `exec`，而是：
+
+1. 在沙箱子进程中执行验证
+2. 通过项目根目录注入 `PYTHONPATH`
+3. 在正式启用后，再以独立包装函数方式注册到 `external_skills` 运行链路
+
+这意味着生成代码里对 `core.skill_runtime.*` 的导入，在沙箱验证阶段和正式注册阶段都应保持一致。
+
+因此只要 helper 能在主项目中正常工作，生成 Skill 在运行时就可以通过这些 helper 间接查询真实 MongoDB 数据。
+
+### 8.1.6 当前设计与代码一致性的结论
+
+当前代码实现与本文档在以下方面是一致的：
+
+1. 最终 Skill 不应直接连接 MongoDB
+2. 最终 Skill 必须通过 `core.skill_runtime` 公开接口获取数据库数据
+3. 侦察层负责确认字段与 helper 事实，而不是直接产出绕过约束的实现
+4. 静态验证器会强制阻止越界导入
+5. 沙箱执行与正式注册都依赖同一套项目运行时导入路径
+
+当前真正需要持续演进的，不是放宽生成代码的数据库权限，而是持续补齐 `core.skill_runtime.data_access` 与 `core.skill_runtime.project_access` 中的高频 helper。这样复杂 Skill 才能在不绕过设计边界的前提下稳定访问数据库中的股票数据。
 
 ## 9. 业务验收层设计
 

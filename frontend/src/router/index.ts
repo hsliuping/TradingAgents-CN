@@ -275,6 +275,29 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/debug/embedded-nanobot',
+    name: 'EmbeddedNanobotDebug',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: 'Embedded Nanobot 调试',
+      hideInMenu: true,
+      requiresAuth: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'EmbeddedNanobotDebugHome',
+        component: () => import('@/views/Debug/EmbeddedNanobot.vue'),
+        meta: {
+          title: 'Embedded Nanobot 调试',
+          hideInMenu: true,
+          requiresAuth: true
+        }
+      }
+    ]
+  },
+  {
     path: '/memory',
     name: 'Memory',
     component: () => import('@/layouts/BasicLayout.vue'),

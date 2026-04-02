@@ -267,6 +267,8 @@ def inspect_symbol_documents(
         cursor = cursor.sort("trade_date", -1)
     elif collection_name == "stock_financial_data":
         cursor = cursor.sort([("report_period", -1), ("report_date", -1)])
+    elif collection_name == "stock_financial_periods":
+        cursor = cursor.sort([("report_period", -1), ("ann_date", -1)])
     elif collection_name == "stock_news":
         cursor = cursor.sort("publish_time", -1)
 
@@ -348,7 +350,7 @@ PROJECT_DATA_ACCESS_DOC = """
 
 2. query_stock_collection(collection, filters=None, projection=None, sort=None, limit=100) -> list[dict]
    - 通用本地集合查询入口
-   - 允许访问: stock_basic_info, market_quotes, stock_daily_quotes, stock_financial_data, stock_news
+    - 允许访问: stock_basic_info, market_quotes, stock_daily_quotes, stock_financial_data, stock_financial_periods, stock_news
    - 适用于需要直接按字段读库的 Skill
 
 3. aggregate_stock_collection(collection, pipeline, limit=100) -> list[dict]

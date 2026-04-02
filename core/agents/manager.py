@@ -163,6 +163,7 @@ class ManagerAgent(BaseAgent):
             logger.info(f"📝 [{self.agent_id}] 完整用户提示词:\n{'='*80}\n{user_prompt}\n{'='*80}")
 
             # 5. 调用LLM做决策
+            system_prompt = self._apply_global_trading_advice_guard(system_prompt)
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)

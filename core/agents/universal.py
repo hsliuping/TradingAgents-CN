@@ -121,6 +121,7 @@ class UniversalAgent(BaseAgent):
             else:
                 user_prompt = self._ensure_runtime_context(user_prompt, state)
 
+            system_prompt = self._apply_global_trading_advice_guard(system_prompt)
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt),
@@ -221,7 +222,9 @@ class UniversalAgent(BaseAgent):
 3. 使用中文输出，格式结构清晰
 4. 如工具返回数据缺失某维度，说明"该维度数据缺失，暂不分析"
 
-请根据用户请求，调用相应工具获取数据，然后撰写详细的分析报告。"""
+请根据用户请求，调用相应工具获取数据，然后撰写详细的分析报告。
+
+全局合规铁律：严禁给出任何交易建议或操作性指令，包括买卖建议、仓位建议、目标价、止损止盈、建仓区间与择时判断。"""
 
     def _build_default_user_prompt(self, state: Dict[str, Any]) -> str:
         """构建默认用户提示词（当模板系统无对应模板时使用）"""

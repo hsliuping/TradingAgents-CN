@@ -26,6 +26,8 @@ from app.models.agent_workshop import (
     AgentCapabilityRequirement,
     AgentBenchmarkCase,
     AgentBenchmarkSampleSet,
+    AgentExecutionPlanStep,
+    AgentExecutionValidationPlan,
     AgentSpec,
     AgentSpecIOField,
     AgentSpecStatus,
@@ -47,6 +49,11 @@ from core.tools import get_tool_registry
 from core.tools.config import ToolCategory
 
 logger = logging.getLogger(__name__)
+
+GLOBAL_NO_TRADING_ADVICE_CONSTRAINT = (
+    "全局铁律：禁止输出任何交易建议、买卖/持有判断、仓位建议、目标价、止损止盈、"
+    "建仓区间、择时结论和其他可直接执行的操作性指令；只能提供研究结论、关键依据、风险揭示与情景分析。"
+)
 
 _AGENT_WORKSHOP_LLM_TRACE_LOCK = Lock()
 _AGENT_WORKSHOP_LLM_TRACE_PATH = Path(__file__).resolve().parents[2] / "logs" / "agent_workshop_llm_full.log"
@@ -464,6 +471,16 @@ class AgentWorkshopService:
         required_capabilities = self._select_required_capabilities(session.gap_report, session.tooling_plan, capability_snapshot)
         output_schema = self._build_output_schema(spec)
         evaluation_policy = self._build_evaluation_policy(spec)
+        execution_plan = self._build_execution_validation_plan(
+            spec,
+            required_tools,
+            output_schema,
+            gap_report=session.gap_report,
+            tooling_plan=session.tooling_plan,
+        )
+        evaluation_policy["creation_mode"] = "execution-first"
+        evaluation_policy["execution_validation_required"] = True
+        evaluation_policy["execution_validation_status"] = execution_plan.validation_status
         prompt_template = await self._create_prompt_template(
             version_id,
             spec,
@@ -484,6 +501,7 @@ class AgentWorkshopService:
             required_capabilities=required_capabilities,
             output_schema=output_schema,
             evaluation_policy=evaluation_policy,
+            execution_plan=execution_plan,
             published_from_session_id=session.session_id,
         )
 
@@ -1003,6 +1021,9 @@ class AgentWorkshopService:
         spec = AgentSpec(**spec_doc)
 
         symbol = str((stock or {}).get("symbol") or "").strip()
+        sample_input = version.execution_plan.sample_input if version.execution_plan else {}
+        if not symbol:
+            symbol = str(sample_input.get("symbol") or "").strip()
         if not symbol:
             raise ValueError("stock.symbol 不能为空")
 
@@ -1048,8 +1069,10 @@ class AgentWorkshopService:
         )
 
         analysis_date = str(stock.get("analysis_date") or now_tz().strftime("%Y-%m-%d"))
-        market_type = str(stock.get("market_type") or "A股")
-        task_description = user_goal or spec.primary_goal or spec.name
+        if not stock.get("analysis_date") and sample_input.get("analysis_date"):
+            analysis_date = str(sample_input.get("analysis_date") or analysis_date)
+        market_type = str(stock.get("market_type") or sample_input.get("market_type") or "A股")
+        task_description = user_goal or str(sample_input.get("task_description") or "").strip() or spec.primary_goal or spec.name
 
         ctx = AgentContext(
             user_id=spec.owner_user_id or "agent_workshop",
@@ -1083,6 +1106,7 @@ class AgentWorkshopService:
             "prompt_overrides": prompt_overrides or {},
             "task_description": task_description,
             "workflow_id": f"agent_workshop_debug_{version.version_id}",
+            "agent_workshop_execution_plan": version.execution_plan.model_dump(mode="json") if version.execution_plan else {},
         }
 
         try:
@@ -1125,6 +1149,7 @@ class AgentWorkshopService:
                 "template_id": template_id,
                 "template_name": version.prompt_template_ref.get("template_name"),
             },
+            "execution_plan": version.execution_plan.model_dump(mode="json") if version.execution_plan else {},
             "metadata": {
                 "agent_id": version.agent_metadata.get("id") or version.version_id,
                 "agent_name": version.agent_metadata.get("name") or spec.name,
@@ -3730,6 +3755,7 @@ class AgentWorkshopService:
                 f"\n你必须体现该角色对应的金融行业专业判断，但所有事实、数字、结论都必须建立在输入信息、可追溯数据和工具结果之上；不得把本应由数据或工具支撑的内容改成主观臆测。"
                 f"\nrequired_tools 表示当前版本允许且优先考虑的候选工具集。它不是要求你把所有工具都调用一遍，而是要求你根据任务子问题选择最少且足够的工具；但凡涉及估值区间、目标价、评分、排序、权重等精确数值，你必须调用对应工具或引用上游已提供的可追溯数据，否则不得输出该精确数字。"
                 f"\n你必须坚持角色边界，不扩展到未授权的交易建议或其他职责；如果当前信息或能力不足，就明确说明依据不足和降级边界。"
+                f"\n{GLOBAL_NO_TRADING_ADVICE_CONSTRAINT}"
                 f"\n当前版本绑定工具来自 Agent 工坊第二步缺口分析与第三步版本构建结果；若某能力未被绑定或未在上游结果中提供，不得自行假设可用。"
             ),
             user_prompt="请先识别本次任务所在的业务场景、你的角色职责、当前可用能力和已知系统现状，再结合输入标的、业务目标、上下文数据与可用工具，完成一次面向真实业务交付的分析。",
@@ -3747,6 +3773,7 @@ class AgentWorkshopService:
                 "- 第三步生成版本时，必须继承第二步缺口分析已确认的工具绑定，不得重新假设一套新的可用工具集。",
                 "- required_tools 是允许且优先考虑的候选工具集，按任务需要选择性调用；不得为了凑工具调用记录而机械调用全部工具。",
                 "- 若输出估值区间、目标价、评分、排序、权重等精确数值，必须给出可追溯的数据依据、来源标签以及对应工具结果；没有依据时禁止输出精确数字。",
+                f"- {GLOBAL_NO_TRADING_ADVICE_CONSTRAINT}",
                 *((["- 第二步仍标记为缺失的能力：" + "；".join(missing_capabilities)] if missing_capabilities else [])),
             ])),
         )
@@ -3832,6 +3859,7 @@ class AgentWorkshopService:
                         "spec_id": version.spec_id,
                         "version_id": version.version_id,
                         "template_id": version.prompt_template_ref.get("template_id"),
+                        "execution_plan": version.execution_plan.model_dump(mode="json") if version.execution_plan else {},
                     },
                     "updated_at": now_tz(),
                 },
@@ -3884,6 +3912,126 @@ class AgentWorkshopService:
             execution_order=50,
         )
         return metadata.model_dump(mode="json")
+
+    def _build_execution_validation_plan(
+        self,
+        spec: AgentSpec,
+        required_tools: List[str],
+        output_schema: Dict[str, Any],
+        gap_report: Optional[AgentWorkshopGapAnalysis] = None,
+        tooling_plan: Optional[Dict[str, Any]] = None,
+    ) -> AgentExecutionValidationPlan:
+        sample_input = self._build_execution_sample_input(spec)
+        output_fields = self._list_io_field_labels(spec.outputs) or list((output_schema.get("properties") or {}).keys())
+        top_tools = self._dedupe(required_tools)[:4]
+        evidence_tools = top_tools[:2]
+        capability_gaps = self._dedupe([
+            *((gap_report.blocking_gaps if gap_report else []) or []),
+            *(((tooling_plan or {}).get("missing_capabilities") or []) if isinstance(tooling_plan, dict) else []),
+        ])
+
+        steps = [
+            AgentExecutionPlanStep(
+                step_id="understand-task",
+                title="确认任务与交付边界",
+                objective="根据规格确认本次运行必须覆盖的输出、边界和非目标。",
+                suggested_tools=[],
+                expected_evidence=self._dedupe([
+                    f"至少覆盖这些输出：{'；'.join(output_fields[:4])}" if output_fields else "明确本次输出字段",
+                    *( [f"遵守这些关键约束：{'；'.join(spec.constraints[:3])}"] if spec.constraints else [] ),
+                ]),
+                failure_signals=[
+                    "输出只是在泛泛描述职责，没有回应这次具体任务。",
+                    "回答越过了规格中的 non_goals 或 constraints。",
+                ],
+            ),
+            AgentExecutionPlanStep(
+                step_id="collect-evidence",
+                title="收集核心证据",
+                objective="优先通过当前版本绑定的工具拿到支撑结论的核心事实，而不是先写结论。",
+                suggested_tools=top_tools,
+                expected_evidence=self._dedupe([
+                    "至少出现 1 次成功的绑定工具调用。" if top_tools else "若当前版本没有绑定工具，应明确说明这次只能做约束内的降级输出。",
+                    *( [f"优先复用这些工具：{'、'.join(top_tools)}"] if top_tools else [] ),
+                ]),
+                failure_signals=[
+                    "最终报告出现了关键结论，但 tool_trace 中没有对应事实获取过程。",
+                    "把 required_tools 当成装饰信息，实际没有用于证据收集。",
+                ],
+            ),
+            AgentExecutionPlanStep(
+                step_id="deliver-output",
+                title="生成可验证交付",
+                objective="基于已获取证据输出结果，并对关键数字、结论和降级边界做说明。",
+                suggested_tools=evidence_tools,
+                expected_evidence=self._dedupe([
+                    *( [f"输出字段可在结果中找到：{'；'.join(output_fields[:4])}"] if output_fields else [] ),
+                    "若输出精确数值、区间、排序或评分，必须能在工具结果或上游结构化输入中追溯。",
+                ]),
+                failure_signals=[
+                    "出现精确数字或区间，但没有对应来源、参数或工具证据。",
+                    "明明数据不足，却仍然输出了完整确定性结论。",
+                ],
+            ),
+        ]
+
+        acceptance_checks = self._dedupe([
+            *( [f"结果中应覆盖输出字段：{label}" for label in output_fields[:6]] ),
+            *( [f"成功标准：{item}" for item in spec.success_criteria[:4]] ),
+            *( ["tool_trace 中至少出现 1 个来自 required_tools 的成功调用。"] if required_tools else [] ),
+            *( ["若输出估值区间、目标价、评分、排序、权重等精确数值，必须具备工具或结构化数据依据。"] if self._get_numeric_traceability_policy(spec)["enabled"] else [] ),
+        ])
+
+        fallback_rules = self._dedupe([
+            "如果当前绑定工具不足以支撑精确结论，应降级为定性判断并说明原因。",
+            "如果核心字段缺失，不要伪造数字，应直接说明缺失维度。",
+            *( [f"当前仍存在未补齐能力：{'；'.join(capability_gaps[:4])}"] if capability_gaps else [] ),
+        ])
+
+        rationale_parts = [
+            "创建阶段同步生成执行验证计划，目的是把版本从“规格草案”推进到“可运行交付单元”。",
+            "调试和评估应优先验证是否真的调用到了所需工具、是否真的覆盖了目标输出，而不是只看 Prompt 是否写得完整。",
+        ]
+        if required_tools:
+            rationale_parts.append(f"当前版本绑定的核心工具有：{'、'.join(top_tools)}。")
+        if capability_gaps:
+            rationale_parts.append(f"当前仍需关注的缺口有：{'；'.join(capability_gaps[:4])}。")
+
+        return AgentExecutionValidationPlan(
+            mode="tool-driven",
+            validation_status="not-run",
+            rationale="\n".join(rationale_parts),
+            sample_input=sample_input,
+            execution_steps=steps,
+            acceptance_checks=acceptance_checks,
+            fallback_rules=fallback_rules,
+        )
+
+    def _build_execution_sample_input(self, spec: AgentSpec) -> Dict[str, Any]:
+        symbol = "600519"
+        domain_text = " ".join([
+            spec.domain or "",
+            spec.primary_goal or "",
+            " ".join(spec.preferred_methods or []),
+            " ".join(spec.responsibilities or []),
+        ]).lower()
+        if any(keyword in domain_text for keyword in ["银行", "pb", "roe", "金融"]):
+            symbol = "600036"
+        elif any(keyword in domain_text for keyword in ["新能源", "成长", "peg"]):
+            symbol = "300750"
+        elif spec.sample_symbols:
+            symbol = str(spec.sample_symbols[0]).strip() or symbol
+
+        task_description = spec.primary_goal or spec.name
+        if spec.outputs:
+            task_description = f"{task_description}。请至少覆盖这些输出：{'、'.join(self._list_io_field_labels(spec.outputs)[:4])}"
+
+        return {
+            "symbol": symbol,
+            "market_type": "A股",
+            "analysis_date": now_tz().strftime("%Y-%m-%d"),
+            "task_description": task_description,
+        }
 
     def _build_sample_sets_for_spec(self, spec: AgentSpec) -> List[AgentBenchmarkSampleSet]:
         if self._is_valuation_spec(spec):
@@ -4176,6 +4324,15 @@ class AgentWorkshopService:
         goal_evidence = self._analyze_goal_alignment(runtime_result.get("user_goal", spec.primary_goal), output_text, payload)
         valuation_guardrail = self._analyze_valuation_numeric_guardrail(spec, runtime_result, output_text)
         valuation_traceability = self._build_valuation_traceability(spec, runtime_result, output_text)
+        execution_plan_review = self._evaluate_execution_plan_review(
+            version,
+            spec,
+            runtime_result,
+            output_text,
+            output_evidence,
+            goal_evidence,
+            valuation_guardrail,
+        )
 
         output_coverage = output_evidence["score"]
         explainability = explain_evidence["score"]
@@ -4187,6 +4344,7 @@ class AgentWorkshopService:
             "runtime_goal_alignment": round(goal_alignment, 2),
             "runtime_output_coverage": round(output_coverage, 2),
             "runtime_explainability": round((explainability + method_quality) / 2, 2),
+            "runtime_execution_readiness": round(execution_plan_review["score"], 2),
             "runtime_constraint_control": round(max(0.0, 1.0 - forbidden_penalty), 2),
         }
         issues: List[str] = []
@@ -4201,6 +4359,7 @@ class AgentWorkshopService:
         if valuation_guardrail["violation"]:
             issues.append("数值类结果违反可追溯硬约束：输出了精确数字或区间，但没有提供可追溯的数据源或工具计算依据。")
             issues.append("当前更核心的问题不是文案表达，而是缺少可复核的数据链路或直接计算工具，导致 Agent 只能生成看似合理但不可复核的数字。")
+        issues.extend(execution_plan_review["issues"])
         if user_feedback.strip():
             issues.append(f"用户反馈中提到的问题待处理：{user_feedback.strip()}")
 
@@ -4210,12 +4369,14 @@ class AgentWorkshopService:
             "把这次 production review 中暴露的问题加入下一轮真实结果验收清单。",
             *( ["对数值类结果增加原始数据、工具计算结果、输入参数和来源标签；没有足够依据时不要输出精确数字。"] if valuation_guardrail["violation"] else [] ),
             *( ["下一轮工坊应优先补数据链路或直接计算工具，而不是继续微调 Prompt 让模型自己编数字。"] if valuation_guardrail["violation"] else [] ),
+            *execution_plan_review["recommendations"],
         ])
         details = {
             "mode": "production-review",
             "runtime_result": runtime_result,
             "parsed_output_excerpt": output_text[:1200],
             "valuation_traceability": valuation_traceability,
+            "execution_plan_review": execution_plan_review,
             "score_breakdown": {
                 "runtime_goal_alignment": {
                     "matched": goal_evidence["matched"],
@@ -4234,6 +4395,11 @@ class AgentWorkshopService:
                         "检查是否解释了假设、风险、失效条件，以及规格要求的方法依据。",
                     ],
                 },
+                "runtime_execution_readiness": {
+                    "matched": execution_plan_review["matched"],
+                    "missing": execution_plan_review["missing"],
+                    "notes": execution_plan_review["notes"],
+                },
                 "runtime_constraint_control": {
                     "matched": self._dedupe([*forbidden_evidence["matched"], *valuation_guardrail["matched"]]),
                     "missing": self._dedupe([*forbidden_evidence["missing"], *valuation_guardrail["missing"]]),
@@ -4242,6 +4408,146 @@ class AgentWorkshopService:
             },
         }
         return scores, issues, recommendations, details
+
+    def _evaluate_execution_plan_review(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+        runtime_result: Dict[str, Any],
+        output_text: str,
+        output_evidence: Dict[str, Any],
+        goal_evidence: Dict[str, Any],
+        valuation_guardrail: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        plan = version.execution_plan or AgentExecutionValidationPlan()
+        debug_prompt = self._extract_runtime_debug_prompt(runtime_result)
+        tool_trace = self._sanitize_tool_trace(debug_prompt.get("tool_trace"))
+        successful_tool_names = self._dedupe([
+            str(item.get("tool_name") or "").strip()
+            for item in tool_trace
+            if isinstance(item, dict) and item.get("success") and str(item.get("tool_name") or "").strip()
+        ])
+        required_tools = self._dedupe([str(item).strip() for item in (version.required_tools or []) if str(item).strip()])
+        successful_required_tools = [tool for tool in required_tools if tool in successful_tool_names]
+        missing_required_tools = [tool for tool in required_tools if tool not in successful_required_tools]
+
+        runtime_symbol = str(
+            runtime_result.get("symbol")
+            or runtime_result.get("stock_symbol")
+            or runtime_result.get("metadata", {}).get("symbol")
+            or ""
+        ).strip()
+        sample_symbol = str((plan.sample_input or {}).get("symbol") or "").strip()
+        sample_symbol_aligned = not sample_symbol or not runtime_symbol or runtime_symbol == sample_symbol
+
+        output_labels = self._list_io_field_labels(spec.outputs)
+        matched_outputs = self._dedupe([str(item) for item in (output_evidence.get("matched") or []) if item])
+        missing_outputs = self._dedupe([str(item) for item in (output_evidence.get("missing") or []) if item])
+
+        acceptance_results: List[Dict[str, Any]] = []
+        for label in output_labels[:6]:
+            matched = any(self._match_concept(label, candidate) for candidate in matched_outputs)
+            acceptance_results.append({
+                "label": f"覆盖输出字段：{label}",
+                "passed": matched,
+                "detail": "已在结果或结构化输出中识别到。" if matched else "本次运行没有稳定覆盖该字段。",
+                "category": "output",
+            })
+
+        success_criteria = self._dedupe([str(item).strip() for item in (spec.success_criteria or []) if str(item).strip()])
+        for item in success_criteria[:4]:
+            matched = self._match_concept(item, output_text) or any(self._match_concept(item, matched_item) for matched_item in goal_evidence.get("matched") or [])
+            acceptance_results.append({
+                "label": f"满足成功标准：{item}",
+                "passed": matched,
+                "detail": "输出中存在对应响应。" if matched else "当前输出还看不到这个成功标准的直接证据。",
+                "category": "success_criteria",
+            })
+
+        if required_tools:
+            acceptance_results.append({
+                "label": "至少命中一个 required_tools 成功调用",
+                "passed": bool(successful_required_tools),
+                "detail": (
+                    f"已命中：{'、'.join(successful_required_tools[:4])}" if successful_required_tools
+                    else "tool_trace 中还没有看到 required_tools 的成功调用。"
+                ),
+                "category": "tool_usage",
+            })
+
+        numeric_policy = self._get_numeric_traceability_policy(spec)
+        if numeric_policy["enabled"]:
+            acceptance_results.append({
+                "label": "精确数字具备可追溯来源",
+                "passed": not valuation_guardrail.get("violation"),
+                "detail": "本次运行没有触发不可追溯数值问题。" if not valuation_guardrail.get("violation") else "出现了精确数字，但缺少结构化来源或工具证据。",
+                "category": "traceability",
+            })
+
+        passed_count = sum(1 for item in acceptance_results if item.get("passed"))
+        acceptance_score = passed_count / max(1, len(acceptance_results)) if acceptance_results else 0.7
+        tool_score = 1.0 if not required_tools else len(successful_required_tools) / len(required_tools)
+        sample_input_score = 1.0 if sample_symbol_aligned else 0.4
+        score = round((acceptance_score * 0.55) + (tool_score * 0.3) + (sample_input_score * 0.15), 2)
+
+        matched: List[str] = []
+        if sample_symbol:
+            matched.append(f"默认样本标的：{sample_symbol}") if sample_symbol_aligned else None
+        if successful_required_tools:
+            matched.append(f"已命中的 required_tools：{'、'.join(successful_required_tools[:4])}")
+        if not missing_outputs:
+            matched.append("规格要求的核心输出字段已全部覆盖。")
+        matched.extend([item["label"] for item in acceptance_results if item.get("passed")][:6])
+
+        missing: List[str] = []
+        if sample_symbol and not sample_symbol_aligned:
+            missing.append(f"默认样本建议标的为 {sample_symbol}，但本次调试输入是 {runtime_symbol or '空'}")
+        if missing_required_tools:
+            missing.append(f"未命中的 required_tools：{'、'.join(missing_required_tools[:4])}")
+        if missing_outputs:
+            missing.append(f"未覆盖输出字段：{'、'.join(missing_outputs[:4])}")
+        missing.extend([item["label"] for item in acceptance_results if not item.get("passed")][:6])
+
+        issues: List[str] = []
+        if score < 0.75:
+            issues.append("execution_plan 验收未通过：这次运行还没有达到版本创建时定义的执行验证要求。")
+        if missing_required_tools:
+            issues.append("这次运行没有真正调用到版本声明的关键工具，当前结果更像 Prompt 演示，不像可复核的执行结果。")
+        if missing_outputs:
+            issues.append("execution_plan 要求的核心输出字段仍有缺失，说明版本草案和实际运行结果还没对齐。")
+        if sample_symbol and not sample_symbol_aligned:
+            issues.append("本次调试输入偏离了版本默认样本，当前评估结论不能直接代表 build_version 生成的执行计划是否成立。")
+
+        recommendations = self._dedupe([
+            *( ["先按 execution_plan.sample_input 重新跑一次调试，确保版本默认样本能稳定通过。"] if sample_symbol and not sample_symbol_aligned else [] ),
+            *( ["把 required_tools 的调用前置到分析主链路，而不是只在 Prompt 里声明。"] if missing_required_tools else [] ),
+            *( ["按 execution_plan.acceptance_checks 逐项补齐输出字段，再重新发起结果评估。"] if missing_outputs else [] ),
+            *( ["如果当前工具无法支撑精确结论，就按 execution_plan.fallback_rules 降级输出，不要硬给确定性数字。"] if valuation_guardrail.get("violation") else [] ),
+        ])
+
+        status = "pass" if score >= 0.8 else "revise" if score >= 0.55 else "fail"
+        notes = self._dedupe([
+            f"执行计划模式：{plan.mode or 'tool-driven'}",
+            f"执行计划状态：{plan.validation_status or 'not-run'}",
+            *( [f"计划理由：{plan.rationale.strip()}"] if str(plan.rationale or '').strip() else [] ),
+            *( [f"成功工具轨迹：{'、'.join(successful_tool_names[:6])}"] if successful_tool_names else ["当前 debug_prompt 里没有成功的 tool_trace。"] ),
+            *( [f"降级规则：{'；'.join((plan.fallback_rules or [])[:3])}"] if plan.fallback_rules else [] ),
+        ])
+
+        return {
+            "status": status,
+            "score": score,
+            "sample_input": plan.sample_input,
+            "successful_tools": successful_tool_names,
+            "successful_required_tools": successful_required_tools,
+            "missing_required_tools": missing_required_tools,
+            "acceptance_results": acceptance_results,
+            "matched": self._dedupe(matched),
+            "missing": self._dedupe(missing),
+            "issues": self._dedupe(issues),
+            "recommendations": recommendations,
+            "notes": notes,
+        }
 
     def _analyze_valuation_numeric_guardrail(self, spec: AgentSpec, runtime_result: Dict[str, Any], output_text: str) -> Dict[str, Any]:
         policy = self._get_numeric_traceability_policy(spec)

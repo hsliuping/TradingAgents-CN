@@ -12,6 +12,7 @@ SUPPORTED_COLLECTIONS = {
     "market_quotes",
     "stock_daily_quotes",
     "stock_financial_data",
+    "stock_financial_periods",
     "stock_news",
 }
 
@@ -45,6 +46,12 @@ STOCK_COLLECTION_SUMMARY: List[Dict[str, Any]] = [
         "purpose": "财务报表与关键财务指标，供基本面分析和估值计算使用。",
         "preferred_access": ["get_stock_financial_data"],
         "query_keys": ["symbol", "report_period", "data_source", "report_type"],
+    },
+    {
+        "collection": "stock_financial_periods",
+        "purpose": "按报告期展开后的标准化财务记录，适合同比、环比、多期质量与成长因子计算。",
+        "preferred_access": ["get_stock_financial_periods"],
+        "query_keys": ["symbol", "report_period", "ann_date", "source"],
     },
     {
         "collection": "stock_news",

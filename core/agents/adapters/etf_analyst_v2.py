@@ -75,6 +75,7 @@ class EtfAnalystAgentV2(BaseAgent):
         system_prompt = self._build_system_prompt(state)
         user_prompt = self._build_user_prompt(ticker, trade_date, state)
 
+        system_prompt = self._apply_global_trading_advice_guard(system_prompt)
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)

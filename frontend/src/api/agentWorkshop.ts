@@ -187,6 +187,25 @@ export interface AgentWorkshopToolingPlanResult {
   tooling_plan: AgentWorkshopToolingPlan
 }
 
+export interface AgentExecutionPlanStep {
+  step_id: string
+  title: string
+  objective: string
+  suggested_tools: string[]
+  expected_evidence: string[]
+  failure_signals: string[]
+}
+
+export interface AgentExecutionValidationPlan {
+  mode: string
+  validation_status: string
+  rationale: string
+  sample_input: Record<string, any>
+  execution_steps: AgentExecutionPlanStep[]
+  acceptance_checks: string[]
+  fallback_rules: string[]
+}
+
 export interface AgentVersion {
   version_id: string
   spec_id: string
@@ -203,6 +222,7 @@ export interface AgentVersion {
   required_capabilities: string[]
   output_schema: Record<string, any>
   evaluation_policy: Record<string, any>
+  execution_plan?: AgentExecutionValidationPlan
   published_from_session_id?: string | null
   created_at: string
   updated_at: string

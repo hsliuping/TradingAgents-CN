@@ -11,6 +11,9 @@
         </el-tag>
       </div>
       <div class="header-right">
+        <el-button size="small" plain @click="goToEmbeddedNanobotDebug">
+          Nanobot 调试
+        </el-button>
         <el-button size="small" @click="settingsDialogVisible = true">
           <el-icon><Setting /></el-icon>
           助手设置
@@ -479,6 +482,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ChatDotRound, DataAnalysis, Delete, Document, FolderOpened, Plus, QuestionFilled, Setting, User } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
@@ -499,6 +503,8 @@ import type {
 import type { LLMConfig } from '@/api/config'
 
 marked.setOptions({ breaks: true, gfm: true })
+
+const router = useRouter()
 
 const renderMarkdown = (content: string): string => {
   if (!content?.trim()) return ''
@@ -920,6 +926,10 @@ const selectThread = async (threadId: string) => {
 
 const handleThreadNodeClick = (data: ThreadTreeNode) => {
   void selectThread(data.thread_id)
+}
+
+const goToEmbeddedNanobotDebug = () => {
+  router.push('/debug/embedded-nanobot')
 }
 
 const getDescendantThreadIds = (threadId: string): string[] => {

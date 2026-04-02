@@ -537,6 +537,49 @@
                     <el-tag v-for="item in latestVersion.evaluation_policy?.dimensions || []" :key="item" class="tag-item">{{ item }}</el-tag>
                   </div>
                 </div>
+                <div class="field-block" v-if="latestExecutionPlan">
+                  <div class="field-label">执行验证计划</div>
+                  <div class="note-item" v-if="latestExecutionPlan.rationale">{{ latestExecutionPlan.rationale }}</div>
+                  <div class="runtime-meta-row">
+                    <span>模式：{{ latestExecutionPlan.mode || 'tool-driven' }}</span>
+                    <span>状态：{{ latestExecutionPlan.validation_status || 'not-run' }}</span>
+                  </div>
+                  <div class="field-block" v-if="executionPlanSampleInputText" style="margin-top: 12px;">
+                    <div class="field-label">默认调试输入</div>
+                    <pre class="runtime-raw-response">{{ executionPlanSampleInputText }}</pre>
+                  </div>
+                  <div class="field-block" v-if="executionPlanStepCards.length" style="margin-top: 12px;">
+                    <div class="field-label">执行步骤</div>
+                    <div class="breakdown-grid">
+                      <div v-for="item in executionPlanStepCards" :key="item.stepId" class="breakdown-card">
+                        <div class="breakdown-title">{{ item.title }}</div>
+                        <div class="note-item compact-note">{{ item.objective }}</div>
+                        <div v-if="item.tools.length" class="breakdown-group">
+                          <div class="breakdown-label">建议工具</div>
+                          <div class="tag-wrap">
+                            <el-tag v-for="tool in item.tools" :key="tool" class="tag-item" effect="plain">{{ tool }}</el-tag>
+                          </div>
+                        </div>
+                        <div v-if="item.expectedEvidence.length" class="breakdown-group">
+                          <div class="breakdown-label success">期望证据</div>
+                          <div v-for="entry in item.expectedEvidence" :key="entry" class="note-item compact-note">{{ entry }}</div>
+                        </div>
+                        <div v-if="item.failureSignals.length" class="breakdown-group">
+                          <div class="breakdown-label warning">失败信号</div>
+                          <div v-for="entry in item.failureSignals" :key="entry" class="note-item compact-note">{{ entry }}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="field-block" v-if="executionPlanAcceptanceChecks.length" style="margin-top: 12px;">
+                    <div class="field-label">验收清单</div>
+                    <div v-for="item in executionPlanAcceptanceChecks" :key="item" class="note-item compact-note">{{ item }}</div>
+                  </div>
+                  <div class="field-block" v-if="executionPlanFallbackRules.length" style="margin-top: 12px;">
+                    <div class="field-label">降级规则</div>
+                    <div v-for="item in executionPlanFallbackRules" :key="item" class="note-item compact-note">{{ item }}</div>
+                  </div>
+                </div>
                 <div class="action-row right">
                   <el-button type="primary" plain @click="handleIterateVersion" :loading="iteratingVersion">基于当前结果发起下一轮迭代</el-button>
                 </div>
@@ -680,6 +723,37 @@
                         <div v-for="entry in item.notes" :key="entry" class="note-item compact-note">{{ entry }}</div>
                       </div>
                     </div>
+                  </div>
+                </div>
+                <div class="field-block" v-if="executionPlanReview">
+                  <div class="field-label">执行计划验收</div>
+                  <div class="runtime-meta-row">
+                    <span>状态：{{ executionPlanReview.statusText }}</span>
+                    <span>得分：{{ executionPlanReview.score }}</span>
+                  </div>
+                  <div v-if="executionPlanReview.sampleInputText" class="note-item compact-note">推荐样本：{{ executionPlanReview.sampleInputText }}</div>
+                  <div class="breakdown-grid" v-if="executionPlanReview.acceptanceResults.length">
+                    <div v-for="item in executionPlanReview.acceptanceResults" :key="item.label" class="breakdown-card">
+                      <div class="breakdown-title">{{ item.label }}</div>
+                      <div class="breakdown-group">
+                        <div class="breakdown-label" :class="item.passed ? 'success' : 'warning'">{{ item.passed ? '通过' : '未通过' }}</div>
+                        <div class="note-item compact-note">{{ item.detail }}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="breakdown-grid" v-if="executionPlanReview.matched.length || executionPlanReview.missing.length">
+                    <div class="breakdown-card" v-if="executionPlanReview.matched.length">
+                      <div class="breakdown-title">已满足</div>
+                      <div v-for="item in executionPlanReview.matched" :key="item" class="note-item compact-note">{{ item }}</div>
+                    </div>
+                    <div class="breakdown-card" v-if="executionPlanReview.missing.length">
+                      <div class="breakdown-title">待补齐</div>
+                      <div v-for="item in executionPlanReview.missing" :key="item" class="note-item compact-note">{{ item }}</div>
+                    </div>
+                  </div>
+                  <div class="field-block" v-if="executionPlanReview.notes.length" style="margin-top: 12px;">
+                    <div class="field-label">说明</div>
+                    <div v-for="item in executionPlanReview.notes" :key="item" class="note-item compact-note">{{ item }}</div>
                   </div>
                 </div>
                 <div class="field-block" v-if="latestEvaluation.details?.parsed_output_excerpt && !displayedRuntimeOutput">
@@ -960,6 +1034,32 @@ const pendingVersionCapabilities = computed(() => {
 const resolvedVersionCapabilities = computed(() => {
   return (latestVersion.value?.required_capabilities || []).filter(item => existingCapabilityIds.value.has(normalizeCapabilityLabel(item)))
 })
+const latestExecutionPlan = computed(() => latestVersion.value?.execution_plan || null)
+const executionPlanSampleInputText = computed(() => {
+  const payload = latestExecutionPlan.value?.sample_input
+  if (!payload || typeof payload !== 'object' || !Object.keys(payload).length) return ''
+  try {
+    return JSON.stringify(payload, null, 2)
+  } catch {
+    return String(payload)
+  }
+})
+const executionPlanStepCards = computed(() => {
+  return (latestExecutionPlan.value?.execution_steps || []).map(item => ({
+    stepId: item.step_id,
+    title: item.title,
+    objective: item.objective,
+    tools: Array.isArray(item.suggested_tools) ? item.suggested_tools.filter(Boolean) : [],
+    expectedEvidence: Array.isArray(item.expected_evidence) ? item.expected_evidence.filter(Boolean) : [],
+    failureSignals: Array.isArray(item.failure_signals) ? item.failure_signals.filter(Boolean) : [],
+  }))
+})
+const executionPlanAcceptanceChecks = computed(() => {
+  return Array.isArray(latestExecutionPlan.value?.acceptance_checks) ? latestExecutionPlan.value?.acceptance_checks.filter(Boolean) : []
+})
+const executionPlanFallbackRules = computed(() => {
+  return Array.isArray(latestExecutionPlan.value?.fallback_rules) ? latestExecutionPlan.value?.fallback_rules.filter(Boolean) : []
+})
 const promptSections = computed(() => {
   const content = latestVersionPrompt.value?.content
   if (!content) return []
@@ -1140,6 +1240,39 @@ const valuationTraceabilityItems = computed(() => {
     }
   })
 })
+const executionPlanReview = computed(() => {
+  const review = latestEvaluation.value?.details?.execution_plan_review
+  if (!review || typeof review !== 'object') return null
+  const sampleInput = review.sample_input && typeof review.sample_input === 'object' ? review.sample_input : null
+  let sampleInputText = ''
+  if (sampleInput) {
+    try {
+      sampleInputText = JSON.stringify(sampleInput, null, 2)
+    } catch {
+      sampleInputText = String(sampleInput)
+    }
+  }
+  const status = typeof review.status === 'string' ? review.status : ''
+  const statusMap: Record<string, string> = {
+    pass: '通过',
+    revise: '需补齐',
+    fail: '失败',
+  }
+  return {
+    status,
+    statusText: statusMap[status] || status || '未知',
+    score: typeof review.score === 'number' ? review.score : '-',
+    sampleInputText,
+    acceptanceResults: Array.isArray(review.acceptance_results) ? review.acceptance_results.map(item => ({
+      label: item?.label || '未命名检查项',
+      passed: Boolean(item?.passed),
+      detail: item?.detail || '',
+    })) : [],
+    matched: Array.isArray(review.matched) ? review.matched.filter(Boolean) : [],
+    missing: Array.isArray(review.missing) ? review.missing.filter(Boolean) : [],
+    notes: Array.isArray(review.notes) ? review.notes.filter(Boolean) : [],
+  }
+})
 const evaluationScoreCards = computed(() => {
   const scoreMap: Record<string, { label: string; description: string }> = {
     runtime_goal_alignment: { label: '目标对齐', description: '输出有没有真正回应这次任务目标' },
@@ -1147,6 +1280,7 @@ const evaluationScoreCards = computed(() => {
     runtime_reasoning_quality: { label: '分析过程', description: '推理过程、假设与结论之间是否自洽合理' },
     runtime_tool_usage: { label: '工具使用', description: '工具选择和调用过程是否适合这个任务' },
     runtime_prompt_quality: { label: '提示词质量', description: 'Prompt 是否把任务、约束和输出要求讲清楚了' },
+    runtime_execution_readiness: { label: '执行验收', description: '是否按 execution_plan 完成了样本、工具、输出和降级约束' },
     runtime_constraint_control: { label: '边界控制', description: '有没有越界说到不该说的内容' },
     overall: { label: '综合得分', description: '以上几项评审分的平均值' },
   }
@@ -1165,6 +1299,7 @@ const llmDimensionCards = computed(() => {
     runtime_reasoning_quality: { label: '分析过程', description: '推理过程是否清晰、自洽且有依据' },
     runtime_tool_usage: { label: '工具使用', description: '工具选择和调用轨迹是否合理' },
     runtime_prompt_quality: { label: '提示词质量', description: 'Prompt 是否明确、充分、可执行' },
+    runtime_execution_readiness: { label: '执行验收', description: '是否真的按版本执行计划完成关键检查项' },
     runtime_constraint_control: { label: '边界控制', description: '是否存在越界、幻觉或违反限制的内容' },
   }
 
@@ -1312,6 +1447,7 @@ const goToGapStep = () => {
 // }
 
 const resetEvaluationForm = () => {
+  const sampleInput = latestVersion.value?.execution_plan?.sample_input || {}
   evaluationForm.value = {
     user_feedback: '',
     llm: {
@@ -1322,12 +1458,12 @@ const resetEvaluationForm = () => {
       backend_url: '',
     },
     stock: {
-      symbol: displaySpec.value?.sample_symbols?.[0] || '',
-      market_type: 'A股',
-      analysis_date: '',
+      symbol: String(sampleInput.symbol || displaySpec.value?.sample_symbols?.[0] || ''),
+      market_type: String(sampleInput.market_type || 'A股'),
+      analysis_date: String(sampleInput.analysis_date || ''),
     },
     runtime_result: {
-      user_goal: '',
+      user_goal: String(sampleInput.task_description || ''),
       output_text: '',
     },
   }

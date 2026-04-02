@@ -218,6 +218,29 @@ class AgentWorkshopSession(BaseModel):
     )
 
 
+class AgentExecutionPlanStep(BaseModel):
+    """Agent 版本执行验证步骤"""
+
+    step_id: str = ""
+    title: str = ""
+    objective: str = ""
+    suggested_tools: List[str] = Field(default_factory=list)
+    expected_evidence: List[str] = Field(default_factory=list)
+    failure_signals: List[str] = Field(default_factory=list)
+
+
+class AgentExecutionValidationPlan(BaseModel):
+    """Agent 版本的执行验证计划"""
+
+    mode: str = "tool-driven"
+    validation_status: str = "not-run"
+    rationale: str = ""
+    sample_input: Dict[str, Any] = Field(default_factory=dict)
+    execution_steps: List[AgentExecutionPlanStep] = Field(default_factory=list)
+    acceptance_checks: List[str] = Field(default_factory=list)
+    fallback_rules: List[str] = Field(default_factory=list)
+
+
 class AgentVersion(BaseModel):
     """Agent 版本记录"""
 
@@ -236,6 +259,7 @@ class AgentVersion(BaseModel):
     )
     output_schema: Dict[str, Any] = Field(default_factory=dict)
     evaluation_policy: Dict[str, Any] = Field(default_factory=dict)
+    execution_plan: AgentExecutionValidationPlan = Field(default_factory=AgentExecutionValidationPlan)
     published_from_session_id: Optional[str] = None
     created_at: datetime = Field(default_factory=now_tz)
     updated_at: datetime = Field(default_factory=now_tz)

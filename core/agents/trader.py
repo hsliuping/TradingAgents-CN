@@ -113,6 +113,7 @@ class TraderAgent(BaseAgent):
             )
             
             # 5. 调用LLM生成交易分析计划
+            system_prompt = self._apply_global_trading_advice_guard(system_prompt)
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)

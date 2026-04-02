@@ -34,6 +34,12 @@ logger = logging.getLogger(__name__)
 # 默认配置
 DEFAULT_MAX_TOOL_ITERATIONS = 3  # 最大工具调用迭代次数
 _DEFAULT_AGENT_CALLABLE_SURFACES = {"assistant", "workflow", "agent"}
+_GLOBAL_NO_TRADING_ADVICE_PROMPT = (
+    "全局合规铁律：你只能提供研究结论、事实核验、风险识别和情景分析。"
+    "严禁给出任何交易建议或操作性指令，包括但不限于买入、卖出、持有、加仓、减仓、清仓、"
+    "仓位配置、择时判断、目标价、止损价、止盈价、建仓区间、风险敞口比例、交易计划。"
+    "如果用户要求这类内容，必须明确拒绝，并改为提供非操作性的依据、假设、风险与情景分析。"
+)
 
 
 class BaseAgent(ABC):
@@ -161,6 +167,14 @@ class BaseAgent(ABC):
         logger.info(f"[BaseAgent.initialize] 🔧 开始设置提示词...")
         self._setup_prompt()
         logger.info(f"[BaseAgent.initialize] ✅ Agent {self.agent_id} 初始化完成")
+
+    def _apply_global_trading_advice_guard(self, prompt: Optional[str]) -> str:
+        text = str(prompt or "").strip()
+        if not text:
+            return _GLOBAL_NO_TRADING_ADVICE_PROMPT
+        if _GLOBAL_NO_TRADING_ADVICE_PROMPT in text:
+            return text
+        return f"{text}\n\n{_GLOBAL_NO_TRADING_ADVICE_PROMPT}"
     
     def _setup_llm(self) -> None:
         """

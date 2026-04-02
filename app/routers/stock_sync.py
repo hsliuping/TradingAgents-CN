@@ -85,6 +85,8 @@ async def _sync_latest_to_market_quotes(symbol: str) -> None:
         "code": symbol6,
         "symbol": symbol6,
         "close": latest_doc.get("close"),
+        "price": latest_doc.get("close"),
+        "current_price": latest_doc.get("close"),
         "open": latest_doc.get("open"),
         "high": latest_doc.get("high"),
         "low": latest_doc.get("low"),
