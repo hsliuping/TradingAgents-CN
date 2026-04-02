@@ -52,6 +52,7 @@
 | [v3.0/controlled-growth-agent-design.md](v3.0/controlled-growth-agent-design.md) | 在 3.0 中落地受控成长 Agent 的设计方案 | ✅ 新增 |
 | [v3.0/agent-capability-audit.md](v3.0/agent-capability-audit.md) | 流程 Agent 基类、元数据与能力矩阵审计 | ✅ 新增 |
 | [v3.0/agent-workshop-iterative-design.md](v3.0/agent-workshop-iterative-design.md) | Agent 工坊、版本生成、评估与迭代设计 | ✅ 新增 |
+| [v3.0/nanobot-first-agent-workshop-unification.md](v3.0/nanobot-first-agent-workshop-unification.md) | 以 Nanobot 为入口、以 Agent 工坊为治理后端的统一资产流转设计 | ✅ 新增 |
 | [v3.0/collaboration-runtime-design.md](v3.0/collaboration-runtime-design.md) | Assistant、Workflow、Agent 之间的最小协作运行时设计 | ✅ 新增 |
 
 ## 🎯 重点设计文档

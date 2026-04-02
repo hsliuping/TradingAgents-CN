@@ -279,6 +279,101 @@ def test_runtime_build_scoped_tools_selects_skill_creation_tools_by_query(tmp_pa
     assert "start_external_skill_generation_session" in selection["selected_tool_names"]
 
 
+def test_runtime_build_scoped_tools_prefers_callable_agents_for_integrated_request(tmp_path) -> None:
+    provider = _FakeProvider([])
+    runtime = EmbeddedNanobotRuntime(provider=provider, workspace=tmp_path)
+
+    list_meta = ToolMetadata(
+        id="list_callable_agents",
+        name="List Callable Agents",
+        description="列出可直接调用的完整 Agent 能力",
+        category="assistant_ops",
+        parameters=[ToolParameter(name="keyword", type="string", description="关键词", required=False)],
+        when_to_use="当用户要做完整估值、研究、复盘、风险分析任务时，先检查是否已有可复用 Agent。",
+    )
+    execute_meta = ToolMetadata(
+        id="execute_callable_agent",
+        name="Execute Callable Agent",
+        description="调用完整 Agent 能力",
+        category="assistant_ops",
+        parameters=[ToolParameter(name="agent_identifier", type="string", description="Agent 标识", required=True)],
+        when_to_use="确认已有合适 Agent 后，优先直接调用完整 Agent，而不是拆多个底层工具。",
+    )
+    valuation_meta = ToolMetadata(
+        id="valuation_tool",
+        name="Valuation Tool",
+        description="A股估值底层工具",
+        category="fundamentals",
+        parameters=[ToolParameter(name="ticker", type="string", description="股票代码", required=True)],
+        when_to_use="当没有合适完整 Agent 时，才作为底层估值工具使用。",
+    )
+
+    runtime.tools.register(TradingAgentsRegistryTool(metadata=list_meta, func=lambda keyword=None: {"keyword": keyword}))
+    runtime.tools.register(TradingAgentsRegistryTool(metadata=execute_meta, func=lambda agent_identifier: {"agent_identifier": agent_identifier}))
+    runtime.tools.register(TradingAgentsRegistryTool(metadata=valuation_meta, func=lambda ticker: {"ticker": ticker}))
+
+    scoped, selection = runtime._build_scoped_tools("帮我做一下茅台的估值分析，给我一份完整结论")
+
+    assert "list_callable_agents" in scoped.tool_names
+    assert "execute_callable_agent" in scoped.tool_names
+    assert selection["agent_first"]["enabled"] is True
+    assert selection["agent_first"]["keyword"] == "估值"
+    assert "list_callable_agents" in selection["agent_first"]["guidance"]
+
+
+def test_runtime_build_scoped_tools_does_not_trigger_agent_first_for_preview_request(tmp_path) -> None:
+    provider = _FakeProvider([])
+    runtime = EmbeddedNanobotRuntime(provider=provider, workspace=tmp_path)
+
+    list_meta = ToolMetadata(
+        id="list_callable_agents",
+        name="List Callable Agents",
+        description="列出可直接调用的完整 Agent 能力",
+        category="assistant_ops",
+        parameters=[ToolParameter(name="keyword", type="string", description="关键词", required=False)],
+        when_to_use="当用户要做完整分析任务时使用。",
+    )
+    execute_meta = ToolMetadata(
+        id="execute_callable_agent",
+        name="Execute Callable Agent",
+        description="调用完整 Agent 能力",
+        category="assistant_ops",
+        parameters=[ToolParameter(name="agent_identifier", type="string", description="Agent 标识", required=True)],
+        when_to_use="确认已有合适 Agent 后使用。",
+    )
+    runtime.tools.register(TradingAgentsRegistryTool(metadata=list_meta, func=lambda keyword=None: {"keyword": keyword}))
+    runtime.tools.register(TradingAgentsRegistryTool(metadata=execute_meta, func=lambda agent_identifier: {"agent_identifier": agent_identifier}))
+
+    scoped, selection = runtime._build_scoped_tools("这个估值 agent 生成的报告会是什么样子，先给我看输出结构")
+
+    assert selection["agent_first"]["enabled"] is False
+    assert selection["agent_first"]["guidance"] == ""
+    assert "execute_callable_agent" not in scoped.tool_names
+
+
+@pytest.mark.asyncio
+async def test_runtime_build_capped_initial_messages_injects_agent_first_guidance(tmp_path) -> None:
+    provider = _FakeProvider([])
+    runtime = EmbeddedNanobotRuntime(provider=provider, workspace=tmp_path)
+    session = runtime.sessions.get_or_create("embedded:agent-first")
+
+    initial_messages, history, _ = await runtime._build_capped_initial_messages(
+        session,
+        runtime.tools,
+        user_message="帮我做一下茅台的估值分析",
+        skill_names=None,
+        media=None,
+        channel="api",
+        chat_id="embedded:agent-first",
+        extra_system_guidance="优先调用 list_callable_agents，再决定是否使用 execute_callable_agent。",
+    )
+
+    assert history == []
+    assert initial_messages[0]["role"] == "system"
+    assert initial_messages[1]["role"] == "system"
+    assert "list_callable_agents" in initial_messages[1]["content"]
+
+
 @pytest.mark.asyncio
 async def test_runtime_build_capped_initial_messages_trims_history_when_over_budget(tmp_path) -> None:
     provider = _FakeProvider([])

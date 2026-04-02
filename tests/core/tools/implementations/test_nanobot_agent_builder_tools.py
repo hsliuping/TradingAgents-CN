@@ -6,6 +6,7 @@ from app.models.capability_index import CapabilityDocument, CapabilitySearchHit
 from core.agents.config import AgentCategory, AgentInput, AgentMetadata, AgentOutput, LicenseTier
 from core.tools.implementations.agent_builder.nanobot_agent_builder_tools import (
     bind_agent_tools_and_validate_candidate,
+    create_or_update_agent_workshop_draft,
     create_or_update_runtime_agent_config,
     create_or_update_universal_agent_prompt_template,
     generate_confirmed_candidate_agent,
@@ -361,6 +362,48 @@ async def test_create_or_update_runtime_agent_config_upserts_candidate(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_create_or_update_agent_workshop_draft_creates_visible_spec_and_session(monkeypatch):
+    fake_db = _FakeDb({
+        "agent_specs": _FakeCollection([]),
+        "agent_workshop_sessions": _FakeCollection([]),
+    })
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: fake_db,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.require_current_user_id",
+        lambda: "user_001",
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_current_assistant_thread_id",
+        lambda: "thread_valuation",
+    )
+
+    raw = await create_or_update_agent_workshop_draft.ainvoke({
+        "agent_id": "valuation_candidate_v1",
+        "agent_name": "估值候选Agent",
+        "target_responsibility": "输出A股估值结论",
+        "output_field": "valuation_report",
+        "tool_ids": "get_value_factor_bundle_tool",
+        "preferred_methods": "PE,PB,PEG",
+        "constraints": "不要输出交易建议",
+    })
+    payload = json.loads(raw)
+
+    assert payload["status"] == "ok"
+    assert payload["spec_id"] == "spec_nanobot_valuation_candidate_v1"
+    assert payload["source"] == "nanobot"
+    spec_doc = fake_db["agent_specs"]._items[0]
+    assert spec_doc["owner_user_id"] == "user_001"
+    assert spec_doc["source"] == "nanobot"
+    assert spec_doc["outputs"] == ["valuation_report"]
+    session_doc = fake_db["agent_workshop_sessions"]._items[0]
+    assert session_doc["spec_id"] == "spec_nanobot_valuation_candidate_v1"
+    assert session_doc["user_id"] == "user_001"
+
+
+@pytest.mark.asyncio
 async def test_create_or_update_universal_agent_prompt_template_writes_template(monkeypatch):
     fake_db = _FakeDb({
         "prompt_templates": _FakeCollection([]),
@@ -539,6 +582,8 @@ async def test_generate_confirmed_candidate_agent_runs_one_shot_after_confirmati
         "agent_configs": _FakeCollection([]),
         "prompt_templates": _FakeCollection([]),
         "tool_agent_bindings": _FakeCollection([]),
+        "agent_specs": _FakeCollection([]),
+        "agent_workshop_sessions": _FakeCollection([]),
     })
 
     class _FakeFactory:
@@ -583,6 +628,14 @@ async def test_generate_confirmed_candidate_agent_runs_one_shot_after_confirmati
         "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_tool_registry",
         lambda: _FakeToolRegistry(),
     )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.require_current_user_id",
+        lambda: "user_001",
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_current_assistant_thread_id",
+        lambda: "thread_valuation",
+    )
 
     raw = await generate_confirmed_candidate_agent.ainvoke({
         "agent_id": "valuation_candidate_v1",
@@ -597,6 +650,7 @@ async def test_generate_confirmed_candidate_agent_runs_one_shot_after_confirmati
     payload = json.loads(raw)
 
     assert payload["status"] == "ok"
+    assert payload["steps"]["workshop_draft"]["status"] == "ok"
     assert payload["steps"]["agent_config"]["status"] == "ok"
     assert payload["steps"]["prompt_template"]["status"] == "ok"
     assert payload["steps"]["bindings_and_validation"]["validation"]["dry_run"]["instantiated"] is True

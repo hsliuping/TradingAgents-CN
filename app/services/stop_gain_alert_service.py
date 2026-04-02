@@ -18,7 +18,6 @@ class StopGainAlertService:
     def __init__(self, scan_interval_minutes=10):
         self.scan_interval_minutes = scan_interval_minutes
         self.scheduler = BackgroundScheduler()
-        self.db = get_mongo_db()
         self._job = None
         self._loop = None
 
@@ -31,6 +30,17 @@ class StopGainAlertService:
             self._job = self.scheduler.add_job(self.run_once, "interval", minutes=self.scan_interval_minutes)
             self.scheduler.start()
             logger.info("止盈提醒服务启动，间隔%s分钟", self.scan_interval_minutes)
+
+    def stop(self):
+        if self._job is not None:
+            self._job = None
+        if getattr(self.scheduler, "running", False):
+            self.scheduler.shutdown(wait=False)
+            logger.info("止盈提醒服务已停止")
+
+    @staticmethod
+    def _get_db():
+        return get_mongo_db()
 
     def run_once(self):
         watch_items = self._load_watch_items()
@@ -64,8 +74,9 @@ class StopGainAlertService:
     async def _load_watch_items_async(self) -> List[Dict[str, Any]]:
         """加载止盈监控项并批量补齐当前价。"""
         items: List[Dict[str, Any]] = []
+        db = self._get_db()
 
-        cursor_users = self.db.users.find(
+        cursor_users = db.users.find(
             {"favorite_stocks.alert_gain_price": {"$ne": None}},
             {"_id": 1, "favorite_stocks": 1},
         )
@@ -86,7 +97,7 @@ class StopGainAlertService:
                     }
                 )
 
-        cursor_old = self.db.user_favorites.find(
+        cursor_old = db.user_favorites.find(
             {"favorites.alert_gain_price": {"$ne": None}},
             {"user_id": 1, "favorites": 1},
         )
@@ -112,10 +123,10 @@ class StopGainAlertService:
         if not items:
             return []
 
-        await self._fill_current_prices(items)
+        await self._fill_current_prices(items, db)
         return items
 
-    async def _fill_current_prices(self, items: List[Dict[str, Any]]) -> None:
+    async def _fill_current_prices(self, items: List[Dict[str, Any]], db) -> None:
         grouped: Dict[str, List[str]] = {"CN": [], "HK": [], "US": []}
         for item in items:
             market = item.get("market", "CN")
@@ -128,19 +139,19 @@ class StopGainAlertService:
         quotes_us: Dict[str, Dict[str, Any]] = {}
 
         if grouped.get("CN"):
-            cn_docs = await self.db.market_quotes.find(
+            cn_docs = await db.market_quotes.find(
                 {"code": {"$in": grouped["CN"]}}, {"code": 1, "close": 1}
             ).to_list(length=None)
             quotes_cn = {str(d.get("code")).zfill(6): d for d in (cn_docs or [])}
 
         if grouped.get("HK"):
-            hk_docs = await self.db.market_quotes_hk.find(
+            hk_docs = await db.market_quotes_hk.find(
                 {"code": {"$in": grouped["HK"]}}, {"code": 1, "close": 1}
             ).to_list(length=None)
             quotes_hk = {str(d.get("code")): d for d in (hk_docs or [])}
 
         if grouped.get("US"):
-            us_docs = await self.db.market_quotes_us.find(
+            us_docs = await db.market_quotes_us.find(
                 {"code": {"$in": grouped["US"]}}, {"code": 1, "close": 1}
             ).to_list(length=None)
             quotes_us = {str(d.get("code")): d for d in (us_docs or [])}

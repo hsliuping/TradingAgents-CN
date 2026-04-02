@@ -1149,6 +1149,11 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.warning(f"Scheduler shutdown error: {e}")
 
+        try:
+            stop_gain_alert_service.stop()
+        except Exception as e:
+            logger.warning(f"StopGainAlertService cleanup error: {e}")
+
         # 关闭 UserService MongoDB 连接
         try:
             from app.services.user_service import user_service

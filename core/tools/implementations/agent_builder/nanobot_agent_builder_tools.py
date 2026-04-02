@@ -13,12 +13,14 @@ from app.core.database import get_mongo_db
 from app.core.database import get_mongo_db_sync
 from app.models.capability_index import CapabilitySearchHit
 from app.models.prompt_template import TemplateContent
+from app.services.agent_workshop_service import AgentWorkshopService
 from core.agents.factory import AgentFactory
 from core.config.binding_manager import BindingManager
 from app.services.capability_index_service import CapabilityIndexService
 from core.agents.registry import get_registry
 from core.tools import get_tool_registry
 from core.tools.base import register_tool
+from core.tools.context import get_current_assistant_thread_id, require_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -1070,6 +1072,63 @@ async def create_or_update_runtime_agent_config(
 
 @tool
 @register_tool(
+    tool_id="create_or_update_agent_workshop_draft",
+    name="创建或更新 Agent 工坊 Draft",
+    description="把 Nanobot 已确认的候选 Agent 同步到 Agent 工坊 Draft 资产层，使其在工坊列表中可见并可继续做版本治理。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="当 Nanobot 已经确认了候选 Agent 的职责、输出和工具范围，希望把它沉淀为 Agent 工坊 Draft 而不是只停留在运行时候选时使用。",
+    when_not_to_use="不适合直接做版本发布，也不适合在需求尚未确认时调用。",
+    returns="返回 JSON 字符串，包含写入后的 spec_id、session_id 和概览信息。",
+    example="create_or_update_agent_workshop_draft(agent_id='valuation_candidate_v1', agent_name='估值候选Agent', target_responsibility='输出A股估值结论')",
+    related_tools=["generate_confirmed_candidate_agent", "inspect_agent_workshop_assets", "create_or_update_runtime_agent_config"],
+)
+async def create_or_update_agent_workshop_draft(
+    agent_id: Annotated[str, "候选 Agent ID，例如 valuation_candidate_v1"],
+    agent_name: Annotated[str, "Agent 显示名称"],
+    target_responsibility: Annotated[str, "单一职责描述"],
+    output_field: Annotated[str, "输出字段名，默认 analysis_report"] = "analysis_report",
+    tool_ids: Annotated[str, "候选工具 ID，逗号分隔"] = "",
+    non_goals: Annotated[str, "非目标列表，逗号分隔"] = "",
+    preferred_methods: Annotated[str, "方法范围或偏好，逗号分隔"] = "",
+    constraints: Annotated[str, "额外约束，逗号分隔"] = "",
+) -> str:
+    """将 Nanobot 候选同步为 Agent 工坊 Draft。"""
+    try:
+        clean_agent_id = str(agent_id or "").strip()
+        clean_agent_name = str(agent_name or "").strip()
+        clean_responsibility = str(target_responsibility or "").strip()
+        if not clean_agent_id or not clean_agent_name or not clean_responsibility:
+            return _json_response({"status": "error", "message": "agent_id、agent_name、target_responsibility 不能为空"})
+
+        try:
+            user_id = require_current_user_id()
+        except RuntimeError:
+            user_id = ""
+        current_thread_id = (get_current_assistant_thread_id() or "").strip()
+        db = get_mongo_db()
+        result = await AgentWorkshopService(db=db).create_nanobot_draft(
+            agent_id=clean_agent_id,
+            agent_name=clean_agent_name,
+            target_responsibility=clean_responsibility,
+            output_field=output_field,
+            tool_ids=_parse_string_list(tool_ids),
+            non_goals=_parse_string_list(non_goals),
+            preferred_methods=_parse_string_list(preferred_methods),
+            constraints=_parse_string_list(constraints),
+            owner_user_id=user_id,
+            source_thread_id=current_thread_id,
+        )
+        return _json_response({**result, "status": "ok"})
+    except Exception as exc:
+        logger.error("创建或更新 Agent 工坊 Draft 失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"创建或更新 Agent 工坊 Draft 失败: {exc}"})
+
+
+@tool
+@register_tool(
     tool_id="create_or_update_universal_agent_prompt_template",
     name="创建或更新 UniversalAgent 提示词模板",
     description="为配置式 UniversalAgent 候选创建或更新默认提示词模板，使运行时能够直接按 agent_id 读取模板。",
@@ -1333,6 +1392,7 @@ async def generate_confirmed_candidate_agent(
     input_mode: Annotated[str, "输入模式，默认 standalone"] = "standalone",
     enabled: Annotated[bool, "是否启用，默认 true"] = True,
     status: Annotated[str, "模板状态，默认 active"] = "active",
+    sync_to_workshop_draft: Annotated[bool, "是否同步创建 Agent 工坊 Draft，默认 true"] = True,
     confirmed: Annotated[bool, "是否已拿到用户明确确认"] = False,
     allow_overwrite: Annotated[bool, "若存在覆盖风险，是否允许覆盖现有配置"] = False,
 ) -> str:
@@ -1361,6 +1421,20 @@ async def generate_confirmed_candidate_agent(
             })
 
         resolved_default_tools = _parse_string_list(default_tools) or _parse_string_list(tool_ids)[:2]
+        workshop_result = None
+        if sync_to_workshop_draft:
+            workshop_result = _parse_json_tool_result(await create_or_update_agent_workshop_draft.ainvoke({
+                "agent_id": clean_agent_id,
+                "agent_name": clean_agent_name,
+                "target_responsibility": clean_responsibility,
+                "output_field": output_field,
+                "tool_ids": tool_ids,
+                "preferred_methods": "",
+                "constraints": constraints,
+            }))
+            if workshop_result.get("status") != "ok":
+                return _json_response({"status": "error", "stage": "workshop_draft", "result": workshop_result})
+
         config_result = _parse_json_tool_result(await create_or_update_runtime_agent_config.ainvoke({
             "agent_id": clean_agent_id,
             "agent_name": clean_agent_name,
@@ -1406,6 +1480,7 @@ async def generate_confirmed_candidate_agent(
                 "allow_overwrite": allow_overwrite,
             },
             "steps": {
+                "workshop_draft": workshop_result,
                 "agent_config": config_result,
                 "prompt_template": prompt_result,
                 "bindings_and_validation": binding_result,
@@ -1425,6 +1500,7 @@ __all__ = [
     "inspect_agent_workshop_assets",
     "prepare_agent_requirement_intake",
     "prepare_agent_generation_confirmation",
+    "create_or_update_agent_workshop_draft",
     "create_or_update_runtime_agent_config",
     "create_or_update_universal_agent_prompt_template",
     "bind_agent_tools_and_validate_candidate",

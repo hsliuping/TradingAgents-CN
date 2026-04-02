@@ -54,6 +54,7 @@ class EmbeddedNanobotRuntime:
         "inspect_agent_blueprints",
         "get_agent_blueprint_details",
         "inspect_agent_workshop_assets",
+        "create_or_update_agent_workshop_draft",
         "create_or_update_runtime_agent_config",
         "create_or_update_universal_agent_prompt_template",
         "bind_agent_tools_and_validate_candidate",
@@ -66,6 +67,53 @@ class EmbeddedNanobotRuntime:
         "generate_confirmed_external_skill",
         "inspect_external_skill_generation_session",
     }
+    CALLABLE_AGENT_TOOL_IDS = {
+        "list_callable_agents",
+        "execute_callable_agent",
+    }
+    AGENT_FIRST_EXCLUDED_KEYWORDS = {
+        "agent",
+        "智能体",
+        "蓝图",
+        "工作流",
+        "skill",
+        "技能",
+        "可复用",
+        "能力缺口",
+        "样式",
+        "模板",
+        "骨架",
+        "预览",
+        "输出结构",
+        "字段结构",
+    }
+    AGENT_FIRST_VERB_HINTS = (
+        "帮我做",
+        "给我做",
+        "做一下",
+        "分析一下",
+        "帮我分析",
+        "研究一下",
+        "看一下",
+        "生成报告",
+        "输出报告",
+        "完整分析",
+        "全面分析",
+        "直接分析",
+    )
+    AGENT_FIRST_DOMAIN_HINTS = (
+        "估值",
+        "基本面",
+        "财务",
+        "复盘",
+        "风险",
+        "研究",
+        "行业",
+        "情绪",
+        "etf",
+        "技术面",
+        "市场",
+    )
     CATEGORY_KEYWORDS = {
         ToolCategory.FUNDAMENTALS.value: ["估值", "基本面", "财务", "利润", "现金流", "分红", "roe", "pe", "pb", "peg", "ps", "股息"],
         ToolCategory.MARKET.value: ["行情", "市场", "板块", "指数", "大盘", "k线", "技术面", "成交量", "资金流", "北向"],
@@ -131,6 +179,91 @@ class EmbeddedNanobotRuntime:
             deduped.append(term)
         return deduped
 
+    @staticmethod
+    def _contains_any_keyword(text: str, keywords: tuple[str, ...] | set[str]) -> bool:
+        lowered = text.lower()
+        return any(keyword.lower() in lowered for keyword in keywords)
+
+    @classmethod
+    def _should_prefer_callable_agent(cls, user_message: str) -> bool:
+        query = str(user_message or "").strip()
+        if not query:
+            return False
+
+        lowered = query.lower()
+        if cls._contains_any_keyword(lowered, cls.AGENT_FIRST_EXCLUDED_KEYWORDS):
+            if "报告" not in query and "analysis" not in lowered:
+                return False
+            if any(keyword in query for keyword in ("样式", "模板", "骨架", "预览", "输出结构", "字段结构")):
+                return False
+            if any(keyword in query for keyword in ("agent", "智能体", "蓝图", "工作流", "skill", "技能", "可复用", "能力缺口")):
+                return False
+
+        has_domain_hint = cls._contains_any_keyword(lowered, cls.AGENT_FIRST_DOMAIN_HINTS)
+        has_verb_hint = cls._contains_any_keyword(query, cls.AGENT_FIRST_VERB_HINTS)
+        has_stock_code = bool(re.search(r"\b\d{6}\b", query))
+
+        if has_domain_hint and (has_verb_hint or has_stock_code):
+            return True
+
+        return bool(re.search(r"(估值|复盘|风险|研究|行业|情绪|技术面|基本面).{0,8}(分析|报告)", query, re.IGNORECASE))
+
+    @classmethod
+    def _should_suppress_callable_agent_tools(cls, user_message: str) -> bool:
+        query = str(user_message or "").strip()
+        if not query:
+            return False
+        lowered = query.lower()
+        if any(keyword in query for keyword in ("样式", "模板", "骨架", "预览", "输出结构", "字段结构", "什么样")):
+            return True
+        if any(keyword in query for keyword in ("创建agent", "生成agent", "智能体", "蓝图", "工作流", "skill", "技能", "可复用", "能力缺口")):
+            return True
+        return "preview" in lowered
+
+    @staticmethod
+    def _infer_callable_agent_keyword(user_message: str) -> str:
+        query = str(user_message or "").lower()
+        if any(term in query for term in ("估值", "pe", "pb", "peg", "ps", "dcf")):
+            return "估值"
+        if any(term in query for term in ("复盘", "交易回顾", "交易记录")):
+            return "复盘"
+        if any(term in query for term in ("风险", "回撤", "波动")):
+            return "风险"
+        if "etf" in query:
+            return "ETF"
+        if any(term in query for term in ("行业", "产业链")):
+            return "行业"
+        if any(term in query for term in ("情绪", "舆情", "热度")):
+            return "情绪"
+        if any(term in query for term in ("基本面", "财务")):
+            return "基本面"
+        return "分析"
+
+    @classmethod
+    def _build_agent_first_guidance(cls, user_message: str, tool_names: set[str]) -> str | None:
+        if not cls._should_prefer_callable_agent(user_message):
+            return None
+        if not cls.CALLABLE_AGENT_TOOL_IDS.issubset(tool_names):
+            return None
+
+        keyword = cls._infer_callable_agent_keyword(user_message)
+        return (
+            "# Agent-first execution rule\n\n"
+            "The current user request looks like an integrated analysis task rather than a tool-building or style-preview task. "
+            "Prefer reusable callable agents before decomposing the task into low-level tools.\n\n"
+            f"Recommended first step: call list_callable_agents(keyword='{keyword}') to check whether an existing agent already covers this task.\n"
+            "If a suitable callable agent exists, call execute_callable_agent first. "
+            "Only fall back to bottom-level tools when no suitable callable agent exists, or when the user explicitly asks for tool-level decomposition."
+        )
+
+    @staticmethod
+    def _inject_ephemeral_system_guidance(messages: list[dict[str, Any]], guidance: str | None) -> list[dict[str, Any]]:
+        if not guidance:
+            return messages
+        if messages and messages[0].get("role") == "system":
+            return [messages[0], {"role": "system", "content": guidance}, *messages[1:]]
+        return [{"role": "system", "content": guidance}, *messages]
+
     def _build_scoped_tools(self, user_message: str, skill_names: list[str] | None = None) -> tuple[ToolRegistry, dict[str, Any]]:
         scoped = ToolRegistry()
         selected_names = set(self.CORE_TOOL_NAMES)
@@ -138,6 +271,7 @@ class EmbeddedNanobotRuntime:
         query_lower = query.lower()
         query_terms = self._extract_query_terms(query)
         registry_scores: list[tuple[int, str, dict[str, Any]]] = []
+        agent_first_guidance = None
 
         if skill_names and "nanobot-agent-design" in skill_names:
             selected_names.update(self.AGENT_BUILDER_TOOL_IDS)
@@ -156,12 +290,18 @@ class EmbeddedNanobotRuntime:
         ):
             selected_names.update(self.SKILL_CREATION_TOOL_IDS)
 
+        if self._should_prefer_callable_agent(query):
+            selected_names.update(self.CALLABLE_AGENT_TOOL_IDS)
+
         for tool_name in self.tools.tool_names:
             if tool_name not in self.CORE_TOOL_NAMES and tool_name not in selected_names:
                 tool = self.tools.get(tool_name)
                 metadata = getattr(tool, "metadata", None)
                 if metadata is None:
                     selected_names.add(tool_name)
+                    continue
+
+                if tool_name in self.CALLABLE_AGENT_TOOL_IDS and self._should_suppress_callable_agent_tools(query):
                     continue
 
                 score = 0
@@ -183,6 +323,9 @@ class EmbeddedNanobotRuntime:
                     if tool_name in selected_names:
                         score += 120
 
+                if tool_name in self.CALLABLE_AGENT_TOOL_IDS and tool_name in selected_names:
+                    score += 160
+
                 if tool_name.lower() in query_lower:
                     score += 60
 
@@ -203,6 +346,7 @@ class EmbeddedNanobotRuntime:
         registry_scores.sort(key=lambda item: (-item[0], item[1]))
         selected_dynamic = registry_scores[:self.MAX_DYNAMIC_TOOLS]
         selected_names.update(name for _, name, _ in selected_dynamic)
+        agent_first_guidance = self._build_agent_first_guidance(query, selected_names)
 
         for tool_name in self.tools.tool_names:
             if tool_name in selected_names:
@@ -219,6 +363,11 @@ class EmbeddedNanobotRuntime:
             ],
             "core_tool_names": sorted(self.CORE_TOOL_NAMES),
             "dynamic_tool_limit": self.MAX_DYNAMIC_TOOLS,
+            "agent_first": {
+                "enabled": bool(agent_first_guidance),
+                "guidance": agent_first_guidance or "",
+                "keyword": self._infer_callable_agent_keyword(query) if agent_first_guidance else "",
+            },
         }
 
     @classmethod
@@ -330,6 +479,7 @@ class EmbeddedNanobotRuntime:
         media: list[str] | None,
         channel: str,
         chat_id: str,
+        extra_system_guidance: str | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
@@ -342,6 +492,7 @@ class EmbeddedNanobotRuntime:
             channel=channel,
             chat_id=chat_id,
         )
+        initial_messages = self._inject_ephemeral_system_guidance(initial_messages, extra_system_guidance)
 
         token_budget = max(0, self.context_window_tokens - self.provider.generation.max_tokens - 1024)
         estimated_tokens, _ = estimate_prompt_tokens_chain(
@@ -364,6 +515,7 @@ class EmbeddedNanobotRuntime:
                 channel=channel,
                 chat_id=chat_id,
             )
+            initial_messages = self._inject_ephemeral_system_guidance(initial_messages, extra_system_guidance)
             estimated_tokens, _ = estimate_prompt_tokens_chain(
                 self.provider,
                 self.model,
@@ -478,6 +630,8 @@ class EmbeddedNanobotRuntime:
         active_tools, tool_selection = self._build_scoped_tools(raw, skill_names)
         if on_progress:
             await self._invoke_callback(on_progress, f"已选择 {len(active_tools.tool_names)} 个可用工具（核心 {len(self.CORE_TOOL_NAMES)} + 动态 {len(tool_selection['selected_dynamic_tools'])}）")
+            if tool_selection.get("agent_first", {}).get("enabled"):
+                await self._invoke_callback(on_progress, "检测到这是完整任务请求，将优先尝试复用现有 callable agent")
         initial_messages, history, estimated_tokens = await self._build_capped_initial_messages(
             session,
             active_tools,
@@ -486,6 +640,7 @@ class EmbeddedNanobotRuntime:
             media=media,
             channel=channel,
             chat_id=chat_id,
+            extra_system_guidance=tool_selection.get("agent_first", {}).get("guidance") or None,
         )
         if on_progress and estimated_tokens > 0:
             await self._invoke_callback(on_progress, f"上下文已准备完成，估算输入约 {estimated_tokens} tokens")

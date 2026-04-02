@@ -297,6 +297,123 @@ class AgentWorkshopService:
             "spec_overview": self._build_spec_overview(spec),
         }
 
+    async def create_nanobot_draft(
+        self,
+        *,
+        agent_id: str,
+        agent_name: str,
+        target_responsibility: str,
+        output_field: str = "analysis_report",
+        tool_ids: Optional[List[str]] = None,
+        non_goals: Optional[List[str]] = None,
+        preferred_methods: Optional[List[str]] = None,
+        constraints: Optional[List[str]] = None,
+        owner_user_id: str = "",
+        source_thread_id: str = "",
+    ) -> Dict[str, Any]:
+        clean_agent_id = str(agent_id or "").strip()
+        clean_agent_name = str(agent_name or "").strip()
+        clean_responsibility = str(target_responsibility or "").strip()
+        clean_output_field = str(output_field or "analysis_report").strip() or "analysis_report"
+        if not clean_agent_id or not clean_agent_name or not clean_responsibility:
+            raise ValueError("agent_id、agent_name、target_responsibility 不能为空")
+
+        spec_id = self._build_nanobot_spec_id(clean_agent_id)
+        session_id = str(uuid.uuid4())
+
+        existing_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": spec_id})
+        existing_spec = AgentSpec(**existing_doc) if existing_doc else None
+
+        normalized_non_goals = self._normalize_unique_list(non_goals)
+        normalized_methods = self._normalize_unique_list(preferred_methods)
+        normalized_constraints = self._normalize_unique_list(constraints)
+        normalized_tools = self._normalize_unique_list(tool_ids)
+
+        if GLOBAL_NO_TRADING_ADVICE_CONSTRAINT not in normalized_constraints:
+            normalized_constraints.append(GLOBAL_NO_TRADING_ADVICE_CONSTRAINT)
+
+        spec = AgentSpec(
+            spec_id=spec_id,
+            name=clean_agent_name,
+            domain=self._infer_nanobot_spec_domain(clean_agent_name, clean_responsibility, normalized_methods),
+            primary_goal=clean_responsibility,
+            responsibilities=[clean_responsibility],
+            non_goals=normalized_non_goals,
+            inputs=existing_spec.inputs if existing_spec and existing_spec.inputs else ["user_request", "symbol"],
+            outputs=existing_spec.outputs if existing_spec and existing_spec.outputs else [clean_output_field],
+            constraints=normalized_constraints,
+            preferred_methods=normalized_methods,
+            success_criteria=existing_spec.success_criteria if existing_spec else [],
+            capability_requirements=existing_spec.capability_requirements if existing_spec else [],
+            sample_symbols=existing_spec.sample_symbols if existing_spec else [],
+            status=existing_spec.status if existing_spec else AgentSpecStatus.DRAFT,
+            source="nanobot",
+            owner_user_id=owner_user_id or (existing_spec.owner_user_id if existing_spec else ""),
+            latest_session_id=session_id,
+            current_version_id=existing_spec.current_version_id if existing_spec else None,
+            version_count=existing_spec.version_count if existing_spec else 0,
+            created_at=existing_spec.created_at if existing_spec else now_tz(),
+        )
+
+        summary_lines = [
+            f"Nanobot 已将候选 Agent 同步为 Agent 工坊 Draft：{clean_agent_name}（{clean_agent_id}）。",
+            f"单一职责：{clean_responsibility}",
+            f"输出字段：{clean_output_field}",
+        ]
+        if normalized_tools:
+            summary_lines.append(f"候选工具：{'、'.join(normalized_tools)}")
+        if normalized_non_goals:
+            summary_lines.append(f"非目标：{'、'.join(normalized_non_goals)}")
+        if normalized_methods:
+            summary_lines.append(f"方法范围：{'、'.join(normalized_methods)}")
+        if source_thread_id:
+            summary_lines.append(f"来源线程：{source_thread_id}")
+
+        session = AgentWorkshopSession(
+            session_id=session_id,
+            spec_id=spec.spec_id,
+            user_id=spec.owner_user_id,
+            stage=self._infer_stage("feasible", 1.0),
+            current_round=1,
+            messages=[
+                AgentWorkshopMessage(
+                    role="user",
+                    content=self._build_nanobot_draft_user_message(
+                        agent_id=clean_agent_id,
+                        agent_name=clean_agent_name,
+                        target_responsibility=clean_responsibility,
+                        output_field=clean_output_field,
+                        tool_ids=normalized_tools,
+                        non_goals=normalized_non_goals,
+                        preferred_methods=normalized_methods,
+                    ),
+                ),
+                AgentWorkshopMessage(role="assistant", content="\n".join(summary_lines)),
+            ],
+            current_spec_snapshot=spec,
+            pending_questions=[],
+            completeness_score=1.0,
+            feasibility_status="feasible",
+            refusal_reason="",
+        )
+
+        await self._save_spec(spec, session_id=session.session_id)
+        await self._save_session(session)
+
+        return {
+            "session_id": session.session_id,
+            "spec_id": spec.spec_id,
+            "stage": session.stage.value,
+            "status": spec.status.value,
+            "source": spec.source,
+            "owner_user_id": spec.owner_user_id,
+            "linked_agent_id": clean_agent_id,
+            "output_field": clean_output_field,
+            "tool_ids": normalized_tools,
+            "updated_existing_spec": existing_spec is not None,
+            "spec_overview": self._build_spec_overview(spec),
+        }
+
     async def respond(self, session_id: str, message: str) -> Dict[str, Any]:
         session = await self._load_session(session_id)
         if not session:
@@ -1221,6 +1338,57 @@ class AgentWorkshopService:
             set_on_insert["created_at"] = created_at
 
         return set_doc, set_on_insert
+
+    def _build_nanobot_spec_id(self, agent_id: str) -> str:
+        normalized = re.sub(r"[^a-zA-Z0-9_]+", "_", str(agent_id or "").strip()).strip("_")
+        if not normalized:
+            normalized = uuid.uuid4().hex[:12]
+        return f"spec_nanobot_{normalized}"
+
+    def _infer_nanobot_spec_domain(self, agent_name: str, responsibility: str, preferred_methods: List[str]) -> str:
+        haystack = " ".join([agent_name or "", responsibility or "", " ".join(preferred_methods or [])]).lower()
+        if any(keyword in haystack for keyword in ["估值", "a股", "stock", "pe", "pb", "peg", "财务", "基本面"]):
+            return "stock_analysis"
+        if any(keyword in haystack for keyword in ["风险", "复盘", "review"]):
+            return "risk_management"
+        return "general"
+
+    @staticmethod
+    def _normalize_unique_list(values: Optional[List[str]]) -> List[str]:
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for value in values or []:
+            text = str(value or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            normalized.append(text)
+        return normalized
+
+    @staticmethod
+    def _build_nanobot_draft_user_message(
+        *,
+        agent_id: str,
+        agent_name: str,
+        target_responsibility: str,
+        output_field: str,
+        tool_ids: List[str],
+        non_goals: List[str],
+        preferred_methods: List[str],
+    ) -> str:
+        lines = [
+            f"请基于 Nanobot 已确认的候选方案继续治理这个 Agent：{agent_name}（{agent_id}）。",
+            f"职责：{target_responsibility}",
+            f"输出字段：{output_field}",
+        ]
+        if tool_ids:
+            lines.append(f"候选工具：{'、'.join(tool_ids)}")
+        if non_goals:
+            lines.append(f"非目标：{'、'.join(non_goals)}")
+        if preferred_methods:
+            lines.append(f"方法范围：{'、'.join(preferred_methods)}")
+        lines.append("这是一份从 Nanobot 同步进 Agent 工坊的 Draft，请在此基础上继续做缺口分析、版本构建和治理。")
+        return "\n".join(lines)
 
     async def _load_session(self, session_id: str) -> Optional[AgentWorkshopSession]:
         doc = await self._db[SESSION_COLLECTION].find_one({"session_id": session_id})
