@@ -51,54 +51,75 @@
         <el-icon><SetUp /></el-icon>
         <span>分析流</span>
       </template>
-      <el-menu-item index="/workflow">
-        流程管理
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/tools">
-        配置Tools
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/agents">
-        配置Agent
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/skills">
-        Skill 管理
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/skill-generation">
-        AI Skill 工坊
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/agent-workshop">
-        Agent 工坊
-        <el-tag type="primary" size="small" style="margin-left: 4px; transform: scale(0.85);">迭代</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/mcp-servers">
-        MCP 服务器
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/skill-gaps">
-        工具缺口
-        <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">感知</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/settings/templates">
-        提示词模板
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/settings/prompt-policies">
-        注入策略管理
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/settings/prompt-design">
-        Prompt 设计助手
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/settings/analysis-profiles">
-        行业/个股配置
-        <el-tag type="info" size="small" style="margin-left: 4px; transform: scale(0.85);">智能</el-tag>
-      </el-menu-item>
+      <el-sub-menu index="/workflow-entry-build">
+        <template #title>
+          <span>开始创建</span>
+        </template>
+        <el-menu-item index="/workflow/agent-workshop">
+          Agent 工坊
+          <el-tag type="primary" size="small" style="margin-left: 4px; transform: scale(0.85);">主推</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/workflow/workflow-generation/create">
+          AI 工作流架构师
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">新建</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/workflow">
+          工作流列表
+          <el-tag type="info" size="small" style="margin-left: 4px; transform: scale(0.85);">总览</el-tag>
+        </el-menu-item>
+      </el-sub-menu>
+
+      <el-sub-menu index="/workflow-assets">
+        <template #title>
+          <span>能力组件</span>
+        </template>
+        <el-menu-item index="/workflow/skills">
+          Skill 管理
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">资产</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/workflow/skill-generation">
+          AI Skill 工坊
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">生成</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/workflow/agents">
+          Agent 列表
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">资产</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/workflow/tools">
+          Tools 列表
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">资产</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/workflow/mcp-servers">
+          MCP 服务器
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">接入</el-tag>
+        </el-menu-item>
+      </el-sub-menu>
+
+      <el-sub-menu index="/workflow-governance">
+        <template #title>
+          <span>调优设置</span>
+        </template>
+        <el-menu-item index="/workflow/skill-gaps">
+          工具缺口
+          <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">发现</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/settings/templates">
+          提示词模板
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">策略</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/settings/prompt-policies">
+          提示词规则
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">治理</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/settings/prompt-design">
+          Prompt 优化助手
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">优化</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/settings/analysis-profiles">
+          行业和个股设置
+          <el-tag type="info" size="small" style="margin-left: 4px; transform: scale(0.85);">场景</el-tag>
+        </el-menu-item>
+      </el-sub-menu>
     </el-sub-menu>
 
     <el-menu-item index="/tasks/unified">

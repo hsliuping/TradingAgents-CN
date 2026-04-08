@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,12 +39,49 @@ class AgentRunResult:
     usage: dict[str, int] = field(default_factory=dict)
     stop_reason: str = "completed"
     error: str | None = None
-    tool_events: list[dict[str, str]] = field(default_factory=list)
+    tool_events: list[dict[str, Any]] = field(default_factory=list)
 
 
 class AgentRunner:
     def __init__(self, provider: LLMProvider):
         self.provider = provider
+
+    def _normalize_tool_event(self, raw_event: dict[str, Any], fallback_name: str, fallback_status: str = "ok", fallback_detail: str = "") -> dict[str, str]:
+        name = str(raw_event.get("name") or raw_event.get("tool") or raw_event.get("stage") or fallback_name).strip() or fallback_name
+        status = str(raw_event.get("status") or raw_event.get("event") or fallback_status).strip().lower() or fallback_status
+        detail = str(raw_event.get("detail") or raw_event.get("message") or raw_event.get("summary") or fallback_detail).replace("\n", " ").strip()
+        if not detail:
+            detail = "(empty)"
+        elif len(detail) > 120:
+            detail = detail[:120] + "..."
+        return {"name": name, "status": status, "detail": detail}
+
+    def _extract_structured_tool_events(self, tool_name: str, result: Any) -> list[dict[str, str]]:
+        if not isinstance(result, str):
+            return []
+        try:
+            payload = json.loads(result)
+        except Exception:
+            return []
+        if not isinstance(payload, dict):
+            return []
+
+        raw_events = payload.get("_tool_events") or payload.get("tool_events")
+        events: list[dict[str, str]] = []
+        if isinstance(raw_events, list):
+            for raw_event in raw_events:
+                if isinstance(raw_event, dict):
+                    events.append(self._normalize_tool_event(raw_event, fallback_name=tool_name))
+
+        if events:
+            return events
+
+        status = str(payload.get("status") or "").strip().lower()
+        detail = str(payload.get("message") or payload.get("summary") or "").strip()
+        if status or detail:
+            normalized_status = "error" if status in {"error", "failed", "fail"} else "ok"
+            return [self._normalize_tool_event({}, fallback_name=tool_name, fallback_status=normalized_status, fallback_detail=detail)]
+        return []
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
@@ -140,22 +178,22 @@ class AgentRunner:
 
         return AgentRunResult(final_content=final_content, messages=messages, tools_used=tools_used, usage=usage, stop_reason=stop_reason, error=error, tool_events=tool_events)
 
-    async def _execute_tools(self, spec: AgentRunSpec, tool_calls: list[ToolCallRequest]) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
+    async def _execute_tools(self, spec: AgentRunSpec, tool_calls: list[ToolCallRequest]) -> tuple[list[Any], list[dict[str, Any]], BaseException | None]:
         if spec.concurrent_tools:
             tool_results = await asyncio.gather(*(self._run_tool(spec, tool_call) for tool_call in tool_calls))
         else:
             tool_results = [await self._run_tool(spec, tool_call) for tool_call in tool_calls]
         results: list[Any] = []
-        events: list[dict[str, str]] = []
+        events: list[dict[str, Any]] = []
         fatal_error: BaseException | None = None
-        for result, event, err in tool_results:
+        for result, tool_events, err in tool_results:
             results.append(result)
-            events.append(event)
+            events.extend(tool_events)
             if err is not None and fatal_error is None:
                 fatal_error = err
         return results, events, fatal_error
 
-    async def _run_tool(self, spec: AgentRunSpec, tool_call: ToolCallRequest) -> tuple[Any, dict[str, str], BaseException | None]:
+    async def _run_tool(self, spec: AgentRunSpec, tool_call: ToolCallRequest) -> tuple[Any, list[dict[str, Any]], BaseException | None]:
         try:
             result = await spec.tools.execute(tool_call.name, tool_call.arguments)
         except asyncio.CancelledError:
@@ -163,12 +201,20 @@ class AgentRunner:
         except BaseException as exc:
             event = {"name": tool_call.name, "status": "error", "detail": str(exc)}
             if spec.fail_on_tool_error:
-                return f"Error: {type(exc).__name__}: {exc}", event, exc
-            return f"Error: {type(exc).__name__}: {exc}", event, None
+                return f"Error: {type(exc).__name__}: {exc}", [event], exc
+            return f"Error: {type(exc).__name__}: {exc}", [event], None
+        structured_events = self._extract_structured_tool_events(tool_call.name, result)
+        if structured_events:
+            fatal_error = None
+            for event in structured_events:
+                if event.get("status") == "error" and spec.fail_on_tool_error:
+                    fatal_error = RuntimeError(event.get("detail") or f"{tool_call.name} failed")
+                    break
+            return result, structured_events, fatal_error
         detail = "" if result is None else str(result)
         detail = detail.replace("\n", " ").strip()
         if not detail:
             detail = "(empty)"
         elif len(detail) > 120:
             detail = detail[:120] + "..."
-        return result, {"name": tool_call.name, "status": "error" if isinstance(result, str) and result.startswith("Error") else "ok", "detail": detail}, None
+        return result, [{"name": tool_call.name, "status": "error" if isinstance(result, str) and result.startswith("Error") else "ok", "detail": detail}], None

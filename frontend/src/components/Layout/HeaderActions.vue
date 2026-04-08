@@ -118,8 +118,14 @@ onMounted(() => {
   watch(filter, () => { if (drawerVisible.value) notifStore.loadList(filter.value) })
 
   // token 变化时重连
-  watch(() => authStore.token, () => {
-    notifStore.connect()
+  watch(() => authStore.token, (nextToken, previousToken) => {
+    if (!nextToken) {
+      notifStore.disconnect()
+      return
+    }
+    if (!previousToken || !notifStore.connected) {
+      notifStore.connect()
+    }
   })
 })
 

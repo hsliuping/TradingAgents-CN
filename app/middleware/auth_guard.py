@@ -64,10 +64,29 @@ class AuthGuardMiddleware(BaseHTTPMiddleware):
             try:
                 from app.services.auth_service import AuthService
                 token_data = AuthService.verify_token(token)
+            except Exception:
+                logger.warning(
+                    "AuthGuard JWT 校验异常: method=%s path=%s",
+                    request.method,
+                    path,
+                    exc_info=True,
+                )
+            else:
                 if token_data:
                     return await call_next(request)
-            except Exception:
-                pass
+                logger.info(
+                    "AuthGuard JWT 校验失败: method=%s path=%s token_prefix=%s",
+                    request.method,
+                    path,
+                    token[:12],
+                )
+        elif auth_header:
+            logger.info(
+                "AuthGuard 收到非 Bearer Authorization: method=%s path=%s prefix=%s",
+                request.method,
+                path,
+                auth_header[:24],
+            )
 
         # --- Session cookie ---
         try:
@@ -75,9 +94,20 @@ class AuthGuardMiddleware(BaseHTTPMiddleware):
             if user_id:
                 return await call_next(request)
         except Exception:
-            pass
+            logger.warning(
+                "AuthGuard 读取 Session Cookie 异常: method=%s path=%s",
+                request.method,
+                path,
+                exc_info=True,
+            )
 
-        logger.debug("AuthGuard 拦截未认证请求: %s %s", request.method, path)
+        logger.warning(
+            "AuthGuard 拦截未认证请求: method=%s path=%s has_authorization=%s has_session=%s",
+            request.method,
+            path,
+            bool(auth_header),
+            bool(request.session.get("user_id")) if "session" in request.scope else False,
+        )
         return JSONResponse(
             status_code=401,
             content={

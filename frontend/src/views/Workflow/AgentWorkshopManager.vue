@@ -2,10 +2,13 @@
   <div class="agent-workshop-manager-page">
     <div class="page-header">
       <div class="header-left">
-        <h1>Agent 工坊</h1>
-        <span class="subtitle">先在管理页挑选或新建 Agent，再进入独立工作页做讨论、生成和评估。</span>
+        <h1>Agent 管理</h1>
+        <span class="subtitle">这里统一查看进行中的工坊会话、已沉淀的规格和当前测试状态。</span>
       </div>
       <div class="header-right">
+        <el-button plain @click="goToLanding()">
+          返回总览
+        </el-button>
         <el-button type="primary" @click="goToWorkshop()">
           新建 Agent
         </el-button>
@@ -118,8 +121,40 @@
                 <div class="spec-card-goal">{{ spec.primary_goal || '还没有填写主要目标' }}</div>
                 <div class="spec-card-meta">
                   <span>{{ spec.domain || '未分类' }}</span>
-                  <span>{{ spec.current_version_id || '无版本' }}</span>
+                  <span>{{ getLatestSpecVersion(spec)?.version_id || spec.current_version_id || '无版本' }}</span>
                   <span>{{ formatTime(spec.updated_at) }}</span>
+                </div>
+                <div v-if="getLatestSpecVersion(spec)" class="spec-card-version-summary">
+                  <div class="spec-card-version-head">
+                    <strong>v{{ getLatestSpecVersion(spec)?.version }}</strong>
+                    <el-tag size="small" effect="plain" :type="getVersionStatusTagType(getLatestSpecVersion(spec)?.status)">
+                      {{ getVersionStatusText(getLatestSpecVersion(spec)?.status) }}
+                    </el-tag>
+                    <el-tag
+                      v-if="getLatestSpecVersion(spec)?.last_evaluation_summary"
+                      size="small"
+                      effect="plain"
+                      :type="getEvaluationDecisionTagType(getLatestSpecVersion(spec)?.last_evaluation_summary?.decision)"
+                    >
+                      {{ getEvaluationDecisionText(getLatestSpecVersion(spec)?.last_evaluation_summary?.decision) }}
+                    </el-tag>
+                  </div>
+                  <div v-if="getLatestSpecVersion(spec)?.prompt_template_project_memory_binding_summary" class="spec-card-summary-text">
+                    {{ getLatestSpecVersion(spec)?.prompt_template_project_memory_binding_summary?.summary }}
+                  </div>
+                  <div v-if="getLatestSpecVersion(spec)?.prompt_template_project_memory_binding_summary || getLatestSpecVersion(spec)?.last_evaluation_summary?.project_memory_binding" class="spec-card-summary-meta">
+                    <el-tag
+                      v-if="getLatestSpecVersion(spec)?.last_evaluation_summary?.project_memory_binding"
+                      size="small"
+                      effect="plain"
+                      :type="getProjectMemorySummaryTagType(getLatestSpecVersion(spec)?.last_evaluation_summary?.project_memory_binding?.review_status)"
+                    >
+                      {{ getProjectMemorySummaryText(getLatestSpecVersion(spec)?.last_evaluation_summary?.project_memory_binding?.review_status) }}
+                    </el-tag>
+                    <span v-if="typeof getLatestSpecVersion(spec)?.last_evaluation_summary?.overall_score === 'number'">
+                      综合分 {{ getLatestSpecVersion(spec)?.last_evaluation_summary?.overall_score }}
+                    </span>
+                  </div>
                 </div>
                 <div class="spec-card-tags" v-if="spec.outputs?.length">
                   <el-tag v-for="item in getSpecOutputTags(spec).slice(0, 4)" :key="item" size="small" effect="plain">{{ item }}</el-tag>
@@ -145,7 +180,12 @@ import { computed, onActivated, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
-import agentWorkshopApi, { type AgentSpec, type AgentSpecIOItem, type AgentWorkshopSessionDetail } from '@/api/agentWorkshop'
+import agentWorkshopApi, {
+  type AgentSpec,
+  type AgentSpecIOItem,
+  type AgentVersion,
+  type AgentWorkshopSessionDetail,
+} from '@/api/agentWorkshop'
 
 const router = useRouter()
 
@@ -156,6 +196,7 @@ const searchKeyword = ref('')
 
 const draftSessions = ref<AgentWorkshopSessionDetail[]>([])
 const specs = ref<AgentSpec[]>([])
+const latestVersionBySpec = ref<Record<string, AgentVersion>>({})
 
 const getSpecIoText = (item?: AgentSpecIOItem | null) => {
   if (!item) return ''
@@ -268,6 +309,52 @@ const specStatusTagType = (status?: string) => {
   return 'primary'
 }
 
+const getLatestSpecVersion = (spec: AgentSpec) => latestVersionBySpec.value[spec.spec_id] || null
+
+const getVersionStatusText = (status?: string) => {
+  if (status === 'active') return '已发布'
+  if (status === 'testing') return '测试中'
+  if (status === 'archived') return '已归档'
+  if (status === 'draft') return '草稿'
+  return status || '未知'
+}
+
+const getVersionStatusTagType = (status?: string): 'success' | 'warning' | 'info' | 'primary' => {
+  if (status === 'active') return 'success'
+  if (status === 'testing') return 'warning'
+  if (status === 'archived') return 'info'
+  return 'primary'
+}
+
+const getEvaluationDecisionText = (decision?: string) => {
+  if (decision === 'pass') return '通过'
+  if (decision === 'reject') return '拒绝'
+  if (decision === 'revise') return '需修订'
+  return decision || '未评估'
+}
+
+const getEvaluationDecisionTagType = (decision?: string): 'success' | 'warning' | 'danger' | 'info' => {
+  if (decision === 'pass') return 'success'
+  if (decision === 'reject') return 'danger'
+  if (decision === 'revise') return 'warning'
+  return 'info'
+}
+
+const getProjectMemorySummaryTagType = (status?: string): 'success' | 'warning' | 'danger' | 'info' => {
+  if (status === 'pass') return 'success'
+  if (status === 'evidence_incomplete') return 'warning'
+  if (status === 'failed') return 'danger'
+  return 'info'
+}
+
+const getProjectMemorySummaryText = (status?: string) => {
+  if (status === 'pass') return 'L4 已绑定'
+  if (status === 'failed') return 'L4 缺失'
+  if (status === 'evidence_incomplete') return 'L4 证据不足'
+  if (status === 'not_enabled') return 'L4 未启用'
+  return status || 'L4 未知'
+}
+
 const getDraftPreview = (draft: AgentWorkshopSessionDetail) => {
   const lastAssistant = [...(draft.messages || [])].reverse().find(item => item.role === 'assistant')
   const lastUser = [...(draft.messages || [])].reverse().find(item => item.role === 'user')
@@ -281,6 +368,10 @@ const goToWorkshop = (sessionId?: string) => {
     return
   }
   router.push('/workflow/agent-workshop/create')
+}
+
+const goToLanding = () => {
+  router.push('/workflow/agent-workshop')
 }
 
 const openSpec = (spec: AgentSpec) => {
@@ -307,10 +398,33 @@ const loadDrafts = async () => {
 const loadSpecs = async () => {
   listLoading.value = true
   try {
-    const result = await agentWorkshopApi.listSpecs({ page: 1, page_size: 50 })
-    specs.value = result.items || []
+    const specResult = await agentWorkshopApi.listSpecs({ page: 1, page_size: 50 })
+    const specItems = specResult.items || []
+    specs.value = specItems
+
+    const versionPairs = await Promise.all(
+      specItems.map(async spec => {
+        try {
+          if (spec.current_version_id) {
+            const version = await agentWorkshopApi.getVersion(spec.current_version_id)
+            return [spec.spec_id, version] as const
+          }
+
+          const result = await agentWorkshopApi.listVersions({ spec_id: spec.spec_id, page: 1, page_size: 1 })
+          const version = result.items?.[0]
+          return version ? ([spec.spec_id, version] as const) : null
+        } catch {
+          return null
+        }
+      })
+    )
+
+    latestVersionBySpec.value = Object.fromEntries(
+      versionPairs.filter((entry): entry is readonly [string, AgentVersion] => Array.isArray(entry) && !!entry[0] && !!entry[1])
+    )
   } catch (error: any) {
     specs.value = []
+    latestVersionBySpec.value = {}
     ElMessage.error(error?.message || '加载 Agent 列表失败')
   } finally {
     listLoading.value = false
@@ -573,6 +687,40 @@ onActivated(refreshAll)
 .spec-card-meta {
   margin-top: 10px;
   flex-wrap: wrap;
+  color: #70837d;
+  font-size: 12px;
+}
+
+.spec-card-version-summary {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(18, 63, 57, 0.08);
+  background: linear-gradient(180deg, rgba(251, 254, 253, 0.94) 0%, rgba(244, 250, 247, 0.98) 100%);
+}
+
+.spec-card-version-head,
+.spec-card-summary-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.spec-card-version-head strong {
+  color: #123f39;
+  font-size: 13px;
+}
+
+.spec-card-summary-text {
+  margin-top: 8px;
+  color: #4e5b57;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.spec-card-summary-meta {
+  margin-top: 8px;
   color: #70837d;
   font-size: 12px;
 }

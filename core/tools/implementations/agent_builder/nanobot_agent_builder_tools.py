@@ -80,6 +80,18 @@ def _parse_string_list(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def _dedupe_string_list(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        ordered.append(text)
+    return ordered
+
+
 def _utc_now_iso() -> str:
     return datetime.utcnow().isoformat()
 
@@ -92,10 +104,514 @@ def _parse_json_tool_result(raw: str) -> dict[str, Any]:
         return {"status": "error", "message": f"工具返回无法解析为 JSON: {exc}", "raw": raw}
 
 
+def _parse_optional_json_object(raw: str, field_name: str) -> dict[str, Any]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+    except Exception as exc:
+        raise ValueError(f"{field_name} 不是合法 JSON 对象: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{field_name} 必须是 JSON 对象")
+    return data
+
+
+def _parse_optional_json_list(raw: str, field_name: str) -> list[Any]:
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    try:
+        data = json.loads(text)
+    except Exception as exc:
+        raise ValueError(f"{field_name} 不是合法 JSON 数组: {exc}") from exc
+    if not isinstance(data, list):
+        raise ValueError(f"{field_name} 必须是 JSON 数组")
+    return data
+
+
+def _with_nanobot_review_worker_flags(runtime_result: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    if runtime_result is None:
+        return None
+    payload = dict(runtime_result)
+    payload.setdefault("review_worker_mode", "nanobot-assisted")
+    payload.setdefault("nanobot_evidence_workers", True)
+    return payload
+
+
+def _has_workshop_runtime_evidence(runtime_result: dict[str, Any] | None) -> bool:
+    if not isinstance(runtime_result, dict) or not runtime_result:
+        return False
+    if str(runtime_result.get("output_text") or "").strip():
+        return True
+    if str(runtime_result.get("report") or "").strip():
+        return True
+    if runtime_result.get("output_payload"):
+        return True
+    if runtime_result.get("raw_result"):
+        return True
+    if runtime_result.get("tool_trace"):
+        return True
+
+    debug_prompt = runtime_result.get("debug_prompt")
+    if isinstance(debug_prompt, dict):
+        if debug_prompt.get("tool_trace"):
+            return True
+        if str(debug_prompt.get("system_prompt") or "").strip():
+            return True
+        if str(debug_prompt.get("user_prompt") or "").strip():
+            return True
+        if str(debug_prompt.get("output_text") or "").strip():
+            return True
+
+    raw_result = runtime_result.get("raw_result")
+    if isinstance(raw_result, dict):
+        if raw_result.get("tool_trace"):
+            return True
+        nested_debug_prompt = raw_result.get("__debug_prompt__")
+        if isinstance(nested_debug_prompt, dict):
+            if nested_debug_prompt.get("tool_trace"):
+                return True
+            if str(nested_debug_prompt.get("system_prompt") or "").strip():
+                return True
+            if str(nested_debug_prompt.get("user_prompt") or "").strip():
+                return True
+            if str(nested_debug_prompt.get("output_text") or "").strip():
+                return True
+    return False
+
+
+def _build_tool_stage_event(name: str, status: str, detail: str) -> dict[str, str]:
+    return {
+        "name": name,
+        "status": status,
+        "detail": str(detail or "").strip(),
+    }
+
+
+_WORKSHOP_SPEC_COLLECTION = "agent_specs"
+_WORKSHOP_SESSION_COLLECTION = "agent_workshop_sessions"
+_WORKSHOP_VERSION_COLLECTION = "agent_versions"
+_WORKSHOP_EVALUATION_COLLECTION = "agent_evaluations"
+
+
+def _compute_workshop_phase(
+    *,
+    feasibility_status: str,
+    completeness_score: float,
+    version_status: str,
+    latest_evaluation_decision: str,
+    has_version: bool,
+) -> str:
+    if feasibility_status == "not-feasible":
+        return "blocked"
+    if version_status == "active":
+        return "published"
+    if version_status == "testing" and latest_evaluation_decision == "pass":
+        return "publish-ready"
+    if latest_evaluation_decision:
+        return "evaluation"
+    if version_status == "testing":
+        return "testing"
+    if has_version or (feasibility_status == "feasible" and completeness_score >= 0.75):
+        return "generation"
+    if feasibility_status == "need-clarification":
+        return "confirmation"
+    return "requirement-intake"
+
+
+def _humanize_workshop_phase(phase: str) -> str:
+    mapping = {
+        "requirement-intake": "需求收集中",
+        "confirmation": "待确认",
+        "generation": "生成阶段",
+        "testing": "真数据测试中",
+        "evaluation": "待修正",
+        "publish-ready": "待确认发布",
+        "published": "已发布",
+        "blocked": "不可继续",
+    }
+    return mapping.get(str(phase or "").strip(), str(phase or "未定义阶段").strip() or "未定义阶段")
+
+
+async def _resolve_workshop_session_phase_context(db: Any, session_id: str) -> dict[str, Any]:
+    sessions = _get_collection(db, _WORKSHOP_SESSION_COLLECTION)
+    specs = _get_collection(db, _WORKSHOP_SPEC_COLLECTION)
+    versions = _get_collection(db, _WORKSHOP_VERSION_COLLECTION)
+    evaluations = _get_collection(db, _WORKSHOP_EVALUATION_COLLECTION)
+
+    clean_session_id = str(session_id or "").strip()
+    if not clean_session_id:
+        return {"exists": False, "session_id": clean_session_id, "guard_available": False}
+    if sessions is None or specs is None or versions is None or evaluations is None:
+        return {"exists": False, "session_id": clean_session_id, "guard_available": False}
+
+    session_doc = await sessions.find_one({"session_id": clean_session_id})
+    if not session_doc:
+        return {"exists": False, "session_id": clean_session_id, "guard_available": True}
+
+    spec_snapshot = _read_mapping_or_attr(session_doc, "current_spec_snapshot", {}) or {}
+    spec_id = str(
+        session_doc.get("spec_id")
+        or _read_mapping_or_attr(spec_snapshot, "spec_id", "")
+        or ""
+    ).strip()
+    spec_doc = await specs.find_one({"spec_id": spec_id}) if spec_id and specs is not None else None
+
+    current_version_id = str(
+        (spec_doc or {}).get("current_version_id")
+        or _read_mapping_or_attr(spec_snapshot, "current_version_id", "")
+        or ""
+    ).strip()
+    version_doc = await versions.find_one({"version_id": current_version_id}) if current_version_id and versions is not None else None
+    latest_evaluation_doc = (
+        await evaluations.find_one({"version_id": current_version_id}, sort=[("created_at", -1)])
+        if current_version_id and evaluations is not None
+        else None
+    )
+
+    feasibility_status = str(session_doc.get("feasibility_status") or "").strip().lower()
+    try:
+        completeness_score = float(session_doc.get("completeness_score") or 0)
+    except Exception:
+        completeness_score = 0.0
+    version_status = str((version_doc or {}).get("status") or "").strip().lower()
+    latest_evaluation_decision = str((latest_evaluation_doc or {}).get("decision") or "").strip().lower()
+    phase = _compute_workshop_phase(
+        feasibility_status=feasibility_status,
+        completeness_score=completeness_score,
+        version_status=version_status,
+        latest_evaluation_decision=latest_evaluation_decision,
+        has_version=bool(version_doc),
+    )
+
+    return {
+        "exists": True,
+        "guard_available": True,
+        "session_id": clean_session_id,
+        "spec_id": spec_id,
+        "current_version_id": current_version_id,
+        "feasibility_status": feasibility_status,
+        "completeness_score": completeness_score,
+        "version_status": version_status,
+        "latest_evaluation_decision": latest_evaluation_decision,
+        "phase": phase,
+        "phase_label": _humanize_workshop_phase(phase),
+    }
+
+
+async def _resolve_workshop_version_phase_context(db: Any, version_id: str) -> dict[str, Any]:
+    versions = _get_collection(db, _WORKSHOP_VERSION_COLLECTION)
+    evaluations = _get_collection(db, _WORKSHOP_EVALUATION_COLLECTION)
+
+    clean_version_id = str(version_id or "").strip()
+    if not clean_version_id:
+        return {"exists": False, "version_id": clean_version_id, "guard_available": False}
+    if versions is None or evaluations is None:
+        return {"exists": False, "version_id": clean_version_id, "guard_available": False}
+
+    version_doc = await versions.find_one({"version_id": clean_version_id})
+    if not version_doc:
+        return {"exists": False, "version_id": clean_version_id, "guard_available": True}
+
+    latest_evaluation_doc = (
+        await evaluations.find_one({"version_id": clean_version_id}, sort=[("created_at", -1)])
+        if evaluations is not None
+        else None
+    )
+    version_status = str(version_doc.get("status") or "").strip().lower()
+    latest_evaluation_decision = str((latest_evaluation_doc or {}).get("decision") or "").strip().lower()
+    phase = _compute_workshop_phase(
+        feasibility_status="feasible",
+        completeness_score=1.0,
+        version_status=version_status,
+        latest_evaluation_decision=latest_evaluation_decision,
+        has_version=True,
+    )
+
+    return {
+        "exists": True,
+        "guard_available": True,
+        "version_id": clean_version_id,
+        "spec_id": str(version_doc.get("spec_id") or "").strip(),
+        "version_status": version_status,
+        "latest_evaluation_decision": latest_evaluation_decision,
+        "phase": phase,
+        "phase_label": _humanize_workshop_phase(phase),
+    }
+
+
+async def _resolve_workshop_draft_target_context(db: Any, agent_id: str, thread_id: str = "") -> dict[str, Any]:
+    specs = _get_collection(db, _WORKSHOP_SPEC_COLLECTION)
+    versions = _get_collection(db, _WORKSHOP_VERSION_COLLECTION)
+    threads = _get_collection(db, "embedded_nanobot_threads")
+
+    clean_agent_id = str(agent_id or "").strip()
+    clean_thread_id = str(thread_id or "").strip()
+    default_context = {
+        "exists": False,
+        "guard_available": bool(specs is not None and versions is not None),
+        "matched_existing_asset": False,
+        "target_kind": "",
+        "agent_id": clean_agent_id,
+        "thread_id": clean_thread_id,
+    }
+    if not clean_agent_id:
+        return default_context
+    if specs is None or versions is None:
+        return default_context
+
+    version_doc = await versions.find_one({"version_id": clean_agent_id})
+    if version_doc:
+        phase_context = await _resolve_workshop_version_phase_context(db, clean_agent_id)
+        return {
+            **phase_context,
+            "matched_existing_asset": True,
+            "target_kind": "version_id",
+            "agent_id": clean_agent_id,
+            "thread_id": clean_thread_id,
+        }
+
+    spec_doc = await specs.find_one({"spec_id": clean_agent_id})
+    if spec_doc:
+        current_version_id = str(spec_doc.get("current_version_id") or "").strip()
+        phase_context = {
+            "exists": True,
+            "guard_available": True,
+            "spec_id": clean_agent_id,
+            "version_id": current_version_id,
+            "version_status": "",
+            "latest_evaluation_decision": "",
+            "phase": "generation",
+            "phase_label": _humanize_workshop_phase("generation"),
+        }
+        if current_version_id:
+            phase_context = await _resolve_workshop_version_phase_context(db, current_version_id)
+        return {
+            **phase_context,
+            "matched_existing_asset": True,
+            "target_kind": "spec_id",
+            "agent_id": clean_agent_id,
+            "thread_id": clean_thread_id,
+        }
+
+    if not clean_thread_id or threads is None:
+        return default_context
+
+    thread_doc = await threads.find_one({"thread_id": clean_thread_id})
+    if thread_doc is None:
+        thread_doc = await threads.find_one({"session_key": clean_thread_id})
+    thread_context = dict((thread_doc or {}).get("thread_context") or {})
+    resolved_spec_id = str(thread_context.get("spec_id") or "").strip()
+    resolved_version_id = str(thread_context.get("version_id") or "").strip()
+    resolved_version_status = str(thread_context.get("version_status") or "").strip().lower()
+    if clean_agent_id not in {resolved_spec_id, resolved_version_id}:
+        return default_context
+
+    if resolved_version_id:
+        phase_context = await _resolve_workshop_version_phase_context(db, resolved_version_id)
+        if phase_context.get("exists"):
+            return {
+                **phase_context,
+                "matched_existing_asset": True,
+                "target_kind": "thread_context",
+                "agent_id": clean_agent_id,
+                "thread_id": clean_thread_id,
+                "spec_id": resolved_spec_id or phase_context.get("spec_id"),
+            }
+
+    phase = "published" if resolved_version_status == "active" else "generation"
+    return {
+        "exists": True,
+        "guard_available": True,
+        "matched_existing_asset": True,
+        "target_kind": "thread_context",
+        "agent_id": clean_agent_id,
+        "thread_id": clean_thread_id,
+        "spec_id": resolved_spec_id,
+        "version_id": resolved_version_id,
+        "version_status": resolved_version_status,
+        "latest_evaluation_decision": "",
+        "phase": phase,
+        "phase_label": _humanize_workshop_phase(phase),
+    }
+
+
+def _build_phase_guard_blocked_response(
+    *,
+    tool_name: str,
+    blocked_code: str,
+    message: str,
+    next_action: str,
+    phase_context: dict[str, Any],
+    target_fields: dict[str, Any],
+) -> str:
+    return _json_response({
+        "status": "blocked",
+        "blocked_by": "phase_guard",
+        "blocked_code": str(blocked_code or "phase_not_ready").strip() or "phase_not_ready",
+        "message": message,
+        "next_action": next_action,
+        "current_phase": phase_context.get("phase"),
+        "current_phase_label": phase_context.get("phase_label"),
+        "summary": {
+            "blocked_code": str(blocked_code or "phase_not_ready").strip() or "phase_not_ready",
+            "current_phase": phase_context.get("phase"),
+            "current_phase_label": phase_context.get("phase_label"),
+            "version_status": phase_context.get("version_status"),
+            "latest_evaluation_decision": phase_context.get("latest_evaluation_decision"),
+            "feasibility_status": phase_context.get("feasibility_status"),
+            "completeness_score": phase_context.get("completeness_score"),
+        },
+        "_tool_events": [
+            _build_tool_stage_event(
+                f"{tool_name}.phase_guard",
+                "blocked",
+                message,
+            ),
+        ],
+        **target_fields,
+    })
+
+
+async def _resolve_workshop_test_llm_payload(
+    db: Any,
+    temperature: float = 0.2,
+    max_tokens: int = 4000,
+) -> dict[str, Any]:
+    from app.services.intelligent_assistant_service import get_reasoning_llm_config
+
+    config = await get_reasoning_llm_config(db)
+    if not config:
+        raise ValueError("系统中未找到可用的默认推理模型配置，请先在系统设置中配置大模型。")
+
+    clean_provider = str(getattr(config, "provider", "") or "").strip()
+    clean_model = str(
+        getattr(config, "model", "")
+        or getattr(config, "model_name", "")
+        or ""
+    ).strip()
+    clean_backend_url = str(
+        getattr(config, "base_url", "")
+        or getattr(config, "api_base", "")
+        or ""
+    ).strip()
+    clean_api_key = str(getattr(config, "api_key", "") or "").strip()
+
+    try:
+        temperature = float(getattr(config, "temperature", temperature) or temperature)
+    except Exception:
+        pass
+    try:
+        max_tokens = int(getattr(config, "max_tokens", max_tokens) or max_tokens)
+    except Exception:
+        pass
+
+    if not clean_provider:
+        raise ValueError("系统默认推理模型缺少 provider 配置")
+    if not clean_model:
+        raise ValueError("系统默认推理模型缺少 model 配置")
+
+    return {
+        "provider": clean_provider,
+        "model": clean_model,
+        "temperature": float(temperature),
+        "max_tokens": int(max_tokens),
+        "backend_url": clean_backend_url or None,
+        "api_key": clean_api_key or None,
+    }
+
+
 def _read_mapping_or_attr(value: Any, field: str, default: Any = None) -> Any:
     if isinstance(value, dict):
         return value.get(field, default)
     return getattr(value, field, default)
+
+
+async def _sync_linked_workshop_versions(
+    db: Any,
+    agent_id: str,
+    candidate_config: dict[str, Any],
+    resolved_tools: list[str],
+    resolved_default_tools: list[str],
+    max_tool_calls: int,
+) -> dict[str, Any]:
+    versions = _get_collection(db, "agent_versions")
+    if versions is None:
+        return {
+            "status": "skipped",
+            "reason": "agent_versions_unavailable",
+            "attempted_version_ids": [],
+            "synced_version_ids": [],
+            "skipped": [],
+        }
+
+    metadata = dict(candidate_config.get("metadata") or {})
+    version_candidates = [
+        metadata.get("version_id"),
+        metadata.get("latest_workshop_version_id"),
+        metadata.get("current_version_id"),
+    ]
+    spec_id = str(metadata.get("spec_id") or "").strip()
+    if spec_id:
+        specs = _get_collection(db, "agent_specs")
+        if specs is not None:
+            spec_doc = await specs.find_one({"spec_id": spec_id}, {"current_version_id": 1}) or {}
+            version_candidates.append(spec_doc.get("current_version_id"))
+
+    target_version_ids = _dedupe_string_list([str(item or "").strip() for item in version_candidates])
+    if not target_version_ids:
+        return {
+            "status": "not_linked",
+            "reason": "no_linked_version",
+            "attempted_version_ids": [],
+            "synced_version_ids": [],
+            "skipped": [],
+        }
+
+    synced_version_ids: list[str] = []
+    skipped: list[dict[str, str]] = []
+    workshop_service = AgentWorkshopService(db=db)
+
+    for version_id in target_version_ids:
+        version_doc = await versions.find_one({"version_id": version_id})
+        if not version_doc:
+            skipped.append({"version_id": version_id, "reason": "version_not_found"})
+            continue
+
+        version_status = str(version_doc.get("status") or "").strip().lower()
+        if version_status == "active":
+            skipped.append({"version_id": version_id, "reason": "version_active"})
+            continue
+
+        await workshop_service.sync_version_required_tools(
+            version_id=version_id,
+            required_tools=list(resolved_tools),
+            default_tools=list(resolved_default_tools),
+            max_tool_calls=int(max_tool_calls),
+        )
+        synced_version_ids.append(version_id)
+
+    if synced_version_ids:
+        logger.info(
+            "已同步候选 Agent %s 的工具绑定到 Agent Workshop 版本: %s",
+            agent_id,
+            ", ".join(synced_version_ids),
+        )
+
+    return {
+        "status": "ok" if synced_version_ids else "skipped",
+        "reason": None if synced_version_ids else "no_sync_target",
+        "attempted_version_ids": target_version_ids,
+        "synced_version_ids": synced_version_ids,
+        "skipped": skipped,
+    }
+
+
+async def _auto_build_workshop_version_result(session_id: str) -> dict[str, Any]:
+    return _parse_json_tool_result(await build_agent_workshop_version.ainvoke({
+        "session_id": session_id,
+    }))
 
 
 def _looks_unspecified(value: str) -> bool:
@@ -205,7 +721,7 @@ def _build_confirmation_template(
         f"- 核心工具：{_join_display_items(bound_tools, default='待确认')}",
         f"- 明确不做：{_join_display_items(non_goals, default='待确认')}",
         f"- 方法边界：{str(valuation_method_scope or '未特别限定').strip()}",
-        f"- 生成后验证方式：{str(test_strategy or '未指定').strip()}",
+        f"- 生成后运行诊断方式（非正式验收）：{str(test_strategy or '未指定').strip()}",
     ]
 
     if report_contract is not None:
@@ -331,7 +847,7 @@ def _format_runtime_agent_config(doc: dict[str, Any], bound_tools: list[str], re
 async def _is_orphaned_workshop_runtime_agent(doc: dict[str, Any], db: Any) -> bool:
     metadata = doc.get("metadata") or {}
     source = str(metadata.get("source") or "").strip().lower()
-    if source != "agent_workshop":
+    if source not in {"agent_workshop", "nanobot_generated"}:
         return False
 
     version_id = str(metadata.get("version_id") or "").strip()
@@ -399,6 +915,227 @@ def _format_prompt_template_record(doc: dict[str, Any]) -> dict[str, Any]:
         "version": doc.get("version"),
         "content_fields": sorted(content.keys()) if isinstance(content, dict) else [],
         "updated_at": doc.get("updated_at"),
+    }
+
+
+def _format_prompt_template_detail(doc: dict[str, Any]) -> dict[str, Any]:
+    formatted = _format_prompt_template_record(doc)
+    content = doc.get("content") or {}
+    formatted["content"] = {
+        "system_prompt": str(content.get("system_prompt") or "").strip(),
+        "user_prompt": str(content.get("user_prompt") or "").strip(),
+        "tool_guidance": str(content.get("tool_guidance") or "").strip(),
+        "analysis_requirements": str(content.get("analysis_requirements") or "").strip(),
+        "output_format": str(content.get("output_format") or "").strip(),
+        "constraints": str(content.get("constraints") or "").strip(),
+    }
+    formatted["remark"] = str(doc.get("remark") or "").strip()
+    formatted["is_system"] = bool(doc.get("is_system", False))
+    formatted["created_at"] = doc.get("created_at")
+    formatted["preference_type"] = doc.get("preference_type")
+    return formatted
+
+
+def _parse_auto_bool(raw: str, default: bool | None = None) -> bool | None:
+    text = str(raw or "").strip().lower()
+    if not text or text == "auto":
+        return default
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
+async def _resolve_effective_prompt_template_payload(
+    *,
+    agent_type: str,
+    agent_name: str,
+    preference_id: str = "neutral",
+    workflow_id: str = "",
+    node_id: str = "",
+    is_debug_mode: bool = False,
+    debug_template_id: str = "",
+    user_id: str = "",
+) -> dict[str, Any]:
+    clean_agent_type = str(agent_type or "").strip()
+    clean_agent_name = str(agent_name or "").strip()
+    if not clean_agent_type or not clean_agent_name:
+        return {"status": "error", "message": "agent_type 和 agent_name 不能为空"}
+
+    resolved_user_id = str(user_id or "").strip()
+    if not resolved_user_id:
+        try:
+            resolved_user_id = str(require_current_user_id() or "").strip()
+        except Exception:
+            resolved_user_id = ""
+
+    context = {
+        "user_id": resolved_user_id or None,
+        "preference_id": str(preference_id or "neutral").strip() or "neutral",
+        "workflow_id": str(workflow_id or "").strip() or None,
+        "node_id": str(node_id or "").strip() or None,
+        "is_debug_mode": bool(is_debug_mode),
+        "debug_template_id": str(debug_template_id or "").strip() or None,
+    }
+
+    from tradingagents.utils.template_client import get_template_client
+
+    template_client = get_template_client()
+    effective = template_client.get_effective_template(
+        clean_agent_type,
+        clean_agent_name,
+        user_id=resolved_user_id or None,
+        preference_id=context["preference_id"],
+        context=context,
+        workflow_id=context["workflow_id"],
+        node_id=context["node_id"],
+    )
+    if not effective:
+        return {
+            "status": "error",
+            "message": "未找到当前生效模板",
+            "resolution_input": {
+                "agent_type": clean_agent_type,
+                "agent_name": clean_agent_name,
+                "user_id": resolved_user_id,
+                "preference_id": context["preference_id"],
+                "workflow_id": context["workflow_id"],
+                "node_id": context["node_id"],
+                "is_debug_mode": context["is_debug_mode"],
+                "debug_template_id": context["debug_template_id"],
+            },
+        }
+
+    return {
+        "status": "ok",
+        "resolution_input": {
+            "agent_type": clean_agent_type,
+            "agent_name": clean_agent_name,
+            "user_id": resolved_user_id,
+            "preference_id": context["preference_id"],
+            "workflow_id": context["workflow_id"],
+            "node_id": context["node_id"],
+            "is_debug_mode": context["is_debug_mode"],
+            "debug_template_id": context["debug_template_id"],
+        },
+        "template": effective,
+    }
+
+
+async def _resolve_current_thread_effective_template_input(
+    *,
+    db: Any,
+    user_id: str,
+    thread_id: str,
+    preference_id: str = "neutral",
+    workflow_id: str = "",
+    node_id: str = "",
+    debug_template_id: str = "",
+    debug_mode: str = "auto",
+    agent_type: str = "",
+    agent_name: str = "",
+) -> dict[str, Any]:
+    clean_user_id = str(user_id or "").strip()
+    clean_thread_id = str(thread_id or "").strip()
+    if not clean_user_id or not clean_thread_id:
+        return {"status": "error", "message": "user_id 和 thread_id 不能为空"}
+
+    threads = _get_collection(db, "embedded_nanobot_threads")
+    if threads is None:
+        return {"status": "error", "message": "当前数据库中不可用 embedded_nanobot_threads 集合"}
+
+    thread_doc = await threads.find_one({"user_id": clean_user_id, "thread_id": clean_thread_id})
+    if thread_doc is None:
+        thread_doc = await threads.find_one({"user_id": clean_user_id, "session_key": clean_thread_id})
+    if thread_doc is None:
+        return {"status": "error", "message": f"未找到 thread_id={clean_thread_id} 对应的 Nanobot 会话"}
+
+    thread_context = dict(thread_doc.get("thread_context") or {})
+    channel = str(thread_doc.get("channel") or "embedded").strip() or "embedded"
+    resolved_version_id = str(thread_context.get("version_id") or "").strip()
+    resolved_spec_id = str(thread_context.get("spec_id") or "").strip()
+    resolved_version_status = str(thread_context.get("version_status") or "").strip()
+    explicit_workflow_id = str(thread_context.get("workflow_id") or "").strip()
+    explicit_node_id = str(thread_context.get("node_id") or "").strip()
+    explicit_preference_id = str(thread_context.get("preference_id") or "").strip()
+    explicit_debug_template_id = str(thread_context.get("debug_template_id") or "").strip()
+
+    specs = _get_collection(db, "agent_specs")
+    versions = _get_collection(db, "agent_versions")
+    if not resolved_version_id and resolved_spec_id and specs is not None:
+        spec_doc = await specs.find_one({"spec_id": resolved_spec_id}, {"current_version_id": 1}) or {}
+        resolved_version_id = str(spec_doc.get("current_version_id") or "").strip()
+
+    version_doc = None
+    if resolved_version_id and versions is not None:
+        version_doc = await versions.find_one({"version_id": resolved_version_id})
+
+    resolved_agent_type = str(agent_type or "").strip()
+    resolved_agent_name = str(agent_name or "").strip()
+    if version_doc is not None:
+        if not resolved_agent_type:
+            resolved_agent_type = "custom_agent"
+        if not resolved_agent_name:
+            resolved_agent_name = str(version_doc.get("version_id") or resolved_version_id).strip()
+
+    if not resolved_agent_type or not resolved_agent_name:
+        return {
+            "status": "error",
+            "message": "当前线程缺少足够上下文，无法自动推断 agent_type/agent_name；请先让线程进入带版本上下文的状态，或显式传入 agent_type 和 agent_name",
+            "thread_context": thread_context,
+        }
+
+    template_ref = dict((version_doc or {}).get("prompt_template_ref") or {})
+    resolved_debug_template_id = str(debug_template_id or explicit_debug_template_id or template_ref.get("template_id") or "").strip()
+    resolved_workflow_id = str(workflow_id or explicit_workflow_id or "").strip()
+    if not resolved_workflow_id and resolved_version_id and channel == "agent_workshop":
+        resolved_workflow_id = f"agent_workshop_debug_{resolved_version_id}"
+
+    resolved_node_id = str(node_id or explicit_node_id or "").strip()
+    requested_preference_id = str(preference_id or "").strip()
+    if explicit_preference_id and requested_preference_id in {"", "neutral"}:
+        resolved_preference_id = explicit_preference_id
+    else:
+        resolved_preference_id = requested_preference_id or "neutral"
+    explicit_debug_mode = _parse_auto_bool(debug_mode, default=None)
+    if explicit_debug_mode is None:
+        resolved_is_debug_mode = bool(
+            resolved_debug_template_id and (
+                channel == "agent_workshop"
+                or resolved_version_status.lower() in {"testing", "draft"}
+            )
+        )
+    else:
+        resolved_is_debug_mode = explicit_debug_mode
+
+    return {
+        "status": "ok",
+        "thread_id": str(thread_doc.get("thread_id") or clean_thread_id),
+        "session_key": str(thread_doc.get("session_key") or "").strip(),
+        "channel": channel,
+        "thread_context": thread_context,
+        "resolution_input": {
+            "agent_type": resolved_agent_type,
+            "agent_name": resolved_agent_name,
+            "user_id": clean_user_id,
+            "preference_id": resolved_preference_id,
+            "workflow_id": resolved_workflow_id or None,
+            "node_id": resolved_node_id or None,
+            "is_debug_mode": resolved_is_debug_mode,
+            "debug_template_id": resolved_debug_template_id or None,
+        },
+        "resolution_source": {
+            "resolved_spec_id": resolved_spec_id or None,
+            "resolved_version_id": resolved_version_id or None,
+            "resolved_version_status": resolved_version_status or None,
+            "used_version_doc": bool(version_doc is not None),
+            "used_thread_channel": channel,
+            "used_explicit_workflow_id": bool(explicit_workflow_id),
+            "used_explicit_node_id": bool(explicit_node_id),
+            "used_explicit_preference_id": bool(explicit_preference_id),
+            "used_explicit_debug_template_id": bool(explicit_debug_template_id),
+        },
     }
 
 
@@ -936,37 +1673,96 @@ def get_agent_blueprint_details(
 @register_tool(
     tool_id="inspect_agent_workshop_assets",
     name="查看 Agent 工坊资产",
-    description="查看数据库中的 agent_specs 和 agent_versions 摘要，用于确认是否已有可复用的配置式 Agent 规格、版本或提示词资产。",
+    description="查看数据库中的 agent_specs 和 agent_versions 摘要，支持按关键词、workshop_session_id 或 spec_id/version_id/agent_id 精确核验，用于确认是否已有可复用的配置式 Agent 规格、版本或提示词资产。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
     when_to_use=(
         "当 Nanobot 需要确认是否已有接近需求的 Agent 规格、已构建版本或提示词资产时使用。"
-        "适合在决定新建前先看已有配置式资产。"
+        "适合在决定新建前先看已有配置式资产，或在当前线程已知 workshop_session_id/spec_id/version_id 时先做精确核验。"
     ),
     when_not_to_use="不适合做通用工具搜索，也不适合直接发布 Agent；它只汇总工坊资产摘要。",
     returns=(
         "返回 JSON 字符串，包含 spec 摘要、version 摘要、required_tools、required_capabilities、"
-        "prompt_template_ref 等信息。"
+        "prompt_template_ref 等信息，以及本次使用或解析后的精确过滤条件。"
     ),
-    example="inspect_agent_workshop_assets(keyword='估值', limit=5)",
+    example="inspect_agent_workshop_assets(workshop_session_id='session_001')",
     related_tools=["inspect_runtime_agent_configs", "inspect_agent_blueprints", "search_project_capabilities"],
 )
 async def inspect_agent_workshop_assets(
     keyword: Annotated[str, "按 spec 名称、目标、version agent_metadata 模糊筛选，可留空"] = "",
+    workshop_session_id: Annotated[str, "按 Agent 工坊 session_id 精确定位当前 spec/version，可留空"] = "",
+    spec_id: Annotated[str, "按 spec_id 精确筛选，可留空；适合当前线程已知 spec_id 的场景"] = "",
+    version_id: Annotated[str, "按 version_id 精确筛选，可留空；适合当前线程已知 version_id 的场景"] = "",
+    agent_id: Annotated[str, "按运行时 agent_id 精确筛选，可留空"] = "",
     limit: Annotated[int, "每类结果返回条数，默认 10，最大 20"] = 10,
     include_archived: Annotated[bool, "是否包含 archived 状态的 spec/version，默认 false"] = False,
 ) -> str:
     """查看 Agent 工坊资产摘要。"""
     try:
         db = get_mongo_db()
+        sessions_collection = _get_collection(db, _WORKSHOP_SESSION_COLLECTION)
         specs_collection = _get_collection(db, "agent_specs")
         versions_collection = _get_collection(db, "agent_versions")
         if specs_collection is None or versions_collection is None:
             return _json_response({"status": "error", "message": "当前数据库中不可用 agent_specs 或 agent_versions 集合"})
 
         capped_limit = max(1, min(int(limit), 20))
+        clean_keyword = str(keyword or "").strip()
+        clean_workshop_session_id = str(workshop_session_id or "").strip()
+        clean_spec_id = str(spec_id or "").strip()
+        clean_version_id = str(version_id or "").strip()
+        clean_agent_id = str(agent_id or "").strip()
+
+        resolved_spec_id = clean_spec_id
+        resolved_version_id = clean_version_id
+        if clean_workshop_session_id:
+            if sessions_collection is None:
+                return _json_response({
+                    "status": "error",
+                    "message": "当前数据库中不可用 agent_workshop_sessions 集合，无法按 workshop_session_id 核验",
+                })
+            session_doc = await sessions_collection.find_one({"session_id": clean_workshop_session_id})
+            if session_doc is None:
+                return _json_response({
+                    "status": "ok",
+                    "keyword": clean_keyword,
+                    "workshop_session_id": clean_workshop_session_id,
+                    "spec_id": clean_spec_id,
+                    "version_id": clean_version_id,
+                    "agent_id": clean_agent_id,
+                    "include_archived": include_archived,
+                    "spec_count": 0,
+                    "version_count": 0,
+                    "specs": [],
+                    "versions": [],
+                    "message": f"未找到 session_id={clean_workshop_session_id} 对应的 Agent 工坊会话",
+                    "design_references": [
+                        "docs/design/v3.0/agent-workshop-interface-sequence.md",
+                        "docs/design/v3.0/implementation-status-report.md",
+                    ],
+                })
+            spec_snapshot = _read_mapping_or_attr(session_doc, "current_spec_snapshot", {}) or {}
+            if not resolved_spec_id:
+                resolved_spec_id = str(
+                    session_doc.get("spec_id")
+                    or _read_mapping_or_attr(spec_snapshot, "spec_id", "")
+                    or ""
+                ).strip()
+            if not resolved_version_id:
+                resolved_version_id = str(
+                    _read_mapping_or_attr(spec_snapshot, "current_version_id", "")
+                    or session_doc.get("current_version_id")
+                    or ""
+                ).strip()
+
+        resolved_spec_doc = None
+        if resolved_spec_id:
+            resolved_spec_doc = await specs_collection.find_one({"spec_id": resolved_spec_id})
+            if resolved_spec_doc is not None and not resolved_version_id:
+                resolved_version_id = str(resolved_spec_doc.get("current_version_id") or "").strip()
+
         specs_cursor = specs_collection.find({}, {"_id": 0})
         versions_cursor = versions_collection.find({}, {"_id": 0})
         if hasattr(specs_cursor, "sort"):
@@ -977,13 +1773,17 @@ async def inspect_agent_workshop_assets(
         spec_docs = await specs_cursor.to_list(length=max(capped_limit * 5, 20))
         version_docs = await versions_cursor.to_list(length=max(capped_limit * 5, 20))
 
+        matched_spec_ids_from_versions: set[str] = set()
+
         spec_results: list[dict[str, Any]] = []
         for doc in spec_docs:
             if not include_archived and str(doc.get("status") or "") == "archived":
                 continue
             formatted = _format_agent_spec(doc)
-            if not _match_keyword(
-                keyword,
+            if resolved_spec_id and str(formatted.get("spec_id") or "").strip() != resolved_spec_id:
+                continue
+            if not resolved_spec_id and not resolved_version_id and not clean_agent_id and not clean_workshop_session_id and not _match_keyword(
+                clean_keyword,
                 formatted.get("spec_id"),
                 formatted.get("name"),
                 formatted.get("domain"),
@@ -1000,8 +1800,14 @@ async def inspect_agent_workshop_assets(
             if not include_archived and str(doc.get("status") or "") == "archived":
                 continue
             formatted = _format_agent_version(doc)
-            if not _match_keyword(
-                keyword,
+            if resolved_spec_id and str(formatted.get("spec_id") or "").strip() != resolved_spec_id:
+                continue
+            if resolved_version_id and str(formatted.get("version_id") or "").strip() != resolved_version_id:
+                continue
+            if clean_agent_id and str(formatted.get("agent_id") or "").strip() != clean_agent_id:
+                continue
+            if not resolved_spec_id and not resolved_version_id and not clean_agent_id and not clean_workshop_session_id and not _match_keyword(
+                clean_keyword,
                 formatted.get("version_id"),
                 formatted.get("spec_id"),
                 formatted.get("agent_id"),
@@ -1011,11 +1817,31 @@ async def inspect_agent_workshop_assets(
             ):
                 continue
             version_results.append(formatted)
+            if formatted.get("spec_id"):
+                matched_spec_ids_from_versions.add(str(formatted.get("spec_id")))
             if len(version_results) >= capped_limit:
                 break
 
+        if matched_spec_ids_from_versions and not clean_spec_id:
+            existing_spec_ids = {str(item.get("spec_id") or "") for item in spec_results}
+            for doc in spec_docs:
+                if not include_archived and str(doc.get("status") or "") == "archived":
+                    continue
+                formatted = _format_agent_spec(doc)
+                formatted_spec_id = str(formatted.get("spec_id") or "")
+                if formatted_spec_id not in matched_spec_ids_from_versions or formatted_spec_id in existing_spec_ids:
+                    continue
+                spec_results.append(formatted)
+                existing_spec_ids.add(formatted_spec_id)
+                if len(spec_results) >= capped_limit:
+                    break
+
         return _json_response({
-            "keyword": keyword,
+            "keyword": clean_keyword,
+            "workshop_session_id": clean_workshop_session_id,
+            "spec_id": resolved_spec_id,
+            "version_id": resolved_version_id,
+            "agent_id": clean_agent_id,
             "include_archived": include_archived,
             "spec_count": len(spec_results),
             "version_count": len(version_results),
@@ -1029,6 +1855,250 @@ async def inspect_agent_workshop_assets(
     except Exception as exc:
         logger.error("查看 Agent 工坊资产失败: %s", exc, exc_info=True)
         return _json_response({"status": "error", "message": f"查看 Agent 工坊资产失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="inspect_prompt_templates",
+    name="查看提示词模板库",
+    description="查询数据库中 prompt_templates 集合的模板摘要，支持按 agent_type、agent_name、status 和关键词筛选。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="当需要确认数据库中有哪些提示词模板、某个 Agent 当前绑定了哪些模板，或要为 Nanobot 查模板资产时使用。",
+    when_not_to_use="不适合直接修改模板正文；只做读取和筛选。",
+    returns="返回 JSON 字符串，包含模板摘要列表。",
+    example="inspect_prompt_templates(agent_type='universal', keyword='估值', status='active', limit=10)",
+    related_tools=["get_prompt_template_detail", "inspect_agent_workshop_assets", "create_or_update_universal_agent_prompt_template"],
+)
+async def inspect_prompt_templates(
+    agent_type: Annotated[str, "按 agent_type 精确筛选，可留空"] = "",
+    agent_name: Annotated[str, "按 agent_name 精确筛选，可留空"] = "",
+    status: Annotated[str, "按状态筛选，如 active/draft，可留空"] = "",
+    keyword: Annotated[str, "按 template_name、agent_name、remark 模糊筛选，可留空"] = "",
+    is_system_only: Annotated[bool, "是否仅查看系统模板，默认 false"] = False,
+    limit: Annotated[int, "返回条数，默认 10，最大 50"] = 10,
+) -> str:
+    """查看数据库中的提示词模板摘要。"""
+    try:
+        db = get_mongo_db()
+        templates = _get_collection(db, "prompt_templates")
+        if templates is None:
+            return _json_response({"status": "error", "message": "当前数据库中不可用 prompt_templates 集合"})
+
+        capped_limit = max(1, min(int(limit), 50))
+        cursor = templates.find({}, {"_id": 1})
+        if hasattr(cursor, "sort"):
+            cursor = cursor.sort("updated_at", -1)
+        docs = await cursor.to_list(length=max(capped_limit * 5, 50))
+
+        clean_agent_type = str(agent_type or "").strip()
+        clean_agent_name = str(agent_name or "").strip()
+        clean_status = str(status or "").strip()
+
+        results: list[dict[str, Any]] = []
+        for doc in docs:
+            if clean_agent_type and str(doc.get("agent_type") or "").strip() != clean_agent_type:
+                continue
+            if clean_agent_name and str(doc.get("agent_name") or "").strip() != clean_agent_name:
+                continue
+            if clean_status and str(doc.get("status") or "").strip() != clean_status:
+                continue
+            if is_system_only and not bool(doc.get("is_system", False)):
+                continue
+            if not _match_keyword(keyword, doc.get("template_name"), doc.get("agent_name"), doc.get("remark"), doc.get("agent_type")):
+                continue
+            results.append(_format_prompt_template_record(doc))
+            if len(results) >= capped_limit:
+                break
+
+        return _json_response({
+            "status": "ok",
+            "count": len(results),
+            "filters": {
+                "agent_type": clean_agent_type,
+                "agent_name": clean_agent_name,
+                "status": clean_status,
+                "keyword": keyword,
+                "is_system_only": is_system_only,
+            },
+            "templates": results,
+        })
+    except Exception as exc:
+        logger.error("查看提示词模板库失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"查看提示词模板库失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="get_prompt_template_detail",
+    name="查看提示词模板详情",
+    description="按 template_id 读取数据库中 prompt_templates 的完整模板内容。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="当 Nanobot 已经知道 template_id，需要查看完整 system_prompt、tool_guidance、output_format 等正文时使用。",
+    when_not_to_use="不适合模糊搜索模板列表；那种场景应先使用 inspect_prompt_templates。",
+    returns="返回 JSON 字符串，包含模板详情和完整 content 字段。",
+    example="get_prompt_template_detail(template_id='69cfdf8db1828a17f6b00cfb')",
+    related_tools=["inspect_prompt_templates", "create_or_update_universal_agent_prompt_template"],
+)
+async def get_prompt_template_detail(
+    template_id: Annotated[str, "prompt_templates 集合中的 _id 字符串"],
+) -> str:
+    """查看数据库中单个提示词模板的完整内容。"""
+    try:
+        clean_template_id = str(template_id or "").strip()
+        if not clean_template_id:
+            return _json_response({"status": "error", "message": "template_id 不能为空"})
+
+        db = get_mongo_db()
+        templates = _get_collection(db, "prompt_templates")
+        if templates is None:
+            return _json_response({"status": "error", "message": "当前数据库中不可用 prompt_templates 集合"})
+
+        cursor = templates.find({}, {"_id": 1})
+        docs = await cursor.to_list(length=500)
+        matched = next((doc for doc in docs if str(doc.get("_id") or doc.get("id") or "").strip() == clean_template_id), None)
+        if matched is None:
+            return _json_response({"status": "error", "message": f"未找到 template_id={clean_template_id} 对应的模板"})
+
+        return _json_response({
+            "status": "ok",
+            "template": _format_prompt_template_detail(matched),
+        })
+    except Exception as exc:
+        logger.error("查看提示词模板详情失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"查看提示词模板详情失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="get_effective_prompt_template",
+    name="获取当前生效提示词模板",
+    description="按系统真实优先级解析当前生效模板，支持调试模板、节点专属模板、流程专属模板、用户激活模板和系统默认模板。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="当需要知道当前 Agent 在调试或正式运行时实际会使用哪份模板，而不是只看模板库列表时使用。",
+    when_not_to_use="不适合做模板库模糊搜索；那种场景应先使用 inspect_prompt_templates。",
+    returns="返回 JSON 字符串，包含当前生效模板内容、来源、template_id、version 以及解析参数。",
+    example="get_effective_prompt_template(agent_type='universal', agent_name='valuation_candidate_v1', workflow_id='wf_001', node_id='node_002', is_debug_mode=true, debug_template_id='69cfdf8db1828a17f6b00cfb')",
+    related_tools=["inspect_prompt_templates", "get_prompt_template_detail", "create_or_update_universal_agent_prompt_template"],
+)
+async def get_effective_prompt_template(
+    agent_type: Annotated[str, "Agent 类型，如 universal、analysts、researchers"],
+    agent_name: Annotated[str, "Agent 名称或运行时 agent_id"],
+    preference_id: Annotated[str, "偏好 ID，默认 neutral"] = "neutral",
+    workflow_id: Annotated[str, "工作流 ID，可留空"] = "",
+    node_id: Annotated[str, "节点 ID，可留空"] = "",
+    is_debug_mode: Annotated[bool, "是否按调试模式解析，默认 false"] = False,
+    debug_template_id: Annotated[str, "调试模板 ID；调试时可留空或显式指定"] = "",
+    user_id: Annotated[str, "用户 ID；不传则默认取当前对话上下文用户"] = "",
+) -> str:
+    """获取当前会命中的生效提示词模板。"""
+    try:
+        return _json_response(await _resolve_effective_prompt_template_payload(
+            agent_type=agent_type,
+            agent_name=agent_name,
+            preference_id=preference_id,
+            workflow_id=workflow_id,
+            node_id=node_id,
+            is_debug_mode=is_debug_mode,
+            debug_template_id=debug_template_id,
+            user_id=user_id,
+        ))
+    except Exception as exc:
+        logger.error("获取当前生效提示词模板失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"获取当前生效提示词模板失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="get_current_thread_effective_prompt_template",
+    name="获取当前线程生效提示词模板",
+    description="基于当前 Nanobot 线程上下文自动推断当前正在调试或讨论的 Agent 版本，再解析该上下文下实际生效的提示词模板。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="当用户问当前线程里现在实际命中了哪份模板，且上下文已经在当前 Nanobot 会话中时优先使用。",
+    when_not_to_use="不适合做模板库浏览；那种场景应先使用 inspect_prompt_templates。",
+    returns="返回 JSON 字符串，包含线程上下文、自动推断得到的 resolution_input 和实际生效模板内容。",
+    example="get_current_thread_effective_prompt_template()",
+    related_tools=["get_effective_prompt_template", "inspect_prompt_templates", "get_prompt_template_detail"],
+)
+async def get_current_thread_effective_prompt_template(
+    preference_id: Annotated[str, "偏好 ID，默认 neutral"] = "neutral",
+    workflow_id: Annotated[str, "可显式覆盖自动推断的工作流 ID，可留空"] = "",
+    node_id: Annotated[str, "可显式覆盖自动推断的节点 ID，可留空"] = "",
+    debug_template_id: Annotated[str, "可显式覆盖自动推断的调试模板 ID，可留空"] = "",
+    debug_mode: Annotated[str, "调试模式，支持 auto/true/false，默认 auto"] = "auto",
+    user_id: Annotated[str, "用户 ID；不传则默认取当前对话上下文用户"] = "",
+    thread_id: Annotated[str, "线程 ID；不传则默认取当前对话上下文线程"] = "",
+    agent_type: Annotated[str, "若自动推断失败，可显式指定 agent_type"] = "",
+    agent_name: Annotated[str, "若自动推断失败，可显式指定 agent_name"] = "",
+) -> str:
+    """基于当前 Nanobot 线程自动解析当前生效模板。"""
+    try:
+        resolved_user_id = str(user_id or "").strip()
+        if not resolved_user_id:
+            try:
+                resolved_user_id = str(require_current_user_id() or "").strip()
+            except Exception:
+                resolved_user_id = ""
+
+        resolved_thread_id = str(thread_id or "").strip()
+        if not resolved_thread_id:
+            resolved_thread_id = str(get_current_assistant_thread_id() or "").strip()
+
+        if not resolved_user_id or not resolved_thread_id:
+            return _json_response({
+                "status": "error",
+                "message": "当前上下文缺少 user_id 或 thread_id，无法自动解析当前线程生效模板；请显式传入 thread_id/user_id 或退回使用 get_effective_prompt_template",
+            })
+
+        db = get_mongo_db()
+        inferred = await _resolve_current_thread_effective_template_input(
+            db=db,
+            user_id=resolved_user_id,
+            thread_id=resolved_thread_id,
+            preference_id=preference_id,
+            workflow_id=workflow_id,
+            node_id=node_id,
+            debug_template_id=debug_template_id,
+            debug_mode=debug_mode,
+            agent_type=agent_type,
+            agent_name=agent_name,
+        )
+        if inferred.get("status") != "ok":
+            return _json_response(inferred)
+
+        resolution_input = dict(inferred.get("resolution_input") or {})
+        payload = await _resolve_effective_prompt_template_payload(
+            agent_type=str(resolution_input.get("agent_type") or ""),
+            agent_name=str(resolution_input.get("agent_name") or ""),
+            preference_id=str(resolution_input.get("preference_id") or "neutral"),
+            workflow_id=str(resolution_input.get("workflow_id") or ""),
+            node_id=str(resolution_input.get("node_id") or ""),
+            is_debug_mode=bool(resolution_input.get("is_debug_mode")),
+            debug_template_id=str(resolution_input.get("debug_template_id") or ""),
+            user_id=str(resolution_input.get("user_id") or resolved_user_id),
+        )
+        return _json_response({
+            **payload,
+            "thread_id": inferred.get("thread_id"),
+            "session_key": inferred.get("session_key"),
+            "channel": inferred.get("channel"),
+            "thread_context": inferred.get("thread_context") or {},
+            "resolution_source": inferred.get("resolution_source") or {},
+        })
+    except Exception as exc:
+        logger.error("获取当前线程生效提示词模板失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"获取当前线程生效提示词模板失败: {exc}"})
 
 
 @tool
@@ -1124,7 +2194,7 @@ async def create_or_update_agent_workshop_draft(
     agent_id: Annotated[str, "候选 Agent ID，例如 valuation_candidate_v1"],
     agent_name: Annotated[str, "Agent 显示名称"],
     target_responsibility: Annotated[str, "单一职责描述"],
-    output_field: Annotated[str, "输出字段名，默认 analysis_report"] = "analysis_report",
+    output_field: Annotated[str, "输出字段名；若留空或给出通用名，系统会自动生成带 agent 语义的专属字段名"] = "analysis_report",
     tool_ids: Annotated[str, "候选工具 ID，逗号分隔"] = "",
     non_goals: Annotated[str, "非目标列表，逗号分隔"] = "",
     preferred_methods: Annotated[str, "方法范围或偏好，逗号分隔"] = "",
@@ -1144,6 +2214,37 @@ async def create_or_update_agent_workshop_draft(
             user_id = ""
         current_thread_id = (get_current_assistant_thread_id() or "").strip()
         db = get_mongo_db()
+        draft_target_context = await _resolve_workshop_draft_target_context(
+            db,
+            clean_agent_id,
+            thread_id=current_thread_id,
+        )
+        if draft_target_context.get("guard_available") and draft_target_context.get("matched_existing_asset"):
+            version_status = str(draft_target_context.get("version_status") or "").strip().lower()
+            current_phase = str(draft_target_context.get("phase") or "").strip().lower()
+            if version_status == "active" or current_phase == "published":
+                resolved_version_id = str(draft_target_context.get("version_id") or clean_agent_id).strip()
+                resolved_spec_id = str(draft_target_context.get("spec_id") or "").strip()
+                return _build_phase_guard_blocked_response(
+                    tool_name="create_or_update_agent_workshop_draft",
+                    blocked_code="active_version_requires_iteration",
+                    message=(
+                        "当前目标指向已发布版本；create_or_update_agent_workshop_draft 只适用于新的候选 Draft，"
+                        "不能直接拿现有 spec_id 或 version_id 覆盖已发布资产。"
+                    ),
+                    next_action=(
+                        f"请先调用 iterate_agent_workshop_version(version_id='{resolved_version_id}') 创建下一轮，"
+                        "再在新会话里继续修改。"
+                        if resolved_version_id
+                        else "请先 inspect 当前版本并发起 iterate，再在下一轮会话中继续修改。"
+                    ),
+                    phase_context=draft_target_context,
+                    target_fields={
+                        "agent_id": clean_agent_id,
+                        "spec_id": resolved_spec_id or None,
+                        "version_id": resolved_version_id or None,
+                    },
+                )
         result = await AgentWorkshopService(db=db).create_nanobot_draft(
             agent_id=clean_agent_id,
             agent_name=clean_agent_name,
@@ -1277,6 +2378,48 @@ async def build_agent_workshop_version(
             return _json_response({"status": "error", "message": "session_id 不能为空"})
 
         db = get_mongo_db()
+        phase_context = await _resolve_workshop_session_phase_context(db, clean_session_id)
+        if phase_context.get("guard_available") and not phase_context.get("exists"):
+            return _json_response({"status": "error", "message": f"会话 {clean_session_id} 不存在"})
+
+        version_status = str(phase_context.get("version_status") or "").strip().lower()
+        feasibility_status = str(phase_context.get("feasibility_status") or "").strip().lower()
+        completeness_score = float(phase_context.get("completeness_score") or 0)
+        if phase_context.get("guard_available") and (feasibility_status != "feasible" or completeness_score < 0.75):
+            return _build_phase_guard_blocked_response(
+                tool_name="build_agent_workshop_version",
+                blocked_code="phase_not_ready",
+                message=(
+                    f"当前阶段为{phase_context.get('phase_label')}，不能直接补建测试版本；"
+                    "请先完成需求澄清并让会话进入可执行状态。"
+                ),
+                next_action="先补齐待确认点、目标边界、输出格式和验收方式。",
+                phase_context=phase_context,
+                target_fields={
+                    "session_id": clean_session_id,
+                    "spec_id": phase_context.get("spec_id"),
+                },
+            )
+        if phase_context.get("guard_available") and version_status and version_status != "draft":
+            next_action = "当前已有测试流程在推进，请直接继续真数据测试或发布。"
+            if version_status == "active":
+                next_action = "当前版本已发布，如需继续优化，请先开始下一轮。"
+            return _build_phase_guard_blocked_response(
+                tool_name="build_agent_workshop_version",
+                blocked_code="active_version_requires_iteration" if version_status == "active" else "version_already_in_progress",
+                message=(
+                    f"当前阶段为{phase_context.get('phase_label')}，不能再次补建测试版本；"
+                    "当前会话已经有可继续推进的版本。"
+                ),
+                next_action=next_action,
+                phase_context=phase_context,
+                target_fields={
+                    "session_id": clean_session_id,
+                    "spec_id": phase_context.get("spec_id"),
+                    "current_version_id": phase_context.get("current_version_id"),
+                },
+            )
+
         result = await AgentWorkshopService(db=db).build_version(clean_session_id)
         version = result.get("version") if isinstance(result, dict) else None
         return _json_response({
@@ -1293,6 +2436,598 @@ async def build_agent_workshop_version(
     except Exception as exc:
         logger.error("生成 Agent 工坊版本草案失败: %s", exc, exc_info=True)
         return _json_response({"status": "error", "message": f"生成 Agent 工坊版本草案失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="debug_agent_workshop_version",
+    name="调试 Agent 工坊版本",
+    description="让 Nanobot 对指定 Agent 工坊版本执行一次真实股票样例运行，并返回调试结果；该工具不会自动写入正式评估记录。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="当用户明确要做调试排障、查看最近一次样例输出、诊断 Prompt 或运行时问题时使用。",
+    when_not_to_use="不适合替代正式真数据测试、验收、评估落库、发布前确认，或回答为什么版本仍处于 testing。",
+    returns="返回 JSON 字符串，包含 version_id、spec_id、report、raw_result 和运行元数据，但不会自动生成 evaluation 记录。",
+    example="debug_agent_workshop_version(version_id='spec_x_v1', stock_symbol='600519')",
+    related_tools=["run_agent_workshop_real_data_test", "publish_agent_workshop_version"],
+)
+async def debug_agent_workshop_version(
+    version_id: Annotated[str, "Agent 工坊版本 ID"],
+    stock_symbol: Annotated[str, "真实股票代码，如 600519"],
+    market_type: Annotated[str, "市场类型，默认 A股"] = "A股",
+    analysis_date: Annotated[str, "分析日期，格式 YYYY-MM-DD，可为空"] = "",
+    user_goal: Annotated[str, "本次测试目标，可为空"] = "",
+    prompt_overrides_json: Annotated[str, "Prompt 覆盖 JSON 对象，可为空"] = "",
+) -> str:
+    """Run a single real-stock debug execution for one workshop version."""
+    stage_events: list[dict[str, str]] = []
+    try:
+        clean_version_id = str(version_id or "").strip()
+        clean_symbol = str(stock_symbol or "").strip()
+        if not clean_version_id:
+            return _json_response({"status": "error", "message": "version_id 不能为空"})
+        if not clean_symbol:
+            return _json_response({"status": "error", "message": "stock_symbol 不能为空"})
+
+        prompt_overrides = _parse_optional_json_object(prompt_overrides_json, "prompt_overrides_json")
+
+        db = get_mongo_db()
+        phase_context = await _resolve_workshop_version_phase_context(db, clean_version_id)
+        if phase_context.get("guard_available") and not phase_context.get("exists"):
+            return _json_response({"status": "error", "message": f"版本 {clean_version_id} 不存在"})
+        if phase_context.get("guard_available"):
+            version_status = str(phase_context.get("version_status") or "").strip().lower()
+            current_phase = str(phase_context.get("phase") or "").strip().lower()
+            allowed_phases = {"testing", "evaluation", "publish-ready"}
+            if current_phase not in allowed_phases:
+                next_action = "请先让版本进入 testing，再执行调试。"
+                blocked_code = "version_not_testing"
+                if version_status == "active":
+                    blocked_code = "active_version_requires_iteration"
+                    next_action = "当前版本已经发布；如需继续优化，请开始下一轮。"
+                elif version_status == "archived":
+                    blocked_code = "archived_version_blocked"
+                    next_action = "已归档版本不能继续调试，请切换到当前 testing 版本。"
+                return _build_phase_guard_blocked_response(
+                    tool_name="debug_agent_workshop_version",
+                    blocked_code=blocked_code,
+                    message=(
+                        f"当前阶段为{phase_context.get('phase_label')}，不能直接执行调试；"
+                        "只有 testing / evaluation / publish-ready 阶段的版本才允许进入调试链路。"
+                    ),
+                    next_action=next_action,
+                    phase_context=phase_context,
+                    target_fields={
+                        "version_id": clean_version_id,
+                        "spec_id": phase_context.get("spec_id"),
+                    },
+                )
+
+        llm_payload = await _resolve_workshop_test_llm_payload(
+            db=db,
+        )
+        stage_events.append(_build_tool_stage_event(
+            "debug_agent_workshop_version.resolve_default_llm",
+            "ok",
+            f"已解析系统默认推理模型: {llm_payload.get('provider')}/{llm_payload.get('model')}",
+        ))
+        result = await AgentWorkshopService(db=db).debug_version(
+            version_id=clean_version_id,
+            llm=llm_payload,
+            stock={
+                "symbol": clean_symbol,
+                "market_type": str(market_type or "A股").strip() or "A股",
+                "analysis_date": str(analysis_date or "").strip() or None,
+            },
+            user_goal=str(user_goal or "").strip(),
+            prompt_overrides=prompt_overrides,
+        )
+        return _json_response({
+            "status": "ok",
+            **result,
+            "summary": {
+            "_tool_events": [
+                *stage_events,
+                _build_tool_stage_event(
+                    "debug_agent_workshop_version.debug_version",
+                    "ok",
+                    f"调试完成: symbol={result.get('symbol') or clean_symbol}, report_length={result.get('report_length')}",
+                ),
+                _build_tool_stage_event(
+                    "debug_agent_workshop_version",
+                    "ok",
+                    "样例调试已完成",
+                ),
+            ],
+                "version_id": result.get("version_id"),
+                "spec_id": result.get("spec_id"),
+                "symbol": result.get("symbol"),
+                "analysis_date": result.get("analysis_date"),
+                "report_length": result.get("report_length"),
+            },
+        })
+    except Exception as exc:
+        logger.error("调试 Agent 工坊版本失败: %s", exc, exc_info=True)
+        return _json_response({
+            "status": "error",
+            "message": f"调试 Agent 工坊版本失败: {exc}",
+            "failed_stage": "debug_agent_workshop_version",
+            "_tool_events": [
+                *stage_events,
+                _build_tool_stage_event(
+                    "debug_agent_workshop_version",
+                    "error",
+                    f"调试失败: {exc}",
+                ),
+            ],
+        })
+
+
+@tool
+@register_tool(
+    tool_id="run_agent_workshop_real_data_test",
+    name="执行 Agent 工坊真数据测试",
+    description="让 Nanobot 对指定 Agent 工坊版本执行一次真实股票样例测试，并自动记录评估结果到 Agent Workshop。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="当用户要执行真数据测试、正式验收、验证是否通过、查看评估结果、确认发布前 readiness，或排查为什么版本仍停留在 testing 时使用。",
+    when_not_to_use="不适合只做样式预览、只讨论方案、只想单步调试 Prompt，或还没有 version_id 时调用。",
+    returns="返回 JSON 字符串，包含 debug_result、evaluation、latest_decision 和是否已完成正式落库。",
+    example="run_agent_workshop_real_data_test(version_id='spec_x_v1', stock_symbol='600519')",
+    related_tools=["debug_agent_workshop_version", "publish_agent_workshop_version"],
+)
+async def run_agent_workshop_real_data_test(
+    version_id: Annotated[str, "Agent 工坊版本 ID"],
+    stock_symbol: Annotated[str, "真实股票代码，如 600519"],
+    market_type: Annotated[str, "市场类型，默认 A股"] = "A股",
+    analysis_date: Annotated[str, "分析日期，格式 YYYY-MM-DD，可为空"] = "",
+    user_goal: Annotated[str, "本次测试目标，可为空"] = "",
+    user_feedback: Annotated[str, "本次测试补充反馈，可为空"] = "",
+    prompt_overrides_json: Annotated[str, "Prompt 覆盖 JSON 对象，可为空"] = "",
+) -> str:
+    """Execute the official real-data test loop and persist its evaluation."""
+    stage_events: list[dict[str, str]] = []
+    try:
+        clean_version_id = str(version_id or "").strip()
+        clean_symbol = str(stock_symbol or "").strip()
+        if not clean_version_id:
+            return _json_response({"status": "error", "message": "version_id 不能为空"})
+        if not clean_symbol:
+            return _json_response({"status": "error", "message": "stock_symbol 不能为空"})
+
+        prompt_overrides = _parse_optional_json_object(prompt_overrides_json, "prompt_overrides_json")
+        db = get_mongo_db()
+        phase_context = await _resolve_workshop_version_phase_context(db, clean_version_id)
+        if phase_context.get("guard_available") and not phase_context.get("exists"):
+            return _json_response({"status": "error", "message": f"版本 {clean_version_id} 不存在"})
+        if phase_context.get("guard_available") and str(phase_context.get("version_status") or "").strip().lower() != "testing":
+            next_action = "请先补建测试版本。"
+            if phase_context.get("version_status") == "active":
+                next_action = "当前版本已发布；如需继续优化，请先开始下一轮。"
+            elif phase_context.get("version_status") == "archived":
+                next_action = "请切换到当前 testing 版本，或重新开始新一轮生成。"
+            return _build_phase_guard_blocked_response(
+                tool_name="run_agent_workshop_real_data_test",
+                blocked_code=(
+                    "active_version_requires_iteration"
+                    if phase_context.get("version_status") == "active"
+                    else "archived_version_blocked"
+                    if phase_context.get("version_status") == "archived"
+                    else "version_not_testing"
+                ),
+                message=(
+                    f"当前阶段为{phase_context.get('phase_label')}，不能直接执行真数据测试；"
+                    "只有 testing 版本才能进入正式测试链路。"
+                ),
+                next_action=next_action,
+                phase_context=phase_context,
+                target_fields={
+                    "version_id": clean_version_id,
+                    "spec_id": phase_context.get("spec_id"),
+                },
+            )
+
+        service = AgentWorkshopService(db=db)
+        llm_payload = await _resolve_workshop_test_llm_payload(
+            db=db,
+        )
+        stage_events.append(_build_tool_stage_event(
+            "run_agent_workshop_real_data_test.resolve_default_llm",
+            "ok",
+            f"已解析系统默认推理模型: {llm_payload.get('provider')}/{llm_payload.get('model')}",
+        ))
+        debug_result = await service.debug_version(
+            version_id=clean_version_id,
+            llm=llm_payload,
+            stock={
+                "symbol": clean_symbol,
+                "market_type": str(market_type or "A股").strip() or "A股",
+                "analysis_date": str(analysis_date or "").strip() or None,
+            },
+            user_goal=str(user_goal or "").strip(),
+            prompt_overrides=prompt_overrides,
+        )
+        stage_events.append(_build_tool_stage_event(
+            "run_agent_workshop_real_data_test.debug_version",
+            "ok",
+            f"样例运行完成: symbol={debug_result.get('symbol') or clean_symbol}, report_length={debug_result.get('report_length')}",
+        ))
+
+        debug_prompt = debug_result.get("debug_prompt") if isinstance(debug_result.get("debug_prompt"), dict) else {}
+        raw_result = debug_result.get("raw_result") if isinstance(debug_result.get("raw_result"), dict) else {}
+        runtime_result_payload = _with_nanobot_review_worker_flags({
+            "user_goal": str(user_goal or "").strip(),
+            "report": debug_result.get("report") or "",
+            "raw_result": raw_result,
+            "debug_prompt": debug_prompt,
+            "template": debug_result.get("template") or {},
+            "metadata": debug_result.get("metadata") or {},
+            "symbol": debug_result.get("symbol") or clean_symbol,
+            "analysis_date": debug_result.get("analysis_date") or str(analysis_date or "").strip(),
+            "output_text": debug_prompt.get("llm_final_response") or debug_result.get("report") or "",
+            "output_payload": raw_result,
+            "tool_trace": debug_prompt.get("tool_trace") or raw_result.get("tool_trace") or [],
+        })
+
+        evaluation_result = await service.evaluate_version(
+            clean_version_id,
+            evaluation_type="production-review",
+            user_feedback=str(user_feedback or "").strip(),
+            runtime_result=runtime_result_payload,
+        )
+        evaluation = evaluation_result.get("evaluation") if isinstance(evaluation_result, dict) else None
+        evaluation_decision = _read_mapping_or_attr(evaluation, "decision", None)
+        acceptance_passed = evaluation_decision == "pass"
+        stage_events.append(_build_tool_stage_event(
+            "run_agent_workshop_real_data_test.evaluate_version",
+            "ok",
+            f"评估已记录: decision={evaluation_decision or 'unknown'}, overall={_read_mapping_or_attr(_read_mapping_or_attr(evaluation, 'scores', {}), 'overall', None)}",
+        ))
+        return _json_response({
+            "status": "ok",
+            "test_chain_status": "ok",
+            "official_acceptance_decision": evaluation_decision,
+            "official_acceptance_passed": acceptance_passed,
+            "version_id": clean_version_id,
+            "spec_id": debug_result.get("spec_id"),
+            "debug_result": debug_result,
+            "evaluation": evaluation,
+            "_tool_events": [
+                *stage_events,
+                _build_tool_stage_event(
+                    "run_agent_workshop_real_data_test",
+                    "ok",
+                    "真数据测试与评估落库已完成",
+                ),
+            ],
+            "summary": {
+                "symbol": debug_result.get("symbol"),
+                "analysis_date": debug_result.get("analysis_date"),
+                "report_length": debug_result.get("report_length"),
+                "decision": evaluation_decision,
+                "overall_score": _read_mapping_or_attr(_read_mapping_or_attr(evaluation, "scores", {}), "overall", None),
+                "recorded_in_workshop": bool(_read_mapping_or_attr(evaluation, "evaluation_id", None)),
+                "official_acceptance_passed": acceptance_passed,
+            },
+            "message": (
+                "真数据测试链路已执行并完成评估落库；最新官方验收结论为 pass，版本现已进入待确认发布状态，必须由用户手动确认后才能正式发布。"
+                if acceptance_passed
+                else f"真数据测试链路已执行并完成评估落库；但最新官方验收结论为 {evaluation_decision or 'unknown'}，当前不能视为通过。"
+            ),
+        })
+    except Exception as exc:
+        logger.error("执行 Agent 工坊真数据测试失败: %s", exc, exc_info=True)
+        failed_stage = "run_agent_workshop_real_data_test.evaluate_version" if any(event.get("name") == "run_agent_workshop_real_data_test.debug_version" for event in stage_events) else "run_agent_workshop_real_data_test.debug_version"
+        return _json_response({
+            "status": "error",
+            "message": f"执行 Agent 工坊真数据测试失败: {exc}",
+            "failed_stage": failed_stage,
+            "_tool_events": [
+                *stage_events,
+                _build_tool_stage_event(
+                    failed_stage,
+                    "error",
+                    str(exc),
+                ),
+                _build_tool_stage_event(
+                    "run_agent_workshop_real_data_test",
+                    "error",
+                    f"真数据测试失败，失败阶段={failed_stage}",
+                ),
+            ],
+        })
+
+
+@tool
+@register_tool(
+    tool_id="publish_agent_workshop_version",
+    name="发布 Agent 工坊版本",
+    description="在用户已经手动确认发布后，让 Nanobot 将已通过最新真数据测试评估的 Agent 工坊版本发布为 active。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="仅当版本已经在 testing 且最新评估结论为 pass，并且用户在当前回合明确确认要发布时使用。",
+    when_not_to_use="不适合在尚未完成真数据测试评估、评估未通过，或只是测试刚通过但用户尚未明确确认发布时调用。",
+    returns="返回 JSON 字符串，包含发布后的版本状态与 spec_id。",
+    example="publish_agent_workshop_version(version_id='spec_x_v1')",
+    related_tools=["run_agent_workshop_real_data_test", "debug_agent_workshop_version"],
+)
+async def publish_agent_workshop_version(
+    version_id: Annotated[str, "Agent 工坊版本 ID"],
+) -> str:
+    """Publish a workshop version after its latest evaluation has passed."""
+    try:
+        clean_version_id = str(version_id or "").strip()
+        if not clean_version_id:
+            return _json_response({"status": "error", "message": "version_id 不能为空"})
+
+        db = get_mongo_db()
+        phase_context = await _resolve_workshop_version_phase_context(db, clean_version_id)
+        if phase_context.get("guard_available") and not phase_context.get("exists"):
+            return _json_response({"status": "error", "message": f"版本 {clean_version_id} 不存在"})
+        if phase_context.get("guard_available") and str(phase_context.get("version_status") or "").strip().lower() != "testing":
+            next_action = "请先让版本进入 testing，再执行真数据测试。"
+            if phase_context.get("version_status") == "active":
+                next_action = "当前版本已经发布；如需继续优化，请开始下一轮。"
+            elif phase_context.get("version_status") == "archived":
+                next_action = "已归档版本不能直接发布，请切换到当前 testing 版本。"
+            return _build_phase_guard_blocked_response(
+                tool_name="publish_agent_workshop_version",
+                blocked_code=(
+                    "active_version_requires_iteration"
+                    if phase_context.get("version_status") == "active"
+                    else "archived_version_blocked"
+                    if phase_context.get("version_status") == "archived"
+                    else "version_not_testing"
+                ),
+                message=(
+                    f"当前阶段为{phase_context.get('phase_label')}，不能直接发布正式版本；"
+                    "只有 testing 版本才允许发布。"
+                ),
+                next_action=next_action,
+                phase_context=phase_context,
+                target_fields={
+                    "version_id": clean_version_id,
+                    "spec_id": phase_context.get("spec_id"),
+                },
+            )
+        if phase_context.get("guard_available") and str(phase_context.get("latest_evaluation_decision") or "").strip().lower() != "pass":
+            return _build_phase_guard_blocked_response(
+                tool_name="publish_agent_workshop_version",
+                blocked_code="latest_evaluation_not_pass",
+                message=(
+                    f"当前阶段为{phase_context.get('phase_label')}，不能直接发布正式版本；"
+                    "只有最新一次真数据测试评估为 pass 的 testing 版本才能发布。"
+                ),
+                next_action="先完成最新一次真数据测试，确认官方验收结论为 pass。",
+                phase_context=phase_context,
+                target_fields={
+                    "version_id": clean_version_id,
+                    "spec_id": phase_context.get("spec_id"),
+                },
+            )
+
+        result = await AgentWorkshopService(db=db).publish_version(clean_version_id)
+        payload = dict(result or {})
+        version_status = payload.pop("status", None)
+        return _json_response({
+            "status": "ok",
+            **payload,
+            "version_status": version_status,
+        })
+    except Exception as exc:
+        logger.error("发布 Agent 工坊版本失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"发布 Agent 工坊版本失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="evaluate_agent_workshop_version",
+    name="评估 Agent 工坊版本",
+    description="让 Nanobot 对指定 Agent 工坊版本执行一次显式评估落库，并返回最新评估结果。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="当版本已经处于 testing/evaluation 阶段，需要重新记录一次正式评估结论时使用。",
+    when_not_to_use="不适合在 version_id 不存在、仍未进入 testing，或只是想看最近一次评估结果时调用。",
+    returns="返回 JSON 字符串，包含 version_id、evaluation 和最新 decision 摘要。",
+    example="evaluate_agent_workshop_version(version_id='spec_x_v1', evaluation_type='production-review', runtime_result_json='{\"output_text\":\"...\"}')",
+    related_tools=["debug_agent_workshop_version", "run_agent_workshop_real_data_test", "iterate_agent_workshop_version"],
+)
+async def evaluate_agent_workshop_version(
+    version_id: Annotated[str, "Agent 工坊版本 ID"],
+    evaluation_type: Annotated[str, "评估类型，默认 production-review"] = "production-review",
+    sample_set_id: Annotated[str, "样本集 ID，可为空"] = "",
+    user_feedback: Annotated[str, "评估补充反馈，可为空"] = "",
+    benchmark_outputs_json: Annotated[str, "benchmark 输出数组 JSON，可为空"] = "",
+    runtime_result_json: Annotated[str, "真实运行结果 JSON 对象，可为空"] = "",
+) -> str:
+    """Persist one explicit evaluation result for a workshop version."""
+    try:
+        clean_version_id = str(version_id or "").strip()
+        if not clean_version_id:
+            return _json_response({"status": "error", "message": "version_id 不能为空"})
+
+        benchmark_outputs = _parse_optional_json_list(benchmark_outputs_json, "benchmark_outputs_json")
+        runtime_result = _parse_optional_json_object(runtime_result_json, "runtime_result_json")
+
+        db = get_mongo_db()
+        phase_context = await _resolve_workshop_version_phase_context(db, clean_version_id)
+        if phase_context.get("guard_available") and not phase_context.get("exists"):
+            return _json_response({"status": "error", "message": f"版本 {clean_version_id} 不存在"})
+        if phase_context.get("guard_available"):
+            version_status = str(phase_context.get("version_status") or "").strip().lower()
+            current_phase = str(phase_context.get("phase") or "").strip().lower()
+            allowed_phases = {"testing", "evaluation", "publish-ready"}
+            if current_phase not in allowed_phases:
+                next_action = "请先让版本进入 testing，再执行正式评估。"
+                blocked_code = "version_not_testing"
+                if version_status == "active":
+                    blocked_code = "active_version_requires_iteration"
+                    next_action = "当前版本已经发布；如需继续优化，请开始下一轮。"
+                elif version_status == "archived":
+                    blocked_code = "archived_version_blocked"
+                    next_action = "已归档版本不能继续评估，请切换到当前 testing 版本。"
+                return _build_phase_guard_blocked_response(
+                    tool_name="evaluate_agent_workshop_version",
+                    blocked_code=blocked_code,
+                    message=(
+                        f"当前阶段为{phase_context.get('phase_label')}，不能直接执行正式评估；"
+                        "只有 testing / evaluation / publish-ready 阶段的版本才允许进入评估链路。"
+                    ),
+                    next_action=next_action,
+                    phase_context=phase_context,
+                    target_fields={
+                        "version_id": clean_version_id,
+                        "spec_id": phase_context.get("spec_id"),
+                    },
+                )
+
+        normalized_evaluation_type = str(evaluation_type or "production-review").strip() or "production-review"
+        normalized_runtime_result = runtime_result or None
+        if normalized_evaluation_type == "production-review" and normalized_runtime_result is not None:
+            if not _has_workshop_runtime_evidence(normalized_runtime_result):
+                return _json_response({
+                    "status": "error",
+                    "message": (
+                        "production-review 提供了 runtime_result_json，但其中缺少可用证据；"
+                        "至少需要 output_text、report、output_payload、raw_result、debug_prompt 或 tool_trace 之一"
+                    ),
+                })
+            normalized_runtime_result = _with_nanobot_review_worker_flags(normalized_runtime_result)
+
+        result = await AgentWorkshopService(db=db).evaluate_version(
+            clean_version_id,
+            evaluation_type=normalized_evaluation_type,
+            sample_set_id=str(sample_set_id or "").strip() or None,
+            user_feedback=str(user_feedback or "").strip(),
+            benchmark_outputs=benchmark_outputs,
+            runtime_result=normalized_runtime_result,
+        )
+        evaluation = result.get("evaluation") if isinstance(result, dict) else None
+        decision = _read_mapping_or_attr(evaluation, "decision", None)
+        return _json_response({
+            "status": "ok",
+            **(result or {}),
+            "_tool_events": [
+                _build_tool_stage_event(
+                    "evaluate_agent_workshop_version.evaluate_version",
+                    "ok",
+                    f"评估已落库: decision={decision or 'unknown'}",
+                ),
+                _build_tool_stage_event(
+                    "evaluate_agent_workshop_version",
+                    "ok",
+                    "版本评估已完成",
+                ),
+            ],
+            "summary": {
+                "version_id": clean_version_id,
+                "spec_id": _read_mapping_or_attr(evaluation, "spec_id", None) or phase_context.get("spec_id"),
+                "evaluation_id": _read_mapping_or_attr(evaluation, "evaluation_id", None),
+                "evaluation_type": _read_mapping_or_attr(evaluation, "evaluation_type", None),
+                "decision": decision,
+                "overall_score": _read_mapping_or_attr(_read_mapping_or_attr(evaluation, "scores", {}), "overall", None),
+                "recorded_in_workshop": bool(_read_mapping_or_attr(evaluation, "evaluation_id", None)),
+            },
+            "message": f"已完成版本评估落库；最新结论为 {decision or 'unknown'}。",
+        })
+    except Exception as exc:
+        logger.error("评估 Agent 工坊版本失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"评估 Agent 工坊版本失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="iterate_agent_workshop_version",
+    name="发起 Agent 工坊下一轮迭代",
+    description="让 Nanobot 基于指定 Agent 工坊版本发起下一轮迭代，并创建新的 Session。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="当版本已经进入 evaluation / publish-ready / published，需要基于已有结论开始下一轮时使用。",
+    when_not_to_use="不适合在还没完成测试评估或仍处于 generation/testing 初期时调用。",
+    returns="返回 JSON 字符串，包含 source_version_id、session_id、spec_id 和 ai_message。",
+    example="iterate_agent_workshop_version(version_id='spec_x_v1', feedback='补充解释评分波动来源')",
+    related_tools=["evaluate_agent_workshop_version", "build_agent_workshop_version", "publish_agent_workshop_version"],
+)
+async def iterate_agent_workshop_version(
+    version_id: Annotated[str, "Agent 工坊版本 ID"],
+    feedback: Annotated[str, "迭代反馈，可为空"] = "",
+) -> str:
+    """Start the next workshop iteration from an evaluated or published version."""
+    try:
+        clean_version_id = str(version_id or "").strip()
+        if not clean_version_id:
+            return _json_response({"status": "error", "message": "version_id 不能为空"})
+
+        db = get_mongo_db()
+        phase_context = await _resolve_workshop_version_phase_context(db, clean_version_id)
+        if phase_context.get("guard_available") and not phase_context.get("exists"):
+            return _json_response({"status": "error", "message": f"版本 {clean_version_id} 不存在"})
+        if phase_context.get("guard_available"):
+            version_status = str(phase_context.get("version_status") or "").strip().lower()
+            current_phase = str(phase_context.get("phase") or "").strip().lower()
+            allowed_phases = {"evaluation", "publish-ready", "published"}
+            if current_phase not in allowed_phases:
+                blocked_code = "phase_not_ready"
+                next_action = "请先完成至少一轮正式评估，再决定是否开始下一轮。"
+                if version_status == "archived":
+                    blocked_code = "archived_version_blocked"
+                    next_action = "已归档版本不能作为当前迭代起点，请切换到最新版本。"
+                return _build_phase_guard_blocked_response(
+                    tool_name="iterate_agent_workshop_version",
+                    blocked_code=blocked_code,
+                    message=(
+                        f"当前阶段为{phase_context.get('phase_label')}，不能直接开始下一轮；"
+                        "只有 evaluation / publish-ready / published 阶段的版本才允许发起 iterate。"
+                    ),
+                    next_action=next_action,
+                    phase_context=phase_context,
+                    target_fields={
+                        "version_id": clean_version_id,
+                        "spec_id": phase_context.get("spec_id"),
+                    },
+                )
+
+        result = await AgentWorkshopService(db=db).iterate_version(
+            clean_version_id,
+            feedback=str(feedback or "").strip(),
+        )
+        return _json_response({
+            "status": "ok",
+            **(result or {}),
+            "_tool_events": [
+                _build_tool_stage_event(
+                    "iterate_agent_workshop_version.iterate_version",
+                    "ok",
+                    f"已创建下一轮 Session: {result.get('session_id') or ''}；Draft 版本: {result.get('version_id') or ''}",
+                ),
+                _build_tool_stage_event(
+                    "iterate_agent_workshop_version",
+                    "ok",
+                    "下一轮迭代已创建",
+                ),
+            ],
+            "summary": {
+                "source_version_id": result.get("source_version_id") or clean_version_id,
+                "session_id": result.get("session_id"),
+                "spec_id": result.get("spec_id") or phase_context.get("spec_id"),
+                "version_id": result.get("version_id"),
+                "version_status": result.get("version_status"),
+                "feedback": str(feedback or "").strip(),
+            },
+        })
+    except Exception as exc:
+        logger.error("发起 Agent 工坊下一轮迭代失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"发起 Agent 工坊下一轮迭代失败: {exc}"})
 
 
 @tool
@@ -1420,14 +3155,14 @@ async def create_or_update_universal_agent_prompt_template(
 @register_tool(
     tool_id="bind_agent_tools_and_validate_candidate",
     name="绑定 Agent 工具并校验候选",
-    description="为候选 Agent 写入 tool_agent_bindings，并按真实运行时逻辑做一次干运行校验，确认配置式 Agent 已具备最小可运行条件。",
+    description="为候选 Agent 写入 tool_agent_bindings，并按真实运行时逻辑做一次干运行校验，确认配置式 Agent 已具备最小可运行条件；该校验不等于 Agent Workshop 正式测试验收。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
     when_to_use="当 Nanobot 已写入 agent_configs 和提示词模板，准备绑定工具并确认候选 Agent 是否能被运行时正常创建时使用。",
     when_not_to_use="不适合用来搜索资源或生成提示词。",
-    returns="返回 JSON 字符串，包含绑定后的工具列表、提示词模板存在性和干运行校验结果。",
+    returns="返回 JSON 字符串，包含绑定后的工具列表、提示词模板存在性和干运行校验结果；结果仅代表运行时候选可实例化，不代表 Workshop 版本已生成或已通过正式验收。",
     example="bind_agent_tools_and_validate_candidate(agent_id='valuation_candidate_v1', tool_ids='get_value_factor_bundle_tool,get_peer_comparison')",
     related_tools=["create_or_update_runtime_agent_config", "create_or_update_universal_agent_prompt_template"],
 )
@@ -1473,6 +3208,7 @@ async def bind_agent_tools_and_validate_candidate(
             }
             for index, tool_id in enumerate(resolved_tools)
         ])
+        existing_config = await agent_configs.find_one({"agent_id": clean_agent_id}) or {}
         await agent_configs.update_one(
             {"agent_id": clean_agent_id},
             {
@@ -1485,6 +3221,21 @@ async def bind_agent_tools_and_validate_candidate(
                 }
             },
             upsert=True,
+        )
+        persisted_config = await agent_configs.find_one({"agent_id": clean_agent_id}) or {
+            **existing_config,
+            "agent_id": clean_agent_id,
+            "tools": resolved_tools,
+            "default_tools": resolved_default_tools,
+            "max_tool_calls": int(max_tool_calls),
+        }
+        workshop_sync = await _sync_linked_workshop_versions(
+            db=db,
+            agent_id=clean_agent_id,
+            candidate_config=persisted_config,
+            resolved_tools=resolved_tools,
+            resolved_default_tools=resolved_default_tools,
+            max_tool_calls=int(max_tool_calls),
         )
 
         prompt_doc = None
@@ -1518,6 +3269,7 @@ async def bind_agent_tools_and_validate_candidate(
             "agent_id": clean_agent_id,
             "bound_tools": resolved_tools,
             "default_tools": resolved_default_tools,
+            "workshop_sync": workshop_sync,
             "validation": validation,
         })
     except Exception as exc:
@@ -1529,14 +3281,14 @@ async def bind_agent_tools_and_validate_candidate(
 @register_tool(
     tool_id="generate_confirmed_candidate_agent",
     name="确认后生成候选 Agent",
-    description="在用户明确确认后，一次性完成配置写入、提示词模板写入、工具绑定和干运行校验。",
+    description="在用户明确确认后，一次性完成配置写入、提示词模板写入、工具绑定和干运行校验；若已同步到 Agent Workshop Draft，则默认自动生成一个测试版本，便于直接进入真数据测试。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
     when_to_use="当 Nanobot 已完成确认稿并拿到用户明确确认后，用一次调用生成候选 Agent。",
     when_not_to_use="未确认前不要调用；也不适合做资源侦察。",
-    returns="返回 JSON 字符串，包含三步写入结果和最终干运行校验结果。",
+    returns="返回 JSON 字符串，包含三步写入结果、最终干运行校验结果、可选的自动 version 生成结果，以及与 Agent Workshop 正式验收边界相关的治理提示。",
     example="generate_confirmed_candidate_agent(agent_id='valuation_candidate_v1', agent_name='估值候选Agent', target_responsibility='输出A股估值结论', tool_ids='get_value_factor_bundle_tool', system_prompt='你是一名估值分析师', confirmed=True)",
     related_tools=["prepare_agent_generation_confirmation", "bind_agent_tools_and_validate_candidate"],
 )
@@ -1561,6 +3313,7 @@ async def generate_confirmed_candidate_agent(
     enabled: Annotated[bool, "是否启用，默认 true"] = True,
     status: Annotated[str, "模板状态，默认 active"] = "active",
     sync_to_workshop_draft: Annotated[bool, "是否同步创建 Agent 工坊 Draft，默认 true"] = True,
+    auto_build_workshop_version: Annotated[bool, "若已同步到 Agent 工坊 Draft，是否自动生成一个可测试版本，默认 true"] = True,
     confirmed: Annotated[bool, "是否已拿到用户明确确认"] = False,
     allow_overwrite: Annotated[bool, "若存在覆盖风险，是否允许覆盖现有配置"] = False,
 ) -> str:
@@ -1640,6 +3393,64 @@ async def generate_confirmed_candidate_agent(
         if binding_result.get("status") != "ok":
             return _json_response({"status": "error", "stage": "bindings", "result": binding_result})
 
+        dry_run_validation = binding_result.get("validation") or {}
+        if sync_to_workshop_draft and isinstance(workshop_result, dict) and workshop_result.get("spec_id"):
+            agent_configs = _get_collection(db, "agent_configs")
+            if agent_configs is not None:
+                await agent_configs.update_one(
+                    {"agent_id": clean_agent_id},
+                    {
+                        "$set": {
+                            "metadata.source": "nanobot_generated",
+                            "metadata.spec_id": workshop_result.get("spec_id"),
+                            "metadata.session_id": workshop_result.get("session_id"),
+                            "metadata.linked_agent_workshop": True,
+                            "updated_at": _utc_now_iso(),
+                        }
+                    },
+                    upsert=False,
+                )
+
+        workshop_version_result = None
+        if auto_build_workshop_version and sync_to_workshop_draft and isinstance(workshop_result, dict):
+            workshop_session_id = str(workshop_result.get("session_id") or "").strip()
+            if workshop_session_id:
+                workshop_version_result = await _auto_build_workshop_version_result(workshop_session_id)
+                if workshop_version_result.get("status") != "ok":
+                    return _json_response({"status": "error", "stage": "workshop_version", "result": workshop_version_result})
+                built_version = workshop_version_result.get("version") or {}
+                built_version_id = str(built_version.get("version_id") or "").strip()
+                if built_version_id and agent_configs is not None:
+                    await agent_configs.update_one(
+                        {"agent_id": clean_agent_id},
+                        {
+                            "$set": {
+                                "metadata.latest_workshop_version_id": built_version_id,
+                                "updated_at": _utc_now_iso(),
+                            }
+                        },
+                        upsert=False,
+                    )
+
+        workshop_governance = {
+            "asset_layer": "agent_workshop" if sync_to_workshop_draft else "runtime_only",
+            "spec_id": workshop_result.get("spec_id") if isinstance(workshop_result, dict) else None,
+            "session_id": workshop_result.get("session_id") if isinstance(workshop_result, dict) else None,
+            "spec_status": "draft" if sync_to_workshop_draft else "not_synced",
+            "version_generated": bool((workshop_version_result or {}).get("version")),
+            "version_id": ((workshop_version_result or {}).get("version") or {}).get("version_id"),
+            "official_acceptance_status": "not_started",
+            "acceptance_ready": False,
+            "release_ready": False,
+            "next_required_action": (
+                "当前已自动生成 Agent Workshop 测试版本；下一步直接做真数据测试，并以最新评估结论决定是否可发布。"
+                if (workshop_version_result or {}).get("version")
+                else "下一步应先生成 Agent Workshop 测试版本，再做真数据测试；当前 dry-run 仅证明候选运行时配置可实例化。"
+                if sync_to_workshop_draft
+                else "当前只完成了运行时候选生成；如需 Agent Workshop 正式测试验收，请先同步到 Draft 并生成 version。"
+            ),
+        }
+
         return _json_response({
             "status": "ok",
             "agent_id": clean_agent_id,
@@ -1652,8 +3463,26 @@ async def generate_confirmed_candidate_agent(
                 "agent_config": config_result,
                 "prompt_template": prompt_result,
                 "bindings_and_validation": binding_result,
+                "workshop_version": workshop_version_result,
             },
-            "final_validation": binding_result.get("validation") or {},
+            "final_validation": dry_run_validation,
+            "governance_boundary": {
+                "runtime_candidate_validation": {
+                    "agent_config_written": config_result.get("status") == "ok",
+                    "prompt_template_written": prompt_result.get("status") == "ok",
+                    "tool_bindings_written": binding_result.get("status") == "ok",
+                    "dry_run_instantiated": bool(((dry_run_validation.get("dry_run") or {}).get("instantiated"))),
+                },
+                "workshop_governance": workshop_governance,
+                "warnings": [
+                    (
+                        "Dry-run 只代表候选 Agent 可按运行时配置被实例化；当前已自动生成测试版本，但这仍不代表真数据测试已经通过。"
+                        if workshop_governance["version_generated"]
+                        else "Dry-run 只代表候选 Agent 可按运行时配置被实例化，不代表 Agent Workshop 已生成 version。"
+                    ),
+                    "即使已自动生成测试版本，也必须先完成记录在 Agent Workshop 中的样例真数据测试评估，并以最新评估结论作为发布依据。",
+                ],
+            },
         })
     except Exception as exc:
         logger.error("确认后生成候选 Agent 失败: %s", exc, exc_info=True)
@@ -1672,6 +3501,11 @@ __all__ = [
     "analyze_agent_workshop_gaps",
     "generate_agent_workshop_tooling_plan",
     "build_agent_workshop_version",
+    "debug_agent_workshop_version",
+    "run_agent_workshop_real_data_test",
+    "publish_agent_workshop_version",
+    "evaluate_agent_workshop_version",
+    "iterate_agent_workshop_version",
     "create_or_update_runtime_agent_config",
     "create_or_update_universal_agent_prompt_template",
     "bind_agent_tools_and_validate_candidate",

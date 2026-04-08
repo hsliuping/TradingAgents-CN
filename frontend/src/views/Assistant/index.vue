@@ -12,7 +12,7 @@
       </div>
       <div class="header-right">
         <el-button size="small" plain @click="goToEmbeddedNanobotDebug">
-          Nanobot 调试
+          助手调试
         </el-button>
         <el-button size="small" @click="settingsDialogVisible = true">
           <el-icon><Setting /></el-icon>

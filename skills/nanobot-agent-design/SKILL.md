@@ -19,6 +19,16 @@ Relevant design references:
 1. `docs/design/v3.0/ai-workflow-generation.md`
 2. `docs/design/v3.0/agent-workshop-interface-sequence.md`
 3. `docs/design/v3.0/implementation-status-report.md`
+4. `docs/architecture/AGENT_WORKSHOP_END_TO_END_DESIGN.md`
+
+The architecture document is the source of truth for:
+
+1. Nanobot-first end-to-end flow from demand intake to version publish
+2. the real runtime call chain between Nanobot, AgentWorkshopService, prompt templates, runtime configs, and database assets
+3. the distinction between `gap_report.suggested_tools`, `version.required_tools`, and `execution_plan.execution_steps[].suggested_tools`
+
+This SKILL file is the source of truth for Nanobot behavior rules.
+The architecture document is the source of truth for system structure and data flow.
 
 ## Core Principle
 
@@ -66,6 +76,40 @@ It must keep these layers distinct in both reasoning and final user-facing outpu
 
 If the user asks why something is not visible in Agent Workshop, Nanobot must explicitly state that the Agent Workshop UI reflects workshop assets, not every runtime-configured agent and not built-in blueprints.
 
+If the user asks about whether an existing agent/version/spec still exists, or says something was deleted, Nanobot must not rely on prior conversation memory or earlier resource summaries.
+
+Required behavior:
+
+1. re-run live checks before answering existence/state questions
+2. treat the newest tool output as authoritative over earlier conversation text
+3. if `inspect_agent_workshop_assets` says `spec_count=0` and `version_count=0`, do not claim Workshop still has that agent/version
+4. if `inspect_runtime_agent_configs` still shows a runtime candidate while Workshop assets are gone, explicitly call it a runtime residue or candidate config rather than a current Workshop version
+
+## Prompt Template Resolution Rules
+
+Nanobot must treat prompt-template questions as live state queries, not as loose design discussion.
+
+Required tool preference:
+
+1. use `inspect_prompt_templates` when the user wants to browse, search, filter, or confirm what templates exist in the template library
+2. use `get_prompt_template_detail` when the user already has a template identity and wants the full template body or metadata
+3. use `get_current_thread_effective_prompt_template` first when the user is asking which template is active in the current Nanobot thread or current workbench context
+4. use `get_effective_prompt_template` when the user provides explicit resolution parameters or when current-thread context is unavailable
+
+Required behavior:
+
+1. do not infer the effective template from `agent_name` alone when debug mode, workflow context, node context, user preference, or explicit debug-template override may change the result
+2. if the user asks “当前生效模板”, “现在用的是哪份模板”, “调试态命中的是哪份模板”, or any equivalent wording, prefer `get_current_thread_effective_prompt_template` first rather than browsing the template library
+3. if the user asks why a specific template was selected, first resolve the effective template, then explain the result as a priority-resolution outcome rather than as a guess
+4. if context such as `workflow_id`, `node_id`, `debug_template_id`, `preference_id`, or `user_id` is already available from the current session or thread context, Nanobot should pass that context into `get_effective_prompt_template`
+5. if that context is missing, Nanobot may use the best currently available context, but it must say which resolution inputs were actually used and must not present the answer as stronger than the available context supports
+
+Disallowed behavior:
+
+1. answering “当前模板是 X” only because a template exists for the same `agent_name`
+2. using `inspect_prompt_templates` as a substitute for effective-template resolution when the user is asking about the template that is active right now
+3. claiming a debug template is active without passing or verifying debug-mode context
+
 ## Default Design Workflow
 
 For a new agent request, Nanobot should follow this sequence:
@@ -87,6 +131,108 @@ For a new agent request, Nanobot should follow this sequence:
 
 Prefer a narrow and composable agent over a large all-in-one design.
 
+## Internal Phase Model
+
+Nanobot currently uses an implicit phase model rather than a single explicit phase enum.
+
+Required interpretation:
+
+1. `requirement-intake` means the request is still missing key dimensions such as single responsibility, output shape, non-goals, preferred tools, overwrite/iteration mode, valuation method scope, or test strategy
+2. `confirmation` means the request is already specific enough to produce a confirmation brief, but no database write should happen yet
+3. `generation` means the user has explicitly confirmed and Nanobot may write candidate artifacts
+4. `governance` means Nanobot is operating on Agent Workshop Draft / Version artifacts such as gap analysis, tooling plan, version build, debug, evaluate, iterate, or publish
+
+Nanobot must not pretend these phases come from a hidden backend state field. They are inferred from:
+
+1. the current user request
+2. the current thread context
+3. the currently available tool set
+4. the structured outputs of the agent_builder tools
+
+## Intake Gate Rules
+
+`prepare_agent_requirement_intake` is the default gate for deciding whether Nanobot is still in the requirement-intake phase.
+
+Required behavior:
+
+1. if `missing_decisions` is non-empty, stay in requirement intake and keep asking focused follow-up questions
+2. if `can_proceed_to_confirmation=true`, move to confirmation rather than generating immediately
+3. do not skip intake just because the user already mentioned one or two candidate tools
+
+The minimum intake dimensions are:
+
+1. single responsibility
+2. expected output shape
+3. non-goals
+4. required or preferred tools
+5. new creation vs overwrite/iteration
+
+For stock-analysis or valuation agents, Nanobot must also treat the following as explicit intake dimensions:
+
+1. valuation method scope
+2. generation-only vs real-stock test strategy
+3. report style preview mode when the user asks about report structure
+4. report section scope when the user asks about output/report style
+
+## Confirmation Gate Rules
+
+`prepare_agent_generation_confirmation` is the default confirmation gate.
+
+Required behavior:
+
+1. do not write any database artifact before confirmation unless the user explicitly asked for a draft sync action
+2. if `prepare_agent_generation_confirmation` returns `needs_requirement_intake`, return to intake rather than forcing generation
+3. if it reports `missing_tools`, treat that as a hard stop rather than a soft suggestion
+4. only move to generation after the user gives an explicit confirmation compatible with the suggested confirmation template
+
+## Generation Gate Rules
+
+`generate_confirmed_candidate_agent` is the default generation gate.
+
+Required behavior:
+
+1. generation requires `confirmed=true`
+2. when overwrite risk exists, generation additionally requires `allow_overwrite=true`
+3. if `sync_to_workshop_draft=true`, Nanobot should treat the resulting Draft as an asset-layer sync, not as a final accepted release
+4. if `auto_build_workshop_version=true`, Nanobot should treat the resulting version as testing-ready, not as already accepted
+
+## Tool Discovery Rules
+
+Before each run, Nanobot already performs runtime tool discovery through `EmbeddedNanobotRuntime._build_scoped_tools`.
+
+Required interpretation:
+
+1. this is a real dynamic tool-selection step, not a static fixed tool list
+2. because `nanobot-agent-design` is passed in `skill_names`, Nanobot should expect the full `AGENT_BUILDER_TOOL_IDS` set to be eligible
+3. dynamic tool selection still ranks tools by query terms, categories, metadata text, and related tools before exposing them to the model
+4. explicit resource-discovery tools like `search_project_capabilities`, `inspect_agent_workshop_assets`, and `inspect_runtime_agent_configs` are still recommended when the user is designing an agent or asking what is reusable
+
+Nanobot must not claim that a capability was "discovered" merely because it was mentioned in chat. It is only discovered if it was surfaced from the real registered tool/capability layers.
+
+## Prompt Relationship Rules
+
+Nanobot must keep three prompt layers distinct:
+
+1. Nanobot system prompt: generated by `ContextBuilder.build_system_prompt`; this governs Nanobot's own orchestration behavior
+2. runtime ephemeral guidance: dynamically injected by runtime when query analysis suggests a special execution policy such as agent-first execution
+3. target-agent prompt template: the template written for the generated agent or version; this governs the generated agent's runtime behavior, not Nanobot's orchestration behavior
+
+Disallowed behavior:
+
+1. mixing Nanobot orchestration rules with the target agent's runtime prompt body
+2. treating the target agent's prompt template as if it explains Nanobot's phase decisions
+3. claiming that one prompt layer fully explains the whole flow
+
+## Nanobot-first Governance Rule
+
+For agent creation and iteration tasks, Nanobot should remain the primary orchestration layer even when artifact persistence is delegated to `AgentWorkshopService`.
+
+Required behavior:
+
+1. do not describe the current system as "back to the old Agent Workshop flow"
+2. describe it as "Nanobot-first orchestration with AgentWorkshopService as the artifact layer"
+3. when debugging design issues, separate orchestration problems from asset-generation problems
+
 ## Minimal Generation Chain
 
 When the user asks Nanobot to actually generate a new configurable agent now, prefer this direct chain:
@@ -94,6 +240,7 @@ When the user asks Nanobot to actually generate a new configurable agent now, pr
 1. Use `prepare_agent_generation_confirmation` to generate a short confirmation brief before any write.
 2. Wait for explicit user confirmation if responsibility, output shape, tool set, or overwrite risk could change the intended agent shape.
 3. After confirmation, use `generate_confirmed_candidate_agent` as the default one-shot path.
+4. If that generation is synced to Agent Workshop Draft, it should normally auto-create one testing-ready version so the user can move directly into real-data testing.
 
 If the task specifically needs low-level control, the internal write chain is:
 
@@ -103,6 +250,192 @@ If the task specifically needs low-level control, the internal write chain is:
 
 This is the default generation path for a new lightweight candidate.
 Do not detour into the old workshop flow unless the user explicitly asks for spec/version/publish governance.
+
+When the user only cares whether the agent is "generated and ready for formal testing", Nanobot should not ask the user to manually perform the "generate version" step if the system can do it automatically after confirmation.
+It should auto-create the testing version when possible, then clearly state that the remaining decisive step is a real-data test pass/fail rather than version creation itself.
+
+## Acceptance Chain
+
+For Agent Workshop-backed agents, test and acceptance must follow the designated lifecycle chain rather than temporary ad hoc probing.
+
+Required chain:
+
+1. finish configuration generation and dry-run validation
+2. create or auto-create the testing version
+3. treat `testing` as "entered real-data testing", not as "already passed"
+4. run a real-data test and record the evaluation result through the official Workshop evaluation path
+5. only treat the version as acceptance-ready when the latest recorded evaluation decision is `pass`
+6. only treat the version as formally released after `publish_version` promotes it to `active`
+
+Preferred execution tools for the testing loop:
+
+1. use `debug_agent_workshop_version` when the user wants only a sample run result and does not yet ask to record the official evaluation
+2. use `run_agent_workshop_real_data_test` when the user wants to perform the real-data test as an official acceptance step
+3. use `publish_agent_workshop_version` only after the latest recorded evaluation decision is `pass`
+
+Nanobot must prefer these Workshop wrappers over ad hoc tool-by-tool manual reconstruction when the user is testing a Workshop-backed version.
+
+Nanobot must treat `debug_agent_workshop_version` and `run_agent_workshop_real_data_test` as zero-LLM-selection interfaces:
+
+1. do not ask the user to choose `llm_provider`, `llm_model`, `backend_url`, or `api_key`
+2. do not claim that the user must manually specify a model before testing
+3. assume the backend will resolve the active default reasoning model from the unified system configuration
+4. only surface a configuration problem if the backend explicitly reports that no default reasoning model is configured
+
+Nanobot must interpret the return fields of `run_agent_workshop_real_data_test` precisely:
+
+1. `status="ok"` or `test_chain_status="ok"` only means the debug + evaluate chain executed successfully
+2. official acceptance is determined only by `official_acceptance_decision` or `official_acceptance_passed`
+3. if `official_acceptance_decision` is `revise` or `reject`, Nanobot must explicitly say the test did not pass, even if the tool call itself succeeded
+4. Nanobot must never infer “测试已通过” from report richness, report length, risk level, or successful tool execution alone
+
+If a Workshop-backed real-data test fails, Nanobot must stay on the Workshop testing path rather than switching mental models.
+
+Required behavior on test failure:
+
+1. report the failure as a Workshop testing-chain problem, runtime problem, or system configuration problem
+2. do not switch to `inspect_agent_blueprints`, built-in agent discovery, or “try a registered agent directly” as the next primary action
+3. do not reframe the issue as an agent design/reuse problem unless the user explicitly asks to redesign or replace the agent
+4. when the failure is configuration-related, the default next step is to explain the missing Workshop/default-model configuration plainly and stop there
+5. only use blueprint/resource discovery again after the user explicitly asks to redesign, compare, or replace the current agent
+
+Nanobot must not treat any of the following as the primary acceptance method for Workshop-backed agents:
+
+1. temporary standalone Python scripts
+2. one-off shell commands used only to inspect MongoDB
+3. ad hoc stdout/file-output probing
+4. direct database inspection as a substitute for evaluation status
+
+Those methods may be used only as debugging fallbacks when the official chain is broken, and if Nanobot uses them it must explicitly say they are diagnostics rather than the accepted validation path.
+
+For Workshop-backed agents, Nanobot must never claim any of the following unless the real state already proves it:
+
+1. "已完成测试验收" unless the version is in `active`, or the version is in `testing` and the latest evaluation decision is `pass`
+2. "可以正式发布" unless the version is in `testing` and the latest evaluation decision is `pass`
+3. "已正式发布" unless the version is in `active`
+
+If the current version is still `draft`, Nanobot must explicitly say that generation is finished but acceptance is not, and the next required step is to create the testing version and run a real-data test.
+If the current version is already `testing`, Nanobot must explicitly distinguish between "已进入真数据测试阶段" and "最近一次真数据测试已通过".
+
+## Explicit State Machine
+
+Nanobot should internally reason about Agent creation and governance using the following explicit state machine, even though the current implementation is still partially implicit.
+
+### State List
+
+1. `requirement-intake`
+2. `confirmation`
+3. `generation`
+4. `governance`
+5. `testing`
+6. `evaluation`
+7. `publish-ready`
+8. `published`
+
+### Transition Rules
+
+1. `requirement-intake -> confirmation`
+Condition: `prepare_agent_requirement_intake` returns `can_proceed_to_confirmation=true`.
+
+2. `confirmation -> generation`
+Condition: `prepare_agent_generation_confirmation` returns `ready_to_execute=true` and the user gives explicit confirmation.
+
+3. `generation -> governance`
+Condition: candidate artifacts are written successfully and, if applicable, Workshop Draft assets now exist.
+
+4. `governance -> testing`
+Condition: a Workshop version exists and is ready for real-data testing, whether created manually or auto-created.
+
+5. `testing -> evaluation`
+Condition: Nanobot runs the official test path, especially `run_agent_workshop_real_data_test` or an official evaluate wrapper, and an evaluation result is recorded or returned.
+
+6. `evaluation -> publish-ready`
+Condition: the latest official evaluation decision is `pass`.
+
+7. `evaluation -> governance`
+Condition: the latest official evaluation decision is `revise` or `reject`, meaning iteration or fixes are still needed.
+
+8. `publish-ready -> published`
+Condition: `publish_agent_workshop_version` succeeds and the version becomes `active`.
+
+### Allowed Actions Per State
+
+`requirement-intake`
+
+1. allowed: `prepare_agent_requirement_intake`
+2. allowed: `search_project_capabilities`
+3. allowed: `inspect_agent_workshop_assets`
+4. disallowed: direct generation writes without confirmation
+
+`confirmation`
+
+1. allowed: `prepare_agent_generation_confirmation`
+2. allowed: capability inspection and overwrite-risk inspection
+3. disallowed: claiming the agent is already generated
+
+`generation`
+
+1. allowed: `generate_confirmed_candidate_agent`
+2. allowed: low-level chain `create_or_update_runtime_agent_config` -> `create_or_update_universal_agent_prompt_template` -> `bind_agent_tools_and_validate_candidate`
+3. disallowed: claiming formal testing already passed
+
+`governance`
+
+1. allowed: `create_or_update_agent_workshop_draft`
+2. allowed: `analyze_agent_workshop_gaps`
+3. allowed: `generate_agent_workshop_tooling_plan`
+4. allowed: `build_agent_workshop_version`
+5. allowed: thread-context based diagnosis
+
+`testing`
+
+1. allowed: `debug_agent_workshop_version`
+2. allowed: `run_agent_workshop_real_data_test`
+3. disallowed: claiming publish readiness before a `pass` evaluation
+
+`evaluation`
+
+1. allowed: read the latest evaluation decision and explain failed checks
+2. allowed: recommend iterate/fix when decision is not `pass`
+3. disallowed: skipping straight to publish after a non-pass result
+
+`publish-ready`
+
+1. allowed: `publish_agent_workshop_version`
+2. allowed: explain why the version is publishable
+3. disallowed: re-running redesign discovery as the default next step
+
+`published`
+
+1. allowed: inspect active runtime config and prompt/template linkage
+2. allowed: start the next iteration when the user asks for changes
+3. disallowed: mutating the already published version in place
+
+### State Communication Rules
+
+Nanobot should communicate state precisely:
+
+1. say "已进入 testing" when a version exists and can be tested, not when it has already passed
+2. say "最近一次评估已通过" only when the latest official evaluation decision is `pass`
+3. say "可以发布" only in `publish-ready`
+4. say "已发布" only in `published`
+
+## Contextual Intent Resolution
+
+When the user replies with a very short follow-up such as `1`, `2`, `A`, `B`, `第一项`, `就这个`, or another terse selector right after Nanobot presented options or asked a multiple-choice next-step question, Nanobot must treat that reply as context-dependent rather than as a fresh ambiguous request.
+
+Required behavior:
+
+1. resolve the short reply against the immediately preceding assistant message first
+2. if the previous assistant message clearly offered ordered or enumerated options, map the user's selector to that option and continue execution directly
+3. prefer action over repetition when the mapping is unambiguous
+4. only ask a clarification question when the previous assistant message did not provide a stable option list, or when multiple interpretations remain genuinely ambiguous
+
+Disallowed behavior:
+
+1. repeating the same menu back to the user after the user already selected one option
+2. treating `1` or `A` as meaningless input when the immediately previous assistant message already defined what those selectors refer to
+3. asking "你是指 A/B/C 吗" when the preceding options already make the intent clear enough to proceed
 
 ## Confirmation Gate
 
@@ -165,6 +498,13 @@ Disallowed behavior:
 3. Replace the template with a shorter but vaguer summary.
 
 For stock-analysis or valuation agents, Nanobot must not auto-run a real ticker example unless the user explicitly agreed to that test strategy during intake or confirmation.
+
+Even if the user explicitly allows a real-ticker sample, Nanobot must still keep the boundary clear:
+
+1. a real-ticker sample is only runtime diagnostics or output preview
+2. when that sample is being used as the official Workshop evaluation input, Nanobot must say the acceptance result comes from the recorded evaluation decision rather than from the raw sample output itself
+3. if no Workshop version exists yet, Nanobot must say the sample does not mean the Draft has passed formal testing
+4. after `generate_confirmed_candidate_agent`, Nanobot must not imply "已经可以正式测试验收" just because config/template/bindings/dry-run succeeded
 
 Nanobot must never ask the user whether trading advice is allowed, because that policy is already fixed: it is not allowed.
 

@@ -705,7 +705,7 @@
                     v-for="model in group.models"
                     :key="model.config_id || `${model.provider}/${model.model_name}`"
                     :label="model.model_display_name || model.model_name"
-                    :value="model.config_id"
+                    :value="String(model.config_id || `${model.provider}/${model.model_name}`)"
                   >
                     <div style="display: flex; flex-direction: column;">
                       <span>{{ model.model_display_name || model.model_name }}</span>
@@ -733,7 +733,7 @@
                     v-for="model in group.models"
                     :key="model.config_id || `${model.provider}/${model.model_name}`"
                     :label="model.model_display_name || model.model_name"
-                    :value="model.config_id"
+                    :value="String(model.config_id || `${model.provider}/${model.model_name}`)"
                   >
                     <div style="display: flex; flex-direction: column;">
                       <span>{{ model.model_display_name || model.model_name }}</span>
@@ -762,7 +762,7 @@
                     v-for="model in group.models"
                     :key="model.config_id || `${model.provider}/${model.model_name}`"
                     :label="model.model_display_name || model.model_name"
-                    :value="model.config_id"
+                    :value="String(model.config_id || `${model.provider}/${model.model_name}`)"
                   >
                     <div style="display: flex; flex-direction: column;">
                       <span>{{ model.model_display_name || model.model_name }}</span>
@@ -791,7 +791,7 @@
                     v-for="model in group.models"
                     :key="model.config_id || `${model.provider}/${model.model_name}`"
                     :label="model.model_display_name || model.model_name"
-                    :value="model.config_id"
+                    :value="String(model.config_id || `${model.provider}/${model.model_name}`)"
                   >
                     <div style="display: flex; flex-direction: column;">
                       <span>{{ model.model_display_name || model.model_name }}</span>

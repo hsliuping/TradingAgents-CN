@@ -51,6 +51,78 @@
             />
           </el-form-item>
         </el-form>
+
+        <div class="history-block">
+          <div class="card-header">
+            <span>数据库会话</span>
+            <el-button size="small" text @click="loadThreads" :loading="loadingThreads">刷新</el-button>
+          </div>
+          <div class="thread-filter-grid">
+            <el-select v-model="selectedThreadScope" size="small" placeholder="活动会话" @change="loadThreads">
+              <el-option label="活动会话" value="active" />
+              <el-option label="已归档会话" value="archived" />
+            </el-select>
+            <el-input v-model="threadSearchText" size="small" clearable placeholder="搜索标题、摘要、最近问题" />
+            <el-select v-model="selectedThreadAgentFilter" size="small" placeholder="全部 Agent">
+              <el-option label="全部 Agent" value="all" />
+              <el-option
+                v-for="option in nanobotThreadAgentOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+            <el-select v-model="selectedThreadTimeFilter" size="small" placeholder="全部时间">
+              <el-option label="全部时间" value="all" />
+              <el-option label="最近 24 小时" value="24h" />
+              <el-option label="最近 7 天" value="7d" />
+              <el-option label="最近 30 天" value="30d" />
+            </el-select>
+          </div>
+          <el-empty v-if="!loadingThreads && !threadItems.length" :description="selectedThreadScope === 'archived' ? '暂无已归档会话' : '暂无数据库会话'" :image-size="56" />
+          <div v-else class="thread-list">
+            <div v-if="loadingThreads" class="status-line">正在加载数据库会话...</div>
+            <div v-else-if="!filteredThreadItems.length" class="status-line">{{ selectedThreadScope === 'archived' ? '没有符合筛选条件的已归档会话' : '没有符合筛选条件的会话' }}</div>
+            <div
+              v-for="thread in filteredThreadItems"
+              :key="thread.thread_id"
+              :class="['thread-item', { active: selectedThreadId === thread.thread_id }]"
+            >
+              <button
+                type="button"
+                class="thread-main"
+                @click="loadThreadMessages(thread.thread_id)"
+              >
+                <div class="thread-title-row">
+                  <strong>{{ thread.title || 'Nanobot 会话' }}</strong>
+                  <el-tag size="small" effect="plain">{{ thread.message_count }}</el-tag>
+                </div>
+                <div class="thread-desc">{{ thread.last_user_message || thread.summary || '暂无摘要' }}</div>
+                <div class="thread-meta-row">
+                  <div class="thread-meta">{{ formatThreadMeta(thread) }}</div>
+                  <div class="thread-meta-badges">
+                    <el-tag v-if="thread.archived" size="small" type="info" effect="plain">已归档</el-tag>
+                    <div v-if="thread.thread_context?.spec_name" class="thread-agent">{{ thread.thread_context.spec_name }}</div>
+                  </div>
+                </div>
+              </button>
+              <el-button
+                v-if="thread.archived"
+                type="primary"
+                link
+                class="thread-delete-btn"
+                @click.stop="handleRestoreThread(thread)"
+              >恢复</el-button>
+              <el-button
+                v-else
+                type="danger"
+                link
+                class="thread-delete-btn"
+                @click.stop="handleDeleteThread(thread)"
+              >归档</el-button>
+            </div>
+          </div>
+        </div>
       </el-card>
 
       <el-card class="chat-card" shadow="never">
@@ -140,11 +212,13 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import embeddedNanobotApi, {
   type EmbeddedNanobotChatResponse,
+  type EmbeddedNanobotMessageItem,
   type EmbeddedNanobotStreamCallbacks,
   type EmbeddedNanobotStatusResponse,
+  type EmbeddedNanobotThreadItem,
 } from '@/api/embeddedNanobot'
 
 type DebugMessage = {
@@ -162,6 +236,7 @@ type TraceItem = {
 const TOOL_STATUS_LABELS: Record<string, string> = {
   started: '开始',
   ok: '完成',
+  completed: '完成',
   error: '失败',
 }
 
@@ -174,6 +249,13 @@ const lastResponse = ref<EmbeddedNanobotChatResponse | null>(null)
 const draftMessage = ref('')
 const currentProgressHint = ref('')
 const traceEvents = ref<TraceItem[]>([])
+const threadItems = ref<EmbeddedNanobotThreadItem[]>([])
+const loadingThreads = ref(false)
+const selectedThreadId = ref('')
+const selectedThreadScope = ref('active')
+const threadSearchText = ref('')
+const selectedThreadAgentFilter = ref('all')
+const selectedThreadTimeFilter = ref('all')
 let activeStreamController: AbortController | null = null
 
 const form = ref({
@@ -235,6 +317,60 @@ const lastUsageText = computed(() => {
   return parts.join(' | ')
 })
 
+const nanobotThreadAgentOptions = computed(() => {
+  const seen = new Map<string, string>()
+  for (const item of threadItems.value) {
+    const specId = String(item.thread_context?.spec_id || '').trim()
+    const specName = String(item.thread_context?.spec_name || '').trim()
+    if (!specId || seen.has(specId)) continue
+    seen.set(specId, specName || specId)
+  }
+  return Array.from(seen.entries()).map(([value, label]) => ({ value, label }))
+})
+
+const filteredThreadItems = computed(() => {
+  const keyword = String(threadSearchText.value || '').trim().toLowerCase()
+  const now = Date.now()
+  const windowMap: Record<string, number> = {
+    '24h': 24 * 60 * 60 * 1000,
+    '7d': 7 * 24 * 60 * 60 * 1000,
+    '30d': 30 * 24 * 60 * 60 * 1000,
+  }
+  return threadItems.value.filter(item => {
+    if (selectedThreadAgentFilter.value !== 'all') {
+      if (String(item.thread_context?.spec_id || '').trim() !== selectedThreadAgentFilter.value) {
+        return false
+      }
+    }
+
+    if (selectedThreadTimeFilter.value !== 'all') {
+      const timestamp = Date.parse(String(item.updated_at || item.created_at || ''))
+      const range = windowMap[selectedThreadTimeFilter.value]
+      if (!Number.isFinite(timestamp) || !range || now - timestamp > range) {
+        return false
+      }
+    }
+
+    if (!keyword) return true
+    const haystack = [
+      item.title,
+      item.last_user_message,
+      item.summary,
+      item.thread_context?.spec_name,
+    ].join(' ').toLowerCase()
+    return haystack.includes(keyword)
+  })
+})
+
+const mapThreadMessages = (items: EmbeddedNanobotMessageItem[]): DebugMessage[] => {
+  return items.map(item => ({
+    role: item.role === 'user' ? 'user' : 'assistant',
+    content: String(item.content || ''),
+    toolsUsed: item.tools_used || [],
+    stopReason: item.stop_reason,
+  }))
+}
+
 const loadStatus = async () => {
   loadingStatus.value = true
   try {
@@ -243,6 +379,86 @@ const loadStatus = async () => {
     ElMessage.error(error?.message || '读取 embedded nanobot 状态失败')
   } finally {
     loadingStatus.value = false
+  }
+}
+
+const loadThreads = async () => {
+  loadingThreads.value = true
+  try {
+    const result = await embeddedNanobotApi.listThreads(20, selectedThreadScope.value === 'archived')
+    threadItems.value = result.items || []
+  } catch (error: any) {
+    threadItems.value = []
+    ElMessage.error(error?.message || '读取数据库会话失败')
+  } finally {
+    loadingThreads.value = false
+  }
+}
+
+const formatThreadMeta = (thread: EmbeddedNanobotThreadItem) => {
+  const raw = String(thread.updated_at || thread.created_at || '').trim()
+  if (!raw) return '未知时间'
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) return raw
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+const loadThreadMessages = async (threadId: string, silent = false) => {
+  try {
+    const result = await embeddedNanobotApi.getThreadMessages(threadId)
+    selectedThreadId.value = threadId
+    form.value.sessionKey = result.thread?.session_key || threadId
+    form.value.chatId = result.thread?.thread_id || threadId
+    messages.value = mapThreadMessages(result.messages || [])
+    const assistantMessages = (result.messages || []).filter(item => item.role === 'assistant')
+    const latestAssistant = assistantMessages[assistantMessages.length - 1]
+    lastResponse.value = latestAssistant ? {
+      content: latestAssistant.content,
+      session_key: result.thread?.session_key || threadId,
+      thread_id: result.thread?.thread_id || threadId,
+      stop_reason: latestAssistant.stop_reason,
+      tools_used: latestAssistant.tools_used || [],
+      usage: latestAssistant.usage || {},
+      tool_events: latestAssistant.tool_events || [],
+    } : null
+    currentProgressHint.value = ''
+  } catch (error: any) {
+    if (!silent) {
+      ElMessage.error(error?.message || '加载会话消息失败')
+    }
+  }
+}
+
+const handleDeleteThread = async (thread: EmbeddedNanobotThreadItem) => {
+  try {
+    await ElMessageBox.confirm(`归档会话「${thread.title || thread.thread_id}」后，它会从活动列表隐藏，但历史消息仍会保留。是否继续？`, '归档会话', {
+      type: 'warning',
+      confirmButtonText: '归档',
+      cancelButtonText: '取消',
+      confirmButtonClass: 'el-button--danger',
+    })
+    await embeddedNanobotApi.deleteThread(thread.thread_id)
+    if (selectedThreadId.value === thread.thread_id) {
+      selectedThreadId.value = ''
+      form.value.sessionKey = generateSessionKey()
+      form.value.chatId = ''
+      clearMessages()
+    }
+    await loadThreads()
+    ElMessage.success('会话已归档')
+  } catch (error: any) {
+    if (error === 'cancel' || error === 'close' || error?.action === 'cancel' || error?.action === 'close') return
+    ElMessage.error(error?.message || '归档会话失败')
+  }
+}
+
+const handleRestoreThread = async (thread: EmbeddedNanobotThreadItem) => {
+  try {
+    await embeddedNanobotApi.restoreThread(thread.thread_id)
+    await loadThreads()
+    ElMessage.success('会话已恢复到活动列表')
+  } catch (error: any) {
+    ElMessage.error(error?.message || '恢复会话失败')
   }
 }
 
@@ -257,6 +473,7 @@ const createNewSession = () => {
   if (streaming.value || sending.value) return
   form.value.sessionKey = generateSessionKey()
   form.value.chatId = ''
+  selectedThreadId.value = ''
   clearMessages()
   ElMessage.success('已切换到新的调试会话')
 }
@@ -311,6 +528,16 @@ const handleSend = async () => {
             : `工具 ${toolName}${statusLabel === '完成' ? ' 已完成' : ` ${statusLabel}`}`
           pushTrace('tool', `${toolName}（${statusLabel}）${detail}`)
         },
+        onStepEvent(event) {
+          const stepTitle = event.title || event.step || '步骤'
+          const status = event.status || 'started'
+          const detail = event.detail ? `：${event.detail}` : ''
+          const statusLabel = TOOL_STATUS_LABELS[status] || (status === 'completed' ? '完成' : status)
+          currentProgressHint.value = status === 'started'
+            ? (event.detail || `正在执行 ${stepTitle}`)
+            : (event.detail || `${stepTitle} 已完成`)
+          pushTrace('step', `${stepTitle}（${statusLabel}）${detail}`)
+        },
         onDone(data) {
           lastResponse.value = data
           messages.value[assistantIndex].content = data.content || messages.value[assistantIndex].content
@@ -326,9 +553,14 @@ const handleSend = async () => {
           reject(new Error(messageText || '未知错误'))
         },
       }
+      activeStreamController?.abort()
       activeStreamController = embeddedNanobotApi.chatStream(payload, callbacks)
     })
     draftMessage.value = ''
+    await loadThreads()
+    if (lastResponse.value?.thread_id) {
+      await loadThreadMessages(lastResponse.value.thread_id, true)
+    }
   } catch (error: any) {
     ElMessage.error(error?.message || 'Embedded Nanobot 请求失败')
   } finally {
@@ -340,6 +572,7 @@ const handleSend = async () => {
 
 onMounted(() => {
   loadStatus()
+  loadThreads()
 })
 </script>
 
@@ -405,9 +638,109 @@ onMounted(() => {
     margin-bottom: 16px;
   }
 
+  .history-block {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--el-border-color-lighter);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .thread-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
   .status-line {
     color: var(--el-text-color-secondary);
     word-break: break-all;
+  }
+
+  .thread-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 320px;
+    overflow: auto;
+  }
+
+  .thread-item {
+    border: 1px solid var(--el-border-color-light);
+    border-radius: 12px;
+    background: #fff;
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+
+    &.active {
+      border-color: #9fd5c8;
+      background: linear-gradient(135deg, #f0fdf9 0%, #ffffff 100%);
+    }
+  }
+
+  .thread-main {
+    flex: 1;
+    border: 0;
+    background: transparent;
+    padding: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .thread-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--el-text-color-primary);
+  }
+
+  .thread-desc {
+    margin-top: 8px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--el-text-color-secondary);
+  }
+
+  .thread-meta {
+    font-size: 11px;
+    color: #94a3b8;
+  }
+
+  .thread-meta-row {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .thread-meta-badges {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .thread-agent {
+    font-size: 11px;
+    line-height: 1.4;
+    color: #0f766e;
+    background: #ecfeff;
+    border: 1px solid #a5f3fc;
+    border-radius: 999px;
+    padding: 2px 8px;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .thread-delete-btn {
+    align-self: center;
+    padding-right: 12px;
   }
 
   .session-key-row {
@@ -565,6 +898,10 @@ onMounted(() => {
     .session-key-row {
       flex-direction: column;
       align-items: stretch;
+    }
+
+    .thread-filter-grid {
+      grid-template-columns: 1fr;
     }
   }
 }

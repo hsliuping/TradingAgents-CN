@@ -50,11 +50,74 @@ def _is_tool_choice_unsupported(content: str | None) -> bool:
 class MemoryStore:
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, db: Any | None = None):
+        self._db = db
+        self.workspace = workspace
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
         self._consecutive_failures = 0
+
+    @staticmethod
+    def _normalize_session_metadata(session_metadata: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(session_metadata, dict):
+            return {}
+        return dict(session_metadata)
+
+    async def _sync_compaction_to_mem0(
+        self,
+        *,
+        history_entry: str,
+        memory_update: str,
+        previous_memory: str,
+        session_metadata: dict[str, Any] | None,
+    ) -> None:
+        if self._db is None:
+            return
+
+        metadata = self._normalize_session_metadata(session_metadata)
+        user_id = str(metadata.get("user_id") or "").strip()
+        if not user_id:
+            return
+
+        try:
+            from core.memory.service import get_memory_service
+
+            thread_context = metadata.get("thread_context") if isinstance(metadata.get("thread_context"), dict) else {}
+            store_metadata: dict[str, Any] = {
+                "source": "embedded_nanobot_compaction",
+                "thread_id": str(metadata.get("thread_id") or metadata.get("chat_id") or "").strip() or None,
+                "session_key": str(metadata.get("session_key") or "").strip() or None,
+                "channel": str(metadata.get("channel") or "embedded").strip() or "embedded",
+                "chat_id": str(metadata.get("chat_id") or "").strip() or None,
+                "workspace_path": str(metadata.get("workspace_path") or self.workspace),
+                "symbol": str(metadata.get("symbol") or "").strip() or None,
+                "object_type": str(metadata.get("object_type") or "").strip() or None,
+                "object_key": str(metadata.get("object_key") or "").strip() or None,
+            }
+            for key, value in thread_context.items():
+                normalized = str(value or "").strip()
+                if normalized:
+                    store_metadata[key] = normalized
+            store_metadata = {key: value for key, value in store_metadata.items() if value is not None}
+
+            content_parts = [f"Compact history entry:\n{history_entry.strip()}"]
+            if memory_update != previous_memory:
+                content_parts.append(f"Updated long-term memory:\n{memory_update.strip()}")
+
+            svc = get_memory_service(self._db)
+            result = await svc.store(
+                [{"role": "system", "content": "\n\n".join(part for part in content_parts if part.strip())}],
+                user_id=user_id,
+                agent_id="embedded_nanobot",
+                session_id=str(store_metadata.get("thread_id") or store_metadata.get("session_key") or "").strip(),
+                scope="conversation",
+                metadata=store_metadata,
+            )
+            if not result.success:
+                logger.warning("Embedded nanobot mem0 compaction mirror skipped: %s", result.error or "unknown error")
+        except Exception:
+            logger.exception("Embedded nanobot mem0 compaction mirror failed")
 
     def read_long_term(self) -> str:
         return self.memory_file.read_text(encoding="utf-8") if self.memory_file.exists() else ""
@@ -80,7 +143,13 @@ class MemoryStore:
             lines.append(f"[{message.get('timestamp', '?')[:16]}] {message['role'].upper()}{tools}: {message['content']}")
         return "\n".join(lines)
 
-    async def consolidate(self, messages: list[dict[str, Any]], provider, model: str) -> bool:
+    async def consolidate(
+        self,
+        messages: list[dict[str, Any]],
+        provider,
+        model: str,
+        session_metadata: dict[str, Any] | None = None,
+    ) -> bool:
         if not messages:
             return True
         current_memory = self.read_long_term()
@@ -106,6 +175,12 @@ class MemoryStore:
             self.append_history(entry)
             if update != current_memory:
                 self.write_long_term(update)
+            await self._sync_compaction_to_mem0(
+                history_entry=entry,
+                memory_update=update,
+                previous_memory=current_memory,
+                session_metadata=session_metadata,
+            )
             self._consecutive_failures = 0
             logger.info("Embedded nanobot memory consolidation done for %s messages", len(messages))
             return True
@@ -130,8 +205,8 @@ class MemoryConsolidator:
     _MAX_CONSOLIDATION_ROUNDS = 5
     _SAFETY_BUFFER = 1024
 
-    def __init__(self, workspace: Path, provider, model: str, sessions, context_window_tokens: int, build_messages: Callable[..., list[dict[str, Any]]], get_tool_definitions: Callable[[], list[dict[str, Any]]], max_completion_tokens: int = 4096):
-        self.store = MemoryStore(workspace)
+    def __init__(self, workspace: Path, provider, model: str, sessions, context_window_tokens: int, build_messages: Callable[..., list[dict[str, Any]]], get_tool_definitions: Callable[[], list[dict[str, Any]]], max_completion_tokens: int = 4096, db: Any | None = None):
+        self.store = MemoryStore(workspace, db=db)
         self.provider = provider
         self.model = model
         self.sessions = sessions
@@ -144,8 +219,8 @@ class MemoryConsolidator:
     def get_lock(self, session_key: str) -> asyncio.Lock:
         return self._locks.setdefault(session_key, asyncio.Lock())
 
-    async def consolidate_messages(self, messages: list[dict[str, object]]) -> bool:
-        return await self.store.consolidate(messages, self.provider, self.model)
+    async def consolidate_messages(self, messages: list[dict[str, object]], session_metadata: dict[str, Any] | None = None) -> bool:
+        return await self.store.consolidate(messages, self.provider, self.model, session_metadata=session_metadata)
 
     def pick_consolidation_boundary(self, session, tokens_to_remove: int) -> tuple[int, int] | None:
         start = session.last_consolidated
@@ -196,7 +271,7 @@ class MemoryConsolidator:
                 chunk = session.messages[session.last_consolidated:end_index]
                 if not chunk:
                     return
-                if not await self.consolidate_messages(chunk):
+                if not await self.consolidate_messages(chunk, session_metadata=session.metadata):
                     return
                 session.last_consolidated = end_index
                 self.sessions.save(session)

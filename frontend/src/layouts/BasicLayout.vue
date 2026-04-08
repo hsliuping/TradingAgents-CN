@@ -73,7 +73,7 @@
       </main>
 
       <!-- 页脚 -->
-      <footer class="footer">
+      <footer v-if="!hideFooterRoute" class="footer">
         <AppFooter />
       </footer>
     </div>
@@ -106,7 +106,13 @@ const keepAliveComponents = computed(() => [
   'QueueManagement'
 ])
 
-const isFullWidthRoute = computed(() => route.path.startsWith('/assistant'))
+const isFullWidthRoute = computed(() => {
+  return route.path.startsWith('/assistant') || route.path.startsWith('/workflow/nanobot-agent-studio')
+})
+
+const hideFooterRoute = computed(() => {
+  return route.path.startsWith('/workflow/nanobot-agent-studio')
+})
 
 // 移动端判断
 const isMobile = computed(() => width.value < 768)
