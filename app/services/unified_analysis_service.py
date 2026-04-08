@@ -1900,8 +1900,12 @@ async def _recall_analysis_memory(db, user_id: str, stock_code: str) -> str:
             query=f"分析 {stock_code} 股票",
             user_id=user_id,
             scopes=["analysis_insight", "agent_experience", "user_preference"],
+            metadata_filters={"symbol": stock_code},
             limit=5,
             max_chars=1500,
+            ranking_profile="analysis",
+            group_by_scope=True,
+            per_scope_limit=2,
         )
     except Exception as e:
         logger.debug("[mem0] 分析记忆召回失败: %s", e)

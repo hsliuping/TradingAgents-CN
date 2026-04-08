@@ -29,6 +29,7 @@ from core.agents.config import GrowthMemoryScope as AgentGrowthMemoryScope
 from core.agents.config import GrowthReviewLevel as AgentGrowthReviewLevel
 from core.agents.config import GrowthSourceType as AgentGrowthSourceType
 from core.agents.registry import get_registry
+from core.memory.models import MemoryScope
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,10 @@ class WorkflowGrowthService:
                 }
             },
         )
+        if result.modified_count > 0:
+            approved_doc = await self.memory_collection.find_one({"user_id": user_id, "memory_id": memory_id})
+            if approved_doc:
+                await self._sync_approved_memory_to_mem0(approved_doc)
         return result.modified_count > 0
 
     async def reject_memory_item(self, user_id: str, memory_id: str) -> bool:
@@ -245,7 +250,7 @@ class WorkflowGrowthService:
         """
         为即将执行的工作流构建已批准记忆的召回上下文。
 
-        按优先级查询: object_tracking（与标的相关）> workflow_pattern >
+        按优先级查询: object_tracking（与标的相关）> pattern >
         research_asset，拼接为结构化文本注入工作流输入。
 
         Returns:
@@ -272,12 +277,12 @@ class WorkflowGrowthService:
 
         remaining = max_items - len(recall_items)
 
-        # 优先级 2: workflow_pattern 记忆
+        # 优先级 2: pattern 记忆
         if remaining > 0 and workflow_id:
             wf_query = {
                 **query,
-                "scope": GrowthMemoryScope.WORKFLOW_PATTERN.value,
-                "source_workflow_id": workflow_id,
+                "scope": GrowthMemoryScope.PATTERN.value,
+                "workflow_id": workflow_id,
             }
             seen_ids = {str(d.get("_id")) for d in recall_items}
             docs = await (
@@ -1158,6 +1163,131 @@ class WorkflowGrowthService:
             "mode": mode,
         }
 
+    async def _sync_approved_memory_to_mem0(self, memory_doc: Dict[str, Any]) -> None:
+        """将已批准的成长记忆桥接到 mem0。
+
+        该桥接采用 best-effort 策略：失败仅记录日志，不影响 Mongo 审批结果。
+        """
+        try:
+            from core.memory.service import get_memory_service
+
+            scope = self._map_growth_memory_to_mem0_scope(memory_doc)
+            agent_id = self._resolve_growth_memory_agent_id(memory_doc)
+            metadata = self._build_growth_memory_mem0_metadata(memory_doc, scope)
+            content = self._build_growth_memory_mem0_content(memory_doc)
+
+            memory_svc = get_memory_service(self.db)
+            result = await memory_svc.store(
+                [{"role": "assistant", "content": content}],
+                user_id=str(memory_doc.get("user_id") or ""),
+                agent_id=agent_id,
+                session_id=str(memory_doc.get("source_id") or ""),
+                scope=scope,
+                metadata=metadata,
+                infer=True,
+            )
+
+            if not result.success:
+                logger.warning(
+                    "⚠️ 成长记忆桥接 mem0 失败: memory_id=%s error=%s",
+                    memory_doc.get("memory_id"),
+                    result.error or "unknown",
+                )
+                return
+
+            logger.info(
+                "✅ 成长记忆已桥接到 mem0: memory_id=%s scope=%s facts=%s",
+                memory_doc.get("memory_id"),
+                scope,
+                result.facts_extracted,
+            )
+        except Exception as exc:
+            logger.warning(
+                "⚠️ 成长记忆桥接 mem0 异常: memory_id=%s error=%s",
+                memory_doc.get("memory_id"),
+                exc,
+            )
+
+    def _map_growth_memory_to_mem0_scope(self, memory_doc: Dict[str, Any]) -> str:
+        raw_scope = memory_doc.get("scope")
+        task_type = str(memory_doc.get("task_type") or "")
+
+        if raw_scope == GrowthMemoryScope.USER_PREFERENCE.value:
+            return MemoryScope.USER_PREFERENCE.value
+        if raw_scope == GrowthMemoryScope.PATTERN.value:
+            if task_type == str(AnalysisTaskType.TRADE_REVIEW):
+                return MemoryScope.TRADE_PATTERN.value
+            return MemoryScope.AGENT_EXPERIENCE.value
+        if raw_scope in {
+            GrowthMemoryScope.OBJECT_TRACKING.value,
+            GrowthMemoryScope.RESEARCH_ASSET.value,
+        }:
+            return MemoryScope.ANALYSIS_INSIGHT.value
+        return MemoryScope.AGENT_EXPERIENCE.value
+
+    def _resolve_growth_memory_agent_id(self, memory_doc: Dict[str, Any]) -> str:
+        structured_payload = memory_doc.get("structured_payload") or {}
+        agent_name = structured_payload.get("agent_name")
+        if agent_name:
+            return str(agent_name)
+        return "workflow_growth"
+
+    def _build_growth_memory_mem0_metadata(self, memory_doc: Dict[str, Any], mem0_scope: str) -> Dict[str, Any]:
+        object_type = str(memory_doc.get("object_type") or "")
+        object_key = str(memory_doc.get("object_key") or "")
+        metadata: Dict[str, Any] = {
+            "scope": mem0_scope,
+            "source": "workflow_growth",
+            "growth_memory_id": str(memory_doc.get("memory_id") or ""),
+            "growth_scope": str(memory_doc.get("scope") or ""),
+            "source_type": str(memory_doc.get("source_type") or ""),
+            "source_id": str(memory_doc.get("source_id") or ""),
+            "task_type": str(memory_doc.get("task_type") or ""),
+            "workflow_id": str(memory_doc.get("workflow_id") or ""),
+            "object_type": object_type,
+            "object_key": object_key,
+            "review_level": str(memory_doc.get("review_level") or ""),
+            "confidence": memory_doc.get("confidence") or 0.0,
+            "confirmed_by": str(memory_doc.get("confirmed_by") or ""),
+            "confirmed_at": self._format_optional_datetime(memory_doc.get("confirmed_at")),
+        }
+        if object_type == "stock" and object_key:
+            metadata["symbol"] = object_key
+        structured_payload = memory_doc.get("structured_payload") or {}
+        if structured_payload:
+            metadata["structured_payload"] = structured_payload
+        evidence_refs = memory_doc.get("evidence_refs") or []
+        if evidence_refs:
+            metadata["evidence_refs"] = evidence_refs
+        return metadata
+
+    def _build_growth_memory_mem0_content(self, memory_doc: Dict[str, Any]) -> str:
+        parts: List[str] = []
+        title = self._extract_text(memory_doc.get("title"))
+        summary = self._extract_text(memory_doc.get("summary"))
+        content = self._extract_text(memory_doc.get("content"))
+        object_key = self._extract_text(memory_doc.get("object_key"))
+        growth_scope = self._extract_text(memory_doc.get("scope"))
+
+        if title:
+            parts.append(f"标题: {title}")
+        if object_key:
+            parts.append(f"对象: {object_key}")
+        if growth_scope:
+            parts.append(f"成长记忆范围: {growth_scope}")
+        if summary:
+            parts.append(f"摘要: {summary}")
+        if content:
+            parts.append(f"详情: {content}")
+
+        return "\n".join(parts)
+
+    @staticmethod
+    def _format_optional_datetime(value: Any) -> str:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return str(value or "")
+
 
 _workflow_growth_service: Optional[WorkflowGrowthService] = None
 
@@ -1204,8 +1334,8 @@ def build_recall_context_sync(
     if remaining > 0 and workflow_id:
         wf_query = {
             **base_query,
-            "scope": GrowthMemoryScope.WORKFLOW_PATTERN.value,
-            "source_workflow_id": workflow_id,
+            "scope": GrowthMemoryScope.PATTERN.value,
+            "workflow_id": workflow_id,
         }
         seen_ids = {str(d.get("_id")) for d in recall_items}
         docs = list(

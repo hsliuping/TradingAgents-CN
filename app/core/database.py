@@ -1474,6 +1474,18 @@ async def create_database_indexes(db):
         await assistant_thread_checkpoints.create_index([("thread_id", 1), ("created_at", -1)])
         await assistant_thread_checkpoints.create_index([("user_id", 1), ("thread_id", 1), ("created_at", -1)])
 
+        # embedded_nanobot_threads 内嵌 Nanobot 会话
+        embedded_nanobot_threads = db["embedded_nanobot_threads"]
+        await embedded_nanobot_threads.create_index([("user_id", 1), ("thread_id", 1)], unique=True)
+        await embedded_nanobot_threads.create_index([("user_id", 1), ("updated_at", -1)])
+        await embedded_nanobot_threads.create_index([("session_key", 1), ("updated_at", -1)])
+
+        # embedded_nanobot_thread_messages 内嵌 Nanobot 会话消息
+        embedded_nanobot_thread_messages = db["embedded_nanobot_thread_messages"]
+        await embedded_nanobot_thread_messages.create_index([("thread_id", 1), ("created_at", 1)])
+        await embedded_nanobot_thread_messages.create_index([("user_id", 1), ("thread_id", 1), ("created_at", -1)])
+        await embedded_nanobot_thread_messages.create_index([("session_key", 1), ("created_at", -1)])
+
         # ETF 集合索引
         etf_basic = db["etf_basic_info"]
         await etf_basic.create_index([("code", 1), ("source", 1)], unique=True)

@@ -2439,21 +2439,74 @@ async def _load_assistant_settings(db, user_id: str) -> Optional[dict]:
 #  mem0 统一记忆层 — 助手对话集成
 # ------------------------------------------------------------------
 
-async def _recall_memory_block(db, user_id: str, user_message: str) -> str:
-    """从 mem0 召回与当前用户/问题相关的记忆，格式化为可注入 prompt 的文本。"""
+def _extract_memory_metadata_filters(
+    current_topic_title: Optional[str] = None,
+    report_refs: Optional[List[Dict[str, Any]]] = None,
+) -> Optional[Dict[str, str]]:
+    title = (current_topic_title or "").strip()
+    if not title:
+        title = ""
+
+    if title:
+        title_match = re.search(r"[（(]([A-Za-z]{1,5}|\d{5,6}|(?:sh|sz|bj|hk)\.\d{5,6})[)）]", title, re.IGNORECASE)
+        if title_match:
+            return {"symbol": title_match.group(1).upper()}
+
+        fallback_match = re.search(r"\b(?:sh|sz|bj|hk)\.\d{5,6}\b|\b\d{5,6}\b", title, re.IGNORECASE)
+        if fallback_match:
+            return {"symbol": fallback_match.group(0).upper()}
+
+    for ref in report_refs or []:
+        symbol = str(ref.get("symbol") or "").strip()
+        if symbol:
+            return {"symbol": symbol.upper()}
+
+    return None
+
+
+async def _recall_memory_block(
+    db,
+    user_id: str,
+    user_message: str,
+    current_topic_title: Optional[str] = None,
+    report_refs: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    """召回可注入 prompt 的记忆块，组合 L4 项目长期记忆与 L5/L6 用户语义记忆。"""
+    blocks: List[str] = []
+
+    try:
+        from app.services.project_memory_service import get_project_memory_service
+
+        project_block = await get_project_memory_service(db).build_prompt_block(
+            max_items=4,
+            max_chars=600,
+        )
+        if project_block:
+            blocks.append(project_block)
+    except Exception as e:
+        logger.debug("[project-memory] 项目长期记忆召回失败（已忽略）: %s", e)
+
     try:
         from core.memory.service import get_memory_service
         svc = get_memory_service(db)
-        return await svc.recall_formatted(
+        metadata_filters = _extract_memory_metadata_filters(current_topic_title, report_refs=report_refs)
+        mem0_block = await svc.recall_formatted(
             query=user_message,
             user_id=user_id,
             scopes=["conversation", "user_preference", "analysis_insight", "trade_pattern"],
             limit=8,
             max_chars=2000,
+            metadata_filters=metadata_filters,
+            ranking_profile="assistant",
+            group_by_scope=True,
+            per_scope_limit=3,
         )
+        if mem0_block:
+            blocks.append(mem0_block)
     except Exception as e:
         logger.debug("[mem0] 记忆召回失败（已忽略）: %s", e)
-        return ""
+
+    return "\n\n".join(block for block in blocks if block).strip()
 
 
 async def _store_conversation_memory(
@@ -2552,6 +2605,7 @@ async def chat_with_assistant(
     # 加载用户画像（跨会话持久记忆）
     user_profile: Optional[dict] = None
     current_topic_title: Optional[str] = None
+    current_thread_report_refs: List[Dict[str, Any]] = []
     if user_id:
         try:
             user_profile = await load_user_profile(db, user_id)
@@ -2568,10 +2622,11 @@ async def chat_with_assistant(
                     "thread_id": current_thread_id,
                     "archived": {"$ne": True},
                 },
-                {"title": 1},
+                {"title": 1, "report_refs": 1},
             )
             if current_topic:
                 current_topic_title = (current_topic.get("title") or "").strip() or None
+                current_thread_report_refs = current_topic.get("report_refs") or []
         except Exception as e:
             logger.warning(f"[智能助手] 加载当前主题失败（已跳过）: {e}")
 
@@ -2596,7 +2651,13 @@ async def chat_with_assistant(
     # mem0 记忆召回（降级安全）
     memory_block = ""
     if user_id:
-        memory_block = await _recall_memory_block(db, user_id, user_message)
+        memory_block = await _recall_memory_block(
+            db,
+            user_id,
+            user_message,
+            current_topic_title=current_topic_title,
+            report_refs=current_thread_report_refs,
+        )
 
     service = IntelligentAssistantService(
         db,
@@ -2672,6 +2733,7 @@ async def stream_chat_with_assistant(
 
     user_profile: Optional[dict] = None
     current_topic_title: Optional[str] = None
+    current_thread_report_refs: List[Dict[str, Any]] = []
     if user_id:
         try:
             user_profile = await load_user_profile(db, user_id)
@@ -2683,10 +2745,11 @@ async def stream_chat_with_assistant(
         try:
             current_topic = await db.assistant_threads.find_one(
                 {"user_id": user_id, "thread_id": tid, "archived": {"$ne": True}},
-                {"title": 1},
+                {"title": 1, "report_refs": 1},
             )
             if current_topic:
                 current_topic_title = (current_topic.get("title") or "").strip() or None
+                current_thread_report_refs = current_topic.get("report_refs") or []
         except Exception:
             pass
 
@@ -2710,7 +2773,13 @@ async def stream_chat_with_assistant(
     # mem0 记忆召回
     memory_block = ""
     if user_id:
-        memory_block = await _recall_memory_block(db, user_id, user_message)
+        memory_block = await _recall_memory_block(
+            db,
+            user_id,
+            user_message,
+            current_topic_title=current_topic_title,
+            report_refs=current_thread_report_refs,
+        )
 
     service = IntelligentAssistantService(
         db,
