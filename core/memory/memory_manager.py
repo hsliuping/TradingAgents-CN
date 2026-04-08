@@ -18,10 +18,176 @@ Memory 管理器 v2.0
 import logging
 import os
 import queue
+import asyncio
 import threading
 from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+_MEM0_COMPAT_DEFAULT_USER_ID = "legacy_tradingagents"
+_AGENT_ID_ALIAS_MAPPING = {
+    "bull_researcher": ["bull_researcher_v2", "bull_researcher"],
+    "bull_researcher_v2": ["bull_researcher_v2", "bull_researcher"],
+    "bear_researcher": ["bear_researcher_v2", "bear_researcher"],
+    "bear_researcher_v2": ["bear_researcher_v2", "bear_researcher"],
+    "trader": ["trader_v2", "trader"],
+    "trader_v2": ["trader_v2", "trader"],
+    "research_manager": ["research_manager_v2", "research_manager"],
+    "research_manager_v2": ["research_manager_v2", "research_manager"],
+    "risk_manager": ["risk_manager_v2", "risk_manager"],
+    "risk_manager_v2": ["risk_manager_v2", "risk_manager"],
+}
+
+
+def _is_truthy(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _run_async_sync(coro):
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    result: dict[str, Any] = {}
+    error: dict[str, BaseException] = {}
+    done = threading.Event()
+
+    def _runner() -> None:
+        try:
+            result["value"] = asyncio.run(coro)
+        except BaseException as exc:  # pragma: no cover - 仅用于跨线程异常传递
+            error["value"] = exc
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    done.wait()
+    if "value" in error:
+        raise error["value"]
+    return result.get("value")
+
+
+class Mem0AgentMemory:
+    """为 v2 AgentMemory 接口提供 mem0 兼容层。"""
+
+    def __init__(self, agent_id: str):
+        self.agent_id = agent_id
+        self.agent_ids = list(dict.fromkeys(_AGENT_ID_ALIAS_MAPPING.get(agent_id, [agent_id])))
+
+    def _resolve_user_id(self) -> str:
+        return str(os.getenv("MEM0_COMPAT_USER_ID") or _MEM0_COMPAT_DEFAULT_USER_ID).strip() or _MEM0_COMPAT_DEFAULT_USER_ID
+
+    @staticmethod
+    def _normalize_store_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        merged = dict(metadata or {})
+        ticker = str(merged.get("ticker") or merged.get("symbol") or "").strip().upper()
+        if ticker:
+            merged["ticker"] = ticker
+            merged.setdefault("symbol", ticker)
+            merged.setdefault("object_type", "stock")
+            merged.setdefault("object_key", ticker)
+        merged.setdefault("source", "legacy_agent_memory_runtime")
+        return merged
+
+    @staticmethod
+    def _normalize_recall_filters(filter_metadata: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not filter_metadata:
+            return None
+        merged = dict(filter_metadata)
+        ticker = str(merged.get("ticker") or merged.get("symbol") or "").strip().upper()
+        if ticker:
+            merged["ticker"] = ticker
+            merged.setdefault("symbol", ticker)
+        return merged
+
+    def add_memory(
+        self,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        memory_id: Optional[str] = None,
+    ) -> bool:
+        del memory_id
+        try:
+            from .service import get_memory_service
+
+            svc = get_memory_service()
+            result = _run_async_sync(
+                svc.store(
+                    [{"role": "user", "content": str(content or "")}],
+                    user_id=self._resolve_user_id(),
+                    agent_id=self.agent_ids[0],
+                    session_id=str((metadata or {}).get("ticker") or self.agent_id),
+                    scope="agent_experience",
+                    metadata=self._normalize_store_metadata(metadata),
+                    infer=False,
+                )
+            )
+            if result.success:
+                logger.info("✅ mem0 AgentMemory 写入成功 agent_id=%s", self.agent_ids[0])
+                return True
+            raise RuntimeError(result.error or "mem0 store failed")
+        except Exception as exc:
+            logger.warning("⚠️ mem0 AgentMemory 写入失败 %s: %s", self.agent_id, exc)
+        return False
+
+    def search_memories(
+        self,
+        query: str,
+        n_results: int = 5,
+        filter_metadata: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        try:
+            from .service import get_memory_service
+
+            svc = get_memory_service()
+            memories: List[Dict[str, Any]] = []
+            seen_memory_ids = set()
+            normalized_filters = self._normalize_recall_filters(filter_metadata)
+            for agent_id in self.agent_ids:
+                recalled = _run_async_sync(
+                    svc.recall(
+                        query=str(query or ""),
+                        user_id=self._resolve_user_id(),
+                        agent_id=agent_id,
+                        scopes=["agent_experience"],
+                        metadata_filters=normalized_filters,
+                        limit=n_results,
+                    )
+                )
+                for item in recalled or []:
+                    memory_id = getattr(item, "id", None)
+                    if memory_id and memory_id in seen_memory_ids:
+                        continue
+                    if memory_id:
+                        seen_memory_ids.add(memory_id)
+                    memories.append({
+                        "content": item.metadata.get("legacy_situation") or item.memory,
+                        "metadata": item.metadata,
+                        "similarity": item.score,
+                        "distance": max(0.0, 1.0 - float(item.score or 0.0)),
+                    })
+                    if len(memories) >= n_results:
+                        break
+                if len(memories) >= n_results:
+                    break
+            if memories:
+                logger.info("✅ mem0 AgentMemory 命中 agent_id=%s recalled=%d aliases=%s", self.agent_id, len(memories), self.agent_ids)
+                return memories
+            logger.info("📭 mem0 AgentMemory 未命中 agent_id=%s aliases=%s", self.agent_id, self.agent_ids)
+        except Exception as exc:
+            logger.warning("⚠️ mem0 AgentMemory 召回失败 %s: %s", self.agent_id, exc)
+        return []
+
+    def get_memory_count(self) -> int:
+        return 0
+
+    def clear_memories(self):
+        return None
 
 
 class VectorStoreManager:
@@ -414,10 +580,13 @@ class MemoryManager:
             embedding_manager: EmbeddingManager 实例
         """
         self.embedding_manager = embedding_manager
-        self._agent_memories: Dict[str, AgentMemory] = {}
+        self._agent_memories: Dict[str, Any] = {}
+        self._use_mem0_compat = str(os.getenv("MEMORY_USE_MEM0_COMPAT", "true")).strip().lower() in {"1", "true", "yes", "on"}
         logger.info("🧠 记忆管理器初始化完成")
+        if not self._use_mem0_compat:
+            logger.warning("⚠️ MemoryManager 当前显式使用 legacy-only AgentMemory 路径，建议迁回 mem0 主路径")
 
-    def get_agent_memory(self, agent_id: str) -> AgentMemory:
+    def get_agent_memory(self, agent_id: str) -> Any:
         """
         获取指定 Agent 的记忆实例
 
@@ -428,7 +597,10 @@ class MemoryManager:
             AgentMemory 实例
         """
         if agent_id not in self._agent_memories:
-            self._agent_memories[agent_id] = AgentMemory(agent_id, self.embedding_manager)
+            if self._use_mem0_compat:
+                self._agent_memories[agent_id] = Mem0AgentMemory(agent_id)
+            else:
+                self._agent_memories[agent_id] = AgentMemory(agent_id, self.embedding_manager)
 
         return self._agent_memories[agent_id]
 

@@ -76,6 +76,7 @@ class LegacyDependencyProvider:
         self._debate_llm = None  # 🆕 辩论专用 LLM（使用更高温度）
         self._toolkit = None
         self._memories = {}
+        self._memory_provider = None
 
     @classmethod
     def get_instance(cls, config: Optional[Dict[str, Any]] = None) -> "LegacyDependencyProvider":
@@ -89,6 +90,8 @@ class LegacyDependencyProvider:
             cls._instance._deep_llm = None
             cls._instance._debate_llm = None  # 🆕 重置辩论 LLM
             cls._instance._toolkit = None
+            cls._instance._memories = {}
+            cls._instance._memory_provider = None
         return cls._instance
 
     @classmethod
@@ -607,13 +610,15 @@ class LegacyDependencyProvider:
 
     def _create_memory(self, memory_type: str):
         """创建 Memory 实例"""
-        from tradingagents.agents.utils.memory import FinancialSituationMemory
+        from tradingagents.core.engine.memory_provider import MemoryProvider
         from tradingagents.default_config import DEFAULT_CONFIG
 
         config = {**DEFAULT_CONFIG, **self._config}
 
         if config.get("memory_enabled", True):
-            self._memories[memory_type] = FinancialSituationMemory(memory_type, config)
+            if self._memory_provider is None:
+                self._memory_provider = MemoryProvider(config=config, memory_enabled=True)
+            self._memories[memory_type] = self._memory_provider.get_memory(memory_type)
         else:
             self._memories[memory_type] = None
 

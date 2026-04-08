@@ -6,6 +6,7 @@ from dashscope import TextEmbedding
 import os
 import threading
 import hashlib
+import warnings
 from typing import Dict, Optional
 
 # 导入统一日志系统
@@ -99,6 +100,11 @@ class ChromaDBManager:
 
 class FinancialSituationMemory:
     def __init__(self, name, config):
+        warnings.warn(
+            "FinancialSituationMemory 已进入 legacy-only 兼容模式，主路径请改用 mem0 MemoryProvider/MemoryManager。",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.config = config
         self.llm_provider = config.get("llm_provider", "openai").lower()
 

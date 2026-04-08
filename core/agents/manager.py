@@ -6,6 +6,7 @@ v2.0 新增：基于配置的管理者Agent架构
 """
 
 import logging
+import json
 from abc import abstractmethod
 from typing import Any, Dict, List, Optional
 
@@ -15,6 +16,17 @@ from .base import BaseAgent
 from .config import AgentMetadata, AgentCategory
 
 logger = logging.getLogger(__name__)
+
+
+def _stringify_manager_decision(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        except TypeError:
+            return str(value)
+    return str(value)
 
 
 class ManagerAgent(BaseAgent):
@@ -55,6 +67,7 @@ class ManagerAgent(BaseAgent):
         self,
         config: Optional[Dict[str, Any]] = None,
         llm: Optional[Any] = None,
+        memory: Optional[Any] = None,
         debate_rounds: int = 1,
         **kwargs
     ):
@@ -69,6 +82,7 @@ class ManagerAgent(BaseAgent):
         """
         super().__init__(config=config, llm=llm, **kwargs)
         
+        self.memory = memory
         self.debate_rounds = debate_rounds
         self.debate_history = []
         
@@ -150,6 +164,10 @@ class ManagerAgent(BaseAgent):
                 debate_summary = self._conduct_debate(inputs, state)
             else:
                 debate_summary = None
+
+            memory_context = self._get_memory_context(ticker, inputs)
+            if memory_context:
+                debate_summary = self._merge_memory_context(debate_summary, memory_context)
             
             # 4. 构建提示词
             logger.info(f"🔍 [{self.agent_id}] 开始构建提示词...")
@@ -212,6 +230,8 @@ class ManagerAgent(BaseAgent):
                         logger.info(f"🎯 [{self.agent_id}] 市场观点: {view}")
                     if "confidence" in decision:
                         logger.info(f"📊 [{self.agent_id}] 信心度: {decision.get('confidence')}")
+
+                self._save_to_memory(ticker, decision)
             else:
                 raise ValueError("LLM not initialized")
             
@@ -294,6 +314,72 @@ class ManagerAgent(BaseAgent):
         })
 
         return debate_summary
+
+    def _build_memory_query(self, ticker: str, inputs: Dict[str, Any]) -> str:
+        query_parts = [f"股票代码: {ticker}", f"管理者类型: {self.manager_type or self.agent_id}", "历史管理决策"]
+        for key, value in list(inputs.items())[:4]:
+            if not value:
+                continue
+            content = value.get("content") if isinstance(value, dict) else str(value)
+            query_parts.append(f"{key}: {str(content)[:200]}")
+        return "\n".join(query_parts)
+
+    def _get_memory_context(self, ticker: str, inputs: Dict[str, Any]) -> str:
+        if not self.memory:
+            return ""
+
+        try:
+            query = self._build_memory_query(ticker, inputs)
+
+            if not hasattr(self.memory, "search_memories"):
+                logger.warning("记忆实例不支持 search_memories，已跳过管理者历史召回: %s", type(self.memory).__name__)
+                return ""
+
+            memories = self.memory.search_memories(
+                query=query,
+                n_results=3,
+                filter_metadata={"ticker": ticker} if ticker else None,
+            )
+            formatted = []
+            for item in memories or []:
+                content = item.get("content", "")
+                similarity = item.get("similarity", 0.0)
+                if content:
+                    formatted.append(f"[相似度: {similarity:.2f}] {content}")
+            if formatted:
+                return "【历史管理经验】\n" + "\n\n".join(formatted)
+        except Exception as exc:
+            logger.warning(f"获取管理者历史记忆失败: {exc}")
+
+        return ""
+
+    def _merge_memory_context(self, debate_summary: Optional[str], memory_context: str) -> str:
+        if debate_summary:
+            return f"{debate_summary}\n\n{memory_context}"
+        return memory_context
+
+    def _save_to_memory(self, ticker: str, decision: Any) -> None:
+        if not self.memory:
+            return
+
+        try:
+            content = _stringify_manager_decision(decision)
+
+            if not hasattr(self.memory, "add_memory"):
+                logger.warning("记忆实例不支持 add_memory，已跳过管理者记忆保存: %s", type(self.memory).__name__)
+                return
+
+            metadata = {
+                "ticker": ticker,
+                "agent_id": self.agent_id,
+                "manager_type": self.manager_type,
+                "output_field": self.output_field,
+                "memory_kind": "manager_decision",
+                "source": "manager_agent_runtime",
+            }
+            self.memory.add_memory(content=content, metadata=metadata)
+        except Exception as exc:
+            logger.warning(f"保存管理者记忆失败: {exc}")
 
     @abstractmethod
     def _build_system_prompt(self, state: Dict[str, Any] = None) -> str:

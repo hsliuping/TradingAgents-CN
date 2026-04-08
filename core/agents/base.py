@@ -6,6 +6,7 @@ v2.0 新增：标准化工具调用循环处理
 """
 
 import logging
+import re
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -1239,7 +1240,7 @@ class BaseAgent(ABC):
 
         for tool_call in tool_calls:
             tool_name = tool_call.get('name')
-            tool_args = tool_call.get('args', {})
+            tool_args = self._normalize_tool_call_args(tool_call.get('args', {}))
             tool_id = tool_call.get('id')
             tool_success = False
 
@@ -1357,6 +1358,38 @@ class BaseAgent(ABC):
             ))
 
         return tool_messages
+
+    @staticmethod
+    def _normalize_tool_call_args(tool_args: Any) -> Dict[str, Any]:
+        if not isinstance(tool_args, dict):
+            return {}
+
+        nested_kwargs = tool_args.get("kwargs")
+        if isinstance(nested_kwargs, dict):
+            normalized = {**nested_kwargs}
+            for key, value in tool_args.items():
+                if key != "kwargs":
+                    normalized[key] = value
+        else:
+            normalized = dict(tool_args)
+
+        for key in ("ticker", "symbol"):
+            if key in normalized and normalized[key]:
+                normalized[key] = BaseAgent._normalize_ticker_for_engine(str(normalized[key]))
+
+        return normalized
+
+    @staticmethod
+    def _normalize_ticker_for_engine(ticker: str) -> str:
+        if not ticker or not isinstance(ticker, str):
+            return ticker
+
+        symbol = ticker.strip().upper()
+        if re.match(r'^\d{6}\.(SZ|SH|SS|XSHE|XSHG)$', symbol):
+            return symbol.split('.')[0]
+        if re.match(r'^\d{4,5}\.HK$', symbol):
+            return symbol.split('.')[0]
+        return ticker
 
     def _get_prompt_from_template(
         self,

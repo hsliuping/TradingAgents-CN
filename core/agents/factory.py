@@ -242,6 +242,11 @@ class AgentFactory:
                 agent_name=agent_name,
                 agent_description=agent_description,
                 output_field=output_field,
+                prompt_template_type=str(doc.get("prompt_template_type") or "universal"),
+                prompt_template_name=str(doc.get("prompt_template_name") or agent_id),
+                prompt_template_id=str(((doc.get("metadata") or {}).get("template_id") or "")).strip() or None,
+                prompt_template_status=str(((doc.get("metadata") or {}).get("template_status") or "")).strip() or None,
+                version_status=str(((doc.get("metadata") or {}).get("version_status") or "")).strip() or None,
             )
 
             if memory is not None and hasattr(agent, "_memory"):

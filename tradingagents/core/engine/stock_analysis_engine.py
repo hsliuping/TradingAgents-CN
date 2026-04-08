@@ -121,6 +121,8 @@ class StockAnalysisEngine:
         logger.info("📊 [StockAnalysisEngine] 引擎初始化完成")
         if memory_enabled:
             logger.info("🧠 [StockAnalysisEngine] Memory 功能已启用")
+            if self.config and not self.config.get("memory_use_mem0_compat", True):
+                logger.warning("⚠️ [StockAnalysisEngine] 当前显式使用 legacy-only memory 路径")
 
     def _get_memory_provider(self):
         """获取或创建 Memory 提供者"""

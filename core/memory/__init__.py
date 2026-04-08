@@ -5,7 +5,7 @@ v2.0: 多后端向量记忆系统（Qdrant / ChromaDB）— 用于 Agent 历史�
 v3.0: mem0 统一记忆层 — 跨子系统的智能记忆存储与召回
 """
 
-from .memory_manager import MemoryManager, AgentMemory, VectorStoreManager
+from .memory_manager import MemoryManager, AgentMemory, Mem0AgentMemory, VectorStoreManager
 from .chromadb_config import get_optimal_chromadb_client, is_windows_11
 
 # v3.0 统一记忆层
@@ -19,6 +19,7 @@ __all__ = [
     # v2.0
     'MemoryManager',
     'AgentMemory',
+    'Mem0AgentMemory',
     'VectorStoreManager',
     'ChromaDBManager',
     'get_optimal_chromadb_client',

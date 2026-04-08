@@ -11,6 +11,7 @@
 """
 
 import logging
+from dataclasses import asdict, is_dataclass
 from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -49,6 +50,11 @@ class UniversalAgent(BaseAgent):
         agent_name: str = "通用智能体",
         agent_description: str = "由数据库配置驱动的通用智能体",
         output_field: str = "analysis_report",
+        prompt_template_type: str = "universal",
+        prompt_template_name: Optional[str] = None,
+        prompt_template_id: Optional[str] = None,
+        prompt_template_status: Optional[str] = None,
+        version_status: Optional[str] = None,
         **kwargs,
     ):
         """
@@ -68,6 +74,11 @@ class UniversalAgent(BaseAgent):
         self._agent_name = agent_name
         self._agent_description = agent_description
         self._output_field = output_field
+        self._prompt_template_type = str(prompt_template_type or "universal").strip() or "universal"
+        self._prompt_template_name = str(prompt_template_name or agent_id).strip() or agent_id
+        self._prompt_template_id = str(prompt_template_id or "").strip() or None
+        self._prompt_template_status = str(prompt_template_status or "").strip() or None
+        self._version_status = str(version_status or "").strip().lower() or None
 
         super().__init__(config=config, llm=llm, tool_ids=tool_ids)
 
@@ -75,6 +86,53 @@ class UniversalAgent(BaseAgent):
     def agent_id(self) -> str:
         """返回动态 Agent ID（来自数据库配置）"""
         return getattr(self, "_dynamic_agent_id", "universal_agent")
+
+    def _resolve_template_context(self, state: Dict[str, Any]) -> Any:
+        context = state.get("context")
+        if isinstance(context, dict):
+            resolved_context = dict(context)
+        elif context is not None and is_dataclass(context):
+            resolved_context = asdict(context)
+        elif context is not None:
+            resolved_context = {
+                "user_id": getattr(context, "user_id", None),
+                "preference_id": getattr(context, "preference_id", None),
+                "session_id": getattr(context, "session_id", None),
+                "request_id": getattr(context, "request_id", None),
+                "is_debug_mode": getattr(context, "is_debug_mode", False),
+                "debug_template_id": getattr(context, "debug_template_id", None),
+                "workflow_id": getattr(context, "workflow_id", None),
+                "node_id": getattr(context, "node_id", None),
+                "extra": getattr(context, "extra", None),
+            }
+        else:
+            resolved_context = {}
+
+        state_version_status = str(
+            state.get("version_status")
+            or resolved_context.get("version_status")
+            or self._version_status
+            or ""
+        ).strip().lower()
+        workflow_id = str(state.get("workflow_id") or resolved_context.get("workflow_id") or "").strip()
+        should_force_debug = bool(
+            self._prompt_template_id and (
+                state_version_status in {"testing", "draft"}
+                or workflow_id.startswith("agent_workshop_debug_")
+            )
+        )
+        if should_force_debug:
+            resolved_context["is_debug_mode"] = True
+            resolved_context["debug_template_id"] = resolved_context.get("debug_template_id") or self._prompt_template_id
+            resolved_context["version_status"] = state_version_status or self._version_status
+            if workflow_id and not resolved_context.get("workflow_id"):
+                resolved_context["workflow_id"] = workflow_id
+
+        cleaned_context = {key: value for key, value in resolved_context.items() if value is not None}
+        state["context"] = cleaned_context
+        if cleaned_context.get("version_status") and not state.get("version_status"):
+            state["version_status"] = cleaned_context.get("version_status")
+        return cleaned_context
 
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -88,13 +146,13 @@ class UniversalAgent(BaseAgent):
         logger.info(f"[UniversalAgent:{self.agent_id}] 🚀 开始执行")
 
         try:
-            context = state.get("context")
+            context = self._resolve_template_context(state)
             prompt_variables = self._build_prompt_variables(state)
 
             # 1. 系统提示词（从模板系统，三层优先级）
             system_prompt = self._get_prompt_from_template(
-                agent_type="universal",
-                agent_name=self.agent_id,
+                agent_type=self._prompt_template_type,
+                agent_name=self._prompt_template_name,
                 variables=prompt_variables,
                 state=state,
                 context=context,
@@ -107,8 +165,8 @@ class UniversalAgent(BaseAgent):
 
             # 2. 用户提示词（从模板系统，三层优先级）
             user_prompt = self._get_prompt_from_template(
-                agent_type="universal",
-                agent_name=self.agent_id,
+                agent_type=self._prompt_template_type,
+                agent_name=self._prompt_template_name,
                 variables=prompt_variables,
                 state=state,
                 context=context,
@@ -150,7 +208,7 @@ class UniversalAgent(BaseAgent):
                     "tool_trace": list(self._last_tool_debug),
                 }
 
-            is_debug_mode = bool(getattr(context, 'is_debug_mode', False)) if context else False
+            is_debug_mode = bool(context.get('is_debug_mode', False)) if isinstance(context, dict) else bool(getattr(context, 'is_debug_mode', False)) if context else False
             if is_debug_mode:
                 logger.info(f"[UniversalAgent:{self.agent_id}] 调试模式 Prompt - system:\n{system_prompt}")
                 logger.info(f"[UniversalAgent:{self.agent_id}] 调试模式 Prompt - user:\n{user_prompt}")

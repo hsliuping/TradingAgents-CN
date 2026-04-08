@@ -6,6 +6,7 @@ v2.0 新增：基于配置的交易员Agent架构
 """
 
 import logging
+import json
 from abc import abstractmethod
 from typing import Any, Dict, List, Optional
 
@@ -15,6 +16,17 @@ from .base import BaseAgent
 from .config import AgentMetadata, AgentCategory
 
 logger = logging.getLogger(__name__)
+
+
+def _stringify_trading_plan(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        except TypeError:
+            return str(value)
+    return str(value)
 
 
 class TraderAgent(BaseAgent):
@@ -207,8 +219,26 @@ class TraderAgent(BaseAgent):
             return None
 
         try:
-            # 这里需要根据实际的记忆系统实现
-            # 暂时返回None
+            query = f"股票代码: {ticker}\n交易分析计划\n历史交易经验"
+
+            if not hasattr(self.memory, 'search_memories'):
+                logger.warning("记忆实例不支持 search_memories，已跳过历史交易召回: %s", type(self.memory).__name__)
+                return None
+
+            memories = self.memory.search_memories(
+                query=query,
+                n_results=3,
+                filter_metadata={"ticker": ticker} if ticker else None,
+            )
+            return [
+                {
+                    "content": item.get("content", ""),
+                    "metadata": item.get("metadata", {}),
+                    "similarity": item.get("similarity", 0.0),
+                }
+                for item in (memories or [])
+            ]
+
             return None
         except Exception as e:
             logger.warning(f"获取历史交易记录失败: {e}")
@@ -226,8 +256,20 @@ class TraderAgent(BaseAgent):
             return
 
         try:
-            # 这里需要根据实际的记忆系统实现
-            pass
+            content = _stringify_trading_plan(trading_plan)
+
+            if not hasattr(self.memory, 'add_memory'):
+                logger.warning("记忆实例不支持 add_memory，已跳过交易计划保存: %s", type(self.memory).__name__)
+                return
+
+            metadata = {
+                "ticker": ticker,
+                "agent_id": self.agent_id,
+                "output_field": self.output_field,
+                "memory_kind": "trader_plan",
+                "source": "trader_agent_runtime",
+            }
+            self.memory.add_memory(content=content, metadata=metadata)
         except Exception as e:
             logger.warning(f"保存到记忆系统失败: {e}")
 

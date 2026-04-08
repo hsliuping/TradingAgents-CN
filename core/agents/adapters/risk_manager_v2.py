@@ -148,19 +148,21 @@ class RiskManagerV2(ManagerAgent):
             fallback_prompt=None,
             prompt_type="system"  # ✅ 关键：指定获取系统提示词（包含output_format）
         )
-        
-        logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
-        logger.info(f"📝 系统提示词前500字符:\n{prompt[:500]}...")
-        
-        # 检查是否包含输出格式要求
-        if "output_format" in prompt.lower() or "JSON格式" in prompt or "json" in prompt.lower():
-            logger.info("✅ 系统提示词包含【输出格式要求】")
-        else:
-            logger.warning("⚠️ 系统提示词可能不包含【输出格式要求】（可能使用旧版提示词）")
-        
+
         if prompt:
+            logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
+            logger.info(f"📝 系统提示词前500字符:\n{prompt[:500]}...")
+
+            # 检查是否包含输出格式要求
+            if "output_format" in prompt.lower() or "JSON格式" in prompt or "json" in prompt.lower():
+                logger.info("✅ 系统提示词包含【输出格式要求】")
+            else:
+                logger.warning("⚠️ 系统提示词可能不包含【输出格式要求】（可能使用旧版提示词）")
+
             logger.debug(f"✅ 从模板系统获取风险管理者系统提示词")
             return prompt
+
+        logger.warning("⚠️ 从模板系统获取系统提示词失败，使用默认提示词")
         
         # 默认提示词（合规版本）
         return """你是一位中性的风险管理者，需要综合各方风险观点做出风险评估，并生成综合分析。

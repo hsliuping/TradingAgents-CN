@@ -6,11 +6,21 @@
 
 import logging
 import threading
-from typing import Dict, List, Optional, Callable, Any
+from typing import Dict, List, Optional, Callable, Any, Tuple, Type
 
 from .config import ToolMetadata, ToolCategory, BUILTIN_TOOLS
 
 logger = logging.getLogger(__name__)
+
+
+_PARAMETER_TYPE_MAP: Dict[str, Tuple[type, Any]] = {
+    "string": (str, ""),
+    "number": (float, 0.0),
+    "integer": (int, 0),
+    "boolean": (bool, False),
+    "array": (list, []),
+    "object": (dict, {}),
+}
 
 
 class ToolRegistry:
@@ -189,6 +199,29 @@ class ToolRegistry:
         """获取工具的函数实现"""
         return self._functions.get(tool_id)
 
+    def _build_langchain_args_schema(self, metadata: ToolMetadata) -> Optional[Type]:
+        """基于工具元数据构建 LangChain/Pydantic 参数模型。"""
+        if not metadata.parameters:
+            return None
+
+        from pydantic import Field, create_model
+
+        field_definitions = {}
+        for parameter in metadata.parameters:
+            python_type, fallback_default = _PARAMETER_TYPE_MAP.get(parameter.type, (Any, None))
+            if parameter.required:
+                default_value = ...
+            else:
+                default_value = parameter.default if parameter.default is not None else fallback_default
+
+            field_definitions[parameter.name] = (
+                python_type,
+                Field(default_value, description=parameter.description),
+            )
+
+        model_name = f"{metadata.id.title().replace('_', '')}Args"
+        return create_model(model_name, **field_definitions)
+
     def get_langchain_tool(self, tool_id: str):
         """
         获取 LangChain 格式的工具
@@ -223,12 +256,17 @@ class ToolRegistry:
 
         metadata = self._tools[tool_id]
 
+        args_schema = None
+        if metadata.source == "generated" and metadata.parameters:
+            args_schema = self._build_langchain_args_schema(metadata)
+
         # 使用 StructuredTool.from_function 来创建工具
-        # 这样可以显式指定 name 和 description
+        # 这样可以显式指定 name、description 和 args_schema
         lc_tool = StructuredTool.from_function(
             func=func,
             name=tool_id,
-            description=metadata.description or func.__doc__ or "No description available"
+            description=metadata.description or func.__doc__ or "No description available",
+            args_schema=args_schema,
         )
 
         return lc_tool

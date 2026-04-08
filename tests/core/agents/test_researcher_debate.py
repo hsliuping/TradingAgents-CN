@@ -271,9 +271,9 @@ class TestBackwardCompatibility:
 
         # Mock Memory
         agent.memory = Mock()
-        agent.memory.get_memories = Mock(return_value=[
-            {"recommendation": "历史建议1"},
-            {"recommendation": "历史建议2"},
+        agent.memory.search_memories = Mock(return_value=[
+            {"content": "历史建议1", "similarity": 0.91},
+            {"content": "历史建议2", "similarity": 0.89},
         ])
 
         reports = {"market_report": "当前市场报告"}
