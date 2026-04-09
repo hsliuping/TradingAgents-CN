@@ -107,6 +107,10 @@ const initApp = async () => {
     const apiConnected = await appStore.checkApiConnection()
 
     if (apiConnected) {
+      await appStore.fetchApiVersion()
+    }
+
+    if (apiConnected) {
       console.log('✅ API连接正常，检查认证状态...')
       // 检查本地存储的认证信息（设置较短的超时时间）
       const checkPromise = authStore.checkAuthStatus()
