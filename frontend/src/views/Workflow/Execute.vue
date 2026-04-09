@@ -110,44 +110,14 @@
           </template>
           
           <div v-if="executionResult" class="result-content">
-            <!-- 最终分析结果 -->
-            <div class="decision-box" v-if="hasContent(getReportField('final_trade_decision'))">
-              <h4>最终分析结果</h4>
-              <div class="decision-content" v-html="formatReport(extractContent(getReportField('final_trade_decision')).substring(0, 500))" />
+            <!-- 研究摘要 -->
+            <div class="decision-box" v-if="hasContent(getReportField('market_report')) || hasContent(getReportField('fundamentals_report')) || hasContent(getReportField('news_report'))">
+              <h4>研究摘要</h4>
+              <div class="decision-content" v-html="formatReport(extractContent(getReportField('market_report') || getReportField('fundamentals_report') || getReportField('news_report')).substring(0, 500))" />
             </div>
 
             <!-- 详细报告 -->
             <el-collapse v-model="activeCollapse">
-              <!-- 最终决策 -->
-              <el-collapse-item title="最终决策详情" name="final" v-if="hasContent(getReportField('final_trade_decision'))">
-                <div class="report-content" v-html="formatReport(getReportField('final_trade_decision'))" />
-              </el-collapse-item>
-
-              <!-- 风险评估 -->
-              <el-collapse-item title="风险评估" name="risk" v-if="hasContent(getReportField('risk_assessment'))">
-                <div class="report-content" v-html="formatReport(getReportField('risk_assessment'))" />
-              </el-collapse-item>
-
-              <!-- 交易员计划 -->
-              <el-collapse-item title="交易员计划" name="trader" v-if="hasContent(getReportField('trader_investment_plan'))">
-                <div class="report-content" v-html="formatReport(getReportField('trader_investment_plan'))" />
-              </el-collapse-item>
-
-              <!-- 投资计划 -->
-              <el-collapse-item title="投资计划" name="investment" v-if="hasContent(getReportField('investment_plan'))">
-                <div class="report-content" v-html="formatReport(getReportField('investment_plan'))" />
-              </el-collapse-item>
-
-              <!-- 看涨观点 -->
-              <el-collapse-item title="看涨研究" name="bull" v-if="hasContent(getReportField('bull_report')) || hasContent(getReportField('bull_opinion'))">
-                <div class="report-content" v-html="formatReport(getReportField('bull_report') || getReportField('bull_opinion'))" />
-              </el-collapse-item>
-
-              <!-- 看跌观点 -->
-              <el-collapse-item title="看跌研究" name="bear" v-if="hasContent(getReportField('bear_report')) || hasContent(getReportField('bear_opinion'))">
-                <div class="report-content" v-html="formatReport(getReportField('bear_report') || getReportField('bear_opinion'))" />
-              </el-collapse-item>
-
               <!-- 分析师报告 -->
               <el-collapse-item title="大盘分析" name="index" v-if="hasContent(getReportField('index_report'))">
                 <div class="report-content" v-html="formatReport(getReportField('index_report'))" />
@@ -166,17 +136,6 @@
               </el-collapse-item>
               <el-collapse-item title="情绪分析" name="sentiment" v-if="hasContent(getReportField('sentiment_report'))">
                 <div class="report-content" v-html="formatReport(getReportField('sentiment_report'))" />
-              </el-collapse-item>
-
-              <!-- 风险辩论观点 -->
-              <el-collapse-item title="激进风险观点" name="risky" v-if="hasContent(getReportField('risky_opinion'))">
-                <div class="report-content" v-html="formatReport(getReportField('risky_opinion'))" />
-              </el-collapse-item>
-              <el-collapse-item title="保守风险观点" name="safe" v-if="hasContent(getReportField('safe_opinion'))">
-                <div class="report-content" v-html="formatReport(getReportField('safe_opinion'))" />
-              </el-collapse-item>
-              <el-collapse-item title="中性风险观点" name="neutral" v-if="hasContent(getReportField('neutral_opinion'))">
-                <div class="report-content" v-html="formatReport(getReportField('neutral_opinion'))" />
               </el-collapse-item>
 
               <!-- 原始数据 -->

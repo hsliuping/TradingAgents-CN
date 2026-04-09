@@ -219,7 +219,7 @@
           <div v-else-if="analysisContext">
             <div style="font-size:12px;color:#666">
               <span>标的：{{ analysisContext.stock_symbol || '-' }}</span>
-              <span style="margin-left:8px">模型建议：{{ analysisContext.recommendation || '-' }}</span>
+              <span style="margin-left:8px">研究摘要：{{ analysisContext.summary || analysisContext.recommendation || '-' }}</span>
             </div>
           </div>
         </el-alert>

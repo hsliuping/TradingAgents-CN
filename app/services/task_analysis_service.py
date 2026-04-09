@@ -20,6 +20,7 @@ from app.models.user import PyObjectId
 from app.services.unified_analysis_engine import UnifiedAnalysisEngine
 from app.services.workflow_registry import AnalysisWorkflowRegistry
 from app.core.database import get_mongo_db
+from app.utils.compliance import sanitize_analysis_payload
 from app.utils.timezone import now_tz
 
 logger = logging.getLogger(__name__)
@@ -1394,10 +1395,10 @@ class TaskAnalysisService:
         }
 
         # 🔥 调试日志：打印 decision 对象的完整内容
-        self.logger.info(f"✅ 格式化结果完成: {len(reports)} 个报告")
-        self.logger.info(f"🔍 [TaskAnalysisService] decision 对象完整内容: {formatted_decision}")
-        self.logger.info(f"🔍 [TaskAnalysisService] decision.price_analysis_range = {formatted_decision.get('price_analysis_range')}")
-        self.logger.info(f"🔍 [TaskAnalysisService] decision.risk_score = {formatted_decision.get('risk_score')}")
+        formatted_result = sanitize_analysis_payload(formatted_result)
+
+        self.logger.info(f"✅ 格式化结果完成: {len(formatted_result.get('reports', {}))} 个报告")
+        self.logger.info(f"🔍 [TaskAnalysisService] 合规化后 decision: {formatted_result.get('decision')}")
         return formatted_result
 
     def _format_decision_dict(self, decision: Dict[str, Any]) -> Dict[str, Any]:

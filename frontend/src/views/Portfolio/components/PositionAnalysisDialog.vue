@@ -184,48 +184,20 @@
 
       <el-divider content-position="left">分析结果</el-divider>
 
-      <!-- 分析观点 -->
+      <!-- 研究观察 -->
       <div class="action-section">
-        <div class="action-badge" :class="actionClass">
-          {{ actionText }}
+        <div class="action-badge neutral">
+          研究观察
         </div>
         <div class="confidence">
-          置信度: <el-progress :percentage="analysisResult.confidence" :stroke-width="8" style="width: 120px; display: inline-flex;" />
+          研究置信度: <el-progress :percentage="analysisResult.confidence" :stroke-width="8" style="width: 120px; display: inline-flex;" />
         </div>
       </div>
 
-      <!-- 分析理由 -->
+      <!-- 研究观察 -->
       <div class="reason-section">
-        <h4>分析理由</h4>
+        <h4>研究观察</h4>
         <div class="markdown-content" v-html="renderMarkdown(analysisResult.action_reason || '暂无')"></div>
-      </div>
-
-      <!-- 价格参考区间 -->
-      <div class="price-targets" v-if="analysisResult.price_targets">
-        <h4>价格参考区间</h4>
-        <el-row :gutter="20">
-          <el-col :span="8">
-            <div class="target-card loss-bg">
-              <div class="label">风险控制参考价</div>
-              <div class="value">¥{{ analysisResult.price_targets.stop_loss_price?.toFixed(2) || '-' }}</div>
-              <div class="pct">{{ analysisResult.price_targets.stop_loss_pct?.toFixed(1) || '-' }}%</div>
-            </div>
-          </el-col>
-          <el-col :span="8">
-            <div class="target-card neutral-bg">
-              <div class="label">成本价</div>
-              <div class="value">¥{{ analysisResult.price_targets.breakeven_price?.toFixed(2) || '-' }}</div>
-              <div class="pct">0%</div>
-            </div>
-          </el-col>
-          <el-col :span="8">
-            <div class="target-card profit-bg">
-              <div class="label">收益预期参考价</div>
-              <div class="value">¥{{ analysisResult.price_targets.take_profit_price?.toFixed(2) || '-' }}</div>
-              <div class="pct">+{{ analysisResult.price_targets.take_profit_pct?.toFixed(1) || '-' }}%</div>
-            </div>
-          </el-col>
-        </el-row>
       </div>
 
       <!-- 风险与机会评估 -->

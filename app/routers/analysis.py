@@ -18,6 +18,7 @@ from app.services.analysis_service import get_analysis_service
 from app.services.simple_analysis_service import get_simple_analysis_service
 from app.services.unified_analysis_service import get_unified_analysis_service
 from app.services.websocket_manager import get_websocket_manager
+from app.utils.compliance import sanitize_analysis_payload
 from app.utils.error_formatter import ErrorFormatter
 from app.models.analysis import (
     SingleAnalysisRequest, BatchAnalysisRequest, AnalysisParameters,
@@ -47,87 +48,7 @@ def normalize_result_data(result_data: Dict[str, Any]) -> Dict[str, Any]:
     3. decision 字段：支持新旧字段名
     4. action 字段：将旧术语（买入/卖出/持有）映射为合规术语（看涨/看跌/中性）
     """
-    if not result_data:
-        return result_data
-
-    # 🔥 术语映射：将旧术语转换为合规术语
-    ACTION_TRANSLATION = {
-        'BUY': '看涨', 'SELL': '看跌', 'HOLD': '中性',
-        'buy': '看涨', 'sell': '看跌', 'hold': '中性',
-        '买入': '看涨', '卖出': '看跌', '持有': '中性',  # 兼容旧数据
-        '看涨': '看涨', '看跌': '看跌', '中性': '中性',  # 保持新术语不变
-    }
-
-    # 1. 处理 decision 字段（支持新旧字段名）
-    decision = result_data.get('decision', {})
-    if isinstance(decision, dict):
-        # 支持新旧字段名
-        raw_action = decision.get('analysis_view') or decision.get('action')
-        # 🔥 映射为合规术语
-        action = ACTION_TRANSLATION.get(raw_action, raw_action) if raw_action else None
-
-        # 🔥 更新 decision 对象中的 action 字段为合规术语
-        if action and raw_action != action:
-            decision['action'] = action
-            # 如果有 analysis_view 字段，也更新它
-            if 'analysis_view' in decision:
-                decision['analysis_view'] = action
-
-        # 🔥 优先使用 price_analysis_range（价格区间），不使用 target_price（单个值）
-        price_range = decision.get('price_analysis_range')
-        # 如果没有 price_analysis_range，才使用 target_price（但这是单个值，不应该用于价格区间显示）
-        if not price_range:
-            target_price = decision.get('target_price')
-            if target_price:
-                logger.warning(f"⚠️ [normalize_result_data] decision 中没有 price_analysis_range，只有 target_price: {target_price}，前端将显示 '-'")
-        
-        confidence = decision.get('confidence')
-        # 🔥 优先从 decision 中获取 risk_score（风险经理的评估结果）
-        risk_score = decision.get('risk_score')
-        risk_level = decision.get('risk_level')
-        reasoning = decision.get('reasoning', '')
-        
-        # 🔥 调试日志：记录 decision 字段
-        logger.info(f"🔍 [normalize_result_data] decision 字段检查: price_analysis_range={price_range}, risk_score={risk_score}, target_price={decision.get('target_price')}")
-
-        # 2. 格式化 recommendation（如果为空或包含旧术语）
-        recommendation = result_data.get('recommendation', '')
-        if not recommendation or '投资建议' in recommendation or '目标价格' in recommendation or '买入' in recommendation or '卖出' in recommendation:
-            # 重新生成合规的 recommendation
-            recommendation = f"分析观点：{action}；" if action else ""
-            if reasoning and len(reasoning) < 100:
-                recommendation += f"分析依据：{reasoning}"
-            elif reasoning and reasoning != "暂无分析推理":
-                short_reasoning = reasoning[:50] + "..." if len(reasoning) > 50 else reasoning
-                recommendation += f"分析依据：{short_reasoning}"
-            result_data['recommendation'] = recommendation
-
-        # 3. 格式化 key_points（如果包含 JSON 字段名）
-        key_points = result_data.get('key_points', [])
-        if key_points and isinstance(key_points, list):
-            # 检查是否包含 JSON 字段名（如 "analysis_view": "中性"）
-            if any('"' in str(kp) and ':' in str(kp) for kp in key_points):
-                # 重新生成 key_points
-                new_key_points = []
-                if action:
-                    new_key_points.append(f"分析观点: {action}")
-                # 🔥 只显示价格区间，不显示单个值
-                if price_range:
-                    if isinstance(price_range, (list, tuple)) and len(price_range) == 2:
-                        new_key_points.append(f"价格分析区间: {price_range[0]}-{price_range[1]}元")
-                    else:
-                        logger.warning(f"⚠️ [normalize_result_data] price_range 不是有效的区间格式: {price_range}")
-                # 不添加 target_price 到 key_points（因为这是单个值，不符合合规要求）
-                if confidence is not None:
-                    new_key_points.append(f"置信度: {confidence * 100:.1f}%" if confidence <= 1 else f"置信度: {confidence}%")
-                if risk_level:
-                    new_key_points.append(f"风险等级: {risk_level}")
-                if risk_score is not None:
-                    new_key_points.append(f"风险评分: {risk_score * 100:.1f}%" if risk_score <= 1 else f"风险评分: {risk_score}%")
-
-                result_data['key_points'] = new_key_points[:5]
-
-    return result_data
+    return sanitize_analysis_payload(result_data)
 
 
 def get_market_type_from_symbol(symbol: str) -> str:
@@ -1275,7 +1196,7 @@ async def get_task_result(
             "stock_code": safe_string(result_data.get("stock_code"), "UNKNOWN"),
             "analysis_date": safe_string(result_data.get("analysis_date"), "2025-08-20"),
             "summary": safe_string(result_data.get("summary"), "分析摘要暂无"),
-            "recommendation": safe_string(result_data.get("recommendation"), "投资建议暂无"),
+            "recommendation": safe_string(result_data.get("recommendation"), "研究摘要暂无"),
             "confidence_score": safe_number(result_data.get("confidence_score"), 0.0),
             "risk_level": safe_string(result_data.get("risk_level"), "中等"),
             "key_points": safe_list(result_data.get("key_points")),

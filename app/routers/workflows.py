@@ -12,6 +12,11 @@ import logging
 
 from app.core.response import ok, fail
 from app.routers.auth_db import get_current_user
+from app.utils.compliance import (
+    GENERIC_RESEARCH_RECOMMENDATION,
+    build_research_summary,
+    filter_analysis_reports,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -561,7 +566,7 @@ def _extract_recommendation_and_confidence(
     从工作流结果中提取 recommendation、confidence_score 和 risk_level
 
     提取逻辑：
-    1. recommendation: 从 final_trade_decision 或 trader_investment_plan 中提取投资建议
+    1. recommendation: 从安全报告中提取研究摘要
     2. confidence_score: 从文本中提取置信度，或根据分析一致性计算
     3. risk_level: 从风险管理决策中提取
 
@@ -580,54 +585,14 @@ def _extract_recommendation_and_confidence(
                     return x
         return ""
 
-    recommendation = ""
+    recommendation = GENERIC_RESEARCH_RECOMMENDATION
     confidence_score = 0.0
     risk_level = "中等"
 
-    # 1. 提取 recommendation（投资建议）
-    final_decision = _text(workflow_result.get("final_trade_decision", ""))
-    trader_plan = _text(workflow_result.get("trader_investment_plan", ""))
-
-    # 尝试从最终决策中提取操作建议
-    if final_decision:
-        # 提取操作类型
-        action = "持有"
-        action_patterns = [
-            (r'(强烈)?买入|建议买入|看多', '买入'),
-            (r'(强烈)?卖出|建议卖出|看空|减持', '卖出'),
-            (r'持有|观望|等待', '持有'),
-            (r'BUY|STRONG_BUY', '买入'),
-            (r'SELL|STRONG_SELL', '卖出'),
-            (r'HOLD', '持有'),
-        ]
-        for pattern, act in action_patterns:
-            if re.search(pattern, final_decision, re.IGNORECASE):
-                action = act
-                break
-
-        # 提取目标价格
-        target_price = None
-        price_match = re.search(r'目标价[格]?[：:]\s*([0-9.]+)', final_decision)
-        if price_match:
-            try:
-                target_price = float(price_match.group(1))
-            except ValueError:
-                pass
-
-        # 提取决策依据（取前200字符）
-        reasoning = final_decision[:200].replace('#', '').replace('*', '').strip()
-        if len(final_decision) > 200:
-            reasoning += "..."
-
-        # 生成 recommendation
-        recommendation = f"投资建议：{action}。"
-        if target_price:
-            recommendation += f"目标价格：{target_price}元。"
-        recommendation += f"决策依据：{reasoning}"
-
-    # 如果没有从 final_decision 提取到，尝试从 trader_plan
-    if not recommendation and trader_plan:
-        recommendation = trader_plan[:500] if len(trader_plan) > 500 else trader_plan
+    safe_reports = filter_analysis_reports(reports or {})
+    research_summary = build_research_summary(safe_reports, workflow_result.get("summary", ""))
+    if research_summary:
+        recommendation = research_summary[:200]
 
     # 2. 提取 confidence_score（置信度）
     # 尝试从文本中提取置信度数值
@@ -638,7 +603,7 @@ def _extract_recommendation_and_confidence(
         r'把握[：:]\s*([0-9.]+)%?',
     ]
     for pattern in confidence_patterns:
-        match = re.search(pattern, final_decision, re.IGNORECASE)
+        match = re.search(pattern, research_summary, re.IGNORECASE)
         if match:
             try:
                 conf_val = float(match.group(1))
@@ -653,7 +618,7 @@ def _extract_recommendation_and_confidence(
     # 如果没有提取到，根据分析一致性估算置信度
     if confidence_score == 0.0:
         # 检查有多少个报告达成一致
-        report_count = len(reports)
+        report_count = len(safe_reports)
         if report_count >= 10:
             confidence_score = 0.85  # 完整分析
         elif report_count >= 7:

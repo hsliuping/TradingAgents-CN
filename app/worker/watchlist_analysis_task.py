@@ -15,6 +15,7 @@ from app.core.database import get_mongo_db
 from app.services.notifications_service import NotificationsService
 from app.models.notification import NotificationCreate
 from app.models.analysis import SingleAnalysisRequest
+from app.utils.compliance import GENERIC_RESEARCH_RECOMMENDATION, build_research_summary
 
 logger = logging.getLogger("app.worker.watchlist_analysis")
 
@@ -40,7 +41,7 @@ def _build_scheduled_email_attachments(results: List[Dict[str, Any]], analysis_t
         stock_code = item.get("stock_code") or item.get("stock_symbol") or "unknown"
         stock_name = item.get("stock_name") or stock_code
         success = item.get("success", False)
-        recommendation = item.get("recommendation") or "未知"
+        research_overview = build_research_summary({}, item.get("summary") or "")
         confidence_score = item.get("confidence_score") or 0
         risk_level = item.get("risk_level") or "中等"
         summary = (item.get("summary") or "").strip()
@@ -49,7 +50,7 @@ def _build_scheduled_email_attachments(results: List[Dict[str, Any]], analysis_t
         markdown_lines.append(f"## {stock_code} {stock_name}")
         markdown_lines.append("")
         markdown_lines.append(f"- Status: {'success' if success else 'failed'}")
-        markdown_lines.append(f"- Recommendation: {recommendation}")
+        markdown_lines.append(f"- Research Overview: {research_overview}")
         markdown_lines.append(f"- Confidence: {confidence_score}")
         markdown_lines.append(f"- Risk Level: {risk_level}")
         if summary:
@@ -64,7 +65,8 @@ def _build_scheduled_email_attachments(results: List[Dict[str, Any]], analysis_t
             "stock_code": stock_code,
             "stock_name": stock_name,
             "success": success,
-            "recommendation": recommendation,
+            "recommendation": GENERIC_RESEARCH_RECOMMENDATION,
+            "analysis_overview": research_overview,
             "confidence_score": confidence_score,
             "risk_level": risk_level,
             "summary": summary,
@@ -92,7 +94,7 @@ def _format_completed_task_result(task_id: str, task_doc: Dict[str, Any]) -> Dic
         "stock_code": stock_code,
         "stock_name": result.get("stock_name") or stock_code,
         "summary": result.get("summary", ""),
-        "recommendation": result.get("recommendation", ""),
+        "recommendation": GENERIC_RESEARCH_RECOMMENDATION,
         "confidence_score": result.get("confidence_score", 0),
         "risk_level": result.get("risk_level", "中等"),
         "key_points": result.get("key_points", []),
@@ -465,9 +467,9 @@ async def send_completion_notification(
         email_service = get_email_service()
 
         # 统计推荐结果
-        buy_count = sum(1 for r in results if r.get("recommendation") == "买入")
-        hold_count = sum(1 for r in results if r.get("recommendation") == "持有")
-        sell_count = sum(1 for r in results if r.get("recommendation") == "卖出")
+        buy_count = 0
+        hold_count = 0
+        sell_count = 0
 
         attachments = _build_scheduled_email_attachments(results, analysis_time)
 

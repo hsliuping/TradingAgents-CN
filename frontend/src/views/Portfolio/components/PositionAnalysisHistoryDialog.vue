@@ -45,10 +45,10 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="分析观点" width="100" align="center">
+      <el-table-column label="研究观察" width="100" align="center">
         <template #default="{ row }">
-          <el-tag v-if="row.action" :type="getActionType(row.action)" size="small">
-            {{ getActionText(row.action) }}
+          <el-tag v-if="row.action" type="info" size="small">
+            研究观察
           </el-tag>
           <span v-else>-</span>
         </template>

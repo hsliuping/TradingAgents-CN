@@ -42,6 +42,7 @@ from app.models.portfolio import (
     PositionChangeType, PositionChange, PositionChangeResponse,
     PositionOperationType, PositionOperationRequest
 )
+from app.utils.compliance import sanitize_position_analysis_payload
 from app.utils.timezone import now_tz
 
 logger = logging.getLogger("app.services.portfolio_service")
@@ -83,6 +84,19 @@ class PortfolioService:
         self.accounts_collection = "real_accounts"
         self.transactions_collection = "capital_transactions"
         self.position_changes_collection = "position_changes"
+
+    def _sanitize_position_analysis_result(self, result: PositionAnalysisResult) -> PositionAnalysisResult:
+        """统一将持仓分析结果转换为研究观察模式。"""
+        if result is None:
+            return PositionAnalysisResult()
+
+        raw_data = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+        sanitized_data = sanitize_position_analysis_payload(raw_data)
+        return PositionAnalysisResult(**sanitized_data)
+
+    def _sanitize_position_analysis_dict(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """统一清洗历史记录和接口返回中的持仓分析字段。"""
+        return sanitize_position_analysis_payload(data)
 
     # ==================== 资金账户管理 ====================
 
@@ -2968,7 +2982,7 @@ class PortfolioService:
     def _format_position_analysis_report(self, report: Dict) -> Dict[str, Any]:
         """格式化分析报告为响应格式"""
         snapshot = report.get("position_snapshot") or {}
-        ai_analysis = report.get("ai_analysis") or {}
+        ai_analysis = self._sanitize_position_analysis_dict(report.get("ai_analysis") or {})
         price_targets = ai_analysis.get("price_targets") or {}
         
         # 处理action_reason：如果是JSON格式，转换为Markdown
@@ -3865,10 +3879,10 @@ class PortfolioService:
 
             if not base_url:
                 logger.error("❌ [持仓AI分析] API地址未配置")
-                return PositionAnalysisResult(
+                return self._sanitize_position_analysis_result(PositionAnalysisResult(
                     action=PositionAction.HOLD,
                     action_reason="AI模型未正确配置，请在设置中配置深度分析模型的API地址"
-                )
+                ))
 
             # 使用统一的 LLM 适配器
             logger.info(f"🔧 [持仓AI分析v2] 准备创建 LLM: provider={provider}, model={model_name}, temperature=0.3")
@@ -3898,10 +3912,10 @@ class PortfolioService:
 
             action_reason = f"AI分析暂时不可用：{ErrorFormatter.format_user_message(error_msg, include_suggestion=False)}"
 
-            return PositionAnalysisResult(
+            return self._sanitize_position_analysis_result(PositionAnalysisResult(
                 action=PositionAction.HOLD,
                 action_reason=action_reason
-            )
+            ))
 
     async def _call_position_ai_analysis(
         self,
@@ -3937,10 +3951,10 @@ class PortfolioService:
             logger.error(f"单股AI分析失败: {e}", exc_info=True)
             from app.utils.error_formatter import ErrorFormatter
 
-            return PositionAnalysisResult(
+            return self._sanitize_position_analysis_result(PositionAnalysisResult(
                 action=PositionAction.HOLD,
                 action_reason=f"AI分析暂时不可用：{ErrorFormatter.format_user_message(str(e), include_suggestion=False)}"
-            )
+            ))
 
     def _build_position_analysis_prompt(
         self,
@@ -3950,7 +3964,7 @@ class PortfolioService:
         """构建单股持仓分析提示词"""
         pnl_status = "盈利" if (snapshot.unrealized_pnl or 0) >= 0 else "亏损"
 
-        prompt = f"""# 单股持仓分析任务
+        prompt = f"""# 单股持仓研究观察任务
 
 ## 持仓信息
 - 股票代码: {snapshot.code}
@@ -3968,18 +3982,18 @@ class PortfolioService:
 - 是否考虑加仓: {'是' if params.include_add_position else '否'}
 
 ## 分析要求
+请仅输出研究观察，不得提供买卖、加减仓、清仓、止盈止损、目标价或仓位比例等执行性建议。
+
 请从以下维度分析该持仓，用中文回答：
 
-1. **操作建议** (必须是以下之一: 加仓/减仓/持有/清仓)
-2. **建议理由** (100字以内)
-3. **置信度** (0-100分)
-4. **止损价建议** (具体价格)
-5. **止盈价建议** (具体价格)
-6. **风险评估** (300-500字，需详细说明主要风险点、风险等级、风险影响等)
-7. **机会评估** (300-500字，需详细说明潜在机会、催化剂、收益空间等)
-8. **详细分析** (200字以内的完整分析)
+1. **持仓现状观察** (100字以内，描述当前持仓面临的主要情况)
+2. **研究置信度** (0-100分，不对应交易动作)
+3. **风险评估** (300-500字，说明主要风险点、触发条件、影响路径)
+4. **机会评估** (300-500字，说明潜在积极因素、经营改善点、催化事件)
+5. **后续跟踪要点** (100字以内)
+6. **详细分析** (200字以内的完整研究摘要)
 
-请直接给出分析结果。"""
+请直接给出研究观察结果。"""
 
         return prompt
 
@@ -3998,29 +4012,7 @@ class PortfolioService:
         # 先构建硬编码版本作为降级兜底
         legacy_prompt = self._build_legacy_position_prompt(snapshot, params, stock_analysis_report)
 
-        # 如果启用模板系统，尝试使用模板生成提示词
-        if _use_template_prompts():
-            try:
-                from tradingagents.utils.template_client import get_agent_prompt
-
-                variables = self._build_position_vars(snapshot, params, stock_analysis_report)
-
-                prompt = get_agent_prompt(
-                    agent_type="trader",
-                    agent_name="position_advisor",
-                    variables=variables,
-                    user_id=user_id,
-                    preference_id=params.invest_style or "neutral",
-                    fallback_prompt=legacy_prompt
-                )
-
-                if prompt and prompt != legacy_prompt:
-                    logger.info(f"✅ [持仓分析] 使用模板系统生成提示词 (长度: {len(prompt)})")
-                    return prompt
-
-            except Exception as e:
-                logger.warning(f"⚠️ [持仓分析] 模板系统调用失败，使用硬编码提示词: {e}")
-
+        logger.info("ℹ️ [持仓分析] 合规模式启用，使用研究观察提示词")
         return legacy_prompt
 
     def _build_legacy_position_prompt(
@@ -4050,7 +4042,7 @@ class PortfolioService:
 
         prompt = f"""# 持仓分析专家任务
 
-你是一位专业的持仓分析师，需要基于完整的股票分析报告和用户的持仓情况，给出个性化的操作建议。
+你是一位专业的持仓研究分析师，需要基于完整的股票分析报告和用户的持仓情况，给出中性的研究观察。
 
 ## 📊 股票分析报告摘要
 
@@ -4063,11 +4055,10 @@ class PortfolioService:
 ### 新闻面分析
 {news_report}
 
-### 综合建议
+### 综合研究摘要
 - 摘要: {summary or '暂无'}
-- 交易建议: {trade_action}
-- 目标价: {target_price or '未知'}
-- 详细建议: {recommendation or '暂无'}
+- 历史输出中的交易字段已忽略，仅保留研究背景信息
+- 详细研究摘要: {recommendation or '暂无'}
 
 ---
 
@@ -4095,37 +4086,35 @@ class PortfolioService:
 
 ## 📝 分析要求
 
-请综合以上股票分析报告和持仓信息，给出个性化的持仓操作建议。
+请综合以上股票分析报告和持仓信息，给出中性的持仓研究观察。
 
 **重要考量因素**：
 1. 当前盈亏状态：{pnl_status} {pnl_pct:.2f}%
 2. 与目标收益率的差距：目标 {params.target_profit_pct}%，当前 {pnl_pct:.2f}%
-3. 股票分析报告中的交易建议：{trade_action}
+3. 股票分析报告中的研究背景信息：{trade_action}
 4. 技术面、基本面、新闻面的综合判断
 
 **请以JSON格式输出**：
 ```json
 {{
-    "action": "加仓|减仓|持有|清仓",
-    "action_reason": "操作建议的核心理由，需要结合分析报告和持仓情况说明（100字以内）",
+    "action": "持有",
+    "action_reason": "持仓现状观察，需要结合分析报告和持仓情况说明（100字以内，不提供执行建议）",
     "confidence": 0-100的整数,
-    "stop_loss_price": 止损价（数字，保留2位小数）,
-    "take_profit_price": 止盈价（数字，保留2位小数）,
+    "stop_loss_price": null,
+    "take_profit_price": null,
     "risk_assessment": "基于分析报告的详细风险评估（300-500字，需包含主要风险点、风险等级、风险影响等）",
     "opportunity_assessment": "基于分析报告的详细机会评估（300-500字，需包含潜在机会、催化剂、收益空间等）",
     "detailed_analysis": "结合分析报告和持仓情况的详细分析（200字以内）",
-    "suggested_quantity": 建议操作数量（整数，加仓/减仓时填写，可选）,
-    "suggested_amount": 建议操作金额（数字，加仓/减仓时填写，可选）,
+    "suggested_quantity": null,
+    "suggested_amount": null,
     "position_risk_analysis": "仓位风险分析（如提供了资金总量，分析仓位占比是否合理，50字以内，可选）"
 }}
 ```
 
 **注意事项**：
-- 止损价应低于当前价
-- 止盈价应高于当前价
-- 所有价格保留2位小数
 - 必须基于提供的分析报告进行判断，不要凭空编造信息
 - 如果用户提供了资金总量，务必在分析中考虑仓位占比和风险敞口
+- 不得输出买卖、加减仓、清仓、止盈止损、目标价或仓位比例等执行性建议
 """
 
         return prompt
@@ -4329,7 +4318,7 @@ class PortfolioService:
                 if snapshot.total_capital and snapshot.total_capital > 0:
                     risk_metrics = self._calculate_risk_metrics(snapshot, price_targets)
 
-                return PositionAnalysisResult(
+                return self._sanitize_position_analysis_result(PositionAnalysisResult(
                     action=action,
                     action_reason=data.get("action_reason", "基于综合分析给出建议"),
                     confidence=float(data.get("confidence", 50)),
@@ -4340,7 +4329,7 @@ class PortfolioService:
                     suggested_quantity=suggested_quantity,
                     suggested_amount=suggested_amount,
                     risk_metrics=risk_metrics
-                )
+                ))
             except json.JSONDecodeError:
                 logger.warning("JSON解析失败，使用备用解析方法")
 
@@ -4408,7 +4397,7 @@ class PortfolioService:
                 elif current_section == "opportunity" and len(opportunity) < 100:
                     opportunity += line + " "
 
-        return PositionAnalysisResult(
+        return self._sanitize_position_analysis_result(PositionAnalysisResult(
             action=action,
             action_reason=reason.strip() or "基于综合分析给出建议",
             confidence=confidence,
@@ -4416,7 +4405,7 @@ class PortfolioService:
             risk_assessment=risk.strip() or "请关注市场风险",
             opportunity_assessment=opportunity.strip() or "请关注市场机会",
             detailed_analysis=content[:500]
-        )
+        ))
 
     def _calculate_risk_metrics(
         self,
@@ -4507,7 +4496,7 @@ class PortfolioService:
             formatted_item["position_type"] = item.get("position_type", "real")
             
             # 提取 ai_analysis 中的所有字段到顶层
-            ai_analysis = item.get("ai_analysis", {})
+            ai_analysis = self._sanitize_position_analysis_dict(item.get("ai_analysis", {}))
             if ai_analysis:
                 # 提取 action（可能是枚举类型，需要转换为字符串）
                 action_value = ai_analysis.get("action")
@@ -4735,10 +4724,10 @@ class PortfolioService:
             if not result.get("success"):
                 error_msg = result.get("error", "工作流执行失败")
                 logger.error(f"❌ [工作流持仓分析] 执行失败: {error_msg}")
-                return PositionAnalysisResult(
+                return self._sanitize_position_analysis_result(PositionAnalysisResult(
                     action=PositionAction.HOLD,
                     action_reason=f"分析失败: {error_msg}"
-                )
+                ))
 
             # 解析工作流结果
             workflow_result = result.get("result", {})
@@ -4904,7 +4893,7 @@ class PortfolioService:
             
             logger.info(f"📊 [工作流持仓分析] recommendation字段: 使用转换后的Markdown，长度: {len(recommendation_markdown)}")
 
-            return PositionAnalysisResult(
+            return self._sanitize_position_analysis_result(PositionAnalysisResult(
                 action=action,
                 action_reason=action_reason,
                 confidence=confidence,
@@ -4915,14 +4904,14 @@ class PortfolioService:
                 summary=analysis_summary,
                 recommendation=recommendation_markdown,
                 source="workflow_engine_v2"
-            )
+            ))
 
         except Exception as e:
             logger.error(f"❌ [工作流持仓分析] 执行异常: {e}", exc_info=True)
-            return PositionAnalysisResult(
+            return self._sanitize_position_analysis_result(PositionAnalysisResult(
                 action=PositionAction.HOLD,
                 action_reason=f"工作流分析异常: {str(e)}"
-            )
+            ))
 
     def _get_user_analysis_preference(self, user_id: Optional[str], risk_tolerance: str) -> str:
         """根据用户ID和风险偏好确定分析风格

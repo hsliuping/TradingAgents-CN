@@ -42,49 +42,21 @@
         </el-descriptions>
       </div>
 
-      <!-- 分析观点 -->
+      <!-- 研究观察 -->
       <div class="section">
-        <h3>💡 分析观点</h3>
+        <h3>💡 研究观察</h3>
         <div class="action-section">
-          <div class="action-badge" :class="getActionClass(report.action)">
-            {{ getActionText(report.action) }}
+          <div class="action-badge hold">
+            研究观察
           </div>
           <div class="confidence">
-            置信度: <el-progress :percentage="report.confidence || 0" :stroke-width="8" style="width: 120px; display: inline-flex;" />
+            研究置信度: <el-progress :percentage="report.confidence || 0" :stroke-width="8" style="width: 120px; display: inline-flex;" />
           </div>
         </div>
         <div class="reason-section">
-          <h4>分析理由</h4>
+          <h4>研究观察</h4>
           <div class="markdown-content" v-html="renderMarkdown(report.action_reason || '暂无')"></div>
         </div>
-      </div>
-
-      <!-- 价格参考区间 -->
-      <div class="section" v-if="report.price_targets">
-        <h3>🎯 价格参考区间</h3>
-        <el-row :gutter="20">
-          <el-col :span="8">
-            <div class="target-card loss-bg">
-              <div class="label">风险控制参考价</div>
-              <div class="value">¥{{ (report.price_targets.stop_loss_price || 0).toFixed(2) }}</div>
-              <div class="pct">{{ (report.price_targets.stop_loss_pct || 0).toFixed(1) }}%</div>
-            </div>
-          </el-col>
-          <el-col :span="8">
-            <div class="target-card neutral-bg">
-              <div class="label">成本价</div>
-              <div class="value">¥{{ (report.price_targets.breakeven_price || 0).toFixed(2) }}</div>
-              <div class="pct">0%</div>
-            </div>
-          </el-col>
-          <el-col :span="8">
-            <div class="target-card profit-bg">
-              <div class="label">收益预期参考价</div>
-              <div class="value">¥{{ (report.price_targets.take_profit_price || 0).toFixed(2) }}</div>
-              <div class="pct">+{{ (report.price_targets.take_profit_pct || 0).toFixed(1) }}%</div>
-            </div>
-          </el-col>
-        </el-row>
       </div>
 
       <!-- 风险与机会评估 -->

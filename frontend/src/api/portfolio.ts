@@ -190,15 +190,15 @@ export interface PositionAnalysisResult {
   code: string
   name?: string
   status: 'pending' | 'processing' | 'completed' | 'failed'
-  action: 'add' | 'reduce' | 'hold' | 'clear'
+  action: string
   action_reason: string
   confidence: number
-  price_targets: PriceTargets
+  price_targets: PriceTargets | Record<string, never>
   risk_assessment: string
   opportunity_assessment: string
   detailed_analysis: string
-  suggested_quantity?: number     // 建议操作数量
-  suggested_amount?: number       // 建议操作金额
+  suggested_quantity?: number | null
+  suggested_amount?: number | null
   risk_metrics?: PositionRiskMetrics  // 风险指标（基于资金总量计算）
   execution_time?: number
   error_message?: string

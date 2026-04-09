@@ -30,240 +30,15 @@
               <span v-if="report.model_info && report.model_info !== 'Unknown'" class="meta-item">
                 <el-icon><Cpu /></el-icon>
                 <el-tooltip :content="getModelDescription(report.model_info)" placement="top">
-                  <el-tag type="info" style="cursor: help;">{{ report.model_info }}</el-tag>
-                </el-tooltip>
-              </span>
-              <span v-if="report.research_depth" class="meta-item">
-                <el-icon><DataAnalysis /></el-icon>
-                <el-tooltip :content="getResearchDepthDescription(report.research_depth)" placement="top">
-                  <el-tag type="warning" style="cursor: help;">深度: {{ report.research_depth }}</el-tag>
-                </el-tooltip>
-              </span>
-            </div>
-          </div>
-          
-          <div class="action-section">
-            <el-button
-              v-if="canApplyToTrading"
-              type="success"
-              @click="applyToTrading"
-            >
-              <el-icon><ShoppingCart /></el-icon>
-              应用到交易
-            </el-button>
-            <el-dropdown trigger="click" @command="downloadReport">
-              <el-button type="primary">
-                <el-icon><Download /></el-icon>
-                下载报告
-                <el-icon class="el-icon--right"><arrow-down /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="markdown">
-                    <el-icon><document /></el-icon> Markdown
-                  </el-dropdown-item>
-                  <el-dropdown-item command="docx">
-                    <el-icon><document /></el-icon> Word 文档
-                  </el-dropdown-item>
-                  <el-dropdown-item command="pdf">
-                    <el-icon><document /></el-icon> PDF
-                  </el-dropdown-item>
-                  <el-dropdown-item command="json" divided>
-                    <el-icon><document /></el-icon> JSON (原始数据)
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-            <el-button @click="goBack">
-              <el-icon><Back /></el-icon>
-              返回
-            </el-button>
-          </div>
-        </div>
-      </el-card>
-
-      <!-- 风险提示 -->
-      <div class="risk-disclaimer">
-        <el-alert
-          type="warning"
-          :closable="false"
-          show-icon
-        >
-          <template #title>
-            <div class="disclaimer-content">
-              <el-icon class="disclaimer-icon"><WarningFilled /></el-icon>
-              <div class="disclaimer-text">
-                <p style="margin: 0 0 8px 0;"><strong>⚠️ 重要风险提示与免责声明</strong></p>
-                <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
-                  <li><strong>平台性质：</strong>本平台为AI辅助分析技术学习平台，专注于AI技术在股票分析领域的应用验证和技术学习。</li>
-                  <li><strong>分析目的：</strong>所有分析结论仅用于学习和验证AI辅助分析技术，不作为真实炒股操盘指导或投资依据。</li>
-                  <li><strong>非投资建议：</strong>所有分析结果、评分、建议仅为技术验证参考，不构成任何买卖建议或投资决策依据。</li>
-                  <li><strong>数据局限性：</strong>分析基于历史数据和公开信息，可能存在延迟、不完整或不准确的情况，无法预测未来市场走势。</li>
-                  <li><strong>投资风险：</strong>股票投资存在市场风险、流动性风险、政策风险等多种风险，可能导致本金损失。</li>
-                  <li><strong>独立决策：</strong>投资者应基于自身风险承受能力、投资目标和财务状况独立做出投资决策。</li>
-                  <li><strong>责任声明：</strong>使用本平台产生的任何投资决策及其后果由使用者自行承担，本平台不承担任何责任。</li>
-                </ul>
-              </div>
-            </div>
-          </template>
-        </el-alert>
-      </div>
-
-      <!-- 关键指标 -->
-      <el-card class="metrics-card" shadow="never">
-        <template #header>
-          <div class="card-header">
-            <el-icon><TrendCharts /></el-icon>
-            <span>关键指标</span>
-          </div>
-        </template>
-        <div class="metrics-content">
-          <el-row :gutter="24">
-            <!-- 分析参考 -->
-            <el-col :span="8">
-              <div class="metric-item">
-                <div class="metric-label">
-                  <el-icon><TrendCharts /></el-icon>
-                  分析参考
-                  <el-tooltip content="基于AI模型的分析倾向，仅供参考，不构成投资建议" placement="top">
-                    <el-icon style="margin-left: 4px; cursor: help; font-size: 14px;"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </div>
-                <div class="metric-value recommendation-value">
-                  <div class="core-conclusion">
-                    <strong>核心结论：</strong>{{ getCoreConclusion() }}
-                  </div>
-                </div>
-                <el-tag type="info" size="small" style="margin-top: 8px;">仅供参考</el-tag>
-              </div>
-            </el-col>
-
-            <!-- 风险评估 -->
-            <el-col :span="8">
-              <div class="metric-item risk-item">
-                <div class="metric-label">
-                  <el-icon><Warning /></el-icon>
-                  风险评估
-                  <el-tooltip content="基于历史数据的风险评估，实际风险可能更高" placement="top">
-                    <el-icon style="margin-left: 4px; cursor: help; font-size: 14px;"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </div>
-                <div class="risk-display">
-                  <div class="risk-stars">
-                    <el-icon
-                      v-for="star in 5"
-                      :key="star"
-                      class="star-icon"
-                      :class="{ active: star <= getRiskStars(report.risk_level || '中等') }"
-                    >
-                      <StarFilled />
-                    </el-icon>
-                  </div>
-                  <div class="risk-label" :style="{ color: getRiskColor(report.risk_level || '中等') }">
-                    {{ report.risk_level || '中等' }}风险
-                  </div>
-                </div>
-              </div>
-            </el-col>
-
-            <!-- 模型置信度 -->
-            <el-col :span="8">
-              <div class="metric-item confidence-item">
-                <div class="metric-label">
-                  <el-icon><DataAnalysis /></el-icon>
-                  模型置信度
-                  <el-tooltip content="基于AI模型计算的置信度，不代表实际投资成功率" placement="top">
-                    <el-icon style="margin-left: 4px; cursor: help; font-size: 14px;"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </div>
-                <div class="confidence-display">
-                  <div class="confidence-value">
-                    <span class="confidence-number">{{ normalizeConfidenceScore(report.confidence_score || 0) }}</span>
-                    <span class="confidence-unit">分</span>
-                  </div>
-                  <div class="confidence-label">{{ getConfidenceLabel(normalizeConfidenceScore(report.confidence_score || 0)) }}</div>
-                </div>
-              </div>
-            </el-col>
-          </el-row>
-
-          <!-- 关键要点 -->
-          <div v-if="report.key_points && report.key_points.length > 0" class="key-points">
-            <h4>
-              <el-icon><List /></el-icon>
-              关键要点
-            </h4>
-            <ul>
-              <li v-for="(point, index) in report.key_points" :key="index">
-                <el-icon class="point-icon"><Check /></el-icon>
-                {{ formatKeyPoint(point) }}
-              </li>
-            </ul>
-          </div>
-        </div>
-      </el-card>
-
-      <!-- 报告摘要 -->
-      <el-card v-if="report.summary" class="summary-card" shadow="never">
-        <template #header>
-          <div class="card-header">
-            <el-icon><InfoFilled /></el-icon>
-            <span>执行摘要</span>
-          </div>
-        </template>
-        <div class="summary-content markdown-content" v-html="renderMarkdown(report.summary)"></div>
-      </el-card>
-
-      <!-- 报告模块 -->
-      <el-card class="modules-card" shadow="never">
-        <template #header>
-          <div class="card-header">
-            <el-icon><Files /></el-icon>
-            <span>分析报告</span>
-          </div>
-        </template>
-        
-        <el-tabs v-model="activeModule" type="border-card">
-          <el-tab-pane
-            v-for="moduleName in orderedModuleNames"
-            :key="moduleName"
-            :label="getModuleDisplayName(moduleName)"
-            :name="moduleName"
-          >
-            <div class="module-content">
-              <div v-if="getModuleContent(report.reports[moduleName])" class="markdown-content">
-                <div v-html="renderMarkdown(getModuleContent(report.reports[moduleName]))"></div>
-              </div>
-              <div v-else class="json-content">
-                <pre>{{ JSON.stringify(report.reports[moduleName], null, 2) }}</pre>
-              </div>
-            </div>
-          </el-tab-pane>
-        </el-tabs>
-      </el-card>
-    </div>
-
-    <!-- 错误状态 -->
-    <div v-else class="error-container">
-      <el-result
-        icon="error"
-        title="报告加载失败"
-        sub-title="请检查报告ID是否正确或稍后重试"
-      >
-        <template #extra>
-          <el-button type="primary" @click="goBack">返回列表</el-button>
-        </template>
       </el-result>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, h, reactive } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox, ElInput, ElInputNumber, ElForm, ElFormItem } from 'element-plus'
-import { paperApi } from '@/api/paper'
-import { stocksApi } from '@/api/stocks'
+import { ElMessage, ElInput, ElForm, ElFormItem } from 'element-plus'
 import { configApi, type LLMConfig } from '@/api/config'
 import {
   Document,
@@ -274,7 +49,6 @@ import {
   InfoFilled,
   TrendCharts,
   Files,
-  ShoppingCart,
   WarningFilled,
   DataAnalysis,
   Warning,
@@ -287,8 +61,6 @@ import {
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { marked } from 'marked'
-import { getMarketByStockCode } from '@/utils/market'
-import type { CurrencyAmount } from '@/api/paper'
 
 // 路由和认证
 const route = useRoute()
@@ -452,307 +224,7 @@ const getFileExtension = (format: string): string => {
   return extensions[format] || 'txt'
 }
 
-// 判断是否可以应用到交易
-const canApplyToTrading = computed(() => {
-  if (!report.value) return false
-  const rec = report.value.recommendation || ''
-  // 检查是否包含买入或卖出建议
-  return rec.includes('买入') || rec.includes('卖出') || rec.toLowerCase().includes('buy') || rec.toLowerCase().includes('sell')
-})
-
-// 解析投资建议
-const parseRecommendation = () => {
-  if (!report.value) return null
-
-  const rec = report.value.recommendation || ''
-  const traderPlan = report.value.reports?.trader_investment_plan || ''
-
-  // 解析操作类型
-  let action: 'buy' | 'sell' | null = null
-  if (rec.includes('买入') || rec.toLowerCase().includes('buy')) {
-    action = 'buy'
-  } else if (rec.includes('卖出') || rec.toLowerCase().includes('sell')) {
-    action = 'sell'
-  }
-
-  if (!action) return null
-
-  // 解析目标价格（从recommendation或trader_investment_plan中提取）
-  let targetPrice: number | null = null
-  const priceMatch = rec.match(/目标价[格]?[：:]\s*([0-9.]+)/) ||
-                     traderPlan.match(/目标价[格]?[：:]\s*([0-9.]+)/)
-  if (priceMatch) {
-    targetPrice = parseFloat(priceMatch[1])
-  }
-
-  return {
-    action,
-    targetPrice,
-    confidence: report.value.confidence_score || 0,
-    riskLevel: report.value.risk_level || '中等'
-  }
-}
-
-// 辅助函数：根据股票代码获取对应货币的现金金额
-const getCashByCurrency = (account: any, stockSymbol: string): number => {
-  const cash = account.cash
-
-  // 兼容旧格式（单一数字）
-  if (typeof cash === 'number') {
-    return cash
-  }
-
-  // 新格式（多货币对象）
-  if (typeof cash === 'object' && cash !== null) {
-    // 根据股票代码判断市场类型
-    const marketType = getMarketByStockCode(stockSymbol)
-
-    // 映射市场类型到货币
-    const currencyMap: Record<string, keyof CurrencyAmount> = {
-      'A股': 'CNY',
-      '港股': 'HKD',
-      '美股': 'USD'
-    }
-
-    const currency = currencyMap[marketType] || 'CNY'
-    return cash[currency] || 0
-  }
-
-  return 0
-}
-
-// 应用到模拟交易
-const applyToTrading = async () => {
-  const recommendation = parseRecommendation()
-  if (!recommendation) {
-    ElMessage.warning('无法解析投资建议，请检查报告内容')
-    return
-  }
-
-  try {
-    // 获取账户信息
-    const accountRes = await paperApi.getAccount()
-    if (!accountRes.success || !accountRes.data) {
-      ElMessage.error('获取账户信息失败')
-      return
-    }
-
-    const account = accountRes.data.account
-    const positions = accountRes.data.positions
-
-    // 查找当前持仓
-    const currentPosition = positions.find(p => p.code === report.value.stock_symbol)
-
-    // 获取当前实时价格
-    let currentPrice = 10 // 默认价格
-    try {
-      const quoteRes = await stocksApi.getQuote(report.value.stock_symbol)
-      if (quoteRes.success && quoteRes.data && quoteRes.data.price) {
-        currentPrice = quoteRes.data.price
-      }
-    } catch (error) {
-      console.warn('获取实时价格失败，使用默认价格')
-    }
-
-    // 获取对应货币的可用资金
-    const availableCash = getCashByCurrency(account, report.value.stock_symbol)
-
-    // 计算建议交易数量
-    let suggestedQuantity = 0
-    let maxQuantity = 0
-
-    if (recommendation.action === 'buy') {
-      // 买入：根据可用资金和当前价格计算
-      maxQuantity = Math.floor(availableCash / currentPrice / 100) * 100 // 100股为单位
-      const suggested = Math.floor(maxQuantity * 0.2) // 建议使用20%资金
-      suggestedQuantity = Math.floor(suggested / 100) * 100 // 向下取整到100的倍数
-      suggestedQuantity = Math.max(100, suggestedQuantity) // 至少100股
-    } else {
-      // 卖出：根据当前持仓计算
-      if (!currentPosition || currentPosition.quantity === 0) {
-        ElMessage.warning('当前没有持仓，无法卖出')
-        return
-      }
-      maxQuantity = currentPosition.quantity
-      suggestedQuantity = Math.floor(maxQuantity / 100) * 100 // 向下取整到100的倍数
-      suggestedQuantity = Math.max(100, suggestedQuantity) // 至少100股
-    }
-
-    // 用户可修改的价格和数量（使用reactive）
-    const tradeForm = reactive({
-      price: currentPrice,
-      quantity: suggestedQuantity
-    })
-
-    // 显示可编辑的确认对话框
-    const actionText = recommendation.action === 'buy' ? '买入' : '卖出'
-    const actionColor = recommendation.action === 'buy' ? '#67C23A' : '#F56C6C'
-
-    // 创建一个响应式的消息组件
-    const MessageComponent = {
-      setup() {
-        // 计算预计金额
-        const estimatedAmount = computed(() => {
-          return (tradeForm.price * tradeForm.quantity).toFixed(2)
-        })
-
-        return () => h('div', { style: 'line-height: 2;' }, [
-          // 风险提示横幅
-          h('div', {
-            style: 'background-color: #FEF0F0; border: 1px solid #F56C6C; border-radius: 4px; padding: 12px; margin-bottom: 16px;'
-          }, [
-            h('div', { style: 'color: #F56C6C; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center;' }, [
-              h('span', { style: 'font-size: 16px; margin-right: 6px;' }, '⚠️'),
-              h('span', '风险提示')
-            ]),
-            h('div', { style: 'color: #606266; font-size: 12px; line-height: 1.6;' }, [
-              h('p', { style: 'margin: 4px 0;' }, '• 本交易基于AI分析结果，仅供参考，不构成投资建议'),
-              h('p', { style: 'margin: 4px 0;' }, '• 模拟交易使用虚拟资金，与实盘存在显著差异'),
-              h('p', { style: 'margin: 4px 0;' }, '• 股票投资存在市场风险，可能导致本金损失'),
-              h('p', { style: 'margin: 4px 0;' }, '• 请勿将模拟结果作为实盘投资决策依据')
-            ])
-          ]),
-          h('p', [
-            h('strong', '股票代码：'),
-            h('span', report.value.stock_symbol)
-          ]),
-          h('p', [
-            h('strong', '操作类型：'),
-            h('span', { style: `color: ${actionColor}; font-weight: bold;` }, actionText)
-          ]),
-          recommendation.targetPrice ? h('p', [
-            h('strong', '目标价格：'),
-            h('span', { style: 'color: #E6A23C;' }, `${recommendation.targetPrice.toFixed(2)}元`),
-            h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(仅供参考)')
-          ]) : null,
-          h('p', [
-            h('strong', '当前价格：'),
-            h('span', `${currentPrice.toFixed(2)}元`)
-          ]),
-          h('div', { style: 'margin: 16px 0;' }, [
-            h('p', { style: 'margin-bottom: 8px;' }, [
-              h('strong', '交易价格：'),
-              h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(可修改)')
-            ]),
-            h(ElInputNumber, {
-              modelValue: tradeForm.price,
-              'onUpdate:modelValue': (val: number) => { tradeForm.price = val },
-              min: 0.01,
-              max: 9999,
-              precision: 2,
-              step: 0.01,
-              style: 'width: 200px;',
-              controls: true
-            })
-          ]),
-          h('div', { style: 'margin: 16px 0;' }, [
-            h('p', { style: 'margin-bottom: 8px;' }, [
-              h('strong', '交易数量：'),
-              h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(可修改，100股为单位)')
-            ]),
-            h(ElInputNumber, {
-              modelValue: tradeForm.quantity,
-              'onUpdate:modelValue': (val: number) => { tradeForm.quantity = val },
-              min: 100,
-              max: maxQuantity,
-              step: 100,
-              style: 'width: 200px;',
-              controls: true
-            })
-          ]),
-          h('p', [
-            h('strong', '预计金额：'),
-            h('span', { style: 'color: #409EFF; font-weight: bold;' }, `${estimatedAmount.value}元`)
-          ]),
-          h('p', [
-            h('strong', '模型置信度：'),
-            h('span', `${(recommendation.confidence * 100).toFixed(1)}%`),
-            h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(不代表实际成功率)')
-          ]),
-          h('p', [
-            h('strong', '风险评估：'),
-            h('span', recommendation.riskLevel),
-            h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(实际风险可能更高)')
-          ]),
-          recommendation.action === 'buy' ? h('p', { style: 'color: #909399; font-size: 12px; margin-top: 12px;' },
-            `可用资金：${availableCash.toFixed(2)}元，最大可买：${maxQuantity}股`
-          ) : null,
-          recommendation.action === 'sell' ? h('p', { style: 'color: #909399; font-size: 12px; margin-top: 12px;' },
-            `当前持仓：${maxQuantity}股`
-          ) : null
-        ])
-      }
-    }
-
-    await ElMessageBox({
-      title: '确认交易',
-      message: h(MessageComponent),
-      confirmButtonText: '确认下单',
-      cancelButtonText: '取消',
-      type: 'warning',
-      beforeClose: (action, instance, done) => {
-        if (action === 'confirm') {
-          // 验证输入
-          if (tradeForm.quantity < 100 || tradeForm.quantity % 100 !== 0) {
-            ElMessage.error('交易数量必须是100的整数倍')
-            return
-          }
-          if (tradeForm.quantity > maxQuantity) {
-            ElMessage.error(`交易数量不能超过${maxQuantity}股`)
-            return
-          }
-          if (tradeForm.price <= 0) {
-            ElMessage.error('交易价格必须大于0')
-            return
-          }
-
-          // 检查资金是否充足
-          if (recommendation.action === 'buy') {
-            const totalAmount = tradeForm.price * tradeForm.quantity
-            if (totalAmount > account.cash) {
-              ElMessage.error('可用资金不足')
-              return
-            }
-          }
-        }
-        done()
-      }
-    })
-
-    // 执行交易
-    const orderRes = await paperApi.placeOrder({
-      code: report.value.stock_symbol,
-      side: recommendation.action,
-      quantity: tradeForm.quantity,
-      analysis_id: report.value.analysis_id || report.value.id
-    })
-
-    if (orderRes.success) {
-      ElMessage.success(`${actionText}订单已提交成功！`)
-      // 可选：跳转到模拟交易页面
-      setTimeout(() => {
-        router.push({ name: 'PaperTradingHome' })
-      }, 1500)
-    } else {
-      ElMessage.error(orderRes.message || '下单失败')
-    }
-
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      console.error('应用到交易失败:', error)
-      ElMessage.error(error.message || '操作失败')
-    }
-  }
-}
-
-// 返回列表
-const goBack = () => {
-  router.push('/reports')
-}
-
-// 工具函数
-const getStatusText = (status: string) => {
-  const statusMap: Record<string, string> = {
+const statusMap: Record<string, string> = {
     completed: '已完成',
     processing: '生成中',
     failed: '失败'
@@ -856,34 +328,6 @@ const moduleOrder = [
   'fundamentals_report',
   'sentiment_report',
   'news_report',
-
-  // 第三阶段：研究团队（多空辩论 + 初步建议）
-  'bull_researcher',
-  'bull_report',
-  'bear_researcher',
-  'bear_report',
-  'research_team_decision',
-  // 'investment_plan',  // 🔑 已隐藏：与研究经理分析内容相同
-
-  // 第四阶段：交易团队
-  'trader_investment_plan',
-
-  // 第五阶段：风险管理团队（风险辩论）
-  'risky_analyst',
-  'risky_opinion',
-  'safe_analyst',
-  'safe_opinion',
-  'neutral_analyst',
-  'neutral_opinion',
-  'risk_management_decision',
-  'risk_assessment',
-
-  // 第六阶段：最终决策
-  'final_trade_decision',  // 🔑 最终分析结果（风险管理后）
-
-  // 兼容旧字段
-  'investment_debate_state',
-  'risk_debate_state',
   'detailed_analysis'
 ]
 
@@ -897,15 +341,33 @@ const orderedModuleNames = computed(() => {
   const ordered = moduleOrder.filter(name => availableModules.includes(name))
 
   // 添加不在 moduleOrder 中但存在的模块（放在最后）
-  // 🔑 排除 investment_plan（已隐藏，与研究经理分析内容相同）
-  const hiddenModules = ['investment_plan']
+  const hiddenModules = [
+    'investment_plan',
+    'bull_researcher',
+    'bull_report',
+    'bear_researcher',
+    'bear_report',
+    'research_team_decision',
+    'trader_investment_plan',
+    'risky_analyst',
+    'risky_opinion',
+    'safe_analyst',
+    'safe_opinion',
+    'neutral_analyst',
+    'neutral_opinion',
+    'risk_management_decision',
+    'risk_assessment',
+    'final_trade_decision',
+    'investment_debate_state',
+    'risk_debate_state'
+  ]
   const remaining = availableModules.filter(name => !moduleOrder.includes(name) && !hiddenModules.includes(name))
 
   return [...ordered, ...remaining]
 })
 
 const getModuleDisplayName = (moduleName: string) => {
-  // 统一与单股分析的中文标签映射（完整的15个报告）
+  // 统一与单股分析的中文标签映射（仅保留研究类报告）
   const nameMap: Record<string, string> = {
     // 🆕 宏观分析师团队 (2个) - 优先显示
     index_report: '📊 大盘指数分析',
@@ -916,36 +378,6 @@ const getModuleDisplayName = (moduleName: string) => {
     sentiment_report: '💭 市场情绪分析',
     news_report: '📰 新闻事件分析',
     fundamentals_report: '💰 基本面分析',
-
-    // 研究团队 (3个)
-    bull_researcher: '🐂 多头研究员',
-    bear_researcher: '🐻 空头研究员',
-    research_team_decision: '🔬 研究经理分析',
-    // v2.0 直出字段
-    bull_report: '🐂 看涨研究',
-    bear_report: '🐻 看跌研究',
-
-    // 交易团队 (1个)
-    trader_investment_plan: '💼 交易员计划',
-
-    // 风险管理团队 (4个)
-    risky_analyst: '⚡ 激进分析师',
-    safe_analyst: '🛡️ 保守分析师',
-    neutral_analyst: '⚖️ 中性分析师',
-    risk_management_decision: '⚠️ 风险经理',
-    // v2.0 风险观点与评估直出字段
-    risky_opinion: '🔥 激进风险观点',
-    safe_opinion: '🛡️ 保守风险观点',
-    neutral_opinion: '⚖️ 中性风险观点',
-    risk_assessment: '⚠️ 风险评估',
-
-    // 🔑 关键决策字段（重命名）
-    investment_plan: '💡 初步投资建议',  // 研究经理的初步建议
-    final_trade_decision: '🎯 最终分析结果',  // 风险管理后的最终决策
-
-    // 兼容旧字段
-    investment_debate_state: '🔬 研究团队分析（旧）',
-    risk_debate_state: '⚖️ 风险管理团队（旧）',
     detailed_analysis: '📄 详细分析'
   }
   // 未匹配到时，做一个友好的回退：下划线转空格

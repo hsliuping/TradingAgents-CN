@@ -1090,35 +1090,8 @@ function formatReportName(key: string): string {
     'news_report': '📰 新闻事件分析',
     'fundamentals_report': '💰 基本面分析',
 
-    // 研究团队 (3个)
-    'bull_researcher': '🐂 多头研究员',
-    'bear_researcher': '🐻 空头研究员',
-    'research_team_decision': '🔬 研究经理分析',
-    // v2.0 直出字段
-    'bull_report': '🐂 看涨研究',
-    'bear_report': '🐻 看跌研究',
-
-    // 交易团队 (1个)
-    'trader_investment_plan': '💼 交易员计划',
-
-    // 风险管理团队 (4个)
-    'risky_analyst': '⚡ 激进分析师',
-    'safe_analyst': '🛡️ 保守分析师',
-    'neutral_analyst': '⚖️ 中性分析师',
-    'risk_management_decision': '⚠️ 风险经理',
-    // v2.0 风险观点与评估直出字段
-    'risky_opinion': '🔥 激进风险观点',
-    'safe_opinion': '🛡️ 保守风险观点',
-    'neutral_opinion': '⚖️ 中性风险观点',
-    'risk_assessment': '⚠️ 风险评估',
-
-    // 最终决策 (1个)
-    'final_trade_decision': '🎯 最终分析结果',
-
     // 兼容旧字段
-    'investment_plan': '📋 投资建议',
-    'investment_debate_state': '🔬 研究团队分析（旧）',
-    'risk_debate_state': '⚖️ 风险管理团队（旧）'
+    'detailed_analysis': '📄 详细分析'
   }
   return nameMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
 }
