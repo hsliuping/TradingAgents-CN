@@ -1007,6 +1007,11 @@ let loadingTimer: number | null = null
 let persistThreadContextPromise: Promise<void> | null = null
 let queuedThreadContextSignature: string | null = null
 let lastPersistedThreadContextSignature = ''
+let initFromRoutePromise: Promise<void> | null = null
+const versionContextRequests = new Map<string, Promise<void>>()
+const latestVersionContextRequests = new Map<string, Promise<void>>()
+const sessionRequests = new Map<string, Promise<void>>()
+const threadMessageRequests = new Map<string, Promise<boolean>>()
 const THREAD_CONTEXT_PERSIST_DEBOUNCE_MS = 180
 
 const sleep = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
@@ -1177,22 +1182,29 @@ const applyThreadContext = async (threadContext?: EmbeddedNanobotThreadContext |
   }
 
   if (sessionId) {
-    await loadSession(sessionId, { syncNanobotThread: false })
+    if (String(currentSession.value?.session_id || '').trim() !== sessionId) {
+      await loadSession(sessionId, { syncNanobotThread: false })
+    }
   } else if (specId) {
-    try {
-      standaloneSpec.value = await agentWorkshopApi.getSpec(specId)
-      currentSession.value = null
-      expandAgentBranch(specId)
-      await ensureSpecVersionsLoaded(specId)
-      await loadLatestVersionContext(specId)
-    } catch {
-      // Ignore stale draft references when restoring old context.
+    const currentSpecId = String(displaySpec.value?.spec_id || '').trim()
+    if (currentSpecId !== specId || !latestVersion.value) {
+      try {
+        standaloneSpec.value = await agentWorkshopApi.getSpec(specId)
+        currentSession.value = null
+        expandAgentBranch(specId)
+        await ensureSpecVersionsLoaded(specId)
+        await loadLatestVersionContext(specId)
+      } catch {
+        // Ignore stale draft references when restoring old context.
+      }
     }
   }
 
   if (versionId) {
     selectedVersionId.value = versionId
-    await loadVersionContext(versionId)
+    if (String(latestVersion.value?.version_id || '').trim() !== versionId || !latestVersionPrompt.value) {
+      await loadVersionContext(versionId)
+    }
   }
 }
 
@@ -1495,25 +1507,38 @@ const loadNanobotThreadMessages = async (options?: {
   const requestedThreadId = String(options?.threadId || options?.sessionKey || currentNanobotSessionKey.value || '').trim()
   if (!requestedThreadId) return false
 
-  let targetThread = recentNanobotThreads.value.find(item => item.thread_id === requestedThreadId || item.session_key === requestedThreadId) || null
-  if (!targetThread) {
-    await loadNanobotThreads()
-    targetThread = recentNanobotThreads.value.find(item => item.thread_id === requestedThreadId || item.session_key === requestedThreadId) || null
+  if (threadMessageRequests.has(requestedThreadId)) {
+    return threadMessageRequests.get(requestedThreadId) as Promise<boolean>
   }
-  if (!targetThread) return false
 
-  try {
-    const result = await embeddedNanobotApi.getThreadMessages(targetThread.thread_id)
-    currentNanobotSessionKey.value = result.thread?.session_key || targetThread.session_key || targetThread.thread_id
-    nanobotMessages.value = mapDbMessagesToWorkshopMessages(result.messages || [])
-    await applyThreadContext(result.thread?.thread_context)
-    persistState()
-    return true
-  } catch (error: any) {
-    if (!options?.silent) {
-      ElMessage.error(error?.message || '加载数据库会话历史失败')
+  const request = (async () => {
+    let targetThread = recentNanobotThreads.value.find(item => item.thread_id === requestedThreadId || item.session_key === requestedThreadId) || null
+    if (!targetThread) {
+      await loadNanobotThreads()
+      targetThread = recentNanobotThreads.value.find(item => item.thread_id === requestedThreadId || item.session_key === requestedThreadId) || null
     }
-    return false
+    if (!targetThread) return false
+
+    try {
+      const result = await embeddedNanobotApi.getThreadMessages(targetThread.thread_id)
+      currentNanobotSessionKey.value = result.thread?.session_key || targetThread.session_key || targetThread.thread_id
+      nanobotMessages.value = mapDbMessagesToWorkshopMessages(result.messages || [])
+      await applyThreadContext(result.thread?.thread_context)
+      persistState()
+      return true
+    } catch (error: any) {
+      if (!options?.silent) {
+        ElMessage.error(error?.message || '加载数据库会话历史失败')
+      }
+      return false
+    }
+  })()
+
+  threadMessageRequests.set(requestedThreadId, request)
+  try {
+    return await request
+  } finally {
+    threadMessageRequests.delete(requestedThreadId)
   }
 }
 
@@ -2604,17 +2629,28 @@ const loadVersionContext = async (versionId?: string) => {
     resetVersionContext()
     return
   }
+  if (versionContextRequests.has(normalized)) {
+    return versionContextRequests.get(normalized) as Promise<void>
+  }
+  const request = (async () => {
+    try {
+      const [versionResult, versionPromptResult, evaluationResult] = await Promise.all([
+        agentWorkshopApi.getVersion(normalized),
+        agentWorkshopApi.getVersionPrompt(normalized).catch(() => null),
+        agentWorkshopApi.listEvaluations(normalized, { page: 1, page_size: 1 }).catch(() => null),
+      ])
+      latestVersion.value = versionResult
+      latestVersionPrompt.value = versionPromptResult
+      latestEvaluation.value = evaluationResult?.items?.[0] || null
+    } catch {
+      resetVersionContext()
+    }
+  })()
+  versionContextRequests.set(normalized, request)
   try {
-    const [versionResult, versionPromptResult, evaluationResult] = await Promise.all([
-      agentWorkshopApi.getVersion(normalized),
-      agentWorkshopApi.getVersionPrompt(normalized).catch(() => null),
-      agentWorkshopApi.listEvaluations(normalized, { page: 1, page_size: 1 }).catch(() => null),
-    ])
-    latestVersion.value = versionResult
-    latestVersionPrompt.value = versionPromptResult
-    latestEvaluation.value = evaluationResult?.items?.[0] || null
-  } catch {
-    resetVersionContext()
+    await request
+  } finally {
+    versionContextRequests.delete(normalized)
   }
 }
 
@@ -2647,20 +2683,32 @@ const loadVersionDetail = async (versionId: string) => {
 }
 
 const loadLatestVersionContext = async (specId?: string) => {
-  if (!specId) {
+  const normalized = String(specId || '').trim()
+  if (!normalized) {
     resetVersionContext()
     return
   }
-  try {
-    const result = await agentWorkshopApi.listVersions({ spec_id: specId, page: 1, page_size: 1 })
-    const latestVersionId = result.items?.[0]?.version_id
-    if (!latestVersionId) {
+  if (latestVersionContextRequests.has(normalized)) {
+    return latestVersionContextRequests.get(normalized) as Promise<void>
+  }
+  const request = (async () => {
+    try {
+      const result = await agentWorkshopApi.listVersions({ spec_id: normalized, page: 1, page_size: 1 })
+      const latestVersionId = result.items?.[0]?.version_id
+      if (!latestVersionId) {
+        resetVersionContext()
+        return
+      }
+      await loadVersionContext(latestVersionId)
+    } catch {
       resetVersionContext()
-      return
     }
-    await loadVersionContext(latestVersionId)
-  } catch {
-    resetVersionContext()
+  })()
+  latestVersionContextRequests.set(normalized, request)
+  try {
+    await request
+  } finally {
+    latestVersionContextRequests.delete(normalized)
   }
 }
 
@@ -2745,28 +2793,39 @@ const loadSession = async (sessionId?: string, options?: {
 }) => {
   const normalized = String(sessionId || '').trim()
   if (!normalized) return
-  loadingSession.value = true
+  if (sessionRequests.has(normalized)) {
+    return sessionRequests.get(normalized) as Promise<void>
+  }
+  const request = (async () => {
+    loadingSession.value = true
+    try {
+      currentSession.value = await agentWorkshopApi.getSession(normalized)
+      standaloneSpec.value = null
+      nanobotDraftLink.value = {
+        specId: currentSession.value.current_spec_snapshot?.spec_id || '',
+        specName: currentSession.value.current_spec_snapshot?.name || '当前 Draft',
+        sessionId: currentSession.value.session_id,
+      }
+      selectedVersionId.value = ''
+      expandAgentBranch(currentSession.value.current_spec_snapshot?.spec_id)
+      await ensureSpecVersionsLoaded(currentSession.value.current_spec_snapshot?.spec_id)
+      await loadLatestVersionContext(currentSession.value.current_spec_snapshot?.spec_id)
+      if (options?.syncNanobotThread && currentNanobotSessionKey.value) {
+        await loadNanobotThreadMessages({ sessionKey: currentNanobotSessionKey.value, silent: true })
+      } else {
+        await alignNanobotThreadWithWorkspace({ silent: true })
+      }
+    } catch (error: any) {
+      ElMessage.error(error?.message || '加载会话失败')
+    } finally {
+      loadingSession.value = false
+    }
+  })()
+  sessionRequests.set(normalized, request)
   try {
-    currentSession.value = await agentWorkshopApi.getSession(normalized)
-    standaloneSpec.value = null
-    nanobotDraftLink.value = {
-      specId: currentSession.value.current_spec_snapshot?.spec_id || '',
-      specName: currentSession.value.current_spec_snapshot?.name || '当前 Draft',
-      sessionId: currentSession.value.session_id,
-    }
-    selectedVersionId.value = ''
-    expandAgentBranch(currentSession.value.current_spec_snapshot?.spec_id)
-    await ensureSpecVersionsLoaded(currentSession.value.current_spec_snapshot?.spec_id)
-    await loadLatestVersionContext(currentSession.value.current_spec_snapshot?.spec_id)
-    if (options?.syncNanobotThread && currentNanobotSessionKey.value) {
-      await loadNanobotThreadMessages({ sessionKey: currentNanobotSessionKey.value, silent: true })
-    } else {
-      await alignNanobotThreadWithWorkspace({ silent: true })
-    }
-  } catch (error: any) {
-    ElMessage.error(error?.message || '加载会话失败')
+    await request
   } finally {
-    loadingSession.value = false
+    sessionRequests.delete(normalized)
   }
 }
 
@@ -2953,6 +3012,7 @@ const sendNanobotMessage = async (message: string) => {
     const response = await new Promise<EmbeddedNanobotChatResponse>((resolve, reject) => {
       activeNanobotStreamController = embeddedNanobotApi.chatStream({
         message: payloadMessage,
+        display_message: normalized,
         session_key: sessionKey,
         chat_id: sessionKey,
         channel: 'agent_workshop',
@@ -3295,50 +3355,62 @@ const resetStudio = () => {
 }
 
 const initFromRoute = async () => {
-  clearStudioState(true)
-  const routeNanobotSessionKey = typeof route.query.nanobotSessionKey === 'string' ? route.query.nanobotSessionKey : ''
-  const routeSessionId = typeof route.query.sessionId === 'string' ? route.query.sessionId : ''
-  const routeSpecId = typeof route.query.specId === 'string' ? route.query.specId : ''
-  const restoredFromStorage = !routeNanobotSessionKey && !routeSessionId && !routeSpecId ? restoreState() : false
-  const nanobotSessionKey = routeNanobotSessionKey || String(currentNanobotSessionKey.value || '').trim()
-  const sessionId = routeSessionId || String(nanobotDraftLink.value?.sessionId || '').trim()
-  const specId = routeSpecId || String(nanobotDraftLink.value?.specId || '').trim()
-  let restoredFromNanobotThread = false
-
-  await loadNanobotThreads()
-
-  if (nanobotSessionKey) {
-    restoredFromNanobotThread = await loadNanobotThreadMessages({ sessionKey: nanobotSessionKey, silent: true })
+  if (initFromRoutePromise) {
+    return initFromRoutePromise
   }
 
-  if (sessionId) {
-    if (!restoredFromNanobotThread || String(currentSession.value?.session_id || '').trim() !== sessionId) {
-      await loadSession(sessionId, { syncNanobotThread: false })
+  initFromRoutePromise = (async () => {
+    clearStudioState(true)
+    const routeNanobotSessionKey = typeof route.query.nanobotSessionKey === 'string' ? route.query.nanobotSessionKey : ''
+    const routeSessionId = typeof route.query.sessionId === 'string' ? route.query.sessionId : ''
+    const routeSpecId = typeof route.query.specId === 'string' ? route.query.specId : ''
+    const restoredFromStorage = !routeNanobotSessionKey && !routeSessionId && !routeSpecId ? restoreState() : false
+    const nanobotSessionKey = routeNanobotSessionKey || String(currentNanobotSessionKey.value || '').trim()
+    const sessionId = routeSessionId || String(nanobotDraftLink.value?.sessionId || '').trim()
+    const specId = routeSpecId || String(nanobotDraftLink.value?.specId || '').trim()
+    let restoredFromNanobotThread = false
+
+    await loadNanobotThreads()
+
+    if (nanobotSessionKey) {
+      restoredFromNanobotThread = await loadNanobotThreadMessages({ sessionKey: nanobotSessionKey, silent: true })
     }
-  } else if (specId) {
-    if (!restoredFromNanobotThread || String(displaySpec.value?.spec_id || '').trim() !== specId) {
-      try {
-        standaloneSpec.value = await agentWorkshopApi.getSpec(specId)
-        selectedVersionId.value = ''
-        expandAgentBranch(specId)
-        await ensureSpecVersionsLoaded(specId)
-        await loadLatestVersionContext(specId)
-      } catch (error: any) {
-        ElMessage.error(error?.message || '加载 Draft 失败')
+
+    if (sessionId) {
+      if (!restoredFromNanobotThread || String(currentSession.value?.session_id || '').trim() !== sessionId) {
+        await loadSession(sessionId, { syncNanobotThread: false })
       }
+    } else if (specId) {
+      if (!restoredFromNanobotThread || String(displaySpec.value?.spec_id || '').trim() !== specId) {
+        try {
+          standaloneSpec.value = await agentWorkshopApi.getSpec(specId)
+          selectedVersionId.value = ''
+          expandAgentBranch(specId)
+          await ensureSpecVersionsLoaded(specId)
+          await loadLatestVersionContext(specId)
+        } catch (error: any) {
+          ElMessage.error(error?.message || '加载 Draft 失败')
+        }
+      }
+    } else if (nanobotDraftLink.value?.sessionId && !restoredFromNanobotThread) {
+      await loadSession(nanobotDraftLink.value.sessionId, { syncNanobotThread: false })
     }
-  } else if (nanobotDraftLink.value?.sessionId && !restoredFromNanobotThread) {
-    await loadSession(nanobotDraftLink.value.sessionId, { syncNanobotThread: false })
-  }
 
-  if (!restoredFromNanobotThread && (sessionId || specId || restoredFromStorage)) {
-    await alignNanobotThreadWithWorkspace({ silent: true, forceReload: true })
-  }
+    if (!restoredFromNanobotThread && (sessionId || specId || restoredFromStorage)) {
+      await alignNanobotThreadWithWorkspace({ silent: true, forceReload: true })
+    }
 
-  await loadAgentItems()
-  reconcileDeletedWorkspaceState()
-  persistState()
-  syncRoute()
+    await loadAgentItems()
+    reconcileDeletedWorkspaceState()
+    persistState()
+    syncRoute()
+  })()
+
+  try {
+    await initFromRoutePromise
+  } finally {
+    initFromRoutePromise = null
+  }
 }
 
 watch(

@@ -8,6 +8,7 @@ export interface EmbeddedNanobotStatusResponse {
 
 export interface EmbeddedNanobotChatRequest {
   message: string
+  display_message?: string
   session_key?: string
   model?: string
   channel?: string

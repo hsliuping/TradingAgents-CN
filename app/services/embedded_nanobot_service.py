@@ -114,12 +114,13 @@ class EmbeddedNanobotService:
         role: str,
         content: str,
         channel: str,
+        raw_content: str | None = None,
         tools_used: list[str] | None = None,
         stop_reason: str | None = None,
         usage: dict[str, int] | None = None,
         tool_events: list[dict[str, Any]] | None = None,
     ) -> None:
-        await self._db[EMBEDDED_NANOBOT_MESSAGE_COLLECTION].insert_one({
+        document = {
             "message_id": f"nanobot_msg_{uuid.uuid4().hex}",
             "thread_id": thread_id,
             "user_id": user_id,
@@ -132,7 +133,11 @@ class EmbeddedNanobotService:
             "usage": usage or {},
             "tool_events": tool_events or [],
             "created_at": _now_utc(),
-        })
+        }
+        clean_raw_content = str(raw_content or "").strip()
+        if clean_raw_content:
+            document["raw_content"] = clean_raw_content
+        await self._db[EMBEDDED_NANOBOT_MESSAGE_COLLECTION].insert_one(document)
 
     async def persist_chat_turn(
         self,
@@ -142,6 +147,7 @@ class EmbeddedNanobotService:
         session_key: str,
         channel: str,
         user_content: str,
+        user_display_content: str | None = None,
         assistant_content: str,
         tools_used: list[str] | None = None,
         stop_reason: str | None = None,
@@ -149,7 +155,8 @@ class EmbeddedNanobotService:
         tool_events: list[dict[str, Any]] | None = None,
         thread_context: dict[str, Any] | None = None,
     ) -> None:
-        clean_user_content = str(user_content or "").strip()
+        clean_user_raw_content = str(user_content or "").strip()
+        clean_user_content = str(user_display_content or clean_user_raw_content or "").strip()
         clean_assistant_content = str(assistant_content or "").strip()
         clean_thread_id = str(thread_id or session_key or "").strip()
         clean_session_key = str(session_key or clean_thread_id or "").strip()
@@ -175,6 +182,7 @@ class EmbeddedNanobotService:
                 role="user",
                 content=clean_user_content,
                 channel=clean_channel,
+                raw_content=clean_user_raw_content if clean_user_raw_content != clean_user_content else None,
             )
             inserted_count += 1
 
@@ -417,6 +425,7 @@ class EmbeddedNanobotService:
     async def chat(
         self,
         user_message: str,
+        display_message: str | None = None,
         session_key: str = "embedded:default",
         user_id: str | None = None,
         current_thread_id: str | None = None,
@@ -446,6 +455,7 @@ class EmbeddedNanobotService:
                         session_key=session_key,
                         channel=str(kwargs.get("channel") or "embedded"),
                         user_content=user_message,
+                        user_display_content=display_message,
                         assistant_content=str(result.get("content") or ""),
                         tools_used=result.get("tools_used") or [],
                         stop_reason=result.get("stop_reason"),

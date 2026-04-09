@@ -24,6 +24,7 @@ class EmbeddedNanobotThreadContext(BaseModel):
 
 class EmbeddedNanobotChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="用户输入消息")
+    display_message: str | None = Field(default=None, description="前端展示用的原始用户输入")
     session_key: str | None = Field(default=None, description="会话标识，未传则按用户维度默认生成")
     model: str | None = Field(default=None, description="优先使用的模型名称")
     channel: str = Field(default="api", description="消息来源渠道")

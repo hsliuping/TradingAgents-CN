@@ -116,6 +116,7 @@ async def embedded_nanobot_chat(
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
     message = request.message.strip()
+    display_message = str(request.display_message or "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="消息不能为空")
 
@@ -127,6 +128,7 @@ async def embedded_nanobot_chat(
         service = EmbeddedNanobotService(db=db, workspace=WORKSPACE_ROOT, preferred_model=request.model)
         result = await service.chat(
             user_message=message,
+            display_message=display_message,
             session_key=session_key,
             user_id=user_id,
             current_thread_id=chat_id,
@@ -160,6 +162,7 @@ async def embedded_nanobot_chat_stream(
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
     message = request.message.strip()
+    display_message = str(request.display_message or "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="消息不能为空")
 
@@ -193,6 +196,7 @@ async def embedded_nanobot_chat_stream(
             try:
                 result = await service.chat(
                     user_message=message,
+                    display_message=display_message,
                     session_key=session_key,
                     user_id=user_id,
                     current_thread_id=chat_id,

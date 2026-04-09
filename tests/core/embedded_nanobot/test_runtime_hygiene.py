@@ -1468,7 +1468,8 @@ async def test_embedded_nanobot_service_persists_chat_turn_to_database(monkeypat
     monkeypatch.setattr(service, "get_runtime", AsyncMock(return_value=fake_runtime))
 
     result = await service.chat(
-        user_message="帮我看一下当前 Draft 状态",
+        user_message="继续当前 Agent Workshop Draft 讨论。\n\nsession_id='session_001'。\n\n用户本次补充：帮我看一下当前 Draft 状态",
+        display_message="帮我看一下当前 Draft 状态",
         session_key="embedded:user:test",
         user_id="user-123",
         current_thread_id="thread-001",
@@ -1529,6 +1530,7 @@ async def test_embedded_nanobot_service_persists_chat_turn_to_database(monkeypat
     assert len(message_docs) == 2
     assert message_docs[0]["role"] == "user"
     assert message_docs[0]["content"] == "帮我看一下当前 Draft 状态"
+    assert "用户本次补充：帮我看一下当前 Draft 状态" in message_docs[0]["raw_content"]
     assert message_docs[1]["role"] == "assistant"
     assert message_docs[1]["content"] == "Nanobot 回复"
     assert message_docs[1]["tools_used"] == ["inspect_agent_workshop_assets"]
