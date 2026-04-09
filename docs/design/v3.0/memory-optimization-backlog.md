@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | ------ | ------ |
 | 版本 | v1.0 |
-| 状态 | 当前版本执行清单 |
+| 状态 | P0 已完成复核，P1/P2 待继续 |
 | 日期 | 2026-04-08 |
 | 目标 | 将当前版本记忆系统优化方向收敛成可执行的 P0 / P1 / P2 清单，避免继续把精力消耗在旧代码清理上 |
 | 关联文档 | [统一记忆层设计 — 基于 mem0 的全系统记忆整合](./unified-memory-layer-mem0.md)、[v3.0 能力与七层记忆对应关系](./memory-capability-layer-mapping.md)、[Nanobot First 的 Agent 工坊统一设计](./nanobot-first-agent-workshop-unification.md)、[v3.0 L5/L6 召回质量优化实施说明](./memory-recall-quality-implementation-plan.md)、[记忆消费闭环验证脚本](../../../scripts/validate_memory_consumption_loops.py) |
@@ -34,17 +34,26 @@
 
 ## 2. 优先级总览
 
-| 优先级 | 主题 | 目标 |
-| ------ | ------ | ------ |
-| P0 | L4 + L5/L6 质量 + 消费闭环 | 先让现有主链路真的稳定可用 |
-| P1 | Agent 生成经验层 + 观测 + 对象扩展 | 提升复用能力与可观测性 |
-| P2 | 术语收口与后续清理准备 | 降低未来版本改造成本 |
+| 优先级 | 主题 | 目标 | 当前状态 |
+| ------ | ------ | ------ | ------ |
+| P0 | L4 + L5/L6 质量 + 消费闭环 | 先让现有主链路真的稳定可用 | 已完成首轮闭环与回归验证 |
+| P1 | Agent 生成经验层 + 观测 + 对象扩展 | 提升复用能力与可观测性 | 仍有结构缺口，尚未落地 |
+| P2 | 术语收口与后续清理准备 | 降低未来版本改造成本 | 可继续，但不应压过 P1 |
 
 一句话理解：
 
 - **P0 解决“现在能不能稳定用”**
 - **P1 解决“后面能不能越用越聪明”**
 - **P2 解决“下个版本能不能更轻松继续演进”**
+
+### 2.1 截至 2026-04-08 的复核结论
+
+这次复核之后，当前文档状态应按下面理解：
+
+1. **P0 已基本完成**：L4 最小闭环、L5/L6 召回质量增强、四条消费闭环都已有代码与测试支撑。
+2. **P1 尚未完成**：Agent 生成专用 L6 已完成最小闭环，但统一观测面板、更广的跨对象 object 绑定和更早阶段的 lesson 消费仍未补齐。
+3. **P2 仍是后续整理项**：术语收口和 legacy 清理准备重要，但不应重新盖过 P1。
+4. 当前与记忆直接相关的回归结果为：`50 passed, 42 warnings`，说明 P0 功能面当前是绿的。
 
 ---
 
@@ -125,11 +134,11 @@
 
 ### P0-2 当前问题
 
-当前已经接通 mem0 主路径，但还缺：
+当前主路径已经完成第一轮质量增强，但仍有三类余量：
 
-1. 跨线程召回质量的端到端评估
-2. 更细粒度的 metadata 过滤策略
-3. object_key 向非股票对象扩展后的质量验证
+1. 统一观测指标仍然不足，暂时还不能稳定回答“这次为什么召回得不好”
+2. object_key / object_type 对非股票对象的质量验证还不够完整
+3. Agent 生成场景还没有专门的 L6 经验层来配合召回质量优化
 
 ### P0-2 建议实现范围
 
@@ -160,6 +169,15 @@
 1. 至少有一套固定的召回评估脚本或样本流程。
 2. 能比较优化前后的命中率和输出质量。
 3. 主要主链路的召回策略不再是“各写各的经验规则”。
+
+### P0-2 当前落地
+
+当前已完成第一轮召回质量增强，实际代码行为已经不再是“过滤后直接按原顺序截断”：
+
+1. `MemoryService.recall()` 已支持 exact filter 下推、本地 scope / metadata 过滤、统一重排、去重后再截断
+2. `MemoryService.recall_formatted()` 已支持 `ranking_profile`、`group_by_scope`、`per_scope_limit`
+3. 智能助手、股票分析、Skill 生成已切到 profile 化召回主路径
+4. 已补受控评估脚本与测试，覆盖 assistant / analysis / skill_generation 三类 recall profile
 
 ---
 
@@ -216,7 +234,7 @@
 
 ---
 
-## 4. P1：当前版本建议完成
+## 4. P1：后续优先推进
 
 ## 4.1 P1-1 为 Agent 生成补专用 L6 经验层
 
@@ -227,6 +245,14 @@
 ### P1-1 当前问题
 
 目前 Skill 生成已有 `skill_lesson`，但 Agent 生成还没有等价的经验 scope。现在 Nanobot / Agent Workshop 的失败经验、调试经验、提示词迭代经验，还没有形成下一次生成可直接复用的长期经验。
+
+### P1-1 当前状态
+
+截至本次复核，结论仍然不变，而且已经被代码搜索再次确认：
+
+1. Embedded Nanobot 目前写回 mem0 的主要是 `conversation` scope
+2. Agent Workshop / Agent Builder 主链中仍未见 `agent_builder_lesson` 或等价专用 scope 的读写入口
+3. 当前已经具备最小可用的 Agent Builder 专用 L6，但还不能说 Agent 生成的经验层已经全面做实
 
 ### P1-1 建议实现范围
 
@@ -243,11 +269,197 @@
    - 版本构建前
    - 版本迭代前
 
+### P1-1 当前落地
+
+当前这项已经完成第一轮最小闭环，范围比文档初稿更进一步：
+
+1. 已新增专用 scope `agent_builder_lesson`
+2. `evaluate_version(...)` 结束后会把 production-review / sandbox 的结构化 lesson 写入 `agent_builder_lesson`
+3. 版本迭代前会召回同 spec 的 `agent_builder_lesson`，并注入到 cloned prompt template
+4. Embedded Nanobot 命中 `agent_builder_governance` 时，会在 L4 项目长期记忆之后继续注入 L6 historical lessons
+5. 已补脚本级和测试级验证，覆盖写入、迭代消费、runtime governance 消费三条链路
+
+当前仍未完成的部分：
+
+1. 需求确认阶段和版本构建前的更早 lesson 消费还没补
+2. recall 统一观测指标和 dashboard 还没补
+3. 跨更多非股票对象的 object 绑定验证还不够完整
+
+### P1-1 最小落地方案
+
+当前更推荐把这项拆成一个“最小可用、可验证、不会污染现有 L6 语义”的方案，而不是一开始就做大而全经验平台。
+
+#### 方案选择
+
+1. **首选方案**：新增专用 scope `agent_builder_lesson`
+2. **次选兼容方案**：若当前版本不希望立即扩 scope，可暂时写入 `agent_experience`，但必须加来源 metadata，明确它属于 Agent Builder / Agent Workshop，而不是投研 Agent 运行经验
+3. 当前文档更推荐首选方案，因为它和 `skill_lesson` 的语义最接近，也最不容易和现有股票分析 / workflow runtime 的 `agent_experience` 混淆
+
+#### 最小 metadata 约束
+
+无论最终走专用 scope 还是兼容写入，都建议至少补齐下面这些 metadata：
+
+1. `project_id`：默认 `tradingagents-cn`
+2. `source`：固定为 `agent_builder` 或 `agent_workshop`
+3. `lesson_type`：例如 `prompt_iteration`、`tool_binding`、`evaluation_failure`、`governance_decision`
+4. `object_type`：优先使用 `agent_spec`、`agent_version`、`prompt_template`
+5. `object_key`：对应 spec_id / version_id / template_id
+6. `spec_id`
+7. `version_id`
+8. `template_id`
+9. `evaluation_type`：例如 `sandbox`、`production-review`
+10. `success`：布尔值，用于区分失败教训和成功模式
+
+其中前 5 项应视为最小必填，其余字段可按具体写入点补充。
+
+#### 最小写入点
+
+当前不建议从所有 Nanobot 对话都抽 lesson，而是只在“已经发生结构化判断”的节点写入：
+
+1. **版本构建失败后**：沉淀提示词迭代失败原因、缺失输入、结构化校验失败原因
+2. **工具绑定同步失败后**：沉淀 required_tools 缺失、schema 解析失败、工具名映射错误
+3. **版本评估结束后**：对 production-review / sandbox 的主要 finding 做结构化归纳
+4. **版本最终成功发布后**：只沉淀少量高价值成功模式，例如“哪类模板结构在某类 spec 上稳定通过”
+
+不建议作为首版写入点的内容：
+
+1. 原始长对话
+2. 每轮草稿 prompt 全量文本
+3. 没有经过评估或反思的临时尝试
+
+#### 最小读取点
+
+消费顺序也应收敛，只放在真正能影响下一次生成决策的位置：
+
+1. **需求确认阶段**：召回同类 spec 的历史高频失败模式，避免重复踩坑
+2. **版本构建前**：召回与当前 spec / template 接近的 prompt 结构经验和工具绑定经验
+3. **版本迭代前**：把上一轮评估失败的归纳 lesson 重新注入，作为下一轮 build / revise 的约束
+
+首版不建议放的位置：
+
+1. 每次 Nanobot 普通聊天入口
+2. 所有助手问答入口
+3. 与 Agent 生成无关的分析链路
+
+#### 最小召回策略
+
+为了避免这层经验一接入就污染上下文，首版建议：
+
+1. scope 只查 `agent_builder_lesson`，或只查带 `source=agent_builder|agent_workshop` 的 `agent_experience`
+2. metadata 过滤优先级高于语义近似，优先按 `object_type`、`object_key`、`spec_id`、`template_id` 收敛候选集
+3. 注入条数控制在 3 到 5 条以内
+4. 优先展示“失败教训 + 对应修正动作”，而不是只给抽象结论
+
+#### 最小测试点
+
+这项一旦开始做，至少要同时补三类验证，避免再出现“写进去了但根本没用”的假闭环：
+
+1. **写入测试**：验证 build / evaluate / revise 后是否按预期写入正确 scope 和 metadata
+2. **召回测试**：验证当前 spec/version/template 命中时，相关 lesson 会排在泛化经验之前
+3. **消费测试**：验证 lesson 真正进入 Agent Builder / Agent Workshop 的 prompt 或 revise 输入，而不是只停留在 recall API 返回值里
+
+#### 最小落地顺序
+
+建议按下面顺序推进，而不是并行铺开：
+
+1. 先补 scope 与 metadata 约束
+2. 再只选一个写入点，优先 production-review finding 总结
+3. 再只选一个消费点，优先版本迭代前注入
+4. 最后补脚本和单测，验证这层经验真的改善下一轮生成
+
+### P1-1 实现任务清单（按文件）
+
+下面这份清单的目标不是覆盖所有远期演进，而是给首批实现一个可以直接动手的拆解顺序。
+
+#### 第一批基础约束
+
+1. [core/memory/models.py](../../../core/memory/models.py)
+   - 如果采用首选方案，新增 `MemoryScope.AGENT_BUILDER_LESSON = "agent_builder_lesson"`
+   - 若暂不扩 scope，也要在文档里明确“当前版本走 `agent_experience + source metadata` 兼容路径”
+2. [app/routers/memory.py](../../../app/routers/memory.py)
+   - 将 `agent_builder_lesson` 加入 `ALL_SCOPES`
+   - 保证后续列表、搜索、健康检查接口不会把新 scope 视为非法值
+3. [core/memory/service.py](../../../core/memory/service.py)
+   - 为新 scope 补 `_SCOPE_LABEL` 和 `_DEFAULT_SCOPE_ORDER`
+   - 建议补一个 `agent_builder` ranking profile，优先级高于 `conversation`，并允许按 `object_type` / `object_key` / `spec_id` 收敛结果
+
+#### 第二批 Agent Workshop 写入任务
+
+1. [app/services/agent_workshop_service.py](../../../app/services/agent_workshop_service.py)
+   - 新增一个统一 helper，建议命名为 `_build_agent_builder_lesson_metadata(...)`
+   - 新增一个统一写入 helper，建议命名为 `_store_agent_builder_lesson(...)`
+   - helper 至少封装 `source`、`lesson_type`、`object_type`、`object_key`、`spec_id`、`version_id`、`template_id`、`evaluation_type`、`success`
+2. [app/services/agent_workshop_service.py](../../../app/services/agent_workshop_service.py)
+   - 在 `evaluate_version(...)` 中增加首个正式写入点
+   - 首批只沉淀 production-review / sandbox 的结构化 finding、主要 recommendation 和最终 decision
+   - 这一点应优先于 build 阶段写入，因为这里最容易拿到“失败原因 + 修正建议”的稳定 lesson
+3. [app/services/agent_workshop_service.py](../../../app/services/agent_workshop_service.py)
+   - 在 `sync_version_required_tools(...)` 中增加可选写入点
+   - 只在 required_tools 缺失、schema/tool 绑定失败或 execution plan 明显不完整时记录 tool-binding 类 lesson
+4. [app/services/agent_workshop_service.py](../../../app/services/agent_workshop_service.py)
+   - 在 `build_version(...)` 中暂时不要直接全量写入 lesson
+   - 首版最多只为“构建失败且有明确结构化原因”的场景预留调用点，避免把半成品 prompt 过程噪声灌进 L6
+5. [app/services/agent_workshop_service.py](../../../app/services/agent_workshop_service.py)
+   - 在 `_clone_prompt_template_for_iteration(...)` 周边不要直接写 lesson
+   - 这里只需要保证 template_id / source_version_id 这类 metadata 可被后续写入 helper 复用
+
+#### 第三批 Agent Workshop 读取任务
+
+1. [app/services/agent_workshop_service.py](../../../app/services/agent_workshop_service.py)
+   - 新增读取 helper，建议命名为 `_recall_agent_builder_lessons(...)`
+   - 首版读取时只查 `agent_builder_lesson`，或只查 `source=agent_builder|agent_workshop` 的 `agent_experience`
+   - 读取参数优先使用 `object_type`、`object_key`、`spec_id`、`template_id`
+2. [app/services/agent_workshop_service.py](../../../app/services/agent_workshop_service.py)
+   - 在版本迭代前的入口接入该 helper，优先选择 iterate / revise 前的 prompt 组装点
+   - 目标不是所有 build 都带 lesson，而是“上一轮已评估失败”的版本下一轮自动带入修正经验
+3. [app/services/agent_workshop_service.py](../../../app/services/agent_workshop_service.py)
+   - 如果当前版本暂时没有独立 revise helper，就先把读取结果挂到 `build_version(...)` 的 prompt template content 构建链路里
+   - 但必须限定只有迭代场景才注入，避免全量 draft 构建都被历史 lesson 污染
+
+#### 第四批 Embedded Nanobot 接入任务
+
+1. [core/embedded_nanobot/runtime.py](../../../core/embedded_nanobot/runtime.py)
+   - 新增一个与 `_recall_project_memory_guidance(...)` 平级的 lesson guidance helper，建议命名为 `_recall_agent_builder_lesson_guidance(...)`
+   - 仅在 `agent_builder_governance` 命中时启用，不进入普通 Nanobot 对话入口
+2. [core/embedded_nanobot/runtime.py](../../../core/embedded_nanobot/runtime.py)
+   - 用 `_merge_system_guidance(...)` 把 L6 lesson guidance 叠加到现有 project memory guidance 后面
+   - 顺序建议是：L4 项目长期记忆在前，L6 lesson 在后，避免历史经验盖过硬约束
+
+#### 第五批测试与脚本任务
+
+1. [tests/services/test_agent_workshop_service_publish_flow.py](../../../tests/services/test_agent_workshop_service_publish_flow.py)
+   - 补写入测试：`evaluate_version(...)` 后是否按预期写入 lesson scope 和 metadata
+   - 补读取测试：迭代场景下 recall 结果是否进入 prompt template content 或 revise 输入
+   - 补排序测试：当前 version/spec/template 命中时，相关 lesson 是否优先于泛化经验
+2. [tests/core/embedded_nanobot/test_runtime_hygiene.py](../../../tests/core/embedded_nanobot/test_runtime_hygiene.py)
+   - 补 governance 命中时的 lesson guidance 注入测试
+   - 明确验证普通聊天入口不会误注入 Agent Builder lesson
+3. [tests/core/tools/implementations/test_nanobot_agent_builder_tools.py](../../../tests/core/tools/implementations/test_nanobot_agent_builder_tools.py)
+   - 补当前线程 / 当前 spec 的 Agent Builder 经验读取行为测试
+   - 验证与 prompt template 工具链组合时不会破坏现有 thread_context 解析
+4. [scripts/validate_agent_builder_project_memory_loop.py](../../../scripts/validate_agent_builder_project_memory_loop.py)
+   - 保留现有 L4 验证脚本，不与 L6 混写
+5. 建议新增 `scripts/validate_agent_builder_l6_lesson_loop.py`
+   - 覆盖“写入 lesson -> 迭代前召回 -> 注入 prompt”最小闭环
+6. 建议新增 [tests/scripts/test_validate_agent_builder_l6_lesson_loop.py](../../../tests/scripts/test_validate_agent_builder_l6_lesson_loop.py)
+   - 对脚本做受控回归，避免后续只有单测没有端到端闭环验证
+
+#### 第一批建议提交顺序
+
+为了降低一次性改动面，建议按下面顺序拆批实现：
+
+1. 先改 memory scope / router / service 基础约束
+2. 再给 `evaluate_version(...)` 增加 lesson 写入 helper
+3. 再给迭代入口增加 lesson recall helper
+4. 再把 lesson guidance 接到 Embedded Nanobot governance 路径
+5. 最后补脚本与测试，把 L6 闭环单独跑绿
+
 ### P1-1 完成标准
 
 1. Agent 生成有明确可写可读的经验层。
 2. 至少 1 条生成/迭代链路能消费它。
 3. 文档中不再只能说“Agent 生成主链路更偏 L2/L3/L7”，而能补上稳定的 L6 角色。
+4. 至少 1 组测试能证明 lesson 真正进入构建或迭代输入，而不是只完成存储。
 
 ---
 
@@ -279,6 +491,10 @@
 2. 能区分写入失败、召回失败、消费失败三类问题。
 3. 后续优化不再只能靠人工翻日志判断。
 
+### P1-2 当前状态
+
+当前仍未完成。现阶段主要依赖脚本验证和零散日志，尚未形成统一指标入口、固定 dashboard 或标准化埋点字段。
+
 ---
 
 ## 4.3 P1-3 扩展 object_key / object_type 到更多对象
@@ -305,6 +521,14 @@
 1. 至少补齐 1 到 2 个非股票对象类型。
 2. 这些对象的 recall 能基于 object 维度做精确过滤。
 3. 文档中能明确这些对象属于 L4 / L5 / L6 中的哪一层，而不是混到 L7。
+
+### P1-3 当前状态
+
+当前属于部分完成：
+
+1. `workflow` / `trade_review` 已经开始进入 object binding 范围
+2. `agent_spec` / `agent_version` / `template` 仍未形成统一 object recall 约束
+3. 因此这项还不能算完成，只能算“已经离开纯股票单对象阶段”
 
 ---
 
@@ -344,16 +568,15 @@
 
 ---
 
-## 6. 推荐执行顺序
+## 6. 后续推荐顺序
 
 | 顺序 | 任务 | 理由 |
 | ------ | ------ | ------ |
-| 1 | P0-2 L5/L6 召回质量 | 这是当前最直接影响输出质量的部分 |
-| 2 | P0-3 消费闭环验证 | 先确认记忆真的被用到了 |
-| 3 | P0-1 L4 最小闭环 | 补上当前最明显的结构缺口 |
-| 4 | P1-1 Agent 生成经验层 | 提升工坊与 Nanobot 的长期复用能力 |
-| 5 | P1-2 观测指标 | 让后续优化可量化 |
-| 6 | P1-3 对象扩展 | 为跨对象记忆打基础 |
+| 1 | P1-1 Agent 生成经验层 | 当前最明确的结构缺口，且直接影响工坊复用能力 |
+| 2 | P1-2 观测指标 | 没有统一指标，后续 recall 优化很难量化比较 |
+| 3 | P1-3 对象扩展 | 为 agent / template / workflow 级 recall 打基础 |
+| 4 | P2-1 术语边界 | 防止状态、资产、记忆继续混用 |
+| 5 | P2-2 清理准备 | 为下个版本的 legacy 清理保留可执行清单 |
 
 这个顺序的核心是：
 
@@ -373,12 +596,22 @@
 4. Agent 生成开始具备专门的长期经验沉淀能力。
 5. 团队能清楚区分 L4/L5/L6 与 L7，而不会再把状态层混进记忆系统讨论。
 
+### 7.1 当前复核结果
+
+按上述口径复核，当前状态应表述为：
+
+1. 第 1 条已完成。
+2. 第 2 条已完成第一轮，仍缺统一观测指标。
+3. 第 3 条已完成。
+4. 第 4 条未完成，这正是当前最重要的 P1 缺口。
+5. 第 5 条已在文档与实现边界上明显收紧，但仍需持续维护口径。
+
 ---
 
 ## 8. 一句话版
 
-当前版本记忆系统优化，先做三件事：
+当前版本记忆系统优化，当前更准确的说法是：
 
-1. 让 L5/L6 召回真正稳定可用
-2. 让记忆真正被消费而不是只写入
-3. 补齐 L4 和 Agent 生成经验层这两个结构缺口
+1. L4 最小闭环已经补齐
+2. L5/L6 召回质量与消费闭环已经完成首轮落地
+3. 下一个最重要的缺口是 Agent 生成专用 L6、统一观测和跨对象扩展

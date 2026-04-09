@@ -1,6 +1,9 @@
+import json
+
 import pytest
 from types import SimpleNamespace
 
+from app.models.prompt_template import TemplateContent
 from app.models.agent_workshop import (
     AgentEvaluationCandidateFinding,
     AgentEvaluationEvidenceBundle,
@@ -24,6 +27,7 @@ from app.services.agent_workshop_service import (
     SPEC_COLLECTION,
     VERSION_COLLECTION,
 )
+from core.memory.models import MemoryScope
 
 
 class _FakeCursor:
@@ -1166,6 +1170,73 @@ def test_build_nanobot_evidence_worker_prompt_includes_project_memory_binding_co
 
 
 @pytest.mark.asyncio
+async def test_run_nanobot_evidence_worker_task_passes_user_id_to_embedded_nanobot(monkeypatch):
+    fake_db = _FakeDb({
+        SESSION_COLLECTION: _FakeCollection([
+            _build_session().model_dump(mode="json", by_alias=True),
+        ]),
+    })
+    svc = AgentWorkshopService(fake_db)
+    spec = _build_spec()
+    version = _build_version(AgentVersionStatus.TESTING, "spec_valuation_candidate_v1_v2", 2)
+    task = AgentEvaluationEvidenceTask(
+        task_id="task_nanobot_001",
+        finding_id="finding_nanobot_001",
+        worker_name="PromptEvidenceWorker",
+        objective="核查 prompt 证据",
+    )
+    finding = AgentEvaluationCandidateFinding(
+        finding_id="finding_nanobot_001",
+        category="prompt_evidence",
+        title="提示词证据缺口",
+    )
+    captured = {}
+
+    class _FakeEmbeddedNanobotService:
+        def __init__(self, db, workspace, preferred_model=None):
+            captured["init"] = {
+                "db": db,
+                "workspace": workspace,
+                "preferred_model": preferred_model,
+            }
+
+        async def chat(self, **kwargs):
+            captured["chat_kwargs"] = dict(kwargs)
+            return {
+                "content": json.dumps({
+                    "status": "confirmed",
+                    "summary": "nanobot 已确认",
+                    "evidence": ["证据 1"],
+                    "artifacts": [],
+                }, ensure_ascii=False),
+            }
+
+    monkeypatch.setattr(
+        "app.services.embedded_nanobot_service.EmbeddedNanobotService",
+        _FakeEmbeddedNanobotService,
+    )
+    monkeypatch.setattr(svc, "_build_nanobot_evidence_worker_prompt", lambda *_args, **_kwargs: "worker prompt")
+
+    result = await svc._run_nanobot_evidence_worker_task(
+        task,
+        finding,
+        version,
+        spec,
+        {"output_text": "ok", "output_payload": {}, "debug_prompt": {}},
+        {"project_memory_binding": {"enabled": True}},
+    )
+
+    assert result.status == "confirmed"
+    assert result.source == "nanobot"
+    assert result.summary == "nanobot 已确认"
+    assert captured["chat_kwargs"]["user_id"] == "user_001"
+    assert captured["chat_kwargs"]["channel"] == "agent_workshop_evaluation"
+    assert captured["chat_kwargs"]["thread_context"]["spec_id"] == spec.spec_id
+    assert captured["chat_kwargs"]["thread_context"]["version_id"] == version.version_id
+    assert captured["chat_kwargs"]["thread_context"]["workshop_session_id"] == version.published_from_session_id
+
+
+@pytest.mark.asyncio
 async def test_evaluate_runtime_result_does_not_raise_constraint_candidate_from_missing_list(monkeypatch):
     svc = AgentWorkshopService(_FakeDb({}))
     version = _build_version(AgentVersionStatus.TESTING, "spec_valuation_candidate_v1_v1", 1)
@@ -1666,6 +1737,94 @@ async def test_evaluate_version_production_review_falls_back_to_saved_debug_resu
     assert normalized["user_goal"] == "验证财报风险跟踪结果"
 
 
+@pytest.mark.asyncio
+async def test_evaluate_version_stores_agent_builder_lesson_after_production_review(monkeypatch):
+    spec = _build_spec()
+    session = _build_session()
+    version = _build_version(AgentVersionStatus.TESTING, "spec_valuation_candidate_v1_v1", 1)
+    fake_db = _FakeDb({
+        SPEC_COLLECTION: _FakeCollection([spec.model_dump(mode="json", by_alias=True)]),
+        SESSION_COLLECTION: _FakeCollection([session.model_dump(mode="json", by_alias=True)]),
+        VERSION_COLLECTION: _FakeCollection([version.model_dump(mode="json", by_alias=True)]),
+        EVALUATION_COLLECTION: _FakeCollection([]),
+    })
+    svc = AgentWorkshopService(fake_db)
+
+    class _FakeMemoryService:
+        def __init__(self):
+            self.calls = []
+
+        async def store(self, messages, **kwargs):
+            self.calls.append({"messages": messages, **kwargs})
+            return SimpleNamespace(memory_ids=["mem_001"], facts_extracted=1, success=True, error="")
+
+    fake_memory_service = _FakeMemoryService()
+
+    async def _fake_evaluate_runtime_result(_version, _spec, _runtime_result, user_feedback=""):
+        del _version, _spec, _runtime_result, user_feedback
+        return (
+            {
+                "runtime_goal_alignment": 0.92,
+                "runtime_output_quality": 0.9,
+                "runtime_reasoning_quality": 0.88,
+                "runtime_tool_usage": 0.91,
+                "runtime_prompt_quality": 0.89,
+                "runtime_constraint_control": 0.93,
+            },
+            ["缺少 tool_trace 中的关键工具调用证据。"],
+            ["补齐 tool_trace 并重新发起 production-review。"],
+            {
+                "mode": "production-review",
+                "evaluation_valid": True,
+                "evaluation_status": "valid",
+                "layered_review": {
+                    "content_quality": {"score": 0.9, "decision": "pass", "blockers": [], "warnings": []},
+                    "publish_readiness": {
+                        "score": 0.62,
+                        "decision": "revise",
+                        "blockers": ["缺少 tool_trace 中的关键工具调用证据。"],
+                        "warnings": [],
+                    },
+                    "blockers": ["缺少 tool_trace 中的关键工具调用证据。"],
+                    "warnings": [],
+                },
+            },
+        )
+
+    monkeypatch.setattr(svc, "_evaluate_runtime_result", _fake_evaluate_runtime_result)
+    monkeypatch.setattr("core.memory.service.get_memory_service", lambda _db=None: fake_memory_service)
+
+    result = await svc.evaluate_version(
+        version.version_id,
+        evaluation_type="production-review",
+        runtime_result={
+            "output_text": "表面上有结果",
+            "debug_prompt": {"system_prompt": "system", "tool_trace": []},
+        },
+    )
+
+    assert result["evaluation"].decision == "revise"
+    assert len(fake_memory_service.calls) == 1
+    call = fake_memory_service.calls[0]
+    assert call["user_id"] == session.user_id
+    assert call["agent_id"] == "agent_builder"
+    assert call["session_id"] == session.session_id
+    assert call["scope"] == MemoryScope.AGENT_BUILDER_LESSON.value
+    assert call["metadata"]["project_id"] == "tradingagents-cn"
+    assert call["metadata"]["source"] == "agent_workshop"
+    assert call["metadata"]["lesson_type"] == "evaluation_failure"
+    assert call["metadata"]["object_type"] == "agent_version"
+    assert call["metadata"]["object_key"] == version.version_id
+    assert call["metadata"]["spec_id"] == spec.spec_id
+    assert call["metadata"]["version_id"] == version.version_id
+    assert call["metadata"]["template_id"] == version.prompt_template_ref["template_id"]
+    assert call["metadata"]["evaluation_type"] == "production-review"
+    assert call["metadata"]["success"] is False
+    assert "Agent Workshop 版本" in call["messages"][0]["content"]
+    assert "主要问题：缺少 tool_trace 中的关键工具调用证据。" in call["messages"][0]["content"]
+    assert "修正动作：补齐 tool_trace 并重新发起 production-review。" in call["messages"][0]["content"]
+
+
 def test_agent_evaluation_report_hydrates_evidence_bundle_from_legacy_details() -> None:
     report = AgentEvaluationReport(
         evaluation_id="eval_legacy_001",
@@ -2003,8 +2162,8 @@ async def test_build_version_for_nanobot_draft_skips_gap_analysis(monkeypatch):
     async def _fake_collect_capability_snapshot(_text):
         return {"registered_capabilities": []}
 
-    async def _fake_create_prompt_template(_version_id, _spec, _required_tools, gap_report=None, tooling_plan=None):
-        del gap_report, tooling_plan
+    async def _fake_create_prompt_template(_version_id, _spec, _required_tools, gap_report=None, tooling_plan=None, agent_builder_lesson_block=""):
+        del gap_report, tooling_plan, agent_builder_lesson_block
         return {"template_id": "tpl_nanobot_v1", "template_name": "Nanobot 模板"}
 
     monkeypatch.setattr(svc, "_build_gap_analysis", _unexpected_gap_analysis)
@@ -2016,6 +2175,147 @@ async def test_build_version_for_nanobot_draft_skips_gap_analysis(monkeypatch):
     assert result["version"].status == AgentVersionStatus.TESTING
     saved_session = await fake_db[SESSION_COLLECTION].find_one({"session_id": session.session_id})
     assert saved_session["gap_report"] is None
+
+
+@pytest.mark.asyncio
+async def test_build_version_includes_agent_builder_lessons_in_prompt_template(monkeypatch):
+    spec = _build_spec()
+    spec.owner_user_id = "user_001"
+    session = _build_session()
+    session.current_spec_snapshot = spec
+    session.gap_report = AgentWorkshopGapAnalysis(existing_tools=["get_peer_comparison"])
+    session.feasibility_status = "feasible"
+    session.completeness_score = 1.0
+
+    fake_db = _FakeDb({
+        SPEC_COLLECTION: _FakeCollection([spec.model_dump(mode="json", by_alias=True)]),
+        SESSION_COLLECTION: _FakeCollection([session.model_dump(mode="json", by_alias=True)]),
+        VERSION_COLLECTION: _FakeCollection([]),
+        EVALUATION_COLLECTION: _FakeCollection([]),
+        "prompt_templates": _FakeCollection([]),
+        "template_history": _FakeCollection([]),
+    })
+    svc = AgentWorkshopService(fake_db)
+    captured = {}
+
+    class _FakeMemoryService:
+        def __init__(self):
+            self.calls = []
+
+        async def recall_formatted(self, **kwargs):
+            self.calls.append(kwargs)
+            return "【历史工坊教训】\n- 上一轮缺少行业横向比较\n- 修正动作：保留 peer comparison 证据链\n"
+
+    fake_memory_service = _FakeMemoryService()
+
+    async def _fake_collect_capability_snapshot(_text):
+        return {"registered_capabilities": []}
+
+    async def _fake_build_project_memory_block():
+        return ""
+
+    async def _fake_create_template(_self, payload):
+        captured["payload"] = payload
+        return SimpleNamespace(id="tpl_build_lesson_001", template_name=payload.template_name, status=payload.status)
+
+    monkeypatch.setattr("core.memory.service.get_memory_service", lambda _db=None: fake_memory_service)
+    monkeypatch.setattr(svc, "_collect_capability_snapshot", _fake_collect_capability_snapshot)
+    monkeypatch.setattr(svc, "_build_project_memory_block_for_workshop", _fake_build_project_memory_block)
+    monkeypatch.setattr("app.services.agent_workshop_service.PromptTemplateService.create_template", _fake_create_template)
+
+    result = await svc.build_version(session.session_id)
+
+    assert result["version"].version_id == "spec_valuation_candidate_v1_v1"
+    assert len(fake_memory_service.calls) == 1
+    recall_call = fake_memory_service.calls[0]
+    assert recall_call["user_id"] == session.user_id
+    assert recall_call["agent_id"] == "agent_builder"
+    assert recall_call["scopes"] == [MemoryScope.AGENT_BUILDER_LESSON.value]
+    assert recall_call["metadata_filters"] == {"spec_id": spec.spec_id}
+    assert recall_call["ranking_profile"] == "agent_builder"
+    payload = captured["payload"]
+    assert "【Agent 工坊历史教训】" in payload.content.system_prompt
+    assert "上一轮缺少行业横向比较" in payload.content.system_prompt
+    assert "必须结合 Agent 工坊历史教训修正上一轮或同类版本已确认的问题。" in payload.content.constraints
+    assert "修正动作：保留 peer comparison 证据链" in payload.content.constraints
+
+
+@pytest.mark.asyncio
+async def test_recall_agent_builder_lessons_for_spec_logs_hit_observation(monkeypatch):
+    spec = _build_spec()
+    spec.owner_user_id = "user_001"
+    svc = AgentWorkshopService(_FakeDb({}))
+    captured = {}
+
+    class _FakeMemoryService:
+        async def recall_formatted(self, **kwargs):
+            captured["recall_kwargs"] = dict(kwargs)
+            return "【历史工坊教训】\n- 上一轮缺少行业对比证据\n"
+
+    def _fake_log_generated_result(stage, result, context=None):
+        captured["log_stage"] = stage
+        captured["log_result"] = result
+        captured["log_context"] = context
+
+    monkeypatch.setattr("core.memory.service.get_memory_service", lambda _db=None: _FakeMemoryService())
+    monkeypatch.setattr(svc, "_log_generated_result", _fake_log_generated_result)
+
+    result = await svc._recall_agent_builder_lessons_for_spec(
+        spec,
+        user_id="user_001",
+        query_text="PE PB",
+        source_stage="gap_analysis",
+    )
+
+    assert "【Agent 工坊历史教训】" in result
+    assert captured["log_stage"] == "agent_builder_lesson_recall_observation"
+    assert captured["log_result"]["status"] == "hit"
+    assert captured["log_result"]["hit"] is True
+    assert captured["log_result"]["source_stage"] == "gap_analysis"
+    assert captured["log_result"]["scope"] == MemoryScope.AGENT_BUILDER_LESSON.value
+    assert captured["log_result"]["query_chars"] > 0
+    assert captured["log_result"]["result_chars"] > 0
+    assert captured["log_context"] == {
+        "spec_id": spec.spec_id,
+        "spec_name": spec.name,
+        "user_id": "user_001",
+    }
+
+
+@pytest.mark.asyncio
+async def test_recall_agent_builder_lessons_for_spec_logs_miss_observation(monkeypatch):
+    spec = _build_spec()
+    spec.owner_user_id = "user_001"
+    svc = AgentWorkshopService(_FakeDb({}))
+    captured = {}
+
+    class _FakeMemoryService:
+        async def recall_formatted(self, **kwargs):
+            captured["recall_kwargs"] = dict(kwargs)
+            return ""
+
+    def _fake_log_generated_result(stage, result, context=None):
+        captured["log_stage"] = stage
+        captured["log_result"] = result
+        captured["log_context"] = context
+
+    monkeypatch.setattr("core.memory.service.get_memory_service", lambda _db=None: _FakeMemoryService())
+    monkeypatch.setattr(svc, "_log_generated_result", _fake_log_generated_result)
+
+    result = await svc._recall_agent_builder_lessons_for_spec(
+        spec,
+        user_id="user_001",
+        query_text="valuation_report",
+        source_stage="requirement_clarification",
+    )
+
+    assert result == ""
+    assert captured["log_stage"] == "agent_builder_lesson_recall_observation"
+    assert captured["log_result"]["status"] == "miss"
+    assert captured["log_result"]["hit"] is False
+    assert captured["log_result"]["source_stage"] == "requirement_clarification"
+    assert captured["log_result"]["result_chars"] == 0
+    assert captured["log_result"]["error"] == ""
 
 
 @pytest.mark.asyncio
@@ -2232,8 +2532,8 @@ async def test_iterate_version_keeps_same_spec_and_creates_new_session() -> None
 
     svc._analyze_requirement_turn = _fake_analyze_requirement_turn
 
-    async def _fake_create_prompt_template(version_id, _spec, _required_tools, gap_report=None, tooling_plan=None):
-        del _spec, _required_tools, gap_report, tooling_plan
+    async def _fake_create_prompt_template(version_id, _spec, _required_tools, gap_report=None, tooling_plan=None, agent_builder_lesson_block=""):
+        del _spec, _required_tools, gap_report, tooling_plan, agent_builder_lesson_block
         return {"template_id": f"tpl_{version_id}", "template_name": f"模板_{version_id}", "status": "draft"}
 
     svc._create_prompt_template = _fake_create_prompt_template
@@ -2257,6 +2557,214 @@ async def test_iterate_version_keeps_same_spec_and_creates_new_session() -> None
     stored_version = next(item for item in fake_db[VERSION_COLLECTION]._items if item["version_id"] == "spec_valuation_candidate_v1_v2")
     assert stored_version["status"] == AgentVersionStatus.DRAFT
     assert stored_version["version"] == 2
+
+
+@pytest.mark.asyncio
+async def test_analyze_requirement_turn_includes_agent_builder_lessons_in_prompt(monkeypatch):
+    spec = _build_spec()
+    spec.owner_user_id = "user_001"
+    svc = AgentWorkshopService(_FakeDb({}))
+    captured = {}
+
+    class _FakeClient:
+        async def achat(self, messages):
+            captured["messages"] = messages
+            return SimpleNamespace(content=json.dumps({
+                "feasibility_status": "feasible",
+                "response_message": "我先按现有需求整理成一版可执行草案。",
+                "refusal_reason": "",
+                "pending_questions": [],
+                "completeness_score": 0.95,
+                "name": spec.name,
+                "domain": "stock_analysis",
+                "target_users": ["投研人员"],
+                "primary_goal": "输出A股估值结论",
+                "responsibilities": ["输出估值结论并解释关键依据"],
+                "non_goals": ["不直接给买卖建议"],
+                "inputs": [{"name": "symbol", "type": "string", "required": True, "description": "股票代码"}],
+                "outputs": [{"name": "valuation_report", "type": "string", "required": True, "description": "估值报告"}],
+                "success_criteria": ["结论可解释且有依据"],
+                "constraints": ["不直接给买卖建议"],
+                "preferred_methods": ["PE"],
+                "capability_requirements": [{
+                    "capability_key": "peer_comparison",
+                    "capability_name": "同业比较",
+                    "capability_type": "data",
+                    "description": "获取同业估值与财务比较依据",
+                    "delivery_requirement": "tool-or-prompt",
+                    "acceptance_criteria": ["能给出至少一组可解释的同行比较依据"],
+                }],
+                "sample_symbols": ["600519.SH"],
+            }, ensure_ascii=False))
+
+    async def _fake_collect_capability_snapshot(_text, top_k=12):
+        del top_k
+        return {"registered_capabilities": []}
+
+    async def _fake_recall_agent_builder_lessons_for_spec(_spec, *, user_id="", query_text="", source_stage=""):
+        captured["lesson_request"] = {
+            "spec_id": _spec.spec_id,
+            "user_id": user_id,
+            "query_text": query_text,
+            "source_stage": source_stage,
+        }
+        return "【Agent 工坊历史教训】\n- 之前遗漏了禁止交易建议约束\n- 修正动作：明确保留 non_goals 和 constraints"
+
+    async def _fake_ensure_llm_client():
+        return _FakeClient()
+
+    monkeypatch.setattr(svc, "_ensure_llm_client", _fake_ensure_llm_client)
+    monkeypatch.setattr(svc, "_get_llm_runtime_config", lambda _client: {})
+    monkeypatch.setattr(svc, "_collect_capability_snapshot", _fake_collect_capability_snapshot)
+    monkeypatch.setattr(svc, "_recall_agent_builder_lessons_for_spec", _fake_recall_agent_builder_lessons_for_spec)
+
+    result = await svc._analyze_requirement_turn(
+        ["请帮我做一个A股估值 Agent，不能直接给买卖建议。"],
+        user_id="user_001",
+        existing_spec=spec,
+    )
+
+    assert result["spec"].name == spec.name
+    assert captured["lesson_request"]["spec_id"] == spec.spec_id
+    assert captured["lesson_request"]["user_id"] == "user_001"
+    prompt = captured["messages"][1].content
+    assert "【Agent 工坊历史教训】" in prompt
+    assert "之前遗漏了禁止交易建议约束" in prompt
+    assert "避免在规格确认阶段重复过去的问题" in prompt
+
+
+@pytest.mark.asyncio
+async def test_build_gap_analysis_with_llm_includes_agent_builder_lessons_in_prompt(monkeypatch):
+    spec = _build_spec()
+    spec.owner_user_id = "user_001"
+    spec.capability_requirements = []
+    svc = AgentWorkshopService(_FakeDb({}))
+    captured = {}
+
+    class _FakeClient:
+        async def achat(self, messages):
+            captured["messages"] = messages
+            return SimpleNamespace(content=json.dumps({
+                "existing_tools": [],
+                "suggested_tools": [],
+                "suggested_capabilities": [],
+                "manual_dependencies": [],
+                "blocking_gaps": ["需要补充更稳定的同行比较能力封装"],
+                "fallback_strategy": ["先基于现有工具做保守降级"],
+                "build_recommendations": ["优先补同行比较证据链"],
+                "notes": ["已结合历史 lesson 做去重判断"],
+            }, ensure_ascii=False))
+
+    async def _fake_ensure_llm_client():
+        return _FakeClient()
+
+    async def _fake_recall_agent_builder_lessons_for_spec(_spec, *, user_id="", query_text="", source_stage=""):
+        captured["lesson_request"] = {
+            "spec_id": _spec.spec_id,
+            "user_id": user_id,
+            "query_text": query_text,
+            "source_stage": source_stage,
+        }
+        return "【Agent 工坊历史教训】\n- 上一轮误把已有能力判成新缺口\n- 修正动作：先核对合法工具清单和能力覆盖映射"
+
+    monkeypatch.setattr(svc, "_ensure_llm_client", _fake_ensure_llm_client)
+    monkeypatch.setattr(svc, "_select_gap_analysis_tool_details", lambda _spec, _snapshot: [])
+    monkeypatch.setattr(svc, "_build_valuation_reuse_guidance_lines", lambda _spec, _snapshot: [])
+    monkeypatch.setattr(svc, "_build_capability_coverage_map_lines", lambda _spec, _details: [])
+    monkeypatch.setattr(svc, "_recall_agent_builder_lessons_for_spec", _fake_recall_agent_builder_lessons_for_spec)
+    svc._llm_client_meta = {"provider": "fake", "model": "fake-model", "timeout": 60}
+
+    result = await svc._build_gap_analysis_with_llm(spec, {"registered_capabilities": []})
+
+    assert result.generated_by == "llm"
+    assert captured["lesson_request"]["spec_id"] == spec.spec_id
+    assert captured["lesson_request"]["user_id"] == "user_001"
+    prompt = captured["messages"][1].content
+    assert "【Agent 工坊历史教训】" in prompt
+    assert "上一轮误把已有能力判成新缺口" in prompt
+    assert "不要在缺口分析阶段再次提出已经被证伪的补法" in prompt
+
+
+@pytest.mark.asyncio
+async def test_clone_prompt_template_for_iteration_includes_agent_builder_lessons(monkeypatch):
+    spec = _build_spec()
+    spec.owner_user_id = "user_001"
+    session = _build_session()
+    version = _build_version(AgentVersionStatus.TESTING, "spec_valuation_candidate_v1_v1", 1)
+    fake_db = _FakeDb({
+        SPEC_COLLECTION: _FakeCollection([spec.model_dump(mode="json", by_alias=True)]),
+        SESSION_COLLECTION: _FakeCollection([session.model_dump(mode="json", by_alias=True)]),
+        VERSION_COLLECTION: _FakeCollection([version.model_dump(mode="json", by_alias=True)]),
+        EVALUATION_COLLECTION: _FakeCollection([
+            AgentEvaluationReport(
+                evaluation_id="eval_iter_lesson_001",
+                version_id=version.version_id,
+                evaluation_type="production-review",
+                scores={"overall": 0.52},
+                issues=["缺少行业对比证据"],
+                recommendations=["补充行业横向比较和估值解释"],
+                details={},
+                decision="revise",
+            ).model_dump(mode="json", by_alias=True)
+        ]),
+        "prompt_templates": _FakeCollection([]),
+        "template_history": _FakeCollection([]),
+    })
+    svc = AgentWorkshopService(fake_db)
+    captured = {}
+
+    class _FakeMemoryService:
+        def __init__(self):
+            self.calls = []
+
+        async def recall_formatted(self, **kwargs):
+            self.calls.append(kwargs)
+            return "【历史工坊教训】\n- 上一轮在行业对比证据上不足\n- 修正动作：补充行业横向比较和估值解释\n"
+
+    fake_memory_service = _FakeMemoryService()
+
+    async def _fake_get_template(_self, template_id):
+        assert template_id == version.prompt_template_ref["template_id"]
+        return SimpleNamespace(
+            agent_type="custom_agent",
+            content=TemplateContent(
+                system_prompt="你是估值分析师。",
+                user_prompt="user",
+                tool_guidance="guidance",
+                analysis_requirements="analysis",
+                output_format="output",
+                constraints="- 原始约束",
+            ),
+        )
+
+    async def _fake_create_template(_self, payload):
+        captured["payload"] = payload
+        return SimpleNamespace(id="tpl_iter_clone_001", template_name=payload.template_name, status=payload.status)
+
+    monkeypatch.setattr("core.memory.service.get_memory_service", lambda _db=None: fake_memory_service)
+    monkeypatch.setattr("app.services.agent_workshop_service.PromptTemplateService.get_template", _fake_get_template)
+    monkeypatch.setattr("app.services.agent_workshop_service.PromptTemplateService.create_template", _fake_create_template)
+
+    result = await svc._clone_prompt_template_for_iteration(
+        version,
+        spec,
+        "spec_valuation_candidate_v1_v2",
+    )
+
+    assert result["template_id"] == "tpl_iter_clone_001"
+    assert len(fake_memory_service.calls) == 1
+    recall_call = fake_memory_service.calls[0]
+    assert recall_call["user_id"] == session.user_id
+    assert recall_call["agent_id"] == "agent_builder"
+    assert recall_call["scopes"] == [MemoryScope.AGENT_BUILDER_LESSON.value]
+    assert recall_call["metadata_filters"] == {"spec_id": spec.spec_id}
+    assert recall_call["ranking_profile"] == "agent_builder"
+    assert "缺少行业对比证据" in recall_call["query"]
+    payload = captured["payload"]
+    assert "【Agent 工坊历史教训】" in payload.content.system_prompt
+    assert "上一轮在行业对比证据上不足" in payload.content.system_prompt
+    assert "必须结合 Agent 工坊历史教训修正上一轮或同类版本已确认的问题。" in payload.content.constraints
+    assert "修正动作：补充行业横向比较和估值解释" in payload.content.constraints
 
 
 @pytest.mark.asyncio

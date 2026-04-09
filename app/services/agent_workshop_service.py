@@ -59,6 +59,7 @@ from app.models.agent_workshop import (
 from app.services.capability_index_service import CapabilityIndexService
 from app.services.prompt_template_service import PromptTemplateService
 from app.utils.timezone import now_tz
+from core.memory.models import MemoryScope
 from core.agents.config import AgentCategory, AgentInput, AgentMaintenanceStatus, AgentMetadata, AgentOutput, LicenseTier
 from core.llm import UnifiedLLMClient, Message
 from core.tools import get_tool_registry
@@ -78,6 +79,7 @@ SPEC_COLLECTION = "agent_specs"
 SESSION_COLLECTION = "agent_workshop_sessions"
 VERSION_COLLECTION = "agent_versions"
 EVALUATION_COLLECTION = "agent_evaluations"
+_AGENT_BUILDER_PROJECT_ID = "tradingagents-cn"
 
 
 class AgentWorkshopLLMStageError(Exception):
@@ -804,12 +806,14 @@ class AgentWorkshopService:
 
         gap_report = None
         tooling_plan = None
+        lesson_user_id = str(spec.owner_user_id or "").strip()
         context_session_id = str(version.published_from_session_id or spec.latest_session_id or "").strip()
         if context_session_id:
             session = await self._load_session(context_session_id)
             if session is not None:
                 gap_report = session.gap_report
                 tooling_plan = session.tooling_plan
+            lesson_user_id = str(session.user_id or lesson_user_id).strip()
 
         version.required_tools = normalized_required_tools
         metadata = dict(version.agent_metadata or {})
@@ -834,12 +838,19 @@ class AgentWorkshopService:
         evaluation_policy["execution_validation_required"] = True
         evaluation_policy["execution_validation_status"] = version.execution_plan.validation_status
         version.evaluation_policy = evaluation_policy
+        agent_builder_lesson_block = await self._recall_agent_builder_lessons_for_spec(
+            spec,
+            user_id=lesson_user_id,
+            query_text=" ".join(normalized_required_tools[:4]),
+            source_stage="sync_version_required_tools",
+        )
 
         prompt_content = self._build_prompt_template_content(
             spec,
             normalized_required_tools,
             gap_report=gap_report,
             tooling_plan=tooling_plan,
+            agent_builder_lesson_block=agent_builder_lesson_block,
         )
         version.prompt_template_ref = await self._upsert_version_prompt_template(
             version,
@@ -900,6 +911,12 @@ class AgentWorkshopService:
         evaluation_policy["execution_validation_required"] = True
         evaluation_policy["execution_validation_status"] = execution_plan.validation_status
         metadata = self._build_agent_metadata(version_id, spec, required_tools)
+        agent_builder_lesson_block = await self._recall_agent_builder_lessons_for_spec(
+            spec,
+            user_id=str(session.user_id or spec.owner_user_id or "").strip(),
+            query_text=" ".join([*spec.preferred_methods[:4], *required_tools[:4]]),
+            source_stage="build_version",
+        )
 
         if existing_draft_version is not None:
             version = existing_draft_version
@@ -920,6 +937,7 @@ class AgentWorkshopService:
                     required_tools,
                     gap_report=gap_report,
                     tooling_plan=session.tooling_plan,
+                    agent_builder_lesson_block=agent_builder_lesson_block,
                 ),
             )
             version.published_from_session_id = session.session_id
@@ -931,6 +949,7 @@ class AgentWorkshopService:
                 required_tools,
                 gap_report=gap_report,
                 tooling_plan=session.tooling_plan,
+                agent_builder_lesson_block=agent_builder_lesson_block,
             )
             version = AgentVersion(
                 version_id=version_id,
@@ -1331,6 +1350,7 @@ class AgentWorkshopService:
         report = self._attach_evaluation_summary(report)
 
         await self._save_evaluation(report)
+        await self._store_agent_builder_lesson(version, spec, report)
 
         if decision == "pass" and version.status == AgentVersionStatus.DRAFT:
             version.status = AgentVersionStatus.TESTING
@@ -1707,6 +1727,238 @@ class AgentWorkshopService:
             ),
         }
 
+    def _build_agent_builder_lesson_metadata(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+        report: AgentEvaluationReport,
+    ) -> Dict[str, Any]:
+        template_id = str((version.prompt_template_ref or {}).get("template_id") or "").strip()
+        success = str(report.decision or "").strip().lower() == "pass"
+        return {
+            "project_id": _AGENT_BUILDER_PROJECT_ID,
+            "source": "agent_workshop",
+            "lesson_type": "evaluation_success" if success else "evaluation_failure",
+            "object_type": "agent_version",
+            "object_key": version.version_id,
+            "spec_id": spec.spec_id,
+            "version_id": version.version_id,
+            "template_id": template_id,
+            "evaluation_type": str(report.evaluation_type or "").strip(),
+            "success": success,
+        }
+
+    def _build_agent_builder_lesson_text(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+        report: AgentEvaluationReport,
+    ) -> str:
+        decision = str(report.decision or "").strip().lower() or "revise"
+        evaluation_type = str(report.evaluation_type or "").strip() or "sandbox"
+        overall_score = (report.scores or {}).get("overall")
+        parts = [
+            f"Agent Workshop 版本 {version.version_id}（{spec.name or spec.spec_id}）在 {evaluation_type} 评估中结论为 {decision}。",
+        ]
+        if overall_score is not None:
+            parts.append(f"综合分：{overall_score}。")
+
+        issues = self._dedupe([str(item).strip() for item in (report.issues or []) if str(item).strip()])[:3]
+        if issues:
+            parts.append("主要问题：" + "；".join(issues) + "。")
+
+        recommendations = self._dedupe([
+            str(item).strip() for item in (report.recommendations or []) if str(item).strip()
+        ])[:3]
+        if recommendations:
+            parts.append("修正动作：" + "；".join(recommendations) + "。")
+
+        return "\n".join(parts).strip()
+
+    async def _resolve_agent_builder_lesson_user_context(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+    ) -> Tuple[str, str]:
+        session_id = str(spec.latest_session_id or version.published_from_session_id or "").strip()
+        if not session_id:
+            return "", ""
+
+        session_doc = await self._db[SESSION_COLLECTION].find_one({"session_id": session_id})
+        if not session_doc:
+            return "", session_id
+
+        session = AgentWorkshopSession(**session_doc)
+        return str(session.user_id or "").strip(), session_id
+
+    async def _store_agent_builder_lesson(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+        report: AgentEvaluationReport,
+    ) -> None:
+        evaluation_type = str(report.evaluation_type or "").strip()
+        if evaluation_type not in {"sandbox", "production-review"}:
+            return
+
+        lesson_text = self._build_agent_builder_lesson_text(version, spec, report)
+        if not lesson_text:
+            return
+
+        try:
+            from core.memory.service import get_memory_service
+
+            user_id, session_id = await self._resolve_agent_builder_lesson_user_context(version, spec)
+            await get_memory_service(self._db).store(
+                [{"role": "system", "content": lesson_text}],
+                user_id=user_id,
+                agent_id="agent_builder",
+                session_id=session_id,
+                scope=MemoryScope.AGENT_BUILDER_LESSON.value,
+                metadata=self._build_agent_builder_lesson_metadata(version, spec, report),
+            )
+        except Exception as exc:
+            logger.debug("[AgentWorkshop] store agent builder lesson skipped: %s", exc)
+
+    async def _recall_agent_builder_lessons(
+        self,
+        source_version: AgentVersion,
+        spec: AgentSpec,
+    ) -> str:
+        try:
+            user_id, _session_id = await self._resolve_agent_builder_lesson_user_context(source_version, spec)
+            latest_evaluation_doc = await self._db[EVALUATION_COLLECTION].find_one(
+                {"version_id": source_version.version_id},
+                sort=[("created_at", -1)],
+            )
+            latest_evaluation = AgentEvaluationReport(**latest_evaluation_doc) if latest_evaluation_doc else None
+
+            query_parts = [
+                source_version.version_id,
+                " ".join((latest_evaluation.issues or [])[:2]) if latest_evaluation else "",
+                " ".join((latest_evaluation.recommendations or [])[:2]) if latest_evaluation else "",
+            ]
+            return await self._recall_agent_builder_lessons_for_spec(
+                spec,
+                user_id=user_id,
+                query_text=" ".join(part for part in query_parts if str(part or "").strip()),
+                source_stage="iteration_prompt_clone",
+            )
+        except Exception as exc:
+            logger.debug("[AgentWorkshop] recall agent builder lessons skipped: %s", exc)
+            return ""
+
+    def _build_agent_builder_lesson_query_text(self, spec: AgentSpec, extra_text: str = "") -> str:
+        parts: List[str] = [
+            spec.name,
+            spec.primary_goal,
+            *spec.responsibilities[:4],
+            *spec.success_criteria[:4],
+            *spec.preferred_methods[:4],
+            *spec.constraints[:4],
+            *self._list_io_field_names(spec.outputs)[:4],
+            extra_text,
+        ]
+        return " ".join(part for part in parts if str(part or "").strip())
+
+    def _format_agent_builder_lesson_block(self, recalled: str) -> str:
+        if not recalled.strip():
+            return ""
+        return (
+            "【Agent 工坊历史教训】\n"
+            "以下内容来自同一规格或相近版本的已验证评估结论。当前这轮规格确认、版本构建或迭代必须优先避免重复这些问题，并优先采用已经验证过的修正动作。\n\n"
+            f"{recalled.strip()}"
+        )
+
+    def _log_agent_builder_lesson_recall_observation(
+        self,
+        *,
+        spec: AgentSpec,
+        source_stage: str,
+        user_id: str,
+        query: str,
+        metadata_filters: Dict[str, Any],
+        recalled: str,
+        status: str,
+        error: str = "",
+    ) -> None:
+        query_text = str(query or "")
+        recalled_text = str(recalled or "")
+        payload = {
+            "source_stage": source_stage or "unknown",
+            "status": status,
+            "hit": bool(recalled_text.strip()),
+            "query_chars": len(query_text),
+            "query_preview": query_text[:240],
+            "result_chars": len(recalled_text),
+            "result_preview": recalled_text[:240],
+            "metadata_filters": dict(metadata_filters or {}),
+            "ranking_profile": "agent_builder",
+            "scope": MemoryScope.AGENT_BUILDER_LESSON.value,
+            "error": error,
+        }
+        self._log_generated_result(
+            "agent_builder_lesson_recall_observation",
+            payload,
+            context={
+                "spec_id": spec.spec_id,
+                "spec_name": spec.name,
+                "user_id": user_id,
+            },
+        )
+
+    async def _recall_agent_builder_lessons_for_spec(
+        self,
+        spec: AgentSpec,
+        *,
+        user_id: str = "",
+        query_text: str = "",
+        source_stage: str = "",
+    ) -> str:
+        try:
+            from core.memory.service import get_memory_service
+
+            resolved_user_id = str(user_id or spec.owner_user_id or "").strip()
+            recall_query = self._build_agent_builder_lesson_query_text(spec, query_text)
+            metadata_filters = {"spec_id": spec.spec_id}
+            recalled = await get_memory_service(self._db).recall_formatted(
+                query=recall_query,
+                user_id=resolved_user_id,
+                agent_id="agent_builder",
+                scopes=[MemoryScope.AGENT_BUILDER_LESSON.value],
+                metadata_filters=metadata_filters,
+                limit=4,
+                max_chars=900,
+                ranking_profile="agent_builder",
+                group_by_scope=True,
+                per_scope_limit=4,
+            )
+            self._log_agent_builder_lesson_recall_observation(
+                spec=spec,
+                source_stage=source_stage,
+                user_id=resolved_user_id,
+                query=recall_query,
+                metadata_filters=metadata_filters,
+                recalled=recalled,
+                status="hit" if recalled.strip() else "miss",
+            )
+            return self._format_agent_builder_lesson_block(recalled)
+        except Exception as exc:
+            resolved_user_id = str(user_id or spec.owner_user_id or "").strip()
+            recall_query = self._build_agent_builder_lesson_query_text(spec, query_text)
+            self._log_agent_builder_lesson_recall_observation(
+                spec=spec,
+                source_stage=source_stage,
+                user_id=resolved_user_id,
+                query=recall_query,
+                metadata_filters={"spec_id": spec.spec_id},
+                recalled="",
+                status="error",
+                error=str(exc),
+            )
+            logger.debug("[AgentWorkshop] recall agent builder lessons skipped: %s", exc)
+            return ""
+
     def _build_project_memory_binding_summary(
         self,
         review: Optional[Dict[str, Any]],
@@ -2028,18 +2280,39 @@ class AgentWorkshopService:
         spec: AgentSpec,
         new_version_id: str,
     ) -> Dict[str, Any]:
+        agent_builder_lesson_block = await self._recall_agent_builder_lessons(source_version, spec)
         template_id = str((source_version.prompt_template_ref or {}).get("template_id") or "").strip()
         if template_id:
             try:
                 prompt_service = PromptTemplateService(db=self._db)
                 source_template = await prompt_service.get_template(template_id)
                 if source_template is not None:
+                    content = source_template.content.model_copy(deep=True)
+                    if agent_builder_lesson_block:
+                        lesson_guidance = (
+                            "\n你还必须结合以下 Agent 工坊历史教训修正这轮迭代，"
+                            "对已经被上一轮评估证实的问题，不得原样重复失败。"
+                            f"\n{agent_builder_lesson_block.strip()}"
+                        )
+                        content.system_prompt = f"{content.system_prompt}{lesson_guidance}"
+                        lesson_constraint_lines = [
+                            "- 必须结合 Agent 工坊历史教训修正上一轮或同类版本已确认的问题。",
+                            *[
+                                f"- {line.strip()}"
+                                for line in agent_builder_lesson_block.splitlines()
+                                if line.strip() and not line.strip().startswith("【")
+                            ],
+                        ]
+                        content.constraints = "\n".join(self._dedupe([
+                            str(content.constraints or "").strip(),
+                            *lesson_constraint_lines,
+                        ]))
                     cloned_template = await prompt_service.create_template(
                         PromptTemplateCreate(
                             agent_type=source_template.agent_type or "custom_agent",
                             agent_name=new_version_id,
                             template_name=f"{spec.name} v{new_version_id.split('_v')[-1]} 草案",
-                            content=source_template.content,
+                            content=content,
                             remark=f"Agent 工坊迭代复制的草案模板，来源版本 {source_version.version_id}",
                             status="draft",
                         )
@@ -2058,6 +2331,7 @@ class AgentWorkshopService:
             new_version_id,
             spec,
             list(source_version.required_tools or []),
+            agent_builder_lesson_block=agent_builder_lesson_block,
         )
 
     async def get_version_prompt(self, version_id: str) -> Dict[str, Any]:
@@ -3890,6 +4164,7 @@ class AgentWorkshopService:
         key_tool_detail_lines: List[str],
         capability_coverage_map_lines: List[str],
         valuation_reuse_guidance_lines: List[str],
+        agent_builder_lesson_block: str = "",
         compact: bool = False,
     ) -> str:
         tools_enum_lines = "\n".join(f"  - {t}" for t in known_tools) if known_tools else "  （暂无）"
@@ -3926,6 +4201,14 @@ class AgentWorkshopService:
                 "",
                 "【重点工具能力说明 - 用于理解工具覆盖范围，existing_tools 仍只能从上方合法清单中原样复制】",
                 "\n".join(key_tool_detail_lines[:6]) if key_tool_detail_lines else "- 暂无",
+            ])
+
+        if agent_builder_lesson_block:
+            prompt_lines.extend([
+                "",
+                agent_builder_lesson_block,
+                "",
+                "使用要求：如果这些历史教训与当前规格不冲突，你必须优先避免重复这些已验证失败，不要在缺口分析阶段再次提出已经被证伪的补法。",
             ])
 
         prompt_lines.extend([
@@ -3977,8 +4260,14 @@ class AgentWorkshopService:
         application_scene_context = self._build_application_scene_context()
         agent_role_pattern_context = self._build_agent_role_pattern_context()
         capability_context = self._build_capability_context(capability_snapshot, compact=True)
+        agent_builder_lesson_context = await self._recall_agent_builder_lessons_for_spec(
+            base_spec,
+            user_id=user_id,
+            query_text=conversation,
+            source_stage="requirement_clarification",
+        )
 
-        prompt = "\n".join([
+        prompt_sections = [
             "请基于下列材料整理一版可执行的 Agent 规格草案，核心任务是完成需求拆解、能力拆解和规格结构化，而不是继续做开放式追问。",
             "要求：",
             "1. 你不能把本应由专家判断的内容全部留空或退回给用户，但默认方案必须从简、够用、能落地，优先给出最小可用草案，而不是一次性补成重型专业系统。",
@@ -4011,6 +4300,15 @@ class AgentWorkshopService:
             agent_role_pattern_context,
             "",
             capability_context,
+        ]
+        if agent_builder_lesson_context:
+            prompt_sections.extend([
+                "",
+                agent_builder_lesson_context,
+                "",
+                "使用要求：如果这些历史教训与当前新增需求不冲突，你必须优先继承这些已验证修正，避免在规格确认阶段重复过去的问题。",
+            ])
+        prompt_sections.extend([
             "",
             "当前已有草案（如果有）：",
             json.dumps(self._build_requirement_spec_snapshot(base_spec), ensure_ascii=False, indent=2),
@@ -4050,6 +4348,7 @@ class AgentWorkshopService:
             "}",
             "自检要求：输出前请检查，用户原始需求里凡是出现了明确数量（如三种）、明确方法（如 DCF/PE-PB/PEG）、明确交付动作（如分别返回/进行解读）、明确禁止项（如不要直接给买卖建议），都必须在 JSON 中找到对应落点；找不到就说明你整理丢了。并且必须检查 capability_requirements 是否已经把能力原语拆清楚，而不是只重复业务目标。",
         ])
+        prompt = "\n".join(prompt_sections)
 
         system_prompt = "你服务于 TradingAgents-CN。它是一个面向股票投研、交易分析、Agent 编排与能力复用的金融分析系统。你的角色不是通用助手，而是金融行业专家兼 Agent 规格架构师。你的任务是基于已经收集到的需求材料，完成需求拆解、能力拆解和规格结构化，形成可执行的 Agent 规格草案，明确目标、职责边界、输入输出、依赖能力、约束条件和交付方式。你只能依据用户输入、系统背景、典型接入场景、角色模式、当前能力快照和已有草案做判断，不能臆造系统现状。这个阶段的重点不是继续和用户对话，而是把前面的需求分析结果收敛成结构化规格；如果确实存在信息缺口，只能把少数关键待确认项写入输出字段 pending_questions。你的输出必须是纯 JSON，内容要能直接用于后续规格确认与版本构建，不能输出 Markdown、寒暄或额外解释。"
         prompt_metrics = {
@@ -4060,6 +4359,7 @@ class AgentWorkshopService:
             "application_scene_chars": len(application_scene_context),
             "agent_role_pattern_chars": len(agent_role_pattern_context),
             "capability_context_chars": len(capability_context),
+            "agent_builder_lesson_chars": len(agent_builder_lesson_context),
             "capability_snapshot_elapsed_seconds": capability_elapsed,
             **self._summarize_capability_snapshot(capability_snapshot),
             **{f"llm_{key}": value for key, value in llm_runtime.items()},
@@ -4842,6 +5142,15 @@ class AgentWorkshopService:
         capability_requirement_lines = self._build_capability_requirement_lines(spec)
         decision_rule_lines = self._build_gap_analysis_decision_rules(spec)
         spec_brief = self._build_gap_analysis_spec_brief(spec)
+        agent_builder_lesson_block = await self._recall_agent_builder_lessons_for_spec(
+            spec,
+            user_id=str(spec.owner_user_id or "").strip(),
+            query_text=" ".join([
+                spec_brief,
+                self._build_capability_requirement_text(spec),
+            ]),
+            source_stage="gap_analysis",
+        )
         enriched_prompt = self._build_gap_analysis_prompt(
             spec=spec,
             known_tools=known_tools,
@@ -4851,6 +5160,7 @@ class AgentWorkshopService:
             key_tool_detail_lines=key_tool_detail_lines,
             capability_coverage_map_lines=capability_coverage_map_lines,
             valuation_reuse_guidance_lines=valuation_reuse_guidance_lines,
+            agent_builder_lesson_block=agent_builder_lesson_block,
             compact=False,
         )
         compact_prompt = self._build_gap_analysis_prompt(
@@ -4862,6 +5172,7 @@ class AgentWorkshopService:
             key_tool_detail_lines=key_tool_detail_lines,
             capability_coverage_map_lines=capability_coverage_map_lines,
             valuation_reuse_guidance_lines=valuation_reuse_guidance_lines,
+            agent_builder_lesson_block=agent_builder_lesson_block,
             compact=True,
         )
         system_prompt = "你是 TradingAgents-CN Agent 工坊的缺口分析器。先判断现有能力能否满足规格，再识别真正缺失的最小能力原语。禁止因为命名对称或类比现有工具而臆造新工具。只输出合法 JSON。"
@@ -4879,6 +5190,7 @@ class AgentWorkshopService:
                         "known_tools": min(len(known_tools), 8),
                         "selected_tool_details": min(len(selected_tool_details), 6),
                         "capability_requirements": len(spec.capability_requirements or []),
+                        "agent_builder_lesson_chars": len(agent_builder_lesson_block),
                     },
                 ),
                 (
@@ -4888,6 +5200,7 @@ class AgentWorkshopService:
                         "known_tools": len(known_tools),
                         "selected_tool_details": len(selected_tool_details),
                         "capability_requirements": len(spec.capability_requirements or []),
+                        "agent_builder_lesson_chars": len(agent_builder_lesson_block),
                     },
                 ),
             ]
@@ -5153,6 +5466,7 @@ class AgentWorkshopService:
         gap_report: Optional[AgentWorkshopGapAnalysis] = None,
         tooling_plan: Optional[Dict[str, Any]] = None,
         project_memory_block: str = "",
+        agent_builder_lesson_block: str = "",
     ) -> TemplateContent:
         responsibilities = "\n".join(f"- {item}" for item in spec.responsibilities)
         success_criteria = "\n".join(f"- {item}" for item in spec.success_criteria)
@@ -5209,6 +5523,14 @@ class AgentWorkshopService:
                 f"\n{project_memory_block.strip()}"
             )
 
+        agent_builder_lesson_guidance = ""
+        if agent_builder_lesson_block:
+            agent_builder_lesson_guidance = (
+                "\n你还必须参考以下 Agent 工坊历史教训；这些内容来自上一轮或同类版本的已验证评估结论，"
+                "应优先用于避免重复失败并收敛修正动作。"
+                f"\n{agent_builder_lesson_block.strip()}"
+            )
+
         return TemplateContent(
             system_prompt=(
                 f"你正在 TradingAgents-CN 中运行。TradingAgents-CN 是一个面向投研、交易分析与 Agent 编排场景的多智能体金融分析系统，系统内已有行情、财务、新闻、研究、筛选、复盘、报告、工作流与工具注册等能力模块。"
@@ -5221,6 +5543,7 @@ class AgentWorkshopService:
                 f"\n{GLOBAL_NO_TRADING_ADVICE_CONSTRAINT}"
                 f"\n{binding_source_text}"
                 f"{project_memory_guidance}"
+                f"{agent_builder_lesson_guidance}"
             ),
             user_prompt="请先识别本次任务所在的业务场景、你的角色职责、当前可用能力和已知系统现状，再结合输入标的、业务目标、上下文数据与可用工具，完成一次面向真实业务交付的分析。",
             tool_guidance=tool_guidance,
@@ -5240,6 +5563,7 @@ class AgentWorkshopService:
                 "- 若输出估值区间、目标价、评分、排序、权重等精确数值，必须给出可追溯的数据依据、来源标签以及对应工具结果；没有依据时禁止输出精确数字。",
                 f"- {GLOBAL_NO_TRADING_ADVICE_CONSTRAINT}",
                 *((["- 必须同时遵守项目长期记忆中的稳定规则、治理约束、输出约束与研究模板。"] + [f"- {line.strip()}" for line in project_memory_block.splitlines() if line.strip() and not line.strip().startswith("【")]) if project_memory_block else []),
+                *((["- 必须结合 Agent 工坊历史教训修正上一轮或同类版本已确认的问题。"] + [f"- {line.strip()}" for line in agent_builder_lesson_block.splitlines() if line.strip() and not line.strip().startswith("【")]) if agent_builder_lesson_block else []),
                 *((["- 第二步仍标记为缺失的能力：" + "；".join(missing_capabilities)] if missing_capabilities else [])),
             ])),
         )
@@ -5364,6 +5688,7 @@ class AgentWorkshopService:
         required_tools: List[str],
         gap_report: Optional[AgentWorkshopGapAnalysis] = None,
         tooling_plan: Optional[Dict[str, Any]] = None,
+        agent_builder_lesson_block: str = "",
     ) -> Dict[str, Any]:
         prompt_service = PromptTemplateService(db=self._db)
         project_memory_block = await self._build_project_memory_block_for_workshop()
@@ -5373,6 +5698,7 @@ class AgentWorkshopService:
             gap_report=gap_report,
             tooling_plan=tooling_plan,
             project_memory_block=project_memory_block,
+            agent_builder_lesson_block=agent_builder_lesson_block,
         )
 
         self._log_generated_result(
@@ -6565,6 +6891,7 @@ class AgentWorkshopService:
         try:
             from app.services.embedded_nanobot_service import EmbeddedNanobotService
 
+            user_id, _session_id = await self._resolve_agent_builder_lesson_user_context(version, spec)
             service = EmbeddedNanobotService(
                 db=self._db,
                 workspace=Path(__file__).resolve().parents[2],
@@ -6580,6 +6907,7 @@ class AgentWorkshopService:
             response = await service.chat(
                 user_message=prompt,
                 session_key=f"embedded:agent-workshop-eval:{version.version_id}:{task.task_id}",
+                user_id=user_id or None,
                 channel="agent_workshop_evaluation",
                 chat_id=f"agent-workshop-eval:{version.version_id}:{task.task_id}",
                 skill_names=["nanobot-agent-design"],

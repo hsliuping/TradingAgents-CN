@@ -35,3 +35,13 @@ def test_skill_generation_scenario_dedupes_duplicate_lessons() -> None:
     assert result["ok"] is True
     assert result["deduped_count"] == 2
     assert any("【历史教训】" in line for line in result["formatted_preview"])
+
+
+def test_agent_builder_scenario_prefers_spec_matched_lessons() -> None:
+    scenario = module._agent_builder_scenario()
+    result = module._evaluate_scenario(scenario)
+
+    assert result["ok"] is True
+    assert result["first_scope"] == "agent_builder_lesson"
+    assert result["deduped_count"] == 3
+    assert any("【历史工坊教训】" in line for line in result["formatted_preview"])

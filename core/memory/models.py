@@ -18,6 +18,7 @@ class MemoryScope(str, Enum):
     USER_PREFERENCE = "user_preference"
     ANALYSIS_INSIGHT = "analysis_insight"
     SKILL_LESSON = "skill_lesson"
+    AGENT_BUILDER_LESSON = "agent_builder_lesson"
     AGENT_EXPERIENCE = "agent_experience"
     TRADE_PATTERN = "trade_pattern"
 

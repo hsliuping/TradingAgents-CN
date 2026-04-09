@@ -24,11 +24,7 @@
 
     <div :class="['workspace-body', { 'left-sidebar-hidden': !showAgentSidebar, 'right-sidebar-hidden': !showStatusSidebar }]">
       <aside v-if="showAgentSidebar" class="agent-sidebar">
-        <div class="sidebar-header">
-          <div>
-            <div class="sidebar-title">Agent 列表</div>
-            <div class="sidebar-subtitle">查看已创建 Agent、当前状态和版本</div>
-          </div>
+        <div class="sidebar-header sidebar-header-compact">
           <div class="sidebar-header-actions">
             <el-button size="small" text @click="showNanobotThreadPanel = !showNanobotThreadPanel">
               {{ showNanobotThreadPanel ? '隐藏会话' : '最近会话' }}
@@ -3317,6 +3313,12 @@ onUnmounted(() => {
   align-items: flex-start;
   gap: 12px;
   padding: 16px 18px 0;
+}
+
+.sidebar-header-compact {
+  justify-content: flex-end;
+  align-items: center;
+  padding: 4px 4px 0;
 }
 
 .sidebar-header-actions,

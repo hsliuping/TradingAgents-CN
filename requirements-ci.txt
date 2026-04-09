@@ -1,0 +1,15 @@
+fastapi
+pydantic
+pydantic-settings
+python-multipart
+concurrent-log-handler
+httpx
+openai
+motor
+pymongo
+requests
+python-dotenv
+pyyaml
+pytest
+pytest-cov
+pytest-asyncio

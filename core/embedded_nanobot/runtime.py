@@ -719,6 +719,109 @@ class EmbeddedNanobotRuntime:
             logger.debug("EmbeddedNanobot project memory guidance skipped: %s", exc)
             return None
 
+    def _log_agent_builder_lesson_recall_observation(
+        self,
+        *,
+        source_stage: str,
+        user_id: str,
+        query: str,
+        metadata_filters: dict[str, Any] | None,
+        recalled: str,
+        status: str,
+        thread_context: dict[str, Any] | None = None,
+        error: str = "",
+    ) -> None:
+        clean_thread_context = dict(thread_context or {})
+        payload = {
+            "source_stage": source_stage or "unknown",
+            "status": status,
+            "hit": bool(str(recalled or "").strip()),
+            "query_chars": len(str(query or "")),
+            "query_preview": str(query or "")[:240],
+            "result_chars": len(str(recalled or "")),
+            "result_preview": str(recalled or "")[:240],
+            "metadata_filters": dict(metadata_filters or {}),
+            "ranking_profile": "agent_builder",
+            "scope": "agent_builder_lesson",
+            "user_id": user_id,
+            "spec_id": str(clean_thread_context.get("spec_id") or ""),
+            "version_id": str(clean_thread_context.get("version_id") or clean_thread_context.get("object_key") or ""),
+            "error": error,
+        }
+        logger.info("[EmbeddedNanobot][agent_builder_lesson_recall_observation] %s", json.dumps(payload, ensure_ascii=False, default=str))
+
+    async def _recall_agent_builder_lesson_guidance(
+        self,
+        *,
+        user_message: str,
+        user_id: str,
+        tool_selection: dict[str, Any],
+        thread_context: dict[str, Any] | None = None,
+    ) -> str | None:
+        if self.memory_db is None:
+            return None
+        if not user_id:
+            return None
+        if not tool_selection.get("agent_builder_governance", {}).get("enabled"):
+            return None
+
+        try:
+            from core.memory.models import MemoryScope
+            from core.memory.service import get_memory_service
+
+            clean_thread_context = dict(thread_context or {})
+            spec_id = str(clean_thread_context.get("spec_id") or "").strip()
+            version_id = str(clean_thread_context.get("version_id") or clean_thread_context.get("object_key") or "").strip()
+            metadata_filters: dict[str, str] | None = None
+            if spec_id:
+                metadata_filters = {"spec_id": spec_id}
+            elif version_id:
+                metadata_filters = {"version_id": version_id}
+
+            query_parts = [user_message, spec_id, version_id]
+            recall_query = " ".join(part for part in query_parts if str(part or "").strip())
+            recalled = await get_memory_service(self.memory_db).recall_formatted(
+                query=recall_query,
+                user_id=user_id,
+                agent_id="agent_builder",
+                scopes=[MemoryScope.AGENT_BUILDER_LESSON.value],
+                metadata_filters=metadata_filters,
+                limit=3,
+                max_chars=900,
+                ranking_profile="agent_builder",
+                group_by_scope=True,
+                per_scope_limit=3,
+            )
+            self._log_agent_builder_lesson_recall_observation(
+                source_stage="runtime_governance",
+                user_id=user_id,
+                query=recall_query,
+                metadata_filters=metadata_filters,
+                recalled=recalled,
+                status="hit" if recalled.strip() else "miss",
+                thread_context=clean_thread_context,
+            )
+            if not recalled.strip():
+                return None
+            return (
+                "# Agent Workshop historical lessons\n\n"
+                "Use the following validated lessons from earlier Agent Workshop evaluations to avoid repeating known defects and reuse verified fixes.\n\n"
+                f"{recalled.strip()}"
+            )
+        except Exception as exc:
+            self._log_agent_builder_lesson_recall_observation(
+                source_stage="runtime_governance",
+                user_id=user_id,
+                query=user_message,
+                metadata_filters=dict(thread_context or {}),
+                recalled="",
+                status="error",
+                thread_context=thread_context,
+                error=str(exc),
+            )
+            logger.debug("EmbeddedNanobot agent builder lesson guidance skipped: %s", exc)
+            return None
+
     @staticmethod
     def _inject_ephemeral_system_guidance(messages: list[dict[str, Any]], guidance: str | None) -> list[dict[str, Any]]:
         if not guidance:
@@ -1176,6 +1279,12 @@ class EmbeddedNanobotRuntime:
             tool_selection=tool_selection,
             thread_context=clean_thread_context,
         )
+        agent_builder_lesson_guidance = await self._recall_agent_builder_lesson_guidance(
+            user_message=raw,
+            user_id=str(session.metadata.get("user_id") or "").strip(),
+            tool_selection=tool_selection,
+            thread_context=clean_thread_context,
+        )
         if on_progress:
             await self._invoke_callback(on_progress, f"已选择 {len(active_tools.tool_names)} 个可用工具（核心 {len(self.CORE_TOOL_NAMES)} + 动态 {len(tool_selection['selected_dynamic_tools'])}）")
             if tool_selection.get("agent_first", {}).get("enabled"):
@@ -1184,6 +1293,8 @@ class EmbeddedNanobotRuntime:
                 await self._invoke_callback(on_progress, "检测到 Agent 工坊治理请求，将先核对当前资产和版本状态")
             if project_memory_guidance:
                 await self._invoke_callback(on_progress, "已加载 Agent 工坊的项目长期规则约束")
+            if agent_builder_lesson_guidance:
+                await self._invoke_callback(on_progress, "已加载 Agent 工坊历史教训")
         logger.debug(
             "EmbeddedNanobot route decision: session_key=%s primary_intent=%s callable_agent_mode=%s reasons=%s matched_categories=%s",
             session_key,
@@ -1202,6 +1313,7 @@ class EmbeddedNanobotRuntime:
             chat_id=chat_id,
             extra_system_guidance=self._merge_system_guidance(
                 project_memory_guidance,
+                agent_builder_lesson_guidance,
                 tool_selection.get("agent_first", {}).get("guidance") or None,
                 tool_selection.get("agent_builder_governance", {}).get("guidance") or None,
             ),

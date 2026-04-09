@@ -116,11 +116,57 @@ def _skill_generation_scenario() -> Dict[str, Any]:
     }
 
 
+def _agent_builder_scenario() -> Dict[str, Any]:
+    return {
+        "name": "agent_builder_profile_prefers_spec_matched_lessons_over_generic_experience",
+        "ranking_profile": "agent_builder",
+        "metadata_filters": {"spec_id": "spec_agent_builder_demo"},
+        "group_by_scope": True,
+        "per_scope_limit": 2,
+        "items": [
+            MemoryItem(
+                id="d1",
+                memory="Agent Builder lesson: 上一轮 production-review 缺少行业对比证据，下一轮必须先补行业横向比较。",
+                scope="agent_builder_lesson",
+                score=0.74,
+                metadata={"spec_id": "spec_agent_builder_demo"},
+            ),
+            MemoryItem(
+                id="d2",
+                memory="Agent Builder lesson: 上一轮 production-review 缺少行业对比证据，下一轮必须先补行业横向比较",
+                scope="agent_builder_lesson",
+                score=0.73,
+                metadata={"spec_id": "spec_agent_builder_demo"},
+            ),
+            MemoryItem(
+                id="d3",
+                memory="Agent 经验：先确认 required_tools 是否齐全，再进入 build。",
+                scope="agent_experience",
+                score=0.93,
+                metadata={"spec_id": "spec_agent_builder_demo"},
+            ),
+            MemoryItem(
+                id="d4",
+                memory="历史分析：白酒估值切换需要业绩验证。",
+                scope="analysis_insight",
+                score=0.96,
+                metadata={"spec_id": "spec_agent_builder_demo"},
+            ),
+        ],
+        "expect": {
+            "first_scope": "agent_builder_lesson",
+            "deduped_count": 3,
+            "contains_headers": ["【历史工坊教训】", "【历史经验】", "【历史分析】"],
+        },
+    }
+
+
 def _build_scenarios() -> List[Dict[str, Any]]:
     return [
         _assistant_scenario(),
         _analysis_scenario(),
         _skill_generation_scenario(),
+        _agent_builder_scenario(),
     ]
 
 

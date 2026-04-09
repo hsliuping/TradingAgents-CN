@@ -39,6 +39,12 @@
 - [ ] 确认基本面与技术因子校验都返回通过
 - [ ] 若技术因子失败，先重跑 `python scripts/materialize_technical_indicators.py` 再复验
 
+### 6. 记忆与治理回归校验
+
+- [ ] 直播前执行一次 `python scripts/run_governance_validations.py --only agent_workshop_governance_l4_l6`
+- [ ] 确认 Agent Workshop 请求同时注入 L4 项目长期记忆、L6 历史教训与 governance rule
+- [ ] 若组合链路失败，先检查当前线程是否带有 `user_id`、`spec_id`、`version_id`，再复验
+
 ### 4. 页面与展示效果
 
 - [ ] 默认进入页面内容正常

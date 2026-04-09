@@ -5,9 +5,9 @@
 | 项目 | 内容 |
 | ------ | ------ |
 | 版本 | v1.0 |
-| 状态 | 当前版本 P0 实施说明 |
+| 状态 | P0 已完成首轮落地，观测能力仍待补齐 |
 | 日期 | 2026-04-08 |
-| 目标 | 将 L5/L6 召回质量优化从“概念性待办”拆成可以直接执行的实现步骤、文件范围和验收标准 |
+| 目标 | 记录 L5/L6 召回质量优化的当前落地状态、剩余缺口和后续补强方向 |
 | 关联文档 | [v3.0 记忆系统优化待办清单](./memory-optimization-backlog.md)、[统一记忆层设计 — 基于 mem0 的全系统记忆整合](./unified-memory-layer-mem0.md)、[v3.0 能力与七层记忆对应关系](./memory-capability-layer-mapping.md)、[记忆消费闭环验证脚本](../../../scripts/validate_memory_consumption_loops.py) |
 
 ---
@@ -23,6 +23,15 @@
 1. **先过滤准**：尽量先用 metadata 把候选集缩小
 2. **再排序稳**：在语义相似度之外，补去重、新鲜度、对象精确性等重排逻辑
 3. **再注入可控**：确保注入 prompt 的内容短、稳、可解释，不把上下文撑爆
+
+### 1.1 截至 2026-04-08 的状态
+
+当前这三件事都已经完成首轮落地：
+
+1. 过滤链路已支持 exact filter 下推和本地 metadata 精修正
+2. 召回链路已支持统一重排、去重和场景化 ranking profile
+3. 注入链路已支持按 scope 分段和 per-scope 限流
+4. 当前仍未完成的是统一观测面和更广的跨对象质量评估
 
 ---
 
@@ -49,82 +58,65 @@
 
 ```text
 调用方传 query/scopes/metadata_filters
-  -> MemoryService.recall()
-  -> 若单 scope + 简单 metadata，可下推 mem0 exact filter
-  -> 否则扩大 limit，拉更多候选到本地
-  -> 本地按 scope 过滤
-  -> 本地按 metadata 精确过滤
-  -> 直接按 mem0 返回顺序截断
-  -> recall_formatted() 线性拼接为文本块
+-> MemoryService.recall()
+-> 若单 scope + 简单 metadata，可下推 mem0 exact filter
+-> 否则扩大 limit，拉更多候选到本地
+-> 本地按 scope 过滤
+-> 本地按 metadata 精确过滤
+-> 按对象精度 / scope 权重 / 语义分数 / 新鲜度统一重排
+-> 去重后再截断
+-> recall_formatted() 按业务 profile 做分段和限流格式化
 ```
 
-这个实现已经能工作，但仍然偏“最小可用”，还不够“主路径稳定”。
+这个实现已经从“最小可用”提升到“主路径可用”，但观测和跨对象质量验证还没有补齐。
 
 ---
 
 ## 2.3 当前短板
 
-### 1. 没有统一重排
+### 1. 统一观测仍然不足
 
-当前 `recall()` 在本地过滤后，直接按 mem0 返回顺序取前 N 条，没有统一的二次排序逻辑。
-
-影响：
-
-1. 高相似但低精度的结果可能排在前面
-2. 老旧内容可能压住更新内容
-3. 多条内容语义接近时，容易重复注入
-
-### 2. 没有去重策略
-
-当前 `recall_formatted()` 只是逐条拼接，未对近似重复内容去重。
+当前已经有统一重排，但还缺稳定的指标与 dashboard 来解释召回表现。
 
 影响：
 
-1. prompt 容量被重复记忆浪费
-2. 模型会被重复信号误导
+1. 很难快速回答某次召回为什么变差
+2. 很难长期比较 profile 调整前后的收益
 
-### 3. metadata 过滤只做了最小精确匹配
+### 2. 跨对象质量验证还不够强
 
-当前 metadata 过滤是简单的字符串精确相等判断。
-
-影响：
-
-1. object_key / symbol / ticker 的同义字段还没有统一重排策略
-2. 多对象、多级优先级场景不够强
-
-### 4. 不区分不同 scope 的优先级
-
-当前 `recall_formatted()` 会把所有命中的 item 统一格式化成同一种文本，没有 scope 级优先顺序。
+当前 profile 和 metadata 精确过滤已经补上，但高质量验证样本仍主要集中在助手、分析和 Skill 三条主链。
 
 影响：
 
-1. `user_preference` 可能和 `analysis_insight` 混在一起
-2. 不同业务场景下，最重要的记忆不一定排在最前面
+1. `workflow` 之外的更多业务对象仍缺少稳定评估样本
+2. Agent 生成已进入首轮受控样本，但更广的非股票对象评估还不够系统
 
-### 5. 缺少统一观测
+### 3. 统一观测仍然是 Agent 生成场景的主要剩余缺口
 
-当前只有零散日志，没有形成稳定的“召回质量”指标。
+当前 Recall 质量优化已经开始覆盖 Agent 生成专用 L6，但统一指标和更早读取点还没有补齐。
 
 影响：
 
-1. 很难回答“为什么这次召回看起来不对”
-2. 很难比较优化前后是否真实提升
+1. 还不能稳定解释某次 Agent Builder lesson 为什么命中或为什么没命中
+2. 需求确认阶段、版本构建前等更早读取点尚未进入统一样本集
 
 ---
 
-## 3. 本次优化后的目标行为
+## 3. 当前目标行为
 
-优化完成后，召回链路目标应变成：
+当前召回链路已经变成：
 
 ```text
 query + scope + metadata_filters
-  -> 尽量下推精确过滤
-  -> 拉候选集
-  -> 本地 metadata 精修正
-  -> 按对象精度 / scope 权重 / 相似度 / 新鲜度统一重排
-  -> 去重
-  -> 按业务场景格式化注入
-  -> 输出观测指标
+-> 尽量下推精确过滤
+-> 拉候选集
+-> 本地 metadata 精修正
+-> 按对象精度 / scope 权重 / 相似度 / 新鲜度统一重排
+-> 去重
+-> 按业务场景格式化注入
+-> 输出脚本级验证结果
+-> 后续补统一观测指标
 ```
 
 关键结果应该是：
@@ -133,6 +125,7 @@ query + scope + metadata_filters
 2. 注入更短
 3. 重复更少
 4. 更容易解释为什么选中了这些记忆
+5. 仍保留进一步补指标、补对象样本的空间
 
 ---
 
@@ -149,7 +142,7 @@ query + scope + metadata_filters
 | [scripts/evaluate_memory_recall_quality.py](../../../scripts/evaluate_memory_recall_quality.py) | 受控召回质量评估脚本 |
 | [scripts/validate_memory_consumption_loops.py](../../../scripts/validate_memory_consumption_loops.py) | 受控消费闭环验证脚本 |
 
-## 4.2 建议新增文件
+## 4.2 当前已新增文件
 
 | 文件 | 作用 |
 | ------ | ------ |
@@ -160,9 +153,11 @@ query + scope + metadata_filters
 
 ---
 
-## 5. 分步实施
+## 5. 分步落地状态
 
 ## 5.1 Step 1：在 MemoryService 内引入统一重排
+
+状态：已完成
 
 ### Step 1 目标
 
@@ -183,9 +178,9 @@ query + scope + metadata_filters
 
 ### Step 1 实现建议
 
-在 [core/memory/service.py](../../../core/memory/service.py) 新增类似能力：
+当前实现主要由以下能力组成：
 
-1. `_score_memory_item(...)`
+1. `_build_mem0_exact_filter(...)`
 2. `_sort_recalled_items(...)`
 3. `recall(..., ranking_profile="default")`
 
@@ -199,6 +194,8 @@ query + scope + metadata_filters
 ---
 
 ## 5.2 Step 2：引入统一去重逻辑
+
+状态：已完成
 
 ### Step 2 目标
 
@@ -232,6 +229,8 @@ query + scope + metadata_filters
 
 ## 5.3 Step 3：引入场景化 ranking profile
 
+状态：已完成
+
 ### Step 3 目标
 
 不同业务链路对记忆的优先级不同，不能一套排序打天下。
@@ -261,6 +260,8 @@ query + scope + metadata_filters
 ---
 
 ## 5.4 Step 4：把 recall_formatted 从“线性拼接”改成“受控注入”
+
+状态：已完成
 
 ### Step 4 目标
 
@@ -312,6 +313,8 @@ query + scope + metadata_filters
 
 ## 5.5 Step 5：补观测和评估脚本
 
+状态：部分完成
+
 ### Step 5 目标
 
 让这轮优化有明确的“前后对比”。
@@ -326,6 +329,9 @@ query + scope + metadata_filters
    - manager / researcher 经验是否优先命中
 3. Skill 生成：
    - 相同 category + data_source 的历史 lesson 是否优先命中
+4. Agent 生成：
+   - 同 spec 的 `agent_builder_lesson` 是否优先于泛化 `agent_experience`
+   - 相同 spec_id 的失败 lesson 是否能在 runtime governance 场景优先命中
 
 ### Step 5 指标建议
 
@@ -337,7 +343,7 @@ query + scope + metadata_filters
 
 ### Step 5 实现建议
 
-1. 新增 `scripts/evaluate_memory_recall_quality.py`
+1. 已新增 `scripts/evaluate_memory_recall_quality.py`
 2. 用受控样本而不是线上全量数据做第一轮比较
 3. 输出 JSON 或 Markdown 结果，便于后续迭代对比
 
@@ -346,15 +352,20 @@ query + scope + metadata_filters
 1. 能跑出一份优化前后的对比结果
 2. 后续每次改召回规则，都能复用这套样本
 
+### Step 5 当前缺口
+
+1. 仍缺统一指标入口，当前主要依赖脚本结果和测试断言
+2. 评估样本虽然已补 Agent Builder 首轮场景，但更广的非股票对象覆盖仍不够
+
 ---
 
-## 6. 调用方改造建议
+## 6. 调用方当前状态
 
 ## 6.1 智能助手
 
 文件：[app/services/intelligent_assistant_service.py](../../../app/services/intelligent_assistant_service.py)
 
-建议改动：
+当前状态：
 
 1. 给 `recall_formatted()` 显式加 `ranking_profile="assistant"`
 2. 开启按 scope 分段输出
@@ -364,7 +375,7 @@ query + scope + metadata_filters
 
 文件：[app/services/unified_analysis_service.py](../../../app/services/unified_analysis_service.py)
 
-建议改动：
+当前状态：
 
 1. 给 `recall_formatted()` 显式加 `ranking_profile="analysis"`
 2. 强化 `symbol` 命中权重
@@ -374,7 +385,7 @@ query + scope + metadata_filters
 
 文件：[app/services/skill_generation_service.py](../../../app/services/skill_generation_service.py)
 
-建议改动：
+当前状态：
 
 1. 给 `recall_formatted()` 显式加 `ranking_profile="skill_generation"`
 2. 强化 `category + data_source` 命中优先级
@@ -382,13 +393,13 @@ query + scope + metadata_filters
 
 ---
 
-## 7. 测试建议
+## 7. 当前测试状态
 
 ## 7.1 单元测试
 
-新增测试文件建议：
+当前已补测试文件：
 
-- `tests/core/memory/test_memory_service_recall_quality.py`
+- `tests/core/memory/test_memory_service_filters.py`
 
 至少覆盖：
 
@@ -400,7 +411,7 @@ query + scope + metadata_filters
 
 ## 7.2 集成验证
 
-建议新增脚本：
+当前已补脚本：
 
 - `scripts/evaluate_memory_recall_quality.py`
 
@@ -424,12 +435,11 @@ query + scope + metadata_filters
 
 ---
 
-## 9. 推荐实施顺序
+## 9. 后续推荐顺序
 
-1. 先改 [core/memory/service.py](../../../core/memory/service.py) 的本地重排和去重
-2. 再补测试
-3. 再让智能助手、股票分析、Skill 生成切到 profile 化召回
-4. 最后补评估脚本做前后对比
+1. 先补统一观测字段和指标入口
+2. 再扩评估样本到 Agent 生成等非主召回对象
+3. 最后继续细化 object 维度过滤策略
 
 这个顺序的好处是：
 
@@ -441,8 +451,8 @@ query + scope + metadata_filters
 
 ## 10. 一句话版
 
-这次 P0-2 不做“大重构”，只做三件事：
+这次 P0-2 当前更准确的状态是：
 
-1. 给召回加统一重排
-2. 给注入加统一去重和分段
-3. 给优化加统一评估
+1. 统一重排已经落地
+2. 去重和分段注入已经落地
+3. 统一评估已完成脚本化第一轮，统一观测仍待补齐

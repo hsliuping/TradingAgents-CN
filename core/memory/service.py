@@ -488,6 +488,7 @@ _SCOPE_LABEL = {
     MemoryScope.USER_PREFERENCE: "偏好",
     MemoryScope.ANALYSIS_INSIGHT: "分析",
     MemoryScope.SKILL_LESSON: "教训",
+    MemoryScope.AGENT_BUILDER_LESSON: "工坊教训",
     MemoryScope.AGENT_EXPERIENCE: "经验",
     MemoryScope.TRADE_PATTERN: "交易",
 }
@@ -495,6 +496,7 @@ _SCOPE_LABEL = {
 _DEFAULT_SCOPE_ORDER = [
     MemoryScope.USER_PREFERENCE,
     MemoryScope.ANALYSIS_INSIGHT,
+    MemoryScope.AGENT_BUILDER_LESSON,
     MemoryScope.AGENT_EXPERIENCE,
     MemoryScope.TRADE_PATTERN,
     MemoryScope.SKILL_LESSON,
@@ -517,6 +519,12 @@ _RANKING_PROFILE_SCOPE_WEIGHTS = {
     },
     "skill_generation": {
         MemoryScope.SKILL_LESSON: 4,
+    },
+    "agent_builder": {
+        MemoryScope.AGENT_BUILDER_LESSON: 4,
+        MemoryScope.AGENT_EXPERIENCE: 2,
+        MemoryScope.ANALYSIS_INSIGHT: 1,
+        MemoryScope.CONVERSATION: 0,
     },
 }
 

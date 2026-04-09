@@ -2,6 +2,7 @@ import copy
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -206,10 +207,16 @@ class _FakeMemoryService:
     def __init__(self, result: StoreResult):
         self.result = result
         self.calls: list[dict[str, Any]] = []
+        self.recall_calls: list[dict[str, Any]] = []
+        self.recall_text = ""
 
     async def store(self, messages, **kwargs):
         self.calls.append({"messages": messages, **kwargs})
         return self.result
+
+    async def recall_formatted(self, **kwargs):
+        self.recall_calls.append(dict(kwargs))
+        return self.recall_text
 
 
 class _LongResultTool(Tool):
@@ -939,6 +946,173 @@ async def test_runtime_handle_message_injects_project_memory_for_agent_builder_r
     assert "【项目长期记忆】" in captured["extra_system_guidance"]
     assert "禁止直接投资建议" in captured["extra_system_guidance"]
     assert "# Agent Workshop governance rule" in captured["extra_system_guidance"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_handle_message_injects_agent_builder_lessons_for_governance_request(tmp_path, monkeypatch) -> None:
+    provider = _FakeProvider([])
+    runtime = EmbeddedNanobotRuntime(provider=provider, workspace=tmp_path, memory_db=object())
+
+    inspect_meta = ToolMetadata(
+        id="inspect_agent_workshop_assets",
+        name="Inspect Agent Workshop Assets",
+        description="查看 Agent 工坊中的 spec 和 version 资产摘要。",
+        category="assistant_ops",
+        parameters=[],
+        when_to_use="当用户要查看或修改现有 Agent 工坊资产时先确认状态。",
+    )
+    runtime.tools.register(TradingAgentsRegistryTool(metadata=inspect_meta, func=lambda: {"ok": True}))
+
+    captured = {}
+    fake_memory_service = _FakeMemoryService(StoreResult())
+    fake_memory_service.recall_text = "【工坊历史教训】\n- 上一轮缺少行业对比证据\n- 修正动作：补充行业横向比较和估值解释\n"
+
+    class _FakeProjectMemoryService:
+        async def build_prompt_block(self, **kwargs):
+            captured["project_memory_kwargs"] = dict(kwargs)
+            return "【项目长期记忆】\n- 项目规则\n  - 禁止直接投资建议：所有分析只提供研究与学习参考。"
+
+    async def _fake_build_capped_initial_messages(*args, **kwargs):
+        captured["extra_system_guidance"] = kwargs.get("extra_system_guidance")
+        return ([{"role": "system", "content": "sys"}, {"role": "user", "content": "msg"}], [], 10)
+
+    async def _fake_run(self, spec):
+        del self, spec
+        return AgentRunResult(final_content="ok", messages=[{"role": "assistant", "content": "ok"}], stop_reason="completed", usage={}, tools_used=[], tool_events=[])
+
+    def _fake_log_agent_builder_lesson_recall_observation(**kwargs):
+        captured["lesson_observation"] = dict(kwargs)
+
+    monkeypatch.setattr(
+        "app.services.project_memory_service.get_project_memory_service",
+        lambda db: _FakeProjectMemoryService(),
+    )
+    monkeypatch.setattr("core.memory.service.get_memory_service", lambda db: fake_memory_service)
+    monkeypatch.setattr(runtime, "_log_agent_builder_lesson_recall_observation", _fake_log_agent_builder_lesson_recall_observation)
+    monkeypatch.setattr(runtime, "_build_capped_initial_messages", _fake_build_capped_initial_messages)
+    monkeypatch.setattr(runtime, "_dump_prompt_context", lambda **kwargs: tmp_path / "ctx.json")
+    monkeypatch.setattr(runtime.runner, "run", _fake_run.__get__(runtime.runner, type(runtime.runner)))
+
+    result = await runtime.handle_message(
+        user_message="继续修改这个 agent 工坊版本，先结合历史评估结论确认下一步",
+        session_key="embedded:agent-builder:l6",
+        user_id="user-123",
+        thread_context={
+            "spec_id": "spec_agent_builder_demo",
+            "version_id": "spec_agent_builder_demo_v2",
+            "version_status": "testing",
+        },
+    )
+
+    assert result["content"] == "ok"
+    assert captured["project_memory_kwargs"]["categories"] == ["project_rule", "governance_constraint", "research_template"]
+    assert len(fake_memory_service.recall_calls) == 1
+    recall_call = fake_memory_service.recall_calls[0]
+    assert recall_call["user_id"] == "user-123"
+    assert recall_call["agent_id"] == "agent_builder"
+    assert recall_call["scopes"] == ["agent_builder_lesson"]
+    assert recall_call["metadata_filters"] == {"spec_id": "spec_agent_builder_demo"}
+    assert recall_call["ranking_profile"] == "agent_builder"
+    assert captured["lesson_observation"]["source_stage"] == "runtime_governance"
+    assert captured["lesson_observation"]["status"] == "hit"
+    assert captured["lesson_observation"]["user_id"] == "user-123"
+    assert captured["lesson_observation"]["metadata_filters"] == {"spec_id": "spec_agent_builder_demo"}
+    assert "# Agent Workshop project memory" in captured["extra_system_guidance"]
+    assert "# Agent Workshop historical lessons" in captured["extra_system_guidance"]
+    assert "【工坊历史教训】" in captured["extra_system_guidance"]
+    assert "# Agent Workshop governance rule" in captured["extra_system_guidance"]
+    assert captured["extra_system_guidance"].index("# Agent Workshop project memory") < captured["extra_system_guidance"].index("# Agent Workshop historical lessons")
+    assert captured["extra_system_guidance"].index("# Agent Workshop historical lessons") < captured["extra_system_guidance"].index("# Agent Workshop governance rule")
+
+
+@pytest.mark.asyncio
+async def test_runtime_handle_message_logs_agent_builder_lesson_miss_for_governance_request(tmp_path, monkeypatch) -> None:
+    provider = _FakeProvider([])
+    runtime = EmbeddedNanobotRuntime(provider=provider, workspace=tmp_path, memory_db=object())
+
+    inspect_meta = ToolMetadata(
+        id="inspect_agent_workshop_assets",
+        name="Inspect Agent Workshop Assets",
+        description="查看 Agent 工坊中的 spec 和 version 资产摘要。",
+        category="assistant_ops",
+        parameters=[],
+        when_to_use="当用户要查看或修改现有 Agent 工坊资产时先确认状态。",
+    )
+    runtime.tools.register(TradingAgentsRegistryTool(metadata=inspect_meta, func=lambda: {"ok": True}))
+
+    captured = {}
+    fake_memory_service = _FakeMemoryService(StoreResult())
+    fake_memory_service.recall_text = ""
+
+    async def _fake_build_capped_initial_messages(*args, **kwargs):
+        captured["extra_system_guidance"] = kwargs.get("extra_system_guidance")
+        return ([{"role": "system", "content": "sys"}, {"role": "user", "content": "msg"}], [], 10)
+
+    async def _fake_run(self, spec):
+        del self, spec
+        return AgentRunResult(final_content="ok", messages=[{"role": "assistant", "content": "ok"}], stop_reason="completed", usage={}, tools_used=[], tool_events=[])
+
+    def _fake_log_agent_builder_lesson_recall_observation(**kwargs):
+        captured["lesson_observation"] = dict(kwargs)
+
+    monkeypatch.setattr("core.memory.service.get_memory_service", lambda db: fake_memory_service)
+    monkeypatch.setattr(runtime, "_log_agent_builder_lesson_recall_observation", _fake_log_agent_builder_lesson_recall_observation)
+    monkeypatch.setattr(runtime, "_build_capped_initial_messages", _fake_build_capped_initial_messages)
+    monkeypatch.setattr(runtime, "_dump_prompt_context", lambda **kwargs: tmp_path / "ctx.json")
+    monkeypatch.setattr(runtime.runner, "run", _fake_run.__get__(runtime.runner, type(runtime.runner)))
+
+    result = await runtime.handle_message(
+        user_message="继续修改这个 agent 工坊版本，先结合历史评估结论确认下一步",
+        session_key="embedded:agent-builder:l6-miss",
+        user_id="user-123",
+        thread_context={
+            "spec_id": "spec_agent_builder_demo",
+            "version_id": "spec_agent_builder_demo_v2",
+            "version_status": "testing",
+        },
+    )
+
+    assert result["content"] == "ok"
+    assert len(fake_memory_service.recall_calls) == 1
+    assert captured["lesson_observation"]["source_stage"] == "runtime_governance"
+    assert captured["lesson_observation"]["status"] == "miss"
+    assert captured["lesson_observation"]["user_id"] == "user-123"
+    assert captured["lesson_observation"]["metadata_filters"] == {"spec_id": "spec_agent_builder_demo"}
+    assert captured["lesson_observation"]["recalled"] == ""
+    assert "# Agent Workshop historical lessons" not in str(captured["extra_system_guidance"] or "")
+
+
+@pytest.mark.asyncio
+async def test_runtime_handle_message_skips_agent_builder_lessons_for_non_governance_request(tmp_path, monkeypatch) -> None:
+    provider = _FakeProvider([])
+    runtime = EmbeddedNanobotRuntime(provider=provider, workspace=tmp_path, memory_db=object())
+    captured = {}
+    fake_memory_service = _FakeMemoryService(StoreResult())
+    fake_memory_service.recall_text = "【工坊历史教训】\n- 不应该出现在普通请求里\n"
+
+    async def _fake_build_capped_initial_messages(*args, **kwargs):
+        captured["extra_system_guidance"] = kwargs.get("extra_system_guidance")
+        return ([{"role": "system", "content": "sys"}, {"role": "user", "content": "msg"}], [], 10)
+
+    async def _fake_run(self, spec):
+        del self, spec
+        return AgentRunResult(final_content="ok", messages=[{"role": "assistant", "content": "ok"}], stop_reason="completed", usage={}, tools_used=[], tool_events=[])
+
+    monkeypatch.setattr("core.memory.service.get_memory_service", lambda db: fake_memory_service)
+    monkeypatch.setattr(runtime, "_build_capped_initial_messages", _fake_build_capped_initial_messages)
+    monkeypatch.setattr(runtime, "_dump_prompt_context", lambda **kwargs: tmp_path / "ctx.json")
+    monkeypatch.setattr(runtime.runner, "run", _fake_run.__get__(runtime.runner, type(runtime.runner)))
+
+    result = await runtime.handle_message(
+        user_message="帮我看下贵州茅台近期估值变化",
+        session_key="embedded:agent-builder:non-governance",
+        user_id="user-123",
+        thread_context={"symbol": "600519"},
+    )
+
+    assert result["content"] == "ok"
+    assert fake_memory_service.recall_calls == []
+    assert "# Agent Workshop historical lessons" not in str(captured["extra_system_guidance"] or "")
 
 
 def test_runtime_build_scoped_tools_does_not_trigger_agent_first_for_skill_creation_request(tmp_path) -> None:

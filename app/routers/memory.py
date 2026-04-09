@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 ALL_SCOPES = [
     "conversation", "user_preference", "analysis_insight",
-    "skill_lesson", "agent_experience", "trade_pattern",
+    "skill_lesson", "agent_builder_lesson", "agent_experience", "trade_pattern",
 ]
 
 

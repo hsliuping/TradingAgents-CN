@@ -89,6 +89,7 @@
 - **当前 screening 暴露范围**：上述 8 个技术字段已经进入 `stock_technical_indicators`、`stock_screening_view`、数据库筛选和增强筛选数据库路径。
 - **为什么 `ma60` 暂不进入 screening**：`ma60` 已登记在技术因子 schema/catalog 中，但当前首批物化与公开 screening 字段只覆盖已完成数据库链路验证的技术因子；`ma60` 暂未加入公开 screening，避免出现“catalog 已宣称可筛选、但数据库视图与回归链未覆盖”的语义漂移。
 - **统一校验入口**：本地可直接运行 `python scripts/run_factor_validations.py`，或在 VS Code 中执行任务 `Run Factor Validations`。技术因子专项校验脚本为 `scripts/validate_technical_factors.py`。
+- **记忆与治理校验入口**：本地可直接运行 `python scripts/run_governance_validations.py`，或在 VS Code 中执行任务 `Run Governance Validations`。其中已包含 Agent Workshop 的 L4 项目长期记忆、L6 历史教训与 governance 路径组合校验，以及 requirement clarification -> gap analysis -> build_version 的 L6 前移消费闭环校验。
 - **详细说明**：见 [docs/architecture/technical-factor-governance.md](docs/architecture/technical-factor-governance.md)。
 
 

@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | ------ | ------ |
 | 版本 | v1.0 |
-| 状态 | 已整理当前实现映射 |
+| 状态 | 已整理当前实现映射并完成 2026-04-08 复核 |
 | 日期 | 2026-04-08 |
 | 目标 | 说明智能助手、Agent 生成、Skill 生成、股票分析四条链路分别落在七层记忆模型的哪几层，以及哪些对象不应被算作记忆 |
 | 关联文档 | [统一记忆层设计 — 基于 mem0 的全系统记忆整合](./unified-memory-layer-mem0.md)、[智能助手（分析助理）](./intelligent-assistant.md)、[Skill 自动生成系统](./skill-generation-system.md)、[Agent Workshop 端到端设计与缺口分析](../../architecture/AGENT_WORKSHOP_END_TO_END_DESIGN.md)、[v3.0 记忆系统优化待办清单](./memory-optimization-backlog.md) |
@@ -19,7 +19,7 @@
 - **L1-L3** 主要由运行时和 Nanobot 本地记忆承担。
 - **L5-L6** 主要由 mem0 统一承担。
 - **L7** 是运行状态，不属于语义记忆。
-- **L4** 目前已补一条最小闭环，但仍未成为所有链路统一依赖的稳定层。
+- **L4** 已补最小闭环，并已进入助手与 Agent Workshop 治理链，但仍未成为所有链路统一依赖的稳定层。
 
 因此，这四条能力的真实情况是：
 
@@ -137,7 +137,7 @@
 | L3 | 是 | `MEMORY.md` / `HISTORY.md` 做 compact 与恢复 |
 | L4 | 是，治理最小注入 + 模板构建注入 + production-review 校验 + 发布校验 | Agent Builder 请求会前置注入项目规则、治理约束、研究模板；Agent Workshop 版本模板会固化项目规则与输出约束，production-review 与发布前还会校验绑定是否真实成立 |
 | L5 | 有，但不是主轴 | Nanobot compact 结果 best-effort 镜像到 mem0 `conversation` |
-| L6 | 弱 | 当前没有独立的 agent_builder 经验 scope 作为主路径 |
+| L6 | 是，最小闭环已落地 | 已新增 `agent_builder_lesson`，评估后写入，版本迭代前与 runtime governance 路径可读 |
 | L7 | 是，且很重 | `thread_context`、spec/version/template/workflow/node 绑定关系 |
 
 ## 5.2 代码与设计证据
@@ -150,6 +150,10 @@
 6. 当前 Agent Workshop 在创建版本 Prompt Template 时，也会把 L4 项目长期记忆块注入生成出的 system_prompt 和 constraints，让稳定项目规则直接固化进版本模板，见 [app/services/agent_workshop_service.py](../../../app/services/agent_workshop_service.py)。
 7. 当前 Agent Workshop 在发布版本前，会重新校验 Prompt Template 是否仍绑定当前 L4 项目长期记忆；若模板缺失绑定，则发布被拒绝，见 [app/services/agent_workshop_service.py](../../../app/services/agent_workshop_service.py)。
 8. 当前 Agent Workshop 在 production-review 时，会重新校验运行时 debug_prompt.system_prompt 是否真实带上当前 L4 项目长期记忆；若缺少绑定或缺少 prompt 证据，则评估不能作为正式发布依据，见 [app/services/agent_workshop_service.py](../../../app/services/agent_workshop_service.py)。
+9. 当前 `agent_builder_lesson` 已进入 [core/memory/models.py](../../../core/memory/models.py)、[core/memory/service.py](../../../core/memory/service.py) 和 [app/routers/memory.py](../../../app/routers/memory.py)，形成专用 scope 与 profile。
+10. 当前 [app/services/agent_workshop_service.py](../../../app/services/agent_workshop_service.py) 已在 `evaluate_version(...)` 后写入 `agent_builder_lesson`，并在版本迭代前召回 lesson 注入 cloned prompt template。
+11. 当前 [core/embedded_nanobot/runtime.py](../../../core/embedded_nanobot/runtime.py) 在命中 `agent_builder_governance` 时，会在 L4 项目长期记忆之后继续前置注入 L6 historical lessons。
+12. 当前已补 [scripts/validate_agent_workshop_governance_l4_l6_loop.py](../../../scripts/validate_agent_workshop_governance_l4_l6_loop.py)，覆盖 Agent Workshop worker -> Embedded Nanobot runtime 的 L4 + L6 组合消费链路。
 
 ## 5.3 最重要的边界
 
@@ -167,7 +171,29 @@ Agent 生成当前最准确的说法不是“已经全面打通七层记忆”�
 - **已开始用 L4 约束 Agent Builder 治理决策，固化到 Agent Workshop 版本模板，并进入 production-review 与发布门禁**
 - **通过 L7 串起资产治理上下文**
 - **少量把稳定结果桥接到 L5**
-- **尚未形成专门的 L6 Agent 生成经验记忆体系**
+- **已经形成最小专用 L6 Agent 生成经验层**
+- **当前仍不能把 conversation 镜像或 thread_context 绑定误写成 L6 落地**
+
+当前剩余缺口更准确地说是：
+
+- **L6 已落地，但仍未扩到需求确认阶段、版本构建前和更广对象样本**
+- **统一 recall 观测和 dashboard 仍未补齐**
+
+## 5.5 最小目标态建议
+
+当前已经达到“最小可用 L6”之后，下一步更合理的目标是：
+
+1. 把 lesson 读取点从“版本迭代前 + runtime governance”继续扩到需求确认阶段和版本构建前
+2. 把 Agent Builder 对象样本纳入统一 recall 质量评估脚本，而不只停留在消费闭环脚本
+3. 继续保持 metadata 优先过滤，避免 `agent_builder_lesson` 污染普通聊天或无关分析入口
+4. 统一补上 recall 观测指标，能解释这类 lesson 为什么命中或为什么没有命中
+5. 保持这层经验只沉淀少量高价值、可验证的 lesson，而不是退回到存整段对话或全量 prompt
+
+这样做的结果是：
+
+1. Agent 生成链就不再只有 L2/L3 的上下文连续性
+2. L6 会开始承担“下次少犯同样错误”的职责
+3. 也能和现有 `skill_lesson`、`agent_experience` 形成更清楚的边界
 
 ---
 
@@ -296,8 +322,8 @@ Skill 生成当前是四条链路里最“单点清晰”的一个：
 ### 9.1 还没统一好的地方
 
 1. **L4 项目长期记忆层仍然偏弱**
-   - 现在多数链路没有真正依赖统一的项目长期规则层。
-   - 现状更多是“按需镜像”而不是统一平台。
+   - 助手与 Agent Workshop 已经开始依赖统一项目规则层，但多数链路仍未统一接入。
+   - 现状已经不是“纯按需镜像”，但距离全局稳定平台还有明显差距。
 
 2. **Agent 生成缺少专用的 L6 经验层**
    - 当前更多依赖 L2/L3 会话和 L7 资产绑定。
@@ -318,6 +344,6 @@ Skill 生成当前是四条链路里最“单点清晰”的一个：
 ## 10. 一句话版映射
 
 - **智能助手**：L2 负责会话承接，L5/L6 负责跨会话理解，L7 负责任务编排状态。
-- **Agent 生成**：L2/L3 负责 Nanobot 持续协作，L7 负责工坊上下文绑定，L5 只有镜像桥接。
+- **Agent 生成**：L2/L3 负责 Nanobot 持续协作，L4 已进入治理与模板链路，L7 负责工坊上下文绑定，L5 只有镜像桥接，L6 仍未补齐。
 - **Skill 生成**：L1 负责当轮生成，L6 的 `skill_lesson` 负责历史教训复用。
 - **股票分析**：L5 负责用户偏好，L6 负责分析洞察与 agent 经验，L7 负责任务运行状态。
