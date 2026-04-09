@@ -922,10 +922,21 @@ type EvaluationArtifactView = {
   workerName: string
 }
 
+type NanobotStudioPersistedState = {
+  nanobotSessionKey?: string
+  sessionId?: string
+  specId?: string
+  specName?: string
+  versionId?: string
+  showNanobotThreadPanel?: boolean
+  selectedThreadScope?: string
+}
+
 marked.setOptions({ breaks: true, gfm: true })
 
 const NANOBOT_WORKSHOP_SESSION_PREFIX = 'embedded:nanobot-agent-studio:'
 const NANOBOT_SKILLS = ['nanobot-agent-design']
+const NANOBOT_STUDIO_STATE_STORAGE_KEY = 'nanobot-agent-studio:state'
 
 const route = useRoute()
 const router = useRouter()
@@ -999,6 +1010,32 @@ let lastPersistedThreadContextSignature = ''
 const THREAD_CONTEXT_PERSIST_DEBOUNCE_MS = 180
 
 const sleep = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
+
+const getThreadTimestamp = (thread?: EmbeddedNanobotThreadItem | null) => {
+  const raw = String(thread?.updated_at || thread?.created_at || '').trim()
+  if (!raw) return 0
+  const timestamp = Date.parse(raw)
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+const readPersistedStudioState = (): NanobotStudioPersistedState | null => {
+  try {
+    const raw = localStorage.getItem(NANOBOT_STUDIO_STATE_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed as NanobotStudioPersistedState : null
+  } catch {
+    return null
+  }
+}
+
+const clearPersistedStudioState = () => {
+  try {
+    localStorage.removeItem(NANOBOT_STUDIO_STATE_STORAGE_KEY)
+  } catch {
+    // Ignore storage failures and keep the page usable.
+  }
+}
 
 const ensureNanobotContextAuth = async (): Promise<boolean> => {
   const accessToken = authStore.token || localStorage.getItem('auth-token')
@@ -1270,22 +1307,65 @@ const clearStudioState = (preserveStorage = false) => {
   resetVersionContext()
   lastPersistedThreadContextSignature = ''
   queuedThreadContextSignature = null
-  void preserveStorage
+  if (!preserveStorage) {
+    clearPersistedStudioState()
+  }
 }
 
 const persistState = () => {
-  return
+  try {
+    const payload: NanobotStudioPersistedState = {
+      nanobotSessionKey: String(currentNanobotSessionKey.value || '').trim() || undefined,
+      sessionId: String(currentSession.value?.session_id || nanobotDraftLink.value?.sessionId || '').trim() || undefined,
+      specId: String(displaySpec.value?.spec_id || nanobotDraftLink.value?.specId || '').trim() || undefined,
+      specName: String(displaySpec.value?.name || nanobotDraftLink.value?.specName || '').trim() || undefined,
+      versionId: String(selectedVersionId.value || latestVersion.value?.version_id || '').trim() || undefined,
+      showNanobotThreadPanel: showNanobotThreadPanel.value,
+      selectedThreadScope: selectedThreadScope.value,
+    }
+    localStorage.setItem(NANOBOT_STUDIO_STATE_STORAGE_KEY, JSON.stringify(payload))
+  } catch {
+    // Ignore storage failures and keep the page usable.
+  }
 }
 
 const restoreState = (sessionKey?: string) => {
-  void sessionKey
-  return false
+  const persisted = readPersistedStudioState()
+  if (!persisted) return false
+
+  showNanobotThreadPanel.value = Boolean(persisted.showNanobotThreadPanel)
+  if (persisted.selectedThreadScope === 'active' || persisted.selectedThreadScope === 'archived') {
+    selectedThreadScope.value = persisted.selectedThreadScope
+  }
+
+  const restoredSessionKey = String(sessionKey || persisted.nanobotSessionKey || '').trim()
+  if (restoredSessionKey) {
+    currentNanobotSessionKey.value = restoredSessionKey
+  }
+
+  const restoredSpecId = String(persisted.specId || '').trim()
+  const restoredSessionId = String(persisted.sessionId || '').trim()
+  const restoredSpecName = String(persisted.specName || '').trim()
+  if (restoredSpecId || restoredSessionId) {
+    nanobotDraftLink.value = {
+      specId: restoredSpecId,
+      specName: restoredSpecName || '当前 Draft',
+      sessionId: restoredSessionId || undefined,
+    }
+  }
+
+  const restoredVersionId = String(persisted.versionId || '').trim()
+  if (restoredVersionId) {
+    selectedVersionId.value = restoredVersionId
+  }
+
+  return Boolean(restoredSessionKey || restoredSessionId || restoredSpecId)
 }
 
 const loadNanobotThreads = async () => {
   loadingNanobotThreads.value = true
   try {
-    const result = await embeddedNanobotApi.listThreads(20, selectedThreadScope.value === 'archived')
+    const result = await embeddedNanobotApi.listThreads(80, selectedThreadScope.value === 'archived')
     recentNanobotThreads.value = result.items || []
   } catch {
     recentNanobotThreads.value = []
@@ -1300,6 +1380,111 @@ const formatThreadMeta = (thread: EmbeddedNanobotThreadItem) => {
   const date = new Date(raw)
   if (Number.isNaN(date.getTime())) return raw
   return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+const doesThreadMatchWorkspace = (
+  thread?: EmbeddedNanobotThreadItem | null,
+  options?: {
+    sessionId?: string
+    specId?: string
+    versionId?: string
+  },
+) => {
+  if (!thread) return false
+
+  const sessionId = String(options?.sessionId || currentSession.value?.session_id || nanobotDraftLink.value?.sessionId || '').trim()
+  const specId = String(options?.specId || displaySpec.value?.spec_id || nanobotDraftLink.value?.specId || '').trim()
+  const versionId = String(options?.versionId || selectedVersionId.value || latestVersion.value?.version_id || '').trim()
+
+  const threadSessionId = String(thread.thread_context?.workshop_session_id || '').trim()
+  const threadSpecId = String(thread.thread_context?.spec_id || '').trim()
+  const threadVersionId = String(thread.thread_context?.version_id || '').trim()
+
+  if (sessionId && threadSessionId && threadSessionId !== sessionId) return false
+  if (specId && threadSpecId && threadSpecId !== specId) return false
+  if (versionId && threadVersionId && threadVersionId !== versionId) return false
+
+  if (sessionId && threadSessionId === sessionId) return true
+  if (versionId && threadVersionId === versionId) return true
+  if (specId && threadSpecId === specId) return true
+
+  return !sessionId && !specId && !versionId
+}
+
+const findBestMatchingNanobotThread = (options?: {
+  sessionId?: string
+  specId?: string
+  versionId?: string
+  sessionKey?: string
+}) => {
+  const sessionId = String(options?.sessionId || '').trim()
+  const specId = String(options?.specId || '').trim()
+  const versionId = String(options?.versionId || '').trim()
+  const sessionKey = String(options?.sessionKey || '').trim()
+  const hasWorkspaceIdentity = Boolean(sessionId || specId || versionId)
+
+  const ranked = recentNanobotThreads.value
+    .map(thread => {
+      const threadSessionId = String(thread.thread_context?.workshop_session_id || '').trim()
+      const threadSpecId = String(thread.thread_context?.spec_id || '').trim()
+      const threadVersionId = String(thread.thread_context?.version_id || '').trim()
+      const threadSessionKey = String(thread.session_key || thread.thread_id || '').trim()
+      let score = 0
+
+      if (hasWorkspaceIdentity && !doesThreadMatchWorkspace(thread, { sessionId, specId, versionId })) {
+        return null
+      }
+
+      if (!hasWorkspaceIdentity && sessionKey && threadSessionKey === sessionKey) score += 1000
+      if (sessionId && threadSessionId === sessionId) score += 400
+      if (specId && threadSpecId === specId) score += 120
+      if (versionId && threadVersionId === versionId) score += 80
+
+      if (!score) return null
+      return {
+        thread,
+        score,
+        timestamp: getThreadTimestamp(thread),
+      }
+    })
+    .filter((item): item is { thread: EmbeddedNanobotThreadItem; score: number; timestamp: number } => Boolean(item))
+    .sort((left, right) => right.score - left.score || right.timestamp - left.timestamp)
+
+  return ranked[0]?.thread || null
+}
+
+const alignNanobotThreadWithWorkspace = async (options?: {
+  silent?: boolean
+  forceReload?: boolean
+}) => {
+  const sessionId = String(currentSession.value?.session_id || nanobotDraftLink.value?.sessionId || '').trim()
+  const specId = String(displaySpec.value?.spec_id || nanobotDraftLink.value?.specId || '').trim()
+  const versionId = String(selectedVersionId.value || latestVersion.value?.version_id || '').trim()
+  const currentSessionKey = String(currentNanobotSessionKey.value || '').trim()
+
+  const matchedThread = findBestMatchingNanobotThread({
+    sessionId,
+    specId,
+    versionId,
+    sessionKey: currentSessionKey,
+  })
+
+  if (matchedThread) {
+    const matchedSessionKey = String(matchedThread.session_key || matchedThread.thread_id || '').trim()
+    if (options?.forceReload || matchedSessionKey !== currentSessionKey || !nanobotMessages.value.length) {
+      return await loadNanobotThreadMessages({ threadId: matchedThread.thread_id, silent: options?.silent })
+    }
+    return true
+  }
+
+  if (currentSessionKey || nanobotMessages.value.length) {
+    currentNanobotSessionKey.value = ''
+    nanobotMessages.value = []
+    nanobotToolEvents.value = []
+    nanobotProgressHint.value = ''
+    persistState()
+  }
+  return false
 }
 
 const loadNanobotThreadMessages = async (options?: {
@@ -1359,7 +1544,26 @@ const syncRoute = () => {
 }
 
 const displaySpec = computed(() => currentSession.value?.current_spec_snapshot || standaloneSpec.value || null)
-const displayedMessages = computed(() => nanobotMessages.value.length ? nanobotMessages.value : (currentSession.value?.messages || []))
+const activeNanobotThread = computed(() => {
+  const sessionKey = String(currentNanobotSessionKey.value || '').trim()
+  if (!sessionKey) return null
+  return recentNanobotThreads.value.find(item => item.session_key === sessionKey || item.thread_id === sessionKey) || null
+})
+const activeNanobotThreadMatchesWorkspace = computed(() => {
+  if (!nanobotMessages.value.length) return false
+  return doesThreadMatchWorkspace(activeNanobotThread.value)
+})
+const displayedMessages = computed(() => {
+  const workspaceSessionId = String(currentSession.value?.session_id || nanobotDraftLink.value?.sessionId || '').trim()
+  const workspaceSpecId = String(displaySpec.value?.spec_id || nanobotDraftLink.value?.specId || '').trim()
+  const workspaceVersionId = String(selectedVersionId.value || latestVersion.value?.version_id || '').trim()
+  const hasWorkspaceIdentity = Boolean(workspaceSessionId || workspaceSpecId || workspaceVersionId)
+
+  if (nanobotMessages.value.length && (!hasWorkspaceIdentity || activeNanobotThreadMatchesWorkspace.value)) {
+    return nanobotMessages.value
+  }
+  return currentSession.value?.messages || []
+})
 const activeNanobotThreadId = computed(() => {
   const sessionKey = String(currentNanobotSessionKey.value || '').trim()
   if (!sessionKey) return ''
@@ -2556,6 +2760,8 @@ const loadSession = async (sessionId?: string, options?: {
     await loadLatestVersionContext(currentSession.value.current_spec_snapshot?.spec_id)
     if (options?.syncNanobotThread && currentNanobotSessionKey.value) {
       await loadNanobotThreadMessages({ sessionKey: currentNanobotSessionKey.value, silent: true })
+    } else {
+      await alignNanobotThreadWithWorkspace({ silent: true })
     }
   } catch (error: any) {
     ElMessage.error(error?.message || '加载会话失败')
@@ -2857,6 +3063,7 @@ const refreshWorkspace = async () => {
   } else if (currentNanobotSessionKey.value) {
     await loadNanobotThreadMessages({ sessionKey: currentNanobotSessionKey.value, silent: true })
   }
+  await alignNanobotThreadWithWorkspace({ silent: true })
 }
 
 const openNanobotThread = async (thread: EmbeddedNanobotThreadItem) => {
@@ -2911,6 +3118,7 @@ const openAgentItem = async (item: AgentSpec) => {
     await loadSession(item.latest_session_id)
   } else {
     currentSession.value = null
+    await alignNanobotThreadWithWorkspace({ silent: true, forceReload: true })
     await loadLatestVersionContext(item.spec_id)
     syncRoute()
   }
@@ -2931,10 +3139,12 @@ const openAgentVersion = async (item: AgentSpec, version: AgentVersion) => {
     await loadSession(item.latest_session_id)
   } else {
     currentSession.value = null
+    await alignNanobotThreadWithWorkspace({ silent: true, forceReload: true })
     syncRoute()
   }
   selectedVersionId.value = version.version_id
   await loadVersionContext(version.version_id)
+  await alignNanobotThreadWithWorkspace({ silent: true, forceReload: true })
   await persistThreadContext()
   await openVersionDetailDialog(item, version)
 }
@@ -3086,9 +3296,13 @@ const resetStudio = () => {
 
 const initFromRoute = async () => {
   clearStudioState(true)
-  const nanobotSessionKey = typeof route.query.nanobotSessionKey === 'string' ? route.query.nanobotSessionKey : ''
-  const sessionId = typeof route.query.sessionId === 'string' ? route.query.sessionId : ''
-  const specId = typeof route.query.specId === 'string' ? route.query.specId : ''
+  const routeNanobotSessionKey = typeof route.query.nanobotSessionKey === 'string' ? route.query.nanobotSessionKey : ''
+  const routeSessionId = typeof route.query.sessionId === 'string' ? route.query.sessionId : ''
+  const routeSpecId = typeof route.query.specId === 'string' ? route.query.specId : ''
+  const restoredFromStorage = !routeNanobotSessionKey && !routeSessionId && !routeSpecId ? restoreState() : false
+  const nanobotSessionKey = routeNanobotSessionKey || String(currentNanobotSessionKey.value || '').trim()
+  const sessionId = routeSessionId || String(nanobotDraftLink.value?.sessionId || '').trim()
+  const specId = routeSpecId || String(nanobotDraftLink.value?.specId || '').trim()
   let restoredFromNanobotThread = false
 
   await loadNanobotThreads()
@@ -3117,8 +3331,13 @@ const initFromRoute = async () => {
     await loadSession(nanobotDraftLink.value.sessionId, { syncNanobotThread: false })
   }
 
+  if (!restoredFromNanobotThread && (sessionId || specId || restoredFromStorage)) {
+    await alignNanobotThreadWithWorkspace({ silent: true, forceReload: true })
+  }
+
   await loadAgentItems()
   reconcileDeletedWorkspaceState()
+  persistState()
   syncRoute()
 }
 
