@@ -95,6 +95,16 @@ REPLACEMENTS: Tuple[Tuple[str, str], ...] = (
 
 GENERIC_GUIDANCE = "输出仅限研究结论、风险提示和后续观察点，不得形成交易建议、价位方案或仓位计划。"
 USER_CLOSING = build_research_only_closing()
+REPORT_METADATA_CONSTRAINT = (
+    "⚠️ **重要约束**：本报告由AI自动生成，禁止在报告中添加任何署名信息（如'撰写人'、'分析师'、'日期'、'声明'等）。"
+    "禁止生成任何虚假的人名、作者信息或署名。报告内容应直接开始，无需添加任何署名、日期或声明信息。"
+)
+
+
+def with_report_metadata_constraint(base_constraints: str) -> str:
+    if not base_constraints:
+        return REPORT_METADATA_CONSTRAINT
+    return f"{base_constraints}\n\n{REPORT_METADATA_CONSTRAINT}"
 
 FULL_REWRITE_FIELDS = ("system_prompt", "user_prompt", "tool_guidance", "analysis_requirements", "output_format", "constraints")
 
@@ -174,7 +184,7 @@ ROLE_FIELD_OVERRIDES: Dict[str, Dict[str, str]] = {
         "tool_guidance": "仅基于提供的研究资料做归纳和对比，提炼研究结论、分歧与风险。",
         "analysis_requirements": "输出只包含研究摘要、证据、分歧、风险、信息缺口和后续观察点，不得转写为投资建议或交易计划。",
         "output_format": "使用 Markdown 输出：研究摘要、支撑证据、关键分歧、主要风险、信息缺口、后续观察点。",
-        "constraints": "禁止输出买卖建议、价格区间、目标价、仓位比例、收益预期、止损止盈和执行策略。",
+        "constraints": with_report_metadata_constraint("禁止输出买卖建议、价格区间、目标价、仓位比例、收益预期、止损止盈和执行策略。"),
     },
     "trader": {
         "system_prompt": dedent(
@@ -251,7 +261,7 @@ ROLE_FIELD_OVERRIDES: Dict[str, Dict[str, str]] = {
         "tool_guidance": "仅整合研究信息，不得将研究结论扩写为交易分析或执行方案。",
         "analysis_requirements": "重点提炼研究摘要、证据、前提条件、风险与观察清单，不得输出价格、仓位、执行策略。",
         "output_format": "使用 Markdown 输出：研究摘要、关键证据与信号、前提条件、主要风险与反向证据、后续观察清单。",
-        "constraints": "禁止输出任何交易动作、价位、仓位、收益预期、胜率、止损止盈、执行时机或分批计划。",
+        "constraints": with_report_metadata_constraint("禁止输出任何交易动作、价位、仓位、收益预期、胜率、止损止盈、执行时机或分批计划。"),
     },
     "risk_manager": {
         "system_prompt": dedent(
@@ -307,7 +317,7 @@ ROLE_FIELD_OVERRIDES: Dict[str, Dict[str, str]] = {
         "tool_guidance": "从风险治理角度审阅现有研究资料，仅输出风险和观察事项。",
         "analysis_requirements": "必须聚焦风险来源、争议点、约束条件、信息缺口与后续观察，不得形成最终交易决策。",
         "output_format": "使用 Markdown 输出：风险汇总、主要争议、约束条件、信息缺口、后续观察点。",
-        "constraints": "禁止输出目标价、止损止盈、仓位比例、收益预期、交易动作或执行计划。",
+        "constraints": with_report_metadata_constraint("禁止输出目标价、止损止盈、仓位比例、收益预期、交易动作或执行计划。"),
     },
 }
 
@@ -328,7 +338,7 @@ def _make_parallel_analyst_override(role_name: str, focus: str, key_points: str,
             - 只输出研究观察、证据说明、风险提示和待验证问题。
             - 不得输出买卖建议、目标价、止损止盈、仓位比例、建仓节奏或执行指令。
             - 如工具或输入数据缺失，应明确说明“数据缺失/待验证”，不得编造。
-            - 可以描述关键价位、支撑压力或估值区间，但只能作为观察区间，不得写成操作价位。
+            - 可以引用工具或输入中已有的真实数值说明事实、结构和变化，但不得把这些数值改写成目标价、支撑阻力、操作价位或触发条件。
             """
         ).strip(),
         "user_prompt": dedent(
@@ -358,9 +368,9 @@ def _make_parallel_analyst_override(role_name: str, focus: str, key_points: str,
             """
         ).strip(),
         "tool_guidance": f"优先使用 {{tool_names}} 获取与{focus}相关的真实数据；若数据缺失，明确指出缺口与对结论的影响。",
-        "analysis_requirements": f"重点分析：{observation_points}。必须同时给出证据来源、结论影响和待验证事项，不得延伸为交易建议。",
+        "analysis_requirements": f"重点分析：{observation_points}。必须同时给出证据来源、结论影响和待验证事项；允许引用真实、可验证的事实型数字，但不得把数字改写成交易建议、关键执行位或触发条件。",
         "output_format": "使用 Markdown 输出：一、核心观察；二、关键证据；三、影响评估；四、待验证问题。",
-        "constraints": "禁止输出买卖建议、目标价、止损止盈、仓位比例、收益承诺、执行时机或任何可直接下单的表达。",
+        "constraints": with_report_metadata_constraint("禁止输出买卖建议、目标价、止损止盈、仓位比例、收益承诺、执行时机或任何可直接下单的表达。"),
     }
 
 
@@ -418,7 +428,7 @@ def _make_fundamentals_analyst_override(style_name: str, focus_bias: str, extra_
         "tool_guidance": "优先调用 get_stock_fundamentals_unified 获取整体基本面背景；如需补充最近季度三表明细和现金流链路，继续调用 get_financial_statements 与 get_cash_flow_statement。若工具结果已存在，直接基于现有结果输出，不要重复调用。",
         "analysis_requirements": "必须同时说明：财务与经营信号、估值背景、对整体研究结论的影响、待验证问题。不得输出价格方案、仓位建议、收益空间或交易动作。",
         "output_format": "使用 Markdown 输出：一、核心观察；二、财务与经营信号；三、估值背景；四、对整体研究结论的影响；五、待验证问题。",
-        "constraints": "禁止输出买卖建议、目标价、价格区间、上涨空间、下行空间、止损止盈、仓位比例、执行时机或任何可直接下单的表达。",
+        "constraints": with_report_metadata_constraint("禁止输出买卖建议、目标价、价格区间、上涨空间、下行空间、止损止盈、仓位比例、执行时机或任何可直接下单的表达。"),
     }
 
 
@@ -495,7 +505,7 @@ def _make_researcher_override(role_name: str, stance: str, rebuttal_target: str)
         "tool_guidance": "仅基于已有分析报告和辩论上下文构建研究论证，重点比较证据强弱、假设前提和失效条件。",
         "analysis_requirements": "必须给出完整证据链、明确反驳点、成立前提和失效条件，不得把偏多/偏空论点写成买卖操作。",
         "output_format": "使用 Markdown 输出：一、核心主张；二、证据链；三、对对手观点的回应；四、成立前提；五、失效条件与观察点。",
-        "constraints": "禁止输出买卖建议、目标价、仓位比例、止损止盈、收益承诺或任何交易执行表达。",
+        "constraints": with_report_metadata_constraint("禁止输出买卖建议、目标价、仓位比例、止损止盈、收益承诺或任何交易执行表达。"),
     }
 
 
@@ -576,7 +586,7 @@ def _make_risk_debater_override(role_name: str, viewpoint: str, core_focus: str)
         "tool_guidance": "基于研究结论和风险辩论上下文，比较情景成立条件、证据可靠性与失效触发因素，不得延伸为交易策略。",
         "analysis_requirements": f"重点围绕{core_focus}展开，必须说明情景前提、失效条件和监测信号，不得输出任何仓位、价位或操作指令。",
         "output_format": "使用 Markdown 输出：一、核心情景判断；二、关键证据与脆弱点；三、约束条件；四、监测信号；五、回应与补充。",
-        "constraints": "禁止输出建仓、加仓、减仓、止损止盈、目标价、仓位比例、执行节奏、收益承诺或任何终极操作指令。",
+        "constraints": with_report_metadata_constraint("禁止输出建仓、加仓、减仓、止损止盈、目标价、仓位比例、执行节奏、收益承诺或任何终极操作指令。"),
     }
 
 
@@ -688,7 +698,7 @@ def _build_single_stock_workflow_overrides() -> Dict[str, Dict[str, str]]:
         "tool_guidance": "综合研究结论、整合意见与风险辩论材料，输出结构化风险治理结论，所有字段都保持研究辅助语义。",
         "analysis_requirements": "必须同时给出主要风险、约束条件、信息缺口、观察信号和综合研究结论；JSON 字段必须可被系统解析，且不得出现交易建议。",
         "output_format": "输出唯一的 ```json 代码块，不要追加额外说明。",
-        "constraints": "禁止输出买卖建议、目标价、止损止盈、仓位比例、执行节奏、收益承诺或任何操作指令。",
+        "constraints": with_report_metadata_constraint("禁止输出买卖建议、目标价、止损止盈、仓位比例、执行节奏、收益承诺或任何操作指令。"),
     }
 
     return overrides

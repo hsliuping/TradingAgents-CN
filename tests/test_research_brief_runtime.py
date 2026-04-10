@@ -1,0 +1,143 @@
+from app.utils.compliance import sanitize_analysis_payload, sanitize_display_report_text
+from app.utils.report_formatter import (
+    _convert_final_decision_json_to_markdown,
+    format_decision,
+)
+
+
+def test_sanitize_analysis_payload_strips_legacy_execution_fields() -> None:
+    raw_result = {
+        "summary": "建议买入，目标价100元，仓位20%。",
+        "reports": {
+            "market_report": "公司订单回暖，盈利能力改善，后续仍需跟踪原材料波动。",
+            "final_trade_decision": "建议买入并关注目标价100元。",
+        },
+        "decision": {
+            "action": "BUY",
+            "confidence": 82,
+            "risk_score": 65,
+            "target_price": 100,
+            "price_analysis_range": [90, 100],
+            "risk_exposure_ratio": "20%",
+            "stop_loss": 88,
+            "reasoning": "订单回暖，毛利率修复，现金流改善。",
+            "summary": "盈利修复趋势在延续，但仍需关注成本压力。",
+            "risk_warning": "原材料价格波动可能侵蚀利润。",
+            "core_evidence": ["订单回暖", "毛利率修复"],
+            "uncertainties": ["需求持续性"],
+            "invalidation_conditions": ["订单再次下滑"],
+            "watch_items": ["下一期财报"],
+        },
+    }
+
+    sanitized = sanitize_analysis_payload(raw_result)
+
+    assert sanitized["reports"] == {
+        "market_report": "公司订单回暖，盈利能力改善，后续仍需跟踪原材料波动。"
+    }
+    assert sanitized["decision"]["action"] == "看涨"
+    assert sanitized["decision"]["analysis_view"] == "看涨"
+    assert sanitized["decision"]["confidence"] == 0.82
+    assert sanitized["decision"]["risk_score"] == 0.65
+    assert sanitized["decision"]["core_evidence"] == ["订单回暖", "毛利率修复"]
+    assert sanitized["decision"]["uncertainties"] == ["需求持续性"]
+    assert sanitized["decision"]["invalidation_conditions"] == ["订单再次下滑"]
+    assert sanitized["decision"]["watch_items"] == ["下一期财报"]
+    assert "target_price" not in sanitized["decision"]
+    assert "price_analysis_range" not in sanitized["decision"]
+    assert "risk_exposure_ratio" not in sanitized["decision"]
+    assert "stop_loss" not in sanitized["decision"]
+    assert sanitized["recommendation"].startswith("研究判断：看涨；")
+    assert "目标价" not in sanitized["recommendation"]
+    assert "仓位" not in sanitized["recommendation"]
+
+
+def test_format_decision_keeps_research_brief_fields_only() -> None:
+    decision = format_decision(
+        {
+            "action": "BUY",
+            "confidence": 0.78,
+            "risk_score": 0.32,
+            "target_price": 120,
+            "position_ratio": "15%",
+            "reasoning": "需求改善带动盈利预期上修。",
+            "summary": "当前证据偏向看涨，但需继续跟踪兑现节奏。",
+            "risk_warning": "若需求复苏不及预期，判断可能转弱。",
+            "core_evidence": ["需求改善", "盈利预期上修"],
+            "uncertainties": ["兑现节奏"],
+            "invalidation_conditions": ["景气度再次转弱"],
+            "watch_items": ["月度销售数据"],
+        }
+    )
+
+    assert decision == {
+        "action": "看涨",
+        "analysis_view": "看涨",
+        "confidence": 0.78,
+        "risk_score": 0.32,
+        "reasoning": "需求改善带动盈利预期上修。",
+        "summary": "当前证据偏向看涨，但需继续跟踪兑现节奏。",
+        "risk_warning": "若需求复苏不及预期，判断可能转弱。",
+        "core_evidence": ["需求改善", "盈利预期上修"],
+        "uncertainties": ["兑现节奏"],
+        "invalidation_conditions": ["景气度再次转弱"],
+        "watch_items": ["月度销售数据"],
+    }
+
+
+def test_convert_final_decision_json_to_markdown_uses_research_brief_sections() -> None:
+    markdown = _convert_final_decision_json_to_markdown(
+        {
+            "risk_level": "中",
+            "risk_score": 0.4,
+            "final_trade_decision": {
+                "analysis_view": "中性",
+                "confidence": 72,
+                "target_price": 88,
+                "risk_control_reference": 75,
+                "risk_exposure_ratio": "10%",
+                "reasoning": "当前证据尚不足以支持更明确方向，需要继续观察经营数据。",
+                "summary": "判断维持中性，等待更多经营验证。",
+                "core_evidence": ["盈利表现企稳"],
+                "uncertainties": ["需求恢复斜率"],
+                "invalidation_conditions": ["盈利再次恶化"],
+                "watch_items": ["下一期经营披露"],
+                "risk_warning": "若行业需求持续走弱，结论可能下修。",
+            },
+        }
+    )
+
+    assert "# 🎯 综合研究简报" in markdown
+    assert "- **研究观点**: 🟡 中性" in markdown
+    assert "## 🔍 核心依据" in markdown
+    assert "## ❓ 关键不确定性" in markdown
+    assert "## 🔄 判断调整条件" in markdown
+    assert "## 👀 后续观察事项" in markdown
+    assert "观察区间参考" not in markdown
+    assert "关键验证位" not in markdown
+    assert "风险承受前提" not in markdown
+
+
+def test_sanitize_display_report_text_removes_price_and_actionable_lines() -> None:
+    raw_text = """## 情景结论
+
+当前判断仍依赖后续财报与经营数据验证。
+
+- 价格中枢可能上移至12.8-13.5元区间
+- 若突破11.33元则强化上行预期
+- 建议维持60%-80%风险敞口
+
+## 继续验证的公开信号
+
+1. 下一期财报是否披露更完整的资产质量数据
+2. 监管口径是否出现变化
+"""
+
+    sanitized = sanitize_display_report_text(raw_text)
+
+    assert "当前判断仍依赖后续财报与经营数据验证。" in sanitized
+    assert "下一期财报是否披露更完整的资产质量数据" in sanitized
+    assert "监管口径是否出现变化" in sanitized
+    assert "12.8-13.5元区间" not in sanitized
+    assert "突破11.33元" not in sanitized
+    assert "60%-80%风险敞口" not in sanitized

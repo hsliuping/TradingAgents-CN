@@ -16,7 +16,27 @@ import json
 import re
 from typing import Dict, Any, Optional, Tuple
 
+from app.utils.compliance import sanitize_display_report_text
+
 logger = logging.getLogger(__name__)
+
+
+DISPLAY_SANITIZED_REPORT_KEYS = {
+    'bull_researcher',
+    'bull_report',
+    'bear_researcher',
+    'bear_report',
+    'research_team_decision',
+    'investment_plan',
+    'trader_investment_plan',
+    'risky_analyst',
+    'risky_opinion',
+    'safe_analyst',
+    'safe_opinion',
+    'neutral_analyst',
+    'neutral_opinion',
+    'risk_management_decision',
+}
 
 
 # 所有标准报告字段
@@ -38,6 +58,57 @@ STANDARD_REPORT_FIELDS = [
 ]
 
 
+def _extract_report_text(report_key: str, value: Any) -> Optional[str]:
+    text_value = None
+
+    if isinstance(value, str):
+        text_value = value.strip()
+    elif isinstance(value, dict):
+        for key in ("content", "markdown", "text", "message", "report"):
+            nested_value = value.get(key)
+            if isinstance(nested_value, str) and nested_value.strip():
+                text_value = nested_value.strip()
+                break
+    elif value is not None:
+        raw_text = str(value).strip()
+        if raw_text:
+            text_value = raw_text
+
+    if not text_value or len(text_value) <= 10:
+        return None
+
+    if report_key == 'final_trade_decision':
+        return _convert_json_to_markdown(text_value, "final_decision")
+    if report_key == 'research_team_decision':
+        return _convert_json_to_markdown(text_value, "final_decision")
+    if report_key == 'risk_management_decision':
+        return _convert_json_to_markdown(text_value, "risk")
+    return _clean_report_for_display(report_key, text_value)
+
+
+def _extract_reports_from_mapping(mapping: Dict[str, Any], reports: Dict[str, str], source_name: str) -> None:
+    if not isinstance(mapping, dict):
+        return
+
+    logger.info(f"🔍 [ReportFormatter] {source_name} 字段: {list(mapping.keys())}")
+
+    for field in STANDARD_REPORT_FIELDS:
+        if field in reports:
+            continue
+        extracted = _extract_report_text(field, mapping.get(field))
+        if extracted:
+            reports[field] = extracted
+            logger.info(f"📊 [ReportFormatter] 提取报告: {field} <- {source_name} - 长度: {len(extracted)}")
+
+    for report_key in DISPLAY_SANITIZED_REPORT_KEYS:
+        if report_key in reports:
+            continue
+        extracted = _extract_report_text(report_key, mapping.get(report_key))
+        if extracted:
+            reports[report_key] = extracted
+            logger.info(f"📊 [ReportFormatter] 提取报告: {report_key} <- {source_name} - 长度: {len(extracted)}")
+
+
 def extract_reports_from_state(state: Any) -> Dict[str, str]:
     """
     从 state 中提取所有报告内容
@@ -53,45 +124,35 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
     if state is None:
         return reports
 
+    nested_reports = _get_field_value(state, 'reports')
+    has_nested_reports = isinstance(nested_reports, dict) and bool(nested_reports)
+
+    if has_nested_reports:
+        _extract_reports_from_mapping(nested_reports, reports, 'state.reports')
+
     # 🔥 调试日志：显示 state 的顶层字段
     if isinstance(state, dict):
         logger.info(f"🔍 [ReportFormatter] state 顶层字段: {list(state.keys())}")
         # 🔥 检查 index_report 和 sector_report 是否存在
         if "index_report" in state:
             logger.info(f"🔍 [ReportFormatter] index_report 存在，长度: {len(str(state.get('index_report', '')))}")
-        else:
+        elif not has_nested_reports:
             logger.warning(f"⚠️ [ReportFormatter] index_report 字段不存在于 state 中")
         if "sector_report" in state:
             logger.info(f"🔍 [ReportFormatter] sector_report 存在，长度: {len(str(state.get('sector_report', '')))}")
-        else:
+        elif not has_nested_reports:
             logger.warning(f"⚠️ [ReportFormatter] sector_report 字段不存在于 state 中")
 
     # 1. 提取标准报告字段
     for field in STANDARD_REPORT_FIELDS:
+        if field in reports:
+            continue
         value = _get_field_value(state, field)
-        if value and isinstance(value, str) and len(value.strip()) > 10:
-            # 🔥 对于可能包含 JSON 的字段，转换为 Markdown
-            if field == 'final_trade_decision':
-                markdown_value = _convert_json_to_markdown(value.strip(), "final_decision")
-                reports[field] = markdown_value
-                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
-            elif field == 'research_team_decision':
-                logger.info(f"🔍 [ReportFormatter] 检测到 research_team_decision 字段，准备转换 JSON")
-                logger.info(f"🔍 [ReportFormatter] 原始内容前500字符: {value.strip()[:500]}")
-                markdown_value = _convert_json_to_markdown(value.strip(), "final_decision")
-                reports[field] = markdown_value
-                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
-                logger.info(f"📊 [ReportFormatter] 转换后内容前500字符: {markdown_value[:500]}")
-            elif field == 'risk_management_decision':
-                markdown_value = _convert_json_to_markdown(value.strip(), "risk")
-                reports[field] = markdown_value
-                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
-            else:
-                # 🔥 清理AI生成的署名信息
-                cleaned_value = _remove_author_signature(value.strip())
-                reports[field] = cleaned_value
-                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(cleaned_value)} (已清理署名)")
-        elif field in ['index_report', 'sector_report']:
+        extracted = _extract_report_text(field, value)
+        if extracted:
+            reports[field] = extracted
+            logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(extracted)}")
+        elif field in ['index_report', 'sector_report'] and not has_nested_reports:
             # 特别记录宏观报告的提取失败
             logger.warning(f"⚠️ [ReportFormatter] 宏观报告 {field} 未能提取: value={type(value)}, 内容长度={len(str(value)) if value else 0}")
 
@@ -115,6 +176,13 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
 
     logger.info(f"📊 [ReportFormatter] 提取到 {len(reports)} 个报告: {list(reports.keys())}")
     return reports
+
+
+def _clean_report_for_display(report_key: str, text: str) -> str:
+    cleaned_text = _remove_author_signature(text.strip())
+    if report_key in DISPLAY_SANITIZED_REPORT_KEYS:
+        cleaned_text = sanitize_display_report_text(cleaned_text, fallback=cleaned_text)
+    return cleaned_text
 
 
 def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
@@ -179,7 +247,7 @@ def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
                     logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
                 else:
                     # 🔥 清理AI生成的署名信息
-                    cleaned_value = _remove_author_signature(text_value)
+                    cleaned_value = _clean_report_for_display(report_key, text_value)
                     reports[report_key] = cleaned_value
                     logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已清理署名)")
                 break
@@ -300,7 +368,7 @@ def _convert_investment_json_to_markdown(json_obj: Dict[str, Any]) -> str:
     lines = []
     
     # 研究观点摘要
-    action = json_obj.get("action", "")
+    action = json_obj.get("analysis_view") or json_obj.get("action", "")
     logger.info(f"🔄 [研究结论转换] action: {action}")
     if action:
         action_map = {
@@ -330,12 +398,6 @@ def _convert_investment_json_to_markdown(json_obj: Dict[str, Any]) -> str:
         except (ValueError, TypeError):
             lines.append(f"**信心度**: {confidence}/100\n\n")
     
-    # 目标价格
-    target_price = json_obj.get("target_price")
-    logger.info(f"🔄 [研究结论转换] target_price: {target_price}")
-    if target_price:
-        lines.append(f"**观察区间参考**: ¥{target_price}\n\n")
-    
     # 风险评分
     risk_score = json_obj.get("risk_score")
     logger.info(f"🔄 [研究结论转换] risk_score: {risk_score}")
@@ -360,12 +422,20 @@ def _convert_investment_json_to_markdown(json_obj: Dict[str, Any]) -> str:
     logger.info(f"🔄 [研究结论转换] risk_warning 长度: {len(risk_warning) if risk_warning else 0}")
     if risk_warning:
         lines.append(f"## ⚠️ 风险提示\n\n{risk_warning}\n\n")
-    
-    # 建议持仓比例
-    position_ratio = json_obj.get("position_ratio", "")
-    logger.info(f"🔄 [研究结论转换] position_ratio: {position_ratio}")
-    if position_ratio:
-        lines.append(f"## 💼 风险承受前提\n\n{position_ratio}\n\n")
+
+    for title, field_name in (
+        ("## 🔍 核心依据", "core_evidence"),
+        ("## ❓ 关键不确定性", "uncertainties"),
+        ("## 🔄 判断调整条件", "invalidation_conditions"),
+        ("## 👀 后续观察事项", "watch_items"),
+    ):
+        items = json_obj.get(field_name, [])
+        if isinstance(items, list) and items:
+            lines.append(f"{title}\n\n")
+            for idx, item in enumerate(items, 1):
+                if item:
+                    lines.append(f"{idx}. {item}\n")
+            lines.append("\n")
     
     result = "\n".join(lines).strip()
     logger.info(f"✅ [研究结论转换] 转换完成，Markdown 行数: {len(lines)}, 总长度: {len(result)}")
@@ -407,11 +477,11 @@ def _convert_risk_json_to_markdown(json_obj: Dict[str, Any]) -> str:
                 lines.append(f"{idx}. {risk}\n")
         lines.append("\n")
 
-    # 风险控制建议
+    # 研究使用边界
     risk_control = json_obj.get("risk_control", "")
     logger.info(f"🔄 [风险评估转换] risk_control 长度: {len(risk_control) if risk_control else 0}")
     if risk_control:
-        lines.append(f"## 🛡️ 风险控制建议\n\n{risk_control}\n\n")
+        lines.append(f"## 🛡️ 研究使用边界\n\n{risk_control}\n\n")
 
     # 研究跟踪建议调整
     investment_adjustment = json_obj.get("investment_adjustment", "")
@@ -443,11 +513,11 @@ def _convert_final_decision_json_to_markdown(json_obj: Dict[str, Any]) -> str:
         logger.info(f"🔄 [最终决策转换] final_trade_decision 字段: {list(final_trade_decision.keys())}")
 
         # 决策摘要
-        lines.append("# 🎯 综合研究结论\n\n")
-        lines.append("## 结论摘要\n\n")
+        lines.append("# 🎯 综合研究简报\n\n")
+        lines.append("## 当前判断\n\n")
 
-        # 操作建议
-        action = final_trade_decision.get("action", "")
+        # 研究判断
+        action = final_trade_decision.get("analysis_view") or final_trade_decision.get("action", "")
         logger.info(f"🔄 [最终决策转换] action: {action}")
         if action:
             action_map = {
@@ -477,24 +547,6 @@ def _convert_final_decision_json_to_markdown(json_obj: Dict[str, Any]) -> str:
             except (ValueError, TypeError):
                 lines.append(f"- **信心度**: {confidence}%\n")
 
-        # 目标价格
-        target_price = final_trade_decision.get("target_price")
-        logger.info(f"🔄 [最终决策转换] target_price: {target_price}")
-        if target_price:
-            lines.append(f"- **观察区间参考**: ¥{target_price}\n")
-
-        # 止损价格
-        stop_loss = final_trade_decision.get("stop_loss")
-        logger.info(f"🔄 [最终决策转换] stop_loss: {stop_loss}")
-        if stop_loss:
-            lines.append(f"- **关键验证位**: ¥{stop_loss}\n")
-
-        # 建议仓位
-        position_ratio = final_trade_decision.get("position_ratio", "")
-        logger.info(f"🔄 [最终决策转换] position_ratio: {position_ratio}")
-        if position_ratio:
-            lines.append(f"- **风险承受前提**: {position_ratio}\n")
-
         lines.append("\n")
 
         # 研究依据（核心内容）
@@ -507,13 +559,27 @@ def _convert_final_decision_json_to_markdown(json_obj: Dict[str, Any]) -> str:
         summary = final_trade_decision.get("summary", "")
         logger.info(f"🔄 [最终决策转换] summary 长度: {len(summary) if summary else 0}")
         if summary:
-            lines.append(f"## 💡 结论总结\n\n{summary}\n\n")
+            lines.append(f"## 💡 研究摘要\n\n{summary}\n\n")
 
         # 风险提示
         risk_warning = final_trade_decision.get("risk_warning", "")
         logger.info(f"🔄 [最终决策转换] risk_warning 长度: {len(risk_warning) if risk_warning else 0}")
         if risk_warning:
             lines.append(f"## ⚠️ 风险提示\n\n{risk_warning}\n\n")
+
+        for title, field_name in (
+            ("## 🔍 核心依据", "core_evidence"),
+            ("## ❓ 关键不确定性", "uncertainties"),
+            ("## 🔄 判断调整条件", "invalidation_conditions"),
+            ("## 👀 后续观察事项", "watch_items"),
+        ):
+            items = final_trade_decision.get(field_name, [])
+            if isinstance(items, list) and items:
+                lines.append(f"{title}\n\n")
+                for idx, item in enumerate(items, 1):
+                    if item:
+                        lines.append(f"{idx}. {item}\n")
+                lines.append("\n")
     else:
         logger.warning(f"⚠️ [最终决策转换] final_trade_decision 不存在或为空，回退到风险评估格式")
         # 如果没有 final_trade_decision，回退到风险评估格式
@@ -536,7 +602,7 @@ def _extract_investment_debate_reports(debate_state: Any, reports: Dict[str, str
     logger.info(f"🔍 [ReportFormatter] bull_history 类型: {type(bull_content)}, 值: {str(bull_content)[:100] if bull_content else None}")
     if bull_content and isinstance(bull_content, str) and len(bull_content.strip()) > 10:
         # 🔥 清理AI生成的署名信息
-        cleaned_content = _remove_author_signature(bull_content.strip())
+        cleaned_content = _clean_report_for_display('bull_researcher', bull_content.strip())
         reports['bull_researcher'] = cleaned_content
         logger.info(f"📊 [ReportFormatter] 提取: bull_researcher - 长度: {len(cleaned_content)} (已清理署名)")
 
@@ -545,7 +611,7 @@ def _extract_investment_debate_reports(debate_state: Any, reports: Dict[str, str
     logger.info(f"🔍 [ReportFormatter] bear_history 类型: {type(bear_content)}, 值: {str(bear_content)[:100] if bear_content else None}")
     if bear_content and isinstance(bear_content, str) and len(bear_content.strip()) > 10:
         # 🔥 清理AI生成的署名信息
-        cleaned_content = _remove_author_signature(bear_content.strip())
+        cleaned_content = _clean_report_for_display('bear_researcher', bear_content.strip())
         reports['bear_researcher'] = cleaned_content
         logger.info(f"📊 [ReportFormatter] 提取: bear_researcher - 长度: {len(cleaned_content)} (已清理署名)")
 
@@ -557,7 +623,10 @@ def _extract_investment_debate_reports(debate_state: Any, reports: Dict[str, str
     # 不要在空字符串时使用 str(debate_state) 作为备选
     if decision_content and isinstance(decision_content, str) and len(decision_content.strip()) > 10:
         # 🔥 新增：如果是 JSON 格式，转换为 Markdown
-        markdown_content = _convert_json_to_markdown(decision_content.strip(), "investment")
+        markdown_content = _clean_report_for_display(
+            'research_team_decision',
+            _convert_json_to_markdown(decision_content.strip(), "investment"),
+        )
         reports['research_team_decision'] = markdown_content
         logger.info(f"📊 [ReportFormatter] 提取: research_team_decision - 长度: {len(markdown_content)}")
     else:
@@ -576,7 +645,7 @@ def _extract_risk_debate_reports(risk_state: Any, reports: Dict[str, str]):
     logger.info(f"🔍 [ReportFormatter] risky_history: {str(risky_content)[:100] if risky_content else None}")
     if risky_content and isinstance(risky_content, str) and len(risky_content.strip()) > 10:
         # 🔥 清理AI生成的署名信息
-        cleaned_content = _remove_author_signature(risky_content.strip())
+        cleaned_content = _clean_report_for_display('risky_analyst', risky_content.strip())
         reports['risky_analyst'] = cleaned_content
         logger.info(f"📊 [ReportFormatter] 提取: risky_analyst - 长度: {len(cleaned_content)} (已清理署名)")
 
@@ -585,7 +654,7 @@ def _extract_risk_debate_reports(risk_state: Any, reports: Dict[str, str]):
     logger.info(f"🔍 [ReportFormatter] safe_history: {str(safe_content)[:100] if safe_content else None}")
     if safe_content and isinstance(safe_content, str) and len(safe_content.strip()) > 10:
         # 🔥 清理AI生成的署名信息
-        cleaned_content = _remove_author_signature(safe_content.strip())
+        cleaned_content = _clean_report_for_display('safe_analyst', safe_content.strip())
         reports['safe_analyst'] = cleaned_content
         logger.info(f"📊 [ReportFormatter] 提取: safe_analyst - 长度: {len(cleaned_content)} (已清理署名)")
 
@@ -594,7 +663,7 @@ def _extract_risk_debate_reports(risk_state: Any, reports: Dict[str, str]):
     logger.info(f"🔍 [ReportFormatter] neutral_history: {str(neutral_content)[:100] if neutral_content else None}")
     if neutral_content and isinstance(neutral_content, str) and len(neutral_content.strip()) > 10:
         # 🔥 清理AI生成的署名信息
-        cleaned_content = _remove_author_signature(neutral_content.strip())
+        cleaned_content = _clean_report_for_display('neutral_analyst', neutral_content.strip())
         reports['neutral_analyst'] = cleaned_content
         logger.info(f"📊 [ReportFormatter] 提取: neutral_analyst - 长度: {len(cleaned_content)} (已清理署名)")
 
@@ -606,7 +675,10 @@ def _extract_risk_debate_reports(risk_state: Any, reports: Dict[str, str]):
     # 不要在空字符串时使用 str(risk_state) 作为备选
     if risk_decision and isinstance(risk_decision, str) and len(risk_decision.strip()) > 10:
         # 🔥 新增：如果是 JSON 格式，转换为 Markdown
-        markdown_content = _convert_json_to_markdown(risk_decision.strip(), "risk")
+        markdown_content = _clean_report_for_display(
+            'risk_management_decision',
+            _convert_json_to_markdown(risk_decision.strip(), "risk"),
+        )
         reports['risk_management_decision'] = markdown_content
         logger.info(f"📊 [ReportFormatter] 提取: risk_management_decision - 长度: {len(markdown_content)}")
     else:
@@ -630,7 +702,7 @@ def format_decision(
     """
     格式化决策为标准格式
 
-    🔥 核心修复：如果 decision_raw 缺少关键字段（target_price, reasoning），
+    🔥 核心修复：如果 decision_raw 缺少关键字段（reasoning），
     使用 SignalProcessor 从 fallback_text 中提取结构化信息。
 
     Args:
@@ -640,7 +712,7 @@ def format_decision(
         stock_code: 股票代码（用于 SignalProcessor 判断货币类型）
 
     Returns:
-        格式化后的决策字典，包含 action, confidence, risk_score, target_price, reasoning
+        格式化后的决策字典，包含 action, confidence, risk_score, reasoning
     """
     import re
 
@@ -651,7 +723,7 @@ def format_decision(
     needs_signal_processing = (
         fallback_text and
         len(fallback_text) > 50 and
-        (decision_raw.get('target_price') is None or not decision_raw.get('reasoning'))
+        (not decision_raw.get('reasoning') and not decision_raw.get('rationale'))
     )
 
     if needs_signal_processing:
@@ -722,11 +794,9 @@ def format_decision(
 
             signal_processor = SignalProcessor(quick_llm)
             processed = signal_processor.process_signal(fallback_text, stock_code)
-            logger.info(f"📊 [ReportFormatter] 使用 SignalProcessor 处理文本，结果: action={processed.get('action')}, target_price={processed.get('target_price')}")
+            logger.info(f"📊 [ReportFormatter] 使用 SignalProcessor 处理文本，结果: action={processed.get('action')}")
 
             # 合并处理结果（优先使用 decision_raw 中的值，如果有的话）
-            if decision_raw.get('target_price') is None and processed.get('target_price') is not None:
-                decision_raw['target_price'] = processed['target_price']
             if not decision_raw.get('reasoning') and processed.get('reasoning'):
                 decision_raw['reasoning'] = processed['reasoning']
             if not decision_raw.get('action') and processed.get('action'):
@@ -742,39 +812,6 @@ def format_decision(
     # 获取 action
     action = decision_raw.get('action', '中性')
     chinese_action = ACTION_TRANSLATION.get(action, action) if action else '中性'
-
-    # 获取 target_price
-    target_price = decision_raw.get('target_price')
-    if target_price is not None and target_price != 'N/A':
-        try:
-            if isinstance(target_price, str):
-                clean_price = target_price.replace('$', '').replace('¥', '').replace('￥', '').strip()
-                target_price = float(clean_price) if clean_price and clean_price != 'None' else None
-            elif isinstance(target_price, (int, float)):
-                target_price = float(target_price)
-            else:
-                target_price = None
-        except (ValueError, TypeError):
-            target_price = None
-    else:
-        target_price = None
-
-    # 如果 target_price 仍然为空，尝试从 fallback_text 中提取（备用方案）
-    if target_price is None and fallback_text:
-        price_patterns = [
-            r'目标价[格]?[：:]\s*([0-9.]+)',
-            r'target_price[：:]\s*([0-9.]+)',
-            r'价格[：:]\s*([0-9.]+)',
-        ]
-        for pattern in price_patterns:
-            match = re.search(pattern, fallback_text, re.IGNORECASE)
-            if match:
-                try:
-                    target_price = float(match.group(1))
-                    logger.debug(f"📊 [ReportFormatter] 从文本中提取目标价格: {target_price}")
-                    break
-                except ValueError:
-                    pass
 
     # 获取 reasoning - 清理 Markdown 格式
     # 🔥 兼容新旧版本：reasoning 或 rationale
@@ -808,10 +845,16 @@ def format_decision(
 
     return {
         'action': chinese_action,
+        'analysis_view': chinese_action,
         'confidence': float(decision_raw.get('confidence', 0.5)),
         'risk_score': float(decision_raw.get('risk_score', 0.3)),
-        'target_price': target_price,
-        'reasoning': reasoning or '暂无分析推理'
+        'reasoning': reasoning or '暂无分析推理',
+        'summary': decision_raw.get('summary', '') or '',
+        'risk_warning': decision_raw.get('risk_warning', '') or '',
+        'core_evidence': decision_raw.get('core_evidence', []) if isinstance(decision_raw.get('core_evidence'), list) else [],
+        'uncertainties': decision_raw.get('uncertainties', []) if isinstance(decision_raw.get('uncertainties'), list) else [],
+        'invalidation_conditions': decision_raw.get('invalidation_conditions', []) if isinstance(decision_raw.get('invalidation_conditions'), list) else [],
+        'watch_items': decision_raw.get('watch_items', []) if isinstance(decision_raw.get('watch_items'), list) else [],
     }
 
 

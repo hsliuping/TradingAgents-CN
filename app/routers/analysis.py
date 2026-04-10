@@ -37,14 +37,150 @@ def format_http_error_detail(exc: Exception) -> str:
 
 
 # 🔥 统一的结果数据格式化函数
+def _coerce_result_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        for key in ("content", "markdown", "text", "message", "report", "judge_decision", "summary", "reasoning"):
+            item = value.get(key)
+            if isinstance(item, str) and item.strip():
+                return item.strip()
+        try:
+            import json
+            return json.dumps(value, ensure_ascii=False, indent=2).strip()
+        except Exception:
+            return str(value).strip()
+    return str(value).strip()
+
+
+def _build_decision_report(decision: Dict[str, Any]) -> str:
+    if not isinstance(decision, dict) or not decision:
+        return ""
+
+    sections = []
+    action = _coerce_result_text(decision.get("analysis_view") or decision.get("action"))
+    confidence = decision.get("confidence")
+    risk_score = decision.get("risk_score")
+    summary = _coerce_result_text(decision.get("summary"))
+    reasoning = _coerce_result_text(decision.get("reasoning"))
+    risk_warning = _coerce_result_text(decision.get("risk_warning"))
+
+    headline_parts = []
+    if action:
+        headline_parts.append(f"研究判断：{action}")
+    if isinstance(confidence, (int, float)):
+        headline_parts.append(f"置信度：{confidence:.2f}")
+    if isinstance(risk_score, (int, float)):
+        headline_parts.append(f"风险分：{risk_score:.2f}")
+    if headline_parts:
+        sections.append("## 研究判断\n" + "\n".join(f"- {part}" for part in headline_parts))
+
+    if summary:
+        sections.append(f"## 核心结论\n{summary}")
+    if reasoning:
+        sections.append(f"## 主要依据\n{reasoning}")
+    if risk_warning:
+        sections.append(f"## 风险提示\n{risk_warning}")
+
+    for field_name, title in (
+        ("core_evidence", "核心依据"),
+        ("uncertainties", "主要不确定性"),
+        ("invalidation_conditions", "失效条件"),
+        ("watch_items", "后续观察"),
+    ):
+        items = decision.get(field_name)
+        if isinstance(items, list):
+            cleaned_items = [_coerce_result_text(item) for item in items if _coerce_result_text(item)]
+            if cleaned_items:
+                sections.append(f"## {title}\n" + "\n".join(f"- {item}" for item in cleaned_items))
+
+    return "\n\n".join(section for section in sections if section).strip()
+
+
 def normalize_result_data(result_data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    统一返回分析结果数据。
-
-    当前阶段保留原始结果内容，避免旧报告在读取时再次被压缩，
-    影响历史数据核查与回溯。
+    统一整理分析结果数据，保留详情报告所需的完整模块内容。
     """
-    return result_data
+    if not isinstance(result_data, dict) or not result_data:
+        return result_data
+
+    normalized = dict(result_data)
+
+    reports = normalized.get("reports")
+    normalized_reports: Dict[str, str] = {}
+    if isinstance(reports, dict):
+        for key, value in reports.items():
+            text = _coerce_result_text(value)
+            if text:
+                normalized_reports[str(key)] = text
+    normalized["reports"] = normalized_reports
+
+    for field_name in ("summary", "recommendation", "model_info", "quick_model", "deep_model"):
+        if field_name in normalized and normalized[field_name] is not None and not isinstance(normalized[field_name], str):
+            normalized[field_name] = _coerce_result_text(normalized[field_name])
+
+    decision = normalized.get("decision")
+    if isinstance(decision, dict):
+        normalized_decision = dict(decision)
+        for field_name in ("action", "analysis_view", "reasoning", "summary", "risk_warning"):
+            if field_name in normalized_decision and normalized_decision[field_name] is not None and not isinstance(normalized_decision[field_name], str):
+                normalized_decision[field_name] = _coerce_result_text(normalized_decision[field_name])
+        normalized["decision"] = normalized_decision
+
+        if "final_trade_decision" not in normalized_reports:
+            decision_report = _build_decision_report(normalized_decision)
+            if decision_report:
+                normalized_reports["final_trade_decision"] = decision_report
+
+    return normalized
+
+
+def has_meaningful_result_payload(result_data: Dict[str, Any]) -> bool:
+    """判断结果载荷是否包含可返回给前端的有效内容。"""
+    if not isinstance(result_data, dict) or not result_data:
+        return False
+
+    if _coerce_result_text(result_data.get("summary")):
+        return True
+
+    if _coerce_result_text(result_data.get("recommendation")):
+        return True
+
+    reports = result_data.get("reports")
+    if isinstance(reports, dict):
+        for value in reports.values():
+            if _coerce_result_text(value):
+                return True
+
+    decision = result_data.get("decision")
+    if isinstance(decision, dict):
+        for key in (
+            "action",
+            "analysis_view",
+            "reasoning",
+            "summary",
+            "risk_warning",
+        ):
+            if _coerce_result_text(decision.get(key)):
+                return True
+
+        for key in (
+            "core_evidence",
+            "uncertainties",
+            "invalidation_conditions",
+            "watch_items",
+        ):
+            items = decision.get(key)
+            if isinstance(items, list) and any(_coerce_result_text(item) for item in items):
+                return True
+
+    key_points = result_data.get("key_points")
+    if isinstance(key_points, list) and any(_coerce_result_text(item) for item in key_points):
+        return True
+
+    return False
 
 
 def get_market_type_from_symbol(symbol: str) -> str:
@@ -664,9 +800,16 @@ async def get_task_result(
                 # 🔥 统一格式化结果数据
                 result_data = normalize_result_data(result_data)
 
+                if not has_meaningful_result_payload(result_data):
+                    logger.warning(f"⚠️ [RESULT] 内存 result_data 为空壳，回退 MongoDB 真实结果: {task_id}")
+                    result_data = None
+                else:
+                    logger.info(f"📊 [RESULT] 内存 result_data 有效，直接返回")
+
                 logger.info(f"📊 [RESULT] ========== 格式化后 ==========")
-                logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
-                logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
+                if result_data:
+                    logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                    logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
             else:
                 logger.warning(f"⚠️ [RESULT] 内存中result_data为空")
 
@@ -871,8 +1014,25 @@ async def get_task_result(
         if not result_data:
             raise HTTPException(status_code=404, detail="研究结果不存在")
 
-        # 处理reports字段 - 如果没有reports字段，优先尝试从文件系统加载，其次从state中提取
-        if 'reports' not in result_data or not result_data['reports']:
+        reports_dict = result_data.get('reports', {}) if isinstance(result_data, dict) else {}
+        has_detail_reports = isinstance(reports_dict, dict) and any(
+            key in reports_dict
+            for key in (
+                'investment_plan',
+                'trader_investment_plan',
+                'research_team_decision',
+                'risk_management_decision',
+                'final_trade_decision',
+                'bull_researcher',
+                'bear_researcher',
+                'risky_analyst',
+                'safe_analyst',
+                'neutral_analyst',
+            )
+        )
+
+        # 处理reports字段 - 如果没有报告，或缺少关键详情模块，优先尝试从文件系统加载，其次从state中提取
+        if 'reports' not in result_data or not result_data['reports'] or not has_detail_reports:
             import os
             from pathlib import Path
 
@@ -1029,16 +1189,17 @@ async def get_task_result(
             if not result_data.get('recommendation'):
                 rec_candidates = []
                 if isinstance(decision, dict):
-                    # 🔥 合规修改：支持新旧字段名
                     action = decision.get('analysis_view') or decision.get('action')
-                    price_range = decision.get('price_analysis_range') or decision.get('target_price')
                     confidence = decision.get('confidence')
+                    risk_level = decision.get('risk_level')
+                    summary_text = decision.get('summary')
 
                     if action:
                         parts = [
                             f"研究结论: {action}",
-                            f"价格分析区间: {price_range}" if price_range else None,
-                            f"置信度: {confidence}" if confidence is not None else None
+                            f"置信度: {confidence}" if confidence is not None else None,
+                            f"风险等级: {risk_level}" if risk_level else None,
+                            f"研究摘要: {summary_text[:80]}" if isinstance(summary_text, str) and summary_text else None,
                         ]
                         rec_candidates.append("；".join([p for p in parts if p]))
                 # 从报告中兜底
@@ -1064,24 +1225,32 @@ async def get_task_result(
             if not result_data.get('key_points'):
                 kp = []
                 if isinstance(decision, dict):
-                    # 🔥 合规修改：支持新旧字段名和新术语
                     action = decision.get('analysis_view') or decision.get('action')
-                    price_range = decision.get('price_analysis_range') or decision.get('target_price')
                     confidence = decision.get('confidence')
                     risk_level = decision.get('risk_level')
+                    summary_text = decision.get('summary')
+                    reasoning = decision.get('reasoning')
+                    core_evidence = decision.get('core_evidence')
+                    watch_items = decision.get('watch_items')
 
                     if action:
                         kp.append(f"研究结论: {action}")
-                    if price_range:
-                        # 处理价格区间（可能是列表或单个值）
-                        if isinstance(price_range, (list, tuple)) and len(price_range) == 2:
-                            kp.append(f"价格分析区间: {price_range[0]}-{price_range[1]}元")
-                        else:
-                            kp.append(f"参考价格: {price_range}元")
                     if confidence is not None:
                         kp.append(f"置信度: {confidence}")
                     if risk_level:
                         kp.append(f"风险等级: {risk_level}")
+                    if isinstance(summary_text, str) and summary_text:
+                        kp.append(f"研究摘要: {summary_text[:100]}")
+                    if isinstance(reasoning, str) and reasoning:
+                        kp.append(f"研究依据: {reasoning[:100]}")
+                    if isinstance(core_evidence, list):
+                        for item in core_evidence[:2]:
+                            if item:
+                                kp.append(f"核心依据: {item}")
+                    if isinstance(watch_items, list):
+                        for item in watch_items[:2]:
+                            if item:
+                                kp.append(f"后续观察事项: {item}")
                 # 从reports中截取前几句作为要点
                 for k in ['investment_plan', 'final_trade_decision']:
                     v = reports.get(k)

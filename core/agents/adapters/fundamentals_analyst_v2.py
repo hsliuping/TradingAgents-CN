@@ -298,7 +298,8 @@ class FundamentalsAnalystAgentV2(BaseAgent):
     4. 对整体研究结论的影响
     5. 待验证问题
 
-    不得给出交易建议、目标价、价格区间或仓位建议。"""
+    不得给出交易建议、目标价、价格区间或仓位建议。
+    不得添加任何署名、作者、分析师、日期或声明信息。"""
 
     def _build_analysis_prompt(self, ticker: str) -> str:
         """构建分析提示词"""
@@ -310,7 +311,8 @@ class FundamentalsAnalystAgentV2(BaseAgent):
     4. 对整体研究结论的支持或削弱作用
     5. 待验证问题与后续观察点
 
-    不要输出价格区间、目标价、仓位或执行建议。"""
+    不要输出价格区间、目标价、仓位或执行建议。
+    不得添加任何署名、作者、分析师、日期或声明信息。"""
 
     def _generate_mock_report(self, ticker: str, trade_date: str) -> str:
         """生成模拟报告（降级方案）"""
