@@ -1,4 +1,8 @@
-from app.utils.compliance import sanitize_analysis_payload, sanitize_display_report_text
+from app.utils.compliance import (
+    sanitize_analysis_payload,
+    sanitize_display_report_text,
+    sanitize_position_analysis_payload,
+)
 from app.utils.report_formatter import (
     _convert_final_decision_json_to_markdown,
     format_decision,
@@ -141,3 +145,30 @@ def test_sanitize_display_report_text_removes_price_and_actionable_lines() -> No
     assert "12.8-13.5元区间" not in sanitized
     assert "突破11.33元" not in sanitized
     assert "60%-80%风险敞口" not in sanitized
+
+
+def test_sanitize_position_analysis_payload_strips_execution_fields() -> None:
+    raw_result = {
+        "action": "add",
+        "action_reason": "建议加仓，跌破9.8元止损，目标价12元。",
+        "summary": "建议继续持有并等待12元目标价。",
+        "detailed_analysis": "公司基本面稳定，但若跌破9.8元需要止损。",
+        "risk_assessment": "若行业景气继续走弱，盈利能力会承压。",
+        "opportunity_assessment": "若资产质量改善，估值修复弹性可能提升。",
+        "price_targets": {"stop_loss_price": 9.8, "take_profit_price": 12.0},
+        "suggested_quantity": 1000,
+        "suggested_amount": 10000,
+        "confidence": 88,
+    }
+
+    sanitized = sanitize_position_analysis_payload(raw_result)
+
+    assert sanitized["action"] == "hold"
+    assert sanitized["price_targets"] == {}
+    assert sanitized["suggested_quantity"] is None
+    assert sanitized["suggested_amount"] is None
+    assert sanitized["confidence"] == 88.0
+    assert "加仓" not in sanitized["action_reason"]
+    assert "止损" not in sanitized["action_reason"]
+    assert "目标价" not in sanitized["summary"]
+    assert sanitized["recommendation"].startswith("该持仓研究仅提供研究观察")

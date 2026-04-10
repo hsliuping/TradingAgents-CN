@@ -316,6 +316,38 @@ class TestTechnicalAnalystV2:
         assert TechnicalAnalystV2.researcher_type == "position_technical"
         assert TechnicalAnalystV2.output_field == "technical_analysis"
 
+    def test_fallback_user_prompt_avoids_execution_language(self):
+        """测试降级提示词改为研究判断口径"""
+        from core.agents.adapters import TechnicalAnalystV2
+
+        agent = TechnicalAnalystV2()
+        agent._get_prompt_from_template = lambda *args, **kwargs: None
+
+        prompt = agent._build_user_prompt(
+            ticker="000001",
+            analysis_date="2024-12-15",
+            reports={},
+            historical_context=None,
+            state={
+                "position_info": {
+                    "code": "000001",
+                    "name": "平安银行",
+                    "cost_price": 10.0,
+                    "current_price": 10.5,
+                    "unrealized_pnl_pct": 5.0,
+                },
+                "market_data": {
+                    "summary": "趋势偏稳，量能一般。",
+                    "technical_indicators": "MACD走平，RSI中性。",
+                },
+                "stock_analysis_report": {"has_cache": False},
+            },
+        )
+
+        assert "技术验证信号" in prompt
+        assert "操作建议" not in prompt
+        assert "支撑阻力位" not in prompt
+
 
 class TestFundamentalAnalystV2:
     """测试基本面分析师V2 (持仓分析)"""
@@ -333,6 +365,35 @@ class TestFundamentalAnalystV2:
         assert FundamentalAnalystV2.metadata.name == "基本面分析师 v2.0"
         assert FundamentalAnalystV2.researcher_type == "position_fundamental"
         assert FundamentalAnalystV2.output_field == "fundamental_analysis"
+
+    def test_fallback_user_prompt_avoids_execution_language(self):
+        """测试降级提示词改为研究判断口径"""
+        from core.agents.adapters import FundamentalAnalystV2
+
+        agent = FundamentalAnalystV2()
+        agent._get_prompt_from_template = lambda *args, **kwargs: None
+
+        prompt = agent._build_user_prompt(
+            ticker="000001",
+            analysis_date="2024-12-15",
+            reports={},
+            historical_context=None,
+            state={
+                "position_info": {
+                    "code": "000001",
+                    "name": "平安银行",
+                    "industry": "银行",
+                    "cost_price": 10.0,
+                    "current_price": 10.5,
+                    "holding_days": 30,
+                },
+                "stock_analysis_report": {"has_cache": False},
+            },
+        )
+
+        assert "公开验证信号" in prompt
+        assert "基于持仓的基本面操作建议" not in prompt
+        assert "禁止输出买卖建议" in prompt
 
 
 class TestRiskAssessorV2:
@@ -352,9 +413,43 @@ class TestRiskAssessorV2:
         assert RiskAssessorV2.researcher_type == "position_risk"
         assert RiskAssessorV2.output_field == "risk_analysis"
 
+    def test_fallback_user_prompt_avoids_reference_prices(self):
+        """测试降级提示词不再要求参考价位"""
+        from core.agents.adapters import RiskAssessorV2
+
+        agent = RiskAssessorV2()
+        agent._get_prompt_from_template = lambda *args, **kwargs: None
+
+        prompt = agent._build_user_prompt(
+            ticker="000001",
+            analysis_date="2024-12-15",
+            reports={},
+            historical_context=None,
+            state={
+                "position_info": {
+                    "code": "000001",
+                    "name": "平安银行",
+                    "quantity": 100,
+                    "cost_price": 10.0,
+                    "current_price": 10.5,
+                    "market_value": 1050.0,
+                    "unrealized_pnl": 50.0,
+                    "unrealized_pnl_pct": 5.0,
+                },
+                "capital_info": {"total_assets": 100000.0},
+                "market_data": {"volatility": "中等"},
+                "stock_analysis_report": {"has_cache": False},
+            },
+        )
+
+        assert "后续观察事项" in prompt
+        assert "风险控制参考价位（仅供参考）" not in prompt
+        assert "收益预期参考价位（仅供参考）" not in prompt
+        assert "禁止输出风险控制参考价位" in prompt
+
 
 class TestActionAdvisorV2:
-    """测试操作建议师V2 (持仓分析)"""
+    """测试持仓研究整合师V2 (持仓分析)"""
 
     def test_import(self):
         """测试导入"""
@@ -366,9 +461,41 @@ class TestActionAdvisorV2:
         from core.agents.adapters import ActionAdvisorV2
 
         assert ActionAdvisorV2.metadata.id == "pa_advisor_v2"
-        assert ActionAdvisorV2.metadata.name == "操作建议师 v2.0"
+        assert ActionAdvisorV2.metadata.name == "持仓研究整合师 v2.0"
         assert ActionAdvisorV2.manager_type == "position_advisor"
         assert ActionAdvisorV2.output_field == "action_advice"
+
+    def test_fallback_user_prompt_uses_research_schema(self):
+        """测试降级提示词输出研究判断格式"""
+        from core.agents.adapters import ActionAdvisorV2
+
+        agent = ActionAdvisorV2()
+        agent._get_prompt_from_template = lambda *args, **kwargs: None
+
+        prompt = agent._build_user_prompt(
+            ticker="000001",
+            analysis_date="2024-12-15",
+            inputs={},
+            debate_summary=None,
+            state={
+                "position_info": {
+                    "code": "000001",
+                    "name": "平安银行",
+                    "cost_price": 10.0,
+                    "current_price": 10.5,
+                    "unrealized_pnl_pct": 5.0,
+                },
+                "technical_analysis": "趋势偏稳，量价配合一般。",
+                "fundamental_analysis": "盈利能力稳定，估值中性。",
+                "risk_analysis": "需关注行业景气与资产质量变化。",
+                "user_goal": {"target_return": 10, "stop_loss": -8},
+            },
+        )
+
+        assert "持仓研究结论" in prompt
+        assert "observation_factors" in prompt
+        assert "价格分析区间" not in prompt
+        assert "风险控制参考价" not in prompt
 
 
 # ==================== 复盘分析Agent测试 ====================
