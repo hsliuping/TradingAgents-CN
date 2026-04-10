@@ -206,6 +206,24 @@ class TestNewsAnalystV2:
         assert NewsAnalystV2.analyst_type == "news"
         assert NewsAnalystV2.output_field == "news_report"
 
+    def test_fallback_user_prompt_uses_research_observation_schema(self):
+        """测试新闻分析师降级提示词改为研究观察语义"""
+        from core.agents.adapters import NewsAnalystV2
+
+        agent = NewsAnalystV2()
+        agent._get_prompt_from_template = lambda *args, **kwargs: None
+
+        prompt = agent._build_user_prompt(
+            ticker="000001",
+            analysis_date="2024-12-15",
+            tool_data={},
+            state={"company_name": "平安银行"},
+        )
+
+        assert "新闻事件研究" in prompt
+        assert "后续观察事项" in prompt
+        assert "投资机会窗口判断" not in prompt
+
 
 class TestSocialMediaAnalystV2:
     """测试社交媒体分析师V2"""
@@ -223,6 +241,24 @@ class TestSocialMediaAnalystV2:
         assert SocialMediaAnalystV2.metadata.name == "社交媒体分析师 v2.0"
         assert SocialMediaAnalystV2.analyst_type == "social"
         assert SocialMediaAnalystV2.output_field == "sentiment_report"
+
+    def test_fallback_user_prompt_uses_research_observation_schema(self):
+        """测试社交媒体分析师降级提示词改为研究观察语义"""
+        from core.agents.adapters import SocialMediaAnalystV2
+
+        agent = SocialMediaAnalystV2()
+        agent._get_prompt_from_template = lambda *args, **kwargs: None
+
+        prompt = agent._build_user_prompt(
+            ticker="000001",
+            analysis_date="2024-12-15",
+            tool_data={},
+            state={"company_name": "平安银行"},
+        )
+
+        assert "情绪研究" in prompt
+        assert "噪音来源" in prompt
+        assert "投资机会" not in prompt
 
 
 class TestSectorAnalystV2:

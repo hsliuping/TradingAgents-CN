@@ -80,6 +80,82 @@ def generate_template_content(agent_type: str, agent_name: str, display_name: st
     Returns:
         包含system_prompt, tool_guidance, analysis_requirements的字典
     """
+
+    if agent_name == "news_analyst_v2":
+        focus_map = {
+            "aggressive": ("高敏感度", "更快识别可能强化研究判断的事件催化", "说明催化成立前提、时效性与验证条件", "输出催化、风险与后续观察事项"),
+            "neutral": ("中性", "平衡评估新闻、公告与监管事件", "区分短期噪音与中期变量", "输出事件影响路径、信息缺口与观察事项"),
+            "conservative": ("保守", "优先识别可能削弱研究判断的风险事件", "关注争议、监管与负面舆情的影响路径", "输出脆弱点、风险与后续观察事项"),
+        }
+        pref_label, focus1, focus2, focus3 = focus_map[preference]
+        return {
+            "system_prompt": f"""你是一位{pref_label}的{display_name}。
+
+**分析目标**: {{company_name}}（{{ticker}}，{{market_name}}）
+**分析日期**: {{current_date}}
+
+**核心职责**:
+1. {focus1}
+2. {focus2}
+3. {focus3}
+4. 仅输出研究观察、风险提示与验证事项
+
+允许引用真实事件、时间与数字，但不得输出买卖建议、目标价、价格区间、止损止盈或仓位计划。""",
+            "tool_guidance": """**工具使用指导**:
+
+1. 必须调用 get_stock_news_unified 获取真实新闻数据
+2. 调用参数使用 ticker 与 curr_date
+3. 只分析真实返回的事件、公告和监管信息
+
+⚠️ 严格禁止：假设或编造新闻、把事件解读改写成交易建议或价格触发条件。""",
+            "analysis_requirements": """**分析要求**:
+
+1. 梳理核心事件事实、时效性和可信度
+2. 说明事件如何影响经营、估值预期、行业位置或风险暴露
+3. 提炼主要催化、主要风险与后续观察事项
+
+**输出重点**: 事件影响路径、信息缺口、观察信号""",
+            "output_format": "使用Markdown格式输出研究报告，按核心事件、影响路径、催化与风险、后续观察事项展开。",
+            "constraints": "必须基于真实数据进行分析，禁止输出任何交易建议、价位方案、止损止盈、仓位计划或执行指令。"
+        }
+
+    if agent_name == "social_analyst_v2":
+        focus_map = {
+            "aggressive": ("高敏感度", "更快识别可能强化研究判断的正向情绪变化", "分析热度扩散、观点分歧与情绪共振", "输出值得跟踪的情绪信号与观察事项"),
+            "neutral": ("中性", "平衡评估情绪方向、热度与渠道差异", "识别情绪背离、噪音与待验证信号", "输出研究观察、风险提示与观察事项"),
+            "conservative": ("保守", "优先识别负面情绪、恐慌扩散与脆弱点", "分析噪音放大与风险外溢可能", "输出风险提示与后续观察事项"),
+        }
+        pref_label, focus1, focus2, focus3 = focus_map[preference]
+        return {
+            "system_prompt": f"""你是一位{pref_label}的{display_name}。
+
+**分析目标**: {{company_name}}（{{ticker}}，{{market_name}}）
+**分析日期**: {{current_date}}
+
+**核心职责**:
+1. {focus1}
+2. {focus2}
+3. {focus3}
+4. 仅输出研究观察、风险提示与验证事项
+
+允许引用真实情绪指标、讨论热度与文本片段，但不得输出买卖建议、目标价、价格区间、止损止盈或仓位计划。""",
+            "tool_guidance": """**工具使用指导**:
+
+1. 必须调用 get_stock_sentiment_unified 获取真实情绪数据
+2. 调用参数使用 ticker 与 curr_date
+3. 只分析真实返回的情绪指标、讨论主题和观点分歧
+
+⚠️ 严格禁止：假设或编造情绪数据、把情绪变化改写成交易建议或执行指令。""",
+            "analysis_requirements": """**分析要求**:
+
+1. 说明情绪方向、热度变化和主要讨论主题
+2. 分析不同渠道观点差异、情绪背离与噪音来源
+3. 提炼值得跟踪的情绪信号、主要风险与后续观察事项
+
+**输出重点**: 情绪结构、噪音识别、观察信号""",
+            "output_format": "使用Markdown格式输出研究报告，按情绪方向、热度变化、背离与噪音、后续观察事项展开。",
+            "constraints": "必须基于真实数据进行分析，禁止输出任何交易建议、价位方案、止损止盈、仓位计划或执行指令。"
+        }
     
     preference_map = {
         "aggressive": ("激进", "发现投资机会", "强调成长潜力", "积极寻找买入理由"),

@@ -175,6 +175,25 @@ def test_sanitize_position_analysis_payload_strips_execution_fields() -> None:
     assert sanitized["recommendation"].startswith("该持仓研究仅提供研究观察")
 
 
+def test_sanitize_analysis_payload_strips_news_and_sentiment_execution_language() -> None:
+    raw_result = {
+        "reports": {
+            "news_report": "建议买入，目标价12元。\n公司公告显示新产线投产，后续仍需跟踪放量节奏。",
+            "sentiment_report": "社交媒体建议加仓并设置止损。\n讨论热度上升，但分歧明显且噪音较多。",
+        },
+        "summary": "建议买入，目标价12元。",
+        "key_points": ["建议买入", "新产线投产"],
+    }
+
+    sanitized = sanitize_analysis_payload(raw_result)
+
+    assert "买入" not in sanitized["summary"]
+    assert "目标价" not in sanitized["summary"]
+    assert "公司公告显示新产线投产" in sanitized["reports"]["news_report"]
+    assert "讨论热度上升" in sanitized["reports"]["sentiment_report"]
+    assert all("买入" not in point for point in sanitized["key_points"])
+
+
 def test_sanitize_trade_review_payload_strips_future_trade_actions() -> None:
     raw_result = {
         "summary": "下次可在10元附近买回，并把仓位提升到五成。",
