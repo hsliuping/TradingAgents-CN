@@ -2,6 +2,7 @@ from app.utils.compliance import (
     sanitize_analysis_payload,
     sanitize_display_report_text,
     sanitize_position_analysis_payload,
+    sanitize_trade_review_payload,
 )
 from app.utils.report_formatter import (
     _convert_final_decision_json_to_markdown,
@@ -172,3 +173,22 @@ def test_sanitize_position_analysis_payload_strips_execution_fields() -> None:
     assert "止损" not in sanitized["action_reason"]
     assert "目标价" not in sanitized["summary"]
     assert sanitized["recommendation"].startswith("该持仓研究仅提供研究观察")
+
+
+def test_sanitize_trade_review_payload_strips_future_trade_actions() -> None:
+    raw_result = {
+        "summary": "下次可在10元附近买回，并把仓位提升到五成。",
+        "timing_analysis": "若回到10.2元可再次买入，跌破9.8元应止损。",
+        "position_analysis": "建议下次加仓到50%，并设置止盈。",
+        "emotion_analysis": "出现了恐慌卖出，但可以通过预设规则改善。",
+        "attribution_analysis": "本次收益更多来自行业回暖，而非稳定的择时能力。",
+        "suggestions": ["下次跌到10元买入", "仓位提到50%"],
+    }
+
+    sanitized = sanitize_trade_review_payload(raw_result)
+
+    assert "10元" not in sanitized["summary"]
+    assert "买入" not in sanitized["timing_analysis"]
+    assert "加仓" not in sanitized["position_analysis"]
+    assert all("买入" not in item for item in sanitized["suggestions"])
+    assert all("50%" not in item for item in sanitized["suggestions"])

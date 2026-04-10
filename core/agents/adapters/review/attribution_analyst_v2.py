@@ -32,7 +32,7 @@ class AttributionAnalystV2(ResearcherAgent):
     功能：
     - 分析收益来源
     - 区分大盘/行业/个股Alpha贡献
-    - 评估择时能力
+    - 评估可复制能力与偶然因素
     
     工作流程：
     1. 读取交易信息和基准数据
@@ -56,7 +56,7 @@ class AttributionAnalystV2(ResearcherAgent):
     metadata = AgentMetadata(
         id="attribution_analyst_v2",
         name="归因分析师 v2.0",
-        description="分析收益来源，区分大盘/行业/个股Alpha贡献",
+        description="分析收益来源，区分大盘/行业/个股Alpha贡献与可复制性",
         category=AgentCategory.ANALYST,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -95,14 +95,17 @@ class AttributionAnalystV2(ResearcherAgent):
         
         return """您是一位专业的归因分析师。
 
-您的职责是分析收益的来源构成。
+您的职责是分析收益或亏损的来源构成，并识别哪些因素可复制、哪些属于偶然。
 
 分析要点：
 1. Beta收益 - 大盘贡献的收益
 2. 行业超额 - 行业相对大盘的超额收益
 3. 个股Alpha - 选股能力带来的超额收益
 4. 择时贡献 - 买卖时机选择的贡献
-5. 归因评分 - 0-100分的收益质量评分
+5. 可复制性 - 哪些经验可复用、哪些不应过度归功
+6. 归因评分 - 0-100分的收益质量评分
+
+严格要求：改进建议只能写成研究与复盘能力提升方向，不得写成未来交易动作。
 
 请使用中文，基于真实数据进行分析。"""
 
@@ -189,7 +192,10 @@ class AttributionAnalystV2(ResearcherAgent):
 2. 行业超额收益分析
 3. 个股Alpha分析（选股能力）
 4. 择时贡献分析
-5. 收益质量评分（0-100分）"""
+5. 可复制性与偶然因素分析
+6. 收益质量评分（0-100分）
+
+禁止输出未来交易动作、目标价、止损止盈或仓位方案。"""
 
         # 打印模板变量（调试用）
         logger.info(f"📊 [归因分析师] 模板变量:")

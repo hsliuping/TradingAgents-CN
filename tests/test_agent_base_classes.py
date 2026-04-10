@@ -517,6 +517,35 @@ class TestTimingAnalystV2:
         assert TimingAnalystV2.researcher_type == "review_timing"
         assert TimingAnalystV2.output_field == "timing_analysis"
 
+    def test_fallback_user_prompt_avoids_execution_language(self):
+        """测试时机复盘降级提示词不再要求最优买卖点"""
+        from core.agents.adapters import TimingAnalystV2
+
+        agent = TimingAnalystV2()
+        agent._get_prompt_from_template = lambda *args, **kwargs: None
+
+        prompt = agent._build_user_prompt(
+            ticker="000001",
+            analysis_date="2024-12-15",
+            reports={},
+            historical_context=None,
+            state={
+                "trade_info": {
+                    "code": "000001",
+                    "name": "平安银行",
+                    "holding_days": 12,
+                    "realized_pnl": 120.0,
+                    "realized_pnl_pct": 3.2,
+                    "trades": [{"date": "2024-12-01", "side": "buy", "quantity": 100, "price": 10.2}],
+                },
+                "market_data": {"summary": "市场震荡，量能一般。"},
+            },
+        )
+
+        assert "时机复盘" in prompt
+        assert "证据完整性与纪律偏差" in prompt
+        assert "与最优点的差距" not in prompt
+
 
 class TestPositionAnalystV2:
     """测试仓位分析师V2 (复盘分析)"""
@@ -534,6 +563,33 @@ class TestPositionAnalystV2:
         assert PositionAnalystV2.metadata.name == "仓位分析师 v2.0"
         assert PositionAnalystV2.researcher_type == "review_position"
         assert PositionAnalystV2.output_field == "position_analysis"
+
+    def test_fallback_user_prompt_avoids_future_position_plan(self):
+        """测试仓位复盘降级提示词不再要求未来加减仓方案"""
+        from core.agents.adapters import PositionAnalystV2
+
+        agent = PositionAnalystV2()
+        agent._get_prompt_from_template = lambda *args, **kwargs: None
+
+        prompt = agent._build_user_prompt(
+            ticker="000001",
+            analysis_date="2024-12-15",
+            reports={},
+            historical_context=None,
+            state={
+                "trade_info": {
+                    "code": "000001",
+                    "name": "平安银行",
+                    "realized_pnl": 120.0,
+                    "realized_pnl_pct": 3.2,
+                    "trades": [{"date": "2024-12-01", "side": "buy", "quantity": 100}],
+                },
+            },
+        )
+
+        assert "仓位复盘" in prompt
+        assert "仓位变化依据分析" in prompt
+        assert "加减仓策略分析" not in prompt
 
 
 class TestEmotionAnalystV2:
@@ -588,6 +644,36 @@ class TestReviewManagerV2:
         assert ReviewManagerV2.metadata.name == "复盘总结师 v2.0"
         assert ReviewManagerV2.manager_type == "review_manager"
         assert ReviewManagerV2.output_field == "review_summary"
+
+    def test_fallback_user_prompt_avoids_future_trade_actions(self):
+        """测试复盘总结降级提示词不要求未来交易动作"""
+        from core.agents.adapters import ReviewManagerV2
+
+        agent = ReviewManagerV2()
+        agent._get_prompt_from_template = lambda *args, **kwargs: None
+
+        prompt = agent._build_user_prompt(
+            ticker="000001",
+            analysis_date="2024-12-15",
+            inputs={},
+            debate_summary=None,
+            state={
+                "trade_info": {
+                    "code": "000001",
+                    "name": "平安银行",
+                    "realized_pnl": 120.0,
+                    "realized_pnl_pct": 3.2,
+                    "holding_days": 12,
+                },
+                "timing_analysis": "入场证据基本充分，但退出依据略显仓促。",
+                "position_analysis": "仓位暴露与账户规模基本匹配。",
+                "emotion_analysis": "盘中受短期波动影响出现犹豫。",
+                "attribution_analysis": "收益主要来自行业回暖与个股基本面改善。",
+            },
+        )
+
+        assert "禁止把 suggestions 写成买卖" in prompt
+        assert "下次应在某价位执行" in prompt
 
 
 if __name__ == "__main__":

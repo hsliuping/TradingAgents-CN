@@ -30,7 +30,7 @@ class ReviewManagerV2(ManagerAgent):
     功能：
     - 综合所有分析维度
     - 生成完整复盘报告
-    - 给出改进建议
+    - 给出非执行性的改进方向
     
     工作流程：
     1. 读取各维度分析结果
@@ -57,7 +57,7 @@ class ReviewManagerV2(ManagerAgent):
     metadata = AgentMetadata(
         id="review_manager_v2",
         name="复盘总结师 v2.0",
-        description="综合所有分析维度，生成完整复盘报告和改进建议",
+        description="综合所有分析维度，生成完整复盘报告和改进方向",
         category=AgentCategory.MANAGER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -93,13 +93,13 @@ class ReviewManagerV2(ManagerAgent):
         """
         fallback_prompt = """您是一位专业的复盘总结师 v2.0。
 
-您的职责是综合各维度分析，生成完整的复盘报告。
+您的职责是综合各维度分析，生成完整的复盘报告与改进方向。
 
 **总结要点**：
 1. 整体评价 - 综合评分和总体评价
 2. 优点识别 - 本次交易的优点
 3. 不足分析 - 本次交易的不足
-4. 改进建议 - 具体的改进措施
+4. 改进方向 - 聚焦纪律、研究和流程的优化方向
 5. 经验总结 - 可复用的经验教训
 
 请使用中文，基于真实数据进行客观总结。
@@ -115,7 +115,7 @@ class ReviewManagerV2(ManagerAgent):
     "summary": "2-3句话的综合评价（必须是字符串，不能是对象）",
     "strengths": ["优点1", "优点2", "优点3"],
     "weaknesses": ["不足1", "不足2", "不足3"],
-    "suggestions": ["建议1", "建议2", "建议3"],
+    "suggestions": ["改进方向1", "改进方向2", "改进方向3"],
     "lessons": "经验教训总结（必须是字符串）"
 }
 ```
@@ -126,7 +126,8 @@ class ReviewManagerV2(ManagerAgent):
 3. summary 和 lessons 必须是字符串，不能是对象或数组
 4. strengths、weaknesses、suggestions 必须是字符串数组
 5. 请根据实际分析给出真实的评分，不要使用示例中的默认值
-6. 不要在输出中包含日期（如"2025年4月5日"），日期由系统自动生成"""
+6. suggestions 只能写成复盘改进方向，不得写成买卖、加减仓、止损止盈等未来执行动作
+7. 不要在输出中包含日期（如"2025年4月5日"），日期由系统自动生成"""
 
         # 🆕 从 state 获取交易计划（如果有）
         trading_plan = None
@@ -145,7 +146,7 @@ class ReviewManagerV2(ManagerAgent):
 请在复盘报告中增加"交易计划合规性"部分，总结：
 1. 各维度分析中发现的规则违反情况
 2. 合规性总体评价
-3. 针对规则违反的改进建议"""
+3. 针对规则违反的改进方向，不得写成未来交易指令"""
 
         # 使用基类的通用方法从模板系统获取提示词（支持注入交易计划规则）
         variables = {'trading_plan_section': trading_plan_section}
@@ -308,7 +309,9 @@ class ReviewManagerV2(ManagerAgent):
 - 浮动盈亏反映了当前持仓的潜在收益/亏损，是评价交易决策的重要指标
 - 不要仅基于已实现盈亏（可能为0）就认为交易"收益归零"，要结合浮动盈亏进行综合评价
 
-请给出JSON格式的复盘报告。"""
+请给出JSON格式的复盘报告。
+
+禁止把 suggestions 写成买卖、加减仓、止损止盈、仓位调整或“下次应在某价位执行”之类的未来动作。"""
 
         # 打印模板变量（调试用）
         logger.info(f"📊 [复盘管理器] 模板变量:")
