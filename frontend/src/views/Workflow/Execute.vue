@@ -119,22 +119,22 @@
             <!-- 详细报告 -->
             <el-collapse v-model="activeCollapse">
               <!-- 分析师报告 -->
-              <el-collapse-item title="大盘分析" name="index" v-if="hasContent(getReportField('index_report'))">
+              <el-collapse-item title="大盘环境研究" name="index" v-if="hasContent(getReportField('index_report'))">
                 <div class="report-content" v-html="formatReport(getReportField('index_report'))" />
               </el-collapse-item>
-              <el-collapse-item title="板块分析" name="sector" v-if="hasContent(getReportField('sector_report'))">
+              <el-collapse-item title="行业板块研究" name="sector" v-if="hasContent(getReportField('sector_report'))">
                 <div class="report-content" v-html="formatReport(getReportField('sector_report'))" />
               </el-collapse-item>
-              <el-collapse-item title="市场分析" name="market" v-if="hasContent(getReportField('market_report'))">
+              <el-collapse-item title="市场技术研究" name="market" v-if="hasContent(getReportField('market_report'))">
                 <div class="report-content" v-html="formatReport(getReportField('market_report'))" />
               </el-collapse-item>
-              <el-collapse-item title="基本面分析" name="fundamentals" v-if="hasContent(getReportField('fundamentals_report'))">
+              <el-collapse-item title="基本面研究" name="fundamentals" v-if="hasContent(getReportField('fundamentals_report'))">
                 <div class="report-content" v-html="formatReport(getReportField('fundamentals_report'))" />
               </el-collapse-item>
-              <el-collapse-item title="新闻分析" name="news" v-if="hasContent(getReportField('news_report'))">
+              <el-collapse-item title="新闻研究" name="news" v-if="hasContent(getReportField('news_report'))">
                 <div class="report-content" v-html="formatReport(getReportField('news_report'))" />
               </el-collapse-item>
-              <el-collapse-item title="情绪分析" name="sentiment" v-if="hasContent(getReportField('sentiment_report'))">
+              <el-collapse-item title="情绪研究" name="sentiment" v-if="hasContent(getReportField('sentiment_report'))">
                 <div class="report-content" v-html="formatReport(getReportField('sentiment_report'))" />
               </el-collapse-item>
 

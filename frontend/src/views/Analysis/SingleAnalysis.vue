@@ -1606,12 +1606,12 @@ const analysisModuleOrder = [
 ]
 
 const analysisModuleMeta: Record<string, { title: string; icon: string; description: string }> = {
-  index_report: { title: '大盘指数分析', icon: '📊', description: '大盘指数走势、市场环境、系统性风险分析' },
-  sector_report: { title: '行业板块分析', icon: '🏭', description: '行业趋势、板块轮动、同业对比分析' },
-  market_report: { title: '市场技术分析', icon: '📈', description: '技术指标、价格趋势、支撑阻力位分析' },
-  fundamentals_report: { title: '基本面分析', icon: '💰', description: '财务数据、估值水平、盈利能力分析' },
-  sentiment_report: { title: '市场情绪分析', icon: '💭', description: '投资者情绪、社交媒体情绪指标' },
-  news_report: { title: '新闻事件分析', icon: '📰', description: '相关新闻事件、市场动态影响分析' },
+  index_report: { title: '大盘环境研究', icon: '📊', description: '市场环境、流动性条件与系统性风险观察' },
+  sector_report: { title: '行业板块研究', icon: '🏭', description: '行业景气度、结构变化与同业对比' },
+  market_report: { title: '市场技术研究', icon: '📈', description: '趋势结构、波动状态与量价配合观察' },
+  fundamentals_report: { title: '基本面研究', icon: '💰', description: '财务质量、估值背景与经营弹性分析' },
+  sentiment_report: { title: '情绪研究', icon: '💭', description: '情绪方向、热度变化与噪音识别' },
+  news_report: { title: '新闻研究', icon: '📰', description: '公告、新闻事件与催化风险脉络' },
   bull_researcher: { title: '乐观情景研究员', icon: '🌤️', description: '乐观情景下的主要论点与论证' },
   bull_report: { title: '乐观情景论证', icon: '🌤️', description: '乐观情景研究的展开论证内容' },
   bear_researcher: { title: '审慎情景研究员', icon: '🌧️', description: '审慎情景下的主要论点与论证' },
@@ -1625,9 +1625,9 @@ const analysisModuleMeta: Record<string, { title: string; icon: string; descript
   safe_opinion: { title: '防御情景审阅', icon: '🛡️', description: '防御情景的补充审阅意见' },
   neutral_analyst: { title: '基准情景分析师', icon: '⚖️', description: '基准情景下的平衡分析与条件判断' },
   neutral_opinion: { title: '基准情景审阅', icon: '⚖️', description: '基准情景的补充审阅意见' },
-  risk_management_decision: { title: '风险治理摘要', icon: '⚠️', description: '风险治理团队对整体风险的汇总意见' },
+  risk_management_decision: { title: '风险治理结论', icon: '⚠️', description: '整体风险、约束条件与后续观察要求' },
   risk_assessment: { title: '风险评估摘要', icon: '⚠️', description: '整体风险暴露、约束条件与关注点' },
-  final_trade_decision: { title: '综合研究简报', icon: '📝', description: '融合研究与风险结论后的最终简报' },
+  final_trade_decision: { title: '综合研究结论', icon: '📝', description: '融合研究与风险结论后的综合结论' },
   investment_debate_state: { title: '研究辩论状态', icon: '🔬', description: '研究辩论过程中的关键状态信息' },
   risk_debate_state: { title: '风险辩论状态', icon: '🛡️', description: '风险辩论过程中的关键状态信息' },
   detailed_analysis: { title: '详细分析', icon: '📄', description: '补充的详细过程或扩展分析内容' }
@@ -1652,6 +1652,12 @@ const normalizeDisplayedResearchText = (content: string) => {
     [/投资计划/g, '研究结论'],
     [/投资建议/g, '研究结论'],
     [/操作建议/g, '研究观点'],
+    [/大盘指数分析/g, '大盘环境研究'],
+    [/行业板块分析/g, '行业板块研究'],
+    [/市场情绪分析/g, '情绪研究'],
+    [/新闻事件分析/g, '新闻研究'],
+    [/风险治理摘要/g, '风险治理结论'],
+    [/综合研究简报/g, '综合研究结论'],
     [/风险管理决策/g, '风险治理结论'],
     [/最终分析结果/g, '最终研究结论']
   ]

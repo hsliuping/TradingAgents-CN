@@ -20,22 +20,22 @@ logger = logging.getLogger(__name__)
 # 分析师英文 ID 到中文名称映射（报告展示用）
 ANALYST_ID_TO_CHINESE: dict = {
     # 宏观分析师
-    "index_analyst": "大盘分析师",
-    "index_analyst_v2": "大盘分析师",
-    "sector_analyst": "板块分析师",
-    "sector_analyst_v2": "板块分析师",
+    "index_analyst": "大盘环境分析师",
+    "index_analyst_v2": "大盘环境分析师",
+    "sector_analyst": "行业板块研究分析师",
+    "sector_analyst_v2": "行业板块研究分析师",
     # 分析师团队
-    "market_analyst": "市场分析师",
-    "market_analyst_v2": "市场分析师",
-    "sentiment_analyst": "情绪分析师",
-    "emotion_analyst": "情绪分析师",
-    "emotion_analyst_v2": "情绪分析师",
-    "news_analyst": "新闻分析师",
-    "news_analyst_v2": "新闻分析师",
+    "market_analyst": "市场技术分析师",
+    "market_analyst_v2": "市场技术分析师",
+    "sentiment_analyst": "情绪研究分析师",
+    "emotion_analyst": "情绪研究分析师",
+    "emotion_analyst_v2": "情绪研究分析师",
+    "news_analyst": "新闻研究分析师",
+    "news_analyst_v2": "新闻研究分析师",
     "fundamentals_analyst": "基本面分析师",
     "fundamentals_analyst_v2": "基本面分析师",
-    "social_media_analyst": "社媒分析师",
-    "social_analyst_v2": "社媒分析师",
+    "social_media_analyst": "社交媒体研究分析师",
+    "social_analyst_v2": "社交媒体研究分析师",
     # 研究团队
     "bull_researcher": "看涨研究员",
     "bull_researcher_v2": "看涨研究员",
@@ -201,7 +201,7 @@ class ReportExporter:
             "sentiment_report",
             "news_report",
 
-            # 研究团队分析
+            # 研究团队结论
             "bull_researcher",
             "bear_researcher",
             "neutral_analyst",
@@ -228,13 +228,13 @@ class ReportExporter:
             "investment_recommendation": "🎯 研究结论摘要",
 
             # 决策报告
-            "final_trade_decision": "⚖️ 最终研究结论",
-            "investment_plan": "📋 研究计划",
+            "final_trade_decision": "📝 综合研究结论",
+            "investment_plan": "📋 研究经理简报",
             "trader_investment_plan": "🧩 研究整合意见",
-            "research_team_decision": "🤝 研究团队分析",
+            "research_team_decision": "🤝 研究团队结论",
             "risk_management_decision": "🛡️ 风险治理结论",
 
-            # 研究团队分析师
+            # 研究团队研究员
             "bull_researcher": "🐂 多头研究员",
             "bear_researcher": "🐻 空头研究员",
 
@@ -244,14 +244,14 @@ class ReportExporter:
             "neutral_analyst": "⚖️ 中立分析师",
 
             # 个股分析报告
-            "market_report": "📊 市场研究报告",
-            "fundamentals_report": "📈 基本面研究报告",
+            "market_report": "📈 市场技术研究报告",
+            "fundamentals_report": "💰 基本面研究报告",
             "sentiment_report": "💭 情绪研究报告",
             "news_report": "📰 新闻研究报告",
 
             # 宏观分析报告
-            "sector_report": "🏭 板块研究报告",
-            "index_report": "📉 大盘研究报告",
+            "sector_report": "🏭 行业板块研究报告",
+            "index_report": "📊 大盘环境研究报告",
         }
         
         # 按顺序添加模块

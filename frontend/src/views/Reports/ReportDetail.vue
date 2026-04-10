@@ -428,14 +428,14 @@ const formatTime = (time: string) => {
 const formatAnalysts = (analysts: string[]) => {
   const analystNameMap: Record<string, string> = {
     // 宏观分析师
-    'index_analyst': '大盘指数分析师',
-    'sector_analyst': '行业板块分析师',
+    'index_analyst': '大盘环境分析师',
+    'sector_analyst': '行业板块研究分析师',
     
     // 分析师团队
     'market_analyst': '市场技术分析师',
     'fundamentals_analyst': '基本面分析师',
-    'news_analyst': '新闻事件分析师',
-    'sentiment_analyst': '市场情绪分析师',
+    'news_analyst': '新闻研究分析师',
+    'sentiment_analyst': '情绪研究分析师',
     
     // 研究团队
     'bull_researcher': '乐观情景研究员',
@@ -449,9 +449,9 @@ const formatAnalysts = (analysts: string[]) => {
     // 兼容旧格式（不带_analyst后缀）
     'market': '市场分析师',
     'fundamentals': '基本面分析师',
-    'news': '新闻分析师',
-    'social': '社媒分析师',
-    'sentiment': '情绪分析师',
+    'news': '新闻研究分析师',
+    'social': '社交媒体研究分析师',
+    'sentiment': '情绪研究分析师',
     'technical': '技术分析师'
   }
 
@@ -559,14 +559,14 @@ const getModuleDisplayName = (moduleName: string) => {
   // 历史报告详情页保留完整模块展示，便于核查旧数据
   const nameMap: Record<string, string> = {
     // 🆕 宏观分析师团队 (2个) - 优先显示
-    index_report: '📊 大盘指数分析',
-    sector_report: '🏭 行业板块分析',
+    index_report: '📊 大盘环境研究',
+    sector_report: '🏭 行业板块研究',
 
     // 分析师团队 (4个)
-    market_report: '📈 市场技术分析',
-    sentiment_report: '💭 市场情绪分析',
-    news_report: '📰 新闻事件分析',
-    fundamentals_report: '💰 基本面分析',
+    market_report: '📈 市场技术研究',
+    sentiment_report: '💭 情绪研究',
+    news_report: '📰 新闻研究',
+    fundamentals_report: '💰 基本面研究',
     bull_researcher: '🌤️ 乐观情景研究员',
     bull_report: '🌤️ 乐观情景论证',
     bear_researcher: '🌧️ 审慎情景研究员',
@@ -580,9 +580,9 @@ const getModuleDisplayName = (moduleName: string) => {
     safe_opinion: '🛡️ 防御情景审阅',
     neutral_analyst: '⚖️ 基准情景分析师',
     neutral_opinion: '⚖️ 基准情景审阅',
-    risk_management_decision: '⚠️ 风险治理摘要',
+    risk_management_decision: '⚠️ 风险治理结论',
     risk_assessment: '⚠️ 风险评估摘要',
-    final_trade_decision: '📝 综合研究简报',
+    final_trade_decision: '📝 综合研究结论',
     investment_debate_state: '🔬 研究辩论状态',
     risk_debate_state: '🛡️ 风险辩论状态',
     detailed_analysis: '📄 详细分析'
@@ -601,6 +601,12 @@ const normalizeDisplayedResearchText = (content: string) => {
     [/投资计划/g, '研究结论'],
     [/投资建议/g, '研究结论'],
     [/操作建议/g, '研究观点'],
+    [/大盘指数分析/g, '大盘环境研究'],
+    [/行业板块分析/g, '行业板块研究'],
+    [/市场情绪分析/g, '情绪研究'],
+    [/新闻事件分析/g, '新闻研究'],
+    [/风险治理摘要/g, '风险治理结论'],
+    [/综合研究简报/g, '综合研究结论'],
     [/风险管理决策/g, '风险治理结论'],
     [/最终分析结果/g, '最终研究结论']
   ]
@@ -756,7 +762,7 @@ const getModuleContent = (moduleData: any): string | null => {
 const getResearchDepthDescription = (depth: number) => {
   const descMap: Record<number, string> = {
     1: '快速分析 - 基础技术面和基本面分析',
-    2: '标准分析 - 包含技术面、基本面和市场情绪分析',
+    2: '标准分析 - 包含技术面、基本面和情绪研究',
     3: '深度分析 - 全面的多维度分析，包含详细的行业和竞争分析',
     4: '专家级分析 - 最全面的分析，包含所有维度和深度研究',
     5: '顶级分析 - 最高级别的分析深度，包含所有可能的分析维度'

@@ -1082,13 +1082,13 @@ function formatReportName(key: string): string {
   // 完整的13个报告映射
   const nameMap: Record<string, string> = {
     // 🆕 宏观分析师团队 (2个)
-    'index_report': '📊 大盘指数分析',
-    'sector_report': '🏭 行业板块分析',
+    'index_report': '📊 大盘环境研究',
+    'sector_report': '🏭 行业板块研究',
     // 分析师团队 (4个)
-    'market_report': '📈 市场技术分析',
-    'sentiment_report': '💭 市场情绪分析',
-    'news_report': '📰 新闻事件分析',
-    'fundamentals_report': '💰 基本面分析',
+    'market_report': '📈 市场技术研究',
+    'sentiment_report': '💭 情绪研究',
+    'news_report': '📰 新闻研究',
+    'fundamentals_report': '💰 基本面研究',
 
     // 兼容旧字段
     'detailed_analysis': '📄 详细分析'

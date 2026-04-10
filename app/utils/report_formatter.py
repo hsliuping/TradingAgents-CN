@@ -47,12 +47,12 @@ STANDARD_REPORT_FIELDS = [
     # 个股研究报告
     'market_report',          # 市场技术分析
     'sentiment_report',       # 社交媒体情绪分析
-    'news_report',            # 新闻事件分析
+    'news_report',            # 新闻研究
     'fundamentals_report',    # 基本面分析
     # 研究结论报告
     # 'investment_plan',        # 研究经理结论（作为 research_team_decision 的备选）
     'trader_investment_plan', # 研究整合意见
-    'research_team_decision', # 研究团队分析
+    'research_team_decision', # 研究团队结论
     'risk_management_decision', # 风险治理结论
     'final_trade_decision'    # 综合研究结论
 ]
@@ -233,7 +233,7 @@ def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
                     reports[report_key] = markdown_value
                     logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
                 elif report_key == 'research_team_decision':
-                    # 研究团队分析也可能是 JSON 格式
+                    # 研究团队结论也可能是 JSON 格式
                     logger.info(f"🔍 [ReportFormatter] 备选提取检测到 research_team_decision，准备转换 JSON")
                     logger.info(f"🔍 [ReportFormatter] 原始内容前500字符: {text_value[:500]}")
                     markdown_value = _convert_json_to_markdown(text_value, "final_decision")
@@ -513,7 +513,7 @@ def _convert_final_decision_json_to_markdown(json_obj: Dict[str, Any]) -> str:
         logger.info(f"🔄 [最终决策转换] final_trade_decision 字段: {list(final_trade_decision.keys())}")
 
         # 决策摘要
-        lines.append("# 🎯 综合研究简报\n\n")
+        lines.append("# 🎯 综合研究结论\n\n")
         lines.append("## 当前判断\n\n")
 
         # 研究判断
