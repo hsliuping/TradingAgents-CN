@@ -334,10 +334,20 @@ async def create_v2_templates():
                         status="active"
                     )
 
-                    # 保存到数据库（user_id=None表示系统模板）
-                    result = await service.create_template(template_data, user_id=None)
+                    result, operation = await service.upsert_system_template(
+                        template_data,
+                        remark_suffix="[2026-04-11] 幂等同步 v2.0 系统模板",
+                    )
 
-                    print(f"    ✅ {preference}: {result.id}")
+                    if not result:
+                        raise RuntimeError(f"同步失败: {operation}")
+
+                    action_text = {
+                        "created": "创建",
+                        "updated": "更新",
+                        "unchanged": "保持",
+                    }.get(operation, operation)
+                    print(f"    ✅ {preference}: {action_text} -> {result.id}")
                     success += 1
 
                 except Exception as e:

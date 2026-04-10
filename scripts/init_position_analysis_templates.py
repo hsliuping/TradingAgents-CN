@@ -593,7 +593,7 @@ PA_ADVISOR_TEMPLATES = {
 # ==================== 模板创建函数 ====================
 
 async def create_template(service: PromptTemplateService, agent_name: str, preference_id: str, template_data: dict) -> bool:
-    """创建单个模板"""
+    """同步单个模板"""
     try:
         template_create = PromptTemplateCreate(
             agent_type="position_analysis",
@@ -605,19 +605,16 @@ async def create_template(service: PromptTemplateService, agent_name: str, prefe
             status="active",
         )
 
-        # 检查是否已存在
-        existing = await service.get_system_templates(
-            agent_type="position_analysis",
-            agent_name=agent_name,
-            preference_type=preference_id
+        result, operation = await service.upsert_system_template(
+            template_create,
+            remark_suffix="[2026-04-11] 幂等同步持仓分析模板",
         )
-
-        if existing:
-            print(f"⏭️  跳过: {agent_name}/{preference_id} - 已存在")
+        if not result:
+            print(f"❌ 同步失败: {agent_name}/{preference_id} - {operation}")
             return False
 
-        await service.create_template(template_create)
-        print(f"✅ 创建: {agent_name}/{preference_id} - {template_data['template_name']}")
+        action_text = {"created": "创建", "updated": "更新", "unchanged": "保持"}.get(operation, operation)
+        print(f"✅ {action_text}: {agent_name}/{preference_id} - {template_data['template_name']}")
         return True
 
     except Exception as e:
@@ -635,8 +632,8 @@ async def main():
 
     service = PromptTemplateService()
 
-    created_count = 0
-    skipped_count = 0
+    synced_count = 0
+    failed_count = 0
 
     # 定义所有Agent及其模板
     all_templates = [
@@ -650,13 +647,13 @@ async def main():
         print(f"\n📌 初始化{display_name}({agent_name})模板...")
         for preference_id, template_data in templates.items():
             if await create_template(service, agent_name, preference_id, template_data):
-                created_count += 1
+                synced_count += 1
             else:
-                skipped_count += 1
+                failed_count += 1
 
     print(f"\n🎉 初始化完成！")
-    print(f"✅ 创建: {created_count} 个模板")
-    print(f"⏭️  跳过: {skipped_count} 个模板")
+    print(f"✅ 已同步: {synced_count} 个模板")
+    print(f"❌ 失败: {failed_count} 个模板")
 
     print(f"\n📋 已创建的持仓分析智能体模板:")
     print(f"   📈 pa_technical (技术面分析师) - 3种偏好")

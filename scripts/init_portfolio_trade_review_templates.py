@@ -290,24 +290,13 @@ async def init_templates():
     print("🚀 开始初始化持仓分析与交易复盘系统模板")
     print("=" * 60)
 
-    created_count = 0
-    skipped_count = 0
+    synced_count = 0
+    failed_count = 0
 
     # 初始化持仓分析师模板
     print("\n📊 初始化持仓分析师(position_advisor)模板...")
     for preference_type, template_data in POSITION_ADVISOR_TEMPLATES.items():
         try:
-            existing = await service.get_system_templates(
-                agent_type="trader",
-                agent_name="position_advisor",
-                preference_type=preference_type
-            )
-
-            if existing:
-                print(f"⏭️  跳过: position_advisor/{preference_type} (已存在)")
-                skipped_count += 1
-                continue
-
             create_data = PromptTemplateCreate(
                 agent_type="trader",
                 agent_name="position_advisor",
@@ -317,33 +306,27 @@ async def init_templates():
                 status="active"
             )
 
-            # user_id=None 表示系统模板
-            template = await service.create_template(create_data, user_id=None)
+            template, operation = await service.upsert_system_template(
+                create_data,
+                remark_suffix="[2026-04-11] 幂等同步组合交易复盘模板",
+            )
 
             if template:
-                print(f"✅ 创建: position_advisor/{preference_type}")
-                created_count += 1
+                action_text = {"created": "创建", "updated": "更新", "unchanged": "保持"}.get(operation, operation)
+                print(f"✅ {action_text}: position_advisor/{preference_type}")
+                synced_count += 1
             else:
-                print(f"❌ 创建失败: position_advisor/{preference_type}")
+                print(f"❌ 同步失败: position_advisor/{preference_type}")
+                failed_count += 1
 
         except Exception as e:
             print(f"❌ 错误: position_advisor/{preference_type} - {e}")
+            failed_count += 1
 
     # 初始化交易复盘分析师模板
     print("\n📝 初始化交易复盘分析师(trade_reviewer)模板...")
     for preference_type, template_data in TRADE_REVIEWER_TEMPLATES.items():
         try:
-            existing = await service.get_system_templates(
-                agent_type="managers",
-                agent_name="trade_reviewer",
-                preference_type=preference_type
-            )
-
-            if existing:
-                print(f"⏭️  跳过: trade_reviewer/{preference_type} (已存在)")
-                skipped_count += 1
-                continue
-
             create_data = PromptTemplateCreate(
                 agent_type="managers",
                 agent_name="trade_reviewer",
@@ -353,20 +336,25 @@ async def init_templates():
                 status="active"
             )
 
-            # user_id=None 表示系统模板
-            template = await service.create_template(create_data, user_id=None)
+            template, operation = await service.upsert_system_template(
+                create_data,
+                remark_suffix="[2026-04-11] 幂等同步组合交易复盘模板",
+            )
 
             if template:
-                print(f"✅ 创建: trade_reviewer/{preference_type}")
-                created_count += 1
+                action_text = {"created": "创建", "updated": "更新", "unchanged": "保持"}.get(operation, operation)
+                print(f"✅ {action_text}: trade_reviewer/{preference_type}")
+                synced_count += 1
             else:
-                print(f"❌ 创建失败: trade_reviewer/{preference_type}")
+                print(f"❌ 同步失败: trade_reviewer/{preference_type}")
+                failed_count += 1
 
         except Exception as e:
             print(f"❌ 错误: trade_reviewer/{preference_type} - {e}")
+            failed_count += 1
 
     print("\n" + "=" * 60)
-    print(f"✅ 初始化完成: 创建 {created_count} 个，跳过 {skipped_count} 个")
+    print(f"✅ 初始化完成: 已同步 {synced_count} 个，失败 {failed_count} 个")
     print("=" * 60)
 
 
