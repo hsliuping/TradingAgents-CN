@@ -115,9 +115,9 @@ class IndexAnalystV2(AnalystAgent):
     大盘分析师 v2.0
     
     功能：
-    - 分析大盘指数走势
-    - 评估市场整体环境
-    - 分析市场风险和机会
+    - 分析大盘指数走势与市场环境
+    - 识别流动性、风险偏好和系统性风险
+    - 提炼关键宏观信号与待验证事项
     
     工作流程：
     1. 调用指数数据工具获取大盘数据
@@ -141,7 +141,7 @@ class IndexAnalystV2(AnalystAgent):
     metadata = AgentMetadata(
         id="index_analyst_v2",
         name="大盘分析师 v2.0",
-        description="分析大盘指数走势，评估市场整体环境",
+        description="分析大盘指数走势与市场环境，提炼系统性风险和关键观察信号",
         category=AgentCategory.ANALYST,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -290,10 +290,12 @@ class IndexAnalystV2(AnalystAgent):
             return prompt
 
         # 降级：使用默认提示词（包含工具信息）
-        return f"""您是一位专业的{market_type}大盘分析师。
+        market_label = market_type or state.get("market_type", "A股")
+        tool_descriptions = self._get_tool_descriptions()
+        return f"""您是一位专业的{market_label}大盘分析师。
 
 ## 您的职责
-分析大盘指数走势，评估市场整体环境，为投资决策提供宏观背景分析。
+    分析大盘指数走势、市场环境与系统性风险，为单股研究提供宏观背景和观察框架。
 
 ## 可用工具
 您可以调用以下工具获取实时市场数据：
@@ -303,16 +305,17 @@ class IndexAnalystV2(AnalystAgent):
 1. **必须调用工具**：在分析之前，必须先调用相关工具获取真实数据
 2. **基于数据分析**：所有结论必须基于工具返回的真实数据，不要编造数据
 3. **多维度分析**：尽量调用多个工具，从不同维度分析市场状态
+4. **禁止交易化表达**：不得输出买卖建议、目标位、价格区间、支撑阻力位、止损止盈、仓位配置或执行方案
 
 ## 分析要点
-1. 大盘指数走势和趋势（上证、深证、创业板等）
-2. 市场技术面分析（MACD、RSI、KDJ等技术指标）
-3. 资金流向分析（北向资金、两融余额）
-4. 市场情绪和风险偏好（涨跌停统计、市场宽度）
-5. 市场周期判断（牛熊阶段、估值水平）
+1. 大盘指数走势和趋势状态（上证、深证、创业板等）
+2. 流动性与风险偏好变化（北向资金、两融、市场宽度）
+3. 波动结构与系统性风险来源
+4. 市场周期与宏观环境判断
+5. 关键观察信号、信息缺口与后续验证事项
 
 ## 输出格式
-请使用中文撰写分析报告，结构清晰、数据准确、结论明确。"""
+请使用中文撰写研究报告，结构清晰、数据准确、结论明确，只输出研究观察、风险提示和后续观察事项。"""
 
     def _get_tool_descriptions(self) -> str:
         """获取工具描述信息"""
@@ -409,7 +412,7 @@ class IndexAnalystV2(AnalystAgent):
         # 🔑 关键：在默认提示词中明确告诉LLM要使用什么参数调用工具
         return f"""## 分析任务
 
-请对 **{ticker}（{company_name}）** 所在的{market_type}市场进行全面的大盘分析。
+    请对 **{ticker}（{company_name}）** 所在的{market_type}市场进行全面的宏观环境研究。
 
 **分析日期**: {analysis_date}
 
@@ -426,7 +429,12 @@ class IndexAnalystV2(AnalystAgent):
 
 **必须使用上述参数值**，不要使用其他日期。
 
-请调用工具获取市场数据，然后生成详细的大盘分析报告。"""
+请调用工具获取市场数据，然后生成详细的中文研究报告，至少包含：
+1. 市场环境与趋势状态
+2. 流动性、风险偏好与系统性风险来源
+3. 关键宏观信号、信息缺口与后续观察事项
+
+禁止输出买卖建议、目标位、价格区间、支撑阻力位、止损止盈、仓位配置或任何执行性指令。"""
 
     def _get_tool_suggestions(self, market_type: str) -> str:
         """根据市场类型生成工具调用建议"""

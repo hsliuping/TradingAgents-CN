@@ -278,6 +278,24 @@ class TestSectorAnalystV2:
         assert SectorAnalystV2.analyst_type == "sector"
         assert SectorAnalystV2.output_field == "sector_report"
 
+    def test_fallback_user_prompt_avoids_sector_allocation_language(self):
+        """测试板块分析师降级提示词不再要求配置建议"""
+        from core.agents.adapters import SectorAnalystV2
+
+        agent = SectorAnalystV2()
+        agent._get_prompt_from_template = lambda *args, **kwargs: None
+
+        prompt = agent._build_user_prompt(
+            ticker="000001",
+            analysis_date="2024-12-15",
+            tool_data={},
+            state={"company_name": "平安银行", "market_type": "A股"},
+        )
+
+        assert "后续观察事项" in prompt
+        assert "行业成长机会和投资价值" not in prompt
+        assert "行业风险和防御策略" not in prompt
+
 
 class TestIndexAnalystV2:
     """测试大盘分析师V2"""
@@ -295,6 +313,25 @@ class TestIndexAnalystV2:
         assert IndexAnalystV2.metadata.name == "大盘分析师 v2.0"
         assert IndexAnalystV2.analyst_type == "index"
         assert IndexAnalystV2.output_field == "index_report"
+
+    def test_fallback_user_prompt_avoids_macro_execution_language(self):
+        """测试大盘分析师降级提示词不再要求目标位或配置建议"""
+        from core.agents.adapters import IndexAnalystV2
+
+        agent = IndexAnalystV2()
+        agent._get_prompt_from_template = lambda *args, **kwargs: None
+
+        prompt = agent._build_user_prompt(
+            ticker="000001",
+            analysis_date="2024-12-15",
+            tool_data={},
+            state={"company_name": "平安银行", "market_type": "A股"},
+        )
+
+        assert "宏观环境研究" in prompt
+        assert "后续观察事项" in prompt
+        assert "上涨机会和市场热点" not in prompt
+        assert "下跌风险和防御策略" not in prompt
 
 
 class TestBearResearcherV2:

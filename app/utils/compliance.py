@@ -32,6 +32,7 @@ _ACTIONABLE_PATTERNS = [
     for pattern in (
         r"买入|卖出|持有|加仓|减仓|清仓|建仓|平仓|调仓",
         r"止损|止盈|仓位|目标价|目标价格|目标区间|价格分析区间|参考价格",
+        r"目标位|目标点位|支撑位|阻力位|压力位|配置建议|防御性配置|进攻性配置|安全边际|板块机会",
         r"投资建议|交易建议|操作建议|一键模拟下单|下单|模拟交易",
         r"BUY|SELL|HOLD|STRONG_BUY|STRONG_SELL",
         r"target_price|stop_loss|take_profit|position_ratio|suggested_quantity|suggested_amount",

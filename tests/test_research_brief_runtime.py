@@ -194,6 +194,25 @@ def test_sanitize_analysis_payload_strips_news_and_sentiment_execution_language(
     assert all("买入" not in point for point in sanitized["key_points"])
 
 
+def test_sanitize_analysis_payload_strips_index_and_sector_execution_language() -> None:
+    raw_result = {
+        "reports": {
+            "index_report": "建议关注3300点支撑位并逢低布局。\n流动性中性，仍需跟踪政策节奏。",
+            "sector_report": "新能源板块具备配置建议和安全边际。\n行业景气度修复，但同业分化明显。",
+        },
+        "summary": "建议关注3300点支撑位并逢低布局。",
+        "key_points": ["配置建议", "行业景气度修复"],
+    }
+
+    sanitized = sanitize_analysis_payload(raw_result)
+
+    assert "支撑位" not in sanitized["summary"]
+    assert "配置建议" not in sanitized["summary"]
+    assert "流动性中性" in sanitized["reports"]["index_report"]
+    assert "行业景气度修复" in sanitized["reports"]["sector_report"]
+    assert all("配置建议" not in point for point in sanitized["key_points"])
+
+
 def test_sanitize_trade_review_payload_strips_future_trade_actions() -> None:
     raw_result = {
         "summary": "下次可在10元附近买回，并把仓位提升到五成。",
