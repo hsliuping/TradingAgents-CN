@@ -1,19 +1,16 @@
 <template>
   <div class="report-detail">
-    <!-- 加载状态 -->
     <div v-if="loading" class="loading-container">
       <el-skeleton :rows="10" animated />
     </div>
 
-    <!-- 报告内容 -->
     <div v-else-if="report" class="report-content">
-      <!-- 报告头部 -->
       <el-card class="report-header" shadow="never">
         <div class="header-content">
           <div class="title-section">
             <h1 class="report-title">
               <el-icon><Document /></el-icon>
-              {{ report.stock_name || report.stock_symbol }} 分析报告
+              {{ report.stock_name || report.stock_symbol }} 研究报告
             </h1>
             <div class="report-meta">
               <el-tag type="primary">{{ report.stock_symbol }}</el-tag>
@@ -30,6 +27,193 @@
               <span v-if="report.model_info && report.model_info !== 'Unknown'" class="meta-item">
                 <el-icon><Cpu /></el-icon>
                 <el-tooltip :content="getModelDescription(report.model_info)" placement="top">
+                  <el-tag type="info" style="cursor: help;">{{ report.model_info }}</el-tag>
+                </el-tooltip>
+              </span>
+              <span v-if="report.research_depth" class="meta-item">
+                <el-icon><DataAnalysis /></el-icon>
+                <el-tooltip :content="getResearchDepthDescription(report.research_depth)" placement="top">
+                  <el-tag type="warning" style="cursor: help;">深度: {{ report.research_depth }}</el-tag>
+                </el-tooltip>
+              </span>
+            </div>
+          </div>
+
+          <div class="action-section">
+            <el-dropdown trigger="click" @command="downloadReport">
+              <el-button type="primary">
+                <el-icon><Download /></el-icon>
+                下载报告
+                <el-icon class="el-icon--right"><arrow-down /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="markdown">
+                    <el-icon><document /></el-icon> Markdown
+                  </el-dropdown-item>
+                  <el-dropdown-item command="docx">
+                    <el-icon><document /></el-icon> Word 文档
+                  </el-dropdown-item>
+                  <el-dropdown-item command="pdf">
+                    <el-icon><document /></el-icon> PDF
+                  </el-dropdown-item>
+                  <el-dropdown-item command="json" divided>
+                    <el-icon><document /></el-icon> JSON (原始数据)
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            <el-button @click="goBack">
+              <el-icon><Back /></el-icon>
+              返回
+            </el-button>
+          </div>
+        </div>
+      </el-card>
+
+      <div class="risk-disclaimer">
+        <el-alert type="warning" :closable="false" show-icon>
+          <template #title>
+            <div class="disclaimer-content">
+              <el-icon class="disclaimer-icon"><WarningFilled /></el-icon>
+              <div class="disclaimer-text">
+                <p style="margin: 0 0 8px 0;"><strong>⚠️ 重要风险提示与免责声明</strong></p>
+                <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
+                  <li><strong>平台性质：</strong>本页面仅展示研究辅助结果与公开信息整理，不提供个股交易建议。</li>
+                  <li><strong>分析目的：</strong>所有内容仅用于研究、复盘与风险识别，不作为买卖依据。</li>
+                  <li><strong>数据局限性：</strong>分析基于历史数据与公开信息，可能存在延迟、不完整或不准确。</li>
+                  <li><strong>独立决策：</strong>请结合自身风险承受能力与投资目标独立判断。</li>
+                </ul>
+              </div>
+            </div>
+          </template>
+        </el-alert>
+      </div>
+
+      <el-card class="metrics-card" shadow="never">
+        <template #header>
+          <div class="card-header">
+            <el-icon><TrendCharts /></el-icon>
+            <span>关键指标</span>
+          </div>
+        </template>
+        <div class="metrics-content">
+          <el-row :gutter="24">
+            <el-col :span="8">
+              <div class="metric-item">
+                <div class="metric-label">
+                  <el-icon><TrendCharts /></el-icon>
+                  研究概览
+                  <el-tooltip content="仅展示研究摘要与公开信息整理，不提供方向性交易结论" placement="top">
+                    <el-icon style="margin-left: 4px; cursor: help; font-size: 14px;"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </div>
+                <div class="metric-value recommendation-value">
+                  <div class="core-conclusion">
+                    {{ getResearchOverview() }}
+                  </div>
+                </div>
+                <el-tag type="info" size="small" style="margin-top: 8px;">研究辅助</el-tag>
+              </div>
+            </el-col>
+
+            <el-col :span="8">
+              <div class="metric-item">
+                <div class="metric-label">
+                  <el-icon><Warning /></el-icon>
+                  风险关注
+                  <el-tooltip content="仅展示研究过程识别到的风险关注点，不展示风险评级" placement="top">
+                    <el-icon style="margin-left: 4px; cursor: help; font-size: 14px;"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </div>
+                <div class="metric-value recommendation-value">
+                  <div class="core-conclusion">
+                    {{ getRiskFocus() }}
+                  </div>
+                </div>
+                <el-tag type="warning" size="small" style="margin-top: 8px;">需自行判断</el-tag>
+              </div>
+            </el-col>
+
+            <el-col :span="8">
+              <div class="metric-item">
+                <div class="metric-label">
+                  <el-icon><DataAnalysis /></el-icon>
+                  报告覆盖
+                  <el-tooltip content="展示本页已保留的研究模块与分析师信息，不展示模型打分" placement="top">
+                    <el-icon style="margin-left: 4px; cursor: help; font-size: 14px;"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </div>
+                <div class="metric-value recommendation-value">
+                  <div class="core-conclusion">
+                    <strong>已展示模块：</strong>{{ orderedModuleNames.length }} 个
+                    <br>
+                    <strong>参与分析：</strong>{{ formatAnalysts(report.analysts || []) || '未提供' }}
+                  </div>
+                </div>
+                <el-tag type="success" size="small" style="margin-top: 8px;">公开信息整理</el-tag>
+              </div>
+            </el-col>
+          </el-row>
+
+          <div v-if="report.key_points && report.key_points.length > 0" class="key-points">
+            <h4>
+              <el-icon><List /></el-icon>
+              关键要点
+            </h4>
+            <ul>
+              <li v-for="(point, index) in report.key_points" :key="index">
+                <el-icon class="point-icon"><Check /></el-icon>
+                {{ formatKeyPoint(point) }}
+              </li>
+            </ul>
+          </div>
+        </div>
+      </el-card>
+
+      <el-card v-if="report.summary" class="summary-card" shadow="never">
+        <template #header>
+          <div class="card-header">
+            <el-icon><InfoFilled /></el-icon>
+            <span>研究摘要</span>
+          </div>
+        </template>
+        <div class="summary-content markdown-content" v-html="renderMarkdown(report.summary)"></div>
+      </el-card>
+
+      <el-card class="modules-card" shadow="never">
+        <template #header>
+          <div class="card-header">
+            <el-icon><Files /></el-icon>
+            <span>研究模块</span>
+          </div>
+        </template>
+
+        <el-tabs v-model="activeModule" type="border-card">
+          <el-tab-pane
+            v-for="moduleName in orderedModuleNames"
+            :key="moduleName"
+            :label="getModuleDisplayName(moduleName)"
+            :name="moduleName"
+          >
+            <div class="module-content">
+              <div v-if="getModuleContent(report.reports[moduleName])" class="markdown-content">
+                <div v-html="renderMarkdown(getModuleContent(report.reports[moduleName]))"></div>
+              </div>
+              <div v-else class="json-content">
+                <pre>{{ JSON.stringify(report.reports[moduleName], null, 2) }}</pre>
+              </div>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </el-card>
+    </div>
+
+    <div v-else class="error-container">
+      <el-result icon="error" title="报告加载失败" sub-title="请检查报告ID是否正确或稍后重试">
+        <template #extra>
+          <el-button type="primary" @click="goBack">返回列表</el-button>
+        </template>
       </el-result>
     </div>
   </div>
@@ -52,7 +236,6 @@ import {
   WarningFilled,
   DataAnalysis,
   Warning,
-  StarFilled,
   List,
   Check,
   Cpu,
@@ -170,10 +353,10 @@ const downloadReport = async (format: string = 'markdown') => {
       .replace(/[\/\\:*?"<>|]/g, '') // 移除文件名不允许的字符
       .replace(/\s+/g, '_') // 空格替换为下划线
       .trim()
-    // 构建文件名：股票代码_股票名称_分析报告_日期
+    // 构建文件名：股票代码_股票名称_研究报告_日期
     const fileName = cleanStockName
-      ? `${report.value.stock_symbol}_${cleanStockName}_分析报告_${report.value.analysis_date}.${ext}`
-      : `${report.value.stock_symbol}_分析报告_${report.value.analysis_date}.${ext}`
+      ? `${report.value.stock_symbol}_${cleanStockName}_研究报告_${report.value.analysis_date}.${ext}`
+      : `${report.value.stock_symbol}_研究报告_${report.value.analysis_date}.${ext}`
     a.download = fileName
 
     document.body.appendChild(a)
@@ -224,7 +407,12 @@ const getFileExtension = (format: string): string => {
   return extensions[format] || 'txt'
 }
 
-const statusMap: Record<string, string> = {
+const goBack = () => {
+  router.push('/reports')
+}
+
+const getStatusText = (status: string) => {
+  const statusMap: Record<string, string> = {
     completed: '已完成',
     processing: '生成中',
     failed: '失败'
@@ -328,6 +516,28 @@ const moduleOrder = [
   'fundamentals_report',
   'sentiment_report',
   'news_report',
+
+  // 第三阶段：研究与辩论过程
+  'bull_researcher',
+  'bull_report',
+  'bear_researcher',
+  'bear_report',
+  'research_team_decision',
+  'investment_plan',
+  'trader_investment_plan',
+
+  // 第四阶段：风险过程
+  'risky_analyst',
+  'risky_opinion',
+  'safe_analyst',
+  'safe_opinion',
+  'neutral_analyst',
+  'neutral_opinion',
+  'risk_management_decision',
+  'risk_assessment',
+  'final_trade_decision',
+  'investment_debate_state',
+  'risk_debate_state',
   'detailed_analysis'
 ]
 
@@ -340,34 +550,13 @@ const orderedModuleNames = computed(() => {
   // 按照 moduleOrder 的顺序过滤出存在的模块
   const ordered = moduleOrder.filter(name => availableModules.includes(name))
 
-  // 添加不在 moduleOrder 中但存在的模块（放在最后）
-  const hiddenModules = [
-    'investment_plan',
-    'bull_researcher',
-    'bull_report',
-    'bear_researcher',
-    'bear_report',
-    'research_team_decision',
-    'trader_investment_plan',
-    'risky_analyst',
-    'risky_opinion',
-    'safe_analyst',
-    'safe_opinion',
-    'neutral_analyst',
-    'neutral_opinion',
-    'risk_management_decision',
-    'risk_assessment',
-    'final_trade_decision',
-    'investment_debate_state',
-    'risk_debate_state'
-  ]
-  const remaining = availableModules.filter(name => !moduleOrder.includes(name) && !hiddenModules.includes(name))
+  const remaining = availableModules.filter(name => !moduleOrder.includes(name))
 
   return [...ordered, ...remaining]
 })
 
 const getModuleDisplayName = (moduleName: string) => {
-  // 统一与单股分析的中文标签映射（仅保留研究类报告）
+  // 历史报告详情页保留完整模块展示，便于核查旧数据
   const nameMap: Record<string, string> = {
     // 🆕 宏观分析师团队 (2个) - 优先显示
     index_report: '📊 大盘指数分析',
@@ -378,18 +567,53 @@ const getModuleDisplayName = (moduleName: string) => {
     sentiment_report: '💭 市场情绪分析',
     news_report: '📰 新闻事件分析',
     fundamentals_report: '💰 基本面分析',
+    bull_researcher: '🐂 多头研究员',
+    bull_report: '🐂 看涨研究',
+    bear_researcher: '🐻 空头研究员',
+    bear_report: '🐻 看跌研究',
+    research_team_decision: '🔬 研究团队分析',
+    investment_plan: '📋 研究团队结论',
+    trader_investment_plan: '🧩 研究整合意见',
+    risky_analyst: '⚡ 激进分析师',
+    risky_opinion: '🔥 激进风险观点',
+    safe_analyst: '🛡️ 保守分析师',
+    safe_opinion: '🛡️ 保守风险观点',
+    neutral_analyst: '⚖️ 中性分析师',
+    neutral_opinion: '⚖️ 中性风险观点',
+    risk_management_decision: '⚠️ 风险治理结论',
+    risk_assessment: '⚠️ 风险评估',
+    final_trade_decision: '📝 最终研究结论',
+    investment_debate_state: '🔬 研究辩论状态',
+    risk_debate_state: '🛡️ 风险辩论状态',
     detailed_analysis: '📄 详细分析'
   }
   // 未匹配到时，做一个友好的回退：下划线转空格
   return nameMap[moduleName] || moduleName.replace(/_/g, ' ')
 }
 
+const normalizeDisplayedResearchText = (content: string) => {
+  if (!content) return ''
+
+  const replacements: Array<[RegExp, string]> = [
+    [/交易分析计划/g, '研究整合意见'],
+    [/交易员计划/g, '研究整合意见'],
+    [/初步投资计划/g, '研究团队结论'],
+    [/投资计划/g, '研究结论'],
+    [/投资建议/g, '研究结论'],
+    [/操作建议/g, '研究观点'],
+    [/风险管理决策/g, '风险治理结论'],
+    [/最终分析结果/g, '最终研究结论']
+  ]
+
+  return replacements.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), content)
+}
+
 const renderMarkdown = (content: string) => {
   if (!content) return ''
   try {
-    return marked.parse(content) as string
+    return marked.parse(normalizeDisplayedResearchText(content)) as string
   } catch (e) {
-    return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
+    return `<pre style="white-space: pre-wrap; font-family: inherit;">${normalizeDisplayedResearchText(content)}</pre>`
   }
 }
 
@@ -399,82 +623,23 @@ const getModuleContent = (moduleData: any): string | null => {
   
   // 如果是字符串，直接返回
   if (typeof moduleData === 'string') {
-    return moduleData
+    return normalizeDisplayedResearchText(moduleData)
   }
   
   // 如果是对象，优先提取 content 字段
   if (typeof moduleData === 'object') {
     if (moduleData.content && typeof moduleData.content === 'string') {
-      return moduleData.content
+      return normalizeDisplayedResearchText(moduleData.content)
     }
     if (moduleData.markdown && typeof moduleData.markdown === 'string') {
-      return moduleData.markdown
+      return normalizeDisplayedResearchText(moduleData.markdown)
     }
     if (moduleData.judge_decision && typeof moduleData.judge_decision === 'string') {
-      return moduleData.judge_decision
+      return normalizeDisplayedResearchText(moduleData.judge_decision)
     }
   }
   
   return null
-}
-
-// 置信度评分相关函数
-// 将后端返回的 0-1 小数转换为 0-100 的百分制
-const normalizeConfidenceScore = (score: number) => {
-  // 如果已经是 0-100 的范围，直接返回
-  if (score > 1) {
-    return Math.round(score)
-  }
-  // 如果是 0-1 的小数，转换为百分制
-  return Math.round(score * 100)
-}
-
-const getConfidenceColor = (score: number) => {
-  if (score >= 80) return '#67C23A' // 较高 - 绿色
-  if (score >= 60) return '#409EFF' // 中上 - 蓝色
-  if (score >= 40) return '#E6A23C' // 中等 - 橙色
-  return '#F56C6C' // 较低 - 红色
-}
-
-const getConfidenceLabel = (score: number) => {
-  if (score >= 80) return '较高'
-  if (score >= 60) return '中上'
-  if (score >= 40) return '中等'
-  return '较低'
-}
-
-// 风险等级相关函数
-const getRiskStars = (riskLevel: string) => {
-  const riskMap: Record<string, number> = {
-    '低': 1,
-    '中低': 2,
-    '中等': 3,
-    '中高': 4,
-    '高': 5
-  }
-  return riskMap[riskLevel] || 3
-}
-
-const getRiskColor = (riskLevel: string) => {
-  const colorMap: Record<string, string> = {
-    '低': '#67C23A',      // 绿色
-    '中低': '#95D475',    // 浅绿色
-    '中等': '#E6A23C',    // 橙色
-    '中高': '#F56C6C',    // 红色
-    '高': '#F56C6C'       // 深红色
-  }
-  return colorMap[riskLevel] || '#E6A23C'
-}
-
-const getRiskDescription = (riskLevel: string) => {
-  const descMap: Record<string, string> = {
-    '低': '风险较小，适合稳健投资者',
-    '中低': '风险可控，适合大多数投资者',
-    '中等': '风险适中，需要谨慎评估',
-    '中高': '风险较高，需要密切关注',
-    '高': '风险很高，建议谨慎投资'
-  }
-  return descMap[riskLevel] || '请根据自身风险承受能力决策'
 }
 
 // 获取分析深度描述
@@ -504,8 +669,8 @@ const formatKeyPoint = (point: string): string => {
     'stop_loss': '风险控制参考价',
     'risk_exposure_ratio': '风险敞口比例',
     'position_ratio': '风险敞口比例',
-    'reasoning': '分析推理',
-    'summary': '分析摘要',
+    'reasoning': '研究依据',
+    'summary': '研究摘要',
     'risk_score': '风险评分',
     'risk_level': '风险等级'
   }
@@ -532,39 +697,42 @@ const formatKeyPoint = (point: string): string => {
   return point
 }
 
-// 提取核心结论（简洁版）
-const getCoreConclusion = () => {
-  if (!report.value) return '暂无'
+const getPlainText = (content: string) => {
+  return content
+    .replace(/[#*_`>-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
-  // 优先从 decision 字段提取
-  if (report.value.decision) {
-    const action = report.value.decision.action || report.value.decision.analysis_view || '持有'
+const getResearchOverview = () => {
+  if (!report.value) return '已生成研究摘要，请查看下方详细报告。'
 
-    // 🔥 合规修改：直接返回分析观点，不提取前提（避免从 JSON 格式的 reasoning 中提取错误信息）
-    return action
+  const sourceText = report.value.summary || report.value.recommendation || ''
+  const normalized = getPlainText(String(sourceText))
+
+  if (!normalized) {
+    return '已生成研究摘要，请查看下方详细报告。'
   }
 
-  // 如果没有 decision 字段，尝试从 recommendation 中提取
-  if (report.value.recommendation) {
-    const rec = report.value.recommendation
+  return normalized.length > 90 ? `${normalized.slice(0, 90)}...` : normalized
+}
 
-    // 尝试提取核心结论（匹配"核心结论：..."或"分析观点：..."）
-    const coreMatch = rec.match(/核心结论[：:]\s*([^。\n]+)/) ||
-                      rec.match(/分析观点[：:]\s*([^。\n]+)/) ||
-                      rec.match(/投资建议[：:]\s*([^。\n]+)/) ||
-                      rec.match(/建议[：:]\s*([^。\n]+)/)
+const getRiskFocus = () => {
+  if (!report.value) return '请结合详细报告关注风险因素、信息披露与市场环境变化。'
 
-    if (coreMatch && coreMatch[1]) {
-      // 清理提取的内容，移除多余的空格和换行
-      const cleaned = coreMatch[1].trim().replace(/\s+/g, ' ')
-      return cleaned.length > 100 ? cleaned.substring(0, 100) + '...' : cleaned
-    }
+  const riskPoint = (report.value.key_points || []).find((point: string) => {
+    const normalized = String(point)
+    return /风险|波动|回撤|不确定|关注/.test(normalized)
+  })
 
-    // 如果没找到，返回前50个字符
-    return rec.length > 50 ? rec.substring(0, 50) + '...' : rec
+  const rawText = riskPoint || report.value.summary || ''
+  const normalized = getPlainText(String(rawText))
+
+  if (!normalized) {
+    return '请结合详细报告关注风险因素、信息披露与市场环境变化。'
   }
 
-  return '暂无'
+  return normalized.length > 90 ? `${normalized.slice(0, 90)}...` : normalized
 }
 
 // 生命周期

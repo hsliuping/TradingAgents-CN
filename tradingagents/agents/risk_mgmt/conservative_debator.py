@@ -8,6 +8,7 @@ logger = get_logger("default")
 
 # 导入模板客户端
 from tradingagents.utils.template_client import get_agent_prompt
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails, build_research_only_closing
 
 
 def create_safe_debator(llm):
@@ -77,6 +78,7 @@ def create_safe_debator(llm):
                 fallback_prompt=None
             )
 
+            system_prompt = apply_compliance_guardrails(system_prompt, "conservative_debator")
             logger.info(f"✅ [保守风险分析师] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
 
         except Exception as e:
@@ -91,6 +93,7 @@ def create_safe_debator(llm):
 您的任务是积极反驳激进和中性分析师的论点，突出他们的观点可能忽视的潜在威胁。
 
 请用中文以对话方式输出。"""
+            system_prompt = apply_compliance_guardrails(system_prompt, "conservative_debator")
             logger.warning(f"⚠️ [保守风险分析师] 使用降级提示词 (长度: {len(system_prompt)})")
 
         # 构建完整提示词
@@ -109,7 +112,7 @@ def create_safe_debator(llm):
 激进分析师的最后回应：{current_risky_response}
 中性分析师的最后回应：{current_neutral_response}
 
-请提出您的保守观点，强调为什么低风险方法是最安全的。"""
+{build_research_only_closing(["请提出您的保守研究观点，强调脆弱点与风险来源，但不要形成止损、减仓或退出方案。"])}"""
 
         logger.info(f"⏱️ [Safe Analyst] 开始调用LLM...")
         llm_start_time = time.time()

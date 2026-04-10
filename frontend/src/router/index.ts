@@ -257,7 +257,7 @@ const routes: RouteRecordRaw[] = [
     name: 'Reports',
     component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
-      title: '分析报告',
+      title: '研究报告',
       icon: 'Document',
       requiresAuth: true,
       transition: 'fade'
@@ -268,7 +268,7 @@ const routes: RouteRecordRaw[] = [
         name: 'ReportsHome',
         component: () => import('@/views/Reports/index.vue'),
         meta: {
-          title: '分析报告',
+          title: '研究报告',
           requiresAuth: true
         }
       },
@@ -564,7 +564,7 @@ const routes: RouteRecordRaw[] = [
     name: 'Portfolio',
     component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
-      title: '持仓分析',
+      title: '持仓研究',
       icon: 'PieChart',
       requiresAuth: true,
       transition: 'slide-up'
@@ -575,7 +575,7 @@ const routes: RouteRecordRaw[] = [
         name: 'PortfolioHome',
         component: () => import('@/views/Portfolio/index.vue'),
         meta: {
-          title: '持仓分析',
+          title: '持仓研究',
           requiresAuth: true
         }
       }

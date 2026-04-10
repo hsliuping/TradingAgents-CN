@@ -381,7 +381,7 @@ const categoryNameMap: Record<string, string> = {
   'social': '社交媒体',
   'technical': '技术分析',
   'china_market': '中国市场',
-  'position_analysis': '持仓分析',
+  'position_analysis': '持仓研究',
   'stock_analysis': '股票分析'
 }
 

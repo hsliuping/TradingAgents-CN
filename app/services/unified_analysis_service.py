@@ -388,7 +388,7 @@ class UnifiedAnalysisService:
                 progress_callback=progress_callback,
             )
 
-            logger.info(f"分析完成: {stock_code}, task_id={task_id}")
+            logger.info(f"研究完成: {stock_code}, task_id={task_id}")
 
             # 7. 格式化结果
             return self._format_result(result, stock_code, analysis_date, task_id, parameters)
@@ -455,7 +455,7 @@ class UnifiedAnalysisService:
                 progress_callback=progress_callback,
             )
 
-            logger.info(f"[同步] 分析完成: {stock_code}")
+            logger.info(f"[同步] 研究完成: {stock_code}")
             return self._format_result(result, stock_code, analysis_date, task_id, parameters)
 
         except Exception as e:
@@ -632,7 +632,7 @@ class UnifiedAnalysisService:
                 task_id=task_id,
                 status=TaskStatus.RUNNING,
                 progress=5,
-                message="🚀 [统一引擎] 正在启动分析...",
+                message="🚀 [统一引擎] 正在启动研究...",
                 current_step="启动"
             )
 
@@ -699,7 +699,7 @@ class UnifiedAnalysisService:
             # 初始化进度
             await asyncio.to_thread(
                 progress_tracker.update_progress,
-                {"progress_percentage": 10, "last_message": "🚀 [统一引擎] 开始股票分析"}
+                {"progress_percentage": 10, "last_message": "🚀 [统一引擎] 开始股票研究"}
             )
 
             # 🔥 更新内存管理器状态
@@ -707,8 +707,8 @@ class UnifiedAnalysisService:
                 task_id=task_id,
                 status=TaskStatus.RUNNING,
                 progress=10,
-                message="🚀 [统一引擎] 开始股票分析",
-                current_step="开始分析"
+                message="🚀 [统一引擎] 开始股票研究",
+                current_step="开始研究"
             )
 
             # 调用统一分析服务（已在 _format_result 中填充所有字段）
@@ -722,7 +722,7 @@ class UnifiedAnalysisService:
                 user_id=user_id,  # ✅ 传递 user_id 以创建 AgentContext
             )
 
-            # 分析完成，标记进度
+            # 研究完成，标记进度
             # 注意：mark_completed() 不接受参数
             await asyncio.to_thread(progress_tracker.mark_completed)
 
@@ -734,12 +734,12 @@ class UnifiedAnalysisService:
                 task_id=task_id,
                 status=TaskStatus.COMPLETED,
                 progress=100,
-                message="✅ 分析完成",
+                message="✅ 研究完成",
                 current_step="完成",
                 result_data=result
             )
 
-            logger.info(f"✅ [AB测试-统一引擎] 分析完成: {stock_code}")
+            logger.info(f"✅ [AB测试-统一引擎] 研究完成: {stock_code}")
             return result
 
         except Exception as e:
@@ -783,7 +783,7 @@ class UnifiedAnalysisService:
                 task_id=task_id,
                 status=TaskStatus.RUNNING,
                 progress=5,
-                message="🚀 [v2.0引擎] 正在启动分析...",
+                message="🚀 [v2.0引擎] 正在启动研究...",
                 current_step="启动"
             )
 
@@ -816,7 +816,7 @@ class UnifiedAnalysisService:
                                     status=TaskStatus.RUNNING,
                                     progress=int(progress),
                                     message=message,
-                                    current_step=kwargs.get("step", "分析中")
+                                    current_step=kwargs.get("step", "研究中")
                                 )
                             )
                         except RuntimeError:
@@ -857,15 +857,15 @@ class UnifiedAnalysisService:
 
             await asyncio.to_thread(
                 progress_tracker.update_progress,
-                {"progress_percentage": 10, "last_message": "🚀 [v2.0引擎] 开始股票分析"}
+                {"progress_percentage": 10, "last_message": "🚀 [v2.0引擎] 开始股票研究"}
             )
 
             await memory_manager.update_task_status(
                 task_id=task_id,
                 status=TaskStatus.RUNNING,
                 progress=10,
-                message="🚀 [v2.0引擎] 开始股票分析",
-                current_step="开始分析"
+                message="🚀 [v2.0引擎] 开始股票研究",
+                current_step="开始研究"
             )
 
 
@@ -885,7 +885,7 @@ class UnifiedAnalysisService:
                 task_id=task_id,
                 status=TaskStatus.COMPLETED,
                 progress=100,
-                message="✅ 分析完成",
+                message="✅ 研究完成",
                 current_step="完成",
                 result_data=result
             )
@@ -1064,7 +1064,7 @@ class UnifiedAnalysisService:
 
         return f"股票{stock_code}"
 
-    # ==================== 持仓分析相关方法 ====================
+    # ==================== 持仓研究相关方法 ====================
 
     async def create_position_analysis_task(
         self,
@@ -1073,7 +1073,7 @@ class UnifiedAnalysisService:
         market: str = "CN",
         task_params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """创建持仓分析任务
+        """创建持仓研究任务
 
         Args:
             user_id: 用户ID
@@ -1084,21 +1084,21 @@ class UnifiedAnalysisService:
         Returns:
             任务信息字典
         """
-        logger.info(f"🔧 [持仓分析服务] create_position_analysis_task 被调用: user_id={user_id}, code={code}, market={market}")
+        logger.info(f"🔧 [持仓研究服务] create_position_analysis_task 被调用: user_id={user_id}, code={code}, market={market}")
         from bson import ObjectId
         from app.core.database import get_mongo_db
 
         task_id = str(uuid.uuid4())
-        logger.info(f"📝 [持仓分析服务] 生成任务ID: {task_id}")
+        logger.info(f"📝 [持仓研究服务] 生成任务ID: {task_id}")
         task_params = task_params or {}
 
         # 🔥 从用户偏好读取风险偏好设置
         from app.routers.analysis import get_user_risk_preference
         preference_type = await get_user_risk_preference(user_id)
-        logger.info(f"📊 [持仓分析服务] 使用用户风险偏好: {preference_type}")
+        logger.info(f"📊 [持仓研究服务] 使用用户风险偏好: {preference_type}")
 
         # 创建统一分析任务
-        logger.info(f"🔄 [持仓分析服务] 创建 UnifiedAnalysisTask 对象...")
+        logger.info(f"🔄 [持仓研究服务] 创建 UnifiedAnalysisTask 对象...")
         task = UnifiedAnalysisTask(
             task_id=task_id,
             user_id=ObjectId(user_id),
@@ -1115,7 +1115,7 @@ class UnifiedAnalysisService:
         )
 
         # 保存到数据库
-        logger.info(f"💾 [持仓分析服务] 准备保存到数据库...")
+        logger.info(f"💾 [持仓研究服务] 准备保存到数据库...")
         try:
             db = get_mongo_db()
             task_dict = task.model_dump(by_alias=True, exclude={"id"})
@@ -1123,36 +1123,36 @@ class UnifiedAnalysisService:
             # ✅ 确保 user_id 是 ObjectId 类型，不是字符串
             if 'user_id' in task_dict and isinstance(task_dict['user_id'], str):
                 task_dict['user_id'] = ObjectId(task_dict['user_id'])
-                logger.info(f"🔄 [持仓分析服务] 转换 user_id 从字符串到 ObjectId: {task_dict['user_id']}")
+                logger.info(f"🔄 [持仓研究服务] 转换 user_id 从字符串到 ObjectId: {task_dict['user_id']}")
 
-            logger.info(f"💾 [持仓分析服务] 保存文档: user_id={task_dict.get('user_id')} (类型: {type(task_dict.get('user_id'))})")
+            logger.info(f"💾 [持仓研究服务] 保存文档: user_id={task_dict.get('user_id')} (类型: {type(task_dict.get('user_id'))})")
 
             await db.unified_analysis_tasks.insert_one(task_dict)
-            logger.info(f"✅ [持仓分析服务] 已保存到数据库，任务ID: {task_id}")
-            logger.info(f"✅ [持仓分析服务] 任务已创建: {task_id} - {code}")
+            logger.info(f"✅ [持仓研究服务] 已保存到数据库，任务ID: {task_id}")
+            logger.info(f"✅ [持仓研究服务] 任务已创建: {task_id} - {code}")
         except Exception as e:
-            logger.error(f"❌ [持仓分析] 保存任务失败: {e}")
+            logger.error(f"❌ [持仓研究] 保存任务失败: {e}")
             raise
 
         # 保存到内存状态管理器
-        logger.info(f"💾 [持仓分析服务] 准备保存到内存状态管理器...")
+        logger.info(f"💾 [持仓研究服务] 准备保存到内存状态管理器...")
         memory_manager = get_memory_state_manager()
         await memory_manager.create_task(
             task_id=task_id,
             user_id=user_id,
             stock_code=code,
-            stock_name=f"{code} 持仓分析",
+            stock_name=f"{code} 持仓研究",
             parameters=task_params,
         )
-        logger.info(f"✅ [持仓分析服务] 已保存到内存状态管理器")
+        logger.info(f"✅ [持仓研究服务] 已保存到内存状态管理器")
 
-        logger.info(f"🎉 [持仓分析服务] 任务创建完成，准备返回结果")
+        logger.info(f"🎉 [持仓研究服务] 任务创建完成，准备返回结果")
         return {
             "task_id": task_id,
             "code": code,
             "market": market,
             "status": "pending",
-            "message": "持仓分析任务已创建，预计需要2-5分钟",
+            "message": "持仓研究任务已创建，预计需要2-5分钟",
             "created_at": task.created_at.isoformat()
         }
 
@@ -1165,7 +1165,7 @@ class UnifiedAnalysisService:
         task_params: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[Callable] = None,
     ) -> Dict[str, Any]:
-        """执行持仓分析
+        """执行持仓研究
 
         Args:
             task_id: 任务ID
@@ -1176,26 +1176,26 @@ class UnifiedAnalysisService:
             progress_callback: 进度回调函数
 
         Returns:
-            分析结果字典
+            研究结果字典
         """
-        logger.info(f"🚀 [持仓分析服务] execute_position_analysis 被调用: task_id={task_id}, code={code}")
-        logger.info(f"📋 [持仓分析服务] 任务参数: {task_params}")
+        logger.info(f"🚀 [持仓研究服务] execute_position_analysis 被调用: task_id={task_id}, code={code}")
+        logger.info(f"📋 [持仓研究服务] 任务参数: {task_params}")
 
         try:
             # 更新任务状态为处理中
             await self._update_position_task_status(
                 task_id=task_id,
                 status=AnalysisStatus.PROCESSING,
-                message="正在分析持仓..."
+                message="正在研究持仓..."
             )
 
-            # 调用持仓分析服务
+            # 调用持仓研究服务
             from app.services.portfolio_service import get_portfolio_service
             from app.models.portfolio import PositionAnalysisByCodeRequest
 
             portfolio_service = get_portfolio_service()
 
-            # 构建分析请求
+            # 构建研究请求
             task_params = task_params or {}
             analysis_request = PositionAnalysisByCodeRequest(
                 code=code,
@@ -1212,7 +1212,7 @@ class UnifiedAnalysisService:
                 position_type=task_params.get("position_type", "real"),
             )
 
-            # 执行分析
+            # 执行研究
             report = await portfolio_service.analyze_position_by_code(
                 user_id=user_id,
                 code=code,
@@ -1238,21 +1238,21 @@ class UnifiedAnalysisService:
             await self._update_position_task_status(
                 task_id=task_id,
                 status=AnalysisStatus.COMPLETED if report.status.value == "completed" else AnalysisStatus.FAILED,
-                message="持仓分析完成" if report.status.value == "completed" else report.error_message,
+                message="持仓研究完成" if report.status.value == "completed" else report.error_message,
                 result=result
             )
 
-            logger.info(f"✅ [持仓分析] 执行完成: {task_id} - {code}")
+            logger.info(f"✅ [持仓研究] 执行完成: {task_id} - {code}")
             return result
 
         except Exception as e:
-            logger.error(f"❌ [持仓分析] 执行失败: {task_id} - {e}", exc_info=True)
+            logger.error(f"❌ [持仓研究] 执行失败: {task_id} - {e}", exc_info=True)
 
             # 更新任务状态为失败
             await self._update_position_task_status(
                 task_id=task_id,
                 status=AnalysisStatus.FAILED,
-                message=f"持仓分析失败: {str(e)}"
+                message=f"持仓研究失败: {str(e)}"
             )
 
             return {
@@ -1269,7 +1269,7 @@ class UnifiedAnalysisService:
         message: Optional[str] = None,
         result: Optional[Dict[str, Any]] = None,
     ):
-        """更新持仓分析任务状态"""
+        """更新持仓研究任务状态"""
         from app.core.database import get_mongo_db
 
         try:
@@ -1306,7 +1306,7 @@ class UnifiedAnalysisService:
             )
 
         except Exception as e:
-            logger.error(f"❌ [持仓分析] 更新任务状态失败: {e}")
+            logger.error(f"❌ [持仓研究] 更新任务状态失败: {e}")
 
     # ==================== 交易复盘相关方法 ====================
 
@@ -1677,7 +1677,7 @@ class UnifiedAnalysisService:
                     task_id=task_id,
                     status=memory_status,
                     progress=100,
-                    message=message or "分析完成",
+                    message=message or "研究完成",
                     result_data=result
                 )
                 logger.info(f"✅ [交易复盘服务] 任务已标记为完成")

@@ -151,9 +151,9 @@ class SocialMediaAnalystV2(AnalystAgent):
 2. 分析投资者情绪（看涨/看跌/中性）
 3. 评估市场热度和关注度
 4. 识别潜在的情绪驱动因素
-5. 提供基于情绪的分析观点
+5. 提供基于情绪的研究观察与噪音辨识
 
-请使用中文，基于真实数据进行分析。"""
+请使用中文，基于真实数据进行分析，不得输出交易建议。"""
 
     def _build_user_prompt(
         self,
@@ -252,7 +252,7 @@ class SocialMediaAnalystV2(AnalystAgent):
 
 **重要提示**：调用工具 get_stock_sentiment_unified 时，必须使用 curr_date 参数，值为：{analysis_date_str}
 
-请调用工具获取社交媒体数据，然后生成详细的中文分析报告。"""
+请调用工具获取社交媒体数据，然后生成详细的中文研究报告，不得给出交易建议。"""
 
     def _get_company_name(self, ticker: str, state: Dict[str, Any]) -> str:
         """获取公司名称"""

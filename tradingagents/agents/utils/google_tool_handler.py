@@ -538,7 +538,7 @@ class GoogleToolCallHandler:
                     
                     要求：
                     1. 综合分析所有工具返回的数据
-                    2. 提供清晰的投资建议和风险评估
+                    2. 提供清晰的研究结论、风险评估和后续观察点
                     3. 报告应该结构化且易于理解
                     4. 包含具体的数据支撑和分析逻辑
                     
@@ -546,8 +546,8 @@ class GoogleToolCallHandler:
                     """
                 elif attempt == 1:
                     analysis_prompt = f"""
-                    请简要分析{analyst_name}的工具调用结果并提供投资建议。
-                    要求：简洁明了，包含关键数据和建议。
+                    请简要分析{analyst_name}的工具调用结果并给出研究结论。
+                    要求：简洁明了，包含关键数据、风险提示和观察点。
                     """
                 else:
                     analysis_prompt = f"""
@@ -739,13 +739,13 @@ class GoogleToolCallHandler:
 **分析要求：**
 1. 报告必须基于工具返回的真实数据进行分析
 2. 包含具体的数值和专业分析
-3. 提供明确的投资建议和风险提示
+3. 提供明确的研究结论、风险提示和后续观察点
 4. 报告长度不少于800字
 5. 使用中文撰写
 6. 确保在分析中正确使用公司名称"{company_name}"和股票代码"{ticker}"
 
 {specific_requirements}
 
-请生成专业、详细的{analyst_type}报告。"""
+请生成专业、详细的{analyst_type}报告，不得形成投资建议或交易指令。"""
         
         return base_prompt

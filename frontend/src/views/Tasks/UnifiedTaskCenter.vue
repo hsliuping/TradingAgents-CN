@@ -5,7 +5,7 @@
         <el-icon><List /></el-icon>
         统一任务中心
       </h1>
-      <p class="page-description">查看并管理所有类型的分析任务（股票分析、持仓分析、交易复盘等）</p>
+      <p class="page-description">查看并管理所有类型的分析任务（股票分析、持仓研究、交易复盘等）</p>
     </div>
 
     <!-- 统计卡片 -->

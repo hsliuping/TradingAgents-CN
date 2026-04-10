@@ -7,6 +7,7 @@ logger = get_logger("default")
 
 # 导入模板客户端
 from tradingagents.utils.template_client import get_agent_prompt
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails, build_research_only_closing
 
 
 def create_risky_debator(llm):
@@ -76,6 +77,7 @@ def create_risky_debator(llm):
                 fallback_prompt=None
             )
 
+            system_prompt = apply_compliance_guardrails(system_prompt, "aggressive_debator")
             logger.info(f"✅ [激进风险分析师] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
 
         except Exception as e:
@@ -90,6 +92,7 @@ def create_risky_debator(llm):
 积极参与，解决提出的任何具体担忧，反驳他们逻辑中的弱点，并断言承担风险的好处。
 
 请用中文以对话方式输出。"""
+            system_prompt = apply_compliance_guardrails(system_prompt, "aggressive_debator")
             logger.warning(f"⚠️ [激进风险分析师] 使用降级提示词 (长度: {len(system_prompt)})")
 
         # 构建完整提示词
@@ -108,7 +111,7 @@ def create_risky_debator(llm):
 保守分析师的最后论点：{current_safe_response}
 中性分析师的最后论点：{current_neutral_response}
 
-请提出您的激进观点，强调为什么高风险方法是最优的。"""
+{build_research_only_closing(["请提出您的激进研究观点，强调上行弹性与潜在催化，但不要形成交易方案。"])}"""
 
         logger.info(f"⏱️ [Risky Analyst] 开始调用LLM...")
         import time

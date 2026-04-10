@@ -19,7 +19,7 @@ SAFE_REPORT_KEYS = (
 )
 
 GENERIC_RESEARCH_RECOMMENDATION = "请参考详细研究报告，重点关注基本面变化、市场环境与风险因素。"
-GENERIC_POSITION_RECOMMENDATION = "该持仓分析仅提供研究观察与风险提示，请结合自身策略独立判断。"
+GENERIC_POSITION_RECOMMENDATION = "该持仓研究仅提供研究观察与风险提示，请结合自身策略独立判断。"
 
 _ACTIONABLE_PATTERNS = [
     re.compile(pattern, re.IGNORECASE)
@@ -33,6 +33,26 @@ _ACTIONABLE_PATTERNS = [
 ]
 _JSON_FIELD_PATTERN = re.compile(r'^[\[\]{}":,0-9._%\-\s]+$')
 _SENTENCE_SPLIT_PATTERN = re.compile(r"[\n。！？；]+")
+_LOW_SIGNAL_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"^股票基本信息$",
+        r"^公司名称[:：]",
+        r"^股票代码[:：]",
+        r"^所属市场[:：]",
+        r"^当前价格[:：]",
+        r"^涨跌幅[:：]",
+        r"^分析日期[:：]",
+        r"^数据来源[:：]",
+        r"^基本信息[:：]",
+        r"^财务数据[:：]$",
+        r"^一、公司概况$",
+        r"^二、财务数据分析$",
+        r"^三、",
+        r"^四、",
+        r"分析报告",
+    )
+]
 
 
 def _as_text(value: Any) -> str:
@@ -60,6 +80,32 @@ def _plain_text(text: str) -> str:
     return re.sub(r"\s+", " ", normalized).strip()
 
 
+def is_low_signal_text(text: str) -> bool:
+    normalized = _plain_text(text)
+    if not normalized:
+        return True
+    if any(pattern.search(normalized) for pattern in _LOW_SIGNAL_PATTERNS):
+        return True
+    if normalized.startswith("-") and len(normalized) <= 14:
+        return True
+    return False
+
+
+def _fragment_score(text: str) -> int:
+    normalized = _plain_text(text)
+    if not normalized:
+        return -1
+
+    score = min(len(normalized), 160)
+    if is_low_signal_text(normalized):
+        score -= 120
+    if any(keyword in normalized for keyword in ("风险", "盈利", "增长", "压力", "竞争", "估值", "资产", "负债", "催化", "行业", "宏观", "需求", "收入", "利润")):
+        score += 60
+    if normalized.startswith("-"):
+        score -= 10
+    return score
+
+
 def sanitize_text_block(text: Any, fallback: str = "") -> str:
     raw_text = _as_text(text)
     if not raw_text:
@@ -74,6 +120,8 @@ def sanitize_text_block(text: Any, fallback: str = "") -> str:
             continue
         if contains_actionable_content(line):
             continue
+        if is_low_signal_text(line):
+            continue
         lines.append(line)
 
     deduped: List[str] = []
@@ -83,7 +131,7 @@ def sanitize_text_block(text: Any, fallback: str = "") -> str:
 
     if not deduped:
         return fallback
-    return "\n".join(deduped[:6])[:1500]
+    return "\n".join(deduped[:12])[:2500]
 
 
 def filter_analysis_reports(reports: Any) -> Dict[str, str]:
@@ -104,26 +152,36 @@ def _iter_safe_fragments(reports: Dict[str, str], fallback_summary: str = "") ->
         if cleaned_summary:
             for fragment in _SENTENCE_SPLIT_PATTERN.split(cleaned_summary):
                 sentence = fragment.strip()
-                if sentence and not contains_actionable_content(sentence):
+                if sentence and not contains_actionable_content(sentence) and not is_low_signal_text(sentence):
                     yield sentence
 
-    for key in SAFE_REPORT_KEYS:
+    summary_priority = (
+        "fundamentals_report",
+        "market_report",
+        "sector_report",
+        "news_report",
+        "sentiment_report",
+        "index_report",
+    )
+
+    for key in summary_priority:
         content = sanitize_text_block(reports.get(key, ""))
         if not content:
             continue
         for fragment in _SENTENCE_SPLIT_PATTERN.split(content):
             sentence = fragment.strip()
-            if sentence and not contains_actionable_content(sentence):
+            if sentence and not contains_actionable_content(sentence) and not is_low_signal_text(sentence):
                 yield sentence
 
 
 def build_research_summary(reports: Dict[str, str], fallback_summary: str = "") -> str:
-    summary_parts: List[str] = []
+    candidate_fragments: List[str] = []
     for fragment in _iter_safe_fragments(reports, fallback_summary):
-        if fragment not in summary_parts:
-            summary_parts.append(fragment)
-        if len(summary_parts) >= 3:
-            break
+        normalized = _plain_text(fragment)
+        if normalized and normalized not in candidate_fragments:
+            candidate_fragments.append(normalized)
+
+    summary_parts = sorted(candidate_fragments, key=_fragment_score, reverse=True)[:3]
 
     if summary_parts:
         return "；".join(summary_parts)[:800]
@@ -136,14 +194,14 @@ def build_key_points(reports: Dict[str, str], key_points: Any, summary: str) -> 
     if isinstance(key_points, list):
         for item in key_points:
             point = sanitize_text_block(item)
-            if point and point not in cleaned_points:
+            if point and point not in cleaned_points and not is_low_signal_text(point):
                 cleaned_points.append(point)
 
     if len(cleaned_points) >= 3:
         return cleaned_points[:5]
 
     for fragment in _iter_safe_fragments(reports, summary):
-        if fragment not in cleaned_points:
+        if fragment not in cleaned_points and not is_low_signal_text(fragment):
             cleaned_points.append(fragment)
         if len(cleaned_points) >= 5:
             break
@@ -188,7 +246,7 @@ def sanitize_position_analysis_payload(result_data: Dict[str, Any]) -> Dict[str,
     sanitized = dict(result_data)
     summary = sanitize_text_block(
         sanitized.get("summary") or sanitized.get("action_reason") or sanitized.get("detailed_analysis"),
-        fallback="该持仓分析已转换为研究观察，请结合自身策略独立判断。",
+        fallback="该持仓研究已转换为研究观察，请结合自身策略独立判断。",
     )
 
     sanitized["action"] = "hold"

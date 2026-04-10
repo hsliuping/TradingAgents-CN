@@ -51,7 +51,7 @@ export const advancedCourseCategories: CourseCategory[] = [
     lessons: [
       { 
         id: 'lesson-3', 
-        title: '第3课：单股分析深度应用', 
+        title: '第3课：单股研究深度应用', 
         file: 'lesson-03-stock-selection-single-analysis.md', 
         order: 3 
       },
@@ -121,12 +121,12 @@ export const advancedCourseCategories: CourseCategory[] = [
     id: 'position-management',
     name: '持仓管理篇',
     icon: '📊',
-    description: 'AI辅助的持仓分析和决策',
+    description: 'AI辅助的持仓研究与风险观察',
     lessonCount: 2,
     lessons: [
       { 
         id: 'lesson-11', 
-        title: '第11课：AI持仓分析的应用', 
+        title: '第11课：AI持仓研究的应用', 
         file: 'lesson-11-position-ai-analysis.md', 
         order: 11 
       },

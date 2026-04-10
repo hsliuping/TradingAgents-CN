@@ -100,11 +100,11 @@
     <!-- 空状态 -->
     <el-empty v-if="!loading && changes.length === 0" description="暂无操作记录" />
 
-    <!-- 操作分析报告展示 -->
+    <!-- 操作复盘报告展示 -->
     <el-card v-if="reviewReport" class="review-card" shadow="never">
       <template #header>
         <div class="review-header">
-          <span>📊 操作分析报告</span>
+          <span>📊 操作复盘报告</span>
           <div style="display: flex; align-items: center; gap: 8px">
             <el-tag v-if="reviewReport.trading_system_name" type="success" size="small">
               🎯 {{ reviewReport.trading_system_name }}
@@ -116,7 +116,7 @@
         </div>
       </template>
       <div class="review-content">
-        <div class="review-summary">{{ reviewReport.ai_review?.summary || '暂无分析摘要' }}</div>
+        <div class="review-summary">{{ reviewReport.ai_review?.summary || '暂无复盘摘要' }}</div>
         <el-row :gutter="16" class="review-scores">
           <el-col :span="8" v-if="reviewReport.ai_review?.timing_score">
             <div class="score-item">
@@ -214,7 +214,7 @@ watch(() => props.modelValue, (val) => {
   visible.value = val
   if (val && props.stock) {
     currentPage.value = 1
-    reviewReport.value = null  // 重置分析报告
+    reviewReport.value = null  // 重置复盘报告
     selectedTradingSystemId.value = ''  // 重置交易计划选择
     loadData()
     loadExistingReview()  // 加载已有的复盘报告
@@ -263,7 +263,7 @@ const loadExistingReview = async () => {
   }
 }
 
-// 操作分析
+// 操作复盘
 const handleAnalyze = async () => {
   if (!props.stock?.code) return
 
@@ -293,10 +293,10 @@ const handleAnalyze = async () => {
 
     if (reviewRes.data) {
       reviewReport.value = reviewRes.data
-      ElMessage.success('操作分析完成')
+      ElMessage.success('操作复盘完成')
     }
   } catch (e: any) {
-    ElMessage.error(e.message || '操作分析失败')
+    ElMessage.error(e.message || '操作复盘失败')
   } finally {
     analyzing.value = false
   }

@@ -162,7 +162,7 @@ async def save_analysis_report(
         model_info: 模型信息
         reports: 报告字典（会清理重复字段）
         decision: 决策字典
-        recommendation: 投资建议
+        recommendation: 研究结论
         confidence_score: 置信度
         risk_level: 风险等级
         ... (其他参数)
@@ -197,7 +197,7 @@ async def save_analysis_report(
         "engine": engine,
 
         # 分析结果摘要
-        "summary": summary or "分析完成",
+        "summary": summary or "研究完成",
         "analysts": analysts or [],
         "research_depth": research_depth,
 

@@ -8,6 +8,7 @@ logger = get_logger("default")
 
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails
 
 
 def _get_company_name_for_china_market(ticker: str, market_info: dict) -> str:
@@ -128,15 +129,16 @@ def create_china_market_analyst(llm, toolkit):
 - **市场风格**: 判断当前是成长风格还是价值风格占优
 
 中国股市特色考虑：
-- 涨跌停板限制对交易策略的影响
+- 涨跌停板限制对市场行为和流动性的影响
 - ST股票的特殊风险和机会
 - 科创板、创业板的差异化分析
-- 国企改革、混改等主题投资机会
+- 国企改革、混改等主题对行业格局的影响
 - 中美关系、地缘政治对中概股的影响
 
 请基于Tushare数据接口提供的实时数据和技术指标，结合中国股市的特殊性，撰写专业的中文分析报告。
-确保在报告末尾附上Markdown表格总结关键发现和投资建议。"""
+确保在报告末尾附上Markdown表格总结关键发现、风险提示和后续观察点。"""
         )
+    system_message = apply_compliance_guardrails(system_message, "china_market_analyst")
         
         prompt = ChatPromptTemplate.from_messages(
             [

@@ -212,11 +212,12 @@ class FundamentalsAnalystAgentV2(BaseAgent):
 1. 使用工具获取股票的基本面数据（财务数据、估值指标等）
 2. 分析公司的财务健康状况、盈利能力、成长性
 3. 评估公司的估值水平（市盈率、市净率等）
-4. 提供投资建议和合理价位区间
+4. 说明这些因素对整体研究结论的支持或削弱作用
 
 要求：
 - 必须基于真实数据进行分析
 - 分析要专业、客观、详细
+- 不得输出投资建议、目标价或仓位建议
 - 使用中文撰写报告"""
 
     def _build_user_prompt(self, ticker: str, trade_date: str, state: Dict[str, Any] = None) -> str:
@@ -290,7 +291,7 @@ class FundamentalsAnalystAgentV2(BaseAgent):
 
 分析日期：{trade_date}
 
-请调用工具获取基本面数据，然后生成详细的分析报告。"""
+请调用工具获取基本面数据，然后生成详细的研究分析报告，不得给出交易建议。"""
 
     def _build_analysis_prompt(self, ticker: str) -> str:
         """构建分析提示词"""
@@ -300,7 +301,7 @@ class FundamentalsAnalystAgentV2(BaseAgent):
 2. 盈利能力评估
 3. 成长性分析
 4. 估值水平评估
-5. 投资建议和合理价位区间"""
+5. 对整体研究结论的影响与待验证问题"""
 
     def _generate_mock_report(self, ticker: str, trade_date: str) -> str:
         """生成模拟报告（降级方案）"""
@@ -312,5 +313,5 @@ class FundamentalsAnalystAgentV2(BaseAgent):
 财务状况：良好
 盈利能力：稳定
 估值水平：合理
-建议：持有"""
+研究结论：请结合详细证据继续跟踪。"""
 

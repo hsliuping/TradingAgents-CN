@@ -132,7 +132,7 @@ PRO_FEATURES = [
     "email_notification",      # 邮件通知
     "watchlist_groups",        # 自选股分组
     "scheduled_analysis",      # 定时分析
-    "portfolio_analysis",      # 持仓分析
+    "portfolio_analysis",      # 持仓研究
     "trade_review",            # 操作复盘
     "advanced_screening",      # 高级选股
     "batch_analysis",          # 批量分析

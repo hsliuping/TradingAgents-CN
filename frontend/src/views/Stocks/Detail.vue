@@ -125,19 +125,19 @@
           </div>
         </el-card>
 
-        <!-- 详细分析结果（方案B）：仅在进行中或有结果时显示 -->
+        <!-- 详细研究结果（方案B）：仅在进行中或有结果时显示 -->
         <el-card v-if="analysisStatus==='running' || lastAnalysis" shadow="hover" class="analysis-detail-card" id="analysis-detail">
-          <template #header><div class="card-hd">详细分析结果</div></template>
+          <template #header><div class="card-hd">详细研究结果</div></template>
           <div v-if="analysisStatus==='running'" class="running">
             <el-progress :percentage="analysisProgress" :text-inside="true" style="width:100%" />
-            <div class="hint">{{ analysisMessage || '正在生成分析报告…' }}</div>
+            <div class="hint">{{ analysisMessage || '正在生成研究报告…' }}</div>
           </div>
           <div v-else class="detail">
-            <!-- 分析时间和信心度 -->
+            <!-- 研究时间和信心度 -->
             <div class="analysis-meta">
               <span class="analysis-time">
                 <el-icon><Clock /></el-icon>
-                分析时间：{{ formatAnalysisTime(lastTaskInfo?.end_time) }}
+                研究时间：{{ formatAnalysisTime(lastTaskInfo?.end_time) }}
               </span>
               <span class="confidence">
                 <el-icon><TrendCharts /></el-icon>
@@ -145,11 +145,11 @@
               </span>
             </div>
 
-            <!-- 投资建议 - 重点突出 -->
+            <!-- 研究结论 - 重点突出 -->
             <div class="recommendation-box">
               <div class="recommendation-header">
                 <el-icon class="icon"><TrendCharts /></el-icon>
-                <span class="title">投资建议</span>
+                <span class="title">研究结论</span>
               </div>
               <div class="recommendation-content">
                 <div class="recommendation-text">
@@ -158,11 +158,11 @@
               </div>
             </div>
 
-            <!-- 分析摘要 -->
+            <!-- 研究摘要 -->
             <div class="summary-section">
               <div class="summary-title">
                 <el-icon><Reading /></el-icon>
-                分析摘要
+                研究摘要
               </div>
               <div class="summary-text markdown-body" v-html="renderMarkdown(lastAnalysis?.summary || '-')"></div>
             </div>
@@ -171,7 +171,7 @@
             <div v-if="lastAnalysis?.reports && Object.keys(lastAnalysis.reports).length > 0" class="reports-section">
               <el-divider />
               <div class="reports-header">
-                <span class="reports-title">📊 详细分析报告 ({{ Object.keys(lastAnalysis.reports).length }})</span>
+                <span class="reports-title">📊 详细研究报告 ({{ Object.keys(lastAnalysis.reports).length }})</span>
                 <el-button
                   type="primary"
                   plain
@@ -284,7 +284,7 @@
     <!-- 详细报告对话框 -->
     <el-dialog
       v-model="showReportsDialog"
-      title="📊 详细分析报告"
+      title="📊 详细研究报告"
       width="80%"
       :close-on-click-modal="false"
       class="reports-dialog"
@@ -731,7 +731,7 @@ onMounted(async () => {
     fetchKline(),
     fetchNews(),
     checkFavorite(),
-    fetchLatestAnalysis(),  // 获取最新的历史分析报告
+    fetchLatestAnalysis(),  // 获取最新的历史研究报告
     fetchSyncStatus()  // 获取同步状态
   ])
   // 每30秒刷新一次报价
@@ -896,10 +896,10 @@ function scrollToDetail() {
   if (el) el.scrollIntoView({ behavior: 'smooth' })
 }
 
-// 获取最新的历史分析报告
+// 获取最新的历史研究报告
 async function fetchLatestAnalysis() {
   try {
-    console.log('🔍 [fetchLatestAnalysis] 开始获取历史分析报告, symbol:', symbol.value)
+    console.log('🔍 [fetchLatestAnalysis] 开始获取历史研究报告, symbol:', symbol.value)
 
     const resp: any = await analysisApi.getHistory({
       symbol: symbol.value,
@@ -942,14 +942,14 @@ async function fetchLatestAnalysis() {
       if (latestTask.result_data) {
         lastAnalysis.value = latestTask.result_data
         analysisStatus.value = 'completed'
-        console.log('✅ 加载历史分析报告成功 (result_data):', latestTask.result_data)
+        console.log('✅ 加载历史研究报告成功 (result_data):', latestTask.result_data)
         console.log('🔍 [fetchLatestAnalysis] lastAnalysis.value.reports:', lastAnalysis.value?.reports)
       }
       // 兼容旧的 result 字段
       else if (latestTask.result) {
         lastAnalysis.value = latestTask.result
         analysisStatus.value = 'completed'
-        console.log('✅ 加载历史分析报告成功 (result):', latestTask.result)
+        console.log('✅ 加载历史研究报告成功 (result):', latestTask.result)
         console.log('🔍 [fetchLatestAnalysis] lastAnalysis.value.reports:', lastAnalysis.value?.reports)
       }
       // 否则尝试通过 task_id 获取结果
@@ -960,18 +960,18 @@ async function fetchLatestAnalysis() {
           console.log('🔍 [fetchLatestAnalysis] getTaskResult响应:', resultResp)
           lastAnalysis.value = resultResp?.data || resultResp
           analysisStatus.value = 'completed'
-          console.log('✅ 通过 task_id 加载分析报告成功:', lastAnalysis.value)
+          console.log('✅ 通过 task_id 加载研究报告成功:', lastAnalysis.value)
           console.log('🔍 [fetchLatestAnalysis] lastAnalysis.value.reports:', lastAnalysis.value?.reports)
         } catch (e) {
           console.warn('⚠️ 获取任务结果失败:', e)
         }
       }
     } else {
-      console.log('ℹ️ 该股票暂无历史分析报告')
+      console.log('ℹ️ 该股票暂无历史研究报告')
       console.log('🔍 [fetchLatestAnalysis] 判断条件: tasks=', tasks, ', tasks.length=', tasks?.length)
     }
   } catch (e) {
-    console.warn('⚠️ 获取历史分析报告失败:', e)
+    console.warn('⚠️ 获取历史研究报告失败:', e)
   }
 }
 
@@ -1145,8 +1145,8 @@ function exportReport() {
     return
   }
 
-  // 生成Markdown格式的完整报告
-  let fullReport = `# ${code.value} 股票分析报告\n\n`
+  // 生成 Markdown 格式的完整研究报告
+  let fullReport = `# ${code.value} 股票研究报告\n\n`
 
   // 格式化分析时间用于报告
   const reportTime = lastTaskInfo.value?.end_time
@@ -1161,8 +1161,8 @@ function exportReport() {
       })
     : lastAnalysis.value?.analysis_date
 
-  fullReport += `**分析时间**: ${reportTime}\n`
-  fullReport += `**投资建议**: ${lastAnalysis.value.recommendation}\n`
+  fullReport += `**研究时间**: ${reportTime}\n`
+  fullReport += `**研究结论**: ${lastAnalysis.value.recommendation}\n`
   fullReport += `**信心度**: ${fmtConf(lastAnalysis.value.confidence_score)}\n\n`
   fullReport += `---\n\n`
 
@@ -1178,9 +1178,9 @@ function exportReport() {
   const link = document.createElement('a')
   link.href = url
 
-  // 使用分析日期作为文件名（简化格式）
+  // 使用研究日期作为文件名（简化格式）
   const fileDate = lastAnalysis.value.analysis_date || new Date().toISOString().slice(0, 10)
-  link.download = `${code.value}_分析报告_${fileDate}.md`
+  link.download = `${code.value}_研究报告_${fileDate}.md`
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
@@ -1407,7 +1407,7 @@ function exportReport() {
   font-size: 14px;
 }
 
-/* 投资建议盒子 - 重点突出 */
+/* 研究结论盒子 - 重点突出 */
 .recommendation-box {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-radius: 12px;
@@ -1453,7 +1453,7 @@ function exportReport() {
   white-space: pre-wrap;
 }
 
-/* 分析摘要 */
+/* 研究摘要 */
 .summary-section {
   padding: 18px 20px;
   background: #f8fafc;

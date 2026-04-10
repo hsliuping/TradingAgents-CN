@@ -6,7 +6,7 @@
   >
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-        <span>单股持仓分析</span>
+        <span>单股持仓研究</span>
         <el-button
           type="primary"
           size="small"
@@ -124,14 +124,14 @@
       </el-form>
     </div>
 
-    <!-- 分析失败提示 -->
+    <!-- 研究失败提示 -->
     <div v-if="analysisResult && analysisResult.status === 'failed'" class="analysis-failed">
       <el-alert type="error" :closable="false">
-        <template #title>分析失败</template>
+        <template #title>研究失败</template>
         <template #default>
-          <p>{{ analysisResult.error_message || '分析过程中出现错误' }}</p>
+          <p>{{ analysisResult.error_message || '研究过程中出现错误' }}</p>
           <el-button type="primary" size="small" @click="resetAnalysis" style="margin-top: 10px">
-            重新分析
+            重新研究
           </el-button>
         </template>
       </el-alert>
@@ -168,9 +168,9 @@
               <div class="disclaimer-text">
                 <p style="margin: 0 0 8px 0;"><strong>⚠️ 重要风险提示与免责声明</strong></p>
                 <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
-                  <li><strong>平台性质：</strong>本平台为AI辅助分析技术学习平台，专注于AI技术在股票分析领域的应用验证和技术学习。</li>
-                  <li><strong>分析目的：</strong>所有分析结论仅用于学习和验证AI辅助分析技术，不作为真实炒股操盘指导或投资依据。</li>
-                  <li><strong>非投资建议：</strong>所有分析结果、评分、建议仅为技术验证参考，不构成任何买卖建议或投资决策依据。</li>
+                  <li><strong>平台性质：</strong>本平台为 AI 辅助投研研究学习平台，专注于持仓研究、风险识别与公开信息整理。</li>
+                  <li><strong>分析目的：</strong>所有分析结论仅用于学习、研究和持仓风险识别，不提供交易指导或投资依据。</li>
+                  <li><strong>非投资建议：</strong>所有分析结果、评分、研究结论仅为技术验证参考，不构成任何买卖建议或投资决策依据。</li>
                   <li><strong>数据局限性：</strong>分析基于历史数据和公开信息，可能存在延迟、不完整或不准确的情况，无法预测未来市场走势。</li>
                   <li><strong>投资风险：</strong>股票投资存在市场风险、流动性风险、政策风险等多种风险，可能导致本金损失。</li>
                   <li><strong>独立决策：</strong>投资者应基于自身风险承受能力、投资目标和财务状况独立做出投资决策。</li>
@@ -182,7 +182,7 @@
         </el-alert>
       </div>
 
-      <el-divider content-position="left">分析结果</el-divider>
+      <el-divider content-position="left">研究结果</el-divider>
 
       <!-- 研究观察 -->
       <div class="action-section">
@@ -371,7 +371,7 @@ watch(visible, (val) => {
     analysisId.value = null
     analysisStatus.value = 'idle'
 
-    // 加载资金账户信息和已有分析报告
+    // 加载资金账户信息和已有研究报告
     loadAccountSummary()
     loadExistingAnalysis()
   }
@@ -395,7 +395,7 @@ const isAIConnectionError = computed(() => {
   return reason.includes('AI服务') ||
          reason.includes('连接失败') ||
          reason.includes('Connection error') ||
-         reason.includes('AI分析暂时不可用') ||
+         reason.includes('AI研究暂时不可用') ||
          (analysisResult.value.confidence === 0 && reason.includes('error'))
 })
 
@@ -429,7 +429,7 @@ const handleAnalyze = async () => {
   loading.value = true
 
   try {
-    // 第一步：检查是否有单股分析报告缓存
+    // 第一步：检查是否有单股研究报告缓存
     const cacheRes = await portfolioApi.checkStockAnalysisCache(
       props.position.code,
       props.position.market
@@ -443,24 +443,24 @@ const handleAnalyze = async () => {
         loading.value = false
         try {
           await ElMessageBox.confirm(
-            '当前没有可用的单股分析报告缓存。\n\n' +
-            '建议先进行单股分析以获得更准确的持仓分析结果。\n\n' +
+            '当前没有可用的单股研究报告缓存。\n\n' +
+            '建议先进行单股研究，以获得更完整的持仓研究结果。\n\n' +
             '您可以选择：\n' +
-            '• 继续分析：直接进行持仓分析（不使用单股分析报告）\n' +
-            '• 先去单股分析：先跳转到单股分析页面进行分析',
-            '提示：缺少单股分析报告',
+            '• 继续研究：直接进行持仓研究（不使用单股研究报告）\n' +
+            '• 先去个股研究：先跳转到个股研究页面进行研究',
+            '提示：缺少单股研究报告',
             {
-              confirmButtonText: '继续分析',
-              cancelButtonText: '先去单股分析',
+              confirmButtonText: '继续研究',
+              cancelButtonText: '先去个股研究',
               type: 'warning',
               distinguishCancelAndClose: true
             }
           )
-          // 用户选择"继续分析"，继续执行分析流程
+          // 用户选择"继续研究"，继续执行研究流程
         } catch (action: any) {
-          // 用户选择"先去单股分析"或关闭对话框
+          // 用户选择"先去个股研究"或关闭对话框
           if (action === 'cancel') {
-            // 跳转到单股分析页面，带上股票代码参数
+            // 跳转到个股研究页面，带上股票代码参数
             const marketMap: Record<string, string> = {
               CN: 'A股',
               HK: '港股',
@@ -470,7 +470,7 @@ const handleAnalyze = async () => {
             router.push(`/analysis/single?stock_code=${props.position.code}&market=${marketName}`)
             visible.value = false // 关闭当前对话框
           }
-          return // 取消分析，不执行后续流程
+          return // 取消研究，不执行后续流程
         }
       } else {
         // 有缓存，可以显示缓存信息（可选）
@@ -482,7 +482,7 @@ const handleAnalyze = async () => {
       }
     }
 
-    // 第二步：提交分析任务
+    // 第二步：提交研究任务
     loading.value = true
     analysisStatus.value = 'pending'
 
@@ -499,30 +499,30 @@ const handleAnalyze = async () => {
       analysisParams
     )
 
-    console.log('[开始分析] 收到响应:', res)
+    console.log('[开始研究] 收到响应:', res)
     if (res.success && res.data) {
-      // 设置分析ID和状态
+      // 设置研究 ID 和状态
       analysisId.value = res.data.analysis_id || null
       analysisStatus.value = res.data.status || 'pending'
       
-      console.log('[开始分析] 设置analysisId:', analysisId.value, 'status:', analysisStatus.value)
+      console.log('[开始研究] 设置analysisId:', analysisId.value, 'status:', analysisStatus.value)
 
       if (res.data.status === 'completed' && analysisId.value) {
         // 已有完成的报告，直接获取结果
         await fetchAnalysisResult(analysisId.value)
-        ElMessage.success('已有最近的分析报告')
+        ElMessage.success('已有最近的研究报告')
       } else {
         // 任务已提交，不自动轮询，用户可手动刷新
-        ElMessage.success(res.data.message || '分析任务已提交，预计需要2-5分钟，请稍后点击"手动刷新状态"查看结果')
+        ElMessage.success(res.data.message || '研究任务已提交，预计需要2-5分钟，请稍后点击"手动刷新状态"查看结果')
       }
     } else {
-      ElMessage.error(res.message || '提交分析任务失败')
+      ElMessage.error(res.message || '提交研究任务失败')
       analysisStatus.value = 'failed'
     }
   } catch (error: any) {
     // 如果是MessageBox的取消操作，不显示错误
     if (error !== 'cancel' && error !== 'close') {
-      ElMessage.error(error.message || '提交分析任务失败')
+      ElMessage.error(error.message || '提交研究任务失败')
       analysisStatus.value = 'failed'
     }
   } finally {
@@ -532,7 +532,7 @@ const handleAnalyze = async () => {
 
 
 
-// 获取分析结果
+// 获取研究结果
 const fetchAnalysisResult = async (id: string) => {
   try {
     const res = await portfolioApi.getPositionAnalysisStatus(id)
@@ -541,7 +541,7 @@ const fetchAnalysisResult = async (id: string) => {
       analysisStatus.value = res.data.status || 'completed'
     }
   } catch (error) {
-    console.error('获取分析结果失败:', error)
+    console.error('获取研究结果失败:', error)
   }
 }
 
@@ -563,15 +563,15 @@ const manualRefreshStatus = async () => {
 
       if (res.data.status === 'completed') {
         analysisResult.value = res.data
-        ElMessage.success('分析完成！')
+        ElMessage.success('研究完成！')
       } else if (res.data.status === 'failed') {
-        ElMessage.error(res.data.error_message || '分析失败')
+        ElMessage.error(res.data.error_message || '研究失败')
       } else {
         ElMessage.info(`当前状态: ${res.data.status}`)
       }
     } else {
       console.error('[手动刷新状态] 响应失败:', res)
-      ElMessage.error(res.message || '获取分析状态失败')
+      ElMessage.error(res.message || '获取研究状态失败')
     }
   } catch (error: any) {
     console.error('[手动刷新状态] 请求失败:', error)
@@ -581,8 +581,8 @@ const manualRefreshStatus = async () => {
   }
 }
 
-// 加载已有的分析报告
-// 加载已有的分析报告
+// 加载已有的研究报告
+// 加载已有的研究报告
 // 注意：调用此函数前应先清空 analysisResult，避免显示其他股票的缓存数据
 const loadExistingAnalysis = async () => {
   if (!props.position) return
@@ -596,7 +596,7 @@ const loadExistingAnalysis = async () => {
       source
     )
     // 只有当后端返回有效数据时才更新状态
-    // 如果 res.data 为 null，说明该股票没有分析报告，保持状态为 idle
+    // 如果 res.data 为 null，说明该股票没有研究报告，保持状态为 idle
     if (res.success && res.data) {
       analysisId.value = res.data.analysis_id
       analysisStatus.value = res.data.status || 'unknown'
@@ -604,13 +604,13 @@ const loadExistingAnalysis = async () => {
       if (res.data.status === 'completed') {
         analysisResult.value = res.data
       } else if (res.data.status === 'pending' || res.data.status === 'processing') {
-        // 有正在进行的分析，不自动轮询，用户可手动刷新查看状态
-        ElMessage.info('检测到正在进行的分析任务，请点击"手动刷新状态"查看最新进度')
+        // 有正在进行的研究，不自动轮询，用户可手动刷新查看状态
+        ElMessage.info('检测到正在进行的研究任务，请点击"手动刷新状态"查看最新进度')
       }
     }
     // 如果 res.data 为 null，不做任何操作，保持之前 watch 中重置的 idle 状态
   } catch (error) {
-    console.error('加载已有分析报告失败:', error)
+    console.error('加载已有研究报告失败:', error)
   }
 }
 

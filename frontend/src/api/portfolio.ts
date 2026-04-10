@@ -1,5 +1,5 @@
 /**
- * 持仓分析 API
+ * 持仓研究 API
  */
 import { ApiClient } from './request'
 
@@ -129,7 +129,7 @@ export interface AIAnalysisResult {
   detailed_report?: string
 }
 
-/** 分析报告 */
+/** 研究报告 */
 export interface PortfolioAnalysisReport {
   analysis_id: string
   status: 'pending' | 'processing' | 'completed' | 'failed'
@@ -144,15 +144,15 @@ export interface PortfolioAnalysisReport {
   created_at: string
 }
 
-/** 分析请求 */
+/** 研究请求 */
 export interface AnalysisRequestPayload {
   include_paper?: boolean
   research_depth?: string
 }
 
-// ==================== 单股持仓分析类型 ====================
+// ==================== 单股持仓研究类型 ====================
 
-/** 单股分析请求参数 */
+/** 单股研究请求参数 */
 export interface PositionAnalysisParams {
   research_depth?: string
   include_add_position?: boolean
@@ -183,7 +183,7 @@ export interface PositionRiskMetrics {
   risk_summary?: string           // 风险概述
 }
 
-/** 单股持仓分析结果 */
+/** 单股持仓研究结果 */
 export interface PositionAnalysisResult {
   analysis_id: string
   position_id: string
@@ -253,12 +253,12 @@ export const portfolioApi = {
     return ApiClient.get<PortfolioStats>('/api/portfolio/statistics')
   },
 
-  /** 发起持仓分析 */
+  /** 发起持仓研究 */
   async analyzePortfolio(params?: AnalysisRequestPayload) {
     return ApiClient.post<PortfolioAnalysisReport>('/api/portfolio/analysis', params || {}, { showLoading: true })
   },
 
-  /** 获取分析历史 */
+  /** 获取研究历史 */
   async getAnalysisHistory(page = 1, pageSize = 10) {
     return ApiClient.get<{ items: PortfolioAnalysisReport[]; total: number; page: number; page_size: number }>(
       '/api/portfolio/analysis/history',
@@ -266,19 +266,19 @@ export const portfolioApi = {
     )
   },
 
-  /** 获取分析详情 */
+  /** 获取研究详情 */
   async getAnalysisDetail(analysisId: string) {
     return ApiClient.get<PortfolioAnalysisReport>(`/api/portfolio/analysis/${analysisId}`)
   },
 
-  // ==================== 单股持仓分析 ====================
+  // ==================== 单股持仓研究 ====================
 
   /** 获取单个持仓详情 */
   async getPositionDetail(positionId: string) {
     return ApiClient.get<PositionItem>(`/api/portfolio/positions/${positionId}`)
   },
 
-  /** 发起单股持仓分析（单条记录） */
+  /** 发起单股持仓研究（单条记录） */
   async analyzePosition(positionId: string, params?: PositionAnalysisParams) {
     return ApiClient.post<PositionAnalysisResult>(
       `/api/portfolio/positions/${positionId}/analysis`,
@@ -288,7 +288,7 @@ export const portfolioApi = {
   },
 
   /** 按股票代码分析持仓（异步模式，立即返回任务ID） */
-  /** 检查单股分析报告缓存状态 */
+  /** 检查单股研究报告缓存状态 */
   async checkStockAnalysisCache(code: string, market: string) {
     return ApiClient.post<{
       has_cache: boolean
@@ -318,14 +318,14 @@ export const portfolioApi = {
     )
   },
 
-  /** 获取分析任务状态和结果 */
+  /** 获取研究任务状态和结果 */
   async getPositionAnalysisStatus(analysisId: string) {
     return ApiClient.get<PositionAnalysisResult & { summary?: any }>(
       `/api/portfolio/positions/analysis/${analysisId}`
     )
   },
 
-  /** 按股票代码获取最新分析报告 */
+  /** 按股票代码获取最新研究报告 */
   async getLatestPositionAnalysis(code: string, market: string, source: PositionSource = 'real') {
     return ApiClient.get<PositionAnalysisResult & { summary?: any } | null>(
       `/api/portfolio/positions/analysis-by-code/${code}`,
@@ -333,7 +333,7 @@ export const portfolioApi = {
     )
   },
 
-  /** 获取单股分析历史 */
+  /** 获取单股研究历史 */
   async getPositionAnalysisHistory(positionId: string, page = 1, pageSize = 10, source: PositionSource = 'real') {
     return ApiClient.get<{ items: PositionAnalysisResult[]; total: number; page: number; page_size: number }>(
       `/api/portfolio/positions/${positionId}/analysis/history`,
@@ -341,7 +341,7 @@ export const portfolioApi = {
     )
   },
 
-  /** 删除持仓分析报告 */
+  /** 删除持仓研究报告 */
   async deletePositionAnalysis(analysisId: string) {
     return ApiClient.delete<{ message: string }>(`/api/portfolio/positions/analysis/${analysisId}`)
   },

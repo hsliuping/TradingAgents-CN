@@ -149,18 +149,19 @@ class NeutralAnalystV2(ResearcherAgent):
 1. 从中性角度评估投资计划的风险收益比
 2. 平衡激进和保守的观点
 3. 寻找最优的风险管理策略
-4. 提供客观理性的操作建议
+4. 提供客观理性的情景比较与观察建议
 
 评估要点：
 - 风险收益比的平衡
 - 概率加权的期望收益
-- 合理的仓位和止损设置
+- 情景概率、证据质量与验证信号
 - 市场环境的综合判断
 
 要求：
 - 保持客观中立
 - 用数据和逻辑支持你的观点
 - 综合考虑多方面因素
+- 不得输出仓位、止损位或交易建议
 - 使用中文撰写报告"""
 
     def _build_user_prompt(self, ticker: str, analysis_date: str, state: Dict[str, Any]) -> str:
@@ -207,7 +208,7 @@ class NeutralAnalystV2(ResearcherAgent):
         logger.info(f"  - 总Prompt长度: {total_length:,} 字符 (~{total_length//4:,} tokens)")
 
         # 降级提示词（如果模板系统不可用）- 参考旧版实现
-        fallback_prompt = f"""以下是交易员的决策：
+        fallback_prompt = f"""以下是研究整合员整理的结论：
 {template_variables['investment_plan']}
 
 将以下来源的见解纳入您的论点：
@@ -220,7 +221,7 @@ class NeutralAnalystV2(ResearcherAgent):
 激进分析师的最后回应：{current_risky_response}
 安全分析师的最后回应：{current_safe_response}
 
-请提出您的中性观点，强调为什么平衡方法是最可靠的。"""
+请提出您的中性风险观点，强调不同情景的概率权重、证据质量与最值得监测的验证信号。不要给出仓位或操作建议。"""
 
 
         # 打印模板变量（调试用）

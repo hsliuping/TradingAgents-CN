@@ -1,8 +1,8 @@
 """
-交易员Agent v2.0
+研究整合员 Agent v2.0
 
-基于TraderAgent基类实现的交易员
-根据投资分析观点生成交易分析计划
+基于 TraderAgent 基类实现的研究整合员。
+根据研究分析观点生成研究整合意见。
 """
 
 import logging
@@ -33,17 +33,17 @@ except (ImportError, KeyError):
 @register_agent
 class TraderV2(TraderAgent):
     """
-    交易员 v2.0
+    研究整合员 v2.0
     
     功能：
-    - 根据投资分析观点生成交易分析计划
-    - 分析价格区间、仓位配置、风险控制参考价位
-    - 考虑风险控制和资金管理
+    - 根据研究分析观点生成研究整合意见
+    - 提炼关键信号、约束条件和风险提示
+    - 汇总后续观察重点
     
     工作流程：
     1. 读取投资计划和所有分析报告
-    2. 分析交易参数
-    3. 生成交易分析计划
+    2. 分析研究信号
+    3. 生成研究整合意见
     
     示例:
         from langchain_openai import ChatOpenAI
@@ -64,23 +64,23 @@ class TraderV2(TraderAgent):
     # Agent元数据
     metadata = AgentMetadata(
         id="trader_v2",
-        name="交易员 v2.0",
-        description="根据投资分析观点生成交易分析计划",
+        name="研究整合员 v2.0",
+        description="根据研究分析观点生成研究整合意见",
         category=AgentCategory.TRADER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
-        default_tools=[],  # 交易员不需要工具
+        default_tools=[],  # 研究整合员不需要工具
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_advice", type="string", description="投资分析观点"),
+            AgentInput(name="investment_advice", type="string", description="研究分析观点"),
         ],
         outputs=[
-            AgentOutput(name="trader_investment_plan", type="string", description="交易分析计划"),
+            AgentOutput(name="trader_investment_plan", type="string", description="研究整合意见"),
         ],
         requires_tools=False,
         output_field="trader_investment_plan",
-        report_label="【交易分析计划 v2】",
+        report_label="【研究整合意见 v2】",
     )
 
     # 输出字段名（与报告格式化器期望的字段名一致）
@@ -131,36 +131,35 @@ class TraderV2(TraderAgent):
         
         logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
         if prompt:
-            logger.debug("✅ 从模板系统获取交易员系统提示词")
+            logger.debug("✅ 从模板系统获取研究整合员系统提示词")
             return prompt
         
         # 默认系统提示词（合规版本）
-        return """你是一位专业的投资分析师，负责根据投资分析观点生成交易分析计划。
+        return """你是一位研究整合员，负责根据研究结论整理用户可读的整合意见。
 
 ## 你的职责
 
-1. **市场观点分析**：根据投资计划分析市场观点（看涨/看跌/中性）
-2. **价格分析区间**：基于技术面和基本面分析价格区间（不构成目标价）
-3. **仓位分析**：分析合理的仓位配置（不构成操作建议）
-4. **风险控制参考**：提供风险控制参考价位（仅供参考）
-5. **收益预期参考**：提供收益预期参考价位（仅供参考）
+1. **研究摘要**：总结当前研究结论的核心含义
+2. **关键证据**：提炼支持或削弱结论的核心信号
+3. **前提与约束**：说明结论成立依赖的关键条件
+4. **情景框架**：概括偏多、偏空、中性情景的触发因素
+5. **观察清单**：列出后续需要重点跟踪的数据和事件
 
 ## 分析原则
 
-- **基于投资分析观点**：参考投资计划中的市场观点（看涨/看跌/中性）进行分析
-- **客观的风险分析**：提供风险控制参考价位，不构成操作建议
-- **明确的分析参数**：提供清晰的价格分析区间、仓位分析、风险参考价位
-- **考虑市场流动性**：分析交易执行的可行性
-- **资金管理分析**：基于投资计划中的仓位分析进行资金配置分析
+- **基于研究结论**：参考研究经理的结论与多空证据进行整合
+- **只做研究辅助**：允许描述观察区间与关键验证位，但不能给出执行建议
+- **强调不确定性**：必须说明关键前提、信息缺口和失效条件
+- **用户可读**：输出应帮助用户理解为什么值得继续跟踪，而不是如何交易
 
 ## 重要说明
 
-- **风险评估不在本阶段**：风险评估是在交易分析计划制定之后由风险经理进行的，你不需要进行风险评估
-- **基于已有数据**：你只能使用提供的分析报告（市场分析、基本面分析、新闻分析、板块分析、大盘分析、看涨报告、看跌报告）来制定交易分析计划
-- **遵循投资计划**：投资计划中的 market_view、price_analysis_range、position_analysis 等字段是你的主要参考依据
+- **风险治理不在本阶段**：风险经理会在后续补充风险治理结论
+- **基于已有数据**：你只能使用提供的研究报告与研究结论，不能补造未提供的信息
+- **禁止交易化表达**：不得输出目标价、止损止盈、仓位比例、建仓节奏或终极操作指令
 
 **免责声明**：
-本分析报告仅供参考，不构成投资建议。所有价格区间、市场观点均为分析参考，
+本分析报告仅供参考，不构成投资建议。所有观察区间、市场观点均为分析参考，
 不构成买卖操作建议。投资有风险，决策需谨慎。"""
     
     def _build_user_prompt(
@@ -215,7 +214,7 @@ class TraderV2(TraderAgent):
             return str(report) if report else ""
         
         # 准备模板变量（参考 research_manager_v2 的实现）
-        # 🔑 注意：风险评估（risk_assessment）不在交易分析计划阶段，它在交易分析计划之后由风险经理进行
+        # 🔑 注意：风险评估（risk_assessment）不在研究整合阶段，它在研究整合之后由风险经理进行
         template_variables = {
             "ticker": ticker,
             "company_name": company_name,
@@ -223,7 +222,7 @@ class TraderV2(TraderAgent):
             "current_date": analysis_date,
             "currency_name": currency_name,
             "currency_symbol": currency_symbol,
-            # 投资计划（转换为字符串）
+            # 研究结论（转换为字符串）
             "investment_plan": extract_content(investment_plan) if investment_plan else "",
             # 🔑 可用的分析报告（不包括 risk_assessment）
             "market_report": extract_content(all_reports.get("market_report", "")),
@@ -254,13 +253,13 @@ class TraderV2(TraderAgent):
         )
         
         if prompt:
-            logger.info(f"✅ 从模板系统获取交易员 v2.0 用户提示词 (长度: {len(prompt)})")
+            logger.info(f"✅ 从模板系统获取研究整合员 v2.0 用户提示词 (长度: {len(prompt)})")
             logger.info(f"📝 用户提示词前500字符:\n{prompt[:500]}...")
             return prompt
         
         # 降级：使用默认用户提示词（不包含 risk_assessment）
         logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
-        prompt = f"""请为 {company_name}（{ticker}）生成交易分析计划：
+        prompt = f"""请为 {company_name}（{ticker}）生成研究整合意见：
 
 ## 基本信息
 - **股票代码**：{ticker}
@@ -301,27 +300,20 @@ class TraderV2(TraderAgent):
 
 ## 任务要求
 
-请基于上述投资计划和各类分析报告，生成详细的交易分析计划，包括：
+请基于上述研究结论和各类分析报告，生成详细的研究整合意见，包括：
 
-1. **市场观点**：看涨/看跌/中性（参考投资计划中的 market_view）
-2. **价格分析区间**：基于技术面和基本面的价格分析区间（参考投资计划中的 price_analysis_range，不构成目标价）
-3. **仓位分析**：基于风险收益比的仓位分析（参考投资计划中的 position_analysis，不构成操作建议）
-4. **风险控制参考价位**：风险控制参考价位（仅供参考，不构成操作建议）
-5. **收益预期参考价位**：收益预期参考价位（仅供参考，不构成操作建议）
-6. **执行策略分析**：市价单还是限价单的分析，分批建仓还是一次性建仓的分析
-7. **风险提示**：交易执行中需要注意的风险点
+1. **研究摘要**：当前结论的核心含义
+2. **关键证据与信号**：支持或削弱结论的核心信息
+3. **前提与约束**：结论成立依赖的关键条件
+4. **情景框架**：偏多、偏空、中性情景的触发因素
+5. **观察区间与验证位**：仅作为研究跟踪参考，不构成目标价或交易指令
+6. **后续观察清单**：接下来需要跟踪的数据、公告与事件
 
 **重要提示**：
-- 必须严格按照投资计划中的 market_view 来确定市场观点
-- 价格分析区间应参考投资计划中的 price_analysis_range，但可以根据当前市场价格进行分析
-- 仓位分析应参考投资计划中的 position_analysis
-- 风险控制参考价位和收益预期参考价位应基于技术分析和风险控制原则提供（仅供参考）
+- 可以提及观察区间、关键验证位，但不得写成目标价、止损位或建仓价
+- 不得输出仓位比例、执行策略、收益承诺或任何操作指令
 - 使用 {currency_name}（{currency_symbol}）作为货币单位
-
-**免责声明**：
-本分析报告仅供参考，不构成投资建议。所有价格区间、市场观点均为分析参考，
-不构成买卖操作建议。投资有风险，决策需谨慎。投资者应根据自身情况，结合
-专业投资顾问意见，独立做出投资决策。"""
+"""
         
         return prompt
     

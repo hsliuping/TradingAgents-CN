@@ -371,8 +371,8 @@ class WorkflowEngine:
             "bear_researcher_v2": (55, "🐻 看空研究员正在构建看空观点...", "看空研究员"),
             "research_manager_v2": (60, "🔬 研究经理正在综合研究观点...", "研究经理"),
 
-            # === v2.0 交易团队 ===
-            "trader_v2": (70, "💼 交易员正在制定交易计划...", "交易员"),
+            # === v2.0 研究整合阶段 ===
+            "trader_v2": (70, "🧩 研究整合员正在汇总研究结论...", "研究整合员"),
 
             # === v2.0 风险管理团队 ===
             "risky_analyst_v2": (75, "⚡ 激进分析师正在评估高风险机会...", "激进分析师"),
@@ -392,8 +392,8 @@ class WorkflowEngine:
             "bear_researcher": (55, "🐻 空头研究员正在构建看空观点...", "空头研究员"),
             "research_manager": (60, "🔬 研究经理正在综合研究观点...", "研究经理"),
 
-            # === v1.0 交易团队 ===
-            "trader": (70, "💼 交易员正在制定交易计划...", "交易员"),
+            # === v1.0 研究整合阶段 ===
+            "trader": (70, "🧩 研究整合员正在汇总研究结论...", "研究整合员"),
 
             # === v1.0 风险管理团队 ===
             "risky_analyst": (75, "⚡ 激进分析师正在评估高风险机会...", "激进分析师"),
@@ -419,7 +419,7 @@ class WorkflowEngine:
             "Bull Researcher": (50, "🐂 多头研究员正在构建看多观点...", "多头研究员"),
             "Bear Researcher": (55, "🐻 空头研究员正在构建看空观点...", "空头研究员"),
             "Research Manager": (60, "🔬 研究经理正在综合研究观点...", "研究经理"),
-            "Trader": (70, "💼 交易员正在制定交易计划...", "交易员"),
+            "Trader": (70, "🧩 研究整合员正在汇总研究结论...", "研究整合员"),
             "Risky Analyst": (75, "⚡ 激进分析师正在评估高风险机会...", "激进分析师"),
             "Safe Analyst": (80, "🛡️ 保守分析师正在评估风险因素...", "保守分析师"),
             "Neutral Analyst": (82, "⚖️ 中性分析师正在平衡风险收益...", "中性分析师"),
@@ -611,9 +611,9 @@ class WorkflowEngine:
         生成最终分析结果
 
         综合以下内容：
-        1. investment_plan (研究经理的市场分析)
-        2. trader_investment_plan (交易员的交易分析计划)
-        3. risk_assessment (风险经理的风险评估)
+        1. investment_plan (研究经理的研究结论)
+        2. trader_investment_plan (研究整合员的整合意见)
+        3. risk_assessment (风险经理的风险治理结论)
 
         Args:
             state: 工作流执行状态
@@ -648,13 +648,13 @@ class WorkflowEngine:
         sections = []
 
         if investment_plan:
-            sections.append(f"## 📋 市场分析\n\n{investment_plan}")
+            sections.append(f"## 📋 研究结论\n\n{investment_plan}")
 
         if trader_plan:
-            sections.append(f"## 💼 交易分析计划\n\n{trader_plan}")
+            sections.append(f"## 🧩 研究整合意见\n\n{trader_plan}")
 
         if risk_assessment:
-            sections.append(f"## ⚠️ 风险评估\n\n{risk_assessment}")
+            sections.append(f"## 🛡️ 风险治理结论\n\n{risk_assessment}")
 
         final_decision = "\n\n".join(sections)
         logger.info(f"✅ [WorkflowEngine] 生成 final_trade_decision，包含 {len(sections)} 个部分")

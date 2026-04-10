@@ -263,10 +263,10 @@ class AnalysisHistoryQuery(BaseModel):
 class AnalysisTaskType(str, Enum):
     """分析任务类型
 
-    支持多种分析流程，每种类型对应一个工作流模板
+    支持多种研究流程，每种类型对应一个工作流模板
     """
     STOCK_ANALYSIS = "stock_analysis"           # 股票分析（完整TradingAgents流程）
-    POSITION_ANALYSIS = "position_analysis"     # 持仓分析
+    POSITION_ANALYSIS = "position_analysis"     # 持仓研究
     TRADE_REVIEW = "trade_review"               # 交易复盘
     PORTFOLIO_HEALTH = "portfolio_health"       # 组合健康度分析
     RISK_ASSESSMENT = "risk_assessment"         # 风险评估
@@ -279,7 +279,7 @@ class UnifiedAnalysisTask(BaseModel):
     """统一分析任务模型 (v2.0)
 
     设计目标：
-    1. 支持多种分析流程（股票分析、持仓分析、交易复盘等）
+    1. 支持多种研究流程（股票分析、持仓研究、交易复盘等）
     2. 统一的任务管理和状态跟踪
     3. 灵活的参数配置和引擎选择
     4. 向后兼容现有系统
@@ -297,7 +297,7 @@ class UnifiedAnalysisTask(BaseModel):
             }
         )
 
-        # 持仓分析任务
+        # 持仓研究任务
         task = UnifiedAnalysisTask(
             task_id=str(uuid.uuid4()),
             user_id=user_id,

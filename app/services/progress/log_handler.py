@@ -41,8 +41,8 @@ class ProgressLogHandler(logging.Handler):
             r"研究.*辩论|辩论.*开始|debate.*start": "🎯 研究辩论进行中",
             r"研究经理|research.*manager": "👔 研究经理形成共识",
 
-            # 交易团队阶段
-            r"交易员.*决策|trader.*decision|制定.*交易策略": "💼 交易员制定策略",
+            # 研究整合阶段
+            r"交易员.*决策|trader.*decision|制定.*交易策略|研究整合员.*汇总|研究整合.*意见": "🧩 研究整合员汇总",
 
             # 风险管理阶段
             r"激进.*风险|risky.*risk": "🔥 激进风险评估",
@@ -52,8 +52,8 @@ class ProgressLogHandler(logging.Handler):
 
             # 最终阶段
             r"信号处理|signal.*process": "📡 信号处理",
-            r"生成.*报告|report.*generat": "📊 生成报告",
-            r"分析.*完成|analysis.*complet": "✅ 分析完成",
+            r"生成.*报告|report.*generat": "📊 生成研究报告",
+            r"分析.*完成|analysis.*complet": "✅ 研究完成",
         }
 
         logger.info("📊 [进度日志] 日志处理器初始化完成")

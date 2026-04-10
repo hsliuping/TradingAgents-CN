@@ -134,7 +134,7 @@
               <el-select v-model="exportCollection" style="width: 100%">
                 <el-option label="配置和报告（用于迁移）" value="config_and_reports" />
                 <el-option label="配置数据（用于演示系统，已脱敏）" value="config_only" />
-                <el-option label="分析报告" value="analysis_reports" />
+                <el-option label="研究报告" value="analysis_reports" />
                 <el-option label="用户配置" value="user_configs" />
                 <el-option label="操作日志" value="operation_logs" />
               </el-select>
@@ -712,13 +712,13 @@ const exportData = async () => {
       // 注意: 不包含 market_quotes 和 stock_basic_info（数据量大，不适合演示系统）
     ]
 
-    // 分析报告集合列表
+    // 研究报告集合列表
     const reportCollections = [
       'unified_analysis_tasks',    // 统一分析任务（v2.0）
       'analysis_tasks',            // 分析任务（v1.x）
-      'analysis_reports',          // 分析报告
-      'position_analysis_reports', // 持仓分析报告
-      'portfolio_analysis_reports' // 组合分析报告
+      'analysis_reports',          // 研究报告
+      'position_analysis_reports', // 持仓研究报告
+      'portfolio_analysis_reports' // 组合研究报告
     ]
 
     // 历史记录集合列表（可选，用于完整迁移）

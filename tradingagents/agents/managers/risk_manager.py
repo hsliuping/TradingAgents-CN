@@ -7,6 +7,7 @@ logger = get_logger("default")
 
 # 导入模板客户端
 from tradingagents.utils.template_client import get_agent_prompt
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails, build_research_only_closing
 
 
 def create_risk_manager(llm, memory):
@@ -72,20 +73,20 @@ def create_risk_manager(llm, memory):
                 fallback_prompt=None
             )
 
+            system_prompt = apply_compliance_guardrails(system_prompt, "risk_manager")
             logger.info(f"✅ [风险经理] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
 
         except Exception as e:
             logger.error(f"❌ [风险经理] 从模板系统获取提示词失败: {e}")
             # 降级：使用硬编码提示词
-            system_prompt = """作为风险管理委员会主席和辩论主持人，您的目标是评估三位风险分析师的辩论，并确定交易员的最佳行动方案。
-
-您的决策必须产生明确的建议：买入、卖出或持有。
+            system_prompt = """作为风险管理委员会主席和辩论主持人，您的目标是评估三位风险分析师的辩论，并形成风险治理视角的研究意见。
 
 总结关键论点，提供详细推理，并根据分析师的见解调整交易员计划。
 
 从过去的错误中学习，确保每个决策都能带来更好的结果。
 
 请用中文撰写所有分析内容。"""
+            system_prompt = apply_compliance_guardrails(system_prompt, "risk_manager")
             logger.warning(f"⚠️ [风险经理] 使用降级提示词 (长度: {len(system_prompt)})")
 
         # 构建完整提示词
@@ -100,7 +101,7 @@ def create_risk_manager(llm, memory):
 分析师辩论历史：
 {history}
 
-请基于以上信息做出明确的风险管理决策。"""
+{build_research_only_closing(["请基于以上信息输出风险汇总、主要争议、约束条件、信息缺口和后续观察点。"])}"""
 
         # 📊 统计 prompt 大小
         prompt_length = len(prompt)
@@ -173,21 +174,20 @@ def create_risk_manager(llm, memory):
         # 如果所有重试都失败，生成默认决策
         if not response_content:
             logger.error(f"❌ [Risk Manager] 所有LLM调用尝试失败，使用默认决策")
-            response_content = f"""**默认建议：持有**
+            response_content = f"""**风险汇总**
 
-由于技术原因无法生成详细分析，基于当前市场状况和风险控制原则，建议对{company_name}采取持有策略。
+由于技术原因无法生成详细分析，当前仅保留对 {company_name} 的风险观察。
 
-**理由：**
-1. 市场信息不足，避免盲目操作
-2. 保持现有仓位，等待更明确的市场信号
-3. 控制风险，避免在不确定性高的情况下做出激进决策
+**主要争议**
+1. 市场信息不足，暂时无法确认关键分歧的方向。
+2. 现有公开信息不足以支持更细化的研究结论。
 
-**建议：**
-- 密切关注市场动态和公司基本面变化
-- 设置合理的止损和止盈位
-- 等待更好的入场或出场时机
+**后续观察点**
+- 持续跟踪市场动态和公司基本面变化
+- 补充财务与经营数据后再进行复核
+- 关注重大公告、行业变化与宏观环境扰动
 
-注意：此为系统默认建议，建议结合人工分析做出最终决策。"""
+注意：此为系统默认研究观察，不构成任何交易建议。"""
 
         new_risk_debate_state = {
             "judge_decision": response_content,

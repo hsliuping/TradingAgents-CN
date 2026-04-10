@@ -1,6 +1,6 @@
 """
-持仓分析API路由
-提供持仓管理和AI分析接口
+持仓研究 API 路由
+提供持仓管理和 AI 研究接口
 
 [PRO功能] 此模块为专业版功能，需要专业版授权
 """
@@ -30,7 +30,7 @@ logger = logging.getLogger("webapi")
 # 整个路由器都需要 PRO 权限
 router = APIRouter(
     prefix="/portfolio",
-    tags=["持仓分析"],
+    tags=["持仓研究"],
     dependencies=[Depends(require_pro)]
 )
 
@@ -245,14 +245,14 @@ async def get_portfolio_statistics(
         )
 
 
-# ==================== 持仓分析接口 ====================
+# ==================== 持仓研究接口 ====================
 
 @router.post("/analysis", response_model=dict)
 async def analyze_portfolio(
     data: PortfolioAnalysisRequest = PortfolioAnalysisRequest(),
     current_user: dict = Depends(get_current_user)
 ):
-    """发起持仓分析"""
+    """发起持仓研究"""
     try:
         service = get_portfolio_service()
         report = await service.analyze_portfolio(
@@ -278,7 +278,7 @@ async def analyze_portfolio(
 
         return ok(data=response_data)
     except Exception as e:
-        logger.error(f"持仓分析失败: {e}")
+        logger.error(f"持仓研究失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -325,7 +325,7 @@ async def get_analysis_detail(
     analysis_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """获取分析报告详情"""
+    """获取研究报告详情"""
     try:
         service = get_portfolio_service()
         report = await service.get_analysis_detail(analysis_id)
@@ -333,7 +333,7 @@ async def get_analysis_detail(
         if not report:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="分析报告不存在"
+                detail="研究报告不存在"
             )
 
         # 验证用户权限
@@ -387,7 +387,7 @@ async def get_analysis_detail(
         )
 
 
-# ==================== 单股持仓分析接口 ====================
+# ==================== 单股持仓研究接口 ====================
 
 @router.get("/positions/{position_id}", response_model=dict)
 async def get_position_detail(
@@ -420,7 +420,7 @@ async def analyze_position(
     data: PositionAnalysisRequest = PositionAnalysisRequest(),
     current_user: dict = Depends(get_current_user)
 ):
-    """发起单股持仓分析"""
+    """发起单股持仓研究"""
     try:
         service = get_portfolio_service()
         report = await service.analyze_position(
@@ -433,7 +433,7 @@ async def analyze_position(
         if report.status == PortfolioAnalysisStatus.FAILED:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=report.error_message or "分析失败"
+                detail=report.error_message or "研究失败"
             )
 
         # 转换为响应格式
@@ -459,7 +459,7 @@ async def analyze_position(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"单股持仓分析失败: {e}", exc_info=True)
+        logger.error(f"单股持仓研究失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -477,12 +477,12 @@ async def check_stock_analysis_cache(
     data: CheckCacheRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """检查单股分析报告缓存状态
+    """检查单股研究报告缓存状态
     
-    在开始持仓分析前，先检查是否有可用的单股分析报告缓存。
+    在开始持仓研究前，先检查是否有可用的单股研究报告缓存。
     如果没有缓存，前端可以提示用户选择：
-    1. 继续分析（不使用单股分析报告）
-    2. 先去单股分析页面进行分析
+    1. 继续研究（不使用单股研究报告）
+    2. 先去单股研究页面进行研究
     
     Args:
         data: 检查缓存请求，包含股票代码和市场类型
@@ -504,7 +504,7 @@ async def check_stock_analysis_cache(
         # 将市场代码转换为中文名称（A股/港股/美股）
         market_name = convert_market_code_to_name(data.market)
         
-        logger.info(f"🔍 [检查缓存] 检查单股分析报告缓存: code={data.code}, market={data.market} -> {market_name}")
+        logger.info(f"🔍 [检查缓存] 检查单股研究报告缓存: code={data.code}, market={data.market} -> {market_name}")
         
         cache_status = await portfolio_service.check_stock_analysis_cache(
             stock_code=data.code,
@@ -539,12 +539,12 @@ async def analyze_position_by_code(
     import asyncio
 
     try:
-        logger.info(f"📥 [持仓分析路由] 收到请求: code={data.code}, market={data.market}, user_id={current_user['id']}")
+        logger.info(f"📥 [持仓研究路由] 收到请求: code={data.code}, market={data.market}, user_id={current_user['id']}")
         
         from app.services.unified_analysis_service import get_unified_analysis_service
 
         unified_service = get_unified_analysis_service()
-        logger.info(f"✅ [持仓分析路由] 获取到 UnifiedAnalysisService 实例")
+        logger.info(f"✅ [持仓研究路由] 获取到 UnifiedAnalysisService 实例")
 
         # 准备任务参数
         task_params = {
@@ -559,23 +559,23 @@ async def analyze_position_by_code(
             "analysis_focus": data.analysis_focus,
             "position_type": data.position_type,
         }
-        logger.info(f"📋 [持仓分析路由] 任务参数准备完成: {list(task_params.keys())}")
+        logger.info(f"📋 [持仓研究路由] 任务参数准备完成: {list(task_params.keys())}")
 
-        # 创建统一分析任务
-        logger.info(f"🔄 [持仓分析路由] 开始创建任务...")
+        # 创建统一研究任务
+        logger.info(f"🔄 [持仓研究路由] 开始创建任务...")
         result = await unified_service.create_position_analysis_task(
             user_id=current_user["id"],
             code=data.code,
             market=data.market,
             task_params=task_params
         )
-        logger.info(f"✅ [持仓分析路由] 任务创建成功: task_id={result['task_id']}")
+        logger.info(f"✅ [持仓研究路由] 任务创建成功: task_id={result['task_id']}")
         
         # 为了兼容前端，同时返回analysis_id字段（等于task_id）
         result["analysis_id"] = result["task_id"]
 
-        # 后台执行分析
-        logger.info(f"🚀 [持仓分析路由] 启动后台任务执行...")
+        # 后台执行研究
+        logger.info(f"🚀 [持仓研究路由] 启动后台任务执行...")
         asyncio.create_task(
             unified_service.execute_position_analysis(
                 task_id=result["task_id"],
@@ -585,13 +585,13 @@ async def analyze_position_by_code(
                 task_params=task_params
             )
         )
-        logger.info(f"✅ [持仓分析路由] 后台任务已启动")
+        logger.info(f"✅ [持仓研究路由] 后台任务已启动")
 
-        return ok(data=result, message="持仓分析任务已提交，预计需要2-5分钟完成")
+        return ok(data=result, message="持仓研究任务已提交，预计需要2-5分钟完成")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ [持仓分析路由] 创建任务失败: {e}", exc_info=True)
+        logger.error(f"❌ [持仓研究路由] 创建任务失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -603,7 +603,7 @@ async def get_position_analysis_status(
     task_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """获取持仓分析任务状态和结果
+    """获取持仓研究任务状态和结果
 
     注意：此接口已改为使用统一任务中心，task_id 即为任务ID。
     也可以使用 GET /api/analysis/tasks/{task_id}/status 接口查询。
@@ -623,7 +623,7 @@ async def get_position_analysis_status(
         if not task:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="分析任务不存在"
+                detail="研究任务不存在"
             )
 
         # 格式化返回数据
@@ -688,7 +688,7 @@ async def get_position_analysis_status(
                 
                 # 处理action_reason：如果是JSON格式，转换为Markdown
                 action_reason_raw = ai_analysis.get("action_reason")
-                logger.info(f"📊 [持仓分析接口] 原始action_reason类型: {type(action_reason_raw)}, 长度: {len(str(action_reason_raw)) if action_reason_raw else 0}")
+                logger.info(f"📊 [持仓研究接口] 原始action_reason类型: {type(action_reason_raw)}, 长度: {len(str(action_reason_raw)) if action_reason_raw else 0}")
                 
                 if action_reason_raw:
                     # 检查是否是JSON格式（可能是字符串形式的JSON或字典）
@@ -698,7 +698,7 @@ async def get_position_analysis_status(
                     # 如果是字符串，尝试解析JSON
                     if isinstance(action_reason_raw, str):
                         action_reason_str = action_reason_raw.strip()
-                        logger.info(f"📊 [持仓分析接口] action_reason前100字符: {action_reason_str[:100]}")
+                        logger.info(f"📊 [持仓研究接口] action_reason前100字符: {action_reason_str[:100]}")
                         
                         # 检查是否包含JSON代码块
                         if "```json" in action_reason_str or (action_reason_str.startswith("{") and "analysis_summary" in action_reason_str):
@@ -709,51 +709,51 @@ async def get_position_analysis_status(
                                     json_end = action_reason_str.find("```", json_start)
                                     if json_end > json_start:
                                         json_str = action_reason_str[json_start:json_end].strip()
-                                        logger.info(f"📊 [持仓分析接口] 从代码块提取JSON，长度: {len(json_str)}")
+                                        logger.info(f"📊 [持仓研究接口] 从代码块提取JSON，长度: {len(json_str)}")
                                         advice_json = json.loads(json_str)
                                 elif action_reason_str.strip().startswith("{"):
-                                    logger.info(f"📊 [持仓分析接口] 直接解析JSON格式")
+                                    logger.info(f"📊 [持仓研究接口] 直接解析JSON格式")
                                     advice_json = json.loads(action_reason_str)
                                 
                                 if advice_json:
-                                    logger.info(f"📊 [持仓分析接口] JSON解析成功，字段: {list(advice_json.keys())}")
+                                    logger.info(f"📊 [持仓研究接口] JSON解析成功，字段: {list(advice_json.keys())}")
                                     # 使用portfolio_service的转换方法
                                     service = get_portfolio_service()
                                     action_reason_markdown = service._convert_action_advice_json_to_markdown(advice_json)
-                                    logger.info(f"📊 [持仓分析接口] JSON转换为Markdown成功，长度: {len(action_reason_markdown)}")
+                                    logger.info(f"📊 [持仓研究接口] JSON转换为Markdown成功，长度: {len(action_reason_markdown)}")
                                     result_data["action_reason"] = action_reason_markdown
                                 else:
-                                    logger.warning(f"⚠️ [持仓分析接口] JSON解析后为空，使用原始值")
+                                    logger.warning(f"⚠️ [持仓研究接口] JSON解析后为空，使用原始值")
                                     result_data["action_reason"] = action_reason_raw
                             except Exception as e:
-                                logger.warning(f"⚠️ [持仓分析接口] JSON解析失败，使用原始值: {e}", exc_info=True)
+                                logger.warning(f"⚠️ [持仓研究接口] JSON解析失败，使用原始值: {e}", exc_info=True)
                                 result_data["action_reason"] = action_reason_raw
                         else:
                             # 不是JSON格式，直接使用
-                            logger.info(f"📊 [持仓分析接口] action_reason不是JSON格式，直接使用")
+                            logger.info(f"📊 [持仓研究接口] action_reason不是JSON格式，直接使用")
                             result_data["action_reason"] = action_reason_raw
                     elif isinstance(action_reason_raw, dict):
                         # 如果已经是字典格式，直接转换
-                        logger.info(f"📊 [持仓分析接口] action_reason是字典格式，字段: {list(action_reason_raw.keys())}")
+                        logger.info(f"📊 [持仓研究接口] action_reason是字典格式，字段: {list(action_reason_raw.keys())}")
                         service = get_portfolio_service()
                         action_reason_markdown = service._convert_action_advice_json_to_markdown(action_reason_raw)
-                        logger.info(f"📊 [持仓分析接口] 字典转换为Markdown成功，长度: {len(action_reason_markdown)}")
+                        logger.info(f"📊 [持仓研究接口] 字典转换为Markdown成功，长度: {len(action_reason_markdown)}")
                         result_data["action_reason"] = action_reason_markdown
                     else:
                         # 其他类型，直接使用
-                        logger.info(f"📊 [持仓分析接口] action_reason是其他类型: {type(action_reason_raw)}")
+                        logger.info(f"📊 [持仓研究接口] action_reason是其他类型: {type(action_reason_raw)}")
                         result_data["action_reason"] = str(action_reason_raw) if action_reason_raw else ""
                 else:
                     result_data["action_reason"] = ""
                 
                 # 处理recommendation字段：如果是JSON格式，转换为Markdown（与action_reason保持一致）
                 recommendation_raw = ai_analysis.get("recommendation")
-                logger.info(f"📊 [持仓分析接口] 原始recommendation类型: {type(recommendation_raw)}, 长度: {len(str(recommendation_raw)) if recommendation_raw else 0}")
+                logger.info(f"📊 [持仓研究接口] 原始recommendation类型: {type(recommendation_raw)}, 长度: {len(str(recommendation_raw)) if recommendation_raw else 0}")
                 
                 if recommendation_raw:
                     # 如果recommendation和action_reason相同（都是转换后的Markdown），直接使用
                     if recommendation_raw == result_data.get("action_reason"):
-                        logger.info(f"📊 [持仓分析接口] recommendation与action_reason相同，直接使用转换后的Markdown")
+                        logger.info(f"📊 [持仓研究接口] recommendation与action_reason相同，直接使用转换后的Markdown")
                         result_data["recommendation"] = result_data["action_reason"]
                     else:
                         # 检查是否是JSON格式
@@ -762,7 +762,7 @@ async def get_position_analysis_status(
                         
                         if isinstance(recommendation_raw, str):
                             recommendation_str = recommendation_raw.strip()
-                            logger.info(f"📊 [持仓分析接口] recommendation前100字符: {recommendation_str[:100]}")
+                            logger.info(f"📊 [持仓研究接口] recommendation前100字符: {recommendation_str[:100]}")
                             
                             if "```json" in recommendation_str or (recommendation_str.startswith("{") and ("analysis_summary" in recommendation_str or "neutral_operation" in recommendation_str)):
                                 try:
@@ -771,37 +771,37 @@ async def get_position_analysis_status(
                                         json_end = recommendation_str.find("```", json_start)
                                         if json_end > json_start:
                                             json_str = recommendation_str[json_start:json_end].strip()
-                                            logger.info(f"📊 [持仓分析接口] 从代码块提取recommendation JSON，长度: {len(json_str)}")
+                                            logger.info(f"📊 [持仓研究接口] 从代码块提取recommendation JSON，长度: {len(json_str)}")
                                             advice_json = json.loads(json_str)
                                     elif recommendation_str.strip().startswith("{"):
-                                        logger.info(f"📊 [持仓分析接口] 直接解析recommendation JSON格式")
+                                        logger.info(f"📊 [持仓研究接口] 直接解析recommendation JSON格式")
                                         advice_json = json.loads(recommendation_str)
                                     
                                     if advice_json:
-                                        logger.info(f"📊 [持仓分析接口] recommendation JSON解析成功，转换为Markdown")
+                                        logger.info(f"📊 [持仓研究接口] recommendation JSON解析成功，转换为Markdown")
                                         service = get_portfolio_service()
                                         recommendation_markdown = service._convert_action_advice_json_to_markdown(advice_json)
-                                        logger.info(f"📊 [持仓分析接口] recommendation转换为Markdown成功，长度: {len(recommendation_markdown)}")
+                                        logger.info(f"📊 [持仓研究接口] recommendation转换为Markdown成功，长度: {len(recommendation_markdown)}")
                                         result_data["recommendation"] = recommendation_markdown
                                     else:
-                                        logger.warning(f"⚠️ [持仓分析接口] recommendation JSON解析后为空，使用原始值")
+                                        logger.warning(f"⚠️ [持仓研究接口] recommendation JSON解析后为空，使用原始值")
                                         result_data["recommendation"] = recommendation_raw
                                 except Exception as e:
-                                    logger.warning(f"⚠️ [持仓分析接口] recommendation JSON解析失败，使用原始值: {e}", exc_info=True)
+                                    logger.warning(f"⚠️ [持仓研究接口] recommendation JSON解析失败，使用原始值: {e}", exc_info=True)
                                     result_data["recommendation"] = recommendation_raw
                             else:
                                 # 不是JSON格式，直接使用
-                                logger.info(f"📊 [持仓分析接口] recommendation不是JSON格式，直接使用")
+                                logger.info(f"📊 [持仓研究接口] recommendation不是JSON格式，直接使用")
                                 result_data["recommendation"] = recommendation_raw
                         elif isinstance(recommendation_raw, dict):
                             # 如果已经是字典格式，直接转换
-                            logger.info(f"📊 [持仓分析接口] recommendation是字典格式，字段: {list(recommendation_raw.keys())}")
+                            logger.info(f"📊 [持仓研究接口] recommendation是字典格式，字段: {list(recommendation_raw.keys())}")
                             service = get_portfolio_service()
                             recommendation_markdown = service._convert_action_advice_json_to_markdown(recommendation_raw)
-                            logger.info(f"📊 [持仓分析接口] recommendation字典转换为Markdown成功，长度: {len(recommendation_markdown)}")
+                            logger.info(f"📊 [持仓研究接口] recommendation字典转换为Markdown成功，长度: {len(recommendation_markdown)}")
                             result_data["recommendation"] = recommendation_markdown
                         else:
-                            logger.info(f"📊 [持仓分析接口] recommendation是其他类型: {type(recommendation_raw)}")
+                            logger.info(f"📊 [持仓研究接口] recommendation是其他类型: {type(recommendation_raw)}")
                             result_data["recommendation"] = str(recommendation_raw) if recommendation_raw else ""
                 else:
                     result_data["recommendation"] = ""
@@ -816,7 +816,7 @@ async def get_position_analysis_status(
                 if detailed_analysis_raw and isinstance(detailed_analysis_raw, str):
                     # 检查是否包含JSON格式的操作建议
                     if "```json" in detailed_analysis_raw and "【操作建议】" in detailed_analysis_raw:
-                        logger.info(f"📊 [持仓分析接口] detailed_analysis包含JSON格式的操作建议，需要转换")
+                        logger.info(f"📊 [持仓研究接口] detailed_analysis包含JSON格式的历史建议结构，需要转换")
                         try:
                             import json
                             # 找到【操作建议】后面的JSON部分
@@ -838,7 +838,7 @@ async def get_position_analysis_status(
                                         before_op_advice = detailed_analysis_raw[:op_advice_start + len("【操作建议】\n")]
                                         after_json = op_advice_section[json_end + 3:].lstrip()
                                         detailed_analysis_converted = before_op_advice + op_advice_markdown + (f"\n{after_json}" if after_json else "")
-                                        logger.info(f"📊 [持仓分析接口] detailed_analysis转换成功，长度: {len(detailed_analysis_converted)}")
+                                        logger.info(f"📊 [持仓研究接口] detailed_analysis转换成功，长度: {len(detailed_analysis_converted)}")
                                         result_data["detailed_analysis"] = detailed_analysis_converted
                                     else:
                                         result_data["detailed_analysis"] = detailed_analysis_raw
@@ -847,7 +847,7 @@ async def get_position_analysis_status(
                             else:
                                 result_data["detailed_analysis"] = detailed_analysis_raw
                         except Exception as e:
-                            logger.warning(f"⚠️ [持仓分析接口] detailed_analysis转换失败，使用原始值: {e}", exc_info=True)
+                            logger.warning(f"⚠️ [持仓研究接口] detailed_analysis转换失败，使用原始值: {e}", exc_info=True)
                             result_data["detailed_analysis"] = detailed_analysis_raw
                     else:
                         result_data["detailed_analysis"] = detailed_analysis_raw
@@ -866,11 +866,11 @@ async def get_position_analysis_status(
                     # 如果顶层的recommendation已经转换，同步到result内部
                     if "recommendation" in result_data:
                         ai_analysis_copy["recommendation"] = result_data["recommendation"]
-                        logger.info(f"📊 [持仓分析接口] 同步转换后的recommendation到result.ai_analysis")
+                        logger.info(f"📊 [持仓研究接口] 同步转换后的recommendation到result.ai_analysis")
                     # 如果顶层的action_reason已经转换，也同步到result内部
                     if "action_reason" in result_data:
                         ai_analysis_copy["action_reason"] = result_data["action_reason"]
-                        logger.info(f"📊 [持仓分析接口] 同步转换后的action_reason到result.ai_analysis")
+                        logger.info(f"📊 [持仓研究接口] 同步转换后的action_reason到result.ai_analysis")
                     result_copy["ai_analysis"] = ai_analysis_copy
             result_data["result"] = result_copy
             
@@ -899,7 +899,7 @@ async def get_position_analysis_by_code(
     source: str = Query("real", description="数据来源: real(用户持仓)/paper(模拟持仓)"),
     current_user: dict = Depends(get_current_user)
 ):
-    """按股票代码获取最新的分析报告"""
+    """按股票代码获取最新的研究报告"""
     try:
         service = get_portfolio_service()
         # 🔥 将 source 转换为 position_type
@@ -912,11 +912,11 @@ async def get_position_analysis_by_code(
         )
 
         if not report:
-            return ok(data=None, message="暂无分析报告")
+            return ok(data=None, message="暂无研究报告")
 
         return ok(data=report)
     except Exception as e:
-        logger.error(f"获取分析报告失败: {e}", exc_info=True)
+        logger.error(f"获取持仓研究报告失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -931,7 +931,7 @@ async def get_position_analysis_history(
     source: str = Query("real", description="数据来源: real(用户持仓)/paper(模拟持仓)"),
     current_user: dict = Depends(get_current_user)
 ):
-    """获取单股分析历史"""
+    """获取单股研究历史"""
     try:
         service = get_portfolio_service()
         # 🔥 将 source 转换为 position_type
@@ -957,7 +957,7 @@ async def get_position_analysis_history(
             "page_size": result["page_size"]
         })
     except Exception as e:
-        logger.error(f"获取单股分析历史失败: {e}")
+        logger.error(f"获取单股研究历史失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -969,14 +969,14 @@ async def delete_position_analysis(
     analysis_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """删除持仓分析报告"""
+    """删除持仓研究报告"""
     try:
         from app.core.database import get_mongo_db
         from bson import ObjectId
         
         db = get_mongo_db()
         
-        # 查找分析报告
+        # 查找研究报告
         report = await db["position_analysis_reports"].find_one({
             "analysis_id": analysis_id,
             "user_id": current_user["id"]
@@ -985,17 +985,17 @@ async def delete_position_analysis(
         if not report:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="分析报告不存在"
+                detail="研究报告不存在"
             )
         
-        # 删除分析报告
+        # 删除研究报告
         result = await db["position_analysis_reports"].delete_one({
             "analysis_id": analysis_id,
             "user_id": current_user["id"]
         })
         
         if result.deleted_count > 0:
-            logger.info(f"✅ 删除持仓分析报告成功: {analysis_id}")
+            logger.info(f"✅ 删除持仓研究报告成功: {analysis_id}")
             return ok(message="删除成功")
         else:
             raise HTTPException(
@@ -1005,7 +1005,7 @@ async def delete_position_analysis(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"删除持仓分析报告失败: {e}", exc_info=True)
+        logger.error(f"删除持仓研究报告失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)

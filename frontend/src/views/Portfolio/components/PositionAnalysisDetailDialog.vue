@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="visible"
-    title="分析报告详情"
+    title="研究报告详情"
     width="900px"
     :close-on-click-modal="false"
     @close="handleClose"
@@ -16,7 +16,7 @@
         >
           <template #title>
             <span style="font-size: 14px;">
-              <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。
+              <strong>⚠️ 重要提示：</strong>本报告仅用于学习、研究和持仓风险识别，不提供交易指导。
             </span>
           </template>
         </el-alert>

@@ -73,7 +73,7 @@
         <el-card shadow="never" class="ai-section">
           <template #header>
             <div class="ai-header">
-              <span>AI分析报告</span>
+              <span>AI复盘报告</span>
               <el-tag :type="getScoreType(detail.ai_review?.overall_score || 0)" size="large">
                 {{ detail.ai_review?.overall_score || 0 }}分
               </el-tag>

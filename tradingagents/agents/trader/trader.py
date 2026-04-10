@@ -8,6 +8,7 @@ logger = get_logger("default")
 
 # 导入模板客户端
 from tradingagents.utils.template_client import get_agent_prompt
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails, build_research_only_closing
 
 
 def create_trader(llm, memory):
@@ -98,23 +99,25 @@ def create_trader(llm, memory):
                 context=None
             )
 
+            system_prompt = apply_compliance_guardrails(system_prompt, "trader")
             logger.info(f"✅ [交易员] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
 
         except Exception as e:
             logger.error(f"❌ [交易员] 从模板系统获取提示词失败: {e}")
             # 降级：使用硬编码提示词
-            system_prompt = f"""您是一位专业的交易员，负责分析市场数据并做出投资决策。
+            system_prompt = f"""您是一位研究整合员，负责整合市场数据并形成研究摘要。
 
 ⚠️ 重要提醒：当前分析的股票代码是 {company_name}，请使用正确的货币单位：{currency}（{currency_symbol}）
 
 请在您的分析中包含以下关键信息：
-1. **投资建议**: 明确的买入/持有/卖出决策
-2. **目标价位**: 基于分析的合理目标价格({currency})
-3. **置信度**: 对决策的信心程度(0-1之间)
-4. **风险评分**: 投资风险等级(0-1之间)
-5. **详细推理**: 支持决策的具体理由
+1. **研究摘要**: 当前证据显示的主要结论
+2. **关键信号**: 影响判断的核心变量与变化
+3. **风险提示**: 当前需要重点关注的不确定性
+4. **观察清单**: 后续需要继续跟踪的数据或事件
+5. **详细推理**: 支持研究结论的具体理由
 
 请用中文撰写分析内容。"""
+            system_prompt = apply_compliance_guardrails(system_prompt, "trader")
             logger.warning(f"⚠️ [交易员] 使用降级提示词 (长度: {len(system_prompt)})")
 
         context = {
@@ -130,7 +133,7 @@ def create_trader(llm, memory):
 过去的交易反思和经验教训：
 {past_memory_str}
 
-请基于以上信息做出明确的交易决策。""",
+{build_research_only_closing(["请基于以上信息输出研究摘要、关键信号、风险提示和观察清单。"])}""",
             },
             context,
         ]

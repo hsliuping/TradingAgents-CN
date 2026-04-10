@@ -1,11 +1,11 @@
 """
-统一的分析报告格式化工具
+统一的研究报告格式化工具
 
 提供统一的报告提取和格式化函数，供 SimpleAnalysisService 和 UnifiedAnalysisService 使用。
 确保报告格式一致，包含所有必要字段：
-- 宏观报告：index_report（大盘分析）, sector_report（行业板块分析）
+- 宏观报告：index_report（大盘研究）, sector_report（行业板块研究）
 - 基础报告：market_report, sentiment_report, news_report, fundamentals_report
-- 交易计划：investment_plan, trader_investment_plan, final_trade_decision
+- 研究结论：investment_plan, trader_investment_plan, final_trade_decision
 - 研究团队：bull_researcher, bear_researcher, research_team_decision
 - 风险团队：risky_analyst, safe_analyst, neutral_analyst, risk_management_decision
 """
@@ -21,20 +21,20 @@ logger = logging.getLogger(__name__)
 
 # 所有标准报告字段
 STANDARD_REPORT_FIELDS = [
-    # 🆕 宏观分析报告（优先展示）
+    # 🆕 宏观研究报告（优先展示）
     'index_report',           # 大盘/指数分析
     'sector_report',          # 行业/板块分析
-    # 个股分析报告
+    # 个股研究报告
     'market_report',          # 市场技术分析
     'sentiment_report',       # 社交媒体情绪分析
     'news_report',            # 新闻事件分析
     'fundamentals_report',    # 基本面分析
-    # 决策报告
-    # 'investment_plan',        # 投资建议（已移除，避免与 trader_investment_plan 混淆）
-    'trader_investment_plan', # 交易员计划
+    # 研究结论报告
+    # 'investment_plan',        # 研究经理结论（作为 research_team_decision 的备选）
+    'trader_investment_plan', # 研究整合意见
     'research_team_decision', # 研究团队分析
-    'risk_management_decision', # 风险管理决策
-    'final_trade_decision'    # 最终分析结果
+    'risk_management_decision', # 风险治理结论
+    'final_trade_decision'    # 综合研究结论
 ]
 
 
@@ -276,7 +276,7 @@ def _convert_json_to_markdown(content: str, report_type: str = "investment") -> 
 
     if report_type == "investment":
         result = _convert_investment_json_to_markdown(json_obj)
-        logger.info(f"✅ [JSON转换] 投资建议转换完成，Markdown 长度: {len(result)}")
+        logger.info(f"✅ [JSON转换] 研究结论转换完成，Markdown 长度: {len(result)}")
         logger.info(f"✅ [JSON转换] Markdown 前500字符: {result[:500]}")
         return result
     elif report_type == "risk":
@@ -286,7 +286,7 @@ def _convert_json_to_markdown(content: str, report_type: str = "investment") -> 
         return result
     elif report_type == "final_decision":
         result = _convert_final_decision_json_to_markdown(json_obj)
-        logger.info(f"✅ [JSON转换] 最终分析结果转换完成，Markdown 长度: {len(result)}")
+        logger.info(f"✅ [JSON转换] 最终研究结论转换完成，Markdown 长度: {len(result)}")
         logger.info(f"✅ [JSON转换] Markdown 前500字符: {result[:500]}")
         return result
     else:
@@ -295,21 +295,28 @@ def _convert_json_to_markdown(content: str, report_type: str = "investment") -> 
 
 
 def _convert_investment_json_to_markdown(json_obj: Dict[str, Any]) -> str:
-    """将投资建议 JSON 转换为 Markdown"""
-    logger.info(f"🔄 [投资建议转换] JSON 字段: {list(json_obj.keys())}")
+    """将研究结论 JSON 转换为 Markdown"""
+    logger.info(f"🔄 [研究结论转换] JSON 字段: {list(json_obj.keys())}")
     lines = []
     
-    # 投资建议
+    # 研究观点摘要
     action = json_obj.get("action", "")
-    logger.info(f"🔄 [投资建议转换] action: {action}")
+    logger.info(f"🔄 [研究结论转换] action: {action}")
     if action:
-        action_map = {"买入": "🟢 买入", "持有": "🟡 持有", "卖出": "🔴 卖出"}
+        action_map = {
+            "买入": "🟢 看多",
+            "持有": "🟡 中性",
+            "卖出": "🔴 看空",
+            "看涨": "🟢 看多",
+            "中性": "🟡 中性",
+            "看跌": "🔴 看空",
+        }
         action_display = action_map.get(action, action)
-        lines.append(f"## 💡 投资建议\n\n**操作**: {action_display}\n\n")
+        lines.append(f"## 💡 研究观点\n\n**观点**: {action_display}\n\n")
     
     # 信心度
     confidence = json_obj.get("confidence")
-    logger.info(f"🔄 [投资建议转换] confidence: {confidence}")
+    logger.info(f"🔄 [研究结论转换] confidence: {confidence}")
     if confidence is not None:
         # 🔥 修复：处理 0-1 小数和 0-100 整数两种情况
         try:
@@ -325,43 +332,43 @@ def _convert_investment_json_to_markdown(json_obj: Dict[str, Any]) -> str:
     
     # 目标价格
     target_price = json_obj.get("target_price")
-    logger.info(f"🔄 [投资建议转换] target_price: {target_price}")
+    logger.info(f"🔄 [研究结论转换] target_price: {target_price}")
     if target_price:
-        lines.append(f"**目标价格**: ¥{target_price}\n\n")
+        lines.append(f"**观察区间参考**: ¥{target_price}\n\n")
     
     # 风险评分
     risk_score = json_obj.get("risk_score")
-    logger.info(f"🔄 [投资建议转换] risk_score: {risk_score}")
+    logger.info(f"🔄 [研究结论转换] risk_score: {risk_score}")
     if risk_score is not None:
         risk_level = "低" if risk_score < 0.3 else "中" if risk_score < 0.7 else "高"
         lines.append(f"**风险评分**: {risk_score:.2f} ({risk_level}风险)\n\n")
     
     # 决策理由（核心内容）
     reasoning = json_obj.get("reasoning", "")
-    logger.info(f"🔄 [投资建议转换] reasoning 长度: {len(reasoning) if reasoning else 0}")
+    logger.info(f"🔄 [研究结论转换] reasoning 长度: {len(reasoning) if reasoning else 0}")
     if reasoning:
-        lines.append(f"## 📊 决策理由\n\n{reasoning}\n\n")
+        lines.append(f"## 📊 研究依据\n\n{reasoning}\n\n")
     
     # 投资计划摘要
     summary = json_obj.get("summary", "")
-    logger.info(f"🔄 [投资建议转换] summary 长度: {len(summary) if summary else 0}")
+    logger.info(f"🔄 [研究结论转换] summary 长度: {len(summary) if summary else 0}")
     if summary:
-        lines.append(f"## 📋 投资计划摘要\n\n{summary}\n\n")
+        lines.append(f"## 📋 研究摘要\n\n{summary}\n\n")
     
     # 风险提示
     risk_warning = json_obj.get("risk_warning", "")
-    logger.info(f"🔄 [投资建议转换] risk_warning 长度: {len(risk_warning) if risk_warning else 0}")
+    logger.info(f"🔄 [研究结论转换] risk_warning 长度: {len(risk_warning) if risk_warning else 0}")
     if risk_warning:
         lines.append(f"## ⚠️ 风险提示\n\n{risk_warning}\n\n")
     
     # 建议持仓比例
     position_ratio = json_obj.get("position_ratio", "")
-    logger.info(f"🔄 [投资建议转换] position_ratio: {position_ratio}")
+    logger.info(f"🔄 [研究结论转换] position_ratio: {position_ratio}")
     if position_ratio:
-        lines.append(f"## 💼 建议持仓比例\n\n{position_ratio}\n\n")
+        lines.append(f"## 💼 风险承受前提\n\n{position_ratio}\n\n")
     
     result = "\n".join(lines).strip()
-    logger.info(f"✅ [投资建议转换] 转换完成，Markdown 行数: {len(lines)}, 总长度: {len(result)}")
+    logger.info(f"✅ [研究结论转换] 转换完成，Markdown 行数: {len(lines)}, 总长度: {len(result)}")
     return result
 
 
@@ -406,11 +413,11 @@ def _convert_risk_json_to_markdown(json_obj: Dict[str, Any]) -> str:
     if risk_control:
         lines.append(f"## 🛡️ 风险控制建议\n\n{risk_control}\n\n")
 
-    # 投资建议调整
+    # 研究跟踪建议调整
     investment_adjustment = json_obj.get("investment_adjustment", "")
     logger.info(f"🔄 [风险评估转换] investment_adjustment 长度: {len(investment_adjustment) if investment_adjustment else 0}")
     if investment_adjustment:
-        lines.append(f"## 📈 投资建议调整\n\n{investment_adjustment}\n\n")
+        lines.append(f"## 📈 研究跟踪建议\n\n{investment_adjustment}\n\n")
 
     result = "\n".join(lines).strip()
     logger.info(f"✅ [风险评估转换] 转换完成，Markdown 行数: {len(lines)}, 总长度: {len(result)}")
@@ -423,7 +430,7 @@ def _convert_final_decision_json_to_markdown(json_obj: Dict[str, Any]) -> str:
 
     这个函数处理 RiskManager 输出的完整 JSON，包括：
     - 风险评估部分（risk_level, risk_score, reasoning, key_risks, risk_control, investment_adjustment）
-    - 最终分析结果部分（final_trade_decision 嵌套对象）
+    - 最终研究结论部分（final_trade_decision 嵌套对象）
     """
     logger.info(f"🔄 [最终决策转换] JSON 字段: {list(json_obj.keys())}")
     lines = []
@@ -436,16 +443,23 @@ def _convert_final_decision_json_to_markdown(json_obj: Dict[str, Any]) -> str:
         logger.info(f"🔄 [最终决策转换] final_trade_decision 字段: {list(final_trade_decision.keys())}")
 
         # 决策摘要
-        lines.append("# 🎯 最终分析结果\n\n")
-        lines.append("## 决策摘要\n\n")
+        lines.append("# 🎯 综合研究结论\n\n")
+        lines.append("## 结论摘要\n\n")
 
         # 操作建议
         action = final_trade_decision.get("action", "")
         logger.info(f"🔄 [最终决策转换] action: {action}")
         if action:
-            action_map = {"买入": "🟢 买入", "持有": "🟡 持有", "卖出": "🔴 卖出"}
+            action_map = {
+                "买入": "🟢 看多",
+                "持有": "🟡 中性",
+                "卖出": "🔴 看空",
+                "看涨": "🟢 看多",
+                "中性": "🟡 中性",
+                "看跌": "🔴 看空",
+            }
             action_display = action_map.get(action, action)
-            lines.append(f"- **行动**: {action_display}\n")
+            lines.append(f"- **研究观点**: {action_display}\n")
 
         # 信心度
         confidence = final_trade_decision.get("confidence")
@@ -467,33 +481,33 @@ def _convert_final_decision_json_to_markdown(json_obj: Dict[str, Any]) -> str:
         target_price = final_trade_decision.get("target_price")
         logger.info(f"🔄 [最终决策转换] target_price: {target_price}")
         if target_price:
-            lines.append(f"- **目标价格**: ¥{target_price}\n")
+            lines.append(f"- **观察区间参考**: ¥{target_price}\n")
 
         # 止损价格
         stop_loss = final_trade_decision.get("stop_loss")
         logger.info(f"🔄 [最终决策转换] stop_loss: {stop_loss}")
         if stop_loss:
-            lines.append(f"- **止损价格**: ¥{stop_loss}\n")
+            lines.append(f"- **关键验证位**: ¥{stop_loss}\n")
 
         # 建议仓位
         position_ratio = final_trade_decision.get("position_ratio", "")
         logger.info(f"🔄 [最终决策转换] position_ratio: {position_ratio}")
         if position_ratio:
-            lines.append(f"- **建议仓位**: {position_ratio}\n")
+            lines.append(f"- **风险承受前提**: {position_ratio}\n")
 
         lines.append("\n")
 
-        # 决策推理（核心内容）
+        # 研究依据（核心内容）
         reasoning = final_trade_decision.get("reasoning", "")
         logger.info(f"🔄 [最终决策转换] reasoning 长度: {len(reasoning) if reasoning else 0}")
         if reasoning:
-            lines.append(f"## 📊 决策推理\n\n{reasoning}\n\n")
+            lines.append(f"## 📊 研究依据\n\n{reasoning}\n\n")
 
         # 一句话总结
         summary = final_trade_decision.get("summary", "")
         logger.info(f"🔄 [最终决策转换] summary 长度: {len(summary) if summary else 0}")
         if summary:
-            lines.append(f"## 💡 决策总结\n\n{summary}\n\n")
+            lines.append(f"## 💡 结论总结\n\n{summary}\n\n")
 
         # 风险提示
         risk_warning = final_trade_decision.get("risk_warning", "")
@@ -599,7 +613,7 @@ def _extract_risk_debate_reports(risk_state: Any, reports: Dict[str, str]):
         logger.warning(f"⚠️ [ReportFormatter] risk_management_decision 为空或过短，跳过")
 
 
-# 🔥 合规修改：操作建议映射（英文 -> 中文合规术语）
+# 🔥 合规修改：研究结论映射（英文 -> 中文合规术语）
 ACTION_TRANSLATION = {
     'BUY': '看涨', 'SELL': '看跌', 'HOLD': '中性',
     'buy': '看涨', 'sell': '看跌', 'hold': '中性',
@@ -726,8 +740,8 @@ def format_decision(
             logger.warning(f"⚠️ [ReportFormatter] SignalProcessor 处理失败: {e}")
 
     # 获取 action
-    action = decision_raw.get('action', '持有')
-    chinese_action = ACTION_TRANSLATION.get(action, action) if action else '持有'
+    action = decision_raw.get('action', '中性')
+    chinese_action = ACTION_TRANSLATION.get(action, action) if action else '中性'
 
     # 获取 target_price
     target_price = decision_raw.get('target_price')
@@ -916,7 +930,7 @@ def generate_summary_recommendation(
     🔥 重要：summary 和 decision.reasoning 应该有不同的来源和内容
     - summary：从 final_trade_decision 或其他报告中提取分析摘要（前200字符）
     - decision.reasoning：从 final_decision.reasoning 中提取推理过程（简短摘要，前150字符）
-    - recommendation：基于 action、target_price 和简短的推理摘要生成
+    - recommendation：统一收口为研究辅助提示，不生成交易建议
 
     Args:
         reports: 报告字典
@@ -974,35 +988,25 @@ def generate_summary_recommendation(
         summary = f"对{stock_code}的分析已完成，请查看详细报告。"
         logger.warning(f"⚠️ [Summary] 使用备用摘要")
 
-    # 4. 生成 recommendation（投资建议）
+    # 4. 生成 recommendation（统一研究辅助提示）
     logger.info(f"🔍 [generate_summary_recommendation] ========== 生成 recommendation ==========")
     logger.info(f"🔍 [generate_summary_recommendation] decision 字段: {list(decision.keys())}")
     # 🔥 recommendation 应该基于 decision 的 action、target_price 和简短的推理摘要
-    # 注意：这里不使用完整的 reasoning，避免与"分析依据"重复
-    action = decision.get('action', '持有')
-    target_price = decision.get('target_price')
+    # 注意：这里不使用完整的 reasoning，避免与"研究依据"重复
+    action = decision.get('action') or decision.get('analysis_view') or '中性'
     reasoning = decision.get('reasoning', '')
     
     logger.info(f"🔍 [generate_summary_recommendation] decision.action: {action}")
-    logger.info(f"🔍 [generate_summary_recommendation] decision.target_price: {target_price}")
     logger.info(f"🔍 [generate_summary_recommendation] decision.reasoning 长度: {len(reasoning)}, 内容: {reasoning[:200]}")
 
-    recommendation = f"投资建议：{action}。"
-    if target_price:
-        recommendation += f"目标价格：{target_price}元。"
-    # 🔥 如果 reasoning 很短（<100字符），才添加到 recommendation 中，避免重复
-    if reasoning and len(reasoning) < 100:
-        recommendation += f"决策依据：{reasoning}"
-        logger.info(f"🔍 [generate_summary_recommendation] ✅ reasoning 长度 < 100，添加到 recommendation")
-    elif reasoning:
-        # 如果 reasoning 较长，只提取前50字符
-        short_reasoning = reasoning[:50] + "..." if len(reasoning) > 50 else reasoning
-        recommendation += f"决策依据：{short_reasoning}"
-        logger.info(f"🔍 [generate_summary_recommendation] ✅ reasoning 长度 >= 100，只添加前50字符")
+    recommendation = f"研究观点：{action}。请结合详细报告重点关注证据变化、风险因素与后续披露。"
+    if reasoning:
+        short_reasoning = reasoning[:60] + "..." if len(reasoning) > 60 else reasoning
+        recommendation += f" 核心依据：{short_reasoning}"
 
     if not recommendation:
-        recommendation = "请参考详细分析报告做出投资决策。"
-        logger.warning(f"⚠️ [Recommendation] 使用备用建议")
+        recommendation = "请参考详细研究报告，重点关注基本面变化、市场环境与风险因素。"
+        logger.warning(f"⚠️ [Recommendation] 使用备用研究提示")
     
     logger.info(f"🔍 [generate_summary_recommendation] recommendation 最终内容: {recommendation[:300]}")
 
@@ -1189,7 +1193,7 @@ def format_analysis_result(
         "risk_level": risk_level,
         "key_points": [],
 
-        # decision 字段 - 前端显示分析倾向、分析依据等
+        # decision 字段 - 前端显示研究倾向、研究依据等
         "decision": formatted_decision,
 
         # 报告内容 - 包含多头、空头、激进、保守、中性等

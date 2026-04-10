@@ -245,7 +245,7 @@
         <div class="error-container">
           <el-result
             icon="error"
-            title="分析失败"
+            title="复盘失败"
             :sub-title="report.error_message || '未知错误'"
           >
             <template #extra>

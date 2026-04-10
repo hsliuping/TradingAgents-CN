@@ -156,8 +156,8 @@ class RedisProgressTracker:
         for i in range(rounds):
             steps.append(AnalysisStep(f"🎯 研究辩论 第{i+1}轮", "多头空头研究员深度辩论", "pending", debate_weight))
         steps.append(AnalysisStep("👔 研究经理", "综合辩论结果，形成研究共识", "pending", debate_weight))
-        # 4) 交易团队阶段 (8%)
-        steps.append(AnalysisStep("💼 交易员决策", "基于研究结果制定具体交易策略", "pending", 0.08))
+        # 4) 研究整合阶段 (8%)
+        steps.append(AnalysisStep("🧩 研究整合员汇总", "基于研究结果整理研究整合意见与观察清单", "pending", 0.08))
         # 5) 风险管理团队阶段 (15%)
         risk_weight = 0.15 / 4
         steps.extend([

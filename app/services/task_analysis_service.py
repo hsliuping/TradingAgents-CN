@@ -20,7 +20,6 @@ from app.models.user import PyObjectId
 from app.services.unified_analysis_engine import UnifiedAnalysisEngine
 from app.services.workflow_registry import AnalysisWorkflowRegistry
 from app.core.database import get_mongo_db
-from app.utils.compliance import sanitize_analysis_payload
 from app.utils.timezone import now_tz
 
 logger = logging.getLogger(__name__)
@@ -216,10 +215,10 @@ class TaskAnalysisService:
                 task_id=task.task_id,
                 status=TaskStatus.RUNNING,
                 progress=0,
-                message="开始分析...",
+                message="开始研究...",
                 current_step="initialization",
                 current_step_name="初始化",  # 🔑 传递步骤名称
-                current_step_description="开始分析..."  # 🔑 传递步骤描述
+                current_step_description="开始研究..."  # 🔑 传递步骤描述
             )
 
             # 执行任务（引擎会更新 task 对象的状态）
@@ -264,10 +263,10 @@ class TaskAnalysisService:
                 task_id=task.task_id,
                 status=TaskStatus.COMPLETED,
                 progress=100,
-                message="分析完成",
+                message="研究完成",
                 current_step="completed",
                 current_step_name="已完成",  # 🔑 传递步骤名称
-                current_step_description="分析完成",  # 🔑 传递步骤描述
+                current_step_description="研究完成",  # 🔑 传递步骤描述
                 result_data=task.result
             )
 
@@ -750,7 +749,7 @@ class TaskAnalysisService:
                 # 如果有 reasoning，使用它；如果没有，使用 summary
                 reasoning_to_use = ftd_reasoning if ftd_reasoning else ftd_summary
                 if not reasoning_to_use:
-                    reasoning_to_use = "暂无分析推理"
+                    reasoning_to_use = "暂无研究依据"
 
                 # 🔥 提取 price_analysis_range（价格区间）
                 price_analysis_range = final_trade_decision.get("price_analysis_range")
@@ -836,7 +835,7 @@ class TaskAnalysisService:
                     "price_analysis_range": temp_dict.get("price_analysis_range"),  # 🔥 新增：价格区间
                     "confidence": temp_dict.get("confidence", 0.5),
                     "risk_score": temp_dict.get("risk_score", 0.5),
-                    "reasoning": temp_dict.get("reasoning", "暂无分析推理")
+                    "reasoning": temp_dict.get("reasoning", "暂无研究依据")
                 }
                 self.logger.info(f"✅ [TaskAnalysisService] 从 final_trade_decision (文本) 提取决策: action={decision_dict.get('action')}, target_price={decision_dict.get('target_price')}, risk_score={decision_dict.get('risk_score')}, reasoning长度={len(decision_dict.get('reasoning', ''))}")
         
@@ -895,7 +894,7 @@ class TaskAnalysisService:
                 "price_analysis_range": None,  # 🔥 新增：价格区间
                 "confidence": 0.5,
                 "risk_score": 0.5,
-                "reasoning": "暂无分析推理"
+                "reasoning": "暂无研究依据"
             }
             self.logger.warning(f"⚠️ [TaskAnalysisService] 未找到决策信息，使用默认决策")
         
@@ -906,9 +905,9 @@ class TaskAnalysisService:
         import json
         import re
 
-        # 🔥 关键修复：如果 decision_dict.reasoning 是 "暂无分析推理"，尝试从 risk_assessment 或 investment_plan 中提取
+        # 🔥 关键修复：如果 decision_dict.reasoning 是默认占位值，尝试从 risk_assessment 或 investment_plan 中提取
         # ⚠️ 注意：必须在提取报告之前进行，因为提取报告时会将 JSON 转换为 Markdown
-        if decision_dict and decision_dict.get('reasoning') == "暂无分析推理":
+        if decision_dict and decision_dict.get('reasoning') == "暂无研究依据":
             self.logger.info(f"🔍 [TaskAnalysisService] reasoning 为空，尝试从 risk_assessment 或 investment_plan 中提取")
 
             # 1. 优先从 risk_assessment 中提取（综合性的风险评估推理）
@@ -952,7 +951,7 @@ class TaskAnalysisService:
                 self.logger.warning(f"⚠️ [TaskAnalysisService] risk_assessment_raw 为空")
 
             # 2. 如果 risk_assessment 没有 reasoning，才从 investment_plan 中提取
-            if decision_dict.get('reasoning') == "暂无分析推理":
+            if decision_dict.get('reasoning') == "暂无研究依据":
                 self.logger.info(f"🔍 [TaskAnalysisService] risk_assessment 没有 reasoning，尝试从 investment_plan 中提取")
                 investment_plan_raw = raw_result.get("investment_plan", "")
             self.logger.info(f"🔍 [TaskAnalysisService] investment_plan_raw 类型: {type(investment_plan_raw)}, 长度: {len(str(investment_plan_raw)) if investment_plan_raw else 0}")
@@ -994,7 +993,7 @@ class TaskAnalysisService:
                 self.logger.warning(f"⚠️ [TaskAnalysisService] investment_plan_raw 为空")
             
             # 🔥 如果 investment_plan 没有 reasoning，尝试从 final_trade_decision 中提取（作为备选）
-            if decision_dict.get('reasoning') == "暂无分析推理" and final_trade_decision:
+            if decision_dict.get('reasoning') == "暂无研究依据" and final_trade_decision:
                 self.logger.info(f"🔍 [TaskAnalysisService] investment_plan 没有 reasoning，尝试从 final_trade_decision 中提取")
                 try:
                     final_trade_str = str(final_trade_decision)
@@ -1065,10 +1064,10 @@ class TaskAnalysisService:
 
         # 🔑 第一步：从顶层提取标准报告字段
         report_fields = [
-            # 🆕 宏观分析报告（优先提取）
+            # 🆕 宏观研究报告（优先提取）
             'index_report',
             'sector_report',
-            # 个股分析报告
+            # 个股研究报告
             'market_report',
             'sentiment_report',
             'news_report',
@@ -1134,7 +1133,7 @@ class TaskAnalysisService:
                     reports["bear_researcher"] = bear_history.strip()
                     self.logger.info(f"📊 [REPORTS] 提取报告: bear_researcher (来自 investment_debate_state.bear_history) - 长度: {len(bear_history.strip())}")
 
-            # 3. 研究经理分析报告
+            # 3. 研究经理研究报告
             judge_decision = _extract_text(investment_debate.get("judge_decision", ""))
             if judge_decision and len(judge_decision.strip()) > 5:
                 # 🔥 新增：如果是 JSON 格式，转换为 Markdown
@@ -1197,7 +1196,7 @@ class TaskAnalysisService:
 
         # 🔥 生成摘要和建议（与旧引擎保持一致）
         # summary（分析概览）：优先从 LLM 返回的 investment_plan 或 final_trade_decision 中提取完整的 summary，不截取
-        # recommendation（分析观点）：基于 action、price_range 和简短的推理摘要生成
+        # recommendation（研究结论）：基于 action、price_range 和简短的推理摘要生成
         # decision.reasoning（分析依据）：从 decision_dict.reasoning 中提取（不应该从 final_trade_decision 提取）
         
         self.logger.info(f"🔍 [TaskAnalysisService] ========== 生成 summary 和 recommendation ==========")
@@ -1267,10 +1266,10 @@ class TaskAnalysisService:
         
         # 1.5 最后的备用方案
         if not summary:
-            summary = f"对{task.task_params.get('symbol', '股票')}的分析已完成，请查看详细报告。"
+            summary = f"对{task.task_params.get('symbol', '股票')}的研究已完成，请查看详细报告。"
             self.logger.warning(f"⚠️ [TaskAnalysisService] 使用备用 summary")
         
-        # 4. 生成 recommendation（分析观点）- 基于 action、price_range 和简短的推理摘要生成
+        # 4. 生成 recommendation（研究结论）- 基于 action 和简短的推理摘要生成
         # 🔥 合规修改：使用新术语，先格式化 decision_dict 以确保 action 是合规术语
         temp_formatted_decision = self._format_decision_dict(decision_dict)
         action = temp_formatted_decision.get('action', '中性')
@@ -1280,22 +1279,22 @@ class TaskAnalysisService:
         # 构建 recommendation（不包含具体价格和操作建议）
         recommendation_parts = []
 
-        # 只包含分析观点，不包含具体价格
+        # 只包含研究结论，不包含具体价格
         if action and action != '中性':
-            recommendation_parts.append(f"分析观点：{action}")
+            recommendation_parts.append(f"研究结论：{action}")
 
         # 🔥 如果 reasoning 很短（<100字符），才添加到 recommendation 中，避免重复
-        if reasoning and len(reasoning) < 100 and reasoning != "暂无分析推理":
-            recommendation_parts.append(f"分析依据：{reasoning}")
-        elif reasoning and reasoning != "暂无分析推理":
+        if reasoning and len(reasoning) < 100 and reasoning != "暂无研究依据":
+            recommendation_parts.append(f"研究依据：{reasoning}")
+        elif reasoning and reasoning != "暂无研究依据":
             # 如果 reasoning 较长，只提取前50字符
             short_reasoning = reasoning[:50] + "..." if len(reasoning) > 50 else reasoning
-            recommendation_parts.append(f"分析依据：{short_reasoning}")
+            recommendation_parts.append(f"研究依据：{short_reasoning}")
 
-        recommendation = "；".join(recommendation_parts) if recommendation_parts else "请参考详细分析报告。"
+        recommendation = "；".join(recommendation_parts) if recommendation_parts else "请参考详细研究报告。"
 
-        if not recommendation or recommendation == "分析观点：中性":
-            recommendation = "请参考详细分析报告。"
+        if not recommendation or recommendation == "研究结论：中性":
+            recommendation = "请参考详细研究报告。"
             self.logger.warning(f"⚠️ [TaskAnalysisService] 使用备用 recommendation")
         
         self.logger.info(f"🔍 [TaskAnalysisService] summary 长度: {len(summary)}, 内容: {summary[:200]}")
@@ -1318,7 +1317,7 @@ class TaskAnalysisService:
 
         # 🔥 提取关键要点（从 reasoning 或 summary 中提取）
         key_points = []
-        if reasoning and reasoning != "暂无分析推理":
+        if reasoning and reasoning != "暂无研究依据":
             # 尝试从 reasoning 中提取关键点（按行分割）
             lines = [line.strip() for line in reasoning.split('\n') if line.strip()]
             # 过滤掉太短的行（<10字符）和标题行（以#开头）
@@ -1375,8 +1374,8 @@ class TaskAnalysisService:
             "stock_symbol": task.task_params.get("symbol") or task.task_params.get("stock_code"),
             "stock_code": task.task_params.get("stock_code") or task.task_params.get("symbol"),
             "analysis_date": task.task_params.get("analysis_date") or datetime.now().strftime("%Y-%m-%d"),
-            "summary": summary or "分析完成",
-            "recommendation": recommendation or "请查看详细报告",
+            "summary": summary or "研究完成",
+            "recommendation": recommendation or "请查看详细研究报告",
             "confidence_score": formatted_decision.get("confidence", 0.5),
             "risk_level": risk_level,
             "key_points": key_points,  # 🔥 关键要点（从 reasoning 或 summary 中提取）
@@ -1394,11 +1393,8 @@ class TaskAnalysisService:
             "deep_model": deep_model,  # 🔥 关键：深度模型
         }
 
-        # 🔥 调试日志：打印 decision 对象的完整内容
-        formatted_result = sanitize_analysis_payload(formatted_result)
-
         self.logger.info(f"✅ 格式化结果完成: {len(formatted_result.get('reports', {}))} 个报告")
-        self.logger.info(f"🔍 [TaskAnalysisService] 合规化后 decision: {formatted_result.get('decision')}")
+        self.logger.info(f"🔍 [TaskAnalysisService] 原始 decision: {formatted_result.get('decision')}")
         return formatted_result
 
     def _format_decision_dict(self, decision: Dict[str, Any]) -> Dict[str, Any]:
@@ -1446,7 +1442,7 @@ class TaskAnalysisService:
         # 不应该从 final_trade_decision 中提取，因为 final_trade_decision 会被用于生成 summary
         reasoning = decision.get('reasoning', '') or decision.get('rationale', '')
         if not reasoning:
-            reasoning = '暂无分析推理'
+            reasoning = '暂无研究依据'
         
         self.logger.info(f"🔍 [TaskAnalysisService._format_decision_dict] decision 字段: {list(decision.keys())}")
         self.logger.info(f"🔍 [TaskAnalysisService._format_decision_dict] reasoning 长度: {len(reasoning)}, 内容: {reasoning[:200]}")
@@ -1687,7 +1683,7 @@ class TaskAnalysisService:
         
         # 3. 如果还是没有，使用默认值
         if not reasoning or len(reasoning.strip()) < 10:
-            reasoning = "请参考详细分析报告。"
+            reasoning = "请参考详细研究报告。"
             self.logger.warning(f"⚠️ [TaskAnalysisService._extract_decision_from_text] reasoning 为空或太短，使用默认值")
         
         self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] ========== 最终 reasoning ==========")
@@ -1780,11 +1776,11 @@ class TaskAnalysisService:
             decision = result.get("decision", {})
             recommendation = result.get("recommendation", "")
             if not recommendation and decision.get("action"):
-                # 🔥 合规修改：使用"分析观点"替代"投资建议"，不包含具体价格
-                recommendation = f"分析观点：{decision.get('action')}；"
+                # 🔥 合规修改：使用研究结论表述，不包含具体价格
+                recommendation = f"研究结论：{decision.get('action')}；"
                 if decision.get("reasoning"):
                     reasoning = decision.get("reasoning", "")[:200]
-                    recommendation += f"分析依据：{reasoning}"
+                    recommendation += f"研究依据：{reasoning}"
 
             confidence_score = result.get("confidence_score", 0.0)
             if confidence_score == 0.0 and decision.get("confidence"):
@@ -1990,7 +1986,7 @@ class TaskAnalysisService:
         task: UnifiedAnalysisTask,
         formatted_result: Dict[str, Any]
     ) -> None:
-        """发送分析完成邮件通知
+        """发送研究完成邮件通知
         
         Args:
             task: 任务对象
@@ -2019,7 +2015,7 @@ class TaskAnalysisService:
                 # 尝试从 decision.reasoning 中提取关键点
                 decision = formatted_result.get("decision", {})
                 reasoning = decision.get("reasoning", "")
-                if reasoning and reasoning != "暂无分析推理":
+                if reasoning and reasoning != "暂无研究依据":
                     # 简单提取：按句号分割，取前3条
                     sentences = [s.strip() for s in reasoning.split("。") if s.strip()]
                     key_points = sentences[:3]
@@ -2051,7 +2047,7 @@ class TaskAnalysisService:
                         
                         pdf_content = report_exporter.generate_pdf_report(report_doc)
                         if pdf_content:
-                            filename = f"{stock_code}_{analysis_date}_分析报告.pdf"
+                            filename = f"{stock_code}_{analysis_date}_研究报告.pdf"
                             attachments = [(filename, pdf_content, "application/pdf")]
                             self.logger.info(f"📄 已生成 PDF 报告: {filename} ({len(pdf_content)} bytes)")
             except Exception as pdf_err:
@@ -2076,7 +2072,7 @@ class TaskAnalysisService:
                 reference_id=task.task_id,
                 attachments=attachments  # 附带 PDF 报告
             )
-            self.logger.info(f"📧 已尝试发送分析完成邮件: {task.task_id}")
+            self.logger.info(f"📧 已尝试发送研究完成邮件: {task.task_id}")
         except Exception as e:
             # 邮件发送失败不应该影响任务完成，只记录警告
             self.logger.warning(f"⚠️ 发送邮件通知失败(忽略): {e}", exc_info=True)

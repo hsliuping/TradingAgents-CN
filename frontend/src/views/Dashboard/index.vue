@@ -68,8 +68,8 @@
                 <el-icon><Document /></el-icon>
               </div>
               <div class="action-content">
-                <h3>单股分析</h3>
-                <p>深度分析单只股票的投资价值</p>
+                <h3>单股研究</h3>
+                <p>深度整理单只股票的研究线索、证据与风险</p>
               </div>
               <el-icon class="action-arrow"><ArrowRight /></el-icon>
             </div>
@@ -112,8 +112,8 @@
                 <el-icon><PieChart /></el-icon>
               </div>
               <div class="action-content">
-                <h3>持仓分析</h3>
-                <p>分析当前持仓的投资价值</p>
+                <h3>持仓研究</h3>
+                <p>分析当前持仓的研究状态与风险变化</p>
               </div>
               <el-icon class="action-arrow"><ArrowRight /></el-icon>
             </div>
@@ -561,8 +561,8 @@ const downloadReport = async (analysis: AnalysisTask) => {
     a.href = url
     const code = (analysis as any).stock_code || (analysis as any).stock_symbol || 'stock'
     const dateStr = (analysis as any).analysis_date || (analysis as any).start_time || ''
-    // 🔥 统一文件名格式：{code}_分析报告_{date}.md
-    a.download = `${code}_分析报告_${String(dateStr).slice(0,10)}.md`
+    // 🔥 统一文件名格式：{code}_研究报告_{date}.md
+    a.download = `${code}_研究报告_${String(dateStr).slice(0,10)}.md`
     document.body.appendChild(a)
     a.click()
     window.URL.revokeObjectURL(url)
@@ -664,7 +664,7 @@ const loadRecentAnalyses = async () => {
     userStats.value.totalAnalyses = allTasks.length
     userStats.value.successfulAnalyses = allTasks.filter((item: any) => item.status === 'completed').length
   } catch (error) {
-    console.error('加载最近分析失败:', error)
+    console.error('加载最近研究失败:', error)
     recentAnalyses.value = []
   }
 }

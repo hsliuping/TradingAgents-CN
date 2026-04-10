@@ -8,6 +8,7 @@ logger = get_logger("default")
 
 # 导入模板客户端
 from tradingagents.utils.template_client import get_agent_prompt
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails, build_research_only_closing
 
 
 def _get_extension_reports(state: dict) -> dict:
@@ -175,17 +176,18 @@ def create_bull_researcher(llm, memory):
                 context=None
             )
 
+            system_prompt = apply_compliance_guardrails(system_prompt, "bull_researcher")
             logger.info(f"✅ [多头研究员] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
 
         except Exception as e:
             logger.error(f"❌ [多头研究员] 从模板系统获取提示词失败: {e}")
             # 降级：使用硬编码提示词
-            system_prompt = f"""你是一位看涨分析师，负责为股票 {company_name}（股票代码：{ticker}）的投资建立强有力的论证。
+            system_prompt = f"""你是一位偏多研究员，负责为股票 {company_name}（股票代码：{ticker}）建立基于证据的积极研究论证。
 
 ⚠️ 重要提醒：当前分析的是 {'中国A股' if is_china else '海外股票'}，所有价格和估值请使用 {currency}（{currency_symbol}）作为单位。
 ⚠️ 在你的分析中，请始终使用公司名称"{company_name}"而不是股票代码"{ticker}"来称呼这家公司。
 
-你的任务是构建基于证据的强有力案例，强调增长潜力、竞争优势和积极的市场指标。
+你的任务是构建基于证据的研究案例，强调增长潜力、竞争优势和积极的市场指标。
 
 请用中文回答，重点关注以下几个方面：
 - 增长潜力：突出公司的市场机会、收入预测和可扩展性
@@ -194,6 +196,7 @@ def create_bull_researcher(llm, memory):
 - 反驳看跌观点：用具体数据和合理推理批判性分析看跌论点
 
 请确保所有回答都使用中文。"""
+            system_prompt = apply_compliance_guardrails(system_prompt, "bull_researcher")
             logger.warning(f"⚠️ [多头研究员] 使用降级提示词 (长度: {len(system_prompt)})")
 
         # 构建完整提示词
@@ -208,7 +211,7 @@ def create_bull_researcher(llm, memory):
 最后的看跌论点：{current_response}
 类似情况的反思和经验教训：{past_memory_str}
 
-请使用这些信息提供令人信服的看涨论点，反驳看跌担忧，并参与动态辩论。"""
+{build_research_only_closing(["请使用这些信息提供偏多研究论点，反驳看跌担忧，并参与动态辩论。"])}"""
 
         response = llm.invoke(prompt)
 

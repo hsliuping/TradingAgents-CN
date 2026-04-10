@@ -1,5 +1,5 @@
 """
-分析报告管理API路由
+研究报告管理 API 路由
 """
 import os
 import json
@@ -98,6 +98,42 @@ def _build_report_query(report_id: str) -> Dict[str, Any]:
         pass
     return {"$or": ors}
 
+
+def _rebuild_report_modules(raw_result: Dict[str, Any], existing_reports: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """从任务原始结果中尽可能还原完整报告模块。"""
+    rebuilt_reports: Dict[str, Any] = {}
+
+    if isinstance(existing_reports, dict):
+        for key, value in existing_reports.items():
+            if key == "structured_reports":
+                continue
+            if isinstance(value, str) and value.strip():
+                rebuilt_reports[key] = value.strip()
+            elif value is not None:
+                text_value = str(value).strip()
+                if text_value:
+                    rebuilt_reports[key] = text_value
+
+    if not isinstance(raw_result, dict):
+        return rebuilt_reports
+
+    try:
+        from app.utils.report_formatter import extract_reports_from_state
+
+        extracted_from_result = extract_reports_from_state(raw_result)
+        if len(extracted_from_result) > len(rebuilt_reports):
+            rebuilt_reports.update(extracted_from_result)
+
+        state = raw_result.get("state")
+        if state:
+            extracted_from_state = extract_reports_from_state(state)
+            if len(extracted_from_state) > len(rebuilt_reports):
+                rebuilt_reports.update(extracted_from_state)
+    except Exception as e:
+        logger.warning(f"⚠️ 还原完整报告模块失败: {e}")
+
+    return rebuilt_reports
+
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 class ReportFilter(BaseModel):
@@ -127,7 +163,7 @@ async def get_reports_list(
     stock_code: Optional[str] = Query(None, description="股票代码"),
     user: dict = Depends(get_current_user)
 ):
-    """获取分析报告列表"""
+    """获取研究报告列表"""
     try:
         logger.info(f"🔍 获取报告列表: 用户={user['id']}, 页码={page}, 每页={page_size}, 市场={market_filter}")
 
@@ -199,12 +235,12 @@ async def get_reports_list(
             report = {
                 "id": str(doc["_id"]),
                 "analysis_id": doc.get("analysis_id", ""),
-                "title": f"{stock_name}({stock_code}) 分析报告",
+                "title": f"{stock_name}({stock_code}) 研究报告",
                 "stock_code": stock_code,
                 "stock_name": stock_name,
                 "market_type": market_type,  # 🔥 添加市场类型字段
                 "model_info": doc.get("model_info", "Unknown"),  # 🔥 添加模型信息字段
-                "type": "single",  # 目前主要是单股分析
+                "type": "single",  # 目前主要是单股研究
                 "format": "markdown",  # 主要格式
                 "status": doc.get("status", "completed"),
                 "created_at": created_at_tz.isoformat() if created_at_tz else str(created_at),
@@ -312,14 +348,8 @@ async def get_report_detail(
             if not stock_name:
                 stock_name = get_stock_name(stock_symbol)
 
-            # 🔥 清理 reports 中的重复数据（如果存在）
             reports_raw = r.get("reports", {})
-            cleaned_reports = {}
-            if isinstance(reports_raw, dict):
-                for key, value in reports_raw.items():
-                    # 跳过 structured_reports（如果存在，避免重复）
-                    if key != "structured_reports":
-                        cleaned_reports[key] = value
+            cleaned_reports = _rebuild_report_modules(r, reports_raw)
             
             report = {
                 "id": tasks_doc.get("task_id", report_id),
@@ -366,14 +396,8 @@ async def get_report_detail(
             created_at_tz = to_config_tz(created_at)
             updated_at_tz = to_config_tz(updated_at)
 
-            # 🔥 清理 reports 中的重复数据（如果存在）
             reports_raw = doc.get("reports", {})
-            cleaned_reports = {}
-            if isinstance(reports_raw, dict):
-                for key, value in reports_raw.items():
-                    # 跳过 structured_reports（如果存在，避免重复）
-                    if key != "structured_reports":
-                        cleaned_reports[key] = value
+            cleaned_reports = _rebuild_report_modules(doc, reports_raw)
             
             report = {
                 "id": str(doc["_id"]),
@@ -400,31 +424,32 @@ async def get_report_detail(
                 "decision": doc.get("decision", {})  # 🔥 添加 decision 字段用于格式化
             }
             
-            # 🔥 可选字段：根据查询参数决定是否包含
-            if include_state or include_detailed:
-                # 从 analysis_tasks.result 获取完整数据（如果存在）
-                tasks_doc = await db.analysis_tasks.find_one(
-                    {"task_id": doc.get("task_id", report_id)},
+            tasks_doc = None
+            task_id = doc.get("task_id", report_id)
+            if task_id:
+                tasks_doc = await db.unified_analysis_tasks.find_one(
+                    {"task_id": task_id},
                     {"result": 1}
                 )
-                if tasks_doc and tasks_doc.get("result"):
-                    result = tasks_doc["result"]
-                    if include_state:
-                        report["state"] = result.get("state", {})
-                    if include_detailed:
-                        report["detailed_analysis"] = result.get("detailed_analysis", {})
+                if not tasks_doc:
+                    tasks_doc = await db.analysis_tasks.find_one(
+                        {"task_id": task_id},
+                        {"result": 1}
+                    )
 
-            # 🔥 统一格式化结果数据
-            from app.routers.analysis import normalize_result_data
-            logger.info(f"📊 [REPORT] ========== 格式化前 ==========")
-            logger.info(f"📊 [REPORT] recommendation: {report.get('recommendation', '')[:200]}")
-            logger.info(f"📊 [REPORT] key_points: {report.get('key_points', [])[:3]}")
+            if tasks_doc and tasks_doc.get("result"):
+                result = tasks_doc["result"]
+                rebuilt_from_task = _rebuild_report_modules(result, cleaned_reports)
+                if len(rebuilt_from_task) > len(cleaned_reports):
+                    cleaned_reports = rebuilt_from_task
+                    report["reports"] = cleaned_reports
 
-            report = normalize_result_data(report)
+                if include_state:
+                    report["state"] = result.get("state", {})
+                if include_detailed:
+                    report["detailed_analysis"] = result.get("detailed_analysis", {})
 
-            logger.info(f"📊 [REPORT] ========== 格式化后 ==========")
-            logger.info(f"📊 [REPORT] recommendation: {report.get('recommendation', '')[:200]}")
-            logger.info(f"📊 [REPORT] key_points: {report.get('key_points', [])[:3]}")
+            logger.info("📊 [REPORT] 保留报告原始内容返回，跳过读取时压缩")
 
         return {
             "success": True,
@@ -562,15 +587,15 @@ async def download_report(
             content_parts = []
 
             # 添加标题
-            content_parts.append(f"# {stock_symbol} 分析报告")
-            content_parts.append(f"**分析日期**: {analysis_date}")
+            content_parts.append(f"# {stock_symbol} 研究报告")
+            content_parts.append(f"**研究日期**: {analysis_date}")
             content_parts.append(f"**分析师**: {', '.join(doc.get('analysts', []))}")
             content_parts.append(f"**研究深度**: {doc.get('research_depth', 1)}")
             content_parts.append("")
 
             # 添加摘要
             if doc.get("summary"):
-                content_parts.append("## 执行摘要")
+                content_parts.append("## 研究摘要")
                 content_parts.append(doc["summary"])
                 content_parts.append("")
 

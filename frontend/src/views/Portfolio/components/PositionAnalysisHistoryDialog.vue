@@ -1,18 +1,18 @@
 <template>
   <el-dialog
     v-model="visible"
-    :title="`${position?.name || position?.code || ''} - 分析历史`"
+    :title="`${position?.name || position?.code || ''} - 研究历史`"
     width="1000px"
     :close-on-click-modal="false"
     @close="handleClose"
   >
     <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px">
-      查看该股票的所有分析报告历史记录
+      查看该股票的所有研究报告历史记录
     </el-alert>
 
     <!-- 数据表格 -->
     <el-table :data="historyList" v-loading="loading" stripe>
-      <el-table-column label="分析时间" width="160">
+      <el-table-column label="研究时间" width="160">
         <template #default="{ row }">
           {{ formatTime(row.created_at) }}
         </template>

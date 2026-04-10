@@ -239,7 +239,7 @@ class AnalysisService:
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
             # 生成报告
-            progress_tracker.update_progress("📊 生成分析报告")
+            progress_tracker.update_progress("📊 生成研究报告")
 
             # 从决策中提取模型信息
             model_info = decision.get('model_info', 'Unknown') if isinstance(decision, dict) else 'Unknown'
@@ -419,7 +419,7 @@ class AnalysisService:
                 )
 
             # 标记完成
-            progress_tracker.mark_completed("✅ 分析完成")
+            progress_tracker.mark_completed("✅ 研究完成")
             await self._update_task_status_with_tracker(task.task_id, AnalysisStatus.COMPLETED, progress_tracker, result)
 
             # 记录 token 使用
@@ -767,7 +767,7 @@ class AnalysisService:
             )
 
             if progress_callback:
-                progress_callback(100, "分析完成")
+                progress_callback(100, "研究完成")
 
             # 更新任务状态
             await self._update_task_status(task.task_id, AnalysisStatus.COMPLETED, 100, result)

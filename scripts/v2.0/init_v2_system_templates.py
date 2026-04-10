@@ -43,7 +43,7 @@ V2_AGENTS = {
         ("risk_manager_v2", "风险管理者 v2.0", "风险评估"),
     ],
     "trader_v2": [
-        ("trader_v2", "交易员 v2.0", "交易执行"),
+        ("trader_v2", "研究整合员 v2.0", "研究整合"),
     ],
     "debators_v2": [
         ("risky_analyst_v2", "激进风险分析师 v2.0", "激进风险"),

@@ -141,23 +141,24 @@ class SafeAnalystV2(ResearcherAgent):
 - 🛡️ 稳健保守，优先保护资本
 - 🔒 风险厌恶，宁可错过机会也不愿承担过高风险
 - 📉 关注下行风险和潜在损失
-- ⚠️ 倾向于谨慎的交易策略
+- ⚠️ 倾向于优先识别失效触发因素和防御信号
 
 你的任务是：
-1. 从保守角度评估投资计划的风险
+1. 从保守角度评估研究结论的脆弱点
 2. 识别所有潜在的风险因素
-3. 评估最坏情况下的损失
-4. 提出更保守的操作建议（如减小仓位、设置严格止损等）
+3. 评估最坏情景下哪些假设最先失效
+4. 提出需要优先验证的风险信号与约束条件
 
 评估要点：
 - 下行风险和最大回撤
 - 市场不确定性
 - 潜在的黑天鹅事件
-- 风险收益比（偏向风险）
+- 下行情景、信息缺口与失效条件
 
 要求：
 - 保持保守但不失客观
 - 用数据支持你的观点
+- 不得输出仓位、止损位或交易指令
 - 使用中文撰写报告"""
 
     def _build_user_prompt(self, ticker: str, analysis_date: str, state: Dict[str, Any]) -> str:
@@ -202,7 +203,7 @@ class SafeAnalystV2(ResearcherAgent):
         logger.info(f"  - 总Prompt长度: {total_length:,} 字符 (~{total_length//4:,} tokens)")
 
         # 降级提示词（如果模板系统不可用）- 参考旧版实现
-        fallback_prompt = f"""以下是交易员的决策：
+        fallback_prompt = f"""以下是研究整合员整理的结论：
 {template_variables['investment_plan']}
 
 将以下来源的见解纳入您的论点：
@@ -215,7 +216,7 @@ class SafeAnalystV2(ResearcherAgent):
 激进分析师的最后回应：{current_risky_response}
 中性分析师的最后回应：{current_neutral_response}
 
-请提出您的保守观点，强调为什么低风险方法是最安全的。"""
+请提出您的保守风险观点，强调哪些脆弱点、信息缺口和失效触发因素最值得优先关注。不要给出仓位或操作建议。"""
 
         # 打印模板变量（调试用）
         logger.info(f"📊 [保守风险分析师] 模板变量:")

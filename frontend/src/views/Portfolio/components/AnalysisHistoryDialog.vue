@@ -1,13 +1,13 @@
 <template>
   <el-dialog
     v-model="visible"
-    title="📊 持仓分析历史"
+    title="📊 持仓研究历史"
     width="1000px"
     :close-on-click-modal="false"
     @close="handleClose"
   >
     <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px">
-      查看所有持仓分析报告的历史记录
+      查看所有持仓研究报告的历史记录
     </el-alert>
 
     <!-- 数据表格 -->

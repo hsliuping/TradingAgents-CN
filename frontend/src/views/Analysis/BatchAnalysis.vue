@@ -18,14 +18,14 @@
             >
               <template #title>
                 <span style="font-size: 14px;">
-                  <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。
+                  <strong>⚠️ 重要提示：</strong>本次分析仅用于学习、研究和公开信息整理，不提供个股交易指导。
                 </span>
               </template>
             </el-alert>
           </div>
           
           <p class="page-description">
-            AI驱动的批量股票分析，高效处理多只股票
+            AI驱动的批量研究工作台，高效整理多只股票的研究线索
           </p>
         </div>
       </div>

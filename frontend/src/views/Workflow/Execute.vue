@@ -405,7 +405,7 @@ const startPollingTaskStatus = () => {
         }
 
         executing.value = false
-        ElMessage.success('分析完成！')
+        ElMessage.success('研究完成！')
       }
 
       // 任务失败

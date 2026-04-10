@@ -413,7 +413,7 @@ const viewResult = (task: any) => {
 }
 
 const downloadReport = (task: any) => {
-  ElMessage.success(`正在下载 ${task.stock_name} 的分析报告`)
+  ElMessage.success(`正在下载 ${task.stock_name} 的研究报告`)
 }
 
 const retryAnalysis = (task: any) => {

@@ -2,7 +2,7 @@
   <div class="learning-center">
     <div class="learning-header">
       <h1>📚 学习中心</h1>
-      <p class="subtitle">了解AI、大模型和智能股票分析</p>
+      <p class="subtitle">了解 AI、大模型与多智能体投研研究流程</p>
     </div>
 
     <el-row :gutter="20" class="learning-categories">

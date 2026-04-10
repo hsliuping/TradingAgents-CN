@@ -17,7 +17,7 @@ from ..models import (
 V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
     id="v2_stock_analysis",
     name="v2.0 完整分析流",
-    description="基于v2.0 Agent架构的完整多智能体协作分析流程。包含6个专业分析师（大盘、板块、市场、基本面、新闻、社交媒体）并行分析，2个研究员（看多/看空）进行多轮辩论，研究经理综合评估，交易员制定策略，风险经理把控风险。",
+    description="基于v2.0 Agent架构的单股研究分析流程。包含6个专业分析师并行收集证据，2个研究员围绕核心论点展开辩论，研究经理形成平衡研究结论，研究整合员整理用户可读的整合意见，风险团队补充情景与约束，最终由风险经理给出风险治理结论与后续观察清单。",
     version="2.0.0",
     is_template=True,
     tags=["v2.0", "完整分析", "多智能体", "辩论机制"],
@@ -37,7 +37,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             type=NodeType.PARALLEL,
             label="并行分析开始",
             position=Position(x=400, y=80),
-            config={"description": "6个v2.0分析师同时分析不同维度的数据"},
+            config={"description": "6个v2.0分析师并行分析宏观、行业、价格、财务、新闻与情绪证据"},
         ),
 
         # 🆕 宏观分析师（优先位置）
@@ -47,7 +47,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             agent_id="index_analyst_v2",
             label="大盘分析师 v2.0",
             position=Position(x=50, y=160),
-            config={"focus": "大盘指数走势、市场环境、系统性风险"},
+            config={"focus": "市场环境、流动性条件、系统性风险与关键宏观信号"},
         ),
         NodeDefinition(
             id="sector_analyst_v2",
@@ -55,7 +55,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             agent_id="sector_analyst_v2",
             label="板块分析师 v2.0",
             position=Position(x=200, y=160),
-            config={"focus": "行业趋势、板块轮动、同业对比"},
+            config={"focus": "行业景气度、竞争格局、板块轮动与同业对比"},
         ),
 
         # 个股分析师
@@ -65,7 +65,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             agent_id="market_analyst_v2",
             label="市场分析师 v2.0",
             position=Position(x=350, y=160),
-            config={"focus": "价格走势、技术指标、成交量"},
+            config={"focus": "价格行为、趋势状态、波动结构与关键观察区间"},
         ),
         NodeDefinition(
             id="fundamentals_analyst_v2",
@@ -73,7 +73,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             agent_id="fundamentals_analyst_v2",
             label="基本面分析师 v2.0",
             position=Position(x=500, y=160),
-            config={"focus": "财务报表、估值指标、盈利能力"},
+            config={"focus": "财务质量、估值背景、盈利能力与资产负债结构"},
         ),
         NodeDefinition(
             id="news_analyst_v2",
@@ -81,7 +81,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             agent_id="news_analyst_v2",
             label="新闻分析师 v2.0",
             position=Position(x=650, y=160),
-            config={"focus": "财经新闻、公告、行业动态"},
+            config={"focus": "公告、新闻事件、监管动向与催化持续性"},
         ),
         NodeDefinition(
             id="social_analyst_v2",
@@ -89,7 +89,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             agent_id="social_analyst_v2",
             label="社交媒体分析师 v2.0",
             position=Position(x=800, y=160),
-            config={"focus": "社交媒体情绪、舆论热度"},
+            config={"focus": "市场情绪、讨论热度、情绪背离与噪音识别"},
         ),
 
         # 合并分析结果
@@ -98,7 +98,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             type=NodeType.MERGE,
             label="汇总分析结果",
             position=Position(x=400, y=240),
-            config={"description": "收集所有v2.0分析师的报告，准备进入辩论阶段"},
+            config={"description": "收集所有分析师证据，进入多空研究辩论阶段"},
         ),
 
         # === 阶段3: 多空辩论（核心创新点）===
@@ -110,7 +110,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             config={
                 "rounds": "auto",
                 "rounds_ref": "config.depth_rounds_mapping.{analysis_depth}.debate",
-                "description": "v2.0看多和看空研究员基于分析报告进行多轮辩论",
+                "description": "看多与看空研究员围绕研究证据、假设前提和失效条件进行多轮辩论",
                 "participants": ["bull_researcher_v2", "bear_researcher_v2"],
             },
         ),
@@ -121,7 +121,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             agent_id="bull_researcher_v2",
             label="看多研究员 v2.0",
             position=Position(x=250, y=400),
-            config={"stance": "bullish", "focus": "寻找买入理由和上涨潜力"},
+            config={"stance": "bullish", "focus": "构建偏多论点，说明成立前提、证据链与潜在催化"},
         ),
 
         NodeDefinition(
@@ -130,7 +130,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             agent_id="bear_researcher_v2",
             label="看空研究员 v2.0",
             position=Position(x=550, y=400),
-            config={"stance": "bearish", "focus": "识别风险和下跌因素"},
+            config={"stance": "bearish", "focus": "构建偏空论点，识别脆弱点、反向证据与失效条件"},
         ),
 
         # === 阶段4: 研究经理综合评估 ===
@@ -140,17 +140,17 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             agent_id="research_manager_v2",
             label="研究经理 v2.0",
             position=Position(x=400, y=480),
-            config={"role": "综合看多看空观点，做出投资决策"},
+            config={"role": "综合多空证据，形成平衡研究结论、关键分歧与观察重点"},
         ),
 
-        # === 阶段5: 交易员（先制定初步计划）===
+        # === 阶段5: 研究整合员（先汇总初步结论）===
         NodeDefinition(
             id="trader_v2",
             type=NodeType.TRADER,
             agent_id="trader_v2",
-            label="交易员 v2.0",
+            label="研究整合员 v2.0",
             position=Position(x=400, y=560),
-            config={"role": "根据研究结论制定初步交易计划"},
+            config={"role": "将研究结论整理为用户可读的整合意见、情景框架与观察清单"},
         ),
 
         # === 阶段6: 风险辩论（3个风险分析师辩论）===
@@ -162,7 +162,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             config={
                 "rounds": "auto",
                 "rounds_ref": "config.depth_rounds_mapping.{analysis_depth}.risk",
-                "description": "激进、保守、中性三个风险分析师从不同角度评估交易计划",
+                "description": "激进、保守、中性三个风险分析师从不同情景与风险承受框架审阅研究结论",
                 "participants": ["risky_analyst_v2", "safe_analyst_v2", "neutral_analyst_v2"],
             },
         ),
@@ -173,7 +173,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             agent_id="risky_analyst_v2",
             label="激进分析师 v2.0 🔥",
             position=Position(x=200, y=720),
-            config={"role": "risky", "focus": "寻求高收益机会，容忍较高风险"},
+            config={"role": "risky", "focus": "强调上行情景、弹性来源与需要同时满足的高风险假设"},
         ),
 
         NodeDefinition(
@@ -182,7 +182,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             agent_id="safe_analyst_v2",
             label="保守分析师 v2.0 🛡️",
             position=Position(x=400, y=720),
-            config={"role": "safe", "focus": "优先考虑资本保护，规避风险"},
+            config={"role": "safe", "focus": "强调下行情景、脆弱环节与应优先验证的风险来源"},
         ),
 
         NodeDefinition(
@@ -191,7 +191,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             agent_id="neutral_analyst_v2",
             label="中性分析师 v2.0 ⚖️",
             position=Position(x=600, y=720),
-            config={"role": "neutral", "focus": "平衡收益与风险，寻求最优解"},
+            config={"role": "neutral", "focus": "比较不同情景概率、证据质量与风险收益不对称性"},
         ),
 
         # === 阶段7: 风险经理（裁决）===
@@ -201,7 +201,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             agent_id="risk_manager_v2",
             label="风险经理 v2.0",
             position=Position(x=400, y=800),
-            config={"role": "综合三方风险观点，形成最终风险评估和调整建议"},
+            config={"role": "综合三方风险观点，形成风险治理结论、约束条件与后续观察要求"},
         ),
 
         # === 阶段8: 结束 ===

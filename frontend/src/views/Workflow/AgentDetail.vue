@@ -628,7 +628,7 @@ const publishingTemplate = ref(false) // 发布模板中
 const categoryMap: Record<string, string> = {
   analyst: '分析师',
   researcher: '研究员',
-  trader: '交易员',
+  trader: '研究整合员',
   risk: '风控管理',
   manager: '管理者',
   post_processor: '后处理器'
@@ -675,11 +675,11 @@ const goBack = () => {
   router.back()
 }
 
-// 判断是否可以调试提示词（仅单股分析的六个分析师）
+// 判断是否可以调试提示词（仅单股研究的六个分析师）
 const canDebugPrompt = computed(() => {
   if (!agent.value?.id) return false
 
-  // 单股分析的六个 v2.0 分析师
+  // 单股研究的六个 v2.0 分析师
   const singleStockAnalysts = [
     'fundamentals_analyst_v2',  // 基本面分析师
     'market_analyst_v2',         // 市场分析师

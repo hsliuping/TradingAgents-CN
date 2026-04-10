@@ -940,7 +940,7 @@ class SimpleAnalysisService:
             return {
                 "task_id": task.task_id,
                 "status": task.status,
-                "message": "分析完成" if task.status == "completed" else "分析失败",
+                "message": "研究完成" if task.status == "completed" else "研究失败",
                 "result": task.result,
                 "execution_time": task.execution_time,
                 "error_message": task.error_message
@@ -1067,7 +1067,7 @@ class SimpleAnalysisService:
                 progress_tracker.update_progress,
                 {
                     "progress_percentage": 10,
-                    "last_message": "🚀 开始股票分析"
+                    "last_message": "🚀 开始股票研究"
                 }
             )
 
@@ -1076,7 +1076,7 @@ class SimpleAnalysisService:
                 task_id=task_id,
                 status=TaskStatus.RUNNING,
                 progress=10,
-                message="分析开始...",
+                message="研究开始...",
                 current_step="initialization"
             )
 
@@ -1095,7 +1095,7 @@ class SimpleAnalysisService:
                 task_id=task_id,
                 status=TaskStatus.RUNNING,
                 progress=20,
-                message="准备分析数据...",
+                message="准备研究数据...",
                 current_step="data_preparation"
             )
 
@@ -1128,7 +1128,7 @@ class SimpleAnalysisService:
                 task_id=task_id,
                 status=TaskStatus.COMPLETED,
                 progress=100,
-                message="分析完成",
+                message="研究完成",
                 current_step="completed",
                 result_data=result
             )
@@ -1145,7 +1145,7 @@ class SimpleAnalysisService:
                     payload=NotificationCreate(
                         user_id=str(user_id),
                         type='analysis',
-                        title=f"{request.stock_code} 分析完成",
+                        title=f"{request.stock_code} 研究完成",
                         content=summary,
                         link=f"/stocks/{request.stock_code}",
                         source='analysis'
@@ -1190,7 +1190,7 @@ class SimpleAnalysisService:
 
                             pdf_content = report_exporter.generate_pdf_report(report_doc)
                             if pdf_content:
-                                filename = f"{stock_code}_{analysis_date}_分析报告.pdf"
+                                filename = f"{stock_code}_{analysis_date}_研究报告.pdf"
                                 attachments = [(filename, pdf_content, "application/pdf")]
                                 logger.info(f"📄 已生成 PDF 报告: {filename} ({len(pdf_content)} bytes)")
                 except Exception as pdf_err:
@@ -1254,7 +1254,7 @@ class SimpleAnalysisService:
                 task_id=task_id,
                 status=TaskStatus.FAILED,
                 progress=0,
-                message="分析失败",
+                message="研究失败",
                 current_step="failed",
                 error_message=user_friendly_error
             )
@@ -1559,9 +1559,9 @@ class SimpleAnalysisService:
                     time.sleep(8)
                     progress_tracker.update_progress("👔 研究经理形成共识")
 
-                    # 交易员阶段
+                    # 研究整合阶段
                     time.sleep(10)
-                    progress_tracker.update_progress("💼 交易员制定策略")
+                    progress_tracker.update_progress("🧩 研究整合员汇总")
 
                     # 风险管理阶段
                     time.sleep(8)
@@ -1599,8 +1599,8 @@ class SimpleAnalysisService:
                 "🐂 看涨研究员": 51.25,      # 45% + 6.25%
                 "🐻 看跌研究员": 57.5,       # 45% + 12.5%
                 "👔 研究经理": 70,           # 45% + 25%
-                # 交易员阶段 (70% → 78%)
-                "💼 交易员决策": 78,         # 70% + 8%
+                # 研究整合阶段 (70% → 78%)
+                "🧩 研究整合员汇总": 78,     # 70% + 8%
                 # 风险评估阶段 (78% → 93%)
                 "🔥 激进风险评估": 81.75,    # 78% + 3.75%
                 "🛡️ 保守风险评估": 85.5,    # 78% + 7.5%
@@ -1923,16 +1923,16 @@ class SimpleAnalysisService:
                     else:
                         target_price = None
 
-                    # 将英文投资建议转换为中文
+                    # 将英文 action 转换为研究表述
                     action_translation = {
-                        'BUY': '买入',
-                        'SELL': '卖出',
-                        'HOLD': '持有',
-                        'buy': '买入',
-                        'sell': '卖出',
-                        'hold': '持有'
+                        'BUY': '看多',
+                        'SELL': '看空',
+                        'HOLD': '中性',
+                        'buy': '看多',
+                        'sell': '看空',
+                        'hold': '中性'
                     }
-                    action = decision.get('action', '持有')
+                    action = decision.get('action', '中性')
                     chinese_action = action_translation.get(action, action)
 
                     formatted_decision = {
@@ -1940,28 +1940,28 @@ class SimpleAnalysisService:
                         'confidence': decision.get('confidence', 0.5),
                         'risk_score': decision.get('risk_score', 0.3),
                         'target_price': target_price,
-                        'reasoning': decision.get('reasoning', '暂无分析推理')
+                        'reasoning': decision.get('reasoning', '暂无研究依据')
                     }
 
                     logger.info(f"🎯 [DEBUG] 格式化后的decision: {formatted_decision}")
                 else:
                     # 处理其他类型
                     formatted_decision = {
-                        'action': '持有',
+                        'action': '中性',
                         'confidence': 0.5,
                         'risk_score': 0.3,
                         'target_price': None,
-                        'reasoning': '暂无分析推理'
+                        'reasoning': '暂无研究依据'
                     }
                     logger.warning(f"⚠️ Decision不是字典类型: {type(decision)}")
             except Exception as e:
                 logger.error(f"❌ 格式化decision失败: {e}")
                 formatted_decision = {
-                    'action': '持有',
+                    'action': '中性',
                     'confidence': 0.5,
                     'risk_score': 0.3,
                     'target_price': None,
-                    'reasoning': '暂无分析推理'
+                    'reasoning': '暂无研究依据'
                 }
 
             # 🔥 按照web目录的方式生成summary和recommendation
@@ -1990,25 +1990,22 @@ class SimpleAnalysisService:
             # 3. 生成recommendation（从decision的reasoning）
             if isinstance(formatted_decision, dict):
                 action = formatted_decision.get('action', '中性')
-                # 🔥 合规修改：使用合规术语
-                price_range = formatted_decision.get('price_analysis_range') or formatted_decision.get('target_price')
                 reasoning = formatted_decision.get('reasoning', '')
 
-                # 🔥 合规修改：生成分析观点（不包含具体价格和操作建议）
+                # 🔥 合规修改：生成研究结论（不包含具体价格和操作建议）
                 recommendation_parts = []
                 if action and action != '中性':
-                    recommendation_parts.append(f"分析观点：{action}")
+                    recommendation_parts.append(f"研究结论：{action}")
                 
-                # 🔥 如果 reasoning 很短（<100字符），才添加到 recommendation 中，避免重复
-                if reasoning and len(reasoning) < 100 and reasoning != "暂无分析推理":
-                    recommendation_parts.append(f"分析依据：{reasoning}")
-                elif reasoning and reasoning != "暂无分析推理":
+                if reasoning and len(reasoning) < 100 and reasoning != "暂无研究依据":
+                    recommendation_parts.append(f"研究依据：{reasoning}")
+                elif reasoning and reasoning != "暂无研究依据":
                     # 如果 reasoning 较长，只提取前50字符
                     short_reasoning = reasoning[:50] + "..." if len(reasoning) > 50 else reasoning
-                    recommendation_parts.append(f"分析依据：{short_reasoning}")
+                    recommendation_parts.append(f"研究依据：{short_reasoning}")
                 
-                recommendation = "；".join(recommendation_parts) if recommendation_parts else "请参考详细分析报告。"
-                logger.info(f"💡 [RECOMMENDATION] 生成分析观点: {len(recommendation)}字符")
+                recommendation = "；".join(recommendation_parts) if recommendation_parts else "请参考详细研究报告。"
+                logger.info(f"💡 [RECOMMENDATION] 生成研究结论: {len(recommendation)}字符")
 
             # 4. 如果还是没有，从其他报告中提取
             if not summary and isinstance(reports, dict):
@@ -2023,11 +2020,11 @@ class SimpleAnalysisService:
 
             # 5. 最后的备用方案
             if not summary:
-                summary = f"对{request.stock_code}的分析已完成，请查看详细报告。"
+                summary = f"对{request.stock_code}的研究已完成，请查看详细报告。"
                 logger.warning(f"⚠️ [SUMMARY] 使用备用摘要")
 
-            if not recommendation or recommendation == "分析观点：中性":
-                recommendation = "请参考详细分析报告。"
+            if not recommendation or recommendation == "研究结论：中性":
+                recommendation = "请参考详细研究报告。"
                 logger.warning(f"⚠️ [RECOMMENDATION] 使用备用建议")
 
             # 从决策中提取模型信息
@@ -2903,61 +2900,61 @@ class SimpleAnalysisService:
 
             # 定义报告模块映射 - 完全按照web目录的定义
             report_modules = {
-                # 🆕 宏观分析报告（优先保存）
+                # 🆕 宏观研究报告（优先保存）
                 'index_report': {
                     'filename': 'index_report.md',
-                    'title': f'{stock_symbol} 大盘指数分析报告',
+                    'title': f'{stock_symbol} 大盘指数研究报告',
                     'state_key': 'index_report'
                 },
                 'sector_report': {
                     'filename': 'sector_report.md',
-                    'title': f'{stock_symbol} 行业板块分析报告',
+                    'title': f'{stock_symbol} 行业板块研究报告',
                     'state_key': 'sector_report'
                 },
-                # 个股分析报告
+                # 个股研究报告
                 'market_report': {
                     'filename': 'market_report.md',
-                    'title': f'{stock_symbol} 股票技术分析报告',
+                    'title': f'{stock_symbol} 股票技术研究报告',
                     'state_key': 'market_report'
                 },
                 'sentiment_report': {
                     'filename': 'sentiment_report.md',
-                    'title': f'{stock_symbol} 市场情绪分析报告',
+                    'title': f'{stock_symbol} 市场情绪研究报告',
                     'state_key': 'sentiment_report'
                 },
                 'news_report': {
                     'filename': 'news_report.md',
-                    'title': f'{stock_symbol} 新闻事件分析报告',
+                    'title': f'{stock_symbol} 新闻事件研究报告',
                     'state_key': 'news_report'
                 },
                 'fundamentals_report': {
                     'filename': 'fundamentals_report.md',
-                    'title': f'{stock_symbol} 基本面分析报告',
+                    'title': f'{stock_symbol} 基本面研究报告',
                     'state_key': 'fundamentals_report'
                 },
                 'investment_plan': {
                     'filename': 'investment_plan.md',
-                    'title': f'{stock_symbol} 投资决策报告',
+                    'title': f'{stock_symbol} 研究团队研究结论',
                     'state_key': 'investment_plan'
                 },
                 'trader_investment_plan': {
                     'filename': 'trader_investment_plan.md',
-                    'title': f'{stock_symbol} 交易计划报告',
+                    'title': f'{stock_symbol} 研究整合意见',
                     'state_key': 'trader_investment_plan'
                 },
                 'final_trade_decision': {
                     'filename': 'final_trade_decision.md',
-                    'title': f'{stock_symbol} 最终分析结果',
+                    'title': f'{stock_symbol} 最终研究结论',
                     'state_key': 'final_trade_decision'
                 },
                 'investment_debate_state': {
                     'filename': 'research_team_decision.md',
-                    'title': f'{stock_symbol} 研究团队分析报告',
+                    'title': f'{stock_symbol} 研究团队研究报告',
                     'state_key': 'investment_debate_state'
                 },
                 'risk_debate_state': {
                     'filename': 'risk_management_decision.md',
-                    'title': f'{stock_symbol} 风险管理团队决策报告',
+                    'title': f'{stock_symbol} 风险治理结论',
                     'state_key': 'risk_debate_state'
                 }
             }
@@ -2988,15 +2985,15 @@ class SimpleAnalysisService:
             # 保存最终决策报告 - 完全按照web目录的方式
             decision = result.get('decision', {})
             if decision:
-                decision_content = f"# {stock_symbol} 最终分析决策\n\n"
+                decision_content = f"# {stock_symbol} 最终研究结论\n\n"
 
                 if isinstance(decision, dict):
-                    decision_content += f"## 市场分析\n\n"
-                    decision_content += f"**分析观点**: {decision.get('action', 'N/A')}\n\n"
+                    decision_content += f"## 市场研究\n\n"
+                    decision_content += f"**研究结论**: {decision.get('action', 'N/A')}\n\n"
                     decision_content += f"**置信度**: {decision.get('confidence', 0):.1%}\n\n"
                     decision_content += f"**风险评分**: {decision.get('risk_score', 0):.1%}\n\n"
-                    decision_content += f"**目标价位**: {decision.get('target_price', 'N/A')}\n\n"
-                    decision_content += f"## 分析推理\n\n{decision.get('reasoning', '暂无分析推理')}\n\n"
+                    decision_content += f"**价格观察区间**: {decision.get('target_price', 'N/A')}\n\n"
+                    decision_content += f"## 研究依据\n\n{decision.get('reasoning', '暂无研究依据')}\n\n"
                 else:
                     decision_content += f"{str(decision)}\n\n"
 

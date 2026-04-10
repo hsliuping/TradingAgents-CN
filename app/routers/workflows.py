@@ -324,7 +324,7 @@ async def _save_analysis_report(
     execution_time: float = 0.0
 ):
     """
-    保存分析报告到 MongoDB
+    保存研究报告到 MongoDB
 
     从工作流执行结果中提取各个报告并保存到 analysis_reports 集合
     与单股分析保持完全一致的报告结构
@@ -354,24 +354,24 @@ async def _save_analysis_report(
         # 从工作流结果中提取报告（字符串类型）
         reports = {}
         string_report_fields = [
-            # 🆕 宏观分析报告（优先提取）
-            ("index_report", "大盘指数分析报告"),
-            ("sector_report", "行业板块分析报告"),
-            # 个股分析报告
-            ("market_report", "市场分析报告"),
-            ("sentiment_report", "情绪分析报告"),
-            ("news_report", "新闻分析报告"),
-            ("fundamentals_report", "基本面分析报告"),
+            # 🆕 宏观研究报告（优先提取）
+            ("index_report", "大盘指数研究报告"),
+            ("sector_report", "行业板块研究报告"),
+            # 个股研究报告
+            ("market_report", "市场研究报告"),
+            ("sentiment_report", "情绪研究报告"),
+            ("news_report", "新闻研究报告"),
+            ("fundamentals_report", "基本面研究报告"),
             # 风险与辩论相关直出字段（如果存在，直接保存）
-            ("risk_assessment", "风险评估报告"),
+            ("risk_assessment", "风险评估结论"),
             ("bull_report", "看涨研究报告"),
             ("bear_report", "看跌研究报告"),
             ("risky_opinion", "激进风险观点"),
             ("safe_opinion", "保守风险观点"),
             ("neutral_opinion", "中性风险观点"),
-            ("investment_plan", "研究团队投资计划"),
-            ("trader_investment_plan", "交易团队投资计划"),
-            ("final_trade_decision", "最终分析结果"),
+            ("investment_plan", "研究团队研究结论"),
+            ("trader_investment_plan", "研究整合意见"),
+            ("final_trade_decision", "最终研究结论"),
         ]
 
         def _extract_text(v):
@@ -405,7 +405,7 @@ async def _save_analysis_report(
                 reports["bear_researcher"] = bear_history
                 logger.info(f"[报告保存] 提取报告: 空头研究员 ({len(bear_history)} 字符)")
 
-            # 3. 研究经理分析报告
+            # 3. 研究经理研究报告
             judge_decision = _extract_text(investment_debate.get("judge_decision", ""))
             if judge_decision and len(judge_decision.strip()) > 5:
                 reports["research_team_decision"] = judge_decision
@@ -548,12 +548,12 @@ async def _save_analysis_report(
         result = await db.analysis_reports.insert_one(document)
 
         if result.inserted_id:
-            logger.info(f"✅ [报告保存] 分析报告已保存到MongoDB: {analysis_id}, 共 {len(reports)} 个报告模块")
+            logger.info(f"✅ [报告保存] 研究报告已保存到MongoDB: {analysis_id}, 共 {len(reports)} 个报告模块")
         else:
             logger.error("❌ [报告保存] MongoDB插入失败")
 
     except Exception as e:
-        logger.error(f"❌ [报告保存] 保存分析报告失败: {e}")
+        logger.error(f"❌ [报告保存] 保存研究报告失败: {e}")
         import traceback
         logger.error(f"❌ [报告保存] 详细错误: {traceback.format_exc()}")
 
@@ -686,12 +686,12 @@ def _get_analysts_from_reports(reports: Dict[str, Any]) -> List[str]:
 
 def _format_research_team_report(debate_state: Dict[str, Any]) -> str:
     """
-    格式化研究团队分析报告
+    格式化研究团队研究报告
 
     从 investment_debate_state 中提取 bull_history, bear_history, judge_decision
     """
     parts = []
-    parts.append("# 🔬 研究团队分析报告\n")
+    parts.append("# 🔬 研究团队研究报告\n")
 
     # 多头研究员分析
     bull_history = debate_state.get("bull_history", "")
@@ -707,10 +707,10 @@ def _format_research_team_report(debate_state: Dict[str, Any]) -> str:
         parts.append(bear_history)
         parts.append("\n")
 
-    # 研究经理最终决策
+    # 研究经理综合结论
     judge_decision = debate_state.get("judge_decision", "")
     if judge_decision:
-        parts.append("## 🎯 研究经理综合决策\n")
+        parts.append("## 🎯 研究经理综合结论\n")
         parts.append(judge_decision)
         parts.append("\n")
 
@@ -719,12 +719,12 @@ def _format_research_team_report(debate_state: Dict[str, Any]) -> str:
 
 def _format_risk_management_report(debate_state: Dict[str, Any]) -> str:
     """
-    格式化风险管理团队决策报告
+    格式化风险治理结论
 
     从 risk_debate_state 中提取 risky_history, safe_history, neutral_history, judge_decision
     """
     parts = []
-    parts.append("# 👔 风险管理团队决策报告\n")
+    parts.append("# 👔 风险治理结论\n")
 
     # 激进分析师观点
     risky_history = debate_state.get("risky_history", "")
@@ -764,7 +764,7 @@ async def _build_legacy_config(data: WorkflowExecuteRequest) -> Dict[str, Any]:
     优先使用新的 ModelConfig，否则从数据库根据模型名称查询
 
     旧代码中的使用方式：
-    - quick_thinking_llm: 用于分析师、研究员(Bull/Bear)、交易员、风险辩论者
+    - quick_thinking_llm: 用于分析师、研究员(Bull/Bear)、研究整合员、风险辩论者
     - deep_thinking_llm: 用于研究经理(Research Manager)、风险经理(Risk Judge)
     """
     config = {}

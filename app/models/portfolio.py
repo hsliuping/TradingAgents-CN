@@ -1,5 +1,5 @@
 """
-持仓分析相关数据模型
+持仓研究相关数据模型
 """
 
 from datetime import datetime
@@ -19,7 +19,7 @@ class PositionSource(str, Enum):
 
 
 class PortfolioAnalysisStatus(str, Enum):
-    """持仓分析状态"""
+    """持仓研究状态"""
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
@@ -372,24 +372,24 @@ class AIAnalysisResult(BaseModel):
 
 
 class PortfolioAnalysisReport(BaseModel):
-    """持仓分析报告 (portfolio_analysis_reports 集合)"""
+    """持仓研究报告 (portfolio_analysis_reports 集合)"""
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
-    analysis_id: str                           # 唯一分析ID
+    analysis_id: str                           # 唯一研究ID
     user_id: str
-    analysis_type: str = "portfolio_health"    # 分析类型
-    analysis_date: str                         # 分析日期 YYYY-MM-DD
+    analysis_type: str = "portfolio_health"    # 研究类型
+    analysis_date: str                         # 研究日期 YYYY-MM-DD
     timestamp: datetime = Field(default_factory=now_tz)
     
     # 持仓快照
     portfolio_snapshot: PortfolioSnapshot = Field(default_factory=PortfolioSnapshot)
     
-    # 分析结果
+    # 研究结果
     health_score: float = 0.0                  # 健康度评分 0-100
     risk_level: str = "中"                     # 风险等级: 低/中/高
     industry_distribution: List[IndustryDistribution] = Field(default_factory=list)
     concentration_analysis: ConcentrationAnalysis = Field(default_factory=ConcentrationAnalysis)
     
-    # AI分析
+    # AI研究
     ai_analysis: AIAnalysisResult = Field(default_factory=AIAnalysisResult)
     
     # 执行信息
@@ -462,9 +462,9 @@ class PositionImport(BaseModel):
 
 
 class PortfolioAnalysisRequest(BaseModel):
-    """持仓分析请求"""
+    """持仓研究请求"""
     include_paper: bool = Field(True, description="是否包含模拟交易持仓")
-    research_depth: str = Field("标准", description="分析深度")
+    research_depth: str = Field("标准", description="研究深度")
 
 
 class PositionResponse(BaseModel):
@@ -507,7 +507,7 @@ class PortfolioStatsResponse(BaseModel):
 
 
 class PortfolioAnalysisResponse(BaseModel):
-    """持仓分析响应"""
+    """持仓研究响应"""
     analysis_id: str
     status: PortfolioAnalysisStatus
     health_score: float = 0.0
@@ -524,19 +524,19 @@ class PortfolioAnalysisResponse(BaseModel):
         return dt.isoformat()
 
 
-# ==================== 单股持仓分析模型 ====================
+# ==================== 单股持仓研究模型 ====================
 
 class PositionAnalysisRequest(BaseModel):
-    """单股持仓分析请求"""
-    research_depth: str = "标准"              # 分析深度: 快速/标准/深度
-    include_add_position: bool = True        # 是否分析加仓建议
+    """单股持仓研究请求"""
+    research_depth: str = "标准"              # 研究深度: 快速/标准/深度
+    include_add_position: bool = True        # 是否纳入加仓观察
     target_profit_pct: float = 20.0          # 目标收益率（%）
-    # 资金总量相关（用于风险分析）
+    # 资金总量相关（用于风险研究）
     total_capital: Optional[float] = Field(None, description="投资资金总量")
     max_position_pct: float = Field(30.0, description="单只股票最大仓位比例（%）")
     max_loss_pct: float = Field(10.0, description="最大可接受亏损比例（%）")
 
-    # 投资偏好设置（用于工作流引擎选择分析风格）
+    # 投资偏好设置（用于工作流引擎选择研究风格）
     risk_tolerance: str = Field("medium", description="风险偏好: low/medium/high")
     investment_horizon: str = Field("medium", description="投资期限: short(短线)/medium(中线)/long(长线)")
     analysis_focus: str = Field("comprehensive", description="分析重点: technical(技术面)/fundamental(基本面)/comprehensive(综合)")
@@ -612,21 +612,21 @@ class PositionAnalysisResult(BaseModel):
 
 
 class PositionAnalysisReport(BaseModel):
-    """单股持仓分析报告 (position_analysis_reports 集合)"""
+    """单股持仓研究报告 (position_analysis_reports 集合)"""
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
     analysis_id: str
     user_id: str
     position_id: str                               # 关联的持仓ID
 
-    # 持仓快照（可选，分析失败时可能为空）
+    # 持仓快照（可选，研究失败时可能为空）
     position_snapshot: Optional[PositionSnapshot] = None
 
-    # 分析结果
+    # 研究结果
     status: PortfolioAnalysisStatus = PortfolioAnalysisStatus.PENDING
     ai_analysis: PositionAnalysisResult = Field(default_factory=PositionAnalysisResult)
 
-    # 关联的单股分析任务ID（方案2新增）
-    stock_analysis_task_id: Optional[str] = Field(None, description="关联的单股分析任务ID")
+    # 关联的单股研究任务 ID（方案2新增）
+    stock_analysis_task_id: Optional[str] = Field(None, description="关联的单股研究任务ID")
 
     # 元数据
     execution_time: float = 0.0
@@ -641,7 +641,7 @@ class PositionAnalysisReport(BaseModel):
 
 
 class PositionAnalysisResponse(BaseModel):
-    """单股持仓分析响应"""
+    """单股持仓研究响应"""
     analysis_id: str
     position_id: str
     code: str

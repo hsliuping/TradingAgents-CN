@@ -7,6 +7,7 @@ logger = get_logger("default")
 
 # 导入模板客户端
 from tradingagents.utils.template_client import get_agent_prompt
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails, build_research_only_closing
 
 
 def _get_extension_reports(state: dict) -> dict:
@@ -98,22 +99,18 @@ def create_research_manager(llm, memory):
                 fallback_prompt=None
             )
 
+            system_prompt = apply_compliance_guardrails(system_prompt, "research_manager")
             logger.info(f"✅ [研究经理] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
 
         except Exception as e:
             logger.error(f"❌ [研究经理] 从模板系统获取提示词失败: {e}")
             # 降级：使用硬编码提示词
-            system_prompt = """作为投资组合经理和辩论主持人，您的职责是批判性地评估这轮辩论并做出明确决策。
+            system_prompt = """作为研究经理和辩论主持人，您的职责是批判性地评估这轮辩论并形成研究结论。
 
 简洁地总结双方的关键观点，重点关注最有说服力的证据或推理。
 
-您的建议——买入、卖出或持有——必须明确且可操作。
-
-为交易员制定详细的投资计划，包括建议、理由和战略行动。
-
-提供具体的目标价格分析和时间范围。
-
 请用中文撰写所有分析内容。"""
+            system_prompt = apply_compliance_guardrails(system_prompt, "research_manager")
             logger.warning(f"⚠️ [研究经理] 使用降级提示词 (长度: {len(system_prompt)})")
 
         # 🆕 构建宏观分析部分
@@ -144,7 +141,7 @@ def create_research_manager(llm, memory):
 2. 所属板块是否处于轮动热点
 3. 个股基本面和技术面信号
 
-请基于以上信息做出明确的投资决策。"""
+{build_research_only_closing(["请基于以上信息形成研究结论、核心分歧、主要风险和后续观察点。"])}"""
 
         # 📊 统计 prompt 大小
         prompt_length = len(prompt)

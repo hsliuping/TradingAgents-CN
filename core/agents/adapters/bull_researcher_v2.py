@@ -146,12 +146,12 @@ class BullResearcherV2(ResearcherAgent):
             return prompt
         
         # 降级：使用旧版的默认提示词（与数据库模板保持一致）
-        return """你是一位看涨分析师，负责为股票 {company_name}（股票代码：{ticker}）的投资建立强有力的论证。
+        return """你是一位看涨研究员，负责为股票 {company_name}（股票代码：{ticker}）建立偏多研究论证。
 
 ⚠️ 重要提醒：当前分析的是 {market_name}，所有价格和估值请使用 {currency_name}（{currency_symbol}）作为单位。
 ⚠️ 在你的分析中，请始终使用公司名称"{company_name}"而不是股票代码"{ticker}"来称呼这家公司。
 
-你的任务是构建基于证据的强有力案例，强调增长潜力、竞争优势和积极的市场指标。利用提供的研究和数据来解决担忧并有效反驳看跌论点。
+你的任务是构建基于证据的偏多案例，强调增长潜力、竞争优势和积极的市场指标。利用提供的研究和数据回应看跌论点，但不得输出交易建议。
 """
     
     def _build_user_prompt(

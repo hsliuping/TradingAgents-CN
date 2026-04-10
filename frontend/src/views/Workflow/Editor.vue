@@ -30,7 +30,7 @@
           <el-icon><Star /></el-icon>
           设为默认
         </el-button>
-        <!-- 🔥 只对单股分析流程显示执行按钮，持仓分析和复盘分析暂时不显示 -->
+        <!-- 🔥 只对单股研究流程显示执行按钮，持仓研究和复盘分析暂时不显示 -->
         <el-button 
           v-if="workflow && isStockAnalysisWorkflow(workflow)" 
           type="success" 
@@ -529,7 +529,7 @@ const getNodeTypeName = (type: string) => {
     end: '结束',
     analyst: '分析师',
     researcher: '研究员',
-    trader: '交易员',
+    trader: '研究整合员',
     risk: '风险分析',
     manager: '经理',
     condition: '条件分支',
@@ -717,20 +717,20 @@ const executeWorkflow = () => {
   router.push(`/workflow/execute/${workflowId.value}`)
 }
 
-// 判断是否为单股分析流程（只有单股分析流程支持执行功能）
+// 判断是否为单股研究流程（只有单股研究流程支持执行功能）
 const isStockAnalysisWorkflow = (workflow: WorkflowDefinition): boolean => {
   const id = (workflow.id || '').toLowerCase()
   const name = (workflow.name || '').toLowerCase()
   
-  // 明确排除持仓分析和复盘分析流程
-  if (id.includes('position_analysis') || name.includes('持仓分析')) {
+  // 明确排除持仓研究和复盘分析流程
+  if (id.includes('position_analysis') || name.includes('持仓分析') || name.includes('持仓研究')) {
     return false
   }
   if (id.includes('trade_review') || name.includes('复盘') || name.includes('交易复盘')) {
     return false
   }
   
-  // 单股分析流程的判断条件
+  // 单股研究流程的判断条件
   // 1. ID是 v2_stock_analysis
   if (id === 'v2_stock_analysis') {
     return true
@@ -741,7 +741,7 @@ const isStockAnalysisWorkflow = (workflow: WorkflowDefinition): boolean => {
     return true
   }
   
-  // 3. 名称包含"股票分析"或"单股分析"
+  // 3. 名称包含兼容旧名称的股票分析或单股分析
   if (name.includes('股票分析') || name.includes('单股分析')) {
     return true
   }
@@ -887,7 +887,7 @@ const agentTemplateMapping: Record<string, { type: string; name: string }> = {
   research_manager: { type: 'managers', name: 'research_manager' },
   risk_manager: { type: 'managers', name: 'risk_manager' },
   trader: { type: 'trader', name: 'trader' },
-  // 持仓分析师
+  // 持仓研究师
   position_advisor: { type: 'trader', name: 'position_advisor' },
   // 复盘分析师
   timing_analyst: { type: 'reviewers', name: 'timing_analyst' },
@@ -895,7 +895,7 @@ const agentTemplateMapping: Record<string, { type: string; name: string }> = {
   emotion_analyst: { type: 'reviewers', name: 'emotion_analyst' },
   attribution_analyst: { type: 'reviewers', name: 'attribution_analyst' },
   review_manager: { type: 'reviewers', name: 'review_manager' },
-  // 持仓分析智能体
+  // 持仓研究智能体
   pa_technical: { type: 'position_analysis', name: 'pa_technical' },
   pa_fundamental: { type: 'position_analysis', name: 'pa_fundamental' },
   pa_risk: { type: 'position_analysis', name: 'pa_risk' },

@@ -265,7 +265,7 @@ const featureLabels: Record<string, string> = {
   email_notification: '邮件通知',
   watchlist_groups: '自选股分组',
   scheduled_analysis: '定时分析',
-  portfolio_analysis: '持仓分析',
+  portfolio_analysis: '持仓研究',
   trade_review: '操作复盘',
   trading_system: '交易计划',
   workflow: '分析流',
@@ -279,10 +279,10 @@ const featureLabels: Record<string, string> = {
 
 // 高级学员专属功能列表
 const proFeatureList = [
-  { key: 'email_notification', name: '邮件通知', desc: '分析完成自动发送邮件', icon: Message },
+  { key: 'email_notification', name: '邮件通知', desc: '研究完成自动发送邮件', icon: Message },
   { key: 'watchlist_groups', name: '自选股分组', desc: '按策略分组管理自选股', icon: FolderOpened },
   { key: 'scheduled_analysis', name: '定时分析', desc: '多时段自动分析', icon: Clock },
-  { key: 'portfolio_analysis', name: '持仓分析', desc: 'AI智能持仓诊断', icon: PieChart },
+  { key: 'portfolio_analysis', name: '持仓研究', desc: 'AI辅助持仓研究与风险观察', icon: PieChart },
   { key: 'trade_review', name: '操作复盘', desc: '交易决策复盘分析', icon: DocumentChecked },
   { key: 'trading_system', name: '交易计划', desc: '制定和管理交易策略计划', icon: Tickets },
   { key: 'workflow', name: '流程管理', desc: '可视化工作流编辑器', icon: SetUp },

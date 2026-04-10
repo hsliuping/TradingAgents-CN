@@ -6,7 +6,7 @@
         <div class="title-section">
           <h1 class="page-title">
             <el-icon class="title-icon"><Document /></el-icon>
-            单股分析
+            单股研究
           </h1>
           
           <!-- 风险提示 -->
@@ -18,14 +18,14 @@
             >
               <template #title>
                 <span style="font-size: 14px;">
-                  <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。
+                  <strong>⚠️ 重要提示：</strong>本次研究仅用于学习、研究和公开信息整理，不提供个股交易指导。
                 </span>
               </template>
             </el-alert>
           </div>
           
           <p class="page-description">
-            AI驱动的智能股票分析，多维度评估投资价值与风险
+            AI驱动的单股研究工作台，聚合多维证据、风险与后续观察线索
           </p>
         </div>
       </div>
@@ -547,10 +547,10 @@
                         <div class="disclaimer-text">
                           <p style="margin: 0 0 8px 0;"><strong>⚠️ 重要风险提示与免责声明</strong></p>
                           <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
-                            <li><strong>平台性质：</strong>本平台为AI辅助分析技术学习平台，专注于AI技术在股票分析领域的应用验证和技术学习。</li>
-                            <li><strong>分析目的：</strong>所有分析结论仅用于学习和验证AI辅助分析技术，不作为真实炒股操盘指导或投资依据。</li>
-                            <li><strong>非投资建议：</strong>所有分析结果、评分、建议仅为技术验证参考，不构成任何买卖建议或投资决策依据。</li>
-                            <li><strong>数据局限性：</strong>分析基于历史数据和公开信息，可能存在延迟、不完整或不准确的情况，无法预测未来市场走势。</li>
+                            <li><strong>平台性质：</strong>本平台为 AI 辅助投研技术学习平台，专注于 AI 技术在股票研究领域的应用验证和技术学习。</li>
+                            <li><strong>研究目的：</strong>所有研究结论仅用于学习、研究和公开信息整理，不提供个股交易指导或投资依据。</li>
+                            <li><strong>非投资建议：</strong>所有研究结果、评分、研究结论仅为技术验证参考，不构成任何买卖建议或投资决策依据。</li>
+                            <li><strong>数据局限性：</strong>研究基于历史数据和公开信息，可能存在延迟、不完整或不准确的情况，无法预测未来市场走势。</li>
                             <li><strong>投资风险：</strong>股票投资存在市场风险、流动性风险、政策风险等多种风险，可能导致本金损失。</li>
                             <li><strong>独立决策：</strong>投资者应基于自身风险承受能力、投资目标和财务状况独立做出投资决策。</li>
                             <li><strong>责任声明：</strong>使用本平台产生的任何投资决策及其后果由使用者自行承担，本平台不承担任何责任。</li>
@@ -567,7 +567,7 @@
                   <div class="overview-card">
   
                     <div v-if="analysisResults.summary" class="overview-summary">
-                      <h5>分析摘要:</h5>
+                      <h5>研究摘要:</h5>
                       <p>{{ analysisResults.summary }}</p>
                     </div>
 
@@ -577,9 +577,9 @@
                   </div>
                 </div>
 
-                <!-- 详细分析报告 -->
+                <!-- 详细研究报告 -->
                 <div v-if="analysisResults.state || analysisResults.reports" class="reports-section">
-                  <h4>📋 详细分析报告</h4>
+                  <h4>📋 详细研究报告</h4>
 
                   <!-- 美观的标签页展示 -->
                   <div class="analysis-tabs-container">
@@ -617,7 +617,7 @@
                           >
                             <template #title>
                               <span style="font-size: 13px;">
-                                ⚠️ 重要提示：本报告由AI基于有限资料分析生成，仅供参考，不构成投资建议。投资有风险，决策需谨慎。
+                                ⚠️ 重要提示：本报告由 AI 基于有限资料与公开信息整理生成，仅供研究参考，不构成投资建议。
                               </span>
                             </template>
                           </el-alert>
@@ -671,7 +671,7 @@
                   class="risk-disclaimer"
                 >
                   <template #title>
-                    <span style="font-weight: bold;">报告依据真实交易数据使用AI分析生成，仅供参考，不构成任何投资建议。市场有风险，投资需谨慎。</span>
+                    <span style="font-weight: bold;">报告基于真实市场数据与公开信息生成，仅供研究参考，不构成任何投资建议。</span>
                   </template>
                 </el-alert>
               </div>
@@ -917,7 +917,7 @@ const depthOptions = [
   { icon: '📈', name: '2级 - 基础分析', description: '常规投资决策', time: '3-6分钟' },
   { icon: '🎯', name: '3级 - 标准分析', description: '技术+基本面，推荐', time: '4-8分钟' },
   { icon: '🔍', name: '4级 - 深度分析', description: '多轮辩论，深度研究', time: '6-11分钟' },
-  { icon: '🏆', name: '5级 - 全面分析', description: '最全面的分析报告', time: '8-16分钟' }
+  { icon: '🏆', name: '5级 - 全面研究', description: '最全面的研究报告', time: '8-16分钟' }
 ]
 
 // 禁用日期
@@ -1257,7 +1257,7 @@ const submitAnalysis = async () => {
     }, 1000) // 1秒后查询
 
   } catch (error: any) {
-    ElMessage.error(error.message || '提交分析失败')
+    ElMessage.error(error.message || '提交研究失败')
   } finally {
     submitting.value = false
   }
@@ -1296,8 +1296,8 @@ const startPollingTaskStatus = () => {
       console.log('🔍 当前状态:', status.status, '进度:', status.progress)
 
       if (status.status === 'completed') {
-        // 分析完成，调用专门的结果API获取完整数据
-        console.log('🎉 分析完成，正在获取完整结果...')
+        // 研究完成，调用专门的结果API获取完整数据
+        console.log('🎉 研究完成，正在获取完整结果...')
 
         try {
           const resultResponse = await fetch(`/api/analysis/tasks/${currentTaskId.value}/result`, {
@@ -1311,7 +1311,7 @@ const startPollingTaskStatus = () => {
             const resultData = await resultResponse.json()
             if (resultData.success) {
               analysisResults.value = resultData.data
-              console.log('✅ 获取完整分析结果成功:', resultData.data)
+              console.log('✅ 获取完整研究结果成功:', resultData.data)
 
               // 添加调试信息
               console.log('🔍 完整结果数据结构:', {
@@ -1323,23 +1323,23 @@ const startPollingTaskStatus = () => {
                 keys: Object.keys(resultData.data || {})
               })
             } else {
-              console.error('❌ 获取分析结果失败:', resultData.message)
+              console.error('❌ 获取研究结果失败:', resultData.message)
               analysisResults.value = status.result_data // 回退到状态中的数据
             }
           } else {
-            console.error('❌ 结果API调用失败:', resultResponse.status)
+            console.error('❌ 研究结果 API 调用失败:', resultResponse.status)
             analysisResults.value = status.result_data // 回退到状态中的数据
           }
         } catch (error) {
-          console.error('❌ 获取分析结果异常:', error)
+          console.error('❌ 获取研究结果异常:', error)
           analysisResults.value = status.result_data // 回退到状态中的数据
         }
 
         analysisStatus.value = 'completed'
         showResults.value = true
         progressInfo.value.progress = 100
-        progressInfo.value.currentStep = '分析完成'
-        progressInfo.value.message = '分析已完成！'
+        progressInfo.value.currentStep = '研究完成'
+        progressInfo.value.message = '研究已完成！'
 
         if (pollingTimer.value) {
           clearInterval(pollingTimer.value)
@@ -1349,15 +1349,15 @@ const startPollingTaskStatus = () => {
         // 任务完成后保持缓存，以便刷新后能看到结果
         // clearTaskCache() // 不清除，让用户能在30分钟内刷新查看结果
 
-        ElMessage.success('分析完成！')
+        ElMessage.success('研究完成！')
 
       } else if (status.status === 'failed') {
-        // 分析失败
+        // 研究失败
         analysisStatus.value = 'failed'
-        progressInfo.value.currentStep = '分析失败'
+        progressInfo.value.currentStep = '研究失败'
 
         // 格式化错误消息（保留换行符）
-        const errorMessage = status.error_message || '分析过程中发生错误'
+        const errorMessage = status.error_message || '研究过程中发生错误'
         progressInfo.value.message = errorMessage
 
         if (pollingTimer.value) {
@@ -1507,7 +1507,7 @@ const startNewAnalysis = () => {
 }
 
 
-// 获取分析报告
+// 获取研究报告
 const getAnalysisReports = (data: any) => {
   console.log('📊 getAnalysisReports 输入数据:', data)
   console.log('📊 data.reports 存在:', !!data?.reports)
@@ -1572,17 +1572,17 @@ const getReportIcon = (title: string) => {
     '💰 基本面分析': '💰',
     '📰 新闻事件分析': '📰',
     '💭 市场情绪分析': '💭',
-    '💡 初步投资建议': '💡',  // 🔑 更新
+    '📋 研究团队结论': '📋',
     '🔬 研究团队分析': '🔬',
     '🐂 看涨研究': '🐂',
     '🐻 看跌研究': '🐻',
-    '💼 交易员计划': '💼',
+    '🧩 研究整合意见': '🧩',
     '⚖️ 风险管理团队': '⚖️',
     '🔥 激进风险观点': '🔥',
     '🛡️ 保守风险观点': '🛡️',
     '⚖️ 中性风险观点': '⚖️',
     '⚠️ 风险评估': '⚠️',
-    '🎯 最终分析结果': '🎯'  // 🔑 更新
+    '📝 最终研究结论': '📝'
   }
   return iconMap[title] || '📊'
 }
@@ -1603,19 +1603,36 @@ const getReportDescription = (title: string) => {
     '💰 基本面分析': '财务数据、估值水平、盈利能力分析',
     '📰 新闻事件分析': '相关新闻事件、市场动态影响分析',
     '💭 市场情绪分析': '投资者情绪、社交媒体情绪指标',
-    '💡 初步投资建议': '研究经理综合多空观点后的初步投资建议',  // 🔑 更新
+    '📋 研究团队结论': '研究经理综合多空观点后的研究结论',
     '🔬 研究团队分析': '多头/空头研究员辩论分析，研究经理综合决策',
     '🐂 看涨研究': '多头研究员观点与论证',
     '🐻 看跌研究': '空头研究员观点与论证',
-    '💼 交易员计划': '专业交易员制定的具体交易执行计划',
+    '🧩 研究整合意见': '研究整合员汇总多方分析后的研究摘要与观察点',
     '⚖️ 风险管理团队': '激进/保守/中性分析师风险评估，风险经理最终决策',
     '🔥 激进风险观点': '高风险策略与风险点',
     '🛡️ 保守风险观点': '稳健策略与风险控制',
     '⚖️ 中性风险观点': '平衡观点与风险评估',
     '⚠️ 风险评估': '综合风险评估与建议',
-    '🎯 最终分析结果': '综合风险评估后的最终分析结果（含仓位、止损等）'  // 🔑 更新
+    '📝 最终研究结论': '综合研究与风险评估后的最终研究结论'
   }
-  return descMap[title] || '详细分析报告'
+  return descMap[title] || '详细研究报告'
+}
+
+const normalizeDisplayedResearchText = (content: string) => {
+  if (!content) return ''
+
+  const replacements: Array<[RegExp, string]> = [
+    [/交易分析计划/g, '研究整合意见'],
+    [/交易员计划/g, '研究整合意见'],
+    [/初步投资计划/g, '研究团队结论'],
+    [/投资计划/g, '研究结论'],
+    [/投资建议/g, '研究结论'],
+    [/操作建议/g, '研究观点'],
+    [/风险管理决策/g, '风险治理结论'],
+    [/最终分析结果/g, '最终研究结论']
+  ]
+
+  return replacements.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), content)
 }
 
 // 格式化报告内容
@@ -1635,20 +1652,20 @@ const formatReportContent = (content: any) => {
   // 如果content不是字符串，转换为字符串
   let stringContent = ''
   if (typeof content === 'string') {
-    stringContent = content
+    stringContent = normalizeDisplayedResearchText(content)
     console.log('✅ [DEBUG] content是字符串，长度:', stringContent.length)
   } else if (typeof content === 'object') {
     // 如果是对象，尝试提取有用信息（按优先级）
     if (content.content) {
       // 🔥 优先使用 content 字段（用于 final_trade_decision 等）
-      stringContent = content.content
+      stringContent = normalizeDisplayedResearchText(content.content)
       console.log('📝 [DEBUG] 从对象中提取content字段')
     } else if (content.markdown) {
       // 兼容 markdown 字段
-      stringContent = content.markdown
+      stringContent = normalizeDisplayedResearchText(content.markdown)
       console.log('📝 [DEBUG] 从对象中提取markdown字段')
     } else if (content.judge_decision) {
-      stringContent = content.judge_decision
+      stringContent = normalizeDisplayedResearchText(content.judge_decision)
       console.log('📝 [DEBUG] 从对象中提取judge_decision')
     } else {
       stringContent = JSON.stringify(content, null, 2)
@@ -1678,13 +1695,13 @@ const formatReportContent = (content: any) => {
 const downloadReport = async (format: string = 'markdown') => {
   try {
     if (!analysisResults.value && !currentTaskId.value) {
-      ElMessage.error('报告尚未生成，无法下载')
+      ElMessage.error('研究报告尚未生成，无法下载')
       return
     }
 
     // 显示加载提示
     const loadingMsg = ElMessage({
-      message: `正在生成${getFormatName(format)}格式报告...`,
+      message: `正在生成${getFormatName(format)}格式研究报告...`,
       type: 'info',
       duration: 0
     })
@@ -1716,7 +1733,7 @@ const downloadReport = async (format: string = 'markdown') => {
 
     // 根据格式设置文件扩展名
     const ext = getFileExtension(format)
-    a.download = `${String(code)}_分析报告_${String(dateStr).slice(0, 10)}.${ext}`
+    a.download = `${String(code)}_研究报告_${String(dateStr).slice(0, 10)}.${ext}`
 
     document.body.appendChild(a)
     a.click()
@@ -1984,8 +2001,8 @@ const restoreTaskFromCache = async () => {
       showResults.value = true
       analysisResults.value = status.result_data
       progressInfo.value.progress = 100
-      progressInfo.value.currentStep = '分析完成'
-      progressInfo.value.message = '分析已完成'
+      progressInfo.value.currentStep = '研究完成'
+      progressInfo.value.message = '研究已完成'
 
       // 恢复分析参数
       if (cached.taskData.parameters) {
@@ -2016,8 +2033,8 @@ const restoreTaskFromCache = async () => {
     } else if (status.status === 'failed') {
       // 任务失败
       analysisStatus.value = 'failed'
-      progressInfo.value.currentStep = '分析失败'
-      progressInfo.value.message = status.error_message || '分析过程中发生错误'
+      progressInfo.value.currentStep = '研究失败'
+      progressInfo.value.message = status.error_message || '研究过程中发生错误'
 
       // 清除缓存
       clearTaskCache()
@@ -3252,7 +3269,7 @@ onMounted(async () => {
   border-top: 1px solid #e5e7eb;
 }
 
-/* 分析报告标签页样式 */
+/* 研究报告标签页样式 */
 .analysis-tabs-container {
   margin-top: 16px;
 }

@@ -52,9 +52,9 @@ ANALYST_ID_TO_CHINESE: dict = {
     "neutral_analyst_v2": "中性风险分析师",
     "risk_manager": "风险经理",
     "risk_manager_v2": "风险经理",
-    # 交易与复盘
-    "trader": "交易员",
-    "trader_v2": "交易员",
+    # 研究整合与复盘
+    "trader": "研究整合员",
+    "trader_v2": "研究整合员",
     "timing_analyst": "时机分析师",
     "timing_analyst_v2": "时机分析师",
     "position_analyst": "仓位分析师",
@@ -63,12 +63,12 @@ ANALYST_ID_TO_CHINESE: dict = {
     "attribution_analyst_v2": "归因分析师",
     "review_manager": "复盘总结师",
     "review_manager_v2": "复盘总结师",
-    # 持仓分析
+    # 持仓研究
     "position_advisor": "仓位顾问",
-    "pa_technical": "技术面分析师",
-    "pa_fundamental": "基本面分析师",
+    "pa_technical": "技术研究师",
+    "pa_fundamental": "基本面研究师",
     "pa_risk": "风险评估师",
-    "pa_advisor": "操作建议师",
+    "pa_advisor": "结论整合师",
 }
 
 # 检查依赖是否可用
@@ -158,9 +158,9 @@ class ReportExporter:
         content_parts = []
         
         # 标题和元信息
-        content_parts.append(f"# {stock_symbol} 股票分析报告")
+        content_parts.append(f"# {stock_symbol} 股票研究报告")
         content_parts.append("")
-        content_parts.append(f"**分析日期**: {analysis_date}")
+        content_parts.append(f"**研究日期**: {analysis_date}")
         if analysts:
             analyst_names = [
                 ANALYST_ID_TO_CHINESE.get(a, a) for a in analysts
@@ -171,9 +171,9 @@ class ReportExporter:
         content_parts.append("---")
         content_parts.append("")
         
-        # 执行摘要
+        # 研究摘要
         if summary:
-            content_parts.append("## 📊 执行摘要")
+            content_parts.append("## 📊 研究摘要")
             content_parts.append("")
             content_parts.append(summary)
             content_parts.append("")
@@ -225,14 +225,14 @@ class ReportExporter:
             "market_analysis": "🌍 市场分析",
             "risk_analysis": "⚠️ 风险分析",
             "valuation_analysis": "💎 估值分析",
-            "investment_recommendation": "🎯 投资建议",
+            "investment_recommendation": "🎯 研究结论摘要",
 
             # 决策报告
-            "final_trade_decision": "⚖️ 最终分析结果",
-            "investment_plan": "📋 投资计划",
-            "trader_investment_plan": "👔 交易员投资计划",
+            "final_trade_decision": "⚖️ 最终研究结论",
+            "investment_plan": "📋 研究计划",
+            "trader_investment_plan": "🧩 研究整合意见",
             "research_team_decision": "🤝 研究团队分析",
-            "risk_management_decision": "🛡️ 风险管理决策",
+            "risk_management_decision": "🛡️ 风险治理结论",
 
             # 研究团队分析师
             "bull_researcher": "🐂 多头研究员",
@@ -244,14 +244,14 @@ class ReportExporter:
             "neutral_analyst": "⚖️ 中立分析师",
 
             # 个股分析报告
-            "market_report": "📊 市场分析报告",
-            "fundamentals_report": "📈 基本面分析报告",
-            "sentiment_report": "💭 情绪分析报告",
-            "news_report": "📰 新闻分析报告",
+            "market_report": "📊 市场研究报告",
+            "fundamentals_report": "📈 基本面研究报告",
+            "sentiment_report": "💭 情绪研究报告",
+            "news_report": "📰 新闻研究报告",
 
             # 宏观分析报告
-            "sector_report": "🏭 板块分析报告",
-            "index_report": "📉 大盘分析报告",
+            "sector_report": "🏭 板块研究报告",
+            "index_report": "📉 大盘研究报告",
         }
         
         # 按顺序添加模块
@@ -603,7 +603,7 @@ pre, code {
 <html lang="zh-CN" dir="ltr">
 <head>
     <meta charset="UTF-8">
-    <title>分析报告</title>
+    <title>研究报告</title>
     <style>
         /* 基础样式 - 确保文本方向正确 */
         html {{
@@ -773,7 +773,7 @@ pre, code {
             margin: 20mm;
 
             @top-center {{
-                content: "分析报告";
+                content: "研究报告";
                 font-size: 10pt;
                 color: #999;
             }}

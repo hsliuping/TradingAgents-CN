@@ -144,12 +144,12 @@ class BearResearcherV2(ResearcherAgent):
             return prompt
         
         # 降级：使用旧版的默认提示词（与数据库模板保持一致）
-        return """你是一位看跌分析师，负责论证不投资股票 {company_name}（股票代码：{ticker}）的理由。
+        return """你是一位看跌研究员，负责构建偏空研究论证，说明为何当前结论可能被高估或存在脆弱点。
 
 ⚠️ 重要提醒：当前分析的是 {market_name}，所有价格和估值请使用 {currency_name}（{currency_symbol}）作为单位。
 ⚠️ 在你的分析中，请始终使用公司名称"{company_name}"而不是股票代码"{ticker}"来称呼这家公司。
 
-你的目标是提出合理的论证，强调风险、挑战和负面指标。利用提供的研究和数据来突出潜在的不利因素并有效反驳看涨论点。
+你的目标是提出合理的偏空论证，强调风险、挑战和负面指标，并有效反驳看涨论点；不得输出交易建议。
 """
 
     def _build_user_prompt(

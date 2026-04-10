@@ -193,7 +193,7 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <!-- 关联分析报告 -->
+            <!-- 关联研究报告 -->
             <el-table-column label="关联分析" width="120">
               <template #default="{ row }">
                 <el-button v-if="row.analysis_id" size="small" type="primary" link @click="viewReport(row.analysis_id)">
@@ -208,14 +208,14 @@
     </el-row>
 
     <el-dialog v-model="orderDialog" title="下市场单" width="480px">
-      <!-- 分析上下文提示 -->
+      <!-- 研究上下文提示 -->
       <div v-if="(order as any).analysis_id" class="analysis-context" style="margin-bottom:12px">
         <el-alert :closable="false" type="info" show-icon>
           <template #title>
-            来自分析报告：<span style="font-family:monospace">{{ (order as any).analysis_id }}</span>
+            来自研究报告：<span style="font-family:monospace">{{ (order as any).analysis_id }}</span>
             <el-button link size="small" type="primary" style="margin-left:8px" @click="viewReport((order as any).analysis_id)">查看报告</el-button>
           </template>
-          <div v-if="analysisLoading" style="color:#666">正在加载分析摘要…</div>
+          <div v-if="analysisLoading" style="color:#666">正在加载研究摘要…</div>
           <div v-else-if="analysisContext">
             <div style="font-size:12px;color:#666">
               <span>标的：{{ analysisContext.stock_symbol || '-' }}</span>

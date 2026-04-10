@@ -1186,8 +1186,8 @@ class TradingAgentsGraph:
                 'Bull Researcher': "🐂 看涨研究员",
                 'Bear Researcher': "🐻 看跌研究员",
                 'Research Manager': "👔 研究经理",
-                # 交易员节点
-                'Trader': "💼 交易员决策",
+                # 研究整合节点
+                'Trader': "🧩 研究整合员汇总",
                 # 风险评估节点
                 'Risky Analyst': "🔥 激进风险评估",
                 'Safe Analyst': "🛡️ 保守风险评估",

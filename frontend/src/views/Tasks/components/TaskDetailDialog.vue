@@ -148,12 +148,12 @@
           />
         </el-card>
 
-        <!-- 单股分析任务 - 查看报告按钮（即使没有结果数据也显示） -->
+        <!-- 单股研究任务 - 查看报告按钮（即使没有结果数据也显示） -->
         <el-card v-if="isStockAnalysisTask && !hasResult" shadow="never" class="section-card">
           <template #header>
             <div class="card-header">
               <el-icon><Document /></el-icon>
-              <span>分析报告</span>
+              <span>研究报告</span>
             </div>
           </template>
           <div style="padding: 16px;">
@@ -162,7 +162,7 @@
               @click="goToReport"
             >
               <el-icon><Document /></el-icon>
-              查看分析报告
+              查看研究报告
             </el-button>
           </div>
         </el-card>
@@ -234,7 +234,7 @@ const hasResult = computed(() => {
   return props.taskDetail?.result && Object.keys(props.taskDetail.result).length > 0
 })
 
-// 判断是否是单股分析任务
+// 判断是否是单股研究任务
 const isStockAnalysisTask = computed(() => {
   const taskType = props.taskDetail?.task_type
   // 兼容字符串和枚举值，以及中文名称
@@ -256,7 +256,7 @@ const isStockAnalysisTask = computed(() => {
 
 // 获取报告ID（从任务结果中提取）
 const reportId = computed(() => {
-  // 对于单股分析任务，优先使用 task_id（因为报告API支持通过 task_id 查询）
+  // 对于单股研究任务，优先使用 task_id（因为报告 API 支持通过 task_id 查询）
   if (isStockAnalysisTask.value && props.taskDetail?.task_id) {
     // 如果有result，优先使用result中的analysis_id
     if (props.taskDetail?.result) {

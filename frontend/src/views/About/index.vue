@@ -9,12 +9,11 @@
             <span class="version-badge">v2.0</span>
           </h1>
           <p class="hero-subtitle">
-            AI辅助股票分析技术学习平台
+            AI 多智能体投研研究台
           </p>
           <p class="hero-description">
-            专注于AI辅助分析技术的学习与验证平台。通过优化的工作流引擎和全流程分析辅助，
-            帮助您系统学习股票分析方法，提升分析能力。所有分析结论用于学习和验证AI股票分析技术，
-            不作为真实炒股操盘指导。
+            专注于 AI 辅助投研与公开信息整理的学习验证平台。通过优化的工作流引擎和全流程研究辅助，
+            帮助您系统学习股票分析方法、理解证据如何被整合，并形成可复核的研究结论与风险观察。
           </p>
           <div class="hero-acknowledgment">
             <el-icon><Star /></el-icon>
@@ -62,18 +61,18 @@
           <div class="platform-content">
             <h3>AI辅助分析技术学习平台</h3>
             <p>
-              TradingAgents-CN 是一个专注于<strong>AI辅助股票分析技术学习与验证</strong>的平台。
-              我们致力于帮助用户通过实践学习专业的股票分析方法，理解AI如何辅助分析决策，
-              提升股票分析的学习能力和思维水平。
+              TradingAgents-CN 是一个专注于<strong>AI辅助投研研究学习与验证</strong>的平台。
+              我们致力于帮助用户通过实践学习专业的研究方法，理解 AI 如何辅助整理证据、识别风险、
+              形成结论并持续跟踪关键观察点。
             </p>
             <div class="platform-features">
               <div class="platform-feature-item">
                 <el-icon class="feature-icon"><CircleCheck /></el-icon>
-                <span>所有分析结论用于学习和验证AI股票分析技术</span>
+                <span>所有分析结论用于学习、研究和公开信息整理</span>
               </div>
               <div class="platform-feature-item">
                 <el-icon class="feature-icon"><CircleCheck /></el-icon>
-                <span>不作为真实炒股操盘指导</span>
+                <span>不提供个股交易指导</span>
               </div>
               <div class="platform-feature-item">
                 <el-icon class="feature-icon"><CircleCheck /></el-icon>
@@ -243,7 +242,7 @@
             </div>
             <h3>全流程分析辅助</h3>
           </div>
-          <p>从数据收集、指标计算、智能体分析到报告生成的完整流程辅助。支持单股分析、批量分析、持仓分析、交易复盘等多种分析场景，帮助您系统学习完整的分析流程</p>
+          <p>从数据收集、指标计算、智能体研究到报告生成的完整流程辅助。支持单股研究、批量分析、持仓研究、交易复盘等多种研究场景，帮助您系统学习完整的研究流程</p>
           <div class="feature-tags">
             <el-tag size="small" type="success">全流程辅助</el-tag>
             <el-tag size="small" type="success">多场景分析</el-tag>
@@ -273,7 +272,7 @@
             </div>
             <h3>学习平台定位</h3>
           </div>
-          <p>专注于AI辅助分析技术的学习与验证。所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。通过实践学习，理解AI如何辅助分析，提升分析思维</p>
+          <p>专注于 AI 辅助投研研究技术的学习与验证。所有分析结论仅用于学习、研究与公开信息整理，不提供个股交易指导。通过实践学习，理解 AI 如何辅助分析、整合证据并提升研究思维。</p>
           <div class="feature-tags">
             <el-tag size="small" type="info">学习平台</el-tag>
             <el-tag size="small" type="info">技术验证</el-tag>

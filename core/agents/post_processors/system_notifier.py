@@ -197,5 +197,5 @@ class SystemNotifierAgent(PostProcessorAgent):
         recommendation = self._get_nested_value(state, "investment_plan.recommendation", "")
         confidence = self._get_nested_value(state, "investment_plan.confidence_score", "")
         
-        return f"{ticker} 分析完成，建议：{recommendation}，置信度：{confidence}"
+        return f"{ticker} 分析完成，研究摘要：{recommendation}，置信度：{confidence}"
 

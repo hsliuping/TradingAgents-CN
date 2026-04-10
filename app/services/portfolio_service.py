@@ -1,6 +1,6 @@
 """
-持仓分析服务
-提供持仓管理和AI分析功能
+持仓研究服务
+提供持仓管理和 AI 研究功能
 """
 
 import os
@@ -47,7 +47,7 @@ from app.utils.timezone import now_tz
 
 logger = logging.getLogger("app.services.portfolio_service")
 
-# 市场代码映射：前端/数据库使用的代码 -> 单股分析服务使用的中文名称
+# 市场代码映射：前端/数据库使用的代码 -> 单股研究服务使用的中文名称
 MARKET_CODE_TO_NAME = {
     "CN": "A股",
     "HK": "港股",
@@ -63,7 +63,7 @@ MARKET_NAME_TO_CODE = {
 
 
 def convert_market_code_to_name(market_code: str) -> str:
-    """将市场代码转换为中文名称（用于单股分析服务）"""
+    """将市场代码转换为中文名称（用于单股研究服务）"""
     return MARKET_CODE_TO_NAME.get(market_code, market_code)
 
 
@@ -73,7 +73,7 @@ def convert_market_name_to_code(market_name: str) -> str:
 
 
 class PortfolioService:
-    """持仓分析服务"""
+    """持仓研究服务"""
 
     def __init__(self):
         self.db = get_mongo_db()
@@ -86,7 +86,7 @@ class PortfolioService:
         self.position_changes_collection = "position_changes"
 
     def _sanitize_position_analysis_result(self, result: PositionAnalysisResult) -> PositionAnalysisResult:
-        """统一将持仓分析结果转换为研究观察模式。"""
+        """统一将持仓研究结果转换为研究观察模式。"""
         if result is None:
             return PositionAnalysisResult()
 
@@ -95,7 +95,7 @@ class PortfolioService:
         return PositionAnalysisResult(**sanitized_data)
 
     def _sanitize_position_analysis_dict(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """统一清洗历史记录和接口返回中的持仓分析字段。"""
+        """统一清洗历史记录和接口返回中的持仓研究字段。"""
         return sanitize_position_analysis_payload(data)
 
     # ==================== 资金账户管理 ====================
@@ -331,7 +331,7 @@ class PortfolioService:
         return transactions
 
     async def get_total_capital(self, user_id: str, currency: str = "CNY") -> float:
-        """获取用户的总资金（现金 + 持仓市值），用于持仓分析"""
+        """获取用户的总资金（现金 + 持仓市值），用于持仓研究"""
         summary = await self.get_account_summary(user_id)
         return summary.total_assets.get(currency, 0.0)
 
@@ -1071,7 +1071,7 @@ class PortfolioService:
         current_price = await self._get_stock_price(data.code, data.market)
         if not current_price or current_price <= 0:
             raise ValueError(
-                f"股票 {data.code} 暂无行情数据，无法添加持仓。请先在「股票筛选」或「单股分析」中同步该股票的历史数据后再添加。"
+                f"股票 {data.code} 暂无行情数据，无法添加持仓。请先在「股票筛选」或「个股研究」中同步该股票的历史数据后再添加。"
             )
 
         # 🔥 必须填写买入日期，并校验成本价是否在该日历史高低价范围内
@@ -1844,7 +1844,7 @@ class PortfolioService:
             market_distribution={k: round(v, 2) for k, v in market_map.items()}
         )
 
-    # ==================== 持仓分析 ====================
+    # ==================== 持仓研究 ====================
 
     async def analyze_portfolio(
         self,
@@ -1853,7 +1853,7 @@ class PortfolioService:
         research_depth: str = "标准"
     ) -> PortfolioAnalysisReport:
         """
-        执行持仓分析
+        执行持仓研究
 
         Args:
             user_id: 用户ID
@@ -1863,7 +1863,7 @@ class PortfolioService:
         analysis_id = str(uuid.uuid4())
         analysis_date = datetime.now().strftime("%Y-%m-%d")
 
-        # 创建分析报告
+        # 创建研究报告
         report = PortfolioAnalysisReport(
             analysis_id=analysis_id,
             user_id=user_id,
@@ -1906,10 +1906,10 @@ class PortfolioService:
             report.execution_time = execution_time
             report.status = PortfolioAnalysisStatus.COMPLETED
 
-            logger.info(f"✅ 持仓分析完成: {analysis_id}, 健康度: {report.health_score}")
+            logger.info(f"✅ 持仓研究完成: {analysis_id}, 健康度: {report.health_score}")
 
         except Exception as e:
-            logger.error(f"❌ 持仓分析失败: {e}")
+            logger.error(f"❌ 持仓研究失败: {e}")
             report.status = PortfolioAnalysisStatus.FAILED
             report.error_message = str(e)
 
@@ -1941,7 +1941,7 @@ class PortfolioService:
         }
 
     async def get_analysis_detail(self, analysis_id: str) -> Optional[Dict]:
-        """获取分析报告详情"""
+        """获取研究报告详情"""
         return await self.db[self.analysis_collection].find_one({"analysis_id": analysis_id})
 
     # ==================== 辅助方法 ====================
@@ -2111,7 +2111,7 @@ class PortfolioService:
         snapshot: PortfolioSnapshot,
         industry_dist: List[IndustryDistribution]
     ) -> AIAnalysisResult:
-        """调用AI进行持仓分析"""
+        """调用 AI 进行持仓研究"""
         try:
             # 构建分析提示词
             prompt = self._build_analysis_prompt(snapshot, industry_dist)
@@ -2252,7 +2252,7 @@ class PortfolioService:
             for d in industry_dist[:5]
         ])
 
-        prompt = f"""# 持仓组合分析任务
+        prompt = f"""# 持仓组合研究任务
 
 {account_section}## 📈 持仓概况
 - 持仓总市值: ¥{snapshot.total_value:,.2f}
@@ -2269,22 +2269,22 @@ class PortfolioService:
 ## 🏭 行业分布
 {industry_text}
 
-## 分析要求
-请基于以上数据，从以下维度进行专业分析（用中文回答）：
+## 研究要求
+请基于以上数据，从以下维度进行专业研究观察（用中文回答）：
 
 1. **持仓健康度评估** (给出0-100分，并说明主要扣分项)
 2. **风险评估** (低/中/高，结合仓位水平和集中度分析)
 3. **资金配置评估** (评估现金/持仓比例是否合理，资金利用效率)
-4. **个股表现分析** (哪些股票表现好/差，是否需要止盈/止损)
+4. **个股表现观察** (哪些股票表现相对较强/较弱，后续需重点跟踪什么)
 5. **组合优势** (列出2-3点)
 6. **组合劣势** (列出2-3点)
-7. **调仓建议** (列出2-3条具体建议，包括：
-   - 是否需要调整仓位水平
-   - 是否需要止盈/止损某些股票
-   - 是否需要调整行业配置)
+7. **后续跟踪建议** (列出2-3条具体建议，包括：
+    - 是否需要持续观察仓位水平
+    - 是否需要重点跟踪某些股票的风险或催化因素
+    - 是否需要继续观察行业配置变化)
 8. **综合评价** (150字以内的总结)
 
-请直接给出分析结果，不需要JSON格式。"""
+请直接给出研究结果，不需要JSON格式。"""
 
         return prompt
 
@@ -2451,10 +2451,10 @@ class PortfolioService:
         return "中"
 
     async def _save_analysis_report(self, report: PortfolioAnalysisReport):
-        """保存分析报告"""
+        """保存研究报告"""
         report_dict = report.model_dump(by_alias=True, exclude={"id"})
         await self.db[self.analysis_collection].insert_one(report_dict)
-        logger.info(f"✅ 保存分析报告: {report.analysis_id}")
+        logger.info(f"✅ 保存研究报告: {report.analysis_id}")
 
     # ==================== 数据获取工具 ====================
 
@@ -2660,7 +2660,7 @@ class PortfolioService:
         }
         return currency_map.get(market, "CNY")
 
-    # ==================== 单股持仓分析 ====================
+    # ==================== 单股持仓研究 ====================
 
     async def get_position_by_id(self, user_id: str, position_id: str) -> Optional[PositionResponse]:
         """根据ID获取持仓"""
@@ -2682,13 +2682,13 @@ class PortfolioService:
         position_id: str,
         params: PositionAnalysisRequest
     ) -> PositionAnalysisReport:
-        """单股持仓分析
+        """单股持仓研究
 
         流程：
-        1. 检查是否有缓存的单股分析报告（只读取缓存，不创建新任务）
+        1. 检查是否有缓存的单股研究报告（只读取缓存，不创建新任务）
         2. 如果有缓存，使用缓存的报告；如果没有缓存，使用空报告
-        3. 将分析报告（或空报告）+ 持仓信息发给持仓分析专用LLM
-        4. 生成个性化的持仓操作建议
+        3. 将研究报告（或空报告）+ 持仓信息发给持仓研究专用 LLM
+        4. 生成个性化的持仓研究观察
         """
         analysis_id = str(uuid.uuid4())
 
@@ -2744,17 +2744,17 @@ class PortfolioService:
             # 将市场代码转换为中文名称（用于缓存查询）
             market_name = convert_market_code_to_name(position.market)
 
-            # 检查是否有缓存的单股分析报告（只读取缓存，不创建新任务）
-            logger.info(f"📊 [持仓分析] 检查单股分析报告缓存 - {position.code} (市场: {position.market} -> {market_name})")
+            # 检查是否有缓存的单股研究报告（只读取缓存，不创建新任务）
+            logger.info(f"📊 [持仓研究] 检查单股研究报告缓存 - {position.code} (市场: {position.market} -> {market_name})")
             stock_analysis_report = await self._get_cached_stock_analysis_report(
                 stock_code=position.code,
                 market=market_name,
                 cache_hours=24  # 使用24小时内的缓存
             )
 
-            # 如果没有缓存报告，创建空结构，直接进行持仓分析
+            # 如果没有缓存报告，创建空结构，直接进行持仓研究
             if not stock_analysis_report:
-                logger.info(f"ℹ️ [持仓分析] 未找到缓存报告，直接进行持仓分析 - {position.code}")
+                logger.info(f"ℹ️ [持仓研究] 未找到缓存报告，直接进行持仓研究 - {position.code}")
                 stock_analysis_report = {
                     "task_id": None,
                     "reports": {},
@@ -2764,14 +2764,14 @@ class PortfolioService:
                     "source": "none"
                 }
             else:
-                logger.info(f"✅ [持仓分析] 找到缓存报告，将作为参考 - {position.code}, 来源: {stock_analysis_report.get('source', 'unknown')}")
+                logger.info(f"✅ [持仓研究] 找到缓存报告，将作为参考 - {position.code}, 来源: {stock_analysis_report.get('source', 'unknown')}")
 
-            # 结合持仓信息进行持仓分析
-            logger.info(f"📊 [持仓分析] 开始持仓专用分析 - {position.code}")
+            # 结合持仓信息进行持仓研究
+            logger.info(f"📊 [持仓研究] 开始持仓专用研究 - {position.code}")
 
-            # 根据配置选择分析引擎（USE_STOCK_ENGINE=true 时使用工作流引擎v2.0）
+            # 根据配置选择研究引擎（USE_STOCK_ENGINE=true 时使用工作流引擎 v2.0）
             if _use_stock_engine():
-                logger.info(f"🚀 [持仓分析] 使用工作流引擎v2.0进行分析")
+                logger.info(f"🚀 [持仓研究] 使用工作流引擎 v2.0 进行研究")
                 ai_result = await self._call_position_ai_analysis_workflow(
                     snapshot=snapshot,
                     params=params,
@@ -2779,7 +2779,7 @@ class PortfolioService:
                     user_id=user_id
                 )
             else:
-                logger.info(f"🤖 [持仓分析] 使用传统LLM分析")
+                logger.info(f"🤖 [持仓研究] 使用传统 LLM 研究")
                 ai_result = await self._call_position_ai_analysis_v2(
                     snapshot=snapshot,
                     params=params,
@@ -2792,12 +2792,12 @@ class PortfolioService:
             report.ai_analysis = ai_result
             report.execution_time = execution_time
             report.status = PortfolioAnalysisStatus.COMPLETED
-            # 保存单股分析报告的引用
+            # 保存单股研究报告的引用
             report.stock_analysis_task_id = stock_analysis_report.get("task_id")
-            logger.info(f"✅ 单股持仓分析完成: {position.code}, 建议: {ai_result.action}")
+            logger.info(f"✅ 单股持仓研究完成: {position.code}, 结论: {ai_result.action}")
 
         except Exception as e:
-            logger.error(f"❌ 单股持仓分析失败: {e}", exc_info=True)
+            logger.error(f"❌ 单股持仓研究失败: {e}", exc_info=True)
             report.status = PortfolioAnalysisStatus.FAILED
             report.error_message = str(e)
 
@@ -2813,9 +2813,9 @@ class PortfolioService:
         market: str,
         params: "PositionAnalysisByCodeRequest"
     ) -> Dict[str, Any]:
-        """创建持仓分析任务（异步模式）
+        """创建持仓研究任务（异步模式）
 
-        立即返回任务信息，后台执行分析
+        立即返回任务信息，后台执行研究
         """
         import asyncio
         from app.models.portfolio import PositionAnalysisByCodeRequest
@@ -2835,7 +2835,7 @@ class PortfolioService:
                 "code": code,
                 "market": market,
                 "status": existing.get("status"),
-                "message": "已有分析任务正在进行中",
+                "message": "已有研究任务正在进行中",
                 "created_at": existing.get("created_at").isoformat() if existing.get("created_at") else None
             }
 
@@ -2855,11 +2855,11 @@ class PortfolioService:
                 "code": code,
                 "market": market,
                 "status": "completed",
-                "message": "已有最近的分析报告，可直接查看",
+                "message": "已有最近的研究报告，可直接查看",
                 "created_at": recent_completed.get("created_at").isoformat() if recent_completed.get("created_at") else None
             }
 
-        # 创建新的分析任务记录
+        # 创建新的研究任务记录
         report = PositionAnalysisReport(
             analysis_id=analysis_id,
             user_id=user_id,
@@ -2870,7 +2870,7 @@ class PortfolioService:
         report_dict = report.model_dump(by_alias=True, exclude={"id"})
         await self.db[self.position_analysis_collection].insert_one(report_dict)
 
-        # 在后台启动分析任务
+        # 在后台启动研究任务
         asyncio.create_task(self._execute_position_analysis_background(
             user_id=user_id,
             analysis_id=analysis_id,
@@ -2884,7 +2884,7 @@ class PortfolioService:
             "code": code,
             "market": market,
             "status": "pending",
-            "message": "分析任务已创建，预计需要2-5分钟",
+            "message": "研究任务已创建，预计需要2-5分钟",
             "created_at": report.created_at.isoformat()
         }
 
@@ -2896,7 +2896,7 @@ class PortfolioService:
         market: str,
         params: "PositionAnalysisByCodeRequest"
     ):
-        """后台执行持仓分析"""
+        """后台执行持仓研究"""
         try:
             # 更新状态为处理中
             await self.db[self.position_analysis_collection].update_one(
@@ -2904,10 +2904,10 @@ class PortfolioService:
                 {"$set": {"status": "processing"}}
             )
 
-            # 执行实际分析
+            # 执行实际研究
             report = await self.analyze_position_by_code(user_id, code, market, params)
 
-            # 更新分析结果
+            # 更新研究结果
             update_data = {
                 "status": report.status.value,
                 "position_snapshot": report.position_snapshot.model_dump() if report.position_snapshot else None,
@@ -2922,10 +2922,10 @@ class PortfolioService:
                 {"$set": update_data}
             )
 
-            logger.info(f"✅ 后台持仓分析完成: {code}, analysis_id={analysis_id}")
+            logger.info(f"✅ 后台持仓研究完成: {code}, analysis_id={analysis_id}")
 
         except Exception as e:
-            logger.error(f"❌ 后台持仓分析失败: {code}, error={e}", exc_info=True)
+            logger.error(f"❌ 后台持仓研究失败: {code}, error={e}", exc_info=True)
             await self.db[self.position_analysis_collection].update_one(
                 {"analysis_id": analysis_id},
                 {"$set": {"status": "failed", "error_message": str(e)}}
@@ -2936,7 +2936,7 @@ class PortfolioService:
         user_id: str,
         analysis_id: str
     ) -> Optional[Dict[str, Any]]:
-        """根据分析ID获取分析报告"""
+        """根据研究 ID 获取研究报告"""
         report = await self.db[self.position_analysis_collection].find_one({
             "user_id": user_id,
             "analysis_id": analysis_id
@@ -2954,7 +2954,7 @@ class PortfolioService:
         market: str,
         position_type: str = "real"
     ) -> Optional[Dict[str, Any]]:
-        """获取某只股票的最新分析报告
+        """获取某只股票的最新研究报告
         
         Args:
             user_id: 用户ID
@@ -2962,7 +2962,7 @@ class PortfolioService:
             market: 市场类型
             position_type: 持仓类型 (real/simulated)
         """
-        # 🔥 根据 position_type 查询对应的分析报告
+        # 🔥 根据 position_type 查询对应的研究报告
         query = {
             "user_id": user_id,
             "position_id": f"{code}_{market}",
@@ -2980,7 +2980,7 @@ class PortfolioService:
         return self._format_position_analysis_report(report)
 
     def _format_position_analysis_report(self, report: Dict) -> Dict[str, Any]:
-        """格式化分析报告为响应格式"""
+        """格式化研究报告为响应格式"""
         snapshot = report.get("position_snapshot") or {}
         ai_analysis = self._sanitize_position_analysis_dict(report.get("ai_analysis") or {})
         price_targets = ai_analysis.get("price_targets") or {}
@@ -3081,11 +3081,11 @@ class PortfolioService:
         if position_type == "simulated":
             # 查询模拟持仓
             collection = self.paper_positions_collection
-            logger.info(f"📊 [持仓分析] 查询模拟持仓: {code} ({market})")
+            logger.info(f"📊 [持仓研究] 查询模拟持仓: {code} ({market})")
         else:
             # 查询用户持仓
             collection = self.positions_collection
-            logger.info(f"📊 [持仓分析] 查询用户持仓: {code} ({market})")
+            logger.info(f"📊 [持仓研究] 查询用户持仓: {code} ({market})")
 
         # 查询该股票的所有持仓记录
         positions = await self.db[collection].find({
@@ -3115,7 +3115,7 @@ class PortfolioService:
 
         # 获取当前价格
         current_price = await self._get_stock_price(code, market)
-        # 🔥 修复：确保 market_value、unrealized_pnl 和 unrealized_pnl_pct 不为 None（模拟持仓分析时可能为 None）
+        # 🔥 修复：确保 market_value、unrealized_pnl 和 unrealized_pnl_pct 不为 None（模拟持仓研究时可能为 None）
         if current_price and current_price > 0:
             market_value = current_price * total_quantity
             unrealized_pnl = market_value - total_cost
@@ -3185,13 +3185,13 @@ class PortfolioService:
         try:
             start_time = datetime.now()
 
-            # 将市场代码转换为中文名称（单股分析服务需要）
+            # 将市场代码转换为中文名称（单股研究服务需要）
             market_name = convert_market_code_to_name(market)
 
-            # 检查是否有缓存的单股分析报告（只读取缓存，不创建新任务）
+            # 检查是否有缓存的单股研究报告（只读取缓存，不创建新任务）
             stock_analysis_report = None
             if params.use_stock_analysis:
-                logger.info(f"📊 [汇总持仓分析] 检查单股分析报告缓存 - {code} (市场: {market} -> {market_name}, 共{len(positions)}条记录)")
+                logger.info(f"📊 [汇总持仓研究] 检查单股研究报告缓存 - {code} (市场: {market} -> {market_name}, 共{len(positions)}条记录)")
                 stock_analysis_report = await self._get_cached_stock_analysis_report(
                     stock_code=code,
                     market=market_name,
@@ -3200,13 +3200,13 @@ class PortfolioService:
 
                 # 如果没有缓存报告，记录日志
                 if not stock_analysis_report:
-                    logger.info(f"ℹ️ [汇总持仓分析] 未找到缓存报告，将直接进行持仓分析 - {code}")
+                    logger.info(f"ℹ️ [汇总持仓研究] 未找到缓存报告，将直接进行持仓研究 - {code}")
                 else:
-                    logger.info(f"✅ [汇总持仓分析] 找到缓存报告，将作为参考 - {code}, 来源: {stock_analysis_report.get('source', 'unknown')}")
+                    logger.info(f"✅ [汇总持仓研究] 找到缓存报告，将作为参考 - {code}, 来源: {stock_analysis_report.get('source', 'unknown')}")
             else:
-                logger.info(f"⏭️ [汇总持仓分析] 用户选择不使用单股分析报告 - {code}")
+                logger.info(f"⏭️ [汇总持仓研究] 用户选择不使用单股研究报告 - {code}")
 
-            # 如果没有单股分析报告，创建一个空的报告结构，避免后续代码报错
+            # 如果没有单股研究报告，创建一个空的报告结构，避免后续代码报错
             if not stock_analysis_report:
                 stock_analysis_report = {
                     "task_id": None,
@@ -3217,12 +3217,12 @@ class PortfolioService:
                     "source": "none"
                 }
 
-            # 第二阶段：结合持仓信息进行持仓分析
-            logger.info(f"📊 [汇总持仓分析] 第二阶段：持仓专用分析 - {code}")
+            # 第二阶段：结合持仓信息进行持仓研究
+            logger.info(f"📊 [汇总持仓研究] 第二阶段：持仓专用研究 - {code}")
 
-            # 根据配置选择分析引擎（USE_STOCK_ENGINE=true 时使用工作流引擎v2.0）
+            # 根据配置选择研究引擎（USE_STOCK_ENGINE=true 时使用工作流引擎 v2.0）
             if _use_stock_engine():
-                logger.info(f"🚀 [汇总持仓分析] 使用工作流引擎v2.0进行分析")
+                logger.info(f"🚀 [汇总持仓研究] 使用工作流引擎 v2.0 进行研究")
                 ai_result = await self._call_position_ai_analysis_workflow(
                     snapshot=snapshot,
                     params=analysis_params,
@@ -3230,7 +3230,7 @@ class PortfolioService:
                     user_id=user_id
                 )
             else:
-                logger.info(f"🤖 [汇总持仓分析] 使用传统LLM分析")
+                logger.info(f"🤖 [汇总持仓研究] 使用传统 LLM 研究")
                 ai_result = await self._call_position_ai_analysis_v2(
                     snapshot=snapshot,
                     params=analysis_params,
@@ -3244,10 +3244,10 @@ class PortfolioService:
             report.execution_time = execution_time
             report.status = PortfolioAnalysisStatus.COMPLETED
             report.stock_analysis_task_id = stock_analysis_report.get("task_id")
-            logger.info(f"✅ 汇总持仓分析完成: {code}, 建议: {ai_result.action}, 共{len(positions)}条记录")
+            logger.info(f"✅ 汇总持仓研究完成: {code}, 结论: {ai_result.action}, 共{len(positions)}条记录")
 
         except Exception as e:
-            logger.error(f"❌ 汇总持仓分析失败: {e}", exc_info=True)
+            logger.error(f"❌ 汇总持仓研究失败: {e}", exc_info=True)
             report.status = PortfolioAnalysisStatus.FAILED
             report.error_message = str(e)
 
@@ -3280,14 +3280,14 @@ class PortfolioService:
             params: 分析参数
 
         Returns:
-            持仓分析报告
+            持仓研究报告
         """
         from app.services.task_analysis_service import get_task_analysis_service
         from app.models.analysis import AnalysisTaskType
         from app.models.portfolio import PositionAnalysisByCodeRequest
         from app.models.user import PyObjectId
 
-        logger.info(f"🚀 [持仓分析v2.0] 使用统一任务引擎分析: {code} (市场: {market})")
+        logger.info(f"🚀 [持仓研究v2.0] 使用统一任务引擎研究: {code} (市场: {market})")
 
         # 查询该股票的所有持仓记录（用于构建快照）
         positions = await self.db[self.positions_collection].find({
@@ -3400,7 +3400,7 @@ class PortfolioService:
             if task.result and "ai_analysis" in task.result:
                 report.ai_analysis = AIAnalysisResult(**task.result["ai_analysis"])
 
-            logger.info(f"✅ [持仓分析v2.0] 分析完成: {code}, 任务ID: {task.task_id}")
+            logger.info(f"✅ [持仓研究v2.0] 研究完成: {code}, 任务ID: {task.task_id}")
 
             # 保存报告
             report_dict = report.model_dump(by_alias=True, exclude={"id"})
@@ -3409,7 +3409,7 @@ class PortfolioService:
             return report
 
         except Exception as e:
-            logger.error(f"❌ [持仓分析v2.0] 分析失败: {code} - {e}", exc_info=True)
+            logger.error(f"❌ [持仓研究v2.0] 研究失败: {code} - {e}", exc_info=True)
 
             # 返回失败报告
             report = PositionAnalysisReport(
@@ -3432,7 +3432,7 @@ class PortfolioService:
         stock_code: str,
         market: str = "A股"
     ) -> Dict[str, Any]:
-        """检查单股分析报告缓存状态
+        """检查单股研究报告缓存状态
         
         Args:
             stock_code: 股票代码
@@ -3451,7 +3451,7 @@ class PortfolioService:
         
         db = get_mongo_db()
         
-        # 检查24小时内的报告（前端提示用户的标准）
+        # 检查24小时内的研究报告（前端提示用户的标准）
         cache_hours = 24
         # 🔥 使用 now_tz() 确保时区一致
         recent_cutoff = now_tz() - timedelta(hours=cache_hours)
@@ -3500,7 +3500,7 @@ class PortfolioService:
             }
         
         # 没有找到缓存
-        logger.info(f"❌ [检查缓存] 未找到缓存: {stock_code}")
+        logger.info(f"❌ [检查缓存] 未找到研究缓存: {stock_code}")
         return {
             "has_cache": False,
             "cache_age_minutes": None,
@@ -3514,9 +3514,9 @@ class PortfolioService:
         market: str = "A股",
         cache_hours: int = 24
     ) -> Optional[Dict[str, Any]]:
-        """只从缓存中获取股票分析报告（不创建新任务）
+        """只从缓存中获取股票研究报告（不创建新任务）
         
-        仅用于持仓分析场景，只读取已有缓存，不会创建新的单股分析任务
+        仅用于持仓研究场景，只读取已有缓存，不会创建新的单股研究任务
         
         Args:
             stock_code: 股票代码
@@ -3524,7 +3524,7 @@ class PortfolioService:
             cache_hours: 缓存有效期（小时）
             
         Returns:
-            分析报告字典，如果没有缓存则返回 None
+            研究报告字典，如果没有缓存则返回 None
         """
         from app.core.database import get_mongo_db
         
@@ -3532,7 +3532,7 @@ class PortfolioService:
         # 🔥 使用 now_tz() 确保时区一致
         recent_cutoff = now_tz() - timedelta(hours=cache_hours)
         
-        # 检查是否有已完成的分析报告（任意用户）
+        # 检查是否有已完成的研究报告（任意用户）
         existing_report = await db.analysis_reports.find_one({
             "stock_symbol": stock_code,
             "created_at": {"$gte": recent_cutoff},
@@ -3564,7 +3564,7 @@ class PortfolioService:
             age_minutes = int(report_age.total_seconds() / 60)
             age_hours = report_age.total_seconds() / 3600
             
-            logger.info(f"📚 [持仓分析] 从缓存读取单股分析报告: {stock_code}, "
+            logger.info(f"📚 [持仓研究] 从缓存读取单股研究报告: {stock_code}, "
                        f"task_id={existing_report.get('task_id')}, "
                        f"报告时间: {age_minutes}分钟前 (created_at: {created_at}, current_time: {current_time})")
             return {
@@ -3578,7 +3578,7 @@ class PortfolioService:
                 "cache_age_hours": round(age_hours, 2)
             }
         
-        logger.info(f"❌ [持仓分析] 未找到缓存的单股分析报告: {stock_code}")
+        logger.info(f"❌ [持仓研究] 未找到缓存的单股研究报告: {stock_code}")
         return None
 
     async def _get_stock_analysis_via_engine(
@@ -3586,10 +3586,10 @@ class PortfolioService:
         stock_code: str,
         market: str = "A股"
     ) -> Optional[Dict[str, Any]]:
-        """使用新版 StockAnalysisEngine 获取分析报告
+        """使用新版 StockAnalysisEngine 获取研究报告
 
         Returns:
-            分析报告字典，失败返回 None
+            研究报告字典，失败返回 None
         """
         try:
             from tradingagents.core.engine.stock_analysis_engine import StockAnalysisEngine
@@ -3603,7 +3603,7 @@ class PortfolioService:
             }
             market_type = market_type_map.get(market, "cn")
 
-            logger.info(f"🚀 [持仓分析] 使用 StockAnalysisEngine 分析: {stock_code} (市场: {market_type})")
+            logger.info(f"🚀 [持仓研究] 使用 StockAnalysisEngine 研究: {stock_code} (市场: {market_type})")
 
             # 创建 LLM 依赖提供者（从数据库配置获取 LLM）
             dependency_provider = LegacyDependencyProvider.get_instance()
@@ -3620,7 +3620,7 @@ class PortfolioService:
             )
 
             if result and result.success:
-                logger.info(f"✅ [持仓分析] StockAnalysisEngine 分析完成: {stock_code}")
+                logger.info(f"✅ [持仓研究] StockAnalysisEngine 研究完成: {stock_code}")
 
                 # 转换为统一的返回格式
                 context = result.context
@@ -3647,14 +3647,14 @@ class PortfolioService:
                     "recommendation": result.recommendation if hasattr(result, 'recommendation') else ""
                 }
             else:
-                logger.warning(f"⚠️ [持仓分析] StockAnalysisEngine 返回失败结果: {stock_code}")
+                logger.warning(f"⚠️ [持仓研究] StockAnalysisEngine 返回失败结果: {stock_code}")
                 return None
 
         except ImportError as e:
-            logger.warning(f"⚠️ [持仓分析] StockAnalysisEngine 模块不可用: {e}")
+            logger.warning(f"⚠️ [持仓研究] StockAnalysisEngine 模块不可用: {e}")
             return None
         except Exception as e:
-            logger.error(f"❌ [持仓分析] StockAnalysisEngine 调用异常: {e}", exc_info=True)
+            logger.error(f"❌ [持仓研究] StockAnalysisEngine 调用异常: {e}", exc_info=True)
             return None
 
     async def _get_stock_analysis_via_legacy(
@@ -3664,7 +3664,7 @@ class PortfolioService:
         market: str = "A股",
         skip_if_not_exists: bool = False
     ) -> Optional[Dict[str, Any]]:
-        """使用旧版 simple_analysis_service 获取分析报告（降级方案）
+        """使用旧版 simple_analysis_service 获取研究报告（降级方案）
 
         Args:
             user_id: 用户ID
@@ -3673,7 +3673,7 @@ class PortfolioService:
             skip_if_not_exists: 如果没有缓存报告，是否跳过（不创建新任务）
 
         Returns:
-            分析报告字典，如果 skip_if_not_exists=True 且没有缓存则返回 None
+            研究报告字典，如果 skip_if_not_exists=True 且没有缓存则返回 None
         """
         from app.services.simple_analysis_service import get_simple_analysis_service
         from app.models.analysis import SingleAnalysisRequest, AnalysisParameters
@@ -3689,8 +3689,8 @@ class PortfolioService:
         # 🔥 使用 now_tz() 确保时区一致
         recent_cutoff = now_tz() - timedelta(hours=cache_hours)
 
-        # 1. 首先检查是否有已完成的分析报告（3小时内，不限用户）
-        # 单股分析的结果对所有用户都是一样的，可以共享
+        # 1. 首先检查是否有已完成的研究报告（3小时内，不限用户）
+        # 单股研究的结果对所有用户都是一样的，可以共享
         # 注意：analysis_reports 集合中使用的是 stock_symbol 字段（不是 stock_code）
         existing_report = await db.analysis_reports.find_one({
             "stock_symbol": stock_code,  # 使用 stock_symbol 字段匹配
@@ -3721,7 +3721,7 @@ class PortfolioService:
             
             report_age = current_time - created_at
             age_minutes = int(report_age.total_seconds() / 60)
-            logger.info(f"📚 [持仓分析] 复用已完成的分析报告: {stock_code}, "
+            logger.info(f"📚 [持仓研究] 复用已完成的研究报告: {stock_code}, "
                        f"task_id={existing_report.get('task_id')}, "
                        f"报告时间: {age_minutes}分钟前 (created_at: {created_at}, current_time: {current_time})")
             return {
@@ -3736,10 +3736,10 @@ class PortfolioService:
 
         # 如果设置了 skip_if_not_exists，且没有缓存报告，直接返回 None
         if skip_if_not_exists:
-            logger.info(f"⏭️ [持仓分析] 没有缓存的单股分析报告，跳过单股分析: {stock_code}")
+            logger.info(f"⏭️ [持仓研究] 没有缓存的单股研究报告，跳过单股研究: {stock_code}")
             return None
 
-        # 2. 检查是否有正在运行的分析任务（避免重复创建，不限用户）
+        # 2. 检查是否有正在运行的研究任务（避免重复创建，不限用户）
         # 注意：analysis_reports 集合中使用的是 stock_symbol 字段
         running_report = await db.analysis_reports.find_one({
             "stock_symbol": stock_code,  # 使用 stock_symbol 字段匹配
@@ -3749,12 +3749,12 @@ class PortfolioService:
 
         if running_report:
             task_id = running_report.get("task_id")
-            logger.info(f"⏳ [持仓分析] 发现正在运行的任务，等待完成: {stock_code}, task_id={task_id}")
+            logger.info(f"⏳ [持仓研究] 发现正在运行的任务，等待完成: {stock_code}, task_id={task_id}")
             # 等待这个正在运行的任务完成
             return await self._wait_for_analysis_task(analysis_service, task_id, stock_code)
 
-        # 3. 没有缓存也没有正在运行的任务，创建新的分析
-        logger.info(f"🔄 [持仓分析] 3小时内无可用报告，执行新的单股分析: {stock_code}, market={market}")
+        # 3. 没有缓存也没有正在运行的任务，创建新的研究
+        logger.info(f"🔄 [持仓研究] 3小时内无可用报告，执行新的单股研究: {stock_code}, market={market}")
 
         # 创建分析请求（使用快速分析模式）
         analysis_request = SingleAnalysisRequest(
@@ -3784,7 +3784,7 @@ class PortfolioService:
         stock_code: str,
         max_wait: int = 300
     ) -> Dict[str, Any]:
-        """等待分析任务完成并返回结果"""
+        """等待研究任务完成并返回结果"""
         import asyncio
 
         waited = 0
@@ -3792,7 +3792,7 @@ class PortfolioService:
             task_status = await analysis_service.get_task_status(task_id)
             if task_status and task_status.get("status") == "completed":
                 result_data = task_status.get("result_data", {})
-                logger.info(f"✅ [持仓分析] 单股分析完成: {stock_code}")
+                logger.info(f"✅ [持仓研究] 单股研究完成: {stock_code}")
                 return {
                     "task_id": task_id,
                     "reports": result_data.get("reports", {}),
@@ -3803,13 +3803,13 @@ class PortfolioService:
                 }
             elif task_status and task_status.get("status") == "failed":
                 error_msg = task_status.get("error_message", "未知错误")
-                logger.warning(f"⚠️ [持仓分析] 单股分析失败: {stock_code}, 错误: {error_msg}")
-                # 返回空报告，持仓分析仍可基于持仓信息给出建议
+                logger.warning(f"⚠️ [持仓研究] 单股研究失败: {stock_code}, 错误: {error_msg}")
+                # 返回空报告，持仓研究仍可基于持仓信息给出观察
                 return {
                     "task_id": task_id,
                     "reports": {},
                     "decision": {},
-                    "summary": f"单股分析未能完成: {error_msg}",
+                    "summary": f"单股研究未能完成: {error_msg}",
                     "recommendation": "",
                     "source": "failed"
                 }
@@ -3818,12 +3818,12 @@ class PortfolioService:
             waited += 2
 
         # 超时
-        logger.warning(f"⚠️ [持仓分析] 单股分析超时: {stock_code}")
+        logger.warning(f"⚠️ [持仓研究] 单股研究超时: {stock_code}")
         return {
             "task_id": task_id,
             "reports": {},
             "decision": {},
-            "summary": "单股分析超时",
+            "summary": "单股研究超时",
             "recommendation": "",
             "source": "timeout"
         }
@@ -3835,15 +3835,15 @@ class PortfolioService:
         stock_analysis_report: Dict[str, Any],
         user_id: Optional[str] = None
     ) -> PositionAnalysisResult:
-        """调用AI进行单股持仓分析 - 方案2
+        """调用 AI 进行单股持仓研究 - 方案 2
 
-        基于完整的单股分析报告 + 持仓信息，生成个性化操作建议
+        基于完整的单股研究报告 + 持仓信息，生成个性化研究观察
         使用系统配置的深度分析模型
         """
         import httpx
 
         try:
-            # 构建持仓分析专用提示词
+            # 构建持仓研究专用提示词
             prompt = self._build_position_analysis_prompt_v2(
                 snapshot=snapshot,
                 params=params,
@@ -3881,7 +3881,7 @@ class PortfolioService:
                 logger.error("❌ [持仓AI分析] API地址未配置")
                 return self._sanitize_position_analysis_result(PositionAnalysisResult(
                     action=PositionAction.HOLD,
-                    action_reason="AI模型未正确配置，请在设置中配置深度分析模型的API地址"
+                    action_reason="AI研究模型未正确配置，请在设置中配置深度分析模型的API地址"
                 ))
 
             # 使用统一的 LLM 适配器
@@ -3910,7 +3910,7 @@ class PortfolioService:
             logger.error(f"❌ [持仓AI分析] 分析失败: {error_msg}", exc_info=True)
             from app.utils.error_formatter import ErrorFormatter
 
-            action_reason = f"AI分析暂时不可用：{ErrorFormatter.format_user_message(error_msg, include_suggestion=False)}"
+            action_reason = f"AI研究暂时不可用：{ErrorFormatter.format_user_message(error_msg, include_suggestion=False)}"
 
             return self._sanitize_position_analysis_result(PositionAnalysisResult(
                 action=PositionAction.HOLD,
@@ -3922,7 +3922,7 @@ class PortfolioService:
         snapshot: PositionSnapshot,
         params: PositionAnalysisRequest
     ) -> PositionAnalysisResult:
-        """调用AI进行单股持仓分析 (旧版本，保留兼容)"""
+        """调用 AI 进行单股持仓研究（旧版本，保留兼容）"""
         try:
             prompt = self._build_position_analysis_prompt(snapshot, params)
 
@@ -3953,7 +3953,7 @@ class PortfolioService:
 
             return self._sanitize_position_analysis_result(PositionAnalysisResult(
                 action=PositionAction.HOLD,
-                action_reason=f"AI分析暂时不可用：{ErrorFormatter.format_user_message(str(e), include_suggestion=False)}"
+                action_reason=f"AI研究暂时不可用：{ErrorFormatter.format_user_message(str(e), include_suggestion=False)}"
             ))
 
     def _build_position_analysis_prompt(
@@ -3961,7 +3961,7 @@ class PortfolioService:
         snapshot: PositionSnapshot,
         params: PositionAnalysisRequest
     ) -> str:
-        """构建单股持仓分析提示词"""
+        """构建单股持仓研究提示词"""
         pnl_status = "盈利" if (snapshot.unrealized_pnl or 0) >= 0 else "亏损"
 
         prompt = f"""# 单股持仓研究观察任务
@@ -3981,7 +3981,7 @@ class PortfolioService:
 - 目标收益率: {params.target_profit_pct}%
 - 是否考虑加仓: {'是' if params.include_add_position else '否'}
 
-## 分析要求
+## 研究要求
 请仅输出研究观察，不得提供买卖、加减仓、清仓、止盈止损、目标价或仓位比例等执行性建议。
 
 请从以下维度分析该持仓，用中文回答：
@@ -3991,7 +3991,7 @@ class PortfolioService:
 3. **风险评估** (300-500字，说明主要风险点、触发条件、影响路径)
 4. **机会评估** (300-500字，说明潜在积极因素、经营改善点、催化事件)
 5. **后续跟踪要点** (100字以内)
-6. **详细分析** (200字以内的完整研究摘要)
+6. **详细研究摘要** (200字以内的完整研究摘要)
 
 请直接给出研究观察结果。"""
 
@@ -4004,15 +4004,15 @@ class PortfolioService:
         stock_analysis_report: Dict[str, Any],
         user_id: Optional[str] = None
     ) -> str:
-        """构建持仓分析专用提示词 - 方案2
+        """构建持仓研究专用提示词 - 方案 2
 
-        基于完整的单股分析报告 + 持仓信息，生成个性化操作建议
+        基于完整的单股研究报告 + 持仓信息，生成个性化研究观察
         支持模板系统（通过 USE_TEMPLATE_PROMPTS 特性开关控制）
         """
         # 先构建硬编码版本作为降级兜底
         legacy_prompt = self._build_legacy_position_prompt(snapshot, params, stock_analysis_report)
 
-        logger.info("ℹ️ [持仓分析] 合规模式启用，使用研究观察提示词")
+        logger.info("ℹ️ [持仓研究] 合规模式启用，使用研究观察提示词")
         return legacy_prompt
 
     def _build_legacy_position_prompt(
@@ -4021,30 +4021,29 @@ class PortfolioService:
         params: PositionAnalysisRequest,
         stock_analysis_report: Dict[str, Any]
     ) -> str:
-        """构建硬编码持仓分析提示词（旧版，作为降级兜底）"""
+        """构建硬编码持仓研究提示词（旧版，作为降级兜底）"""
         pnl_status = "盈利" if (snapshot.unrealized_pnl or 0) >= 0 else "亏损"
         pnl_pct = snapshot.unrealized_pnl_pct or 0
 
-        # 提取各分析师报告
+        # 提取各研究模块报告
         reports = stock_analysis_report.get("reports", {})
         decision = stock_analysis_report.get("decision", {})
         summary = stock_analysis_report.get("summary", "")
         recommendation = stock_analysis_report.get("recommendation", "")
 
-        # 构建分析报告摘要
+        # 构建研究报告摘要
         market_report = reports.get("market_report", "")[:1500] if reports.get("market_report") else "暂无"
         fundamentals_report = reports.get("fundamentals_report", "")[:1500] if reports.get("fundamentals_report") else "暂无"
         news_report = reports.get("news_report", "")[:1000] if reports.get("news_report") else "暂无"
 
-        # 提取交易建议
+        # 提取研究背景字段，兼容旧结构
         trade_action = decision.get("action", "未知") if decision else "未知"
-        target_price = decision.get("target_price") if decision else None
 
-        prompt = f"""# 持仓分析专家任务
+        prompt = f"""# 持仓研究任务
 
-你是一位专业的持仓研究分析师，需要基于完整的股票分析报告和用户的持仓情况，给出中性的研究观察。
+    你是一位专业的持仓研究分析师，需要基于完整的股票研究报告和用户的持仓情况，给出中性的研究观察。
 
-## 📊 股票分析报告摘要
+    ## 📊 股票研究报告摘要
 
 ### 技术面分析
 {market_report}
@@ -4084,27 +4083,27 @@ class PortfolioService:
 
 ---
 
-## 📝 分析要求
+## 📝 研究要求
 
-请综合以上股票分析报告和持仓信息，给出中性的持仓研究观察。
+请综合以上股票研究报告和持仓信息，给出中性的持仓研究观察。
 
 **重要考量因素**：
 1. 当前盈亏状态：{pnl_status} {pnl_pct:.2f}%
 2. 与目标收益率的差距：目标 {params.target_profit_pct}%，当前 {pnl_pct:.2f}%
-3. 股票分析报告中的研究背景信息：{trade_action}
+3. 股票研究报告中的研究背景信息：{trade_action}
 4. 技术面、基本面、新闻面的综合判断
 
 **请以JSON格式输出**：
 ```json
 {{
-    "action": "持有",
-    "action_reason": "持仓现状观察，需要结合分析报告和持仓情况说明（100字以内，不提供执行建议）",
+    "action": "中性",
+    "action_reason": "持仓现状观察，需要结合研究报告和持仓情况说明（100字以内，不提供执行建议）",
     "confidence": 0-100的整数,
     "stop_loss_price": null,
     "take_profit_price": null,
-    "risk_assessment": "基于分析报告的详细风险评估（300-500字，需包含主要风险点、风险等级、风险影响等）",
-    "opportunity_assessment": "基于分析报告的详细机会评估（300-500字，需包含潜在机会、催化剂、收益空间等）",
-    "detailed_analysis": "结合分析报告和持仓情况的详细分析（200字以内）",
+    "risk_assessment": "基于研究报告的详细风险评估（300-500字，需包含主要风险点、风险等级、风险影响等）",
+    "opportunity_assessment": "基于研究报告的详细机会评估（300-500字，需包含潜在机会、催化剂、经营改善线索等）",
+    "detailed_analysis": "结合研究报告和持仓情况的详细研究摘要（200字以内）",
     "suggested_quantity": null,
     "suggested_amount": null,
     "position_risk_analysis": "仓位风险分析（如提供了资金总量，分析仓位占比是否合理，50字以内，可选）"
@@ -4112,7 +4111,7 @@ class PortfolioService:
 ```
 
 **注意事项**：
-- 必须基于提供的分析报告进行判断，不要凭空编造信息
+- 必须基于提供的研究报告进行判断，不要凭空编造信息
 - 如果用户提供了资金总量，务必在分析中考虑仓位占比和风险敞口
 - 不得输出买卖、加减仓、清仓、止盈止损、目标价或仓位比例等执行性建议
 """
@@ -4190,7 +4189,7 @@ class PortfolioService:
         """
         pnl_pct = snapshot.unrealized_pnl_pct or 0
 
-        # 提取分析报告
+        # 提取研究报告
         reports = stock_analysis_report.get("reports", {})
         decision = stock_analysis_report.get("decision", {})
 
@@ -4240,7 +4239,7 @@ class PortfolioService:
                 "include_add_position": "是" if params.include_add_position else "否"
             },
 
-            # 单股分析报告
+            # 单股研究报告
             "engine": {
                 "market_report": (reports.get("market_report", "") or "暂无")[:1500],
                 "fundamentals_report": (reports.get("fundamentals_report", "") or "暂无")[:1500],
@@ -4464,7 +4463,7 @@ class PortfolioService:
         page_size: int = 10,
         position_type: str = "real"
     ) -> Dict[str, Any]:
-        """获取单股分析历史
+        """获取单股研究历史
         
         Args:
             user_id: 用户ID
@@ -4592,18 +4591,18 @@ class PortfolioService:
         stock_analysis_report: Dict[str, Any],
         user_id: Optional[str] = None
     ) -> PositionAnalysisResult:
-        """使用工作流引擎进行持仓分析
+        """使用工作流引擎进行持仓研究
 
-        使用持仓分析工作流，包含：
-        1. 持仓技术面分析师 - 分析技术指标和走势
-        2. 持仓基本面分析师 - 分析财务数据和估值
-        3. 持仓风险评估师 - 评估风险和止损建议
-        4. 持仓操作建议师 - 综合分析给出操作建议
+        使用持仓研究工作流，包含：
+        1. 持仓技术研究模块 - 研究技术指标和走势
+        2. 持仓基本面研究模块 - 研究财务数据和估值
+        3. 持仓风险评估模块 - 评估主要风险与触发条件
+        4. 持仓结论整合模块 - 汇总形成研究观察
         """
         try:
             from core.api.workflow_api import WorkflowAPI
 
-            # 准备单股分析报告数据（agents中使用的字段名是 stock_analysis_report）
+            # 准备单股研究报告数据（agents 中使用的字段名是 stock_analysis_report）
             # 如果有缓存，需要设置 has_cache 标志，并提取 reports 子报告
             stock_analysis_report_for_workflow = {}
             if stock_analysis_report and stock_analysis_report.get("reports"):
@@ -4614,7 +4613,7 @@ class PortfolioService:
                     "task_id": stock_analysis_report.get("task_id"),
                     "source": stock_analysis_report.get("source", "cached")
                 }
-                logger.info(f"📊 [工作流持仓分析] 传递缓存报告到工作流: {snapshot.code}, reports字段: {list(stock_analysis_report_for_workflow.get('reports', {}).keys())}")
+                logger.info(f"📊 [工作流持仓研究] 传递缓存报告到工作流: {snapshot.code}, reports字段: {list(stock_analysis_report_for_workflow.get('reports', {}).keys())}")
             else:
                 # 无缓存：设置标志为空
                 stock_analysis_report_for_workflow = {
@@ -4623,7 +4622,7 @@ class PortfolioService:
                     "task_id": None,
                     "source": "none"
                 }
-                logger.info(f"📊 [工作流持仓分析] 无缓存报告，传递空结构到工作流: {snapshot.code}")
+                logger.info(f"📊 [工作流持仓研究] 无缓存报告，传递空结构到工作流: {snapshot.code}")
             
             # 准备工作流输入数据
             workflow_inputs = {
@@ -4644,7 +4643,7 @@ class PortfolioService:
                     "total_capital": snapshot.total_capital
                 },
 
-                # 分析参数
+                # 研究参数
                 "analysis_params": {
                     "research_depth": params.research_depth,
                     "include_add_position": params.include_add_position,
@@ -4658,7 +4657,7 @@ class PortfolioService:
                     "position_type": params.position_type
                 },
 
-                # 单股分析报告（agents中使用的字段名是 stock_analysis_report）
+                # 单股研究报告（agents 中使用的字段名是 stock_analysis_report）
                 "stock_analysis_report": stock_analysis_report_for_workflow,
 
                 # 用户偏好（用于选择提示词模板风格）
@@ -4668,9 +4667,9 @@ class PortfolioService:
                 "position_type": params.position_type
             }
 
-            logger.info(f"🚀 [工作流持仓分析] 开始执行持仓分析工作流 - {snapshot.code}")
+            logger.info(f"🚀 [工作流持仓研究] 开始执行持仓研究工作流 - {snapshot.code}")
 
-            # 🔥 从数据库获取模型配置并构建 legacy_config（与单股分析流程保持一致）
+            # 🔥 从数据库获取模型配置并构建 legacy_config（与单股研究流程保持一致）
             legacy_config = {}
             try:
                 from app.services.config_provider import provider as config_provider
@@ -4691,7 +4690,7 @@ class PortfolioService:
                     
                     if full_config:
                         legacy_config.update(full_config)
-                        logger.info(f"📊 [工作流持仓分析] 从数据库获取完整模型配置: quick={quick_analysis_model}, deep={deep_analysis_model}")
+                        logger.info(f"📊 [工作流持仓研究] 从数据库获取完整模型配置: quick={quick_analysis_model}, deep={deep_analysis_model}")
                         logger.info(f"  quick: temperature={legacy_config.get('quick_temperature')}, max_tokens={legacy_config.get('quick_max_tokens')}, timeout={legacy_config.get('quick_timeout')}")
                         logger.info(f"  deep: temperature={legacy_config.get('deep_temperature')}, max_tokens={legacy_config.get('deep_max_tokens')}, timeout={legacy_config.get('deep_timeout')}")
                     else:
@@ -4699,15 +4698,15 @@ class PortfolioService:
                         legacy_config["quick_think_llm"] = quick_analysis_model
                         legacy_config["deep_think_llm"] = deep_analysis_model
                         legacy_config["llm_provider"] = "dashscope"
-                        logger.warning(f"⚠️ [工作流持仓分析] 无法获取完整模型配置，仅设置模型名称")
+                        logger.warning(f"⚠️ [工作流持仓研究] 无法获取完整模型配置，仅设置模型名称")
                 else:
-                    logger.warning(f"⚠️ [工作流持仓分析] system_settings中未找到quick_analysis_model或deep_analysis_model，使用默认配置")
+                    logger.warning(f"⚠️ [工作流持仓研究] system_settings中未找到quick_analysis_model或deep_analysis_model，使用默认配置")
                     # 如果没有配置，使用默认值
                     legacy_config["quick_think_llm"] = quick_analysis_model or "qwen-turbo"
                     legacy_config["deep_think_llm"] = deep_analysis_model or "qwen-plus"
                     legacy_config["llm_provider"] = "dashscope"
             except Exception as e:
-                logger.error(f"❌ [工作流持仓分析] 从数据库获取模型配置失败: {e}", exc_info=True)
+                logger.error(f"❌ [工作流持仓研究] 从数据库获取模型配置失败: {e}", exc_info=True)
                 # 失败时使用默认配置
                 legacy_config["quick_think_llm"] = "qwen-turbo"
                 legacy_config["deep_think_llm"] = "qwen-plus"
@@ -4723,10 +4722,10 @@ class PortfolioService:
 
             if not result.get("success"):
                 error_msg = result.get("error", "工作流执行失败")
-                logger.error(f"❌ [工作流持仓分析] 执行失败: {error_msg}")
+                logger.error(f"❌ [工作流持仓研究] 执行失败: {error_msg}")
                 return self._sanitize_position_analysis_result(PositionAnalysisResult(
                     action=PositionAction.HOLD,
-                    action_reason=f"分析失败: {error_msg}"
+                    action_reason=f"研究失败: {error_msg}"
                 ))
 
             # 解析工作流结果
@@ -4748,13 +4747,13 @@ class PortfolioService:
             
             # action_advice可能是字符串（JSON）或字典（包含content字段）
             action_advice_raw = workflow_result.get("action_advice", "")
-            logger.info(f"📊 [工作流持仓分析] action_advice_raw类型: {type(action_advice_raw)}")
+            logger.info(f"📊 [工作流持仓研究] action_advice_raw类型: {type(action_advice_raw)}")
             
             # 使用extract_content提取content字段（无论原始格式是什么）
             action_advice = extract_content(action_advice_raw)
-            logger.info(f"📊 [工作流持仓分析] action_advice提取后类型: {type(action_advice)}, 长度: {len(str(action_advice))}")
+            logger.info(f"📊 [工作流持仓研究] action_advice提取后类型: {type(action_advice)}, 长度: {len(str(action_advice))}")
 
-            logger.info(f"✅ [工作流持仓分析] 分析完成 - {snapshot.code}")
+            logger.info(f"✅ [工作流持仓研究] 研究完成 - {snapshot.code}")
 
             # 初始化默认值
             from app.models.portfolio import PriceTarget
@@ -4769,7 +4768,7 @@ class PortfolioService:
             # 如果action_advice是JSON格式，先转换为Markdown
             import json
             advice_json = None
-            logger.info(f"📊 [工作流持仓分析] 开始解析action_advice，类型: {type(action_advice)}, 长度: {len(action_advice) if action_advice else 0}")
+            logger.info(f"📊 [工作流持仓研究] 开始解析action_advice，类型: {type(action_advice)}, 长度: {len(action_advice) if action_advice else 0}")
             
             # 尝试解析JSON（action_advice应该是字符串）
             if action_advice and isinstance(action_advice, str) and ("```json" in action_advice or action_advice.strip().startswith("{")):
@@ -4780,23 +4779,23 @@ class PortfolioService:
                         json_end = action_advice.find("```", json_start)
                         if json_end > json_start:
                             json_str = action_advice[json_start:json_end].strip()
-                            logger.info(f"📊 [工作流持仓分析] 从代码块中提取JSON，长度: {len(json_str)}")
+                            logger.info(f"📊 [工作流持仓研究] 从代码块中提取JSON，长度: {len(json_str)}")
                             advice_json = json.loads(json_str)
                     elif action_advice.strip().startswith("{"):
-                        logger.info(f"📊 [工作流持仓分析] 直接解析JSON格式")
+                        logger.info(f"📊 [工作流持仓研究] 直接解析JSON格式")
                         advice_json = json.loads(action_advice)
                 except Exception as e:
-                    logger.warning(f"⚠️ [工作流持仓分析] JSON解析失败: {e}")
+                    logger.warning(f"⚠️ [工作流持仓研究] JSON解析失败: {e}")
                     advice_json = None
             
             # 转换为Markdown格式并提取其他字段（无论action_advice是字典还是解析后的JSON字符串）
             if advice_json:
-                logger.info(f"📊 [工作流持仓分析] JSON解析成功，字段: {list(advice_json.keys())}")
+                logger.info(f"📊 [工作流持仓研究] JSON解析成功，字段: {list(advice_json.keys())}")
                 action_reason = self._convert_action_advice_json_to_markdown(advice_json)
-                logger.info(f"📊 [工作流持仓分析] JSON转换为Markdown成功，长度: {len(action_reason)}")
+                logger.info(f"📊 [工作流持仓研究] JSON转换为Markdown成功，长度: {len(action_reason)}")
                 # 从JSON中提取action
                 action = self._extract_action_from_json(advice_json)
-                logger.info(f"📊 [工作流持仓分析] 提取的action: {action}")
+                logger.info(f"📊 [工作流持仓研究] 提取的action: {action}")
                 # 提取其他字段
                 # 置信度可能在多个位置
                 confidence = None
@@ -4818,27 +4817,27 @@ class PortfolioService:
                         confidence = max(0.0, min(100.0, confidence))
                     except (ValueError, TypeError):
                         confidence = 50.0  # 默认值
-                        logger.warning(f"⚠️ [工作流持仓分析] confidence转换失败，使用默认值50")
+                        logger.warning(f"⚠️ [工作流持仓研究] confidence转换失败，使用默认值50")
                 else:
                     # 如果AI没有生成置信度，根据分析质量设置一个合理的默认值
                     confidence = 50.0  # 默认中等置信度
-                    logger.info(f"📊 [工作流持仓分析] JSON中没有confidence字段，使用默认值50")
+                    logger.info(f"📊 [工作流持仓研究] JSON中没有confidence字段，使用默认值50")
                 
-                logger.info(f"📊 [工作流持仓分析] 提取的confidence: {confidence}")
+                logger.info(f"📊 [工作流持仓研究] 提取的confidence: {confidence}")
                 price_targets = self._extract_price_targets_from_json(advice_json, snapshot, params)
-                logger.info(f"📊 [工作流持仓分析] 提取的price_targets: stop_loss={price_targets.stop_loss_price}, take_profit={price_targets.take_profit_price}, breakeven={price_targets.breakeven_price}")
+                logger.info(f"📊 [工作流持仓研究] 提取的price_targets: stop_loss={price_targets.stop_loss_price}, take_profit={price_targets.take_profit_price}, breakeven={price_targets.breakeven_price}")
                 risk_assessment_text = advice_json.get("risk_assessment", "") or risk_analysis
-                logger.info(f"📊 [工作流持仓分析] 提取的risk_assessment长度: {len(risk_assessment_text)}")
+                logger.info(f"📊 [工作流持仓研究] 提取的risk_assessment长度: {len(risk_assessment_text)}")
                 opportunity_assessment_text = advice_json.get("opportunity_assessment", "")
-                logger.info(f"📊 [工作流持仓分析] 提取的opportunity_assessment长度: {len(opportunity_assessment_text)}")
+                logger.info(f"📊 [工作流持仓研究] 提取的opportunity_assessment长度: {len(opportunity_assessment_text)}")
             else:
-                logger.warning(f"⚠️ [工作流持仓分析] advice_json为空，使用文本解析")
+                logger.warning(f"⚠️ [工作流持仓研究] advice_json为空，使用文本解析")
                 action, action_reason = self._parse_workflow_action_advice(action_advice if isinstance(action_advice, str) else str(action_advice))
 
             # 构建完整的分析结果
             # 注意：使用转换后的 action_reason（Markdown格式）而不是原始的 action_advice（可能是JSON）
             action_advice_for_summary = action_reason if action_reason else action_advice
-            logger.info(f"📊 [工作流持仓分析] 构建analysis_summary: 使用转换后的action_reason（长度: {len(action_advice_for_summary)}）")
+            logger.info(f"📊 [工作流持仓研究] 构建analysis_summary: 使用转换后的action_reason（长度: {len(action_advice_for_summary)}）")
             
             # analysis_summary 包含所有内容（用于summary字段）
             analysis_summary = f"""
@@ -4867,14 +4866,14 @@ class PortfolioService:
 {risk_analysis}
             """.strip()
             
-            logger.info(f"📊 [工作流持仓分析] analysis_summary长度: {len(analysis_summary)}, detailed_analysis长度: {len(detailed_analysis)}")
+            logger.info(f"📊 [工作流持仓研究] analysis_summary长度: {len(analysis_summary)}, detailed_analysis长度: {len(detailed_analysis)}")
             
             # 确保 detailed_analysis 不为空
             if not detailed_analysis:
-                logger.warning(f"⚠️ [工作流持仓分析] detailed_analysis为空，使用默认内容")
+                logger.warning(f"⚠️ [工作流持仓研究] detailed_analysis为空，使用默认内容")
                 detailed_analysis = f"【技术面分析】\n{technical_analysis}\n\n【基本面分析】\n{fundamental_analysis}\n\n【风险评估】\n{risk_analysis}".strip()
 
-            logger.info(f"📊 [工作流持仓分析] 构建分析结果: action={action}, risk_assessment长度={len(risk_assessment_text)}, detailed_analysis长度={len(detailed_analysis)}")
+            logger.info(f"📊 [工作流持仓研究] 构建研究结果: action={action}, risk_assessment长度={len(risk_assessment_text)}, detailed_analysis长度={len(detailed_analysis)}")
             
             # recommendation 字段也应该使用转换后的 Markdown 格式（与 action_reason 保持一致）
             # 如果 action_reason 已经转换过，直接使用它；否则使用原始的 action_advice（但必须是字符串）
@@ -4888,10 +4887,10 @@ class PortfolioService:
             
             # 确保 recommendation_markdown 是字符串
             if not isinstance(recommendation_markdown, str):
-                logger.warning(f"⚠️ [工作流持仓分析] recommendation不是字符串，类型: {type(recommendation_markdown)}，转换为字符串")
+                logger.warning(f"⚠️ [工作流持仓研究] recommendation不是字符串，类型: {type(recommendation_markdown)}，转换为字符串")
                 recommendation_markdown = str(recommendation_markdown) if recommendation_markdown else ""
             
-            logger.info(f"📊 [工作流持仓分析] recommendation字段: 使用转换后的Markdown，长度: {len(recommendation_markdown)}")
+            logger.info(f"📊 [工作流持仓研究] recommendation字段: 使用转换后的Markdown，长度: {len(recommendation_markdown)}")
 
             return self._sanitize_position_analysis_result(PositionAnalysisResult(
                 action=action,
@@ -4907,10 +4906,10 @@ class PortfolioService:
             ))
 
         except Exception as e:
-            logger.error(f"❌ [工作流持仓分析] 执行异常: {e}", exc_info=True)
+            logger.error(f"❌ [工作流持仓研究] 执行异常: {e}", exc_info=True)
             return self._sanitize_position_analysis_result(PositionAnalysisResult(
                 action=PositionAction.HOLD,
-                action_reason=f"工作流分析异常: {str(e)}"
+                action_reason=f"工作流研究异常: {str(e)}"
             ))
 
     def _get_user_analysis_preference(self, user_id: Optional[str], risk_tolerance: str) -> str:
@@ -5409,7 +5408,7 @@ _portfolio_service: Optional[PortfolioService] = None
 
 
 def get_portfolio_service() -> PortfolioService:
-    """获取持仓分析服务实例"""
+    """获取持仓研究服务实例"""
     global _portfolio_service
     if _portfolio_service is None:
         _portfolio_service = PortfolioService()

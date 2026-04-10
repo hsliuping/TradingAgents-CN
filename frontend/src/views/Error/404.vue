@@ -37,7 +37,7 @@
           </el-link>
           <el-link type="primary" @click="$router.push('/analysis/single')">
             <el-icon><TrendCharts /></el-icon>
-            单股分析
+            单股研究
           </el-link>
           <el-link type="primary" @click="$router.push('/screening')">
             <el-icon><Search /></el-icon>

@@ -4,10 +4,10 @@
     <div class="page-header">
       <h1 class="page-title">
         <el-icon><Document /></el-icon>
-        分析报告
+        研究报告
       </h1>
       <p class="page-description">
-        查看和管理股票分析报告，支持多种格式导出（批量导出最多 10 个）
+        查看和管理股票研究报告，支持多种格式导出（批量导出最多 10 个）
       </p>
     </div>
 
@@ -367,10 +367,10 @@ const downloadReport = async (report: any, format: string = 'markdown') => {
       .replace(/[\/\\:*?"<>|]/g, '') // 移除文件名不允许的字符
       .replace(/\s+/g, '_') // 空格替换为下划线
       .trim()
-    // 构建文件名：股票代码_股票名称_分析报告_日期
+    // 构建文件名：股票代码_股票名称_研究报告_日期
     const fileName = cleanStockName
-      ? `${report.stock_code}_${cleanStockName}_分析报告_${report.analysis_date}.${ext}`
-      : `${report.stock_code}_分析报告_${report.analysis_date}.${ext}`
+      ? `${report.stock_code}_${cleanStockName}_研究报告_${report.analysis_date}.${ext}`
+      : `${report.stock_code}_研究报告_${report.analysis_date}.${ext}`
     a.download = fileName
 
     document.body.appendChild(a)
@@ -489,8 +489,8 @@ const exportSelected = async (format: string = 'markdown') => {
         const ext = getFileExtension(format)
         const cleanStockName = (report.stock_name || '').replace(/[\/\\:*?"<>|]/g, '').replace(/\s+/g, '_').trim()
         const fileName = cleanStockName
-          ? `${report.stock_code}_${cleanStockName}_分析报告_${report.analysis_date}.${ext}`
-          : `${report.stock_code}_分析报告_${report.analysis_date}.${ext}`
+          ? `${report.stock_code}_${cleanStockName}_研究报告_${report.analysis_date}.${ext}`
+          : `${report.stock_code}_研究报告_${report.analysis_date}.${ext}`
         a.download = fileName
         document.body.appendChild(a)
         a.click()
@@ -524,7 +524,7 @@ const getTypeColor = (type: string) => {
 
 const getTypeText = (type: string) => {
   const textMap: Record<string, string> = {
-    single: '单股分析',
+    single: '单股研究',
     batch: '批量分析',
     portfolio: '投资组合'
   }

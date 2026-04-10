@@ -623,7 +623,7 @@ class UnifiedAnalysisEngine:
 
 参数: {params}
 
-请提供详细的分析报告。"""
+请提供详细的研究报告。"""
 
     def _build_risk_assessment_prompt(self, params: Dict[str, Any]) -> str:
         """构建风险评估提示词"""
@@ -649,9 +649,9 @@ class UnifiedAnalysisEngine:
 2. 板块表现
 3. 资金流向
 4. 市场情绪
-5. 投资建议
+5. 研究结论
 
 参数: {params}
 
-请提供详细的市场分析报告。"""
+请提供详细的市场研究报告。"""
 

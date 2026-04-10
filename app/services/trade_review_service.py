@@ -27,7 +27,7 @@ def _use_template_prompts() -> bool:
     return value
 
 def _use_workflow_review() -> bool:
-    """动态读取 USE_STOCK_ENGINE 环境变量（复用持仓分析的引擎开关）
+    """动态读取 USE_STOCK_ENGINE 环境变量（复用持仓研究的引擎开关）
 
     当 USE_STOCK_ENGINE=true 时，交易复盘也会使用工作流引擎进行多维度分析
     """
@@ -95,7 +95,7 @@ class TradeReviewService:
             当前价格，如果获取失败则返回 None
         """
         try:
-            # 🔥 使用与持仓分析服务相同的方法获取价格
+            # 🔥 使用与持仓研究服务相同的方法获取价格
             from app.services.portfolio_service import PortfolioService
             portfolio_service = PortfolioService()
             current_price = await portfolio_service._get_stock_price(code, market)

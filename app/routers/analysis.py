@@ -18,7 +18,6 @@ from app.services.analysis_service import get_analysis_service
 from app.services.simple_analysis_service import get_simple_analysis_service
 from app.services.unified_analysis_service import get_unified_analysis_service
 from app.services.websocket_manager import get_websocket_manager
-from app.utils.compliance import sanitize_analysis_payload
 from app.utils.error_formatter import ErrorFormatter
 from app.models.analysis import (
     SingleAnalysisRequest, BatchAnalysisRequest, AnalysisParameters,
@@ -40,15 +39,12 @@ def format_http_error_detail(exc: Exception) -> str:
 # 🔥 统一的结果数据格式化函数
 def normalize_result_data(result_data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    统一格式化分析结果数据，确保所有接口返回一致的格式
+    统一返回分析结果数据。
 
-    主要处理：
-    1. recommendation 字段：使用合规术语，不包含具体价格
-    2. key_points 字段：转换 JSON 字段名为中文描述
-    3. decision 字段：支持新旧字段名
-    4. action 字段：将旧术语（买入/卖出/持有）映射为合规术语（看涨/看跌/中性）
+    当前阶段保留原始结果内容，避免旧报告在读取时再次被压缩，
+    影响历史数据核查与回溯。
     """
-    return sanitize_analysis_payload(result_data)
+    return result_data
 
 
 def get_market_type_from_symbol(symbol: str) -> str:
@@ -441,7 +437,7 @@ async def get_task_status_new(
                 display_message = error_message or "任务执行失败"
             elif frontend_status == "completed":
                 # 完成状态
-                display_message = "分析完成"
+                display_message = "研究完成"
             else:
                 # 运行中：显示当前步骤
                 display_message = current_step_description or f"任务{frontend_status}中..."
@@ -600,7 +596,7 @@ async def get_task_status_new(
                 "task_id": task_id,
                 "status": "completed",
                 "progress": 100,
-                "message": "分析完成（从历史记录恢复）",
+                "message": "研究完成（从历史记录恢复）",
                 "current_step": "completed",
                 "start_time": start_time,
                 "end_time": end_time,
@@ -870,10 +866,10 @@ async def get_task_result(
 
         if not result_data:
             logger.warning(f"❌ [RESULT] 所有数据源都未找到结果: {task_id}")
-            raise HTTPException(status_code=404, detail="分析结果不存在")
+            raise HTTPException(status_code=404, detail="研究结果不存在")
 
         if not result_data:
-            raise HTTPException(status_code=404, detail="分析结果不存在")
+            raise HTTPException(status_code=404, detail="研究结果不存在")
 
         # 处理reports字段 - 如果没有reports字段，优先尝试从文件系统加载，其次从state中提取
         if 'reports' not in result_data or not result_data['reports']:
@@ -1040,7 +1036,7 @@ async def get_task_result(
 
                     if action:
                         parts = [
-                            f"分析观点: {action}",
+                            f"研究结论: {action}",
                             f"价格分析区间: {price_range}" if price_range else None,
                             f"置信度: {confidence}" if confidence is not None else None
                         ]
@@ -1075,7 +1071,7 @@ async def get_task_result(
                     risk_level = decision.get('risk_level')
 
                     if action:
-                        kp.append(f"分析观点: {action}")
+                        kp.append(f"研究结论: {action}")
                     if price_range:
                         # 处理价格区间（可能是列表或单个值）
                         if isinstance(price_range, (list, tuple)) and len(price_range) == 2:
@@ -1127,13 +1123,13 @@ async def get_task_result(
                 if not result_data.get('recommendation'):
                     rec = None
                     if isinstance(da, str):
-                        # 简单基于关键字提取包含“建议”的段落
+                        # 优先提取研究结论，其次兼容旧字段
                         import re
-                        m = re.search(r'(投资建议|建议|结论)[:：]?\s*(.+)', da)
+                        m = re.search(r'(研究结论|研究摘要|结论|摘要|建议|投资建议)[:：]?\s*(.+)', da)
                         if m:
                             rec = m.group(0)
                     elif isinstance(da, dict):
-                        for key in ['final_trade_decision', 'investment_plan', '结论', '建议']:
+                        for key in ['final_trade_decision', 'trader_investment_plan', 'research_team_decision', 'summary', 'recommendation', '结论', '摘要', '建议']:
                             v = da.get(key)
                             if isinstance(v, str) and len(v.strip()) > 10:
                                 rec = v.strip()

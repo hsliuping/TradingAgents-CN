@@ -2,7 +2,7 @@
  * 统一任务中心 API
  *
  * 对接后端 /api/v2/tasks/* 端点
- * 支持所有类型的分析任务（股票分析、持仓分析、交易复盘等）
+ * 支持所有类型的分析任务（股票分析、持仓研究、交易复盘等）
  */
 
 import { ApiClient } from './request'
@@ -149,7 +149,7 @@ export function resumeTask(taskId: string) {
  */
 export const TaskTypeNames: Record<TaskType, string> = {
   [TaskType.STOCK_ANALYSIS]: '股票分析',
-  [TaskType.POSITION_ANALYSIS]: '持仓分析',
+  [TaskType.POSITION_ANALYSIS]: '持仓研究',
   [TaskType.TRADE_REVIEW]: '交易复盘',
   [TaskType.PORTFOLIO_HEALTH]: '组合健康度',
   [TaskType.RISK_ASSESSMENT]: '风险评估',

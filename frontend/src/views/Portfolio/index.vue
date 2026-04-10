@@ -3,7 +3,7 @@
     <div class="header">
       <div class="title">
         <el-icon style="margin-right:8px"><PieChart /></el-icon>
-        <span>持仓分析</span>
+        <span>持仓研究</span>
         <el-tag type="success" size="small" style="margin-left: 8px;">高级</el-tag>
       </div>
       <div class="actions">
@@ -14,9 +14,9 @@
         <el-button v-if="activeTab === 'real'" type="danger" plain size="small" @click="confirmResetAll">清零全部持仓</el-button>
         <!-- 暂时隐藏，功能未完善 -->
         <!-- <el-button type="success" :icon="DataAnalysis" @click="startAnalysis" :loading="analyzing">
-          AI分析
+          AI研究
         </el-button>
-        <el-button type="info" :icon="Document" @click="showAnalysisHistoryDialog = true">分析历史</el-button> -->
+        <el-button type="info" :icon="Document" @click="showAnalysisHistoryDialog = true">研究历史</el-button> -->
       </div>
     </div>
 
@@ -123,7 +123,7 @@
                         <template #default="{ row }">
                           <el-button link type="warning" size="small" @click="quickAddPosition(row)">加仓</el-button>
                           <el-button link type="danger" size="small" @click="quickSellPosition(row)">卖出</el-button>
-                          <el-button link type="success" size="small" @click="analyzePosition(row)">分析</el-button>
+                          <el-button link type="success" size="small" @click="analyzePosition(row)">研究</el-button>
                           <el-button v-if="row.position_count > 1" link type="info" size="small" @click="showPositionDetails(row)">明细</el-button>
                           <el-dropdown trigger="click" @command="(cmd: string) => handleMoreAction(cmd, row)">
                             <el-button link type="info" size="small">更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
@@ -131,7 +131,7 @@
                               <el-dropdown-menu>
                                 <el-dropdown-item command="history">操作历史</el-dropdown-item>
                                 <!-- 暂时隐藏，功能未完善 -->
-                                <!-- <el-dropdown-item command="analysisHistory">分析历史</el-dropdown-item> -->
+                                <!-- <el-dropdown-item command="analysisHistory">研究历史</el-dropdown-item> -->
                                 <el-dropdown-item command="edit" divided>编辑</el-dropdown-item>
                                 <el-dropdown-item command="dividend">分红</el-dropdown-item>
                                 <el-dropdown-item command="split">拆股</el-dropdown-item>
@@ -147,7 +147,7 @@
                     </el-table>
                   </div>
                 </template>
-                <el-empty v-if="realPositions.length === 0" description="暂无用户持仓" />
+                <el-empty v-if="realPositions.length === 0" description="暂无用户持仓，可先添加后再开展研究" />
               </div>
 
               <!-- 单市场展示 -->
@@ -190,7 +190,7 @@
                     <template #default="{ row }">
                       <el-button link type="warning" size="small" @click="quickAddPosition(row)">加仓</el-button>
                       <el-button link type="danger" size="small" @click="quickSellPosition(row)">卖出</el-button>
-                      <el-button link type="success" size="small" @click="analyzePosition(row)">分析</el-button>
+                      <el-button link type="success" size="small" @click="analyzePosition(row)">研究</el-button>
                       <el-button v-if="row.position_count > 1" link type="info" size="small" @click="showPositionDetails(row)">明细</el-button>
                       <el-dropdown trigger="click" @command="(cmd: string) => handleMoreAction(cmd, row)">
                         <el-button link type="info" size="small">更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
@@ -198,7 +198,7 @@
                           <el-dropdown-menu>
                             <el-dropdown-item command="history">操作历史</el-dropdown-item>
                             <!-- 暂时隐藏，功能未完善 -->
-                            <!-- <el-dropdown-item command="analysisHistory">分析历史</el-dropdown-item> -->
+                            <!-- <el-dropdown-item command="analysisHistory">研究历史</el-dropdown-item> -->
                             <el-dropdown-item command="edit" divided>编辑</el-dropdown-item>
                             <el-dropdown-item command="dividend">分红</el-dropdown-item>
                             <el-dropdown-item command="split">拆股</el-dropdown-item>
@@ -212,7 +212,7 @@
                     </template>
                   </el-table-column>
                 </el-table>
-                <el-empty v-if="filteredPositions.length === 0" description="该市场暂无持仓" />
+                <el-empty v-if="filteredPositions.length === 0" description="该市场暂无持仓数据" />
               </div>
             </el-card>
           </el-col>
@@ -230,7 +230,7 @@
                   <div class="industry-pct">{{ item.percentage.toFixed(1) }}%</div>
                 </div>
               </div>
-              <el-empty v-else description="暂无数据" />
+              <el-empty v-else description="暂无行业分布数据" />
             </el-card>
           </el-col>
         </el-row>
@@ -336,14 +336,14 @@
                       </el-table-column>
                       <el-table-column label="操作" width="160" fixed="right">
                         <template #default="{ row }">
-                          <el-button link type="success" size="small" @click="analyzePosition(row)">分析</el-button>
+                          <el-button link type="success" size="small" @click="analyzePosition(row)">研究</el-button>
                           <el-button v-if="row.position_count > 1" link type="info" size="small" @click="showPositionDetails(row)">明细</el-button>
                         </template>
                       </el-table-column>
                     </el-table>
                   </div>
                 </template>
-                <el-empty v-if="paperPositions.length === 0" description="暂无模拟持仓" />
+                <el-empty v-if="paperPositions.length === 0" description="暂无模拟持仓，可先创建后再开展研究" />
               </div>
 
               <!-- 单市场展示 -->
@@ -381,12 +381,12 @@
                   </el-table-column>
                   <el-table-column label="操作" width="160" fixed="right">
                     <template #default="{ row }">
-                      <el-button link type="success" size="small" @click="analyzePosition(row)">分析</el-button>
+                      <el-button link type="success" size="small" @click="analyzePosition(row)">研究</el-button>
                       <el-button v-if="row.position_count > 1" link type="info" size="small" @click="showPositionDetails(row)">明细</el-button>
                     </template>
                   </el-table-column>
                 </el-table>
-                <el-empty v-if="filteredPaperPositions.length === 0" description="该市场暂无模拟持仓" />
+                <el-empty v-if="filteredPaperPositions.length === 0" description="该市场暂无模拟持仓数据" />
               </div>
             </el-card>
           </el-col>
@@ -404,7 +404,7 @@
                   <div class="industry-pct">{{ item.percentage.toFixed(1) }}%</div>
                 </div>
               </div>
-              <el-empty v-else description="暂无数据" />
+              <el-empty v-else description="暂无行业分布数据" />
             </el-card>
           </el-col>
         </el-row>
@@ -418,13 +418,13 @@
       @success="onPositionSaved" 
     />
 
-    <!-- 分析结果对话框 -->
+    <!-- 研究结果对话框 -->
     <AnalysisResultDialog
       v-model:visible="showAnalysisDialog"
       :report="analysisReport"
     />
 
-    <!-- 单股持仓分析对话框 -->
+    <!-- 单股持仓研究对话框 -->
     <PositionAnalysisDialog
       v-model="showPositionAnalysisDialog"
       :position="selectedPosition"
@@ -436,10 +436,10 @@
     <!-- 历史持仓对话框 -->
     <HistoryPositionsDialog v-model="showHistoryDialog" />
 
-    <!-- 持仓分析历史对话框 -->
+    <!-- 持仓研究历史对话框 -->
     <AnalysisHistoryDialog v-model="showAnalysisHistoryDialog" />
 
-    <!-- 单股分析历史对话框 -->
+    <!-- 单股研究历史对话框 -->
     <PositionAnalysisHistoryDialog
       v-model="showPositionAnalysisHistoryDialog"
       :position="selectedPositionForAnalysisHistory"
@@ -884,7 +884,7 @@ const goToStockDetail = (code: string) => {
   })
 }
 
-// AI分析（整体持仓）
+// AI研究（整体持仓）
 const startAnalysis = async () => {
   if (!positions.value.length) {
     ElMessage.warning('请先添加持仓数据')
@@ -896,15 +896,15 @@ const startAnalysis = async () => {
     const res = await portfolioApi.analyzePortfolio({ include_paper: activeTab.value !== 'real' })
     analysisReport.value = res.data || null
     showAnalysisDialog.value = true
-    ElMessage.success('分析完成')
+    ElMessage.success('研究完成')
   } catch (e: any) {
-    ElMessage.error(e.message || '分析失败')
+    ElMessage.error(e.message || '研究失败')
   } finally {
     analyzing.value = false
   }
 }
 
-// 单股持仓分析
+// 单股持仓研究
 const analyzePosition = (row: PositionItem) => {
   selectedPosition.value = row
   showPositionAnalysisDialog.value = true
@@ -958,7 +958,7 @@ const handleMoreAction = (command: string, row: AggregatedPosition) => {
       showStockHistoryDialog.value = true
       break
     case 'analysisHistory':
-      // 显示该股票的分析历史
+      // 显示该股票的研究历史
       selectedPositionForAnalysisHistory.value = {
         code: row.code,
         name: row.name,

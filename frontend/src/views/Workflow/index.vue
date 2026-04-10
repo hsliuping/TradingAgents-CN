@@ -102,8 +102,8 @@
                     </div>
                     <span class="flow-arrow">→</span>
                     <div class="flow-node trader">
-                      <el-tooltip content="交易员">
-                        <span>💰</span>
+                      <el-tooltip content="研究整合员">
+                        <span>🧩</span>
                       </el-tooltip>
                     </div>
                   </div>
@@ -196,7 +196,7 @@
                       <el-dropdown-item command="edit">
                         <el-icon><Edit /></el-icon> 编辑
                       </el-dropdown-item>
-                      <!-- 🔥 只对单股分析流程显示执行选项，持仓分析和复盘分析暂时不显示 -->
+                      <!-- 🔥 只对单股研究流程显示执行选项，持仓研究和复盘分析暂时不显示 -->
                       <el-dropdown-item 
                         v-if="isStockAnalysisWorkflow(workflow)" 
                         command="execute"
@@ -226,7 +226,7 @@
               <el-button size="small" type="primary" @click="openWorkflow(workflow.id)">
                 编辑
               </el-button>
-              <!-- 🔥 只对单股分析流程显示执行按钮，持仓分析和复盘分析暂时不显示 -->
+              <!-- 🔥 只对单股研究流程显示执行按钮，持仓研究和复盘分析暂时不显示 -->
               <el-button 
                 v-if="isStockAnalysisWorkflow(workflow)" 
                 size="small" 
@@ -350,7 +350,7 @@ const sortedTemplates = computed(() => {
       'default_analysis',      // TradingAgents 完整分析流（v1.0）
       'simple_analysis',       // 简单分析流（v1.0）
       'trade_review',          // 交易复盘（v1.0，非v2）
-      'position_analysis'      // 持仓分析（v1.0，非v2）
+      'position_analysis'      // 持仓研究（v1.0，非v2）
     ]
     if (excludedIds.includes(id)) {
       return false
@@ -475,7 +475,7 @@ const getNodeIcon = (node: any) => {
     bull_researcher: '🐂',
     bear_researcher: '🐻',
     research_manager: '👔',
-    trader: '💼',
+    trader: '🧩',
     risk_manager: '⚠️',
     index_analyst: '🌐',
     sector_analyst: '🏭',
@@ -507,7 +507,7 @@ const getNodeIcon = (node: any) => {
     emotion_analyst_v2: '😊',
     attribution_analyst_v2: '🔍',
     review_manager_v2: '📋',
-    // v2.0 持仓分析智能体
+    // v2.0 持仓研究智能体
     pa_technical_v2: '📈',
     pa_fundamental_v2: '📊',
     pa_risk_v2: '⚠️',
@@ -587,8 +587,8 @@ const getFlowSteps = (template: WorkflowDefinition) => {
     steps.push({
       title: hasDebate ? `⚔️ 阶段二：多空辩论（${debateRounds}轮）` : '📝 阶段二：研究分析',
       desc: hasDebate
-        ? `看多研究员和看空研究员基于所有分析报告进行${debateRounds}轮辩论。每轮中双方针对对方观点进行反驳和论证，最终形成更全面的投资观点`
-        : '研究员综合分析师报告形成投资观点',
+        ? `看多研究员和看空研究员基于所有研究报告进行${debateRounds}轮辩论。每轮中双方针对对方观点进行反驳和论证，最终形成更完整的研究判断`
+        : '研究员综合分析师报告形成阶段性研究判断',
       agents: researchers.map(n => n.label)
     })
   }
@@ -605,15 +605,15 @@ const getFlowSteps = (template: WorkflowDefinition) => {
   if (researchManager) {
     steps.push({
       title: '👔 阶段三：综合评估',
-      desc: '研究经理综合看多和看空双方的辩论结果，权衡各方观点，形成最终投资建议',
+      desc: '研究经理综合看多和看空双方的辩论结果，权衡各方观点，形成最终研究结论',
       agents: [researchManager.label]
     })
   }
 
   if (trader) {
     steps.push({
-      title: '💰 阶段四：交易决策',
-      desc: '交易员根据研究经理的建议，制定具体的交易策略，包括买入/卖出信号和目标仓位',
+      title: '🧩 阶段四：研究整合',
+      desc: '研究整合员根据研究经理的结论，汇总研究摘要、关键信号与后续观察清单',
       agents: [trader.label]
     })
   }
@@ -623,8 +623,8 @@ const getFlowSteps = (template: WorkflowDefinition) => {
     steps.push({
       title: hasRiskDebate ? `⚔️ 阶段五：风险辩论（${riskRounds}轮）` : '🛡️ 阶段五：风险评估',
       desc: hasRiskDebate
-        ? `激进、保守、中性三个风险分析师从不同角度评估交易计划，进行${riskRounds}轮辩论讨论`
-        : '风险分析师评估交易方案的风险敞口',
+        ? `激进、保守、中性三个风险分析师从不同角度审阅研究结论与观察前提，进行${riskRounds}轮辩论讨论`
+        : '风险分析师评估研究结论与整合意见的风险暴露',
       agents: riskAnalysts.length > 0 ? riskAnalysts.map(n => n.label) : ['风险分析师']
     })
   }
@@ -632,7 +632,7 @@ const getFlowSteps = (template: WorkflowDefinition) => {
   if (riskManager) {
     steps.push({
       title: '👨‍⚖️ 阶段六：风险裁决',
-      desc: '风险经理综合三方风险分析师的辩论观点，做出最终风险调整决策，设置止损止盈',
+      desc: '风险经理综合三方风险分析师的辩论观点，形成最终风险治理结论并补充关键约束',
       agents: [riskManager.label]
     })
   }
@@ -645,7 +645,7 @@ const getNodeTypeName = (type: string) => {
     analyst: '分析师',
     researcher: '研究员',
     manager: '经理',
-    trader: '交易员',
+    trader: '研究整合员',
     risk: '风控',
     parallel: '并行',
     merge: '合并',
@@ -817,20 +817,20 @@ const formatDate = (date?: string) => {
   return dayjs(date).format('YYYY-MM-DD HH:mm')
 }
 
-// 判断是否为单股分析流程（只有单股分析流程支持执行功能）
+// 判断是否为单股研究流程（只有单股研究流程支持执行功能）
 const isStockAnalysisWorkflow = (workflow: WorkflowSummary | WorkflowDefinition): boolean => {
   const id = (workflow.id || '').toLowerCase()
   const name = (workflow.name || '').toLowerCase()
   
-  // 明确排除持仓分析和复盘分析流程
-  if (id.includes('position_analysis') || name.includes('持仓分析')) {
+  // 明确排除持仓研究和复盘分析流程
+  if (id.includes('position_analysis') || name.includes('持仓分析') || name.includes('持仓研究')) {
     return false
   }
   if (id.includes('trade_review') || name.includes('复盘') || name.includes('交易复盘')) {
     return false
   }
   
-  // 单股分析流程的判断条件
+  // 单股研究流程的判断条件
   // 1. ID是 v2_stock_analysis
   if (id === 'v2_stock_analysis') {
     return true
@@ -841,7 +841,7 @@ const isStockAnalysisWorkflow = (workflow: WorkflowSummary | WorkflowDefinition)
     return true
   }
   
-  // 3. 名称包含"股票分析"或"单股分析"
+  // 3. 名称包含兼容旧名称的股票分析或单股分析
   if (name.includes('股票分析') || name.includes('单股分析')) {
     return true
   }

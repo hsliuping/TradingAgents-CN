@@ -136,9 +136,9 @@ class NewsAnalystV2(AnalystAgent):
 1. 总结最新的新闻事件和市场动态
 2. 分析新闻对股票的潜在影响
 3. 评估市场情绪和投资者反应
-4. 提供基于新闻的分析观点
+4. 提供基于新闻的研究观察与风险提示
 
-请使用中文，基于真实数据进行分析。"""
+请使用中文，基于真实数据进行分析，不得输出交易建议。"""
 
     def _build_user_prompt(
         self,
@@ -243,7 +243,7 @@ class NewsAnalystV2(AnalystAgent):
 
 **重要提示**：调用工具 get_stock_news_unified 时，必须使用 curr_date 参数，值为：{analysis_date_str}
 
-请调用工具获取新闻数据，然后生成详细的中文分析报告。"""
+请调用工具获取新闻数据，然后生成详细的中文研究报告，不得给出交易建议。"""
 
     def _get_company_name(self, ticker: str, state: Dict[str, Any]) -> str:
         """获取公司名称"""

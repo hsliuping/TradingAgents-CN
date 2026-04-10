@@ -4,12 +4,12 @@
       <el-form :inline="true" :model="filters">
         <el-form-item v-if="!hasAgentTypeParam" label="Agent类型">
           <el-select v-model="filters.agent_type" placeholder="全部" style="width: 220px">
-            <el-option-group label="v2.0 Agents">
+              <el-option-group label="v2.0 Agents">
               <el-option label="分析师 v2.0" value="analysts_v2" />
               <el-option label="研究员 v2.0" value="researchers_v2" />
               <el-option label="辩手 v2.0" value="debators_v2" />
               <el-option label="管理者 v2.0" value="managers_v2" />
-              <el-option label="交易员 v2.0" value="trader_v2" />
+                <el-option label="研究整合员 v2.0" value="trader_v2" />
               <el-option label="复盘分析师 v2.0" value="reviewers_v2" />
               <el-option label="仓位分析 v2.0" value="position_analysis_v2" />
             </el-option-group>
@@ -296,7 +296,7 @@ const agentTypeMap: Record<string, string> = {
   //researchers: '研究员 v1.0',
   //debators: '辩手 v1.0',
   //managers: '管理者 v1.0',
-  //trader: '交易员 v1.0',
+  //trader: '研究整合员 v1.0',
   //reviewers: '复盘分析师 v1.0',
   //position_analysis: '仓位分析 v1.0',
   // v2.0
@@ -304,7 +304,7 @@ const agentTypeMap: Record<string, string> = {
   researchers_v2: '看涨看跌研究员 v2.0',
   debators_v2: '风险分析 v2.0',
   managers_v2: '研究/风险管理者 v2.0',
-  trader_v2: '交易员 v2.0',
+  trader_v2: '研究整合员 v2.0',
   reviewers_v2: '复盘分析 v2.0',
   position_analysis_v2: '仓位分析 v2.0'
 }
@@ -335,7 +335,7 @@ const agentNameMap: Record<string, string> = {
   bear_researcher_v2: '看跌研究员 v2.0',
   research_manager_v2: '研究经理 v2.0',
   risk_manager_v2: '风险管理者 v2.0',
-  trader_v2: '交易员 v2.0',
+  trader_v2: '研究整合员 v2.0',
   risky_analyst_v2: '激进风险分析师 v2.0',
   safe_analyst_v2: '保守风险分析师 v2.0',
   neutral_analyst_v2: '中性风险分析师 v2.0',

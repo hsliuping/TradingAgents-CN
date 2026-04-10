@@ -127,7 +127,7 @@ export const analysisApi = {
     return request.post('/api/analysis/single', analysisRequest)
   },
 
-  // 开始单股分析（使用后端期望的格式）
+  // 开始单股研究（使用后端期望的格式）
   startSingleAnalysis(analysisRequest: SingleAnalysisRequest): Promise<ApiResponse<any>> {
     return request.post('/api/analysis/single', analysisRequest)
   },

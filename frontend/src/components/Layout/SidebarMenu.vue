@@ -23,7 +23,7 @@
 
     <el-menu-item index="/analysis/single">
       <el-icon><TrendCharts /></el-icon>
-      <template #title>单股分析</template>
+      <template #title>单股研究</template>
     </el-menu-item>
 
     <el-menu-item index="/analysis/batch">
@@ -33,7 +33,7 @@
 
     <el-menu-item index="/reports">
       <el-icon><Document /></el-icon>
-      <template #title>分析报告</template>
+      <template #title>研究报告</template>
     </el-menu-item>
 
     <el-sub-menu index="/workflow">
@@ -82,7 +82,7 @@
     <el-menu-item index="/portfolio">
       <el-icon><PieChart /></el-icon>
       <template #title>
-        持仓分析
+        持仓研究
         <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </template>
     </el-menu-item>

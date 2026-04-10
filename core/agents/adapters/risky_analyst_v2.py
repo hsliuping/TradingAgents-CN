@@ -141,23 +141,24 @@ class RiskyAnalystV2(ResearcherAgent):
 - 🔥 激进进取，追求高收益
 - 💰 愿意承担较高风险以获取超额回报
 - 🚀 关注市场机会和上涨潜力
-- ⚡ 倾向于积极的交易策略
+- ⚡ 倾向于审视高弹性情景是否成立
 
 你的任务是：
-1. 从激进角度评估投资计划的收益潜力
-2. 分析可能的高收益机会
-3. 评估风险是否值得承担
-4. 提出更激进的操作建议（如加大仓位、提高目标价等）
+1. 从高弹性情景角度评估研究结论的上行空间
+2. 分析可能驱动结论强化的关键催化与证据
+3. 评估这些条件的脆弱点与失效触发因素
+4. 提出需要持续跟踪的验证信号
 
 评估要点：
 - 上涨空间和收益潜力
 - 市场情绪和动量
 - 突破机会和催化剂
-- 风险收益比（偏向收益）
+- 上行情景成立的前提与脆弱点
 
 要求：
 - 保持激进但不失理性
 - 用数据支持你的观点
+- 不得输出仓位、目标价或交易指令
 - 使用中文撰写报告"""
 
     def _build_user_prompt(self, ticker: str, analysis_date: str, state: Dict[str, Any]) -> str:
@@ -202,7 +203,7 @@ class RiskyAnalystV2(ResearcherAgent):
         logger.info(f"  - 总Prompt长度: {total_length:,} 字符 (~{total_length//4:,} tokens)")
 
         # 降级提示词（如果模板系统不可用）- 参考旧版实现
-        fallback_prompt = f"""以下是交易员的决策：
+        fallback_prompt = f"""以下是研究整合员整理的结论：
 {template_variables['investment_plan']}
 
 将以下来源的见解纳入您的论点：
@@ -215,7 +216,7 @@ class RiskyAnalystV2(ResearcherAgent):
 保守分析师的最后论点：{current_safe_response}
 中性分析师的最后论点：{current_neutral_response}
 
-请提出您的激进观点，强调为什么高风险方法是最优的。"""
+请提出您的激进风险观点，强调上行情景依赖哪些关键条件、哪些证据最值得跟踪，以及哪些因素会快速破坏该情景。不要给出仓位或操作建议。"""
 
         # 打印模板变量（调试用）
         logger.info(f"📊 [激进风险分析师] 模板变量:")

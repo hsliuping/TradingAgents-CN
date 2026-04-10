@@ -192,7 +192,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { marked } from 'marked'
 
-// 简单Markdown渲染，与单股分析保持一致风格
+// 简单 Markdown 渲染，与单股研究保持一致风格
 marked.setOptions({ breaks: true, gfm: true })
 const renderMarkdown = (content: string) => {
   if (!content) return ''

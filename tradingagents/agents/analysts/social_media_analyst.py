@@ -9,6 +9,7 @@ logger = get_logger("analysts.social_media")
 
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails
 
 # 导入模板客户端
 from tradingagents.utils.template_client import get_agent_prompt
@@ -152,6 +153,7 @@ def create_social_media_analyst(llm, toolkit):
                 fallback_prompt=None,
                 context=None
             )
+            system_prompt = apply_compliance_guardrails(system_prompt, "social_media_analyst")
 
             logger.info(f"✅ [社交媒体分析师] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
 
@@ -174,6 +176,7 @@ def create_social_media_analyst(llm, toolkit):
                 f"4. 您的回答必须基于工具返回的真实数据\n\n"
                 f"请使用中文，基于真实数据进行分析。"
             )
+            system_prompt = apply_compliance_guardrails(system_prompt, "social_media_analyst")
             logger.warning(f"⚠️ [社交媒体分析师] 使用降级提示词 (长度: {len(system_prompt)})")
 
         # 创建提示模板

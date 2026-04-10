@@ -120,7 +120,7 @@ async def process_task(task_id: str) -> None:
             # Run analysis in thread pool to avoid blocking
             analysis_result = await loop.run_in_executor(None, sync_analysis)
 
-            await progress_callback("✅ 分析完成，正在保存结果...")
+            await progress_callback("✅ 研究完成，正在保存结果...")
 
             # Prepare result
             if analysis_result and analysis_result.get('success', False):
@@ -133,7 +133,7 @@ async def process_task(task_id: str) -> None:
                 status = "completed"
                 await progress_callback("🎉 任务成功完成")
             else:
-                error_msg = analysis_result.get('error', '分析失败') if analysis_result else '分析返回空结果'
+                error_msg = analysis_result.get('error', '研究失败') if analysis_result else '研究返回空结果'
                 result = {
                     "symbol": symbol,
                     "error": error_msg,
@@ -147,12 +147,12 @@ async def process_task(task_id: str) -> None:
             logger.exception(f"Analysis execution failed for task {task_id}: {analysis_error}")
             result = {
                 "symbol": symbol,
-                "error": f"分析执行异常: {str(analysis_error)}",
+                "error": f"研究执行异常: {str(analysis_error)}",
                 "completed_at": datetime.now().isoformat(),
                 "success": False
             }
             status = "failed"
-            await progress_callback(f"❌ 分析执行异常: {str(analysis_error)}")
+            await progress_callback(f"❌ 研究执行异常: {str(analysis_error)}")
 
         # Mark completed/failed
         finished = int(time.time())
