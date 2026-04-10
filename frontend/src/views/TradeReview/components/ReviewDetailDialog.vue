@@ -217,24 +217,24 @@
           </el-col>
         </el-row>
 
-        <!-- 建议 -->
+        <!-- 复盘改进项 -->
         <div class="section" v-if="report.ai_review?.suggestions?.length">
-          <h4><el-icon><Pointer /></el-icon> 改进建议</h4>
+          <h4><el-icon><Pointer /></el-icon> 复盘改进项</h4>
           <div class="suggestions markdown-content" v-html="renderMarkdown((report.ai_review?.suggestions || []).join('\n\n'))"></div>
         </div>
 
         <!-- 详细分析 -->
         <el-collapse class="section">
-          <el-collapse-item title="时机分析" name="timing" v-if="report.ai_review?.timing_analysis">
+          <el-collapse-item title="时机复盘" name="timing" v-if="report.ai_review?.timing_analysis">
             <div class="markdown-content" v-html="renderMarkdown(report.ai_review?.timing_analysis)"></div>
           </el-collapse-item>
-          <el-collapse-item title="仓位分析" name="position" v-if="report.ai_review?.position_analysis">
+          <el-collapse-item title="仓位复盘" name="position" v-if="report.ai_review?.position_analysis">
             <div class="markdown-content" v-html="renderMarkdown(report.ai_review?.position_analysis)"></div>
           </el-collapse-item>
-          <el-collapse-item title="情绪分析" name="emotion" v-if="report.ai_review?.emotion_analysis">
+          <el-collapse-item title="情绪复盘" name="emotion" v-if="report.ai_review?.emotion_analysis">
             <div class="markdown-content" v-html="renderMarkdown(report.ai_review?.emotion_analysis)"></div>
           </el-collapse-item>
-          <el-collapse-item title="归因分析" name="attribution" v-if="report.ai_review?.attribution_analysis">
+          <el-collapse-item title="归因复盘" name="attribution" v-if="report.ai_review?.attribution_analysis">
             <div class="markdown-content" v-html="renderMarkdown(report.ai_review?.attribution_analysis)"></div>
           </el-collapse-item>
         </el-collapse>

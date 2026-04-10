@@ -20,6 +20,22 @@ logger = logging.getLogger("webapi")
 
 # 股票名称缓存
 _stock_name_cache = {}
+_DISPLAY_SANITIZED_MODULE_KEYS = {
+    "bull_researcher",
+    "bull_report",
+    "bear_researcher",
+    "bear_report",
+    "research_team_decision",
+    "investment_plan",
+    "trader_investment_plan",
+    "risky_analyst",
+    "risky_opinion",
+    "safe_analyst",
+    "safe_opinion",
+    "neutral_analyst",
+    "neutral_opinion",
+    "risk_management_decision",
+}
 
 def get_stock_name(stock_code: str) -> str:
     """
@@ -102,16 +118,22 @@ def _build_report_query(report_id: str) -> Dict[str, Any]:
 def _rebuild_report_modules(raw_result: Dict[str, Any], existing_reports: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """从任务原始结果中尽可能还原完整报告模块。"""
     rebuilt_reports: Dict[str, Any] = {}
+    from app.utils.compliance import sanitize_display_report_text
 
     if isinstance(existing_reports, dict):
         for key, value in existing_reports.items():
             if key == "structured_reports":
                 continue
             if isinstance(value, str) and value.strip():
-                rebuilt_reports[key] = value.strip()
+                text_value = value.strip()
+                if key in _DISPLAY_SANITIZED_MODULE_KEYS:
+                    text_value = sanitize_display_report_text(text_value, fallback=text_value)
+                rebuilt_reports[key] = text_value
             elif value is not None:
                 text_value = str(value).strip()
                 if text_value:
+                    if key in _DISPLAY_SANITIZED_MODULE_KEYS:
+                        text_value = sanitize_display_report_text(text_value, fallback=text_value)
                     rebuilt_reports[key] = text_value
 
     if not isinstance(raw_result, dict):
@@ -121,13 +143,13 @@ def _rebuild_report_modules(raw_result: Dict[str, Any], existing_reports: Option
         from app.utils.report_formatter import extract_reports_from_state
 
         extracted_from_result = extract_reports_from_state(raw_result)
-        if len(extracted_from_result) > len(rebuilt_reports):
+        if extracted_from_result:
             rebuilt_reports.update(extracted_from_result)
 
         state = raw_result.get("state")
         if state:
             extracted_from_state = extract_reports_from_state(state)
-            if len(extracted_from_state) > len(rebuilt_reports):
+            if extracted_from_state:
                 rebuilt_reports.update(extracted_from_state)
     except Exception as e:
         logger.warning(f"⚠️ 还原完整报告模块失败: {e}")

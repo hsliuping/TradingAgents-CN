@@ -90,7 +90,7 @@ export interface AITradeReview {
   summary: string
   strengths: string[]
   weaknesses: string[]
-  suggestions: string[]
+  suggestions: string[]  // 兼容字段名，实际展示为复盘改进项
   timing_analysis?: string
   position_analysis?: string
   emotion_analysis?: string
@@ -216,8 +216,8 @@ export interface AIPeriodicReview {
   summary: string
   trading_style: string
   common_mistakes: string[]
-  improvement_areas: string[]
-  action_plan: string[]
+  improvement_areas: string[]  // 复盘改进方向
+  action_plan: string[]  // 兼容字段名，实际展示为后续观察项
   best_trade?: string
   worst_trade?: string
 }

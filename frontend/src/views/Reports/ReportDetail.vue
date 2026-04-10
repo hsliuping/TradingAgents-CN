@@ -438,13 +438,13 @@ const formatAnalysts = (analysts: string[]) => {
     'sentiment_analyst': '市场情绪分析师',
     
     // 研究团队
-    'bull_researcher': '多头研究员',
-    'bear_researcher': '空头研究员',
+    'bull_researcher': '乐观情景研究员',
+    'bear_researcher': '审慎情景研究员',
     
     // 风险管理团队
-    'risky_analyst': '激进分析师',
-    'safe_analyst': '保守分析师',
-    'neutral_analyst': '中性分析师',
+    'risky_analyst': '高弹性情景分析师',
+    'safe_analyst': '防御情景分析师',
+    'neutral_analyst': '基准情景分析师',
     
     // 兼容旧格式（不带_analyst后缀）
     'market': '市场分析师',
@@ -567,22 +567,22 @@ const getModuleDisplayName = (moduleName: string) => {
     sentiment_report: '💭 市场情绪分析',
     news_report: '📰 新闻事件分析',
     fundamentals_report: '💰 基本面分析',
-    bull_researcher: '🐂 多头研究员',
-    bull_report: '🐂 看涨研究',
-    bear_researcher: '🐻 空头研究员',
-    bear_report: '🐻 看跌研究',
-    research_team_decision: '🔬 研究团队分析',
-    investment_plan: '📋 研究团队结论',
-    trader_investment_plan: '🧩 研究整合意见',
-    risky_analyst: '⚡ 激进分析师',
-    risky_opinion: '🔥 激进风险观点',
-    safe_analyst: '🛡️ 保守分析师',
-    safe_opinion: '🛡️ 保守风险观点',
-    neutral_analyst: '⚖️ 中性分析师',
-    neutral_opinion: '⚖️ 中性风险观点',
-    risk_management_decision: '⚠️ 风险治理结论',
-    risk_assessment: '⚠️ 风险评估',
-    final_trade_decision: '📝 最终研究结论',
+    bull_researcher: '🌤️ 乐观情景研究员',
+    bull_report: '🌤️ 乐观情景论证',
+    bear_researcher: '🌧️ 审慎情景研究员',
+    bear_report: '🌧️ 审慎情景论证',
+    research_team_decision: '🔬 研究结论汇总',
+    investment_plan: '📋 研究经理简报',
+    trader_investment_plan: '🧩 用户版研究简报',
+    risky_analyst: '⚡ 高弹性情景分析师',
+    risky_opinion: '⚡ 高弹性情景审阅',
+    safe_analyst: '🛡️ 防御情景分析师',
+    safe_opinion: '🛡️ 防御情景审阅',
+    neutral_analyst: '⚖️ 基准情景分析师',
+    neutral_opinion: '⚖️ 基准情景审阅',
+    risk_management_decision: '⚠️ 风险治理摘要',
+    risk_assessment: '⚠️ 风险评估摘要',
+    final_trade_decision: '📝 综合研究简报',
     investment_debate_state: '🔬 研究辩论状态',
     risk_debate_state: '🛡️ 风险辩论状态',
     detailed_analysis: '📄 详细分析'
@@ -608,18 +608,128 @@ const normalizeDisplayedResearchText = (content: string) => {
   return replacements.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), content)
 }
 
+const extractStructuredText = (value: any): string | null => {
+  if (!value) return null
+
+  if (typeof value === 'object') {
+    for (const key of ['content', 'markdown', 'text', 'message', 'report', 'judge_decision']) {
+      const item = value[key]
+      if (typeof item === 'string' && item.trim()) {
+        return item
+      }
+    }
+    return null
+  }
+
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  let candidate = value.trim()
+  for (let i = 0; i < 3; i += 1) {
+    if (!candidate) break
+
+    try {
+      const parsed = JSON.parse(candidate)
+      if (typeof parsed === 'string') {
+        candidate = parsed.trim()
+        continue
+      }
+
+      const extracted = extractStructuredText(parsed)
+      if (extracted) {
+        candidate = extracted.trim()
+        continue
+      }
+    } catch {
+      // 不是 JSON，继续使用原文本
+    }
+
+    break
+  }
+
+  if (
+    ((candidate.startsWith('"') && candidate.endsWith('"')) ||
+      (candidate.startsWith("'") && candidate.endsWith("'"))) &&
+    candidate.length >= 2
+  ) {
+    candidate = candidate.slice(1, -1).trim()
+  }
+
+  return candidate || null
+}
+
+const prepareMarkdownContent = (content: string) => {
+  if (!content) return ''
+
+  const rawContent = extractStructuredText(content) || content
+
+  const normalizedText = normalizeDisplayedResearchText(rawContent)
+    .replace(/\u001b\[[0-9;]*m/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\"/g, '"')
+    .replace(/^\uFEFF/, '')
+
+  const lines = normalizedText.split('\n')
+  const nonEmptyLines = lines.filter(line => line.trim())
+
+  if (nonEmptyLines.length === 0) {
+    return normalizedText.trim()
+  }
+
+  const commonIndent = Math.min(
+    ...nonEmptyLines.map(line => {
+      const match = line.match(/^[\t ]*/)
+      return match ? match[0].length : 0
+    })
+  )
+
+  const dedentedLines = commonIndent > 0
+    ? lines.map(line => line.slice(Math.min(commonIndent, line.length)))
+    : lines
+
+  let preparedText = dedentedLines.join('\n').trim()
+
+  if (!preparedText) {
+    return ''
+  }
+
+  if (
+    ((preparedText.startsWith('"') && preparedText.endsWith('"')) ||
+      (preparedText.startsWith("'") && preparedText.endsWith("'"))) &&
+    preparedText.length >= 2
+  ) {
+    preparedText = preparedText.slice(1, -1).trim()
+  }
+
+  const fencedMarkdownMatch = preparedText.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/i)
+  if (fencedMarkdownMatch) {
+    preparedText = fencedMarkdownMatch[1].trim()
+  }
+
+  return preparedText
+}
+
 const renderMarkdown = (content: string) => {
   if (!content) return ''
   try {
-    return marked.parse(normalizeDisplayedResearchText(content)) as string
+    return marked.parse(prepareMarkdownContent(content)) as string
   } catch (e) {
-    return `<pre style="white-space: pre-wrap; font-family: inherit;">${normalizeDisplayedResearchText(content)}</pre>`
+    return `<pre style="white-space: pre-wrap; font-family: inherit;">${prepareMarkdownContent(content)}</pre>`
   }
 }
 
 // 🔥 提取模块内容（支持对象中的 content 字段）
 const getModuleContent = (moduleData: any): string | null => {
   if (!moduleData) return null
+
+  const extractedText = extractStructuredText(moduleData)
+  if (extractedText) {
+    return normalizeDisplayedResearchText(extractedText)
+  }
   
   // 如果是字符串，直接返回
   if (typeof moduleData === 'string') {
@@ -660,19 +770,18 @@ const formatKeyPoint = (point: string): string => {
 
   // 字段名映射（英文 -> 中文）
   const fieldNameMap: Record<string, string> = {
-    'analysis_view': '分析观点',
-    'action': '分析观点',
+    'analysis_view': '研究判断',
+    'action': '研究判断',
     'confidence': '置信度',
-    'price_analysis_range': '价格分析区间',
-    'target_price': '价格分析区间',
-    'risk_reference_price': '风险控制参考价',
-    'stop_loss': '风险控制参考价',
-    'risk_exposure_ratio': '风险敞口比例',
-    'position_ratio': '风险敞口比例',
     'reasoning': '研究依据',
     'summary': '研究摘要',
     'risk_score': '风险评分',
-    'risk_level': '风险等级'
+    'risk_level': '风险等级',
+    'core_evidence': '核心依据',
+    'uncertainties': '关键不确定性',
+    'invalidation_conditions': '判断调整条件',
+    'watch_items': '后续观察事项',
+    'risk_warning': '风险提示'
   }
 
   // 检查是否是 JSON 格式的字段（如 "analysis_view": "中性"）
@@ -1069,6 +1178,24 @@ onMounted(() => {
     .module-content {
       .markdown-content {
         line-height: 1.6;
+
+        :deep(p), :deep(li) {
+          color: var(--el-text-color-primary);
+        }
+
+        :deep(pre) {
+          white-space: pre-wrap;
+          word-break: break-word;
+          background: var(--el-fill-color-light);
+          color: var(--el-text-color-primary);
+          padding: 16px;
+          border-radius: 8px;
+          font-family: inherit;
+        }
+
+        :deep(code) {
+          color: inherit;
+        }
         
         :deep(h1), :deep(h2), :deep(h3) {
           margin: 16px 0 8px 0;

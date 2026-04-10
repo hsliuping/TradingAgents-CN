@@ -138,7 +138,7 @@
           </el-col>
         </el-row>
         <div v-if="reviewReport.ai_review?.suggestions?.length" class="review-suggestions">
-          <div class="section-title">💡 改进建议</div>
+          <div class="section-title">💡 复盘改进项</div>
           <ul>
             <li v-for="(suggestion, idx) in reviewReport.ai_review.suggestions" :key="idx">{{ suggestion }}</li>
           </ul>

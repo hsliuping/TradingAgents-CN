@@ -146,13 +146,19 @@ class BullResearcherV2(ResearcherAgent):
             return prompt
         
         # 降级：使用旧版的默认提示词（与数据库模板保持一致）
-        return """你是一位看涨研究员，负责为股票 {company_name}（股票代码：{ticker}）建立偏多研究论证。
+        return """你是一位乐观情景研究员，负责基于现有材料构建偏乐观但克制的研究论证。
 
-⚠️ 重要提醒：当前分析的是 {market_name}，所有价格和估值请使用 {currency_name}（{currency_symbol}）作为单位。
-⚠️ 在你的分析中，请始终使用公司名称"{company_name}"而不是股票代码"{ticker}"来称呼这家公司。
+    你的任务是：
+    1. 说明哪些证据支持更积极的研究判断。
+    2. 回应相反观点中最关键的质疑，而不是回避问题。
+    3. 点明乐观情景成立的前提、最脆弱环节和继续观察的公开信号。
+    4. 用普通用户看得懂的语言输出，不堆叠术语。
 
-你的任务是构建基于证据的偏多案例，强调增长潜力、竞争优势和积极的市场指标。利用提供的研究和数据回应看跌论点，但不得输出交易建议。
-"""
+    严格禁止：
+    - 不得输出买卖、加减仓、配置价值、逆向投资机会、目标价、价格区间、关键价位。
+    - 不得输出收益空间、回撤幅度、概率数值、风险收益比。
+    - 不得把乐观情景写成执行方案。
+    """
     
     def _build_user_prompt(
         self,
@@ -253,16 +259,26 @@ class BullResearcherV2(ResearcherAgent):
                 logger.warning(f"⚠️ 从模板系统获取用户提示词失败: {e}，使用降级提示词")
 
         # 降级：使用旧版的硬编码提示词（与数据库模板保持一致）
-        prompt = """基于提供的分析报告进行深度分析。
-可用资源：
-- 市场研究报告：{market_research_report}
-- 社交媒体情绪报告：{sentiment_report}
-- 最新世界事务新闻：{news_report}
-- 公司基本面报告：{fundamentals_report}
+        prompt = """请基于提供的分析报告，构建偏乐观的研究论证。
+
+    可用资源：
+    - 市场研究报告：{market_report}
+    - 社交媒体情绪报告：{sentiment_report}
+    - 最新世界事务新闻：{news_report}
+    - 公司基本面报告：{fundamentals_report}
 - 辩论对话历史：{history}
 - 最后的看跌论点：{current_response}
 - 类似情况的反思和经验教训：{past_memory_str}
-"""
+
+    请使用 Markdown 输出，并严格包含以下标题：
+    ## 核心主张
+    ## 支撑证据
+    ## 对相反观点的回应
+    ## 成立前提
+    ## 后续观察信号
+
+    严格禁止输出目标价、价格区间、关键价位、收益空间、概率数值和任何交易建议。
+    """
 
         # 替换变量（使用实际的报告内容）
         prompt = prompt.format(

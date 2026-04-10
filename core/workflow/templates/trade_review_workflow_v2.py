@@ -21,11 +21,11 @@ from ..models import (
 
 TRADE_REVIEW_WORKFLOW_V2 = WorkflowDefinition(
     id="trade_review_v2",
-    name="交易复盘分析流程 v2.0",
-    description="基于 v2.0 Agent 架构的交易复盘流程。包含时机分析、仓位分析、情绪分析、归因分析四个专业分析师并行分析，最后由复盘总结师综合生成报告。",
+    name="交易复盘流程 v2.0",
+    description="基于 v2.0 Agent 架构的交易复盘流程。时机复盘、仓位复盘、情绪复盘与归因复盘并行执行，最后由复盘总结师汇总形成复盘结论与改进项。",
     version="2.0.0",
     is_template=True,
-    tags=["v2.0", "复盘", "交易分析", "多维度", "并行分析"],
+    tags=["v2.0", "复盘", "多维度", "并行复盘"],
     config={
         "workflow_type": "trade_review",
         "parallel_analysts": True,

@@ -47,6 +47,7 @@ from app.models.review import (
     CreateTradeReviewRequest, CreatePeriodicReviewRequest,
     TradeReviewResponse, PeriodicReviewResponse, ReviewListItem
 )
+from app.utils.compliance import sanitize_periodic_review_payload, sanitize_trade_review_payload
 from app.utils.timezone import now_tz
 
 # ==================== v2.0 工具导入 ====================
@@ -81,6 +82,42 @@ class TradeReviewService:
         self.periodic_reviews_collection = "periodic_reviews"
         self.paper_trades_collection = "paper_trades"
         self.trading_systems_collection = "trading_systems"
+
+    def _append_review_guardrails(self, prompt: str) -> str:
+        """为复盘提示词追加统一合规约束。"""
+        guardrails = """
+## 输出约束
+- 仅允许输出复盘结论、做得好的地方、需要改进的地方、纪律反思和后续观察点。
+- 改进内容只限研究准备、规则执行、风险识别和记录方法，不得给出未来买卖、持有、加减仓、止损止盈、目标价或具体仓位比例建议。
+- 如需描述问题，请聚焦本次交易为何偏离计划，不要把输出写成下一次的交易指令。
+""".strip()
+        return f"{prompt.rstrip()}\n\n{guardrails}\n"
+
+    def _sanitize_trade_review_result(self, result: AITradeReview) -> AITradeReview:
+        """统一将交易复盘结果转换为复盘改进模式。"""
+        if result is None:
+            return AITradeReview()
+
+        raw_data = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+        sanitized_data = sanitize_trade_review_payload(raw_data)
+        return AITradeReview(**sanitized_data)
+
+    def _sanitize_trade_review_dict(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """统一清洗交易复盘详情和历史记录中的结果字段。"""
+        return sanitize_trade_review_payload(data)
+
+    def _sanitize_periodic_review_result(self, result: AIPeriodicReview) -> AIPeriodicReview:
+        """统一将阶段性复盘结果转换为复盘改进模式。"""
+        if result is None:
+            return AIPeriodicReview()
+
+        raw_data = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+        sanitized_data = sanitize_periodic_review_payload(raw_data)
+        return AIPeriodicReview(**sanitized_data)
+
+    def _sanitize_periodic_review_dict(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """统一清洗阶段性复盘详情中的结果字段。"""
+        return sanitize_periodic_review_payload(data)
 
     # ==================== 辅助方法 ====================
 
@@ -246,6 +283,7 @@ class TradeReviewService:
                 trading_system=trading_system,
                 use_workflow=request.use_workflow
             )
+            ai_review = self._sanitize_trade_review_result(ai_review)
             
             execution_time = (datetime.now() - start_time).total_seconds()
 
@@ -416,7 +454,9 @@ class TradeReviewService:
 
             # 9. 从任务结果中提取 AI 复盘
             if task.result and "ai_review" in task.result:
-                ai_review = AITradeReview(**task.result["ai_review"])
+                ai_review = self._sanitize_trade_review_result(
+                    AITradeReview(**task.result["ai_review"])
+                )
             else:
                 raise ValueError("任务结果中缺少 ai_review 数据")
 
@@ -1072,16 +1112,16 @@ class TradeReviewService:
             result = self._parse_ai_trade_review(content, trade_info, market_snapshot)
             logger.info(f"✅ [AI复盘] 解析完成 - 总分: {result.overall_score}, 摘要长度: {len(result.summary)}")
 
-            return result
+            return self._sanitize_trade_review_result(result)
 
         except Exception as e:
             logger.error(f"AI复盘分析失败: {e}", exc_info=True)
             from app.utils.error_formatter import ErrorFormatter
 
-            return AITradeReview(
+            return self._sanitize_trade_review_result(AITradeReview(
                 summary=f"AI分析暂时不可用：{ErrorFormatter.format_user_message(str(e))}",
                 overall_score=50
-            )
+            ))
 
 
 
@@ -1138,12 +1178,12 @@ class TradeReviewService:
                     logger.info(f"✅ [交易复盘] 使用模板系统生成提示词 (长度: {len(prompt)})")
                     logger.info(f"📝 [交易复盘] 提示词前500字符:\n{prompt[:500]}")
                     logger.info(f"📝 [交易复盘] 提示词后500字符:\n{prompt[-500:]}")
-                    return prompt
+                    return self._append_review_guardrails(prompt)
 
             except Exception as e:
                 logger.warning(f"⚠️ [交易复盘] 模板系统调用失败，使用硬编码提示词: {e}")
 
-        return legacy_prompt
+        return self._append_review_guardrails(legacy_prompt)
 
     def _build_legacy_trade_review_prompt(
         self,
@@ -1638,6 +1678,8 @@ class TradeReviewService:
 
         if doc:
             logger.info(f"📊 [获取复盘详情] 从 trade_reviews 集合找到数据: {review_id}")
+            doc = dict(doc)
+            doc["ai_review"] = self._sanitize_trade_review_dict(doc.get("ai_review") or {})
             return TradeReviewReport(**doc)
 
         # 2. 如果没找到，从 unified_analysis_tasks 集合查询（任务中心模式）
@@ -1708,7 +1750,9 @@ class TradeReviewService:
 
         # 构建 AITradeReview
         ai_review_data = result.get("ai_review", {})
-        ai_review = AITradeReview(**ai_review_data) if ai_review_data else AITradeReview()
+        ai_review = self._sanitize_trade_review_result(
+            AITradeReview(**ai_review_data) if ai_review_data else AITradeReview()
+        )
 
         # 映射状态
         status_mapping = {
@@ -2082,6 +2126,7 @@ class TradeReviewService:
             statistics=statistics,
             trades_summary=trades_summary
         )
+        ai_review = self._sanitize_periodic_review_result(ai_review)
 
         execution_time = time.time() - start_time
 
@@ -2352,6 +2397,7 @@ class TradeReviewService:
     "worst_trade": "最差交易分析..."
 }}
 """
+        prompt = self._append_review_guardrails(prompt)
 
         try:
             model_name = "qwen-plus"
@@ -2375,7 +2421,7 @@ class TradeReviewService:
             json_match = re.search(r'\{[\s\S]*\}', content)
             if json_match:
                 data = json.loads(json_match.group())
-                return AIPeriodicReview(
+                return self._sanitize_periodic_review_result(AIPeriodicReview(
                     overall_score=data.get("overall_score", 60),
                     summary=data.get("summary", ""),
                     trading_style=data.get("trading_style", ""),
@@ -2384,20 +2430,20 @@ class TradeReviewService:
                     action_plan=data.get("action_plan", []),
                     best_trade=data.get("best_trade"),
                     worst_trade=data.get("worst_trade")
-                )
+                ))
             else:
                 # 如果无法解析JSON，返回默认结果
-                return AIPeriodicReview(
+                return self._sanitize_periodic_review_result(AIPeriodicReview(
                     overall_score=60,
                     summary=content[:500] if content else "AI分析完成"
-                )
+                ))
 
         except Exception as e:
             logger.error(f"AI阶段性复盘分析失败: {e}")
-            return AIPeriodicReview(
+            return self._sanitize_periodic_review_result(AIPeriodicReview(
                 overall_score=0,
                 summary=f"AI分析失败: {str(e)}"
-            )
+            ))
 
     async def get_periodic_review_history(
         self,
@@ -2463,6 +2509,8 @@ class TradeReviewService:
         if not doc:
             return None
 
+        doc = dict(doc)
+        doc["ai_review"] = self._sanitize_periodic_review_dict(doc.get("ai_review") or {})
         return PeriodicReviewReport(**doc)
 
     def _build_trade_review_vars(
@@ -3143,7 +3191,7 @@ class TradeReviewService:
 
         logger.info(f"✅ [工作流复盘] 解析完成 - 总分: {result.overall_score}")
 
-        return result
+        return self._sanitize_trade_review_result(result)
 
     def _calculate_max_profit_pct(self, trade_info: TradeInfo, market_snapshot: MarketSnapshot) -> float:
         """计算最大可能盈利百分比"""

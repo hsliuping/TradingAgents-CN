@@ -23,6 +23,38 @@ logger = get_logger('agents')
 from .cache.mongodb_cache_adapter import get_mongodb_cache_adapter, get_stock_data_with_fallback, get_financial_data_with_fallback
 
 
+def _coerce_stock_info_text(stock_info: Any, symbol: str) -> str:
+    """兼容 str/dict/tuple 等不同股票信息返回格式，统一收敛为可解析文本。"""
+    payload = stock_info[0] if isinstance(stock_info, tuple) and stock_info else stock_info
+
+    if isinstance(payload, str):
+        return payload
+
+    if isinstance(payload, dict):
+        lines = [
+            f"股票代码: {symbol}",
+            f"股票名称: {payload.get('name', '未知')}",
+            f"所属地区: {payload.get('area', '未知')}",
+            f"所属行业: {payload.get('industry', '未知')}",
+            f"上市市场: {payload.get('market', '未知')}",
+            f"上市日期: {payload.get('list_date', '未知')}",
+        ]
+        if payload.get('current_price') is not None:
+            lines.append(f"当前价格: {payload.get('current_price')}")
+        if payload.get('change_pct') is not None:
+            try:
+                lines.append(f"涨跌幅: {float(payload.get('change_pct')):+.2f}%")
+            except Exception:
+                lines.append(f"涨跌幅: {payload.get('change_pct')}")
+        if payload.get('volume') is not None:
+            lines.append(f"成交量: {payload.get('volume')}")
+        return "\n".join(lines)
+
+    if payload in (None, ""):
+        return ""
+    return str(payload)
+
+
 class OptimizedChinaDataProvider:
     """优化的A股数据提供器 - 集成缓存和Tushare数据接口"""
 
@@ -277,7 +309,7 @@ class OptimizedChinaDataProvider:
         try:
             # 从统一接口获取股票基本信息
             from .interface import get_china_stock_info_unified
-            stock_info = get_china_stock_info_unified(symbol)
+            stock_info = _coerce_stock_info_text(get_china_stock_info_unified(symbol), symbol)
 
             # 如果获取成功，直接返回基础信息
             if stock_info and "股票名称:" in stock_info:
@@ -339,7 +371,7 @@ class OptimizedChinaDataProvider:
         try:
             logger.debug(f"🔍 [股票代码追踪] 尝试获取{symbol}的基本信息...")
             from .interface import get_china_stock_info_unified
-            stock_info = get_china_stock_info_unified(symbol)
+            stock_info = _coerce_stock_info_text(get_china_stock_info_unified(symbol), symbol)
             logger.debug(f"🔍 [股票代码追踪] 获取到的股票信息: {stock_info}")
 
             if "股票名称:" in stock_info:

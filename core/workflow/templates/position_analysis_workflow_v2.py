@@ -20,11 +20,11 @@ from ..models import (
 
 POSITION_ANALYSIS_WORKFLOW_V2 = WorkflowDefinition(
     id="position_analysis_v2",
-    name="持仓分析流程 v2.0",
-    description="基于 v2.0 Agent 架构的持仓分析流程。技术面分析和基本面分析并行执行，然后进行风险评估，最后由操作建议师综合生成操作建议。",
+    name="持仓研究流程 v2.0",
+    description="基于 v2.0 Agent 架构的持仓研究流程。技术面研究与基本面研究并行执行，随后进行风险复核，最后由研究整合员汇总形成持仓研究观察。",
     version="2.0.0",
     is_template=True,
-    tags=["v2.0", "持仓", "分析", "多维度", "操作建议"],
+    tags=["v2.0", "持仓", "研究", "多维度", "风险复核"],
     config={
         "workflow_type": "position_analysis",
         "parallel_analysts": True,

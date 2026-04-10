@@ -10,8 +10,8 @@
               <el-option label="辩手 v2.0" value="debators_v2" />
               <el-option label="管理者 v2.0" value="managers_v2" />
                 <el-option label="研究整合员 v2.0" value="trader_v2" />
-              <el-option label="复盘分析师 v2.0" value="reviewers_v2" />
-              <el-option label="仓位分析 v2.0" value="position_analysis_v2" />
+              <el-option label="交易复盘 v2.0" value="reviewers_v2" />
+              <el-option label="持仓研究 v2.0" value="position_analysis_v2" />
             </el-option-group>
           </el-select>
         </el-form-item>
@@ -305,8 +305,8 @@ const agentTypeMap: Record<string, string> = {
   debators_v2: '风险分析 v2.0',
   managers_v2: '研究/风险管理者 v2.0',
   trader_v2: '研究整合员 v2.0',
-  reviewers_v2: '复盘分析 v2.0',
-  position_analysis_v2: '仓位分析 v2.0'
+  reviewers_v2: '交易复盘 v2.0',
+  position_analysis_v2: '持仓研究 v2.0'
 }
 
 const agentNameMap: Record<string, string> = {
@@ -347,7 +347,7 @@ const agentNameMap: Record<string, string> = {
   pa_technical_v2: '技术面分析师 v2.0',
   pa_fundamental_v2: '基本面分析师 v2.0',
   pa_risk_v2: '风险评估师 v2.0',
-  pa_advisor_v2: '操作建议师 v2.0'
+  pa_advisor_v2: '持仓研究整合师 v2.0'
 }
 
 const agentNameReverseMap: Record<string, string> = Object.fromEntries(

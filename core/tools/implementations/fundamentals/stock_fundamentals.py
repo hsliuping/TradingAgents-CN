@@ -110,7 +110,7 @@ def _load_recent_financial_data(ticker: str, limit: int = 4) -> Dict[str, Any]:
     from tradingagents.utils.stock_utils import StockUtils
 
     normalized_ticker = _normalize_china_ticker(ticker)
-    market_info = StockUtils.get_market_info(ticker)
+    market_info = StockUtils.get_market_info(normalized_ticker)
     payload = None
     data_source = 'unknown'
 
@@ -159,6 +159,103 @@ def _load_recent_financial_data(ticker: str, limit: int = 4) -> Dict[str, Any]:
     payload['market_info'] = market_info
     payload['data_source'] = data_source
     return payload
+
+
+def _snapshot_value(value: Any, default: str = 'N/A') -> str:
+    if value in (None, '', 'None', 'nan', 'NaN'):
+        return default
+    return str(value)
+
+
+def _format_pct_change(value: Any) -> str:
+    number = _to_float(value)
+    if number is None:
+        return 'N/A'
+    return f"{number:+.2f}%"
+
+
+def _build_china_snapshot_from_cache(ticker: str) -> Optional[str]:
+    """优先从 app MongoDB 快照构造当前价格信息，避免为基本面工具拉取历史行情。"""
+    normalized_ticker = _normalize_china_ticker(ticker)
+
+    try:
+        from tradingagents.dataflows.cache.app_adapter import get_basics_from_cache, get_market_quote_dataframe
+
+        basics_doc = get_basics_from_cache(normalized_ticker)
+        if isinstance(basics_doc, list):
+            basics_doc = basics_doc[0] if basics_doc else None
+
+        quote_df = get_market_quote_dataframe(normalized_ticker)
+        if not basics_doc and (quote_df is None or quote_df.empty):
+            return None
+
+        lines = [
+            f"股票代码: {normalized_ticker}",
+            f"股票名称: {_snapshot_value((basics_doc or {}).get('name') or (basics_doc or {}).get('stock_name'), '未知公司')}",
+            f"所属地区: {_snapshot_value((basics_doc or {}).get('area'), '未知')}",
+            f"所属行业: {_snapshot_value((basics_doc or {}).get('industry') or (basics_doc or {}).get('industry_name'), '未知')}",
+            f"上市市场: {_snapshot_value((basics_doc or {}).get('market'), '未知')}",
+            f"上市日期: {_snapshot_value((basics_doc or {}).get('list_date'), '未知')}",
+        ]
+
+        current_price = 'N/A'
+        change_pct = 'N/A'
+        volume = 'N/A'
+        if quote_df is not None and not quote_df.empty:
+            latest_quote = quote_df.iloc[-1]
+            current_price = _snapshot_value(latest_quote.get('close'))
+            change_pct = _format_pct_change(latest_quote.get('pct_chg'))
+            volume = _snapshot_value(latest_quote.get('volume'))
+
+        lines.extend([
+            f"当前价格: {current_price}",
+            f"涨跌幅: {change_pct}",
+            f"成交量: {volume}",
+        ])
+        logger.info(f"📊 [统一基本面工具] 使用数据库快照构造 A 股价格信息: {normalized_ticker}")
+        return "\n".join(lines)
+    except Exception as exc:
+        logger.warning(f"⚠️ A股数据库快照读取失败: {exc}")
+        return None
+
+
+def _is_placeholder_china_snapshot(snapshot: Optional[str]) -> bool:
+    if not snapshot:
+        return True
+    markers = (
+        '股票名称: 未知公司',
+        '当前价格: N/A',
+        '涨跌幅: N/A',
+        '成交量: N/A',
+    )
+    return all(marker in snapshot for marker in markers)
+
+
+def _get_china_price_snapshot(ticker: str, curr_date: str) -> str:
+    """为统一基本面工具构造 A 股价格快照，优先读库，最后才降级到行情 provider。"""
+    normalized_ticker = _normalize_china_ticker(ticker)
+
+    cached_snapshot = _build_china_snapshot_from_cache(normalized_ticker)
+    if cached_snapshot:
+        return cached_snapshot
+
+    try:
+        from tradingagents.dataflows.optimized_china_data import OptimizedChinaDataProvider
+
+        analyzer = OptimizedChinaDataProvider()
+        snapshot = analyzer._get_stock_basic_info_only(normalized_ticker)
+        if not _is_placeholder_china_snapshot(snapshot):
+            logger.info(f"📊 [统一基本面工具] 使用基础信息接口构造 A 股价格信息: {normalized_ticker}")
+            return snapshot
+    except Exception as exc:
+        logger.warning(f"⚠️ A股基础信息获取失败: {exc}")
+
+    recent_end_date = curr_date
+    recent_start_date = (datetime.strptime(curr_date, '%Y-%m-%d') - timedelta(days=2)).strftime('%Y-%m-%d')
+    from tradingagents.dataflows.interface import get_china_stock_data_unified
+
+    logger.warning(f"⚠️ A股数据库快照不可用，降级到行情接口: {normalized_ticker}")
+    return get_china_stock_data_unified(normalized_ticker, recent_start_date, recent_end_date)
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -276,14 +373,11 @@ def get_stock_fundamentals_unified(
         if is_china:
             # 中国A股
             logger.info(f"🇨🇳 [统一基本面工具] 处理A股数据...")
+            normalized_ticker = _normalize_china_ticker(ticker)
+            current_price_data = ""
 
             try:
-                # 获取最新股价信息
-                recent_end_date = curr_date
-                recent_start_date = (datetime.strptime(curr_date, '%Y-%m-%d') - timedelta(days=2)).strftime('%Y-%m-%d')
-
-                from tradingagents.dataflows.interface import get_china_stock_data_unified
-                current_price_data = get_china_stock_data_unified(ticker, recent_start_date, recent_end_date)
+                current_price_data = _get_china_price_snapshot(normalized_ticker, curr_date)
                 result_data.append(f"## A股当前价格信息\n{current_price_data}")
             except Exception as e:
                 logger.error(f"❌ A股价格数据获取失败: {e}")
@@ -293,7 +387,7 @@ def get_stock_fundamentals_unified(
                 # 获取基本面财务数据
                 from tradingagents.dataflows.optimized_china_data import OptimizedChinaDataProvider
                 analyzer = OptimizedChinaDataProvider()
-                fundamentals_data = analyzer._generate_fundamentals_report(ticker, current_price_data if 'current_price_data' in locals() else "", "standard")
+                fundamentals_data = analyzer._generate_fundamentals_report(normalized_ticker, current_price_data, "standard")
                 result_data.append(f"## A股基本面财务数据\n{fundamentals_data}")
             except Exception as e:
                 logger.error(f"❌ A股基本面数据获取失败: {e}")
@@ -315,7 +409,7 @@ def get_stock_fundamentals_unified(
                 logger.error(f"❌ 港股数据获取失败: {e}")
                 result_data.append(f"## 港股数据\n获取失败: {e}")
 
-        else:
+        elif is_us:
             # 美股
             logger.info(f"🇺🇸 [统一基本面工具] 处理美股数据...")
 
@@ -326,6 +420,12 @@ def get_stock_fundamentals_unified(
             except Exception as e:
                 logger.error(f"❌ 美股数据获取失败: {e}")
                 result_data.append(f"## 美股基本面数据\n获取失败: {e}")
+
+        else:
+            logger.warning(f"⚠️ [统一基本面工具] 未识别的股票市场: {ticker} -> {market_info['market_name']}")
+            result_data.append(
+                f"## 市场识别结果\n{ticker} 未识别到受支持的股票市场，当前识别结果为 {market_info['market_name']}。"
+            )
 
         # 组合所有数据
         combined_result = f"""# {ticker} 基本面分析数据

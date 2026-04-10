@@ -255,7 +255,7 @@ const checkModelSuitability = async () => {
         '基础': '基础分析，了解主要指标',
         '标准': '标准分析，全面评估股票',
         '深度': '深度研究，挖掘投资机会',
-        '全面': '全面分析，专业投资决策'
+        '全面': '全面分析，形成系统研究结论'
       }
 
       const message = `${depthDescriptions[depthName] || '标准分析'}\n\n推荐模型配置：\n• 快速模型：${quickDisplayName}\n• 深度模型：${deepDisplayName}\n\n${reason}`

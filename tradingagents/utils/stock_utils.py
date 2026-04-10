@@ -31,6 +31,12 @@ class SecurityType(Enum):
 
 class StockUtils:
     """股票工具类"""
+
+    _CHINA_A_SUFFIX_PATTERN = re.compile(r'^\d{6}\.(SZ|SH|BJ)$')
+    _CHINA_A_PLAIN_PATTERN = re.compile(r'^\d{6}$')
+    _HK_SUFFIX_PATTERN = re.compile(r'^\d{4,5}\.HK$')
+    _HK_PLAIN_PATTERN = re.compile(r'^\d{4,5}$')
+    _US_PATTERN = re.compile(r'^[A-Z]{1,5}$')
     
     @staticmethod
     def identify_stock_market(ticker: str) -> StockMarket:
@@ -48,16 +54,16 @@ class StockUtils:
 
         ticker = str(ticker).strip().upper()
 
-        # 中国A股：纯6位数字（前后端统一，不带后缀）
-        if re.match(r'^\d{6}$', ticker):
+        # 中国A股：支持纯6位数字和标准交易所后缀
+        if StockUtils._CHINA_A_PLAIN_PATTERN.match(ticker) or StockUtils._CHINA_A_SUFFIX_PATTERN.match(ticker):
             return StockMarket.CHINA_A
 
         # 港股：4-5位数字.HK 或 纯4-5位数字（支持0700.HK、09988.HK、00700、9988格式）
-        if re.match(r'^\d{4,5}\.HK$', ticker) or re.match(r'^\d{4,5}$', ticker):
+        if StockUtils._HK_SUFFIX_PATTERN.match(ticker) or StockUtils._HK_PLAIN_PATTERN.match(ticker):
             return StockMarket.HONG_KONG
 
         # 美股：1-5位字母
-        if re.match(r'^[A-Z]{1,5}$', ticker):
+        if StockUtils._US_PATTERN.match(ticker):
             return StockMarket.US
 
         return StockMarket.UNKNOWN

@@ -5,9 +5,9 @@
       <div class="header-left">
         <h1>
           <el-icon class="header-icon"><SetUp /></el-icon>
-          分析流管理
+          协作流程管理
         </h1>
-        <span class="subtitle">设计和管理 AI 多智能体协作分析流程</span>
+        <span class="subtitle">设计和管理 AI 多智能体协作流程</span>
       </div>
       <div class="header-right">
         <!-- 暂时隐藏新建空白流程功能，待功能完善后再开放 -->
@@ -18,14 +18,14 @@
       </div>
     </div>
 
-    <!-- 系统分析流模板 -->
+    <!-- 系统流程模板 -->
     <div class="section">
       <div class="section-header">
         <h2>
           <el-icon><Promotion /></el-icon>
-          系统分析流模板
+          系统流程模板
         </h2>
-        <span class="section-desc">基于 TradingAgents 论文设计的多智能体协作分析流程</span>
+        <span class="section-desc">基于 TradingAgents 论文设计的多智能体协作流程</span>
       </div>
 
       <el-row :gutter="20">
@@ -171,14 +171,14 @@
       </el-row>
     </div>
 
-    <!-- 我的分析流 -->
+    <!-- 我的流程 -->
     <div class="section" v-if="userWorkflows.length > 0">
       <div class="section-header">
         <h2>
           <el-icon><Folder /></el-icon>
-          我的分析流
+          我的流程
         </h2>
-        <span class="section-desc">您创建和自定义的分析流程</span>
+        <span class="section-desc">您创建和自定义的协作流程</span>
       </div>
 
       <el-row :gutter="20">

@@ -257,7 +257,7 @@ def initialize_builtin_workflows() -> None:
         task_type=AnalysisTaskType.TRADE_REVIEW,
         workflow_id="trade_review",
         name="交易复盘",
-        description="交易复盘分析流程。包含时机分析师、仓位分析师、情绪与纪律分析师、归因分析师、复盘总结师。",
+        description="交易复盘流程。包含时机复盘、仓位复盘、情绪与纪律复盘、归因复盘与复盘总结。",
         default_engine="workflow",
         supported_engines=["workflow", "llm"],
         required_params=["review_id"],
@@ -269,7 +269,7 @@ def initialize_builtin_workflows() -> None:
         max_retries=3,
         supports_preference=True,
         version="2.0.0",
-        tags=["复盘", "交易计划", "情绪分析"],
+        tags=["复盘", "交易计划", "情绪复盘"],
         is_active=True
     ))
 

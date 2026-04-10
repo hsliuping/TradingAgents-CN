@@ -98,14 +98,14 @@
             </div>
             
             <div class="analysis-item" v-if="detail.ai_review?.improvement_areas?.length">
-              <div class="item-title">改进方向</div>
+              <div class="item-title">复盘改进方向</div>
               <ul>
                 <li v-for="(item, idx) in detail.ai_review.improvement_areas" :key="idx">{{ item }}</li>
               </ul>
             </div>
             
             <div class="analysis-item" v-if="detail.ai_review?.action_plan?.length">
-              <div class="item-title">行动计划</div>
+              <div class="item-title">后续观察项</div>
               <ul>
                 <li v-for="(item, idx) in detail.ai_review.action_plan" :key="idx">{{ item }}</li>
               </ul>

@@ -58,6 +58,24 @@ class USDataSource(Enum):
 class DataSourceManager:
     """数据源管理器"""
 
+    @staticmethod
+    def _normalize_stock_data_result(result: Any) -> tuple[str, Optional[str]]:
+        """兼容历史返回 `(result, source)` 的分支，统一收敛为字符串结果。"""
+        actual_source = None
+        normalized_result = result
+
+        if isinstance(result, tuple):
+            normalized_result = result[0] if result else ""
+            if len(result) > 1 and isinstance(result[1], str):
+                actual_source = result[1]
+
+        if normalized_result is None:
+            normalized_result = ""
+        elif not isinstance(normalized_result, str):
+            normalized_result = str(normalized_result)
+
+        return normalized_result, actual_source
+
     def __init__(self):
         """初始化数据源管理器"""
         # 检查是否启用MongoDB缓存
@@ -1109,6 +1127,10 @@ class DataSourceManager:
                 result = f"❌ 不支持的数据源: {self.current_source.value}"
                 actual_source = None
 
+            result, normalized_source = self._normalize_stock_data_result(result)
+            if normalized_source:
+                actual_source = normalized_source
+
             # 记录详细的输出结果
             duration = time.time() - start_time
             result_length = len(result) if result else 0
@@ -1147,8 +1169,9 @@ class DataSourceManager:
 
                 # 数据质量异常时也尝试降级到其他数据源
                 fallback_result = self._try_fallback_sources(symbol, start_date, end_date)
+                fallback_result, fallback_source = self._normalize_stock_data_result(fallback_result)
                 if fallback_result and "❌" not in fallback_result and "错误" not in fallback_result:
-                    logger.info(f"✅ [数据来源: 备用数据源] 降级成功获取数据: {symbol}")
+                    logger.info(f"✅ [数据来源: {fallback_source or '备用数据源'}] 降级成功获取数据: {symbol}")
                     return fallback_result
                 else:
                     logger.error(f"❌ [数据来源: 所有数据源失败] 所有数据源都无法获取有效数据: {symbol}")
@@ -1166,7 +1189,10 @@ class DataSourceManager:
                             'error': str(e),
                             'event_type': 'data_fetch_exception'
                         }, exc_info=True)
-            return self._try_fallback_sources(symbol, start_date, end_date)
+            fallback_result, _ = self._normalize_stock_data_result(
+                self._try_fallback_sources(symbol, start_date, end_date)
+            )
+            return fallback_result
 
     def _get_mongodb_data(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> tuple[str, str | None]:
         """

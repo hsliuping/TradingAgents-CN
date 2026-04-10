@@ -568,7 +568,7 @@
   
                     <div v-if="analysisResults.summary" class="overview-summary">
                       <h5>研究摘要:</h5>
-                      <p>{{ analysisResults.summary }}</p>
+                      <div class="markdown-content" v-html="renderMarkdown(analysisResults.summary)"></div>
                     </div>
 
                     <!-- 🔥 移除重复的"分析依据"，因为上面决策卡片中已经有完整的 decision.reasoning -->
@@ -591,19 +591,19 @@
                       :key="analysisResults?.id || 'default'"
                     >
                       <el-tab-pane
-                        v-for="(report, key) in getAnalysisReports(analysisResults)"
-                        :key="key"
-                        :name="key.toString()"
+                        v-for="report in getAnalysisReports(analysisResults)"
+                        :key="report.key"
+                        :name="report.key"
                         :label="report.title"
                         class="report-tab-pane"
                       >
                         <!-- 标签页内容头部 -->
                         <div class="report-header">
                           <div class="report-title">
-                            <span class="report-icon">{{ getReportIcon(report.title) }}</span>
-                            <span class="report-name">{{ getReportName(report.title) }}</span>
+                            <span class="report-icon">{{ report.icon }}</span>
+                            <span class="report-name">{{ report.name }}</span>
                           </div>
-                          <div class="report-description">{{ getReportDescription(report.title) }}</div>
+                          <div class="report-description">{{ report.description }}</div>
                         </div>
 
                         <!-- 报告内容 -->
@@ -624,7 +624,7 @@
                           
                           <div
                             class="report-content"
-                            v-html="formatReportContent(report.content)"
+                            v-html="renderMarkdown(report.content)"
                             v-if="report.content"
                           ></div>
                           <div v-else class="no-content">
@@ -841,6 +841,39 @@ const pollingTimer = ref<any>(null)
 // 分析步骤定义（动态生成）
 const analysisSteps = ref<any[]>([])
 
+const progressTextReplacements: Array<[string, string]> = [
+  ['bull_researcher_v2', '乐观情景研究员'],
+  ['bear_researcher_v2', '审慎情景研究员'],
+  ['risky_analyst_v2', '高弹性情景分析师'],
+  ['safe_analyst_v2', '防御情景分析师'],
+  ['neutral_analyst_v2', '基准情景分析师'],
+  ['bull_researcher', '乐观情景研究员'],
+  ['bear_researcher', '审慎情景研究员'],
+  ['risky_analyst', '高弹性情景分析师'],
+  ['safe_analyst', '防御情景分析师'],
+  ['neutral_analyst', '基准情景分析师'],
+  ['看多研究员', '乐观情景研究员'],
+  ['看空研究员', '审慎情景研究员'],
+  ['激进分析师', '高弹性情景分析师'],
+  ['保守分析师', '防御情景分析师'],
+  ['中性分析师', '基准情景分析师'],
+  ['构建看多观点', '构建乐观情景观点'],
+  ['构建看空观点', '构建审慎情景观点'],
+  ['激进风险观点', '高弹性情景观点'],
+  ['保守风险观点', '防御情景观点'],
+  ['中性风险观点', '基准情景观点']
+]
+
+const normalizeProgressText = (text: unknown, fallback = '') => {
+  if (typeof text !== 'string' || !text.trim()) {
+    return fallback
+  }
+
+  return progressTextReplacements.reduce((normalized, [from, to]) => {
+    return normalized.split(from).join(to)
+  }, text)
+}
+
 // 从后端步骤数据生成前端步骤
 const generateStepsFromBackend = (backendSteps: any[]) => {
   if (!backendSteps || !Array.isArray(backendSteps)) {
@@ -849,8 +882,8 @@ const generateStepsFromBackend = (backendSteps: any[]) => {
 
   return backendSteps.map((step: any, index: number) => ({
     key: `step_${index}`,
-    title: step.name || `步骤 ${index + 1}`,
-    description: step.description || '处理中...',
+    title: normalizeProgressText(step.name, `步骤 ${index + 1}`),
+    description: normalizeProgressText(step.description, '处理中...'),
     status: 'pending'
   }))
 }
@@ -913,8 +946,8 @@ const stockCodeHelp = ref<string>('')
 
 // 深度选项（5个级别，基于实际测试数据更新）
 const depthOptions = [
-  { icon: '⚡', name: '1级 - 快速分析', description: '基础数据概览，快速决策', time: '2-5分钟' },
-  { icon: '📈', name: '2级 - 基础分析', description: '常规投资决策', time: '3-6分钟' },
+  { icon: '⚡', name: '1级 - 快速分析', description: '基础数据概览，快速了解', time: '2-5分钟' },
+  { icon: '📈', name: '2级 - 基础分析', description: '常规维度分析', time: '3-6分钟' },
   { icon: '🎯', name: '3级 - 标准分析', description: '技术+基本面，推荐', time: '4-8分钟' },
   { icon: '🔍', name: '4级 - 深度分析', description: '多轮辩论，深度研究', time: '6-11分钟' },
   { icon: '🏆', name: '5级 - 全面研究', description: '最全面的研究报告', time: '8-16分钟' }
@@ -1404,17 +1437,17 @@ const updateProgressInfo = (status: any) => {
 
   if (status.current_step_name) {
     console.log('📋 更新步骤:', status.current_step_name)
-    progressInfo.value.currentStep = status.current_step_name
+    progressInfo.value.currentStep = normalizeProgressText(status.current_step_name)
   }
 
   if (status.current_step_description) {
     console.log('📝 更新步骤描述:', status.current_step_description)
-    progressInfo.value.currentStepDescription = status.current_step_description
+    progressInfo.value.currentStepDescription = normalizeProgressText(status.current_step_description)
   }
 
   if (status.message) {
     console.log('💬 更新消息:', status.message)
-    progressInfo.value.message = status.message
+    progressInfo.value.message = normalizeProgressText(status.message)
   }
 
   // 接收后端返回的时间数据
@@ -1432,11 +1465,8 @@ const updateProgressInfo = (status: any) => {
 
   // 如果后端提供了步骤数据，更新步骤列表
   if (status.steps && Array.isArray(status.steps)) {
-    if (analysisSteps.value.length === 0) {
-      // 首次生成步骤列表
-      analysisSteps.value = generateStepsFromBackend(status.steps)
-      console.log('📋 从后端生成步骤列表:', analysisSteps.value.length, '个步骤')
-    }
+    analysisSteps.value = generateStepsFromBackend(status.steps)
+    console.log('📋 从后端同步步骤列表:', analysisSteps.value.length, '个步骤')
   }
 
   console.log('🔄 更新后进度信息:', progressInfo.value)
@@ -1445,7 +1475,7 @@ const updateProgressInfo = (status: any) => {
   updateAnalysisSteps(status)
 
   // 前端不进行估算，只展示后端返回的数据
-  progressInfo.value.message = status.message || '分析正在进行中...'
+  progressInfo.value.message = normalizeProgressText(status.message, '分析正在进行中...')
 }
 
 // 重新开始分析
@@ -1510,112 +1540,106 @@ const startNewAnalysis = () => {
 // 获取研究报告
 const getAnalysisReports = (data: any) => {
   console.log('📊 getAnalysisReports 输入数据:', data)
-  console.log('📊 data.reports 存在:', !!data?.reports)
-  console.log('📊 data.reports 类型:', typeof data?.reports)
-  console.log('📊 data.reports 内容:', data?.reports)
-  console.log('📊 data.reports 键:', data?.reports ? Object.keys(data.reports) : '无')
-  const reports: Array<{title: string, content: any}> = []
+  const reportsData = extractReportsSource(data)
+  console.log('📊 解析后的 reports 键:', Object.keys(reportsData || {}))
+  const reports: Array<{ key: string; title: string; name: string; icon: string; description: string; content: string }> = []
 
-  // 🔥 优化：只从 reports 字段获取数据（统一数据源）
-  let reportsData = null
-  if (data && data.reports && typeof data.reports === 'object' && Object.keys(data.reports).length > 0) {
-    reportsData = data.reports
-    console.log('✅ 使用 data.reports:', Object.keys(reportsData))
-  } else {
-    console.warn('⚠️ data.reports 为空或不存在，无法获取报告数据')
-    return reports
-  }
+  const availableModules = Object.keys(reportsData).filter(key => !!getModuleContent(reportsData[key]))
+  const orderedModules = analysisModuleOrder.filter(key => availableModules.includes(key))
+  const remainingModules = availableModules.filter(key => !analysisModuleOrder.includes(key))
 
-  // 定义报告映射（仅保留研究辅助类报告）
-  const reportMappings = [
-    // 第一阶段：宏观分析师团队 (2个)
-    { key: 'index_report', title: '📊 大盘指数分析', category: '宏观分析师' },
-    { key: 'sector_report', title: '🏭 行业板块分析', category: '宏观分析师' },
-
-    // 第二阶段：分析师团队 (4个)
-    { key: 'market_report', title: '📈 市场技术分析', category: '分析师团队' },
-    { key: 'fundamentals_report', title: '💰 基本面分析', category: '分析师团队' },
-    { key: 'sentiment_report', title: '💭 市场情绪分析', category: '分析师团队' },
-    { key: 'news_report', title: '📰 新闻事件分析', category: '分析师团队' },
-  ]
-
-  // 遍历所有可能的报告
-  reportMappings.forEach(mapping => {
-    const content = reportsData[mapping.key]
-    if (content) {
-      console.log(`📊 找到报告: ${mapping.key} -> ${mapping.title}`)
-      reports.push({
-        title: mapping.title,
-        content: content
-      })
+  for (const moduleKey of [...orderedModules, ...remainingModules]) {
+    const content = getModuleContent(reportsData[moduleKey])
+    if (!content) {
+      continue
     }
-  })
+
+    const meta = getAnalysisReportMeta(moduleKey)
+    reports.push({
+      key: moduleKey,
+      title: `${meta.icon} ${meta.title}`,
+      name: meta.title,
+      icon: meta.icon,
+      description: meta.description,
+      content
+    })
+  }
 
   console.log(`📊 总共找到 ${reports.length} 个报告`)
 
   // 设置第一个报告为默认激活标签页
-  if (reports.length > 0 && !activeReportTab.value) {
-    activeReportTab.value = '0'
+  if (reports.length > 0 && (!activeReportTab.value || !reports.some(report => report.key === activeReportTab.value))) {
+    activeReportTab.value = reports[0].key
+  } else if (reports.length === 0) {
+    activeReportTab.value = ''
   }
 
   return reports
 }
 
-// 获取报告图标
-const getReportIcon = (title: string) => {
-  const iconMap: Record<string, string> = {
-    // 🆕 宏观分析师图标
-    '📊 大盘指数分析': '📊',
-    '🏭 行业板块分析': '🏭',
-    // 分析师团队图标
-    '📈 市场技术分析': '📈',
-    '💰 基本面分析': '💰',
-    '📰 新闻事件分析': '📰',
-    '💭 市场情绪分析': '💭',
-    '📋 研究团队结论': '📋',
-    '🔬 研究团队分析': '🔬',
-    '🐂 看涨研究': '🐂',
-    '🐻 看跌研究': '🐻',
-    '🧩 研究整合意见': '🧩',
-    '⚖️ 风险管理团队': '⚖️',
-    '🔥 激进风险观点': '🔥',
-    '🛡️ 保守风险观点': '🛡️',
-    '⚖️ 中性风险观点': '⚖️',
-    '⚠️ 风险评估': '⚠️',
-    '📝 最终研究结论': '📝'
-  }
-  return iconMap[title] || '📊'
+const analysisModuleOrder = [
+  'index_report',
+  'sector_report',
+  'market_report',
+  'fundamentals_report',
+  'sentiment_report',
+  'news_report',
+  'bull_researcher',
+  'bull_report',
+  'bear_researcher',
+  'bear_report',
+  'research_team_decision',
+  'investment_plan',
+  'trader_investment_plan',
+  'risky_analyst',
+  'risky_opinion',
+  'safe_analyst',
+  'safe_opinion',
+  'neutral_analyst',
+  'neutral_opinion',
+  'risk_management_decision',
+  'risk_assessment',
+  'final_trade_decision',
+  'investment_debate_state',
+  'risk_debate_state',
+  'detailed_analysis'
+]
+
+const analysisModuleMeta: Record<string, { title: string; icon: string; description: string }> = {
+  index_report: { title: '大盘指数分析', icon: '📊', description: '大盘指数走势、市场环境、系统性风险分析' },
+  sector_report: { title: '行业板块分析', icon: '🏭', description: '行业趋势、板块轮动、同业对比分析' },
+  market_report: { title: '市场技术分析', icon: '📈', description: '技术指标、价格趋势、支撑阻力位分析' },
+  fundamentals_report: { title: '基本面分析', icon: '💰', description: '财务数据、估值水平、盈利能力分析' },
+  sentiment_report: { title: '市场情绪分析', icon: '💭', description: '投资者情绪、社交媒体情绪指标' },
+  news_report: { title: '新闻事件分析', icon: '📰', description: '相关新闻事件、市场动态影响分析' },
+  bull_researcher: { title: '乐观情景研究员', icon: '🌤️', description: '乐观情景下的主要论点与论证' },
+  bull_report: { title: '乐观情景论证', icon: '🌤️', description: '乐观情景研究的展开论证内容' },
+  bear_researcher: { title: '审慎情景研究员', icon: '🌧️', description: '审慎情景下的主要论点与论证' },
+  bear_report: { title: '审慎情景论证', icon: '🌧️', description: '审慎情景研究的展开论证内容' },
+  research_team_decision: { title: '研究结论汇总', icon: '🔬', description: '研究团队综合多方观点后的汇总结论' },
+  investment_plan: { title: '研究经理简报', icon: '📋', description: '研究经理对多维分析的整合摘要' },
+  trader_investment_plan: { title: '用户版研究简报', icon: '🧩', description: '面向用户阅读的精简研究简报' },
+  risky_analyst: { title: '高弹性情景分析师', icon: '⚡', description: '高弹性情景下的主要风险与机会评估' },
+  risky_opinion: { title: '高弹性情景审阅', icon: '⚡', description: '高弹性情景的补充审阅意见' },
+  safe_analyst: { title: '防御情景分析师', icon: '🛡️', description: '防御情景下的主要风险与稳健性评估' },
+  safe_opinion: { title: '防御情景审阅', icon: '🛡️', description: '防御情景的补充审阅意见' },
+  neutral_analyst: { title: '基准情景分析师', icon: '⚖️', description: '基准情景下的平衡分析与条件判断' },
+  neutral_opinion: { title: '基准情景审阅', icon: '⚖️', description: '基准情景的补充审阅意见' },
+  risk_management_decision: { title: '风险治理摘要', icon: '⚠️', description: '风险治理团队对整体风险的汇总意见' },
+  risk_assessment: { title: '风险评估摘要', icon: '⚠️', description: '整体风险暴露、约束条件与关注点' },
+  final_trade_decision: { title: '综合研究简报', icon: '📝', description: '融合研究与风险结论后的最终简报' },
+  investment_debate_state: { title: '研究辩论状态', icon: '🔬', description: '研究辩论过程中的关键状态信息' },
+  risk_debate_state: { title: '风险辩论状态', icon: '🛡️', description: '风险辩论过程中的关键状态信息' },
+  detailed_analysis: { title: '详细分析', icon: '📄', description: '补充的详细过程或扩展分析内容' }
 }
 
-// 获取报告名称（去掉图标）
-const getReportName = (title: string) => {
-  return title.replace(/^[^\s]+\s/, '')
-}
-
-// 获取报告描述
-const getReportDescription = (title: string) => {
-  const descMap: Record<string, string> = {
-    // 🆕 宏观分析师描述
-    '📊 大盘指数分析': '大盘指数走势、市场环境、系统性风险分析',
-    '🏭 行业板块分析': '行业趋势、板块轮动、同业对比分析',
-    // 分析师团队描述
-    '📈 市场技术分析': '技术指标、价格趋势、支撑阻力位分析',
-    '💰 基本面分析': '财务数据、估值水平、盈利能力分析',
-    '📰 新闻事件分析': '相关新闻事件、市场动态影响分析',
-    '💭 市场情绪分析': '投资者情绪、社交媒体情绪指标',
-    '📋 研究团队结论': '研究经理综合多空观点后的研究结论',
-    '🔬 研究团队分析': '多头/空头研究员辩论分析，研究经理综合决策',
-    '🐂 看涨研究': '多头研究员观点与论证',
-    '🐻 看跌研究': '空头研究员观点与论证',
-    '🧩 研究整合意见': '研究整合员汇总多方分析后的研究摘要与观察点',
-    '⚖️ 风险管理团队': '激进/保守/中性分析师风险评估，风险经理最终决策',
-    '🔥 激进风险观点': '高风险策略与风险点',
-    '🛡️ 保守风险观点': '稳健策略与风险控制',
-    '⚖️ 中性风险观点': '平衡观点与风险评估',
-    '⚠️ 风险评估': '综合风险评估与建议',
-    '📝 最终研究结论': '综合研究与风险评估后的最终研究结论'
+const getAnalysisReportMeta = (moduleKey: string) => {
+  const fallbackTitle = moduleKey.replace(/_/g, ' ')
+  return analysisModuleMeta[moduleKey] || {
+    title: fallbackTitle,
+    icon: '📄',
+    description: '详细研究报告'
   }
-  return descMap[title] || '详细研究报告'
 }
 
 const normalizeDisplayedResearchText = (content: string) => {
@@ -1635,60 +1659,179 @@ const normalizeDisplayedResearchText = (content: string) => {
   return replacements.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), content)
 }
 
-// 格式化报告内容
-const formatReportContent = (content: any) => {
-  console.log('🎨 [DEBUG] formatReportContent 被调用:', {
-    content: content,
-    type: typeof content,
-    length: typeof content === 'string' ? content.length : 'N/A'
-  })
+const extractStructuredText = (value: any): string | null => {
+  if (!value) return null
 
-  // 确保content是字符串类型
-  if (!content) {
-    console.log('⚠️ [DEBUG] content为空，返回空字符串')
+  if (typeof value === 'object') {
+    for (const key of ['content', 'markdown', 'text', 'message', 'report', 'judge_decision']) {
+      const item = value[key]
+      if (typeof item === 'string' && item.trim()) {
+        return item
+      }
+    }
+    return null
+  }
+
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  let candidate = value.trim()
+  for (let i = 0; i < 3; i += 1) {
+    if (!candidate) break
+
+    try {
+      const parsed = JSON.parse(candidate)
+      if (typeof parsed === 'string') {
+        candidate = parsed.trim()
+        continue
+      }
+
+      const extracted = extractStructuredText(parsed)
+      if (extracted) {
+        candidate = extracted.trim()
+        continue
+      }
+    } catch {
+      // 不是 JSON，继续使用原文本
+    }
+
+    break
+  }
+
+  if (
+    ((candidate.startsWith('"') && candidate.endsWith('"')) ||
+      (candidate.startsWith("'") && candidate.endsWith("'"))) &&
+    candidate.length >= 2
+  ) {
+    candidate = candidate.slice(1, -1).trim()
+  }
+
+  return candidate || null
+}
+
+const prepareMarkdownContent = (content: string) => {
+  if (!content) return ''
+
+  const rawContent = extractStructuredText(content) || content
+
+  const normalizedText = normalizeDisplayedResearchText(rawContent)
+    .replace(/\u001b\[[0-9;]*m/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .replace(/\\"/g, '"')
+    .replace(/^\uFEFF/, '')
+
+  const lines = normalizedText.split('\n')
+  const nonEmptyLines = lines.filter(line => line.trim())
+
+  if (nonEmptyLines.length === 0) {
+    return normalizedText.trim()
+  }
+
+  const commonIndent = Math.min(
+    ...nonEmptyLines.map(line => {
+      const match = line.match(/^[\t ]*/)
+      return match ? match[0].length : 0
+    })
+  )
+
+  const dedentedLines = commonIndent > 0
+    ? lines.map(line => line.slice(Math.min(commonIndent, line.length)))
+    : lines
+
+  let preparedText = dedentedLines.join('\n').trim()
+
+  if (!preparedText) {
     return ''
   }
 
-  // 如果content不是字符串，转换为字符串
-  let stringContent = ''
-  if (typeof content === 'string') {
-    stringContent = normalizeDisplayedResearchText(content)
-    console.log('✅ [DEBUG] content是字符串，长度:', stringContent.length)
-  } else if (typeof content === 'object') {
-    // 如果是对象，尝试提取有用信息（按优先级）
-    if (content.content) {
-      // 🔥 优先使用 content 字段（用于 final_trade_decision 等）
-      stringContent = normalizeDisplayedResearchText(content.content)
-      console.log('📝 [DEBUG] 从对象中提取content字段')
-    } else if (content.markdown) {
-      // 兼容 markdown 字段
-      stringContent = normalizeDisplayedResearchText(content.markdown)
-      console.log('📝 [DEBUG] 从对象中提取markdown字段')
-    } else if (content.judge_decision) {
-      stringContent = normalizeDisplayedResearchText(content.judge_decision)
-      console.log('📝 [DEBUG] 从对象中提取judge_decision')
-    } else {
-      stringContent = JSON.stringify(content, null, 2)
-      console.log('📝 [DEBUG] 将对象转换为JSON字符串')
-    }
-  } else {
-    stringContent = String(content)
-    console.log('📝 [DEBUG] 将内容转换为字符串')
+  if (
+    ((preparedText.startsWith('"') && preparedText.endsWith('"')) ||
+      (preparedText.startsWith("'") && preparedText.endsWith("'"))) &&
+    preparedText.length >= 2
+  ) {
+    preparedText = preparedText.slice(1, -1).trim()
   }
 
+  const fencedMarkdownMatch = preparedText.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/i)
+  if (fencedMarkdownMatch) {
+    preparedText = fencedMarkdownMatch[1].trim()
+  }
+
+  return preparedText
+}
+
+const renderMarkdown = (content: string) => {
+  if (!content) return ''
   try {
-    // 使用marked库将Markdown转换为HTML
-    const htmlContent = marked.parse(stringContent) as string
-
-    console.log('🎨 [DEBUG] Marked转换完成，HTML长度:', htmlContent.length)
-    console.log('🎨 [DEBUG] HTML前200字符:', htmlContent.substring(0, 200))
-
-    return htmlContent
-  } catch (error) {
-    console.error('❌ [ERROR] Marked转换失败:', error)
-    // 如果marked转换失败，回退到简单的文本显示
-    return `<pre style="white-space: pre-wrap; font-family: inherit;">${stringContent}</pre>`
+    return marked.parse(prepareMarkdownContent(content)) as string
+  } catch {
+    return `<pre style="white-space: pre-wrap; font-family: inherit;">${prepareMarkdownContent(content)}</pre>`
   }
+}
+
+const getModuleContent = (moduleData: any): string | null => {
+  if (!moduleData) return null
+
+  const extractedText = extractStructuredText(moduleData)
+  if (extractedText) {
+    return normalizeDisplayedResearchText(extractedText)
+  }
+
+  if (typeof moduleData === 'string') {
+    return normalizeDisplayedResearchText(moduleData)
+  }
+
+  if (typeof moduleData === 'object') {
+    if (moduleData.content && typeof moduleData.content === 'string') {
+      return normalizeDisplayedResearchText(moduleData.content)
+    }
+    if (moduleData.markdown && typeof moduleData.markdown === 'string') {
+      return normalizeDisplayedResearchText(moduleData.markdown)
+    }
+    if (moduleData.judge_decision && typeof moduleData.judge_decision === 'string') {
+      return normalizeDisplayedResearchText(moduleData.judge_decision)
+    }
+  }
+
+  return null
+}
+
+const extractReportsSource = (data: any): Record<string, any> => {
+  const directReports = data?.reports
+  if (directReports && typeof directReports === 'object' && Object.keys(directReports).length > 0) {
+    return directReports
+  }
+
+  const stateReports = data?.state?.reports
+  if (stateReports && typeof stateReports === 'object' && Object.keys(stateReports).length > 0) {
+    return stateReports
+  }
+
+  const state = data?.state && typeof data.state === 'object' ? data.state : null
+  const root = data && typeof data === 'object' ? data : null
+  const extracted: Record<string, any> = {}
+
+  for (const key of analysisModuleOrder) {
+    if (state && state[key] != null) {
+      extracted[key] = state[key]
+      continue
+    }
+    if (root && root[key] != null) {
+      extracted[key] = root[key]
+    }
+  }
+
+  return extracted
+}
+
+// 格式化报告内容
+const formatReportContent = (content: any) => {
+  const normalizedContent = getModuleContent(content)
+  return normalizedContent ? renderMarkdown(normalizedContent) : ''
 }
 
 // 下载报告
@@ -2137,7 +2280,7 @@ const checkModelSuitability = async () => {
         2: '基础分析，了解主要指标',
         3: '标准分析，全面评估股票',
         4: '深度研究，挖掘投资机会',
-        5: '全面分析，专业投资决策'
+        5: '全面分析，形成系统研究结论'
       }
 
       const message = `${depthDescriptions[analysisForm.researchDepth] || '标准分析'}\n\n推荐模型配置：\n• 快速模型：${quickDisplayName}\n• 深度模型：${deepDisplayName}\n\n${reason}`
