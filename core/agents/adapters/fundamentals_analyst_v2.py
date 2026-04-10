@@ -55,7 +55,7 @@ class FundamentalsAnalystAgentV2(BaseAgent):
         description="分析公司财务数据和基本面指标（插件化架构版本）",
         category=AgentCategory.ANALYST,
         license_tier=LicenseTier.FREE,
-        default_tools=["get_stock_fundamentals_unified"],
+        default_tools=["get_stock_fundamentals_unified", "get_financial_statements", "get_cash_flow_statement"],
         version="2.0.0",
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
@@ -204,21 +204,21 @@ class FundamentalsAnalystAgentV2(BaseAgent):
             logger.info(f"✅ 从模板系统获取基本面分析师 v2.0 系统提示词")
             return prompt
         
-        # 降级：使用默认提示词（优化后：只包含角色和职责，格式要求由output_format字段统一管理）
+        # 降级：使用默认提示词
         logger.warning("⚠️ 未从模板系统获取到系统提示词，使用默认提示词")
-        return """你是一位专业的股票基本面分析师。
+        return """你是一位专业的股票基本面分析师，负责为研究流程提供可复核的财务与经营证据。
 
-你的任务是：
-1. 使用工具获取股票的基本面数据（财务数据、估值指标等）
-2. 分析公司的财务健康状况、盈利能力、成长性
-3. 评估公司的估值水平（市盈率、市净率等）
-4. 说明这些因素对整体研究结论的支持或削弱作用
+    你的任务是：
+    1. 使用工具获取公司的基本面数据、最近季度财报明细和现金流信息
+    2. 分析财务健康状况、盈利质量、经营弹性和现金流匹配度
+    3. 评估估值所处背景，以及这些因素对整体研究结论的支持或削弱作用
+    4. 明确列出仍需继续验证的问题和后续观察点
 
-要求：
-- 必须基于真实数据进行分析
-- 分析要专业、客观、详细
-- 不得输出投资建议、目标价或仓位建议
-- 使用中文撰写报告"""
+    要求：
+    - 必须基于真实数据进行分析
+    - 优先输出研究观察、证据、风险提示和待验证事项
+    - 不得输出投资建议、目标价、价格区间、仓位建议或执行计划
+    - 使用中文撰写报告"""
 
     def _build_user_prompt(self, ticker: str, trade_date: str, state: Dict[str, Any] = None) -> str:
         """
@@ -291,17 +291,26 @@ class FundamentalsAnalystAgentV2(BaseAgent):
 
 分析日期：{trade_date}
 
-请调用工具获取基本面数据，然后生成详细的研究分析报告，不得给出交易建议。"""
+    请调用工具获取基本面数据，然后按以下结构生成研究分析报告：
+    1. 核心观察
+    2. 财务与经营信号
+    3. 估值背景
+    4. 对整体研究结论的影响
+    5. 待验证问题
+
+    不得给出交易建议、目标价、价格区间或仓位建议。"""
 
     def _build_analysis_prompt(self, ticker: str) -> str:
         """构建分析提示词"""
         return f"""基于获取的数据，请生成 {ticker} 的基本面分析报告，包括：
 
-1. 财务健康状况分析
-2. 盈利能力评估
-3. 成长性分析
-4. 估值水平评估
-5. 对整体研究结论的影响与待验证问题"""
+    1. 核心观察
+    2. 财务健康状况、盈利能力与现金流匹配度
+    3. 估值背景与市场预期
+    4. 对整体研究结论的支持或削弱作用
+    5. 待验证问题与后续观察点
+
+    不要输出价格区间、目标价、仓位或执行建议。"""
 
     def _generate_mock_report(self, ticker: str, trade_date: str) -> str:
         """生成模拟报告（降级方案）"""

@@ -94,6 +94,34 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
             ToolParameter(name="curr_date", type="string", description="当前日期，格式：YYYY-MM-DD", required=False),
         ],
     ),
+    "get_financial_statements": ToolMetadata(
+        id="get_financial_statements",
+        name="最近季度财报明细",
+        description="获取 A 股最近几个季度的利润表、资产负债表和核心财务指标明细",
+        category=ToolCategory.FUNDAMENTALS,
+        data_source="mongodb/tushare/akshare",
+        is_online=True,
+        icon="🧾",
+        color="#2f80ed",
+        parameters=[
+            ToolParameter(name="ticker", type="string", description="A股股票代码，支持 000001 或 000001.SZ", required=True),
+            ToolParameter(name="limit", type="integer", description="返回最近几个季度，默认4", required=False, default=4),
+        ],
+    ),
+    "get_cash_flow_statement": ToolMetadata(
+        id="get_cash_flow_statement",
+        name="最近季度现金流量表",
+        description="获取 A 股最近几个季度现金流量表，并补充经营现金与利润匹配情况",
+        category=ToolCategory.FUNDAMENTALS,
+        data_source="mongodb/tushare/akshare",
+        is_online=True,
+        icon="💵",
+        color="#16a085",
+        parameters=[
+            ToolParameter(name="ticker", type="string", description="A股股票代码，支持 000001 或 000001.SZ", required=True),
+            ToolParameter(name="limit", type="integer", description="返回最近几个季度，默认4", required=False, default=4),
+        ],
+    ),
     # ❌ 已删除：get_finnhub_company_insider_sentiment（未实现，使用 get_finnhub_company_insider_sentiment_legacy）
     # ❌ 已删除：get_finnhub_company_insider_transactions（未实现，使用 get_finnhub_company_insider_transactions_legacy）
     # ❌ 已删除：get_simfin_balance_sheet（未实现，使用 get_simfin_balance_sheet_legacy）

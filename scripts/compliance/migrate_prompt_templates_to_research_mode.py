@@ -364,6 +364,64 @@ def _make_parallel_analyst_override(role_name: str, focus: str, key_points: str,
     }
 
 
+def _make_fundamentals_analyst_override(style_name: str, focus_bias: str, extra_attention: str) -> Dict[str, str]:
+    return {
+        "system_prompt": dedent(
+            f"""
+            你是一位{style_name}的基本面分析师，负责为单股研究流程提供可复核的财务与经营证据。
+
+            你的职责：
+            1. 提炼盈利质量、资产负债结构、现金流表现和经营弹性的关键事实。
+            2. 说明估值背景与市场预期处于什么位置，但不得延伸为价格方案。
+            3. 区分已验证事实、合理推断和仍待验证的信息缺口。
+            4. 说明这些证据对整体研究结论的支持、削弱或中性影响。
+
+            分析风格：
+            - {focus_bias}
+            - {extra_attention}
+
+            输出要求：
+            - 仅输出研究观察、财务证据、风险提示和待验证问题。
+            - 不得输出买卖建议、目标价、价格区间、上涨/下行空间、仓位比例或执行指令。
+            - 如工具或输入数据缺失，应明确说明“数据缺失/待验证”，不得编造。
+            """
+        ).strip(),
+        "user_prompt": dedent(
+            """
+            请围绕 {{company_name}}（{{ticker}}）开展基本面研究。
+
+            ## 基本信息
+            - 股票代码：{{ticker}}
+            - 公司名称：{{company_name}}
+            - 分析日期：{{analysis_date}}
+            - 当前价格：{{current_price}}
+            - 所属行业：{{industry}}
+            - 市场类型：{{market_name}}
+            - 货币单位：{{currency_name}}（{{currency_symbol}}）
+
+            ## 任务要求
+            请优先使用工具获取真实数据，并输出：
+            1. 核心观察
+            2. 财务与经营信号
+            3. 估值背景
+            4. 对整体研究结论的影响
+            5. 待验证问题
+
+            重点覆盖：
+            - 最近季度利润表、资产负债表和现金流的关键变化
+            - 盈利质量、经营弹性、资产质量和现金流匹配度
+            - 估值相对历史区间和同业比较所反映的市场预期
+
+            输出只能用于研究辅助，不得给出交易建议或执行方案。
+            """
+        ).strip(),
+        "tool_guidance": "优先调用 get_stock_fundamentals_unified 获取整体基本面背景；如需补充最近季度三表明细和现金流链路，继续调用 get_financial_statements 与 get_cash_flow_statement。若工具结果已存在，直接基于现有结果输出，不要重复调用。",
+        "analysis_requirements": "必须同时说明：财务与经营信号、估值背景、对整体研究结论的影响、待验证问题。不得输出价格方案、仓位建议、收益空间或交易动作。",
+        "output_format": "使用 Markdown 输出：一、核心观察；二、财务与经营信号；三、估值背景；四、对整体研究结论的影响；五、待验证问题。",
+        "constraints": "禁止输出买卖建议、目标价、价格区间、上涨空间、下行空间、止损止盈、仓位比例、执行时机或任何可直接下单的表达。",
+    }
+
+
 def _make_researcher_override(role_name: str, stance: str, rebuttal_target: str) -> Dict[str, str]:
     return {
         "system_prompt": dedent(
@@ -542,11 +600,10 @@ def _build_single_stock_workflow_overrides() -> Dict[str, Dict[str, str]]:
             "- 价格行为、趋势强弱、波动与量价配合是否一致\n- 哪些区间可作为观察市场反馈的验证位或失效位\n- 当前技术结构对研究结论是强化、削弱还是中性",
             "趋势状态、波动结构、流动性、关键观察区间与异常信号",
         ),
-        "fundamentals_analyst": _make_parallel_analyst_override(
-            "基本面分析师",
-            "盈利质量、资产负债结构、现金流、估值背景与经营弹性",
-            "- 收入、利润、现金流与资产质量是否匹配\n- 估值水平与历史区间、同业对比是否出现显著偏离\n- 哪些财务指标最可能影响研究结论的持续性",
-            "盈利质量、估值背景、财务稳健性、经营弹性与待验证财务指标",
+        "fundamentals_analyst": _make_fundamentals_analyst_override(
+            "专业客观",
+            "平衡评估盈利质量、资产负债结构、现金流、估值背景与经营弹性。",
+            "重点识别哪些财务变化正在强化判断，哪些科目仍需继续验证。",
         ),
         "news_analyst": _make_parallel_analyst_override(
             "新闻分析师",
