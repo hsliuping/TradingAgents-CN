@@ -114,11 +114,21 @@ def test_margin_trading_flags_anomalous_change_fields(monkeypatch) -> None:
         async def get_margin_detail(self, start_date: str, end_date: str) -> pd.DataFrame:
             return pd.DataFrame(
                 [
-                    {"trade_date": "20260410", "rzye": 13156.60 * 100000000, "rqye": 124.15 * 100000000, "rzrqye": 13280.75 * 100000000},
-                    {"trade_date": "20260409", "rzye": 9000.00 * 100000000, "rqye": 120.00 * 100000000, "rzrqye": 9120.00 * 100000000},
-                    {"trade_date": "20260408", "rzye": 8000.00 * 100000000, "rqye": 110.00 * 100000000, "rzrqye": 8110.00 * 100000000},
-                    {"trade_date": "20260407", "rzye": 7000.00 * 100000000, "rqye": 100.00 * 100000000, "rzrqye": 7100.00 * 100000000},
-                    {"trade_date": "20260406", "rzye": 6000.00 * 100000000, "rqye": 90.00 * 100000000, "rzrqye": 6090.00 * 100000000},
+                    {"trade_date": "20260410", "exchange_id": "SSE", "rzye": 5000.00 * 100000000, "rqye": 40.00 * 100000000, "rzrqye": 5040.00 * 100000000},
+                    {"trade_date": "20260410", "exchange_id": "SZSE", "rzye": 7000.00 * 100000000, "rqye": 70.00 * 100000000, "rzrqye": 7070.00 * 100000000},
+                    {"trade_date": "20260410", "exchange_id": "BSE", "rzye": 1156.60 * 100000000, "rqye": 14.15 * 100000000, "rzrqye": 1170.75 * 100000000},
+                    {"trade_date": "20260409", "exchange_id": "SSE", "rzye": 3500.00 * 100000000, "rqye": 45.00 * 100000000, "rzrqye": 3545.00 * 100000000},
+                    {"trade_date": "20260409", "exchange_id": "SZSE", "rzye": 4800.00 * 100000000, "rqye": 60.00 * 100000000, "rzrqye": 4860.00 * 100000000},
+                    {"trade_date": "20260409", "exchange_id": "BSE", "rzye": 700.00 * 100000000, "rqye": 15.00 * 100000000, "rzrqye": 715.00 * 100000000},
+                    {"trade_date": "20260408", "exchange_id": "SSE", "rzye": 3200.00 * 100000000, "rqye": 40.00 * 100000000, "rzrqye": 3240.00 * 100000000},
+                    {"trade_date": "20260408", "exchange_id": "SZSE", "rzye": 4200.00 * 100000000, "rqye": 55.00 * 100000000, "rzrqye": 4255.00 * 100000000},
+                    {"trade_date": "20260408", "exchange_id": "BSE", "rzye": 600.00 * 100000000, "rqye": 15.00 * 100000000, "rzrqye": 615.00 * 100000000},
+                    {"trade_date": "20260407", "exchange_id": "SSE", "rzye": 2800.00 * 100000000, "rqye": 35.00 * 100000000, "rzrqye": 2835.00 * 100000000},
+                    {"trade_date": "20260407", "exchange_id": "SZSE", "rzye": 3600.00 * 100000000, "rqye": 50.00 * 100000000, "rzrqye": 3650.00 * 100000000},
+                    {"trade_date": "20260407", "exchange_id": "BSE", "rzye": 600.00 * 100000000, "rqye": 15.00 * 100000000, "rzrqye": 615.00 * 100000000},
+                    {"trade_date": "20260406", "exchange_id": "SSE", "rzye": 2400.00 * 100000000, "rqye": 30.00 * 100000000, "rzrqye": 2430.00 * 100000000},
+                    {"trade_date": "20260406", "exchange_id": "SZSE", "rzye": 3000.00 * 100000000, "rqye": 45.00 * 100000000, "rzrqye": 3045.00 * 100000000},
+                    {"trade_date": "20260406", "exchange_id": "BSE", "rzye": 600.00 * 100000000, "rqye": 15.00 * 100000000, "rzrqye": 615.00 * 100000000},
                 ]
             )
 
@@ -136,6 +146,39 @@ def test_margin_trading_flags_anomalous_change_fields(monkeypatch) -> None:
     assert "【余额水平信号】" in report
     assert "杠杆资金谨慎" not in report
     assert "融资余额处于相对谨慎区间" in report
+
+
+def test_margin_trading_reports_missing_exchange_coverage(monkeypatch) -> None:
+    module = _load_module("core/tools/index_tools.py", "index_tools_margin_trading_incomplete")
+
+    class FakeProvider:
+        async def get_margin_detail(self, start_date: str, end_date: str) -> pd.DataFrame:
+            return pd.DataFrame(
+                [
+                    {"trade_date": "20260410", "exchange_id": "SSE", "rzye": 13156.60 * 100000000, "rqye": 124.15 * 100000000, "rzrqye": 13280.75 * 100000000},
+                    {"trade_date": "20260409", "exchange_id": "SSE", "rzye": 13000.00 * 100000000, "rqye": 120.00 * 100000000, "rzrqye": 13120.00 * 100000000},
+                    {"trade_date": "20260409", "exchange_id": "SZSE", "rzye": 12000.00 * 100000000, "rqye": 60.00 * 100000000, "rzrqye": 12060.00 * 100000000},
+                    {"trade_date": "20260409", "exchange_id": "BSE", "rzye": 902.06 * 100000000, "rqye": 5.05 * 100000000, "rzrqye": 907.11 * 100000000},
+                ]
+            )
+
+    async def fake_latest_trade_date(trade_date: str) -> str:
+        return "20260410"
+
+    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
+
+    report = asyncio.run(module.get_margin_trading("2026-04-11", lookback_days=10))
+
+    assert "【数据完整性】" in report
+    assert "数据状态: 不完整" in report
+    assert "已返回交易所: SSE" in report
+    assert "缺失交易所: SZSE、BSE" in report
+    assert "当前数据仅覆盖部分交易所，不代表 A 股全市场两融口径" in report
+    assert "不应据此判断两融余额水平、单日变化或杠杆资金方向" in report
+    assert "融资异常" in report
+    assert "【今日两融余额】" not in report
+    assert "【余额水平信号】" not in report
 
 
 def test_index_technical_returns_rule_tags_without_summary_judgment(monkeypatch) -> None:

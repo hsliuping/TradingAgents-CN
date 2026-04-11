@@ -14,12 +14,70 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+MARGIN_CORE_EXCHANGES = ("SSE", "SZSE")
+MARGIN_BSE_AVAILABLE_SINCE = "20211115"
+
 
 def _clean_date_string(date_str: str) -> str:
     """清理日期字符串，去掉可能的时间部分"""
     if not date_str:
         return date_str
     return date_str.split()[0] if ' ' in date_str else date_str
+
+
+def _format_compact_trade_date(trade_date: str) -> str:
+    """将 YYYYMMDD 格式转为 YYYY-MM-DD。"""
+    if not trade_date or len(trade_date) != 8 or not trade_date.isdigit():
+        return trade_date
+    return f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+
+
+def _get_required_margin_exchanges(trade_date: str) -> List[str]:
+    """根据日期返回两融汇总应覆盖的交易所集合。"""
+    exchanges = list(MARGIN_CORE_EXCHANGES)
+    if trade_date and trade_date >= MARGIN_BSE_AVAILABLE_SINCE:
+        exchanges.append("BSE")
+    return exchanges
+
+
+def _get_margin_exchange_coverage(day_data: pd.DataFrame, trade_date: str) -> Dict[str, Any]:
+    """评估指定交易日的两融汇总是否覆盖所需交易所。"""
+    required_exchanges = _get_required_margin_exchanges(trade_date)
+
+    if day_data is None or day_data.empty:
+        return {
+            "is_complete": False,
+            "present_exchanges": [],
+            "missing_exchanges": required_exchanges,
+            "missing_exchange_column": False,
+        }
+
+    if "exchange_id" not in day_data.columns:
+        return {
+            "is_complete": False,
+            "present_exchanges": [],
+            "missing_exchanges": required_exchanges,
+            "missing_exchange_column": True,
+        }
+
+    present_exchange_set = {
+        str(exchange_id).strip()
+        for exchange_id in day_data["exchange_id"].dropna().tolist()
+        if str(exchange_id).strip()
+    }
+    present_exchanges = [
+        exchange_id for exchange_id in required_exchanges if exchange_id in present_exchange_set
+    ]
+    missing_exchanges = [
+        exchange_id for exchange_id in required_exchanges if exchange_id not in present_exchange_set
+    ]
+
+    return {
+        "is_complete": not missing_exchanges,
+        "present_exchanges": present_exchanges,
+        "missing_exchanges": missing_exchanges,
+        "missing_exchange_column": False,
+    }
 
 # 缓存管理器
 _cache = None
@@ -757,10 +815,42 @@ async def get_margin_trading(trade_date: str, lookback_days: int = 10) -> str:
             report_lines.append("⚠️ 暂无两融数据（可能需要更高的 Tushare 积分）")
             return "\n".join(report_lines)
 
-        # 按日期排序，汇总沪深两市
+        # 按日期排序，并校验请求交易日是否有完整的交易所覆盖
+        df = df.copy()
+        df['trade_date'] = df['trade_date'].astype(str)
         df = df.sort_values('trade_date', ascending=False)
-        latest_date = df.iloc[0]['trade_date']
-        latest_data = df[df['trade_date'] == latest_date]
+        latest_date = str(df.iloc[0]['trade_date'])
+        latest_data = df[df['trade_date'] == actual_trade_date]
+
+        if latest_data.empty:
+            report_lines.append("【数据完整性】")
+            report_lines.append("  • 数据状态: 请求交易日无记录")
+            report_lines.append(f"  • 请求交易日: {actual_trade_date_formatted}")
+            report_lines.append(f"  • 接口最新返回日期: {_format_compact_trade_date(latest_date)}")
+            report_lines.append("")
+            report_lines.append("【使用限制】")
+            report_lines.append("  • 当前未获取到请求交易日的两融数据")
+            report_lines.append("  • 不应据此判断两融余额水平、单日变化或杠杆资金方向")
+            report_lines.append("  • 可等待 Tushare 更新当日数据后再做两融分析")
+            return "\n".join(report_lines)
+
+        coverage = _get_margin_exchange_coverage(latest_data, actual_trade_date)
+        if not coverage['is_complete']:
+            present_exchanges = "、".join(coverage['present_exchanges']) if coverage['present_exchanges'] else "无"
+            missing_exchanges = "、".join(coverage['missing_exchanges']) if coverage['missing_exchanges'] else "无"
+
+            report_lines.append("【数据完整性】")
+            report_lines.append("  • 数据状态: 不完整")
+            report_lines.append(f"  • 已返回交易所: {present_exchanges}")
+            report_lines.append(f"  • 缺失交易所: {missing_exchanges}")
+            if coverage['missing_exchange_column']:
+                report_lines.append("  • 接口未返回 exchange_id 字段，无法确认交易所覆盖范围")
+            report_lines.append("")
+            report_lines.append("【使用限制】")
+            report_lines.append("  • 当前数据仅覆盖部分交易所，不代表 A 股全市场两融口径")
+            report_lines.append("  • 不应据此判断两融余额水平、单日变化或杠杆资金方向")
+            report_lines.append("  • 后续分析应明确标注数据缺失，不要将其外推为融资异常或杠杆变化")
+            return "\n".join(report_lines)
 
         # 汇总数据
         rzye = latest_data['rzye'].sum() / 100000000  # 融资余额（亿元）
