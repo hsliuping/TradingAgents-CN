@@ -82,6 +82,48 @@ def select_export_template(candidates: List[Dict[str, Any]], agent_name: str, pr
     )
 
 
+def _select_db_doc_for_sync(
+    candidates: List[Dict[str, Any]],
+    export_doc: Dict[str, Any],
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    if not candidates:
+        raise ValueError("数据库候选模板为空")
+
+    if len(candidates) == 1:
+        return candidates[0], []
+
+    expected_template_name = export_doc.get("template_name")
+    canonical_candidates = [
+        item
+        for item in candidates
+        if item.get("is_system") is True and item.get("template_name") == expected_template_name
+    ]
+    if len(canonical_candidates) == 1:
+        duplicate_candidates = [item for item in candidates if item is not canonical_candidates[0]]
+        if all(
+            item.get("is_system") is not True and "副本" in str(item.get("template_name") or "")
+            for item in duplicate_candidates
+        ):
+            return canonical_candidates[0], duplicate_candidates
+
+    filtered_candidates = [
+        item
+        for item in candidates
+        if item.get("is_system") is True and "副本" not in str(item.get("template_name") or "")
+    ]
+    if len(filtered_candidates) == 1:
+        duplicate_candidates = [item for item in candidates if item is not filtered_candidates[0]]
+        if all(
+            item.get("is_system") is not True and "副本" in str(item.get("template_name") or "")
+            for item in duplicate_candidates
+        ):
+            return filtered_candidates[0], duplicate_candidates
+
+    agent_name = candidates[0].get("agent_name")
+    preference_type = candidates[0].get("preference_type")
+    raise ValueError(f"数据库存在重复激活模板，请先清理: {agent_name}/{preference_type}")
+
+
 def _json_safe(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _json_safe(item) for key, item in value.items()}
@@ -143,7 +185,7 @@ def load_export_templates(agent_names: List[str]) -> Dict[Tuple[str, str], Dict[
     return export_map
 
 
-def build_changed_docs(collection, export_map: Dict[Tuple[str, str], Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def build_changed_docs(collection, export_map: Dict[Tuple[str, str], Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     query_filters = [
         {"agent_name": agent_name, "preference_type": preference_type, "status": "active"}
         for agent_name, preference_type in export_map.keys()
@@ -156,7 +198,20 @@ def build_changed_docs(collection, export_map: Dict[Tuple[str, str], Dict[str, A
         )
     )
 
-    found_keys = {(doc.get("agent_name"), doc.get("preference_type")) for doc in db_docs}
+    grouped_docs: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    for doc in db_docs:
+        key = (doc.get("agent_name"), doc.get("preference_type"))
+        grouped_docs.setdefault(key, []).append(doc)
+
+    selected_docs: List[Dict[str, Any]] = []
+    duplicate_docs_to_archive: List[Dict[str, Any]] = []
+    for key, export_doc in export_map.items():
+        candidates = grouped_docs.get(key) or []
+        selected_doc, duplicates = _select_db_doc_for_sync(candidates, export_doc)
+        selected_docs.append(selected_doc)
+        duplicate_docs_to_archive.extend(duplicates)
+
+    found_keys = {(doc.get("agent_name"), doc.get("preference_type")) for doc in selected_docs}
     missing_in_db = set(export_map.keys()).difference(found_keys)
     if missing_in_db:
         missing_text = ", ".join(
@@ -165,17 +220,8 @@ def build_changed_docs(collection, export_map: Dict[Tuple[str, str], Dict[str, A
         )
         raise ValueError(f"数据库缺少目标模板: {missing_text}")
 
-    duplicate_keys = sorted(
-        key for key in found_keys if sum(1 for doc in db_docs if (doc.get("agent_name"), doc.get("preference_type")) == key) > 1
-    )
-    if duplicate_keys:
-        duplicate_text = ", ".join(
-            f"{agent}/{preference}" for agent, preference in duplicate_keys
-        )
-        raise ValueError(f"数据库存在重复激活模板，请先清理: {duplicate_text}")
-
     changed_docs: List[Dict[str, Any]] = []
-    for db_doc in db_docs:
+    for db_doc in selected_docs:
         key = (db_doc.get("agent_name"), db_doc.get("preference_type"))
         export_doc = export_map[key]
         export_content = export_doc.get("content") or {}
@@ -196,7 +242,7 @@ def build_changed_docs(collection, export_map: Dict[Tuple[str, str], Dict[str, A
             }
         )
 
-    return db_docs, changed_docs
+    return db_docs, changed_docs, duplicate_docs_to_archive
 
 
 def main() -> int:
@@ -217,7 +263,7 @@ def main() -> int:
     db = client[get_mongodb_database_name()]
     collection = db.prompt_templates
 
-    db_docs, changed_docs = build_changed_docs(collection, export_map)
+    db_docs, changed_docs, duplicate_docs_to_archive = build_changed_docs(collection, export_map)
 
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     backup_path = BACKUP_DIR / f"research_brief_targeted_sync_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -226,10 +272,14 @@ def main() -> int:
     print(f"目标模板: {len(export_map)} 条")
     print(f"数据库命中: {len(db_docs)} 条")
     print(f"需要更新: {len(changed_docs)} 条")
+    print(f"待归档副本: {len(duplicate_docs_to_archive)} 条")
     print(f"备份文件: {backup_path}")
 
     for item in changed_docs[:30]:
         print(f"- {item['agent_name']} | {item['template_name']} | 字段: {', '.join(item['changed_fields'])}")
+
+    for item in duplicate_docs_to_archive[:30]:
+        print(f"- 归档副本 | {item.get('agent_name')} | {item.get('template_name')}")
 
     if not args.apply:
         print("\n当前为预览模式，未写入数据库。使用 --apply 执行更新。")
@@ -256,7 +306,28 @@ def main() -> int:
         )
         updated_count += 1
 
+    archived_count = 0
+    for item in duplicate_docs_to_archive:
+        remark = (item.get("remark") or "").strip()
+        remark_suffix = "[2026-04-11] 同步时自动归档重复副本模板"
+        if remark_suffix not in remark:
+            remark = f"{remark}\n{remark_suffix}".strip()
+
+        collection.update_one(
+            {"_id": item["_id"]},
+            {
+                "$set": {
+                    "status": "draft",
+                    "updated_at": datetime.utcnow(),
+                    "version": int(item.get("version") or 1) + 1,
+                    "remark": remark,
+                }
+            },
+        )
+        archived_count += 1
+
     print(f"\n已写入数据库: {updated_count} 条模板")
+    print(f"已归档重复副本: {archived_count} 条模板")
     client.close()
     return 0
 

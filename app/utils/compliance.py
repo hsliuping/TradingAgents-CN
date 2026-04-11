@@ -85,6 +85,29 @@ _DISPLAY_REPORT_RISK_PATTERNS = [
     )
 ]
 
+_DISPLAY_TITLE_REPLACEMENTS = [
+    (re.compile(r'^(?P<prefix>#{1,6}\s*)?新闻分析师研究报告$', re.IGNORECASE), '新闻研究'),
+    (re.compile(r'^(?P<prefix>#{1,6}\s*)?新闻研究报告$', re.IGNORECASE), '新闻研究'),
+    (re.compile(r'^(?P<prefix>#{1,6}\s*)?社交媒体分析师研究报告$', re.IGNORECASE), '情绪研究'),
+    (re.compile(r'^(?P<prefix>#{1,6}\s*)?社交分析师研究报告$', re.IGNORECASE), '情绪研究'),
+    (re.compile(r'^(?P<prefix>#{1,6}\s*)?情绪分析师研究报告$', re.IGNORECASE), '情绪研究'),
+    (re.compile(r'^(?P<prefix>#{1,6}\s*)?板块分析师研究观察报告$', re.IGNORECASE), '行业板块研究'),
+    (re.compile(r'^(?P<prefix>#{1,6}\s*)?行业分析师研究观察报告$', re.IGNORECASE), '行业板块研究'),
+    (re.compile(r'^(?P<prefix>#{1,6}\s*)?行业板块研究观察报告$', re.IGNORECASE), '行业板块研究'),
+    (re.compile(r'^(?P<prefix>#{1,6}\s*)?大盘分析师研究观察报告$', re.IGNORECASE), '大盘环境研究'),
+    (re.compile(r'^(?P<prefix>#{1,6}\s*)?大盘环境研究观察报告$', re.IGNORECASE), '大盘环境研究'),
+]
+
+_DISPLAY_PHRASE_REPLACEMENTS = (
+    ('买入逻辑', '研究逻辑'),
+    ('投资机会', '研究线索'),
+    ('配置型投资者', '研究型用户'),
+    ('配置价值', '研究跟踪价值'),
+    ('安全边际', '风险缓冲'),
+    ('具备一定吸引力', '值得继续跟踪'),
+    ('价值修复的起点', '估值与预期修复的早期信号'),
+)
+
 
 def _as_text(value: Any) -> str:
     if isinstance(value, str):
@@ -118,6 +141,21 @@ def _plain_text(text: str) -> str:
     normalized = re.sub(r"`+", "", normalized)
     normalized = normalized.replace("#", " ").replace("*", " ")
     return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _normalize_display_line(line: str) -> str:
+    normalized_line = line
+
+    for pattern, replacement in _DISPLAY_TITLE_REPLACEMENTS:
+        match = pattern.match(normalized_line.strip())
+        if match:
+            prefix = match.groupdict().get('prefix') or ''
+            return f"{prefix}{replacement}".rstrip()
+
+    for old_text, new_text in _DISPLAY_PHRASE_REPLACEMENTS:
+        normalized_line = normalized_line.replace(old_text, new_text)
+
+    return normalized_line
 
 
 def is_low_signal_text(text: str) -> bool:
@@ -274,7 +312,7 @@ def sanitize_display_report_text(text: Any, fallback: str = "") -> str:
     cleaned_lines: List[str] = []
 
     for raw_line in raw_text.splitlines():
-        line = raw_line.rstrip()
+        line = _normalize_display_line(raw_line.rstrip())
         normalized = _plain_text(line)
 
         if not normalized:

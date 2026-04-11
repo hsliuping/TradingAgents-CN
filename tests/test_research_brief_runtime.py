@@ -148,6 +148,28 @@ def test_sanitize_display_report_text_removes_price_and_actionable_lines() -> No
     assert "60%-80%风险敞口" not in sanitized
 
 
+def test_sanitize_display_report_text_normalizes_legacy_titles_and_soft_investment_language() -> None:
+    raw_text = """## 新闻分析师研究报告
+
+该事件可能成为价值修复的起点，对配置型投资者具备一定吸引力。
+
+## 板块分析师研究观察报告
+
+当前行业讨论热度上升，但更适合作为后续研究线索而非投资机会。
+"""
+
+    sanitized = sanitize_display_report_text(raw_text)
+
+    assert "## 新闻研究" in sanitized
+    assert "## 行业板块研究" in sanitized
+    assert "价值修复的起点" not in sanitized
+    assert "配置型投资者" not in sanitized
+    assert "投资机会" not in sanitized
+    assert "估值与预期修复的早期信号" in sanitized
+    assert "研究型用户" in sanitized
+    assert "研究线索" in sanitized
+
+
 def test_sanitize_position_analysis_payload_strips_execution_fields() -> None:
     raw_result = {
         "action": "add",
