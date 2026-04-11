@@ -752,7 +752,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -837,6 +837,7 @@ const progressInfo = ref({
   totalTime: 0         // 预计总时长（秒）
 })
 const pollingTimer = ref<any>(null)
+const completedResultRetryCount = ref(0)
 
 // 分析步骤定义（动态生成）
 const analysisSteps = ref<any[]>([])
@@ -1329,60 +1330,53 @@ const startPollingTaskStatus = () => {
       console.log('🔍 当前状态:', status.status, '进度:', status.progress)
 
       if (status.status === 'completed') {
-        // 研究完成，调用专门的结果API获取完整数据
+        // 研究完成后继续短重试拉取结果，避免 completed 先于完整结果可读的短窗口
         console.log('🎉 研究完成，正在获取完整结果...')
 
-        try {
-          const resultResponse = await fetch(`/api/analysis/tasks/${currentTaskId.value}/result`, {
-            headers: {
-              'Authorization': `Bearer ${authStore.token}`,
-              'Content-Type': 'application/json'
-            }
-          })
-
-          if (resultResponse.ok) {
-            const resultData = await resultResponse.json()
-            if (resultData.success) {
-              analysisResults.value = resultData.data
-              console.log('✅ 获取完整研究结果成功:', resultData.data)
-
-              // 添加调试信息
-              console.log('🔍 完整结果数据结构:', {
-                hasDecision: !!resultData.data?.decision,
-                hasState: !!resultData.data?.state,
-                hasReports: !!resultData.data?.reports,
-                hasSummary: !!resultData.data?.summary,
-                hasRecommendation: !!resultData.data?.recommendation,
-                keys: Object.keys(resultData.data || {})
-              })
-            } else {
-              console.error('❌ 获取研究结果失败:', resultData.message)
-              analysisResults.value = status.result_data // 回退到状态中的数据
-            }
-          } else {
-            console.error('❌ 研究结果 API 调用失败:', resultResponse.status)
-            analysisResults.value = status.result_data // 回退到状态中的数据
-          }
-        } catch (error) {
-          console.error('❌ 获取研究结果异常:', error)
-          analysisResults.value = status.result_data // 回退到状态中的数据
-        }
-
         analysisStatus.value = 'completed'
-        showResults.value = true
         progressInfo.value.progress = 100
         progressInfo.value.currentStep = '研究完成'
-        progressInfo.value.message = '研究已完成！'
+        progressInfo.value.message = '研究已完成，正在同步结果...'
 
-        if (pollingTimer.value) {
-          clearInterval(pollingTimer.value)
-          pollingTimer.value = null
+        let resolvedResult: any = null
+        try {
+          resolvedResult = await fetchCompletedAnalysisResult(currentTaskId.value, status.result_data)
+        } catch (error) {
+          console.error('❌ 获取完整研究结果异常:', error)
+          resolvedResult = pickBestAnalysisResult(null, status.result_data)
         }
 
-        // 任务完成后保持缓存，以便刷新后能看到结果
-        // clearTaskCache() // 不清除，让用户能在30分钟内刷新查看结果
+        if (hasMeaningfulAnalysisResult(resolvedResult)) {
+          analysisResults.value = resolvedResult
+          showResults.value = true
+          progressInfo.value.message = '研究已完成！'
+          completedResultRetryCount.value = 0
 
-        ElMessage.success('研究完成！')
+          if (pollingTimer.value) {
+            clearInterval(pollingTimer.value)
+            pollingTimer.value = null
+          }
+
+          ElMessage.success('研究完成！')
+        } else {
+          completedResultRetryCount.value += 1
+          analysisResults.value = null
+          showResults.value = false
+
+          console.warn('⚠️ 研究结果尚未完成同步，等待下一次轮询:', {
+            taskId: currentTaskId.value,
+            retryCount: completedResultRetryCount.value
+          })
+
+          if (completedResultRetryCount.value >= maxCompletedResultPollRetries) {
+            progressInfo.value.message = '研究已完成，但结果同步较慢，请稍后刷新页面查看'
+            if (pollingTimer.value) {
+              clearInterval(pollingTimer.value)
+              pollingTimer.value = null
+            }
+            ElMessage.warning('研究已完成，但结果同步较慢，请稍后刷新页面查看')
+          }
+        }
 
       } else if (status.status === 'failed') {
         // 研究失败
@@ -1487,6 +1481,7 @@ const restartAnalysis = () => {
   showResults.value = false
   analysisResults.value = null
   currentTaskId.value = ''
+  completedResultRetryCount.value = 0
   progressInfo.value = {
     progress: 0,
     currentStep: '',
@@ -1515,6 +1510,7 @@ const startNewAnalysis = () => {
   analysisStatus.value = 'idle'
   showResults.value = false
   analysisResults.value = null
+  completedResultRetryCount.value = 0
   
   // 重置进度信息
   progressInfo.value = {
@@ -1834,6 +1830,108 @@ const extractReportsSource = (data: any): Record<string, any> => {
   return extracted
 }
 
+const completedResultRetryDelays = [0, 1200, 2500, 4000]
+const maxCompletedResultPollRetries = 3
+
+const waitForResultSync = (delayMs: number) => {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, delayMs)
+  })
+}
+
+const hasMeaningfulText = (value: any) => {
+  const text = extractStructuredText(value)
+  return typeof text === 'string' && text.trim().length > 0
+}
+
+const hasMeaningfulAnalysisResult = (result: any) => {
+  if (!result || typeof result !== 'object') {
+    return false
+  }
+
+  const reports = extractReportsSource(result)
+  if (Object.values(reports).some(report => !!getModuleContent(report)?.trim())) {
+    return true
+  }
+
+  if (hasMeaningfulText(result.summary) || hasMeaningfulText(result.recommendation)) {
+    return true
+  }
+
+  if (Array.isArray(result.key_points) && result.key_points.some(point => hasMeaningfulText(point))) {
+    return true
+  }
+
+  const decision = result.decision
+  if (decision && typeof decision === 'object') {
+    for (const key of ['analysis_view', 'reasoning', 'judge_decision', 'action']) {
+      if (hasMeaningfulText(decision[key])) {
+        return true
+      }
+    }
+  }
+
+  return false
+}
+
+const pickBestAnalysisResult = (primaryResult: any, fallbackResult: any) => {
+  if (hasMeaningfulAnalysisResult(primaryResult)) {
+    return primaryResult
+  }
+
+  if (hasMeaningfulAnalysisResult(fallbackResult)) {
+    return fallbackResult
+  }
+
+  return primaryResult ?? fallbackResult ?? null
+}
+
+const fetchCompletedAnalysisResult = async (taskId: string, fallbackResultData: any = null) => {
+  let bestResult = hasMeaningfulAnalysisResult(fallbackResultData) ? fallbackResultData : null
+  let lastError: unknown = null
+
+  for (let attempt = 0; attempt < completedResultRetryDelays.length; attempt += 1) {
+    const delayMs = completedResultRetryDelays[attempt]
+    if (delayMs > 0) {
+      await waitForResultSync(delayMs)
+    }
+
+    try {
+      const response = await analysisApi.getTaskResult(taskId)
+      const resultPayload = response?.data ?? null
+
+      console.log('📦 研究结果同步尝试:', {
+        taskId,
+        attempt: attempt + 1,
+        hasPayload: !!resultPayload,
+        keys: Object.keys(resultPayload || {})
+      })
+
+      bestResult = pickBestAnalysisResult(resultPayload, bestResult)
+      if (hasMeaningfulAnalysisResult(bestResult)) {
+        return bestResult
+      }
+    } catch (error) {
+      lastError = error
+      console.warn('⚠️ 研究结果同步尝试失败:', {
+        taskId,
+        attempt: attempt + 1,
+        error
+      })
+    }
+  }
+
+  if (bestResult) {
+    return bestResult
+  }
+
+  if (lastError) {
+    throw lastError
+  }
+
+  return fallbackResultData
+}
+
 // 格式化报告内容
 const formatReportContent = (content: any) => {
   const normalizedContent = getModuleContent(content)
@@ -2147,11 +2245,29 @@ const restoreTaskFromCache = async () => {
       // 任务已完成，显示结果
       currentTaskId.value = cached.taskId
       analysisStatus.value = 'completed'
-      showResults.value = true
-      analysisResults.value = status.result_data
       progressInfo.value.progress = 100
       progressInfo.value.currentStep = '研究完成'
-      progressInfo.value.message = '研究已完成'
+      progressInfo.value.message = '研究已完成，正在同步结果...'
+
+      let restoredResult: any = null
+      try {
+        restoredResult = await fetchCompletedAnalysisResult(cached.taskId, status.result_data)
+      } catch (error) {
+        console.warn('⚠️ 恢复任务时同步研究结果失败，继续轮询等待:', error)
+        restoredResult = pickBestAnalysisResult(null, status.result_data)
+      }
+
+      if (hasMeaningfulAnalysisResult(restoredResult)) {
+        analysisResults.value = restoredResult
+        showResults.value = true
+        progressInfo.value.message = '研究已完成'
+        completedResultRetryCount.value = 0
+      } else {
+        analysisResults.value = null
+        showResults.value = false
+        completedResultRetryCount.value = 0
+        startPollingTaskStatus()
+      }
 
       // 恢复分析参数
       if (cached.taskData.parameters) {
@@ -2347,7 +2463,6 @@ const applyRecommendedModels = () => {
 }
 
 // 监听分析深度变化
-import { watch } from 'vue'
 watch(() => analysisForm.researchDepth, () => {
   checkModelSuitability()
 })
