@@ -112,7 +112,7 @@ def test_convert_final_decision_json_to_markdown_uses_research_brief_sections() 
         }
     )
 
-    assert "# 🎯 综合研究简报" in markdown
+    assert "# 🎯 综合研究结论" in markdown
     assert "- **研究观点**: 🟡 中性" in markdown
     assert "## 🔍 核心依据" in markdown
     assert "## ❓ 关键不确定性" in markdown
