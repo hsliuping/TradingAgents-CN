@@ -83,7 +83,7 @@ def get_market_breadth(
 @register_tool(
     tool_id="get_market_environment",
     name="市场环境",
-    description="综合评估市场环境，包括指数走势、市场宽度、资金流向等",
+    description="综合评估市场环境，包括波动、换手与市场规模等",
     category="market",
     is_online=True,
     auto_register=True
@@ -94,7 +94,7 @@ def get_market_environment(
     """
     综合评估市场环境
     
-    整合指数走势、市场宽度、资金流向等多维度数据，给出市场环境综合评估。
+    整合波动、换手和市场规模等多维度数据，给出市场环境综合评估。
     
     Args:
         trade_date: 交易日期（格式：YYYY-MM-DD）
@@ -217,7 +217,7 @@ def get_north_flow(
 @register_tool(
     tool_id="get_margin_trading",
     name="两融余额",
-    description="获取融资融券余额数据，分析杠杆资金动向",
+    description="获取融资融券余额数据，描述余额水平并识别异常字段",
     category="market",
     is_online=True,
     auto_register=True
@@ -229,7 +229,7 @@ def get_margin_trading(
     """
     获取两融余额分析
 
-    分析融资融券余额变化，评估杠杆资金情绪。
+    描述融资融券余额水平，并识别变化字段中的异常或口径冲突。
 
     Args:
         trade_date: 交易日期（格式：YYYY-MM-DD）
@@ -250,7 +250,7 @@ def get_margin_trading(
 @register_tool(
     tool_id="get_limit_stats",
     name="涨跌停统计",
-    description="获取涨跌停家数和涨跌家数统计，评估市场情绪",
+    description="获取涨跌停家数和涨跌家数统计，描述涨跌分布与活跃度",
     category="market",
     is_online=True,
     auto_register=True
@@ -261,7 +261,7 @@ def get_limit_stats(
     """
     获取涨跌停和涨跌家数统计
 
-    统计涨跌停家数、涨跌家数、涨跌幅分布，评估市场赚钱效应。
+    统计涨跌停家数、涨跌家数、涨跌幅分布，描述涨跌分布与活跃度特征。
 
     Args:
         trade_date: 交易日期（格式：YYYY-MM-DD）
@@ -281,7 +281,7 @@ def get_limit_stats(
 @register_tool(
     tool_id="get_index_technical",
     name="指数技术指标",
-    description="获取指数技术指标（MACD、RSI、KDJ），分析技术面走势",
+    description="获取指数技术指标（MACD、RSI、KDJ）及规则标签",
     category="market",
     is_online=True,
     auto_register=True
@@ -293,14 +293,14 @@ def get_index_technical(
     """
     获取指数技术指标分析
 
-    计算上证指数的MACD、RSI、KDJ等技术指标，给出技术面判断。
+    计算上证指数的MACD、RSI、KDJ等技术指标，返回指标数值与轻量规则标签。
 
     Args:
         trade_date: 交易日期（格式：YYYY-MM-DD）
         lookback_days: 回看天数（默认60天）
 
     Returns:
-        str: 指数技术指标分析报告
+        str: 指数技术指标报告
     """
     try:
         from core.tools.index_tools import get_index_technical_sync

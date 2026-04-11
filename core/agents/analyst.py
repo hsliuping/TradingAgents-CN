@@ -67,6 +67,24 @@ class AnalystAgent(BaseAgent):
         super().__init__(config=config, llm=llm, tool_ids=tool_ids, **kwargs)
         
         logger.debug(f"AnalystAgent '{self.agent_id}' 初始化完成")
+
+    @staticmethod
+    def _build_post_tool_analysis_prompt() -> str:
+        return """工具调用已完成，所有需要的数据都已获取。
+
+现在请直接撰写详细的中文分析报告，不要再调用任何工具。
+
+报告要求：
+1. **严格基于工具返回的真实数据进行分析**：所有结论必须来自工具返回的数据，禁止编造、假设或推测
+2. **数据缺失处理**：如果工具返回的数据中没有某个维度的数据，不要分析该维度，也不要单独列出“未获取的数据维度”“数据缺口说明”或缺失维度清单。只有当工具明确返回异常、缺失、口径冲突等提示时，才可在对应段落内用一句话简要说明其对结论的限制。
+3. 结构清晰，逻辑严谨
+4. 结论明确，有理有据
+5. 使用中文输出
+6. 直接输出报告内容，不要返回工具调用
+
+**重要提醒**：仔细检查工具返回的数据，只分析数据中实际存在的维度。不要额外补写 KOL 观点、散户情绪、机构持仓、行业资金流向等未提供维度，也不要生成“本报告未获取以下维度数据，不作相关分析”之类章节。
+
+请立即开始撰写报告："""
     
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -165,21 +183,7 @@ class AnalystAgent(BaseAgent):
                     logger.info(f"[{self.agent_id}] 工具列表: {[tool.name for tool in self._langchain_tools]}")
 
                     # 构建分析提示词，明确告诉 LLM 基于工具结果生成报告
-                    analysis_prompt = f"""工具调用已完成，所有需要的数据都已获取。
-
-现在请直接撰写详细的中文分析报告，不要再调用任何工具。
-
-报告要求：
-1. **严格基于工具返回的真实数据进行分析**：所有结论必须来自工具返回的数据，禁止编造、假设或推测
-2. **数据缺失处理**：如果工具返回的数据中没有某个维度的数据（如KOL数据、散户数据、机构数据等），**不要分析该维度**，或者明确说明"该维度数据缺失，暂不分析"。**绝对禁止在没有数据的情况下编造该维度的分析内容**
-3. 结构清晰，逻辑严谨
-4. 结论明确，有理有据
-5. 使用中文输出
-6. 直接输出报告内容，不要返回工具调用
-
-**重要提醒**：仔细检查工具返回的数据，只分析数据中实际存在的维度。如果数据中没有KOL观点、散户情绪、机构持仓等信息，就不要在报告中包含这些部分的分析。
-
-请立即开始撰写报告："""
+                    analysis_prompt = self._build_post_tool_analysis_prompt()
 
                     report = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)
                 else:

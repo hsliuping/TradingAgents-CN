@@ -122,22 +122,27 @@ async def get_index_trend(
     provider = _get_tushare_provider()
     
     try:
+        actual_trade_date = await _get_latest_trade_date(trade_date)
+        actual_trade_date_formatted = f"{actual_trade_date[:4]}-{actual_trade_date[4:6]}-{actual_trade_date[6:8]}"
+
         # 计算日期范围
-        # 清理日期字符串，去掉可能的时间部分
-        trade_date_clean = _clean_date_string(trade_date).replace('-', '')
-        end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
+        end_date = datetime.strptime(actual_trade_date, '%Y%m%d')
         start_date = end_date - timedelta(days=lookback_days + 30)
         start_date_str = start_date.strftime('%Y%m%d')
-        end_date_str = trade_date_clean
+        end_date_str = actual_trade_date
         
         report_lines = [
             "📈 主要指数走势分析",
             "=" * 50,
-            f"📅 分析日期: {trade_date}",
+            f"📅 分析日期: {actual_trade_date_formatted}",
             f"📆 回看周期: {lookback_days} 交易日",
             "",
             "【主要指数表现】",
         ]
+
+        if actual_trade_date_formatted != _clean_date_string(trade_date):
+            report_lines.insert(4, f"说明: 输入日期 {trade_date} 无可用数据，已切换到最近交易日 {actual_trade_date_formatted}")
+            report_lines.insert(5, "")
         
         for index_code, index_name in MAIN_INDICES.items():
             daily_df = await provider.get_index_daily(
@@ -287,11 +292,6 @@ async def get_market_breadth(trade_date: str) -> str:
                 report_lines.append(f"  • 在交易股票数: {stock_count}")
                 report_lines.append(f"  • 总市值: {total_mv:.2f} 万亿")
                 report_lines.append(f"  • 平均换手率: {avg_turnover:.2f}%")
-
-                # 使用 PE 分布判断市场情绪
-                if 'pe' in daily_basic.columns:
-                    pe_median = daily_basic['pe'].dropna().median()
-                    report_lines.append(f"  • 市场中位数PE: {pe_median:.2f}")
             else:
                 report_lines.append("⚠️ 暂无市场统计数据（可能需要更高的 Tushare 积分）")
 
@@ -304,7 +304,7 @@ async def get_market_breadth(trade_date: str) -> str:
 
 async def get_market_environment(trade_date: str) -> str:
     """
-    评估市场环境（估值、风险等）
+    评估市场环境（波动、换手、规模等）
 
     Args:
         trade_date: 交易日期
@@ -315,9 +315,9 @@ async def get_market_environment(trade_date: str) -> str:
     provider = _get_tushare_provider()
 
     try:
-        # 清理日期字符串（移除可能的时间部分）
-        trade_date_display = _clean_date_string(trade_date)
-        trade_date_clean = trade_date_display.replace('-', '')
+        actual_trade_date = await _get_latest_trade_date(trade_date)
+        trade_date_display = f"{actual_trade_date[:4]}-{actual_trade_date[4:6]}-{actual_trade_date[6:8]}"
+        trade_date_clean = actual_trade_date
 
         report_lines = [
             "",
@@ -325,10 +325,14 @@ async def get_market_environment(trade_date: str) -> str:
             "=" * 50,
             f"📅 日期: {trade_date_display}",
             "",
-            "【指数估值水平】",
+            "【指数运行快照】",
         ]
 
-        # 获取主要指数估值
+        if trade_date_display != _clean_date_string(trade_date):
+            report_lines.append(f"说明: 输入日期 {trade_date} 无可用数据，已切换到最近交易日 {trade_date_display}")
+            report_lines.append("")
+
+        # 获取主要指数快照
         for index_code, index_name in list(MAIN_INDICES.items())[:3]:
             basic_df = await provider.get_index_dailybasic(
                 ts_code=index_code,
@@ -336,18 +340,16 @@ async def get_market_environment(trade_date: str) -> str:
             )
 
             if basic_df is None or basic_df.empty:
-                report_lines.append(f"  {index_name}: 暂无估值数据")
+                report_lines.append(f"  {index_name}: 暂无快照数据")
                 continue
 
             row = basic_df.iloc[0]
-            pe = row.get('pe', row.get('pe_ttm', 'N/A'))
-            pb = row.get('pb', 'N/A')
             turnover = row.get('turnover_rate', 'N/A')
             total_mv = row.get('total_mv', 0)
             total_mv_wan_yi = total_mv / 100000000 if total_mv else 0
 
             report_lines.append(f"  {index_name}:")
-            report_lines.append(f"      PE: {pe} | PB: {pb} | 换手率: {turnover}%")
+            report_lines.append(f"      换手率: {turnover}%")
             report_lines.append(f"      总市值: {total_mv_wan_yi:.2f} 万亿")
 
         # 风险评估
@@ -395,23 +397,27 @@ async def identify_market_cycle(trade_date: str) -> str:
     provider = _get_tushare_provider()
 
     try:
-        # 清理日期字符串，去掉可能的时间部分
-        trade_date_clean = _clean_date_string(trade_date).replace('-', '')
-        end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
+        actual_trade_date = await _get_latest_trade_date(trade_date)
+        actual_trade_date_formatted = f"{actual_trade_date[:4]}-{actual_trade_date[4:6]}-{actual_trade_date[6:8]}"
+        end_date = datetime.strptime(actual_trade_date, '%Y%m%d')
         start_date = end_date - timedelta(days=365)  # 一年数据
 
         # 获取上证指数数据
         daily_df = await provider.get_index_daily(
             ts_code='000001.SH',
             start_date=start_date.strftime('%Y%m%d'),
-            end_date=trade_date_clean
+            end_date=actual_trade_date
         )
 
         report_lines = [
             "",
             "🔄 市场周期判断",
             "=" * 50,
+            f"📅 日期: {actual_trade_date_formatted}",
         ]
+
+        if actual_trade_date_formatted != _clean_date_string(trade_date):
+            report_lines.append(f"说明: 输入日期 {trade_date} 无可用数据，已切换到最近交易日 {actual_trade_date_formatted}")
 
         if daily_df is None or len(daily_df) < 60:
             report_lines.append("⚠️ 数据不足，无法判断市场周期")
@@ -431,24 +437,19 @@ async def identify_market_cycle(trade_date: str) -> str:
 
         # 周期判断
         if current_close > ma60 > ma120 > ma250:
-            cycle = "牛市阶段 🐂"
-            advice = "趋势向上，可适度积极"
+            cycle = "价格位于多头排列区间 🐂"
         elif current_close < ma60 < ma120 < ma250:
-            cycle = "熊市阶段 🐻"
-            advice = "趋势向下，建议防守"
+            cycle = "价格位于空头排列区间 🐻"
         elif current_close > ma60 and current_close > ma120:
-            cycle = "反弹阶段 📈"
-            advice = "短期走强，关注持续性"
+            cycle = "价格位于短中期均线上方区间 📈"
         elif current_close < ma60 and current_close < ma120:
-            cycle = "调整阶段 📉"
-            advice = "短期走弱，等待企稳"
+            cycle = "价格位于短中期均线下方区间 📉"
         else:
-            cycle = "震荡阶段 📊"
-            advice = "方向不明，轻仓观望"
+            cycle = "价格处于均线交错区间 📊"
 
-        report_lines.append(f"  🎯 市场周期: {cycle}")
+        report_lines.append(f"  🎯 规则识别区间: {cycle}")
         report_lines.append(f"  📍 年内位置: {position:.1f}% (0%=年内低点, 100%=年内高点)")
-        report_lines.append(f"  💡 操作建议: {advice}")
+        report_lines.append("  ℹ️ 该结果为基于均线关系与年内位置的规则识别，不代表趋势确认。")
         report_lines.append("")
         report_lines.append("【均线系统】")
         report_lines.append(f"  • 当前价格: {current_close:.2f}")
@@ -557,23 +558,27 @@ async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
     provider = _get_tushare_provider()
 
     try:
-        # 清理日期字符串，去掉可能的时间部分
-        trade_date_clean = _clean_date_string(trade_date).replace('-', '')
-        end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
+        actual_trade_date = await _get_latest_trade_date(trade_date)
+        actual_trade_date_formatted = f"{actual_trade_date[:4]}-{actual_trade_date[4:6]}-{actual_trade_date[6:8]}"
+        end_date = datetime.strptime(actual_trade_date, '%Y%m%d')
         start_date = end_date - timedelta(days=lookback_days + 10)
 
         df = await provider.get_hsgt_moneyflow(
             start_date=start_date.strftime('%Y%m%d'),
-            end_date=trade_date_clean
+            end_date=actual_trade_date
         )
 
         report_lines = [
             "",
             "💰 北向资金流向分析",
             "=" * 50,
-            f"📅 日期: {trade_date}",
+            f"📅 日期: {actual_trade_date_formatted}",
             "",
         ]
+
+        if actual_trade_date_formatted != _clean_date_string(trade_date):
+            report_lines.append(f"说明: 输入日期 {trade_date} 无可用数据，已切换到最近交易日 {actual_trade_date_formatted}")
+            report_lines.append("")
 
         if df is None or df.empty:
             report_lines.append("⚠️ 暂无北向资金数据（可能需要更高的 Tushare 积分）")
@@ -726,23 +731,27 @@ async def get_margin_trading(trade_date: str, lookback_days: int = 10) -> str:
     provider = _get_tushare_provider()
 
     try:
-        # 清理日期字符串，去掉可能的时间部分
-        trade_date_clean = _clean_date_string(trade_date).replace('-', '')
-        end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
+        actual_trade_date = await _get_latest_trade_date(trade_date)
+        actual_trade_date_formatted = f"{actual_trade_date[:4]}-{actual_trade_date[4:6]}-{actual_trade_date[6:8]}"
+        end_date = datetime.strptime(actual_trade_date, '%Y%m%d')
         start_date = end_date - timedelta(days=lookback_days + 10)
 
         df = await provider.get_margin_detail(
             start_date=start_date.strftime('%Y%m%d'),
-            end_date=trade_date_clean
+            end_date=actual_trade_date
         )
 
         report_lines = [
             "",
             "📊 两融余额分析",
             "=" * 50,
-            f"📅 日期: {trade_date}",
+            f"📅 日期: {actual_trade_date_formatted}",
             "",
         ]
+
+        if actual_trade_date_formatted != _clean_date_string(trade_date):
+            report_lines.append(f"说明: 输入日期 {trade_date} 无可用数据，已切换到最近交易日 {actual_trade_date_formatted}")
+            report_lines.append("")
 
         if df is None or df.empty:
             report_lines.append("⚠️ 暂无两融数据（可能需要更高的 Tushare 积分）")
@@ -763,6 +772,8 @@ async def get_margin_trading(trade_date: str, lookback_days: int = 10) -> str:
         report_lines.append(f"  • 融券余额: {rqye:.2f} 亿元")
         report_lines.append(f"  • 两融余额: {rzrqye:.2f} 亿元")
 
+        anomaly_messages = []
+
         # 计算变化
         unique_dates = df['trade_date'].unique()
         if len(unique_dates) >= 2:
@@ -770,31 +781,46 @@ async def get_margin_trading(trade_date: str, lookback_days: int = 10) -> str:
             prev_data = df[df['trade_date'] == prev_date]
             prev_rzye = prev_data['rzye'].sum() / 100000000
             change = rzye - prev_rzye
-            change_icon = "🔴" if change > 0 else "🟢"
-            change_text = "增加" if change > 0 else "减少"
-            report_lines.append(f"  • 融资变化: {change_icon} {abs(change):.2f} 亿元 ({change_text})")
+            if abs(change) > max(rzye * 0.15, 1500):
+                anomaly_messages.append("单日融资变化与当前余额相比波动过大")
+            else:
+                change_icon = "🔴" if change > 0 else "🟢"
+                change_text = "增加" if change > 0 else "减少"
+                report_lines.append(f"  • 融资变化: {change_icon} {abs(change):.2f} 亿元 ({change_text})")
 
         # 近期趋势
         if len(unique_dates) >= 5:
-            report_lines.append("")
-            report_lines.append("【近期趋势】")
             first_date_data = df[df['trade_date'] == unique_dates[-1]]
             first_rzye = first_date_data['rzye'].sum() / 100000000
             total_change = rzye - first_rzye
-            report_lines.append(f"  • 近{len(unique_dates)}日融资变化: {total_change:.2f} 亿元")
+            if abs(total_change) > max(rzye * 0.3, 3000):
+                anomaly_messages.append(f"近{len(unique_dates)}日融资变化与当前余额相比波动过大")
+            else:
+                report_lines.append("")
+                report_lines.append("【近期趋势】")
+                report_lines.append(f"  • 近{len(unique_dates)}日融资变化: {total_change:.2f} 亿元")
 
-        # 杠杆情绪判断
+        if anomaly_messages:
+            report_lines.append("")
+            report_lines.append("【字段一致性检查】")
+            for message in anomaly_messages:
+                report_lines.append(f"  • ⚠️ {message}")
+            report_lines.append("  • 变化字段可能存在口径差异或异常值，暂不据此延伸解读杠杆方向")
+
+        # 余额水平信号
         report_lines.append("")
-        report_lines.append("【杠杆情绪】")
+        report_lines.append("【余额水平信号】")
         if rzye > 17000:
-            sentiment = "杠杆资金活跃 🔥"
+            sentiment = "融资余额处于较高水平 🔥"
         elif rzye > 15000:
-            sentiment = "杠杆资金正常 📊"
+            sentiment = "融资余额处于常态水平 📊"
         elif rzye > 13000:
-            sentiment = "杠杆资金谨慎 📉"
+            sentiment = "融资余额处于相对谨慎区间 📉"
         else:
-            sentiment = "杠杆资金低迷 ❄️"
+            sentiment = "融资余额处于相对低位 ❄️"
         report_lines.append(f"  • {sentiment}")
+        if anomaly_messages:
+            report_lines.append("  • 当前仅能依据余额水平描述活跃度区间，不能依据异常变化字段判断资金方向")
 
         return "\n".join(report_lines)
 
@@ -841,7 +867,7 @@ async def get_limit_stats(trade_date: str) -> str:
             report_lines.append(f"  • 涨跌比: {stats['up_count']}:{stats['down_count']}")
 
             report_lines.append("")
-            report_lines.append("【涨跌停统计】")
+            report_lines.append("【涨跌停统计（汇总口径）】")
             report_lines.append(f"  • 涨停: {stats['limit_up']} 家")
             report_lines.append(f"  • 跌停: {stats['limit_down']} 家")
 
@@ -868,17 +894,17 @@ async def get_limit_stats(trade_date: str) -> str:
                 sentiment = "极度悲观 ❄️"
             report_lines.append(f"  • {sentiment} (涨跌比 {stats['up_count']}:{stats['down_count']})")
 
-            # 赚钱效应
+            # 涨跌幅分布信号
             profit_stocks = stats['up_gt5'] + stats['up_3_5']
             loss_stocks = stats['down_gt5'] + stats['down_3_5']
             if profit_stocks > loss_stocks * 2:
-                effect = "赚钱效应强 💰"
+                effect = "涨幅居前个股数量明显多于跌幅居前个股 💰"
             elif profit_stocks > loss_stocks:
-                effect = "赚钱效应一般 📊"
+                effect = "涨幅居前个股数量多于跌幅居前个股 📊"
             elif loss_stocks > profit_stocks * 2:
-                effect = "亏钱效应强 ⚠️"
+                effect = "跌幅居前个股数量明显多于涨幅居前个股 ⚠️"
             else:
-                effect = "亏钱效应一般 📉"
+                effect = "涨跌幅居前个股数量接近 📉"
             report_lines.append(f"  • {effect}")
         else:
             report_lines.append("⚠️ 暂无涨跌家数数据")
@@ -888,19 +914,32 @@ async def get_limit_stats(trade_date: str) -> str:
         if limit_df is not None and not limit_df.empty:
             limit_up_df = limit_df[limit_df['limit'] == 'U']
             limit_down_df = limit_df[limit_df['limit'] == 'D']
+            detail_lines = []
 
             if not limit_up_df.empty:
-                report_lines.append("")
-                report_lines.append("【涨停详情】")
-                report_lines.append(f"  • 涨停家数: {len(limit_up_df)} 家")
+                detail_lines.append(f"  • 涨停明细: {len(limit_up_df)} 家")
                 # 连板统计
                 if 'up_stat' in limit_up_df.columns:
                     multi_board = limit_up_df[limit_up_df['up_stat'].str.contains('2|3|4|5|6|7|8|9', na=False)]
                     if len(multi_board) > 0:
-                        report_lines.append(f"  • 连板: {len(multi_board)} 家")
+                        detail_lines.append(f"  • 连板: {len(multi_board)} 家")
 
             if not limit_down_df.empty:
-                report_lines.append(f"  • 跌停家数: {len(limit_down_df)} 家")
+                detail_lines.append(f"  • 跌停明细: {len(limit_down_df)} 家")
+
+            if detail_lines:
+                report_lines.append("")
+                report_lines.append("【涨跌停统计（明细口径）】")
+                report_lines.extend(detail_lines)
+
+                detail_up_count = len(limit_up_df)
+                detail_down_count = len(limit_down_df)
+                if stats and (stats['limit_up'] != detail_up_count or stats['limit_down'] != detail_down_count):
+                    report_lines.append("")
+                    report_lines.append("【口径说明】")
+                    report_lines.append(
+                        "  • 汇总口径来自 daily 涨跌幅阈值统计，明细口径来自 limit_list_d 涨跌停名单；两套口径可能不同，正文引用时不要写成“其中关系”。"
+                    )
 
         return "\n".join(report_lines)
 
@@ -923,18 +962,22 @@ async def get_index_technical(trade_date: str, lookback_days: int = 60) -> str:
     provider = _get_tushare_provider()
 
     try:
-        # 清理日期字符串，去掉可能的时间部分
-        trade_date_clean = _clean_date_string(trade_date).replace('-', '')
-        end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
+        actual_trade_date = await _get_latest_trade_date(trade_date)
+        actual_trade_date_formatted = f"{actual_trade_date[:4]}-{actual_trade_date[4:6]}-{actual_trade_date[6:8]}"
+        end_date = datetime.strptime(actual_trade_date, '%Y%m%d')
         start_date = end_date - timedelta(days=lookback_days + 30)
 
         report_lines = [
             "",
             "📉 指数技术指标分析",
             "=" * 50,
-            f"📅 日期: {trade_date}",
+            f"📅 日期: {actual_trade_date_formatted}",
             "",
         ]
+
+        if actual_trade_date_formatted != _clean_date_string(trade_date):
+            report_lines.append(f"说明: 输入日期 {trade_date} 无可用数据，已切换到最近交易日 {actual_trade_date_formatted}")
+            report_lines.append("")
 
         # 分析上证指数的技术指标
         index_code = '000001.SH'
@@ -943,7 +986,7 @@ async def get_index_technical(trade_date: str, lookback_days: int = 60) -> str:
         df = await provider.get_index_daily(
             ts_code=index_code,
             start_date=start_date.strftime('%Y%m%d'),
-            end_date=trade_date_clean
+            end_date=actual_trade_date
         )
 
         if df is None or len(df) < 30:
@@ -998,14 +1041,14 @@ async def get_index_technical(trade_date: str, lookback_days: int = 60) -> str:
         macd_signal = ""
         if latest_dif > latest_dea:
             if latest_dif > 0:
-                macd_signal = "多头趋势，DIF在零轴上方 📈"
+                macd_signal = "DIF高于DEA，且位于零轴上方 📈"
             else:
-                macd_signal = "底部金叉形成，待确认 🔄"
+                macd_signal = "DIF高于DEA，但仍位于零轴下方 🔄"
         else:
             if latest_dif < 0:
-                macd_signal = "空头趋势，DIF在零轴下方 📉"
+                macd_signal = "DIF低于DEA，且位于零轴下方 📉"
             else:
-                macd_signal = "顶部死叉形成，注意风险 ⚠️"
+                macd_signal = "DIF低于DEA，但仍位于零轴上方 ⚠️"
         report_lines.append(f"  • 信号: {macd_signal}")
 
         # RSI 分析
@@ -1014,17 +1057,17 @@ async def get_index_technical(trade_date: str, lookback_days: int = 60) -> str:
         report_lines.append(f"  • RSI(14): {latest_rsi:.2f}")
 
         if latest_rsi > 80:
-            rsi_signal = "超买区域，注意回调风险 🔴"
+            rsi_signal = "处于80以上区间，数值偏高 🔴"
         elif latest_rsi > 70:
-            rsi_signal = "偏强，接近超买 📈"
+            rsi_signal = "处于70-80区间，接近高位 📈"
         elif latest_rsi > 50:
-            rsi_signal = "多方占优 📊"
+            rsi_signal = "处于50-70区间，位于强弱分界线上方 📊"
         elif latest_rsi > 30:
-            rsi_signal = "空方占优 📉"
+            rsi_signal = "处于30-50区间，位于强弱分界线下方 📉"
         elif latest_rsi > 20:
-            rsi_signal = "偏弱，接近超卖 📉"
+            rsi_signal = "处于20-30区间，接近低位 📉"
         else:
-            rsi_signal = "超卖区域，关注反弹机会 🟢"
+            rsi_signal = "处于20以下区间，数值偏低 🟢"
         report_lines.append(f"  • 信号: {rsi_signal}")
 
         # KDJ 分析
@@ -1035,43 +1078,39 @@ async def get_index_technical(trade_date: str, lookback_days: int = 60) -> str:
         report_lines.append(f"  • J: {latest_j:.2f}")
 
         if latest_k > latest_d and latest_j > 80:
-            kdj_signal = "高位金叉，注意回调 ⚠️"
+            kdj_signal = "K高于D，J值处于80以上区间 ⚠️"
         elif latest_k > latest_d:
-            kdj_signal = "金叉向上，多头信号 📈"
+            kdj_signal = "K高于D，短线排列偏上 📈"
         elif latest_k < latest_d and latest_j < 20:
-            kdj_signal = "低位死叉，关注反弹 🔄"
+            kdj_signal = "K低于D，J值处于20以下区间 🔄"
         else:
-            kdj_signal = "死叉向下，空头信号 📉"
+            kdj_signal = "K低于D，短线排列偏下 📉"
         report_lines.append(f"  • 信号: {kdj_signal}")
 
-        # 综合判断
+        # 规则标签汇总
         report_lines.append("")
-        report_lines.append("【技术面综合】")
-        bull_signals = 0
-        bear_signals = 0
+        report_lines.append("【指标规则标签】")
+        upper_signals = 0
+        lower_signals = 0
 
         if latest_dif > latest_dea:
-            bull_signals += 1
+            upper_signals += 1
         else:
-            bear_signals += 1
+            lower_signals += 1
 
         if latest_rsi > 50:
-            bull_signals += 1
+            upper_signals += 1
         else:
-            bear_signals += 1
+            lower_signals += 1
 
         if latest_k > latest_d:
-            bull_signals += 1
+            upper_signals += 1
         else:
-            bear_signals += 1
+            lower_signals += 1
 
-        if bull_signals >= 2:
-            summary = f"技术面偏多 📈 ({bull_signals}/3 指标看多)"
-        elif bear_signals >= 2:
-            summary = f"技术面偏空 📉 ({bear_signals}/3 指标看空)"
-        else:
-            summary = "技术面中性 📊 (多空信号分歧)"
-        report_lines.append(f"  • {summary}")
+        report_lines.append(f"  • 偏上规则标签数量: {upper_signals}/3")
+        report_lines.append(f"  • 偏下规则标签数量: {lower_signals}/3")
+        report_lines.append("  • 说明: 以上标签仅描述指标当前规则位置，不等同于市场结论")
 
         return "\n".join(report_lines)
 

@@ -1,0 +1,213 @@
+import asyncio
+import importlib.util
+from pathlib import Path
+
+import pandas as pd
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_module(relative_path: str, module_name: str):
+    module_path = ROOT / relative_path
+    module_spec = importlib.util.spec_from_file_location(module_name, module_path)
+    assert module_spec is not None and module_spec.loader is not None
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+    return module
+
+
+def _make_index_daily_frame(days: int = 260) -> pd.DataFrame:
+    rows = []
+    for index in range(days):
+        close = 3000 + index
+        rows.append(
+            {
+                "trade_date": f"2024{(index // 28) + 1:02d}{(index % 28) + 1:02d}",
+                "close": close,
+                "high": close + 20,
+                "low": close - 20,
+                "pct_chg": 0.5,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def test_market_environment_uses_actual_trade_date_and_omits_pe_pb(monkeypatch) -> None:
+    module = _load_module("core/tools/index_tools.py", "index_tools_market_environment")
+
+    class FakeProvider:
+        async def get_index_dailybasic(self, ts_code: str, trade_date: str) -> pd.DataFrame:
+            return pd.DataFrame([
+                {"turnover_rate": 1.23, "total_mv": 1_500_000_000_000}
+            ])
+
+        async def get_index_daily(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+            return _make_index_daily_frame(30)
+
+    async def fake_latest_trade_date(trade_date: str) -> str:
+        return "20260410"
+
+    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
+
+    report = asyncio.run(module.get_market_environment("2026-04-11"))
+
+    assert "2026-04-10" in report
+    assert "PE:" not in report
+    assert "PB:" not in report
+    assert "20日年化波动率" in report
+
+
+def test_identify_market_cycle_removes_operation_advice(monkeypatch) -> None:
+    module = _load_module("core/tools/index_tools.py", "index_tools_market_cycle")
+
+    class FakeProvider:
+        async def get_index_daily(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+            return _make_index_daily_frame(260)
+
+    async def fake_latest_trade_date(trade_date: str) -> str:
+        return "20260410"
+
+    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
+
+    report = asyncio.run(module.identify_market_cycle("2026-04-11"))
+
+    assert "2026-04-10" in report
+    assert "操作建议" not in report
+    assert "不代表趋势确认" in report
+    assert "规则识别区间" in report
+    assert "牛市阶段" not in report
+    assert "熊市阶段" not in report
+    assert "调整阶段" not in report
+
+
+def test_north_flow_uses_actual_trade_date_in_report(monkeypatch) -> None:
+    module = _load_module("core/tools/index_tools.py", "index_tools_north_flow")
+
+    class FakeProvider:
+        async def get_hsgt_moneyflow(self, start_date: str, end_date: str) -> pd.DataFrame:
+            return pd.DataFrame(
+                [
+                    {"trade_date": "20260410", "hgt": 120000.0, "sgt": 80000.0},
+                    {"trade_date": "20260409", "hgt": 100000.0, "sgt": 60000.0},
+                ]
+            )
+
+    async def fake_latest_trade_date(trade_date: str) -> str:
+        return "20260410"
+
+    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
+
+    report = asyncio.run(module.get_north_flow("2026-04-11", lookback_days=10))
+
+    assert "📅 日期: 2026-04-10" in report
+    assert "已切换到最近交易日 2026-04-10" in report
+
+
+def test_margin_trading_flags_anomalous_change_fields(monkeypatch) -> None:
+    module = _load_module("core/tools/index_tools.py", "index_tools_margin_trading")
+
+    class FakeProvider:
+        async def get_margin_detail(self, start_date: str, end_date: str) -> pd.DataFrame:
+            return pd.DataFrame(
+                [
+                    {"trade_date": "20260410", "rzye": 13156.60 * 100000000, "rqye": 124.15 * 100000000, "rzrqye": 13280.75 * 100000000},
+                    {"trade_date": "20260409", "rzye": 9000.00 * 100000000, "rqye": 120.00 * 100000000, "rzrqye": 9120.00 * 100000000},
+                    {"trade_date": "20260408", "rzye": 8000.00 * 100000000, "rqye": 110.00 * 100000000, "rzrqye": 8110.00 * 100000000},
+                    {"trade_date": "20260407", "rzye": 7000.00 * 100000000, "rqye": 100.00 * 100000000, "rzrqye": 7100.00 * 100000000},
+                    {"trade_date": "20260406", "rzye": 6000.00 * 100000000, "rqye": 90.00 * 100000000, "rzrqye": 6090.00 * 100000000},
+                ]
+            )
+
+    async def fake_latest_trade_date(trade_date: str) -> str:
+        return "20260410"
+
+    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
+
+    report = asyncio.run(module.get_margin_trading("2026-04-11", lookback_days=10))
+
+    assert "字段一致性检查" in report
+    assert "变化字段可能存在口径差异或异常值" in report
+    assert "暂不据此延伸解读杠杆方向" in report
+    assert "【余额水平信号】" in report
+    assert "杠杆资金谨慎" not in report
+    assert "融资余额处于相对谨慎区间" in report
+
+
+def test_index_technical_returns_rule_tags_without_summary_judgment(monkeypatch) -> None:
+    module = _load_module("core/tools/index_tools.py", "index_tools_technical")
+
+    class FakeProvider:
+        async def get_index_daily(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+            return _make_index_daily_frame(120)
+
+    async def fake_latest_trade_date(trade_date: str) -> str:
+        return "20260410"
+
+    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
+
+    report = asyncio.run(module.get_index_technical("2026-04-11", lookback_days=60))
+
+    assert "【指标规则标签】" in report
+    assert "偏上规则标签数量" in report
+    assert "偏下规则标签数量" in report
+    assert "不等同于市场结论" in report
+    assert "【技术面综合】" not in report
+    assert "技术面偏多，偏多特征占优" not in report
+    assert "技术面偏空，偏弱特征占优" not in report
+    assert "技术面中性" not in report
+    assert "指标看多" not in report
+    assert "指标看空" not in report
+    assert "多方占优" not in report
+    assert "空方占优" not in report
+    assert "底部金叉形成" not in report
+    assert "高位金叉" not in report
+
+
+def test_limit_stats_uses_neutral_distribution_wording(monkeypatch) -> None:
+    module = _load_module("core/tools/index_tools.py", "index_tools_limit_stats")
+
+    class FakeProvider:
+        async def get_daily_stats(self, trade_date: str):
+            return {
+                "up_count": 3977,
+                "up_ratio": 72.4,
+                "down_count": 1397,
+                "down_ratio": 25.4,
+                "flat_count": 121,
+                "limit_up": 81,
+                "limit_down": 10,
+                "up_gt5": 244,
+                "up_3_5": 324,
+                "down_gt5": 55,
+                "down_3_5": 111,
+            }
+
+        async def get_limit_list(self, trade_date: str) -> pd.DataFrame:
+            return pd.DataFrame(
+                [
+                    {"limit": "U", "up_stat": "2"},
+                    {"limit": "U", "up_stat": "1"},
+                    {"limit": "D", "up_stat": "0"},
+                ]
+            )
+
+    async def fake_latest_trade_date(trade_date: str) -> str:
+        return "20260410"
+
+    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
+
+    report = asyncio.run(module.get_limit_stats("2026-04-11"))
+
+    assert "涨幅居前个股数量明显多于跌幅居前个股" in report
+    assert "赚钱效应强" not in report
+    assert "【涨跌停统计（汇总口径）】" in report
+    assert "【涨跌停统计（明细口径）】" in report
+    assert "汇总口径来自 daily 涨跌幅阈值统计，明细口径来自 limit_list_d 涨跌停名单" in report
+    assert "其中涨停家数" not in report

@@ -243,7 +243,7 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
     "get_index_technical": ToolMetadata(
         id="get_index_technical",
         name="指数技术指标",
-        description="获取指数技术指标（MACD、RSI、KDJ），分析技术面走势",
+        description="获取指数技术指标（MACD、RSI、KDJ）及规则标签",
         category=ToolCategory.MARKET,
         data_source="tushare",
         is_online=True,
@@ -270,7 +270,7 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
     "get_market_environment": ToolMetadata(
         id="get_market_environment",
         name="市场环境",
-        description="综合评估市场环境（估值、波动率等）",
+        description="综合评估市场环境（波动率、换手率等）",
         category=ToolCategory.MARKET,
         data_source="tushare",
         is_online=True,

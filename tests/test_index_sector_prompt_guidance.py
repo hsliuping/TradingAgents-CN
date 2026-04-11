@@ -1,0 +1,147 @@
+import importlib.util
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_module(relative_path: str, module_name: str):
+    module_path = ROOT / relative_path
+    module_spec = importlib.util.spec_from_file_location(module_name, module_path)
+    assert module_spec is not None and module_spec.loader is not None
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+    return module
+
+
+def test_research_brief_index_and_sector_builders_keep_explicit_tool_workflow() -> None:
+    module = _load_module(
+        "scripts/template_upgrades/update_research_brief_v2_prompts.py",
+        "update_research_brief_v2_prompts",
+    )
+
+    index_content = module.build_index_analyst_content("neutral")
+    sector_content = module.build_sector_analyst_content("neutral")
+
+    assert "get_market_overview" in index_content["tool_guidance"]
+    assert "get_china_market_overview" in index_content["tool_guidance"]
+    assert "get_index_data" in index_content["tool_guidance"]
+    assert "必须使用上述参数值" in index_content["tool_guidance"]
+    assert "不要使用其他日期" in index_content["tool_guidance"]
+    assert "研究口径" in index_content["system_prompt"]
+    assert "研究口径" in index_content["user_prompt"]
+    assert "中性视角解释市场状态" in index_content["user_prompt"]
+    assert "趋势、资金、情绪、周期和正反证据的事实平衡" in index_content["user_prompt"]
+    assert "数据冲突、异常、缺失或证据不足" in index_content["analysis_requirements"]
+    assert "不要单独设“数据缺口声明”章节" in index_content["analysis_requirements"]
+    assert "证据不足，只能降低结论强度" in index_content["analysis_requirements"]
+    assert "市场周期与正反证据评估只引用工具直接返回和可回溯指标" in index_content["analysis_requirements"]
+    assert "两融变化字段与当前余额明显不匹配" in index_content["analysis_requirements"]
+    assert "只能留在数据说明中" in index_content["analysis_requirements"]
+    assert "不得外推为“均线下行态势”" in index_content["analysis_requirements"]
+    assert "技术标签、活跃度标签或规则识别区间都只是规则描述，不等同于市场结论" in index_content["analysis_requirements"]
+    assert "允许写法示例" in index_content["analysis_requirements"]
+    assert "过线写法示例" in index_content["analysis_requirements"]
+    assert "短期数据表现偏强" in index_content["analysis_requirements"]
+    assert "情绪修复完成" in index_content["analysis_requirements"]
+    assert "总成交额处于较高水平，工具识别为极度活跃" in index_content["analysis_requirements"]
+    assert "无法确认杠杆资金方向，但可依据余额水平描述活跃度区间" in index_content["analysis_requirements"]
+    assert "技术指标整体偏多，但高位指标提示短期仍需关注波动" in index_content["analysis_requirements"]
+    assert "汇总口径显示涨停 81 家、跌停 10 家，明细口径显示涨停 59 家、跌停 8 家，两套口径存在差异" in index_content["analysis_requirements"]
+    assert "成交活跃度显著提升" in index_content["analysis_requirements"]
+    assert "无法确认杠杆资金态度" in index_content["analysis_requirements"]
+    assert "三个指标均显示看多信号" in index_content["analysis_requirements"]
+    assert "融资余额处于谨慎水平" in index_content["analysis_requirements"]
+    assert "涨停 81 家（其中涨停家数 59 家）" in index_content["analysis_requirements"]
+    assert "不要使用“空间”“站稳”“突破”" in index_content["analysis_requirements"]
+    assert "不要写 PE/PB、股息率、估值分位" in index_content["analysis_requirements"]
+    assert "只能作为数据说明" in index_content["user_prompt"]
+    assert "不要自行延伸成均线斜率、风格切换或高位调整叙事" in index_content["user_prompt"]
+    assert "工具返回的技术标签或规则区间只可作为描述线索，不要直接改写成市场定性结论" in index_content["user_prompt"]
+    assert "用‘短期数据表现偏强’替代‘情绪修复完成’" in index_content["user_prompt"]
+    assert "用‘总成交额处于较高水平，工具识别为极度活跃’替代‘成交活跃度显著提升’" in index_content["user_prompt"]
+    assert "用‘无法确认杠杆资金方向’替代‘无法确认杠杆资金态度’" in index_content["user_prompt"]
+    assert "用‘技术指标整体偏多’替代‘三个指标均显示看多信号’" in index_content["user_prompt"]
+    assert "用‘融资余额处于相对谨慎区间’替代‘融资余额处于谨慎水平’" in index_content["user_prompt"]
+    assert "必须写成‘汇总口径/明细口径存在差异’，不要写成‘其中关系’" in index_content["user_prompt"]
+    assert "数据缺口声明" not in index_content["system_prompt"]
+    assert "PE、PB" not in index_content["system_prompt"]
+    assert "数据缺口声明" not in index_content["user_prompt"]
+    assert "PE/PB" not in index_content["user_prompt"]
+    assert "实际数据日期" not in index_content["system_prompt"]
+
+    assert "get_sector_data" in sector_content["tool_guidance"]
+    assert "get_peer_comparison" in sector_content["tool_guidance"]
+    assert "get_fund_flow_data" in sector_content["tool_guidance"]
+    assert "必须使用上述参数值" in sector_content["tool_guidance"]
+    assert "不要使用其他股票代码或日期" in sector_content["tool_guidance"]
+
+
+def test_research_mode_migration_preserves_index_and_sector_tool_instructions() -> None:
+    module = _load_module(
+        "scripts/compliance/migrate_prompt_templates_to_research_mode.py",
+        "migrate_prompt_templates_to_research_mode",
+    )
+
+    index_guidance = module.get_field_override("index_analyst", "tool_guidance")
+    sector_guidance = module.get_field_override("sector_analyst", "tool_guidance")
+    index_system_prompt = module.get_field_override("index_analyst", "system_prompt")
+    sector_system_prompt = module.get_field_override("sector_analyst", "system_prompt")
+
+    assert index_guidance is not None
+    assert sector_guidance is not None
+    assert index_system_prompt is not None
+    assert sector_system_prompt is not None
+
+    assert "get_market_overview" in index_guidance
+    assert "get_index_data" in index_guidance
+    assert "必须先调用工具获取数据" in index_guidance
+    assert "研究口径" in index_system_prompt
+    assert "坚持研究口径" in index_system_prompt
+    assert "判断原因" in index_system_prompt
+    assert "数据缺口声明" not in index_system_prompt
+    assert "PE、PB" not in index_system_prompt
+    assert "PE/PB" not in index_guidance
+    index_requirements = module.get_field_override("index_analyst", "analysis_requirements")
+    assert index_requirements is not None
+    assert "大盘趋势和技术形态" in index_requirements
+    assert "资金流向（北向、两融）" in index_requirements
+    assert "趋势判断必须同时说明对应的数据依据和形成原因" in index_requirements
+    assert "数据冲突、异常、缺失或证据不足" in index_requirements
+    assert "不要单独设“数据缺口声明”章节" in index_requirements
+    assert "市场周期与正反证据评估只引用工具直接返回和可回溯指标" in index_requirements
+    assert "两融变化字段与当前余额明显不匹配" in index_requirements
+    assert "只能留在数据说明中" in index_requirements
+    assert "不得外推为“均线下行态势”" in index_requirements
+    assert "技术标签、活跃度标签或规则识别区间都只是规则描述，不等同于市场结论" in index_requirements
+    assert "允许写法示例" in index_requirements
+    assert "过线写法示例" in index_requirements
+    assert "总成交额处于较高水平，工具识别为极度活跃" in index_requirements
+    assert "无法确认杠杆资金方向，但可依据余额水平描述活跃度区间" in index_requirements
+    assert "技术指标整体偏多，但高位指标提示短期仍需关注波动" in index_requirements
+    assert "汇总口径显示涨停 81 家、跌停 10 家，明细口径显示涨停 59 家、跌停 8 家，两套口径存在差异" in index_requirements
+    assert "不要使用“空间”“站稳”“突破”" in index_requirements
+    assert "不要写 PE/PB、股息率、估值分位" in index_requirements
+
+    assert "get_sector_data" in sector_guidance
+    assert "get_peer_comparison" in sector_guidance
+    assert "必须先调用工具获取数据" in sector_guidance
+    assert "实际数据日期" in sector_system_prompt
+
+
+def test_runtime_analyst_prompt_avoids_missing_dimension_sections() -> None:
+    source = (ROOT / "core/agents/analyst.py").read_text(encoding="utf-8")
+
+    assert "不要单独列出“未获取的数据维度”" in source
+    assert "本报告未获取以下维度数据，不作相关分析" in source
+    assert "KOL 观点、散户情绪、机构持仓、行业资金流向" in source
+    assert "该维度数据缺失，暂不分析" not in source
+
+
+def test_index_fallback_prompts_drop_information_gap_wording() -> None:
+    source = (ROOT / "core/agents/adapters/index_analyst_v2.py").read_text(encoding="utf-8")
+
+    assert "关键观察信号与后续验证事项" in source
+    assert "关键宏观信号与后续观察事项" in source
+    assert "5. 关键观察信号、信息缺口与后续验证事项" not in source
+    assert "3. 关键宏观信号、信息缺口与后续观察事项" not in source
