@@ -11,9 +11,12 @@ PDF 导出需要额外工具:
 
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
+
+from app.utils.compliance import RESEARCH_ONLY_DISCLAIMER, sanitize_display_report_text
 
 logger = logging.getLogger(__name__)
 
@@ -37,24 +40,24 @@ ANALYST_ID_TO_CHINESE: dict = {
     "social_media_analyst": "社交媒体研究分析师",
     "social_analyst_v2": "社交媒体研究分析师",
     # 研究团队
-    "bull_researcher": "看涨研究员",
-    "bull_researcher_v2": "看涨研究员",
-    "bear_researcher": "看跌研究员",
-    "bear_researcher_v2": "看跌研究员",
-    "research_manager": "研究经理",
-    "research_manager_v2": "研究经理",
+    "bull_researcher": "乐观情景论证",
+    "bull_researcher_v2": "乐观情景论证",
+    "bear_researcher": "审慎情景论证",
+    "bear_researcher_v2": "审慎情景论证",
+    "research_manager": "研究结论汇总",
+    "research_manager_v2": "研究结论汇总",
     # 风险管理团队
-    "risky_analyst": "激进风险分析师",
-    "risky_analyst_v2": "激进风险分析师",
-    "safe_analyst": "保守风险分析师",
-    "safe_analyst_v2": "保守风险分析师",
-    "neutral_analyst": "中性风险分析师",
-    "neutral_analyst_v2": "中性风险分析师",
-    "risk_manager": "风险经理",
-    "risk_manager_v2": "风险经理",
+    "risky_analyst": "高弹性情景评估",
+    "risky_analyst_v2": "高弹性情景评估",
+    "safe_analyst": "防御情景评估",
+    "safe_analyst_v2": "防御情景评估",
+    "neutral_analyst": "基准情景评估",
+    "neutral_analyst_v2": "基准情景评估",
+    "risk_manager": "风险治理汇总",
+    "risk_manager_v2": "风险治理汇总",
     # 研究整合与复盘
-    "trader": "研究整合员",
-    "trader_v2": "研究整合员",
+    "trader": "研究整合意见",
+    "trader_v2": "研究整合意见",
     "timing_analyst": "时机分析师",
     "timing_analyst_v2": "时机分析师",
     "position_analyst": "仓位分析师",
@@ -70,6 +73,26 @@ ANALYST_ID_TO_CHINESE: dict = {
     "pa_risk": "风险评估师",
     "pa_advisor": "结论整合师",
 }
+
+EXPORT_SANITIZED_MODULE_KEYS = {
+    "investment_plan",
+    "trader_investment_plan",
+    "final_trade_decision",
+    "bull_researcher",
+    "bull_researcher_v2",
+    "bear_researcher",
+    "bear_researcher_v2",
+    "risky_analyst",
+    "risky_analyst_v2",
+    "safe_analyst",
+    "safe_analyst_v2",
+    "neutral_analyst",
+    "neutral_analyst_v2",
+    "research_team_decision",
+    "risk_management_decision",
+}
+
+MARKDOWN_HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.*)$")
 
 # 检查依赖是否可用
 try:
@@ -143,6 +166,75 @@ class ReportExporter:
         logger.info(f"  - export_available: {self.export_available}")
         logger.info(f"  - pandoc_available: {self.pandoc_available}")
         logger.info(f"  - pdfkit_available: {self.pdfkit_available}")
+
+    @staticmethod
+    def _normalize_heading_text(text: str) -> str:
+        normalized = re.sub(r"[\W_]+", "", text, flags=re.UNICODE)
+        return normalized.casefold()
+
+    def _strip_duplicate_leading_heading(self, content: str, title: str) -> str:
+        lines = content.splitlines()
+        normalized_title = self._normalize_heading_text(title)
+
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            heading_match = MARKDOWN_HEADING_PATTERN.match(stripped)
+            if not heading_match:
+                break
+
+            if self._normalize_heading_text(heading_match.group(2)) == normalized_title:
+                remaining = lines[index + 1 :]
+                while remaining and not remaining[0].strip():
+                    remaining.pop(0)
+                return "\n".join(remaining)
+
+            break
+
+        return content
+
+    @staticmethod
+    def _demote_markdown_headings(content: str) -> str:
+        demoted_lines = []
+        in_code_block = False
+
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_code_block = not in_code_block
+                demoted_lines.append(line)
+                continue
+
+            if not in_code_block:
+                heading_match = MARKDOWN_HEADING_PATTERN.match(line)
+                if heading_match:
+                    heading_level = min(len(heading_match.group(1)) + 1, 6)
+                    demoted_lines.append(f"{'#' * heading_level} {heading_match.group(2)}")
+                    continue
+
+            demoted_lines.append(line)
+
+        return "\n".join(demoted_lines)
+
+    @staticmethod
+    def _normalize_disclaimer(content: str) -> str:
+        return re.sub(
+            r"(?is)(?:\*\*)?免责声明(?:\*\*)?[：:].*?(?:独立做出投资决策。|必要时请咨询专业顾问。)",
+            f"**免责声明**：{RESEARCH_ONLY_DISCLAIMER}",
+            content,
+        )
+
+    def _normalize_module_content(self, module_key: str, title: str, module_content: str) -> str:
+        normalized_content = module_content.strip()
+        if module_key in EXPORT_SANITIZED_MODULE_KEYS:
+            normalized_content = sanitize_display_report_text(normalized_content, fallback=normalized_content)
+
+        normalized_content = self._normalize_disclaimer(normalized_content)
+        normalized_content = self._strip_duplicate_leading_heading(normalized_content, title)
+        normalized_content = self._demote_markdown_headings(normalized_content)
+        return normalized_content.strip()
     
     def generate_markdown_report(self, report_doc: Dict[str, Any]) -> str:
         """生成 Markdown 格式报告"""
@@ -230,18 +322,18 @@ class ReportExporter:
             # 决策报告
             "final_trade_decision": "📝 综合研究结论",
             "investment_plan": "📋 研究经理简报",
-            "trader_investment_plan": "🧩 研究整合意见",
-            "research_team_decision": "🤝 研究团队结论",
+            "trader_investment_plan": "🧩 用户版研究简报",
+            "research_team_decision": "🤝 研究结论汇总",
             "risk_management_decision": "🛡️ 风险治理结论",
 
             # 研究团队研究员
-            "bull_researcher": "🐂 多头研究员",
-            "bear_researcher": "🐻 空头研究员",
+            "bull_researcher": "🌤️ 乐观情景论证",
+            "bear_researcher": "🌧️ 审慎情景论证",
 
             # 风险团队分析师
-            "risky_analyst": "⚠️ 激进分析师",
-            "safe_analyst": "🛡️ 保守分析师",
-            "neutral_analyst": "⚖️ 中立分析师",
+            "risky_analyst": "⚡ 高弹性情景评估",
+            "safe_analyst": "🛡️ 防御情景评估",
+            "neutral_analyst": "⚖️ 基准情景评估",
 
             # 个股分析报告
             "market_report": "📈 市场技术研究报告",
@@ -270,6 +362,7 @@ class ReportExporter:
                 
                 if isinstance(module_content, str) and module_content.strip():
                     title = module_titles.get(module_key, module_key)
+                    module_content = self._normalize_module_content(module_key, title, module_content)
                     content_parts.append(f"## {title}")
                     content_parts.append("")
                     content_parts.append(module_content)
@@ -296,6 +389,7 @@ class ReportExporter:
                 if isinstance(module_content, str) and module_content.strip():
                     # 🔥 使用友好的标题（如果存在）
                     title = module_titles.get(module_key, module_key.replace("_", " ").title())
+                    module_content = self._normalize_module_content(module_key, title, module_content)
                     content_parts.append(f"## {title}")
                     content_parts.append("")
                     content_parts.append(module_content)

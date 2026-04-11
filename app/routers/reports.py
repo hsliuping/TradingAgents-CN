@@ -605,30 +605,9 @@ async def download_report(
 
         elif format == "markdown":
             # Markdown格式下载
-            reports = doc.get("reports", {})
-            content_parts = []
+            from app.utils.report_exporter import report_exporter
 
-            # 添加标题
-            content_parts.append(f"# {stock_symbol} 研究报告")
-            content_parts.append(f"**研究日期**: {analysis_date}")
-            content_parts.append(f"**分析师**: {', '.join(doc.get('analysts', []))}")
-            content_parts.append(f"**研究深度**: {doc.get('research_depth', 1)}")
-            content_parts.append("")
-
-            # 添加摘要
-            if doc.get("summary"):
-                content_parts.append("## 研究摘要")
-                content_parts.append(doc["summary"])
-                content_parts.append("")
-
-            # 添加各模块内容
-            for module_name, module_content in reports.items():
-                if isinstance(module_content, str) and module_content.strip():
-                    content_parts.append(f"## {module_name}")
-                    content_parts.append(module_content)
-                    content_parts.append("")
-
-            content = "\n".join(content_parts)
+            content = report_exporter.generate_markdown_report(doc)
             filename = f"{stock_symbol}_{analysis_date}_report.md"
             media_type = "text/markdown"
 

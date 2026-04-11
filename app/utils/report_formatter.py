@@ -16,7 +16,7 @@ import json
 import re
 from typing import Dict, Any, Optional, Tuple
 
-from app.utils.compliance import sanitize_display_report_text
+from app.utils.compliance import normalize_research_brief_lists, sanitize_display_report_text
 
 logger = logging.getLogger(__name__)
 
@@ -429,12 +429,11 @@ def _convert_investment_json_to_markdown(json_obj: Dict[str, Any]) -> str:
         ("## 🔄 判断调整条件", "invalidation_conditions"),
         ("## 👀 后续观察事项", "watch_items"),
     ):
-        items = json_obj.get(field_name, [])
-        if isinstance(items, list) and items:
+        items = [item for item in json_obj.get(field_name, []) if item] if isinstance(json_obj.get(field_name, []), list) else []
+        if items:
             lines.append(f"{title}\n\n")
             for idx, item in enumerate(items, 1):
-                if item:
-                    lines.append(f"{idx}. {item}\n")
+                lines.append(f"{idx}. {item}\n")
             lines.append("\n")
     
     result = "\n".join(lines).strip()
@@ -573,12 +572,11 @@ def _convert_final_decision_json_to_markdown(json_obj: Dict[str, Any]) -> str:
             ("## 🔄 判断调整条件", "invalidation_conditions"),
             ("## 👀 后续观察事项", "watch_items"),
         ):
-            items = final_trade_decision.get(field_name, [])
-            if isinstance(items, list) and items:
+            items = [item for item in final_trade_decision.get(field_name, []) if item] if isinstance(final_trade_decision.get(field_name, []), list) else []
+            if items:
                 lines.append(f"{title}\n\n")
                 for idx, item in enumerate(items, 1):
-                    if item:
-                        lines.append(f"{idx}. {item}\n")
+                    lines.append(f"{idx}. {item}\n")
                 lines.append("\n")
     else:
         logger.warning(f"⚠️ [最终决策转换] final_trade_decision 不存在或为空，回退到风险评估格式")
@@ -843,6 +841,13 @@ def format_decision(
             logger.info(f"🔍 [format_decision] fallback_text 前200字符: {fallback_text[:200]}")
             logger.info(f"🔍 [format_decision] ⚠️ 注意：不会从 fallback_text 中提取 reasoning，避免与 summary 重复")
 
+    normalized_lists = normalize_research_brief_lists(
+        decision_raw.get('core_evidence'),
+        decision_raw.get('uncertainties'),
+        decision_raw.get('invalidation_conditions'),
+        decision_raw.get('watch_items'),
+    )
+
     return {
         'action': chinese_action,
         'analysis_view': chinese_action,
@@ -851,10 +856,10 @@ def format_decision(
         'reasoning': reasoning or '暂无分析推理',
         'summary': decision_raw.get('summary', '') or '',
         'risk_warning': decision_raw.get('risk_warning', '') or '',
-        'core_evidence': decision_raw.get('core_evidence', []) if isinstance(decision_raw.get('core_evidence'), list) else [],
-        'uncertainties': decision_raw.get('uncertainties', []) if isinstance(decision_raw.get('uncertainties'), list) else [],
-        'invalidation_conditions': decision_raw.get('invalidation_conditions', []) if isinstance(decision_raw.get('invalidation_conditions'), list) else [],
-        'watch_items': decision_raw.get('watch_items', []) if isinstance(decision_raw.get('watch_items'), list) else [],
+        'core_evidence': normalized_lists['core_evidence'],
+        'uncertainties': normalized_lists['uncertainties'],
+        'invalidation_conditions': normalized_lists['invalidation_conditions'],
+        'watch_items': normalized_lists['watch_items'],
     }
 
 

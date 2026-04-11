@@ -26,6 +26,7 @@ from app.models.analysis import (
 )
 from tradingagents.utils.stock_utils import StockUtils, StockMarket
 from app.core.database import get_mongo_db
+from app.utils.compliance import normalize_research_brief_lists
 from bson import ObjectId
 
 router = APIRouter()
@@ -127,6 +128,14 @@ def normalize_result_data(result_data: Dict[str, Any]) -> Dict[str, Any]:
         for field_name in ("action", "analysis_view", "reasoning", "summary", "risk_warning"):
             if field_name in normalized_decision and normalized_decision[field_name] is not None and not isinstance(normalized_decision[field_name], str):
                 normalized_decision[field_name] = _coerce_result_text(normalized_decision[field_name])
+
+        normalized_lists = normalize_research_brief_lists(
+            normalized_decision.get("core_evidence"),
+            normalized_decision.get("uncertainties"),
+            normalized_decision.get("invalidation_conditions"),
+            normalized_decision.get("watch_items"),
+        )
+        normalized_decision.update(normalized_lists)
         normalized["decision"] = normalized_decision
 
         if "final_trade_decision" not in normalized_reports:

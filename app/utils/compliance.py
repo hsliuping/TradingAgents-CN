@@ -84,6 +84,14 @@ _DISPLAY_REPORT_RISK_PATTERNS = [
         r"(?:¥|￥|\$)\s*\d|\d+(?:\.\d+)?\s*(?:元|美元|港元)",
     )
 ]
+_INFERENTIAL_EVIDENCE_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"推断|推测|推定|估算|测算|估计|假设|假定|猜测|臆测|疑似",
+        r"可能|或将|有望|预计|倾向于|大概率|或许|或可",
+        r"待验证|需验证|尚待验证|仍待验证|不可验证|难以验证",
+    )
+]
 
 _DISPLAY_TITLE_REPLACEMENTS = [
     (re.compile(r'^(?P<prefix>#{1,6}\s*)?新闻分析师研究报告$', re.IGNORECASE), '新闻研究'),
@@ -106,6 +114,16 @@ _DISPLAY_PHRASE_REPLACEMENTS = (
     ('安全边际', '风险缓冲'),
     ('具备一定吸引力', '值得继续跟踪'),
     ('价值修复的起点', '估值与预期修复的早期信号'),
+)
+
+RESEARCH_ONLY_DISCLAIMER = "本报告仅供研究参考，不构成个股推荐、投资建议或操作依据。请结合公开信息披露与自身研究独立判断。"
+_LEGACY_DISCLAIMER_BLOCK_PATTERN = re.compile(
+    r"(?is)(?:\*\*)?免责声明(?:\*\*)?[：:]\s*"
+    r"(?:本(?:分析)?报告仅供参考，不构成投资建议。.*?独立做出投资决策。"
+    r"|请结合自身情况独立判断。投资有风险，决策需谨慎。必要时请咨询专业顾问。)"
+)
+_LEGACY_DISCLAIMER_LINE_PATTERN = re.compile(
+    r"(?is)请结合自身情况独立判断。投资有风险，决策需谨慎。必要时请咨询专业顾问。"
 )
 
 
@@ -156,6 +174,15 @@ def _normalize_display_line(line: str) -> str:
         normalized_line = normalized_line.replace(old_text, new_text)
 
     return normalized_line
+
+
+def _normalize_research_disclaimer(text: str) -> str:
+    normalized = _LEGACY_DISCLAIMER_BLOCK_PATTERN.sub(
+        f"**免责声明**：{RESEARCH_ONLY_DISCLAIMER}",
+        text,
+    )
+    normalized = _LEGACY_DISCLAIMER_LINE_PATTERN.sub(RESEARCH_ONLY_DISCLAIMER, normalized)
+    return normalized
 
 
 def is_low_signal_text(text: str) -> bool:
@@ -304,10 +331,54 @@ def sanitize_brief_points(points: Any) -> List[str]:
     return cleaned_points
 
 
+def contains_inferential_evidence(text: str) -> bool:
+    normalized = _plain_text(_as_text(text))
+    if not normalized:
+        return False
+    return any(pattern.search(normalized) for pattern in _INFERENTIAL_EVIDENCE_PATTERNS)
+
+
+def normalize_research_brief_lists(
+    core_evidence: Any,
+    uncertainties: Any,
+    invalidation_conditions: Any,
+    watch_items: Any,
+) -> Dict[str, List[str]]:
+    cleaned_core_evidence = sanitize_brief_points(core_evidence)
+    cleaned_uncertainties = sanitize_brief_points(uncertainties)
+    cleaned_invalidation_conditions = sanitize_brief_points(invalidation_conditions)
+    cleaned_watch_items = sanitize_brief_points(watch_items)
+
+    normalized_core_evidence: List[str] = []
+    demoted_inferential_items: List[str] = []
+
+    for item in cleaned_core_evidence:
+        if contains_inferential_evidence(item):
+            demoted_inferential_items.append(item)
+            continue
+        normalized_core_evidence.append(item)
+
+    for item in demoted_inferential_items:
+        if item not in cleaned_uncertainties and len(cleaned_uncertainties) < 5:
+            cleaned_uncertainties.append(item)
+            continue
+        if item not in cleaned_watch_items and len(cleaned_watch_items) < 5:
+            cleaned_watch_items.append(item)
+
+    return {
+        "core_evidence": normalized_core_evidence[:5],
+        "uncertainties": cleaned_uncertainties[:5],
+        "invalidation_conditions": cleaned_invalidation_conditions[:5],
+        "watch_items": cleaned_watch_items[:5],
+    }
+
+
 def sanitize_display_report_text(text: Any, fallback: str = "") -> str:
     raw_text = _as_text(text)
     if not raw_text:
         return fallback
+
+    raw_text = _normalize_research_disclaimer(raw_text)
 
     cleaned_lines: List[str] = []
 
@@ -318,6 +389,10 @@ def sanitize_display_report_text(text: Any, fallback: str = "") -> str:
         if not normalized:
             if cleaned_lines and cleaned_lines[-1] != "":
                 cleaned_lines.append("")
+            continue
+
+        if "免责声明" in normalized or normalized == RESEARCH_ONLY_DISCLAIMER:
+            cleaned_lines.append(line)
             continue
 
         if contains_actionable_content(normalized):
@@ -334,6 +409,7 @@ def sanitize_display_report_text(text: Any, fallback: str = "") -> str:
 
     cleaned_text = "\n".join(cleaned_lines)
     cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text).strip()
+    cleaned_text = _normalize_research_disclaimer(cleaned_text)
 
     if cleaned_text:
         return cleaned_text[:4000]
@@ -463,8 +539,14 @@ def sanitize_analysis_payload(result_data: Dict[str, Any]) -> Dict[str, Any]:
         risk_warning = sanitize_text_block(decision.get("risk_warning"))
         if risk_warning:
             sanitized_decision["risk_warning"] = risk_warning[:200]
+        normalized_lists = normalize_research_brief_lists(
+            decision.get("core_evidence"),
+            decision.get("uncertainties"),
+            decision.get("invalidation_conditions"),
+            decision.get("watch_items"),
+        )
         for field_name in ("core_evidence", "uncertainties", "invalidation_conditions", "watch_items"):
-            cleaned_items = sanitize_brief_points(decision.get(field_name))
+            cleaned_items = normalized_lists.get(field_name, [])
             if cleaned_items:
                 sanitized_decision[field_name] = cleaned_items
         sanitized["decision"] = sanitized_decision

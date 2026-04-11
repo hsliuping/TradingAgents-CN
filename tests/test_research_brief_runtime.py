@@ -90,6 +90,23 @@ def test_format_decision_keeps_research_brief_fields_only() -> None:
     }
 
 
+def test_format_decision_demotes_inferential_core_evidence() -> None:
+    decision = format_decision(
+        {
+            "action": "HOLD",
+            "confidence": 0.66,
+            "risk_score": 0.41,
+            "reasoning": "当前关键分歧仍需等待更完整披露验证。",
+            "core_evidence": ["ROE连续四季度回升", "零售贷款占比推断超60%"],
+            "uncertainties": ["净息差变动方向未披露"],
+            "watch_items": ["下一期财报"],
+        }
+    )
+
+    assert decision["core_evidence"] == ["ROE连续四季度回升"]
+    assert "零售贷款占比推断超60%" in decision["uncertainties"]
+
+
 def test_convert_final_decision_json_to_markdown_uses_research_brief_sections() -> None:
     markdown = _convert_final_decision_json_to_markdown(
         {
@@ -121,6 +138,44 @@ def test_convert_final_decision_json_to_markdown_uses_research_brief_sections() 
     assert "观察区间参考" not in markdown
     assert "关键验证位" not in markdown
     assert "风险承受前提" not in markdown
+
+
+def test_convert_final_decision_json_to_markdown_reindexes_non_empty_lists() -> None:
+    markdown = _convert_final_decision_json_to_markdown(
+        {
+            "final_trade_decision": {
+                "analysis_view": "中性",
+                "core_evidence": ["证据A", "", None, "证据B"],
+                "uncertainties": [None, "不确定性A"],
+                "invalidation_conditions": ["条件A", "", "条件B"],
+                "watch_items": ["观察项A", None, "观察项B"],
+            }
+        }
+    )
+
+    assert "1. 证据A" in markdown
+    assert "2. 证据B" in markdown
+    assert "3. 证据B" not in markdown
+    assert "1. 不确定性A" in markdown
+    assert "1. 条件A" in markdown
+    assert "2. 条件B" in markdown
+    assert "1. 观察项A" in markdown
+    assert "2. 观察项B" in markdown
+
+
+def test_sanitize_display_report_text_normalizes_legacy_disclaimer() -> None:
+    raw_text = """## 综合研究结论
+
+当前判断仍需结合后续披露继续验证。
+
+**免责声明**：请结合自身情况独立判断。投资有风险，决策需谨慎。必要时请咨询专业顾问。
+"""
+
+    sanitized = sanitize_display_report_text(raw_text)
+
+    assert "当前判断仍需结合后续披露继续验证。" in sanitized
+    assert "投资有风险，决策需谨慎" not in sanitized
+    assert "本报告仅供研究参考，不构成个股推荐、投资建议或操作依据。请结合公开信息披露与自身研究独立判断。" in sanitized
 
 
 def test_sanitize_display_report_text_removes_price_and_actionable_lines() -> None:
@@ -214,6 +269,29 @@ def test_sanitize_analysis_payload_strips_news_and_sentiment_execution_language(
     assert "公司公告显示新产线投产" in sanitized["reports"]["news_report"]
     assert "讨论热度上升" in sanitized["reports"]["sentiment_report"]
     assert all("买入" not in point for point in sanitized["key_points"])
+
+
+def test_sanitize_analysis_payload_demotes_inferential_core_evidence() -> None:
+    raw_result = {
+        "summary": "等待年报进一步验证。",
+        "reports": {
+            "market_report": "价格仍处于震荡区间。"
+        },
+        "decision": {
+            "analysis_view": "中性",
+            "confidence": 68,
+            "risk_score": 52,
+            "reasoning": "当前更适合基于已披露数据维持中性研究判断。",
+            "core_evidence": ["PB为0.48倍", "零售贷款占比推断超60%"],
+            "uncertainties": ["不良贷款率细分数据缺失"],
+            "watch_items": ["下一期财报"],
+        },
+    }
+
+    sanitized = sanitize_analysis_payload(raw_result)
+
+    assert sanitized["decision"]["core_evidence"] == ["PB为0.48倍"]
+    assert "零售贷款占比推断超60%" in sanitized["decision"]["uncertainties"]
 
 
 def test_sanitize_analysis_payload_strips_index_and_sector_execution_language() -> None:

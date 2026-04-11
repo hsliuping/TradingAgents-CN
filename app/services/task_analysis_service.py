@@ -21,6 +21,7 @@ from app.services.unified_analysis_engine import UnifiedAnalysisEngine
 from app.services.workflow_registry import AnalysisWorkflowRegistry
 from app.core.database import get_mongo_db
 from app.utils.timezone import now_tz
+from app.utils.compliance import normalize_research_brief_lists
 
 logger = logging.getLogger(__name__)
 
@@ -1397,10 +1398,16 @@ class TaskAnalysisService:
                     break
             return cleaned_items
 
-        core_evidence = _clean_list_field('core_evidence')
-        uncertainties = _clean_list_field('uncertainties')
-        invalidation_conditions = _clean_list_field('invalidation_conditions')
-        watch_items = _clean_list_field('watch_items')
+        normalized_lists = normalize_research_brief_lists(
+            _clean_list_field('core_evidence'),
+            _clean_list_field('uncertainties'),
+            _clean_list_field('invalidation_conditions'),
+            _clean_list_field('watch_items'),
+        )
+        core_evidence = normalized_lists['core_evidence']
+        uncertainties = normalized_lists['uncertainties']
+        invalidation_conditions = normalized_lists['invalidation_conditions']
+        watch_items = normalized_lists['watch_items']
 
         self.logger.info(
             f"🔍 [TaskAnalysisService._format_decision_dict] 返回字段: "
@@ -1629,6 +1636,13 @@ class TaskAnalysisService:
         final_confidence = confidence_from_json if confidence_from_json is not None else confidence
         final_risk_score = risk_score_from_json if risk_score_from_json is not None else risk_score
         
+        normalized_lists = normalize_research_brief_lists(
+            core_evidence_from_json,
+            uncertainties_from_json,
+            invalidation_conditions_from_json,
+            watch_items_from_json,
+        )
+
         return {
             'action': action,
             'analysis_view': action,
@@ -1637,10 +1651,10 @@ class TaskAnalysisService:
             'reasoning': reasoning,
             'summary': summary_from_json,
             'risk_warning': risk_warning_from_json,
-            'core_evidence': core_evidence_from_json,
-            'uncertainties': uncertainties_from_json,
-            'invalidation_conditions': invalidation_conditions_from_json,
-            'watch_items': watch_items_from_json,
+            'core_evidence': normalized_lists['core_evidence'],
+            'uncertainties': normalized_lists['uncertainties'],
+            'invalidation_conditions': normalized_lists['invalidation_conditions'],
+            'watch_items': normalized_lists['watch_items'],
         }
 
     async def _update_task(self, task: UnifiedAnalysisTask) -> None:

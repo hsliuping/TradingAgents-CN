@@ -46,6 +46,23 @@ def test_normalize_result_data_builds_final_decision_report_when_missing():
 	assert "季度息差变化" in result["reports"]["final_trade_decision"]
 
 
+def test_normalize_result_data_demotes_inferential_core_evidence_in_decision():
+	result = normalize_result_data(
+		{
+			"decision": {
+				"analysis_view": "中性",
+				"reasoning": "当前更适合等待年报披露。",
+				"core_evidence": ["PB为0.48倍", "零售贷款占比推断超60%"],
+				"uncertainties": ["净息差数据缺失"],
+				"watch_items": ["下一期财报"],
+			},
+		}
+	)
+
+	assert result["decision"]["core_evidence"] == ["PB为0.48倍"]
+	assert "零售贷款占比推断超60%" in result["decision"]["uncertainties"]
+
+
 def test_has_meaningful_result_payload_rejects_empty_shell_result():
 	assert has_meaningful_result_payload(
 		{
