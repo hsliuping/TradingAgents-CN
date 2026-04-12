@@ -243,16 +243,17 @@ async def get_sector_performance(
 
 async def get_sector_rotation(trade_date: str, top_n: int = 10) -> str:
     """
-    识别板块轮动趋势
+    识别行业轮动趋势
 
-    分析近期热门板块和资金流向，识别轮动方向
+    优先使用同花顺行业资金流向；如果行业接口不可用或无数据，
+    则回退到同花顺个股资金流向，并在结果中明确标注数据口径。
 
     Args:
         trade_date: 交易日期
-        top_n: 返回前N个板块
+        top_n: 返回前N条资金流记录
 
     Returns:
-        板块轮动分析报告
+        行业轮动分析报告
     """
     provider = _get_tushare_provider()
 
@@ -261,78 +262,164 @@ async def get_sector_rotation(trade_date: str, top_n: int = 10) -> str:
         trade_date_clean = await _get_latest_trade_date(trade_date)
         trade_date_formatted = f"{trade_date_clean[:4]}-{trade_date_clean[4:6]}-{trade_date_clean[6:8]}"
 
-        # 获取板块资金流向数据
-        moneyflow_df = await provider.get_moneyflow_ths(trade_date=trade_date_clean)
+        moneyflow_df = await provider.get_moneyflow_ind_ths(trade_date=trade_date_clean)
+        data_scope = "industry"
 
         report_lines = [
-            f"🔄 板块轮动趋势分析",
+            f"🔄 行业轮动趋势分析",
             f"{'='*50}",
             f"📅 分析日期: {trade_date_formatted}",
             "",
         ]
 
         if moneyflow_df is None or moneyflow_df.empty:
-            report_lines.append("⚠️ 暂无板块资金流向数据")
+            logger.warning("⚠️ 行业资金流向接口无数据，回退到同花顺个股资金流向")
+            moneyflow_df = await provider.get_moneyflow_ths(trade_date=trade_date_clean)
+            data_scope = "stock"
+
+        if moneyflow_df is None or moneyflow_df.empty:
+            report_lines.append("⚠️ 暂无行业资金流向数据，个股资金流回退数据也不可用")
             return "\n".join(report_lines)
 
-        # 按净流入金额排序
-        moneyflow_df = moneyflow_df.sort_values('net_amount', ascending=False)
+        moneyflow_df = moneyflow_df.copy()
+        moneyflow_df['net_amount'] = pd.to_numeric(moneyflow_df.get('net_amount'), errors='coerce').fillna(0.0)
 
-        # 资金流入TOP板块
-        report_lines.append("【💰 资金净流入TOP板块】")
-        inflow_df = moneyflow_df.head(top_n)
-        for i, row in enumerate(inflow_df.itertuples(), 1):
-            ts_code = getattr(row, 'ts_code', '')
-            name = getattr(row, 'name', ts_code)
-            net_amount = getattr(row, 'net_amount', 0)
-            net_rate = getattr(row, 'net_amount_rate', 0)
+        if data_scope == "industry":
+            report_lines.append("📌 数据口径: 同花顺行业资金流向（THS）")
+            report_lines.append("📎 说明: 以下榜单按行业口径展示，可用于描述哪些行业进入资金净流入/净流出前列。")
+            report_lines.append("")
 
-            # 转换单位：万元 -> 亿元
-            net_amount_yi = net_amount / 10000 if net_amount else 0
-            trend = "🔴" if net_amount > 0 else "🟢"
-
-            report_lines.append(
-                f"  {i}. {name}: {trend} {net_amount_yi:+.2f}亿 "
-                f"(占比: {net_rate:.2f}%)"
+            moneyflow_df['display_name'] = (
+                moneyflow_df.get('industry')
+                if 'industry' in moneyflow_df.columns
+                else moneyflow_df.get('name')
             )
+            if 'display_name' not in moneyflow_df.columns:
+                moneyflow_df['display_name'] = moneyflow_df.get('ts_code', '')
 
-        report_lines.append("")
+            inflow_df = moneyflow_df[moneyflow_df['net_amount'] > 0].sort_values('net_amount', ascending=False).head(top_n)
+            outflow_df = moneyflow_df[moneyflow_df['net_amount'] < 0].sort_values('net_amount', ascending=True).head(top_n)
 
-        # 资金流出TOP板块
-        report_lines.append("【💸 资金净流出TOP板块】")
-        outflow_df = moneyflow_df.tail(top_n).iloc[::-1]
-        for i, row in enumerate(outflow_df.itertuples(), 1):
-            ts_code = getattr(row, 'ts_code', '')
-            name = getattr(row, 'name', ts_code)
-            net_amount = getattr(row, 'net_amount', 0)
-            net_rate = getattr(row, 'net_amount_rate', 0)
+            report_lines.append("【💰 资金净流入TOP行业】")
+            if inflow_df.empty:
+                report_lines.append("  • 当日无净流入行业数据")
+            for i, row in enumerate(inflow_df.itertuples(), 1):
+                ts_code = getattr(row, 'ts_code', '')
+                name = getattr(row, 'display_name', '') or getattr(row, 'industry', '') or getattr(row, 'name', ts_code)
+                net_amount = getattr(row, 'net_amount', 0)
+                pct_change = getattr(row, 'pct_change', None)
+                company_num = getattr(row, 'company_num', None)
 
-            net_amount_yi = net_amount / 10000 if net_amount else 0
+                extras = []
+                if pct_change is not None and pd.notna(pct_change):
+                    extras.append(f"涨跌幅: {pct_change:+.2f}%")
+                if company_num is not None and pd.notna(company_num):
+                    extras.append(f"成分股: {int(company_num)}家")
+                extra_text = f" ({' | '.join(extras)})" if extras else ""
 
-            report_lines.append(
-                f"  {i}. {name}: 🟢 {net_amount_yi:+.2f}亿 "
-                f"(占比: {net_rate:.2f}%)"
-            )
+                report_lines.append(
+                    f"  {i}. {name}: 🔴 {net_amount:+.2f}亿{extra_text}"
+                )
 
-        # 轮动判断
-        report_lines.append("")
-        report_lines.append("【🎯 轮动判断】")
+            report_lines.append("")
+            report_lines.append("【💸 资金净流出TOP行业】")
+            if outflow_df.empty:
+                report_lines.append("  • 当日无净流出行业数据")
+            for i, row in enumerate(outflow_df.itertuples(), 1):
+                ts_code = getattr(row, 'ts_code', '')
+                name = getattr(row, 'display_name', '') or getattr(row, 'industry', '') or getattr(row, 'name', ts_code)
+                net_amount = getattr(row, 'net_amount', 0)
+                pct_change = getattr(row, 'pct_change', None)
+                company_num = getattr(row, 'company_num', None)
 
-        total_inflow = inflow_df['net_amount'].sum() / 10000
-        total_outflow = abs(outflow_df['net_amount'].sum()) / 10000
+                extras = []
+                if pct_change is not None and pd.notna(pct_change):
+                    extras.append(f"涨跌幅: {pct_change:+.2f}%")
+                if company_num is not None and pd.notna(company_num):
+                    extras.append(f"成分股: {int(company_num)}家")
+                extra_text = f" ({' | '.join(extras)})" if extras else ""
 
-        if total_inflow > total_outflow * 1.5:
-            report_lines.append("  • 市场整体资金流入，偏多头氛围")
-        elif total_outflow > total_inflow * 1.5:
-            report_lines.append("  • 市场整体资金流出，偏空头氛围")
+                report_lines.append(
+                    f"  {i}. {name}: 🟢 {net_amount:+.2f}亿{extra_text}"
+                )
+
+            report_lines.append("")
+            report_lines.append("【🎯 轮动判断】")
+
+            total_inflow = inflow_df['net_amount'].sum() if not inflow_df.empty else 0
+            total_outflow = abs(outflow_df['net_amount'].sum()) if not outflow_df.empty else 0
+
+            if total_inflow > total_outflow * 1.5:
+                report_lines.append("  • 行业资金净流入前列强于净流出前列，短线资金偏向少数行业。")
+            elif total_outflow > total_inflow * 1.5:
+                report_lines.append("  • 行业资金净流出前列更强，资金在行业间偏谨慎。")
+            else:
+                report_lines.append("  • 行业净流入与净流出前列力量接近，行业轮动仍较明显。")
+            report_lines.append("  • 如在后续报告中引用本段，应按行业口径说明哪些行业进入前列，不要改写成个股资金结论。")
         else:
-            report_lines.append("  • 市场资金进出均衡，板块轮动明显")
+            report_lines.append("📌 数据口径: 同花顺个股资金流向（THS）回退")
+            report_lines.append("📎 说明: 行业资金流向接口当前无数据或不可用，以下使用个股资金流前列名单作为替代参考。该口径只能描述个股层面的资金聚焦情况，不能直接代表行业整体净流入/净流出排序。")
+            report_lines.append("")
+
+            moneyflow_df['display_name'] = moneyflow_df.get('name', moneyflow_df.get('ts_code', ''))
+            inflow_df = moneyflow_df[moneyflow_df['net_amount'] > 0].sort_values('net_amount', ascending=False).head(top_n)
+            outflow_df = moneyflow_df[moneyflow_df['net_amount'] < 0].sort_values('net_amount', ascending=True).head(top_n)
+
+            report_lines.append("【💰 资金净流入TOP个股】")
+            if inflow_df.empty:
+                report_lines.append("  • 当日无净流入个股数据")
+            for i, row in enumerate(inflow_df.itertuples(), 1):
+                ts_code = getattr(row, 'ts_code', '')
+                name = getattr(row, 'display_name', '') or getattr(row, 'name', ts_code)
+                net_amount = getattr(row, 'net_amount', 0)
+                pct_change = getattr(row, 'pct_change', None)
+                latest = getattr(row, 'latest', None)
+                net_amount_yi = net_amount / 10000 if net_amount else 0
+
+                extras = []
+                if pct_change is not None and pd.notna(pct_change):
+                    extras.append(f"涨跌幅: {pct_change:+.2f}%")
+                if latest is not None and pd.notna(latest):
+                    extras.append(f"最新价: {latest:.2f}")
+                extra_text = f" ({' | '.join(extras)})" if extras else ""
+
+                report_lines.append(
+                    f"  {i}. {name}: 🔴 {net_amount_yi:+.2f}亿{extra_text}"
+                )
+
+            report_lines.append("")
+            report_lines.append("【💸 资金净流出TOP个股】")
+            if outflow_df.empty:
+                report_lines.append("  • 当日无净流出个股数据")
+            for i, row in enumerate(outflow_df.itertuples(), 1):
+                ts_code = getattr(row, 'ts_code', '')
+                name = getattr(row, 'display_name', '') or getattr(row, 'name', ts_code)
+                net_amount = getattr(row, 'net_amount', 0)
+                pct_change = getattr(row, 'pct_change', None)
+                latest = getattr(row, 'latest', None)
+                net_amount_yi = net_amount / 10000 if net_amount else 0
+
+                extras = []
+                if pct_change is not None and pd.notna(pct_change):
+                    extras.append(f"涨跌幅: {pct_change:+.2f}%")
+                if latest is not None and pd.notna(latest):
+                    extras.append(f"最新价: {latest:.2f}")
+                extra_text = f" ({' | '.join(extras)})" if extras else ""
+
+                report_lines.append(
+                    f"  {i}. {name}: 🟢 {net_amount_yi:+.2f}亿{extra_text}"
+                )
+
+            report_lines.append("")
+            report_lines.append("【🎯 使用提示】")
+            report_lines.append("  • 当前返回的是个股资金流回退数据，后续报告只能按个股名单描述资金集中或流出情况。")
+            report_lines.append("  • 不要把个股前列名单直接改写成行业整体净流入、行业显著获配或行业整体撤离结论。")
 
         return "\n".join(report_lines)
 
     except Exception as e:
-        logger.error(f"板块轮动分析失败: {e}")
-        return f"❌ 板块轮动分析失败: {e}"
+        logger.error(f"行业轮动分析失败: {e}")
+        return f"❌ 行业轮动分析失败: {e}"
 
 
 async def get_peer_comparison(

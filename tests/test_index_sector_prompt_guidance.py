@@ -83,9 +83,12 @@ def test_research_brief_index_and_sector_builders_keep_explicit_tool_workflow() 
     assert "行业标签必须分层处理" in sector_content["system_prompt"]
     assert "更贴近主业的细分行业标签" in sector_content["tool_guidance"]
     assert "主力资金显著配置" in sector_content["tool_guidance"]
+    assert "个股资金流回退数据" in sector_content["tool_guidance"]
     assert "研究口径" in sector_content["user_prompt"]
     assert "更贴近主业的行业口径" in sector_content["user_prompt"]
-    assert "未进入当日资金净流入前列" in sector_content["user_prompt"]
+    assert "未进入当日行业资金净流入前列" in sector_content["user_prompt"]
+    assert "个股资金流回退数据" in sector_content["user_prompt"]
+    assert "未进入当日个股资金净流入前列" in sector_content["user_prompt"]
     assert "利率、监管、资产质量、息差、不良率、拨备覆盖率" in sector_content["user_prompt"]
     assert "安全边际、修复窗口或板块机会叙事" in sector_content["user_prompt"]
     assert "资金流向与市场热度" in sector_content["analysis_requirements"]
@@ -94,7 +97,8 @@ def test_research_brief_index_and_sector_builders_keep_explicit_tool_workflow() 
     assert "不要单独设“数据缺口声明”章节" in sector_content["analysis_requirements"]
     assert "如果同一股票命中多个行业类指数" in sector_content["analysis_requirements"]
     assert "银行个股同时命中“金融(A股)”" in sector_content["analysis_requirements"]
-    assert "未进入当日资金净流入前列" in sector_content["analysis_requirements"]
+    assert "未进入当日行业资金净流入前列" in sector_content["analysis_requirements"]
+    assert "个股资金流回退数据" in sector_content["analysis_requirements"]
     assert "安全边际" in sector_content["analysis_requirements"]
     assert "行业机会与风险" not in sector_content["user_prompt"]
 
@@ -153,6 +157,7 @@ def test_research_mode_migration_preserves_index_and_sector_tool_instructions() 
     assert "判断原因" in sector_system_prompt
     assert "层级标签" in sector_system_prompt
     assert "实际数据日期" not in sector_system_prompt
+    assert "个股资金流回退数据" in sector_guidance
     sector_requirements = module.get_field_override("sector_analyst", "analysis_requirements")
     assert sector_requirements is not None
     assert "资金流向与市场热度" in sector_requirements
@@ -161,6 +166,8 @@ def test_research_mode_migration_preserves_index_and_sector_tool_instructions() 
     assert "不要单独设“数据缺口声明”章节" in sector_requirements
     assert "如果同一股票命中多个行业类指数" in sector_requirements
     assert "更贴近主业的行业口径" in sector_requirements
+    assert "未进入当日行业资金净流入前列" in sector_requirements
+    assert "未进入当日个股资金净流入前列" in sector_requirements
 
 
 def test_runtime_analyst_prompt_avoids_missing_dimension_sections() -> None:

@@ -43,6 +43,22 @@ ANALYST_TOOL_MAPPING = {
     "social_analyst_v2": "social",
 }
 
+DEEP_LLM_AGENT_IDS = {
+    "index_analyst_v2",
+    "sector_analyst_v2",
+    "research_manager_v2",
+    "risk_manager_v2",
+    "risky_analyst_v2",
+    "safe_analyst_v2",
+    "neutral_analyst_v2",
+    "research_manager",
+    "risk_manager",
+}
+
+
+def _select_llm_type_for_agent(agent_id: str) -> str:
+    return "deep" if agent_id in DEEP_LLM_AGENT_IDS else "quick"
+
 
 class LegacyDependencyProvider:
     """
@@ -1386,18 +1402,9 @@ class WorkflowBuilder:
             if not tool_ids:
                 logger.warning(f"[智能体创建] ⚠️ 未找到任何工具绑定: {agent_id}")
 
-            # 🔥 关键修复：根据 agent_id 判断应该使用 quick 还是 deep LLM
-            # 使用深度模型的 Agent：
-            # 1. 管理者（research_manager, risk_manager）- 需要综合大量信息做决策
-            # 2. 风险分析师（risky/safe/neutral_analyst_v2）- 需要处理大量分析报告
-            # 其他 agent（普通分析师、研究员）使用快速模型
-            llm_type = "quick"  # 默认使用快速模型
-            if agent_id in [
-                "research_manager_v2", "risk_manager_v2",  # v2.0 管理者
-                "risky_analyst_v2", "safe_analyst_v2", "neutral_analyst_v2",  # v2.0 风险分析师
-                "research_manager", "risk_manager"  # 旧版管理者
-            ]:
-                llm_type = "deep"  # 使用深度模型
+            # 大盘/行业 v2 分析师已升级为高约束、多工具的研究型输出，使用深度模型更稳。
+            llm_type = _select_llm_type_for_agent(agent_id)
+            if llm_type == "deep":
                 logger.info(f"[智能体创建] 🔧 {agent_id} 使用深度分析模型 (deep_think_llm)")
             else:
                 logger.info(f"[智能体创建] 🔧 {agent_id} 使用快速分析模型 (quick_think_llm)")
@@ -1572,16 +1579,8 @@ class WorkflowBuilder:
             module = importlib.import_module(module_path)
             factory_func = getattr(module, func_name)
 
-            # 🔥 关键修复：根据 agent_id 判断应该使用 quick 还是 deep LLM
-            # 使用深度模型的 Agent：
-            # 1. 管理者（research_manager, risk_manager）- 需要综合大量信息做决策
-            # 2. 风险分析师（risky/safe/neutral_analyst）- 需要处理大量分析报告
-            llm_type = "quick"  # 默认使用快速模型
-            if agent_id in [
-                "research_manager", "risk_manager",  # 管理者
-                "risky_analyst", "safe_analyst", "neutral_analyst"  # 旧版风险分析师
-            ]:
-                llm_type = "deep"  # 使用深度模型
+            llm_type = _select_llm_type_for_agent(agent_id)
+            if llm_type == "deep":
                 logger.info(f"[遗留适配器] 🔧 {agent_id} 使用深度分析模型 (deep_think_llm)")
             else:
                 logger.info(f"[遗留适配器] 🔧 {agent_id} 使用快速分析模型 (quick_think_llm)")

@@ -1844,6 +1844,46 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取板块资金流向失败: {e}")
             return None
 
+    async def get_moneyflow_ind_ths(self, trade_date: str = None,
+                                   ts_code: str = None) -> Optional[pd.DataFrame]:
+        """
+        获取同花顺行业资金流向
+
+        Args:
+            trade_date: 交易日期 YYYYMMDD
+            ts_code: 行业代码
+
+        Returns:
+            DataFrame，包含行业资金流向数据
+            - industry: 行业名称
+            - pct_change: 行业指数涨跌幅
+            - company_num: 成分股数量
+            - net_buy_amount: 流入资金（亿元）
+            - net_sell_amount: 流出资金（亿元）
+            - net_amount: 净额（亿元）
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if trade_date:
+                params['trade_date'] = trade_date.replace('-', '')
+            if ts_code:
+                params['ts_code'] = ts_code
+
+            df = await asyncio.to_thread(
+                self.api.moneyflow_ind_ths,
+                **params
+            )
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取行业资金流向数据: {len(df)} 条")
+                return df
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ 获取行业资金流向失败: {e}")
+            return None
+
     def get_stock_industry_sync(self, ticker: str) -> Optional[str]:
         """
         同步获取股票所属行业（从 stock_basic 提取）

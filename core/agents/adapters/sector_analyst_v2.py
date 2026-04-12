@@ -462,10 +462,13 @@ class SectorAnalystV2(AnalystAgent):
 **重要提示**：调用工具时，必须使用以下参数：
 - get_china_market_overview: curr_date='{analysis_date}'
 - get_sector_data: ticker='{ticker}', trade_date='{analysis_date}', lookback_days=20
-- get_fund_flow_data: trade_date='{analysis_date}', top_n=10
+- get_fund_flow_data: trade_date='{analysis_date}', top_n=10（优先行业资金流，必要时回退到个股资金流）
 - get_peer_comparison: ticker='{ticker}', trade_date='{analysis_date}'（如果需要）
 
 **必须使用上述参数值**，不要使用其他股票代码或日期。
+
+如果 get_fund_flow_data 返回的是行业资金流结果，按行业口径说明哪些行业进入净流入/净流出前列。
+如果 get_fund_flow_data 明确标注为个股资金流回退结果，只能按个股名单描述，不要把个股前列名单改写成行业整体资金结论。
 
 请调用工具获取板块数据，然后生成详细的中文研究报告，至少包含：
 1. 行业景气度、轮动节奏与结构变化
@@ -484,7 +487,7 @@ class SectorAnalystV2(AnalystAgent):
         # 根据工具名称给出调用建议
         tool_hints = {
             "get_sector_data": "获取板块基础数据（行业分类、板块走势）",
-            "get_fund_flow_data": "获取板块资金流向数据",
+            "get_fund_flow_data": "优先获取行业资金流向，必要时回退到个股资金流向",
             "get_industry_comparison": "获取同业公司对比数据",
             "get_sector_stocks": "获取板块成分股列表",
         }

@@ -313,7 +313,7 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
     "get_fund_flow_data": ToolMetadata(
         id="get_fund_flow_data",
         name="资金流向",
-        description="获取板块资金流向数据，分析主力资金动向",
+        description="优先获取行业资金流向，必要时回退到个股资金流向，并明确说明数据口径",
         category=ToolCategory.MARKET,
         data_source="tushare",
         is_online=True,
@@ -321,7 +321,7 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
         color="#3498db",
         parameters=[
             ToolParameter(name="trade_date", type="string", description="交易日期，格式：YYYY-MM-DD", required=True),
-            ToolParameter(name="top_n", type="integer", description="返回前N个板块，默认10", required=False, default=10),
+            ToolParameter(name="top_n", type="integer", description="返回前N条资金流记录，默认10", required=False, default=10),
         ],
     ),
     "get_peer_comparison": ToolMetadata(

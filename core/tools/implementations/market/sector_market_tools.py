@@ -53,7 +53,7 @@ def get_sector_data(
 @register_tool(
     tool_id="get_fund_flow_data",
     name="资金流向",
-    description="获取板块资金流向数据，分析主力资金动向",
+    description="优先获取行业资金流向，必要时回退到个股资金流向，并明确说明数据口径",
     category="market",
     is_online=True,
     auto_register=True
@@ -63,16 +63,16 @@ def get_fund_flow_data(
     top_n: Annotated[int, "返回前N个板块，默认10"] = 10
 ) -> str:
     """
-    获取板块资金流向数据
+    获取资金流向数据
     
-    分析各板块的资金流入流出情况，识别主力资金动向和板块轮动趋势。
+    优先分析各行业的资金流入流出情况；如果行业接口不可用，则回退到个股资金流向，并在结果中明确标注为个股回退口径。
     
     Args:
         trade_date: 交易日期（格式：YYYY-MM-DD）
-        top_n: 返回前N个板块（默认10）
+        top_n: 返回前N个行业（默认10）
     
     Returns:
-        str: 板块资金流向分析报告
+        str: 资金流向分析报告（行业优先，必要时个股回退）
     """
     try:
         from core.tools.sector_tools import get_sector_rotation_sync

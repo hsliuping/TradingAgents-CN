@@ -88,11 +88,12 @@ class TestSectorTools:
     @pytest.mark.asyncio
     async def test_get_sector_rotation(self, mock_tushare_provider):
         """测试板块轮动分析"""
-        mock_tushare_provider.get_moneyflow_ths = AsyncMock(return_value=pd.DataFrame({
-            'ts_code': ['885691.TI', '885611.TI'],
-            'name': ['银行', '科技'],
-            'net_amount': [50000, -30000],
-            'net_amount_rate': [2.5, -1.5]
+        mock_tushare_provider.get_moneyflow_ind_ths = AsyncMock(return_value=pd.DataFrame({
+            'ts_code': ['877035.TI', '881157.TI'],
+            'industry': ['银行', '证券'],
+            'pct_change': [-0.12, 1.35],
+            'company_num': [84, 50],
+            'net_amount': [-40.0, 49.0]
         }))
         
         with patch('core.tools.sector_tools._get_tushare_provider', return_value=mock_tushare_provider):
@@ -100,8 +101,43 @@ class TestSectorTools:
             
             result = await get_sector_rotation("2024-12-02")
             
-            assert "板块轮动趋势分析" in result
+            assert "行业轮动趋势分析" in result
+            assert "数据口径: 同花顺行业资金流向（THS）" in result
+            assert "银行" in result
+            assert "证券" in result
+            assert "+49.00亿" in result
+            assert "-40.00亿" in result
             assert "资金净流入" in result or "资金净流出" in result
+            mock_tushare_provider.get_moneyflow_ind_ths.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_get_sector_rotation_falls_back_to_stock_moneyflow(self, mock_tushare_provider):
+        """测试行业资金流不可用时回退到个股资金流"""
+        mock_tushare_provider.get_moneyflow_ind_ths = AsyncMock(return_value=pd.DataFrame())
+        mock_tushare_provider.get_moneyflow_ths = AsyncMock(return_value=pd.DataFrame({
+            'ts_code': ['300750.SZ', '600519.SH', '000001.SZ'],
+            'name': ['宁德时代', '贵州茅台', '平安银行'],
+            'pct_change': [2.1, -1.3, -0.4],
+            'latest': [210.55, 1568.0, 10.25],
+            'net_amount': [25600.0, -13200.0, 1800.0]
+        }))
+
+        with patch('core.tools.sector_tools._get_tushare_provider', return_value=mock_tushare_provider):
+            from core.tools.sector_tools import get_sector_rotation
+
+            result = await get_sector_rotation("2024-12-02")
+
+            assert "数据口径: 同花顺个股资金流向（THS）回退" in result
+            assert "个股资金流前列名单作为替代参考" in result
+            assert "资金净流入TOP个股" in result
+            assert "资金净流出TOP个股" in result
+            assert "宁德时代" in result
+            assert "平安银行" in result
+            assert "贵州茅台" in result
+            assert "+2.56亿" in result
+            assert "-1.32亿" in result
+            mock_tushare_provider.get_moneyflow_ind_ths.assert_awaited_once()
+            mock_tushare_provider.get_moneyflow_ths.assert_awaited_once()
 
 
 class TestSectorAnalystAgent:
