@@ -1452,11 +1452,11 @@ class TushareProvider(BaseStockDataProvider):
                 "report_type": self._determine_report_type(report_period),
 
                 # 利润表核心指标
-                "revenue": self._safe_float(latest_income.get('revenue')),  # 营业收入（单期）
+                "revenue": self._safe_float(latest_income.get('revenue')),  # 营业收入（原始报告期口径，A股季报通常为年初累计）
                 "revenue_ttm": revenue_ttm,  # 营业收入（TTM）
                 "oper_rev": self._safe_float(latest_income.get('oper_rev')),  # 营业收入
-                "net_income": self._safe_float(latest_income.get('n_income')),  # 净利润（单期）
-                "net_profit": self._safe_float(latest_income.get('n_income_attr_p')),  # 归属母公司净利润（单期）
+                "net_income": self._safe_float(latest_income.get('n_income')),  # 净利润（原始报告期口径，A股季报通常为年初累计）
+                "net_profit": self._safe_float(latest_income.get('n_income_attr_p')),  # 归属母公司净利润（原始报告期口径，A股季报通常为年初累计）
                 "net_profit_ttm": net_profit_ttm,  # 归属母公司净利润（TTM）
                 "oper_profit": self._safe_float(latest_income.get('oper_profit')),  # 营业利润
                 "total_profit": self._safe_float(latest_income.get('total_profit')),  # 利润总额

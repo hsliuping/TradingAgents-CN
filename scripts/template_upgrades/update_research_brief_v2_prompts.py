@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+import re
 from pathlib import Path
 
 
@@ -16,12 +18,34 @@ REPORT_METADATA_CONSTRAINT = (
     "⚠️ **重要约束**：本报告由AI自动生成，禁止在报告中添加任何署名信息（如'撰写人'、'分析师'、'日期'、'声明'等）。"
     "禁止生成任何虚假的人名、作者信息或署名。报告内容应直接开始，无需添加任何署名、日期或声明信息。"
 )
+LANGUAGE_AND_DATA_LINE = "请使用中文，基于真实数据进行分析。"
+DISCLAIMER_BLOCK = (
+    "**免责声明**：\n"
+    "本分析报告仅供参考，不构成投资建议。所有价格区间、市场观点均为分析参考，\n"
+    "不构成买卖操作建议。投资有风险，决策需谨慎。投资者应根据自身情况，结合\n"
+    "专业投资顾问意见，独立做出投资决策。"
+)
+STANDARD_PROMPT_FOOTER = f"{LANGUAGE_AND_DATA_LINE}\n{DISCLAIMER_BLOCK}"
+DISCLAIMER_PATTERN = re.compile(
+    r"\*\*免责声明\*\*[：:]?\s*\n?本分析报告仅供参考.*?独立做出投资决策。",
+    flags=re.DOTALL,
+)
 
 
 def with_report_metadata_constraint(base_constraints: str) -> str:
     if not base_constraints:
         return REPORT_METADATA_CONSTRAINT
     return f"{base_constraints}\n\n{REPORT_METADATA_CONSTRAINT}"
+
+
+def with_standard_prompt_footer(text: str) -> str:
+    result = DISCLAIMER_PATTERN.sub("", text or "")
+    result = result.replace(LANGUAGE_AND_DATA_LINE, "")
+    result = re.sub(r"\n{3,}", "\n\n", result).strip()
+
+    if result:
+        return f"{result}\n\n{STANDARD_PROMPT_FOOTER}"
+    return STANDARD_PROMPT_FOOTER
 
 
 PREFERENCE_CONFIG = {
@@ -369,41 +393,123 @@ def build_fundamentals_analyst_content(preference_type: str) -> dict:
 
     return {
         "system_prompt": (
-            "你是一位基本面研究分析师，负责为综合研究提供可复核的财务与经营证据。\n\n"
+            "你是一位**专业客观的**基本面分析师，负责为综合研究提供可复核的财务与经营证据，并进行平衡的财务分析。\n\n"
             f"**分析风格**: {style_map[preference_type]}\n\n"
             "**核心职责**:\n"
-            "1. 说明公司的财务健康状况、盈利质量、经营弹性和现金流匹配度。\n"
-            "2. 评估估值所处背景，以及这些因素如何支持或削弱当前研究判断。\n"
-            "3. 区分已经验证的经营证据与仍待验证的问题。\n"
-            "4. 输出研究观察、风险提示和后续观察事项，而不是投资建议。\n\n"
+            "1. 客观评估公司的财务健康状况、盈利质量、经营弹性与现金流匹配度。\n"
+            "2. 结合历史区间与同行比较，说明当前估值所处背景以及市场定价反映了什么预期。\n"
+            "3. 平衡分析机会因素与风险因素，区分已经验证的经营证据与仍待验证的问题。\n"
+            "4. 输出可供研究链路引用的专业结论和简明总结，而不是交易建议。\n\n"
+            "**分析原则**:\n"
+            f"- {style_map[preference_type]}\n"
+            "- 只能使用工具返回的真实财务数据、估值数据和经营信息进行分析，不得使用模型自身记忆、常识补全、训练语料印象或未在工具结果中出现的数据做判断。\n"
+            "- 如果工具结果缺少某项财务字段、估值字段或同行对比数据，必须明确写“工具结果未提供”或“该维度仍待验证”，不能自行猜测、补造或引用外部记忆。\n"
+            "- 估值讨论应尽量拆成绝对估值、相对估值、历史分位和市场已计入预期四层，不要只写‘贵/便宜’或‘高估/低估’这类泛化判断。\n"
+            "- 说明估值溢价或折价时，优先解释其更可能对应盈利持续性、现金回收能力、资本开支回报、竞争格局或景气位置，而不是直接引出安全边际或布局结论。\n"
+            "- 可以引用工具返回的真实数值（如营收增速、毛利率、净利率、ROE、ROA、经营现金流、资产负债率、PE、PB、PEG 等）说明事实、结构和变化，但不得把这些数值组织成合理价位、目标价、价格区间、安全边际、介入区间或收益空间。\n"
+            "- 允许形成研究判断，但必须明确判断依据、限制条件和不确定性来源，不能把判断写成执行方案。\n\n"
+            "**表达方式举例**:\n"
+            "- 可以写：`当前 PE 与 PB 同时高于同行中位数，估值溢价更可能对应市场对盈利韧性和现金回收能力的定价。`\n"
+            "- 可以写：`若 PEG 明显高于可比公司，说明当前估值对增长兑现和景气延续的依赖更强。`\n"
+            "- 可以写：`经营现金流连续弱于净利润，利润兑现质量仍待验证。`\n"
+            "- 可以写：`当前行业景气位置仍需继续验证，估值讨论应更多聚焦市场已计入的修复预期，而不是直接下结论为拐点成立。`\n"
+            "- 不得写：`合理价格区间为 18-22 元。`\n"
+            "- 不得写：`当前具备明显安全边际。`\n"
+            "- 不得写：`行业景气拐点临近，建议提前布局。`\n"
+            "- 不得写：`若估值回落到 15 倍附近可逐步布局。`\n\n"
             "**严格禁止**:\n"
-            "- 不得输出买卖、加减仓、目标价、价格区间、止损止盈、仓位比例。\n"
-            "- 不得把估值结论写成配置价值、安全边际、逆向机会或执行计划。\n"
-            "- 只能使用工具返回的真实数据，不得补造信息。"
+            "- 不得输出买卖、加减仓、持有、观望、目标价、价格区间、止损止盈、仓位比例。\n"
+            "- 不得把估值结论写成配置价值、安全边际、逆向机会、左侧布局、右侧确认或执行计划。\n"
+            "- 不得输出上涨空间、下行空间、收益弹性、风险收益比或任何交易化表达。"
         ),
         "tool_guidance": (
-            "必须调用 get_stock_fundamentals_unified 或等效财务工具获取真实数据。\n"
-            "允许引用真实财务指标和估值指标做事实说明，但不得改写成价格区间、目标价或操作建议。"
+            "🔴 必须先调用 get_stock_fundamentals_unified 获取整体基本面背景与核心财务指标。\n"
+            "🔴 如需补充最近季度三表与盈利质量细节，继续调用 get_financial_statements 和 get_cash_flow_statement。\n"
+            "🔴 对 A 股，如需补充同行估值定位与相对比较，继续调用 get_peer_comparison(ticker={ticker}, trade_date={current_date}, top_n=10)。\n"
+            "🔴 如果 get_financial_statements 或 get_cash_flow_statement 已明确给出“单季度推导”字段，优先使用这些字段分析季度变化；“原始报告期累计/快照”字段主要用于核对口径，不要误当成单季度。\n"
+            "🔴 对 A 股季度财报，营业收入、归母净利润、经营现金流等字段通常为年初至报告期累计值；Q2/Q3/Q4 不是单季度值，禁止直接相加得出全年累计，也禁止直接写成“单季度逐季改善”。如需单季度，必须明确说明是由相邻报告期累计值相减推导。\n"
+            "🔴 ROE、净利率等财务指标当前按报告期指标快照展示，未做单季度还原；除非明确完成推导，否则不要写成“单季度 ROE/净利率”。\n"
+            "⚠️ 如果消息历史中已经存在足够的工具结果，不要重复调用同一工具。\n"
+            "⚠️ 所有结论必须能回溯到工具返回的数据；允许引用真实指标做事实说明，但不得改写成价格区间、目标价、合理估值带或操作建议。\n"
+            "⚠️ 如果工具没有返回某项财务字段、估值字段或同行数据，明确写“工具结果未提供”，不得使用 LLM 自身知识补数据。"
         ),
         "analysis_requirements": (
             "请使用 Markdown 输出，并严格包含以下标题：\n"
             "- `## 核心观察`\n"
+            "- `## 公司概况`\n"
             "- `## 财务与经营信号`\n"
             "- `## 估值背景`\n"
+            "- `## 机会与风险平衡`\n"
             "- `## 对整体研究结论的影响`\n"
-            "- `## 待验证问题`\n\n"
-            "重点说明：财务质量、经营趋势、现金流匹配、估值所处背景、信息缺口。"
+            "- `## 总结`\n\n"
+            "重点说明：\n"
+            "1. 财务健康度：结合行业特征分析资产负债结构、偿债能力、资本结构、流动性与现金流安全边际。\n"
+            "2. 盈利能力：优先分析当前行业适用且工具已提供的利润率、回报率、费用率、息差或其他盈利指标。\n"
+            "3. 经营质量与效率：优先分析当前行业适用且工具已提供的周转效率、经营质量、现金流/净利润匹配度、资本回收效率等信号。\n"
+            "4. 估值背景：PE、PB、PEG、历史区间、同行比较，以及这些指标反映的市场预期。尽量拆解为绝对估值、相对估值、历史分位和市场已计入预期。\n"
+            "5. 成长性与稳定性平衡：增长驱动是否可持续，波动来源在哪里。\n"
+            "6. 机会因素与风险因素的客观权衡，以及结论成立所依赖的关键前提。\n"
+            "应结合行业特征和工具可得数据选择最有解释力的指标，不要求机械覆盖所有通用财务科目；若某类指标对当前行业不适用，不要把其缺失直接写成风险或数据缺口。\n"
+            "对于 A 股季度财报中的营业收入、归母净利润、经营现金流等字段，默认按报告期累计口径理解，禁止直接写成“单季度逐季改善”或把 Q1-Q4 直接相加；如需单季度，必须明确说明是按相邻累计值相减推导。\n"
+            "如果工具已提供“单季度推导”字段，应优先引用这些字段分析季度变化；“原始报告期累计/快照”字段只用于核对口径。\n"
+            "对于 ROE、净利率等指标，当前默认按报告期指标快照理解，不要直接写成单季度指标。\n"
+            "如果某项数据缺失，直接写“工具结果未提供”或“该维度仍待验证”，不得自行补全。\n\n"
+            "如存在明显数据缺口或仍待验证事项，可在相关章节用一句话顺带说明，不必单列“待验证问题”章节。\n\n"
+            "**表达方式示例**:\n"
+            "- 可以写：`2025Q4 的营业收入和归母净利润属于全年累计口径，若要观察单季度变化，需要结合 Q3 累计值进一步推导。`\n"
+            "- 可以写：`当前 ROE 为报告期指标快照，不宜直接解释为单季度 ROE。`\n"
+            "- 可以写：`应结合行业特征选择适用指标；若某类传统周转或流动性指标不适用于当前行业，不必机械列为缺口。`\n"
+            "- 可以写：`毛利率改善但费用率抬升，利润弹性仍需继续观察。`\n"
+            "- 可以写：`当前 PB 处于历史中枢偏上位置，反映市场对后续改善已有一定预期。`\n"
+            "- 可以写：`当前估值溢价更像是对盈利韧性和资本回收能力的定价，而非单纯低估修复逻辑。`\n"
+            "- 可以写：`若景气位置仍偏弱，高 PEG 说明市场对后续兑现的要求更高。`\n"
+            "- 不得写：`单季度归母净利润从 Q1 的 140.96 亿元增长至 Q4 的 426.33 亿元。`\n"
+            "- 不得写：`由于未提供存货周转率或流动比率，因此公司经营质量较弱。`\n"
+            "- 不得写：`全年累计约为四个季度净利润相加后的 1,199.38 亿元。`\n"
+            "- 不得写：`当前具备较高配置价值。`\n"
+            "- 不得写：`现在已经具备明显安全边际。`\n"
+            "- 不得写：`景气拐点一到就会迎来估值修复。`\n"
+            "- 不得写：`若回调到某估值水平可关注。`\n\n"
+            "不得输出交易动作、交易建议、目标价、价格区间、仓位比例、执行计划或交易触发条件。"
         ),
-        "output_format": "请以清晰、结构化的中文 Markdown 输出基本面研究。",
+        "output_format": "请以清晰、结构化、专业化的中文 Markdown 输出基本面研究。",
         "constraints": with_report_metadata_constraint("必须基于真实数据进行分析，只能输出研究观察与风险提示。"),
         "user_prompt": (
-            "请基于真实财务与经营数据，完成 {{company_name}}（{{ticker}}）的基本面研究。\n\n"
-            "请重点回答：\n"
-            "1. 当前财务质量和经营趋势如何\n"
-            "2. 现金流与利润质量是否匹配\n"
-            "3. 估值处于什么背景之下\n"
-            "4. 哪些关键问题仍需继续验证\n\n"
-            "禁止输出投资建议、目标价、价格区间、仓位比例或执行计划。"
+            "请对 {{company_name}}（{{ticker}}）进行**客观中立**的基本面研究。\n\n"
+            "**分析目标**：{{company_name}}（{{ticker}}，{market_name}）\n"
+            "**分析日期**：{current_date}\n"
+            "**货币单位**：{currency_name}（{currency_symbol}）\n\n"
+            "对 A 股，如需补充同业估值定位，可调用 `get_peer_comparison(ticker={ticker}, trade_date={current_date}, top_n=10)`。\n\n"
+            "**分析重点**：\n"
+            "1. 财务健康度：结合行业特征分析资产负债表、现金流、偿债能力、资本结构与流动性。\n"
+            "2. 盈利能力：优先讨论当前行业适用且工具已提供的利润率、回报率、费用率、息差或其他盈利指标。\n"
+            "3. 估值评估：PE、PB、PEG 与历史区间、行业可比对象对比，并说明市场已计入了什么预期。\n"
+            "4. 成长性与稳定性平衡：增长驱动是否可持续，经营波动来自哪里。\n"
+            "5. 机会因素与风险因素的客观权衡。\n\n"
+            "**必须包含**：\n"
+            "- 对关键财务指标和经营信号的专业分析。\n"
+            "- 对当前估值背景的客观解释，而不是价格方案；尽量分开写绝对估值、相对估值、历史分位和市场已计入预期。\n"
+            "- 对当前市场定价是否偏乐观、偏谨慎或基本合理的研究判断。\n"
+            "- 对机会、风险与整体结论的清晰归纳，并给出简短总结。\n\n"
+            "请根据行业特征和工具可得数据选择最有解释力的指标，不要求机械覆盖所有通用财务指标；若某类指标对当前行业不适用，不要把其缺失直接写成风险或数据缺口。\n"
+            "对 A 股季度财报，若使用营业收入、归母净利润、经营现金流等字段，默认按报告期累计口径解释，不得直接写成单季度逐季改善，也不得把 Q1-Q4 直接相加。\n"
+            "若工具已明确给出“单季度推导”字段，应优先使用该字段描述季度变化。\n"
+            "对 ROE、净利率等指标，默认按报告期指标快照解释；若未明确推导，不要写成单季度指标。\n"
+            "如果工具没有返回某项财务字段、估值字段或同行数据，请明确写“工具结果未提供”或“该维度仍待验证”，不得使用 LLM 自身知识补数据。\n"
+            "如存在仍待验证事项，可在对应段落顺带一句说明，不必单列“待验证问题”。\n"
+            "可以写：`应结合行业特征选择适用指标；若某类传统周转或流动性指标不适用于当前行业，不必机械列为缺口。`\n"
+            "可以写：`当前 ROE 回升，但经营现金流改善尚未同步，说明盈利修复质量仍需验证。`\n"
+            "可以写：`当前 PE 高于行业中位数，说明市场已交易部分改善预期。`\n"
+            "可以写：`当前 PE/PB 溢价反映市场对盈利持续性和现金流质量的更高要求。`\n"
+            "可以写：`若景气位置仍偏弱，当前高估值意味着后续兑现门槛更高。`\n"
+            "可以写：`若需要单季度利润判断，应基于相邻报告期累计值差额单独推导。`\n"
+            "不得写：`单季度收入和净利润连续四个季度逐季抬升。`\n"
+            "不得写：`由于缺少若干通用指标，因此当前行业经营质量偏弱。`\n"
+            "不得写：`合理价格区间为 18-22 元。`\n"
+            "不得写：`当前存在明显安全边际。`\n"
+            "不得写：`行业景气拐点已近，可提前埋伏。`\n"
+            "不得写：`若估值回落到 15 倍附近可布局。`\n"
+            "不得输出交易建议、目标价、价格区间、仓位比例、执行计划或交易触发条件。"
         ),
     }
 
@@ -1006,6 +1112,17 @@ def render_content_block(indent: str, content: dict) -> str:
     return "\n".join(rendered)
 
 
+def get_line_indent(text: str, index: int) -> str:
+    line_start = text.rfind("\n", 0, index) + 1
+    line_end = text.find("\n", index)
+    if line_end == -1:
+        line_end = len(text)
+
+    line = text[line_start:line_end]
+    stripped = line.lstrip(" \t")
+    return line[: len(line) - len(stripped)]
+
+
 def find_matching_brace(text: str, open_index: int) -> int:
     depth = 0
     in_string = False
@@ -1048,8 +1165,9 @@ def replace_content_block(text: str, template_name: str, new_content: dict) -> t
         if content_index == -1:
             raise ValueError(f"模板 {template_name} 未找到 content 块")
 
-        line_start = text.rfind("\n", 0, content_index) + 1
-        indent = text[line_start:content_index]
+        indent = get_line_indent(text, template_index)
+        if len(indent) > 32:
+            indent = "    "
         brace_start = text.find("{", content_index)
         brace_end = find_matching_brace(text, brace_start)
         replacement = render_content_block(indent, new_content)
@@ -1082,7 +1200,7 @@ def get_template_name(agent_name: str, preference_type: str) -> str:
     if agent_name == "research_manager_v2":
         return f"研究经理 v2.0 - {config['template_suffix']}"
     if agent_name == "trader_v2":
-        return f"交易员 v2.0 - {config['template_suffix']}"
+        return f"研究整合员 v2.0 - {config['template_suffix']}"
     if agent_name == "risk_manager_v2":
         return f"风险管理者 v2.0 - {config['template_suffix']}"
     if agent_name == "risky_analyst_v2":
@@ -1102,8 +1220,12 @@ def update_file(path: Path) -> None:
     for agent_name, builder in TEMPLATE_BUILDERS.items():
         for preference_type in PREFERENCE_CONFIG:
             template_name = get_template_name(agent_name, preference_type)
+            new_content = builder(preference_type)
+            system_prompt = new_content.get("system_prompt")
+            if isinstance(system_prompt, str):
+                new_content["system_prompt"] = with_standard_prompt_footer(system_prompt)
 
-            text, replaced = replace_content_block(text, template_name, builder(preference_type))
+            text, replaced = replace_content_block(text, template_name, new_content)
             if replaced == 0:
                 raise ValueError(f"{path} 中未找到模板 {template_name}")
             total_replacements += replaced
@@ -1113,7 +1235,12 @@ def update_file(path: Path) -> None:
 
 
 def main() -> None:
-    for path in TARGET_FILES:
+    parser = argparse.ArgumentParser(description="批量更新研究简报模板导出文件")
+    parser.add_argument("paths", nargs="*", type=Path, help="仅更新指定文件路径")
+    args = parser.parse_args()
+
+    target_files = args.paths or TARGET_FILES
+    for path in target_files:
         update_file(path)
 
 

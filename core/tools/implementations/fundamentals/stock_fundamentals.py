@@ -9,9 +9,10 @@ import concurrent.futures
 import logging
 import re
 from datetime import datetime, timedelta
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from langchain_core.tools import tool
+import pandas as pd
 
 from core.tools.base import register_tool
 
@@ -315,6 +316,208 @@ def _merge_recent_periods(*record_groups: List[Dict[str, Any]], limit: int = 4) 
     return sorted(period_tokens, reverse=True)[:limit]
 
 
+def _quarter_from_period(period_token: str) -> Optional[int]:
+    digits = re.sub(r'\D', '', str(period_token))
+    if len(digits) != 8:
+        return None
+
+    return {
+        '0331': 1,
+        '0630': 2,
+        '0930': 3,
+        '1231': 4,
+    }.get(digits[4:8])
+
+
+def _previous_cumulative_period(period_token: str) -> Optional[str]:
+    digits = re.sub(r'\D', '', str(period_token))
+    if len(digits) != 8:
+        return None
+
+    quarter = _quarter_from_period(digits)
+    if quarter in (None, 1):
+        return None
+
+    previous_suffix = {
+        2: '0331',
+        3: '0630',
+        4: '0930',
+    }[quarter]
+    return f"{digits[:4]}{previous_suffix}"
+
+
+def _derive_single_quarter_value(
+    period_token: str,
+    records_by_period: Dict[str, Dict[str, Any]],
+    fields: List[str],
+) -> Tuple[Optional[float], str]:
+    current_record = records_by_period.get(period_token) or {}
+    current_value = _to_float(_pick_value(current_record, *fields))
+    if current_value is None:
+        return None, 'missing-current'
+
+    quarter = _quarter_from_period(period_token)
+    if quarter == 1:
+        return current_value, 'q1'
+
+    previous_period = _previous_cumulative_period(period_token)
+    if not previous_period:
+        return None, 'missing-prev-period'
+
+    previous_record = records_by_period.get(previous_period) or {}
+    previous_value = _to_float(_pick_value(previous_record, *fields))
+    if previous_value is None:
+        return None, 'missing-prev-value'
+
+    return current_value - previous_value, 'derived'
+
+
+def _single_quarter_metric_line(
+    period_token: str,
+    records_by_period: Dict[str, Dict[str, Any]],
+    label: str,
+    fields: List[str],
+    style: str = 'number',
+) -> Optional[str]:
+    value, status = _derive_single_quarter_value(period_token, records_by_period, fields)
+    if value is not None:
+        return f"- {label}: {_format_value(value, style)}"
+
+    if status in {'missing-prev-period', 'missing-prev-value'}:
+        return f"- {label}: N/A（缺少上期累计值，暂无法推导单季度）"
+
+    return None
+
+
+def _calculate_percentile_rank(values: List[float], current: float) -> Optional[float]:
+    valid = [value for value in values if value is not None]
+    if not valid:
+        return None
+
+    count = sum(1 for value in valid if value <= current)
+    return count / len(valid) * 100
+
+
+def _describe_percentile_band(percentile: Optional[float]) -> str:
+    if percentile is None:
+        return 'N/A'
+    if percentile < 20:
+        return '历史低位'
+    if percentile < 40:
+        return '历史中低位'
+    if percentile < 60:
+        return '历史中枢附近'
+    if percentile < 80:
+        return '历史中高位'
+    return '历史高位'
+
+
+def _build_historical_valuation_section_from_frame(
+    valuation_df: pd.DataFrame,
+    *,
+    window_start: str,
+    window_end: str,
+) -> str:
+    if valuation_df is None or valuation_df.empty:
+        return "工具结果未提供历史估值分位数据。"
+
+    working_df = valuation_df.copy()
+    if 'trade_date' not in working_df.columns:
+        return "工具结果未提供历史估值分位数据。"
+
+    working_df['trade_date'] = working_df['trade_date'].astype(str)
+    working_df = working_df.sort_values('trade_date', ascending=False)
+
+    lines = [
+        f"- 样本窗口: {window_start} 至 {window_end}",
+        f"- 有效交易日样本: {len(working_df)}",
+    ]
+
+    metric_specs = [
+        ('pe', 'PE'),
+        ('pe_ttm', 'PE(TTM)'),
+        ('pb', 'PB'),
+        ('ps_ttm', 'PS(TTM)'),
+    ]
+
+    any_metric = False
+    for column, label in metric_specs:
+        if column not in working_df.columns:
+            lines.append(f"- {label}: 工具结果未提供历史序列，历史分位暂无法计算。")
+            continue
+
+        numeric_series = pd.to_numeric(working_df[column], errors='coerce')
+        valid_df = working_df.loc[numeric_series.notna()].copy()
+        valid_df[column] = pd.to_numeric(valid_df[column], errors='coerce')
+        valid_df = valid_df[valid_df[column] > 0]
+
+        if len(valid_df) < 60:
+            lines.append(f"- {label}: 工具结果未提供足够历史样本，历史分位暂无法计算。")
+            continue
+
+        latest_row = valid_df.iloc[0]
+        current_value = float(latest_row[column])
+        percentile = _calculate_percentile_rank(valid_df[column].tolist(), current_value)
+        median_value = float(valid_df[column].median())
+        latest_trade_date = _display_period(str(latest_row['trade_date']))
+        percentile_text = f"{percentile:.1f}%" if percentile is not None else 'N/A'
+        band = _describe_percentile_band(percentile)
+
+        lines.append(
+            f"- {label}: 当前 {current_value:.2f} 倍（{latest_trade_date}） | 历史中位数 {median_value:.2f} 倍 | 历史分位 {percentile_text} | 历史位置: {band}"
+        )
+        any_metric = True
+
+    lines.append("- PEG: 当前工具未提供稳定的日频 PEG 历史序列，历史分位暂无法计算。")
+
+    if not any_metric:
+        return "工具结果未提供可用于计算历史估值分位的有效估值序列。"
+
+    return "\n".join(lines)
+
+
+def _get_historical_valuation_summary(
+    ticker: str,
+    curr_date: str,
+    *,
+    lookback_years: int = 3,
+) -> str:
+    normalized_ticker = _normalize_china_ticker(ticker)
+
+    try:
+        end_dt = datetime.strptime(curr_date, '%Y-%m-%d')
+    except Exception:
+        end_dt = datetime.now()
+
+    start_dt = end_dt - timedelta(days=365 * lookback_years)
+
+    try:
+        from tradingagents.dataflows.providers.china.tushare import TushareProvider
+
+        provider = TushareProvider()
+        if not provider.is_available():
+            provider.connect_sync()
+        if not provider.is_available() or provider.api is None:
+            return "工具结果未提供历史估值分位数据。"
+
+        ts_code = provider._normalize_ts_code(normalized_ticker)
+        valuation_df = provider.api.daily_basic(
+            ts_code=ts_code,
+            start_date=start_dt.strftime('%Y%m%d'),
+            end_date=end_dt.strftime('%Y%m%d'),
+            fields='ts_code,trade_date,pe,pe_ttm,pb,ps_ttm',
+        )
+
+        return _build_historical_valuation_section_from_frame(
+            valuation_df,
+            window_start=start_dt.strftime('%Y-%m-%d'),
+            window_end=end_dt.strftime('%Y-%m-%d'),
+        )
+    except Exception as exc:
+        logger.warning(f"⚠️ 历史估值分位计算失败: {exc}")
+        return "工具结果未提供历史估值分位数据。"
+
+
 @tool
 @register_tool(
     tool_id="get_stock_fundamentals_unified",
@@ -393,6 +596,13 @@ def get_stock_fundamentals_unified(
                 logger.error(f"❌ A股基本面数据获取失败: {e}")
                 result_data.append(f"## A股基本面财务数据\n获取失败: {e}")
 
+            try:
+                historical_valuation = _get_historical_valuation_summary(normalized_ticker, curr_date)
+                result_data.append(f"## A股历史估值分位\n{historical_valuation}")
+            except Exception as e:
+                logger.error(f"❌ A股历史估值分位获取失败: {e}")
+                result_data.append("## A股历史估值分位\n工具结果未提供历史估值分位数据。")
+
         elif is_hk:
             # 港股
             logger.info(f"🇭🇰 [统一基本面工具] 处理港股数据...")
@@ -453,7 +663,7 @@ def get_stock_fundamentals_unified(
 @register_tool(
     tool_id="get_financial_statements",
     name="最近季度财报明细",
-    description="获取 A 股最近几个季度的利润表、资产负债表和核心财务指标明细",
+    description="获取 A 股最近几个季度的利润表、资产负债表和核心财务指标明细，并对主要利润表字段推导单季度口径",
     category="fundamentals",
     is_online=True,
     auto_register=True
@@ -465,7 +675,8 @@ def get_financial_statements(
     """获取最近季度财报明细。"""
     try:
         limit = max(1, min(int(limit), 8))
-        financial_data = _load_recent_financial_data(ticker, limit=limit)
+        load_limit = min(limit + 1, 8)
+        financial_data = _load_recent_financial_data(ticker, limit=load_limit)
         market_info = financial_data['market_info']
 
         if not market_info.get('is_china'):
@@ -488,6 +699,7 @@ def get_financial_statements(
             "",
             f"**股票类型**: {market_info['market_name']}",
             f"**数据来源**: {financial_data['data_source']}",
+            "**口径说明**: A股利润表中的营业收入、归母净利润等字段通常为年初至报告期累计值，Q2/Q3/Q4 不是单季度值，不能直接相加或直接写成单季度逐季改善；如需估算单季度，通常应使用本期累计减上期累计（Q1 可近似视为单季度）。ROE、净利率等财务指标当前展示为对应报告期指标快照，未做单季度还原。",
             "",
         ]
 
@@ -496,14 +708,25 @@ def get_financial_statements(
 
             income = income_by_period.get(period)
             if income:
-                result_lines.append("### 利润表")
+                single_quarter_lines = [
+                    _single_quarter_metric_line(period, income_by_period, '营业总收入（单季度推导）', ['total_revenue', 'revenue']),
+                    _single_quarter_metric_line(period, income_by_period, '营业利润（单季度推导）', ['operate_profit', 'oper_profit']),
+                    _single_quarter_metric_line(period, income_by_period, '归母净利润（单季度推导）', ['n_income_attr_p', 'net_profit']),
+                    _single_quarter_metric_line(period, income_by_period, '净利润（单季度推导）', ['n_income']),
+                ]
+                if any(single_quarter_lines):
+                    result_lines.append("### 利润表（单季度推导）")
+                    for line in single_quarter_lines:
+                        if line:
+                            result_lines.append(line)
+
+                result_lines.append("### 利润表（原始报告期累计/快照）")
                 for line in [
-                    _metric_line(income, '营业总收入', ['total_revenue', 'revenue']),
-                    _metric_line(income, '营业收入', ['revenue']),
-                    _metric_line(income, '营业利润', ['operate_profit', 'oper_profit']),
-                    _metric_line(income, '归母净利润', ['n_income_attr_p', 'net_profit']),
-                    _metric_line(income, '净利润', ['n_income']),
-                    _metric_line(income, '基本每股收益', ['basic_eps'], 'plain'),
+                    _metric_line(income, '营业总收入（原始累计）', ['total_revenue', 'revenue']),
+                    _metric_line(income, '营业利润（原始累计）', ['operate_profit', 'oper_profit']),
+                    _metric_line(income, '归母净利润（原始累计）', ['n_income_attr_p', 'net_profit']),
+                    _metric_line(income, '净利润（原始累计）', ['n_income']),
+                    _metric_line(income, '基本每股收益（报告期）', ['basic_eps'], 'plain'),
                 ]:
                     if line:
                         result_lines.append(line)
@@ -525,16 +748,23 @@ def get_financial_statements(
             indicators = indicators_by_period.get(period)
             if indicators:
                 result_lines.append("### 核心财务指标")
+                single_quarter_revenue, _ = _derive_single_quarter_value(period, income_by_period, ['total_revenue', 'revenue'])
+                single_quarter_profit, _ = _derive_single_quarter_value(period, income_by_period, ['n_income_attr_p', 'net_profit'])
                 for line in [
-                    _metric_line(indicators, '净资产收益率 ROE', ['roe', 'roe_dt'], 'percent'),
-                    _metric_line(indicators, '总资产收益率 ROA', ['roa'], 'percent'),
-                    _metric_line(indicators, '毛利率', ['gross_margin', 'grossprofit_margin'], 'percent'),
-                    _metric_line(indicators, '净利率', ['netprofit_margin', 'net_margin'], 'percent'),
+                    _metric_line(indicators, '报告期净资产收益率 ROE', ['roe', 'roe_dt'], 'percent'),
+                    _metric_line(indicators, '报告期总资产收益率 ROA', ['roa'], 'percent'),
+                    _metric_line(indicators, '报告期毛利率', ['gross_margin', 'grossprofit_margin'], 'percent'),
+                    _metric_line(indicators, '报告期净利率', ['netprofit_margin', 'net_margin'], 'percent'),
                     _metric_line(indicators, '资产负债率', ['debt_to_assets', 'debt_to_asset'], 'percent'),
                     _metric_line(indicators, '流动比率', ['current_ratio'], 'plain'),
                 ]:
                     if line:
                         result_lines.append(line)
+
+                if single_quarter_revenue not in (None, 0) and single_quarter_profit is not None:
+                    result_lines.append(
+                        f"- 单季度净利率（推导）: {single_quarter_profit / single_quarter_revenue * 100:.2f}%"
+                    )
 
             result_lines.append("")
 
@@ -549,7 +779,7 @@ def get_financial_statements(
 @register_tool(
     tool_id="get_cash_flow_statement",
     name="最近季度现金流量表",
-    description="获取 A 股最近几个季度的现金流量表，并补充经营现金与利润匹配情况",
+    description="获取 A 股最近几个季度的现金流量表，并对主要现金流字段推导单季度口径",
     category="fundamentals",
     is_online=True,
     auto_register=True
@@ -561,7 +791,8 @@ def get_cash_flow_statement(
     """获取最近季度现金流量表。"""
     try:
         limit = max(1, min(int(limit), 8))
-        financial_data = _load_recent_financial_data(ticker, limit=limit)
+        load_limit = min(limit + 1, 8)
+        financial_data = _load_recent_financial_data(ticker, limit=load_limit)
         market_info = financial_data['market_info']
 
         if not market_info.get('is_china'):
@@ -573,22 +804,40 @@ def get_cash_flow_statement(
         if not cash_flow_records:
             return f"{financial_data['ticker']} 暂未获取到最近季度现金流量表数据。"
 
+        display_cash_flows = cash_flow_records[:limit]
+
         result_lines = [
-            f"# {financial_data['ticker']} 最近{min(len(cash_flow_records), limit)}个季度现金流量表",
+            f"# {financial_data['ticker']} 最近{len(display_cash_flows)}个季度现金流量表",
             "",
             f"**股票类型**: {market_info['market_name']}",
             f"**数据来源**: {financial_data['data_source']}",
+            "**口径说明**: A股现金流量表中的经营活动现金流量净额等字段通常为年初至报告期累计值，Q2/Q3/Q4 不是单季度值，不能直接相加或直接写成单季度逐季改善；如需估算单季度，通常应使用本期累计减上期累计（Q1 可近似视为单季度）。",
             "",
         ]
 
-        for cash_flow in cash_flow_records[:limit]:
+        cash_flow_by_period = _index_by_period(cash_flow_records)
+
+        for cash_flow in display_cash_flows:
             period = _period_token(cash_flow)
             result_lines.append(f"## 报告期 {_display_period(period)}")
 
+            single_quarter_cash_lines = [
+                _single_quarter_metric_line(period, cash_flow_by_period, '经营活动现金流量净额（单季度推导）', ['n_cashflow_act']),
+                _single_quarter_metric_line(period, cash_flow_by_period, '投资活动现金流量净额（单季度推导）', ['n_cashflow_inv_act']),
+                _single_quarter_metric_line(period, cash_flow_by_period, '筹资活动现金流量净额（单季度推导）', ['n_cash_flows_fnc_act', 'n_cashflow_fin_act']),
+            ]
+            if any(single_quarter_cash_lines):
+                result_lines.append("### 现金流量表（单季度推导）")
+                for line in single_quarter_cash_lines:
+                    if line:
+                        result_lines.append(line)
+
+            result_lines.append("### 现金流量表（原始报告期累计/快照）")
+
             for line in [
-                _metric_line(cash_flow, '经营活动现金流量净额', ['n_cashflow_act']),
-                _metric_line(cash_flow, '投资活动现金流量净额', ['n_cashflow_inv_act']),
-                _metric_line(cash_flow, '筹资活动现金流量净额', ['n_cash_flows_fnc_act', 'n_cashflow_fin_act']),
+                _metric_line(cash_flow, '经营活动现金流量净额（原始累计）', ['n_cashflow_act']),
+                _metric_line(cash_flow, '投资活动现金流量净额（原始累计）', ['n_cashflow_inv_act']),
+                _metric_line(cash_flow, '筹资活动现金流量净额（原始累计）', ['n_cash_flows_fnc_act', 'n_cashflow_fin_act']),
                 _metric_line(cash_flow, '期初现金及现金等价物余额', ['c_cash_equ_beg_period']),
                 _metric_line(cash_flow, '期末现金及现金等价物余额', ['c_cash_equ_end_period']),
             ]:
@@ -601,8 +850,16 @@ def get_cash_flow_statement(
             if matched_income:
                 net_profit = _to_float(_pick_value(matched_income, 'n_income_attr_p', 'n_income', 'net_profit'))
 
+            single_quarter_operating_cash, _ = _derive_single_quarter_value(period, cash_flow_by_period, ['n_cashflow_act'])
+            single_quarter_profit, _ = _derive_single_quarter_value(period, income_by_period, ['n_income_attr_p', 'n_income', 'net_profit'])
+
+            if single_quarter_operating_cash is not None and single_quarter_profit not in (None, 0):
+                result_lines.append(
+                    f"- 单季度经营现金净额/归母净利润（推导）: {single_quarter_operating_cash / single_quarter_profit:.2f} 倍"
+                )
+
             if operating_cash is not None and net_profit not in (None, 0):
-                result_lines.append(f"- 经营现金净额/净利润: {operating_cash / net_profit:.2f} 倍")
+                result_lines.append(f"- 报告期累计经营现金净额/归母净利润: {operating_cash / net_profit:.2f} 倍")
 
             result_lines.append("")
 

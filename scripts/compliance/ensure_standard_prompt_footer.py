@@ -186,10 +186,13 @@ def update_mongodb(apply_changes: bool) -> Dict[str, int]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="为所有模板统一补齐中文/真实数据提示与免责声明")
     parser.add_argument("--apply", action="store_true", help="执行实际写入（默认仅预览）")
+    parser.add_argument("paths", nargs="*", type=Path, help="仅处理指定导出文件路径")
     args = parser.parse_args()
 
+    target_files = args.paths or EXPORT_FILES
+
     print("=== 导出文件 ===")
-    for path in EXPORT_FILES:
+    for path in target_files:
         stats = preview_export_updates(path) if not args.apply else update_export_file(path)
         print(f"{path}: scanned={stats['scanned']} updated={stats['updated']}")
 

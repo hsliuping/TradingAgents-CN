@@ -603,9 +603,9 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         icon="📊",
         color="#3498db",
         tags=["基本面", "财务分析", "v2.0"],
-        tools=["get_stock_fundamentals_unified", "get_financial_statements", "get_cash_flow_statement"],
-        default_tools=["get_stock_fundamentals_unified", "get_financial_statements", "get_cash_flow_statement"],
-        max_tool_calls=3,
+        tools=["get_stock_fundamentals_unified", "get_financial_statements", "get_cash_flow_statement", "get_peer_comparison"],
+        default_tools=["get_stock_fundamentals_unified", "get_financial_statements", "get_cash_flow_statement", "get_peer_comparison"],
+        max_tool_calls=4,
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),

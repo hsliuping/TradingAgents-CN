@@ -25,9 +25,16 @@ def test_fundamentals_analyst_v2_templates_are_research_mode() -> None:
         "核心观察",
         "财务与经营信号",
         "估值背景",
-        "待验证问题",
+        "估值溢价",
+        "总结",
         "get_financial_statements",
         "get_cash_flow_statement",
+        "get_peer_comparison",
+        "工具结果未提供",
+        "报告期累计口径",
+        "单季度推导",
+        "行业特征",
+        "不适用",
     ]
 
     for template in target_templates:
@@ -47,10 +54,42 @@ def test_fundamentals_analyst_v2_templates_are_research_mode() -> None:
 
         assert "不得输出交易建议" in user_prompt
         assert "目标价" in user_prompt
+        assert "不得使用 LLM 自身知识补数据" in user_prompt
+        assert "可以写：" in user_prompt
+        assert "不得写：" in user_prompt
+        assert "不必单列“待验证问题”" in user_prompt
+        assert "不要求机械覆盖所有通用财务指标" in user_prompt
+        assert "Q2/Q3/Q4 不是单季度值" in combined_text
+        assert (
+            "优先使用这些字段分析季度变化" in combined_text
+            or "优先使用该字段描述季度变化" in combined_text
+        )
+        assert "安全边际" in user_prompt
+        assert "景气拐点" in user_prompt
         assert "不得输出" in analysis_requirements
         assert "交易动作" in analysis_requirements
+        assert "表达方式示例" in analysis_requirements
+        assert "不必单列“待验证问题”" in analysis_requirements
+        assert "不要把其缺失直接写成风险或数据缺口" in analysis_requirements
+        assert (
+            "不得把 Q1-Q4 直接相加" in analysis_requirements
+            or "或把 Q1-Q4 直接相加" in analysis_requirements
+        )
+        assert "单季度推导" in combined_text
+        assert "安全边际" in analysis_requirements
+        assert "景气拐点" in analysis_requirements
         assert "禁止在报告中添加任何署名信息" in combined_text
         assert "禁止生成任何虚假的人名、作者信息或署名" in combined_text
 
         for phrase in required_phrases:
             assert phrase in combined_text
+
+
+def test_fundamentals_analyst_v2_default_tools_include_peer_comparison() -> None:
+    adapter_source = (ROOT / "core" / "agents" / "adapters" / "fundamentals_analyst_v2.py").read_text(encoding="utf-8")
+    config_source = (ROOT / "core" / "agents" / "config.py").read_text(encoding="utf-8")
+
+    assert "default_tools=[\"get_stock_fundamentals_unified\", \"get_financial_statements\", \"get_cash_flow_statement\", \"get_peer_comparison\"]" in adapter_source
+    assert "max_tool_calls=4" in adapter_source
+    assert "default_tools=[\"get_stock_fundamentals_unified\", \"get_financial_statements\", \"get_cash_flow_statement\", \"get_peer_comparison\"]" in config_source
+    assert "tools=[\"get_stock_fundamentals_unified\", \"get_financial_statements\", \"get_cash_flow_statement\", \"get_peer_comparison\"]" in config_source

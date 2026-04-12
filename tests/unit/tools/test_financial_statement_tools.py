@@ -28,8 +28,18 @@ def _mock_financial_payload() -> dict:
             {
                 "end_date": "20240630",
                 "revenue": 11900000000,
+                "operate_profit": 1600000000,
                 "n_income_attr_p": 1500000000,
+                "n_income": 1480000000,
                 "basic_eps": 1.10,
+            },
+            {
+                "end_date": "20240331",
+                "revenue": 5200000000,
+                "operate_profit": 620000000,
+                "n_income_attr_p": 580000000,
+                "n_income": 570000000,
+                "basic_eps": 0.42,
             },
         ],
         "balance_sheet": [
@@ -52,6 +62,23 @@ def _mock_financial_payload() -> dict:
                 "c_cash_equ_beg_period": 84500000000,
                 "c_cash_equ_end_period": 86200000000,
             }
+            ,
+            {
+                "end_date": "20240630",
+                "n_cashflow_act": 1700000000,
+                "n_cashflow_inv_act": -630000000,
+                "n_cash_flows_fnc_act": -310000000,
+                "c_cash_equ_beg_period": 83100000000,
+                "c_cash_equ_end_period": 84500000000,
+            },
+            {
+                "end_date": "20240331",
+                "n_cashflow_act": 550000000,
+                "n_cashflow_inv_act": -210000000,
+                "n_cash_flows_fnc_act": -100000000,
+                "c_cash_equ_beg_period": 82000000000,
+                "c_cash_equ_end_period": 83100000000,
+            }
         ],
         "financial_indicators": [
             {
@@ -68,6 +95,24 @@ def _mock_financial_payload() -> dict:
 
 
 class TestFinancialStatementTools:
+    def test_historical_valuation_section_from_frame(self):
+        valuation_df = pd.DataFrame([
+            {"trade_date": "20240930", "pe": 11.0, "pe_ttm": 10.5, "pb": 1.10, "ps_ttm": 2.10},
+            {"trade_date": "20240927", "pe": 10.0, "pe_ttm": 9.8, "pb": 1.00, "ps_ttm": 1.90},
+            {"trade_date": "20240926", "pe": 9.0, "pe_ttm": 8.9, "pb": 0.95, "ps_ttm": 1.80},
+        ] * 25)
+
+        result = fundamentals_tools._build_historical_valuation_section_from_frame(
+            valuation_df,
+            window_start="2021-10-01",
+            window_end="2024-09-30",
+        )
+
+        assert "样本窗口: 2021-10-01 至 2024-09-30" in result
+        assert "PE(TTM): 当前 10.50 倍" in result
+        assert "PB: 当前 1.10 倍" in result
+        assert "PEG: 当前工具未提供稳定的日频 PEG 历史序列" in result
+
     def test_load_recent_financial_data_prefers_db_cache(self, monkeypatch):
         db_payload = _mock_financial_payload()
 
@@ -126,12 +171,16 @@ class TestFinancialStatementTools:
 
         result = fundamentals_tools.get_financial_statements.invoke({"ticker": "000001", "limit": 4})
 
-        assert "最近2个季度财报明细" in result
+        assert "最近3个季度财报明细" in result
         assert "2024-09-30" in result
-        assert "利润表" in result
+        assert "利润表（单季度推导）" in result
+        assert "利润表（原始报告期累计/快照）" in result
         assert "资产负债表" in result
         assert "核心财务指标" in result
-        assert "净资产收益率 ROE" in result
+        assert "报告期净资产收益率 ROE" in result
+        assert "营业总收入（单季度推导）: 9.00亿元" in result
+        assert "归母净利润（单季度推导）: 1.80亿元" in result
+        assert "单季度净利率（推导）: 20.00%" in result
 
     def test_financial_statement_tools_prefer_db_loaded_payload(self, monkeypatch):
         captured = []
@@ -147,7 +196,7 @@ class TestFinancialStatementTools:
         financial_result = fundamentals_tools.get_financial_statements.invoke({"ticker": "000001.SZ", "limit": 4})
         cash_flow_result = fundamentals_tools.get_cash_flow_statement.invoke({"ticker": "000001.SZ", "limit": 4})
 
-        assert captured == [("000001.SZ", 4), ("000001.SZ", 4)]
+        assert captured == [("000001.SZ", 5), ("000001.SZ", 5)]
         assert "**数据来源**: optimized_cache" in financial_result
         assert "**数据来源**: optimized_cache" in cash_flow_result
 
@@ -161,9 +210,29 @@ class TestFinancialStatementTools:
         result = fundamentals_tools.get_cash_flow_statement.invoke({"ticker": "000001", "limit": 4})
 
         assert "现金流量表" in result
-        assert "经营活动现金流量净额" in result
-        assert "投资活动现金流量净额" in result
-        assert "经营现金净额/净利润" in result
+        assert "经营活动现金流量净额（单季度推导）: 5.50亿元" in result
+        assert "投资活动现金流量净额（单季度推导）: -3.50亿元" in result
+        assert "单季度经营现金净额/归母净利润（推导）: 3.06 倍" in result
+        assert "报告期累计经营现金净额/归母净利润" in result
+
+    def test_single_quarter_derivation_helpers(self):
+        records_by_period = {
+            "20240930": {"revenue": 12800000000, "n_income_attr_p": 1680000000},
+            "20240630": {"revenue": 11900000000, "n_income_attr_p": 1500000000},
+            "20240331": {"revenue": 5200000000, "n_income_attr_p": 580000000},
+        }
+
+        revenue_q3, revenue_status = fundamentals_tools._derive_single_quarter_value(
+            "20240930", records_by_period, ["revenue"]
+        )
+        profit_q1, profit_status = fundamentals_tools._derive_single_quarter_value(
+            "20240331", records_by_period, ["n_income_attr_p"]
+        )
+
+        assert revenue_status == "derived"
+        assert revenue_q3 == 900000000
+        assert profit_status == "q1"
+        assert profit_q1 == 580000000
 
     def test_agent_default_tools_binding(self):
         fundamentals_agent = BUILTIN_AGENTS.get("fundamentals_analyst")
@@ -222,6 +291,11 @@ class TestFinancialStatementTools:
             "tradingagents.dataflows.optimized_china_data.OptimizedChinaDataProvider",
             FakeAnalyzer,
         )
+        monkeypatch.setattr(
+            fundamentals_tools,
+            "_get_historical_valuation_summary",
+            lambda ticker, curr_date, lookback_years=3: "- PE(TTM): 当前 12.30 倍 | 历史中位数 10.00 倍 | 历史分位 70.0% | 历史位置: 历史中高位",
+        )
 
         result = fundamentals_tools.get_stock_fundamentals_unified.invoke({"ticker": "000001.SZ"})
 
@@ -229,6 +303,8 @@ class TestFinancialStatementTools:
         assert "当前价格: 12.34" in result
         assert "涨跌幅: +1.23%" in result
         assert "mock fundamentals" in result
+        assert "A股历史估值分位" in result
+        assert "历史分位 70.0%" in result
         assert captured["ticker"] == "000001"
         assert "股票代码: 000001" in captured["stock_data"]
         assert captured["analysis_modules"] == "standard"
