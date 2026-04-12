@@ -321,20 +321,8 @@ async def get_market_breadth(trade_date: str) -> str:
             if total_vol > 0:
                 report_lines.append(f"  • 总成交量: {total_vol:.2f} 亿股")
 
-            # 成交活跃度判断
             if total_amount > 0:
                 avg_amount_per_stock = total_amount / total_count if total_count > 0 else 0
-                if total_amount > 15000:
-                    activity = "极度活跃 🔥"
-                elif total_amount > 10000:
-                    activity = "活跃 📈"
-                elif total_amount > 7000:
-                    activity = "正常 📊"
-                elif total_amount > 5000:
-                    activity = "偏冷清 📉"
-                else:
-                    activity = "清淡 ❄️"
-                report_lines.append(f"  • 市场活跃度: {activity}")
                 report_lines.append(f"  • 平均每股成交: {avg_amount_per_stock:.2f} 亿元")
         else:
             # 方案2: 使用 daily_basic API 获取市场整体数据
@@ -410,9 +398,9 @@ async def get_market_environment(trade_date: str) -> str:
             report_lines.append(f"      换手率: {turnover}%")
             report_lines.append(f"      总市值: {total_mv_wan_yi:.2f} 万亿")
 
-        # 风险评估
+        # 波动率快照
         report_lines.append("")
-        report_lines.append("【风险评估】")
+        report_lines.append("【波动率】")
 
         # 获取上证指数近期数据计算波动率
         daily_df = await provider.get_index_daily(
@@ -425,15 +413,7 @@ async def get_market_environment(trade_date: str) -> str:
             # 计算20日波动率
             returns = daily_df['pct_chg'].dropna()
             volatility = returns.std() * (252 ** 0.5)  # 年化波动率
-
-            if volatility > 30:
-                risk_level = "高风险 🔴"
-            elif volatility > 20:
-                risk_level = "中等风险 🟡"
-            else:
-                risk_level = "低风险 🟢"
-
-            report_lines.append(f"  • 20日年化波动率: {volatility:.2f}% ({risk_level})")
+            report_lines.append(f"  • 20日年化波动率: {volatility:.2f}%")
 
         return "\n".join(report_lines)
 
@@ -721,9 +701,8 @@ async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
         report_lines.append("【今日北向资金】")
         report_lines.append(f"  • 沪股通: {hgt/10000:.2f} 亿元")
         report_lines.append(f"  • 深股通: {sgt/10000:.2f} 亿元")
-        flow_icon = "🔴" if north_money > 0 else "🟢"
         flow_text = "净流入" if north_money > 0 else "净流出"
-        report_lines.append(f"  • 北向合计: {flow_icon} {abs(north_money)/10000:.2f} 亿元 ({flow_text})")
+        report_lines.append(f"  • 北向合计: {abs(north_money)/10000:.2f} 亿元 ({flow_text})")
 
         # 近N日统计
         if len(df) >= 5:
@@ -750,23 +729,6 @@ async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
                     break
             if consecutive > 1:
                 report_lines.append(f"  • 连续{direction}: {consecutive} 天")
-
-        # 资金情绪判断
-        report_lines.append("")
-        report_lines.append("【资金情绪】")
-        if north_money > 5000000000:  # 50亿以上
-            sentiment = "外资大幅加仓 🔥"
-        elif north_money > 2000000000:  # 20亿以上
-            sentiment = "外资积极流入 📈"
-        elif north_money > 0:
-            sentiment = "外资小幅流入 📊"
-        elif north_money > -2000000000:
-            sentiment = "外资小幅流出 📉"
-        elif north_money > -5000000000:
-            sentiment = "外资持续流出 ⚠️"
-        else:
-            sentiment = "外资大幅撤离 🔴"
-        report_lines.append(f"  • {sentiment}")
 
         return "\n".join(report_lines)
 
@@ -897,20 +859,10 @@ async def get_margin_trading(trade_date: str, lookback_days: int = 10) -> str:
                 report_lines.append(f"  • ⚠️ {message}")
             report_lines.append("  • 变化字段可能存在口径差异或异常值，暂不据此延伸解读杠杆方向")
 
-        # 余额水平信号
-        report_lines.append("")
-        report_lines.append("【余额水平信号】")
-        if rzye > 17000:
-            sentiment = "融资余额处于较高水平 🔥"
-        elif rzye > 15000:
-            sentiment = "融资余额处于常态水平 📊"
-        elif rzye > 13000:
-            sentiment = "融资余额处于相对谨慎区间 📉"
-        else:
-            sentiment = "融资余额处于相对低位 ❄️"
-        report_lines.append(f"  • {sentiment}")
         if anomaly_messages:
-            report_lines.append("  • 当前仅能依据余额水平描述活跃度区间，不能依据异常变化字段判断资金方向")
+            report_lines.append("")
+            report_lines.append("【使用限制】")
+            report_lines.append("  • 当前仅可引用余额数值，不应依据异常变化字段判断资金方向")
 
         return "\n".join(report_lines)
 
@@ -968,22 +920,6 @@ async def get_limit_stats(trade_date: str) -> str:
             report_lines.append(f"  • 跌幅>5%: {stats['down_gt5']} 家")
             report_lines.append(f"  • 跌幅3-5%: {stats['down_3_5']} 家")
 
-            # 市场情绪判断
-            report_lines.append("")
-            report_lines.append("【市场情绪】")
-            up_ratio = stats['up_ratio']
-            if up_ratio > 70:
-                sentiment = "极度乐观 🔥"
-            elif up_ratio > 55:
-                sentiment = "偏向乐观 📈"
-            elif up_ratio > 45:
-                sentiment = "中性震荡 📊"
-            elif up_ratio > 30:
-                sentiment = "偏向悲观 📉"
-            else:
-                sentiment = "极度悲观 ❄️"
-            report_lines.append(f"  • {sentiment} (涨跌比 {stats['up_count']}:{stats['down_count']})")
-
             # 涨跌幅分布信号
             profit_stocks = stats['up_gt5'] + stats['up_3_5']
             loss_stocks = stats['down_gt5'] + stats['down_3_5']
@@ -1025,6 +961,17 @@ async def get_limit_stats(trade_date: str) -> str:
                 detail_up_count = len(limit_up_df)
                 detail_down_count = len(limit_down_df)
                 if stats and (stats['limit_up'] != detail_up_count or stats['limit_down'] != detail_down_count):
+                    report_lines.append("")
+                    report_lines.append("【口径差异摘要】")
+                    report_lines.append(
+                        f"  • 汇总口径: 涨停 {stats['limit_up']} 家，跌停 {stats['limit_down']} 家"
+                    )
+                    report_lines.append(
+                        f"  • 明细口径: 涨停 {detail_up_count} 家，跌停 {detail_down_count} 家"
+                    )
+                    report_lines.append(
+                        "  • 两套口径存在差异，正文引用时必须明确写成“汇总口径/明细口径存在差异”，不要合并成单一计数或“其中关系”。"
+                    )
                     report_lines.append("")
                     report_lines.append("【口径说明】")
                     report_lines.append(

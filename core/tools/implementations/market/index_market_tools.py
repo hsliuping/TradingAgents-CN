@@ -250,7 +250,7 @@ def get_margin_trading(
 @register_tool(
     tool_id="get_limit_stats",
     name="涨跌停统计",
-    description="获取涨跌停家数和涨跌家数统计，描述涨跌分布与活跃度",
+    description="获取涨跌停家数和涨跌家数统计，描述涨跌分布事实",
     category="market",
     is_online=True,
     auto_register=True
@@ -261,7 +261,7 @@ def get_limit_stats(
     """
     获取涨跌停和涨跌家数统计
 
-    统计涨跌停家数、涨跌家数、涨跌幅分布，描述涨跌分布与活跃度特征。
+    统计涨跌停家数、涨跌家数、涨跌幅分布，输出供上层模型归纳的事实数据。
 
     Args:
         trade_date: 交易日期（格式：YYYY-MM-DD）

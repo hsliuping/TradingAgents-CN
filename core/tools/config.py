@@ -230,7 +230,7 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
     "get_limit_stats": ToolMetadata(
         id="get_limit_stats",
         name="涨跌停统计",
-        description="获取涨跌停家数和涨跌家数统计，评估市场情绪",
+        description="获取涨跌停家数和涨跌家数统计，描述涨跌分布事实",
         category=ToolCategory.MARKET,
         data_source="tushare",
         is_online=True,

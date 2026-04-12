@@ -39,13 +39,14 @@ def test_research_brief_index_and_sector_builders_keep_explicit_tool_workflow() 
     assert "两融变化字段与当前余额明显不匹配" in index_content["analysis_requirements"]
     assert "只能留在数据说明中" in index_content["analysis_requirements"]
     assert "不得外推为“均线下行态势”" in index_content["analysis_requirements"]
-    assert "技术标签、活跃度标签或规则识别区间都只是规则描述，不等同于市场结论" in index_content["analysis_requirements"]
+    assert "技术标签或规则识别区间都只是规则描述，不等同于市场结论" in index_content["analysis_requirements"]
+    assert "成交额、换手率、涨跌家数等事实指标由模型自行归纳" in index_content["analysis_requirements"]
     assert "允许写法示例" in index_content["analysis_requirements"]
     assert "过线写法示例" in index_content["analysis_requirements"]
     assert "短期数据表现偏强" in index_content["analysis_requirements"]
     assert "情绪修复完成" in index_content["analysis_requirements"]
-    assert "总成交额处于较高水平，工具识别为极度活跃" in index_content["analysis_requirements"]
-    assert "无法确认杠杆资金方向，但可依据余额水平描述活跃度区间" in index_content["analysis_requirements"]
+    assert "总成交额为 23246.35 亿元，上海/深圳市场成交额占比分别为 41.2% 和 58.8%" in index_content["analysis_requirements"]
+    assert "两融数据若不完整，应明确说明不纳入资金面综合评估" in index_content["analysis_requirements"]
     assert "技术指标整体偏多，但高位指标提示短期仍需关注波动" in index_content["analysis_requirements"]
     assert "汇总口径显示涨停 81 家、跌停 10 家，明细口径显示涨停 59 家、跌停 8 家，两套口径存在差异" in index_content["analysis_requirements"]
     assert "成交活跃度显著提升" in index_content["analysis_requirements"]
@@ -59,10 +60,10 @@ def test_research_brief_index_and_sector_builders_keep_explicit_tool_workflow() 
     assert "不要自行延伸成均线斜率、风格切换或高位调整叙事" in index_content["user_prompt"]
     assert "工具返回的技术标签或规则区间只可作为描述线索，不要直接改写成市场定性结论" in index_content["user_prompt"]
     assert "用‘短期数据表现偏强’替代‘情绪修复完成’" in index_content["user_prompt"]
-    assert "用‘总成交额处于较高水平，工具识别为极度活跃’替代‘成交活跃度显著提升’" in index_content["user_prompt"]
+    assert "用‘总成交额、平均每股成交和换手率的事实数据’替代‘成交活跃度显著提升’" in index_content["user_prompt"]
     assert "用‘无法确认杠杆资金方向’替代‘无法确认杠杆资金态度’" in index_content["user_prompt"]
     assert "用‘技术指标整体偏多’替代‘三个指标均显示看多信号’" in index_content["user_prompt"]
-    assert "用‘融资余额处于相对谨慎区间’替代‘融资余额处于谨慎水平’" in index_content["user_prompt"]
+    assert "两融完整时只引用余额与变化数值；若数据不完整，直接说明不纳入综合评估" in index_content["user_prompt"]
     assert "必须写成‘汇总口径/明细口径存在差异’，不要写成‘其中关系’" in index_content["user_prompt"]
     assert "数据缺口声明" not in index_content["system_prompt"]
     assert "PE、PB" not in index_content["system_prompt"]
@@ -113,11 +114,12 @@ def test_research_mode_migration_preserves_index_and_sector_tool_instructions() 
     assert "两融变化字段与当前余额明显不匹配" in index_requirements
     assert "只能留在数据说明中" in index_requirements
     assert "不得外推为“均线下行态势”" in index_requirements
-    assert "技术标签、活跃度标签或规则识别区间都只是规则描述，不等同于市场结论" in index_requirements
+    assert "技术标签或规则识别区间都只是规则描述，不等同于市场结论" in index_requirements
+    assert "成交额、换手率、涨跌家数等事实指标由模型自行归纳" in index_requirements
     assert "允许写法示例" in index_requirements
     assert "过线写法示例" in index_requirements
-    assert "总成交额处于较高水平，工具识别为极度活跃" in index_requirements
-    assert "无法确认杠杆资金方向，但可依据余额水平描述活跃度区间" in index_requirements
+    assert "总成交额为 23246.35 亿元，上海/深圳市场成交额占比分别为 41.2% 和 58.8%" in index_requirements
+    assert "两融数据若不完整，应明确说明不纳入资金面综合评估" in index_requirements
     assert "技术指标整体偏多，但高位指标提示短期仍需关注波动" in index_requirements
     assert "汇总口径显示涨停 81 家、跌停 10 家，明细口径显示涨停 59 家、跌停 8 家，两套口径存在差异" in index_requirements
     assert "不要使用“空间”“站稳”“突破”" in index_requirements
@@ -135,6 +137,8 @@ def test_runtime_analyst_prompt_avoids_missing_dimension_sections() -> None:
     assert "不要单独列出“未获取的数据维度”" in source
     assert "本报告未获取以下维度数据，不作相关分析" in source
     assert "KOL 观点、散户情绪、机构持仓、行业资金流向" in source
+    assert "如果工具返回“汇总口径/明细口径”" in source
+    assert "必须同时保留两套数值，并明确写出“存在口径差异”" in source
     assert "该维度数据缺失，暂不分析" not in source
 
 

@@ -57,6 +57,35 @@ def test_market_environment_uses_actual_trade_date_and_omits_pe_pb(monkeypatch) 
     assert "PE:" not in report
     assert "PB:" not in report
     assert "20日年化波动率" in report
+    assert "中等风险" not in report
+    assert "高风险" not in report
+    assert "低风险" not in report
+
+
+def test_market_breadth_omits_activity_labels(monkeypatch) -> None:
+    module = _load_module("core/tools/index_tools.py", "index_tools_market_breadth")
+
+    class FakeProvider:
+        async def get_daily_info(self, trade_date: str) -> pd.DataFrame:
+            return pd.DataFrame(
+                [
+                    {"ts_code": "SH_MARKET", "amount": 9567.54, "vol": 250.00, "com_count": 2300},
+                    {"ts_code": "SZ_MARKET", "amount": 13678.81, "vol": 296.68, "com_count": 3100},
+                ]
+            )
+
+    async def fake_latest_trade_date(trade_date: str) -> str:
+        return "20260410"
+
+    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
+
+    report = asyncio.run(module.get_market_breadth("2026-04-11"))
+
+    assert "总成交额" in report
+    assert "平均每股成交" in report
+    assert "市场活跃度" not in report
+    assert "极度活跃" not in report
 
 
 def test_identify_market_cycle_removes_operation_advice(monkeypatch) -> None:
@@ -105,6 +134,8 @@ def test_north_flow_uses_actual_trade_date_in_report(monkeypatch) -> None:
 
     assert "📅 日期: 2026-04-10" in report
     assert "已切换到最近交易日 2026-04-10" in report
+    assert "【资金情绪】" not in report
+    assert "外资积极流入" not in report
 
 
 def test_margin_trading_flags_anomalous_change_fields(monkeypatch) -> None:
@@ -143,9 +174,10 @@ def test_margin_trading_flags_anomalous_change_fields(monkeypatch) -> None:
     assert "字段一致性检查" in report
     assert "变化字段可能存在口径差异或异常值" in report
     assert "暂不据此延伸解读杠杆方向" in report
-    assert "【余额水平信号】" in report
-    assert "杠杆资金谨慎" not in report
-    assert "融资余额处于相对谨慎区间" in report
+    assert "【余额水平信号】" not in report
+    assert "融资余额处于相对谨慎区间" not in report
+    assert "【使用限制】" in report
+    assert "当前仅可引用余额数值，不应依据异常变化字段判断资金方向" in report
 
 
 def test_margin_trading_reports_missing_exchange_coverage(monkeypatch) -> None:
@@ -176,7 +208,7 @@ def test_margin_trading_reports_missing_exchange_coverage(monkeypatch) -> None:
     assert "缺失交易所: SZSE、BSE" in report
     assert "当前数据仅覆盖部分交易所，不代表 A 股全市场两融口径" in report
     assert "不应据此判断两融余额水平、单日变化或杠杆资金方向" in report
-    assert "融资异常" in report
+    assert "融资异常" not in report
     assert "【今日两融余额】" not in report
     assert "【余额水平信号】" not in report
 
@@ -232,13 +264,10 @@ def test_limit_stats_uses_neutral_distribution_wording(monkeypatch) -> None:
             }
 
         async def get_limit_list(self, trade_date: str) -> pd.DataFrame:
-            return pd.DataFrame(
-                [
-                    {"limit": "U", "up_stat": "2"},
-                    {"limit": "U", "up_stat": "1"},
-                    {"limit": "D", "up_stat": "0"},
-                ]
-            )
+            up_rows = [{"limit": "U", "up_stat": "2"} for _ in range(17)]
+            up_rows.extend({"limit": "U", "up_stat": "1"} for _ in range(42))
+            down_rows = [{"limit": "D", "up_stat": "0"} for _ in range(8)]
+            return pd.DataFrame(up_rows + down_rows)
 
     async def fake_latest_trade_date(trade_date: str) -> str:
         return "20260410"
@@ -250,7 +279,15 @@ def test_limit_stats_uses_neutral_distribution_wording(monkeypatch) -> None:
 
     assert "涨幅居前个股数量明显多于跌幅居前个股" in report
     assert "赚钱效应强" not in report
+    assert "【市场情绪】" not in report
+    assert "极度乐观" not in report
+    assert "偏向乐观" not in report
+    assert "偏向悲观" not in report
     assert "【涨跌停统计（汇总口径）】" in report
     assert "【涨跌停统计（明细口径）】" in report
+    assert "【口径差异摘要】" in report
+    assert "汇总口径: 涨停 81 家，跌停 10 家" in report
+    assert "明细口径: 涨停 59 家，跌停 8 家" in report
+    assert "两套口径存在差异" in report
     assert "汇总口径来自 daily 涨跌幅阈值统计，明细口径来自 limit_list_d 涨跌停名单" in report
     assert "其中涨停家数" not in report
