@@ -80,10 +80,36 @@ class TestSectorTools:
             
             assert "板块表现分析报告" in result
             assert "银行" in result
+            assert "主行业锚点: 银行" in result
             assert "所属行业类指数数: 2 个" in result
             assert "金融科技" not in result
             assert "仅统计同花顺行业类指数" in result
+            assert "不改变主行业归属" in result
             assert mock_tushare_provider.get_ths_daily.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_get_peer_comparison_uses_single_primary_industry_anchor(self, mock_tushare_provider):
+        """测试同业对比固定使用唯一主行业锚点"""
+        mock_tushare_provider.get_stock_industry = AsyncMock(return_value="银行")
+        mock_tushare_provider.get_sector_stocks_daily_basic = AsyncMock(return_value=pd.DataFrame({
+            'ts_code': ['000001.SZ', '600036.SH', '601398.SH'],
+            'name': ['平安银行', '招商银行', '工商银行'],
+            'total_mv': [21521200.0, 98890000.0, 260530000.0],
+            'pe_ttm': [5.05, 6.4, 7.2],
+            'pb': [0.48, 0.92, 0.71],
+            'turnover_rate': [0.25, 0.31, 0.12],
+        }))
+
+        with patch('core.tools.sector_tools._get_tushare_provider', return_value=mock_tushare_provider):
+            from core.tools.sector_tools import get_peer_comparison
+
+            result = await get_peer_comparison("000001", "2024-12-02")
+
+            assert "同业对比分析报告" in result
+            assert "主行业锚点: 银行" in result
+            assert "同行样本按此精确匹配" in result
+            assert "行业内上市公司: 3 家" in result
+            assert "市值排名: 3/3" in result
     
     @pytest.mark.asyncio
     async def test_get_sector_rotation(self, mock_tushare_provider):
@@ -107,6 +133,7 @@ class TestSectorTools:
             assert "证券" in result
             assert "+49.00亿" in result
             assert "-40.00亿" in result
+            assert "成分股" not in result
             assert "资金净流入" in result or "资金净流出" in result
             mock_tushare_provider.get_moneyflow_ind_ths.assert_awaited_once()
 

@@ -179,6 +179,7 @@ async def get_sector_performance(
             f"{'='*50}",
             f"🎯 目标股票: {ticker}",
             f"🏭 所属行业: {industry}",
+            f"📌 主行业锚点: {industry}（股票基础行业字段，全文唯一主行业口径）",
             f"📅 分析日期: {trade_date}",
             f"📆 回看周期: {lookback_days} 交易日",
             "",
@@ -222,7 +223,7 @@ async def get_sector_performance(
                             'today_pct': round(today_pct, 2) if today_pct else 0
                         })
 
-            report_lines.append("注：仅统计同花顺行业类指数（type='I'），不包含概念、地域、风格、宽基等归属标签。")
+            report_lines.append("注：主行业归属以股票基础行业字段为唯一锚点；以下仅统计同花顺行业类指数（type='I'），用于补充观察结构，不改变主行业归属。")
             
             # 按累计涨幅排序
             sector_performance.sort(key=lambda x: x['period_pct'], reverse=True)
@@ -308,13 +309,10 @@ async def get_sector_rotation(trade_date: str, top_n: int = 10) -> str:
                 name = getattr(row, 'display_name', '') or getattr(row, 'industry', '') or getattr(row, 'name', ts_code)
                 net_amount = getattr(row, 'net_amount', 0)
                 pct_change = getattr(row, 'pct_change', None)
-                company_num = getattr(row, 'company_num', None)
 
                 extras = []
                 if pct_change is not None and pd.notna(pct_change):
                     extras.append(f"涨跌幅: {pct_change:+.2f}%")
-                if company_num is not None and pd.notna(company_num):
-                    extras.append(f"成分股: {int(company_num)}家")
                 extra_text = f" ({' | '.join(extras)})" if extras else ""
 
                 report_lines.append(
@@ -330,13 +328,10 @@ async def get_sector_rotation(trade_date: str, top_n: int = 10) -> str:
                 name = getattr(row, 'display_name', '') or getattr(row, 'industry', '') or getattr(row, 'name', ts_code)
                 net_amount = getattr(row, 'net_amount', 0)
                 pct_change = getattr(row, 'pct_change', None)
-                company_num = getattr(row, 'company_num', None)
 
                 extras = []
                 if pct_change is not None and pd.notna(pct_change):
                     extras.append(f"涨跌幅: {pct_change:+.2f}%")
-                if company_num is not None and pd.notna(company_num):
-                    extras.append(f"成分股: {int(company_num)}家")
                 extra_text = f" ({' | '.join(extras)})" if extras else ""
 
                 report_lines.append(
@@ -463,6 +458,7 @@ async def get_peer_comparison(
             f"{'='*50}",
             f"🎯 目标股票: {ticker}",
             f"🏭 所属行业: {industry}",
+            f"📌 主行业锚点: {industry}（股票基础行业字段，同行样本按此精确匹配）",
             f"📅 分析日期: {trade_date_formatted}",
             "",
         ]
