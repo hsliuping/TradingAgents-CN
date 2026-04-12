@@ -286,10 +286,12 @@ def main() -> int:
         client.close()
         return 0
 
+    sync_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
     updated_count = 0
     for item in changed_docs:
         remark = item["remark"].strip()
-        remark_suffix = "[2026-04-10] 定向同步研究简报模板"
+        remark_suffix = f"[{sync_date}] 定向同步研究简报模板"
         if remark_suffix not in remark:
             remark = f"{remark}\n{remark_suffix}".strip()
 
@@ -309,7 +311,7 @@ def main() -> int:
     archived_count = 0
     for item in duplicate_docs_to_archive:
         remark = (item.get("remark") or "").strip()
-        remark_suffix = "[2026-04-11] 同步时自动归档重复副本模板"
+        remark_suffix = f"[{sync_date}] 同步时自动归档重复副本模板"
         if remark_suffix not in remark:
             remark = f"{remark}\n{remark_suffix}".strip()
 
