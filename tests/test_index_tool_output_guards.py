@@ -255,8 +255,6 @@ def test_limit_stats_uses_neutral_distribution_wording(monkeypatch) -> None:
                 "down_count": 1397,
                 "down_ratio": 25.4,
                 "flat_count": 121,
-                "limit_up": 81,
-                "limit_down": 10,
                 "up_gt5": 244,
                 "up_3_5": 324,
                 "down_gt5": 55,
@@ -283,11 +281,12 @@ def test_limit_stats_uses_neutral_distribution_wording(monkeypatch) -> None:
     assert "极度乐观" not in report
     assert "偏向乐观" not in report
     assert "偏向悲观" not in report
-    assert "【涨跌停统计（汇总口径）】" in report
-    assert "【涨跌停统计（明细口径）】" in report
-    assert "【口径差异摘要】" in report
-    assert "汇总口径: 涨停 81 家，跌停 10 家" in report
-    assert "明细口径: 涨停 59 家，跌停 8 家" in report
-    assert "两套口径存在差异" in report
-    assert "汇总口径来自 daily 涨跌幅阈值统计，明细口径来自 limit_list_d 涨跌停名单" in report
+    assert "【涨跌停统计】" in report
+    assert "  • 涨停: 59 家" in report
+    assert "  • 跌停: 8 家" in report
+    assert "  • 连板: 17 家" in report
+    assert "【涨跌停统计（汇总口径）】" not in report
+    assert "【涨跌停统计（明细口径）】" not in report
+    assert "【口径差异摘要】" not in report
+    assert "汇总口径" not in report
     assert "其中涨停家数" not in report

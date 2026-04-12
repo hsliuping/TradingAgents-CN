@@ -48,7 +48,7 @@ def test_research_brief_index_and_sector_builders_keep_explicit_tool_workflow() 
     assert "总成交额为 23246.35 亿元，上海/深圳市场成交额占比分别为 41.2% 和 58.8%" in index_content["analysis_requirements"]
     assert "两融数据若不完整，应明确说明不纳入资金面综合评估" in index_content["analysis_requirements"]
     assert "技术指标整体偏多，但高位指标提示短期仍需关注波动" in index_content["analysis_requirements"]
-    assert "汇总口径显示涨停 81 家、跌停 10 家，明细口径显示涨停 59 家、跌停 8 家，两套口径存在差异" in index_content["analysis_requirements"]
+    assert "涨跌停明细名单显示涨停 59 家、跌停 8 家，连板 17 家" in index_content["analysis_requirements"]
     assert "成交活跃度显著提升" in index_content["analysis_requirements"]
     assert "无法确认杠杆资金态度" in index_content["analysis_requirements"]
     assert "三个指标均显示看多信号" in index_content["analysis_requirements"]
@@ -64,7 +64,7 @@ def test_research_brief_index_and_sector_builders_keep_explicit_tool_workflow() 
     assert "用‘无法确认杠杆资金方向’替代‘无法确认杠杆资金态度’" in index_content["user_prompt"]
     assert "用‘技术指标整体偏多’替代‘三个指标均显示看多信号’" in index_content["user_prompt"]
     assert "两融完整时只引用余额与变化数值；若数据不完整，直接说明不纳入综合评估" in index_content["user_prompt"]
-    assert "必须写成‘汇总口径/明细口径存在差异’，不要写成‘其中关系’" in index_content["user_prompt"]
+    assert "涨跌停家数统一采用涨跌停明细名单口径，不要混用 `pct_chg` 阈值近似结果" in index_content["user_prompt"]
     assert "数据缺口声明" not in index_content["system_prompt"]
     assert "PE、PB" not in index_content["system_prompt"]
     assert "数据缺口声明" not in index_content["user_prompt"]
@@ -121,7 +121,7 @@ def test_research_mode_migration_preserves_index_and_sector_tool_instructions() 
     assert "总成交额为 23246.35 亿元，上海/深圳市场成交额占比分别为 41.2% 和 58.8%" in index_requirements
     assert "两融数据若不完整，应明确说明不纳入资金面综合评估" in index_requirements
     assert "技术指标整体偏多，但高位指标提示短期仍需关注波动" in index_requirements
-    assert "汇总口径显示涨停 81 家、跌停 10 家，明细口径显示涨停 59 家、跌停 8 家，两套口径存在差异" in index_requirements
+    assert "涨跌停明细名单显示涨停 59 家、跌停 8 家，连板 17 家" in index_requirements
     assert "不要使用“空间”“站稳”“突破”" in index_requirements
     assert "不要写 PE/PB、股息率、估值分位" in index_requirements
 

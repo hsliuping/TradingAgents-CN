@@ -2441,7 +2441,7 @@ class TushareProvider(BaseStockDataProvider):
         trade_date: str
     ) -> Optional[Dict[str, Any]]:
         """
-        获取每日市场统计（涨跌家数等）
+        获取每日市场统计（涨跌家数与涨跌幅分布）
 
         通过 daily 接口聚合计算
 
@@ -2472,10 +2472,6 @@ class TushareProvider(BaseStockDataProvider):
             down_count = len(df[df['pct_chg'] < 0])
             flat_count = len(df[df['pct_chg'] == 0])
 
-            # 涨停跌停（近似判断：涨幅>=9.9% 或 跌幅<=-9.9%）
-            limit_up = len(df[df['pct_chg'] >= 9.9])
-            limit_down = len(df[df['pct_chg'] <= -9.9])
-
             # 涨幅分布
             up_gt5 = len(df[df['pct_chg'] >= 5])
             up_3_5 = len(df[(df['pct_chg'] >= 3) & (df['pct_chg'] < 5)])
@@ -2488,8 +2484,6 @@ class TushareProvider(BaseStockDataProvider):
                 'up_count': up_count,
                 'down_count': down_count,
                 'flat_count': flat_count,
-                'limit_up': limit_up,
-                'limit_down': limit_down,
                 'up_ratio': up_count / total * 100 if total > 0 else 0,
                 'down_ratio': down_count / total * 100 if total > 0 else 0,
                 'up_gt5': up_gt5,

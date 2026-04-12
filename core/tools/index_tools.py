@@ -909,11 +909,6 @@ async def get_limit_stats(trade_date: str) -> str:
             report_lines.append(f"  • 涨跌比: {stats['up_count']}:{stats['down_count']}")
 
             report_lines.append("")
-            report_lines.append("【涨跌停统计（汇总口径）】")
-            report_lines.append(f"  • 涨停: {stats['limit_up']} 家")
-            report_lines.append(f"  • 跌停: {stats['limit_down']} 家")
-
-            report_lines.append("")
             report_lines.append("【涨跌幅分布】")
             report_lines.append(f"  • 涨幅>5%: {stats['up_gt5']} 家")
             report_lines.append(f"  • 涨幅3-5%: {stats['up_3_5']} 家")
@@ -943,7 +938,7 @@ async def get_limit_stats(trade_date: str) -> str:
             detail_lines = []
 
             if not limit_up_df.empty:
-                detail_lines.append(f"  • 涨停明细: {len(limit_up_df)} 家")
+                detail_lines.append(f"  • 涨停: {len(limit_up_df)} 家")
                 # 连板统计
                 if 'up_stat' in limit_up_df.columns:
                     multi_board = limit_up_df[limit_up_df['up_stat'].str.contains('2|3|4|5|6|7|8|9', na=False)]
@@ -951,32 +946,16 @@ async def get_limit_stats(trade_date: str) -> str:
                         detail_lines.append(f"  • 连板: {len(multi_board)} 家")
 
             if not limit_down_df.empty:
-                detail_lines.append(f"  • 跌停明细: {len(limit_down_df)} 家")
+                detail_lines.append(f"  • 跌停: {len(limit_down_df)} 家")
 
             if detail_lines:
                 report_lines.append("")
-                report_lines.append("【涨跌停统计（明细口径）】")
+                report_lines.append("【涨跌停统计】")
                 report_lines.extend(detail_lines)
-
-                detail_up_count = len(limit_up_df)
-                detail_down_count = len(limit_down_df)
-                if stats and (stats['limit_up'] != detail_up_count or stats['limit_down'] != detail_down_count):
-                    report_lines.append("")
-                    report_lines.append("【口径差异摘要】")
-                    report_lines.append(
-                        f"  • 汇总口径: 涨停 {stats['limit_up']} 家，跌停 {stats['limit_down']} 家"
-                    )
-                    report_lines.append(
-                        f"  • 明细口径: 涨停 {detail_up_count} 家，跌停 {detail_down_count} 家"
-                    )
-                    report_lines.append(
-                        "  • 两套口径存在差异，正文引用时必须明确写成“汇总口径/明细口径存在差异”，不要合并成单一计数或“其中关系”。"
-                    )
-                    report_lines.append("")
-                    report_lines.append("【口径说明】")
-                    report_lines.append(
-                        "  • 汇总口径来自 daily 涨跌幅阈值统计，明细口径来自 limit_list_d 涨跌停名单；两套口径可能不同，正文引用时不要写成“其中关系”。"
-                    )
+        else:
+            report_lines.append("")
+            report_lines.append("【涨跌停统计】")
+            report_lines.append("  • 涨跌停明细名单暂不可用，无法确认当日涨停/跌停家数")
 
         return "\n".join(report_lines)
 
