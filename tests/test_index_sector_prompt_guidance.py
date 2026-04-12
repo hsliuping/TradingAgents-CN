@@ -83,18 +83,23 @@ def test_research_brief_index_and_sector_builders_keep_explicit_tool_workflow() 
     assert "行业标签必须分层处理" in sector_content["system_prompt"]
     assert "唯一锚点" in sector_content["system_prompt"]
     assert "股票基础行业字段（单值 industry）" in sector_content["system_prompt"]
+    assert "有限行业常识只能作背景说明" in sector_content["system_prompt"]
     assert "更贴近主业的细分行业标签" in sector_content["tool_guidance"]
     assert "唯一主行业锚点" in sector_content["tool_guidance"]
+    assert "如果引用少量行业通识" in sector_content["tool_guidance"]
     assert "主力资金显著配置" in sector_content["tool_guidance"]
     assert "个股资金流回退数据" in sector_content["tool_guidance"]
     assert "研究口径" in sector_content["user_prompt"]
     assert "唯一主行业锚点" in sector_content["user_prompt"]
+    assert "允许少量行业通识作为背景说明" in sector_content["user_prompt"]
     assert "更贴近主业的行业口径" in sector_content["user_prompt"]
     assert "未进入当日行业资金净流入前列" in sector_content["user_prompt"]
     assert "个股资金流回退数据" in sector_content["user_prompt"]
     assert "未进入当日个股资金净流入前列" in sector_content["user_prompt"]
     assert "利率、监管、资产质量、息差、不良率、拨备覆盖率" in sector_content["user_prompt"]
     assert "安全边际、修复窗口或板块机会叙事" in sector_content["user_prompt"]
+    assert "成熟阶段、增长空间有限" in sector_content["user_prompt"]
+    assert "资产质量担忧/息差收窄压力" in sector_content["user_prompt"]
     assert "资金流向与市场热度" in sector_content["analysis_requirements"]
     assert "风险与结构性特征的事实型平衡评估" in sector_content["analysis_requirements"]
     assert "趋势、景气、竞争、轮动、估值分化和资金流向判断" in sector_content["analysis_requirements"]
@@ -102,9 +107,12 @@ def test_research_brief_index_and_sector_builders_keep_explicit_tool_workflow() 
     assert "对所有 A 股个股，正文只能保留一个主行业归属" in sector_content["analysis_requirements"]
     assert "如果同一股票命中多个行业类指数" in sector_content["analysis_requirements"]
     assert "银行个股同时命中“金融(A股)”" in sector_content["analysis_requirements"]
+    assert "允许少量行业通识作为背景说明" in sector_content["analysis_requirements"]
     assert "未进入当日行业资金净流入前列" in sector_content["analysis_requirements"]
     assert "个股资金流回退数据" in sector_content["analysis_requirements"]
     assert "安全边际" in sector_content["analysis_requirements"]
+    assert "成熟发展阶段，行业增长空间有限" in sector_content["analysis_requirements"]
+    assert "资产质量担忧和息差收窄压力" in sector_content["analysis_requirements"]
     assert "行业机会与风险" not in sector_content["user_prompt"]
 
 
@@ -163,8 +171,10 @@ def test_research_mode_migration_preserves_index_and_sector_tool_instructions() 
     assert "判断原因" in sector_system_prompt
     assert "层级标签" in sector_system_prompt
     assert "股票基础行业字段（单值 industry）" in sector_system_prompt
+    assert "允许少量行业通识作为背景说明" in sector_system_prompt
     assert "实际数据日期" not in sector_system_prompt
     assert "个股资金流回退数据" in sector_guidance
+    assert "如果引用少量行业通识" in sector_guidance
     sector_requirements = module.get_field_override("sector_analyst", "analysis_requirements")
     assert sector_requirements is not None
     assert "资金流向与市场热度" in sector_requirements
@@ -174,6 +184,7 @@ def test_research_mode_migration_preserves_index_and_sector_tool_instructions() 
     assert "对所有 A 股个股，正文只能保留一个主行业归属" in sector_requirements
     assert "如果同一股票命中多个行业类指数" in sector_requirements
     assert "更贴近主业的行业口径" in sector_requirements
+    assert "允许少量行业通识作为背景说明" in sector_requirements
     assert "未进入当日行业资金净流入前列" in sector_requirements
     assert "未进入当日个股资金净流入前列" in sector_requirements
 
@@ -196,3 +207,12 @@ def test_index_fallback_prompts_drop_information_gap_wording() -> None:
     assert "关键宏观信号与后续观察事项" in source
     assert "5. 关键观察信号、信息缺口与后续验证事项" not in source
     assert "3. 关键宏观信号、信息缺口与后续观察事项" not in source
+
+
+def test_sector_fallback_prompt_limits_background_industry_inference() -> None:
+    source = (ROOT / "core/agents/adapters/sector_analyst_v2.py").read_text(encoding="utf-8")
+
+    assert "允许少量行业通识作为背景说明" in source
+    assert "显式标注为背景" in source
+    assert "行业处于成熟阶段、增长空间有限" in source
+    assert "估值折价反映资产质量担忧、息差收窄压力" in source
