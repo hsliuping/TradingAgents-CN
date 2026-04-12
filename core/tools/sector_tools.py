@@ -14,6 +14,31 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+async def _get_industry_sector_members(provider, ticker: str) -> pd.DataFrame:
+    """获取个股所属的同花顺行业类指数（type='I'）。"""
+    ts_code = provider._normalize_ts_code(ticker)
+    sectors_df = await provider.get_ths_member(con_code=ts_code)
+    if sectors_df is None or sectors_df.empty:
+        return pd.DataFrame(columns=["ts_code", "name"])
+
+    industry_index_df = await provider.get_ths_index_list(index_type='I')
+    if industry_index_df is None or industry_index_df.empty:
+        logger.warning("⚠️ 无法获取同花顺行业指数列表，无法区分行业类归属")
+        return pd.DataFrame(columns=["ts_code", "name"])
+
+    industry_members = sectors_df.merge(
+        industry_index_df[["ts_code", "name"]].drop_duplicates(subset=["ts_code"]),
+        on="ts_code",
+        how="inner",
+    )
+
+    if industry_members.empty:
+        logger.warning(f"⚠️ 股票 {ticker} 未匹配到同花顺行业类指数归属")
+        return pd.DataFrame(columns=["ts_code", "name"])
+
+    return industry_members.drop_duplicates(subset=["ts_code"]).reset_index(drop=True)
+
+
 def _get_tushare_provider():
     """延迟导入获取 Tushare Provider"""
     from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
@@ -100,9 +125,8 @@ async def get_stock_sector_info(ticker: str) -> Dict[str, Any]:
         industry = await provider.get_stock_industry(ticker)
         result["industry"] = industry
         
-        # 2. 获取所属板块（同花顺概念/行业板块）
-        ts_code = provider._normalize_ts_code(ticker)
-        sectors_df = await provider.get_ths_member(con_code=ts_code)
+        # 2. 获取所属行业类指数（同花顺 type='I'）
+        sectors_df = await _get_industry_sector_members(provider, ticker)
         
         if sectors_df is not None and not sectors_df.empty:
             result["sectors"] = sectors_df.to_dict('records')
@@ -139,9 +163,8 @@ async def get_sector_performance(
         if not industry:
             return f"⚠️ 无法获取股票 {ticker} 的行业信息"
         
-        # 2. 获取股票所属板块
-        ts_code = provider._normalize_ts_code(ticker)
-        sectors_df = await provider.get_ths_member(con_code=ts_code)
+        # 2. 获取股票所属行业类指数（只保留同花顺 type='I'）
+        sectors_df = await _get_industry_sector_members(provider, ticker)
         
         # 3. 计算日期范围
         # 清理日期字符串，去掉可能的时间部分
@@ -164,13 +187,13 @@ async def get_sector_performance(
         # 4. 分析板块表现
         if sectors_df is not None and not sectors_df.empty:
             sector_count = len(sectors_df)
-            report_lines.append(f"📌 所属板块数: {sector_count} 个")
+            report_lines.append(f"📌 所属行业类指数数: {sector_count} 个")
             report_lines.append("")
-            report_lines.append("【板块涨跌幅排行】")
+            report_lines.append("【行业类指数涨跌幅排行】")
             
-            # 获取每个板块的行情数据
+            # 获取每个行业类指数的行情数据
             sector_performance = []
-            for _, row in sectors_df.head(10).iterrows():  # 最多分析10个板块
+            for _, row in sectors_df.iterrows():
                 sector_code = row.get('ts_code')
                 if not sector_code:
                     continue
@@ -198,6 +221,8 @@ async def get_sector_performance(
                             'period_pct': round(pct_change, 2),
                             'today_pct': round(today_pct, 2) if today_pct else 0
                         })
+
+            report_lines.append("注：仅统计同花顺行业类指数（type='I'），不包含概念、地域、风格、宽基等归属标签。")
             
             # 按累计涨幅排序
             sector_performance.sort(key=lambda x: x['period_pct'], reverse=True)

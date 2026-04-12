@@ -93,6 +93,7 @@ EXPORT_SANITIZED_MODULE_KEYS = {
 }
 
 MARKDOWN_HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.*)$")
+CHINESE_SECTION_PREFIX_PATTERN = re.compile(r"^[一二三四五六七八九十百]+[、\.]\s*")
 
 # 检查依赖是否可用
 try:
@@ -219,6 +220,53 @@ class ReportExporter:
         return "\n".join(demoted_lines)
 
     @staticmethod
+    def _normalize_section_title(text: str) -> str:
+        normalized = text.strip()
+        if normalized.startswith("**") and normalized.endswith("**") and len(normalized) > 4:
+            normalized = normalized[2:-2].strip()
+        return CHINESE_SECTION_PREFIX_PATTERN.sub("", normalized).strip()
+
+    @staticmethod
+    def _strip_emphasis_markers(text: str) -> str:
+        normalized = text.strip()
+        if normalized.startswith("**") and normalized.endswith("**") and len(normalized) > 4:
+            return normalized[2:-2].strip()
+        return normalized
+
+    def _normalize_intra_module_headings(self, content: str) -> str:
+        normalized_lines = []
+        in_code_block = False
+
+        for line in content.splitlines():
+            stripped = line.strip()
+
+            if stripped.startswith("```"):
+                in_code_block = not in_code_block
+                normalized_lines.append(line)
+                continue
+
+            if in_code_block or not stripped:
+                normalized_lines.append(line)
+                continue
+
+            heading_match = MARKDOWN_HEADING_PATTERN.match(line)
+            if heading_match:
+                heading_text = self._normalize_section_title(heading_match.group(2))
+                normalized_lines.append(f"{heading_match.group(1)} {heading_text}")
+                continue
+
+            plain_line = self._strip_emphasis_markers(stripped)
+            if CHINESE_SECTION_PREFIX_PATTERN.match(plain_line):
+                section_title = self._normalize_section_title(stripped)
+                if section_title and len(section_title) <= 30 and not re.search(r"[，,。！？；：:]", section_title):
+                    normalized_lines.append(f"## {section_title}")
+                    continue
+
+            normalized_lines.append(line)
+
+        return "\n".join(normalized_lines)
+
+    @staticmethod
     def _normalize_disclaimer(content: str) -> str:
         return re.sub(
             r"(?is)(?:\*\*)?免责声明(?:\*\*)?[：:].*?(?:独立做出投资决策。|必要时请咨询专业顾问。)",
@@ -231,6 +279,7 @@ class ReportExporter:
         if module_key in EXPORT_SANITIZED_MODULE_KEYS:
             normalized_content = sanitize_display_report_text(normalized_content, fallback=normalized_content)
 
+        normalized_content = self._normalize_intra_module_headings(normalized_content)
         normalized_content = self._normalize_disclaimer(normalized_content)
         normalized_content = self._strip_duplicate_leading_heading(normalized_content, title)
         normalized_content = self._demote_markdown_headings(normalized_content)

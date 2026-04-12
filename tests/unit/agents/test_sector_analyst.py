@@ -3,7 +3,6 @@
 """
 
 import pytest
-import asyncio
 from unittest.mock import Mock, patch, AsyncMock
 import pandas as pd
 
@@ -25,8 +24,12 @@ class TestSectorTools:
         # 设置模拟返回值
         mock_tushare_provider.get_stock_industry = AsyncMock(return_value="银行")
         mock_tushare_provider.get_ths_member = AsyncMock(return_value=pd.DataFrame({
-            'ts_code': ['885691.TI', '885611.TI'],
-            'name': ['银行', '金融科技']
+            'ts_code': ['881155.TI', '885611.TI'],
+            'con_name': ['平安银行', '平安银行']
+        }))
+        mock_tushare_provider.get_ths_index_list = AsyncMock(return_value=pd.DataFrame({
+            'ts_code': ['881155.TI'],
+            'name': ['银行']
         }))
         
         with patch('core.tools.sector_tools._get_tushare_provider', return_value=mock_tushare_provider):
@@ -36,7 +39,8 @@ class TestSectorTools:
             
             assert result['ticker'] == "000001"
             assert result['industry'] == "银行"
-            assert len(result['sectors']) == 2
+            assert len(result['sectors']) == 1
+            assert result['sectors'][0]['name'] == '银行'
             assert result['error'] is None
     
     @pytest.mark.asyncio
@@ -44,14 +48,30 @@ class TestSectorTools:
         """测试板块表现分析"""
         mock_tushare_provider.get_stock_industry = AsyncMock(return_value="银行")
         mock_tushare_provider.get_ths_member = AsyncMock(return_value=pd.DataFrame({
-            'ts_code': ['885691.TI'],
-            'name': ['银行']
+            'ts_code': ['881155.TI', '885611.TI', '700402.TI'],
+            'con_name': ['平安银行', '平安银行', '平安银行']
         }))
-        mock_tushare_provider.get_ths_daily = AsyncMock(return_value=pd.DataFrame({
-            'trade_date': ['20241201', '20241202'],
-            'close': [100, 105],
-            'pct_change': [0, 5.0]
+        mock_tushare_provider.get_ths_index_list = AsyncMock(return_value=pd.DataFrame({
+            'ts_code': ['881155.TI', '700402.TI'],
+            'name': ['银行', '商业银行(A股)']
         }))
+
+        async def mock_get_ths_daily(ts_code, start_date=None, end_date=None):
+            if ts_code == '881155.TI':
+                return pd.DataFrame({
+                    'trade_date': ['20241201', '20241202'],
+                    'close': [100, 105],
+                    'pct_change': [0, 5.0]
+                })
+            if ts_code == '700402.TI':
+                return pd.DataFrame({
+                    'trade_date': ['20241201', '20241202'],
+                    'close': [200, 198],
+                    'pct_change': [0, -1.0]
+                })
+            raise AssertionError(f"unexpected ts_code: {ts_code}")
+
+        mock_tushare_provider.get_ths_daily = AsyncMock(side_effect=mock_get_ths_daily)
         
         with patch('core.tools.sector_tools._get_tushare_provider', return_value=mock_tushare_provider):
             from core.tools.sector_tools import get_sector_performance
@@ -60,6 +80,10 @@ class TestSectorTools:
             
             assert "板块表现分析报告" in result
             assert "银行" in result
+            assert "所属行业类指数数: 2 个" in result
+            assert "金融科技" not in result
+            assert "仅统计同花顺行业类指数" in result
+            assert mock_tushare_provider.get_ths_daily.await_count == 2
     
     @pytest.mark.asyncio
     async def test_get_sector_rotation(self, mock_tushare_provider):

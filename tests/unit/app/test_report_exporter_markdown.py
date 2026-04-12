@@ -37,3 +37,29 @@ def test_generate_markdown_report_hides_internal_module_keys_and_role_ids():
 	assert "### 核心观察" in markdown_content
 	assert "投资有风险，决策需谨慎" not in markdown_content
 	assert "本报告仅供研究参考，不构成个股推荐、投资建议或操作依据。请结合公开信息披露与自身研究独立判断。" in markdown_content
+
+
+def test_generate_markdown_report_normalizes_chinese_numbered_subsections():
+	exporter = ReportExporter()
+	report_doc = {
+		"stock_symbol": "000001",
+		"analysis_date": "2026-04-11 00:00:00",
+		"research_depth": "快速",
+		"reports": {
+			"index_report": "## 一、核心观察\n\n量能回升但结构分化仍在。\n\n二、后续关注\n\n关注政策催化与成交持续性。",
+			"sector_report": "**一、景气线索**\n\n板块轮动速度加快。\n\n**二、验证要点**\n\n观察主线成交是否延续。",
+		},
+	}
+
+	markdown_content = exporter.generate_markdown_report(report_doc)
+
+	assert "## 📊 大盘环境研究报告" in markdown_content
+	assert "## 🏭 行业板块研究报告" in markdown_content
+	assert "### 核心观察" in markdown_content
+	assert "### 后续关注" in markdown_content
+	assert "### 景气线索" in markdown_content
+	assert "### 验证要点" in markdown_content
+	assert "### 一、核心观察" not in markdown_content
+	assert "### 二、后续关注" not in markdown_content
+	assert "一、景气线索" not in markdown_content
+	assert "二、验证要点" not in markdown_content
