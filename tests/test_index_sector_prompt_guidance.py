@@ -60,7 +60,7 @@ def test_research_brief_index_and_sector_builders_keep_explicit_tool_workflow() 
     assert "不要自行延伸成均线斜率、风格切换或高位调整叙事" in index_content["user_prompt"]
     assert "工具返回的技术标签或规则区间只可作为描述线索，不要直接改写成市场定性结论" in index_content["user_prompt"]
     assert "用‘短期数据表现偏强’替代‘情绪修复完成’" in index_content["user_prompt"]
-    assert "用‘总成交额、平均每股成交和换手率的事实数据’替代‘成交活跃度显著提升’" in index_content["user_prompt"]
+    assert "用‘总成交额、平均每家上市公司成交额和换手率的事实数据’替代‘成交活跃度显著提升’" in index_content["user_prompt"]
     assert "用‘无法确认杠杆资金方向’替代‘无法确认杠杆资金态度’" in index_content["user_prompt"]
     assert "用‘技术指标整体偏多’替代‘三个指标均显示看多信号’" in index_content["user_prompt"]
     assert "两融完整时只引用余额与变化数值；若数据不完整，直接说明不纳入综合评估" in index_content["user_prompt"]

@@ -323,7 +323,7 @@ async def get_market_breadth(trade_date: str) -> str:
 
             if total_amount > 0:
                 avg_amount_per_stock = total_amount / total_count if total_count > 0 else 0
-                report_lines.append(f"  • 平均每股成交: {avg_amount_per_stock:.2f} 亿元")
+                report_lines.append(f"  • 平均每家上市公司成交额: {avg_amount_per_stock:.2f} 亿元")
         else:
             # 方案2: 使用 daily_basic API 获取市场整体数据
             daily_basic = await provider.get_daily_basic(trade_date=trade_date_clean)
@@ -811,7 +811,7 @@ async def get_margin_trading(trade_date: str, lookback_days: int = 10) -> str:
             report_lines.append("【使用限制】")
             report_lines.append("  • 当前数据仅覆盖部分交易所，不代表 A 股全市场两融口径")
             report_lines.append("  • 不应据此判断两融余额水平、单日变化或杠杆资金方向")
-            report_lines.append("  • 后续分析应明确标注数据缺失，不要将其外推为融资异常或杠杆变化")
+            report_lines.append("  • 后续分析应明确标注数据缺失，不要将其外推为异常波动或杠杆变化")
             return "\n".join(report_lines)
 
         # 汇总数据

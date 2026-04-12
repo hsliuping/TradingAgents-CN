@@ -83,7 +83,7 @@ def test_market_breadth_omits_activity_labels(monkeypatch) -> None:
     report = asyncio.run(module.get_market_breadth("2026-04-11"))
 
     assert "总成交额" in report
-    assert "平均每股成交" in report
+    assert "平均每家上市公司成交额" in report
     assert "市场活跃度" not in report
     assert "极度活跃" not in report
 
