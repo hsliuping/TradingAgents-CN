@@ -211,6 +211,7 @@ def build_risky_analyst_content(preference_type: str) -> dict:
             "4. 给出 3-5 条后续需要验证的公开信号。"
         ),
         "output_format": (
+            "🔴 **所有分析必须基于工具返回的真实数据，禁止编造、虚构或推断任何数据维度。**\n\n"
             "请使用 Markdown 输出，并严格包含以下标题：\n"
             "- `## 情景结论`\n"
             "- `## 主要支撑证据`\n"
@@ -219,12 +220,19 @@ def build_risky_analyst_content(preference_type: str) -> dict:
         ),
         "constraints": with_report_metadata_constraint("只能输出高弹性情景分析，不得转成交易建议。"),
         "user_prompt": (
-            "请基于以下研究材料，审阅 {{company_name}}（{{ticker}}）在更积极情景下可能被强化的条件。\n\n"
-            "【研究结论】\n{{investment_plan}}\n\n"
-            "【看多观点】\n{{bull_opinion}}\n\n"
-            "【看空观点】\n{{bear_opinion}}\n\n"
-            "【市场/基本面/新闻】\n{{market_report}}\n{{fundamentals_report}}\n{{news_report}}\n\n"
-            "【辩论历史】\n{{history}}\n\n"
+            "基于提供的研究材料进行高弹性情景审阅。\n"
+            "可用资源：\n"
+            "- 标的代码：{ticker}\n"
+            "- 研究整合结论：{investment_plan}\n"
+            "- 看多研究观点：{bull_opinion}\n"
+            "- 看空研究观点：{bear_opinion}\n"
+            "- 市场研究报告：{market_report}\n"
+            "- 社交媒体情绪报告：{sentiment_report}\n"
+            "- 最新世界事务新闻：{news_report}\n"
+            "- 公司基本面报告：{fundamentals_report}\n"
+            "- 风险辩论历史：{history}\n"
+            "- 最新保守观点：{current_safe_response}\n"
+            "- 最新中性观点：{current_neutral_response}\n\n"
             "任务重点：说明哪些公开信息变化会强化当前判断，但不要写价格位、空间和动作建议。"
         ),
     }
@@ -254,6 +262,7 @@ def build_safe_analyst_content(preference_type: str) -> dict:
             "4. 给出 3-5 条优先核验的公开信号。"
         ),
         "output_format": (
+            "🔴 **所有分析必须基于工具返回的真实数据，禁止编造、虚构或推断任何数据维度。**\n\n"
             "请使用 Markdown 输出，并严格包含以下标题：\n"
             "- `## 情景结论`\n"
             "- `## 主要风险`\n"
@@ -262,12 +271,19 @@ def build_safe_analyst_content(preference_type: str) -> dict:
         ),
         "constraints": with_report_metadata_constraint("只能输出防御情景分析，不得转成交易建议。"),
         "user_prompt": (
-            "请基于以下研究材料，审阅 {{company_name}}（{{ticker}}）当前判断最容易失去支撑的地方。\n\n"
-            "【研究结论】\n{{investment_plan}}\n\n"
-            "【看多观点】\n{{bull_opinion}}\n\n"
-            "【看空观点】\n{{bear_opinion}}\n\n"
-            "【市场/基本面/新闻】\n{{market_report}}\n{{fundamentals_report}}\n{{news_report}}\n\n"
-            "【辩论历史】\n{{history}}\n\n"
+            "基于提供的研究材料进行防御情景审阅。\n"
+            "可用资源：\n"
+            "- 标的代码：{ticker}\n"
+            "- 研究整合结论：{investment_plan}\n"
+            "- 看多研究观点：{bull_opinion}\n"
+            "- 看空研究观点：{bear_opinion}\n"
+            "- 市场研究报告：{market_report}\n"
+            "- 社交媒体情绪报告：{sentiment_report}\n"
+            "- 最新世界事务新闻：{news_report}\n"
+            "- 公司基本面报告：{fundamentals_report}\n"
+            "- 风险辩论历史：{history}\n"
+            "- 最新激进观点：{current_risky_response}\n"
+            "- 最新中性观点：{current_neutral_response}\n\n"
             "任务重点：指出最关键的风险来源、最脆弱的假设，以及哪些公开信息最值得优先核验。"
         ),
     }
@@ -299,6 +315,7 @@ def build_neutral_analyst_content(preference_type: str) -> dict:
             "- 避免量化未来涨跌和具体操作。"
         ),
         "output_format": (
+            "🔴 **所有分析必须基于工具返回的真实数据，禁止编造、虚构或推断任何数据维度。**\n\n"
             "请使用 Markdown 输出，并严格包含以下标题：\n"
             "- `## 当前最可能的基准情景`\n"
             "- `## 证据权重`\n"
@@ -307,14 +324,21 @@ def build_neutral_analyst_content(preference_type: str) -> dict:
         ),
         "constraints": with_report_metadata_constraint("只能输出基准情景分析，不得转成交易建议。"),
         "user_prompt": (
-            "请基于以下研究材料，给出 {{company_name}}（{{ticker}}）当前最稳妥的基准情景判断。\n\n"
-            "【研究结论】\n{{investment_plan}}\n\n"
-            "【看多观点】\n{{bull_opinion}}\n\n"
-            "【看空观点】\n{{bear_opinion}}\n\n"
-            "【激进风险观点】\n{{risky_opinion}}\n\n"
-            "【保守风险观点】\n{{safe_opinion}}\n\n"
-            "【市场/基本面/新闻】\n{{market_report}}\n{{fundamentals_report}}\n{{news_report}}\n\n"
-            "【辩论历史】\n{{history}}\n\n"
+            "基于提供的研究材料进行基准情景审阅。\n"
+            "可用资源：\n"
+            "- 标的代码：{ticker}\n"
+            "- 研究整合结论：{investment_plan}\n"
+            "- 看多研究观点：{bull_opinion}\n"
+            "- 看空研究观点：{bear_opinion}\n"
+            "- 激进风险观点：{risky_opinion}\n"
+            "- 保守风险观点：{safe_opinion}\n"
+            "- 市场研究报告：{market_report}\n"
+            "- 社交媒体情绪报告：{sentiment_report}\n"
+            "- 最新世界事务新闻：{news_report}\n"
+            "- 公司基本面报告：{fundamentals_report}\n"
+            "- 风险辩论历史：{history}\n"
+            "- 最新激进观点：{current_risky_response}\n"
+            "- 最新保守观点：{current_safe_response}\n\n"
             "任务重点：说明当前最稳妥的基准情景、证据权重和信息缺口，不要量化未来涨跌空间。"
         ),
     }
