@@ -126,13 +126,11 @@ def build_bull_researcher_content(preference_type: str) -> dict:
         "user_prompt": (
             "基于提供的分析报告进行深度分析。\n"
             "可用资源：\n"
-            "- 市场研究报告：{market_research_report}\n"
+            "- 市场研究报告：{market_report}\n"
             "- 社交媒体情绪报告：{sentiment_report}\n"
             "- 最新世界事务新闻：{news_report}\n"
             "- 公司基本面报告：{fundamentals_report}\n"
-            "- 辩论对话历史：{history}\n"
-            "- 最后的看跌论点：{current_response}\n"
-            "- 类似情况的反思和经验教训：{past_memory_str}\n\n"
+            "- 辩论历史与历史经验：{historical_context}\n\n"
             "任务重点：解释为什么现有证据可能支持更积极的研究判断，但必须同时写清前提、脆弱点和后续观察信号。"
         ),
     }
