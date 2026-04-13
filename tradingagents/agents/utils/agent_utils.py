@@ -1240,6 +1240,7 @@ class Toolkit:
                     logger.error(f"❌ [统一新闻工具] 东方财富新闻获取失败: {em_e}")
                     result_data.append(f"## 东方财富新闻\n获取失败: {em_e}")
 
+
                 # 2. 获取Google新闻作为补充
                 try:
                     # 获取公司中文名称用于搜索
@@ -1292,6 +1293,62 @@ class Toolkit:
         except Exception as e:
             error_msg = f"统一新闻工具执行失败: {str(e)}"
             logger.error(f"❌ [统一新闻工具] {error_msg}")
+            return error_msg
+
+    @staticmethod
+    @tool
+    @log_tool_call(tool_name="get_stock_news_headlines_unified", log_args=True)
+    def get_stock_news_headlines_unified(
+        ticker: Annotated[str, "股票代码（支持A股、港股、美股）"],
+        curr_date: Annotated[str, "当前日期，格式：YYYY-MM-DD"],
+        limit: Annotated[int, "返回的标题候选数量，默认12"] = 12,
+    ) -> str:
+        """
+        统一股票新闻标题工具的 legacy Toolkit 桥接。
+
+        复用 core.tools 中的 split news headlines 实现，确保旧工作流入口也能拿到新工具。
+        """
+        try:
+            from core.tools.implementations.news.stock_news import (
+                get_stock_news_headlines_unified as core_headlines_tool,
+            )
+
+            if hasattr(core_headlines_tool, "invoke"):
+                return core_headlines_tool.invoke(
+                    {"ticker": ticker, "curr_date": curr_date, "limit": limit}
+                )
+            return core_headlines_tool(ticker=ticker, curr_date=curr_date, limit=limit)
+        except Exception as e:
+            error_msg = f"统一新闻标题工具执行失败: {str(e)}"
+            logger.error(f"❌ [统一新闻标题工具/Toolkit桥接] {error_msg}")
+            return error_msg
+
+    @staticmethod
+    @tool
+    @log_tool_call(tool_name="get_stock_news_details_unified", log_args=True)
+    def get_stock_news_details_unified(
+        ticker: Annotated[str, "股票代码（支持A股、港股、美股）"],
+        curr_date: Annotated[str, "当前日期，格式：YYYY-MM-DD"],
+        news_ids: Annotated[str, "要查看明细的 news_id，可使用逗号分隔多个 ID"],
+    ) -> str:
+        """
+        统一股票新闻明细工具的 legacy Toolkit 桥接。
+
+        复用 core.tools 中的 split news details 实现，确保旧工作流入口也能拿到新工具。
+        """
+        try:
+            from core.tools.implementations.news.stock_news import (
+                get_stock_news_details_unified as core_details_tool,
+            )
+
+            if hasattr(core_details_tool, "invoke"):
+                return core_details_tool.invoke(
+                    {"ticker": ticker, "curr_date": curr_date, "news_ids": news_ids}
+                )
+            return core_details_tool(ticker=ticker, curr_date=curr_date, news_ids=news_ids)
+        except Exception as e:
+            error_msg = f"统一新闻明细工具执行失败: {str(e)}"
+            logger.error(f"❌ [统一新闻明细工具/Toolkit桥接] {error_msg}")
             return error_msg
 
     @staticmethod

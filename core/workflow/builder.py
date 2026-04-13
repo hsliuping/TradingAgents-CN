@@ -634,6 +634,8 @@ class LegacyDependencyProvider:
                 toolkit.get_reddit_stock_info,
             ]),
             "news": ToolNode([
+                toolkit.get_stock_news_headlines_unified,
+                toolkit.get_stock_news_details_unified,
                 toolkit.get_stock_news_unified,
                 toolkit.get_global_news_openai,
                 toolkit.get_google_news,

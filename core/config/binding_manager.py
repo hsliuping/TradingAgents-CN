@@ -12,6 +12,17 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
+LEGACY_AGENT_TOOL_REWRITES = {
+    "news_analyst_v2": {
+        "remove": {"get_stock_news_unified"},
+        "ensure": [
+            "get_stock_news_headlines_unified",
+            "get_stock_news_details_unified",
+        ],
+    },
+}
+
+
 class BindingManager:
     """
     统一绑定管理器
@@ -109,12 +120,81 @@ class BindingManager:
             tool_ids = self._get_default_tools_for_agent(agent_id)
             logger.info(f"📦 [BindingManager] 代码配置结果: {tool_ids}")
 
+        tool_ids = self._normalize_tool_ids(agent_id, tool_ids)
+
         # 更新缓存
         self._cache["tool_agent"][agent_id] = tool_ids
         self._cache_time[cache_key] = datetime.utcnow()
 
         logger.info(f"✅ [BindingManager] {agent_id} 最终工具列表: {tool_ids}")
         return tool_ids
+
+    def _normalize_tool_ids(self, agent_id: str, tool_ids: List[str]) -> List[str]:
+        """归一化工具列表，过滤脏数据并兼容旧绑定。"""
+        normalized_tools: List[str] = []
+        seen_tools = set()
+        invalid_tools: List[str] = []
+        registry = None
+
+        try:
+            from core.tools.registry import ToolRegistry
+
+            registry = ToolRegistry()
+        except Exception as exc:
+            logger.warning(f"⚠️ [BindingManager] 初始化工具注册表失败，跳过工具有效性校验: {exc}")
+
+        for tool_id in tool_ids:
+            if not tool_id or tool_id in seen_tools:
+                continue
+
+            if registry is not None and not registry.has_tool(tool_id):
+                invalid_tools.append(tool_id)
+                continue
+
+            seen_tools.add(tool_id)
+            normalized_tools.append(tool_id)
+
+        if invalid_tools:
+            logger.warning(
+                f"⚠️ [BindingManager] {agent_id} 检测到无效工具绑定，已自动忽略: {invalid_tools}"
+            )
+
+        rewrite_rule = LEGACY_AGENT_TOOL_REWRITES.get(agent_id)
+        if not rewrite_rule:
+            return normalized_tools
+
+        removed_tools = []
+        remove_tools = rewrite_rule.get("remove", set())
+        if remove_tools:
+            filtered_tools = []
+            for tool_id in normalized_tools:
+                if tool_id in remove_tools:
+                    removed_tools.append(tool_id)
+                    continue
+                filtered_tools.append(tool_id)
+            normalized_tools = filtered_tools
+
+        if removed_tools:
+            logger.info(
+                f"🔄 [BindingManager] {agent_id} 检测到旧工具绑定，已替换为新工具流程: {removed_tools}"
+            )
+
+        added_tools = []
+        for required_tool in rewrite_rule.get("ensure", []):
+            if required_tool in normalized_tools:
+                continue
+            if registry is not None and not registry.has_tool(required_tool):
+                logger.warning(
+                    f"⚠️ [BindingManager] {agent_id} 需要的工具未注册，无法自动补齐: {required_tool}"
+                )
+                continue
+            normalized_tools.append(required_tool)
+            added_tools.append(required_tool)
+
+        if added_tools:
+            logger.info(f"✅ [BindingManager] {agent_id} 自动补齐工具: {added_tools}")
+
+        return normalized_tools
     
     def _get_default_tools_for_agent(self, agent_id: str) -> List[str]:
         """从代码配置获取默认工具列表"""
