@@ -381,73 +381,46 @@ class ResearchManagerV2(ManagerAgent):
             logger.info(f"✅ 从模板系统获取研究经理用户提示词 (长度: {len(prompt)})")
             return prompt
         
-        # 🆕 判断交易风格（用于权重设置）
-        trading_style = state.get("trading_style")  # 从state获取交易风格（如果有）
-        
-        # 降级：使用默认提示词
-        prompt = f"""请综合分析 {company_name}（{ticker}）的投资机会：
+        market_name = state.get("market_name", "")
+        currency_name = state.get("currency_name", "")
+        currency_symbol = state.get("currency_symbol", "")
 
-股票代码：{ticker}
-公司名称：{company_name}
-分析日期：{analysis_date}
+        target_line = f"{company_name}（{ticker}）"
+        if market_name:
+            target_line = f"{company_name}（{ticker}，{market_name}）"
 
-"""
-        
-        # 🆕 根据交易风格设置看涨/看跌观点的权重
-        bull_report = inputs.get("bull_report", "")
-        bear_report = inputs.get("bear_report", "")
-        
-        if trading_style == "short":
-            # 短线：看涨和看跌观点权重相等（各50%）
-            prompt += f"""【看涨观点】（权重50%，请重点关注）
-{bull_report}
+        prompt = (
+            "基于提供的研究材料进行综合研究判断。\n"
+            "可用资源：\n"
+            f"- 分析目标：{target_line}\n"
+            f"- 分析日期：{analysis_date}\n"
+            f"- 货币单位：{currency_name}（{currency_symbol}）\n"
+            f"- 当前价格上下文：{current_price}\n"
+            f"- 看涨观点：{bull_report_content}\n"
+            f"- 看跌观点：{bear_report_content}\n"
+            f"- 辩论总结：{debate_summary or '材料未提供'}\n"
+        )
 
-【看跌观点】（权重50%，请重点关注）
-{bear_report}
-"""
-        elif trading_style == "long":
-            # 中长线：看涨和看跌观点权重相等（各50%）
-            prompt += f"""【看涨观点】（权重50%，请重点关注）
-{bull_report}
-
-【看跌观点】（权重50%，请重点关注）
-{bear_report}
-"""
-        else:
-            # 默认：看涨和看跌观点权重相等
-            if bull_report:
-                prompt += f"\n【看涨观点】\n{bull_report}\n"
-            if bear_report:
-                prompt += f"\n【看跌观点】\n{bear_report}\n"
-        
-        # 添加辩论总结
-        if debate_summary:
-            prompt += f"\n【辩论总结】\n{debate_summary}\n"
-        
-        # 添加其他输入
         for key, value in inputs.items():
             if key not in ["bull_report", "bear_report"]:
-                prompt += f"\n【{key}】\n{value}\n"
-        
-                prompt += f"""
-请基于以上信息输出一份研究简报，而不是交易方案。
+                prompt += f"- 补充材料 {key}：{value}\n"
 
-**任务要求**：
-- 客观权衡看涨和看跌观点，形成当前研究判断：看涨 / 中性 / 看跌。
-- 说明支持判断的核心依据，突出最关键的证据而非罗列所有信息。
+        prompt += f"""
+
+任务重点：
+- 客观权衡看涨和看跌观点，先概括共识，再写最关键的分歧，形成当前研究判断：看涨 / 中性 / 看跌。
+- 提炼支持判断的核心依据，突出最关键的证据而非罗列所有信息。
 - 识别关键不确定性，以及哪些新增事实会让当前判断上修、下修或失效。
 - 列出后续观察事项，优先使用财报、公告、经营指标、行业数据、政策变化等可验证事项。
+- 如果任一材料为空或证据不足，必须明确写“材料未提供”或“仍待验证”，不得使用模型记忆补全。
+- 如果提到等待财报或年报，不要指定过时年份，直接写“等待下一期财报”或“等待年报发布”。
 
-**严格禁止**：
+严格禁止：
 - 不得输出买入、卖出、持有、加仓、减仓、清仓等动作建议。
 - 不得输出目标价、价格区间、关键价位、风险控制参考价、仓位比例、收益预期。
 - 不得把观察条件写成价格触发后的执行动作。
 
-**时间上下文说明**：
-- 当前分析日期：{analysis_date}
-- 如果提到等待财报或年报，不要指定过时年份，直接写“等待下一期财报”或“等待年报发布”。
-
-**输出格式**：
+输出格式：
 请使用 JSON 输出，字段如下：
 ```json
 {{
@@ -464,7 +437,7 @@ class ResearchManagerV2(ManagerAgent):
 }}
 ```
 
-**字段要求**：
+字段要求：
 - `analysis_view`、`confidence`、`summary`、`reasoning` 为必填。
 - `core_evidence`、`uncertainties`、`invalidation_conditions`、`watch_items` 为数组，尽量提供 2-5 条。
 - 所有字段都必须服务于研究判断，不能出现交易执行语言。
@@ -473,11 +446,10 @@ class ResearchManagerV2(ManagerAgent):
         logger.info(f"📝 用户提示词总长度: {len(prompt)} 字符")
         logger.info(f"📝 用户提示词前500字符:\n{prompt[:500]}...")
 
-        # 检查是否包含分析步骤指导
-        if "分析步骤" in prompt and "提取关键数据" in prompt:
-            logger.info("✅ 用户提示词包含【分析步骤】指导")
+        if "可用资源" in prompt and "任务重点" in prompt:
+            logger.info("✅ 用户提示词包含【可用资源】与【任务重点】指导")
         else:
-            logger.warning("⚠️ 用户提示词不包含【分析步骤】指导")
+            logger.warning("⚠️ 用户提示词不包含【可用资源】与【任务重点】指导")
 
         return prompt
     

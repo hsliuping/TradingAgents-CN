@@ -151,6 +151,7 @@ class TraderV2(TraderAgent):
     - **强调不确定性**：必须说明信息缺口、关键假设和判断调整条件。
     - **用户可读**：让用户看懂“为什么这样看”以及“接下来观察什么”。
     - **禁止交易化表达**：不得输出目标价、价格区间、关键价位、止损止盈、仓位比例、建仓节奏或操作策略。
+    - **缺失材料要明说**：如果研究结论、任一分析报告或历史记录缺失，必须明确写出“材料未提供”或“仍待验证”，不得自行补造。
 
     ## 重要说明
 
@@ -255,72 +256,54 @@ class TraderV2(TraderAgent):
             logger.info(f"📝 用户提示词前500字符:\n{prompt[:500]}...")
             return prompt
         
+        market_name = state.get("market_name", "")
+        industry = state.get("industry", "")
+        current_price = state.get("current_price", "")
+
+        target_line = f"{company_name}（{ticker}）"
+        if market_name:
+            target_line = f"{company_name}（{ticker}，{market_name}）"
+
         # 降级：使用默认用户提示词（不包含 risk_assessment）
         logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
-        prompt = f"""请为 {company_name}（{ticker}）生成研究整合意见：
+        prompt = f"""基于提供的研究材料生成研究整合简报。
+    可用资源：
+    - 分析目标：{target_line}
+    - 分析日期：{analysis_date}
+    - 货币单位：{currency_name}（{currency_symbol}）
+    - 当前价格上下文：{current_price or '材料未提供'}
+    - 所属行业：{industry or '材料未提供'}
+    - 当前研究结论：{extract_content(investment_plan) if investment_plan else '材料未提供'}
+    - 市场分析报告：{extract_content(all_reports.get("market_report", "")) or '材料未提供'}
+    - 基本面分析报告：{extract_content(all_reports.get("fundamentals_report", "")) or '材料未提供'}
+    - 新闻分析报告：{extract_content(all_reports.get("news_report", "")) or '材料未提供'}
+    - 情绪分析报告：{extract_content(all_reports.get("sentiment_report", "")) or '材料未提供'}
+    - 板块分析报告：{extract_content(all_reports.get("sector_report", "")) or '材料未提供'}
+    - 大盘分析报告：{extract_content(all_reports.get("index_report", "")) or '材料未提供'}
+    - 看涨研究报告：{extract_content(all_reports.get("bull_report", "")) or '材料未提供'}
+    - 看跌研究报告：{extract_content(all_reports.get("bear_report", "")) or '材料未提供'}
+    - 历史交易记录：{chr(10).join([str(trade) for trade in historical_trades[:3]]) if historical_trades else '材料未提供'}
 
-## 基本信息
-- **股票代码**：{ticker}
-- **公司名称**：{company_name}
-- **分析日期**：{analysis_date}
-- **货币单位**：{currency_name}（{currency_symbol}）
+    任务重点：
+    - 基于上述研究结论和各类分析报告，生成研究摘要、核心依据、情景框架、关键不确定性、后续观察事项和风险提示。
+    - 先概括共识，再提炼最关键的证据冲突、信息缺口和判断调整条件。
+    - 如果任一资源为空、材料不足或没有明确证据，必须直接写“材料未提供”或“仍待验证”，不得使用模型记忆补全。
+    - 情景框架与后续观察事项只能写研究条件变化，不得改写成价格触发、仓位动作、止损止盈或执行节奏。
 
-## 投资计划
+    严格禁止：
+    - 不得输出价格区间、目标价、关键验证位、止损止盈、仓位比例、建仓节奏或执行策略。
+    - 不得把观察条件写成“达到某价位后执行什么动作”。
+    - 输出应帮助用户理解研究逻辑，而不是告诉用户怎么交易。
 
-{extract_content(investment_plan) if investment_plan else "无投资计划"}
-
-## 可用分析报告
-
-### 1. 市场分析报告
-{extract_content(all_reports.get("market_report", "")) or "无市场分析报告"}
-
-### 2. 基本面分析报告
-{extract_content(all_reports.get("fundamentals_report", "")) or "无基本面分析报告"}
-
-### 3. 新闻分析报告
-{extract_content(all_reports.get("news_report", "")) or "无新闻分析报告"}
-
-### 4. 板块分析报告
-{extract_content(all_reports.get("sector_report", "")) or "无板块分析报告"}
-
-### 5. 大盘分析报告
-{extract_content(all_reports.get("index_report", "")) or "无大盘分析报告"}
-
-### 6. 看涨研究报告
-{extract_content(all_reports.get("bull_report", "")) or "无看涨研究报告"}
-
-### 7. 看跌研究报告
-{extract_content(all_reports.get("bear_report", "")) or "无看跌研究报告"}
-
-## 历史交易记录（如有）
-
-{chr(10).join([str(trade) for trade in historical_trades[:3]]) if historical_trades else "无历史交易记录"}
-
-## 任务要求
-
-请基于上述研究结论和各类分析报告，生成详细的研究整合简报，包含以下部分：
-
-1. **研究摘要**：当前判断的核心含义，用 80-150 字说清“现在为什么这样看”。
-2. **关键证据与信号**：3-5 条，提炼最支持或最削弱判断的核心信息。
-3. **情景框架**：分别说明偏多、偏空、中性情景各自取决于哪些事实变化。
-4. **信息缺口与关键不确定性**：指出仍需验证的关键问题。
-5. **后续观察清单**：列出接下来应重点跟踪的数据、公告、财报、经营指标或政策变化。
-
-**重要提示**：
-- 不得输出价格区间、目标价、关键验证位、止损止盈、仓位比例、建仓节奏或执行策略。
-- 不得把观察条件写成“达到某价位后执行什么动作”。
-- 输出应帮助用户理解研究逻辑，而不是告诉用户怎么交易。
-- 使用 {currency_name}（{currency_symbol}）作为上下文货币单位，但不要据此生成价格指令。
-
-**输出格式**：
-请使用 Markdown 输出，并严格包含以下标题：
-- `## 研究摘要`
-- `## 核心依据`
-- `## 情景框架`
-- `## 关键不确定性`
-- `## 后续观察事项`
-- `## 风险提示`
-"""
+    输出格式：
+    请使用 Markdown 输出，并严格包含以下标题：
+    - `## 研究摘要`
+    - `## 核心依据`
+    - `## 情景框架`
+    - `## 关键不确定性`
+    - `## 后续观察事项`
+    - `## 风险提示`
+    """
         
         return prompt
     
