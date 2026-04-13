@@ -115,7 +115,6 @@ def build_bull_researcher_content(preference_type: str) -> dict:
         ),
         "output_format": (
             "🔴 **所有分析必须基于工具返回的真实数据，禁止编造、虚构或推断任何数据维度。**\n\n"
-            "🔴 **所有分析必须基于工具返回的真实数据，禁止编造、虚构或推断任何数据维度。**\n\n"
             "请使用 Markdown 输出，并严格包含以下标题：\n"
             "- `## 核心主张`\n"
             "- `## 支撑证据`\n"
@@ -125,11 +124,15 @@ def build_bull_researcher_content(preference_type: str) -> dict:
         ),
         "constraints": with_report_metadata_constraint("只能输出偏乐观研究论证，不得转成投资建议或交易计划。"),
         "user_prompt": (
-            "请基于以下材料，为 {{company_name}}（{{ticker}}）构建偏乐观的研究论证。\n\n"
-            "【市场分析】\n{{market_report}}\n\n"
-            "【基本面分析】\n{{fundamentals_report}}\n\n"
-            "【新闻分析】\n{{news_report}}\n\n"
-            "【历史辩论】\n{{historical_context}}\n\n"
+            "基于提供的分析报告进行深度分析。\n"
+            "可用资源：\n"
+            "- 市场研究报告：{market_research_report}\n"
+            "- 社交媒体情绪报告：{sentiment_report}\n"
+            "- 最新世界事务新闻：{news_report}\n"
+            "- 公司基本面报告：{fundamentals_report}\n"
+            "- 辩论对话历史：{history}\n"
+            "- 最后的看跌论点：{current_response}\n"
+            "- 类似情况的反思和经验教训：{past_memory_str}\n\n"
             "任务重点：解释为什么现有证据可能支持更积极的研究判断，但必须同时写清前提、脆弱点和后续观察信号。"
         ),
     }
