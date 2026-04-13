@@ -29,7 +29,7 @@ V2_AGENTS = {
     "analysts_v2": [
         ("fundamentals_analyst_v2", "基本面分析师 v2.0", "get_stock_fundamentals_unified"),
         ("market_analyst_v2", "市场分析师 v2.0", "get_stock_market_data_unified"),
-        ("news_analyst_v2", "新闻分析师 v2.0", "get_stock_news_unified"),
+        ("news_analyst_v2", "新闻分析师 v2.0", "get_stock_news_headlines_unified + get_stock_news_details_unified"),
         ("social_analyst_v2", "社交媒体分析师 v2.0", "get_stock_sentiment_unified"),
         ("sector_analyst_v2", "板块分析师 v2.0", "get_sector_data"),
         ("index_analyst_v2", "大盘分析师 v2.0", "get_index_data"),
@@ -103,9 +103,11 @@ def generate_template_content(agent_type: str, agent_name: str, display_name: st
 允许引用真实事件、时间与数字，但不得输出买卖建议、目标价、价格区间、止损止盈或仓位计划。""",
             "tool_guidance": """**工具使用指导**:
 
-1. 必须调用 get_stock_news_unified 获取真实新闻数据
-2. 调用参数使用 ticker 与 curr_date
-3. 只分析真实返回的事件、公告和监管信息
+1. 第一步必须调用 get_stock_news_headlines_unified 获取去重后的新闻标题
+2. 先根据标题、来源、相关性和明细建议做去重筛选，再决定是否展开
+3. 第二步按需调用 get_stock_news_details_unified，一次性传入 1 至 3 个 news_id
+4. 如果标题工具提示“可暂不展开”，除非该新闻对核心论点必要，否则不要继续拉明细
+5. 不要调用 get_stock_news_unified；该工具仅保留兼容用途
 
 ⚠️ 严格禁止：假设或编造新闻、把事件解读改写成交易建议或价格触发条件。""",
             "analysis_requirements": """**分析要求**:

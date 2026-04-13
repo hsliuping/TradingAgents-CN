@@ -206,8 +206,8 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         icon="📰",
         color="#9b59b6",
         tags=["新闻", "事件驱动"],
-        tools=["get_stock_news_unified", "get_global_news_openai", "get_google_news", "get_finnhub_news", "get_reddit_news"],
-        default_tools=["get_stock_news_unified"],
+        tools=["get_stock_news_headlines_unified", "get_stock_news_details_unified", "get_global_news_openai", "get_google_news", "get_finnhub_news", "get_reddit_news"],
+        default_tools=["get_stock_news_headlines_unified", "get_stock_news_details_unified"],
         max_tool_calls=3,
         # 🆕 工作流配置
         requires_tools=True,
@@ -627,8 +627,8 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         icon="📰",
         color="#9b59b6",
         tags=["新闻", "事件驱动", "v2.0"],
-        tools=["get_stock_news_unified"],
-        default_tools=["get_stock_news_unified"],
+        tools=["get_stock_news_headlines_unified", "get_stock_news_details_unified"],
+        default_tools=["get_stock_news_headlines_unified", "get_stock_news_details_unified"],
         max_tool_calls=3,
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),

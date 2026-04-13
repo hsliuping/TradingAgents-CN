@@ -729,10 +729,18 @@ ANALYST_TEMPLATES_V2["news_analyst_v2"] = {
 2. 可能强化研究判断的催化线索
 3. 催化持续性、传播强度与信息缺口
 4. 需要继续验证的事件节点""",
-        "tool_guidance": """🔴 **立即调用** get_stock_news_unified 工具获取新闻数据
+        "tool_guidance": """🔴 **第一步必须调用** get_stock_news_headlines_unified 获取去重后的新闻标题
 参数: ticker='{ticker}', curr_date='{current_date}'
 
-⚠️ **重要**: 必须先调用工具获取真实新闻，禁止假设或编造。""",
+🔴 **第二步按需调用** get_stock_news_details_unified 获取新闻明细
+参数: news_ids='逗号分隔的 news_id'
+
+⚠️ **重要规则**:
+1. 先根据标题、来源、相关性和明细建议做去重筛选
+2. 只对 1 至 3 条确有分析价值的新闻拉取明细
+3. 如果标题工具提示“可暂不展开”，除非该新闻对核心论点必要，否则不要继续拉明细
+4. 已有足够工具结果时直接写报告，不要重复调用
+5. 禁止假设或编造新闻内容，不要调用 get_stock_news_unified；该工具仅保留兼容用途。""",
         "analysis_requirements": """**高敏感度新闻分析要求**:
 
 📰 **事件识别**:
@@ -773,13 +781,18 @@ ANALYST_TEMPLATES_V2["news_analyst_v2"] = {
 3. 催化/风险因素平衡分析
 4. 事件影响路径与信息缺口
 5. 后续观察事项""",
-        "tool_guidance": """🔴 **立即调用** get_stock_news_unified 工具获取新闻数据
+        "tool_guidance": """🔴 **第一步必须调用** get_stock_news_headlines_unified 获取去重后的新闻标题
 参数: ticker='{ticker}', curr_date='{current_date}'
 
+🔴 **第二步按需调用** get_stock_news_details_unified 获取新闻明细
+参数: news_ids='逗号分隔的 news_id'
+
 ⚠️ **重要规则**:
-1. 必须先调用工具获取真实新闻数据
-2. 已有工具结果时直接生成分析报告
-3. 禁止假设或编造任何新闻内容""",
+1. 先根据标题、来源、相关性和明细建议做去重筛选
+2. 只对 1 至 3 条确有分析价值的新闻拉取明细
+3. 如果标题工具提示“可暂不展开”，除非该新闻对核心论点必要，否则不要继续拉明细
+4. 已有足够工具结果时直接写报告，不要重复调用
+5. 禁止假设或编造新闻内容，不要调用 get_stock_news_unified；该工具仅保留兼容用途。""",
         "analysis_requirements": """**中性型新闻分析要求**:
 
 📰 **新闻分类分析**:
@@ -836,10 +849,18 @@ ANALYST_TEMPLATES_V2["news_analyst_v2"] = {
 3. 市场不确定性分析
 4. 潜在的负面催化剂
 5. 风险预警与后续观察事项""",
-        "tool_guidance": """🔴 **立即调用** get_stock_news_unified 工具获取新闻数据
+        "tool_guidance": """🔴 **第一步必须调用** get_stock_news_headlines_unified 获取去重后的新闻标题
 参数: ticker='{ticker}', curr_date='{current_date}'
 
-⚠️ **重要**: 必须基于真实新闻数据进行分析。""",
+🔴 **第二步按需调用** get_stock_news_details_unified 获取新闻明细
+参数: news_ids='逗号分隔的 news_id'
+
+⚠️ **重要规则**:
+1. 先根据标题、来源、相关性和明细建议做去重筛选
+2. 只对 1 至 3 条确有分析价值的新闻拉取明细
+3. 如果标题工具提示“可暂不展开”，除非该新闻对核心论点必要，否则不要继续拉明细
+4. 已有足够工具结果时直接写报告，不要重复调用
+5. 禁止假设或编造新闻内容，不要调用 get_stock_news_unified；该工具仅保留兼容用途。""",
         "analysis_requirements": """**保守型新闻分析要求**:
 
 ⚠️ **风险新闻识别**:

@@ -7,6 +7,8 @@
 import logging
 from typing import Dict, Any, Optional
 
+from langchain_core.messages import SystemMessage, HumanMessage
+
 from core.agents.analyst import AnalystAgent
 from core.agents.config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from core.agents.registry import register_agent
@@ -75,6 +77,45 @@ class SocialMediaAnalystV2(AnalystAgent):
     
     # 输出字段名
     output_field = "sentiment_report"
+
+    def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """覆盖执行逻辑以支持专用情绪分析提示词。"""
+        try:
+            ticker = state.get("ticker") or state.get("company_of_interest")
+            analysis_date = state.get("analysis_date") or state.get("trade_date")
+            market_type = state.get("market_type", "A股")
+            context = state.get("context")
+            overrides = state.get("prompt_overrides") or {}
+            system_override = overrides.get("system")
+            user_override = overrides.get("user")
+            analysis_override = overrides.get("analysis")
+
+            if not ticker or not analysis_date:
+                raise ValueError("Missing required parameters: ticker or analysis_date")
+
+            system_prompt = system_override or self._build_system_prompt(market_type, context=context, state=state)
+            user_prompt = user_override or self._build_user_prompt(ticker, analysis_date, {}, state)
+            analysis_prompt = analysis_override or self._build_analysis_prompt(ticker)
+
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ]
+
+            if self._llm:
+                if self._langchain_tools:
+                    report = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)
+                else:
+                    response = self._llm.invoke(messages)
+                    report = response.content if hasattr(response, "content") else str(response)
+            else:
+                raise ValueError("LLM not initialized")
+
+            return {self.output_field: report}
+
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] 执行失败: {e}", exc_info=True)
+            return {self.output_field: f"执行失败: {str(e)}"}
 
     def _build_system_prompt(self, market_type: str = None, context=None, state: Dict[str, Any] = None) -> str:
         """
@@ -266,9 +307,14 @@ class SocialMediaAnalystV2(AnalystAgent):
 
     def _get_company_name(self, ticker: str, state: Dict[str, Any]) -> str:
         """获取公司名称"""
-        # 优先从state获取
-        if "company_name" in state:
-            return state["company_name"]
+        company_name = str(
+            state.get("company_name")
+            or state.get("stock_name")
+            or state.get("name")
+            or ""
+        )
+        if company_name:
+            return company_name
         
         # 使用StockUtils获取
         if StockUtils:
@@ -283,4 +329,29 @@ class SocialMediaAnalystV2(AnalystAgent):
                 logger.debug(f"获取公司名称失败: {e}")
         
         return f"股票{ticker}"
+
+    def _build_analysis_prompt(self, ticker: str) -> str:
+        """构建工具调用后的情绪分析提示词。"""
+        return f"""基于获取的数据，请生成 {ticker} 的专业情绪研究报告，包括：
+
+1. 情绪方向与热度
+2. 观点结构与渠道差异
+3. 情绪变化与分化
+4. 噪音与风险
+5. 对整体研究结论的影响
+6. 后续观察事项
+
+如果工具结果没有 KOL、散户、机构、平台分层、互动数据或高影响力消息等某个维度，就不要分析该维度；如必须提及，只能写“工具结果未提供”或“该维度暂不分析”。
+如果工具明确说明当前结果来自新闻回退情绪摘要而非真实社媒内容，正文必须明确写出这一点，且不得把回退结果写成 KOL、散户、机构或社区分层结论。
+情绪方向、讨论热度、平台分布、互动强弱和高影响力消息要分开表述；不要把消息数量更多、关键词更集中或互动更高，直接写成“市场一致看多”“情绪持续升温”“趋势确认”。
+如果工具只提供当前快照、最近7天汇总或有限条消息，不得写“持续升温”“连续多日改善”“情绪已经反转”“市场形成一致预期”等需要更长时序验证的措辞。
+如果高影响力消息与总体情绪统计不一致，必须写出这种分化及其对结论强度的限制。
+可以引用工具返回的情绪评级、消息数量、平台分布、关键词、话题标签、互动数据和高影响力消息做事实说明，但不得把这些内容改写成目标价、价格区间、买卖建议、做多做空结论或执行计划。
+请使用研究口径表达情绪含义，优先使用“偏积极”“偏审慎”“中性”“分化加大”“噪音较高”“一致性有限”“值得继续跟踪”等表述，不要使用“情绪拐点已至”“全面看多”“抄底情绪升温”“马上反转”等交易化措辞。
+`## 对整体研究结论的影响` 只说明情绪信号如何强化、削弱或中性影响整体研究判断，不要把情绪直接写成趋势结论。
+`## 后续观察事项` 只能写需要继续跟踪的情绪方向、讨论主题、平台结构变化、互动强度变化或与新闻/基本面的交叉验证，不得写成交易触发条件。
+在工具结果充分时，报告应保持足够展开，正常情况下不少于700字。
+
+不要输出投资建议、目标价、价格区间、仓位或执行计划。
+不得添加任何署名、作者、分析师、日期或声明信息。"""
 

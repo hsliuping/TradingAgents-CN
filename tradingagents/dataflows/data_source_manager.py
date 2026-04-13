@@ -738,6 +738,20 @@ class DataSourceManager:
             str: 格式化的数据报告（包含技术指标）
         """
         try:
+            def _format_trade_date(value: Any) -> str:
+                if value is None:
+                    return ""
+                try:
+                    if pd.isna(value):
+                        return ""
+                except Exception:
+                    pass
+
+                try:
+                    return pd.to_datetime(value).strftime("%Y-%m-%d")
+                except Exception:
+                    return str(value)
+
             original_data_count = len(data)
             logger.info(f"📊 [技术指标] 开始计算技术指标，原始数据: {original_data_count}条")
 
@@ -802,6 +816,8 @@ class DataSourceManager:
             display_rows = min(5, len(data))
             display_data = data.tail(display_rows)
             latest_data = data.iloc[-1]
+            latest_trade_date = _format_trade_date(latest_data.get('date'))
+            requested_end_date = _format_trade_date(end_date) or str(end_date)
 
             # 🔍 [调试日志] 打印最近5天的原始数据和技术指标
             logger.info(f"🔍 [技术指标详情] ===== 最近{display_rows}个交易日数据 =====")
@@ -824,6 +840,14 @@ class DataSourceManager:
 
             # 格式化数据报告
             result = f"📊 {stock_name}({symbol}) - 技术分析数据\n"
+            result += f"请求分析日期: {requested_end_date}\n"
+            if latest_trade_date:
+                result += f"实际数据日期: {latest_trade_date}\n"
+            if latest_trade_date and latest_trade_date != requested_end_date:
+                result += (
+                    f"日期说明: 请求分析日期 {requested_end_date} 暂无完整日线数据，"
+                    f"以下价格与技术指标以 {latest_trade_date} 为准\n"
+                )
             result += f"数据期间: {start_date} 至 {end_date}\n"
             result += f"数据条数: {original_data_count}条 (展示最近{display_rows}个交易日)\n\n"
 

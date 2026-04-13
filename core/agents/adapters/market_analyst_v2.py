@@ -6,6 +6,7 @@
 """
 
 import logging
+import re
 from typing import Any, Dict, Optional
 
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -14,6 +15,52 @@ from ..config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, Agen
 from ..registry import register_agent
 
 logger = logging.getLogger(__name__)
+
+_MARKET_REPORT_SANITIZE_RULES = [
+    (r"价格区间", "波动范围"),
+    (r"支撑位", "支撑关系"),
+    (r"阻力位", "压力关系"),
+    (r"关键价位", "关键价格关系"),
+    (r"风险控制位", "风险观察位置"),
+    (r"价格分析区间", "历史波动区间"),
+    (r"尚未站上\s*(MA\d+)", r"仍低于\1"),
+    (r"尚未突破\s*(MA\d+)", r"仍低于\1"),
+    (r"重新站上\s*(MA\d+)", r"回到\1上方"),
+    (r"站上\s*(MA\d+)", r"高于\1"),
+    (r"尚未站稳于\s*(MA\d+)(?:之上|上方)?", r"仍低于\1"),
+    (r"未能有效站稳于其上方", "与该均线的关系仍待改善"),
+    (r"未能有效站稳于\s*(MA\d+)(?:之上|上方)?", r"与\1的关系仍待改善"),
+    (r"站稳\s*(MA\d+)", r"高于\1"),
+    (r"站稳于\s*(MA\d+)(?:之上|上方)?", r"高于\1"),
+    (r"站稳信号", "关系改善信号"),
+    (r"能否实现有效站稳", "短期均线关系是否改善"),
+    (r"尚未形成有效突破(?:信号|支撑)", "上破依据仍不足"),
+    (r"未形成有效突破信号", "上破依据仍不足"),
+    (r"未形成有效突破支撑", "上破依据仍不足"),
+    (r"未形成有效突破", "上破依据仍不足"),
+    (r"有效突破", "明确上破"),
+    (r"强势突破", "明显上破"),
+    (r"对关键短期均线的突破", "对关键短期均线关系的改善"),
+    (r"对短期均线上方的确认", "与短期均线关系改善的确认"),
+    (r"上行突破动力", "进一步走强依据"),
+    (r"未突破布林带上轨", "仍低于布林带上轨"),
+    (r"突破布林带上轨", "高于布林带上轨"),
+    (r"持续运行于", "位于"),
+    (r"柱状图是否(?:出现)?持续放大或收缩", "动能一致性是否增强或减弱"),
+    (r"柱状图是否(?:出现)?持续放大", "动能一致性是否增强"),
+    (r"MACD柱状图若继续持续放大", "MACD动能若进一步增强"),
+    (r"持续放大", "进一步增强"),
+    (r"持续收缩", "进一步减弱"),
+    (r"未能维持站稳", "关系仍待改善"),
+    (r"上行空间受限", "短期弹性受限"),
+    (r"上行空间支撑", "偏积极支撑"),
+    (r"上行支撑力", "偏积极支撑"),
+    (r"上行空间", "进一步抬升弹性"),
+    (r"较前期有所收窄，表明短期波动趋于收敛", "显示短期波动集中在当前区间内"),
+    (r"向上排列趋势", "偏强排列"),
+    (r"未形成明确上升趋势", "后续是否形成明确上行方向仍待验证"),
+    (r"增强了市场信心", "为研究判断提供了一定技术支撑"),
+]
 
 # 尝试导入工具函数
 try:
@@ -63,9 +110,7 @@ class MarketAnalystV2(AnalystAgent):
         version="2.0.0",
         license_tier=LicenseTier.FREE,
         default_tools=[
-            "get_stock_price",
-            "get_technical_indicators",
-            "get_volume_data"
+            "get_stock_market_data_unified"
         ],
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
@@ -152,6 +197,8 @@ class MarketAnalystV2(AnalystAgent):
             if not user_prompt:
                 user_prompt = self._build_user_prompt(ticker, analysis_date, state)
 
+            analysis_prompt = analysis_override or self._build_analysis_prompt(ticker)
+
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
@@ -162,12 +209,14 @@ class MarketAnalystV2(AnalystAgent):
 
             if self._llm:
                 if self._langchain_tools:
-                    report = self.invoke_with_tools(messages, analysis_prompt=analysis_override)
+                    report = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)
                 else:
                     response = self._llm.invoke(messages)
                     report = response.content if hasattr(response, 'content') else str(response)
             else:
                 raise ValueError("LLM not initialized")
+
+            report = self._sanitize_report(report)
 
             return {self.output_field: report}
 
@@ -200,6 +249,8 @@ class MarketAnalystV2(AnalystAgent):
         # 如果 state 中有 ticker 和 analysis_date，提取它们（系统提示词模板可能需要）
         if "ticker" in state:
             template_variables["ticker"] = state["ticker"]
+        if "company_name" in state:
+            template_variables["company_name"] = state["company_name"]
         if "analysis_date" in state or "trade_date" in state:
             analysis_date = state.get("analysis_date") or state.get("trade_date")
             if analysis_date:
@@ -208,6 +259,14 @@ class MarketAnalystV2(AnalystAgent):
                     analysis_date = analysis_date.split()[0]
                 template_variables["current_date"] = analysis_date
                 template_variables["analysis_date"] = analysis_date
+        if state.get("market_name"):
+            template_variables["market_name"] = state["market_name"]
+        if state.get("currency_name"):
+            template_variables["currency_name"] = state["currency_name"]
+        if state.get("currency_symbol"):
+            template_variables["currency_symbol"] = state["currency_symbol"]
+        if self._langchain_tools:
+            template_variables["tool_names"] = ", ".join([t.name for t in self._langchain_tools])
         
         # 使用基类的通用方法从模板系统获取提示词（参考 research_manager_v2）
         # 基类会自动从 state 中提取系统变量（如 current_price、industry 等）
@@ -273,21 +332,36 @@ class MarketAnalystV2(AnalystAgent):
         
         # 获取公司名称和市场信息
         market_name = "中国A股"
-        company_name = ""
+        company_name = str(
+            state.get("company_name")
+            or state.get("stock_name")
+            or state.get("name")
+            or ""
+        )
         currency_name = "人民币"
         currency_symbol = "¥"
         
         if StockUtils and ticker:
             try:
                 market_info = StockUtils.get_market_info(ticker)
-                company_name = self._get_company_name(ticker, market_info)
                 market_name = market_info.get('market_name', "中国A股")
                 currency_name = market_info.get('currency_name', "人民币")
                 currency_symbol = market_info.get('currency_symbol', "¥")
+                market_company_name = str(market_info.get("company_name") or "").strip()
+                lookup_company_name = ""
+                if not market_company_name:
+                    lookup_company_name = str(self._get_company_name(ticker, market_info) or "").strip()
+
+                if market_company_name:
+                    company_name = market_company_name
+                elif lookup_company_name and not company_name:
+                    company_name = lookup_company_name
             except Exception as e:
                 logger.warning(f"获取市场信息失败: {e}")
-        else:
+
+        if not company_name:
             company_name = ticker
+        if not market_name:
             market_name = "未知市场"
         
         # 准备模板变量（参考 research_manager_v2 的实现）
@@ -331,6 +405,66 @@ class MarketAnalystV2(AnalystAgent):
 市场类型：{market_name}
 
 请调用工具获取市场数据，然后生成详细的市场分析报告。"""
+
+    def _build_analysis_prompt(self, ticker: str) -> str:
+        """构建工具调用后的专业分析提示词。"""
+        return f"""基于获取的数据，请生成 {ticker} 的专业市场结构研究报告，包括：
+
+1. 股票基本信息
+2. 技术指标分析
+    - 移动平均线（MA）分析
+    - MACD指标分析
+    - RSI相对强弱指标
+    - 布林带（BOLL）分析
+3. 价格趋势分析
+    - 短期趋势（5-10个交易日）
+    - 中期趋势（20-60个交易日）
+    - 成交量分析
+4. 综合评估
+5. 对整体研究结论的影响
+6. 后续观察点
+
+如果工具返回的实际数据日期不同于分析日期，必须在正文中明确写出实际数据日期。
+股票基本信息中的实际数据日期只能引用工具明确返回的“实际数据日期”或“最新有效日线日期”；如果分析日期是今天但工具显示最新有效日线仍为更早日期，禁止把分析日期直接写成实际数据日期。
+如果某项价格、指标或成交字段缺失，请直接写“工具结果未提供”或“该维度仍待验证”，不要自行补全。
+如果短期与中期信号冲突，必须明确写出冲突点以及为什么不能下更强结论。
+股票基本信息部分要写明公司名称、股票代码、所属市场、实际数据日期、当前价格、涨跌幅和成交量。
+技术指标分析部分要尽量完整覆盖 MA、MACD、RSI、BOLL 中工具已返回的内容，不要只写笼统总结。
+价格趋势分析部分要覆盖短期趋势、中期趋势和成交量分析，保留最近5日高低点、均价或价格重心变化等事实数据。
+如果工具只提供当前值、最近5日统计或单次快照，不得写“持续放大”“继续扩大”“连续多个交易日”“始终运行于”“站稳”“有效突破”“跌破失守”等需要更长时序验证的措辞。
+均线排列关系与均线斜率方向要分开表述；若没有更长历史序列，不要把“MA20 高于 MA60”直接写成“MA60 向上运行”或“中期趋势已扭转”。
+凡是写到价格、均线或最近5日高低点的大小规律，必须先按工具给出的真实数值核对；后续文字必须与表格和数值一致。若无法确保完整排序正确，就只写逐项高于/低于关系，不要强行写链式排列。
+不得写出与真实数值相反的比较式；例如 MA20 高于 MA60 时，不能写成“MA60 高于 MA20”。
+只有工具明确提供价格与指标拐点对应关系或直接识别结果时，才可使用“背离”一词；否则改写为“信号分化”或“尚未形成一致验证”。
+可以写最近5日历史高低点形成的历史波动区间，但不得写未来价格分析区间、关键触发区间或执行阈值。
+如果工具只给出最近5日最高价、最低价、均价或当前价格与均线位置，只能写“最高价为”“触及”“位于”“高于/低于”“接近”等事实，不得改写成“短暂突破”“重新站稳”“持续运行于”等确认式措辞。
+若工具未直接返回逐日穿越或阈值验证事实，不要写“曾一度突破MA5”“未能维持站稳”“有效站稳关键短期均线”等过程化表述；改写为当前价格与均线的相对关系及仍待验证事项。
+只要描述价格与均线、布林带或历史区间的相对关系，优先使用“高于/低于”“位于”“接近”“处于区间中上部”“关系仍待改善”等表述，不要使用“站上”“站稳”“强势突破”“有效突破”“持续运行于”“持续放大”“上行空间”这类阈值或空间化措辞。
+允许引用真实数值做事实说明，但不要把数值写成投资评级、目标价、价格分析区间、支撑阻力位、关键执行位、风险控制位或交易触发条件。
+请使用研究口径解释趋势、结构、动能和量价关系，不要把“突破、跌破、站稳、失守、回踩确认、放量突破”写成执行方案。
+`综合评估` 只归纳技术状态、主要强弱信号和冲突点，不要逐段重复前文指标解释；`对整体研究结论的影响` 只说明这些信号如何强化、削弱或中性影响整体研究，避免重复复述整套指标。
+后续观察点不要写成“是否站稳于MA5之上”“是否持续运行于MA10与MA20之上”“若价格创新高则背离”等阈值句式；改写为关系是否改善、量价是否继续一致、指标同步性是否增强或减弱等可复核方向。
+即便是否定句，也不要写“未形成有效突破”“未站稳于MA5之上”“MACD柱状图未持续放大”；改写为“上破证据仍不足”“价格与MA5关系仍待改善”“MACD当前为正值但延续性仍待验证”。
+正文与后续观察点都不要写“尚未站稳于MA5之上”“未能有效站稳关键短期均线”“能否实现有效站稳”“柱状图是否出现持续放大”；改写为“价格低于MA5，短期均线关系仍待改善”“MACD当前为正值，但动能一致性仍待验证”。
+若价格位于布林带中上部或高于部分均线，只能说明当前位置关系，不要写成“具备一定上行空间”“上方仍有空间”或其他空间判断。
+输出前必须做一次逐词自检：最终报告中不得出现“站上”“站稳”“有效突破”“强势突破”“持续运行于”“持续放大”“突破布林带上轨”“上行空间”这些原词；若出现，必须全部改写后再输出。
+在工具结果充分时，报告应保持足够展开，正常情况下不少于800字。
+
+不要输出交易建议、目标价、价格区间、仓位或执行计划。
+不得添加任何署名、作者、分析师、日期或声明信息。"""
+
+    def _sanitize_report(self, report: str) -> str:
+        if not isinstance(report, str) or not report:
+            return report
+
+        sanitized = report
+        for pattern, replacement in _MARKET_REPORT_SANITIZE_RULES:
+            sanitized = re.sub(pattern, replacement, sanitized)
+
+        if sanitized != report:
+            logger.info("[market_analyst_v2] 已对报告执行合规净化")
+
+        return sanitized
 
     def _get_company_name(self, ticker: str, market_info: dict) -> str:
         """

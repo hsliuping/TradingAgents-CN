@@ -322,7 +322,44 @@ ROLE_FIELD_OVERRIDES: Dict[str, Dict[str, str]] = {
 }
 
 
-def _make_parallel_analyst_override(role_name: str, focus: str, key_points: str, observation_points: str) -> Dict[str, str]:
+def _make_parallel_analyst_override(
+    role_name: str,
+    focus: str,
+    key_points: str,
+    observation_points: str,
+    standalone_validation_section: bool = True,
+) -> Dict[str, str]:
+    responsibility_4 = "4. 标记仍需继续验证的关键问题，供后续研究员和经理使用。"
+    output_requirement = "- 只输出研究观察、证据说明、风险提示和待验证问题。"
+    task_outputs = """
+            1. 核心观察
+            2. 关键证据与数据依据
+            3. 对整体研究结论的可能影响
+            4. 待继续验证的问题
+    """.rstrip()
+    analysis_requirement = (
+        f"重点分析：{observation_points}。必须同时给出证据来源、结论影响和待验证事项；"
+        "允许引用真实、可验证的事实型数字，但不得把数字改写成交易建议、关键执行位或触发条件。"
+    )
+    output_format = "使用 Markdown 输出：一、核心观察；二、关键证据；三、影响评估；四、待验证问题。"
+
+    if not standalone_validation_section:
+        responsibility_4 = "4. 如存在仍需继续验证的关键问题，在相关段落中简要说明其不确定性来源，供后续研究员和经理使用。"
+        output_requirement = "- 只输出研究观察、证据说明与影响评估；如存在不确定性，可在对应段落顺带一句说明，无需另起章节。"
+        task_outputs = """
+            1. 核心观察
+            2. 关键证据与数据依据
+            3. 对整体研究结论的可能影响
+
+            如存在仍待验证事项，可在对应段落顺带一句说明，无需另起章节。
+        """.rstrip()
+        analysis_requirement = (
+            f"重点分析：{observation_points}。必须同时给出证据来源与结论影响；"
+            "如存在仍待验证事项，可在对应段落顺带一句说明，无需另起章节；"
+            "允许引用真实、可验证的事实型数字，但不得把数字改写成交易建议、关键执行位或触发条件。"
+        )
+        output_format = "使用 Markdown 输出：一、核心观察；二、关键证据；三、影响评估。若存在仍待验证事项，可在对应段落顺带一句说明，无需另起章节。"
+
     return {
         "system_prompt": dedent(
             f"""
@@ -332,10 +369,10 @@ def _make_parallel_analyst_override(role_name: str, focus: str, key_points: str,
             1. 围绕{focus}提取关键事实、数据和变化趋势。
             2. 区分已验证事实、合理推断和暂未证实的信息。
             3. 说明这些证据对后续研究结论可能产生的支持、削弱或中性影响。
-            4. 标记仍需继续验证的关键问题，供后续研究员和经理使用。
+            {responsibility_4}
 
             输出要求：
-            - 只输出研究观察、证据说明、风险提示和待验证问题。
+            {output_requirement}
             - 不得输出买卖建议、目标价、止损止盈、仓位比例、建仓节奏或执行指令。
             - 如工具或输入数据缺失，应明确说明“数据缺失/待验证”，不得编造。
             - 可以引用工具或输入中已有的真实数值说明事实、结构和变化，但不得把这些数值改写成目标价、支撑阻力、操作价位或触发条件。
@@ -356,10 +393,7 @@ def _make_parallel_analyst_override(role_name: str, focus: str, key_points: str,
 
             ## 任务要求
             请优先使用工具获取与{focus}相关的真实数据，并输出：
-            1. 核心观察
-            2. 关键证据与数据依据
-            3. 对整体研究结论的可能影响
-            4. 待继续验证的问题
+{task_outputs}
 
             重点关注：
             {key_points}
@@ -368,8 +402,8 @@ def _make_parallel_analyst_override(role_name: str, focus: str, key_points: str,
             """
         ).strip(),
         "tool_guidance": f"优先使用 {{tool_names}} 获取与{focus}相关的真实数据；若数据缺失，明确指出缺口与对结论的影响。",
-        "analysis_requirements": f"重点分析：{observation_points}。必须同时给出证据来源、结论影响和待验证事项；允许引用真实、可验证的事实型数字，但不得把数字改写成交易建议、关键执行位或触发条件。",
-        "output_format": "使用 Markdown 输出：一、核心观察；二、关键证据；三、影响评估；四、待验证问题。",
+        "analysis_requirements": analysis_requirement,
+        "output_format": output_format,
         "constraints": with_report_metadata_constraint("禁止输出买卖建议、目标价、止损止盈、仓位比例、收益承诺、执行时机或任何可直接下单的表达。"),
     }
 
@@ -599,8 +633,8 @@ def _make_fundamentals_analyst_override(style_name: str, focus_bias: str, extra_
             输出只能用于研究辅助，不得给出交易建议或执行方案。
             """
         ).strip(),
-        "tool_guidance": "优先调用 get_stock_fundamentals_unified 获取整体基本面背景；如需补充最近季度三表与盈利质量细节，继续调用 get_financial_statements 与 get_cash_flow_statement。对 A 股，如需补充同行估值定位，继续调用 get_peer_comparison(ticker={ticker}, trade_date={current_date}, top_n=10)。如果工具已明确给出“单季度推导”字段，优先使用这些字段分析季度变化；“原始报告期累计/快照”字段主要用于核对口径。A 股季度财报中的营业收入、归母净利润、经营现金流等字段通常为报告期累计口径，Q2/Q3/Q4 不是单季度值，禁止直接相加或直接写成单季度逐季改善；如需单季度，必须明确说明是相邻累计值相减推导。ROE、净利率等指标当前按报告期指标快照展示，未做单季度还原。若工具结果已存在，直接基于现有结果输出，不要重复调用。若工具没有返回某项财务字段、估值字段或同行数据，明确写“工具结果未提供”，不得使用 LLM 自身知识补数据。",
-        "analysis_requirements": "必须同时说明：财务健康度、盈利能力、经营质量与效率、估值背景、成长性与稳定性平衡、机会与风险平衡、对整体研究结论的影响和总结。估值背景尽量拆成绝对估值、相对估值、历史分位和市场已计入预期；允许引用真实数值做事实说明，但不得把这些数值写成合理价位、目标价、价格区间、安全边际、景气拐点布局、仓位建议、收益空间、交易动作或触发条件。应结合行业特征和工具可得数据选择最有解释力的指标，不要求机械覆盖所有通用财务科目；若某类指标对当前行业不适用，不要把其缺失直接写成风险或数据缺口。对 A 股季度财报中的营业收入、归母净利润、经营现金流等字段，默认按报告期累计口径解释；若工具已明确给出“单季度推导”字段，应优先使用这些字段描述季度变化，不得再把原始累计字段误写成单季度逐季改善或把 Q1-Q4 直接相加。对 ROE、净利率等指标，默认按报告期指标快照解释。若存在仍待验证事项，可在对应段落顺带一句说明，不必单列“待验证问题”。",
+        "tool_guidance": "优先调用 get_stock_fundamentals_unified 获取整体基本面背景；对 A 股个股，在撰写正文前必须补充 get_financial_statements 与 get_cash_flow_statement。对 A 股，如需补充同行估值定位，继续调用 get_peer_comparison(ticker={ticker}, trade_date={current_date}, top_n=10)。如果工具已明确给出“单季度推导”字段，优先使用这些字段分析季度变化；“原始报告期累计/快照”字段主要用于核对口径。A 股季度财报中的营业收入、归母净利润、经营现金流等字段通常为报告期累计口径，Q2/Q3/Q4 不是单季度值，禁止直接相加或直接写成单季度逐季改善；如需单季度，必须明确说明是相邻累计值相减推导。ROE、净利率等指标当前按报告期指标快照展示，未做单季度还原。若工具结果已存在，直接基于现有结果输出，不要重复调用。若缺少财报明细或现金流结果，不得直接结束报告。若工具没有返回某项财务字段、估值字段或同行数据，明确写“工具结果未提供”，不得使用 LLM 自身知识补数据。",
+        "analysis_requirements": "必须同时说明：财务健康度、盈利能力、经营质量与效率、估值背景、成长性与稳定性平衡、机会与风险平衡、对整体研究结论的影响和总结。估值背景尽量拆成绝对估值、相对估值、历史分位和市场已计入预期；允许引用真实数值做事实说明，但不得把这些数值写成合理价位、目标价、价格区间、安全边际、景气拐点布局、仓位建议、收益空间、交易动作或触发条件。应结合行业特征和工具可得数据选择最有解释力的指标，不要求机械覆盖所有通用财务科目；若某类指标对当前行业不适用，不要把其缺失直接写成风险或数据缺口。对 A 股个股，必须先获得整体基本面、最近季度财报明细和最近季度现金流量表，再进入正文撰写；若缺少财报明细或现金流结果，不得直接结束报告。对 A 股季度财报中的营业收入、归母净利润、经营现金流等字段，默认按报告期累计口径解释；若工具已明确给出“单季度推导”字段，应优先使用这些字段描述季度变化，不得再把原始累计字段误写成单季度逐季改善或把 Q1-Q4 直接相加。对 ROE、净利率等指标，默认按报告期指标快照解释。若存在仍待验证事项，可在对应段落顺带一句说明，不必单列“待验证问题”。",
         "output_format": "使用 Markdown 输出：一、核心观察；二、公司概况；三、财务与经营信号；四、估值背景；五、机会与风险平衡；六、对整体研究结论的影响；七、总结。",
         "constraints": with_report_metadata_constraint("禁止输出买卖建议、目标价、价格区间、上涨空间、下行空间、止损止盈、仓位比例、执行时机或任何可直接下单的表达。"),
     }
@@ -870,9 +904,23 @@ def _build_single_stock_workflow_overrides() -> Dict[str, Dict[str, str]]:
 
 ROLE_FIELD_OVERRIDES.update(_build_single_stock_workflow_overrides())
 
+AGENT_FIELD_OVERRIDES: Dict[str, Dict[str, str]] = {
+    "news_analyst": _make_parallel_analyst_override(
+        "新闻分析师",
+        "公告、新闻事件、监管变化、政策催化与舆情冲击",
+        "- 最近公告、新闻与监管事件的核心事实是什么\n- 哪些事件可能成为催化或风险放大器\n- 事件影响是短期噪音还是中期变量",
+        "事件时效、公告影响、政策监管、催化持续性与信息缺口",
+        standalone_validation_section=False,
+    ),
+}
+
 
 def get_field_override(role: str, field_name: str) -> str | None:
     return ROLE_FIELD_OVERRIDES.get(role, {}).get(field_name)
+
+
+def get_agent_field_override(agent_name: str, field_name: str) -> str | None:
+    return AGENT_FIELD_OVERRIDES.get(agent_name, {}).get(field_name)
 
 
 def transform_template_name(template_name: str, role: str) -> str:
@@ -895,9 +943,13 @@ def transform_remark(remark: str, role: str) -> str:
     return updated
 
 
-def transform_text(text: str, role: str, field_name: str) -> str:
+def transform_text(text: str, role: str, field_name: str, agent_name: str = "") -> str:
     if not text:
         return text
+
+    agent_override = get_agent_field_override(agent_name, field_name)
+    if agent_override is not None:
+        return agent_override
 
     override = get_field_override(role, field_name)
     if override is not None:
@@ -971,6 +1023,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="迁移 prompt_templates 到研究模式")
     parser.add_argument("--apply", action="store_true", help="执行实际写库更新")
     parser.add_argument("--limit", type=int, default=0, help="仅处理前 N 条模板，0 表示全部")
+    parser.add_argument("--agent-name", type=str, default="", help="仅迁移指定 agent_name")
     parser.add_argument("--show-agent", type=str, default="", help="显示指定 agent_name 的当前模板内容，不执行迁移")
     args = parser.parse_args()
 
@@ -979,8 +1032,9 @@ def main() -> int:
     collection = db.prompt_templates
 
     query = {"agent_name": {"$in": sorted(TARGET_AGENT_ROLES.keys())}, "status": "active"}
-    if args.show_agent:
-        query["agent_name"] = args.show_agent
+    agent_filter = (args.show_agent or args.agent_name or "").strip()
+    if agent_filter:
+        query["agent_name"] = agent_filter
 
     documents = list(collection.find(query).sort([("agent_type", 1), ("agent_name", 1), ("updated_at", -1)]))
     if args.limit > 0:
@@ -1023,7 +1077,7 @@ def main() -> int:
             if not isinstance(value, str):
                 continue
 
-            new_value = transform_text(value, role, field_name)
+            new_value = transform_text(value, role, field_name, str(doc.get("agent_name", "")))
             if new_value != value:
                 content[field_name] = new_value
                 changed_fields.append(field_name)
@@ -1046,6 +1100,8 @@ def main() -> int:
                 "content": content,
             })
 
+    if agent_filter:
+        print(f"目标 agent_name: {agent_filter}")
     print(f"扫描模板: {len(documents)} 条")
     print(f"需要更新: {len(changed_docs)} 条")
     print(f"备份文件: {backup_path}")

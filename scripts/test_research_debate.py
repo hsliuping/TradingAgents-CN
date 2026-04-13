@@ -8,6 +8,14 @@ from tradingagents.core.engine.stock_analysis_engine import StockAnalysisEngine
 from tradingagents.core.engine.data_contract import DataLayer
 from core.workflow.builder import LegacyDependencyProvider
 
+
+def build_test_provider_config() -> dict:
+    model_name = os.environ.get("RESEARCH_DEBATE_TEST_LLM_MODEL") or os.environ.get("TEST_LLM_MODEL") or "qwen-plus"
+    return {
+        "quick_think_llm": model_name,
+        "deep_think_llm": model_name,
+    }
+
 def main():
     print("=" * 60)
     print("测试 ResearchDebatePhase 集成")
@@ -15,10 +23,12 @@ def main():
 
     # 创建依赖
     print("\n[1/3] 创建 LLM 和 Toolkit...")
-    provider = LegacyDependencyProvider.get_instance()
+    provider_config = build_test_provider_config()
+    provider = LegacyDependencyProvider(provider_config)
     llm = provider.get_llm("quick")
     toolkit = provider.get_toolkit()
     print(f"  ✓ LLM: {type(llm).__name__}")
+    print(f"  ✓ Test Model: {provider_config['quick_think_llm']}")
     print(f"  ✓ Toolkit: 已创建")
     
     # 创建引擎（启用 Memory 支持）

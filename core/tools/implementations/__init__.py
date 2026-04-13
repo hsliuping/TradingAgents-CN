@@ -11,7 +11,11 @@ from .fundamentals.stock_fundamentals import (
     get_financial_statements,
     get_stock_fundamentals_unified,
 )
-from .news.stock_news import get_stock_news_unified
+from .news.stock_news import (
+    get_stock_news_details_unified,
+    get_stock_news_headlines_unified,
+    get_stock_news_unified,
+)
 from .social.stock_sentiment import get_stock_sentiment_unified
 from . import legacy_bridge
 
@@ -37,6 +41,8 @@ __all__ = [
     'get_financial_statements',
     'get_cash_flow_statement',
     'get_stock_news_unified',
+    'get_stock_news_headlines_unified',
+    'get_stock_news_details_unified',
     'get_stock_sentiment_unified',
     # 大盘/指数分析工具
     'get_index_data',

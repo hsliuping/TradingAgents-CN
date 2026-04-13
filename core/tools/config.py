@@ -143,6 +143,36 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
             ToolParameter(name="curr_date", type="string", description="当前日期，格式：YYYY-MM-DD", required=True),
         ],
     ),
+    "get_stock_news_headlines_unified": ToolMetadata(
+        id="get_stock_news_headlines_unified",
+        name="统一新闻标题候选",
+        description="先获取去重后的新闻标题、来源和明细建议，再决定哪些新闻值得继续深挖",
+        category=ToolCategory.NEWS,
+        data_source="mongodb/tushare/akshare/google/finnhub",
+        is_online=True,
+        icon="🗂️",
+        color="#8e44ad",
+        parameters=[
+            ToolParameter(name="ticker", type="string", description="股票代码（支持A股、港股、美股）", required=True),
+            ToolParameter(name="curr_date", type="string", description="当前日期，格式：YYYY-MM-DD", required=True),
+            ToolParameter(name="limit", type="integer", description="返回的标题候选数量，默认12", required=False, default=12),
+        ],
+    ),
+    "get_stock_news_details_unified": ToolMetadata(
+        id="get_stock_news_details_unified",
+        name="统一新闻明细",
+        description="根据标题工具返回的 news_id 获取新闻摘要、正文要点和来源明细",
+        category=ToolCategory.NEWS,
+        data_source="mongodb/tushare/akshare/google/finnhub",
+        is_online=True,
+        icon="🧾",
+        color="#6c3483",
+        parameters=[
+            ToolParameter(name="ticker", type="string", description="股票代码（支持A股、港股、美股）", required=True),
+            ToolParameter(name="curr_date", type="string", description="当前日期，格式：YYYY-MM-DD", required=True),
+            ToolParameter(name="news_ids", type="string", description="一个或多个 news_id，多个 ID 用逗号分隔", required=True),
+        ],
+    ),
     # ❌ 已删除：get_global_news_openai（未实现，使用 get_global_news_openai_legacy）
     # ❌ 已删除：get_google_news（未实现，使用 get_google_news_legacy）
     # ❌ 已删除：get_finnhub_news（未实现，使用 get_finnhub_news_legacy）

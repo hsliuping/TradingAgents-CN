@@ -35,6 +35,7 @@ def test_fundamentals_analyst_v2_templates_are_research_mode() -> None:
         "单季度推导",
         "行业特征",
         "不适用",
+        "不得直接结束报告",
     ]
 
     for template in target_templates:
@@ -59,6 +60,7 @@ def test_fundamentals_analyst_v2_templates_are_research_mode() -> None:
         assert "不得写：" in user_prompt
         assert "不必单列“待验证问题”" in user_prompt
         assert "不要求机械覆盖所有通用财务指标" in user_prompt
+        assert "在生成正文前必须先拿到 get_stock_fundamentals_unified、get_financial_statements 和 get_cash_flow_statement 的结果" in user_prompt
         assert "Q2/Q3/Q4 不是单季度值" in combined_text
         assert (
             "优先使用这些字段分析季度变化" in combined_text
@@ -71,6 +73,7 @@ def test_fundamentals_analyst_v2_templates_are_research_mode() -> None:
         assert "表达方式示例" in analysis_requirements
         assert "不必单列“待验证问题”" in analysis_requirements
         assert "不要把其缺失直接写成风险或数据缺口" in analysis_requirements
+        assert "必须先获得整体基本面、最近季度财报明细和最近季度现金流量表" in analysis_requirements
         assert (
             "不得把 Q1-Q4 直接相加" in analysis_requirements
             or "或把 Q1-Q4 直接相加" in analysis_requirements

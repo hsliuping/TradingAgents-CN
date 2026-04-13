@@ -5,7 +5,8 @@
 """
 
 import logging
-from typing import Any, Dict, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -139,10 +140,25 @@ class FundamentalsAnalystAgentV2(BaseAgent):
         ]
 
         # 使用 BaseAgent 标准化的工具调用方法
-        if self._llm and self.tools:
+        if self._llm:
+            analysis_prompt = analysis_override or self._build_analysis_prompt(ticker)
+            prefetched_message, prefetched_tool_names = self._build_prefetched_tool_message(ticker, trade_date, state)
+            if prefetched_message:
+                messages.append(prefetched_message)
+
+            original_tools = list(self._langchain_tools)
+            if prefetched_tool_names:
+                self._langchain_tools = [
+                    tool for tool in original_tools
+                    if getattr(tool, "name", "") not in prefetched_tool_names
+                ]
+
             # 使用默认提示词（模板中已包含详细的分析要求和输出格式）
             # 除非用户通过 prompt_overrides 覆盖
-            analysis = self.invoke_with_tools(messages, analysis_prompt=analysis_override)
+            try:
+                analysis = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)
+            finally:
+                self._langchain_tools = original_tools
         else:
             # 降级：没有 LLM 或工具
             logger.warning("没有配置 LLM 或工具，返回模拟结果")
@@ -263,7 +279,12 @@ class FundamentalsAnalystAgentV2(BaseAgent):
         
         # 获取市场信息和公司名称
         market_name = "中国A股"
-        company_name = ""
+        company_name = str(
+            state.get("company_name")
+            or state.get("stock_name")
+            or state.get("name")
+            or ""
+        )
         currency_name = "人民币"
         currency_symbol = "¥"
         
@@ -273,7 +294,9 @@ class FundamentalsAnalystAgentV2(BaseAgent):
                 market_name = market_info.get("market_name", "中国A股")
                 currency_name = market_info.get("currency_name", "人民币")
                 currency_symbol = market_info.get("currency_symbol", "¥")
-                company_name = market_info.get("company_name", "")
+                market_company_name = market_info.get("company_name", "")
+                if market_company_name:
+                    company_name = market_company_name
             except Exception as e:
                 logger.warning(f"获取市场信息失败: {e}")
         
@@ -378,6 +401,101 @@ class FundamentalsAnalystAgentV2(BaseAgent):
 
     不要输出价格区间、目标价、仓位或执行建议。
     不得添加任何署名、作者、分析师、日期或声明信息。"""
+
+    def _get_market_characteristics(self, ticker: str) -> Dict[str, Any]:
+        default_market_info = {
+            "is_china": True,
+            "market_name": "中国A股",
+        }
+
+        if not StockUtils or not ticker:
+            return default_market_info
+
+        try:
+            market_info = StockUtils.get_market_info(ticker)
+            if isinstance(market_info, dict):
+                return {**default_market_info, **market_info}
+        except Exception as exc:
+            logger.warning(f"获取股票市场信息失败，使用默认 A 股回退: {exc}")
+
+        return default_market_info
+
+    def _get_langchain_tool_by_name(self, tool_name: str):
+        for tool in self._langchain_tools:
+            if getattr(tool, "name", "") == tool_name:
+                return tool
+        return None
+
+    def _invoke_prefetch_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> Optional[str]:
+        tool = self._get_langchain_tool_by_name(tool_name)
+        if tool is None:
+            logger.warning(f"预取工具未找到，跳过: {tool_name}")
+            return None
+
+        try:
+            result = tool.invoke(tool_args)
+        except Exception as exc:
+            logger.warning(f"预取工具执行失败 {tool_name}: {exc}")
+            return None
+
+        result_text = str(result or "").strip()
+        return result_text or None
+
+    def _build_prefetched_tool_message(
+        self,
+        ticker: str,
+        trade_date: Optional[str],
+        state: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Optional[HumanMessage], List[str]]:
+        if not self._langchain_tools:
+            return None, []
+
+        effective_trade_date = trade_date or (state or {}).get("analysis_date") or datetime.now().strftime("%Y-%m-%d")
+        market_info = self._get_market_characteristics(ticker)
+        is_china = bool(market_info.get("is_china"))
+
+        tool_plan: List[Tuple[str, Dict[str, Any], str]] = [
+            (
+                "get_stock_fundamentals_unified",
+                {"ticker": ticker, "curr_date": effective_trade_date},
+                "整体基本面背景",
+            ),
+        ]
+        if is_china:
+            tool_plan.extend(
+                [
+                    (
+                        "get_financial_statements",
+                        {"ticker": ticker, "limit": 4},
+                        "最近季度财报明细",
+                    ),
+                    (
+                        "get_cash_flow_statement",
+                        {"ticker": ticker, "limit": 4},
+                        "最近季度现金流量表",
+                    ),
+                ]
+            )
+
+        sections: List[str] = []
+        consumed_tool_names: List[str] = []
+        for tool_name, tool_args, section_title in tool_plan:
+            result_text = self._invoke_prefetch_tool(tool_name, tool_args)
+            if not result_text:
+                continue
+
+            sections.append(f"### {section_title}（{tool_name}）\n{result_text}")
+            consumed_tool_names.append(tool_name)
+
+        if not sections:
+            return None, []
+
+        content = (
+            "以下必需工具结果已预先获取。请优先基于这些结果完成分析，不要再重复调用同名工具；"
+            "若仍缺少同行估值或其他补充证据，再调用剩余可选工具。\n\n"
+            + "\n\n".join(sections)
+        )
+        return HumanMessage(content=content), consumed_tool_names
 
     def _generate_mock_report(self, ticker: str, trade_date: str) -> str:
         """生成模拟报告（降级方案）"""
