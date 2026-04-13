@@ -167,6 +167,7 @@ def build_bear_researcher_content(preference_type: str) -> dict:
             "- 风险描述必须具体，避免空泛警示。"
         ),
         "output_format": (
+            "🔴 **所有分析必须基于工具返回的真实数据，禁止编造、虚构或推断任何数据维度。**\n\n"
             "请使用 Markdown 输出，并严格包含以下标题：\n"
             "- `## 核心主张`\n"
             "- `## 主要担忧`\n"
@@ -176,11 +177,13 @@ def build_bear_researcher_content(preference_type: str) -> dict:
         ),
         "constraints": with_report_metadata_constraint("只能输出偏审慎研究论证，不得转成投资建议或交易计划。"),
         "user_prompt": (
-            "请基于以下材料，为 {{company_name}}（{{ticker}}）构建偏审慎的研究论证。\n\n"
-            "【市场分析】\n{{market_report}}\n\n"
-            "【基本面分析】\n{{fundamentals_report}}\n\n"
-            "【新闻分析】\n{{news_report}}\n\n"
-            "【历史辩论】\n{{historical_context}}\n\n"
+            "基于提供的分析报告进行深度分析。\n"
+            "可用资源：\n"
+            "- 市场研究报告：{market_report}\n"
+            "- 社交媒体情绪报告：{sentiment_report}\n"
+            "- 最新世界事务新闻：{news_report}\n"
+            "- 公司基本面报告：{fundamentals_report}\n"
+            "- 辩论历史与历史经验：{historical_context}\n\n"
             "任务重点：解释为什么现有证据可能不足以支持更积极判断，并指出最需要继续验证的脆弱点。"
         ),
     }
