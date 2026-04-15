@@ -1,7 +1,8 @@
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 import os
+import secrets
 import warnings
 import re
 import getpass
@@ -21,6 +22,20 @@ for _legacy, _new in _LEGACY_ENV_ALIASES.items():
             DeprecationWarning,
             stacklevel=2,
         )
+
+# Well-known insecure default values that ship in source / .env.example.
+# If the runtime value matches any of these, it is replaced with a random
+# secret so that a forgotten configuration change does not leave the
+# application wide-open to token forgery.
+_INSECURE_JWT_DEFAULTS = frozenset({
+    "change-me-in-production",
+    "your-super-secret-jwt-key-change-in-production",
+})
+
+_INSECURE_CSRF_DEFAULTS = frozenset({
+    "change-me-csrf-secret",
+    "your-csrf-secret-key-change-in-production",
+})
 
 class Settings(BaseSettings):
     # 基础配置
@@ -329,6 +344,41 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """是否为生产环境"""
         return not self.DEBUG
+
+    @model_validator(mode="after")
+    def _replace_insecure_secret_defaults(self) -> "Settings":
+        """Replace well-known placeholder secrets with random values.
+
+        If the operator forgot to set JWT_SECRET or CSRF_SECRET (or
+        copied the placeholder from .env.example), generate a
+        cryptographically-random value so the application is never
+        silently left open to token forgery.  A warning is emitted so
+        the oversight is visible in the logs.
+        """
+        if self.JWT_SECRET in _INSECURE_JWT_DEFAULTS:
+            generated = secrets.token_urlsafe(32)
+            object.__setattr__(self, "JWT_SECRET", generated)
+            warnings.warn(
+                "JWT_SECRET was not configured or uses a well-known default. "
+                "A random secret has been generated for this process. "
+                "Set JWT_SECRET in your .env file for stable token validation across restarts. "
+                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\"",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        if self.CSRF_SECRET in _INSECURE_CSRF_DEFAULTS:
+            generated = secrets.token_urlsafe(32)
+            object.__setattr__(self, "CSRF_SECRET", generated)
+            warnings.warn(
+                "CSRF_SECRET was not configured or uses a well-known default. "
+                "A random secret has been generated for this process. "
+                "Set CSRF_SECRET in your .env file for stable CSRF protection across restarts.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        return self
 
     # Ignore any extra environment variables present in .env or process env
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
