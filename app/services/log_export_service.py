@@ -42,6 +42,36 @@ class LogExportService:
         else:
             logger.info(f"✅ [LogExportService] 日志目录存在")
 
+    def _validate_log_path(self, filename: str) -> Path:
+        """
+        验证日志文件路径安全性，防止路径遍历攻击
+
+        对文件名进行安全检查，确保解析后的绝对路径位于日志目录内。
+        同时拒绝包含空字节的文件名和解析到目录外的符号链接。
+
+        Args:
+            filename: 日志文件名
+
+        Returns:
+            验证通过的安全文件路径
+
+        Raises:
+            ValueError: 文件名包含非法字符或路径遍历序列
+        """
+        # 拒绝空字节
+        if "\x00" in filename:
+            raise ValueError(f"文件名包含非法字符: {filename}")
+
+        # 构造候选路径并解析为绝对路径（解析 .. 和符号链接）
+        resolved_log_dir = self.log_dir.resolve()
+        file_path = (self.log_dir / filename).resolve()
+
+        # 确保解析后的路径仍在日志目录内
+        if not file_path.is_relative_to(resolved_log_dir):
+            raise ValueError(f"非法的文件路径，禁止访问日志目录之外的文件: {filename}")
+
+        return file_path
+
     def list_log_files(self) -> List[Dict[str, Any]]:
         """
         列出所有日志文件
@@ -148,7 +178,7 @@ class LogExportService:
         Returns:
             日志内容和统计信息
         """
-        file_path = self.log_dir / filename
+        file_path = self._validate_log_path(filename)
         
         if not file_path.exists():
             raise FileNotFoundError(f"日志文件不存在: {filename}")
@@ -238,7 +268,11 @@ class LogExportService:
         try:
             # 确定要导出的文件
             if filenames:
-                files_to_export = [self.log_dir / f for f in filenames if (self.log_dir / f).exists()]
+                files_to_export = []
+                for f in filenames:
+                    validated = self._validate_log_path(f)
+                    if validated.exists():
+                        files_to_export.append(validated)
             else:
                 files_to_export = list(self.log_dir.glob("*.log*"))
             
@@ -475,4 +509,3 @@ def _get_log_directory() -> str:
     except Exception as e:
         logger.error(f"❌ [_get_log_directory] 获取日志目录失败: {e}，使用默认值 ./logs", exc_info=True)
         return "./logs"
-

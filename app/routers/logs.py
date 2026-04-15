@@ -116,6 +116,8 @@ async def read_log_file(
         
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"❌ 读取日志文件失败: {e}")
         raise HTTPException(status_code=500, detail=f"读取日志文件失败: {str(e)}")
@@ -210,7 +212,9 @@ async def delete_log_file(
         logger.warning(f"🗑️ 用户 {current_user['username']} 删除日志文件: {filename}")
         
         service = get_log_export_service()
-        file_path = service.log_dir / filename
+
+        # 路径安全检查：防止路径遍历
+        file_path = service._validate_log_path(filename)
         
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="日志文件不存在")
@@ -228,7 +232,8 @@ async def delete_log_file(
         
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"❌ 删除日志文件失败: {e}")
         raise HTTPException(status_code=500, detail=f"删除日志文件失败: {str(e)}")
-
