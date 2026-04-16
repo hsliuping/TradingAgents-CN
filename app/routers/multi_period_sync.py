@@ -6,10 +6,11 @@
 import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 
 from app.worker.multi_period_sync_service import get_multi_period_sync_service
+from app.routers.auth_db import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +37,14 @@ class MultiPeriodSyncResponse(BaseModel):
 @router.post("/start", response_model=MultiPeriodSyncResponse)
 async def start_multi_period_sync(
     request: MultiPeriodSyncRequest,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user)
 ):
     """
-    启动多周期数据同步
+    启动多周期数据同步（需要管理员权限）
     """
+    if not current_user.get("is_admin", False):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     try:
         service = await get_multi_period_sync_service()
         
@@ -73,9 +77,12 @@ async def start_multi_period_sync(
 async def start_daily_sync(
     background_tasks: BackgroundTasks,
     symbols: Optional[List[str]] = None,
-    data_sources: Optional[List[str]] = None
+    data_sources: Optional[List[str]] = None,
+    current_user: dict = Depends(get_current_user)
 ):
-    """启动日线数据同步"""
+    """启动日线数据同步（需要管理员权限）"""
+    if not current_user.get("is_admin", False):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     try:
         service = await get_multi_period_sync_service()
         
@@ -104,9 +111,12 @@ async def start_daily_sync(
 async def start_weekly_sync(
     background_tasks: BackgroundTasks,
     symbols: Optional[List[str]] = None,
-    data_sources: Optional[List[str]] = None
+    data_sources: Optional[List[str]] = None,
+    current_user: dict = Depends(get_current_user)
 ):
-    """启动周线数据同步"""
+    """启动周线数据同步（需要管理员权限）"""
+    if not current_user.get("is_admin", False):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     try:
         service = await get_multi_period_sync_service()
         
@@ -135,9 +145,12 @@ async def start_weekly_sync(
 async def start_monthly_sync(
     background_tasks: BackgroundTasks,
     symbols: Optional[List[str]] = None,
-    data_sources: Optional[List[str]] = None
+    data_sources: Optional[List[str]] = None,
+    current_user: dict = Depends(get_current_user)
 ):
-    """启动月线数据同步"""
+    """启动月线数据同步（需要管理员权限）"""
+    if not current_user.get("is_admin", False):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     try:
         service = await get_multi_period_sync_service()
 
@@ -167,9 +180,12 @@ async def start_all_history_sync(
     background_tasks: BackgroundTasks,
     symbols: Optional[List[str]] = None,
     periods: Optional[List[str]] = None,
-    data_sources: Optional[List[str]] = None
+    data_sources: Optional[List[str]] = None,
+    current_user: dict = Depends(get_current_user)
 ):
-    """启动全历史数据同步（从1990年开始）"""
+    """启动全历史数据同步（从1990年开始，需要管理员权限）"""
+    if not current_user.get("is_admin", False):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     try:
         service = await get_multi_period_sync_service()
 
@@ -205,9 +221,12 @@ async def start_incremental_sync(
     symbols: Optional[List[str]] = None,
     periods: Optional[List[str]] = None,
     data_sources: Optional[List[str]] = None,
-    days_back: Optional[int] = 30
+    days_back: Optional[int] = 30,
+    current_user: dict = Depends(get_current_user)
 ):
-    """启动增量数据同步（最近N天）"""
+    """启动增量数据同步（最近N天，需要管理员权限）"""
+    if not current_user.get("is_admin", False):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     try:
         from datetime import datetime, timedelta
 
@@ -245,7 +264,9 @@ async def start_incremental_sync(
 
 
 @router.get("/statistics")
-async def get_sync_statistics():
+async def get_sync_statistics(
+    current_user: dict = Depends(get_current_user)
+):
     """获取多周期同步统计信息"""
     try:
         service = await get_multi_period_sync_service()
@@ -266,7 +287,8 @@ async def get_sync_statistics():
 async def compare_period_data(
     symbol: str,
     trade_date: str,
-    data_source: str = "tushare"
+    data_source: str = "tushare",
+    current_user: dict = Depends(get_current_user)
 ):
     """
     对比同一股票不同周期的数据
