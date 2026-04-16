@@ -9,7 +9,7 @@ param(
     [string]$Password,
 
     [Parameter(Mandatory=$false)]
-    [string]$Version = "v1.0.0-preview",
+    [string]$Version = "v1.0.1",
 
     [Parameter(Mandatory=$false)]
     [switch]$SkipBuild,

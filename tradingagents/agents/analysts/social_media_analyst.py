@@ -9,6 +9,7 @@ logger = get_logger("analysts.social_media")
 
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
+from tradingagents.agents.utils.instrument_utils import build_instrument_context
 
 
 def _get_company_name_for_social_media(ticker: str, market_info: dict) -> str:
@@ -106,6 +107,7 @@ def create_social_media_analyst(llm, toolkit):
 
         # 获取公司名称
         company_name = _get_company_name_for_social_media(ticker, market_info)
+        instrument_context = build_instrument_context(ticker)
         logger.info(f"[社交媒体分析师] 公司名称: {company_name}")
 
         # 统一使用 get_stock_sentiment_unified 工具
@@ -165,7 +167,7 @@ def create_social_media_analyst(llm, toolkit):
                     " 将从您停下的地方继续帮助。执行您能做的以取得进展。"
                     " 如果您或任何其他助手有最终交易提案：**买入/持有/卖出**或可交付成果，"
                     " 请在您的回应前加上最终交易提案：**买入/持有/卖出**，以便团队知道停止。"
-                    " 您可以访问以下工具：{tool_names}。\n{system_message}"
+                    " 您可以访问以下工具：{tool_names}。\n标的约束：{instrument_context}\n{system_message}"
                     "供您参考，当前日期是{current_date}。我们要分析的当前公司是{ticker}。请用中文撰写所有分析内容。",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
@@ -186,6 +188,7 @@ def create_social_media_analyst(llm, toolkit):
         prompt = prompt.partial(tool_names=", ".join(tool_names))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(ticker=ticker)
+        prompt = prompt.partial(instrument_context=instrument_context)
 
         chain = prompt | llm.bind_tools(tools)
 

@@ -408,6 +408,8 @@ class UnifiedConfigManager:
     def get_database_configs(self) -> List[DatabaseConfig]:
         """获取数据库配置"""
         configs = []
+
+        from app.core.config import settings
         
         # MongoDB配置
         mongodb_config = DatabaseConfig(
@@ -415,7 +417,7 @@ class UnifiedConfigManager:
             type=DatabaseType.MONGODB,
             host=os.getenv("MONGODB_HOST", "localhost"),
             port=int(os.getenv("MONGODB_PORT", "27017")),
-            database=os.getenv("MONGODB_DATABASE", "tradingagents"),
+            database=os.getenv("MONGODB_DATABASE", "") or os.getenv("MONGODB_DATABASE_NAME", "") or settings.MONGO_DB,
             enabled=True,
             description="MongoDB主数据库"
         )

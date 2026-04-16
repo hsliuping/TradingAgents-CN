@@ -201,7 +201,7 @@
       <el-form-item label="自定义参数">
         <div class="config-params">
           <div
-            v-for="(value, key, index) in formData.config_params"
+            v-for="(_value, key, index) in formData.config_params"
             :key="index"
             class="param-item"
           >
@@ -362,7 +362,7 @@ const dataSourceTypes = [
   {
     label: 'Tushare',
     value: 'tushare',
-    register_url: 'https://tushare.pro/register?reg=tacn',
+    register_url: 'https://tushare.pro/weborder/#/login?reg=tacn',
     register_guide: '如果您还没有 Tushare 账号，请先注册并获取 Token：'
   },
   {
@@ -440,7 +440,7 @@ const rules: FormRules = {
   // API Key 验证规则
   api_key: [
     {
-      validator: (rule: any, value: string, callback: any) => {
+      validator: (_rule: any, value: string, callback: any) => {
         // 如果为空，允许（表示使用环境变量）
         if (!value || value.trim() === '') {
           callback()

@@ -185,14 +185,14 @@
               <!-- 报告列表预览 -->
               <div class="reports-preview">
                 <el-tag
-                  v-for="(content, key) in lastAnalysis.reports"
-                  :key="key"
+                  v-for="reportKey in reportKeys"
+                  :key="reportKey"
                   size="small"
                   effect="plain"
                   class="report-tag"
-                  @click="openReport(key)"
+                  @click="openReport(reportKey)"
                 >
-                  {{ formatReportName(key) }}
+                  {{ formatReportName(reportKey) }}
                 </el-tag>
               </div>
             </div>
@@ -291,14 +291,14 @@
     >
       <el-tabs v-model="activeReportTab" type="border-card">
         <el-tab-pane
-          v-for="(content, key) in lastAnalysis?.reports"
-          :key="key"
-          :label="formatReportName(key)"
-          :name="key"
+          v-for="reportKey in reportKeys"
+          :key="reportKey"
+          :label="formatReportName(reportKey)"
+          :name="reportKey"
         >
           <div class="report-content">
             <el-scrollbar height="500px">
-              <div class="markdown-body" v-html="renderMarkdown(content)"></div>
+              <div class="markdown-body" v-html="renderMarkdown(lastAnalysis?.reports?.[reportKey] || '')"></div>
             </el-scrollbar>
           </div>
         </el-tab-pane>
@@ -374,7 +374,6 @@ import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
 import { favoritesApi } from '@/api/favorites'
-import { useNotificationStore } from '@/stores/notifications'
 
 
 echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
@@ -394,16 +393,6 @@ const lastTaskInfo = ref<any | null>(null) // 保存任务信息（包含 end_ti
 // 报告对话框
 const showReportsDialog = ref(false)
 const activeReportTab = ref('')
-
-const notifStore = useNotificationStore()
-
-const lastAnalysisTagType = computed(() => {
-  const reco = String(lastAnalysis.value?.recommendation || '').toLowerCase()
-  if (reco.includes('买') || reco.includes('buy') || reco.includes('增持') || reco.includes('强')) return 'success'
-  if (reco.includes('卖') || reco.includes('sell')) return 'danger'
-  if (reco.includes('减持') || reco.includes('谨慎')) return 'warning'
-  return 'info'
-})
 
 // 股票代码（从路由参数获取）
 const code = computed(() => {
@@ -539,46 +528,70 @@ async function handleSync() {
 
     if (res.success) {
       const data = res.data
-      let message = `股票 ${code.value} 数据同步完成\n`
+      const lines: string[] = [`股票 ${code.value} 数据同步结果`]
 
       if (data.realtime_sync) {
         if (data.realtime_sync.success) {
           // 🔥 如果切换了数据源，显示提示信息
           if (data.realtime_sync.data_source_used && data.realtime_sync.data_source_used !== syncForm.dataSource) {
-            message += `✅ 实时行情同步成功（已自动切换到 ${data.realtime_sync.data_source_used.toUpperCase()} 数据源）\n`
+            lines.push(`✅ 实时行情同步成功（已自动切换到 ${data.realtime_sync.data_source_used.toUpperCase()} 数据源）`)
           } else {
-            message += `✅ 实时行情同步成功\n`
+            lines.push('✅ 实时行情同步成功')
           }
         } else {
-          message += `❌ 实时行情同步失败: ${data.realtime_sync.error || '未知错误'}\n`
+          lines.push(`❌ 实时行情同步失败: ${data.realtime_sync.error || data.realtime_sync.message || '未知错误'}`)
+        }
+
+        if (data.realtime_sync.attempted_sources?.length) {
+          lines.push(`尝试数据源: ${data.realtime_sync.attempted_sources.join(' -> ')}`)
+        }
+
+        if (data.realtime_sync.primary_error?.error) {
+          lines.push(`主链路错误: ${data.realtime_sync.primary_error.error}`)
+        }
+
+        if (data.realtime_sync.fallback_error?.error) {
+          lines.push(`回退错误: ${data.realtime_sync.fallback_error.error}`)
+        }
+
+        if (data.realtime_sync.market_quote_available) {
+          const snapshot = data.realtime_sync.market_quote_snapshot
+          lines.push(`行情已写入 market_quotes${snapshot?.trade_date ? `（交易日: ${snapshot.trade_date}）` : ''}`)
+        } else if (syncForm.syncTypes.includes('realtime')) {
+          lines.push('行情未写入 market_quotes')
         }
       }
 
       if (data.historical_sync) {
         if (data.historical_sync.success) {
-          message += `✅ 历史数据: ${data.historical_sync.records || 0} 条记录\n`
+          lines.push(`✅ 历史数据: ${data.historical_sync.records || 0} 条记录`)
         } else {
-          message += `❌ 历史数据同步失败: ${data.historical_sync.error || '未知错误'}\n`
+          lines.push(`❌ 历史数据同步失败: ${data.historical_sync.error || '未知错误'}`)
         }
       }
 
       if (data.financial_sync) {
         if (data.financial_sync.success) {
-          message += `✅ 财务数据同步成功\n`
+          lines.push('✅ 财务数据同步成功')
         } else {
-          message += `❌ 财务数据同步失败: ${data.financial_sync.error || '未知错误'}\n`
+          lines.push(`❌ 财务数据同步失败: ${data.financial_sync.error || '未知错误'}`)
         }
       }
 
       if (data.basic_sync) {
         if (data.basic_sync.success) {
-          message += `✅ 基础数据同步成功\n`
+          lines.push('✅ 基础数据同步成功')
         } else {
-          message += `❌ 基础数据同步失败: ${data.basic_sync.error || '未知错误'}\n`
+          lines.push(`❌ 基础数据同步失败: ${data.basic_sync.error || '未知错误'}`)
         }
       }
 
-      ElMessage.success(message)
+      const messageHtml = lines.map(line => line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')).join('<br/>')
+      await ElMessageBox.alert(messageHtml, data.overall_success ? '同步成功' : '同步部分失败', {
+        dangerouslyUseHTMLString: true,
+        confirmButtonText: '知道了',
+        type: data.overall_success ? 'success' : 'warning'
+      })
       syncDialogVisible.value = false
 
       // 刷新页面数据
@@ -723,8 +736,8 @@ async function checkFavorite() {
     console.warn('检查自选失败', e)
   }
 }
-onMounted(async () => {
-  // 首次加载：打通后端（并行）
+
+async function loadPageData() {
   await Promise.all([
     fetchQuote(),
     fetchFundamentals(),
@@ -734,10 +747,39 @@ onMounted(async () => {
     fetchLatestAnalysis(),  // 获取最新的历史分析报告
     fetchSyncStatus()  // 获取同步状态
   ])
+}
+
+function resetPageState() {
+  stockName.value = ''
+  market.value = ''
+  isFav.value = false
+  syncStatus.value = null
+  newsItems.value = []
+  newsSource.value = undefined
+  lastAnalysis.value = null
+  lastTaskInfo.value = null
+  analysisStatus.value = 'idle'
+  analysisProgress.value = 0
+  analysisMessage.value = ''
+  currentTaskId.value = null
+}
+
+onMounted(async () => {
+  // 首次加载：打通后端（并行）
+  await loadPageData()
   // 每30秒刷新一次报价
   timer = setInterval(fetchQuote, 30000)
 })
 onUnmounted(() => { if (timer) clearInterval(timer) })
+
+watch(() => route.params.code, async (newCode, oldCode) => {
+  if (!newCode || newCode === oldCode) {
+    return
+  }
+
+  resetPageState()
+  await loadPageData()
+})
 
 
 
@@ -889,11 +931,6 @@ async function onToggleFavorite() {
 
 function goPaperTrading() {
   router.push({ name: 'PaperTradingHome', query: { code: code.value } })
-}
-
-function scrollToDetail() {
-  const el = document.getElementById('analysis-detail')
-  if (el) el.scrollIntoView({ behavior: 'smooth' })
 }
 
 // 获取最新的历史分析报告
@@ -1116,12 +1153,17 @@ function formatReportName(key: string): string {
 function renderMarkdown(content: string): string {
   if (!content) return '<p>暂无内容</p>'
   try {
-    return marked(content)
+    return String(marked.parse(content))
   } catch (e) {
     console.error('Markdown渲染失败:', e)
     return `<pre>${content}</pre>`
   }
 }
+
+const reportKeys = computed<string[]>(() => {
+  const reports = lastAnalysis.value?.reports
+  return reports ? Object.keys(reports) : []
+})
 
 // 打开指定报告
 function openReport(reportKey: string) {

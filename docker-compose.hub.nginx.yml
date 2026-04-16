@@ -1,6 +1,6 @@
 version: '3.8'
 
-# TradingAgents-CN v1.0.0-preview Docker Compose配置（带 Nginx 反向代理）
+# TradingAgents-CN v1.0.1 Docker Compose配置（带 Nginx 反向代理）
 # 使用Docker Hub镜像 + Nginx 反向代理
 #
 # 使用方法：
@@ -28,7 +28,7 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: tradingagents123
-      MONGO_INITDB_DATABASE: tradingagents
+      MONGO_INITDB_DATABASE: tradingagentscn
       TZ: "Asia/Shanghai"
     networks:
       - tradingagents-network
@@ -68,7 +68,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.backend
-    image: hsliup/tradingagents-backend:latest
+    image: hsliup/tradingagents-backend:v1.0.1
     container_name: tradingagents-backend
     restart: unless-stopped
     expose:
@@ -91,11 +91,11 @@ services:
       MONGODB_PORT: "27017"
       MONGODB_USERNAME: "admin"
       MONGODB_PASSWORD: "tradingagents123"
-      MONGODB_DATABASE: "tradingagents"
+      MONGODB_DATABASE: "tradingagentscn"
       MONGODB_AUTH_SOURCE: "admin"
       # 注意：authSource=admin 表示在 admin 数据库中验证用户
-      MONGODB_URL: "mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin"
-      MONGODB_CONNECTION_STRING: "mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin"
+      MONGODB_URL: "mongodb://admin:tradingagents123@mongodb:27017/tradingagentscn?authSource=admin"
+      MONGODB_CONNECTION_STRING: "mongodb://admin:tradingagents123@mongodb:27017/tradingagentscn?authSource=admin"
       # Redis配置
       REDIS_HOST: "redis"
       REDIS_PORT: "6379"
@@ -125,6 +125,8 @@ services:
       BAIDU_ENABLED: "${BAIDU_ENABLED:-false}"
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
       OPENROUTER_ENABLED: "${OPENROUTER_ENABLED:-false}"
+      AIHUBMIX_API_KEY: "${AIHUBMIX_API_KEY}"
+      AIHUBMIX_ENABLED: "${AIHUBMIX_ENABLED:-false}"
       # 数据源API密钥
       TUSHARE_TOKEN: "${TUSHARE_TOKEN}"
       TUSHARE_ENABLED: "${TUSHARE_ENABLED:-false}"
@@ -152,7 +154,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
-    image: hsliup/tradingagents-frontend:latest
+    image: hsliup/tradingagents-frontend:v1.0.1
     container_name: tradingagents-frontend
     restart: unless-stopped
     expose:

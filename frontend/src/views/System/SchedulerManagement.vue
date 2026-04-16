@@ -273,7 +273,7 @@
       width="1200px"
       :close-on-click-modal="false"
     >
-      <el-tabs v-model="activeHistoryTab" @tab-change="handleHistoryTabChange">
+      <el-tabs v-model="activeHistoryTab" @tab-change="(name) => handleHistoryTabChange(name as string)">
         <!-- 手动操作历史 -->
         <el-tab-pane label="手动操作历史" name="manual">
           <el-table :data="historyList" v-loading="historyLoading" stripe max-height="500">
@@ -847,7 +847,11 @@ const loadHistory = async () => {
 
     // 直接使用执行记录，不需要转换格式
     const executions = Array.isArray(res.data?.items) ? res.data.items : []
-    historyList.value = executions
+    // 手动历史需要 JobHistory 类型，包含 action 字段，因此将 JobExecution 转换为兼容格式
+    historyList.value = executions.map((ex: JobExecution) => ({
+      ...ex,
+      action: '手动触发' // 补充缺失的 action 字段
+    } as JobHistory))
     historyTotal.value = res.data?.total || 0
   } catch (error: any) {
     ElMessage.error(error.message || '加载执行历史失败')
@@ -992,16 +996,6 @@ const formatTrigger = (trigger: string) => {
     return trigger.replace(/interval\[|\]/g, '')
   }
   return trigger
-}
-
-const formatAction = (action: string) => {
-  const actionMap: Record<string, string> = {
-    pause: '暂停',
-    resume: '恢复',
-    trigger: '手动触发',
-    execute: '执行'
-  }
-  return actionMap[action] || action
 }
 
 const handleSearch = () => {

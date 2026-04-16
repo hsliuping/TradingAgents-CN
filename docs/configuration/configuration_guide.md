@@ -217,7 +217,7 @@ TUSHARE_TOKEN=xxx
 TUSHARE_ENABLED=true
 ```
 
-**获取地址**: https://tushare.pro/register?reg=tacn
+**获取地址**: https://tushare.pro/weborder/#/login?reg=tacn
 - 注册账号 → 邮箱验证 → 获取Token
 
 #### AKShare（推荐，免费无需密钥）

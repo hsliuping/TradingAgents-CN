@@ -164,9 +164,15 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
                         backend_url = _get_default_backend_url(provider)
                         logger.warning(f"⚠️ [同步查询] 厂家 {provider} 没有配置 default_base_url，使用硬编码默认值")
 
+                    from tradingagents.llm_clients.provider_keys import normalize_provider_key, default_backend_url
+
+                    provider_key = normalize_provider_key(provider)
+                    if provider_key == "qwen" and backend_url == "https://dashscope.aliyuncs.com/api/v1":
+                        backend_url = default_backend_url(provider_key)
+
                     client.close()
                     return {
-                        "provider": provider,
+                        "provider": provider_key,
                         "backend_url": backend_url,
                         "api_key": api_key
                     }
@@ -204,9 +210,15 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
                 if api_key:
                     logger.info(f"✅ [同步查询] 使用环境变量的 API Key")
 
+            from tradingagents.llm_clients.provider_keys import normalize_provider_key, default_backend_url
+
+            provider_key = normalize_provider_key(provider)
+            if provider_key == "qwen" and backend_url == "https://dashscope.aliyuncs.com/api/v1":
+                backend_url = default_backend_url(provider_key)
+
             client.close()
             return {
-                "provider": provider,
+                "provider": provider_key,
                 "backend_url": backend_url,
                 "api_key": api_key
             }
@@ -214,10 +226,13 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
             logger.warning(f"⚠️ [同步查询] 无法查询厂家配置: {e}")
 
         # 最后回退到硬编码的默认 URL 和环境变量 API Key
+        from tradingagents.llm_clients.provider_keys import normalize_provider_key
+
+        provider_key = normalize_provider_key(provider)
         return {
-            "provider": provider,
-            "backend_url": _get_default_backend_url(provider),
-            "api_key": _get_env_api_key_for_provider(provider)
+            "provider": provider_key,
+            "backend_url": _get_default_backend_url(provider_key),
+            "api_key": _get_env_api_key_for_provider(provider_key)
         }
 
     except Exception as e:
@@ -281,19 +296,14 @@ def _get_env_api_key_for_provider(provider: str) -> str:
     """
     import os
 
-    env_key_map = {
-        "google": "GOOGLE_API_KEY",
-        "dashscope": "DASHSCOPE_API_KEY",
-        "openai": "OPENAI_API_KEY",
-        "deepseek": "DEEPSEEK_API_KEY",
-        "anthropic": "ANTHROPIC_API_KEY",
-        "openrouter": "OPENROUTER_API_KEY",
-        "siliconflow": "SILICONFLOW_API_KEY",
-        "qianfan": "QIANFAN_API_KEY",
-        "302ai": "AI302_API_KEY",
-    }
+    from tradingagents.llm_clients.provider_keys import env_key_for_provider, normalize_provider_key
 
-    env_key_name = env_key_map.get(provider.lower())
+    provider_key = normalize_provider_key(provider)
+    env_key_name = env_key_for_provider(provider_key)
+    if not env_key_name and provider_key == "302ai":
+        env_key_name = "AI302_API_KEY"
+    if not env_key_name and provider_key == "aihubmix":
+        env_key_name = "AIHUBMIX_API_KEY"
     if env_key_name:
         api_key = os.getenv(env_key_name)
         if api_key and api_key.strip() and api_key != "your-api-key":
@@ -312,18 +322,16 @@ def _get_default_backend_url(provider: str) -> str:
     Returns:
         str: 默认的 backend_url
     """
-    default_urls = {
-        "google": "https://generativelanguage.googleapis.com/v1beta",
-        "dashscope": "https://dashscope.aliyuncs.com/api/v1",
-        "openai": "https://api.openai.com/v1",
-        "deepseek": "https://api.deepseek.com",
-        "anthropic": "https://api.anthropic.com",
-        "openrouter": "https://openrouter.ai/api/v1",
-        "qianfan": "https://qianfan.baidubce.com/v2",
-        "302ai": "https://api.302.ai/v1",
-    }
+    from tradingagents.llm_clients.provider_keys import default_backend_url, normalize_provider_key
 
-    url = default_urls.get(provider, "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    provider_key = normalize_provider_key(provider)
+    if provider_key == "302ai":
+        url = "https://api.302.ai/v1"
+    elif provider_key == "aihubmix":
+        url = "https://aihubmix.com/v1"
+    else:
+        url = default_backend_url(provider_key)
+
     logger.info(f"🔧 [默认URL] {provider} -> {url}")
     return url
 
@@ -336,11 +344,11 @@ def _get_default_provider_by_model(model_name: str) -> str:
     # 模型名称到供应商的默认映射
     model_provider_map = {
         # 阿里百炼 (DashScope)
-        'qwen-turbo': 'dashscope',
-        'qwen-plus': 'dashscope',
-        'qwen-max': 'dashscope',
-        'qwen-plus-latest': 'dashscope',
-        'qwen-max-longcontext': 'dashscope',
+        'qwen-turbo': 'qwen',
+        'qwen-plus': 'qwen',
+        'qwen-max': 'qwen',
+        'qwen-plus-latest': 'qwen',
+        'qwen-max-longcontext': 'qwen',
 
         # OpenAI
         'gpt-3.5-turbo': 'openai',
@@ -359,12 +367,12 @@ def _get_default_provider_by_model(model_name: str) -> str:
         'deepseek-coder': 'deepseek',
 
         # 智谱AI
-        'glm-4': 'zhipu',
-        'glm-3-turbo': 'zhipu',
-        'chatglm3-6b': 'zhipu'
+        'glm-4': 'glm',
+        'glm-3-turbo': 'glm',
+        'chatglm3-6b': 'glm'
     }
 
-    provider = model_provider_map.get(model_name, 'dashscope')  # 默认使用阿里百炼
+    provider = model_provider_map.get(model_name, 'qwen')  # 默认使用阿里百炼
     logger.info(f"🔧 使用默认映射: {model_name} -> {provider}")
     return provider
 
@@ -514,41 +522,7 @@ def create_analysis_config(
         logger.info(f"🔑 深度模型 API Key: {'已配置' if config['deep_api_key'] else '未配置（将使用环境变量）'}")
     except Exception as e:
         logger.warning(f"⚠️  无法从数据库获取 backend_url 和 API Key: {e}")
-        # 2️⃣ 回退到硬编码的默认 URL，API Key 将从环境变量读取
-        if llm_provider == "dashscope":
-            config["backend_url"] = "https://dashscope.aliyuncs.com/api/v1"
-        elif llm_provider == "deepseek":
-            config["backend_url"] = "https://api.deepseek.com"
-        elif llm_provider == "openai":
-            config["backend_url"] = "https://api.openai.com/v1"
-        elif llm_provider == "google":
-            config["backend_url"] = "https://generativelanguage.googleapis.com/v1beta"
-        elif llm_provider == "qianfan":
-            config["backend_url"] = "https://aip.baidubce.com"
-        else:
-            # 🔧 未知厂家，尝试从数据库获取厂家的 default_base_url
-            logger.warning(f"⚠️  未知厂家 {llm_provider}，尝试从数据库获取配置")
-            try:
-                from pymongo import MongoClient
-                from app.core.config import settings
-
-                client = MongoClient(settings.MONGO_URI)
-                db = client[settings.MONGO_DB]
-                providers_collection = db.llm_providers
-                provider_doc = providers_collection.find_one({"name": llm_provider})
-
-                if provider_doc and provider_doc.get("default_base_url"):
-                    config["backend_url"] = provider_doc["default_base_url"]
-                    logger.info(f"✅ 从数据库获取自定义厂家 {llm_provider} 的 backend_url: {config['backend_url']}")
-                else:
-                    # 如果数据库中也没有，使用 OpenAI 兼容格式作为最后的回退
-                    config["backend_url"] = "https://api.openai.com/v1"
-                    logger.warning(f"⚠️  数据库中未找到厂家 {llm_provider} 的配置，使用默认 OpenAI 端点")
-
-                client.close()
-            except Exception as e2:
-                logger.error(f"❌ 查询数据库失败: {e2}，使用默认 OpenAI 端点")
-                config["backend_url"] = "https://api.openai.com/v1"
+        config["backend_url"] = _get_default_backend_url(llm_provider)
 
         logger.info(f"⚠️  使用回退的 backend_url: {config['backend_url']}")
 

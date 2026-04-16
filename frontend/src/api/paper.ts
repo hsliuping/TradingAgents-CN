@@ -1,4 +1,4 @@
-import { ApiClient, type ApiResponse } from './request'
+import { ApiClient } from './request'
 
 export interface CurrencyAmount {
   CNY: number

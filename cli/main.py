@@ -29,6 +29,7 @@ from rich.text import Text
 # 项目内部导入
 from cli.models import AnalystType
 from cli.utils import (
+    normalize_ticker_symbol,
     select_analysts,
     select_deep_thinking_agent,
     select_llm_provider,
@@ -633,7 +634,7 @@ def get_user_selections():
         "analysis_date": analysis_date,
         "analysts": selected_analysts,
         "research_depth": selected_research_depth,
-        "llm_provider": selected_llm_provider.lower(),
+        "llm_provider": selected_llm_provider,
         "backend_url": backend_url,
         "shallow_thinker": selected_shallow_thinker,
         "deep_thinker": selected_deep_thinker,
@@ -700,8 +701,10 @@ def get_ticker(market):
     console.print(f"\n[dim]格式要求 | Format: {market['format']}[/dim]")
 
     while True:
-        ticker = typer.prompt(f"\n请输入{market['name']}股票代码 | Enter {market['name_en']} ticker",
-                             default=market['default'])
+        ticker = typer.prompt(
+            f"\n请输入{market['name']}股票代码 | Enter {market['name_en']} ticker",
+            default=market['default'],
+        )
 
         # 记录用户输入（只写入文件）
         logger.info(f"用户输入股票代码: {ticker}")
@@ -710,13 +713,13 @@ def get_ticker(market):
         import re
         
         # 添加边界条件检查
-        ticker = ticker.strip()  # 移除首尾空格
+        ticker = normalize_ticker_symbol(ticker)
         if not ticker:  # 检查空字符串
             console.print(f"[red]❌ 股票代码不能为空 | Ticker cannot be empty[/red]")
             logger.warning(f"用户输入空股票代码")
             continue
             
-        ticker_to_check = ticker.upper() if market['data_source'] != 'china_stock' else ticker
+        ticker_to_check = ticker if market['data_source'] != 'china_stock' else ticker
 
         if re.match(market['pattern'], ticker_to_check):
             # 对于A股，返回纯数字代码
@@ -990,18 +993,31 @@ def check_api_keys(llm_provider: str) -> bool:
     """检查必要的API密钥是否已配置"""
 
     missing_keys = []
+    provider = llm_provider.lower()
 
     # 检查LLM提供商对应的API密钥
-    if "阿里百炼" in llm_provider or "dashscope" in llm_provider.lower():
+    if provider in {"qwen", "dashscope"}:
         if not os.getenv("DASHSCOPE_API_KEY"):
             missing_keys.append("DASHSCOPE_API_KEY (阿里百炼)")
-    elif "openai" in llm_provider.lower():
+    elif provider == "deepseek":
+        if not os.getenv("DEEPSEEK_API_KEY"):
+            missing_keys.append("DEEPSEEK_API_KEY")
+    elif provider == "openai":
         if not os.getenv("OPENAI_API_KEY"):
             missing_keys.append("OPENAI_API_KEY")
-    elif "anthropic" in llm_provider.lower():
+    elif provider == "custom_openai":
+        if not os.getenv("CUSTOM_OPENAI_API_KEY") and not os.getenv("OPENAI_API_KEY"):
+            missing_keys.append("CUSTOM_OPENAI_API_KEY / OPENAI_API_KEY")
+    elif provider == "openrouter":
+        if not os.getenv("OPENROUTER_API_KEY"):
+            missing_keys.append("OPENROUTER_API_KEY")
+    elif provider == "glm":
+        if not os.getenv("ZHIPU_API_KEY"):
+            missing_keys.append("ZHIPU_API_KEY")
+    elif provider == "anthropic":
         if not os.getenv("ANTHROPIC_API_KEY"):
             missing_keys.append("ANTHROPIC_API_KEY")
-    elif "google" in llm_provider.lower():
+    elif provider == "google":
         if not os.getenv("GOOGLE_API_KEY"):
             missing_keys.append("GOOGLE_API_KEY")
 
@@ -1050,26 +1066,13 @@ def run_analysis():
     config["quick_think_llm"] = selections["shallow_thinker"]
     config["deep_think_llm"] = selections["deep_thinker"]
     config["backend_url"] = selections["backend_url"]
-    # 处理LLM提供商名称，确保正确识别
-    selected_llm_provider_name = selections["llm_provider"].lower()
-    if "阿里百炼" in selections["llm_provider"] or "dashscope" in selected_llm_provider_name:
-        config["llm_provider"] = "dashscope"
-    elif "deepseek" in selected_llm_provider_name or "DeepSeek" in selections["llm_provider"]:
-        config["llm_provider"] = "deepseek"
-    elif "openai" in selected_llm_provider_name and "自定义" not in selections["llm_provider"]:
-        config["llm_provider"] = "openai"
-    elif "自定义openai端点" in selected_llm_provider_name or "自定义" in selections["llm_provider"]:
-        config["llm_provider"] = "custom_openai"
-        # 从环境变量获取自定义URL
-        custom_url = os.getenv('CUSTOM_OPENAI_BASE_URL', selections["backend_url"])
+    selected_llm_provider_name = selections["llm_provider"]
+    config["llm_provider"] = selected_llm_provider_name
+
+    if selected_llm_provider_name == "custom_openai":
+        custom_url = os.getenv("CUSTOM_OPENAI_BASE_URL", selections["backend_url"])
         config["custom_openai_base_url"] = custom_url
         config["backend_url"] = custom_url
-    elif "anthropic" in selected_llm_provider_name:
-        config["llm_provider"] = "anthropic"
-    elif "google" in selected_llm_provider_name:
-        config["llm_provider"] = "google"
-    else:
-        config["llm_provider"] = selected_llm_provider_name
 
     # Initialize the graph
     ui.show_progress("正在初始化分析系统...")

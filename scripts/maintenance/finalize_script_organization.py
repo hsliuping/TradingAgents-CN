@@ -42,7 +42,6 @@ def finalize_script_organization():
         
         # 维护和管理脚本 -> scripts/maintenance/
         "branch_manager.py": "maintenance/branch_manager.py",
-        "sync_upstream.py": "maintenance/sync_upstream.py",
         "version_manager.py": "maintenance/version_manager.py",
         
         # Docker脚本 -> scripts/docker/
@@ -245,7 +244,7 @@ bash scripts/git/upstream_git_workflow.sh
 |------|------|----------|
 | `setup/` | 环境配置和初始化 | setup_databases.py |
 | `validation/` | 验证和检查 | verify_gitignore.py |
-| `maintenance/` | 维护和管理 | sync_upstream.py |
+| `maintenance/` | 维护和管理 | branch_manager.py |
 | `development/` | 开发辅助 | prepare_upstream_contribution.py |
 | `deployment/` | 部署发布 | create_github_release.py |
 | `docker/` | 容器管理 | start_docker_services.bat |

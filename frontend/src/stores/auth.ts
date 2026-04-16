@@ -174,7 +174,7 @@ export const useAuthStore = defineStore('auth', {
     },
     
     // 设置API请求头
-    setAuthHeader(token: string | null) {
+    setAuthHeader(_token: string | null) {
       // 这里会在API模块中设置Authorization头
       // 具体实现在api/request.ts中
     },
@@ -411,7 +411,8 @@ export const useAuthStore = defineStore('auth', {
       try {
         const response = await authApi.changePassword({
           old_password: oldPassword,
-          new_password: newPassword
+          new_password: newPassword,
+          confirm_password: newPassword
         })
 
         if (response.success) {
@@ -457,9 +458,10 @@ export const useAuthStore = defineStore('auth', {
             await this.refreshAccessToken()
           }
         } catch (error) {
-          console.error('❌ 检查认证状态失败:', error)
+          const err = error as { code?: string; message?: string }
+          console.error('❌ 检查认证状态失败:', err)
           // 如果是网络错误或超时，不清除认证信息，只是标记为未认证
-          if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+          if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
             console.warn('⚠️ 网络超时，保留认证信息但标记为未认证状态')
             this.isAuthenticated = false
           } else {

@@ -5,7 +5,6 @@ import type {
   LoginResponse, 
   RefreshTokenResponse,
   User,
-  UserPermissions,
   ChangePasswordForm
 } from '@/types/auth'
 

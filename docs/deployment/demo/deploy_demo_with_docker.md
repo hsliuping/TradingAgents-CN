@@ -626,7 +626,7 @@ notepad .env
 #   将等号后面改为你的 API Key，例如：DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxx
 #
 # 其他可选配置：
-#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据，注册地址：https://tushare.pro/register?reg=tacn）
+#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据，注册地址：https://tushare.pro/weborder/#/login?reg=tacn）
 #   - OPENAI_API_KEY=你的OpenAI Key（可选）
 #
 # 配置完成后保存并关闭编辑器
@@ -681,7 +681,7 @@ nano .env
 #   将等号后面改为你的 API Key，例如：DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxx
 #
 # 其他可选配置：
-#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据，注册地址：https://tushare.pro/register?reg=tacn）
+#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据，注册地址：https://tushare.pro/weborder/#/login?reg=tacn）
 #   - OPENAI_API_KEY=你的OpenAI Key（可选）
 #
 # 配置完成后保存并退出编辑器（nano: Ctrl+X, Y, Enter；vim: :wq）
@@ -736,7 +736,7 @@ nano .env
 #   将等号后面改为你的 API Key，例如：DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxx
 #
 # 其他可选配置：
-#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据，注册地址：https://tushare.pro/register?reg=tacn）
+#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据，注册地址：https://tushare.pro/weborder/#/login?reg=tacn）
 #   - OPENAI_API_KEY=你的OpenAI Key（可选）
 #
 # 配置完成后保存并退出编辑器（nano: Ctrl+X, Y, Enter；vim: :wq）
@@ -939,7 +939,7 @@ GOOGLE_API_KEY=your-google-api-key-here    # Google Gemini
 | 阿里百炼 | https://dashscope.aliyun.com/ | 国产模型，中文优化，推荐 |
 | DeepSeek | https://platform.deepseek.com/ | 性价比高，推荐 |
 | OpenAI | https://platform.openai.com/ | 需要国外网络 |
-| Tushare | https://tushare.pro/register?reg=tacn | 专业金融数据 |
+| Tushare | https://tushare.pro/weborder/#/login?reg=tacn | 专业金融数据 |
 
 ### 步骤 4：启动服务
 

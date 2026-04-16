@@ -21,7 +21,7 @@
       :class="{ 'drag-active': isDragging }"
     >
       <div
-        v-for="(item, index) in dataSources"
+        v-for="item in dataSources"
         :key="item.name"
         class="datasource-item"
         :data-id="item.name"

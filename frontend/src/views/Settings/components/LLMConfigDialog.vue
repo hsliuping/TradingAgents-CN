@@ -410,7 +410,24 @@ const defaultFormData = {
   }
 }
 
-const formData = ref({ ...defaultFormData })
+type PerformanceMetrics = {
+  speed: number
+  cost: number
+  quality: number
+}
+
+const normalizePerformanceMetrics = (
+  metrics?: Partial<PerformanceMetrics> | null
+): PerformanceMetrics => ({
+  speed: metrics?.speed ?? defaultFormData.performance_metrics.speed,
+  cost: metrics?.cost ?? defaultFormData.performance_metrics.cost,
+  quality: metrics?.quality ?? defaultFormData.performance_metrics.quality
+})
+
+const formData = ref({
+  ...defaultFormData,
+  performance_metrics: normalizePerformanceMetrics(defaultFormData.performance_metrics)
+})
 
 // 用于跟踪当前选择的模型（用于下拉列表）
 const selectedModelKey = ref<string>('')
@@ -442,9 +459,21 @@ interface ModelInfo {
   is_deprecated?: boolean
   release_date?: string
   capabilities?: string[]
+  created_at?: string
+  updated_at?: string
 }
 
 const modelCatalog = ref<Record<string, Array<ModelInfo>>>({})
+
+const sortModelsByNewest = (models: ModelInfo[]) => {
+  const getTimestamp = (model: ModelInfo) => {
+    const timeValue = model.created_at || model.updated_at
+    const timestamp = timeValue ? new Date(timeValue).getTime() : 0
+    return Number.isNaN(timestamp) ? 0 : timestamp
+  }
+
+  return [...models].sort((a, b) => getTimestamp(b) - getTimestamp(a))
+}
 
 // 加载模型目录
 const loadModelCatalog = async () => {
@@ -453,7 +482,7 @@ const loadModelCatalog = async () => {
     // 转换为 provider -> models 的映射
     const catalogMap: Record<string, Array<ModelInfo>> = {}
     catalog.forEach(item => {
-      catalogMap[item.provider] = item.models
+      catalogMap[item.provider] = sortModelsByNewest(item.models || [])
     })
     modelCatalog.value = catalogMap
     console.log('✅ 模型目录加载成功:', Object.keys(catalogMap))
@@ -470,7 +499,7 @@ const getModelOptions = (provider: string) => {
   // 优先从后端获取的目录中查找
   const models = modelCatalog.value[provider]
   if (models && models.length > 0) {
-    return models.map(m => ({
+    return sortModelsByNewest(models).map(m => ({
       label: m.display_name,
       value: m.name
     }))
@@ -577,7 +606,7 @@ watch(
         suitable_roles: config.suitable_roles || defaultFormData.suitable_roles,
         features: config.features || defaultFormData.features,
         recommended_depths: config.recommended_depths || defaultFormData.recommended_depths,
-        performance_metrics: config.performance_metrics || defaultFormData.performance_metrics
+        performance_metrics: normalizePerformanceMetrics(config.performance_metrics)
       }
       modelOptions.value = getModelOptions(config.provider)
 
@@ -623,7 +652,7 @@ watch(
           suitable_roles: props.config.suitable_roles || defaultFormData.suitable_roles,
           features: props.config.features || defaultFormData.features,
           recommended_depths: props.config.recommended_depths || defaultFormData.recommended_depths,
-          performance_metrics: props.config.performance_metrics || defaultFormData.performance_metrics
+          performance_metrics: normalizePerformanceMetrics(props.config.performance_metrics)
         }
         modelOptions.value = getModelOptions(props.config.provider)
 

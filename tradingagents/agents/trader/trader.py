@@ -4,12 +4,14 @@ import json
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
+from tradingagents.agents.utils.instrument_utils import build_instrument_context
 logger = get_logger("default")
 
 
 def create_trader(llm, memory):
     def trader_node(state, name):
         company_name = state["company_of_interest"]
+        instrument_context = build_instrument_context(company_name)
         investment_plan = state["investment_plan"]
         market_research_report = state["market_report"]
         sentiment_report = state["sentiment_report"]
@@ -59,6 +61,7 @@ def create_trader(llm, memory):
                 "content": f"""您是一位专业的交易员，负责分析市场数据并做出投资决策。基于您的分析，请提供具体的买入、卖出或持有建议。
 
 ⚠️ 重要提醒：当前分析的股票代码是 {company_name}，请使用正确的货币单位：{currency}（{currency_symbol}）
+{instrument_context}
 
 🔴 严格要求：
 - 股票代码 {company_name} 的公司名称必须严格按照基本面报告中的真实数据

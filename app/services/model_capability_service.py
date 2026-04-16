@@ -51,7 +51,8 @@ class ModelCapabilityService:
                     "deepseek": "deepseek",
                     "alibaba": "qwen",
                     "qwen": "qwen",
-                    "zhipu": "zhipu",
+                    "zhipu": "glm",
+                    "glm": "glm",
                     "baidu": "baidu",
                     "moonshot": "moonshot"
                 }

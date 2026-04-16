@@ -168,7 +168,9 @@ class AnalysisService:
             progress_tracker.update_progress("💰 预估分析成本")
 
             # 根据模型名称动态查找供应商（同步版本）
-            llm_provider = "dashscope"  # 默认使用dashscope
+            from tradingagents.llm_clients.provider_keys import normalize_provider_key
+
+            llm_provider = normalize_provider_key(get_provider_by_model_name(quick_model))
 
             # 参数配置
             progress_tracker.update_progress("⚙️ 配置分析参数")
@@ -293,7 +295,9 @@ class AnalysisService:
                 logger.warning(f"⚠️ 从 MongoDB 读取模型配置失败: {e}，将使用默认参数")
 
             # 根据模型名称动态查找供应商（同步版本）
-            llm_provider = "dashscope"  # 默认使用dashscope
+            from tradingagents.llm_clients.provider_keys import normalize_provider_key
+
+            llm_provider = normalize_provider_key(get_provider_by_model_name(quick_model))
 
             # 使用标准配置函数创建完整配置
             from app.services.simple_analysis_service import create_analysis_config
@@ -659,7 +663,9 @@ class AnalysisService:
                     }
 
             # 根据模型名称动态查找供应商
-            llm_provider = await get_provider_by_model_name(quick_model)
+            from tradingagents.llm_clients.provider_keys import normalize_provider_key
+
+            llm_provider = normalize_provider_key(await get_provider_by_model_name(quick_model))
 
             # 使用标准配置函数创建完整配置
             config = create_analysis_config(

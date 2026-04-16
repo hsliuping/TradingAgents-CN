@@ -290,8 +290,10 @@ python scripts/branch_manager.py delete release/v1.2.0-cn
 # 分支管理
 python scripts/branch_manager.py
 
-# 上游同步
-python scripts/sync_upstream.py
+# 上游差异检查（推荐人工选择性同步）
+git fetch upstream
+git log --oneline HEAD..upstream/main
+git diff --name-only HEAD..upstream/main
 
 # 代码质量检查
 black tradingagents/

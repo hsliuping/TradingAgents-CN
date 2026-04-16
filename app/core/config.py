@@ -3,6 +3,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 import os
 import warnings
+import re
+import getpass
+from pathlib import Path
 
 # Legacy env var aliases (deprecated): map API_HOST/PORT/DEBUG -> HOST/PORT/DEBUG
 _LEGACY_ENV_ALIASES = {
@@ -32,7 +35,10 @@ class Settings(BaseSettings):
     MONGODB_PORT: int = Field(default=27017)
     MONGODB_USERNAME: str = Field(default="")
     MONGODB_PASSWORD: str = Field(default="")
-    MONGODB_DATABASE: str = Field(default="tradingagents")
+    MONGODB_DATABASE: str = Field(default="tradingagentscn")
+    MONGODB_DATABASE_SCOPE: str = Field(default="auto")
+    MONGODB_DATABASE_INSTANCE: str = Field(default="")
+    ALLOW_SHARED_DB_IN_DEBUG: bool = Field(default=False)
     MONGODB_AUTH_SOURCE: str = Field(default="admin")
     MONGO_MAX_CONNECTIONS: int = Field(default=100)
     MONGO_MIN_CONNECTIONS: int = Field(default=10)
@@ -45,14 +51,57 @@ class Settings(BaseSettings):
     def MONGO_URI(self) -> str:
         """构建MongoDB URI"""
         if self.MONGODB_USERNAME and self.MONGODB_PASSWORD:
-            return f"mongodb://{self.MONGODB_USERNAME}:{self.MONGODB_PASSWORD}@{self.MONGODB_HOST}:{self.MONGODB_PORT}/{self.MONGODB_DATABASE}?authSource={self.MONGODB_AUTH_SOURCE}"
+            return f"mongodb://{self.MONGODB_USERNAME}:{self.MONGODB_PASSWORD}@{self.MONGODB_HOST}:{self.MONGODB_PORT}/{self.MONGO_DB}?authSource={self.MONGODB_AUTH_SOURCE}"
         else:
-            return f"mongodb://{self.MONGODB_HOST}:{self.MONGODB_PORT}/{self.MONGODB_DATABASE}"
+            return f"mongodb://{self.MONGODB_HOST}:{self.MONGODB_PORT}/{self.MONGO_DB}"
 
     @property
     def MONGO_DB(self) -> str:
         """获取数据库名称"""
-        return self.MONGODB_DATABASE
+        scope = (self.MONGODB_DATABASE_SCOPE or "").strip().lower()
+        if not scope or scope == "auto":
+            scope = "major_instance" if self.DEBUG else "explicit"
+
+        if scope == "explicit":
+            return self.MONGODB_DATABASE
+
+        base = self.MONGODB_DATABASE
+        major = _read_major_version()
+
+        if scope == "major":
+            name = f"{base}_v{major}"
+            return _sanitize_mongo_db_name(name)
+
+        if scope == "major_instance":
+            instance = (self.MONGODB_DATABASE_INSTANCE or "").strip()
+            if not instance:
+                instance = _default_instance_tag()
+            name = f"{base}_v{major}_{instance}"
+            return _sanitize_mongo_db_name(name)
+
+        return _sanitize_mongo_db_name(base)
+
+    @property
+    def MONGO_DB_IDENTITY(self) -> dict:
+        scope = (self.MONGODB_DATABASE_SCOPE or "").strip().lower() or "auto"
+        if scope == "auto":
+            resolved_scope = "major_instance" if self.DEBUG else "explicit"
+        else:
+            resolved_scope = scope
+
+        major = _read_major_version()
+        instance = (self.MONGODB_DATABASE_INSTANCE or "").strip()
+        if resolved_scope == "major_instance" and not instance:
+            instance = _default_instance_tag()
+
+        return {
+            "base_database": self.MONGODB_DATABASE,
+            "scope_configured": scope,
+            "scope_effective": resolved_scope,
+            "major_version": major,
+            "instance": instance,
+            "database": self.MONGO_DB,
+        }
 
     # Redis配置
     REDIS_HOST: str = Field(default="localhost")
@@ -285,6 +334,38 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 settings = Settings()
+
+
+def _read_major_version() -> str:
+    v = os.getenv("TRADINGAGENTS_VERSION", "").strip() or os.getenv("APP_VERSION", "").strip()
+    if not v:
+        try:
+            v = Path(__file__).resolve().parents[3].joinpath("VERSION").read_text(encoding="utf-8").strip()
+        except Exception:
+            v = ""
+
+    m = re.match(r"^\s*(\d+)", v)
+    return m.group(1) if m else "0"
+
+
+def _default_instance_tag() -> str:
+    user = os.getenv("TRADINGAGENTS_DB_USER", "").strip() or getpass.getuser()
+    host = os.getenv("TRADINGAGENTS_DB_HOST", "").strip() or os.getenv("COMPUTERNAME", "").strip() or os.getenv("HOSTNAME", "").strip()
+    tag = f"{user}-{host}" if host else user
+    return _sanitize_mongo_db_name(tag).strip("_-").lower() or "local"
+
+
+def _sanitize_mongo_db_name(name: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", str(name)).strip("._-")
+    if not cleaned:
+        return "tradingagentscn"
+
+    max_len = 63
+    if len(cleaned) <= max_len:
+        return cleaned
+
+    suffix = str(abs(hash(cleaned)) % (10**8)).rjust(8, "0")
+    return f"{cleaned[:max_len-9]}_{suffix}"
 
 # 自动将代理配置设置到环境变量
 # 这样 requests 库可以直接读取 os.environ['NO_PROXY']

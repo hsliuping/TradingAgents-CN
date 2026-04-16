@@ -145,7 +145,9 @@ class MemoryStateManager:
         # 获取分析参数
         research_depth = parameters.get('research_depth', '标准')
         selected_analysts = parameters.get('selected_analysts', [])
-        llm_provider = parameters.get('llm_provider', 'dashscope')
+        from tradingagents.llm_clients.provider_keys import normalize_provider_key
+
+        llm_provider = normalize_provider_key(parameters.get('llm_provider', 'dashscope'))
 
         # 研究深度映射
         depth_map = {"快速": 1, "标准": 2, "深度": 3}
@@ -162,6 +164,7 @@ class MemoryStateManager:
 
         # 模型速度影响（基于实际测试）
         model_multiplier = {
+            'qwen': 1.0,       # 阿里百炼（通义千问）速度适中
             'dashscope': 1.0,  # 阿里百炼速度适中
             'deepseek': 0.7,   # DeepSeek较快
             'google': 1.3      # Google较慢

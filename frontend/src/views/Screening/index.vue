@@ -361,9 +361,9 @@
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh, Collection, TrendCharts, Download, Star, Setting, Connection, Warning } from '@element-plus/icons-vue'
+import { Search, Refresh, TrendCharts, Download, Star, Connection, Warning } from '@element-plus/icons-vue'
 import type { StockInfo } from '@/types/analysis'
-import { screeningApi, type FieldConfigResponse, type FieldInfo } from '@/api/screening'
+import { screeningApi, type FieldConfigResponse } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
 import { getCurrentDataSource } from '@/api/sync'
 import { normalizeMarketForAnalysis, exchangeCodeToMarket, getMarketByStockCode } from '@/utils/market'
@@ -486,11 +486,11 @@ const performScreening = async () => {
     // 明确指定：不加任何技术指标相关条件
 
     const payload = {
-      market: 'CN',
+      market: 'CN' as const,
       date: undefined,
-      adj: 'qfq',
+      adj: 'qfq' as const,
       conditions: { logic: 'AND', children },
-      order_by: [{ field: 'market_cap', direction: 'desc' }],
+      order_by: [{ field: 'market_cap', direction: 'desc' as const }],
       limit: 500,
       offset: 0,
     }
@@ -551,19 +551,6 @@ const performScreening = async () => {
   }
 }
 
-const generateMockResults = (): StockInfo[] => {
-  const mockStocks = [
-    { code: '000001', name: '平安银行', industry: '银行', close: 12.50, pct_chg: 2.1, total_mv: 2400, pe: 5.2, pb: 0.8 },
-    { code: '000002', name: '万科A', industry: '房地产', close: 18.30, pct_chg: -1.5, total_mv: 2100, pe: 8.5, pb: 1.2 },
-    { code: '000858', name: '五粮液', industry: '食品饮料', close: 168.50, pct_chg: 3.2, total_mv: 6500, pe: 25.3, pb: 4.5 }
-  ]
-
-  return mockStocks.map(stock => ({
-    ...stock,
-    market: filters.market
-  }))
-}
-
 const resetFilters = () => {
   Object.assign(filters, {
     market: 'A股',
@@ -608,7 +595,7 @@ const batchAnalyze = async () => {
     router.push({
       name: 'BatchAnalysis',
       query: {
-        stocks: selectedStocks.value.map(s => s.code).join(','),
+        stocks: selectedStocks.value.map(s => s.code || s.symbol || '').filter(Boolean).join(','),
         market: normalizeMarketForAnalysis(filters.market)
       }
     })
@@ -619,20 +606,24 @@ const batchAnalyze = async () => {
 
 
 const analyzeSingle = (stock: StockInfo) => {
+  const stockCode = stock.code || stock.symbol || ''
+  if (!stockCode) return
   router.push({
     name: 'SingleAnalysis',
     query: {
-      stock: stock.code,
+      stock: stockCode,
       market: normalizeMarketForAnalysis((stock as any).market || filters.market)
     }
   })
 }
 
 const viewStockDetail = (stock: StockInfo) => {
+  const stockCode = stock.code || stock.symbol || ''
+  if (!stockCode) return
   // 跳转到股票详情页面
   router.push({
     name: 'StockDetail',
-    params: { code: stock.code }
+    params: { code: stockCode }
   })
 }
 
@@ -640,7 +631,11 @@ const isFavorited = (code: string) => favoriteSet.value.has(code)
 
 const toggleFavorite = async (stock: StockInfo) => {
   try {
-    const code = stock.code
+    const code = stock.code || stock.symbol || ''
+    if (!code) {
+      ElMessage.error('股票代码缺失，无法加入自选')
+      return
+    }
     if (favoriteSet.value.has(code)) {
       // 取消自选
       const res = await favoritesApi.remove(code)

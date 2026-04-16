@@ -52,11 +52,11 @@ main (生产分支)
 - **生命周期**: 短期（3-7天）
 - **示例**: `release/v1.1.0-cn`
 
-#### 🔄 **upstream-sync/** - 上游同步分支
-- **命名**: `upstream-sync/日期`
-- **用途**: 同步上游更新
-- **生命周期**: 临时（1天）
-- **示例**: `upstream-sync/20240115`
+#### 🔄 **manual-sync/** - 手工上游同步分支
+- **命名**: `manual-sync/日期-主题`
+- **用途**: 人工选择性吸收上游更新
+- **生命周期**: 临时（1-3天）
+- **示例**: `manual-sync/20260414-llm-clients`
 
 ## 🔄 工作流程
 
@@ -486,26 +486,30 @@ python scripts/branch_manager.py delete release/v1.1.0-cn
 
 #### 与原项目保持同步
 ```bash
-# 步骤1: 检查上游更新
-python scripts/sync_upstream.py
+# 步骤1: 拉取上游最新状态
+git fetch upstream
 
-# 步骤2: 如果有更新，会自动创建同步分支
-# upstream-sync/20240115
+# 步骤2: 创建手工同步分支
+git checkout -b manual-sync/20260414-llm-clients
 
-# 步骤3: 解决可能的冲突
-# 保护我们的中文文档和增强功能
-# 采用上游的核心代码更新
+# 步骤3: 检查差异并按模块人工吸收
+git log --oneline HEAD..upstream/main
+git diff --name-only HEAD..upstream/main
 
-# 步骤4: 测试同步结果
+# 步骤4: 解决可能的冲突
+# 保护我们的中文文档、配置体系和中文增强功能
+# 只选择需要的核心代码更新
+
+# 步骤5: 测试同步结果
 python -m pytest tests/
 python examples/basic_example.py
 
-# 步骤5: 合并到主分支
+# 步骤6: 合并到主分支
 git checkout main
-git merge upstream-sync/20240115
+git merge manual-sync/20260414-llm-clients
 git push origin main
 
-# 步骤6: 同步到develop
+# 步骤7: 同步到develop
 git checkout develop
 git merge main
 git push origin develop

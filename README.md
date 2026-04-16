@@ -2,9 +2,51 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-cn--0.1.15-green.svg)](./VERSION)
+[![Version](https://img.shields.io/badge/Version-v1.0.1-green.svg)](./VERSION)
 [![Documentation](https://img.shields.io/badge/docs-中文文档-green.svg)](./docs/)
 [![Original](https://img.shields.io/badge/基于-TauricResearch/TradingAgents-orange.svg)](https://github.com/TauricResearch/TradingAgents)
+
+---
+
+## ⚠️ 重要版权声明与授权说明
+
+### 🚨 版权侵权警告
+
+**我们注意到 `tradingagents-ai.com` 网站未经授权使用了我们的专有代码，并声称是他们公司的产品。**
+
+**⚠️ 重要提醒**：
+- ❌ **我们项目组目前没有给任何组织或个人进行过商业授权**
+- ❌ **该网站未经授权使用我们的代码，属于侵权行为**
+- ⚠️ **请大家注意识别，避免上当受骗**
+
+**✅ 官方唯一渠道**：
+- 📦 GitHub 仓库：https://github.com/hsliuping/TradingAgents-CN
+- 📧 官方邮箱：hsliup@163.com
+- 📱 微信公众号：TradingAgents-CN
+
+如发现任何未经授权的商业使用，请通过上述渠道联系我们。
+
+### 📋 版本授权说明
+
+#### v1.0.1（当前稳定版本）
+- ✅ **个人使用**：完全开源，可自由使用
+- ❌ **商业使用**：**必须获得商业授权**，未经授权禁止商业使用
+- 📧 **授权联系**：[hsliup@163.com](mailto:hsliup@163.com)
+
+#### v2.0.0（开发中）
+- 🔄 **开发状态**：已完成两轮内测，接近完工上线阶段
+- ⚠️ **开源计划**：**因存在盗版问题，v2.0 版本暂时不进行开源**
+- 📢 **发布方式**：将通过官方渠道发布，敬请关注
+
+### 📄 许可证详情
+
+本项目采用**混合许可证**模式：
+- 🔓 **开源部分**（Apache 2.0）：除 `app/` 和 `frontend/` 外的所有文件
+- 🔒 **专有部分**（需商业授权）：`app/`（FastAPI后端）和 `frontend/`（Vue前端）目录
+
+详细说明请查看：[版权声明](./COPYRIGHT.md) | [许可证文件](./LICENSE)
+
+---
 
 >
 > 🎓 **学习中心**: AI基础 | 提示词工程 | 模型选择 | 多智能体分析原理 | 风险与局限 | 源项目与论文 | 实战教程（部分为外链） | 常见问题
@@ -18,9 +60,9 @@
 
 **🎯 我们的定位与使命**: 专注学习与研究，提供中文化学习中心与工具，合规友好，支持 A股/港股/美股 的分析与教学，推动 AI 金融技术在中文社区的普及与正确使用。
 
-## 🎉 v1.0.0-preview 版本上线 - 全新架构升级
+## 🎉 v1.0.1 版本说明 - 配置体验与同步稳定性增强
 
-> 🚀 **重磅发布**: v1.0.0-preview 版本现已正式！全新的 FastAPI + Vue 3 架构，带来企业级的性能和体验！
+> 🚀 **当前推荐版本**: `v1.0.1` 已正式可用，在 `v1.0.0-preview` 架构基础上，重点增强配置管理、聚合厂家、页面切换、单股同步和上游能力吸收。
 
 ### ✨ 核心特性
 
@@ -29,6 +71,15 @@
 - **前端重构**: 采用 Vue 3 + Element Plus，打造现代化的单页应用
 - **数据库优化**: MongoDB + Redis 双数据库架构，性能提升 10 倍
 - **容器化部署**: 完整的 Docker 多架构支持（amd64 + arm64）
+
+#### 🚀 **v1.0.1 重点增强**
+- **配置管理优化**: 新增厂家、模型目录和大模型配置支持按最新添加顺序置顶显示
+- **聚合厂家增强**: 新增 `AiHubMix` 聚合 LLM 厂家，并支持聚合渠道初始化能力
+- **模型选择统一排序**: 配置页、对话框和分析页中的模型列表顺序保持一致
+- **页面切换修复**: 股票详情页和报告详情页切换后会自动刷新正确内容
+- **单股同步增强**: 同步结果支持展示主链路、回退链路、失败原因和 `market_quotes` 落库状态
+- **AKShare 兜底增强**: 单股实时行情支持 `stock_bid_ask_em -> stock_zh_a_spot -> stock_zh_a_spot_em -> stock_zh_a_hist` 多级降级链
+- **上游能力同步**: 同步 `llm_clients`、共享模型目录、provider 规范键、图层初始化路径和数据库迁移增强等能力
 
 #### 🎯 **企业级功能**
 - **用户权限管理**: 完整的用户认证、角色管理、操作日志系统
@@ -47,20 +98,20 @@
 - **多数据源同步**: 统一的数据源管理，支持 Tushare、AkShare、BaoStock
 - **报告导出功能**: 支持 Markdown/Word/PDF 多格式专业报告导出
 
-#### � **重大Bug修复**
+#### 🔧 **重大Bug修复**
 - **技术指标计算修复**: 彻底解决市场分析师技术指标计算不准确问题
 - **基本面数据修复**: 修复基本面分析师PE、PB等关键财务数据计算错误
 - **死循环问题修复**: 解决部分用户在分析过程中触发的无限循环问题
 - **数据一致性优化**: 确保所有分析师使用统一、准确的数据源
 
-#### �🐳 **Docker 多架构支持**
+#### 🐳 **Docker 多架构支持**
 - **跨平台部署**: 支持 x86_64 和 ARM64 架构（Apple Silicon、树莓派、AWS Graviton）
 - **GitHub Actions**: 自动化构建和发布 Docker 镜像
 - **一键部署**: 完整的 Docker Compose 配置，5 分钟快速启动
 
 ### 📊 技术栈升级
 
-| 组件 | v0.1.x | v1.0.0-preview |
+| 组件 | v0.1.x | v1.0.1 |
 |------|--------|----------------|
 | **后端框架** | Streamlit | FastAPI + Uvicorn |
 | **前端框架** | Streamlit | Vue 3 + Vite + Element Plus |
@@ -72,11 +123,10 @@
 
 #### 📥 安装部署
 
-**三种部署方式，任选其一**：
+**两种部署方式，任选其一**：
 
 | 部署方式 | 适用场景 | 难度 | 文档链接 |
 |---------|---------|------|---------|
-| 🟢 **绿色版** | Windows 用户、快速体验 | ⭐ 简单 | [绿色版安装指南](https://mp.weixin.qq.com/s/eoo_HeIGxaQZVT76LBbRJQ) |
 | 🐳 **Docker版** | 生产环境、跨平台 | ⭐⭐ 中等 | [Docker 部署指南](https://mp.weixin.qq.com/s/JkA0cOu8xJnoY_3LC5oXNw) |
 | 💻 **本地代码版** | 开发者、定制需求 | ⭐⭐⭐ 较难 | [本地安装指南](https://mp.weixin.qq.com/s/cqUGf-sAzcBV19gdI4sYfA) |
 
@@ -87,6 +137,10 @@
 #### 📚 使用指南
 
 在使用前，建议先阅读详细的使用指南：
+- **[v1.0.1 发布说明](./docs/releases/v1.0.1-release-notes.md)**
+- **[v1.0.1 使用手册](./docs/guides/v1.0.1-user-manual.md)**
+- **[v1.0.1 升级指南](./docs/releases/upgrade-guide.md)**
+- **[完整更新日志](./docs/releases/CHANGELOG.md)**
 - **[0、📘 TradingAgents-CN v1.0.0-preview 快速入门视频](https://www.bilibili.com/video/BV1i2CeBwEP7/?vd_source=5d790a5b8d2f46d2c10fd4e770be1594)**
 
 - **[1、📘 TradingAgents-CN v1.0.0-preview 使用指南](https://mp.weixin.qq.com/s/ppsYiBncynxlsfKFG8uEbw)**
@@ -104,6 +158,27 @@
 - ✅ 常见问题解答和故障排除
 - ✅ 实际使用案例和效果展示
 
+### 数据库运维补充
+
+- 数据库版本隔离、共享库保护、迁移脚本与 provider 规范化说明：
+  - [数据库版本隔离与 Provider 规范化](./docs/deployment/database/DB_VERSION_ISOLATION_AND_PROVIDER_NORMALIZATION.md)
+
+### 上游吸收补充
+
+- 当前项目采用人工选择性吸收上游更新：
+  - [上游同步策略](./docs/maintenance/upstream-sync.md)
+  - [人工上游吸收清单](./docs/maintenance/manual-upstream-absorption-checklist.md)
+
+- `v1.0.1` 已明确同步到当前版本的上游能力包括：
+  - `llm_clients` 抽象层主链路
+  - 共享模型目录与轻量校验
+  - provider canonical key 规范化
+  - `trading_graph.py` 主要 provider 初始化路径收口
+  - `fundamentals_analyst.py` 中 qwen fresh llm 重建逻辑
+  - 图层参数透传、工厂别名兼容、风控引用修复
+  - provider 默认 URL / 环境变量映射统一
+  - MongoDB 默认库名、版本隔离命名与迁移脚本增强
+
 #### 关注公众号
 
 1. **关注公众号**: 微信搜索 **"TradingAgents-CN"** 并关注
@@ -119,57 +194,7 @@
 
 **相比原版新增**: 智能新闻分析 | 多层次新闻过滤 | 新闻质量评估 | 统一新闻工具 | 多LLM提供商集成 | 模型选择持久化 | 快速切换按钮 | | 实时进度显示 | 智能会话管理 | 中文界面 | A股数据 | 国产LLM | Docker部署 | 专业报告导出 | 统一日志管理 | Web配置界面 | 成本优化
 
-## 📢 招募测试志愿者
 
-### 🎯 我们需要你的帮助！
-
-TradingAgentsCN 已经获得 **13,000+ stars**，但一直由我一个人开发维护。每次发布新版本时，尽管我会尽力测试，但仍然会有一些隐藏的 bug 没有被发现。
-
-**我需要你的帮助来让这个项目变得更好！**
-
-### 🙋 我们需要什么样的志愿者？
-
-- ✅ 对股票分析或 AI 应用感兴趣
-- ✅ 愿意在新版本发布前进行测试
-- ✅ 能够清晰描述遇到的问题
-- ✅ 每周可以投入 2-4 小时（弹性时间）
-
-**不需要编程经验！** 功能测试、文档测试、用户体验测试都非常有价值。
-
-### 🎁 你将获得什么？
-
-1. **优先体验权** - 提前体验新功能和新版本
-2. **技术成长** - 深入了解多智能体系统和 LLM 应用开发
-3. **社区认可** - 在 README 和发布说明中致谢，获得 "Core Tester" 标签
-4. **开源贡献** - 为 13,000+ stars 的项目做出实质性贡献
-5. **未来机会** - 如果项目商业化，可能会有相应的报酬
-
-### 🚀 如何加入？
-
-**方式一：微信公众号申请（推荐）**
-1. 关注微信公众号：**TradingAgentsCN**
-2. 在公众号菜单选择"测试申请"菜单
-3. 填写申请信息
-
-**方式二：邮件申请**
-- 发送邮件到：hsliup@163.com
-- 主题：测试志愿者申请
-
-### 📋 测试内容示例
-
-- **日常测试**（每周 2-4 小时）：测试新功能和 bug 修复，在不同环境下验证功能
-- **版本发布前测试**（每月 1-2 次）：完整的功能回归测试、安装和部署流程测试
-
-### 🌟 特别需要的测试方向
-
-- 🪟 **Windows 用户** - 测试 Windows 安装程序和绿色版
-- 🍎 **macOS 用户** - 测试 macOS 兼容性
-- 🐧 **Linux 用户** - 测试 Linux 兼容性
-- 🐳 **Docker 用户** - 测试 Docker 部署
-- 📊 **多市场用户** - 测试 A 股、港股、美股数据源
-- 🤖 **多 LLM 用户** - 测试不同 LLM 提供商（OpenAI/Gemini/DeepSeek/通义千问等）
-
-**详细信息**: 查看完整招募公告 → [📢 测试志愿者招募](docs/community/CALL_FOR_TESTERS.md)
 
 ## 🤝 贡献指南
 
@@ -195,7 +220,7 @@ TradingAgentsCN 已经获得 **13,000+ stars**，但一直由我一个人开发�
 
 查看所有贡献者和详细贡献内容：**[🤝 贡献者名单](CONTRIBUTORS.md)**
 
-## 📄 许可证
+## 📄 许可证详情
 
 本项目采用**混合许可证**模式，详见 [LICENSE](LICENSE) 文件：
 
@@ -213,6 +238,13 @@ TradingAgentsCN 已经获得 **13,000+ stars**，但一直由我一个人开发�
 - **个人学习/研究**：可自由使用全部功能
 - **商业应用**：请联系获取专有组件授权
 - **定制开发**：欢迎咨询商业合作方案
+
+### 📚 相关文档
+
+- [版权声明](./COPYRIGHT.md) - 详细的版权信息和使用条款
+- [主许可证](./LICENSE) - Apache 2.0 许可证
+- [后端专有许可证](./app/LICENSE) - 后端专有组件许可证
+- [前端专有许可证](./frontend/LICENSE) - 前端专有组件许可证
 
 ## 🙏 致谢与感恩
 
@@ -267,9 +299,17 @@ TradingAgentsCN 已经获得 **13,000+ stars**，但一直由我一个人开发�
 - **持续改进**: 不断完善中文增强版本，提供更好的用户体验
 - **开放合作**: 欢迎与源项目团队和全球开发者进行技术交流与合作
 
+## [感谢AIHubmix赞助，推荐llm模型使用AIHubmix](https://aihubmix.com/?aff=2rIi)
+
+<a href="https://aihubmix.com/?aff=2rIi" target="_blank" rel="noopener noreferrer">
+  <img src="assets/AIHubmixlogo.png" alt="AIHubMix" width="220"/>
+</a>
+
 ## 📈 版本历史
 
-- **v0.1.13** (2025-08-02): 🤖 原生OpenAI支持与Google AI生态系统全面集成 ✨ **最新版本**
+- **v1.0.1** (2026-04-14): 🔧 配置管理优化、AiHubMix 聚合厂家、单股同步增强与上游能力吸收 ✨ **当前版本**
+- **v1.0.0-preview** (2025-10-10): 🏗️ FastAPI + Vue 3 新架构预览版
+- **v0.1.13** (2025-08-02): 🤖 原生OpenAI支持与Google AI生态系统全面集成
 - **v0.1.12** (2025-07-29): 🧠 智能新闻分析模块与项目结构优化
 - **v0.1.11** (2025-07-27): 🤖 多LLM提供商集成与模型选择持久化
 - **v0.1.10** (2025-07-18): 🚀 Web界面实时进度显示与智能会话管理
@@ -289,7 +329,7 @@ TradingAgentsCN 已经获得 **13,000+ stars**，但一直由我一个人开发�
 
 - **GitHub Issues**: [提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
 - **邮箱**: hsliup@163.com
-- 项目ＱＱ群：1009816091
+- 项目ＱＱ群：1091917201
 - 项目微信公众号：TradingAgents-CN
 
   <img src="assets/wexin.png" alt="微信公众号" width="200"/>

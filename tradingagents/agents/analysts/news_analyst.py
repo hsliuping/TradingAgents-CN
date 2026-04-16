@@ -12,6 +12,7 @@ from tradingagents.tools.unified_news_tool import create_unified_news_tool
 from tradingagents.utils.stock_utils import StockUtils
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
+from tradingagents.agents.utils.instrument_utils import build_instrument_context
 
 logger = get_logger("analysts.news")
 
@@ -93,6 +94,7 @@ def create_news_analyst(llm, toolkit):
                 return f"股票{ticker}"
         
         company_name = _get_company_name(ticker, market_info)
+        instrument_context = build_instrument_context(ticker)
         logger.info(f"[新闻分析师] 公司名称: {company_name}")
         
         # 🔧 使用统一新闻工具，简化工具调用
@@ -174,6 +176,7 @@ def create_news_analyst(llm, toolkit):
                     "\n⚠️ 没有例外，没有借口，必须调用工具。"
                     "\n"
                     "\n您可以访问以下工具：{tool_names}。"
+                    "\n标的约束：{instrument_context}"
                     "\n{system_message}"
                     "\n供您参考，当前日期是{current_date}。我们正在查看公司{ticker}。"
                     "\n请按照上述要求执行，用中文撰写所有分析内容。",
@@ -186,6 +189,7 @@ def create_news_analyst(llm, toolkit):
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(ticker=ticker)
+        prompt = prompt.partial(instrument_context=instrument_context)
         
         # 获取模型信息用于统一新闻工具的特殊处理
         model_info = ""

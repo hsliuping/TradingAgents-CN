@@ -7,14 +7,12 @@ from datetime import date
 from typing import Dict, Any, Tuple, List, Optional
 import time
 
-from langchain_openai import ChatOpenAI
-from langchain_anthropic import ChatAnthropic
-from langchain_google_genai import ChatGoogleGenerativeAI
-from tradingagents.llm_adapters import ChatDashScopeOpenAI, ChatGoogleOpenAI
+from tradingagents.llm_clients import create_llm_client
+from tradingagents.llm_clients.provider_keys import env_key_for_provider, normalize_provider_key
 
 from langgraph.prebuilt import ToolNode
 
-from tradingagents.agents import *
+from tradingagents.agents import Toolkit
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.agents.utils.memory import FinancialSituationMemory
 
@@ -38,7 +36,7 @@ from .reflection import Reflector
 from .signal_processing import SignalProcessor
 
 
-def create_llm_by_provider(provider: str, model: str, backend_url: str, temperature: float, max_tokens: int, timeout: int, api_key: str = None):
+def create_llm_by_provider(provider: str, model: str, backend_url: str, temperature: float, max_tokens: int, timeout: int, api_key: str = None, **extra_kwargs):
     """
     根据 provider 创建对应的 LLM 实例
 
@@ -54,109 +52,65 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
     Returns:
         LLM 实例
     """
-    from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
-    from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
-
     logger.info(f"🔧 [创建LLM] provider={provider}, model={model}, url={backend_url}")
     logger.info(f"🔑 [API Key] 来源: {'数据库配置' if api_key else '环境变量'}")
 
-    if provider.lower() == "google":
-        # 优先使用传入的 API Key，否则从环境变量读取
-        google_api_key = api_key or os.getenv('GOOGLE_API_KEY')
-        if not google_api_key:
-            raise ValueError("使用Google需要设置GOOGLE_API_KEY环境变量或在数据库中配置API Key")
+    normalized_provider = normalize_provider_key(provider)
 
-        # 传递 base_url 参数，使厂家配置的 default_base_url 生效
-        return ChatGoogleOpenAI(
-            model=model,
-            google_api_key=google_api_key,
-            base_url=backend_url if backend_url else None,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout
-        )
-
-    elif provider.lower() == "dashscope":
-        # 优先使用传入的 API Key，否则从环境变量读取
-        dashscope_api_key = api_key or os.getenv('DASHSCOPE_API_KEY')
-
-        # 传递 base_url 参数，使厂家配置的 default_base_url 生效
-        return ChatDashScopeOpenAI(
-            model=model,
-            api_key=dashscope_api_key,  # 🔥 传递 API Key
-            base_url=backend_url if backend_url else None,  # 如果有自定义 URL 则使用
-            temperature=temperature,
-            max_tokens=max_tokens,
-            request_timeout=timeout
-        )
-
-    elif provider.lower() == "deepseek":
-        # 优先使用传入的 API Key，否则从环境变量读取
-        deepseek_api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
-        if not deepseek_api_key:
-            raise ValueError("使用DeepSeek需要设置DEEPSEEK_API_KEY环境变量或在数据库中配置API Key")
-
-        return ChatDeepSeek(
-            model=model,
-            api_key=deepseek_api_key,
-            base_url=backend_url,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout
-        )
-
-    elif provider.lower() == "zhipu":
-        # 智谱AI处理
-        zhipu_api_key = api_key or os.getenv('ZHIPU_API_KEY')
-        if not zhipu_api_key:
-            raise ValueError("使用智谱AI需要设置ZHIPU_API_KEY环境变量或在数据库中配置API Key")
-        
-        return create_openai_compatible_llm(
-            provider="zhipu",
-            model=model,
-            api_key=zhipu_api_key,
-            base_url=backend_url,  # 使用用户提供的backend_url
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout
-        )
-
-    elif provider.lower() in ["openai", "siliconflow", "openrouter", "ollama"]:
-        # 优先使用传入的 API Key，否则从环境变量读取
+    if normalized_provider in {"openai", "siliconflow", "openrouter", "aihubmix", "ollama", "deepseek", "qwen", "glm", "custom_openai", "qianfan"}:
         if not api_key:
-            if provider.lower() == "siliconflow":
+            if normalized_provider == "siliconflow":
                 api_key = os.getenv('SILICONFLOW_API_KEY')
-            elif provider.lower() == "openrouter":
+            elif normalized_provider == "openrouter":
                 api_key = os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY')
-            elif provider.lower() == "openai":
+            elif normalized_provider == "openai":
                 api_key = os.getenv('OPENAI_API_KEY')
+            else:
+                env_key = env_key_for_provider(normalized_provider)
+                if env_key:
+                    api_key = os.getenv(env_key)
 
-        return ChatOpenAI(
+        factory_provider = "openai" if normalized_provider == "siliconflow" else normalized_provider
+        client = create_llm_client(
+            provider=factory_provider,
             model=model,
             base_url=backend_url,
             api_key=api_key,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=timeout
+            timeout=timeout,
+            **extra_kwargs,
         )
+        return client.get_llm()
 
-    elif provider.lower() == "anthropic":
+    if normalized_provider == "google":
+        # 优先使用传入的 API Key，否则从环境变量读取
+        google_api_key = api_key or os.getenv('GOOGLE_API_KEY')
+        if not google_api_key:
+            raise ValueError("使用Google需要设置GOOGLE_API_KEY环境变量或在数据库中配置API Key")
+
+        client = create_llm_client(
+            provider="google",
+            model=model,
+            base_url=backend_url if backend_url else None,
+            api_key=google_api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            **extra_kwargs,
+        )
+        return client.get_llm()
+
+    elif normalized_provider == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+
         return ChatAnthropic(
             model=model,
             base_url=backend_url,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=timeout
-        )
-
-    elif provider.lower() in ["qianfan", "custom_openai"]:
-        return create_openai_compatible_llm(
-            provider=provider,
-            model=model,
-            base_url=backend_url,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout
+            timeout=timeout,
+            **extra_kwargs,
         )
 
     else:
@@ -180,6 +134,8 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         if not custom_api_key:
             logger.warning(f"⚠️ 未找到自定义厂家 {provider} 的 API Key，尝试使用默认配置")
 
+        from langchain_openai import ChatOpenAI
+
         return ChatOpenAI(
             model=model,
             base_url=backend_url,
@@ -188,6 +144,48 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             max_tokens=max_tokens,
             timeout=timeout
         )
+
+
+def _create_provider_pair(
+    provider: str,
+    config: Dict[str, Any],
+    quick_temperature: float,
+    quick_max_tokens: int,
+    quick_timeout: int,
+    deep_temperature: float,
+    deep_max_tokens: int,
+    deep_timeout: int,
+    backend_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    quick_extra_kwargs: Optional[Dict[str, Any]] = None,
+    deep_extra_kwargs: Optional[Dict[str, Any]] = None,
+) -> Tuple[Any, Any]:
+    resolved_backend_url = backend_url if backend_url is not None else config.get("backend_url", "")
+    shared_api_key = api_key or config.get("quick_api_key") or config.get("deep_api_key")
+    quick_extra_kwargs = quick_extra_kwargs or {}
+    deep_extra_kwargs = deep_extra_kwargs or {}
+
+    deep_llm = create_llm_by_provider(
+        provider=provider,
+        model=config["deep_think_llm"],
+        backend_url=resolved_backend_url,
+        temperature=deep_temperature,
+        max_tokens=deep_max_tokens,
+        timeout=deep_timeout,
+        api_key=shared_api_key,
+        **deep_extra_kwargs,
+    )
+    quick_llm = create_llm_by_provider(
+        provider=provider,
+        model=config["quick_think_llm"],
+        backend_url=resolved_backend_url,
+        temperature=quick_temperature,
+        max_tokens=quick_max_tokens,
+        timeout=quick_timeout,
+        api_key=shared_api_key,
+        **quick_extra_kwargs,
+    )
+    return deep_llm, quick_llm
 
 
 class TradingAgentsGraph:
@@ -236,18 +234,21 @@ class TradingAgentsGraph:
         # 🔧 检查是否为混合模式（快速模型和深度模型来自不同厂家）
         quick_provider = self.config.get("quick_provider")
         deep_provider = self.config.get("deep_provider")
+        normalized_quick_provider = normalize_provider_key(quick_provider) if quick_provider else None
+        normalized_deep_provider = normalize_provider_key(deep_provider) if deep_provider else None
         quick_backend_url = self.config.get("quick_backend_url")
         deep_backend_url = self.config.get("deep_backend_url")
+        normalized_provider = normalize_provider_key(self.config["llm_provider"])
 
-        if quick_provider and deep_provider and quick_provider != deep_provider:
+        if normalized_quick_provider and normalized_deep_provider and normalized_quick_provider != normalized_deep_provider:
             # 混合模式：快速模型和深度模型来自不同厂家
             logger.info(f"🔀 [混合模式] 检测到不同厂家的模型组合")
-            logger.info(f"   快速模型: {self.config['quick_think_llm']} ({quick_provider})")
-            logger.info(f"   深度模型: {self.config['deep_think_llm']} ({deep_provider})")
+            logger.info(f"   快速模型: {self.config['quick_think_llm']} ({normalized_quick_provider})")
+            logger.info(f"   深度模型: {self.config['deep_think_llm']} ({normalized_deep_provider})")
 
             # 使用统一的函数创建 LLM 实例
             self.quick_thinking_llm = create_llm_by_provider(
-                provider=quick_provider,
+                provider=normalized_quick_provider,
                 model=self.config["quick_think_llm"],
                 backend_url=quick_backend_url or self.config.get("backend_url", ""),
                 temperature=quick_temperature,
@@ -257,7 +258,7 @@ class TradingAgentsGraph:
             )
 
             self.deep_thinking_llm = create_llm_by_provider(
-                provider=deep_provider,
+                provider=normalized_deep_provider,
                 model=self.config["deep_think_llm"],
                 backend_url=deep_backend_url or self.config.get("backend_url", ""),
                 temperature=deep_temperature,
@@ -268,95 +269,40 @@ class TradingAgentsGraph:
 
             logger.info(f"✅ [混合模式] LLM 实例创建成功")
 
-        elif self.config["llm_provider"].lower() == "openai":
-            logger.info(f"🔧 [OpenAI-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
-            logger.info(f"🔧 [OpenAI-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
+        elif normalized_provider in {"openai", "siliconflow", "openrouter", "aihubmix", "ollama"}:
+            provider = normalized_provider
+            logger.info(f"🔧 [{provider}-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
+            logger.info(f"🔧 [{provider}-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
 
-            self.deep_thinking_llm = ChatOpenAI(
-                model=self.config["deep_think_llm"],
-                base_url=self.config["backend_url"],
-                temperature=deep_temperature,
-                max_tokens=deep_max_tokens,
-                timeout=deep_timeout
-            )
-            self.quick_thinking_llm = ChatOpenAI(
-                model=self.config["quick_think_llm"],
-                base_url=self.config["backend_url"],
-                temperature=quick_temperature,
-                max_tokens=quick_max_tokens,
-                timeout=quick_timeout
-            )
-        elif self.config["llm_provider"] == "siliconflow":
-            # SiliconFlow支持：使用OpenAI兼容API
-            siliconflow_api_key = os.getenv('SILICONFLOW_API_KEY')
-            if not siliconflow_api_key:
-                raise ValueError("使用SiliconFlow需要设置SILICONFLOW_API_KEY环境变量")
+            api_key = None
+            if provider == "siliconflow":
+                api_key = os.getenv('SILICONFLOW_API_KEY')
+                if not api_key:
+                    raise ValueError("使用SiliconFlow需要设置SILICONFLOW_API_KEY环境变量")
+            elif provider == "openrouter":
+                api_key = os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY')
+                if not api_key:
+                    raise ValueError("使用OpenRouter需要设置OPENROUTER_API_KEY或OPENAI_API_KEY环境变量")
+            elif provider == "aihubmix":
+                api_key = os.getenv('AIHUBMIX_API_KEY')
+                if not api_key:
+                    raise ValueError("使用AiHubMix需要设置AIHUBMIX_API_KEY环境变量")
 
-            logger.info(f"🌐 [SiliconFlow] 使用API密钥: {siliconflow_api_key[:20]}...")
-            logger.info(f"🔧 [SiliconFlow-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
-            logger.info(f"🔧 [SiliconFlow-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
+            self.deep_thinking_llm, self.quick_thinking_llm = _create_provider_pair(
+                provider=provider,
+                config=self.config,
+                quick_temperature=quick_temperature,
+                quick_max_tokens=quick_max_tokens,
+                quick_timeout=quick_timeout,
+                deep_temperature=deep_temperature,
+                deep_max_tokens=deep_max_tokens,
+                deep_timeout=deep_timeout,
+                backend_url=self.config["backend_url"],
+                api_key=api_key,
+            )
+        elif normalized_provider == "anthropic":
+            from langchain_anthropic import ChatAnthropic
 
-            self.deep_thinking_llm = ChatOpenAI(
-                model=self.config["deep_think_llm"],
-                base_url=self.config["backend_url"],
-                api_key=siliconflow_api_key,
-                temperature=deep_temperature,
-                max_tokens=deep_max_tokens,
-                timeout=deep_timeout
-            )
-            self.quick_thinking_llm = ChatOpenAI(
-                model=self.config["quick_think_llm"],
-                base_url=self.config["backend_url"],
-                api_key=siliconflow_api_key,
-                temperature=quick_temperature,
-                max_tokens=quick_max_tokens,
-                timeout=quick_timeout
-            )
-        elif self.config["llm_provider"] == "openrouter":
-            # OpenRouter支持：优先使用OPENROUTER_API_KEY，否则使用OPENAI_API_KEY
-            openrouter_api_key = os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY')
-            if not openrouter_api_key:
-                raise ValueError("使用OpenRouter需要设置OPENROUTER_API_KEY或OPENAI_API_KEY环境变量")
-
-            logger.info(f"🌐 [OpenRouter] 使用API密钥: {openrouter_api_key[:20]}...")
-            logger.info(f"🔧 [OpenRouter-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
-            logger.info(f"🔧 [OpenRouter-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
-
-            self.deep_thinking_llm = ChatOpenAI(
-                model=self.config["deep_think_llm"],
-                base_url=self.config["backend_url"],
-                api_key=openrouter_api_key,
-                temperature=deep_temperature,
-                max_tokens=deep_max_tokens,
-                timeout=deep_timeout
-            )
-            self.quick_thinking_llm = ChatOpenAI(
-                model=self.config["quick_think_llm"],
-                base_url=self.config["backend_url"],
-                api_key=openrouter_api_key,
-                temperature=quick_temperature,
-                max_tokens=quick_max_tokens,
-                timeout=quick_timeout
-            )
-        elif self.config["llm_provider"] == "ollama":
-            logger.info(f"🔧 [Ollama-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
-            logger.info(f"🔧 [Ollama-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
-
-            self.deep_thinking_llm = ChatOpenAI(
-                model=self.config["deep_think_llm"],
-                base_url=self.config["backend_url"],
-                temperature=deep_temperature,
-                max_tokens=deep_max_tokens,
-                timeout=deep_timeout
-            )
-            self.quick_thinking_llm = ChatOpenAI(
-                model=self.config["quick_think_llm"],
-                base_url=self.config["backend_url"],
-                temperature=quick_temperature,
-                max_tokens=quick_max_tokens,
-                timeout=quick_timeout
-            )
-        elif self.config["llm_provider"].lower() == "anthropic":
             logger.info(f"🔧 [Anthropic-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
             logger.info(f"🔧 [Anthropic-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
 
@@ -374,9 +320,9 @@ class TradingAgentsGraph:
                 max_tokens=quick_max_tokens,
                 timeout=quick_timeout
             )
-        elif self.config["llm_provider"].lower() == "google":
-            # 使用 Google OpenAI 兼容适配器，解决工具调用格式不匹配问题
-            logger.info(f"🔧 使用Google AI OpenAI 兼容适配器 (解决工具调用问题)")
+        elif normalized_provider == "google":
+            # 使用统一 llm_clients 入口，但底层仍返回 ChatGoogleOpenAI 兼容适配器
+            logger.info("🔧 使用统一 llm_clients 路径初始化 Google AI（保留工具调用兼容行为）")
 
             # 🔥 优先使用数据库配置的 API Key，否则从环境变量读取
             google_api_key = self.config.get("quick_api_key") or self.config.get("deep_api_key") or os.getenv('GOOGLE_API_KEY')
@@ -384,18 +330,6 @@ class TradingAgentsGraph:
                 raise ValueError("使用Google AI需要在数据库中配置API Key或设置GOOGLE_API_KEY环境变量")
 
             logger.info(f"🔑 [Google AI] API Key 来源: {'数据库配置' if self.config.get('quick_api_key') or self.config.get('deep_api_key') else '环境变量'}")
-
-            # 🔧 从配置中读取模型参数（优先使用用户配置，否则使用默认值）
-            quick_config = self.config.get("quick_model_config", {})
-            deep_config = self.config.get("deep_model_config", {})
-
-            quick_max_tokens = quick_config.get("max_tokens", 4000)
-            quick_temperature = quick_config.get("temperature", 0.7)
-            quick_timeout = quick_config.get("timeout", 180)
-
-            deep_max_tokens = deep_config.get("max_tokens", 4000)
-            deep_temperature = deep_config.get("temperature", 0.7)
-            deep_timeout = deep_config.get("timeout", 180)
 
             logger.info(f"🔧 [Google-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
             logger.info(f"🔧 [Google-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
@@ -407,228 +341,90 @@ class TradingAgentsGraph:
             else:
                 logger.info(f"🔧 [Google AI] 未配置 backend_url，使用默认端点")
 
-            self.deep_thinking_llm = ChatGoogleOpenAI(
-                model=self.config["deep_think_llm"],
-                google_api_key=google_api_key,
-                base_url=backend_url if backend_url else None,
-                temperature=deep_temperature,
-                max_tokens=deep_max_tokens,
-                timeout=deep_timeout
-            )
-            self.quick_thinking_llm = ChatGoogleOpenAI(
-                model=self.config["quick_think_llm"],
-                google_api_key=google_api_key,
-                base_url=backend_url if backend_url else None,
-                temperature=quick_temperature,
-                max_tokens=quick_max_tokens,
-                timeout=quick_timeout,
-                transport="rest"
+            self.deep_thinking_llm, self.quick_thinking_llm = _create_provider_pair(
+                provider="google",
+                config=self.config,
+                quick_temperature=quick_temperature,
+                quick_max_tokens=quick_max_tokens,
+                quick_timeout=quick_timeout,
+                deep_temperature=deep_temperature,
+                deep_max_tokens=deep_max_tokens,
+                deep_timeout=deep_timeout,
+                backend_url=backend_url if backend_url else None,
+                api_key=google_api_key,
+                quick_extra_kwargs={"transport": "rest"},
             )
 
             logger.info(f"✅ [Google AI] 已启用优化的工具调用和内容格式处理并应用用户配置的模型参数")
-        elif (self.config["llm_provider"].lower() == "dashscope" or
-              self.config["llm_provider"].lower() == "alibaba" or
-              "dashscope" in self.config["llm_provider"].lower() or
-              "阿里百炼" in self.config["llm_provider"]):
-            # 使用 OpenAI 兼容适配器，支持原生 Function Calling
-            logger.info(f"🔧 使用阿里百炼 OpenAI 兼容适配器 (支持原生工具调用)")
-
-            # 🔥 优先使用数据库配置的 API Key，否则从环境变量读取
-            dashscope_api_key = self.config.get("quick_api_key") or self.config.get("deep_api_key") or os.getenv('DASHSCOPE_API_KEY')
-            logger.info(f"🔑 [阿里百炼] API Key 来源: {'数据库配置' if self.config.get('quick_api_key') or self.config.get('deep_api_key') else '环境变量'}")
-
-            # 🔧 从配置中读取模型参数（优先使用用户配置，否则使用默认值）
-            quick_config = self.config.get("quick_model_config", {})
-            deep_config = self.config.get("deep_model_config", {})
-
-            # 读取快速模型参数
-            quick_max_tokens = quick_config.get("max_tokens", 4000)
-            quick_temperature = quick_config.get("temperature", 0.7)
-            quick_timeout = quick_config.get("timeout", 180)
-
-            # 读取深度模型参数
-            deep_max_tokens = deep_config.get("max_tokens", 4000)
-            deep_temperature = deep_config.get("temperature", 0.7)
-            deep_timeout = deep_config.get("timeout", 180)
-
-            logger.info(f"🔧 [阿里百炼-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
-            logger.info(f"🔧 [阿里百炼-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
-
-            # 获取 backend_url（如果配置中有的话）
-            backend_url = self.config.get("backend_url")
-            if backend_url:
-                logger.info(f"🔧 [阿里百炼] 使用自定义 API 地址: {backend_url}")
-
-            # 🔥 详细日志：打印所有 LLM 初始化参数
-            logger.info("=" * 80)
-            logger.info("🤖 [LLM初始化] 阿里百炼深度模型参数:")
-            logger.info(f"   model: {self.config['deep_think_llm']}")
-            logger.info(f"   api_key: {'有值' if dashscope_api_key else '空'} (长度: {len(dashscope_api_key) if dashscope_api_key else 0})")
-            logger.info(f"   base_url: {backend_url if backend_url else '默认'}")
-            logger.info(f"   temperature: {deep_temperature}")
-            logger.info(f"   max_tokens: {deep_max_tokens}")
-            logger.info(f"   request_timeout: {deep_timeout}")
-            logger.info("=" * 80)
-
-            self.deep_thinking_llm = ChatDashScopeOpenAI(
-                model=self.config["deep_think_llm"],
-                api_key=dashscope_api_key,  # 🔥 传递 API Key
-                base_url=backend_url if backend_url else None,  # 传递 base_url
-                temperature=deep_temperature,
-                max_tokens=deep_max_tokens,
-                request_timeout=deep_timeout
+        elif normalized_provider == "qwen":
+            logger.info("🔧 使用统一 llm_clients 路径初始化阿里百炼/通义千问")
+            self.deep_thinking_llm, self.quick_thinking_llm = _create_provider_pair(
+                provider="qwen",
+                config=self.config,
+                quick_temperature=quick_temperature,
+                quick_max_tokens=quick_max_tokens,
+                quick_timeout=quick_timeout,
+                deep_temperature=deep_temperature,
+                deep_max_tokens=deep_max_tokens,
+                deep_timeout=deep_timeout,
+                backend_url=self.config.get("backend_url"),
             )
-
-            logger.info("=" * 80)
-            logger.info("🤖 [LLM初始化] 阿里百炼快速模型参数:")
-            logger.info(f"   model: {self.config['quick_think_llm']}")
-            logger.info(f"   api_key: {'有值' if dashscope_api_key else '空'} (长度: {len(dashscope_api_key) if dashscope_api_key else 0})")
-            logger.info(f"   base_url: {backend_url if backend_url else '默认'}")
-            logger.info(f"   temperature: {quick_temperature}")
-            logger.info(f"   max_tokens: {quick_max_tokens}")
-            logger.info(f"   request_timeout: {quick_timeout}")
-            logger.info("=" * 80)
-
-            self.quick_thinking_llm = ChatDashScopeOpenAI(
-                model=self.config["quick_think_llm"],
-                api_key=dashscope_api_key,  # 🔥 传递 API Key
-                base_url=backend_url if backend_url else None,  # 传递 base_url
-                temperature=quick_temperature,
-                max_tokens=quick_max_tokens,
-                request_timeout=quick_timeout
-            )
-            logger.info(f"✅ [阿里百炼] 已应用用户配置的模型参数")
-        elif (self.config["llm_provider"].lower() == "deepseek" or
-              "deepseek" in self.config["llm_provider"].lower()):
-            # DeepSeek V3配置 - 使用支持token统计的适配器
-            from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
-
-            deepseek_api_key = os.getenv('DEEPSEEK_API_KEY')
+            logger.info("✅ [阿里百炼] 已通过 llm_clients 初始化成功并应用用户配置的模型参数")
+        elif normalized_provider == "deepseek":
+            deepseek_api_key = self.config.get("quick_api_key") or self.config.get("deep_api_key") or os.getenv('DEEPSEEK_API_KEY')
             if not deepseek_api_key:
                 raise ValueError("使用DeepSeek需要设置DEEPSEEK_API_KEY环境变量")
 
-            deepseek_base_url = os.getenv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
-
-            # 🔧 从配置中读取模型参数（优先使用用户配置，否则使用默认值）
-            quick_config = self.config.get("quick_model_config", {})
-            deep_config = self.config.get("deep_model_config", {})
-
-            # 读取快速模型参数
-            quick_max_tokens = quick_config.get("max_tokens", 4000)
-            quick_temperature = quick_config.get("temperature", 0.7)
-            quick_timeout = quick_config.get("timeout", 180)
-
-            # 读取深度模型参数
-            deep_max_tokens = deep_config.get("max_tokens", 4000)
-            deep_temperature = deep_config.get("temperature", 0.7)
-            deep_timeout = deep_config.get("timeout", 180)
-
-            logger.info(f"🔧 [DeepSeek-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
-            logger.info(f"🔧 [DeepSeek-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
-
-            # 使用支持token统计的DeepSeek适配器
-            self.deep_thinking_llm = ChatDeepSeek(
-                model=self.config["deep_think_llm"],
+            deepseek_base_url = self.config.get("backend_url") or os.getenv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
+            self.deep_thinking_llm, self.quick_thinking_llm = _create_provider_pair(
+                provider="deepseek",
+                config=self.config,
+                quick_temperature=quick_temperature,
+                quick_max_tokens=quick_max_tokens,
+                quick_timeout=quick_timeout,
+                deep_temperature=deep_temperature,
+                deep_max_tokens=deep_max_tokens,
+                deep_timeout=deep_timeout,
+                backend_url=deepseek_base_url,
                 api_key=deepseek_api_key,
-                base_url=deepseek_base_url,
-                temperature=deep_temperature,
-                max_tokens=deep_max_tokens,
-                timeout=deep_timeout
             )
-            self.quick_thinking_llm = ChatDeepSeek(
-                model=self.config["quick_think_llm"],
-                api_key=deepseek_api_key,
-                base_url=deepseek_base_url,
-                temperature=quick_temperature,
-                max_tokens=quick_max_tokens,
-                timeout=quick_timeout
-            )
-
-            logger.info(f"✅ [DeepSeek] 已启用token统计功能并应用用户配置的模型参数")
-        elif self.config["llm_provider"].lower() == "custom_openai":
-            # 自定义OpenAI端点配置
-            from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
-
+            logger.info("✅ [DeepSeek] 已通过 llm_clients 初始化成功并应用用户配置的模型参数")
+        elif normalized_provider == "custom_openai":
             custom_api_key = os.getenv('CUSTOM_OPENAI_API_KEY')
             if not custom_api_key:
                 raise ValueError("使用自定义OpenAI端点需要设置CUSTOM_OPENAI_API_KEY环境变量")
 
             custom_base_url = self.config.get("custom_openai_base_url", "https://api.openai.com/v1")
-
-            # 🔧 从配置中读取模型参数（优先使用用户配置，否则使用默认值）
-            quick_config = self.config.get("quick_model_config", {})
-            deep_config = self.config.get("deep_model_config", {})
-
-            quick_max_tokens = quick_config.get("max_tokens", 4000)
-            quick_temperature = quick_config.get("temperature", 0.7)
-            quick_timeout = quick_config.get("timeout", 180)
-
-            deep_max_tokens = deep_config.get("max_tokens", 4000)
-            deep_temperature = deep_config.get("temperature", 0.7)
-            deep_timeout = deep_config.get("timeout", 180)
-
             logger.info(f"🔧 [自定义OpenAI] 使用端点: {custom_base_url}")
-            logger.info(f"🔧 [自定义OpenAI-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
-            logger.info(f"🔧 [自定义OpenAI-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
-
-            # 使用OpenAI兼容适配器创建LLM实例
-            self.deep_thinking_llm = create_openai_compatible_llm(
+            self.deep_thinking_llm, self.quick_thinking_llm = _create_provider_pair(
                 provider="custom_openai",
-                model=self.config["deep_think_llm"],
-                base_url=custom_base_url,
-                temperature=deep_temperature,
-                max_tokens=deep_max_tokens,
-                timeout=deep_timeout
+                config=self.config,
+                quick_temperature=quick_temperature,
+                quick_max_tokens=quick_max_tokens,
+                quick_timeout=quick_timeout,
+                deep_temperature=deep_temperature,
+                deep_max_tokens=deep_max_tokens,
+                deep_timeout=deep_timeout,
+                backend_url=custom_base_url,
+                api_key=custom_api_key,
             )
-            self.quick_thinking_llm = create_openai_compatible_llm(
-                provider="custom_openai",
-                model=self.config["quick_think_llm"],
-                base_url=custom_base_url,
-                temperature=quick_temperature,
-                max_tokens=quick_max_tokens,
-                timeout=quick_timeout
-            )
-
-            logger.info(f"✅ [自定义OpenAI] 已配置自定义端点并应用用户配置的模型参数")
-        elif self.config["llm_provider"].lower() == "qianfan":
+            logger.info("✅ [自定义OpenAI] 已通过 llm_clients 初始化成功并应用用户配置的模型参数")
+        elif normalized_provider == "qianfan":
             # 百度千帆（文心一言）配置 - 统一由适配器内部读取与校验 QIANFAN_API_KEY
-            from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
-
-            # 🔧 从配置中读取模型参数（优先使用用户配置，否则使用默认值）
-            quick_config = self.config.get("quick_model_config", {})
-            deep_config = self.config.get("deep_model_config", {})
-
-            quick_max_tokens = quick_config.get("max_tokens", 4000)
-            quick_temperature = quick_config.get("temperature", 0.7)
-            quick_timeout = quick_config.get("timeout", 180)
-
-            deep_max_tokens = deep_config.get("max_tokens", 4000)
-            deep_temperature = deep_config.get("temperature", 0.7)
-            deep_timeout = deep_config.get("timeout", 180)
-
             logger.info(f"🔧 [千帆-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
             logger.info(f"🔧 [千帆-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
-
-            # 使用OpenAI兼容适配器创建LLM实例（基类会使用千帆默认base_url并负责密钥校验）
-            self.deep_thinking_llm = create_openai_compatible_llm(
+            self.deep_thinking_llm, self.quick_thinking_llm = _create_provider_pair(
                 provider="qianfan",
-                model=self.config["deep_think_llm"],
-                temperature=deep_temperature,
-                max_tokens=deep_max_tokens,
-                timeout=deep_timeout
-            )
-            self.quick_thinking_llm = create_openai_compatible_llm(
-                provider="qianfan",
-                model=self.config["quick_think_llm"],
-                temperature=quick_temperature,
-                max_tokens=quick_max_tokens,
-                timeout=quick_timeout
+                config=self.config,
+                quick_temperature=quick_temperature,
+                quick_max_tokens=quick_max_tokens,
+                quick_timeout=quick_timeout,
+                deep_temperature=deep_temperature,
+                deep_max_tokens=deep_max_tokens,
+                deep_timeout=deep_timeout,
             )
             logger.info("✅ [千帆] 文心一言适配器已配置成功并应用用户配置的模型参数")
-        elif self.config["llm_provider"].lower() == "zhipu":
-            # 智谱AI GLM配置 - 使用专门的ChatZhipuOpenAI适配器
-            from tradingagents.llm_adapters.openai_compatible_base import ChatZhipuOpenAI
-            
+        elif normalized_provider == "glm":
             # 🔥 优先使用数据库配置的 API Key，否则从环境变量读取
             zhipu_api_key = self.config.get("quick_api_key") or self.config.get("deep_api_key") or os.getenv('ZHIPU_API_KEY')
             logger.info(f"🔑 [智谱AI] API Key 来源: {'数据库配置' if self.config.get('quick_api_key') or self.config.get('deep_api_key') else '环境变量'}")
@@ -657,35 +453,23 @@ class TradingAgentsGraph:
                 logger.info(f"🔧 [智谱AI] 使用配置的 backend_url: {backend_url}")
             else:
                 logger.info(f"🔧 [智谱AI] 未配置 backend_url，使用默认端点")
-            
-            # 使用专门的ChatZhipuOpenAI适配器创建LLM实例
-            self.deep_thinking_llm = ChatZhipuOpenAI(
-                model=self.config["deep_think_llm"],
+            self.deep_thinking_llm, self.quick_thinking_llm = _create_provider_pair(
+                provider="glm",
+                config=self.config,
+                quick_temperature=quick_temperature,
+                quick_max_tokens=quick_max_tokens,
+                quick_timeout=quick_timeout,
+                deep_temperature=deep_temperature,
+                deep_max_tokens=deep_max_tokens,
+                deep_timeout=deep_timeout,
+                backend_url=backend_url,
                 api_key=zhipu_api_key,
-                base_url=backend_url,  # 使用用户配置的backend_url
-                temperature=deep_temperature,
-                max_tokens=deep_max_tokens,
-                timeout=deep_timeout
-            )
-            self.quick_thinking_llm = ChatZhipuOpenAI(
-                model=self.config["quick_think_llm"],
-                api_key=zhipu_api_key,
-                base_url=backend_url,  # 使用用户配置的backend_url
-                temperature=quick_temperature,
-                max_tokens=quick_max_tokens,
-                timeout=quick_timeout
             )
             
-            logger.info("✅ [智谱AI] 已使用专用适配器配置成功并应用用户配置的模型参数")
+            logger.info("✅ [智谱AI] 已通过 llm_clients 初始化成功并应用用户配置的模型参数")
         else:
-            # 🔧 通用的 OpenAI 兼容厂家支持（用于自定义厂家）
-            logger.info(f"🔧 使用通用 OpenAI 兼容适配器处理自定义厂家: {self.config['llm_provider']}")
-            from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
-
-            # 获取厂家配置中的 API Key 和 base_url
             provider_name = self.config['llm_provider']
-
-            # 尝试从环境变量获取 API Key（支持多种命名格式）
+            logger.info(f"🔧 使用统一 llm_clients 路径处理自定义厂家: {provider_name}")
             api_key_candidates = [
                 f"{provider_name.upper()}_API_KEY",  # 例如: KYX_API_KEY
                 f"{provider_name}_API_KEY",          # 例如: kyx_API_KEY
@@ -730,24 +514,17 @@ class TradingAgentsGraph:
             logger.info(f"🔧 [{provider_name}-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
             logger.info(f"🔧 [{provider_name}-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
 
-            # 使用 custom_openai 适配器创建 LLM 实例
-            self.deep_thinking_llm = create_openai_compatible_llm(
+            self.deep_thinking_llm, self.quick_thinking_llm = _create_provider_pair(
                 provider="custom_openai",
-                model=self.config["deep_think_llm"],
+                config=self.config,
+                quick_temperature=quick_temperature,
+                quick_max_tokens=quick_max_tokens,
+                quick_timeout=quick_timeout,
+                deep_temperature=deep_temperature,
+                deep_max_tokens=deep_max_tokens,
+                deep_timeout=deep_timeout,
+                backend_url=backend_url,
                 api_key=custom_api_key,
-                base_url=backend_url,
-                temperature=deep_temperature,
-                max_tokens=deep_max_tokens,
-                timeout=deep_timeout
-            )
-            self.quick_thinking_llm = create_openai_compatible_llm(
-                provider="custom_openai",
-                model=self.config["quick_think_llm"],
-                api_key=custom_api_key,
-                base_url=backend_url,
-                temperature=quick_temperature,
-                max_tokens=quick_max_tokens,
-                timeout=quick_timeout
             )
 
             logger.info(f"✅ [自定义厂家 {provider_name}] 已配置自定义端点并应用用户配置的模型参数")

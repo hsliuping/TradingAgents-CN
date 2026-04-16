@@ -47,8 +47,12 @@ def bridge_config_to_env():
             bridged_count += 1
 
         # 桥接 MongoDB 数据库名称
-        mongodb_db_name = os.getenv("MONGODB_DATABASE_NAME", "tradingagents")
+        from app.core.config import settings
+
+        mongodb_db_name = os.getenv("MONGODB_DATABASE_NAME", "").strip() or settings.MONGO_DB
         os.environ["MONGODB_DATABASE_NAME"] = mongodb_db_name
+        if "MONGODB_DATABASE" not in os.environ or not os.environ["MONGODB_DATABASE"].strip():
+            os.environ["MONGODB_DATABASE"] = mongodb_db_name
         logger.info(f"  ✓ 桥接 MONGODB_DATABASE_NAME: {mongodb_db_name}")
         bridged_count += 1
 
@@ -235,7 +239,7 @@ def bridge_config_to_env():
             # 调试：检查环境变量
             use_mongodb = os.getenv("USE_MONGODB_STORAGE", "false")
             mongodb_conn = os.getenv("MONGODB_CONNECTION_STRING", "未设置")
-            mongodb_db = os.getenv("MONGODB_DATABASE_NAME", "tradingagents")
+            mongodb_db = os.getenv("MONGODB_DATABASE_NAME", "tradingagentscn")
             logger.info(f"  📋 USE_MONGODB_STORAGE: {use_mongodb}")
             logger.info(f"  📋 MONGODB_CONNECTION_STRING: {mongodb_conn[:30]}..." if len(mongodb_conn) > 30 else f"  📋 MONGODB_CONNECTION_STRING: {mongodb_conn}")
             logger.info(f"  📋 MONGODB_DATABASE_NAME: {mongodb_db}")

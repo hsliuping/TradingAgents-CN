@@ -48,7 +48,7 @@ app.use(ElementPlus, {
 setupGlobalComponents(app)
 
 // 全局错误处理
-app.config.errorHandler = (err, vm, info) => {
+app.config.errorHandler = (err, _vm, info) => {
   console.error('全局错误:', err, info)
 
   // 检查是否是认证错误
@@ -73,7 +73,7 @@ app.config.errorHandler = (err, vm, info) => {
 }
 
 // 全局警告处理
-app.config.warnHandler = (msg, vm, trace) => {
+app.config.warnHandler = (msg, _vm, trace) => {
   console.warn('全局警告:', msg, trace)
 }
 
@@ -125,9 +125,10 @@ const initApp = async () => {
       console.log('⚠️ API连接失败，跳过认证检查')
     }
   } catch (error) {
-    console.warn('⚠️ 应用初始化失败，但应用将继续启动:', error)
+    const err = error as { code?: string; message?: string }
+    console.warn('⚠️ 应用初始化失败，但应用将继续启动:', err)
     // 如果是网络错误，不影响应用启动
-    if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+    if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
       console.log('📱 离线模式：应用将在没有后端连接的情况下启动')
     }
   } finally {

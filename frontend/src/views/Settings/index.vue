@@ -438,6 +438,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import type { UserPreferences } from '@/types/auth'
 import {
   Setting,
   User,
@@ -556,6 +557,28 @@ const notificationSettings = ref({
   systemMaintenance: authStore.user?.preferences?.system_maintenance_notification ?? true
 })
 
+const buildPreferencesPayload = (
+  partial: Partial<UserPreferences>
+): UserPreferences => {
+  const current = authStore.user?.preferences
+  return {
+    default_market: current?.default_market || 'A股',
+    default_depth: current?.default_depth || '3',
+    default_analysts: current?.default_analysts || ['市场分析师', '基本面分析师'],
+    auto_refresh: current?.auto_refresh ?? true,
+    refresh_interval: current?.refresh_interval || 30,
+    ui_theme: current?.ui_theme || 'light',
+    sidebar_width: current?.sidebar_width || 240,
+    language: current?.language || 'zh-CN',
+    notifications_enabled: current?.notifications_enabled ?? true,
+    email_notifications: current?.email_notifications ?? false,
+    desktop_notifications: current?.desktop_notifications ?? true,
+    analysis_complete_notification: current?.analysis_complete_notification ?? true,
+    system_maintenance_notification: current?.system_maintenance_notification ?? true,
+    ...partial
+  }
+}
+
 // 监听用户信息变化，同步更新设置
 watch(() => authStore.user, (newUser) => {
   if (newUser) {
@@ -587,8 +610,10 @@ const handleMenuSelect = (index: string) => {
   activeTab.value = index
 }
 
-const handleThemeChange = (theme: string) => {
-  appStore.setTheme(theme as any)
+const handleThemeChange = (theme: string | number | boolean | undefined) => {
+  if (typeof theme === 'string') {
+    appStore.setTheme(theme as any)
+  }
 }
 
 const saveGeneralSettings = async () => {
@@ -596,9 +621,9 @@ const saveGeneralSettings = async () => {
     // 调用 authStore 更新用户信息
     const success = await authStore.updateUserInfo({
       email: generalSettings.value.email,
-      preferences: {
+      preferences: buildPreferencesPayload({
         language: generalSettings.value.language
-      }
+      })
     })
 
     if (success) {
@@ -618,10 +643,10 @@ const saveAppearanceSettings = async () => {
 
     // 保存到后端
     const success = await authStore.updateUserInfo({
-      preferences: {
+      preferences: buildPreferencesPayload({
         ui_theme: appearanceSettings.value.theme,
         sidebar_width: appearanceSettings.value.sidebarWidth
-      }
+      })
     })
 
     if (success) {
@@ -645,13 +670,13 @@ const saveAnalysisSettings = async () => {
 
     // 保存到后端
     const success = await authStore.updateUserInfo({
-      preferences: {
+      preferences: buildPreferencesPayload({
         default_market: analysisSettings.value.defaultMarket,
         default_depth: analysisSettings.value.defaultDepth,
         default_analysts: analysisSettings.value.defaultAnalysts,
         auto_refresh: analysisSettings.value.autoRefresh,
         refresh_interval: analysisSettings.value.refreshInterval
-      }
+      })
     })
 
     if (success) {
@@ -667,12 +692,12 @@ const saveNotificationSettings = async () => {
   try {
     // 保存到后端
     const success = await authStore.updateUserInfo({
-      preferences: {
+      preferences: buildPreferencesPayload({
         desktop_notifications: notificationSettings.value.desktop,
         analysis_complete_notification: notificationSettings.value.analysisComplete,
         system_maintenance_notification: notificationSettings.value.systemMaintenance,
         notifications_enabled: notificationSettings.value.desktop || notificationSettings.value.analysisComplete || notificationSettings.value.systemMaintenance
-      }
+      })
     })
 
     if (success) {
@@ -719,7 +744,7 @@ const changePasswordForm = ref({
   confirmPassword: ''
 })
 
-const validateConfirmPassword = (rule: any, value: any, callback: any) => {
+const validateConfirmPassword = (_rule: any, value: any, callback: any) => {
   if (value === '') {
     callback(new Error('请再次输入新密码'))
   } else if (value !== changePasswordForm.value.newPassword) {

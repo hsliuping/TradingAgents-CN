@@ -2,7 +2,10 @@
  * 日志管理 API
  */
 
-import { ApiClient } from './request'
+import { ApiClient, type ApiResponse } from './request'
+
+const unwrapResponse = <T>(promise: Promise<ApiResponse<T>>): Promise<T> =>
+  promise.then((res) => res.data)
 
 export interface LogFileInfo {
   name: string
@@ -56,38 +59,45 @@ export const LogsApi = {
    * 获取日志文件列表
    */
   listLogFiles(): Promise<LogFileInfo[]> {
-    return ApiClient.get('/api/system/system-logs/files')
+    return unwrapResponse(ApiClient.get<LogFileInfo[]>('/api/system/system-logs/files'))
   },
 
   /**
    * 读取日志文件内容
    */
   readLogFile(request: LogReadRequest): Promise<LogContentResponse> {
-    return ApiClient.post('/api/system/system-logs/read', request)
+    return unwrapResponse(ApiClient.post<LogContentResponse>('/api/system/system-logs/read', request))
   },
 
   /**
    * 导出日志文件
    */
   async exportLogs(request: LogExportRequest): Promise<Blob> {
-    const response = await ApiClient.post('/api/system/system-logs/export', request, {
-      responseType: 'blob'
+    const response = await fetch('/api/system/system-logs/export', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(request)
     })
-    return response as unknown as Blob
+    if (!response.ok) {
+      throw new Error(`导出日志失败: HTTP ${response.status}`)
+    }
+    return await response.blob()
   },
 
   /**
    * 获取日志统计信息
    */
   getStatistics(days: number = 7): Promise<LogStatistics> {
-    return ApiClient.get('/api/system/system-logs/statistics', { params: { days } })
+    return unwrapResponse(ApiClient.get<LogStatistics>('/api/system/system-logs/statistics', { days }))
   },
 
   /**
    * 删除日志文件
    */
   deleteLogFile(filename: string): Promise<{ success: boolean; message: string }> {
-    return ApiClient.delete(`/api/system/system-logs/files/${filename}`)
+    return unwrapResponse(ApiClient.delete<{ success: boolean; message: string }>(`/api/system/system-logs/files/${filename}`))
   }
 }
 

@@ -17,6 +17,7 @@
 import json
 import sys
 import hashlib
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -47,7 +48,9 @@ def load_env_config(script_dir: Path) -> dict:
         'mongodb_host': 'localhost',
         'mongodb_username': 'admin',
         'mongodb_password': 'tradingagents123',
-        'mongodb_database': 'tradingagents'
+        'mongodb_database': 'tradingagents',
+        'mongodb_auth_source': 'admin',
+        'mongodb_connection_string': None,
     }
 
     if env_file.exists():
@@ -70,6 +73,16 @@ def load_env_config(script_dir: Path) -> dict:
                             config['mongodb_username'] = value
                         elif key == 'MONGODB_PASSWORD':
                             config['mongodb_password'] = value
+                        elif key == 'MONGODB_DATABASE_NAME':
+                            config['mongodb_database'] = value
+                        elif key == 'MONGODB_DATABASE':
+                            # 仅在没有更显式的 DATABASE_NAME 时作为回退
+                            if not config.get('mongodb_database') or config['mongodb_database'] == 'tradingagents':
+                                config['mongodb_database'] = value
+                        elif key == 'MONGODB_AUTH_SOURCE':
+                            config['mongodb_auth_source'] = value
+                        elif key == 'MONGODB_CONNECTION_STRING':
+                            config['mongodb_connection_string'] = value
         except Exception as e:
             print(f"⚠️  警告: 读取 .env 文件失败: {e}")
             print(f"   使用默认配置")
@@ -80,11 +93,6 @@ def load_env_config(script_dir: Path) -> dict:
     return config
 
 
-# MongoDB 连接配置
-# Docker 内部运行时使用服务名 "mongodb"
-# 宿主机运行时使用 "localhost"
-DB_NAME = "tradingagents"
-
 # 默认管理员用户
 DEFAULT_ADMIN = {
     "username": "admin",
@@ -92,18 +100,116 @@ DEFAULT_ADMIN = {
     "email": "admin@tradingagents.cn"
 }
 
-# 配置集合列表
+# 配置集合列表（按照导出顺序）
 CONFIG_COLLECTIONS = [
+    # v2.0 核心配置
+    "workflow_definitions",
+    "workflows",
+    "agent_configs",
+    "tool_configs",
+    "tool_agent_bindings",
+    "agent_workflow_bindings",
+    "agent_io_definitions",
+
+    # 系统配置
     "system_configs",
-    "users",
     "llm_providers",
-    "market_categories",
-    "user_tags",
-    "datasource_groupings",
+    "model_catalog",
     "platform_configs",
-    "user_configs",
-    "model_catalog"
+    "datasource_groupings",
+    "market_categories",
+    "smtp_config",
+    "sync_status",
+
+    # 用户相关
+    "users",
+    "user_tags",
+    "user_favorites",
+
+    # 交易系统
+    "trading_systems",
+    "paper_accounts",
+    "paper_market_rules",
+    "real_accounts",
+
+    # 提示词
+    "prompt_templates",
+    "user_template_configs",
+
+    # 调度任务
+    "scheduled_analysis_configs",
+    "scheduler_metadata",
+
+    # 其他配置
+    "watchlist_groups",
+
+    # 分析报告
+    "unified_analysis_tasks",
+    "analysis_tasks",
+    "analysis_reports",
+    "position_analysis_reports",
+    "portfolio_analysis_reports",
+
+    # 历史记录（可选）
+    "workflow_history",
+    "template_history",
+    "scheduled_analysis_history",
+    "notifications",
+    "email_records",
+
+    # 交易记录（可选）
+    "paper_positions",
+    "paper_orders",
+    "paper_trades",
+    "real_positions",
+    "capital_transactions",
+    "position_changes",
+    "trade_reviews",
+    "trading_system_evaluations",
 ]
+
+# 增量模式下各集合的唯一键（用于判断文档是否已存在，避免重复插入）
+# 支持单键或键列表（多键组合）
+COLLECTION_UNIQUE_KEYS = {
+    "agent_configs": ["agent_id"],
+    "prompt_templates": ["agent_id", "preference_type"],
+    "system_configs": ["key"],
+    "workflow_definitions": ["id"],
+    "workflows": ["id"],
+    "tool_configs": ["tool_id"],  # fallback: name
+    "llm_providers": ["provider_id"],
+    "model_catalog": ["model_id"],
+    "platform_configs": ["platform_id"],
+    "datasource_groupings": ["name"],
+    "market_categories": ["name"],
+    "tool_agent_bindings": ["tool_id", "agent_id"],
+    "agent_workflow_bindings": ["agent_id", "workflow_id"],
+}
+
+
+def _build_unique_query(doc: Dict[str, Any], collection_name: str) -> Optional[Dict[str, Any]]:
+    """根据集合的唯一键构建查询条件"""
+    if "_id" in doc:
+        return {"_id": doc["_id"]}
+    keys = COLLECTION_UNIQUE_KEYS.get(collection_name)
+    if keys:
+        query = {}
+        for k in keys:
+            if k in doc and doc[k] is not None:
+                query[k] = doc[k]
+        if query:
+            return query
+        # 单键集合若主键缺失，尝试备用键
+        if collection_name == "tool_configs" and "name" in doc:
+            return {"name": doc["name"]}
+    # 通用回退
+    if "username" in doc:
+        return {"username": doc["username"]}
+    if "name" in doc:
+        return {"name": doc["name"]}
+    if "key" in doc:
+        return {"key": doc["key"]}
+    return None
 
 
 def hash_password(password: str) -> str:
@@ -189,21 +295,34 @@ def connect_mongodb(use_docker: bool = True, config: dict = None) -> MongoClient
             'mongodb_host': 'localhost',
             'mongodb_username': 'admin',
             'mongodb_password': 'tradingagents123',
-            'mongodb_database': 'tradingagents'
+            'mongodb_database': 'tradingagents',
+            'mongodb_auth_source': 'admin',
+            'mongodb_connection_string': None,
         }
 
-    # 构建 MongoDB URI
-    host = 'mongodb' if use_docker else config['mongodb_host']
-    port = config['mongodb_port']
-    username = config['mongodb_username']
-    password = config['mongodb_password']
     database = config['mongodb_database']
-
-    mongo_uri = f"mongodb://{username}:{password}@{host}:{port}/{database}?authSource=admin"
+    auth_source = config.get('mongodb_auth_source') or 'admin'
+    mongo_uri = config.get('mongodb_connection_string')
     env_name = "Docker 容器内" if use_docker else "宿主机"
 
+    if not mongo_uri:
+        # 构建 MongoDB URI
+        host = 'mongodb' if use_docker else config['mongodb_host']
+        port = config['mongodb_port']
+        username = config['mongodb_username']
+        password = config['mongodb_password']
+        mongo_uri = f"mongodb://{username}:{password}@{host}:{port}/{database}?authSource={auth_source}"
+        masked_uri = f"mongodb://{username}:***@{host}:{port}/{database}?authSource={auth_source}"
+    else:
+        # 如果是 Docker 模式，并且 .env 写的是 localhost，则替换成容器内服务名
+        if use_docker:
+            mongo_uri = mongo_uri.replace("@localhost:", "@mongodb:")
+            mongo_uri = mongo_uri.replace("//localhost:", "//mongodb:")
+        masked_uri = re.sub(r"://([^:/]+):([^@]+)@", r"://\1:***@", mongo_uri)
+
     print(f"\n🔌 连接到 MongoDB ({env_name})...")
-    print(f"   URI: mongodb://{username}:***@{host}:{port}/{database}?authSource=admin")
+    print(f"   URI: {masked_uri}")
+    print(f"   数据库: {database}")
 
     try:
         client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
@@ -252,32 +371,25 @@ def import_collection(
             "skipped": 0
         }
     else:
-        # 增量模式：跳过已存在的文档
+        # 增量模式：跳过已存在的文档（使用集合专属唯一键）
         inserted_count = 0
         skipped_count = 0
-        
+
         for doc in converted_docs:
-            # 检查是否已存在（根据 _id 或 username）
-            query = {}
-            if "_id" in doc:
-                query["_id"] = doc["_id"]
-            elif "username" in doc:
-                query["username"] = doc["username"]
-            elif "name" in doc:
-                query["name"] = doc["name"]
-            else:
-                # 没有唯一标识，直接插入
+            query = _build_unique_query(doc, collection_name)
+            if query is None:
+                # 没有唯一标识，直接插入（可能产生重复，但部分集合无稳定唯一键）
                 collection.insert_one(doc)
                 inserted_count += 1
                 continue
-            
+
             existing = collection.find_one(query)
             if existing:
                 skipped_count += 1
             else:
                 collection.insert_one(doc)
                 inserted_count += 1
-        
+
         return {
             "deleted": 0,
             "inserted": inserted_count,
@@ -450,11 +562,15 @@ def main():
     if args.mongodb_host:
         env_config['mongodb_host'] = args.mongodb_host
         print(f"💡 使用命令行指定的 MongoDB 主机: {args.mongodb_host}")
+        # 主机被显式覆盖时，不再复用 .env 里的完整连接串
+        env_config['mongodb_connection_string'] = None
 
     # 连接数据库
     use_docker = not args.host  # 默认在 Docker 内运行，除非指定 --host
     client = connect_mongodb(use_docker=use_docker, config=env_config)
-    db = client[DB_NAME]
+    db_name = env_config['mongodb_database']
+    db = client[db_name]
+    print(f"🎯 当前导入目标数据库: {db_name}")
     
     # 导入数据
     if not args.create_user_only:

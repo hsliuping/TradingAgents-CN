@@ -2,7 +2,11 @@
  * 操作日志API接口
  */
 
-import { ApiClient } from './request'
+import { ApiClient, type ApiResponse } from './request'
+import { useAuthStore } from '@/stores/auth'
+
+const unwrapResponse = <T>(promise: Promise<ApiResponse<T>>): Promise<T> =>
+  promise.then((res) => res.data)
 
 // 操作日志数据类型
 export interface OperationLog {
@@ -35,15 +39,11 @@ export interface OperationLogQuery {
 
 // 操作日志列表响应
 export interface OperationLogListResponse {
-  success: boolean
-  data: {
-    logs: OperationLog[]
-    total: number
-    page: number
-    page_size: number
-    total_pages: number
-  }
-  message: string
+  logs: OperationLog[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
 }
 
 // 操作日志统计
@@ -60,11 +60,7 @@ export interface OperationLogStats {
 }
 
 // 操作日志统计响应
-export interface OperationLogStatsResponse {
-  success: boolean
-  data: OperationLogStats
-  message: string
-}
+export type OperationLogStatsResponse = OperationLogStats
 
 // 创建操作日志请求
 export interface CreateOperationLogRequest {
@@ -110,14 +106,14 @@ export class OperationLogsApi {
     if (params.keyword) queryParams.append('keyword', params.keyword)
     
     const url = `/api/system/logs/list${queryParams.toString() ? '?' + queryParams.toString() : ''}`
-    return ApiClient.get(url)
+    return unwrapResponse(ApiClient.get<OperationLogListResponse>(url))
   }
 
   /**
    * 获取操作日志统计
    */
   static getOperationLogStats(days: number = 30): Promise<OperationLogStatsResponse> {
-    return ApiClient.get(`/api/system/logs/stats?days=${days}`)
+    return unwrapResponse(ApiClient.get<OperationLogStatsResponse>(`/api/system/logs/stats?days=${days}`))
   }
 
   /**
@@ -128,7 +124,11 @@ export class OperationLogsApi {
     data: OperationLog
     message: string
   }> {
-    return ApiClient.get(`/api/system/logs/${logId}`)
+    return unwrapResponse(ApiClient.get<{
+      success: boolean
+      data: OperationLog
+      message: string
+    }>(`/api/system/logs/${logId}`))
   }
 
   /**
@@ -139,14 +139,18 @@ export class OperationLogsApi {
     data: { log_id: string }
     message: string
   }> {
-    return ApiClient.post('/api/system/logs/create', data)
+    return unwrapResponse(ApiClient.post<{
+      success: boolean
+      data: { log_id: string }
+      message: string
+    }>('/api/system/logs/create', data))
   }
 
   /**
    * 清空操作日志
    */
   static clearOperationLogs(data: ClearLogsRequest = {}): Promise<ClearLogsResponse> {
-    return ApiClient.post('/api/system/logs/clear', data)
+    return unwrapResponse(ApiClient.post<ClearLogsResponse>('/api/system/logs/clear', data))
   }
 
   /**
@@ -164,7 +168,15 @@ export class OperationLogsApi {
     if (params.action_type) queryParams.append('action_type', params.action_type)
     
     const url = `/api/system/logs/export/csv${queryParams.toString() ? '?' + queryParams.toString() : ''}`
-    return ApiClient.get(url, { responseType: 'blob' })
+    const token = useAuthStore().token
+    return fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined
+    }).then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`导出操作日志失败: HTTP ${response.status}`)
+      }
+      return response.blob()
+    })
   }
 }
 
@@ -221,7 +233,7 @@ export const getActionTypeName = (actionType: string): string => {
   return ActionTypeNames[actionType as keyof typeof ActionTypeNames] || actionType
 }
 
-export const getActionTypeTagColor = (actionType: string): string => {
+export const getActionTypeTagColor = (actionType: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' => {
   return ActionTypeTagColors[actionType as keyof typeof ActionTypeTagColors] || 'info'
 }
 

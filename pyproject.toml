@@ -38,7 +38,6 @@ dependencies = [
 
     # 数据源和金融数据
     "akshare>=1.17.86",
-    "backtrader>=1.9.78.123",
     "baostock>=0.8.8",
     "eodhd>=1.0.32",
     "finnhub-python>=2.4.23",
@@ -51,6 +50,7 @@ dependencies = [
     "chromadb>=1.0.12",
     "dashscope>=1.20.0",
     "langchain-anthropic>=0.3.15",
+    "langchain-core>=0.3.0",
     "langchain-experimental>=0.3.4",
     "langchain-google-genai>=2.1.12",  # 修复 client_options 未定义错误
     "langchain-openai>=0.3.23",

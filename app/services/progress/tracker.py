@@ -50,7 +50,9 @@ class RedisProgressTracker:
         self.task_id = task_id
         self.analysts = analysts
         self.research_depth = research_depth
-        self.llm_provider = llm_provider
+        from tradingagents.llm_clients.provider_keys import normalize_provider_key
+
+        self.llm_provider = normalize_provider_key(llm_provider)
 
         # Redis连接
         self.redis_client = None
@@ -243,6 +245,7 @@ class RedisProgressTracker:
 
         # 🚀 模型速度影响（基于实际测试）
         model_mult = {
+            'qwen': 1.0,       # 阿里百炼（通义千问）速度适中
             'dashscope': 1.0,  # 阿里百炼速度适中
             'deepseek': 0.8,   # DeepSeek较快
             'google': 1.2      # Google较慢

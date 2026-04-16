@@ -149,11 +149,23 @@ async def sync_single_stock(
         # 同步实时行情
         if request.sync_realtime:
             try:
+                realtime_debug = {
+                    "requested_data_source": request.data_source,
+                    "data_source_used": None,
+                    "attempted_sources": [],
+                    "primary_stats": None,
+                    "fallback_stats": None,
+                    "primary_error": None,
+                    "fallback_error": None
+                }
+
                 # 🔥 单个股票实时行情同步：优先使用 AKShare（避免 Tushare 接口限制）
                 actual_data_source = request.data_source
                 if request.data_source == "tushare":
                     logger.info(f"💡 单个股票实时行情同步，自动切换到 AKShare 数据源（避免 Tushare 接口限制）")
                     actual_data_source = "akshare"
+                realtime_debug["data_source_used"] = actual_data_source
+                realtime_debug["attempted_sources"].append(actual_data_source)
 
                 if actual_data_source == "tushare":
                     service = await get_tushare_sync_service()
@@ -167,23 +179,32 @@ async def sync_single_stock(
                     symbols=[request.symbol],
                     force=True  # 强制执行，跳过交易时间检查
                 )
+                realtime_debug["primary_stats"] = realtime_result
+                if realtime_result.get("errors"):
+                    realtime_debug["primary_error"] = realtime_result["errors"][0]
 
                 # 🔥 如果 AKShare 同步失败，回退到 Tushare 全量同步
                 if actual_data_source == "akshare" and realtime_result.get("success_count", 0) == 0:
                     logger.warning(f"⚠️ AKShare 同步失败，回退到 Tushare 全量同步")
                     logger.info(f"💡 Tushare 只支持全量同步，将同步所有股票的实时行情")
+                    realtime_debug["attempted_sources"].append("tushare")
 
                     tushare_service = await get_tushare_sync_service()
                     if tushare_service:
                         # 使用 Tushare 全量同步（不指定 symbols，同步所有股票）
-                        realtime_result = await tushare_service.sync_realtime_quotes(
+                        fallback_result = await tushare_service.sync_realtime_quotes(
                             symbols=None,  # 全量同步
                             force=True
                         )
+                        realtime_debug["fallback_stats"] = fallback_result
+                        if fallback_result.get("errors"):
+                            realtime_debug["fallback_error"] = fallback_result["errors"][0]
+                        realtime_result = fallback_result
                         logger.info(f"✅ Tushare 全量同步完成: 成功 {realtime_result.get('success_count', 0)} 只")
                     else:
                         logger.error(f"❌ Tushare 服务不可用，无法回退")
                         realtime_result["fallback_failed"] = True
+                        realtime_debug["fallback_error"] = {"error": "Tushare 服务不可用，无法回退", "context": "fallback_unavailable"}
 
                 success = realtime_result.get("success_count", 0) > 0
 
@@ -192,12 +213,33 @@ async def sync_single_stock(
                 if request.data_source == "tushare" and actual_data_source == "akshare":
                     message += "（已自动切换到 AKShare 数据源）"
 
+                db = get_mongo_db()
+                latest_quote = await db.market_quotes.find_one(
+                    {"code": str(request.symbol).zfill(6)},
+                    {"_id": 0, "code": 1, "trade_date": 1, "updated_at": 1, "close": 1}
+                )
+
                 result["realtime_sync"] = {
                     "success": success,
                     "message": message,
-                    "data_source_used": actual_data_source  # 🔥 返回实际使用的数据源
+                    "data_source_used": actual_data_source,  # 🔥 返回实际使用的数据源
+                    "attempted_sources": realtime_debug["attempted_sources"],
+                    "primary_error": realtime_debug["primary_error"],
+                    "fallback_error": realtime_debug["fallback_error"],
+                    "market_quote_available": latest_quote is not None,
+                    "market_quote_snapshot": latest_quote
                 }
                 logger.info(f"✅ {request.symbol} 实时行情同步完成: {success}")
+                logger.info(
+                    "📋 %s 实时行情同步详情: requested=%s, used=%s, attempted=%s, primary_error=%s, fallback_error=%s, market_quote_available=%s",
+                    request.symbol,
+                    request.data_source,
+                    actual_data_source,
+                    realtime_debug["attempted_sources"],
+                    realtime_debug["primary_error"],
+                    realtime_debug["fallback_error"],
+                    latest_quote is not None,
+                )
 
             except Exception as e:
                 logger.error(f"❌ {request.symbol} 实时行情同步失败: {e}")
@@ -512,6 +554,8 @@ async def sync_single_stock(
 
         # 添加整体成功标志到结果中
         result["overall_success"] = overall_success
+
+        logger.info("📋 单股同步汇总 %s: %s", request.symbol, result)
 
         return ok(
             data=result,

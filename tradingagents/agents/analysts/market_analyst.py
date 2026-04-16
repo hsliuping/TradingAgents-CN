@@ -12,6 +12,7 @@ logger = get_logger("default")
 
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
+from tradingagents.agents.utils.instrument_utils import build_instrument_context
 
 
 def _get_company_name(ticker: str, market_info: dict) -> str:
@@ -118,6 +119,7 @@ def create_market_analyst(llm, toolkit):
 
         # 获取公司名称
         company_name = _get_company_name(ticker, market_info)
+        instrument_context = build_instrument_context(ticker)
         logger.debug(f"📈 [DEBUG] 公司名称: {ticker} -> {company_name}")
 
         # 统一使用 get_stock_market_data_unified 工具
@@ -150,6 +152,7 @@ def create_market_analyst(llm, toolkit):
                     "- 所属市场：{market_name}\n"
                     "- 计价货币：{currency_name}（{currency_symbol}）\n"
                     "- 分析日期：{current_date}\n"
+                    "- 标的约束：{instrument_context}\n"
                     "\n"
                     "🔧 **工具使用：**\n"
                     "你可以使用以下工具：{tool_names}\n"
@@ -211,6 +214,7 @@ def create_market_analyst(llm, toolkit):
         prompt = prompt.partial(market_name=market_info['market_name'])
         prompt = prompt.partial(currency_name=market_info['currency_name'])
         prompt = prompt.partial(currency_symbol=market_info['currency_symbol'])
+        prompt = prompt.partial(instrument_context=instrument_context)
 
         # 添加详细日志
         logger.info(f"📊 [市场分析师] LLM类型: {llm.__class__.__name__}")

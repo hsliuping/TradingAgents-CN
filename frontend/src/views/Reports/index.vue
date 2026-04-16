@@ -196,6 +196,21 @@ import {
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
+type ReportListItem = {
+  id: string
+  title: string
+  stock_code: string
+  stock_name: string
+  type: string
+  format: string
+  status: string
+  model_info?: string
+  created_at: string
+  analysis_date?: string
+}
+
 // 使用路由和认证store
 const router = useRouter()
 const authStore = useAuthStore()
@@ -205,12 +220,12 @@ const loading = ref(false)
 const searchKeyword = ref('')
 const marketFilter = ref('')
 const dateRange = ref<[string, string] | null>(null)
-const selectedReports = ref([])
+const selectedReports = ref<ReportListItem[]>([])
 const currentPage = ref(1)
 const pageSize = ref(20)
 const totalReports = ref(0)
 
-const reports = ref([])
+const reports = ref<ReportListItem[]>([])
 
 // 计算属性
 const filteredReports = computed(() => {
@@ -281,16 +296,16 @@ const handleMarketChange = () => {
   fetchReports()
 }
 
-const handleSelectionChange = (selection: any[]) => {
+const handleSelectionChange = (selection: ReportListItem[]) => {
   selectedReports.value = selection
 }
 
-const viewReport = (report: any) => {
+const viewReport = (report: ReportListItem) => {
   // 跳转到报告详情页面
   router.push(`/reports/view/${report.id}`)
 }
 
-const downloadReport = async (report: any, format: string = 'markdown') => {
+const downloadReport = async (report: ReportListItem, format: string = 'markdown') => {
   try {
     // 显示加载提示
     const loadingMsg = ElMessage({
@@ -327,17 +342,18 @@ const downloadReport = async (report: any, format: string = 'markdown') => {
     document.body.removeChild(a)
 
     ElMessage.success(`${getFormatName(format)}报告下载成功`)
-  } catch (error: any) {
-    console.error('下载报告失败:', error)
+  } catch (error) {
+    const err = error as Error
+    console.error('下载报告失败:', err)
 
     // 显示详细错误信息
-    if (error.message && error.message.includes('pandoc')) {
+    if (err.message && err.message.includes('pandoc')) {
       ElMessage.error({
         message: 'PDF/Word 导出需要安装 pandoc 工具',
         duration: 5000
       })
     } else {
-      ElMessage.error(`下载报告失败: ${error.message || '未知错误'}`)
+      ElMessage.error(`下载报告失败: ${err.message || '未知错误'}`)
     }
   }
 }
@@ -364,7 +380,7 @@ const getFileExtension = (format: string): string => {
   return extensions[format] || 'txt'
 }
 
-const deleteReport = async (report: any) => {
+const deleteReport = async (report: ReportListItem) => {
   try {
     await ElMessageBox.confirm(
       `确定要删除报告 "${report.title}" 吗？`,
@@ -398,8 +414,9 @@ const deleteReport = async (report: any) => {
       throw new Error(result.message || '删除失败')
     }
   } catch (error) {
-    if (error.message !== 'cancel') {
-      console.error('删除报告失败:', error)
+    const err = error as Error
+    if (err.message !== 'cancel') {
+      console.error('删除报告失败:', err)
       ElMessage.error('删除报告失败')
     }
   }
@@ -413,8 +430,8 @@ const refreshReports = () => {
   fetchReports()
 }
 
-const getTypeColor = (type: string) => {
-  const colorMap: Record<string, string> = {
+const getTypeColor = (type: string): TagType => {
+  const colorMap: Record<string, TagType> = {
     single: 'primary',
     batch: 'success',
     portfolio: 'warning'
@@ -431,8 +448,8 @@ const getTypeText = (type: string) => {
   return textMap[type] || type
 }
 
-const getStatusType = (status: string) => {
-  const statusMap: Record<string, string> = {
+const getStatusType = (status: string): TagType => {
+  const statusMap: Record<string, TagType> = {
     completed: 'success',
     processing: 'warning',
     failed: 'danger'

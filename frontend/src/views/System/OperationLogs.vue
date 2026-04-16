@@ -326,23 +326,25 @@ import {
   formatDateTime
 } from '@/api/operationLogs'
 
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
 // 响应式数据
 const loading = ref(false)
 const detailDialogVisible = ref(false)
-const selectedLog = ref(null)
+const selectedLog = ref<OperationLog | null>(null)
 const currentPage = ref(1)
 const pageSize = ref(20)
 const totalLogs = ref(0)
 
 // 图表引用
-const actionTypeChart = ref()
-const operationTrendChart = ref()
+const actionTypeChart = ref<HTMLDivElement | null>(null)
+const operationTrendChart = ref<HTMLDivElement | null>(null)
 
 // 筛选表单
 const filterForm = reactive({
-  dateRange: [],
+  dateRange: [] as string[],
   actionType: '',
-  success: '',
+  success: '' as '' | boolean,
   keyword: ''
 })
 
@@ -361,7 +363,7 @@ const logs = ref<OperationLog[]>([])
 const statsData = ref<OperationLogStats | null>(null)
 
 // 方法
-const getActionTypeTag = (actionType: string): string => {
+const getActionTypeTag = (actionType: string): TagType => {
   return getActionTypeTagColor(actionType)
 }
 
@@ -381,20 +383,12 @@ const loadLogs = async () => {
 
     // 调用API获取日志列表
     const response = await OperationLogsApi.getOperationLogs(queryParams)
+    logs.value = response.logs
+    totalLogs.value = response.total
 
-    if (response.success) {
-      logs.value = response.data.logs
-      totalLogs.value = response.data.total
-
-      // 获取统计数据
-      await loadStats()
-
-      // 渲染图表
-      await nextTick()
-      renderCharts()
-    } else {
-      ElMessage.error(response.message || '获取操作日志失败')
-    }
+    await loadStats()
+    await nextTick()
+    renderCharts()
 
   } catch (error) {
     console.error('加载操作日志失败:', error)
@@ -407,16 +401,11 @@ const loadLogs = async () => {
 const loadStats = async () => {
   try {
     const response = await OperationLogsApi.getOperationLogStats(30)
-
-    if (response.success) {
-      statsData.value = response.data
-
-      // 更新统计数据
-      stats.totalLogs = response.data.total_logs
-      stats.successLogs = response.data.success_logs
-      stats.failedLogs = response.data.failed_logs
-      stats.successRate = response.data.success_rate
-    }
+    statsData.value = response
+    stats.totalLogs = response.total_logs
+    stats.successLogs = response.success_logs
+    stats.failedLogs = response.failed_logs
+    stats.successRate = response.success_rate
   } catch (error) {
     console.error('获取统计数据失败:', error)
   }

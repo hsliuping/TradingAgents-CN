@@ -174,7 +174,7 @@
 
           <el-table :data="formData.models" border max-height="400">
             <el-table-column label="模型名称" width="200">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <el-input
                   v-model="row.name"
                   placeholder="如: qwen-turbo"
@@ -183,7 +183,7 @@
               </template>
             </el-table-column>
             <el-table-column label="显示名称" width="280">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <el-input
                   v-model="row.display_name"
                   placeholder="如: Qwen Turbo - 快速经济"
@@ -192,7 +192,7 @@
               </template>
             </el-table-column>
             <el-table-column label="输入价格/1K" width="180">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <div style="display: flex; align-items: center; gap: 4px;">
                   <el-input-number
                     v-model="row.input_price_per_1k"
@@ -207,7 +207,7 @@
               </template>
             </el-table-column>
             <el-table-column label="输出价格/1K" width="180">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <div style="display: flex; align-items: center; gap: 4px;">
                   <el-input-number
                     v-model="row.output_price_per_1k"
@@ -222,7 +222,7 @@
               </template>
             </el-table-column>
             <el-table-column label="上下文长度" width="150">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <el-input
                   v-model.number="row.context_length"
                   placeholder="1000000"
@@ -232,7 +232,7 @@
               </template>
             </el-table-column>
             <el-table-column label="货币单位" width="120">
-              <template #default="{ row, $index }">
+              <template #default="{ row }">
                 <el-select
                   v-model="row.currency"
                   size="small"
@@ -265,6 +265,115 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="fetchDialogVisible"
+      title="从 API 获取模型列表"
+      width="1200px"
+      append-to-body
+    >
+      <el-form :model="fetchForm" label-width="110px">
+        <el-form-item
+          v-if="fetchingProvider?.name === 'aihubmix'"
+          label="模型厂家"
+        >
+          <el-select
+            v-model="fetchForm.provider_names"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            filterable
+            placeholder="请选择要保留的模型厂家"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="option in aihubmixProviderOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+          <div class="form-tip">可多选，例如同时保留 `OpenAI`、`DeepSeek`、`Qwen`。</div>
+        </el-form-item>
+
+        <el-form-item label="模型关键词">
+          <el-input
+            v-model="fetchForm.model_keyword"
+            placeholder="可选，按模型名称模糊筛选"
+            clearable
+          />
+        </el-form-item>
+
+        <el-form-item label="返回数量">
+          <el-input-number
+            v-model="fetchForm.limit"
+            :min="1"
+            :max="200"
+          />
+        </el-form-item>
+
+        <el-form-item label="附加筛选">
+          <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+            <el-checkbox v-model="fetchForm.tools_only">仅工具调用</el-checkbox>
+            <el-checkbox v-model="fetchForm.exclude_preview">排除预览/测试模型</el-checkbox>
+            <el-checkbox v-model="fetchForm.recommended_only">仅推荐主流模型</el-checkbox>
+          </div>
+        </el-form-item>
+      </el-form>
+
+      <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+        <div class="form-tip">
+          已返回 {{ fetchedModels.length }} 个模型，已选 {{ selectedFetchedModels.length }} 个
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <el-button size="small" @click="handleSelectAllFetchedModels" :disabled="fetchedModels.length === 0">全选</el-button>
+          <el-button size="small" @click="handleClearFetchedModelsSelection" :disabled="selectedFetchedModels.length === 0">清空选择</el-button>
+          <el-button type="primary" size="small" @click="handleRunFetchModels" :loading="fetchingModels">拉取模型</el-button>
+        </div>
+      </div>
+
+      <el-table
+        ref="fetchedModelsTableRef"
+        :data="fetchedModels"
+        border
+        max-height="420"
+        @selection-change="handleFetchedModelsSelectionChange"
+      >
+        <el-table-column type="selection" width="48" />
+        <el-table-column prop="name" label="模型名称" min-width="220" />
+        <el-table-column prop="provider_vendor" label="模型厂家" width="120">
+          <template #default="{ row }">
+            <el-tag size="small">{{ providerVendorLabelMap[row.provider_vendor] || row.provider_vendor || '其他' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="context_length" label="上下文" width="120" />
+        <el-table-column prop="input_price_per_1k" label="输入/1K" width="110" />
+        <el-table-column prop="output_price_per_1k" label="输出/1K" width="110" />
+        <el-table-column label="能力" min-width="180">
+          <template #default="{ row }">
+            <el-tag
+              v-for="cap in (row.capabilities || []).slice(0, 3)"
+              :key="cap"
+              size="small"
+              style="margin-right: 4px;"
+            >
+              {{ cap }}
+            </el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <template #footer>
+        <el-button @click="fetchDialogVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          @click="handleImportFetchedModels"
+          :disabled="selectedFetchedModels.length === 0"
+        >
+          导入选中模型
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -272,22 +381,26 @@
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, Refresh, Document } from '@element-plus/icons-vue'
-import { configApi, type LLMProvider } from '@/api/config'
-import axios from 'axios'
+import { configApi, type FetchProviderModelsRequest, type LLMProvider } from '@/api/config'
 
 // 数据
 const loading = ref(false)
 const catalogs = ref<any[]>([])
 const dialogVisible = ref(false)
+const fetchDialogVisible = ref(false)
 const isEdit = ref(false)
 const saving = ref(false)
 const formRef = ref<FormInstance>()
 const availableProviders = ref<LLMProvider[]>([])
 const providersLoading = ref(false)
 const fetchingModels = ref(false)
+const fetchingProvider = ref<LLMProvider | null>(null)
+const fetchedModels = ref<any[]>([])
+const selectedFetchedModels = ref<any[]>([])
+const fetchedModelsTableRef = ref()
 
 // 聚合平台列表
-const aggregatorProviders = ['302ai', 'oneapi', 'newapi', 'openrouter', 'custom_aggregator']
+const aggregatorProviders = ['302ai', 'oneapi', 'newapi', 'openrouter', 'aihubmix', 'custom_aggregator']
 
 // 计算属性：判断当前选择的是否为聚合平台
 const isAggregatorProvider = computed(() => {
@@ -308,11 +421,48 @@ interface ModelInfo {
   capabilities?: string[]
 }
 
+interface FetchDialogForm extends FetchProviderModelsRequest {
+  provider_names: string[]
+}
+
 const formData = ref({
   provider: '',
   provider_name: '',
   models: [] as ModelInfo[]
 })
+
+const fetchForm = ref<FetchDialogForm>({
+  type: 'llm',
+  modalities: 'text',
+  features: [],
+  provider_names: [],
+  model_keyword: '',
+  sort_by: 'order',
+  sort_order: 'asc',
+  limit: 40,
+  recommended_only: false,
+  tools_only: false,
+  exclude_preview: false
+})
+
+const aihubmixProviderOptions = [
+  { label: 'OpenAI', value: 'openai' },
+  { label: 'Anthropic', value: 'anthropic' },
+  { label: 'Google', value: 'google' },
+  { label: 'DeepSeek', value: 'deepseek' },
+  { label: 'Qwen', value: 'qwen' },
+  { label: 'GLM', value: 'glm' },
+  { label: 'Kimi', value: 'kimi' },
+  { label: '豆包', value: 'doubao' },
+  { label: 'MiniMax', value: 'minimax' },
+  { label: 'Mistral', value: 'mistral' },
+  { label: 'Meta', value: 'meta' },
+  { label: 'Jina', value: 'jina' }
+]
+
+const providerVendorLabelMap: Record<string, string> = Object.fromEntries(
+  aihubmixProviderOptions.map(option => [option.value, option.label])
+)
 
 const rules: FormRules = {
   provider: [{ required: true, message: '请输入厂家标识', trigger: 'blur' }],
@@ -324,7 +474,7 @@ const loadCatalogs = async () => {
   loading.value = true
   try {
     const response = await configApi.getModelCatalog()
-    catalogs.value = response
+    catalogs.value = sortCatalogsByNewest(response)
   } catch (error) {
     console.error('加载模型目录失败:', error)
     ElMessage.error('加载模型目录失败')
@@ -333,12 +483,22 @@ const loadCatalogs = async () => {
   }
 }
 
+const sortCatalogsByNewest = (catalogList: any[]) => {
+  const getTimestamp = (catalog: any) => {
+    const timeValue = catalog.created_at || catalog.updated_at
+    const timestamp = timeValue ? new Date(timeValue).getTime() : 0
+    return Number.isNaN(timestamp) ? 0 : timestamp
+  }
+
+  return [...catalogList].sort((a, b) => getTimestamp(b) - getTimestamp(a))
+}
+
 // 加载可用的厂家列表
 const loadProviders = async (showSuccessMessage = false) => {
   providersLoading.value = true
   try {
     const providers = await configApi.getLLMProviders()
-    availableProviders.value = providers
+    availableProviders.value = sortProvidersByNewest(providers)
     console.log('✅ 加载厂家列表成功:', availableProviders.value.length)
     if (showSuccessMessage) {
       ElMessage.success(`已刷新厂家列表，共 ${providers.length} 个厂家`)
@@ -349,6 +509,16 @@ const loadProviders = async (showSuccessMessage = false) => {
   } finally {
     providersLoading.value = false
   }
+}
+
+const sortProvidersByNewest = (providers: LLMProvider[]) => {
+  const getTimestamp = (provider: LLMProvider) => {
+    const timeValue = provider.created_at || provider.updated_at
+    const timestamp = timeValue ? new Date(timeValue).getTime() : 0
+    return Number.isNaN(timestamp) ? 0 : timestamp
+  }
+
+  return [...providers].sort((a, b) => getTimestamp(b) - getTimestamp(a))
 }
 
 // 处理厂家选择
@@ -441,58 +611,11 @@ const handleFetchModelsFromAPI = async () => {
       return
     }
 
-    // 提示：某些聚合平台（如 OpenRouter）不需要 API Key
-    if (!provider.extra_config?.has_api_key) {
-      console.log('⚠️ 该厂家未配置 API Key，尝试无认证访问')
-    }
-
-    await ElMessageBox.confirm(
-      '此操作将从 API 获取模型列表并覆盖当前的模型列表，是否继续？',
-      '确认操作',
-      { type: 'warning' }
-    )
-
-    fetchingModels.value = true
-
-    // 构建 API URL
-    let baseUrl = provider.default_base_url
-    if (!baseUrl.endsWith('/v1')) {
-      baseUrl = baseUrl.replace(/\/$/, '') + '/v1'
-    }
-    const apiUrl = `${baseUrl}/models`
-
-    console.log('🔍 获取模型列表:', apiUrl)
-    console.log('🔍 厂家信息:', provider)
-
-    // 调用后端 API 来获取模型列表（避免 CORS 问题）
-    // 注意：需要传递厂家的 ID，而不是 name
-    const response = await configApi.fetchProviderModels(provider.id)
-
-    console.log('📊 API 响应:', response)
-
-    if (response.success && response.models && response.models.length > 0) {
-      // 转换模型格式，包含价格信息
-      formData.value.models = response.models.map((model: any) => ({
-        name: model.id || model.name,
-        display_name: model.name || model.id,
-        // 使用 API 返回的价格信息（USD），如果没有则为 null
-        input_price_per_1k: model.input_price_per_1k || null,
-        output_price_per_1k: model.output_price_per_1k || null,
-        context_length: model.context_length || null,
-        // OpenRouter 的价格是 USD
-        currency: 'USD'
-      }))
-
-      // 统计有价格信息的模型数量
-      const modelsWithPricing = formData.value.models.filter(m => m.input_price_per_1k || m.output_price_per_1k).length
-
-      ElMessage.success(`成功获取 ${formData.value.models.length} 个模型（${modelsWithPricing} 个包含价格信息）`)
-    } else {
-      // 显示详细的错误信息
-      const errorMsg = response.message || '获取模型列表失败或列表为空'
-      console.error('❌ 获取失败:', errorMsg)
-      ElMessage.error(errorMsg)
-    }
+    fetchingProvider.value = provider
+    fetchForm.value = buildFetchModelFilters(provider.name)
+    fetchedModels.value = []
+    selectedFetchedModels.value = []
+    fetchDialogVisible.value = true
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error('获取模型列表失败:', error)
@@ -502,6 +625,169 @@ const handleFetchModelsFromAPI = async () => {
   } finally {
     fetchingModels.value = false
   }
+}
+
+const buildFetchModelFilters = (providerName: string): FetchDialogForm => {
+  if (providerName === 'aihubmix') {
+    return {
+      type: 'llm',
+      modalities: 'text',
+      features: [],
+      provider_names: ['openai', 'deepseek'],
+      sort_by: 'order',
+      sort_order: 'asc',
+      limit: 40,
+      recommended_only: false,
+      tools_only: false,
+      exclude_preview: false
+    }
+  }
+
+  return {
+    type: 'llm',
+    modalities: 'text',
+    features: [],
+    provider_names: [],
+    model_keyword: '',
+    sort_by: 'order',
+    sort_order: 'asc',
+    limit: 40,
+    recommended_only: false,
+    tools_only: false,
+    exclude_preview: false
+  }
+}
+
+const handleRunFetchModels = async () => {
+  if (!fetchingProvider.value) return
+
+  try {
+    fetchingModels.value = true
+    const requestPayload = {
+      ...fetchForm.value,
+      features: fetchForm.value.tools_only ? ['tools', 'function_calling'] : fetchForm.value.features
+    }
+    console.log('🔍 [fetch-models] provider=', fetchingProvider.value)
+    console.log('🔍 [fetch-models] payload=', requestPayload)
+    const response = await configApi.fetchProviderModels(fetchingProvider.value.id, requestPayload)
+    console.log('📦 [fetch-models] response=', response)
+
+    if (response.success && response.models && response.models.length > 0) {
+      const mappedModels = response.models.map((model: any) => ({
+        name: model.id || model.name,
+        display_name: model.name || model.id,
+        provider_vendor: normalizeFetchedModelVendor(model.provider_vendor || inferProviderVendor(model.id || model.name)),
+        input_price_per_1k: model.input_price_per_1k || null,
+        output_price_per_1k: model.output_price_per_1k || null,
+        context_length: model.context_length || null,
+        max_tokens: model.max_tokens || null,
+        description: model.description || '',
+        capabilities: model.capabilities || [],
+        currency: model.currency || 'USD'
+      }))
+
+      const selectedProviders = new Set((fetchForm.value.provider_names || []).map(item => normalizeFetchedModelVendor(item)))
+      fetchedModels.value = selectedProviders.size > 0
+        ? mappedModels.filter(model => selectedProviders.has(normalizeFetchedModelVendor(model.provider_vendor)))
+        : mappedModels
+
+      selectedFetchedModels.value = []
+      if (fetchedModels.value.length === 0) {
+        ElMessage.warning('已拉取到模型，但按当前厂家筛选后没有匹配结果，请调整筛选条件')
+        return
+      }
+      ElMessage.success(`成功拉取 ${fetchedModels.value.length} 个模型，请勾选后导入`)
+    } else {
+      fetchedModels.value = []
+      selectedFetchedModels.value = []
+      ElMessage.error(response.message || '获取模型列表失败或列表为空')
+    }
+  } catch (error: any) {
+    console.error('获取模型列表失败:', error)
+    const errorMsg = error.response?.data?.detail || error.message || '获取模型列表失败'
+    ElMessage.error(errorMsg)
+  } finally {
+    fetchingModels.value = false
+  }
+}
+
+const handleFetchedModelsSelectionChange = (rows: any[]) => {
+  selectedFetchedModels.value = rows
+}
+
+const handleSelectAllFetchedModels = () => {
+  fetchedModelsTableRef.value?.toggleAllSelection?.()
+}
+
+const handleClearFetchedModelsSelection = () => {
+  fetchedModelsTableRef.value?.clearSelection?.()
+  selectedFetchedModels.value = []
+}
+
+const handleImportFetchedModels = async () => {
+  if (selectedFetchedModels.value.length === 0) {
+    ElMessage.warning('请至少勾选一个模型')
+    return
+  }
+
+  const importedModels = selectedFetchedModels.value.map((model: any) => ({
+    name: model.name,
+    display_name: model.display_name,
+    input_price_per_1k: model.input_price_per_1k,
+    output_price_per_1k: model.output_price_per_1k,
+    context_length: model.context_length,
+    max_tokens: model.max_tokens,
+    description: model.description,
+    capabilities: model.capabilities,
+    currency: model.currency || 'USD'
+  }))
+
+  const mergedModels = [...formData.value.models]
+  const indexByName = new Map(
+    mergedModels.map((model, index) => [String(model.name || '').trim().toLowerCase(), index])
+  )
+
+  for (const importedModel of importedModels) {
+    const modelKey = String(importedModel.name || '').trim().toLowerCase()
+    if (!modelKey) continue
+
+    const existingIndex = indexByName.get(modelKey)
+    if (existingIndex !== undefined) {
+      mergedModels[existingIndex] = {
+        ...mergedModels[existingIndex],
+        ...importedModel
+      }
+    } else {
+      indexByName.set(modelKey, mergedModels.length)
+      mergedModels.push(importedModel)
+    }
+  }
+
+  formData.value.models = mergedModels
+
+  fetchDialogVisible.value = false
+  ElMessage.success(`已导入 ${importedModels.length} 个选中模型，当前共 ${formData.value.models.length} 个模型`)
+}
+
+const normalizeFetchedModelVendor = (vendor: string) => {
+  return String(vendor || '').trim().toLowerCase()
+}
+
+const inferProviderVendor = (modelName: string) => {
+  const name = String(modelName || '').toLowerCase()
+  if (name.startsWith('gpt-') || name.startsWith('o1') || name.startsWith('o3') || name.startsWith('o4') || name.startsWith('chatgpt-')) return 'openai'
+  if (name.startsWith('claude-')) return 'anthropic'
+  if (name.startsWith('gemini')) return 'google'
+  if (name.startsWith('deepseek')) return 'deepseek'
+  if (name.startsWith('qwen')) return 'qwen'
+  if (name.startsWith('glm') || name.startsWith('chatglm') || name.startsWith('zhipu')) return 'glm'
+  if (name.startsWith('kimi') || name.startsWith('moonshot')) return 'kimi'
+  if (name.startsWith('doubao')) return 'doubao'
+  if (name.startsWith('minimax') || name.startsWith('mimo-') || name.startsWith('abab')) return 'minimax'
+  if (name.startsWith('mistral')) return 'mistral'
+  if (name.startsWith('meta/') || name.startsWith('meta-') || name.startsWith('llama-')) return 'meta'
+  if (name.startsWith('jina')) return 'jina'
+  return 'other'
 }
 
 // 使用预设模板

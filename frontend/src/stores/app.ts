@@ -36,6 +36,16 @@ export interface AppState {
   apiVersion: string
 }
 
+type AppPreferences = AppState['preferences']
+
+const defaultPreferences: AppPreferences = {
+  defaultMarket: 'A股',
+  defaultDepth: '3',
+  autoRefresh: true,
+  refreshInterval: 30,
+  showWelcome: true
+}
+
 export const useAppStore = defineStore('app', {
   state: (): AppState => ({
     loading: false,
@@ -52,19 +62,7 @@ export const useAppStore = defineStore('app', {
 
     currentRoute: null,
 
-    preferences: useStorage('user-preferences', {
-      defaultMarket: 'A股',
-      defaultDepth: '3',  // 3级为标准分析（推荐）
-      autoRefresh: true,
-      refreshInterval: 30,
-      showWelcome: true
-    }).value || {
-      defaultMarket: 'A股',
-      defaultDepth: '3',  // 3级为标准分析（推荐）
-      autoRefresh: true,
-      refreshInterval: 30,
-      showWelcome: true
-    },
+    preferences: (useStorage<AppPreferences>('user-preferences', defaultPreferences).value || defaultPreferences) as AppPreferences,
 
     version: '0.1.16',
     buildTime: new Date().toISOString(),
@@ -184,11 +182,7 @@ export const useAppStore = defineStore('app', {
     // 重置偏好设置
     resetPreferences() {
       this.preferences = {
-        defaultMarket: 'A股',
-        defaultDepth: '标准',
-        autoRefresh: true,
-        refreshInterval: 30,
-        showWelcome: true
+        ...defaultPreferences
       }
     },
     
@@ -220,10 +214,11 @@ export const useAppStore = defineStore('app', {
         this.setApiConnected(connected)
         return connected
       } catch (error) {
-        if (error.name === 'AbortError') {
+        const err = error as Error
+        if (err.name === 'AbortError') {
           console.warn('API连接检查超时')
         } else {
-          console.warn('API连接检查失败:', error)
+          console.warn('API连接检查失败:', err)
         }
         this.setApiConnected(false)
         return false
@@ -251,10 +246,11 @@ export const useAppStore = defineStore('app', {
           this.setApiConnected(false)
         }
       } catch (error) {
-        if (error.name === 'AbortError') {
+        const err = error as Error
+        if (err.name === 'AbortError') {
           console.warn('获取API版本超时')
         } else {
-          console.warn('获取API版本失败:', error)
+          console.warn('获取API版本失败:', err)
         }
         this.apiVersion = 'unknown'
         this.setApiConnected(false)

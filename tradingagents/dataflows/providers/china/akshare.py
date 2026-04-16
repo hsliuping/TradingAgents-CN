@@ -703,9 +703,11 @@ class AKShareProvider(BaseStockDataProvider):
         """
         获取单个股票实时行情
 
-        🔥 策略：使用 stock_bid_ask_em 接口获取单个股票的实时行情报价
-        - 优点：只获取单个股票数据，速度快，不浪费资源
-        - 适用场景：手动同步单个股票
+        🔥 策略：优先使用单股报价接口，失败时回退到全市场快照和历史数据
+        - 主接口: stock_bid_ask_em
+        - 备份接口1: stock_zh_a_spot（新浪快照）
+        - 备份接口2: stock_zh_a_spot_em（东方财富快照）
+        - 最终兜底: stock_zh_a_hist（最新日线）
 
         Args:
             code: 股票代码
@@ -718,79 +720,41 @@ class AKShareProvider(BaseStockDataProvider):
 
         try:
             logger.info(f"📈 使用 stock_bid_ask_em 接口获取 {code} 实时行情...")
+            try:
+                # 🔥 使用 stock_bid_ask_em 接口获取单个股票实时行情
+                def fetch_bid_ask():
+                    return self.ak.stock_bid_ask_em(symbol=code)
 
-            # 🔥 使用 stock_bid_ask_em 接口获取单个股票实时行情
-            def fetch_bid_ask():
-                return self.ak.stock_bid_ask_em(symbol=code)
+                bid_ask_df = await asyncio.to_thread(fetch_bid_ask)
 
-            bid_ask_df = await asyncio.to_thread(fetch_bid_ask)
+                logger.info(f"📊 stock_bid_ask_em 返回数据类型: {type(bid_ask_df)}")
+                if bid_ask_df is not None:
+                    logger.info(f"📊 DataFrame shape: {bid_ask_df.shape}")
+                    logger.info(f"📊 DataFrame columns: {list(bid_ask_df.columns)}")
+                    logger.info(f"📊 DataFrame 完整数据:\n{bid_ask_df.to_string()}")
 
-            # 🔥 打印原始返回数据
-            logger.info(f"📊 stock_bid_ask_em 返回数据类型: {type(bid_ask_df)}")
-            if bid_ask_df is not None:
-                logger.info(f"📊 DataFrame shape: {bid_ask_df.shape}")
-                logger.info(f"📊 DataFrame columns: {list(bid_ask_df.columns)}")
-                logger.info(f"📊 DataFrame 完整数据:\n{bid_ask_df.to_string()}")
+                if bid_ask_df is not None and not bid_ask_df.empty:
+                    data_dict = dict(zip(bid_ask_df['item'], bid_ask_df['value']))
+                    logger.info(f"📊 转换后的字典: {data_dict}")
+                    quotes = self._build_bid_ask_quotes(code, data_dict)
+                    logger.info(f"✅ {code} 实时行情获取成功: 来源=stock_bid_ask_em, 最新价={quotes['price']}, 涨跌幅={quotes['change_percent']}%, 成交量={quotes['volume']}, 成交额={quotes['amount']}")
+                    return quotes
 
-            if bid_ask_df is None or bid_ask_df.empty:
-                logger.warning(f"⚠️ 未找到{code}的行情数据")
-                return None
+                logger.warning(f"⚠️ stock_bid_ask_em 未返回 {code} 的行情数据，尝试备份接口")
+            except Exception as primary_error:
+                logger.warning(f"⚠️ stock_bid_ask_em 获取 {code} 失败，尝试备份接口: {primary_error}")
 
-            # 将 DataFrame 转换为字典
-            data_dict = dict(zip(bid_ask_df['item'], bid_ask_df['value']))
-            logger.info(f"📊 转换后的字典: {data_dict}")
+            fallback_quotes = await self._get_realtime_quotes_data(code)
+            if fallback_quotes:
+                logger.info(
+                    f"✅ {code} 通过备份接口获取行情成功: 来源={fallback_quotes.get('quote_source', 'unknown')}, "
+                    f"最新价={fallback_quotes['price']}, 涨跌幅={fallback_quotes['change_percent']}%, "
+                    f"成交量={fallback_quotes['volume']}, 成交额={fallback_quotes['amount']}"
+                )
+                return self._build_standard_quotes(code, fallback_quotes)
 
-            # 转换为标准化字典
-            # 🔥 注意：字段名必须与 app/routers/stocks.py 中的查询字段一致
-            # 前端查询使用的是 high/low/open，不是 high_price/low_price/open_price
-
-            # 🔥 获取当前日期（UTC+8）
-            from datetime import datetime, timezone, timedelta
-            cn_tz = timezone(timedelta(hours=8))
-            now_cn = datetime.now(cn_tz)
-            trade_date = now_cn.strftime("%Y-%m-%d")  # 格式：2025-11-05
-
-            # 🔥 成交量单位转换：手 → 股（1手 = 100股）
-            volume_in_lots = int(data_dict.get("总手", 0))  # 单位：手
-            volume_in_shares = volume_in_lots * 100  # 单位：股
-
-            quotes = {
-                "code": code,
-                "symbol": code,
-                "name": f"股票{code}",  # stock_bid_ask_em 不返回股票名称
-                "price": float(data_dict.get("最新", 0)),
-                "close": float(data_dict.get("最新", 0)),  # 🔥 close 字段（与 price 相同）
-                "current_price": float(data_dict.get("最新", 0)),  # 🔥 current_price 字段（兼容旧数据）
-                "change": float(data_dict.get("涨跌", 0)),
-                "change_percent": float(data_dict.get("涨幅", 0)),
-                "pct_chg": float(data_dict.get("涨幅", 0)),  # 🔥 pct_chg 字段（兼容旧数据）
-                "volume": volume_in_shares,  # 🔥 单位：股（已转换）
-                "amount": float(data_dict.get("金额", 0)),  # 单位：元
-                "open": float(data_dict.get("今开", 0)),  # 🔥 使用 open 而不是 open_price
-                "high": float(data_dict.get("最高", 0)),  # 🔥 使用 high 而不是 high_price
-                "low": float(data_dict.get("最低", 0)),  # 🔥 使用 low 而不是 low_price
-                "pre_close": float(data_dict.get("昨收", 0)),
-                # 🔥 新增：财务指标字段
-                "turnover_rate": float(data_dict.get("换手", 0)),  # 换手率（%）
-                "volume_ratio": float(data_dict.get("量比", 0)),  # 量比
-                "pe": None,  # stock_bid_ask_em 不返回市盈率
-                "pe_ttm": None,
-                "pb": None,  # stock_bid_ask_em 不返回市净率
-                "total_mv": None,  # stock_bid_ask_em 不返回总市值
-                "circ_mv": None,  # stock_bid_ask_em 不返回流通市值
-                # 🔥 新增：交易日期和更新时间
-                "trade_date": trade_date,  # 交易日期（格式：2025-11-05）
-                "updated_at": now_cn.isoformat(),  # 更新时间（ISO格式，带时区）
-                # 扩展字段
-                "full_symbol": self._get_full_symbol(code),
-                "market_info": self._get_market_info(code),
-                "data_source": "akshare",
-                "last_sync": datetime.now(timezone.utc),
-                "sync_status": "success"
-            }
-
-            logger.info(f"✅ {code} 实时行情获取成功: 最新价={quotes['price']}, 涨跌幅={quotes['change_percent']}%, 成交量={quotes['volume']}, 成交额={quotes['amount']}")
-            return quotes
+            logger.warning(f"⚠️ 未找到{code}的行情数据")
+            return None
 
         except Exception as e:
             logger.error(f"❌ 获取{code}实时行情失败: {e}", exc_info=True)
@@ -799,12 +763,12 @@ class AKShareProvider(BaseStockDataProvider):
     async def _get_realtime_quotes_data(self, code: str) -> Dict[str, Any]:
         """获取实时行情数据"""
         try:
-            # 方法1: 获取A股实时行情
-            def fetch_spot_data():
-                return self.ak.stock_zh_a_spot_em()
+            # 方法1: 使用新浪全市场快照
+            def fetch_spot_data_sina():
+                return self.ak.stock_zh_a_spot()
 
             try:
-                spot_df = await asyncio.to_thread(fetch_spot_data)
+                spot_df = await asyncio.to_thread(fetch_spot_data_sina)
 
                 if spot_df is not None and not spot_df.empty:
                     # 查找对应股票
@@ -832,11 +796,46 @@ class AKShareProvider(BaseStockDataProvider):
                             "pb": self._safe_float(row.get("市净率", None)),  # 市净率
                             "total_mv": self._safe_float(row.get("总市值", None)),  # 总市值（元）
                             "circ_mv": self._safe_float(row.get("流通市值", None)),  # 流通市值（元）
+                            "quote_source": "stock_zh_a_spot",
                         }
             except Exception as e:
-                logger.debug(f"获取{code}A股实时行情失败: {e}")
+                logger.debug(f"获取{code}新浪实时快照失败: {e}")
 
-            # 方法2: 尝试获取单只股票实时数据
+            # 方法2: 使用东方财富全市场快照
+            def fetch_spot_data_em():
+                return self.ak.stock_zh_a_spot_em()
+
+            try:
+                spot_df = await asyncio.to_thread(fetch_spot_data_em)
+
+                if spot_df is not None and not spot_df.empty:
+                    stock_data = spot_df[spot_df['代码'] == code]
+
+                    if not stock_data.empty:
+                        row = stock_data.iloc[0]
+                        return {
+                            "name": str(row.get("名称", f"股票{code}")),
+                            "price": self._safe_float(row.get("最新价", 0)),
+                            "change": self._safe_float(row.get("涨跌额", 0)),
+                            "change_percent": self._safe_float(row.get("涨跌幅", 0)),
+                            "volume": self._safe_int(row.get("成交量", 0)),
+                            "amount": self._safe_float(row.get("成交额", 0)),
+                            "open": self._safe_float(row.get("今开", 0)),
+                            "high": self._safe_float(row.get("最高", 0)),
+                            "low": self._safe_float(row.get("最低", 0)),
+                            "pre_close": self._safe_float(row.get("昨收", 0)),
+                            "turnover_rate": self._safe_float(row.get("换手率", None)),
+                            "volume_ratio": self._safe_float(row.get("量比", None)),
+                            "pe": self._safe_float(row.get("市盈率-动态", None)),
+                            "pb": self._safe_float(row.get("市净率", None)),
+                            "total_mv": self._safe_float(row.get("总市值", None)),
+                            "circ_mv": self._safe_float(row.get("流通市值", None)),
+                            "quote_source": "stock_zh_a_spot_em",
+                        }
+            except Exception as e:
+                logger.debug(f"获取{code}东方财富实时快照失败: {e}")
+
+            # 方法3: 使用最新日线兜底
             def fetch_individual_spot():
                 return self.ak.stock_zh_a_hist(symbol=code, period="daily", adjust="")
 
@@ -855,7 +854,8 @@ class AKShareProvider(BaseStockDataProvider):
                         "open": self._safe_float(latest_row.get("开盘", 0)),
                         "high": self._safe_float(latest_row.get("最高", 0)),
                         "low": self._safe_float(latest_row.get("最低", 0)),
-                        "pre_close": self._safe_float(latest_row.get("收盘", 0))
+                        "pre_close": self._safe_float(latest_row.get("收盘", 0)),
+                        "quote_source": "stock_zh_a_hist"
                     }
             except Exception as e:
                 logger.debug(f"获取{code}历史数据作为行情失败: {e}")
@@ -865,6 +865,87 @@ class AKShareProvider(BaseStockDataProvider):
         except Exception as e:
             logger.debug(f"获取{code}实时行情数据失败: {e}")
             return {}
+
+    def _build_bid_ask_quotes(self, code: str, data_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """将 stock_bid_ask_em 数据转换为标准行情结构"""
+        cn_tz = timezone(timedelta(hours=8))
+        now_cn = datetime.now(cn_tz)
+        trade_date = now_cn.strftime("%Y-%m-%d")
+
+        volume_in_lots = int(data_dict.get("总手", 0))
+        volume_in_shares = volume_in_lots * 100
+
+        return {
+            "code": code,
+            "symbol": code,
+            "name": f"股票{code}",
+            "price": float(data_dict.get("最新", 0)),
+            "close": float(data_dict.get("最新", 0)),
+            "current_price": float(data_dict.get("最新", 0)),
+            "change": float(data_dict.get("涨跌", 0)),
+            "change_percent": float(data_dict.get("涨幅", 0)),
+            "pct_chg": float(data_dict.get("涨幅", 0)),
+            "volume": volume_in_shares,
+            "amount": float(data_dict.get("金额", 0)),
+            "open": float(data_dict.get("今开", 0)),
+            "high": float(data_dict.get("最高", 0)),
+            "low": float(data_dict.get("最低", 0)),
+            "pre_close": float(data_dict.get("昨收", 0)),
+            "turnover_rate": float(data_dict.get("换手", 0)),
+            "volume_ratio": float(data_dict.get("量比", 0)),
+            "pe": None,
+            "pe_ttm": None,
+            "pb": None,
+            "total_mv": None,
+            "circ_mv": None,
+            "trade_date": trade_date,
+            "updated_at": now_cn.isoformat(),
+            "full_symbol": self._get_full_symbol(code),
+            "market_info": self._get_market_info(code),
+            "data_source": "akshare",
+            "quote_source": "stock_bid_ask_em",
+            "last_sync": datetime.now(timezone.utc),
+            "sync_status": "success"
+        }
+
+    def _build_standard_quotes(self, code: str, quote_data: Dict[str, Any]) -> Dict[str, Any]:
+        """将备份接口返回的数据转换为统一行情结构"""
+        cn_tz = timezone(timedelta(hours=8))
+        now_cn = datetime.now(cn_tz)
+        trade_date = now_cn.strftime("%Y-%m-%d")
+
+        return {
+            "code": code,
+            "symbol": code,
+            "name": quote_data.get("name", f"股票{code}"),
+            "price": self._safe_float(quote_data.get("price", 0)),
+            "close": self._safe_float(quote_data.get("price", 0)),
+            "current_price": self._safe_float(quote_data.get("price", 0)),
+            "change": self._safe_float(quote_data.get("change", 0)),
+            "change_percent": self._safe_float(quote_data.get("change_percent", 0)),
+            "pct_chg": self._safe_float(quote_data.get("change_percent", 0)),
+            "volume": self._safe_int(quote_data.get("volume", 0)),
+            "amount": self._safe_float(quote_data.get("amount", 0)),
+            "open": self._safe_float(quote_data.get("open", 0)),
+            "high": self._safe_float(quote_data.get("high", 0)),
+            "low": self._safe_float(quote_data.get("low", 0)),
+            "pre_close": self._safe_float(quote_data.get("pre_close", 0)),
+            "turnover_rate": self._safe_float(quote_data.get("turnover_rate", 0)),
+            "volume_ratio": self._safe_float(quote_data.get("volume_ratio", 0)),
+            "pe": quote_data.get("pe"),
+            "pe_ttm": quote_data.get("pe"),
+            "pb": quote_data.get("pb"),
+            "total_mv": quote_data.get("total_mv") / 1e8 if quote_data.get("total_mv") else None,
+            "circ_mv": quote_data.get("circ_mv") / 1e8 if quote_data.get("circ_mv") else None,
+            "trade_date": trade_date,
+            "updated_at": now_cn.isoformat(),
+            "full_symbol": self._get_full_symbol(code),
+            "market_info": self._get_market_info(code),
+            "data_source": "akshare",
+            "quote_source": quote_data.get("quote_source", "unknown"),
+            "last_sync": datetime.now(timezone.utc),
+            "sync_status": "success"
+        }
     
     def _safe_float(self, value: Any) -> float:
         """安全转换为浮点数"""

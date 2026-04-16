@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from app.core.database import init_db, get_mongo_db
 from app.models.config import LLMProvider
+from tradingagents.llm_clients.provider_keys import canonical_aliases
 
 async def init_providers():
     """初始化大模型厂家数据"""
@@ -56,12 +57,13 @@ async def init_providers():
             "supported_features": ["chat", "completion", "embedding", "vision", "function_calling", "streaming"]
         },
         {
-            "name": "zhipu",
+            "name": "glm",
             "display_name": "智谱AI",
             "description": "智谱AI提供GLM系列中文大模型",
             "website": "https://zhipuai.cn",
             "api_doc_url": "https://open.bigmodel.cn/doc",
             "default_base_url": "https://open.bigmodel.cn/api/paas/v4",
+            "aliases": canonical_aliases("glm"),
             "is_active": True,
             "supported_features": ["chat", "completion", "embedding", "function_calling", "streaming"]
         },
@@ -76,12 +78,13 @@ async def init_providers():
             "supported_features": ["chat", "completion", "function_calling", "streaming"]
         },
         {
-            "name": "dashscope",
+            "name": "qwen",
             "display_name": "阿里云百炼",
             "description": "阿里云百炼大模型服务平台，提供通义千问等模型",
             "website": "https://bailian.console.aliyun.com",
             "api_doc_url": "https://help.aliyun.com/zh/dashscope/",
             "default_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "aliases": canonical_aliases("qwen"),
             "is_active": True,
             "supported_features": ["chat", "completion", "embedding", "function_calling", "streaming"]
         },
@@ -104,6 +107,16 @@ async def init_providers():
             "default_base_url": "https://api.302.ai/v1",
             "is_active": True,
             "supported_features": ["chat", "completion", "embedding", "image", "vision", "function_calling", "streaming"]
+        },
+        {
+            "name": "aihubmix",
+            "display_name": "AiHubMix",
+            "description": "AiHubMix 是 OpenAI 兼容的聚合渠道，提供统一模型接入入口",
+            "website": "https://aihubmix.com/?aff=2rIi",
+            "api_doc_url": "https://docs.aihubmix.com/cn/quick-start",
+            "default_base_url": "https://aihubmix.com/v1",
+            "is_active": True,
+            "supported_features": ["chat", "completion", "embedding", "vision", "function_calling", "streaming"]
         }
     ]
     

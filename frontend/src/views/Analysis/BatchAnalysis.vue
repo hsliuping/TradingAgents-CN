@@ -290,7 +290,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Files, TrendCharts, Check, Close } from '@element-plus/icons-vue'
 import { ANALYSTS, DEFAULT_ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
@@ -352,7 +352,7 @@ const parseStockCodes = () => {
   const normalized: string[] = []
   const invalid: string[] = []
   for (const c of codes) {
-    const { symbol, error } = normalizeCodeSmart(c)
+    const { symbol } = normalizeCodeSmart(c)
     if (symbol) normalized.push(symbol)
     else invalid.push(c)
   }
@@ -372,6 +372,16 @@ const clearStocks = () => {
 // 初始化模型设置
 const initializeModelSettings = async () => {
   try {
+    const sortModelsByNewest = (configs: any[]) => {
+      const getTimestamp = (config: any) => {
+        const timeValue = config.created_at || config.updated_at
+        const timestamp = timeValue ? new Date(timeValue).getTime() : 0
+        return Number.isNaN(timestamp) ? 0 : timestamp
+      }
+
+      return [...configs].sort((a, b) => getTimestamp(b) - getTimestamp(a))
+    }
+
     // 获取默认模型
     const defaultModels = await configApi.getDefaultModels()
     modelSettings.value.quickAnalysisModel = defaultModels.quick_analysis_model
@@ -379,7 +389,9 @@ const initializeModelSettings = async () => {
 
     // 获取所有可用的模型列表
     const llmConfigs = await configApi.getLLMConfigs()
-    availableModels.value = llmConfigs.filter((config: any) => config.enabled)
+    availableModels.value = sortModelsByNewest(
+      llmConfigs.filter((config: any) => config.enabled)
+    )
 
     console.log('✅ 加载模型配置成功:', {
       quick: modelSettings.value.quickAnalysisModel,
@@ -389,7 +401,7 @@ const initializeModelSettings = async () => {
   } catch (error) {
     console.error('加载默认模型配置失败:', error)
     // 使用硬编码的默认值
-    modelSettings.value.quickAnalysisModel = 'qwen-turbo'
+    modelSettings.value.quickAnalysisModel = 'qwen-plus'
     modelSettings.value.deepAnalysisModel = 'qwen-max'
   }
 }
@@ -554,20 +566,6 @@ const submitBatchAnalysis = async () => {
   } finally {
     submitting.value = false
   }
-}
-
-const resetForm = () => {
-  // 从用户偏好加载默认值
-  const authStore = useAuthStore()
-  const userPrefs = authStore.user?.preferences
-
-  Object.assign(batchForm, {
-    title: '',
-    description: '',
-    depth: userPrefs?.default_depth || '3',
-    analysts: userPrefs?.default_analysts ? [...userPrefs.default_analysts] : [...DEFAULT_ANALYSTS]
-  })
-  clearStocks()
 }
 
 </script>

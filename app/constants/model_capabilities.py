@@ -407,6 +407,15 @@ AGGREGATOR_PROVIDERS = {
         "model_name_format": "{provider}/{model}",
         "supported_providers": ["openai", "anthropic", "google", "meta", "mistral"]
     },
+    "aihubmix": {
+        "display_name": "AiHubMix",
+        "description": "AiHubMix 聚合平台，提供 OpenAI 兼容统一接口",
+        "website": "https://aihubmix.com/?aff=2rIi",
+        "api_doc_url": "https://docs.aihubmix.com/cn/quick-start",
+        "default_base_url": "https://aihubmix.com/v1",
+        "model_name_format": "{model}",
+        "supported_providers": ["openai", "anthropic", "google", "deepseek", "qwen"]
+    },
     "oneapi": {
         "display_name": "One API",
         "description": "One API 开源聚合平台",

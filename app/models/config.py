@@ -33,6 +33,7 @@ class ModelProvider(str, Enum):
 
     # 🆕 聚合渠道
     AI302 = "302ai"              # 302.AI
+    AIHUBMIX = "aihubmix"        # AiHubMix
     ONEAPI = "oneapi"            # One API
     NEWAPI = "newapi"            # New API
     FASTGPT = "fastgpt"          # FastGPT
@@ -53,6 +54,7 @@ class LLMProvider(BaseModel):
     default_base_url: Optional[str] = Field(None, description="默认API地址")
     api_key: Optional[str] = Field(None, description="API密钥")
     api_secret: Optional[str] = Field(None, description="API密钥（某些厂家需要）")
+    aliases: List[str] = Field(default_factory=list, description="兼容别名")
     extra_config: Dict[str, Any] = Field(default_factory=dict, description="额外配置参数")
 
     # 🆕 聚合渠道支持
@@ -110,6 +112,7 @@ class LLMProviderRequest(BaseModel):
     default_base_url: Optional[str] = Field(None, description="默认API地址")
     api_key: Optional[str] = Field(None, description="API密钥")
     api_secret: Optional[str] = Field(None, description="API密钥（某些厂家需要）")
+    aliases: List[str] = Field(default_factory=list, description="兼容别名")
     extra_config: Dict[str, Any] = Field(default_factory=dict, description="额外配置参数")
 
     # 🆕 聚合渠道支持
@@ -132,6 +135,7 @@ class LLMProviderResponse(BaseModel):
     default_base_url: Optional[str] = None
     api_key: Optional[str] = None
     api_secret: Optional[str] = None
+    aliases: List[str] = Field(default_factory=list)
     extra_config: Dict[str, Any] = Field(default_factory=dict)
 
     # 🆕 聚合渠道支持
@@ -232,6 +236,8 @@ class LLMConfig(BaseModel):
         default=None,
         description="性能指标: speed(速度1-5), cost(成本1-5), quality(质量1-5)"
     )
+    created_at: Optional[datetime] = Field(default=None, description="创建时间")
+    updated_at: Optional[datetime] = Field(default=None, description="更新时间")
 
 
 class DataSourceConfig(BaseModel):

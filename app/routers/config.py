@@ -25,6 +25,7 @@ from app.utils.timezone import now_tz
 from app.services.operation_log_service import log_operation
 from app.models.operation_log import ActionType
 from app.services.config_provider import provider as config_provider
+from app.core.response import ok
 
 
 
@@ -57,18 +58,24 @@ async def reload_config(current_user: dict = Depends(get_current_user)):
                 user_agent=""
             )
 
-            return {
-                "success": True,
-                "message": "配置重载成功",
-                "data": {
-                    "reloaded_at": now_tz().isoformat()
-                }
-            }
+            return ok(
+                data={
+                    "success": True,
+                    "message": "配置重载成功",
+                    "data": {
+                        "reloaded_at": now_tz().isoformat()
+                    }
+                },
+                message="配置重载成功"
+            )
         else:
-            return {
-                "success": False,
-                "message": "配置重载失败，请查看日志"
-            }
+            return ok(
+                data={
+                    "success": False,
+                    "message": "配置重载失败，请查看日志"
+                },
+                message="配置重载失败，请查看日志"
+            )
     except Exception as e:
         logger.error(f"配置重载失败: {e}", exc_info=True)
         raise HTTPException(
@@ -85,6 +92,23 @@ def _sanitize_llm_configs(items):
         return [LLMConfig(**{**i.model_dump(), "api_key": None}) for i in items]
     except Exception:
         return items
+
+
+def _sort_llm_configs_by_newest(items):
+    indexed_items = list(enumerate(items))
+
+    def get_sort_key(indexed_item):
+        index, item = indexed_item
+        time_value = getattr(item, "created_at", None) or getattr(item, "updated_at", None)
+        if not time_value:
+            return (0, index)
+
+        try:
+            return (1, time_value.timestamp())
+        except Exception:
+            return (0, index)
+
+    return [item for _, item in sorted(indexed_items, key=get_sort_key, reverse=True)]
 
 def _sanitize_datasource_configs(items):
     """
@@ -168,7 +192,22 @@ class SetDefaultRequest(BaseModel):
     name: str
 
 
-@router.get("/system", response_model=SystemConfigResponse)
+class FetchProviderModelsRequest(BaseModel):
+    """从厂家 API 获取模型列表时的过滤参数"""
+    type: str | None = None
+    modalities: str | None = None
+    features: List[str] | None = None
+    provider_names: List[str] | None = None
+    model_keyword: str | None = None
+    sort_by: str | None = None
+    sort_order: str | None = None
+    limit: int | None = None
+    recommended_only: bool = False
+    tools_only: bool = False
+    exclude_preview: bool = True
+
+
+@router.get("/system", response_model=dict)
 async def get_system_config(
     current_user: User = Depends(get_current_user)
 ):
@@ -181,7 +220,7 @@ async def get_system_config(
                 detail="系统配置不存在"
             )
 
-        return SystemConfigResponse(
+        return ok(data=SystemConfigResponse(
             config_name=config.config_name,
             config_type=config.config_type,
             llm_configs=_sanitize_llm_configs(config.llm_configs),
@@ -194,7 +233,7 @@ async def get_system_config(
             updated_at=config.updated_at,
             version=config.version,
             is_active=config.is_active
-        )
+        ), message="获取系统配置成功")
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -204,7 +243,7 @@ async def get_system_config(
 
 # ========== 大模型厂家管理 ==========
 
-@router.get("/llm/providers", response_model=List[LLMProviderResponse])
+@router.get("/llm/providers", response_model=dict)
 async def get_llm_providers(
     current_user: User = Depends(get_current_user)
 ):
@@ -267,7 +306,7 @@ async def get_llm_providers(
                 )
             )
 
-        return result
+        return ok(data=result, message="获取厂家列表成功")
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -280,12 +319,24 @@ async def add_llm_provider(
     request: LLMProviderRequest,
     current_user: User = Depends(get_current_user)
 ):
-    """添加大模型厂家（方案A：REST不接受密钥，强制清洗）"""
+    """添加大模型厂家"""
     try:
-        sanitized = request.model_dump()
-        if 'api_key' in sanitized:
-            sanitized['api_key'] = ""
-        provider = LLMProvider(**sanitized)
+        from app.utils.api_key_utils import should_skip_api_key_update
+
+        provider_data = request.model_dump()
+
+        # 新增时也允许保存完整密钥；占位符/截断值则跳过该字段
+        if 'api_key' in provider_data:
+            api_key = provider_data.get('api_key', '')
+            if should_skip_api_key_update(api_key):
+                del provider_data['api_key']
+
+        if 'api_secret' in provider_data:
+            api_secret = provider_data.get('api_secret', '')
+            if should_skip_api_key_update(api_secret):
+                del provider_data['api_secret']
+
+        provider = LLMProvider(**provider_data)
         provider_id = await config_service.add_llm_provider(provider)
 
         # 审计日志（忽略异常）
@@ -300,11 +351,8 @@ async def add_llm_provider(
             )
         except Exception:
             pass
-        return {
-            "success": True,
-            "message": "厂家添加成功",
-            "data": {"id": str(provider_id)}
-        }
+
+        return ok(data={"message": "厂家添加成功", "id": str(provider_id)}, message="厂家添加成功")
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -357,11 +405,7 @@ async def update_llm_provider(
                 )
             except Exception:
                 pass
-            return {
-                "success": True,
-                "message": "厂家更新成功",
-                "data": {}
-            }
+            return ok(data={"message": "厂家更新成功"}, message="厂家更新成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -398,11 +442,7 @@ async def delete_llm_provider(
                 )
             except Exception:
                 pass
-            return {
-                "success": True,
-                "message": "厂家删除成功",
-                "data": {}
-            }
+            return ok(data={"message": "厂家删除成功"}, message="厂家删除成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -441,11 +481,7 @@ async def toggle_llm_provider(
                 )
             except Exception:
                 pass
-            return {
-                "success": True,
-                "message": f"厂家已{'启用' if is_active else '禁用'}",
-                "data": {}
-            }
+            return ok(data={"message": f"厂家已{'启用' if is_active else '禁用'}"}, message=f"厂家已{'启用' if is_active else '禁用'}")
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -463,12 +499,27 @@ async def toggle_llm_provider(
 @router.post("/llm/providers/{provider_id}/fetch-models", response_model=dict)
 async def fetch_provider_models(
     provider_id: str,
+    request: FetchProviderModelsRequest | None = None,
     current_user: User = Depends(get_current_user)
 ):
     """从厂家 API 获取模型列表"""
     try:
-        result = await config_service.fetch_provider_models(provider_id)
-        return result
+        filters = request.model_dump(exclude_none=True) if request else None
+        logger.info(
+            "🔍 [API] POST /api/config/llm/providers/%s/fetch-models user=%s filters=%s",
+            provider_id,
+            getattr(current_user, "username", None),
+            filters,
+        )
+        result = await config_service.fetch_provider_models(provider_id, filters)
+        logger.info(
+            "📦 [API] fetch-models result provider_id=%s success=%s models=%s message=%s",
+            provider_id,
+            result.get("success"),
+            len(result.get("models") or []),
+            result.get("message"),
+        )
+        return ok(data=result, message=result.get("message", "获取模型列表成功"))
     except HTTPException:
         raise
     except Exception as e:
@@ -504,14 +555,16 @@ async def migrate_env_to_providers(
         except Exception:
             pass
 
-        return {
-            "success": result["success"],
-            "message": result["message"],
-            "data": {
-                "migrated_count": result.get("migrated_count", 0),
-                "skipped_count": result.get("skipped_count", 0)
-            }
-        }
+        return ok(
+            data={
+                "message": result["message"],
+                "data": {
+                    "migrated_count": result.get("migrated_count", 0),
+                    "skipped_count": result.get("skipped_count", 0)
+                }
+            },
+            message=result["message"]
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -543,14 +596,17 @@ async def init_aggregator_providers(
         except Exception:
             pass
 
-        return {
-            "success": result["success"],
-            "message": result["message"],
-            "data": {
-                "added_count": result.get("added", 0),
-                "skipped_count": result.get("skipped", 0)
-            }
-        }
+        return ok(
+            data={
+                "success": result["success"],
+                "message": result["message"],
+                "data": {
+                    "added_count": result.get("added", 0),
+                    "skipped_count": result.get("skipped", 0)
+                }
+            },
+            message=result["message"]
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -568,7 +624,7 @@ async def test_provider_api(
         logger.info(f"🧪 收到API测试请求 - provider_id: {provider_id}")
         result = await config_service.test_provider_api(provider_id)
         logger.info(f"🧪 API测试结果: {result}")
-        return result
+        return ok(data=result, message=result.get("message", "测试厂家API完成"))
     except Exception as e:
         logger.error(f"测试厂家API失败: {e}")
         raise HTTPException(
@@ -669,7 +725,7 @@ async def add_llm_config(
                 )
             except Exception:
                 pass
-            return {"message": "大模型配置更新成功", "model_name": llm_config.model_name}
+            return ok(data={"message": "大模型配置更新成功", "model_name": llm_config.model_name}, message="大模型配置更新成功")
         else:
             logger.error(f"❌ 大模型配置保存失败")
             raise HTTPException(
@@ -776,7 +832,7 @@ async def add_data_source_config(
                 )
             except Exception:
                 pass
-            return {"message": "数据源配置添加成功", "name": ds_config.name}
+            return ok(data={"message": "数据源配置添加成功", "name": ds_config.name}, message="数据源配置添加成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -828,7 +884,7 @@ async def add_database_config(
                 )
             except Exception:
                 pass
-            return {"message": "数据库配置添加成功", "name": db_config.name}
+            return ok(data={"success": True, "message": "数据库配置添加成功", "name": db_config.name}, message="数据库配置添加成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -843,7 +899,7 @@ async def add_database_config(
         )
 
 
-@router.post("/test", response_model=ConfigTestResponse)
+@router.post("/test", response_model=dict)
 async def test_config(
     request: ConfigTestRequest,
     current_user: User = Depends(get_current_user)
@@ -865,7 +921,8 @@ async def test_config(
                 detail="不支持的配置类型"
             )
 
-        return ConfigTestResponse(**result)
+        response = ConfigTestResponse(**result)
+        return ok(data=response.model_dump(), message=response.message)
     except HTTPException:
         raise
     except Exception as e:
@@ -875,7 +932,7 @@ async def test_config(
         )
 
 
-@router.post("/database/{db_name}/test", response_model=ConfigTestResponse)
+@router.post("/database/{db_name}/test", response_model=dict)
 async def test_saved_database_config(
     db_name: str,
     current_user: dict = Depends(get_current_user)
@@ -913,7 +970,8 @@ async def test_saved_database_config(
         # 使用完整配置进行测试
         result = await config_service.test_database_config(db_config)
 
-        return ConfigTestResponse(**result)
+        response = ConfigTestResponse(**result)
+        return ok(data=response.model_dump(), message=response.message)
     except HTTPException:
         raise
     except Exception as e:
@@ -924,7 +982,7 @@ async def test_saved_database_config(
         )
 
 
-@router.get("/llm", response_model=List[LLMConfig])
+@router.get("/llm", response_model=dict)
 async def get_llm_configs(
     current_user: User = Depends(get_current_user)
 ):
@@ -935,7 +993,7 @@ async def get_llm_configs(
 
         if not config:
             logger.warning("⚠️ 系统配置为空，返回空列表")
-            return []
+            return ok(data=[], message="获取大模型配置成功")
 
         logger.info(f"📊 系统配置存在，大模型配置数量: {len(config.llm_configs)}")
 
@@ -955,9 +1013,11 @@ async def get_llm_configs(
             if llm_config.enabled and llm_config.provider in active_provider_names
         ]
 
-        logger.info(f"✅ 过滤后的大模型配置数量: {len(filtered_configs)} (原始: {len(config.llm_configs)})")
+        sorted_configs = _sort_llm_configs_by_newest(filtered_configs)
 
-        return _sanitize_llm_configs(filtered_configs)
+        logger.info(f"✅ 过滤后的大模型配置数量: {len(sorted_configs)} (原始: {len(config.llm_configs)})")
+
+        return ok(data=_sanitize_llm_configs(sorted_configs), message="获取大模型配置成功")
     except Exception as e:
         logger.error(f"❌ 获取大模型配置失败: {e}")
         raise HTTPException(
@@ -1000,7 +1060,7 @@ async def delete_llm_config(
                 )
             except Exception:
                 pass
-            return {"message": "大模型配置删除成功"}
+            return ok(data={"message": "大模型配置删除成功"}, message="大模型配置删除成功")
         else:
             logger.warning(f"⚠️ 未找到大模型配置 - {provider}/{model_name}")
             raise HTTPException(
@@ -1038,7 +1098,7 @@ async def set_default_llm(
                 )
             except Exception:
                 pass
-            return {"message": "默认大模型设置成功", "default_llm": request.name}
+            return ok(data={"message": "默认大模型设置成功", "default_llm": request.name}, message="默认大模型设置成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -1053,7 +1113,7 @@ async def set_default_llm(
         )
 
 
-@router.get("/datasource", response_model=List[DataSourceConfig])
+@router.get("/datasource", response_model=dict)
 async def get_data_source_configs(
     current_user: User = Depends(get_current_user)
 ):
@@ -1061,8 +1121,8 @@ async def get_data_source_configs(
     try:
         config = await config_service.get_system_config()
         if not config:
-            return []
-        return _sanitize_datasource_configs(config.data_source_configs)
+            return ok(data=[], message="获取数据源配置成功")
+        return ok(data=_sanitize_datasource_configs(config.data_source_configs), message="获取数据源配置成功")
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1260,7 +1320,7 @@ async def update_data_source_config(
                         )
                     except Exception:
                         pass
-                    return {"message": "数据源配置更新成功"}
+                    return ok(data={"message": "数据源配置更新成功"}, message="数据源配置更新成功")
                 else:
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1314,7 +1374,7 @@ async def delete_data_source_config(
                         )
                     except Exception:
                         pass
-                    return {"message": "数据源配置删除成功"}
+                    return ok(data={"message": "数据源配置删除成功"}, message="数据源配置删除成功")
                 else:
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1336,14 +1396,14 @@ async def delete_data_source_config(
 
 # ==================== 市场分类管理 ====================
 
-@router.get("/market-categories", response_model=List[MarketCategory])
+@router.get("/market-categories", response_model=dict)
 async def get_market_categories(
     current_user: User = Depends(get_current_user)
 ):
     """获取所有市场分类"""
     try:
         categories = await config_service.get_market_categories()
-        return categories
+        return ok(data=categories, message="获取市场分类成功")
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1374,7 +1434,7 @@ async def add_market_category(
                 )
             except Exception:
                 pass
-            return {"message": "市场分类添加成功", "id": category.id}
+            return ok(data={"message": "市场分类添加成功", "id": category.id}, message="市场分类添加成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1412,7 +1472,7 @@ async def update_market_category(
                 )
             except Exception:
                 pass
-            return {"message": "市场分类更新成功"}
+            return ok(data={"message": "市场分类更新成功"}, message="市场分类更新成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -1449,7 +1509,7 @@ async def delete_market_category(
                 )
             except Exception:
                 pass
-            return {"message": "市场分类删除成功"}
+            return ok(data={"message": "市场分类删除成功"}, message="市场分类删除成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1466,14 +1526,14 @@ async def delete_market_category(
 
 # ==================== 数据源分组管理 ====================
 
-@router.get("/datasource-groupings", response_model=List[DataSourceGrouping])
+@router.get("/datasource-groupings", response_model=dict)
 async def get_datasource_groupings(
     current_user: User = Depends(get_current_user)
 ):
     """获取所有数据源分组关系"""
     try:
         groupings = await config_service.get_datasource_groupings()
-        return groupings
+        return ok(data=groupings, message="获取数据源分组关系成功")
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1504,7 +1564,7 @@ async def add_datasource_to_category(
                 )
             except Exception:
                 pass
-            return {"message": "数据源添加到分类成功"}
+            return ok(data={"message": "数据源添加到分类成功"}, message="数据源添加到分类成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1542,7 +1602,7 @@ async def remove_datasource_from_category(
                 )
             except Exception:
                 pass
-            return {"message": "数据源从分类中移除成功"}
+            return ok(data={"message": "数据源从分类中移除成功"}, message="数据源从分类中移除成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -1581,7 +1641,7 @@ async def update_datasource_grouping(
                 )
             except Exception:
                 pass
-            return {"message": "数据源分组关系更新成功"}
+            return ok(data={"message": "数据源分组关系更新成功"}, message="数据源分组关系更新成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -1619,7 +1679,7 @@ async def update_category_datasource_order(
                 )
             except Exception:
                 pass
-            return {"message": "数据源排序更新成功"}
+            return ok(data={"message": "数据源排序更新成功"}, message="数据源排序更新成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1655,7 +1715,7 @@ async def set_default_data_source(
                 )
             except Exception:
                 pass
-            return {"message": "默认数据源设置成功", "default_data_source": request.name}
+            return ok(data={"message": "默认数据源设置成功", "default_data_source": request.name}, message="默认数据源设置成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -1670,14 +1730,14 @@ async def set_default_data_source(
         )
 
 
-@router.get("/settings", response_model=Dict[str, Any])
+@router.get("/settings", response_model=dict)
 async def get_system_settings(
     current_user: User = Depends(get_current_user)
 ):
     """获取系统设置"""
     try:
         effective = await config_provider.get_effective_system_settings()
-        return _sanitize_kv(effective)
+        return ok(data=_sanitize_kv(effective), message="获取系统设置成功")
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1697,7 +1757,7 @@ async def get_system_settings_meta(
         items = [
             {"key": k, **v} for k, v in meta_map.items()
         ]
-        return {"success": True, "data": {"items": items}, "message": ""}
+        return ok(data={"items": items}, message="获取系统设置元数据成功")
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1742,7 +1802,7 @@ async def update_system_settings(
                 config_provider.invalidate()
             except Exception:
                 pass
-            return {"message": "系统设置更新成功"}
+            return ok(data={"message": "系统设置更新成功"}, message="系统设置更新成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1789,11 +1849,14 @@ async def export_config(
             )
         except Exception:
             pass
-        return {
-            "message": "配置导出成功",
-            "data": config_data,
-            "exported_at": now_tz().isoformat()
-        }
+        return ok(
+            data={
+                "message": "配置导出成功",
+                "data": config_data,
+                "exported_at": now_tz().isoformat()
+            },
+            message="配置导出成功"
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1822,7 +1885,7 @@ async def import_config(
                 )
             except Exception:
                 pass
-            return {"message": "配置导入成功"}
+            return ok(data={"message": "配置导入成功"}, message="配置导入成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1857,7 +1920,7 @@ async def migrate_legacy_config(
                 )
             except Exception:
                 pass
-            return {"message": "传统配置迁移成功"}
+            return ok(data={"message": "传统配置迁移成功"}, message="传统配置迁移成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1895,7 +1958,7 @@ async def set_default_llm(
                 )
             except Exception:
                 pass
-            return {"message": f"默认大模型已设置为: {request.name}"}
+            return ok(data={"message": f"默认大模型已设置为: {request.name}"}, message=f"默认大模型已设置为: {request.name}")
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1933,7 +1996,7 @@ async def set_default_data_source(
                 )
             except Exception:
                 pass
-            return {"message": f"默认数据源已设置为: {request.name}"}
+            return ok(data={"message": f"默认数据源已设置为: {request.name}"}, message=f"默认数据源已设置为: {request.name}")
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1948,14 +2011,14 @@ async def set_default_data_source(
         )
 
 
-@router.get("/models", response_model=List[Dict[str, Any]])
+@router.get("/models", response_model=dict)
 async def get_available_models(
     current_user: User = Depends(get_current_user)
 ):
     """获取可用的模型列表"""
     try:
         models = await config_service.get_available_models()
-        return models
+        return ok(data=models, message="获取模型列表成功")
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1965,14 +2028,17 @@ async def get_available_models(
 
 # ========== 模型目录管理 ==========
 
-@router.get("/model-catalog", response_model=List[Dict[str, Any]])
+@router.get("/model-catalog", response_model=dict)
 async def get_model_catalog(
     current_user: User = Depends(get_current_user)
 ):
     """获取所有模型目录"""
     try:
         catalogs = await config_service.get_model_catalog()
-        return [catalog.model_dump(by_alias=False) for catalog in catalogs]
+        return ok(
+            data=[catalog.model_dump(by_alias=False) for catalog in catalogs],
+            message="获取模型目录成功"
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1980,7 +2046,7 @@ async def get_model_catalog(
         )
 
 
-@router.get("/model-catalog/{provider}", response_model=Dict[str, Any])
+@router.get("/model-catalog/{provider}", response_model=dict)
 async def get_provider_model_catalog(
     provider: str,
     current_user: User = Depends(get_current_user)
@@ -1993,7 +2059,7 @@ async def get_provider_model_catalog(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"未找到厂家 {provider} 的模型目录"
             )
-        return catalog.model_dump(by_alias=False)
+        return ok(data=catalog.model_dump(by_alias=False), message="获取模型目录成功")
     except HTTPException:
         raise
     except Exception as e:
@@ -2049,7 +2115,7 @@ async def save_model_catalog(
             details={"provider": request.provider, "provider_name": request.provider_name, "models_count": len(request.models)}
         )
 
-        return {"success": True, "message": "模型目录保存成功"}
+        return ok(data={"success": True, "message": "模型目录保存成功"}, message="模型目录保存成功")
     except HTTPException:
         raise
     except Exception as e:
@@ -2083,7 +2149,7 @@ async def delete_model_catalog(
             details={"provider": provider}
         )
 
-        return {"success": True, "message": "模型目录删除成功"}
+        return ok(data={"success": True, "message": "模型目录删除成功"}, message="模型目录删除成功")
     except HTTPException:
         raise
     except Exception as e:
@@ -2106,7 +2172,7 @@ async def init_model_catalog(
                 detail="初始化模型目录失败"
             )
 
-        return {"success": True, "message": "模型目录初始化成功"}
+        return ok(data={"success": True, "message": "模型目录初始化成功"}, message="模型目录初始化成功")
     except HTTPException:
         raise
     except Exception as e:
@@ -2118,7 +2184,7 @@ async def init_model_catalog(
 
 # ===== 数据库配置管理端点 =====
 
-@router.get("/database", response_model=List[DatabaseConfig])
+@router.get("/database", response_model=dict)
 async def get_database_configs(
     current_user: dict = Depends(get_current_user)
 ):
@@ -2127,7 +2193,7 @@ async def get_database_configs(
         logger.info("🔄 获取数据库配置列表...")
         configs = await config_service.get_database_configs()
         logger.info(f"✅ 获取到 {len(configs)} 个数据库配置")
-        return configs
+        return ok(data=configs, message="获取数据库配置成功")
     except Exception as e:
         logger.error(f"❌ 获取数据库配置失败: {e}")
         raise HTTPException(
@@ -2136,7 +2202,7 @@ async def get_database_configs(
         )
 
 
-@router.get("/database/{db_name}", response_model=DatabaseConfig)
+@router.get("/database/{db_name}", response_model=dict)
 async def get_database_config(
     db_name: str,
     current_user: dict = Depends(get_current_user)
@@ -2152,7 +2218,7 @@ async def get_database_config(
                 detail=f"数据库配置 '{db_name}' 不存在"
             )
 
-        return config
+        return ok(data=config, message="获取数据库配置成功")
     except HTTPException:
         raise
     except Exception as e:
@@ -2193,7 +2259,7 @@ async def add_database_config(
             details={"name": request.name, "type": request.type, "host": request.host, "port": request.port}
         )
 
-        return {"success": True, "message": "数据库配置添加成功"}
+        return ok(data={"success": True, "message": "数据库配置添加成功"}, message="数据库配置添加成功")
 
     except HTTPException:
         raise
@@ -2243,7 +2309,7 @@ async def update_database_config(
             details={"name": request.name, "type": request.type, "host": request.host, "port": request.port}
         )
 
-        return {"success": True, "message": "数据库配置更新成功"}
+        return ok(data={"success": True, "message": "数据库配置更新成功"}, message="数据库配置更新成功")
 
     except HTTPException:
         raise
@@ -2282,7 +2348,7 @@ async def delete_database_config(
             details={"name": db_name}
         )
 
-        return {"success": True, "message": "数据库配置删除成功"}
+        return ok(data={"success": True, "message": "数据库配置删除成功"}, message="数据库配置删除成功")
 
     except HTTPException:
         raise

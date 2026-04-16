@@ -54,7 +54,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { Search, Loading } from '@element-plus/icons-vue'
 import { searchStocks, type StockInfo } from '@/api/multiMarket'
 import { ElMessage } from 'element-plus'

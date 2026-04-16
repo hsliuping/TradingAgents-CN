@@ -28,6 +28,26 @@ export interface SyncResult {
   records?: number
   message?: string
   error?: string
+  data_source_used?: string
+  attempted_sources?: string[]
+  primary_error?: {
+    error?: string
+    context?: string
+    [key: string]: any
+  }
+  fallback_error?: {
+    error?: string
+    context?: string
+    [key: string]: any
+  }
+  market_quote_available?: boolean
+  market_quote_snapshot?: {
+    code?: string
+    trade_date?: string
+    updated_at?: string
+    close?: number
+    [key: string]: any
+  } | null
 }
 
 export interface SingleStockSyncResponse {
@@ -36,6 +56,7 @@ export interface SingleStockSyncResponse {
   historical_sync: SyncResult | null
   financial_sync: SyncResult | null
   basic_sync: SyncResult | null
+  overall_success?: boolean
 }
 
 export interface BatchStockSyncResponse {

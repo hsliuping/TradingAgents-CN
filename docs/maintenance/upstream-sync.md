@@ -2,7 +2,17 @@
 
 ## 概述
 
-本文档详细说明如何保持 TradingAgents-CN 与原项目 [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) 的同步。
+本文档说明如何在当前项目与原项目 [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) 差异已经较大的情况下，采用人工选择性方式进行上游同步。
+
+> 说明
+>
+> - 本项目已不再推荐使用“自动同步上游脚本”
+> - 自动 merge/rebase 在当前阶段容易误覆盖中文增强、配置体系和数据库相关改造
+> - 推荐改为“人工审查 + 按模块挑选 + 分批提交”的方式同步
+
+相关清单：
+
+- [人工上游吸收清单](./manual-upstream-absorption-checklist.md)
 
 ## 🎯 同步目标
 
@@ -54,46 +64,35 @@ upstream/main (原项目主分支)
 
 ### 3. 同步流程
 
-#### 标准同步流程
+#### 推荐人工流程
 
 ```bash
 # 1. 检查当前状态
 git status
 git log --oneline -5
 
-# 2. 获取上游更新
+# 2. 如果本地还没有 upstream，先添加一次
+git remote add upstream https://github.com/TauricResearch/TradingAgents.git
+
+# 3. 获取上游更新
 git fetch upstream
 
-# 3. 检查新提交
+# 4. 检查新提交
 git log --oneline HEAD..upstream/main
 
-# 4. 使用自动化脚本同步
-python scripts/sync_upstream.py
+# 5. 手工挑选需要同步的文件/模块
+git diff --name-only HEAD..upstream/main
+git diff HEAD..upstream/main -- tradingagents/
 
-# 5. 解决冲突（如果有）
-# 手动编辑冲突文件
-git add <resolved_files>
-git commit
+# 6. 在本地分支中按模块人工移植
+# 例如：LLM、CLI、数据流、文档分别拆开处理
 
-# 6. 测试同步结果
+# 7. 测试同步结果
 python -m pytest tests/
 python examples/basic_example.py
 
-# 7. 推送更新
+# 8. 提交并推送
 git push origin main
-```
-
-#### 使用自动化脚本
-
-```bash
-# 基本同步
-python scripts/sync_upstream.py
-
-# 使用rebase策略
-python scripts/sync_upstream.py --strategy rebase
-
-# 自动模式（不询问确认）
-python scripts/sync_upstream.py --auto
 ```
 
 ## ⚠️ 冲突处理策略
@@ -193,7 +192,7 @@ print(f'Decision: {decision}')
 
 ## 📊 同步记录
 
-### 同步日志格式
+### 同步记录格式
 ```json
 {
   "sync_time": "2024-01-15T10:30:00Z",

@@ -102,7 +102,7 @@
       <el-alert
         title="🔒 安全提示"
         type="info"
-        description="敏感密钥通过环境变量/运维配置注入，出于安全考虑，此处不存储或展示真实密钥。"
+        description="敏感密钥保存后不会在列表中明文展示；你也可以留空并改用 .env 环境变量注入。"
         show-icon
         :closable="false"
         class="mb-2"
@@ -233,6 +233,17 @@ const openRegisterUrl = () => {
 // 预设厂家数据
 const presetProviders = [
   {
+    name: 'aihubmix',
+    display_name: 'AiHubMix',
+    description: 'AiHubMix 是 OpenAI 兼容的聚合渠道，提供统一模型接入入口',
+    website: 'https://aihubmix.com/?aff=2rIi',
+    api_doc_url: 'https://docs.aihubmix.com/cn/quick-start',
+    default_base_url: 'https://aihubmix.com/v1',
+    supported_features: ['chat', 'completion', 'embedding', 'vision', 'function_calling', 'streaming'],
+    register_url: 'https://aihubmix.com/?aff=2rIi',
+    register_guide: '如果您还没有 AiHubMix 账号，请先注册并获取 API Key：'
+  },
+  {
     name: 'dashscope',
     display_name: '阿里云百炼',
     description: '阿里云百炼大模型服务平台，提供通义千问等模型',
@@ -254,7 +265,7 @@ const presetProviders = [
     register_url: 'https://share.302.ai/DUjftK',
     register_guide: '如果您还没有 302.AI 账号，请先注册并获取 API Key：'
   },
-    {
+  {
     name: 'deepseek',
     display_name: 'DeepSeek',
     description: 'DeepSeek提供高性能的AI推理服务',

@@ -6,7 +6,7 @@
         <div class="hero-text">
           <h1 class="hero-title">
             TradingAgents-CN
-            <span class="version-badge">v1.0.0-preview</span>
+            <span class="version-badge">v1.0.1</span>
           </h1>
           <p class="hero-subtitle">
             现代化的多智能体股票分析学习平台
@@ -323,13 +323,13 @@
       <div class="version-info">
         <div class="version-card">
           <div class="version-main">
-            <div class="version-number">v1.0.0-preview</div>
-            <div class="version-status">预览版</div>
+            <div class="version-number">v1.0.1</div>
+            <div class="version-status">稳定版</div>
           </div>
           <div class="version-details">
             <div class="version-item">
               <span class="label">发布日期</span>
-              <span class="value">2025-10-16</span>
+              <span class="value">2026-04-14</span>
             </div>
             <div class="version-item">
               <span class="label">构建时间</span>
@@ -337,7 +337,7 @@
             </div>
             <div class="version-item">
               <span class="label">API版本</span>
-              <span class="value">v1.0.0-preview</span>
+              <span class="value">v1.0.1</span>
             </div>
           </div>
         </div>

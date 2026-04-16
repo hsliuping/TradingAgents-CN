@@ -42,7 +42,6 @@ def create_scripts_structure():
         "maintenance": {
             "description": "维护和管理脚本",
             "scripts": [
-                "sync_upstream.py",
                 "branch_manager.py",
                 "version_manager.py"
             ]

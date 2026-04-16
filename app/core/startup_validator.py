@@ -10,6 +10,8 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -108,7 +110,7 @@ class StartupValidator:
             level=ConfigLevel.RECOMMENDED,
             description="Tushare Token（推荐，专业A股数据）",
             example="xxx",
-            help_url="https://tushare.pro/register?reg=tacn"
+            help_url="https://tushare.pro/weborder/#/login?reg=tacn"
         ),
     ]
     
@@ -232,6 +234,29 @@ class StartupValidator:
             logger.info("ℹ️  生产环境模式")
         else:
             logger.info("ℹ️  开发环境模式（DEBUG=true）")
+
+        # 检查开发环境是否误连共享数据库
+        db_identity = settings.MONGO_DB_IDENTITY
+        if (
+            settings.DEBUG
+            and db_identity.get("scope_effective") != "major_instance"
+            and not settings.ALLOW_SHARED_DB_IN_DEBUG
+        ):
+            self.result.invalid_configs.append(
+                (
+                    ConfigItem(
+                        key="MONGODB_DATABASE_SCOPE",
+                        level=ConfigLevel.REQUIRED,
+                        description="开发环境应默认使用 major_instance 隔离数据库",
+                        example="major_instance",
+                    ),
+                    (
+                        "DEBUG=true 时当前数据库作用域为 "
+                        f"{db_identity.get('scope_effective')}，实际数据库为 {db_identity.get('database')}。"
+                        " 如确需共享数据库，请显式设置 ALLOW_SHARED_DB_IN_DEBUG=true。"
+                    ),
+                )
+            )
     
     def _print_validation_result(self):
         """输出验证结果"""

@@ -134,9 +134,10 @@ const handleLogin = async () => {
     }
 
   } catch (error) {
-    console.error('登录失败:', error)
+    const err = error as Error
+    console.error('登录失败:', err)
     // 只有在不是表单验证错误时才显示错误消息
-    if (error.message && !error.message.includes('validate')) {
+    if (err.message && !err.message.includes('validate')) {
       ElMessage.error('登录失败，请重试')
     }
   } finally {
