@@ -61,7 +61,7 @@ async def get_config_summary(current_user: dict = Depends(get_current_user)) -> 
 
 
 @router.get("/config/validate", tags=["system"], summary="验证配置完整性")
-async def validate_config():
+async def validate_config(current_user: dict = Depends(get_current_user)):
     """
     验证系统配置的完整性和有效性。
     返回验证结果，包括缺少的配置项和无效的配置。
