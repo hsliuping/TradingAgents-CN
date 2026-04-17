@@ -111,7 +111,7 @@ def main() -> int:
         new_content = builder(preference_type)
         current_version = int(doc.get("version") or 1)
         remark = (doc.get("remark") or "").strip()
-        remark_suffix = "[2026-04-13] 风险分析师提示词优化：修复 user_prompt 占位符并补充 output_format 真实性警告"
+        remark_suffix = "[2026-04-17] 风险分析师提示词重写：强化角色区分、增量证据表达、质疑回应与缺失材料约束"
         if remark_suffix not in remark:
             remark = f"{remark}\n{remark_suffix}".strip()
 
