@@ -140,7 +140,7 @@ class TraderV2(TraderAgent):
     ## 你的职责
 
     1. **研究摘要**：把当前研究判断翻译成清晰、克制、易理解的结论摘要。
-    2. **关键证据**：提炼支持或削弱判断的核心信号，不堆砌细节。
+    2. **关键证据**：围绕研究经理结论，提炼最能强化、削弱或限制当前判断的核心信号，不堆砌细节。
     3. **情景框架**：概括偏多、偏空、中性三种情景分别取决于哪些事实变化。
     4. **信息缺口**：说明现在仍不确定、仍需验证的关键问题。
     5. **观察清单**：列出接下来需要重点跟踪的公开信息和验证事项。
@@ -148,10 +148,13 @@ class TraderV2(TraderAgent):
     ## 分析原则
 
     - **只做研究整合**：输出帮助用户更新认知，不输出交易动作。
+    - **以研究经理结论为主线**：先理解当前研究结论，再说明各维度材料如何强化、削弱或限制该结论，不要把所有报告平均复述成流水账。
+    - **冲突要直接点明**：如果研究结论与原始报告存在冲突，必须说明冲突来自哪类材料或前提差异，不得机械折中。
     - **强调不确定性**：必须说明信息缺口、关键假设和判断调整条件。
     - **用户可读**：让用户看懂“为什么这样看”以及“接下来观察什么”。
     - **禁止交易化表达**：不得输出目标价、价格区间、关键价位、止损止盈、仓位比例、建仓节奏或操作策略。
     - **缺失材料要明说**：如果研究结论、任一分析报告或历史记录缺失，必须明确写出“材料未提供”或“仍待验证”，不得自行补造。
+    - **历史交易记录只作为背景材料**：只能补充过去关注点或验证过程，不得改写成当前建议、偏好或执行节奏。
 
     ## 重要说明
 
@@ -205,12 +208,62 @@ class TraderV2(TraderAgent):
             except Exception as e:
                 logger.warning(f"获取市场信息失败: {e}")
         
-        # 🆕 提取报告内容（如果是字典，取 content 字段）
+        def normalize_items(value: Any, limit: int) -> List[str]:
+            if not isinstance(value, list):
+                return []
+
+            items: List[str] = []
+            for item in value:
+                if item is None:
+                    continue
+                text = item.strip() if isinstance(item, str) else str(item).strip()
+                if text:
+                    items.append(text)
+                if len(items) >= limit:
+                    break
+            return items
+
         def extract_content(report):
             """从报告中提取纯文本内容"""
             if isinstance(report, dict):
-                return report.get('content', str(report))
-            return str(report) if report else ""
+                for key in ("content", "markdown", "text"):
+                    value = report.get(key)
+                    if isinstance(value, str) and value.strip():
+                        return value.strip()
+
+                sections = []
+                analysis_view = report.get("analysis_view") or report.get("action")
+                if isinstance(analysis_view, str) and analysis_view.strip():
+                    sections.append(f"研究观点：{analysis_view.strip()}")
+
+                for key, label in (
+                    ("summary", "研究摘要"),
+                    ("reasoning", "核心判断"),
+                    ("risk_warning", "风险提示"),
+                ):
+                    value = report.get(key)
+                    if isinstance(value, str) and value.strip():
+                        sections.append(f"{label}：{value.strip()}")
+
+                for key, label, limit in (
+                    ("core_evidence", "核心依据", 5),
+                    ("uncertainties", "关键不确定性", 4),
+                    ("invalidation_conditions", "判断调整条件", 4),
+                    ("watch_items", "后续观察事项", 5),
+                ):
+                    items = normalize_items(report.get(key), limit)
+                    if items:
+                        sections.append(f"{label}：{'；'.join(items)}")
+
+                if sections:
+                    return "\n".join(sections)
+
+                return str(report)
+
+            if isinstance(report, list):
+                return "\n".join(normalize_items(report, len(report)))
+
+            return str(report).strip() if report else ""
         
         # 准备模板变量（参考 research_manager_v2 的实现）
         # 🔑 注意：风险评估（risk_assessment）不在研究整合阶段，它在研究整合之后由风险经理进行
@@ -227,14 +280,14 @@ class TraderV2(TraderAgent):
             "market_report": extract_content(all_reports.get("market_report", "")),
             "fundamentals_report": extract_content(all_reports.get("fundamentals_report", "")),
             "news_report": extract_content(all_reports.get("news_report", "")),
-            "sentiment_report": extract_content(all_reports.get("sentiment_report", "")),
+            "sentiment_report": extract_content(all_reports.get("sentiment_report") or all_reports.get("social_report", "")),
             # 历史交易记录（转换为字符串）
             "historical_trades": "\n".join([str(trade) for trade in historical_trades[:3]]) if historical_trades else "",
         }
         
         # 🔑 添加其他报告到模板变量（不包括 risk_assessment）
         # 这些报告包括：sector_report, index_report, bull_report, bear_report 等
-        excluded_keys = ["risk_assessment", "market_report", "fundamentals_report", "news_report", "sentiment_report"]
+        excluded_keys = ["risk_assessment", "market_report", "fundamentals_report", "news_report", "sentiment_report", "social_report"]
         for key, value in all_reports.items():
             if key not in excluded_keys:
                 template_variables[f"report_{key}"] = extract_content(value)
@@ -277,7 +330,7 @@ class TraderV2(TraderAgent):
     - 市场分析报告：{extract_content(all_reports.get("market_report", "")) or '材料未提供'}
     - 基本面分析报告：{extract_content(all_reports.get("fundamentals_report", "")) or '材料未提供'}
     - 新闻分析报告：{extract_content(all_reports.get("news_report", "")) or '材料未提供'}
-    - 情绪分析报告：{extract_content(all_reports.get("sentiment_report", "")) or '材料未提供'}
+    - 情绪分析报告：{extract_content(all_reports.get("sentiment_report") or all_reports.get("social_report", "")) or '材料未提供'}
     - 板块分析报告：{extract_content(all_reports.get("sector_report", "")) or '材料未提供'}
     - 大盘分析报告：{extract_content(all_reports.get("index_report", "")) or '材料未提供'}
     - 看涨研究报告：{extract_content(all_reports.get("bull_report", "")) or '材料未提供'}
@@ -285,9 +338,11 @@ class TraderV2(TraderAgent):
     - 历史交易记录：{chr(10).join([str(trade) for trade in historical_trades[:3]]) if historical_trades else '材料未提供'}
 
     任务重点：
+    - 以当前研究结论为主线，说明哪些材料在强化、削弱或限制该结论；如果与原始报告冲突，直接指出冲突来源，不要机械折中。
     - 基于上述研究结论和各类分析报告，生成研究摘要、核心依据、情景框架、关键不确定性、后续观察事项和风险提示。
-    - 先概括共识，再提炼最关键的证据冲突、信息缺口和判断调整条件。
+    - 先概括共识，再提炼最关键的证据冲突、信息缺口和判断调整条件，避免平均复述每一份报告。
     - 如果任一资源为空、材料不足或没有明确证据，必须直接写“材料未提供”或“仍待验证”，不得使用模型记忆补全。
+    - 历史交易记录只作为背景材料，用于补充过去关注点或验证过程，不得改写成当前应采取的动作、仓位或执行节奏。
     - 情景框架与后续观察事项只能写研究条件变化，不得改写成价格触发、仓位动作、止损止盈或执行节奏。
 
     严格禁止：

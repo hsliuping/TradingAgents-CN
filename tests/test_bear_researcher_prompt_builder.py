@@ -116,3 +116,35 @@ def test_research_manager_fallback_tracks_structured_reasoning_without_old_tradi
     assert "市场是否已经计入部分乐观/悲观预期" in source
     assert "多方最强依据、空方最强依据、双方共识、关键分歧根源" in source
     assert "投资机会" not in source
+
+
+def test_trader_builder_and_fallback_prioritize_manager_judgment_without_trading_regression() -> None:
+    module = _load_module(
+        "scripts/template_upgrades/update_research_brief_v2_prompts.py",
+        "update_research_brief_v2_prompts_trader",
+    )
+
+    content = module.build_trader_content("neutral")
+    source = (ROOT / "core/agents/adapters/trader_v2.py").read_text(encoding="utf-8")
+
+    assert "以研究经理结论为主线" in content["system_prompt"]
+    assert "不要把所有报告平均复述成流水账" in content["system_prompt"]
+    assert "优先选择最能强化、削弱或限制当前研究结论的信号" in content["analysis_requirements"]
+    assert "避免平均复述每一份报告" in content["analysis_requirements"]
+    assert "历史交易记录只能作为背景参考" in content["analysis_requirements"]
+    assert "以当前研究结论为主线" in content["user_prompt"]
+    assert "历史交易记录只能作为背景" in content["user_prompt"]
+    assert "以研究经理结论为主线" in source
+    assert "历史交易记录只作为背景材料" in source
+    assert "平均复述每一份报告" in source
+
+
+def test_trader_runtime_keeps_sentiment_report_and_structured_plan_rendering() -> None:
+    trader_source = (ROOT / "core/agents/trader.py").read_text(encoding="utf-8")
+    adapter_source = (ROOT / "core/agents/adapters/trader_v2.py").read_text(encoding="utf-8")
+
+    assert '"sentiment_report"' in trader_source
+    assert 'reports["sentiment_report"] = state["social_report"]' in trader_source
+    assert 'for key in ("content", "markdown", "text")' in adapter_source
+    assert '("summary", "研究摘要")' in adapter_source
+    assert 'all_reports.get("sentiment_report") or all_reports.get("social_report", "")' in adapter_source

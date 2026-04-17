@@ -95,7 +95,7 @@ def main() -> int:
         new_content = build_trader_content(preference_type)
         current_version = int(doc.get("version") or 1)
         remark = (doc.get("remark") or "").strip()
-        remark_suffix = "[2026-04-13] 研究整合员提示词优化：改为可用资源清单 user_prompt，并补充缺失材料处理与非交易约束"
+        remark_suffix = "[2026-04-17] 研究整合员提示词优化：改为以研究结论为主线整合证据，并补充历史交易仅作背景的约束"
         if remark_suffix not in remark:
             remark = f"{remark}\n{remark_suffix}".strip()
 
