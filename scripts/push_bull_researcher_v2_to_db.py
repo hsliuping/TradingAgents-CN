@@ -79,7 +79,7 @@ def main() -> int:
         new_content = build_bull_researcher_content(preference_type)
         current_version = int(doc.get("version") or 1)
         remark = (doc.get("remark") or "").strip()
-        remark_suffix = "[2026-04-13] 看涨研究员提示词优化：修复 market_report 变量名、删除无效字段、统一用 historical_context"
+        remark_suffix = "[2026-04-13] 看涨研究员提示词优化：将固定条数要求改为上限型要求，证据不足时允许明确写材料不足，避免为凑结构补造内容"
         if remark_suffix not in remark:
             remark = f"{remark}\n{remark_suffix}".strip()
 

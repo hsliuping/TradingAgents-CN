@@ -258,7 +258,7 @@ class BullResearcherV2(ResearcherAgent):
             except Exception as e:
                 logger.warning(f"⚠️ 从模板系统获取用户提示词失败: {e}，使用降级提示词")
 
-        # 降级：使用旧版的硬编码提示词（与数据库模板保持一致）
+        # 降级：使用与当前模板语义一致的硬编码提示词
         prompt = """请基于提供的分析报告，构建偏乐观的研究论证。
 
     可用资源：
@@ -266,27 +266,29 @@ class BullResearcherV2(ResearcherAgent):
     - 社交媒体情绪报告：{sentiment_report}
     - 最新世界事务新闻：{news_report}
     - 公司基本面报告：{fundamentals_report}
-- 辩论对话历史：{history}
-- 最后的看跌论点：{current_response}
-- 类似情况的反思和经验教训：{past_memory_str}
+    - 辩论对话历史：{historical_context}
+    - 最后的看跌论点：{current_response}
+    - 类似情况的反思和经验教训：{past_memory_str}
 
-    请使用 Markdown 输出，并严格包含以下标题：
+    请使用 Markdown 输出，并优先包含以下标题：
     ## 核心主张
     ## 支撑证据
     ## 对相反观点的回应
     ## 成立前提
-    ## 后续观察信号
 
+    要求：
+    - 如本轮存在新增且可验证的公开信号，再补充“## 后续观察信号”；如果本轮没有新的观察信号，可以省略该标题，或直接说明“本轮暂无新增观察信号”。
+    - 多轮辩论时，优先输出本轮新增或最值得回应的 1-2 个点；若新增证据有限，可明确写“核心判断延续，暂无新增高质量支撑证据或前提修正”，不要为凑结构重复扩写。
     严格禁止输出目标价、价格区间、关键价位、收益空间、概率数值和任何交易建议。
     """
 
         # 替换变量（使用实际的报告内容）
         prompt = prompt.format(
-            market_research_report=reports.get("market_report", ""),
+            market_report=reports.get("market_report", ""),
             sentiment_report=reports.get("sentiment_report", ""),
             news_report=reports.get("news_report", ""),
             fundamentals_report=reports.get("fundamentals_report", ""),
-            history=state.get("history", "") if state else "",
+            historical_context=historical_context or (state.get("history", "") if state else ""),
             current_response=state.get("current_response", "") if state else "",
             past_memory_str=state.get("past_memory_str", "") if state else ""
         )

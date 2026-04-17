@@ -95,7 +95,7 @@ def main() -> int:
         new_content = build_research_manager_content(preference_type)
         current_version = int(doc.get("version") or 1)
         remark = (doc.get("remark") or "").strip()
-        remark_suffix = "[2026-04-13] 研究经理提示词优化：改为可用资源清单 user_prompt，补充缺失材料处理约束，并去掉人民币硬编码"
+        remark_suffix = "[2026-04-17] 研究经理提示词优化：恢复多空 strongest case、共识/分歧根源与定价预期权衡，但继续保持研究简报 schema 不变"
         if remark_suffix not in remark:
             remark = f"{remark}\n{remark_suffix}".strip()
 

@@ -79,7 +79,7 @@ def main() -> int:
         new_content = build_bear_researcher_content(preference_type)
         current_version = int(doc.get("version") or 1)
         remark = (doc.get("remark") or "").strip()
-        remark_suffix = "[2026-04-13] 看空研究员提示词优化：修复双大括号变量名、补充可用资源清单 user_prompt、补充 output_format 真实性警告"
+        remark_suffix = "[2026-04-13] 看空研究员提示词优化：将固定条数要求改为上限型要求，证据不足时允许明确写材料不足，避免为凑结构补造内容"
         if remark_suffix not in remark:
             remark = f"{remark}\n{remark_suffix}".strip()
 
