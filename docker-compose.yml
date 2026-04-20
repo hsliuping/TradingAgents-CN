@@ -94,11 +94,11 @@ services:
 
   # MongoDB 数据库服务
   mongodb:
-    image: mongo:4.4
+    image: mongo
     container_name: tradingagents-mongodb
     restart: unless-stopped
     ports:
-      - "27017:27017"
+      - "27018:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: tradingagents123
