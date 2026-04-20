@@ -3393,7 +3393,11 @@ class ConfigService:
             elif provider_name == "deepseek":
                 return await asyncio.get_event_loop().run_in_executor(None, self._test_deepseek_api, api_key, display_name)
             elif provider_name == "dashscope":
-                return await asyncio.get_event_loop().run_in_executor(None, self._test_dashscope_api, api_key, display_name)
+                db = await self._get_db()
+                providers_collection = db.llm_providers
+                provider_data = await providers_collection.find_one({"name": provider_name})
+                base_url = provider_data.get("default_base_url") if provider_data else None
+                return await asyncio.get_event_loop().run_in_executor(None, self._test_dashscope_api, api_key, display_name, None, base_url)
             elif provider_name == "openrouter":
                 return await asyncio.get_event_loop().run_in_executor(None, self._test_openrouter_api, api_key, display_name)
             elif provider_name == "openai":
@@ -3627,13 +3631,15 @@ class ConfigService:
             data = {
                 "model": model_name,
                 "messages": [
-                    {"role": "user", "content": "你好，请简单介绍一下你自己。"}
+                    {"role": "user", "content": "请回复ok"}
                 ],
-                "max_tokens": 50,
-                "temperature": 0.1
+                "max_tokens": 8,
+                "temperature": 0.0
             }
 
-            response = requests.post(url, json=data, headers=headers, timeout=10)
+            # Coding Plan 专属接口响应可能比通用兼容接口慢，放宽读取超时避免误判。
+            request_timeout = (10, 30) if 'coding.dashscope.aliyuncs.com' in normalized_base_url else 10
+            response = requests.post(url, json=data, headers=headers, timeout=request_timeout)
 
             if response.status_code == 200:
                 result = response.json()
@@ -3655,9 +3661,13 @@ class ConfigService:
                         "message": f"{display_name} API响应格式异常"
                     }
             else:
+                error_detail = response.text.strip()
+                if len(error_detail) > 300:
+                    error_detail = error_detail[:300] + '...'
+                logger.warning(f"⚠️ [DashScope 测试] 失败响应: {error_detail}")
                 return {
                     "success": False,
-                    "message": f"{display_name} API测试失败: HTTP {response.status_code}"
+                    "message": f"{display_name} API测试失败: HTTP {response.status_code}" + (f" - {error_detail}" if error_detail else "")
                 }
 
         except Exception as e:
@@ -3666,20 +3676,28 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    def _test_dashscope_api(self, api_key: str, display_name: str, model_name: str = None) -> dict:
-        """测试阿里云百炼API"""
+    def _test_dashscope_api(self, api_key: str, display_name: str, model_name: str = None, base_url: str = None) -> dict:
+        """测试阿里云百炼API，兼容普通百炼与 Coding Plan 专属 OpenAI 接口。"""
         try:
             import requests
+            import re
 
-            # 如果没有指定模型，使用默认模型
+            normalized_base_url = (base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1").rstrip('/')
+            if not re.search(r'/v\d+$', normalized_base_url):
+                normalized_base_url = normalized_base_url + '/v1'
+
+            # 如果没有指定模型，按接口类型选一个大概率可用的默认模型。
             if not model_name:
-                model_name = "qwen-turbo"
+                if 'coding.dashscope.aliyuncs.com' in normalized_base_url:
+                    model_name = "qwen3.5-plus"
+                else:
+                    model_name = "qwen-turbo"
                 logger.info(f"⚠️ 未指定模型，使用默认模型: {model_name}")
 
             logger.info(f"🔍 [DashScope 测试] 使用模型: {model_name}")
 
-            # 使用阿里云百炼的OpenAI兼容接口
-            url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+            url = f"{normalized_base_url}/chat/completions"
+            logger.info(f"🔍 [DashScope 测试] 使用地址: {url}")
 
             headers = {
                 "Content-Type": "application/json",
@@ -3689,18 +3707,20 @@ class ConfigService:
             data = {
                 "model": model_name,
                 "messages": [
-                    {"role": "user", "content": "你好，请简单介绍一下你自己。"}
+                    {"role": "user", "content": "请回复ok"}
                 ],
-                "max_tokens": 50,
-                "temperature": 0.1
+                "max_tokens": 8,
+                "temperature": 0.0
             }
 
-            response = requests.post(url, json=data, headers=headers, timeout=10)
+            # Coding Plan 专属接口响应可能比通用兼容接口慢，放宽读取超时避免误判。
+            request_timeout = (10, 30) if 'coding.dashscope.aliyuncs.com' in normalized_base_url else 10
+            response = requests.post(url, json=data, headers=headers, timeout=request_timeout)
 
             if response.status_code == 200:
                 result = response.json()
                 if "choices" in result and len(result["choices"]) > 0:
-                    content = result["choices"][0]["message"]["content"]
+                    content = result["choices"][0]["message"].get("content")
                     if content and len(content.strip()) > 0:
                         return {
                             "success": True,
@@ -3717,9 +3737,13 @@ class ConfigService:
                         "message": f"{display_name} API响应格式异常"
                     }
             else:
+                error_detail = response.text.strip()
+                if len(error_detail) > 300:
+                    error_detail = error_detail[:300] + '...'
+                logger.warning(f"⚠️ [DashScope 测试] 失败响应: {error_detail}")
                 return {
                     "success": False,
-                    "message": f"{display_name} API测试失败: HTTP {response.status_code}"
+                    "message": f"{display_name} API测试失败: HTTP {response.status_code}" + (f" - {error_detail}" if error_detail else "")
                 }
 
         except Exception as e:
@@ -3773,9 +3797,13 @@ class ConfigService:
                         "message": f"{display_name} API响应格式异常"
                     }
             else:
+                error_detail = response.text.strip()
+                if len(error_detail) > 300:
+                    error_detail = error_detail[:300] + '...'
+                logger.warning(f"⚠️ [DashScope 测试] 失败响应: {error_detail}")
                 return {
                     "success": False,
-                    "message": f"{display_name} API测试失败: HTTP {response.status_code}"
+                    "message": f"{display_name} API测试失败: HTTP {response.status_code}" + (f" - {error_detail}" if error_detail else "")
                 }
 
         except Exception as e:
@@ -3827,9 +3855,13 @@ class ConfigService:
                         "message": f"{display_name} API响应格式异常"
                     }
             else:
+                error_detail = response.text.strip()
+                if len(error_detail) > 300:
+                    error_detail = error_detail[:300] + '...'
+                logger.warning(f"⚠️ [DashScope 测试] 失败响应: {error_detail}")
                 return {
                     "success": False,
-                    "message": f"{display_name} API测试失败: HTTP {response.status_code}"
+                    "message": f"{display_name} API测试失败: HTTP {response.status_code}" + (f" - {error_detail}" if error_detail else "")
                 }
 
         except Exception as e:
@@ -3881,9 +3913,13 @@ class ConfigService:
                         "message": f"{display_name} API响应格式异常"
                     }
             else:
+                error_detail = response.text.strip()
+                if len(error_detail) > 300:
+                    error_detail = error_detail[:300] + '...'
+                logger.warning(f"⚠️ [DashScope 测试] 失败响应: {error_detail}")
                 return {
                     "success": False,
-                    "message": f"{display_name} API测试失败: HTTP {response.status_code}"
+                    "message": f"{display_name} API测试失败: HTTP {response.status_code}" + (f" - {error_detail}" if error_detail else "")
                 }
 
         except Exception as e:
