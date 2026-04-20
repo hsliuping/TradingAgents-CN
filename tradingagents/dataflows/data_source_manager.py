@@ -1369,7 +1369,7 @@ class DataSourceManager:
             for col in volume_columns:
                 if col in data.columns:
                     logger.info(f"✅ 找到成交量列: {col}")
-                    return data[col].sum()
+                    return data[col].iloc[-1]  # 返回当日成交量，而非sum()
 
             # 如果都没找到，记录警告并返回0
             logger.warning(f"⚠️ 未找到成交量列，可用列: {list(data.columns)}")
