@@ -18,7 +18,7 @@
 ³ Tauric Research
 
 **资源**:
-- 📄 [英文原版 PDF](../../paper/TradingAgents_paper.pdf)
+- 📄 [英文原版 PDF](/research-papers/TradingAgents_paper.pdf)
 - 📄 [中文翻译版](../../paper/TradingAgents_论文中文版.md)
 - 💻 [项目地址](https://github.com/TauricResearch/TradingAgents)
 

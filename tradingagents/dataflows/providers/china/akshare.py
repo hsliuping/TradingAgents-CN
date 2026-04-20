@@ -1011,30 +1011,125 @@ class AKShareProvider(BaseStockDataProvider):
             start_date_formatted = start_date.replace('-', '')
             end_date_formatted = end_date.replace('-', '')
 
-            # 获取历史数据
-            def fetch_historical_data():
-                return self.ak.stock_zh_a_hist(
-                    symbol=code,
-                    period=ak_period,
-                    start_date=start_date_formatted,
-                    end_date=end_date_formatted,
-                    adjust="qfq"  # 前复权
+            # 检查时间跨度，如果超过2年，分批获取
+            from datetime import datetime, timedelta
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+            days_diff = (end_dt - start_dt).days
+
+            # 如果时间跨度超过2年（730天），分批获取
+            if days_diff > 730:
+                logger.info(f"⚠️ {code} 时间跨度过大({days_diff}天)，分批获取数据...")
+                return await self._get_historical_data_in_batches(
+                    code, start_date, end_date, period
                 )
 
-            hist_df = await asyncio.to_thread(fetch_historical_data)
+            # 获取历史数据（带重试）
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    def fetch_historical_data():
+                        return self.ak.stock_zh_a_hist(
+                            symbol=code,
+                            period=ak_period,
+                            start_date=start_date_formatted,
+                            end_date=end_date_formatted,
+                            adjust="qfq"  # 前复权
+                        )
 
-            if hist_df is None or hist_df.empty:
-                logger.warning(f"⚠️ {code}历史数据为空")
-                return None
+                    hist_df = await asyncio.to_thread(fetch_historical_data)
 
-            # 标准化列名
-            hist_df = self._standardize_historical_columns(hist_df, code)
+                    if hist_df is None or hist_df.empty:
+                        logger.warning(f"⚠️ {code}历史数据为空")
+                        return None
 
-            logger.debug(f"✅ {code}历史数据获取成功: {len(hist_df)}条记录")
-            return hist_df
+                    # 标准化列名
+                    hist_df = self._standardize_historical_columns(hist_df, code)
+
+                    logger.debug(f"✅ {code}历史数据获取成功: {len(hist_df)}条记录")
+                    return hist_df
+
+                except Exception as retry_error:
+                    if attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 2  # 2秒、4秒、6秒
+                        logger.warning(f"⚠️ {code} 第{attempt + 1}次尝试失败，{wait_time}秒后重试: {retry_error}")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        raise
 
         except Exception as e:
-            logger.error(f"❌ 获取{code}历史数据失败: {e}")
+            error_msg = str(e)
+            if "Connection aborted" in error_msg or "RemoteDisconnected" in error_msg:
+                logger.error(f"❌ {code} 网络连接中断，建议稍后重试或减小时间范围")
+            else:
+                logger.error(f"❌ 获取{code}历史数据失败: {e}")
+            return None
+
+    async def _get_historical_data_in_batches(
+        self,
+        code: str,
+        start_date: str,
+        end_date: str,
+        period: str = "daily"
+    ) -> Optional[pd.DataFrame]:
+        """
+        分批获取历史数据（用于时间跨度过大的情况）
+
+        Args:
+            code: 股票代码
+            start_date: 开始日期 (YYYY-MM-DD)
+            end_date: 结束日期 (YYYY-MM-DD)
+            period: 周期
+
+        Returns:
+            合并后的历史数据DataFrame
+        """
+        from datetime import datetime, timedelta
+        import pandas as pd
+
+        try:
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+
+            # 每批获取1年的数据
+            batch_size_days = 365
+            all_data = []
+
+            current_start = start_dt
+            while current_start < end_dt:
+                current_end = min(current_start + timedelta(days=batch_size_days), end_dt)
+
+                batch_start_str = current_start.strftime('%Y-%m-%d')
+                batch_end_str = current_end.strftime('%Y-%m-%d')
+
+                logger.debug(f"📊 {code} 分批获取: {batch_start_str} 到 {batch_end_str}")
+
+                # 递归调用（不会再次触发分批，因为时间跨度<730天）
+                batch_df = await self.get_historical_data(
+                    code, batch_start_str, batch_end_str, period
+                )
+
+                if batch_df is not None and not batch_df.empty:
+                    all_data.append(batch_df)
+
+                # 批次间休眠，避免请求过快
+                await asyncio.sleep(1.0)
+
+                current_start = current_end + timedelta(days=1)
+
+            # 合并所有批次数据
+            if all_data:
+                merged_df = pd.concat(all_data, ignore_index=True)
+                # 去重并排序
+                merged_df = merged_df.drop_duplicates(subset=['date']).sort_values('date')
+                logger.info(f"✅ {code} 分批获取完成: 共{len(merged_df)}条记录")
+                return merged_df
+            else:
+                logger.warning(f"⚠️ {code} 分批获取未获得任何数据")
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ {code} 分批获取失败: {e}")
             return None
 
     def _standardize_historical_columns(self, df: pd.DataFrame, code: str) -> pd.DataFrame:
