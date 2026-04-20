@@ -91,6 +91,28 @@ const routes: RouteRecordRaw[] = [
       }
     ]
   },
+  {
+    path: '/dianjin',
+    name: 'Dianjin',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '点金术',
+      icon: 'MagicStick',
+      requiresAuth: true,
+      transition: 'slide-up'
+    },
+    children: [
+      {
+        path: '',
+        name: 'DianjinHome',
+        component: () => import('@/views/Dianjin/index.vue'),
+        meta: {
+          title: '点金术',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
 
   {
     path: '/favorites',
@@ -151,6 +173,62 @@ const routes: RouteRecordRaw[] = [
           title: '文章详情',
           requiresAuth: false
         }
+      }
+    ]
+  },
+  {
+    path: '/market',
+    name: 'Market',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    redirect: '/market/overview',
+    meta: {
+      title: '市场',
+      icon: 'DataAnalysis',
+      requiresAuth: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: 'overview',
+        name: 'MarketOverview',
+        component: () => import('@/views/Market/MarketOverview.vue'),
+        meta: { title: '市场概览', requiresAuth: true }
+      },
+      {
+        path: 'headlines',
+        name: 'MarketHeadlines',
+        component: () => import('@/views/Market/Headlines.vue'),
+        meta: { title: '资讯头条', requiresAuth: true }
+      },
+      {
+        path: 'mainline',
+        name: 'MainlineWatch',
+        component: () => import('@/views/Market/MainlineWatch.vue'),
+        meta: { title: '主线观察', requiresAuth: true }
+      },
+      {
+        path: 'recommendations',
+        name: 'RecommendedStocks',
+        component: () => import('@/views/Market/RecommendedStocks.vue'),
+        meta: { title: '推荐股票', requiresAuth: true }
+      },
+      {
+        path: 'morning',
+        name: 'MorningForecast',
+        component: () => import('@/views/Market/MorningForecast.vue'),
+        meta: { title: '早盘预测', requiresAuth: true }
+      },
+      {
+        path: 'evening',
+        name: 'EveningSummary',
+        component: () => import('@/views/Market/EveningSummary.vue'),
+        meta: { title: '晚间总结', requiresAuth: true }
+      },
+      {
+        path: 'calendar',
+        name: 'InvestmentCalendar',
+        component: () => import('@/views/Market/InvestmentCalendar.vue'),
+        meta: { title: '投资日历', requiresAuth: true }
       }
     ]
   },
@@ -356,6 +434,17 @@ const routes: RouteRecordRaw[] = [
       title: '关于',
       icon: 'InfoFilled',
       requiresAuth: false, // 关于页面不需要认证
+      transition: 'fade'
+    }
+  },
+  {
+    path: '/docs/usage',
+    name: 'UsageGuide',
+    component: () => import('@/views/Docs/UsageGuide.vue'),
+    meta: {
+      title: '使用文档',
+      hideInMenu: true,
+      requiresAuth: false,
       transition: 'fade'
     }
   },

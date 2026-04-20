@@ -50,6 +50,18 @@ export interface NewsSyncResponse {
   max_news_per_source: number
 }
 
+export interface NewsAnalysisRequest {
+  title: string
+  content: string
+  model_name?: string
+}
+
+export interface NewsAnalysisResponse {
+  analysis: string
+  model_name?: string
+  model_provider?: string
+}
+
 /**
  * 新闻API
  */
@@ -60,8 +72,8 @@ export const newsApi = {
    * @param limit 返回数量限制
    * @param hours_back 回溯小时数
    */
-  async getLatestNews(symbol?: string, limit: number = 10, hours_back: number = 24) {
-    const params: any = { limit, hours_back }
+  async getLatestNews(symbol?: string, limit: number = 10, hours_back: number = 24, skip: number = 0) {
+    const params: any = { limit, hours_back, skip }
     if (symbol) {
       params.symbol = symbol
     }
@@ -93,6 +105,10 @@ export const newsApi = {
       hours_back,
       max_news_per_source
     })
+  },
+
+  async analyzeNews(payload: NewsAnalysisRequest) {
+    return ApiClient.post<NewsAnalysisResponse>('/api/news-data/analyze', payload)
   }
 }
 

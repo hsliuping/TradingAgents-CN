@@ -368,52 +368,20 @@
 
     <!-- 联系我们 -->
     <div class="contact-section">
-      <div class="section-header">
+      <!-- <div class="section-header">
         <h2 class="section-title">联系我们</h2>
         <p class="section-subtitle">获取支持、反馈问题或加入社区讨论</p>
-      </div>
+      </div> -->
 
       <div class="contact-grid">
-        <div class="contact-card">
-          <div class="contact-icon email">
-            <el-icon><Message /></el-icon>
-          </div>
-          <h4>邮箱联系</h4>
-          <p>hsliup@163.com</p>
-          <span class="contact-desc">技术支持和商务合作</span>
-        </div>
-
-        <div class="contact-card">
-          <div class="contact-icon qq">
-            <el-icon><ChatDotRound /></el-icon>
-          </div>
-          <h4>QQ交流群</h4>
-          <p>187537480</p>
-          <span class="contact-desc">用户交流和问题讨论</span>
-        </div>
-
-        <div class="contact-card">
-          <div class="contact-icon wechat">
-            <el-icon><ChatDotRound /></el-icon>
-          </div>
-          <h4>微信公众号</h4>
-          <p>TradingAgents-CN</p>
-          <span class="contact-desc">最新动态和使用教程</span>
-        </div>
-
         <div class="contact-card">
           <div class="contact-icon docs">
             <el-icon><Document /></el-icon>
           </div>
           <h4>使用文档</h4>
-          <p>
-            <a href="https://mp.weixin.qq.com/s/ppsYiBncynxlsfKFG8uEbw"
-               target="_blank"
-               rel="noopener noreferrer"
-               class="doc-link">
-              查看详细文档
-            </a>
-          </p>
+          <div class="doc-actions">
+            <el-button type="primary" @click="viewDocumentation">打开文档</el-button>
+          </div>
           <span class="contact-desc">完整的使用指南和API文档</span>
         </div>
       </div>
@@ -439,8 +407,6 @@ import {
   Document,
   Monitor,
   Setting,
-  Message,
-  ChatDotRound,
   Cpu,
   Star,
   Link,
@@ -455,7 +421,7 @@ const goToAnalysis = () => {
 }
 
 const viewDocumentation = () => {
-  window.open('https://mp.weixin.qq.com/s/ppsYiBncynxlsfKFG8uEbw', '_blank')
+  router.push('/docs/usage')
 }
 </script>
 
@@ -1167,16 +1133,12 @@ const viewDocumentation = () => {
           font-size: 16px;
           font-weight: 500;
           color: #1a202c;
+        }
 
-          .doc-link {
-            color: var(--el-color-primary);
-            text-decoration: none;
-            font-weight: 500;
-
-            &:hover {
-              text-decoration: underline;
-            }
-          }
+        .doc-actions {
+          margin: 0 0 12px 0;
+          display: flex;
+          justify-content: center;
         }
 
         .contact-desc {

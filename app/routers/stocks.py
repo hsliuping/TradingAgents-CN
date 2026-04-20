@@ -6,16 +6,23 @@
 """
 from typing import Optional, Dict, Any, List, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from datetime import datetime, timedelta
+import asyncio
+import time
 import logging
 import re
 
 from app.routers.auth_db import get_current_user
 from app.core.database import get_mongo_db
 from app.core.response import ok
+from app.services.favorites_service import FavoritesService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
+
+_MARKET_OVERVIEW_CACHE: Dict[str, Any] = {"ts": 0.0, "data": None}
+_MARKET_OVERVIEW_TTL = 60
 
 
 def _zfill_code(code: str) -> str:
@@ -58,6 +65,869 @@ def _detect_market_and_code(code: str) -> Tuple[str, str]:
     # A股：6位数字
     if re.match(r'^\d{6}$', code):
         return ('CN', code)
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            s = value.strip().replace(",", "")
+            if s.endswith("%"):
+                s = s[:-1]
+            if s == "" or s == "-":
+                return None
+            return float(s)
+        return float(value)
+    except Exception:
+        return None
+
+
+def _pick_col(columns: List[str], candidates: List[str]) -> Optional[str]:
+    for c in candidates:
+        if c in columns:
+            return c
+    return None
+
+
+def _pick_col_contains(columns: List[str], candidates: List[str]) -> Optional[str]:
+    for col in columns:
+        col_str = str(col)
+        for c in candidates:
+            if c in col_str:
+                return col
+    return None
+
+
+def _format_amount(value: Optional[float]) -> str:
+    if value is None:
+        return "-"
+    try:
+        v = float(value)
+    except Exception:
+        return "-"
+    if abs(v) >= 1e8:
+        return f"{v / 1e8:.2f}亿"
+    if abs(v) >= 1e4:
+        return f"{v / 1e4:.2f}万"
+    return f"{v:.2f}"
+
+
+def _normalize_date_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if "-" in s:
+        s = s.replace("-", "")
+    if len(s) >= 8:
+        return s[:8]
+    return s.zfill(8)
+
+
+async def _fetch_cn_index_cards() -> List[Dict[str, Any]]:
+    def _task() -> List[Dict[str, Any]]:
+        try:
+            import akshare as ak
+            df = ak.stock_zh_index_spot_em()
+            if df is None or getattr(df, "empty", True):
+                return []
+            cols = list(df.columns)
+            name_col = _pick_col(cols, ["指数名称", "名称", "指数"])
+            value_col = _pick_col(cols, ["最新价", "最新", "最新价(元)"])
+            chg_col = _pick_col(cols, ["涨跌幅", "涨跌幅(%)", "涨幅"])
+            open_col = _pick_col(cols, ["开盘", "今开"])
+            high_col = _pick_col(cols, ["最高", "最高价"])
+            low_col = _pick_col(cols, ["最低", "最低价"])
+            vol_col = _pick_col(cols, ["成交额", "成交额(元)", "成交额(万元)", "成交量"])
+            if not name_col or not value_col:
+                return []
+            target_names = ["上证指数", "深证成指", "创业板指"]
+            rows = df[df[name_col].isin(target_names)]
+            if rows is None or getattr(rows, "empty", True):
+                rows = df.head(6)
+            items: List[Dict[str, Any]] = []
+            for _, row in rows.iterrows():
+                name = str(row.get(name_col)).strip()
+                items.append({
+                    "name": name,
+                    "market": "A股",
+                    "value": _safe_float(row.get(value_col)),
+                    "chg": _safe_float(row.get(chg_col)),
+                    "open": _safe_float(row.get(open_col)),
+                    "high": _safe_float(row.get(high_col)),
+                    "low": _safe_float(row.get(low_col)),
+                    "volume": _safe_float(row.get(vol_col)),
+                    "source": "akshare"
+                })
+            return items
+        except Exception as e:
+            logger.error(f"获取A股指数失败: {e}")
+            return []
+    return await asyncio.to_thread(_task)
+
+
+async def _fetch_trade_dates() -> List[str]:
+    def _task() -> List[str]:
+        try:
+            import akshare as ak
+            df = _akshare_call(getattr(ak, "tool_trade_date_hist_sina", None), name="交易日历")
+            if df is None or getattr(df, "empty", True):
+                return []
+            col = _pick_col(list(df.columns), ["trade_date", "交易日期", "日期"])
+            if not col:
+                return []
+            dates = []
+            for v in df[col].tolist():
+                d = _normalize_date_str(v)
+                if d:
+                    dates.append(d)
+            dates = sorted(set(dates))
+            today = datetime.now().strftime("%Y%m%d")
+            dates = [d for d in dates if d <= today]
+            return dates[-10:] if len(dates) >= 10 else dates
+        except Exception as e:
+            logger.error(f"获取交易日失败: {e}")
+            return []
+    return await asyncio.to_thread(_task)
+
+
+async def _fetch_sector_cards(limit: int = 12) -> List[Dict[str, Any]]:
+    def _task() -> List[Dict[str, Any]]:
+        try:
+            import akshare as ak
+            df = _akshare_call(getattr(ak, "stock_board_industry_spot_em", None), name="行业板块")
+            if df is None or getattr(df, "empty", True):
+                return []
+            cols = list(df.columns)
+            name_col = _pick_col(cols, ["板块名称", "行业名称", "名称"])
+            chg_col = _pick_col(cols, ["涨跌幅", "涨跌幅(%)", "涨幅"])
+            vol_col = _pick_col(cols, ["成交额", "成交额(元)", "成交额(万元)", "成交量"])
+            if not name_col:
+                return []
+            items: List[Dict[str, Any]] = []
+            for _, row in df.head(limit).iterrows():
+                items.append({
+                    "name": str(row.get(name_col)).strip(),
+                    "chg": _safe_float(row.get(chg_col)),
+                    "volume": _safe_float(row.get(vol_col)),
+                    "source": "akshare"
+                })
+            return items
+        except Exception as e:
+            logger.error(f"获取行业板块失败: {e}")
+            return []
+    return await asyncio.to_thread(_task)
+
+
+async def _fetch_market_metrics() -> List[Dict[str, Any]]:
+    def _task() -> List[Dict[str, Any]]:
+        try:
+            import akshare as ak
+            df = _akshare_call(getattr(ak, "stock_zh_a_spot_em", None), name="市场指标")
+            if df is None or getattr(df, "empty", True):
+                return []
+            cols = list(df.columns)
+            amt_col = _pick_col(cols, ["成交额", "成交额(元)", "成交额(万元)"])
+            pe_col = _pick_col(cols, ["市盈率-动态", "市盈率(动)", "市盈率", "pe"])
+            turn_col = _pick_col(cols, ["换手率", "换手率(%)"])
+            pct_col = _pick_col(cols, ["涨跌幅", "涨跌幅(%)", "涨幅"])
+            total_amount = None
+            if amt_col:
+                total_amount = df[amt_col].apply(_safe_float).dropna().sum()
+            avg_pe = None
+            if pe_col:
+                pe_series = df[pe_col].apply(_safe_float).dropna()
+                avg_pe = pe_series.mean() if not pe_series.empty else None
+            avg_turn = None
+            if turn_col:
+                turn_series = df[turn_col].apply(_safe_float).dropna()
+                avg_turn = turn_series.mean() if not turn_series.empty else None
+            up = None
+            down = None
+            if pct_col:
+                pct_series = df[pct_col].apply(_safe_float).dropna()
+                up = int((pct_series > 0).sum())
+                down = int((pct_series < 0).sum())
+            metrics = [
+                {"name": "市场成交额", "value": _format_amount(total_amount), "desc": "全市场成交额"},
+                {"name": "平均市盈率", "value": f"{avg_pe:.2f}" if avg_pe is not None else "-", "desc": "动态市盈率均值"},
+                {"name": "平均换手率", "value": f"{avg_turn:.2f}%" if avg_turn is not None else "-", "desc": "全市场换手率均值"},
+                {"name": "涨跌家数", "value": f"{up}/{down}" if up is not None and down is not None else "-", "desc": "上涨/下跌家数"}
+            ]
+            return metrics
+        except Exception as e:
+            logger.error(f"获取市场指标失败: {e}")
+            return []
+    return await asyncio.to_thread(_task)
+
+
+async def _fetch_market_metrics_from_db() -> List[Dict[str, Any]]:
+    try:
+        db = get_mongo_db()
+        coll = db["market_quotes"]
+        pipeline = [
+            {"$project": {"amount": 1, "pct_chg": 1}},
+            {"$group": {
+                "_id": None,
+                "total_amount": {"$sum": {"$ifNull": ["$amount", 0]}},
+                "up": {"$sum": {"$cond": [{"$gt": ["$pct_chg", 0]}, 1, 0]}},
+                "down": {"$sum": {"$cond": [{"$lt": ["$pct_chg", 0]}, 1, 0]}}
+            }}
+        ]
+        docs = await coll.aggregate(pipeline).to_list(length=1)
+        if not docs:
+            return []
+        doc = docs[0]
+        total_amount = doc.get("total_amount")
+        up = doc.get("up")
+        down = doc.get("down")
+        metrics = [
+            {"name": "市场成交额", "value": _format_amount(total_amount), "desc": "全市场成交额"},
+            {"name": "平均市盈率", "value": "-", "desc": "动态市盈率均值"},
+            {"name": "平均换手率", "value": "-", "desc": "全市场换手率均值"},
+            {"name": "涨跌家数", "value": f"{up}/{down}" if up is not None and down is not None else "-", "desc": "上涨/下跌家数"}
+        ]
+        return metrics
+    except Exception as e:
+        logger.error(f"从数据库获取市场指标失败: {e}")
+        return []
+
+
+async def _with_timeout(coro, timeout: float, default: Any, name: str):
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except Exception as e:
+        detail = str(e).strip() or type(e).__name__
+        logger.warning(f"{name}请求超时或失败: {detail}")
+        return default
+
+
+async def _fetch_sector_cards_from_db(limit: int = 12) -> List[Dict[str, Any]]:
+    try:
+        db = get_mongo_db()
+        quotes = await db["market_quotes"].find(
+            {"code": {"$regex": r"^\d{6}$"}},
+            {"code": 1, "pct_chg": 1, "amount": 1, "_id": 0}
+        ).sort("amount", -1).limit(300).to_list(length=300)
+        if not quotes:
+            return []
+        codes = [q.get("code") for q in quotes if q.get("code")]
+        basics = await db["stock_basic_info"].find(
+            {"code": {"$in": codes}},
+            {"code": 1, "industry": 1, "_id": 0}
+        ).to_list(length=len(codes))
+        industry_map = {str(b.get("code")).zfill(6): b.get("industry") for b in basics if b.get("industry")}
+        agg: Dict[str, Dict[str, Any]] = {}
+        for q in quotes:
+            code = str(q.get("code")).zfill(6)
+            industry = industry_map.get(code)
+            if not industry:
+                continue
+            item = agg.setdefault(industry, {"sum_amount": 0.0, "sum_chg": 0.0, "count": 0})
+            item["sum_amount"] += float(q.get("amount") or 0)
+            pct = _safe_float(q.get("pct_chg")) or 0.0
+            item["sum_chg"] += pct
+            item["count"] += 1
+        items: List[Dict[str, Any]] = []
+        for name, val in agg.items():
+            count = val.get("count", 0) or 1
+            items.append({
+                "name": name,
+                "chg": val["sum_chg"] / count,
+                "volume": val["sum_amount"],
+                "source": "database"
+            })
+        items.sort(key=lambda x: x.get("volume") or 0, reverse=True)
+        return items[:limit]
+    except Exception as e:
+        logger.error(f"从数据库获取行业板块失败: {e}")
+        return []
+
+
+def _akshare_call(func, date_value: Optional[str] = None, name: str = ""):
+    if func is None:
+        return None
+    def _do_call():
+        if date_value:
+            try:
+                return func(date=date_value)
+            except TypeError:
+                return func(date_value)
+        return func()
+    try:
+        return _do_call()
+    except Exception as e:
+        msg = str(e)
+        prefix = f"{name} " if name else ""
+        if "最近 30 个交易日" in msg:
+            logger.warning(f"AKShare调用受限: {prefix}{msg}")
+            return None
+        if "RemoteDisconnected" in msg or "Connection aborted" in msg:
+            try:
+                time.sleep(0.6)
+                return _do_call()
+            except Exception as e2:
+                logger.warning(f"AKShare调用失败: {prefix}{e2}")
+                return None
+        logger.error(f"AKShare调用失败: {prefix}{e}")
+        return None
+
+
+async def _fetch_limit_data() -> Dict[str, Any]:
+    def _task() -> Dict[str, Any]:
+        import akshare as ak
+        return {
+            "today_up": _akshare_call(getattr(ak, "stock_zt_pool_em", None), name="涨停池"),
+            "today_down": _akshare_call(getattr(ak, "stock_zt_pool_dtgc_em", None), name="跌停池"),
+            "today_break": _akshare_call(getattr(ak, "stock_zt_pool_zbgc_em", None), name="炸板池"),
+            "today_lianban": _akshare_call(getattr(ak, "stock_zt_pool_lgb_em", None), name="连板池"),
+        }
+    return await asyncio.to_thread(_task)
+
+
+async def _fetch_limit_data_with_date(trade_date: str) -> Dict[str, Any]:
+    def _task() -> Dict[str, Any]:
+        import akshare as ak
+        return {
+            "up": _akshare_call(getattr(ak, "stock_zt_pool_em", None), trade_date, "涨停池"),
+            "down": _akshare_call(getattr(ak, "stock_zt_pool_dtgc_em", None), trade_date, "跌停池"),
+            "break": _akshare_call(getattr(ak, "stock_zt_pool_zbgc_em", None), trade_date, "炸板池"),
+            "lianban": _akshare_call(getattr(ak, "stock_zt_pool_lgb_em", None), trade_date, "连板池")
+        }
+    return await asyncio.to_thread(_task)
+
+
+async def _fetch_wencai_limitup(trade_date: str):
+    def _task():
+        try:
+            import pywencai
+        except Exception as e:
+            logger.warning(f"⚠️ wencai 未安装或导入失败: {e}")
+            return None
+        try:
+            base_query = f"非ST,{trade_date}涨停"
+            query_reason = f"{base_query},涨停原因类别,涨停概念,概念板块"
+            logger.info(f"📡 wencai 查询涨停(带概念字段): {query_reason}")
+            df_reason = pywencai.get(
+                query=query_reason,
+                sort_key="成交金额",
+                sort_order="desc",
+                loop=True
+            )
+            if df_reason is not None and not getattr(df_reason, "empty", True):
+                cols_reason = list(df_reason.columns)
+                logger.info(f"✅ wencai 返回 {len(df_reason)} 行, 列数 {len(cols_reason)}")
+                logger.info(f"🔍 wencai 列预览: {cols_reason[:12]}")
+                if _find_reason_col(cols_reason):
+                    return df_reason
+                logger.warning("⚠️ wencai 返回未包含概念列，尝试基础查询")
+            else:
+                logger.warning("⚠️ wencai 带概念字段查询返回空数据，尝试基础查询")
+            logger.info(f"📡 wencai 查询涨停(基础): {base_query}")
+            df_base = pywencai.get(
+                query=base_query,
+                sort_key="成交金额",
+                sort_order="desc",
+                loop=True
+            )
+            if df_base is None or getattr(df_base, "empty", True):
+                logger.warning("⚠️ wencai 基础查询返回空数据")
+                return None
+            cols_base = list(df_base.columns)
+            logger.info(f"✅ wencai 基础返回 {len(df_base)} 行, 列数 {len(cols_base)}")
+            logger.info(f"🔍 wencai 基础列预览: {cols_base[:12]}")
+            return df_base
+        except Exception:
+            logger.exception("❌ wencai 查询涨停失败")
+            return None
+    return await asyncio.to_thread(_task)
+
+
+def _df_count(df) -> int:
+    if df is None:
+        return 0
+    try:
+        return 0 if getattr(df, "empty", True) else int(len(df))
+    except Exception:
+        return 0
+
+
+def _extract_codes(df) -> List[str]:
+    if df is None or getattr(df, "empty", True):
+        return []
+    col = _pick_col(list(df.columns), ["代码", "股票代码", "code", "symbol"])
+    if not col:
+        return []
+    codes = []
+    for v in df[col].tolist():
+        s = str(v).strip()
+        if s:
+            codes.append(s.zfill(6))
+    return codes
+
+
+def _extract_names(df) -> Dict[str, str]:
+    if df is None or getattr(df, "empty", True):
+        return {}
+    cols = list(df.columns)
+    code_col = _pick_col(cols, ["代码", "股票代码", "code", "symbol"])
+    name_col = _pick_col(cols, ["名称", "股票简称", "股票名称", "简称", "名字", "name"])
+    if not code_col or not name_col:
+        return {}
+    mapping: Dict[str, str] = {}
+    for _, row in df.iterrows():
+        code = str(row.get(code_col, "")).strip().zfill(6)
+        name = str(row.get(name_col, "")).strip()
+        if code and name:
+            mapping[code] = name
+    return mapping
+
+
+def _build_stock_list(df, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    if df is None or getattr(df, "empty", True):
+        return []
+    codes = _extract_codes(df)
+    if not codes:
+        return []
+    name_map = _extract_names(df)
+    items = []
+    for code in codes:
+        name = name_map.get(code) or code
+        items.append({"code": code, "name": name})
+        if limit and len(items) >= limit:
+            break
+    return items
+
+
+def _build_stock_list_by_codes(df, codes: List[str], limit: Optional[int] = None, include_reason: bool = False) -> List[Dict[str, Any]]:
+    if df is None or getattr(df, "empty", True):
+        return []
+    if not codes:
+        return []
+    code_col = _pick_col(list(df.columns), ["代码", "股票代码", "code", "symbol"])
+    if not code_col:
+        return []
+    code_set = {str(c).zfill(6) for c in codes if c}
+    if not code_set:
+        return []
+    name_map = _extract_names(df)
+    reason_col = _find_reason_col(list(df.columns)) if include_reason else None
+    items: List[Dict[str, Any]] = []
+    for _, row in df.iterrows():
+        code = str(row.get(code_col, "")).strip().zfill(6)
+        if code not in code_set:
+            continue
+        item: Dict[str, Any] = {"code": code, "name": name_map.get(code) or code}
+        if reason_col:
+            item["reason"] = str(row.get(reason_col, "")).strip()
+        items.append(item)
+        if limit and len(items) >= limit:
+            break
+    return items
+
+
+async def _count_sector_limitup(limit_up_df) -> List[Dict[str, Any]]:
+    if limit_up_df is None or getattr(limit_up_df, "empty", True):
+        return []
+    cols = list(limit_up_df.columns)
+    industry_col = _pick_col(cols, ["所属行业", "行业", "板块"])
+    code_col = _pick_col(cols, ["代码", "股票代码", "code", "symbol"])
+    if industry_col:
+        code_names = _extract_names(limit_up_df)
+        sector_map: Dict[str, Dict[str, Any]] = {}
+        for _, row in limit_up_df.iterrows():
+            sector = str(row.get(industry_col, "")).strip()
+            if not sector:
+                continue
+            code = str(row.get(code_col or "", "")).strip().zfill(6)
+            name = code_names.get(code, "")
+            if sector not in sector_map:
+                sector_map[sector] = {"name": sector, "count": 0, "stocks": []}
+            sector_map[sector]["count"] += 1
+            if code and name:
+                sector_map[sector]["stocks"].append({"code": code, "name": name})
+        items = list(sector_map.values())
+        items.sort(key=lambda x: x["count"], reverse=True)
+        return items[:20]
+    codes = _extract_codes(limit_up_df)
+    if not codes:
+        return []
+    try:
+        db = get_mongo_db()
+        basics = await db["stock_basic_info"].find(
+            {"code": {"$in": codes}},
+            {"code": 1, "industry": 1, "name": 1, "_id": 0}
+        ).to_list(length=len(codes))
+        industry_map = {str(b.get("code")).zfill(6): b.get("industry") for b in basics if b.get("industry")}
+        name_map = {str(b.get("code")).zfill(6): b.get("name") for b in basics if b.get("name")}
+        sector_map: Dict[str, Dict[str, Any]] = {}
+        for code in codes:
+            industry = industry_map.get(code)
+            if not industry:
+                continue
+            if industry not in sector_map:
+                sector_map[industry] = {"name": industry, "count": 0, "stocks": []}
+            sector_map[industry]["count"] += 1
+            name = name_map.get(code)
+            if name:
+                sector_map[industry]["stocks"].append({"code": code, "name": name})
+        items = list(sector_map.values())
+        items.sort(key=lambda x: x["count"], reverse=True)
+        return items[:20]
+    except Exception as e:
+        logger.error(f"统计板块涨停失败: {e}")
+        return []
+
+
+async def _fetch_limit_snapshot(trade_dates: List[str], index: int, strict: bool = False) -> Dict[str, Any]:
+    date_value = trade_dates[index] if trade_dates and len(trade_dates) > abs(index) else None
+    if not date_value:
+        if strict:
+            return {}
+        current = await _fetch_limit_data()
+        return {
+            "up": current.get("today_up"),
+            "down": current.get("today_down"),
+            "break": current.get("today_break"),
+            "lianban": current.get("today_lianban")
+        }
+    snapshot = await _fetch_limit_data_with_date(date_value)
+    if snapshot and any(_df_count(snapshot.get(k)) > 0 for k in ["up", "down", "break", "lianban"]):
+        return snapshot
+    if len(trade_dates) >= 3 and index == -2:
+        prev_snapshot = await _fetch_limit_data_with_date(trade_dates[-3])
+        if prev_snapshot and any(_df_count(prev_snapshot.get(k)) > 0 for k in ["up", "down", "break", "lianban"]):
+            return prev_snapshot
+    if strict:
+        return {}
+    current = await _fetch_limit_data()
+    if current:
+        return {
+            "up": current.get("today_up"),
+            "down": current.get("today_down"),
+            "break": current.get("today_break"),
+            "lianban": current.get("today_lianban")
+        }
+    return snapshot
+
+
+def _limit_progression(lianban_df) -> List[Dict[str, Any]]:
+    if lianban_df is None or getattr(lianban_df, "empty", True):
+        return []
+    col = _pick_col(list(lianban_df.columns), ["连板数", "连板", "连板高度", "涨停板数"])
+    if not col:
+        return []
+    counts: Dict[int, int] = {2: 0, 3: 0, 4: 0, 5: 0, 6: 0}
+    for v in lianban_df[col].tolist():
+        try:
+            n = int(float(v))
+        except Exception:
+            continue
+        if n in counts:
+            counts[n] += 1
+    return [
+        {"from": 1, "to": 2, "count": counts[2]},
+        {"from": 2, "to": 3, "count": counts[3]},
+        {"from": 3, "to": 4, "count": counts[4]},
+        {"from": 4, "to": 5, "count": counts[5]},
+        {"from": 5, "to": 6, "count": counts[6]},
+    ]
+
+
+def _limit_promotion_rates(prev_df, curr_df) -> List[Dict[str, Any]]:
+    if prev_df is None or getattr(prev_df, "empty", True):
+        return []
+    if curr_df is None or getattr(curr_df, "empty", True):
+        return []
+    prev_col = _pick_col(list(prev_df.columns), ["连板数", "连板", "连板高度", "连续涨停天数", "涨停板数"])
+    curr_col = _pick_col(list(curr_df.columns), ["连板数", "连板", "连板高度", "连续涨停天数", "涨停板数"])
+    if not prev_col or not curr_col:
+        return []
+    prev_series = prev_df[prev_col].apply(_safe_float).fillna(1)
+    curr_series = curr_df[curr_col].apply(_safe_float).fillna(1)
+    try:
+        max_days = int(max(prev_series.max() or 0, curr_series.max() or 0))
+    except Exception:
+        max_days = 0
+    if max_days <= 0:
+        return []
+    code_col = _pick_col(list(curr_df.columns), ["代码", "股票代码", "code", "symbol"])
+    name_map = _extract_names(curr_df)
+    items: List[Dict[str, Any]] = []
+    for days in range(1, max_days + 1):
+        prev_count = int((prev_series == days).sum())
+        curr_mask = curr_series == (days + 1)
+        curr_count = int(curr_mask.sum())
+        rate = (curr_count / prev_count) if prev_count else None
+        stocks = []
+        if code_col and curr_count:
+            for _, row in curr_df.loc[curr_mask].head(30).iterrows():
+                code = str(row.get(code_col, "")).strip().zfill(6)
+                name = name_map.get(code, "")
+                if code:
+                    stocks.append({"code": code, "name": name})
+        items.append({
+            "from": days,
+            "to": days + 1,
+            "success": curr_count,
+            "total": prev_count,
+            "rate": rate,
+            "stocks": stocks
+        })
+    return items
+
+
+def _find_reason_col(cols: List[str]) -> Optional[str]:
+    if not cols:
+        return None
+    priority = ["涨停原因", "涨停概念", "原因类别", "涨停原因类别", "概念板块", "所属概念", "概念", "题材", "热点", "属性"]
+    for key in priority:
+        for c in cols:
+            if key in str(c):
+                return c
+    return None
+
+
+def _limitup_concepts(df) -> Dict[str, int]:
+    if df is None or getattr(df, "empty", True):
+        return {}
+    col = _find_reason_col(list(df.columns))
+    if not col:
+        logger.warning(f"⚠️ 未找到概念列，列名预览: {list(df.columns)[:12]}")
+        return {}
+    logger.info(f"🎯 概念统计列: {col}")
+    counter: Dict[str, int] = {}
+    for v in df[col].tolist():
+        if v is None:
+            continue
+        parts = re.split(r"[+|、，,;/；\s]+", str(v))
+        for p in parts:
+            t = str(p).strip()
+            if not t or t.lower() in {"nan", "none"}:
+                continue
+            counter[t] = counter.get(t, 0) + 1
+    logger.info(f"📈 概念统计结果数: {len(counter)}")
+    return counter
+
+
+def _limitup_concepts_with_stocks(df, limit_per_concept: int = 50) -> Dict[str, Dict[str, Any]]:
+    if df is None or getattr(df, "empty", True):
+        return {}
+    cols = list(df.columns)
+    reason_col = _find_reason_col(cols)
+    if not reason_col:
+        logger.warning(f"⚠️ 未找到概念列，列名预览: {list(df.columns)[:12]}")
+        return {}
+    code_col = _pick_col(cols, ["代码", "股票代码", "code", "symbol"])
+    name_col = _pick_col(cols, ["名称", "股票简称", "股票名称", "简称", "名字", "name"])
+    result: Dict[str, Dict[str, Any]] = {}
+    for _, row in df.iterrows():
+        reason_val = row.get(reason_col)
+        if reason_val is None:
+            continue
+        code = str(row.get(code_col, "")).strip().zfill(6) if code_col else ""
+        name = str(row.get(name_col, "")).strip() if name_col else ""
+        parts = re.split(r"[+|、，,;/；\s]+", str(reason_val))
+        for p in parts:
+            concept = str(p).strip()
+            if not concept or concept.lower() in {"nan", "none"}:
+                continue
+            bucket = result.get(concept)
+            if not bucket:
+                bucket = {"count": 0, "stocks": [], "code_set": set()}
+                result[concept] = bucket
+            bucket["count"] += 1
+            if code:
+                code_set = bucket["code_set"]
+                if code not in code_set and len(bucket["stocks"]) < limit_per_concept:
+                    code_set.add(code)
+                    bucket["stocks"].append({"code": code, "name": name or code})
+    for item in result.values():
+        item.pop("code_set", None)
+    logger.info(f"📈 概念统计结果数: {len(result)}")
+    return result
+
+
+def _merge_limitup_concepts(
+    today_df,
+    prev_df,
+    limit: int = 12,
+    include_stocks: bool = False,
+    stock_limit: int = 50
+) -> List[Dict[str, Any]]:
+    if include_stocks:
+        today_map = _limitup_concepts_with_stocks(today_df, stock_limit)
+        prev_map = _limitup_concepts_with_stocks(prev_df, stock_limit)
+        keys = set(today_map) | set(prev_map)
+        items = []
+        for k in keys:
+            today_item = today_map.get(k) or {}
+            prev_item = prev_map.get(k) or {}
+            today = today_item.get("count", 0)
+            prev = prev_item.get("count", 0)
+            items.append({
+                "concept": k,
+                "today": today,
+                "yesterday": prev,
+                "change": today - prev,
+                "today_stocks": today_item.get("stocks", []),
+                "yesterday_stocks": prev_item.get("stocks", [])
+            })
+        items.sort(key=lambda x: (x["today"], x["change"]), reverse=True)
+        return items[:limit]
+    today_map = _limitup_concepts(today_df)
+    prev_map = _limitup_concepts(prev_df)
+    keys = set(today_map) | set(prev_map)
+    items = []
+    for k in keys:
+        today = today_map.get(k, 0)
+        prev = prev_map.get(k, 0)
+        items.append({
+            "concept": k,
+            "today": today,
+            "yesterday": prev,
+            "change": today - prev
+        })
+    items.sort(key=lambda x: (x["today"], x["change"]), reverse=True)
+    return items[:limit]
+
+
+def _limitup_continuous_list(df, limit: int = 200) -> List[Dict[str, Any]]:
+    if df is None or getattr(df, "empty", True):
+        return []
+    cols = list(df.columns)
+    days_col = _pick_col(cols, ["连板数", "连板", "连板高度", "连续涨停天数", "涨停板数"]) or _pick_col_contains(
+        cols, ["连板数", "连板", "连板高度", "连续涨停天数", "涨停板数"]
+    )
+    code_col = _pick_col(cols, ["代码", "股票代码", "code", "symbol"])
+    name_col = _pick_col(cols, ["名称", "股票简称", "股票名称", "简称", "名字", "name"])
+    price_col = _pick_col(cols, ["最新价", "最新", "收盘价", "价格", "现价"])
+    reason_col = _find_reason_col(cols)
+    first_time_col = _pick_col(cols, ["首次涨停时间", "首次封板时间", "首次涨停"]) or _pick_col_contains(
+        cols, ["首次涨停时间", "首次封板时间", "首次涨停"]
+    )
+    last_time_col = _pick_col(cols, ["最终涨停时间", "最终封板时间", "最后封板时间"]) or _pick_col_contains(
+        cols, ["最终涨停时间", "最终封板时间", "最后封板时间"]
+    )
+    order_vol_col = _pick_col(cols, ["涨停封单量", "封单量"]) or _pick_col_contains(cols, ["涨停封单量", "封单量"])
+    order_amt_col = _pick_col(cols, ["涨停封单额", "封单额"]) or _pick_col_contains(cols, ["涨停封单额", "封单额"])
+    type_col = _pick_col(cols, ["涨停类型", "类型"]) or _pick_col_contains(cols, ["涨停类型", "类型"])
+    if not code_col:
+        return []
+    df_sorted = df
+    if days_col:
+        try:
+            df_sorted = df_sorted.copy()
+            df_sorted[days_col] = df_sorted[days_col].apply(_safe_float).fillna(1)
+            df_sorted = df_sorted.sort_values(days_col, ascending=False)
+        except Exception:
+            df_sorted = df
+    items: List[Dict[str, Any]] = []
+    for _, row in df_sorted.head(limit).iterrows():
+        code = str(row.get(code_col, "")).strip().zfill(6)
+        if not code:
+            continue
+        item: Dict[str, Any] = {"code": code}
+        if name_col:
+            item["name"] = str(row.get(name_col, "")).strip()
+        if days_col:
+            item["days"] = int((_safe_float(row.get(days_col)) or 1))
+        if price_col:
+            item["price"] = _safe_float(row.get(price_col))
+        if reason_col:
+            item["reason"] = str(row.get(reason_col, "")).strip()
+        if first_time_col:
+            item["first_time"] = str(row.get(first_time_col, "")).strip()
+        if last_time_col:
+            item["last_time"] = str(row.get(last_time_col, "")).strip()
+        if order_vol_col:
+            item["order_volume"] = _safe_float(row.get(order_vol_col))
+        if order_amt_col:
+            item["order_amount"] = _safe_float(row.get(order_amt_col))
+        if type_col:
+            item["limit_type"] = str(row.get(type_col, "")).strip()
+        items.append(item)
+    return items
+
+
+def _promotion_rates_with_reason(prev_df, curr_df) -> List[Dict[str, Any]]:
+    if prev_df is None or getattr(prev_df, "empty", True):
+        return []
+    if curr_df is None or getattr(curr_df, "empty", True):
+        return []
+    prev_col = _pick_col(list(prev_df.columns), ["连板数", "连板", "连板高度", "连续涨停天数", "涨停板数"])
+    curr_col = _pick_col(list(curr_df.columns), ["连板数", "连板", "连板高度", "连续涨停天数", "涨停板数"])
+    if not prev_col or not curr_col:
+        return []
+    prev_series = prev_df[prev_col].apply(_safe_float).fillna(1)
+    curr_series = curr_df[curr_col].apply(_safe_float).fillna(1)
+    try:
+        max_days = int(max(prev_series.max() or 0, curr_series.max() or 0))
+    except Exception:
+        max_days = 0
+    if max_days <= 0:
+        return []
+    code_col = _pick_col(list(curr_df.columns), ["代码", "股票代码", "code", "symbol"])
+    name_map = _extract_names(curr_df)
+    reason_col = _find_reason_col(list(curr_df.columns))
+    items: List[Dict[str, Any]] = []
+    for days in range(1, max_days + 1):
+        prev_count = int((prev_series == days).sum())
+        curr_mask = curr_series == (days + 1)
+        curr_count = int(curr_mask.sum())
+        rate = (curr_count / prev_count) if prev_count else None
+        stocks = []
+        if code_col and curr_count:
+            for _, row in curr_df.loc[curr_mask].head(30).iterrows():
+                code = str(row.get(code_col, "")).strip().zfill(6)
+                name = name_map.get(code, "")
+                if code:
+                    stock: Dict[str, Any] = {"code": code, "name": name}
+                    if reason_col:
+                        stock["reason"] = str(row.get(reason_col, "")).strip()
+                    stocks.append(stock)
+        items.append({
+            "from": days,
+            "to": days + 1,
+            "success": curr_count,
+            "total": prev_count,
+            "rate": rate,
+            "stocks": stocks
+        })
+    return items
+
+
+async def _fetch_watchlist_from_db(limit: int = 6) -> List[Dict[str, Any]]:
+    try:
+        db = get_mongo_db()
+        quotes = await db["market_quotes"].find(
+            {"code": {"$regex": r"^\d{6}$"}},
+            {"code": 1, "pct_chg": 1, "close": 1, "amount": 1, "_id": 0}
+        ).sort("amount", -1).limit(limit).to_list(length=limit)
+        if not quotes:
+            return []
+        codes = [q.get("code") for q in quotes if q.get("code")]
+        basics = await db["stock_basic_info"].find(
+            {"code": {"$in": codes}},
+            {"code": 1, "name": 1, "_id": 0}
+        ).to_list(length=len(codes))
+        name_map = {str(b.get("code")).zfill(6): b.get("name") for b in basics if b.get("name")}
+        items = []
+        for q in quotes:
+            code = str(q.get("code")).zfill(6)
+            items.append({
+                "code": code,
+                "name": name_map.get(code, code),
+                "price": q.get("close"),
+                "chg": q.get("pct_chg"),
+                "volume": q.get("amount")
+            })
+        return items
+    except Exception as e:
+        logger.error(f"从数据库获取热门关注失败: {e}")
+        return []
 
     # 默认当作A股处理
     return ('CN', _zfill_code(code))
@@ -747,4 +1617,407 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
                 "items": []
             }
             return ok(data)
+
+
+@router.get("/market/overview", response_model=dict)
+async def get_market_overview(
+    sector_limit: int = Query(12, description="行业板块数量"),
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        now_ts = time.time()
+        cache_data = _MARKET_OVERVIEW_CACHE.get("data")
+        cache_ts = _MARKET_OVERVIEW_CACHE.get("ts", 0.0)
+        if cache_data and (now_ts - cache_ts) < _MARKET_OVERVIEW_TTL:
+            return ok(cache_data)
+
+        sectors_task = _with_timeout(_fetch_sector_cards(sector_limit), 8.0, [], "板块")
+        metrics_task = _with_timeout(_fetch_market_metrics(), 12.0, [], "指标")
+        sectors, metrics = await asyncio.gather(sectors_task, metrics_task)
+        if not metrics:
+            metrics = await _fetch_market_metrics_from_db()
+        if not metrics:
+            metrics = [
+                {"name": "市场成交额", "value": "-", "desc": "全市场成交额"},
+                {"name": "平均市盈率", "value": "-", "desc": "动态市盈率均值"},
+                {"name": "平均换手率", "value": "-", "desc": "全市场换手率均值"},
+                {"name": "涨跌家数", "value": "-", "desc": "上涨/下跌家数"}
+            ]
+        if not sectors:
+            sectors = await _fetch_sector_cards_from_db(sector_limit)
+
+        trade_dates = await _with_timeout(_fetch_trade_dates(), 6.0, [], "交易日")
+        current_trade_date = trade_dates[-1] if trade_dates else None
+        prev_trade_date = trade_dates[-2] if len(trade_dates) >= 2 else None
+        if current_trade_date:
+            limit_today_task = _with_timeout(_fetch_limit_data_with_date(current_trade_date), 12.0, {}, "涨跌停池")
+        else:
+            limit_today_task = _with_timeout(_fetch_limit_data(), 12.0, {}, "涨跌停池")
+        if prev_trade_date:
+            limit_prev_task = _with_timeout(_fetch_limit_data_with_date(prev_trade_date), 12.0, {}, "昨日涨跌停池")
+        else:
+            limit_prev_task = _with_timeout(_fetch_limit_data_with_date(current_trade_date), 12.0, {}, "昨日涨跌停池") if current_trade_date else _with_timeout(_fetch_limit_data(), 12.0, {}, "昨日涨跌停池")
+        limit_today, limit_prev = await asyncio.gather(limit_today_task, limit_prev_task)
+        if limit_today and "today_up" in limit_today:
+            limit_today = {
+                "up": limit_today.get("today_up"),
+                "down": limit_today.get("today_down"),
+                "break": limit_today.get("today_break"),
+                "lianban": limit_today.get("today_lianban")
+            }
+        if limit_prev and "today_up" in limit_prev:
+            limit_prev = {
+                "up": limit_prev.get("today_up"),
+                "down": limit_prev.get("today_down"),
+                "break": limit_prev.get("today_break"),
+                "lianban": limit_prev.get("today_lianban")
+            }
+        if current_trade_date and _df_count(limit_today.get("up")) == 0:
+            logger.warning("⚠️ 按日期涨停池为空，回退实时涨停池")
+            limit_today_fallback = await _with_timeout(_fetch_limit_data(), 12.0, {}, "涨跌停池")
+            if limit_today_fallback and "today_up" in limit_today_fallback:
+                limit_today = {
+                    "up": limit_today_fallback.get("today_up"),
+                    "down": limit_today_fallback.get("today_down"),
+                    "break": limit_today_fallback.get("today_break"),
+                    "lianban": limit_today_fallback.get("today_lianban")
+                }
+
+        today_up = _df_count(limit_today.get("up"))
+        today_down = _df_count(limit_today.get("down"))
+        prev_up = _df_count(limit_prev.get("up"))
+        prev_down = _df_count(limit_prev.get("down"))
+        break_count = _df_count(limit_today.get("break"))
+        lianban_today = _df_count(limit_today.get("lianban"))
+
+        yesterday_limitup_codes = _extract_codes(limit_prev.get("up"))
+        yesterday_up_total = len(yesterday_limitup_codes)
+        yesterday_up_today_up = 0
+        if yesterday_limitup_codes:
+            db = get_mongo_db()
+            docs = await db["market_quotes"].find(
+                {"code": {"$in": yesterday_limitup_codes}},
+                {"code": 1, "pct_chg": 1, "_id": 0}
+            ).to_list(length=len(yesterday_limitup_codes))
+            for d in docs:
+                if (_safe_float(d.get("pct_chg")) or 0) > 0:
+                    yesterday_up_today_up += 1
+
+        lianban_upgraded = 0
+        if yesterday_limitup_codes:
+            today_up_codes = set(_extract_codes(limit_today.get("up")))
+            lianban_upgraded = len([c for c in yesterday_limitup_codes if c in today_up_codes])
+
+        break_total = break_count + today_up
+        sentiment_up_list = _build_stock_list(limit_prev.get("up"), 300)
+        sentiment_today_up_list = _build_stock_list(limit_today.get("up"), 300)
+        sentiment_break_list = _build_stock_list(limit_today.get("break"), 300)
+        break_pool = {s["code"]: s for s in sentiment_break_list}
+        limit_break_stocks = list(break_pool.values())
+        today_up_pool = {s["code"]: s for s in sentiment_today_up_list}
+        limit_up_today_stocks = list(today_up_pool.values())
+        sentiment = {
+            "yesterday_limit_up_up_rate": (yesterday_up_today_up / yesterday_up_total) if yesterday_up_total else None,
+            "lianban_upgrade_rate": (lianban_upgraded / yesterday_up_total) if yesterday_up_total else None,
+            "limit_break_rate": (break_count / break_total) if break_total else None
+        }
+        sentiment_detail = {
+            "yesterday_limit_up_up_rate": {"success": yesterday_up_today_up, "total": yesterday_up_total, "stocks": limit_up_today_stocks},
+            "lianban_upgrade_rate": {"success": lianban_upgraded, "total": yesterday_up_total, "stocks": limit_up_today_stocks},
+            "limit_break_rate": {"success": break_count, "total": break_total, "stocks": limit_break_stocks}
+        }
+        limit_change = {
+            "today_up": today_up,
+            "today_down": today_down,
+            "yesterday_up": prev_up,
+            "yesterday_down": prev_down,
+            "up_change": today_up - prev_up,
+            "down_change": today_down - prev_down
+        }
+        limit_progression = _limit_progression(limit_today.get("lianban"))
+        promotion_rates = _limit_promotion_rates(limit_prev.get("up"), limit_today.get("up"))
+        limitup_concepts = _merge_limitup_concepts(limit_today.get("up"), limit_prev.get("up"))
+        if not limitup_concepts and current_trade_date:
+            logger.warning("⚠️ 涨停概念为空，尝试 wencai 概念兜底")
+            wencai_today = await _fetch_wencai_limitup(current_trade_date)
+            wencai_prev = await _fetch_wencai_limitup(prev_trade_date) if prev_trade_date else None
+            limitup_concepts = _merge_limitup_concepts(wencai_today, wencai_prev)
+        logger.info(f"📊 概念条目数: {len(limitup_concepts)}")
+        sector_limitup = await _count_sector_limitup(limit_today.get("up"))
+        if not sector_limitup and current_trade_date:
+            logger.warning("⚠️ 板块涨停分布为空，尝试 wencai 兜底")
+            wencai_today = await _fetch_wencai_limitup(current_trade_date)
+            if wencai_today is not None:
+                sector_limitup = await _count_sector_limitup(wencai_today)
+        logger.info(f"🏷️ 板块涨停条目数: {len(sector_limitup)}")
+
+        favorites_service = FavoritesService()
+        favorites = await favorites_service.get_user_favorites(current_user.get("id", ""))
+        watchlist = []
+        watchlist_source = "favorites"
+        for item in favorites:
+            watchlist.append({
+                "code": item.get("stock_code"),
+                "name": item.get("stock_name"),
+                "price": item.get("current_price"),
+                "chg": item.get("change_percent"),
+                "volume": item.get("volume")
+            })
+        if not watchlist:
+            watchlist = await _fetch_watchlist_from_db(6)
+            watchlist_source = "market"
+
+        industries = [s.get("name") for s in sectors if s.get("name")]
+        filters = {
+            "industries": industries[:12],
+            "markets": ["A股"],
+            "risks": ["低风险", "中风险", "高风险"]
+        }
+
+        data = {
+            "updated_at": datetime.utcnow().isoformat(),
+            "indices": [],
+            "sectors": sectors,
+            "watchlist": watchlist,
+            "watchlist_source": watchlist_source,
+            "metrics": metrics,
+            "filters": filters,
+            "sentiment": sentiment,
+            "limit_change": limit_change,
+            "limit_progression": limit_progression,
+            "promotion_rates": promotion_rates,
+            "limitup_concepts": limitup_concepts,
+            "sentiment_detail": sentiment_detail,
+            "sector_limitup": sector_limitup
+        }
+        if sectors or metrics or watchlist or sentiment or limit_change or limit_progression or sector_limitup:
+            _MARKET_OVERVIEW_CACHE["ts"] = time.time()
+            _MARKET_OVERVIEW_CACHE["data"] = data
+        return ok(data)
+    except Exception as e:
+        logger.error(f"获取市场概览失败: {e}", exc_info=True)
+        cache_data = _MARKET_OVERVIEW_CACHE.get("data")
+        if cache_data:
+            return ok(cache_data)
+        data = {
+            "updated_at": datetime.utcnow().isoformat(),
+            "indices": [],
+            "sectors": [],
+            "watchlist": [],
+            "watchlist_source": "favorites",
+            "metrics": [
+                {"name": "市场成交额", "value": "-", "desc": "全市场成交额"},
+                {"name": "平均市盈率", "value": "-", "desc": "动态市盈率均值"},
+                {"name": "平均换手率", "value": "-", "desc": "全市场换手率均值"},
+                {"name": "涨跌家数", "value": "-", "desc": "上涨/下跌家数"}
+            ],
+            "filters": {"industries": [], "markets": ["A股"], "risks": ["低风险", "中风险", "高风险"]},
+            "sentiment": {
+                "yesterday_limit_up_up_rate": None,
+                "lianban_upgrade_rate": None,
+                "limit_break_rate": None
+            },
+            "sentiment_detail": {
+                "yesterday_limit_up_up_rate": {"success": 0, "total": 0},
+                "lianban_upgrade_rate": {"success": 0, "total": 0},
+                "limit_break_rate": {"success": 0, "total": 0}
+            },
+            "limit_change": {
+                "today_up": 0,
+                "today_down": 0,
+                "yesterday_up": 0,
+                "yesterday_down": 0,
+                "up_change": 0,
+                "down_change": 0
+            },
+            "limit_progression": [],
+            "promotion_rates": [],
+            "limitup_concepts": [],
+            "sector_limitup": []
+        }
+        return ok(data)
+
+
+@router.get("/market/limitup-analysis", response_model=dict)
+async def get_limitup_analysis(
+    date: Optional[str] = Query(None, description="交易日YYYY-MM-DD"),
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        trade_dates = await _with_timeout(_fetch_trade_dates(), 6.0, [], "交易日")
+        if not trade_dates:
+            return ok({
+                "selected_date": None,
+                "previous_date": None,
+                "sentiment": {
+                    "yesterday_up": {"success": 0, "total": 0, "rate": None},
+                    "lianban": {"success": 0, "total": 0, "rate": None},
+                    "break": {"success": 0, "total": 0, "rate": None}
+                },
+                "sentiment_detail": {
+                    "yesterday_up": {"success": 0, "total": 0, "stocks": []},
+                    "lianban": {"success": 0, "total": 0, "stocks": []},
+                    "break": {"success": 0, "total": 0}
+                },
+                "limit_change": {
+                    "selected_up": 0,
+                    "selected_down": 0,
+                    "previous_up": 0,
+                    "previous_down": 0,
+                    "up_change": 0,
+                    "down_change": 0
+                },
+                "concepts": [],
+                "continuous": [],
+                "promotion_rates": []
+            })
+        target = _normalize_date_str(date) if date else trade_dates[-1]
+        if target not in trade_dates:
+            candidates = [d for d in trade_dates if d <= target]
+            target = candidates[-1] if candidates else trade_dates[-1]
+        idx = trade_dates.index(target) if target in trade_dates else len(trade_dates) - 1
+        prev = trade_dates[idx - 1] if idx > 0 else None
+
+        selected_task = _with_timeout(_fetch_limit_data_with_date(target), 12.0, {}, "涨跌停池")
+        if prev:
+            prev_task = _with_timeout(_fetch_limit_data_with_date(prev), 12.0, {}, "昨日涨跌停池")
+        else:
+            prev_task = _with_timeout(_fetch_limit_data_with_date(target), 12.0, {}, "昨日涨跌停池")
+        selected, previous = await asyncio.gather(selected_task, prev_task)
+        if target == trade_dates[-1] and _df_count(selected.get("up")) == 0:
+            logger.warning("⚠️ 按日期涨停池为空，回退实时涨停池")
+            selected_fallback = await _with_timeout(_fetch_limit_data(), 12.0, {}, "涨跌停池")
+            if selected_fallback and "today_up" in selected_fallback:
+                selected = {
+                    "up": selected_fallback.get("today_up"),
+                    "down": selected_fallback.get("today_down"),
+                    "break": selected_fallback.get("today_break"),
+                    "lianban": selected_fallback.get("today_lianban")
+                }
+
+        today_up = _df_count(selected.get("up"))
+        today_down = _df_count(selected.get("down"))
+        prev_up = _df_count(previous.get("up"))
+        prev_down = _df_count(previous.get("down"))
+        break_count = _df_count(selected.get("break"))
+        break_total = break_count + today_up
+
+        yesterday_limitup_codes = _extract_codes(previous.get("up"))
+        yesterday_up_total = len(yesterday_limitup_codes)
+        today_up_codes = set(_extract_codes(selected.get("up")))
+        lianban_upgraded = len([c for c in yesterday_limitup_codes if c in today_up_codes]) if yesterday_limitup_codes else 0
+
+        yesterday_up_today_up = 0
+        yesterday_up_today_total = 0
+        yesterday_up_stocks: List[Dict[str, Any]] = []
+        if target == trade_dates[-1] and yesterday_limitup_codes:
+            db = get_mongo_db()
+            docs = await db["market_quotes"].find(
+                {"code": {"$in": yesterday_limitup_codes}},
+                {"code": 1, "pct_chg": 1, "_id": 0}
+            ).to_list(length=len(yesterday_limitup_codes))
+            yesterday_up_today_total = len(docs)
+            up_codes: List[str] = []
+            for d in docs:
+                if (_safe_float(d.get("pct_chg")) or 0) > 0:
+                    yesterday_up_today_up += 1
+                    code = str(d.get("code") or "").zfill(6)
+                    if code:
+                        up_codes.append(code)
+            if up_codes:
+                basics = await db["stock_basic_info"].find(
+                    {"code": {"$in": up_codes}},
+                    {"code": 1, "name": 1, "_id": 0}
+                ).to_list(length=len(up_codes))
+                name_map = {str(b.get("code")).zfill(6): b.get("name") for b in basics if b.get("name")}
+                yesterday_up_stocks = [{"code": code, "name": name_map.get(code) or code} for code in up_codes]
+
+        sentiment = {
+            "yesterday_up": {
+                "success": yesterday_up_today_up,
+                "total": yesterday_up_today_total,
+                "rate": (yesterday_up_today_up / yesterday_up_today_total) if yesterday_up_today_total else None
+            },
+            "lianban": {
+                "success": lianban_upgraded,
+                "total": yesterday_up_total,
+                "rate": (lianban_upgraded / yesterday_up_total) if yesterday_up_total else None
+            },
+            "break": {
+                "success": break_count,
+                "total": break_total,
+                "rate": (break_count / break_total) if break_total else None
+            }
+        }
+
+        lianban_codes = [c for c in yesterday_limitup_codes if c in today_up_codes] if yesterday_limitup_codes else []
+        lianban_stocks = _build_stock_list_by_codes(selected.get("up"), lianban_codes, 60, True)
+        sentiment_detail = {
+            "yesterday_up": {"success": yesterday_up_today_up, "total": yesterday_up_today_total, "stocks": yesterday_up_stocks},
+            "lianban": {"success": lianban_upgraded, "total": yesterday_up_total, "stocks": lianban_stocks},
+            "break": {"success": break_count, "total": break_total}
+        }
+
+        concepts = _merge_limitup_concepts(selected.get("up"), previous.get("up"), 10, True)
+        if not concepts:
+            concepts = _merge_limitup_concepts(selected.get("lianban"), previous.get("lianban"), 10, True)
+        if not concepts:
+            logger.warning("⚠️ 涨停概念为空，尝试 wencai 概念兜底")
+            wencai_today = await _fetch_wencai_limitup(target)
+            wencai_prev = await _fetch_wencai_limitup(prev) if prev else None
+            concepts = _merge_limitup_concepts(wencai_today, wencai_prev, 10, True)
+        logger.info(f"📊 概念条目数: {len(concepts)}")
+        continuous = _limitup_continuous_list(selected.get("lianban")) or _limitup_continuous_list(selected.get("up"))
+        promotion_rates = _promotion_rates_with_reason(previous.get("up"), selected.get("up"))
+
+        def _format_date(val: Optional[str]) -> Optional[str]:
+            if not val:
+                return None
+            return f"{val[:4]}-{val[4:6]}-{val[6:8]}"
+
+        data = {
+            "selected_date": _format_date(target),
+            "previous_date": _format_date(prev),
+            "sentiment": sentiment,
+            "sentiment_detail": sentiment_detail,
+            "limit_change": {
+                "selected_up": today_up,
+                "selected_down": today_down,
+                "previous_up": prev_up,
+                "previous_down": prev_down,
+                "up_change": today_up - prev_up,
+                "down_change": today_down - prev_down
+            },
+            "concepts": concepts,
+            "continuous": continuous,
+            "promotion_rates": promotion_rates
+        }
+        return ok(data)
+    except Exception as e:
+        logger.error(f"获取涨停分析失败: {e}", exc_info=True)
+        return ok({
+            "selected_date": None,
+            "previous_date": None,
+            "sentiment": {
+                "yesterday_up": {"success": 0, "total": 0, "rate": None},
+                "lianban": {"success": 0, "total": 0, "rate": None},
+                "break": {"success": 0, "total": 0, "rate": None}
+            },
+            "sentiment_detail": {
+                "yesterday_up": {"success": 0, "total": 0, "stocks": []},
+                "lianban": {"success": 0, "total": 0, "stocks": []},
+                "break": {"success": 0, "total": 0}
+            },
+            "limit_change": {
+                "selected_up": 0,
+                "selected_down": 0,
+                "previous_up": 0,
+                "previous_down": 0,
+                "up_change": 0,
+                "down_change": 0
+            },
+            "concepts": [],
+            "continuous": [],
+            "promotion_rates": []
+        })
 

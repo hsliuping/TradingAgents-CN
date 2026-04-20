@@ -119,7 +119,3 @@ If helpful, please add screenshots.
 - 🐳 [Docker部署指南](../docs/DOCKER_GUIDE.md)
 - 🚀 [快速开始指南](../README.md#🚀-启动应用)
 - ⚙️ [配置说明](../README.md#配置api密钥)
-
-**社区支持 / Community Support:**
-- 💬 [GitHub Discussions](https://github.com/hsliuping/TradingAgents-CN/discussions)
-- 📧 邮箱: hsliup@163.com

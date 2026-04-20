@@ -1,4 +1,4 @@
-<template>
+<!-- <template>
   <div class="app-footer">
     <div class="footer-content">
       <div class="copyright">
@@ -10,7 +10,7 @@
       </div>
     </div>
   </div>
-</template>
+</template> -->
 
 <script setup lang="ts">
 // Footer组件逻辑

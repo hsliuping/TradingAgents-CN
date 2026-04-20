@@ -282,13 +282,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **修订版本号**: Bug修复和小优化
 - **预览版**: `-preview` 后缀表示预览版本
 
-
-### 反馈渠道
-
-- **GitHub Issues**: https://github.com/hsliuping/TradingAgents-CN/issues
-- **QQ群**: 782124367
-- **邮箱**: hsliup@163.com
-
 ---
 
 **发布日期**: 2025-10-15  

@@ -436,14 +436,6 @@ command: redis-server --appendonly yes --save 60 1000
 
 ---
 
-## 🤝 获取帮助
-
-- **GitHub Issues**: https://github.com/hsliuping/TradingAgents-CN/issues
-- **QQ群**: 782124367
-- **邮箱**: hsliup@163.com
-
----
-
 **版本**: v1.0.0-preview  
 **更新日期**: 2025-10-15  
 **维护者**: TradingAgents-CN Team

@@ -553,7 +553,8 @@ class NewsDataService:
         self,
         symbol: str = None,
         limit: int = 10,
-        hours_back: int = 24
+        hours_back: int = 24,
+        skip: int = 0
     ) -> List[Dict[str, Any]]:
         """
         获取最新新闻
@@ -572,6 +573,7 @@ class NewsDataService:
             symbol=symbol,
             start_time=start_time,
             limit=limit,
+            skip=skip,
             sort_by="publish_time",
             sort_order=-1
         )

@@ -124,9 +124,3 @@
 
 如果您想为文档做出贡献，请参考 [贡献指南](../CONTRIBUTING.md)。
 
-## 联系我们
-
-- **GitHub Issues**: [提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
-- **邮箱**: hsliup@163.com
-- 项目ＱＱ群：782124367
-- **原项目**: [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)

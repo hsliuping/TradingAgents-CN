@@ -3,13 +3,43 @@
     :default-active="activeMenu"
     :collapse="appStore.sidebarCollapsed"
     :unique-opened="true"
-    router
     class="sidebar-menu"
+    @select="handleMenuSelect"
   >
+    
     <el-menu-item index="/dashboard">
       <el-icon><Odometer /></el-icon>
       <template #title>仪表板</template>
     </el-menu-item>
+    <el-menu-item index="/market/overview">
+      <el-icon><DataAnalysis /></el-icon>
+      <template #title>市场概览</template>
+    </el-menu-item>
+    <el-menu-item index="/market/calendar">
+      <el-icon><Calendar /></el-icon>
+      <template #title>投资日历</template>
+    </el-menu-item>
+    <el-menu-item index="/market/headlines">
+      <el-icon><Bell /></el-icon>
+      <template #title>资讯头条</template>
+    </el-menu-item>
+    <el-menu-item index="/market/mainline">
+      <el-icon><TrendCharts /></el-icon>
+      <template #title>主线观察</template>
+    </el-menu-item>
+    <el-menu-item index="/market/recommendations">
+      <el-icon><Star /></el-icon>
+      <template #title>推荐股票</template>
+    </el-menu-item>
+    <el-menu-item index="/market/morning">
+      <el-icon><Sunny /></el-icon>
+      <template #title>早盘预测</template>
+    </el-menu-item>
+    <el-menu-item index="/market/evening">
+      <el-icon><Moon /></el-icon>
+      <template #title>晚间总结</template>
+    </el-menu-item>
+
 
     <el-menu-item index="/learning">
       <el-icon><Reading /></el-icon>
@@ -35,6 +65,11 @@
     <el-menu-item index="/screening">
       <el-icon><Search /></el-icon>
       <template #title>股票筛选</template>
+    </el-menu-item>
+
+    <el-menu-item index="/dianjin">
+      <el-icon><MagicStick /></el-icon>
+      <template #title>点金术</template>
     </el-menu-item>
 
     <el-menu-item index="/favorites">
@@ -100,25 +135,46 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import {
   Odometer,
   Reading,
+  DataAnalysis,
   TrendCharts,
   Search,
+  MagicStick,
   Star,
   List,
   /* Document 移除：不再使用顶级分析报告菜单图标 */
   Setting,
   InfoFilled,
-  CreditCard
+  CreditCard,
+  Bell,
+  Sunny,
+  Moon,
+  Calendar
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
+const router = useRouter()
 const appStore = useAppStore()
 
 const activeMenu = computed(() => route.path)
+
+const handleMenuSelect = (index: string) => {
+  if (index === '/dianjin') {
+    router.push({
+      path: '/dianjin',
+      query: { refresh: String(Date.now()) }
+    })
+    return
+  }
+
+  if (route.fullPath !== index) {
+    router.push(index)
+  }
+}
 </script>
 
 <style lang="scss" scoped>

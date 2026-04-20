@@ -211,16 +211,6 @@ const modelConfig = {
 - [配置管理文档](./CONFIG_WIZARD.md) - 配置管理说明
 - [使用统计文档](./USAGE_STATISTICS_AND_PRICING.md) - 使用统计和成本分析
 
-## 📞 支持 / Support
-
-如有货币单位相关问题，请联系：
-
-For currency-related questions, please contact:
-
-- 📧 邮箱 / Email: hsliup@163.com
-- 💬 QQ群 / QQ Group: 782124367
-- 🌐 GitHub: https://github.com/hsliuping/TradingAgents-CN
-
 ---
 
 **最后更新 / Last Updated**: 2025年10月 / October 2025  

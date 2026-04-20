@@ -8,9 +8,6 @@ Copyright (c) 2025 hsliuping. All rights reserved.
 This software is proprietary and confidential. Unauthorized copying, distribution,
 or use of this software, via any medium, is strictly prohibited.
 本软件为专有和机密软件。严禁通过任何媒介未经授权复制、分发或使用本软件。
-
-For commercial licensing, please contact: hsliup@163.com
-商业许可咨询，请联系：hsliup@163.com
 """
 
 from fastapi import FastAPI, Request
@@ -28,7 +25,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
-from app.routers import auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
+from app.routers import auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs, calendar, dianjin
 from app.routers import sync as sync_router, multi_source_sync
 from app.routers import stocks as stocks_router
 from app.routers import stock_data as stock_data_router
@@ -569,6 +566,36 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📰 新闻数据同步已配置（仅自选股）: {settings.NEWS_SYNC_CRON}")
 
+        from app.services.calendar.scheduler_jobs import run_calendar_sync, run_calendar_preanalyze
+
+        async def run_invest_calendar_sync():
+            await run_calendar_sync(settings.CALENDAR_SYNC_DAYS_AHEAD)
+
+        async def run_invest_calendar_preanalyze():
+            await run_calendar_preanalyze(
+                days_ahead=settings.CALENDAR_PREANALYZE_DAYS_AHEAD,
+                min_importance=settings.CALENDAR_PREANALYZE_MIN_IMPORTANCE,
+                max_items=settings.CALENDAR_PREANALYZE_MAX_ITEMS,
+            )
+
+        scheduler.add_job(
+            run_invest_calendar_sync,
+            CronTrigger.from_crontab(settings.CALENDAR_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="invest_calendar_sync",
+            name="投资日历同步（Mock）",
+        )
+        if not settings.CALENDAR_SYNC_ENABLED:
+            scheduler.pause_job("invest_calendar_sync")
+
+        scheduler.add_job(
+            run_invest_calendar_preanalyze,
+            CronTrigger.from_crontab(settings.CALENDAR_PREANALYZE_CRON, timezone=settings.TIMEZONE),
+            id="invest_calendar_preanalyze",
+            name="投资日历预分析（队列）",
+        )
+        if not settings.CALENDAR_PREANALYZE_ENABLED:
+            scheduler.pause_job("invest_calendar_preanalyze")
+
         scheduler.start()
 
         # 设置调度器实例到服务中，以便API可以管理任务
@@ -688,6 +715,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 app.include_router(reports.router, tags=["reports"])
 app.include_router(screening.router, prefix="/api/screening", tags=["screening"])
+app.include_router(dianjin.router, prefix="/api/dianjin", tags=["dianjin"])
 app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
 app.include_router(favorites.router, prefix="/api", tags=["favorites"])
 app.include_router(stocks_router.router, prefix="/api", tags=["stocks"])
@@ -698,6 +726,7 @@ app.include_router(tags.router, prefix="/api", tags=["tags"])
 app.include_router(config.router, prefix="/api", tags=["config"])
 app.include_router(model_capabilities.router, tags=["model-capabilities"])
 app.include_router(usage_statistics.router, tags=["usage-statistics"])
+app.include_router(calendar.router, prefix="/api/market/calendar", tags=["calendar"])
 app.include_router(database.router, prefix="/api/system", tags=["database"])
 app.include_router(cache.router, tags=["cache"])
 app.include_router(operation_logs.router, prefix="/api/system", tags=["operation_logs"])

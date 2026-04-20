@@ -337,12 +337,6 @@ python scripts/prefetch_stock_data.py 000001 600519 AAPL
 - [API文档](./docs/api/)
 - [常见问题](./docs/faq/faq.md)
 
-## 🆘 获取帮助
-
-- **GitHub Issues**: [提交问题](https://github.com/hsliuping/TradingAgents-CN/issues)
-- **QQ群**: 782124367
-- **邮箱**: hsliup@163.com
-
 ---
 
 **🎉 祝您使用愉快！**

@@ -80,6 +80,209 @@ export interface NewsResponse {
   items: NewsItem[]
 }
 
+export interface MarketIndexItem {
+  name: string
+  market: string
+  value?: number
+  chg?: number
+  open?: number
+  high?: number
+  low?: number
+  volume?: number
+  source?: string
+}
+
+export interface MarketSectorItem {
+  name: string
+  chg?: number
+  volume?: number
+  source?: string
+}
+
+export interface MarketMetricItem {
+  name: string
+  value: string
+  desc: string
+}
+
+export interface MarketSentiment {
+  yesterday_limit_up_up_rate?: number | null
+  lianban_upgrade_rate?: number | null
+  limit_break_rate?: number | null
+}
+
+export interface MarketSentimentDetailItem {
+  success: number
+  total: number
+  stocks?: Array<{
+    code: string
+    name: string
+  }>
+}
+
+export interface MarketSentimentDetail {
+  yesterday_limit_up_up_rate?: MarketSentimentDetailItem
+  lianban_upgrade_rate?: MarketSentimentDetailItem
+  limit_break_rate?: MarketSentimentDetailItem
+}
+
+export interface MarketLimitChange {
+  today_up: number
+  today_down: number
+  yesterday_up: number
+  yesterday_down: number
+  up_change: number
+  down_change: number
+}
+
+export interface MarketLimitProgression {
+  from: number
+  to: number
+  count: number
+}
+
+export interface MarketLimitupConcept {
+  concept: string
+  today: number
+  yesterday: number
+  change: number
+}
+
+export interface MarketPromotionRate {
+  from: number
+  to: number
+  success: number
+  total: number
+  rate?: number | null
+  stocks?: Array<{
+    code: string
+    name: string
+  }>
+}
+
+export interface SectorLimitUpItem {
+  name: string
+  count: number
+  stocks?: Array<{
+    code: string
+    name: string
+  }>
+}
+
+export interface LimitupAnalysisSentimentItem {
+  success: number
+  total: number
+  rate?: number | null
+}
+
+export interface LimitupAnalysisSentimentDetailItem {
+  success: number
+  total: number
+  stocks?: Array<{
+    code: string
+    name?: string
+    reason?: string
+  }>
+}
+
+export interface LimitupAnalysisSentimentDetail {
+  yesterday_up: LimitupAnalysisSentimentDetailItem
+  lianban: LimitupAnalysisSentimentDetailItem
+  break: LimitupAnalysisSentimentDetailItem
+}
+
+export interface LimitupAnalysisLimitChange {
+  selected_up: number
+  selected_down: number
+  previous_up: number
+  previous_down: number
+  up_change: number
+  down_change: number
+}
+
+export interface LimitupAnalysisConceptItem {
+  concept: string
+  today: number
+  yesterday: number
+  change: number
+  today_stocks?: Array<{
+    code: string
+    name?: string
+  }>
+  yesterday_stocks?: Array<{
+    code: string
+    name?: string
+  }>
+}
+
+export interface LimitupAnalysisContinuousItem {
+  code: string
+  name?: string
+  days?: number
+  price?: number
+  reason?: string
+  first_time?: string
+  last_time?: string
+  order_volume?: number
+  order_amount?: number
+  limit_type?: string
+}
+
+export interface LimitupAnalysisPromotionRate {
+  from: number
+  to: number
+  success: number
+  total: number
+  rate?: number | null
+  stocks?: Array<{
+    code: string
+    name?: string
+    reason?: string
+  }>
+}
+
+export interface LimitupAnalysisResponse {
+  selected_date?: string | null
+  previous_date?: string | null
+  sentiment: {
+    yesterday_up: LimitupAnalysisSentimentItem
+    lianban: LimitupAnalysisSentimentItem
+    break: LimitupAnalysisSentimentItem
+  }
+  sentiment_detail?: LimitupAnalysisSentimentDetail
+  limit_change: LimitupAnalysisLimitChange
+  concepts: LimitupAnalysisConceptItem[]
+  continuous: LimitupAnalysisContinuousItem[]
+  promotion_rates: LimitupAnalysisPromotionRate[]
+}
+
+export interface MarketOverviewResponse {
+  updated_at: string
+  indices: MarketIndexItem[]
+  sectors: MarketSectorItem[]
+  watchlist: Array<{
+    code: string
+    name: string
+    price?: number
+    chg?: number
+    volume?: number
+  }>
+  watchlist_source?: 'favorites' | 'market'
+  metrics: MarketMetricItem[]
+  filters: {
+    industries: string[]
+    markets: string[]
+    risks: string[]
+  }
+  sentiment?: MarketSentiment
+  sentiment_detail?: MarketSentimentDetail
+  limit_change?: MarketLimitChange
+  limit_progression?: MarketLimitProgression[]
+  promotion_rates?: MarketPromotionRate[]
+  limitup_concepts?: MarketLimitupConcept[]
+  sector_limitup?: SectorLimitUpItem[]
+}
+
 export const stocksApi = {
   /**
    * 获取股票行情
@@ -117,6 +320,13 @@ export const stocksApi = {
    */
   async getNews(symbol: string, days = 30, limit = 50, includeAnnouncements = true) {
     return ApiClient.get<NewsResponse>(`/api/stocks/${symbol}/news`, { days, limit, include_announcements: includeAnnouncements })
+  },
+
+  async getMarketOverview(sectorLimit = 12) {
+    return ApiClient.get<MarketOverviewResponse>('/api/stocks/market/overview', { sector_limit: sectorLimit })
+  },
+
+  async getLimitupAnalysis(date?: string) {
+    return ApiClient.get<LimitupAnalysisResponse>('/api/stocks/market/limitup-analysis', { date })
   }
 }
-

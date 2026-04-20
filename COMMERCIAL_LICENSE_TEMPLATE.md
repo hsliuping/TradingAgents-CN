@@ -100,10 +100,3 @@
 **被许可方签字**: _________________ **日期**: _________
 
 ---
-
-## 联系信息
-
-**商业许可咨询 / Commercial License Inquiries**:
-- 邮箱 / Email: hsliup@163.com
-- GitHub: https://github.com/hsliuping/TradingAgents-CN
-- QQ群 / QQ Group: 782124367

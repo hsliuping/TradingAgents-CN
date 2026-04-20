@@ -12,10 +12,7 @@ contact_links:
     url: https://github.com/hsliuping/TradingAgents-CN/discussions
     about: 技术讨论、想法分享和社区交流 / Technical discussions, idea sharing and community communication
   
-  - name: 📧 邮件联系 / Email Contact
-    url: mailto:hsliup@163.com
-    about: 直接邮件联系项目维护者 / Direct email contact with project maintainer
-  
+ 
   - name: 🌟 源项目 / Original Project
     url: https://github.com/TauricResearch/TradingAgents
     about: 查看原始的TradingAgents项目 / View the original TradingAgents project

@@ -136,6 +136,19 @@ class Settings(BaseSettings):
     SSE_BATCH_POLL_INTERVAL_SECONDS: float = Field(default=2.0)
     SSE_BATCH_MAX_IDLE_SECONDS: int = Field(default=600)
 
+    CALENDAR_SYNC_ENABLED: bool = Field(default=True)
+    CALENDAR_SYNC_CRON: str = Field(default="*/30 * * * *")
+    CALENDAR_SYNC_DAYS_AHEAD: int = Field(default=30)
+
+    CALENDAR_PREANALYZE_ENABLED: bool = Field(default=True)
+    CALENDAR_PREANALYZE_CRON: str = Field(default="10 6 * * *")
+    CALENDAR_PREANALYZE_DAYS_AHEAD: int = Field(default=14)
+    CALENDAR_PREANALYZE_MIN_IMPORTANCE: int = Field(default=4)
+    CALENDAR_PREANALYZE_MAX_ITEMS: int = Field(default=50)
+
+    CALENDAR_QUEUE_POLL_INTERVAL_SECONDS: float = Field(default=1.0)
+    CALENDAR_WORKER_HEARTBEAT_INTERVAL: int = Field(default=30)
+
 
     # 监控配置
     METRICS_ENABLED: bool = Field(default=True)

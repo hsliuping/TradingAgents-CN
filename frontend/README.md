@@ -299,14 +299,6 @@ const exampleStore = useExampleStore()
    npm run type-check
    ```
 
-## 📞 技术支持
-
-如有问题，请通过以下方式联系：
-
-- 📧 邮箱: hsliup@163.com
-- 💬 微信群: 扫描README中的二维码
-- 🐛 问题反馈: GitHub Issues
-
 ---
 
 **TradingAgents-CN Frontend v1.0.0-preview** - 现代化的股票分析平台前端

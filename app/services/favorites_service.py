@@ -132,6 +132,7 @@ class FavoritesService:
                     if q:
                         it["current_price"] = q.get("close")
                         it["change_percent"] = q.get("pct_chg")
+                        it["volume"] = q.get("amount")
                 # 兜底：对未命中的代码使用在线源补齐（可选）
                 missing = [c for c in codes if c not in quotes_map]
                 if missing:
@@ -143,6 +144,7 @@ class FavoritesService:
                                 q2 = quotes_online.get(code, {}) if quotes_online else {}
                                 it["current_price"] = q2.get("close")
                                 it["change_percent"] = q2.get("pct_chg")
+                                it["volume"] = q2.get("amount")
                     except Exception:
                         pass
             except Exception:

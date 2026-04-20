@@ -23,33 +23,44 @@
       </div>
     </div>
 
-
-    <!-- 学习中心推荐卡片 -->
-    <el-card class="learning-highlight-card">
-      <div class="learning-highlight">
-        <div class="learning-icon">
-          <el-icon size="48"><Reading /></el-icon>
-        </div>
-        <div class="learning-content">
-          <h2>📚 AI股票分析学习中心</h2>
-          <p>从零开始学习AI、大语言模型和智能股票分析。了解多智能体系统如何协作分析股票，掌握提示词工程技巧，选择合适的大模型，理解AI的能力与局限性。</p>
-          <div class="learning-features">
-            <span class="feature-tag">🤖 AI基础知识</span>
-            <span class="feature-tag">✍️ 提示词工程</span>
-            <span class="feature-tag">🎯 模型选择</span>
-            <span class="feature-tag">📊 分析原理</span>
-            <span class="feature-tag">⚠️ 风险认知</span>
-            <span class="feature-tag">🎓 实战教程</span>
+    <el-row :gutter="16" class="overview-section">
+      <el-col :xs="24" :sm="12" :md="6">
+        <el-card class="overview-card is-clickable" @click="goToQueue">
+          <div class="overview-item">
+            <div class="overview-label">最近任务</div>
+            <div class="overview-value">{{ userStats.totalAnalyses }}</div>
+            <div class="overview-sub">已完成 {{ userStats.successfulAnalyses }}</div>
           </div>
-        </div>
-        <div class="learning-action">
-          <el-button type="primary" size="large" @click="goToLearning">
-            <el-icon><Reading /></el-icon>
-            开始学习
-          </el-button>
-        </div>
-      </div>
-    </el-card>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :sm="12" :md="6">
+        <el-card class="overview-card is-clickable" @click="goToFavorites">
+          <div class="overview-item">
+            <div class="overview-label">自选股</div>
+            <div class="overview-value">{{ favoriteStocks.length }}</div>
+            <div class="overview-sub">快速查看与管理</div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :sm="12" :md="6">
+        <el-card class="overview-card is-clickable" @click="goToMarketOverview">
+          <div class="overview-item">
+            <div class="overview-label">市场概览</div>
+            <div class="overview-value">{{ marketNews.length }}</div>
+            <div class="overview-sub">快讯条数（示意）</div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :sm="12" :md="6">
+        <el-card class="overview-card is-clickable" @click="goToPaperTrading">
+          <div class="overview-item">
+            <div class="overview-label">模拟交易</div>
+            <div class="overview-value">¥{{ formatMoney(paperEquityCNY) }}</div>
+            <div class="overview-sub">A股总资产（示意）</div>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
 
     <!-- 主要功能区域 -->
     <el-row :gutter="24" class="main-content">
@@ -147,7 +158,13 @@
         <!-- 市场快讯 -->
         <el-card class="market-news-card" style="margin-top: 24px;">
           <template #header>
-            <span>市场快讯</span>
+            <div class="card-header">
+              <span>市场快讯</span>
+              <div class="header-actions">
+                <el-button type="text" size="small" :loading="syncingNews" @click="syncMarketNews">同步</el-button>
+                <el-button type="text" size="small" @click="loadMarketNews">刷新</el-button>
+              </div>
+            </div>
           </template>
           <div v-if="marketNews.length > 0" class="news-list">
             <div
@@ -169,8 +186,45 @@
 
       <!-- 右侧：自选股和快讯 -->
       <el-col :span="8">
+        <el-card class="market-entry-card">
+          <template #header>
+            <div class="card-header">
+              <span>市场模块</span>
+              <el-button type="text" size="small" @click="goToMarketOverview">
+                市场概览 <el-icon><ArrowRight /></el-icon>
+              </el-button>
+            </div>
+          </template>
+          <div class="market-entry-grid">
+            <div class="entry-item" @click="goToMarketOverview">
+              <div class="entry-title">市场概览</div>
+              <div class="entry-desc">宽度/情绪/风险一屏查看</div>
+            </div>
+            <div class="entry-item" @click="goToMarketHeadlines">
+              <div class="entry-title">资讯头条</div>
+              <div class="entry-desc">宏观/行业/公司热点</div>
+            </div>
+            <div class="entry-item" @click="goToMarketMainline">
+              <div class="entry-title">主线观察</div>
+              <div class="entry-desc">主题轮动与强势方向</div>
+            </div>
+            <div class="entry-item" @click="goToMarketRecommendations">
+              <div class="entry-title">推荐股票</div>
+              <div class="entry-desc">候选标的快速进入分析</div>
+            </div>
+            <div class="entry-item" @click="goToMarketMorning">
+              <div class="entry-title">早盘预测</div>
+              <div class="entry-desc">盘前要点与情景假设</div>
+            </div>
+            <div class="entry-item" @click="goToMarketEvening">
+              <div class="entry-title">晚间总结</div>
+              <div class="entry-desc">复盘与次日关注清单</div>
+            </div>
+          </div>
+        </el-card>
+
         <!-- 我的自选股 -->
-        <el-card class="favorites-card">
+        <el-card class="favorites-card" style="margin-top: 24px;">
           <template #header>
             <div class="card-header">
               <span>我的自选股</span>
@@ -293,13 +347,25 @@
 
         <!-- 多数据源同步 -->
         <MultiSourceSyncCard style="margin-top: 24px;" />
+
+        <el-card class="learning-min-card" style="margin-top: 24px;">
+          <template #header>
+            <span>学习中心</span>
+          </template>
+          <div class="learning-min-body">
+            <div class="learning-min-desc">可选：了解 AI 股票分析相关基础与方法</div>
+            <el-button type="text" @click="goToLearning">
+              前往学习中心 <el-icon><ArrowRight /></el-icon>
+            </el-button>
+          </div>
+        </el-card>
       </el-col>
     </el-row>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -309,8 +375,7 @@ import {
   Files,
   List,
   ArrowRight,
-  InfoFilled,
-  Reading
+  InfoFilled
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { AnalysisTask, AnalysisStatus } from '@/types/analysis'
@@ -386,6 +451,30 @@ const goToHistory = () => {
 
 const goToLearning = () => {
   router.push('/learning')
+}
+
+const goToMarketOverview = () => {
+  router.push('/market/overview')
+}
+
+const goToMarketHeadlines = () => {
+  router.push('/market/headlines')
+}
+
+const goToMarketMainline = () => {
+  router.push('/market/mainline')
+}
+
+const goToMarketRecommendations = () => {
+  router.push('/market/recommendations')
+}
+
+const goToMarketMorning = () => {
+  router.push('/market/morning')
+}
+
+const goToMarketEvening = () => {
+  router.push('/market/evening')
 }
 
 const viewAnalysis = (analysis: AnalysisTask) => {
@@ -564,6 +653,15 @@ const loadPaperAccount = async () => {
   }
 }
 
+const paperEquityCNY = computed(() => {
+  const acct: any = paperAccount.value as any
+  if (!acct) return 0
+  const equity = acct.equity
+  if (typeof equity === 'number') return equity
+  if (equity && typeof equity.CNY === 'number') return equity.CNY
+  return 0
+})
+
 // 跳转到模拟交易页面
 const goToPaperTrading = () => {
   router.push('/paper')
@@ -664,64 +762,43 @@ onMounted(async () => {
     }
   }
 
-  .learning-highlight-card {
+  .overview-section {
     margin-bottom: 24px;
-    border: 2px solid var(--el-color-primary);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
 
-    .learning-highlight {
-      display: flex;
-      align-items: center;
-      gap: 24px;
-      padding: 8px;
+    .overview-card {
+      border: 1px solid var(--el-border-color-lighter);
+      transition: all 0.2s ease;
 
-      .learning-icon {
-        flex-shrink: 0;
-        width: 80px;
-        height: 80px;
-        border-radius: 12px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: white;
+      &.is-clickable {
+        cursor: pointer;
       }
 
-      .learning-content {
-        flex: 1;
+      &.is-clickable:hover {
+        border-color: var(--el-color-primary);
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
+        transform: translateY(-1px);
+      }
 
-        h2 {
-          font-size: 20px;
-          font-weight: 600;
-          margin: 0 0 12px 0;
+      .overview-item {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+
+        .overview-label {
+          font-size: 13px;
+          color: var(--el-text-color-regular);
+        }
+
+        .overview-value {
+          font-size: 22px;
+          font-weight: 700;
           color: var(--el-text-color-primary);
         }
 
-        p {
-          font-size: 14px;
-          color: var(--el-text-color-regular);
-          line-height: 1.6;
-          margin: 0 0 16px 0;
+        .overview-sub {
+          font-size: 12px;
+          color: var(--el-text-color-placeholder);
         }
-
-        .learning-features {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-
-          .feature-tag {
-            padding: 4px 12px;
-            background: var(--el-color-primary-light-9);
-            color: var(--el-color-primary);
-            border-radius: 16px;
-            font-size: 13px;
-            font-weight: 500;
-          }
-        }
-      }
-
-      .learning-action {
-        flex-shrink: 0;
       }
     }
   }
@@ -817,6 +894,18 @@ onMounted(async () => {
   }
 
   .market-news-card {
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+    }
+
     .news-list {
       .news-item {
         padding: 12px 0;
@@ -866,6 +955,59 @@ onMounted(async () => {
       .tip-icon {
         color: var(--el-color-primary);
       }
+    }
+  }
+
+  .market-entry-card {
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .market-entry-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    .entry-item {
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: 10px;
+      padding: 12px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      background: var(--el-fill-color-blank);
+
+      &:hover {
+        border-color: var(--el-color-primary);
+        background: var(--el-color-primary-light-9);
+      }
+
+      .entry-title {
+        font-weight: 600;
+        color: var(--el-text-color-primary);
+        margin-bottom: 4px;
+      }
+
+      .entry-desc {
+        font-size: 12px;
+        color: var(--el-text-color-regular);
+      }
+    }
+  }
+
+  .learning-min-card {
+    .learning-min-body {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .learning-min-desc {
+      font-size: 13px;
+      color: var(--el-text-color-regular);
+      line-height: 1.5;
     }
   }
 
@@ -1045,19 +1187,6 @@ onMounted(async () => {
 
       .welcome-actions {
         justify-content: center;
-      }
-    }
-
-    .learning-highlight-card {
-      .learning-highlight {
-        flex-direction: column;
-        text-align: center;
-
-        .learning-content {
-          .learning-features {
-            justify-content: center;
-          }
-        }
       }
     }
 

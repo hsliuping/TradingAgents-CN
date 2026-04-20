@@ -28,13 +28,6 @@
 
 **适用法律 / Governing Law**: 中华人民共和国法律 / Laws of the People's Republic of China
 
-## 📞 联系信息 / Contact Information
-
-**版权所有者 / Copyright Owner**: hsliuping  
-**邮箱 / Email**: hsliup@163.com  
-**GitHub**: https://github.com/hsliuping/TradingAgents-CN  
-**QQ群 / QQ Group**: 782124367  
-
 ## 💼 商业许可 / Commercial Licensing
 
 如需获得专有组件的商业使用许可，请联系版权所有者。  

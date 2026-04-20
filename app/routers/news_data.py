@@ -7,11 +7,15 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 import logging
+import akshare as ak
 
 from app.routers.auth_db import get_current_user
 from app.core.response import ok
 from app.services.news_data_service import get_news_data_service, NewsQueryParams
 from app.worker.news_data_sync_service import get_news_data_sync_service
+from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+from langchain_core.prompts import ChatPromptTemplate
 
 router = APIRouter(prefix="/api/news-data", tags=["新闻数据"])
 logger = logging.getLogger("webapi")
@@ -38,6 +42,85 @@ class NewsSyncRequest(BaseModel):
     data_sources: Optional[List[str]] = Field(None, description="数据源列表")
     hours_back: int = Field(24, description="回溯小时数")
     max_news_per_source: int = Field(50, description="每个数据源最大新闻数量")
+
+
+class NewsAnalysisRequest(BaseModel):
+    title: str
+    content: str
+    model_name: Optional[str] = None
+
+
+def _fetch_cls_news_stream(limit: int, hours_back: int, skip: int = 0) -> List[Dict[str, Any]]:
+    try:
+        df = ak.stock_info_global_cls()
+    except Exception as e:
+        logger.error(f"获取财联社新闻失败: {e}")
+        return []
+
+    now = datetime.utcnow()
+    cutoff = now - timedelta(hours=hours_back)
+    items: List[Dict[str, Any]] = []
+    skipped = 0
+
+    for idx, row in df.iterrows():
+        try:
+            date_str = str(row.get("发布日期") or "").strip()
+            time_str = str(row.get("发布时间") or "").strip()
+            title = str(row.get("标题") or "").strip()
+            content = str(row.get("内容") or "").strip()
+            url = (
+                str(row.get("链接") or "").strip()
+                or str(row.get("URL") or "").strip()
+                or str(row.get("url") or "").strip()
+            )
+
+            if not title:
+                continue
+
+            dt_str = ""
+            if date_str and time_str:
+                dt_str = f"{date_str} {time_str}"
+            elif date_str:
+                dt_str = date_str
+
+            publish_dt = None
+            if dt_str:
+                for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
+                    try:
+                        publish_dt = datetime.strptime(dt_str, fmt)
+                        break
+                    except Exception:
+                        continue
+            if publish_dt is None:
+                publish_dt = now
+
+            if publish_dt < cutoff:
+                continue
+
+            if skipped < skip:
+                skipped += 1
+                continue
+
+            item = {
+                "id": f"cls_{idx}",
+                "title": title,
+                "content": content,
+                "source": "财联社",
+                "publish_time": publish_dt.isoformat(),
+                "url": url or None,
+                "symbol": None,
+                "category": "macro",
+                "data_source": "cls_akshare",
+            }
+            items.append(item)
+
+            if len(items) >= limit:
+                break
+        except Exception as e:
+            logger.error(f"处理财联社新闻行失败: {e}")
+            continue
+
+    return items
 
 
 @router.get("/query/{symbol}", response_model=dict)
@@ -185,6 +268,7 @@ async def get_latest_news(
     symbol: Optional[str] = Query(None, description="股票代码，为空则获取所有新闻"),
     limit: int = Query(10, description="返回数量限制"),
     hours_back: int = Query(24, description="回溯小时数"),
+    skip: int = Query(0, description="跳过数量"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -200,20 +284,31 @@ async def get_latest_news(
     """
     try:
         service = await get_news_data_service()
-        
-        # 获取最新新闻
         news_list = await service.get_latest_news(
             symbol=symbol,
             limit=limit,
-            hours_back=hours_back
+            hours_back=hours_back,
+            skip=skip
         )
-        
-        return ok(data={
+
+        data_source = "database"
+
+        if not news_list and symbol is None:
+            logger.info("数据库中暂无市场新闻，使用财联社新闻流作为数据源")
+            cls_items = _fetch_cls_news_stream(limit=limit, hours_back=hours_back, skip=skip)
+            news_list = cls_items
+            data_source = "cls_akshare"
+            logger.info(f"财联社新闻流返回 {len(news_list)} 条记录")
+
+        return ok(
+            data={
                 "symbol": symbol,
                 "limit": limit,
                 "hours_back": hours_back,
+                "skip": skip,
                 "total_count": len(news_list),
-                "news": news_list
+                "news": news_list,
+                "data_source": data_source,
             },
             message=f"获取最新新闻成功，返回 {len(news_list)} 条"
         )
@@ -323,6 +418,90 @@ async def get_news_statistics(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取新闻统计失败: {str(e)}"
+        )
+
+
+@router.post("/analyze", response_model=dict)
+async def analyze_news(
+    request: NewsAnalysisRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        model = request.model_name or "deepseek-chat"
+        provider_info = get_provider_and_url_by_model_sync(model)
+        provider = provider_info.get("provider")
+        api_key = provider_info.get("api_key")
+        backend_url = provider_info.get("backend_url")
+
+        llm = create_openai_compatible_llm(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            temperature=0.3,
+            max_tokens=1200,
+            base_url=backend_url,
+        )
+
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "你是一位资深证券分析师，拥有10年以上A股/港股市场研究经验，熟悉中国证监会行业分类、"
+                    "申万行业指数、产业链上下游关系及龙头公司基本面。请严格基于用户提供的新闻内容进行分析，"
+                    "不得编造事实或引用外部知识。\n\n"
+                    "【任务要求】\n"
+                    "1. **概念识别**：\n"
+                    "   - 仅提取新闻中**明确提及或强烈暗示**的产业链/技术/政策概念（如：低空经济、CPO光模块、创新药医保谈判）。\n"
+                    "   - 概念必须属于以下范畴之一：\n"
+                    "     • 新兴技术（如AI芯片、量子计算）\n"
+                    "     • 政策驱动（如设备更新、以旧换新）\n"
+                    "     • 行业事件（如OPEC+减产、苹果发布会）\n"
+                    "     • 金融工具（如REITs、科创50ETF）\n"
+                    "   - 排除泛泛而谈的词汇（如“经济复苏”、“市场波动”）。\n\n"
+                    "2. **个股挖掘**：\n"
+                    "   - 仅推荐**A股（60/00/30开头）或港股（00XXX.HK）** 的上市公司。\n"
+                    "   - 必须满足以下任一条件：\n"
+                    "     a) 公司在新闻中被直接点名；\n"
+                    "     b) 公司是该概念公认的龙头（市值/市占率前3）；\n"
+                    "     c) 公司主营业务与概念有直接且紧密的关联（需说明具体业务）。\n"
+                    "   - **严禁推荐**：\n"
+                    "     • 未上市企业（如“某独角兽”）\n"
+                    "     • 模糊表述（如“相关概念股”）\n"
+                    "     • 股票代码不完整（必须含交易所后缀，如 600519.SH）\n\n"
+                    "【输出格式】\n"
+                    "- 使用标准 Markdown\n"
+                    "- 分为两个二级标题：`## 核心概念` 和 `## 相关个股`\n"
+                    "- 概念用无序列表（`-`），每个概念不超过15字\n"
+                    "- 个股用无序列表（`-`），格式：`[股票名称](股票代码)：关联理由（≤20字）`\n"
+                    "- 若新闻无有效信息，输出：`无法从新闻中提取有效概念或个股。`\n\n"
+                    "【重要原则】\n"
+                    "❗ 宁可少说，不可错说！若不确定，请跳过该项。\n"
+                    "❗ 所有结论必须严格基于新闻文本，禁止推测或补充背景知识。",
+                ),
+                (
+                    "user",
+                    "新闻标题：{title}\n\n新闻内容：{content}\n\n请开始分析。",
+                ),
+            ]
+        )
+
+        chain = prompt | llm
+        result_msg = chain.invoke({"title": request.title, "content": request.content})
+        content = getattr(result_msg, "content", "") or str(result_msg)
+
+        return ok(
+            data={
+                "analysis": content,
+                "model_name": model,
+                "model_provider": provider,
+            },
+            message="新闻AI分析成功",
+        )
+    except Exception as e:
+        logger.error(f"新闻AI分析失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"新闻AI分析失败: {str(e)}",
         )
 
 

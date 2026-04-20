@@ -104,16 +104,6 @@
 - ✅ 常见问题解答和故障排除
 - ✅ 实际使用案例和效果展示
 
-#### 关注公众号
-
-1. **关注公众号**: 微信搜索 **"TradingAgents-CN"** 并关注
-2. 公众号每天推送项目最新进展和使用教程
-
-
-- **微信公众号**: TradingAgents-CN（推荐）
-
-  <img src="assets/wexin.png" alt="微信公众号" width="200"/>
-
 
 ## 🆚 中文增强特色
 
@@ -143,17 +133,6 @@ TradingAgentsCN 已经获得 **13,000+ stars**，但一直由我一个人开发�
 3. **社区认可** - 在 README 和发布说明中致谢，获得 "Core Tester" 标签
 4. **开源贡献** - 为 13,000+ stars 的项目做出实质性贡献
 5. **未来机会** - 如果项目商业化，可能会有相应的报酬
-
-### 🚀 如何加入？
-
-**方式一：微信公众号申请（推荐）**
-1. 关注微信公众号：**TradingAgentsCN**
-2. 在公众号菜单选择"测试申请"菜单
-3. 填写申请信息
-
-**方式二：邮件申请**
-- 发送邮件到：hsliup@163.com
-- 主题：测试志愿者申请
 
 ### 📋 测试内容示例
 
@@ -203,11 +182,6 @@ TradingAgentsCN 已经获得 **13,000+ stars**，但一直由我一个人开发�
 - **适用范围**：除 `app/` 和 `frontend/` 外的所有文件
 - **权限**：商业使用 ✅ | 修改分发 ✅ | 私人使用 ✅ | 专利使用 ✅
 - **条件**：保留版权声明 ❗ | 包含许可证副本 ❗
-
-### 🔒 专有部分（需商业授权）
-- **适用范围**：`app/`（FastAPI后端）和 `frontend/`（Vue前端）目录
-- **商业使用**：需要单独许可协议
-- **联系授权**：[hsliup@163.com](mailto:hsliup@163.com)
 
 ### 📋 许可证选择建议
 - **个人学习/研究**：可自由使用全部功能
@@ -284,18 +258,6 @@ TradingAgentsCN 已经获得 **13,000+ stars**，但一直由我一个人开发�
 - **v0.1.1** (2025-06-01): 🧠 国产LLM集成
 
 📋 **详细更新日志**: [CHANGELOG.md](./docs/releases/CHANGELOG.md)
-
-## 📞 联系方式
-
-- **GitHub Issues**: [提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
-- **邮箱**: hsliup@163.com
-- 项目ＱＱ群：1009816091
-- 项目微信公众号：TradingAgents-CN
-
-  <img src="assets/wexin.png" alt="微信公众号" width="200"/>
-
-- **原项目**: [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
-- **文档**: [完整文档目录](docs/)
 
 ## ⚠️ 风险提示
 

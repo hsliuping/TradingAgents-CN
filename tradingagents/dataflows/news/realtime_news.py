@@ -310,81 +310,85 @@ class RealtimeNewsAggregator:
             news_items = []
 
             # 1. 尝试使用AKShare获取东方财富个股新闻
-            try:
-                logger.info(f"[中文财经新闻] 尝试通过 AKShare Provider 获取新闻")
-                from tradingagents.dataflows.providers.china.akshare import AKShareProvider
+            # 如果没有传入ticker（例如获取市场新闻），跳过东方财富个股新闻部分
+            if ticker:
+                try:
+                    logger.info(f"[中文财经新闻] 尝试通过 AKShare Provider 获取新闻")
+                    from tradingagents.dataflows.providers.china.akshare import AKShareProvider
 
-                provider = AKShareProvider()
+                    provider = AKShareProvider()
 
-                # 处理股票代码格式
-                # 如果是美股代码，不使用东方财富新闻
-                if '.' in ticker and any(suffix in ticker for suffix in ['.US', '.N', '.O', '.NYSE', '.NASDAQ']):
-                    logger.info(f"[中文财经新闻] 检测到美股代码 {ticker}，跳过东方财富新闻获取")
-                else:
-                    # 处理A股和港股代码
-                    clean_ticker = ticker.replace('.SH', '').replace('.SZ', '').replace('.SS', '')\
-                                    .replace('.HK', '').replace('.XSHE', '').replace('.XSHG', '')
+                    # 处理股票代码格式
+                    # 如果是美股代码，不使用东方财富新闻
+                    if '.' in ticker and any(suffix in ticker for suffix in ['.US', '.N', '.O', '.NYSE', '.NASDAQ']):
+                        logger.info(f"[中文财经新闻] 检测到美股代码 {ticker}，跳过东方财富新闻获取")
+                    else:
+                        # 处理A股和港股代码
+                        clean_ticker = ticker.replace('.SH', '').replace('.SZ', '').replace('.SS', '')\
+                                        .replace('.HK', '').replace('.XSHE', '').replace('.XSHG', '')
 
-                    # 获取东方财富新闻
-                    logger.info(f"[中文财经新闻] 开始获取 {clean_ticker} 的东方财富新闻")
-                    em_start_time = datetime.now(ZoneInfo(get_timezone_name()))
-                    news_df = provider.get_stock_news_sync(symbol=clean_ticker)
+                        # 获取东方财富新闻
+                        logger.info(f"[中文财经新闻] 开始获取 {clean_ticker} 的东方财富新闻")
+                        em_start_time = datetime.now(ZoneInfo(get_timezone_name()))
+                        news_df = provider.get_stock_news_sync(symbol=clean_ticker)
 
-                    if not news_df.empty:
-                        logger.info(f"[中文财经新闻] 东方财富返回 {len(news_df)} 条新闻数据，开始处理")
-                        processed_count = 0
-                        skipped_count = 0
-                        error_count = 0
+                        if not news_df.empty:
+                            logger.info(f"[中文财经新闻] 东方财富返回 {len(news_df)} 条新闻数据，开始处理")
+                            processed_count = 0
+                            skipped_count = 0
+                            error_count = 0
 
-                        # 转换为NewsItem格式
-                        for _, row in news_df.iterrows():
-                            try:
-                                # 解析时间
-                                time_str = row.get('时间', '')
-                                if time_str:
-                                    # 尝试解析时间格式，可能是'2023-01-01 12:34:56'格式
-                                    try:
-                                        publish_time = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=ZoneInfo(get_timezone_name()))
-                                    except:
-                                        # 尝试其他可能的格式
+                            # 转换为NewsItem格式
+                            for _, row in news_df.iterrows():
+                                try:
+                                    # 解析时间
+                                    time_str = row.get('时间', '')
+                                    if time_str:
+                                        # 尝试解析时间格式，可能是'2023-01-01 12:34:56'格式
                                         try:
-                                            publish_time = datetime.strptime(time_str, '%Y-%m-%d').replace(tzinfo=ZoneInfo(get_timezone_name()))
+                                            publish_time = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=ZoneInfo(get_timezone_name()))
                                         except:
-                                            logger.warning(f"[中文财经新闻] 无法解析时间格式: {time_str}，使用当前时间")
-                                            publish_time = datetime.now(ZoneInfo(get_timezone_name()))
-                                else:
-                                    logger.warning(f"[中文财经新闻] 新闻时间为空，使用当前时间")
-                                    publish_time = datetime.now(ZoneInfo(get_timezone_name()))
+                                            # 尝试其他可能的格式
+                                            try:
+                                                publish_time = datetime.strptime(time_str, '%Y-%m-%d').replace(tzinfo=ZoneInfo(get_timezone_name()))
+                                            except:
+                                                logger.warning(f"[中文财经新闻] 无法解析时间格式: {time_str}，使用当前时间")
+                                                publish_time = datetime.now(ZoneInfo(get_timezone_name()))
+                                    else:
+                                        logger.warning(f"[中文财经新闻] 新闻时间为空，使用当前时间")
+                                        publish_time = datetime.now(ZoneInfo(get_timezone_name()))
 
-                                # 检查时效性
-                                if publish_time < datetime.now(ZoneInfo(get_timezone_name())) - timedelta(hours=hours_back):
-                                    skipped_count += 1
+                                    # 检查时效性
+                                    if publish_time < datetime.now(ZoneInfo(get_timezone_name())) - timedelta(hours=hours_back):
+                                        skipped_count += 1
+                                        continue
+
+                                    # 评估紧急程度
+                                    title = row.get('标题', '')
+                                    content = row.get('内容', '')
+                                    urgency = self._assess_news_urgency(title, content)
+
+                                    news_items.append(NewsItem(
+                                        title=title,
+                                        content=content,
+                                        source='东方财富',
+                                        publish_time=publish_time,
+                                        url=row.get('链接', ''),
+                                        urgency=urgency,
+                                        relevance_score=self._calculate_relevance(title, ticker)
+                                    ))
+                                    processed_count += 1
+                                except Exception as item_e:
+                                    logger.error(f"[中文财经新闻] 处理东方财富新闻项目失败: {item_e}")
+                                    error_count += 1
                                     continue
 
-                                # 评估紧急程度
-                                title = row.get('标题', '')
-                                content = row.get('内容', '')
-                                urgency = self._assess_news_urgency(title, content)
-
-                                news_items.append(NewsItem(
-                                    title=title,
-                                    content=content,
-                                    source='东方财富',
-                                    publish_time=publish_time,
-                                    url=row.get('链接', ''),
-                                    urgency=urgency,
-                                    relevance_score=self._calculate_relevance(title, ticker)
-                                ))
-                                processed_count += 1
-                            except Exception as item_e:
-                                logger.error(f"[中文财经新闻] 处理东方财富新闻项目失败: {item_e}")
-                                error_count += 1
-                                continue
-
-                        em_time = (datetime.now(ZoneInfo(get_timezone_name())) - em_start_time).total_seconds()
-                        logger.info(f"[中文财经新闻] 东方财富新闻处理完成，成功: {processed_count}条，跳过: {skipped_count}条，错误: {error_count}条，耗时: {em_time:.2f}秒")
-            except Exception as ak_e:
-                logger.error(f"[中文财经新闻] 获取东方财富新闻失败: {ak_e}")
+                            em_time = (datetime.now(ZoneInfo(get_timezone_name())) - em_start_time).total_seconds()
+                            logger.info(f"[中文财经新闻] 东方财富新闻处理完成，成功: {processed_count}条，跳过: {skipped_count}条，错误: {error_count}条，耗时: {em_time:.2f}秒")
+                except Exception as ak_e:
+                    logger.error(f"[中文财经新闻] 获取东方财富新闻失败: {ak_e}")
+            else:
+                logger.info("[中文财经新闻] ticker为空（市场级新闻），跳过东方财富个股新闻，仅使用RSS等全市场来源")
 
             # 2. 财联社RSS (如果可用)
             logger.info(f"[中文财经新闻] 开始获取财联社RSS新闻")
