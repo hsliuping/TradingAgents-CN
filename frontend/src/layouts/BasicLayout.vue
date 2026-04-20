@@ -10,7 +10,7 @@
         <div class="logo">
           <img src="/logo.svg" alt="TradingAgents-CN" />
           <span v-show="!appStore.sidebarCollapsed" class="logo-text">
-            TradingAgents-CN
+            TradingAgents-CN11
           </span>
         </div>
       </div>

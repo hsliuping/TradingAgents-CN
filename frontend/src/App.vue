@@ -4,7 +4,7 @@
     <NetworkStatus />
 
     <!-- 主要内容区域 -->
-    <router-view v-slot="{ Component, route }">
+    <!-- <router-view v-slot="{ Component, route }">
       <transition
         :name="(route?.meta?.transition as string) || 'fade'"
         mode="out-in"
@@ -14,7 +14,8 @@
           <component :is="Component" :key="route?.fullPath || 'default'" />
         </keep-alive>
       </transition>
-    </router-view>
+    </router-view> -->
+    <basic-layout/>
 
     <!-- 配置向导 -->
     <ConfigWizard
@@ -30,6 +31,7 @@ import { ElMessage } from 'element-plus'
 import NetworkStatus from '@/components/NetworkStatus.vue'
 import axios from 'axios'
 import { configApi } from '@/api/config'
+import BasicLayout from '@/layouts/BasicLayout.vue'
 
 // 需要缓存的组件
 const keepAliveComponents = computed(() => [
