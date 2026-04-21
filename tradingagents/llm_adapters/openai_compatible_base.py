@@ -216,6 +216,28 @@ class ChatDeepSeekOpenAI(OpenAICompatibleBase):
             **kwargs
         )
 
+class ChatQiniuOpenAI(OpenAICompatibleBase):
+    """七牛云 OpenAI兼容适配器"""
+    
+    def __init__(
+        self,
+        model: str = "qiniu",
+        api_key: Optional[str] = None,
+        temperature: float = 0.1,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ):
+        super().__init__(
+            provider_name="qiniu",
+            model=model,
+            api_key_env_var="QINIU_API_KEY",
+            base_url="https://api.qnaigc.com/v1",
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+
 
 class ChatDashScopeOpenAIUnified(OpenAICompatibleBase):
     """阿里百炼 DashScope OpenAI兼容适配器"""
