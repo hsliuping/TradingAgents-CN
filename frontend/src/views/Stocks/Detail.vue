@@ -942,9 +942,10 @@ async function fetchLatestAnalysis() {
       symbol: symbol.value,
       stock_code: symbol.value,  // 兼容字段
       page: 1,
-      page_size: 1,
+      page_size: 5, // 股票详情页 - 详细分析报告 - 分页参数 - 作用（设置为5，能让最近出过分析报告的股票详情页都展示报告，原值1永远只有一只股票详情页有报告）
       status: 'completed'
     })
+
 
     console.log('🔍 [fetchLatestAnalysis] API响应:', resp)
     console.log('🔍 [fetchLatestAnalysis] resp.data:', resp?.data)
