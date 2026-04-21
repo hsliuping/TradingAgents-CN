@@ -819,6 +819,71 @@ class DataSourceManager:
             latest_trade_date = _format_trade_date(latest_data.get('date'))
             requested_end_date = _format_trade_date(end_date) or str(end_date)
 
+            # 由工具端直接计算均线方向与拐头结论，避免让LLM做二次推导
+            def _compute_ma_conclusion(df: pd.DataFrame, ma_col: str, price_col: str = 'close') -> Dict[str, Any]:
+                valid_df = df[[ma_col, price_col]].dropna()
+                sample_size = min(5, len(valid_df))
+
+                if sample_size < 2:
+                    return {
+                        'sample_size': sample_size,
+                        'slope_abs': None,
+                        'slope_pct_per_day': None,
+                        'direction': '样本不足',
+                        'turning_signal': '样本不足'
+                    }
+
+                recent = valid_df.tail(sample_size)
+                y = recent[ma_col].astype(float).to_numpy()
+                x = np.arange(sample_size, dtype=float)
+                slope_abs = float(np.polyfit(x, y, 1)[0])
+
+                latest_close = float(recent[price_col].iloc[-1]) if recent[price_col].iloc[-1] else 0.0
+                slope_pct_per_day = (slope_abs / latest_close * 100.0) if latest_close != 0 else 0.0
+
+                # 阈值按日变化率刻画，避免仅靠绝对值在不同价位股票间不可比
+                if slope_pct_per_day > 0.02:
+                    direction = '上行'
+                elif slope_pct_per_day < -0.02:
+                    direction = '下行'
+                else:
+                    direction = '走平'
+
+                turning_signal = '未出现拐头'
+                if sample_size >= 3:
+                    prev_diff = y[-2] - y[-3]
+                    curr_diff = y[-1] - y[-2]
+                    if prev_diff <= 0 < curr_diff:
+                        turning_signal = '拐头向上'
+                    elif prev_diff >= 0 > curr_diff:
+                        turning_signal = '拐头向下'
+                    elif curr_diff > 0:
+                        turning_signal = '延续上行'
+                    elif curr_diff < 0:
+                        turning_signal = '延续下行'
+                    else:
+                        turning_signal = '短期走平'
+
+                return {
+                    'sample_size': sample_size,
+                    'slope_abs': slope_abs,
+                    'slope_pct_per_day': slope_pct_per_day,
+                    'direction': direction,
+                    'turning_signal': turning_signal
+                }
+
+            ma5_conclusion = _compute_ma_conclusion(data, 'ma5')
+            ma10_conclusion = _compute_ma_conclusion(data, 'ma10')
+            ma20_conclusion = _compute_ma_conclusion(data, 'ma20')
+            ma60_conclusion = _compute_ma_conclusion(data, 'ma60')
+
+            ma_conclusions = {
+                'ma5': ma5_conclusion,
+                'ma10': ma10_conclusion,
+                'ma20': ma20_conclusion,
+                'ma60': ma60_conclusion,
+            }
+
             # 🔍 [调试日志] 打印最近5天的原始数据和技术指标
             logger.info(f"🔍 [技术指标详情] ===== 最近{display_rows}个交易日数据 =====")
             for i, (idx, row) in enumerate(display_data.iterrows(), 1):
@@ -880,6 +945,35 @@ class DataSourceManager:
             else:
                 result += " (价格在MA60下方 ↓)\n\n"
 
+            result += f"📐 均线方向结论（工具端确定性计算）:\n"
+            for ma_name, ma_result in ma_conclusions.items():
+                ma_label = ma_name.upper()
+                if ma_result['slope_abs'] is not None:
+                    result += (
+                        f"   {ma_label}斜率: {ma_result['slope_abs']:+.4f}/日 "
+                        f"({ma_result['slope_pct_per_day']:+.3f}%/日), "
+                        f"方向: {ma_result['direction']}, "
+                        f"拐头识别: {ma_result['turning_signal']}, "
+                        f"样本: {ma_result['sample_size']}日\n"
+                    )
+                else:
+                    result += f"   {ma_label}斜率: 样本不足，暂无法判断\n"
+            result += "\n"
+
+            # 机器可读结论块：供下游组件和LLM直接引用，避免二次计算
+            result += "🧾 MACHINE_READABLE_MA_CONCLUSIONS:\n"
+            for ma_name, ma_result in ma_conclusions.items():
+                slope_abs = "null" if ma_result['slope_abs'] is None else f"{ma_result['slope_abs']:.6f}"
+                slope_pct = "null" if ma_result['slope_pct_per_day'] is None else f"{ma_result['slope_pct_per_day']:.6f}"
+                result += (
+                    f"   {ma_name}.sample_size={ma_result['sample_size']};"
+                    f"{ma_name}.slope_abs={slope_abs};"
+                    f"{ma_name}.slope_pct_per_day={slope_pct};"
+                    f"{ma_name}.direction={ma_result['direction']};"
+                    f"{ma_name}.turning_signal={ma_result['turning_signal']}\n"
+                )
+            result += "\n"
+
             # MACD指标
             result += f"📈 MACD指标:\n"
             result += f"   DIF:  {latest_data['macd_dif']:.3f}\n"
@@ -890,21 +984,49 @@ class DataSourceManager:
             else:
                 result += " (空头 ↓)\n"
 
-            # 判断金叉/死叉
+            # 工具端确定性判断MACD交叉，避免LLM自行推断
+            macd_cross_signal = "样本不足"
+            dif_dea_relation = "未知"
+            macd_hist_trend = "样本不足"
+
             if len(data) > 1:
                 prev_dif = data.iloc[-2]['macd_dif']
                 prev_dea = data.iloc[-2]['macd_dea']
                 curr_dif = latest_data['macd_dif']
                 curr_dea = latest_data['macd_dea']
+                prev_hist = data.iloc[-2]['macd']
+                curr_hist = latest_data['macd']
+
+                dif_dea_relation = "DIF>DEA" if curr_dif > curr_dea else ("DIF<DEA" if curr_dif < curr_dea else "DIF=DEA")
+
+                if curr_hist > prev_hist:
+                    macd_hist_trend = "柱状图走强"
+                elif curr_hist < prev_hist:
+                    macd_hist_trend = "柱状图走弱"
+                else:
+                    macd_hist_trend = "柱状图持平"
 
                 if prev_dif <= prev_dea and curr_dif > curr_dea:
-                    result += "   ⚠️ MACD金叉信号（DIF上穿DEA）\n\n"
+                    macd_cross_signal = "金叉"
                 elif prev_dif >= prev_dea and curr_dif < curr_dea:
-                    result += "   ⚠️ MACD死叉信号（DIF下穿DEA）\n\n"
+                    macd_cross_signal = "死叉"
                 else:
-                    result += "\n"
-            else:
-                result += "\n"
+                    macd_cross_signal = "无交叉"
+
+            result += (
+                f"   MACD交叉识别: {macd_cross_signal}; 当前关系: {dif_dea_relation}; "
+                f"柱状图变化: {macd_hist_trend}\n\n"
+            )
+
+            result += "🧾 MACHINE_READABLE_MACD_CONCLUSIONS:\n"
+            result += (
+                f"   macd.cross_signal={macd_cross_signal};"
+                f"macd.dif_dea_relation={dif_dea_relation};"
+                f"macd.hist_trend={macd_hist_trend};"
+                f"macd.dif={float(latest_data['macd_dif']):.6f};"
+                f"macd.dea={float(latest_data['macd_dea']):.6f};"
+                f"macd.hist={float(latest_data['macd']):.6f}\n\n"
+            )
 
             # RSI指标 - 同花顺风格 (6, 12, 24)
             rsi6 = latest_data['rsi6']
