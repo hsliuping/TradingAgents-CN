@@ -184,7 +184,15 @@ class TushareAdapter(DataSourceAdapter):
             if prov is None or prov.api is None:
                 return None
             # normalize ts_code
-            ts_code = prov._normalize_symbol(code) if hasattr(prov, "_normalize_symbol") else code
+            # Prefer _normalize_ts_code (the actual method name in TushareProvider).
+            # Falling back to raw code (e.g. "601398" instead of "601398.SH") makes
+            # tushare pro_bar return empty data silently.
+            if hasattr(prov, "_normalize_ts_code"):
+                ts_code = prov._normalize_ts_code(code)
+            elif hasattr(prov, "_normalize_symbol"):
+                ts_code = prov._normalize_symbol(code)
+            else:
+                ts_code = code
             # map period -> freq
             freq_map = {
                 "day": "D",
@@ -249,7 +257,13 @@ class TushareAdapter(DataSourceAdapter):
         items = []
         # resolve ts_code and date range
         try:
-            ts_code = self._provider._normalize_symbol(code) if hasattr(self._provider, "_normalize_symbol") else code
+            # Same fix as get_kline: prefer _normalize_ts_code
+            if hasattr(self._provider, "_normalize_ts_code"):
+                ts_code = self._provider._normalize_ts_code(code)
+            elif hasattr(self._provider, "_normalize_symbol"):
+                ts_code = self._provider._normalize_symbol(code)
+            else:
+                ts_code = code
         except Exception:
             ts_code = code
         try:
