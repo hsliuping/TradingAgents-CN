@@ -54,6 +54,10 @@
               <el-icon><Download /></el-icon>
               批量导出
             </el-button>
+            <el-button type="danger" @click="deleteSelected" :disabled="selectedReports.length === 0">
+              <el-icon><Delete /></el-icon>
+              删除
+            </el-button>
             <el-button @click="refreshReports">
               <el-icon><Refresh /></el-icon>
               刷新
@@ -191,6 +195,7 @@ import {
   Document,
   Search,
   Download,
+  Delete,
   Refresh,
   ArrowDown
 } from '@element-plus/icons-vue'
@@ -419,6 +424,61 @@ const deleteReport = async (report: ReportListItem) => {
       console.error('删除报告失败:', err)
       ElMessage.error('删除报告失败')
     }
+  }
+}
+
+const deleteSelected = async () => {
+  const count = selectedReports.value.length
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${count} 份报告吗？此操作不可撤销。`,
+      '批量删除确认',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    loading.value = true
+    let successCount = 0
+    let failCount = 0
+
+    for (const report of selectedReports.value) {
+      try {
+        const response = await fetch(`/api/reports/${report.id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${authStore.token}`,
+            'Content-Type': 'application/json'
+          }
+        })
+
+        if (response.ok) {
+          const result = await response.json()
+          if (result.success) {
+            successCount++
+            continue
+          }
+        }
+        failCount++
+      } catch {
+        failCount++
+      }
+    }
+
+    if (failCount === 0) {
+      ElMessage.success(`成功删除 ${successCount} 份报告`)
+    } else {
+      ElMessage.warning(`成功删除 ${successCount} 份，失败 ${failCount} 份`)
+    }
+
+    selectedReports.value = []
+    refreshReports()
+  } catch {
+    // 用户取消
+  } finally {
+    loading.value = false
   }
 }
 

@@ -162,6 +162,19 @@ class SingleAnalysisRequest(BaseModel):
         return self.symbol or self.stock_code or ""
 
 
+class DateRangeAnalysisRequest(BaseModel):
+    """区间分析请求 - 对同一股票在多个交易日并行执行分析"""
+    symbol: Optional[str] = Field(None, description="6位股票代码")
+    stock_code: Optional[str] = Field(None, description="股票代码(已废弃,使用symbol)")
+    start_date: str = Field(..., description="起始日期 YYYY-MM-DD")
+    end_date: str = Field(..., description="结束日期 YYYY-MM-DD")
+    parameters: Optional[AnalysisParameters] = None
+
+    def get_symbol(self) -> str:
+        """获取股票代码(兼容旧字段)"""
+        return self.symbol or self.stock_code or ""
+
+
 class BatchAnalysisRequest(BaseModel):
     """批量分析请求"""
     title: str = Field(..., description="批次标题")

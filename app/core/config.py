@@ -141,6 +141,11 @@ class Settings(BaseSettings):
     GLOBAL_CONCURRENT_LIMIT: int = Field(default=50)
     DEFAULT_DAILY_QUOTA: int = Field(default=1000)
 
+    # 区间分析并发控制
+    DATERANGE_MAX_CONCURRENT: int = Field(default=5, description="区间分析最大同时执行任务数")
+    DATERANGE_STAGGER_DELAY: float = Field(default=3.0, description="区间分析任务间交错启动延迟(秒)")
+    DATERANGE_MAX_TRADING_DAYS: int = Field(default=30, description="区间分析最大交易日数量")
+
     # 速率限制
     RATE_LIMIT_ENABLED: bool = Field(default=True)
     DEFAULT_RATE_LIMIT: int = Field(default=100)  # 每分钟请求数

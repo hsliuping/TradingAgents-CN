@@ -37,6 +37,39 @@ export interface SingleAnalysisRequest {
   }
 }
 
+// 区间分析请求格式
+export interface DateRangeAnalysisRequest {
+  symbol?: string
+  stock_code?: string
+  start_date: string   // YYYY-MM-DD
+  end_date: string     // YYYY-MM-DD
+  parameters?: SingleAnalysisRequest['parameters']
+}
+
+// 区间分析任务映射
+export interface DateRangeTaskMapping {
+  date: string
+  task_id: string
+}
+
+// 区间分析响应
+export interface DateRangeAnalysisResponse {
+  batch_id: string
+  total_tasks: number
+  trading_days: string[]
+  task_ids: string[]
+  mapping: DateRangeTaskMapping[]
+  status: string
+}
+
+// 交易日预览响应
+export interface TradingDaysPreview {
+  trading_days: string[]
+  count: number
+  max_allowed: number
+  exceeds_limit: boolean
+}
+
 export interface AnalysisProgress {
   analysis_id: string
   status: 'pending' | 'running' | 'completed' | 'failed'
@@ -125,6 +158,18 @@ export const analysisApi = {
   // 开始单股分析（使用后端期望的格式）
   startSingleAnalysis(analysisRequest: SingleAnalysisRequest): Promise<ApiResponse<any>> {
     return request.post('/api/analysis/single', analysisRequest)
+  },
+
+  // 提交区间分析（同一股票，多个交易日并行分析）
+  startDateRangeAnalysis(req: DateRangeAnalysisRequest): Promise<ApiResponse<DateRangeAnalysisResponse>> {
+    return request.post('/api/analysis/date-range', req)
+  },
+
+  // 预览区间内交易日列表
+  getTradingDays(startDate: string, endDate: string, marketType: string = 'A股'): Promise<ApiResponse<TradingDaysPreview>> {
+    return request.get('/api/analysis/trading-days', {
+      params: { start_date: startDate, end_date: endDate, market_type: marketType }
+    })
   },
 
   // 获取任务状态
