@@ -1,0 +1,28 @@
+name: 股票AI分析
+
+on:
+  workflow_dispatch:
+    inputs:
+      stock_code:
+        description: '股票代码 (如: 600032)'
+        required: true
+        default: '600032'
+      deep_level:
+        description: '分析深度 (1-5)'
+        required: false
+        default: '2'
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e .
+      - run: |
+          python -c "from tradingagents.agentchat import AgentChat; print(AgentChat(stock_code='${{ github.event.inputs.stock_code }}').run())"
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
