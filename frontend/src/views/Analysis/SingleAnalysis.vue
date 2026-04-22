@@ -827,7 +827,17 @@ const depthOptions = [
 
 // 禁用日期
 const disabledDate = (time: Date) => {
-  return time.getTime() > Date.now()
+  const isFuture = time.getTime() > Date.now()
+  const day = time.getDay()
+  const isWeekend = day === 0 || day === 6
+  return isFuture || isWeekend
+}
+
+const formatLocalDate = (date: Date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 // 股票代码输入时的处理
@@ -941,7 +951,7 @@ const submitAnalysis = async () => {
       stock_code: analysisForm.symbol,  // 兼容字段
       parameters: {
         market_type: analysisForm.market,
-        analysis_date: analysisDate.toISOString().split('T')[0],
+        analysis_date: formatLocalDate(analysisDate),
         research_depth: getDepthDescription(analysisForm.researchDepth),
         selected_analysts: convertAnalystNamesToIds(analysisForm.selectedAnalysts),
         include_sentiment: analysisForm.includeSentiment,
