@@ -476,6 +476,24 @@ class WorkflowAPI:
 
             market_info = StockUtils.get_market_info(stock_code)
             is_china = market_info.get('is_china', False)
+            effective_data_date = analysis_date
+            stable_data_note = ""
+
+            if is_china:
+                try:
+                    from core.tools.trade_date_policy import apply_stable_data_cutoff, build_stable_data_cutoff_note
+
+                    effective_data_date = apply_stable_data_cutoff(analysis_date)
+                    stable_data_note = build_stable_data_cutoff_note(
+                        analysis_date,
+                        effective_data_date,
+                        subject="A股日频稳定数据",
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ 计算稳定数据日期失败，回退到分析日期: {e}")
+
+            system_vars["effective_data_date"] = effective_data_date
+            system_vars["stable_data_note"] = stable_data_note
 
             # 1. 从数据库获取股票基础信息（公司名称、行业）
             company_name = stock_code
@@ -505,45 +523,50 @@ class WorkflowAPI:
 
             # 2. 从数据库获取当前价格
             current_price = "未知"
+            current_price_context_date = ""
 
             if is_china:
                 try:
                     db = get_mongo_db_sync()  # 使用同步版本
                     logger.info(f"🔍 [价格查询] 开始查询股票 {stock_code} 的价格...")
 
-                    # 优先从 market_quotes 获取最新价格
-                    logger.info(f"🔍 [价格查询] 步骤1: 从 market_quotes 查询...")
-                    quote = db.market_quotes.find_one(
-                        {"$or": [{"code": stock_code}, {"symbol": stock_code}]},
-                        {"_id": 0, "close": 1, "trade_date": 1},
-                        sort=[("trade_date", -1)]  # 按日期降序，获取最新数据
-                    )
+                    # 优先从 market_quotes 获取不晚于稳定日期的价格，避免把汇总口径拉回分析日当天。
+                    logger.info(f"🔍 [价格查询] 步骤1: 从 market_quotes 查询稳定日期价格...")
+                    quote = None
+                    date_candidates = [effective_data_date]
+                    compact_effective_date = effective_data_date.replace('-', '')
+                    if compact_effective_date != effective_data_date:
+                        date_candidates.append(compact_effective_date)
+
+                    for date_candidate in date_candidates:
+                        quote = db.market_quotes.find_one(
+                            {
+                                "$or": [{"code": stock_code}, {"symbol": stock_code}],
+                                "trade_date": {"$lte": date_candidate},
+                            },
+                            {"_id": 0, "close": 1, "trade_date": 1},
+                            sort=[("trade_date", -1)]
+                        )
+                        if quote:
+                            break
+
                     logger.info(f"🔍 [价格查询] market_quotes 查询结果: {quote}")
 
                     if quote and quote.get("close"):
                         current_price = str(quote["close"])
+                        current_price_context_date = str(quote.get("trade_date") or "")
                         logger.info(f"✅ [系统变量-数据库] 当前价格: ¥{current_price} (日期: {quote.get('trade_date', 'N/A')})")
                     else:
-                        logger.info(f"🔍 [价格查询] market_quotes 未找到数据，尝试步骤2...")
-                        # 回退到 stock_basic_info 的 current_price 字段
-                        logger.info(f"🔍 [价格查询] 步骤2: 从 stock_basic_info 查询...")
-                        stock_info = db.stock_basic_info.find_one(
-                            {"$or": [{"code": stock_code}, {"symbol": stock_code}]},
-                            {"_id": 0, "current_price": 1}
+                        logger.warning(
+                            f"⚠️ 数据库中未找到股票 {stock_code} 在稳定日期 {effective_data_date} 及之前的价格信息"
                         )
-                        logger.info(f"🔍 [价格查询] stock_basic_info 查询结果: {stock_info}")
-
-                        if stock_info and stock_info.get("current_price"):
-                            current_price = str(stock_info["current_price"])
-                            logger.info(f"✅ [系统变量-数据库] 当前价格(备用): ¥{current_price}")
-                        else:
-                            logger.warning(f"⚠️ 数据库中未找到股票 {stock_code} 的价格信息")
                 except Exception as e:
                     logger.warning(f"⚠️ 从数据库获取当前价格失败: {e}")
                     import traceback
                     traceback.print_exc()
 
             system_vars["current_price"] = current_price
+            system_vars["current_price_context_date"] = current_price_context_date
 
             # 3. 市场信息
             market_name = "A股" if is_china else "港股" if market_info.get('is_hk') else "美股"
@@ -570,6 +593,7 @@ class WorkflowAPI:
             logger.info(f"   - company_name: {company_name}")
             logger.info(f"   - industry: {industry}")
             logger.info(f"   - current_price: {current_price}")
+            logger.info(f"   - effective_data_date: {effective_data_date}")
             logger.info(f"   - market_name: {market_name}")
 
         except Exception as e:

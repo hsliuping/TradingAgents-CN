@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from app.utils.compliance import RESEARCH_ONLY_DISCLAIMER, sanitize_display_report_text
+from app.utils.compliance import RESEARCH_ONLY_DISCLAIMER, sanitize_display_report_text, sanitize_report_artifacts
 
 logger = logging.getLogger(__name__)
 
@@ -275,9 +275,12 @@ class ReportExporter:
         )
 
     def _normalize_module_content(self, module_key: str, title: str, module_content: str) -> str:
-        normalized_content = module_content.strip()
+        normalized_content = sanitize_report_artifacts(module_content.strip()) or module_content.strip()
         if module_key in EXPORT_SANITIZED_MODULE_KEYS:
             normalized_content = sanitize_display_report_text(normalized_content, fallback=normalized_content)
+
+        if not normalized_content and module_key == "news_report":
+            normalized_content = "工具结果未成功展开为新闻报告，当前新闻结论仍待验证。"
 
         normalized_content = self._normalize_intra_module_headings(normalized_content)
         normalized_content = self._normalize_disclaimer(normalized_content)

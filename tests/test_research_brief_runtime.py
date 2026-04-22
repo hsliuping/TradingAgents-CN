@@ -1,6 +1,7 @@
 from app.utils.compliance import (
     sanitize_analysis_payload,
     sanitize_display_report_text,
+    sanitize_report_artifacts,
     sanitize_position_analysis_payload,
     sanitize_trade_review_payload,
 )
@@ -223,6 +224,32 @@ def test_sanitize_display_report_text_normalizes_legacy_titles_and_soft_investme
     assert "估值与预期修复的早期信号" in sanitized
     assert "研究型用户" in sanitized
     assert "研究线索" in sanitized
+
+
+def test_sanitize_report_artifacts_removes_raw_news_tool_call_payload() -> None:
+    raw_text = """## 新闻研究报告
+
+{"name": "get_stock_news_details_unified", "arguments": {"news_ids": "news_1,news_2"}}
+</tool_call>
+"""
+
+    sanitized = sanitize_report_artifacts(raw_text)
+
+    assert 'get_stock_news_details_unified' not in sanitized
+    assert '</tool_call>' not in sanitized
+    assert '## 新闻研究报告' in sanitized
+
+
+def test_sanitize_report_artifacts_downgrades_conflicting_stable_data_snapshot_date() -> None:
+    raw_text = """### 核心观察
+当前尚无分析日（2026-04-21）对应的稳定收盘后日频数据，因此本次历史估值分位与同业比较均按前一可用交易日口径执行。
+所有估值指标快照日期统一为 **2026-04-21**。
+"""
+
+    sanitized = sanitize_report_artifacts(raw_text)
+
+    assert '所有估值指标快照日期统一为 **2026-04-21**' not in sanitized
+    assert '当前正文日期口径仍待验证' in sanitized
 
 
 def test_sanitize_position_analysis_payload_strips_execution_fields() -> None:

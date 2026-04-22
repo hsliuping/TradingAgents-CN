@@ -12,6 +12,8 @@ from typing import Optional, Dict, Any, List
 
 import pandas as pd
 
+from core.tools.trade_date_policy import apply_stable_data_cutoff, build_stable_data_cutoff_note
+
 logger = logging.getLogger(__name__)
 
 MARGIN_CORE_EXCHANGES = ("SSE", "SZSE")
@@ -125,6 +127,10 @@ async def _get_latest_trade_date(trade_date: str) -> str:
     provider = _get_tushare_provider()
     # 清理日期字符串，去掉可能的时间部分
     trade_date_clean = _clean_date_string(trade_date).replace('-', '')
+    stable_trade_date = apply_stable_data_cutoff(trade_date_clean)
+    if stable_trade_date != trade_date_clean:
+        logger.info(f"🕖 {trade_date} 尚未达到稳定数据时点，按业务口径先回退到 {stable_trade_date}")
+        trade_date_clean = stable_trade_date
 
     try:
         # 计算8天前的日期
@@ -199,7 +205,15 @@ async def get_index_trend(
         ]
 
         if actual_trade_date_formatted != _clean_date_string(trade_date):
-            report_lines.insert(4, f"说明: 输入日期 {trade_date} 无可用数据，已切换到最近交易日 {actual_trade_date_formatted}")
+            report_lines.insert(
+                4,
+                "说明: "
+                + build_stable_data_cutoff_note(
+                    _clean_date_string(trade_date),
+                    actual_trade_date_formatted,
+                    subject="大盘分析所需的当日收盘后日频数据",
+                ),
+            )
             report_lines.insert(5, "")
         
         for index_code, index_name in MAIN_INDICES.items():
@@ -545,6 +559,15 @@ async def analyze_index(trade_date: str) -> str:
             "",
             "=" * 60,
         ]
+
+        stable_note = build_stable_data_cutoff_note(
+            _clean_date_string(trade_date),
+            actual_trade_date_formatted,
+            subject="大盘分析所需的当日收盘后日频数据",
+        )
+        if stable_note:
+            full_report.insert(4, f"说明: {stable_note}")
+            full_report.insert(5, "")
 
         return "\n".join(full_report)
 

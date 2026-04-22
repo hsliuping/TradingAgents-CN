@@ -16,7 +16,7 @@ import json
 import re
 from typing import Dict, Any, Optional, Tuple
 
-from app.utils.compliance import normalize_research_brief_lists, sanitize_display_report_text
+from app.utils.compliance import normalize_research_brief_lists, sanitize_display_report_text, sanitize_report_artifacts
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +180,14 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
 
 def _clean_report_for_display(report_key: str, text: str) -> str:
     cleaned_text = _remove_author_signature(text.strip())
+    artifact_cleaned_text = sanitize_report_artifacts(cleaned_text)
+    if artifact_cleaned_text:
+        cleaned_text = artifact_cleaned_text
+    elif any(token in cleaned_text for token in ("</tool_call>", "<tool_call", '"name": "get_')):
+        if report_key == 'news_report':
+            return "工具结果未成功展开为新闻报告，当前新闻结论仍待验证。"
+        return "工具结果未成功展开为正文，当前结论仍待验证。"
+
     if report_key in DISPLAY_SANITIZED_REPORT_KEYS:
         cleaned_text = sanitize_display_report_text(cleaned_text, fallback=cleaned_text)
     return cleaned_text

@@ -15,6 +15,7 @@ from langchain_core.tools import tool
 import pandas as pd
 
 from core.tools.base import register_tool
+from core.tools.trade_date_policy import apply_stable_data_cutoff, build_stable_data_cutoff_note
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +176,35 @@ def _format_pct_change(value: Any) -> str:
     return f"{number:+.2f}%"
 
 
+def _build_china_company_profile(ticker: str) -> Optional[str]:
+    """构造不含实时价格字段的 A 股公司基础信息。"""
+    normalized_ticker = _normalize_china_ticker(ticker)
+
+    try:
+        from tradingagents.dataflows.cache.app_adapter import get_basics_from_cache
+
+        basics_doc = get_basics_from_cache(normalized_ticker)
+        if isinstance(basics_doc, list):
+            basics_doc = basics_doc[0] if basics_doc else None
+
+        if not basics_doc:
+            return None
+
+        lines = [
+            f"股票代码: {normalized_ticker}",
+            f"股票名称: {_snapshot_value((basics_doc or {}).get('name') or (basics_doc or {}).get('stock_name'), '未知公司')}",
+            f"所属地区: {_snapshot_value((basics_doc or {}).get('area'), '未知')}",
+            f"所属行业: {_snapshot_value((basics_doc or {}).get('industry') or (basics_doc or {}).get('industry_name'), '未知')}",
+            f"上市市场: {_snapshot_value((basics_doc or {}).get('market'), '未知')}",
+            f"上市日期: {_snapshot_value((basics_doc or {}).get('list_date'), '未知')}",
+        ]
+        logger.info(f"📊 [统一基本面工具] 使用数据库静态信息构造 A 股公司概况: {normalized_ticker}")
+        return "\n".join(lines)
+    except Exception as exc:
+        logger.warning(f"⚠️ A股静态公司信息读取失败: {exc}")
+        return None
+
+
 def _build_china_snapshot_from_cache(ticker: str) -> Optional[str]:
     """优先从 app MongoDB 快照构造当前价格信息，避免为基本面工具拉取历史行情。"""
     normalized_ticker = _normalize_china_ticker(ticker)
@@ -257,6 +287,49 @@ def _get_china_price_snapshot(ticker: str, curr_date: str) -> str:
 
     logger.warning(f"⚠️ A股数据库快照不可用，降级到行情接口: {normalized_ticker}")
     return get_china_stock_data_unified(normalized_ticker, recent_start_date, recent_end_date)
+
+
+def _strip_realtime_snapshot_fields(text: Optional[str]) -> str:
+    """移除基本面研究中不应使用的实时快照字段。"""
+    if not text:
+        return ""
+
+    dropped_markers = (
+        '当前价格',
+        '当前股价',
+        '最新价格',
+        '涨跌幅',
+        '成交量',
+        '总市值',
+        '流通市值',
+        '基本价格信息',
+        '市盈率(PE)',
+        '市盈率TTM(PE_TTM)',
+        '市净率(PB)',
+        '市销率(PS)',
+        '股息收益率',
+    )
+
+    cleaned_lines: List[str] = []
+    previous_blank = False
+    for raw_line in str(text).splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+
+        if stripped and any(marker in stripped for marker in dropped_markers):
+            continue
+
+        if not stripped:
+            if previous_blank:
+                continue
+            previous_blank = True
+            cleaned_lines.append("")
+            continue
+
+        previous_blank = False
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines).strip()
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -417,6 +490,8 @@ def _build_historical_valuation_section_from_frame(
     *,
     window_start: str,
     window_end: str,
+    requested_analysis_date: Optional[str] = None,
+    effective_analysis_date: Optional[str] = None,
 ) -> str:
     if valuation_df is None or valuation_df.empty:
         return "工具结果未提供历史估值分位数据。"
@@ -427,11 +502,23 @@ def _build_historical_valuation_section_from_frame(
 
     working_df['trade_date'] = working_df['trade_date'].astype(str)
     working_df = working_df.sort_values('trade_date', ascending=False)
+    latest_available_trade_date = _display_period(str(working_df.iloc[0]['trade_date']))
 
     lines = [
         f"- 样本窗口: {window_start} 至 {window_end}",
         f"- 有效交易日样本: {len(working_df)}",
+        f"- 最近可用估值快照日期: {latest_available_trade_date}",
+        "- 估值快照口径: 下文如写“当前 PE/PB/PS(TTM)”等，均指该指标历史序列中最近可得且有效的交易日快照，而非实时盘口价格。",
+        "- 日期说明: 每个指标后括号中的日期即该指标本次采用的估值快照日期；若不同指标可用样本不同，不默认视为同一交易日。不得用分析日期替代该快照日期。",
     ]
+
+    cutoff_note = build_stable_data_cutoff_note(
+        requested_analysis_date or "",
+        effective_analysis_date or "",
+        subject="估值分析所需的当日收盘后日频数据",
+    )
+    if cutoff_note:
+        lines.append(f"- 稳定数据说明: {cutoff_note}")
 
     metric_specs = [
         ('pe', 'PE'),
@@ -484,6 +571,13 @@ def _get_historical_valuation_summary(
 ) -> str:
     normalized_ticker = _normalize_china_ticker(ticker)
 
+    requested_curr_date = curr_date
+    stable_curr_date = apply_stable_data_cutoff(curr_date)
+    if stable_curr_date != curr_date:
+        logger.info(
+            f"🕖 基本面历史估值输入日期 {requested_curr_date} 尚未达到稳定数据时点，按业务口径回退到 {stable_curr_date}"
+        )
+        curr_date = stable_curr_date
     try:
         end_dt = datetime.strptime(curr_date, '%Y-%m-%d')
     except Exception:
@@ -512,6 +606,8 @@ def _get_historical_valuation_summary(
             valuation_df,
             window_start=start_dt.strftime('%Y-%m-%d'),
             window_end=end_dt.strftime('%Y-%m-%d'),
+            requested_analysis_date=requested_curr_date,
+            effective_analysis_date=curr_date,
         )
     except Exception as exc:
         logger.warning(f"⚠️ 历史估值分位计算失败: {exc}")
@@ -577,20 +673,48 @@ def get_stock_fundamentals_unified(
             # 中国A股
             logger.info(f"🇨🇳 [统一基本面工具] 处理A股数据...")
             normalized_ticker = _normalize_china_ticker(ticker)
-            current_price_data = ""
+            company_profile_data = ""
 
             try:
-                current_price_data = _get_china_price_snapshot(normalized_ticker, curr_date)
-                result_data.append(f"## A股当前价格信息\n{current_price_data}")
+                company_profile_data = _build_china_company_profile(normalized_ticker)
+                if not company_profile_data:
+                    from tradingagents.dataflows.optimized_china_data import OptimizedChinaDataProvider
+
+                    analyzer = OptimizedChinaDataProvider()
+                    company_profile_data = _strip_realtime_snapshot_fields(
+                        analyzer._get_stock_basic_info_only(normalized_ticker)
+                    )
+
+                if company_profile_data:
+                    result_data.append(f"## A股公司基础信息\n{company_profile_data}")
             except Exception as e:
-                logger.error(f"❌ A股价格数据获取失败: {e}")
-                result_data.append(f"## A股当前价格信息\n获取失败: {e}")
+                logger.error(f"❌ A股静态公司信息获取失败: {e}")
+
+            result_data.append(
+                "## A股基本面分析口径说明\n"
+                "- 本工具面向历史财务、历史估值区间和已披露经营数据分析。\n"
+                "- 不提供当前股价、涨跌幅、成交量、当前总市值等实时快照字段，也不应将这些字段作为基本面结论依据。"
+            )
+            result_data.append(
+                "## A股估值快照日期说明\n"
+                "- 估值快照口径: PE、PE(TTM)、PB、PS(TTM) 等估值指标如被表述为“当前值”，均指对应指标最近可得且有效的交易日快照，而非实时盘口价格。\n"
+                "- 历史估值分位部分如已在指标后附带日期，该日期就是该指标本次采用的估值快照日期；若不同指标日期不同，不默认视为同一交易日。"
+            )
+            stable_curr_date = apply_stable_data_cutoff(curr_date)
+            stable_note = build_stable_data_cutoff_note(
+                curr_date,
+                stable_curr_date,
+                subject="估值分析所需的当日收盘后日频数据",
+            )
+            if stable_note:
+                result_data.append(f"## A股数据日期说明\n- {stable_note}")
 
             try:
                 # 获取基本面财务数据
                 from tradingagents.dataflows.optimized_china_data import OptimizedChinaDataProvider
                 analyzer = OptimizedChinaDataProvider()
-                fundamentals_data = analyzer._generate_fundamentals_report(normalized_ticker, current_price_data, "standard")
+                fundamentals_data = analyzer._generate_fundamentals_report(normalized_ticker, company_profile_data, "standard")
+                fundamentals_data = _strip_realtime_snapshot_fields(fundamentals_data)
                 result_data.append(f"## A股基本面财务数据\n{fundamentals_data}")
             except Exception as e:
                 logger.error(f"❌ A股基本面数据获取失败: {e}")

@@ -106,9 +106,12 @@ class TestFinancialStatementTools:
             valuation_df,
             window_start="2021-10-01",
             window_end="2024-09-30",
+            requested_analysis_date="2024-10-01",
+            effective_analysis_date="2024-09-30",
         )
 
         assert "样本窗口: 2021-10-01 至 2024-09-30" in result
+        assert "当前尚无 2024-10-01 的估值分析所需的当日收盘后日频数据，本次分析按前一可用交易日 2024-09-30 的口径执行。" in result
         assert "PE(TTM): 当前 10.50 倍" in result
         assert "PB: 当前 1.10 倍" in result
         assert "PEG: 当前工具未提供稳定的日频 PEG 历史序列" in result
@@ -257,14 +260,11 @@ class TestFinancialStatementTools:
         captured = {}
 
         class FakeAnalyzer:
-            def _get_stock_basic_info_only(self, ticker):
-                raise AssertionError("不应回退到基础信息 provider")
-
             def _generate_fundamentals_report(self, ticker, stock_data, analysis_modules="standard"):
                 captured["ticker"] = ticker
                 captured["stock_data"] = stock_data
                 captured["analysis_modules"] = analysis_modules
-                return "mock fundamentals"
+                return "## 📊 股票基本信息\n- **股票代码**: 000001\n- **股票名称**: 平安银行\n- **当前股价**: 12.34\n- **总市值**: 1234亿元\n\nmock fundamentals"
 
         monkeypatch.setattr(
             "tradingagents.dataflows.cache.app_adapter.get_basics_from_cache",
@@ -294,17 +294,28 @@ class TestFinancialStatementTools:
         monkeypatch.setattr(
             fundamentals_tools,
             "_get_historical_valuation_summary",
-            lambda ticker, curr_date, lookback_years=3: "- PE(TTM): 当前 12.30 倍 | 历史中位数 10.00 倍 | 历史分位 70.0% | 历史位置: 历史中高位",
+            lambda ticker, curr_date, lookback_years=3: (
+                "- 最近可用估值快照日期: 2026-04-20\n"
+                "- PE(TTM): 当前 12.30 倍（2026-04-20） | 历史中位数 10.00 倍 | 历史分位 70.0% | 历史位置: 历史中高位"
+            ),
         )
 
         result = fundamentals_tools.get_stock_fundamentals_unified.invoke({"ticker": "000001.SZ"})
 
         assert "平安银行" in result
-        assert "当前价格: 12.34" in result
-        assert "涨跌幅: +1.23%" in result
+        assert "A股公司基础信息" in result
+        assert "A股基本面分析口径说明" in result
+        assert "当前价格: 12.34" not in result
+        assert "涨跌幅: +1.23%" not in result
+        assert "- **当前股价**:" not in result
+        assert "- **总市值**:" not in result
         assert "mock fundamentals" in result
         assert "A股历史估值分位" in result
         assert "历史分位 70.0%" in result
+        assert "估值快照口径" in result
+        assert "本次采用的估值快照日期" in result
+        assert "最近可用估值快照日期" in result
         assert captured["ticker"] == "000001"
         assert "股票代码: 000001" in captured["stock_data"]
+        assert "当前价格" not in captured["stock_data"]
         assert captured["analysis_modules"] == "standard"

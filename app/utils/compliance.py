@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Tuple
 
 
 SAFE_REPORT_KEYS = (
@@ -125,6 +125,26 @@ _LEGACY_DISCLAIMER_BLOCK_PATTERN = re.compile(
 _LEGACY_DISCLAIMER_LINE_PATTERN = re.compile(
     r"(?is)请结合自身情况独立判断。投资有风险，决策需谨慎。必要时请咨询专业顾问。"
 )
+_TOOL_CALL_ARTIFACT_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"^</?tool_call>$",
+        r'^\{"name"\s*:\s*"get_[^\"]+".*"arguments"\s*:\s*\{.*\}\s*\}$',
+        r'^"name"\s*:\s*"get_[^\"]+"',
+        r'^"arguments"\s*:\s*\{',
+    )
+]
+_STABLE_DATA_REQUEST_DATE_PATTERNS = [
+    re.compile(pattern)
+    for pattern in (
+        r"当前尚无分析日[（(](\d{4}-\d{2}-\d{2})[）)]对应的稳定收盘后日频数据",
+        r"当前尚无\s*(\d{4}-\d{2}-\d{2})\s*对应的稳定收盘后日频数据",
+        r"当前尚无\s*(\d{4}-\d{2}-\d{2})\s*的[^。\n]*稳定收盘后日频数据",
+    )
+]
+_STABLE_DATA_SNAPSHOT_LINE_PATTERN = re.compile(
+    r"所有估值指标快照日期统一为\s*(?:\*\*)?(\d{4}-\d{2}-\d{2})(?:\*\*)?[。.]?"
+)
 
 
 def _as_text(value: Any) -> str:
@@ -185,6 +205,62 @@ def _normalize_research_disclaimer(text: str) -> str:
     return normalized
 
 
+def _strip_tool_call_artifacts(text: str) -> Tuple[str, bool]:
+    cleaned_lines: List[str] = []
+    removed_any = False
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        normalized = _plain_text(raw_line)
+
+        if any(pattern.search(stripped) or pattern.search(normalized) for pattern in _TOOL_CALL_ARTIFACT_PATTERNS):
+            removed_any = True
+            continue
+
+        if stripped.startswith("{") and '"name"' in stripped and '"arguments"' in stripped and '"get_' in stripped:
+            removed_any = True
+            continue
+
+        cleaned_lines.append(raw_line)
+
+    cleaned_text = "\n".join(cleaned_lines)
+    cleaned_text = re.sub(r"```(?:json)?\s*```", "", cleaned_text, flags=re.IGNORECASE)
+    cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text).strip()
+    return cleaned_text, removed_any
+
+
+def _normalize_stable_data_snapshot_conflicts(text: str) -> str:
+    requested_date = ""
+    for pattern in _STABLE_DATA_REQUEST_DATE_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            requested_date = match.group(1)
+            break
+
+    if not requested_date:
+        return text
+
+    def _replace_snapshot_line(match: re.Match[str]) -> str:
+        snapshot_date = match.group(1)
+        if snapshot_date == requested_date:
+            return "所有估值指标快照日期应以工具返回的最近可用交易日为准，当前正文日期口径仍待验证。"
+        return match.group(0)
+
+    return _STABLE_DATA_SNAPSHOT_LINE_PATTERN.sub(_replace_snapshot_line, text)
+
+
+def sanitize_report_artifacts(text: Any) -> str:
+    raw_text = _as_text(text)
+    if not raw_text:
+        return ""
+
+    normalized = _normalize_research_disclaimer(raw_text)
+    normalized, _ = _strip_tool_call_artifacts(normalized)
+    normalized = _normalize_stable_data_snapshot_conflicts(normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized).strip()
+    return normalized
+
+
 def is_low_signal_text(text: str) -> bool:
     normalized = _plain_text(text)
     if not normalized:
@@ -212,7 +288,7 @@ def _fragment_score(text: str) -> int:
 
 
 def sanitize_text_block(text: Any, fallback: str = "") -> str:
-    raw_text = _as_text(text)
+    raw_text = sanitize_report_artifacts(text)
     if not raw_text:
         return fallback
 
@@ -374,11 +450,9 @@ def normalize_research_brief_lists(
 
 
 def sanitize_display_report_text(text: Any, fallback: str = "") -> str:
-    raw_text = _as_text(text)
+    raw_text = sanitize_report_artifacts(text)
     if not raw_text:
         return fallback
-
-    raw_text = _normalize_research_disclaimer(raw_text)
 
     cleaned_lines: List[str] = []
 

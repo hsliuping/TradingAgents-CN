@@ -11,6 +11,8 @@ from typing import Optional, Dict, Any, List, Tuple
 
 import pandas as pd
 
+from core.tools.trade_date_policy import apply_stable_data_cutoff, build_stable_data_cutoff_note
+
 logger = logging.getLogger(__name__)
 
 
@@ -52,6 +54,13 @@ def _clean_date_string(date_str: str) -> str:
     return date_str.split()[0] if ' ' in date_str else date_str
 
 
+def _format_compact_trade_date(trade_date: str) -> str:
+    clean_date = str(trade_date or "")
+    if len(clean_date) == 8 and clean_date.isdigit():
+        return f"{clean_date[:4]}-{clean_date[4:6]}-{clean_date[6:8]}"
+    return clean_date
+
+
 async def _get_latest_trade_date(trade_date: str) -> str:
     """
     获取最新可用的交易日期
@@ -67,6 +76,10 @@ async def _get_latest_trade_date(trade_date: str) -> str:
     provider = _get_tushare_provider()
     # 清理日期字符串，去掉可能的时间部分
     trade_date_clean = _clean_date_string(trade_date).replace('-', '')
+    stable_trade_date = apply_stable_data_cutoff(trade_date_clean)
+    if stable_trade_date != trade_date_clean:
+        logger.info(f"🕖 {trade_date} 尚未达到稳定数据时点，按业务口径先回退到 {stable_trade_date}")
+        trade_date_clean = stable_trade_date
 
     try:
         # 计算8天前的日期
@@ -99,6 +112,38 @@ async def _get_latest_trade_date(trade_date: str) -> str:
     except Exception as e:
         logger.error(f"❌ 获取最新交易日失败: {e}")
         return trade_date_clean
+
+
+async def _get_latest_available_sector_trade_date(
+    provider,
+    industry: str,
+    trade_date: str,
+    lookback_days: int = 10,
+) -> Tuple[str, pd.DataFrame]:
+    """获取最近可用的行业 daily_basic 数据日期。"""
+    requested_trade_date = await _get_latest_trade_date(trade_date)
+
+    try:
+        current_dt = datetime.strptime(requested_trade_date, '%Y%m%d')
+    except Exception:
+        current_dt = datetime.strptime(_clean_date_string(trade_date).replace('-', ''), '%Y%m%d')
+
+    for offset in range(max(0, lookback_days) + 1):
+        candidate_dt = current_dt - timedelta(days=offset)
+        candidate_trade_date = candidate_dt.strftime('%Y%m%d')
+        industry_df = await provider.get_sector_stocks_daily_basic(
+            industry=industry,
+            trade_date=candidate_trade_date,
+        )
+        if industry_df is not None and not industry_df.empty:
+            if candidate_trade_date != requested_trade_date:
+                logger.info(
+                    f"📅 行业 {industry} 在 {requested_trade_date} 暂无估值数据，回退到最近可用日期 {candidate_trade_date}"
+                )
+            return candidate_trade_date, industry_df
+
+    logger.warning(f"⚠️ 行业 {industry} 在最近 {lookback_days} 天内均无可用估值数据")
+    return requested_trade_date, pd.DataFrame()
 
 
 async def get_stock_sector_info(ticker: str) -> Dict[str, Any]:
@@ -158,6 +203,8 @@ async def get_sector_performance(
     provider = _get_tushare_provider()
     
     try:
+        requested_trade_date = _clean_date_string(trade_date)
+
         # 1. 获取股票所属行业
         industry = await provider.get_stock_industry(ticker)
         if not industry:
@@ -167,33 +214,15 @@ async def get_sector_performance(
         sectors_df = await _get_industry_sector_members(provider, ticker)
         
         # 3. 计算日期范围
-        # 清理日期字符串，去掉可能的时间部分
-        trade_date_clean = _clean_date_string(trade_date).replace('-', '')
-        end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
+        actual_trade_date = await _get_latest_trade_date(trade_date)
+        end_date = datetime.strptime(actual_trade_date, '%Y%m%d')
         start_date = end_date - timedelta(days=lookback_days + 10)  # 多取几天应对非交易日
         start_date_str = start_date.strftime('%Y%m%d')
-        end_date_str = trade_date_clean
-        
-        report_lines = [
-            f"📊 板块表现分析报告",
-            f"{'='*50}",
-            f"🎯 目标股票: {ticker}",
-            f"🏭 所属行业: {industry}",
-            f"📌 主行业锚点: {industry}（股票基础行业字段，全文唯一主行业口径）",
-            f"📅 分析日期: {trade_date}",
-            f"📆 回看周期: {lookback_days} 交易日",
-            "",
-        ]
+        end_date_str = actual_trade_date
         
         # 4. 分析板块表现
+        sector_daily_frames: List[Dict[str, Any]] = []
         if sectors_df is not None and not sectors_df.empty:
-            sector_count = len(sectors_df)
-            report_lines.append(f"📌 所属行业类指数数: {sector_count} 个")
-            report_lines.append("")
-            report_lines.append("【行业类指数涨跌幅排行】")
-            
-            # 获取每个行业类指数的行情数据
-            sector_performance = []
             for _, row in sectors_df.iterrows():
                 sector_code = row.get('ts_code')
                 if not sector_code:
@@ -206,28 +235,89 @@ async def get_sector_performance(
                 )
                 
                 if daily_df is not None and not daily_df.empty:
-                    # 计算累计涨跌幅
-                    daily_df = daily_df.sort_values('trade_date')
-                    if len(daily_df) >= 2:
-                        first_close = daily_df.iloc[0]['close']
-                        last_close = daily_df.iloc[-1]['close']
-                        pct_change = ((last_close - first_close) / first_close) * 100
-                        
-                        # 获取最新一日涨跌
-                        today_pct = daily_df.iloc[-1].get('pct_change', 0)
-                        
-                        sector_performance.append({
+                    sector_df = daily_df.copy()
+                    sector_df['trade_date'] = sector_df['trade_date'].astype(str)
+                    sector_df = sector_df.sort_values('trade_date')
+                    if len(sector_df) >= 2:
+                        sector_daily_frames.append({
                             'code': sector_code,
                             'name': row.get('name', sector_code),
-                            'period_pct': round(pct_change, 2),
-                            'today_pct': round(today_pct, 2) if today_pct else 0
+                            'data': sector_df,
+                            'latest_trade_date': str(sector_df.iloc[-1]['trade_date']),
                         })
 
+        unified_trade_date = actual_trade_date
+        if sector_daily_frames:
+            unified_trade_date = min(
+                frame['latest_trade_date']
+                for frame in sector_daily_frames
+                if frame.get('latest_trade_date')
+            )
+
+        actual_trade_date_formatted = _format_compact_trade_date(unified_trade_date)
+        report_lines = [
+            f"📊 板块表现分析报告",
+            f"{'='*50}",
+            f"🎯 目标股票: {ticker}",
+            f"🏭 所属行业: {industry}",
+            f"📌 主行业锚点: {industry}（股票基础行业字段，全文唯一主行业口径）",
+            f"📅 请求分析日期: {requested_trade_date}",
+            f"📅 实际板块数据日期: {actual_trade_date_formatted}",
+            f"📆 回看周期: {lookback_days} 交易日",
+            "",
+        ]
+
+        stable_note = build_stable_data_cutoff_note(
+            requested_trade_date,
+            actual_trade_date_formatted,
+            subject="板块表现分析所需的当日行业类指数日频数据",
+        )
+        if stable_note:
+            report_lines.append(f"说明: {stable_note}")
+            report_lines.append("")
+
+        actual_market_trade_date_formatted = _format_compact_trade_date(actual_trade_date)
+        if unified_trade_date != actual_trade_date:
+            report_lines.append(
+                "说明: 不同行业类指数的最新可用日期不完全一致，"
+                f"为保持口径一致，以下排名已统一截取到 {actual_trade_date_formatted}。"
+            )
+            report_lines.append(
+                f"补充: 市场层面最近交易日为 {actual_market_trade_date_formatted}，"
+                "但部分行业类指数尚未更新到该日期。"
+            )
+            report_lines.append("")
+
+        if sectors_df is not None and not sectors_df.empty:
+            sector_count = len(sectors_df)
+            report_lines.append(f"📌 所属行业类指数数: {sector_count} 个")
+            report_lines.append("")
+            report_lines.append("【行业类指数涨跌幅排行】")
+
+            sector_performance = []
+            for sector_frame in sector_daily_frames:
+                aligned_df = sector_frame['data'][
+                    sector_frame['data']['trade_date'] <= unified_trade_date
+                ]
+                if len(aligned_df) < 2:
+                    continue
+
+                first_close = aligned_df.iloc[0]['close']
+                last_close = aligned_df.iloc[-1]['close']
+                pct_change = ((last_close - first_close) / first_close) * 100
+                today_pct = aligned_df.iloc[-1].get('pct_change', 0)
+
+                sector_performance.append({
+                    'code': sector_frame['code'],
+                    'name': sector_frame['name'],
+                    'period_pct': round(pct_change, 2),
+                    'today_pct': round(today_pct, 2) if today_pct else 0,
+                })
+
             report_lines.append("注：主行业归属以股票基础行业字段为唯一锚点；以下仅统计同花顺行业类指数（type='I'），用于补充观察结构，不改变主行业归属。")
-            
-            # 按累计涨幅排序
+
             sector_performance.sort(key=lambda x: x['period_pct'], reverse=True)
-            
+
             for i, sp in enumerate(sector_performance, 1):
                 trend = "📈" if sp['period_pct'] > 0 else "📉"
                 report_lines.append(
@@ -443,15 +533,13 @@ async def get_peer_comparison(
         if not industry:
             return f"⚠️ 无法获取股票 {ticker} 的行业信息"
 
-        # 2. 获取最新可用的交易日
-        trade_date_clean = await _get_latest_trade_date(trade_date)
-        trade_date_formatted = f"{trade_date_clean[:4]}-{trade_date_clean[4:6]}-{trade_date_clean[6:8]}"
-
-        # 3. 获取同行业股票每日基础数据
-        industry_df = await provider.get_sector_stocks_daily_basic(
-            industry=industry,
-            trade_date=trade_date_clean
+        requested_trade_date = _clean_date_string(trade_date)
+        actual_trade_date, industry_df = await _get_latest_available_sector_trade_date(
+            provider,
+            industry,
+            trade_date,
         )
+        actual_trade_date_formatted = f"{actual_trade_date[:4]}-{actual_trade_date[4:6]}-{actual_trade_date[6:8]}"
 
         report_lines = [
             f"📊 同业对比分析报告",
@@ -459,9 +547,21 @@ async def get_peer_comparison(
             f"🎯 目标股票: {ticker}",
             f"🏭 所属行业: {industry}",
             f"📌 主行业锚点: {industry}（股票基础行业字段，同行样本按此精确匹配）",
-            f"📅 分析日期: {trade_date_formatted}",
+            f"📅 请求分析日期: {requested_trade_date}",
+            f"📅 估值快照日期: {actual_trade_date_formatted}",
             "",
         ]
+
+        if actual_trade_date_formatted != requested_trade_date:
+            report_lines.append(
+                "说明: "
+                + build_stable_data_cutoff_note(
+                    requested_trade_date,
+                    actual_trade_date_formatted,
+                    subject="同行估值所需的当日收盘后日频数据",
+                )
+            )
+            report_lines.append("")
 
         if industry_df is None or industry_df.empty:
             report_lines.append(f"⚠️ 暂无行业 {industry} 的对比数据")
