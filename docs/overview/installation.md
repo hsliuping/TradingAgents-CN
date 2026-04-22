@@ -95,7 +95,7 @@ pip3.11 --version
 
 ```bash
 # 克隆项目仓库
-git clone https://github.com/TauricResearch/TradingAgents.git
+git clone https://github.com/hsliuping/TradingAgents-CN.git
 
 # 进入项目目录
 cd TradingAgents
