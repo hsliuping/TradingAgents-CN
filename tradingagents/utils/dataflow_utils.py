@@ -90,6 +90,32 @@ def get_next_weekday(date_input):
         return date_input
 
 
+def get_latest_trading_day(date_input=None):
+    """
+    获取最近的交易日（向前查找，跳过周末和未来日期）
+
+    Args:
+        date_input: 日期对象或日期字符串（YYYY-MM-DD），默认为今天
+
+    Returns:
+        datetime: 最近交易日的日期对象
+    """
+    if date_input is None:
+        date_input = datetime.now()
+    elif not isinstance(date_input, datetime):
+        date_input = datetime.strptime(date_input, "%Y-%m-%d")
+
+    today = datetime.now()
+    if date_input.date() > today.date():
+        date_input = today
+
+    while date_input.weekday() >= 5:
+        date_input -= timedelta(days=1)
+
+    return date_input
+
+
+
 def get_trading_date_range(target_date=None, lookback_days=10):
     """
     获取用于查询交易数据的日期范围
@@ -109,7 +135,7 @@ def get_trading_date_range(target_date=None, lookback_days=10):
         ("2025-10-03", "2025-10-13")
 
         >>> get_trading_date_range("2025-10-12", 10)  # 周日
-        ("2025-10-02", "2025-10-12")
+        ("2025-10-02", "2025-10-10")
     """
     from datetime import datetime, timedelta
 
@@ -119,10 +145,14 @@ def get_trading_date_range(target_date=None, lookback_days=10):
     elif isinstance(target_date, str):
         target_date = datetime.strptime(target_date, "%Y-%m-%d")
 
-    # 如果是未来日期，使用今天
-    today = datetime.now()
-    if target_date.date() > today.date():
-        target_date = today
+    # 自动回退到最近交易日，避免周末/未来日期导致所有数据源返回空
+    original_target_date = target_date
+    target_date = get_latest_trading_day(target_date)
+    if original_target_date.date() != target_date.date():
+        logger.info(
+            f"📅 [交易日调整] 查询日期已自动调整: "
+            f"{original_target_date.strftime('%Y-%m-%d')} -> {target_date.strftime('%Y-%m-%d')}"
+        )
 
     # 计算开始日期（向前推N天）
     start_date = target_date - timedelta(days=lookback_days)
