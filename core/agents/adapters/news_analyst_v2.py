@@ -11,6 +11,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from core.agents.analyst import AnalystAgent
+from core.agents.base import GENERIC_REPORT_FALLBACK
 from core.agents.config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from core.agents.registry import register_agent
 
@@ -333,7 +334,7 @@ class NewsAnalystV2(AnalystAgent):
 
         except Exception as e:
             logger.error(f"[{self.agent_id}] 执行失败: {e}", exc_info=True)
-            return {self.output_field: f"执行失败: {str(e)}"}
+            return {self.output_field: GENERIC_REPORT_FALLBACK}
 
     def _build_system_prompt(self, market_type: str = None, context=None, state: Dict[str, Any] = None) -> str:
         """

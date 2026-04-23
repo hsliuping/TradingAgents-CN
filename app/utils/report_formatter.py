@@ -19,6 +19,25 @@ from typing import Dict, Any, Optional, Tuple
 from app.utils.compliance import normalize_research_brief_lists, sanitize_display_report_text, sanitize_report_artifacts
 
 logger = logging.getLogger(__name__)
+_ERROR_RESULT_PATTERNS = (
+    re.compile(r'^\{[\s\S]*["\']error["\']\s*:\s*["\'][\s\S]*["\']\s*,\s*["\']success["\']\s*:\s*False[\s\S]*\}$'),
+    re.compile(r'^执行失败[:：].*$', re.IGNORECASE),
+)
+
+def _build_report_failure_fallback(report_type: str) -> str:
+    fallback_map = {
+        "risk": "风险治理模块执行未完成，当前风险结论仍待验证。",
+        "investment": "综合研究结论模块执行未完成，当前结论仍待验证。",
+        "final_decision": "综合研究结论模块执行未完成，当前结论仍待验证。",
+    }
+    return fallback_map.get(report_type, "工具执行或模型生成未完成，当前结论仍待验证。")
+
+
+def _is_error_payload_text(content: str) -> bool:
+    stripped = (content or "").strip()
+    if not stripped:
+        return False
+    return any(pattern.match(stripped) for pattern in _ERROR_RESULT_PATTERNS)
 
 
 DISPLAY_SANITIZED_REPORT_KEYS = {
@@ -296,6 +315,10 @@ def _convert_json_to_markdown(content: str, report_type: str = "investment") -> 
     logger.info(f"🔄 [JSON转换] 内容前500字符: {content[:500]}")
     logger.info(f"🔄 [JSON转换] 是否包含 '```json': {'```json' in content}")
     logger.info(f"🔄 [JSON转换] 是否以 {{ 开头: {content.startswith('{')}")
+
+    if _is_error_payload_text(content):
+        logger.warning(f"⚠️ [JSON转换] 检测到错误载荷文本，按降级文案返回，报告类型: {report_type}")
+        return _build_report_failure_fallback(report_type)
 
     # 检查是否是 JSON 格式
     json_obj = None

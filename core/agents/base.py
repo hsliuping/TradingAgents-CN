@@ -17,6 +17,22 @@ from langchain_core.tools import BaseTool
 from .config import AgentMetadata, AgentConfig
 
 logger = logging.getLogger(__name__)
+GENERIC_REPORT_FALLBACK = "工具执行或模型生成未完成，当前结论仍待验证。"
+
+
+def is_retryable_llm_error(error_msg: str) -> bool:
+    normalized_error = str(error_msg or "").lower()
+    return (
+        "choices" in normalized_error or
+        "null value" in normalized_error or
+        "connection" in normalized_error or
+        "timeout" in normalized_error or
+        "timed out" in normalized_error or
+        "rate limit" in normalized_error or
+        "503" in normalized_error or
+        "502" in normalized_error or
+        "500" in normalized_error
+    )
 
 # 默认配置
 DEFAULT_MAX_TOOL_ITERATIONS = 3  # 最大工具调用迭代次数
@@ -692,16 +708,7 @@ class BaseAgent(ABC):
                         last_error = e
                         
                         # 🔥 检查是否是 choices 为 null 的错误或其他可重试的错误
-                        is_retryable = (
-                            "choices" in error_msg.lower() or 
-                            "null value" in error_msg.lower() or
-                            "connection" in error_msg.lower() or
-                            "timeout" in error_msg.lower() or
-                            "rate limit" in error_msg.lower() or
-                            "503" in error_msg or
-                            "502" in error_msg or
-                            "500" in error_msg
-                        )
+                        is_retryable = is_retryable_llm_error(error_msg)
                         
                         if is_retryable and retry_count < max_retries:
                             retry_count += 1

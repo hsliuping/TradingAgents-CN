@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from .base import BaseAgent
+from .base import BaseAgent, GENERIC_REPORT_FALLBACK
 from .config import AgentMetadata, AgentCategory
 
 logger = logging.getLogger(__name__)
@@ -210,7 +210,7 @@ class AnalystAgent(BaseAgent):
             output_key = self.output_field or f"{self.analyst_type}_report"
             return {
                 output_key: {
-                    "error": str(e),
+                    "error": GENERIC_REPORT_FALLBACK,
                     "success": False
                 }
             }

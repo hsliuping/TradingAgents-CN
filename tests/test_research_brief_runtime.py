@@ -6,6 +6,7 @@ from app.utils.compliance import (
     sanitize_trade_review_payload,
 )
 from app.utils.report_formatter import (
+    _convert_json_to_markdown,
     _convert_final_decision_json_to_markdown,
     format_decision,
 )
@@ -250,6 +251,24 @@ def test_sanitize_report_artifacts_downgrades_conflicting_stable_data_snapshot_d
 
     assert '所有估值指标快照日期统一为 **2026-04-21**' not in sanitized
     assert '当前正文日期口径仍待验证' in sanitized
+
+
+def test_convert_json_report_to_markdown_downgrades_error_payload_dict() -> None:
+    markdown = _convert_json_to_markdown(
+        "{'error': 'Request timed out.', 'success': False}",
+        report_type="risk",
+    )
+
+    assert markdown == "风险治理模块执行未完成，当前风险结论仍待验证。"
+
+
+def test_convert_json_report_to_markdown_downgrades_execution_failure_text() -> None:
+    markdown = _convert_json_to_markdown(
+        "执行失败: LLM API 调用失败（已重试 0 次）: Request timed out.",
+        report_type="investment",
+    )
+
+    assert markdown == "综合研究结论模块执行未完成，当前结论仍待验证。"
 
 
 def test_sanitize_position_analysis_payload_strips_execution_fields() -> None:

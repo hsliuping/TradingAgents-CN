@@ -12,6 +12,14 @@ import pytest
 from unittest.mock import Mock, MagicMock
 
 
+def test_is_retryable_llm_error_recognizes_timed_out_variant() -> None:
+    from core.agents.base import is_retryable_llm_error
+
+    assert is_retryable_llm_error("Request timed out.") is True
+    assert is_retryable_llm_error("The read operation timed out") is True
+    assert is_retryable_llm_error("validation failed") is False
+
+
 class TestMarketAnalystV2:
     """测试市场分析师V2"""
     
