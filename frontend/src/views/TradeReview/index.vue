@@ -173,13 +173,6 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="评分" width="80" align="center">
-            <template #default="{ row }">
-              <el-tag :type="getScoreType(row.overall_score)" size="small">
-                {{ row.overall_score }}分
-              </el-tag>
-            </template>
-          </el-table-column>
           <el-table-column label="创建时间" width="160">
             <template #default="{ row }">
               {{ formatDateTime(row.created_at) }}
@@ -330,13 +323,6 @@
                 <span :class="row.total_pnl >= 0 ? 'positive' : 'negative'">
                   {{ formatCurrency(row.total_pnl) }}
                 </span>
-              </template>
-            </el-table-column>
-            <el-table-column label="评分" width="80" align="center">
-              <template #default="{ row }">
-                <el-tag :type="getScoreType(row.overall_score)" size="small">
-                  {{ row.overall_score }}分
-                </el-tag>
               </template>
             </el-table-column>
             <el-table-column label="创建时间" width="160">

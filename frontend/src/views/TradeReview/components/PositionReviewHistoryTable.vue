@@ -8,13 +8,6 @@
           <el-tag size="small">{{ getReviewTypeLabel(row.review_type) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="score" label="评分" width="80" align="center">
-        <template #default="{ row }">
-          <el-tag :type="getScoreType(row.score)" size="small">
-            {{ row.score || '-' }}
-          </el-tag>
-        </template>
-      </el-table-column>
       <el-table-column prop="summary" label="复盘摘要" min-width="200" show-overflow-tooltip />
       <el-table-column prop="created_at" label="复盘时间" width="160">
         <template #default="{ row }">
@@ -75,12 +68,6 @@ const getReviewTypeLabel = (type: string) => {
     complete: '完整交易'
   }
   return map[type] || type
-}
-
-const getScoreType = (score: number) => {
-  if (score >= 80) return 'success'
-  if (score >= 60) return 'warning'
-  return 'danger'
 }
 
 const formatDateTime = (dateStr?: string) => {

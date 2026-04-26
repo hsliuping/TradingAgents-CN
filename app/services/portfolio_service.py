@@ -4089,21 +4089,21 @@ class PortfolioService:
 
 **重要考量因素**：
 1. 当前盈亏状态：{pnl_status} {pnl_pct:.2f}%
-2. 与目标收益率的差距：目标 {params.target_profit_pct}%，当前 {pnl_pct:.2f}%
+2. 用户设定的收益预期与波动承受度仅作为持仓背景参考，不得据此生成执行建议
 3. 股票研究报告中的研究背景信息：{trade_action}
 4. 技术面、基本面、新闻面的综合判断
 
 **请以JSON格式输出**：
 ```json
 {{
-    "action": "中性",
-    "action_reason": "持仓现状观察，需要结合研究报告和持仓情况说明（100字以内，不提供执行建议）",
-    "confidence": 0-100的整数,
+    "action": "中性（固定口径，不得输出加仓/减仓/清仓）",
+    "action_reason": "持仓研究结论摘要，需要说明当前状态、核心依据与风险边界（100字以内，不提供执行建议）",
+    "confidence": 0-100的整数（表示研究判断稳定度，不代表交易把握）, 
     "stop_loss_price": null,
     "take_profit_price": null,
-    "risk_assessment": "基于研究报告的详细风险评估（300-500字，需包含主要风险点、风险等级、风险影响等）",
-    "opportunity_assessment": "基于研究报告的详细机会评估（300-500字，需包含潜在机会、催化剂、经营改善线索等）",
-    "detailed_analysis": "结合研究报告和持仓情况的详细研究摘要（200字以内）",
+    "risk_assessment": "基于研究报告的详细风险评估（300-500字，需包含主要风险点、风险等级、风险影响路径以及需继续验证的公开信号）",
+    "opportunity_assessment": "基于研究报告的详细催化与改善条件评估（300-500字，需包含潜在催化、经营改善线索、哪些事实出现后可修正当前判断）",
+    "detailed_analysis": "结合研究报告和持仓情况的详细研究摘要（200字以内，强调研究逻辑而非操作动作）",
     "suggested_quantity": null,
     "suggested_amount": null,
     "position_risk_analysis": "仓位风险分析（如提供了资金总量，分析仓位占比是否合理，50字以内，可选）"
@@ -4113,6 +4113,8 @@ class PortfolioService:
 **注意事项**：
 - 必须基于提供的研究报告进行判断，不要凭空编造信息
 - 如果用户提供了资金总量，务必在分析中考虑仓位占比和风险敞口
+- suggested_quantity 和 suggested_amount 必须保持 null，不得填写具体数量或金额
+- stop_loss_price 和 take_profit_price 必须保持 null，不得输出目标价、价格区间或止盈止损位
 - 不得输出买卖、加减仓、清仓、止盈止损、目标价或仓位比例等执行性建议
 """
 
@@ -4161,19 +4163,18 @@ class PortfolioService:
 | 仓位风险等级 | {risk_level} | low/medium/high/critical |
 
 ### 风险敞口分析
-- 如果该股票下跌 {stop_loss_pct:.0f}%（止损线），最大亏损金额: {max_loss_amount:,.2f} 元
-- 最大亏损对总资金影响: {max_loss_impact_pct:.2f}%
-- 用户可接受最大亏损比例: {params.max_loss_pct:.0f}%
+- 如果股价回撤 {stop_loss_pct:.0f}%（仅作为压力测试假设），账面波动金额约为: {max_loss_amount:,.2f} 元
+- 对总资金的影响约为: {max_loss_impact_pct:.2f}%
+- 用户设定的最大可承受波动参考: {params.max_loss_pct:.0f}%
 
-### 加仓空间分析
+### 仓位缓冲分析
 - 最大允许持仓市值: {max_position_value:,.0f} 元
 - 当前已占用: {market_value:,.2f} 元
-- 剩余可加仓金额: {available_add_amount:,.0f} 元
-- 剩余可加仓数量（按当前价）: {int(available_add_amount / (snapshot.current_price or snapshot.cost_price))} 股
+- 剩余仓位缓冲金额: {available_add_amount:,.0f} 元
 
 **⚠️ 重要提醒**：
 - 仓位风险等级为 **{risk_level}**
-- {'仓位已超限！建议减仓' if risk_level == 'critical' else '仓位接近上限，谨慎加仓' if risk_level == 'high' else '仓位合理' if risk_level == 'medium' else '仓位较轻，有加仓空间'}
+- {'仓位已超出预设上限，应优先复核风险暴露' if risk_level == 'critical' else '仓位接近上限，需要重点关注波动与集中度' if risk_level == 'high' else '仓位处于中等水平，仍需持续跟踪风险变化' if risk_level == 'medium' else '当前仓位压力相对可控，但仍需结合研究持续验证'}
 """
         return section
 

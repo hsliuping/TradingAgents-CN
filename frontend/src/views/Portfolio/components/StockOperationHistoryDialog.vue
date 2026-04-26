@@ -109,36 +109,13 @@
             <el-tag v-if="reviewReport.trading_system_name" type="success" size="small">
               🎯 {{ reviewReport.trading_system_name }}
             </el-tag>
-            <el-tag :type="getScoreTagType(reviewReport.ai_review?.overall_score)" size="small">
-              评分: {{ reviewReport.ai_review?.overall_score || 0 }}分
-            </el-tag>
           </div>
         </div>
       </template>
       <div class="review-content">
         <div class="review-summary">{{ reviewReport.ai_review?.summary || '暂无复盘摘要' }}</div>
-        <el-row :gutter="16" class="review-scores">
-          <el-col :span="8" v-if="reviewReport.ai_review?.timing_score">
-            <div class="score-item">
-              <span class="score-label">买卖时机</span>
-              <span class="score-value">{{ reviewReport.ai_review.timing_score }}分</span>
-            </div>
-          </el-col>
-          <el-col :span="8" v-if="reviewReport.ai_review?.position_score">
-            <div class="score-item">
-              <span class="score-label">仓位控制</span>
-              <span class="score-value">{{ reviewReport.ai_review.position_score }}分</span>
-            </div>
-          </el-col>
-          <el-col :span="8" v-if="reviewReport.ai_review?.discipline_score">
-            <div class="score-item">
-              <span class="score-label">交易纪律</span>
-              <span class="score-value">{{ reviewReport.ai_review.discipline_score }}分</span>
-            </div>
-          </el-col>
-        </el-row>
         <div v-if="reviewReport.ai_review?.suggestions?.length" class="review-suggestions">
-          <div class="section-title">💡 复盘改进项</div>
+          <div class="section-title">💡 后续改进重点</div>
           <ul>
             <li v-for="(suggestion, idx) in reviewReport.ai_review.suggestions" :key="idx">{{ suggestion }}</li>
           </ul>
@@ -313,12 +290,6 @@ const getMarketTagType = (m: string) => ({ CN: 'danger', HK: 'warning', US: 'pri
 const getCurrencySymbol = (c: string) => ({ CNY: '¥', HKD: 'HK$', USD: '$' }[c] || c)
 const getChangeTypeName = (t: string) => ({ buy: '买入', add: '加仓', reduce: '减仓', sell: '卖出', adjust: '调整', dividend: '分红', split: '拆股', merge: '合股' }[t] || t)
 const getChangeTypeTag = (t: string) => ({ buy: 'success', add: 'primary', reduce: 'warning', sell: 'danger', adjust: 'info', dividend: '', split: '', merge: '' }[t] || 'info') as any
-const getScoreTagType = (score: number | undefined) => {
-  if (!score) return 'info'
-  if (score >= 80) return 'success'
-  if (score >= 60) return 'warning'
-  return 'danger'
-}
 const getStyleLabel = (style: string) => {
   const labels: Record<string, string> = {
     short_term: '短线',
@@ -345,10 +316,6 @@ const getStyleLabel = (style: string) => {
 .review-header { display: flex; justify-content: space-between; align-items: center; }
 .review-content { font-size: 14px; }
 .review-summary { color: #606266; line-height: 1.6; margin-bottom: 12px; }
-.review-scores { margin-bottom: 12px; }
-.score-item { text-align: center; padding: 8px; background: #fff; border-radius: 4px; }
-.score-label { display: block; font-size: 12px; color: #909399; }
-.score-value { display: block; font-size: 18px; font-weight: 600; color: #409eff; margin-top: 4px; }
 .review-suggestions { margin-top: 12px; }
 .section-title { font-weight: 600; color: #303133; margin-bottom: 8px; }
 .review-suggestions ul { margin: 0; padding-left: 20px; color: #606266; }

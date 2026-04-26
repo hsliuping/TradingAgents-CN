@@ -173,13 +173,13 @@ class ActionAdvisorV2(ManagerAgent):
     },
     "neutral_operation_advice": {
         "recommended_analysis_view": "偏强|中性|偏弱|待验证",
-        "confidence": 0-100的整数,
+        "confidence": 0-100的整数（表示研究判断稳定度，不代表交易把握）, 
         "core_judgment": "当前持仓所处研究阶段与核心判断",
         "reasoning": ["依据1", "依据2"],
         "analysis_points": ["观察要点1", "观察要点2"],
         "specific_suggestions": [
             {
-                "action": "继续观察",
+                "action": "继续跟踪",
                 "reason": "说明当前最应优先跟踪的公开信号"
             }
         ],
@@ -433,7 +433,7 @@ class ActionAdvisorV2(ManagerAgent):
             "technical_analysis": technical[:2000] if technical else "",
             "fundamental_analysis": fundamental[:2000] if fundamental else "",
             "risk_analysis": risk[:2000] if risk else "",
-            # 用户目标
+            # 用户背景参考
             "target_return": str(user_goal.get('target_return', 10)),
             "stop_loss": str(user_goal.get('stop_loss', -10)),
         }
@@ -537,9 +537,10 @@ class ActionAdvisorV2(ManagerAgent):
 - 请重点关注高权重分析，这些分析对研究判断更重要
 - 在综合判断时，请根据权重给予相应的关注度
 
-=== 用户目标 ===
-- 目标收益: {user_goal.get('target_return', 10)}%
+=== 持仓背景参考 ===
+- 收益预期参考: {user_goal.get('target_return', 10)}%
 - 可承受波动参考: {user_goal.get('stop_loss', -10)}%
+- 上述信息仅用于理解持仓背景，不得据此输出任何执行建议
 
 请给出JSON格式的持仓研究结论：
 ```json
@@ -550,13 +551,13 @@ class ActionAdvisorV2(ManagerAgent):
     }},
     "neutral_operation_advice": {{
         "recommended_analysis_view": "偏强|中性|偏弱|待验证",
-        "confidence": 0-100的整数（信心度）,
+        "confidence": 0-100的整数（研究判断稳定度，不代表交易把握）, 
         "core_judgment": "当前持仓所处研究阶段与核心判断",
         "reasoning": ["理由1", "理由2"],
         "analysis_points": ["分析要点1", "分析要点2"],
         "specific_suggestions": [
             {{
-                "action": "继续观察",
+                "action": "继续跟踪",
                 "reason": "说明当前最应优先跟踪的公开信号"
             }}
         ],
@@ -572,10 +573,10 @@ class ActionAdvisorV2(ManagerAgent):
 ```
 
 **重要提示**：
-1. **confidence** 字段是必需的，必须是0-100的整数，表示对分析观点的信心度
+1. **confidence** 字段是必需的，必须是0-100的整数，表示研究判断稳定度，不代表交易把握
 2. 严禁输出加仓、减仓、清仓、买卖、目标价、价格区间、止损止盈、仓位比例等执行性内容
-3. 请根据综合分析给出真实的信心度值，不要使用默认值
-4. observation_factors 必须是可继续验证的公开信号或事实，不得写成交易动作"""
+3. 请根据综合分析给出真实的 confidence 值，不要使用默认值
+4. specific_suggestions 和 observation_factors 必须是可继续验证的公开信号、研究动作或信息核查事项，不得写成交易动作"""
 
     def _get_required_inputs(self) -> List[str]:
         """

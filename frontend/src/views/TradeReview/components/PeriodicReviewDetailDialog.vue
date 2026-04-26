@@ -74,9 +74,6 @@
           <template #header>
             <div class="ai-header">
               <span>AI复盘报告</span>
-              <el-tag :type="getScoreType(detail.ai_review?.overall_score || 0)" size="large">
-                {{ detail.ai_review?.overall_score || 0 }}分
-              </el-tag>
             </div>
           </template>
           
@@ -176,12 +173,6 @@ const formatPnl = (value?: number) => {
   if (value === undefined || value === null) return '-'
   const prefix = value >= 0 ? '+' : ''
   return prefix + value.toFixed(2)
-}
-
-const getScoreType = (score: number) => {
-  if (score >= 80) return 'success'
-  if (score >= 60) return 'warning'
-  return 'danger'
 }
 
 const loadDetail = async () => {

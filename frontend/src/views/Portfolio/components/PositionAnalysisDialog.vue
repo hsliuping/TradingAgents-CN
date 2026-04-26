@@ -70,12 +70,14 @@
     <div class="analysis-params" v-if="!analysisResult && analysisStatus !== 'pending' && analysisStatus !== 'processing'">
       <el-divider content-position="left">分析设置</el-divider>
       <el-form :model="params" label-width="120px">
-        <el-form-item label="目标收益率">
+        <el-form-item label="收益预期参考">
           <el-input-number v-model="params.target_profit_pct" :min="5" :max="100" :step="5" />
           <span class="unit">%</span>
+          <span class="tip">仅用于理解持仓背景，不生成任何操作建议</span>
         </el-form-item>
-        <el-form-item label="分析增持观点">
+        <el-form-item label="补充仓位背景分析">
           <el-switch v-model="params.include_add_position" />
+          <span class="tip">仅补充研究背景，不输出动作结论</span>
         </el-form-item>
 
         <el-divider content-position="left">
@@ -170,7 +172,7 @@
                 <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
                   <li><strong>平台性质：</strong>本平台为 AI 辅助投研研究学习平台，专注于持仓研究、风险识别与公开信息整理。</li>
                   <li><strong>分析目的：</strong>所有分析结论仅用于学习、研究和持仓风险识别，不提供交易指导或投资依据。</li>
-                  <li><strong>非投资建议：</strong>所有分析结果、评分、研究结论仅为技术验证参考，不构成任何买卖建议或投资决策依据。</li>
+                  <li><strong>非投资建议：</strong>所有分析结果和研究结论仅为技术验证参考，不构成任何买卖建议或投资决策依据。</li>
                   <li><strong>数据局限性：</strong>分析基于历史数据和公开信息，可能存在延迟、不完整或不准确的情况，无法预测未来市场走势。</li>
                   <li><strong>投资风险：</strong>股票投资存在市场风险、流动性风险、政策风险等多种风险，可能导致本金损失。</li>
                   <li><strong>独立决策：</strong>投资者应基于自身风险承受能力、投资目标和财务状况独立做出投资决策。</li>
@@ -190,7 +192,7 @@
           研究观察
         </div>
         <div class="confidence">
-          研究置信度: <el-progress :percentage="analysisResult.confidence" :stroke-width="8" style="width: 120px; display: inline-flex;" />
+          研究判断稳定度: <el-progress :percentage="analysisResult.confidence" :stroke-width="8" style="width: 120px; display: inline-flex;" />
         </div>
       </div>
 
@@ -207,7 +209,7 @@
           <div class="markdown-content" v-html="renderMarkdown(analysisResult.risk_assessment || '暂无')"></div>
         </div>
         <div class="assessment-card" style="margin-top: 20px;">
-          <h4><el-icon><StarFilled /></el-icon> 机会评估</h4>
+          <h4><el-icon><StarFilled /></el-icon> 催化与改善条件</h4>
           <div class="markdown-content" v-html="renderMarkdown(analysisResult.opportunity_assessment || '暂无')"></div>
         </div>
       </div>
@@ -230,7 +232,7 @@
           <el-descriptions-item label="对总资金影响">
             <span class="loss">{{ analysisResult.risk_metrics.max_loss_impact_pct?.toFixed(2) }}%</span>
           </el-descriptions-item>
-          <el-descriptions-item label="可增持金额">
+          <el-descriptions-item label="仓位缓冲金额">
             <span class="profit">¥{{ analysisResult.risk_metrics.available_add_amount?.toLocaleString() }}</span>
           </el-descriptions-item>
           <el-descriptions-item label="风险等级">

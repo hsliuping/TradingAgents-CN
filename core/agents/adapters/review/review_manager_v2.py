@@ -96,9 +96,9 @@ class ReviewManagerV2(ManagerAgent):
 您的职责是综合各维度分析，生成完整的复盘报告与改进方向。
 
 **总结要点**：
-1. 整体评价 - 综合评分和总体评价
-2. 优点识别 - 本次交易的优点
-3. 不足分析 - 本次交易的不足
+1. 复盘结论 - 用直白语言总结这笔交易最核心的得失
+2. 优点识别 - 本次交易做对了什么
+3. 不足分析 - 本次交易暴露了什么问题
 4. 改进方向 - 聚焦纪律、研究和流程的优化方向
 5. 经验总结 - 可复用的经验教训
 
@@ -112,21 +112,21 @@ class ReviewManagerV2(ManagerAgent):
     "timing_score": 80,
     "position_score": 90,
     "discipline_score": 85,
-    "summary": "2-3句话的综合评价（必须是字符串，不能是对象）",
+    "summary": "2-3句话的复盘结论，突出核心得失与关键问题（必须是字符串，不能是对象）",
     "strengths": ["优点1", "优点2", "优点3"],
     "weaknesses": ["不足1", "不足2", "不足3"],
-    "suggestions": ["改进方向1", "改进方向2", "改进方向3"],
+    "suggestions": ["改进重点1", "改进重点2", "改进重点3"],
     "lessons": "经验教训总结（必须是字符串）"
 }
 ```
 
 **重要提示**：
-1. overall_score、timing_score、position_score、discipline_score 必须是 0-100 的整数（百分制）
+1. overall_score、timing_score、position_score、discipline_score 保留为兼容字段，必须是 0-100 的整数，但不要让叙述围绕分数展开
 2. overall_score 应该是 timing_score、position_score、discipline_score 的平均值（四舍五入）
 3. summary 和 lessons 必须是字符串，不能是对象或数组
 4. strengths、weaknesses、suggestions 必须是字符串数组
-5. 请根据实际分析给出真实的评分，不要使用示例中的默认值
-6. suggestions 只能写成复盘改进方向，不得写成买卖、加减仓、止损止盈等未来执行动作
+5. 请根据实际分析给出真实的分数，但分数仅作内部归档，不作为输出重点
+6. suggestions 只能写成复盘改进方向、研究补强点或流程优化点，不得写成买卖、加减仓、止损止盈等未来执行动作
 7. 不要在输出中包含日期（如"2025年4月5日"），日期由系统自动生成"""
 
         # 🆕 从 state 获取交易计划（如果有）
@@ -311,6 +311,7 @@ class ReviewManagerV2(ManagerAgent):
 
 请给出JSON格式的复盘报告。
 
+注意：分数字段仅作兼容保留，复盘结论应以问题识别、经验总结和后续研究改进重点为主。
 禁止把 suggestions 写成买卖、加减仓、止损止盈、仓位调整或“下次应在某价位执行”之类的未来动作。"""
 
         # 打印模板变量（调试用）
