@@ -186,6 +186,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         return create_openai_compatible_llm(
             provider=provider,
             model=model,
+            api_key=api_key,
             base_url=backend_url,
             temperature=temperature,
             max_tokens=max_tokens,

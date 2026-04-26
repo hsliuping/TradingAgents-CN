@@ -70,10 +70,10 @@ STANDARD_REPORT_FIELDS = [
     'fundamentals_report',    # 基本面分析
     # 研究结论报告
     # 'investment_plan',        # 研究经理结论（作为 research_team_decision 的备选）
-    'trader_investment_plan', # 研究整合意见
     'research_team_decision', # 研究团队结论
     'risk_management_decision', # 风险治理结论
-    'final_trade_decision'    # 综合研究结论
+    'final_trade_decision',   # 综合研究结论
+    'trader_investment_plan', # 用户版研究简报
 ]
 
 
@@ -1028,39 +1028,34 @@ def generate_summary_recommendation(
         if isinstance(reports[report_name], str):
             logger.info(f"🔍 [generate_summary_recommendation] reports['{report_name}'] 长度: {len(reports[report_name])}, 前100字符: {reports[report_name][:100]}")
 
-    # 🔥 重要：与旧引擎保持一致，summary（分析摘要）优先从 final_trade_decision 提取
-    # 旧引擎的处理方式：优先从 reports 中的 final_trade_decision 提取 summary（前200字符）
-    # 1. 优先从 final_trade_decision 提取 summary（与旧引擎保持一致）
-    logger.info(f"🔍 [generate_summary_recommendation] 检查 'final_trade_decision' 是否在 reports 中: {'final_trade_decision' in reports}")
-    if 'final_trade_decision' in reports:
-        content = reports['final_trade_decision']
-        logger.info(f"🔍 [generate_summary_recommendation] final_trade_decision 内容长度: {len(content)}")
-        logger.info(f"🔍 [generate_summary_recommendation] final_trade_decision 前300字符: {content[:300]}")
-        if len(content) > 50:
-            # 清理 Markdown 格式，提取前200字符作为摘要（与旧引擎保持一致）
-            cleaned_content = _clean_markdown(content)
-            summary = cleaned_content[:200].strip()
-            if len(cleaned_content) > 200:
-                summary += "..."
-            logger.info(f"🔍 [generate_summary_recommendation] ✅ 从 final_trade_decision 提取摘要: {len(summary)}字符")
-            logger.info(f"🔍 [generate_summary_recommendation] summary 内容: {summary[:300]}")
+    # 1. 优先从用户版研究简报提取 summary，其次回退到综合研究结论和其他汇总报告
+    summary_priority_fields = [
+        'trader_investment_plan',
+        'final_trade_decision',
+        'investment_plan',
+        'research_team_decision',
+        'market_report',
+    ]
+    for report_name in summary_priority_fields:
+        logger.info(f"🔍 [generate_summary_recommendation] 检查 '{report_name}' 是否在 reports 中: {report_name in reports}")
+        if report_name not in reports:
+            continue
 
-    # 2. 如果没有 final_trade_decision，从其他报告中提取摘要
-    if not summary:
-        logger.info(f"🔍 [generate_summary_recommendation] final_trade_decision 不存在或为空，尝试从其他报告提取")
-        for report_name in ['investment_plan', 'trader_investment_plan', 'research_team_decision', 'market_report']:
-            logger.info(f"🔍 [generate_summary_recommendation] 检查 '{report_name}': {'存在' if report_name in reports else '不存在'}")
-            if report_name in reports:
-                content = reports[report_name]
-                logger.info(f"🔍 [generate_summary_recommendation] {report_name} 内容长度: {len(content)}")
-                if len(content) > 100:
-                    cleaned_content = _clean_markdown(content)
-                    summary = cleaned_content[:200].strip()
-                    if len(cleaned_content) > 200:
-                        summary += "..."
-                    logger.info(f"🔍 [generate_summary_recommendation] ✅ 从 {report_name} 提取摘要: {len(summary)}字符")
-                    logger.info(f"🔍 [generate_summary_recommendation] summary 内容: {summary[:300]}")
-                    break
+        content = reports[report_name]
+        logger.info(f"🔍 [generate_summary_recommendation] {report_name} 内容长度: {len(content)}")
+        logger.info(f"🔍 [generate_summary_recommendation] {report_name} 前300字符: {content[:300]}")
+        min_length = 30 if report_name == 'trader_investment_plan' else 50
+        if len(content) <= min_length:
+            logger.warning(f"⚠️ [generate_summary_recommendation] {report_name} 内容过短，跳过")
+            continue
+
+        cleaned_content = _clean_markdown(content)
+        summary = cleaned_content[:200].strip()
+        if len(cleaned_content) > 200:
+            summary += "..."
+        logger.info(f"🔍 [generate_summary_recommendation] ✅ 从 {report_name} 提取摘要: {len(summary)}字符")
+        logger.info(f"🔍 [generate_summary_recommendation] summary 内容: {summary[:300]}")
+        break
 
     # 3. 最后的备用方案
     if not summary:

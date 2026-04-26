@@ -2,7 +2,7 @@
 保守风险分析师 v2.0
 
 基于 ResearcherAgent 基类的保守风险分析师实现。
-从保守角度评估交易计划，优先资本保护，规避潜在风险。
+从保守角度审阅研究结论的脆弱点，优先识别失效条件与关键风险。
 支持多轮辩论和缓存系统。
 """
 
@@ -32,10 +32,10 @@ class SafeAnalystV2(ResearcherAgent):
     保守风险分析师 v2.0
 
     功能：
-    - 从保守角度评估交易计划
+    - 从保守角度审阅研究结论的脆弱点
     - 优先考虑资本保护
     - 规避潜在风险
-    - 寻找防御性策略
+    - 识别判断失效条件
     - 支持多轮辩论（与激进、中性分析师辩论）
     - 支持缓存系统（避免重复分析）
 
@@ -73,7 +73,7 @@ class SafeAnalystV2(ResearcherAgent):
     metadata = AgentMetadata(
         id="safe_analyst_v2",
         name="保守风险分析师 v2.0",
-        description="从保守角度评估交易计划，优先资本保护，规避潜在风险，支持多轮辩论",
+        description="从保守角度审阅研究结论的脆弱点，优先资本保护，规避潜在风险，支持多轮辩论",
         category=AgentCategory.RISK,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -81,7 +81,7 @@ class SafeAnalystV2(ResearcherAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_plan", type="string", description="投资计划"),
+            AgentInput(name="investment_plan", type="string", description="当前内部研究结论"),
             AgentInput(name="bull_opinion", type="string", description="看涨观点", required=False),
             AgentInput(name="bear_opinion", type="string", description="看跌观点", required=False),
             AgentInput(name="risk_debate_state", type="dict", description="辩论状态", required=False),
@@ -191,7 +191,7 @@ class SafeAnalystV2(ResearcherAgent):
         logger.info(f"  - 总Prompt长度: {total_length:,} 字符 (~{total_length//4:,} tokens)")
 
         # 降级提示词（如果模板系统不可用）- 参考旧版实现
-        fallback_prompt = f"""以下是研究整合员整理的当前研究结论：
+        fallback_prompt = f"""以下是当前内部研究结论：
 {template_variables['investment_plan']}
 
 将以下来源的见解纳入您的论点：

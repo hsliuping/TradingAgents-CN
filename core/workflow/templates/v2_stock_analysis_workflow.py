@@ -143,26 +143,16 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             config={"role": "综合多空证据，形成平衡研究结论、关键分歧与观察重点"},
         ),
 
-        # === 阶段5: 研究整合员（先汇总初步结论）===
-        NodeDefinition(
-            id="trader_v2",
-            type=NodeType.TRADER,
-            agent_id="trader_v2",
-            label="研究整合员 v2.0",
-            position=Position(x=400, y=560),
-            config={"role": "将研究结论整理为用户可读的整合意见、情景框架与观察清单"},
-        ),
-
-        # === 阶段6: 风险辩论（3个风险分析师辩论）===
+        # === 阶段5: 风险辩论（3个风险分析师辩论）===
         NodeDefinition(
             id="risk_debate",
             type=NodeType.DEBATE,
             label="风险辩论",
-            position=Position(x=400, y=640),
+            position=Position(x=400, y=560),
             config={
                 "rounds": "auto",
                 "rounds_ref": "config.depth_rounds_mapping.{analysis_depth}.risk",
-                "description": "激进、保守、中性三个风险分析师从不同情景与风险承受框架审阅研究结论",
+                "description": "激进、保守、中性三个风险分析师从不同稳健性框架审阅研究结论",
                 "participants": ["risky_analyst_v2", "safe_analyst_v2", "neutral_analyst_v2"],
             },
         ),
@@ -172,8 +162,8 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             type=NodeType.RISK,
             agent_id="risky_analyst_v2",
             label="激进分析师 v2.0 🔥",
-            position=Position(x=200, y=720),
-            config={"role": "risky", "focus": "强调上行情景、弹性来源与需要同时满足的高风险假设"},
+            position=Position(x=200, y=640),
+            config={"role": "risky", "focus": "强调研究结论上修依赖的强化条件、催化证据与高要求前提"},
         ),
 
         NodeDefinition(
@@ -181,8 +171,8 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             type=NodeType.RISK,
             agent_id="safe_analyst_v2",
             label="保守分析师 v2.0 🛡️",
-            position=Position(x=400, y=720),
-            config={"role": "safe", "focus": "强调下行情景、脆弱环节与应优先验证的风险来源"},
+            position=Position(x=400, y=640),
+            config={"role": "safe", "focus": "强调研究结论最脆弱的前提、关键风险来源与失效条件"},
         ),
 
         NodeDefinition(
@@ -190,18 +180,28 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             type=NodeType.RISK,
             agent_id="neutral_analyst_v2",
             label="中性分析师 v2.0 ⚖️",
-            position=Position(x=600, y=720),
-            config={"role": "neutral", "focus": "比较不同情景概率、证据质量与风险收益不对称性"},
+            position=Position(x=600, y=640),
+            config={"role": "neutral", "focus": "比较证据质量、信息缺口与当前最稳妥的基准情景"},
         ),
 
-        # === 阶段7: 风险经理（裁决）===
+        # === 阶段6: 风险经理（裁决）===
         NodeDefinition(
             id="risk_manager_v2",
             type=NodeType.MANAGER,
             agent_id="risk_manager_v2",
             label="风险经理 v2.0",
+            position=Position(x=400, y=720),
+            config={"role": "综合三方稳健性审阅，形成风险治理结论、判断约束与调整条件"},
+        ),
+
+        # === 阶段7: 研究整合员（风险审阅后生成用户版结论）===
+        NodeDefinition(
+            id="trader_v2",
+            type=NodeType.TRADER,
+            agent_id="trader_v2",
+            label="研究整合员 v2.0",
             position=Position(x=400, y=800),
-            config={"role": "综合三方风险观点，形成风险治理结论、约束条件与后续观察要求"},
+            config={"role": "将风险审阅后的综合研究结论整理为用户可读的最终简报"},
         ),
 
         # === 阶段8: 结束 ===
@@ -269,11 +269,8 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
         # === 阶段4: 辩论结束 -> 研究经理 ===
         EdgeDefinition(id="e_mgr", source="debate", target="research_manager_v2"),
 
-        # === 阶段5: 研究经理 -> 交易员 ===
-        EdgeDefinition(id="e_trader", source="research_manager_v2", target="trader_v2"),
-
-        # === 阶段6: 交易员 -> 风险辩论 ===
-        EdgeDefinition(id="e_to_risk_debate", source="trader_v2", target="risk_debate"),
+        # === 阶段5: 研究经理 -> 风险辩论 ===
+        EdgeDefinition(id="e_to_risk_debate", source="research_manager_v2", target="risk_debate"),
 
         # === 阶段6: 风险辩论 <-> 三个风险分析师（多轮讨论）===
         EdgeDefinition(
@@ -319,11 +316,14 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             animated=True,
         ),
 
-        # === 阶段7: 风险辩论结束 -> 风险经理裁决 ===
+        # === 阶段6: 风险辩论结束 -> 风险经理裁决 ===
         EdgeDefinition(id="e_risk_judge", source="risk_debate", target="risk_manager_v2"),
 
-        # === 阶段8: 风险经理 -> 结束 ===
-        EdgeDefinition(id="e_end", source="risk_manager_v2", target="end"),
+        # === 阶段7: 风险经理 -> 用户版研究简报 ===
+        EdgeDefinition(id="e_trader", source="risk_manager_v2", target="trader_v2"),
+
+        # === 阶段8: 用户版研究简报 -> 结束 ===
+        EdgeDefinition(id="e_end", source="trader_v2", target="end"),
     ],
 )
 

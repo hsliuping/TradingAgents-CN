@@ -56,8 +56,8 @@ ANALYST_ID_TO_CHINESE: dict = {
     "risk_manager": "风险治理汇总",
     "risk_manager_v2": "风险治理汇总",
     # 研究整合与复盘
-    "trader": "研究整合意见",
-    "trader_v2": "研究整合意见",
+    "trader": "用户版研究简报",
+    "trader_v2": "用户版研究简报",
     "timing_analyst": "时机分析师",
     "timing_analyst_v2": "时机分析师",
     "position_analyst": "仓位分析师",
@@ -326,6 +326,10 @@ class ReportExporter:
         
         # 各模块内容（按展示顺序）
         module_order = [
+            # 最终用户输出
+            "trader_investment_plan",
+            "final_trade_decision",
+
             # 宏观分析（优先展示）
             "index_report",
             "sector_report",
@@ -357,8 +361,6 @@ class ReportExporter:
             "risk_management_decision",
 
             # 决策报告
-            "trader_investment_plan",
-            "final_trade_decision",
         ]
         
         module_titles = {

@@ -2,7 +2,7 @@
 研究整合员 Agent v2.0
 
 基于 TraderAgent 基类实现的研究整合员。
-根据研究分析观点生成研究整合意见。
+根据风险审阅后的综合研究结论生成用户版研究简报。
 """
 
 import logging
@@ -36,8 +36,8 @@ class TraderV2(TraderAgent):
     研究整合员 v2.0
     
     功能：
-    - 根据研究分析观点生成研究整合意见
-    - 提炼关键信号、约束条件和风险提示
+    - 根据风险审阅后的综合研究结论生成用户版研究简报
+    - 提炼核心依据、判断限制和风险提示
     - 汇总后续观察重点
     
     工作流程：
@@ -65,7 +65,7 @@ class TraderV2(TraderAgent):
     metadata = AgentMetadata(
         id="trader_v2",
         name="研究整合员 v2.0",
-        description="根据研究分析观点生成研究整合意见",
+        description="根据风险审阅后的综合研究结论生成用户版研究简报",
         category=AgentCategory.TRADER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -76,11 +76,11 @@ class TraderV2(TraderAgent):
             AgentInput(name="investment_advice", type="string", description="研究分析观点"),
         ],
         outputs=[
-            AgentOutput(name="trader_investment_plan", type="string", description="研究整合意见"),
+            AgentOutput(name="trader_investment_plan", type="string", description="用户版研究简报"),
         ],
         requires_tools=False,
         output_field="trader_investment_plan",
-        report_label="【研究整合意见 v2】",
+        report_label="【用户版研究简报 v2】",
     )
 
     # 输出字段名（与报告格式化器期望的字段名一致）
@@ -135,30 +135,32 @@ class TraderV2(TraderAgent):
             return prompt
         
         # 默认系统提示词（合规版本）
-        return """你是一位研究整合员，负责把研究经理结论与多维报告整理成用户可读的研究简报。
+        return """你是一位研究整合员，负责把风险审阅后的综合研究结论整理成普通用户能快速看懂的最终简报。
 
     ## 你的职责
 
-    1. **研究摘要**：把当前研究判断翻译成清晰、克制、易理解的结论摘要。
-    2. **关键证据**：围绕研究经理结论，提炼最能强化、削弱或限制当前判断的核心信号，不堆砌细节。
-    3. **情景框架**：概括偏多、偏空、中性三种情景分别取决于哪些事实变化。
-    4. **信息缺口**：说明现在仍不确定、仍需验证的关键问题。
-    5. **观察清单**：列出接下来需要重点跟踪的公开信息和验证事项。
+    1. **一句话结论**：先用最短的话说明当前怎么看。
+    2. **结论理由**：只保留最影响当前判断的 2-3 个核心点。
+    3. **判断限制**：直接说明为什么现在不能更乐观或更悲观。
+    4. **后续关注**：列出接下来最值得继续观察的公开信息。
 
     ## 分析原则
 
     - **只做研究整合**：输出帮助用户更新认知，不输出交易动作。
-    - **以研究经理结论为主线**：先理解当前研究结论，再说明各维度材料如何强化、削弱或限制该结论，不要把所有报告平均复述成流水账。
-    - **冲突要直接点明**：如果研究结论与原始报告存在冲突，必须说明冲突来自哪类材料或前提差异，不得机械折中。
-    - **强调不确定性**：必须说明信息缺口、关键假设和判断调整条件。
-    - **用户可读**：让用户看懂“为什么这样看”以及“接下来观察什么”。
+    - **以风险审阅后的综合研究结论为主线**：先说结论，再说理由，不要把所有报告平均复述成流水账。
+    - **冲突要直接点明**：如果综合研究结论与原始报告存在冲突，必须说明冲突来自哪类材料或前提差异，不得机械折中。
+    - **强调限制条件**：必须说明信息缺口、关键假设和判断调整条件。
+    - **用户可读**：让用户在短时间内看懂“当前怎么看、为什么这么看、为什么现在不能更强”。
+    - **一句话结论要像对朋友解释**：优先用“现在先看中性”“现在还不能更乐观”“先继续观察”这类直白说法，不要写成投研黑话。
+    - **少用术语和缩写**：像 PB、PE、ROE、Q4、MA60 这类词，能不用就不用；必须用时，要立刻补一句白话解释。
+    - **不要直接写内部状态**：不要直接写“估值修复逻辑”“提供防御”“材料未提供”“风险治理结论未提供”“投资决策材料未提供”这类偏内部或偏术语化表达，要改写成普通用户一看就懂的话。
     - **禁止交易化表达**：不得输出目标价、价格区间、关键价位、止损止盈、仓位比例、建仓节奏或操作策略。
-    - **缺失材料要明说**：如果研究结论、任一分析报告或历史记录缺失，必须明确写出“材料未提供”或“仍待验证”，不得自行补造。
+    - **缺失材料要明说**：如果研究结论、风险治理结论或任一关键材料缺失，必须明确写出“材料未提供”或“仍待验证”，不得自行补造。
     - **历史交易记录只作为背景材料**：只能补充过去关注点或验证过程，不得改写成当前建议、偏好或执行节奏。
 
     ## 重要说明
 
-    - **风险治理不在本阶段**：风险经理会在后续补充风险治理视角。
+    - **风险治理已在前序阶段完成**：你需要基于风险审阅后的综合研究结论做最终用户表达。
     - **基于已有数据**：你只能使用提供的研究报告与研究结论，不能补造未提供的信息。
 
     **免责声明**：
@@ -265,8 +267,10 @@ class TraderV2(TraderAgent):
 
             return str(report).strip() if report else ""
         
-        # 准备模板变量（参考 research_manager_v2 的实现）
-        # 🔑 注意：风险评估（risk_assessment）不在研究整合阶段，它在研究整合之后由风险经理进行
+        risk_management_decision = all_reports.get("risk_management_decision", "") or state.get("risk_management_decision", "")
+        final_trade_decision = all_reports.get("final_trade_decision", "") or state.get("final_trade_decision", "")
+
+        # 准备模板变量
         template_variables = {
             "ticker": ticker,
             "company_name": company_name,
@@ -276,7 +280,9 @@ class TraderV2(TraderAgent):
             "currency_symbol": currency_symbol,
             # 研究结论（转换为字符串）
             "investment_plan": extract_content(investment_plan) if investment_plan else "",
-            # 🔑 可用的分析报告（不包括 risk_assessment）
+            "risk_management_decision": extract_content(risk_management_decision),
+            "final_trade_decision": extract_content(final_trade_decision),
+            # 可用的分析报告
             "market_report": extract_content(all_reports.get("market_report", "")),
             "fundamentals_report": extract_content(all_reports.get("fundamentals_report", "")),
             "news_report": extract_content(all_reports.get("news_report", "")),
@@ -285,8 +291,7 @@ class TraderV2(TraderAgent):
             "historical_trades": "\n".join([str(trade) for trade in historical_trades[:3]]) if historical_trades else "",
         }
         
-        # 🔑 添加其他报告到模板变量（不包括 risk_assessment）
-        # 这些报告包括：sector_report, index_report, bull_report, bear_report 等
+        # 添加其他报告到模板变量
         excluded_keys = ["risk_assessment", "market_report", "fundamentals_report", "news_report", "sentiment_report", "social_report"]
         for key, value in all_reports.items():
             if key not in excluded_keys:
@@ -317,16 +322,18 @@ class TraderV2(TraderAgent):
         if market_name:
             target_line = f"{company_name}（{ticker}，{market_name}）"
 
-        # 降级：使用默认用户提示词（不包含 risk_assessment）
+        # 降级：使用默认用户提示词
         logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
-        prompt = f"""基于提供的研究材料生成研究整合简报。
+        prompt = f"""基于提供的研究材料生成面向普通用户的最终研究简报。
     可用资源：
     - 分析目标：{target_line}
     - 分析日期：{analysis_date}
     - 货币单位：{currency_name}（{currency_symbol}）
     - 当前价格上下文：{current_price or '材料未提供'}
     - 所属行业：{industry or '材料未提供'}
-    - 当前研究结论：{extract_content(investment_plan) if investment_plan else '材料未提供'}
+    - 当前内部研究结论：{extract_content(investment_plan) if investment_plan else '材料未提供'}
+    - 风险治理结论：{extract_content(risk_management_decision) or '材料未提供'}
+    - 风险审阅后的综合研究结论：{extract_content(final_trade_decision) or '材料未提供'}
     - 市场分析报告：{extract_content(all_reports.get("market_report", "")) or '材料未提供'}
     - 基本面分析报告：{extract_content(all_reports.get("fundamentals_report", "")) or '材料未提供'}
     - 新闻分析报告：{extract_content(all_reports.get("news_report", "")) or '材料未提供'}
@@ -338,12 +345,15 @@ class TraderV2(TraderAgent):
     - 历史交易记录：{chr(10).join([str(trade) for trade in historical_trades[:3]]) if historical_trades else '材料未提供'}
 
     任务重点：
-    - 以当前研究结论为主线，说明哪些材料在强化、削弱或限制该结论；如果与原始报告冲突，直接指出冲突来源，不要机械折中。
-    - 基于上述研究结论和各类分析报告，生成研究摘要、核心依据、情景框架、关键不确定性、后续观察事项和风险提示。
-    - 先概括共识，再提炼最关键的证据冲突、信息缺口和判断调整条件，避免平均复述每一份报告。
-    - 如果任一资源为空、材料不足或没有明确证据，必须直接写“材料未提供”或“仍待验证”，不得使用模型记忆补全。
+    - 以风险审阅后的综合研究结论为主线，先说当前怎么看，再说为什么这么看。
+    - 只保留最影响当前判断的核心理由，不要平均复述每一份报告，也不要再展开完整情景框架。
+    - 必须直接说明为什么现在不能更乐观或更悲观，不要只写“仍待验证”而不解释原因。
+    - 如果任一资源为空、材料不足或没有明确证据，要改写成“现在关键信息还不够完整”“这件事还没法确认”这类直白说法，不得使用模型记忆补全。
+    - 整篇正文控制在 500-800 个中文字符之间，不能只写成几句很短的话。
+    - 四个标题下都尽量写成完整白话段落，不要大量使用短 bullet。
     - 历史交易记录只作为背景材料，用于补充过去关注点或验证过程，不得改写成当前应采取的动作、仓位或执行节奏。
-    - 情景框架与后续观察事项只能写研究条件变化，不得改写成价格触发、仓位动作、止损止盈或执行节奏。
+    - 后续关注只能写研究条件变化，不得改写成价格触发、仓位动作、止损止盈或执行节奏。
+    - 尽量不要在一句话结论里直接使用 PB、PE、ROE、Q4、MA60 这类缩写；必须使用时，要立刻补一句白话解释。
 
     严格禁止：
     - 不得输出价格区间、目标价、关键验证位、止损止盈、仓位比例、建仓节奏或执行策略。
@@ -352,12 +362,14 @@ class TraderV2(TraderAgent):
 
     输出格式：
     请使用 Markdown 输出，并严格包含以下标题：
-    - `## 研究摘要`
-    - `## 核心依据`
-    - `## 情景框架`
-    - `## 关键不确定性`
-    - `## 后续观察事项`
-    - `## 风险提示`
+    - `## 一句话结论`
+    - `## 为什么这么看`
+    - `## 当前判断的限制`
+    - `## 后续关注`
+
+    正文总长度应控制在 500-800 个中文字符之间。
+    四个标题下优先写完整白话段落，不要输出过短的清单式内容。
+    一句话结论和当前判断的限制必须优先使用白话表达，避免把内部流程、缩写术语或模型状态直接暴露给用户。
     """
         
         return prompt

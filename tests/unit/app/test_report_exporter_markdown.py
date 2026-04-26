@@ -33,6 +33,8 @@ def test_generate_markdown_report_hides_internal_module_keys_and_role_ids():
 	assert "## 📝 综合研究结论" in markdown_content
 	assert "## 🌤️ 乐观情景论证" in markdown_content
 	assert "## ⚡ 高弹性情景评估" in markdown_content
+	assert markdown_content.index("## 🧩 用户版研究简报") < markdown_content.index("## 📝 综合研究结论")
+	assert markdown_content.index("## 🧩 用户版研究简报") < markdown_content.index("## 📈 市场技术研究报告")
 	assert "## 综合研究结论" not in markdown_content
 	assert "### 核心观察" in markdown_content
 	assert "投资有风险，决策需谨慎" not in markdown_content

@@ -90,108 +90,27 @@
         </el-alert>
       </div>
 
-      <el-card class="metrics-card" shadow="never">
-        <template #header>
-          <div class="card-header">
-            <el-icon><TrendCharts /></el-icon>
-            <span>关键指标</span>
-          </div>
-        </template>
-        <div class="metrics-content">
-          <el-row :gutter="24">
-            <el-col :span="8">
-              <div class="metric-item">
-                <div class="metric-label">
-                  <el-icon><TrendCharts /></el-icon>
-                  研究概览
-                  <el-tooltip content="仅展示研究摘要与公开信息整理，不提供方向性交易结论" placement="top">
-                    <el-icon style="margin-left: 4px; cursor: help; font-size: 14px;"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </div>
-                <div class="metric-value recommendation-value">
-                  <div class="core-conclusion">
-                    {{ getResearchOverview() }}
-                  </div>
-                </div>
-                <el-tag type="info" size="small" style="margin-top: 8px;">研究辅助</el-tag>
-              </div>
-            </el-col>
-
-            <el-col :span="8">
-              <div class="metric-item">
-                <div class="metric-label">
-                  <el-icon><Warning /></el-icon>
-                  风险关注
-                  <el-tooltip content="仅展示研究过程识别到的风险关注点，不展示风险评级" placement="top">
-                    <el-icon style="margin-left: 4px; cursor: help; font-size: 14px;"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </div>
-                <div class="metric-value recommendation-value">
-                  <div class="core-conclusion">
-                    {{ getRiskFocus() }}
-                  </div>
-                </div>
-                <el-tag type="warning" size="small" style="margin-top: 8px;">需自行判断</el-tag>
-              </div>
-            </el-col>
-
-            <el-col :span="8">
-              <div class="metric-item">
-                <div class="metric-label">
-                  <el-icon><DataAnalysis /></el-icon>
-                  报告覆盖
-                  <el-tooltip content="展示本页已保留的研究模块与分析师信息，不展示模型打分" placement="top">
-                    <el-icon style="margin-left: 4px; cursor: help; font-size: 14px;"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </div>
-                <div class="metric-value recommendation-value">
-                  <div class="core-conclusion">
-                    <strong>已展示模块：</strong>{{ orderedModuleNames.length }} 个
-                    <br>
-                    <strong>参与分析：</strong>{{ formatAnalysts(report.analysts || []) || '未提供' }}
-                  </div>
-                </div>
-                <el-tag type="success" size="small" style="margin-top: 8px;">公开信息整理</el-tag>
-              </div>
-            </el-col>
-          </el-row>
-
-          <div v-if="report.key_points && report.key_points.length > 0" class="key-points">
-            <h4>
-              <el-icon><List /></el-icon>
-              关键要点
-            </h4>
-            <ul>
-              <li v-for="(point, index) in report.key_points" :key="index">
-                <el-icon class="point-icon"><Check /></el-icon>
-                {{ formatKeyPoint(point) }}
-              </li>
-            </ul>
-          </div>
-        </div>
-      </el-card>
-
-      <el-card v-if="report.summary" class="summary-card" shadow="never">
+      <el-card v-if="summaryDisplayContent" class="summary-card" shadow="never">
         <template #header>
           <div class="card-header">
             <el-icon><InfoFilled /></el-icon>
-            <span>研究摘要</span>
+            <span>研究简报</span>
           </div>
         </template>
-        <div class="summary-content markdown-content" v-html="renderMarkdown(report.summary)"></div>
+        <div class="summary-content markdown-content" v-html="renderMarkdown(summaryDisplayContent)"></div>
       </el-card>
 
       <el-card class="modules-card" shadow="never">
         <template #header>
           <div class="card-header">
             <el-icon><Files /></el-icon>
-            <span>研究模块</span>
+            <span>详细研究报告</span>
           </div>
         </template>
 
         <el-tabs v-model="activeModule" type="border-card">
           <el-tab-pane
-            v-for="moduleName in orderedModuleNames"
+            v-for="moduleName in detailedModuleNames"
             :key="moduleName"
             :label="getModuleDisplayName(moduleName)"
             :name="moduleName"
@@ -231,15 +150,10 @@ import {
   Download,
   Back,
   InfoFilled,
-  TrendCharts,
   Files,
   WarningFilled,
   DataAnalysis,
-  Warning,
-  List,
-  Check,
   Cpu,
-  QuestionFilled,
   ArrowDown
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
@@ -255,9 +169,9 @@ marked.setOptions({ breaks: true, gfm: true })
 
 // 响应式数据
 const loading = ref(true)
-const report = ref(null)
+const report = ref<any>(null)
 const activeModule = ref('')
-const llmConfigs = ref<LLMConfig[]>([]) // 存储所有模型配置
+const llmConfigs = ref<LLMConfig[]>([])
 
 // 获取模型配置列表
 const fetchLLMConfigs = async () => {
@@ -276,52 +190,46 @@ const fetchReportDetail = async () => {
   loading.value = true
   try {
     const reportId = route.params.id as string
+    const headers = authStore.token
+      ? { Authorization: `Bearer ${authStore.token}` }
+      : undefined
 
-    const response = await fetch(`/api/reports/${reportId}/detail`, {
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-
+    const response = await fetch(`/api/reports/${reportId}/detail`, { headers })
     const result = await response.json()
 
-    if (result.success) {
-      report.value = result.data
-
-      // 设置默认激活的模块（使用有序列表的第一个）
-      // 注意：这里不能直接使用 orderedModuleNames，因为它是计算属性
-      // 需要手动计算第一个模块
-      const reports = result.data.reports || {}
-      const availableModules = Object.keys(reports)
-
-      // 按照 moduleOrder 找到第一个存在的模块
-      const firstModule = moduleOrder.find(name => availableModules.includes(name))
-      if (firstModule) {
-        activeModule.value = firstModule
-      } else if (availableModules.length > 0) {
-        // 如果没有匹配的，使用第一个可用的
-        activeModule.value = availableModules[0]
-      }
-    } else {
+    if (!result.success) {
       throw new Error(result.message || '获取报告详情失败')
     }
-  } catch (error) {
+
+    report.value = result.data
+
+    const reports = result.data?.reports || {}
+    const availableModules = Object.keys(reports)
+    const firstModule = moduleOrder.find(
+      name => availableModules.includes(name) && name !== 'trader_investment_plan'
+    )
+
+    if (firstModule) {
+      activeModule.value = firstModule
+    } else {
+      const firstDetailedModule = availableModules.find(name => name !== 'trader_investment_plan')
+      activeModule.value = firstDetailedModule || ''
+    }
+  } catch (error: any) {
     console.error('获取报告详情失败:', error)
-    ElMessage.error('获取报告详情失败')
+    ElMessage.error(error.message || '获取报告详情失败')
   } finally {
     loading.value = false
   }
 }
 
 // 下载报告
-const downloadReport = async (format: string = 'markdown') => {
+const downloadReport = async (format: string) => {
+  if (!report.value) {
+    return
+  }
+
   try {
-    // 显示加载提示
     const loadingMsg = ElMessage({
       message: `正在生成${getFormatName(format)}格式报告...`,
       type: 'info',
@@ -330,7 +238,7 @@ const downloadReport = async (format: string = 'markdown') => {
 
     const response = await fetch(`/api/reports/${report.value.id}/download?format=${format}`, {
       headers: {
-        'Authorization': `Bearer ${authStore.token}`
+        Authorization: `Bearer ${authStore.token}`
       }
     })
 
@@ -346,14 +254,11 @@ const downloadReport = async (format: string = 'markdown') => {
     const a = document.createElement('a')
     a.href = url
 
-    // 根据格式设置文件扩展名
     const ext = getFileExtension(format)
-    // 清理股票名称中的特殊字符（用于文件名）
     const cleanStockName = (report.value.stock_name || '')
-      .replace(/[\/\\:*?"<>|]/g, '') // 移除文件名不允许的字符
-      .replace(/\s+/g, '_') // 空格替换为下划线
+      .replace(/[\/\\:*?"<>|]/g, '')
+      .replace(/\s+/g, '_')
       .trim()
-    // 构建文件名：股票代码_股票名称_研究报告_日期
     const fileName = cleanStockName
       ? `${report.value.stock_symbol}_${cleanStockName}_研究报告_${report.value.analysis_date}.${ext}`
       : `${report.value.stock_symbol}_研究报告_${report.value.analysis_date}.${ext}`
@@ -555,6 +460,19 @@ const orderedModuleNames = computed(() => {
   return [...ordered, ...remaining]
 })
 
+const userBriefContent = computed(() => {
+  if (!report.value?.reports) return null
+  return getModuleContent(report.value.reports.trader_investment_plan)
+})
+
+const summaryDisplayContent = computed(() => {
+  return userBriefContent.value || report.value?.summary || ''
+})
+
+const detailedModuleNames = computed(() => {
+  return orderedModuleNames.value.filter(name => name !== 'trader_investment_plan')
+})
+
 const getModuleDisplayName = (moduleName: string) => {
   // 历史报告详情页保留完整模块展示，便于核查旧数据
   const nameMap: Record<string, string> = {
@@ -573,7 +491,7 @@ const getModuleDisplayName = (moduleName: string) => {
     bear_report: '🌧️ 审慎情景论证',
     research_team_decision: '🔬 研究结论汇总',
     investment_plan: '📋 研究经理简报',
-    trader_investment_plan: '🧩 用户版研究简报',
+    trader_investment_plan: '🧩 研究简报',
     risky_analyst: '⚡ 高弹性情景分析师',
     risky_opinion: '⚡ 高弹性情景审阅',
     safe_analyst: '🛡️ 防御情景分析师',
@@ -780,7 +698,7 @@ const formatKeyPoint = (point: string): string => {
     'action': '研究判断',
     'confidence': '置信度',
     'reasoning': '研究依据',
-    'summary': '研究摘要',
+    'summary': '简报',
     'risk_score': '风险评分',
     'risk_level': '风险等级',
     'core_evidence': '核心依据',
@@ -820,13 +738,13 @@ const getPlainText = (content: string) => {
 }
 
 const getResearchOverview = () => {
-  if (!report.value) return '已生成研究摘要，请查看下方详细报告。'
+  if (!report.value) return '已生成简报，请查看下方详细报告。'
 
-  const sourceText = report.value.summary || report.value.recommendation || ''
+  const sourceText = summaryDisplayContent.value || report.value.recommendation || ''
   const normalized = getPlainText(String(sourceText))
 
   if (!normalized) {
-    return '已生成研究摘要，请查看下方详细报告。'
+    return '已生成简报，请查看下方详细报告。'
   }
 
   return normalized.length > 90 ? `${normalized.slice(0, 90)}...` : normalized

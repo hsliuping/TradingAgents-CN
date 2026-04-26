@@ -36,9 +36,9 @@ class RiskManagerV2(ManagerAgent):
     风险管理者 v2.0
     
     功能：
-    - 主持风险辩论
+    - 主持稳健性审阅
     - 综合多方风险观点
-    - 形成最终风险评估
+    - 形成风险审阅后的综合研究结论
     
     工作流程：
     1. 读取投资计划和各方风险观点
@@ -66,7 +66,7 @@ class RiskManagerV2(ManagerAgent):
     metadata = AgentMetadata(
         id="risk_manager_v2",
         name="风险管理者 v2.0",
-        description="主持风险辩论，综合多方观点，形成最终风险评估",
+        description="主持稳健性审阅，综合多方观点，形成风险审阅后的综合研究结论",
         category=AgentCategory.MANAGER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -74,18 +74,18 @@ class RiskManagerV2(ManagerAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_plan", type="string", description="投资计划"),
+            AgentInput(name="investment_plan", type="string", description="当前内部研究结论"),
             AgentInput(name="risky_opinion", type="string", description="激进风险观点", required=False),
             AgentInput(name="safe_opinion", type="string", description="保守风险观点", required=False),
             AgentInput(name="neutral_opinion", type="string", description="中性风险观点", required=False),
         ],
         outputs=[
-            AgentOutput(name="risk_assessment", type="string", description="风险评估报告"),
+            AgentOutput(name="risk_assessment", type="string", description="稳健性审阅与风险治理报告"),
             AgentOutput(name="risk_debate_state", type="dict", description="风险辩论状态（包含 judge_decision）"),
         ],
         requires_tools=False,
         output_field="risk_assessment",
-        report_label="【风险评估 v2】",
+        report_label="【风险治理结论 v2】",
     )
 
     # 管理者类型
@@ -154,19 +154,20 @@ class RiskManagerV2(ManagerAgent):
             return prompt
         
         # 默认提示词（合规版本）
-        return """你是一位中性的风险治理经理，负责把研究结论与风险分歧整理成最终的综合研究结论。
+        return """你是一位中性的风险治理经理，负责审阅研究结论的稳健性，并把风险分歧整理成最终的综合研究结论。
 
     **分析风格**: 客观、克制、基于证据，强调关键风险、信息缺口与判断调整条件。
 
     **核心职责**:
-    1. 先归纳激进、保守、中性三方风险观点的共识，再识别最关键的风险分歧。
-    2. 判断哪些风险已经较明确，哪些风险仍需继续验证。
+    1. 先归纳激进、保守、中性三方稳健性审阅的共识，再识别最关键的风险分歧。
+    2. 判断哪些风险已经足以限制当前研究结论，哪些风险仍需继续验证。
     3. 形成风险等级、关键风险清单、研究谨慎度要求、判断调整原则与后续观察重点。
-    4. 在兼容字段 `final_trade_decision` 中输出“综合研究结论”，而不是交易决策。
+    4. 在兼容字段 `final_trade_decision` 中输出“风险审阅后的综合研究结论”，而不是交易决策。
 
     **分析原则**:
     - 不得输出交易建议、执行方案、目标价、止损止盈、仓位比例或价格触发动作。
     - 风险治理建议只能表达为研究谨慎度、验证要求与后续观察事项。
+    - 你的任务不是平均拼接三方观点，而是判断当前哪类风险已足以限制研究结论，哪类风险仍停留在待验证阶段。
     - `risk_level`、`risk_score`、`reasoning` 与 `final_trade_decision` 必须相互一致，不得自相矛盾。
     - 所有结论必须严格基于提供内容，不得补造信息。
     - 使用中文输出。
@@ -279,7 +280,7 @@ class RiskManagerV2(ManagerAgent):
 - 公司名称：{company_name}
 - 分析日期：{analysis_date}
 
-【当前研究结论】
+【当前内部研究结论】
 {investment_plan_content}
 
 【激进风险观点】
@@ -297,11 +298,11 @@ class RiskManagerV2(ManagerAgent):
 请基于以上信息输出风险治理结论，不得给出交易建议。
 
 **任务要求**：
-- 先归纳三方风险观点的共识，再写最关键的分歧与判断脆弱点。
-- 给出风险等级与关键风险来源，说明这些风险为什么重要。
+- 先归纳三方稳健性审阅的共识，再写最关键的分歧与判断脆弱点。
+- 给出风险等级与关键风险来源，说明这些风险为什么重要、为什么它们足以限制当前研究结论。
 - 区分哪些风险已有较充分证据，哪些仍存在明显信息缺口。
 - 给出研究谨慎度要求、判断调整条件与后续观察事项。
-- 在 `final_trade_decision` 字段中继续输出兼容对象，但其语义必须是“综合研究结论”，不是交易决策。
+- 在 `final_trade_decision` 字段中继续输出兼容对象，但其语义必须是“风险审阅后的综合研究结论”，不是交易决策。
 
 **严格禁止**：
 - 不得输出价格区间、关键价位、风险控制参考价、仓位比例、执行策略或动作建议。
@@ -313,15 +314,15 @@ class RiskManagerV2(ManagerAgent):
 {{
     "risk_level": "低|中|高",
     "risk_score": 0.0-1.0,
-    "reasoning": "200-500字，说明风险评估逻辑与关键分歧",
+    "reasoning": "200-500字，说明风险评估逻辑、关键分歧与当前判断为何仍需保持谨慎",
     "key_risks": ["关键风险1", "关键风险2", "关键风险3"],
     "risk_control": "研究谨慎度与验证要求，不能包含执行动作",
     "investment_adjustment": "研究判断调整原则，不能包含交易动作",
     "final_trade_decision": {{
         "analysis_view": "看涨|中性|看跌",
         "confidence": 0-100,
-        "summary": "50-120字的综合研究摘要",
-        "reasoning": "200-500字，说明综合研究判断为何成立",
+        "summary": "50-120字的综合研究摘要，说明当前结论与主要限制",
+        "reasoning": "200-500字，说明综合研究判断为何成立、为何现在不能更强",
         "core_evidence": ["核心依据1", "核心依据2", "核心依据3"],
         "uncertainties": ["关键不确定性1", "关键不确定性2"],
         "invalidation_conditions": ["判断下修或失效前提1", "判断下修或失效前提2"],

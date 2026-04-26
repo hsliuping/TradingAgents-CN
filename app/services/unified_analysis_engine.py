@@ -14,6 +14,7 @@ from datetime import datetime
 from app.models.analysis import UnifiedAnalysisTask, AnalysisTaskType, AnalysisStatus
 from app.services.workflow_registry import AnalysisWorkflowRegistry
 from app.utils.timezone import now_tz
+from core.workflow.default_workflow_provider import get_default_workflow_provider
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,25 @@ class UnifiedAnalysisEngine:
     def __init__(self):
         """初始化引擎"""
         self.logger = logger
+
+    def _resolve_workflow_id(self, task: UnifiedAnalysisTask, config) -> str:
+        """解析本次任务应使用的工作流 ID。"""
+        explicit_workflow_id = task.workflow_id or task.task_params.get("workflow_id")
+        if explicit_workflow_id:
+            self.logger.info(f"📋 工作流选择: 使用任务显式指定的 workflow_id={explicit_workflow_id}")
+            return explicit_workflow_id
+
+        if task.task_type == AnalysisTaskType.STOCK_ANALYSIS:
+            try:
+                active_workflow_id = get_default_workflow_provider().get_active_workflow_id()
+                if active_workflow_id:
+                    self.logger.info(f"📋 工作流选择: 使用当前活动工作流 workflow_id={active_workflow_id}")
+                    return active_workflow_id
+            except Exception as exc:
+                self.logger.warning(f"⚠️ 获取活动工作流失败，回退注册表默认值: {exc}")
+
+        self.logger.info(f"📋 工作流选择: 使用注册表默认 workflow_id={config.workflow_id}")
+        return config.workflow_id
     
     async def execute_task(
         self,
@@ -345,7 +365,8 @@ class UnifiedAnalysisEngine:
         Returns:
             执行结果
         """
-        self.logger.info(f"🔄 使用工作流引擎执行: {config.workflow_id}")
+        workflow_id = self._resolve_workflow_id(task, config)
+        self.logger.info(f"🔄 使用工作流引擎执行: {workflow_id}")
 
         # 导入工作流 API
         from core.api.workflow_api import WorkflowAPI
@@ -474,7 +495,7 @@ class UnifiedAnalysisEngine:
         import asyncio
         result = await asyncio.to_thread(
             workflow_api.execute,
-            workflow_id=task.workflow_id or config.workflow_id,
+            workflow_id=workflow_id,
             inputs=workflow_inputs,
             legacy_config=legacy_config,
             progress_callback=wrapped_progress_callback  # 使用包装的回调

@@ -127,14 +127,20 @@ def test_trader_builder_and_fallback_prioritize_manager_judgment_without_trading
     content = module.build_trader_content("neutral")
     source = (ROOT / "core/agents/adapters/trader_v2.py").read_text(encoding="utf-8")
 
-    assert "以研究经理结论为主线" in content["system_prompt"]
+    assert "一句话结论要像对朋友解释" in content["system_prompt"]
     assert "不要把所有报告平均复述成流水账" in content["system_prompt"]
-    assert "优先选择最能强化、削弱或限制当前研究结论的信号" in content["analysis_requirements"]
-    assert "避免平均复述每一份报告" in content["analysis_requirements"]
+    assert "不要直接写‘估值修复逻辑’‘提供防御’‘材料未提供’‘风险治理结论未提供’‘投资决策材料未提供’" in content["system_prompt"]
+    assert "整篇用户版研究简报正文总长度控制在 500-800 个中文字符之间" in content["analysis_requirements"]
+    assert "不要把‘低 PB’直接塞进一句话结论" in content["analysis_requirements"]
+    assert "500-800 个中文字符" in content["analysis_requirements"]
+    assert "完整白话段落" in content["output_format"]
     assert "历史交易记录只能作为背景参考" in content["analysis_requirements"]
-    assert "以当前研究结论为主线" in content["user_prompt"]
+    assert "用户版简报要像对普通人解释" in content["user_prompt"]
+    assert "不能只写成几句很短的话" in content["user_prompt"]
     assert "历史交易记录只能作为背景" in content["user_prompt"]
-    assert "以研究经理结论为主线" in source
+    assert "一句话结论要像对朋友解释" in source
+    assert "不要直接写“估值修复逻辑”" in source
+    assert "500-800 个中文字符之间" in source
     assert "历史交易记录只作为背景材料" in source
     assert "平均复述每一份报告" in source
 

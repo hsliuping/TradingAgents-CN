@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from .models import WorkflowDefinition
+from .templates import v2_stock_analysis_workflow as v2_stock_analysis_workflow_module
 from .templates.default_workflow import DEFAULT_WORKFLOW
 from .templates.simple_workflow import SIMPLE_WORKFLOW
 from .templates.trade_review_workflow import TRADE_REVIEW_WORKFLOW
@@ -87,6 +88,30 @@ class DefaultWorkflowProvider:
     def get_system_workflow(self, workflow_id: str) -> Optional[WorkflowDefinition]:
         """获取系统预置工作流"""
         return self.SYSTEM_WORKFLOWS.get(workflow_id)
+
+    def _log_workflow_diagnostics(
+        self,
+        workflow: WorkflowDefinition,
+        source: str,
+        source_path: Optional[str] = None,
+    ) -> None:
+        """记录工作流来源和关键边，便于排查是否加载到预期版本。"""
+        nodes = [node.id for node in workflow.nodes]
+        edges = [f"{edge.id}:{edge.source}->{edge.target}" for edge in workflow.edges]
+        logger.info(f"📋 [工作流加载] 来源: {source}")
+        if source_path:
+            logger.info(f"📋 [工作流加载] 来源文件: {source_path}")
+        logger.info(f"📋 [工作流加载] 节点列表: {nodes}")
+        logger.info(f"📋 [工作流加载] 边列表: {edges}")
+
+        critical_edge_ids = ("e_to_risk_debate", "e_risk_judge", "e_trader", "e_end")
+        critical_edges = {
+            edge.id: (edge.source, edge.target)
+            for edge in workflow.edges
+            if edge.id in critical_edge_ids
+        }
+        if critical_edges:
+            logger.info(f"📋 [工作流加载] 关键边: {critical_edges}")
 
     def is_system_workflow(self, workflow_id: str) -> bool:
         """检查是否为系统预置工作流"""
@@ -218,6 +243,10 @@ class DefaultWorkflowProvider:
         if self.is_system_workflow(workflow_id):
             workflow = self.SYSTEM_WORKFLOWS[workflow_id]
             logger.info(f"✅ [工作流加载] 使用系统预置工作流: {workflow_id} - {workflow.name}")
+            source_path = None
+            if workflow_id == SYSTEM_V2_STOCK_ANALYSIS_WORKFLOW_ID:
+                source_path = getattr(v2_stock_analysis_workflow_module, "__file__", None)
+            self._log_workflow_diagnostics(workflow, "system_preset", source_path)
             return workflow
 
         # 1. 优先从数据库加载
@@ -244,6 +273,7 @@ class DefaultWorkflowProvider:
                     logger.info(f"   版本: {doc.get('version', 1)}")
                     logger.info(f"   分析师数量: {len(analyst_nodes)}")
                     logger.info(f"   分析师列表: {analyst_ids}")
+                    self._log_workflow_diagnostics(workflow, "database")
 
                     return workflow
                 else:
@@ -269,6 +299,7 @@ class DefaultWorkflowProvider:
                 logger.info(f"   名称: {workflow.name}")
                 logger.info(f"   分析师数量: {len(analyst_nodes)}")
                 logger.info(f"   分析师列表: {analyst_ids}")
+                self._log_workflow_diagnostics(workflow, f"filesystem:{file_path}")
 
                 return workflow
             except Exception as e:
@@ -282,6 +313,7 @@ class DefaultWorkflowProvider:
         logger.info(f"   默认工作流: {default_workflow.name}")
         logger.info(f"   分析师数量: {len(analyst_nodes)}")
         logger.info(f"   分析师列表: {analyst_ids}")
+        self._log_workflow_diagnostics(default_workflow, "fallback_default")
 
         return default_workflow
 

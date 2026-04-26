@@ -2,7 +2,7 @@
 中性风险分析师 v2.0
 
 基于 ResearcherAgent 基类的中性风险分析师实现。
-从中性角度评估交易计划，平衡收益与风险，寻求最优解。
+从中性角度审阅研究结论的基准情景，平衡强化证据、风险与信息缺口。
 支持多轮辩论和缓存系统。
 """
 
@@ -32,10 +32,10 @@ class NeutralAnalystV2(ResearcherAgent):
     中性风险分析师 v2.0
 
     功能：
-    - 从中性角度评估交易计划
+    - 从中性角度审阅研究结论的基准情景
     - 平衡收益与风险
-    - 寻求最优风险收益比
-    - 提供客观理性的建议
+    - 判断最稳妥的基准结论
+    - 提供客观理性的证据权衡
     - 支持多轮辩论（与激进、保守分析师辩论）
     - 支持缓存系统（避免重复分析）
 
@@ -73,7 +73,7 @@ class NeutralAnalystV2(ResearcherAgent):
     metadata = AgentMetadata(
         id="neutral_analyst_v2",
         name="中性风险分析师 v2.0",
-        description="从中性角度评估交易计划，平衡收益与风险，寻求最优解，支持多轮辩论",
+        description="从中性角度审阅研究结论的基准情景，平衡收益与风险，支持多轮辩论",
         category=AgentCategory.RISK,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -81,7 +81,7 @@ class NeutralAnalystV2(ResearcherAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_plan", type="string", description="投资计划"),
+            AgentInput(name="investment_plan", type="string", description="当前内部研究结论"),
             AgentInput(name="bull_opinion", type="string", description="看涨观点", required=False),
             AgentInput(name="bear_opinion", type="string", description="看跌观点", required=False),
             AgentInput(name="risky_opinion", type="string", description="激进风险观点", required=False),
@@ -194,7 +194,7 @@ class NeutralAnalystV2(ResearcherAgent):
         logger.info(f"  - 总Prompt长度: {total_length:,} 字符 (~{total_length//4:,} tokens)")
 
         # 降级提示词（如果模板系统不可用）- 参考旧版实现
-        fallback_prompt = f"""以下是研究整合员整理的当前研究结论：
+        fallback_prompt = f"""以下是当前内部研究结论：
 {template_variables['investment_plan']}
 
 将以下来源的见解纳入您的论点：

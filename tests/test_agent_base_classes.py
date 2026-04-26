@@ -160,7 +160,7 @@ class TestResearchManagerV2:
 
 
 class TestTraderV2:
-    """测试交易员V2"""
+    """测试研究整合员V2"""
     
     def test_import(self):
         """测试导入"""
@@ -172,8 +172,8 @@ class TestTraderV2:
         from core.agents.adapters import TraderV2
 
         assert TraderV2.metadata.id == "trader_v2"
-        assert TraderV2.metadata.name == "交易员 v2.0"
-        assert TraderV2.output_field == "trading_plan"
+        assert TraderV2.metadata.name == "研究整合员 v2.0"
+        assert TraderV2.output_field == "trader_investment_plan"
     
     def test_user_prompt(self):
         """测试用户提示词生成"""
@@ -184,13 +184,19 @@ class TestTraderV2:
             ticker="AAPL",
             analysis_date="2024-12-15",
             investment_plan={"recommendation": "买入"},
-            all_reports={"market_report": "市场分析"},
+            all_reports={
+                "market_report": "市场分析",
+                "risk_management_decision": "风险治理结论",
+                "final_trade_decision": {"summary": "综合研究结论摘要"},
+            },
             historical_trades=None,
             state={}
         )
         
         assert "AAPL" in prompt
-        assert "买入" in prompt or "投资计划" in prompt
+        assert "一句话结论" in prompt
+        assert "当前判断的限制" in prompt
+        assert "综合研究结论摘要" in prompt or "风险审阅后的综合研究结论" in prompt
 
 
 # ============================================================
@@ -376,6 +382,30 @@ class TestRiskManagerV2:
         assert RiskManagerV2.metadata.name == "风险管理者 v2.0"
         assert RiskManagerV2.manager_type == "risk"
         assert RiskManagerV2.output_field == "risk_assessment"
+
+    def test_fallback_user_prompt_uses_robustness_review_semantics(self):
+        """测试降级提示词改为稳健性审阅口径"""
+        from core.agents.adapters import RiskManagerV2
+
+        agent = RiskManagerV2()
+        agent._get_prompt_from_template = lambda *args, **kwargs: None
+
+        prompt = agent._build_user_prompt(
+            ticker="000001",
+            analysis_date="2024-12-15",
+            inputs={
+                "investment_plan": "当前内部研究结论",
+                "risky_opinion": "激进观点",
+                "safe_opinion": "保守观点",
+                "neutral_opinion": "中性观点",
+            },
+            debate_summary="辩论总结",
+            state={"company_name": "平安银行"},
+        )
+
+        assert "当前内部研究结论" in prompt
+        assert "风险审阅后的综合研究结论" in prompt
+        assert "交易决策" in prompt
 
 
 # ==================== 持仓分析Agent测试 ====================

@@ -87,6 +87,29 @@ class WorkflowAPI:
     def _get_path(self, workflow_id: str) -> Path:
         """获取工作流文件路径（备选方案）"""
         return Path(self.WORKFLOWS_DIR) / f"{workflow_id}.json"
+
+    def _log_workflow_source(
+        self,
+        workflow_id: str,
+        source: str,
+        data: Dict[str, Any],
+        source_path: Optional[str] = None,
+    ) -> None:
+        """记录工作流来源和关键边，便于排查实际加载的是哪份定义。"""
+        edges = data.get("edges") or []
+        edge_list = [f"{edge.get('id')}:{edge.get('source')}->{edge.get('target')}" for edge in edges]
+        critical_edge_ids = {"e_to_risk_debate", "e_risk_judge", "e_trader", "e_end"}
+        critical_edges = {
+            edge.get("id"): (edge.get("source"), edge.get("target"))
+            for edge in edges
+            if edge.get("id") in critical_edge_ids
+        }
+        logger.info(f"📋 [WorkflowAPI] 工作流来源: {workflow_id} <- {source}")
+        if source_path:
+            logger.info(f"📋 [WorkflowAPI] 来源路径: {source_path}")
+        logger.info(f"📋 [WorkflowAPI] 边列表: {edge_list}")
+        if critical_edges:
+            logger.info(f"📋 [WorkflowAPI] 关键边: {critical_edges}")
     
     # ==================== CRUD 操作 ====================
 
@@ -168,7 +191,8 @@ class WorkflowAPI:
                         doc["created_at"] = doc["created_at"].isoformat()
                     if "updated_at" in doc and isinstance(doc["updated_at"], datetime):
                         doc["updated_at"] = doc["updated_at"].isoformat()
-                    logger.debug(f"从数据库获取工作流: {workflow_id}")
+                    logger.info(f"📋 [WorkflowAPI] 从数据库获取工作流: {workflow_id}")
+                    self._log_workflow_source(workflow_id, "database", doc)
                     return doc
             except Exception as e:
                 logger.warning(f"从数据库获取工作流失败: {e}")
@@ -177,8 +201,10 @@ class WorkflowAPI:
         path = self._get_path(workflow_id)
         if path.exists():
             with open(path, 'r', encoding='utf-8') as f:
-                logger.debug(f"从文件系统获取工作流: {workflow_id}")
-                return json.load(f)
+                data = json.load(f)
+                logger.info(f"📋 [WorkflowAPI] 从文件系统获取工作流: {workflow_id}")
+                self._log_workflow_source(workflow_id, "filesystem", data, str(path))
+                return data
 
         return None
 
@@ -413,12 +439,14 @@ class WorkflowAPI:
             workflow = provider.get_system_workflow(workflow_id)
             if workflow:
                 data = workflow.to_dict()
+                self._log_workflow_source(workflow_id, "system_preset", data)
 
         if data is None:
             return {"success": False, "error": "工作流不存在"}
 
         try:
             definition = WorkflowDefinition.from_dict(data)
+            logger.info(f"📋 [WorkflowAPI] 执行工作流定义: {definition.id} - {definition.name}")
 
             # 准备输入参数
             prepared_inputs = self._prepare_inputs(inputs)

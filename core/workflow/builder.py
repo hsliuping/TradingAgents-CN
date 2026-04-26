@@ -96,18 +96,37 @@ class LegacyDependencyProvider:
         """重置单例实例（用于测试或重新配置）"""
         cls._instance = None
 
-    def get_llm(self, llm_type: str = "quick", temperature: Optional[float] = None):
+    def get_llm(
+        self,
+        llm_type: str = "quick",
+        temperature: Optional[float] = None,
+        timeout: Optional[int] = None,
+        max_tokens: Optional[int] = None,
+    ):
         """
         获取 LLM 实例
 
         Args:
             llm_type: "quick" 或 "deep"
-            temperature: 可选，如果指定则创建新的 LLM 实例（用于 Agent 特定的温度配置）
+            temperature: 可选，如果指定则覆盖默认温度
+            timeout: 可选，如果指定则覆盖默认超时时间
+            max_tokens: 可选，如果指定则覆盖默认输出长度
         """
-        # 如果指定了 temperature，创建新的 LLM 实例
-        if temperature is not None:
-            logger.info(f"[依赖提供者] 创建自定义温度 LLM: type={llm_type}, temperature={temperature}")
-            return self._create_custom_llm(llm_type, temperature)
+        # 如果指定了任一 Agent 级别覆盖参数，创建新的 LLM 实例
+        if any(value is not None for value in (temperature, timeout, max_tokens)):
+            logger.info(
+                "[依赖提供者] 创建自定义 LLM: type=%s, temperature=%s, timeout=%s, max_tokens=%s",
+                llm_type,
+                temperature,
+                timeout,
+                max_tokens,
+            )
+            return self._create_custom_llm(
+                llm_type,
+                temperature=temperature,
+                timeout=timeout,
+                max_tokens=max_tokens,
+            )
         
         # 🔥 每次调用时都检查配置是否变化，如果变化则重新创建 LLM 实例
         # 这样可以确保 API key 更新后立即生效，无需重启服务
@@ -227,13 +246,21 @@ class LegacyDependencyProvider:
             logger.error(f"[依赖提供者] LLM 创建失败: {e}")
             raise
 
-    def _create_custom_llm(self, llm_type: str, temperature: float):
+    def _create_custom_llm(
+        self,
+        llm_type: str,
+        temperature: Optional[float] = None,
+        timeout: Optional[int] = None,
+        max_tokens: Optional[int] = None,
+    ):
         """
-        创建自定义温度的 LLM 实例（用于 Agent 特定的温度配置）
+        创建带 Agent 级覆盖参数的 LLM 实例
 
         Args:
             llm_type: "quick" 或 "deep"
             temperature: 温度参数
+            timeout: 超时参数
+            max_tokens: 输出长度参数
 
         Returns:
             LLM 实例
@@ -258,11 +285,28 @@ class LegacyDependencyProvider:
         api_key_from_db = config.get("api_key")
         api_key = api_key_from_config or api_key_from_db
 
-        # 使用默认的 max_tokens 和 timeout
-        max_tokens = self._config.get(f"{llm_type}_max_tokens", 2000 if llm_type == "quick" else 4000)
-        timeout = self._config.get(f"{llm_type}_timeout", 60 if llm_type == "quick" else 120)
+        effective_temperature = temperature
+        if effective_temperature is None:
+            effective_temperature = self._config.get(f"{llm_type}_temperature", 0.1)
 
-        logger.info(f"[依赖提供者] 创建自定义温度 LLM: type={llm_type}, model={model}, temperature={temperature}")
+        effective_max_tokens = max_tokens
+        if effective_max_tokens is None:
+            effective_max_tokens = self._config.get(
+                f"{llm_type}_max_tokens",
+                2000 if llm_type == "quick" else 4000,
+            )
+
+        effective_timeout = timeout
+        if effective_timeout is None:
+            effective_timeout = self._config.get(
+                f"{llm_type}_timeout",
+                60 if llm_type == "quick" else 120,
+            )
+
+        logger.info(
+            f"[依赖提供者] 创建自定义 LLM: type={llm_type}, model={model}, "
+            f"temperature={effective_temperature}, timeout={effective_timeout}, max_tokens={effective_max_tokens}"
+        )
         logger.info(f"  - API Key 来源: {'用户显式指定' if api_key_from_config else ('数据库配置' if api_key_from_db else '未配置（将使用环境变量）')}")
         if api_key:
             logger.info(f"  - API Key: 已配置 ({truncate_api_key(api_key)})")
@@ -273,9 +317,9 @@ class LegacyDependencyProvider:
             provider=provider,
             model=model,
             backend_url=url,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
+            temperature=effective_temperature,
+            max_tokens=effective_max_tokens,
+            timeout=effective_timeout,
             api_key=api_key
         )
 
@@ -839,6 +883,17 @@ class WorkflowBuilder:
 
         # 添加节点（使用过滤后的定义）
         logger.info(f"[图构建] 📋 工作流节点列表: {[n.id for n in filtered_definition.nodes]}")
+        logger.info(
+            f"[图构建] 🔗 工作流边列表: "
+            f"{[f'{e.id}:{e.source}->{e.target}' for e in filtered_definition.edges]}"
+        )
+        critical_edges = {
+            edge.id: (edge.source, edge.target)
+            for edge in filtered_definition.edges
+            if edge.id in {"e_to_risk_debate", "e_risk_judge", "e_trader", "e_end"}
+        }
+        if critical_edges:
+            logger.info(f"[图构建] 🔍 关键边: {critical_edges}")
         for node in filtered_definition.nodes:
             if node.type in (NodeType.START, NodeType.END):
                 continue
@@ -1418,19 +1473,38 @@ class WorkflowBuilder:
             logger.info(f"   - Agent 配置中的 temperature: {agent_temperature}")
             logger.info(f"   - LLM 类型: {llm_type}")
             
+            agent_timeout = execution_config.get("timeout") if isinstance(execution_config, dict) else None
+            agent_max_tokens = execution_config.get("max_tokens") if isinstance(execution_config, dict) else None
+
+            logger.info(f"[智能体创建] ⏱️ Agent 配置中的 timeout: {agent_timeout}")
+            logger.info(f"[智能体创建] 🧾 Agent 配置中的 max_tokens: {agent_max_tokens}")
+
             if self.llm_override:
                 llm = self.llm_override
                 logger.info(f"[智能体创建] 🤖 LLM 实例: {type(llm).__name__ if llm else 'None'}")
                 logger.info(f"[智能体创建]    - 使用自定义 LLM (llm_override)，忽略 temperature 配置")
-            elif agent_temperature is not None:
-                # Agent 配置中有 temperature，创建新的 LLM 实例
-                logger.info(f"[智能体创建] ✅ 检测到 Agent 配置的 temperature={agent_temperature}，创建自定义 LLM 实例")
-                llm = self._legacy_provider.get_llm(llm_type, temperature=agent_temperature)
+            elif any(value is not None for value in (agent_temperature, agent_timeout, agent_max_tokens)):
+                # Agent 配置中存在 LLM 覆盖参数，创建新的 LLM 实例
+                logger.info(
+                    f"[智能体创建] ✅ 检测到 Agent 覆盖参数: "
+                    f"temperature={agent_temperature}, timeout={agent_timeout}, max_tokens={agent_max_tokens}，创建自定义 LLM 实例"
+                )
+                llm = self._legacy_provider.get_llm(
+                    llm_type,
+                    temperature=agent_temperature,
+                    timeout=agent_timeout,
+                    max_tokens=agent_max_tokens,
+                )
                 logger.info(f"[智能体创建] 🤖 LLM 实例: {type(llm).__name__ if llm else 'None'}")
-                logger.info(f"[智能体创建]    - ✅ 成功使用 Agent 配置的温度: {agent_temperature}")
-                # 验证 LLM 实例的 temperature（如果 LLM 支持）
+                logger.info(
+                    f"[智能体创建]    - ✅ 成功应用 Agent LLM 覆盖参数: "
+                    f"temperature={agent_temperature}, timeout={agent_timeout}, max_tokens={agent_max_tokens}"
+                )
+                # 验证 LLM 实例的参数（如果 LLM 支持）
                 if hasattr(llm, 'temperature'):
                     logger.info(f"[智能体创建]    - 验证: LLM 实例的 temperature={llm.temperature}")
+                if hasattr(llm, 'request_timeout'):
+                    logger.info(f"[智能体创建]    - 验证: LLM 实例的 request_timeout={llm.request_timeout}")
             else:
                 # 使用默认 LLM 实例
                 logger.info(f"[智能体创建] ⚠️ Agent 配置中没有 temperature，使用默认 LLM 实例")
@@ -1774,6 +1848,7 @@ class WorkflowBuilder:
         if start_node:
             for edge in definition.get_edges_from(start_node.id):
                 graph.add_edge(START, edge.target)
+                logger.info(f"[图构建] ➕ 起始边: START->{edge.target} (from {edge.id})")
 
         # 1. 先处理辩论流程的边
         for debate_id, config in debate_configs.items():
@@ -1782,6 +1857,7 @@ class WorkflowBuilder:
             # 辩论节点 → 第一个参与者
             graph.add_edge(debate_id, participants[0])
             added_edges.add((debate_id, participants[0]))
+            logger.info(f"[图构建] ➕ 辩论入口边: {debate_id}->{participants[0]}")
 
             # 为每个参与者添加条件边
             for i, participant in enumerate(participants):
@@ -1854,10 +1930,13 @@ class WorkflowBuilder:
             # 普通边
             if target_node.type == NodeType.END:
                 graph.add_edge(edge.source, END)
+                logger.info(f"[图构建] ➕ 普通边: {edge.source}->END (from {edge.id})")
             elif edge.type == EdgeType.CONDITIONAL:
                 self._add_conditional_edge(graph, edge, definition)
+                logger.info(f"[图构建] ➕ 条件边: {edge.source}->{edge.target} (from {edge.id})")
             else:
                 graph.add_edge(edge.source, edge.target)
+                logger.info(f"[图构建] ➕ 普通边: {edge.source}->{edge.target} (from {edge.id})")
             added_edges.add(edge_key)
 
     def _add_participant_conditional_edge(

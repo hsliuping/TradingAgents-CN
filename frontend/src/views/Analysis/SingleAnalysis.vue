@@ -566,9 +566,9 @@
                   <h4>📊 分析概览</h4>
                   <div class="overview-card">
   
-                    <div v-if="analysisResults.summary" class="overview-summary">
-                      <h5>研究摘要:</h5>
-                      <div class="markdown-content" v-html="renderMarkdown(analysisResults.summary)"></div>
+                    <div v-if="overviewBriefContent" class="overview-summary">
+                      <h5>研究简报:</h5>
+                      <div class="markdown-content" v-html="renderMarkdown(overviewBriefContent)"></div>
                     </div>
 
                     <!-- 🔥 移除重复的"分析依据"，因为上面决策卡片中已经有完整的 decision.reasoning -->
@@ -1540,7 +1540,9 @@ const getAnalysisReports = (data: any) => {
   console.log('📊 解析后的 reports 键:', Object.keys(reportsData || {}))
   const reports: Array<{ key: string; title: string; name: string; icon: string; description: string; content: string }> = []
 
-  const availableModules = Object.keys(reportsData).filter(key => !!getModuleContent(reportsData[key]))
+  const availableModules = Object.keys(reportsData).filter(
+    key => key !== 'trader_investment_plan' && !!getModuleContent(reportsData[key])
+  )
   const orderedModules = analysisModuleOrder.filter(key => availableModules.includes(key))
   const remainingModules = availableModules.filter(key => !analysisModuleOrder.includes(key))
 
@@ -1614,7 +1616,7 @@ const analysisModuleMeta: Record<string, { title: string; icon: string; descript
   bear_report: { title: '审慎情景论证', icon: '🌧️', description: '审慎情景研究的展开论证内容' },
   research_team_decision: { title: '研究结论汇总', icon: '🔬', description: '研究团队综合多方观点后的汇总结论' },
   investment_plan: { title: '研究经理简报', icon: '📋', description: '研究经理对多维分析的整合摘要' },
-  trader_investment_plan: { title: '用户版研究简报', icon: '🧩', description: '面向用户阅读的精简研究简报' },
+  trader_investment_plan: { title: '研究简报', icon: '🧩', description: '面向用户阅读的精简研究简报' },
   risky_analyst: { title: '高弹性情景分析师', icon: '⚡', description: '高弹性情景下的主要风险与机会评估' },
   risky_opinion: { title: '高弹性情景审阅', icon: '⚡', description: '高弹性情景的补充审阅意见' },
   safe_analyst: { title: '防御情景分析师', icon: '🛡️', description: '防御情景下的主要风险与稳健性评估' },
@@ -1637,6 +1639,18 @@ const getAnalysisReportMeta = (moduleKey: string) => {
     description: '详细研究报告'
   }
 }
+
+const getOverviewBriefContent = (data: any): string | null => {
+  const reportsData = extractReportsSource(data)
+  const traderBrief = getModuleContent(reportsData?.trader_investment_plan)
+  if (traderBrief) {
+    return traderBrief
+  }
+
+  return getModuleContent(data?.summary) || getModuleContent(data?.recommendation)
+}
+
+const overviewBriefContent = computed(() => getOverviewBriefContent(analysisResults.value))
 
 const normalizeDisplayedResearchText = (content: string) => {
   if (!content) return ''
