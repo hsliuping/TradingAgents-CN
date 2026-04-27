@@ -85,18 +85,26 @@ class PortfolioService:
         self.transactions_collection = "capital_transactions"
         self.position_changes_collection = "position_changes"
 
-    def _sanitize_position_analysis_result(self, result: PositionAnalysisResult) -> PositionAnalysisResult:
+    def _sanitize_position_analysis_result(
+        self,
+        result: PositionAnalysisResult,
+        position_snapshot: Optional[Dict[str, Any]] = None,
+    ) -> PositionAnalysisResult:
         """统一将持仓研究结果转换为研究观察模式。"""
         if result is None:
             return PositionAnalysisResult()
 
         raw_data = result.model_dump() if hasattr(result, "model_dump") else dict(result)
-        sanitized_data = sanitize_position_analysis_payload(raw_data)
+        sanitized_data = sanitize_position_analysis_payload(raw_data, position_snapshot=position_snapshot)
         return PositionAnalysisResult(**sanitized_data)
 
-    def _sanitize_position_analysis_dict(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _sanitize_position_analysis_dict(
+        self,
+        data: Dict[str, Any],
+        position_snapshot: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """统一清洗历史记录和接口返回中的持仓研究字段。"""
-        return sanitize_position_analysis_payload(data)
+        return sanitize_position_analysis_payload(data, position_snapshot=position_snapshot)
 
     # ==================== 资金账户管理 ====================
 
@@ -2982,7 +2990,7 @@ class PortfolioService:
     def _format_position_analysis_report(self, report: Dict) -> Dict[str, Any]:
         """格式化研究报告为响应格式"""
         snapshot = report.get("position_snapshot") or {}
-        ai_analysis = self._sanitize_position_analysis_dict(report.get("ai_analysis") or {})
+        ai_analysis = self._sanitize_position_analysis_dict(report.get("ai_analysis") or {}, position_snapshot=snapshot)
         price_targets = ai_analysis.get("price_targets") or {}
         
         # 处理action_reason：如果是JSON格式，转换为Markdown
@@ -4496,7 +4504,10 @@ class PortfolioService:
             formatted_item["position_type"] = item.get("position_type", "real")
             
             # 提取 ai_analysis 中的所有字段到顶层
-            ai_analysis = self._sanitize_position_analysis_dict(item.get("ai_analysis", {}))
+            ai_analysis = self._sanitize_position_analysis_dict(
+                item.get("ai_analysis", {}),
+                position_snapshot=item.get("position_snapshot") or {},
+            )
             if ai_analysis:
                 # 提取 action（可能是枚举类型，需要转换为字符串）
                 action_value = ai_analysis.get("action")

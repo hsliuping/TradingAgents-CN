@@ -321,6 +321,37 @@ def test_sanitize_position_analysis_payload_strips_score_and_trigger_language() 
     assert "核心判断是公司经营质量仍具韧性" in sanitized["action_reason"]
 
 
+def test_sanitize_position_analysis_payload_rewrites_deep_loss_into_user_summary() -> None:
+    raw_result = {
+        "action": "hold",
+        "action_reason": (
+            "研究结论；当前持仓处于技术结构临界守稳、基本面坚实但估值结构分化的中性观察阶段；"
+            "价格紧贴中期支撑，尚未出现趋势反转信号；核心依据"
+        ),
+        "risk_assessment": "请重点关注持仓波动、行业变化和公告风险。",
+        "opportunity_assessment": "请持续跟踪经营质量、估值变化和潜在催化事件。",
+        "detailed_analysis": "已连续3日站稳MA20上方，并关注成交量是否温和放大。",
+    }
+    snapshot = {
+        "cost_price": 345.5,
+        "current_price": 228.52,
+        "unrealized_pnl_pct": -33.86,
+        "holding_days": 85,
+    }
+
+    sanitized = sanitize_position_analysis_payload(raw_result, position_snapshot=snapshot)
+
+    assert "浮亏约33.86%" in sanitized["action_reason"]
+    assert "成本价约¥345.50，当前价约¥228.52" in sanitized["action_reason"]
+    assert "持有时间约85天" in sanitized["action_reason"]
+    assert "暂时只能继续观察" in sanitized["action_reason"]
+    assert "站稳" not in sanitized["action_reason"]
+    assert "MA20" not in sanitized["action_reason"]
+    assert "技术结构临界守稳" not in sanitized["action_reason"]
+    assert "### 当前状态" in sanitized["detailed_analysis"]
+    assert "### 风险提示" in sanitized["detailed_analysis"]
+
+
 def test_sanitize_analysis_payload_strips_news_and_sentiment_execution_language() -> None:
     raw_result = {
         "reports": {

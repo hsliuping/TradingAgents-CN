@@ -61,6 +61,22 @@ _POSITION_TRIGGER_PATTERNS = [
         r"支撑带|支撑位|阻力位|压力位|放量|缩量|站稳|突破|跌破",
     )
 ]
+_POSITION_LABEL_ONLY_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"^(研究结论|核心依据|研究判断|风险提示|观察重点|补充视角|研究观察|风险评估|催化与改善条件)$",
+    )
+]
+_POSITION_PLAIN_LANGUAGE_REPLACEMENTS = (
+    ("技术结构临界守稳", "短期没有继续恶化"),
+    ("基本面坚实但估值结构分化", "公司经营基础尚可，但市场对估值修复仍有分歧"),
+    ("中性观察阶段", "暂时只能继续观察"),
+    ("价格紧贴中期支撑", "股价目前仍在阶段性低位附近"),
+    ("尚未出现趋势反转信号", "还没有看到明确修复信号"),
+    ("亦未触发系统性恶化条件", "也没有出现明确恶化证据"),
+    ("成本价显著高于现价", "当前价格仍明显低于持仓成本"),
+    ("修复需时间与多重条件配合", "后续修复通常需要时间，也需要多方面条件一起改善"),
+)
 _JSON_FIELD_PATTERN = re.compile(r'^[\[\]{}":,0-9._%\-\s]+$')
 _SENTENCE_SPLIT_PATTERN = re.compile(r"[\n。！？；]+")
 _LOW_SIGNAL_PATTERNS = [
@@ -339,12 +355,113 @@ def sanitize_position_text_block(text: Any, fallback: str = "") -> str:
     for fragment in _iter_review_fragments(text):
         if contains_position_trigger_language(fragment):
             continue
+        if any(pattern.match(fragment) for pattern in _POSITION_LABEL_ONLY_PATTERNS):
+            continue
         if fragment not in deduped:
             deduped.append(fragment)
 
     if not deduped:
         return fallback
     return "；".join(deduped[:5])[:600]
+
+
+def _coerce_float(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _coerce_int(value: Any) -> int | None:
+    number = _coerce_float(value)
+    if number is None:
+        return None
+    return int(number)
+
+
+def _extract_position_snapshot(result_data: Dict[str, Any], position_snapshot: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    if isinstance(position_snapshot, dict) and position_snapshot:
+        return position_snapshot
+    summary = result_data.get("summary")
+    if isinstance(summary, dict):
+        return summary
+    return {}
+
+
+def _simplify_position_user_language(text: str) -> str:
+    normalized = _plain_text(text)
+    if not normalized:
+        return ""
+
+    for old, new in _POSITION_PLAIN_LANGUAGE_REPLACEMENTS:
+        normalized = normalized.replace(old, new)
+
+    normalized = re.sub(r"\s+", " ", normalized)
+    normalized = normalized.replace("现阶段短期没有继续恶化、", "现阶段更合适的结论是继续观察：短期没有继续恶化，")
+    normalized = normalized.replace("仍有分歧的暂时只能继续观察", "仍有分歧，目前暂时只能继续观察")
+    normalized = normalized.replace("；价格", "；股价")
+    normalized = normalized.replace("当前持仓处于", "现阶段")
+    return normalized.strip(" ；，。")
+
+
+def _build_position_user_action_reason(
+    result_data: Dict[str, Any],
+    position_snapshot: Dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    snapshot = _extract_position_snapshot(result_data, position_snapshot)
+    cleaned_observation = _simplify_position_user_language(
+        sanitize_position_text_block(result_data.get("action_reason"), fallback="")
+    )
+    cleaned_risk = sanitize_text_block(result_data.get("risk_assessment"), fallback="")
+    cleaned_opportunity = sanitize_text_block(result_data.get("opportunity_assessment"), fallback="")
+
+    current_price = _coerce_float(snapshot.get("current_price"))
+    cost_price = _coerce_float(snapshot.get("cost_price"))
+    unrealized_pnl_pct = _coerce_float(snapshot.get("unrealized_pnl_pct"))
+    holding_days = _coerce_int(snapshot.get("holding_days"))
+
+    opening_parts: List[str] = []
+    if unrealized_pnl_pct is not None:
+        abs_loss = abs(unrealized_pnl_pct)
+        if unrealized_pnl_pct <= -30:
+            opening_parts.append(f"当前这笔持仓浮亏约{abs_loss:.2f}%，已经处于较深浮亏区间。")
+        elif unrealized_pnl_pct <= -15:
+            opening_parts.append(f"当前这笔持仓浮亏约{abs_loss:.2f}%，已经明显偏离原始成本区间。")
+        elif unrealized_pnl_pct < 0:
+            opening_parts.append(f"当前这笔持仓浮亏约{abs_loss:.2f}%，仍处于成本下方运行。")
+        elif unrealized_pnl_pct > 0:
+            opening_parts.append(f"当前这笔持仓浮盈约{unrealized_pnl_pct:.2f}%，但后续判断仍需关注证据是否延续。")
+
+    if cost_price is not None and current_price is not None:
+        opening_parts.append(f"成本价约¥{cost_price:.2f}，当前价约¥{current_price:.2f}。")
+
+    if holding_days is not None and holding_days >= 60:
+        opening_parts.append(f"持有时间约{holding_days}天，后续更应优先确认经营与风险是否改善，而不是依赖短线技术信号。")
+
+    if cleaned_observation:
+        opening_parts.append(cleaned_observation)
+    else:
+        opening_parts.append("现阶段更适合把重点放在确认研究逻辑是否仍然成立，而不是把短期价格波动直接理解为修复开始。")
+
+    risk_line = _simplify_position_user_language(cleaned_risk) or "请优先关注行业变化、公司公告和持仓波动是否继续恶化。"
+    opportunity_line = _simplify_position_user_language(cleaned_opportunity) or "后续重点观察经营质量、估值变化和能够改变当前判断的公开催化。"
+
+    action_reason = " ".join(part for part in opening_parts if part).strip()[:320]
+    detailed_sections = [
+        "### 当前状态",
+        f"- {action_reason}",
+        "",
+        "### 风险提示",
+        f"- {risk_line[:180]}",
+        "",
+        "### 后续观察点",
+        f"- {opportunity_line[:180]}",
+    ]
+    return action_reason, "\n".join(detailed_sections).strip()
 
 
 def _iter_review_fragments(text: Any) -> Iterable[str]:
@@ -668,21 +785,22 @@ def sanitize_analysis_payload(result_data: Dict[str, Any]) -> Dict[str, Any]:
     return sanitized
 
 
-def sanitize_position_analysis_payload(result_data: Dict[str, Any]) -> Dict[str, Any]:
+def sanitize_position_analysis_payload(
+    result_data: Dict[str, Any],
+    position_snapshot: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     if not isinstance(result_data, dict) or not result_data:
         return result_data
 
     sanitized = dict(result_data)
-    summary = sanitize_position_text_block(
+    action_reason, user_detailed_analysis = _build_position_user_action_reason(sanitized, position_snapshot)
+    summary = action_reason or sanitize_position_text_block(
         sanitized.get("summary") or sanitized.get("action_reason") or sanitized.get("detailed_analysis"),
         fallback="该持仓研究已转换为研究观察，请结合自身策略独立判断。",
     )
 
     sanitized["action"] = "hold"
-    sanitized["action_reason"] = sanitize_position_text_block(
-        sanitized.get("action_reason"),
-        fallback="当前仅保留研究结论、风险提示与观察重点，不提供执行性交易建议。",
-    )
+    sanitized["action_reason"] = action_reason or "当前仅保留研究结论、风险提示与观察重点，不提供执行性交易建议。"
     sanitized["price_targets"] = {}
     sanitized["suggested_quantity"] = None
     sanitized["suggested_amount"] = None
@@ -694,10 +812,7 @@ def sanitize_position_analysis_payload(result_data: Dict[str, Any]) -> Dict[str,
         sanitized.get("opportunity_assessment"),
         fallback="请持续跟踪经营质量、估值变化和潜在催化事件。",
     )
-    sanitized["detailed_analysis"] = sanitize_text_block(
-        sanitized.get("detailed_analysis"),
-        fallback=summary,
-    )
+    sanitized["detailed_analysis"] = user_detailed_analysis
     sanitized["summary"] = summary
     sanitized["recommendation"] = GENERIC_POSITION_RECOMMENDATION
 
