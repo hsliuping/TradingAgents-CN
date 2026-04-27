@@ -383,6 +383,61 @@ const getTotalPnlPct = () => {
   if (!report.value?.trade_info) return 0
   const tradeInfo = report.value.trade_info
   const realizedPct = tradeInfo.realized_pnl_pct || 0
+  if (tradeInfo.is_holding && tradeInfo.unrealized_pnl_pct !== undefined) {
+    const totalBuyAmount = tradeInfo.total_buy_amount || 0
+    if (totalBuyAmount > 0) {
+      const totalPnl = getTotalPnl()
+      return (totalPnl / totalBuyAmount) * 100
+    }
+    return realizedPct + tradeInfo.unrealized_pnl_pct
+  }
+  return realizedPct
+}
+
+const renderMarkdown = (content?: string) => {
+  if (!content) return ''
+  try {
+    return marked.parse(content) as string
+  } catch (e) {
+    return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
+  }
+}
+
+const showSaveCaseDialog = () => {
+  saveCaseDialogVisible.value = true
+}
+
+const handleSaveCaseSuccess = () => {
+  if (report.value) {
+    report.value.is_case_study = true
+  }
+}
+
+watch(() => [props.modelValue, props.reviewId], ([show, id]) => {
+  if (show && id) {
+    loadReport()
+  } else if (!show) {
+    stopPolling()
+  }
+}, { immediate: true })
+
+onBeforeUnmount(() => {
+  console.log('🧹 [复盘详情] 组件卸载，清理轮询资源...')
+  stopPolling()
+})
+</script>
+
+<style scoped lang="scss">
+.review-detail {
+  .progress-container {
+    padding: 32px 24px;
+
+    .status-card {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      padding: 32px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       border-radius: 12px;
       margin-bottom: 32px;
       color: white;
@@ -437,7 +492,6 @@ const getTotalPnlPct = () => {
       }
     }
 
-    // 分析步骤说明
     .analysis-steps {
       margin-bottom: 32px;
 
@@ -487,7 +541,6 @@ const getTotalPnlPct = () => {
       }
     }
 
-    // 预计时间提示
     .time-estimate {
       display: flex;
       align-items: center;
@@ -506,7 +559,6 @@ const getTotalPnlPct = () => {
       }
     }
 
-    // 底部操作按钮
     .progress-actions {
       display: flex;
       justify-content: center;
@@ -514,7 +566,6 @@ const getTotalPnlPct = () => {
     }
   }
 
-  // ❌ 错误显示界面样式
   .error-container {
     padding: 20px;
   }
@@ -530,82 +581,13 @@ const getTotalPnlPct = () => {
 
   .section {
     margin-bottom: 20px;
+
     h4 {
       margin: 0 0 12px 0;
       font-size: 14px;
       display: flex;
       align-items: center;
       gap: 6px;
-    }
-  }
-
-  .score-section {
-    display: flex;
-    gap: 40px;
-    margin-bottom: 24px;
-    padding: 20px;
-    background: #f5f7fa;
-    border-radius: 8px;
-
-    .overall-score {
-      text-align: center;
-      padding: 16px 32px;
-      background: #fff;
-      border-radius: 8px;
-
-      .score-value {
-        font-size: 48px;
-        font-weight: 700;
-        line-height: 1;
-      }
-      .score-label {
-        margin-top: 8px;
-        font-size: 14px;
-        color: #909399;
-      }
-
-      &.excellent .score-value { color: #67c23a; }
-      &.good .score-value { color: #e6a23c; }
-      &.poor .score-value { color: #f56c6c; }
-    }
-
-    .sub-scores {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 12px;
-
-      .sub-score-item {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-
-        .label {
-          width: 70px;
-          font-size: 13px;
-          color: #606266;
-          flex-shrink: 0;
-        }
-
-        .el-progress {
-          flex: 1;
-
-          // 确保隐藏进度条内部文本
-          :deep(.el-progress__text) {
-            display: none !important;
-          }
-        }
-
-        .score {
-          width: 40px;
-          font-size: 13px;
-          color: #303133;
-          font-weight: 500;
-          text-align: right;
-          flex-shrink: 0;
-        }
-      }
     }
   }
 
@@ -712,6 +694,7 @@ const getTotalPnlPct = () => {
 
   .suggestions {
     padding-left: 20px;
+
     li { margin-bottom: 8px; line-height: 1.5; }
   }
 
@@ -756,8 +739,8 @@ const getTotalPnlPct = () => {
     }
   }
 
-  .positive { color: #f56c6c; }  // 中国习惯：红色表示盈利（正数）
-  .negative { color: #67c23a; }  // 中国习惯：绿色表示亏损（负数）
+  .positive { color: #f56c6c; }
+  .negative { color: #67c23a; }
   .warning { color: #e6a23c; }
 }
 </style>
