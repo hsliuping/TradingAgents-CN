@@ -298,6 +298,29 @@ def test_sanitize_position_analysis_payload_strips_execution_fields() -> None:
     assert sanitized["recommendation"].startswith("该持仓研究仅提供研究观察")
 
 
+def test_sanitize_position_analysis_payload_strips_score_and_trigger_language() -> None:
+    raw_result = {
+        "action": "hold",
+        "action_reason": (
+            "当前持仓处于观察期。技术面评分5分，基本面评分7.3分。"
+            "需持续验证价格是否能在MA20上方形成连续三日收盘站稳，并关注成交量是否温和放大。"
+            "核心判断是公司经营质量仍具韧性，但市场预期尚待修复。"
+        ),
+        "detailed_analysis": "价格紧贴MA20与布林中轨，暂不具备右侧介入依据。",
+        "risk_assessment": "若行业景气继续走弱，盈利能力会承压。",
+        "opportunity_assessment": "若经营改善兑现，估值修复弹性可能提升。",
+    }
+
+    sanitized = sanitize_position_analysis_payload(raw_result)
+
+    assert "评分" not in sanitized["action_reason"]
+    assert "连续三日" not in sanitized["action_reason"]
+    assert "站稳" not in sanitized["action_reason"]
+    assert "放大" not in sanitized["action_reason"]
+    assert "MA20" not in sanitized["action_reason"]
+    assert "核心判断是公司经营质量仍具韧性" in sanitized["action_reason"]
+
+
 def test_sanitize_analysis_payload_strips_news_and_sentiment_execution_language() -> None:
     raw_result = {
         "reports": {

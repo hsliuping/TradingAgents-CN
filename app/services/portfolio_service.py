@@ -4943,15 +4943,15 @@ class PortfolioService:
         if "analysis_summary" in advice_json:
             summary = advice_json["analysis_summary"]
             if isinstance(summary, str) and summary:
-                lines.append(f"## 📊 分析摘要\n\n{summary}\n")
+                lines.append(f"## 研究结论\n\n{summary}\n")
             elif isinstance(summary, dict):
                 overall_view = summary.get("overall_view", summary.get("overall_assessment", ""))
                 if overall_view:
-                    lines.append(f"## 📊 分析摘要\n\n{overall_view}\n")
+                    lines.append(f"## 研究结论\n\n{overall_view}\n")
                 key_points = summary.get("key_points", [])
                 if isinstance(key_points, list) and key_points:
-                    lines.append("\n**关键点**：\n\n")
-                    for point in key_points:
+                    lines.append("\n### 核心依据\n\n")
+                    for point in key_points[:3]:
                         if point:
                             lines.append(f"- {point}\n")
         
@@ -4959,13 +4959,13 @@ class PortfolioService:
         if "comprehensive_assessment" in advice_json:
             assessment = advice_json["comprehensive_assessment"]
             if isinstance(assessment, dict):
-                lines.append("\n## 🔍 综合评估\n\n")
+                lines.append("\n## 补充视角\n\n")
                 
                 # 持仓状态
                 if "position_status" in assessment:
                     pos_status = assessment["position_status"]
                     if isinstance(pos_status, dict):
-                        lines.append("### 📈 持仓状态\n\n")
+                        lines.append("### 持仓状态\n\n")
                         current_price = pos_status.get("current_price", "")
                         cost_price = pos_status.get("cost_price", "")
                         floating_loss_ratio = pos_status.get("floating_loss_ratio", "")
@@ -4981,7 +4981,7 @@ class PortfolioService:
                 if "technical_perspective" in assessment:
                     tech = assessment["technical_perspective"]
                     if isinstance(tech, dict):
-                        lines.append("\n### 📊 技术面视角\n\n")
+                        lines.append("\n### 技术面观察\n\n")
                         trend = tech.get("trend", "")
                         momentum = tech.get("momentum", "")
                         neutral_view = tech.get("neutral_view", "")
@@ -4996,7 +4996,7 @@ class PortfolioService:
                 if "fundamental_perspective" in assessment:
                     fund = assessment["fundamental_perspective"]
                     if isinstance(fund, dict):
-                        lines.append("\n### 💼 基本面视角\n\n")
+                        lines.append("\n### 基本面观察\n\n")
                         strengths = fund.get("strengths", "")
                         challenges = fund.get("challenges", "")
                         neutral_view = fund.get("neutral_view", "")
@@ -5011,7 +5011,7 @@ class PortfolioService:
                 if "risk_perspective" in assessment:
                     risk = assessment["risk_perspective"]
                     if isinstance(risk, dict):
-                        lines.append("\n### ⚠️ 风险视角\n\n")
+                        lines.append("\n### 风险视角\n\n")
                         volatility = risk.get("volatility", "")
                         key_risk_factors = risk.get("key_risk_factors", "")
                         neutral_view = risk.get("neutral_view", "")
@@ -5022,8 +5022,7 @@ class PortfolioService:
                         if neutral_view:
                             lines.append(f"**中性观点**: {neutral_view}\n\n")
         
-        # 3. 中性操作建议（最核心的内容）
-        # 支持两种格式：neutral_operation_advice 和 neutral_operation_suggestion
+        # 3. 中性研究判断（最核心的内容）
         neutral_advice = None
         if "neutral_operation_advice" in advice_json:
             neutral_advice = advice_json["neutral_operation_advice"]
@@ -5031,59 +5030,27 @@ class PortfolioService:
             neutral_advice = advice_json["neutral_operation_suggestion"]
         
         if neutral_advice and isinstance(neutral_advice, dict):
-            lines.append("\n## 💡 操作建议\n\n")
+            lines.append("\n## 研究判断\n\n")
             
             # 核心判断
             core_judgment = neutral_advice.get("core_judgment", "")
             if core_judgment:
                 lines.append(f"### 核心判断\n\n{core_judgment}\n\n")
             
-            # 推荐操作/建议操作（兼容不同字段名）
-            recommended_action = neutral_advice.get("recommended_action", neutral_advice.get("suggested_action", ""))
-            if recommended_action:
-                lines.append(f"**推荐操作**: {recommended_action}\n\n")
-            
             # 理由说明（reasoning字段，可能是列表或字符串）
             reasoning = neutral_advice.get("reasoning", [])
             if isinstance(reasoning, list) and reasoning:
-                lines.append("### 理由说明\n\n")
-                for idx, reason_item in enumerate(reasoning, 1):
+                lines.append("### 核心依据\n\n")
+                for reason_item in reasoning[:3]:
                     if isinstance(reason_item, str) and reason_item:
-                        lines.append(f"{idx}. {reason_item}\n\n")
+                        lines.append(f"- {reason_item}\n")
                     elif isinstance(reason_item, dict):
-                        # 如果是字典，提取所有键值对
                         for key, value in reason_item.items():
                             if value:
-                                lines.append(f"**{key}**: {value}\n\n")
+                                lines.append(f"- {value}\n")
+                lines.append("\n")
             elif isinstance(reasoning, str) and reasoning:
-                lines.append(f"### 理由说明\n\n{reasoning}\n\n")
-            
-            # 具体建议（新格式）
-            specific_suggestions = neutral_advice.get("specific_suggestions", [])
-            if isinstance(specific_suggestions, list) and specific_suggestions:
-                lines.append("### 具体建议\n\n")
-                for idx, suggestion in enumerate(specific_suggestions, 1):
-                    if isinstance(suggestion, dict):
-                        action = suggestion.get("action", "")
-                        reason = suggestion.get("reason", "")
-                        if action or reason:
-                            lines.append(f"#### {idx}. {action}\n\n")
-                            if reason:
-                                # 处理reason中的Markdown格式（如**加粗**）
-                                lines.append(f"{reason}\n\n")
-            
-            # 详细建议步骤（兼容旧格式）
-            detailed_suggestions = neutral_advice.get("detailed_suggestions", [])
-            if isinstance(detailed_suggestions, list) and detailed_suggestions:
-                for suggestion in detailed_suggestions:
-                    if isinstance(suggestion, dict):
-                        step = suggestion.get("step", "")
-                        content = suggestion.get("content", "")
-                        if step or content:
-                            if step:
-                                lines.append(f"**{step}**\n\n")
-                            if content:
-                                lines.append(f"{content}\n\n")
+                lines.append(f"### 核心依据\n\n{reasoning}\n\n")
             
             # 理由说明（兼容旧格式）
             action_reasoning = neutral_advice.get("action_reasoning", "")
@@ -5093,80 +5060,19 @@ class PortfolioService:
             # 风险提醒
             risk_reminder = neutral_advice.get("risk_reminder", "")
             if risk_reminder:
-                lines.append(f"\n---\n\n> ⚠️ **风险提醒**: {risk_reminder}\n")
+                lines.append(f"\n### 风险提示\n\n{risk_reminder}\n")
         
         # 处理 specific_plan 字段（新格式）
         if "specific_plan" in advice_json:
             specific_plan = advice_json["specific_plan"]
             if isinstance(specific_plan, dict):
-                lines.append("\n## 📋 具体计划\n\n")
-                
-                # 立即步骤
-                immediate_step = specific_plan.get("immediate_step", "")
-                if immediate_step:
-                    lines.append(f"### 立即行动\n\n{immediate_step}\n\n")
-                
-                # 价格监控
-                price_monitoring = specific_plan.get("price_monitoring", {})
-                if isinstance(price_monitoring, dict) and price_monitoring:
-                    lines.append("### 价格监控\n\n")
-                    stop_loss_ref = price_monitoring.get("止损参考价", "")
-                    if stop_loss_ref:
-                        lines.append(f"**止损参考价**: {stop_loss_ref}\n\n")
-                    first_target = price_monitoring.get("第一目标价（减亏/解套）", "")
-                    if first_target:
-                        lines.append(f"**第一目标价（减亏/解套）**: {first_target}\n\n")
-                    second_target = price_monitoring.get("第二目标价（达成收益）", "")
-                    if second_target:
-                        lines.append(f"**第二目标价（达成收益）**: {second_target}\n\n")
-                
-                # 观察因素
+                lines.append("\n## 观察重点\n\n")
                 observation_factors = specific_plan.get("observation_factors", [])
                 if isinstance(observation_factors, list) and observation_factors:
-                    lines.append("### 观察要点\n\n")
-                    for factor in observation_factors:
+                    for factor in observation_factors[:4]:
                         if factor:
                             lines.append(f"- {factor}\n")
                     lines.append("\n")
-        
-        # 4. 基于目标的具体建议（兼容旧格式）
-        if "specific_suggestions_based_on_your_goals" in advice_json:
-            suggestions = advice_json["specific_suggestions_based_on_your_goals"]
-            if isinstance(suggestions, dict):
-                lines.append("\n## 🎯 基于您的目标的具体建议\n\n")
-                
-                if_price_rises = suggestions.get("if_price_rises", {})
-                if isinstance(if_price_rises, dict):
-                    scenario = if_price_rises.get("scenario", "")
-                    suggestion = if_price_rises.get("suggestion", "")
-                    if scenario or suggestion:
-                        lines.append(f"### 📈 如果股价上涨\n\n")
-                        if scenario:
-                            lines.append(f"**情景**: {scenario}\n\n")
-                        if suggestion:
-                            lines.append(f"{suggestion}\n\n")
-                
-                if_price_falls = suggestions.get("if_price_falls", {})
-                if isinstance(if_price_falls, dict):
-                    scenario = if_price_falls.get("scenario", "")
-                    suggestion = if_price_falls.get("suggestion", "")
-                    if scenario or suggestion:
-                        lines.append(f"### 📉 如果股价下跌\n\n")
-                        if scenario:
-                            lines.append(f"**情景**: {scenario}\n\n")
-                        if suggestion:
-                            lines.append(f"{suggestion}\n\n")
-                
-                if_price_consolidates = suggestions.get("if_price_consolidates", {})
-                if isinstance(if_price_consolidates, dict):
-                    scenario = if_price_consolidates.get("scenario", "")
-                    suggestion = if_price_consolidates.get("suggestion", "")
-                    if scenario or suggestion:
-                        lines.append(f"### ➡️ 如果股价盘整\n\n")
-                        if scenario:
-                            lines.append(f"**情景**: {scenario}\n\n")
-                        if suggestion:
-                            lines.append(f"{suggestion}\n\n")
         
         # 5. 风险提醒（顶层，兼容旧格式）
         if "risk_reminder" in advice_json and "neutral_operation_advice" not in advice_json:
@@ -5191,7 +5097,7 @@ class PortfolioService:
             elif "operation_suggestion" in advice_json:
                 lines.append(advice_json["operation_suggestion"])
         
-        return "\n".join(lines).strip() if lines else "基于综合分析给出建议"
+        return "\n".join(lines).strip() if lines else "当前仅保留研究结论、风险提示与观察重点。"
     
     def _extract_price_targets_from_json(self, advice_json: Dict[str, Any], snapshot: PositionSnapshot, params: Optional[PositionAnalysisRequest] = None) -> PriceTarget:
         """从JSON中提取价格目标

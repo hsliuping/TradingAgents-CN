@@ -51,6 +51,16 @@ _REVIEW_EXECUTION_PATTERNS = [
         r"一键模拟下单|下单|模拟交易",
     )
 ]
+_POSITION_TRIGGER_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"(?:技术面|基本面|风险|综合)?评分\s*[:：]?\s*\d+(?:\.\d+)?\s*分",
+        r"连续.{0,8}(?:日|天|周).{0,10}(站稳|收盘站稳|放量|缩量|突破|跌破)",
+        r"右侧介入|左侧介入|介入依据|入场依据|退出依据|交易触发|反弹动能",
+        r"\bMA\d+\b|\bRSI\d*\b|\bMACD\b|\bKDJ\b|布林(?:中轨|上轨|下轨)?",
+        r"支撑带|支撑位|阻力位|压力位|放量|缩量|站稳|突破|跌破",
+    )
+]
 _JSON_FIELD_PATTERN = re.compile(r'^[\[\]{}":,0-9._%\-\s]+$')
 _SENTENCE_SPLIT_PATTERN = re.compile(r"[\n。！？；]+")
 _LOW_SIGNAL_PATTERNS = [
@@ -313,6 +323,28 @@ def sanitize_text_block(text: Any, fallback: str = "") -> str:
     if not deduped:
         return fallback
     return "\n".join(deduped[:12])[:2500]
+
+
+def contains_position_trigger_language(text: str) -> bool:
+    if not text:
+        return False
+    normalized = _plain_text(text)
+    if not normalized:
+        return False
+    return any(pattern.search(normalized) for pattern in _POSITION_TRIGGER_PATTERNS)
+
+
+def sanitize_position_text_block(text: Any, fallback: str = "") -> str:
+    deduped: List[str] = []
+    for fragment in _iter_review_fragments(text):
+        if contains_position_trigger_language(fragment):
+            continue
+        if fragment not in deduped:
+            deduped.append(fragment)
+
+    if not deduped:
+        return fallback
+    return "；".join(deduped[:5])[:600]
 
 
 def _iter_review_fragments(text: Any) -> Iterable[str]:
@@ -641,15 +673,15 @@ def sanitize_position_analysis_payload(result_data: Dict[str, Any]) -> Dict[str,
         return result_data
 
     sanitized = dict(result_data)
-    summary = sanitize_text_block(
+    summary = sanitize_position_text_block(
         sanitized.get("summary") or sanitized.get("action_reason") or sanitized.get("detailed_analysis"),
         fallback="该持仓研究已转换为研究观察，请结合自身策略独立判断。",
     )
 
     sanitized["action"] = "hold"
-    sanitized["action_reason"] = sanitize_text_block(
+    sanitized["action_reason"] = sanitize_position_text_block(
         sanitized.get("action_reason"),
-        fallback="该结果仅保留研究观察与风险提示，不提供执行性交易建议。",
+        fallback="当前仅保留研究结论、风险提示与观察重点，不提供执行性交易建议。",
     )
     sanitized["price_targets"] = {}
     sanitized["suggested_quantity"] = None
