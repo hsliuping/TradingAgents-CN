@@ -261,7 +261,7 @@
                 <el-tag v-if="basics.peIsRealtime" type="success" size="small" style="margin-left: 4px">实时</el-tag>
               </b>
             </div>
-            <div class="fact"><span>PS(TTM)</span><b>{{ Number.isFinite(basics.ps) ? basics.ps.toFixed(2) : '-' }}</b></div>
+            <div class="fact"><span>PS(TTM)</span><b>{{ Number.isFinite(basics.psTtm) ? basics.psTtm.toFixed(2) : '-' }}</b></div>
             <div class="fact"><span>ROE</span><b>{{ fmtPercent(basics.roe) }}</b></div>
             <div class="fact"><span>负债率</span><b>{{ fmtPercent(basics.debtRatio) }}</b></div>
           </div>
@@ -688,7 +688,8 @@ async function fetchFundamentals() {
     // 🔥 新增：PB（市净率）
     basics.pb = Number.isFinite(f.pb) ? Number(f.pb) : basics.pb
     // 🔥 新增：PS（市销率）- 优先使用 ps_ttm，其次 ps
-    basics.ps = Number.isFinite(f.ps_ttm) ? Number(f.ps_ttm) : (Number.isFinite(f.ps) ? Number(f.ps) : basics.ps)
+    basics.ps = Number.isFinite(f.ps) ? Number(f.ps) : basics.ps
+    basics.psTtm = Number.isFinite(f.ps_ttm) ? Number(f.ps_ttm) : basics.psTtm
     // ROE 和负债率
     basics.roe = Number.isFinite(f.roe) ? Number(f.roe) : basics.roe
     const ff: any = f
@@ -853,6 +854,7 @@ const basics = reactive({
   pe: NaN,
   pb: NaN,              // 🔥 新增：市净率
   ps: NaN,              // 🔥 新增：市销率
+  psTtm: NaN,
   roe: NaN,
   debtRatio: NaN,
   peIsRealtime: false,  // PE是否为实时数据

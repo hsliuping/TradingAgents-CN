@@ -370,6 +370,10 @@ async def create_database_indexes(db):
         await market_quotes.create_index([("amount", -1)])
         await market_quotes.create_index([("updated_at", -1)])
 
+        industry_mapping = db["stock_industry_mappings"]
+        await industry_mapping.create_index([("code", 1)], unique=True)
+        await industry_mapping.create_index([("provider", 1), ("updated_at", -1)])
+
         logger.info("✅ 数据库索引创建完成")
 
     except Exception as e:

@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any, List, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 import logging
 import re
+from datetime import datetime
 
 from app.routers.auth_db import get_current_user
 from app.core.database import get_mongo_db
@@ -61,6 +62,24 @@ def _detect_market_and_code(code: str) -> Tuple[str, str]:
 
     # 默认当作A股处理
     return ('CN', _zfill_code(code))
+
+
+async def _get_enabled_a_share_sources() -> List[str]:
+    """按统一配置获取 A 股数据源优先级。"""
+    from app.core.unified_config import UnifiedConfigManager
+
+    config = UnifiedConfigManager()
+    data_source_configs = await config.get_data_source_configs_async()
+    enabled_sources = [
+        ds.type.lower() for ds in data_source_configs
+        if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
+    ]
+
+    if not enabled_sources:
+        enabled_sources = ['tushare', 'akshare', 'baostock']
+
+    # 保留 multi_source 兼容，但放在配置源之后，避免抢占独立数据源。
+    return list(dict.fromkeys(enabled_sources + ['multi_source']))
 
 
 @router.get("/{code}/quote", response_model=dict)
@@ -122,18 +141,7 @@ async def get_quote(
         logger.info(f"  ❌ 未找到数据")
 
     # 🔥 基础信息 - 按数据源优先级查询
-    from app.core.unified_config import UnifiedConfigManager
-    config = UnifiedConfigManager()
-    data_source_configs = await config.get_data_source_configs_async()
-
-    # 提取启用的数据源，按优先级排序
-    enabled_sources = [
-        ds.type.lower() for ds in data_source_configs
-        if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
-    ]
-
-    if not enabled_sources:
-        enabled_sources = ['tushare', 'akshare', 'baostock']
+    enabled_sources = await _get_enabled_a_share_sources()
 
     # 按优先级查询基础信息
     b = None
@@ -269,7 +277,7 @@ async def get_fundamentals(
             )
     else:
         # 🔥 未指定数据源，按优先级查询
-        source_priority = ["tushare", "multi_source", "akshare", "baostock"]
+        source_priority = await _get_enabled_a_share_sources()
         b = None
 
         for src in source_priority:
@@ -291,47 +299,44 @@ async def get_fundamentals(
     # 2. 尝试从 stock_financial_data 获取最新财务指标
     # 🔥 按数据源优先级查询，而不是按时间戳，避免混用不同数据源的数据
     financial_data = None
+    effective_source = (source.lower() if source else None) or b.get("source")
+    today_str = datetime.now().strftime("%Y%m%d")
+
     try:
-        # 获取数据源优先级配置
-        from app.core.unified_config import UnifiedConfigManager
-        config = UnifiedConfigManager()
-        data_source_configs = await config.get_data_source_configs_async()
-
-        # 提取启用的数据源，按优先级排序
-        enabled_sources = [
-            ds.type.lower() for ds in data_source_configs
-            if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
-        ]
-
-        if not enabled_sources:
-            enabled_sources = ['tushare', 'akshare', 'baostock']
-
-        # 按数据源优先级查询财务数据
-        for data_source in enabled_sources:
+        if effective_source:
             financial_data = await db["stock_financial_data"].find_one(
-                {"$or": [{"symbol": code6}, {"code": code6}], "data_source": data_source},
+                {
+                    "$or": [{"symbol": code6}, {"code": code6}],
+                    "data_source": effective_source,
+                    "report_period": {"$lte": today_str}
+                },
                 {"_id": 0},
-                sort=[("report_period", -1)]  # 按报告期降序，获取该数据源的最新数据
+                sort=[("report_period", -1)]
             )
             if financial_data:
-                logger.info(f"✅ 使用数据源 {data_source} 的财务数据 (报告期: {financial_data.get('report_period')})")
-                break
+                logger.info(f"✅ 使用同源财务数据 {effective_source} (报告期: {financial_data.get('report_period')})")
+            else:
+                logger.warning(f"⚠️ 未找到 {code6} 在数据源 {effective_source} 下的财务数据")
 
         if not financial_data:
             logger.warning(f"⚠️ 未找到 {code6} 的财务数据")
     except Exception as e:
         logger.error(f"获取财务数据失败: {e}")
 
-    # 3. 获取实时PE/PB（优先使用实时计算）
-    from tradingagents.dataflows.realtime_metrics import get_pe_pb_with_fallback
     import asyncio
+    realtime_metrics = {}
 
-    # 在线程池中执行同步的实时计算
-    realtime_metrics = await asyncio.to_thread(
-        get_pe_pb_with_fallback,
-        code6,
-        db.client
-    )
+    # 3. 获取实时PE/PB（仅 Tushare 口径支持同源动态计算）
+    if effective_source == "tushare":
+        from tradingagents.dataflows.realtime_metrics import get_pe_pb_with_fallback
+
+        realtime_metrics = await asyncio.to_thread(
+            get_pe_pb_with_fallback,
+            code6,
+            db.client
+        )
+    else:
+        logger.info(f"ℹ️ fundamentals 使用同源模式，跳过 {effective_source or 'unknown'} 的跨源实时PE/PB计算")
 
     # 4. 构建返回数据
     # 🔥 优先使用实时市值，降级到 stock_basic_info 的静态市值
@@ -353,14 +358,14 @@ async def get_fundamentals(
         "pe_ttm": realtime_metrics.get("pe_ttm") or b.get("pe_ttm"),
         "pb_mrq": realtime_metrics.get("pb_mrq") or b.get("pb_mrq"),
 
-        # 🔥 市销率（PS）- 动态计算（使用实时市值）
-        "ps": None,
-        "ps_ttm": None,
+        # 🔥 市销率（PS）- 优先使用同源基础数据，必要时再动态计算覆盖
+        "ps": b.get("ps"),
+        "ps_ttm": b.get("ps_ttm"),
 
         # PE/PB 数据来源标识
-        "pe_source": realtime_metrics.get("source", "unknown"),
+        "pe_source": realtime_metrics.get("source") or effective_source or "unknown",
         "pe_is_realtime": realtime_metrics.get("is_realtime", False),
-        "pe_updated_at": realtime_metrics.get("updated_at"),
+        "pe_updated_at": realtime_metrics.get("updated_at") or b.get("updated_at"),
 
         # ROE（优先从 stock_financial_data 获取，其次从 stock_basic_info）
         "roe": None,
@@ -368,7 +373,7 @@ async def get_fundamentals(
         # 负债率（从 stock_financial_data 获取）
         "debt_ratio": None,
 
-        # 市值：优先使用实时市值，降级到静态市值
+        # 市值：优先使用同源实时市值，降级到静态市值
         "total_mv": total_mv,
         "circ_mv": b.get("circ_mv"),
 
@@ -396,20 +401,22 @@ async def get_fundamentals(
         if data["debt_ratio"] is None:
             data["debt_ratio"] = financial_data.get("debt_to_assets")
 
-        # 🔥 动态计算 PS（市销率）- 使用实时市值
+        # 🔥 动态计算 PS（市销率）- 使用同源财务收入和当前返回市值
         # 优先使用 TTM 营业收入，如果没有则使用单期营业收入
         revenue_ttm = financial_data.get("revenue_ttm")
         revenue = financial_data.get("revenue")
         revenue_for_ps = revenue_ttm if revenue_ttm and revenue_ttm > 0 else revenue
 
-        if revenue_for_ps and revenue_for_ps > 0:
-            # 🔥 使用实时市值（如果有），否则使用静态市值
-            if total_mv and total_mv > 0:
-                # 营业收入单位：元，需要转换为亿元
-                revenue_yi = revenue_for_ps / 100000000
-                ps_calculated = total_mv / revenue_yi
+        if revenue_for_ps and revenue_for_ps > 0 and total_mv and total_mv > 0:
+            # 只在同源基础信息缺失时补算，避免覆盖数据源原本提供的 ps/ps_ttm。
+            revenue_yi = revenue_for_ps / 100000000
+            ps_calculated = total_mv / revenue_yi
+
+            if data["ps"] is None:
                 data["ps"] = round(ps_calculated, 2)
-                data["ps_ttm"] = round(ps_calculated, 2) if revenue_ttm else None
+
+            if revenue_ttm and data["ps_ttm"] is None:
+                data["ps_ttm"] = round(ps_calculated, 2)
 
     # 6. 如果财务数据中没有 ROE，使用 stock_basic_info 中的
     if data["roe"] is None:

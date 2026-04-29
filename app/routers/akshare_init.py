@@ -355,7 +355,10 @@ async def _run_basic_sync_background(force_update: bool):
     
     try:
         service = await get_akshare_sync_service()
-        result = await service.sync_stock_basic_info(force_update=force_update)
+        result = await service.sync_stock_basic_info(
+            force_update=force_update,
+            manual_mode=True  # 手动初始化不应继承调度任务取消状态
+        )
         
         _initialization_status.update({
             "is_running": False,

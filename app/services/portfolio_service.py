@@ -2589,18 +2589,18 @@ class PortfolioService:
     async def _get_stock_industry(self, code: str, market: str) -> Optional[str]:
         """获取股票所属行业
         
-        优先从官网获取（避免 AKShare 轮询封号），其次按数据库数据源优先级查询
+        优先从系统行业映射集合获取，其次按数据库数据源优先级查询
         """
         try:
             if market == "CN":
                 logger.info(f"🔍 [获取行业] 查询股票代码: {code}, 市场: {market}")
 
-                # 🔥 优先从官网获取行业数据（避免 AKShare 轮询封号）
+                # 优先从系统行业映射集合获取行业数据，避免实时链路再次轮询外部数据源。
                 from app.services.official_industry_service import get_industry
-                official_industry = await get_industry(code)
-                if official_industry:
-                    logger.info(f"✅ [获取行业] 从官网获取: {code} -> {official_industry}")
-                    return official_industry
+                mapped_industry = await get_industry(code)
+                if mapped_industry:
+                    logger.info(f"✅ [获取行业] 从系统行业映射集合获取: {code} -> {mapped_industry}")
+                    return mapped_industry
                 
                 # 🔥 获取启用的数据源列表（按优先级从高到低排序）
                 from app.core.data_source_priority import get_enabled_data_sources_async

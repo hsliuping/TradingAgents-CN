@@ -17,7 +17,7 @@ langgraph
 chromadb
 qdrant-client>=1.7.0
 setuptools
-akshare>=1.17.86
+akshare>=1.18.59
 tushare
 baostock
 finnhub-python

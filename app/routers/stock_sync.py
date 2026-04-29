@@ -25,6 +25,39 @@ logger = logging.getLogger("webapi")
 router = APIRouter(prefix="/api/stock-sync", tags=["股票数据同步"])
 
 
+def _extract_sync_error(result: dict) -> str:
+    """从同步结果中提取首个可读错误。"""
+    errors = result.get("errors") or []
+    for error in errors:
+        if isinstance(error, dict):
+            message = str(error.get("error") or error.get("message") or "").strip()
+        else:
+            message = str(error).strip()
+        if message:
+            return message
+    return ""
+
+
+def _build_single_historical_sync_result(hist_result: dict) -> dict:
+    """构造单股历史同步响应，保留真实失败原因。"""
+    success_count = hist_result.get("success_count", 0)
+    total_records = hist_result.get("total_records", 0)
+
+    if success_count > 0:
+        return {
+            "success": True,
+            "records": total_records,
+            "message": f"同步了 {total_records} 条历史记录"
+        }
+
+    error_message = _extract_sync_error(hist_result) or "未获取到历史数据"
+    return {
+        "success": False,
+        "records": total_records,
+        "error": error_message
+    }
+
+
 async def _sync_latest_to_market_quotes(symbol: str) -> None:
     """
     将 stock_daily_quotes 中的最新数据同步到 market_quotes
@@ -166,10 +199,17 @@ async def sync_single_stock(
                     raise ValueError(f"不支持的数据源: {actual_data_source}")
 
                 # 同步实时行情（只同步指定的股票）
-                realtime_result = await service.sync_realtime_quotes(
-                    symbols=[request.symbol],
-                    force=True  # 强制执行，跳过交易时间检查
-                )
+                if actual_data_source == "akshare":
+                    realtime_result = await service.sync_realtime_quotes(
+                        symbols=[request.symbol],
+                        force=True,
+                        manual_mode=True  # 手动接口不应继承调度任务取消状态
+                    )
+                else:
+                    realtime_result = await service.sync_realtime_quotes(
+                        symbols=[request.symbol],
+                        force=True  # 强制执行，跳过交易时间检查
+                    )
 
                 # 🔥 已移除回退到 Tushare 的逻辑，Tushare 实时行情由定时任务统一管理（每小时31分）
                 # 避免与定时任务冲突（免费用户每小时只能调用一次）
@@ -209,19 +249,27 @@ async def sync_single_stock(
                 start_date = (datetime.now() - timedelta(days=request.days)).strftime('%Y-%m-%d')
 
                 # 同步历史数据
-                hist_result = await service.sync_historical_data(
-                    symbols=[request.symbol],
-                    start_date=start_date,
-                    end_date=end_date,
-                    incremental=False
-                )
+                if request.data_source == "akshare":
+                    hist_result = await service.sync_historical_data(
+                        symbols=[request.symbol],
+                        start_date=start_date,
+                        end_date=end_date,
+                        incremental=False,
+                        manual_mode=True  # 手动接口不应继承调度任务取消状态
+                    )
+                else:
+                    hist_result = await service.sync_historical_data(
+                        symbols=[request.symbol],
+                        start_date=start_date,
+                        end_date=end_date,
+                        incremental=False
+                    )
 
-                result["historical_sync"] = {
-                    "success": hist_result.get("success_count", 0) > 0,
-                    "records": hist_result.get("total_records", 0),
-                    "message": f"同步了 {hist_result.get('total_records', 0)} 条历史记录"
-                }
-                logger.info(f"✅ {request.symbol} 历史数据同步完成: {hist_result.get('total_records', 0)} 条记录")
+                result["historical_sync"] = _build_single_historical_sync_result(hist_result)
+                if result["historical_sync"].get("success"):
+                    logger.info(f"✅ {request.symbol} 历史数据同步完成: {hist_result.get('total_records', 0)} 条记录")
+                else:
+                    logger.warning(f"⚠️ {request.symbol} 历史数据同步失败: {result['historical_sync'].get('error')}")
 
                 # 🔥 同步最新历史数据到 market_quotes
                 if hist_result.get("success_count", 0) > 0:
@@ -448,9 +496,18 @@ async def sync_single_stock(
 
                     # 获取 AKShare 同步服务
                     service = await get_akshare_sync_service()
+                    from app.services.official_industry_service import (
+                        INDUSTRY_SOURCE_SYSTEM,
+                        fetch_industry_mapping,
+                    )
 
-                    # 获取股票基础信息（直接调用个股信息接口，不需要获取整个股票列表）
-                    basic_info = await service.provider.get_stock_basic_info(symbol6)
+                    industry_mapping = await fetch_industry_mapping(refresh_if_empty=True)
+                    mapped_industry = industry_mapping.get(symbol6, "") if industry_mapping else ""
+
+                    # 获取股票基础信息（单股同步允许组合多个接口，避免完全依赖东财详情接口）
+                    basic_info = await service.provider.get_stock_basic_info_for_single_sync(symbol6)
+                    if not basic_info:
+                        basic_info = await service.provider.get_stock_basic_info(symbol6)
 
                     if basic_info:
                         # 转换为字典格式
@@ -466,6 +523,19 @@ async def sync_single_stock(
                             basic_data["name"] = fallback_name
                             logger.debug(f"📝 使用数据库中的股票名称: {fallback_name}")
 
+                        if mapped_industry:
+                            raw_industry = str(basic_data.get("industry") or "").strip()
+                            basic_data["industry"] = mapped_industry
+                            basic_data["industry_source"] = INDUSTRY_SOURCE_SYSTEM
+                            if raw_industry and raw_industry != mapped_industry:
+                                logger.info(
+                                    f"🔁 {symbol6} AK 原始行业已替换为系统行业映射: {raw_industry} -> {mapped_industry}"
+                                )
+
+                        detail_fetch_error = basic_data.pop("detail_fetch_error", None)
+                        detail_fetch_symbol = basic_data.pop("detail_fetch_symbol", None)
+                        degraded_sync = basic_data.get("sync_status") == "degraded"
+
                         # 确保必要字段
                         basic_data["code"] = symbol6
                         basic_data["symbol"] = symbol6
@@ -479,11 +549,21 @@ async def sync_single_stock(
                             upsert=True
                         )
 
-                        result["basic_sync"] = {
-                            "success": True,
-                            "message": "基础数据同步成功"
-                        }
-                        logger.info(f"✅ {request.symbol} 基础数据同步完成 (AKShare)")
+                        if degraded_sync:
+                            result["basic_sync"] = {
+                                "success": False,
+                                "degraded": True,
+                                "message": "基础数据已降级写入，AKShare 个股详情接口失败",
+                                "error": detail_fetch_error or "AKShare 个股详情接口失败",
+                                "detail_symbol": detail_fetch_symbol,
+                            }
+                            logger.warning(f"⚠️ {request.symbol} 基础数据仅完成降级同步 (AKShare): {detail_fetch_error or '个股详情接口失败'}")
+                        else:
+                            result["basic_sync"] = {
+                                "success": True,
+                                "message": "基础数据同步成功"
+                            }
+                            logger.info(f"✅ {request.symbol} 基础数据同步完成 (AKShare)")
                     else:
                         result["basic_sync"] = {
                             "success": False,
@@ -564,12 +644,21 @@ async def sync_batch_stocks(
                 start_date = (datetime.now() - timedelta(days=request.days)).strftime('%Y-%m-%d')
                 
                 # 批量同步历史数据
-                hist_result = await service.sync_historical_data(
-                    symbols=request.symbols,
-                    start_date=start_date,
-                    end_date=end_date,
-                    incremental=False
-                )
+                if request.data_source == "akshare":
+                    hist_result = await service.sync_historical_data(
+                        symbols=request.symbols,
+                        start_date=start_date,
+                        end_date=end_date,
+                        incremental=False,
+                        manual_mode=True  # 手动接口不应继承调度任务取消状态
+                    )
+                else:
+                    hist_result = await service.sync_historical_data(
+                        symbols=request.symbols,
+                        start_date=start_date,
+                        end_date=end_date,
+                        incremental=False
+                    )
                 
                 result["historical_sync"] = {
                     "success_count": hist_result.get("success_count", 0),
@@ -827,18 +916,21 @@ async def validate_stock_data(
 @router.post("/industry-from-official", response_model=dict)
 async def sync_industry_from_official(current_user: dict = Depends(get_current_user)):
     """
-    从官网 URL 同步行业数据到 stock_basic_info
-    需配置 OFFICIAL_INDUSTRY_DATA_URL，格式: {"600519":"白酒","000001":"银行"}
+    刷新系统行业映射集合并回填到 stock_basic_info。
+    优先使用官网接口；未配置官网接口时，临时使用 Tushare 作为供数来源。
     """
     try:
-        from app.services.official_industry_service import sync_industry_to_stock_basic_info, get_official_industry_url
-        if not get_official_industry_url():
-            raise HTTPException(
-                status_code=400,
-                detail="未配置 OFFICIAL_INDUSTRY_DATA_URL，请在 .env 中设置官网行业数据 JSON 的 URL"
-            )
+        from app.services.official_industry_service import refresh_industry_mapping, sync_industry_to_stock_basic_info
+
+        refresh_result = await refresh_industry_mapping(prefer_official=True)
         result = await sync_industry_to_stock_basic_info()
-        return ok(data=result, message=f"行业数据同步完成，更新 {result.get('updated', 0)} 条")
+        return ok(
+            data={
+                "mapping": refresh_result,
+                "stock_basic_info": result,
+            },
+            message=f"系统行业映射同步完成，供数来源 {refresh_result.get('provider', 'none')}，回填 {result.get('updated', 0)} 条"
+        )
     except HTTPException:
         raise
     except Exception as e:

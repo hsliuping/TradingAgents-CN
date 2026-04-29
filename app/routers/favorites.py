@@ -272,10 +272,17 @@ async def sync_favorites_realtime(
 
         # 同步实时行情
         logger.info(f"🔄 调用 {request.data_source} 同步服务...")
-        sync_result = await service.sync_realtime_quotes(
-            symbols=symbols,
-            force=True  # 强制执行，跳过交易时间检查
-        )
+        if request.data_source == "akshare":
+            sync_result = await service.sync_realtime_quotes(
+                symbols=symbols,
+                force=True,
+                manual_mode=True  # 手动接口不应继承调度任务取消状态
+            )
+        else:
+            sync_result = await service.sync_realtime_quotes(
+                symbols=symbols,
+                force=True  # 强制执行，跳过交易时间检查
+            )
 
         success_count = sync_result.get("success_count", 0)
         failed_count = sync_result.get("failed_count", 0)

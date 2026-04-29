@@ -35,6 +35,16 @@ class AKShareSyncService:
         self.batch_size = 100
         self.rate_limit_delay = 0.2  # AKShare建议的延迟
         self._current_job_id = None  # 🔥 当前任务ID，用于进度跟踪和停止检查
+
+    def _resolve_job_id(self, manual_mode: bool = False) -> Optional[str]:
+        """解析当前执行上下文的调度任务 ID。"""
+        if manual_mode:
+            return None
+
+        job_id = getattr(self, '_current_job_id', None)
+        if isinstance(job_id, str):
+            job_id = job_id.strip()
+        return job_id or None
     
     async def initialize(self):
         """初始化同步服务"""
@@ -61,12 +71,13 @@ class AKShareSyncService:
             logger.error(f"❌ AKShare同步服务初始化失败: {e}")
             raise
     
-    async def sync_stock_basic_info(self, force_update: bool = False) -> Dict[str, Any]:
+    async def sync_stock_basic_info(self, force_update: bool = False, manual_mode: bool = False) -> Dict[str, Any]:
         """
         同步股票基础信息
         
         Args:
             force_update: 是否强制更新
+            manual_mode: 是否为手动 API 调用；手动模式不读取或写回调度任务状态
             
         Returns:
             同步结果统计
@@ -83,6 +94,7 @@ class AKShareSyncService:
             "duration": 0,
             "errors": []
         }
+        job_id = self._resolve_job_id(manual_mode)
         
         try:
             # 1. 获取股票列表
@@ -126,7 +138,6 @@ class AKShareSyncService:
                        f"耗时: {stats['duration']:.2f}秒")
             
             # 🔥 更新任务状态为已完成
-            job_id = getattr(self, '_current_job_id', None) or "akshare_basic_info_sync"
             if job_id:
                 try:
                     from app.services.scheduler_service import mark_job_completed
@@ -141,7 +152,6 @@ class AKShareSyncService:
             stats["errors"].append({"error": str(e), "context": "sync_stock_basic_info"})
             
             # 🔥 更新任务状态为失败
-            job_id = getattr(self, '_current_job_id', None) or "akshare_basic_info_sync"
             if job_id:
                 try:
                     from app.services.scheduler_service import mark_job_completed
@@ -191,32 +201,41 @@ class AKShareSyncService:
             "errors": []
         }
 
-        # 🔥 若配置了官方行业数据 URL，使用官网数据，避免 AKShare 轮询查询行业导致封号
+        # 优先使用系统行业映射集合，未来可由官网接口供数，当前为空时会临时回退到 Tushare。
         from app.services.official_industry_service import fetch_industry_mapping
-        industry_mapping = await fetch_industry_mapping()
-        use_official_industry = bool(industry_mapping)
-        if use_official_industry:
-            logger.info(f"📊 使用官方行业数据（{len(industry_mapping)} 只），跳过 AKShare 轮询查询")
+        industry_mapping = await fetch_industry_mapping(refresh_if_empty=True)
+        use_system_industry_mapping = bool(industry_mapping)
+        if use_system_industry_mapping:
+            logger.info(f"📊 使用系统行业映射集合（{len(industry_mapping)} 只），跳过 AKShare 轮询查询")
         
         for stock_info in batch:
             try:
                 code = stock_info["code"]
                 name = stock_info.get("name", "")
+                code6 = str(code).strip().zfill(6)
+                mapped_industry = industry_mapping.get(code6, "") if use_system_industry_mapping else ""
                 
                 # 检查是否需要更新
                 if not force_update:
-                    existing = await self.db.stock_basic_info.find_one({"code": code})
+                    existing = await self.db.stock_basic_info.find_one({"code": code6, "source": "akshare"})
                     if existing and self._is_data_fresh(existing.get("updated_at"), hours=24):
-                        batch_stats["skipped_count"] += 1
-                        continue
+                        existing_industry = str(existing.get("industry") or "").strip()
+                        has_existing_industry = existing_industry not in ("", "未知")
+                        if use_system_industry_mapping:
+                            if mapped_industry and existing_industry == mapped_industry:
+                                batch_stats["skipped_count"] += 1
+                                continue
+                            if not mapped_industry and has_existing_industry:
+                                batch_stats["skipped_count"] += 1
+                                continue
+                        else:
+                            batch_stats["skipped_count"] += 1
+                            continue
                 
-                # 🔥 使用官方行业时：直接从列表+行业构建，不调用 get_stock_basic_info
-                if use_official_industry:
-                    code6 = str(code).strip().zfill(6)
-                    industry = industry_mapping.get(code6, "未知")
+                if use_system_industry_mapping:
+                    industry = mapped_industry or "未知"
                     basic_info = self._build_basic_info_from_list(code, name, industry)
                 else:
-                    # 未配置官方行业：沿用原逻辑（可能触发 AKShare 轮询）
                     basic_info = await self.provider.get_stock_basic_info(code)
                 
                 if basic_info:
@@ -232,14 +251,18 @@ class AKShareSyncService:
                     if "source" not in basic_data:
                         basic_data["source"] = "akshare"
 
+                    if use_system_industry_mapping and mapped_industry:
+                        basic_data["industry"] = mapped_industry
+                        basic_data["industry_source"] = "system_industry_mapping"
+
                     # 🔥 确保 symbol 字段存在
                     if "symbol" not in basic_data:
-                        basic_data["symbol"] = code
+                        basic_data["symbol"] = code6
 
                     # 更新到数据库（使用 code + source 联合查询）
                     try:
                         await self.db.stock_basic_info.update_one(
-                            {"code": code, "source": "akshare"},
+                            {"code": code6, "source": "akshare"},
                             {"$set": basic_data},
                             upsert=True
                         )
@@ -364,13 +387,14 @@ class AKShareSyncService:
         
         return True
     
-    async def sync_realtime_quotes(self, symbols: List[str] = None, force: bool = False) -> Dict[str, Any]:
+    async def sync_realtime_quotes(self, symbols: List[str] = None, force: bool = False, manual_mode: bool = False) -> Dict[str, Any]:
         """
         同步实时行情数据
 
         Args:
             symbols: 指定股票代码列表，为空则同步所有股票
             force: 是否强制执行（跳过交易时间检查），默认 False
+            manual_mode: 是否为手动 API 调用；手动模式不读取或写回调度任务状态
 
         Returns:
             同步结果统计
@@ -390,6 +414,7 @@ class AKShareSyncService:
             "duration": 0,
             "errors": []
         }
+        job_id = self._resolve_job_id(manual_mode)
 
         try:
             # 1. 确定要同步的股票列表
@@ -617,7 +642,6 @@ class AKShareSyncService:
                        f"耗时: {stats['duration']:.2f}秒")
 
             # 🔥 更新任务状态为已完成
-            job_id = getattr(self, '_current_job_id', None) or "akshare_quotes_sync"
             if job_id:
                 try:
                     from app.services.scheduler_service import mark_job_completed
@@ -632,7 +656,6 @@ class AKShareSyncService:
             stats["errors"].append({"error": str(e), "context": "sync_realtime_quotes"})
             
             # 🔥 更新任务状态为失败
-            job_id = getattr(self, '_current_job_id', None) or "akshare_quotes_sync"
             if job_id:
                 try:
                     from app.services.scheduler_service import mark_job_completed
@@ -891,7 +914,8 @@ class AKShareSyncService:
         symbols: List[str] = None,
         incremental: bool = True,
         period: str = "daily",
-        resume_from_index: int = None  # 🔥 恢复执行：从哪个位置继续
+        resume_from_index: int = None,  # 🔥 恢复执行：从哪个位置继续
+        manual_mode: bool = False
     ) -> Dict[str, Any]:
         """
         同步历史数据
@@ -902,6 +926,7 @@ class AKShareSyncService:
             symbols: 指定股票代码列表
             incremental: 是否增量同步
             period: 数据周期 (daily/weekly/monthly)
+            manual_mode: 是否为手动 API 调用；手动模式不读取或写回调度任务状态
 
         Returns:
             同步结果统计
@@ -919,6 +944,7 @@ class AKShareSyncService:
             "duration": 0,
             "errors": []
         }
+        job_id = self._resolve_job_id(manual_mode)
 
         try:
             # 🔥 在线程池的线程中执行时，需要重新初始化数据库连接
@@ -1055,7 +1081,6 @@ class AKShareSyncService:
             logger.info(f"📊 历史数据同步: 结束日期={end_date}, 股票数量={len(symbols)} (总计{original_total_symbols}), 模式={'增量' if incremental else '全量'}, 起始位置={start_index}")
 
             # 4. 批量处理
-            job_id = getattr(self, '_current_job_id', None) or "akshare_historical_sync"
             processed_count = start_index  # 🔥 从恢复位置开始计数
             was_cancelled = False  # 🔥 标记是否因取消而停止
             
@@ -1210,7 +1235,6 @@ class AKShareSyncService:
                        f"耗时: {stats['duration']:.2f}秒")
 
             # 🔥 更新任务状态为已完成（根据实际完成情况判断成功/失败/部分成功）
-            job_id = getattr(self, '_current_job_id', None) or "akshare_historical_sync"
             if job_id:
                 try:
                     from app.services.scheduler_service import mark_job_completed
@@ -1248,7 +1272,6 @@ class AKShareSyncService:
                 stats["stopped"] = True
                 
                 # 更新状态为取消
-                job_id = getattr(self, '_current_job_id', None) or "akshare_historical_sync"
                 if job_id:
                     try:
                         from app.core.database import get_mongo_db_sync, get_redis_sync_client
@@ -1344,7 +1367,6 @@ class AKShareSyncService:
             stats["errors"].append({"error": str(e), "context": "sync_historical_data"})
             
             # 🔥 更新任务状态为失败
-            job_id = getattr(self, '_current_job_id', None) or "akshare_historical_sync"
             if job_id:
                 try:
                     from app.services.scheduler_service import mark_job_completed

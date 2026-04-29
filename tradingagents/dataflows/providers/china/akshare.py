@@ -13,6 +13,10 @@ from ..base_provider import BaseStockDataProvider
 logger = logging.getLogger(__name__)
 
 
+class AKShareNetworkError(RuntimeError):
+    """AKShare 网络层瞬时失败。"""
+
+
 class AKShareProvider(BaseStockDataProvider):
     """
     AKShare统一数据提供器
@@ -347,6 +351,83 @@ class AKShareProvider(BaseStockDataProvider):
         except Exception as e:
             logger.error(f"❌ AKShare获取股票列表失败: {e}")
             return []
+
+    async def get_stock_basic_info_for_single_sync(self, code: str) -> Optional[Dict[str, Any]]:
+        """
+        获取单股同步所需的基础信息。
+
+        单股同步允许低频组合多个 AKShare 接口，以换取更稳定的字段覆盖；
+        批量同步仍保持既有逻辑，避免逐股高频请求触发源站限流。
+        """
+        if not self.connected:
+            return None
+
+        code = str(code).strip().zfill(6)
+        board = self._determine_board(code)
+        exchange_name = self._determine_market(code)
+        basic_info = {
+            "code": code,
+            "name": f"股票{code}",
+            "area": "未知",
+            "industry": "未知",
+            "market": board,
+            "sse": exchange_name,
+            "list_date": "",
+            "full_symbol": self._get_full_symbol(code),
+            "market_info": self._get_market_info(code),
+            "data_source": "akshare",
+            "last_sync": datetime.now(timezone.utc),
+            "sync_status": "degraded",
+            "sec": "stock_cn",
+        }
+
+        source_hits: List[str] = []
+        errors: List[str] = []
+
+        for source_name, fetcher in (
+            ("cninfo_profile", self._get_single_stock_profile_info),
+            ("exchange_listing", self._get_single_stock_listing_info),
+            ("xq_spot", self._get_single_stock_spot_info),
+        ):
+            try:
+                source_data = await fetcher(code)
+            except Exception as e:
+                logger.warning(f"⚠️ {code} 单股基础信息接口 {source_name} 调用失败: {e}")
+                errors.append(f"{source_name}: {e}")
+                continue
+
+            if not source_data:
+                continue
+
+            self._merge_single_stock_basic_info(basic_info, source_data)
+            source_hits.append(source_name)
+
+        detail_failure = None
+        detail_symbol = self._get_akshare_cn_symbol(code)
+        if self._needs_single_sync_detail_fallback(basic_info):
+            detail_info = await self._get_stock_info_detail(code)
+            if detail_info and not detail_info.get("_detail_fetch_failed"):
+                self._merge_single_stock_basic_info(basic_info, detail_info)
+                source_hits.append("eastmoney_detail")
+            else:
+                detail_failure = (detail_info or {}).get("_detail_fetch_error") or "AKShare 个股详情接口未返回有效数据"
+                detail_symbol = (detail_info or {}).get("_detail_symbol", detail_symbol)
+                errors.append(detail_failure)
+
+        if self._has_single_sync_basic_info(basic_info):
+            basic_info["sync_status"] = "success"
+            logger.info(
+                f"✅ {code} 单股基础信息获取成功: 来源={','.join(source_hits) if source_hits else 'unknown'}"
+            )
+            return basic_info
+
+        basic_info["sync_status"] = "degraded"
+        basic_info["detail_fetch_error"] = detail_failure or "; ".join(errors) or "AKShare 单股基础信息接口未返回有效数据"
+        basic_info["detail_fetch_symbol"] = detail_symbol
+        logger.warning(
+            f"⚠️ {code} 单股基础信息获取失败，已返回降级结果: {basic_info['detail_fetch_error']}"
+        )
+        return basic_info
     
     async def get_stock_basic_info(self, code: str) -> Optional[Dict[str, Any]]:
         """
@@ -371,6 +452,8 @@ class AKShareProvider(BaseStockDataProvider):
                 logger.warning(f"⚠️ 未找到{code}的基础信息")
                 return None
             
+            detail_fetch_failed = bool(stock_info.get("_detail_fetch_failed"))
+
             # 转换为标准化字典
             basic_info = {
                 "code": code,
@@ -384,8 +467,13 @@ class AKShareProvider(BaseStockDataProvider):
                 "market_info": self._get_market_info(code),
                 "data_source": "akshare",
                 "last_sync": datetime.now(timezone.utc),
-                "sync_status": "success"
+                "sync_status": "degraded" if detail_fetch_failed else "success"
             }
+
+            if detail_fetch_failed:
+                basic_info["detail_fetch_error"] = stock_info.get("_detail_fetch_error")
+                basic_info["detail_fetch_symbol"] = stock_info.get("_detail_symbol")
+                logger.warning(f"⚠️ {code} 基础信息仅完成降级同步，详细信息接口不可用")
             
             logger.debug(f"✅ {code}基础信息获取成功")
             return basic_info
@@ -393,6 +481,258 @@ class AKShareProvider(BaseStockDataProvider):
         except Exception as e:
             logger.error(f"❌ 获取{code}基础信息失败: {e}")
             return None
+
+    async def _get_single_stock_listing_info(self, code: str) -> Dict[str, Any]:
+        """从交易所股票列表接口提取单股基础字段。"""
+
+        def fetch_listing_data() -> Optional[pd.DataFrame]:
+            if code.startswith("68"):
+                return self.ak.stock_info_sh_name_code(symbol="科创板")
+            if code.startswith(("60", "90")):
+                return self.ak.stock_info_sh_name_code(symbol="主板A股")
+            if code.startswith(("00", "30", "20")):
+                return self.ak.stock_info_sz_name_code(symbol="A股列表")
+            if code.startswith(("8", "4")):
+                return self.ak.stock_info_bj_name_code()
+            return None
+
+        listing_df = await asyncio.to_thread(fetch_listing_data)
+        if listing_df is None or listing_df.empty:
+            return {}
+
+        code_column = next(
+            (column for column in ("A股代码", "证券代码", "B股代码") if column in listing_df.columns),
+            None,
+        )
+        if not code_column:
+            return {}
+
+        listing_df = listing_df.copy()
+        listing_df[code_column] = listing_df[code_column].map(self._normalize_security_code)
+        matched = listing_df[listing_df[code_column] == code]
+        if matched.empty:
+            return {}
+
+        row = matched.iloc[0]
+        listing_info: Dict[str, Any] = {"market": self._determine_board(code)}
+
+        name_column = next(
+            (column for column in ("A股简称", "证券简称", "B股简称") if column in matched.columns),
+            None,
+        )
+        if name_column:
+            name = self._safe_str(row.get(name_column))
+            if name:
+                listing_info["name"] = name
+
+        industry = self._safe_str(row.get("所属行业")) if "所属行业" in matched.columns else ""
+        if industry:
+            listing_info["industry"] = industry
+
+        list_date = self._normalize_basic_date(row.get("A股上市日期", row.get("上市日期")))
+        if list_date:
+            listing_info["list_date"] = list_date
+
+        board = self._safe_str(row.get("板块")) if "板块" in matched.columns else ""
+        if board:
+            listing_info["market"] = board
+
+        area = self._safe_str(row.get("地区")) if "地区" in matched.columns else ""
+        if area:
+            listing_info["area"] = area
+
+        return listing_info
+
+    async def _get_single_stock_profile_info(self, code: str) -> Dict[str, Any]:
+        """从 CNInfo 公司概况接口提取单股基础字段。"""
+
+        def fetch_profile_data() -> pd.DataFrame:
+            return self.ak.stock_profile_cninfo(symbol=code)
+
+        profile_df = await asyncio.to_thread(fetch_profile_data)
+        if profile_df is None or profile_df.empty:
+            return {}
+
+        row = profile_df.iloc[0]
+        profile_info: Dict[str, Any] = {}
+
+        name = self._safe_str(row.get("A股简称") or row.get("公司名称"))
+        if name:
+            profile_info["name"] = name
+
+        company_name = self._safe_str(row.get("公司名称"))
+        if company_name:
+            profile_info["company_name"] = company_name
+
+        industry = self._safe_str(row.get("所属行业"))
+        if industry:
+            profile_info["industry"] = industry
+
+        list_date = self._normalize_basic_date(row.get("上市日期"))
+        if list_date:
+            profile_info["list_date"] = list_date
+
+        established_date = self._normalize_basic_date(row.get("成立日期"))
+        if established_date:
+            profile_info["established_date"] = established_date
+
+        market_label = self._safe_str(row.get("所属市场"))
+        normalized_exchange = self._normalize_exchange_name(market_label)
+        if normalized_exchange:
+            profile_info["sse"] = normalized_exchange
+
+        board = self._extract_board_from_market_label(market_label)
+        if board:
+            profile_info["market"] = board
+
+        main_business = self._safe_str(row.get("主营业务"))
+        if main_business:
+            profile_info["main_business"] = main_business
+
+        business_scope = self._safe_str(row.get("经营范围"))
+        if business_scope:
+            profile_info["business_scope"] = business_scope
+
+        company_profile = self._safe_str(row.get("机构简介"))
+        if company_profile:
+            profile_info["company_profile"] = company_profile
+
+        return profile_info
+
+    async def _get_single_stock_spot_info(self, code: str) -> Dict[str, Any]:
+        """从雪球实时行情接口提取单股估值字段。"""
+
+        def fetch_spot_data() -> pd.DataFrame:
+            return self.ak.stock_individual_spot_xq(symbol=self._get_xueqiu_symbol(code))
+
+        spot_df = await asyncio.to_thread(fetch_spot_data)
+        if spot_df is None or spot_df.empty:
+            return {}
+
+        spot_map = {
+            self._safe_str(row.get("item")): row.get("value")
+            for _, row in spot_df.iterrows()
+            if self._safe_str(row.get("item"))
+        }
+        spot_info: Dict[str, Any] = {}
+
+        name = self._safe_str(spot_map.get("名称"))
+        if name:
+            spot_info["name"] = name
+
+        exchange_name = self._normalize_exchange_name(spot_map.get("交易所"))
+        if exchange_name:
+            spot_info["sse"] = exchange_name
+
+        total_mv = self._convert_market_cap_to_yi(spot_map.get("资产净值/总市值"))
+        if total_mv is not None:
+            spot_info["total_mv"] = total_mv
+
+        circ_mv = self._convert_market_cap_to_yi(spot_map.get("流通值"))
+        if circ_mv is not None:
+            spot_info["circ_mv"] = circ_mv
+
+        pe = self._safe_optional_float(spot_map.get("市盈率(动)"))
+        if pe is not None:
+            spot_info["pe"] = pe
+
+        pe_static = self._safe_optional_float(spot_map.get("市盈率(静)"))
+        if pe_static is not None:
+            spot_info["pe_static"] = pe_static
+
+        pe_ttm = self._safe_optional_float(spot_map.get("市盈率(TTM)"))
+        if pe_ttm is not None:
+            spot_info["pe_ttm"] = pe_ttm
+
+        pb = self._safe_optional_float(spot_map.get("市净率"))
+        if pb is not None:
+            spot_info["pb"] = pb
+
+        ps = self._safe_optional_float(spot_map.get("市销率"))
+        if ps is not None:
+            spot_info["ps"] = ps
+
+        turnover_rate = self._safe_optional_float(spot_map.get("周转率"))
+        if turnover_rate is not None:
+            spot_info["turnover_rate"] = turnover_rate
+
+        total_share = self._safe_optional_float(spot_map.get("基金份额/总股本"))
+        if total_share is not None:
+            spot_info["total_share"] = total_share
+
+        float_share = self._safe_optional_float(spot_map.get("流通股"))
+        if float_share is not None:
+            spot_info["float_share"] = float_share
+
+        close = self._safe_optional_float(spot_map.get("现价"))
+        if close is not None:
+            spot_info["close"] = close
+
+        return spot_info
+
+    def _merge_single_stock_basic_info(self, target: Dict[str, Any], incoming: Dict[str, Any]) -> None:
+        """将来源字段合并到单股基础信息结果中。"""
+        code = target.get("code", "")
+        default_name = f"股票{code}"
+
+        for key, value in incoming.items():
+            if value is None:
+                continue
+
+            if isinstance(value, str):
+                value = value.strip()
+                if not value or value.lower() in {"none", "nan", "nat", "null", "-", "--"}:
+                    continue
+
+            current_value = target.get(key)
+
+            if key == "name":
+                if current_value in (None, "", default_name):
+                    target[key] = value
+                continue
+
+            if key == "market":
+                if current_value in (None, "", "未知", self._determine_board(code)):
+                    target[key] = value
+                continue
+
+            if key == "sse":
+                if current_value in (None, "", "未知", self._determine_market(code)):
+                    target[key] = value
+                continue
+
+            if key in {"industry", "area", "list_date", "company_name", "main_business", "business_scope", "company_profile", "established_date"}:
+                if current_value in (None, "", "未知"):
+                    target[key] = value
+                continue
+
+            if current_value in (None, "", 0, 0.0):
+                target[key] = value
+
+    def _has_single_sync_basic_info(self, basic_info: Dict[str, Any]) -> bool:
+        """判断单股同步是否已经拿到足够的基础字段。"""
+        code = basic_info.get("code", "")
+        name = basic_info.get("name")
+        industry = basic_info.get("industry")
+        list_date = basic_info.get("list_date")
+
+        name_ok = name not in (None, "", f"股票{code}")
+        industry_ok = industry not in (None, "", "未知")
+        list_date_ok = bool(list_date)
+        valuation_ok = any(
+            basic_info.get(field) not in (None, "", 0, 0.0)
+            for field in ("total_mv", "circ_mv", "pe", "pb", "pe_ttm", "ps")
+        )
+        return name_ok and (industry_ok or list_date_ok or valuation_ok)
+
+    def _needs_single_sync_detail_fallback(self, basic_info: Dict[str, Any]) -> bool:
+        """判断单股同步是否还需要调用东财个股详情兜底。"""
+        code = basic_info.get("code", "")
+        return (
+            basic_info.get("name") in (None, "", f"股票{code}")
+            or basic_info.get("industry") in (None, "", "未知")
+            or not basic_info.get("list_date")
+        )
     
     async def _get_stock_list_cached(self):
         """获取缓存的股票列表（避免重复获取）"""
@@ -453,16 +793,18 @@ class AKShareProvider(BaseStockDataProvider):
         个股的代码和名称应该已经在数据库中了
         """
         try:
+            akshare_symbol = self._get_akshare_cn_symbol(code)
+
             # 🔥 直接获取个股详细信息（包含行业、地区等详细信息）
             def fetch_individual_info():
-                return self.ak.stock_individual_info_em(symbol=code)
+                return self.ak.stock_individual_info_em(symbol=akshare_symbol)
 
             try:
                 stock_info = await asyncio.to_thread(fetch_individual_info)
 
                 if stock_info is not None and not stock_info.empty:
                     # 解析信息
-                    info = {"code": code}
+                    info = {"code": code, "_detail_symbol": akshare_symbol}
 
                     # 提取股票名称
                     name_row = stock_info[stock_info['item'] == '股票简称']
@@ -492,11 +834,27 @@ class AKShareProvider(BaseStockDataProvider):
             # 🔥 如果获取失败，返回基本信息（使用默认名称）
             # 注意：在实际使用中，股票名称应该从数据库中获取，这里只是作为最后的回退
             logger.debug(f"⚠️ 无法获取{code}的详细信息，使用默认信息")
-            return {"code": code, "name": f"股票{code}", "industry": "未知", "area": "未知"}
+            return {
+                "code": code,
+                "name": f"股票{code}",
+                "industry": "未知",
+                "area": "未知",
+                "_detail_fetch_failed": True,
+                "_detail_fetch_error": "AKShare 个股详情接口网络异常，已使用兜底基础信息",
+                "_detail_symbol": akshare_symbol,
+            }
 
         except Exception as e:
             logger.error(f"❌ 获取{code}详细信息失败: {e}")
-            return {"code": code, "name": f"股票{code}", "industry": "未知", "area": "未知"}
+            return {
+                "code": code,
+                "name": f"股票{code}",
+                "industry": "未知",
+                "area": "未知",
+                "_detail_fetch_failed": True,
+                "_detail_fetch_error": str(e),
+                "_detail_symbol": self._get_akshare_cn_symbol(code),
+            }
     
     def _determine_market(self, code: str) -> str:
         """根据股票代码判断市场"""
@@ -844,28 +1202,28 @@ class AKShareProvider(BaseStockDataProvider):
                 trade_date = now_cn.strftime("%Y-%m-%d")  # 格式：2025-11-05
 
                 # 🔥 成交量单位转换：手 → 股（1手 = 100股）
-                volume_in_lots = int(data_dict.get("总手", 0))  # 单位：手
+                volume_in_lots = self._safe_int(data_dict.get("总手", 0))  # 单位：手
                 volume_in_shares = volume_in_lots * 100  # 单位：股
 
                 quotes = {
                     "code": code,
                     "symbol": code,
                     "name": f"股票{code}",  # stock_bid_ask_em 不返回股票名称
-                    "price": float(data_dict.get("最新", 0)),
-                    "close": float(data_dict.get("最新", 0)),  # 🔥 close 字段（与 price 相同）
-                    "current_price": float(data_dict.get("最新", 0)),  # 🔥 current_price 字段（兼容旧数据）
-                    "change": float(data_dict.get("涨跌", 0)),
-                    "change_percent": float(data_dict.get("涨幅", 0)),
-                    "pct_chg": float(data_dict.get("涨幅", 0)),  # 🔥 pct_chg 字段（兼容旧数据）
+                    "price": self._safe_float(data_dict.get("最新", 0)),
+                    "close": self._safe_float(data_dict.get("最新", 0)),  # 🔥 close 字段（与 price 相同）
+                    "current_price": self._safe_float(data_dict.get("最新", 0)),  # 🔥 current_price 字段（兼容旧数据）
+                    "change": self._safe_float(data_dict.get("涨跌", 0)),
+                    "change_percent": self._safe_float(data_dict.get("涨幅", 0)),
+                    "pct_chg": self._safe_float(data_dict.get("涨幅", 0)),  # 🔥 pct_chg 字段（兼容旧数据）
                     "volume": volume_in_shares,  # 🔥 单位：股（已转换）
-                    "amount": float(data_dict.get("金额", 0)),  # 单位：元
-                    "open": float(data_dict.get("今开", 0)),  # 🔥 使用 open 而不是 open_price
-                    "high": float(data_dict.get("最高", 0)),  # 🔥 使用 high 而不是 high_price
-                    "low": float(data_dict.get("最低", 0)),  # 🔥 使用 low 而不是 low_price
-                    "pre_close": float(data_dict.get("昨收", 0)),
+                    "amount": self._safe_float(data_dict.get("金额", 0)),  # 单位：元
+                    "open": self._safe_float(data_dict.get("今开", 0)),  # 🔥 使用 open 而不是 open_price
+                    "high": self._safe_float(data_dict.get("最高", 0)),  # 🔥 使用 high 而不是 high_price
+                    "low": self._safe_float(data_dict.get("最低", 0)),  # 🔥 使用 low 而不是 low_price
+                    "pre_close": self._safe_float(data_dict.get("昨收", 0)),
                     # 🔥 新增：财务指标字段
-                    "turnover_rate": float(data_dict.get("换手", 0)),  # 换手率（%）
-                    "volume_ratio": float(data_dict.get("量比", 0)),  # 量比
+                    "turnover_rate": self._safe_float(data_dict.get("换手", 0)),  # 换手率（%）
+                    "volume_ratio": self._safe_float(data_dict.get("量比", 0)),  # 量比
                     "pe": None,  # stock_bid_ask_em 不返回市盈率
                     "pe_ttm": None,
                     "pb": None,  # stock_bid_ask_em 不返回市净率
@@ -1084,6 +1442,219 @@ class AKShareProvider(BaseStockDataProvider):
         except:
             return ""
 
+    def _safe_optional_float(self, value: Any) -> Optional[float]:
+        """安全转换为可空浮点数。"""
+        try:
+            if value is None or pd.isna(value):
+                return None
+            if isinstance(value, str):
+                text = value.strip().replace(",", "")
+                if not text or text.lower() in {"none", "nan", "nat", "null", "-", "--"}:
+                    return None
+                return float(text)
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+
+    def _convert_market_cap_to_yi(self, value: Any) -> Optional[float]:
+        """将元单位市值转换为亿元。"""
+        numeric_value = self._safe_optional_float(value)
+        if numeric_value is None:
+            return None
+        return numeric_value / 100000000
+
+    def _normalize_security_code(self, value: Any) -> str:
+        """将不同来源的证券代码归一为 6 位字符串。"""
+        text = self._safe_str(value).strip()
+        if not text:
+            return ""
+        if "." in text:
+            text = text.split(".", 1)[0]
+        digits_only = "".join(character for character in text if character.isdigit())
+        if digits_only:
+            return digits_only.zfill(6)
+        return text
+
+    def _normalize_basic_date(self, value: Any) -> str:
+        """将不同来源的日期值统一格式化为 YYYY-MM-DD。"""
+        if value is None or pd.isna(value):
+            return ""
+
+        if isinstance(value, (datetime, pd.Timestamp)):
+            return pd.Timestamp(value).strftime("%Y-%m-%d")
+
+        if isinstance(value, (int, float)):
+            number = int(value)
+            if number <= 0:
+                return ""
+            if number >= 100000000000:
+                return datetime.fromtimestamp(number / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+            if number >= 1000000000:
+                return datetime.fromtimestamp(number, tz=timezone.utc).strftime("%Y-%m-%d")
+            if len(str(number)) == 8:
+                text = str(number)
+                return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+
+        text = self._safe_str(value).strip()
+        if not text or text.lower() in {"none", "nan", "nat", "null", "-", "--"}:
+            return ""
+        if text.isdigit() and len(text) == 8:
+            return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+
+        normalized = pd.to_datetime(text, errors="coerce")
+        if pd.isna(normalized):
+            return ""
+        return normalized.strftime("%Y-%m-%d")
+
+    def _normalize_exchange_name(self, value: Any) -> str:
+        """将不同来源的交易所标识统一为中文交易所名称。"""
+        text = self._safe_str(value).strip().upper()
+        if not text:
+            return ""
+        if text in {"SZ", "SZSE"} or "深交所" in text or "深圳" in text:
+            return "深圳证券交易所"
+        if text in {"SH", "SSE", "SS"} or "上交所" in text or "上海" in text:
+            return "上海证券交易所"
+        if text in {"BJ", "BSE"} or "北交所" in text or "北京" in text:
+            return "北京证券交易所"
+        return self._safe_str(value).strip()
+
+    def _extract_board_from_market_label(self, value: Any) -> str:
+        """从市场描述里提取板块标签。"""
+        text = self._safe_str(value).strip()
+        if not text:
+            return ""
+        if "科创板" in text:
+            return "科创板"
+        if "创业板" in text:
+            return "创业板"
+        if "中小板" in text:
+            return "中小板"
+        if "北交所" in text or "北京" in text:
+            return "北交所"
+        if "主板" in text or "深交所" in text or "上交所" in text:
+            return "主板"
+        return ""
+
+    def _determine_board(self, code: str) -> str:
+        """根据股票代码推断板块。"""
+        code = str(code).strip()
+        if code.startswith("68"):
+            return "科创板"
+        if code.startswith("30"):
+            return "创业板"
+        if code.startswith("002"):
+            return "中小板"
+        if code.startswith(("8", "4", "90")):
+            return "北交所"
+        if code.startswith(("60", "00")):
+            return "主板"
+        return "未知"
+
+    def _get_xueqiu_symbol(self, code: str) -> str:
+        """生成雪球接口使用的股票代码。"""
+        code = str(code).strip()
+        if code.startswith(("60", "68", "90")):
+            return f"SH{code}"
+        if code.startswith(("00", "30", "20")):
+            return f"SZ{code}"
+        if code.startswith(("8", "4")):
+            return f"BJ{code}"
+        return code
+
+    def _get_akshare_cn_symbol(self, code: str) -> str:
+        """为 AKShare 的部分 A 股接口生成 sh/sz/bj 前缀代码。"""
+        code = str(code).strip()
+        if code.startswith(('60', '68', '90')):
+            return f"sh{code}"
+        if code.startswith(('00', '30', '20')):
+            return f"sz{code}"
+        if code.startswith(('8', '4')):
+            return f"bj{code}"
+        return code
+
+    async def _get_historical_data_tx_fallback(
+        self,
+        code: str,
+        start_date: str,
+        end_date: str,
+        period: str = "daily"
+    ) -> Optional[pd.DataFrame]:
+        """使用腾讯历史接口作为 AK 日线历史数据兜底。"""
+        if period != "daily":
+            return None
+
+        symbol = self._get_akshare_cn_symbol(code)
+
+        def fetch_historical_data():
+            return self.ak.stock_zh_a_hist_tx(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                adjust="qfq"
+            )
+
+        hist_df = await asyncio.to_thread(fetch_historical_data)
+        if hist_df is None or hist_df.empty:
+            return None
+
+        hist_df = hist_df.copy()
+        if 'date' in hist_df.columns:
+            hist_df['date'] = pd.to_datetime(hist_df['date'], errors='coerce')
+            start_dt = pd.to_datetime(start_date)
+            end_dt = pd.to_datetime(end_date)
+            hist_df = hist_df[(hist_df['date'] >= start_dt) & (hist_df['date'] <= end_dt)]
+
+        if hist_df.empty:
+            return None
+
+        if 'pre_close' not in hist_df.columns and 'close' in hist_df.columns and 'date' in hist_df.columns:
+            hist_df = hist_df.sort_values('date').reset_index(drop=True)
+            hist_df['pre_close'] = hist_df['close'].shift(1)
+
+        return hist_df
+
+    async def _get_historical_data_sina_fallback(
+        self,
+        code: str,
+        start_date: str,
+        end_date: str,
+        period: str = "daily"
+    ) -> Optional[pd.DataFrame]:
+        """使用新浪历史接口作为 AK 日线历史数据兜底。"""
+        if period != "daily":
+            return None
+
+        symbol = self._get_akshare_cn_symbol(code)
+
+        def fetch_historical_data():
+            return self.ak.stock_zh_a_daily(
+                symbol=symbol,
+                start_date=start_date.replace('-', ''),
+                end_date=end_date.replace('-', ''),
+                adjust="qfq"
+            )
+
+        hist_df = await asyncio.to_thread(fetch_historical_data)
+        if hist_df is None or hist_df.empty:
+            return None
+
+        hist_df = hist_df.copy()
+        if 'date' in hist_df.columns:
+            hist_df['date'] = pd.to_datetime(hist_df['date'], errors='coerce')
+            start_dt = pd.to_datetime(start_date)
+            end_dt = pd.to_datetime(end_date)
+            hist_df = hist_df[(hist_df['date'] >= start_dt) & (hist_df['date'] <= end_dt)]
+
+        if hist_df.empty:
+            return None
+
+        if 'pre_close' not in hist_df.columns and 'close' in hist_df.columns and 'date' in hist_df.columns:
+            hist_df = hist_df.sort_values('date').reset_index(drop=True)
+            hist_df['pre_close'] = hist_df['close'].shift(1)
+
+        return hist_df
+
     async def get_historical_data(
         self,
         code: str,
@@ -1134,6 +1705,8 @@ class AKShareProvider(BaseStockDataProvider):
                     code, start_date, end_date, period
                 )
 
+            primary_error = None
+
             # 获取历史数据（带重试）
             max_retries = 3
             for attempt in range(max_retries):
@@ -1166,6 +1739,7 @@ class AKShareProvider(BaseStockDataProvider):
                         self._event_loop_closed = True
                         return None
                     # 其他 RuntimeError，继续重试
+                    primary_error = runtime_error
                     if attempt < max_retries - 1:
                         wait_time = (attempt + 1) * 2
                         logger.warning(f"⚠️ {code} 第{attempt + 1}次尝试失败（RuntimeError），{wait_time}秒后重试: {runtime_error}")
@@ -1173,6 +1747,7 @@ class AKShareProvider(BaseStockDataProvider):
                     else:
                         raise
                 except Exception as retry_error:
+                    primary_error = retry_error
                     if attempt < max_retries - 1:
                         wait_time = (attempt + 1) * 2  # 2秒、4秒、6秒
                         logger.warning(f"⚠️ {code} 第{attempt + 1}次尝试失败，{wait_time}秒后重试: {retry_error}")
@@ -1188,7 +1763,24 @@ class AKShareProvider(BaseStockDataProvider):
                 self._event_loop_closed = True
                 return None
             elif "Connection aborted" in error_msg or "RemoteDisconnected" in error_msg:
-                logger.error(f"❌ {code} 网络连接中断，建议稍后重试或减小时间范围")
+                logger.warning(f"⚠️ {code} 东财历史接口网络异常，尝试回退到腾讯/新浪历史接口")
+                fallback_strategies = [
+                    ("腾讯", self._get_historical_data_tx_fallback),
+                    ("新浪", self._get_historical_data_sina_fallback),
+                ]
+                for fallback_name, fallback_loader in fallback_strategies:
+                    try:
+                        fallback_df = await fallback_loader(code, start_date, end_date, period)
+                        if fallback_df is not None and not fallback_df.empty:
+                            logger.info(f"✅ {code} {fallback_name}历史接口回退成功: {len(fallback_df)}条记录")
+                            fallback_df = self._standardize_historical_columns(fallback_df, code)
+                            return fallback_df
+                    except Exception as fallback_error:
+                        logger.warning(f"⚠️ {code} {fallback_name}历史接口回退失败: {fallback_error}")
+
+                message = f"{code} 网络连接中断，建议稍后重试或减小时间范围"
+                logger.error(f"❌ {message}")
+                raise AKShareNetworkError(message) from (primary_error or e)
             else:
                 logger.error(f"❌ 获取{code}历史数据失败: {e}")
             return None
@@ -1257,6 +1849,8 @@ class AKShareProvider(BaseStockDataProvider):
                 return None
 
         except Exception as e:
+            if isinstance(e, AKShareNetworkError):
+                raise
             logger.error(f"❌ {code} 分批获取失败: {e}")
             return None
 

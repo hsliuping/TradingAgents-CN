@@ -6,6 +6,7 @@
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
+import re
 import pandas as pd
 from pymongo import ReplaceOne
 
@@ -116,6 +117,23 @@ class FinancialDataService:
             # 批量操作
             operations = []
             saved_count = 0
+
+            # 清理历史错误数据：AKShare 旧逻辑可能写入未来报告期，优先删除再 upsert。
+            if data_source == "akshare":
+                if isinstance(standardized_data, list):
+                    latest_period = max(
+                        [item.get("report_period") for item in standardized_data if item.get("report_period")],
+                        default=None
+                    )
+                else:
+                    latest_period = standardized_data.get("report_period")
+
+                if latest_period:
+                    await collection.delete_many({
+                        "symbol": symbol,
+                        "data_source": data_source,
+                        "report_period": {"$gt": latest_period}
+                    })
             
             # 如果是多期数据，分别处理每期
             if isinstance(standardized_data, list):
@@ -428,6 +446,10 @@ class FinancialDataService:
             if key in financial_data and financial_data[key]:
                 records = financial_data[key]
                 if isinstance(records, list) and records:
+                    period = self._get_akshare_matrix_latest_period(records)
+                    if period:
+                        return period
+
                     # 假设第一条记录是最新的
                     first_record = records[0]
                     for date_field in ['报告期', '报告日期', 'date', '日期']:
@@ -436,6 +458,56 @@ class FinancialDataService:
         
         # 如果无法提取，使用当前季度
         return self._generate_current_period()
+
+    def _get_akshare_matrix_latest_period(self, records: List[Dict[str, Any]]) -> Optional[str]:
+        """从 AKShare 指标矩阵中提取最新报告期列。"""
+        if not isinstance(records, list) or not records:
+            return None
+
+        first_record = records[0] if isinstance(records[0], dict) else {}
+        period_columns = [
+            str(key) for key in first_record.keys()
+            if re.fullmatch(r"\d{8}", str(key))
+        ]
+        if not period_columns:
+            return None
+
+        period_columns.sort(reverse=True)
+        return period_columns[0]
+
+    def _get_akshare_matrix_value(
+        self,
+        records: List[Dict[str, Any]],
+        indicator_names: List[str],
+        period: Optional[str] = None
+    ) -> Optional[float]:
+        """从 AKShare 的“指标 x 报告期”矩阵中提取指定指标的最新值。"""
+        if not isinstance(records, list) or not records:
+            return None
+
+        latest_period = period or self._get_akshare_matrix_latest_period(records)
+        if not latest_period:
+            return None
+
+        for indicator_name in indicator_names:
+            for row in records:
+                if not isinstance(row, dict):
+                    continue
+                if str(row.get('指标', '')).strip() == indicator_name:
+                    value = self._safe_float(row.get(latest_period))
+                    if value is not None:
+                        return value
+
+        for row in records:
+            if not isinstance(row, dict):
+                continue
+            row_name = str(row.get('指标', '')).strip()
+            if any(indicator_name in row_name for indicator_name in indicator_names):
+                value = self._safe_float(row.get(latest_period))
+                if value is not None:
+                    return value
+
+        return None
     
     def _extract_akshare_indicators(self, financial_data: Dict[str, Any]) -> Dict[str, Any]:
         """从AKShare数据中提取关键财务指标"""
@@ -443,31 +515,39 @@ class FinancialDataService:
 
         # 从主要财务指标中提取
         if 'main_indicators' in financial_data and financial_data['main_indicators']:
-            main_data = financial_data['main_indicators'][0] if financial_data['main_indicators'] else {}
-            indicators.update({
-                "revenue": self._safe_float(main_data.get('营业收入')),
-                "net_income": self._safe_float(main_data.get('净利润')),
-                "total_assets": self._safe_float(main_data.get('总资产')),
-                "total_equity": self._safe_float(main_data.get('股东权益合计')),
-            })
+            main_records = financial_data['main_indicators']
+            latest_period = self._get_akshare_matrix_latest_period(main_records)
 
-            # 🔥 新增：提取 ROE（净资产收益率）
-            roe = main_data.get('净资产收益率(ROE)') or main_data.get('净资产收益率')
+            revenue = self._get_akshare_matrix_value(main_records, ['营业总收入', '营业收入'], latest_period)
+            net_income = self._get_akshare_matrix_value(main_records, ['归母净利润', '净利润'], latest_period)
+            total_equity = self._get_akshare_matrix_value(main_records, ['股东权益合计(净资产)', '股东权益合计'], latest_period)
+            roe = self._get_akshare_matrix_value(main_records, ['净资产收益率_平均', '净资产收益率(ROE)', '净资产收益率'], latest_period)
+            debt_ratio = self._get_akshare_matrix_value(main_records, ['资产负债率', '负债率'], latest_period)
+
+            if revenue is not None:
+                indicators['revenue'] = revenue
+            if net_income is not None:
+                indicators['net_income'] = net_income
+            if total_equity is not None:
+                indicators['total_equity'] = total_equity
             if roe is not None:
-                indicators["roe"] = self._safe_float(roe)
-
-            # 🔥 新增：提取负债率（资产负债率）
-            debt_ratio = main_data.get('资产负债率') or main_data.get('负债率')
+                indicators['roe'] = roe
             if debt_ratio is not None:
-                indicators["debt_to_assets"] = self._safe_float(debt_ratio)
+                indicators['debt_to_assets'] = debt_ratio
 
         # 从资产负债表中提取
         if 'balance_sheet' in financial_data and financial_data['balance_sheet']:
             balance_data = financial_data['balance_sheet'][0] if financial_data['balance_sheet'] else {}
-            indicators.update({
-                "total_liab": self._safe_float(balance_data.get('负债合计')),
-                "cash_and_equivalents": self._safe_float(balance_data.get('货币资金')),
-            })
+            total_assets = self._safe_float(balance_data.get('资产总计') or balance_data.get('总资产'))
+            total_liab = self._safe_float(balance_data.get('负债合计') or balance_data.get('负债总计'))
+            cash_and_equivalents = self._safe_float(balance_data.get('货币资金'))
+
+            if total_assets is not None and indicators.get('total_assets') is None:
+                indicators['total_assets'] = total_assets
+            if total_liab is not None:
+                indicators['total_liab'] = total_liab
+            if cash_and_equivalents is not None:
+                indicators['cash_and_equivalents'] = cash_and_equivalents
 
             # 🔥 如果主要指标中没有负债率，从资产负债表计算
             if "debt_to_assets" not in indicators:

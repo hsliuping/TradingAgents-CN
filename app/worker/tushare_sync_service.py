@@ -104,6 +104,14 @@ class TushareSyncService:
             stats["total_processed"] = len(stock_list)
             logger.info(f"📊 获取到 {len(stock_list)} 只股票信息")
 
+            try:
+                from app.services.official_industry_service import upsert_industry_mapping_from_records
+                mapping_result = await upsert_industry_mapping_from_records(stock_list, provider="tushare_fallback")
+                if mapping_result.get("total", 0) > 0:
+                    logger.info(f"📊 系统行业映射集合已更新: {mapping_result['total']} 只股票")
+            except Exception as mapping_error:
+                logger.warning(f"⚠️ 更新系统行业映射集合失败，继续执行基础信息同步: {mapping_error}")
+
             # 2. 批量处理
             for i in range(0, len(stock_list), self.batch_size):
                 # 检查是否需要退出
