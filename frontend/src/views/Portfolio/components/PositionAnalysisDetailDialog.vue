@@ -44,36 +44,53 @@
 
       <!-- 研究观察 -->
       <div class="section">
-        <h3>💡 研究观察</h3>
-        <div class="action-section">
-          <div class="action-badge hold">
-            研究观察
+        <h3>💡 当前结论</h3>
+        <div class="summary-panel">
+          <p class="summary-conclusion">{{ view.conclusion || report.action_reason || '暂无' }}</p>
+          <p v-if="view.position_context" class="summary-context">{{ view.position_context }}</p>
+        </div>
+
+        <div class="section-grid">
+          <div class="info-card">
+            <h4>核心依据</h4>
+            <ul>
+              <li v-for="item in view.key_points" :key="`detail-point-${item}`">{{ item }}</li>
+            </ul>
           </div>
-          <div class="confidence">
-            研究置信度: <el-progress :percentage="report.confidence || 0" :stroke-width="8" style="width: 120px; display: inline-flex;" />
+          <div class="info-card">
+            <h4>风险提示</h4>
+            <ul>
+              <li v-for="item in view.risk_focus" :key="`detail-risk-${item}`">{{ item }}</li>
+            </ul>
+          </div>
+          <div class="info-card">
+            <h4>后续观察点</h4>
+            <ul>
+              <li v-for="item in view.watch_items" :key="`detail-watch-${item}`">{{ item }}</li>
+            </ul>
           </div>
         </div>
-        <div class="reason-section">
-          <h4>研究观察</h4>
-          <div class="markdown-content" v-html="renderMarkdown(report.action_reason || '暂无')"></div>
+
+        <div class="uncertainty-box" v-if="view.uncertainty_note">
+          <h4>不确定性说明</h4>
+          <p>{{ view.uncertainty_note }}</p>
         </div>
-      </div>
-
-      <!-- 风险与机会评估 -->
-      <div class="section">
-        <h3>⚠️ 风险评估</h3>
-        <div class="markdown-content" v-html="renderMarkdown(report.risk_assessment || '暂无')"></div>
-      </div>
-
-      <div class="section">
-        <h3>⭐ 机会评估</h3>
-        <div class="markdown-content" v-html="renderMarkdown(report.opportunity_assessment || '暂无')"></div>
       </div>
 
       <!-- 详细分析 -->
-      <div class="section" v-if="report.detailed_analysis">
-        <h3>📝 详细分析</h3>
-        <div class="markdown-content" v-html="renderMarkdown(report.detailed_analysis)"></div>
+      <div class="section" v-if="appendixSections.length > 0 || report.detailed_analysis">
+        <h3>📝 研究附录</h3>
+        <template v-if="appendixSections.length > 0">
+          <div
+            v-for="section in appendixSections"
+            :key="`detail-appendix-${section.key}`"
+            class="appendix-section"
+          >
+            <h4>{{ section.title }}</h4>
+            <div class="markdown-content" v-html="renderMarkdown(section.content)"></div>
+          </div>
+        </template>
+        <div v-else class="markdown-content" v-html="renderMarkdown(report.detailed_analysis)"></div>
       </div>
 
       <!-- 分析时间 -->
@@ -92,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { type PositionAnalysisResult } from '@/api/portfolio'
 import { marked } from 'marked'
 
@@ -109,6 +126,19 @@ const emit = defineEmits<{
 }>()
 
 const visible = ref(false)
+
+const view = computed(() => props.report?.user_view || {
+  conclusion: props.report?.action_reason || '',
+  position_context: '',
+  key_points: [],
+  risk_focus: [],
+  watch_items: [],
+  uncertainty_note: ''
+})
+
+const appendixSections = computed(() =>
+  (props.report?.appendix_sections || []).filter(section => section?.content)
+)
 
 watch(() => props.modelValue, (val) => {
   visible.value = val
@@ -156,32 +186,6 @@ const pnlClass = (pnl: number) => {
   return ''
 }
 
-// 分析观点样式
-const getActionClass = (action: string) => {
-  if (action === 'buy' || action === 'add') return 'action-buy'
-  if (action === 'sell' || action === 'reduce') return 'action-sell'
-  return 'action-hold'
-}
-
-// 分析观点文本（兼容新旧术语）
-const getActionText = (action: string) => {
-  const map: Record<string, string> = {
-    // 旧术语（后端数据可能仍使用）
-    buy: '看涨',
-    add: '增持观点',
-    hold: '中性',
-    reduce: '减持观点',
-    sell: '看跌',
-    // 新术语
-    '看涨': '看涨',
-    '看跌': '看跌',
-    '中性': '中性',
-    '增持观点': '增持观点',
-    '减持观点': '减持观点',
-    '观望观点': '观望观点'
-  }
-  return map[action] || action
-}
 </script>
 
 <style scoped>
@@ -216,48 +220,76 @@ const getActionText = (action: string) => {
   color: #f56c6c;
 }
 
-.action-section {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  margin-bottom: 16px;
+.summary-panel {
+  padding: 18px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f8fafc 0%, #eef4ff 100%);
+  border: 1px solid #dbe7ff;
 }
 
-.action-badge {
-  padding: 8px 20px;
-  border-radius: 4px;
-  font-size: 18px;
+.summary-conclusion,
+.summary-context {
+  margin: 0;
+  line-height: 1.8;
+  color: #334155;
+}
+
+.summary-conclusion {
+  font-size: 15px;
   font-weight: 600;
+  color: #1f2937;
 }
 
-.action-buy {
-  background: #f0f9ff;
-  color: #409eff;
-  border: 2px solid #409eff;
+.summary-context {
+  margin-top: 10px;
 }
 
-.action-sell {
-  background: #fef0f0;
-  color: #f56c6c;
-  border: 2px solid #f56c6c;
+.section-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
 }
 
-.action-hold {
-  background: #f4f4f5;
-  color: #909399;
-  border: 2px solid #909399;
-}
-
-.confidence {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.reason-section {
-  background: #f5f7fa;
+.info-card {
   padding: 16px;
-  border-radius: 4px;
+  border-radius: 14px;
+  background: #f8fafc;
+  border: 1px solid #e5edf6;
+}
+
+.info-card h4,
+.uncertainty-box h4 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: #1f2937;
+}
+
+.info-card ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #475569;
+  line-height: 1.8;
+}
+
+.uncertainty-box {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 14px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+}
+
+.uncertainty-box p {
+  margin: 0;
+  line-height: 1.8;
+  color: #7c2d12;
+}
+
+@media (max-width: 900px) {
+  .section-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .target-card {
@@ -299,6 +331,23 @@ const getActionText = (action: string) => {
 
 .markdown-content {
   line-height: 1.8;
+}
+
+.appendix-section {
+  padding: 10px 0;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.appendix-section:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.appendix-section h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
 }
 
 .markdown-content :deep(h1),

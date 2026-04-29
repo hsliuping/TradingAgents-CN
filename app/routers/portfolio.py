@@ -454,6 +454,8 @@ async def analyze_position(
             "risk_assessment": sanitized_ai_analysis.get("risk_assessment"),
             "opportunity_assessment": sanitized_ai_analysis.get("opportunity_assessment"),
             "detailed_analysis": sanitized_ai_analysis.get("detailed_analysis"),
+            "user_view": sanitized_ai_analysis.get("user_view", {}),
+            "appendix_sections": sanitized_ai_analysis.get("appendix_sections", []),
             "execution_time": report.execution_time,
             "error_message": report.error_message,
             "created_at": report.created_at.isoformat()
@@ -698,6 +700,8 @@ async def get_position_analysis_status(
                 result_data["risk_assessment"] = sanitized_ai_analysis.get("risk_assessment")
                 result_data["opportunity_assessment"] = sanitized_ai_analysis.get("opportunity_assessment")
                 result_data["detailed_analysis"] = sanitized_ai_analysis.get("detailed_analysis")
+                result_data["user_view"] = sanitized_ai_analysis.get("user_view", {})
+                result_data["appendix_sections"] = sanitized_ai_analysis.get("appendix_sections", [])
                 result_data["suggested_quantity"] = sanitized_ai_analysis.get("suggested_quantity")
                 result_data["suggested_amount"] = sanitized_ai_analysis.get("suggested_amount")
                 result_data["risk_metrics"] = sanitized_ai_analysis.get("risk_metrics")
@@ -718,6 +722,10 @@ async def get_position_analysis_status(
                         logger.info(f"📊 [持仓研究接口] 同步转换后的action_reason到result.ai_analysis")
                     if "detailed_analysis" in result_data:
                         ai_analysis_copy["detailed_analysis"] = result_data["detailed_analysis"]
+                    if "user_view" in result_data:
+                        ai_analysis_copy["user_view"] = result_data["user_view"]
+                    if "appendix_sections" in result_data:
+                        ai_analysis_copy["appendix_sections"] = result_data["appendix_sections"]
                     result_copy["ai_analysis"] = ai_analysis_copy
             result_data["result"] = result_copy
             

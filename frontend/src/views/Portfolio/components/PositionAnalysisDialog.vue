@@ -186,32 +186,40 @@
 
       <el-divider content-position="left">研究结果</el-divider>
 
-      <!-- 研究观察 -->
-      <div class="action-section">
-        <div class="action-badge neutral">
-          研究观察
+      <div class="overview-panel">
+        <div class="overview-header">
+          <h3>当前结论</h3>
+          <p>{{ userView.conclusion || '暂无结论' }}</p>
         </div>
-        <div class="confidence">
-          研究判断稳定度: <el-progress :percentage="analysisResult.confidence" :stroke-width="8" style="width: 120px; display: inline-flex;" />
+        <div class="context-chip" v-if="userView.position_context">
+          {{ userView.position_context }}
         </div>
       </div>
 
-      <!-- 研究观察 -->
-      <div class="reason-section">
-        <h4>研究观察</h4>
-        <div class="markdown-content" v-html="renderMarkdown(analysisResult.action_reason || '暂无')"></div>
-      </div>
-
-      <!-- 风险与机会评估 -->
-      <div class="assessment-section">
+      <div class="assessment-grid">
         <div class="assessment-card">
-          <h4><el-icon><WarningFilled /></el-icon> 风险评估</h4>
-          <div class="markdown-content" v-html="renderMarkdown(analysisResult.risk_assessment || '暂无')"></div>
+          <h4>核心依据</h4>
+          <ul class="bullet-list">
+            <li v-for="item in userView.key_points" :key="`point-${item}`">{{ item }}</li>
+          </ul>
         </div>
-        <div class="assessment-card" style="margin-top: 20px;">
-          <h4><el-icon><StarFilled /></el-icon> 催化与改善条件</h4>
-          <div class="markdown-content" v-html="renderMarkdown(analysisResult.opportunity_assessment || '暂无')"></div>
+        <div class="assessment-card">
+          <h4><el-icon><WarningFilled /></el-icon> 风险提示</h4>
+          <ul class="bullet-list">
+            <li v-for="item in userView.risk_focus" :key="`risk-${item}`">{{ item }}</li>
+          </ul>
         </div>
+        <div class="assessment-card">
+          <h4><el-icon><StarFilled /></el-icon> 后续观察点</h4>
+          <ul class="bullet-list">
+            <li v-for="item in userView.watch_items" :key="`watch-${item}`">{{ item }}</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="uncertainty-card" v-if="userView.uncertainty_note">
+        <h4>不确定性说明</h4>
+        <p>{{ userView.uncertainty_note }}</p>
       </div>
 
       <!-- 资金风险指标（如果启用） -->
@@ -244,10 +252,24 @@
         <p class="risk-summary">{{ analysisResult.risk_metrics.risk_summary }}</p>
       </div>
 
-      <!-- 详细分析 -->
+      <!-- 研究附录 -->
       <el-collapse>
-        <el-collapse-item title="查看详细分析" name="detail">
-          <div class="detailed-analysis markdown-content" v-html="renderMarkdown(analysisResult.detailed_analysis || '暂无详细分析')"></div>
+        <el-collapse-item title="查看研究附录" name="detail">
+          <template v-if="appendixSections.length > 0">
+            <div
+              v-for="section in appendixSections"
+              :key="section.key"
+              class="appendix-section"
+            >
+              <h4>{{ section.title }}</h4>
+              <div class="detailed-analysis markdown-content" v-html="renderMarkdown(section.content)"></div>
+            </div>
+          </template>
+          <div
+            v-else
+            class="detailed-analysis markdown-content"
+            v-html="renderMarkdown(analysisResult.detailed_analysis || '暂无详细分析')"
+          ></div>
         </el-collapse-item>
       </el-collapse>
     </div>
@@ -401,35 +423,24 @@ const isAIConnectionError = computed(() => {
          (analysisResult.value.confidence === 0 && reason.includes('error'))
 })
 
-// 分析观点样式
-const actionClass = computed(() => {
-  if (!analysisResult.value) return ''
-  const map: Record<string, string> = {
-    add: 'action-add',
-    reduce: 'action-reduce',
-    hold: 'action-hold',
-    clear: 'action-clear'
-  }
-  return map[analysisResult.value.action] || 'action-hold'
+const userView = computed(() => analysisResult.value?.user_view || {
+  conclusion: analysisResult.value?.action_reason || '暂无结论',
+  position_context: '',
+  key_points: [],
+  risk_focus: [],
+  watch_items: [],
+  uncertainty_note: ''
 })
 
-const actionText = computed(() => {
-  if (!analysisResult.value) return ''
-  const map: Record<string, string> = {
-    add: '增持观点',
-    reduce: '减持观点',
-    hold: '中性观点',
-    clear: '观望观点'
-  }
-  return map[analysisResult.value.action] || '中性观点'
-})
+const appendixSections = computed(() =>
+  (analysisResult.value?.appendix_sections || []).filter(section => section?.content)
+)
 
 // 执行分析（异步模式）
 const handleAnalyze = async () => {
   if (!props.position) return
 
   loading.value = true
-
   try {
     // 第一步：检查是否有单股研究报告缓存
     const cacheRes = await portfolioApi.checkStockAnalysisCache(
@@ -470,15 +481,15 @@ const handleAnalyze = async () => {
             }
             const marketName = marketMap[props.position.market] || 'A股'
             router.push(`/analysis/single?stock_code=${props.position.code}&market=${marketName}`)
-            visible.value = false // 关闭当前对话框
+            visible.value = false
           }
-          return // 取消研究，不执行后续流程
+          return
         }
       } else {
         // 有缓存，可以显示缓存信息（可选）
         const ageMinutes = cacheRes.data.cache_age_minutes || 0
-        const ageText = ageMinutes < 60 
-          ? `${ageMinutes}分钟前` 
+        const ageText = ageMinutes < 60
+          ? `${ageMinutes}分钟前`
           : `${Math.floor(ageMinutes / 60)}小时前`
         console.log(`使用缓存报告（${ageText}）`)
       }
@@ -503,18 +514,15 @@ const handleAnalyze = async () => {
 
     console.log('[开始研究] 收到响应:', res)
     if (res.success && res.data) {
-      // 设置研究 ID 和状态
       analysisId.value = res.data.analysis_id || null
       analysisStatus.value = res.data.status || 'pending'
-      
+
       console.log('[开始研究] 设置analysisId:', analysisId.value, 'status:', analysisStatus.value)
 
       if (res.data.status === 'completed' && analysisId.value) {
-        // 已有完成的报告，直接获取结果
         await fetchAnalysisResult(analysisId.value)
         ElMessage.success('已有最近的研究报告')
       } else {
-        // 任务已提交，不自动轮询，用户可手动刷新
         ElMessage.success(res.data.message || '研究任务已提交，预计需要2-5分钟，请稍后点击"手动刷新状态"查看结果')
       }
     } else {
@@ -522,7 +530,6 @@ const handleAnalyze = async () => {
       analysisStatus.value = 'failed'
     }
   } catch (error: any) {
-    // 如果是MessageBox的取消操作，不显示错误
     if (error !== 'cancel' && error !== 'close') {
       ElMessage.error(error.message || '提交研究任务失败')
       analysisStatus.value = 'failed'
@@ -771,6 +778,82 @@ const getRiskLevelText = (level?: string) => {
   color: #909399;
 }
 
+.overview-panel {
+  background: linear-gradient(135deg, #f8fafc 0%, #eef4ff 100%);
+  border: 1px solid #dbe7ff;
+  border-radius: 16px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+}
+
+.overview-header h3 {
+  margin: 0 0 10px 0;
+  font-size: 20px;
+  color: #1f2937;
+}
+
+.overview-header p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.9;
+  color: #334155;
+}
+
+.context-chip {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #475569;
+  line-height: 1.8;
+}
+
+.assessment-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.assessment-card {
+  background: #f8fafc;
+  border: 1px solid #e5edf6;
+  border-radius: 14px;
+  padding: 18px;
+}
+
+.assessment-card h4,
+.uncertainty-card h4 {
+  margin: 0 0 10px 0;
+  font-size: 15px;
+  color: #1f2937;
+}
+
+.bullet-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #475569;
+  line-height: 1.8;
+}
+
+.bullet-list li + li {
+  margin-top: 8px;
+}
+
+.uncertainty-card {
+  margin-bottom: 20px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+}
+
+.uncertainty-card p {
+  margin: 0;
+  color: #7c2d12;
+  line-height: 1.8;
+}
+
 .action-section {
   display: flex;
   align-items: center;
@@ -845,6 +928,23 @@ const getRiskLevelText = (level?: string) => {
 .detailed-analysis {
   line-height: 1.6;
   color: #606266;
+}
+
+.appendix-section {
+  padding: 12px 0;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.appendix-section:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.appendix-section h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
 }
 
 .markdown-content {
@@ -949,6 +1049,12 @@ const getRiskLevelText = (level?: string) => {
   margin-left: 8px;
   font-size: 12px;
   color: #909399;
+}
+
+@media (max-width: 900px) {
+  .assessment-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
 

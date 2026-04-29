@@ -604,7 +604,10 @@ async def get_trades_by_code(
                     "amount": quantity * price,
                     "pnl": float(pnl),
                     "commission": 0.0,
-                    "timestamp": timestamp_str
+                    "timestamp": timestamp_str,
+                    "change_type": change_type,
+                    "quantity_after": c.get("quantity_after"),
+                    "created_at": c.get("created_at").isoformat() if c.get("created_at") else None
                 })
 
         # 计算汇总

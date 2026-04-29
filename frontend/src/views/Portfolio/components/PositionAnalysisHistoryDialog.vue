@@ -54,10 +54,9 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="置信度" width="100" align="center">
+      <el-table-column label="一句话结论" min-width="260">
         <template #default="{ row }">
-          <span v-if="row.confidence">{{ row.confidence }}%</span>
-          <span v-else>-</span>
+          <span class="conclusion-preview">{{ row.user_view?.conclusion || row.action_reason || '-' }}</span>
         </template>
       </el-table-column>
 
@@ -308,6 +307,14 @@ const getStatusText = (status: string) => {
 
 .text-danger {
   color: #f56c6c;
+}
+
+.conclusion-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.6;
 }
 </style>
 

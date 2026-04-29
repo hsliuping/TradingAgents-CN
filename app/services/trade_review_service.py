@@ -619,6 +619,25 @@ class TradeReviewService:
         if not trade_records:
             return TradeInfo(code=code or "")
 
+        def _parse_trade_time(value: Any) -> datetime:
+            if isinstance(value, datetime):
+                return value
+            if isinstance(value, str) and value:
+                normalized = value.replace('Z', '+00:00')
+                try:
+                    return datetime.fromisoformat(normalized)
+                except ValueError:
+                    try:
+                        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        return datetime.max
+            return datetime.max
+
+        trade_records = sorted(
+            trade_records,
+            key=lambda record: _parse_trade_time(record.get("timestamp"))
+        )
+
         # 打印输入的交易记录（调试用）
         logger.info(f"📊 [_build_trade_info] 收到 {len(trade_records)} 笔交易记录")
         for i, record in enumerate(trade_records):
@@ -642,7 +661,8 @@ class TradeReviewService:
         total_pnl = 0.0
         total_commission = 0.0
 
-        timestamps = []
+        buy_timestamps = []
+        sell_timestamps = []
 
         for record in trade_records:
             trade = TradeRecord(
@@ -658,7 +678,10 @@ class TradeReviewService:
             trades.append(trade)
 
             if trade.timestamp:
-                timestamps.append(trade.timestamp)
+                if trade.side == "buy":
+                    buy_timestamps.append(trade.timestamp)
+                elif trade.side == "sell":
+                    sell_timestamps.append(trade.timestamp)
 
             total_commission += trade.commission
 
@@ -689,9 +712,10 @@ class TradeReviewService:
         is_holding = remaining_quantity > 0
         
         # 计算持仓天数
-        timestamps.sort()
-        first_buy_date = timestamps[0] if timestamps else None
-        last_sell_date = None
+        buy_timestamps.sort()
+        sell_timestamps.sort()
+        first_buy_date = buy_timestamps[0] if buy_timestamps else None
+        last_sell_date = sell_timestamps[-1] if sell_timestamps else None
         
         holding_days = 0
         if first_buy_date:
@@ -715,10 +739,7 @@ class TradeReviewService:
                     logger.info(f"📊 [持仓天数] 持仓中交易，从 {first_buy_date} 到当前: {holding_days} 天")
                 else:
                     # 已平仓：从第一笔买入到最后卖出
-                    sell_timestamps = [t.timestamp for t in trades if t.side == "sell" and t.timestamp]
-                    if sell_timestamps:
-                        sell_timestamps.sort()
-                        last_sell_date = sell_timestamps[-1]
+                    if last_sell_date:
                         last_dt_str = last_sell_date.replace('Z', '+00:00')
                         if '+' in last_dt_str or last_dt_str.endswith('Z'):
                             last_dt = datetime.fromisoformat(last_dt_str.replace('Z', '+00:00'))
@@ -1370,11 +1391,7 @@ class TradeReviewService:
     "emotion_analysis": "是否存在情绪化操作（50字以内）",
 
     "market_analysis": "大盘环境对本次交易的影响（50字以内，如有大盘数据）",
-    "industry_analysis": "行业因素对本次交易的影响（50字以内，如有行业数据）",
-
-    "optimal_pnl": 理论最优收益金额（数字）,
-    "missed_profit": 错失的收益金额（数字，如果亏损则为0）,
-    "avoided_loss": 避免的亏损金额（数字，如果盈利则为0）
+    "industry_analysis": "行业因素对本次交易的影响（50字以内，如有行业数据）"
 }}
 ```
 
@@ -1431,10 +1448,10 @@ class TradeReviewService:
                         return int(score_value * 10)
                     return int(score_value)
 
-                result.overall_score = normalize_score(data.get("overall_score", 50))
-                result.timing_score = normalize_score(data.get("timing_score", 50))
-                result.position_score = normalize_score(data.get("position_score", 50))
-                result.discipline_score = normalize_score(data.get("discipline_score", 50))
+                result.overall_score = normalize_score(data.get("overall_score", 0))
+                result.timing_score = normalize_score(data.get("timing_score", 0))
+                result.position_score = normalize_score(data.get("position_score", 0))
+                result.discipline_score = normalize_score(data.get("discipline_score", 0))
 
                 # 解析摘要 - 兼容多种字段名
                 result.summary = (
@@ -1482,11 +1499,6 @@ class TradeReviewService:
                     ""
                 )
 
-                # 解析收益数据
-                result.optimal_pnl = float(data.get("optimal_pnl", 0))
-                result.missed_profit = float(data.get("missed_profit", 0))
-                result.avoided_loss = float(data.get("avoided_loss", 0))
-
                 # 🆕 解析交易计划执行情况（如果有）
                 result.plan_adherence = data.get("plan_adherence")
                 result.plan_deviation = data.get("plan_deviation")
@@ -1502,18 +1514,6 @@ class TradeReviewService:
         else:
             logger.warning(f"⚠️ [解析AI响应] 未找到 JSON 代码块")
             logger.warning(f"📄 [解析AI响应] 完整内容:\n{content}")
-
-        # 备用：计算理论最优收益
-        logger.info(f"🔧 [解析AI响应] 使用备用方案，计算理论最优收益")
-        if market_snapshot.optimal_buy_price and market_snapshot.optimal_sell_price:
-            qty = trade_info.total_buy_quantity
-            optimal_pnl = (market_snapshot.optimal_sell_price - market_snapshot.optimal_buy_price) * qty
-            result.optimal_pnl = round(optimal_pnl, 2)
-
-            if trade_info.realized_pnl >= 0:
-                result.missed_profit = max(0, round(optimal_pnl - trade_info.realized_pnl, 2))
-            else:
-                result.avoided_loss = max(0, round(optimal_pnl - trade_info.realized_pnl, 2))
 
         result.summary = content[:200] if content else "AI分析完成"
         logger.info(f"⚠️ [解析AI响应] 使用备用方案完成 - 摘要: {result.summary}")
@@ -3144,12 +3144,12 @@ class TradeReviewService:
                             return int(score_value * 10)
                         return int(score_value)
 
-                    result.overall_score = normalize_score(data.get("overall_score") or data.get("综合评分") or data.get("总分") or 50)
-                    result.timing_score = normalize_score(data.get("timing_score") or data.get("时机评分") or data.get("买卖时机评分") or 50)
-                    result.position_score = normalize_score(data.get("position_score") or data.get("仓位评分") or data.get("仓位管理评分") or 50)
-                    result.emotion_score = normalize_score(data.get("emotion_score") or data.get("情绪评分") or data.get("情绪控制评分") or 50)
-                    result.attribution_score = normalize_score(data.get("attribution_score") or data.get("归因评分") or data.get("收益归因评分") or 50)
-                    result.discipline_score = normalize_score(data.get("discipline_score") or data.get("纪律评分") or data.get("执行纪律评分") or 50)
+                    result.overall_score = normalize_score(data.get("overall_score") or data.get("综合评分") or data.get("总分") or 0)
+                    result.timing_score = normalize_score(data.get("timing_score") or data.get("时机评分") or data.get("买卖时机评分") or 0)
+                    result.position_score = normalize_score(data.get("position_score") or data.get("仓位评分") or data.get("仓位管理评分") or 0)
+                    result.emotion_score = normalize_score(data.get("emotion_score") or data.get("情绪评分") or data.get("情绪控制评分") or 0)
+                    result.attribution_score = normalize_score(data.get("attribution_score") or data.get("归因评分") or data.get("收益归因评分") or 0)
+                    result.discipline_score = normalize_score(data.get("discipline_score") or data.get("纪律评分") or data.get("执行纪律评分") or 0)
 
                     # 提取文本字段（确保是字符串）
                     summary_raw = data.get("summary") or data.get("综合评价") or data.get("核心结论") or ""
@@ -3184,11 +3184,6 @@ class TradeReviewService:
             # 如果没有提取到摘要，使用总结文本
             if not result.summary:
                 result.summary = review_summary[:200] if len(review_summary) > 200 else review_summary
-
-        # 计算理论最优收益
-        if market_snapshot.period_high and trade_info.avg_buy_price:
-            optimal_return = (market_snapshot.period_high - trade_info.avg_buy_price) / trade_info.avg_buy_price
-            result.optimal_pnl = trade_info.total_buy_amount * optimal_return
 
         logger.info(f"✅ [工作流复盘] 解析完成 - 总分: {result.overall_score}")
 

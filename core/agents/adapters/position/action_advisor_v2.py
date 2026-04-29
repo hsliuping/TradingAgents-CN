@@ -5,13 +5,48 @@
 """
 
 import logging
+import re
 from typing import Dict, Any, List
 
 from ...manager import ManagerAgent
 from ...config import AgentMetadata, AgentCategory, LicenseTier
 from ...registry import register_agent
+from app.utils.compliance import sanitize_position_text_block, sanitize_text_block
 
 logger = logging.getLogger(__name__)
+
+_LEGACY_EXECUTION_PROMPT_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\bstop_loss\b",
+        r"\btake_profit\b",
+        r"risk_reference(?:_price)?",
+        r"profit_reference(?:_price)?",
+        r"price_monitoring",
+        r"recommended_action",
+        r"价格分析区间",
+        r"止损参考价|第一目标价|第二目标价",
+        r"请给出JSON格式的操作建议",
+        r"操作建议师",
+        r"2000-5000字",
+    )
+]
+
+
+def _contains_legacy_execution_prompt_terms(text: str) -> bool:
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in _LEGACY_EXECUTION_PROMPT_PATTERNS)
+
+
+def _summarize_position_research_input(value: Any, fallback: str) -> str:
+    """将上游分析压缩为可用于整合提示词的研究摘要。"""
+    cleaned = sanitize_position_text_block(value, fallback="")
+    if not cleaned:
+        secondary = sanitize_text_block(value, fallback="")
+        cleaned = sanitize_position_text_block(secondary, fallback="") if secondary else ""
+    normalized = re.sub(r"\s+", " ", cleaned).strip(" ；")
+    return normalized[:600] if normalized else fallback
 
 # 尝试导入模板系统
 try:
@@ -122,18 +157,7 @@ class ActionAdvisorV2(ManagerAgent):
                 logger.info(f"📊 [ActionAdvisorV2] ✅ 提示词中包含confidence字段要求")
             else:
                 logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 提示词中不包含confidence字段要求！")
-            forbidden_terms = (
-                "stop_loss",
-                "take_profit",
-                "risk_reference",
-                "profit_reference",
-                "价格分析区间",
-                "操作建议",
-                "加仓",
-                "减仓",
-                "清仓",
-            )
-            if any(term.lower() in prompt.lower() for term in forbidden_terms):
+            if _contains_legacy_execution_prompt_terms(prompt):
                 logger.warning("⚠️ [ActionAdvisorV2] 提示词中仍包含执行性术语，请检查模板内容")
             if "observation_factors" in prompt.lower() or "观察事项" in prompt:
                 logger.info("📊 [ActionAdvisorV2] ✅ 提示词中包含观察事项字段要求")
@@ -169,6 +193,14 @@ class ActionAdvisorV2(ManagerAgent):
 请给出JSON格式的持仓研究结论：
 ```json
 {
+    "user_view": {
+        "conclusion": "1到2句白话短句，直接说明当前持仓状态，不超过36字；不得出现技术面、基本面、PB、ROE、均线、MACD、RSI、KDJ等术语",
+        "position_context": "结合浮盈浮亏、持有时间、成本与现价关系解释这笔持仓当前意味着什么，不超过55字；不要写成研究腔长句",
+        "key_points": ["核心依据1，完整短句", "核心依据2，完整短句", "核心依据3，完整短句"],
+        "risk_focus": ["风险提示1，完整短句", "风险提示2，完整短句", "风险提示3，完整短句"],
+        "watch_items": ["后续观察点1，完整短句", "后续观察点2，完整短句", "后续观察点3，完整短句"],
+        "uncertainty_note": "一句话说明还缺哪些公开信息验证，不超过45字"
+    },
     "analysis_summary": {
         "overall_view": "综合研究概述",
         "key_points": ["关键点1", "关键点2"]
@@ -289,15 +321,7 @@ class ActionAdvisorV2(ManagerAgent):
                     logger.info(f"📊 [ActionAdvisorV2] ✅ 用户提示词中包含confidence字段要求")
                 else:
                     logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 用户提示词中不包含confidence字段要求！")
-                forbidden_terms = (
-                    "stop_loss",
-                    "take_profit",
-                    "risk_reference",
-                    "profit_reference",
-                    "价格分析区间",
-                    "操作建议",
-                )
-                if any(term.lower() in user_prompt.lower() for term in forbidden_terms):
+                if _contains_legacy_execution_prompt_terms(user_prompt):
                     logger.warning("⚠️ [ActionAdvisorV2] 用户提示词中仍包含执行性术语，请检查降级提示词")
                 if "observation_factors" in user_prompt.lower() or "观察事项" in user_prompt:
                     logger.info("📊 [ActionAdvisorV2] ✅ 用户提示词中包含观察事项字段要求")
@@ -409,9 +433,18 @@ class ActionAdvisorV2(ManagerAgent):
         risk_raw = state.get("risk_analysis", "无风险评估")
         
         # 提取内容并限制长度
-        technical = extract_content(technical_raw, "无技术面分析")
-        fundamental = extract_content(fundamental_raw, "无基本面分析")
-        risk = extract_content(risk_raw, "无风险评估")
+        technical = _summarize_position_research_input(
+            extract_content(technical_raw, "无技术面分析"),
+            fallback="技术面当前仍缺少稳定、可直接引用的研究摘要。",
+        )
+        fundamental = _summarize_position_research_input(
+            extract_content(fundamental_raw, "无基本面分析"),
+            fallback="基本面当前仍缺少稳定、可直接引用的研究摘要。",
+        )
+        risk = _summarize_position_research_input(
+            extract_content(risk_raw, "无风险评估"),
+            fallback="风险层面当前仍缺少稳定、可直接引用的研究摘要。",
+        )
         
         # 准备模板变量（支持多种变量名映射，兼容不同模板）
         from datetime import datetime
@@ -432,9 +465,9 @@ class ActionAdvisorV2(ManagerAgent):
             "currency_symbol": "¥",
             "currency_name": "人民币",
             # 🔧 新增：技术面、基本面和风险分析结果
-            "technical_analysis": technical[:2000] if technical else "",
-            "fundamental_analysis": fundamental[:2000] if fundamental else "",
-            "risk_analysis": risk[:2000] if risk else "",
+            "technical_analysis": technical[:800] if technical else "",
+            "fundamental_analysis": fundamental[:800] if fundamental else "",
+            "risk_analysis": risk[:800] if risk else "",
             # 用户背景参考
             "target_return": str(user_goal.get('target_return', 10)),
             "stop_loss": str(user_goal.get('stop_loss', -10)),
@@ -491,9 +524,9 @@ class ActionAdvisorV2(ManagerAgent):
             weights = {k: 1.0 for k in selected_analyses.keys()}
         
         # 确保是字符串并限制长度（避免f-string中的切片问题）
-        technical_text = (technical[:1500] if isinstance(technical, str) else str(technical)[:1500])
-        fundamental_text = (fundamental[:1500] if isinstance(fundamental, str) else str(fundamental)[:1500])
-        risk_text = (risk[:1500] if isinstance(risk, str) else str(risk)[:1500])
+        technical_text = (technical[:800] if isinstance(technical, str) else str(technical)[:800])
+        fundamental_text = (fundamental[:800] if isinstance(fundamental, str) else str(fundamental)[:800])
+        risk_text = (risk[:800] if isinstance(risk, str) else str(risk)[:800])
         
         # 🆕 格式化带权重的分析报告
         analysis_labels = {
@@ -547,6 +580,14 @@ class ActionAdvisorV2(ManagerAgent):
 请给出JSON格式的持仓研究结论：
 ```json
 {{
+    "user_view": {{
+        "conclusion": "一句话结论，白话短句",
+        "position_context": "持仓影响说明，白话短句",
+        "key_points": ["核心依据1，完整短句", "核心依据2，完整短句", "核心依据3，完整短句"],
+        "risk_focus": ["风险提示1，完整短句", "风险提示2，完整短句", "风险提示3，完整短句"],
+        "watch_items": ["后续观察点1，完整短句", "后续观察点2，完整短句", "后续观察点3，完整短句"],
+        "uncertainty_note": "不确定性说明，白话短句"
+    }},
     "analysis_summary": {{
         "overall_view": "综合研究概述",
         "key_points": ["关键点1", "关键点2"]
@@ -575,11 +616,16 @@ class ActionAdvisorV2(ManagerAgent):
 ```
 
 **重要提示**：
-1. **confidence** 字段是必需的，必须是0-100的整数，表示研究判断稳定度，不代表交易把握
-2. 严禁输出加仓、减仓、清仓、买卖、目标价、价格区间、止损止盈、仓位比例等执行性内容
-3. 请根据综合分析给出真实的 confidence 值，不要使用默认值
-4. specific_suggestions 和 observation_factors 必须是可继续验证的公开信号、研究动作或信息核查事项，不得写成交易动作
-5. 严禁输出“评分”“站稳”“突破”“放量”“右侧介入”等会被用户理解为交易触发条件的表达"""
+1. user_view 是给前端主界面直接展示的用户版内容，必须优先生成，且不得与后面的详细研究字段重复堆砌
+2. user_view.conclusion 和 user_view.position_context 必须使用白话中文，不得出现“技术面”“基本面”“PB”“ROE”“均线”“MACD”“RSI”“KDJ”“站稳”“突破”“支撑位”“阻力位”“右侧介入”“放量”等术语或触发语
+3. user_view.key_points、risk_focus、watch_items 每组最多3条，每条必须是完整短句；宁可少写也不要输出半句、截断句或长段落
+4. 如果某条内容会以“将”“让”“获”“并”“但”“与”“或”“则”“需”等字结尾，说明句子不完整，必须重写，不得直接输出
+5. key_points 不得写“当前判断主要基于已披露信息”“请持续关注”“后续重点观察”等空话，必须写具体依据
+6. **confidence** 字段是必需的，必须是0-100的整数，表示研究判断稳定度，不代表交易把握
+7. 严禁输出加仓、减仓、清仓、买卖、目标价、价格区间、止损止盈、仓位比例等执行性内容
+8. 请根据综合分析给出真实的 confidence 值，不要使用默认值
+9. specific_suggestions 和 observation_factors 必须是可继续验证的公开信号、研究动作或信息核查事项，不得写成交易动作
+10. 严禁输出“评分”“站稳”“突破”“放量”“右侧介入”等会被用户理解为交易触发条件的表达"""
 
     def _get_required_inputs(self) -> List[str]:
         """

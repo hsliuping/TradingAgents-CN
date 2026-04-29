@@ -26,6 +26,9 @@ export interface TradeRecord {
   pnl: number
   commission: number
   timestamp: string
+  change_type?: string
+  quantity_after?: number
+  created_at?: string
 }
 
 /** 交易信息汇总 */

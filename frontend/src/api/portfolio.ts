@@ -183,6 +183,21 @@ export interface PositionRiskMetrics {
   risk_summary?: string           // 风险概述
 }
 
+export interface PositionUserView {
+  conclusion: string
+  position_context: string
+  key_points: string[]
+  risk_focus: string[]
+  watch_items: string[]
+  uncertainty_note: string
+}
+
+export interface PositionAppendixSection {
+  key: string
+  title: string
+  content: string
+}
+
 /** 单股持仓研究结果 */
 export interface PositionAnalysisResult {
   analysis_id: string
@@ -197,6 +212,8 @@ export interface PositionAnalysisResult {
   risk_assessment: string
   opportunity_assessment: string
   detailed_analysis: string
+  user_view?: PositionUserView
+  appendix_sections?: PositionAppendixSection[]
   suggested_quantity?: number | null
   suggested_amount?: number | null
   risk_metrics?: PositionRiskMetrics  // 风险指标（基于资金总量计算）

@@ -1096,7 +1096,8 @@ const startHistoryPositionReview = (item: HistoryPositionItem) => {
     market: item.market,
     type: 'history',
     realized_pnl: item.realized_pnl,
-    hold_days: item.hold_days
+    hold_days: item.hold_days,
+    cleared_at: item.cleared_at
   }
   showPositionReviewDialog.value = true
 }

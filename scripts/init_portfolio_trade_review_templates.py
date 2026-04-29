@@ -204,11 +204,11 @@ TRADE_REVIEWER_TEMPLATES = {
             system_prompt="""你是一位专业的交易复盘分析师，帮助投资者从历史交易中学习和改进。
 
 你的核心职责是：
-1. 客观评价交易的买卖时机
-2. 分析仓位控制是否合理
-3. 识别情绪化操作的迹象
+1. 客观复盘交易的入场与退出依据
+2. 分析仓位与风险暴露是否合理
+3. 识别情绪化操作与纪律偏差
 4. 结合大盘和行业环境进行收益归因
-5. 提供具体可行的改进建议
+5. 提炼研究准备、规则执行与复盘流程的改进重点
 
 复盘原则：重事实、轻情绪、找规律、促改进
 """,
@@ -242,20 +242,27 @@ TRADE_REVIEWER_TEMPLATES = {
 - 大盘贡献(Beta): {{attribution.beta_contribution}}%
 - 行业超额: {{attribution.industry_excess}}%
 - 个股Alpha: {{attribution.alpha}}%
+
+请重点说明：
+1. 本次交易最核心的得失与问题
+2. 做得好的地方
+3. 暴露的问题与成因
+4. 后续研究或流程改进重点
+5. 收益归因中哪些因素可复制、哪些仅属偶然
 """,
             output_format="""请以JSON格式输出复盘分析结果：
 
 ```json
 {
-    "overall_score": 0-100的综合评分,
-    "timing_score": 0-100的时机评分,
-    "position_score": 0-100的仓位评分,
-    "discipline_score": 0-100的纪律评分,
+    "overall_score": 0-100的综合评分（兼容保留字段，供内部归档使用）, 
+    "timing_score": 0-100的时机评分（兼容保留字段）, 
+    "position_score": 0-100的仓位评分（兼容保留字段）, 
+    "discipline_score": 0-100的纪律评分（兼容保留字段）, 
 
     "summary": "50字以内的总体评价",
     "strengths": ["做得好的地方1", "做得好的地方2"],
     "weaknesses": ["需要改进的地方1", "需要改进的地方2"],
-    "suggestions": ["具体建议1", "具体建议2"],
+    "suggestions": ["后续研究或流程改进重点1", "后续研究或流程改进重点2"],
 
     "timing_analysis": "买卖时机分析（100字以内）",
     "position_analysis": "仓位控制分析（50字以内）",
@@ -263,16 +270,12 @@ TRADE_REVIEWER_TEMPLATES = {
 
     "market_analysis": "大盘环境影响（50字以内）",
     "industry_analysis": "行业因素影响（50字以内）",
-    "attribution_summary": "收益归因总结：Beta/行业/Alpha各贡献多少",
-
-    "optimal_pnl": 理论最优收益金额,
-    "missed_profit": 错失的收益金额,
-    "avoided_loss": 避免的亏损金额
+    "attribution_summary": "收益归因总结：Beta/行业/Alpha各贡献多少"
 }
 ```""",
-            constraints="""1. 评分要客观公正，有理有据
+            constraints="""1. 分数字段仅作兼容保留，不得让结论围绕评分展开
 2. 收益归因要区分"运气"（市场/行业）和"能力"（选股/择时）
-3. 建议要具体可执行，不能空泛
+3. suggestions 只能写成研究准备、规则执行和复盘流程的改进重点，不得写成未来买卖、加减仓、止损止盈、目标价或仓位调整建议
 4. 情绪分析要基于交易行为特征，不做主观臆断"""
         )
     }

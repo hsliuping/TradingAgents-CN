@@ -68,6 +68,8 @@ _POSITION_LABEL_ONLY_PATTERNS = [
     )
 ]
 _POSITION_PLAIN_LANGUAGE_REPLACEMENTS = (
+    ("技术面高度安全", "短期走势没有明显转弱"),
+    ("中性偏强状态", "当前状态偏稳，但还需要继续验证"),
     ("技术结构临界守稳", "短期没有继续恶化"),
     ("基本面坚实但估值结构分化", "公司经营基础尚可，但市场对估值修复仍有分歧"),
     ("中性观察阶段", "暂时只能继续观察"),
@@ -75,8 +77,41 @@ _POSITION_PLAIN_LANGUAGE_REPLACEMENTS = (
     ("尚未出现趋势反转信号", "还没有看到明确修复信号"),
     ("亦未触发系统性恶化条件", "也没有出现明确恶化证据"),
     ("成本价显著高于现价", "当前价格仍明显低于持仓成本"),
+    ("成本价深埋于所有关键均线之下", "当前价格明显高于持仓成本"),
+    ("财务指标稳健，盈利质量优异", "经营和财务表现整体稳定"),
+    ("经营现金流持续高倍覆盖净利润", "现金流表现较稳"),
+    ("财务安全边际坚实", "财务缓冲仍然较稳"),
+    ("成长逻辑待验证", "后续增长是否延续仍待验证"),
+    ("ROE阶段性回落", "盈利效率阶段性回落"),
+    ("毛利率数据缺失", "利润率数据还不完整"),
+    ("高PB估值", "当前估值水平"),
+    ("壁垒溢价", "竞争优势溢价"),
+    ("增长溢价", "增长预期溢价"),
+    ("估值中枢抬升", "市场愿意给出更高估值"),
+    ("第二曲线", "新业务增长"),
+    ("客户定点公告", "新增客户和项目进展公告"),
+    ("议价能力", "定价能力"),
     ("修复需时间与多重条件配合", "后续修复通常需要时间，也需要多方面条件一起改善"),
 )
+_POSITION_GENERIC_ITEM_PATTERNS = [
+    re.compile(pattern)
+    for pattern in (
+        r"当前判断主要基于已披露经营信息与风险信号整理",
+        r"当前结论主要基于已披露信息",
+        r"请重点关注",
+        r"请持续跟踪",
+        r"后续重点观察",
+    )
+]
+_POSITION_APPENDIX_SECTION_ORDER = (
+    ("technical_analysis", "技术面分析"),
+    ("fundamental_analysis", "基本面分析"),
+    ("risk_analysis", "风险评估"),
+)
+_POSITION_APPENDIX_TITLE_TO_KEY = {
+    title: key for key, title in _POSITION_APPENDIX_SECTION_ORDER
+}
+_POSITION_APPENDIX_HEADING_PATTERN = re.compile(r"^【(技术面分析|基本面分析|风险评估)】$")
 _JSON_FIELD_PATTERN = re.compile(r'^[\[\]{}":,0-9._%\-\s]+$')
 _SENTENCE_SPLIT_PATTERN = re.compile(r"[\n。！？；]+")
 _LOW_SIGNAL_PATTERNS = [
@@ -200,7 +235,25 @@ def contains_review_execution_guidance(text: str) -> bool:
     return any(pattern.search(normalized) for pattern in _REVIEW_EXECUTION_PATTERNS)
 
 
-def _plain_text(text: str) -> str:
+def _plain_text(text: Any) -> str:
+    if text is None:
+        return ""
+
+    if isinstance(text, (list, tuple, set)):
+        joined = " ".join(
+            fragment
+            for item in text
+            for fragment in [_plain_text(item)]
+            if fragment
+        )
+        if not joined:
+            return ""
+        text = joined
+    elif isinstance(text, dict):
+        text = _as_text(text)
+    elif not isinstance(text, str):
+        text = str(text)
+
     normalized = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
     normalized = re.sub(r"`+", "", normalized)
     normalized = normalized.replace("#", " ").replace("*", " ")
@@ -350,9 +403,46 @@ def contains_position_trigger_language(text: str) -> bool:
     return any(pattern.search(normalized) for pattern in _POSITION_TRIGGER_PATTERNS)
 
 
+def _iter_position_review_fragments(text: Any) -> Iterable[str]:
+    for fragment in _iter_review_fragments(text):
+        yield fragment
+
+    raw_text = _as_text(text)
+    if not raw_text:
+        return
+
+    for chunk in re.split(r"\r?\n", raw_text):
+        normalized = _plain_text(chunk)
+        if not normalized:
+            continue
+
+        fragments = [
+            fragment.strip()
+            for fragment in _SENTENCE_SPLIT_PATTERN.split(normalized)
+            if fragment.strip()
+        ]
+        if not fragments:
+            fragments = [normalized]
+
+        for fragment in fragments:
+            if len(fragment) < 4:
+                continue
+            if _JSON_FIELD_PATTERN.match(fragment):
+                continue
+            if is_low_signal_text(fragment):
+                continue
+            if not contains_review_execution_guidance(fragment):
+                continue
+
+            simplified = _simplify_position_user_language(fragment)
+            if not simplified or contains_review_execution_guidance(simplified):
+                continue
+            yield simplified
+
+
 def sanitize_position_text_block(text: Any, fallback: str = "") -> str:
     deduped: List[str] = []
-    for fragment in _iter_review_fragments(text):
+    for fragment in _iter_position_review_fragments(text):
         if contains_position_trigger_language(fragment):
             continue
         if any(pattern.match(fragment) for pattern in _POSITION_LABEL_ONLY_PATTERNS):
@@ -363,6 +453,36 @@ def sanitize_position_text_block(text: Any, fallback: str = "") -> str:
     if not deduped:
         return fallback
     return "；".join(deduped[:5])[:600]
+
+
+def _normalize_position_list_items(value: Any, fallback: List[str], limit: int = 3) -> List[str]:
+    raw_items: List[str] = []
+    if isinstance(value, list):
+        for item in value:
+            text = _plain_text(item)
+            if text:
+                raw_items.append(text)
+    elif value:
+        raw_items.extend(_iter_position_review_fragments(value))
+
+    cleaned_items: List[str] = []
+    for item in raw_items:
+        for fragment in _iter_position_clauses(item):
+            cleaned = _clip_position_user_text(_simplify_position_user_language(fragment), 56)
+            if not cleaned or contains_position_trigger_language(cleaned):
+                continue
+            if _is_low_signal_position_item(cleaned) or _looks_truncated_position_text(cleaned):
+                continue
+            if cleaned not in cleaned_items:
+                cleaned_items.append(cleaned)
+            if len(cleaned_items) >= limit:
+                break
+        if len(cleaned_items) >= limit:
+            break
+
+    if cleaned_items:
+        return cleaned_items
+    return fallback[:limit]
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -400,21 +520,130 @@ def _simplify_position_user_language(text: str) -> str:
     for old, new in _POSITION_PLAIN_LANGUAGE_REPLACEMENTS:
         normalized = normalized.replace(old, new)
 
+    normalized = re.sub(
+        r"短期未达目标(?:也)?未触(?:及)?止损",
+        "短期表现未达到预期，但当前还没出现进一步恶化信号",
+        normalized,
+    )
+    normalized = re.sub(r"未达目标", "表现未达到预期", normalized)
+    normalized = re.sub(r"未触(?:及)?止损", "还没出现进一步恶化信号", normalized)
+
     normalized = re.sub(r"\s+", " ", normalized)
     normalized = normalized.replace("现阶段短期没有继续恶化、", "现阶段更合适的结论是继续观察：短期没有继续恶化，")
     normalized = normalized.replace("仍有分歧的暂时只能继续观察", "仍有分歧，目前暂时只能继续观察")
     normalized = normalized.replace("；价格", "；股价")
     normalized = normalized.replace("当前持仓处于", "现阶段")
+    normalized = normalized.replace("；-", "；")
+    normalized = normalized.replace("- ", "")
     return normalized.strip(" ；，。")
+
+
+def _iter_position_clauses(text: Any) -> Iterable[str]:
+    normalized = _plain_text(text)
+    if not normalized:
+        return
+
+    for sentence in re.split(r"[。！？；]+", normalized):
+        sentence = sentence.strip(" ；，。")
+        if not sentence:
+            continue
+
+        comma_fragments = [
+            fragment.strip(" ；，。")
+            for fragment in re.split(r"[，、]+", sentence)
+            if fragment.strip(" ；，。")
+        ]
+        if len(comma_fragments) >= 2:
+            for fragment in comma_fragments:
+                if len(fragment) >= 6:
+                    yield fragment
+            continue
+
+        yield sentence
+
+
+def _clip_position_user_text(text: str, max_len: int) -> str:
+    normalized = _plain_text(text).strip(" ；，。:-")
+    if not normalized:
+        return ""
+    if len(normalized) <= max_len:
+        return normalized
+
+    window = normalized[: max_len + 1]
+    cut_at = max(window.rfind(marker) for marker in ("；", "。", "，", "、", "：", " "))
+    if cut_at >= max(10, max_len // 2):
+        clipped = window[:cut_at]
+    else:
+        clipped = window[:max_len]
+
+    clipped = re.sub(r"(?:将|让|获|并|但|且|及|与|或|则|需|待|可)+$", "", clipped)
+    return clipped.strip(" ；，。:-")
+
+
+def _looks_truncated_position_text(text: str) -> bool:
+    normalized = _plain_text(text).strip()
+    if len(normalized) < 12:
+        return False
+    if re.search(r"[；，,:：\-/]$", normalized):
+        return True
+    return bool(re.search(r"(?:将|让|获|并|但|且|及|与|或|则|需|待|可)$", normalized))
+
+
+def _is_low_signal_position_item(text: str) -> bool:
+    normalized = _plain_text(text)
+    return any(pattern.search(normalized) for pattern in _POSITION_GENERIC_ITEM_PATTERNS)
+
+
+def _build_position_candidate_items(*sources: Any, limit: int = 3, max_len: int = 40) -> List[str]:
+    items: List[str] = []
+    for source in sources:
+        for fragment in _iter_position_clauses(source):
+            cleaned = _clip_position_user_text(_simplify_position_user_language(fragment), max_len)
+            if len(cleaned) < 6:
+                continue
+            if contains_position_trigger_language(cleaned):
+                continue
+            if _is_low_signal_position_item(cleaned) or _looks_truncated_position_text(cleaned):
+                continue
+            if cleaned not in items:
+                items.append(cleaned)
+            if len(items) >= limit:
+                return items
+    return items
+
+
+def _build_position_conclusion(*sources: Any) -> str:
+    for source in sources:
+        normalized = _clip_position_user_text(_simplify_position_user_language(source), 72)
+        if normalized and not _looks_truncated_position_text(normalized) and (
+            "继续观察" in normalized
+            or "表现未达到预期" in normalized
+            or "进一步恶化信号" in normalized
+        ):
+            return normalized
+
+    clauses = _build_position_candidate_items(*sources, limit=2, max_len=32)
+    if clauses:
+        return _clip_position_user_text("；".join(clauses), 72)
+    return "现阶段更适合继续观察，重点确认原始研究逻辑是否仍然成立"
 
 
 def _build_position_user_action_reason(
     result_data: Dict[str, Any],
     position_snapshot: Dict[str, Any] | None = None,
-) -> tuple[str, str]:
+) -> tuple[str, str, Dict[str, Any]]:
     snapshot = _extract_position_snapshot(result_data, position_snapshot)
+    raw_user_view = result_data.get("user_view") if isinstance(result_data.get("user_view"), dict) else {}
+    analysis_summary = result_data.get("analysis_summary") if isinstance(result_data.get("analysis_summary"), dict) else {}
+    neutral_advice = result_data.get("neutral_operation_advice") if isinstance(result_data.get("neutral_operation_advice"), dict) else {}
+    if not neutral_advice and isinstance(result_data.get("neutral_operation_suggestion"), dict):
+        neutral_advice = result_data.get("neutral_operation_suggestion")
+    specific_plan = result_data.get("specific_plan") if isinstance(result_data.get("specific_plan"), dict) else {}
     cleaned_observation = _simplify_position_user_language(
-        sanitize_position_text_block(result_data.get("action_reason"), fallback="")
+        sanitize_position_text_block(
+            raw_user_view.get("conclusion") or result_data.get("action_reason"),
+            fallback="",
+        )
     )
     cleaned_risk = sanitize_text_block(result_data.get("risk_assessment"), fallback="")
     cleaned_opportunity = sanitize_text_block(result_data.get("opportunity_assessment"), fallback="")
@@ -424,44 +653,114 @@ def _build_position_user_action_reason(
     unrealized_pnl_pct = _coerce_float(snapshot.get("unrealized_pnl_pct"))
     holding_days = _coerce_int(snapshot.get("holding_days"))
 
-    opening_parts: List[str] = []
+    snapshot_context_parts: List[str] = []
     if unrealized_pnl_pct is not None:
         abs_loss = abs(unrealized_pnl_pct)
         if unrealized_pnl_pct <= -30:
-            opening_parts.append(f"当前这笔持仓浮亏约{abs_loss:.2f}%，已经处于较深浮亏区间。")
+            snapshot_context_parts.append(f"当前这笔持仓浮亏约{abs_loss:.2f}%，已经处于较深浮亏区间。")
         elif unrealized_pnl_pct <= -15:
-            opening_parts.append(f"当前这笔持仓浮亏约{abs_loss:.2f}%，已经明显偏离原始成本区间。")
+            snapshot_context_parts.append(f"当前这笔持仓浮亏约{abs_loss:.2f}%，已经明显偏离原始成本区间。")
         elif unrealized_pnl_pct < 0:
-            opening_parts.append(f"当前这笔持仓浮亏约{abs_loss:.2f}%，仍处于成本下方运行。")
+            snapshot_context_parts.append(f"当前这笔持仓浮亏约{abs_loss:.2f}%，仍处于成本下方运行。")
         elif unrealized_pnl_pct > 0:
-            opening_parts.append(f"当前这笔持仓浮盈约{unrealized_pnl_pct:.2f}%，但后续判断仍需关注证据是否延续。")
+            snapshot_context_parts.append(f"当前这笔持仓浮盈约{unrealized_pnl_pct:.2f}%，但后续判断仍需关注证据是否延续。")
 
     if cost_price is not None and current_price is not None:
-        opening_parts.append(f"成本价约¥{cost_price:.2f}，当前价约¥{current_price:.2f}。")
+        snapshot_context_parts.append(f"成本价约¥{cost_price:.2f}，当前价约¥{current_price:.2f}。")
 
     if holding_days is not None and holding_days >= 60:
-        opening_parts.append(f"持有时间约{holding_days}天，后续更应优先确认经营与风险是否改善，而不是依赖短线技术信号。")
+        snapshot_context_parts.append(f"持有时间约{holding_days}天，后续更应优先确认经营与风险是否改善，而不是依赖短线技术信号。")
+
+    opening_parts = list(snapshot_context_parts)
 
     if cleaned_observation:
         opening_parts.append(cleaned_observation)
     else:
         opening_parts.append("现阶段更适合把重点放在确认研究逻辑是否仍然成立，而不是把短期价格波动直接理解为修复开始。")
 
-    risk_line = _simplify_position_user_language(cleaned_risk) or "请优先关注行业变化、公司公告和持仓波动是否继续恶化。"
-    opportunity_line = _simplify_position_user_language(cleaned_opportunity) or "后续重点观察经营质量、估值变化和能够改变当前判断的公开催化。"
+    raw_position_context = _clip_position_user_text(
+        _simplify_position_user_language(raw_user_view.get("position_context", "")),
+        88,
+    )
+    if raw_position_context and not _looks_truncated_position_text(raw_position_context):
+        position_context = raw_position_context
+    else:
+        position_context = _clip_position_user_text(" ".join(snapshot_context_parts[:3]).strip(), 96)
 
-    action_reason = " ".join(part for part in opening_parts if part).strip()[:320]
+    conclusion = _build_position_conclusion(
+        raw_user_view.get("conclusion"),
+        cleaned_observation,
+        analysis_summary.get("overall_view"),
+        neutral_advice.get("core_judgment"),
+    )
+
+    key_points_fallback = _build_position_candidate_items(
+        raw_user_view.get("conclusion"),
+        cleaned_observation,
+        analysis_summary.get("overall_view"),
+        neutral_advice.get("core_judgment"),
+        limit=3,
+        max_len=38,
+    ) or ["当前判断仍要继续核对经营表现、风险变化和后续披露。"]
+    key_points = _normalize_position_list_items(
+        raw_user_view.get("key_points") or analysis_summary.get("key_points") or neutral_advice.get("reasoning"),
+        fallback=key_points_fallback,
+    )
+    risk_focus_fallback = _build_position_candidate_items(
+        raw_user_view.get("risk_focus"),
+        cleaned_risk,
+        limit=3,
+        max_len=42,
+    ) or ["请优先关注行业变化、公司公告和持仓波动是否继续恶化。"]
+    risk_focus = _normalize_position_list_items(
+        raw_user_view.get("risk_focus") or cleaned_risk,
+        fallback=risk_focus_fallback,
+    )
+    watch_items_fallback = _build_position_candidate_items(
+        raw_user_view.get("watch_items"),
+        specific_plan.get("observation_factors"),
+        neutral_advice.get("analysis_points"),
+        cleaned_opportunity,
+        limit=3,
+        max_len=42,
+    ) or ["后续重点观察经营质量、估值变化和能够改变当前判断的公开催化。"]
+    watch_items = _normalize_position_list_items(
+        raw_user_view.get("watch_items") or specific_plan.get("observation_factors") or neutral_advice.get("analysis_points") or cleaned_opportunity,
+        fallback=watch_items_fallback,
+    )
+    uncertainty_note = _clip_position_user_text(
+        _simplify_position_user_language(raw_user_view.get("uncertainty_note", ""))
+        or "当前结论主要基于已披露信息，后续仍需结合财报、公告和行业变化继续验证。",
+        72,
+    )
+
     detailed_sections = [
         "### 当前状态",
-        f"- {action_reason}",
+        f"- {position_context}",
+        f"- {conclusion}",
+        "",
+        "### 核心依据",
+        *[f"- {item}" for item in key_points],
         "",
         "### 风险提示",
-        f"- {risk_line[:180]}",
+        *[f"- {item}" for item in risk_focus],
         "",
         "### 后续观察点",
-        f"- {opportunity_line[:180]}",
+        *[f"- {item}" for item in watch_items],
+        "",
+        "### 不确定性说明",
+        f"- {uncertainty_note[:180]}",
     ]
-    return action_reason, "\n".join(detailed_sections).strip()
+    user_view = {
+        "conclusion": conclusion[:80],
+        "position_context": position_context[:96],
+        "key_points": key_points,
+        "risk_focus": risk_focus,
+        "watch_items": watch_items,
+        "uncertainty_note": uncertainty_note[:72],
+    }
+    compatibility_reason = _clip_position_user_text(f"{position_context} {conclusion}".strip(), 220)
+    return compatibility_reason, "\n".join(detailed_sections).strip(), user_view
 
 
 def _iter_review_fragments(text: Any) -> Iterable[str]:
@@ -503,6 +802,45 @@ def sanitize_review_text_block(text: Any, fallback: str = "") -> str:
     if not deduped:
         return fallback
     return "；".join(deduped[:6])[:1200]
+
+
+def sanitize_review_detail_block(text: Any, fallback: str = "") -> str:
+    raw_text = _as_text(text)
+    if not raw_text:
+        return fallback
+
+    normalized = sanitize_report_artifacts(raw_text)
+    if not normalized:
+        return fallback
+
+    cleaned_lines: List[str] = []
+
+    for raw_line in normalized.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            if cleaned_lines and cleaned_lines[-1] != "":
+                cleaned_lines.append("")
+            continue
+
+        plain = _plain_text(raw_line)
+        if not plain:
+            continue
+        if _JSON_FIELD_PATTERN.match(plain):
+            continue
+        if contains_review_execution_guidance(plain):
+            continue
+        if is_low_signal_text(plain) and not stripped.startswith(("#", "-", "*")):
+            continue
+
+        cleaned_lines.append(raw_line.rstrip())
+
+    cleaned_text = "\n".join(cleaned_lines)
+    cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text).strip()
+
+    if cleaned_text:
+        return cleaned_text[:4000]
+
+    return fallback
 
 
 def sanitize_review_points(points: Any, fallback: Iterable[str] = ()) -> List[str]:
@@ -638,6 +976,68 @@ def sanitize_display_report_text(text: Any, fallback: str = "") -> str:
         return cleaned_text[:4000]
 
     return sanitize_text_block(raw_text, fallback=fallback)
+
+
+def _build_position_appendix_sections(result_data: Dict[str, Any]) -> List[Dict[str, str]]:
+    normalized_sections: List[Dict[str, str]] = []
+    seen_keys: set[str] = set()
+
+    raw_sections = result_data.get("appendix_sections")
+    if isinstance(raw_sections, list):
+        for item in raw_sections:
+            if not isinstance(item, dict):
+                continue
+            raw_title = str(item.get("title") or "").strip()
+            key = str(item.get("key") or _POSITION_APPENDIX_TITLE_TO_KEY.get(raw_title) or "").strip()
+            title = raw_title or dict(_POSITION_APPENDIX_SECTION_ORDER).get(key, "")
+            content = sanitize_display_report_text(item.get("content"))
+            if key and title and content and key not in seen_keys:
+                normalized_sections.append({"key": key, "title": title, "content": content[:4000]})
+                seen_keys.add(key)
+
+    if normalized_sections:
+        return normalized_sections
+
+    section_content_by_key: Dict[str, str] = {}
+    for key, _title in _POSITION_APPENDIX_SECTION_ORDER:
+        cleaned_direct = sanitize_display_report_text(result_data.get(key))
+        if cleaned_direct:
+            section_content_by_key[key] = cleaned_direct
+
+    raw_detailed_analysis = sanitize_report_artifacts(result_data.get("detailed_analysis"))
+    if raw_detailed_analysis:
+        current_key: str | None = None
+        current_lines: List[str] = []
+
+        def flush_current_section() -> None:
+            nonlocal current_key, current_lines
+            if not current_key:
+                current_lines = []
+                return
+            cleaned = sanitize_display_report_text("\n".join(current_lines).strip())
+            if cleaned and current_key not in section_content_by_key:
+                section_content_by_key[current_key] = cleaned
+            current_key = None
+            current_lines = []
+
+        for raw_line in raw_detailed_analysis.splitlines():
+            stripped = raw_line.strip()
+            heading_match = _POSITION_APPENDIX_HEADING_PATTERN.match(stripped)
+            if heading_match:
+                flush_current_section()
+                current_key = _POSITION_APPENDIX_TITLE_TO_KEY.get(heading_match.group(1))
+                continue
+            if current_key:
+                current_lines.append(raw_line)
+
+        flush_current_section()
+
+    for key, title in _POSITION_APPENDIX_SECTION_ORDER:
+        content = section_content_by_key.get(key)
+        if content:
+            normalized_sections.append({"key": key, "title": title, "content": content[:4000]})
+
+    return normalized_sections
 
 
 def filter_analysis_reports(reports: Any) -> Dict[str, str]:
@@ -793,7 +1193,8 @@ def sanitize_position_analysis_payload(
         return result_data
 
     sanitized = dict(result_data)
-    action_reason, user_detailed_analysis = _build_position_user_action_reason(sanitized, position_snapshot)
+    appendix_sections = _build_position_appendix_sections(sanitized)
+    action_reason, user_detailed_analysis, user_view = _build_position_user_action_reason(sanitized, position_snapshot)
     summary = action_reason or sanitize_position_text_block(
         sanitized.get("summary") or sanitized.get("action_reason") or sanitized.get("detailed_analysis"),
         fallback="该持仓研究已转换为研究观察，请结合自身策略独立判断。",
@@ -813,6 +1214,8 @@ def sanitize_position_analysis_payload(
         fallback="请持续跟踪经营质量、估值变化和潜在催化事件。",
     )
     sanitized["detailed_analysis"] = user_detailed_analysis
+    sanitized["user_view"] = user_view
+    sanitized["appendix_sections"] = appendix_sections
     sanitized["summary"] = summary
     sanitized["recommendation"] = GENERIC_POSITION_RECOMMENDATION
 
@@ -838,24 +1241,27 @@ def sanitize_trade_review_payload(result_data: Dict[str, Any]) -> Dict[str, Any]
         sanitized.get("suggestions"),
         fallback=GENERIC_REVIEW_IMPROVEMENTS,
     )
-    sanitized["timing_analysis"] = sanitize_review_text_block(
+    sanitized["timing_analysis"] = sanitize_review_detail_block(
         sanitized.get("timing_analysis"),
         fallback="请重点复盘入场与退出依据是否充分，而非给出新的买卖指令。",
     )
-    sanitized["position_analysis"] = sanitize_review_text_block(
+    sanitized["position_analysis"] = sanitize_review_detail_block(
         sanitized.get("position_analysis"),
         fallback="请重点复盘仓位管理依据与风险暴露，不提供具体仓位调整方案。",
     )
-    sanitized["emotion_analysis"] = sanitize_review_text_block(
+    sanitized["emotion_analysis"] = sanitize_review_detail_block(
         sanitized.get("emotion_analysis"),
         fallback="请重点复盘情绪控制与纪律执行问题。",
     )
-    sanitized["attribution_analysis"] = sanitize_review_text_block(
+    sanitized["attribution_analysis"] = sanitize_review_detail_block(
         sanitized.get("attribution_analysis"),
         fallback="请重点复盘收益与亏损来源的证据归因。",
     )
     sanitized["plan_adherence"] = sanitize_review_text_block(sanitized.get("plan_adherence"))
     sanitized["plan_deviation"] = sanitize_review_text_block(sanitized.get("plan_deviation"))
+    sanitized.pop("optimal_pnl", None)
+    sanitized.pop("missed_profit", None)
+    sanitized.pop("avoided_loss", None)
 
     return sanitized
 

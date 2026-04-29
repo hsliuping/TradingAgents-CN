@@ -121,6 +121,7 @@ interface PositionData {
   unrealized_pnl?: number
   realized_pnl?: number
   hold_days?: number
+  cleared_at?: string
 }
 
 const props = defineProps<{
@@ -205,6 +206,85 @@ const getStyleLabel = (style: string) => {
   return labels[style] || style
 }
 
+const parseTime = (value?: string) => {
+  if (!value) return null
+  const timestamp = new Date(value).getTime()
+  return Number.isNaN(timestamp) ? null : timestamp
+}
+
+const getTradeSortTime = (trade: TradeRecord) => {
+  return parseTime(trade.timestamp) ?? parseTime(trade.created_at) ?? 0
+}
+
+const segmentPositionTrades = (trades: TradeRecord[]) => {
+  const sortedTrades = [...trades].sort((left, right) => getTradeSortTime(left) - getTradeSortTime(right))
+  const segments: TradeRecord[][] = []
+  let startIndex = 0
+
+  sortedTrades.forEach((trade, index) => {
+    if (trade.quantity_after === 0) {
+      const segment = sortedTrades.slice(startIndex, index + 1)
+      if (segment.length) {
+        segments.push(segment)
+      }
+      startIndex = index + 1
+    }
+  })
+
+  if (startIndex < sortedTrades.length) {
+    segments.push(sortedTrades.slice(startIndex))
+  }
+
+  return segments.filter(segment => segment.length > 0)
+}
+
+const selectTradesForPositionCycle = (trades: TradeRecord[], positionData: PositionData, source: 'paper' | 'real') => {
+  if (source !== 'real' || trades.length === 0) {
+    return trades
+  }
+
+  const segments = segmentPositionTrades(trades)
+  if (segments.length === 0) {
+    return trades
+  }
+
+  if (positionData.type === 'current') {
+    const activeSegment = [...segments].reverse().find(segment => {
+      const lastTrade = segment[segment.length - 1]
+      return (lastTrade.quantity_after ?? 0) > 0
+    })
+    return activeSegment || segments[segments.length - 1]
+  }
+
+  const closedSegments = segments.filter(segment => {
+    const lastTrade = segment[segment.length - 1]
+    return lastTrade.quantity_after === 0
+  })
+
+  if (closedSegments.length === 0) {
+    return segments[segments.length - 1]
+  }
+
+  const clearedAt = parseTime(positionData.cleared_at)
+  if (clearedAt === null) {
+    return closedSegments[closedSegments.length - 1]
+  }
+
+  let bestSegment = closedSegments[0]
+  let bestDiff = Math.abs(getTradeSortTime(closedSegments[0][closedSegments[0].length - 1]) - clearedAt)
+
+  closedSegments.slice(1).forEach(segment => {
+    const endTime = getTradeSortTime(segment[segment.length - 1])
+    const diff = Math.abs(endTime - clearedAt)
+    if (diff < bestDiff) {
+      bestSegment = segment
+      bestDiff = diff
+    }
+  })
+
+  return bestSegment
+}
+
 const handleSubmit = async () => {
   if (!props.positionData) {
     ElMessage.error('持仓数据不存在')
@@ -225,8 +305,15 @@ const handleSubmit = async () => {
       return
     }
 
-    // 2. 获取交易ID列表
-    const tradeIds = trades.map(t => t.trade_id)
+    const reviewTrades = selectTradesForPositionCycle(trades, props.positionData, source)
+
+    if (reviewTrades.length === 0) {
+      ElMessage.warning('未找到与当前持仓周期对应的交易记录')
+      return
+    }
+
+    // 2. 获取当前持仓周期的交易ID列表
+    const tradeIds = reviewTrades.map(t => t.trade_id)
 
     // 3. 创建复盘分析（统一使用工作流分析）
     const reviewRes = await reviewApi.createTradeReview({

@@ -100,27 +100,6 @@
           <el-descriptions-item label="手续费" :span="3">{{ report.trade_info?.total_commission?.toFixed(2) }}元</el-descriptions-item>
         </el-descriptions>
 
-        <!-- 收益分析 -->
-        <el-descriptions title="收益分析" :column="2" border size="small" class="section">
-          <el-descriptions-item label="实际收益">
-            <span :class="getTotalPnl() >= 0 ? 'positive' : 'negative'">
-              {{ formatPnl(getTotalPnl()) }}
-            </span>
-            <span v-if="report.trade_info?.is_holding && report.trade_info?.unrealized_pnl" class="unrealized-hint">
-              (已实现: {{ formatPnl(report.trade_info.realized_pnl) }}, 浮动: {{ formatPnl(report.trade_info.unrealized_pnl) }})
-            </span>
-          </el-descriptions-item>
-          <el-descriptions-item label="理论最优">
-            <span class="positive">{{ formatPnl(report.ai_review?.optimal_pnl) }}</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="错失收益" v-if="(report.ai_review?.missed_profit || 0) > 0">
-            <span class="warning">{{ formatPnl(report.ai_review?.missed_profit) }}</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="避免亏损" v-if="(report.ai_review?.avoided_loss || 0) > 0">
-            <span class="positive">{{ formatPnl(report.ai_review?.avoided_loss) }}</span>
-          </el-descriptions-item>
-        </el-descriptions>
-
         <!-- 关联交易计划 (如果有) -->
         <div v-if="report.trading_system_name" class="section trading-plan-section">
           <h4><el-icon><Document /></el-icon> 关联交易计划</h4>

@@ -108,10 +108,6 @@ class ReviewManagerV2(ManagerAgent):
 请给出JSON格式的复盘报告：
 ```json
 {
-    "overall_score": 85,
-    "timing_score": 80,
-    "position_score": 90,
-    "discipline_score": 85,
     "summary": "2-3句话的复盘结论，突出核心得失与关键问题（必须是字符串，不能是对象）",
     "strengths": ["优点1", "优点2", "优点3"],
     "weaknesses": ["不足1", "不足2", "不足3"],
@@ -121,13 +117,11 @@ class ReviewManagerV2(ManagerAgent):
 ```
 
 **重要提示**：
-1. overall_score、timing_score、position_score、discipline_score 保留为兼容字段，必须是 0-100 的整数，但不要让叙述围绕分数展开
-2. overall_score 应该是 timing_score、position_score、discipline_score 的平均值（四舍五入）
-3. summary 和 lessons 必须是字符串，不能是对象或数组
-4. strengths、weaknesses、suggestions 必须是字符串数组
-5. 请根据实际分析给出真实的分数，但分数仅作内部归档，不作为输出重点
-6. suggestions 只能写成复盘改进方向、研究补强点或流程优化点，不得写成买卖、加减仓、止损止盈等未来执行动作
-7. 不要在输出中包含日期（如"2025年4月5日"），日期由系统自动生成"""
+1. 兼容链路如仍要求 overall_score、timing_score、position_score、discipline_score，可选填 0-100 的整数，但不要让叙述围绕分数展开
+2. summary 和 lessons 必须是字符串，不能是对象或数组
+3. strengths、weaknesses、suggestions 必须是字符串数组
+4. suggestions 只能写成复盘改进方向、研究补强点或流程优化点，不得写成买卖、加减仓、止损止盈等未来执行动作
+5. 不要在输出中包含日期（如"2025年4月5日"），日期由系统自动生成"""
 
         # 🆕 从 state 获取交易计划（如果有）
         trading_plan = None
@@ -255,6 +249,7 @@ class ReviewManagerV2(ManagerAgent):
                 'style': str(trading_plan.get('style', '')),
                 'rules_text': str(trading_plan.get('rules_text', ''))
             }
+            template_variables['trading_analysis_plan'] = dict(template_variables['trading_plan'])
 
             logger.info(f"✅ [复盘管理器] 检测到交易计划: {trading_plan.get('plan_name', 'N/A')}")
             logger.info(f"   - plan_id: {trading_plan.get('plan_id', 'N/A')}")

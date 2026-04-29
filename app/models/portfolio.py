@@ -591,6 +591,23 @@ class PositionRiskMetrics(BaseModel):
     risk_summary: str = ""                        # 风险概述
 
 
+class PositionUserView(BaseModel):
+    """持仓研究的用户版展示模型"""
+    conclusion: str = ""                          # 一句话结论
+    position_context: str = ""                    # 持仓影响说明
+    key_points: List[str] = Field(default_factory=list)      # 核心依据
+    risk_focus: List[str] = Field(default_factory=list)      # 风险提示
+    watch_items: List[str] = Field(default_factory=list)     # 后续观察点
+    uncertainty_note: str = ""                   # 不确定性说明
+
+
+class PositionAppendixSection(BaseModel):
+    """持仓研究附录分段内容"""
+    key: str
+    title: str
+    content: str = ""
+
+
 class PositionAnalysisResult(BaseModel):
     """单股持仓AI分析结果"""
     action: PositionAction = PositionAction.HOLD    # 操作建议
@@ -604,6 +621,8 @@ class PositionAnalysisResult(BaseModel):
     detailed_analysis: str = ""                     # 详细分析
     # 风险指标（基于资金总量计算）
     risk_metrics: Optional[PositionRiskMetrics] = None
+    user_view: PositionUserView = Field(default_factory=PositionUserView)
+    appendix_sections: List[PositionAppendixSection] = Field(default_factory=list)
 
     # 工作流引擎扩展字段
     summary: str = ""                               # 分析摘要（综合各智能体结果）
@@ -654,5 +673,6 @@ class PositionAnalysisResponse(BaseModel):
     risk_assessment: str = ""
     opportunity_assessment: str = ""
     detailed_analysis: str = ""
+    appendix_sections: List[PositionAppendixSection] = Field(default_factory=list)
     execution_time: float = 0.0
     created_at: str = ""

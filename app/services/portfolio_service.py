@@ -36,7 +36,8 @@ from app.models.portfolio import (
     ConcentrationAnalysis, AIAnalysisResult, PortfolioAnalysisReport,
     PositionCreate, PositionUpdate, PositionResponse, PortfolioStatsResponse,
     PositionAnalysisRequest, PositionAnalysisReport, PositionAnalysisResult,
-    PriceTarget, PositionAnalysisResponse, PositionRiskMetrics,
+    PriceTarget, PositionAnalysisResponse, PositionRiskMetrics, PositionUserView,
+    PositionAppendixSection,
     RealAccount, CapitalTransaction, CapitalTransactionType,
     AccountInitRequest, AccountTransactionRequest, AccountSettingsRequest, AccountSummary,
     PositionChangeType, PositionChange, PositionChangeResponse,
@@ -3051,6 +3052,8 @@ class PortfolioService:
             "risk_assessment": ai_analysis.get("risk_assessment"),
             "opportunity_assessment": ai_analysis.get("opportunity_assessment"),
             "detailed_analysis": ai_analysis.get("detailed_analysis"),
+            "user_view": ai_analysis.get("user_view", {}),
+            "appendix_sections": ai_analysis.get("appendix_sections", []),
             "execution_time": report.get("execution_time"),
             "error_message": report.get("error_message"),
             "created_at": report.get("created_at").isoformat() if report.get("created_at") else None,
@@ -4528,6 +4531,8 @@ class PortfolioService:
                 formatted_item["risk_assessment"] = ai_analysis.get("risk_assessment", "")
                 formatted_item["opportunity_assessment"] = ai_analysis.get("opportunity_assessment", "")
                 formatted_item["detailed_analysis"] = ai_analysis.get("detailed_analysis", "")
+                formatted_item["user_view"] = ai_analysis.get("user_view", {})
+                formatted_item["appendix_sections"] = ai_analysis.get("appendix_sections", [])
                 
                 # 提取 price_targets（如果存在）
                 price_targets = ai_analysis.get("price_targets")
@@ -4558,6 +4563,8 @@ class PortfolioService:
                 formatted_item["risk_assessment"] = ""
                 formatted_item["opportunity_assessment"] = ""
                 formatted_item["detailed_analysis"] = ""
+                formatted_item["user_view"] = {}
+                formatted_item["appendix_sections"] = []
                 formatted_item["price_targets"] = None
             
             # 保留 position_snapshot 中的持仓信息，方便前端显示
@@ -4805,9 +4812,7 @@ class PortfolioService:
                 logger.info(f"📊 [工作流持仓研究] JSON解析成功，字段: {list(advice_json.keys())}")
                 action_reason = self._convert_action_advice_json_to_markdown(advice_json)
                 logger.info(f"📊 [工作流持仓研究] JSON转换为Markdown成功，长度: {len(action_reason)}")
-                # 从JSON中提取action
-                action = self._extract_action_from_json(advice_json)
-                logger.info(f"📊 [工作流持仓研究] 提取的action: {action}")
+                logger.info("📊 [工作流持仓研究] 跳过legacy action/price_targets提取，保持研究观察口径")
                 # 提取其他字段
                 # 置信度可能在多个位置
                 confidence = None
@@ -4836,15 +4841,15 @@ class PortfolioService:
                     logger.info(f"📊 [工作流持仓研究] JSON中没有confidence字段，使用默认值50")
                 
                 logger.info(f"📊 [工作流持仓研究] 提取的confidence: {confidence}")
-                price_targets = self._extract_price_targets_from_json(advice_json, snapshot, params)
-                logger.info(f"📊 [工作流持仓研究] 提取的price_targets: stop_loss={price_targets.stop_loss_price}, take_profit={price_targets.take_profit_price}, breakeven={price_targets.breakeven_price}")
+                user_view_payload = advice_json.get("user_view") if isinstance(advice_json.get("user_view"), dict) else {}
                 risk_assessment_text = advice_json.get("risk_assessment", "") or risk_analysis
                 logger.info(f"📊 [工作流持仓研究] 提取的risk_assessment长度: {len(risk_assessment_text)}")
                 opportunity_assessment_text = advice_json.get("opportunity_assessment", "")
                 logger.info(f"📊 [工作流持仓研究] 提取的opportunity_assessment长度: {len(opportunity_assessment_text)}")
             else:
                 logger.warning(f"⚠️ [工作流持仓研究] advice_json为空，使用文本解析")
-                action, action_reason = self._parse_workflow_action_advice(action_advice if isinstance(action_advice, str) else str(action_advice))
+                action_reason = action_advice if isinstance(action_advice, str) else str(action_advice)
+                user_view_payload = {}
 
             # 构建完整的分析结果
             # 注意：使用转换后的 action_reason（Markdown格式）而不是原始的 action_advice（可能是JSON）
@@ -4904,6 +4909,12 @@ class PortfolioService:
             
             logger.info(f"📊 [工作流持仓研究] recommendation字段: 使用转换后的Markdown，长度: {len(recommendation_markdown)}")
 
+            appendix_sections = [
+                PositionAppendixSection(key="technical_analysis", title="技术面分析", content=technical_analysis),
+                PositionAppendixSection(key="fundamental_analysis", title="基本面分析", content=fundamental_analysis),
+                PositionAppendixSection(key="risk_analysis", title="风险评估", content=risk_analysis),
+            ]
+
             return self._sanitize_position_analysis_result(PositionAnalysisResult(
                 action=action,
                 action_reason=action_reason,
@@ -4912,10 +4923,12 @@ class PortfolioService:
                 risk_assessment=risk_assessment_text,
                 opportunity_assessment=opportunity_assessment_text,
                 detailed_analysis=detailed_analysis,
+                user_view=PositionUserView(**user_view_payload) if user_view_payload else PositionUserView(),
+                appendix_sections=appendix_sections,
                 summary=analysis_summary,
                 recommendation=recommendation_markdown,
                 source="workflow_engine_v2"
-            ))
+            ), position_snapshot=snapshot.model_dump() if hasattr(snapshot, "model_dump") else {})
 
         except Exception as e:
             logger.error(f"❌ [工作流持仓研究] 执行异常: {e}", exc_info=True)

@@ -14,6 +14,16 @@ from ...registry import register_agent
 logger = logging.getLogger(__name__)
 
 
+def _build_market_data_tool_date_guard(code: str, analysis_date: str) -> str:
+    return (
+        "\n\n## 工具调用参数约束\n"
+        f"- 如需调用 get_stock_market_data_unified，ticker 必须使用 {code}\n"
+        f"- start_date 必须严格填写为 {analysis_date}\n"
+        f"- end_date 必须严格填写为 {analysis_date}\n"
+        "- 不得使用示例日期、历史占位日期或自行推测其他日期\n"
+    )
+
+
 # 不再需要直接导入 get_agent_prompt，使用基类的 _get_prompt_from_template 方法
 
 
@@ -375,6 +385,8 @@ class TechnicalAnalystV2(ResearcherAgent):
             )
             if prompt:
                 logger.info(f"✅ [技术面分析师] 从数据库加载提示词模板 (场景: {preference_id}, 长度: {len(prompt)})")
+                if not has_cache:
+                    return prompt.rstrip() + _build_market_data_tool_date_guard(code, analysis_date)
                 return prompt
         except Exception as e:
             logger.warning(f"⚠️ [技术面分析师] 从数据库加载提示词失败: {e}，使用降级提示词")
@@ -426,7 +438,7 @@ class TechnicalAnalystV2(ResearcherAgent):
 4. 需要继续跟踪的技术验证信号
 5. 技术面评分（1-10分）
 
-禁止输出买卖建议、支撑阻力具体价位、目标价或止损止盈。"""
+禁止输出买卖建议、支撑阻力具体价位、目标价或止损止盈。""" + _build_market_data_tool_date_guard(code, analysis_date)
 
     def _get_required_reports(self) -> List[str]:
         """

@@ -189,6 +189,14 @@ POSITION_ADVISOR_REQUIREMENTS = {
   - **判断理由**: [基于三个维度的综合判断]
   - **当前阶段**: [处于验证、改善、承压或等待信号的哪一阶段]
 
+  👤 **用户版摘要**:
+  - **一句话结论**: [1到2句白话短句，不超过36字；不得出现技术面、基本面、PB、ROE、均线、MACD、RSI、KDJ等术语]
+  - **持仓影响**: [结合浮亏/浮盈、持有时间和成本关系，说明这笔持仓当前意味着什么；不超过55字，不要写成长句]
+  - **核心依据**: [最多3条，每条必须是完整短句，不能写空话]
+  - **风险提示**: [最多3条，每条必须是完整短句，不能输出半句或截断句]
+  - **后续观察点**: [最多3条，只能是公开事实或后续披露，每条必须是完整短句]
+  - **不确定性说明**: [一句白话短句，不超过45字]
+
   🧭 **后续观察事项**:
   - **优先关注事实**: [下一步优先核对的公告、财报或市场信号]
   - **关键验证指标**: [后续要跟踪的经营、行业或市场变量]
@@ -205,9 +213,199 @@ POSITION_ADVISOR_REQUIREMENTS = {
   - 不得把收益预期、风险承受度翻译成买卖动作
   - 不得输出评分、打分、几分制等排序式表达
   - 不得使用“站稳”“突破”“跌破”“放量”“缩量”“右侧介入”等隐性交易触发语
+  - 用户版摘要不得重复拼接详细研究正文，不得写成研报腔大段落
+  - 用户版摘要不得出现“技术面”“基本面”“PB”“ROE”“均线”“MACD”“RSI”“KDJ”等术语
+  - 如果一句话会以“将”“让”“获”“并”“但”“与”“或”“则”“需”等字结尾，视为截断句，必须重写，不得直接输出
+  - 不得写“当前判断主要基于已披露信息”“请持续关注”“后续重点观察”等无信息量空话
 
   🌍 **语言要求**: 所有内容使用中文，保持研究判断口径"""
 }
+
+POSITION_ADVISOR_STYLE_LABELS = {
+  "aggressive": "激进",
+  "neutral": "中性",
+  "conservative": "保守",
+}
+
+
+def build_position_advisor_system_prompt(preference: str) -> str:
+  style_label = POSITION_ADVISOR_STYLE_LABELS.get(preference, "中性")
+  return f"""您是一位专业的持仓研究整合师，采用{style_label}的分析视角。
+
+您的职责是综合技术面、基本面和风险评估结果，形成非执行性的持仓研究判断。
+
+分析要点：
+1. 综合研究判断 - 当前持仓处于偏强/中性/偏弱/待验证的哪种研究状态
+2. 核心证据 - 支撑当前判断的主要事实与逻辑
+3. 风险边界 - 当前最值得警惕的风险来源与情景变化
+4. 潜在催化 - 可能改变研究判断的经营、行业或政策因素
+5. 后续观察事项 - 未来需要持续验证的公开信号
+
+严格要求：
+- 禁止输出买入、卖出、持有、加仓、减仓、清仓等执行性建议。
+- 禁止输出目标价、止损止盈、价格区间、仓位比例、建议数量或建议金额。
+- 禁止输出任何评分、打分、几分制、置信打分等排序式表达。
+- 禁止使用“站稳”“突破”“跌破”“放量”“缩量”“右侧介入”“左侧介入”等隐性交易触发语。
+- 只输出研究判断、风险提示、催化因素和观察事项。
+
+请使用中文，基于真实数据进行客观分析。
+
+输出格式要求：
+请给出JSON格式的持仓研究结论：
+```json
+{{
+  "user_view": {{
+    "conclusion": "1到2句白话短句，直接说明当前持仓状态，不超过36字；不得出现技术面、基本面、PB、ROE、均线、MACD、RSI、KDJ等术语",
+    "position_context": "结合浮盈浮亏、持有时间、成本与现价关系解释这笔持仓当前意味着什么，不超过55字；不要写成研究腔长句",
+    "key_points": ["核心依据1，完整短句", "核心依据2，完整短句", "核心依据3，完整短句"],
+    "risk_focus": ["风险提示1，完整短句", "风险提示2，完整短句", "风险提示3，完整短句"],
+    "watch_items": ["后续观察点1，完整短句", "后续观察点2，完整短句", "后续观察点3，完整短句"],
+    "uncertainty_note": "一句话说明还缺哪些公开信息验证，不超过45字"
+  }},
+  "analysis_summary": {{
+    "overall_view": "综合研究概述",
+    "key_points": ["关键点1", "关键点2"]
+  }},
+  "neutral_operation_advice": {{
+    "recommended_analysis_view": "偏强|中性|偏弱|待验证",
+    "confidence": 0-100的整数（表示研究判断稳定度，不代表交易把握）, 
+    "core_judgment": "当前持仓所处研究阶段与核心判断",
+    "reasoning": ["依据1", "依据2"],
+    "analysis_points": ["观察要点1", "观察要点2"],
+    "specific_suggestions": [
+      {{
+        "action": "继续跟踪",
+        "reason": "说明当前最应优先跟踪的公开信号"
+      }}
+    ],
+    "risk_reminder": "主要风险提示"
+  }},
+  "risk_assessment": "详细风险评估（300-500字）",
+  "opportunity_assessment": "详细催化与改善条件（300-500字）",
+  "specific_plan": {{
+    "immediate_step": "下一步应优先核对的事实或披露",
+    "observation_factors": ["后续观察事项1", "后续观察事项2"]
+  }}
+}}
+```
+
+**免责声明**：
+本分析仅用于研究辅助与风险提示，不构成任何交易建议或执行指令。"""
+
+
+def build_position_advisor_user_prompt() -> str:
+  return """请综合以下分析，形成持仓研究判断：
+
+=== 持仓信息 ===
+- 股票: {{code}} {{name}}
+- 成本价: {{cost_price}}
+- 现价: {{current_price}}
+- 浮动盈亏: {{unrealized_pnl_pct}}
+
+=== 技术面分析 ===
+{{technical_analysis}}
+
+=== 基本面分析 ===
+{{fundamental_analysis}}
+
+=== 风险评估 ===
+{{risk_analysis}}
+
+=== 用户目标 ===
+- 目标收益: {{target_return}}%
+- 止损线: {{stop_loss}}%
+
+请给出JSON格式的持仓研究结论：
+```json
+{
+  "user_view": {
+    "conclusion": "一句话结论，白话短句",
+    "position_context": "持仓影响说明，白话短句",
+    "key_points": ["核心依据1，完整短句", "核心依据2，完整短句", "核心依据3，完整短句"],
+    "risk_focus": ["风险提示1，完整短句", "风险提示2，完整短句", "风险提示3，完整短句"],
+    "watch_items": ["后续观察点1，完整短句", "后续观察点2，完整短句", "后续观察点3，完整短句"],
+    "uncertainty_note": "不确定性说明，白话短句"
+  },
+  "analysis_summary": {
+    "overall_view": "综合研究概述",
+    "key_points": ["关键点1", "关键点2"]
+  },
+  "neutral_operation_advice": {
+    "recommended_analysis_view": "偏强|中性|偏弱|待验证",
+    "confidence": 0-100的整数（研究判断稳定度，不代表交易把握）, 
+    "core_judgment": "当前持仓所处研究阶段与核心判断",
+    "reasoning": ["理由1", "理由2"],
+    "analysis_points": ["分析要点1", "分析要点2"],
+    "specific_suggestions": [
+      {
+        "action": "继续跟踪",
+        "reason": "说明当前最应优先跟踪的公开信号"
+      }
+    ],
+    "risk_reminder": "主要风险提示"
+  },
+  "risk_assessment": "详细风险评估",
+  "opportunity_assessment": "详细催化与改善条件",
+  "specific_plan": {
+    "immediate_step": "下一步应优先核对的事实或披露",
+    "observation_factors": ["后续观察事项1", "后续观察事项2"]
+  }
+}
+```
+
+**重要提示**：
+1. user_view 是给前端主界面直接展示的用户版内容，必须优先生成，且不得与后面的详细研究字段重复堆砌
+2. user_view.conclusion 和 user_view.position_context 必须使用白话中文，不得出现“技术面”“基本面”“PB”“ROE”“均线”“MACD”“RSI”“KDJ”“站稳”“突破”“支撑位”“阻力位”“右侧介入”“放量”等术语或触发语
+3. user_view.key_points、risk_focus、watch_items 每组最多3条，每条必须是完整短句；宁可少写也不要输出半句、截断句或长段落
+4. 如果某条内容会以“将”“让”“获”“并”“但”“与”“或”“则”“需”等字结尾，说明句子不完整，必须重写，不得直接输出
+5. key_points 不得写“当前判断主要基于已披露信息”“请持续关注”“后续重点观察”等空话，必须写具体依据
+6. confidence 字段是必需的，必须是0-100的整数，表示研究判断稳定度，不代表交易把握
+7. 严禁输出加仓、减仓、清仓、买卖、目标价、价格区间、止损止盈、仓位比例等执行性内容
+8. 请根据综合分析给出真实的 confidence 值，不要使用默认值
+9. specific_suggestions 和 observation_factors 必须是可继续验证的公开信号、研究动作或信息核查事项，不得写成交易动作
+10. 严禁输出“评分”“站稳”“突破”“放量”“右侧介入”等会被用户理解为交易触发条件的表达"""
+
+
+def build_position_advisor_output_format() -> str:
+  return """**输出格式要求**：
+必须使用JSON格式输出，包含以下核心字段：
+- user_view（用户主界面展示内容，必需字段）
+- analysis_summary（分析摘要）
+- neutral_operation_advice（持仓分析观点，必须包含 recommended_analysis_view 和 confidence 字段）
+- specific_plan（具体计划，必须包含 immediate_step 和 observation_factors）
+- risk_assessment（风险评估，300-500字，必需字段）
+- opportunity_assessment（催化与改善条件，300-500字，必需字段）
+
+**user_view字段说明**：
+- conclusion：1到2句白话短句，不超过36字
+- position_context：说明这笔持仓当前意味着什么，不超过55字
+- key_points / risk_focus / watch_items：每组最多3条，每条必须是完整短句
+- uncertainty_note：一句白话短句，不超过45字
+
+**confidence字段说明**：
+- 类型：整数（0-100）
+- 含义：研究判断稳定度，不代表交易把握
+- 必需性：必需字段，必须提供
+
+**观察事项说明**：
+- observation_factors 只能写公开事实、后续披露、研究核查事项
+- 不得写成价格触发条件、交易动作或仓位动作"""
+
+
+def build_position_advisor_constraints(preference: str) -> str:
+  style_label = POSITION_ADVISOR_STYLE_LABELS.get(preference, "中性")
+  return f"""必须从{style_label}角度进行分析，保持一致的分析立场。必须严格按照JSON格式输出，确保所有必需字段都存在。
+
+**user_view特别要求**：
+- conclusion 和 position_context 必须使用白话中文，不得出现“技术面”“基本面”“PB”“ROE”“均线”“MACD”“RSI”“KDJ”等术语
+- key_points、risk_focus、watch_items 每组最多3条，每条必须是完整短句，宁可少写也不要输出半句
+- 若一句话以“将”“让”“获”“并”“但”“与”“或”“则”“需”等字结尾，视为截断句，必须重写
+- 不得写“当前判断主要基于已披露信息”“请持续关注”“后续重点观察”等空话
+
+**合规要求**：
+- 严禁输出加仓、减仓、持有、清仓、买卖、目标价、价格区间、止损止盈、仓位比例、数量金额等执行性内容
+- 严禁输出“评分”“站稳”“突破”“跌破”“放量”“缩量”“右侧介入”等会被理解为交易触发条件的表达
+- 报告内容应直接开始，无需添加任何署名、日期或声明信息。"""
 
 
 def update_position_advisors():
@@ -229,6 +427,20 @@ def update_position_advisors():
     for agent_name, req_type in agents.items():
         # 更新所有三种偏好类型（aggressive, neutral, conservative）
         for preference in ["aggressive", "neutral", "conservative"]:
+            update_fields = {
+                "content.analysis_requirements": POSITION_ADVISOR_REQUIREMENTS[req_type],
+                "updated_at": datetime.now(),
+            }
+
+            if agent_name == "pa_advisor_v2":
+                update_fields.update({
+                    "content.system_prompt": build_position_advisor_system_prompt(preference),
+                    "content.user_prompt": build_position_advisor_user_prompt(),
+                    "content.tool_guidance": f"**工具使用指导**:\n\n基于提供的分析报告进行{POSITION_ADVISOR_STYLE_LABELS.get(preference, '中性')}的综合分析。\n从{POSITION_ADVISOR_STYLE_LABELS.get(preference, '中性')}角度评估所有信息。",
+                    "content.output_format": build_position_advisor_output_format(),
+                    "content.constraints": build_position_advisor_constraints(preference),
+                })
+
             result = collection.update_one(
                 {
                     "agent_type": "position_analysis_v2",
@@ -238,8 +450,7 @@ def update_position_advisors():
                 },
                 {
                     "$set": {
-                        "content.analysis_requirements": POSITION_ADVISOR_REQUIREMENTS[req_type],
-                        "updated_at": datetime.now()
+                    **update_fields
                     }
                 }
             )

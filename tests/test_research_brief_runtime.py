@@ -288,6 +288,9 @@ def test_sanitize_position_analysis_payload_strips_execution_fields() -> None:
     sanitized = sanitize_position_analysis_payload(raw_result)
 
     assert sanitized["action"] == "hold"
+    assert sanitized["user_view"]["conclusion"]
+    assert sanitized["user_view"]["risk_focus"]
+    assert sanitized["user_view"]["watch_items"]
     assert sanitized["price_targets"] == {}
     assert sanitized["suggested_quantity"] is None
     assert sanitized["suggested_amount"] is None
@@ -342,6 +345,8 @@ def test_sanitize_position_analysis_payload_rewrites_deep_loss_into_user_summary
     sanitized = sanitize_position_analysis_payload(raw_result, position_snapshot=snapshot)
 
     assert "浮亏约33.86%" in sanitized["action_reason"]
+    assert sanitized["user_view"]["position_context"]
+    assert len(sanitized["user_view"]["key_points"]) >= 1
     assert "成本价约¥345.50，当前价约¥228.52" in sanitized["action_reason"]
     assert "持有时间约85天" in sanitized["action_reason"]
     assert "暂时只能继续观察" in sanitized["action_reason"]
@@ -350,6 +355,108 @@ def test_sanitize_position_analysis_payload_rewrites_deep_loss_into_user_summary
     assert "技术结构临界守稳" not in sanitized["action_reason"]
     assert "### 当前状态" in sanitized["detailed_analysis"]
     assert "### 风险提示" in sanitized["detailed_analysis"]
+
+
+def test_sanitize_position_analysis_payload_rewrites_user_view_into_plain_complete_items() -> None:
+    raw_result = {
+        "action": "hold",
+        "action_reason": (
+            "当前这笔持仓浮盈约31.83%，但后续判断仍需关注证据是否延续。 成本价约¥329.87，当前价约¥434.88。 "
+            "持有时间约152天，后续更应优先确认经营与风险是否改善，而不是依赖短线技术信号。"
+            "现阶段技术面高度安全、基本面确定性优势兑现但成长逻辑待验证的中性偏强状态；"
+            "成本价深埋于所有关键均线之下，财务指标稳健，盈利质量优异，但ROE阶段性回落与毛利率数据缺失构成核心验证缺口；"
+            "- 经营现金流持续高倍覆盖净利润，财务安全边际坚实"
+        ),
+        "risk_assessment": (
+            "宁德时代当前持仓面临的主要风险并非流动性或信用危机类显性风险，而是结构性预期错配引发的估值再平衡风险。"
+            "第二风险点为毛利率信息不可用所导致的盈利归因失焦：无法区分当前净利率水平是源于上游原材料价格回落的被动传导，"
+            "还是自身技术降本能力的真实体现，抑或市场份额策略性让"
+        ),
+        "opportunity_assessment": (
+            "当前持仓具备清晰的结构性机会窗口，核心催化来源于盈利质量与成长动能的双重验证兑现。"
+            "第一类机会来自ROE趋势修复：若2026年中报显示净资产收益率环比明显回升，则高PB估值将获"
+        ),
+        "user_view": {
+            "conclusion": "现阶段技术面高度安全、基本面确定性优势兑现但成长逻辑待验证的中性偏强状态；成本价深埋于所有关键均线之下，财务指标稳健，盈利质量优异，但ROE阶段性回落与毛利率数据缺失构成核心验证缺口；- 经营现金流持续高倍覆盖净利润，财务安全边际坚实",
+            "position_context": "当前这笔持仓浮盈约31.83%，但后续判断仍需关注证据是否延续。 成本价约¥329.87，当前价约¥434.88。 持有时间约152天，后续更应优先确认经营与风险是否改善，而不是依赖短线技术信号",
+            "key_points": ["当前判断主要基于已披露经营信息与风险信号整理"],
+            "risk_focus": [
+                "宁德时代当前持仓面临的主要风险并非流动性或信用危机类显性风险，而是结构性预期错配引发的估值再平衡风险",
+                "第二风险点为毛利率信息不可用所导致的盈利归因失焦：无法区分当前净利率水平是源于上游原材料价格回落的被动传导，还是自身技术降本能力的真实体现，抑或市场份额策略性让",
+            ],
+            "watch_items": [
+                "当前持仓具备清晰的结构性机会窗口，核心催化来源于盈利质量与成长动能的双重验证兑现",
+                "第一类机会来自ROE趋势修复：若2026年中报显示净资产收益率环比明显回升，则高PB估值将获",
+            ],
+            "uncertainty_note": "当前结论主要基于已披露信息，后续仍需结合财报、公告和行业变化继续验证",
+        },
+    }
+    snapshot = {
+        "cost_price": 329.8699,
+        "current_price": 434.88,
+        "unrealized_pnl_pct": 31.83,
+        "holding_days": 152,
+    }
+
+    sanitized = sanitize_position_analysis_payload(raw_result, position_snapshot=snapshot)
+
+    assert "技术面" not in sanitized["user_view"]["conclusion"]
+    assert "均线" not in sanitized["user_view"]["conclusion"]
+    assert "PB" not in " ".join(sanitized["user_view"]["watch_items"])
+    assert "已披露经营信息与风险信号整理" not in sanitized["user_view"]["key_points"][0]
+    assert len(sanitized["user_view"]["key_points"]) >= 1
+    assert all(
+        not item.endswith(("将", "让", "获", "并", "但", "与"))
+        for item in sanitized["user_view"]["risk_focus"] + sanitized["user_view"]["watch_items"]
+    )
+    assert "技术面" not in sanitized["action_reason"]
+    assert "关键均线" not in sanitized["action_reason"]
+
+
+def test_sanitize_position_analysis_payload_removes_target_and_stop_loss_language_from_user_view() -> None:
+    raw_result = {
+        "action_reason": "持有86天浮亏33.1%，成本远高于现价，短期未达目标也未触止损。",
+        "risk_assessment": "请重点关注持仓波动、行业变化和公告风险。",
+        "opportunity_assessment": "请持续跟踪经营质量、估值变化和潜在催化事件。",
+    }
+    snapshot = {
+        "cost_price": 345.5,
+        "current_price": 231.2,
+        "unrealized_pnl_pct": -33.1,
+        "holding_days": 86,
+    }
+
+    sanitized = sanitize_position_analysis_payload(raw_result, position_snapshot=snapshot)
+
+    assert "目标" not in sanitized["action_reason"]
+    assert "止损" not in sanitized["action_reason"]
+    assert "表现未达到预期" in sanitized["action_reason"]
+    assert "进一步恶化信号" in sanitized["action_reason"]
+    assert "目标" not in sanitized["user_view"]["position_context"]
+    assert "止损" not in sanitized["user_view"]["position_context"]
+
+
+def test_sanitize_position_analysis_payload_preserves_appendix_sections() -> None:
+    raw_result = {
+        "detailed_analysis": (
+            "【技术面分析】\n短期趋势仍偏弱，但未出现流动性风险。\n\n"
+            "【基本面分析】\n经营现金流尚可，但订单修复仍待确认。\n\n"
+            "【风险评估】\n若后续回款继续放缓，估值修复节奏可能继续推迟。"
+        ),
+        "action_reason": "现阶段仍需继续观察。",
+    }
+
+    sanitized = sanitize_position_analysis_payload(raw_result)
+
+    assert [section["key"] for section in sanitized["appendix_sections"]] == [
+        "technical_analysis",
+        "fundamental_analysis",
+        "risk_analysis",
+    ]
+    assert sanitized["appendix_sections"][0]["title"] == "技术面分析"
+    assert "短期趋势仍偏弱" in sanitized["appendix_sections"][0]["content"]
+    assert "经营现金流尚可" in sanitized["appendix_sections"][1]["content"]
+    assert "估值修复节奏可能继续推迟" in sanitized["appendix_sections"][2]["content"]
 
 
 def test_sanitize_analysis_payload_strips_news_and_sentiment_execution_language() -> None:
@@ -430,3 +537,43 @@ def test_sanitize_trade_review_payload_strips_future_trade_actions() -> None:
     assert "加仓" not in sanitized["position_analysis"]
     assert all("买入" not in item for item in sanitized["suggestions"])
     assert all("50%" not in item for item in sanitized["suggestions"])
+
+
+def test_sanitize_trade_review_payload_removes_counterfactual_profit_fields() -> None:
+    raw_result = {
+        "summary": "本次交易的核心问题是退出依据不足。",
+        "optimal_pnl": 3200.0,
+        "missed_profit": 1800.0,
+        "avoided_loss": 0.0,
+    }
+
+    sanitized = sanitize_trade_review_payload(raw_result)
+
+    assert "optimal_pnl" not in sanitized
+    assert "missed_profit" not in sanitized
+    assert "avoided_loss" not in sanitized
+
+
+def test_sanitize_trade_review_payload_preserves_detail_markdown_blocks() -> None:
+    raw_result = {
+        "summary": "本次交易的核心问题是归因证据闭环不足。",
+        "attribution_analysis": """# 宁德时代（300750）持仓归因复盘报告
+
+## 1. Beta收益分析（大盘贡献）
+
+- 持仓周期内，大盘收益率为 -0.78%。
+- 假设该股Beta系数约为1.45，理论Beta收益应为：
+
+Beta收益 = -0.78% × 1.45 = -1.13%
+
+## 2. 行业超额收益分析
+
+- 行业相对大盘并未贡献显著正向超额。
+""",
+    }
+
+    sanitized = sanitize_trade_review_payload(raw_result)
+
+    assert "理论Beta收益应为：" in sanitized["attribution_analysis"]
+    assert "Beta收益 = -0.78% × 1.45 = -1.13%" in sanitized["attribution_analysis"]
+    assert "## 2. 行业超额收益分析" in sanitized["attribution_analysis"]

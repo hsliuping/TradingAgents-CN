@@ -34,10 +34,21 @@
         <el-input-number v-model="form.quantity" :min="1" :step="100" style="width: 100%" />
       </el-form-item>
       <el-form-item label="成本价" prop="cost_price">
-        <el-input-number v-model="form.cost_price" :min="0.01" :precision="2" :step="0.1" style="width: 100%" />
+        <el-input
+          v-model="form.cost_price"
+          inputmode="decimal"
+          placeholder="请输入成本价，例如 3.25"
+          style="width: 100%"
+        />
       </el-form-item>
       <el-form-item label="买入日期" prop="buy_date" required>
-        <el-date-picker v-model="form.buy_date" type="date" placeholder="必填，用于校验成本价" style="width: 100%" />
+        <el-date-picker
+          v-model="form.buy_date"
+          type="date"
+          value-format="YYYY-MM-DD"
+          placeholder="必填，用于校验成本价"
+          style="width: 100%"
+        />
       </el-form-item>
       <el-form-item label="备注" prop="notes">
         <el-input v-model="form.notes" type="textarea" :rows="2" placeholder="可选" />
@@ -79,12 +90,46 @@ const lastFetchedCode = ref<string>('')
 
 const isEdit = computed(() => !!props.editData)
 
-const form = ref<PositionCreatePayload & { buy_date?: Date | string }>({
+type PositionFormModel = Omit<PositionCreatePayload, 'cost_price'> & {
+  cost_price: string
+  buy_date?: string
+}
+
+const parseCostPrice = (value: string): number | null => {
+  const normalized = value.trim()
+  if (!normalized) return null
+
+  const matched = normalized.match(/^\d+(?:\.\d{0,2})?$/)
+  if (!matched) return null
+
+  const parsed = Number(normalized)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null
+  }
+
+  return parsed
+}
+
+const validateCostPrice = (_rule: unknown, value: string, callback: (error?: Error) => void) => {
+  if (!value || !value.trim()) {
+    callback(new Error('请输入成本价'))
+    return
+  }
+
+  if (parseCostPrice(value) === null) {
+    callback(new Error('成本价需为大于0的数字，最多保留2位小数'))
+    return
+  }
+
+  callback()
+}
+
+const form = ref<PositionFormModel>({
   code: '',
   name: '',
   market: 'CN',
   quantity: 100,
-  cost_price: 10,
+  cost_price: '',
   buy_date: undefined,
   notes: ''
 })
@@ -93,7 +138,7 @@ const form = ref<PositionCreatePayload & { buy_date?: Date | string }>({
 const rules = computed<FormRules>(() => ({
   code: [{ required: true, message: '请输入股票代码', trigger: 'blur' }],
   quantity: [{ required: true, message: '请输入持仓数量', trigger: 'blur' }],
-  cost_price: [{ required: true, message: '请输入成本价', trigger: 'blur' }],
+  cost_price: [{ validator: validateCostPrice, trigger: 'blur' }],
   buy_date: isEdit.value ? [] : [{ required: true, message: '请选择买入日期，以便校验成本价是否正确', trigger: 'change' }]
 }))
 
@@ -205,7 +250,7 @@ watch(() => props.visible, (val) => {
       name: props.editData.name || '',
       market: props.editData.market || 'CN',
       quantity: props.editData.quantity,
-      cost_price: props.editData.cost_price,
+      cost_price: String(props.editData.cost_price ?? ''),
       buy_date: props.editData.buy_date || undefined,
       notes: props.editData.notes || ''
     }
@@ -217,7 +262,7 @@ watch(() => props.visible, (val) => {
       name: '',
       market: 'CN',
       quantity: 100,
-      cost_price: 10,
+      cost_price: '',
       buy_date: undefined,
       notes: ''
     }
@@ -237,14 +282,20 @@ const handleSubmit = async () => {
   try {
     await formRef.value.validate()
     submitting.value = true
+    const parsedCostPrice = parseCostPrice(form.value.cost_price)
+
+    if (parsedCostPrice === null) {
+      ElMessage.error('成本价需为大于0的数字，最多保留2位小数')
+      return
+    }
     
     const payload: PositionCreatePayload = {
       code: form.value.code,
       name: form.value.name || undefined,
       market: form.value.market,
       quantity: form.value.quantity,
-      cost_price: form.value.cost_price,
-      buy_date: form.value.buy_date ? new Date(form.value.buy_date).toISOString().split('T')[0] : undefined,
+      cost_price: parsedCostPrice,
+      buy_date: form.value.buy_date || undefined,
       notes: form.value.notes || undefined
     }
     

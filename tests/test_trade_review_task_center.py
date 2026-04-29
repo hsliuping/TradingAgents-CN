@@ -15,6 +15,87 @@ from app.models.review import CreateTradeReviewRequest, ReviewType
 from app.models.analysis import AnalysisStatus
 
 
+def test_build_trade_info_uses_first_buy_date_instead_of_first_trade() -> None:
+    from app.services.trade_review_service import TradeReviewService
+
+    with patch('app.services.trade_review_service.get_mongo_db', return_value=Mock()):
+        service = TradeReviewService()
+
+    trade_info = service._build_trade_info(
+        [
+            {
+                "_id": "6943d2817b4e4f65202796a3",
+                "code": "300750",
+                "name": "宁德时代",
+                "market": "CN",
+                "side": "sell",
+                "quantity": 100,
+                "price": 379.0,
+                "amount": 37900.0,
+                "commission": 0.0,
+                "timestamp": "2025-12-18T10:07:32.696000",
+                "pnl": 157.14,
+            },
+            {
+                "_id": "6976f33e3feea732c3dc83c6",
+                "code": "300750",
+                "name": "宁德时代",
+                "market": "CN",
+                "side": "buy",
+                "quantity": 100,
+                "price": 343.74,
+                "amount": 34374.0,
+                "commission": 0.0,
+                "timestamp": "2026-01-25T00:00:00",
+                "pnl": 0.0,
+            },
+            {
+                "_id": "698941a0bc971494ddf7bcc6",
+                "code": "300750",
+                "name": "宁德时代",
+                "market": "CN",
+                "side": "buy",
+                "quantity": 100,
+                "price": 339.87,
+                "amount": 33987.0,
+                "commission": 0.0,
+                "timestamp": "2026-01-27T16:00:00",
+                "pnl": 0.0,
+            },
+            {
+                "_id": "698941bfbc971494ddf7bcc8",
+                "code": "300750",
+                "name": "宁德时代",
+                "market": "CN",
+                "side": "buy",
+                "quantity": 100,
+                "price": 339.91333333333336,
+                "amount": 33991.33,
+                "commission": 0.0,
+                "timestamp": "2026-01-28T16:00:00",
+                "pnl": 0.0,
+            },
+            {
+                "_id": "698941e8bc971494ddf7bcca",
+                "code": "300750",
+                "name": "宁德时代",
+                "market": "CN",
+                "side": "sell",
+                "quantity": 100,
+                "price": 360.0,
+                "amount": 36000.0,
+                "commission": 0.0,
+                "timestamp": "2026-02-05T16:00:00",
+                "pnl": 2008.67,
+            },
+        ],
+        "300750",
+    )
+
+    assert trade_info.first_buy_date == "2026-01-25T00:00:00"
+    assert trade_info.last_sell_date == "2026-02-05T16:00:00"
+
+
 @pytest.mark.asyncio
 async def test_create_trade_review_task():
     """测试创建交易复盘任务"""
