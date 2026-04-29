@@ -15,7 +15,7 @@ export const ANALYSTS: Analyst[] = [
   {
     id: 'market',
     name: '市场分析师',
-    description: '分析市场趋势、行业动态和宏观经济环境',
+    description: '分析个股价格走势与技术指标（均线/MACD/RSI/布林带），生成技术分析报告',
     icon: 'TrendCharts'
   },
   {
