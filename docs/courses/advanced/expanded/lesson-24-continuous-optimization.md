@@ -569,7 +569,7 @@ weaknesses频率统计（10笔交易）
 3. 增加"必须查看AI大盘分析报告"规则
 ```
 
-#### suggestions应用：将AI建议转化为行动
+#### suggestions应用：将AI研究结论转化为行动
 
 **操作步骤**：
 1. **将suggestions分类到不同环节**
@@ -946,9 +946,9 @@ suggestions分类（10笔交易）
 #### AI如何提供针对性建议
 
 **方法1：基于评分提供建议**
-- 如果`timing_score`持续低，AI建议调整择时分析流程配置
-- 如果`position_score`持续低，AI建议优化仓位管理配置
-- 如果`emotion_score`持续低，AI建议加强纪律执行
+- 如果`timing_score`持续低，AI研究结论提示调整择时分析流程配置
+- 如果`position_score`持续低，AI研究结论提示优化仓位管理配置
+- 如果`emotion_score`持续低，AI研究结论提示加强纪律执行
 
 **方法2：基于weaknesses提供建议**
 - AI分析`weaknesses`中重复出现的问题
