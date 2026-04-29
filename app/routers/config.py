@@ -247,7 +247,6 @@ async def get_system_config(
             llm_configs=_sanitize_llm_configs(config.llm_configs, providers_dict),
             default_llm=config.default_llm,
             data_source_configs=_sanitize_datasource_configs(config.data_source_configs),
-            default_data_source=config.default_data_source,
             database_configs=_sanitize_database_configs(config.database_configs),
             system_settings=_sanitize_kv(config.system_settings),
             created_at=config.created_at,
@@ -1793,42 +1792,6 @@ async def update_category_datasource_order(
         )
 
 
-@router.post("/datasource/set-default")
-async def set_default_data_source(
-    request: SetDefaultRequest,
-    current_user: User = Depends(get_current_user)
-):
-    """设置默认数据源"""
-    try:
-        success = await config_service.set_default_data_source(request.name)
-        if success:
-            # 审计日志（忽略异常）
-            try:
-                await log_operation(
-                    user_id=str(getattr(current_user, "id", "")),
-                    username=getattr(current_user, "username", "unknown"),
-                    action_type=ActionType.CONFIG_MANAGEMENT,
-                    action="set_default_datasource",
-                    details={"name": request.name},
-                    success=True,
-                )
-            except Exception:
-                pass
-            return {"message": "默认数据源设置成功", "default_data_source": request.name}
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="指定的数据源不存在"
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"设置默认数据源失败: {str(e)}"
-        )
-
-
 @router.get("/settings", response_model=Dict[str, Any])
 async def get_system_settings(
     current_user: User = Depends(get_current_user)
@@ -2075,44 +2038,6 @@ async def set_default_llm(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"设置默认大模型失败: {str(e)}"
-        )
-
-
-@router.post("/default/datasource", response_model=dict)
-async def set_default_data_source(
-    request: SetDefaultRequest,
-    current_user: User = Depends(get_current_user)
-):
-    """设置默认数据源"""
-    try:
-        # 开源版本：所有用户都可以修改配置
-
-        success = await config_service.set_default_data_source(request.name)
-        if success:
-            # 审计日志（忽略异常）
-            try:
-                await log_operation(
-                    user_id=str(getattr(current_user, "id", "")),
-                    username=getattr(current_user, "username", "unknown"),
-                    action_type=ActionType.CONFIG_MANAGEMENT,
-                    action="set_default_datasource",
-                    details={"name": request.name},
-                    success=True,
-                )
-            except Exception:
-                pass
-            return {"message": f"默认数据源已设置为: {request.name}"}
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="设置默认数据源失败，请检查数据源名称是否正确"
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"设置默认数据源失败: {str(e)}"
         )
 
 

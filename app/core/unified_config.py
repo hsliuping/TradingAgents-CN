@@ -446,7 +446,6 @@ class UnifiedConfigManager:
                 llm_configs=self.get_llm_configs(),
                 default_llm=self.get_default_model(),
                 data_source_configs=self.get_data_source_configs(),
-                default_data_source="AKShare",
                 database_configs=self.get_database_configs(),
                 system_settings=self.get_system_settings()
             )

@@ -339,7 +339,6 @@ class SystemConfig(BaseModel):
     
     # 数据源配置
     data_source_configs: List[DataSourceConfig] = Field(default_factory=list, description="数据源配置列表")
-    default_data_source: Optional[str] = Field(None, description="默认数据源")
     
     # 数据库配置
     database_configs: List[DatabaseConfig] = Field(default_factory=list, description="数据库配置列表")
@@ -458,7 +457,6 @@ class SystemConfigResponse(BaseModel):
     llm_configs: List[LLMConfig]
     default_llm: Optional[str]
     data_source_configs: List[DataSourceConfig]
-    default_data_source: Optional[str]
     database_configs: List[DatabaseConfig]
     system_settings: Dict[str, Any]
     created_at: datetime

@@ -1237,7 +1237,6 @@ const defaultLLM = ref<string>('')
 
 // 厂家信息映射
 const providerInfoMap = ref<Record<string, any>>({})
-const defaultDataSource = ref<string>('')
 
 // 新增：数据源分组相关
 const marketCategories = ref<MarketCategory[]>([])
@@ -1481,10 +1480,6 @@ const loadDataSourceConfigs = async () => {
   try {
     const configs = await configApi.getDataSourceConfigs()
     dataSourceConfigs.value = configs
-
-    // 获取默认数据源
-    const systemConfig = await configApi.getSystemConfig()
-    defaultDataSource.value = systemConfig.default_data_source || ''
 
     // 加载分组相关数据
     await loadMarketCategories()
@@ -2074,16 +2069,6 @@ const handleMarketCategorySuccess = () => {
 const handleDataSourceGroupingSuccess = () => {
   loadDataSourceGroupings()
   buildDataSourceGroups()
-}
-
-const setDefaultDataSource = async (name: string) => {
-  try {
-    await configApi.setDefaultDataSource(name)
-    defaultDataSource.value = name
-    ElMessage.success('默认数据源设置成功')
-  } catch (error) {
-    ElMessage.error('设置默认数据源失败')
-  }
 }
 
 const testDataSource = async (config: DataSourceConfig) => {

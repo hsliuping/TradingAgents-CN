@@ -129,7 +129,6 @@ export interface SystemConfig {
   llm_configs: LLMConfig[]
   default_llm?: string
   data_source_configs: DataSourceConfig[]
-  default_data_source?: string
   database_configs: DatabaseConfig[]
   system_settings: Record<string, any>
   created_at: string
@@ -430,11 +429,6 @@ export const configApi = {
   // 添加数据源配置
   addDataSourceConfig(config: Partial<DataSourceConfig>): Promise<{ message: string; name: string }> {
     return ApiClient.post('/api/config/datasource', config)
-  },
-
-  // 设置默认数据源
-  setDefaultDataSource(name: string): Promise<{ message: string; default_data_source: string }> {
-    return ApiClient.post('/api/config/datasource/set-default', { name })
   },
 
   // 更新数据源配置

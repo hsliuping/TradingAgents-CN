@@ -136,7 +136,6 @@ const handleWizardComplete = async (data: any) => {
         }
 
         await configApi.addDataSourceConfig(dsConfig)
-        await configApi.setDefaultDataSource(data.datasource.type)
       } catch (error) {
         console.error('保存数据源配置失败:', error)
         ElMessage.warning('数据源配置保存失败，请稍后在配置管理中手动配置')

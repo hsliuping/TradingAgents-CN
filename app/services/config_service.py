@@ -454,7 +454,6 @@ class ConfigService:
                     description="Tushare专业金融数据接口"
                 )
             ],
-            default_data_source="AKShare",
             database_configs=[
                 DatabaseConfig(
                     name="MongoDB主库",
@@ -643,28 +642,6 @@ class ConfigService:
             print(f"设置默认LLM失败: {e}")
             return False
 
-    async def set_default_data_source(self, data_source_name: str) -> bool:
-        """设置默认数据源"""
-        try:
-            config = await self.get_system_config()
-            if not config:
-                return False
-
-            # 检查指定的数据源是否存在
-            source_exists = any(
-                ds.name == data_source_name for ds in config.data_source_configs
-            )
-
-            if not source_exists:
-                return False
-
-            config.default_data_source = data_source_name
-            return await self.save_system_config(config)
-
-        except Exception as e:
-            print(f"设置默认数据源失败: {e}")
-            return False
-
     async def update_system_settings(self, settings: Dict[str, Any]) -> bool:
         """更新系统设置"""
         try:
@@ -773,7 +750,6 @@ class ConfigService:
                 "llm_configs": [_llm_sanitize(llm) for llm in config.llm_configs],
                 "default_llm": config.default_llm,
                 "data_source_configs": [_ds_sanitize(ds) for ds in config.data_source_configs],
-                "default_data_source": config.default_data_source,
                 "database_configs": [_db_sanitize(db) for db in config.database_configs],
                 # 方案A：导出时对 system_settings 中的敏感键做脱敏
                 "system_settings": {k: (None if any(p in k.lower() for p in ("key","secret","password","token","client_secret")) else v) for k, v in (config.system_settings or {}).items()},
@@ -827,7 +803,6 @@ class ConfigService:
                 llm_configs=[_llm_sanitize_in(llm) for llm in config_data.get("llm_configs", [])],
                 default_llm=config_data.get("default_llm"),
                 data_source_configs=[_ds_sanitize_in(ds) for ds in config_data.get("data_source_configs", [])],
-                default_data_source=config_data.get("default_data_source"),
                 database_configs=[_db_sanitize_in(db) for db in config_data.get("database_configs", [])],
                 system_settings=config_data.get("system_settings", {})
             )
@@ -3098,28 +3073,6 @@ class ConfigService:
             return await self.save_system_config(config)
         except Exception as e:
             print(f"设置默认LLM失败: {e}")
-            return False
-
-    async def set_default_data_source(self, source_name: str) -> bool:
-        """设置默认数据源"""
-        try:
-            config = await self.get_system_config()
-            if not config:
-                return False
-
-            # 检查数据源是否存在
-            source_exists = any(
-                ds.name == source_name
-                for ds in config.data_source_configs
-            )
-
-            if not source_exists:
-                return False
-
-            config.default_data_source = source_name
-            return await self.save_system_config(config)
-        except Exception as e:
-            print(f"设置默认数据源失败: {e}")
             return False
 
     # ========== 大模型厂家管理 ==========
