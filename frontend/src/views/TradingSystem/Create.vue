@@ -91,18 +91,18 @@
             <el-col :span="12">
               <el-form-item label="交易风格">
                 <el-radio-group v-model="formData.style">
-                  <el-radio-button value="short_term">短线</el-radio-button>
-                  <el-radio-button value="medium_term">中线</el-radio-button>
-                  <el-radio-button value="long_term">长线</el-radio-button>
+                  <el-radio-button label="short_term">短线</el-radio-button>
+                  <el-radio-button label="medium_term">中线</el-radio-button>
+                  <el-radio-button label="long_term">长线</el-radio-button>
                 </el-radio-group>
               </el-form-item>
             </el-col>
             <el-col :span="12">
               <el-form-item label="风险偏好">
                 <el-radio-group v-model="formData.risk_profile">
-                  <el-radio-button value="conservative">保守</el-radio-button>
-                  <el-radio-button value="balanced">中性</el-radio-button>
-                  <el-radio-button value="aggressive">激进</el-radio-button>
+                  <el-radio-button label="conservative">保守</el-radio-button>
+                  <el-radio-button label="balanced">中性</el-radio-button>
+                  <el-radio-button label="aggressive">激进</el-radio-button>
                 </el-radio-group>
               </el-form-item>
             </el-col>
@@ -507,25 +507,29 @@ const systemId = computed(() => route.params.id as string)
 // 当前步骤
 const currentStep = ref(0)
 
+function createDefaultFormData(): TradingSystemCreatePayload {
+  return {
+    name: '',
+    description: '',
+    style: 'medium_term',
+    risk_profile: 'balanced',
+    stock_selection: { must_have: [], exclude: [], bonus: [] },
+    timing: { entry_signals: [] },
+    position: { max_per_stock: 0.2, max_holdings: 10, min_holdings: 3 },
+    holding: { add_conditions: [], reduce_conditions: [] },
+    risk_management: {
+      stop_loss: { type: 'percentage', percentage: 0.08 },
+      take_profit: { type: 'percentage', percentage: 0.2 },
+      time_stop: { enabled: false, max_holding_days: 30 },
+      logical_stop: { conditions: [] }
+    },
+    review: { checklist: [] },
+    discipline: { must_do: [], must_not: [] }
+  }
+}
+
 // 表单数据
-const formData = ref<TradingSystemCreatePayload>({
-  name: '',
-  description: '',
-  style: 'medium_term',
-  risk_profile: 'balanced',
-  stock_selection: { must_have: [], exclude: [], bonus: [] },
-  timing: { entry_signals: [] },
-  position: { max_per_stock: 0.2, max_holdings: 10, min_holdings: 3 },
-  holding: { add_conditions: [], reduce_conditions: [] },
-  risk_management: {
-    stop_loss: { type: 'percentage', percentage: 0.08 },
-    take_profit: { type: 'percentage', percentage: 0.2 },
-    time_stop: { enabled: false, max_holding_days: 30 },
-    logical_stop: { conditions: [] }
-  },
-  review: { checklist: [] },
-  discipline: { must_do: [], must_not: [] }
-})
+const formData = ref<TradingSystemCreatePayload>(createDefaultFormData())
 
 // AI评估相关
 const evaluating = ref(false)
@@ -738,18 +742,14 @@ async function handlePublish() {
 function selectTemplate(template: TradingSystemTemplate) {
   selectedTemplate.value = template.id
 
-  // 应用模板数据
-  formData.value.name = template.name
-  formData.value.description = template.description
-  formData.value.style = template.style
-  formData.value.risk_profile = template.risk_profile
-  formData.value.stock_selection = JSON.parse(JSON.stringify(template.data.stock_selection))
-  formData.value.timing = JSON.parse(JSON.stringify(template.data.timing))
-  formData.value.position = JSON.parse(JSON.stringify(template.data.position))
-  formData.value.holding = JSON.parse(JSON.stringify(template.data.holding))
-  formData.value.risk_management = JSON.parse(JSON.stringify(template.data.risk_management))
-  formData.value.review = JSON.parse(JSON.stringify(template.data.review))
-  formData.value.discipline = JSON.parse(JSON.stringify(template.data.discipline))
+  // 一次性替换表单，避免隐藏步骤中的编辑器在模板应用过程中反复响应每个字段变更。
+  formData.value = mergeDeep(createDefaultFormData(), {
+    name: template.name,
+    description: template.description,
+    style: template.style,
+    risk_profile: template.risk_profile,
+    ...cloneValue(template.data)
+  })
 }
 
 // 工具函数
