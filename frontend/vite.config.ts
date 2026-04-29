@@ -1,14 +1,47 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
+import { existsSync, statSync, createReadStream, cpSync } from 'fs'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
+
+const COURSE_IMAGES_DIR = resolve(__dirname, '../docs/courses/advanced/expanded/images')
+
+/** 开发时将 /course-images/* 映射到 docs 目录，构建后复制到 dist */
+function courseImagesPlugin() {
+  return {
+    name: 'course-images',
+    configureServer(server: any) {
+      const mimeMap: Record<string, string> = {
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+        gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml'
+      }
+      server.middlewares.use('/course-images', (req: any, res: any, next: any) => {
+        const filePath = resolve(COURSE_IMAGES_DIR, (req.url || '').replace(/^\//, ''))
+        if (existsSync(filePath) && statSync(filePath).isFile()) {
+          const ext = filePath.split('.').pop()?.toLowerCase() || ''
+          res.setHeader('Content-Type', mimeMap[ext] || 'application/octet-stream')
+          createReadStream(filePath).pipe(res)
+        } else {
+          next()
+        }
+      })
+    },
+    closeBundle() {
+      const dest = resolve(__dirname, 'dist/course-images')
+      if (existsSync(COURSE_IMAGES_DIR)) {
+        cpSync(COURSE_IMAGES_DIR, dest, { recursive: true })
+      }
+    }
+  }
+}
 
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     vue(),
+    courseImagesPlugin(),
     AutoImport({
       resolvers: [ElementPlusResolver()],
       imports: [

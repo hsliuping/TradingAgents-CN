@@ -114,7 +114,7 @@ const loadLesson = async () => {
 
     // 转换为HTML
     const html = marked(markdown)
-    lessonContent.value = html
+    lessonContent.value = rewriteCourseImageSrc(html as string)
 
     // 提取目录
     await nextTick()
@@ -183,6 +183,14 @@ const downloadLesson = async () => {
     console.error('下载失败:', error)
     ElMessage.error('下载失败：' + (error.message || '未知错误'))
   }
+}
+
+// 重写课程图片路径：将 images/lesson-XX/file.png 转为 /course-images/lesson-XX/file.png
+function rewriteCourseImageSrc(html: string): string {
+  return html.replace(
+    /(<img[^>]+src=")images\/(lesson-\d+\/[^"]+")/g,
+    '$1/course-images/$2'
+  )
 }
 
 // 导航到课程
@@ -317,6 +325,15 @@ onMounted(() => {
         margin-left: 0;
         color: var(--el-text-color-regular);
         font-style: italic;
+      }
+
+      :deep(img) {
+        max-width: 100%;
+        height: auto;
+        border-radius: 6px;
+        border: 1px solid var(--el-border-color);
+        margin: 8px 0;
+        display: block;
       }
 
       :deep(table) {
