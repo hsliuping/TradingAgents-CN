@@ -94,10 +94,7 @@
 2. 点击左侧菜单：`持仓研究`
 3. 或直接访问：`/position-analysis`
 
-<!-- 📸 截图占位符 -->
-> **[待添加截图]** `11-holding-01-page-overview.png`
->
-> 截图说明：持仓研究页面全貌，展示持仓列表和分析结果区域
+![持仓研究页面全貌](images/lesson-11/11-holding-01-page-overview.png)
 
 ---
 
@@ -169,10 +166,7 @@
 
 ### 11.5.1 持仓研究的多维度AI评估
 
-<!-- 📸 截图占位符 -->
-> **[待添加截图]** `11-holding-03-ai-analysis.png`
->
-> 截图说明：AI持仓研究结果展示，包括技术面、基本面、风险评估的综合分析
+![AI持仓研究结果展示](images/lesson-11/11-holding-03-ai-analysis.png)
 
 TradingAgentsCN系统的持仓研究功能采用**多智能体协作架构**，通过三个专业分析师并行分析，最后由整合节点综合生成研究建议。
 
