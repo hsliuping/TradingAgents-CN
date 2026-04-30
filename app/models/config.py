@@ -33,6 +33,7 @@ class ModelProvider(str, Enum):
 
     # 🆕 聚合渠道
     AI302 = "302ai"              # 302.AI
+    AIHUBMIX = "aihubmix"        # AIHubMix
     ONEAPI = "oneapi"            # One API
     NEWAPI = "newapi"            # New API
     FASTGPT = "fastgpt"          # FastGPT

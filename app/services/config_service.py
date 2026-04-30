@@ -39,6 +39,35 @@ class ConfigService:
                 self.db = get_mongo_db()
         return self.db
 
+    @staticmethod
+    def _provider_to_string(provider: Any) -> str:
+        """统一提取 provider 字符串，兼容历史枚举对象和普通字符串。"""
+        if provider is None:
+            return ""
+
+        if hasattr(provider, "value"):
+            provider = provider.value
+
+        return str(provider).strip()
+
+    @classmethod
+    def _providers_match(cls, left: Any, right: Any) -> bool:
+        """比较 provider，兼容枚举对象和字符串。"""
+        left_provider = cls._provider_to_string(left).lower()
+        right_provider = cls._provider_to_string(right).lower()
+
+        if left_provider == right_provider:
+            return True
+
+        if not left_provider or not right_provider:
+            return False
+
+        alias_groups = {
+            "kimi": {"kimi", "moonshot"},
+            "moonshot": {"kimi", "moonshot"},
+        }
+        return bool(alias_groups.get(left_provider, {left_provider}) & alias_groups.get(right_provider, {right_provider}))
+
     # ==================== 市场分类管理 ====================
 
     async def get_market_categories(self) -> List[MarketCategory]:
@@ -585,8 +614,7 @@ class ConfigService:
 
             # 打印所有现有配置
             for i, llm in enumerate(config.llm_configs):
-                # 🔥 修复：provider 是字符串，不是枚举
-                provider_str = llm.provider if isinstance(llm.provider, str) else llm.provider.value
+                provider_str = self._provider_to_string(getattr(llm, "provider", ""))
                 print(f"   {i+1}. provider: {provider_str}, model_name: {llm.model_name}")
 
             # 查找并删除指定的LLM配置
@@ -596,7 +624,7 @@ class ConfigService:
             config.llm_configs = [
                 llm for llm in config.llm_configs
                 if not (
-                    (llm.provider if isinstance(llm.provider, str) else llm.provider.value).lower() == provider.lower()
+                    self._providers_match(getattr(llm, "provider", ""), provider)
                     and llm.model_name == model_name
                 )
             ]
@@ -855,9 +883,27 @@ class ConfigService:
             if not config:
                 return False
 
+            now = now_tz()
+
+            # 更新时保留原创建时间；新增时补齐创建时间和更新时间
+            for existing_config in config.llm_configs:
+                if (
+                    self._providers_match(existing_config.provider, llm_config.provider)
+                    and existing_config.model_name == llm_config.model_name
+                ):
+                    llm_config.created_at = existing_config.created_at or now
+                    llm_config.updated_at = now
+                    break
+            else:
+                llm_config.created_at = llm_config.created_at or now
+                llm_config.updated_at = now
+
             # 查找并更新对应的LLM配置
             for i, existing_config in enumerate(config.llm_configs):
-                if existing_config.model_name == llm_config.model_name:
+                if (
+                    self._providers_match(existing_config.provider, llm_config.provider)
+                    and existing_config.model_name == llm_config.model_name
+                ):
                     config.llm_configs[i] = llm_config
                     break
             else:
@@ -876,7 +922,7 @@ class ConfigService:
             import requests
 
             # 获取 provider 字符串值（兼容枚举和字符串）
-            provider_str = llm_config.provider.value if hasattr(llm_config.provider, 'value') else str(llm_config.provider)
+            provider_str = self._provider_to_string(llm_config.provider)
 
             logger.info(f"🧪 测试大模型配置: {provider_str} - {llm_config.model_name}")
             logger.info(f"📍 API基础URL (模型配置): {llm_config.api_base}")
@@ -3135,6 +3181,13 @@ class ConfigService:
 
                 providers.append(provider)
 
+            providers.sort(
+                key=lambda provider: (
+                    0 if provider.name == "aihubmix" else 1,
+                    (provider.display_name or provider.name or "").lower(),
+                )
+            )
+
             logger.info(f"🔍 [get_llm_providers] 返回 {len(providers)} 个供应商")
             return providers
         except Exception as e:
@@ -3249,6 +3302,7 @@ class ConfigService:
             "openrouter": "OPENROUTER_API_KEY",
             # 🆕 聚合渠道
             "302ai": "AI302_API_KEY",
+            "aihubmix": "AIHUBMIX_API_KEY",
             "oneapi": "ONEAPI_API_KEY",
             "newapi": "NEWAPI_API_KEY",
             "custom_aggregator": "CUSTOM_AGGREGATOR_API_KEY"
@@ -3787,7 +3841,7 @@ class ConfigService:
 
         try:
             # 聚合渠道（使用 OpenAI 兼容 API）
-            if provider_name in ["302ai", "oneapi", "newapi", "custom_aggregator"]:
+            if provider_name in ["302ai", "aihubmix", "oneapi", "newapi", "custom_aggregator"]:
                 # 获取厂家的 base_url
                 base_url = provider_data.get("default_base_url") if provider_data else None
                 return await asyncio.get_event_loop().run_in_executor(
@@ -4523,7 +4577,7 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    async def fetch_provider_models(self, provider_id: str) -> dict:
+    async def fetch_provider_models(self, provider_id: str, filters: Optional[dict] = None) -> dict:
         """从厂家 API 获取模型列表"""
         try:
             print(f"🔍 获取厂家模型列表 - provider_id: {provider_id}")
@@ -4572,11 +4626,18 @@ class ConfigService:
                     "message": f"{display_name} 未配置 API 基础地址 (default_base_url)"
                 }
 
-            # 调用 OpenAI 兼容的 /v1/models 端点
             import asyncio
-            result = await asyncio.get_event_loop().run_in_executor(
-                None, self._fetch_models_from_api, api_key, base_url, display_name
-            )
+            filters = filters or {}
+
+            if provider_name == "aihubmix":
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None, self._fetch_aihubmix_models, api_key, base_url, display_name, filters
+                )
+            else:
+                # 调用 OpenAI 兼容的 /v1/models 端点
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None, self._fetch_models_from_api, api_key, base_url, display_name
+                )
 
             return result
 
@@ -4699,6 +4760,205 @@ class ConfigService:
                 "success": False,
                 "message": f"{display_name} API请求异常: {str(e)}"
             }
+
+    def _fetch_aihubmix_models(self, api_key: str, base_url: str, display_name: str, filters: dict) -> dict:
+        """从 AIHubMix 的 Models API 获取模型列表。"""
+        try:
+            import re
+            import requests
+
+            root_url = re.sub(r"/v\d+$", "", base_url.rstrip("/"))
+            url = f"{root_url}/api/v1/models"
+
+            params = {
+                "type": filters.get("type") or "llm",
+                "modalities": filters.get("modalities") or "text",
+                "sort_by": filters.get("sort_by") or "order",
+                "sort_order": filters.get("sort_order") or "asc",
+            }
+
+            features = filters.get("features")
+            if features:
+                if isinstance(features, list):
+                    params["features"] = ",".join(
+                        [str(item).strip() for item in features if str(item).strip()]
+                    )
+                elif str(features).strip():
+                    params["features"] = str(features).strip()
+
+            model_keyword = filters.get("model_keyword")
+            if model_keyword and str(model_keyword).strip():
+                params["model"] = str(model_keyword).strip()
+
+            headers = {}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+            logger.info(f"🔍 [AIHubMix] 请求模型列表: {url} params={params}")
+            response = requests.get(url, headers=headers, params=params, timeout=20)
+
+            if response.status_code != 200:
+                try:
+                    error_detail = response.json()
+                    error_msg = error_detail.get("error", {}).get("message", f"HTTP {response.status_code}")
+                except Exception:
+                    error_msg = f"HTTP {response.status_code}"
+                return {
+                    "success": False,
+                    "message": f"{display_name} API请求失败: {error_msg}"
+                }
+
+            result = response.json()
+            if "data" not in result or not isinstance(result["data"], list):
+                return {
+                    "success": False,
+                    "message": f"{display_name} API 响应格式异常（缺少 data 字段或格式不正确）"
+                }
+
+            all_models = result["data"]
+            filtered_models = self._filter_aihubmix_models(all_models, filters)
+            formatted_models = self._format_aihubmix_models(filtered_models)
+
+            return {
+                "success": True,
+                "models": formatted_models,
+                "message": f"成功获取 {len(formatted_models)} 个 AIHubMix 模型（已过滤，原始 {len(all_models)} 个）"
+            }
+        except Exception as e:
+            logger.exception("AIHubMix 模型列表获取失败")
+            return {
+                "success": False,
+                "message": f"{display_name} API请求异常: {str(e)}"
+            }
+
+    def _filter_aihubmix_models(self, models: list, filters: dict) -> list:
+        """过滤 AIHubMix 模型，避免一次导入过多低价值模型。"""
+        limit = self._safe_int(filters.get("limit"), default=40)
+        recommended_only = bool(filters.get("recommended_only", False))
+        tools_only = bool(filters.get("tools_only", False))
+        exclude_preview = bool(filters.get("exclude_preview", True))
+        keyword = str(filters.get("model_keyword") or "").strip().lower()
+
+        requested_modalities = {
+            item.strip().lower()
+            for item in str(filters.get("modalities") or "text").split(",")
+            if item.strip()
+        }
+
+        raw_features = filters.get("features")
+        if isinstance(raw_features, list):
+            requested_features = {str(item).strip().lower() for item in raw_features if str(item).strip()}
+        else:
+            requested_features = {
+                item.strip().lower()
+                for item in str(raw_features or "").split(",")
+                if item.strip()
+            }
+
+        preferred_prefixes = (
+            "gpt-",
+            "o1",
+            "o3",
+            "o4",
+            "claude-",
+            "gemini",
+            "deepseek-",
+            "qwen-",
+            "glm-",
+            "kimi-",
+        )
+        excluded_keywords = ("preview", "experimental", "exp", "alpha", "beta", "test", "free")
+
+        filtered = []
+        for model in models:
+            model_id = str(model.get("model_id") or model.get("id") or "").strip()
+            if not model_id:
+                continue
+
+            model_id_lower = model_id.lower()
+            model_type = str(model.get("types") or "").strip().lower()
+            features = {
+                item.strip().lower()
+                for item in str(model.get("features") or "").split(",")
+                if item.strip()
+            }
+            modalities = {
+                item.strip().lower()
+                for item in str(model.get("input_modalities") or "").split(",")
+                if item.strip()
+            }
+
+            if model_type and model_type != "llm":
+                continue
+            if requested_modalities and not requested_modalities.issubset(modalities):
+                continue
+            if requested_features and not requested_features.issubset(features):
+                continue
+            if tools_only and not ({"tools", "function_calling"} & features):
+                continue
+            if keyword and keyword not in model_id_lower:
+                continue
+            if exclude_preview and any(word in model_id_lower for word in excluded_keywords):
+                continue
+            if recommended_only and not model_id_lower.startswith(preferred_prefixes):
+                continue
+
+            filtered.append(model)
+
+        filtered.sort(key=self._aihubmix_model_sort_key)
+        return filtered[:limit]
+
+    def _aihubmix_model_sort_key(self, model: dict) -> tuple:
+        model_id = str(model.get("model_id") or model.get("id") or "").lower()
+        features = {
+            item.strip().lower()
+            for item in str(model.get("features") or "").split(",")
+            if item.strip()
+        }
+        pricing = model.get("pricing") or {}
+        input_price = self._safe_float(pricing.get("input"), default=999999.0)
+        context_length = self._safe_int(model.get("context_length"), default=0)
+        has_tools = 0 if ({"tools", "function_calling"} & features) else 1
+        mainstream_rank = 0 if model_id.startswith(("gpt-", "claude-", "gemini", "deepseek-", "qwen-", "glm-", "kimi-")) else 1
+        return (has_tools, mainstream_rank, -context_length, input_price, model_id)
+
+    def _format_aihubmix_models(self, models: list) -> list:
+        formatted = []
+        for model in models:
+            model_id = str(model.get("model_id") or model.get("id") or "").strip()
+            pricing = model.get("pricing") or {}
+            formatted.append({
+                "id": model_id,
+                "name": model_id,
+                "description": model.get("desc"),
+                "context_length": self._safe_int(model.get("context_length")),
+                "max_tokens": self._safe_int(model.get("max_output")),
+                "input_price_per_1k": self._safe_float(pricing.get("input")),
+                "output_price_per_1k": self._safe_float(pricing.get("output")),
+                "currency": "USD",
+                "capabilities": [
+                    item.strip()
+                    for item in str(model.get("features") or "").split(",")
+                    if item.strip()
+                ],
+            })
+        return formatted
+
+    def _safe_int(self, value: Any, default: Optional[int] = None) -> Optional[int]:
+        try:
+            if value in (None, ""):
+                return default
+            return int(float(value))
+        except (TypeError, ValueError):
+            return default
+
+    def _safe_float(self, value: Any, default: Optional[float] = None) -> Optional[float]:
+        try:
+            if value in (None, ""):
+                return default
+            return float(value)
+        except (TypeError, ValueError):
+            return default
 
     def _format_models_with_pricing(self, models: list) -> list:
         """

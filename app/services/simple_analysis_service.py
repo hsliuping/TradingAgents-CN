@@ -326,6 +326,7 @@ def _get_env_api_key_for_provider(provider: str) -> str:
         "siliconflow": "SILICONFLOW_API_KEY",
         "qianfan": "QIANFAN_API_KEY",
         "302ai": "AI302_API_KEY",
+        "aihubmix": "AIHUBMIX_API_KEY",
     }
 
     env_key_name = env_key_map.get(provider.lower())
@@ -358,6 +359,7 @@ def _get_default_backend_url(provider: str) -> str:
         "openrouter": "https://openrouter.ai/api/v1",
         "qianfan": "https://qianfan.baidubce.com/v2",
         "302ai": "https://api.302.ai/v1",
+        "aihubmix": "https://aihubmix.com/v1",
     }
 
     url = default_urls.get(provider, "https://dashscope.aliyuncs.com/compatible-mode/v1")

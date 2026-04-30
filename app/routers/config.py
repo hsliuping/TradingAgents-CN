@@ -224,6 +224,11 @@ class SetDefaultRequest(BaseModel):
     name: str
 
 
+class FetchProviderModelsRequest(BaseModel):
+    """获取厂家模型列表请求"""
+    filters: Optional[Dict[str, Any]] = Field(default=None, description="可选的模型筛选参数")
+
+
 @router.get("/system", response_model=SystemConfigResponse)
 async def get_system_config(
     current_user: User = Depends(get_current_user)
@@ -543,11 +548,15 @@ async def toggle_llm_provider(
 @router.post("/llm/providers/{provider_id}/fetch-models", response_model=dict)
 async def fetch_provider_models(
     provider_id: str,
+    request: Optional[FetchProviderModelsRequest] = None,
     current_user: User = Depends(get_current_user)
 ):
     """从厂家 API 获取模型列表"""
     try:
-        result = await config_service.fetch_provider_models(provider_id)
+        result = await config_service.fetch_provider_models(
+            provider_id,
+            request.filters if request else None,
+        )
         return result
     except HTTPException:
         raise

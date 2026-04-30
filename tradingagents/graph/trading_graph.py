@@ -137,13 +137,15 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             timeout=timeout
         )
 
-    elif provider.lower() in ["openai", "siliconflow", "openrouter", "ollama"]:
+    elif provider.lower() in ["openai", "siliconflow", "openrouter", "aihubmix", "ollama"]:
         # 优先使用传入的 API Key，否则从环境变量读取
         if not api_key:
             if provider.lower() == "siliconflow":
                 api_key = os.getenv('SILICONFLOW_API_KEY')
             elif provider.lower() == "openrouter":
                 api_key = os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY')
+            elif provider.lower() == "aihubmix":
+                api_key = os.getenv('AIHUBMIX_API_KEY')
             elif provider.lower() == "openai":
                 api_key = os.getenv('OPENAI_API_KEY')
             elif provider.lower() == "ollama":
@@ -375,6 +377,31 @@ class TradingAgentsGraph:
                 model=self.config["quick_think_llm"],
                 base_url=self.config["backend_url"],
                 api_key=openrouter_api_key,
+                temperature=quick_temperature,
+                max_tokens=quick_max_tokens,
+                timeout=quick_timeout
+            )
+        elif self.config["llm_provider"] == "aihubmix":
+            aihubmix_api_key = os.getenv('AIHUBMIX_API_KEY')
+            if not aihubmix_api_key:
+                raise ValueError("使用AIHubMix需要设置AIHUBMIX_API_KEY环境变量")
+
+            logger.info(f"🌐 [AIHubMix] 使用API密钥: {aihubmix_api_key[:20]}...")
+            logger.info(f"🔧 [AIHubMix-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
+            logger.info(f"🔧 [AIHubMix-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
+
+            self.deep_thinking_llm = ChatOpenAI(
+                model=self.config["deep_think_llm"],
+                base_url=self.config["backend_url"],
+                api_key=aihubmix_api_key,
+                temperature=deep_temperature,
+                max_tokens=deep_max_tokens,
+                timeout=deep_timeout
+            )
+            self.quick_thinking_llm = ChatOpenAI(
+                model=self.config["quick_think_llm"],
+                base_url=self.config["backend_url"],
+                api_key=aihubmix_api_key,
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
                 timeout=quick_timeout

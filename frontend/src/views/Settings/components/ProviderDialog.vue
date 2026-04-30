@@ -315,7 +315,18 @@ const presetProviders = [
     register_url: 'https://share.302.ai/DUjftK',
     register_guide: '如果您还没有 302.AI 账号，请先注册并获取 API Key：'
   },
-    {
+  {
+    name: 'aihubmix',
+    display_name: 'AiHubMix',
+    description: 'AiHubMix 聚合平台，提供 OpenAI 兼容统一接口',
+    website: 'https://aihubmix.com/?aff=2rIi',
+    api_doc_url: 'https://docs.aihubmix.com/cn/quick-start',
+    default_base_url: 'https://aihubmix.com/v1',
+    supported_features: ['chat', 'completion', 'embedding', 'vision', 'function_calling', 'streaming'],
+    register_url: 'https://aihubmix.com/?aff=2rIi',
+    register_guide: '如果您还没有 AiHubMix 账号，请先注册并获取 API Key：'
+  },
+  {
     name: 'deepseek',
     display_name: 'DeepSeek',
     description: 'DeepSeek提供高性能的AI推理服务',

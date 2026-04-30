@@ -475,7 +475,7 @@
               </li>
               <li>
                 <el-icon class="check-icon"><CircleCheck /></el-icon>
-                <span><strong>多LLM支持：</strong>支持国内外主流大语言模型（OpenAI、Claude、智谱AI、DeepSeek等）</span>
+                <span><strong>多LLM支持：</strong>支持国内外主流大语言模型（OpenAI、Claude、智谱AI、DeepSeek等），并可通过 AIHubMix 聚合平台统一接入多厂商模型</span>
               </li>
               <li>
                 <el-icon class="check-icon"><CircleCheck /></el-icon>

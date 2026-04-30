@@ -66,6 +66,33 @@ export interface LLMConfig {
   }
 }
 
+export interface FetchProviderModelsFilters {
+  type?: string
+  modalities?: string
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
+  features?: string[] | string
+  model_keyword?: string
+  limit?: number
+  recommended_only?: boolean
+  tools_only?: boolean
+  exclude_preview?: boolean
+}
+
+export interface ProviderModelInfo {
+  id: string
+  name: string
+  description?: string
+  context_length?: number
+  max_tokens?: number
+  input_price_per_1k?: number
+  output_price_per_1k?: number
+  currency?: string
+  is_deprecated?: boolean
+  release_date?: string
+  capabilities?: string[]
+}
+
 export interface DataSourceConfig {
   name: string
   type: string
@@ -387,16 +414,12 @@ export const configApi = {
   },
 
   // 从厂家 API 获取模型列表
-  fetchProviderModels(provider: string): Promise<{
+  fetchProviderModels(provider: string, filters?: FetchProviderModelsFilters): Promise<{
     success: boolean
     message?: string
-    models?: Array<{
-      id: string
-      name: string
-      context_length?: number
-    }>
+    models?: ProviderModelInfo[]
   }> {
-    return ApiClient.post(`/api/config/llm/providers/${provider}/fetch-models`)
+    return ApiClient.post(`/api/config/llm/providers/${provider}/fetch-models`, filters ? { filters } : {})
   },
 
   // ========== 大模型配置管理 ==========

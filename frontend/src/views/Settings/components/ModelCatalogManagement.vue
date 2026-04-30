@@ -314,7 +314,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, Refresh, Document, Download, Upload } from '@element-plus/icons-vue'
-import { configApi, type LLMProvider } from '@/api/config'
+import { configApi, type FetchProviderModelsFilters, type LLMProvider } from '@/api/config'
 
 // 数据
 const loading = ref(false)
@@ -330,7 +330,7 @@ const importingForProvider = ref(false)
 const exportingForProvider = ref(false)
 
 // 聚合平台列表
-const aggregatorProviders = ['302ai', 'oneapi', 'newapi', 'openrouter', 'custom_aggregator']
+const aggregatorProviders = ['302ai', 'aihubmix', 'oneapi', 'newapi', 'openrouter', 'custom_aggregator']
 
 // 计算属性：判断当前选择的是否为聚合平台
 const isAggregatorProvider = computed(() => {
@@ -399,6 +399,23 @@ const handleProviderChange = (providerName: string) => {
   const provider = availableProviders.value.find(p => p.name === providerName)
   if (provider) {
     formData.value.provider_name = provider.display_name
+  }
+}
+
+const buildFetchModelFilters = (providerName: string): FetchProviderModelsFilters | undefined => {
+  if (providerName !== 'aihubmix') {
+    return undefined
+  }
+
+  return {
+    type: 'llm',
+    modalities: 'text',
+    sort_by: 'order',
+    sort_order: 'asc',
+    limit: 40,
+    recommended_only: true,
+    tools_only: false,
+    exclude_preview: true
   }
 }
 
@@ -489,8 +506,12 @@ const handleFetchModelsFromAPI = async () => {
       console.log('⚠️ 该厂家未配置 API Key，尝试无认证访问')
     }
 
+    const fetchFilters = buildFetchModelFilters(provider.name)
+
     await ElMessageBox.confirm(
-      '此操作将从 API 获取模型列表并覆盖当前的模型列表，是否继续？',
+      provider.name === 'aihubmix'
+        ? '此操作将从 AIHubMix 获取推荐文本模型列表并覆盖当前模型列表，是否继续？'
+        : '此操作将从 API 获取模型列表并覆盖当前的模型列表，是否继续？',
       '确认操作',
       { type: 'warning' }
     )
@@ -509,7 +530,7 @@ const handleFetchModelsFromAPI = async () => {
 
     // 调用后端 API 来获取模型列表（避免 CORS 问题）
     // 注意：需要传递厂家的 ID，而不是 name
-    const response = await configApi.fetchProviderModels(provider.id)
+    const response = await configApi.fetchProviderModels(provider.id, fetchFilters)
 
     console.log('📊 API 响应:', response)
 
@@ -519,11 +540,13 @@ const handleFetchModelsFromAPI = async () => {
         name: model.id || model.name,
         display_name: model.name || model.id,
         // 使用 API 返回的价格信息（USD），如果没有则为 null
-        input_price_per_1k: model.input_price_per_1k || null,
-        output_price_per_1k: model.output_price_per_1k || null,
-        context_length: model.context_length || null,
-        // OpenRouter 的价格是 USD
-        currency: 'USD'
+        input_price_per_1k: model.input_price_per_1k ?? null,
+        output_price_per_1k: model.output_price_per_1k ?? null,
+        context_length: model.context_length ?? null,
+        max_tokens: model.max_tokens ?? null,
+        description: model.description,
+        capabilities: model.capabilities,
+        currency: model.currency || 'USD'
       }))
 
       // 统计有价格信息的模型数量
@@ -800,6 +823,13 @@ const getPresetModels = (providerName: string): ModelInfo[] => {
       { name: 'gemini-2.0-flash-exp', display_name: 'Gemini 2.0 Flash', input_price_per_1k: 0, output_price_per_1k: 0, context_length: 1000000, currency: 'USD' },
       { name: 'gemini-1.5-pro', display_name: 'Gemini 1.5 Pro', input_price_per_1k: 0.00125, output_price_per_1k: 0.005, context_length: 2000000, currency: 'USD' },
       { name: 'gemini-1.5-flash', display_name: 'Gemini 1.5 Flash', input_price_per_1k: 0.000075, output_price_per_1k: 0.0003, context_length: 1000000, currency: 'USD' },
+    ],
+    'aihubmix': [
+      { name: 'gpt-4o', display_name: 'GPT-4o', input_price_per_1k: 0.005, output_price_per_1k: 0.015, context_length: 128000, currency: 'USD' },
+      { name: 'gpt-4o-mini', display_name: 'GPT-4o Mini', input_price_per_1k: 0.00015, output_price_per_1k: 0.0006, context_length: 128000, currency: 'USD' },
+      { name: 'claude-3-5-sonnet-latest', display_name: 'Claude 3.5 Sonnet', input_price_per_1k: 0.003, output_price_per_1k: 0.015, context_length: 200000, currency: 'USD' },
+      { name: 'gemini-2.0-flash', display_name: 'Gemini 2.0 Flash', input_price_per_1k: 0, output_price_per_1k: 0, context_length: 1000000, currency: 'USD' },
+      { name: 'deepseek-chat', display_name: 'DeepSeek Chat', input_price_per_1k: 0.00027, output_price_per_1k: 0.0011, context_length: 64000, currency: 'USD' },
     ],
     'openrouter': [
       // OpenAI 模型
