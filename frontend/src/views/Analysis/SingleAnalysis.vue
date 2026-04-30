@@ -567,7 +567,6 @@
                   <div class="overview-card">
   
                     <div v-if="overviewBriefContent" class="overview-summary">
-                      <h5>研究简报:</h5>
                       <div class="markdown-content" v-html="renderMarkdown(overviewBriefContent)"></div>
                     </div>
 
