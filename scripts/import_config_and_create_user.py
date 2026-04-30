@@ -110,6 +110,7 @@ CONFIG_COLLECTIONS = [
     "platform_configs",
     "datasource_groupings",
     "market_categories",
+    "stock_industry_mappings",
     "smtp_config",
     "sync_status",
 
@@ -174,6 +175,7 @@ COLLECTION_UNIQUE_KEYS = {
     "platform_configs": ["platform_id"],
     "datasource_groupings": ["name"],
     "market_categories": ["name"],
+    "stock_industry_mappings": ["code"],
     "tool_agent_bindings": ["tool_id", "agent_id"],
     "agent_workflow_bindings": ["agent_id", "workflow_id"],
 }
