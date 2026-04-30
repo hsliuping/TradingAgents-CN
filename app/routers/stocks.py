@@ -517,7 +517,7 @@ async def get_kline(
 
             # 查询本地历史数据（异步迭代）
             cursor = collection.find(
-                {"symbol": code_padded, "data_source": "local", "period": period}
+                {"symbol": code_padded, "data_source": "local", "period": mongodb_period}
             ).sort("trade_date", 1).limit(limit)
 
             # 使用异步迭代获取数据
@@ -538,7 +538,7 @@ async def get_kline(
                         "amount": float(kline.get("amount", 0)) if "amount" in kline else None,
                     })
                 source = "local"
-                logger.info(f"✅ 从本地数据源获取到 {len(items)} 条 K 线数据")
+                logger.info(f"✅ 从本地数据源获取到 {len(items)} 条 K 线数据 (period={mongodb_period})")
     except Exception as e:
         logger.warning(f"⚠️ 本地数据源获取 K 线失败: {e}")
 

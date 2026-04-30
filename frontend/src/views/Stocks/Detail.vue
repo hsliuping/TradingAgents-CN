@@ -365,6 +365,7 @@ import { stocksApi } from '@/api/stocks'
 import { analysisApi } from '@/api/analysis'
 import { ApiClient } from '@/api/request'
 import { stockSyncApi } from '@/api/stockSync'
+import { configApi } from '@/api/config'
 import { clearAllCache } from '@/api/cache'
 import { use as echartsUse } from 'echarts/core'
 import { CandlestickChart } from 'echarts/charts'
@@ -504,9 +505,10 @@ const syncStatus = ref<any>(null)
 // 数据同步对话框
 const syncDialogVisible = ref(false)
 const syncLoading = ref(false)
+type ManualSyncDataSource = 'tushare' | 'akshare'
 const syncForm = reactive({
   syncTypes: ['realtime'],  // 默认选中实时行情
-  dataSource: 'tushare' as 'tushare' | 'akshare',
+  dataSource: 'tushare' as ManualSyncDataSource,
   days: 365
 })
 
@@ -515,7 +517,28 @@ const clearCacheLoading = ref(false)
 
 // 显示同步对话框
 function showSyncDialog() {
+  void loadPreferredSyncDataSource()
   syncDialogVisible.value = true
+}
+
+async function loadPreferredSyncDataSource() {
+  try {
+    const configs = await configApi.getDataSourceConfigs()
+    const preferredSource = configs
+      .map(item => ({
+        enabled: item.enabled,
+        priority: item.priority,
+        type: String(item.type || '').toLowerCase()
+      }))
+      .filter(item => item.enabled && (item.type === 'tushare' || item.type === 'akshare'))
+      .sort((left, right) => right.priority - left.priority)[0]
+
+    if (preferredSource) {
+      syncForm.dataSource = preferredSource.type as ManualSyncDataSource
+    }
+  } catch (error) {
+    console.warn('加载同步数据源优先级失败，保留当前默认值', error)
+  }
 }
 
 // 执行同步

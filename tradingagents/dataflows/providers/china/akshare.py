@@ -1763,10 +1763,10 @@ class AKShareProvider(BaseStockDataProvider):
                 self._event_loop_closed = True
                 return None
             elif "Connection aborted" in error_msg or "RemoteDisconnected" in error_msg:
-                logger.warning(f"⚠️ {code} 东财历史接口网络异常，尝试回退到腾讯/新浪历史接口")
+                logger.warning(f"⚠️ {code} 东财历史接口网络异常，尝试回退到新浪/腾讯历史接口")
                 fallback_strategies = [
-                    ("腾讯", self._get_historical_data_tx_fallback),
                     ("新浪", self._get_historical_data_sina_fallback),
+                    ("腾讯", self._get_historical_data_tx_fallback),
                 ]
                 for fallback_name, fallback_loader in fallback_strategies:
                     try:

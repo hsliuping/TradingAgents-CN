@@ -6,7 +6,7 @@
         <div class="hero-text">
           <h1 class="hero-title">
             TradingAgents-CN
-            <span class="version-badge">v2.0</span>
+            <span class="version-badge">{{ displayVersion }}</span>
           </h1>
           <p class="hero-subtitle">
             AI 多智能体投研研究台
@@ -500,7 +500,7 @@
       <div class="version-info" v-loading="systemInfoLoading">
         <div class="version-card">
           <div class="version-main">
-            <div class="version-number">{{ systemInfo.version || 'v2.0' }}</div>
+            <div class="version-number">{{ displayVersion }}</div>
             <div class="version-status">正式版</div>
           </div>
           <div class="version-details">
@@ -526,7 +526,7 @@
             </div>
             <div class="version-item">
               <span class="label">API版本</span>
-              <span class="value">v2.0</span>
+              <span class="value">{{ displayVersion }}</span>
             </div>
           </div>
           <div class="version-actions" v-if="systemInfo.full_version">
@@ -625,7 +625,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -644,6 +644,7 @@ import {
   DocumentCopy
 } from '@element-plus/icons-vue'
 import { ApiClient } from '@/api/request'
+import { APP_CONFIG } from '@/config/app'
 
 const router = useRouter()
 const buildTime = ref(new Date().toLocaleString('zh-CN'))
@@ -657,6 +658,14 @@ const systemInfo = ref<{
   git_commit?: string
   build_type?: string
 }>({})
+
+const displayVersion = computed(() => {
+  const version = (systemInfo.value.version || APP_CONFIG.version || '').trim()
+  if (!version) {
+    return 'v2.1.0'
+  }
+  return version.startsWith('v') ? version : `v${version}`
+})
 
 // 加载系统信息
 const loadSystemInfo = async () => {
@@ -705,7 +714,7 @@ const formatBuildType = (type: string) => {
 // 复制版本信息
 const copyVersionInfo = async () => {
   const info = [
-    `版本号: ${systemInfo.value.version || 'v2.0'}`,
+    `版本号: ${displayVersion.value}`,
     systemInfo.value.full_version ? `完整版本: ${systemInfo.value.full_version}` : '',
     systemInfo.value.build_date ? `构建时间: ${formatBuildDate(systemInfo.value.build_date)}` : '',
     systemInfo.value.build_type ? `构建类型: ${formatBuildType(systemInfo.value.build_type)}` : '',
