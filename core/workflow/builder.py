@@ -182,9 +182,14 @@ class LegacyDependencyProvider:
         # 根据模型名称从数据库获取完整配置（provider, url, api_key）
         # 复用 simple_analysis_service 中已有的统一查询函数
         # 🔥 每次调用时都重新从数据库读取配置，确保 API key 更新后立即生效
-        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync, _split_model_selection
         quick_config = get_provider_and_url_by_model_sync(quick_model)
         deep_config = get_provider_and_url_by_model_sync(deep_model)
+
+        _, quick_model_name = _split_model_selection(quick_model)
+        _, deep_model_name = _split_model_selection(deep_model)
+        quick_model_name = quick_model_name or quick_model
+        deep_model_name = deep_model_name or deep_model
 
         quick_provider = quick_config.get("provider", "dashscope")
         deep_provider = deep_config.get("provider", "dashscope")
@@ -203,13 +208,13 @@ class LegacyDependencyProvider:
         deep_api_key = deep_api_key_from_config or deep_api_key_from_db or quick_api_key
 
         logger.info("[依赖提供者] 创建 LLM:")
-        logger.info(f"  - Quick: provider={quick_provider}, model={quick_model}, url={quick_url[:50] if quick_url else 'None'}...")
+        logger.info(f"  - Quick: provider={quick_provider}, model={quick_model_name}, url={quick_url[:50] if quick_url else 'None'}...")
         logger.info(f"  - Quick API Key 来源: {'用户显式指定' if quick_api_key_from_config else ('数据库配置' if quick_api_key_from_db else '未配置（将使用环境变量）')}")
         if quick_api_key:
             logger.info(f"  - Quick API Key: 已配置 ({truncate_api_key(quick_api_key)})")
         else:
             logger.info(f"  - Quick API Key: 空")
-        logger.info(f"  - Deep: provider={deep_provider}, model={deep_model}, url={deep_url[:50] if deep_url else 'None'}...")
+        logger.info(f"  - Deep: provider={deep_provider}, model={deep_model_name}, url={deep_url[:50] if deep_url else 'None'}...")
         logger.info(f"  - Deep API Key 来源: {'用户显式指定' if deep_api_key_from_config else ('数据库配置' if deep_api_key_from_db else ('继承 Quick' if quick_api_key else '未配置（将使用环境变量）'))}")
         if deep_api_key:
             logger.info(f"  - Deep API Key: 已配置 ({truncate_api_key(deep_api_key)})")
@@ -220,7 +225,7 @@ class LegacyDependencyProvider:
             # 创建快速模型
             self._quick_llm = create_llm_by_provider(
                 provider=quick_provider,
-                model=quick_model,
+                model=quick_model_name,
                 backend_url=quick_url,
                 temperature=self._config.get("quick_temperature", 0.1),
                 max_tokens=self._config.get("quick_max_tokens", 2000),
@@ -231,7 +236,7 @@ class LegacyDependencyProvider:
             # 创建深度模型
             self._deep_llm = create_llm_by_provider(
                 provider=deep_provider,
-                model=deep_model,
+                model=deep_model_name,
                 backend_url=deep_url,
                 temperature=self._config.get("deep_temperature", 0.1),
                 max_tokens=self._config.get("deep_max_tokens", 4000),
@@ -274,8 +279,10 @@ class LegacyDependencyProvider:
             model = db_default.get(f"{llm_type}_think_llm", "qwen-turbo" if llm_type == "quick" else "qwen-plus")
 
         # 根据模型名称获取配置（provider, url, api_key）
-        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync, _split_model_selection
         config = get_provider_and_url_by_model_sync(model)
+        _, model_name = _split_model_selection(model)
+        model_name = model_name or model
 
         provider = config.get("provider", "dashscope")
         url = self._config.get(f"{llm_type}_backend_url") or self._config.get("backend_url") or config.get("backend_url", "")
@@ -304,7 +311,7 @@ class LegacyDependencyProvider:
             )
 
         logger.info(
-            f"[依赖提供者] 创建自定义 LLM: type={llm_type}, model={model}, "
+            f"[依赖提供者] 创建自定义 LLM: type={llm_type}, model={model_name}, "
             f"temperature={effective_temperature}, timeout={effective_timeout}, max_tokens={effective_max_tokens}"
         )
         logger.info(f"  - API Key 来源: {'用户显式指定' if api_key_from_config else ('数据库配置' if api_key_from_db else '未配置（将使用环境变量）')}")
@@ -315,7 +322,7 @@ class LegacyDependencyProvider:
 
         return create_llm_by_provider(
             provider=provider,
-            model=model,
+            model=model_name,
             backend_url=url,
             temperature=effective_temperature,
             max_tokens=effective_max_tokens,

@@ -702,25 +702,35 @@ class DataSourceManager:
         except Exception as e:
             logger.warning(f"⚠️ 保存数据到缓存失败: {e}")
 
-    def _get_volume_safely(self, data: pd.DataFrame) -> float:
-        """
-        安全获取成交量数据
-
-        Args:
-            data: 股票数据DataFrame
-
-        Returns:
-            float: 成交量，如果获取失败返回0
-        """
+    def _get_volume_series_safely(self, data: pd.DataFrame) -> tuple[Optional[str], Optional[pd.Series]]:
+        """安全获取成交量序列，只接受真实成交量列。"""
         try:
-            if 'volume' in data.columns:
-                return data['volume'].iloc[-1]
-            elif 'vol' in data.columns:
-                return data['vol'].iloc[-1]
-            else:
-                return 0
-        except Exception:
-            return 0
+            volume_columns = ['volume', 'vol', 'trade_volume', '成交量']
+
+            for col in volume_columns:
+                if col in data.columns:
+                    logger.info(f"✅ 找到成交量列: {col}")
+                    volume_series = pd.to_numeric(data[col], errors='coerce')
+                    if volume_series.notna().any():
+                        return col, volume_series
+
+            logger.warning(f"⚠️ 未找到有效成交量列，可用列: {list(data.columns)}")
+            return None, None
+        except Exception as e:
+            logger.error(f"❌ 获取成交量序列失败: {e}")
+            return None, None
+
+    def _get_volume_safely(self, data: pd.DataFrame) -> Optional[float]:
+        """安全获取最近窗口的平均成交量。"""
+        _, volume_series = self._get_volume_series_safely(data)
+        if volume_series is None:
+            return None
+
+        valid_volume_series = volume_series.dropna()
+        if valid_volume_series.empty:
+            return None
+
+        return float(valid_volume_series.mean())
 
     def _format_stock_data_response(self, data: pd.DataFrame, symbol: str, stock_name: str,
                                     start_date: str, end_date: str) -> str:
@@ -756,9 +766,9 @@ class DataSourceManager:
             logger.info(f"📊 [技术指标] 开始计算技术指标，原始数据: {original_data_count}条")
 
             # 🔧 计算技术指标（使用完整数据）
-            # 确保数据按日期排序
-            if 'date' in data.columns:
-                data = data.sort_values('date')
+            sort_column = 'date' if 'date' in data.columns else ('trade_date' if 'trade_date' in data.columns else None)
+            if sort_column:
+                data = data.sort_values(sort_column)
 
             # 计算移动平均线
             data['ma5'] = data['close'].rolling(window=5, min_periods=1).mean()
@@ -816,7 +826,7 @@ class DataSourceManager:
             display_rows = min(5, len(data))
             display_data = data.tail(display_rows)
             latest_data = data.iloc[-1]
-            latest_trade_date = _format_trade_date(latest_data.get('date'))
+            latest_trade_date = _format_trade_date(latest_data.get('date') or latest_data.get('trade_date'))
             requested_end_date = _format_trade_date(end_date) or str(end_date)
 
             # 由工具端直接计算均线方向与拐头结论，避免让LLM做二次推导
@@ -1087,9 +1097,32 @@ class DataSourceManager:
             result += f"   最低价: ¥{display_data['low'].min():.2f}\n"
             result += f"   平均价: ¥{display_data['close'].mean():.2f}\n"
 
-            # 防御性获取成交量数据
-            volume_value = self._get_volume_safely(display_data)
-            result += f"   平均成交量: {volume_value:,.0f}股\n"
+            _, volume_series = self._get_volume_series_safely(display_data)
+            if volume_series is None:
+                result += f"   最近{display_rows}日成交量明细: 工具结果未提供\n"
+                result += "   平均成交量: 工具结果未提供\n"
+            else:
+                result += f"   最近{display_rows}日成交量明细:\n"
+                valid_volume_count = 0
+                for idx, row in display_data.iterrows():
+                    trade_date = _format_trade_date(row.get('date') or row.get('trade_date')) or 'N/A'
+                    volume_value = volume_series.loc[idx]
+                    if pd.isna(volume_value):
+                        result += f"      {trade_date}: 工具结果未提供\n"
+                    else:
+                        valid_volume_count += 1
+                        result += f"      {trade_date}: {float(volume_value):,.0f}股\n"
+
+                average_volume = self._get_volume_safely(display_data)
+                if average_volume is None:
+                    result += "   平均成交量: 工具结果未提供\n"
+                elif valid_volume_count == display_rows:
+                    result += f"   平均成交量: {average_volume:,.0f}股\n"
+                else:
+                    result += (
+                        f"   平均成交量(基于{valid_volume_count}/{display_rows}个有效交易日): "
+                        f"{average_volume:,.0f}股\n"
+                    )
 
             return result
 
@@ -1649,25 +1682,6 @@ class DataSourceManager:
     #     """使用TDX获取多周期数据 (已移除)"""
     #     logger.error(f"❌ TDX数据源已不再支持")
     #     return f"❌ TDX数据源已不再支持"
-
-    def _get_volume_safely(self, data) -> float:
-        """安全地获取成交量数据，支持多种列名"""
-        try:
-            # 支持多种可能的成交量列名
-            volume_columns = ['volume', 'vol', 'turnover', 'trade_volume']
-
-            for col in volume_columns:
-                if col in data.columns:
-                    logger.info(f"✅ 找到成交量列: {col}")
-                    return data[col].sum()
-
-            # 如果都没找到，记录警告并返回0
-            logger.warning(f"⚠️ 未找到成交量列，可用列: {list(data.columns)}")
-            return 0
-
-        except Exception as e:
-            logger.error(f"❌ 获取成交量失败: {e}")
-            return 0
 
     def _try_fallback_sources(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> tuple[str, str | None]:
         """

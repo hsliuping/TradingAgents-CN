@@ -39,6 +39,24 @@ from .signal_processing import SignalProcessor
 from app.utils.api_key_utils import truncate_api_key
 
 
+def _normalize_provider_qualified_model(provider: str, model: str) -> tuple[str, str]:
+    """Normalize provider-qualified model selections like provider::model."""
+    raw_model = str(model or "").strip()
+    normalized_provider = str(provider or "").strip()
+
+    if "::" not in raw_model:
+        return normalized_provider, raw_model
+
+    provider_hint, model_name = raw_model.split("::", 1)
+    provider_hint = provider_hint.strip()
+    model_name = model_name.strip()
+
+    if provider_hint and model_name:
+        return provider_hint, model_name
+
+    return normalized_provider, raw_model
+
+
 def create_llm_by_provider(provider: str, model: str, backend_url: str, temperature: float, max_tokens: int, timeout: int, api_key: str = None):
     """
     根据 provider 创建对应的 LLM 实例
@@ -57,6 +75,15 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
     """
     from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
     from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+
+    normalized_provider, normalized_model = _normalize_provider_qualified_model(provider, model)
+    if normalized_provider != provider or normalized_model != model:
+        logger.info(
+            f"🔧 [创建LLM] 归一化 provider/model: provider={provider}, model={model} -> "
+            f"provider={normalized_provider}, model={normalized_model}"
+        )
+        provider = normalized_provider
+        model = normalized_model
 
     logger.info(f"🔧 [创建LLM] provider={provider}, model={model}, url={backend_url}")
     logger.info(f"🔑 [API Key] 传入值: {'有值' if api_key else 'None（将使用环境变量）'}")
