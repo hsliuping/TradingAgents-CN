@@ -404,7 +404,7 @@ class ConfigService:
                     model_name="gpt-3.5-turbo",
                     api_key="your-openai-api-key",
                     api_base="https://api.openai.com/v1",
-                    max_tokens=4000,
+                    max_tokens=8000,
                     temperature=0.7,
                     enabled=False,
                     description="OpenAI GPT-3.5 Turbo模型"
@@ -414,7 +414,7 @@ class ConfigService:
                     model_name="glm-4",
                     api_key="your-zhipu-api-key",
                     api_base="https://open.bigmodel.cn/api/paas/v4",
-                    max_tokens=4000,
+                    max_tokens=8000,
                     temperature=0.7,
                     enabled=True,
                     description="智谱AI GLM-4模型（推荐）"
@@ -424,7 +424,7 @@ class ConfigService:
                     model_name="qwen-turbo",
                     api_key="your-qwen-api-key",
                     api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    max_tokens=4000,
+                    max_tokens=8000,
                     temperature=0.7,
                     enabled=False,
                     description="阿里云通义千问模型"
@@ -727,7 +727,7 @@ class ConfigService:
                 # 确保必填字段有默认值（防止导出 None 或空字符串）
                 # 注意：max_tokens 在 system_configs 中已经有正确的值，直接使用
                 if not d.get("max_tokens") or d.get("max_tokens") == "":
-                    d["max_tokens"] = 4000
+                    d["max_tokens"] = 8000
                 if not d.get("temperature") and d.get("temperature") != 0:
                     d["temperature"] = 0.7
                 if not d.get("timeout") or d.get("timeout") == "":
@@ -960,7 +960,14 @@ class ConfigService:
             elif provider_str == "deepseek":
                 # DeepSeek 使用专门的测试方法
                 logger.info(f"🔍 使用 DeepSeek 专用测试方法")
-                result = self._test_deepseek_api(api_key, f"{provider_str} {llm_config.model_name}", llm_config.model_name)
+                result = self._test_deepseek_api(
+                    api_key,
+                    f"{provider_str} {llm_config.model_name}",
+                    llm_config.model_name,
+                    llm_config.temperature,
+                    llm_config.max_tokens,
+                    llm_config.timeout,
+                )
                 result["response_time"] = time.time() - start_time
                 return result
             elif provider_str == "dashscope":
@@ -3792,7 +3799,16 @@ class ConfigService:
                 base_url = provider_data.get("default_base_url") if provider_data else None
                 return await asyncio.get_event_loop().run_in_executor(None, self._test_google_api, api_key, display_name, base_url, test_model)
             elif provider_name == "deepseek":
-                return await asyncio.get_event_loop().run_in_executor(None, self._test_deepseek_api, api_key, display_name, test_model)
+                return await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    self._test_deepseek_api,
+                    api_key,
+                    display_name,
+                    test_model,
+                    llm_temperature,
+                    llm_max_tokens,
+                    llm_timeout,
+                )
             elif provider_name == "dashscope":
                 return await asyncio.get_event_loop().run_in_executor(None, self._test_dashscope_api, api_key, display_name, test_model)
             elif provider_name == "openrouter":
@@ -4029,7 +4045,15 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    def _test_deepseek_api(self, api_key: str, display_name: str, test_model: str = None) -> dict:
+    def _test_deepseek_api(
+        self,
+        api_key: str,
+        display_name: str,
+        test_model: str = None,
+        temperature: float = 0.1,
+        max_tokens: int = 256,
+        timeout: int = 10,
+    ) -> dict:
         """测试DeepSeek API"""
         try:
             import requests
@@ -4043,6 +4067,10 @@ class ConfigService:
                 logger.info(f"⚠️ 未指定模型，使用默认模型: {model_name}")
 
             logger.info(f"🔍 [DeepSeek 测试] 使用模型: {model_name}")
+            logger.info(
+                f"🔍 [DeepSeek 测试] 请求参数: temperature={temperature}, "
+                f"max_tokens={max_tokens}, timeout={timeout}"
+            )
 
             url = "https://api.deepseek.com/chat/completions"
 
@@ -4056,22 +4084,83 @@ class ConfigService:
                 "messages": [
                     {"role": "user", "content": "你好，请简单介绍一下你自己。"}
                 ],
-                "max_tokens": 50,
-                "temperature": 0.1
+                # DeepSeek v4 可能在思考阶段先消耗较多 token，50 太容易造成
+                # finish_reason=length 且没有最终 content，从而被误判为空响应。
+                "max_tokens": max(1, int(max_tokens or 256)),
+                "temperature": temperature,
+                "stream": False
             }
 
-            response = requests.post(url, json=data, headers=headers, timeout=10)
+            response = requests.post(url, json=data, headers=headers, timeout=max(1, int(timeout or 10)))
 
             if response.status_code == 200:
                 result = response.json()
                 if "choices" in result and len(result["choices"]) > 0:
-                    content = result["choices"][0]["message"]["content"]
+                    choice = result["choices"][0] or {}
+                    message = choice.get("message") or {}
+                    finish_reason = choice.get("finish_reason") or choice.get("finishReason") or ""
+
+                    content = message.get("content")
+                    if isinstance(content, list):
+                        text_parts = []
+                        for item in content:
+                            if isinstance(item, dict):
+                                text = item.get("text")
+                                if text:
+                                    text_parts.append(str(text))
+                            elif item:
+                                text_parts.append(str(item))
+                        content = "".join(text_parts)
+                    elif content is None:
+                        content = ""
+                    else:
+                        content = str(content)
+
+                    reasoning_content = message.get("reasoning_content") or message.get("reasoning") or ""
+                    if isinstance(reasoning_content, list):
+                        reasoning_parts = []
+                        for item in reasoning_content:
+                            if isinstance(item, dict):
+                                text = item.get("text")
+                                if text:
+                                    reasoning_parts.append(str(text))
+                            elif item:
+                                reasoning_parts.append(str(item))
+                        reasoning_content = "".join(reasoning_parts)
+                    elif reasoning_content is None:
+                        reasoning_content = ""
+                    else:
+                        reasoning_content = str(reasoning_content)
+
                     if content and len(content.strip()) > 0:
                         return {
                             "success": True,
                             "message": f"{display_name} API连接测试成功"
                         }
+                    elif reasoning_content and len(reasoning_content.strip()) > 0:
+                        logger.info(
+                            f"🔍 [DeepSeek 测试] 模型 {model_name} 返回推理内容，"
+                            f"finish_reason={finish_reason or 'unknown'}"
+                        )
+                        return {
+                            "success": True,
+                            "message": f"{display_name} API连接测试成功（返回推理内容）"
+                        }
+                    elif str(finish_reason).upper() in {"LENGTH", "MAX_TOKENS"}:
+                        logger.warning(
+                            f"⚠️ [DeepSeek 测试] 模型 {model_name} 响应被 token 限制截断，"
+                            f"finish_reason={finish_reason}"
+                        )
+                        return {
+                            "success": True,
+                            "message": f"{display_name} API连接测试成功（响应被 token 限制截断）"
+                        }
                     else:
+                        logger.warning(
+                            f"⚠️ [DeepSeek 测试] 空响应，model={model_name}, "
+                            f"finish_reason={finish_reason or 'unknown'}, "
+                            f"message_keys={list(message.keys())}"
+                        )
                         return {
                             "success": False,
                             "message": f"{display_name} API响应为空"
