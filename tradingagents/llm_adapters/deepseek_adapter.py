@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Union
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_openai import ChatOpenAI
+from langchain_openai.chat_models.base import _convert_message_to_dict
 from langchain_core.callbacks import CallbackManagerForLLMRun
 
 # 导入统一日志系统
@@ -34,6 +35,33 @@ class ChatDeepSeek(ChatOpenAI):
     
     继承自ChatOpenAI，添加了Token使用量统计功能
     """
+
+    @staticmethod
+    def _supports_thinking_mode(model: str) -> bool:
+        normalized = str(model or "").strip().lower()
+        return (
+            normalized.startswith("deepseek-v4")
+            or "reasoner" in normalized
+            or normalized.startswith("deepseek-r1")
+        )
+
+    @staticmethod
+    def _build_thinking_kwargs(model: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        updated_kwargs = dict(kwargs)
+        thinking = updated_kwargs.pop("thinking", None)
+        extra_body = dict(updated_kwargs.get("extra_body") or {})
+
+        if thinking is not None:
+            extra_body["thinking"] = thinking
+
+        if ChatDeepSeek._supports_thinking_mode(model):
+            extra_body.setdefault("thinking", {"type": "enabled"})
+            updated_kwargs.setdefault("reasoning_effort", "high")
+
+        if extra_body:
+            updated_kwargs["extra_body"] = extra_body
+
+        return updated_kwargs
     
     def __init__(
         self,
@@ -91,6 +119,14 @@ class ChatDeepSeek(ChatOpenAI):
                     "DeepSeek API密钥未找到。请在 Web 界面配置 API Key "
                     "(设置 -> 大模型厂家) 或设置 DEEPSEEK_API_KEY 环境变量。"
                 )
+
+        kwargs = self._build_thinking_kwargs(model, kwargs)
+        thinking_config = (kwargs.get("extra_body") or {}).get("thinking")
+        reasoning_effort = kwargs.get("reasoning_effort")
+        if thinking_config:
+            logger.info(
+                f"✅ [DeepSeek初始化] thinking={thinking_config}, reasoning_effort={reasoning_effort or 'default'}"
+            )
         
         # 初始化父类
         super().__init__(
@@ -103,6 +139,74 @@ class ChatDeepSeek(ChatOpenAI):
         )
         
         self.model_name = model
+
+    @staticmethod
+    def _extract_reasoning_content_from_message(message: BaseMessage) -> Optional[str]:
+        if not isinstance(message, AIMessage):
+            return None
+
+        additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
+        reasoning_content = additional_kwargs.get("reasoning_content")
+        if reasoning_content:
+            return str(reasoning_content)
+
+        response_metadata = getattr(message, "response_metadata", {}) or {}
+        if isinstance(response_metadata, dict):
+            reasoning_content = response_metadata.get("reasoning_content")
+            if reasoning_content:
+                return str(reasoning_content)
+
+        content = getattr(message, "content", None)
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") not in {"thinking", "reasoning", "reasoning_content"}:
+                    continue
+                reasoning_text = block.get("text") or block.get("content") or block.get("reasoning_content")
+                if reasoning_text:
+                    return str(reasoning_text)
+
+        return None
+
+    def _convert_message_to_deepseek_dict(self, message: BaseMessage) -> Dict[str, Any]:
+        message_dict = _convert_message_to_dict(message)
+        reasoning_content = self._extract_reasoning_content_from_message(message)
+        if reasoning_content and message_dict.get("role") == "assistant":
+            message_dict["reasoning_content"] = reasoning_content
+        return message_dict
+
+    def _get_request_payload(
+        self,
+        input_: Any,
+        *,
+        stop: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        messages = self._convert_input(input_).to_messages()
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        if "messages" in payload:
+            payload["messages"] = [self._convert_message_to_deepseek_dict(message) for message in messages]
+        return payload
+
+    def _create_chat_result(
+        self,
+        response: Any,
+        generation_info: Optional[Dict[str, Any]] = None,
+    ) -> ChatResult:
+        result = super()._create_chat_result(response, generation_info)
+        response_dict = response if isinstance(response, dict) else response.model_dump()
+        choices = response_dict.get("choices") or []
+
+        for generation, choice in zip(result.generations, choices):
+            if not isinstance(generation.message, AIMessage):
+                continue
+            message_payload = choice.get("message") or {}
+            reasoning_content = message_payload.get("reasoning_content")
+            if reasoning_content:
+                generation.message.additional_kwargs["reasoning_content"] = reasoning_content
+
+        return result
         
     def _generate(
         self,

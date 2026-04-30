@@ -40,6 +40,131 @@ def _is_error_payload_text(content: str) -> bool:
     return any(pattern.match(stripped) for pattern in _ERROR_RESULT_PATTERNS)
 
 
+def _repair_common_json_format_issues(content: str) -> str:
+    return re.sub(
+        r'"price_analysis_range"\s*:\s*(\d+\.?\d*)\s*-\s*(\d+\.?\d*)',
+        r'"price_analysis_range": [\1, \2]',
+        content,
+    )
+
+
+def _decode_relaxed_json_string(value: str) -> str:
+    return (
+        value.replace(r'\/', '/')
+        .replace(r'\"', '"')
+        .replace(r'\n', '\n')
+        .replace(r'\r', '\r')
+        .replace(r'\t', '\t')
+        .replace(r'\\', '\\')
+    )
+
+
+def _parse_relaxed_json_value(raw_value: str) -> Any:
+    value = raw_value.strip().rstrip(',').strip()
+    if not value:
+        return None
+
+    if value.startswith('"'):
+        last_quote = value.rfind('"')
+        if last_quote > 0:
+            return _decode_relaxed_json_string(value[1:last_quote])
+        return _decode_relaxed_json_string(value[1:])
+
+    if value.startswith('['):
+        closing_index = value.rfind(']')
+        candidate = value[:closing_index + 1] if closing_index >= 0 else value
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            items = re.findall(r'"((?:\\.|[^\"])*)"', candidate)
+            if items:
+                return [_decode_relaxed_json_string(item) for item in items]
+            return [item.strip().strip('"') for item in candidate.strip('[]').split(',') if item.strip()]
+
+    lowered = value.lower()
+    if lowered == 'true':
+        return True
+    if lowered == 'false':
+        return False
+    if lowered == 'null':
+        return None
+    if re.fullmatch(r'-?\d+', value):
+        return int(value)
+    if re.fullmatch(r'-?\d+\.\d+', value):
+        return float(value)
+
+    return value.strip('"')
+
+
+def _salvage_structured_report_json(content: str, report_type: str) -> Optional[Dict[str, Any]]:
+    field_names_by_type = {
+        'investment': (
+            'analysis_view',
+            'action',
+            'confidence',
+            'risk_score',
+            'summary',
+            'reasoning',
+            'risk_warning',
+            'core_evidence',
+            'uncertainties',
+            'invalidation_conditions',
+            'watch_items',
+        ),
+        'risk': (
+            'risk_level',
+            'risk_score',
+            'reasoning',
+            'key_risks',
+            'risk_control',
+            'investment_adjustment',
+        ),
+    }
+
+    field_names = field_names_by_type.get(report_type)
+    if not field_names:
+        return None
+
+    field_pattern = re.compile(
+        r'"(?P<key>' + '|'.join(re.escape(name) for name in field_names) + r')"\s*:\s*'
+    )
+    matches = list(field_pattern.finditer(content))
+    if not matches:
+        return None
+
+    object_end = content.rfind('}')
+    if object_end < 0:
+        object_end = len(content)
+
+    salvaged: Dict[str, Any] = {}
+    for index, match in enumerate(matches):
+        value_end = matches[index + 1].start() if index + 1 < len(matches) else object_end
+        parsed_value = _parse_relaxed_json_value(content[match.end():value_end])
+        if parsed_value is not None and parsed_value != '':
+            salvaged[match.group('key')] = parsed_value
+
+    return salvaged or None
+
+
+def _load_report_json(content: str, report_type: str, source_label: str) -> Optional[Dict[str, Any]]:
+    fixed_content = _repair_common_json_format_issues(content)
+    try:
+        json_obj = json.loads(fixed_content)
+        logger.info(
+            f"✅ [JSON转换] {source_label}解析成功，字段: {list(json_obj.keys()) if isinstance(json_obj, dict) else 'N/A'}"
+        )
+        return json_obj
+    except json.JSONDecodeError as e:
+        salvaged = _salvage_structured_report_json(fixed_content, report_type)
+        if salvaged is not None:
+            logger.info(f"ℹ️ [JSON转换] {source_label}格式不规范，已按字段级兜底提取: {list(salvaged.keys())}")
+            logger.debug(f"🔍 [JSON转换] {source_label}原始解析异常: {e}")
+            return salvaged
+        logger.warning(f"⚠️ [JSON转换] {source_label}解析失败: {e}")
+        logger.debug(f"🔍 [JSON转换] 修复后的 JSON 字符串前500字符: {fixed_content[:500]}")
+        return None
+
+
 DISPLAY_SANITIZED_REPORT_KEYS = {
     'bull_researcher',
     'bull_report',
@@ -330,38 +455,13 @@ def _convert_json_to_markdown(content: str, report_type: str = "investment") -> 
         if json_match:
             json_str = json_match.group(1).strip()
             logger.info(f"🔄 [JSON转换] 提取的 JSON 字符串长度: {len(json_str)}, 前200字符: {json_str[:200]}")
-            
-            # 🔥 修复常见的 JSON 格式问题
-            # 1. 修复 price_analysis_range: 295.29-442.93 -> [295.29, 442.93]
-            # 匹配模式: "price_analysis_range": 数字-数字
-            json_str = re.sub(
-                r'"price_analysis_range"\s*:\s*(\d+\.?\d*)\s*-\s*(\d+\.?\d*)',
-                r'"price_analysis_range": [\1, \2]',
-                json_str
-            )
-            
-            try:
-                json_obj = json.loads(json_str)
-                logger.info(f"✅ [JSON转换] JSON 代码块解析成功，字段: {list(json_obj.keys()) if isinstance(json_obj, dict) else 'N/A'}")
-            except json.JSONDecodeError as e:
-                logger.warning(f"⚠️ [JSON转换] JSON 代码块解析失败: {e}")
-                # 如果修复后仍然失败，记录修复后的内容用于调试
-                logger.debug(f"🔍 [JSON转换] 修复后的 JSON 字符串前500字符: {json_str[:500]}")
+
+            json_obj = _load_report_json(json_str, report_type, "JSON 代码块")
 
     # 2. 尝试直接解析 JSON
     if json_obj is None and content.startswith("{"):
         logger.info(f"🔄 [JSON转换] 检测到以 {{ 开头，尝试直接解析 JSON")
-        # 🔥 修复常见的 JSON 格式问题
-        fixed_content = re.sub(
-            r'"price_analysis_range"\s*:\s*(\d+\.?\d*)\s*-\s*(\d+\.?\d*)',
-            r'"price_analysis_range": [\1, \2]',
-            content
-        )
-        try:
-            json_obj = json.loads(fixed_content)
-            logger.info(f"✅ [JSON转换] 直接 JSON 解析成功，字段: {list(json_obj.keys()) if isinstance(json_obj, dict) else 'N/A'}")
-        except json.JSONDecodeError as e:
-            logger.warning(f"⚠️ [JSON转换] 直接 JSON 解析失败: {e}")
+        json_obj = _load_report_json(content, report_type, "直接 JSON")
 
     # 如果不是 JSON，直接返回原内容
     if json_obj is None:

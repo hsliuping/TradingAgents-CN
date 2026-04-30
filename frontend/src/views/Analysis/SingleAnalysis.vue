@@ -405,8 +405,8 @@
                       <el-option
                         v-for="model in availableModels"
                         :key="`quick-${model.provider}/${model.model_name}`"
-                        :label="model.model_display_name || model.model_name"
-                        :value="model.model_name"
+                        :label="getModelOptionLabel(model)"
+                        :value="encodeModelSelection(model)"
                       >
                         <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
                           <span style="flex: 1;">{{ model.model_display_name || model.model_name }}</span>
@@ -783,6 +783,13 @@ import { marked } from 'marked'
 import { recommendModels, validateModels, type ModelRecommendationResponse } from '@/api/modelCapabilities'
 import { validateStockCode, getStockCodeFormatHelp, getStockCodeExamples } from '@/utils/stockValidator'
 import { normalizeMarketForAnalysis, getMarketByStockCode } from '@/utils/market'
+import {
+  encodeModelSelection,
+  findModelBySelection,
+  getModelOptionLabel,
+  parseModelSelection,
+  resolveModelSelection,
+} from '@/utils/modelSelection'
 
 // 配置marked选项
 marked.setOptions({
@@ -2169,14 +2176,22 @@ const updateAnalysisSteps = (status: any) => {
 // 初始化模型设置
 const initializeModelSettings = async () => {
   try {
-    // 获取默认模型
-    const defaultModels = await configApi.getDefaultModels()
-    modelSettings.value.quickAnalysisModel = defaultModels.quick_analysis_model
-    modelSettings.value.deepAnalysisModel = defaultModels.deep_analysis_model
-
     // 获取所有可用的模型列表
     const llmConfigs = await configApi.getLLMConfigs()
     availableModels.value = llmConfigs.filter((config: any) => config.enabled)
+
+    // 获取默认模型
+    const defaultModels = await configApi.getDefaultModels()
+    modelSettings.value.quickAnalysisModel = resolveModelSelection(
+      defaultModels.quick_analysis_model,
+      availableModels.value,
+      defaultModels.default_provider
+    )
+    modelSettings.value.deepAnalysisModel = resolveModelSelection(
+      defaultModels.deep_analysis_model,
+      availableModels.value,
+      defaultModels.default_provider
+    )
 
     console.log('✅ 加载模型配置成功:', {
       quick: modelSettings.value.quickAnalysisModel,
@@ -2190,8 +2205,8 @@ const initializeModelSettings = async () => {
     })))
   } catch (error) {
     console.error('加载默认模型配置失败:', error)
-    modelSettings.value.quickAnalysisModel = 'qwen-turbo'
-    modelSettings.value.deepAnalysisModel = 'qwen-max'
+    modelSettings.value.quickAnalysisModel = resolveModelSelection('qwen-turbo', availableModels.value)
+    modelSettings.value.deepAnalysisModel = resolveModelSelection('qwen-max', availableModels.value)
   }
 }
 
@@ -2399,10 +2414,20 @@ const checkModelSuitability = async () => {
     if (responseData) {
       const quickModel = responseData.quick_model || '未知'
       const deepModel = responseData.deep_model || '未知'
+      const quickSelection = resolveModelSelection(
+        quickModel,
+        availableModels.value,
+        parseModelSelection(modelSettings.value.quickAnalysisModel).provider
+      )
+      const deepSelection = resolveModelSelection(
+        deepModel,
+        availableModels.value,
+        parseModelSelection(modelSettings.value.deepAnalysisModel).provider
+      )
 
       // 获取模型的显示名称
-      const quickModelInfo = availableModels.value.find(m => m.model_name === quickModel)
-      const deepModelInfo = availableModels.value.find(m => m.model_name === deepModel)
+      const quickModelInfo = findModelBySelection(availableModels.value, quickSelection)
+      const deepModelInfo = findModelBySelection(availableModels.value, deepSelection)
 
       const quickDisplayName = quickModelInfo?.model_display_name || quickModel
       const deepDisplayName = deepModelInfo?.model_display_name || deepModel
@@ -2425,8 +2450,8 @@ const checkModelSuitability = async () => {
         title: '💡 模型推荐',
         message,
         type: 'info',
-        quickModel,
-        deepModel
+        quickModel: quickSelection,
+        deepModel: deepSelection
       }
     } else {
       // 如果没有推荐数据，显示通用说明

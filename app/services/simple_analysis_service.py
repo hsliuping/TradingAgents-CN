@@ -49,6 +49,89 @@ logger = logging.getLogger("app.services.simple_analysis_service")
 # 配置服务实例
 config_service = ConfigService()
 
+MODEL_SELECTION_DELIMITER = "::"
+
+
+def _normalize_provider_key(provider: Optional[str]) -> str:
+    """标准化供应商标识，兼容常见别名。"""
+    if provider is None:
+        return ""
+
+    raw = str(provider).strip()
+    if not raw:
+        return ""
+
+    lowered = raw.lower()
+    alias_map = {
+        "dashscope": "qwen",
+        "alibaba": "qwen",
+        "qwen": "qwen",
+        "zhipu": "glm",
+        "glm": "glm",
+        "openai": "openai",
+        "google": "google",
+        "anthropic": "anthropic",
+        "deepseek": "deepseek",
+        "openrouter": "openrouter",
+        "aihubmix": "aihubmix",
+        "ollama": "ollama",
+        "qianfan": "qianfan",
+        "custom_openai": "custom_openai",
+        "siliconflow": "siliconflow",
+        "302ai": "302ai",
+    }
+
+    if "阿里百炼" in raw or "百炼" in raw:
+        return "qwen"
+    if "智谱" in raw:
+        return "glm"
+
+    return alias_map.get(lowered, lowered)
+
+
+def _providers_match(left: Optional[str], right: Optional[str]) -> bool:
+    """比较两个供应商标识是否等价。"""
+    if not left or not right:
+        return False
+    return _normalize_provider_key(left) == _normalize_provider_key(right)
+
+
+def _split_model_selection(model_selection: Optional[str]) -> tuple[Optional[str], str]:
+    """解析前端传回的 provider::model 选择值。"""
+    raw = str(model_selection or "").strip()
+    if not raw:
+        return None, ""
+
+    if MODEL_SELECTION_DELIMITER not in raw:
+        return None, raw
+
+    provider_hint, model_name = raw.split(MODEL_SELECTION_DELIMITER, 1)
+    provider_hint = provider_hint.strip()
+    model_name = model_name.strip()
+
+    if provider_hint and model_name:
+        return provider_hint, model_name
+
+    return None, raw
+
+
+def _get_default_provider_hint(system_settings: dict, model_name: str) -> Optional[str]:
+    """当模型命中系统默认配置时，使用默认供应商帮助消解同名模型。"""
+    if not system_settings or not model_name:
+        return None
+
+    default_provider = str(system_settings.get("default_provider") or "").strip()
+    if not default_provider:
+        return None
+
+    _, quick_default_model = _split_model_selection(system_settings.get("quick_analysis_model"))
+    _, deep_default_model = _split_model_selection(system_settings.get("deep_analysis_model"))
+
+    if model_name in {quick_default_model, deep_default_model}:
+        return default_provider
+
+    return None
+
 
 async def get_provider_by_model_name(model_name: str) -> str:
     """
@@ -61,23 +144,10 @@ async def get_provider_by_model_name(model_name: str) -> str:
         str: 供应商名称，如 'dashscope', 'openai' 等
     """
     try:
-        # 从配置服务获取系统配置
-        system_config = await config_service.get_system_config()
-        if not system_config or not system_config.llm_configs:
-            logger.warning(f"⚠️ 系统配置为空，使用默认供应商映射")
-            return _get_default_provider_by_model(model_name)
-
-        # 在LLM配置中查找匹配的模型
-        for llm_config in system_config.llm_configs:
-            if llm_config.model_name == model_name:
-                provider = llm_config.provider.value if hasattr(llm_config.provider, 'value') else str(llm_config.provider)
-                logger.info(f"✅ 从数据库找到模型 {model_name} 的供应商: {provider}")
-                return provider
-
-        # 如果数据库中没有找到，使用默认映射
-        logger.warning(f"⚠️ 数据库中未找到模型 {model_name}，使用默认映射")
-        return _get_default_provider_by_model(model_name)
-
+        provider_info = await asyncio.to_thread(get_provider_and_url_by_model_sync, model_name)
+        provider = provider_info["provider"]
+        logger.info(f"✅ 从数据库找到模型 {model_name} 的供应商: {provider}")
+        return provider
     except Exception as e:
         logger.error(f"❌ 查找模型供应商失败: {e}")
         return _get_default_provider_by_model(model_name)
@@ -97,7 +167,7 @@ def get_provider_by_model_name_sync(model_name: str) -> str:
     return provider_info["provider"]
 
 
-def get_provider_and_url_by_model_sync(model_name: str) -> dict:
+def get_provider_and_url_by_model_sync(model_name: str, provider_hint: Optional[str] = None) -> dict:
     """
     根据模型名称从数据库配置中查找对应的供应商和 API URL（同步版本）
 
@@ -107,6 +177,10 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
     Returns:
         dict: {"provider": "google", "backend_url": "https://...", "api_key": "xxx"}
     """
+    requested_provider_hint, clean_model_name = _split_model_selection(model_name)
+    provider_hint = provider_hint or requested_provider_hint
+    lookup_model_name = clean_model_name or str(model_name or "").strip()
+
     try:
         # 使用同步 MongoDB 客户端直接查询
         from pymongo import MongoClient
@@ -123,85 +197,112 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
         if doc and "llm_configs" in doc:
             llm_configs = doc["llm_configs"]
 
-            for config_dict in llm_configs:
-                if config_dict.get("model_name") == model_name:
-                    provider = config_dict.get("provider")
-                    api_base = config_dict.get("api_base")
-                    model_api_key = config_dict.get("api_key")  # 🔥 获取模型配置的 API Key
+            matching_configs = [
+                config_dict
+                for config_dict in llm_configs
+                if config_dict.get("model_name") == lookup_model_name
+            ]
 
-                    # 从 llm_providers 集合中查找厂家配置
-                    providers_collection = db.llm_providers
-                    provider_doc = providers_collection.find_one({"name": provider})
+            if not provider_hint:
+                provider_hint = _get_default_provider_hint(doc.get("system_settings") or {}, lookup_model_name)
+                if provider_hint:
+                    logger.info(f"🔍 [同步查询] 模型 {lookup_model_name} 命中系统默认供应商提示: {provider_hint}")
 
-                    # 🔥 方案3：确定 API Key（新优先级：厂家配置 > 模型配置 > 环境变量）
-                    # 原因：
-                    # 1. 厂家配置是用户主动管理的，应该优先使用
-                    # 2. 模型配置中的 API Key 可能是历史遗留的"快照"
-                    # 3. 这样更新厂家配置后，所有模型立即生效
-                    from app.utils.api_key_utils import is_valid_api_key
+            if provider_hint and matching_configs:
+                hinted_configs = [
+                    config_dict
+                    for config_dict in matching_configs
+                    if _providers_match(config_dict.get("provider"), provider_hint)
+                ]
+                if hinted_configs:
+                    matching_configs = hinted_configs
+                    logger.info(f"✅ [同步查询] 模型 {lookup_model_name} 根据供应商提示 {provider_hint} 命中 {len(hinted_configs)} 条配置")
+                else:
+                    logger.warning(f"⚠️ [同步查询] 模型 {lookup_model_name} 未找到与供应商提示 {provider_hint} 匹配的配置，将回退到首个同名模型")
 
-                    api_key = None
-                    api_key_source = None
-                    logger.info(f"🔍 [同步查询] 模型 {model_name} API Key 获取流程:")
+            if len(matching_configs) > 1:
+                duplicate_providers = [str(config_dict.get("provider") or "") for config_dict in matching_configs]
+                logger.warning(f"⚠️ [同步查询] 模型 {lookup_model_name} 存在多个供应商配置: {duplicate_providers}，当前使用第一条匹配")
 
-                    # 优先级1：厂家配置
-                    if provider_doc and provider_doc.get("api_key"):
-                        provider_api_key = provider_doc["api_key"]
-                        logger.info(f"   - 厂家配置中的 api_key: {'有值' if provider_api_key else '空'}")
-                        if is_valid_api_key(provider_api_key):
-                            api_key = provider_api_key.strip()
-                            api_key_source = "厂家配置"
-                            logger.info(f"✅ [同步查询] ✅ 使用厂家配置的 API Key（优先级1）")
-                        else:
-                            logger.warning(f"⚠️ [同步查询] 厂家配置的 API Key 无效（可能是占位符或空值）")
+            if matching_configs:
+                config_dict = matching_configs[0]
+                provider = config_dict.get("provider")
+                api_base = config_dict.get("api_base")
+                model_api_key = config_dict.get("api_key")  # 🔥 获取模型配置的 API Key
+
+                # 从 llm_providers 集合中查找厂家配置
+                providers_collection = db.llm_providers
+                provider_doc = providers_collection.find_one({"name": provider})
+
+                # 🔥 方案3：确定 API Key（新优先级：厂家配置 > 模型配置 > 环境变量）
+                # 原因：
+                # 1. 厂家配置是用户主动管理的，应该优先使用
+                # 2. 模型配置中的 API Key 可能是历史遗留的"快照"
+                # 3. 这样更新厂家配置后，所有模型立即生效
+                from app.utils.api_key_utils import is_valid_api_key
+
+                api_key = None
+                api_key_source = None
+                logger.info(f"🔍 [同步查询] 模型 {lookup_model_name} API Key 获取流程:")
+
+                # 优先级1：厂家配置
+                if provider_doc and provider_doc.get("api_key"):
+                    provider_api_key = provider_doc["api_key"]
+                    logger.info(f"   - 厂家配置中的 api_key: {'有值' if provider_api_key else '空'}")
+                    if is_valid_api_key(provider_api_key):
+                        api_key = provider_api_key.strip()
+                        api_key_source = "厂家配置"
+                        logger.info(f"✅ [同步查询] ✅ 使用厂家配置的 API Key（优先级1）")
                     else:
-                        logger.info(f"   - 厂家配置: {'存在但无API Key' if provider_doc else '不存在'}")
+                        logger.warning(f"⚠️ [同步查询] 厂家配置的 API Key 无效（可能是占位符或空值）")
+                else:
+                    logger.info(f"   - 厂家配置: {'存在但无API Key' if provider_doc else '不存在'}")
 
-                    # 优先级2：模型配置（作为备选）
-                    if not api_key:
-                        logger.info(f"   - 模型配置中的 api_key: {'有值' if model_api_key else '空'}")
-                        if is_valid_api_key(model_api_key):
-                            api_key = model_api_key.strip()
-                            api_key_source = "模型配置"
-                            logger.info(f"✅ [同步查询] ✅ 使用模型配置的 API Key（优先级2，备选）")
+                # 优先级2：模型配置（作为备选）
+                if not api_key:
+                    logger.info(f"   - 模型配置中的 api_key: {'有值' if model_api_key else '空'}")
+                    if is_valid_api_key(model_api_key):
+                        api_key = model_api_key.strip()
+                        api_key_source = "模型配置"
+                        logger.info(f"✅ [同步查询] ✅ 使用模型配置的 API Key（优先级2，备选）")
 
-                    # 优先级3：环境变量
-                    if not api_key:
-                        env_api_key = _get_env_api_key_for_provider(provider)
-                        logger.info(f"   - 环境变量中的 api_key: {'有值' if env_api_key else '空'}")
-                        if env_api_key:
-                            api_key = env_api_key
-                            api_key_source = "环境变量"
-                            logger.info(f"✅ [同步查询] ✅ 使用环境变量的 API Key（优先级3）")
-                        else:
-                            logger.warning(f"⚠️ [同步查询] ❌ 未找到 {provider} 的 API Key（厂家配置、模型配置、环境变量都没有）")
-
-                    if api_key_source:
-                        logger.info(f"✅ [同步查询] 最终使用的 API Key 来源: {api_key_source}")
-
-                    # 确定 backend_url
-                    backend_url = None
-                    if api_base:
-                        backend_url = api_base
-                        logger.info(f"✅ [同步查询] 模型 {model_name} 使用自定义 API: {api_base}")
-                    elif provider_doc and provider_doc.get("default_base_url"):
-                        backend_url = provider_doc["default_base_url"]
-                        logger.info(f"✅ [同步查询] 模型 {model_name} 使用厂家默认 API: {backend_url}")
+                # 优先级3：环境变量
+                if not api_key:
+                    env_api_key = _get_env_api_key_for_provider(provider)
+                    logger.info(f"   - 环境变量中的 api_key: {'有值' if env_api_key else '空'}")
+                    if env_api_key:
+                        api_key = env_api_key
+                        api_key_source = "环境变量"
+                        logger.info(f"✅ [同步查询] ✅ 使用环境变量的 API Key（优先级3）")
                     else:
-                        backend_url = _get_default_backend_url(provider)
-                        logger.warning(f"⚠️ [同步查询] 厂家 {provider} 没有配置 default_base_url，使用硬编码默认值")
+                        logger.warning(f"⚠️ [同步查询] ❌ 未找到 {provider} 的 API Key（厂家配置、模型配置、环境变量都没有）")
 
-                    client.close()
-                    return {
-                        "provider": provider,
-                        "backend_url": backend_url,
-                        "api_key": api_key
-                    }
+                if api_key_source:
+                    logger.info(f"✅ [同步查询] 最终使用的 API Key 来源: {api_key_source}")
+
+                # 确定 backend_url
+                backend_url = None
+                if api_base:
+                    backend_url = api_base
+                    logger.info(f"✅ [同步查询] 模型 {lookup_model_name} 使用自定义 API: {api_base}")
+                elif provider_doc and provider_doc.get("default_base_url"):
+                    backend_url = provider_doc["default_base_url"]
+                    logger.info(f"✅ [同步查询] 模型 {lookup_model_name} 使用厂家默认 API: {backend_url}")
+                else:
+                    backend_url = _get_default_backend_url(provider)
+                    logger.warning(f"⚠️ [同步查询] 厂家 {provider} 没有配置 default_base_url，使用硬编码默认值")
+
+                client.close()
+                return {
+                    "provider": provider,
+                    "backend_url": backend_url,
+                    "api_key": api_key
+                }
 
         client.close()
 
         # 如果数据库中没有找到模型配置，使用默认映射
-        logger.warning(f"⚠️ [同步查询] 数据库中未找到模型 {model_name}，使用默认映射")
+        logger.warning(f"⚠️ [同步查询] 数据库中未找到模型 {lookup_model_name}，使用默认映射")
         provider = _get_default_provider_by_model(model_name)
 
         # 尝试从厂家配置中获取 default_base_url 和 API Key
@@ -372,6 +473,13 @@ def _get_default_provider_by_model(model_name: str) -> str:
     根据模型名称返回默认的供应商映射
     这是一个后备方案，当数据库查询失败时使用
     """
+    provider_hint, normalized_model_name = _split_model_selection(model_name)
+    if provider_hint:
+        logger.info(f"🔧 使用模型选择中的供应商提示: {model_name} -> {provider_hint}")
+        return provider_hint
+
+    model_name = normalized_model_name or model_name
+
     # 模型名称到供应商的默认映射
     # ⚠️ 注意：这只是后备方案，优先应该从数据库配置中获取
     model_provider_map = {
@@ -478,11 +586,22 @@ def create_analysis_config(
         logger.warning(f"⚠️ 无效的研究深度类型: {type(research_depth)}，使用默认标准分析")
         research_depth = "标准"
 
+    quick_model_selection = quick_model
+    deep_model_selection = deep_model
+    quick_provider_hint, quick_model = _split_model_selection(quick_model)
+    deep_provider_hint, deep_model = _split_model_selection(deep_model)
+
     # 从DEFAULT_CONFIG开始，完全复制web目录的逻辑
     config = DEFAULT_CONFIG.copy()
     config["llm_provider"] = llm_provider
     config["deep_think_llm"] = deep_model
     config["quick_think_llm"] = quick_model
+
+    if quick_provider_hint or deep_provider_hint:
+        logger.info(
+            f"🔍 [配置创建] 解析模型选择值: quick={quick_model} ({quick_provider_hint or 'auto'}), "
+            f"deep={deep_model} ({deep_provider_hint or 'auto'})"
+        )
 
     # 根据研究深度调整配置 - 支持5个级别（与Web界面保持一致）
     if research_depth == "快速":
@@ -541,8 +660,8 @@ def create_analysis_config(
     # 🔧 获取 backend_url 和 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
     try:
         # 1️⃣ 优先从数据库获取（包含模型配置的 api_base、API Key 和厂家的 default_base_url、API Key）
-        quick_provider_info = get_provider_and_url_by_model_sync(quick_model)
-        deep_provider_info = get_provider_and_url_by_model_sync(deep_model)
+        quick_provider_info = get_provider_and_url_by_model_sync(quick_model_selection, quick_provider_hint)
+        deep_provider_info = get_provider_and_url_by_model_sync(deep_model_selection, deep_provider_hint)
 
         config["backend_url"] = quick_provider_info["backend_url"]
         config["quick_api_key"] = quick_provider_info.get("api_key")  # 🔥 保存快速模型的 API Key
@@ -1423,9 +1542,14 @@ class SimpleAnalysisService:
                 )
                 logger.info(f"🤖 自动推荐模型: quick={quick_model}, deep={deep_model}")
 
+            quick_model_selection = quick_model
+            deep_model_selection = deep_model
+            _, quick_model = _split_model_selection(quick_model_selection)
+            _, deep_model = _split_model_selection(deep_model_selection)
+
             # 🔧 根据快速模型和深度模型分别查找对应的供应商和 API URL
-            quick_provider_info = get_provider_and_url_by_model_sync(quick_model)
-            deep_provider_info = get_provider_and_url_by_model_sync(deep_model)
+            quick_provider_info = get_provider_and_url_by_model_sync(quick_model_selection)
+            deep_provider_info = get_provider_and_url_by_model_sync(deep_model_selection)
 
             quick_provider = quick_provider_info["provider"]
             deep_provider = deep_provider_info["provider"]
@@ -1451,8 +1575,8 @@ class SimpleAnalysisService:
             config = create_analysis_config(
                 research_depth=research_depth,
                 selected_analysts=request.parameters.selected_analysts if request.parameters else ["market", "fundamentals"],
-                quick_model=quick_model,
-                deep_model=deep_model,
+                quick_model=quick_model_selection,
+                deep_model=deep_model_selection,
                 llm_provider=quick_provider,  # 主要使用快速模型的供应商
                 market_type=market_type  # 使用前端传递的市场类型
             )

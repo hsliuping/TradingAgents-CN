@@ -5,8 +5,12 @@
 """
 
 import os
+import json
+from ast import literal_eval
 from typing import Any, Dict, List, Optional, Union, Sequence
 from langchain_openai import ChatOpenAI
+from langchain_openai.chat_models.base import _convert_message_to_dict
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.tools import BaseTool
 from pydantic import Field, SecretStr
 from ..config.config_manager import token_tracker
@@ -22,6 +26,64 @@ class ChatDashScopeOpenAI(ChatOpenAI):
     继承 ChatOpenAI，通过 OpenAI 兼容接口调用百炼模型
     利用百炼模型的原生 OpenAI 兼容性，支持原生 Function Calling
     """
+
+    @staticmethod
+    def _normalize_tool_call_arguments(arguments: Any) -> Optional[str]:
+        if arguments in (None, ""):
+            return "{}"
+
+        if not isinstance(arguments, str):
+            return json.dumps(arguments, ensure_ascii=False)
+
+        candidate = arguments.strip()
+        if not candidate:
+            return "{}"
+
+        try:
+            parsed = json.loads(candidate)
+            return json.dumps(parsed, ensure_ascii=False)
+        except json.JSONDecodeError:
+            try:
+                parsed = literal_eval(candidate)
+                return json.dumps(parsed, ensure_ascii=False)
+            except (ValueError, SyntaxError):
+                return None
+
+    def _convert_message_to_dashscope_dict(self, message: BaseMessage) -> Optional[Dict[str, Any]]:
+        message_dict = _convert_message_to_dict(message)
+        if not isinstance(message, AIMessage):
+            return message_dict
+
+        raw_tool_calls = message_dict.get("tool_calls") or []
+        if not raw_tool_calls:
+            return message_dict
+
+        normalized_tool_calls = []
+        for tool_call in raw_tool_calls:
+            function = dict(tool_call.get("function") or {})
+            normalized_arguments = self._normalize_tool_call_arguments(function.get("arguments"))
+            if normalized_arguments is None:
+                logger.warning(
+                    f"⚠️ [DashScope] 跳过无法修复的历史 tool_call 参数: {function.get('name', 'unknown')}"
+                )
+                continue
+
+            function["arguments"] = normalized_arguments
+            normalized_tool_calls.append({**tool_call, "function": function})
+
+        if normalized_tool_calls:
+            message_dict["tool_calls"] = normalized_tool_calls
+            return message_dict
+
+        message_dict.pop("tool_calls", None)
+        if message_dict.get("content") is None:
+            message_dict["content"] = ""
+
+        if not message_dict.get("content"):
+            logger.warning("⚠️ [DashScope] 跳过仅包含无效 tool_calls 的空 assistant 历史消息")
+            return None
+
+        return message_dict
     
     def __init__(self, **kwargs):
         """初始化 DashScope OpenAI 兼容客户端"""
@@ -152,6 +214,23 @@ class ChatDashScopeOpenAI(ChatOpenAI):
             logger.error(f"⚠️ Token 追踪失败: {track_error}")
         
         return result
+
+    def _get_request_payload(
+        self,
+        input_: Any,
+        *,
+        stop: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        messages = self._convert_input(input_).to_messages()
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        if "messages" in payload:
+            payload["messages"] = [
+                message_dict
+                for message_dict in (self._convert_message_to_dashscope_dict(message) for message in messages)
+                if message_dict is not None
+            ]
+        return payload
 
 
 # 支持的模型列表

@@ -19,7 +19,8 @@ export enum TaskType {
   PORTFOLIO_HEALTH = 'portfolio_health',
   RISK_ASSESSMENT = 'risk_assessment',
   MARKET_OVERVIEW = 'market_overview',
-  SECTOR_ANALYSIS = 'sector_analysis'
+  SECTOR_ANALYSIS = 'sector_analysis',
+  ETF_ANALYSIS = 'etf_analysis'
 }
 
 /**
@@ -154,7 +155,8 @@ export const TaskTypeNames: Record<TaskType, string> = {
   [TaskType.PORTFOLIO_HEALTH]: '组合健康度',
   [TaskType.RISK_ASSESSMENT]: '风险评估',
   [TaskType.MARKET_OVERVIEW]: '市场概览',
-  [TaskType.SECTOR_ANALYSIS]: '板块分析'
+  [TaskType.SECTOR_ANALYSIS]: '板块分析',
+  [TaskType.ETF_ANALYSIS]: 'ETF分析'
 }
 
 /**

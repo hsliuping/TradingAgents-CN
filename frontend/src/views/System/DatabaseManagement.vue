@@ -684,6 +684,7 @@ const exportData = async () => {
       'platform_configs',          // 平台配置
       'datasource_groupings',      // 数据源分组
       'market_categories',         // 市场分类
+      'stock_industry_mappings',   // 行业映射数据
       'smtp_config',               // SMTP 配置
       'sync_status',               // 同步状态
 

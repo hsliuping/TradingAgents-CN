@@ -72,6 +72,7 @@ export interface FetchProviderModelsFilters {
   sort_by?: string
   sort_order?: 'asc' | 'desc'
   features?: string[] | string
+  provider_names?: string[]
   model_keyword?: string
   limit?: number
   recommended_only?: boolean
@@ -82,6 +83,7 @@ export interface FetchProviderModelsFilters {
 export interface ProviderModelInfo {
   id: string
   name: string
+  provider_vendor?: string
   description?: string
   context_length?: number
   max_tokens?: number
@@ -554,10 +556,11 @@ export const configApi = {
   },
 
   // 获取默认模型配置
-  getDefaultModels(): Promise<{ quick_analysis_model: string; deep_analysis_model: string }> {
+  getDefaultModels(): Promise<{ quick_analysis_model: string; deep_analysis_model: string; default_provider?: string }> {
     return ApiClient.get('/api/config/settings').then(settings => ({
       quick_analysis_model: settings.quick_analysis_model || 'qwen-turbo',
-      deep_analysis_model: settings.deep_analysis_model || 'qwen-max'
+      deep_analysis_model: settings.deep_analysis_model || 'qwen-max',
+      default_provider: settings.default_provider || ''
     }))
   },
 

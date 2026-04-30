@@ -43,13 +43,23 @@
 
             <el-form-item label="快速分析模型">
               <el-select v-model="inputs.quick_analysis_model" placeholder="选择模型" style="width: 100%" :loading="modelsLoading">
-                <el-option v-for="model in enabledModels" :key="model.model_name" :label="model.model_name" :value="model.model_name" />
+                <el-option
+                  v-for="model in enabledModels"
+                  :key="`${model.provider}/${model.model_name}`"
+                  :label="getModelOptionLabel(model)"
+                  :value="encodeModelSelection(model)"
+                />
               </el-select>
             </el-form-item>
 
             <el-form-item label="深度分析模型">
               <el-select v-model="inputs.deep_analysis_model" placeholder="选择模型" style="width: 100%" :loading="modelsLoading">
-                <el-option v-for="model in enabledModels" :key="model.model_name" :label="model.model_name" :value="model.model_name" />
+                <el-option
+                  v-for="model in enabledModels"
+                  :key="`${model.provider}/${model.model_name}`"
+                  :label="getModelOptionLabel(model)"
+                  :value="encodeModelSelection(model)"
+                />
               </el-select>
             </el-form-item>
 
@@ -162,6 +172,7 @@ import { configApi, type LLMConfig } from '@/api/config'
 import { analysisApi } from '@/api/analysis'
 import { marked } from 'marked'
 import { useAuthStore } from '@/stores/auth'
+import { encodeModelSelection, getModelOptionLabel, resolveModelSelection } from '@/utils/modelSelection'
 
 const route = useRoute()
 const router = useRouter()
@@ -229,10 +240,18 @@ const loadModels = async () => {
 
     // 设置默认模型（优先使用系统配置）
     if (!inputs.value.quick_analysis_model) {
-      inputs.value.quick_analysis_model = defaultModels.quick_analysis_model || 'qwen-turbo'
+      inputs.value.quick_analysis_model = resolveModelSelection(
+        defaultModels.quick_analysis_model || 'qwen-turbo',
+        enabledModels.value,
+        defaultModels.default_provider
+      )
     }
     if (!inputs.value.deep_analysis_model) {
-      inputs.value.deep_analysis_model = defaultModels.deep_analysis_model || 'qwen-max'
+      inputs.value.deep_analysis_model = resolveModelSelection(
+        defaultModels.deep_analysis_model || 'qwen-max',
+        enabledModels.value,
+        defaultModels.default_provider
+      )
     }
 
     console.log('✅ [工作流执行] 加载模型配置成功:', {
@@ -246,10 +265,10 @@ const loadModels = async () => {
     const enabled = enabledModels.value
     if (enabled.length > 0) {
       if (!inputs.value.quick_analysis_model) {
-        inputs.value.quick_analysis_model = enabled[0].model_name
+        inputs.value.quick_analysis_model = encodeModelSelection(enabled[0])
       }
       if (!inputs.value.deep_analysis_model) {
-        inputs.value.deep_analysis_model = enabled[0].model_name
+        inputs.value.deep_analysis_model = encodeModelSelection(enabled[0])
       }
     }
   } finally {

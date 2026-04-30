@@ -4838,6 +4838,11 @@ class ConfigService:
         tools_only = bool(filters.get("tools_only", False))
         exclude_preview = bool(filters.get("exclude_preview", True))
         keyword = str(filters.get("model_keyword") or "").strip().lower()
+        provider_names = {
+            str(item).strip().lower()
+            for item in (filters.get("provider_names") or [])
+            if str(item).strip()
+        }
 
         requested_modalities = {
             item.strip().lower()
@@ -4876,6 +4881,7 @@ class ConfigService:
                 continue
 
             model_id_lower = model_id.lower()
+            provider_vendor = self._infer_aihubmix_model_provider(model_id_lower)
             model_type = str(model.get("types") or "").strip().lower()
             features = {
                 item.strip().lower()
@@ -4901,6 +4907,8 @@ class ConfigService:
             if exclude_preview and any(word in model_id_lower for word in excluded_keywords):
                 continue
             if recommended_only and not model_id_lower.startswith(preferred_prefixes):
+                continue
+            if provider_names and provider_vendor not in provider_names:
                 continue
 
             filtered.append(model)
@@ -4930,6 +4938,7 @@ class ConfigService:
             formatted.append({
                 "id": model_id,
                 "name": model_id,
+                "provider_vendor": self._infer_aihubmix_model_provider(model_id),
                 "description": model.get("desc"),
                 "context_length": self._safe_int(model.get("context_length")),
                 "max_tokens": self._safe_int(model.get("max_output")),
@@ -4943,6 +4952,34 @@ class ConfigService:
                 ],
             })
         return formatted
+
+    def _infer_aihubmix_model_provider(self, model_name: str) -> str:
+        name = str(model_name or "").strip().lower()
+        if name.startswith(("gpt-", "o1", "o3", "o4", "chatgpt-")):
+            return "openai"
+        if name.startswith("claude-"):
+            return "anthropic"
+        if name.startswith("gemini"):
+            return "google"
+        if name.startswith("deepseek"):
+            return "deepseek"
+        if name.startswith("qwen"):
+            return "qwen"
+        if name.startswith(("glm", "chatglm", "zhipu")):
+            return "glm"
+        if name.startswith(("kimi", "moonshot")):
+            return "kimi"
+        if name.startswith("doubao"):
+            return "doubao"
+        if name.startswith(("minimax", "mimo-", "abab")):
+            return "minimax"
+        if name.startswith("mistral"):
+            return "mistral"
+        if name.startswith(("meta/", "meta-", "llama-")):
+            return "meta"
+        if name.startswith("jina"):
+            return "jina"
+        return "other"
 
     def _safe_int(self, value: Any, default: Optional[int] = None) -> Optional[int]:
         try:

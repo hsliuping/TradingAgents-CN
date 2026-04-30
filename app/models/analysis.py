@@ -272,6 +272,7 @@ class AnalysisTaskType(str, Enum):
     RISK_ASSESSMENT = "risk_assessment"         # 风险评估
     MARKET_OVERVIEW = "market_overview"         # 市场概览
     SECTOR_ANALYSIS = "sector_analysis"         # 板块分析
+    ETF_ANALYSIS = "etf_analysis"               # ETF分析（历史兼容，默认不注册工作流）
     # 未来可扩展更多类型...
 
 

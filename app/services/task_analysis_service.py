@@ -10,6 +10,7 @@ import logging
 import uuid
 import asyncio
 from datetime import datetime
+from pydantic import ValidationError
 
 from app.models.analysis import (
     UnifiedAnalysisTask,
@@ -59,6 +60,30 @@ class TaskAnalysisService:
         self.db = get_mongo_db()
         self.collection = self.db.unified_analysis_tasks
         self.logger = logger
+
+    def _deserialize_task(self, doc: Dict[str, Any]) -> UnifiedAnalysisTask:
+        try:
+            return UnifiedAnalysisTask(**doc)
+        except ValidationError as exc:
+            errors = exc.errors()
+            unknown_task_type_error = any(
+                error.get("loc") == ("task_type",) and error.get("type") == "enum"
+                for error in errors
+            )
+            if not unknown_task_type_error:
+                raise
+
+            raw_task_type = doc.get("task_type")
+            task_id = doc.get("task_id")
+            self.logger.warning(
+                f"⚠️ 任务 {task_id} 使用未注册的历史 task_type={raw_task_type}，按兼容模式读取"
+            )
+
+            fallback_doc = dict(doc)
+            fallback_doc["task_type"] = AnalysisTaskType.STOCK_ANALYSIS
+            task = UnifiedAnalysisTask(**fallback_doc)
+            task.task_type = raw_task_type
+            return task
     
     async def create_task(
         self,
@@ -385,7 +410,7 @@ class TaskAnalysisService:
         if not doc:
             return None
 
-        return UnifiedAnalysisTask(**doc)
+        return self._deserialize_task(doc)
 
     async def list_user_tasks(
         self,
@@ -458,7 +483,7 @@ class TaskAnalysisService:
 
         tasks = []
         async for doc in cursor:
-            tasks.append(UnifiedAnalysisTask(**doc))
+            tasks.append(self._deserialize_task(doc))
 
         self.logger.info(f"📋 返回任务数量: {len(tasks)}")
         return tasks
@@ -725,7 +750,14 @@ class TaskAnalysisService:
                                     risk_score = float(risk_score)
                                 self.logger.info(f"✅✅✅ [TaskAnalysisService] 从 risk_debate_state.judge_decision (直接JSON) 提取 risk_score: {risk_score}")
                     except (json.JSONDecodeError, Exception) as e:
-                        self.logger.warning(f"⚠️ [TaskAnalysisService] 解析 risk_debate_state.judge_decision JSON 失败: {e}")
+                        self.logger.warning(f"⚠️ [TaskAnalysisService] 解析 risk_debate_state.judge_decision JSON 失败: {e} trace=-")
+                        # JSON 格式有误时，尝试用正则直接提取 risk_score 字段
+                        score_match = re.search(r'"risk_score"\s*:\s*(\d+(?:\.\d+)?)', judge_decision_str)
+                        if score_match:
+                            risk_score = float(score_match.group(1))
+                            if risk_score > 1:
+                                risk_score = risk_score / 100.0
+                            self.logger.info(f"✅ [TaskAnalysisService] 从 risk_debate_state.judge_decision (正则兜底) 提取 risk_score: {risk_score}")
         
         # 如果还是没有，从 risk_assessment 中提取
         if risk_score is None:
