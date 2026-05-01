@@ -470,7 +470,22 @@ const summaryDisplayContent = computed(() => {
 })
 
 const detailedModuleNames = computed(() => {
-  return orderedModuleNames.value.filter(name => name !== 'trader_investment_plan')
+  return orderedModuleNames.value.filter(name => {
+    if (name === 'trader_investment_plan') {
+      return false
+    }
+
+    if (name === 'investment_plan') {
+      const reports = report.value?.reports || {}
+      const researchDecision = getResearchContentFingerprint(reports.research_team_decision)
+      const managerBrief = getResearchContentFingerprint(reports.investment_plan)
+      if (researchDecision && researchDecision === managerBrief) {
+        return false
+      }
+    }
+
+    return true
+  })
 })
 
 const getModuleDisplayName = (moduleName: string) => {
@@ -507,6 +522,38 @@ const getModuleDisplayName = (moduleName: string) => {
   }
   // 未匹配到时，做一个友好的回退：下划线转空格
   return nameMap[moduleName] || moduleName.replace(/_/g, ' ')
+}
+
+const getResearchContentFingerprint = (moduleData: any) => {
+  const prepared = prepareMarkdownContent(getModuleContent(moduleData) || '')
+  if (!prepared) {
+    return ''
+  }
+
+  const strippedTitleLines = prepared
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => {
+      const normalizedLine = line
+        .replace(/^#{1,6}\s*/, '')
+        .replace(/^[>*\-+\d.\s)]+/, '')
+        .trim()
+
+      return !['研究结论汇总', '研究经理简报', '研究团队结论', '研究结论', '研究简报'].includes(normalizedLine)
+    })
+    .join('\n')
+
+  return strippedTitleLines
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^\d+[.)]\s+/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\[(.*?)\]\([^)]*\)/g, '$1')
+    .replace(/[>_*|~]/g, ' ')
+    .replace(/[\s\u3000]+/g, '')
 }
 
 const normalizeDisplayedResearchText = (content: string) => {

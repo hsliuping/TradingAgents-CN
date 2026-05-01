@@ -1553,6 +1553,10 @@ const getAnalysisReports = (data: any) => {
   const remainingModules = availableModules.filter(key => !analysisModuleOrder.includes(key))
 
   for (const moduleKey of [...orderedModules, ...remainingModules]) {
+    if (shouldHideDuplicateResearchManagerBrief(moduleKey, reportsData)) {
+      continue
+    }
+
     const content = getModuleContent(reportsData[moduleKey])
     if (!content) {
       continue
@@ -1579,6 +1583,49 @@ const getAnalysisReports = (data: any) => {
   }
 
   return reports
+}
+
+const shouldHideDuplicateResearchManagerBrief = (moduleKey: string, reportsData: any) => {
+  if (moduleKey !== 'investment_plan') {
+    return false
+  }
+
+  const researchDecision = getResearchContentFingerprint(reportsData?.research_team_decision)
+  const managerBrief = getResearchContentFingerprint(reportsData?.investment_plan)
+
+  return !!researchDecision && researchDecision === managerBrief
+}
+
+const getResearchContentFingerprint = (moduleData: any) => {
+  const prepared = prepareMarkdownContent(getModuleContent(moduleData) || '')
+  if (!prepared) {
+    return ''
+  }
+
+  const strippedTitleLines = prepared
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => {
+      const normalizedLine = line
+        .replace(/^#{1,6}\s*/, '')
+        .replace(/^[>*\-+\d.\s)]+/, '')
+        .trim()
+
+      return !['研究结论汇总', '研究经理简报', '研究团队结论', '研究结论', '研究简报'].includes(normalizedLine)
+    })
+    .join('\n')
+
+  return strippedTitleLines
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^\d+[.)]\s+/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\[(.*?)\]\([^)]*\)/g, '$1')
+    .replace(/[>_*|~]/g, ' ')
+    .replace(/[\s\u3000]+/g, '')
 }
 
 const analysisModuleOrder = [

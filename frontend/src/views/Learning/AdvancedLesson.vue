@@ -94,6 +94,14 @@ const loading = ref(false)
 // 目录
 const tableOfContents = ref<Array<{ id: string; text: string; level: number }>>([])
 
+const stripLeadingLessonHeading = (markdown: string) => {
+  if (!markdown) {
+    return ''
+  }
+
+  return markdown.replace(/^#\s+.+?(\r?\n){1,2}/, '')
+}
+
 // 加载课程内容
 const loadLesson = async () => {
   if (!lesson.value) {
@@ -113,7 +121,7 @@ const loadLesson = async () => {
     }
 
     // 转换为HTML
-    const html = marked(markdown)
+    const html = marked(stripLeadingLessonHeading(markdown))
     lessonContent.value = rewriteCourseImageSrc(html as string)
 
     // 提取目录
