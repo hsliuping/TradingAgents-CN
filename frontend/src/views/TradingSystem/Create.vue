@@ -25,7 +25,7 @@
     <!-- 步骤内容 -->
     <div class="step-content">
       <!-- Step 0: 基本信息 -->
-      <el-card v-show="currentStep === 0">
+      <el-card v-if="currentStep === 0">
         <template #header>
           <span>基本信息</span>
         </template>
@@ -111,7 +111,7 @@
       </el-card>
 
       <!-- Step 1: 选股规则 -->
-      <el-card v-show="currentStep === 1">
+      <el-card v-if="currentStep === 1">
         <template #header>
           <span>选股规则</span>
         </template>
@@ -126,7 +126,7 @@
       </el-card>
 
       <!-- Step 2: 择时规则 -->
-      <el-card v-show="currentStep === 2">
+      <el-card v-if="currentStep === 2">
         <template #header>
           <span>择时规则</span>
         </template>
@@ -141,7 +141,7 @@
       </el-card>
 
       <!-- Step 3: 仓位规则 -->
-      <el-card v-show="currentStep === 3">
+      <el-card v-if="currentStep === 3">
         <template #header>
           <span>仓位规则</span>
         </template>
@@ -189,7 +189,7 @@
       </el-card>
 
       <!-- Step 4: 风险管理 -->
-      <el-card v-show="currentStep === 4">
+      <el-card v-if="currentStep === 4">
         <template #header>
           <span>风险管理规则</span>
         </template>
@@ -209,7 +209,7 @@
       </el-card>
 
       <!-- Step 5: 纪律规则 -->
-      <el-card v-show="currentStep === 5">
+      <el-card v-if="currentStep === 5">
         <template #header>
           <span>纪律规则</span>
         </template>
@@ -217,7 +217,7 @@
       </el-card>
 
       <!-- Step 6: 完成确认 -->
-      <el-card v-show="currentStep === 6">
+      <el-card v-if="currentStep === 6">
         <template #header>
           <span>确认信息</span>
         </template>
@@ -507,6 +507,14 @@ const systemId = computed(() => route.params.id as string)
 // 当前步骤
 const currentStep = ref(0)
 
+function createDefaultTimingRules() {
+  return {
+    market_condition: { rule: '市场环境', description: '' },
+    entry_signals: [],
+    confirmation: []
+  }
+}
+
 function createDefaultFormData(): TradingSystemCreatePayload {
   return {
     name: '',
@@ -514,7 +522,7 @@ function createDefaultFormData(): TradingSystemCreatePayload {
     style: 'medium_term',
     risk_profile: 'balanced',
     stock_selection: { must_have: [], exclude: [], bonus: [] },
-    timing: { entry_signals: [] },
+    timing: createDefaultTimingRules(),
     position: { max_per_stock: 0.2, max_holdings: 10, min_holdings: 3 },
     holding: { add_conditions: [], reduce_conditions: [] },
     risk_management: {
@@ -526,6 +534,10 @@ function createDefaultFormData(): TradingSystemCreatePayload {
     review: { checklist: [] },
     discipline: { must_do: [], must_not: [] }
   }
+}
+
+function normalizeFormData(source: Partial<TradingSystemCreatePayload>): TradingSystemCreatePayload {
+  return mergeDeep(createDefaultFormData(), source)
 }
 
 // 表单数据
@@ -611,25 +623,20 @@ onMounted(async () => {
       const sourceData = (system.status === 'published' && system.draft_data)
         ? mergeDeep(system, system.draft_data)
         : system
-      
-      formData.value = {
+
+      formData.value = normalizeFormData({
         name: sourceData.name,
         description: sourceData.description || '',
         style: sourceData.style,
         risk_profile: sourceData.risk_profile,
-        stock_selection: sourceData.stock_selection || { must_have: [], exclude: [], bonus: [] },
-        timing: sourceData.timing || { entry_signals: [] },
-        position: sourceData.position || { max_per_stock: 0.2, max_holdings: 10, min_holdings: 3 },
-        holding: sourceData.holding || { add_conditions: [], reduce_conditions: [] },
-        risk_management: sourceData.risk_management || {
-          stop_loss: { type: 'percentage', percentage: 0.08 },
-          take_profit: { type: 'percentage', percentage: 0.2 },
-          time_stop: { enabled: false, max_holding_days: 30 },
-          logical_stop: { conditions: [] }
-        },
-        review: sourceData.review || { checklist: [] },
-        discipline: sourceData.discipline || { must_do: [], must_not: [] }
-      }
+        stock_selection: sourceData.stock_selection,
+        timing: sourceData.timing,
+        position: sourceData.position,
+        holding: sourceData.holding,
+        risk_management: sourceData.risk_management,
+        review: sourceData.review,
+        discipline: sourceData.discipline
+      })
     }
   }
 })
@@ -743,7 +750,7 @@ function selectTemplate(template: TradingSystemTemplate) {
   selectedTemplate.value = template.id
 
   // 一次性替换表单，避免隐藏步骤中的编辑器在模板应用过程中反复响应每个字段变更。
-  formData.value = mergeDeep(createDefaultFormData(), {
+  formData.value = normalizeFormData({
     name: template.name,
     description: template.description,
     style: template.style,
