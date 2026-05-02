@@ -24,6 +24,7 @@ DEFAULT_NGINX_PORT=8082
 DEFAULT_MONGODB_PORT=27017
 DEFAULT_REDIS_PORT=6379
 DEFAULT_BACKEND_PORT=8000
+DEFAULT_IMAGE_TAG=latest
 
 # 打印带颜色的消息
 print_info() {
@@ -111,6 +112,18 @@ configure_ports() {
 
     echo ""
     print_success "端口配置完成！"
+    echo ""
+}
+
+# 询问部署版本
+configure_version() {
+    print_info "配置部署版本..."
+    echo ""
+
+    print_info "Docker 镜像版本 (默认: latest，如指定版本请输入如 2.1.0)"
+    read -p "请输入版本号 [直接回车使用默认]: " IMAGE_TAG
+    IMAGE_TAG=${IMAGE_TAG:-$DEFAULT_IMAGE_TAG}
+    print_success "镜像版本: $IMAGE_TAG"
     echo ""
 }
 
@@ -204,6 +217,10 @@ update_env_ports() {
     sed -i.bak "s/^REDIS_PORT=.*/REDIS_PORT=${REDIS_PORT}/g" .env
     sed -i.bak "s/^PORT=.*/PORT=${BACKEND_PORT}/g" .env
     sed -i.bak "s/^NGINX_PORT=.*/NGINX_PORT=${NGINX_PORT}/g" .env
+    sed -i.bak "s/^IMAGE_TAG=.*/IMAGE_TAG=${IMAGE_TAG}/g" .env
+    if ! grep -q "^IMAGE_TAG=" .env; then
+        echo "IMAGE_TAG=${IMAGE_TAG}" >> .env
+    fi
 
     # 删除备份文件
     rm -f .env.bak
@@ -233,9 +250,12 @@ start_docker_services() {
         exit 1
     fi
     
+    print_info "停止旧服务..."
+    docker-compose -f "$DOCKER_COMPOSE_FILE" down --remove-orphans 2>/dev/null || true
+
     print_info "拉取最新镜像..."
     docker-compose -f "$DOCKER_COMPOSE_FILE" pull
-    
+
     print_info "启动服务..."
     docker-compose -f "$DOCKER_COMPOSE_FILE" up -d
     
@@ -256,6 +276,7 @@ show_access_info() {
     echo -e "${GREEN}========================================${NC}"
     echo -e "${GREEN}  访问信息${NC}"
     echo -e "${GREEN}========================================${NC}"
+    echo -e "${BLUE}部署版本:${NC} ${IMAGE_TAG}"
     echo -e "${BLUE}前端地址:${NC} http://localhost:${NGINX_PORT}"
     echo -e "${BLUE}后端API:${NC} http://localhost:${NGINX_PORT}/api"
     echo -e "${BLUE}MongoDB:${NC} localhost:${MONGODB_PORT}"
@@ -280,6 +301,9 @@ main() {
 
     # 配置端口
     configure_ports
+
+    # 配置部署版本
+    configure_version
 
     # 下载 Docker Compose 配置文件
     download_docker_compose
