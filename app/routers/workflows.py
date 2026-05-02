@@ -11,6 +11,7 @@ from datetime import datetime
 import logging
 
 from app.core.response import ok, fail
+from app.core.permissions import require_pro
 from app.routers.auth_db import get_current_user
 from app.utils.compliance import (
     GENERIC_RESEARCH_RECOMMENDATION,
@@ -20,7 +21,11 @@ from app.utils.compliance import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/workflows", tags=["workflows"])
+router = APIRouter(
+    prefix="/api/workflows",
+    tags=["workflows"],
+    dependencies=[Depends(require_pro)]
+)
 
 
 # ==================== 数据模型 ====================

@@ -48,12 +48,12 @@
           </div>
         </el-alert>
 
-        <!-- 模板选择 -->
+        <!-- 内置范例选择 -->
         <el-card class="template-selector" shadow="never">
           <template #header>
             <div class="template-header">
               <el-icon><MagicStick /></el-icon>
-              <span>快速开始：选择模板</span>
+              <span>快速开始：选择内置范例</span>
             </div>
           </template>
           <div class="template-list">
@@ -76,7 +76,7 @@
           </div>
           <div class="template-tip">
             <el-icon><InfoFilled /></el-icon>
-            <span>选择模板后，您可以在后续步骤中根据自己的需求进行调整</span>
+            <span>选择内置范例后，您可以在后续步骤中根据自己的需求进行调整</span>
           </div>
         </el-card>
 
@@ -115,14 +115,11 @@
         <template #header>
           <span>选股规则</span>
         </template>
-        <div class="module-ai-actions">
-          <el-button type="primary" plain :loading="generatingStockSelectionRules" @click="handleGenerateStockSelectionRules">
-            <el-icon><MagicStick /></el-icon>
-            AI生成选股规则
-          </el-button>
-          <span class="module-ai-tip">结合交易风格、风险偏好和系统描述，生成必须满足/排除/加分条件</span>
-        </div>
-        <RuleEditor v-model="formData.stock_selection" type="stock_selection" />
+        <RuleEditor
+          v-model="formData.stock_selection"
+          type="stock_selection"
+          :example-data="currentExampleTemplate?.data.stock_selection"
+        />
       </el-card>
 
       <!-- Step 2: 择时规则 -->
@@ -130,14 +127,11 @@
         <template #header>
           <span>择时规则</span>
         </template>
-        <div class="module-ai-actions">
-          <el-button type="primary" plain :loading="generatingTimingRules" @click="handleGenerateTimingRules">
-            <el-icon><MagicStick /></el-icon>
-            AI生成择时规则
-          </el-button>
-          <span class="module-ai-tip">生成市场环境、技术位置、资金认可等入场信号，可再手动微调</span>
-        </div>
-        <RuleEditor v-model="formData.timing" type="timing" />
+        <RuleEditor
+          v-model="formData.timing"
+          type="timing"
+          :example-data="currentExampleTemplate?.data.timing"
+        />
       </el-card>
 
       <!-- Step 3: 仓位规则 -->
@@ -155,11 +149,14 @@
         >
           <p>合理的仓位管理是风险控制的关键。</p>
           <div class="examples">
-            <p><strong>建议：</strong></p>
+            <div class="example-actions">
+              <p><strong>示例：</strong></p>
+              <el-button size="small" plain @click="applyPositionExampleConditions">应用示例条件</el-button>
+            </div>
             <ul>
-              <li><strong>单只股票仓位：</strong>短线 10-15%，中线 15-20%，长线 20-30%</li>
-              <li><strong>持股数量：</strong>短线 5-10只，中线 3-8只，长线 2-5只</li>
-              <li><strong>分散原则：</strong>不同行业、不同板块，避免集中风险</li>
+              <li><strong>单只股票仓位上限：</strong>{{ formatExamplePercent(currentExampleTemplate.data.position.max_per_stock) }}</li>
+              <li><strong>最大持股数：</strong>{{ currentExampleTemplate.data.position.max_holdings }}只</li>
+              <li><strong>最小持股数：</strong>{{ currentExampleTemplate.data.position.min_holdings }}只</li>
             </ul>
           </div>
         </el-alert>
@@ -193,19 +190,11 @@
         <template #header>
           <span>风险管理规则</span>
         </template>
-        <div class="risk-ai-actions">
-          <el-select v-model="riskRuleStyle" class="risk-style-select" size="default">
-            <el-option label="稳健模板" value="conservative" />
-            <el-option label="平衡模板" value="balanced" />
-            <el-option label="激进模板" value="aggressive" />
-          </el-select>
-          <el-button type="primary" plain :loading="generatingRiskRules" @click="handleGenerateRiskRules">
-            <el-icon><MagicStick /></el-icon>
-            AI生成风险规则
-          </el-button>
-          <span class="risk-ai-tip">根据风格与风险偏好生成止损/止盈/时间止损/逻辑止损，可二次编辑确认</span>
-        </div>
-        <RuleEditor v-model="formData.risk_management" type="risk_management" />
+        <RuleEditor
+          v-model="formData.risk_management"
+          type="risk_management"
+          :example-data="currentExampleTemplate?.data.risk_management"
+        />
       </el-card>
 
       <!-- Step 5: 纪律规则 -->
@@ -213,7 +202,11 @@
         <template #header>
           <span>纪律规则</span>
         </template>
-        <RuleEditor v-model="formData.discipline" type="discipline" />
+        <RuleEditor
+          v-model="formData.discipline"
+          type="discipline"
+          :example-data="currentExampleTemplate?.data.discipline"
+        />
       </el-card>
 
       <!-- Step 6: 完成确认 -->
@@ -247,15 +240,16 @@
           <el-descriptions-item label="单只仓位上限">{{ positionMaxPerStock }}%</el-descriptions-item>
         </el-descriptions>
         
-        <!-- AI评估按钮 -->
+        <!-- AI检查按钮 -->
         <div class="evaluation-section">
-          <el-button type="primary" @click="handleEvaluate" :loading="evaluating" size="large">
+          <el-button type="primary" @click="handleEvaluate" :loading="evaluating" size="large" class="advanced-action-button">
             <el-icon><DocumentChecked /></el-icon>
-            AI评估交易计划
+            AI检查交易计划
+            <el-tag size="small" type="warning" effect="dark">高级</el-tag>
           </el-button>
           <div class="evaluation-tip">
             <el-icon><InfoFilled /></el-icon>
-            <span>在创建前，让AI帮您评估交易计划的优缺点和改进建议</span>
+            <span>在创建前，让AI帮助检查计划完整性、前后一致性和执行要点</span>
           </div>
         </div>
         
@@ -282,10 +276,10 @@
       </template>
     </div>
 
-    <!-- AI评估结果对话框（复用Detail.vue的对话框） -->
+    <!-- AI检查结果对话框（复用Detail.vue的对话框） -->
     <el-dialog
       v-model="evaluationDialogVisible"
-      title="AI评估结果"
+      title="AI检查结果"
       width="800px"
       :close-on-click-modal="false"
     >
@@ -296,7 +290,7 @@
             <el-icon class="spinning"><Loading /></el-icon>
           </div>
           <div class="loading-text">
-            <h3>AI正在分析您的交易计划...</h3>
+            <h3>AI正在检查您的交易计划...</h3>
             <p>请稍候，这可能需要几秒钟时间</p>
           </div>
           <div class="loading-steps">
@@ -306,11 +300,11 @@
             </div>
             <div class="step-item" :class="{ active: true }">
               <el-icon><DataAnalysis /></el-icon>
-              <span>多维度评估</span>
+              <span>多维度检查</span>
             </div>
             <div class="step-item" :class="{ active: true }">
               <el-icon><DocumentChecked /></el-icon>
-              <span>生成评估报告</span>
+              <span>生成检查报告</span>
             </div>
           </div>
         </div>
@@ -429,8 +423,9 @@
         </el-card>
 
         <div class="evaluation-bottom-actions">
-          <el-button type="primary" plain @click="optimizationDialogVisible = true">
+          <el-button type="primary" plain @click="optimizationDialogVisible = true" class="advanced-action-button">
             与AI讨论并应用建议
+            <el-tag size="small" type="warning" effect="dark">高级</el-tag>
           </el-button>
         </div>
       </div>
@@ -477,12 +472,11 @@ import {
   Loading,
   DataAnalysis
 } from '@element-plus/icons-vue'
+import { useLicenseStore } from '@/stores/license'
 import { useTradingSystemStore } from '@/stores/tradingSystem'
 import {
   evaluateTradingPlanDraft,
   publishTradingSystem,
-  generateModuleRules,
-  generateRiskManagementRules,
   type OptimizationSuggestionUpdate,
   type TradingPlanEvaluation,
   type TradingSystemUpdatePayload
@@ -494,9 +488,10 @@ import { tradingSystemTemplates, type TradingSystemTemplate } from '@/config/tra
 
 const route = useRoute()
 const router = useRouter()
+const licenseStore = useLicenseStore()
 const store = useTradingSystemStore()
 
-// 模板相关
+// 内置范例相关
 const templates = tradingSystemTemplates
 const selectedTemplate = ref<string | null>(null)
 
@@ -543,16 +538,28 @@ function normalizeFormData(source: Partial<TradingSystemCreatePayload>): Trading
 // 表单数据
 const formData = ref<TradingSystemCreatePayload>(createDefaultFormData())
 
-// AI评估相关
+const currentExampleTemplate = computed<TradingSystemTemplate>(() => {
+  if (selectedTemplate.value) {
+    const selected = templates.find(template => template.id === selectedTemplate.value)
+    if (selected) {
+      return selected
+    }
+  }
+
+  return (
+    templates.find(template => template.style === formData.value.style)
+    || templates.find(template => template.risk_profile === formData.value.risk_profile)
+    || templates[1]
+    || templates[0]
+  )
+})
+
+// AI检查相关
 const evaluating = ref(false)
 const evaluationResult = ref<TradingPlanEvaluation | null>(null)
 const evaluationDialogVisible = ref(false)
 const optimizationDialogVisible = ref(false)
 const applyingOptimization = ref(false)
-const generatingStockSelectionRules = ref(false)
-const generatingTimingRules = ref(false)
-const generatingRiskRules = ref(false)
-const riskRuleStyle = ref<'conservative' | 'balanced' | 'aggressive'>('balanced')
 
 // 发布相关
 const publishing = ref(false)
@@ -577,6 +584,33 @@ const canNext = computed(() => {
 
 // 当前系统状态
 const currentSystem = ref<any>(null)
+
+async function ensureTradingPlanCheckAccess() {
+  if (!licenseStore.licenseInfo) {
+    await licenseStore.verifyLicense()
+  }
+
+  if (licenseStore.hasFeature('trading_plan_check')) {
+    return true
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '交易计划 AI 检查为高级学员专属，请前往授权管理完成认证。',
+      '功能受限',
+      {
+        confirmButtonText: '前往授权管理',
+        cancelButtonText: '稍后再说',
+        type: 'warning'
+      }
+    )
+    router.push('/settings/license')
+  } catch {
+    // 用户取消时不做额外处理
+  }
+
+  return false
+}
 
 function isPlainObject(value: unknown): value is Record<string, any> {
   return Object.prototype.toString.call(value) === '[object Object]'
@@ -745,17 +779,17 @@ async function handlePublish() {
   }
 }
 
-// 模板选择
+// 内置范例选择
 function selectTemplate(template: TradingSystemTemplate) {
   selectedTemplate.value = template.id
 
-  // 一次性替换表单，避免隐藏步骤中的编辑器在模板应用过程中反复响应每个字段变更。
+  // 选择内置范例时只切换基础信息和示例来源，不自动写入下方规则。
   formData.value = normalizeFormData({
+    ...formData.value,
     name: template.name,
     description: template.description,
     style: template.style,
-    risk_profile: template.risk_profile,
-    ...cloneValue(template.data)
+    risk_profile: template.risk_profile
   })
 }
 
@@ -787,8 +821,47 @@ function getRiskType(risk: string) {
   return map[risk] || 'info'
 }
 
-// AI评估功能
+function formatExamplePercent(value: number | undefined) {
+  return `${Math.round(Number(value || 0) * 100)}%`
+}
+
+function hasCustomizedPosition(): boolean {
+  const defaultPosition = createDefaultFormData().position
+  return JSON.stringify(formData.value.position) !== JSON.stringify(defaultPosition)
+}
+
+async function applyPositionExampleConditions() {
+  const examplePosition = currentExampleTemplate.value?.data?.position
+  if (!examplePosition) {
+    return
+  }
+
+  if (hasCustomizedPosition()) {
+    try {
+      await ElMessageBox.confirm(
+        '将使用示例条件替换当前仓位规则，已填写内容会被覆盖。',
+        '应用示例条件',
+        {
+          type: 'warning',
+          confirmButtonText: '替换',
+          cancelButtonText: '取消'
+        }
+      )
+    } catch {
+      return
+    }
+  }
+
+  formData.value.position = mergeDeep(formData.value.position, cloneValue(examplePosition))
+  ElMessage.success('已填入示例条件，您可以继续修改')
+}
+
+// AI检查功能
 async function handleEvaluate() {
+  if (!(await ensureTradingPlanCheckAccess())) {
+    return
+  }
+
   if (!validateRiskManagementRules()) {
     return
   }
@@ -806,90 +879,15 @@ async function handleEvaluate() {
     console.log('评估响应:', res)
     if (res.success && res.data?.evaluation) {
       evaluationResult.value = res.data.evaluation
-      ElMessage.success('交易计划AI评估成功！')
+      ElMessage.success('交易计划检查完成！')
     } else {
       ElMessage.error(res.message || '评估失败')
     }
   } catch (error: any) {
-    console.error('评估交易计划失败:', error)
+    console.error('检查交易计划失败:', error)
     ElMessage.error(error.response?.data?.message || error.message || '评估失败，请稍后重试')
   } finally {
     evaluating.value = false
-  }
-}
-
-async function handleGenerateRiskRules() {
-  generatingRiskRules.value = true
-  try {
-    const res = await generateRiskManagementRules({
-      style: (formData.value.style || 'medium_term') as any,
-      risk_profile: (formData.value.risk_profile || 'balanced') as any,
-      risk_style: riskRuleStyle.value,
-      description: formData.value.description || '',
-      current_rules: formData.value.risk_management || {}
-    })
-
-    if (res.success && res.data?.risk_management) {
-      formData.value.risk_management = res.data.risk_management as any
-      ElMessage.success('已生成风险管理规则，请确认后再保存')
-    } else {
-      ElMessage.error(res.message || '生成失败')
-    }
-  } catch (error: any) {
-    console.error('生成风险管理规则失败:', error)
-    ElMessage.error(error.response?.data?.message || error.message || '生成失败，请稍后重试')
-  } finally {
-    generatingRiskRules.value = false
-  }
-}
-
-async function handleGenerateStockSelectionRules() {
-  generatingStockSelectionRules.value = true
-  try {
-    const res = await generateModuleRules({
-      module: 'stock_selection',
-      style: (formData.value.style || 'medium_term') as any,
-      risk_profile: (formData.value.risk_profile || 'balanced') as any,
-      description: formData.value.description || '',
-      current_rules: formData.value.stock_selection || {}
-    })
-
-    if (res.success && res.data?.rules) {
-      formData.value.stock_selection = mergeDeep(formData.value.stock_selection || {}, res.data.rules) as any
-      ElMessage.success('已生成选股规则，请确认后再保存')
-    } else {
-      ElMessage.error(res.message || '生成失败')
-    }
-  } catch (error: any) {
-    console.error('生成选股规则失败:', error)
-    ElMessage.error(error.response?.data?.message || error.message || '生成失败，请稍后重试')
-  } finally {
-    generatingStockSelectionRules.value = false
-  }
-}
-
-async function handleGenerateTimingRules() {
-  generatingTimingRules.value = true
-  try {
-    const res = await generateModuleRules({
-      module: 'timing',
-      style: (formData.value.style || 'medium_term') as any,
-      risk_profile: (formData.value.risk_profile || 'balanced') as any,
-      description: formData.value.description || '',
-      current_rules: formData.value.timing || {}
-    })
-
-    if (res.success && res.data?.rules) {
-      formData.value.timing = mergeDeep(formData.value.timing || {}, res.data.rules) as any
-      ElMessage.success('已生成择时规则，请确认后再保存')
-    } else {
-      ElMessage.error(res.message || '生成失败')
-    }
-  } catch (error: any) {
-    console.error('生成择时规则失败:', error)
-    ElMessage.error(error.response?.data?.message || error.message || '生成失败，请稍后重试')
-  } finally {
-    generatingTimingRules.value = false
   }
 }
 
@@ -1062,6 +1060,19 @@ function getScoreLevel(score: number): string {
     background: rgba(255, 255, 255, 0.5);
     border-radius: 4px;
 
+    .example-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+
+      p {
+        margin: 0;
+      }
+    }
+
     p {
       margin: 0 0 8px 0;
       font-weight: 600;
@@ -1179,6 +1190,12 @@ function getScoreLevel(score: number): string {
   display: flex;
   justify-content: center;
   margin-top: 4px;
+}
+
+.advanced-action-button {
+  :deep(.el-tag) {
+    margin-left: 6px;
+  }
 }
 
 .dimension-grid {

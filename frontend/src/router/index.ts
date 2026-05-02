@@ -87,7 +87,12 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'batch',
         name: 'BatchAnalysis',
-        component: () => import('@/views/Analysis/BatchAnalysis.vue')
+        component: () => import('@/views/Analysis/BatchAnalysis.vue'),
+        meta: {
+          title: '批量分析',
+          requiresAuth: true,
+          requiresPro: true
+        }
       },
 
     ]
@@ -503,19 +508,19 @@ const routes: RouteRecordRaw[] = [
         path: 'email',
         name: 'EmailNotification',
         component: () => import('@/views/Settings/EmailNotification.vue'),
-        meta: { title: '邮件通知', requiresAuth: true }
+        meta: { title: '邮件通知', requiresAuth: true, requiresPro: true }
       },
       {
         path: 'watchlist-groups',
         name: 'WatchlistGroups',
         component: () => import('@/views/Settings/WatchlistGroups.vue'),
-        meta: { title: '定时分析分组', requiresAuth: true }
+        meta: { title: '定时分析分组', requiresAuth: true, requiresPro: true }
       },
       {
         path: 'scheduled-analysis',
         name: 'ScheduledAnalysis',
         component: () => import('@/views/Settings/ScheduledAnalysis.vue'),
-        meta: { title: '定时分析配置', requiresAuth: true }
+        meta: { title: '定时分析配置', requiresAuth: true, requiresPro: true }
       },
       {
         path: 'license',
@@ -622,7 +627,6 @@ const routes: RouteRecordRaw[] = [
       title: '交易计划',
       icon: 'Tickets',
       requiresAuth: true,
-      requiresPro: true,  // 🔥 需要高级学员权限
       transition: 'slide-up'
     },
     children: [
@@ -632,8 +636,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/TradingSystem/List.vue'),
         meta: {
           title: '交易计划列表',
-          requiresAuth: true,
-          requiresPro: true  // 🔥 需要高级学员权限
+          requiresAuth: true
         }
       },
       {
@@ -643,7 +646,6 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '创建交易计划',
           requiresAuth: true,
-          requiresPro: true,  // 🔥 需要高级学员权限
           hideInMenu: true
         }
       },
@@ -654,7 +656,6 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '交易计划详情',
           requiresAuth: true,
-          requiresPro: true,  // 🔥 需要高级学员权限
           hideInMenu: true
         }
       },
@@ -665,7 +666,6 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '编辑交易计划',
           requiresAuth: true,
-          requiresPro: true,  // 🔥 需要高级学员权限
           hideInMenu: true
         }
       }
@@ -809,7 +809,7 @@ router.beforeEach(async (to, from, next) => {
       }
       
       if (!licenseStore.isPro) {
-        ElMessage.warning('此功能需要高级学员权限，请先认证')
+        ElMessage.warning('此功能为高级学员专属，请前往授权管理完成认证')
         NProgress.done()
         next('/settings/license')
         return
@@ -842,38 +842,6 @@ router.beforeEach(async (to, from, next) => {
     return
   }
 
-  // PRO 功能路由检查
-  const proRoutes = [
-    '/settings/email',
-    '/settings/watchlist-groups',
-    '/settings/scheduled-analysis',
-    '/settings/templates',  // 🔥 提示词模板需要高级学员权限
-    '/portfolio',
-    '/review',
-    '/trading-system',  // 🔥 交易计划需要高级学员权限
-    '/workflow'  // 分析流功能需要高级学员权限
-  ]
-
-  // 检查是否是 PRO 路由
-  const isProRoute = proRoutes.some(route => to.path.startsWith(route))
-  if (isProRoute && authStore.isAuthenticated) {
-    // 延迟导入 license store 避免循环依赖
-    const { useLicenseStore } = await import('@/stores/license')
-    const licenseStore = useLicenseStore()
-
-    // 确保已验证授权状态
-    if (!licenseStore.licenseInfo) {
-      await licenseStore.verifyLicense()
-    }
-
-    // 如果不是高级学员，显示提示并重定向到授权管理页面
-    if (!licenseStore.isPro) {
-      ElMessage.warning('此功能为高级学员专属，请先升级学员等级')
-      next('/settings/license')
-      return
-    }
-  }
-
   // 更新当前路由信息
   appStore.setCurrentRoute(to)
 
@@ -896,29 +864,6 @@ router.onError((error) => {
   console.error('路由错误:', error)
   NProgress.done()
   ElMessage.error('页面加载失败，请重试')
-})
-
-// 路由守卫：检查高级课程权限
-router.beforeEach((to, from, next) => {
-  // 检查是否需要高级学员权限
-  if (to.meta.requiresPro) {
-    // 动态导入License Store（避免循环依赖）
-    import('@/stores/license').then(({ useLicenseStore }) => {
-      const licenseStore = useLicenseStore()
-      if (!licenseStore.isPro) {
-        ElMessage.warning('此功能需要高级学员权限，请先认证')
-        next('/settings/license')
-        return
-      }
-      next()
-    }).catch(() => {
-      // 如果导入失败，允许访问（开发环境可能未配置）
-      console.warn('License store导入失败，允许访问')
-      next()
-    })
-  } else {
-    next()
-  }
 })
 
 export default router

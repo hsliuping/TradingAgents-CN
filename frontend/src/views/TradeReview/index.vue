@@ -5,7 +5,6 @@
       <div class="title">
         <el-icon style="margin-right:8px"><TrendCharts /></el-icon>
         <span>操作复盘</span>
-        <el-tag v-if="isPro" type="success" size="small" style="margin-left: 8px;">高级</el-tag>
       </div>
       <div class="actions">
         <el-button :icon="Refresh" text size="small" @click="refreshData">刷新</el-button>
@@ -411,7 +410,6 @@ import { ElMessage } from 'element-plus'
 import { TrendCharts, Refresh, Search, RefreshRight, Goods, Wallet } from '@element-plus/icons-vue'
 import { reviewApi, type ReviewListItem, type TradingStatistics, type ReviewableStock, type ReviewType, type PeriodicReviewListItem } from '@/api/review'
 import { portfolioApi } from '@/api/portfolio'
-import { useLicenseStore } from '@/stores/license'
 import ReviewHistoryTable from './components/ReviewHistoryTable.vue'
 import CaseLibraryTable from './components/CaseLibraryTable.vue'
 import ReviewableTradesTable from './components/ReviewableTradesTable.vue'
@@ -423,10 +421,6 @@ import HistoryPositionsTable from './components/HistoryPositionsTable.vue'
 import PositionReviewHistoryTable from './components/PositionReviewHistoryTable.vue'
 import PositionReviewDialog from './components/PositionReviewDialog.vue'
 import SaveAsCaseDialog from './components/SaveAsCaseDialog.vue'
-
-// 权限检查
-const licenseStore = useLicenseStore()
-const isPro = computed(() => licenseStore.isPro && licenseStore.hasFeature('trade_review'))
 
 // 复盘来源类型
 type ReviewSourceType = 'paper' | 'position'
@@ -1271,19 +1265,6 @@ const handlePositionCasesPageChange = (page: number) => {
 
 // 初始化
 onMounted(async () => {
-  // 确保权限状态已刷新
-  if (licenseStore.appToken) {
-    await licenseStore.verifyLicense(true)
-  }
-  
-  // 调试信息
-  console.log('[操作复盘页面] 权限状态', {
-    isPro: licenseStore.isPro,
-    plan: licenseStore.plan,
-    hasTradeReview: licenseStore.hasFeature('trade_review'),
-    licenseInfo: licenseStore.licenseInfo
-  })
-  
   // 根据默认的 reviewSource 加载对应的数据
   if (reviewSource.value === 'paper') {
     refreshData()

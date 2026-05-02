@@ -54,6 +54,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { Download, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
+import {
+  downloadAdvancedLesson,
+  getAdvancedCourseImageUrl,
+  getAdvancedLessonContent,
+} from '@/api/advancedCourses'
 import { 
   advancedCourseCategories, 
   getLesson, 
@@ -112,9 +117,8 @@ const loadLesson = async () => {
 
   loading.value = true
   try {
-    // 从静态导入映射中获取Markdown内容
-    const { getCourseContent } = await import('@/config/advancedCourseContent')
-    const markdown = await getCourseContent(lesson.value.file)
+    const response = await getAdvancedLessonContent(lesson.value.file)
+    const markdown = response.data?.content
     
     if (!markdown) {
       throw new Error(`课程文件未找到: ${lesson.value.file}`)
@@ -172,32 +176,18 @@ const downloadLesson = async () => {
   if (!lesson.value) return
 
   try {
-    const { getCourseContent } = await import('@/config/advancedCourseContent')
-    const markdown = await getCourseContent(lesson.value.file)
-    
-    if (!markdown) {
-      ElMessage.error('课程内容未找到')
-      return
-    }
-
-    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = lesson.value.file
-    a.click()
-    URL.revokeObjectURL(url)
+    await downloadAdvancedLesson(lesson.value.file)
   } catch (error: any) {
     console.error('下载失败:', error)
     ElMessage.error('下载失败：' + (error.message || '未知错误'))
   }
 }
 
-// 重写课程图片路径：将 images/lesson-XX/file.png 转为 /course-images/lesson-XX/file.png
+// 重写课程图片路径，避免将高级课程图片暴露为公开静态资源。
 function rewriteCourseImageSrc(html: string): string {
   return html.replace(
-    /(<img[^>]+src=")images\/(lesson-\d+\/[^"]+")/g,
-    '$1/course-images/$2'
+    /(<img[^>]+src=")(?:\.\/)?images\/([^"]+)(")/g,
+    (_, prefix: string, imagePath: string, suffix: string) => `${prefix}${getAdvancedCourseImageUrl(imagePath)}${suffix}`
   )
 }
 

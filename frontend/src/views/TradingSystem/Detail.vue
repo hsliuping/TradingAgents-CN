@@ -17,13 +17,15 @@
           <el-icon><Clock /></el-icon>
           版本管理
         </el-button>
-        <el-button @click="showEvaluationHistory">
+        <el-button @click="showEvaluationHistory" class="advanced-action-button">
           <el-icon><Clock /></el-icon>
-          评估历史
+          检查历史
+          <el-tag size="small" type="warning" effect="dark">高级</el-tag>
         </el-button>
-        <el-button type="primary" @click="handleEvaluate" :loading="evaluating">
+        <el-button type="primary" @click="handleEvaluate" :loading="evaluating" class="advanced-action-button">
           <el-icon><DocumentChecked /></el-icon>
-          AI评估
+          AI检查
+          <el-tag size="small" type="warning" effect="dark">高级</el-tag>
         </el-button>
         <el-button @click="handleEdit">
           <el-icon><Edit /></el-icon>
@@ -195,10 +197,10 @@
       <el-button type="primary" @click="goBack">返回列表</el-button>
     </el-empty>
 
-    <!-- AI评估结果对话框 -->
+    <!-- AI检查结果对话框 -->
     <el-dialog
       v-model="evaluationDialogVisible"
-      title="AI评估结果"
+      title="AI检查结果"
       width="800px"
       :close-on-click-modal="false"
     >
@@ -209,7 +211,7 @@
             <el-icon class="spinning"><Loading /></el-icon>
           </div>
           <div class="loading-text">
-            <h3>AI正在分析您的交易计划...</h3>
+            <h3>AI正在检查您的交易计划...</h3>
             <p>请稍候，这可能需要几秒钟时间</p>
           </div>
           <div class="loading-steps">
@@ -219,11 +221,11 @@
             </div>
             <div class="step-item" :class="{ active: true }">
               <el-icon><DataAnalysis /></el-icon>
-              <span>多维度评估</span>
+              <span>多维度检查</span>
             </div>
             <div class="step-item" :class="{ active: true }">
               <el-icon><DocumentChecked /></el-icon>
-              <span>生成评估报告</span>
+              <span>生成检查报告</span>
             </div>
           </div>
         </div>
@@ -342,16 +344,17 @@
         </el-card>
 
         <div class="evaluation-bottom-actions">
-          <el-button type="primary" plain @click="optimizationDialogVisible = true">
+          <el-button type="primary" plain @click="optimizationDialogVisible = true" class="advanced-action-button">
             与AI讨论并应用建议
+            <el-tag size="small" type="warning" effect="dark">高级</el-tag>
           </el-button>
         </div>
       </div>
 
       <!-- 错误状态 -->
       <div v-else-if="!evaluating && !evaluationResult" class="evaluation-error">
-        <el-empty description="评估失败，请重试">
-          <el-button type="primary" @click="handleEvaluate">重新评估</el-button>
+        <el-empty description="检查失败，请重试">
+          <el-button type="primary" @click="handleEvaluate">重新检查</el-button>
         </el-empty>
       </div>
       
@@ -369,10 +372,10 @@
       @apply="handleApplyOptimizationUpdates"
     />
 
-    <!-- 评估历史记录对话框 -->
+    <!-- 检查历史记录对话框 -->
     <el-dialog
       v-model="historyDialogVisible"
-      title="AI评估历史记录"
+      title="AI检查历史记录"
       width="900px"
       :close-on-click-modal="false"
     >
@@ -695,6 +698,7 @@ import {
   Plus,
   Promotion
 } from '@element-plus/icons-vue'
+import { useLicenseStore } from '@/stores/license'
 import { useTradingSystemStore } from '@/stores/tradingSystem'
 import { 
   evaluateTradingSystem, 
@@ -715,6 +719,7 @@ import OptimizationAssistantDialog from './components/OptimizationAssistantDialo
 
 const route = useRoute()
 const router = useRouter()
+const licenseStore = useLicenseStore()
 const store = useTradingSystemStore()
 
 const systemId = computed(() => route.params.id as string)
@@ -726,7 +731,7 @@ const optimizationDialogVisible = ref(false)
 const applyingOptimization = ref(false)
 const publishing = ref(false)
 
-// 评估历史相关
+// 检查历史相关
 const historyDialogVisible = ref(false)
 const loadingHistory = ref(false)
 const evaluationHistory = ref<EvaluationHistoryItem[]>([])
@@ -746,6 +751,33 @@ const versionForm = ref({
   improvement_summary: '',
   new_version: ''
 })
+
+async function ensureTradingPlanCheckAccess() {
+  if (!licenseStore.licenseInfo) {
+    await licenseStore.verifyLicense()
+  }
+
+  if (licenseStore.hasFeature('trading_plan_check')) {
+    return true
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '交易计划一致性检查为高级学员专属，请前往授权管理完成认证。',
+      '功能受限',
+      {
+        confirmButtonText: '前往授权管理',
+        cancelButtonText: '稍后再说',
+        type: 'warning'
+      }
+    )
+    router.push('/settings/license')
+  } catch {
+    // 用户取消时不做额外处理
+  }
+
+  return false
+}
 
 // 生命周期
 onMounted(() => {
@@ -823,6 +855,10 @@ async function handlePublish() {
 
 async function handleEvaluate() {
   if (!systemId.value) return
+
+  if (!(await ensureTradingPlanCheckAccess())) {
+    return
+  }
   
   evaluating.value = true
   evaluationDialogVisible.value = true
@@ -832,13 +868,13 @@ async function handleEvaluate() {
     console.log('评估响应:', res)
     if (res.success && res.data?.evaluation) {
       evaluationResult.value = res.data.evaluation
-      ElMessage.success('交易计划AI评估成功！')
+      ElMessage.success('交易计划检查完成！')
     } else {
-      ElMessage.error(res.message || '评估失败')
+      ElMessage.error(res.message || '检查失败')
     }
   } catch (error: any) {
-    console.error('评估交易计划失败:', error)
-    ElMessage.error(error.response?.data?.message || error.message || '评估失败，请稍后重试')
+    console.error('检查交易计划失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '检查失败，请稍后重试')
   } finally {
     evaluating.value = false
   }
@@ -1120,8 +1156,12 @@ function viewVersionDetail(version: TradingSystemVersion) {
   versionDetailDialogVisible.value = true
 }
 
-// 评估历史相关函数
+// 检查历史相关函数
 async function showEvaluationHistory() {
+  if (!(await ensureTradingPlanCheckAccess())) {
+    return
+  }
+
   historyDialogVisible.value = true
   historyPage.value = 1
   await loadEvaluationHistory()
@@ -1137,11 +1177,11 @@ async function loadEvaluationHistory() {
       evaluationHistory.value = res.data.items || []
       historyTotal.value = res.data.total || 0
     } else {
-      ElMessage.error(res.message || '获取评估历史失败')
+      ElMessage.error(res.message || '获取检查历史失败')
     }
   } catch (error: any) {
-    console.error('获取评估历史失败:', error)
-    ElMessage.error(error.message || '获取评估历史失败')
+    console.error('获取检查历史失败:', error)
+    ElMessage.error(error.message || '获取检查历史失败')
   } finally {
     loadingHistory.value = false
   }
@@ -1156,11 +1196,11 @@ async function viewHistoryDetail(evaluationId: string) {
       evaluationDialogVisible.value = true
       historyDialogVisible.value = false
     } else {
-      ElMessage.error(res.message || '获取评估详情失败')
+      ElMessage.error(res.message || '获取检查详情失败')
     }
   } catch (error: any) {
-    console.error('获取评估详情失败:', error)
-    ElMessage.error(error.message || '获取评估详情失败')
+    console.error('获取检查详情失败:', error)
+    ElMessage.error(error.message || '获取检查详情失败')
   }
 }
 </script>
@@ -1251,6 +1291,12 @@ async function viewHistoryDetail(evaluationId: string) {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.advanced-action-button {
+  :deep(.el-tag) {
+    margin-left: 6px;
+  }
 }
 
 .evaluation-loading {

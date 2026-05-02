@@ -228,10 +228,10 @@ const runDebug = async () => {
       const detail = e?.response?.data?.detail
       if (detail?.code === 'ADVANCED_REQUIRED') {
         ElMessageBox.confirm(
-          '提示词调试功能为高级学员专属，请升级学员等级后使用。',
+          '提示词调试功能为高级学员专属，请前往授权管理完成认证后使用。',
           '权限不足',
           {
-            confirmButtonText: '查看学员状态',
+            confirmButtonText: '前往授权管理',
             cancelButtonText: '返回',
             type: 'warning'
           }

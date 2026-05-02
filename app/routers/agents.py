@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 import logging
 
+from app.core.permissions import require_feature
 from app.core.response import ok, fail
 from app.routers.auth_db import get_current_user
 from app.core.database import get_mongo_db
@@ -77,7 +78,11 @@ from app.services.license_service import get_license_service
 
 logger = logging.getLogger("webapi")
 
-router = APIRouter(prefix="/api/agents", tags=["agents"])
+router = APIRouter(
+    prefix="/api/agents",
+    tags=["agents"],
+    dependencies=[Depends(require_feature("workflow_agents"))]
+)
 
 # ==================== 辅助函数 ====================
 

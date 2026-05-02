@@ -11,10 +11,20 @@
       >
         <p>定义您的选股标准，系统会在复盘时检查是否符合这些条件。</p>
         <div class="examples">
-          <p><strong>示例：</strong></p>
+          <div class="example-actions">
+            <p><strong>示例：</strong></p>
+            <el-button size="small" plain @click="applyExampleConditions">应用示例条件</el-button>
+          </div>
           <ul>
-            <li><strong>必须满足：</strong>市值 > 50亿、流通盘 > 10亿、近3日成交额 > 1亿</li>
-            <li><strong>排除条件：</strong>ST股票、次新股（上市不足1年）、连续跌停</li>
+            <li v-for="(item, index) in stockSelectionExample.must_have" :key="`must-${index}`">
+              <strong>必须满足：</strong>{{ item }}
+            </li>
+            <li v-for="(item, index) in stockSelectionExample.exclude" :key="`exclude-${index}`">
+              <strong>排除条件：</strong>{{ item }}
+            </li>
+            <li v-for="(item, index) in stockSelectionExample.bonus" :key="`bonus-${index}`">
+              <strong>加分条件：</strong>{{ item }}
+            </li>
           </ul>
         </div>
       </el-alert>
@@ -77,11 +87,14 @@
       >
         <p>定义您的入场时机，明确什么情况下可以买入。</p>
         <div class="examples">
-          <p><strong>示例：</strong></p>
+          <div class="example-actions">
+            <p><strong>示例：</strong></p>
+            <el-button size="small" plain @click="applyExampleConditions">应用示例条件</el-button>
+          </div>
           <ul>
-            <li><strong>市场环境：</strong>大盘处于上升趋势（MA20 > MA60）</li>
-            <li><strong>技术信号：</strong>股价突破前期高点、MACD金叉、成交量放大</li>
-            <li><strong>确认条件：</strong>连续3日收阳、突破后回踩不破支撑</li>
+            <li v-for="(item, index) in timingExampleRows" :key="`timing-${index}`">
+              <strong>{{ item.label }}：</strong>{{ item.text }}
+            </li>
           </ul>
         </div>
       </el-alert>
@@ -167,11 +180,14 @@
       >
         <p>设置止损和止盈规则，保护您的资金安全。</p>
         <div class="examples">
-          <p><strong>建议：</strong></p>
+          <div class="example-actions">
+            <p><strong>示例：</strong></p>
+            <el-button size="small" plain @click="applyExampleConditions">应用示例条件</el-button>
+          </div>
           <ul>
-            <li><strong>止损：</strong>短线 5-8%，中线 10-15%，长线 20-25%</li>
-            <li><strong>止盈：</strong>可以使用移动止盈（如跌破5日线）或分批止盈（涨20%卖1/3，涨40%卖1/3）</li>
-            <li><strong>盈亏比：</strong>建议至少 1:2（止损10%，止盈至少20%）</li>
+            <li v-for="(item, index) in riskManagementExampleRows" :key="`risk-${index}`">
+              <strong>{{ item.label }}：</strong>{{ item.text }}
+            </li>
           </ul>
         </div>
       </el-alert>
@@ -324,11 +340,17 @@
       >
         <p>明确您的交易纪律，这是交易计划的灵魂。</p>
         <div class="examples">
-          <p><strong>示例：</strong></p>
+          <div class="example-actions">
+            <p><strong>示例：</strong></p>
+            <el-button size="small" plain @click="applyExampleConditions">应用示例条件</el-button>
+          </div>
           <ul>
-            <li><strong>必须做到：</strong>严格执行止损、每次交易前检查选股条件、盈利后及时复盘总结</li>
-            <li><strong>严禁操作：</strong>追涨杀跌、重仓单只股票、频繁交易、情绪化交易</li>
-            <li><strong>违规处理：</strong>暂停交易1周、减少仓位、强制复盘</li>
+            <li v-for="(item, index) in disciplineExample.must_do" :key="`must-do-${index}`">
+              <strong>必须做到：</strong>{{ item }}
+            </li>
+            <li v-for="(item, index) in disciplineExample.must_not" :key="`must-not-${index}`">
+              <strong>严禁操作：</strong>{{ item }}
+            </li>
           </ul>
         </div>
       </el-alert>
@@ -381,14 +403,326 @@
 <script setup lang="ts">
 import { computed, watchEffect } from 'vue'
 import { Plus, Delete } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const props = defineProps<{
   modelValue: any
   type: string
+  exampleData?: any
 }>()
 
 const emit = defineEmits(['update:modelValue'])
+
+const defaultStockSelectionExample = {
+  must_have: [
+    { rule: '市值 > 100亿', description: '中大盘股' },
+    { rule: 'ROE > 15%（最近3年平均）', description: '盈利能力强' },
+    { rule: '营收增长率 > 20%（最近3年平均）', description: '成长性好' }
+  ],
+  exclude: [
+    { rule: 'ST股票', description: '风险过高' },
+    { rule: '业绩连续下滑', description: '基本面恶化' }
+  ],
+  bonus: []
+}
+
+const defaultTimingExample = {
+  market_condition: { rule: '市场环境', description: '' },
+  entry_signals: [
+    { signal: '大盘处于震荡或上升趋势', description: '市场环境' },
+    { signal: '股价回调至60日均线附近', description: '技术位置' },
+    { signal: 'MACD即将金叉或刚刚金叉', description: '动能转强' },
+    { signal: '出现重大利好消息（如业绩超预期）', description: '催化剂' },
+    { signal: '机构资金流入', description: '资金认可' }
+  ],
+  confirmation: []
+}
+
+const defaultRiskManagementExample = {
+  stop_loss: { type: 'percentage', percentage: 0.12, description: '固定12%止损' },
+  take_profit: { type: 'scaled', description: '涨30%卖1/3，涨50%卖1/3，剩余持有' }
+}
+
+const defaultDisciplineExample = {
+  must_do: [
+    { rule: '每季度财报发布后重新评估持仓', description: '跟踪基本面' },
+    { rule: '严格执行止损和止盈计划', description: '纪律执行' }
+  ],
+  must_not: [
+    { rule: '因短期波动而频繁交易', description: '保持耐心' },
+    { rule: '不做基本面研究就买入', description: '必须研究' }
+  ]
+}
+
+function cloneSectionValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function formatExampleItem(item: any): string {
+  const title = String(item?.rule || item?.signal || item?.condition || '').trim()
+  const detail = String(item?.description || item?.condition || '').trim()
+
+  if (title && detail && detail !== title) {
+    return `${title}（${detail}）`
+  }
+
+  return title || detail
+}
+
+function normalizeSectionExample(type: string, exampleData: any) {
+  if (type === 'stock_selection') {
+    const source = exampleData || defaultStockSelectionExample
+    return {
+      must_have: Array.isArray(source.must_have) ? source.must_have : [],
+      exclude: Array.isArray(source.exclude) ? source.exclude : [],
+      bonus: Array.isArray(source.bonus) ? source.bonus : []
+    }
+  }
+
+  if (type === 'timing') {
+    const source = exampleData || defaultTimingExample
+    return {
+      market_condition: source.market_condition && typeof source.market_condition === 'object'
+        ? source.market_condition
+        : { rule: '市场环境', description: '' },
+      entry_signals: Array.isArray(source.entry_signals) ? source.entry_signals : [],
+      confirmation: Array.isArray(source.confirmation) ? source.confirmation : []
+    }
+  }
+
+  if (type === 'risk_management') {
+    return exampleData || defaultRiskManagementExample
+  }
+
+  if (type === 'discipline') {
+    const source = exampleData || defaultDisciplineExample
+    return {
+      must_do: Array.isArray(source.must_do) ? source.must_do : [],
+      must_not: Array.isArray(source.must_not) ? source.must_not : []
+    }
+  }
+
+  return exampleData
+}
+
+const stockSelectionExample = computed(() => {
+  const source = normalizeSectionExample('stock_selection', props.exampleData)
+  return {
+    must_have: source.must_have.map((item: any) => formatExampleItem(item)).filter(Boolean),
+    exclude: source.exclude.map((item: any) => formatExampleItem(item)).filter(Boolean),
+    bonus: source.bonus.map((item: any) => formatExampleItem(item)).filter(Boolean)
+  }
+})
+
+const timingExampleRows = computed(() => {
+  const source = normalizeSectionExample('timing', props.exampleData)
+  const rows: Array<{ label: string, text: string }> = []
+
+  const marketRule = String(source.market_condition?.rule || '').trim()
+  const marketDescription = String(source.market_condition?.description || '').trim()
+  if (marketDescription) {
+    rows.push({ label: marketRule || '市场环境', text: marketDescription })
+  }
+
+  source.entry_signals.forEach((item: any) => {
+    const label = String(item?.signal || item?.rule || '入场信号').trim()
+    const text = String(item?.condition || item?.description || '').trim()
+    if (label || text) {
+      rows.push({ label: label || '入场信号', text: text || label })
+    }
+  })
+
+  source.confirmation.forEach((item: any) => {
+    const label = String(item?.rule || '确认条件').trim()
+    const text = String(item?.description || item?.condition || '').trim()
+    if (label || text) {
+      rows.push({ label: label || '确认条件', text: text || label })
+    }
+  })
+
+  return rows
+})
+
+function formatStopLossExample(stopLoss: any): string {
+  const source = stopLoss || {}
+  if (source.type === 'technical') {
+    return source.description || '技术位止损'
+  }
+  if (source.type === 'atr') {
+    return `ATR止损，倍数 ${Number(source.atr_multiplier || 2).toFixed(1)}`
+  }
+  const percentage = Math.round(Number(source.percentage || 0) * 100)
+  return `固定比例止损 ${percentage}%`
+}
+
+function formatTakeProfitExample(takeProfit: any): string {
+  const source = takeProfit || {}
+  if (source.type === 'trailing') {
+    return source.description || '移动止盈'
+  }
+  if (source.type === 'scaled') {
+    if (source.description) {
+      return source.description
+    }
+    if (Array.isArray(source.levels) && source.levels.length > 0) {
+      return source.levels.map((level: any) => {
+        const profit = Math.round(Number(level?.target_profit_pct || 0) * 100)
+        const ratio = Math.round(Number(level?.sell_ratio || 0) * 100)
+        return `盈利 ${profit}% 卖出 ${ratio}%`
+      }).join('；')
+    }
+    return '分批止盈'
+  }
+  const percentage = Math.round(Number(source.percentage || 0) * 100)
+  return source.description || `固定比例止盈 ${percentage}%`
+}
+
+const riskManagementExampleRows = computed(() => {
+  const source = normalizeSectionExample('risk_management', props.exampleData)
+  const rows: Array<{ label: string, text: string }> = []
+
+  if (source.stop_loss) {
+    rows.push({ label: '止损', text: formatStopLossExample(source.stop_loss) })
+  }
+  if (source.take_profit) {
+    rows.push({ label: '止盈', text: formatTakeProfitExample(source.take_profit) })
+  }
+  if (source.time_stop?.enabled) {
+    rows.push({ label: '时间止损', text: `最大持有 ${source.time_stop.max_holding_days} 天` })
+  }
+  if (Array.isArray(source.logical_stop?.conditions) && source.logical_stop.conditions.length > 0) {
+    rows.push({ label: '逻辑止损', text: source.logical_stop.conditions.join('；') })
+  }
+
+  return rows
+})
+
+const disciplineExample = computed(() => {
+  const source = normalizeSectionExample('discipline', props.exampleData)
+  return {
+    must_do: source.must_do.map((item: any) => formatExampleItem(item)).filter(Boolean),
+    must_not: source.must_not.map((item: any) => formatExampleItem(item)).filter(Boolean)
+  }
+})
+
+function hasTimingRulesContent(value: any): boolean {
+  const marketConditionDescription = String(value?.market_condition?.description || '').trim()
+  const entrySignals = Array.isArray(value?.entry_signals) ? value.entry_signals : []
+  const confirmations = Array.isArray(value?.confirmation) ? value.confirmation : []
+
+  return Boolean(marketConditionDescription)
+    || entrySignals.some((item: any) => String(item?.signal || '').trim() || String(item?.condition || '').trim())
+    || confirmations.some((item: any) => String(item?.rule || '').trim() || String(item?.description || '').trim())
+}
+
+function hasStockSelectionContent(value: any): boolean {
+  const mustHave = Array.isArray(value?.must_have) ? value.must_have : []
+  const exclude = Array.isArray(value?.exclude) ? value.exclude : []
+  const bonus = Array.isArray(value?.bonus) ? value.bonus : []
+
+  return [...mustHave, ...exclude, ...bonus].some((item: any) => {
+    return String(item?.rule || '').trim() || String(item?.description || '').trim()
+  })
+}
+
+function hasDisciplineContent(value: any): boolean {
+  const mustDo = Array.isArray(value?.must_do) ? value.must_do : []
+  const mustNot = Array.isArray(value?.must_not) ? value.must_not : []
+
+  return [...mustDo, ...mustNot].some((item: any) => {
+    return String(item?.rule || '').trim() || String(item?.description || '').trim()
+  })
+}
+
+function hasRiskManagementContent(value: any): boolean {
+  const defaultValue = {
+    stop_loss: { type: 'percentage', percentage: 0.08 },
+    take_profit: { type: 'percentage', percentage: 0.2 },
+    time_stop: { enabled: false, max_holding_days: 30 },
+    logical_stop: { conditions: [] }
+  }
+
+  const normalizedCurrent = {
+    stop_loss: sanitizeStopLoss(value?.stop_loss),
+    take_profit: sanitizeTakeProfit(value?.take_profit),
+    time_stop: value?.time_stop || { enabled: false, max_holding_days: 30 },
+    logical_stop: value?.logical_stop || { conditions: [] }
+  }
+
+  return JSON.stringify(normalizedCurrent) !== JSON.stringify(defaultValue)
+}
+
+function hasSectionContent(value: any, type: string): boolean {
+  if (type === 'stock_selection') {
+    return hasStockSelectionContent(value)
+  }
+  if (type === 'timing') {
+    return hasTimingRulesContent(value)
+  }
+  if (type === 'risk_management') {
+    return hasRiskManagementContent(value)
+  }
+  if (type === 'discipline') {
+    return hasDisciplineContent(value)
+  }
+  return false
+}
+
+function buildExampleSectionValue(type: string) {
+  const source = normalizeSectionExample(type, props.exampleData)
+
+  if (type === 'stock_selection') {
+    return {
+      must_have: cloneSectionValue(source.must_have),
+      exclude: cloneSectionValue(source.exclude),
+      bonus: cloneSectionValue(source.bonus)
+    }
+  }
+
+  if (type === 'timing') {
+    return {
+      market_condition: cloneSectionValue(source.market_condition),
+      entry_signals: cloneSectionValue(source.entry_signals),
+      confirmation: cloneSectionValue(source.confirmation)
+    }
+  }
+
+  if (type === 'risk_management') {
+    return cloneSectionValue(source)
+  }
+
+  if (type === 'discipline') {
+    return {
+      must_do: cloneSectionValue(source.must_do),
+      must_not: cloneSectionValue(source.must_not)
+    }
+  }
+
+  return cloneSectionValue(source)
+}
+
+async function applyExampleConditions() {
+  const currentValue = props.modelValue || {}
+
+  if (hasSectionContent(currentValue, props.type)) {
+    try {
+      await ElMessageBox.confirm(
+        '将使用示例条件替换当前规则，已填写内容会被覆盖。',
+        '应用示例条件',
+        {
+          type: 'warning',
+          confirmButtonText: '替换',
+          cancelButtonText: '取消'
+        }
+      )
+    } catch {
+      return
+    }
+  }
+
+  emit('update:modelValue', buildExampleSectionValue(props.type))
+  ElMessage.success('已填入示例条件，您可以继续修改')
+}
 
 function isLikelyCategoryLabel(text: string): boolean {
   const value = String(text || '').trim()
@@ -825,6 +1159,19 @@ function handleJsonChange(val: string) {
     padding: 12px;
     background: rgba(255, 255, 255, 0.5);
     border-radius: 4px;
+
+    .example-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+
+      p {
+        margin: 0;
+      }
+    }
 
     p {
       margin: 0 0 8px 0;

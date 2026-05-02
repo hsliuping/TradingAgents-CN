@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .auth_db import get_current_user
+from ..core.permissions import require_feature
 from ..core.database import get_mongo_db
 from ..utils.timezone import to_config_tz
 import logging
@@ -562,7 +563,8 @@ async def delete_report(
 async def download_report(
     report_id: str,
     format: str = Query("markdown", description="下载格式: markdown, json, pdf, docx"),
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(get_current_user),
+    _license=Depends(require_feature("export_reports"))
 ):
     """下载报告
 

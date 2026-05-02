@@ -1,10 +1,16 @@
 <template>
   <el-dialog
     v-model="dialogVisible"
-    title="AI优化助手"
     width="920px"
     :close-on-click-modal="false"
   >
+    <template #header>
+      <div class="dialog-title">
+        <span>AI优化助手</span>
+        <el-tag size="small" type="warning" effect="dark">高级</el-tag>
+      </div>
+    </template>
+
     <div class="optimization-layout">
       <el-card shadow="never" class="optimization-panel">
         <template #header>
@@ -272,6 +278,13 @@ async function requestDiscussion(question: string, history: OptimizationChatMess
   display: grid;
   grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
   gap: 16px;
+}
+
+.dialog-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
 }
 
 .optimization-panel {

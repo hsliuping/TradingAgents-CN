@@ -4,7 +4,6 @@
       <div class="title">
         <el-icon style="margin-right:8px"><PieChart /></el-icon>
         <span>持仓研究</span>
-        <el-tag type="success" size="small" style="margin-left: 8px;">高级</el-tag>
       </div>
       <div class="actions">
         <el-button :icon="Refresh" text size="small" @click="refreshData">刷新</el-button>

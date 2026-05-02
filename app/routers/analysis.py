@@ -13,6 +13,7 @@ import uuid
 import asyncio
 
 from app.routers.auth_db import get_current_user
+from app.core.permissions import require_pro
 from app.services.queue_service import get_queue_service, QueueService
 from app.services.analysis_service import get_analysis_service
 from app.services.simple_analysis_service import get_simple_analysis_service
@@ -1510,7 +1511,8 @@ async def list_user_tasks(
 @router.post("/batch", response_model=Dict[str, Any])
 async def submit_batch_analysis(
     request: BatchAnalysisRequest,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(get_current_user),
+    _license=Depends(require_pro)
 ):
     """
     提交批量分析任务（真正的并发执行）- 支持 AB 测试
@@ -1703,6 +1705,7 @@ async def analyze_single(
 async def analyze_batch(
     req: BatchAnalyzeRequest,
     user: dict = Depends(get_current_user),
+    _license=Depends(require_pro),
     svc: QueueService = Depends(get_queue_service)
 ):
     """批量分析（兼容性端点）"""
@@ -1717,7 +1720,7 @@ async def analyze_batch(
         raise HTTPException(status_code=400, detail=format_http_error_detail(e))
 
 @router.get("/batches/{batch_id}")
-async def get_batch(batch_id: str, user: dict = Depends(get_current_user), svc: QueueService = Depends(get_queue_service)):
+async def get_batch(batch_id: str, user: dict = Depends(get_current_user), _license=Depends(require_pro), svc: QueueService = Depends(get_queue_service)):
     b = await svc.get_batch(batch_id)
     if not b or b.get("user") != user["id"]:
         raise HTTPException(status_code=404, detail="batch not found")

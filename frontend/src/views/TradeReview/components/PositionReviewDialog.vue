@@ -48,7 +48,7 @@
           </template>
         </el-alert>
       </el-form-item>
-      <el-form-item label="关联交易计划">
+      <el-form-item v-if="canUseTradingPlanCheck" label="关联交易计划">
         <el-select
           v-model="form.trading_system_id"
           placeholder="选择交易计划（可选）"
@@ -71,7 +71,10 @@
             </div>
           </el-option>
         </el-select>
-        <div class="form-tip">选择后将按照交易计划规则进行合规性检查</div>
+        <div class="form-tip">选择后将按照交易计划规则进行执行一致性检查</div>
+      </el-form-item>
+      <el-form-item v-else label="执行一致性检查">
+        <div class="form-tip">高级学员可关联交易计划，对复盘结果进行执行一致性检查。</div>
       </el-form-item>
       <el-form-item label="分析维度">
         <div class="dimensions-list">
@@ -105,11 +108,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { reviewApi } from '@/api/review'
 import * as tradingSystemApi from '@/api/tradingSystem'
 import type { TradingSystem } from '@/api/tradingSystem'
+import { useLicenseStore } from '@/stores/license'
 
 interface PositionData {
   code: string
@@ -139,6 +143,8 @@ const visible = computed({
   get: () => props.modelValue,
   set: (val) => emit('update:modelValue', val)
 })
+const licenseStore = useLicenseStore()
+const canUseTradingPlanCheck = computed(() => licenseStore.hasFeature('trading_plan_check'))
 
 const form = ref({
   // 🆕 移除 analysis_version，统一使用工作流分析
@@ -155,6 +161,12 @@ const loadingTradingSystems = ref(false)
 
 // 加载交易计划列表
 const loadTradingSystems = async () => {
+  if (!canUseTradingPlanCheck.value) {
+    tradingSystems.value = []
+    form.value.trading_system_id = ''
+    return
+  }
+
   loadingTradingSystems.value = true
   try {
     const res = await tradingSystemApi.getTradingSystems()
@@ -172,12 +184,6 @@ const loadTradingSystems = async () => {
   }
 }
 
-// 组件挂载时加载交易计划列表（对话框打开时会重新加载，这里可以延迟加载）
-onMounted(() => {
-  // 延迟加载，避免不必要的请求（对话框打开时会重新加载）
-  // loadTradingSystems()
-})
-
 watch(visible, async (val) => {
   if (!val) {
     // 关闭对话框时重置表单
@@ -186,6 +192,9 @@ watch(visible, async (val) => {
       trading_system_id: ''
     }
   } else {
+    if (!licenseStore.licenseInfo) {
+      await licenseStore.verifyLicense()
+    }
     // 打开对话框时，重新加载交易计划列表并自动选中默认计划
     await loadTradingSystems()
   }
@@ -321,7 +330,7 @@ const handleSubmit = async () => {
       review_type: 'complete_trade',
       code: props.positionData.code,
       source: source,  // 使用传入的数据源
-      trading_system_id: form.value.trading_system_id || undefined,  // 传递交易计划ID
+      trading_system_id: canUseTradingPlanCheck.value ? (form.value.trading_system_id || undefined) : undefined,
       use_workflow: true  // 🆕 统一使用工作流分析
     })
 

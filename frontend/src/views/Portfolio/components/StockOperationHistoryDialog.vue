@@ -15,6 +15,7 @@
       </div>
       <div class="analysis-controls">
         <el-select
+          v-if="canUseTradingPlanCheck"
           v-model="selectedTradingSystemId"
           placeholder="选择交易计划（可选）"
           clearable
@@ -34,6 +35,9 @@
             </div>
           </el-option>
         </el-select>
+        <el-tag v-else size="small" type="info" effect="plain" style="margin-right: 8px">
+          一致性检查需高级学员
+        </el-tag>
         <el-button type="primary" size="small" :loading="analyzing" @click="handleAnalyze">
           <el-icon v-if="!analyzing"><DataAnalysis /></el-icon>
           {{ analyzing ? '分析中...' : '操作分析' }}
@@ -130,14 +134,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { DataAnalysis } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionChange } from '@/api/portfolio'
 import { reviewApi, type TradeReviewReport, type ReviewListItem } from '@/api/review'
 import * as tradingSystemApi from '@/api/tradingSystem'
 import type { TradingSystem } from '@/api/tradingSystem'
+import { useLicenseStore } from '@/stores/license'
 
 interface StockInfo {
   code: string
@@ -152,7 +156,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits(['update:modelValue'])
 
-const router = useRouter()
+const licenseStore = useLicenseStore()
 const visible = ref(props.modelValue)
 const loading = ref(false)
 const analyzing = ref(false)
@@ -166,11 +170,18 @@ const reviewReport = ref<TradeReviewReport | null>(null)
 const tradingSystems = ref<TradingSystem[]>([])
 const selectedTradingSystemId = ref<string>('')
 const loadingTradingSystems = ref(false)
+const canUseTradingPlanCheck = computed(() => licenseStore.hasFeature('trading_plan_check'))
 
 const stockInfo = computed(() => props.stock || { code: '', name: '', market: '' })
 
 // 加载交易计划列表
 const loadTradingSystems = async () => {
+  if (!canUseTradingPlanCheck.value) {
+    tradingSystems.value = []
+    selectedTradingSystemId.value = ''
+    return
+  }
+
   loadingTradingSystems.value = true
   try {
     const res = await tradingSystemApi.getTradingSystems()
@@ -182,18 +193,17 @@ const loadTradingSystems = async () => {
   }
 }
 
-// 组件挂载时加载交易计划列表
-onMounted(() => {
-  loadTradingSystems()
-})
-
-watch(() => props.modelValue, (val) => {
+watch(() => props.modelValue, async (val) => {
   visible.value = val
   if (val && props.stock) {
+    if (!licenseStore.licenseInfo) {
+      await licenseStore.verifyLicense()
+    }
     currentPage.value = 1
     reviewReport.value = null  // 重置复盘报告
     selectedTradingSystemId.value = ''  // 重置交易计划选择
     loadData()
+    await loadTradingSystems()
     loadExistingReview()  // 加载已有的复盘报告
   }
 })
@@ -265,7 +275,7 @@ const handleAnalyze = async () => {
       review_type: 'complete_trade',
       code: props.stock.code,
       source: source,  // 传递数据源参数
-      trading_system_id: selectedTradingSystemId.value || undefined  // 传递交易计划ID
+      trading_system_id: canUseTradingPlanCheck.value ? (selectedTradingSystemId.value || undefined) : undefined
     })
 
     if (reviewRes.data) {

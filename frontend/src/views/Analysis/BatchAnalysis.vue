@@ -7,6 +7,7 @@
           <h1 class="page-title">
             <el-icon class="title-icon"><Files /></el-icon>
             批量分析
+            <el-tag type="warning" effect="dark" size="small" style="margin-left: 12px; vertical-align: middle;">高级</el-tag>
           </h1>
           
           <!-- 风险提示 -->

@@ -215,6 +215,7 @@ import {
   ArrowDown
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import { ensureReportExportAccess } from '@/utils/featureAccess'
 
 // 使用路由和认证store
 const router = useRouter()
@@ -334,6 +335,10 @@ const viewReport = (report: any) => {
 }
 
 const downloadReport = async (report: any, format: string = 'markdown') => {
+  if (!(await ensureReportExportAccess(router))) {
+    return
+  }
+
   try {
     // 显示加载提示
     const loadingMsg = ElMessage({
@@ -472,6 +477,11 @@ const exportSelected = async (format: string = 'markdown') => {
     ElMessage.warning('请选择已完成的报告进行导出')
     return
   }
+
+  if (!(await ensureReportExportAccess(router))) {
+    return
+  }
+
   batchExporting.value = true
   let successCount = 0
   try {

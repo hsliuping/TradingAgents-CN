@@ -775,6 +775,8 @@ import { workflowApi, type WorkflowDefinition } from '@/api/workflow'
 import { stocksApi } from '@/api/stocks'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { useLicenseStore } from '@/stores/license'
+import { ensureReportExportAccess } from '@/utils/featureAccess'
 import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import { ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
@@ -819,6 +821,7 @@ interface AnalysisForm {
 // 使用store
 const appStore = useAppStore()
 const authStore = useAuthStore()
+const licenseStore = useLicenseStore()
 const router = useRouter()
 const route = useRoute()
 
@@ -2013,6 +2016,10 @@ const downloadReport = async (format: string = 'markdown') => {
       return
     }
 
+    if (!(await ensureReportExportAccess(router))) {
+      return
+    }
+
     // 显示加载提示
     const loadingMsg = ElMessage({
       message: `正在生成${getFormatName(format)}格式研究报告...`,
@@ -2633,13 +2640,18 @@ onMounted(async () => {
 
   // 🆕 初始检查模型适用性
   await checkModelSuitability()
-  try {
-    workflows.value = await workflowApi.getTemplates()
-    const exists = workflows.value.some(w => w.id === selectedWorkflowId.value)
-    if (!exists && workflows.value.length > 0) {
-      selectedWorkflowId.value = workflowsSorted.value[0]?.id || workflows.value[0].id
-    }
-  } catch {}
+  if (!licenseStore.licenseInfo) {
+    await licenseStore.verifyLicense()
+  }
+  if (licenseStore.hasFeature('workflow')) {
+    try {
+      workflows.value = await workflowApi.getTemplates()
+      const exists = workflows.value.some(w => w.id === selectedWorkflowId.value)
+      if (!exists && workflows.value.length > 0) {
+        selectedWorkflowId.value = workflowsSorted.value[0]?.id || workflows.value[0].id
+      }
+    } catch {}
+  }
 })
 
 </script>

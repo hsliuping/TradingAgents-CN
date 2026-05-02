@@ -92,7 +92,7 @@
       <div class="section-header">
         <div class="header-content">
           <h2>🎓 从散户到系统交易者：AI赋能的可进化投资法</h2>
-          <el-tag type="warning" size="large">PRO</el-tag>
+          <el-tag type="warning" size="large">高级学员</el-tag>
         </div>
         <p class="section-subtitle">完整的投资系统构建课程，24节精心设计的课程，涵盖从基础概念到实战应用的完整投资闭环</p>
       </div>

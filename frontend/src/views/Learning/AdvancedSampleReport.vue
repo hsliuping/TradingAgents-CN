@@ -42,14 +42,17 @@ import { useRoute, useRouter } from 'vue-router'
 import { Download } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
-import sample000001Content from '../../../../docs/courses/advanced/expanded/000001_研究报告_2026-04-30.md?raw'
+import {
+  downloadAdvancedSample,
+  getAdvancedCourseImageUrl,
+  getAdvancedSampleContent,
+} from '@/api/advancedCourses'
 
 type SampleDefinition = {
   title: string
   subtitle: string
   description: string
   fileName: string
-  content: string
 }
 
 const sampleDefinitions: Record<string, SampleDefinition> = {
@@ -57,8 +60,7 @@ const sampleDefinitions: Record<string, SampleDefinition> = {
     title: '000001 研究报告示例',
     subtitle: '平安银行 2026-04-30 真实单股研究样本',
     description: '课程里多处引用这份样本来讲解单股研究、择时和风险边界。这里保留完整原文，方便对照阅读。',
-    fileName: '000001_研究报告_2026-04-30.md',
-    content: sample000001Content
+    fileName: '000001_研究报告_2026-04-30.md'
   }
 }
 
@@ -110,9 +112,13 @@ const loadSample = async () => {
   }
 
   try {
-    const markdown = sample.value.content
+    const response = await getAdvancedSampleContent(sampleId.value)
+    const markdown = response.data?.content
+    if (!markdown) {
+      throw new Error('示例内容未找到')
+    }
     const html = marked(stripLeadingHeading(markdown))
-    sampleContent.value = html as string
+    sampleContent.value = rewriteSampleImageSrc(html as string)
 
     await nextTick()
     extractTableOfContents()
@@ -135,18 +141,18 @@ const downloadSample = async () => {
   }
 
   try {
-    const markdown = sample.value.content
-    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = sample.value.fileName
-    link.click()
-    URL.revokeObjectURL(url)
+    await downloadAdvancedSample(sampleId.value, sample.value.fileName)
   } catch (error: any) {
     console.error('下载课程示例失败:', error)
     ElMessage.error('下载课程示例失败：' + (error.message || '未知错误'))
   }
+}
+
+function rewriteSampleImageSrc(html: string): string {
+  return html.replace(
+    /(<img[^>]+src=")(?:\.\/)?images\/([^"]+)(")/g,
+    (_, prefix: string, imagePath: string, suffix: string) => `${prefix}${getAdvancedCourseImageUrl(imagePath)}${suffix}`
+  )
 }
 
 const goBack = () => {

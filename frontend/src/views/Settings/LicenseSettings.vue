@@ -164,8 +164,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Key, Delete, Refresh, Message, FolderOpened, Clock, PieChart, DocumentChecked, Tickets, SetUp, Tools, User, Document } from '@element-plus/icons-vue'
-import { useLicenseStore, type ProFeature } from '@/stores/license'
+import { Key, Delete, Refresh, Message, FolderOpened, Clock, DocumentChecked, SetUp, Tools, User, Document, Reading } from '@element-plus/icons-vue'
+import { PRO_FEATURES, useLicenseStore, type ProFeature } from '@/stores/license'
 import request, { type ApiResponse } from '@/api/request'
 
 const licenseStore = useLicenseStore()
@@ -186,7 +186,14 @@ const hasToken = computed(() => {
   // 其次检查本地存储的 token
   return !!licenseStore.appToken
 })
-const availableFeatures = computed(() => licenseInfo.value?.features || [])
+const availableFeatures = computed(() => {
+  const rawFeatures = licenseInfo.value?.features || []
+  const fallbackFeatures = licenseStore.isPro ? [...PRO_FEATURES] : []
+
+  return [...new Set([...fallbackFeatures, ...rawFeatures]
+    .map((feature) => feature === 'trading_system' ? 'trading_plan_check' : feature)
+    .filter((feature) => feature !== 'advanced_screening'))]
+})
 
 const statusTagType = computed(() => {
   const plan = licenseStore.plan
@@ -262,30 +269,31 @@ const formatExpireTime = (dateStr: string): string => {
 
 // 功能标签映射
 const featureLabels: Record<string, string> = {
+  advanced_courses: '高级学员课程',
   email_notification: '邮件通知',
   watchlist_groups: '自选股分组',
   scheduled_analysis: '定时分析',
   portfolio_analysis: '持仓研究',
   trade_review: '操作复盘',
-  trading_system: '交易计划',
+  trading_plan_check: '交易计划一致性检查',
   workflow: '分析流',
   workflow_tools: '配置Tools',
   workflow_agents: '配置Agent',
   prompt_templates: '提示词模板',
-  advanced_screening: '高级选股',
   batch_analysis: '批量分析',
   export_reports: '导出报告',
 }
 
 // 高级学员专属功能列表
 const proFeatureList = [
+  { key: 'advanced_courses', name: '高级学员课程', desc: '解锁 24 节系统课程与高级课程样本', icon: Reading },
   { key: 'email_notification', name: '邮件通知', desc: '研究完成自动发送邮件', icon: Message },
   { key: 'watchlist_groups', name: '自选股分组', desc: '按策略分组管理自选股', icon: FolderOpened },
   { key: 'scheduled_analysis', name: '定时分析', desc: '多时段自动分析', icon: Clock },
-  { key: 'portfolio_analysis', name: '持仓研究', desc: 'AI辅助持仓研究与风险观察', icon: PieChart },
-  { key: 'trade_review', name: '操作复盘', desc: '交易决策复盘分析', icon: DocumentChecked },
-  { key: 'trading_system', name: '交易计划', desc: '制定和管理交易策略计划', icon: Tickets },
-  { key: 'workflow', name: '流程管理', desc: '可视化工作流编辑器', icon: SetUp },
+  { key: 'batch_analysis', name: '批量分析', desc: '一次提交多只股票进行研究', icon: DocumentChecked },
+  { key: 'export_reports', name: '导出报告', desc: '导出研究结果与历史记录', icon: Document },
+  { key: 'trading_plan_check', name: '交易计划一致性检查', desc: '复盘时对照交易计划检查执行一致性', icon: DocumentChecked },
+  { key: 'workflow', name: '分析流', desc: '可视化管理研究流程', icon: SetUp },
   { key: 'workflow_tools', name: '配置Tools', desc: '管理和配置分析工具', icon: Tools },
   { key: 'workflow_agents', name: '配置Agent', desc: '管理和配置智能体', icon: User },
   { key: 'prompt_templates', name: '提示词模板', desc: '管理和调试提示词模板', icon: Document },

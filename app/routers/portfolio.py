@@ -1,8 +1,6 @@
 """
 持仓研究 API 路由
 提供持仓管理和 AI 研究接口
-
-[PRO功能] 此模块为专业版功能，需要专业版授权
 """
 
 from typing import Optional, List
@@ -11,7 +9,6 @@ from pydantic import BaseModel, Field
 import logging
 
 from app.routers.auth_db import get_current_user
-from app.core.permissions import require_pro
 from app.services.portfolio_service import get_portfolio_service
 from app.models.portfolio import (
     PositionCreate, PositionUpdate, PositionImport, PositionOperationRequest,
@@ -27,11 +24,9 @@ from app.core.response import ok
 
 logger = logging.getLogger("webapi")
 
-# 整个路由器都需要 PRO 权限
 router = APIRouter(
     prefix="/portfolio",
-    tags=["持仓研究"],
-    dependencies=[Depends(require_pro)]
+    tags=["持仓研究"]
 )
 
 

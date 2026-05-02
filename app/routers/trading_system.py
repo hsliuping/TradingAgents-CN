@@ -18,11 +18,15 @@ from app.models.trading_system import (
     TradingSystemVersionCreate,
     TradingSystemPublish
 )
+from app.core.permissions import require_feature
 from app.routers.auth_db import get_current_user
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/trading-systems", tags=["trading-systems"])
+router = APIRouter(
+    prefix="/api/v1/trading-systems",
+    tags=["trading-systems"]
+)
 
 
 # 统一响应格式
@@ -30,22 +34,6 @@ class ApiResponse(BaseModel):
     success: bool = True
     data: dict = {}
     message: str = ""
-
-
-class GenerateRiskRulesRequest(BaseModel):
-    style: str = "medium_term"
-    risk_profile: str = "balanced"
-    risk_style: str = "balanced"
-    description: Optional[str] = ""
-    current_rules: Optional[dict] = None
-
-
-class GenerateModuleRulesRequest(BaseModel):
-    module: str
-    style: str = "medium_term"
-    risk_profile: str = "balanced"
-    description: Optional[str] = ""
-    current_rules: Optional[dict] = None
 
 
 class OptimizationDiscussionMessage(BaseModel):
@@ -255,6 +243,7 @@ async def activate_trading_system(
 async def evaluate_trading_system(
     system_id: str,
     current_user: dict = Depends(get_current_user),
+    _license=Depends(require_feature("trading_plan_check")),
     service: TradingSystemService = Depends(get_trading_system_service),
     evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
 ):
@@ -285,6 +274,7 @@ async def get_evaluation_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=50),
     current_user: dict = Depends(get_current_user),
+    _license=Depends(require_feature("trading_plan_check")),
     evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
 ):
     """获取交易计划评估历史"""
@@ -311,6 +301,7 @@ async def get_evaluation_history(
 async def get_evaluation_detail(
     evaluation_id: str,
     current_user: dict = Depends(get_current_user),
+    _license=Depends(require_feature("trading_plan_check")),
     evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
 ):
     """获取评估详情"""
@@ -335,6 +326,7 @@ async def get_evaluation_detail(
 async def evaluate_trading_plan_draft(
     trading_plan_data: TradingSystemCreate,
     current_user: dict = Depends(get_current_user),
+    _license=Depends(require_feature("trading_plan_check")),
     evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
 ):
     """AI评估交易计划草稿（未保存的计划）"""
@@ -357,56 +349,11 @@ async def evaluate_trading_plan_draft(
         return error(message=format_user_error("评估交易计划失败", e))
 
 
-@router.post("/generate-risk-rules", response_model=ApiResponse)
-async def generate_risk_rules(
-    request: GenerateRiskRulesRequest,
-    current_user: dict = Depends(get_current_user),
-    evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
-):
-    """AI生成风险管理规则（止损/止盈/时间止损/逻辑止损）"""
-    try:
-        user_id = current_user["id"]
-        rules = await evaluation_service.generate_risk_management_rules(
-            user_id=user_id,
-            style=request.style,
-            risk_profile=request.risk_profile,
-            risk_style=request.risk_style,
-            description=request.description or "",
-            current_rules=request.current_rules or {}
-        )
-        return ok(data={"risk_management": rules}, message="风险管理规则生成成功")
-    except Exception as e:
-        logger.error(f"生成风险管理规则失败: {e}", exc_info=True)
-        return error(message=format_user_error("生成风险管理规则失败", e))
-
-
-@router.post("/generate-module-rules", response_model=ApiResponse)
-async def generate_module_rules(
-    request: GenerateModuleRulesRequest,
-    current_user: dict = Depends(get_current_user),
-    evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
-):
-    """AI生成选股/择时/风控等模块的结构化规则。"""
-    try:
-        user_id = current_user["id"]
-        rules = await evaluation_service.generate_module_rules(
-            user_id=user_id,
-            module=request.module,
-            style=request.style,
-            risk_profile=request.risk_profile,
-            description=request.description or "",
-            current_rules=request.current_rules or {}
-        )
-        return ok(data={"module": request.module, "rules": rules}, message="模块规则生成成功")
-    except Exception as e:
-        logger.error(f"生成模块规则失败: {e}", exc_info=True)
-        return error(message=format_user_error("生成模块规则失败", e))
-
-
 @router.post("/optimize-discussion", response_model=ApiResponse)
 async def discuss_trading_plan_optimization(
     request: OptimizationDiscussionRequest,
     current_user: dict = Depends(get_current_user),
+    _license=Depends(require_feature("trading_plan_check")),
     evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
 ):
     """围绕评估结果进行 AI 讨论，并返回可选择应用的结构化优化项。"""

@@ -28,7 +28,10 @@
 
     <el-menu-item index="/analysis/batch">
       <el-icon><DataAnalysis /></el-icon>
-      <template #title>批量分析</template>
+      <template #title>
+        批量分析
+        <el-tag v-if="isAdvancedMenuItem('/analysis/batch')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+      </template>
     </el-menu-item>
 
     <el-menu-item index="/reports">
@@ -40,22 +43,23 @@
       <template #title>
         <el-icon><SetUp /></el-icon>
         <span>分析流</span>
+        <el-tag v-if="isAdvancedMenuItem('/workflow')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </template>
       <el-menu-item index="/workflow">
         流程管理
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        <el-tag v-if="isAdvancedMenuItem('/workflow')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </el-menu-item>
       <el-menu-item index="/workflow/tools">
         配置Tools
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        <el-tag v-if="isAdvancedMenuItem('/workflow/tools')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </el-menu-item>
       <el-menu-item index="/workflow/agents">
         配置Agent
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        <el-tag v-if="isAdvancedMenuItem('/workflow/agents')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </el-menu-item>
       <el-menu-item index="/settings/templates">
         提示词模板
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        <el-tag v-if="isAdvancedMenuItem('/settings/templates')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </el-menu-item>
     </el-sub-menu>
 
@@ -81,26 +85,17 @@
 
     <el-menu-item index="/portfolio">
       <el-icon><PieChart /></el-icon>
-      <template #title>
-        持仓研究
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </template>
+      <template #title>持仓研究</template>
     </el-menu-item>
 
     <el-menu-item index="/review">
       <el-icon><DocumentChecked /></el-icon>
-      <template #title>
-        操作复盘
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </template>
+      <template #title>操作复盘</template>
     </el-menu-item>
 
     <el-menu-item index="/trading-system">
       <el-icon><Tickets /></el-icon>
-      <template #title>
-        交易计划
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </template>
+      <template #title>交易计划</template>
     </el-menu-item>
 
     <el-sub-menu index="/settings">
@@ -119,15 +114,15 @@
         <el-menu-item index="/settings?tab=security">安全设置</el-menu-item>
         <el-menu-item index="/settings/email">
           邮件通知
-          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+          <el-tag v-if="isAdvancedMenuItem('/settings/email')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/watchlist-groups">
           定时分析分组
-          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+          <el-tag v-if="isAdvancedMenuItem('/settings/watchlist-groups')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/scheduled-analysis">
           定时分析配置
-          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+          <el-tag v-if="isAdvancedMenuItem('/settings/scheduled-analysis')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/license">
           授权管理
@@ -192,6 +187,20 @@ import {
 
 const route = useRoute()
 const appStore = useAppStore()
+
+const advancedMenuItems = new Set([
+  '/analysis/batch',
+  '/workflow',
+  '/workflow/tools',
+  '/workflow/agents',
+  '/settings/templates',
+  '/settings/email',
+  '/settings/watchlist-groups',
+  '/settings/scheduled-analysis',
+  '/settings/data-import'
+])
+
+const isAdvancedMenuItem = (index: string) => advancedMenuItems.has(index)
 
 const activeMenu = computed(() => route.path)
 </script>

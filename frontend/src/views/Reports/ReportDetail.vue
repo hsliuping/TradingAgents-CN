@@ -157,6 +157,7 @@ import {
   ArrowDown
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import { ensureReportExportAccess } from '@/utils/featureAccess'
 import { marked } from 'marked'
 
 // 路由和认证
@@ -226,6 +227,10 @@ const fetchReportDetail = async () => {
 // 下载报告
 const downloadReport = async (format: string) => {
   if (!report.value) {
+    return
+  }
+
+  if (!(await ensureReportExportAccess(router))) {
     return
   }
 

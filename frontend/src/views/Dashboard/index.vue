@@ -79,7 +79,7 @@
                 <el-icon><Files /></el-icon>
               </div>
               <div class="action-content">
-                <h3>批量分析</h3>
+                <h3>批量分析 <span class="advanced-chip">高级</span></h3>
                 <p>同时分析多只股票，提高效率</p>
               </div>
               <el-icon class="action-arrow"><ArrowRight /></el-icon>
@@ -150,7 +150,7 @@
                 <el-icon><SetUp /></el-icon>
               </div>
               <div class="action-content">
-                <h3>流程管理</h3>
+                <h3>流程管理 <span class="advanced-chip">高级</span></h3>
                 <p>可视化工作流编辑器，配置分析流程</p>
               </div>
               <el-icon class="action-arrow"><ArrowRight /></el-icon>
@@ -161,7 +161,7 @@
                 <el-icon><UserFilled /></el-icon>
               </div>
               <div class="action-content">
-                <h3>Agent配置</h3>
+                <h3>Agent配置 <span class="advanced-chip">高级</span></h3>
                 <p>管理和配置AI分析智能体</p>
               </div>
               <el-icon class="action-arrow"><ArrowRight /></el-icon>
@@ -172,7 +172,7 @@
                 <el-icon><Tools /></el-icon>
               </div>
               <div class="action-content">
-                <h3>工具管理</h3>
+                <h3>工具管理 <span class="advanced-chip">高级</span></h3>
                 <p>配置和管理分析工具</p>
               </div>
               <el-icon class="action-arrow"><ArrowRight /></el-icon>
@@ -183,7 +183,7 @@
                 <el-icon><EditPen /></el-icon>
               </div>
               <div class="action-content">
-                <h3>提示词管理</h3>
+                <h3>提示词管理 <span class="advanced-chip">高级</span></h3>
                 <p>管理和优化AI提示词模板</p>
               </div>
               <el-icon class="action-arrow"><ArrowRight /></el-icon>
@@ -424,6 +424,7 @@ import { favoritesApi } from '@/api/favorites'
 import { analysisApi } from '@/api/analysis'
 import { newsApi } from '@/api/news'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
+import { ensureReportExportAccess } from '@/utils/featureAccess'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -542,6 +543,10 @@ const viewAnalysis = (analysis: AnalysisTask) => {
 }
 
 const downloadReport = async (analysis: AnalysisTask) => {
+  if (!(await ensureReportExportAccess(router))) {
+    return
+  }
+
   try {
     const reportId = analysis.task_id
     const res = await fetch(`/api/reports/${reportId}/download?format=markdown`, {
@@ -948,10 +953,26 @@ onMounted(async () => {
           flex: 1;
 
           h3 {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             margin: 0 0 4px 0;
             font-size: 16px;
             font-weight: 600;
             color: var(--el-text-color-primary);
+          }
+
+          .advanced-chip {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: var(--el-color-success-light-8);
+            color: var(--el-color-success-dark-2);
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1;
           }
 
           p {

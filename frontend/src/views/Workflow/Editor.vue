@@ -634,7 +634,7 @@ const getAgentLockedReason = (agent: any) => {
 
   const tier = agent.license_tier?.toLowerCase()
   if (['pro', 'enterprise'].includes(tier)) {
-    return '需要高级学员权限'
+    return '高级学员专属'
   }
 
   return '此智能体需要更高级别许可证'
