@@ -1646,6 +1646,44 @@ class DataSourceManager:
         logger.error(f"❌ 所有数据源都无法获取{symbol}的股票信息")
         return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'unknown'}
 
+    def _get_tushare_stock_info(self, symbol: str) -> Dict:
+        """使用Tushare获取股票基本信息（_try_fallback_stock_info 调用此方法）
+
+        修复说明：
+          1. 原代码 line 1616 调此方法但类里没定义 → AttributeError → Tushare 备用源永久失效
+          2. 不能调 interface.get_china_stock_info_tushare（它会回调本方法导致循环）
+          3. 直接走 tushare provider 的 stock_basic API（同步调用，省去 asyncio.run 复杂度）
+        """
+        try:
+            provider = self._get_tushare_adapter()
+            if not provider or not provider.is_available():
+                logger.warning(f"⚠️ [Tushare股票信息] provider 不可用")
+                return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'tushare_unavailable'}
+
+            ts_code = provider._normalize_ts_code(symbol)
+            df = provider.api.stock_basic(
+                ts_code=ts_code,
+                fields='ts_code,symbol,name,area,industry,market,exchange,list_date'
+            )
+            if df is None or df.empty:
+                logger.warning(f"⚠️ [Tushare股票信息] {symbol} 返回空数据")
+                return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'tushare_empty'}
+
+            row = df.iloc[0]
+            return {
+                'symbol': symbol,
+                'name': row.get('name') or f'股票{symbol}',
+                'industry': row.get('industry') or '未知',
+                'area': row.get('area') or '未知',
+                'market': row.get('market') or '未知',
+                'list_date': row.get('list_date') or '未知',
+                'exchange': row.get('exchange') or '未知',
+                'source': 'tushare',
+            }
+        except Exception as e:
+            logger.error(f"❌ [Tushare股票信息] 获取失败: {e}")
+            return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'tushare_failed'}
+
     def _get_akshare_stock_info(self, symbol: str) -> Dict:
         """使用AKShare获取股票基本信息
 
