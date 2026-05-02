@@ -20,9 +20,14 @@ docker/
 ├── nginx/                              # 🔥 Nginx 配置目录（需要创建）
 │   └── nginx-proxy.conf                # Nginx 反向代理配置（需要下载）
 ├── scripts/
-│   ├── build-compile.sh                # 编译版构建脚本（Ubuntu）
+│   ├── build-and-push-all.sh           # AMD64 构建与推送脚本
+│   ├── build-arm64.sh                  # ARM64 构建与推送脚本
+│   ├── build-compile.sh                # 仅后端编译版构建脚本
+│   ├── build-multiarch.sh              # 多架构构建与推送脚本
 │   ├── compile-code.sh                 # 代码编译脚本
-│   └── push-images.sh                  # 推送镜像脚本
+│   ├── push-images.sh                  # 推送本地已构建镜像
+│   ├── release-version.ps1             # PowerShell 版版本发布脚本
+│   └── version-utils.sh                # Bash 版版本号解析辅助脚本
 └── build/                              # 临时构建目录（.gitignore）
     └── compiled/                       # 编译后的代码
 ```
@@ -61,7 +66,7 @@ mkdir -p logs data runtime nginx
    - 在**宿主机**上编译代码（使用 Cython）
    - Docker 镜像只包含编译后的 `.pyc` 和 `.so` 文件
    - Docker 镜像**不需要**安装编译工具，保持精简
-3. **推送到 Docker Hub**：`hsliup/tradingagents-backend:latest`
+3. **推送到 Docker Hub**：支持按 `VERSION` 或显式 `--tag` 发布版本镜像，并可同步更新 `latest`
 4. **独立测试**：不影响现有的根目录 Docker 配置
 
 ## 📐 构建流程
@@ -138,11 +143,15 @@ nano ../.env  # 配置 API 密钥
 # ========================================
 # 步骤 4: 构建并推送 Docker 镜像（前后端）
 # ========================================
+# 默认读取项目根目录 VERSION，例如 2.1.0
 # 一键构建并推送前后端镜像
 ./scripts/build-and-push-all.sh
 
+# 或显式指定版本号
+./scripts/build-and-push-all.sh -t 2.1.0
+
 # 或者只构建后端镜像
-./scripts/build-compile.sh --push
+./scripts/build-compile.sh --push -t 2.1.0
 
 # ========================================
 # 步骤 5: 启动服务
@@ -163,9 +172,12 @@ docker-compose -f docker-compose.compiled.yml up -d
 cp docker/.env.docker .env
 nano .env  # 配置 API 密钥
 
+# 锁定部署版本（示例：2.1.0）
+echo "IMAGE_TAG=2.1.0" >> .env
+
 # 2. 拉取镜像
-docker pull hsliup/tradingagents-pro-backend:latest
-docker pull hsliup/tradingagents-pro-frontend:latest
+docker pull hsliup/tradingagents-pro-backend:2.1.0
+docker pull hsliup/tradingagents-pro-frontend:2.1.0
 
 # 3. 启动服务
 docker-compose -f docker/docker-compose.compiled.yml up -d
@@ -222,6 +234,7 @@ docker-compose -f docker/docker-compose.compiled.yml up -d
 ## 🔧 Docker Compose 配置说明
 
 ### docker-compose.compiled.yml（新版本 - 测试中）
+
 - **用途**: 编译版生产配置
 - **服务**: backend（编译版）, frontend, mongodb, redis, nginx
 - **特点**:
@@ -232,19 +245,21 @@ docker-compose -f docker/docker-compose.compiled.yml up -d
   - 无跨域问题
 - **适用**: Ubuntu 22.04 服务器生产环境
 - **镜像**:
-  - `hsliup/tradingagents-backend:latest`
-  - `hsliup/tradingagents-frontend:latest`
+  - `hsliup/tradingagents-pro-backend:<IMAGE_TAG>`
+  - `hsliup/tradingagents-pro-frontend:<IMAGE_TAG>`
 
 ---
 
 **以下是根目录的旧版配置（保留用于兼容）**:
 
 ### ../docker-compose.yml
+
 - **用途**: 基础配置
 - **服务**: backend, frontend, mongodb, redis
 - **端口**: 8000 (backend), 80 (frontend)
 
 ### ../docker-compose.hub.nginx.yml（推荐）
+
 - **用途**: 生产环境配置
 - **服务**: backend, frontend, mongodb, redis, nginx
 - **特点**:
@@ -252,11 +267,12 @@ docker-compose -f docker/docker-compose.compiled.yml up -d
   - 前后端统一入口（80 端口）
   - 无跨域问题
   - 支持从 Docker Hub 拉取镜像
-- **镜像**: `hsliup/tradingagents-backend:latest`, `hsliup/tradingagents-frontend:latest`
+- **镜像**: `hsliup/tradingagents-pro-backend:latest`, `hsliup/tradingagents-pro-frontend:latest`
 
 ### ../docker-compose.hub.nginx.arm.yml
+
 - **用途**: ARM64 架构（如树莓派、Apple Silicon）
-- **镜像**: `hsliup/tradingagents-backend-arm64:latest`
+- **镜像**: `hsliup/tradingagents-pro-backend:latest-arm64`
 
 ## 🛠️ 构建脚本说明
 
@@ -303,16 +319,43 @@ pip3 install cython
 
 ---
 
-### scripts/build-and-push-all.sh ⭐ 推荐（AMD64）
-**一键构建并推送前后端镜像**（Pro 版本专用，AMD64 架构）
+## 🏷️ 版本号发布规则
 
-**功能**:
+Docker 发布脚本现在统一支持按版本号发布：
+
+1. 如果没有传 `-t` / `--tag`，默认读取项目根目录 `VERSION`。
+2. 如果显式传入 `-t 2.1.0`，则按该标签构建和推送。
+3. 当发布的是版本标签而不是 `latest` 时，默认会同步更新 `latest` 别名。
+4. 如果不想更新 `latest`，可以加 `--no-push-latest`。
+
+例如当前 `VERSION` 为 `2.1.0` 时：
+
+```bash
+./docker/scripts/build-multiarch.sh -r hsliup
+```
+
+会发布：
+
+- `hsliup/tradingagents-pro-backend:2.1.0`
+- `hsliup/tradingagents-pro-frontend:2.1.0`
+- `hsliup/tradingagents-pro-backend:latest`
+- `hsliup/tradingagents-pro-frontend:latest`
+
+---
+
+### scripts/build-and-push-all.sh ⭐ 推荐（AMD64）
+
+一键构建并推送前后端镜像（Pro 版本专用，AMD64 架构）。
+
+#### build-and-push-all 功能
+
 1. 编译 Python 代码为 .pyc 和 .so
 2. 构建后端 Docker 镜像（编译版）
 3. 构建前端 Docker 镜像
 4. 推送所有镜像到 Docker Hub
 
-**使用方法**:
+#### build-and-push-all 使用方法
+
 ```bash
 # 完整构建并推送（推荐）
 ./docker/scripts/build-and-push-all.sh
@@ -329,35 +372,48 @@ pip3 install cython
 # 只构建后端
 ./docker/scripts/build-and-push-all.sh --skip-frontend
 
+# 按 VERSION 发布
+./docker/scripts/build-and-push-all.sh -r hsliup
+
 # 指定版本号和仓库
-./docker/scripts/build-and-push-all.sh -r hsliup -t v1.0.0
+./docker/scripts/build-and-push-all.sh -r hsliup -t 2.1.0
+
+# 发布版本号但不更新 latest
+./docker/scripts/build-and-push-all.sh -r hsliup -t 2.1.0 --no-push-latest
 ```
 
-**参数**:
+#### build-and-push-all 参数
+
 - `-r, --registry REGISTRY`: Docker Hub 用户名（默认: hsliup）
-- `-t, --tag TAG`: 镜像标签（默认: latest）
+- `-t, --tag TAG`: 镜像标签（默认: 读取根目录 VERSION）
 - `--skip-compile`: 跳过代码编译
 - `--skip-backend`: 跳过后端镜像构建
 - `--skip-frontend`: 跳过前端镜像构建
 - `--skip-push`: 只构建不推送
+- `--no-push-latest`: 推送版本标签时不额外更新 latest
 - `-h, --help`: 显示帮助信息
 
-**输出镜像**:
-- 后端: `hsliup/tradingagents-pro-backend:latest`
-- 前端: `hsliup/tradingagents-pro-frontend:latest`
+#### build-and-push-all 输出镜像
+
+- 后端: `hsliup/tradingagents-pro-backend:<VERSION>`
+- 前端: `hsliup/tradingagents-pro-frontend:<VERSION>`
+- 可选别名: `hsliup/tradingagents-pro-backend:latest`、`hsliup/tradingagents-pro-frontend:latest`
 
 ---
 
 ### scripts/build-arm64.sh
-**ARM64 架构镜像构建**
 
-**功能**:
+ARM64 架构镜像构建。
+
+#### build-arm64 功能
+
 1. 使用 Docker Buildx 构建 ARM64 镜像
 2. 支持跨平台构建（在 x86_64 上构建 ARM64）
 3. 构建后端和前端 ARM64 镜像
 4. 推送到 Docker Hub
 
-**使用方法**:
+#### build-arm64 使用方法
+
 ```bash
 # 完整构建并推送（ARM64）
 ./docker/scripts/build-arm64.sh
@@ -368,36 +424,49 @@ pip3 install cython
 # 只构建前端
 ./docker/scripts/build-arm64.sh --skip-backend
 
+# 按 VERSION 发布 ARM64 镜像
+./docker/scripts/build-arm64.sh -r hsliup
+
 # 指定版本号
-./docker/scripts/build-arm64.sh -r hsliup -t v1.0.0
+./docker/scripts/build-arm64.sh -r hsliup -t 2.1.0
+
+# 发布版本号但不更新 latest-arm64
+./docker/scripts/build-arm64.sh -r hsliup -t 2.1.0 --no-push-latest
 ```
 
-**参数**:
+#### build-arm64 参数
+
 - `-r, --registry REGISTRY`: Docker Hub 用户名（默认: hsliup）
-- `-t, --tag TAG`: 镜像标签（默认: latest）
+- `-t, --tag TAG`: 镜像标签（默认: 读取根目录 VERSION）
 - `--skip-compile`: 跳过代码编译
 - `--skip-backend`: 跳过后端镜像构建
 - `--skip-frontend`: 跳过前端镜像构建
 - `--skip-push`: 只构建不推送
 - `--use-qemu`: 使用 QEMU 模拟器（跨平台构建）
+- `--no-push-latest`: 推送版本标签时不额外更新 latest-arm64
 
-**输出镜像**:
-- 后端: `hsliup/tradingagents-pro-backend:latest-arm64`
-- 前端: `hsliup/tradingagents-pro-frontend:latest-arm64`
+#### build-arm64 输出镜像
+
+- 后端: `hsliup/tradingagents-pro-backend:<VERSION>-arm64`
+- 前端: `hsliup/tradingagents-pro-frontend:<VERSION>-arm64`
+- 可选别名: `hsliup/tradingagents-pro-backend:latest-arm64`、`hsliup/tradingagents-pro-frontend:latest-arm64`
 
 ---
 
 ### scripts/build-multiarch.sh ⭐ 多架构（推荐）
-**同时构建 AMD64 和 ARM64 镜像**
 
-**功能**:
+同时构建 AMD64 和 ARM64 镜像。
+
+#### build-multiarch 功能
+
 1. 使用 Docker Buildx 构建多架构镜像
 2. 同时支持 AMD64 和 ARM64
 3. **在目标架构上编译代码**（自动生成对应架构的 .so 文件）
 4. 自动创建 manifest（Docker 自动选择架构）
 5. 推送到 Docker Hub
 
-**使用方法**:
+#### build-multiarch 使用方法
+
 ```bash
 # 完整构建并推送（多架构）
 ./docker/scripts/build-multiarch.sh
@@ -405,29 +474,41 @@ pip3 install cython
 # 只构建前端
 ./docker/scripts/build-multiarch.sh --skip-backend
 
+# 按 VERSION 发布多架构镜像
+./docker/scripts/build-multiarch.sh -r hsliup
+
 # 指定版本号
-./docker/scripts/build-multiarch.sh -r hsliup -t v1.0.0
+./docker/scripts/build-multiarch.sh -r hsliup -t 2.1.0
+
+# 发布版本号但不更新 latest
+./docker/scripts/build-multiarch.sh -r hsliup -t 2.1.0 --no-push-latest
 ```
 
-**参数**:
+#### build-multiarch 参数
+
 - `-r, --registry REGISTRY`: Docker Hub 用户名（默认: hsliup）
-- `-t, --tag TAG`: 镜像标签（默认: latest）
+- `-t, --tag TAG`: 镜像标签（默认: 读取根目录 VERSION）
 - `--skip-backend`: 跳过后端镜像构建
 - `--skip-frontend`: 跳过前端镜像构建
 - `--skip-push`: 只构建不推送（注意：多架构构建会自动推送）
+- `--no-push-latest`: 推送版本标签时不额外更新 latest
 
-**输出镜像**:
-- 后端: `hsliup/tradingagents-pro-backend:latest` (AMD64 + ARM64)
-- 前端: `hsliup/tradingagents-pro-frontend:latest` (AMD64 + ARM64)
+#### build-multiarch 输出镜像
 
-**优势**:
+- 后端: `hsliup/tradingagents-pro-backend:<VERSION>` (AMD64 + ARM64)
+- 前端: `hsliup/tradingagents-pro-frontend:<VERSION>` (AMD64 + ARM64)
+- 可选别名: `hsliup/tradingagents-pro-backend:latest`、`hsliup/tradingagents-pro-frontend:latest`
+
+#### build-multiarch 优势
+
 - ✅ 一次构建，多架构支持
 - ✅ Docker 自动选择匹配的架构
 - ✅ 自动在目标架构上编译（AMD64 生成 AMD64 的 .so，ARM64 生成 ARM64 的 .so）
 - ✅ 简化部署流程
 - ✅ 无需预编译，构建时自动编译和清理
 
-**编译和清理**:
+#### build-multiarch 编译和清理
+
 - `core/licensing/` → Cython 编译为 `.so`（最强保护）
 - `core/` 其他模块 → 字节码编译为 `.pyc`
 - `app/` → 字节码编译为 `.pyc`
@@ -439,14 +520,17 @@ pip3 install cython
 ---
 
 ### scripts/build-compile.sh
+
 在 Ubuntu 22.04 服务器上构建编译版**后端**镜像的脚本。
 
-**功能**:
+#### build-compile 功能
+
 1. 调用 `compile-code.sh` 编译代码
 2. 构建后端 Docker 镜像
 3. 可选推送到 Docker Hub
 
-**使用方法**:
+#### build-compile 使用方法
+
 ```bash
 # 只构建后端镜像
 ./docker/scripts/build-compile.sh
@@ -455,23 +539,32 @@ pip3 install cython
 ./docker/scripts/build-compile.sh --push
 
 # 指定版本号
-./docker/scripts/build-compile.sh -t v1.0.0 --push
+./docker/scripts/build-compile.sh -t 2.1.0 --push
+
+# 发布版本号但不更新 latest
+./docker/scripts/build-compile.sh -t 2.1.0 --push --no-push-latest
 ```
 
-**参数**:
-- `-p, --push`: 构建后推送到 Docker Hub
-- `-t, --tag TAG`: 指定版本号（默认: latest）
-- `-r, --registry REGISTRY`: 指定 Docker Hub 用户名（默认: hsliup）
+#### build-compile 参数
 
-**输出镜像**:
-- 后端: `hsliup/tradingagents-pro-backend:latest`
+- `-p, --push`: 构建后推送到 Docker Hub
+- `-t, --tag TAG`: 指定版本号（默认: 读取根目录 VERSION）
+- `-r, --registry REGISTRY`: 指定 Docker Hub 用户名（默认: hsliup）
+- `--no-push-latest`: 推送版本标签时不额外更新 latest
+
+#### build-compile 输出镜像
+
+- 后端: `hsliup/tradingagents-pro-backend:<VERSION>`
+- 可选别名: `hsliup/tradingagents-pro-backend:latest`
 
 ---
 
 ### scripts/push-images.sh
+
 推送镜像到 Docker Hub 的脚本。
 
-**使用方法**:
+#### push-images 使用方法
+
 ```bash
 # 推送所有镜像
 ./docker/scripts/push-images.sh
@@ -482,15 +575,23 @@ pip3 install cython
 # 只推送前端镜像
 ./docker/scripts/push-images.sh --frontend-only
 
+# 按 VERSION 推送本地已构建镜像
+./docker/scripts/push-images.sh
+
 # 指定标签
-./docker/scripts/push-images.sh --tag 1.0.0
+./docker/scripts/push-images.sh --tag 2.1.0
+
+# 推送版本标签但不更新 latest
+./docker/scripts/push-images.sh --tag 2.1.0 --no-push-latest
 ```
 
-**参数**:
+#### push-images 参数
+
 - `-r, --registry REGISTRY`: Docker Hub 用户名（默认: hsliup）
-- `-t, --tag TAG`: 镜像标签（默认: latest）
+- `-t, --tag TAG`: 镜像标签（默认: 读取根目录 VERSION）
 - `-b, --backend-only`: 只推送后端镜像
 - `-f, --frontend-only`: 只推送前端镜像
+- `--no-push-latest`: 推送版本标签时不额外更新 latest
 
 ## 📝 环境变量配置
 
@@ -524,6 +625,7 @@ CSRF_SECRET=your_csrf_secret_here
 ## 🔍 常见问题
 
 ### 1. 如何查看日志？
+
 ```bash
 # 查看所有服务日志
 docker-compose -f docker/docker-compose.compiled.yml logs -f
@@ -536,16 +638,19 @@ docker-compose -f docker/docker-compose.compiled.yml logs -f frontend
 ```
 
 ### 2. 如何重启服务？
+
 ```bash
 docker-compose -f docker/docker-compose.compiled.yml restart
 ```
 
 ### 3. 如何停止服务？
+
 ```bash
 docker-compose -f docker/docker-compose.compiled.yml down
 ```
 
 ### 4. 如何清理构建缓存？
+
 ```bash
 # 清理编译目录
 rm -rf docker/build/compiled
@@ -555,19 +660,21 @@ docker builder prune -a
 ```
 
 ### 5. 如何更新镜像？
+
 ```bash
-# 拉取最新镜像
-docker pull hsliup/tradingagents-backend:latest
-docker pull hsliup/tradingagents-frontend:latest
+# 拉取指定版本镜像（示例：2.1.0）
+docker pull hsliup/tradingagents-pro-backend:2.1.0
+docker pull hsliup/tradingagents-pro-frontend:2.1.0
 
 # 重启服务
 docker-compose -f docker/docker-compose.compiled.yml up -d
 ```
 
-### 4. 如何清理数据？
+### 6. 如何清理数据？
+
 ```bash
 # 停止并删除容器、网络、数据卷
-docker-compose -f docker/docker-compose.hub.nginx.yml down -v
+docker-compose -f docker/docker-compose.compiled.yml down -v
 ```
 
 ## 📚 相关文档
@@ -578,6 +685,6 @@ docker-compose -f docker/docker-compose.hub.nginx.yml down -v
 
 ---
 
-**最后更新**: 2026-01-13  
-**版本**: v1.0.0
+**最后更新**: 2026-05-02  
+**版本**: v2.1.0
 
