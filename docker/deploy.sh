@@ -6,6 +6,17 @@
 
 set -e  # 遇到错误立即退出
 
+# Docker Compose 命令兼容（优先 V2 插件 docker compose，其次独立版 docker-compose）
+detect_compose_cmd() {
+    if docker compose version &>/dev/null 2>&1; then
+        COMPOSE_CMD="docker compose"
+    elif command -v docker-compose &>/dev/null; then
+        COMPOSE_CMD="docker-compose"
+    else
+        COMPOSE_CMD=""
+    fi
+}
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -58,7 +69,104 @@ print_header() {
 # 检查命令是否存在
 check_command() {
     if ! command -v $1 &> /dev/null; then
-        print_error "$1 未安装，请先安装 $1"
+        return 1
+    fi
+    return 0
+}
+
+# 检测操作系统
+detect_os() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        echo "$ID"
+    elif command -v lsb_release &>/dev/null; then
+        lsb_release -is | tr '[:upper:]' '[:lower:]'
+    elif [ -f /etc/redhat-release ]; then
+        echo "centos"
+    else
+        echo "unknown"
+    fi
+}
+
+# 安装 Docker
+install_docker() {
+    local os
+    os=$(detect_os)
+    print_info "检测到系统: $os"
+
+    case "$os" in
+        ubuntu|debian)
+            print_info "使用官方脚本安装 Docker..."
+            curl -fsSL https://get.docker.com | sh
+            ;;
+        centos|rhel|rocky|almalinux)
+            print_info "使用官方脚本安装 Docker..."
+            curl -fsSL https://get.docker.com | sh
+            ;;
+        *)
+            print_error "不支持的系统: $os，请手动安装 Docker"
+            print_info "安装文档: https://docs.docker.com/engine/install/"
+            exit 1
+            ;;
+    esac
+
+    # 启动 Docker 并设置开机自启
+    systemctl start docker
+    systemctl enable docker
+    print_success "Docker 安装完成并已启动"
+}
+
+# 安装 Docker Compose
+install_docker_compose() {
+    local os
+    os=$(detect_os)
+
+    # 检查是否已通过 Docker Compose V2 插件安装
+    if docker compose version &>/dev/null; then
+        print_success "Docker Compose V2 插件已安装"
+        return 0
+    fi
+
+    print_info "安装 Docker Compose..."
+
+    case "$os" in
+        ubuntu|debian)
+            apt-get update -qq && apt-get install -y -qq docker-compose-plugin 2>/dev/null
+            if docker compose version &>/dev/null; then
+                print_success "Docker Compose V2 插件安装完成"
+                return 0
+            fi
+            # 如果插件安装失败，回退到独立安装
+            print_info "插件安装失败，使用独立版本..."
+            ;;
+        centos|rhel|rocky|almalinux)
+            yum install -y docker-compose-plugin 2>/dev/null
+            if docker compose version &>/dev/null; then
+                print_success "Docker Compose V2 插件安装完成"
+                return 0
+            fi
+            print_info "插件安装失败，使用独立版本..."
+            ;;
+    esac
+
+    # 独立版本安装
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64)  arch="x86_64" ;;
+        aarch64) arch="aarch64" ;;
+        *)       print_error "不支持的架构: $arch"; exit 1 ;;
+    esac
+
+    local compose_url="https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${arch}"
+    curl -fsSL "$compose_url" -o /usr/local/bin/docker-compose
+    chmod +x /usr/local/bin/docker-compose
+
+    if docker-compose version &>/dev/null; then
+        print_success "Docker Compose 独立版安装完成"
+    else
+        print_error "Docker Compose 安装失败，请手动安装"
+        print_info "安装文档: https://docs.docker.com/compose/install/"
         exit 1
     fi
 }
@@ -66,9 +174,68 @@ check_command() {
 # 检查依赖
 check_dependencies() {
     print_info "检查依赖..."
-    check_command docker
-    check_command docker-compose
-    check_command wget
+
+    # 检查 Docker
+    if ! check_command docker; then
+        print_warning "Docker 未安装"
+        print_info "是否自动安装 Docker？(y/n)"
+        read -r response
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            install_docker
+        else
+            print_error "请先安装 Docker: https://docs.docker.com/engine/install/"
+            exit 1
+        fi
+    else
+        print_success "Docker 已安装 ($(docker --version 2>/dev/null))"
+    fi
+
+    # 检查 Docker 服务是否运行
+    if ! docker info &>/dev/null; then
+        print_warning "Docker 服务未运行，尝试启动..."
+        systemctl start docker 2>/dev/null || service docker start 2>/dev/null || {
+            print_error "无法启动 Docker 服务，请手动启动"
+            exit 1
+        }
+        print_success "Docker 服务已启动"
+    fi
+
+    # 检查 Docker Compose（优先 V2 插件，其次独立版）
+    if docker compose version &>/dev/null; then
+        print_success "Docker Compose 已安装 ($(docker compose version --short 2>/dev/null))"
+    elif check_command docker-compose; then
+        print_success "Docker Compose 已安装 ($(docker-compose --version 2>/dev/null))"
+    else
+        print_warning "Docker Compose 未安装"
+        print_info "是否自动安装 Docker Compose？(y/n)"
+        read -r response
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            install_docker_compose
+        else
+            print_error "请先安装 Docker Compose: https://docs.docker.com/compose/install/"
+            exit 1
+        fi
+    fi
+
+    # 检查 wget 或 curl（至少需要一个用于下载配置文件）
+    if check_command wget; then
+        print_success "wget 已安装"
+    elif check_command curl; then
+        print_success "curl 已安装（将替代 wget）"
+        # 定义 wget 别名使用 curl
+        wget() { curl -fsSL "$1" -o "$2"; }
+    else
+        print_warning "wget 和 curl 均未安装，正在安装 curl..."
+        local os
+        os=$(detect_os)
+        case "$os" in
+            ubuntu|debian) apt-get update -qq && apt-get install -y -qq curl ;;
+            centos|rhel|rocky|almalinux) yum install -y curl ;;
+            *) print_error "请手动安装 curl 或 wget"; exit 1 ;;
+        esac
+        wget() { curl -fsSL "$1" -o "$2"; }
+    fi
+
     print_success "依赖检查通过"
 }
 
@@ -292,13 +459,13 @@ start_docker_services() {
     # 强制清理旧容器，避免容器名冲突
     print_info "清理旧容器..."
     docker rm -f tradingagents-mongodb-pro tradingagents-redis-pro tradingagents-backend-pro tradingagents-frontend-pro tradingagents-nginx-pro 2>/dev/null || true
-    docker-compose -f "$DOCKER_COMPOSE_FILE" down --remove-orphans 2>/dev/null || true
+    $COMPOSE_CMD -f "$DOCKER_COMPOSE_FILE" down --remove-orphans 2>/dev/null || true
 
     print_info "拉取镜像 (版本: ${IMAGE_TAG})..."
-    IMAGE_TAG="$IMAGE_TAG" docker-compose -f "$DOCKER_COMPOSE_FILE" pull
+    IMAGE_TAG="$IMAGE_TAG" $COMPOSE_CMD -f "$DOCKER_COMPOSE_FILE" pull
 
     print_info "启动服务 (版本: ${IMAGE_TAG})..."
-    IMAGE_TAG="$IMAGE_TAG" docker-compose -f "$DOCKER_COMPOSE_FILE" up -d
+    IMAGE_TAG="$IMAGE_TAG" $COMPOSE_CMD -f "$DOCKER_COMPOSE_FILE" up -d
     
     print_success "Docker 服务启动成功"
 }
@@ -306,7 +473,7 @@ start_docker_services() {
 # 显示服务状态
 show_status() {
     print_info "服务状态:"
-    docker-compose -f "$DOCKER_COMPOSE_FILE" ps
+    $COMPOSE_CMD -f "$DOCKER_COMPOSE_FILE" ps
 }
 
 # 显示访问信息
@@ -327,9 +494,9 @@ show_access_info() {
     echo -e "${BLUE}默认密码:${NC} admin123"
     echo ""
     echo -e "${YELLOW}提示:${NC}"
-    echo -e "  - 查看日志: docker-compose -f $DOCKER_COMPOSE_FILE logs -f"
-    echo -e "  - 停止服务: docker-compose -f $DOCKER_COMPOSE_FILE down"
-    echo -e "  - 重启服务: docker-compose -f $DOCKER_COMPOSE_FILE restart"
+    echo -e "  - 查看日志: $COMPOSE_CMD -f $DOCKER_COMPOSE_FILE logs -f"
+    echo -e "  - 停止服务: $COMPOSE_CMD -f $DOCKER_COMPOSE_FILE down"
+    echo -e "  - 重启服务: $COMPOSE_CMD -f $DOCKER_COMPOSE_FILE restart"
     echo ""
 }
 
@@ -362,6 +529,9 @@ main() {
     done
 
     print_header
+
+    # 检测 Docker Compose 命令
+    detect_compose_cmd
 
     # 检查依赖
     check_dependencies
