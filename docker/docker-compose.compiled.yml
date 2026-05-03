@@ -1,6 +1,4 @@
-version: '3.8'
-
-# TradingAgents-CN Pro v1.0.0 Docker Compose 配置（编译版 + Nginx）
+# TradingAgents-CN Pro Docker Compose 配置（编译版 + Nginx）
 # 使用编译后的 .pyc 和 .pyd 文件 + Nginx 反向代理
 #
 # 使用方法:
@@ -75,7 +73,7 @@ services:
       dockerfile: docker/Dockerfile.backend.compiled.ubuntu
       args:
         COMPILE_DIR: docker/build/compiled
-    image: hsliup/tradingagents-pro-backend:latest
+    image: ${DOCKER_IMAGE_NAMESPACE:-hsliup}/tradingagents-pro-backend:${IMAGE_TAG:-latest}
     container_name: tradingagents-backend-pro
     restart: unless-stopped
     expose:
@@ -160,7 +158,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.frontend
-    image: hsliup/tradingagents-pro-frontend:latest
+    image: ${DOCKER_IMAGE_NAMESPACE:-hsliup}/tradingagents-pro-frontend:${IMAGE_TAG:-latest}
     container_name: tradingagents-frontend-pro
     restart: unless-stopped
     expose:

@@ -13,12 +13,13 @@
 #
 # 选项:
 #   -r, --registry REGISTRY   Docker Hub 用户名（默认: hsliup）
-#   -t, --tag TAG             镜像标签（默认: latest）
+#   -t, --tag TAG             镜像标签（默认: 读取根目录 VERSION）
 #   --skip-compile            跳过代码编译（使用已有的编译产物）
 #   --skip-backend            跳过后端镜像构建
 #   --skip-frontend           跳过前端镜像构建
 #   --skip-push               只构建不推送
 #   --use-qemu                使用 QEMU 模拟器（跨平台构建）
+#   --no-push-latest          推送版本标签时不额外更新 latest-arm64
 #   -h, --help                显示帮助信息
 
 set -e  # 遇到错误立即退出
@@ -33,14 +34,17 @@ NC='\033[0m' # No Color
 
 # 默认参数
 REGISTRY="hsliup"
-TAG="latest"
+TAG=""
 SKIP_COMPILE=false
 SKIP_BACKEND=false
 SKIP_FRONTEND=false
 SKIP_PUSH=false
 USE_QEMU=false
+PUSH_LATEST=true
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+source "$SCRIPT_DIR/version-utils.sh"
 
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do
@@ -73,17 +77,22 @@ while [[ $# -gt 0 ]]; do
             USE_QEMU=true
             shift
             ;;
+        --no-push-latest)
+            PUSH_LATEST=false
+            shift
+            ;;
         -h|--help)
             echo "用法: $0 [OPTIONS]"
             echo ""
             echo "选项:"
             echo "  -r, --registry REGISTRY   Docker Hub 用户名（默认: hsliup）"
-            echo "  -t, --tag TAG             镜像标签（默认: latest）"
+            echo "  -t, --tag TAG             镜像标签（默认: 读取根目录 VERSION）"
             echo "  --skip-compile            跳过代码编译（使用已有的编译产物）"
             echo "  --skip-backend            跳过后端镜像构建"
             echo "  --skip-frontend           跳过前端镜像构建"
             echo "  --skip-push               只构建不推送"
             echo "  --use-qemu                使用 QEMU 模拟器（跨平台构建）"
+            echo "  --no-push-latest          推送版本标签时不额外更新 latest-arm64"
             echo "  -h, --help                显示帮助信息"
             exit 0
             ;;
@@ -94,9 +103,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+TAG="$(resolve_image_tag "$TAG" "$PROJECT_ROOT")"
+PUSH_LATEST_ALIAS=false
+if should_push_latest_alias "$TAG" "$PUSH_LATEST"; then
+    PUSH_LATEST_ALIAS=true
+fi
+
 # 镜像名称
 BACKEND_IMAGE="$REGISTRY/tradingagents-pro-backend:$TAG-arm64"
 FRONTEND_IMAGE="$REGISTRY/tradingagents-pro-frontend:$TAG-arm64"
+BACKEND_LATEST_IMAGE="$REGISTRY/tradingagents-pro-backend:latest-arm64"
+FRONTEND_LATEST_IMAGE="$REGISTRY/tradingagents-pro-frontend:latest-arm64"
 
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}TradingAgents-CN Pro - ARM64 构建${NC}"
@@ -104,6 +121,7 @@ echo -e "${CYAN}========================================${NC}"
 echo ""
 echo -e "${GREEN}Registry: ${YELLOW}$REGISTRY${NC}"
 echo -e "${GREEN}Tag: ${YELLOW}$TAG${NC}"
+echo -e "${GREEN}推送 latest-arm64 别名: ${YELLOW}$PUSH_LATEST_ALIAS${NC}"
 echo -e "${GREEN}后端镜像: ${YELLOW}$BACKEND_IMAGE${NC}"
 echo -e "${GREEN}前端镜像: ${YELLOW}$FRONTEND_IMAGE${NC}"
 echo -e "${GREEN}使用 QEMU: ${YELLOW}$USE_QEMU${NC}"
@@ -182,6 +200,10 @@ if [ "$SKIP_BACKEND" = false ]; then
         --load \
         "$PROJECT_ROOT"
 
+    if [ "$PUSH_LATEST_ALIAS" = true ]; then
+        docker tag "$BACKEND_IMAGE" "$BACKEND_LATEST_IMAGE"
+    fi
+
     echo -e "${GREEN}✅ 后端镜像构建完成${NC}"
     echo ""
 else
@@ -205,6 +227,10 @@ if [ "$SKIP_FRONTEND" = false ]; then
         --load \
         "$PROJECT_ROOT"
 
+    if [ "$PUSH_LATEST_ALIAS" = true ]; then
+        docker tag "$FRONTEND_IMAGE" "$FRONTEND_LATEST_IMAGE"
+    fi
+
     echo -e "${GREEN}✅ 前端镜像构建完成${NC}"
     echo ""
 else
@@ -223,6 +249,10 @@ if [ "$SKIP_PUSH" = false ]; then
     if [ "$SKIP_BACKEND" = false ]; then
         echo -e "${GREEN}📤 推送后端镜像: ${YELLOW}$BACKEND_IMAGE${NC}"
         docker push "$BACKEND_IMAGE"
+        if [ "$PUSH_LATEST_ALIAS" = true ]; then
+            echo -e "${GREEN}📤 推送后端 latest-arm64 别名: ${YELLOW}$BACKEND_LATEST_IMAGE${NC}"
+            docker push "$BACKEND_LATEST_IMAGE"
+        fi
         echo -e "${GREEN}✅ 后端镜像推送完成${NC}"
         echo ""
     fi
@@ -231,6 +261,10 @@ if [ "$SKIP_PUSH" = false ]; then
     if [ "$SKIP_FRONTEND" = false ]; then
         echo -e "${GREEN}📤 推送前端镜像: ${YELLOW}$FRONTEND_IMAGE${NC}"
         docker push "$FRONTEND_IMAGE"
+        if [ "$PUSH_LATEST_ALIAS" = true ]; then
+            echo -e "${GREEN}📤 推送前端 latest-arm64 别名: ${YELLOW}$FRONTEND_LATEST_IMAGE${NC}"
+            docker push "$FRONTEND_LATEST_IMAGE"
+        fi
         echo -e "${GREEN}✅ 前端镜像推送完成${NC}"
         echo ""
     fi
@@ -247,9 +281,15 @@ echo ""
 
 if [ "$SKIP_BACKEND" = false ]; then
     echo -e "${GREEN}后端镜像: ${YELLOW}$BACKEND_IMAGE${NC}"
+    if [ "$PUSH_LATEST_ALIAS" = true ]; then
+        echo -e "${GREEN}后端 latest-arm64 别名: ${YELLOW}$BACKEND_LATEST_IMAGE${NC}"
+    fi
 fi
 if [ "$SKIP_FRONTEND" = false ]; then
     echo -e "${GREEN}前端镜像: ${YELLOW}$FRONTEND_IMAGE${NC}"
+    if [ "$PUSH_LATEST_ALIAS" = true ]; then
+        echo -e "${GREEN}前端 latest-arm64 别名: ${YELLOW}$FRONTEND_LATEST_IMAGE${NC}"
+    fi
 fi
 echo ""
 
