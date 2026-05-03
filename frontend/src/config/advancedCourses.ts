@@ -163,12 +163,12 @@ export const advancedCourseCategories: CourseCategory[] = [
     id: 'review-improvement',
     name: '复盘改进篇',
     icon: '🔄',
-    description: 'AI辅助的交易复盘和持续改进',
+    description: 'AI辅助的操作复盘和持续改进',
     lessonCount: 2,
     lessons: [
       { 
         id: 'lesson-15', 
-        title: '第15课：AI交易复盘的应用', 
+        title: '第15课：AI操作复盘的应用', 
         file: 'lesson-15-review-ai-trade-review.md', 
         order: 15 
       },

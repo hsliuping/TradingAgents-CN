@@ -45,10 +45,10 @@ images/
 ### 示例
 
 ```
-03-single-analysis-01-page-overview.png     # 第3课-单股分析-01-页面概览
-03-single-analysis-02-config-panel.png      # 第3课-单股分析-02-配置面板
-15-trade-review-01-review-form.png          # 第15课-交易复盘-01-复盘表单
-15-trade-review-02-score-display.png        # 第15课-交易复盘-02-评分展示
+03-single-analysis-01-page-overview.png     # 第3课-单股研究-01-页面概览
+03-single-analysis-02-config-panel.png      # 第3课-单股研究-02-配置面板
+15-trade-review-01-review-form.png          # 第15课-操作复盘-01-复盘表单
+15-trade-review-02-score-display.png        # 第15课-操作复盘-02-评分展示
 ```
 
 ## 📐 截图规范
@@ -75,15 +75,15 @@ images/
 
 ```markdown
 ![页面概览](./images/lesson-03/03-single-analysis-01-page-overview.png)
-*图3-1：单股分析页面概览*
+*图3-1：单股研究页面概览*
 ```
 
 ### 带说明的引用
 
 ```markdown
 <figure>
-  <img src="./images/lesson-03/03-single-analysis-01-page-overview.png" alt="单股分析页面概览">
-  <figcaption>图3-1：单股分析页面概览，左侧为配置区域，右侧为结果展示区域</figcaption>
+  <img src="./images/lesson-03/03-single-analysis-01-page-overview.png" alt="单股研究页面概览">
+  <figcaption>图3-1：单股研究页面概览，左侧为配置区域，右侧为结果展示区域</figcaption>
 </figure>
 ```
 
