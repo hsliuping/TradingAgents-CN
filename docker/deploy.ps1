@@ -1,5 +1,5 @@
 # TradingAgents-CN Pro - 一键部署脚本 (Windows PowerShell)
-# 版本: v1.0.0
+# 版本: v1.1.0
 # 用途: 自动下载配置文件、创建目录、启动 Docker 服务
 
 # 设置错误时停止
@@ -16,12 +16,17 @@ $DEFAULT_NGINX_PORT = 8082
 $DEFAULT_MONGODB_PORT = 27017
 $DEFAULT_REDIS_PORT = 6379
 $DEFAULT_BACKEND_PORT = 8000
+$DEFAULT_IMAGE_TAG = "latest"
 
 # 端口变量（全局）
 $script:NGINX_PORT = $DEFAULT_NGINX_PORT
 $script:MONGODB_PORT = $DEFAULT_MONGODB_PORT
 $script:REDIS_PORT = $DEFAULT_REDIS_PORT
 $script:BACKEND_PORT = $DEFAULT_BACKEND_PORT
+$script:IMAGE_TAG = $DEFAULT_IMAGE_TAG
+
+# 非交互模式标志
+$script:NON_INTERACTIVE = $false
 
 # 打印带颜色的消息
 function Print-Info {
@@ -56,7 +61,7 @@ function Print-Header {
 # 检查命令是否存在
 function Test-Command {
     param([string]$Command)
-    
+
     $exists = $null -ne (Get-Command $Command -ErrorAction SilentlyContinue)
     return $exists
 }
@@ -64,19 +69,19 @@ function Test-Command {
 # 检查依赖
 function Test-Dependencies {
     Print-Info "检查依赖..."
-    
+
     if (-not (Test-Command "docker")) {
         Print-Error "Docker 未安装，请先安装 Docker Desktop"
         Print-Info "下载地址: https://www.docker.com/products/docker-desktop"
         exit 1
     }
-    
+
     if (-not (Test-Command "docker-compose")) {
         Print-Error "docker-compose 未安装"
         Print-Info "Docker Desktop 应该已包含 docker-compose"
         exit 1
     }
-    
+
     Print-Success "依赖检查通过"
 }
 
@@ -84,6 +89,21 @@ function Test-Dependencies {
 function Set-PortConfiguration {
     Print-Info "配置服务端口..."
     Write-Host ""
+
+    if ($script:NON_INTERACTIVE) {
+        $script:NGINX_PORT = if ($script:NGINX_PORT -ne $DEFAULT_NGINX_PORT) { $script:NGINX_PORT } else { $DEFAULT_NGINX_PORT }
+        $script:MONGODB_PORT = if ($script:MONGODB_PORT -ne $DEFAULT_MONGODB_PORT) { $script:MONGODB_PORT } else { $DEFAULT_MONGODB_PORT }
+        $script:REDIS_PORT = if ($script:REDIS_PORT -ne $DEFAULT_REDIS_PORT) { $script:REDIS_PORT } else { $DEFAULT_REDIS_PORT }
+        $script:BACKEND_PORT = if ($script:BACKEND_PORT -ne $DEFAULT_BACKEND_PORT) { $script:BACKEND_PORT } else { $DEFAULT_BACKEND_PORT }
+        Print-Success "Nginx 端口: $($script:NGINX_PORT)"
+        Print-Success "MongoDB 端口: $($script:MONGODB_PORT)"
+        Print-Success "Redis 端口: $($script:REDIS_PORT)"
+        Print-Success "Backend 端口: $($script:BACKEND_PORT)"
+        Write-Host ""
+        Print-Success "端口配置完成！"
+        Write-Host ""
+        return
+    }
 
     # Nginx 端口
     Print-Info "Nginx 前端服务端口 (默认: $DEFAULT_NGINX_PORT)"
@@ -127,6 +147,38 @@ function Set-PortConfiguration {
 
     Write-Host ""
     Print-Success "端口配置完成！"
+    Write-Host ""
+}
+
+# 询问部署版本
+function Set-VersionConfiguration {
+    Print-Info "配置部署版本..."
+    Write-Host ""
+
+    if ($script:NON_INTERACTIVE) {
+        # 自动补 v 前缀
+        if ($script:IMAGE_TAG -match '^[0-9]') {
+            $script:IMAGE_TAG = "v$($script:IMAGE_TAG)"
+        }
+        Print-Success "镜像版本: $($script:IMAGE_TAG)"
+        Write-Host ""
+        return
+    }
+
+    Print-Info "Docker 镜像版本 (默认: latest，如指定版本请输入如 2.1.0)"
+    $userInput = Read-Host "请输入版本号 [直接回车使用默认]"
+    if ([string]::IsNullOrWhiteSpace($userInput)) {
+        $script:IMAGE_TAG = $DEFAULT_IMAGE_TAG
+    } else {
+        $script:IMAGE_TAG = $userInput
+    }
+
+    # 自动补 v 前缀
+    if ($script:IMAGE_TAG -match '^[0-9]') {
+        $script:IMAGE_TAG = "v$($script:IMAGE_TAG)"
+    }
+
+    Print-Success "镜像版本: $($script:IMAGE_TAG)"
     Write-Host ""
 }
 
@@ -199,12 +251,9 @@ function Get-EnvFile {
     Print-Info "下载 .env 配置文件..."
 
     if (Test-Path ".env") {
-        Print-Warning ".env 文件已存在，是否覆盖？(Y/N)"
-        $response = Read-Host
-        if ($response -notmatch '^[Yy]$') {
-            Print-Info "跳过下载 .env 配置"
-            return
-        }
+        Print-Info ".env 文件已存在，将备份旧文件并下载最新模板"
+        $timestamp = Get-Date -Format "yyyyMMddHHmmss"
+        Move-Item ".env" ".env.bak.$timestamp" -Force
     }
 
     try {
@@ -240,19 +289,43 @@ function Update-DockerComposePorts {
 function Update-EnvPorts {
     Print-Info "更新 .env 端口配置..."
 
-    # 读取文件内容
+    # 逐行读取并替换，避免编码问题
     $content = Get-Content ".env"
+    $updated = @()
+    $imageTagFound = $false
 
-    # 替换端口配置
-    $content = $content -replace '^MONGODB_PORT=.*', "MONGODB_PORT=$($script:MONGODB_PORT)"
-    $content = $content -replace '^REDIS_PORT=.*', "REDIS_PORT=$($script:REDIS_PORT)"
-    $content = $content -replace '^PORT=.*', "PORT=$($script:BACKEND_PORT)"
-    $content = $content -replace '^NGINX_PORT=.*', "NGINX_PORT=$($script:NGINX_PORT)"
+    foreach ($line in $content) {
+        if ($line -match '^MONGODB_PORT=') {
+            $updated += "MONGODB_PORT=$($script:MONGODB_PORT)"
+        }
+        elseif ($line -match '^REDIS_PORT=') {
+            $updated += "REDIS_PORT=$($script:REDIS_PORT)"
+        }
+        elseif ($line -match '^PORT=') {
+            $updated += "PORT=$($script:BACKEND_PORT)"
+        }
+        elseif ($line -match '^NGINX_PORT=') {
+            $updated += "NGINX_PORT=$($script:NGINX_PORT)"
+        }
+        elseif ($line -match '^IMAGE_TAG=') {
+            $updated += "IMAGE_TAG=$($script:IMAGE_TAG)"
+            $imageTagFound = $true
+        }
+        else {
+            $updated += $line
+        }
+    }
+
+    # 确保 IMAGE_TAG 存在
+    if (-not $imageTagFound) {
+        $updated += "IMAGE_TAG=$($script:IMAGE_TAG)"
+    }
 
     # 写回文件
-    $content | Set-Content ".env"
+    $updated | Set-Content ".env"
 
     Print-Success ".env 端口配置已更新"
+    Print-Info "IMAGE_TAG=$($script:IMAGE_TAG)"
 }
 
 # 检查 .env 文件是否存在
@@ -272,18 +345,27 @@ function Test-EnvFile {
 # 启动 Docker 服务
 function Start-DockerServices {
     Print-Info "启动 Docker 服务..."
-    
+
     if (-not (Test-Path $DOCKER_COMPOSE_FILE)) {
         Print-Error "$DOCKER_COMPOSE_FILE 文件不存在"
         exit 1
     }
-    
-    Print-Info "拉取最新镜像..."
+
+    # 强制清理旧容器，避免容器名冲突
+    Print-Info "清理旧容器..."
+    @("tradingagents-mongodb-pro", "tradingagents-redis-pro", "tradingagents-backend-pro", "tradingagents-frontend-pro", "tradingagents-nginx-pro") | ForEach-Object {
+        docker rm -f $_ 2>$null
+    }
+    docker-compose -f $DOCKER_COMPOSE_FILE down --remove-orphans 2>$null
+
+    Print-Info "拉取镜像 (版本: $($script:IMAGE_TAG))..."
+    $env:IMAGE_TAG = $script:IMAGE_TAG
     docker-compose -f $DOCKER_COMPOSE_FILE pull
-    
-    Print-Info "启动服务..."
+
+    Print-Info "启动服务 (版本: $($script:IMAGE_TAG))..."
+    $env:IMAGE_TAG = $script:IMAGE_TAG
     docker-compose -f $DOCKER_COMPOSE_FILE up -d
-    
+
     Print-Success "Docker 服务启动成功"
 }
 
@@ -301,6 +383,8 @@ function Show-AccessInfo {
     Write-Host "========================================" -ForegroundColor Green
     Write-Host "  访问信息" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
+    Write-Host "部署版本: " -NoNewline -ForegroundColor Blue
+    Write-Host "$($script:IMAGE_TAG)"
     Write-Host "前端地址: " -NoNewline -ForegroundColor Blue
     Write-Host "http://localhost:$($script:NGINX_PORT)"
     Write-Host "后端API: " -NoNewline -ForegroundColor Blue
@@ -324,6 +408,23 @@ function Show-AccessInfo {
 
 # 主函数
 function Main {
+    # 解析命令行参数
+    param(
+        [switch]$NonInteractive,
+        [string]$ImageTag,
+        [string]$NginxPort,
+        [string]$MongodbPort,
+        [string]$RedisPort,
+        [string]$BackendPort
+    )
+
+    if ($NonInteractive) { $script:NON_INTERACTIVE = $true }
+    if ($ImageTag) { $script:IMAGE_TAG = $ImageTag }
+    if ($NginxPort) { $script:NGINX_PORT = $NginxPort }
+    if ($MongodbPort) { $script:MONGODB_PORT = $MongodbPort }
+    if ($RedisPort) { $script:REDIS_PORT = $RedisPort }
+    if ($BackendPort) { $script:BACKEND_PORT = $BackendPort }
+
     Print-Header
 
     # 检查依赖
@@ -331,6 +432,9 @@ function Main {
 
     # 配置端口
     Set-PortConfiguration
+
+    # 配置部署版本
+    Set-VersionConfiguration
 
     # 下载 Docker Compose 配置文件
     Get-DockerCompose
@@ -364,5 +468,4 @@ function Main {
 }
 
 # 运行主函数
-Main
-
+Main @args
