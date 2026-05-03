@@ -76,16 +76,24 @@ check_command() {
 
 # 检测操作系统
 detect_os() {
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        echo "$ID"
-    elif command -v lsb_release &>/dev/null; then
-        lsb_release -is | tr '[:upper:]' '[:lower:]'
-    elif [ -f /etc/redhat-release ]; then
-        echo "centos"
-    else
-        echo "unknown"
-    fi
+    local uname_out
+    uname_out="$(uname -s 2>/dev/null)"
+    case "$uname_out" in
+        Darwin*) echo "macos" ;;
+        Linux*)
+            if [ -f /etc/os-release ]; then
+                . /etc/os-release
+                echo "$ID"
+            elif command -v lsb_release &>/dev/null; then
+                lsb_release -is | tr '[:upper:]' '[:lower:]'
+            elif [ -f /etc/redhat-release ]; then
+                echo "centos"
+            else
+                echo "linux"
+            fi
+            ;;
+        *) echo "unknown" ;;
+    esac
 }
 
 # 安装 Docker
@@ -95,13 +103,27 @@ install_docker() {
     print_info "检测到系统: $os"
 
     case "$os" in
-        ubuntu|debian)
+        ubuntu|debian|centos|rhel|rocky|almalinux)
             print_info "使用官方脚本安装 Docker..."
             curl -fsSL https://get.docker.com | sh
+            # 启动 Docker 并设置开机自启
+            systemctl start docker
+            systemctl enable docker
+            print_success "Docker 安装完成并已启动"
             ;;
-        centos|rhel|rocky|almalinux)
-            print_info "使用官方脚本安装 Docker..."
-            curl -fsSL https://get.docker.com | sh
+        macos)
+            print_info "macOS 系统需要安装 Docker Desktop"
+            if check_command brew; then
+                print_info "检测到 Homebrew，使用 brew 安装 Docker Desktop..."
+                brew install --cask docker
+                print_success "Docker Desktop 已安装，请从应用程序中启动"
+            else
+                print_info "请安装 Docker Desktop:"
+                print_info "  方式1: 访问 https://www.docker.com/products/docker-desktop 下载"
+                print_info "  方式2: 先安装 Homebrew (https://brew.sh)，然后 brew install --cask docker"
+            fi
+            print_warning "安装 Docker Desktop 后请重新运行此脚本"
+            exit 1
             ;;
         *)
             print_error "不支持的系统: $os，请手动安装 Docker"
@@ -109,17 +131,18 @@ install_docker() {
             exit 1
             ;;
     esac
-
-    # 启动 Docker 并设置开机自启
-    systemctl start docker
-    systemctl enable docker
-    print_success "Docker 安装完成并已启动"
 }
 
 # 安装 Docker Compose
 install_docker_compose() {
     local os
     os=$(detect_os)
+
+    # macOS 上 Docker Desktop 自带 Compose
+    if [ "$os" = "macos" ]; then
+        print_error "macOS 上 Docker Desktop 自带 Docker Compose，请确保 Docker Desktop 已正确安装并启动"
+        exit 1
+    fi
 
     # 检查是否已通过 Docker Compose V2 插件安装
     if docker compose version &>/dev/null; then
@@ -136,7 +159,6 @@ install_docker_compose() {
                 print_success "Docker Compose V2 插件安装完成"
                 return 0
             fi
-            # 如果插件安装失败，回退到独立安装
             print_info "插件安装失败，使用独立版本..."
             ;;
         centos|rhel|rocky|almalinux)
@@ -193,11 +215,36 @@ check_dependencies() {
     # 检查 Docker 服务是否运行
     if ! docker info &>/dev/null; then
         print_warning "Docker 服务未运行，尝试启动..."
-        systemctl start docker 2>/dev/null || service docker start 2>/dev/null || {
-            print_error "无法启动 Docker 服务，请手动启动"
+        local os
+        os=$(detect_os)
+        if [ "$os" = "macos" ]; then
+            # macOS: 尝试打开 Docker Desktop
+            open -a Docker 2>/dev/null && {
+                print_info "正在启动 Docker Desktop，请等待..."
+                # 等待 Docker 就绪（最多 60 秒）
+                for i in $(seq 1 30); do
+                    sleep 2
+                    if docker info &>/dev/null; then
+                        print_success "Docker Desktop 已启动"
+                        break
+                    fi
+                done
+            } || {
+                print_error "无法启动 Docker Desktop，请手动从应用程序中启动"
+                exit 1
+            }
+        else
+            systemctl start docker 2>/dev/null || service docker start 2>/dev/null || {
+                print_error "无法启动 Docker 服务，请手动启动"
+                exit 1
+            }
+            print_success "Docker 服务已启动"
+        fi
+        # 最终检查
+        if ! docker info &>/dev/null; then
+            print_error "Docker 服务仍未运行，请检查后重试"
             exit 1
-        }
-        print_success "Docker 服务已启动"
+        fi
     fi
 
     # 检查 Docker Compose（优先 V2 插件，其次独立版）
@@ -231,6 +278,14 @@ check_dependencies() {
         case "$os" in
             ubuntu|debian) apt-get update -qq && apt-get install -y -qq curl ;;
             centos|rhel|rocky|almalinux) yum install -y curl ;;
+            macos)
+                if check_command brew; then
+                    brew install curl
+                else
+                    print_error "请先安装 Homebrew (https://brew.sh) 或手动安装 curl"
+                    exit 1
+                fi
+                ;;
             *) print_error "请手动安装 curl 或 wget"; exit 1 ;;
         esac
         wget() { curl -fsSL "$1" -o "$2"; }
