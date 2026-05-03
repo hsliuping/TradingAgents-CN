@@ -1,5 +1,5 @@
 # TradingAgents-CN Pro - 一键部署脚本 (Windows PowerShell)
-# 版本: v1.1.0
+# 版本: v1.2.0
 # 用途: 自动下载配置文件、创建目录、启动 Docker 服务
 
 # 设置错误时停止

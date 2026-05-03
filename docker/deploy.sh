@@ -1,8 +1,12 @@
 #!/bin/bash
-
 # TradingAgents-CN Pro - 一键部署脚本 (Linux/macOS)
-# 版本: v1.0.0
+# 版本: v1.2.0
 # 用途: 自动下载配置文件、创建目录、启动 Docker 服务
+#
+# 使用方式:
+#   方式1: curl -fsSL https://www.tradingagentscn.com/docker/deploy.sh | bash -s -- [选项]
+#   方式2: 下载后运行 bash deploy.sh [选项]
+#   如遇 ^M 错误: sed -i 's/\r$//' deploy.sh
 
 set -e  # 遇到错误立即退出
 
