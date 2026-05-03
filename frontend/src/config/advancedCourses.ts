@@ -30,7 +30,7 @@ export const advancedCourseCategories: CourseCategory[] = [
     lessons: [
       { 
         id: 'lesson-1', 
-        title: '第1课：从散户到系统交易者', 
+        title: '第1课：从散户到有研究框架的决策者', 
         file: 'lesson-01-basics-retail-to-system-trader.md', 
         order: 1 
       },
@@ -57,13 +57,13 @@ export const advancedCourseCategories: CourseCategory[] = [
       },
       { 
         id: 'lesson-4', 
-        title: '第4课：批量分析选股', 
+        title: '第4课：批量分析与股票关注列表管理', 
         file: 'lesson-04-stock-selection-batch-analysis.md', 
         order: 4 
       },
       { 
         id: 'lesson-5', 
-        title: '第5课：短线与中长线选股策略', 
+        title: '第5课：短线选股 vs 中长线选股', 
         file: 'lesson-05-stock-selection-short-long-term.md', 
         order: 5 
       }
@@ -78,19 +78,19 @@ export const advancedCourseCategories: CourseCategory[] = [
     lessons: [
       { 
         id: 'lesson-6', 
-        title: '第6课：多空辩论的应用', 
+        title: '第6课：大盘分析与市场环境判断', 
         file: 'lesson-06-timing-bull-bear-debate.md', 
         order: 6 
       },
       { 
         id: 'lesson-7', 
-        title: '第7课：风险辩论的应用', 
+        title: '第7课：行业分析与板块轮动', 
         file: 'lesson-07-timing-risk-debate.md', 
         order: 7 
       },
       { 
         id: 'lesson-8', 
-        title: '第8课：多智能体辩论的综合应用', 
+        title: '第8课：多空辩论的阅读与研究分歧整理', 
         file: 'lesson-08-timing-multi-agent-debate.md', 
         order: 8 
       }
@@ -105,13 +105,13 @@ export const advancedCourseCategories: CourseCategory[] = [
     lessons: [
       { 
         id: 'lesson-9', 
-        title: '第9课：仓位管理原则', 
+        title: '第9课：执行准备阶段的资金暴露边界', 
         file: 'lesson-09-execution-position-management.md', 
         order: 9 
       },
       { 
         id: 'lesson-10', 
-        title: '第10课：执行策略', 
+        title: '第10课：模拟环境中的流程演练', 
         file: 'lesson-10-execution-strategy.md', 
         order: 10 
       }
@@ -126,13 +126,13 @@ export const advancedCourseCategories: CourseCategory[] = [
     lessons: [
       { 
         id: 'lesson-11', 
-        title: '第11课：AI持仓分析的应用', 
+        title: '第11课：持仓研究的应用',
         file: 'lesson-11-position-ai-analysis.md', 
         order: 11 
       },
       { 
         id: 'lesson-12', 
-        title: '第12课：持仓决策', 
+        title: '第12课：扩大、收缩与结束计划判断框架', 
         file: 'lesson-12-position-decision.md', 
         order: 12 
       }
@@ -147,13 +147,13 @@ export const advancedCourseCategories: CourseCategory[] = [
     lessons: [
       { 
         id: 'lesson-13', 
-        title: '第13课：风险辩论的应用', 
+        title: '第13课：风险辩论的解读', 
         file: 'lesson-13-risk-debate-application.md', 
         order: 13 
       },
       { 
         id: 'lesson-14', 
-        title: '第14课：止盈止损策略', 
+        title: '第14课：关键验证信号与风险跟踪策略', 
         file: 'lesson-14-risk-profit-loss-strategy.md', 
         order: 14 
       }
@@ -168,13 +168,13 @@ export const advancedCourseCategories: CourseCategory[] = [
     lessons: [
       { 
         id: 'lesson-15', 
-        title: '第15课：AI操作复盘的应用', 
+        title: '第15课：复盘报告的阅读与自我校准', 
         file: 'lesson-15-review-ai-trade-review.md', 
         order: 15 
       },
       { 
         id: 'lesson-16', 
-        title: '第16课：持续改进方法', 
+        title: '第16课：案例库的沉淀与调用', 
         file: 'lesson-16-review-continuous-improvement.md', 
         order: 16 
       }
