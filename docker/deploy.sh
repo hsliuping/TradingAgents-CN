@@ -140,6 +140,10 @@ configure_version() {
 
     if $NON_INTERACTIVE; then
         IMAGE_TAG=${IMAGE_TAG:-$DEFAULT_IMAGE_TAG}
+        # 用户输入版本号时可能不带 v 前缀，自动补上
+        if [[ "$IMAGE_TAG" =~ ^[0-9] ]]; then
+            IMAGE_TAG="v${IMAGE_TAG}"
+        fi
         print_success "镜像版本: $IMAGE_TAG"
         echo ""
         return
@@ -148,6 +152,10 @@ configure_version() {
     print_info "Docker 镜像版本 (默认: latest，如指定版本请输入如 2.1.0)"
     read -p "请输入版本号 [直接回车使用默认]: " IMAGE_TAG
     IMAGE_TAG=${IMAGE_TAG:-$DEFAULT_IMAGE_TAG}
+    # 用户输入版本号时可能不带 v 前缀，自动补上
+    if [[ "$IMAGE_TAG" =~ ^[0-9] ]]; then
+        IMAGE_TAG="v${IMAGE_TAG}"
+    fi
     print_success "镜像版本: $IMAGE_TAG"
     echo ""
 }
