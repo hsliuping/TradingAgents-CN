@@ -204,15 +204,9 @@ TradingAgentsCN系统通过AI多智能体协作，让你也能享受到类似专
 
 ## 8.4 AI多空辩论深度解读
 
-<!-- 📸 截图占位符 -->
-> **[待添加截图]** `08-debate-01-bull-arguments.png`
->
-> 截图说明：看涨研究员观点展示，展示看涨论据和分析报告
+![看涨研究员观点展示](images/lesson-08/08-debate-01-bull-arguments.png)
 
-<!-- 📸 截图占位符 -->
-> **[待添加截图]** `08-debate-02-bear-arguments.png`
->
-> 截图说明：看跌研究员观点展示，展示风险因素和看跌理由
+![看跌研究员观点展示](images/lesson-08/08-debate-02-bear-arguments.png)
 
 ### 8.4.1 看涨研究员 vs 看跌研究员
 
@@ -285,10 +279,7 @@ TradingAgentsCN系统通过AI多智能体协作，让你也能享受到类似专
 
 ### 8.4.3 研究团队分析的解读
 
-<!-- 📸 截图占位符 -->
-> **[待添加截图]** `08-debate-03-manager-conclusion.png`
->
-> 截图说明：研究经理综合结论，展示投资建议、置信度、目标价格等关键信息
+![研究经理综合结论](images/lesson-08/08-debate-03-manager-conclusion.png)
 
 研究经理（Research Manager v2.0）会综合看涨和看跌观点，生成最终的投资建议。你需要重点解读以下内容：
 
