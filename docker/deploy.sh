@@ -176,12 +176,8 @@ download_env_file() {
     print_info "下载 .env 配置文件..."
 
     if [ -f ".env" ]; then
-        print_warning ".env 文件已存在，是否覆盖？(y/n)"
-        read -r response
-        if [[ ! "$response" =~ ^[Yy]$ ]]; then
-            print_info "跳过下载 .env 配置"
-            return
-        fi
+        print_info ".env 文件已存在，将备份旧文件并下载最新模板"
+        mv .env ".env.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
     fi
 
     if wget -q --show-progress "$ENV_DOCKER_URL" -O .env; then
