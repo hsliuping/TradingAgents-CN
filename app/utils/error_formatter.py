@@ -39,6 +39,7 @@ class ErrorFormatter:
         "deepseek": "DeepSeek",
         "openai": "OpenAI",
         "openrouter": "OpenRouter",
+        "aihubmix": "AIHubMix",
         "anthropic": "Anthropic Claude",
         "zhipu": "智谱AI",
         "moonshot": "月之暗面（Kimi）",
@@ -112,7 +113,7 @@ class ErrorFormatter:
             "api key", "api_key", "apikey", "invalid_api_key", "authentication", 
             "unauthorized", "401", "402", "403", "payment required", "billing",
             "quota", "insufficient_quota", "balance", "余额", "账户余额",
-            "gemini", "openai", "dashscope", "qianfan", "deepseek", "openrouter"
+            "gemini", "openai", "dashscope", "qianfan", "deepseek", "openrouter", "aihubmix"
         ]):
             # LLM API Key 错误
             if any(keyword in error_lower for keyword in [

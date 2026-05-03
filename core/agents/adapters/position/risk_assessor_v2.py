@@ -10,8 +10,20 @@ from typing import Dict, Any, List
 from ...researcher import ResearcherAgent
 from ...config import AgentMetadata, AgentCategory, LicenseTier
 from ...registry import register_agent
+from app.utils.compliance import sanitize_position_text_block, sanitize_text_block
 
 logger = logging.getLogger(__name__)
+
+
+def _summarize_upstream_position_report(value: Any, fallback: str) -> str:
+    """压缩上游技术面/基本面报告，避免原始触发语直接传入风险提示词。"""
+    cleaned = sanitize_position_text_block(value, fallback="")
+    if not cleaned:
+        secondary = sanitize_text_block(value, fallback="")
+        cleaned = sanitize_position_text_block(secondary, fallback="") if secondary else ""
+    normalized = "；".join(fragment.strip() for fragment in cleaned.splitlines() if fragment.strip())
+    normalized = normalized.strip("； ")
+    return normalized[:600] if normalized else fallback
 
 # 尝试导入模板系统
 try:
@@ -28,8 +40,8 @@ class RiskAssessorV2(ResearcherAgent):
 
     功能：
     - 评估风险敞口
-    - 设置风险控制参考和收益预期参考价位
-    - 分析波动性
+    - 识别风险情景和脆弱点
+    - 分析波动性与后续观察重点
     
     工作流程：
     1. 读取持仓信息、资金信息和市场数据
@@ -54,7 +66,7 @@ class RiskAssessorV2(ResearcherAgent):
     metadata = AgentMetadata(
         id="pa_risk_v2",
         name="风险评估师 v2.0",
-        description="评估持仓风险，包括风险敞口、风险控制参考价位、波动性分析",
+        description="评估持仓风险，包括风险敞口、风险情景与波动性分析",
         category=AgentCategory.ANALYST,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -129,16 +141,18 @@ class RiskAssessorV2(ResearcherAgent):
         # 降级：使用默认提示词
         return """您是一位专业的风险评估师。
 
-您的职责是评估持仓股票的风险状态。
+    您的职责是评估持仓股票当前的风险结构、脆弱点和需要持续验证的风险信号。
 
-分析要点：
-1. 风险敞口分析 - 当前风险敞口是否过大
-2. 风险控制参考 - 风险控制参考价位（仅供参考）
-3. 收益预期参考 - 收益预期参考价位（仅供参考）
-4. 波动风险 - 股票波动性评估
-5. 风险等级 - 低/中/高风险评级
+    分析要点：
+    1. 风险敞口分析 - 当前持仓对账户整体波动的影响
+    2. 风险来源拆解 - 技术面、基本面、行业与流动性风险来源
+    3. 风险情景 - 哪些公开变化可能使研究判断转弱
+    4. 波动风险 - 股票波动性及其对持仓体验的影响
+    5. 风险等级 - 低/中/高风险评级
 
-请使用中文，基于真实数据进行分析。"""
+    严格要求：禁止输出止损止盈、参考价位、目标价、仓位调整建议。
+
+    请使用中文，基于真实数据进行分析。"""
     
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -285,18 +299,27 @@ class RiskAssessorV2(ResearcherAgent):
         # 🔧 修复：确保 technical_analysis 和 fundamental_analysis 是字符串类型
         # 如果它们是字典或其他类型，转换为字符串
         if isinstance(technical_analysis_raw, str):
-            technical_analysis = technical_analysis_raw
+            technical_source = technical_analysis_raw
         elif technical_analysis_raw:
-            technical_analysis = str(technical_analysis_raw)
+            technical_source = str(technical_analysis_raw)
         else:
-            technical_analysis = ""
-        
+            technical_source = ""
+
         if isinstance(fundamental_analysis_raw, str):
-            fundamental_analysis = fundamental_analysis_raw
+            fundamental_source = fundamental_analysis_raw
         elif fundamental_analysis_raw:
-            fundamental_analysis = str(fundamental_analysis_raw)
+            fundamental_source = str(fundamental_analysis_raw)
         else:
-            fundamental_analysis = ""
+            fundamental_source = ""
+
+        technical_analysis = _summarize_upstream_position_report(
+            technical_source,
+            fallback="技术面当前仍缺少稳定、可直接引用的研究摘要。",
+        )
+        fundamental_analysis = _summarize_upstream_position_report(
+            fundamental_source,
+            fallback="基本面当前仍缺少稳定、可直接引用的研究摘要。",
+        )
         
         code = position_info.get("code", ticker)
         name = position_info.get("name", "N/A")
@@ -367,8 +390,8 @@ class RiskAssessorV2(ResearcherAgent):
             "currency_name": "人民币",
             # 🔧 新增：技术面和基本面分析结果（确保是字符串后再切片）
             # 🔧 修复：确保切片操作安全，避免 unhashable type: 'slice' 错误
-            "technical_analysis": (technical_analysis[:2000] if isinstance(technical_analysis, str) and len(technical_analysis) > 2000 else technical_analysis) if technical_analysis else "",
-            "fundamental_analysis": (fundamental_analysis[:2000] if isinstance(fundamental_analysis, str) and len(fundamental_analysis) > 2000 else fundamental_analysis) if fundamental_analysis else "",
+            "technical_analysis": (technical_analysis[:800] if isinstance(technical_analysis, str) and len(technical_analysis) > 800 else technical_analysis) if technical_analysis else "",
+            "fundamental_analysis": (fundamental_analysis[:800] if isinstance(fundamental_analysis, str) and len(fundamental_analysis) > 800 else fundamental_analysis) if fundamental_analysis else "",
         }
         
         # 如果有缓存，添加风险经理的决策报告（risk_management_decision）
@@ -407,8 +430,8 @@ class RiskAssessorV2(ResearcherAgent):
             logger.warning(f"⚠️ [风险评估师] 从数据库加载提示词失败: {e}，使用降级提示词")
         
         # 降级：使用硬编码提示词（根据has_cache和技术面/基本面分析结果选择不同内容）
-        if has_cache and (technical_analysis or fundamental_analysis):
-            # 有缓存且有技术面/基本面分析结果
+        if technical_analysis or fundamental_analysis or has_cache:
+            # 只要已有上游研究摘要，就在降级提示词中显式带入；缓存风险报告仅作为附加参考
             reports_data = stock_report.get("reports", {})
             risk_report_content = reports_data.get("risk_report", "")
             
@@ -423,8 +446,8 @@ class RiskAssessorV2(ResearcherAgent):
 """
             
             # 🔧 修复：在 f-string 外进行切片操作
-            technical_text = (technical_analysis[:1000] if isinstance(technical_analysis, str) and len(technical_analysis) > 1000 else technical_analysis) if technical_analysis else '暂无技术面分析结果'
-            fundamental_text = (fundamental_analysis[:1000] if isinstance(fundamental_analysis, str) and len(fundamental_analysis) > 1000 else fundamental_analysis) if fundamental_analysis else '暂无基本面分析结果'
+            technical_text = (technical_analysis[:800] if isinstance(technical_analysis, str) and len(technical_analysis) > 800 else technical_analysis) if technical_analysis else '暂无技术面分析结果'
+            fundamental_text = (fundamental_analysis[:800] if isinstance(fundamental_analysis, str) and len(fundamental_analysis) > 800 else fundamental_analysis) if fundamental_analysis else '暂无基本面分析结果'
             
             return f"""请基于以下单股分析报告中的风险分析、技术面、基本面分析结果和持仓信息，进行持仓风险评估：
 
@@ -449,10 +472,12 @@ class RiskAssessorV2(ResearcherAgent):
 
 请结合单股分析报告中的风险分析、技术面和基本面分析结果，撰写详细的风险评估报告，包括：
 1. 风险敞口评估（参考单股分析报告中的风险分析，结合持仓情况）
-2. 风险控制参考价位（参考单股分析报告中的风险分析，结合技术面支撑位和持仓成本，仅供参考）
-3. 收益预期参考价位（基于技术面阻力位和基本面估值，仅供参考）
-4. 波动风险分析（参考单股分析报告中的风险分析，结合持仓周期）
-5. 风险等级评定（综合单股分析报告中的风险分析、技术面、基本面和持仓风险，低/中/高）"""
+2. 主要风险来源与触发情景（说明哪些公开变化需要警惕）
+3. 波动风险分析（参考单股分析报告中的风险分析，结合持仓周期）
+4. 风险等级评定（综合单股分析报告中的风险分析、技术面、基本面和持仓风险，低/中/高）
+5. 后续观察事项（列出需要继续跟踪的公开信号）
+
+禁止输出风险控制参考价位、收益预期参考价位、止损止盈或具体仓位建议。"""
         else:
             # 无缓存或无技术面/基本面分析结果
             return f"""请评估以下持仓的风险：
@@ -475,10 +500,12 @@ class RiskAssessorV2(ResearcherAgent):
 
 请撰写详细的风险评估报告，包括：
 1. 风险敞口评估
-2. 风险控制参考价位（仅供参考）
-3. 收益预期参考价位（仅供参考）
-4. 波动风险分析
-5. 风险等级评定（低/中/高）"""
+2. 主要风险来源与触发情景
+3. 波动风险分析
+4. 风险等级评定（低/中/高）
+5. 后续观察事项
+
+禁止输出风险控制参考价位、收益预期参考价位、止损止盈或具体仓位建议。"""
 
     def _get_required_reports(self) -> List[str]:
         """

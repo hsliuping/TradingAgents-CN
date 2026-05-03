@@ -254,6 +254,17 @@ class MultiSourceBasicsSyncService:
                             daily_data_map[ts_code] = row.to_dict()
                     stats.data_sources_used.append(f"daily_data:{daily_source}")
 
+            from app.services.official_industry_service import (
+                INDUSTRY_SOURCE_SYSTEM,
+                fetch_industry_mapping,
+            )
+
+            industry_mapping = await fetch_industry_mapping(refresh_if_empty=True)
+            use_system_industry_mapping = bool(industry_mapping)
+            if use_system_industry_mapping:
+                stats.data_sources_used.append(f"industry_mapping:{INDUSTRY_SOURCE_SYSTEM}")
+                logger.info(f"📊 使用系统行业映射集合: {len(industry_mapping)} 只股票")
+
             # Step 5: 处理和更新数据（分批处理）
             ops = []
             inserted = updated = errors = 0
@@ -278,6 +289,9 @@ class MultiSourceBasicsSyncService:
                     else:
                         symbol = row.get("symbol") or ""
                         code = str(symbol).zfill(6) if symbol else ""
+
+                    mapped_industry = industry_mapping.get(code, "") if use_system_industry_mapping else ""
+                    resolved_industry = mapped_industry or industry or "未知"
 
                     # 根据 ts_code 判断交易所
                     if isinstance(ts_code, str):
@@ -317,7 +331,7 @@ class MultiSourceBasicsSyncService:
                         "symbol": code,  # 添加 symbol 字段（标准化字段）
                         "name": name,
                         "area": area,
-                        "industry": industry,
+                        "industry": resolved_industry,
                         "market": market,
                         "list_date": list_date,
                         "sse": sse,
@@ -326,6 +340,9 @@ class MultiSourceBasicsSyncService:
                         "source": data_source,  # 🔥 使用实际数据源
                         "updated_at": datetime.now(),
                     }
+
+                    if mapped_industry:
+                        doc["industry_source"] = INDUSTRY_SOURCE_SYSTEM
 
                     # 添加财务指标
                     self._add_financial_metrics(doc, daily_metrics)

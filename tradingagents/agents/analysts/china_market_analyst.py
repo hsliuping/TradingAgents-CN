@@ -8,6 +8,7 @@ logger = get_logger("default")
 
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails
 
 
 def _get_company_name_for_china_market(ticker: str, market_info: dict) -> str:
@@ -128,83 +129,84 @@ def create_china_market_analyst(llm, toolkit):
 - **市场风格**: 判断当前是成长风格还是价值风格占优
 
 中国股市特色考虑：
-- 涨跌停板限制对交易策略的影响
+- 涨跌停板限制对市场行为和流动性的影响
 - ST股票的特殊风险和机会
 - 科创板、创业板的差异化分析
-- 国企改革、混改等主题投资机会
+- 国企改革、混改等主题对行业格局的影响
 - 中美关系、地缘政治对中概股的影响
 
 请基于Tushare数据接口提供的实时数据和技术指标，结合中国股市的特殊性，撰写专业的中文分析报告。
-确保在报告末尾附上Markdown表格总结关键发现和投资建议。"""
+确保在报告末尾附上Markdown表格总结关键发现、风险提示和后续观察点。"""
         )
-        
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "您是一位专业的AI助手，与其他分析师协作进行股票分析。"
-                    " 使用提供的工具获取和分析数据。"
-                    " 如果您无法完全回答，没关系；其他分析师会补充您的分析。"
-                    " 专注于您的专业领域，提供高质量的分析见解。"
-                    " 您可以访问以下工具：{tool_names}。\n{system_message}"
-                    "当前分析日期：{current_date}，分析标的：{ticker}。请用中文撰写所有分析内容。",
-                ),
-                MessagesPlaceholder(variable_name="messages"),
-            ]
-        )
-        
-        prompt = prompt.partial(system_message=system_message)
-        # 安全地获取工具名称，处理函数和工具对象
-        tool_names = []
-        for tool in tools:
-            if hasattr(tool, 'name'):
-                tool_names.append(tool.name)
-            elif hasattr(tool, '__name__'):
-                tool_names.append(tool.__name__)
-            else:
-                tool_names.append(str(tool))
+    system_message = apply_compliance_guardrails(system_message, "china_market_analyst")
 
-        prompt = prompt.partial(tool_names=", ".join(tool_names))
-        prompt = prompt.partial(current_date=current_date)
-        prompt = prompt.partial(ticker=ticker)
-        
-        chain = prompt | llm.bind_tools(tools)
-        result = chain.invoke(state["messages"])
-        
-        # 使用统一的Google工具调用处理器
-        if GoogleToolCallHandler.is_google_model(llm):
-            logger.info(f"📊 [中国市场分析师] 检测到Google模型，使用统一工具调用处理器")
-            
-            # 创建分析提示词
-            analysis_prompt_template = GoogleToolCallHandler.create_analysis_prompt(
-                ticker=ticker,
-                company_name=company_name,
-                analyst_type="中国市场分析",
-                specific_requirements="重点关注中国A股市场特点、政策影响、行业发展趋势等。"
-            )
-            
-            # 处理Google模型工具调用
-            report, messages = GoogleToolCallHandler.handle_google_tool_calls(
-                result=result,
-                llm=llm,
-                tools=tools,
-                state=state,
-                analysis_prompt_template=analysis_prompt_template,
-                analyst_name="中国市场分析师"
-            )
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "您是一位专业的AI助手，与其他分析师协作进行股票分析。"
+                " 使用提供的工具获取和分析数据。"
+                " 如果您无法完全回答，没关系；其他分析师会补充您的分析。"
+                " 专注于您的专业领域，提供高质量的分析见解。"
+                " 您可以访问以下工具：{tool_names}。\n{system_message}"
+                "当前分析日期：{current_date}，分析标的：{ticker}。请用中文撰写所有分析内容。",
+            ),
+            MessagesPlaceholder(variable_name="messages"),
+        ]
+    )
+
+    prompt = prompt.partial(system_message=system_message)
+    # 安全地获取工具名称，处理函数和工具对象
+    tool_names = []
+    for tool in tools:
+        if hasattr(tool, 'name'):
+            tool_names.append(tool.name)
+        elif hasattr(tool, '__name__'):
+            tool_names.append(tool.__name__)
         else:
-            # 非Google模型的处理逻辑
-            logger.debug(f"📊 [DEBUG] 非Google模型 ({llm.__class__.__name__})，使用标准处理逻辑")
-            
-            report = ""
-            if len(result.tool_calls) == 0:
-                report = result.content
-        
-        return {
-            "messages": [result],
-            "china_market_report": report,
-            "sender": "ChinaMarketAnalyst",
-        }
+            tool_names.append(str(tool))
+
+    prompt = prompt.partial(tool_names=", ".join(tool_names))
+    prompt = prompt.partial(current_date=current_date)
+    prompt = prompt.partial(ticker=ticker)
+
+    chain = prompt | llm.bind_tools(tools)
+    result = chain.invoke(state["messages"])
+
+    # 使用统一的Google工具调用处理器
+    if GoogleToolCallHandler.is_google_model(llm):
+        logger.info(f"📊 [中国市场分析师] 检测到Google模型，使用统一工具调用处理器")
+
+        # 创建分析提示词
+        analysis_prompt_template = GoogleToolCallHandler.create_analysis_prompt(
+            ticker=ticker,
+            company_name=company_name,
+            analyst_type="中国市场分析",
+            specific_requirements="重点关注中国A股市场特点、政策影响、行业发展趋势等。"
+        )
+
+        # 处理Google模型工具调用
+        report, messages = GoogleToolCallHandler.handle_google_tool_calls(
+            result=result,
+            llm=llm,
+            tools=tools,
+            state=state,
+            analysis_prompt_template=analysis_prompt_template,
+            analyst_name="中国市场分析师"
+        )
+    else:
+        # 非Google模型的处理逻辑
+        logger.debug(f"📊 [DEBUG] 非Google模型 ({llm.__class__.__name__})，使用标准处理逻辑")
+
+        report = ""
+        if len(result.tool_calls) == 0:
+            report = result.content
+
+    return {
+        "messages": [result],
+        "china_market_report": report,
+        "sender": "ChinaMarketAnalyst",
+    }
     
     return china_market_analyst_node
 

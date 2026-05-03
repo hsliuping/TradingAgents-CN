@@ -9,11 +9,16 @@ from fastapi import APIRouter, Query, Body, HTTPException, Depends
 from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from app.core.permissions import require_feature
 from core.tools import get_tool_registry, ToolMetadata, ToolCategory, BUILTIN_TOOLS
 from core.tools.custom_tool import CustomToolDefinition, register_custom_tool
 from app.core.database import get_mongo_db
 
-router = APIRouter(prefix="/api/tools", tags=["tools"])
+router = APIRouter(
+    prefix="/api/tools",
+    tags=["tools"],
+    dependencies=[Depends(require_feature("workflow_tools"))]
+)
 
 
 class ToolResponse(BaseModel):

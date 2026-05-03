@@ -6,7 +6,7 @@
 1. 6个分析师并行分析（大盘、板块、市场、基本面、新闻、社交媒体）
 2. 看多/看空研究员进行多轮辩论
 3. 研究经理综合观点
-4. 交易员制定策略
+4. 研究整合员汇总结论
 5. 风险经理把控风险
 """
 
@@ -23,7 +23,7 @@ from ..models import (
 DEFAULT_WORKFLOW = WorkflowDefinition(
     id="default_analysis",
     name="TradingAgents 完整分析流",
-    description="基于 TradingAgents 论文设计的完整多智能体协作分析流程。包含6个专业分析师（大盘、板块、市场、基本面、新闻、社交媒体）并行分析，2个研究员（看多/看空）进行多轮辩论，研究经理综合评估，交易员制定策略，风险团队多轮辩论评估风险。辩论轮次根据分析深度动态调整。",
+    description="基于 TradingAgents 论文设计的完整多智能体协作分析流程。包含6个专业分析师（大盘、板块、市场、基本面、新闻、社交媒体）并行分析，2个研究员（看多/看空）进行多轮辩论，研究经理综合评估，研究整合员汇总结论，风险团队多轮辩论评估风险。辩论轮次根据分析深度动态调整。",
     version="1.0.0",
     is_template=True,
     tags=["完整", "多智能体", "辩论机制", "风险管理"],
@@ -177,9 +177,9 @@ DEFAULT_WORKFLOW = WorkflowDefinition(
             id="trader",
             type=NodeType.TRADER,
             agent_id="trader",
-            label="交易员",
+            label="研究整合员",
             position=Position(x=400, y=580),
-            config={"description": "制定具体交易策略和仓位"},
+            config={"description": "汇总研究结论，整理关键信号与观察事项"},
         ),
 
         # === 阶段5: 风险辩论（3个角色多轮讨论）===

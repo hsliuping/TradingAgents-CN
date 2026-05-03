@@ -30,8 +30,11 @@ async def test_system():
         print("1️⃣ 测试创建系统模板...")
         content = TemplateContent(
             system_prompt="You are a market analyst",
+            user_prompt="",
             tool_guidance="Use market data tools",
-            analysis_requirements="Provide detailed analysis"
+            analysis_requirements="Provide detailed analysis",
+            output_format="Structured JSON format",
+            constraints="Stay within test boundaries"
         )
         
         template_data = PromptTemplateCreate(
@@ -42,16 +45,16 @@ async def test_system():
             content=content
         )
         
-        template = await template_service.create_template(
+        template, operation = await template_service.upsert_system_template(
             template_data,
-            is_system=True
+            remark_suffix="[2026-04-11] 脚本测试系统模板同步"
         )
         
         if template:
-            print(f"   ✅ 系统模板创建成功: {template.id}\n")
+            print(f"   ✅ 系统模板同步成功({operation}): {template.id}\n")
             template_id = str(template.id)
         else:
-            print("   ❌ 系统模板创建失败\n")
+            print("   ❌ 系统模板同步失败\n")
             return False
         
         # 2. 创建用户偏好

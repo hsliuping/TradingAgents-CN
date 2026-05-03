@@ -149,7 +149,7 @@ class AITradeReview(BaseModel):
     summary: str = ""                                # 总结
     strengths: List[str] = Field(default_factory=list)  # 做得好的地方
     weaknesses: List[str] = Field(default_factory=list) # 需要改进的地方
-    suggestions: List[str] = Field(default_factory=list) # 具体建议
+    suggestions: List[str] = Field(default_factory=list) # 兼容旧字段名，实际语义为复盘改进项
 
     timing_analysis: str = ""                        # 时机分析详情
     position_analysis: str = ""                      # 仓位分析详情
@@ -237,8 +237,8 @@ class AIPeriodicReview(BaseModel):
 
     trading_style: str = ""              # 交易风格分析
     common_mistakes: List[str] = Field(default_factory=list)   # 常见错误
-    improvement_areas: List[str] = Field(default_factory=list) # 改进方向
-    action_plan: List[str] = Field(default_factory=list)       # 下阶段行动计划
+    improvement_areas: List[str] = Field(default_factory=list) # 复盘改进方向
+    action_plan: List[str] = Field(default_factory=list)       # 兼容旧字段名，实际语义为后续观察项
 
     best_trade: Optional[str] = None     # 最佳交易分析
     worst_trade: Optional[str] = None    # 最差交易分析

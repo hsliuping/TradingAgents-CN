@@ -1,7 +1,7 @@
 """
-为持仓分析Agent v2.0添加风险分析和操作建议的完整模板（2种缓存场景 × 3种风格 = 6个模板/Agent）
+为持仓分析Agent v2.0添加风险分析和研究整合的完整模板（2种缓存场景 × 3种风格 = 6个模板/Agent）
 
-为 pa_risk_v2 和 pa_advisor_v2 创建：
+为 pa_risk_v2 和 pa_advisor_v2 创建研究判断模式模板：
 - with_cache_aggressive, with_cache_neutral, with_cache_conservative
 - without_cache_aggressive, without_cache_neutral, without_cache_conservative
 """
@@ -44,10 +44,12 @@ def get_risk_template(cache_scenario: str, style: str) -> dict:
 
 分析要点：
 1. 风险敞口评估 - 结合单股分析报告中的风险分析、技术面和基本面分析，评估当前持仓的风险敞口
-2. 风险控制参考 - 参考单股分析报告中的风险分析，结合技术面支撑位和基本面估值，设置风险控制参考价位（仅供参考）
-3. 收益预期参考 - 基于技术面阻力位和基本面估值，设置收益预期参考价位（仅供参考）
+2. 主要风险来源 - 识别当前最重要的技术、基本面和市场风险
+3. 风险情景 - 哪些公开变化会使研究判断转弱或需要重评
 4. 波动风险 - 参考单股分析报告中的风险分析，结合市场数据和技术面分析，评估股票波动性
 5. 风险等级 - 综合单股分析报告中的风险分析、技术面、基本面和市场风险，给出风险等级评定（低/中/高）
+
+严格要求：禁止输出止损止盈、参考价位、目标价、仓位调整建议。
 
 请使用中文，基于单股分析报告中的风险分析、技术面分析、基本面分析和持仓信息进行风险评估。"""
         
@@ -77,10 +79,12 @@ def get_risk_template(cache_scenario: str, style: str) -> dict:
 
 请结合单股分析报告中的风险分析、技术面和基本面分析结果，撰写详细的风险评估报告，包括：
 1. 风险敞口评估（参考单股分析报告中的风险分析，结合持仓情况）
-2. 风险控制参考价位（参考单股分析报告中的风险分析，结合技术面支撑位和持仓成本，仅供参考）
-3. 收益预期参考价位（基于技术面阻力位和基本面估值，仅供参考）
-4. 波动风险分析（参考单股分析报告中的风险分析，结合持仓周期）
-5. 风险等级评定（综合单股分析报告中的风险分析、技术面、基本面和持仓风险，低/中/高）"""
+2. 主要风险来源与触发情景（说明哪些公开变化需要警惕）
+3. 波动风险分析（参考单股分析报告中的风险分析，结合持仓周期）
+4. 风险等级评定（综合单股分析报告中的风险分析、技术面、基本面和持仓风险，低/中/高）
+5. 后续观察事项（列出需要继续跟踪的公开信号）
+
+禁止输出风险控制参考价位、收益预期参考价位、止损止盈或具体仓位建议。"""
     else:  # without_cache
         system_prompt = f"""您是一位专业的风险评估师，采用{style_desc}的风险管理风格。
 
@@ -88,10 +92,12 @@ def get_risk_template(cache_scenario: str, style: str) -> dict:
 
 分析要点：
 1. 风险敞口评估 - 评估当前持仓的风险敞口
-2. 风险控制参考 - 设置风险控制参考价位（仅供参考）
-3. 收益预期参考 - 设置收益预期参考价位（仅供参考）
+2. 主要风险来源 - 识别当前最重要的风险项
+3. 风险情景 - 哪些公开变化会使研究判断转弱或需要重评
 4. 波动风险 - 评估股票波动性
 5. 风险等级 - 给出风险等级评定（低/中/高）
+
+严格要求：禁止输出止损止盈、参考价位、目标价、仓位调整建议。
 
 请使用中文，基于真实数据进行分析。"""
         
@@ -121,21 +127,23 @@ def get_risk_template(cache_scenario: str, style: str) -> dict:
 
 请撰写详细的风险评估报告，包括：
 1. 风险敞口评估
-2. 风险控制参考价位（仅供参考）
-3. 收益预期参考价位（仅供参考）
-4. 波动风险分析
-5. 风险等级评定（低/中/高）"""
+2. 主要风险来源与触发情景
+3. 波动风险分析
+4. 风险等级评定（低/中/高）
+5. 后续观察事项
+
+禁止输出风险控制参考价位、收益预期参考价位、止损止盈或具体仓位建议。"""
     
     # 风格相关的指导
     if style == "aggressive":
-        tool_guidance = "风险评估重点：在控制风险的前提下追求更高收益，重点关注上行空间，设置相对宽松的风险控制参考"
-        constraints = "重点关注收益机会，风险控制相对宽松，评估标准偏向积极"
+        tool_guidance = "风险评估重点：在较积极的假设下评估主要脆弱点与改善条件，但不输出执行性价格或动作建议"
+        constraints = "重点关注收益机会，但禁止输出参考价位、仓位和交易动作"
     elif style == "conservative":
-        tool_guidance = "风险评估重点：严格评估风险，以保护本金为首要目标，重点关注下行风险，设置严格的风险控制参考"
-        constraints = "重点关注风险控制，强调本金保护，评估标准偏向保守"
+        tool_guidance = "风险评估重点：严格评估风险，以保护本金为首要目标，强调风险来源与重评条件"
+        constraints = "重点关注风险控制，禁止输出参考价位、仓位和交易动作"
     else:  # neutral
-        tool_guidance = "风险评估重点：平衡风险与收益，客观评估风险敞口，综合考虑技术面和基本面风险"
-        constraints = "保持客观中性，平衡风险与收益，不偏向任何一方"
+        tool_guidance = "风险评估重点：平衡风险与收益，客观评估风险敞口、波动来源与后续验证重点"
+        constraints = "保持客观中性，平衡风险与收益，不输出执行动作或价格位"
     
     return {
         "template_name": f"风险评估师 v2.0 - {style_desc}风格 ({'有缓存' if cache_scenario == 'with_cache' else '无缓存'})",
@@ -143,19 +151,19 @@ def get_risk_template(cache_scenario: str, style: str) -> dict:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             tool_guidance=tool_guidance,
-            analysis_requirements="## 风险评估要求\n1. **风险敞口评估**: 评估当前持仓的风险敞口\n2. **风险控制参考**: 设置风险控制参考价位（仅供参考）\n3. **收益预期参考**: 设置收益预期参考价位（仅供参考）\n4. **波动风险**: 评估股票波动性\n5. **风险等级**: 给出风险等级评定（低/中/高）",
+            analysis_requirements="## 风险评估要求\n1. **风险敞口评估**: 评估当前持仓的风险敞口\n2. **主要风险来源**: 识别当前最重要的风险项\n3. **风险情景**: 哪些公开变化会使研究判断转弱或需要重评\n4. **波动风险**: 评估股票波动性\n5. **风险等级**: 给出风险等级评定（低/中/高）\n6. **后续观察事项**: 列出需要继续跟踪的公开信号",
             output_format="请用简洁专业的语言客观评估风险。",
             constraints=constraints
         )
     }
 
 
-# ==================== 操作建议师 v2.0 模板 ====================
+# ==================== 持仓研究整合师 v2.0 模板 ====================
 
 def get_advisor_template(style: str) -> dict:
-    """获取操作建议师模板（只需要风格，不需要缓存场景）
+    """获取持仓研究整合师模板（只需要风格，不需要缓存场景）
     
-    操作建议师是根据技术面、基本面、风险分析的结果做综合判断，
+    持仓研究整合师是根据技术面、基本面、风险分析的结果做综合判断，
     和缓存没有关系，所以只需要风格偏好（neutral/aggressive/conservative）
     """
     
@@ -168,22 +176,24 @@ def get_advisor_template(style: str) -> dict:
     
     style_desc = style_descriptions.get(style, style)
     
-    # 基础系统提示词（操作建议师不需要区分缓存场景）
-    system_prompt = f"""您是一位专业的投资顾问，采用{style_desc}的持仓分析观点风格。
+    # 基础系统提示词（整合师不需要区分缓存场景）
+    system_prompt = f"""您是一位专业的持仓研究整合师，采用{style_desc}的研究风格。
 
-您的职责是综合技术面分析、基本面分析和风险评估，给出持仓分析观点和操作建议。
+您的职责是综合技术面分析、基本面分析和风险评估，形成持仓研究判断与后续观察事项。
 
 分析要点：
-1. 市场观点 - 基于技术面、基本面和风险评估，给出看涨/看跌/中性观点
-2. 持仓建议 - 基于综合分析，给出继续持有/增持/减持/清仓建议
-3. 价格分析区间 - 基于技术面支撑阻力位和基本面估值，给出价格分析区间
-4. 风险控制参考 - 基于风险评估，设置风险控制参考价位（仅供参考）
-5. 收益预期参考 - 基于技术面阻力位和基本面估值，设置收益预期参考价位（仅供参考）
-6. 信心度 - 基于分析质量，给出信心度评分（1-10分）
+1. 综合研究判断 - 基于技术面、基本面和风险评估，给出偏强/中性/偏弱/待验证观点
+2. 核心证据 - 说明当前判断最重要的事实依据
+3. 风险边界 - 说明最需要警惕的风险来源与情景变化
+4. 潜在催化 - 说明哪些因素可能改善或恶化研究判断
+5. 后续观察事项 - 给出需要继续跟踪的公开验证信号
+6. 信心度 - 基于分析质量，给出信心度评分（0-100分）
+
+严格要求：禁止输出买卖建议、加减仓、目标价、价格区间、止损止盈、仓位比例。
 
 请使用中文，基于技术面分析、基本面分析和风险评估进行综合分析。"""
     
-    user_prompt = """请基于以下技术面分析、基本面分析、风险评估和持仓信息，给出持仓分析观点和操作建议：
+    user_prompt = """请基于以下技术面分析、基本面分析、风险评估和持仓信息，给出持仓研究判断：
 
 === 技术面分析结果 ===
 {technical_analysis}
@@ -203,35 +213,37 @@ def get_advisor_template(style: str) -> dict:
 
 === 用户目标 ===
 - 目标收益: {target_return}%
-- 风险控制线: {stop_loss}%
+- 可承受波动参考: {stop_loss}%
 
-请综合各维度分析，给出持仓分析观点和操作建议，包括：
-1. 市场观点（看涨/看跌/中性）
-2. 持仓建议（继续持有/增持/减持/清仓）
-3. 价格分析区间
-4. 风险控制参考价位（仅供参考）
-5. 收益预期参考价位（仅供参考）
-6. 信心度评分（1-10分）"""
+请综合各维度分析，给出持仓研究判断，包括：
+1. 综合研究判断（偏强/中性/偏弱/待验证）
+2. 核心证据与判断理由
+3. 主要风险来源与风险提醒
+4. 潜在催化与改善条件
+5. 后续观察事项（公开验证信号）
+6. 信心度评分（0-100分）
+
+禁止输出买卖建议、加减仓、目标价、价格区间、止损止盈、仓位比例。"""
     
     # 风格相关的指导
     if style == "aggressive":
-        tool_guidance = "操作建议重点：积极寻找增持机会，重点关注上行空间，设置相对宽松的风险控制参考，强调收益预期"
-        constraints = "重点关注收益机会，建议偏向积极，评估标准偏向成长"
+        tool_guidance = "研究整合重点：在较积极的假设下识别核心证据与催化因素，但不输出执行性价格或动作建议"
+        constraints = "重点关注收益机会，但禁止输出交易动作、价格位和仓位建议"
     elif style == "conservative":
-        tool_guidance = "操作建议重点：严格评估风险，以保护本金为首要目标，设置严格的风险控制参考，强调风险控制"
-        constraints = "重点关注风险控制，建议偏向保守，评估标准偏向价值"
+        tool_guidance = "研究整合重点：严格评估风险，以保护本金为首要目标，强调风险边界与重评条件"
+        constraints = "重点关注风险控制，禁止输出交易动作、价格位和仓位建议"
     else:  # neutral
-        tool_guidance = "操作建议重点：平衡风险与收益，客观评估各维度分析，综合考虑技术面、基本面和风险因素"
-        constraints = "保持客观中性，平衡风险与收益，不偏向任何风格"
+        tool_guidance = "研究整合重点：平衡风险与收益，客观评估各维度分析，综合考虑技术面、基本面和风险因素"
+        constraints = "保持客观中性，平衡风险与收益，不输出执行动作或价格位"
     
     return {
-        "template_name": f"操作建议师 v2.0 - {style_desc}风格",
+        "template_name": f"持仓研究整合师 v2.0 - {style_desc}风格",
         "content": TemplateContent(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             tool_guidance=tool_guidance,
-            analysis_requirements="## 分析要求\n1. **市场观点**: 看涨/看跌/中性\n2. **持仓建议**: 继续持有/增持/减持/清仓\n3. **价格分析区间**: 基于技术面和基本面\n4. **风险控制参考**: 风险控制参考价位（仅供参考）\n5. **收益预期参考**: 收益预期参考价位（仅供参考）\n6. **信心度**: 1-10分",
-            output_format="请用简洁专业的语言给出持仓分析观点和操作建议。",
+            analysis_requirements="## 分析要求\n1. **综合研究判断**: 偏强/中性/偏弱/待验证\n2. **核心证据**: 当前判断的关键事实依据\n3. **风险边界**: 当前最重要的风险来源与情景变化\n4. **潜在催化**: 可能改善或恶化判断的因素\n5. **后续观察事项**: 需要继续跟踪的公开验证信号\n6. **信心度**: 0-100分",
+            output_format="请用简洁专业的语言给出持仓研究判断与观察事项。",
             constraints=constraints
         )
     }
@@ -240,7 +252,7 @@ def get_advisor_template(style: str) -> dict:
 # ==================== 模板创建函数 ====================
 
 async def create_template(service: PromptTemplateService, agent_name: str, preference_id: str, template_data: dict) -> bool:
-    """创建模板"""
+    """同步模板"""
     try:
         template_create = PromptTemplateCreate(
             agent_type="position_analysis_v2",  # 与工作流ID保持一致
@@ -252,19 +264,16 @@ async def create_template(service: PromptTemplateService, agent_name: str, prefe
             status="active",
         )
 
-        # 检查是否已存在
-        existing = await service.get_system_templates(
-            agent_type="position_analysis_v2",  # 与工作流ID保持一致
-            agent_name=agent_name,
-            preference_type=preference_id
+        result, operation = await service.upsert_system_template(
+            template_create,
+            remark_suffix="[2026-04-11] 幂等同步持仓风险与整合模板",
         )
-
-        if existing:
-            print(f"⏭️  跳过: {agent_name}/{preference_id} - 已存在")
+        if not result:
+            print(f"❌ 同步失败: {agent_name}/{preference_id} - {operation}")
             return False
 
-        await service.create_template(template_create)
-        print(f"✅ 创建: {agent_name}/{preference_id} - {template_data['template_name']}")
+        action_text = {"created": "创建", "updated": "更新", "unchanged": "保持"}.get(operation, operation)
+        print(f"✅ {action_text}: {agent_name}/{preference_id} - {template_data['template_name']}")
         return True
 
     except Exception as e:
@@ -275,8 +284,8 @@ async def create_template(service: PromptTemplateService, agent_name: str, prefe
 
 
 async def main():
-    """初始化风险分析和操作建议的完整模板"""
-    print("🚀 开始为持仓分析Agent v2.0添加风险分析和操作建议的完整模板...")
+    """初始化风险分析和研究整合的完整模板"""
+    print("🚀 开始为持仓分析Agent v2.0添加风险分析和研究整合的完整模板...")
     print("🔄 正在初始化数据库连接...")
 
     await init_database()
@@ -284,8 +293,8 @@ async def main():
 
     service = PromptTemplateService()
 
-    created_count = 0
-    skipped_count = 0
+    synced_count = 0
+    failed_count = 0
 
     # 缓存场景和风格组合（仅用于风险分析师）
     cache_scenarios = ["with_cache", "without_cache"]
@@ -302,12 +311,12 @@ async def main():
             template_data = get_risk_template(cache_scenario, style)
             
             if await create_template(service, "pa_risk_v2", preference_id, template_data):
-                created_count += 1
+                synced_count += 1
             else:
-                skipped_count += 1
+                failed_count += 1
     
-    # 操作建议师：只需要风格偏好（3种风格 = 3个模板）
-    print(f"\n📌 初始化操作建议师 v2.0 (pa_advisor_v2) 模板...")
+    # 持仓研究整合师：只需要风格偏好（3种风格 = 3个模板）
+    print(f"\n📌 初始化持仓研究整合师 v2.0 (pa_advisor_v2) 模板...")
     for style in styles:
         # preference_id 就是风格偏好（不需要缓存场景）
         preference_id = style
@@ -316,17 +325,17 @@ async def main():
         template_data = get_advisor_template(style)
         
         if await create_template(service, "pa_advisor_v2", preference_id, template_data):
-            created_count += 1
+            synced_count += 1
         else:
-            skipped_count += 1
+            failed_count += 1
 
     print(f"\n🎉 初始化完成！")
-    print(f"✅ 创建: {created_count} 个模板")
-    print(f"⏭️  跳过: {skipped_count} 个模板")
+    print(f"✅ 已同步: {synced_count} 个模板")
+    print(f"❌ 失败: {failed_count} 个模板")
 
     print(f"\n📋 已创建的模板:")
     print(f"   ⚠️  pa_risk_v2 (风险评估师 v2.0) - 2种缓存场景 × 3种风格 = 6个模板")
-    print(f"   💡 pa_advisor_v2 (操作建议师 v2.0) - 3种风格 = 3个模板")
+    print(f"   💡 pa_advisor_v2 (持仓研究整合师 v2.0) - 3种风格 = 3个模板")
     print(f"   总计: 9个模板")
 
 

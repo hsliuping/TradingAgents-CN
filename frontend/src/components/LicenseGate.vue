@@ -7,7 +7,7 @@
     <slot v-else name="locked">
       <div class="locked-content">
         <el-icon class="lock-icon"><Lock /></el-icon>
-        <p class="lock-message">此功能需要高级学员权限</p>
+        <p class="lock-message">此功能为高级学员专属，请前往授权管理完成认证</p>
       </div>
     </slot>
   </div>

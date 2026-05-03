@@ -20,7 +20,7 @@
                 <el-icon><TrendCharts /></el-icon>
                 股票数据批量导入
               </span>
-              <el-tag v-if="!isPro" type="warning" size="small">高级</el-tag>
+              <el-tag v-if="!isPro" type="warning" size="small">高级学员</el-tag>
             </div>
           </template>
 
@@ -123,7 +123,7 @@
       </template>
       <p>
         您当前是初级学员，无法使用批量导入功能。
-        <router-link to="/settings/license">点击这里</router-link> 成为高级学员。
+        <router-link to="/settings/license">前往授权管理</router-link> 完成高级学员认证。
       </p>
     </el-alert>
   </div>

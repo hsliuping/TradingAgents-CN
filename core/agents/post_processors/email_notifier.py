@@ -225,7 +225,7 @@ class EmailNotifierAgent(PostProcessorAgent):
             prompt = f"""请用3句话总结以下股票分析报告的核心观点：
 
 股票代码：{state.get('ticker')}
-投资建议：{self._get_nested_value(state, 'investment_plan.recommendation')}
+研究摘要：{self._get_nested_value(state, 'investment_plan.recommendation')}
 置信度：{self._get_nested_value(state, 'investment_plan.confidence_score')}
 
 请简洁明了地总结关键信息。"""

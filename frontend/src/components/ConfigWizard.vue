@@ -274,7 +274,7 @@
             <template #default>
               <div>
                 <div>• 访问"仪表盘"查看系统概览</div>
-                <div>• 访问"单股分析"开始分析股票</div>
+                <div>• 访问"单股研究"开始研究股票</div>
                 <div>• 访问"配置管理"调整详细设置</div>
               </div>
             </template>

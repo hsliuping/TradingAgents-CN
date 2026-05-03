@@ -15,6 +15,7 @@ logger = get_logger("default")
 
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails
 
 # 导入模板客户端
 from tradingagents.utils.template_client import get_agent_prompt
@@ -215,6 +216,7 @@ def create_fundamentals_analyst(llm, toolkit):
                 fallback_prompt=None,
                 context=None
             )
+            system_prompt = apply_compliance_guardrails(system_prompt, "fundamentals_analyst")
 
             logger.info(f"✅ [基本面分析师] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
 
@@ -235,13 +237,14 @@ def create_fundamentals_analyst(llm, toolkit):
                 f"参数：ticker='{ticker}', start_date='{start_date}', end_date='{current_date}', curr_date='{current_date}'\n\n"
                 f"📊 分析要求：\n"
                 f"- 基于真实数据进行深度基本面分析\n"
-                f"- 计算并提供合理价位区间（使用{market_info['currency_name']}{market_info['currency_symbol']}）\n"
-                f"- 分析当前股价是否被低估或高估\n"
-                f"- 提供基于基本面的目标价位建议\n"
+                f"- 基于估值指标解释当前定价反映的经营预期\n"
+                f"- 分析当前股价相对基本面的高估或低估迹象\n"
+                f"- 说明估值判断依赖的关键假设和信息缺口\n"
                 f"可用工具：{', '.join(tool_names_debug)}。\n"
                 f"当前日期：{current_date}。\n"
                 f"分析目标：{company_name}（股票代码：{ticker}）。"
             )
+            system_prompt = apply_compliance_guardrails(system_prompt, "fundamentals_analyst")
             logger.warning(f"⚠️ [基本面分析师] 使用降级提示词 (长度: {len(system_prompt)})")
 
         # 创建提示模板
@@ -461,14 +464,15 @@ def create_fundamentals_analyst(llm, toolkit):
                         f"1. 公司基本信息和财务数据分析\n"
                         f"2. PE、PB、PEG等估值指标分析\n"
                         f"3. 当前股价是否被低估或高估的判断\n"
-                        f"4. 合理价位区间和目标价位建议\n"
-                        f"5. 基于基本面的投资建议（买入/持有/卖出）\n\n"
+                        f"4. 估值判断依赖的关键假设与信息边界\n"
+                        f"5. 主要风险与后续需要跟踪的指标\n\n"
                         f"要求：\n"
                         f"- 使用中文撰写报告\n"
                         f"- 基于消息历史中的真实数据进行分析\n"
                         f"- 分析要详细且专业\n"
-                        f"- 投资建议必须明确（买入/持有/卖出）"
+                        f"- 仅输出研究判断，不得形成投资建议或目标价"
                     )
+                    force_system_prompt = apply_compliance_guardrails(force_system_prompt, "fundamentals_analyst")
 
                     # 创建专门的提示模板（不绑定工具）
                     force_prompt = ChatPromptTemplate.from_messages([
@@ -649,13 +653,13 @@ def create_fundamentals_analyst(llm, toolkit):
 2. 财务状况评估
 3. 盈利能力分析
 4. 估值分析（使用{currency_info}）
-5. 投资建议（买入/持有/卖出）
+5. 关键假设、主要风险与后续观察指标
 
 要求：
 - 基于提供的真实数据进行分析
 - 正确使用公司名称"{company_name}"和股票代码"{ticker}"
 - 价格使用{currency_info}
-- 投资建议使用中文
+- 只输出研究判断与风险提示，不得形成投资建议
 - 分析要详细且专业"""
 
                 try:

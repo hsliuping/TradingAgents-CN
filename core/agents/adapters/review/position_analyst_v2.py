@@ -28,9 +28,9 @@ class PositionAnalystV2(ResearcherAgent):
     仓位分析师 v2.0 (复盘分析)
     
     功能：
-    - 分析仓位控制和加减仓策略
+    - 复盘仓位控制与仓位变化依据
     - 评估仓位与风险的匹配度
-    - 分析资金利用效率
+    - 分析资金利用效率与集中度风险
     
     工作流程：
     1. 读取交易信息和仓位历史
@@ -53,7 +53,7 @@ class PositionAnalystV2(ResearcherAgent):
     metadata = AgentMetadata(
         id="position_analyst_v2",
         name="仓位分析师 v2.0",
-        description="分析仓位控制和加减仓策略的合理性",
+        description="复盘仓位控制与仓位变化依据的合理性",
         category=AgentCategory.ANALYST,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -96,14 +96,14 @@ class PositionAnalystV2(ResearcherAgent):
         # 降级提示词（当模板系统不可用时使用）
         fallback_prompt = """您是一位专业的仓位分析师 v2.0。
 
-您的职责是分析仓位管理的合理性。
+    您的职责是复盘仓位管理的合理性，并识别仓位依据、风险暴露和纪律执行问题。
 
-**分析要点**：
-1. 初始仓位 - 首次建仓比例是否合理
-2. 加减仓策略 - 加减仓时机和比例
-3. 风险匹配 - 仓位与风险的匹配度
-4. 资金效率 - 资金利用效率
-5. 仓位评分 - 0-100分的仓位管理评分
+    **分析要点**：
+    1. 初始仓位 - 首次建仓比例是否合理
+    2. 仓位变化依据 - 每次仓位变化是否有清晰依据
+    3. 风险匹配 - 仓位与风险的匹配度
+    4. 资金效率 - 资金利用效率与集中度风险
+    5. 需补强的仓位纪律要点 - 本次复盘后应补充哪些依据记录与风险约束
 
 **重要约束**：
 - 必须使用用户提示词中提供的真实数据（股票代码、股票名称、收益金额、收益率等）
@@ -138,8 +138,8 @@ class PositionAnalystV2(ResearcherAgent):
 
 **请在分析中重点检查**：
 1. 仓位是否超过单只股票上限
-2. 加减仓操作是否合理
-3. 如有违反规则的地方，请明确指出"""
+2. 仓位变化是否有清晰依据
+3. 如有违反规则的地方，请明确指出，并说明应如何改进仓位纪律"""
 
         # 使用基类的通用方法从模板系统获取提示词（支持注入交易计划规则，参考 research_manager_v2）
         logger.info("🔍 [PositionAnalystV2] 开始构建系统提示词")
@@ -242,7 +242,7 @@ class PositionAnalystV2(ResearcherAgent):
         template_variables['holding_status'] = f"{'持仓中' if is_holding else '已平仓'}"
         
         # 降级提示词（如果模板系统不可用）
-        fallback_prompt = f"""请分析以下交易的仓位管理：
+        fallback_prompt = f"""请分析以下交易的仓位复盘：
 
 === 交易信息 ===
 - 股票代码: {code}
@@ -262,10 +262,12 @@ class PositionAnalystV2(ResearcherAgent):
 
 请撰写详细的仓位分析报告，包括：
 1. 初始仓位评估
-2. 加减仓策略分析
+2. 仓位变化依据分析
 3. 仓位与风险匹配度
-4. 资金利用效率
-5. 仓位管理评分（0-100分）"""
+4. 资金利用效率与集中度风险
+5. 需补强的仓位纪律要点
+
+禁止输出未来加减仓方案、目标仓位或具体执行动作。"""
 
         # 打印模板变量（调试用）
         logger.info(f"📊 [仓位分析师] 模板变量:")

@@ -1505,11 +1505,11 @@ class TushareProvider(BaseStockDataProvider):
                 "report_type": self._determine_report_type(report_period),
 
                 # 利润表核心指标
-                "revenue": self._safe_float(latest_income.get('revenue')),  # 营业收入（单期）
+                "revenue": self._safe_float(latest_income.get('revenue')),  # 营业收入（原始报告期口径，A股季报通常为年初累计）
                 "revenue_ttm": revenue_ttm,  # 营业收入（TTM）
                 "oper_rev": self._safe_float(latest_income.get('oper_rev')),  # 营业收入
-                "net_income": self._safe_float(latest_income.get('n_income')),  # 净利润（单期）
-                "net_profit": self._safe_float(latest_income.get('n_income_attr_p')),  # 归属母公司净利润（单期）
+                "net_income": self._safe_float(latest_income.get('n_income')),  # 净利润（原始报告期口径，A股季报通常为年初累计）
+                "net_profit": self._safe_float(latest_income.get('n_income_attr_p')),  # 归属母公司净利润（原始报告期口径，A股季报通常为年初累计）
                 "net_profit_ttm": net_profit_ttm,  # 归属母公司净利润（TTM）
                 "oper_profit": self._safe_float(latest_income.get('oper_profit')),  # 营业利润
                 "total_profit": self._safe_float(latest_income.get('total_profit')),  # 利润总额
@@ -2030,6 +2030,46 @@ class TushareProvider(BaseStockDataProvider):
             return None
         except Exception as e:
             self.logger.error(f"❌ 获取概念板块资金流向失败: {e}")
+            return None
+
+    async def get_moneyflow_ind_ths(self, trade_date: str = None,
+                                   ts_code: str = None) -> Optional[pd.DataFrame]:
+        """
+        获取同花顺行业资金流向
+
+        Args:
+            trade_date: 交易日期 YYYYMMDD
+            ts_code: 行业代码
+
+        Returns:
+            DataFrame，包含行业资金流向数据
+            - industry: 行业名称
+            - pct_change: 行业指数涨跌幅
+            - company_num: 成分股数量
+            - net_buy_amount: 流入资金（亿元）
+            - net_sell_amount: 流出资金（亿元）
+            - net_amount: 净额（亿元）
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if trade_date:
+                params['trade_date'] = trade_date.replace('-', '')
+            if ts_code:
+                params['ts_code'] = ts_code
+
+            df = await asyncio.to_thread(
+                self.api.moneyflow_ind_ths,
+                **params
+            )
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取行业资金流向数据: {len(df)} 条")
+                return df
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ 获取行业资金流向失败: {e}")
             return None
 
     def get_stock_industry_sync(self, ticker: str) -> Optional[str]:
@@ -2629,7 +2669,7 @@ class TushareProvider(BaseStockDataProvider):
         trade_date: str
     ) -> Optional[Dict[str, Any]]:
         """
-        获取每日市场统计（涨跌家数等）
+        获取每日市场统计（涨跌家数与涨跌幅分布）
 
         通过 daily 接口聚合计算
 
@@ -2660,10 +2700,6 @@ class TushareProvider(BaseStockDataProvider):
             down_count = len(df[df['pct_chg'] < 0])
             flat_count = len(df[df['pct_chg'] == 0])
 
-            # 涨停跌停（近似判断：涨幅>=9.9% 或 跌幅<=-9.9%）
-            limit_up = len(df[df['pct_chg'] >= 9.9])
-            limit_down = len(df[df['pct_chg'] <= -9.9])
-
             # 涨幅分布
             up_gt5 = len(df[df['pct_chg'] >= 5])
             up_3_5 = len(df[(df['pct_chg'] >= 3) & (df['pct_chg'] < 5)])
@@ -2676,8 +2712,6 @@ class TushareProvider(BaseStockDataProvider):
                 'up_count': up_count,
                 'down_count': down_count,
                 'flat_count': flat_count,
-                'limit_up': limit_up,
-                'limit_down': limit_down,
                 'up_ratio': up_count / total * 100 if total > 0 else 0,
                 'down_ratio': down_count / total * 100 if total > 0 else 0,
                 'up_gt5': up_gt5,

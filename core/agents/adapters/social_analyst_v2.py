@@ -7,7 +7,10 @@
 import logging
 from typing import Dict, Any, Optional
 
+from langchain_core.messages import SystemMessage, HumanMessage
+
 from core.agents.analyst import AnalystAgent
+from core.agents.base import GENERIC_REPORT_FALLBACK
 from core.agents.config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from core.agents.registry import register_agent
 
@@ -28,8 +31,8 @@ class SocialMediaAnalystV2(AnalystAgent):
     
     功能：
     - 获取社交媒体情绪数据
-    - 分析投资者情绪和市场热度
-    - 评估社交媒体对股价的影响
+    - 分析投资者情绪结构与市场热度
+    - 识别情绪背离、噪音与待验证信号
     
     工作流程：
     1. 调用统一情绪工具获取社交媒体数据
@@ -53,7 +56,7 @@ class SocialMediaAnalystV2(AnalystAgent):
     metadata = AgentMetadata(
         id="social_analyst_v2",
         name="社交媒体分析师 v2.0",
-        description="分析社交媒体情绪，评估投资者情绪和市场热度",
+        description="分析社交媒体情绪，提炼热度变化、情绪背离与噪音风险",
         category=AgentCategory.ANALYST,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -80,6 +83,45 @@ class SocialMediaAnalystV2(AnalystAgent):
     
     # 输出字段名
     output_field = "sentiment_report"
+
+    def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """覆盖执行逻辑以支持专用情绪分析提示词。"""
+        try:
+            ticker = state.get("ticker") or state.get("company_of_interest")
+            analysis_date = state.get("analysis_date") or state.get("trade_date")
+            market_type = state.get("market_type", "A股")
+            context = state.get("context")
+            overrides = state.get("prompt_overrides") or {}
+            system_override = overrides.get("system")
+            user_override = overrides.get("user")
+            analysis_override = overrides.get("analysis")
+
+            if not ticker or not analysis_date:
+                raise ValueError("Missing required parameters: ticker or analysis_date")
+
+            system_prompt = system_override or self._build_system_prompt(market_type, context=context, state=state)
+            user_prompt = user_override or self._build_user_prompt(ticker, analysis_date, {}, state)
+            analysis_prompt = analysis_override or self._build_analysis_prompt(ticker)
+
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ]
+
+            if self._llm:
+                if self._langchain_tools:
+                    report = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)
+                else:
+                    response = self._llm.invoke(messages)
+                    report = response.content if hasattr(response, "content") else str(response)
+            else:
+                raise ValueError("LLM not initialized")
+
+            return {self.output_field: report}
+
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] 执行失败: {e}", exc_info=True)
+            return {self.output_field: GENERIC_REPORT_FALLBACK}
 
     def _build_system_prompt(self, market_type: str = None, context=None, state: Dict[str, Any] = None) -> str:
         """
@@ -149,16 +191,20 @@ class SocialMediaAnalystV2(AnalystAgent):
         # 降级：使用默认提示词
         return f"""您是一位专业的社交媒体情绪分析师。
 
-您的职责是分析社交媒体上的投资者情绪，评估市场热度和情绪趋势。
+    您的职责是分析社交媒体上的投资者情绪结构、讨论热度和观点分歧，识别哪些情绪信号值得跟踪，哪些只是噪音。
 
-分析要点：
-1. 总结社交媒体上的主要讨论话题
-2. 分析投资者情绪（看涨/看跌/中性）
-3. 评估市场热度和关注度
-4. 识别潜在的情绪驱动因素
-5. 提供基于情绪的分析观点
+    分析要点：
+    1. 情绪方向与热度 - 讨论更偏乐观、悲观还是分歧加大
+    2. 情绪来源结构 - 散户、主题社区、KOL 或机构观点分别在表达什么
+    3. 情绪背离 - 情绪变化与基本面、价格行为是否一致
+    4. 噪音识别 - 哪些说法缺乏证据、容易放大短期波动
+    5. 后续观察信号 - 仍需跟踪的情绪变化、讨论主题和验证事件
 
-请使用中文，基于真实数据进行分析。"""
+    严格要求：
+    - 不得输出买入、卖出、持有、加减仓、目标价、价格区间、止损止盈或仓位建议。
+    - 允许引用工具返回的真实情绪指标、讨论热度和文本片段，但不得改写成执行性结论。
+
+    请使用中文，基于真实数据进行分析。"""
 
     def _build_user_prompt(
         self,
@@ -251,19 +297,30 @@ class SocialMediaAnalystV2(AnalystAgent):
         # 降级：使用默认提示词（不再检查 tool_data，因为工具数据会通过 ToolMessage 传递）
         logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
         # 🔑 关键：在默认提示词中明确告诉LLM要使用什么日期调用工具
-        return f"""请对股票 {ticker}（{company_name}）进行详细的社交媒体情绪分析：
+        return f"""请对股票 {ticker}（{company_name}）进行详细的情绪研究：
 
 **分析日期**：{analysis_date_str}
 
 **重要提示**：调用工具 get_stock_sentiment_unified 时，必须使用 curr_date 参数，值为：{analysis_date_str}
 
-请调用工具获取社交媒体数据，然后生成详细的中文分析报告。"""
+    请调用工具获取社交媒体数据，然后基于真实结果输出中文研究报告，至少包含：
+    1. 情绪方向、热度与主要讨论主题
+    2. 情绪背离、观点分歧与潜在噪音来源
+    3. 可能强化或削弱研究判断的情绪信号
+    4. 需要继续跟踪的后续观察事项
+
+    禁止输出买卖建议、目标价、价格区间、止损止盈、仓位计划或任何执行性指令。"""
 
     def _get_company_name(self, ticker: str, state: Dict[str, Any]) -> str:
         """获取公司名称"""
-        # 优先从state获取
-        if "company_name" in state:
-            return state["company_name"]
+        company_name = str(
+            state.get("company_name")
+            or state.get("stock_name")
+            or state.get("name")
+            or ""
+        )
+        if company_name:
+            return company_name
         
         # 使用StockUtils获取
         if StockUtils:
@@ -278,4 +335,29 @@ class SocialMediaAnalystV2(AnalystAgent):
                 logger.debug(f"获取公司名称失败: {e}")
         
         return f"股票{ticker}"
+
+    def _build_analysis_prompt(self, ticker: str) -> str:
+        """构建工具调用后的情绪分析提示词。"""
+        return f"""基于获取的数据，请生成 {ticker} 的专业情绪研究报告，包括：
+
+1. 情绪方向与热度
+2. 观点结构与渠道差异
+3. 情绪变化与分化
+4. 噪音与风险
+5. 对整体研究结论的影响
+6. 后续观察事项
+
+如果工具结果没有 KOL、散户、机构、平台分层、互动数据或高影响力消息等某个维度，就不要分析该维度；如必须提及，只能写“工具结果未提供”或“该维度暂不分析”。
+如果工具明确说明当前结果来自新闻回退情绪摘要而非真实社媒内容，正文必须明确写出这一点，且不得把回退结果写成 KOL、散户、机构或社区分层结论。
+情绪方向、讨论热度、平台分布、互动强弱和高影响力消息要分开表述；不要把消息数量更多、关键词更集中或互动更高，直接写成“市场一致看多”“情绪持续升温”“趋势确认”。
+如果工具只提供当前快照、最近7天汇总或有限条消息，不得写“持续升温”“连续多日改善”“情绪已经反转”“市场形成一致预期”等需要更长时序验证的措辞。
+如果高影响力消息与总体情绪统计不一致，必须写出这种分化及其对结论强度的限制。
+可以引用工具返回的情绪评级、消息数量、平台分布、关键词、话题标签、互动数据和高影响力消息做事实说明，但不得把这些内容改写成目标价、价格区间、买卖建议、做多做空结论或执行计划。
+请使用研究口径表达情绪含义，优先使用“偏积极”“偏审慎”“中性”“分化加大”“噪音较高”“一致性有限”“值得继续跟踪”等表述，不要使用“情绪拐点已至”“全面看多”“抄底情绪升温”“马上反转”等交易化措辞。
+`## 对整体研究结论的影响` 只说明情绪信号如何强化、削弱或中性影响整体研究判断，不要把情绪直接写成趋势结论。
+`## 后续观察事项` 只能写需要继续跟踪的情绪方向、讨论主题、平台结构变化、互动强度变化或与新闻/基本面的交叉验证，不得写成交易触发条件。
+在工具结果充分时，报告应保持足够展开，正常情况下不少于700字。
+
+不要输出投资建议、目标价、价格区间、仓位或执行计划。
+不得添加任何署名、作者、分析师、日期或声明信息。"""
 

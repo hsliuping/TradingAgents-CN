@@ -41,6 +41,9 @@ DEFAULT_REDIS_PORT=6379
 DEFAULT_BACKEND_PORT=8000
 DEFAULT_IMAGE_TAG=latest
 
+# 非交互模式标志
+NON_INTERACTIVE=false
+
 # 打印带颜色的消息
 print_info() {
     echo -e "${BLUE}ℹ️  $1${NC}"
@@ -312,6 +315,21 @@ configure_ports() {
     print_info "配置服务端口..."
     echo ""
 
+    if $NON_INTERACTIVE; then
+        NGINX_PORT=${NGINX_PORT:-$DEFAULT_NGINX_PORT}
+        MONGODB_PORT=${MONGODB_PORT:-$DEFAULT_MONGODB_PORT}
+        REDIS_PORT=${REDIS_PORT:-$DEFAULT_REDIS_PORT}
+        BACKEND_PORT=${BACKEND_PORT:-$DEFAULT_BACKEND_PORT}
+        print_success "Nginx 端口: $NGINX_PORT"
+        print_success "MongoDB 端口: $MONGODB_PORT"
+        print_success "Redis 端口: $REDIS_PORT"
+        print_success "Backend 端口: $BACKEND_PORT"
+        echo ""
+        print_success "端口配置完成！"
+        echo ""
+        return
+    fi
+
     # Nginx 端口
     print_info "Nginx 前端服务端口 (默认: $DEFAULT_NGINX_PORT)"
     read -p "请输入端口 [直接回车使用默认]: " NGINX_PORT
@@ -356,7 +374,6 @@ configure_version() {
         echo ""
         return
     fi
-
 
     print_info "Docker 镜像版本 (默认: latest，如指定版本请输入如 2.1.0)"
     read -p "请输入版本号 [直接回车使用默认]: " IMAGE_TAG
@@ -544,6 +561,32 @@ show_access_info() {
 
 # 主函数
 main() {
+    # 解析命令行参数
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --non-interactive) NON_INTERACTIVE=true ;;
+            --image-tag) IMAGE_TAG="$2"; shift ;;
+            --nginx-port) NGINX_PORT="$2"; shift ;;
+            --mongodb-port) MONGODB_PORT="$2"; shift ;;
+            --redis-port) REDIS_PORT="$2"; shift ;;
+            --backend-port) BACKEND_PORT="$2"; shift ;;
+            -h|--help)
+                echo "用法: $0 [选项]"
+                echo ""
+                echo "选项:"
+                echo "  --non-interactive    非交互模式，使用默认值或环境变量"
+                echo "  --image-tag TAG      指定 Docker 镜像版本"
+                echo "  --nginx-port PORT    指定 Nginx 端口"
+                echo "  --mongodb-port PORT  指定 MongoDB 端口"
+                echo "  --redis-port PORT    指定 Redis 端口"
+                echo "  --backend-port PORT  指定 Backend 端口"
+                exit 0
+                ;;
+            *) print_error "未知选项: $1"; exit 1 ;;
+        esac
+        shift
+    done
+
     print_header
 
     # 检测 Docker Compose 命令
@@ -590,5 +633,5 @@ main() {
 }
 
 # 运行主函数
-main
+main "$@"
 

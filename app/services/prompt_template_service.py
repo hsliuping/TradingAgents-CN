@@ -3,7 +3,7 @@
 """
 
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.core.database import get_mongo_db
@@ -56,6 +56,130 @@ class PromptTemplateService:
         """验证模板内容长度"""
         total_length = sum(len(str(v)) for v in content.values())
         return total_length <= MAX_TEMPLATE_LENGTH
+
+    def _merge_remark_suffix(self, remark: str, remark_suffix: Optional[str] = None) -> str:
+        """将同步备注追加到 remark，避免重复追加。"""
+        merged_remark = (remark or "").strip()
+        if not remark_suffix:
+            return merged_remark
+
+        suffix = remark_suffix.strip()
+        if not suffix:
+            return merged_remark
+        if suffix in merged_remark:
+            return merged_remark
+        return f"{merged_remark}\n{suffix}".strip()
+
+    async def upsert_system_template(
+        self,
+        template_data: PromptTemplateCreate,
+        remark_suffix: Optional[str] = None,
+    ) -> Tuple[Optional[PromptTemplate], str]:
+        """按 agent_type/agent_name/preference_type 幂等同步系统模板。"""
+        try:
+            content_doc = template_data.content.model_dump()
+            if not self._validate_template_length(content_doc):
+                logger.error(f"模板内容超过长度限制 ({MAX_TEMPLATE_LENGTH} bytes)")
+                return None, "error"
+
+            template_key = {
+                "agent_type": template_data.agent_type,
+                "agent_name": template_data.agent_name,
+                "preference_type": template_data.preference_type,
+                "is_system": True,
+            }
+            existing_docs = await self.templates_collection.find(template_key).to_list(length=10)
+
+            if len(existing_docs) > 1:
+                logger.error(
+                    "❌ 系统模板存在重复记录，拒绝自动同步: %s/%s/%s",
+                    template_data.agent_type,
+                    template_data.agent_name,
+                    template_data.preference_type,
+                )
+                return None, "conflict"
+
+            existing_doc = existing_docs[0] if existing_docs else None
+            now = datetime.utcnow()
+            remark = self._merge_remark_suffix(getattr(template_data, "remark", "") or "", remark_suffix)
+
+            if existing_doc:
+                unchanged = (
+                    existing_doc.get("template_name") == template_data.template_name
+                    and (existing_doc.get("content") or {}) == content_doc
+                    and (existing_doc.get("remark") or "") == remark
+                    and existing_doc.get("status") == template_data.status
+                    and existing_doc.get("is_system") is True
+                    and existing_doc.get("created_by") is None
+                )
+                if unchanged:
+                    return await self.get_template(str(existing_doc["_id"])), "unchanged"
+
+                version = int(existing_doc.get("version") or 1) + 1
+                query = {"_id": existing_doc["_id"]}
+                template_id = str(existing_doc["_id"])
+                created_at = existing_doc.get("created_at") or now
+                operation = "updated"
+            else:
+                version = 1
+                query = template_key
+                template_id = None
+                created_at = now
+                operation = "created"
+
+            result = await self.templates_collection.update_one(
+                query,
+                {
+                    "$set": {
+                        "agent_type": template_data.agent_type,
+                        "agent_name": template_data.agent_name,
+                        "template_name": template_data.template_name,
+                        "preference_type": template_data.preference_type,
+                        "content": content_doc,
+                        "remark": remark,
+                        "is_system": True,
+                        "created_by": None,
+                        "base_template_id": None,
+                        "base_version": None,
+                        "status": template_data.status,
+                        "updated_at": now,
+                        "version": version,
+                    },
+                    "$setOnInsert": {
+                        "created_at": created_at,
+                    },
+                },
+                upsert=True,
+            )
+
+            if template_id is None:
+                template_id = str(result.upserted_id) if result.upserted_id else None
+                if template_id is None:
+                    created_doc = await self.templates_collection.find_one(template_key)
+                    template_id = str(created_doc["_id"]) if created_doc else None
+
+            if template_id is None:
+                logger.error(
+                    "❌ 系统模板同步后无法定位模板记录: %s/%s/%s",
+                    template_data.agent_type,
+                    template_data.agent_name,
+                    template_data.preference_type,
+                )
+                return None, "error"
+
+            await self._record_history(
+                template_id,
+                None,
+                version,
+                content_doc,
+                "create" if operation == "created" else "update",
+            )
+
+            return await self.get_template(template_id), operation
+
+        except Exception as e:
+            logger.error(f"❌ 同步系统模板失败: {e}", exc_info=True)
+            return None, "error"
 
     async def create_template(
         self,

@@ -12,6 +12,7 @@ from tradingagents.tools.unified_news_tool import create_unified_news_tool
 from tradingagents.utils.stock_utils import StockUtils
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails
 
 # 导入模板客户端
 from tradingagents.utils.template_client import get_agent_prompt
@@ -143,6 +144,7 @@ def create_news_analyst(llm, toolkit):
                 fallback_prompt=None,
                 context=None
             )
+            system_prompt = apply_compliance_guardrails(system_prompt, "news_analyst")
 
             logger.info(f"✅ [新闻分析师] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
             system_message = system_prompt
@@ -166,6 +168,7 @@ def create_news_analyst(llm, toolkit):
                 f"4. 您的回答必须基于工具返回的真实数据\n\n"
                 f"请使用中文，基于真实数据进行分析。"
             )
+            system_prompt = apply_compliance_guardrails(system_prompt, "news_analyst")
             logger.warning(f"⚠️ [新闻分析师] 使用降级提示词 (长度: {len(system_prompt)})")
             system_message = system_prompt
 
@@ -219,9 +222,10 @@ def create_news_analyst(llm, toolkit):
 1. 总结最新的新闻事件和市场动态
 2. 分析新闻对股票的潜在影响
 3. 评估市场情绪和投资者反应
-4. 提供基于新闻的投资建议
+4. 提炼需要继续跟踪的事件与风险点
 
 重要说明：新闻数据已经为您提供，您无需调用任何工具，直接基于提供的数据进行分析。"""
+                    analysis_system_prompt = apply_compliance_guardrails(analysis_system_prompt, "news_analyst")
 
                     enhanced_prompt = f"""请基于以下已获取的最新新闻数据，对股票 {ticker}（{company_name}）进行详细的新闻分析：
 
@@ -232,7 +236,7 @@ def create_news_analyst(llm, toolkit):
 1. 新闻事件总结
 2. 对股票的影响分析
 3. 市场情绪评估
-4. 投资建议"""
+4. 后续观察事项与风险提示"""
 
                     logger.info(f"[新闻分析师] 🔄 使用预获取新闻数据直接生成分析...")
                     logger.info(f"[新闻分析师] 📝 系统提示词长度: {len(analysis_system_prompt)} 字符")

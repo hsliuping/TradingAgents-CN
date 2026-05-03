@@ -14,6 +14,14 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+def build_test_provider_config() -> dict:
+    model_name = os.environ.get("MARKET_TEST_LLM_MODEL") or os.environ.get("TEST_LLM_MODEL") or "qwen-plus"
+    return {
+        "quick_think_llm": model_name,
+        "deep_think_llm": model_name,
+    }
+
+
 def test_market_analyst():
     """测试市场分析师集成"""
     print("\n" + "=" * 60)
@@ -21,15 +29,16 @@ def test_market_analyst():
     print("=" * 60)
 
     # 1. 使用 LegacyDependencyProvider 创建依赖
-    # 不传入 config，让它自动从数据库获取 dashscope/qwen-plus 配置
-    print("\n[1/3] 创建 LLM 和 Toolkit (从数据库获取配置)...")
+    print("\n[1/3] 创建 LLM 和 Toolkit (默认使用 dashscope/qwen-plus 测试配置)...")
     from core.workflow.builder import LegacyDependencyProvider
 
-    provider = LegacyDependencyProvider()  # 自动从数据库获取配置
+    provider_config = build_test_provider_config()
+    provider = LegacyDependencyProvider(provider_config)
     llm = provider.get_llm("quick")
     toolkit = provider.get_toolkit()
 
     print(f"  ✓ LLM: {llm.__class__.__name__}")
+    print(f"  ✓ Test Model: {provider_config['quick_think_llm']}")
     print("  ✓ Toolkit: 已创建")
 
     # 2. 创建引擎

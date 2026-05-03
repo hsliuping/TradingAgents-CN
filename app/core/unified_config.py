@@ -116,7 +116,7 @@ class UnifiedConfigManager:
                     model_name=model.get("model_name", ""),
                     api_key="",
                     api_base=model.get("base_url"),
-                    max_tokens=model.get("max_tokens", 4000),
+                    max_tokens=model.get("max_tokens", 8000),
                     temperature=model.get("temperature", 0.7),
                     enabled=model.get("enabled", True),
                     description=f"{model.get('provider', '')} {model.get('model_name', '')}"
@@ -536,7 +536,6 @@ class UnifiedConfigManager:
                 llm_configs=self.get_llm_configs(),
                 default_llm=self.get_default_model(),
                 data_source_configs=self.get_data_source_configs(),
-                default_data_source="AKShare",
                 database_configs=self.get_database_configs(),
                 system_settings=self.get_system_settings()
             )

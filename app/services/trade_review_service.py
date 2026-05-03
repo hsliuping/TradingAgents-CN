@@ -27,7 +27,7 @@ def _use_template_prompts() -> bool:
     return value
 
 def _use_workflow_review() -> bool:
-    """动态读取 USE_STOCK_ENGINE 环境变量（复用持仓分析的引擎开关）
+    """动态读取 USE_STOCK_ENGINE 环境变量（复用持仓研究的引擎开关）
 
     当 USE_STOCK_ENGINE=true 时，交易复盘也会使用工作流引擎进行多维度分析
     """
@@ -47,6 +47,7 @@ from app.models.review import (
     CreateTradeReviewRequest, CreatePeriodicReviewRequest,
     TradeReviewResponse, PeriodicReviewResponse, ReviewListItem
 )
+from app.utils.compliance import sanitize_periodic_review_payload, sanitize_trade_review_payload
 from app.utils.timezone import now_tz
 
 # ==================== v2.0 工具导入 ====================
@@ -82,6 +83,42 @@ class TradeReviewService:
         self.paper_trades_collection = "paper_trades"
         self.trading_systems_collection = "trading_systems"
 
+    def _append_review_guardrails(self, prompt: str) -> str:
+        """为复盘提示词追加统一合规约束。"""
+        guardrails = """
+## 输出约束
+- 仅允许输出复盘结论、做得好的地方、需要改进的地方、纪律反思和后续观察点。
+- 改进内容只限研究准备、规则执行、风险识别和记录方法，不得给出未来买卖、持有、加减仓、止损止盈、目标价或具体仓位比例建议。
+- 如需描述问题，请聚焦本次交易为何偏离计划，不要把输出写成下一次的交易指令。
+""".strip()
+        return f"{prompt.rstrip()}\n\n{guardrails}\n"
+
+    def _sanitize_trade_review_result(self, result: AITradeReview) -> AITradeReview:
+        """统一将交易复盘结果转换为复盘改进模式。"""
+        if result is None:
+            return AITradeReview()
+
+        raw_data = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+        sanitized_data = sanitize_trade_review_payload(raw_data)
+        return AITradeReview(**sanitized_data)
+
+    def _sanitize_trade_review_dict(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """统一清洗交易复盘详情和历史记录中的结果字段。"""
+        return sanitize_trade_review_payload(data)
+
+    def _sanitize_periodic_review_result(self, result: AIPeriodicReview) -> AIPeriodicReview:
+        """统一将阶段性复盘结果转换为复盘改进模式。"""
+        if result is None:
+            return AIPeriodicReview()
+
+        raw_data = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+        sanitized_data = sanitize_periodic_review_payload(raw_data)
+        return AIPeriodicReview(**sanitized_data)
+
+    def _sanitize_periodic_review_dict(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """统一清洗阶段性复盘详情中的结果字段。"""
+        return sanitize_periodic_review_payload(data)
+
     # ==================== 辅助方法 ====================
 
     async def _get_current_price(self, code: str, market: str = "CN") -> Optional[float]:
@@ -95,7 +132,7 @@ class TradeReviewService:
             当前价格，如果获取失败则返回 None
         """
         try:
-            # 🔥 使用与持仓分析服务相同的方法获取价格
+            # 🔥 使用与持仓研究服务相同的方法获取价格
             from app.services.portfolio_service import PortfolioService
             portfolio_service = PortfolioService()
             current_price = await portfolio_service._get_stock_price(code, market)
@@ -246,6 +283,7 @@ class TradeReviewService:
                 trading_system=trading_system,
                 use_workflow=request.use_workflow
             )
+            ai_review = self._sanitize_trade_review_result(ai_review)
             
             execution_time = (datetime.now() - start_time).total_seconds()
 
@@ -416,7 +454,9 @@ class TradeReviewService:
 
             # 9. 从任务结果中提取 AI 复盘
             if task.result and "ai_review" in task.result:
-                ai_review = AITradeReview(**task.result["ai_review"])
+                ai_review = self._sanitize_trade_review_result(
+                    AITradeReview(**task.result["ai_review"])
+                )
             else:
                 raise ValueError("任务结果中缺少 ai_review 数据")
 
@@ -579,6 +619,25 @@ class TradeReviewService:
         if not trade_records:
             return TradeInfo(code=code or "")
 
+        def _parse_trade_time(value: Any) -> datetime:
+            if isinstance(value, datetime):
+                return value
+            if isinstance(value, str) and value:
+                normalized = value.replace('Z', '+00:00')
+                try:
+                    return datetime.fromisoformat(normalized)
+                except ValueError:
+                    try:
+                        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        return datetime.max
+            return datetime.max
+
+        trade_records = sorted(
+            trade_records,
+            key=lambda record: _parse_trade_time(record.get("timestamp"))
+        )
+
         # 打印输入的交易记录（调试用）
         logger.info(f"📊 [_build_trade_info] 收到 {len(trade_records)} 笔交易记录")
         for i, record in enumerate(trade_records):
@@ -602,7 +661,8 @@ class TradeReviewService:
         total_pnl = 0.0
         total_commission = 0.0
 
-        timestamps = []
+        buy_timestamps = []
+        sell_timestamps = []
 
         for record in trade_records:
             trade = TradeRecord(
@@ -618,7 +678,10 @@ class TradeReviewService:
             trades.append(trade)
 
             if trade.timestamp:
-                timestamps.append(trade.timestamp)
+                if trade.side == "buy":
+                    buy_timestamps.append(trade.timestamp)
+                elif trade.side == "sell":
+                    sell_timestamps.append(trade.timestamp)
 
             total_commission += trade.commission
 
@@ -649,9 +712,10 @@ class TradeReviewService:
         is_holding = remaining_quantity > 0
         
         # 计算持仓天数
-        timestamps.sort()
-        first_buy_date = timestamps[0] if timestamps else None
-        last_sell_date = None
+        buy_timestamps.sort()
+        sell_timestamps.sort()
+        first_buy_date = buy_timestamps[0] if buy_timestamps else None
+        last_sell_date = sell_timestamps[-1] if sell_timestamps else None
         
         holding_days = 0
         if first_buy_date:
@@ -675,10 +739,7 @@ class TradeReviewService:
                     logger.info(f"📊 [持仓天数] 持仓中交易，从 {first_buy_date} 到当前: {holding_days} 天")
                 else:
                     # 已平仓：从第一笔买入到最后卖出
-                    sell_timestamps = [t.timestamp for t in trades if t.side == "sell" and t.timestamp]
-                    if sell_timestamps:
-                        sell_timestamps.sort()
-                        last_sell_date = sell_timestamps[-1]
+                    if last_sell_date:
                         last_dt_str = last_sell_date.replace('Z', '+00:00')
                         if '+' in last_dt_str or last_dt_str.endswith('Z'):
                             last_dt = datetime.fromisoformat(last_dt_str.replace('Z', '+00:00'))
@@ -1072,16 +1133,16 @@ class TradeReviewService:
             result = self._parse_ai_trade_review(content, trade_info, market_snapshot)
             logger.info(f"✅ [AI复盘] 解析完成 - 总分: {result.overall_score}, 摘要长度: {len(result.summary)}")
 
-            return result
+            return self._sanitize_trade_review_result(result)
 
         except Exception as e:
             logger.error(f"AI复盘分析失败: {e}", exc_info=True)
             from app.utils.error_formatter import ErrorFormatter
 
-            return AITradeReview(
+            return self._sanitize_trade_review_result(AITradeReview(
                 summary=f"AI分析暂时不可用：{ErrorFormatter.format_user_message(str(e))}",
                 overall_score=50
-            )
+            ))
 
 
 
@@ -1138,12 +1199,12 @@ class TradeReviewService:
                     logger.info(f"✅ [交易复盘] 使用模板系统生成提示词 (长度: {len(prompt)})")
                     logger.info(f"📝 [交易复盘] 提示词前500字符:\n{prompt[:500]}")
                     logger.info(f"📝 [交易复盘] 提示词后500字符:\n{prompt[-500:]}")
-                    return prompt
+                    return self._append_review_guardrails(prompt)
 
             except Exception as e:
                 logger.warning(f"⚠️ [交易复盘] 模板系统调用失败，使用硬编码提示词: {e}")
 
-        return legacy_prompt
+        return self._append_review_guardrails(legacy_prompt)
 
     def _build_legacy_trade_review_prompt(
         self,
@@ -1315,34 +1376,29 @@ class TradeReviewService:
 
 ```json
 {{
-    "overall_score": 0-100的整数（综合评分）,
-    "timing_score": 0-100的整数（时机评分）,
-    "position_score": 0-100的整数（仓位评分）,
-    "discipline_score": 0-100的整数（纪律评分）,
+    "overall_score": 0-100的整数（兼容保留字段，供内部归档使用）, 
+    "timing_score": 0-100的整数（兼容保留字段）, 
+    "position_score": 0-100的整数（兼容保留字段）, 
+    "discipline_score": 0-100的整数（兼容保留字段）, 
 
-    "summary": "50字以内的总体评价",
+    "summary": "80字以内的复盘结论，直白说明这笔交易最核心的得失与问题",
     "strengths": ["做得好的地方1", "做得好的地方2"],
     "weaknesses": ["需要改进的地方1", "需要改进的地方2"],
-    "suggestions": ["具体建议1", "具体建议2"],
+    "suggestions": ["后续研究或流程改进重点1", "后续研究或流程改进重点2"],
 
     "timing_analysis": "买入卖出时机的详细分析（100字以内）",
     "position_analysis": "仓位控制分析（50字以内）",
     "emotion_analysis": "是否存在情绪化操作（50字以内）",
 
     "market_analysis": "大盘环境对本次交易的影响（50字以内，如有大盘数据）",
-    "industry_analysis": "行业因素对本次交易的影响（50字以内，如有行业数据）",
-
-    "optimal_pnl": 理论最优收益金额（数字）,
-    "missed_profit": 错失的收益金额（数字，如果亏损则为0）,
-    "avoided_loss": 避免的亏损金额（数字，如果盈利则为0）
+    "industry_analysis": "行业因素对本次交易的影响（50字以内，如有行业数据）"
 }}
 ```
 
-**评分标准**：
-- 90-100分：优秀，时机把握精准，纪律严明
-- 70-89分：良好，整体操作合理，小有瑕疵
-- 50-69分：一般，有明显改进空间
-- 0-49分：较差，存在严重问题
+**输出要求**：
+- 分数字段仅用于兼容旧结构和内部归档，不得让总结围绕评分展开
+- summary、weaknesses、suggestions 应优先说明关键问题、成因和后续研究改进重点
+- suggestions 只能写成复盘改进重点、研究补强点或流程优化点，不得写成未来买卖、加减仓、止损止盈等执行动作
 
 **收益归因分析要点**：
 - 如果个股涨幅 > 大盘涨幅 + 行业超额，说明选股能力较强
@@ -1392,10 +1448,10 @@ class TradeReviewService:
                         return int(score_value * 10)
                     return int(score_value)
 
-                result.overall_score = normalize_score(data.get("overall_score", 50))
-                result.timing_score = normalize_score(data.get("timing_score", 50))
-                result.position_score = normalize_score(data.get("position_score", 50))
-                result.discipline_score = normalize_score(data.get("discipline_score", 50))
+                result.overall_score = normalize_score(data.get("overall_score", 0))
+                result.timing_score = normalize_score(data.get("timing_score", 0))
+                result.position_score = normalize_score(data.get("position_score", 0))
+                result.discipline_score = normalize_score(data.get("discipline_score", 0))
 
                 # 解析摘要 - 兼容多种字段名
                 result.summary = (
@@ -1443,11 +1499,6 @@ class TradeReviewService:
                     ""
                 )
 
-                # 解析收益数据
-                result.optimal_pnl = float(data.get("optimal_pnl", 0))
-                result.missed_profit = float(data.get("missed_profit", 0))
-                result.avoided_loss = float(data.get("avoided_loss", 0))
-
                 # 🆕 解析交易计划执行情况（如果有）
                 result.plan_adherence = data.get("plan_adherence")
                 result.plan_deviation = data.get("plan_deviation")
@@ -1463,18 +1514,6 @@ class TradeReviewService:
         else:
             logger.warning(f"⚠️ [解析AI响应] 未找到 JSON 代码块")
             logger.warning(f"📄 [解析AI响应] 完整内容:\n{content}")
-
-        # 备用：计算理论最优收益
-        logger.info(f"🔧 [解析AI响应] 使用备用方案，计算理论最优收益")
-        if market_snapshot.optimal_buy_price and market_snapshot.optimal_sell_price:
-            qty = trade_info.total_buy_quantity
-            optimal_pnl = (market_snapshot.optimal_sell_price - market_snapshot.optimal_buy_price) * qty
-            result.optimal_pnl = round(optimal_pnl, 2)
-
-            if trade_info.realized_pnl >= 0:
-                result.missed_profit = max(0, round(optimal_pnl - trade_info.realized_pnl, 2))
-            else:
-                result.avoided_loss = max(0, round(optimal_pnl - trade_info.realized_pnl, 2))
 
         result.summary = content[:200] if content else "AI分析完成"
         logger.info(f"⚠️ [解析AI响应] 使用备用方案完成 - 摘要: {result.summary}")
@@ -1638,6 +1677,8 @@ class TradeReviewService:
 
         if doc:
             logger.info(f"📊 [获取复盘详情] 从 trade_reviews 集合找到数据: {review_id}")
+            doc = dict(doc)
+            doc["ai_review"] = self._sanitize_trade_review_dict(doc.get("ai_review") or {})
             return TradeReviewReport(**doc)
 
         # 2. 如果没找到，从 unified_analysis_tasks 集合查询（任务中心模式）
@@ -1708,7 +1749,9 @@ class TradeReviewService:
 
         # 构建 AITradeReview
         ai_review_data = result.get("ai_review", {})
-        ai_review = AITradeReview(**ai_review_data) if ai_review_data else AITradeReview()
+        ai_review = self._sanitize_trade_review_result(
+            AITradeReview(**ai_review_data) if ai_review_data else AITradeReview()
+        )
 
         # 映射状态
         status_mapping = {
@@ -2082,6 +2125,7 @@ class TradeReviewService:
             statistics=statistics,
             trades_summary=trades_summary
         )
+        ai_review = self._sanitize_periodic_review_result(ai_review)
 
         execution_time = time.time() - start_time
 
@@ -2332,26 +2376,29 @@ class TradeReviewService:
 {trades_detail}
 
 请对这段时间的交易进行全面复盘分析，包括：
-1. 整体评分（0-100分）
+1. 阶段结论（分数字段仅作兼容保留，不作为总结主体）
 2. 交易风格分析
 3. 常见错误总结
 4. 改进方向建议
-5. 下阶段行动计划
+5. 后续观察与复盘重点
 6. 最佳交易分析
 7. 最差交易分析
 
 请以JSON格式输出，格式如下：
 {{
     "overall_score": 75,
-    "summary": "整体评价...",
+    "summary": "整体评价，需直白总结这段时间最突出的得失与问题...",
     "trading_style": "交易风格分析...",
     "common_mistakes": ["错误1", "错误2"],
     "improvement_areas": ["改进方向1", "改进方向2"],
-    "action_plan": ["行动计划1", "行动计划2"],
+    "action_plan": ["后续观察重点1", "后续复盘重点2"],
     "best_trade": "最佳交易分析...",
     "worst_trade": "最差交易分析..."
 }}
+
+注意：action_plan 字段是兼容旧结构的名称，实际内容必须写成后续观察重点或复盘跟踪事项，不得写成未来交易动作。
 """
+        prompt = self._append_review_guardrails(prompt)
 
         try:
             model_name = "qwen-plus"
@@ -2375,7 +2422,7 @@ class TradeReviewService:
             json_match = re.search(r'\{[\s\S]*\}', content)
             if json_match:
                 data = json.loads(json_match.group())
-                return AIPeriodicReview(
+                return self._sanitize_periodic_review_result(AIPeriodicReview(
                     overall_score=data.get("overall_score", 60),
                     summary=data.get("summary", ""),
                     trading_style=data.get("trading_style", ""),
@@ -2384,20 +2431,20 @@ class TradeReviewService:
                     action_plan=data.get("action_plan", []),
                     best_trade=data.get("best_trade"),
                     worst_trade=data.get("worst_trade")
-                )
+                ))
             else:
                 # 如果无法解析JSON，返回默认结果
-                return AIPeriodicReview(
+                return self._sanitize_periodic_review_result(AIPeriodicReview(
                     overall_score=60,
                     summary=content[:500] if content else "AI分析完成"
-                )
+                ))
 
         except Exception as e:
             logger.error(f"AI阶段性复盘分析失败: {e}")
-            return AIPeriodicReview(
+            return self._sanitize_periodic_review_result(AIPeriodicReview(
                 overall_score=0,
                 summary=f"AI分析失败: {str(e)}"
-            )
+            ))
 
     async def get_periodic_review_history(
         self,
@@ -2463,6 +2510,8 @@ class TradeReviewService:
         if not doc:
             return None
 
+        doc = dict(doc)
+        doc["ai_review"] = self._sanitize_periodic_review_dict(doc.get("ai_review") or {})
         return PeriodicReviewReport(**doc)
 
     def _build_trade_review_vars(
@@ -3095,12 +3144,12 @@ class TradeReviewService:
                             return int(score_value * 10)
                         return int(score_value)
 
-                    result.overall_score = normalize_score(data.get("overall_score") or data.get("综合评分") or data.get("总分") or 50)
-                    result.timing_score = normalize_score(data.get("timing_score") or data.get("时机评分") or data.get("买卖时机评分") or 50)
-                    result.position_score = normalize_score(data.get("position_score") or data.get("仓位评分") or data.get("仓位管理评分") or 50)
-                    result.emotion_score = normalize_score(data.get("emotion_score") or data.get("情绪评分") or data.get("情绪控制评分") or 50)
-                    result.attribution_score = normalize_score(data.get("attribution_score") or data.get("归因评分") or data.get("收益归因评分") or 50)
-                    result.discipline_score = normalize_score(data.get("discipline_score") or data.get("纪律评分") or data.get("执行纪律评分") or 50)
+                    result.overall_score = normalize_score(data.get("overall_score") or data.get("综合评分") or data.get("总分") or 0)
+                    result.timing_score = normalize_score(data.get("timing_score") or data.get("时机评分") or data.get("买卖时机评分") or 0)
+                    result.position_score = normalize_score(data.get("position_score") or data.get("仓位评分") or data.get("仓位管理评分") or 0)
+                    result.emotion_score = normalize_score(data.get("emotion_score") or data.get("情绪评分") or data.get("情绪控制评分") or 0)
+                    result.attribution_score = normalize_score(data.get("attribution_score") or data.get("归因评分") or data.get("收益归因评分") or 0)
+                    result.discipline_score = normalize_score(data.get("discipline_score") or data.get("纪律评分") or data.get("执行纪律评分") or 0)
 
                     # 提取文本字段（确保是字符串）
                     summary_raw = data.get("summary") or data.get("综合评价") or data.get("核心结论") or ""
@@ -3136,14 +3185,9 @@ class TradeReviewService:
             if not result.summary:
                 result.summary = review_summary[:200] if len(review_summary) > 200 else review_summary
 
-        # 计算理论最优收益
-        if market_snapshot.period_high and trade_info.avg_buy_price:
-            optimal_return = (market_snapshot.period_high - trade_info.avg_buy_price) / trade_info.avg_buy_price
-            result.optimal_pnl = trade_info.total_buy_amount * optimal_return
-
         logger.info(f"✅ [工作流复盘] 解析完成 - 总分: {result.overall_score}")
 
-        return result
+        return self._sanitize_trade_review_result(result)
 
     def _calculate_max_profit_pct(self, trade_info: TradeInfo, market_snapshot: MarketSnapshot) -> float:
         """计算最大可能盈利百分比"""

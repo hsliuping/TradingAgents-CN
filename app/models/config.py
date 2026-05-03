@@ -33,6 +33,7 @@ class ModelProvider(str, Enum):
 
     # 🆕 聚合渠道
     AI302 = "302ai"              # 302.AI
+    AIHUBMIX = "aihubmix"        # AIHubMix
     ONEAPI = "oneapi"            # One API
     NEWAPI = "newapi"            # New API
     FASTGPT = "fastgpt"          # FastGPT
@@ -199,7 +200,7 @@ class LLMConfig(BaseModel):
     model_display_name: Optional[str] = Field(None, description="模型显示名称")
     api_key: Optional[str] = Field(None, description="API密钥(可选，优先从厂家配置获取)")
     api_base: Optional[str] = Field(None, description="API基础URL")
-    max_tokens: int = Field(default=4000, description="最大token数")
+    max_tokens: int = Field(default=8000, description="最大token数")
     temperature: float = Field(default=0.2, ge=0.0, le=2.0, description="温度参数（股票分析推荐：0.2-0.3快速分析，0.1-0.2深度分析）")
     timeout: int = Field(default=180, description="请求超时时间(秒)")
     retry_times: int = Field(default=3, description="重试次数")
@@ -241,6 +242,8 @@ class LLMConfig(BaseModel):
         default=None,
         description="性能指标: speed(速度1-5), cost(成本1-5), quality(质量1-5)"
     )
+    created_at: Optional[datetime] = Field(default_factory=now_tz, description="创建时间")
+    updated_at: Optional[datetime] = Field(default_factory=now_tz, description="更新时间")
 
 
 class DataSourceConfig(BaseModel):
@@ -342,7 +345,6 @@ class SystemConfig(BaseModel):
     
     # 数据源配置
     data_source_configs: List[DataSourceConfig] = Field(default_factory=list, description="数据源配置列表")
-    default_data_source: Optional[str] = Field(None, description="默认数据源")
     
     # 数据库配置
     database_configs: List[DatabaseConfig] = Field(default_factory=list, description="数据库配置列表")
@@ -371,7 +373,7 @@ class LLMConfigRequest(BaseModel):
     model_display_name: Optional[str] = None  # 新增：模型显示名称
     api_key: Optional[str] = None  # 可选，优先从厂家配置获取
     api_base: Optional[str] = None
-    max_tokens: int = 4000
+    max_tokens: int = 8000
     temperature: float = 0.2  # 股票分析推荐值：0.2-0.3（快速分析），0.1-0.2（深度分析）
     timeout: int = 180  # 默认超时时间改为180秒
     retry_times: int = 3
@@ -463,7 +465,6 @@ class SystemConfigResponse(BaseModel):
     llm_configs: List[LLMConfig]
     default_llm: Optional[str]
     data_source_configs: List[DataSourceConfig]
-    default_data_source: Optional[str]
     database_configs: List[DatabaseConfig]
     system_settings: Dict[str, Any]
     created_at: datetime

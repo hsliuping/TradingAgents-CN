@@ -240,7 +240,7 @@
               <span class="setting-description">显示桌面通知</span>
             </el-form-item>
 
-            <el-form-item label="分析完成通知">
+            <el-form-item label="研究完成通知">
               <el-switch v-model="notificationSettings.analysisComplete" />
             </el-form-item>
 

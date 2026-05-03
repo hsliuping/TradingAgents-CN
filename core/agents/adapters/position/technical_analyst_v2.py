@@ -14,6 +14,16 @@ from ...registry import register_agent
 logger = logging.getLogger(__name__)
 
 
+def _build_market_data_tool_date_guard(code: str, analysis_date: str) -> str:
+    return (
+        "\n\n## 工具调用参数约束\n"
+        f"- 如需调用 get_stock_market_data_unified，ticker 必须使用 {code}\n"
+        f"- start_date 必须严格填写为 {analysis_date}\n"
+        f"- end_date 必须严格填写为 {analysis_date}\n"
+        "- 不得使用示例日期、历史占位日期或自行推测其他日期\n"
+    )
+
+
 # 不再需要直接导入 get_agent_prompt，使用基类的 _get_prompt_from_template 方法
 
 
@@ -121,16 +131,18 @@ class TechnicalAnalystV2(ResearcherAgent):
         # 降级：使用默认提示词
         return """您是一位专业的技术面分析师。
 
-您的职责是分析持仓股票的技术面状态。
+    您的职责是分析持仓股票的技术面状态，并提炼趋势结构、信号强弱与后续验证重点。
 
-分析要点：
-1. 趋势判断 - 当前处于上升/下降/震荡趋势
-2. 支撑阻力 - 关键支撑位和阻力位
-3. 技术指标 - MACD/KDJ/RSI等指标状态
-4. 短期预判 - 未来3-5天可能走势
-5. 技术评分 - 1-10分的技术面评分
+    分析要点：
+    1. 趋势判断 - 当前处于上升/下降/震荡趋势中的哪一类结构
+    2. 技术指标 - MACD/KDJ/RSI等指标状态及其一致性
+    3. 动量与波动 - 成交量、波动水平和情绪变化
+    4. 验证信号 - 后续需要继续跟踪的技术面公开信号
+    5. 技术评分 - 1-10分的技术面评分
 
-请使用中文，基于真实数据进行分析。"""
+    严格要求：禁止输出买卖建议、支撑阻力具体价位、目标价或止损止盈。
+
+    请使用中文，基于真实数据进行分析。"""
     
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -378,6 +390,8 @@ class TechnicalAnalystV2(ResearcherAgent):
             )
             if prompt:
                 logger.info(f"✅ [技术面分析师] 从数据库加载提示词模板 (场景: {preference_id}, 长度: {len(prompt)})")
+                if not has_cache:
+                    return prompt.rstrip() + _build_market_data_tool_date_guard(code, analysis_date)
                 return prompt
         except Exception as e:
             logger.warning(f"⚠️ [技术面分析师] 从数据库加载提示词失败: {e}，使用降级提示词")
@@ -399,11 +413,13 @@ class TechnicalAnalystV2(ResearcherAgent):
 - 浮动盈亏: {position_info.get('unrealized_pnl_pct', 0):.2f}%
 
 请结合持仓情况（成本价、盈亏等），对技术面进行持仓视角的分析：
-1. 当前技术面状态与持仓成本的关系
-2. 基于持仓的技术面操作建议
-3. 支撑阻力位与持仓成本的关系
-4. 短期走势预判（考虑持仓盈亏）
-5. 技术面评分（1-10分）"""
+1. 当前趋势结构与持仓成本的关系
+2. 动量、成交量与波动是否改善或走弱
+3. 多空证据之间是否一致
+4. 需要继续跟踪的技术验证信号
+5. 技术面评分（1-10分）
+
+禁止输出买卖建议、支撑阻力具体价位、目标价或止损止盈。"""
         else:
             return f"""请分析以下持仓股票的技术面：
 
@@ -422,10 +438,12 @@ class TechnicalAnalystV2(ResearcherAgent):
 
 请撰写详细的技术面分析报告，包括：
 1. 趋势判断
-2. 支撑阻力位
-3. 技术指标分析
-4. 短期走势预判
-5. 技术面评分（1-10分）"""
+2. 技术指标分析
+3. 动量与波动状态
+4. 需要继续跟踪的技术验证信号
+5. 技术面评分（1-10分）
+
+禁止输出买卖建议、支撑阻力具体价位、目标价或止损止盈。""" + _build_market_data_tool_date_guard(code, analysis_date)
 
     def _get_required_reports(self) -> List[str]:
         """

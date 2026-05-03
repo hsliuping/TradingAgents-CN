@@ -17,6 +17,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from tradingagents.utils.tool_logging import log_analyst_module
 from tradingagents.utils.logging_init import get_logger
 from tradingagents.utils.template_client import get_agent_prompt
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails
 
 logger = get_logger("default")
 
@@ -265,6 +266,7 @@ def _analyze_with_llm(llm, ticker: str, trade_date: str, sector_data: str, state
                 fallback_prompt=None,
                 context=None
             )
+            system_prompt = apply_compliance_guardrails(system_prompt, "sector_analyst")
             logger.info(f"✅ [板块分析师] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
 
         except Exception as e:
@@ -299,13 +301,13 @@ def _analyze_with_llm(llm, ticker: str, trade_date: str, sector_data: str, state
    - 估值水平评价（PE/PB）
    - 与行业龙头的差距
 
-4. **投资建议**
+4. **研究结论**
    - 板块热度评估：🔥热门 / ⚡一般 / ❄️冷门
    - 资金方向：💰流入 / 💸流出 / ⚖️平衡
    - 个股位置：👑龙头 / 🥈第二梯队 / 🥉跟随
-   - 操作建议：基于板块趋势的具体建议
+    - 后续观察点：基于板块趋势需要继续跟踪的信号
 
-请用中文输出，分析要有理有据，结论要明确。"""
+请用中文输出，分析要有理有据，结论要明确，但不得形成投资建议或操作指令。"""
 
         # 调用 LLM 生成分析报告
         logger.info(f"📤 [板块分析师] 调用 LLM 生成分析报告...")
@@ -337,7 +339,7 @@ def _get_default_system_prompt(ticker: str, trade_date: str) -> str:
     Returns:
         默认系统提示词
     """
-    return f"""你是一位专业的行业/板块分析师，专注于板块轮动和同业对比分析。
+    prompt = f"""你是一位专业的行业/板块分析师，专注于板块轮动和同业对比分析。
 
 📋 **分析对象：**
 - 股票代码：{ticker}
@@ -355,4 +357,5 @@ def _get_default_system_prompt(ticker: str, trade_date: str) -> str:
 - 估值对比：PE/PB相对行业水平
 - 行业地位：市值排名、龙头地位
 
-请基于提供的数据进行专业分析，给出明确的结论和建议。"""
+请基于提供的数据进行专业分析，给出明确的研究结论、风险提示和后续观察点。"""
+    return apply_compliance_guardrails(prompt, "sector_analyst")

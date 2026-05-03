@@ -7,6 +7,7 @@
 
 import os
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 import pandas as pd
@@ -123,7 +124,8 @@ class IntegratedCacheManager:
             return self.legacy_cache.load_stock_data(cache_key)
     
     def find_cached_stock_data(self, symbol: str, start_date: str = None, 
-                              end_date: str = None, data_source: str = "default") -> Optional[str]:
+                              end_date: str = None, data_source: str = "default",
+                              max_age_hours: int = None) -> Optional[str]:
         """
         查找缓存的股票数据
         
@@ -132,27 +134,93 @@ class IntegratedCacheManager:
             start_date: 开始日期
             end_date: 结束日期
             data_source: 数据源
+            max_age_hours: 最大缓存时间（小时），None 时使用缓存系统默认 TTL
             
         Returns:
             缓存键或None
         """
         if self.use_adaptive:
             # 使用自适应缓存系统
-            return self.adaptive_cache.find_cached_data(
+            cache_key = self.adaptive_cache.find_cached_data(
                 symbol=symbol,
                 start_date=start_date or "",
                 end_date=end_date or "",
                 data_source=data_source,
                 data_type="stock_data"
             )
+
+            if not cache_key:
+                return None
+
+            if max_age_hours is not None and not self._is_adaptive_cache_within_age(cache_key, max_age_hours):
+                self.logger.info(f"⌛ 自适应缓存超出 max_age_hours 限制: {symbol} -> {cache_key}")
+                return None
+
+            return cache_key
         else:
             # 使用传统缓存系统
             return self.legacy_cache.find_cached_stock_data(
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
-                data_source=data_source
+                data_source=data_source,
+                max_age_hours=max_age_hours
             )
+
+    def find_cacched_stock_data(self, symbol: str, start_date: str = None,
+                               end_date: str = None, data_source: str = "default",
+                               max_age_hours: int = None) -> Optional[str]:
+        """兼容历史拼写错误的缓存查找接口。"""
+        return self.find_cached_stock_data(
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            data_source=data_source,
+            max_age_hours=max_age_hours
+        )
+
+    def _load_adaptive_cache_entry(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        """读取自适应缓存底层条目，用于附加 TTL 校验。"""
+        loaders = []
+
+        if self.adaptive_cache.primary_backend == "redis":
+            loaders.append(self.adaptive_cache._load_from_redis)
+        elif self.adaptive_cache.primary_backend == "mongodb":
+            loaders.append(self.adaptive_cache._load_from_mongodb)
+        elif self.adaptive_cache.primary_backend == "file":
+            loaders.append(self.adaptive_cache._load_from_file)
+
+        if self.adaptive_cache.fallback_enabled:
+            loaders.append(self.adaptive_cache._load_from_file)
+
+        seen = set()
+        for loader in loaders:
+            if loader in seen:
+                continue
+            seen.add(loader)
+
+            try:
+                cache_entry = loader(cache_key)
+            except Exception as e:
+                self.logger.debug(f"⚠️ 读取自适应缓存元数据失败: {cache_key}, error={e}")
+                continue
+
+            if cache_entry:
+                return cache_entry
+
+        return None
+
+    def _is_adaptive_cache_within_age(self, cache_key: str, max_age_hours: int) -> bool:
+        """检查自适应缓存是否落在调用方要求的时间窗口内。"""
+        cache_entry = self._load_adaptive_cache_entry(cache_key)
+        if not cache_entry:
+            return False
+
+        cache_timestamp = cache_entry.get("timestamp")
+        if not isinstance(cache_timestamp, datetime):
+            return False
+
+        return cache_timestamp >= datetime.now() - timedelta(hours=max_age_hours)
     
     def save_news_data(self, symbol: str, data: Any, data_source: str = "default") -> str:
         """保存新闻数据"""

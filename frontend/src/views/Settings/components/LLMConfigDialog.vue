@@ -385,7 +385,7 @@ const defaultFormData = {
   model_name: '',
   model_display_name: '',  // 新增：模型显示名称
   api_base: '',
-  max_tokens: 4000,
+  max_tokens: 8000,
   temperature: 0.2,  // 股票分析推荐值：0.2-0.3（快速分析），0.1-0.2（深度分析）
   timeout: 180,  // 默认超时时间改为180秒
   retry_times: 3,

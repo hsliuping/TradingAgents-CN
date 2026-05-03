@@ -177,7 +177,7 @@ class TraderAgent(BaseAgent):
             "market_report",
             "news_report",
             "fundamentals_report",
-            "social_report",
+            "sentiment_report",
             "sector_report",
             "index_report",
             "bull_report",
@@ -189,6 +189,9 @@ class TraderAgent(BaseAgent):
         for key in report_keys:
             if key in state:
                 reports[key] = state[key]
+
+        if "sentiment_report" not in reports and "social_report" in state:
+            reports["sentiment_report"] = state["social_report"]
 
         return reports
 

@@ -211,6 +211,106 @@ class AKShareAdapter(DataSourceAdapter):
         except (ValueError, TypeError):
             return None
 
+    @staticmethod
+    def _get_akshare_cn_symbol(code: str) -> str:
+        code6 = str(code).zfill(6)
+        if code6.startswith(("60", "68", "90")):
+            return f"sh{code6}"
+        if code6.startswith(("00", "30", "20")):
+            return f"sz{code6}"
+        if code6.startswith(("8", "4")):
+            return f"bj{code6}"
+        return code6
+
+    @staticmethod
+    def _get_kline_fallback_window(period: str, limit: int) -> int:
+        if period == "week":
+            return max(limit * 10, 365)
+        if period == "month":
+            return max(limit * 35, 1095)
+        return max(limit * 4, 180)
+
+    @staticmethod
+    def _normalize_kline_frame(df: pd.DataFrame) -> pd.DataFrame:
+        normalized = df.copy()
+        normalized = normalized.rename(columns={
+            "日期": "date",
+            "day": "date",
+            "时间": "date",
+            "开盘": "open",
+            "最高": "high",
+            "最低": "low",
+            "收盘": "close",
+            "成交量": "volume",
+            "成交额": "amount",
+        })
+
+        if "date" in normalized.columns:
+            normalized["date"] = pd.to_datetime(normalized["date"], errors="coerce")
+
+        for column in ["open", "high", "low", "close", "volume", "amount"]:
+            if column in normalized.columns:
+                normalized[column] = pd.to_numeric(normalized[column], errors="coerce")
+
+        return normalized
+
+    def _resample_daily_kline(self, df: pd.DataFrame, period: str) -> Optional[pd.DataFrame]:
+        normalized = self._normalize_kline_frame(df)
+        if "date" not in normalized.columns:
+            return None
+
+        normalized = normalized.dropna(subset=["date", "open", "high", "low", "close"])
+        if normalized.empty:
+            return None
+
+        normalized = normalized.sort_values("date").set_index("date")
+        rule = "W-FRI" if period == "week" else "ME"
+
+        aggregation = {
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last",
+        }
+        if "volume" in normalized.columns:
+            aggregation["volume"] = "sum"
+        if "amount" in normalized.columns:
+            aggregation["amount"] = "sum"
+
+        resampled = normalized.resample(rule).agg(aggregation)
+        resampled = resampled.dropna(subset=["open", "high", "low", "close"]).reset_index()
+        if resampled.empty:
+            return None
+        resampled["date"] = resampled["date"].dt.strftime("%Y-%m-%d")
+        return resampled
+
+    def _build_kline_items(self, df: pd.DataFrame, period: str, limit: int):
+        items = []
+        if df is None or getattr(df, 'empty', True):
+            return items
+
+        normalized = self._normalize_kline_frame(df)
+        if normalized.empty:
+            return items
+
+        normalized = normalized.tail(limit)
+        for _, row in normalized.iterrows():
+            date_value = row.get("date")
+            if hasattr(date_value, "strftime"):
+                time_value = date_value.strftime("%Y-%m-%d")
+            else:
+                time_value = str(date_value or "")
+            items.append({
+                "time": time_value,
+                "open": self._safe_float(row.get("open")),
+                "high": self._safe_float(row.get("high")),
+                "low": self._safe_float(row.get("low")),
+                "close": self._safe_float(row.get("close")),
+                "volume": self._safe_float(row.get("volume")),
+                "amount": self._safe_float(row.get("amount")),
+            })
+        return items
+
 
     def get_realtime_quotes(self, source: str = "eastmoney"):
         """
@@ -313,31 +413,66 @@ class AKShareAdapter(DataSourceAdapter):
             return None
 
     def get_kline(self, code: str, period: str = "day", limit: int = 120, adj: Optional[str] = None):
-        """AKShare K-line as fallback. Try daily/week/month via stock_zh_a_hist; minutes via stock_zh_a_minute."""
+        """AKShare K-line as fallback. Daily/weekly/monthly retry Tencent and Sina when Eastmoney fails."""
         if not self.is_available():
             return None
         try:
             import akshare as ak
             code6 = str(code).zfill(6)
-            items = []
             if period in ("day", "week", "month"):
                 period_map = {"day": "daily", "week": "weekly", "month": "monthly"}
                 adjust_map = {None: "", "qfq": "qfq", "hfq": "hfq"}
-                df = ak.stock_zh_a_hist(symbol=code6, period=period_map[period], adjust=adjust_map.get(adj, ""))
-                if df is None or getattr(df, 'empty', True):
-                    return None
-                df = df.tail(limit)
-                for _, row in df.iterrows():
-                    items.append({
-                        "time": str(row.get('日期') or row.get('date') or ''),
-                        "open": self._safe_float(row.get('开盘') or row.get('open')),
-                        "high": self._safe_float(row.get('最高') or row.get('high')),
-                        "low": self._safe_float(row.get('最低') or row.get('low')),
-                        "close": self._safe_float(row.get('收盘') or row.get('close')),
-                        "volume": self._safe_float(row.get('成交量') or row.get('volume')),
-                        "amount": self._safe_float(row.get('成交额') or row.get('amount')),
-                    })
-                return items
+                symbol = self._get_akshare_cn_symbol(code6)
+                end_date = datetime.now().strftime("%Y%m%d")
+                start_date = (datetime.now() - timedelta(days=self._get_kline_fallback_window(period, limit))).strftime("%Y%m%d")
+
+                fetchers = [
+                    (
+                        "eastmoney",
+                        lambda: ak.stock_zh_a_hist(
+                            symbol=code6,
+                            period=period_map[period],
+                            adjust=adjust_map.get(adj, "")
+                        ),
+                        False,
+                    ),
+                    (
+                        "sina",
+                        lambda: ak.stock_zh_a_daily(
+                            symbol=symbol,
+                            start_date=start_date,
+                            end_date=end_date,
+                            adjust=adjust_map.get(adj, "")
+                        ),
+                        period != "day",
+                    ),
+                    (
+                        "tencent",
+                        lambda: ak.stock_zh_a_hist_tx(
+                            symbol=symbol,
+                            start_date=start_date,
+                            end_date=end_date,
+                            adjust=adjust_map.get(adj, "")
+                        ),
+                        period != "day",
+                    ),
+                ]
+
+                for source_name, fetcher, needs_resample in fetchers:
+                    try:
+                        df = fetcher()
+                        if df is None or getattr(df, 'empty', True):
+                            logger.warning(f"AKShare {source_name} get_kline returned empty for {code6}")
+                            continue
+                        if needs_resample:
+                            df = self._resample_daily_kline(df, period)
+                            if df is None or getattr(df, 'empty', True):
+                                logger.warning(f"AKShare {source_name} get_kline resample returned empty for {code6}")
+                                continue
+                        return self._build_kline_items(df, period, limit)
+                    except Exception as source_error:
+                        logger.warning(f"AKShare {source_name} get_kline failed for {code6}: {source_error}")
+                return None
             else:
                 # minutes
                 per_map = {"5m": "5", "15m": "15", "30m": "30", "60m": "60"}
@@ -346,18 +481,7 @@ class AKShareAdapter(DataSourceAdapter):
                 df = ak.stock_zh_a_minute(symbol=code6, period=per_map[period], adjust=adj if adj in ("qfq", "hfq") else "")
                 if df is None or getattr(df, 'empty', True):
                     return None
-                df = df.tail(limit)
-                for _, row in df.iterrows():
-                    items.append({
-                        "time": str(row.get('时间') or row.get('day') or ''),
-                        "open": self._safe_float(row.get('开盘') or row.get('open')),
-                        "high": self._safe_float(row.get('最高') or row.get('high')),
-                        "low": self._safe_float(row.get('最低') or row.get('low')),
-                        "close": self._safe_float(row.get('收盘') or row.get('close')),
-                        "volume": self._safe_float(row.get('成交量') or row.get('volume')),
-                        "amount": self._safe_float(row.get('成交额') or row.get('amount')),
-                    })
-                return items
+                return self._build_kline_items(df, period, limit)
         except Exception as e:
             logger.error(f"AKShare get_kline failed: {e}")
             return None

@@ -206,7 +206,7 @@ class AgentAPI:
         names = {
             AgentCategory.ANALYST: "分析师",
             AgentCategory.RESEARCHER: "研究员",
-            AgentCategory.TRADER: "交易员",
+            AgentCategory.TRADER: "研究整合员",
             AgentCategory.RISK: "风险管理",
             AgentCategory.MANAGER: "管理者",
             AgentCategory.POST_PROCESSOR: "后处理器",

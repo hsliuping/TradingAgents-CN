@@ -7,6 +7,7 @@
           <h1 class="page-title">
             <el-icon class="title-icon"><Files /></el-icon>
             批量分析
+            <el-tag type="warning" effect="dark" size="small" style="margin-left: 12px; vertical-align: middle;">高级</el-tag>
           </h1>
           
           <!-- 风险提示 -->
@@ -18,14 +19,14 @@
             >
               <template #title>
                 <span style="font-size: 14px;">
-                  <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。
+                  <strong>⚠️ 重要提示：</strong>本次分析仅用于学习、研究和公开信息整理，不提供个股交易指导。
                 </span>
               </template>
             </el-alert>
           </div>
           
           <p class="page-description">
-            AI驱动的批量股票分析，高效处理多只股票
+            AI驱动的批量研究工作台，高效整理多只股票的研究线索
           </p>
         </div>
       </div>
@@ -297,6 +298,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import ModelConfig from '@/components/ModelConfig.vue'
 import { getMarketByStockCode } from '@/utils/market'
+import { resolveModelSelection } from '@/utils/modelSelection'
 import { validateStockCode } from '@/utils/stockValidator'
 
 // 路由实例（必须在顶层调用）
@@ -373,16 +375,24 @@ const initializeModelSettings = async () => {
   try {
     console.log('🔍 [批量分析] 开始加载模型配置...')
 
+    // 获取所有可用的模型列表
+    const llmConfigs = await configApi.getLLMConfigs()
+    availableModels.value = llmConfigs.filter((config: any) => config.enabled)
+
     // 获取默认模型
     const defaultModels = await configApi.getDefaultModels()
     console.log('🔍 [批量分析] 从API获取的默认模型:', defaultModels)
 
-    modelSettings.value.quickAnalysisModel = defaultModels.quick_analysis_model
-    modelSettings.value.deepAnalysisModel = defaultModels.deep_analysis_model
-
-    // 获取所有可用的模型列表
-    const llmConfigs = await configApi.getLLMConfigs()
-    availableModels.value = llmConfigs.filter((config: any) => config.enabled)
+    modelSettings.value.quickAnalysisModel = resolveModelSelection(
+      defaultModels.quick_analysis_model,
+      availableModels.value,
+      defaultModels.default_provider
+    )
+    modelSettings.value.deepAnalysisModel = resolveModelSelection(
+      defaultModels.deep_analysis_model,
+      availableModels.value,
+      defaultModels.default_provider
+    )
 
     console.log('✅ [批量分析] 加载模型配置成功:', {
       quick: modelSettings.value.quickAnalysisModel,
@@ -393,8 +403,8 @@ const initializeModelSettings = async () => {
   } catch (error) {
     console.error('❌ [批量分析] 加载默认模型配置失败:', error)
     // 使用硬编码的默认值
-    modelSettings.value.quickAnalysisModel = 'qwen-turbo'
-    modelSettings.value.deepAnalysisModel = 'qwen-max'
+    modelSettings.value.quickAnalysisModel = resolveModelSelection('qwen-turbo', availableModels.value)
+    modelSettings.value.deepAnalysisModel = resolveModelSelection('qwen-max', availableModels.value)
     console.log('🔄 [批量分析] 使用硬编码默认值:', {
       quick: modelSettings.value.quickAnalysisModel,
       deep: modelSettings.value.deepAnalysisModel

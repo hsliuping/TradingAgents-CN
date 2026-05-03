@@ -18,7 +18,7 @@ aiofiles==24.1.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.12.15
 aiosignal==1.4.0
-akshare==1.17.54
+akshare==1.18.59
 altair==5.5.0
 amqp==5.3.1
 annotated-types==0.7.0

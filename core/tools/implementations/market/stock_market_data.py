@@ -9,12 +9,82 @@ import concurrent.futures
 import json
 import logging
 import re
-from typing import Annotated, Optional
+from datetime import datetime
+from typing import Annotated, Optional, Tuple
+from zoneinfo import ZoneInfo
 from langchain_core.tools import tool
 
 from core.tools.base import register_tool
 
 logger = logging.getLogger(__name__)
+_CHINA_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _get_china_now() -> datetime:
+    return datetime.now(_CHINA_TZ)
+
+
+def _normalize_trade_date(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    digits = re.sub(r"[^0-9]", "", text)
+    if len(digits) >= 8:
+        return f"{digits[:4]}-{digits[4:6]}-{digits[6:8]}"
+
+    return text
+
+
+def _resolve_china_actual_data_date(
+    ticker: str,
+    requested_end_date: str,
+    now: Optional[datetime] = None,
+    db_latest_trade_date: Optional[str] = None,
+) -> Tuple[str, Optional[str], Optional[str]]:
+    requested_date = _normalize_trade_date(requested_end_date) or requested_end_date
+    latest_trade_date = _normalize_trade_date(db_latest_trade_date or _get_db_latest_trade_date_sync(ticker))
+
+    if not latest_trade_date:
+        return requested_date, None, None
+
+    if latest_trade_date >= requested_date:
+        return requested_date, requested_date, None
+
+    current_time = now or _get_china_now()
+    current_date = current_time.strftime("%Y-%m-%d")
+    trading_status = None
+
+    try:
+        from app.utils.trading_time import get_trading_status
+
+        trading_status = get_trading_status(current_time)
+    except Exception as exc:
+        logger.debug(f"[市场工具] 读取交易时段状态失败（非致命）: {exc}")
+
+    if requested_date == current_date:
+        status_messages = {
+            "pre_market": "当前处于盘前时段，尚未形成当日日线数据",
+            "morning_session": "当前处于交易时段，当日日线尚未收盘定型",
+            "noon_break": "当前处于午间休市，当日日线尚未收盘定型",
+            "afternoon_session": "当前处于交易时段，当日日线尚未收盘定型",
+            "after_market": "当前处于盘后缓冲期，当日日线数据可能尚未完成落库",
+        }
+        reason = status_messages.get(trading_status, "当前请求日期暂无完整日线数据")
+        note = (
+            f"请求分析日期为 {requested_date}，但{reason}；"
+            f"以下价格与技术指标以最近已完成交易日 {latest_trade_date} 为准。"
+        )
+    else:
+        note = (
+            f"请求分析日期为 {requested_date}，但工具可用的最近完整日线数据截至 {latest_trade_date}；"
+            f"以下价格与技术指标以 {latest_trade_date} 为准。"
+        )
+
+    return latest_trade_date, latest_trade_date, note
 
 
 def _get_last_trade_date_sync() -> Optional[str]:
@@ -248,6 +318,13 @@ def get_stock_market_data_unified(
             # 中国A股：使用中国股票数据源
             logger.info(f"🇨🇳 [统一市场工具] 处理A股市场数据...")
 
+            requested_start_date = _normalize_trade_date(start_date) or start_date
+            requested_end_date = _normalize_trade_date(end_date) or end_date
+            effective_start_date = start_date
+            effective_end_date = end_date
+            actual_data_date = None
+            date_note = None
+
             # ===== JIT 新鲜度检查：确保 MongoDB 数据覆盖最近交易日 =====
             # 先检查 DB 数据是否已覆盖 Redis 缓存的最近交易日；
             # 若陈旧，则在独立线程中异步拉取最新行情并写入 MongoDB，
@@ -259,14 +336,38 @@ def get_stock_market_data_unified(
             # ============================================================
 
             try:
+                effective_end_date, actual_data_date, date_note = _resolve_china_actual_data_date(
+                    ticker,
+                    requested_end_date,
+                )
+                if requested_start_date == requested_end_date:
+                    effective_start_date = effective_end_date
+                logger.info(
+                    f"📅 [统一市场工具] A股日期语义: 请求日期={requested_end_date}, "
+                    f"实际数据日期={actual_data_date or '未知'}, 查询截止日={effective_end_date}"
+                )
+            except Exception as date_err:
+                logger.warning(f"⚠️ [统一市场工具] 解析A股实际数据日期失败（继续按原日期请求）: {date_err}")
+
+            try:
                 from tradingagents.dataflows.interface import get_china_stock_data_unified
-                stock_data = get_china_stock_data_unified(ticker, start_date, end_date)
+                stock_data = get_china_stock_data_unified(ticker, effective_start_date, effective_end_date)
 
                 # 🔍 调试：打印返回数据的前500字符
                 logger.info(f"🔍 [市场工具调试] A股数据返回长度: {len(stock_data)}")
                 logger.info(f"🔍 [市场工具调试] A股数据前500字符:\n{stock_data[:500]}")
 
-                result_data.append(f"## A股市场数据\n{stock_data}")
+                date_context_lines = [f"**请求分析日期**: {requested_end_date}"]
+                if actual_data_date:
+                    date_context_lines.append(f"**实际数据日期**: {actual_data_date}")
+                if date_note:
+                    date_context_lines.append(f"**日期说明**: {date_note}")
+
+                result_data.append(
+                    "## A股市场数据\n"
+                    + "\n".join(date_context_lines)
+                    + f"\n\n{stock_data}"
+                )
             except Exception as e:
                 logger.error(f"❌ [市场工具调试] A股数据获取失败: {e}")
                 result_data.append(f"## A股市场数据\n获取失败: {e}")
@@ -304,7 +405,7 @@ def get_stock_market_data_unified(
 
 **股票类型**: {market_info['market_name']}
 **货币**: {market_info['currency_name']} ({market_info['currency_symbol']})
-**分析期间**: {start_date} 至 {end_date}
+    **请求分析期间**: {start_date} 至 {end_date}
 
 {chr(10).join(result_data)}
 
