@@ -237,20 +237,30 @@ update_docker_compose_ports() {
 update_env_ports() {
     print_info "更新 .env 端口配置..."
 
-    # 更新 .env 文件中的端口配置
-    sed -i.bak "s/^MONGODB_PORT=.*/MONGODB_PORT=${MONGODB_PORT}/g" .env
-    sed -i.bak "s/^REDIS_PORT=.*/REDIS_PORT=${REDIS_PORT}/g" .env
-    sed -i.bak "s/^PORT=.*/PORT=${BACKEND_PORT}/g" .env
-    sed -i.bak "s/^NGINX_PORT=.*/NGINX_PORT=${NGINX_PORT}/g" .env
-    sed -i.bak "s/^IMAGE_TAG=.*/IMAGE_TAG=${IMAGE_TAG}/g" .env
-    if ! grep -q "^IMAGE_TAG=" .env; then
-        echo "IMAGE_TAG=${IMAGE_TAG}" >> .env
+    # 更新 .env 文件中的端口和版本配置
+    # 使用临时文件方式，避免 .env 文件含 null 字节时 sed/grep 行为异常
+    local tmp_env=".env.tmp.$$"
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            MONGODB_PORT=*)  echo "MONGODB_PORT=${MONGODB_PORT}" ;;
+            REDIS_PORT=*)    echo "REDIS_PORT=${REDIS_PORT}" ;;
+            PORT=*)          echo "PORT=${BACKEND_PORT}" ;;
+            NGINX_PORT=*)    echo "NGINX_PORT=${NGINX_PORT}" ;;
+            IMAGE_TAG=*)     echo "IMAGE_TAG=${IMAGE_TAG}" ;;
+            *)               echo "$line" ;;
+        esac
+    done < .env > "$tmp_env"
+
+    # 确保 IMAGE_TAG 存在
+    if ! grep -q "^IMAGE_TAG=" "$tmp_env" 2>/dev/null; then
+        echo "IMAGE_TAG=${IMAGE_TAG}" >> "$tmp_env"
     fi
 
-    # 删除备份文件
+    mv "$tmp_env" .env
     rm -f .env.bak
 
     print_success ".env 端口配置已更新"
+    print_info "IMAGE_TAG=${IMAGE_TAG}"
 }
 
 # 检查 .env 文件是否存在
@@ -269,20 +279,22 @@ check_env_file() {
 # 启动 Docker 服务
 start_docker_services() {
     print_info "启动 Docker 服务..."
-    
+
     if [ ! -f "$DOCKER_COMPOSE_FILE" ]; then
         print_error "$DOCKER_COMPOSE_FILE 文件不存在"
         exit 1
     fi
-    
-    print_info "停止旧服务..."
+
+    # 强制清理旧容器，避免容器名冲突
+    print_info "清理旧容器..."
+    docker rm -f tradingagents-mongodb-pro tradingagents-redis-pro tradingagents-backend-pro tradingagents-frontend-pro tradingagents-nginx-pro 2>/dev/null || true
     docker-compose -f "$DOCKER_COMPOSE_FILE" down --remove-orphans 2>/dev/null || true
 
-    print_info "拉取最新镜像..."
-    docker-compose -f "$DOCKER_COMPOSE_FILE" pull
+    print_info "拉取镜像 (版本: ${IMAGE_TAG})..."
+    IMAGE_TAG="$IMAGE_TAG" docker-compose -f "$DOCKER_COMPOSE_FILE" pull
 
-    print_info "启动服务..."
-    docker-compose -f "$DOCKER_COMPOSE_FILE" up -d
+    print_info "启动服务 (版本: ${IMAGE_TAG})..."
+    IMAGE_TAG="$IMAGE_TAG" docker-compose -f "$DOCKER_COMPOSE_FILE" up -d
     
     print_success "Docker 服务启动成功"
 }
