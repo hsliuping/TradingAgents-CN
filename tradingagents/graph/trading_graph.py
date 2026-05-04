@@ -74,7 +74,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         LLM 实例
     """
     from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
-    from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+    from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm, normalize_openai_temperature
 
     normalized_provider, normalized_model = _normalize_provider_qualified_model(provider, model)
     if normalized_provider != provider or normalized_model != model:
@@ -84,6 +84,13 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         )
         provider = normalized_provider
         model = normalized_model
+
+    temperature = normalize_openai_temperature(
+        provider=provider,
+        model=model,
+        temperature=temperature,
+        base_url=backend_url,
+    )
 
     logger.info(f"🔧 [创建LLM] provider={provider}, model={model}, url={backend_url}")
     logger.info(f"🔑 [API Key] 传入值: {'有值' if api_key else 'None（将使用环境变量）'}")
