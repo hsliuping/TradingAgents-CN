@@ -36,6 +36,22 @@ class ApiResponse(BaseModel):
     message: str = ""
 
 
+class GenerateRiskRulesRequest(BaseModel):
+    style: str = "medium_term"
+    risk_profile: str = "balanced"
+    risk_style: str = "balanced"
+    description: Optional[str] = ""
+    current_rules: Optional[dict] = None
+
+
+class GenerateModuleRulesRequest(BaseModel):
+    module: str
+    style: str = "medium_term"
+    risk_profile: str = "balanced"
+    description: Optional[str] = ""
+    current_rules: Optional[dict] = None
+
+
 class OptimizationDiscussionMessage(BaseModel):
     role: str
     content: str
@@ -354,6 +370,54 @@ async def evaluate_trading_plan_draft(
     except Exception as e:
         logger.error(f"评估交易计划草稿失败: {e}", exc_info=True)
         return error(message=format_user_error("评估交易计划失败", e))
+
+
+@router.post("/generate-risk-rules", response_model=ApiResponse)
+async def generate_risk_rules(
+    request: GenerateRiskRulesRequest,
+    current_user: dict = Depends(get_current_user),
+    _license=Depends(require_feature("trading_plan_check")),
+    evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
+):
+    """AI生成风险管理规则（止损/止盈/时间止损/逻辑止损）"""
+    try:
+        user_id = current_user["id"]
+        rules = await evaluation_service.generate_risk_management_rules(
+            user_id=user_id,
+            style=request.style,
+            risk_profile=request.risk_profile,
+            risk_style=request.risk_style,
+            description=request.description or "",
+            current_rules=request.current_rules or {}
+        )
+        return ok(data={"risk_management": rules}, message="风险管理规则生成成功")
+    except Exception as e:
+        logger.error(f"生成风险管理规则失败: {e}", exc_info=True)
+        return error(message=format_user_error("生成风险管理规则失败", e))
+
+
+@router.post("/generate-module-rules", response_model=ApiResponse)
+async def generate_module_rules(
+    request: GenerateModuleRulesRequest,
+    current_user: dict = Depends(get_current_user),
+    _license=Depends(require_feature("trading_plan_check")),
+    evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
+):
+    """AI生成选股/择时/风控等模块的结构化规则"""
+    try:
+        user_id = current_user["id"]
+        rules = await evaluation_service.generate_module_rules(
+            user_id=user_id,
+            module=request.module,
+            style=request.style,
+            risk_profile=request.risk_profile,
+            description=request.description or "",
+            current_rules=request.current_rules or {}
+        )
+        return ok(data={"module": request.module, "rules": rules}, message="模块规则生成成功")
+    except Exception as e:
+        logger.error(f"生成模块规则失败: {e}", exc_info=True)
+        return error(message=format_user_error("生成模块规则失败", e))
 
 
 @router.post("/optimize-discussion", response_model=ApiResponse)

@@ -371,3 +371,43 @@ export function publishTradingSystem(
   )
 }
 
+// ==================== AI 生成规则 ====================
+
+/** AI生成风险管理规则请求 */
+export interface GenerateRiskRulesPayload {
+  style: TradingStyle
+  risk_profile: RiskProfile
+  risk_style?: 'conservative' | 'balanced' | 'aggressive'
+  description?: string
+  current_rules?: Record<string, any>
+}
+
+/** AI生成模块规则请求 */
+export interface GenerateModuleRulesPayload {
+  module: 'stock_selection' | 'timing' | 'risk_management'
+  style: TradingStyle
+  risk_profile: RiskProfile
+  description?: string
+  current_rules?: Record<string, any>
+}
+
+/**
+ * AI生成风险管理规则
+ */
+export function generateRiskManagementRules(payload: GenerateRiskRulesPayload) {
+  return ApiClient.post<{ risk_management: RiskManagementRule }>(
+    '/api/v1/trading-systems/generate-risk-rules',
+    payload
+  )
+}
+
+/**
+ * AI生成指定模块规则
+ */
+export function generateModuleRules(payload: GenerateModuleRulesPayload) {
+  return ApiClient.post<{ module: string; rules: Record<string, any> }>(
+    '/api/v1/trading-systems/generate-module-rules',
+    payload
+  )
+}
+
