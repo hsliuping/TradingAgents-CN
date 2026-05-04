@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 # 默认配置
 DEFAULT_MAX_TOOL_ITERATIONS = 3  # 最大工具调用迭代次数
 _DEFAULT_AGENT_CALLABLE_SURFACES = {"assistant", "workflow", "agent"}
+GENERIC_REPORT_FALLBACK = "工具执行或模型生成未完成，当前结论仍待验证。"
 
 
 class BaseAgent(ABC):
