@@ -74,7 +74,7 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    port: 3000,
+    port: parseInt(process.env.VITE_PORT || '3000', 10),
     hmr: {
       overlay: false
     },
@@ -87,10 +87,10 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: process.env.VITE_API_TARGET || 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
-        ws: true  // 🔥 启用 WebSocket 代理支持
+        ws: true  // 启用 WebSocket 代理支持
       }
     }
   },
