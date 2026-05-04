@@ -998,6 +998,12 @@ class ConfigService:
                 result = self._test_dashscope_api(api_key, f"{provider_str} {llm_config.model_name}", llm_config.model_name)
                 result["response_time"] = time.time() - start_time
                 return result
+            elif provider_str == "anthropic":
+                # Anthropic 使用专门的测试方法 (其 API 不兼容 OpenAI /chat/completions)
+                logger.info(f"🔍 使用 Anthropic 专用测试方法")
+                result = self._test_anthropic_api(api_key, f"{provider_str} {llm_config.model_name}", llm_config.model_name)
+                result["response_time"] = time.time() - start_time
+                return result
             else:
                 # 其他厂家使用 OpenAI 兼容的测试方法
                 logger.info(f"🔍 使用 OpenAI 兼容测试方法")
@@ -3433,7 +3439,9 @@ class ConfigService:
 
             # 如果没有指定模型，使用默认模型
             if not model_name:
-                model_name = "gemini-2.0-flash-exp"
+                # gemini-2.0-flash-exp 已下线，gemini-2.0-flash 对新账户也已下线
+                # 使用当前 GA 的 gemini-2.5-flash 作为厂家级测试默认值
+                model_name = "gemini-2.5-flash"
                 logger.info(f"⚠️ 未指定模型，使用默认模型: {model_name}")
 
             logger.info(f"🔍 [Google AI 测试] 开始测试")
@@ -3629,11 +3637,11 @@ class ConfigService:
                 "messages": [
                     {"role": "user", "content": "你好，请简单介绍一下你自己。"}
                 ],
-                "max_tokens": 50,
+                "max_tokens": 2000,
                 "temperature": 0.1
             }
 
-            response = requests.post(url, json=data, headers=headers, timeout=10)
+            response = requests.post(url, json=data, headers=headers, timeout=120)
 
             if response.status_code == 200:
                 result = response.json()
@@ -3838,10 +3846,16 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    def _test_anthropic_api(self, api_key: str, display_name: str) -> dict:
+    def _test_anthropic_api(self, api_key: str, display_name: str, model_name: str = None) -> dict:
         """测试Anthropic API"""
         try:
             import requests
+
+            # 如果没有指定模型，使用当前 GA 默认模型
+            # claude-3-haiku-20240307 已弃用，改用 claude-haiku-4-5
+            if not model_name:
+                model_name = "claude-haiku-4-5"
+                logger.info(f"⚠️ 未指定模型，使用默认模型: {model_name}")
 
             url = "https://api.anthropic.com/v1/messages"
 
@@ -3852,7 +3866,7 @@ class ConfigService:
             }
 
             data = {
-                "model": "claude-3-haiku-20240307",
+                "model": model_name,
                 "max_tokens": 50,
                 "messages": [
                     {"role": "user", "content": "你好，请简单介绍一下你自己。"}
