@@ -456,24 +456,23 @@ class UnifiedThreadPoolSyncService:
             sync_db = sync_client[settings.MONGODB_DATABASE]
             
             try:
-                # 🔥 查询执行记录，检查 cancel_requested 标记和任务状态
-                # 注意：不限制状态为 running，因为 shutdown 时可能已经改为 suspended
+                # 只检查当前运行中的执行记录，避免历史 suspended 记录误伤新任务。
                 execution = sync_db.scheduler_executions.find_one(
-                    {"job_id": job_id},
+                    {"job_id": job_id, "status": "running"},
                     sort=[("timestamp", -1)]
                 )
 
-                if execution:
-                    # 检查取消请求标记
-                    if execution.get("cancel_requested"):
-                        logger.info(f"🛑 任务 {job_id} 收到取消请求，应停止执行")
-                        return True
+                if not execution:
+                    return False
 
-                    # 🔥 检查任务状态：如果任务已被标记为失败、取消或挂起，也应该停止
-                    status = execution.get("status")
-                    if status in ["failed", "cancelled", "suspended"]:
-                        logger.info(f"🛑 任务 {job_id} 状态为 {status}，应停止执行")
-                        return True
+                if execution.get("cancel_requested"):
+                    logger.info(f"🛑 任务 {job_id} 收到取消请求，应停止执行")
+                    return True
+
+                status = execution.get("status")
+                if status in ["failed", "cancelled"]:
+                    logger.info(f"🛑 任务 {job_id} 状态为 {status}，应停止执行")
+                    return True
 
                 return False
             finally:

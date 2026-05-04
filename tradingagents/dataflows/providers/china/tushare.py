@@ -1480,11 +1480,40 @@ class TushareProvider(BaseStockDataProvider):
             标准化后的财务数据
         """
         try:
-            # 获取最新的数据记录（第一条记录通常是最新的）
-            latest_income = financial_data.get('income_statement', [{}])[0] if financial_data.get('income_statement') else {}
-            latest_balance = financial_data.get('balance_sheet', [{}])[0] if financial_data.get('balance_sheet') else {}
-            latest_cashflow = financial_data.get('cashflow_statement', [{}])[0] if financial_data.get('cashflow_statement') else {}
-            latest_indicator = financial_data.get('financial_indicators', [{}])[0] if financial_data.get('financial_indicators') else {}
+            # 优先使用“已披露”的最新报告，避免未来预约披露期覆盖当前可用财报。
+            income_statements = financial_data.get('income_statement', []) or []
+            balance_statements = financial_data.get('balance_sheet', []) or []
+            cashflow_statements = financial_data.get('cashflow_statement', []) or []
+            indicator_statements = financial_data.get('financial_indicators', []) or []
+
+            latest_income = self._pick_latest_disclosed_record(income_statements)
+            if not latest_income and income_statements:
+                latest_income = income_statements[0]
+
+            latest_period = str((latest_income or {}).get('end_date') or '')
+
+            latest_balance = self._pick_record_by_period(balance_statements, latest_period)
+            if not latest_balance:
+                latest_balance = self._pick_latest_disclosed_record(balance_statements)
+            if not latest_balance and balance_statements:
+                latest_balance = balance_statements[0]
+
+            latest_cashflow = self._pick_record_by_period(cashflow_statements, latest_period)
+            if not latest_cashflow:
+                latest_cashflow = self._pick_latest_disclosed_record(cashflow_statements)
+            if not latest_cashflow and cashflow_statements:
+                latest_cashflow = cashflow_statements[0]
+
+            latest_indicator = self._pick_record_by_period(indicator_statements, latest_period)
+            if not latest_indicator:
+                latest_indicator = self._pick_latest_disclosed_record(indicator_statements)
+            if not latest_indicator and indicator_statements:
+                latest_indicator = indicator_statements[0]
+
+            latest_income = latest_income or {}
+            latest_balance = latest_balance or {}
+            latest_cashflow = latest_cashflow or {}
+            latest_indicator = latest_indicator or {}
 
             # 提取基础信息
             symbol = ts_code.split('.')[0] if '.' in ts_code else ts_code
@@ -1492,7 +1521,6 @@ class TushareProvider(BaseStockDataProvider):
             ann_date = latest_income.get('ann_date') or latest_balance.get('ann_date') or latest_cashflow.get('ann_date')
 
             # 计算 TTM 数据
-            income_statements = financial_data.get('income_statement', [])
             revenue_ttm = self._calculate_ttm_from_tushare(income_statements, 'revenue')
             net_profit_ttm = self._calculate_ttm_from_tushare(income_statements, 'n_income_attr_p')
 
@@ -1586,6 +1614,47 @@ class TushareProvider(BaseStockDataProvider):
                 "updated_at": datetime.utcnow(),
                 "error": str(e)
             }
+
+    def _pick_record_by_period(self, statements: List[Dict[str, Any]], period: str) -> Optional[Dict[str, Any]]:
+        """按报告期匹配记录。"""
+        if not statements or not period:
+            return None
+        target = str(period)
+        for record in statements:
+            if str(record.get('end_date') or '') == target:
+                return record
+        return None
+
+    def _pick_latest_disclosed_record(self, statements: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """
+        选择已披露记录中报告期最新的一条。
+
+        规则：
+        1. 优先 ann_date/f_ann_date <= 今天 的记录
+        2. 在可用记录中按 end_date 倒序选择最新
+        """
+        if not statements:
+            return None
+
+        today = datetime.utcnow().strftime('%Y%m%d')
+        disclosed: List[Dict[str, Any]] = []
+
+        for record in statements:
+            ann_date = str(record.get('ann_date') or record.get('f_ann_date') or '').replace('-', '')
+            end_date = str(record.get('end_date') or '').replace('-', '')
+
+            if not end_date:
+                continue
+
+            # ann_date 缺失时，默认保留该记录，避免误删历史数据。
+            if not ann_date or ann_date <= today:
+                disclosed.append(record)
+
+        if not disclosed:
+            return None
+
+        disclosed.sort(key=lambda rec: str(rec.get('end_date') or '').replace('-', ''), reverse=True)
+        return disclosed[0]
 
     def _calculate_ttm_from_tushare(self, income_statements: list, field: str) -> Optional[float]:
         """

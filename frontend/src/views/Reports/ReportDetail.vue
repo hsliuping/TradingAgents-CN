@@ -345,6 +345,123 @@ const activeModule = ref('')
 const llmConfigs = ref<LLMConfig[]>([]) // 存储所有模型配置
 const growthTaskId = computed(() => report.value?.task_id || null)
 
+const analystNameMap: Record<string, string> = {
+  index_analyst: '大盘分析师',
+  index_analyst_v2: '大盘分析师',
+  sector_analyst: '板块分析师',
+  sector_analyst_v2: '板块分析师',
+  market_analyst: '市场分析师',
+  market_analyst_v2: '市场分析师',
+  fundamentals_analyst: '基本面分析师',
+  fundamentals_analyst_v2: '基本面分析师',
+  etf_analyst: 'ETF 分析师',
+  etf_analyst_v2: 'ETF 分析师',
+  news_analyst: '新闻分析师',
+  news_analyst_v2: '新闻分析师',
+  social_analyst: '社交媒体分析师',
+  social_analyst_v2: '社交媒体分析师',
+  sentiment_analyst: '社交媒体分析师',
+  bull_researcher: '乐观情景研究员',
+  bull_researcher_v2: '乐观情景研究员',
+  bear_researcher: '审慎情景研究员',
+  bear_researcher_v2: '审慎情景研究员',
+  research_manager: '研究经理',
+  research_manager_v2: '研究经理',
+  trader: '研究整合员',
+  trader_v2: '研究整合员',
+  risky_analyst: '高弹性情景分析师',
+  risky_analyst_v2: '高弹性情景分析师',
+  safe_analyst: '防御情景分析师',
+  safe_analyst_v2: '防御情景分析师',
+  neutral_analyst: '基准情景分析师',
+  neutral_analyst_v2: '基准情景分析师',
+  risk_manager: '风险经理',
+  risk_manager_v2: '风险经理',
+  market: '市场分析师',
+  fundamentals: '基本面分析师',
+  etf: 'ETF 分析师',
+  news: '新闻分析师',
+  social: '社交媒体分析师',
+  sentiment: '社交媒体分析师',
+  technical: '市场分析师',
+  '大盘指数分析师': '大盘分析师',
+  '行业板块分析师': '板块分析师',
+  '市场技术分析师': '市场分析师',
+  '新闻事件分析师': '新闻分析师',
+  '市场情绪分析师': '社交媒体分析师',
+  '多头研究员': '乐观情景研究员',
+  '空头研究员': '审慎情景研究员',
+  '激进分析师': '高弹性情景分析师',
+  '保守分析师': '防御情景分析师',
+  '中性分析师': '基准情景分析师'
+}
+
+const moduleDisplayNameMap: Record<string, string> = {
+  index_report: '📊 大盘分析师',
+  sector_report: '🏭 板块分析师',
+  market_report: '📈 市场分析师',
+  sentiment_report: '💬 社交媒体分析师',
+  news_report: '📰 新闻分析师',
+  fundamentals_report: '💰 基本面分析师',
+  bull_researcher: '🐂 乐观情景研究员',
+  bull_report: '🐂 乐观情景研究',
+  bear_researcher: '🐻 审慎情景研究员',
+  bear_report: '🐻 审慎情景研究',
+  research_team_decision: '🔬 研究经理',
+  trader_investment_plan: '🧩 研究整合员',
+  risky_analyst: '⚡ 高弹性情景分析师',
+  risky_opinion: '⚡ 高弹性情景分析观点',
+  safe_analyst: '🛡️ 防御情景分析师',
+  safe_opinion: '🛡️ 防御情景分析观点',
+  neutral_analyst: '⚖️ 基准情景分析师',
+  neutral_opinion: '⚖️ 基准情景分析观点',
+  risk_management_decision: '👔 风险经理',
+  risk_assessment: '⚠️ 风险审阅',
+  investment_plan: '🧾 研究简报',
+  final_trade_decision: '🧾 综合研究结论',
+  investment_debate_state: '🔬 研究团队分析（旧）',
+  risk_debate_state: '⚖️ 风险团队分析（旧）',
+  detailed_analysis: '📄 详细分析'
+}
+
+const manifestDisplayNameAliasMap: Record<string, string> = {
+  '大盘分析 v2': '📊 大盘分析师',
+  '大盘分析师 v2': '📊 大盘分析师',
+  '板块分析 v2': '🏭 板块分析师',
+  '板块分析师 v2': '🏭 板块分析师',
+  '市场分析 v2': '📈 市场分析师',
+  '市场分析师 v2': '📈 市场分析师',
+  '市场技术分析': '📈 市场分析师',
+  '基本面分析 v2': '💰 基本面分析师',
+  '基本面分析师 v2': '💰 基本面分析师',
+  '新闻分析 v2': '📰 新闻分析师',
+  '新闻分析师 v2': '📰 新闻分析师',
+  '新闻事件分析': '📰 新闻分析师',
+  '舆情分析 v2': '💬 社交媒体分析师',
+  '社交媒体分析师 v2': '💬 社交媒体分析师',
+  '市场情绪分析': '💬 社交媒体分析师',
+  '研究经理分析': '🔬 研究经理',
+  '研究经理 v2': '🔬 研究经理',
+  '研究经理': '🔬 研究经理',
+  '交易员计划': '🧩 研究整合员',
+  '交易员 v2': '🧩 研究整合员',
+  '交易员': '🧩 研究整合员',
+  '研究整合员 v2': '🧩 研究整合员',
+  '研究整合员': '🧩 研究整合员',
+  '激进分析师': '⚡ 高弹性情景分析师',
+  '激进分析师 v2': '⚡ 高弹性情景分析师',
+  '保守分析师': '🛡️ 防御情景分析师',
+  '保守分析师 v2': '🛡️ 防御情景分析师',
+  '中性分析师': '⚖️ 基准情景分析师',
+  '中性分析师 v2': '⚖️ 基准情景分析师',
+  '风险管理者': '👔 风险经理',
+  '风险管理者 v2': '👔 风险经理',
+  '风险经理': '👔 风险经理',
+  '风险经理 v2': '👔 风险经理',
+  '风险评估': '⚠️ 风险审阅',
+  '最终分析结果': '🧾 综合研究结论'
+}
+
 // 获取模型配置列表
 const fetchLLMConfigs = async () => {
   try {
@@ -383,8 +500,16 @@ const fetchReportDetail = async () => {
       const reports = result.data.reports || {}
       const availableModules = Object.keys(reports)
 
-      // 按照 moduleOrder 找到第一个存在的模块
-      const firstModule = moduleOrder.find(name => availableModules.includes(name))
+      const manifest = Array.isArray(result.data.report_manifest) ? result.data.report_manifest : []
+      const firstManifestModule = manifest.length > 0
+        ? [...manifest]
+            .sort((a, b) => a.order - b.order)
+            .map(item => item.field)
+            .find((field: string) => availableModules.includes(field))
+        : undefined
+
+      // 优先按照 report_manifest，再回退到 moduleOrder
+      const firstModule = firstManifestModule || moduleOrder.find(name => availableModules.includes(name))
       if (firstModule) {
         activeModule.value = firstModule
       } else if (availableModules.length > 0) {
@@ -812,40 +937,13 @@ const formatTime = (time: string) => {
   return new Date(time).toLocaleString('zh-CN')
 }
 
+const normalizeAnalystName = (analyst: string): string => {
+  return analystNameMap[analyst] || analyst
+}
+
 // 将分析师英文名称转换为中文
 const formatAnalysts = (analysts: string[] = []) => {
-  const analystNameMap: Record<string, string> = {
-    // 宏观分析师
-    'index_analyst': '大盘指数分析师',
-    'sector_analyst': '行业板块分析师',
-    
-    // 分析师团队
-    'market_analyst': '市场技术分析师',
-    'fundamentals_analyst': '基本面分析师',
-    'etf_analyst': 'ETF 分析师',
-    'news_analyst': '新闻事件分析师',
-    'sentiment_analyst': '市场情绪分析师',
-    
-    // 研究团队
-    'bull_researcher': '多头研究员',
-    'bear_researcher': '空头研究员',
-    
-    // 风险管理团队
-    'risky_analyst': '激进分析师',
-    'safe_analyst': '保守分析师',
-    'neutral_analyst': '中性分析师',
-    
-    // 兼容旧格式（不带_analyst后缀）
-    'market': '市场分析师',
-    'fundamentals': '基本面分析师',
-    'etf': 'ETF 分析师',
-    'news': '新闻分析师',
-    'social': '社媒分析师',
-    'sentiment': '情绪分析师',
-    'technical': '技术分析师'
-  }
-
-  return analysts.map(analyst => analystNameMap[analyst] || analyst).join('、')
+  return Array.from(new Set(analysts.map(normalizeAnalystName))).join('、')
 }
 
 // 获取模型的详细描述（从后端配置中获取）
@@ -963,8 +1061,25 @@ const orderedModuleNames = computed(() => {
 
 const isEtfReport = computed(() => {
   const analysts = report.value?.analysts || []
-  return report.value?.task_type === 'etf_analysis' || analysts.includes('etf_analyst')
+  return report.value?.task_type === 'etf_analysis' || analysts.includes('etf_analyst') || analysts.includes('etf_analyst_v2')
 })
+
+const normalizeModuleDisplayName = (displayName?: string, moduleName?: string) => {
+  if (moduleName === 'fundamentals_report' && isEtfReport.value) {
+    return '📊 ETF 分析师'
+  }
+
+  const normalized = (displayName || '').replace(/^【|】$/g, '').trim()
+  if (normalized) {
+    return manifestDisplayNameAliasMap[normalized] || normalized
+  }
+
+  if (moduleName) {
+    return moduleDisplayNameMap[moduleName] || moduleName.replace(/_/g, ' ')
+  }
+
+  return ''
+}
 
 const getModuleDisplayName = (moduleName: string) => {
   // 动态模式：优先从 report_manifest 获取 display_name
@@ -973,41 +1088,10 @@ const getModuleDisplayName = (moduleName: string) => {
   }> | undefined
   if (manifest) {
     const item = manifest.find(m => m.field === moduleName)
-    if (item?.display_name) return item.display_name
+    if (item?.display_name) return normalizeModuleDisplayName(item.display_name, moduleName)
   }
 
-  if (moduleName === 'fundamentals_report' && isEtfReport.value) {
-    return '📊 ETF 分析'
-  }
-
-  const nameMap: Record<string, string> = {
-    index_report: '📊 大盘指数分析',
-    sector_report: '🏭 行业板块分析',
-    market_report: '📈 市场技术分析',
-    sentiment_report: '💭 市场情绪分析',
-    news_report: '📰 新闻事件分析',
-    fundamentals_report: '💰 基本面分析',
-    bull_researcher: '🐂 多头研究员',
-    bear_researcher: '🐻 空头研究员',
-    research_team_decision: '🔬 研究经理分析',
-    bull_report: '🐂 看涨研究',
-    bear_report: '🐻 看跌研究',
-    trader_investment_plan: '💼 交易员计划',
-    risky_analyst: '⚡ 激进分析师',
-    safe_analyst: '🛡️ 保守分析师',
-    neutral_analyst: '⚖️ 中性分析师',
-    risk_management_decision: '⚠️ 风险经理',
-    risky_opinion: '🔥 激进风险观点',
-    safe_opinion: '🛡️ 保守风险观点',
-    neutral_opinion: '⚖️ 中性风险观点',
-    risk_assessment: '⚠️ 风险评估',
-    investment_plan: '💡 初步投资建议',
-    final_trade_decision: '🎯 最终分析结果',
-    investment_debate_state: '🔬 研究团队分析（旧）',
-    risk_debate_state: '⚖️ 风险管理团队（旧）',
-    detailed_analysis: '📄 详细分析'
-  }
-  return nameMap[moduleName] || moduleName.replace(/_/g, ' ')
+  return normalizeModuleDisplayName(undefined, moduleName)
 }
 
 const renderMarkdown = (content: string) => {

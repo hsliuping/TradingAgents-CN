@@ -81,6 +81,8 @@ from app.routers import paper as paper_router
 from app.routers import portfolio as portfolio_router
 from app.routers import review as review_router
 from app.routers import email as email_router
+from app.routers import intelligent_assistant as intelligent_assistant_router
+from app.routers import memory as memory_router
 
 
 def get_version() -> str:
@@ -1067,6 +1069,8 @@ app.include_router(paper_router.router, prefix="/api", tags=["paper"])
 app.include_router(portfolio_router.router, prefix="/api", tags=["portfolio"])
 app.include_router(review_router.router, prefix="/api", tags=["review"])
 app.include_router(email_router.router, tags=["email"])
+app.include_router(intelligent_assistant_router.router, tags=["assistant"])
+app.include_router(memory_router.router, tags=["memory"])
 app.include_router(tushare_init.router, prefix="/api", tags=["tushare-init"])
 app.include_router(akshare_init.router, prefix="/api", tags=["akshare-init"])
 app.include_router(baostock_init.router, prefix="/api", tags=["baostock-init"])

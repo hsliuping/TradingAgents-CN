@@ -430,8 +430,12 @@ async def get_report_detail(
                 "key_points": r.get("key_points", []),
                 "execution_time": r.get("execution_time", 0),
                 "tokens_used": r.get("tokens_used", 0),
-                "decision": r.get("decision", {})  # 🔥 添加 decision 字段
+                "decision": r.get("decision", {}),  # 🔥 添加 decision 字段
+                "task_type": tasks_doc.get("task_type", "")
             }
+
+            if r.get("report_manifest"):
+                report["report_manifest"] = r.get("report_manifest")
             
             # 🔥 可选字段：根据查询参数决定是否包含
             if include_state:
@@ -478,8 +482,12 @@ async def get_report_detail(
                 "key_points": doc.get("key_points", []),
                 "execution_time": doc.get("execution_time", 0),
                 "tokens_used": doc.get("tokens_used", 0),
-                "decision": doc.get("decision", {})  # 🔥 添加 decision 字段用于格式化
+                "decision": doc.get("decision", {}),  # 🔥 添加 decision 字段用于格式化
+                "task_type": doc.get("task_type", "")
             }
+
+            if doc.get("report_manifest"):
+                report["report_manifest"] = doc.get("report_manifest")
             
             tasks_doc = None
             task_id = doc.get("task_id", report_id)
@@ -500,6 +508,9 @@ async def get_report_detail(
                 if len(rebuilt_from_task) > len(cleaned_reports):
                     cleaned_reports = rebuilt_from_task
                     report["reports"] = cleaned_reports
+
+                if result.get("report_manifest"):
+                    report["report_manifest"] = result.get("report_manifest")
 
                 if include_state:
                     report["state"] = result.get("state", {})
