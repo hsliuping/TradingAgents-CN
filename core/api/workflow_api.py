@@ -182,6 +182,14 @@ class WorkflowAPI:
 
     def get(self, workflow_id: str) -> Optional[Dict[str, Any]]:
         """获取工作流"""
+        provider = get_default_workflow_provider()
+        system_workflow = provider.get_system_workflow(workflow_id)
+        if system_workflow is not None:
+            data = system_workflow.to_dict()
+            logger.info(f"📋 [WorkflowAPI] 使用系统预置工作流: {workflow_id}")
+            self._log_workflow_source(workflow_id, "system_preset", data)
+            return data
+
         # 优先从数据库获取
         if self._workflows_collection is not None:
             try:

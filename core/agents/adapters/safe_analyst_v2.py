@@ -73,7 +73,7 @@ class SafeAnalystV2(ResearcherAgent):
     metadata = AgentMetadata(
         id="safe_analyst_v2",
         name="保守风险分析师 v2.0",
-        description="从保守角度评估交易计划，优先资本保护，规避潜在风险，支持多轮辩论",
+        description="从保守角度审阅研究结论的脆弱点，优先资本保护，规避潜在风险，支持多轮辩论",
         category=AgentCategory.RISK,
         version="2.0.0",
         license_tier=LicenseTier.FREE,

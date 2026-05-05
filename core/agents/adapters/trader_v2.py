@@ -64,8 +64,8 @@ class TraderV2(TraderAgent):
     # Agent元数据
     metadata = AgentMetadata(
         id="trader_v2",
-        name="交易员 v2.0",
-        description="根据投资分析观点生成交易分析计划",
+        name="研究整合员 v2.0",
+        description="根据风险审阅后的综合研究结论生成用户版研究简报",
         category=AgentCategory.TRADER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -84,11 +84,11 @@ class TraderV2(TraderAgent):
             AgentInput(name="bear_report", type="string", description="看跌研究报告", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
         ],
         outputs=[
-            AgentOutput(name="trader_investment_plan", type="string", description="交易分析计划"),
+            AgentOutput(name="trader_investment_plan", type="string", description="用户版研究简报"),
         ],
         requires_tools=False,
         output_field="trader_investment_plan",
-        report_label="【交易分析计划 v2】",
+        report_label="【用户版研究简报 v2】",
         growth_role="optimizer",
         growth_outputs=["trader_investment_plan"],
         memory_scope_hint="pattern",

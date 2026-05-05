@@ -142,7 +142,7 @@ class IndexAnalystV2(AnalystAgent):
     metadata = AgentMetadata(
         id="index_analyst_v2",
         name="大盘分析师 v2.0",
-        description="分析大盘指数走势，评估市场整体环境",
+        description="分析大盘指数走势与市场环境，提炼系统性风险和关键观察信号",
         category=AgentCategory.ANALYST,
         version="2.0.0",
         license_tier=LicenseTier.FREE,

@@ -73,7 +73,7 @@ class NeutralAnalystV2(ResearcherAgent):
     metadata = AgentMetadata(
         id="neutral_analyst_v2",
         name="中性风险分析师 v2.0",
-        description="从中性角度评估交易计划，平衡收益与风险，寻求最优解，支持多轮辩论",
+        description="从中性角度审阅研究结论的基准情景，平衡收益与风险，支持多轮辩论",
         category=AgentCategory.RISK,
         version="2.0.0",
         license_tier=LicenseTier.FREE,

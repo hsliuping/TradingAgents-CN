@@ -73,7 +73,7 @@ class RiskyAnalystV2(ResearcherAgent):
     metadata = AgentMetadata(
         id="risky_analyst_v2",
         name="激进风险分析师 v2.0",
-        description="从激进角度评估交易计划，关注高收益机会，容忍较高风险，支持多轮辩论",
+        description="从激进角度审阅研究结论的上修条件，关注高收益机会，容忍较高风险，支持多轮辩论",
         category=AgentCategory.RISK,
         version="2.0.0",
         license_tier=LicenseTier.FREE,

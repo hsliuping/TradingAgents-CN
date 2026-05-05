@@ -66,7 +66,7 @@ class RiskManagerV2(ManagerAgent):
     metadata = AgentMetadata(
         id="risk_manager_v2",
         name="风险管理者 v2.0",
-        description="主持风险辩论，综合多方观点，形成最终风险评估",
+        description="主持稳健性审阅，综合多方观点，形成风险审阅后的综合研究结论",
         category=AgentCategory.MANAGER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -80,12 +80,12 @@ class RiskManagerV2(ManagerAgent):
             AgentInput(name="neutral_opinion", type="string", description="中性风险观点", required=False, source="state", state_field="neutral_opinion", producer_hint="neutral_analyst_v2"),
         ],
         outputs=[
-            AgentOutput(name="risk_assessment", type="string", description="风险评估报告"),
+            AgentOutput(name="risk_assessment", type="string", description="稳健性审阅与风险治理报告"),
             AgentOutput(name="risk_debate_state", type="dict", description="风险辩论状态（包含 judge_decision）"),
         ],
         requires_tools=False,
         output_field="risk_assessment",
-        report_label="【风险评估 v2】",
+        report_label="【风险治理结论 v2】",
         growth_role="optimizer",
         growth_outputs=["risk_assessment", "risk_debate_state", "final_trade_decision"],
         memory_scope_hint="pattern",

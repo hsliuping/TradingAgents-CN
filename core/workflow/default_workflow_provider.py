@@ -92,6 +92,34 @@ class DefaultWorkflowProvider:
         """获取系统预置工作流"""
         return self.SYSTEM_WORKFLOWS.get(workflow_id)
 
+    def _build_system_workflow_doc(
+        self,
+        workflow: WorkflowDefinition,
+        created_at: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """构造用于持久化的系统工作流文档。"""
+        timestamp = datetime.utcnow().isoformat()
+        doc = workflow.to_dict()
+        doc["created_at"] = self._stringify_timestamp(created_at) or timestamp
+        doc["updated_at"] = timestamp
+        doc["created_by"] = "system"
+        doc["is_system"] = True
+        return doc
+
+    def _normalize_workflow_doc_for_compare(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+        """移除运行时字段，便于比较代码定义和数据库副本是否一致。"""
+        normalized = dict(doc)
+        for key in ("_id", "created_at", "updated_at"):
+            normalized.pop(key, None)
+        return normalized
+
+    def _stringify_timestamp(self, value: Optional[Any]) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return str(value)
+
     def _log_workflow_diagnostics(
         self,
         workflow: WorkflowDefinition,
@@ -322,10 +350,10 @@ class DefaultWorkflowProvider:
 
     def ensure_system_workflows_exist(self) -> Dict[str, bool]:
         """
-        确保系统预置工作流存在于数据库
+        确保系统预置工作流在数据库中与代码定义保持一致
 
         Returns:
-            Dict[workflow_id, created]: 是否新创建
+            Dict[workflow_id, changed]: 是否新建或更新
         """
         results = {}
         db = self._get_db()
@@ -337,19 +365,28 @@ class DefaultWorkflowProvider:
         for wf_id, workflow in self.SYSTEM_WORKFLOWS.items():
             try:
                 existing = db.workflows.find_one({"id": wf_id})
-                if existing:
+                desired_doc = self._build_system_workflow_doc(
+                    workflow,
+                    existing.get("created_at") if existing else None,
+                )
+
+                if existing and self._normalize_workflow_doc_for_compare(existing) == self._normalize_workflow_doc_for_compare(desired_doc):
                     results[wf_id] = False
-                    logger.debug(f"系统工作流已存在: {wf_id}")
-                else:
-                    # 插入新工作流
-                    doc = workflow.to_dict()
-                    doc["created_at"] = datetime.utcnow().isoformat()
-                    doc["updated_at"] = datetime.utcnow().isoformat()
-                    doc["created_by"] = "system"
-                    doc["is_system"] = True  # 标记为系统工作流
-                    db.workflows.insert_one(doc)
-                    results[wf_id] = True
-                    logger.info(f"已创建系统工作流: {wf_id}")
+                    logger.debug(f"系统工作流已是最新版本: {wf_id}")
+                    continue
+
+                update_doc = dict(desired_doc)
+                created_at = update_doc.pop("created_at")
+                db.workflows.update_one(
+                    {"id": wf_id},
+                    {
+                        "$set": update_doc,
+                        "$setOnInsert": {"created_at": created_at},
+                    },
+                    upsert=True,
+                )
+                results[wf_id] = True
+                logger.info(f"已同步系统工作流: {wf_id}")
             except Exception as e:
                 logger.error(f"确保系统工作流存在失败 {wf_id}: {e}")
                 results[wf_id] = False

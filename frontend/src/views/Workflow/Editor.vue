@@ -613,8 +613,8 @@ const loadWorkflow = async () => {
 
 const loadAgents = async () => {
   try {
-    // 获取所有智能体（包括不可用的），让前端自己判断权限
-    agents.value = await agentApi.listAll()
+    // 统一使用维护中的 Agent 列表；锁定态 Agent 仍会随接口返回
+    agents.value = await agentApi.listAvailable()
     categories.value = await agentApi.getCategories()
 
     console.log('📋 加载智能体完成:', {
