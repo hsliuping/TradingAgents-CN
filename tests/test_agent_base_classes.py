@@ -65,7 +65,7 @@ class TestMarketAnalystV2:
 
 
 class TestBullResearcherV2:
-    """测试看涨研究员V2"""
+    """测试乐观情景研究员V2"""
     
     def test_import(self):
         """测试导入"""
@@ -77,7 +77,7 @@ class TestBullResearcherV2:
         from core.agents.adapters import BullResearcherV2
 
         assert BullResearcherV2.metadata.id == "bull_researcher_v2"
-        assert BullResearcherV2.metadata.name == "看涨研究员 v2.0"
+        assert BullResearcherV2.metadata.name == "乐观情景研究员 v2.0"
         assert BullResearcherV2.researcher_type == "bull"
         assert BullResearcherV2.stance == "bull"
     
@@ -349,7 +349,7 @@ class TestIndexAnalystV2:
 
 
 class TestBearResearcherV2:
-    """测试看跌研究员V2"""
+    """测试审慎情景研究员V2"""
 
     def test_import(self):
         """测试导入"""
@@ -361,7 +361,7 @@ class TestBearResearcherV2:
         from core.agents.adapters import BearResearcherV2
 
         assert BearResearcherV2.metadata.id == "bear_researcher_v2"
-        assert BearResearcherV2.metadata.name == "看跌研究员 v2.0"
+        assert BearResearcherV2.metadata.name == "审慎情景研究员 v2.0"
         assert BearResearcherV2.researcher_type == "bear"
         assert BearResearcherV2.stance == "bear"
 

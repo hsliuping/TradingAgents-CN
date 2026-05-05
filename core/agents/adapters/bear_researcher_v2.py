@@ -1,7 +1,7 @@
 """
-看跌研究员 v2.0
+审慎情景研究员 v2.0
 
-基于ResearcherAgent基类实现的看跌研究员
+基于ResearcherAgent基类实现的审慎情景研究员
 """
 
 import logging
@@ -32,17 +32,17 @@ except ImportError:
 @register_agent
 class BearResearcherV2(ResearcherAgent):
     """
-    看跌研究员 v2.0
+    审慎情景研究员 v2.0
     
     功能：
-    - 从看跌角度综合分析多个报告
-    - 找出所有风险因素和看跌理由
-    - 生成看跌观点报告
+    - 从审慎情景角度综合分析多个报告
+    - 提炼风险因素、脆弱点与判断边界
+    - 生成审慎情景研究报告
     
     工作流程：
     1. 读取市场报告、新闻报告、基本面报告等
-    2. 从看跌角度综合分析
-    3. 生成看跌观点报告
+    2. 从审慎情景角度综合分析
+    3. 生成审慎情景研究报告
     
     示例:
         from langchain_openai import ChatOpenAI
@@ -63,8 +63,8 @@ class BearResearcherV2(ResearcherAgent):
     # Agent元数据
     metadata = AgentMetadata(
         id="bear_researcher_v2",
-        name="看跌研究员 v2.0",
-        description="从看跌角度综合分析多个报告，找出风险因素和看跌理由",
+        name="审慎情景研究员 v2.0",
+        description="基于现有材料构建偏审慎的研究论证，提炼风险、脆弱点与判断边界",
         category=AgentCategory.RESEARCHER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -77,11 +77,11 @@ class BearResearcherV2(ResearcherAgent):
             AgentInput(name="fundamentals_report", type="string", description="基本面分析报告", required=False, source="state", state_field="fundamentals_report", producer_hint="fundamentals_analyst_v2"),
         ],
         outputs=[
-            AgentOutput(name="bear_report", type="string", description="看跌观点报告"),
+            AgentOutput(name="bear_report", type="string", description="审慎情景研究报告"),
         ],
         requires_tools=False,
         output_field="bear_report",
-        report_label="【看跌观点 v2】",
+        report_label="【审慎情景研究 v2】",
         growth_role="reviewer",
         growth_outputs=["bear_report"],
         memory_scope_hint="pattern",
@@ -149,7 +149,7 @@ class BearResearcherV2(ResearcherAgent):
             prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )
         if prompt:
-            logger.info(f"✅ 从模板系统获取看跌研究员提示词 (长度: {len(prompt)})")
+            logger.info(f"✅ 从模板系统获取审慎情景研究员提示词 (长度: {len(prompt)})")
             return prompt
         
         # 降级：使用与当前模板语义一致的默认提示词
@@ -250,7 +250,7 @@ class BearResearcherV2(ResearcherAgent):
         )
         
         if prompt:
-            logger.info(f"✅ 从模板系统获取看跌研究员用户提示词 (长度: {len(prompt)})")
+            logger.info(f"✅ 从模板系统获取审慎情景研究员用户提示词 (长度: {len(prompt)})")
             return prompt
         
         # 降级：如果模板系统不可用，使用旧方式
@@ -268,7 +268,7 @@ class BearResearcherV2(ResearcherAgent):
                 )
 
                 if prompt:
-                    logger.info(f"✅ 从模板系统获取看跌研究员用户提示词 (长度: {len(prompt)})")
+                    logger.info(f"✅ 从模板系统获取审慎情景研究员用户提示词 (长度: {len(prompt)})")
                     return prompt
             except Exception as e:
                 logger.warning(f"⚠️ 从模板系统获取用户提示词失败: {e}，使用降级提示词")

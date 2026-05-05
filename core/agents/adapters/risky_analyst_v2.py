@@ -81,9 +81,9 @@ class RiskyAnalystV2(ResearcherAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_plan", type="string", description="投资计划", source="state", state_field="investment_plan", source_state_fields=["trader_investment_plan"], producer_hint="research_manager_v2"),
-            AgentInput(name="bull_opinion", type="string", description="看涨观点", required=False, source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
-            AgentInput(name="bear_opinion", type="string", description="看跌观点", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
+            AgentInput(name="investment_plan", type="string", description="综合研究结论", source="state", state_field="investment_plan", source_state_fields=["trader_investment_plan"], producer_hint="research_manager_v2"),
+            AgentInput(name="bull_opinion", type="string", description="乐观情景观点", required=False, source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
+            AgentInput(name="bear_opinion", type="string", description="审慎情景观点", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
             AgentInput(name="risk_debate_state", type="dict", description="辩论状态", required=False, source="state", state_field="risk_debate_state", producer_hint="risk_manager_v2"),
             AgentInput(name="market_report", type="string", description="市场分析报告", required=False, source="state", state_field="market_report", producer_hint="market_analyst_v2"),
             AgentInput(name="fundamentals_report", type="string", description="基本面分析报告", required=False, source="state", state_field="fundamentals_report", producer_hint="fundamentals_analyst_v2"),
@@ -150,30 +150,30 @@ class RiskyAnalystV2(ResearcherAgent):
             return prompt
 
         # 降级：使用默认提示词
-        return """你是一位激进的风险分析师。
+        return """你是一位激进风险分析师。
 
 你的角色特点：
-- 🔥 激进进取，追求高收益
-- 💰 愿意承担较高风险以获取超额回报
-- 🚀 关注市场机会和上涨潜力
-- ⚡ 倾向于积极的交易策略
+    - 🔥 更关注研究结论上修所依赖的强化条件与催化
+    - 💰 接受更高不确定性，但必须说明前提与证据门槛
+    - 🚀 重视哪些公开信号会让当前结论变得更积极
+    - ⚡ 强调结论增强所需要的外部验证
 
 你的任务是：
-1. 从激进角度评估投资计划的收益潜力
-2. 分析可能的高收益机会
-3. 评估风险是否值得承担
-4. 提出更激进的操作建议（如加大仓位、提高目标价等）
+    1. 从激进角度审阅当前研究结论的上修条件。
+    2. 说明哪些催化、验证信号和市场反馈会增强当前结论。
+    3. 指出如果要更积极，需要满足哪些高要求前提。
+    4. 不输出仓位、目标价、收益空间或交易建议。
 
 评估要点：
-- 上涨空间和收益潜力
-- 市场情绪和动量
-- 突破机会和催化剂
-- 风险收益比（偏向收益）
+    - 结论上修依赖的催化与证据
+    - 当前材料中最支持乐观情景的部分
+    - 市场是否存在重新定价的触发因素
+    - 仍需补足的验证信息
 
 要求：
-- 保持激进但不失理性
-- 用数据支持你的观点
-- 使用中文撰写报告"""
+    - 保持激进但不失理性
+    - 用数据支持你的观点
+    - 使用中文撰写报告"""
 
     def _build_user_prompt(self, ticker: str, analysis_date: str, state: Dict[str, Any]) -> str:
         """构建用户提示词（从模板系统获取并渲染）"""

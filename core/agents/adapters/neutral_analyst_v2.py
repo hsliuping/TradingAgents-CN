@@ -81,9 +81,9 @@ class NeutralAnalystV2(ResearcherAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_plan", type="string", description="投资计划", source="state", state_field="investment_plan", source_state_fields=["trader_investment_plan"], producer_hint="research_manager_v2"),
-            AgentInput(name="bull_opinion", type="string", description="看涨观点", required=False, source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
-            AgentInput(name="bear_opinion", type="string", description="看跌观点", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
+            AgentInput(name="investment_plan", type="string", description="综合研究结论", source="state", state_field="investment_plan", source_state_fields=["trader_investment_plan"], producer_hint="research_manager_v2"),
+            AgentInput(name="bull_opinion", type="string", description="乐观情景观点", required=False, source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
+            AgentInput(name="bear_opinion", type="string", description="审慎情景观点", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
             AgentInput(name="risky_opinion", type="string", description="激进风险观点", required=False, source="state", state_field="risky_opinion", producer_hint="risky_analyst_v2"),
             AgentInput(name="safe_opinion", type="string", description="保守风险观点", required=False, source="state", state_field="safe_opinion", producer_hint="safe_analyst_v2"),
             AgentInput(name="risk_debate_state", type="dict", description="辩论状态", required=False, source="state", state_field="risk_debate_state", producer_hint="risk_manager_v2"),
@@ -152,31 +152,31 @@ class NeutralAnalystV2(ResearcherAgent):
             return prompt
 
         # 降级：使用默认提示词
-        return """你是一位中性的风险分析师。
+        return """你是一位中性风险分析师。
 
 你的角色特点：
-- ⚖️ 客观中立，平衡收益与风险
-- 📊 数据驱动，理性分析
-- 🎯 追求最优风险收益比
-- 🔍 全面考虑各种因素
+    - ⚖️ 客观中立，比较证据质量与判断边界
+    - 📊 数据驱动，重视信息缺口与前提完整性
+    - 🎯 以当前最稳妥的基准情景为中心组织分析
+    - 🔍 全面考虑强化条件、脆弱点与未验证部分
 
 你的任务是：
-1. 从中性角度评估投资计划的风险收益比
-2. 平衡激进和保守的观点
-3. 寻找最优的风险管理策略
-4. 提供客观理性的操作建议
+    1. 从中性角度审阅当前研究结论的基准情景。
+    2. 比较激进与保守观点各自依赖的证据质量。
+    3. 指出当前最稳妥的判断、主要信息缺口与待验证事项。
+    4. 不输出仓位、价格区间、风险收益比或交易建议。
 
 评估要点：
-- 风险收益比的平衡
-- 概率加权的期望收益
-- 合理的仓位和止损设置
-- 市场环境的综合判断
+    - 证据质量与结论稳健性
+    - 当前最可信的基准情景
+    - 仍待补足的信息与验证路径
+    - 不同观点分歧背后的关键前提
 
 要求：
-- 保持客观中立
-- 用数据和逻辑支持你的观点
-- 综合考虑多方面因素
-- 使用中文撰写报告"""
+    - 保持客观中立
+    - 用数据和逻辑支持你的观点
+    - 综合考虑多方面因素
+    - 使用中文撰写报告"""
 
     def _build_user_prompt(self, ticker: str, analysis_date: str, state: Dict[str, Any]) -> str:
         """构建用户提示词（从模板系统获取并渲染）"""

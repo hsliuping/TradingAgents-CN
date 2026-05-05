@@ -74,7 +74,7 @@ class RiskManagerV2(ManagerAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_plan", type="string", description="投资计划", source="state", state_field="investment_plan", producer_hint="research_manager_v2"),
+            AgentInput(name="investment_plan", type="string", description="综合研究结论", source="state", state_field="investment_plan", producer_hint="research_manager_v2"),
             AgentInput(name="risky_opinion", type="string", description="激进风险观点", required=False, source="state", state_field="risky_opinion", producer_hint="risky_analyst_v2"),
             AgentInput(name="safe_opinion", type="string", description="保守风险观点", required=False, source="state", state_field="safe_opinion", producer_hint="safe_analyst_v2"),
             AgentInput(name="neutral_opinion", type="string", description="中性风险观点", required=False, source="state", state_field="neutral_opinion", producer_hint="neutral_analyst_v2"),
@@ -163,34 +163,31 @@ class RiskManagerV2(ManagerAgent):
             return prompt
         
         # 默认提示词（合规版本）
-        return """你是一位中性的风险管理者，需要综合各方风险观点做出风险评估，并生成综合分析。
+        return """你是一位风险管理者，负责综合各方稳健性审阅并形成风险治理结论。
 
-**分析风格**: 中性的分析风格，客观评估，平衡分析，提供理性判断
+    **分析风格**: 客观、克制、以稳健性为核心，强调判断边界、约束条件、失效触发与后续观察。
 
 **核心职责**:
-1. 综合分析激进、保守、中性三方的风险观点
-2. 识别关键风险因素
-3. 评估风险的可能性和影响
-4. 形成中性、理性的风险评估
-5. 提出风险控制参考建议
-6. **综合市场观点、交易分析计划、风险评估，生成综合分析**
+    1. 综合激进、保守、中性三方的稳健性审阅意见。
+    2. 识别当前研究结论的关键风险、脆弱点与信息缺口。
+    3. 说明哪些条件会支持结论上修、维持或下修。
+    4. 形成风险治理结论与后续观察重点。
+    5. 给出判断约束，而不是交易执行方案。
 
 **分析原则**:
-- 客观权衡看涨和看跌观点，基于证据做出理性分析
-- 平衡的风险收益比分析
-- 客观、理性、基于证据
-- 给出明确的风险评级
-- 详细说明风险评估理由
-- 使用中文输出
+    - 客观综合三方观点，基于证据说明当前结论是否足够稳健。
+    - 不输出买卖、加减仓、仓位比例、目标价、价格区间、止损止盈或执行节奏。
+    - 可以说明风险来源、观察信号与结论失效条件，但不得扩展为操作建议。
+    - 所有结论必须严格基于提供材料，不得补造信息。
+    - 使用中文输出。
 
 **工具使用指导**:
 
-基于提供的风险观点进行中性的风险评估。
-从中性角度评估所有风险信息。
+    基于提供的风险观点与综合研究结论进行风险治理审阅。
+    从稳健性角度评估所有风险信息。
 
 **免责声明**：
-本分析报告仅供参考，不构成交易建议。所有市场观点、价格区间、风险评估均为分析参考，
-不构成交易操作建议。投资有风险，决策需谨慎。"""
+    本风险治理结论仅供信息参考，不构成投资建议或交易承诺。请结合自身情况独立判断。"""
 
     def _build_user_prompt(
         self,
@@ -288,16 +285,16 @@ class RiskManagerV2(ManagerAgent):
             logger.info(f"✅ 从模板系统获取风险管理者用户提示词 (长度: {len(prompt)})")
             return prompt
         
-        # 降级：使用默认用户提示词（优化后：只包含任务描述和数据，不包含格式要求）
+        # 降级：使用默认用户提示词
         logger.info("⚠️ 使用降级用户提示词")
-        return f"""请综合分析 {company_name}（{ticker}）的投资风险：
+        return f"""请基于 {company_name}（{ticker}）的综合研究结论与三方稳健性审阅意见，形成风险治理结论：
 
 📊 **基本信息**：
 - 股票代码：{ticker}
 - 公司名称：{company_name}
 - 分析日期：{analysis_date}
 
-【投资计划】
+    【风险审阅后的综合研究结论】
 {investment_plan_content}
 
 【激进风险观点】
@@ -312,7 +309,14 @@ class RiskManagerV2(ManagerAgent):
 【风险辩论总结】
 {debate_summary or ''}
 
-请基于以上信息，综合分析并给出风险评估和风险控制建议。"""
+请基于以上信息：
+
+1. 提炼当前研究结论是否足够稳健。
+2. 说明关键风险、判断边界、结论上修或下修的触发条件。
+3. 给出后续观察事项与资料缺口。
+4. 明确不要直接给出交易决策、仓位安排、目标价、价格区间、止损止盈或执行节奏。
+
+输出目标是形成风险治理结论，而不是交易建议。"""
 
     def _get_required_inputs(self) -> List[str]:
         """

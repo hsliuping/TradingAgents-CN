@@ -19,10 +19,10 @@ def test_v2_risk_analysts_mapping():
     
     # 测试所有 v2 风险分析师节点
     test_cases = [
-        ("risky_analyst_v2", "激进分析师", "⚡ 激进分析师正在评估高风险机会..."),
-        ("safe_analyst_v2", "保守分析师", "🛡️ 保守分析师正在评估风险因素..."),
-        ("neutral_analyst_v2", "中性分析师", "⚖️ 中性分析师正在平衡风险收益..."),
-        ("risk_manager_v2", "风险管理者", "👔 风险管理者正在做最终决策..."),
+        ("risky_analyst_v2", "激进风险分析师", "⚡ 激进风险分析师正在审阅结论上修条件..."),
+        ("safe_analyst_v2", "保守风险分析师", "🛡️ 保守风险分析师正在审阅脆弱点与关键风险..."),
+        ("neutral_analyst_v2", "中性风险分析师", "⚖️ 中性风险分析师正在审阅基准情景与证据完整性..."),
+        ("risk_manager_v2", "风险管理者", "👔 风险管理者正在审阅研究结论稳健性..."),
     ]
     
     print("\n测试 v2 风险分析师节点映射:")
@@ -109,8 +109,8 @@ def test_step_name_vs_message_difference():
     
     test_cases = [
         ("market_analyst_v2", "市场分析师", "📈 市场分析师正在分析技术指标和市场趋势..."),
-        ("neutral_analyst_v2", "中性分析师", "⚖️ 中性分析师正在平衡风险收益..."),
-        ("trader_v2", "交易员", "💼 交易员正在制定交易计划..."),
+        ("neutral_analyst_v2", "中性风险分析师", "⚖️ 中性风险分析师正在审阅基准情景与证据完整性..."),
+        ("trader_v2", "研究整合员", "🧩 研究整合员正在生成用户版研究简报..."),
     ]
     
     print("\n测试步骤名称和消息的区别:")
@@ -122,7 +122,7 @@ def test_step_name_vs_message_difference():
         print(f"  消息 (message): {message}")
         
         # 验证步骤名称是简短的
-        assert len(step_name) < 10, f"步骤名称应该简短: {step_name}"
+        assert len(step_name) < 12, f"步骤名称应该简短: {step_name}"
         
         # 验证消息是详细的
         assert len(message) > 10, f"消息应该详细: {message}"
@@ -145,7 +145,7 @@ def test_v1_nodes_also_updated():
     test_cases = [
         ("market_analyst", "市场分析师"),
         ("neutral_analyst", "中性分析师"),
-        ("trader", "交易员"),
+        ("trader", "研究整合员"),
     ]
     
     print("\n测试 v1 节点也更新了:")

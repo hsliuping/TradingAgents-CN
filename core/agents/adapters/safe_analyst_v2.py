@@ -81,9 +81,9 @@ class SafeAnalystV2(ResearcherAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_plan", type="string", description="投资计划", source="state", state_field="investment_plan", source_state_fields=["trader_investment_plan"], producer_hint="research_manager_v2"),
-            AgentInput(name="bull_opinion", type="string", description="看涨观点", required=False, source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
-            AgentInput(name="bear_opinion", type="string", description="看跌观点", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
+            AgentInput(name="investment_plan", type="string", description="综合研究结论", source="state", state_field="investment_plan", source_state_fields=["trader_investment_plan"], producer_hint="research_manager_v2"),
+            AgentInput(name="bull_opinion", type="string", description="乐观情景观点", required=False, source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
+            AgentInput(name="bear_opinion", type="string", description="审慎情景观点", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
             AgentInput(name="risk_debate_state", type="dict", description="辩论状态", required=False, source="state", state_field="risk_debate_state", producer_hint="risk_manager_v2"),
             AgentInput(name="market_report", type="string", description="市场分析报告", required=False, source="state", state_field="market_report", producer_hint="market_analyst_v2"),
             AgentInput(name="fundamentals_report", type="string", description="基本面分析报告", required=False, source="state", state_field="fundamentals_report", producer_hint="fundamentals_analyst_v2"),
@@ -150,30 +150,30 @@ class SafeAnalystV2(ResearcherAgent):
             return prompt
 
         # 降级：使用默认提示词
-        return """你是一位保守的风险分析师。
+        return """你是一位保守风险分析师。
 
 你的角色特点：
-- 🛡️ 稳健保守，优先保护资本
-- 🔒 风险厌恶，宁可错过机会也不愿承担过高风险
-- 📉 关注下行风险和潜在损失
-- ⚠️ 倾向于谨慎的交易策略
+    - 🛡️ 稳健保守，优先识别研究结论的脆弱点
+    - 🔒 宁可错过机会，也不接受前提不清或证据不足的结论强化
+    - 📉 关注潜在风险来源、失效条件与下行情景
+    - ⚠️ 强调需要先澄清的问题，而不是直接给执行建议
 
 你的任务是：
-1. 从保守角度评估投资计划的风险
-2. 识别所有潜在的风险因素
-3. 评估最坏情况下的损失
-4. 提出更保守的操作建议（如减小仓位、设置严格止损等）
+    1. 从保守角度审阅当前研究结论的脆弱点。
+    2. 识别关键风险来源、失效条件与信息缺口。
+    3. 说明哪些负面信号会使当前判断下修。
+    4. 不输出仓位、止损止盈、价格区间或交易建议。
 
 评估要点：
-- 下行风险和最大回撤
-- 市场不确定性
-- 潜在的黑天鹅事件
-- 风险收益比（偏向风险）
+    - 研究结论最脆弱的前提
+    - 关键风险来源与潜在冲击
+    - 需要重点监测的负面公开信号
+    - 当前材料中尚未覆盖的信息缺口
 
 要求：
-- 保持保守但不失客观
-- 用数据支持你的观点
-- 使用中文撰写报告"""
+    - 保持保守但不失客观
+    - 用数据支持你的观点
+    - 使用中文撰写报告"""
 
     def _build_user_prompt(self, ticker: str, analysis_date: str, state: Dict[str, Any]) -> str:
         """构建用户提示词（从模板系统获取并渲染）"""

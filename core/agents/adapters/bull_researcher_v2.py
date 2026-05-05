@@ -1,8 +1,8 @@
 """
-看涨研究员Agent v2.0
+乐观情景研究员 v2.0
 
-基于ResearcherAgent基类实现的看涨研究员
-从看涨角度综合分析多个报告
+基于ResearcherAgent基类实现的乐观情景研究员
+从乐观情景角度综合分析多个报告
 """
 
 import logging
@@ -34,17 +34,17 @@ except (ImportError, KeyError):
 @register_agent
 class BullResearcherV2(ResearcherAgent):
     """
-    看涨研究员 v2.0
+    乐观情景研究员 v2.0
     
     功能：
-    - 从看涨角度综合分析多个报告
-    - 找出所有支持买入的理由
-    - 生成看涨观点报告
+    - 从乐观情景角度综合分析多个报告
+    - 提炼成立前提、证据链与潜在催化
+    - 生成乐观情景研究报告
     
     工作流程：
     1. 读取市场报告、新闻报告、基本面报告等
-    2. 从看涨角度综合分析
-    3. 生成看涨观点报告
+    2. 从乐观情景角度综合分析
+    3. 生成乐观情景研究报告
     
     示例:
         from langchain_openai import ChatOpenAI
@@ -65,8 +65,8 @@ class BullResearcherV2(ResearcherAgent):
     # Agent元数据
     metadata = AgentMetadata(
         id="bull_researcher_v2",
-        name="看涨研究员 v2.0",
-        description="从看涨角度综合分析多个报告，找出支持买入的理由",
+        name="乐观情景研究员 v2.0",
+        description="基于现有材料构建偏乐观但克制的研究论证，提炼成立前提、证据链与观察信号",
         category=AgentCategory.RESEARCHER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -79,11 +79,11 @@ class BullResearcherV2(ResearcherAgent):
             AgentInput(name="fundamentals_report", type="string", description="基本面分析报告", required=False, source="state", state_field="fundamentals_report", producer_hint="fundamentals_analyst_v2"),
         ],
         outputs=[
-            AgentOutput(name="bull_report", type="string", description="看涨观点报告"),
+            AgentOutput(name="bull_report", type="string", description="乐观情景研究报告"),
         ],
         requires_tools=False,
         output_field="bull_report",
-        report_label="【看涨观点 v2】",
+        report_label="【乐观情景研究 v2】",
         growth_role="reviewer",
         growth_outputs=["bull_report"],
         memory_scope_hint="pattern",
@@ -151,7 +151,7 @@ class BullResearcherV2(ResearcherAgent):
             prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )
         if prompt:
-            logger.debug("✅ 从模板系统获取看涨研究员系统提示词")
+            logger.debug("✅ 从模板系统获取乐观情景研究员系统提示词")
             return prompt
         
         # 降级：使用旧版的默认提示词（与数据库模板保持一致）
@@ -244,7 +244,7 @@ class BullResearcherV2(ResearcherAgent):
         )
         
         if prompt:
-            logger.info(f"✅ 从模板系统获取看涨研究员用户提示词 (长度: {len(prompt)})")
+            logger.info(f"✅ 从模板系统获取乐观情景研究员用户提示词 (长度: {len(prompt)})")
             return prompt
         
         # 降级：如果模板系统不可用，使用旧方式
@@ -262,7 +262,7 @@ class BullResearcherV2(ResearcherAgent):
                 )
 
                 if prompt:
-                    logger.info(f"✅ 从模板系统获取看涨研究员用户提示词 (长度: {len(prompt)})")
+                    logger.info(f"✅ 从模板系统获取乐观情景研究员用户提示词 (长度: {len(prompt)})")
                     return prompt
             except Exception as e:
                 logger.warning(f"⚠️ 从模板系统获取用户提示词失败: {e}，使用降级提示词")

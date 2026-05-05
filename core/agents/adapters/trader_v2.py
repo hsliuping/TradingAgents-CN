@@ -1,8 +1,8 @@
 """
-交易员Agent v2.0
+研究整合员 v2.0
 
-基于TraderAgent基类实现的交易员
-根据投资分析观点生成交易分析计划
+基于TraderAgent基类实现的研究整合员
+根据综合研究结论生成用户版研究简报
 """
 
 import logging
@@ -33,17 +33,17 @@ except (ImportError, KeyError):
 @register_agent
 class TraderV2(TraderAgent):
     """
-    交易员 v2.0
+    研究整合员 v2.0
     
     功能：
-    - 根据投资分析观点生成交易分析计划
-    - 分析价格区间、仓位配置、风险控制参考价位
-    - 考虑风险控制和资金管理
+    - 根据综合研究结论生成用户版研究简报
+    - 提炼核心依据、判断边界与后续观察事项
+    - 统一整理上游报告的用户可读表达
     
     工作流程：
-    1. 读取投资计划和所有分析报告
-    2. 分析交易参数
-    3. 生成交易分析计划
+    1. 读取综合研究结论和所有分析报告
+    2. 提炼用户最关心的核心信息
+    3. 生成用户版研究简报
     
     示例:
         from langchain_openai import ChatOpenAI
@@ -73,15 +73,15 @@ class TraderV2(TraderAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_plan", type="string", description="投资计划", source="state", state_field="investment_advice", source_state_fields=["investment_plan"], producer_hint="research_manager_v2"),
+            AgentInput(name="investment_plan", type="string", description="综合研究结论", source="state", state_field="investment_advice", source_state_fields=["investment_plan"], producer_hint="research_manager_v2"),
             AgentInput(name="market_report", type="string", description="市场分析报告", required=False, source="state", state_field="market_report", producer_hint="market_analyst_v2"),
             AgentInput(name="fundamentals_report", type="string", description="基本面分析报告", required=False, source="state", state_field="fundamentals_report", producer_hint="fundamentals_analyst_v2"),
             AgentInput(name="news_report", type="string", description="新闻分析报告", required=False, source="state", state_field="news_report", producer_hint="news_analyst_v2"),
             AgentInput(name="sentiment_report", type="string", description="情绪分析报告", required=False, source="state", state_field="sentiment_report", producer_hint="social_analyst_v2"),
             AgentInput(name="index_report", type="string", description="大盘分析报告", required=False, source="state", state_field="index_report", producer_hint="index_analyst_v2"),
             AgentInput(name="sector_report", type="string", description="板块分析报告", required=False, source="state", state_field="sector_report", producer_hint="sector_analyst_v2"),
-            AgentInput(name="bull_report", type="string", description="看涨研究报告", required=False, source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
-            AgentInput(name="bear_report", type="string", description="看跌研究报告", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
+            AgentInput(name="bull_report", type="string", description="乐观情景研究报告", required=False, source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
+            AgentInput(name="bear_report", type="string", description="审慎情景研究报告", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
         ],
         outputs=[
             AgentOutput(name="trader_investment_plan", type="string", description="用户版研究简报"),
@@ -152,33 +152,30 @@ class TraderV2(TraderAgent):
             return prompt
         
         # 默认系统提示词（合规版本）
-        return """你是一位专业的投资分析师，负责根据投资分析观点生成交易分析计划。
+        return """你是一位研究整合员，负责根据风险审阅后的综合研究结论生成用户版研究简报。
 
 ## 你的职责
 
-1. **市场观点分析**：根据投资计划分析市场观点（看涨/看跌/中性）
-2. **价格分析区间**：基于技术面和基本面分析价格区间（不构成目标价）
-3. **仓位分析**：分析合理的仓位配置（不构成操作建议）
-4. **风险控制参考**：提供风险控制参考价位（仅供参考）
-5. **收益预期参考**：提供收益预期参考价位（仅供参考）
+    1. **整合研究结论**：把综合研究结论翻译成普通用户可读的简报
+    2. **提炼关键信息**：概括核心依据、关键分歧、不确定性与后续观察事项
+    3. **保留研究边界**：说明当前判断成立的前提与可能失效的条件
+    4. **统一表达口径**：将上游多份报告整理成一致、清晰、可直接阅读的最终简报
 
 ## 分析原则
 
-- **基于投资分析观点**：参考投资计划中的市场观点（看涨/看跌/中性）进行分析
-- **客观的风险分析**：提供风险控制参考价位，不构成操作建议
-- **明确的分析参数**：提供清晰的价格分析区间、仓位分析、风险参考价位
-- **考虑市场流动性**：分析交易执行的可行性
-- **资金管理分析**：基于投资计划中的仓位分析进行资金配置分析
+    - **基于研究结论**：以研究经理的综合研究结论和风险治理结论为主线组织内容
+    - **不扩展为交易计划**：不得输出买卖、加减仓、仓位比例、目标价、价格区间、止损止盈或执行节奏
+    - **客观呈现证据**：清晰说明支持判断的依据、关键不确定性与后续观察事项
+    - **保持用户可读性**：使用简洁中文，不堆叠术语，不制造未提供的信息
 
 ## 重要说明
 
-- **风险评估不在本阶段**：风险评估是在交易分析计划制定之后由风险经理进行的，你不需要进行风险评估
-- **基于已有数据**：你只能使用提供的分析报告（市场分析、基本面分析、新闻分析、板块分析、大盘分析、看涨报告、看跌报告）来制定交易分析计划
-- **遵循投资计划**：投资计划中的 market_view、price_analysis_range、position_analysis 等字段是你的主要参考依据
+    - **基于已有数据**：你只能使用提供的分析报告与上游研究结论生成用户版研究简报
+    - **风险治理已在上游完成**：本阶段负责整合表达，不再重新生成交易计划或风险控制方案
+    - **不引入外部推断**：不得使用模型内部知识、材料外信息或额外价格推演补足结论
 
 **免责声明**：
-本分析报告仅供参考，不构成投资建议。所有价格区间、市场观点均为分析参考，
-不构成买卖操作建议。投资有风险，决策需谨慎。"""
+    本研究简报仅供信息参考，不构成投资建议或交易承诺。请结合自身情况独立判断。"""
     
     def _build_user_prompt(
         self,
@@ -232,7 +229,7 @@ class TraderV2(TraderAgent):
             return str(report) if report else ""
         
         # 准备模板变量（参考 research_manager_v2 的实现）
-        # 🔑 注意：风险评估（risk_assessment）不在交易分析计划阶段，它在交易分析计划之后由风险经理进行
+        # 🔑 注意：风险治理已在上游完成，本阶段负责整合呈现综合研究结论
         template_variables = {
             "ticker": ticker,
             "company_name": company_name,
@@ -275,9 +272,11 @@ class TraderV2(TraderAgent):
             logger.info(f"📝 用户提示词前500字符:\n{prompt[:500]}...")
             return prompt
         
-        # 降级：使用默认用户提示词（不包含 risk_assessment）
+        # 降级：使用默认用户提示词
         logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
-        prompt = f"""请为 {company_name}（{ticker}）生成交易分析计划：
+
+        summary_source = extract_content(all_reports.get("final_trade_decision", "")) or extract_content(all_reports.get("risk_management_decision", "")) or extract_content(investment_plan)
+        prompt = f"""请为 {company_name}（{ticker}）生成用户版研究简报：
 
 ## 基本信息
 - **股票代码**：{ticker}
@@ -285,9 +284,13 @@ class TraderV2(TraderAgent):
 - **分析日期**：{analysis_date}
 - **货币单位**：{currency_name}（{currency_symbol}）
 
-## 投资计划
+    ## 风险审阅后的综合研究结论
 
-{extract_content(investment_plan) if investment_plan else "无投资计划"}
+    {extract_content(investment_plan) if investment_plan else "无综合研究结论"}
+
+    ## 一句话结论
+
+    {summary_source or "请基于下述材料提炼一句话结论。"}
 
 ## 可用分析报告
 
@@ -306,11 +309,11 @@ class TraderV2(TraderAgent):
 ### 5. 大盘分析报告
 {extract_content(all_reports.get("index_report", "")) or "无大盘分析报告"}
 
-### 6. 看涨研究报告
-{extract_content(all_reports.get("bull_report", "")) or "无看涨研究报告"}
+### 6. 乐观情景研究报告
+{extract_content(all_reports.get("bull_report", "")) or "无乐观情景研究报告"}
 
-### 7. 看跌研究报告
-{extract_content(all_reports.get("bear_report", "")) or "无看跌研究报告"}
+### 7. 审慎情景研究报告
+{extract_content(all_reports.get("bear_report", "")) or "无审慎情景研究报告"}
 
 ## 历史交易记录（如有）
 
@@ -318,27 +321,22 @@ class TraderV2(TraderAgent):
 
 ## 任务要求
 
-请基于上述投资计划和各类分析报告，生成详细的交易分析计划，包括：
+请基于上述综合研究结论和各类分析报告，生成用户可读的研究简报，优先包含以下结构：
 
-1. **市场观点**：看涨/看跌/中性（参考投资计划中的 market_view）
-2. **价格分析区间**：基于技术面和基本面的价格分析区间（参考投资计划中的 price_analysis_range，不构成目标价）
-3. **仓位分析**：基于风险收益比的仓位分析（参考投资计划中的 position_analysis，不构成操作建议）
-4. **风险控制参考价位**：风险控制参考价位（仅供参考，不构成操作建议）
-5. **收益预期参考价位**：收益预期参考价位（仅供参考，不构成操作建议）
-6. **执行策略分析**：市价单还是限价单的分析，分批建仓还是一次性建仓的分析
-7. **风险提示**：交易执行中需要注意的风险点
+1. **一句话结论**：用一句话概括当前研究判断。
+2. **核心依据**：概括最关键的 2-4 条证据。
+3. **当前判断的限制**：说明信息缺口、脆弱前提与结论边界。
+4. **后续观察事项**：列出最值得继续跟踪的公开信号。
+5. **资料边界说明**：如果报告未提供关键信息，必须明确指出。
 
 **重要提示**：
-- 必须严格按照投资计划中的 market_view 来确定市场观点
-- 价格分析区间应参考投资计划中的 price_analysis_range，但可以根据当前市场价格进行分析
-- 仓位分析应参考投资计划中的 position_analysis
-- 风险控制参考价位和收益预期参考价位应基于技术分析和风险控制原则提供（仅供参考）
-- 使用 {currency_name}（{currency_symbol}）作为货币单位
+- 不得输出买卖、加减仓、仓位比例、目标价、价格区间、止损止盈或执行节奏
+- 可以解释价格、估值和财务数据如何影响研究判断，但不得扩展成操作建议
+- 必须使用 {currency_name}（{currency_symbol}）作为货币单位
+- 语言要让普通用户看得懂，不得补造材料外信息
 
 **免责声明**：
-本分析报告仅供参考，不构成投资建议。所有价格区间、市场观点均为分析参考，
-不构成买卖操作建议。投资有风险，决策需谨慎。投资者应根据自身情况，结合
-专业投资顾问意见，独立做出投资决策。"""
+本研究简报仅供信息参考，不构成投资建议或交易承诺。请结合自身情况独立判断。"""
         
         return prompt
     

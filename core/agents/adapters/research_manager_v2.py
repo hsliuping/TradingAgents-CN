@@ -1,8 +1,8 @@
 """
-研究经理Agent v2.0
+研究经理 v2.0
 
 基于ManagerAgent基类实现的研究经理
-综合看涨和看跌观点，做出最终分析结果
+综合乐观与审慎情景研究，形成平衡研究结论
 """
 
 import logging
@@ -37,16 +37,16 @@ class ResearchManagerV2(ManagerAgent):
     研究经理 v2.0
     
     功能：
-    - 综合看涨和看跌观点
+    - 综合乐观与审慎情景研究
     - 主持辩论（可选）
-    - 做出最终分析结果
-    - 生成投资计划
+    - 做出平衡研究结论
+    - 生成综合研究结论
     
     工作流程：
-    1. 读取看涨报告和看跌报告
+    1. 读取乐观情景与审慎情景研究报告
     2. 主持辩论（可选）
     3. 综合研判
-    4. 生成投资分析观点（看涨/中性/看跌）
+    4. 生成平衡研究结论与观察重点
     
     示例:
         from langchain_openai import ChatOpenAI
@@ -67,7 +67,7 @@ class ResearchManagerV2(ManagerAgent):
     metadata = AgentMetadata(
         id="research_manager_v2",
         name="研究经理 v2.0",
-        description="综合看涨和看跌观点，做出最终分析结果",
+        description="综合乐观与审慎情景研究，形成平衡研究结论与观察重点",
         category=AgentCategory.MANAGER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -75,15 +75,15 @@ class ResearchManagerV2(ManagerAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="bull_report", type="string", description="看涨观点报告", source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
-            AgentInput(name="bear_report", type="string", description="看跌观点报告", source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
+            AgentInput(name="bull_report", type="string", description="乐观情景研究报告", source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
+            AgentInput(name="bear_report", type="string", description="审慎情景研究报告", source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
         ],
         outputs=[
-            AgentOutput(name="investment_advice", type="string", description="投资分析观点"),
+            AgentOutput(name="investment_advice", type="string", description="平衡研究结论"),
         ],
         requires_tools=False,
         output_field="investment_advice",
-        report_label="【投资分析观点 v2】",
+        report_label="【平衡研究结论 v2】",
         growth_role="optimizer",
         growth_outputs=["investment_plan", "investment_debate_state"],
         memory_scope_hint="research_asset",
@@ -277,15 +277,15 @@ class ResearchManagerV2(ManagerAgent):
             logger.warning("⚠️ 从模板系统获取系统提示词失败，使用默认提示词")
         
         # 默认提示词（合规版本）
-        return """你是一位中性的研究经理，负责把多空观点整理成面向用户的研究简报。
+        return """你是一位中性的研究经理，负责把乐观情景研究与审慎情景研究整理成平衡研究结论。
 
     **分析风格**: 客观、克制、基于证据，强调 strongest case 对比、分歧根源、信息缺口与后续观察。
 
     **核心职责**:
-    1. 先用双方最强的成立逻辑理解看涨和看跌观点，再形成当前研究判断。
+    1. 先用双方最强的成立逻辑理解乐观与审慎两类论证，再形成当前研究判断。
     2. 说明双方共识、关键分歧及分歧根源，而不是只给一个结果标签。
     3. 点明支持判断的核心依据、关键不确定性、判断可能失效的条件与后续观察重点。
-    4. 输出用户可读的研究简报，帮助用户理解“为什么这样看”以及“接下来观察什么”。
+    4. 输出面向下游整合与风险审阅的平衡研究结论，帮助后续节点理解“为什么这样看”以及“接下来观察什么”。
 
     **分析原则**:
     - 应先按双方最强论点等权审阅，再根据证据质量决定当前倾向，不预设结论。
@@ -298,6 +298,7 @@ class ResearchManagerV2(ManagerAgent):
     **输出目标**:
     - 让用户理解当前证据更支持哪一类判断，以及为什么另一侧暂时没有占优。
     - 让用户知道关键依据、关键风险、判断升级或下修的前提，以及后续观察事项。
+    - 为研究整合员与风险团队提供清晰、可复用的研究结论输入。
 
     **免责声明**：
     本研究简报仅供信息参考，不构成交易建议或投资承诺。请结合自身情况独立判断。"""
