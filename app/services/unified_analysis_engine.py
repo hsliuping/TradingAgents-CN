@@ -33,25 +33,58 @@ class UnifiedAnalysisEngine:
         """初始化引擎"""
         self.logger = logger
 
+    def _workflow_exists(self, workflow_id: Optional[str]) -> bool:
+        """检查工作流是否存在于系统预置、数据库或文件系统中。"""
+        if not workflow_id:
+            return False
+
+        provider = get_default_workflow_provider()
+        if provider.get_system_workflow(workflow_id) is not None:
+            return True
+
+        from core.api.workflow_api import WorkflowAPI
+
+        try:
+            return WorkflowAPI().get(workflow_id) is not None
+        except Exception as exc:
+            self.logger.warning(f"⚠️ 校验工作流存在性失败: workflow_id={workflow_id}, error={exc}")
+            return False
+
     def _resolve_workflow_id(self, task: UnifiedAnalysisTask, config) -> str:
         """解析本次任务应使用的工作流 ID。"""
         explicit_workflow_id = task.workflow_id or task.task_params.get("workflow_id")
         if explicit_workflow_id:
-            self.logger.info(f"📋 工作流选择: 使用任务显式指定的 workflow_id={explicit_workflow_id}")
-            return explicit_workflow_id
+            if self._workflow_exists(explicit_workflow_id):
+                self.logger.info(f"📋 工作流选择: 使用任务显式指定的 workflow_id={explicit_workflow_id}")
+                return explicit_workflow_id
+            self.logger.warning(
+                f"⚠️ 任务显式指定的工作流不存在，将回退到默认流程: workflow_id={explicit_workflow_id}"
+            )
 
         if task.task_type == AnalysisTaskType.STOCK_ANALYSIS:
             try:
                 active_workflow_id = get_default_workflow_provider().get_active_workflow_id()
-                if active_workflow_id:
+                if active_workflow_id and self._workflow_exists(active_workflow_id):
                     self.logger.info(f"📋 工作流选择: 使用当前活动工作流 workflow_id={active_workflow_id}")
                     return active_workflow_id
+                if active_workflow_id:
+                    self.logger.warning(
+                        f"⚠️ 当前活动工作流不存在，将回退到注册表默认流程: workflow_id={active_workflow_id}"
+                    )
             except Exception as exc:
                 self.logger.warning(f"⚠️ 获取活动工作流失败，回退注册表默认值: {exc}")
 
-        self.logger.info(f"📋 工作流选择: 使用注册表默认 workflow_id={config.workflow_id}")
-        return config.workflow_id
-    
+        if self._workflow_exists(config.workflow_id):
+            self.logger.info(f"📋 工作流选择: 使用注册表默认 workflow_id={config.workflow_id}")
+            return config.workflow_id
+
+        fallback_workflow_id = get_default_workflow_provider().get_default_workflow().id
+        self.logger.warning(
+            f"⚠️ 注册表默认工作流不存在，回退到系统默认工作流: workflow_id={fallback_workflow_id}"
+        )
+        return fallback_workflow_id
+
+
     async def execute_task(
         self,
         task: UnifiedAnalysisTask,

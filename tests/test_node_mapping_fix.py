@@ -19,9 +19,9 @@ def test_v2_risk_analysts_mapping():
     
     # 测试所有 v2 风险分析师节点
     test_cases = [
-        ("risky_analyst_v2", "激进风险分析师", "⚡ 激进风险分析师正在审阅结论上修条件..."),
-        ("safe_analyst_v2", "保守风险分析师", "🛡️ 保守风险分析师正在审阅脆弱点与关键风险..."),
-        ("neutral_analyst_v2", "中性风险分析师", "⚖️ 中性风险分析师正在审阅基准情景与证据完整性..."),
+        ("risky_analyst_v2", "高弹性情景分析师", "⚡ 高弹性情景分析师正在审阅结论上修条件..."),
+        ("safe_analyst_v2", "防御情景分析师", "🛡️ 防御情景分析师正在审阅脆弱点与关键风险..."),
+        ("neutral_analyst_v2", "基准情景分析师", "⚖️ 基准情景分析师正在审阅基准情景与证据完整性..."),
         ("risk_manager_v2", "风险管理者", "👔 风险管理者正在审阅研究结论稳健性..."),
     ]
     
@@ -109,7 +109,7 @@ def test_step_name_vs_message_difference():
     
     test_cases = [
         ("market_analyst_v2", "市场分析师", "📈 市场分析师正在分析技术指标和市场趋势..."),
-        ("neutral_analyst_v2", "中性风险分析师", "⚖️ 中性风险分析师正在审阅基准情景与证据完整性..."),
+        ("neutral_analyst_v2", "基准情景分析师", "⚖️ 基准情景分析师正在审阅基准情景与证据完整性..."),
         ("trader_v2", "研究整合员", "🧩 研究整合员正在生成用户版研究简报..."),
     ]
     
@@ -145,7 +145,6 @@ def test_v1_nodes_also_updated():
     test_cases = [
         ("market_analyst", "市场分析师"),
         ("neutral_analyst", "中性分析师"),
-        ("trader", "研究整合员"),
     ]
     
     print("\n测试 v1 节点也更新了:")

@@ -63,8 +63,8 @@ EXPECTED_METADATA = {
     },
     "core/agents/adapters/risky_analyst_v2.py": {
         "id": "risky_analyst_v2",
-        "name": "激进风险分析师 v2.0",
-        "description": "从激进角度审阅研究结论的上修条件，关注高收益机会，容忍较高风险，支持多轮辩论",
+        "name": "高弹性情景分析师 v2.0",
+        "description": "从研究结论能否上修的角度审阅，识别强化催化、高要求前提与额外验证信号",
         "category": "RISK",
         "version": "2.0.0",
         "license_tier": "FREE",
@@ -72,8 +72,8 @@ EXPECTED_METADATA = {
     },
     "core/agents/adapters/safe_analyst_v2.py": {
         "id": "safe_analyst_v2",
-        "name": "保守风险分析师 v2.0",
-        "description": "从保守角度审阅研究结论的脆弱点，优先资本保护，规避潜在风险，支持多轮辩论",
+        "name": "防御情景分析师 v2.0",
+        "description": "从研究结论最易失效的角度审阅，识别脆弱前提、风险来源与下修触发条件",
         "category": "RISK",
         "version": "2.0.0",
         "license_tier": "FREE",
@@ -81,8 +81,8 @@ EXPECTED_METADATA = {
     },
     "core/agents/adapters/neutral_analyst_v2.py": {
         "id": "neutral_analyst_v2",
-        "name": "中性风险分析师 v2.0",
-        "description": "从中性角度审阅研究结论的基准情景，平衡收益与风险，支持多轮辩论",
+        "name": "基准情景分析师 v2.0",
+        "description": "平衡乐观与审慎材料，判断当前最稳妥的基准情景，识别共识、冲突点与信息缺口",
         "category": "RISK",
         "version": "2.0.0",
         "license_tier": "FREE",
