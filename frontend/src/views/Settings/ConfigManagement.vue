@@ -1633,10 +1633,16 @@ const allEnabledModels = computed(() => {
   return llmConfigs.value.filter(config => config.enabled)
 })
 
-const groupedAvailableModels = computed(() => {
-  const groups = new Map<string, { provider: string; providerLabel: string; models: LLMConfig[] }>()
+const selectableEnabledModels = computed(() => {
+  return allEnabledModels.value.filter(
+    (config): config is LLMConfig & { config_id: string } => typeof config.config_id === 'string' && config.config_id.trim().length > 0
+  )
+})
 
-  for (const model of allEnabledModels.value) {
+const groupedAvailableModels = computed(() => {
+  const groups = new Map<string, { provider: string; providerLabel: string; models: Array<LLMConfig & { config_id: string }> }>()
+
+  for (const model of selectableEnabledModels.value) {
     const providerLabel = providerInfoMap.value[model.provider]?.display_name || model.provider_name || model.provider
     const existingGroup = groups.get(model.provider)
 

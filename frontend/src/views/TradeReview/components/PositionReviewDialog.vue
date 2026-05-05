@@ -110,7 +110,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { reviewApi } from '@/api/review'
+import { reviewApi, type TradeRecord } from '@/api/review'
 import * as tradingSystemApi from '@/api/tradingSystem'
 import type { TradingSystem } from '@/api/tradingSystem'
 import { useLicenseStore } from '@/stores/license'

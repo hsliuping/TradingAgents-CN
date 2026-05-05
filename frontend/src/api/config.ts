@@ -68,6 +68,20 @@ export interface LLMConfig {
   }
 }
 
+export interface FetchProviderModelsFilters {
+  type?: string
+  modalities?: string
+  features?: string[]
+  provider_names?: string[]
+  model_keyword?: string
+  sort_by?: string
+  sort_order?: string
+  limit?: number
+  recommended_only?: boolean
+  tools_only?: boolean
+  exclude_preview?: boolean
+}
+
 export interface DataSourceConfig {
   name: string
   type: string
@@ -421,7 +435,7 @@ export const configApi = {
   },
 
   // 从厂家 API 获取模型列表
-  fetchProviderModels(provider: string): Promise<{
+  fetchProviderModels(provider: string, filters?: FetchProviderModelsFilters): Promise<{
     success: boolean
     message?: string
     models?: Array<{
@@ -430,7 +444,7 @@ export const configApi = {
       context_length?: number
     }>
   }> {
-    return ApiClient.post(`/api/config/llm/providers/${provider}/fetch-models`)
+    return ApiClient.post(`/api/config/llm/providers/${provider}/fetch-models`, filters || {})
   },
 
   // ========== 大模型配置管理 ==========
@@ -571,6 +585,7 @@ export const configApi = {
 
   // 获取默认模型配置
   getDefaultModels(): Promise<{
+    default_provider?: string
     quick_analysis_model: string
     quick_analysis_model_config_id?: string
     deep_analysis_model: string
@@ -581,6 +596,7 @@ export const configApi = {
     coding_model_config_id?: string
   }> {
     return ApiClient.get('/api/config/settings').then((settings: any) => ({
+      default_provider: settings.data?.default_provider || settings.default_provider || '',
       quick_analysis_model: settings.data?.quick_analysis_model || settings.quick_analysis_model || 'qwen-turbo',
       quick_analysis_model_config_id: settings.data?.quick_analysis_model_config_id || settings.quick_analysis_model_config_id || '',
       deep_analysis_model: settings.data?.deep_analysis_model || settings.deep_analysis_model || 'qwen-max',
