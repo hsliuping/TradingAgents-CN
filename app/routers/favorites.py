@@ -2,7 +2,10 @@
 自选股管理API路由
 """
 
-from typing import List, Optional
+import asyncio
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 import logging
@@ -15,6 +18,144 @@ from app.core.response import ok
 logger = logging.getLogger("webapi")
 
 router = APIRouter(prefix="/favorites", tags=["自选股管理"])
+
+FAVORITES_SYNC_TASKS_COLLECTION = "favorites_sync_tasks"
+
+
+def _utc_now_iso() -> str:
+    return datetime.utcnow().isoformat()
+
+
+async def _create_favorites_sync_task(current_user: dict, payload: Dict[str, Any]) -> Dict[str, Any]:
+    db = favorites_service.db
+    task_doc = {
+        "task_id": uuid4().hex,
+        "task_type": "favorites_realtime",
+        "status": "pending",
+        "message": "自选股实时行情同步任务已提交",
+        "payload": payload,
+        "user_id": current_user["id"],
+        "submitted_by": str(current_user.get("username") or current_user.get("id") or "unknown"),
+        "created_at": _utc_now_iso(),
+        "started_at": None,
+        "finished_at": None,
+        "result": None,
+        "error": None,
+    }
+    await db[FAVORITES_SYNC_TASKS_COLLECTION].insert_one(task_doc)
+    task_doc.pop("_id", None)
+    return task_doc
+
+
+async def _update_favorites_sync_task(task_id: str, updates: Dict[str, Any]) -> None:
+    db = favorites_service.db
+    await db[FAVORITES_SYNC_TASKS_COLLECTION].update_one(
+        {"task_id": task_id},
+        {"$set": updates},
+        upsert=False,
+    )
+
+
+async def _get_favorites_sync_task(task_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    db = favorites_service.db
+    task_doc = await db[FAVORITES_SYNC_TASKS_COLLECTION].find_one({"task_id": task_id, "user_id": user_id})
+    if task_doc:
+        task_doc.pop("_id", None)
+    return task_doc
+
+
+async def _run_favorites_realtime_sync_task(task_id: str, user_id: str, data_source: str) -> None:
+    try:
+        await _update_favorites_sync_task(
+            task_id,
+            {
+                "status": "running",
+                "message": "自选股实时行情同步执行中",
+                "started_at": _utc_now_iso(),
+                "error": None,
+            },
+        )
+
+        favorites = await favorites_service.get_user_favorites(user_id)
+
+        if not favorites:
+            result = {
+                "total": 0,
+                "success_count": 0,
+                "failed_count": 0,
+                "message": "没有自选股需要同步",
+                "symbols": [],
+                "data_source": data_source,
+            }
+            await _update_favorites_sync_task(
+                task_id,
+                {
+                    "status": "success",
+                    "message": result["message"],
+                    "finished_at": _utc_now_iso(),
+                    "result": result,
+                },
+            )
+            return
+
+        symbols = [fav.get("stock_code") or fav.get("symbol") for fav in favorites]
+        symbols = [s for s in symbols if s]
+
+        if data_source == "tushare":
+            from app.worker.tushare_sync_service import get_tushare_sync_service
+            service = await get_tushare_sync_service()
+        elif data_source == "akshare":
+            from app.worker.akshare_sync_service import get_akshare_sync_service
+            service = await get_akshare_sync_service()
+        else:
+            raise RuntimeError(f"不支持的数据源: {data_source}")
+
+        if not service:
+            raise RuntimeError(f"{data_source} 服务不可用")
+
+        if data_source == "akshare":
+            sync_result = await service.sync_realtime_quotes(
+                symbols=symbols,
+                force=True,
+                manual_mode=True,
+            )
+        else:
+            sync_result = await service.sync_realtime_quotes(
+                symbols=symbols,
+                force=True,
+            )
+
+        success_count = sync_result.get("success_count", 0)
+        failed_count = sync_result.get("failed_count", 0)
+        result = {
+            "total": len(symbols),
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "symbols": symbols,
+            "data_source": data_source,
+            "message": f"同步完成: 成功 {success_count} 只，失败 {failed_count} 只",
+        }
+
+        await _update_favorites_sync_task(
+            task_id,
+            {
+                "status": "success" if failed_count == 0 else "success_with_errors",
+                "message": result["message"],
+                "finished_at": _utc_now_iso(),
+                "result": result,
+            },
+        )
+    except Exception as e:
+        logger.error(f"❌ 自选股实时行情同步任务失败: {e}", exc_info=True)
+        await _update_favorites_sync_task(
+            task_id,
+            {
+                "status": "failed",
+                "message": f"同步失败: {str(e)}",
+                "finished_at": _utc_now_iso(),
+                "error": str(e),
+            },
+        )
 
 
 class AddFavoriteRequest(BaseModel):
@@ -239,72 +380,21 @@ async def sync_favorites_realtime(
     - **data_source**: 数据源（tushare/akshare）
     """
     try:
-        logger.info(f"📊 开始同步自选股实时行情: user_id={current_user['id']}, data_source={request.data_source}")
+        logger.info(f"📊 提交自选股实时行情同步任务: user_id={current_user['id']}, data_source={request.data_source}")
 
-        # 获取用户自选股列表
-        favorites = await favorites_service.get_user_favorites(current_user["id"])
-
-        if not favorites:
-            logger.info("⚠️ 用户没有自选股")
-            return ok({
-                "total": 0,
-                "success_count": 0,
-                "failed_count": 0,
-                "message": "没有自选股需要同步"
-            })
-
-        # 提取股票代码列表
-        symbols = [fav.get("stock_code") or fav.get("symbol") for fav in favorites]
-        symbols = [s for s in symbols if s]  # 过滤空值
-
-        logger.info(f"🎯 需要同步的股票: {len(symbols)} 只 - {symbols}")
-
-        # 根据数据源选择同步服务
-        if request.data_source == "tushare":
-            from app.worker.tushare_sync_service import get_tushare_sync_service
-            service = await get_tushare_sync_service()
-        elif request.data_source == "akshare":
-            from app.worker.akshare_sync_service import get_akshare_sync_service
-            service = await get_akshare_sync_service()
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"不支持的数据源: {request.data_source}"
+        task_doc = await _create_favorites_sync_task(
+            current_user,
+            {"data_source": request.data_source},
+        )
+        asyncio.create_task(
+            _run_favorites_realtime_sync_task(
+                task_doc["task_id"],
+                current_user["id"],
+                request.data_source,
             )
+        )
 
-        if not service:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"{request.data_source} 服务不可用"
-            )
-
-        # 同步实时行情
-        logger.info(f"🔄 调用 {request.data_source} 同步服务...")
-        if request.data_source == "akshare":
-            sync_result = await service.sync_realtime_quotes(
-                symbols=symbols,
-                force=True,
-                manual_mode=True  # 手动接口不应继承调度任务取消状态
-            )
-        else:
-            sync_result = await service.sync_realtime_quotes(
-                symbols=symbols,
-                force=True  # 强制执行，跳过交易时间检查
-            )
-
-        success_count = sync_result.get("success_count", 0)
-        failed_count = sync_result.get("failed_count", 0)
-
-        logger.info(f"✅ 自选股实时行情同步完成: 成功 {success_count}/{len(symbols)} 只")
-
-        return ok({
-            "total": len(symbols),
-            "success_count": success_count,
-            "failed_count": failed_count,
-            "symbols": symbols,
-            "data_source": request.data_source,
-            "message": f"同步完成: 成功 {success_count} 只，失败 {failed_count} 只"
-        })
+        return ok(task_doc, "自选股实时行情同步任务已提交")
 
     except HTTPException:
         raise
@@ -313,4 +403,28 @@ async def sync_favorites_realtime(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"同步失败: {str(e)}"
+        )
+
+
+@router.get("/sync-realtime/tasks/{task_id}", response_model=dict)
+async def get_favorites_realtime_sync_task(
+    task_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """获取自选股实时行情同步任务状态。"""
+    try:
+        task_doc = await _get_favorites_sync_task(task_id, current_user["id"])
+        if not task_doc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="同步任务不存在"
+            )
+        return ok(task_doc)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 获取自选股实时行情同步任务失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取同步任务失败: {str(e)}"
         )

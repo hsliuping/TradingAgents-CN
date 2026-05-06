@@ -18,8 +18,12 @@ router = APIRouter(prefix="/api/sync", tags=["sync"])
 async def run_stock_basics_sync(force: bool = False):
     try:
         service = get_basics_sync_service()
-        result = await service.run_full_sync(force=force)
-        return {"success": True, "data": result}
+        result = await service.start_full_sync(force=force)
+        return {
+            "success": True,
+            "message": result.get("message") or "Synchronization task started",
+            "data": result,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

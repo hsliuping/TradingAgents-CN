@@ -504,7 +504,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import {
@@ -516,11 +516,16 @@ import {
 } from '@element-plus/icons-vue'
 import { favoritesApi } from '@/api/favorites'
 import { tagsApi } from '@/api/tags'
-import { stockSyncApi } from '@/api/stockSync'
+import {
+  stockSyncApi,
+  type BatchStockSyncResponse,
+  type SingleStockSyncResponse,
+  type StockSyncTaskStatus,
+} from '@/api/stockSync'
 import { normalizeMarketForAnalysis } from '@/utils/market'
 import { ApiClient } from '@/api/request'
 
-import type { FavoriteItem } from '@/api/favorites'
+import type { FavoriteItem, FavoritesRealtimeSyncTaskStatus } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
 
 
@@ -533,6 +538,9 @@ const COLOR_PALETTE = [
 ]
 
 const router = useRouter()
+const STOCK_SYNC_POLL_INTERVAL_MS = 2000
+const STOCK_SYNC_POLL_MAX_ATTEMPTS = 300
+let favoritesViewDisposed = false
 
 // 响应式数据
 const loading = ref(false)
@@ -709,6 +717,45 @@ const loadFavorites = async () => {
 
 // 同步实时行情
 const syncRealtimeLoading = ref(false)
+const waitForFavoritesRealtimeTask = async (taskId: string): Promise<FavoritesRealtimeSyncTaskStatus> => {
+  for (let attempt = 0; attempt < STOCK_SYNC_POLL_MAX_ATTEMPTS; attempt += 1) {
+    if (favoritesViewDisposed) {
+      throw new Error('页面已离开，停止等待同步结果')
+    }
+
+    const res = await favoritesApi.getRealtimeSyncTaskStatus(taskId)
+    if (res.success && ['success', 'success_with_errors', 'failed'].includes(res.data.status)) {
+      return res.data
+    }
+
+    await sleep(STOCK_SYNC_POLL_INTERVAL_MS)
+  }
+
+  throw new Error('自选股实时行情同步超时，请稍后刷新列表查看结果')
+}
+
+const monitorFavoritesRealtimeTask = async (taskId: string) => {
+  try {
+    const task = await waitForFavoritesRealtimeTask(taskId)
+    if (favoritesViewDisposed) return
+
+    const message = task.result?.message || task.error || task.message || '自选股实时行情同步失败'
+    if (task.status === 'success') {
+      ElMessage.success(message)
+    } else if (task.status === 'success_with_errors') {
+      ElMessage.warning(message)
+    } else {
+      ElMessage.error(message)
+    }
+
+    await loadFavorites()
+  } catch (error: any) {
+    if (!favoritesViewDisposed && error?.message !== '页面已离开，停止等待同步结果') {
+      ElMessage.error(error?.message || '自选股实时行情结果查询失败，请稍后刷新列表查看')
+    }
+  }
+}
+
 const syncAllRealtime = async () => {
   if (favorites.value.length === 0) {
     ElMessage.warning('没有自选股需要同步')
@@ -718,12 +765,10 @@ const syncAllRealtime = async () => {
   syncRealtimeLoading.value = true
   try {
     const res = await favoritesApi.syncRealtime('tushare')
-    const data = (res as any)?.data
 
     if ((res as any)?.success) {
-      ElMessage.success(data?.message || `同步完成: 成功 ${data?.success_count} 只`)
-      // 重新加载自选股列表以获取最新价格
-      await loadFavorites()
+      ElMessage.success('自选股实时行情同步任务已提交，后台执行中')
+      void monitorFavoritesRealtimeTask(res.data.task_id)
     } else {
       ElMessage.error((res as any)?.message || '同步失败')
     }
@@ -1031,6 +1076,118 @@ const showSingleSyncDialog = (row: FavoriteItem) => {
   singleSyncDialogVisible.value = true
 }
 
+
+const sleep = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
+
+const isTerminalStockSyncStatus = (status?: string): boolean => {
+  return status === 'success' || status === 'success_with_errors' || status === 'failed'
+}
+
+const buildSingleSyncTaskMessage = (task: StockSyncTaskStatus, symbol: string): string => {
+  const result = task.result as SingleStockSyncResponse | null | undefined
+  if (!result) {
+    return task.error || task.message || `股票 ${symbol} 同步失败`
+  }
+
+  const parts = [`股票 ${symbol} 数据同步完成`]
+
+  if (result.realtime_sync) {
+    parts.push(result.realtime_sync.success ? '实时行情同步成功' : `实时行情同步失败: ${result.realtime_sync.error || '未知错误'}`)
+  }
+  if (result.historical_sync) {
+    parts.push(result.historical_sync.success ? `历史数据 ${result.historical_sync.records || 0} 条` : `历史数据同步失败: ${result.historical_sync.error || '未知错误'}`)
+  }
+  if (result.financial_sync) {
+    parts.push(result.financial_sync.success ? '财务数据同步成功' : `财务数据同步失败: ${result.financial_sync.error || '未知错误'}`)
+  }
+  if (result.basic_sync) {
+    parts.push(result.basic_sync.success ? '基础数据同步成功' : `基础数据同步失败: ${result.basic_sync.error || '未知错误'}`)
+  }
+
+  return parts.join('；')
+}
+
+const buildBatchSyncTaskMessage = (task: StockSyncTaskStatus, symbols: string[]): string => {
+  const result = task.result as BatchStockSyncResponse | null | undefined
+  if (!result) {
+    return task.error || task.message || '批量同步失败'
+  }
+
+  const parts = [`批量同步完成（共 ${symbols.length} 只股票）`]
+
+  if (result.historical_sync) {
+    parts.push(`历史数据 ${result.historical_sync.success_count}/${result.historical_sync.success_count + result.historical_sync.error_count} 成功，共 ${result.historical_sync.total_records} 条`)
+  }
+  if (result.financial_sync) {
+    parts.push(`财务数据 ${result.financial_sync.success_count}/${result.financial_sync.total_symbols} 成功`)
+  }
+  if (result.basic_sync) {
+    parts.push(`基础数据 ${result.basic_sync.success_count}/${result.basic_sync.total_symbols} 成功`)
+  }
+
+  return parts.join('；')
+}
+
+const waitForStockSyncTask = async (taskId: string): Promise<StockSyncTaskStatus> => {
+  for (let attempt = 0; attempt < STOCK_SYNC_POLL_MAX_ATTEMPTS; attempt += 1) {
+    if (favoritesViewDisposed) {
+      throw new Error('页面已离开，停止等待同步结果')
+    }
+
+    const res = await stockSyncApi.getTaskStatus(taskId)
+    if (res.success && isTerminalStockSyncStatus(res.data.status)) {
+      return res.data
+    }
+
+    await sleep(STOCK_SYNC_POLL_INTERVAL_MS)
+  }
+
+  throw new Error('同步任务执行超时，请稍后刷新列表查看结果')
+}
+
+const monitorSingleSyncTask = async (taskId: string, symbol: string) => {
+  try {
+    const task = await waitForStockSyncTask(taskId)
+    if (favoritesViewDisposed) return
+
+    const message = buildSingleSyncTaskMessage(task, symbol)
+    if (task.status === 'success') {
+      ElMessage.success(message)
+    } else if (task.status === 'success_with_errors') {
+      ElMessage.warning(message)
+    } else {
+      ElMessage.error(message)
+    }
+
+    await loadFavorites()
+  } catch (error: any) {
+    if (!favoritesViewDisposed && error?.message !== '页面已离开，停止等待同步结果') {
+      ElMessage.error(error?.message || '同步结果查询失败，请稍后刷新列表查看')
+    }
+  }
+}
+
+const monitorBatchSyncTask = async (taskId: string, symbols: string[]) => {
+  try {
+    const task = await waitForStockSyncTask(taskId)
+    if (favoritesViewDisposed) return
+
+    const message = buildBatchSyncTaskMessage(task, symbols)
+    if (task.status === 'success') {
+      ElMessage.success(message)
+    } else if (task.status === 'success_with_errors') {
+      ElMessage.warning(message)
+    } else {
+      ElMessage.error(message)
+    }
+
+    await loadFavorites()
+  } catch (error: any) {
+    if (!favoritesViewDisposed && error?.message !== '页面已离开，停止等待同步结果') {
+      ElMessage.error(error?.message || '批量同步结果查询失败，请稍后刷新列表查看')
+    }
+  }
+}
 // 执行单个股票同步
 const handleSingleSync = async () => {
   if (singleSyncForm.value.syncTypes.length === 0) {
@@ -1050,46 +1207,9 @@ const handleSingleSync = async () => {
     })
 
     if (res.success) {
-      const data = res.data
-      let message = `股票 ${currentSyncStock.value.stock_code} 数据同步完成\n`
-
-      if (data.realtime_sync) {
-        if (data.realtime_sync.success) {
-          message += `✅ 实时行情同步成功\n`
-        } else {
-          message += `❌ 实时行情同步失败: ${data.realtime_sync.error || '未知错误'}\n`
-        }
-      }
-
-      if (data.historical_sync) {
-        if (data.historical_sync.success) {
-          message += `✅ 历史数据: ${data.historical_sync.records || 0} 条记录\n`
-        } else {
-          message += `❌ 历史数据同步失败: ${data.historical_sync.error || '未知错误'}\n`
-        }
-      }
-
-      if (data.financial_sync) {
-        if (data.financial_sync.success) {
-          message += `✅ 财务数据同步成功\n`
-        } else {
-          message += `❌ 财务数据同步失败: ${data.financial_sync.error || '未知错误'}\n`
-        }
-      }
-
-      if (data.basic_sync) {
-        if (data.basic_sync.success) {
-          message += `✅ 基础数据同步成功\n`
-        } else {
-          message += `❌ 基础数据同步失败: ${data.basic_sync.error || '未知错误'}\n`
-        }
-      }
-
-      ElMessage.success(message)
+      ElMessage.success(`股票 ${currentSyncStock.value.stock_code} 同步任务已提交，后台执行中`)
       singleSyncDialogVisible.value = false
-
-      // 刷新列表
-      await loadFavorites()
+      void monitorSingleSyncTask(res.data.task_id, currentSyncStock.value.stock_code)
     } else {
       ElMessage.error(res.message || '同步失败')
     }
@@ -1174,27 +1294,10 @@ const handleBatchSync = async () => {
     })
 
     if (res.success) {
-      const data = res.data
-      let message = `批量同步完成 (共 ${symbols.length} 只股票)\n`
-
-      if (data.historical_sync) {
-        message += `✅ 历史数据: ${data.historical_sync.success_count}/${data.historical_sync.success_count + data.historical_sync.error_count} 成功，共 ${data.historical_sync.total_records} 条记录\n`
-      }
-
-      if (data.financial_sync) {
-        message += `✅ 财务数据: ${data.financial_sync.success_count}/${data.financial_sync.total_symbols} 成功\n`
-      }
-
-      if (data.basic_sync) {
-        message += `✅ 基础数据: ${data.basic_sync.success_count}/${data.basic_sync.total_symbols} 成功\n`
-      }
-
-      ElMessage.success(message)
+      ElMessage.success(`批量同步任务已提交（共 ${symbols.length} 只股票），后台执行中`)
       batchSyncDialogVisible.value = false
       syncAllStocks.value = false  // 重置全部同步标记
-
-      // 刷新列表
-      await loadFavorites()
+      void monitorBatchSyncTask(res.data.task_id, symbols)
     } else {
       ElMessage.error(res.message || '批量同步失败')
     }
@@ -1236,6 +1339,10 @@ onMounted(() => {
     loadFavorites()
     loadUserTags()
   }
+})
+
+onUnmounted(() => {
+  favoritesViewDisposed = true
 })
 </script>
 

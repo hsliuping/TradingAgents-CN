@@ -88,6 +88,33 @@ class MultiSourceBasicsSyncService:
         self._last_status = status
         return status
 
+    async def _try_mark_running(self, force: bool = False) -> bool:
+        async with self._lock:
+            if self._running and not force:
+                return False
+            self._running = True
+            return True
+
+    async def start_full_sync(
+        self,
+        force: bool = False,
+        preferred_sources: List[str] = None,
+    ) -> Dict[str, Any]:
+        """启动后台同步任务并立即返回运行状态。"""
+        if not await self._try_mark_running(force=force):
+            logger.info("Multi-source stock basics sync already running; skip start")
+            return await self.get_status()
+
+        db = get_mongo_db()
+        stats = SyncStats()
+        stats.started_at = datetime.now().isoformat()
+        stats.status = "running"
+        stats.message = "Synchronization task started"
+        await self._persist_status(db, stats.__dict__.copy())
+
+        asyncio.create_task(self._run_full_sync_impl(db, stats, preferred_sources))
+        return stats.__dict__.copy()
+
     async def get_status(self) -> Dict[str, Any]:
         """获取同步状态"""
         if self._last_status and self._last_status.get("status") == "queued":
@@ -198,17 +225,25 @@ class MultiSourceBasicsSyncService:
             force: 是否强制运行（即使已在运行中）
             preferred_sources: 优先使用的数据源列表
         """
-        async with self._lock:
-            if self._running and not force:
-                logger.info("Multi-source stock basics sync already running; skip start")
-                return await self.get_status()
-            self._running = True
+        if not await self._try_mark_running(force=force):
+            logger.info("Multi-source stock basics sync already running; skip start")
+            return await self.get_status()
 
         db = get_mongo_db()
         stats = SyncStats()
         stats.started_at = datetime.now().isoformat()
         stats.status = "running"
         await self._persist_status(db, stats.__dict__.copy())
+
+        return await self._run_full_sync_impl(db, stats, preferred_sources)
+
+    async def _run_full_sync_impl(
+        self,
+        db: AsyncIOMotorDatabase,
+        stats: SyncStats,
+        preferred_sources: List[str] = None,
+    ) -> Dict[str, Any]:
+        """执行真实同步逻辑；由同步入口或后台任务入口复用。"""
 
         try:
             # Step 1: 获取数据源管理器

@@ -28,6 +28,30 @@ export interface AddFavoriteReq {
   alert_price_low?: number | null
 }
 
+export type FavoritesSyncTaskState = 'pending' | 'running' | 'success' | 'success_with_errors' | 'failed'
+
+export interface FavoritesRealtimeSyncTaskSubmission {
+  task_id: string
+  task_type: 'favorites_realtime'
+  status: FavoritesSyncTaskState
+  message?: string | null
+  created_at: string
+}
+
+export interface FavoritesRealtimeSyncTaskStatus extends FavoritesRealtimeSyncTaskSubmission {
+  started_at?: string | null
+  finished_at?: string | null
+  result?: {
+    total: number
+    success_count: number
+    failed_count: number
+    symbols: string[]
+    data_source: string
+    message: string
+  } | null
+  error?: string | null
+}
+
 export const favoritesApi = {
   /**
    * 获取收藏列表
@@ -70,13 +94,11 @@ export const favoritesApi = {
    * @param data_source 数据源（tushare/akshare）
    */
   syncRealtime: (data_source: string = 'tushare') =>
-    ApiClient.post<{
-      total: number
-      success_count: number
-      failed_count: number
-      symbols: string[]
-      data_source: string
-      message: string
-    }>('/api/favorites/sync-realtime', { data_source })
+    ApiClient.post<FavoritesRealtimeSyncTaskSubmission>('/api/favorites/sync-realtime', { data_source }, {
+      timeout: 15000
+    }),
+
+  getRealtimeSyncTaskStatus: (taskId: string) =>
+    ApiClient.get<FavoritesRealtimeSyncTaskStatus>(`/api/favorites/sync-realtime/tasks/${taskId}`)
 }
 

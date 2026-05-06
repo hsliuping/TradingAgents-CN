@@ -459,7 +459,12 @@ import { stocksApi } from '@/api/stocks'
 import { analysisApi } from '@/api/analysis'
 import { fetchTaskResultWithRetry, hasTaskResultContent, mergeTaskResult } from '@/utils/taskResult'
 import { ApiClient } from '@/api/request'
-import { stockSyncApi } from '@/api/stockSync'
+import {
+  stockSyncApi,
+  type SingleStockSyncResponse,
+  type StockSyncTaskStatus,
+} from '@/api/stockSync'
+import { configApi } from '@/api/config'
 import { clearAllCache } from '@/api/cache'
 import { use as echartsUse } from 'echarts/core'
 import { CandlestickChart } from 'echarts/charts'
@@ -479,6 +484,9 @@ echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const STOCK_SYNC_POLL_INTERVAL_MS = 2000
+const STOCK_SYNC_POLL_MAX_ATTEMPTS = 300
+let stockDetailDisposed = false
 
 
 // 分析状态
@@ -619,6 +627,7 @@ function formatDateTag(dateStr: string | null): string {
 
 // 同步状态
 const syncStatus = ref<any>(null)
+type ManualSyncDataSource = 'tushare' | 'akshare'
 
 // 数据同步对话框
 const syncDialogVisible = ref(false)
@@ -643,6 +652,110 @@ function showSyncDialog() {
   syncDialogVisible.value = true
 }
 
+async function loadPreferredSyncDataSource() {
+  try {
+    const configs = await configApi.getDataSourceConfigs()
+    const preferredSource = configs
+      .map(item => ({
+        enabled: item.enabled,
+        priority: item.priority,
+        type: String(item.type || '').toLowerCase()
+      }))
+      .filter(item => item.enabled && (item.type === 'tushare' || item.type === 'akshare'))
+      .sort((left, right) => right.priority - left.priority)[0]
+
+    if (preferredSource) {
+      syncForm.dataSource = preferredSource.type as ManualSyncDataSource
+    }
+  } catch (error) {
+    console.warn('加载同步数据源优先级失败，保留当前默认值', error)
+  }
+}
+
+const sleep = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
+
+const isTerminalStockSyncStatus = (status?: string): boolean => {
+  return status === 'success' || status === 'success_with_errors' || status === 'failed'
+}
+
+const buildSingleSyncTaskMessage = (task: StockSyncTaskStatus, symbol: string): string => {
+  const result = task.result as SingleStockSyncResponse | null | undefined
+  if (!result) {
+    return task.error || task.message || `股票 ${symbol} 同步失败`
+  }
+
+  const parts = [`股票 ${symbol} 数据同步完成`]
+
+  if (result.realtime_sync) {
+    if (result.realtime_sync.success) {
+      const dataSourceUsed = (result.realtime_sync as any).data_source_used
+      if (dataSourceUsed && dataSourceUsed !== syncForm.dataSource) {
+        parts.push(`实时行情同步成功（已自动切换到 ${String(dataSourceUsed).toUpperCase()} 数据源）`)
+      } else {
+        parts.push('实时行情同步成功')
+      }
+    } else {
+      parts.push(`实时行情同步失败: ${result.realtime_sync.error || '未知错误'}`)
+    }
+  }
+
+  if (result.historical_sync) {
+    parts.push(result.historical_sync.success ? `历史数据 ${result.historical_sync.records || 0} 条` : `历史数据同步失败: ${result.historical_sync.error || '未知错误'}`)
+  }
+  if (result.financial_sync) {
+    parts.push(result.financial_sync.success ? '财务数据同步成功' : `财务数据同步失败: ${result.financial_sync.error || '未知错误'}`)
+  }
+  if (result.basic_sync) {
+    parts.push(result.basic_sync.success ? '基础数据同步成功' : `基础数据同步失败: ${result.basic_sync.error || '未知错误'}`)
+  }
+
+  return parts.join('；')
+}
+
+const waitForStockSyncTask = async (taskId: string): Promise<StockSyncTaskStatus> => {
+  for (let attempt = 0; attempt < STOCK_SYNC_POLL_MAX_ATTEMPTS; attempt += 1) {
+    if (stockDetailDisposed) {
+      throw new Error('页面已离开，停止等待同步结果')
+    }
+
+    const res = await stockSyncApi.getTaskStatus(taskId)
+    if (res.success && isTerminalStockSyncStatus(res.data.status)) {
+      return res.data
+    }
+
+    await sleep(STOCK_SYNC_POLL_INTERVAL_MS)
+  }
+
+  throw new Error('同步任务执行超时，请稍后刷新页面查看结果')
+}
+
+const monitorSingleSyncTask = async (taskId: string, symbol: string) => {
+  try {
+    const task = await waitForStockSyncTask(taskId)
+    if (stockDetailDisposed) return
+
+    const message = buildSingleSyncTaskMessage(task, symbol)
+    if (task.status === 'success') {
+      ElMessage.success(message)
+    } else if (task.status === 'success_with_errors') {
+      ElMessage.warning(message)
+    } else {
+      ElMessage.error(message)
+    }
+
+    await Promise.all([
+      fetchQuote(),
+      fetchFundamentals(),
+      fetchFinancials(),
+      fetchKline(),
+      fetchSyncStatus(),
+    ])
+  } catch (error: any) {
+    if (!stockDetailDisposed && error?.message !== '页面已离开，停止等待同步结果') {
+      ElMessage.error(error?.message || '同步结果查询失败，请稍后刷新页面查看')
+    }
+  }
+}
 // 执行同步
 async function handleSync() {
   if (syncForm.syncTypes.length === 0) {
@@ -663,53 +776,9 @@ async function handleSync() {
     })
 
     if (res.success) {
-      const data = res.data
-      let message = `${isEtf.value ? 'ETF' : '股票'} ${code.value} 数据同步完成\n`
-
-      if (data.realtime_sync) {
-        if (data.realtime_sync.success) {
-          // 🔥 如果切换了数据源，显示提示信息
-          if (data.realtime_sync.data_source_used && data.realtime_sync.data_source_used !== syncForm.dataSource) {
-            message += `✅ 实时行情同步成功（已自动切换到 ${data.realtime_sync.data_source_used.toUpperCase()} 数据源）\n`
-          } else {
-            message += `✅ 实时行情同步成功\n`
-          }
-        } else {
-          message += `❌ 实时行情同步失败: ${data.realtime_sync.error || '未知错误'}\n`
-        }
-      }
-
-      if (data.historical_sync) {
-        if (data.historical_sync.success) {
-          message += `✅ 历史数据: ${data.historical_sync.records || 0} 条记录\n`
-        } else {
-          message += `❌ 历史数据同步失败: ${data.historical_sync.error || '未知错误'}\n`
-        }
-      }
-
-      if (data.financial_sync) {
-        if (data.financial_sync.success) {
-          message += `✅ 财务数据同步成功\n`
-        } else {
-          message += `❌ 财务数据同步失败: ${data.financial_sync.error || '未知错误'}\n`
-        }
-      }
-
-      if (data.basic_sync) {
-        if (data.basic_sync.success) {
-          message += `✅ 基础数据同步成功\n`
-        } else {
-          message += `❌ 基础数据同步失败: ${data.basic_sync.error || '未知错误'}\n`
-        }
-      }
-
-      ElMessage.success(message)
+      ElMessage.success(`股票 ${code.value} 同步任务已提交，后台执行中`)
       syncDialogVisible.value = false
-
-      // 刷新页面数据
-      await fetchQuote()
-      await fetchFundamentals()
-      await fetchFinancials()
+      void monitorSingleSyncTask(res.data.task_id, code.value)
     } else {
       ElMessage.error(res.message || '同步失败')
     }
@@ -986,7 +1055,9 @@ async function checkFavorite() {
   }
 }
 onMounted(async () => {
+  stockDetailDisposed = false
   await ensureAuthReady()
+  await loadPreferredSyncDataSource()
 
   // 首次加载：打通后端（并行）
   await Promise.all([
@@ -1002,7 +1073,10 @@ onMounted(async () => {
   // 每30秒刷新一次报价
   timer = setInterval(fetchQuote, 30000)
 })
-onUnmounted(() => { if (timer) clearInterval(timer) })
+onUnmounted(() => {
+  stockDetailDisposed = true
+  if (timer) clearInterval(timer)
+})
 
 
 

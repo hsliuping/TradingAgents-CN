@@ -8,6 +8,7 @@
 4. 实时行情数据是否存在（可选）
 """
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List, Tuple
@@ -16,6 +17,8 @@ from dataclasses import dataclass
 from app.core.database import get_mongo_db
 
 logger = logging.getLogger(__name__)
+
+DATA_VALIDATION_FETCH_TIMEOUT_SECONDS = 8
 
 
 @dataclass
@@ -39,6 +42,18 @@ class DataValidationService:
         if self.db is None:
             self.db = get_mongo_db()
         return self.db
+
+    async def _find_latest_trade_date_async(self, manager) -> Optional[str]:
+        return await asyncio.wait_for(
+            asyncio.to_thread(manager.find_latest_trade_date_with_fallback),
+            timeout=DATA_VALIDATION_FETCH_TIMEOUT_SECONDS,
+        )
+
+    async def _get_realtime_quotes_with_fallback_async(self, manager):
+        return await asyncio.wait_for(
+            asyncio.to_thread(manager.get_realtime_quotes_with_fallback),
+            timeout=DATA_VALIDATION_FETCH_TIMEOUT_SECONDS,
+        )
     
     async def validate_stock_data(
         self,
@@ -517,7 +532,7 @@ class DataValidationService:
                                     from app.services.data_sources.manager import DataSourceManager
                                     manager = DataSourceManager()
                                     # 🔥 使用优先级最高的数据源获取最后交易日期
-                                    latest_trade_date = manager.find_latest_trade_date_with_fallback()
+                                    latest_trade_date = await self._find_latest_trade_date_async(manager)
                                     if latest_trade_date:
                                         latest_trade_dt = datetime.strptime(latest_trade_date, '%Y%m%d').date()
                                         is_trading_day = (latest_trade_dt == today)
@@ -648,7 +663,7 @@ class DataValidationService:
             from app.services.data_sources.manager import DataSourceManager
             manager = DataSourceManager()
             # get_realtime_quotes_with_fallback 会按照优先级顺序尝试各个数据源
-            quotes_dict, source_name = manager.get_realtime_quotes_with_fallback()
+            quotes_dict, source_name = await self._get_realtime_quotes_with_fallback_async(manager)
             logger.debug(f"📊 使用数据源 {source_name} 获取实时行情（优先级最高）")
             
             if not quotes_dict or symbol not in quotes_dict:

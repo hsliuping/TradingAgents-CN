@@ -37,6 +37,7 @@ export interface SingleStockSyncResponse {
   historical_sync: SyncResult | null
   financial_sync: SyncResult | null
   basic_sync: SyncResult | null
+  overall_success?: boolean
 }
 
 export interface BatchStockSyncResponse {
@@ -76,13 +77,40 @@ export interface StockSyncStatus {
   }
 }
 
+export type StockSyncTaskType = 'single' | 'batch'
+export type StockSyncTaskState = 'pending' | 'running' | 'success' | 'success_with_errors' | 'failed'
+
+export interface StockSyncTaskSubmission {
+  task_id: string
+  task_type: StockSyncTaskType
+  status: StockSyncTaskState
+  message?: string | null
+  symbol?: string
+  symbols?: string[]
+  created_at: string
+}
+
+export interface StockSyncTaskStatus {
+  task_id: string
+  task_type: StockSyncTaskType
+  status: StockSyncTaskState
+  message?: string | null
+  symbol?: string
+  symbols?: string[]
+  created_at: string
+  started_at?: string | null
+  finished_at?: string | null
+  result?: SingleStockSyncResponse | BatchStockSyncResponse | null
+  error?: string | null
+}
+
 export const stockSyncApi = {
   /**
    * 同步单个股票数据
    */
   syncSingle(request: SingleStockSyncRequest) {
-    return ApiClient.post<SingleStockSyncResponse>('/api/stock-sync/single', request, {
-      timeout: 120000 // 2分钟超时
+    return ApiClient.post<StockSyncTaskSubmission>('/api/stock-sync/single', request, {
+      timeout: 15000 // 后端改为提交任务后立即返回
     })
   },
 
@@ -90,9 +118,16 @@ export const stockSyncApi = {
    * 批量同步股票数据
    */
   syncBatch(request: BatchStockSyncRequest) {
-    return ApiClient.post<BatchStockSyncResponse>('/api/stock-sync/batch', request, {
-      timeout: 300000 // 5分钟超时
+    return ApiClient.post<StockSyncTaskSubmission>('/api/stock-sync/batch', request, {
+      timeout: 15000 // 后端改为提交任务后立即返回
     })
+  },
+
+  /**
+   * 获取同步任务状态
+   */
+  getTaskStatus(taskId: string) {
+    return ApiClient.get<StockSyncTaskStatus>(`/api/stock-sync/tasks/${taskId}`)
   },
 
   /**

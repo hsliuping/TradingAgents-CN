@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, time as dtime, timedelta
 from typing import Dict, Optional, Tuple, List
@@ -11,6 +12,9 @@ from app.core.database import get_mongo_db
 from app.services.data_sources.manager import DataSourceManager
 
 logger = logging.getLogger(__name__)
+
+
+REALTIME_QUOTES_FETCH_TIMEOUT_SECONDS = 8
 
 
 class QuotesIngestionService:
@@ -261,6 +265,22 @@ class QuotesIngestionService:
             self._tushare_permission_checked = True
             return False
 
+    async def _check_tushare_permission_async(self) -> bool:
+        return await asyncio.to_thread(self._check_tushare_permission)
+
+    async def _find_latest_trade_date_async(
+        self,
+        manager: DataSourceManager,
+        preferred_sources: Optional[List[str]] = None,
+    ) -> Optional[str]:
+        return await asyncio.to_thread(manager.find_latest_trade_date_with_fallback, preferred_sources)
+
+    async def _get_realtime_quotes_with_fallback_async(
+        self,
+        manager: DataSourceManager,
+    ) -> Tuple[Optional[Dict], Optional[str]]:
+        return await asyncio.to_thread(manager.get_realtime_quotes_with_fallback)
+
     def _can_call_tushare(self) -> bool:
         """
         判断是否可以调用 Tushare rt_k 接口
@@ -440,7 +460,7 @@ class QuotesIngestionService:
 
             # 获取最新交易日
             try:
-                latest_trade_date = manager.find_latest_trade_date_with_fallback()
+                latest_trade_date = await self._find_latest_trade_date_async(manager)
                 if not latest_trade_date:
                     logger.warning("⚠️ 无法获取最新交易日，跳过历史数据导入")
                     return
@@ -509,12 +529,12 @@ class QuotesIngestionService:
         try:
             manager = self._get_dsm()
             # 使用近实时快照作为兜底，休市期返回的即为最后收盘数据
-            quotes_map, source = manager.get_realtime_quotes_with_fallback()
+            quotes_map, source = await self._get_realtime_quotes_with_fallback_async(manager)
             if not quotes_map:
                 logger.warning("backfill: 未获取到行情数据，跳过")
                 return
             try:
-                trade_date = manager.find_latest_trade_date_with_fallback() or datetime.now(self.tz).strftime("%Y%m%d")
+                trade_date = await self._find_latest_trade_date_async(manager) or datetime.now(self.tz).strftime("%Y%m%d")
             except Exception:
                 trade_date = datetime.now(self.tz).strftime("%Y%m%d")
             await self._bulk_upsert(quotes_map, trade_date, source)
@@ -534,7 +554,7 @@ class QuotesIngestionService:
 
             # 如果集合不为空但数据陈旧，使用实时接口更新
             manager = self._get_dsm()
-            latest_td = manager.find_latest_trade_date_with_fallback()
+            latest_td = await self._find_latest_trade_date_async(manager)
             if await self._collection_stale(latest_td):
                 logger.info("🔁 触发休市期/启动期 backfill 以填充最新收盘数据")
                 await self.backfill_last_close_snapshot()
@@ -606,7 +626,7 @@ class QuotesIngestionService:
             # 首次运行：检测 Tushare 权限
             if settings.QUOTES_AUTO_DETECT_TUSHARE_PERMISSION and not self._tushare_permission_checked:
                 logger.info("🔍 首次运行，检测 Tushare rt_k 接口权限...")
-                has_premium = self._check_tushare_permission()
+                has_premium = await self._check_tushare_permission_async()
 
                 if has_premium:
                     logger.info(
@@ -621,8 +641,26 @@ class QuotesIngestionService:
             # 获取下一个数据源
             source_type, akshare_api = self._get_next_source()
 
-            # 尝试获取行情
-            quotes_map, source_name = self._fetch_quotes_from_source(source_type, akshare_api)
+            # 同步第三方行情接口可能长时间阻塞；放到线程中并加超时，避免卡住整个事件循环。
+            try:
+                quotes_map, source_name = await asyncio.wait_for(
+                    asyncio.to_thread(self._fetch_quotes_from_source, source_type, akshare_api),
+                    timeout=REALTIME_QUOTES_FETCH_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                source_hint = source_type if source_type != "akshare" else f"akshare_{akshare_api or 'eastmoney'}"
+                logger.error(
+                    "❌ 获取实时行情超时: source=%s, timeout=%ss",
+                    source_hint,
+                    REALTIME_QUOTES_FETCH_TIMEOUT_SECONDS,
+                )
+                await self._record_sync_status(
+                    success=False,
+                    source=source_hint,
+                    records_count=0,
+                    error_msg=f"获取实时行情超时（>{REALTIME_QUOTES_FETCH_TIMEOUT_SECONDS}s）",
+                )
+                return
 
             if not quotes_map:
                 logger.warning(f"⚠️ {source_name or source_type} 未获取到行情数据，跳过本次入库")
@@ -638,7 +676,7 @@ class QuotesIngestionService:
             # 获取交易日
             try:
                 manager = self._get_dsm()
-                trade_date = manager.find_latest_trade_date_with_fallback() or datetime.now(self.tz).strftime("%Y%m%d")
+                trade_date = await self._find_latest_trade_date_async(manager) or datetime.now(self.tz).strftime("%Y%m%d")
             except Exception:
                 trade_date = datetime.now(self.tz).strftime("%Y%m%d")
 

@@ -13,7 +13,16 @@ from app.services.data_sources.manager import DataSourceManager
 
 logger = logging.getLogger(__name__)
 
+DATA_SOURCE_STATUS_TIMEOUT_SECONDS = 8
+
 router = APIRouter(prefix="/api/sync/multi-source", tags=["Multi-Source Sync"])
+
+
+async def _get_available_adapters_async(manager: DataSourceManager):
+    return await asyncio.wait_for(
+        asyncio.to_thread(manager.get_available_adapters),
+        timeout=DATA_SOURCE_STATUS_TIMEOUT_SECONDS,
+    )
 
 
 class SyncRequest(BaseModel):
@@ -42,7 +51,7 @@ async def get_data_sources_status():
     """获取所有数据源的状态"""
     try:
         manager = DataSourceManager()
-        available_adapters = manager.get_available_adapters()
+        available_adapters = await _get_available_adapters_async(manager)
         all_adapters = manager.adapters
 
         status_list = []
@@ -90,7 +99,7 @@ async def get_current_data_source():
     """获取当前正在使用的数据源（优先级最高且可用的）"""
     try:
         manager = DataSourceManager()
-        available_adapters = manager.get_available_adapters()
+        available_adapters = await _get_available_adapters_async(manager)
 
         if not available_adapters:
             return SyncResponse(
@@ -172,9 +181,9 @@ async def run_stock_basics_sync(
         message = "Synchronization task accepted"
 
         if result.get("launch_mode") == "already_running":
-            message = "Synchronization is already running"
+            message = result.get("message") or "Synchronization is already running"
         elif result.get("status") == "queued":
-            message = "Synchronization started in background"
+            message = result.get("message") or "Synchronization started in background"
 
         return SyncResponse(
             success=success,
@@ -347,7 +356,7 @@ async def get_sync_recommendations():
     """获取数据源使用建议"""
     try:
         manager = DataSourceManager()
-        available_adapters = manager.get_available_adapters()
+        available_adapters = await _get_available_adapters_async(manager)
         
         recommendations = {
             "primary_source": None,

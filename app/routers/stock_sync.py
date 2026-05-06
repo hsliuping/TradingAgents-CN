@@ -3,8 +3,9 @@
 支持单个股票或批量股票的历史数据和财务数据同步
 """
 
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from typing import Any, Dict, List, Optional
+from uuid import uuid4
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.routers.auth_db import get_current_user
@@ -18,12 +19,173 @@ from app.services.data_validation_service import get_data_validation_service
 import logging
 import asyncio
 from datetime import datetime, timedelta
-from typing import Optional
 from fastapi import Query
 
 logger = logging.getLogger("webapi")
 
 router = APIRouter(prefix="/api/stock-sync", tags=["股票数据同步"])
+
+STOCK_SYNC_TASKS_COLLECTION = "stock_sync_tasks"
+TASK_TERMINAL_STATUSES = {"success", "success_with_errors", "failed"}
+
+
+def _utc_now_iso() -> str:
+    return datetime.utcnow().isoformat()
+
+
+def _request_to_dict(request: BaseModel) -> Dict[str, Any]:
+    if hasattr(request, "model_dump"):
+        return request.model_dump()
+    return request.dict()
+
+
+def _serialize_task_doc(task_doc: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not task_doc:
+        return None
+    serialized = dict(task_doc)
+    serialized.pop("_id", None)
+    return serialized
+
+
+def _get_single_task_message(symbol: str, result: Dict[str, Any]) -> str:
+    if result.get("overall_success"):
+        return f"股票 {symbol} 数据同步成功"
+    return f"股票 {symbol} 数据同步部分失败"
+
+
+def _get_batch_task_status(request: "BatchStockSyncRequest", result: Dict[str, Any]) -> str:
+    total_symbols = len(request.symbols)
+    if total_symbols <= 0:
+        return "failed"
+
+    section_success_flags: List[bool] = []
+    section_has_success = False
+
+    if request.sync_historical:
+        success_count = (result.get("historical_sync") or {}).get("success_count", 0)
+        section_success_flags.append(success_count >= total_symbols)
+        section_has_success = section_has_success or success_count > 0
+
+    if request.sync_financial:
+        success_count = (result.get("financial_sync") or {}).get("success_count", 0)
+        section_success_flags.append(success_count >= total_symbols)
+        section_has_success = section_has_success or success_count > 0
+
+    if request.sync_basic:
+        success_count = (result.get("basic_sync") or {}).get("success_count", 0)
+        section_success_flags.append(success_count >= total_symbols)
+        section_has_success = section_has_success or success_count > 0
+
+    if section_success_flags and all(section_success_flags):
+        return "success"
+    if section_has_success:
+        return "success_with_errors"
+    return "failed"
+
+
+def _get_batch_task_message(result: Dict[str, Any]) -> str:
+    total_symbols = result.get("total_symbols") or len(result.get("symbols") or [])
+    total_success = result.get("total_success", 0)
+    if total_success >= total_symbols and total_symbols > 0:
+        return f"批量同步完成: {total_success}/{total_symbols} 只股票成功"
+    if total_success > 0:
+        return f"批量同步部分完成: {total_success}/{total_symbols} 只股票成功"
+    return "批量同步失败"
+
+
+async def _create_stock_sync_task(
+    task_type: str,
+    payload: Dict[str, Any],
+    current_user: dict,
+) -> Dict[str, Any]:
+    db = get_mongo_db()
+    task_id = uuid4().hex
+    now_iso = _utc_now_iso()
+    task_doc = {
+        "task_id": task_id,
+        "task_type": task_type,
+        "status": "pending",
+        "message": "同步任务已提交",
+        "payload": payload,
+        "symbol": payload.get("symbol"),
+        "symbols": payload.get("symbols"),
+        "created_at": now_iso,
+        "started_at": None,
+        "finished_at": None,
+        "result": None,
+        "error": None,
+        "submitted_by": str(
+            current_user.get("username")
+            or current_user.get("user_id")
+            or current_user.get("id")
+            or "unknown"
+        ),
+    }
+    await db[STOCK_SYNC_TASKS_COLLECTION].insert_one(task_doc)
+    return _serialize_task_doc(task_doc) or {}
+
+
+async def _update_stock_sync_task(task_id: str, updates: Dict[str, Any]) -> None:
+    db = get_mongo_db()
+    await db[STOCK_SYNC_TASKS_COLLECTION].update_one(
+        {"task_id": task_id},
+        {"$set": updates},
+        upsert=False,
+    )
+
+
+async def _get_stock_sync_task(task_id: str) -> Optional[Dict[str, Any]]:
+    db = get_mongo_db()
+    task_doc = await db[STOCK_SYNC_TASKS_COLLECTION].find_one({"task_id": task_id})
+    return _serialize_task_doc(task_doc)
+
+
+async def _execute_stock_sync_task(task_id: str, task_type: str, payload: Dict[str, Any]) -> None:
+    await _update_stock_sync_task(
+        task_id,
+        {
+            "status": "running",
+            "message": "同步任务执行中",
+            "started_at": _utc_now_iso(),
+            "error": None,
+        },
+    )
+
+    try:
+        if task_type == "single":
+            request = SingleStockSyncRequest(**payload)
+            result = await run_single_stock_sync(request)
+            status = "success" if result.get("overall_success") else "success_with_errors"
+            message = _get_single_task_message(request.symbol, result)
+        elif task_type == "batch":
+            request = BatchStockSyncRequest(**payload)
+            result = await run_batch_stock_sync(request)
+            status = _get_batch_task_status(request, result)
+            message = _get_batch_task_message(result)
+        else:
+            raise RuntimeError(f"未知同步任务类型: {task_type}")
+
+        await _update_stock_sync_task(
+            task_id,
+            {
+                "status": status,
+                "message": message,
+                "result": result,
+                "finished_at": _utc_now_iso(),
+                "error": None,
+            },
+        )
+    except Exception as e:
+        logger.error(f"❌ 同步任务 {task_id} 执行失败: {e}", exc_info=True)
+        await _update_stock_sync_task(
+            task_id,
+            {
+                "status": "failed",
+                "message": f"同步失败: {str(e)}",
+                "finished_at": _utc_now_iso(),
+                "error": str(e),
+            },
+        )
 
 
 ETF_CODE_PREFIXES = ("50", "51", "52", "56", "58", "15", "16", "18")
@@ -163,10 +325,17 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                 raise ValueError(f"不支持的数据源: {actual_data_source}")
 
             # 同步实时行情（只同步指定的股票）
-            realtime_result = await service.sync_realtime_quotes(
-                symbols=[request.symbol],
-                force=True  # 强制执行，跳过交易时间检查
-            )
+            if actual_data_source == "akshare":
+                realtime_result = await service.sync_realtime_quotes(
+                    symbols=[request.symbol],
+                    force=True,
+                    manual_mode=True  # 手动接口不应继承调度任务取消状态
+                )
+            else:
+                realtime_result = await service.sync_realtime_quotes(
+                    symbols=[request.symbol],
+                    force=True  # 强制执行，跳过交易时间检查
+                )
 
             success = realtime_result.get("success_count", 0) > 0
 
@@ -217,12 +386,21 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                 end_date = datetime.now().strftime('%Y-%m-%d')
                 start_date = (datetime.now() - timedelta(days=request.days)).strftime('%Y-%m-%d')
 
-                hist_result = await service.sync_historical_data(
-                    symbols=[request.symbol],
-                    start_date=start_date,
-                    end_date=end_date,
-                    incremental=False
-                )
+                if request.data_source == "akshare":
+                    hist_result = await service.sync_historical_data(
+                        symbols=[request.symbol],
+                        start_date=start_date,
+                        end_date=end_date,
+                        incremental=False,
+                        manual_mode=True,
+                    )
+                else:
+                    hist_result = await service.sync_historical_data(
+                        symbols=[request.symbol],
+                        start_date=start_date,
+                        end_date=end_date,
+                        incremental=False
+                    )
 
                 result["historical_sync"] = {
                     "success": hist_result.get("success_count", 0) > 0,
@@ -445,7 +623,18 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                 fallback_name = existing_stock.get("name") if existing_stock and existing_stock.get("name") else f"股票{symbol6}"
 
                 service = await get_akshare_sync_service()
-                basic_info = await service.provider.get_stock_basic_info(symbol6)
+                from app.services.official_industry_service import (
+                    INDUSTRY_SOURCE_SYSTEM,
+                    fetch_industry_mapping,
+                )
+
+                industry_mapping = await fetch_industry_mapping(refresh_if_empty=True)
+                mapped_industry = industry_mapping.get(symbol6, "") if industry_mapping else ""
+
+                # 单股同步允许组合多个接口，避免完全依赖东财详情接口。
+                basic_info = await service.provider.get_stock_basic_info_for_single_sync(symbol6)
+                if not basic_info:
+                    basic_info = await service.provider.get_stock_basic_info(symbol6)
 
                 if basic_info:
                     if hasattr(basic_info, 'model_dump'):
@@ -459,6 +648,19 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                         basic_data["name"] = fallback_name
                         logger.debug(f"📝 使用数据库中的股票名称: {fallback_name}")
 
+                    if mapped_industry:
+                        raw_industry = str(basic_data.get("industry") or "").strip()
+                        basic_data["industry"] = mapped_industry
+                        basic_data["industry_source"] = INDUSTRY_SOURCE_SYSTEM
+                        if raw_industry and raw_industry != mapped_industry:
+                            logger.info(
+                                f"🔁 {symbol6} AK 原始行业已替换为系统行业映射: {raw_industry} -> {mapped_industry}"
+                            )
+
+                    detail_fetch_error = basic_data.pop("detail_fetch_error", None)
+                    detail_fetch_symbol = basic_data.pop("detail_fetch_symbol", None)
+                    degraded_sync = basic_data.get("sync_status") == "degraded"
+
                     basic_data["code"] = symbol6
                     basic_data["symbol"] = symbol6
                     basic_data["source"] = "akshare"
@@ -470,11 +672,23 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                         upsert=True
                     )
 
-                    result["basic_sync"] = {
-                        "success": True,
-                        "message": "基础数据同步成功"
-                    }
-                    logger.info(f"✅ {request.symbol} 基础数据同步完成 (AKShare)")
+                    if degraded_sync:
+                        result["basic_sync"] = {
+                            "success": False,
+                            "degraded": True,
+                            "message": "基础数据已降级写入，AKShare 个股详情接口失败",
+                            "error": detail_fetch_error or "AKShare 个股详情接口失败",
+                            "detail_symbol": detail_fetch_symbol,
+                        }
+                        logger.warning(
+                            f"⚠️ {request.symbol} 基础数据仅完成降级同步 (AKShare): {detail_fetch_error or '个股详情接口失败'}"
+                        )
+                    else:
+                        result["basic_sync"] = {
+                            "success": True,
+                            "message": "基础数据同步成功"
+                        }
+                        logger.info(f"✅ {request.symbol} 基础数据同步完成 (AKShare)")
                 else:
                     result["basic_sync"] = {
                         "success": False,
@@ -507,40 +721,23 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
 @router.post("/single")
 async def sync_single_stock(
     request: SingleStockSyncRequest,
-    background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    同步单个股票的历史数据、财务数据和实时行情
-
-    - **symbol**: 股票代码（6位）
-    - **sync_realtime**: 是否同步实时行情
-    - **sync_historical**: 是否同步历史数据
-    - **sync_financial**: 是否同步财务数据
-    - **data_source**: 数据源（tushare/akshare）
-    - **days**: 历史数据天数
-    """
+    """提交单股同步任务，立即返回任务状态。"""
     try:
-        result = await run_single_stock_sync(request)
-        is_etf = _is_cn_etf_symbol(request.symbol)
-        return ok(
-            data=result,
-            message=f"{'ETF' if is_etf else '股票'} {request.symbol} 数据同步{'成功' if result.get('overall_success') else '部分失败'}"
-        )
+        payload = _request_to_dict(request)
+        task_doc = await _create_stock_sync_task("single", payload, current_user)
+        asyncio.create_task(_execute_stock_sync_task(task_doc["task_id"], "single", payload))
+        return ok(data=task_doc, message="股票同步任务已提交")
     except Exception as e:
-        logger.error(f"❌ 同步单个股票失败: {e}")
-        raise HTTPException(status_code=500, detail=f"同步失败: {str(e)}")
+        logger.error(f"❌ 提交单股同步任务失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"提交同步任务失败: {str(e)}")
 
 
-@router.post("/batch")
-async def sync_batch_stocks(
-    request: BatchStockSyncRequest,
-    background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user)
-):
+async def run_batch_stock_sync(request: BatchStockSyncRequest) -> dict:
     """
     批量同步多个股票的历史数据和财务数据
-    
+
     - **symbols**: 股票代码列表
     - **sync_historical**: 是否同步历史数据
     - **sync_financial**: 是否同步财务数据
@@ -549,7 +746,7 @@ async def sync_batch_stocks(
     """
     try:
         logger.info(f"📊 开始批量同步 {len(request.symbols)} 只股票 (数据源: {request.data_source})")
-        
+
         result = {
             "total": len(request.symbols),
             "symbols": request.symbols,
@@ -557,8 +754,7 @@ async def sync_batch_stocks(
             "financial_sync": None,
             "basic_sync": None
         }
-        
-        # 同步历史数据
+
         if request.sync_historical:
             try:
                 if request.data_source == "tushare":
@@ -568,18 +764,16 @@ async def sync_batch_stocks(
                 else:
                     raise ValueError(f"不支持的数据源: {request.data_source}")
 
-                # 计算日期范围
                 end_date = datetime.now().strftime('%Y-%m-%d')
                 start_date = (datetime.now() - timedelta(days=request.days)).strftime('%Y-%m-%d')
-                
-                # 批量同步历史数据
+
                 hist_result = await service.sync_historical_data(
                     symbols=request.symbols,
                     start_date=start_date,
                     end_date=end_date,
                     incremental=False
                 )
-                
+
                 result["historical_sync"] = {
                     "success_count": hist_result.get("success_count", 0),
                     "error_count": hist_result.get("error_count", 0),
@@ -587,7 +781,7 @@ async def sync_batch_stocks(
                     "message": f"成功同步 {hist_result.get('success_count', 0)}/{len(request.symbols)} 只股票，共 {hist_result.get('total_records', 0)} 条记录"
                 }
                 logger.info(f"✅ 批量历史数据同步完成: {hist_result.get('success_count', 0)}/{len(request.symbols)}")
-                
+
             except Exception as e:
                 logger.error(f"❌ 批量历史数据同步失败: {e}")
                 result["historical_sync"] = {
@@ -595,19 +789,17 @@ async def sync_batch_stocks(
                     "error_count": len(request.symbols),
                     "error": str(e)
                 }
-        
-        # 同步财务数据
+
         if request.sync_financial:
             try:
                 financial_service = await get_financial_sync_service()
-                
-                # 批量同步财务数据
+
                 fin_results = await financial_service.sync_financial_data(
                     symbols=request.symbols,
                     data_sources=[request.data_source],
                     batch_size=10
                 )
-                
+
                 source_stats = fin_results.get(request.data_source)
                 if source_stats:
                     result["financial_sync"] = {
@@ -622,9 +814,9 @@ async def sync_batch_stocks(
                         "error_count": len(request.symbols),
                         "message": "财务数据同步失败"
                     }
-                
+
                 logger.info(f"✅ 批量财务数据同步完成: {result['financial_sync']['success_count']}/{len(request.symbols)}")
-                
+
             except Exception as e:
                 logger.error(f"❌ 批量财务数据同步失败: {e}")
                 result["financial_sync"] = {
@@ -633,11 +825,8 @@ async def sync_batch_stocks(
                     "error": str(e)
                 }
 
-        # 同步基础数据
         if request.sync_basic:
             try:
-                # 🔥 批量同步基础数据
-                # 注意：基础数据同步服务目前只支持 Tushare 数据源
                 if request.data_source == "tushare":
                     from tradingagents.dataflows.providers.china.tushare import TushareProvider
 
@@ -651,11 +840,9 @@ async def sync_batch_stocks(
                                 basic_info = await tushare_provider.get_stock_basic_info(symbol)
 
                                 if basic_info:
-                                    # 保存到 MongoDB
                                     db = get_mongo_db()
                                     symbol6 = str(symbol).zfill(6)
 
-                                    # 添加必要字段
                                     basic_info["code"] = symbol6
                                     basic_info["source"] = "tushare"
                                     basic_info["updated_at"] = datetime.utcnow()
@@ -720,24 +907,53 @@ async def sync_batch_stocks(
                     "error": str(e)
                 }
 
-        # 判断整体是否成功
         hist_success = result["historical_sync"].get("success_count", 0) if request.sync_historical else 0
         fin_success = result["financial_sync"].get("success_count", 0) if request.sync_financial else 0
         basic_success = result["basic_sync"].get("success_count", 0) if request.sync_basic else 0
         total_success = max(hist_success, fin_success, basic_success)
 
-        # 添加统计信息到结果中
         result["total_success"] = total_success
         result["total_symbols"] = len(request.symbols)
 
-        return ok(
-            data=result,
-            message=f"批量同步完成: {total_success}/{len(request.symbols)} 只股票成功"
-        )
-        
+        return result
+
     except Exception as e:
         logger.error(f"❌ 批量同步失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量同步失败: {str(e)}")
+        raise RuntimeError(f"批量同步失败: {str(e)}") from e
+
+
+@router.post("/batch")
+async def sync_batch_stocks(
+    request: BatchStockSyncRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """提交批量同步任务，立即返回任务状态。"""
+    try:
+        payload = _request_to_dict(request)
+        task_doc = await _create_stock_sync_task("batch", payload, current_user)
+        asyncio.create_task(_execute_stock_sync_task(task_doc["task_id"], "batch", payload))
+        return ok(data=task_doc, message="批量同步任务已提交")
+    except Exception as e:
+        logger.error(f"❌ 提交批量同步任务失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"提交批量同步任务失败: {str(e)}")
+
+
+@router.get("/tasks/{task_id}")
+async def get_stock_sync_task_status(
+    task_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """查询手动股票同步任务状态与结果。"""
+    try:
+        task_doc = await _get_stock_sync_task(task_id)
+        if not task_doc:
+            raise HTTPException(status_code=404, detail="同步任务不存在")
+        return ok(data=task_doc)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 获取同步任务状态失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取同步任务状态失败: {str(e)}")
 
 
 @router.get("/status/{symbol}")

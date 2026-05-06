@@ -117,7 +117,7 @@ export const runStockBasicsSync = (params?: {
 
   const url = `/api/sync/multi-source/stock_basics/run${queryParams.toString() ? '?' + queryParams.toString() : ''}`
   return ApiClient.post(url, undefined, {
-    timeout: 30000
+  timeout: 15000 // 后端已改为启动任务后立即返回，前端走状态轮询
   })
 }
 
@@ -177,7 +177,9 @@ export const clearSyncCache = (): Promise<ApiResponse<{ cleared: boolean }>> => 
 
 // 传统单一数据源同步API（保持兼容性）
 export const runSingleSourceSync = (): Promise<ApiResponse<any>> => {
-  return ApiClient.post('/api/sync/stock_basics/run')
+  return ApiClient.post('/api/sync/stock_basics/run', undefined, {
+    timeout: 15000 // 后端已改为提交任务后立即返回
+  })
 }
 
 export const getSingleSourceSyncStatus = (): Promise<ApiResponse<any>> => {

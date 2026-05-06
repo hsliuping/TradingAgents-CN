@@ -56,6 +56,32 @@ class BasicsSyncService:
         self._last_status: Optional[Dict[str, Any]] = None
         self._indexes_ensured = False
 
+    async def _try_mark_running(self, force: bool = False) -> bool:
+        async with self._lock:
+            if self._running and not force:
+                return False
+            self._running = True
+            return True
+
+    async def start_full_sync(self, force: bool = False) -> Dict[str, Any]:
+        """启动后台同步任务并立即返回运行状态。"""
+        if not await self._try_mark_running(force=force):
+            logger.info("Stock basics sync already running; skip start")
+            return await self.get_status()
+
+        db = get_mongo_db()
+
+        await self._ensure_indexes(db)
+
+        stats = SyncStats()
+        stats.started_at = datetime.utcnow().isoformat()
+        stats.status = "running"
+        stats.message = "Synchronization task started"
+        await self._persist_status(db, stats.__dict__.copy())
+
+        asyncio.create_task(self._run_full_sync_impl(db, stats))
+        return stats.__dict__.copy()
+
     async def _ensure_indexes(self, db: AsyncIOMotorDatabase) -> None:
         """确保必要的索引存在"""
         if self._indexes_ensured:
@@ -167,11 +193,9 @@ class BasicsSyncService:
 
     async def run_full_sync(self, force: bool = False) -> Dict[str, Any]:
         """Run a full sync. If already running, return current status unless force."""
-        async with self._lock:
-            if self._running and not force:
-                logger.info("Stock basics sync already running; skip start")
-                return await self.get_status()
-            self._running = True
+        if not await self._try_mark_running(force=force):
+            logger.info("Stock basics sync already running; skip start")
+            return await self.get_status()
 
         db = get_mongo_db()
 
@@ -182,6 +206,15 @@ class BasicsSyncService:
         stats.started_at = datetime.utcnow().isoformat()
         stats.status = "running"
         await self._persist_status(db, stats.__dict__.copy())
+
+        return await self._run_full_sync_impl(db, stats)
+
+    async def _run_full_sync_impl(
+        self,
+        db: AsyncIOMotorDatabase,
+        stats: SyncStats,
+    ) -> Dict[str, Any]:
+        """执行真实同步逻辑；由同步入口和后台任务入口复用。"""
 
         try:
             # 🔧 移除 TUSHARE_ENABLED 检查，与财务数据、历史数据同步保持一致
