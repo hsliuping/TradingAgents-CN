@@ -92,6 +92,11 @@ class OpenAICompatAdapter(BaseAdapter):
         result = []
         for msg in messages:
             converted = {"role": msg.role, "content": msg.content or ""}
+
+            # 推理模型（如 Qwen thinking / DeepSeek reasoning）在工具回合中
+            # 需要回传上一轮 assistant 的 reasoning_content，否则 provider 会拒绝请求。
+            if getattr(msg, 'reasoning_content', None):
+                converted["reasoning_content"] = msg.reasoning_content
             
             if msg.name:
                 converted["name"] = msg.name
@@ -255,9 +260,11 @@ class OpenAICompatAdapter(BaseAdapter):
         if raw_content is None or (isinstance(raw_content, str) and not raw_content.strip()):
             raw_content = getattr(message, 'reasoning_content', None)
         content = raw_content if raw_content else None
+        reasoning_content = getattr(message, 'reasoning_content', None)
 
         return LLMResponse(
             content=content,
+            reasoning_content=reasoning_content,
             tool_calls=tool_calls,
             finish_reason=choice.finish_reason if hasattr(choice, 'finish_reason') else None,
             model=response.model if hasattr(response, 'model') else None,

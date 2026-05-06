@@ -11,6 +11,14 @@
         </el-tag>
       </div>
       <div class="header-right">
+        <el-button size="small" @click="showThreadSidebar = !showThreadSidebar">
+          <el-icon><Expand v-if="!showThreadSidebar" /><Fold v-else /></el-icon>
+          {{ showThreadSidebar ? '隐藏主题栏' : '显示主题栏' }}
+        </el-button>
+        <el-button size="small" @click="showSummarySidebar = !showSummarySidebar">
+          <el-icon><Expand v-if="!showSummarySidebar" /><Fold v-else /></el-icon>
+          {{ showSummarySidebar ? '隐藏摘要栏' : '显示摘要栏' }}
+        </el-button>
         <el-button size="small" @click="settingsDialogVisible = true">
           <el-icon><Setting /></el-icon>
           助手设置
@@ -34,7 +42,7 @@
     </div>
 
     <div class="workspace-body">
-      <aside class="thread-sidebar">
+      <aside v-if="showThreadSidebar" class="thread-sidebar">
         <div class="sidebar-header">
           <div>
             <div class="sidebar-title">研究主题</div>
@@ -226,7 +234,7 @@
         </div>
       </section>
 
-      <aside class="summary-sidebar">
+      <aside v-if="showSummarySidebar" class="summary-sidebar">
         <div class="summary-header">
           <div>
             <div class="summary-title">研究摘要</div>
@@ -479,7 +487,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { ChatDotRound, DataAnalysis, Delete, Document, FolderOpened, Plus, QuestionFilled, Setting, User } from '@element-plus/icons-vue'
+import { ChatDotRound, DataAnalysis, Delete, Document, Expand, Fold, FolderOpened, Plus, QuestionFilled, Setting, User } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
@@ -528,6 +536,8 @@ const loading = ref(false)
 const streaming = ref(false)
 const sidebarLoading = ref(false)
 const summaryLoading = ref(false)
+const showThreadSidebar = ref(true)
+const showSummarySidebar = ref(true)
 const analysisMode = ref<'react' | 'planned'>('react')
 const loadingSeconds = ref(0)
 const streamingToolHint = ref('')
@@ -1371,6 +1381,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .page-title {
