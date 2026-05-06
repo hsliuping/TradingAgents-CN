@@ -35,6 +35,7 @@ from app.services.intelligent_assistant_service import (
     _get_assistant_llm_config,
     _build_assistant_model_preferences,
     _build_fallback_memory_facts,
+    _get_preferred_assistant_config_id,
     _get_preferred_assistant_model,
     _get_system_prompt,
     _get_latest_trade_date,
@@ -291,11 +292,17 @@ class PlannedAnalysisService:
         self._tool_functions: Optional[Dict[str, Any]] = None
         self._openai_tools: Optional[List[Dict[str, Any]]] = None
         self._preferred_model = _get_preferred_assistant_model(preferred_models)
+        self._preferred_model_config_id = _get_preferred_assistant_config_id(preferred_models)
 
     def _get_react_preferred_models(self) -> Dict[str, str]:
-        if not self._preferred_model:
+        if not self._preferred_model and not self._preferred_model_config_id:
             return {}
-        return {"model": self._preferred_model}
+        preferred: Dict[str, str] = {}
+        if self._preferred_model:
+            preferred["model"] = self._preferred_model
+        if self._preferred_model_config_id:
+            preferred["model_config_id"] = self._preferred_model_config_id
+        return preferred
 
     async def _ensure_client(self) -> bool:
         """确保 LLM 客户端和工具已加载"""
@@ -304,7 +311,7 @@ class PlannedAnalysisService:
 
         llm_config = await _get_assistant_llm_config(
             self._db,
-            preferred_models={"model": self._preferred_model} if self._preferred_model else None,
+            preferred_models=self._get_react_preferred_models() or None,
         )
         if not llm_config:
             return False

@@ -496,21 +496,34 @@ def _normalize_preferred_models(preferred_models: Optional[Dict[str, Any]]) -> D
 
     normalized: Dict[str, str] = {}
     unified_model = _normalize_model_name(preferred_models.get("model"))
+    unified_model_config_id = _normalize_config_id(preferred_models.get("model_config_id"))
     quick_model = _normalize_model_name(preferred_models.get("quick_model"))
+    quick_model_config_id = _normalize_config_id(preferred_models.get("quick_model_config_id"))
     deep_model = _normalize_model_name(preferred_models.get("deep_model"))
+    deep_model_config_id = _normalize_config_id(preferred_models.get("deep_model_config_id"))
 
     if unified_model:
         normalized["model"] = unified_model
+    if unified_model_config_id:
+        normalized["model_config_id"] = unified_model_config_id
 
     if quick_model:
         normalized["quick_model"] = quick_model
+    if quick_model_config_id:
+        normalized["quick_model_config_id"] = quick_model_config_id
     if deep_model:
         normalized["deep_model"] = deep_model
+    if deep_model_config_id:
+        normalized["deep_model_config_id"] = deep_model_config_id
 
     if unified_model and not quick_model:
         normalized["quick_model"] = unified_model
     if unified_model and not deep_model:
         normalized["deep_model"] = unified_model
+    if unified_model_config_id and not quick_model_config_id:
+        normalized["quick_model_config_id"] = unified_model_config_id
+    if unified_model_config_id and not deep_model_config_id:
+        normalized["deep_model_config_id"] = unified_model_config_id
 
     return normalized
 
@@ -524,21 +537,43 @@ def _get_preferred_assistant_model(preferred_models: Optional[Dict[str, Any]]) -
     )
 
 
+def _get_preferred_assistant_config_id(preferred_models: Optional[Dict[str, Any]]) -> Optional[str]:
+    normalized = _normalize_preferred_models(preferred_models)
+    return (
+        normalized.get("model_config_id")
+        or normalized.get("deep_model_config_id")
+        or normalized.get("quick_model_config_id")
+    )
+
+
 def _build_assistant_model_preferences(
     model: Optional[str] = None,
+    model_config_id: Optional[str] = None,
     quick_model: Optional[str] = None,
+    quick_model_config_id: Optional[str] = None,
     deep_model: Optional[str] = None,
+    deep_model_config_id: Optional[str] = None,
 ) -> Dict[str, str]:
-    assistant_model = _get_preferred_assistant_model(
+    normalized = _normalize_preferred_models(
         {
             "model": model,
+            "model_config_id": model_config_id,
             "quick_model": quick_model,
+            "quick_model_config_id": quick_model_config_id,
             "deep_model": deep_model,
+            "deep_model_config_id": deep_model_config_id,
         }
     )
-    if not assistant_model:
+    assistant_model = _get_preferred_assistant_model(normalized)
+    assistant_model_config_id = _get_preferred_assistant_config_id(normalized)
+    if not assistant_model and not assistant_model_config_id:
         return {}
-    return {"model": assistant_model}
+    preferred: Dict[str, str] = {}
+    if assistant_model:
+        preferred["model"] = assistant_model
+    if assistant_model_config_id:
+        preferred["model_config_id"] = assistant_model_config_id
+    return preferred
 
 
 async def _get_llm_config_for_model(
@@ -582,9 +617,17 @@ async def _get_llm_config_for_model(
         "dashscope": LLMProvider.DASHSCOPE, "qwen": LLMProvider.DASHSCOPE,
         "zhipu": LLMProvider.ZHIPU, "google": LLMProvider.GOOGLE,
         "anthropic": LLMProvider.ANTHROPIC, "siliconflow": LLMProvider.SILICONFLOW,
+        "kimi": LLMProvider.OPENAI, "moonshot": LLMProvider.OPENAI,
         "ollama": LLMProvider.OLLAMA, "openrouter": LLMProvider.OPENROUTER,
     }
     provider = provider_map.get(provider_str, LLMProvider.DASHSCOPE)
+    logger.info(
+        "[智能助手] 模型路由解析: provider=%s model=%s config_id=%s backend_provider=%s",
+        provider_str or "unknown",
+        resolved_model_name,
+        _normalize_config_id(model_config.get("config_id")) or target_config_id or "",
+        provider.value,
+    )
     return LLMConfig(
         provider=provider, model=resolved_model_name,
         api_key=provider_info.get("api_key"), base_url=provider_info.get("backend_url"),
@@ -621,11 +664,17 @@ async def _get_assistant_llm_config(
     deep_model = _selection_model_name(deep_selection)
     reasoning_model = _selection_model_name(reasoning_selection)
     preferred_assistant_model = _get_preferred_assistant_model(preferred_models)
+    preferred_assistant_config_id = _get_preferred_assistant_config_id(preferred_models)
     target_config_id: Optional[str] = None
 
-    if use_reasoning_model and preferred_assistant_model:
+    if use_reasoning_model and (preferred_assistant_model or preferred_assistant_config_id):
         target_model = preferred_assistant_model
-        logger.info(f"[智能助手] 使用用户选择的助手模型: {target_model}")
+        target_config_id = preferred_assistant_config_id
+        logger.info(
+            "[智能助手] 使用用户选择的助手模型: model=%s config_id=%s",
+            target_model or "",
+            target_config_id or "",
+        )
     elif use_reasoning_model and reasoning_selection:
         target_model = _selection_model_name(reasoning_selection)
         target_config_id = _selection_config_id(reasoning_selection)
@@ -633,10 +682,16 @@ async def _get_assistant_llm_config(
     else:
         target_selection = deep_selection or quick_selection
         target_model = preferred_assistant_model or _selection_model_name(target_selection) or default_llm
-        if not preferred_assistant_model and target_selection is not None:
+        if preferred_assistant_config_id:
+            target_config_id = preferred_assistant_config_id
+        elif not preferred_assistant_model and target_selection is not None:
             target_config_id = _selection_config_id(target_selection)
-        if preferred_assistant_model:
-            logger.info(f"[智能助手] 使用用户选择的助手模型: {preferred_assistant_model}")
+        if preferred_assistant_model or preferred_assistant_config_id:
+            logger.info(
+                "[智能助手] 使用用户选择的助手模型: model=%s config_id=%s",
+                preferred_assistant_model or "",
+                preferred_assistant_config_id or "",
+            )
         elif deep_selection:
             logger.info(f"[智能助手] 使用深度分析模型: {deep_model}")
         elif quick_selection:
@@ -707,6 +762,7 @@ class IntelligentAssistantService:
         self._openai_tools: Optional[List[Dict[str, Any]]] = None
         self._tool_functions: Optional[Dict[str, Any]] = None
         self._preferred_model = _get_preferred_assistant_model(preferred_models)
+        self._preferred_model_config_id = _get_preferred_assistant_config_id(preferred_models)
         self._prefer_reasoning_model = prefer_reasoning_model
 
     async def _ensure_client(self) -> bool:
@@ -717,7 +773,10 @@ class IntelligentAssistantService:
         llm_config = await _get_assistant_llm_config(
             self._db,
             use_reasoning_model=self._prefer_reasoning_model,
-            preferred_models={"model": self._preferred_model} if self._preferred_model else None,
+            preferred_models=_build_assistant_model_preferences(
+                model=self._preferred_model,
+                model_config_id=self._preferred_model_config_id,
+            ) if (self._preferred_model or self._preferred_model_config_id) else None,
         )
         if not llm_config:
             return False
@@ -2528,8 +2587,11 @@ async def chat_with_assistant(
     current_thread_id: Optional[str] = None,
     is_im: bool = False,
     model: Optional[str] = None,
+    model_config_id: Optional[str] = None,
     quick_model: Optional[str] = None,
+    quick_model_config_id: Optional[str] = None,
     deep_model: Optional[str] = None,
+    deep_model_config_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     便捷函数：使用智能助手进行对话
@@ -2602,8 +2664,11 @@ async def chat_with_assistant(
         db,
         preferred_models=_build_assistant_model_preferences(
             model=model,
+            model_config_id=model_config_id,
             quick_model=quick_model,
+            quick_model_config_id=quick_model_config_id,
             deep_model=deep_model,
+            deep_model_config_id=deep_model_config_id,
         ),
     )
     result = await service.chat(
@@ -2650,8 +2715,11 @@ async def stream_chat_with_assistant(
     conversation_id: Optional[str] = None,
     current_thread_id: Optional[str] = None,
     model: Optional[str] = None,
+    model_config_id: Optional[str] = None,
     quick_model: Optional[str] = None,
+    quick_model_config_id: Optional[str] = None,
     deep_model: Optional[str] = None,
+    deep_model_config_id: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """
     流式便捷函数：使用智能助手进行流式对话，返回 SSE 事件字符串的 async generator。
@@ -2716,8 +2784,11 @@ async def stream_chat_with_assistant(
         db,
         preferred_models=_build_assistant_model_preferences(
             model=model,
+            model_config_id=model_config_id,
             quick_model=quick_model,
+            quick_model_config_id=quick_model_config_id,
             deep_model=deep_model,
+            deep_model_config_id=deep_model_config_id,
         ),
     )
 

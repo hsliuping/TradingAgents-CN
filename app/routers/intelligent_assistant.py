@@ -52,15 +52,26 @@ router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 logger = logging.getLogger(__name__)
 
 
-def _resolve_requested_model(request: ChatRequest) -> tuple[Optional[str], Optional[str]]:
+def _resolve_requested_model(request: ChatRequest) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
     unified_model = (request.model or "").strip() or None
+    unified_model_config_id = (request.model_config_id or "").strip() or None
     if unified_model:
-        return unified_model, unified_model
+        return unified_model, unified_model, unified_model_config_id, unified_model_config_id
+    if unified_model_config_id:
+        return None, None, unified_model_config_id, unified_model_config_id
 
     quick_model = (request.quick_model or "").strip() or None
     deep_model = (request.deep_model or "").strip() or None
+    quick_model_config_id = (request.quick_model_config_id or "").strip() or None
+    deep_model_config_id = (request.deep_model_config_id or "").strip() or None
     fallback_model = deep_model or quick_model
-    return quick_model or fallback_model, deep_model or fallback_model
+    fallback_config_id = deep_model_config_id or quick_model_config_id
+    return (
+        quick_model or fallback_model,
+        deep_model or fallback_model,
+        quick_model_config_id or fallback_config_id,
+        deep_model_config_id or fallback_config_id,
+    )
 
 
 @router.get("/conversation", response_model=ConversationResponse)
@@ -276,7 +287,7 @@ async def assistant_chat(
         raise HTTPException(status_code=400, detail="消息不能为空")
 
     user_id = str(current_user["id"])
-    quick_model, deep_model = _resolve_requested_model(request)
+    quick_model, deep_model, quick_model_config_id, deep_model_config_id = _resolve_requested_model(request)
 
     try:
         result = await chat_with_assistant(
@@ -285,6 +296,7 @@ async def assistant_chat(
             user_id=user_id,
             conversation_id=request.conversation_id,
             model=deep_model or quick_model,
+            model_config_id=deep_model_config_id or quick_model_config_id,
         )
         return ChatResponse(**result)
     except Exception as e:
@@ -308,7 +320,7 @@ async def assistant_chat_stream(
         raise HTTPException(status_code=400, detail="消息不能为空")
 
     user_id = str(current_user["id"])
-    quick_model, deep_model = _resolve_requested_model(request)
+    quick_model, deep_model, quick_model_config_id, deep_model_config_id = _resolve_requested_model(request)
 
     _HEARTBEAT_INTERVAL = 15  # seconds
 
@@ -320,6 +332,7 @@ async def assistant_chat_stream(
             user_id=user_id,
             conversation_id=request.conversation_id,
             model=deep_model or quick_model,
+            model_config_id=deep_model_config_id or quick_model_config_id,
         )
         try:
             while True:
@@ -365,13 +378,14 @@ async def planned_analysis(
         raise HTTPException(status_code=400, detail="消息不能为空")
 
     user_id = str(current_user["id"])
-    quick_model, deep_model = _resolve_requested_model(request)
+    quick_model, deep_model, quick_model_config_id, deep_model_config_id = _resolve_requested_model(request)
 
     try:
         service = PlannedAnalysisService(
             db,
             preferred_models={
                 "model": deep_model or quick_model,
+                "model_config_id": deep_model_config_id or quick_model_config_id,
             },
         )
         result = await service.analyze(
@@ -422,7 +436,7 @@ async def planned_analysis_stream(
         raise HTTPException(status_code=400, detail="消息不能为空")
 
     user_id = str(current_user["id"])
-    quick_model, deep_model = _resolve_requested_model(request)
+    quick_model, deep_model, quick_model_config_id, deep_model_config_id = _resolve_requested_model(request)
     _HEARTBEAT_INTERVAL = 15
 
     async def event_generator():
@@ -434,6 +448,7 @@ async def planned_analysis_stream(
             user_id=user_id,
             conversation_id=request.conversation_id,
             model=deep_model or quick_model,
+            model_config_id=deep_model_config_id or quick_model_config_id,
         )
         try:
             while True:

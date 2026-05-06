@@ -357,12 +357,12 @@
             >
               <el-option
                 v-for="model in assistantReasoningModels"
-                :key="`assistant-reasoning-${model.provider}/${model.model_name}`"
-                :label="model.model_display_name || model.model_name"
-                :value="model.model_name"
+                :key="`assistant-reasoning-${getAssistantModelSelectionValue(model)}`"
+                :label="formatAssistantModelOptionLabel(model)"
+                :value="getAssistantModelSelectionValue(model)"
               >
                 <div class="assistant-model-option">
-                  <span class="assistant-model-name">{{ model.model_display_name || model.model_name }}</span>
+                  <span class="assistant-model-name">{{ formatAssistantModelOptionLabel(model) }}</span>
                   <div class="assistant-model-meta">
                     <el-tag
                       v-if="model.capability_level"
@@ -372,7 +372,7 @@
                     >
                       {{ getCapabilityText(model.capability_level) }}
                     </el-tag>
-                    <span class="assistant-model-provider">{{ model.provider }}</span>
+                    <span class="assistant-model-provider">{{ formatAssistantModelMeta(model) }}</span>
                   </div>
                 </div>
               </el-option>
@@ -595,6 +595,53 @@ const assistantReasoningModels = computed(() => {
   return sortAssistantModels(matched.length ? matched : availableModels.value)
 })
 
+const getAssistantModelSelectionValue = (model: LLMConfig) => {
+  const configId = String(model.config_id || '').trim()
+  if (configId) {
+    return configId
+  }
+  return `${model.provider}::${model.model_name}`
+}
+
+const selectedAssistantModel = computed(() => {
+  return assistantReasoningModels.value.find(model => getAssistantModelSelectionValue(model) === assistantModel.value)
+    || availableModels.value.find(model => getAssistantModelSelectionValue(model) === assistantModel.value)
+    || null
+})
+
+const formatAssistantProviderLabel = (model: LLMConfig) => {
+  return model.provider_name || model.provider || '未知厂家'
+}
+
+const formatAssistantModelOptionLabel = (model: LLMConfig) => {
+  const providerLabel = formatAssistantProviderLabel(model)
+  const displayName = model.model_display_name || model.model_name
+  return `${providerLabel} / ${displayName}`
+}
+
+const formatAssistantModelMeta = (model: LLMConfig) => {
+  return `${model.provider} / ${model.model_name}`
+}
+
+const findAssistantModelByConfigOrName = (configId?: string, modelName?: string) => {
+  const normalizedConfigId = String(configId || '').trim()
+  if (normalizedConfigId) {
+    const matchedById = availableModels.value.find(model => String(model.config_id || '').trim() === normalizedConfigId)
+    if (matchedById) {
+      return matchedById
+    }
+  }
+
+  const normalizedModelName = String(modelName || '').trim()
+  if (!normalizedModelName) {
+    return null
+  }
+
+  return assistantReasoningModels.value.find(model => model.model_name === normalizedModelName)
+    || availableModels.value.find(model => model.model_name === normalizedModelName)
+    || null
+}
+
 const threadLookup = computed(() => {
   const map = new Map<string, AssistantThreadItem>()
   threads.value.forEach(item => {
@@ -699,22 +746,22 @@ const isDeepAnalysisRole = (roles?: string[]): boolean => {
 }
 
 const ensureAssistantModelSelections = async () => {
-  const enabledModels = availableModels.value
   const defaultModels = await configApi.getDefaultModels()
-  const reasoningDefault = defaultModels.deep_reasoning_model || defaultModels.deep_analysis_model || ''
-  const assistantDefault = reasoningDefault || defaultModels.deep_analysis_model || defaultModels.quick_analysis_model
   const reasoningCandidates = assistantReasoningModels.value
+  const defaultAssistantModel = findAssistantModelByConfigOrName(
+    defaultModels.deep_reasoning_model_config_id || defaultModels.deep_analysis_model_config_id,
+    defaultModels.deep_reasoning_model || defaultModels.deep_analysis_model || defaultModels.quick_analysis_model,
+  )
+  const currentSelected = selectedAssistantModel.value
 
-  if (!assistantModel.value || !enabledModels.find(model => model.model_name === assistantModel.value)) {
-    assistantModel.value = assistantDefault
+  if (!currentSelected && defaultAssistantModel) {
+    assistantModel.value = getAssistantModelSelectionValue(defaultAssistantModel)
+    return
   }
 
-  if (assistantModel.value && !enabledModels.find(model => model.model_name === assistantModel.value)) {
-    assistantModel.value = reasoningCandidates[0]?.model_name || enabledModels[0]?.model_name || ''
-  }
-
-  if (!assistantModel.value) {
-    assistantModel.value = reasoningCandidates[0]?.model_name || enabledModels[0]?.model_name || ''
+  if (!currentSelected) {
+    const fallbackModel = reasoningCandidates[0] || availableModels.value[0]
+    assistantModel.value = fallbackModel ? getAssistantModelSelectionValue(fallbackModel) : ''
   }
 }
 
@@ -1032,7 +1079,8 @@ const handleSendPlanned = (text: string) => {
   activeStreamController = assistantApi.plannedAnalysisStream(
     text,
     selectedThreadId.value,
-    assistantModel.value,
+    selectedAssistantModel.value?.model_name,
+    selectedAssistantModel.value?.config_id,
     {
       onToken(content: string) {
         if (!firstEventReceived) {
@@ -1149,7 +1197,8 @@ const handleSendStream = (text: string) => {
   activeStreamController = assistantApi.chatStream(
     text,
     selectedThreadId.value,
-    assistantModel.value,
+    selectedAssistantModel.value?.model_name,
+    selectedAssistantModel.value?.config_id,
     {
       onToken(content: string) {
         if (!firstTokenReceived) {
