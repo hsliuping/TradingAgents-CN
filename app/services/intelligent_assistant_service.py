@@ -41,6 +41,9 @@ _MEMORY_FACT_KEYWORDS = [
     "支撑", "阻力", "走势", "震荡", "偏弱", "偏强", "回调", "反弹", "逻辑", "原因",
 ]
 
+_NUMBER_ONLY_REPLY_RE = re.compile(r"^\s*([1-9]\d?)\s*[\.、\)）]?\s*$")
+_NUMBERED_OPTION_LINE_RE = re.compile(r"^\s*(\d{1,2})\s*[\.、\)）]\s*(.+?)\s*$")
+
 
 def _extract_memory_subject(user_msg: str, assistant_msg: str) -> str:
     title_match = re.search(r"##\s*[📌✅⚠️🔍💡]*\s*([A-Za-z0-9\u4e00-\u9fff]{2,20})(?:[（(][^\n]{0,20}[)）])?(?:——|\-|：|:)", assistant_msg or "")
@@ -144,6 +147,47 @@ def _should_use_recent_search(user_message: str) -> bool:
     has_recency = any(marker in text for marker in recency_markers)
     has_fact = any(marker in text for marker in fact_markers)
     return has_recency and has_fact
+
+
+def _extract_numbered_options(text: str) -> Dict[int, str]:
+    options: Dict[int, str] = {}
+    for raw_line in (text or "").splitlines():
+        match = _NUMBERED_OPTION_LINE_RE.match(raw_line.strip())
+        if not match:
+            continue
+        option_no = int(match.group(1))
+        option_text = re.sub(r"\*+", "", match.group(2)).strip()
+        option_text = re.sub(r"\s+", " ", option_text)
+        if option_text:
+            options[option_no] = option_text[:200]
+    return options
+
+
+def _rewrite_number_selection_reply(user_message: str, history_messages: Optional[List[Message]]) -> str:
+    original_text = (user_message or "").strip()
+    if not original_text:
+        return original_text
+
+    number_match = _NUMBER_ONLY_REPLY_RE.match(original_text)
+    if not number_match or not history_messages:
+        return original_text
+
+    selected_index = int(number_match.group(1))
+    for message in reversed(history_messages):
+        if message.role != MessageRole.ASSISTANT:
+            continue
+        options = _extract_numbered_options(message.content or "")
+        selected_option = options.get(selected_index)
+        if not selected_option:
+            continue
+        logger.info("[智能助手] 将裸数字回复重写为编号选项选择: %s -> %s", original_text, selected_option)
+        return (
+            f"用户上一轮只回复了数字“{selected_index}”，这是在选择你上一条消息里的第{selected_index}项，不是新的独立问题。\n"
+            f"用户选择的选项是：{selected_option}\n"
+            "请直接沿着这个选项继续回答或继续分析，不要再次猜测这个数字可能代表别的含义，也不要重复发起二次确认。"
+        )
+
+    return original_text
 
 
 def _get_latest_trade_date() -> str:
@@ -273,6 +317,7 @@ def _get_system_prompt(
 - **定时分析**：创建周期性自动分析计划（如每天早9点分析自选股），管理已有的定时分析配置（仅限分析任务，不支持闹钟等无关功能）
 - **股票关注列表管理**：查看股票关注列表（即自选股）、按标签理解用户关注池，并可添加/移除自选股或管理自选股分组
 - **数据查询**：直接获取个股行情、财务报表（利润表/资产负债表/现金流）、技术指标（MACD/RSI/布林带等）、新闻资讯等原始数据
+- **单股数据同步**：按股票代码同步单只股票的历史行情和财务数据，必要时补充基础数据，便于后续查询或分析使用最新数据
 - **持仓分析**：查看用户的持仓列表（实盘/模拟），获取某只持仓股票的最新 AI 分析报告，或发起一次新的持仓分析任务（含操作建议、目标价位、风险评估）
 - **交易复盘**：查看复盘历史，获取复盘报告详情，或对指定交易发起一次新的 AI 复盘分析（评分、总结、改进建议、经验教训）
 - **投资计划**：查看用户创建的个人交易计划（投资纪律），获取当前激活计划的完整规则（选股、择时、仓位、止盈止损等）
@@ -315,6 +360,7 @@ def _get_system_prompt(
 
 **需要先确认再执行（复杂、有副作用、或意图模糊）**：
 - **意图模糊时**：用户表达不明确（如「分析一下茅台」「看看茅台」），先结合上下文判断，仍不确定则主动询问用户意图，不要猜测执行
+- **编号承接时**：如果你上一条消息刚给出了 1/2/3 这类编号选项，而用户下一条只回复一个编号（如「2」），默认视为用户选择对应选项，直接沿该选项继续，不要再把数字解释成新的问题
 - **创建定时分析**：先查看已有配置告知用户，再确认时间、频率、股票等参数，用户确认后再创建
 - **触发分析任务**：如果用户指令明确（如「帮我分析600519」）可直接执行；如果模糊则先确认
 - **删除/移除操作**：先告知用户将要做什么，得到确认后再执行
@@ -827,9 +873,11 @@ class IntelligentAssistantService:
         Returns:
             {"reply": str, "tools_used": List[str], "data_refs": Optional[List]}
         """
+        resolved_user_message = _rewrite_number_selection_reply(user_message, history_messages)
+
         # 前置检查：不支持的品种类型
         from app.services.planned_analysis_service import _check_unsupported_asset
-        unsupported_msg = _check_unsupported_asset(user_message)
+        unsupported_msg = _check_unsupported_asset(resolved_user_message)
         if unsupported_msg:
             return {
                 "reply": unsupported_msg,
@@ -846,11 +894,11 @@ class IntelligentAssistantService:
 
         # 快路径：对“最新/截至目前/近期确认”类事实问题，优先直接执行近期搜索工具，
         # 避免模型在首轮未触发工具时退回训练期知识。
-        if _should_use_recent_search(user_message):
+        if _should_use_recent_search(resolved_user_message):
             try:
                 from core.tools.implementations.assistant_ops.recent_search import run_recent_information_search
 
-                tool_result = run_recent_information_search(user_message.strip())
+                tool_result = run_recent_information_search(resolved_user_message.strip())
                 if inspect.isawaitable(tool_result):
                     tool_result = await tool_result
                 tool_text = str(tool_result or "").strip()
@@ -869,7 +917,7 @@ class IntelligentAssistantService:
         try:
             from core.knowledge import FinancialKnowledgeManager
             km = FinancialKnowledgeManager(db=self._db)
-            knowledge_snippets = km.retrieve_for_prompt(user_message)
+            knowledge_snippets = km.retrieve_for_prompt(resolved_user_message)
             if knowledge_snippets:
                 logger.info(f"[智能助手] ✅ RAG 知识检索成功 ({len(knowledge_snippets)} 字符)")
             else:
@@ -894,7 +942,7 @@ class IntelligentAssistantService:
         if history_messages:
             messages.extend(history_messages)
             logger.info(f"[智能助手] 已注入 {len(history_messages)} 条历史消息")
-        messages.append(Message(role=MessageRole.USER, content=user_message.strip()))
+        messages.append(Message(role=MessageRole.USER, content=resolved_user_message.strip()))
 
         tools_used: List[str] = []
 
@@ -927,7 +975,7 @@ class IntelligentAssistantService:
             )
 
             # 兜底：对于“应走工具”的个人数据查询，如果首轮未调工具，则二次强制引导
-            if not tools_used and _should_force_tool_retry(user_message):
+            if not tools_used and _should_force_tool_retry(resolved_user_message):
                 logger.warning("[智能助手] 首轮未调用工具，触发工具重试兜底")
                 retry_messages = list(messages)
                 retry_messages.append(Message(
@@ -1016,8 +1064,10 @@ class IntelligentAssistantService:
         def _sse(event: str, data: dict) -> str:
             return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
+        resolved_user_message = _rewrite_number_selection_reply(user_message, history_messages)
+
         from app.services.planned_analysis_service import _check_unsupported_asset
-        unsupported_msg = _check_unsupported_asset(user_message)
+        unsupported_msg = _check_unsupported_asset(resolved_user_message)
         if unsupported_msg:
             yield _sse("token", {"content": unsupported_msg})
             yield _sse("done", {"tools_used": []})
@@ -1028,10 +1078,10 @@ class IntelligentAssistantService:
             yield _sse("done", {"tools_used": []})
             return
 
-        if _should_use_recent_search(user_message):
+        if _should_use_recent_search(resolved_user_message):
             try:
                 from core.tools.implementations.assistant_ops.recent_search import run_recent_information_search
-                tool_result = run_recent_information_search(user_message.strip())
+                tool_result = run_recent_information_search(resolved_user_message.strip())
                 if inspect.isawaitable(tool_result):
                     tool_result = await tool_result
                 tool_text = str(tool_result or "").strip()
@@ -1047,7 +1097,7 @@ class IntelligentAssistantService:
         try:
             from core.knowledge import FinancialKnowledgeManager
             km = FinancialKnowledgeManager(db=self._db)
-            knowledge_snippets = km.retrieve_for_prompt(user_message)
+            knowledge_snippets = km.retrieve_for_prompt(resolved_user_message)
         except Exception:
             pass
 
@@ -1064,7 +1114,7 @@ class IntelligentAssistantService:
         ]
         if history_messages:
             messages.extend(history_messages)
-        messages.append(Message(role=MessageRole.USER, content=user_message.strip()))
+        messages.append(Message(role=MessageRole.USER, content=resolved_user_message.strip()))
 
         tools_used: List[str] = []
         event_queue: asyncio.Queue = asyncio.Queue()
@@ -1083,7 +1133,7 @@ class IntelligentAssistantService:
                 dry_run=False,
                 progress_callback=_progress,
             )
-            if not tools_used and _should_force_tool_retry(user_message):
+            if not tools_used and _should_force_tool_retry(resolved_user_message):
                 logger.warning("[智能助手·流式] 首轮未调用工具，触发工具重试兜底")
                 retry_messages = list(messages)
                 retry_messages.append(Message(

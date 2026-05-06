@@ -82,6 +82,7 @@ from app.routers import portfolio as portfolio_router
 from app.routers import review as review_router
 from app.routers import email as email_router
 from app.routers import intelligent_assistant as intelligent_assistant_router
+from app.routers import intelligent_screening as intelligent_screening_router
 from app.routers import memory as memory_router
 
 
@@ -1031,6 +1032,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 app.include_router(reports.router, tags=["reports"])
 app.include_router(screening.router, prefix="/api/screening", tags=["screening"])
+app.include_router(intelligent_screening_router.router, tags=["screening-intelligent"])
 app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
 app.include_router(favorites.router, prefix="/api", tags=["favorites"])
 app.include_router(stocks_router.router, prefix="/api", tags=["stocks"])
