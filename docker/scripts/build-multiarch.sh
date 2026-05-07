@@ -161,16 +161,50 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 
 BUILD_INFO_SCRIPT="${PROJECT_ROOT}/scripts/build/generate_build_info.sh"
+BUILD_INFO_PATH="${PROJECT_ROOT}/BUILD_INFO"
+
+write_fallback_build_info() {
+    local build_timestamp build_date build_unix git_commit version_value full_version_value
+    build_timestamp="$(date -u +%Y%m%d-%H%M%S)"
+    build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    build_unix="$(date -u +%s)"
+    git_commit="$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+    version_value="${TAG%%-build*}"
+    full_version_value="$TAG"
+    if [[ ! "$full_version_value" =~ -build[0-9]{8}-[0-9]{6}$ ]]; then
+        full_version_value="${version_value}-build${build_timestamp}"
+    fi
+
+    cat > "$BUILD_INFO_PATH" <<EOF
+{
+    "build_type": "docker",
+    "version": "${version_value}",
+    "build_timestamp": "${build_timestamp}",
+    "build_date": "${build_date}",
+    "build_unix": ${build_unix},
+    "git_commit": "${git_commit}",
+    "full_version": "${full_version_value}"
+}
+EOF
+
+    echo -e "${GREEN}已生成 BUILD_INFO: ${YELLOW}$BUILD_INFO_PATH${NC}"
+}
+
 if [ -f "$BUILD_INFO_SCRIPT" ]; then
     bash "$BUILD_INFO_SCRIPT" "docker" "$PROJECT_ROOT"
-    if [ -f "${PROJECT_ROOT}/BUILD_INFO" ]; then
-        FULL_VERSION=$(grep -o '"full_version": "[^"]*"' "${PROJECT_ROOT}/BUILD_INFO" | cut -d'"' -f4)
-        if [ -n "$FULL_VERSION" ]; then
-            echo -e "${GREEN}BUILD_INFO full_version: ${YELLOW}$FULL_VERSION${NC}"
-        fi
-    fi
+elif [ -f "$BUILD_INFO_PATH" ]; then
+    echo -e "${YELLOW}未找到构建信息脚本，复用现有 BUILD_INFO: ${BUILD_INFO_PATH}${NC}"
 else
-    echo -e "${YELLOW}警告: 构建信息生成脚本不存在: $BUILD_INFO_SCRIPT${NC}"
+    echo -e "${YELLOW}未找到构建信息脚本，使用脚本内置兜底逻辑生成 BUILD_INFO${NC}"
+    write_fallback_build_info
+fi
+
+if [ -f "$BUILD_INFO_PATH" ]; then
+    FULL_VERSION=$(grep -o '"full_version": "[^"]*"' "$BUILD_INFO_PATH" | cut -d'"' -f4)
+    if [ -n "$FULL_VERSION" ]; then
+        echo -e "${GREEN}BUILD_INFO full_version: ${YELLOW}$FULL_VERSION${NC}"
+    fi
 fi
 
 echo ""
