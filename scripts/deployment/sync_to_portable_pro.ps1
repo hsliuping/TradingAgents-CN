@@ -85,9 +85,8 @@ $excludePatterns = @(
     "build"
 )
 
-# 🔥 新增：排除课程源码和敏感内容
+# 🔥 排除敏感内容
 $excludeDirs = @(
-    "docs\courses\advanced\expanded",  # 排除24节课程扩写内容
     "docs\courses\advanced\ppt",       # 排除PPT源文件
     "docs\design",                     # 排除设计文档
     "docs\email-to-tradingagents-team.txt"  # 排除邮件模板
@@ -369,6 +368,35 @@ if (Test-Path $docsSource) {
 
                 Copy-Item -Path $mapping.Source -Destination $mapping.Destination -Force
                 Write-Host "  ✅ Copied runtime doc asset: $($mapping.Destination.Substring($docsDest.Length + 1))" -ForegroundColor Gray
+            }
+
+            # 补充高级课程正文与纲要（Windows 安装版运行时由本地后端直接读取）
+            $advancedCourseSource = Join-Path $root "docs\courses\advanced"
+            $advancedCourseDest = Join-Path $docsDest "courses\advanced"
+            if (Test-Path $advancedCourseSource) {
+                if (-not (Test-Path $advancedCourseDest)) {
+                    New-Item -ItemType Directory -Path $advancedCourseDest -Force | Out-Null
+                }
+
+                $advancedCourseMarkdownFiles = Get-ChildItem -Path $advancedCourseSource -File -Filter "*.md" -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -ne "扩写计划.md" }
+                foreach ($markdownFile in $advancedCourseMarkdownFiles) {
+                    Copy-Item -Path $markdownFile.FullName -Destination (Join-Path $advancedCourseDest $markdownFile.Name) -Force
+                }
+
+                $expandedSource = Join-Path $advancedCourseSource "expanded"
+                $expandedDest = Join-Path $advancedCourseDest "expanded"
+                if (Test-Path $expandedSource) {
+                    if (Test-Path $expandedDest) {
+                        Remove-Item -Path $expandedDest -Recurse -Force
+                    }
+                    Copy-Item -Path $expandedSource -Destination $expandedDest -Recurse -Force
+                    Write-Host "  ✅ Copied advanced course content: courses\\advanced\\expanded" -ForegroundColor Gray
+                } else {
+                    Write-Host "  ⚠️ Advanced course content missing: $expandedSource" -ForegroundColor Yellow
+                }
+            } else {
+                Write-Host "  ⚠️ Advanced course directory missing: $advancedCourseSource" -ForegroundColor Yellow
             }
 
             # 删除 __pycache__ 目录
@@ -689,7 +717,6 @@ Write-Host "Files synced: $syncCount" -ForegroundColor Cyan
 Write-Host "Files skipped: $skipCount" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Excluded content:" -ForegroundColor White
-Write-Host "  - docs/courses/advanced/expanded/ (24节课程源码)" -ForegroundColor Gray
 Write-Host "  - docs/courses/advanced/ppt/ (PPT源文件)" -ForegroundColor Gray
 Write-Host "  - docs/design/ (设计文档)" -ForegroundColor Gray
 Write-Host "  - __pycache__/ and *.pyc files (Python cache)" -ForegroundColor Gray

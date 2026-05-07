@@ -123,6 +123,8 @@ coverage/
 !docs/examples/social_media_api_guide.md
 !docs/learning/**
 !docs/paper/**
+!docs/courses/advanced/*.md
+!docs/courses/advanced/expanded/**
 
 # Docker相关
 Dockerfile.legacy

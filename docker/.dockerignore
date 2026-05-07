@@ -106,6 +106,8 @@ coverage/
 *.md
 !README.md
 !docker/README.md
+!docs/courses/advanced/*.md
+!docs/courses/advanced/expanded/**
 
 # Docker 相关（避免递归）
 Dockerfile*

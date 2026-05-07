@@ -4,7 +4,7 @@
 # 专业版一键打包脚本
 #
 # 功能：
-# 1. 使用Pro版同步脚本（排除课程源码）
+# 1. 使用Pro版同步脚本（保留高级课程正文，排除敏感素材）
 # 2. 构建前端
 # 3. 打包为压缩文件
 #
@@ -67,7 +67,7 @@ Write-Host "====================================================================
 Write-Host "  Build TradingAgents-CN Pro Package" -ForegroundColor Cyan
 Write-Host "============================================================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "⚠️  Pro版打包 - 将排除课程源码和敏感内容" -ForegroundColor Yellow
+Write-Host "⚠️  Pro版打包 - 将保留高级课程正文，并排除PPT源文件、设计文档等敏感内容" -ForegroundColor Yellow
 
 if ($Interactive) {
     Write-Host "🔧 Interactive mode enabled - will prompt after each step" -ForegroundColor Cyan

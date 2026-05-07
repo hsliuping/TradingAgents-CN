@@ -79,6 +79,7 @@ Write-Host ""
 $includeItems = @(
     "app",
     "core",
+    "docs",
     "frontend",
     "scripts",
     "tradingagents",

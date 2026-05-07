@@ -81,15 +81,21 @@ $passed = @()
 Write-Host "Running verification checks..." -ForegroundColor Yellow
 Write-Host ""
 
-# Check 1: 课程扩写内容不应该存在
+# Check 1: 课程扩写内容应该存在
 Write-Host "[1/6] Checking course expanded content..." -ForegroundColor Cyan
 $expandedDir = Join-Path $ExtractPath "docs\courses\advanced\expanded"
 if (Test-Path $expandedDir) {
-    $issues += "❌ FAIL: Course expanded content found (should be excluded)"
-    Write-Host "  ❌ FAIL: Found expanded/ directory" -ForegroundColor Red
+    $lessonFile = Join-Path $expandedDir "lesson-01-basics-retail-to-system-trader.md"
+    if (Test-Path $lessonFile) {
+        $passed += "✅ PASS: Course expanded content present"
+        Write-Host "  ✅ PASS: Found expanded/ directory and lesson content" -ForegroundColor Green
+    } else {
+        $issues += "❌ FAIL: Course expanded directory exists, but lesson content is missing"
+        Write-Host "  ❌ FAIL: expanded/ directory exists, but lesson file is missing" -ForegroundColor Red
+    }
 } else {
-    $passed += "✅ PASS: Course expanded content excluded"
-    Write-Host "  ✅ PASS: No expanded/ directory" -ForegroundColor Green
+    $issues += "❌ FAIL: Course expanded content missing"
+    Write-Host "  ❌ FAIL: expanded/ directory not found" -ForegroundColor Red
 }
 
 # Check 2: PPT源文件不应该存在
