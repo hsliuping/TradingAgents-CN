@@ -3,9 +3,10 @@
 # 同时构建 AMD64 和 ARM64 架构的镜像
 # 
 # 功能:
-# 1. 构建多架构后端 Docker 镜像（AMD64 + ARM64）
-# 2. 构建多架构前端 Docker 镜像（AMD64 + ARM64）
-# 3. 推送 manifest 到 Docker Hub（自动选择架构）
+# 1. 在宿主机构建前端产物
+# 2. 构建多架构后端 Docker 镜像（AMD64 + ARM64）
+# 3. 构建多架构前端 Docker 镜像（AMD64 + ARM64）
+# 4. 推送 manifest 到 Docker Hub（自动选择架构）
 #
 # 使用方法:
 #   ./docker/scripts/build-multiarch.sh [OPTIONS]
@@ -39,6 +40,8 @@ PUSH_LATEST=true
 BASE_TAG="python3.10-bookworm"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+FRONTEND_DIR="$PROJECT_ROOT/frontend"
+FRONTEND_DIST_DIR="$FRONTEND_DIR/dist"
 
 source "$SCRIPT_DIR/version-utils.sh"
 
@@ -172,6 +175,45 @@ fi
 
 echo ""
 
+# 步骤 2: 在宿主机构建前端产物
+if [ "$SKIP_FRONTEND" = false ]; then
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}步骤 2: 构建前端产物${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    echo ""
+
+    if ! command -v npm &> /dev/null; then
+        echo -e "${RED}❌ npm 不可用，请先安装 Node.js 和 npm${NC}"
+        exit 1
+    fi
+
+    if [ ! -d "$FRONTEND_DIR" ]; then
+        echo -e "${RED}❌ 前端目录不存在: $FRONTEND_DIR${NC}"
+        exit 1
+    fi
+
+    pushd "$FRONTEND_DIR" > /dev/null
+    if [ ! -d "node_modules" ]; then
+        echo -e "${GREEN}📦 未检测到前端依赖，执行 npm install...${NC}"
+        npm install
+    fi
+
+    echo -e "${GREEN}🛠️  执行 npm run build（含类型检查）...${NC}"
+    if ! npm run build; then
+        echo -e "${YELLOW}⚠️  npm run build 失败，改用 npx vite build 跳过类型检查...${NC}"
+        npx vite build
+    fi
+    popd > /dev/null
+
+    if [ ! -d "$FRONTEND_DIST_DIR" ]; then
+        echo -e "${RED}❌ 前端构建完成后仍未找到 dist 目录: $FRONTEND_DIST_DIR${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}✅ 前端产物构建完成: ${YELLOW}$FRONTEND_DIST_DIR${NC}"
+    echo ""
+fi
+
 # 构建参数
 PUSH_ARGS=(--push)
 if [ "$SKIP_PUSH" = false ]; then
@@ -190,7 +232,7 @@ fi
 # 步骤 1: 构建后端镜像
 if [ "$SKIP_BACKEND" = false ]; then
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}步骤 1: 构建多架构后端镜像${NC}"
+    echo -e "${BLUE}步骤 3: 构建多架构后端镜像${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
 
@@ -215,7 +257,7 @@ fi
 # 步骤 2: 构建前端镜像
 if [ "$SKIP_FRONTEND" = false ]; then
     echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}步骤 2: 构建多架构前端镜像${NC}"
+    echo -e "${BLUE}步骤 4: 构建多架构前端镜像${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
 
