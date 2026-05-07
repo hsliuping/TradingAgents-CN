@@ -18,6 +18,7 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+!frontend/dist/
 downloads/
 eggs/
 .eggs/
@@ -47,6 +48,14 @@ venv/
 ENV/
 env/
 
+# 大型目录（不属于镜像内容）
+release/
+vendors/
+runtime/
+assets/
+nanobot/
+OpenViking/
+
 # 环境变量文件（敏感信息，不应打包到镜像）
 .env
 .env.local
@@ -64,9 +73,9 @@ yarn-error.log*
 *.tgz
 .yarn-integrity
 
-# 前端构建产物（在Dockerfile中会重新构建）
-# 注意：只排除构建产物和node_modules，不排除源代码
-frontend/dist/
+# 前端构建产物
+# 注意：frontend/dist/ 在上方 dist/ 规则后已用 !frontend/dist/ 放行
+# 前端 Dockerfile 使用宿主机预构建的 dist/ 目录
 frontend/node_modules/
 frontend/.vite/
 frontend/coverage/

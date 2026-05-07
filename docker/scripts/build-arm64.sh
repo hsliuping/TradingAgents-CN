@@ -41,6 +41,7 @@ SKIP_FRONTEND=false
 SKIP_PUSH=false
 USE_QEMU=false
 PUSH_LATEST=true
+BASE_TAG="python3.10-bookworm"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
@@ -55,6 +56,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -t|--tag)
             TAG="$2"
+            shift 2
+            ;;
+        --base-tag)
+            BASE_TAG="$2"
             shift 2
             ;;
         --skip-compile)
@@ -87,6 +92,7 @@ while [[ $# -gt 0 ]]; do
             echo "选项:"
             echo "  -r, --registry REGISTRY   Docker Hub 用户名（默认: hsliup）"
             echo "  -t, --tag TAG             镜像标签（默认: 读取根目录 VERSION）"
+            echo "  --base-tag TAG            基础镜像标签（默认: python3.10-bookworm）"
             echo "  --skip-compile            跳过代码编译（使用已有的编译产物）"
             echo "  --skip-backend            跳过后端镜像构建"
             echo "  --skip-frontend           跳过前端镜像构建"
@@ -114,6 +120,7 @@ BACKEND_IMAGE="$REGISTRY/tradingagents-pro-backend:$TAG-arm64"
 FRONTEND_IMAGE="$REGISTRY/tradingagents-pro-frontend:$TAG-arm64"
 BACKEND_LATEST_IMAGE="$REGISTRY/tradingagents-pro-backend:latest-arm64"
 FRONTEND_LATEST_IMAGE="$REGISTRY/tradingagents-pro-frontend:latest-arm64"
+BASE_IMAGE="$REGISTRY/tradingagents-pro-backend-base:$BASE_TAG"
 
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}TradingAgents-CN Pro - ARM64 构建${NC}"
@@ -124,6 +131,7 @@ echo -e "${GREEN}Tag: ${YELLOW}$TAG${NC}"
 echo -e "${GREEN}推送 latest-arm64 别名: ${YELLOW}$PUSH_LATEST_ALIAS${NC}"
 echo -e "${GREEN}后端镜像: ${YELLOW}$BACKEND_IMAGE${NC}"
 echo -e "${GREEN}前端镜像: ${YELLOW}$FRONTEND_IMAGE${NC}"
+echo -e "${GREEN}基础镜像: ${YELLOW}$BASE_IMAGE${NC}"
 echo -e "${GREEN}使用 QEMU: ${YELLOW}$USE_QEMU${NC}"
 echo ""
 
@@ -197,6 +205,7 @@ if [ "$SKIP_BACKEND" = false ]; then
         --platform linux/arm64 \
         -f "$PROJECT_ROOT/docker/Dockerfile.backend.compiled.ubuntu" \
         -t "$BACKEND_IMAGE" \
+        --build-arg BASE_IMAGE="$BASE_IMAGE" \
         --load \
         "$PROJECT_ROOT"
 

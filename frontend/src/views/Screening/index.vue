@@ -647,7 +647,7 @@
             </el-button>
             <el-button type="text" size="small" @click="toggleFavorite(row)">
               <el-icon><Star /></el-icon>
-              {{ isFavorited(row.symbol) ? '取消自选' : '股票关注列表' }}
+              {{ isFavorited(row.symbol) ? '取消关注' : '加入关注列表' }}
             </el-button>
           </template>
         </el-table-column>
@@ -693,9 +693,9 @@ import { marked } from 'marked'
 import type { StockInfo } from '@/types/analysis'
 import { screeningApi, type FieldConfigResponse, type FieldInfo, type ScreeningConditionItem, type ScreeningConversationSummary, type ScreeningMessageItem, type ScreeningPreset, type ScreeningWsEnvelope, type ScreeningWsProgressData, type StockRecommendation } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
-import { getCurrentDataSource } from '@/api/sync'
 import { useAuthStore } from '@/stores/auth'
 import { getFactorDiagnosticEntries, getFactorWarningEntries } from '@/utils/factorPresentation'
+import { loadCurrentDataSourceInfo } from '@/utils/dataSource'
 import { normalizeMarketForAnalysis, exchangeCodeToMarket, getMarketByStockCode } from '@/utils/market'
 
 // Markdown 渲染
@@ -1790,12 +1790,14 @@ const toggleFavorite = async (stock: FavoriteCandidate) => {
   try {
     const code = stock.symbol
     if (favoriteSet.value.has(code)) {
-      // 取消自选
+      // 取消关注
       const res = await favoritesApi.remove(code)
       if ((res as any)?.success === false) throw new Error((res as any)?.message || '取消失败')
       favoriteSet.value.delete(code)
-      ElMessage.success(`已取消自选：${stock.name || code}`)
+      ElMessage.success(`已取消关注：${stock.name || code}`)
     } else {
+      // 加入关注列表
+      // 根据股票代码判断市场类型
       let marketType = 'A股'
       if ((stock as any).market) {
         marketType = exchangeCodeToMarket((stock as any).market)
@@ -1812,7 +1814,7 @@ const toggleFavorite = async (stock: FavoriteCandidate) => {
       const res = await favoritesApi.add(payload)
       if ((res as any)?.success === false) throw new Error((res as any)?.message || '添加失败')
       favoriteSet.value.add(code)
-      ElMessage.success(`已股票关注列表：${stock.name || code}`)
+      ElMessage.success(`已加入关注列表：${stock.name || code}`)
     }
   } catch (error: any) {
     ElMessage.error(error?.message || '自选操作失败')
@@ -1912,9 +1914,9 @@ const loadFavorites = async () => {
 // 获取当前数据源
 const loadCurrentDataSource = async () => {
   try {
-    const response = await getCurrentDataSource()
-    if (response.success && response.data) {
-      currentDataSource.value = response.data
+    const currentSource = await loadCurrentDataSourceInfo()
+    if (currentSource) {
+      currentDataSource.value = currentSource
     }
   } catch (e) {
     console.warn('获取当前数据源失败', e)

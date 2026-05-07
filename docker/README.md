@@ -188,6 +188,7 @@ docker-compose -f docker/docker-compose.compiled.yml up -d
 ### Dockerfile.backend.compiled.ubuntu
 - **用途**: Ubuntu 服务器编译版后端镜像（商业版）
 - **特点**:
+  - 基于可复用的后端基础镜像构建，基础镜像负责系统依赖、编译工具和 Python 依赖
   - 在构建时编译 Python 代码为 `.pyc` 字节码
   - 不依赖 Windows 便携版的 `release/` 目录
   - 使用临时构建目录 `docker/build/compiled`
@@ -197,6 +198,29 @@ docker-compose -f docker/docker-compose.compiled.yml up -d
   - `tradingagents/` - 保留源码（开源部分）
 - **适用**: Ubuntu 22.04 服务器生产环境
 - **构建参数**: `COMPILE_DIR=docker/build/compiled`
+
+### Dockerfile.backend.base.ubuntu
+- **用途**: 后端发布镜像的公共基础镜像
+- **特点**:
+  - 统一安装后端运行时系统依赖（pandoc、wkhtmltopdf、WeasyPrint 相关库）
+  - 统一安装编译工具（gcc/g++/python3-dev）和 Python 依赖
+  - 供 `docker/Dockerfile.backend.compiled.ubuntu` 和其他后续发布镜像复用
+- **建议标签**: `tradingagents-pro-backend-base:python3.10-bookworm`
+
+### scripts/build-base.sh
+- **用途**: 构建后端基础镜像
+- **默认行为**: 本机构建当前架构基础镜像
+- **推送多架构**:
+
+```bash
+./docker/scripts/build-base.sh --push
+```
+
+- **指定仓库和标签**:
+
+```bash
+./docker/scripts/build-base.sh -r hsliup -t python3.10-bookworm --push
+```
 
 ### Dockerfile.frontend
 - **用途**: 前端镜像

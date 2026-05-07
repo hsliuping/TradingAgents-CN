@@ -11,85 +11,10 @@
 #   - 使用构建脚本生成的临时编译目录
 #   - 适合在 CI/CD 环境中使用
 
-FROM python:3.10-slim-bookworm
+ARG BASE_IMAGE=hsliup/tradingagents-pro-backend-base:python3.10-bookworm
+FROM ${BASE_IMAGE}
 
-# 获取构建架构信息
-ARG TARGETARCH
 ARG COMPILE_DIR=docker/build/compiled
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    TZ=Asia/Shanghai
-
-WORKDIR /app
-
-# 创建必需的目录并安装系统依赖
-RUN mkdir -p /app/logs /app/data /app/config && \
-    # 配置 apt 重试和超时
-    echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries && \
-    echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries && \
-    echo 'Acquire::https::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries && \
-    # 更新软件源
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        curl \
-        fontconfig \
-        fonts-noto-cjk \
-        wget \
-        xvfb \
-        # WeasyPrint 依赖（GTK+ 库）
-        libglib2.0-0 \
-        libpango-1.0-0 \
-        libcairo2 \
-        libgdk-pixbuf-2.0-0 \
-        libffi8 \
-        shared-mime-info \
-        # WeasyPrint 额外依赖
-        libpangoft2-1.0-0 \
-        libharfbuzz0b \
-        libfribidi0 && \
-    # 根据架构设置变量（默认 amd64）
-    if [ -z "$TARGETARCH" ] || [ "$TARGETARCH" = "amd64" ]; then \
-        PANDOC_ARCH="amd64"; \
-    elif [ "$TARGETARCH" = "arm64" ]; then \
-        PANDOC_ARCH="arm64"; \
-    else \
-        echo "Unsupported architecture: $TARGETARCH, using amd64"; \
-        PANDOC_ARCH="amd64"; \
-    fi && \
-    echo "Building for architecture: $TARGETARCH (PANDOC_ARCH=$PANDOC_ARCH)" && \
-    # 下载并安装 pandoc（添加错误检查）
-    PANDOC_URL="https://github.com/jgm/pandoc/releases/download/3.8.2.1/pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb" && \
-    echo "Downloading pandoc from: $PANDOC_URL" && \
-    if wget --no-verbose --tries=3 --timeout=30 "$PANDOC_URL" -O /tmp/pandoc.deb; then \
-        dpkg -i /tmp/pandoc.deb || (apt-get install -f -y && dpkg -i /tmp/pandoc.deb); \
-        rm -f /tmp/pandoc.deb; \
-        echo "Pandoc installed successfully"; \
-    else \
-        echo "WARNING: Failed to download pandoc from GitHub, trying apt install..." && \
-        apt-get install -y --no-install-recommends pandoc || echo "WARNING: pandoc installation failed, continuing without it"; \
-    fi && \
-    # 使用 apt 安装 wkhtmltopdf（Debian Bookworm 官方版本）
-    apt-get install -y --no-install-recommends wkhtmltopdf && \
-    # 更新字体缓存
-    fc-cache -fv && \
-    rm -rf /var/lib/apt/lists/*
-
-# 复制 pyproject.toml（用于安装依赖）
-COPY pyproject.toml README.md ./
-
-# 安装编译工具和 Python 依赖
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        gcc \
-        g++ \
-        python3-dev && \
-    pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install --prefer-binary . -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install --prefer-binary pdfkit -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    rm -rf /var/lib/apt/lists/*
 
 # 复制构建信息文件（如果存在）
 COPY BUILD_INFO ./BUILD_INFO
@@ -99,12 +24,15 @@ COPY app ./app
 COPY core ./core
 COPY tradingagents ./tradingagents
 
+# 清理宿主机 __pycache__（避免版本不匹配的 .pyc 文件）
+RUN find /app -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
+    find /app -name "*.pyc" -delete 2>/dev/null || true
+
 # 复制编译脚本
 COPY docker/scripts/compile-and-cleanup.sh /tmp/compile-and-cleanup.sh
 
 # 安装 Cython 并执行编译和清理
 RUN chmod +x /tmp/compile-and-cleanup.sh && \
-    pip install Cython && \
     /tmp/compile-and-cleanup.sh && \
     rm -f /tmp/compile-and-cleanup.sh && \
     # 清理编译工具（减小镜像大小）
@@ -114,7 +42,9 @@ RUN chmod +x /tmp/compile-and-cleanup.sh && \
 
 # 复制配置文件和脚本（这些不需要编译）
 COPY config ./config
-COPY scripts ./scripts
+COPY scripts/import_config_and_create_user.py ./scripts/import_config_and_create_user.py
+COPY scripts/migrate_config_to_webapi.py ./scripts/migrate_config_to_webapi.py
+COPY scripts/sync_financial_data.py ./scripts/sync_financial_data.py
 COPY install ./install
 
 # 复制运行时文档：仅保留面向用户的 release_v2.0 文档和后端接口运行时直接读取的白名单文件

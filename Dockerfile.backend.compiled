@@ -2,61 +2,11 @@
 # 使用编译后的 .pyc 和 .pyd 文件，保护源码
 # 支持多架构: amd64, arm64
 
-FROM python:3.10-slim-bookworm
+ARG BASE_IMAGE=hsliup/tradingagents-pro-backend-base:python3.10-bookworm
+FROM ${BASE_IMAGE}
 
 # 获取构建架构信息
 ARG TARGETARCH
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    TZ=Asia/Shanghai
-
-WORKDIR /app
-
-# 创建必需的目录并安装系统依赖
-RUN mkdir -p /app/logs /app/data /app/config && \
-    # 配置 apt 重试和超时
-    echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries && \
-    echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries && \
-    echo 'Acquire::https::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries && \
-    # 更新软件源
-    (apt-get update || apt-get update || apt-get update) && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        curl \
-        fontconfig \
-        fonts-noto-cjk \
-        wget \
-        xvfb && \
-    # 根据架构设置变量
-    if [ "$TARGETARCH" = "arm64" ]; then \
-        PANDOC_ARCH="arm64"; \
-        WKHTMLTOPDF_ARCH="arm64"; \
-    else \
-        PANDOC_ARCH="amd64"; \
-        WKHTMLTOPDF_ARCH="amd64"; \
-    fi && \
-    # 下载并安装 pandoc
-    wget -q https://github.com/jgm/pandoc/releases/download/3.8.2.1/pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb && \
-    dpkg -i pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb && \
-    rm pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb && \
-    # 下载并安装 wkhtmltopdf
-    wget -q https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bookworm_${WKHTMLTOPDF_ARCH}.deb && \
-    apt-get install -y --no-install-recommends \
-        ./wkhtmltox_0.12.6.1-3.bookworm_${WKHTMLTOPDF_ARCH}.deb && \
-    rm wkhtmltox_0.12.6.1-3.bookworm_${WKHTMLTOPDF_ARCH}.deb && \
-    # 更新字体缓存
-    fc-cache -fv && \
-    rm -rf /var/lib/apt/lists/*
-
-# 复制 pyproject.toml（用于安装依赖）
-COPY pyproject.toml README.md ./
-
-# 安装 Python 依赖（不包括 chainlit, streamlit, plotly）
-RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install --prefer-binary . -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install --prefer-binary pdfkit -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 复制编译后的代码（从便携版构建产物）
 # 注意：需要先运行 build_portable_package.ps1 生成编译后的代码
@@ -72,6 +22,10 @@ COPY install ./install
 
 # 复制 Docker 环境配置文件
 COPY .env.docker ./.env
+
+RUN apt-get purge -y gcc g++ python3-dev && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
 
 # 暴露后端端口
 EXPOSE 8000

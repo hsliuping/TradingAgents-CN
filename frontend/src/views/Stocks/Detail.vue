@@ -427,8 +427,8 @@
         </el-form-item>
         <el-form-item label="数据源">
           <el-radio-group v-model="syncForm.dataSource">
-            <el-radio label="tushare">Tushare</el-radio>
-            <el-radio label="akshare">AKShare</el-radio>
+            <el-radio label="tushare" :disabled="!availableSyncSources.tushare">Tushare</el-radio>
+            <el-radio label="akshare" :disabled="!availableSyncSources.akshare">AKShare</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="历史数据天数" v-if="syncForm.syncTypes.includes('historical')">
@@ -464,7 +464,6 @@ import {
   type SingleStockSyncResponse,
   type StockSyncTaskStatus,
 } from '@/api/stockSync'
-import { configApi } from '@/api/config'
 import { clearAllCache } from '@/api/cache'
 import { use as echartsUse } from 'echarts/core'
 import { CandlestickChart } from 'echarts/charts'
@@ -477,6 +476,7 @@ import { favoritesApi } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
 import type { StockInfo } from '@/types/analysis'
 import { getFactorDiagnosticEntries, getFactorWarningEntries } from '@/utils/factorPresentation'
+import { loadManualSyncSourceState, type ManualSyncDataSource } from '@/utils/dataSource'
 
 
 echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
@@ -557,56 +557,55 @@ const kOption = ref<EChartsOption>({
   xAxis: {
     type: 'category',
     data: [],
-    boundaryGap: true,
-    axisLine: { onZero: false }
-  },
-  yAxis: {
-    scale: true,
-    type: 'value'
-  },
-  dataZoom: [
-    { type: 'inside', start: 70, end: 100 },
+    // 同步状态
+    const syncStatus = ref<any>(null)
+    const availableSyncSources = reactive<Record<ManualSyncDataSource, boolean>>({
+      tushare: true,
+      akshare: true
+    })
+
+    // 数据同步对话框
+    const syncDialogVisible = ref(false)
+    const syncLoading = ref(false)
     { start: 70, end: 100 }
   ],
   series: [
     {
       type: 'candlestick',
-      name: 'K线',
-      data: [],
-      itemStyle: {
-        color: '#ef4444',
-        color0: '#16a34a',
-        borderColor: '#ef4444',
-        borderColor0: '#16a34a'
+    watch(isEtf, (value) => {
+      if (value) {
+        syncForm.syncTypes = syncForm.syncTypes.filter(type => type !== 'financial')
+      }
+    }, { immediate: true })
+
+    // 清除缓存
+    const clearCacheLoading = ref(false)
+
+    // 显示同步对话框
+    function showSyncDialog() {
+      syncDialogVisible.value = true
+    }
+
+    async function loadPreferredSyncDataSource() {
+      try {
+        const sourceState = await loadManualSyncSourceState()
+        availableSyncSources.tushare = sourceState.availableSources.tushare
+        availableSyncSources.akshare = sourceState.availableSources.akshare
+
+        if (sourceState.preferredSource) {
+          syncForm.dataSource = sourceState.preferredSource
+          return
+        }
+
+        if (availableSyncSources.akshare) {
+          syncForm.dataSource = 'akshare'
+        } else if (availableSyncSources.tushare) {
+          syncForm.dataSource = 'tushare'
+        }
+      } catch (error) {
+        console.warn('加载同步数据源优先级失败，保留当前默认值', error)
       }
     }
-  ]
-})
-const lastKTime = ref<string | null>(null)
-const lastKClose = ref<number | null>(null)
-
-// 报价（初始化）
-const quote = reactive({
-  price: NaN,
-  changePercent: NaN,
-  open: NaN,
-  high: NaN,
-  low: NaN,
-  prevClose: NaN,
-  volume: NaN,
-  amount: NaN,
-  turnover: NaN,
-  amplitude: NaN,  // 振幅（替代量比）
-  tradeDate: null as string | null,  // 交易日期（用于成交量、成交额）
-  turnoverDate: null as string | null,  // 换手率数据日期
-  amplitudeDate: null as string | null,  // 振幅数据日期
-  updatedAt: null as string | null  // 🔥 数据更新时间
-})
-
-const lastRefreshAt = ref<Date | null>(null)
-const refreshText = computed(() => lastRefreshAt.value ? `已刷新 ${lastRefreshAt.value.toLocaleTimeString()}` : '未刷新')
-const changeClass = computed(() => quote.changePercent > 0 ? 'up' : quote.changePercent < 0 ? 'down' : '')
-
 // 🔥 日期判断和格式化函数
 function isToday(dateStr: string | null): boolean {
   if (!dateStr) return false
@@ -627,11 +626,14 @@ function formatDateTag(dateStr: string | null): string {
 
 // 同步状态
 const syncStatus = ref<any>(null)
-type ManualSyncDataSource = 'tushare' | 'akshare'
 
 // 数据同步对话框
 const syncDialogVisible = ref(false)
 const syncLoading = ref(false)
+const availableSyncSources = reactive<Record<ManualSyncDataSource, boolean>>({
+  tushare: true,
+  akshare: true
+})
 const syncForm = reactive({
   syncTypes: ['realtime'],  // 默认选中实时行情
   dataSource: 'tushare' as 'tushare' | 'akshare',
@@ -654,18 +656,19 @@ function showSyncDialog() {
 
 async function loadPreferredSyncDataSource() {
   try {
-    const configs = await configApi.getDataSourceConfigs()
-    const preferredSource = configs
-      .map(item => ({
-        enabled: item.enabled,
-        priority: item.priority,
-        type: String(item.type || '').toLowerCase()
-      }))
-      .filter(item => item.enabled && (item.type === 'tushare' || item.type === 'akshare'))
-      .sort((left, right) => right.priority - left.priority)[0]
+    const sourceState = await loadManualSyncSourceState()
+    availableSyncSources.tushare = sourceState.availableSources.tushare
+    availableSyncSources.akshare = sourceState.availableSources.akshare
 
-    if (preferredSource) {
-      syncForm.dataSource = preferredSource.type as ManualSyncDataSource
+    if (sourceState.preferredSource) {
+      syncForm.dataSource = sourceState.preferredSource
+      return
+    }
+
+    if (availableSyncSources.akshare) {
+      syncForm.dataSource = 'akshare'
+    } else if (availableSyncSources.tushare) {
+      syncForm.dataSource = 'tushare'
     }
   } catch (error) {
     console.warn('加载同步数据源优先级失败，保留当前默认值', error)

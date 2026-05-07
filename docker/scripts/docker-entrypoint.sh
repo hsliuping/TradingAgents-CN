@@ -28,13 +28,55 @@ log_error() {
     echo "[$timestamp] ERROR: $message" | tee -a "$LOG_FILE" >&2
 }
 
+check_admin_user_exists() {
+    python -c "
+import os
+import sys
+
+from pymongo import MongoClient
+
+mongo_host = os.getenv('MONGODB_HOST', 'mongodb')
+mongo_port = os.getenv('MONGODB_PORT', '27017')
+mongo_username = os.getenv('MONGODB_USERNAME', 'admin')
+mongo_password = os.getenv('MONGODB_PASSWORD', 'tradingagents123')
+mongo_database = os.getenv('MONGODB_DATABASE', 'tradingagents')
+mongo_auth_source = os.getenv('MONGODB_AUTH_SOURCE', 'admin')
+
+connection_string = f'mongodb://{mongo_username}:{mongo_password}@{mongo_host}:{mongo_port}/{mongo_database}?authSource={mongo_auth_source}'
+client = MongoClient(connection_string, serverSelectionTimeoutMS=3000)
+user = client[mongo_database]['users'].find_one({'username': 'admin'}, {'_id': 1})
+client.close()
+sys.exit(0 if user else 1)
+" 2>&1
+}
+
+SHOULD_INIT=true
+INIT_REASON="未找到初始化标记文件"
+
+if [ -f "$INIT_MARKER" ]; then
+    ADMIN_CHECK_OUTPUT=$(check_admin_user_exists)
+    ADMIN_CHECK_EXIT_CODE=$?
+
+    if [ $ADMIN_CHECK_EXIT_CODE -eq 0 ]; then
+        SHOULD_INIT=false
+    else
+        log "⚠️  初始化标记已存在，但数据库中未检测到 admin 用户"
+        if [ -n "$ADMIN_CHECK_OUTPUT" ]; then
+            echo "$ADMIN_CHECK_OUTPUT" | tee -a "$LOG_FILE"
+        fi
+        rm -f "$INIT_MARKER"
+        INIT_REASON="检测到陈旧初始化标记，已移除并重新执行初始化"
+    fi
+fi
+
 # 检查是否需要初始化
-if [ ! -f "$INIT_MARKER" ]; then
+if [ "$SHOULD_INIT" = true ]; then
     log "=========================================="
     log "🚀 首次启动检测到，开始初始化数据库..."
     log "=========================================="
     log ""
     log "📝 日志文件位置: $LOG_FILE"
+    log "📝 初始化原因: $INIT_REASON"
     log ""
     
     # 等待 MongoDB 和 Redis 服务就绪

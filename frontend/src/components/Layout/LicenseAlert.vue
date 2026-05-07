@@ -82,15 +82,15 @@ const alertMessage = computed(() => {
     return '⚠️ 无法连接授权服务器，当前使用离线模式，部分功能可能受限'
   }
   if (licenseStore.isExpired) {
-    return '❌ 您的高级学员资格已过期，请及时续费以继续使用高级功能'
+    return '❌ 您的高级学员资格已过期，请用积分进行兑换以继续使用高级功能'
   }
   if (licenseStore.isExpiringSoon) {
     const days = licenseStore.daysRemaining
     const planLabel = licenseStore.isTrial ? '体验资格' : '高级学员资格'
     if (days === 1) {
-      return `⏰ 您的${planLabel}将于明天到期，请及时续费`
+      return `⏰ 您的${planLabel}将于明天到期，请及时使用积分兑换`
     }
-    return `⏰ 您的${planLabel}将在 ${days} 天后到期，请及时续费`
+    return `⏰ 您的${planLabel}将在 ${days} 天后到期，请及时使用积分兑换`
   }
   return ''
 })
@@ -102,8 +102,8 @@ const showAction = computed(() => {
 
 // 操作按钮文案
 const actionText = computed(() => {
-  if (licenseStore.isExpired) return '立即续费'
-  if (licenseStore.isExpiringSoon) return '前往续费'
+  if (licenseStore.isExpired) return '立即兑换'
+  if (licenseStore.isExpiringSoon) return '前往兑换'
   return '了解详情'
 })
 

@@ -2,6 +2,7 @@
 param(
     [string]$Registry = "hsliup",
     [string]$VersionTag = "",
+    [string]$BaseTag = "python3.10-bookworm",
     [string]$Platforms = "linux/amd64,linux/arm64",
     [switch]$SkipBackend = $false,
     [switch]$SkipFrontend = $false,
@@ -43,6 +44,7 @@ if (-not $VersionTag) {
 
 $backendVersionImage = "$Registry/tradingagents-pro-backend:$VersionTag"
 $frontendVersionImage = "$Registry/tradingagents-pro-frontend:$VersionTag"
+$backendBaseImage = "$Registry/tradingagents-pro-backend-base:$BaseTag"
 $backendLatestImage = "$Registry/tradingagents-pro-backend:latest"
 $frontendLatestImage = "$Registry/tradingagents-pro-frontend:latest"
 
@@ -51,6 +53,7 @@ Write-Host "Docker Release" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Yellow
 Write-Host "Registry: $Registry"
 Write-Host "Version : $VersionTag"
+Write-Host "BaseTag : $BaseTag"
 Write-Host "Platforms: $Platforms"
 Write-Host ""
 
@@ -71,6 +74,7 @@ try {
                 "buildx", "build",
                 "--platform", $Platforms,
                 "-f", "docker/Dockerfile.backend.compiled.ubuntu",
+                "--build-arg", "BASE_IMAGE=$backendBaseImage",
                 "-t", $backendVersionImage,
                 "--push",
                 "."

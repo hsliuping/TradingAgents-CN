@@ -130,31 +130,84 @@ def _get_market_groupings_sync(market_category: str) -> List[Dict[str, Any]]:
         return []
 
 
-async def get_enabled_data_sources_async(market_category: str = "a_shares") -> List[str]:
+async def get_available_data_sources_async(market_category: str = "a_shares") -> List[str]:
     """
-    获取启用的数据源列表（异步版本）
-    
-    从数据库读取数据源配置，按优先级从高到低排序
-    不进行硬编码过滤，完全遵循数据库配置
-    
-    Args:
-        market_category: 市场分类 (a_shares, us_stocks, hk_stocks)
-        
-    Returns:
-        启用的数据源列表，按优先级从高到低排序
-        例如: ['local', 'tushare', 'akshare', 'baostock']
-    """
-    try:
-        from app.core.unified_config import UnifiedConfigManager
-        
-        config = UnifiedConfigManager()
-        data_source_configs = await config.get_data_source_configs_async()
+    获取启用且当前可用的数据源列表（异步版本）。
 
-        groupings = await _get_market_groupings_async(market_category)
-        enabled_sources = _merge_grouped_enabled_sources(data_source_configs, groupings)
-        
-        if enabled_sources:
-            logger.info(f"✅ [数据源优先级] {market_category}: {enabled_sources}")
+    返回顺序遵循数据库中的优先级配置，仅保留当前 adapter.is_available() 为 True 的数据源。
+    """
+    enabled_sources = await get_enabled_data_sources_async(market_category)
+
+    try:
+        from app.services.data_sources.manager import DataSourceManager
+
+        manager = DataSourceManager()
+        available_adapters = manager.get_available_adapters()
+        available_names = {adapter.name.lower() for adapter in available_adapters}
+        available_sources = [source for source in enabled_sources if source in available_names]
+
+        if available_sources:
+            logger.info(f"✅ [可用数据源] {market_category}: {available_sources}")
+            return available_sources
+
+        logger.warning(f"⚠️ [可用数据源] {market_category}: 没有启用且可用的数据源")
+        return []
+
+
+
+    async def get_available_data_sources_async(market_category: str = "a_shares") -> List[str]:
+        """
+        获取启用且当前可用的数据源列表（异步版本）。
+
+        返回顺序遵循数据库中的优先级配置，仅保留当前 adapter.is_available() 为 True 的数据源。
+        """
+        enabled_sources = await get_enabled_data_sources_async(market_category)
+
+        try:
+            from app.services.data_sources.manager import DataSourceManager
+
+            manager = DataSourceManager()
+            available_adapters = manager.get_available_adapters()
+            available_names = {_normalize_source_name(adapter.name) for adapter in available_adapters}
+            available_sources = [source for source in enabled_sources if source in available_names]
+
+            if available_sources:
+                logger.info(f"✅ [可用数据源] {market_category}: {available_sources}")
+                return available_sources
+
+            logger.warning(f"⚠️ [可用数据源] {market_category}: 没有启用且可用的数据源")
+            return []
+
+        except Exception as e:
+            logger.error(f"❌ [可用数据源] 获取失败: {e}")
+            return []
+
+
+    def get_available_data_sources_sync(market_category: str = "a_shares") -> List[str]:
+        """
+        获取启用且当前可用的数据源列表（同步版本）。
+        """
+        enabled_sources = get_enabled_data_sources_sync(market_category)
+
+        try:
+            from app.services.data_sources.manager import DataSourceManager
+
+            manager = DataSourceManager()
+            available_adapters = manager.get_available_adapters()
+            available_names = {_normalize_source_name(adapter.name) for adapter in available_adapters}
+            available_sources = [source for source in enabled_sources if source in available_names]
+
+            if available_sources:
+                logger.info(f"✅ [可用数据源] {market_category}: {available_sources}")
+                return available_sources
+
+            logger.warning(f"⚠️ [可用数据源] {market_category}: 没有启用且可用的数据源")
+            return []
+
+        except Exception as e:
+            logger.error(f"❌ [可用数据源] 获取失败: {e}")
+        logger.error(f"❌ [可用数据源] 获取失败: {e}")
+            return []
             return enabled_sources
         else:
             # 回退到默认配置
@@ -218,8 +271,8 @@ async def get_preferred_data_source_async(market_category: str = "a_shares") -> 
     Returns:
         优先级最高的数据源名称，例如: 'local'
     """
-    enabled_sources = await get_enabled_data_sources_async(market_category)
-    preferred_source = enabled_sources[0] if enabled_sources else 'tushare'
+    available_sources = await get_available_data_sources_async(market_category)
+    preferred_source = available_sources[0] if available_sources else 'tushare'
     logger.info(f"📊 [优先数据源] {market_category}: {preferred_source}")
     return preferred_source
 
@@ -234,8 +287,8 @@ def get_preferred_data_source_sync(market_category: str = "a_shares") -> str:
     Returns:
         优先级最高的数据源名称，例如: 'local'
     """
-    enabled_sources = get_enabled_data_sources_sync(market_category)
-    preferred_source = enabled_sources[0] if enabled_sources else 'tushare'
+    available_sources = get_available_data_sources_sync(market_category)
+    preferred_source = available_sources[0] if available_sources else 'tushare'
     logger.info(f"📊 [优先数据源] {market_category}: {preferred_source}")
     return preferred_source
 

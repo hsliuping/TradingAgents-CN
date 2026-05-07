@@ -31,6 +31,7 @@ REGISTRY="hsliup"
 TAG=""
 PUSH=false
 PUSH_LATEST=true
+BASE_TAG="python3.10-bookworm"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
@@ -47,6 +48,10 @@ while [[ $# -gt 0 ]]; do
             TAG="$2"
             shift 2
             ;;
+        --base-tag)
+            BASE_TAG="$2"
+            shift 2
+            ;;
         -p|--push)
             PUSH=true
             shift
@@ -61,6 +66,7 @@ while [[ $# -gt 0 ]]; do
             echo "选项:"
             echo "  -r, --registry REGISTRY   Docker Hub 用户名（默认: hsliup）"
             echo "  -t, --tag TAG             镜像标签（默认: 读取根目录 VERSION）"
+            echo "  --base-tag TAG            基础镜像标签（默认: python3.10-bookworm）"
             echo "  -p, --push                构建后推送到 Docker Hub"
             echo "  --no-push-latest          推送版本标签时不额外更新 latest"
             echo "  -h, --help                显示帮助信息"
@@ -131,13 +137,16 @@ echo ""
 
 IMAGE_NAME="$REGISTRY/tradingagents-pro-backend:$TAG"
 LATEST_IMAGE_NAME="$REGISTRY/tradingagents-pro-backend:latest"
+BASE_IMAGE="$REGISTRY/tradingagents-pro-backend-base:$BASE_TAG"
 
 echo -e "${GREEN}🐳 构建镜像: ${YELLOW}$IMAGE_NAME${NC}"
+echo -e "${GREEN}🧱 使用基础镜像: ${YELLOW}$BASE_IMAGE${NC}"
 
 # 使用 Dockerfile.backend.compiled.ubuntu
 docker build \
     -f "$PROJECT_ROOT/docker/Dockerfile.backend.compiled.ubuntu" \
     -t "$IMAGE_NAME" \
+    --build-arg BASE_IMAGE="$BASE_IMAGE" \
     --build-arg COMPILE_DIR="docker/build/compiled" \
     "$PROJECT_ROOT"
 

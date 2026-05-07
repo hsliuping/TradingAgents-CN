@@ -36,6 +36,7 @@ SKIP_BACKEND=false
 SKIP_FRONTEND=false
 SKIP_PUSH=false
 PUSH_LATEST=true
+BASE_TAG="python3.10-bookworm"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
@@ -50,6 +51,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -t|--tag)
             TAG="$2"
+            shift 2
+            ;;
+        --base-tag)
+            BASE_TAG="$2"
             shift 2
             ;;
         --skip-backend)
@@ -74,6 +79,7 @@ while [[ $# -gt 0 ]]; do
             echo "选项:"
             echo "  -r, --registry REGISTRY   Docker Hub 用户名（默认: hsliup）"
             echo "  -t, --tag TAG             镜像标签（默认: 读取根目录 VERSION）"
+            echo "  --base-tag TAG            基础镜像标签（默认: python3.10-bookworm）"
             echo "  --skip-backend            跳过后端镜像构建"
             echo "  --skip-frontend           跳过前端镜像构建"
             echo "  --skip-push               只构建不推送"
@@ -99,6 +105,7 @@ BACKEND_IMAGE="$REGISTRY/tradingagents-pro-backend:$TAG"
 FRONTEND_IMAGE="$REGISTRY/tradingagents-pro-frontend:$TAG"
 BACKEND_LATEST_IMAGE="$REGISTRY/tradingagents-pro-backend:latest"
 FRONTEND_LATEST_IMAGE="$REGISTRY/tradingagents-pro-frontend:latest"
+BASE_IMAGE="$REGISTRY/tradingagents-pro-backend-base:$BASE_TAG"
 
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}TradingAgents-CN Pro - 多架构构建${NC}"
@@ -109,6 +116,7 @@ echo -e "${GREEN}Tag: ${YELLOW}$TAG${NC}"
 echo -e "${GREEN}推送 latest 别名: ${YELLOW}$PUSH_LATEST_ALIAS${NC}"
 echo -e "${GREEN}后端镜像: ${YELLOW}$BACKEND_IMAGE${NC}"
 echo -e "${GREEN}前端镜像: ${YELLOW}$FRONTEND_IMAGE${NC}"
+echo -e "${GREEN}基础镜像: ${YELLOW}$BASE_IMAGE${NC}"
 echo -e "${GREEN}架构: ${YELLOW}linux/amd64, linux/arm64${NC}"
 echo ""
 
@@ -192,6 +200,7 @@ if [ "$SKIP_BACKEND" = false ]; then
     docker buildx build \
         --platform linux/amd64,linux/arm64 \
         -f "$PROJECT_ROOT/docker/Dockerfile.backend.compiled.ubuntu" \
+        --build-arg BASE_IMAGE="$BASE_IMAGE" \
         "${BACKEND_TAG_ARGS[@]}" \
         "${PUSH_ARGS[@]}" \
         "$PROJECT_ROOT"

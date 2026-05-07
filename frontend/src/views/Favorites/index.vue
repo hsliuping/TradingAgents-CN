@@ -429,8 +429,8 @@
         </el-form-item>
         <el-form-item label="数据源">
           <el-radio-group v-model="batchSyncForm.dataSource">
-            <el-radio label="tushare">Tushare</el-radio>
-            <el-radio label="akshare">AKShare</el-radio>
+            <el-radio label="tushare" :disabled="!availableSyncSources.tushare">Tushare</el-radio>
+            <el-radio label="akshare" :disabled="!availableSyncSources.akshare">AKShare</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="历史数据天数" v-if="batchSyncForm.syncTypes.includes('historical')">
@@ -480,8 +480,8 @@
         </el-form-item>
         <el-form-item label="数据源">
           <el-radio-group v-model="singleSyncForm.dataSource">
-            <el-radio label="tushare">Tushare</el-radio>
-            <el-radio label="akshare">AKShare</el-radio>
+            <el-radio label="tushare" :disabled="!availableSyncSources.tushare">Tushare</el-radio>
+            <el-radio label="akshare" :disabled="!availableSyncSources.akshare">AKShare</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="历史数据天数" v-if="singleSyncForm.syncTypes.includes('historical')">
@@ -522,6 +522,7 @@ import {
   type SingleStockSyncResponse,
   type StockSyncTaskStatus,
 } from '@/api/stockSync'
+import { loadManualSyncSourceState, type ManualSyncDataSource } from '@/utils/dataSource'
 import { normalizeMarketForAnalysis } from '@/utils/market'
 import { ApiClient } from '@/api/request'
 
@@ -562,9 +563,13 @@ const selectedStocks = ref<FavoriteItem[]>([])
 const batchSyncDialogVisible = ref(false)
 const batchSyncLoading = ref(false)
 const syncAllStocks = ref(false)  // 标记是否同步所有A股股票
+const availableSyncSources = ref<Record<ManualSyncDataSource, boolean>>({
+  tushare: true,
+  akshare: true
+})
 const batchSyncForm = ref({
   syncTypes: ['historical', 'financial'],
-  dataSource: 'tushare' as 'tushare' | 'akshare',
+  dataSource: 'tushare' as ManualSyncDataSource,
   days: 365
 })
 
@@ -577,9 +582,20 @@ const currentSyncStock = ref({
 })
 const singleSyncForm = ref({
   syncTypes: ['realtime'],  // 默认只选中实时行情（最常用）
-  dataSource: 'tushare' as 'tushare' | 'akshare',
+  dataSource: 'tushare' as ManualSyncDataSource,
   days: 365
 })
+
+const loadPreferredAvailableSyncSource = async (): Promise<ManualSyncDataSource | null> => {
+  try {
+    const sourceState = await loadManualSyncSourceState()
+    availableSyncSources.value = sourceState.availableSources
+    return sourceState.preferredSource
+  } catch (error) {
+    console.warn('加载可用同步数据源失败，保留当前默认值', error)
+    return null
+  }
+}
 
 // 添加对话框
 const addDialogVisible = ref(false)
@@ -764,7 +780,9 @@ const syncAllRealtime = async () => {
 
   syncRealtimeLoading.value = true
   try {
-    const res = await favoritesApi.syncRealtime('tushare')
+    const preferredSource = await loadPreferredAvailableSyncSource()
+    const realtimeSource = preferredSource || (availableSyncSources.value.akshare ? 'akshare' : 'tushare')
+    const res = await favoritesApi.syncRealtime(realtimeSource)
 
     if ((res as any)?.success) {
       ElMessage.success('自选股实时行情同步任务已提交，后台执行中')
@@ -1073,6 +1091,11 @@ const showSingleSyncDialog = (row: FavoriteItem) => {
     stock_code: row.stock_code || row.symbol || '',
     stock_name: row.stock_name || ''
   }
+  void loadPreferredAvailableSyncSource().then(preferredSource => {
+    if (preferredSource) {
+      singleSyncForm.value.dataSource = preferredSource
+    }
+  })
   singleSyncDialogVisible.value = true
 }
 
@@ -1223,6 +1246,13 @@ const handleSingleSync = async () => {
 
 // 显示批量同步对话框
 const showBatchSyncDialog = async () => {
+  const applyPreferredSource = async () => {
+    const preferredSource = await loadPreferredAvailableSyncSource()
+    if (preferredSource) {
+      batchSyncForm.value.dataSource = preferredSource
+    }
+  }
+
   if (selectedStocks.value.length === 0) {
     // 提示用户选择股票或全部同步
     try {
@@ -1243,6 +1273,7 @@ const showBatchSyncDialog = async () => {
         return
       }
       syncAllStocks.value = true  // 标记为全部同步
+      await applyPreferredSource()
       batchSyncDialogVisible.value = true
     } catch (action: any) {
       // 用户选择"取消"，不做任何操作
@@ -1252,6 +1283,7 @@ const showBatchSyncDialog = async () => {
     }
   } else {
     syncAllStocks.value = false  // 标记为选中同步
+    await applyPreferredSource()
     batchSyncDialogVisible.value = true
   }
 }
