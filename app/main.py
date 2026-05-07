@@ -1,5 +1,5 @@
 """
-TradingAgents-CN v2.0.1 FastAPI Backend
+TradingAgents-CN v2.1.0 FastAPI Backend
 主应用程序入口
 
 Copyright (c) 2025 hsliuping. All rights reserved.
@@ -43,9 +43,7 @@ from app.routers import templates_debug as templates_debug_router
 from app.routers import analysis_preferences as analysis_preferences_router
 from app.routers import user_template_configs as user_template_configs_router
 from app.routers import template_history as template_history_router
-from app.routers import intelligent_assistant as intelligent_assistant_router
-from app.routers import intelligent_screening as intelligent_screening_router
-from app.routers import backtest as backtest_router
+from app.routers import advanced_courses as advanced_courses_router
 from app.services.basics_sync_service import get_basics_sync_service
 from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
 from app.services.scheduler_service import set_scheduler_instance
@@ -57,7 +55,6 @@ from app.worker.tushare_sync_service import (
     run_tushare_financial_sync,
     run_tushare_status_check
 )
-from app.services.stop_gain_alert_service import stop_gain_alert_service
 from app.worker.akshare_sync_service import (
     run_akshare_basic_info_sync,
     run_akshare_quotes_sync,
@@ -71,9 +68,7 @@ from app.worker.baostock_sync_service import (
     run_baostock_historical_sync,
     run_baostock_status_check
 )
-from app.worker.qmt_sync_service import run_qmt_basic_info_sync, run_qmt_quotes_sync, run_qmt_historical_sync, run_qmt_financial_sync, run_qmt_status_check
 from app.worker.favorites_sync_task import run_favorites_data_sync
-from app.worker.etf_sync_service import run_etf_sync
 # 港股和美股改为按需获取+缓存模式，不再需要定时同步任务
 # from app.worker.hk_sync_service import ...
 # from app.worker.us_sync_service import ...
@@ -86,15 +81,9 @@ from app.routers import paper as paper_router
 from app.routers import portfolio as portfolio_router
 from app.routers import review as review_router
 from app.routers import email as email_router
-
-# MCP Server 集成（v3.0）
-try:
-    from core.mcp import mcp as _mcp_server
-except ModuleNotFoundError as exc:
-    _mcp_server = None
-    _mcp_import_error = exc
-else:
-    _mcp_import_error = None
+from app.routers import intelligent_assistant as intelligent_assistant_router
+from app.routers import intelligent_screening as intelligent_screening_router
+from app.routers import memory as memory_router
 
 
 def get_version() -> str:
@@ -105,7 +94,7 @@ def get_version() -> str:
             return version_file.read_text(encoding='utf-8').strip()
     except Exception:
         pass
-    return "2.0.1"  # 默认版本号
+    return "2.1.0"  # 默认版本号
 
 
 def get_build_info() -> dict:
@@ -347,136 +336,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ 工作流注册表初始化失败: {e}")
 
-    # 确保 ETF 工作流专属提示词模板存在
-    try:
-        from app.services.etf_workflow_prompt_template_service import ensure_etf_workflow_prompt_templates
-
-        await ensure_etf_workflow_prompt_templates()
-        logger.info("✅ ETF 工作流提示词模板初始化完成")
-    except Exception as e:
-        logger.error(f"❌ ETF 工作流提示词模板初始化失败: {e}")
-
-    # 🔥 初始化 Skills（从数据库加载已启用的可执行 Skills 到 ToolRegistry）
-    try:
-        from app.core.database import get_mongo_db
-        from core.skills.models import SkillMetadata
-        from core.skills.executor import SkillExecutor
-        from core.tools.registry import get_tool_registry
-
-        skill_db = get_mongo_db()
-        skill_registry = get_tool_registry()
-        cursor = skill_db.skills.find({"enabled": True})
-        skill_count = 0
-        async for doc in cursor:
-            try:
-                impl = doc.get("implementation")
-                params = doc.get("parameters", [])
-                if not impl or not params:
-                    continue  # 跳过知识型 Skill
-                if "_id" in doc:
-                    del doc["_id"]
-                skill = SkillMetadata(**doc)
-                wrapper = SkillExecutor.create_sync_wrapper(skill)
-                tool_id = skill.name.replace("-", "_")
-                skill_registry.register_function(
-                    tool_id=tool_id,
-                    func=wrapper,
-                    name=skill.description[:50],
-                    category=skill.category,
-                    description=skill.description,
-                    is_online=True,
-                    override=True,
-                )
-                skill_count += 1
-                logger.info(f"✅ 加载 Skill: {skill.name}")
-            except Exception as e:
-                logger.error(f"❌ 加载 Skill 失败 {doc.get('name')}: {e}")
-        if skill_count > 0:
-            logger.info(f"✅ Skills 初始化完成，共加载 {skill_count} 个可执行 Skill")
-        else:
-            logger.info("✅ Skills 初始化完成（无可执行 Skill）")
-    except Exception as e:
-        logger.warning(f"⚠️ Skills 初始化失败: {e}")
-
-    # 🔥 加载 AI 生成的外部 Skills（external_skills 集合）到 ToolRegistry
-    try:
-        from app.core.database import get_mongo_db
-        from core.tools.registry import get_tool_registry
-        from core.tools.external_skill_loader import load_external_skills_to_registry
-
-        ext_db = get_mongo_db()
-        ext_registry = get_tool_registry()
-        ext_count = await load_external_skills_to_registry(ext_db, ext_registry)
-        if ext_count > 0:
-            logger.info(f"✅ 外部 Skills 加载完成，共注册 {ext_count} 个 AI 生成的 Skill")
-    except Exception as e:
-        logger.warning(f"⚠️ 外部 Skills 加载失败: {e}")
-
-    # 🔥 注册 Gateway IM 适配器（QQ Bot 等）
-    try:
-        from app.core.database import get_mongo_db
-        from core.gateway.router import gateway_router
-        from core.gateway.adapters.qq import QQAdapter
-        from core.gateway.session import SessionManager
-
-        gw_db = get_mongo_db()
-        await SessionManager(gw_db).ensure_indexes()
-        qq_cfg_doc = await gw_db.system_configs.find_one({"config_key": "gateway_qq"})
-        if qq_cfg_doc and qq_cfg_doc.get("config_value"):
-            qq_cfg = qq_cfg_doc["config_value"]
-            connection_mode = qq_cfg.get("connection_mode") or "websocket"
-            if not qq_cfg.get("connection_mode"):
-                logger.warning("⚠️ Gateway QQ Bot 未配置 connection_mode，按兼容策略默认使用 WebSocket 模式")
-
-            if qq_cfg.get("enabled", True) and (not qq_cfg.get("app_id") or not qq_cfg.get("app_secret")):
-                logger.warning("⚠️ Gateway QQ Bot 已启用但缺少 app_id 或 app_secret，跳过启动")
-            else:
-                # 注册适配器（Webhook 和 WebSocket 模式都需要，用于发送回复）
-                qq_adapter = QQAdapter(config=qq_cfg)
-                gateway_router.register_adapter(qq_adapter)
-
-                if connection_mode == "websocket" and qq_cfg.get("enabled", True):
-                    # WebSocket 模式：启动后台 WS 客户端
-                    await gateway_router.start_ws_client(qq_cfg, gw_db)
-                    logger.info("✅ Gateway QQ Bot 已启动（WebSocket 模式）")
-                else:
-                    logger.info("✅ Gateway QQ Bot 适配器已注册（Webhook 模式）")
-        else:
-            logger.info("ℹ️ Gateway QQ Bot 未配置（跳过），需在 system_configs 中添加 config_key='gateway_qq'")
-
-        # 注册飞书适配器
-        try:
-            from core.gateway.adapters.feishu import FeishuAdapter
-            feishu_cfg_doc = await gw_db.system_configs.find_one({"config_key": "gateway_feishu"})
-            if feishu_cfg_doc and feishu_cfg_doc.get("config_value"):
-                feishu_cfg = feishu_cfg_doc["config_value"]
-                if feishu_cfg.get("enabled", False) and feishu_cfg.get("app_id") and feishu_cfg.get("app_secret"):
-                    feishu_adapter = FeishuAdapter(config=feishu_cfg)
-                    gateway_router.register_adapter(feishu_adapter)
-                    logger.info("✅ Gateway 飞书 Bot 适配器已注册")
-                elif feishu_cfg.get("enabled", False):
-                    logger.warning("⚠️ Gateway 飞书 Bot 已启用但缺少 app_id 或 app_secret，跳过")
-        except Exception as e:
-            logger.warning(f"⚠️ 飞书适配器注册失败: {e}")
-
-        # 注册钉钉适配器
-        try:
-            from core.gateway.adapters.dingtalk import DingTalkAdapter
-            dingtalk_cfg_doc = await gw_db.system_configs.find_one({"config_key": "gateway_dingtalk"})
-            if dingtalk_cfg_doc and dingtalk_cfg_doc.get("config_value"):
-                dingtalk_cfg = dingtalk_cfg_doc["config_value"]
-                if dingtalk_cfg.get("enabled", False) and dingtalk_cfg.get("app_key") and dingtalk_cfg.get("app_secret"):
-                    dingtalk_adapter = DingTalkAdapter(config=dingtalk_cfg)
-                    gateway_router.register_adapter(dingtalk_adapter)
-                    logger.info("✅ Gateway 钉钉 Bot 适配器已注册")
-                elif dingtalk_cfg.get("enabled", False):
-                    logger.warning("⚠️ Gateway 钉钉 Bot 已启用但缺少 app_key 或 app_secret，跳过")
-        except Exception as e:
-            logger.warning(f"⚠️ 钉钉适配器注册失败: {e}")
-
-    except Exception as e:
-        logger.warning(f"⚠️ Gateway 适配器注册失败: {e}")
-
     # 显示配置摘要
     await _print_config_summary(logger)
 
@@ -605,31 +464,6 @@ async def lifespan(app: FastAPI):
                 name="实时行情入库服务"
             )
             logger.info(f"⏱ 实时行情入库任务已启动: 每 {settings.QUOTES_INGEST_INTERVAL_SECONDS}s")
-
-        # 止损提醒扫描任务（基于用户设置的 alert_price_low）
-        if settings.STOP_LOSS_ALERT_ENABLED:
-            from app.services.stop_loss_alert_service import get_stop_loss_alert_service
-
-            stop_loss_service = get_stop_loss_alert_service()
-
-            async def _run_stop_loss_alert_scan():
-                await stop_loss_service.run_once(
-                    near_pct=settings.STOP_LOSS_ALERT_NEAR_PCT,
-                    cooldown_minutes=settings.STOP_LOSS_ALERT_COOLDOWN_MINUTES,
-                )
-
-            scheduler.add_job(
-                _run_stop_loss_alert_scan,
-                IntervalTrigger(seconds=settings.STOP_LOSS_ALERT_INTERVAL_SECONDS, timezone=settings.TIMEZONE),
-                id="stop_loss_alert_scan",
-                name="止损提醒扫描任务",
-            )
-            logger.info(
-                "⏱ 止损提醒扫描任务已启动: 每 %ss (near=%s, cooldown=%smin)",
-                settings.STOP_LOSS_ALERT_INTERVAL_SECONDS,
-                settings.STOP_LOSS_ALERT_NEAR_PCT,
-                settings.STOP_LOSS_ALERT_COOLDOWN_MINUTES,
-            )
 
         # Tushare统一数据同步任务配置
         logger.info("🔄 配置Tushare统一数据同步任务...")
@@ -836,68 +670,6 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"🔍 BaoStock状态检查已配置: {settings.BAOSTOCK_STATUS_CHECK_CRON}")
 
-        # QMT 数据同步任务配置（需 MiniQMT 运行，默认暂停）
-        scheduler.add_job(
-            run_qmt_basic_info_sync,
-            CronTrigger.from_crontab(settings.QMT_BASIC_INFO_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="qmt_basic_info_sync",
-            name="股票基础信息同步（QMT）",
-            kwargs={"force_update": False}
-        )
-        if not (settings.QMT_UNIFIED_ENABLED and settings.QMT_BASIC_INFO_SYNC_ENABLED):
-            scheduler.pause_job("qmt_basic_info_sync")
-            logger.info("⏸️ QMT 基础信息同步已添加但暂停（需在 .env 设置 QMT_UNIFIED_ENABLED=true 并确保 MiniQMT 运行）")
-        else:
-            logger.info("📋 QMT 基础信息同步已配置")
-
-        scheduler.add_job(
-            run_qmt_quotes_sync,
-            CronTrigger.from_crontab(settings.QMT_QUOTES_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="qmt_quotes_sync",
-            name="实时行情同步（QMT）"
-        )
-        if not (settings.QMT_UNIFIED_ENABLED and settings.QMT_QUOTES_SYNC_ENABLED):
-            scheduler.pause_job("qmt_quotes_sync")
-            logger.info(f"⏸️ QMT 行情同步已添加但暂停: {settings.QMT_QUOTES_SYNC_CRON}")
-        else:
-            logger.info(f"📈 QMT 行情同步已配置: {settings.QMT_QUOTES_SYNC_CRON}")
-
-        scheduler.add_job(
-            run_qmt_historical_sync,
-            CronTrigger.from_crontab(settings.QMT_HISTORICAL_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="qmt_historical_sync",
-            name="历史数据同步（QMT）"
-        )
-        if not (settings.QMT_UNIFIED_ENABLED and settings.QMT_HISTORICAL_SYNC_ENABLED):
-            scheduler.pause_job("qmt_historical_sync")
-            logger.info(f"⏸️ QMT 历史数据同步已添加但暂停: {settings.QMT_HISTORICAL_SYNC_CRON}")
-        else:
-            logger.info(f"📊 QMT 历史数据同步已配置: {settings.QMT_HISTORICAL_SYNC_CRON}")
-
-        scheduler.add_job(
-            run_qmt_financial_sync,
-            CronTrigger.from_crontab(settings.QMT_FINANCIAL_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="qmt_financial_sync",
-            name="财务数据同步（QMT）"
-        )
-        if not (settings.QMT_UNIFIED_ENABLED and settings.QMT_FINANCIAL_SYNC_ENABLED):
-            scheduler.pause_job("qmt_financial_sync")
-            logger.info(f"⏸️ QMT 财务数据同步已添加但暂停: {settings.QMT_FINANCIAL_SYNC_CRON}")
-        else:
-            logger.info(f"💰 QMT 财务数据同步已配置: {settings.QMT_FINANCIAL_SYNC_CRON}")
-
-        scheduler.add_job(
-            run_qmt_status_check,
-            CronTrigger.from_crontab(settings.QMT_STATUS_CHECK_CRON, timezone=settings.TIMEZONE),
-            id="qmt_status_check",
-            name="数据源状态检查（QMT）"
-        )
-        if not (settings.QMT_UNIFIED_ENABLED and settings.QMT_STATUS_CHECK_ENABLED):
-            scheduler.pause_job("qmt_status_check")
-            logger.info(f"⏸️ QMT 状态检查已添加但暂停: {settings.QMT_STATUS_CHECK_CRON}")
-        else:
-            logger.info(f"🔍 QMT 状态检查已配置: {settings.QMT_STATUS_CHECK_CRON}")
-
         # 自选股A股数据同步任务配置
         logger.info("🔄 配置自选股A股数据同步任务...")
         
@@ -912,20 +684,6 @@ async def lifespan(app: FastAPI):
             logger.info(f"⏸️ 自选股A股数据同步已添加但暂停: {settings.FAVORITES_DATA_SYNC_CRON}")
         else:
             logger.info(f"⭐ 自选股A股数据同步已配置: {settings.FAVORITES_DATA_SYNC_CRON} (历史数据+财务数据)")
-
-        # ETF 数据同步任务配置（etf_basic_info + etf_daily_quotes）
-        scheduler.add_job(
-            run_etf_sync,
-            CronTrigger.from_crontab(settings.ETF_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="etf_sync",
-            name="ETF 数据同步（基础信息+日线）",
-            kwargs={"force_update": False, "days": settings.ETF_SYNC_DAYS}
-        )
-        if not settings.ETF_SYNC_ENABLED:
-            scheduler.pause_job("etf_sync")
-            logger.info(f"⏸️ ETF 数据同步已添加但暂停: {settings.ETF_SYNC_CRON}")
-        else:
-            logger.info(f"📈 ETF 数据同步已配置: {settings.ETF_SYNC_CRON}")
 
         # 新闻数据同步任务配置（使用AKShare同步所有股票新闻）
         logger.info("🔄 配置新闻数据同步任务...")
@@ -1006,38 +764,7 @@ async def lifespan(app: FastAPI):
         )
         logger.info("🗓️ 交易日历缓存刷新任务已配置（每日 18:30 执行）")
 
-        # 外部渠道零星会话定期沉淀到研究主题
-        if settings.IM_TOPIC_DIGEST_ENABLED:
-            from app.core.database import get_mongo_db as _get_db
-            from app.services.im_topic_digest_service import IMTopicDigestService
-
-            digest_service = IMTopicDigestService(_get_db())
-
-            async def _run_im_topic_digest():
-                await digest_service.run_once(
-                    min_messages=settings.IM_TOPIC_DIGEST_MIN_MESSAGES,
-                    lookback_limit=settings.IM_TOPIC_DIGEST_LOOKBACK_LIMIT,
-                )
-
-            scheduler.add_job(
-                _run_im_topic_digest,
-                CronTrigger.from_crontab(settings.IM_TOPIC_DIGEST_CRON, timezone=settings.TIMEZONE),
-                id="im_topic_digest",
-                name="外部会话沉淀到研究主题",
-            )
-            logger.info("🧩 外部会话沉淀任务已配置: %s", settings.IM_TOPIC_DIGEST_CRON)
-        else:
-            logger.info("⏸️ 外部会话沉淀任务已关闭")
-
         scheduler.start()
-
-        # 止盈提醒扫描任务（基于用户设置的 alert_gain_price）
-        try:
-            stop_gain_alert_service.set_event_loop(asyncio.get_running_loop())
-            stop_gain_alert_service.start()
-            logger.info("✅ 止盈提醒服务已启动")
-        except Exception as e:
-            logger.warning(f"⚠️ 止盈提醒服务启动失败（不影响启动）: {e}")
 
         # 设置调度器实例到服务中，以便API可以管理任务
         set_scheduler_instance(scheduler)
@@ -1054,17 +781,6 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ 调度器启动失败: {e}", exc_info=True)
         raise  # 抛出异常，阻止应用启动
 
-    # 恢复已启用的 MCP 服务器工具到 ToolRegistry
-    try:
-        from app.core.database import get_mongo_db as _get_db
-        from app.services.mcp_service import MCPService as _MCPService
-        _mcp_db = _get_db()
-        if _mcp_db is not None:
-            _mcp_svc = _MCPService(_mcp_db)
-            await _mcp_svc.restore_enabled_servers()
-    except Exception as e:
-        logger.warning(f"⚠️ 恢复 MCP 工具失败（不影响启动）: {e}")
-
     try:
         yield
     finally:
@@ -1078,6 +794,16 @@ async def lifespan(app: FastAPI):
             logger.info("🛑 统一线程池同步服务已停止")
         except Exception as e:
             logger.warning(f"统一线程池同步服务关闭错误: {e}")
+
+        # 🔥 停止财务数据同步服务的线程池
+        try:
+            from app.worker.financial_data_sync_service import get_financial_sync_service
+            financial_sync_service = await get_financial_sync_service()
+            if financial_sync_service is not None:
+                financial_sync_service.shutdown(timeout=30.0)
+                logger.info("🛑 财务数据同步服务线程池已停止")
+        except Exception as e:
+            logger.warning(f"财务数据同步服务停止错误: {e}")
 
         # 🔥 停止线程池 Worker
         try:
@@ -1105,11 +831,6 @@ async def lifespan(app: FastAPI):
         logger.info("TradingAgents FastAPI backend stopped")
 
 
-# ── MCP Sub-App（Streamable HTTP / SSE） ──
-# 当前 MCP SDK 使用 streamable_http_app() 生成可挂载的 Starlette 子应用。
-_mcp_app = _mcp_server.streamable_http_app() if _mcp_server is not None else None
-_app_lifespan = lifespan
-
 # 创建FastAPI应用
 app = FastAPI(
     title="TradingAgents-CN API",
@@ -1117,53 +838,37 @@ app = FastAPI(
     version=get_version(),
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
-    lifespan=_app_lifespan,
+    lifespan=lifespan
 )
 
-# 挂载 MCP Server 到 /mcp 路径
-# 客户端通过 http://host:port/mcp/ 访问 Streamable HTTP 端点
-if _mcp_app is not None:
-    app.mount("/mcp", _mcp_app)
-elif _mcp_import_error is not None:
-    logging.getLogger("app.main").warning(
-        "⚠️ MCP Server 未启用，缺少依赖或导入失败: %s",
-        _mcp_import_error,
-    )
-
-# ---- 中间件注册（add_middleware 是 LIFO，最先添加的在最内层）----
-
-# [1] 认证守卫（最内层 — Session/CORS 已就绪后才执行）
-from app.middleware.auth_guard import AuthGuardMiddleware
-app.add_middleware(AuthGuardMiddleware)
-
-# [2] 安全中间件
+# 安全中间件
 if not settings.DEBUG:
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=settings.ALLOWED_HOSTS
     )
 
-# [3] CORS中间件
-_use_credentials = "*" not in settings.ALLOWED_ORIGINS
+# CORS中间件
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
-    allow_credentials=_use_credentials,
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# [4] Session 中间件
+# Session 中间件（用于 Web 前端的 Cookie 认证）
+# 注意：必须在 CORS 中间件之后添加
 app.add_middleware(
     SessionMiddleware,
-    secret_key=settings.JWT_SECRET,
-    session_cookie="tradingagents_session",
-    max_age=3600,
-    same_site="lax",
-    https_only=False if settings.DEBUG else True,
+    secret_key=settings.JWT_SECRET,  # 使用相同的密钥
+    session_cookie="tradingagents_session",  # Cookie 名称
+    max_age=3600,  # 1 小时过期
+    same_site="lax",  # CSRF 保护
+    https_only=False if settings.DEBUG else True,  # 生产环境使用 HTTPS
 )
 
-# [5] 操作日志中间件
+# 操作日志中间件
 app.add_middleware(OperationLogMiddleware)
 
 
@@ -1212,39 +917,9 @@ async def log_requests(request: Request, call_next):
 from app.middleware.request_id import RequestIDMiddleware
 app.add_middleware(RequestIDMiddleware)
 
-from fastapi.exceptions import HTTPException as FastAPIHTTPException
-from starlette.exceptions import HTTPException as StarletteHTTPException
-
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """对 >=500 的 HTTPException 隐藏内部细节，防止泄漏堆栈/SQL 等信息。"""
-    request_id = getattr(request.state, "request_id", None)
-    if exc.status_code >= 500:
-        logging.error("HTTPException %s: %s", exc.status_code, exc.detail, exc_info=False)
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={
-                "error": {
-                    "code": "INTERNAL_SERVER_ERROR",
-                    "message": "Internal server error occurred",
-                    "request_id": request_id,
-                }
-            },
-        )
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": {
-                "code": f"HTTP_{exc.status_code}",
-                "message": exc.detail,
-                "request_id": request_id,
-            }
-        },
-    )
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logging.error("Unhandled exception: %s", exc, exc_info=True)
+    logging.error(f"Unhandled exception: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={
@@ -1357,6 +1032,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 app.include_router(reports.router, tags=["reports"])
 app.include_router(screening.router, prefix="/api/screening", tags=["screening"])
+app.include_router(intelligent_screening_router.router, tags=["screening-intelligent"])
 app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
 app.include_router(favorites.router, prefix="/api", tags=["favorites"])
 app.include_router(stocks_router.router, prefix="/api", tags=["stocks"])
@@ -1395,6 +1071,8 @@ app.include_router(paper_router.router, prefix="/api", tags=["paper"])
 app.include_router(portfolio_router.router, prefix="/api", tags=["portfolio"])
 app.include_router(review_router.router, prefix="/api", tags=["review"])
 app.include_router(email_router.router, tags=["email"])
+app.include_router(intelligent_assistant_router.router, tags=["assistant"])
+app.include_router(memory_router.router, tags=["memory"])
 app.include_router(tushare_init.router, prefix="/api", tags=["tushare-init"])
 app.include_router(akshare_init.router, prefix="/api", tags=["akshare-init"])
 app.include_router(baostock_init.router, prefix="/api", tags=["baostock-init"])
@@ -1411,9 +1089,7 @@ app.include_router(templates_debug_router.router, tags=["templates-debug"])
 app.include_router(analysis_preferences_router.router, tags=["analysis-preferences"])
 app.include_router(user_template_configs_router.router, tags=["user-template-configs"])
 app.include_router(template_history_router.router, tags=["template-history"])
-app.include_router(intelligent_assistant_router.router, tags=["assistant"])
-app.include_router(intelligent_screening_router.router, tags=["intelligent-screening"])
-app.include_router(backtest_router.router)
+app.include_router(advanced_courses_router.router, tags=["advanced-courses"])
 
 # 自选股分组管理路由
 from app.routers import watchlist_groups as watchlist_groups_router
@@ -1431,33 +1107,9 @@ register_router_with_log(app, license_router.router, "授权验证路由 (licens
 from app.routers import workflows as workflows_router
 from app.routers import agents as agents_router
 from app.routers import tools as tools_router
-from app.routers import workflow_api as workflow_api_router
-from app.routers import workflow_growth as workflow_growth_router
 register_router_with_log(app, workflows_router.router, "工作流路由 (workflows)", tags=["workflows"])
 register_router_with_log(app, agents_router.router, "智能体路由 (agents)", tags=["agents"])
-register_router_with_log(app, workflow_api_router.router, "工作流API路由 (workflow-api)", tags=["workflow-api"])
 register_router_with_log(app, tools_router.router, "工具路由 (tools)", tags=["tools"])
-register_router_with_log(app, workflow_growth_router.router, "工作流成长路由 (workflow-growth)", tags=["workflow-growth"])
-
-# v2.3 Skill 管理路由
-from app.routers import skills as skills_router
-register_router_with_log(app, skills_router.router, "Skill 路由 (skills)", tags=["skills"])
-
-# v3.0 Skill 生成路由（AI 驱动）
-from app.routers import skill_generation as skill_generation_router
-register_router_with_log(app, skill_generation_router.router, "Skill生成路由 (skill-generation)", tags=["skill-generation"])
-
-# v3.0 AI 工作流架构师路由
-from app.routers import workflow_generation as workflow_generation_router
-register_router_with_log(app, workflow_generation_router.router, "AI工作流架构师路由 (workflow-generation)", tags=["workflow-generation"])
-
-# v3.0 Agent 工坊路由
-from app.routers import agent_workshop as agent_workshop_router
-register_router_with_log(app, agent_workshop_router.router, "Agent工坊路由 (agent-workshop)", tags=["agent-workshop"])
-
-# v2.3 知识库管理路由
-from app.routers import knowledge as knowledge_router
-register_router_with_log(app, knowledge_router.router, "知识库管理路由 (knowledge)", tags=["knowledge"])
 
 # v2.0 个人交易计划路由
 from app.routers import trading_system as trading_system_router
@@ -1466,45 +1118,6 @@ register_router_with_log(app, trading_system_router.router, "交易计划路由 
 # v2.0 统一任务中心路由
 from app.routers import unified_tasks as unified_tasks_router
 register_router_with_log(app, unified_tasks_router.router, "统一任务中心路由 (unified-tasks)", tags=["unified-task-center"])
-
-# v2.0 报告模板路由
-from app.routers import report_templates as report_templates_router
-register_router_with_log(app, report_templates_router.router, "报告模板路由 (report-templates)", tags=["report-templates"])
-
-# v3.1 MCP 服务器管理路由
-from app.routers import mcp as mcp_router
-register_router_with_log(app, mcp_router.router, "MCP服务器管理路由 (mcp)", tags=["mcp"])
-
-# v3.1 Skill 缺口感知路由
-from app.routers import skill_gaps as skill_gaps_router
-register_router_with_log(app, skill_gaps_router.router, "Skill缺口感知路由 (skill-gaps)", tags=["skill-gaps"])
-
-# v3.1 渠道推送配置路由（飞书/钉钉/企微 Webhook + 邮件）
-from app.routers import channel_configs as channel_configs_router
-register_router_with_log(app, channel_configs_router.router, "渠道推送配置路由 (channel-configs)", tags=["channel-configs"])
-
-# v4.0 行业/个股分析配置路由（AI 生成 + CRUD）
-from app.routers import analysis_profiles as analysis_profiles_router
-register_router_with_log(app, analysis_profiles_router.router, "行业分析配置路由 (analysis-profiles)", tags=["analysis-profiles"])
-
-# v3.0 分层提示词预览路由
-from app.routers import prompt_preview as prompt_preview_router
-register_router_with_log(app, prompt_preview_router.router, "分层提示词预览路由 (prompt-preview)", tags=["prompt-preview"])
-
-# v3.0 分层提示词注入策略路由
-from app.routers import prompt_injection_policies as prompt_policies_router
-register_router_with_log(app, prompt_policies_router.router, "注入策略路由 (prompt-policies)", tags=["prompt-policies"])
-
-# v3.0 Prompt 设计助手路由
-from app.routers import prompt_design as prompt_design_router
-register_router_with_log(app, prompt_design_router.router, "Prompt 设计助手路由 (prompt-design)", tags=["prompt-design"])
-
-# v3.0 Gateway — IM 平台 Webhook 接入（飞书/QQ/钉钉）
-from app.routers import gateway as gateway_router
-register_router_with_log(app, gateway_router.router, "Gateway IM 平台接入 (gateway)", tags=["gateway"])
-
-from app.routers import memory as memory_router
-register_router_with_log(app, memory_router.router, "mem0 统一记忆层 (memory)", tags=["memory"])
 
 # 路由注册完成，打印总结
 logger.info("=" * 70)

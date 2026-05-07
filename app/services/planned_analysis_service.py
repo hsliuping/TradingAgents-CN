@@ -33,7 +33,10 @@ from core.tools import get_tool_registry, tool_metadata_list_to_openai
 
 from app.services.intelligent_assistant_service import (
     _get_assistant_llm_config,
+    _build_assistant_model_preferences,
     _build_fallback_memory_facts,
+    _get_preferred_assistant_config_id,
+    _get_preferred_assistant_model,
     _get_system_prompt,
     _get_latest_trade_date,
     get_assistant_conversation,
@@ -288,7 +291,18 @@ class PlannedAnalysisService:
         self._llm_client: Optional[UnifiedLLMClient] = None
         self._tool_functions: Optional[Dict[str, Any]] = None
         self._openai_tools: Optional[List[Dict[str, Any]]] = None
-        self._preferred_models = preferred_models or {}
+        self._preferred_model = _get_preferred_assistant_model(preferred_models)
+        self._preferred_model_config_id = _get_preferred_assistant_config_id(preferred_models)
+
+    def _get_react_preferred_models(self) -> Dict[str, str]:
+        if not self._preferred_model and not self._preferred_model_config_id:
+            return {}
+        preferred: Dict[str, str] = {}
+        if self._preferred_model:
+            preferred["model"] = self._preferred_model
+        if self._preferred_model_config_id:
+            preferred["model_config_id"] = self._preferred_model_config_id
+        return preferred
 
     async def _ensure_client(self) -> bool:
         """确保 LLM 客户端和工具已加载"""
@@ -297,10 +311,7 @@ class PlannedAnalysisService:
 
         llm_config = await _get_assistant_llm_config(
             self._db,
-            preferred_models={
-                "quick_model": self._preferred_models.get("deep_model") or self._preferred_models.get("quick_model"),
-                "deep_model": self._preferred_models.get("deep_model"),
-            },
+            preferred_models=self._get_react_preferred_models() or None,
         )
         if not llm_config:
             return False
@@ -451,10 +462,7 @@ class PlannedAnalysisService:
                 )
                 react_service = IntelligentAssistantService(
                     self._db,
-                    preferred_models={
-                        "quick_model": self._preferred_models.get("deep_model") or self._preferred_models.get("quick_model"),
-                        "deep_model": self._preferred_models.get("deep_model"),
-                    },
+                    preferred_models=self._get_react_preferred_models(),
                 )
                 async for event_str in react_service.chat_stream(question, conversation_id):
                     yield event_str
@@ -768,10 +776,7 @@ class PlannedAnalysisService:
         logger.info("[规划分析] 回退到 ReAct 模式")
         react_service = IntelligentAssistantService(
             self._db,
-            preferred_models={
-                "quick_model": self._preferred_models.get("deep_model") or self._preferred_models.get("quick_model"),
-                "deep_model": self._preferred_models.get("deep_model"),
-            },
+            preferred_models=self._get_react_preferred_models(),
         )
         result = await react_service.chat(question, conversation_id)
         return PlannedAnalysisResult(
@@ -821,16 +826,18 @@ async def stream_planned_analysis_with_assistant(
     user_message: str,
     user_id: str,
     conversation_id: Optional[str] = None,
+    model: Optional[str] = None,
     quick_model: Optional[str] = None,
     deep_model: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """对外提供带持久化的规划分析流式接口。"""
     service = PlannedAnalysisService(
         db,
-        preferred_models={
-            "quick_model": quick_model,
-            "deep_model": deep_model,
-        },
+        preferred_models=_build_assistant_model_preferences(
+            model=model,
+            quick_model=quick_model,
+            deep_model=deep_model,
+        ),
     )
 
     collected_reply = ""

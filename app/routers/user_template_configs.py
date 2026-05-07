@@ -10,11 +10,17 @@ from app.models.user_template_config import (
     UserTemplateConfigCreate,
     UserTemplateConfigUpdate
 )
+from app.core.permissions import require_feature
 from app.core.response import ok, fail
+from app.routers.auth_db import get_current_user
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/user-template-configs", tags=["user-template-configs"])
+router = APIRouter(
+    prefix="/api/v1/user-template-configs",
+    tags=["user-template-configs"],
+    dependencies=[Depends(require_feature("prompt_templates"))]
+)
 
 
 # 依赖注入：获取服务实例
@@ -25,12 +31,13 @@ def get_config_service() -> UserTemplateConfigService:
 
 @router.post("", response_model=dict)
 async def create_config(
-    user_id: str = Query(...),
     config_data: UserTemplateConfigCreate = None,
+    current_user: dict = Depends(get_current_user),
     config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
     """创建用户模板配置"""
     try:
+        user_id = str(current_user["id"])
         if not config_data:
             return fail("配置数据不能为空", 400)
 
@@ -55,14 +62,15 @@ async def create_config(
 
 @router.get("/active", response_model=dict)
 async def get_active_config(
-    user_id: str = Query(...),
     agent_name: str = Query(...),
     agent_type: Optional[str] = Query(None),
     preference_id: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
     config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
     """获取活跃配置"""
     try:
+        user_id = str(current_user["id"])
         # 如果没有提供 agent_type，尝试从 agent_name 推断
         if not agent_type:
             # 从 agent_name 推断 agent_type
@@ -97,11 +105,16 @@ async def get_active_config(
 @router.get("/user/{user_id}", response_model=dict)
 async def get_user_configs(
     user_id: str,
+    current_user: dict = Depends(get_current_user),
     config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
     """获取用户所有配置"""
     try:
-        configs = await config_service.get_user_configs(user_id)
+        current_user_id = str(current_user["id"])
+        if user_id != current_user_id:
+            return fail("无权访问其他用户配置", 403)
+
+        configs = await config_service.get_user_configs(current_user_id)
 
         return ok({
             "configs": [
@@ -124,14 +137,18 @@ async def get_user_configs(
 @router.get("/{config_id}", response_model=dict)
 async def get_config(
     config_id: str,
+    current_user: dict = Depends(get_current_user),
     config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
     """获取配置"""
     try:
+        user_id = str(current_user["id"])
         config = await config_service.get_config(config_id)
 
         if not config:
             return fail("配置不存在", 404)
+        if str(config.user_id) != user_id:
+            return fail("配置不存在或无权访问", 403)
 
         return ok({
             "id": str(config.id),
@@ -154,10 +171,18 @@ async def get_config(
 async def update_config(
     config_id: str,
     update_data: UserTemplateConfigUpdate,
+    current_user: dict = Depends(get_current_user),
     config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
     """更新配置"""
     try:
+        user_id = str(current_user["id"])
+        current_config = await config_service.get_config(config_id)
+        if not current_config:
+            return fail("配置不存在", 404)
+        if str(current_config.user_id) != user_id:
+            return fail("配置不存在或无权访问", 403)
+
         config = await config_service.update_config(config_id, update_data)
 
         if not config:
@@ -176,14 +201,15 @@ async def update_config(
 
 @router.get("/effective-template", response_model=dict)
 async def get_effective_template(
-    user_id: str = Query(...),
     agent_type: str = Query(...),
     agent_name: str = Query(...),
     preference_id: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
     config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
     """获取有效模板（用户优先，系统兜底）"""
     try:
+        user_id = str(current_user["id"])
         template = await config_service.get_effective_template(
             user_id,
             agent_type,

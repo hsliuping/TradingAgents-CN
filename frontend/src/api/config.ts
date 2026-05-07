@@ -34,6 +34,7 @@ export interface LLMProvider {
 }
 
 export interface LLMConfig {
+  config_id?: string
   provider: string
   provider_name?: string
   model_name: string
@@ -65,6 +66,20 @@ export interface LLMConfig {
     cost?: number  // 成本(1-5)
     quality?: number  // 质量(1-5)
   }
+}
+
+export interface FetchProviderModelsFilters {
+  type?: string
+  modalities?: string
+  features?: string[]
+  provider_names?: string[]
+  model_keyword?: string
+  sort_by?: string
+  sort_order?: string
+  limit?: number
+  recommended_only?: boolean
+  tools_only?: boolean
+  exclude_preview?: boolean
 }
 
 export interface DataSourceConfig {
@@ -420,7 +435,7 @@ export const configApi = {
   },
 
   // 从厂家 API 获取模型列表
-  fetchProviderModels(provider: string): Promise<{
+  fetchProviderModels(provider: string, filters?: FetchProviderModelsFilters): Promise<{
     success: boolean
     message?: string
     models?: Array<{
@@ -429,7 +444,7 @@ export const configApi = {
       context_length?: number
     }>
   }> {
-    return ApiClient.post(`/api/config/llm/providers/${provider}/fetch-models`)
+    return ApiClient.post(`/api/config/llm/providers/${provider}/fetch-models`, filters || {})
   },
 
   // ========== 大模型配置管理 ==========
@@ -569,10 +584,27 @@ export const configApi = {
   },
 
   // 获取默认模型配置
-  getDefaultModels(): Promise<{ quick_analysis_model: string; deep_analysis_model: string }> {
+  getDefaultModels(): Promise<{
+    default_provider?: string
+    quick_analysis_model: string
+    quick_analysis_model_config_id?: string
+    deep_analysis_model: string
+    deep_analysis_model_config_id?: string
+    deep_reasoning_model?: string
+    deep_reasoning_model_config_id?: string
+    coding_model?: string
+    coding_model_config_id?: string
+  }> {
     return ApiClient.get('/api/config/settings').then((settings: any) => ({
+      default_provider: settings.data?.default_provider || settings.default_provider || '',
       quick_analysis_model: settings.data?.quick_analysis_model || settings.quick_analysis_model || 'qwen-turbo',
-      deep_analysis_model: settings.data?.deep_analysis_model || settings.deep_analysis_model || 'qwen-max'
+      quick_analysis_model_config_id: settings.data?.quick_analysis_model_config_id || settings.quick_analysis_model_config_id || '',
+      deep_analysis_model: settings.data?.deep_analysis_model || settings.deep_analysis_model || 'qwen-max',
+      deep_analysis_model_config_id: settings.data?.deep_analysis_model_config_id || settings.deep_analysis_model_config_id || '',
+      deep_reasoning_model: settings.data?.deep_reasoning_model || settings.deep_reasoning_model || '',
+      deep_reasoning_model_config_id: settings.data?.deep_reasoning_model_config_id || settings.deep_reasoning_model_config_id || '',
+      coding_model: settings.data?.coding_model || settings.coding_model || '',
+      coding_model_config_id: settings.data?.coding_model_config_id || settings.coding_model_config_id || ''
     }))
   },
 

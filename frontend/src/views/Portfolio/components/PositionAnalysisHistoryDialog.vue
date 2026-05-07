@@ -7,7 +7,7 @@
     @close="handleClose"
   >
     <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px">
-      查看该股票的所有分析报告历史记录
+      {{ isEtfPosition ? '查看该ETF的所有分析报告历史记录' : '查看该股票的所有分析报告历史记录' }}
     </el-alert>
 
     <!-- 数据表格 -->
@@ -129,6 +129,7 @@ import { ref, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { portfolioApi, type PositionItem, type PositionAnalysisResult } from '@/api/portfolio'
 import PositionAnalysisDetailDialog from './PositionAnalysisDetailDialog.vue'
+import { getMarketByStockCode } from '@/utils/market'
 
 const props = defineProps<{
   modelValue: boolean
@@ -151,6 +152,10 @@ const selectedReport = ref<PositionAnalysisResult | null>(null)
 const positionId = computed(() => {
   if (!props.position) return null
   return `${props.position.code}_${props.position.market}`
+})
+const isEtfPosition = computed(() => {
+  if (!props.position) return false
+  return props.position.market === 'CN' && getMarketByStockCode(props.position.code) === 'ETF'
 })
 
 watch(() => props.modelValue, (val) => {

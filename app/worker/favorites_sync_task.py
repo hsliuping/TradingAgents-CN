@@ -16,6 +16,10 @@ from app.worker.financial_data_sync_service import FinancialDataSyncService
 
 logger = logging.getLogger("webapi")
 
+# ETF 代码前缀（与 ETF 同步服务保持一致）
+ETF_SH_PREFIXES = ("50", "51", "52", "56", "58")
+ETF_SZ_PREFIXES = ("15", "16", "18")
+
 
 def _get_sync_data_sources(enabled_sources: List[str]) -> List[str]:
     """从启用的数据源中排除 local，得到用于同步的数据源列表（按优先级顺序）。"""
@@ -58,6 +62,17 @@ async def get_all_favorite_a_stocks() -> List[str]:
     except Exception as e:
         logger.error(f"❌ 获取自选股A股列表失败: {e}")
         return []
+
+
+def _is_etf_code(code: str) -> bool:
+    """判断 6 位代码是否为 ETF。"""
+    normalized = str(code or "").zfill(6)
+    return len(normalized) == 6 and normalized.startswith(ETF_SH_PREFIXES + ETF_SZ_PREFIXES)
+
+
+def _filter_stock_codes_for_financial_sync(codes: List[str]) -> List[str]:
+    """财务同步仅保留股票代码，排除 ETF。"""
+    return [code for code in codes if not _is_etf_code(code)]
 
 
 async def sync_favorites_historical_data():
@@ -281,6 +296,25 @@ async def sync_favorites_financial_data():
                 "synced_count": 0
             }
         
+        # 财务数据仅对股票同步，ETF 走 ETF 专用数据链路。
+        stock_codes = _filter_stock_codes_for_financial_sync(a_stock_codes)
+        skipped_etf_count = len(a_stock_codes) - len(stock_codes)
+
+        if skipped_etf_count > 0:
+            logger.info(f"⏭️ 自选股财务同步已排除 ETF: {skipped_etf_count} 只")
+
+        if not stock_codes:
+            logger.info("ℹ️ 自选股中仅包含 ETF，无需执行股票财务同步")
+            return {
+                "success": True,
+                "message": "仅包含 ETF，已跳过股票财务同步",
+                "total_count": len(a_stock_codes),
+                "synced_count": 0,
+                "error_count": 0,
+                "skipped_etf_count": skipped_etf_count,
+                "details": {}
+            }
+
         # 2. 按数据源优先级获取同步数据源列表（排除 local）
         enabled_sources = await get_enabled_data_sources_async("a_shares")
         data_sources = _get_sync_data_sources(enabled_sources)
@@ -292,7 +326,7 @@ async def sync_favorites_financial_data():
         
         # 同步财务数据（获取最近20期，约5年），数据源按优先级顺序
         result = await financial_service.sync_financial_data(
-            symbols=a_stock_codes,
+            symbols=stock_codes,
             data_sources=data_sources,
             report_types=["quarterly", "annual"],  # 季报和年报
             batch_size=50,
@@ -309,7 +343,8 @@ async def sync_favorites_financial_data():
         
         logger.info(
             f"✅ 自选股A股财务数据同步完成: "
-            f"股票数={len(a_stock_codes)}, "
+            f"股票数={len(stock_codes)}, "
+            f"排除ETF={skipped_etf_count}, "
             f"成功同步={total_synced}, "
             f"失败={total_errors}"
         )
@@ -317,9 +352,10 @@ async def sync_favorites_financial_data():
         return {
             "success": True,
             "message": "自选股A股财务数据同步完成",
-            "total_count": len(a_stock_codes),
+            "total_count": len(stock_codes),
             "synced_count": total_synced,
             "error_count": total_errors,
+            "skipped_etf_count": skipped_etf_count,
             "details": {source: {
                 "success_count": stats.success_count,
                 "error_count": stats.error_count,

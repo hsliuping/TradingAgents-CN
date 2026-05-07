@@ -194,6 +194,26 @@ export interface SkillGenerationRecommendations {
   external_sources: string[]
 }
 
+export interface ReconToolTrace {
+  tool_name: string
+  arguments: Record<string, any>
+  success: boolean
+  duration_ms: number
+  result_preview: string
+  error?: string
+}
+
+export interface ImplementationFactReportView {
+  task_summary: string
+  recommended_strategy: string
+  available_helpers: Array<{ module: string; name: string; reason?: string }>
+  sample_fields: Record<string, string[]>
+  validation_checks: Array<{ name: string; description: string; field?: string }>
+  notes: string[]
+  tool_traces: ReconToolTrace[]
+  confidence: number
+}
+
 /** 分页列表 */
 export interface PaginatedSkills {
   total: number
@@ -231,6 +251,7 @@ export interface SessionDetail {
   boundary_check: BoundaryCheck | null
   handoff_context?: SkillHandoffContext | null
   spec: Record<string, any> | null
+  fact_report?: ImplementationFactReportView | null
   spec_confirmed: boolean
   recommendations?: SkillGenerationRecommendations | null
   pipeline_result: Record<string, any> | null
@@ -238,6 +259,13 @@ export interface SessionDetail {
   pipeline_message?: string
   pipeline_iteration?: number
   pipeline_progress?: number
+  pipeline_details?: Array<{
+    stage: string
+    message: string
+    iteration: number
+    progress: number
+    timestamp?: string
+  }>
   created_at: string
   updated_at: string
 }
@@ -320,8 +348,8 @@ export const skillGenerationApi = {
   },
 
   /** 预览规格（不执行管线），用于规格确认步骤 */
-  previewSpec: async (sessionId: string, message: string = '确认'): Promise<{ spec: Record<string, any>; recommendations?: SkillGenerationRecommendations | null }> => {
-    const res = await request.post<ApiOk<{ spec: Record<string, any>; recommendations?: SkillGenerationRecommendations | null }>>(`${BASE}/sessions/${sessionId}/preview-spec`, { message })
+  previewSpec: async (sessionId: string, message: string = '确认'): Promise<{ spec: Record<string, any>; recommendations?: SkillGenerationRecommendations | null; fact_report?: ImplementationFactReportView | null }> => {
+    const res = await request.post<ApiOk<{ spec: Record<string, any>; recommendations?: SkillGenerationRecommendations | null; fact_report?: ImplementationFactReportView | null }>>(`${BASE}/sessions/${sessionId}/preview-spec`, { message })
     return (res as any).data
   },
 

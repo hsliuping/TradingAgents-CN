@@ -13,7 +13,7 @@
           <div class="title-section">
             <h1 class="report-title">
               <el-icon><Document /></el-icon>
-              {{ report.stock_name || report.stock_symbol }} 分析报告
+              {{ report.stock_name || report.stock_symbol }} 研究报告
             </h1>
             <div class="report-meta">
               <el-tag type="primary">{{ report.stock_symbol }}</el-tag>
@@ -95,11 +95,11 @@
               <div class="disclaimer-text">
                 <p style="margin: 0 0 8px 0;"><strong>⚠️ 重要风险提示与免责声明</strong></p>
                 <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
-                  <li><strong>平台性质：</strong>本平台为AI辅助分析技术学习平台，专注于AI技术在股票分析领域的应用验证和技术学习。</li>
-                  <li><strong>分析目的：</strong>所有分析结论仅用于学习和验证AI辅助分析技术，不作为真实炒股操盘指导或投资依据。</li>
+                  <li><strong>平台性质：</strong>本平台为AI辅助分析技术学习平台，专注于AI技术在证券与ETF分析领域的应用验证和技术学习。</li>
+                  <li><strong>分析目的：</strong>所有分析结论仅用于学习和验证AI辅助分析技术，不作为真实交易操盘指导或投资依据。</li>
                   <li><strong>非投资建议：</strong>所有分析结果、评分、建议仅为技术验证参考，不构成任何买卖建议或投资决策依据。</li>
                   <li><strong>数据局限性：</strong>分析基于历史数据和公开信息，可能存在延迟、不完整或不准确的情况，无法预测未来市场走势。</li>
-                  <li><strong>投资风险：</strong>股票投资存在市场风险、流动性风险、政策风险等多种风险，可能导致本金损失。</li>
+                  <li><strong>投资风险：</strong>股票与ETF投资均存在市场风险、流动性风险、政策风险等多种风险，可能导致本金损失。</li>
                   <li><strong>独立决策：</strong>投资者应基于自身风险承受能力、投资目标和财务状况独立做出投资决策。</li>
                   <li><strong>责任声明：</strong>使用本平台产生的任何投资决策及其后果由使用者自行承担，本平台不承担任何责任。</li>
                 </ul>
@@ -109,109 +109,15 @@
         </el-alert>
       </div>
 
-      <!-- 关键指标 -->
-      <el-card class="metrics-card" shadow="never">
-        <template #header>
-          <div class="card-header">
-            <el-icon><TrendCharts /></el-icon>
-            <span>关键指标</span>
-          </div>
-        </template>
-        <div class="metrics-content">
-          <el-row :gutter="24">
-            <!-- 分析参考 -->
-            <el-col :span="8">
-              <div class="metric-item">
-                <div class="metric-label">
-                  <el-icon><TrendCharts /></el-icon>
-                  分析参考
-                  <el-tooltip content="基于AI模型的分析倾向，仅供参考，不构成投资建议" placement="top">
-                    <el-icon style="margin-left: 4px; cursor: help; font-size: 14px;"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </div>
-                <div class="metric-value recommendation-value">
-                  <div class="core-conclusion">
-                    <strong>核心结论：</strong>{{ getCoreConclusion() }}
-                  </div>
-                </div>
-                <el-tag type="info" size="small" style="margin-top: 8px;">仅供参考</el-tag>
-              </div>
-            </el-col>
-
-            <!-- 风险评估 -->
-            <el-col :span="8">
-              <div class="metric-item risk-item">
-                <div class="metric-label">
-                  <el-icon><Warning /></el-icon>
-                  风险评估
-                  <el-tooltip content="基于历史数据的风险评估，实际风险可能更高" placement="top">
-                    <el-icon style="margin-left: 4px; cursor: help; font-size: 14px;"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </div>
-                <div class="risk-display">
-                  <div class="risk-stars">
-                    <el-icon
-                      v-for="star in 5"
-                      :key="star"
-                      class="star-icon"
-                      :class="{ active: star <= getRiskStars(report.risk_level || '中等') }"
-                    >
-                      <StarFilled />
-                    </el-icon>
-                  </div>
-                  <div class="risk-label" :style="{ color: getRiskColor(report.risk_level || '中等') }">
-                    {{ report.risk_level || '中等' }}风险
-                  </div>
-                </div>
-              </div>
-            </el-col>
-
-            <!-- 模型置信度 -->
-            <el-col :span="8">
-              <div class="metric-item confidence-item">
-                <div class="metric-label">
-                  <el-icon><DataAnalysis /></el-icon>
-                  模型置信度
-                  <el-tooltip content="基于AI模型计算的置信度，不代表实际投资成功率" placement="top">
-                    <el-icon style="margin-left: 4px; cursor: help; font-size: 14px;"><QuestionFilled /></el-icon>
-                  </el-tooltip>
-                </div>
-                <div class="confidence-display">
-                  <div class="confidence-value">
-                    <span class="confidence-number">{{ normalizeConfidenceScore(report.confidence_score || 0) }}</span>
-                    <span class="confidence-unit">分</span>
-                  </div>
-                  <div class="confidence-label">{{ getConfidenceLabel(normalizeConfidenceScore(report.confidence_score || 0)) }}</div>
-                </div>
-              </div>
-            </el-col>
-          </el-row>
-
-          <!-- 关键要点 -->
-          <div v-if="report.key_points && report.key_points.length > 0" class="key-points">
-            <h4>
-              <el-icon><List /></el-icon>
-              关键要点
-            </h4>
-            <ul>
-              <li v-for="(point, index) in report.key_points" :key="index">
-                <el-icon class="point-icon"><Check /></el-icon>
-                {{ formatKeyPoint(point) }}
-              </li>
-            </ul>
-          </div>
-        </div>
-      </el-card>
-
-      <!-- 报告摘要 -->
-      <el-card v-if="report.summary" class="summary-card" shadow="never">
+      <!-- 研究简报 -->
+      <el-card v-if="summaryDisplayContent" class="summary-card" shadow="never">
         <template #header>
           <div class="card-header">
             <el-icon><InfoFilled /></el-icon>
-            <span>执行摘要</span>
+            <span>研究简报</span>
           </div>
         </template>
-        <div class="summary-content markdown-content" v-html="renderMarkdown(report.summary)"></div>
+        <div class="summary-content markdown-content" v-html="renderMarkdown(summaryDisplayContent)"></div>
       </el-card>
 
       <TaskGrowthPanel
@@ -225,13 +131,13 @@
         <template #header>
           <div class="card-header">
             <el-icon><Files /></el-icon>
-            <span>分析报告</span>
+            <span>详细研究报告</span>
           </div>
         </template>
         
         <el-tabs v-model="activeModule" type="border-card">
           <el-tab-pane
-            v-for="moduleName in orderedModuleNames"
+            v-for="moduleName in detailedModuleNames"
             :key="moduleName"
             :label="getModuleDisplayName(moduleName)"
             :name="moduleName"
@@ -279,17 +185,11 @@ import {
   Download,
   Back,
   InfoFilled,
-  TrendCharts,
   Files,
   ShoppingCart,
   WarningFilled,
   DataAnalysis,
-  Warning,
-  StarFilled,
-  List,
-  Check,
   Cpu,
-  QuestionFilled,
   ArrowDown
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
@@ -321,6 +221,13 @@ interface ReportDetailData {
   summary?: string
   task_type?: string
   decision?: ReportDecision
+  report_manifest?: Array<{
+    field: string
+    display_name: string
+    category?: string
+    order: number
+    is_primary?: boolean
+  }>
 }
 
 // 路由和认证
@@ -337,6 +244,123 @@ const report = ref<ReportDetailData | null>(null)
 const activeModule = ref('')
 const llmConfigs = ref<LLMConfig[]>([]) // 存储所有模型配置
 const growthTaskId = computed(() => report.value?.task_id || null)
+
+const analystNameMap: Record<string, string> = {
+  index_analyst: '大盘分析师',
+  index_analyst_v2: '大盘分析师',
+  sector_analyst: '板块分析师',
+  sector_analyst_v2: '板块分析师',
+  market_analyst: '市场分析师',
+  market_analyst_v2: '市场分析师',
+  fundamentals_analyst: '基本面分析师',
+  fundamentals_analyst_v2: '基本面分析师',
+  etf_analyst: 'ETF 分析师',
+  etf_analyst_v2: 'ETF 分析师',
+  news_analyst: '新闻分析师',
+  news_analyst_v2: '新闻分析师',
+  social_analyst: '社交媒体分析师',
+  social_analyst_v2: '社交媒体分析师',
+  sentiment_analyst: '社交媒体分析师',
+  bull_researcher: '乐观情景研究员',
+  bull_researcher_v2: '乐观情景研究员',
+  bear_researcher: '审慎情景研究员',
+  bear_researcher_v2: '审慎情景研究员',
+  research_manager: '研究经理',
+  research_manager_v2: '研究经理',
+  trader: '研究整合员',
+  trader_v2: '研究整合员',
+  risky_analyst: '高弹性情景分析师',
+  risky_analyst_v2: '高弹性情景分析师',
+  safe_analyst: '防御情景分析师',
+  safe_analyst_v2: '防御情景分析师',
+  neutral_analyst: '基准情景分析师',
+  neutral_analyst_v2: '基准情景分析师',
+  risk_manager: '风险经理',
+  risk_manager_v2: '风险经理',
+  market: '市场分析师',
+  fundamentals: '基本面分析师',
+  etf: 'ETF 分析师',
+  news: '新闻分析师',
+  social: '社交媒体分析师',
+  sentiment: '社交媒体分析师',
+  technical: '市场分析师',
+  '大盘指数分析师': '大盘分析师',
+  '行业板块分析师': '板块分析师',
+  '市场技术分析师': '市场分析师',
+  '新闻事件分析师': '新闻分析师',
+  '市场情绪分析师': '社交媒体分析师',
+  '多头研究员': '乐观情景研究员',
+  '空头研究员': '审慎情景研究员',
+  '激进分析师': '高弹性情景分析师',
+  '保守分析师': '防御情景分析师',
+  '中性分析师': '基准情景分析师'
+}
+
+const moduleDisplayNameMap: Record<string, string> = {
+  index_report: '📊 大盘分析师',
+  sector_report: '🏭 板块分析师',
+  market_report: '📈 市场分析师',
+  sentiment_report: '💬 社交媒体分析师',
+  news_report: '📰 新闻分析师',
+  fundamentals_report: '💰 基本面分析师',
+  bull_researcher: '🐂 乐观情景研究员',
+  bull_report: '🐂 乐观情景研究',
+  bear_researcher: '🐻 审慎情景研究员',
+  bear_report: '🐻 审慎情景研究',
+  research_team_decision: '🔬 研究经理',
+  trader_investment_plan: '🧩 研究整合员',
+  risky_analyst: '⚡ 高弹性情景分析师',
+  risky_opinion: '⚡ 高弹性情景分析观点',
+  safe_analyst: '🛡️ 防御情景分析师',
+  safe_opinion: '🛡️ 防御情景分析观点',
+  neutral_analyst: '⚖️ 基准情景分析师',
+  neutral_opinion: '⚖️ 基准情景分析观点',
+  risk_management_decision: '👔 风险经理',
+  risk_assessment: '⚠️ 风险审阅',
+  investment_plan: '🧾 研究简报',
+  final_trade_decision: '🧾 综合研究结论',
+  investment_debate_state: '🔬 研究团队分析（旧）',
+  risk_debate_state: '⚖️ 风险团队分析（旧）',
+  detailed_analysis: '📄 详细分析'
+}
+
+const manifestDisplayNameAliasMap: Record<string, string> = {
+  '大盘分析 v2': '📊 大盘分析师',
+  '大盘分析师 v2': '📊 大盘分析师',
+  '板块分析 v2': '🏭 板块分析师',
+  '板块分析师 v2': '🏭 板块分析师',
+  '市场分析 v2': '📈 市场分析师',
+  '市场分析师 v2': '📈 市场分析师',
+  '市场技术分析': '📈 市场分析师',
+  '基本面分析 v2': '💰 基本面分析师',
+  '基本面分析师 v2': '💰 基本面分析师',
+  '新闻分析 v2': '📰 新闻分析师',
+  '新闻分析师 v2': '📰 新闻分析师',
+  '新闻事件分析': '📰 新闻分析师',
+  '舆情分析 v2': '💬 社交媒体分析师',
+  '社交媒体分析师 v2': '💬 社交媒体分析师',
+  '市场情绪分析': '💬 社交媒体分析师',
+  '研究经理分析': '🔬 研究经理',
+  '研究经理 v2': '🔬 研究经理',
+  '研究经理': '🔬 研究经理',
+  '交易员计划': '🧩 研究整合员',
+  '交易员 v2': '🧩 研究整合员',
+  '交易员': '🧩 研究整合员',
+  '研究整合员 v2': '🧩 研究整合员',
+  '研究整合员': '🧩 研究整合员',
+  '激进分析师': '⚡ 高弹性情景分析师',
+  '激进分析师 v2': '⚡ 高弹性情景分析师',
+  '保守分析师': '🛡️ 防御情景分析师',
+  '保守分析师 v2': '🛡️ 防御情景分析师',
+  '中性分析师': '⚖️ 基准情景分析师',
+  '中性分析师 v2': '⚖️ 基准情景分析师',
+  '风险管理者': '👔 风险经理',
+  '风险管理者 v2': '👔 风险经理',
+  '风险经理': '👔 风险经理',
+  '风险经理 v2': '👔 风险经理',
+  '风险评估': '⚠️ 风险审阅',
+  '最终分析结果': '🧾 综合研究结论'
+}
 
 // 获取模型配置列表
 const fetchLLMConfigs = async () => {
@@ -370,19 +394,35 @@ const fetchReportDetail = async () => {
     if (result.success) {
       report.value = result.data
 
-      // 设置默认激活的模块（使用有序列表的第一个）
-      // 注意：这里不能直接使用 orderedModuleNames，因为它是计算属性
-      // 需要手动计算第一个模块
+      // 设置默认激活的模块（跳过研究简报，优先定位到第一份详细研究报告）
       const reports = result.data.reports || {}
       const availableModules = Object.keys(reports)
 
-      // 按照 moduleOrder 找到第一个存在的模块
-      const firstModule = moduleOrder.find(name => availableModules.includes(name))
+      const manifest = Array.isArray(result.data.report_manifest) ? result.data.report_manifest : []
+      const firstManifestModule = manifest.length > 0
+        ? [...manifest]
+            .sort((a, b) => a.order - b.order)
+            .map(item => item.field)
+            .find((field: string) => availableModules.includes(field))
+        : undefined
+
+      const orderedDetailedModules = moduleOrder.filter(name => {
+        if (!availableModules.includes(name)) {
+          return false
+        }
+
+        return name !== 'trader_investment_plan'
+      })
+
+      // 优先按照 report_manifest，再回退到详细模块顺序
+      const firstModule = (firstManifestModule && firstManifestModule !== 'trader_investment_plan')
+        ? firstManifestModule
+        : orderedDetailedModules[0]
       if (firstModule) {
         activeModule.value = firstModule
       } else if (availableModules.length > 0) {
-        // 如果没有匹配的，使用第一个可用的
-        activeModule.value = availableModules[0]
+        const firstDetailedModule = availableModules.find(name => name !== 'trader_investment_plan')
+        activeModule.value = firstDetailedModule || ''
       }
     } else {
       throw new Error(result.message || '获取报告详情失败')
@@ -648,12 +688,12 @@ const applyToTrading = async () => {
             h('div', { style: 'color: #606266; font-size: 12px; line-height: 1.6;' }, [
               h('p', { style: 'margin: 4px 0;' }, '• 本交易基于AI分析结果，仅供参考，不构成投资建议'),
               h('p', { style: 'margin: 4px 0;' }, '• 模拟交易使用虚拟资金，与实盘存在显著差异'),
-              h('p', { style: 'margin: 4px 0;' }, '• 股票投资存在市场风险，可能导致本金损失'),
+              h('p', { style: 'margin: 4px 0;' }, '• 股票与ETF投资均存在市场风险，可能导致本金损失'),
               h('p', { style: 'margin: 4px 0;' }, '• 请勿将模拟结果作为实盘投资决策依据')
             ])
           ]),
           h('p', [
-            h('strong', '股票代码：'),
+            h('strong', getMarketByStockCode(currentReport.stock_symbol) === 'ETF' ? 'ETF代码：' : '标的代码：'),
             h('span', currentReport.stock_symbol)
           ]),
           h('p', [
@@ -764,6 +804,7 @@ const applyToTrading = async () => {
       code: currentReport.stock_symbol,
       side: recommendation.action,
       quantity: tradeForm.quantity,
+      market: getMarketByStockCode(currentReport.stock_symbol) === 'ETF' ? 'ETF' : getMarketByStockCode(currentReport.stock_symbol) === '港股' ? 'HK' : getMarketByStockCode(currentReport.stock_symbol) === '美股' ? 'US' : 'CN',
       analysis_id: String(currentReport.analysis_id || currentReport.id)
     })
 
@@ -804,40 +845,13 @@ const formatTime = (time: string) => {
   return new Date(time).toLocaleString('zh-CN')
 }
 
+const normalizeAnalystName = (analyst: string): string => {
+  return analystNameMap[analyst] || analyst
+}
+
 // 将分析师英文名称转换为中文
 const formatAnalysts = (analysts: string[] = []) => {
-  const analystNameMap: Record<string, string> = {
-    // 宏观分析师
-    'index_analyst': '大盘指数分析师',
-    'sector_analyst': '行业板块分析师',
-    
-    // 分析师团队
-    'market_analyst': '市场技术分析师',
-    'fundamentals_analyst': '基本面分析师',
-    'etf_analyst': 'ETF 分析师',
-    'news_analyst': '新闻事件分析师',
-    'sentiment_analyst': '市场情绪分析师',
-    
-    // 研究团队
-    'bull_researcher': '多头研究员',
-    'bear_researcher': '空头研究员',
-    
-    // 风险管理团队
-    'risky_analyst': '激进分析师',
-    'safe_analyst': '保守分析师',
-    'neutral_analyst': '中性分析师',
-    
-    // 兼容旧格式（不带_analyst后缀）
-    'market': '市场分析师',
-    'fundamentals': '基本面分析师',
-    'etf': 'ETF 分析师',
-    'news': '新闻分析师',
-    'social': '社媒分析师',
-    'sentiment': '情绪分析师',
-    'technical': '技术分析师'
-  }
-
-  return analysts.map(analyst => analystNameMap[analyst] || analyst).join('、')
+  return Array.from(new Set(analysts.map(normalizeAnalystName))).join('、')
 }
 
 // 获取模型的详细描述（从后端配置中获取）
@@ -947,16 +961,32 @@ const orderedModuleNames = computed(() => {
   // 旧逻辑：按 moduleOrder 排序
   const ordered = moduleOrder.filter(name => availableModules.includes(name))
 
-  const hiddenModules = ['investment_plan']
-  const remaining = availableModules.filter(name => !moduleOrder.includes(name) && !hiddenModules.includes(name))
+  const remaining = availableModules.filter(name => !moduleOrder.includes(name))
 
   return [...ordered, ...remaining]
 })
 
 const isEtfReport = computed(() => {
   const analysts = report.value?.analysts || []
-  return report.value?.task_type === 'etf_analysis' || analysts.includes('etf_analyst')
+  return report.value?.task_type === 'etf_analysis' || analysts.includes('etf_analyst') || analysts.includes('etf_analyst_v2')
 })
+
+const normalizeModuleDisplayName = (displayName?: string, moduleName?: string) => {
+  if (moduleName === 'fundamentals_report' && isEtfReport.value) {
+    return '📊 ETF 分析师'
+  }
+
+  const normalized = (displayName || '').replace(/^【|】$/g, '').trim()
+  if (normalized) {
+    return manifestDisplayNameAliasMap[normalized] || normalized
+  }
+
+  if (moduleName) {
+    return moduleDisplayNameMap[moduleName] || moduleName.replace(/_/g, ' ')
+  }
+
+  return ''
+}
 
 const getModuleDisplayName = (moduleName: string) => {
   // 动态模式：优先从 report_manifest 获取 display_name
@@ -965,116 +995,99 @@ const getModuleDisplayName = (moduleName: string) => {
   }> | undefined
   if (manifest) {
     const item = manifest.find(m => m.field === moduleName)
-    if (item?.display_name) return item.display_name
+    if (item?.display_name) return normalizeModuleDisplayName(item.display_name, moduleName)
   }
 
-  if (moduleName === 'fundamentals_report' && isEtfReport.value) {
-    return '📊 ETF 分析'
+  return normalizeModuleDisplayName(undefined, moduleName)
+}
+
+const extractStructuredText = (value: any): string | null => {
+  if (!value) return null
+
+  if (typeof value === 'string') {
+    return value.trim() ? value : null
   }
 
-  const nameMap: Record<string, string> = {
-    index_report: '📊 大盘指数分析',
-    sector_report: '🏭 行业板块分析',
-    market_report: '📈 市场技术分析',
-    sentiment_report: '💭 市场情绪分析',
-    news_report: '📰 新闻事件分析',
-    fundamentals_report: '💰 基本面分析',
-    bull_researcher: '🐂 多头研究员',
-    bear_researcher: '🐻 空头研究员',
-    research_team_decision: '🔬 研究经理分析',
-    bull_report: '🐂 看涨研究',
-    bear_report: '🐻 看跌研究',
-    trader_investment_plan: '💼 交易员计划',
-    risky_analyst: '⚡ 激进分析师',
-    safe_analyst: '🛡️ 保守分析师',
-    neutral_analyst: '⚖️ 中性分析师',
-    risk_management_decision: '⚠️ 风险经理',
-    risky_opinion: '🔥 激进风险观点',
-    safe_opinion: '🛡️ 保守风险观点',
-    neutral_opinion: '⚖️ 中性风险观点',
-    risk_assessment: '⚠️ 风险评估',
-    investment_plan: '💡 初步投资建议',
-    final_trade_decision: '🎯 最终分析结果',
-    investment_debate_state: '🔬 研究团队分析（旧）',
-    risk_debate_state: '⚖️ 风险管理团队（旧）',
-    detailed_analysis: '📄 详细分析'
+  if (typeof value === 'object') {
+    for (const key of ['content', 'markdown', 'text', 'message', 'report', 'judge_decision']) {
+      const item = value[key]
+      if (typeof item === 'string' && item.trim()) {
+        return item
+      }
+    }
   }
-  return nameMap[moduleName] || moduleName.replace(/_/g, ' ')
+
+  return null
+}
+
+const normalizeDisplayedResearchText = (content: string) => {
+  if (!content) return ''
+
+  const replacements: Array<[RegExp, string]> = [
+    [/交易分析计划/g, '研究整合意见'],
+    [/交易员计划/g, '研究整合意见'],
+    [/初步投资计划/g, '研究团队结论'],
+    [/投资计划/g, '研究结论'],
+    [/投资建议/g, '研究结论'],
+    [/操作建议/g, '研究观点'],
+    [/大盘指数分析/g, '大盘环境研究'],
+    [/行业板块分析/g, '行业板块研究'],
+    [/市场情绪分析/g, '情绪研究'],
+    [/新闻事件分析/g, '新闻研究'],
+    [/风险治理摘要/g, '风险治理结论'],
+    [/综合研究简报/g, '综合研究结论'],
+    [/风险管理决策/g, '风险治理结论'],
+    [/最终分析结果/g, '最终研究结论'],
+    [/激进风险分析师/g, '高弹性情景分析师'],
+    [/保守风险分析师/g, '防御情景分析师'],
+    [/中性风险分析师/g, '基准情景分析师']
+  ]
+
+  return replacements.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), content)
+}
+
+const prepareMarkdownContent = (content: string) => {
+  let preparedText = normalizeDisplayedResearchText(content || '').trim()
+
+  if (!preparedText) {
+    return ''
+  }
+
+  if (
+    ((preparedText.startsWith('"') && preparedText.endsWith('"')) ||
+      (preparedText.startsWith("'") && preparedText.endsWith("'"))) &&
+    preparedText.length >= 2
+  ) {
+    preparedText = preparedText.slice(1, -1).trim()
+  }
+
+  const fencedMarkdownMatch = preparedText.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/i)
+  if (fencedMarkdownMatch) {
+    preparedText = fencedMarkdownMatch[1].trim()
+  }
+
+  return preparedText
 }
 
 const renderMarkdown = (content: string) => {
   if (!content) return ''
   try {
-    return marked.parse(content) as string
+    return marked.parse(prepareMarkdownContent(content)) as string
   } catch (e) {
-    return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
+    return `<pre style="white-space: pre-wrap; font-family: inherit;">${prepareMarkdownContent(content)}</pre>`
   }
 }
 
 // 🔥 提取模块内容（支持对象中的 content 字段）
 const getModuleContent = (moduleData: any): string | null => {
   if (!moduleData) return null
-  
-  // 如果是字符串，直接返回
-  if (typeof moduleData === 'string') {
-    return moduleData
+
+  const extractedText = extractStructuredText(moduleData)
+  if (extractedText) {
+    return normalizeDisplayedResearchText(extractedText)
   }
-  
-  // 如果是对象，优先提取 content 字段
-  if (typeof moduleData === 'object') {
-    if (moduleData.content && typeof moduleData.content === 'string') {
-      return moduleData.content
-    }
-    if (moduleData.markdown && typeof moduleData.markdown === 'string') {
-      return moduleData.markdown
-    }
-    if (moduleData.judge_decision && typeof moduleData.judge_decision === 'string') {
-      return moduleData.judge_decision
-    }
-  }
-  
+
   return null
-}
-
-// 置信度评分相关函数
-// 将后端返回的 0-1 小数转换为 0-100 的百分制
-const normalizeConfidenceScore = (score: number) => {
-  // 如果已经是 0-100 的范围，直接返回
-  if (score > 1) {
-    return Math.round(score)
-  }
-  // 如果是 0-1 的小数，转换为百分制
-  return Math.round(score * 100)
-}
-
-const getConfidenceLabel = (score: number) => {
-  if (score >= 80) return '较高'
-  if (score >= 60) return '中上'
-  if (score >= 40) return '中等'
-  return '较低'
-}
-
-// 风险等级相关函数
-const getRiskStars = (riskLevel: string) => {
-  const riskMap: Record<string, number> = {
-    '低': 1,
-    '中低': 2,
-    '中等': 3,
-    '中高': 4,
-    '高': 5
-  }
-  return riskMap[riskLevel] || 3
-}
-
-const getRiskColor = (riskLevel: string) => {
-  const colorMap: Record<string, string> = {
-    '低': '#67C23A',      // 绿色
-    '中低': '#95D475',    // 浅绿色
-    '中等': '#E6A23C',    // 橙色
-    '中高': '#F56C6C',    // 红色
-    '高': '#F56C6C'       // 深红色
-  }
-  return colorMap[riskLevel] || '#E6A23C'
 }
 
 // 获取分析深度描述
@@ -1089,83 +1102,65 @@ const getResearchDepthDescription = (depth: number) => {
   return descMap[depth] || `分析深度: ${depth}`
 }
 
-// 格式化关键要点（处理 JSON 字段名）
-const formatKeyPoint = (point: string): string => {
-  if (!point) return ''
-
-  // 字段名映射（英文 -> 中文）
-  const fieldNameMap: Record<string, string> = {
-    'analysis_view': '分析观点',
-    'action': '分析观点',
-    'confidence': '置信度',
-    'price_analysis_range': '价格分析区间',
-    'target_price': '价格分析区间',
-    'risk_reference_price': '风险控制参考价',
-    'stop_loss': '风险控制参考价',
-    'risk_exposure_ratio': '风险敞口比例',
-    'position_ratio': '风险敞口比例',
-    'reasoning': '分析推理',
-    'summary': '分析摘要',
-    'risk_score': '风险评分',
-    'risk_level': '风险等级'
+const getResearchContentFingerprint = (moduleData: any) => {
+  const prepared = prepareMarkdownContent(getModuleContent(moduleData) || '')
+  if (!prepared) {
+    return ''
   }
 
-  // 检查是否是 JSON 格式的字段（如 "analysis_view": "中性"）
-  const jsonMatch = point.match(/^"?([a-z_]+)"?\s*:\s*(.+)$/i)
-  if (jsonMatch) {
-    const fieldName = jsonMatch[1]
-    let value = jsonMatch[2].trim()
+  const strippedTitleLines = prepared
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => {
+      const normalizedLine = line
+        .replace(/^#{1,6}\s*/, '')
+        .replace(/^[>*\-+\d.\s)]+/, '')
+        .trim()
 
-    // 移除引号
-    value = value.replace(/^["']|["']$/g, '')
+      return !['研究结论汇总', '研究经理简报', '研究团队结论', '研究结论', '研究简报'].includes(normalizedLine)
+    })
+    .join('\n')
 
-    // 移除末尾的逗号
-    value = value.replace(/,\s*$/, '')
-
-    // 获取中文字段名
-    const chineseName = fieldNameMap[fieldName] || fieldName
-
-    return `${chineseName}: ${value}`
-  }
-
-  // 如果不是 JSON 格式，直接返回
-  return point
+  return strippedTitleLines
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^\d+[.)]\s+/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\[(.*?)\]\([^)]*\)/g, '$1')
+    .replace(/[>_*|~]/g, ' ')
+    .replace(/[\s\u3000]+/g, '')
 }
 
-// 提取核心结论（简洁版）
-const getCoreConclusion = () => {
-  if (!report.value) return '暂无'
+const userBriefContent = computed(() => {
+  if (!report.value?.reports) return null
+  return getModuleContent(report.value.reports.trader_investment_plan)
+})
 
-  // 优先从 decision 字段提取
-  if (report.value.decision) {
-    const action = report.value.decision.action || report.value.decision.analysis_view || '持有'
+const summaryDisplayContent = computed(() => {
+  return userBriefContent.value || getModuleContent(report.value?.summary) || ''
+})
 
-    // 🔥 合规修改：直接返回分析观点，不提取前提（避免从 JSON 格式的 reasoning 中提取错误信息）
-    return action
-  }
-
-  // 如果没有 decision 字段，尝试从 recommendation 中提取
-  if (report.value.recommendation) {
-    const rec = report.value.recommendation
-
-    // 尝试提取核心结论（匹配"核心结论：..."或"分析观点：..."）
-    const coreMatch = rec.match(/核心结论[：:]\s*([^。\n]+)/) ||
-                      rec.match(/分析观点[：:]\s*([^。\n]+)/) ||
-                      rec.match(/投资建议[：:]\s*([^。\n]+)/) ||
-                      rec.match(/建议[：:]\s*([^。\n]+)/)
-
-    if (coreMatch && coreMatch[1]) {
-      // 清理提取的内容，移除多余的空格和换行
-      const cleaned = coreMatch[1].trim().replace(/\s+/g, ' ')
-      return cleaned.length > 100 ? cleaned.substring(0, 100) + '...' : cleaned
+const detailedModuleNames = computed(() => {
+  return orderedModuleNames.value.filter(name => {
+    if (name === 'trader_investment_plan') {
+      return false
     }
 
-    // 如果没找到，返回前50个字符
-    return rec.length > 50 ? rec.substring(0, 50) + '...' : rec
-  }
+    if (name === 'investment_plan') {
+      const reports = report.value?.reports || {}
+      const researchDecision = getResearchContentFingerprint(reports.research_team_decision)
+      const managerBrief = getResearchContentFingerprint(reports.investment_plan)
+      if (researchDecision && researchDecision === managerBrief) {
+        return false
+      }
+    }
 
-  return '暂无'
-}
+    return true
+  })
+})
 
 // 生命周期
 onMounted(() => {

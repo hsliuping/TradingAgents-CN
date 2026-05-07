@@ -32,6 +32,7 @@ class Message(BaseModel):
     """统一消息格式"""
     role: MessageRole
     content: Optional[str] = None
+    reasoning_content: Optional[str] = None
     name: Optional[str] = None
     tool_calls: Optional[List["ToolCall"]] = None
     tool_call_id: Optional[str] = None
@@ -167,6 +168,7 @@ class LLMConfig(BaseModel):
 class LLMResponse(BaseModel):
     """LLM 响应"""
     content: Optional[str] = None
+    reasoning_content: Optional[str] = None
     tool_calls: List[ToolCall] = Field(default_factory=list)
     finish_reason: Optional[str] = None
     
@@ -185,6 +187,7 @@ class LLMResponse(BaseModel):
         return Message(
             role=MessageRole.ASSISTANT,
             content=self.content,
+            reasoning_content=self.reasoning_content,
             tool_calls=self.tool_calls if self.tool_calls else None
         )
 

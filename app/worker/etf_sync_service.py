@@ -43,6 +43,52 @@ def _coalesce(*values):
     return None
 
 
+def _safe_float(value: Any) -> Optional[float]:
+    if _is_missing(value):
+        return None
+    try:
+        if isinstance(value, str):
+            cleaned = value.strip().replace(",", "").replace("%", "")
+            if cleaned == "":
+                return None
+            return float(cleaned)
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_date_text(value: Any) -> Optional[str]:
+    if _is_missing(value):
+        return None
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d")
+
+    text = str(value).strip()
+    if len(text) == 8 and text.isdigit():
+        return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+    if len(text) >= 10:
+        return text[:10].replace("/", "-")
+    return text or None
+
+
+def _calculate_nav_change(latest_unit_nav: Optional[float], previous_unit_nav: Optional[float]) -> tuple[Optional[float], Optional[float]]:
+    if latest_unit_nav is None or previous_unit_nav in (None, 0):
+        return None, None
+    try:
+        change_value = round(float(latest_unit_nav) - float(previous_unit_nav), 4)
+        growth_rate = round(change_value / float(previous_unit_nav) * 100, 4)
+        return change_value, growth_rate
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None, None
+
+
+def _needs_tushare_backfill(existing: Optional[Dict[str, Any]]) -> bool:
+    if not existing:
+        return False
+    required_fields = ("unit_nav", "accum_nav", "latest_nav_date", "fund_share", "fund_share_date")
+    return any(_is_missing(existing.get(field)) for field in required_fields)
+
+
 def _normalize_etf_code(s: str) -> str:
     """标准化 ETF 代码为 6 位"""
     if not s:
@@ -206,6 +252,124 @@ def _fetch_etf_spot_list_tushare() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"Tushare fund_basic 获取失败: {e}")
         return []
+
+
+def _fetch_etf_nav_map_tushare(target_codes: Optional[set[str]] = None, recent_days: int = 15) -> Dict[str, Dict[str, Any]]:
+    """从 Tushare fund_nav 批量获取 ETF 最新净值映射。"""
+    pro = _get_tushare_pro_api()
+    if pro is None:
+        return {}
+
+    try:
+        records_by_code: Dict[str, List[Dict[str, Any]]] = {}
+        pending_codes = set(target_codes or [])
+        end_dt = datetime.now()
+
+        for offset in range(recent_days):
+            nav_date = (end_dt - timedelta(days=offset)).strftime("%Y%m%d")
+            df = pro.fund_nav(nav_date=nav_date, market="E")
+            if df is None or df.empty:
+                continue
+
+            for _, row in df.iterrows():
+                ts_code = str(row.get("ts_code", "")).strip()
+                code = _normalize_etf_code(ts_code)
+                if not _is_etf_code(code):
+                    continue
+                if pending_codes and code not in pending_codes:
+                    continue
+
+                bucket = records_by_code.setdefault(code, [])
+                if len(bucket) < 2:
+                    bucket.append(row.to_dict())
+
+            if pending_codes and all(len(records_by_code.get(code, [])) >= 2 for code in pending_codes):
+                break
+
+        result: Dict[str, Dict[str, Any]] = {}
+        for code, rows in records_by_code.items():
+            rows.sort(
+                key=lambda item: (
+                    str(item.get("nav_date") or ""),
+                    str(item.get("ann_date") or "")
+                ),
+                reverse=True
+            )
+            latest = rows[0]
+            previous = rows[1] if len(rows) > 1 else None
+
+            latest_unit_nav = _safe_float(latest.get("unit_nav"))
+            previous_unit_nav = _safe_float(previous.get("unit_nav")) if previous else None
+            nav_change_value, nav_growth_rate = _calculate_nav_change(latest_unit_nav, previous_unit_nav)
+
+            result[code] = {
+                "unit_nav": latest_unit_nav,
+                "accum_nav": _safe_float(latest.get("accum_nav")),
+                "latest_nav_date": _normalize_date_text(latest.get("nav_date")),
+                "latest_nav_ann_date": _normalize_date_text(latest.get("ann_date")),
+                "accum_div": _safe_float(latest.get("accum_div")),
+                "net_asset": _safe_float(latest.get("net_asset")),
+                "total_netasset": _safe_float(latest.get("total_netasset")),
+                "adj_nav": _safe_float(latest.get("adj_nav")),
+                "nav_change_value": nav_change_value,
+                "nav_growth_rate": nav_growth_rate,
+            }
+
+        return result
+    except Exception as e:
+        logger.warning(f"Tushare fund_nav 获取失败: {e}")
+        return {}
+
+
+def _fetch_etf_share_map_tushare(target_codes: Optional[set[str]] = None, recent_days: int = 30) -> Dict[str, Dict[str, Any]]:
+    """从 Tushare fund_share 批量获取 ETF 最新份额映射。"""
+    pro = _get_tushare_pro_api()
+    if pro is None:
+        return {}
+
+    try:
+        target_codes = set(target_codes or [])
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(days=recent_days)
+        rows: List[Dict[str, Any]] = []
+
+        for market in ("SH", "SZ"):
+            df = pro.fund_share(
+                market=market,
+                start_date=start_dt.strftime("%Y%m%d"),
+                end_date=end_dt.strftime("%Y%m%d")
+            )
+            if df is None or df.empty:
+                continue
+            rows.extend(df.to_dict("records"))
+
+        if not rows:
+            return {}
+
+        latest_by_code: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            ts_code = str(row.get("ts_code", "")).strip()
+            code = _normalize_etf_code(ts_code)
+            if not _is_etf_code(code):
+                continue
+            if target_codes and code not in target_codes:
+                continue
+
+            existing = latest_by_code.get(code)
+            trade_date = str(row.get("trade_date") or "")
+            if not existing or trade_date > str(existing.get("trade_date") or ""):
+                latest_by_code[code] = row
+
+        return {
+            code: {
+                "fund_share": _safe_float(row.get("fd_share")),
+                "fund_share_date": _normalize_date_text(row.get("trade_date")),
+            }
+            for code, row in latest_by_code.items()
+        }
+    except Exception as e:
+        logger.warning(f"Tushare fund_share 获取失败: {e}")
+        return {}
 
 
 def _fetch_etf_hist_tushare(symbol: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
@@ -465,7 +629,7 @@ class EtfSyncService:
         logger.info(f"📊 [ETF 同步] 使用默认数据源: {DEFAULT_SOURCE_PRIORITY}")
         return DEFAULT_SOURCE_PRIORITY
 
-    async def _sync_basic_by_source(self, source: str, force_update: bool) -> Dict[str, Any]:
+    async def _sync_basic_by_source(self, source: str, force_update: bool, symbols: Optional[List[str]] = None) -> Dict[str, Any]:
         """按指定数据源同步 ETF 基础信息"""
         if self.db is None:
             await self.initialize()
@@ -478,7 +642,17 @@ class EtfSyncService:
         try:
             loop = asyncio.get_running_loop()
             rows = await loop.run_in_executor(None, fetch_fn)
-            valuation_map = await loop.run_in_executor(None, _fetch_etf_valuation_map_akshare) if source == "akshare" else {}
+            if symbols:
+                normalized_symbols = {_normalize_etf_code(symbol) for symbol in symbols if _normalize_etf_code(symbol)}
+                rows = [row for row in rows if row.get("code") in normalized_symbols]
+            valuation_map = {}
+            share_map = {}
+            if source == "akshare":
+                valuation_map = await loop.run_in_executor(None, _fetch_etf_valuation_map_akshare)
+            elif source == "tushare":
+                target_codes = {row["code"] for row in rows if row.get("code")}
+                valuation_map = await loop.run_in_executor(None, partial(_fetch_etf_nav_map_tushare, target_codes, 15))
+                share_map = await loop.run_in_executor(None, partial(_fetch_etf_share_map_tushare, target_codes, 30))
             if not rows:
                 logger.warning(f"⚠️ [{source}] 未获取到 ETF 列表")
                 return stats
@@ -495,10 +669,15 @@ class EtfSyncService:
                     if not force_update:
                         existing = await collection.find_one({"code": code, "source": source})
                         if existing and self._is_fresh(existing.get("updated_at"), hours=24):
-                            stats["skipped_count"] += 1
-                            continue
+                            if source == "tushare" and _needs_tushare_backfill(existing):
+                                logger.info(f"🔄 [{source}] ETF {code} 基础信息较新但缺净值/份额字段，执行回填")
+                            else:
+                                stats["skipped_count"] += 1
+                                continue
 
                     valuation = valuation_map.get(code, {})
+                    share_info = share_map.get(code, {})
+                    existing_doc = existing or {}
 
                     doc = {
                         "code": code,
@@ -521,15 +700,22 @@ class EtfSyncService:
                         "min_amount": r.get("min_amount"),
                         "purchase_start_date": r.get("purchase_start_date"),
                         "redemption_start_date": r.get("redemption_start_date"),
-                        "unit_nav": valuation.get("unit_nav"),
-                        "accum_nav": valuation.get("accum_nav"),
-                        "nav_change_value": valuation.get("nav_change_value"),
-                        "nav_growth_rate": valuation.get("nav_growth_rate"),
-                        "market_price": valuation.get("market_price"),
-                        "premium_discount_rate": valuation.get("premium_discount_rate"),
-                        "latest_nav_date": valuation.get("latest_nav_date"),
-                        "purchase_status": valuation.get("purchase_status"),
-                        "redemption_status": valuation.get("redemption_status"),
+                        "unit_nav": _coalesce(valuation.get("unit_nav"), existing_doc.get("unit_nav")),
+                        "accum_nav": _coalesce(valuation.get("accum_nav"), existing_doc.get("accum_nav")),
+                        "nav_change_value": _coalesce(valuation.get("nav_change_value"), existing_doc.get("nav_change_value")),
+                        "nav_growth_rate": _coalesce(valuation.get("nav_growth_rate"), existing_doc.get("nav_growth_rate")),
+                        "market_price": _coalesce(valuation.get("market_price"), existing_doc.get("market_price")),
+                        "premium_discount_rate": _coalesce(valuation.get("premium_discount_rate"), existing_doc.get("premium_discount_rate")),
+                        "latest_nav_date": _coalesce(valuation.get("latest_nav_date"), existing_doc.get("latest_nav_date")),
+                        "latest_nav_ann_date": _coalesce(valuation.get("latest_nav_ann_date"), existing_doc.get("latest_nav_ann_date")),
+                        "accum_div": _coalesce(valuation.get("accum_div"), existing_doc.get("accum_div")),
+                        "net_asset": _coalesce(valuation.get("net_asset"), existing_doc.get("net_asset")),
+                        "total_netasset": _coalesce(valuation.get("total_netasset"), existing_doc.get("total_netasset")),
+                        "adj_nav": _coalesce(valuation.get("adj_nav"), existing_doc.get("adj_nav")),
+                        "fund_share": _coalesce(share_info.get("fund_share"), existing_doc.get("fund_share")),
+                        "fund_share_date": _coalesce(share_info.get("fund_share_date"), existing_doc.get("fund_share_date")),
+                        "purchase_status": _coalesce(valuation.get("purchase_status"), existing_doc.get("purchase_status")),
+                        "redemption_status": _coalesce(valuation.get("redemption_status"), existing_doc.get("redemption_status")),
                         "source": source,
                         "updated_at": now,
                     }

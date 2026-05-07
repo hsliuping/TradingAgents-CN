@@ -17,6 +17,14 @@ load_dotenv()
 import core.agents.adapters  # noqa
 
 
+def build_test_provider_config() -> dict:
+    model_name = os.environ.get("FUNDAMENTALS_TEST_LLM_MODEL") or os.environ.get("TEST_LLM_MODEL") or "qwen-plus"
+    return {
+        "quick_think_llm": model_name,
+        "deep_think_llm": model_name,
+    }
+
+
 def test_fundamentals_analyst_v2():
     """测试基本面分析师 v2.0"""
     print("\n" + "=" * 70)
@@ -24,54 +32,19 @@ def test_fundamentals_analyst_v2():
     print("=" * 70)
 
     # 1. 使用 LegacyDependencyProvider 的方式获取 LLM 配置
-    print("\n📝 步骤 1: 获取 LLM 配置...")
+    print("\n📝 步骤 1: 获取测试 LLM 配置（默认 qwen-plus）...")
     from core.workflow.builder import LegacyDependencyProvider
-    dep_provider = LegacyDependencyProvider()
-    llm_config = dep_provider._get_llm_config_from_db()
+    provider_config = build_test_provider_config()
+    dep_provider = LegacyDependencyProvider(provider_config)
 
-    if not llm_config or not llm_config.get("api_key"):
-        print("   ⚠️ 无法获取有效的 LLM 配置")
-        print("\n⏭️  跳过执行测试（无法获取 LLM 配置）")
-        return True  # 不算失败，只是跳过
-
-    provider = llm_config.get("llm_provider", "dashscope")
-    model_name = llm_config.get("quick_think_llm", "qwen-turbo")
-    api_key = llm_config.get("api_key")
-    backend_url = llm_config.get("backend_url")
-    temperature = llm_config.get("quick_temperature", 0.7)
-    max_tokens = llm_config.get("quick_max_tokens", 2000)
-
-    print(f"   📦 使用 LLM 配置:")
-    print(f"      厂家: {provider}")
-    print(f"      模型: {model_name}")
-    print(f"      API Key: {'已配置' if api_key else '未配置'}")
-    print(f"      Backend URL: {backend_url[:50] + '...' if backend_url and len(backend_url) > 50 else backend_url}")
+    print(f"   📦 使用测试配置:")
+    print(f"      快速模型: {provider_config['quick_think_llm']}")
+    print(f"      深度模型: {provider_config['deep_think_llm']}")
 
     # 2. 创建 LLM 实例
     print("\n📝 步骤 2: 创建 LLM 实例...")
     try:
-        if provider == "dashscope":
-            from tradingagents.llm_adapters import ChatDashScopeOpenAI
-            llm = ChatDashScopeOpenAI(
-                model=model_name,
-                api_key=api_key,
-                base_url=backend_url,
-                temperature=temperature,
-                max_tokens=max_tokens
-            )
-        elif provider in ["openai", "deepseek", "siliconflow"]:
-            from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(
-                model=model_name,
-                api_key=api_key,
-                base_url=backend_url,
-                temperature=temperature,
-                max_tokens=max_tokens
-            )
-        else:
-            print(f"   ⚠️ 不支持的 LLM 厂家: {provider}")
-            return True
-
+        llm = dep_provider.get_llm("quick")
         print(f"   ✅ LLM 实例创建成功: {llm.__class__.__name__}")
     except Exception as e:
         print(f"   ❌ 创建 LLM 实例失败: {e}")

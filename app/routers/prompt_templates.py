@@ -5,6 +5,7 @@
 import logging
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Optional, List
+from bson import ObjectId
 from app.services.prompt_template_service import PromptTemplateService
 from app.services.analysis_preference_service import AnalysisPreferenceService
 from app.services.user_template_config_service import UserTemplateConfigService
@@ -13,12 +14,18 @@ from app.models.prompt_template import (
     PromptTemplateUpdate,
     PromptTemplateResponse
 )
+from app.core.permissions import require_feature
 from app.core.response import ok, fail
+from app.routers.auth_db import get_current_user
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/templates", tags=["templates"])
+router = APIRouter(
+    prefix="/api/v1/templates",
+    tags=["templates"],
+    dependencies=[Depends(require_feature("prompt_templates"))]
+)
 
 
 # 依赖注入：获取服务实例
@@ -37,6 +44,17 @@ def get_config_service() -> UserTemplateConfigService:
     return UserTemplateConfigService()
 
 
+async def _can_access_template(
+    template_service: PromptTemplateService,
+    template_id: str,
+    user_id: str
+) -> bool:
+    template = await template_service.get_template(template_id)
+    if not template:
+        return False
+    return template.is_system or str(template.created_by) == user_id
+
+
 @router.get("", response_model=dict)
 async def get_all_templates(
     agent_type: Optional[str] = Query(None),
@@ -50,12 +68,30 @@ async def get_all_templates(
     q: Optional[str] = Query(None, description="按模板名称模糊搜索"),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=200),
+    current_user: dict = Depends(get_current_user),
     template_service: PromptTemplateService = Depends(get_template_service)
 ):
     """获取所有模板（支持过滤，含 workflow_id 流程绑定）"""
     try:
+        user_id = str(current_user["id"])
+        try:
+            user_object_id = ObjectId(user_id)
+        except Exception:
+            user_object_id = user_id
+
         # 构建查询条件
         query = {}
+        if is_system is True:
+            query["is_system"] = True
+        elif is_system is False:
+            query["is_system"] = False
+            query["created_by"] = user_object_id
+        else:
+            query["$or"] = [
+                {"is_system": True},
+                {"created_by": user_object_id}
+            ]
+
         if agent_type:
             query["agent_type"] = agent_type
         if agent_name:
@@ -69,8 +105,6 @@ async def get_all_templates(
             query["node_id"] = node_id
         if preference_type:
             query["preference_type"] = preference_type
-        if is_system is not None:
-            query["is_system"] = is_system
         if status:
             query["status"] = status
 
@@ -114,12 +148,14 @@ async def get_all_templates(
 @router.post("", response_model=dict)
 async def create_template(
     template_data: PromptTemplateCreate,
-    user_id: Optional[str] = Query(None),
     base_template_id: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
     template_service: PromptTemplateService = Depends(get_template_service)
 ):
     """创建模板"""
     try:
+        user_id = str(current_user["id"])
+
         # 如果是用户模板，需要获取基础模板版本
         base_version = None
         if base_template_id:
@@ -152,6 +188,7 @@ async def create_template(
 @router.get("/{template_id}", response_model=dict)
 async def get_template(
     template_id: str,
+    current_user: dict = Depends(get_current_user),
     template_service: PromptTemplateService = Depends(get_template_service)
 ):
     """获取模板"""
@@ -159,6 +196,9 @@ async def get_template(
         template = await template_service.get_template(template_id)
         if not template:
             return fail("模板不存在", 404)
+        user_id = str(current_user["id"])
+        if not template.is_system and str(template.created_by) != user_id:
+            return fail("模板不存在或无权访问", 403)
 
         return ok({
             "id": str(template.id),
@@ -186,11 +226,12 @@ async def get_template(
 async def update_template(
     template_id: str,
     update_data: PromptTemplateUpdate,
-    user_id: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
     template_service: PromptTemplateService = Depends(get_template_service)
 ):
     """更新模板"""
     try:
+        user_id = str(current_user["id"])
         template = await template_service.update_template(
             template_id,
             update_data,
@@ -215,11 +256,12 @@ async def update_template(
 @router.delete("/{template_id}", response_model=dict)
 async def delete_template(
     template_id: str,
-    user_id: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
     template_service: PromptTemplateService = Depends(get_template_service)
 ):
     """删除用户模板"""
     try:
+        user_id = str(current_user["id"])
         success = await template_service.delete_template(template_id, user_id=user_id)
         if not success:
             return fail("删除模板失败或无权限", 400)
@@ -233,14 +275,15 @@ async def get_agent_templates(
     agent_type: str,
     agent_name: str,
     preference_type: Optional[str] = Query(None),
-    user_id: Optional[str] = Query(None),
     include_system: bool = Query(True, description="是否包含系统模板"),
     include_user: bool = Query(True, description="是否包含用户模板"),
+    current_user: dict = Depends(get_current_user),
     template_service: PromptTemplateService = Depends(get_template_service),
     config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
     """获取特定Agent的所有可用模板（系统模板 + 用户模板）"""
     try:
+        user_id = str(current_user["id"])
         result = []
         seen_ids = set()  # 去重
 
@@ -276,8 +319,6 @@ async def get_agent_templates(
 
         # 2. 获取用户创建的模板
         if include_user and user_id:
-            # created_by 字段在数据库中是 ObjectId 类型
-            from bson import ObjectId
             try:
                 user_object_id = ObjectId(user_id)
             except Exception:
@@ -314,13 +355,16 @@ async def get_agent_templates(
 async def clone_template(
     template_id: str,
     payload: Optional[dict] = None,
-    user_id: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
     template_service: PromptTemplateService = Depends(get_template_service)
 ):
     try:
+        user_id = str(current_user["id"])
         source = await template_service.get_template(template_id)
         if not source:
             return fail("模板不存在", 404)
+        if not source.is_system and str(source.created_by) != user_id:
+            return fail("模板不存在或无权访问", 403)
         new_name = None
         workflow_id_override = None
         node_id_override = None

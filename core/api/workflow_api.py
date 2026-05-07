@@ -89,6 +89,29 @@ class WorkflowAPI:
     def _get_path(self, workflow_id: str) -> Path:
         """获取工作流文件路径（备选方案）"""
         return Path(self.WORKFLOWS_DIR) / f"{workflow_id}.json"
+
+    def _log_workflow_source(
+        self,
+        workflow_id: str,
+        source: str,
+        data: Dict[str, Any],
+        source_path: Optional[str] = None,
+    ) -> None:
+        """记录工作流来源和关键边，便于排查实际加载的是哪份定义。"""
+        edges = data.get("edges") or []
+        edge_list = [f"{edge.get('id')}:{edge.get('source')}->{edge.get('target')}" for edge in edges]
+        critical_edge_ids = {"e_to_risk_debate", "e_risk_judge", "e_trader", "e_end"}
+        critical_edges = {
+            edge.get("id"): (edge.get("source"), edge.get("target"))
+            for edge in edges
+            if edge.get("id") in critical_edge_ids
+        }
+        logger.info(f"📋 [WorkflowAPI] 工作流来源: {workflow_id} <- {source}")
+        if source_path:
+            logger.info(f"📋 [WorkflowAPI] 来源路径: {source_path}")
+        logger.info(f"📋 [WorkflowAPI] 边列表: {edge_list}")
+        if critical_edges:
+            logger.info(f"📋 [WorkflowAPI] 关键边: {critical_edges}")
     
     # ==================== CRUD 操作 ====================
 
@@ -159,6 +182,14 @@ class WorkflowAPI:
 
     def get(self, workflow_id: str) -> Optional[Dict[str, Any]]:
         """获取工作流"""
+        provider = get_default_workflow_provider()
+        system_workflow = provider.get_system_workflow(workflow_id)
+        if system_workflow is not None:
+            data = system_workflow.to_dict()
+            logger.info(f"📋 [WorkflowAPI] 使用系统预置工作流: {workflow_id}")
+            self._log_workflow_source(workflow_id, "system_preset", data)
+            return data
+
         # 优先从数据库获取
         if self._workflows_collection is not None:
             try:
@@ -170,7 +201,8 @@ class WorkflowAPI:
                         doc["created_at"] = doc["created_at"].isoformat()
                     if "updated_at" in doc and isinstance(doc["updated_at"], datetime):
                         doc["updated_at"] = doc["updated_at"].isoformat()
-                    logger.debug(f"从数据库获取工作流: {workflow_id}")
+                    logger.info(f"📋 [WorkflowAPI] 从数据库获取工作流: {workflow_id}")
+                    self._log_workflow_source(workflow_id, "database", doc)
                     return doc
             except Exception as e:
                 logger.warning(f"从数据库获取工作流失败: {e}")
@@ -179,8 +211,10 @@ class WorkflowAPI:
         path = self._get_path(workflow_id)
         if path.exists():
             with open(path, 'r', encoding='utf-8') as f:
-                logger.debug(f"从文件系统获取工作流: {workflow_id}")
-                return json.load(f)
+                data = json.load(f)
+                logger.info(f"📋 [WorkflowAPI] 从文件系统获取工作流: {workflow_id}")
+                self._log_workflow_source(workflow_id, "filesystem", data, str(path))
+                return data
 
         return None
 
@@ -425,12 +459,14 @@ class WorkflowAPI:
             workflow = provider.get_system_workflow(workflow_id)
             if workflow:
                 data = workflow.to_dict()
+                self._log_workflow_source(workflow_id, "system_preset", data)
 
         if data is None:
             return {"success": False, "error": "工作流不存在"}
 
         try:
             definition = WorkflowDefinition.from_dict(data)
+            logger.info(f"📋 [WorkflowAPI] 执行工作流定义: {definition.id} - {definition.name}")
 
             # 准备输入参数
             prepared_inputs = self._prepare_inputs(inputs)
@@ -488,6 +524,24 @@ class WorkflowAPI:
 
             market_info = StockUtils.get_market_info(stock_code)
             is_china = market_info.get('is_china', False)
+            effective_data_date = analysis_date
+            stable_data_note = ""
+
+            if is_china:
+                try:
+                    from core.tools.trade_date_policy import apply_stable_data_cutoff, build_stable_data_cutoff_note
+
+                    effective_data_date = apply_stable_data_cutoff(analysis_date)
+                    stable_data_note = build_stable_data_cutoff_note(
+                        analysis_date,
+                        effective_data_date,
+                        subject="A股日频稳定数据",
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ 计算稳定数据日期失败，回退到分析日期: {e}")
+
+            system_vars["effective_data_date"] = effective_data_date
+            system_vars["stable_data_note"] = stable_data_note
 
             # 1. 从数据库获取股票基础信息（公司名称、行业）
             company_name = stock_code
@@ -517,45 +571,50 @@ class WorkflowAPI:
 
             # 2. 从数据库获取当前价格
             current_price = "未知"
+            current_price_context_date = ""
 
             if is_china:
                 try:
                     db = get_mongo_db_sync()  # 使用同步版本
                     logger.info(f"🔍 [价格查询] 开始查询股票 {stock_code} 的价格...")
 
-                    # 优先从 market_quotes 获取最新价格
-                    logger.info(f"🔍 [价格查询] 步骤1: 从 market_quotes 查询...")
-                    quote = db.market_quotes.find_one(
-                        {"$or": [{"code": stock_code}, {"symbol": stock_code}]},
-                        {"_id": 0, "close": 1, "trade_date": 1},
-                        sort=[("trade_date", -1)]  # 按日期降序，获取最新数据
-                    )
+                    # 优先从 market_quotes 获取不晚于稳定日期的价格，避免把汇总口径拉回分析日当天。
+                    logger.info(f"🔍 [价格查询] 步骤1: 从 market_quotes 查询稳定日期价格...")
+                    quote = None
+                    date_candidates = [effective_data_date]
+                    compact_effective_date = effective_data_date.replace('-', '')
+                    if compact_effective_date != effective_data_date:
+                        date_candidates.append(compact_effective_date)
+
+                    for date_candidate in date_candidates:
+                        quote = db.market_quotes.find_one(
+                            {
+                                "$or": [{"code": stock_code}, {"symbol": stock_code}],
+                                "trade_date": {"$lte": date_candidate},
+                            },
+                            {"_id": 0, "close": 1, "trade_date": 1},
+                            sort=[("trade_date", -1)]
+                        )
+                        if quote:
+                            break
+
                     logger.info(f"🔍 [价格查询] market_quotes 查询结果: {quote}")
 
                     if quote and quote.get("close"):
                         current_price = str(quote["close"])
+                        current_price_context_date = str(quote.get("trade_date") or "")
                         logger.info(f"✅ [系统变量-数据库] 当前价格: ¥{current_price} (日期: {quote.get('trade_date', 'N/A')})")
                     else:
-                        logger.info(f"🔍 [价格查询] market_quotes 未找到数据，尝试步骤2...")
-                        # 回退到 stock_basic_info 的 current_price 字段
-                        logger.info(f"🔍 [价格查询] 步骤2: 从 stock_basic_info 查询...")
-                        stock_info = db.stock_basic_info.find_one(
-                            {"$or": [{"code": stock_code}, {"symbol": stock_code}]},
-                            {"_id": 0, "current_price": 1}
+                        logger.warning(
+                            f"⚠️ 数据库中未找到股票 {stock_code} 在稳定日期 {effective_data_date} 及之前的价格信息"
                         )
-                        logger.info(f"🔍 [价格查询] stock_basic_info 查询结果: {stock_info}")
-
-                        if stock_info and stock_info.get("current_price"):
-                            current_price = str(stock_info["current_price"])
-                            logger.info(f"✅ [系统变量-数据库] 当前价格(备用): ¥{current_price}")
-                        else:
-                            logger.warning(f"⚠️ 数据库中未找到股票 {stock_code} 的价格信息")
                 except Exception as e:
                     logger.warning(f"⚠️ 从数据库获取当前价格失败: {e}")
                     import traceback
                     traceback.print_exc()
 
             system_vars["current_price"] = current_price
+            system_vars["current_price_context_date"] = current_price_context_date
 
             # 3. 市场信息
             market_name = "A股" if is_china else "港股" if market_info.get('is_hk') else "美股"
@@ -597,6 +656,7 @@ class WorkflowAPI:
             logger.info(f"   - company_name: {company_name}")
             logger.info(f"   - industry: {industry}")
             logger.info(f"   - current_price: {current_price}")
+            logger.info(f"   - effective_data_date: {effective_data_date}")
             logger.info(f"   - market_name: {market_name}")
             if system_vars.get("industry_dimensions"):
                 logger.info(f"   - 🏭 已注入行业分析维度")

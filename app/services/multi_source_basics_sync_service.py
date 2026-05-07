@@ -62,9 +62,37 @@ class MultiSourceBasicsSyncService:
         self._lock = asyncio.Lock()
         self._running = False
         self._last_status: Optional[Dict[str, Any]] = None
+        self._current_task: Optional[asyncio.Task] = None
+
+    async def start_background_sync(self, force: bool = False, preferred_sources: List[str] = None) -> Dict[str, Any]:
+        """后台启动同步任务，立即返回当前状态，避免阻塞前端请求。"""
+        async with self._lock:
+            if self._running:
+                status = await self.get_status()
+                status["launch_mode"] = "already_running"
+                return status
+
+            loop = asyncio.get_running_loop()
+            self._current_task = loop.create_task(
+                self.run_full_sync(force=force, preferred_sources=preferred_sources)
+            )
+
+        status = {
+            "job": JOB_KEY,
+            "status": "queued",
+            "message": "同步任务已提交到后台执行",
+            "started_at": datetime.now().isoformat(),
+            "launch_mode": "background",
+            "preferred_sources": preferred_sources or [],
+        }
+        self._last_status = status
+        return status
 
     async def get_status(self) -> Dict[str, Any]:
         """获取同步状态"""
+        if self._last_status and self._last_status.get("status") == "queued":
+            return self._last_status
+
         db = get_mongo_db()
         doc = await db[STATUS_COLLECTION].find_one({"job": JOB_KEY})
         
@@ -226,6 +254,17 @@ class MultiSourceBasicsSyncService:
                             daily_data_map[ts_code] = row.to_dict()
                     stats.data_sources_used.append(f"daily_data:{daily_source}")
 
+            from app.services.official_industry_service import (
+                INDUSTRY_SOURCE_SYSTEM,
+                fetch_industry_mapping,
+            )
+
+            industry_mapping = await fetch_industry_mapping(refresh_if_empty=True)
+            use_system_industry_mapping = bool(industry_mapping)
+            if use_system_industry_mapping:
+                stats.data_sources_used.append(f"industry_mapping:{INDUSTRY_SOURCE_SYSTEM}")
+                logger.info(f"📊 使用系统行业映射集合: {len(industry_mapping)} 只股票")
+
             # Step 5: 处理和更新数据（分批处理）
             ops = []
             inserted = updated = errors = 0
@@ -250,6 +289,9 @@ class MultiSourceBasicsSyncService:
                     else:
                         symbol = row.get("symbol") or ""
                         code = str(symbol).zfill(6) if symbol else ""
+
+                    mapped_industry = industry_mapping.get(code, "") if use_system_industry_mapping else ""
+                    resolved_industry = mapped_industry or industry or "未知"
 
                     # 根据 ts_code 判断交易所
                     if isinstance(ts_code, str):
@@ -289,7 +331,7 @@ class MultiSourceBasicsSyncService:
                         "symbol": code,  # 添加 symbol 字段（标准化字段）
                         "name": name,
                         "area": area,
-                        "industry": industry,
+                        "industry": resolved_industry,
                         "market": market,
                         "list_date": list_date,
                         "sse": sse,
@@ -298,6 +340,9 @@ class MultiSourceBasicsSyncService:
                         "source": data_source,  # 🔥 使用实际数据源
                         "updated_at": datetime.now(),
                     }
+
+                    if mapped_industry:
+                        doc["industry_source"] = INDUSTRY_SOURCE_SYSTEM
 
                     # 添加财务指标
                     self._add_financial_metrics(doc, daily_metrics)

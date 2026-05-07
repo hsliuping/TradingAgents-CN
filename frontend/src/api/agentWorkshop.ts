@@ -18,6 +18,7 @@ export interface AgentWorkshopCapabilitySnapshot {
   builtin_analysis_tools: string[]
   external_data_skills: string[]
   external_analysis_skills: string[]
+  external_skill_tool_ids: string[]
   valuation_tools: string[]
   valuation_skills: string[]
   summary_text: string
@@ -25,6 +26,22 @@ export interface AgentWorkshopCapabilitySnapshot {
     builtin_tools: number
     external_skills: number
   }
+}
+
+export interface AgentWorkshopVersionPrompt {
+  version_id: string
+  template_id?: string | null
+  template_name?: string | null
+  status?: string | null
+  content?: {
+    system_prompt?: string
+    user_prompt?: string
+    tool_guidance?: string
+    analysis_requirements?: string
+    output_format?: string
+    constraints?: string
+  } | null
+  message?: string
 }
 
 export interface AgentWorkshopSessionResult {
@@ -46,6 +63,15 @@ export interface AgentWorkshopMessage {
   timestamp: string
 }
 
+export interface AgentSpecIOField {
+  name: string
+  type?: string
+  required?: boolean
+  description?: string
+}
+
+export type AgentSpecIOItem = string | AgentSpecIOField
+
 export interface AgentSpec {
   spec_id: string
   name: string
@@ -54,8 +80,8 @@ export interface AgentSpec {
   primary_goal: string
   responsibilities: string[]
   non_goals: string[]
-  inputs: string[]
-  outputs: string[]
+  inputs: AgentSpecIOItem[]
+  outputs: AgentSpecIOItem[]
   success_criteria: string[]
   constraints: string[]
   preferred_methods: string[]
@@ -70,11 +96,16 @@ export interface AgentSpec {
   updated_at: string
 }
 
+export interface SuggestedToolItem {
+  tool_id: string
+  description?: string
+  why_needed?: string
+}
+
 export interface AgentWorkshopGapAnalysis {
-  reusable_modules: string[]
   existing_tools: string[]
-  suggested_tools: string[]
-  suggested_capabilities: string[]
+  suggested_tools: SuggestedToolItem[]
+  suggested_capabilities: SuggestedToolItem[]
   manual_dependencies: string[]
   blocking_gaps: string[]
   fallback_strategy: string[]
@@ -390,6 +421,11 @@ export const agentWorkshopApi = {
 
   getVersion: async (versionId: string): Promise<AgentVersion> => {
     const res = await request.get<ApiOk<AgentVersion>>(`${BASE}/versions/${versionId}`)
+    return (res as any).data
+  },
+
+  getVersionPrompt: async (versionId: string): Promise<AgentWorkshopVersionPrompt> => {
+    const res = await request.get<ApiOk<AgentWorkshopVersionPrompt>>(`${BASE}/versions/${versionId}/prompt`)
     return (res as any).data
   },
 

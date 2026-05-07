@@ -104,6 +104,14 @@ class TushareSyncService:
             stats["total_processed"] = len(stock_list)
             logger.info(f"📊 获取到 {len(stock_list)} 只股票信息")
 
+            try:
+                from app.services.official_industry_service import upsert_industry_mapping_from_records
+                mapping_result = await upsert_industry_mapping_from_records(stock_list, provider="tushare_fallback")
+                if mapping_result.get("total", 0) > 0:
+                    logger.info(f"📊 系统行业映射集合已更新: {mapping_result['total']} 只股票")
+            except Exception as mapping_error:
+                logger.warning(f"⚠️ 更新系统行业映射集合失败，继续执行基础信息同步: {mapping_error}")
+
             # 2. 批量处理
             for i in range(0, len(stock_list), self.batch_size):
                 # 检查是否需要退出
@@ -1404,10 +1412,12 @@ class TushareSyncService:
             Tushare 格式代码（如 300750.SZ）
         """
         try:
-            # 简单的转换逻辑：根据代码前缀判断市场
-            if symbol.startswith(('60', '68')):
+            # 根据代码前缀判断市场
+            # 上交所：60/68（A股）、50/51/52/58/56（ETF/LOF/可转债等）、11（国债/可转债）
+            if symbol.startswith(('60', '68', '50', '51', '52', '58', '56', '11')):
                 return f"{symbol}.SH"
-            elif symbol.startswith(('00', '30')):
+            # 深交所：00/30（A股）、15/16/12（ETF/LOF/可转债等）
+            elif symbol.startswith(('00', '30', '15', '16', '12')):
                 return f"{symbol}.SZ"
             elif symbol.startswith(('8', '4', '92')):
                 return f"{symbol}.BJ"  # 北交所（8/4 旧号段，920 为 2025-10 起统一号段）
@@ -1550,16 +1560,17 @@ class TushareSyncService:
 
     # ==================== 财务数据同步 ====================
 
-    async def sync_financial_data(self, symbols: List[str] = None, limit: int = 20, job_id: str = None) -> Dict[str, Any]:
+    async def sync_financial_data(self, symbols: List[str] = None, limit: int = None, job_id: str = None) -> Dict[str, Any]:
         """
         同步财务数据
 
         Args:
             symbols: 股票代码列表，None表示同步所有股票
-            limit: 获取财报期数，默认20期（约5年数据）
+            limit: 获取财报期数，None 表示同步该股票可获取的全部报告期
             job_id: 任务ID（用于进度跟踪）
         """
-        logger.info(f"🔄 开始同步财务数据 (获取最近 {limit} 期)...")
+        limit_text = "全部报告期" if limit is None else f"最近 {limit} 期"
+        logger.info(f"🔄 开始同步财务数据 (获取{limit_text})...")
 
         stats = {
             "total_processed": 0,

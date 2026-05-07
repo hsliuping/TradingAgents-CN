@@ -2,12 +2,13 @@
 Agent 工坊相关数据模型
 """
 
+import json
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from bson import ObjectId
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from app.models.user import PyObjectId
 from app.utils.timezone import now_tz
@@ -54,6 +55,26 @@ class AgentWorkshopMessage(BaseModel):
     )
 
 
+class AgentCapabilityRequirement(BaseModel):
+    """规格中的能力项定义"""
+
+    capability_key: str = ""
+    capability_name: str = ""
+    capability_type: str = ""
+    description: str = ""
+    delivery_requirement: str = ""
+    acceptance_criteria: List[str] = Field(default_factory=list)
+
+
+class AgentSpecIOField(BaseModel):
+    """规格中的输入输出字段定义"""
+
+    name: str = ""
+    type: str = "string"
+    required: bool = False
+    description: str = ""
+
+
 class AgentSpec(BaseModel):
     """Agent 规格定义"""
 
@@ -65,11 +86,12 @@ class AgentSpec(BaseModel):
     primary_goal: str = ""
     responsibilities: List[str] = Field(default_factory=list)
     non_goals: List[str] = Field(default_factory=list)
-    inputs: List[str] = Field(default_factory=list)
-    outputs: List[str] = Field(default_factory=list)
+    inputs: List[Union[str, AgentSpecIOField]] = Field(default_factory=list)
+    outputs: List[Union[str, AgentSpecIOField]] = Field(default_factory=list)
     success_criteria: List[str] = Field(default_factory=list)
     constraints: List[str] = Field(default_factory=list)
     preferred_methods: List[str] = Field(default_factory=list)
+    capability_requirements: List[AgentCapabilityRequirement] = Field(default_factory=list)
     sample_symbols: List[str] = Field(default_factory=list)
     status: AgentSpecStatus = AgentSpecStatus.DRAFT
     source: str = "agent_workshop"
@@ -86,14 +108,58 @@ class AgentSpec(BaseModel):
         json_encoders={ObjectId: str, datetime: lambda dt: dt.isoformat() if dt else None},
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_io_fields(cls, data: Any) -> Any:
+        """兼容旧格式：允许字符串、JSON 字符串和对象数组混用。"""
+        if not isinstance(data, dict):
+            return data
+
+        for key in ("inputs", "outputs"):
+            items = data.get(key)
+            if not isinstance(items, list):
+                continue
+
+            normalized: List[Any] = []
+            for item in items:
+                if not isinstance(item, str):
+                    normalized.append(item)
+                    continue
+
+                text = item.strip()
+                if not text:
+                    continue
+
+                if text.startswith("{") and text.endswith("}"):
+                    try:
+                        parsed = json.loads(text)
+                    except Exception:
+                        normalized.append(text)
+                    else:
+                        normalized.append(parsed if isinstance(parsed, dict) else text)
+                    continue
+
+                normalized.append(text)
+
+            data[key] = normalized
+
+        return data
+
+
+class SuggestedToolItem(BaseModel):
+    """建议补齐的工具/能力条目"""
+
+    tool_id: str = ""
+    description: str = ""
+    why_needed: str = ""
+
 
 class AgentWorkshopGapAnalysis(BaseModel):
     """资源缺口分析结果"""
 
-    reusable_modules: List[str] = Field(default_factory=list)
     existing_tools: List[str] = Field(default_factory=list)
-    suggested_tools: List[str] = Field(default_factory=list)
-    suggested_capabilities: List[str] = Field(
+    suggested_tools: List[SuggestedToolItem] = Field(default_factory=list)
+    suggested_capabilities: List[SuggestedToolItem] = Field(
         default_factory=list,
         validation_alias=AliasChoices("suggested_capabilities", "suggested_skills"),
         serialization_alias="suggested_capabilities",
@@ -102,6 +168,22 @@ class AgentWorkshopGapAnalysis(BaseModel):
     blocking_gaps: List[str] = Field(default_factory=list)
     fallback_strategy: List[str] = Field(default_factory=list)
     build_recommendations: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_string_arrays(cls, data: Any) -> Any:
+        """兼容旧格式：将纯字符串数组自动转换为 SuggestedToolItem 对象数组"""
+        if isinstance(data, dict):
+            for key in ("suggested_tools", "suggested_capabilities", "suggested_skills"):
+                items = data.get(key)
+                if isinstance(items, list):
+                    data[key] = [
+                        {"tool_id": item, "description": "", "why_needed": ""}
+                        if isinstance(item, str)
+                        else item
+                        for item in items
+                    ]
+        return data
     notes: List[str] = Field(default_factory=list)
     generated_by: str = ""
     error_message: str = ""

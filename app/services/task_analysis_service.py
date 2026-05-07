@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, List, Callable, Union
 import logging
 import uuid
 import asyncio
+import inspect
 from datetime import datetime
 
 from app.models.analysis import (
@@ -23,6 +24,13 @@ from app.core.database import get_mongo_db
 from app.utils.timezone import now_tz
 
 logger = logging.getLogger(__name__)
+
+ETF_CODE_PREFIXES = ("50", "51", "52", "56", "58", "15", "16", "18")
+
+
+def _is_cn_etf_symbol(code: Optional[str]) -> bool:
+    code_str = str(code or "").strip()
+    return len(code_str) == 6 and code_str.isdigit() and code_str.startswith(ETF_CODE_PREFIXES)
 
 
 class TaskCancelledException(Exception):
@@ -247,15 +255,40 @@ class TaskAnalysisService:
                     task.result["analysis_id"] = saved_analysis_id
                     self.logger.info(f"✅ 已更新任务结果中的 analysis_id: {saved_analysis_id}")
 
+            # 🔑🔑🔑 关键修复：先持久化结果和更新内存状态为 COMPLETED，
+            # 再执行慢操作（通知、邮件、用户画像、回写研究主题）。
+            # 避免前端检测到 progress=100 后立即请求 /result 时数据尚未就绪的竞态条件。
+            task.status = AnalysisStatus.COMPLETED
+            await self._update_task(task)
+
+            # 🔑 关键：更新内存状态为完成（前端轮询依赖此状态）
+            from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
+            memory_manager = get_memory_state_manager()
+            await memory_manager.update_task_status(
+                task_id=task.task_id,
+                status=TaskStatus.COMPLETED,
+                progress=100,
+                message="分析完成",
+                current_step="completed",
+                current_step_name="已完成",
+                current_step_description="分析完成",
+                result_data=task.result
+            )
+
+            self.logger.info(f"✅ 任务结果已持久化并标记完成: {task.task_id}")
+
+            # ---- 以下为非关键的后处理操作，即使失败也不影响前端获取结果 ----
+            if task.task_type in (AnalysisTaskType.STOCK_ANALYSIS, AnalysisTaskType.ETF_ANALYSIS):
+                _symbol = (task.task_params or {}).get("symbol", "")
+                _stock_name = formatted_result.get("stock_name") or formatted_result.get("stock_symbol") or _symbol
+                _summary = formatted_result.get("summary") or formatted_result.get("executive_summary") or ""
+                if _summary and len(_summary) > 80:
+                    _summary = _summary[:80] + "…"
+
                 # 📢 统一通知：站内铃铛 + IM 回调（QQ 等）+ 用户配置渠道（飞书/钉钉等）
                 try:
                     from app.services.notifications_service import get_notifications_service
                     from app.models.notification import NotificationCreate
-                    _symbol = (task.task_params or {}).get("symbol", "")
-                    _stock_name = formatted_result.get("stock_name") or formatted_result.get("stock_symbol") or _symbol
-                    _summary = formatted_result.get("summary") or formatted_result.get("executive_summary") or ""
-                    if _summary and len(_summary) > 80:
-                        _summary = _summary[:80] + "…"
                     _notif_meta: Dict[str, Any] = {}
                     _im_channel = (task.task_params or {}).get("_im_channel")
                     if _im_channel:
@@ -338,22 +371,6 @@ class TaskAnalysisService:
                     )
                 except Exception as writeback_err:
                     self.logger.warning(f"⚠️ 回写研究主题失败(忽略): {writeback_err}")
-
-            await self._update_task(task)
-
-            # 🔑 关键：更新内存状态为完成
-            from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
-            memory_manager = get_memory_state_manager()
-            await memory_manager.update_task_status(
-                task_id=task.task_id,
-                status=TaskStatus.COMPLETED,
-                progress=100,
-                message="分析完成",
-                current_step="completed",
-                current_step_name="已完成",  # 🔑 传递步骤名称
-                current_step_description="分析完成",  # 🔑 传递步骤描述
-                result_data=task.result
-            )
 
             # 成长提取改为后台执行，避免阻塞主任务完成时间。
             self._schedule_growth_extraction(
@@ -1895,7 +1912,7 @@ class TaskAnalysisService:
             # 解析股票名称（如果没有在result中）
             stock_name = result.get("stock_name", "")
             if not stock_name:
-                stock_name = self._resolve_stock_name(stock_code)
+                stock_name = await self._resolve_stock_name(stock_code)
 
             # 🔑 获取模型信息
             quick_model = task.task_params.get("quick_analysis_model") or result.get("quick_model", "Unknown")
@@ -1988,7 +2005,14 @@ class TaskAnalysisService:
             self.logger.error(f"❌ 保存到 analysis_reports 失败: {e}", exc_info=True)
             return None  # 🔑 保存失败时返回 None
     
-    def _resolve_stock_name(self, stock_code: str) -> str:
+    async def _find_one_compatible(self, collection, query: Dict[str, Any], projection: Optional[Dict[str, Any]] = None):
+        """兼容同步/异步 Mongo collection 的 find_one 调用。"""
+        result = collection.find_one(query, projection)
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+    async def _resolve_stock_name(self, stock_code: str) -> str:
         """解析股票名称
         
         Args:
@@ -2001,6 +2025,30 @@ class TaskAnalysisService:
             return ""
         
         try:
+            code_str = str(stock_code).strip().zfill(6)
+
+            if self.db is not None:
+                if _is_cn_etf_symbol(code_str):
+                    etf_doc = await self._find_one_compatible(
+                        self.db.etf_basic_info,
+                        {"code": code_str},
+                        {"name": 1, "fund_name": 1, "etf_name": 1, "_id": 0}
+                    )
+                    if etf_doc:
+                        etf_name = etf_doc.get("name") or etf_doc.get("fund_name") or etf_doc.get("etf_name")
+                        if etf_name:
+                            return etf_name
+
+                stock_doc = await self._find_one_compatible(
+                    self.db.stock_basic_info,
+                    {"$or": [{"code": code_str}, {"symbol": code_str}]},
+                    {"name": 1, "stock_name": 1, "_id": 0}
+                )
+                if stock_doc:
+                    stock_name = stock_doc.get("name") or stock_doc.get("stock_name")
+                    if stock_name:
+                        return stock_name
+
             # 优先尝试从 data_source_manager 获取结构化数据
             try:
                 from tradingagents.dataflows.data_source_manager import get_china_stock_info_unified as get_info_dict
@@ -2027,7 +2075,7 @@ class TaskAnalysisService:
         except Exception as e:
             self.logger.warning(f"⚠️ 解析股票名称失败: {stock_code} - {e}")
         
-        return f"股票{stock_code}"
+        return f"{'ETF' if _is_cn_etf_symbol(stock_code) else '股票'}{stock_code}"
     
     async def _validate_task_data(self, task: UnifiedAnalysisTask) -> 'DataValidationResult':
         """

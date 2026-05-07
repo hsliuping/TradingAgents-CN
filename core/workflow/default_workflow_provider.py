@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 from .models import WorkflowDefinition
+from .templates import v2_stock_analysis_workflow as v2_stock_analysis_workflow_module
 from .templates.default_workflow import DEFAULT_WORKFLOW
 from .templates.simple_workflow import SIMPLE_WORKFLOW
 from .templates.trade_review_workflow import TRADE_REVIEW_WORKFLOW
@@ -90,6 +91,58 @@ class DefaultWorkflowProvider:
     def get_system_workflow(self, workflow_id: str) -> Optional[WorkflowDefinition]:
         """获取系统预置工作流"""
         return self.SYSTEM_WORKFLOWS.get(workflow_id)
+
+    def _build_system_workflow_doc(
+        self,
+        workflow: WorkflowDefinition,
+        created_at: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """构造用于持久化的系统工作流文档。"""
+        timestamp = datetime.utcnow().isoformat()
+        doc = workflow.to_dict()
+        doc["created_at"] = self._stringify_timestamp(created_at) or timestamp
+        doc["updated_at"] = timestamp
+        doc["created_by"] = "system"
+        doc["is_system"] = True
+        return doc
+
+    def _normalize_workflow_doc_for_compare(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+        """移除运行时字段，便于比较代码定义和数据库副本是否一致。"""
+        normalized = dict(doc)
+        for key in ("_id", "created_at", "updated_at"):
+            normalized.pop(key, None)
+        return normalized
+
+    def _stringify_timestamp(self, value: Optional[Any]) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return str(value)
+
+    def _log_workflow_diagnostics(
+        self,
+        workflow: WorkflowDefinition,
+        source: str,
+        source_path: Optional[str] = None,
+    ) -> None:
+        """记录工作流来源和关键边，便于排查是否加载到预期版本。"""
+        nodes = [node.id for node in workflow.nodes]
+        edges = [f"{edge.id}:{edge.source}->{edge.target}" for edge in workflow.edges]
+        logger.info(f"📋 [工作流加载] 来源: {source}")
+        if source_path:
+            logger.info(f"📋 [工作流加载] 来源文件: {source_path}")
+        logger.info(f"📋 [工作流加载] 节点列表: {nodes}")
+        logger.info(f"📋 [工作流加载] 边列表: {edges}")
+
+        critical_edge_ids = ("e_to_risk_debate", "e_risk_judge", "e_trader", "e_end")
+        critical_edges = {
+            edge.id: (edge.source, edge.target)
+            for edge in workflow.edges
+            if edge.id in critical_edge_ids
+        }
+        if critical_edges:
+            logger.info(f"📋 [工作流加载] 关键边: {critical_edges}")
 
     def is_system_workflow(self, workflow_id: str) -> bool:
         """检查是否为系统预置工作流"""
@@ -221,6 +274,10 @@ class DefaultWorkflowProvider:
         if self.is_system_workflow(workflow_id):
             workflow = self.SYSTEM_WORKFLOWS[workflow_id]
             logger.info(f"✅ [工作流加载] 使用系统预置工作流: {workflow_id} - {workflow.name}")
+            source_path = None
+            if workflow_id == SYSTEM_V2_STOCK_ANALYSIS_WORKFLOW_ID:
+                source_path = getattr(v2_stock_analysis_workflow_module, "__file__", None)
+            self._log_workflow_diagnostics(workflow, "system_preset", source_path)
             return workflow
 
         # 1. 优先从数据库加载
@@ -247,6 +304,7 @@ class DefaultWorkflowProvider:
                     logger.info(f"   版本: {doc.get('version', 1)}")
                     logger.info(f"   分析师数量: {len(analyst_nodes)}")
                     logger.info(f"   分析师列表: {analyst_ids}")
+                    self._log_workflow_diagnostics(workflow, "database")
 
                     return workflow
                 else:
@@ -272,6 +330,7 @@ class DefaultWorkflowProvider:
                 logger.info(f"   名称: {workflow.name}")
                 logger.info(f"   分析师数量: {len(analyst_nodes)}")
                 logger.info(f"   分析师列表: {analyst_ids}")
+                self._log_workflow_diagnostics(workflow, f"filesystem:{file_path}")
 
                 return workflow
             except Exception as e:
@@ -285,15 +344,16 @@ class DefaultWorkflowProvider:
         logger.info(f"   默认工作流: {default_workflow.name}")
         logger.info(f"   分析师数量: {len(analyst_nodes)}")
         logger.info(f"   分析师列表: {analyst_ids}")
+        self._log_workflow_diagnostics(default_workflow, "fallback_default")
 
         return default_workflow
 
     def ensure_system_workflows_exist(self) -> Dict[str, bool]:
         """
-        确保系统预置工作流存在于数据库
+        确保系统预置工作流在数据库中与代码定义保持一致
 
         Returns:
-            Dict[workflow_id, created]: 是否新创建
+            Dict[workflow_id, changed]: 是否新建或更新
         """
         results = {}
         db = self._get_db()
@@ -305,19 +365,28 @@ class DefaultWorkflowProvider:
         for wf_id, workflow in self.SYSTEM_WORKFLOWS.items():
             try:
                 existing = db.workflows.find_one({"id": wf_id})
-                if existing:
+                desired_doc = self._build_system_workflow_doc(
+                    workflow,
+                    existing.get("created_at") if existing else None,
+                )
+
+                if existing and self._normalize_workflow_doc_for_compare(existing) == self._normalize_workflow_doc_for_compare(desired_doc):
                     results[wf_id] = False
-                    logger.debug(f"系统工作流已存在: {wf_id}")
-                else:
-                    # 插入新工作流
-                    doc = workflow.to_dict()
-                    doc["created_at"] = datetime.utcnow().isoformat()
-                    doc["updated_at"] = datetime.utcnow().isoformat()
-                    doc["created_by"] = "system"
-                    doc["is_system"] = True  # 标记为系统工作流
-                    db.workflows.insert_one(doc)
-                    results[wf_id] = True
-                    logger.info(f"已创建系统工作流: {wf_id}")
+                    logger.debug(f"系统工作流已是最新版本: {wf_id}")
+                    continue
+
+                update_doc = dict(desired_doc)
+                created_at = update_doc.pop("created_at")
+                db.workflows.update_one(
+                    {"id": wf_id},
+                    {
+                        "$set": update_doc,
+                        "$setOnInsert": {"created_at": created_at},
+                    },
+                    upsert=True,
+                )
+                results[wf_id] = True
+                logger.info(f"已同步系统工作流: {wf_id}")
             except Exception as e:
                 logger.error(f"确保系统工作流存在失败 {wf_id}: {e}")
                 results[wf_id] = False

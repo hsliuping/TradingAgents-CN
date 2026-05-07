@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 
 from app.models.screening import ScreeningCondition, FieldType, BASIC_FIELDS_INFO
+from app.services.factor_registry_service import get_factor_registry_service
 from app.services.database_screening_service import get_database_screening_service
 from app.services.screening_service import ScreeningService, ScreeningParams
 
@@ -27,6 +28,7 @@ class EnhancedScreeningService:
     def __init__(self):
         self.db_service = get_database_screening_service()
         self.traditional_service = ScreeningService()
+        self.factor_registry_service = get_factor_registry_service()
 
         # 支持数据库优化的字段
         self.db_supported_fields = set(BASIC_FIELDS_INFO.keys())
@@ -63,11 +65,12 @@ class EnhancedScreeningService:
         try:
             # 分析筛选条件
             analysis = self._analyze_conditions(conditions)
+            database_can_handle = await self.db_service.can_handle_conditions(conditions)
 
             # 决定使用哪种筛选方式
             if (use_database_optimization and
                 analysis["can_use_database"] and
-                not analysis["needs_technical_indicators"]):
+                database_can_handle):
 
                 # 使用数据库优化筛选
                 result = await self._screen_with_database(
@@ -132,7 +135,10 @@ class EnhancedScreeningService:
                 "took_ms": took_ms,
                 "optimization_used": optimization_used,
                 "source": source,
-                "analysis": analysis
+                "analysis": {
+                    **analysis,
+                    "database_can_handle": database_can_handle,
+                }
             }
 
         except Exception as e:
@@ -240,36 +246,27 @@ class EnhancedScreeningService:
         Returns:
             Dict: 字段信息
         """
-        if field in BASIC_FIELDS_INFO:
-            field_info = BASIC_FIELDS_INFO[field]
+        field_info = self.factor_registry_service.get_screening_field_info(field)
+        if field_info is None:
+            return None
 
-            # 获取统计信息
-            stats = await self.db_service.get_field_statistics(field)
+        stats = await self.db_service.get_field_statistics(field)
 
-            # 获取可选值（对于枚举类型字段）
-            available_values = None
-            if field_info.data_type == "string":
-                available_values = await self.db_service.get_available_values(field)
+        available_values = None
+        if field_info.get("data_type") == "string":
+            available_values = await self.db_service.get_available_values(field)
 
-            return {
-                "name": field_info.name,
-                "display_name": field_info.display_name,
-                "field_type": field_info.field_type.value,
-                "data_type": field_info.data_type,
-                "description": field_info.description,
-                "unit": field_info.unit,
-                "supported_operators": [op.value for op in field_info.supported_operators],
-                "statistics": stats,
-                "available_values": available_values
-            }
-
-        return None
+        return {
+            **field_info,
+            "statistics": stats,
+            "available_values": available_values,
+        }
 
     async def get_all_supported_fields(self) -> List[Dict[str, Any]]:
         """获取所有支持的字段信息"""
         fields = []
 
-        for field_name in BASIC_FIELDS_INFO.keys():
+        for field_name in self.factor_registry_service.get_legacy_screening_field_config()["fields"].keys():
             field_info = await self.get_field_info(field_name)
             if field_info:
                 fields.append(field_info)

@@ -15,6 +15,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, Field
 
 from app.core.database import get_mongo_db
+from app.services.capability_index_service import CapabilityIndexService
 from core.skills.models import SkillMetadata, SkillParameter, SkillReturns, ImplementationType
 from core.skills.parser import SkillParser
 from core.skills.converter import SkillConverter
@@ -175,6 +176,13 @@ async def _register_skill_to_registry(doc: Dict[str, Any]):
         logger.warning(f"⚠️ Skill 注册到 ToolRegistry 失败: {e}")
 
 
+async def _sync_capability_index(db: AsyncIOMotorDatabase):
+    try:
+        await CapabilityIndexService(db).ensure_index()
+    except Exception as e:
+        logger.warning(f"⚠️ CapabilityIndex 同步失败: {e}")
+
+
 # =============================================================================
 # API 端点
 # =============================================================================
@@ -234,6 +242,7 @@ async def create_skill(
 
     # 注册到 ToolRegistry
     await _register_skill_to_registry(doc)
+    await _sync_capability_index(db)
 
     doc.pop("_id", None)
     return _doc_to_response(doc)
@@ -263,6 +272,7 @@ async def import_skill(
 
     # 注册到 ToolRegistry
     await _register_skill_to_registry(doc)
+    await _sync_capability_index(db)
 
     doc.pop("_id", None)
     return _doc_to_response(doc)
@@ -316,6 +326,7 @@ async def import_skill_from_url(
     doc["source_url"] = url
     await db[COLLECTION].insert_one(doc)
     await _register_skill_to_registry(doc)
+    await _sync_capability_index(db)
 
     doc.pop("_id", None)
     logger.info(f"✅ 从 URL 导入 Skill: {skill.name}")
@@ -351,6 +362,7 @@ async def import_skill_file(
     await db[COLLECTION].insert_one(doc)
 
     await _register_skill_to_registry(doc)
+    await _sync_capability_index(db)
 
     doc.pop("_id", None)
     return _doc_to_response(doc)
@@ -393,6 +405,7 @@ async def update_skill(
     updated = await db[COLLECTION].find_one({"name": req.name})
     if updated:
         await _register_skill_to_registry(updated)
+        await _sync_capability_index(db)
 
     return _doc_to_response(updated or update_doc)
 
@@ -416,6 +429,7 @@ async def delete_skill(
     tool_id = skill_name.replace("-", "_")
     registry = get_tool_registry()
     registry.unregister(tool_id)
+    await _sync_capability_index(db)
 
     return {"success": True, "message": f"Skill '{skill_name}' 已删除"}
 
@@ -444,6 +458,7 @@ async def toggle_skill(
             await _register_skill_to_registry(updated)
     else:
         registry.unregister(tool_id)
+    await _sync_capability_index(db)
 
     status = "启用" if req.enabled else "禁用"
     return {"success": True, "message": f"Skill '{skill_name}' 已{status}"}

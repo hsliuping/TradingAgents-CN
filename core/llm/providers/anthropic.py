@@ -113,24 +113,31 @@ class AnthropicAdapter(BaseAdapter):
         tools: Optional[List[Dict[str, Any]]] = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """构建请求参数"""
+        """构建请求参数
+
+        支持通过 kwargs 覆盖 temperature / max_tokens 等参数，
+        优先级：kwargs > self.config。
+        """
         converted_messages, system_prompt = self._convert_messages(messages)
-        
+
+        # max_tokens: kwargs 优先，其次 config，最后默认 4096
+        max_tokens = kwargs.pop("max_tokens", None) or self.config.max_tokens or 4096
+
         request_kwargs = {
             "model": self.config.model,
             "messages": converted_messages,
-            "max_tokens": self.config.max_tokens or 4096,
+            "max_tokens": max_tokens,
         }
-        
+
         if system_prompt:
             request_kwargs["system"] = system_prompt
-        
+
         if "temperature" in kwargs or self.config.temperature:
-            request_kwargs["temperature"] = kwargs.get("temperature", self.config.temperature)
-        
+            request_kwargs["temperature"] = kwargs.pop("temperature", self.config.temperature)
+
         if tools:
             request_kwargs["tools"] = self.convert_tools_to_provider_format(tools)
-        
+
         return request_kwargs
     
     def chat(

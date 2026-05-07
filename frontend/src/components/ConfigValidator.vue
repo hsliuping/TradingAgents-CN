@@ -285,7 +285,7 @@ import {
   InfoFilled,
   Coin
 } from '@element-plus/icons-vue'
-import axios from 'axios'
+import { ApiClient } from '@/api/request'
 
 // 类型定义
 interface ConfigItem {
@@ -348,16 +348,16 @@ const hasRecommendedWarnings = computed(() => {
 const handleValidate = async () => {
   validating.value = true
   try {
-    const response = await axios.get('/api/system/config/validate')
+    const response: any = await ApiClient.get('/api/system/config/validate')
 
-    console.log('🔍 配置验证响应:', response.data)
+    console.log('🔍 配置验证响应:', response)
 
-    if (response.data.success) {
-      validationResult.value = response.data.data
+    if (response.success) {
+      validationResult.value = response.data
 
       // 提取环境变量验证结果和 MongoDB 验证结果
-      envValidation.value = response.data.data.env_validation || null
-      mongodbValidation.value = response.data.data.mongodb_validation || null
+      envValidation.value = response.data.env_validation || null
+      mongodbValidation.value = response.data.mongodb_validation || null
 
       console.log('🔍 环境变量验证:', envValidation.value)
       console.log('🔍 MongoDB 验证:', mongodbValidation.value)
@@ -370,7 +370,7 @@ const handleValidate = async () => {
         ElMessage.warning('配置验证失败，请检查缺少的配置项')
       }
     } else {
-      ElMessage.error(response.data.message || '验证失败')
+      ElMessage.error(response.message || '验证失败')
     }
   } catch (error: any) {
     console.error('配置验证失败:', error)
@@ -407,6 +407,7 @@ const updateConfigItems = () => {
   // 更新推荐配置
   const recommendedKeys = [
     { key: 'DEEPSEEK_API_KEY', name: 'DeepSeek API', description: 'DeepSeek 大模型 API 密钥', help: '用于 AI 分析功能' },
+    { key: 'AIHUBMIX_API_KEY', name: 'AIHubMix API', description: 'AIHubMix 聚合平台 API 密钥', help: '用于统一接入多厂商模型' },
     { key: 'DASHSCOPE_API_KEY', name: '通义千问 API', description: '阿里云通义千问 API 密钥', help: '用于 AI 分析功能' },
     { key: 'TUSHARE_TOKEN', name: 'Tushare Token', description: 'Tushare 数据源 Token', help: '用于获取专业A股数据' }
   ]

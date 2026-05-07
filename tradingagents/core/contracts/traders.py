@@ -17,7 +17,7 @@ from tradingagents.core.engine.data_contract import (
 # =========================================
 TRADER_CONTRACT = AgentDataContract(
     agent_id="trader",
-    description="交易员 - 根据研究结论和风险评估生成交易信号",
+    description="研究整合员 - 根据研究结论和风险评估生成研究整合意见",
     inputs=[
         DataAccess(
             layer=DataLayer.CONTEXT,

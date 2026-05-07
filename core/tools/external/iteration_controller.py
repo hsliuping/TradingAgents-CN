@@ -18,15 +18,21 @@
 import json
 import logging
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from core.llm import UnifiedLLMClient, Message
 
+from .business_verifier import BusinessVerifierRegistry
 from .code_generator import CodeGenerator
 from .output_evaluator import OutputEvaluator
+from .reconnaissance_controller import DefaultReconnaissanceController, ReconnaissanceController
 from .sandbox_runner import SandboxRunner
 from .skill_spec import (
+    BusinessVerificationResult,
     GeneratedCode,
+    ImplementationFactReport,
     IterationRound,
     PipelineResult,
     ReflectionResult,
@@ -39,6 +45,12 @@ logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 8
 PASS_THRESHOLD = 8.0
+# 连续相同失败检测阈值：连续 N 轮业务验收失败项完全一致则判定为不可恢复
+_STALE_FAILURE_THRESHOLD = 3
+
+# 快照落盘根目录（与 SkillGenerationService 保持一致）
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_SNAPSHOT_DIR = _PROJECT_ROOT / "data" / "code" / "skill"
 
 
 class IterationController:
@@ -56,6 +68,7 @@ class IterationController:
         model: Optional[str] = None,
         max_iterations: int = MAX_ITERATIONS,
         skip_judge: bool = False,
+        reconnaissance_controller: Optional[ReconnaissanceController] = None,
     ):
         self._generator = CodeGenerator(
             llm_client=llm_client, provider=provider, model=model
@@ -68,6 +81,8 @@ class IterationController:
             model=model,
             skip_judge=skip_judge,
         )
+        self._business_verifiers = BusinessVerifierRegistry()
+        self._reconnaissance = reconnaissance_controller or DefaultReconnaissanceController()
         self._llm_client = llm_client
         self._provider = provider
         self._model = model
@@ -86,6 +101,7 @@ class IterationController:
         initial_feedback: str = "",
         initial_code: str = "",
         progress_callback: Optional[Callable[[str, str, int, float], None]] = None,
+        fact_report: Optional[ImplementationFactReport] = None,
     ) -> PipelineResult:
         """
         执行完整的生成管线
@@ -95,11 +111,13 @@ class IterationController:
             initial_feedback: 初始反馈（优化场景使用）
             initial_code: 初始代码（优化场景使用）
             progress_callback: 进度回调 (stage, message, iteration, progress)
+            fact_report: 预构建的侦察报告（侦察前置模式），为 None 时内部自动执行侦察
 
         Returns:
             PipelineResult: 管线最终结果
         """
         start_time = time.time()
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         iterations: List[IterationRound] = []
         feedback = initial_feedback
         previous_code = initial_code
@@ -111,8 +129,42 @@ class IterationController:
                 except Exception as e:
                     logger.warning(f"progress_callback 异常: {e}")
 
+        if fact_report is not None:
+            # 侦察前置模式：复用上游已完成的侦察报告
+            logger.info(
+                "🧭 复用上游侦察报告 | strategy=%s | helpers=%d | checks=%d",
+                fact_report.recommended_strategy or "(none)",
+                len(fact_report.available_helpers),
+                len(fact_report.validation_checks),
+            )
+            self._persist_fact_report(spec.tool_id, run_id, fact_report)
+        else:
+            # 内部侦察模式（向后兼容）
+            try:
+                _report("reconnaissance", "正在整理实现事实...", 0, 0.03)
+                fact_report = self._reconnaissance.analyze(spec)
+                logger.info(
+                    "🧭 前置侦察完成 | strategy=%s | helpers=%d | checks=%d",
+                    fact_report.recommended_strategy or "(none)",
+                    len(fact_report.available_helpers),
+                    len(fact_report.validation_checks),
+                )
+                self._persist_fact_report(spec.tool_id, run_id, fact_report)
+
+                for idx, update in enumerate(self._build_reconnaissance_updates(fact_report), start=1):
+                    logger.info("🧭 侦察摘要[%d]: %s", idx, update)
+                    _report("reconnaissance", update, 0, min(0.03 + idx * 0.01, 0.08))
+                _report("reconnaissance", "实现事实整理完成", 0, 0.08)
+            except Exception as e:
+                logger.warning(f"⚠️ 前置侦察失败，继续使用原有生成流程: {e}")
+                _report("reconnaissance", "实现事实整理失败，降级为原流程", 0, 0.08)
+
         for round_num in range(1, self._max_iterations + 1):
-            logger.info(f"🔄 Skill 生成管线 — 第 {round_num}/{self._max_iterations} 轮")
+            logger.info(
+                f"\n{'='*60}\n"
+                f"🔄 Skill 生成管线 — 第 {round_num}/{self._max_iterations} 轮 | tool_id={spec.tool_id}\n"
+                f"{'='*60}"
+            )
             _report("iteration", f"第 {round_num}/{self._max_iterations} 轮", round_num, 0)
 
             iteration = IterationRound(round_number=round_num)
@@ -121,22 +173,70 @@ class IterationController:
             _report("code_generation", "正在生成代码...", round_num, 0.1)
             try:
                 generated = self._generator.generate(
-                    spec, feedback=feedback, previous_code=previous_code
+                    spec,
+                    feedback=feedback,
+                    previous_code=previous_code,
+                    fact_report=fact_report,
                 )
                 iteration.generated_code = generated
-                logger.info(f"✅ 代码生成完成 ({generated.generation_time}s)")
+                # 详细日志：代码摘要
+                code_lines = generated.code.split("\n") if generated.code else []
+                logger.info(
+                    f"✅ [第{round_num}轮] 代码生成完成\n"
+                    f"   ⏱️  耗时: {generated.generation_time}s\n"
+                    f"   📏 代码行数: {len(code_lines)}\n"
+                    f"   📝 代码前5行:\n"
+                    + "\n".join(f"      | {line}" for line in code_lines[:5])
+                    + (f"\n      | ... (共 {len(code_lines)} 行)" if len(code_lines) > 5 else "")
+                )
+                self._persist_stage_artifact(
+                    tool_id=spec.tool_id,
+                    run_id=run_id,
+                    round_num=round_num,
+                    stage="code_generation",
+                    payload={
+                        "success": True,
+                        "generation_time": generated.generation_time,
+                        "code_lines": len(code_lines),
+                        "metadata": generated.metadata or {},
+                    },
+                    code=generated.code,
+                )
                 _report("code_generation", f"代码生成完成 ({generated.generation_time}s)", round_num, 0.2)
             except Exception as e:
-                logger.error(f"❌ 代码生成失败: {e}")
+                logger.error(f"❌ [第{round_num}轮] 代码生成失败: {e}")
+                self._persist_stage_artifact(
+                    tool_id=spec.tool_id,
+                    run_id=run_id,
+                    round_num=round_num,
+                    stage="code_generation",
+                    payload={
+                        "success": False,
+                        "error": str(e),
+                    },
+                )
                 iteration.decision = "FAIL"
                 iteration.feedback = f"代码生成失败: {e}"
                 iterations.append(iteration)
+                self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
                 break
 
             # ===== 阶段 2: 静态验证 =====
             _report("static_validation", "正在语法检查...", round_num, 0.25)
             validation = self._validator.validate(generated, spec)
             iteration.validation = validation
+            self._persist_stage_artifact(
+                tool_id=spec.tool_id,
+                run_id=run_id,
+                round_num=round_num,
+                stage="static_validation",
+                payload={
+                    "passed": validation.passed,
+                    "errors": validation.errors[:20],
+                    "warnings": (validation.warnings or [])[:20],
+                },
+                code=generated.code,
+            )
 
             if not validation.passed:
                 feedback = self._build_rich_feedback(
@@ -149,20 +249,44 @@ class IterationController:
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
+                self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
                 _report("static_validation", "静态验证失败，重试中...", round_num, 0.3)
-                logger.warning(f"⚠️ 静态验证失败: {validation.errors}")
+                logger.warning(
+                    f"⚠️ [第{round_num}轮] 静态验证失败:\n"
+                    + "\n".join(f"   ❌ {err}" for err in validation.errors[:5])
+                )
                 continue
 
-            logger.info("✅ 静态验证通过")
+            logger.info(f"✅ [第{round_num}轮] 静态验证通过")
             _report("static_validation", "语法检查通过", round_num, 0.35)
 
             # ===== 阶段 3: 沙箱执行 =====
             _report("sandbox_execution", "正在沙箱执行...", round_num, 0.4)
             sandbox = self._runner.run(generated.code, spec)
             iteration.sandbox = sandbox
+            self._persist_stage_artifact(
+                tool_id=spec.tool_id,
+                run_id=run_id,
+                round_num=round_num,
+                stage="sandbox_execution",
+                payload={
+                    "success": sandbox.success,
+                    "execution_time": sandbox.execution_time,
+                    "error": sandbox.error,
+                    "stdout": sandbox.stdout,
+                    "stderr": sandbox.stderr,
+                    "output": sandbox.output,
+                },
+                code=generated.code,
+            )
 
             if not sandbox.success:
                 _report("reflection", "正在分析失败原因...", round_num, 0.5)
+                logger.warning(
+                    f"⚠️ [第{round_num}轮] 沙箱执行失败:\n"
+                    f"   错误: {sandbox.error or '未知错误'}\n"
+                    f"   stderr: {(sandbox.stderr or '(空)')[:500]}"
+                )
                 reflection = self._reflect_on_failure(
                     spec=spec,
                     code=generated.code,
@@ -173,6 +297,12 @@ class IterationController:
                     output=sandbox.output,
                 )
                 iteration.reflection = reflection
+                logger.info(
+                    f"🔍 [第{round_num}轮] 反思结果:\n"
+                    f"   根因: {reflection.root_cause}\n"
+                    f"   修复计划: {reflection.fix_plan}\n"
+                    f"   置信度: {reflection.confidence}"
+                )
 
                 feedback = self._build_rich_feedback(
                     stage="沙箱执行",
@@ -185,29 +315,129 @@ class IterationController:
                     reflection=reflection,
                 )
                 previous_code = generated.code
+                # ---- 提前退出：反思建议放弃 ----
+                if not reflection.should_retry:
+                    iteration.decision = "FAIL"
+                    iteration.feedback = feedback
+                    iterations.append(iteration)
+                    self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
+                    _report("sandbox_execution", "反思判定不可修复，提前终止", round_num, 0.55)
+                    logger.warning(
+                        f"🛑 [第{round_num}轮] 反思建议放弃 (should_retry=False): {reflection.root_cause}"
+                    )
+                    break
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
+                self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
                 _report("sandbox_execution", "沙箱执行失败，反思后重试中...", round_num, 0.55)
-                logger.warning(f"⚠️ 沙箱执行失败: {sandbox.error}")
                 continue
 
-            logger.info(f"✅ 沙箱执行成功 ({sandbox.execution_time}s)")
+            # 详细日志：沙箱执行结果
+            output_preview = ""
+            if sandbox.output is not None:
+                try:
+                    output_preview = json.dumps(sandbox.output, ensure_ascii=False, default=str)[:500]
+                except Exception:
+                    output_preview = str(sandbox.output)[:500]
+            logger.info(
+                f"✅ [第{round_num}轮] 沙箱执行成功\n"
+                f"   ⏱️  耗时: {sandbox.execution_time}s\n"
+                f"   📤 返回值预览: {output_preview or '(空)'}\n"
+                f"   📺 stdout: {(sandbox.stdout or '(空)')[:300]}"
+            )
             _report("sandbox_execution", f"沙箱执行成功 ({sandbox.execution_time}s)", round_num, 0.6)
 
             # ===== 阶段 4: 输出评估 =====
             _report("output_evaluation", "正在质量评估...", round_num, 0.65)
             eval_score = self._evaluator.evaluate(sandbox, spec, generated.code)
             iteration.eval_score = eval_score
-            logger.info(f"📊 评估总分: {eval_score.total}")
+            self._persist_stage_artifact(
+                tool_id=spec.tool_id,
+                run_id=run_id,
+                round_num=round_num,
+                stage="output_evaluation",
+                payload={
+                    "eval_score": iteration.eval_score.model_dump(),
+                },
+                code=generated.code,
+            )
+            logger.info(
+                f"📊 [第{round_num}轮] 评估得分:\n"
+                f"   总分: {eval_score.total}/10 (阈值: {PASS_THRESHOLD})\n"
+                f"   可执行性: {eval_score.executability} | 真实性: {eval_score.authenticity}\n"
+                f"   完整性: {eval_score.completeness} | 相关性: {eval_score.relevance}\n"
+                f"   格式质量: {eval_score.format_quality}"
+            )
 
-            if eval_score.total >= PASS_THRESHOLD:
+            business_verification = self._business_verifiers.resolve(spec).verify(
+                sandbox,
+                spec,
+                fact_report,
+            )
+            iteration.business_verification = business_verification
+            self._persist_stage_artifact(
+                tool_id=spec.tool_id,
+                run_id=run_id,
+                round_num=round_num,
+                stage="business_verification",
+                payload={
+                    "passed": business_verification.passed,
+                    "business_score": business_verification.business_score,
+                    "failures": [failure.model_dump() for failure in business_verification.failures[:20]],
+                    "warnings": business_verification.warnings[:20],
+                    "details": business_verification.details,
+                },
+                code=generated.code,
+            )
+            logger.info(
+                f"🧪 [第{round_num}轮] 业务验收:\n"
+                f"   通过: {business_verification.passed}\n"
+                f"   业务分: {business_verification.business_score}\n"
+                f"   失败项: {len(business_verification.failures)}"
+            )
+
+            if self._is_systemic_business_verifier_failure(business_verification):
+                system_reflection = ReflectionResult(
+                    root_cause="系统级业务验收规则配置错误，当前失败并非代码实现缺陷。",
+                    fix_plan=[
+                        "清洗或降级不可执行的抽象 validation_checks（如 business/custom）。",
+                        "仅保留 status_success、required_field、required_non_empty_payload 等可执行规则。",
+                        "修复系统规则后再重新发起生成。",
+                    ],
+                    should_retry=False,
+                    confidence=0.99,
+                )
+                iteration.reflection = system_reflection
+                iteration.decision = "FAIL"
+                iteration.feedback = self._build_rich_feedback(
+                    stage="质量评估/业务验收",
+                    errors=self._build_business_errors(business_verification),
+                    code=generated.code,
+                    spec=spec,
+                    stdout=sandbox.stdout,
+                    stderr=sandbox.stderr,
+                    output=sandbox.output,
+                    reflection=system_reflection,
+                )
+                iterations.append(iteration)
+                self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
+                _report("output_evaluation", "检测到系统级验收规则错误，终止重试", round_num, 0.8)
+                logger.warning(
+                    f"🛑 [第{round_num}轮] 检测到系统级业务验收错误，停止继续让模型修代码"
+                )
+                break
+
+            if eval_score.total >= PASS_THRESHOLD and business_verification.passed:
                 # ===== 阶段 5: 边缘测试验证 =====
                 _report("edge_testing", "正在执行边缘测试验证...", round_num, 0.8)
                 edge_failures = self._run_edge_tests(generated.code, spec)
 
                 if edge_failures:
-                    logger.warning(f"⚠️ 边缘测试发现 {len(edge_failures)} 个问题")
+                    logger.warning(
+                        f"⚠️ [第{round_num}轮] 边缘测试发现 {len(edge_failures)} 个问题:\n"
+                        + "\n".join(f"   ❌ {f}" for f in edge_failures[:5])
+                    )
                     _report("reflection", "边缘测试失败，正在分析...", round_num, 0.85)
                     reflection = self._reflect_on_failure(
                         spec=spec,
@@ -233,14 +463,27 @@ class IterationController:
                     iteration.decision = "RETRY"
                     iteration.feedback = feedback
                     iterations.append(iteration)
+                    self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
                     _report("edge_testing", "边缘测试失败，反思后重试中...", round_num, 0.9)
                     continue
 
                 # 全部通过
                 iteration.decision = "PASS"
                 iterations.append(iteration)
+                self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
                 _report("output_evaluation", f"评估通过，总分: {eval_score.total}", round_num, 1.0)
-                logger.info(f"🎉 Skill 生成成功！总分: {eval_score.total}")
+                total_time = round(time.time() - start_time, 2)
+                logger.info(
+                    f"\n{'='*60}\n"
+                    f"🎉 Skill 生成成功！\n"
+                    f"   tool_id: {spec.tool_id}\n"
+                    f"   总分: {eval_score.total}/10\n"
+                    f"   业务验收: 通过\n"
+                    f"   迭代轮数: {round_num}\n"
+                    f"   总耗时: {total_time}s\n"
+                    f"   代码行数: {len(generated.code.split(chr(10)))}\n"
+                    f"{'='*60}"
+                )
                 return PipelineResult(
                     success=True,
                     tool_id=spec.tool_id,
@@ -251,21 +494,44 @@ class IterationController:
                     total_time=round(time.time() - start_time, 2),
                 )
             else:
-                _report("reflection", f"评分不足 ({eval_score.total}/10)，正在分析...", round_num, 0.75)
+                failure_messages: List[str] = []
+                extra_context_parts: List[str] = []
+                if eval_score.total < PASS_THRESHOLD:
+                    failure_messages.extend(self._build_eval_errors(eval_score))
+                    extra_context_parts.append(self._build_eval_reflection_context(eval_score))
+                if not business_verification.passed:
+                    failure_messages.extend(self._build_business_errors(business_verification))
+                    extra_context_parts.append(self._build_business_reflection_context(business_verification))
+
+                reason = (
+                    f"评分不足 ({eval_score.total}/10)"
+                    if eval_score.total < PASS_THRESHOLD and business_verification.passed
+                    else "业务验收未通过"
+                    if eval_score.total >= PASS_THRESHOLD and not business_verification.passed
+                    else f"评分不足且业务验收未通过 ({eval_score.total}/10)"
+                )
+                _report("reflection", f"{reason}，正在分析...", round_num, 0.75)
                 reflection = self._reflect_on_failure(
                     spec=spec,
                     code=generated.code,
-                    stage="质量评估",
-                    error=f"评分 {eval_score.total}/10 低于阈值 {PASS_THRESHOLD}",
+                    stage="质量评估/业务验收",
+                    error="\n".join(failure_messages),
                     stdout=sandbox.stdout,
                     stderr=sandbox.stderr,
                     output=sandbox.output,
+                    extra_context="\n\n".join(part for part in extra_context_parts if part),
                 )
                 iteration.reflection = reflection
+                logger.info(
+                    f"🔍 [第{round_num}轮] 反思结果:\n"
+                    f"   根因: {reflection.root_cause}\n"
+                    f"   修复计划: {reflection.fix_plan}\n"
+                    f"   置信度: {reflection.confidence}"
+                )
 
                 feedback = self._build_rich_feedback(
-                    stage="质量评估",
-                    errors=self._build_eval_errors(eval_score),
+                    stage="质量评估/业务验收",
+                    errors=failure_messages,
                     code=generated.code,
                     spec=spec,
                     stdout=sandbox.stdout,
@@ -274,14 +540,47 @@ class IterationController:
                     reflection=reflection,
                 )
                 previous_code = generated.code
+
+                # ---- 提前退出：反思建议放弃 ----
+                if not reflection.should_retry:
+                    iteration.decision = "FAIL"
+                    iteration.feedback = feedback
+                    iterations.append(iteration)
+                    self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
+                    _report("output_evaluation", "反思判定不可修复，提前终止", round_num, 0.8)
+                    logger.warning(
+                        f"🛑 [第{round_num}轮] 反思建议放弃 (should_retry=False): {reflection.root_cause}"
+                    )
+                    break
+
+                # ---- 提前退出：连续相同失败检测 ----
+                if self._detect_stale_failures(iterations):
+                    iteration.decision = "FAIL"
+                    iteration.feedback = feedback + "\n\n[系统] 连续多轮业务验收失败项完全相同，判定为数据源不可用，提前终止。"
+                    iterations.append(iteration)
+                    self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
+                    _report("output_evaluation", "连续相同失败，数据不可用，提前终止", round_num, 0.8)
+                    logger.warning(
+                        f"🛑 [第{round_num}轮] 连续 {_STALE_FAILURE_THRESHOLD} 轮相同业务验收失败，判定为不可恢复"
+                    )
+                    break
+
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
-                _report("output_evaluation", f"评分不足 ({eval_score.total}/10)，反思后重试中...", round_num, 0.8)
-                logger.warning(f"⚠️ 评分不足 ({eval_score.total} < {PASS_THRESHOLD})，重试")
+                self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
+                _report("output_evaluation", f"{reason}，反思后重试中...", round_num, 0.8)
+                logger.warning(f"⚠️ [第{round_num}轮] {reason}，进入下一轮")
 
         failure_summary = self._build_failure_summary(iterations)
-        logger.error(f"❌ Skill 生成失败 — {self._max_iterations} 轮迭代后仍未通过")
+        total_time = round(time.time() - start_time, 2)
+        logger.error(
+            f"\n{'='*60}\n"
+            f"❌ Skill 生成失败 — {self._max_iterations} 轮迭代后仍未通过\n"
+            f"   tool_id: {spec.tool_id}\n"
+            f"   总耗时: {total_time}s\n"
+            f"{'='*60}"
+        )
         return PipelineResult(
             success=False,
             tool_id=spec.tool_id,
@@ -290,6 +589,225 @@ class IterationController:
             total_time=round(time.time() - start_time, 2),
             error=failure_summary,
         )
+
+    # ==================== 提前退出检测 ====================
+
+    @staticmethod
+    def _detect_stale_failures(iterations: List[IterationRound]) -> bool:
+        """
+        检测连续 N 轮业务验收的失败项是否完全相同。
+        如果是，说明失败原因是外部数据不可用，继续迭代不会改善。
+        """
+        if len(iterations) < _STALE_FAILURE_THRESHOLD:
+            return False
+
+        recent = iterations[-_STALE_FAILURE_THRESHOLD:]
+
+        # 提取每轮的失败 rule_id 集合
+        failure_sets: List[frozenset] = []
+        for it in recent:
+            if it.business_verification and not it.business_verification.passed:
+                rule_ids = frozenset(f.rule_id for f in it.business_verification.failures)
+                failure_sets.append(rule_ids)
+            else:
+                return False  # 有一轮通过了或没有业务验收，不算连续
+
+        if len(failure_sets) < _STALE_FAILURE_THRESHOLD:
+            return False
+
+        # 所有集合相同
+        return len(set(failure_sets)) == 1
+
+    # ==================== 即时落盘 ====================
+
+    @staticmethod
+    def _get_snapshot_dir(tool_id: str, run_id: str) -> Path:
+        """获取当前运行批次的快照目录: data/code/skill/{tool_id}/{run_id}/"""
+        d = _SNAPSHOT_DIR / tool_id / run_id
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    @staticmethod
+    def _persist_fact_report(
+        tool_id: str,
+        run_id: str,
+        fact_report: ImplementationFactReport,
+    ) -> Optional[Path]:
+        """侦察完成后立即落盘 fact_report.json。"""
+        try:
+            d = IterationController._get_snapshot_dir(tool_id, run_id)
+            path = d / "fact_report.json"
+            data = fact_report.model_dump(mode="json")
+            path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            logger.info("📝 侦察报告已落盘: %s", path)
+            return path
+        except Exception as exc:
+            logger.warning("⚠️ 侦察报告落盘失败: %s", exc)
+            return None
+
+    @staticmethod
+    def _persist_round_snapshot(
+        tool_id: str,
+        run_id: str,
+        round_num: int,
+        iteration: IterationRound,
+        fact_report: Optional[ImplementationFactReport] = None,
+    ) -> Optional[Path]:
+        """每轮迭代结束后立即落盘该轮完整快照（含代码、评分、反思等）。"""
+        try:
+            d = IterationController._get_snapshot_dir(tool_id, run_id)
+            snapshot: Dict[str, Any] = {
+                "round_number": round_num,
+                "decision": iteration.decision,
+                "feedback_excerpt": (iteration.feedback or "")[:2000],
+            }
+            # 生成的代码
+            if iteration.generated_code:
+                g = iteration.generated_code
+                snapshot["generated_code"] = {
+                    "code_lines": len((g.code or "").split("\n")),
+                    "generation_time": g.generation_time,
+                    "metadata": g.metadata,
+                }
+                # 同时保存完整代码文件
+                code_path = d / f"round_{round_num:02d}.py"
+                code_path.write_text(
+                    (g.code or "") + "\n", encoding="utf-8"
+                )
+            # 静态验证
+            if iteration.validation:
+                snapshot["validation"] = {
+                    "passed": iteration.validation.passed,
+                    "errors": iteration.validation.errors[:10],
+                }
+            # 沙箱执行
+            if iteration.sandbox:
+                sb = iteration.sandbox
+                snapshot["sandbox"] = {
+                    "success": sb.success,
+                    "execution_time": sb.execution_time,
+                    "error": (sb.error or "")[:500],
+                    "stdout_excerpt": (sb.stdout or "")[:500],
+                    "output_excerpt": str(sb.output)[:1000] if sb.output else None,
+                }
+            # 评估得分
+            if iteration.eval_score:
+                snapshot["eval_score"] = iteration.eval_score.model_dump()
+            # 业务验收
+            if iteration.business_verification:
+                bv = iteration.business_verification
+                snapshot["business_verification"] = {
+                    "passed": bv.passed,
+                    "business_score": bv.business_score,
+                    "failures": bv.failures[:10],
+                }
+            # 反思
+            if iteration.reflection:
+                r = iteration.reflection
+                snapshot["reflection"] = {
+                    "root_cause": r.root_cause,
+                    "fix_plan": r.fix_plan,
+                    "should_retry": r.should_retry,
+                    "confidence": r.confidence,
+                }
+            # 附带当轮的侦察报告引用（置信度+策略摘要即可）
+            if fact_report:
+                snapshot["fact_report_summary"] = {
+                    "confidence": fact_report.confidence,
+                    "strategy": (fact_report.recommended_strategy or "")[:200],
+                    "helpers_count": len(fact_report.available_helpers),
+                    "checks_count": len(fact_report.validation_checks),
+                }
+
+            path = d / f"round_{round_num:02d}_snapshot.json"
+            path.write_text(
+                json.dumps(snapshot, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            logger.info("📝 第%d轮快照已落盘: %s", round_num, path)
+            return path
+        except Exception as exc:
+            logger.warning("⚠️ 第%d轮快照落盘失败: %s", round_num, exc)
+            return None
+
+    @staticmethod
+    def _persist_stage_artifact(
+        tool_id: str,
+        run_id: str,
+        round_num: int,
+        stage: str,
+        payload: Dict[str, Any],
+        code: str = "",
+    ) -> Optional[Path]:
+        """阶段一完成就立即落盘，便于定位卡在哪一步。"""
+        try:
+            d = IterationController._get_snapshot_dir(tool_id, run_id)
+            stage_payload = {
+                "tool_id": tool_id,
+                "run_id": run_id,
+                "round_number": round_num,
+                "stage": stage,
+                "updated_at": datetime.utcnow().isoformat(),
+                **payload,
+            }
+            path = d / f"round_{round_num:02d}_{stage}.json"
+            path.write_text(
+                json.dumps(stage_payload, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            latest_path = d / "latest_stage.json"
+            latest_path.write_text(
+                json.dumps(stage_payload, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            if code:
+                code_path = d / f"round_{round_num:02d}.py"
+                code_path.write_text((code or "") + ("" if code.endswith("\n") else "\n"), encoding="utf-8")
+            logger.info("📝 阶段结果已落盘: %s", path)
+            return path
+        except Exception as exc:
+            logger.warning("⚠️ 阶段结果落盘失败(stage=%s, round=%s): %s", stage, round_num, exc)
+            return None
+
+    @staticmethod
+    def _build_reconnaissance_updates(fact_report: ImplementationFactReport) -> List[str]:
+        updates: List[str] = []
+        if fact_report.recommended_strategy:
+            updates.append(f"侦察策略：{fact_report.recommended_strategy}")
+
+        collections = [
+            item.source
+            for item in fact_report.schema_facts
+            if item.source.startswith("stock_") or item.source == "market_quotes"
+        ]
+        if collections:
+            unique_collections = list(dict.fromkeys(collections))[:3]
+            updates.append(f"命中本地集合：{'、'.join(unique_collections)}")
+
+        if fact_report.available_helpers:
+            helper_names = [f"{item.module}.{item.name}" for item in fact_report.available_helpers[:3]]
+            updates.append(f"推荐 helper：{'；'.join(helper_names)}")
+
+        if fact_report.sample_fields:
+            sample_parts: List[str] = []
+            for collection, fields in list(fact_report.sample_fields.items())[:2]:
+                sample_parts.append(f"{collection}: {', '.join(fields[:6])}")
+            if sample_parts:
+                updates.append(f"样本字段：{'；'.join(sample_parts)}")
+
+        if fact_report.runtime_gaps:
+            gap_parts = [item.reason for item in fact_report.runtime_gaps[:2] if item.reason]
+            if gap_parts:
+                updates.append(f"侦察提示：{'；'.join(gap_parts)}")
+
+        if fact_report.validation_checks:
+            check_parts = [check.field or check.name for check in fact_report.validation_checks[:4]]
+            updates.append(f"动态验收字段：{'、'.join(check_parts)}")
+
+        return updates[:6]
 
     async def arun(self, spec: SkillSpec) -> PipelineResult:
         """异步版本的 run"""
@@ -308,6 +826,7 @@ class IterationController:
         stdout: str = "",
         stderr: str = "",
         output: Any = None,
+        extra_context: str = "",
     ) -> ReflectionResult:
         """
         LLM 反思 — 在每轮失败后分析根因并制定修复计划。
@@ -322,6 +841,9 @@ class IterationController:
             except Exception:
                 output_preview = str(output)[:2000]
 
+        code_context = self._format_code_for_prompt(code)
+        extra_context_block = f"\n【补充上下文】\n{extra_context}\n" if extra_context else ""
+
         prompt = f"""你是一位资深 Python 开发者。一个自动生成的工具函数在「{stage}」阶段失败了。
 请分析根因并给出精准的修复计划。
 
@@ -330,10 +852,12 @@ class IterationController:
 - 功能: {spec.description}
 - 数据源: {spec.data_source or '未指定'}
 
-【生成的代码】（截断前 3000 字符）
+【生成的代码】
 ```python
-{code[:3000]}
+{code_context}
 ```
+
+{extra_context_block}
 
 【失败信息】
 {error}
@@ -347,13 +871,40 @@ class IterationController:
 【函数返回值】
 {output_preview or '(空)'}
 
+【修复优先级原则 — 严格遵守】
+1. 优先修复「数据获取/业务逻辑」问题（如数据源调用参数错误、字段解析遗漏、返回结构不完整）
+2. 其次修复「异常处理/边界情况」（如缺少 fallback、空值未处理）
+3. 最后才考虑「返回状态码/格式」调整
+⚠️ 禁止在 fix_plan 中仅调整 status 字段值（如从 success 改 error 或反之），这会导致振荡。
+   如果上一轮的反思已经建议过调整 status，本轮必须从数据获取层面寻找根因。
+
+【should_retry 判定准则】
+- should_retry: true — 失败原因是代码 Bug、参数错误、格式不对等可通过修改代码解决的问题
+- should_retry: false — 失败原因是外部数据源确实不提供所需数据（如该股票在 Tushare 中无增长率数据），
+  或所需数据在当前数据源中根本不存在。此时继续迭代无法改善结果，应提前终止。
+
 请用 JSON 格式回复，不要输出其他内容：
 {{"root_cause": "一句话说明根因", "fix_plan": ["修复步骤1", "修复步骤2", ...], "should_retry": true/false, "confidence": 0.0-1.0}}
 """
         try:
             client = self._get_client()
+            logger.info(
+                f"\n{'─'*50}\n"
+                f"📤 [Reflection] LLM 输入 ({len(prompt)} 字符)\n"
+                f"{'─'*50}\n"
+                f"{prompt[:3000]}\n"
+                f"{'...(截断)' if len(prompt) > 3000 else ''}\n"
+                f"{'─'*50}"
+            )
             response = client.chat([Message(role="user", content=prompt)])
             raw = (response.content or "").strip()
+            logger.info(
+                f"\n{'─'*50}\n"
+                f"📥 [Reflection] LLM 输出 ({len(raw)} 字符)\n"
+                f"{'─'*50}\n"
+                f"{raw}\n"
+                f"{'─'*50}"
+            )
 
             import re
             json_match = re.search(r"\{[^}]+\}", raw, re.DOTALL)
@@ -476,6 +1027,17 @@ class IterationController:
                 if weak:
                     parts.append(f"  不达标维度: {', '.join(weak)}")
 
+            if it.business_verification:
+                parts.append(
+                    f"  业务验收: passed={it.business_verification.passed}, "
+                    f"business_score={it.business_verification.business_score}"
+                )
+                if it.business_verification.failures:
+                    parts.append(
+                        "  业务失败项: "
+                        + "; ".join(f.message for f in it.business_verification.failures[:5])
+                    )
+
             if it.reflection and it.reflection.root_cause:
                 parts.append(f"  根因分析: {it.reflection.root_cause}")
 
@@ -483,7 +1045,129 @@ class IterationController:
 
         return "\n".join(parts).strip()
 
+    @staticmethod
+    def _build_business_errors(result: BusinessVerificationResult) -> List[str]:
+        errors = [failure.message for failure in result.failures]
+        if not errors and not result.passed:
+            errors.append("业务验收未通过")
+        return errors
+
+    @staticmethod
+    def _build_business_reflection_context(result: BusinessVerificationResult) -> str:
+        lines = [
+            f"- 业务验收通过: {result.passed}",
+            f"- 业务分: {result.business_score}/10",
+            f"- 验收器: {result.details.get('verifier', 'unknown')}",
+        ]
+        if result.failures:
+            lines.append("- 失败规则:")
+            for failure in result.failures[:5]:
+                lines.append(f"  - {failure.rule_id}: {failure.message}")
+        if result.warnings:
+            lines.append("- 警告:")
+            for warning in result.warnings[:5]:
+                lines.append(f"  - {warning}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _is_systemic_business_verifier_failure(result: BusinessVerificationResult) -> bool:
+        unsupported = result.details.get("unsupported_rule_types") or []
+        if unsupported:
+            return True
+        return any("未支持的业务验收规则类型" in failure.message for failure in result.failures)
+
+    @staticmethod
+    def _format_code_for_prompt(
+        code: str,
+        *,
+        max_chars: int = 12000,
+        full_code_line_limit: int = 260,
+        head_lines: int = 140,
+        tail_lines: int = 100,
+    ) -> str:
+        """为反思阶段优先保留完整代码，超长时再保留首尾关键片段。"""
+        if not code:
+            return ""
+
+        lines = code.splitlines()
+        if len(code) <= max_chars and len(lines) <= full_code_line_limit:
+            return code
+
+        if len(lines) <= head_lines + tail_lines:
+            combined = code
+        else:
+            combined = (
+                "\n".join(lines[:head_lines])
+                + f"\n# ... (中间省略，共 {len(lines)} 行) ...\n"
+                + "\n".join(lines[-tail_lines:])
+            )
+
+        if len(combined) <= max_chars:
+            return combined
+
+        keep_each_side = max((max_chars - 32) // 2, 1000)
+        return (
+            combined[:keep_each_side]
+            + "\n# ... (中间省略) ...\n"
+            + combined[-keep_each_side:]
+        )
+
+    @staticmethod
+    def _build_eval_reflection_context(score) -> str:
+        """把评估分项显式传给反思模型，避免它只看到总分不足。"""
+        lines = [
+            f"- 总分: {score.total}/10（阈值: {PASS_THRESHOLD}）",
+            f"- 可执行性: {score.executability}/10",
+            f"- 真实性: {score.authenticity}/10",
+            f"- 完整性: {score.completeness}/10",
+            f"- 相关性: {score.relevance}/10",
+            f"- 格式质量: {score.format_quality}/10",
+        ]
+
+        weak_dims = []
+        if score.executability < PASS_THRESHOLD:
+            weak_dims.append(f"可执行性({score.executability})")
+        if score.authenticity < PASS_THRESHOLD:
+            weak_dims.append(f"真实性({score.authenticity})")
+        if score.completeness < PASS_THRESHOLD:
+            weak_dims.append(f"完整性({score.completeness})")
+        if score.relevance < PASS_THRESHOLD:
+            weak_dims.append(f"相关性({score.relevance})")
+        if score.format_quality < PASS_THRESHOLD:
+            weak_dims.append(f"格式质量({score.format_quality})")
+
+        if weak_dims:
+            lines.append(f"- 不达标维度: {', '.join(weak_dims)}")
+
+        return "\n".join(lines)
+
     # ==================== 反馈构建 ====================
+
+    @staticmethod
+    def _summarize_text(
+        text: Any,
+        *,
+        max_chars: int,
+        head_chars: Optional[int] = None,
+        separator: str = "\n... (中间省略) ...\n",
+    ) -> str:
+        """长文本默认保留首尾，避免执行尾部异常信息被截断。"""
+        if text is None:
+            return ""
+
+        text_str = str(text)
+        if len(text_str) <= max_chars:
+            return text_str
+
+        if head_chars is None:
+            head_chars = max_chars // 2
+
+        head_chars = max(1, min(head_chars, max_chars - len(separator) - 1))
+        tail_chars = max_chars - head_chars - len(separator)
+        if tail_chars <= 0:
+            return text_str[:max_chars]
+
+        return text_str[:head_chars] + separator + text_str[-tail_chars:]
 
     @staticmethod
     def _build_rich_feedback(
@@ -507,16 +1191,34 @@ class IterationController:
             parts.append(f"  - {e}")
 
         if stdout:
-            parts.append(f"\n## 标准输出 (stdout 截断)\n{stdout[:1500]}")
+            stdout_excerpt = IterationController._summarize_text(
+                stdout,
+                max_chars=2200,
+                head_chars=1200,
+            )
+            parts.append(f"\n## 标准输出 (stdout 摘要)\n{stdout_excerpt}")
 
         if stderr:
-            parts.append(f"\n## 标准错误 (stderr 截断)\n{stderr[:1500]}")
+            stderr_excerpt = IterationController._summarize_text(
+                stderr,
+                max_chars=2200,
+                head_chars=1200,
+            )
+            parts.append(f"\n## 标准错误 (stderr 摘要)\n{stderr_excerpt}")
 
         if output is not None:
             try:
-                output_str = json.dumps(output, ensure_ascii=False, indent=2, default=str)[:2000]
+                output_str = IterationController._summarize_text(
+                    json.dumps(output, ensure_ascii=False, indent=2, default=str),
+                    max_chars=2500,
+                    head_chars=1500,
+                )
             except Exception:
-                output_str = str(output)[:2000]
+                output_str = IterationController._summarize_text(
+                    output,
+                    max_chars=2500,
+                    head_chars=1500,
+                )
             parts.append(f"\n## 函数实际返回值\n{output_str}")
 
         if reflection:
@@ -530,6 +1232,7 @@ class IterationController:
         parts.append("请根据以上完整的执行上下文，定向修复代码中的问题。")
         parts.append("优先解决导致失败的根因，不要重新设计整体架构。")
         parts.append("保留已经正确工作的部分，只修改有问题的代码。")
+        parts.append("⚠️ 优先修复数据获取和业务逻辑问题，不要仅仅调整 status 字段值来规避验收。")
 
         return "\n".join(parts)
 

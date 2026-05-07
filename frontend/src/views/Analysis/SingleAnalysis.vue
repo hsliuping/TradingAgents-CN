@@ -6,7 +6,7 @@
         <div class="title-section">
           <h1 class="page-title">
             <el-icon class="title-icon"><Document /></el-icon>
-            单股分析
+            {{ analysisForm.market === 'ETF' ? 'ETF分析' : '单股分析' }}
           </h1>
           
           <!-- 风险提示 -->
@@ -18,14 +18,14 @@
             >
               <template #title>
                 <span style="font-size: 14px;">
-                  <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。
+                  <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI证券分析技术，不作为真实交易操盘指导。
                 </span>
               </template>
             </el-alert>
           </div>
           
           <p class="page-description">
-            AI驱动的智能股票分析，多维度评估投资价值与风险
+            AI驱动的智能证券分析，多维度评估投资价值与风险
           </p>
         </div>
       </div>
@@ -45,12 +45,12 @@
             </template>
 
             <el-form :model="analysisForm" label-width="100px" class="analysis-form">
-              <!-- 股票信息 -->
+              <!-- 标的信息 -->
               <div class="form-section">
-                <h4 class="section-title">📊 股票信息</h4>
+                <h4 class="section-title">📊 {{ analysisForm.market === 'ETF' ? 'ETF信息' : '股票信息' }}</h4>
                 <el-row :gutter="16">
                   <el-col :span="12">
-                    <el-form-item label="股票代码" required>
+                    <el-form-item :label="analysisForm.market === 'ETF' ? 'ETF代码' : '股票代码'" required>
                       <el-input
                         v-model="analysisForm.stockCode"
                         placeholder="如：000001、512400(ETF)、AAPL、700"
@@ -185,6 +185,54 @@
                       </el-icon>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              <div
+                v-if="analysisForm.market === 'A股' && (factorPreviewLoading || factorPreview || analysisFactorWarningEntries.length || analysisFactorDiagnosticEntries.length)"
+                class="form-section"
+              >
+                <h4 class="section-title">🧭 因子口径提示</h4>
+                <div class="factor-preview-card">
+                  <div class="factor-preview-meta">
+                    <span>最新财报期：{{ analysisFactorReportPeriod || '-' }}</span>
+                    <el-tag v-if="factorPreviewLoading" size="small" type="info">加载中</el-tag>
+                  </div>
+                  <div v-if="analysisFactorWarningEntries.length || analysisFactorDiagnosticEntries.length" class="factor-preview-tags">
+                    <el-popover
+                      v-for="warning in analysisFactorWarningEntries"
+                      :key="warning.key"
+                      placement="top-start"
+                      width="320"
+                      trigger="hover"
+                    >
+                      <template #reference>
+                        <el-tag :type="warning.tagType" effect="plain" class="factor-preview-tag">{{ warning.label }}</el-tag>
+                      </template>
+                      <div class="factor-preview-popover">
+                        <div class="factor-preview-popover-title">{{ warning.label }}</div>
+                        <div v-for="condition in warning.conditions" :key="condition" class="factor-preview-line">{{ condition }}</div>
+                      </div>
+                    </el-popover>
+                    <el-popover
+                      v-for="diagnostic in analysisFactorDiagnosticEntries"
+                      :key="diagnostic.key"
+                      placement="top-start"
+                      width="340"
+                      trigger="hover"
+                    >
+                      <template #reference>
+                        <el-tag :type="diagnostic.tagType" effect="plain" class="factor-preview-tag">{{ diagnostic.label }}</el-tag>
+                      </template>
+                      <div class="factor-preview-popover">
+                        <div class="factor-preview-popover-title">{{ diagnostic.label }}</div>
+                        <div class="factor-preview-line">状态：{{ diagnostic.state }}</div>
+                        <div v-if="diagnostic.reason" class="factor-preview-line">原因：{{ diagnostic.reason }}</div>
+                        <div v-if="diagnostic.missingInputs.length" class="factor-preview-line">缺失输入：{{ diagnostic.missingInputs.join('、') }}</div>
+                      </div>
+                    </el-popover>
+                  </div>
+                  <el-empty v-else-if="factorPreview && !factorPreviewLoading" description="当前无额外口径提示" :image-size="56" />
                 </div>
               </div>
 
@@ -551,11 +599,11 @@
                         <div class="disclaimer-text">
                           <p style="margin: 0 0 8px 0;"><strong>⚠️ 重要风险提示与免责声明</strong></p>
                           <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
-                            <li><strong>平台性质：</strong>本平台为AI辅助分析技术学习平台，专注于AI技术在股票分析领域的应用验证和技术学习。</li>
-                            <li><strong>分析目的：</strong>所有分析结论仅用于学习和验证AI辅助分析技术，不作为真实炒股操盘指导或投资依据。</li>
+                            <li><strong>平台性质：</strong>本平台为AI辅助分析技术学习平台，专注于AI技术在证券与ETF分析领域的应用验证和技术学习。</li>
+                            <li><strong>分析目的：</strong>所有分析结论仅用于学习和验证AI辅助分析技术，不作为真实交易操盘指导或投资依据。</li>
                             <li><strong>非投资建议：</strong>所有分析结果、评分、建议仅为技术验证参考，不构成任何买卖建议或投资决策依据。</li>
                             <li><strong>数据局限性：</strong>分析基于历史数据和公开信息，可能存在延迟、不完整或不准确的情况，无法预测未来市场走势。</li>
-                            <li><strong>投资风险：</strong>股票投资存在市场风险、流动性风险、政策风险等多种风险，可能导致本金损失。</li>
+                            <li><strong>投资风险：</strong>股票与ETF投资均存在市场风险、流动性风险、政策风险等多种风险，可能导致本金损失。</li>
                             <li><strong>独立决策：</strong>投资者应基于自身风险承受能力、投资目标和财务状况独立做出投资决策。</li>
                             <li><strong>责任声明：</strong>使用本平台产生的任何投资决策及其后果由使用者自行承担，本平台不承担任何责任。</li>
                           </ul>
@@ -582,69 +630,15 @@
                   </div>
                 </el-alert>
 
-                <!-- 最终决策 -->
-                <div v-if="analysisResults.decision" class="decision-section">
-                  <h4>🎯 分析参考</h4>
-                  <div class="decision-card">
-                    <div class="decision-main">
-                      <div class="decision-action">
-                        <span class="label">分析倾向:</span>
-                        <el-tag
-                          :type="getActionTagType(analysisResults.decision.analysis_view || analysisResults.decision.action)"
-                          size="large"
-                        >
-                          {{ analysisResults.decision.analysis_view || analysisResults.decision.action }}
-                        </el-tag>
-                        <el-tag type="info" size="small" style="margin-left: 8px;">仅供参考</el-tag>
-                      </div>
-
-                      <div class="decision-metrics">
-                        <div class="metric-item">
-                          <span class="label">价格合理区间:</span>
-                          <span class="value">{{ formatPriceRange(analysisResults.decision.price_analysis_range) }}</span>
-                        </div>
-                        <div class="metric-item">
-                          <span class="label">模型置信度:</span>
-                          <span class="value">{{ formatConfidenceLevel(analysisResults.decision.confidence) }}</span>
-                          <el-tooltip content="基于AI模型计算的置信度，不代表实际投资成功率" placement="top">
-                            <el-icon style="margin-left: 4px; cursor: help;"><QuestionFilled /></el-icon>
-                          </el-tooltip>
-                        </div>
-                        <div class="metric-item">
-                          <span class="label">风险评分:</span>
-                          <span class="value">{{ formatRiskLevel(analysisResults.decision.risk_score) }}</span>
-                          <el-tooltip content="基于历史数据的风险评估，实际风险可能更高" placement="top">
-                            <el-icon style="margin-left: 4px; cursor: help;"><QuestionFilled /></el-icon>
-                          </el-tooltip>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div class="decision-reasoning">
-                      <h5>分析依据:</h5>
-                      <p>{{ analysisResults.decision.reasoning }}</p>
-                      <el-alert type="info" :closable="false" style="margin-top: 12px;">
-                        <template #default>
-                          <span style="font-size: 13px;">💡 以上分析基于AI模型对历史数据的处理，不构成投资建议，请结合自身情况独立决策。</span>
-                        </template>
-                      </el-alert>
-                    </div>
-                  </div>
-                </div>
-
                 <!-- 分析概览 -->
-                <div v-if="analysisResults" class="overview-section">
+                <div v-if="overviewBriefContent" class="overview-section">
                   <h4>📊 分析概览</h4>
                   <div class="overview-card">
-  
-                    <div v-if="analysisResults.summary" class="overview-summary">
-                      <h5>分析摘要:</h5>
-                      <p>{{ analysisResults.summary }}</p>
+                    <div class="overview-summary">
+                      <div class="markdown-content" v-html="renderMarkdown(overviewBriefContent)"></div>
                     </div>
 
-                    <!-- 🔥 移除重复的"分析依据"，因为上面决策卡片中已经有完整的 decision.reasoning -->
-                    <!-- recommendation 字段通常包含"分析观点：xxx；分析依据：xxx"，与 decision.reasoning 重复 -->
-                    <!-- 如果需要显示 recommendation，可以只显示"分析观点"部分，但为了简洁，这里直接移除 -->
+                    <!-- v2.1.0 结果页以研究简报为主入口，不再在这里重复堆叠另一张决策卡 -->
                   </div>
                 </div>
 
@@ -847,7 +841,6 @@ import {
   CreditCard,
   WarningFilled,
   Cpu,
-  QuestionFilled,
   ArrowDown,
   Plus,
   DocumentChecked,
@@ -855,7 +848,7 @@ import {
 import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
 import { workflowApi, type WorkflowDefinition } from '@/api/workflow'
 import { paperApi } from '@/api/paper'
-import { stocksApi } from '@/api/stocks'
+import { stocksApi, type FundamentalsResponse } from '@/api/stocks'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { configApi } from '@/api/config'
@@ -866,6 +859,9 @@ import { marked } from 'marked'
 import { recommendModels } from '@/api/modelCapabilities'
 import { validateStockCode, getStockCodeFormatHelp } from '@/utils/stockValidator'
 import { normalizeMarketForAnalysis, getMarketByStockCode } from '@/utils/market'
+import { fetchTaskResultWithRetry, hasTaskResultContent, mergeTaskResult } from '@/utils/taskResult'
+import type { StockInfo } from '@/types/analysis'
+import { getFactorDiagnosticEntries, getFactorWarningEntries } from '@/utils/factorPresentation'
 
 // 配置marked选项
 marked.setOptions({
@@ -902,6 +898,8 @@ const submitting = ref(false)
 const validatingData = ref(false)
 const showValidationDialog = ref(false)
 const validationResult = ref<any>(null)
+const factorPreviewLoading = ref(false)
+const factorPreview = ref<FundamentalsResponse | null>(null)
 
 // 分析进度和结果相关状态
 const currentTaskId = ref('')
@@ -920,6 +918,30 @@ const progressInfo = ref({
   totalTime: 0         // 预计总时长（秒）
 })
 const pollingTimer = ref<any>(null)
+
+const applyAnalysisResult = (result: any) => {
+  analysisResults.value = result
+  activeReportTab.value = ''
+}
+
+const loadCompletedAnalysisResult = async (taskId: string, status?: any) => {
+  const statusResult = status?.result_data && typeof status.result_data === 'object' ? status.result_data : null
+  const finalResult = await fetchTaskResultWithRetry(taskId, {
+    seedData: statusResult,
+    isComplete: result => {
+      const merged = mergeTaskResult(statusResult, result)
+      console.log('📦 获取分析结果尝试:', {
+        hasContent: hasTaskResultContent(merged),
+        hasDecision: !!merged?.decision,
+        hasSummary: !!merged?.summary,
+        reportCount: Object.keys(merged?.reports || {}).length
+      })
+      return hasTaskResultContent(merged)
+    }
+  })
+
+  return mergeTaskResult(statusResult, finalResult)
+}
 
 // 分析步骤定义（动态生成）
 const analysisSteps = ref<any[]>([])
@@ -1008,12 +1030,69 @@ const disabledDate = (time: Date) => {
   return time.getTime() > Date.now()
 }
 
+const factorPreviewRow = computed<StockInfo>(() => ({
+  symbol: analysisForm.stockCode || '',
+  name: analysisForm.stockCode || '',
+  market: analysisForm.market,
+  report_period: factorPreview.value?.report_period,
+  factor_diagnostics: factorPreview.value?.factor_diagnostics || {},
+  factor_warnings: factorPreview.value?.factor_warnings || {},
+}))
+
+const analysisFactorWarningEntries = computed(() => getFactorWarningEntries(factorPreviewRow.value))
+const analysisFactorDiagnosticEntries = computed(() => getFactorDiagnosticEntries(factorPreviewRow.value))
+const analysisFactorReportPeriod = computed(() => factorPreview.value?.report_period || '')
+
+const clearFactorPreview = () => {
+  factorPreview.value = null
+}
+
+const fetchFactorPreview = async (normalizedCode?: string) => {
+  if (analysisForm.market !== 'A股') {
+    clearFactorPreview()
+    return
+  }
+
+  const targetCode = String(normalizedCode || analysisForm.stockCode || '').trim()
+  if (!targetCode) {
+    clearFactorPreview()
+    return
+  }
+
+  factorPreviewLoading.value = true
+  try {
+    const response = await stocksApi.getFundamentals(targetCode)
+    factorPreview.value = ((response as any)?.data || null) as FundamentalsResponse | null
+  } catch (error) {
+    console.warn('获取因子预览失败', error)
+    clearFactorPreview()
+  } finally {
+    factorPreviewLoading.value = false
+  }
+}
+
 // 股票代码输入时的处理
 const onStockCodeInput = () => {
   // 清除错误信息
   stockCodeError.value = ''
+  clearFactorPreview()
   // 显示格式提示
   stockCodeHelp.value = getStockCodeFormatHelp(analysisForm.market)
+}
+
+const ETF_ANALYST_NAMES = ['ETF分析师', '市场分析师', '新闻分析师']
+
+const normalizeSelectedAnalystsForMarket = (market: MarketType, analysts: string[]) => {
+  if (market === 'ETF') {
+    return [...ETF_ANALYST_NAMES]
+  }
+
+  const disallowedAnalysts = ['ETF分析师']
+  if (market !== 'A股') {
+    disallowedAnalysts.push('大盘分析师', '板块分析师')
+  }
+
+  return analysts.filter(name => !disallowedAnalysts.includes(name))
 }
 
 // 🔥 根据市场类型过滤可用的分析师（大盘和板块分析师仅支持A股，ETF 仅显示 etf/market/news）
@@ -1024,6 +1103,7 @@ const availableAnalysts = computed(() => {
 
   return ANALYSTS.filter(analyst => {
     if (isETF) return etfAnalystIds.includes(analyst.id)
+    if (analyst.id === 'etf') return false
     return true
   }).map(analyst => {
     const isMacroAnalyst = analyst.id === 'index_analyst' || analyst.id === 'sector_analyst'
@@ -1036,6 +1116,7 @@ const availableAnalysts = computed(() => {
 
 // 市场类型变更时的处理
 const onMarketChange = () => {
+  clearFactorPreview()
   // 重新验证股票代码
   if (analysisForm.stockCode.trim()) {
     validateStockCodeInput()
@@ -1046,17 +1127,14 @@ const onMarketChange = () => {
 
   // 🔥 ETF 市场：固定使用 ETF / 市场 / 新闻 分析师
   if (analysisForm.market === 'ETF') {
-    analysisForm.selectedAnalysts = ['ETF分析师', '市场分析师', '新闻分析师']
+    analysisForm.selectedAnalysts = [...ETF_ANALYST_NAMES]
     return
   }
 
-  // 🔥 如果切换到港股或美股，自动移除大盘和板块分析师
-  if (analysisForm.market !== 'A股') {
-    const macroAnalysts = ['大盘分析师', '板块分析师']
-    analysisForm.selectedAnalysts = analysisForm.selectedAnalysts.filter(
-      name => !macroAnalysts.includes(name)
-    )
-  }
+  analysisForm.selectedAnalysts = normalizeSelectedAnalystsForMarket(
+    analysisForm.market,
+    analysisForm.selectedAnalysts
+  )
 }
 
 // 验证股票代码输入
@@ -1176,6 +1254,7 @@ const handleValidateData = async () => {
 
     if (response.data) {
       const result = response.data
+      await fetchFactorPreview(normalizedCode)
       
       // 显示校验结果对话框
       showValidationResultDialog(result)
@@ -1201,7 +1280,7 @@ const formatValidationDetails = (details: any) => {
       title: '基础信息',
       data: [
         { label: '状态', value: basicInfo.exists ? '✅ 存在' : '❌ 不存在' },
-        { label: '股票名称', value: basicInfo.name || '-' },
+        { label: analysisForm.market === 'ETF' ? 'ETF名称' : '股票名称', value: basicInfo.name || '-' },
         { label: '上市日期', value: basicInfo.list_date || '-' }
       ]
     })
@@ -1286,6 +1365,7 @@ const submitAnalysis = async () => {
 
   // 使用标准化后的代码
   analysisForm.symbol = validation.normalizedCode || stockCode.toUpperCase()
+  await fetchFactorPreview(analysisForm.symbol)
 
   if (analysisForm.selectedAnalysts.length === 0) {
     ElMessage.warning('请至少选择一个分析师')
@@ -1344,6 +1424,8 @@ const submitAnalysis = async () => {
 
     analysisStatus.value = 'running'
     showResults.value = false
+    analysisResults.value = null
+    activeReportTab.value = ''
     progressInfo.value = {
       progress: 0,
       currentStep: '正在初始化分析...',
@@ -1417,43 +1499,31 @@ const startPollingTaskStatus = () => {
       console.log('🔍 当前状态:', status.status, '进度:', status.progress)
 
       if (status.status === 'completed') {
+        if (pollingTimer.value) {
+          clearInterval(pollingTimer.value)
+          pollingTimer.value = null
+        }
+
         // 分析完成，调用专门的结果API获取完整数据
         console.log('🎉 分析完成，正在获取完整结果...')
 
         try {
-          const resultResponse = await fetch(`/api/analysis/tasks/${currentTaskId.value}/result`, {
-            headers: {
-              'Authorization': `Bearer ${authStore.token}`,
-              'Content-Type': 'application/json'
-            }
+          const finalResult = await loadCompletedAnalysisResult(currentTaskId.value, status)
+          applyAnalysisResult(finalResult)
+          console.log('✅ 获取完整分析结果成功:', finalResult)
+
+          // 添加调试信息
+          console.log('🔍 完整结果数据结构:', {
+            hasDecision: !!finalResult?.decision,
+            hasState: !!finalResult?.state,
+            hasReports: !!finalResult?.reports,
+            hasSummary: !!finalResult?.summary,
+            hasRecommendation: !!finalResult?.recommendation,
+            keys: Object.keys(finalResult || {})
           })
-
-          if (resultResponse.ok) {
-            const resultData = await resultResponse.json()
-            if (resultData.success) {
-              analysisResults.value = resultData.data
-              console.log('✅ 获取完整分析结果成功:', resultData.data)
-
-              // 添加调试信息
-              console.log('🔍 完整结果数据结构:', {
-                hasDecision: !!resultData.data?.decision,
-                hasState: !!resultData.data?.state,
-                hasReports: !!resultData.data?.reports,
-                hasSummary: !!resultData.data?.summary,
-                hasRecommendation: !!resultData.data?.recommendation,
-                keys: Object.keys(resultData.data || {})
-              })
-            } else {
-              console.error('❌ 获取分析结果失败:', resultData.message)
-              analysisResults.value = status.result_data // 回退到状态中的数据
-            }
-          } else {
-            console.error('❌ 结果API调用失败:', resultResponse.status)
-            analysisResults.value = status.result_data // 回退到状态中的数据
-          }
         } catch (error) {
           console.error('❌ 获取分析结果异常:', error)
-          analysisResults.value = status.result_data // 回退到状态中的数据
+          applyAnalysisResult(status.result_data || null)
         }
 
         analysisStatus.value = 'completed'
@@ -1461,11 +1531,6 @@ const startPollingTaskStatus = () => {
         progressInfo.value.progress = 100
         progressInfo.value.currentStep = '分析完成'
         progressInfo.value.message = '分析已完成！'
-
-        if (pollingTimer.value) {
-          clearInterval(pollingTimer.value)
-          pollingTimer.value = null
-        }
 
         // 任务完成后保持缓存，以便刷新后能看到结果
         // clearTaskCache() // 不清除，让用户能在30分钟内刷新查看结果
@@ -1628,107 +1693,142 @@ const startNewAnalysis = () => {
 }
 
 
-// 获取操作标签类型（兼容新旧术语）
-const getActionTagType = (action: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' => {
-  const actionTypes: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
-    // 旧术语
-    '买入': 'success',
-    '持有': 'warning',
-    '卖出': 'danger',
-    '观望': 'info',
-    // 新术语（合规修改后）
-    '看涨': 'success',
-    '中性': 'warning',
-    '看跌': 'danger',
-    '偏多观点': 'success',
-    '偏空观点': 'danger',
-    '中性观点': 'warning',
-  }
-  return actionTypes[action] || 'info'
+const analysisModuleMeta: Record<string, { title: string; description: string }> = {
+  index_report: { title: '📊 大盘环境研究', description: '大盘指数走势、市场环境与系统性风险研究' },
+  sector_report: { title: '🏭 行业板块研究', description: '行业趋势、板块轮动与同业比较研究' },
+  market_report: { title: '📈 市场技术研究', description: '技术指标、趋势结构与关键位置研究' },
+  fundamentals_report: { title: '💰 基本面研究', description: '财务质量、估值水平与盈利能力研究' },
+  sentiment_report: { title: '💭 情绪研究', description: '市场热度、投资者情绪与讨论偏差研究' },
+  news_report: { title: '📰 新闻研究', description: '公告、新闻事件与催化影响研究' },
+  bull_report: { title: '🐂 乐观情景研究员', description: '围绕结论上修空间的研究论证' },
+  bear_report: { title: '🐻 审慎情景研究员', description: '围绕脆弱前提与下修风险的研究论证' },
+  research_team_decision: { title: '🔬 平衡研究结论', description: '综合乐观与审慎材料后的研究层结论' },
+  trader_investment_plan: { title: '🧩 研究简报', description: '面向用户的综合研究简报与阅读入口' },
+  risky_opinion: { title: '🔥 高弹性情景观点', description: '结论上修条件与强化催化研究' },
+  safe_opinion: { title: '🛡️ 防御情景观点', description: '脆弱前提、关键风险与下修条件研究' },
+  neutral_opinion: { title: '⚖️ 基准情景观点', description: '基准情景、证据质量与信息缺口研究' },
+  risk_management_decision: { title: '⚠️ 风险治理结论', description: '综合情景审阅后的最终稳健性结论' },
+  risk_assessment: { title: '⚠️ 风险治理结论', description: '综合情景审阅后的最终稳健性结论' },
+  final_trade_decision: { title: '📝 综合研究结论', description: '融合研究结论与风险治理后的总览结论' },
 }
 
-// 格式化价格区间显示（只显示区间，不显示单个值）
-const formatPriceRange = (price: any): string => {
-  if (!price) return '-'
-  // 如果是数组 [min, max]，显示为区间
-  if (Array.isArray(price)) {
-    if (price.length === 2) {
-      // 确保两个值都是有效数字
-      const min = Number(price[0])
-      const max = Number(price[1])
-      if (!isNaN(min) && !isNaN(max)) {
-        return `¥${min.toFixed(2)} - ¥${max.toFixed(2)}`
+const extractReportsSource = (data: any): Record<string, any> | null => {
+  if (data?.reports && typeof data.reports === 'object' && Object.keys(data.reports).length > 0) {
+    return data.reports
+  }
+
+  if (data?.state && typeof data.state === 'object' && Object.keys(data.state).length > 0) {
+    return data.state
+  }
+
+  return null
+}
+
+const normalizeDisplayedResearchText = (content: string) => {
+  if (!content) return ''
+
+  const replacements: Array<[RegExp, string]> = [
+    [/交易分析计划/g, '研究简报'],
+    [/交易员计划/g, '研究简报'],
+    [/初步投资计划/g, '平衡研究结论'],
+    [/投资计划/g, '研究结论'],
+    [/投资建议/g, '研究结论'],
+    [/操作建议/g, '研究观点'],
+    [/大盘指数分析/g, '大盘环境研究'],
+    [/行业板块分析/g, '行业板块研究'],
+    [/市场情绪分析/g, '情绪研究'],
+    [/新闻事件分析/g, '新闻研究'],
+    [/风险管理决策/g, '风险治理结论'],
+    [/风险治理摘要/g, '风险治理结论'],
+    [/综合研究简报/g, '综合研究结论'],
+    [/最终分析结果/g, '综合研究结论'],
+    [/激进风险分析师/g, '高弹性情景分析师'],
+    [/保守风险分析师/g, '防御情景分析师'],
+    [/中性风险分析师/g, '基准情景分析师'],
+  ]
+
+  return replacements.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), content)
+}
+
+const extractStructuredText = (value: any): string | null => {
+  if (!value) return null
+
+  if (typeof value === 'string') {
+    return value.trim() ? value : null
+  }
+
+  if (typeof value === 'object') {
+    for (const key of ['content', 'markdown', 'text', 'message', 'report', 'judge_decision']) {
+      const item = value[key]
+      if (typeof item === 'string' && item.trim()) {
+        return item
       }
     }
-    // 如果数组长度不是2，尝试显示所有值
-    const validPrices = price.filter(p => !isNaN(Number(p))).map(p => `¥${Number(p).toFixed(2)}`)
-    if (validPrices.length > 0) {
-      return validPrices.join(' - ')
-    }
   }
-  // 如果是数字，不应该显示单个值（因为这是价格区间字段），返回 '-'
-  // 如果是字符串，尝试解析为数组
-  if (typeof price === 'string') {
-    try {
-      const parsed = JSON.parse(price)
-      if (Array.isArray(parsed) && parsed.length === 2) {
-        const min = Number(parsed[0])
-        const max = Number(parsed[1])
-        if (!isNaN(min) && !isNaN(max)) {
-          return `¥${min.toFixed(2)} - ¥${max.toFixed(2)}`
-        }
-      }
-    } catch (e) {
-      // 解析失败，返回原字符串
-      return price
-    }
-  }
-  // 其他情况返回 '-'
-  return '-'
+
+  return null
 }
 
-// 格式化置信度为等级
-const formatConfidenceLevel = (confidence: number | null | undefined): string => {
-  if (confidence === null || confidence === undefined || isNaN(Number(confidence))) {
-    return '-'
+const prepareMarkdownContent = (content: string) => {
+  let preparedText = normalizeDisplayedResearchText(content || '').trim()
+
+  if (
+    ((preparedText.startsWith('"') && preparedText.endsWith('"')) ||
+      (preparedText.startsWith("'") && preparedText.endsWith("'"))) &&
+    preparedText.length >= 2
+  ) {
+    preparedText = preparedText.slice(1, -1).trim()
   }
-  const conf = Number(confidence)
-  if (conf >= 0.7) {
-    return '高'
-  } else if (conf >= 0.4) {
-    return '中'
-  } else {
-    return '低'
+
+  const fencedMarkdownMatch = preparedText.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/i)
+  if (fencedMarkdownMatch) {
+    preparedText = fencedMarkdownMatch[1].trim()
+  }
+
+  return preparedText
+}
+
+const renderMarkdown = (content: string) => {
+  if (!content) return ''
+
+  try {
+    return marked.parse(prepareMarkdownContent(content)) as string
+  } catch {
+    return `<pre style="white-space: pre-wrap; font-family: inherit;">${prepareMarkdownContent(content)}</pre>`
   }
 }
 
-// 格式化风险评分为等级（百分制：0-100%）
-const formatRiskLevel = (riskScore: number | null | undefined): string => {
-  if (riskScore === null || riskScore === undefined || isNaN(Number(riskScore))) {
-    return '-'
+const getModuleContent = (moduleData: any): string | null => {
+  const extractedText = extractStructuredText(moduleData)
+  if (extractedText) {
+    return normalizeDisplayedResearchText(extractedText)
   }
-  const score = Number(riskScore)
-  // 风险评分划分（百分制）：
-  // 低风险：< 40% (0.4)
-  // 中风险：40% - 70% (0.4 - 0.7)
-  // 高风险：> 70% (0.7)
-  if (score >= 0.7) {
-    return '高'
-  } else if (score >= 0.4) {
-    return '中'
-  } else {
-    return '低'
+
+  if (moduleData && typeof moduleData !== 'string') {
+    return null
   }
+
+  return typeof moduleData === 'string' ? normalizeDisplayedResearchText(moduleData) : null
 }
+
+const getOverviewBriefContent = (data: any): string | null => {
+  const reportsData = extractReportsSource(data)
+  const traderBrief = getModuleContent(reportsData?.trader_investment_plan)
+  if (traderBrief) {
+    return traderBrief
+  }
+
+  return getModuleContent(data?.summary) || getModuleContent(data?.recommendation)
+}
+
+const overviewBriefContent = computed(() => getOverviewBriefContent(analysisResults.value))
 
 // 获取分析报告
 const getAnalysisReports = (data: any) => {
   const reports: Array<{title: string, content: any}> = []
 
-  let reportsData: Record<string, any> | null = null
-  if (data && data.reports && typeof data.reports === 'object' && Object.keys(data.reports).length > 0) {
-    reportsData = data.reports
-  } else {
+  const reportsData = extractReportsSource(data)
+  if (!reportsData) {
     return reports
   }
 
@@ -1736,7 +1836,7 @@ const getAnalysisReports = (data: any) => {
   const manifest = data?.report_manifest as Array<{
     field: string; display_name: string; category: string; order: number; is_primary: boolean
   }> | undefined
-  if (manifest && manifest.length > 0) {
+  if (reportsData && manifest && manifest.length > 0) {
     const sorted = [...manifest].sort((a, b) => a.order - b.order)
     for (const m of sorted) {
       const content = reportsData[m.field]
@@ -1757,29 +1857,22 @@ const getAnalysisReports = (data: any) => {
   const isEtfAnalysis = data?.task_type === 'etf_analysis' || (Array.isArray(data?.analysts) && data.analysts.includes('etf_analyst'))
 
   const reportMappings = [
-    { key: 'index_report', title: '📊 大盘指数分析', category: '宏观分析师' },
-    { key: 'sector_report', title: '🏭 行业板块分析', category: '宏观分析师' },
-    { key: 'market_report', title: '📈 市场技术分析', category: '分析师团队' },
-    { key: 'fundamentals_report', title: isEtfAnalysis ? '📊 ETF 分析' : '💰 基本面分析', category: '分析师团队' },
-    { key: 'sentiment_report', title: '💭 市场情绪分析', category: '分析师团队' },
-    { key: 'news_report', title: '📰 新闻事件分析', category: '分析师团队' },
-    { key: 'bull_researcher', title: '🐂 多头研究员', category: '研究团队' },
-    { key: 'bull_report', title: '🐂 看涨研究', category: '研究团队' },
-    { key: 'bear_researcher', title: '🐻 空头研究员', category: '研究团队' },
-    { key: 'bear_report', title: '🐻 看跌研究', category: '研究团队' },
-    { key: 'research_team_decision', title: '🔬 研究经理分析', category: '研究团队' },
-    { key: 'trader_investment_plan', title: '💼 交易员计划', category: '交易团队' },
-    { key: 'risky_analyst', title: '⚡ 激进分析师', category: '风险管理团队' },
-    { key: 'risky_opinion', title: '🔥 激进风险观点', category: '风险管理团队' },
-    { key: 'safe_analyst', title: '🛡️ 保守分析师', category: '风险管理团队' },
-    { key: 'safe_opinion', title: '🛡️ 保守风险观点', category: '风险管理团队' },
-    { key: 'neutral_analyst', title: '⚖️ 中性分析师', category: '风险管理团队' },
-    { key: 'neutral_opinion', title: '⚖️ 中性风险观点', category: '风险管理团队' },
-    { key: 'risk_management_decision', title: '⚠️ 风险经理', category: '风险管理团队' },
-    { key: 'risk_assessment', title: '⚠️ 风险评估', category: '风险管理团队' },
-    { key: 'final_trade_decision', title: '🎯 最终分析结果', category: '最终决策' },
-    { key: 'investment_debate_state', title: '🔬 研究团队分析（旧）', category: '其他' },
-    { key: 'risk_debate_state', title: '⚖️ 风险管理团队（旧）', category: '其他' }
+    { key: 'index_report', title: '📊 大盘环境研究' },
+    { key: 'sector_report', title: '🏭 行业板块研究' },
+    { key: 'market_report', title: '📈 市场技术研究' },
+    { key: 'fundamentals_report', title: isEtfAnalysis ? '📊 ETF 分析' : '💰 基本面研究' },
+    { key: 'sentiment_report', title: '💭 情绪研究' },
+    { key: 'news_report', title: '📰 新闻研究' },
+    { key: 'bull_report', title: '🐂 乐观情景研究员' },
+    { key: 'bear_report', title: '🐻 审慎情景研究员' },
+    { key: 'research_team_decision', title: '🔬 平衡研究结论' },
+    { key: 'trader_investment_plan', title: '🧩 研究简报' },
+    { key: 'risky_opinion', title: '🔥 高弹性情景观点' },
+    { key: 'safe_opinion', title: '🛡️ 防御情景观点' },
+    { key: 'neutral_opinion', title: '⚖️ 基准情景观点' },
+    { key: 'risk_management_decision', title: '⚠️ 风险治理结论' },
+    { key: 'risk_assessment', title: '⚠️ 风险治理结论' },
+    { key: 'final_trade_decision', title: '📝 综合研究结论' },
   ]
 
   const hiddenKeys = ['investment_plan']
@@ -1836,84 +1929,16 @@ const getReportName = (title: string) => {
 
 // 获取报告描述
 const getReportDescription = (title: string) => {
-  const descMap: Record<string, string> = {
-    // 🆕 宏观分析师描述
-    '📊 大盘指数分析': '大盘指数走势、市场环境、系统性风险分析',
-    '🏭 行业板块分析': '行业趋势、板块轮动、同业对比分析',
-    // 分析师团队描述
-    '📈 市场技术分析': '技术指标、价格趋势、支撑阻力位分析',
-    '💰 基本面分析': '财务数据、估值水平、盈利能力分析',
-    '📰 新闻事件分析': '相关新闻事件、市场动态影响分析',
-    '💭 市场情绪分析': '投资者情绪、社交媒体情绪指标',
-    '💡 初步投资建议': '研究经理综合多空观点后的初步投资建议',  // 🔑 更新
-    '🔬 研究团队分析': '多头/空头研究员辩论分析，研究经理综合决策',
-    '🐂 看涨研究': '多头研究员观点与论证',
-    '🐻 看跌研究': '空头研究员观点与论证',
-    '💼 交易员计划': '专业交易员制定的具体交易执行计划',
-    '⚖️ 风险管理团队': '激进/保守/中性分析师风险评估，风险经理最终决策',
-    '🔥 激进风险观点': '高风险策略与风险点',
-    '🛡️ 保守风险观点': '稳健策略与风险控制',
-    '⚖️ 中性风险观点': '平衡观点与风险评估',
-    '⚠️ 风险评估': '综合风险评估与建议',
-    '🎯 最终分析结果': '综合风险评估后的最终分析结果（含仓位、止损等）'  // 🔑 更新
-  }
-  return descMap[title] || '详细分析报告'
+  const plainTitle = title.replace(/^[^\s]+\s/, '')
+  return Object.values(analysisModuleMeta).find(meta => meta.title === title)?.description
+    || Object.values(analysisModuleMeta).find(meta => meta.title.endsWith(plainTitle))?.description
+    || '详细研究报告'
 }
 
 // 格式化报告内容
 const formatReportContent = (content: any) => {
-  console.log('🎨 [DEBUG] formatReportContent 被调用:', {
-    content: content,
-    type: typeof content,
-    length: typeof content === 'string' ? content.length : 'N/A'
-  })
-
-  // 确保content是字符串类型
-  if (!content) {
-    console.log('⚠️ [DEBUG] content为空，返回空字符串')
-    return ''
-  }
-
-  // 如果content不是字符串，转换为字符串
-  let stringContent = ''
-  if (typeof content === 'string') {
-    stringContent = content
-    console.log('✅ [DEBUG] content是字符串，长度:', stringContent.length)
-  } else if (typeof content === 'object') {
-    // 如果是对象，尝试提取有用信息（按优先级）
-    if (content.content) {
-      // 🔥 优先使用 content 字段（用于 final_trade_decision 等）
-      stringContent = content.content
-      console.log('📝 [DEBUG] 从对象中提取content字段')
-    } else if (content.markdown) {
-      // 兼容 markdown 字段
-      stringContent = content.markdown
-      console.log('📝 [DEBUG] 从对象中提取markdown字段')
-    } else if (content.judge_decision) {
-      stringContent = content.judge_decision
-      console.log('📝 [DEBUG] 从对象中提取judge_decision')
-    } else {
-      stringContent = JSON.stringify(content, null, 2)
-      console.log('📝 [DEBUG] 将对象转换为JSON字符串')
-    }
-  } else {
-    stringContent = String(content)
-    console.log('📝 [DEBUG] 将内容转换为字符串')
-  }
-
-  try {
-    // 使用marked库将Markdown转换为HTML
-    const htmlContent = marked.parse(stringContent) as string
-
-    console.log('🎨 [DEBUG] Marked转换完成，HTML长度:', htmlContent.length)
-    console.log('🎨 [DEBUG] HTML前200字符:', htmlContent.substring(0, 200))
-
-    return htmlContent
-  } catch (error) {
-    console.error('❌ [ERROR] Marked转换失败:', error)
-    // 如果marked转换失败，回退到简单的文本显示
-    return `<pre style="white-space: pre-wrap; font-family: inherit;">${stringContent}</pre>`
-  }
+  const normalizedContent = getModuleContent(content)
+  return normalizedContent ? renderMarkdown(normalizedContent) : ''
 }
 
 // 下载报告
@@ -2256,6 +2281,7 @@ const goSimOrder = async () => {
       code: code,
       side: recommendation.action,
       quantity: tradeForm.quantity,
+      market: analysisForm.market === 'ETF' ? 'ETF' : analysisForm.market === '港股' ? 'HK' : analysisForm.market === '美股' ? 'US' : 'CN',
       analysis_id: analysisId ? String(analysisId) : undefined
     })
 
@@ -2493,7 +2519,7 @@ const restoreTaskFromCache = async () => {
       currentTaskId.value = cached.taskId
       analysisStatus.value = 'completed'
       showResults.value = true
-      analysisResults.value = status.result_data
+      applyAnalysisResult(await loadCompletedAnalysisResult(cached.taskId, status))
       progressInfo.value.progress = 100
       progressInfo.value.currentStep = '分析完成'
       progressInfo.value.message = '分析已完成'
@@ -2720,7 +2746,10 @@ onMounted(async () => {
 
     // 加载默认分析师
     if (userPrefs.default_analysts && userPrefs.default_analysts.length > 0) {
-      analysisForm.selectedAnalysts = [...userPrefs.default_analysts]
+      analysisForm.selectedAnalysts = normalizeSelectedAnalystsForMarket(
+        analysisForm.market,
+        [...userPrefs.default_analysts]
+      )
     }
 
     console.log('✅ 已加载用户偏好设置:', {
@@ -2753,7 +2782,12 @@ onMounted(async () => {
       const detectedMarket = getMarketByStockCode(analysisForm.stockCode)
       analysisForm.market = detectedMarket as MarketType
       if (detectedMarket === 'ETF') {
-        analysisForm.selectedAnalysts = ['ETF分析师', '市场分析师', '新闻分析师']
+        analysisForm.selectedAnalysts = [...ETF_ANALYST_NAMES]
+      } else {
+        analysisForm.selectedAnalysts = normalizeSelectedAnalystsForMarket(
+          detectedMarket as MarketType,
+          analysisForm.selectedAnalysts
+        )
       }
       console.log('🔍 自动识别市场类型:', analysisForm.stockCode, '->', detectedMarket)
     }
@@ -2762,13 +2796,17 @@ onMounted(async () => {
     analysisForm.market = normalizeMarketForAnalysis(q.market) as MarketType
     // 🔥 如果从路由参数设置市场类型，也需要同步分析师
     if (analysisForm.market === 'ETF') {
-      analysisForm.selectedAnalysts = ['ETF分析师', '市场分析师', '新闻分析师']
-    } else if (analysisForm.market !== 'A股') {
-      const macroAnalysts = ['大盘分析师', '板块分析师']
-      analysisForm.selectedAnalysts = analysisForm.selectedAnalysts.filter(
-        name => !macroAnalysts.includes(name)
+      analysisForm.selectedAnalysts = [...ETF_ANALYST_NAMES]
+    } else {
+      analysisForm.selectedAnalysts = normalizeSelectedAnalystsForMarket(
+        analysisForm.market,
+        analysisForm.selectedAnalysts
       )
     }
+  }
+
+  if (analysisForm.market === 'A股' && analysisForm.stockCode) {
+    await fetchFactorPreview(analysisForm.stockCode)
   }
 
   // 尝试恢复任务状态（仅当没有新股票代码时）
@@ -2878,6 +2916,50 @@ onMounted(async () => {
           margin: 0 0 16px 0;
           padding-bottom: 8px;
           border-bottom: 2px solid #e2e8f0;
+        }
+
+        .factor-preview-card {
+          padding: 16px;
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          background: #f8fafc;
+        }
+
+        .factor-preview-meta {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 12px;
+          font-size: 13px;
+          color: #475569;
+        }
+
+        .factor-preview-tags {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .factor-preview-tag {
+          cursor: help;
+        }
+
+        .factor-preview-popover {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          line-height: 1.6;
+        }
+
+        .factor-preview-popover-title {
+          font-weight: 600;
+          color: #1e293b;
+        }
+
+        .factor-preview-line {
+          font-size: 13px;
+          color: #475569;
         }
       }
 
@@ -3591,6 +3673,35 @@ onMounted(async () => {
   gap: 8px;
 }
 
+.overview-section {
+  margin-bottom: 32px;
+}
+
+.overview-section h4 {
+  color: #1f2937;
+  margin-bottom: 16px;
+}
+
+.overview-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 28px 32px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.overview-summary {
+  color: #1f2937;
+}
+
+.overview-summary :deep(.markdown-content > *:first-child) {
+  margin-top: 0;
+}
+
+.overview-summary :deep(.markdown-content > *:last-child) {
+  margin-bottom: 0;
+}
+
 /* 风险提示样式 */
 .risk-disclaimer {
   margin-bottom: 24px;
@@ -3893,7 +4004,8 @@ onMounted(async () => {
 }
 
 /* 报告内容样式增强 */
-.report-content {
+.report-content,
+.markdown-content {
   line-height: 1.7;
   color: #495057;
   font-size: 16px;
@@ -3905,9 +4017,9 @@ onMounted(async () => {
     font-weight: 600 !important;
   }
 
-  h1 { font-size: 24px !important; }
-  h2 { font-size: 20px !important; }
-  h3 { font-size: 18px !important; }
+  h1 { font-size: 30px !important; line-height: 1.3 !important; }
+  h2 { font-size: 22px !important; line-height: 1.4 !important; }
+  h3 { font-size: 18px !important; line-height: 1.5 !important; }
   h4 { font-size: 16px !important; }
 
   /* 段落样式 */

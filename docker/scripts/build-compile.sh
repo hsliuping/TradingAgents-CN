@@ -12,8 +12,9 @@
 #
 # 选项:
 #   -r, --registry REGISTRY   Docker Hub 用户名（默认: hsliup）
-#   -t, --tag TAG             镜像标签（默认: latest）
+#   -t, --tag TAG             镜像标签（默认: 读取根目录 VERSION）
 #   -p, --push                构建后推送到 Docker Hub
+#   --no-push-latest          推送版本标签时不额外更新 latest
 #   -h, --help                显示帮助信息
 
 set -e  # 遇到错误立即退出
@@ -27,10 +28,13 @@ NC='\033[0m' # No Color
 
 # 默认参数
 REGISTRY="hsliup"
-TAG="latest"
+TAG=""
 PUSH=false
+PUSH_LATEST=true
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+source "$SCRIPT_DIR/version-utils.sh"
 
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do
@@ -47,13 +51,18 @@ while [[ $# -gt 0 ]]; do
             PUSH=true
             shift
             ;;
+        --no-push-latest)
+            PUSH_LATEST=false
+            shift
+            ;;
         -h|--help)
             echo "用法: $0 [OPTIONS]"
             echo ""
             echo "选项:"
             echo "  -r, --registry REGISTRY   Docker Hub 用户名（默认: hsliup）"
-            echo "  -t, --tag TAG             镜像标签（默认: latest）"
+            echo "  -t, --tag TAG             镜像标签（默认: 读取根目录 VERSION）"
             echo "  -p, --push                构建后推送到 Docker Hub"
+            echo "  --no-push-latest          推送版本标签时不额外更新 latest"
             echo "  -h, --help                显示帮助信息"
             exit 0
             ;;
@@ -64,6 +73,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+TAG="$(resolve_image_tag "$TAG" "$PROJECT_ROOT")"
+PUSH_LATEST_ALIAS=false
+if should_push_latest_alias "$TAG" "$PUSH_LATEST"; then
+    PUSH_LATEST_ALIAS=true
+fi
+
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}TradingAgents-CN Pro - 编译版镜像构建${NC}"
 echo -e "${BLUE}========================================${NC}"
@@ -72,6 +87,7 @@ echo -e "${GREEN}📋 构建配置:${NC}"
 echo -e "  Registry: ${YELLOW}$REGISTRY${NC}"
 echo -e "  Tag: ${YELLOW}$TAG${NC}"
 echo -e "  Push: ${YELLOW}$PUSH${NC}"
+echo -e "  Push latest alias: ${YELLOW}$PUSH_LATEST_ALIAS${NC}"
 echo -e "  Project Root: ${YELLOW}$PROJECT_ROOT${NC}"
 echo ""
 
@@ -114,6 +130,7 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 
 IMAGE_NAME="$REGISTRY/tradingagents-pro-backend:$TAG"
+LATEST_IMAGE_NAME="$REGISTRY/tradingagents-pro-backend:latest"
 
 echo -e "${GREEN}🐳 构建镜像: ${YELLOW}$IMAGE_NAME${NC}"
 
@@ -123,6 +140,10 @@ docker build \
     -t "$IMAGE_NAME" \
     --build-arg COMPILE_DIR="docker/build/compiled" \
     "$PROJECT_ROOT"
+
+if [ "$PUSH_LATEST_ALIAS" = true ]; then
+    docker tag "$IMAGE_NAME" "$LATEST_IMAGE_NAME"
+fi
 
 echo -e "${GREEN}✅ 镜像构建完成${NC}"
 echo ""
@@ -136,6 +157,10 @@ if [ "$PUSH" = true ]; then
     
     echo -e "${GREEN}📤 推送镜像: ${YELLOW}$IMAGE_NAME${NC}"
     docker push "$IMAGE_NAME"
+    if [ "$PUSH_LATEST_ALIAS" = true ]; then
+        echo -e "${GREEN}📤 推送 latest 别名: ${YELLOW}$LATEST_IMAGE_NAME${NC}"
+        docker push "$LATEST_IMAGE_NAME"
+    fi
     
     echo -e "${GREEN}✅ 镜像推送完成${NC}"
     echo ""
@@ -150,17 +175,20 @@ echo -e "${GREEN}✅ 构建完成！${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "${GREEN}镜像名称: ${YELLOW}$IMAGE_NAME${NC}"
+if [ "$PUSH_LATEST_ALIAS" = true ]; then
+    echo -e "${GREEN}latest 别名: ${YELLOW}$LATEST_IMAGE_NAME${NC}"
+fi
 echo ""
 echo -e "${GREEN}下一步:${NC}"
 if [ "$PUSH" = true ]; then
     echo -e "  1. 在部署服务器上拉取镜像:"
     echo -e "     ${YELLOW}docker pull $IMAGE_NAME${NC}"
     echo -e "  2. 启动服务:"
-    echo -e "     ${YELLOW}docker-compose -f docker/docker-compose.hub.nginx.yml up -d${NC}"
+    echo -e "     ${YELLOW}docker-compose -f docker/docker-compose.compiled.yml up -d${NC}"
 else
     echo -e "  1. 推送镜像到 Docker Hub:"
     echo -e "     ${YELLOW}docker push $IMAGE_NAME${NC}"
     echo -e "  2. 或者直接在本地启动:"
-    echo -e "     ${YELLOW}docker-compose -f docker/docker-compose.hub.nginx.yml up -d${NC}"
+    echo -e "     ${YELLOW}docker-compose -f docker/docker-compose.compiled.yml up -d${NC}"
 fi
 

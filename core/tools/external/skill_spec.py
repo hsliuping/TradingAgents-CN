@@ -81,6 +81,7 @@ class SkillSpec(BaseModel):
     data_source: str = ""                  # 主数据源标识；若有附加来源应在 constraints 中说明
     parameters: List[SkillParameter] = Field(default_factory=list)
     expected_output: ExpectedOutput = Field(default_factory=ExpectedOutput)
+    validation_checks: List["ValidationCheck"] = Field(default_factory=list)
     constraints: List[str] = Field(default_factory=list)    # 行为约束
     test_input: Dict[str, Any] = Field(default_factory=dict)  # 测试输入
     test_expected: Dict[str, Any] = Field(default_factory=dict)  # 测试期望
@@ -108,6 +109,73 @@ class ValidationResult(BaseModel):
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ImplementationHelper(BaseModel):
+    """侦察阶段确认可复用的运行时 helper。"""
+    module: str = ""
+    name: str = ""
+    signature: str = ""
+    description: str = ""
+    reason: str = ""
+
+
+class ImplementationFact(BaseModel):
+    """侦察阶段确认的结构化事实。"""
+    source: str = ""
+    fact: str = ""
+    evidence: str = ""
+    field: str = ""
+    description: str = ""
+    coverage: float | None = None
+
+
+class ImplementationIssue(BaseModel):
+    """实现阶段的限制、禁止路径或运行时缺口。"""
+    path: str = ""
+    reason: str = ""
+    severity: str = "info"  # info, warning, error
+
+
+class ReconToolTrace(BaseModel):
+    """侦察阶段的工具调用轨迹。"""
+    tool_name: str = ""
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+    success: bool = True
+    duration_ms: float = 0.0
+    result_chars: int = 0
+    result_preview: str = ""
+    error: str = ""
+
+
+class ValidationCheck(BaseModel):
+    """业务验收或生成前侦察建议的检查项。"""
+    name: str = ""
+    description: str = ""
+    required: bool = True
+    check_type: str = "required_field"  # required_field, required_non_empty_payload, custom
+    rule_level: str = "data"  # input, output, data, business, warning
+    blocking: bool = True
+    field: str = ""
+    value_path: str = "data"  # output, data
+    forbid_null: bool = True
+    params: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ImplementationFactReport(BaseModel):
+    """前置侦察层输出的结构化实现事实报告。"""
+    task_summary: str = ""
+    recommended_strategy: str = ""
+    schema_bundle_context: Dict[str, Any] = Field(default_factory=dict)
+    available_helpers: List[ImplementationHelper] = Field(default_factory=list)
+    schema_facts: List[ImplementationFact] = Field(default_factory=list)
+    sample_fields: Dict[str, List[str]] = Field(default_factory=dict)
+    blocked_paths: List[ImplementationIssue] = Field(default_factory=list)
+    runtime_gaps: List[ImplementationIssue] = Field(default_factory=list)
+    validation_checks: List[ValidationCheck] = Field(default_factory=list)
+    tool_traces: List[ReconToolTrace] = Field(default_factory=list)
+    confidence: float = 0.0
+    notes: List[str] = Field(default_factory=list)
 
 
 class EvalScore(BaseModel):
@@ -148,6 +216,22 @@ class ReflectionResult(BaseModel):
     confidence: float = 0.5
 
 
+class BusinessRuleFailure(BaseModel):
+    """业务验收失败项。"""
+    rule_id: str = ""
+    message: str = ""
+    severity: str = "error"  # warning, error
+
+
+class BusinessVerificationResult(BaseModel):
+    """业务验收结果。"""
+    passed: bool = True
+    business_score: float = 0.0
+    failures: List[BusinessRuleFailure] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
 class IterationRound(BaseModel):
     """单轮迭代记录"""
     round_number: int = 1
@@ -155,6 +239,7 @@ class IterationRound(BaseModel):
     validation: Optional[ValidationResult] = None
     sandbox: Optional[SandboxResult] = None
     eval_score: Optional[EvalScore] = None
+    business_verification: Optional[BusinessVerificationResult] = None
     reflection: Optional[ReflectionResult] = None
     feedback: str = ""                     # 给下一轮的反馈
     decision: str = ""                     # PASS / RETRY / FAIL
@@ -197,6 +282,15 @@ class SkillHandoffContext(BaseModel):
     handoff_intent: str = ""
 
 
+class PipelineProgressEvent(BaseModel):
+    """生成管线进度事件。"""
+    stage: str = ""
+    message: str = ""
+    iteration: int = 0
+    progress: float = 0.0
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
 class SkillCreationSession(BaseModel):
     """
     Skill 创建会话 — 对应 MongoDB skill_creation_sessions 集合
@@ -215,9 +309,16 @@ class SkillCreationSession(BaseModel):
     # 规格
     spec: Optional[SkillSpec] = None
     spec_confirmed: bool = False
+    # 侦察报告（侦察前置模式缓存）
+    fact_report: Optional[ImplementationFactReport] = None
     # 生成结果
     pipeline_result: Optional[PipelineResult] = None
     pipeline_history: List[PipelineResult] = Field(default_factory=list)
+    pipeline_stage: str = ""
+    pipeline_message: str = ""
+    pipeline_iteration: int = 0
+    pipeline_progress: float = 0.0
+    pipeline_details: List[PipelineProgressEvent] = Field(default_factory=list)
     # 时间
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

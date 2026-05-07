@@ -113,17 +113,28 @@ class UnifiedThreadPoolSyncService:
         result = SyncTaskResult()
         result.start_time = datetime.now(timezone.utc)
         
-        loop = asyncio.get_event_loop()
-        
-        # 🔥 在线程池中执行同步方法
-        task_future = loop.run_in_executor(
-            self._thread_pool,
-            self._execute_sync_method_sync,
-            sync_method,
-            method_kwargs,
-            job_id,
-            rate_limit_per_minute
-        )
+        # 🔥 异步方法必须留在当前应用事件循环执行，避免跨事件循环访问 Motor/服务单例
+        if asyncio.iscoroutinefunction(sync_method):
+            task_future = asyncio.create_task(
+                self._execute_async_method_with_cancellation(
+                    sync_method,
+                    method_kwargs,
+                    job_id,
+                    use_thread_local_connections=False,
+                )
+            )
+        else:
+            loop = asyncio.get_running_loop()
+
+            # 🔥 只有真正的同步阻塞方法才进入线程池
+            task_future = loop.run_in_executor(
+                self._thread_pool,
+                self._execute_sync_method_sync,
+                sync_method,
+                method_kwargs,
+                job_id,
+                rate_limit_per_minute
+            )
         
         # 🔥 记录活跃任务
         if job_id:
@@ -246,12 +257,14 @@ class UnifiedThreadPoolSyncService:
         self,
         async_method: Callable,
         method_kwargs: Dict[str, Any],
-        job_id: str
+        job_id: str,
+        use_thread_local_connections: bool = True,
     ) -> Any:
         """
         执行异步方法，支持取消检查
         
-        注意：这个方法在线程池的线程中运行，需要确保数据库连接绑定到当前事件循环
+        注意：当在线程池工作线程中执行时，需要确保数据库连接绑定到当前事件循环。
+        当前应用事件循环中执行时，不做额外连接替换。
         """
         # 🔥 检查是否收到退出信号
         if self._shutdown_event.is_set():
@@ -275,39 +288,40 @@ class UnifiedThreadPoolSyncService:
         lock_acquired = False
         
         try:
-            sig = inspect.signature(async_method)
-            if 'self' in sig.parameters:
-                # 这是一个绑定方法，获取self对象
-                if hasattr(async_method, '__self__'):
-                    service_instance = async_method.__self__
-                    
-                    # 🔥 获取锁，保护服务实例的连接修改
-                    # 🔥 这样可以防止主事件循环中的其他操作同时修改连接
-                    self._service_connection_lock.acquire()
-                    lock_acquired = True
-                    
-                    # 🔥 保存原始连接（用于执行后恢复）
-                    if hasattr(service_instance, 'db'):
-                        original_connections['db'] = service_instance.db
-                    if hasattr(service_instance, 'historical_service'):
-                        original_connections['historical_service'] = service_instance.historical_service
-                    if hasattr(service_instance, 'news_service'):
-                        original_connections['news_service'] = service_instance.news_service
-                    
-                    # 🔥 创建线程本地的数据库连接（绑定到当前线程的事件循环）
-                    # 🔥 这些连接只在线程池线程中使用，不会影响主事件循环
-                    thread_local_connections = await self._create_thread_local_db_connections()
-                    
-                    # 🔥 临时替换服务实例的连接（仅在线程池线程中有效）
-                    # 🔥 由于有锁保护，主事件循环中的操作会等待锁释放
-                    if 'db' in thread_local_connections:
-                        service_instance.db = thread_local_connections['db']
-                    if 'historical_service' in thread_local_connections:
-                        service_instance.historical_service = thread_local_connections['historical_service']
-                    if 'news_service' in thread_local_connections:
-                        service_instance.news_service = thread_local_connections['news_service']
-                    
-                    logger.debug(f"🔄 已替换服务实例的数据库连接为线程本地连接: {type(service_instance).__name__}")
+            if use_thread_local_connections:
+                sig = inspect.signature(async_method)
+                if 'self' in sig.parameters:
+                    # 这是一个绑定方法，获取self对象
+                    if hasattr(async_method, '__self__'):
+                        service_instance = async_method.__self__
+                        
+                        # 🔥 获取锁，保护服务实例的连接修改
+                        # 🔥 这样可以防止主事件循环中的其他操作同时修改连接
+                        self._service_connection_lock.acquire()
+                        lock_acquired = True
+                        
+                        # 🔥 保存原始连接（用于执行后恢复）
+                        if hasattr(service_instance, 'db'):
+                            original_connections['db'] = service_instance.db
+                        if hasattr(service_instance, 'historical_service'):
+                            original_connections['historical_service'] = service_instance.historical_service
+                        if hasattr(service_instance, 'news_service'):
+                            original_connections['news_service'] = service_instance.news_service
+                        
+                        # 🔥 创建线程本地的数据库连接（绑定到当前线程的事件循环）
+                        # 🔥 这些连接只在线程池线程中使用，不会影响主事件循环
+                        thread_local_connections = await self._create_thread_local_db_connections()
+                        
+                        # 🔥 临时替换服务实例的连接（仅在线程池线程中有效）
+                        # 🔥 由于有锁保护，主事件循环中的操作会等待锁释放
+                        if 'db' in thread_local_connections:
+                            service_instance.db = thread_local_connections['db']
+                        if 'historical_service' in thread_local_connections:
+                            service_instance.historical_service = thread_local_connections['historical_service']
+                        if 'news_service' in thread_local_connections:
+                            service_instance.news_service = thread_local_connections['news_service']
+                        
+                        logger.debug(f"🔄 已替换服务实例的数据库连接为线程本地连接: {type(service_instance).__name__}")
         except Exception as e:
             logger.debug(f"检查服务实例数据库连接时出错（可忽略）: {e}")
         
@@ -442,24 +456,23 @@ class UnifiedThreadPoolSyncService:
             sync_db = sync_client[settings.MONGODB_DATABASE]
             
             try:
-                # 🔥 查询执行记录，检查 cancel_requested 标记和任务状态
-                # 注意：不限制状态为 running，因为 shutdown 时可能已经改为 suspended
+                # 只检查当前运行中的执行记录，避免历史 suspended 记录误伤新任务。
                 execution = sync_db.scheduler_executions.find_one(
-                    {"job_id": job_id},
+                    {"job_id": job_id, "status": "running"},
                     sort=[("timestamp", -1)]
                 )
 
-                if execution:
-                    # 检查取消请求标记
-                    if execution.get("cancel_requested"):
-                        logger.info(f"🛑 任务 {job_id} 收到取消请求，应停止执行")
-                        return True
+                if not execution:
+                    return False
 
-                    # 🔥 检查任务状态：如果任务已被标记为失败、取消或挂起，也应该停止
-                    status = execution.get("status")
-                    if status in ["failed", "cancelled", "suspended"]:
-                        logger.info(f"🛑 任务 {job_id} 状态为 {status}，应停止执行")
-                        return True
+                if execution.get("cancel_requested"):
+                    logger.info(f"🛑 任务 {job_id} 收到取消请求，应停止执行")
+                    return True
+
+                status = execution.get("status")
+                if status in ["failed", "cancelled"]:
+                    logger.info(f"🛑 任务 {job_id} 状态为 {status}，应停止执行")
+                    return True
 
                 return False
             finally:

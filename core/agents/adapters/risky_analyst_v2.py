@@ -1,8 +1,8 @@
 """
-激进风险分析师 v2.0
+高弹性情景分析师 v2.0
 
-基于 ResearcherAgent 基类的激进风险分析师实现。
-从激进角度评估交易计划，关注高收益机会，容忍较高风险。
+基于 ResearcherAgent 基类的高弹性情景分析师实现。
+从激进角度审阅综合研究结论，关注结论上修条件与强化催化。
 支持多轮辩论和缓存系统。
 """
 
@@ -29,21 +29,21 @@ except (ImportError, KeyError):
 @register_agent
 class RiskyAnalystV2(ResearcherAgent):
     """
-    激进风险分析师 v2.0
+    高弹性情景分析师 v2.0
 
     功能：
-    - 从激进角度评估交易计划
-    - 关注高收益机会
-    - 容忍较高风险
-    - 寻找进攻性策略
+    - 从激进角度审阅综合研究结论
+    - 关注结论上修条件和强化催化
+    - 容忍较高不确定性但要求明确前提
+    - 识别结论增强所需的额外验证
     - 支持多轮辩论（与保守、中性分析师辩论）
     - 支持缓存系统（避免重复分析）
 
     工作流程：
-    1. 读取投资计划和市场分析
+    1. 读取综合研究结论和市场分析
     2. 读取辩论历史和对手观点
-    3. 使用LLM从激进角度评估风险并反驳对手
-    4. 生成激进风险观点
+    3. 使用LLM从激进角度审阅结论上修条件并反驳对手
+    4. 生成高弹性情景观点
     5. 更新辩论状态
 
     示例:
@@ -72,8 +72,8 @@ class RiskyAnalystV2(ResearcherAgent):
     # Agent元数据
     metadata = AgentMetadata(
         id="risky_analyst_v2",
-        name="激进风险分析师 v2.0",
-        description="从激进角度评估交易计划，关注高收益机会，容忍较高风险，支持多轮辩论",
+        name="高弹性情景分析师 v2.0",
+        description="从研究结论能否上修的角度审阅，识别强化催化、高要求前提与额外验证信号",
         category=AgentCategory.RISK,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -81,9 +81,9 @@ class RiskyAnalystV2(ResearcherAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_plan", type="string", description="投资计划", source="state", state_field="investment_plan", source_state_fields=["trader_investment_plan"], producer_hint="research_manager_v2"),
-            AgentInput(name="bull_opinion", type="string", description="看涨观点", required=False, source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
-            AgentInput(name="bear_opinion", type="string", description="看跌观点", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
+            AgentInput(name="investment_plan", type="string", description="综合研究结论", source="state", state_field="investment_plan", source_state_fields=["trader_investment_plan"], producer_hint="research_manager_v2"),
+            AgentInput(name="bull_opinion", type="string", description="乐观情景观点", required=False, source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
+            AgentInput(name="bear_opinion", type="string", description="审慎情景观点", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
             AgentInput(name="risk_debate_state", type="dict", description="辩论状态", required=False, source="state", state_field="risk_debate_state", producer_hint="risk_manager_v2"),
             AgentInput(name="market_report", type="string", description="市场分析报告", required=False, source="state", state_field="market_report", producer_hint="market_analyst_v2"),
             AgentInput(name="fundamentals_report", type="string", description="基本面分析报告", required=False, source="state", state_field="fundamentals_report", producer_hint="fundamentals_analyst_v2"),
@@ -93,7 +93,7 @@ class RiskyAnalystV2(ResearcherAgent):
             AgentInput(name="sector_report", type="string", description="板块分析报告", required=False, source="state", state_field="sector_report", producer_hint="sector_analyst_v2"),
         ],
         outputs=[
-            AgentOutput(name="risky_opinion", type="string", description="激进风险观点"),
+            AgentOutput(name="risky_opinion", type="string", description="高弹性情景观点"),
             AgentOutput(name="risk_debate_state", type="dict", description="更新后的辩论状态"),
         ],
         requires_tools=False,
@@ -146,34 +146,34 @@ class RiskyAnalystV2(ResearcherAgent):
         
         logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
         if prompt:
-            logger.debug("✅ 从模板系统获取激进风险分析师系统提示词")
+            logger.debug("✅ 从模板系统获取高弹性情景分析师系统提示词")
             return prompt
 
         # 降级：使用默认提示词
-        return """你是一位激进的风险分析师。
+        return """你是一位高弹性情景分析师。
 
 你的角色特点：
-- 🔥 激进进取，追求高收益
-- 💰 愿意承担较高风险以获取超额回报
-- 🚀 关注市场机会和上涨潜力
-- ⚡ 倾向于积极的交易策略
+    - 🔥 更关注研究结论上修所依赖的强化条件与催化
+    - 💰 接受更高不确定性，但必须说明前提与证据门槛
+    - 🚀 重视哪些公开信号会让当前结论变得更积极
+    - ⚡ 强调结论增强所需要的外部验证
 
 你的任务是：
-1. 从激进角度评估投资计划的收益潜力
-2. 分析可能的高收益机会
-3. 评估风险是否值得承担
-4. 提出更激进的操作建议（如加大仓位、提高目标价等）
+    1. 从激进角度审阅当前研究结论的上修条件。
+    2. 说明哪些催化、验证信号和市场反馈会增强当前结论。
+    3. 指出如果要更积极，需要满足哪些高要求前提。
+    4. 不输出仓位、目标价、收益空间或交易建议。
 
 评估要点：
-- 上涨空间和收益潜力
-- 市场情绪和动量
-- 突破机会和催化剂
-- 风险收益比（偏向收益）
+    - 结论上修依赖的催化与证据
+    - 当前材料中最支持乐观情景的部分
+    - 市场是否存在重新定价的触发因素
+    - 仍需补足的验证信息
 
 要求：
-- 保持激进但不失理性
-- 用数据支持你的观点
-- 使用中文撰写报告"""
+    - 保持激进但不失理性
+    - 用数据支持你的观点
+    - 使用中文撰写报告"""
 
     def _build_user_prompt(self, ticker: str, analysis_date: str, state: Dict[str, Any]) -> str:
         """构建用户提示词（从模板系统获取并渲染）"""
@@ -216,24 +216,47 @@ class RiskyAnalystV2(ResearcherAgent):
                        len(current_safe_response) + len(current_neutral_response))
         logger.info(f"  - 总Prompt长度: {total_length:,} 字符 (~{total_length//4:,} tokens)")
 
-        # 降级提示词（如果模板系统不可用）- 参考旧版实现
-        fallback_prompt = f"""以下是交易员的决策：
-{template_variables['investment_plan']}
+        # 降级提示词（如果模板系统不可用）
+        fallback_prompt = f"""请从高弹性情景分析师的视角审阅以下综合研究结论，并说明哪些条件会支持结论上修：
 
-将以下来源的见解纳入您的论点：
-市场研究报告：{template_variables['market_report']}
-社交媒体情绪报告：{template_variables['sentiment_report']}
-最新世界事务报告：{template_variables['news_report']}
-公司基本面报告：{template_variables['fundamentals_report']}
+    【综合研究结论】
+    {template_variables['investment_plan'] or '无综合研究结论'}
 
-当前对话历史：{history}
-保守分析师的最后论点：{current_safe_response}
-中性分析师的最后论点：{current_neutral_response}
+    【乐观情景观点】
+    {template_variables['bull_opinion'] or '无乐观情景观点'}
 
-请提出您的激进观点，强调为什么高风险方法是最优的。"""
+    【审慎情景观点】
+    {template_variables['bear_opinion'] or '无审慎情景观点'}
+
+    【市场分析报告】
+    {template_variables['market_report'] or '无市场分析报告'}
+
+    【社交媒体情绪报告】
+    {template_variables['sentiment_report'] or '无情绪分析报告'}
+
+    【新闻分析报告】
+    {template_variables['news_report'] or '无新闻分析报告'}
+
+    【基本面分析报告】
+    {template_variables['fundamentals_report'] or '无基本面分析报告'}
+
+    【当前辩论历史】
+    {history or '无辩论历史'}
+
+    【防御情景分析师最新回应】
+    {current_safe_response or '无'}
+
+    【基准情景分析师最新回应】
+    {current_neutral_response or '无'}
+
+    请输出你的高弹性情景观点，重点说明：
+    1. 哪些催化、验证信号或市场反馈会增强当前结论。
+    2. 如果要更积极，需要满足哪些高要求前提。
+    3. 当前材料中最支持结论上修的证据是什么。
+    4. 不要输出仓位、目标价、收益空间或交易建议。"""
 
         # 打印模板变量（调试用）
-        logger.info(f"📊 [激进风险分析师] 模板变量:")
+        logger.info(f"📊 [高弹性情景分析师] 模板变量:")
         for key, value in template_variables.items():
             if isinstance(value, str) and len(value) > 100:
                 logger.info(f"  - {key}: {value[:100]}...")
@@ -251,11 +274,11 @@ class RiskyAnalystV2(ResearcherAgent):
             prompt_type="user"  # 🔑 明确指定获取用户提示词
         )
         if prompt:
-            logger.info(f"✅ 从模板系统获取激进风险分析师用户提示词 (长度: {len(prompt)})")
+            logger.info(f"✅ 从模板系统获取高弹性情景分析师用户提示词 (长度: {len(prompt)})")
             return prompt
 
         # 降级：使用硬编码提示词
-        logger.info(f"📝 [激进风险分析师] 使用降级提示词 (长度: {len(fallback_prompt)})")
+        logger.info(f"📝 [高弹性情景分析师] 使用降级提示词 (长度: {len(fallback_prompt)})")
         return fallback_prompt
 
     def _get_required_reports(self) -> list:
@@ -281,15 +304,15 @@ class RiskyAnalystV2(ResearcherAgent):
     
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行激进风险分析（支持多轮辩论）
+        执行激进风险审阅（支持多轮辩论）
 
         Args:
             state: 包含以下键的状态字典:
                 - ticker: 股票代码
                 - analysis_date: 分析日期
-                - investment_plan: 投资计划
-                - bull_opinion: 看涨观点（可选）
-                - bear_opinion: 看跌观点（可选）
+                - investment_plan: 综合研究结论
+                - bull_opinion: 乐观情景观点（可选）
+                - bear_opinion: 审慎情景观点（可选）
                 - risk_debate_state: 辩论状态（可选）
                     - history: 完整辩论历史
                     - risky_history: 激进分析师历史
@@ -301,13 +324,13 @@ class RiskyAnalystV2(ResearcherAgent):
 
         Returns:
             更新后的状态，包含:
-                - risky_opinion: 激进风险观点
+                - risky_opinion: 高弹性情景观点
                 - risk_debate_state: 更新后的辩论状态
         """
         ticker = state.get("ticker", "") or state.get("company_of_interest", "")
         analysis_date = state.get("analysis_date", "") or state.get("trade_date", "")
 
-        logger.info(f"🔥 激进风险分析师开始评估 {ticker} @ {analysis_date}")
+        logger.info(f"🔥 高弹性情景分析师开始评估 {ticker} @ {analysis_date}")
 
         # 🆕 获取辩论状态
         risk_debate_state = state.get("risk_debate_state", {})
@@ -346,7 +369,7 @@ class RiskyAnalystV2(ResearcherAgent):
 
             # 🆕 更新辩论状态
             new_count = risk_debate_state.get("count", 0) + 1
-            logger.info(f"🔥 [激进风险分析师] 发言完成，计数: {risk_debate_state.get('count', 0)} -> {new_count}")
+            logger.info(f"🔥 [高弹性情景分析师] 发言完成，计数: {risk_debate_state.get('count', 0)} -> {new_count}")
 
             new_risk_debate_state = {
                 "history": history + "\n" + argument,

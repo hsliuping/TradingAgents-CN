@@ -56,6 +56,7 @@ async def create_system_templates():
                     # 创建模板内容
                     content = TemplateContent(
                         system_prompt=f"You are a {agent_name} with {preference_type} preference",
+                        user_prompt="",
                         tool_guidance=f"Use appropriate tools for {agent_name} analysis",
                         analysis_requirements=f"Provide {preference_type} level analysis",
                         output_format="Structured JSON format",
@@ -72,16 +73,17 @@ async def create_system_templates():
                     )
                     
                     # 保存为系统模板
-                    template = await service.create_template(
+                    template, operation = await service.upsert_system_template(
                         template_data,
-                        is_system=True
+                        remark_suffix="[2026-04-11] 幂等同步通用系统模板",
                     )
                     
                     if template:
                         template_count += 1
-                        print(f"✅ 创建模板: {agent_type}/{agent_name}/{preference_type}")
+                        action_text = {"created": "创建", "updated": "更新", "unchanged": "保持"}.get(operation, operation)
+                        print(f"✅ {action_text}: {agent_type}/{agent_name}/{preference_type}")
                     else:
-                        print(f"❌ 创建模板失败: {agent_type}/{agent_name}/{preference_type}")
+                        print(f"❌ 同步模板失败: {agent_type}/{agent_name}/{preference_type}")
         
         print(f"\n🎉 成功创建 {template_count} 个系统模板")
         return True
@@ -90,7 +92,8 @@ async def create_system_templates():
         print(f"❌ 初始化失败: {e}")
         return False
     finally:
-        service.close()
+        if hasattr(service, "close"):
+            service.close()
 
 
 if __name__ == "__main__":

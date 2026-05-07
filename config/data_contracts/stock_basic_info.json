@@ -1,0 +1,47 @@
+{
+  "collection": "stock_basic_info",
+  "version": 1,
+  "summary": "股票基础信息与静态估值主表。估值类任务优先从这里获取名称、行业、PE/PB/PS 及市值信息。",
+  "structure": {
+    "top_level_shape": "通常按一股一条或按 source 保留少量多版本记录。无需假设存在嵌套多期数组。",
+    "query_keys": ["symbol", "code", "source"],
+    "stable_top_level_fields": [
+      "symbol",
+      "code",
+      "name",
+      "industry",
+      "total_mv",
+      "circ_mv",
+      "pe",
+      "pb",
+      "ps",
+      "pe_ttm",
+      "pb_mrq",
+      "ps_ttm",
+      "roe"
+    ],
+    "nested_paths": []
+  },
+  "task_mappings": [
+    {
+      "task": "valuation_common",
+      "primary_paths": [
+        "pe_ttm",
+        "pb 或 pb_mrq",
+        "ps_ttm 或 ps",
+        "industry",
+        "name"
+      ],
+      "fallback_paths": [
+        "如果 current_price 缺失，价格优先从 market_quotes 或 get_latest_stock_price 获取，不要把 stock_basic_info 当作唯一实时价格来源。"
+      ],
+      "notes": [
+        "估值类任务优先用 get_stock_valuation_context 统一获取当前价格和基础估值指标。"
+      ]
+    }
+  ],
+  "pitfalls": [
+    "current_price 可能不存在或不是最新值，实时价格不应只依赖本集合。",
+    "同一股票可能按 source 保留多条记录，直接查集合时需要考虑优先级。"
+  ]
+}

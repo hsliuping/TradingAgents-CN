@@ -691,7 +691,7 @@
 
             <el-form-item label="快速分析模型">
               <el-select
-                v-model="systemSettings.quick_analysis_model"
+                v-model="systemSettings.quick_analysis_model_config_id"
                 :disabled="!isEditable('quick_analysis_model')"
                 placeholder="选择快速分析模型"
                 filterable
@@ -703,9 +703,9 @@
                 >
                   <el-option
                     v-for="model in group.models"
-                    :key="`${model.provider}/${model.model_name}`"
+                    :key="model.config_id || `${model.provider}/${model.model_name}`"
                     :label="model.model_display_name || model.model_name"
-                    :value="model.model_name"
+                    :value="model.config_id"
                   >
                     <div style="display: flex; flex-direction: column;">
                       <span>{{ model.model_display_name || model.model_name }}</span>
@@ -719,7 +719,7 @@
 
             <el-form-item label="深度决策模型">
               <el-select
-                v-model="systemSettings.deep_analysis_model"
+                v-model="systemSettings.deep_analysis_model_config_id"
                 :disabled="!isEditable('deep_analysis_model')"
                 placeholder="选择深度决策模型"
                 filterable
@@ -731,9 +731,9 @@
                 >
                   <el-option
                     v-for="model in group.models"
-                    :key="`${model.provider}/${model.model_name}`"
+                    :key="model.config_id || `${model.provider}/${model.model_name}`"
                     :label="model.model_display_name || model.model_name"
-                    :value="model.model_name"
+                    :value="model.config_id"
                   >
                     <div style="display: flex; flex-direction: column;">
                       <span>{{ model.model_display_name || model.model_name }}</span>
@@ -747,7 +747,7 @@
 
             <el-form-item label="深度推理模型">
               <el-select
-                v-model="systemSettings.deep_reasoning_model"
+                v-model="systemSettings.deep_reasoning_model_config_id"
                 :disabled="!isEditable('deep_reasoning_model')"
                 placeholder="可选，用于强推理场景"
                 filterable
@@ -760,9 +760,9 @@
                 >
                   <el-option
                     v-for="model in group.models"
-                    :key="`${model.provider}/${model.model_name}`"
+                    :key="model.config_id || `${model.provider}/${model.model_name}`"
                     :label="model.model_display_name || model.model_name"
-                    :value="model.model_name"
+                    :value="model.config_id"
                   >
                     <div style="display: flex; flex-direction: column;">
                       <span>{{ model.model_display_name || model.model_name }}</span>
@@ -776,7 +776,7 @@
 
             <el-form-item label="编程模型">
               <el-select
-                v-model="systemSettings.coding_model"
+                v-model="systemSettings.coding_model_config_id"
                 :disabled="!isEditable('coding_model')"
                 placeholder="可选，用于策略 DSL 生成"
                 filterable
@@ -789,9 +789,9 @@
                 >
                   <el-option
                     v-for="model in group.models"
-                    :key="`${model.provider}/${model.model_name}`"
+                    :key="model.config_id || `${model.provider}/${model.model_name}`"
                     :label="model.model_display_name || model.model_name"
-                    :value="model.model_name"
+                    :value="model.config_id"
                   >
                     <div style="display: flex; flex-direction: column;">
                       <span>{{ model.model_display_name || model.model_name }}</span>
@@ -1633,10 +1633,16 @@ const allEnabledModels = computed(() => {
   return llmConfigs.value.filter(config => config.enabled)
 })
 
-const groupedAvailableModels = computed(() => {
-  const groups = new Map<string, { provider: string; providerLabel: string; models: LLMConfig[] }>()
+const selectableEnabledModels = computed(() => {
+  return allEnabledModels.value.filter(
+    (config): config is LLMConfig & { config_id: string } => typeof config.config_id === 'string' && config.config_id.trim().length > 0
+  )
+})
 
-  for (const model of allEnabledModels.value) {
+const groupedAvailableModels = computed(() => {
+  const groups = new Map<string, { provider: string; providerLabel: string; models: Array<LLMConfig & { config_id: string }> }>()
+
+  for (const model of selectableEnabledModels.value) {
     const providerLabel = providerInfoMap.value[model.provider]?.display_name || model.provider_name || model.provider
     const existingGroup = groups.get(model.provider)
 
@@ -1661,6 +1667,55 @@ const groupedAvailableModels = computed(() => {
     })
   }))
 })
+
+const modelSettingPairs = [
+  { modelKey: 'quick_analysis_model', configIdKey: 'quick_analysis_model_config_id' },
+  { modelKey: 'deep_analysis_model', configIdKey: 'deep_analysis_model_config_id' },
+  { modelKey: 'deep_reasoning_model', configIdKey: 'deep_reasoning_model_config_id' },
+  { modelKey: 'coding_model', configIdKey: 'coding_model_config_id' }
+] as const
+
+const findLLMConfigBySelection = (modelName?: string, configId?: string) => {
+  const normalizedConfigId = String(configId || '').trim()
+  if (normalizedConfigId) {
+    const exactConfig = allEnabledModels.value.find(model => model.config_id === normalizedConfigId)
+    if (exactConfig) {
+      return exactConfig
+    }
+  }
+
+  const normalizedModelName = String(modelName || '').trim()
+  if (!normalizedModelName) {
+    return null
+  }
+
+  const matchingConfigs = allEnabledModels.value.filter(model => model.model_name === normalizedModelName)
+  if (!matchingConfigs.length) {
+    return null
+  }
+
+  const preferredProvider = String(systemSettings.value.default_provider || '').trim().toLowerCase()
+  if (preferredProvider) {
+    const preferredConfig = matchingConfigs.find(model => String(model.provider || '').trim().toLowerCase() === preferredProvider)
+    if (preferredConfig) {
+      return preferredConfig
+    }
+  }
+
+  return matchingConfigs[0]
+}
+
+const syncModelSelectionSettings = () => {
+  for (const { modelKey, configIdKey } of modelSettingPairs) {
+    const matchedConfig = findLLMConfigBySelection(
+      systemSettings.value[modelKey],
+      systemSettings.value[configIdKey]
+    )
+
+    systemSettings.value[configIdKey] = matchedConfig?.config_id || ''
+    systemSettings.value[modelKey] = matchedConfig?.model_name || ''
+  }
+}
 
 // 🔥 新增：支持 embedding 的厂家和模型列表（从后端获取）
 const embeddingProviders = ref<Array<{
@@ -1893,9 +1948,13 @@ const loadSystemSettings = async () => {
     // 确保有默认值
     systemSettings.value = {
       quick_analysis_model: 'qwen-turbo',
+      quick_analysis_model_config_id: '',
       deep_analysis_model: 'qwen-max',
+      deep_analysis_model_config_id: '',
       deep_reasoning_model: '',
+      deep_reasoning_model_config_id: '',
       coding_model: '',
+      coding_model_config_id: '',
       default_embedding_model: '',  // 🔥 新增：默认 Embedding 模型
       default_analysis_timeout: 300,
       enable_cache: true,
@@ -1935,6 +1994,7 @@ const loadSystemSettings = async () => {
 
       ...settings
     }
+    syncModelSelectionSettings()
     // 规整元数据为map
     const metaList = meta?.items || []
     systemSettingsMeta.value = Object.fromEntries(metaList.map((m: SettingMeta) => [m.key, m]))
@@ -2591,6 +2651,7 @@ const isEditable = (key: string): boolean => {
 const saveSystemSettings = async () => {
   systemSaving.value = true
   try {
+    syncModelSelectionSettings()
     // 基本校验：这些数值需 > 0
     const positiveKeys: Array<{key: string; min: number}> = [
       { key: 'worker_heartbeat_interval_seconds', min: 1 },
@@ -2756,25 +2817,24 @@ const migrateLegacyConfig = async () => {
 watch(
   allEnabledModels,
   (availableModels) => {
-    const quickModel = systemSettings.value.quick_analysis_model
-    const deepModel = systemSettings.value.deep_analysis_model
-    const reasoningModel = systemSettings.value.deep_reasoning_model
-    const codingModel = systemSettings.value.coding_model
+    for (const { modelKey, configIdKey } of modelSettingPairs) {
+      const configId = String(systemSettings.value[configIdKey] || '').trim()
+      const modelName = String(systemSettings.value[modelKey] || '').trim()
+      const matchedConfig = availableModels.find(model => {
+        if (configId) {
+          return model.config_id === configId
+        }
+        return model.model_name === modelName
+      })
 
-    if (quickModel && !availableModels.find(m => m.model_name === quickModel)) {
-      systemSettings.value.quick_analysis_model = ''
-    }
+      if (!matchedConfig) {
+        systemSettings.value[configIdKey] = ''
+        systemSettings.value[modelKey] = ''
+        continue
+      }
 
-    if (deepModel && !availableModels.find(m => m.model_name === deepModel)) {
-      systemSettings.value.deep_analysis_model = ''
-    }
-
-    if (reasoningModel && !availableModels.find(m => m.model_name === reasoningModel)) {
-      systemSettings.value.deep_reasoning_model = ''
-    }
-
-    if (codingModel && !availableModels.find(m => m.model_name === codingModel)) {
-      systemSettings.value.coding_model = ''
+      systemSettings.value[configIdKey] = matchedConfig.config_id || ''
+      systemSettings.value[modelKey] = matchedConfig.model_name || ''
     }
   }
 )

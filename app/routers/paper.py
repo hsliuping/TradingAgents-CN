@@ -13,6 +13,8 @@ from app.services.database.serialization import serialize_document
 router = APIRouter(prefix="/paper", tags=["paper"])
 logger = logging.getLogger("webapi")
 
+ETF_CODE_PREFIXES = ("50", "51", "52", "56", "58", "15", "16", "18")
+
 
 # 每个市场的初始资金配置
 INITIAL_CASH_BY_MARKET = {
@@ -23,10 +25,10 @@ INITIAL_CASH_BY_MARKET = {
 
 
 class PlaceOrderRequest(BaseModel):
-    code: str = Field(..., description="股票代码（支持A股/港股/美股）")
+    code: str = Field(..., description="股票代码（支持A股/ETF/港股/美股）")
     side: Literal["buy", "sell"]
     quantity: int = Field(..., gt=0)
-    market: Optional[str] = Field(None, description="市场类型 (CN/HK/US)，不传则自动识别")
+    market: Optional[str] = Field(None, description="市场类型 (CN/ETF/HK/US)，不传则自动识别")
     # 可选：指定价格（如果不指定，则使用当前实时价格）
     price: Optional[float] = Field(None, description="指定价格（必须在当天最高最低价之间）")
     # 可选：关联的分析ID，便于从分析页面一键下单后追踪
@@ -63,6 +65,31 @@ def _detect_market_and_code(code: str) -> Tuple[str, str]:
 
     # 默认当作A股，补齐6位
     return ('CN', code.zfill(6))
+
+
+def _is_cn_etf_symbol(code: str) -> bool:
+    code_str = str(code or "").strip().upper().zfill(6)
+    return len(code_str) == 6 and code_str.isdigit() and code_str.startswith(ETF_CODE_PREFIXES)
+
+
+def _resolve_market_and_code(code: str, market: Optional[str] = None) -> Tuple[str, str, bool]:
+    normalized_code = str(code or "").strip().upper()
+    requested_market = str(market or "").strip().upper()
+
+    if requested_market == "ETF":
+        normalized_code = normalized_code.zfill(6)
+        return "CN", normalized_code, True
+
+    if requested_market in {"CN", "HK", "US"}:
+        if requested_market == "CN":
+            normalized_code = normalized_code.zfill(6)
+        elif requested_market == "HK" and normalized_code.endswith('.HK'):
+            normalized_code = normalized_code[:-3].zfill(5)
+        return requested_market, normalized_code, requested_market == "CN" and _is_cn_etf_symbol(normalized_code)
+
+    detected_market, normalized_code = _detect_market_and_code(code)
+    is_etf = detected_market == "CN" and _is_cn_etf_symbol(normalized_code)
+    return detected_market, normalized_code, is_etf
 
 
 async def _get_or_create_account(user_id: str) -> Dict[str, Any]:
@@ -214,11 +241,17 @@ async def _get_stock_name(code: str, market: str) -> str:
     """
     try:
         # A股：从 stock_basic_info 获取
-        if market == "CN":
+        if market in {"CN", "ETF"}:
             db = get_mongo_db()
-            stock_info = await db["stock_basic_info"].find_one({"code": code})
+            code6 = str(code or "").strip().zfill(6)
+            stock_info = await db["stock_basic_info"].find_one({
+                "$or": [{"code": code}, {"code": code6}, {"symbol": code}, {"symbol": code6}]
+            })
             if stock_info and stock_info.get("name"):
                 return stock_info.get("name")
+            etf_info = await db["etf_basic_info"].find_one({"code": code6}, {"_id": 0, "name": 1})
+            if etf_info and etf_info.get("name"):
+                return etf_info.get("name")
             return f"A股{code}"
 
         # 港股/美股：使用 ForeignStockService（复用已获取的行情数据）
@@ -264,10 +297,11 @@ async def _get_last_price(code: str, market: str) -> Optional[float]:
     db = get_mongo_db()
 
     # A股：从数据库获取
-    if market == "CN":
+    if market in {"CN", "ETF"}:
+        code6 = str(code or "").strip().zfill(6)
         # 1. 尝试从 market_quotes 获取
         q = await db["market_quotes"].find_one(
-            {"$or": [{"code": code}, {"symbol": code}]},
+            {"$or": [{"code": code}, {"code": code6}, {"symbol": code}, {"symbol": code6}]},
             {"_id": 0, "close": 1}
         )
         if q and q.get("close") is not None:
@@ -281,7 +315,7 @@ async def _get_last_price(code: str, market: str) -> Optional[float]:
 
         # 2. 回退到 stock_basic_info 的 current_price
         basic_info = await db["stock_basic_info"].find_one(
-            {"$or": [{"code": code}, {"symbol": code}]},
+            {"$or": [{"code": code}, {"code": code6}, {"symbol": code}, {"symbol": code6}]},
             {"_id": 0, "current_price": 1}
         )
         if basic_info and basic_info.get("current_price") is not None:
@@ -293,7 +327,21 @@ async def _get_last_price(code: str, market: str) -> Optional[float]:
             except Exception as e:
                 logger.warning(f"⚠️ stock_basic_info 价格转换失败 {code}: {e}")
 
-        logger.error(f"❌ 无法从数据库获取A股价格: {code}")
+        etf_daily = await db["etf_daily_quotes"].find_one(
+            {"code": code6},
+            sort=[("trade_date", -1)],
+            projection={"_id": 0, "close": 1}
+        )
+        if etf_daily and etf_daily.get("close") is not None:
+            try:
+                price = float(etf_daily["close"])
+                if price > 0:
+                    logger.debug(f"✅ 从 etf_daily_quotes 获取价格: {code6} = {price}")
+                    return price
+            except Exception as e:
+                logger.warning(f"⚠️ etf_daily_quotes 价格转换失败 {code6}: {e}")
+
+        logger.error(f"❌ 无法从数据库获取A股/ETF价格: {code}")
         return None
 
     # 港股/美股：使用 ForeignStockService
@@ -333,9 +381,10 @@ async def _get_today_price_range(code: str, market: str) -> Optional[Dict[str, f
     db = get_mongo_db()
 
     # A股：从 market_quotes 获取
-    if market == "CN":
+    if market in {"CN", "ETF"}:
+        code6 = str(code or "").strip().zfill(6)
         q = await db["market_quotes"].find_one(
-            {"$or": [{"code": code}, {"symbol": code}]},
+            {"$or": [{"code": code}, {"code": code6}, {"symbol": code}, {"symbol": code6}]},
             {"_id": 0, "high": 1, "low": 1}
         )
         if q:
@@ -348,7 +397,30 @@ async def _get_today_price_range(code: str, market: str) -> Optional[Dict[str, f
             except Exception as e:
                 logger.warning(f"⚠️ market_quotes 价格区间转换失败 {code}: {e}")
 
-        logger.warning(f"⚠️ 无法从数据库获取A股价格区间: {code}")
+        etf_daily = await db["etf_daily_quotes"].find_one(
+            {"code": code6},
+            sort=[("trade_date", -1)],
+            projection={"_id": 0, "high": 1, "low": 1, "open": 1, "close": 1}
+        )
+        if etf_daily:
+            try:
+                high = etf_daily.get("high")
+                low = etf_daily.get("low")
+                if high is None or low is None:
+                    open_price = etf_daily.get("open")
+                    close_price = etf_daily.get("close")
+                    if open_price is not None and close_price is not None:
+                        high = max(float(open_price), float(close_price))
+                        low = min(float(open_price), float(close_price))
+                high_val = float(high) if high is not None else None
+                low_val = float(low) if low is not None else None
+                if high_val is not None and low_val is not None and high_val > 0 and low_val > 0:
+                    logger.debug(f"✅ 从 etf_daily_quotes 获取价格区间: {code6} = high:{high_val}, low:{low_val}")
+                    return {"high": high_val, "low": low_val}
+            except Exception as e:
+                logger.warning(f"⚠️ etf_daily_quotes 价格区间转换失败 {code6}: {e}")
+
+        logger.warning(f"⚠️ 无法从数据库获取A股/ETF价格区间: {code}")
         return None
 
     # 港股/美股：使用 ForeignStockService
@@ -468,11 +540,7 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
     db = get_mongo_db()
 
     # 1. 识别市场类型
-    if payload.market:
-        market = payload.market.upper()
-        normalized_code = payload.code
-    else:
-        market, normalized_code = _detect_market_and_code(payload.code)
+    market, normalized_code, is_etf = _resolve_market_and_code(payload.code, payload.market)
 
     side = payload.side
     qty = int(payload.quantity)
@@ -480,7 +548,7 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
     # 🔥 修复：直接从 Pydantic 模型获取 price 字段（Pydantic 模型可以直接访问字段）
     specified_price = payload.price
     
-    logger.info(f"📊 [模拟交易下单] 收到请求: code={normalized_code}, market={market}, side={side}, qty={qty}, specified_price={specified_price}")
+    logger.info(f"📊 [模拟交易下单] 收到请求: code={normalized_code}, market={market}, is_etf={is_etf}, side={side}, qty={qty}, specified_price={specified_price}")
 
     # 2. 确定货币
     currency_map = {
@@ -727,16 +795,12 @@ async def list_orders(limit: int = Query(50, ge=1, le=200), current_user: dict =
 @router.get("/quote/{code}", response_model=dict)
 async def get_quote(
     code: str,
-    market: Optional[str] = Query(None, description="市场类型 (CN/HK/US)，不传则自动识别"),
+    market: Optional[str] = Query(None, description="市场类型 (CN/ETF/HK/US)，不传则自动识别"),
     current_user: dict = Depends(get_current_user)
 ):
     """获取股票价格信息（当前价格和当天价格区间）"""
     # 1. 识别市场类型
-    if market:
-        market = market.upper()
-        normalized_code = code
-    else:
-        market, normalized_code = _detect_market_and_code(code)
+    market, normalized_code, is_etf = _resolve_market_and_code(code, market)
     
     # 2. 获取当前价格
     current_price = await _get_last_price(normalized_code, market)
@@ -746,7 +810,7 @@ async def get_quote(
     
     return ok({
         "code": normalized_code,
-        "market": market,
+        "market": "ETF" if is_etf else market,
         "current_price": current_price,
         "high": price_range.get("high") if price_range else None,
         "low": price_range.get("low") if price_range else None

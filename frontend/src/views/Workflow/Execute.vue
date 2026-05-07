@@ -230,6 +230,7 @@ import { configApi, type LLMConfig } from '@/api/config'
 import { analysisApi } from '@/api/analysis'
 import { marked } from 'marked'
 import { useAuthStore } from '@/stores/auth'
+import { fetchTaskResultWithRetry } from '@/utils/taskResult'
 
 const route = useRoute()
 const router = useRouter()
@@ -462,8 +463,9 @@ const startPollingTaskStatus = () => {
         }
 
         // 获取任务结果
-        const resultResponse = await analysisApi.getTaskResult(currentTaskId.value)
-        executionResult.value = resultResponse.data
+        executionResult.value = await fetchTaskResultWithRetry(currentTaskId.value, {
+          seedData: status.result_data
+        })
 
         // 🔍 调试：检查返回的数据结构
         console.log('🔍 [工作流执行] 任务结果数据:', executionResult.value)

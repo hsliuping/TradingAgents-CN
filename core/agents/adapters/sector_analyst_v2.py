@@ -194,7 +194,7 @@ class SectorAnalystV2(AnalystAgent):
     metadata = AgentMetadata(
         id="sector_analyst_v2",
         name="板块分析师 v2.0",
-        description="分析行业趋势、板块轮动和同业对比",
+        description="分析行业趋势、板块轮动和同业对比，提炼结构变化与风险来源",
         category=AgentCategory.ANALYST,
         version="2.0.0",
         license_tier=LicenseTier.FREE,

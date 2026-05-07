@@ -270,8 +270,9 @@ class FinancialSituationMemory:
                 self.fallback_available = False
                 logger.warning(f"⚠️ Google AI未找到DASHSCOPE_API_KEY，记忆功能已禁用")
                 logger.info(f"💡 系统将继续运行，但不会保存或检索历史记忆")
-        elif self.llm_provider == "openrouter":
-            # OpenRouter支持：优先使用阿里百炼嵌入，否则禁用记忆功能
+        elif self.llm_provider in {"openrouter", "aihubmix"}:
+            # OpenAI 兼容聚合渠道支持：优先使用阿里百炼嵌入，否则禁用记忆功能
+            provider_label = "AIHubMix" if self.llm_provider == "aihubmix" else "OpenRouter"
             dashscope_key = os.getenv('DASHSCOPE_API_KEY')
             if dashscope_key:
                 try:
@@ -282,19 +283,19 @@ class FinancialSituationMemory:
                     self.embedding = "text-embedding-v3"
                     self.client = None
                     dashscope.api_key = dashscope_key
-                    logger.info(f"💡 OpenRouter使用阿里百炼嵌入服务")
+                    logger.info(f"💡 {provider_label}使用阿里百炼嵌入服务")
                 except ImportError as e:
                     logger.error(f"❌ DashScope包未安装: {e}")
                     self.client = "DISABLED"
-                    logger.warning(f"⚠️ OpenRouter记忆功能已禁用")
+                    logger.warning(f"⚠️ {provider_label}记忆功能已禁用")
                 except Exception as e:
                     logger.error(f"❌ DashScope初始化失败: {e}")
                     self.client = "DISABLED"
-                    logger.warning(f"⚠️ OpenRouter记忆功能已禁用")
+                    logger.warning(f"⚠️ {provider_label}记忆功能已禁用")
             else:
                 # 没有DashScope密钥，禁用记忆功能
                 self.client = "DISABLED"
-                logger.warning(f"⚠️ OpenRouter未找到DASHSCOPE_API_KEY，记忆功能已禁用")
+                logger.warning(f"⚠️ {provider_label}未找到DASHSCOPE_API_KEY，记忆功能已禁用")
                 logger.info(f"💡 系统将继续运行，但不会保存或检索历史记忆")
         elif config["backend_url"] == "http://localhost:11434/v1":
             self.embedding = "nomic-embed-text"
@@ -490,7 +491,7 @@ class FinancialSituationMemory:
             self.llm_provider == "qianfan" or
             (self.llm_provider == "google" and self.client is None) or
             (self.llm_provider == "deepseek" and self.client is None) or
-            (self.llm_provider == "openrouter" and self.client is None)):
+            (self.llm_provider in {"openrouter", "aihubmix"} and self.client is None)):
             # 使用阿里百炼的嵌入模型
             try:
                 # 导入DashScope模块

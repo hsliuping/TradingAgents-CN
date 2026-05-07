@@ -169,39 +169,39 @@
           </template>
         </el-step>
 
-        <!-- 步骤6：完成第一次分析 -->
-        <el-step title="完成第一次分析" description="对自选股进行AI分析">
+        <!-- 步骤6：完成第一次研究 -->
+        <el-step title="完成第一次研究" description="对自选股进行 AI 研究">
           <template #description>
             <div class="step-content">
-              <p>开始您的第一次AI股票分析：</p>
+              <p>开始您的第一次 AI 股票研究：</p>
               <ul class="step-list">
                 <li>
                   <strong>填写股票代码：</strong>
-                  在"单股分析"页面输入股票代码（如：000001、600000等）
+                  在"单股研究"页面输入股票代码（如：000001、600000等）
                 </li>
                 <li>
                   <strong>检测数据是否完整：</strong>
                   系统会自动检测该股票的基础数据、历史数据、财务数据是否完整
                 </li>
                 <li>
-                  <strong>选择分析深度和分析师：</strong>
+                  <strong>选择研究深度和研究团队：</strong>
                   <ol style="margin-top: 8px; padding-left: 24px;">
-                    <li>选择分析深度等级（1-5级，从快速到全面）</li>
-                    <li>选择分析师团队（可选择多个分析师，如市场分析师、基本面分析师等）</li>
+                    <li>选择研究深度等级（1-5级，从快速到全面）</li>
+                    <li>选择研究团队（可选择多个研究模块，如市场、基本面、新闻等）</li>
                   </ol>
                 </li>
                 <li>
-                  <strong>开始分析：</strong>
-                  点击"开始分析"按钮，系统将启动多智能体协作分析流程
+                  <strong>开始研究：</strong>
+                  点击"开始研究"按钮，系统将启动多智能体协作研究流程
                 </li>
                 <li>
                   <strong>等待并查看结果：</strong>
-                  等待几分钟（通常5-8分钟），分析完成后查看详细的分析报告和操作建议
+                  等待几分钟（通常5-8分钟），研究完成后查看详细的研究报告和研究结论
                 </li>
               </ul>
               <el-button type="primary" @click="goToAnalysis">
                 <el-icon><TrendCharts /></el-icon>
-                开始分析
+                开始研究
               </el-button>
             </div>
           </template>
@@ -223,7 +223,7 @@
         </el-button>
         <el-button @click="goToAnalysis">
           <el-icon><TrendCharts /></el-icon>
-          单股分析
+          单股研究
         </el-button>
         <el-button @click="goToDashboard">
           <el-icon><HomeFilled /></el-icon>

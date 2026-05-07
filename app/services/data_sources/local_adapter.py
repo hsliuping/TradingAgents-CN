@@ -137,16 +137,27 @@ class LocalAdapter(DataSourceAdapter):
             from app.core.database import get_mongo_db_sync
             db = get_mongo_db_sync()
             collection = db.stock_daily_quotes
+
+            period_map = {
+                "day": "daily",
+                "week": "weekly",
+                "month": "monthly",
+                "5m": "5min",
+                "15m": "15min",
+                "30m": "30min",
+                "60m": "60min",
+            }
+            normalized_period = period_map.get(period, period)
             
             # 查询K线数据
             cursor = collection.find(
-                {"symbol": code, "data_source": "local", "period": period}
+                {"symbol": code, "data_source": "local", "period": normalized_period}
             ).sort("trade_date", 1).limit(limit)
             
             klines = list(cursor)
             
             if not klines:
-                logger.info(f"Local: No kline data found for {code}")
+                logger.info(f"Local: No kline data found for {code} (period={normalized_period})")
                 return []
             
             # 转换为标准格式
@@ -162,7 +173,7 @@ class LocalAdapter(DataSourceAdapter):
                     'amount': kline.get('amount')
                 })
             
-            logger.info(f"Local: Successfully fetched {len(result)} klines for {code}")
+            logger.info(f"Local: Successfully fetched {len(result)} klines for {code} (period={normalized_period})")
             return result
             
         except Exception as e:

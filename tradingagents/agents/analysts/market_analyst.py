@@ -12,6 +12,7 @@ logger = get_logger("default")
 
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails
 
 # 导入模板客户端
 from tradingagents.utils.template_client import get_agent_prompt
@@ -176,6 +177,7 @@ def create_market_analyst(llm, toolkit):
                 fallback_prompt=None,
                 context=None
             )
+            system_prompt = apply_compliance_guardrails(system_prompt, "market_analyst")
 
             logger.info(f"✅ [市场分析师] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
 
@@ -198,6 +200,7 @@ def create_market_analyst(llm, toolkit):
                 f"3. 不要重复调用工具！一次工具调用就足够了！\n\n"
                 f"请使用中文，基于真实数据进行分析。"
             )
+            system_prompt = apply_compliance_guardrails(system_prompt, "market_analyst")
             logger.warning(f"⚠️ [市场分析师] 使用降级提示词 (长度: {len(system_prompt)})")
 
         # 创建提示模板
@@ -420,7 +423,7 @@ def create_market_analyst(llm, toolkit):
 
 ### 1. 短期趋势（5-10个交易日）
 
-[分析短期价格走势，包括支撑位、压力位、关键价格区间]
+[分析短期价格走势，包括趋势延续性、波动变化和量价配合]
 
 ### 2. 中期趋势（20-60个交易日）
 
@@ -432,25 +435,23 @@ def create_market_analyst(llm, toolkit):
 
 ---
 
-## 四、投资建议
+## 四、研究结论
 
 ### 1. 综合评估
 
 [基于上述技术指标，给出综合评估]
 
-### 2. 操作建议
+### 2. 风险提示
 
-- **投资评级**：买入/持有/卖出
-- **目标价位**：[给出具体价格区间] {market_info['currency_symbol']}
-- **止损位**：[给出止损价格] {market_info['currency_symbol']}
-- **风险提示**：[列出主要风险因素]
+- **主要风险因素**：[列出主要风险因素]
+- **形态失效条件**：[说明哪些信号会削弱当前技术判断]
+- **信息局限**：[说明分析依赖的数据边界或样本限制]
 
-### 3. 关键价格区间
+### 3. 后续观察信号
 
-- **支撑位**：[具体价格]
-- **压力位**：[具体价格]
-- **突破买入价**：[具体价格]
-- **跌破卖出价**：[具体价格]
+- **趋势延续信号**：[需要继续观察的技术指标变化]
+- **波动变化信号**：[需要继续观察的波动或成交量现象]
+- **验证节点**：[后续需要复核的公开信息或市场表现]
 
 ---
 
@@ -462,7 +463,7 @@ def create_market_analyst(llm, toolkit):
 - 报告标题必须是：# **{company_name}（{ticker}）技术分析报告**
 - 报告必须基于工具返回的真实数据进行分析
 - 包含具体的技术指标数值和专业分析
-- 提供明确的投资建议和风险提示
+- 仅提供研究观察、风险提示和后续观察信号，不得形成交易建议
 - 报告长度不少于800字
 - 使用中文撰写
 - 使用表格展示数据时，确保格式规范"""

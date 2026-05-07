@@ -1,0 +1,44 @@
+# git-cliff 配置文件
+# 用法: git-cliff --tag-pattern "v2.*" 生成 v2.x 变更日志
+
+[changelog]
+header = """
+# Changelog\n
+"""
+body = """
+{% if version %}\
+## {{ version | trim_start_matches(pat="v") }} ({{ date | format_date }})\
+{% else %}\
+## [Unreleased]\
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | upper_first }}\
+{% endfor %}
+{% endfor %}\n
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+commit_parsers = [
+    { message = "^feat", group = "新功能" },
+    { message = "^fix", group = "Bug 修复" },
+    { message = "^doc", group = "文档" },
+    { message = "^perf", group = "性能优化" },
+    { message = "^refactor", group = "重构" },
+    { message = "^style", group = "代码风格" },
+    { message = "^test", group = "测试" },
+    { message = "^chore", skip = true },
+    { message = "^ci", skip = true },
+    { message = "^build", skip = true },
+]
+tag_pattern = "v[0-9]+.*"
+
+[git.date]
+format = "%Y-%m-%d"

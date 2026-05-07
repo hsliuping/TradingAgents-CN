@@ -47,7 +47,7 @@
       <el-table-column prop="name" label="名称" width="100" />
       <el-table-column prop="market" label="市场" width="70">
         <template #default="{ row }">
-          <el-tag :type="getMarketTagType(row.market)" size="small">{{ getMarketName(row.market) }}</el-tag>
+          <el-tag :type="getMarketTagType(row.market, row.code)" size="small">{{ getMarketName(row.market, row.code) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="change_type" label="类型" width="80">
@@ -178,6 +178,7 @@
 import { ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { portfolioApi, type PositionChange, type PositionChangeType } from '@/api/portfolio'
+import { getMarketByStockCode } from '@/utils/market'
 
 const props = defineProps<{ modelValue: boolean }>()
 const emit = defineEmits(['update:modelValue', 'refresh'])
@@ -350,8 +351,14 @@ const formatDateTime = (dt: string) => {
   return d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-const getMarketName = (m: string) => ({ CN: 'A股', HK: '港股', US: '美股' }[m] || m)
-const getMarketTagType = (m: string) => ({ CN: 'danger', HK: 'warning', US: 'primary' }[m] || 'info') as any
+const getMarketName = (m: string, code?: string) => {
+  if (m === 'CN' && code && getMarketByStockCode(code) === 'ETF') return 'ETF'
+  return ({ CN: 'A股', HK: '港股', US: '美股' }[m] || m)
+}
+const getMarketTagType = (m: string, code?: string) => {
+  if (m === 'CN' && code && getMarketByStockCode(code) === 'ETF') return 'success'
+  return ({ CN: 'danger', HK: 'warning', US: 'primary' }[m] || 'info') as any
+}
 const getCurrencySymbol = (c: string) => ({ CNY: '¥', HKD: 'HK$', USD: '$' }[c] || c)
 const getChangeTypeName = (t: string) => ({ buy: '买入', add: '加仓', reduce: '减仓', sell: '卖出', adjust: '调整' }[t] || t)
 const getChangeTypeTag = (t: string) => ({ buy: 'success', add: 'primary', reduce: 'warning', sell: 'danger', adjust: 'info' }[t] || 'info') as any

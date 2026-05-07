@@ -84,6 +84,19 @@ class VectorStoreInterface(ABC):
         pass
 
     @abstractmethod
+    def delete_ids(self, ids: List[str]) -> bool:
+        """
+        按文档 ID 删除集合中的部分文档
+
+        Args:
+            ids: 文档 ID 列表
+
+        Returns:
+            是否成功
+        """
+        pass
+
+    @abstractmethod
     def get_backend_name(self) -> str:
         """
         获取后端名称

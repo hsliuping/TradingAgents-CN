@@ -398,6 +398,15 @@ AGGREGATOR_PROVIDERS = {
         "model_name_format": "{provider}/{model}",  # 如: openai/gpt-4
         "supported_providers": ["openai", "anthropic", "google", "deepseek", "qwen"]
     },
+    "aihubmix": {
+        "display_name": "AiHubMix",
+        "description": "AiHubMix 聚合平台，提供 OpenAI 兼容统一接口",
+        "website": "https://aihubmix.com/?aff=2rIi",
+        "api_doc_url": "https://docs.aihubmix.com/cn/quick-start",
+        "default_base_url": "https://aihubmix.com/v1",
+        "model_name_format": "{model}",
+        "supported_providers": ["openai", "anthropic", "google", "deepseek", "qwen"]
+    },
     "openrouter": {
         "display_name": "OpenRouter",
         "description": "OpenRouter 聚合平台，支持多种 AI 模型",

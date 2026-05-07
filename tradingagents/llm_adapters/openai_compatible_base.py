@@ -19,6 +19,8 @@ from tradingagents.utils.logging_manager import get_logger, get_logger_manager
 logger = get_logger('agents')
 logger = setup_llm_logging()
 
+KIMI_FIXED_TEMPERATURE_MODELS = ("kimi-k2.5", "kimi-k2.6")
+
 # 导入token跟踪器
 try:
     from tradingagents.config.config_manager import token_tracker
@@ -197,6 +199,50 @@ class OpenAICompatibleBase(ChatOpenAI):
             )
         except Exception as e:
             logger.warning(f"⚠️ Token跟踪记录失败: {e}")
+
+
+def _canonical_model_name(model: str) -> str:
+    normalized = str(model or "").strip().lower()
+    if "::" in normalized:
+        _, normalized = normalized.split("::", 1)
+    if "/" in normalized:
+        normalized = normalized.rsplit("/", 1)[-1]
+    return normalized
+
+
+def normalize_openai_temperature(
+    provider: Optional[str],
+    model: str,
+    temperature: Optional[float],
+    base_url: Optional[str] = None,
+) -> Optional[float]:
+    """Normalize provider/model-specific temperature constraints before request dispatch."""
+    canonical_model = _canonical_model_name(model)
+    if not canonical_model.startswith(KIMI_FIXED_TEMPERATURE_MODELS):
+        return temperature
+
+    normalized_provider = str(provider or "").strip().lower()
+    normalized_base_url = str(base_url or "").strip().lower()
+    is_moonshot_compatible = (
+        normalized_provider in {"kimi", "moonshot", "custom_openai"}
+        or "moonshot" in normalized_base_url
+    )
+    if not is_moonshot_compatible:
+        return temperature
+
+    forced_temperature = 1.0
+    try:
+        current_temperature = float(temperature) if temperature is not None else None
+    except (TypeError, ValueError):
+        current_temperature = None
+
+    if current_temperature != forced_temperature:
+        logger.info(
+            f"🌡️ [LLM参数归一化] provider={provider}, model={model} 命中 Kimi 温度限制，"
+            f"temperature {temperature} -> {forced_temperature}"
+        )
+
+    return forced_temperature
 
 
 class ChatDeepSeekOpenAI(OpenAICompatibleBase):
@@ -521,6 +567,13 @@ def create_openai_compatible_llm(
     # 如果调用未提供 base_url，则采用 provider 的默认值（可能为 None）
     if base_url is None:
         base_url = provider_info.get("base_url")
+
+    temperature = normalize_openai_temperature(
+        provider=provider,
+        model=model,
+        temperature=temperature,
+        base_url=base_url,
+    )
 
     # 仅当 provider 未内置 base_url（如 custom_openai）时，才将 base_url 传递给适配器，
     # 避免与适配器内部的 super().__init__(..., base_url=...) 冲突导致 "multiple values" 错误。

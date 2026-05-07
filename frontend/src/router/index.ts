@@ -3,6 +3,7 @@ import type { RouteRecordRaw } from 'vue-router'
 import { nextTick } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
+import AdvancedSampleReport from '@/views/Learning/AdvancedSampleReport.vue'
 import { ElMessage } from 'element-plus'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
@@ -180,6 +181,16 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Learning/Advanced.vue'),
         meta: {
           title: '从散户到系统交易者：AI赋能的可进化投资法',
+          requiresAuth: false,
+          requiresPro: true
+        }
+      },
+      {
+        path: 'advanced/sample/:sampleId',
+        name: 'AdvancedSampleReport',
+        component: AdvancedSampleReport,
+        meta: {
+          title: '高级课程示例报告',
           requiresAuth: false,
           requiresPro: true
         }

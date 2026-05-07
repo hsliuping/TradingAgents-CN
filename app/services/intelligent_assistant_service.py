@@ -41,6 +41,9 @@ _MEMORY_FACT_KEYWORDS = [
     "支撑", "阻力", "走势", "震荡", "偏弱", "偏强", "回调", "反弹", "逻辑", "原因",
 ]
 
+_NUMBER_ONLY_REPLY_RE = re.compile(r"^\s*([1-9]\d?)\s*[\.、\)）]?\s*$")
+_NUMBERED_OPTION_LINE_RE = re.compile(r"^\s*(\d{1,2})\s*[\.、\)）]\s*(.+?)\s*$")
+
 
 def _extract_memory_subject(user_msg: str, assistant_msg: str) -> str:
     title_match = re.search(r"##\s*[📌✅⚠️🔍💡]*\s*([A-Za-z0-9\u4e00-\u9fff]{2,20})(?:[（(][^\n]{0,20}[)）])?(?:——|\-|：|:)", assistant_msg or "")
@@ -111,8 +114,19 @@ def _should_force_tool_retry(user_message: str) -> bool:
     has_domain = any(k in text for k in domain_markers)
     has_query = any(k in text for k in query_markers)
 
+    market_markers = [
+        "大盘", "指数", "上证", "深证", "创业板", "沪深300", "中证", "点位", "收盘", "开盘",
+        "成交额", "量能", "涨跌家数", "北向", "南向", "主力资金", "技术面", "技术指标",
+        "macd", "rsi", "kdj", "boll", "布林", "均线", "ma", "ema", "超买", "超卖",
+        "背离", "支撑", "阻力", "回调", "反弹", "突破", "压力位", "自然周期",
+    ]
+    recency_markers = ["最新", "当前", "现在", "今日", "今天", "近期", "最近", "截至目前", "今年", "本周", "本月"]
+
+    has_market = any(k in text for k in market_markers)
+    has_recency = any(k in text for k in recency_markers)
+
     # 至少满足：个人+领域，或 领域+查询
-    return (has_personal and has_domain) or (has_domain and has_query)
+    return (has_personal and has_domain) or (has_domain and has_query) or (has_market and has_recency)
 
 
 def _should_use_recent_search(user_message: str) -> bool:
@@ -133,6 +147,47 @@ def _should_use_recent_search(user_message: str) -> bool:
     has_recency = any(marker in text for marker in recency_markers)
     has_fact = any(marker in text for marker in fact_markers)
     return has_recency and has_fact
+
+
+def _extract_numbered_options(text: str) -> Dict[int, str]:
+    options: Dict[int, str] = {}
+    for raw_line in (text or "").splitlines():
+        match = _NUMBERED_OPTION_LINE_RE.match(raw_line.strip())
+        if not match:
+            continue
+        option_no = int(match.group(1))
+        option_text = re.sub(r"\*+", "", match.group(2)).strip()
+        option_text = re.sub(r"\s+", " ", option_text)
+        if option_text:
+            options[option_no] = option_text[:200]
+    return options
+
+
+def _rewrite_number_selection_reply(user_message: str, history_messages: Optional[List[Message]]) -> str:
+    original_text = (user_message or "").strip()
+    if not original_text:
+        return original_text
+
+    number_match = _NUMBER_ONLY_REPLY_RE.match(original_text)
+    if not number_match or not history_messages:
+        return original_text
+
+    selected_index = int(number_match.group(1))
+    for message in reversed(history_messages):
+        if message.role != MessageRole.ASSISTANT:
+            continue
+        options = _extract_numbered_options(message.content or "")
+        selected_option = options.get(selected_index)
+        if not selected_option:
+            continue
+        logger.info("[智能助手] 将裸数字回复重写为编号选项选择: %s -> %s", original_text, selected_option)
+        return (
+            f"用户上一轮只回复了数字“{selected_index}”，这是在选择你上一条消息里的第{selected_index}项，不是新的独立问题。\n"
+            f"用户选择的选项是：{selected_option}\n"
+            "请直接沿着这个选项继续回答或继续分析，不要再次猜测这个数字可能代表别的含义，也不要重复发起二次确认。"
+        )
+
+    return original_text
 
 
 def _get_latest_trade_date() -> str:
@@ -262,6 +317,7 @@ def _get_system_prompt(
 - **定时分析**：创建周期性自动分析计划（如每天早9点分析自选股），管理已有的定时分析配置（仅限分析任务，不支持闹钟等无关功能）
 - **股票关注列表管理**：查看股票关注列表（即自选股）、按标签理解用户关注池，并可添加/移除自选股或管理自选股分组
 - **数据查询**：直接获取个股行情、财务报表（利润表/资产负债表/现金流）、技术指标（MACD/RSI/布林带等）、新闻资讯等原始数据
+- **单股数据同步**：按股票代码同步单只股票的历史行情和财务数据，必要时补充基础数据，便于后续查询或分析使用最新数据
 - **持仓分析**：查看用户的持仓列表（实盘/模拟），获取某只持仓股票的最新 AI 分析报告，或发起一次新的持仓分析任务（含操作建议、目标价位、风险评估）
 - **交易复盘**：查看复盘历史，获取复盘报告详情，或对指定交易发起一次新的 AI 复盘分析（评分、总结、改进建议、经验教训）
 - **投资计划**：查看用户创建的个人交易计划（投资纪律），获取当前激活计划的完整规则（选股、择时、仓位、止盈止损等）
@@ -304,6 +360,7 @@ def _get_system_prompt(
 
 **需要先确认再执行（复杂、有副作用、或意图模糊）**：
 - **意图模糊时**：用户表达不明确（如「分析一下茅台」「看看茅台」），先结合上下文判断，仍不确定则主动询问用户意图，不要猜测执行
+- **编号承接时**：如果你上一条消息刚给出了 1/2/3 这类编号选项，而用户下一条只回复一个编号（如「2」），默认视为用户选择对应选项，直接沿该选项继续，不要再把数字解释成新的问题
 - **创建定时分析**：先查看已有配置告知用户，再确认时间、频率、股票等参数，用户确认后再创建
 - **触发分析任务**：如果用户指令明确（如「帮我分析600519」）可直接执行；如果模糊则先确认
 - **删除/移除操作**：先告知用户将要做什么，得到确认后再执行
@@ -329,6 +386,9 @@ def _get_system_prompt(
 - 调用所有需要 curr_date 或 trade_date 参数的工具时，**必须传入交易日**
 - 回答涉及年份、季度等问题时，**必须基于当前日期推理**
 - 严禁使用训练数据中的历史日期回答
+- 严禁直接引用模型训练记忆中的指数点位、涨跌幅、MACD、RSI、均线、成交额、财报数字等；这类数字**只能**来自本次工具返回
+- 如果工具返回的数据日期不是当前问题要求的时间范围，必须明确说明“数据日期”，不能冒充成当前/今年/最新口径
+- 如果没有拿到真实数据，必须直接说明“无法基于实时数据确认”，不能用历史记忆补答案
 
 【A股交易执行规则】
 - 讨论A股买卖数量时，默认遵守整手交易：普通买入/卖出应为100股整数倍。
@@ -350,6 +410,7 @@ def _get_system_prompt(
 
 【工具使用原则】
 - **严禁**根据训练数据回答行情、大盘、市场等需要实时数据的问题，**必须**通过调用工具获取
+- 对“大盘现在多少点”“今年高点/低点”“MACD/RSI 是否超买”“技术面怎么看”“市场是否放量”“最近是否突破/回调”这类问题，必须先调用工具，再回答
 - 根据每个工具的描述，**自主选择**最合适的工具；若一次调用不足，可继续调用其他工具
 - 所有需要 curr_date 或 trade_date 的工具，**必须**传入上述日期
 - 对“截至目前”“最新”“近期是否有变化”“请确认最新口径”“最新公告/持股比例/减持进展”这类问题，优先调用“近期信息搜索”或相关新闻工具，先检索近期公开信息，再回答
@@ -362,14 +423,12 @@ def _get_system_prompt(
 
 
 def _resolve_models(config_doc) -> tuple:
-    """从配置文档解析模型名：优先 default_models，否则 system_settings"""
-    default_models = config_doc.get("default_models") or {}
-    system_settings = config_doc.get("system_settings") or {}
+    """从配置文档解析默认模型选择，优先 config_id，其次兼容旧 model_name。"""
     return (
-        default_models.get("quick_analysis_model") or system_settings.get("quick_analysis_model"),
-        default_models.get("deep_analysis_model") or system_settings.get("deep_analysis_model"),
-        default_models.get("deep_reasoning_model") or system_settings.get("deep_reasoning_model"),
-        default_models.get("coding_model") or system_settings.get("coding_model"),
+        _resolve_model_selection(config_doc, "quick_analysis_model"),
+        _resolve_model_selection(config_doc, "deep_analysis_model"),
+        _resolve_model_selection(config_doc, "deep_reasoning_model"),
+        _resolve_model_selection(config_doc, "coding_model"),
     )
 
 
@@ -380,25 +439,197 @@ def _normalize_model_name(model_name: Optional[str]) -> Optional[str]:
     return text or None
 
 
+def _normalize_config_id(config_id: Optional[str]) -> Optional[str]:
+    if not config_id:
+        return None
+    text = str(config_id).strip()
+    return text or None
+
+
+def _get_config_setting_value(config_doc: Dict[str, Any], key: str) -> Any:
+    default_models = config_doc.get("default_models") or {}
+    system_settings = config_doc.get("system_settings") or {}
+    return default_models.get(key) or system_settings.get(key)
+
+
+def _get_default_provider(config_doc: Dict[str, Any]) -> str:
+    return str(_get_config_setting_value(config_doc, "default_provider") or "").strip().lower()
+
+
+def _select_llm_config_from_doc(
+    config_doc: Dict[str, Any],
+    *,
+    config_id: Optional[str] = None,
+    model_name: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    llm_configs = [cfg for cfg in (config_doc.get("llm_configs") or []) if cfg.get("enabled", True)]
+    normalized_config_id = _normalize_config_id(config_id)
+    normalized_model_name = _normalize_model_name(model_name)
+
+    if normalized_config_id:
+        exact_config = next(
+            (
+                cfg
+                for cfg in llm_configs
+                if _normalize_config_id(cfg.get("config_id")) == normalized_config_id
+            ),
+            None,
+        )
+        if exact_config is not None:
+            return exact_config
+
+    if not normalized_model_name:
+        return None
+
+    model_configs = [cfg for cfg in llm_configs if _normalize_model_name(cfg.get("model_name")) == normalized_model_name]
+    if not model_configs:
+        return None
+
+    preferred_provider = _get_default_provider(config_doc)
+    if preferred_provider:
+        preferred_config = next(
+            (
+                cfg
+                for cfg in model_configs
+                if str(cfg.get("provider") or "").strip().lower() == preferred_provider
+            ),
+            None,
+        )
+        if preferred_config is not None:
+            return preferred_config
+
+    return model_configs[0]
+
+
+def _resolve_model_selection(config_doc: Dict[str, Any], model_key: str) -> Optional[Dict[str, Any]]:
+    config_id = _normalize_config_id(_get_config_setting_value(config_doc, f"{model_key}_config_id"))
+    model_name = _normalize_model_name(_get_config_setting_value(config_doc, model_key))
+    matched_config = _select_llm_config_from_doc(
+        config_doc,
+        config_id=config_id,
+        model_name=model_name,
+    )
+    if matched_config is not None:
+        return {
+            "config_id": _normalize_config_id(matched_config.get("config_id")),
+            "model_name": _normalize_model_name(matched_config.get("model_name")),
+            "provider": str(matched_config.get("provider") or "").strip().lower(),
+        }
+    if not config_id and not model_name:
+        return None
+    return {
+        "config_id": config_id,
+        "model_name": model_name,
+        "provider": None,
+    }
+
+
+def _selection_model_name(selection: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not selection:
+        return None
+    return _normalize_model_name(selection.get("model_name"))
+
+
+def _selection_config_id(selection: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not selection:
+        return None
+    return _normalize_config_id(selection.get("config_id"))
+
+
 def _normalize_preferred_models(preferred_models: Optional[Dict[str, Any]]) -> Dict[str, str]:
     if not preferred_models:
         return {}
 
     normalized: Dict[str, str] = {}
+    unified_model = _normalize_model_name(preferred_models.get("model"))
+    unified_model_config_id = _normalize_config_id(preferred_models.get("model_config_id"))
     quick_model = _normalize_model_name(preferred_models.get("quick_model"))
+    quick_model_config_id = _normalize_config_id(preferred_models.get("quick_model_config_id"))
     deep_model = _normalize_model_name(preferred_models.get("deep_model"))
+    deep_model_config_id = _normalize_config_id(preferred_models.get("deep_model_config_id"))
+
+    if unified_model:
+        normalized["model"] = unified_model
+    if unified_model_config_id:
+        normalized["model_config_id"] = unified_model_config_id
 
     if quick_model:
         normalized["quick_model"] = quick_model
+    if quick_model_config_id:
+        normalized["quick_model_config_id"] = quick_model_config_id
     if deep_model:
         normalized["deep_model"] = deep_model
+    if deep_model_config_id:
+        normalized["deep_model_config_id"] = deep_model_config_id
+
+    if unified_model and not quick_model:
+        normalized["quick_model"] = unified_model
+    if unified_model and not deep_model:
+        normalized["deep_model"] = unified_model
+    if unified_model_config_id and not quick_model_config_id:
+        normalized["quick_model_config_id"] = unified_model_config_id
+    if unified_model_config_id and not deep_model_config_id:
+        normalized["deep_model_config_id"] = unified_model_config_id
 
     return normalized
 
 
-async def _get_llm_config_for_model(db, target_model: str, purpose: str = "") -> Optional[LLMConfig]:
-    """根据模型名获取 LLM 配置（内部复用逻辑）"""
-    if not target_model:
+def _get_preferred_assistant_model(preferred_models: Optional[Dict[str, Any]]) -> Optional[str]:
+    normalized = _normalize_preferred_models(preferred_models)
+    return (
+        normalized.get("model")
+        or normalized.get("deep_model")
+        or normalized.get("quick_model")
+    )
+
+
+def _get_preferred_assistant_config_id(preferred_models: Optional[Dict[str, Any]]) -> Optional[str]:
+    normalized = _normalize_preferred_models(preferred_models)
+    return (
+        normalized.get("model_config_id")
+        or normalized.get("deep_model_config_id")
+        or normalized.get("quick_model_config_id")
+    )
+
+
+def _build_assistant_model_preferences(
+    model: Optional[str] = None,
+    model_config_id: Optional[str] = None,
+    quick_model: Optional[str] = None,
+    quick_model_config_id: Optional[str] = None,
+    deep_model: Optional[str] = None,
+    deep_model_config_id: Optional[str] = None,
+) -> Dict[str, str]:
+    normalized = _normalize_preferred_models(
+        {
+            "model": model,
+            "model_config_id": model_config_id,
+            "quick_model": quick_model,
+            "quick_model_config_id": quick_model_config_id,
+            "deep_model": deep_model,
+            "deep_model_config_id": deep_model_config_id,
+        }
+    )
+    assistant_model = _get_preferred_assistant_model(normalized)
+    assistant_model_config_id = _get_preferred_assistant_config_id(normalized)
+    if not assistant_model and not assistant_model_config_id:
+        return {}
+    preferred: Dict[str, str] = {}
+    if assistant_model:
+        preferred["model"] = assistant_model
+    if assistant_model_config_id:
+        preferred["model_config_id"] = assistant_model_config_id
+    return preferred
+
+
+async def _get_llm_config_for_model(
+    db,
+    target_model: Optional[str],
+    target_config_id: Optional[str] = None,
+    purpose: str = "",
+) -> Optional[LLMConfig]:
+    """根据模型选择获取 LLM 配置，优先 config_id，兼容旧 model_name。"""
+    if not target_model and not target_config_id:
         return None
     config_doc = await db.system_configs.find_one(
         {"is_active": True},
@@ -406,26 +637,45 @@ async def _get_llm_config_for_model(db, target_model: str, purpose: str = "") ->
     )
     if not config_doc or "llm_configs" not in config_doc:
         return None
-    llm_configs = config_doc.get("llm_configs", [])
-    model_configs = [c for c in llm_configs if c.get("model_name") == target_model and c.get("enabled", True)]
-    if not model_configs:
+    model_config = _select_llm_config_from_doc(
+        config_doc,
+        config_id=target_config_id,
+        model_name=target_model,
+    )
+    if model_config is None:
         return None
-    model_config = model_configs[0]
+
+    resolved_model_name = _normalize_model_name(model_config.get("model_name")) or _normalize_model_name(target_model)
+    if not resolved_model_name:
+        return None
+
     from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
-    provider_info = get_provider_and_url_by_model_sync(target_model)
+    provider_info = get_provider_and_url_by_model_sync(
+        resolved_model_name,
+        preferred_provider=str(model_config.get("provider") or _get_default_provider(config_doc) or "").strip().lower(),
+        preferred_config_id=_normalize_config_id(model_config.get("config_id")) or target_config_id,
+    )
     if not provider_info:
         return None
-    provider_str = (provider_info.get("provider") or model_config.get("provider", "")).lower()
+    provider_str = str(model_config.get("provider") or provider_info.get("provider") or "").lower()
     provider_map = {
         "openai": LLMProvider.OPENAI, "deepseek": LLMProvider.DEEPSEEK,
         "dashscope": LLMProvider.DASHSCOPE, "qwen": LLMProvider.DASHSCOPE,
         "zhipu": LLMProvider.ZHIPU, "google": LLMProvider.GOOGLE,
         "anthropic": LLMProvider.ANTHROPIC, "siliconflow": LLMProvider.SILICONFLOW,
+        "kimi": LLMProvider.OPENAI, "moonshot": LLMProvider.OPENAI,
         "ollama": LLMProvider.OLLAMA, "openrouter": LLMProvider.OPENROUTER,
     }
-    provider = provider_map.get(provider_str, LLMProvider.DEEPSEEK)
+    provider = provider_map.get(provider_str, LLMProvider.DASHSCOPE)
+    logger.info(
+        "[智能助手] 模型路由解析: provider=%s model=%s config_id=%s backend_provider=%s",
+        provider_str or "unknown",
+        resolved_model_name,
+        _normalize_config_id(model_config.get("config_id")) or target_config_id or "",
+        provider.value,
+    )
     return LLMConfig(
-        provider=provider, model=target_model,
+        provider=provider, model=resolved_model_name,
         api_key=provider_info.get("api_key"), base_url=provider_info.get("backend_url"),
         temperature=float(model_config.get("temperature", 0.2)),
         max_tokens=int(model_config.get("max_tokens", 4000)),
@@ -455,41 +705,58 @@ async def _get_assistant_llm_config(
 
     llm_configs = config_doc.get("llm_configs", [])
     default_llm = config_doc.get("default_llm")
-    quick_model, deep_model, reasoning_model, _ = _resolve_models(config_doc)
-    normalized_preferred_models = _normalize_preferred_models(preferred_models)
-    preferred_quick_model = normalized_preferred_models.get("quick_model")
-    preferred_deep_model = normalized_preferred_models.get("deep_model")
+    quick_selection, deep_selection, reasoning_selection, _ = _resolve_models(config_doc)
+    quick_model = _selection_model_name(quick_selection)
+    deep_model = _selection_model_name(deep_selection)
+    reasoning_model = _selection_model_name(reasoning_selection)
+    preferred_assistant_model = _get_preferred_assistant_model(preferred_models)
+    preferred_assistant_config_id = _get_preferred_assistant_config_id(preferred_models)
+    target_config_id: Optional[str] = None
 
-    if use_reasoning_model and preferred_deep_model:
-        target_model = preferred_deep_model
-        logger.info(f"[智能助手] 使用用户选择的深度模型: {target_model}")
-    elif use_reasoning_model and reasoning_model:
-        target_model = reasoning_model
+    if use_reasoning_model and (preferred_assistant_model or preferred_assistant_config_id):
+        target_model = preferred_assistant_model
+        target_config_id = preferred_assistant_config_id
+        logger.info(
+            "[智能助手] 使用用户选择的助手模型: model=%s config_id=%s",
+            target_model or "",
+            target_config_id or "",
+        )
+    elif use_reasoning_model and reasoning_selection:
+        target_model = _selection_model_name(reasoning_selection)
+        target_config_id = _selection_config_id(reasoning_selection)
         logger.info(f"[智能助手] 使用深度推理模型: {target_model}")
     else:
-        target_model = preferred_quick_model or preferred_deep_model or deep_model or quick_model or default_llm
-        if preferred_quick_model:
-            logger.info(f"[智能助手] 使用用户选择的快速模型: {preferred_quick_model}")
-        elif preferred_deep_model:
-            logger.info(f"[智能助手] 快速模型未指定，回退到用户选择的深度模型: {preferred_deep_model}")
-        elif deep_model:
+        target_selection = deep_selection or quick_selection
+        target_model = preferred_assistant_model or _selection_model_name(target_selection) or default_llm
+        if preferred_assistant_config_id:
+            target_config_id = preferred_assistant_config_id
+        elif not preferred_assistant_model and target_selection is not None:
+            target_config_id = _selection_config_id(target_selection)
+        if preferred_assistant_model or preferred_assistant_config_id:
+            logger.info(
+                "[智能助手] 使用用户选择的助手模型: model=%s config_id=%s",
+                preferred_assistant_model or "",
+                preferred_assistant_config_id or "",
+            )
+        elif deep_selection:
             logger.info(f"[智能助手] 使用深度分析模型: {deep_model}")
-        elif quick_model:
+        elif quick_selection:
             logger.info(f"[智能助手] 深度模型未配置，使用快速模型: {quick_model}")
 
     if not target_model:
-        target_model = preferred_deep_model or preferred_quick_model or deep_model or quick_model or default_llm
+        target_model = preferred_assistant_model or deep_model or quick_model or default_llm
     if not target_model and llm_configs:
         for cfg in llm_configs:
             if cfg.get("enabled", True):
                 target_model = cfg.get("model_name")
+                target_config_id = _normalize_config_id(cfg.get("config_id"))
                 break
 
     if not target_model:
         logger.warning("[智能助手] 未找到可用的模型配置")
         return None
 
-    return await _get_llm_config_for_model(db, target_model)
+    return await _get_llm_config_for_model(db, target_model, target_config_id=target_config_id)
 
 
 async def get_reasoning_llm_config(db=None):
@@ -515,11 +782,16 @@ async def get_coding_llm_config(db=None):
     )
     if not config_doc or "llm_configs" not in config_doc:
         return await get_reasoning_llm_config(db)
-    _, deep_model, reasoning_model, coding_model = _resolve_models(config_doc)
-    target_model = coding_model or reasoning_model or deep_model
+    _, deep_selection, reasoning_selection, coding_selection = _resolve_models(config_doc)
+    deep_model = _selection_model_name(deep_selection)
+    reasoning_model = _selection_model_name(reasoning_selection)
+    coding_model = _selection_model_name(coding_selection)
+    target_selection = coding_selection or reasoning_selection or deep_selection
+    target_model = _selection_model_name(target_selection)
+    target_config_id = _selection_config_id(target_selection)
     if target_model:
         logger.info(f"[编程模型] 使用: {target_model} (coding={bool(coding_model)}, reasoning={bool(reasoning_model)})")
-    return await _get_llm_config_for_model(db, target_model) if target_model else await get_reasoning_llm_config(db)
+    return await _get_llm_config_for_model(db, target_model, target_config_id=target_config_id) if target_model else await get_reasoning_llm_config(db)
 
 
 class IntelligentAssistantService:
@@ -535,7 +807,8 @@ class IntelligentAssistantService:
         self._llm_client: Optional[UnifiedLLMClient] = None
         self._openai_tools: Optional[List[Dict[str, Any]]] = None
         self._tool_functions: Optional[Dict[str, Any]] = None
-        self._preferred_models = _normalize_preferred_models(preferred_models)
+        self._preferred_model = _get_preferred_assistant_model(preferred_models)
+        self._preferred_model_config_id = _get_preferred_assistant_config_id(preferred_models)
         self._prefer_reasoning_model = prefer_reasoning_model
 
     async def _ensure_client(self) -> bool:
@@ -546,7 +819,10 @@ class IntelligentAssistantService:
         llm_config = await _get_assistant_llm_config(
             self._db,
             use_reasoning_model=self._prefer_reasoning_model,
-            preferred_models=self._preferred_models,
+            preferred_models=_build_assistant_model_preferences(
+                model=self._preferred_model,
+                model_config_id=self._preferred_model_config_id,
+            ) if (self._preferred_model or self._preferred_model_config_id) else None,
         )
         if not llm_config:
             return False
@@ -597,9 +873,11 @@ class IntelligentAssistantService:
         Returns:
             {"reply": str, "tools_used": List[str], "data_refs": Optional[List]}
         """
+        resolved_user_message = _rewrite_number_selection_reply(user_message, history_messages)
+
         # 前置检查：不支持的品种类型
         from app.services.planned_analysis_service import _check_unsupported_asset
-        unsupported_msg = _check_unsupported_asset(user_message)
+        unsupported_msg = _check_unsupported_asset(resolved_user_message)
         if unsupported_msg:
             return {
                 "reply": unsupported_msg,
@@ -616,11 +894,11 @@ class IntelligentAssistantService:
 
         # 快路径：对“最新/截至目前/近期确认”类事实问题，优先直接执行近期搜索工具，
         # 避免模型在首轮未触发工具时退回训练期知识。
-        if _should_use_recent_search(user_message):
+        if _should_use_recent_search(resolved_user_message):
             try:
                 from core.tools.implementations.assistant_ops.recent_search import run_recent_information_search
 
-                tool_result = run_recent_information_search(user_message.strip())
+                tool_result = run_recent_information_search(resolved_user_message.strip())
                 if inspect.isawaitable(tool_result):
                     tool_result = await tool_result
                 tool_text = str(tool_result or "").strip()
@@ -639,7 +917,7 @@ class IntelligentAssistantService:
         try:
             from core.knowledge import FinancialKnowledgeManager
             km = FinancialKnowledgeManager(db=self._db)
-            knowledge_snippets = km.retrieve_for_prompt(user_message)
+            knowledge_snippets = km.retrieve_for_prompt(resolved_user_message)
             if knowledge_snippets:
                 logger.info(f"[智能助手] ✅ RAG 知识检索成功 ({len(knowledge_snippets)} 字符)")
             else:
@@ -664,7 +942,7 @@ class IntelligentAssistantService:
         if history_messages:
             messages.extend(history_messages)
             logger.info(f"[智能助手] 已注入 {len(history_messages)} 条历史消息")
-        messages.append(Message(role=MessageRole.USER, content=user_message.strip()))
+        messages.append(Message(role=MessageRole.USER, content=resolved_user_message.strip()))
 
         tools_used: List[str] = []
 
@@ -697,7 +975,7 @@ class IntelligentAssistantService:
             )
 
             # 兜底：对于“应走工具”的个人数据查询，如果首轮未调工具，则二次强制引导
-            if not tools_used and _should_force_tool_retry(user_message):
+            if not tools_used and _should_force_tool_retry(resolved_user_message):
                 logger.warning("[智能助手] 首轮未调用工具，触发工具重试兜底")
                 retry_messages = list(messages)
                 retry_messages.append(Message(
@@ -705,7 +983,8 @@ class IntelligentAssistantService:
                     content=(
                         "请不要直接根据上下文猜测或编造结果。"
                         "这类问题必须先调用相关工具获取真实数据，再基于工具返回回答。"
-                        "如果工具返回为空，再明确说明为空。"
+                        "尤其不能直接编造指数点位、涨跌幅、MACD、RSI、均线、成交额等实时数字。"
+                        "如果工具返回为空或日期不匹配，再明确说明数据为空或数据日期不匹配。"
                     ),
                 ))
 
@@ -785,8 +1064,10 @@ class IntelligentAssistantService:
         def _sse(event: str, data: dict) -> str:
             return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
+        resolved_user_message = _rewrite_number_selection_reply(user_message, history_messages)
+
         from app.services.planned_analysis_service import _check_unsupported_asset
-        unsupported_msg = _check_unsupported_asset(user_message)
+        unsupported_msg = _check_unsupported_asset(resolved_user_message)
         if unsupported_msg:
             yield _sse("token", {"content": unsupported_msg})
             yield _sse("done", {"tools_used": []})
@@ -797,10 +1078,10 @@ class IntelligentAssistantService:
             yield _sse("done", {"tools_used": []})
             return
 
-        if _should_use_recent_search(user_message):
+        if _should_use_recent_search(resolved_user_message):
             try:
                 from core.tools.implementations.assistant_ops.recent_search import run_recent_information_search
-                tool_result = run_recent_information_search(user_message.strip())
+                tool_result = run_recent_information_search(resolved_user_message.strip())
                 if inspect.isawaitable(tool_result):
                     tool_result = await tool_result
                 tool_text = str(tool_result or "").strip()
@@ -816,7 +1097,7 @@ class IntelligentAssistantService:
         try:
             from core.knowledge import FinancialKnowledgeManager
             km = FinancialKnowledgeManager(db=self._db)
-            knowledge_snippets = km.retrieve_for_prompt(user_message)
+            knowledge_snippets = km.retrieve_for_prompt(resolved_user_message)
         except Exception:
             pass
 
@@ -833,7 +1114,7 @@ class IntelligentAssistantService:
         ]
         if history_messages:
             messages.extend(history_messages)
-        messages.append(Message(role=MessageRole.USER, content=user_message.strip()))
+        messages.append(Message(role=MessageRole.USER, content=resolved_user_message.strip()))
 
         tools_used: List[str] = []
         event_queue: asyncio.Queue = asyncio.Queue()
@@ -852,7 +1133,7 @@ class IntelligentAssistantService:
                 dry_run=False,
                 progress_callback=_progress,
             )
-            if not tools_used and _should_force_tool_retry(user_message):
+            if not tools_used and _should_force_tool_retry(resolved_user_message):
                 logger.warning("[智能助手·流式] 首轮未调用工具，触发工具重试兜底")
                 retry_messages = list(messages)
                 retry_messages.append(Message(
@@ -860,7 +1141,8 @@ class IntelligentAssistantService:
                     content=(
                         "请不要直接根据上下文猜测或编造结果。"
                         "这类问题必须先调用相关工具获取真实数据，再基于工具返回回答。"
-                        "如果工具返回为空，再明确说明为空。"
+                        "尤其不能直接编造指数点位、涨跌幅、MACD、RSI、均线、成交额等实时数字。"
+                        "如果工具返回为空或日期不匹配，再明确说明数据为空或数据日期不匹配。"
                     ),
                 ))
                 try:
@@ -2354,8 +2636,12 @@ async def chat_with_assistant(
     conversation_id: Optional[str] = None,
     current_thread_id: Optional[str] = None,
     is_im: bool = False,
+    model: Optional[str] = None,
+    model_config_id: Optional[str] = None,
     quick_model: Optional[str] = None,
+    quick_model_config_id: Optional[str] = None,
     deep_model: Optional[str] = None,
+    deep_model_config_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     便捷函数：使用智能助手进行对话
@@ -2426,10 +2712,14 @@ async def chat_with_assistant(
 
     service = IntelligentAssistantService(
         db,
-        preferred_models={
-            "quick_model": quick_model,
-            "deep_model": deep_model,
-        },
+        preferred_models=_build_assistant_model_preferences(
+            model=model,
+            model_config_id=model_config_id,
+            quick_model=quick_model,
+            quick_model_config_id=quick_model_config_id,
+            deep_model=deep_model,
+            deep_model_config_id=deep_model_config_id,
+        ),
     )
     result = await service.chat(
         user_message,
@@ -2474,8 +2764,12 @@ async def stream_chat_with_assistant(
     user_id: Optional[str] = None,
     conversation_id: Optional[str] = None,
     current_thread_id: Optional[str] = None,
+    model: Optional[str] = None,
+    model_config_id: Optional[str] = None,
     quick_model: Optional[str] = None,
+    quick_model_config_id: Optional[str] = None,
     deep_model: Optional[str] = None,
+    deep_model_config_id: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """
     流式便捷函数：使用智能助手进行流式对话，返回 SSE 事件字符串的 async generator。
@@ -2538,7 +2832,14 @@ async def stream_chat_with_assistant(
 
     service = IntelligentAssistantService(
         db,
-        preferred_models={"quick_model": quick_model, "deep_model": deep_model},
+        preferred_models=_build_assistant_model_preferences(
+            model=model,
+            model_config_id=model_config_id,
+            quick_model=quick_model,
+            quick_model_config_id=quick_model_config_id,
+            deep_model=deep_model,
+            deep_model_config_id=deep_model_config_id,
+        ),
     )
 
     collected_reply = ""

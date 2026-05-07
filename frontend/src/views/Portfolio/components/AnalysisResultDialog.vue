@@ -2,7 +2,7 @@
   <el-dialog
     :model-value="visible"
     @update:model-value="$emit('update:visible', $event)"
-    title="持仓分析报告"
+    title="持仓研究报告"
     width="800px"
     destroy-on-close
   >
@@ -16,7 +16,7 @@
         >
           <template #title>
             <span style="font-size: 14px;">
-              <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。
+              <strong>⚠️ 重要提示：</strong>本报告仅用于学习、研究和持仓风险识别，不提供交易指导。
             </span>
           </template>
         </el-alert>
@@ -66,12 +66,12 @@
         </el-descriptions>
       </el-card>
 
-      <!-- AI分析结果 -->
+      <!-- AI研究结果 -->
       <el-card shadow="never" class="section-card">
-        <template #header><span>🤖 AI分析观点</span></template>
+        <template #header><span>🤖 AI研究结论</span></template>
 
         <div class="ai-section">
-          <div class="ai-title">📝 综合评价</div>
+          <div class="ai-title">📝 综合研究摘要</div>
           <div class="ai-content">{{ report.ai_analysis?.summary || '暂无' }}</div>
         </div>
 
@@ -97,7 +97,7 @@
         </el-row>
 
         <div class="ai-section">
-          <div class="ai-title primary">💡 调仓分析观点</div>
+          <div class="ai-title primary">💡 后续观察建议</div>
           <ul class="ai-list">
             <li v-for="(item, idx) in report.ai_analysis?.suggestions" :key="idx">{{ item }}</li>
           </ul>

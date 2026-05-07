@@ -15,6 +15,12 @@ from .fundamentals.financial_tools import (
     get_dividend_data,
     get_main_business,
 )
+from .fundamentals.factor_bundle_tools import (
+    get_fundamental_factor_snapshot_tool,
+    get_growth_cashflow_factor_bundle_tool,
+    get_quality_factor_bundle_tool,
+    get_value_factor_bundle_tool,
+)
 from .news.stock_news import get_stock_news_unified
 from .social.stock_sentiment import get_stock_sentiment_unified
 from . import legacy_bridge
@@ -44,6 +50,7 @@ from .market.chip_distribution_tools import (
 
 # 导入全市场批量筛选工具
 from .market.stock_screening_tool import screen_stocks_by_criteria
+from .market.technical_factor_bundle_tool import get_technical_factor_bundle_tool
 
 # 导入批量盈利稳定性验证工具
 from .fundamentals.batch_profit_consistency import batch_check_profit_consistency
@@ -59,6 +66,11 @@ __all__ = [
     'get_cashflow_analysis',
     'get_dividend_data',
     'get_main_business',
+    'get_value_factor_bundle_tool',
+    'get_quality_factor_bundle_tool',
+    'get_growth_cashflow_factor_bundle_tool',
+    'get_fundamental_factor_snapshot_tool',
+    'get_technical_factor_bundle_tool',
     # 大盘/指数分析工具
     'get_index_data',
     'get_market_breadth',

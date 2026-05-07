@@ -39,6 +39,24 @@ from .signal_processing import SignalProcessor
 from app.utils.api_key_utils import truncate_api_key
 
 
+def _normalize_provider_qualified_model(provider: str, model: str) -> tuple[str, str]:
+    """Normalize provider-qualified model selections like provider::model."""
+    raw_model = str(model or "").strip()
+    normalized_provider = str(provider or "").strip()
+
+    if "::" not in raw_model:
+        return normalized_provider, raw_model
+
+    provider_hint, model_name = raw_model.split("::", 1)
+    provider_hint = provider_hint.strip()
+    model_name = model_name.strip()
+
+    if provider_hint and model_name:
+        return provider_hint, model_name
+
+    return normalized_provider, raw_model
+
+
 def create_llm_by_provider(provider: str, model: str, backend_url: str, temperature: float, max_tokens: int, timeout: int, api_key: str = None):
     """
     根据 provider 创建对应的 LLM 实例
@@ -56,7 +74,23 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         LLM 实例
     """
     from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
-    from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+    from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm, normalize_openai_temperature
+
+    normalized_provider, normalized_model = _normalize_provider_qualified_model(provider, model)
+    if normalized_provider != provider or normalized_model != model:
+        logger.info(
+            f"🔧 [创建LLM] 归一化 provider/model: provider={provider}, model={model} -> "
+            f"provider={normalized_provider}, model={normalized_model}"
+        )
+        provider = normalized_provider
+        model = normalized_model
+
+    temperature = normalize_openai_temperature(
+        provider=provider,
+        model=model,
+        temperature=temperature,
+        base_url=backend_url,
+    )
 
     logger.info(f"🔧 [创建LLM] provider={provider}, model={model}, url={backend_url}")
     logger.info(f"🔑 [API Key] 传入值: {'有值' if api_key else 'None（将使用环境变量）'}")
@@ -137,13 +171,15 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             timeout=timeout
         )
 
-    elif provider.lower() in ["openai", "siliconflow", "openrouter", "ollama"]:
+    elif provider.lower() in ["openai", "siliconflow", "openrouter", "aihubmix", "ollama"]:
         # 优先使用传入的 API Key，否则从环境变量读取
         if not api_key:
             if provider.lower() == "siliconflow":
                 api_key = os.getenv('SILICONFLOW_API_KEY')
             elif provider.lower() == "openrouter":
                 api_key = os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY')
+            elif provider.lower() == "aihubmix":
+                api_key = os.getenv('AIHUBMIX_API_KEY')
             elif provider.lower() == "openai":
                 api_key = os.getenv('OPENAI_API_KEY')
             elif provider.lower() == "ollama":
@@ -186,6 +222,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         return create_openai_compatible_llm(
             provider=provider,
             model=model,
+            api_key=api_key,
             base_url=backend_url,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -374,6 +411,31 @@ class TradingAgentsGraph:
                 model=self.config["quick_think_llm"],
                 base_url=self.config["backend_url"],
                 api_key=openrouter_api_key,
+                temperature=quick_temperature,
+                max_tokens=quick_max_tokens,
+                timeout=quick_timeout
+            )
+        elif self.config["llm_provider"] == "aihubmix":
+            aihubmix_api_key = os.getenv('AIHUBMIX_API_KEY')
+            if not aihubmix_api_key:
+                raise ValueError("使用AIHubMix需要设置AIHUBMIX_API_KEY环境变量")
+
+            logger.info(f"🌐 [AIHubMix] 使用API密钥: {aihubmix_api_key[:20]}...")
+            logger.info(f"🔧 [AIHubMix-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
+            logger.info(f"🔧 [AIHubMix-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
+
+            self.deep_thinking_llm = ChatOpenAI(
+                model=self.config["deep_think_llm"],
+                base_url=self.config["backend_url"],
+                api_key=aihubmix_api_key,
+                temperature=deep_temperature,
+                max_tokens=deep_max_tokens,
+                timeout=deep_timeout
+            )
+            self.quick_thinking_llm = ChatOpenAI(
+                model=self.config["quick_think_llm"],
+                base_url=self.config["backend_url"],
+                api_key=aihubmix_api_key,
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
                 timeout=quick_timeout
@@ -1186,8 +1248,8 @@ class TradingAgentsGraph:
                 'Bull Researcher': "🐂 看涨研究员",
                 'Bear Researcher': "🐻 看跌研究员",
                 'Research Manager': "👔 研究经理",
-                # 交易员节点
-                'Trader': "💼 交易员决策",
+                # 研究整合节点
+                'Trader': "🧩 研究整合员汇总",
                 # 风险评估节点
                 'Risky Analyst': "🔥 激进风险评估",
                 'Safe Analyst': "🛡️ 保守风险评估",

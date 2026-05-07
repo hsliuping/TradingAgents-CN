@@ -1,7 +1,7 @@
 """
-看跌研究员 v2.0
+审慎情景研究员 v2.0
 
-基于ResearcherAgent基类实现的看跌研究员
+基于ResearcherAgent基类实现的审慎情景研究员
 """
 
 import logging
@@ -32,17 +32,17 @@ except ImportError:
 @register_agent
 class BearResearcherV2(ResearcherAgent):
     """
-    看跌研究员 v2.0
+    审慎情景研究员 v2.0
     
     功能：
-    - 从看跌角度综合分析多个报告
-    - 找出所有风险因素和看跌理由
-    - 生成看跌观点报告
+    - 从审慎情景角度综合分析多个报告
+    - 提炼风险因素、脆弱点与判断边界
+    - 生成审慎情景研究报告
     
     工作流程：
     1. 读取市场报告、新闻报告、基本面报告等
-    2. 从看跌角度综合分析
-    3. 生成看跌观点报告
+    2. 从审慎情景角度综合分析
+    3. 生成审慎情景研究报告
     
     示例:
         from langchain_openai import ChatOpenAI
@@ -63,8 +63,8 @@ class BearResearcherV2(ResearcherAgent):
     # Agent元数据
     metadata = AgentMetadata(
         id="bear_researcher_v2",
-        name="看跌研究员 v2.0",
-        description="从看跌角度综合分析多个报告，找出风险因素和看跌理由",
+        name="审慎情景研究员 v2.0",
+        description="基于现有材料构建偏审慎的研究论证，提炼风险、脆弱点与判断边界",
         category=AgentCategory.RESEARCHER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -77,11 +77,11 @@ class BearResearcherV2(ResearcherAgent):
             AgentInput(name="fundamentals_report", type="string", description="基本面分析报告", required=False, source="state", state_field="fundamentals_report", producer_hint="fundamentals_analyst_v2"),
         ],
         outputs=[
-            AgentOutput(name="bear_report", type="string", description="看跌观点报告"),
+            AgentOutput(name="bear_report", type="string", description="审慎情景研究报告"),
         ],
         requires_tools=False,
         output_field="bear_report",
-        report_label="【看跌观点 v2】",
+        report_label="【审慎情景研究 v2】",
         growth_role="reviewer",
         growth_outputs=["bear_report"],
         memory_scope_hint="pattern",
@@ -149,17 +149,36 @@ class BearResearcherV2(ResearcherAgent):
             prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )
         if prompt:
-            logger.info(f"✅ 从模板系统获取看跌研究员提示词 (长度: {len(prompt)})")
+            logger.info(f"✅ 从模板系统获取审慎情景研究员提示词 (长度: {len(prompt)})")
             return prompt
         
-        # 降级：使用旧版的默认提示词（与数据库模板保持一致）
-        return """你是一位看跌分析师，负责论证不投资股票 {company_name}（股票代码：{ticker}）的理由。
+        # 降级：使用与当前模板语义一致的默认提示词
+        company_name = (state or {}).get("company_name") or (state or {}).get("ticker") or "目标公司"
+        ticker = (state or {}).get("ticker") or ""
+        market_name = (state or {}).get("market_name") or "当前市场"
+        currency_name = (state or {}).get("currency_name") or "报告原始货币"
+        currency_symbol = (state or {}).get("currency_symbol") or ""
+        company_reference = f"{company_name}（股票代码：{ticker}）" if ticker else company_name
+        currency_display = f"{currency_name}（{currency_symbol}）" if currency_symbol else currency_name
 
-⚠️ 重要提醒：当前分析的是 {market_name}，所有价格和估值请使用 {currency_name}（{currency_symbol}）作为单位。
-⚠️ 在你的分析中，请始终使用公司名称"{company_name}"而不是股票代码"{ticker}"来称呼这家公司。
+        return f"""你是一位审慎情景研究员，负责基于现有材料为 {company_reference} 构建偏审慎的研究论证。
 
-你的目标是提出合理的论证，强调风险、挑战和负面指标。利用提供的研究和数据来突出潜在的不利因素并有效反驳看涨论点。
-"""
+    ⚠️ 当前分析市场：{market_name}。若材料中包含价格、估值或财务数值，请统一使用 {currency_display} 作为单位。
+    ⚠️ 行文时请优先使用公司名称“{company_name}”，不要只用股票代码“{ticker}”指代公司。
+
+    你的任务是：
+    1. 说明哪些证据削弱当前判断或支持更谨慎的结论。
+    2. 突出风险和挑战、竞争劣势与负面指标，但前提是材料中确有依据。
+    3. 回应偏乐观观点中最关键的论据，指出其证据短板、前提漏洞或尚未验证之处。
+    4. 结合辩论历史与过往反思，说明哪些判断容易失真，以及当前应如何收窄结论边界。
+    5. 用普通用户看得懂的语言输出，不故作玄虚。
+
+    严格禁止：
+    - 不得输出买卖、加减仓、配置价值、目标价、价格区间、关键价位。
+    - 不得输出下跌空间、最大回撤、概率数值、风险收益比。
+    - 不得把审慎情景写成执行方案。
+    - 不得使用模型内部知识、训练数据或材料外信息补足未提供内容。
+    """
 
     def _build_user_prompt(
         self,
@@ -231,7 +250,7 @@ class BearResearcherV2(ResearcherAgent):
         )
         
         if prompt:
-            logger.info(f"✅ 从模板系统获取看跌研究员用户提示词 (长度: {len(prompt)})")
+            logger.info(f"✅ 从模板系统获取审慎情景研究员用户提示词 (长度: {len(prompt)})")
             return prompt
         
         # 降级：如果模板系统不可用，使用旧方式
@@ -249,30 +268,62 @@ class BearResearcherV2(ResearcherAgent):
                 )
 
                 if prompt:
-                    logger.info(f"✅ 从模板系统获取看跌研究员用户提示词 (长度: {len(prompt)})")
+                    logger.info(f"✅ 从模板系统获取审慎情景研究员用户提示词 (长度: {len(prompt)})")
                     return prompt
             except Exception as e:
                 logger.warning(f"⚠️ 从模板系统获取用户提示词失败: {e}，使用降级提示词")
 
-        # 降级：使用旧版的硬编码提示词（与数据库模板保持一致）
-        prompt = """基于提供的分析报告进行深度分析。
-可用资源：
-- 市场研究报告：{market_research_report}
-- 社交媒体情绪报告：{sentiment_report}
-- 最新世界事务新闻：{news_report}
-- 公司基本面报告：{fundamentals_report}
-- 辩论对话历史：{history}
-- 最后的看涨论点：{current_response}
-- 类似情况的反思和经验教训：{past_memory_str}
-"""
+        # 降级：使用与当前模板语义一致的硬编码提示词
+        market_name = state.get("market_name", "当前市场") if state else "当前市场"
+        currency_name = state.get("currency_name", "报告原始货币") if state else "报告原始货币"
+        currency_symbol = state.get("currency_symbol", "") if state else ""
+        currency_display = f"{currency_name}（{currency_symbol}）" if currency_symbol else currency_name
+
+        prompt = """请基于提供的分析报告，为 {company_name}（股票代码：{ticker}）构建偏审慎的研究论证。
+
+    当前分析市场：{market_name}
+    如材料中包含价格、估值或财务数值，请统一使用 {currency_display} 作为单位。
+    行文时请优先使用公司名称“{company_name}”，不要只用股票代码“{ticker}”指代公司。
+
+    可用资源：
+    - 市场研究报告：{market_report}
+    - 社交媒体情绪报告：{sentiment_report}
+    - 最新世界事务新闻：{news_report}
+    - 公司基本面报告：{fundamentals_report}
+    - 辩论对话历史：{historical_context}
+    - 最新偏乐观论点：{current_response}
+    - 类似情况的反思和经验教训：{past_memory_str}
+
+    请使用 Markdown 输出，并优先包含以下标题：
+    ## 核心主张
+    ## 主要担忧
+    ## 对乐观观点的回应
+    ## 判断转弱前提
+
+    要求：
+    - 如本轮存在新增且可验证的公开信号，再补充“## 后续观察信号”；如果本轮没有新的观察信号，可以省略该标题，或直接说明“本轮暂无新增观察信号”。
+    - 每个关键论据必须在句末用【】标注来源。
+    - 如果报告中缺少某项数据，必须明确写“报告中未提供此数据”或“基于现有报告，无法判断...”。
+    - 直接回应偏乐观论点，不要只重复己方观点。
+    - 若历史反思与当前案例相关，要吸收其中的经验教训；不相关则不要硬套。
+    - 多轮辩论时，优先输出本轮新增或最值得回应的 1-2 个点；若新增证据有限，可明确写“核心判断延续，暂无新增高质量风险证据或前提修正”，不要为凑结构重复扩写。
+    - 只能使用分析日期 {analysis_date} 之前且材料中明确提供的信息，不要引用“去年”“上季度”或模型记忆中的时间信息。
+    - 严格禁止输出目标价、价格区间、关键价位、下跌空间、概率数值和任何交易建议。
+    - 严格禁止使用模型内部知识、训练数据或材料外信息补足未提供内容。
+    """
 
         # 替换变量（使用实际的报告内容）
         prompt = prompt.format(
-            market_research_report=reports.get("market_report", ""),
+            company_name=company_name,
+            ticker=ticker,
+            market_name=market_name,
+            currency_display=currency_display,
+            analysis_date=analysis_date,
+            market_report=reports.get("market_report", ""),
             sentiment_report=reports.get("sentiment_report", ""),
             news_report=reports.get("news_report", ""),
             fundamentals_report=reports.get("fundamentals_report", ""),
-            history=state.get("history", "") if state else "",
+            historical_context=historical_context or (state.get("history", "") if state else ""),
             current_response=state.get("current_response", "") if state else "",
             past_memory_str=state.get("past_memory_str", "") if state else ""
         )

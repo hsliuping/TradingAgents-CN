@@ -5,7 +5,7 @@
 
 import logging
 import asyncio
-from typing import Dict, Optional, Tuple
+from typing import Optional
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo import MongoClient
 from pymongo.database import Database
@@ -41,93 +41,27 @@ class DatabaseManager:
         self.mongo_db: Optional[AsyncIOMotorDatabase] = None
         self.redis_client: Optional[Redis] = None
         self.redis_pool: Optional[ConnectionPool] = None
-        self._mongo_clients_by_loop: Dict[int, AsyncIOMotorClient] = {}
-        self._mongo_dbs_by_loop: Dict[int, AsyncIOMotorDatabase] = {}
-        self._redis_clients_by_loop: Dict[int, Redis] = {}
-        self._redis_pools_by_loop: Dict[int, ConnectionPool] = {}
         self._mongo_healthy = False
         self._redis_healthy = False
-
-    def _get_running_loop(self) -> Optional[asyncio.AbstractEventLoop]:
-        """获取当前事件循环；在非异步上下文中返回 None。"""
-        try:
-            return asyncio.get_running_loop()
-        except RuntimeError:
-            return None
-
-    def ensure_mongodb_for_current_loop(self) -> Tuple[AsyncIOMotorClient, AsyncIOMotorDatabase]:
-        """为当前事件循环获取独立的 MongoDB 客户端。"""
-        current_loop = self._get_running_loop()
-        loop_id = id(current_loop) if current_loop is not None else 0
-
-        client = self._mongo_clients_by_loop.get(loop_id)
-        database = self._mongo_dbs_by_loop.get(loop_id)
-        if client is not None and database is not None:
-            self.mongo_client = client
-            self.mongo_db = database
-            return client, database
-
-        client_kwargs = {
-            "maxPoolSize": settings.MONGO_MAX_CONNECTIONS,
-            "minPoolSize": settings.MONGO_MIN_CONNECTIONS,
-            "maxIdleTimeMS": 30000,
-            "serverSelectionTimeoutMS": settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,
-            "connectTimeoutMS": settings.MONGO_CONNECT_TIMEOUT_MS,
-            "socketTimeoutMS": settings.MONGO_SOCKET_TIMEOUT_MS,
-        }
-        if current_loop is not None:
-            client_kwargs["io_loop"] = current_loop
-
-        client = AsyncIOMotorClient(settings.MONGO_URI, **client_kwargs)
-        database = client[settings.MONGO_DB]
-        self._mongo_clients_by_loop[loop_id] = client
-        self._mongo_dbs_by_loop[loop_id] = database
-        self.mongo_client = client
-        self.mongo_db = database
-
-        if current_loop is not None and len(self._mongo_clients_by_loop) > 1:
-            logger.warning("⚠️ 检测到多个事件循环正在使用 MongoDB 连接，已为当前 loop 创建独立客户端")
-
-        return client, database
-
-    def ensure_redis_for_current_loop(self) -> Tuple[Redis, ConnectionPool]:
-        """为当前事件循环获取独立的 Redis 客户端。"""
-        current_loop = self._get_running_loop()
-        loop_id = id(current_loop) if current_loop is not None else 0
-
-        client = self._redis_clients_by_loop.get(loop_id)
-        pool = self._redis_pools_by_loop.get(loop_id)
-        if client is not None and pool is not None:
-            self.redis_client = client
-            self.redis_pool = pool
-            return client, pool
-
-        pool = ConnectionPool.from_url(
-            settings.REDIS_URL,
-            max_connections=settings.REDIS_MAX_CONNECTIONS,
-            retry_on_timeout=settings.REDIS_RETRY_ON_TIMEOUT,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=10,
-        )
-        client = Redis(connection_pool=pool)
-        self._redis_clients_by_loop[loop_id] = client
-        self._redis_pools_by_loop[loop_id] = pool
-        self.redis_client = client
-        self.redis_pool = pool
-
-        if current_loop is not None and len(self._redis_clients_by_loop) > 1:
-            logger.warning("⚠️ 检测到多个事件循环正在使用 Redis 连接，已为当前 loop 创建独立客户端")
-
-        return client, pool
 
     async def init_mongodb(self):
         """初始化MongoDB连接"""
         try:
             logger.info("🔄 正在初始化MongoDB连接...")
 
-            # 为当前事件循环创建专属客户端，避免跨 loop 复用
-            self.mongo_client, self.mongo_db = self.ensure_mongodb_for_current_loop()
+            # 创建MongoDB客户端，配置连接池
+            self.mongo_client = AsyncIOMotorClient(
+                settings.MONGO_URI,
+                maxPoolSize=settings.MONGO_MAX_CONNECTIONS,
+                minPoolSize=settings.MONGO_MIN_CONNECTIONS,
+                maxIdleTimeMS=30000,  # 30秒空闲超时
+                serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,  # 服务器选择超时
+                connectTimeoutMS=settings.MONGO_CONNECT_TIMEOUT_MS,  # 连接超时
+                socketTimeoutMS=settings.MONGO_SOCKET_TIMEOUT_MS,  # 套接字超时
+            )
+
+            # 获取数据库实例
+            self.mongo_db = self.mongo_client[settings.MONGO_DB]
 
             # 测试连接
             await self.mongo_client.admin.command('ping')
@@ -148,8 +82,18 @@ class DatabaseManager:
         try:
             logger.info("🔄 正在初始化Redis连接...")
 
-            # 为当前事件循环创建专属客户端，避免跨 loop 复用
-            self.redis_client, self.redis_pool = self.ensure_redis_for_current_loop()
+            # 创建Redis连接池
+            self.redis_pool = ConnectionPool.from_url(
+                settings.REDIS_URL,
+                max_connections=settings.REDIS_MAX_CONNECTIONS,
+                retry_on_timeout=settings.REDIS_RETRY_ON_TIMEOUT,
+                decode_responses=True,
+                socket_connect_timeout=5,  # 5秒连接超时
+                socket_timeout=10,  # 10秒套接字超时
+            )
+
+            # 创建Redis客户端
+            self.redis_client = Redis(connection_pool=self.redis_pool)
 
             # 测试连接
             await self.redis_client.ping()
@@ -168,54 +112,30 @@ class DatabaseManager:
         logger.info("🔄 正在关闭数据库连接...")
 
         # 关闭MongoDB连接
-        closed_mongo_clients = set()
-        for client in list(self._mongo_clients_by_loop.values()):
-            if client is None or id(client) in closed_mongo_clients:
-                continue
+        if self.mongo_client:
             try:
-                client.close()
-                closed_mongo_clients.add(id(client))
+                self.mongo_client.close()
+                self._mongo_healthy = False
+                logger.info("✅ MongoDB连接已关闭")
             except Exception as e:
                 logger.error(f"❌ 关闭MongoDB连接时出错: {e}")
-        if closed_mongo_clients:
-            self._mongo_healthy = False
-            logger.info("✅ MongoDB连接已关闭")
 
         # 关闭Redis连接
-        closed_redis_clients = set()
-        for client in list(self._redis_clients_by_loop.values()):
-            if client is None or id(client) in closed_redis_clients:
-                continue
+        if self.redis_client:
             try:
-                await client.close()
-                closed_redis_clients.add(id(client))
+                await self.redis_client.close()
+                self._redis_healthy = False
+                logger.info("✅ Redis连接已关闭")
             except Exception as e:
                 logger.error(f"❌ 关闭Redis连接时出错: {e}")
-        if closed_redis_clients:
-            self._redis_healthy = False
-            logger.info("✅ Redis连接已关闭")
 
         # 关闭Redis连接池
-        closed_redis_pools = set()
-        for pool in list(self._redis_pools_by_loop.values()):
-            if pool is None or id(pool) in closed_redis_pools:
-                continue
+        if self.redis_pool:
             try:
-                await pool.disconnect()
-                closed_redis_pools.add(id(pool))
+                await self.redis_pool.disconnect()
+                logger.info("✅ Redis连接池已关闭")
             except Exception as e:
                 logger.error(f"❌ 关闭Redis连接池时出错: {e}")
-        if closed_redis_pools:
-            logger.info("✅ Redis连接池已关闭")
-
-        self._mongo_clients_by_loop.clear()
-        self._mongo_dbs_by_loop.clear()
-        self._redis_clients_by_loop.clear()
-        self._redis_pools_by_loop.clear()
-        self.mongo_client = None
-        self.mongo_db = None
-        self.redis_client = None
-        self.redis_pool = None
 
     async def health_check(self) -> dict:
         """数据库健康检查"""
@@ -321,8 +241,8 @@ async def create_stock_screening_view(db):
         # 检查视图是否已存在
         collections = await db.list_collection_names()
         if "stock_screening_view" in collections:
-            logger.info("📋 视图 stock_screening_view 已存在，先删除后重建以同步最新字段")
-            await db["stock_screening_view"].drop()
+            logger.info("📋 视图 stock_screening_view 已存在，跳过创建")
+            return
 
         # 创建视图：将 stock_basic_info、market_quotes 和 stock_financial_data 关联
         pipeline = [
@@ -393,93 +313,9 @@ async def create_stock_screening_view(db):
                     # 财务指标
                     "roe": "$financial_data.roe",
                     "roa": "$financial_data.roa",
-                    "netprofit_margin": {
-                        "$ifNull": [
-                            "$financial_data.netprofit_margin",
-                            "$financial_data.financial_indicators.netprofit_margin"
-                        ]
-                    },
-                    "gross_margin": {
-                        "$ifNull": [
-                            "$financial_data.gross_margin",
-                            "$financial_data.financial_indicators.gross_margin"
-                        ]
-                    },
-                    "debt_to_assets": {
-                        "$ifNull": [
-                            "$financial_data.debt_to_assets",
-                            "$financial_data.financial_indicators.debt_to_assets"
-                        ]
-                    },
-                    "assets_to_eqt": {
-                        "$ifNull": [
-                            "$financial_data.assets_to_eqt",
-                            "$financial_data.financial_indicators.assets_to_eqt"
-                        ]
-                    },
-                    "current_ratio": {
-                        "$ifNull": [
-                            "$financial_data.current_ratio",
-                            "$financial_data.financial_indicators.current_ratio"
-                        ]
-                    },
-                    "quick_ratio": {
-                        "$ifNull": [
-                            "$financial_data.quick_ratio",
-                            "$financial_data.financial_indicators.quick_ratio"
-                        ]
-                    },
-                    "cash_ratio": {
-                        "$ifNull": [
-                            "$financial_data.cash_ratio",
-                            "$financial_data.financial_indicators.cash_ratio"
-                        ]
-                    },
-                    "dividend_yield": {
-                        "$ifNull": [
-                            "$dividend_yield",
-                            {
-                                "$ifNull": [
-                                    "$financial_data.financial_indicators.dividend_yield",
-                                    "$financial_data.dividend_yield"
-                                ]
-                            }
-                        ]
-                    },
-                    "dividend_yield_ttm": "$dividend_yield_ttm",
-                    "revenue_ttm": "$financial_data.revenue_ttm",
-                    "net_profit_ttm": "$financial_data.net_profit_ttm",
-                    "n_cashflow_act": "$financial_data.n_cashflow_act",
-                    "net_working_capital": {
-                        "$cond": [
-                            {
-                                "$and": [
-                                    {"$ne": [{"$ifNull": ["$financial_data.total_cur_assets", "$financial_data.balance_sheet.total_cur_assets"]}, None]},
-                                    {"$ne": [{"$ifNull": ["$financial_data.total_cur_liab", "$financial_data.balance_sheet.total_cur_liab"]}, None]}
-                                ]
-                            },
-                            {
-                                "$divide": [
-                                    {
-                                        "$subtract": [
-                                            {"$ifNull": ["$financial_data.total_cur_assets", "$financial_data.balance_sheet.total_cur_assets"]},
-                                            {"$ifNull": ["$financial_data.total_cur_liab", "$financial_data.balance_sheet.total_cur_liab"]}
-                                        ]
-                                    },
-                                    100000000
-                                ]
-                            },
-                            None
-                        ]
-                    },
+                    "netprofit_margin": "$financial_data.netprofit_margin",
+                    "gross_margin": "$financial_data.gross_margin",
                     "report_period": "$financial_data.report_period",
-                    "is_st": {
-                        "$regexMatch": {
-                            "input": {"$ifNull": ["$name", ""]},
-                            "regex": "(^|\\s)\\*?ST",
-                            "options": "i"
-                        }
-                    },
                     # 交易指标
                     "turnover_rate": 1,
                     "volume_ratio": 1,
@@ -534,102 +370,9 @@ async def create_database_indexes(db):
         await market_quotes.create_index([("amount", -1)])
         await market_quotes.create_index([("updated_at", -1)])
 
-        # assistant_conversations 智能助手旧会话（兼容）
-        assistant_conv = db["assistant_conversations"]
-        await assistant_conv.create_index([("user_id", 1)], unique=True)
-
-        # assistant_threads 智能助手主题会话
-        assistant_threads = db["assistant_threads"]
-        await assistant_threads.create_index([("user_id", 1), ("thread_id", 1)], unique=True)
-        await assistant_threads.create_index([("user_id", 1), ("updated_at", -1)])
-        await assistant_threads.create_index([("user_id", 1), ("parent_thread_id", 1), ("updated_at", -1)])
-
-        # assistant_thread_messages 智能助手主题消息
-        assistant_thread_messages = db["assistant_thread_messages"]
-        await assistant_thread_messages.create_index([("thread_id", 1), ("created_at", 1)])
-        await assistant_thread_messages.create_index([("user_id", 1), ("thread_id", 1), ("created_at", -1)])
-
-        # assistant_thread_checkpoints 智能助手主题摘要快照
-        assistant_thread_checkpoints = db["assistant_thread_checkpoints"]
-        await assistant_thread_checkpoints.create_index([("thread_id", 1), ("created_at", -1)])
-        await assistant_thread_checkpoints.create_index([("user_id", 1), ("thread_id", 1), ("created_at", -1)])
-
-        # ETF 集合索引
-        etf_basic = db["etf_basic_info"]
-        await etf_basic.create_index([("code", 1), ("source", 1)], unique=True)
-        await etf_basic.create_index([("code", 1)])
-        etf_daily = db["etf_daily_quotes"]
-        await etf_daily.create_index([("code", 1), ("trade_date", -1)])
-        await etf_daily.create_index([("symbol", 1), ("trade_date", -1)])
-
-        # 工作流成长集合索引
-        growth_memories = db["agent_memory_items"]
-        await growth_memories.create_index([("memory_id", 1)], unique=True)
-        await growth_memories.create_index([("user_id", 1), ("status", 1), ("updated_at", -1)])
-        await growth_memories.create_index([("user_id", 1), ("source_id", 1), ("created_at", -1)])
-        await growth_memories.create_index([("user_id", 1), ("object_type", 1), ("object_key", 1), ("status", 1)])
-
-        growth_suggestions = db["agent_growth_suggestions"]
-        await growth_suggestions.create_index([("suggestion_id", 1)], unique=True)
-        await growth_suggestions.create_index([("user_id", 1), ("status", 1), ("updated_at", -1)])
-        await growth_suggestions.create_index([("user_id", 1), ("source_id", 1), ("created_at", -1)])
-
-        # Agent 工坊集合索引
-        agent_specs = db["agent_specs"]
-        await agent_specs.create_index([("spec_id", 1)], unique=True)
-        await agent_specs.create_index([("owner_user_id", 1), ("status", 1), ("updated_at", -1)])
-        await agent_specs.create_index([("latest_session_id", 1)])
-
-        agent_workshop_sessions = db["agent_workshop_sessions"]
-        await agent_workshop_sessions.create_index([("session_id", 1)], unique=True)
-        await agent_workshop_sessions.create_index([("user_id", 1), ("stage", 1), ("updated_at", -1)])
-        await agent_workshop_sessions.create_index([("spec_id", 1), ("updated_at", -1)])
-
-        agent_versions = db["agent_versions"]
-        await agent_versions.create_index([("version_id", 1)], unique=True)
-        await agent_versions.create_index([("spec_id", 1), ("version", -1)], unique=True)
-        await agent_versions.create_index([("spec_id", 1), ("status", 1), ("updated_at", -1)])
-
-        agent_evaluations = db["agent_evaluations"]
-        await agent_evaluations.create_index([("evaluation_id", 1)], unique=True)
-        await agent_evaluations.create_index([("version_id", 1), ("created_at", -1)])
-
-        # scheduler_executions（高频查询，此前无索引）
-        sched_exec = db["scheduler_executions"]
-        await sched_exec.create_index([("job_id", 1), ("status", 1), ("timestamp", -1)])
-        await sched_exec.create_index([("status", 1), ("timestamp", -1)])
-        await sched_exec.create_index([("updated_at", -1)])
-
-        sched_hist = db["scheduler_history"]
-        await sched_hist.create_index([("job_id", 1), ("timestamp", -1)])
-
-        # 持仓 & 交易相关
-        real_pos = db["real_positions"]
-        await real_pos.create_index([("user_id", 1), ("code", 1), ("market", 1)])
-
-        pos_changes = db["position_changes"]
-        await pos_changes.create_index([("user_id", 1), ("created_at", -1)])
-        await pos_changes.create_index([("user_id", 1), ("code", 1), ("market", 1), ("created_at", -1)])
-
-        real_accts = db["real_accounts"]
-        await real_accts.create_index([("user_id", 1)])
-
-        # 分析报告
-        reports = db["analysis_reports"]
-        await reports.create_index([("user_id", 1), ("created_at", -1)])
-        await reports.create_index([("user_id", 1), ("task_id", 1)])
-
-        pos_reports = db["position_analysis_reports"]
-        await pos_reports.create_index([("user_id", 1), ("created_at", -1)])
-
-        # 统一任务中心
-        unified_tasks = db["unified_analysis_tasks"]
-        await unified_tasks.create_index([("user_id", 1), ("created_at", -1)])
-        await unified_tasks.create_index([("task_id", 1)], unique=True)
-
-        # 系统配置（对齐实际查询字段 config_key）
-        sys_cfg = db["system_configs"]
-        await sys_cfg.create_index([("config_key", 1)], unique=True, sparse=True)
+        industry_mapping = db["stock_industry_mappings"]
+        await industry_mapping.create_index([("code", 1)], unique=True)
+        await industry_mapping.create_index([("provider", 1), ("updated_at", -1)])
 
         logger.info("✅ 数据库索引创建完成")
 
@@ -652,17 +395,15 @@ async def close_database():
 
 def get_mongo_client() -> AsyncIOMotorClient:
     """获取MongoDB客户端"""
-    global mongo_client, mongo_db
-
-    mongo_client, mongo_db = db_manager.ensure_mongodb_for_current_loop()
+    if mongo_client is None:
+        raise RuntimeError("MongoDB客户端未初始化")
     return mongo_client
 
 
 def get_mongo_db() -> AsyncIOMotorDatabase:
     """获取MongoDB数据库实例"""
-    global mongo_client, mongo_db
-
-    mongo_client, mongo_db = db_manager.ensure_mongodb_for_current_loop()
+    if mongo_db is None:
+        raise RuntimeError("MongoDB数据库未初始化")
     return mongo_db
 
 
@@ -692,9 +433,8 @@ def get_mongo_db_sync() -> Database:
 
 def get_redis_client() -> Redis:
     """获取Redis客户端（异步）"""
-    global redis_client, redis_pool
-
-    redis_client, redis_pool = db_manager.ensure_redis_for_current_loop()
+    if redis_client is None:
+        raise RuntimeError("Redis客户端未初始化")
     return redis_client
 
 

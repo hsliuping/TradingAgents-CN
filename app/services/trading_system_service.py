@@ -92,19 +92,12 @@ class TradingSystemService:
         Returns:
             创建的交易计划
         """
-        # 如果设置为激活，先将该用户的其他系统设为非激活
-        if system_data.dict().get("is_active", True):
-            self.collection.update_many(
-                {"user_id": user_id, "is_active": True},
-                {"$set": {"is_active": False}}
-            )
-
         # 构建系统数据
         system_dict = system_data.dict(exclude_unset=True)
         system_dict["user_id"] = user_id
         system_dict["version"] = "1.0.0"
         system_dict["status"] = TradingSystemStatus.DRAFT.value  # 默认创建为草稿
-        system_dict["is_active"] = True
+        system_dict["is_active"] = False
         system_dict["created_at"] = datetime.utcnow()
         system_dict["updated_at"] = datetime.utcnow()
 

@@ -7,6 +7,7 @@ Skill 生成服务 — 业务逻辑层
 import asyncio
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from core.llm import Message
@@ -14,7 +15,9 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from core.tools.external import (
     ConversationRound,
+    DefaultReconnaissanceController,
     ExpectedOutput,
+    ImplementationFactReport,
     IterationController,
     RequirementAnalyzer,
     SkillCreationSession,
@@ -27,9 +30,13 @@ from core.tools.external import (
 
 logger = logging.getLogger("webapi")
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SKILL_CODE_SNAPSHOT_DIR = PROJECT_ROOT / "data" / "code" / "skill"
+
 # MongoDB 集合名
 SESSION_COLLECTION = "skill_creation_sessions"
 SKILL_COLLECTION = "external_skills"
+SKILL_PIPELINE_MAX_ITERATIONS = 5
 
 
 class SkillGenerationService:
@@ -60,8 +67,16 @@ class SkillGenerationService:
         self._analyzer = RequirementAnalyzer(
             llm_client=reasoning_llm_client, provider=provider, model=model
         )
+        self._reconnaissance = DefaultReconnaissanceController(
+            llm_client=coding_llm_client, provider=provider, model=model,
+            analyzer=self._analyzer,
+        )
         self._controller = IterationController(
-            llm_client=coding_llm_client, provider=provider, model=model
+            llm_client=coding_llm_client,
+            provider=provider,
+            model=model,
+            max_iterations=SKILL_PIPELINE_MAX_ITERATIONS,
+            reconnaissance_controller=self._reconnaissance,
         )
 
     def _build_session_recommendations(
@@ -88,6 +103,71 @@ class SkillGenerationService:
             if generated and generated.code:
                 return generated.code
         return ""
+
+    @staticmethod
+    def _persist_generated_code_snapshots(
+        *,
+        session_id: str,
+        tool_id: str,
+        attempt_number: int,
+        pipeline_result: Optional[PipelineResult],
+    ) -> List[Path]:
+        if not pipeline_result:
+            return []
+
+        session_dir = SKILL_CODE_SNAPSHOT_DIR / tool_id / session_id
+        attempt_dir = session_dir / f"attempt_{attempt_number:02d}"
+        attempt_dir.mkdir(parents=True, exist_ok=True)
+
+        written_files: List[Path] = []
+
+        for iteration in pipeline_result.iterations or []:
+            generated = iteration.generated_code
+            code = (generated.code if generated and generated.code else "").strip()
+            if not code:
+                continue
+
+            round_path = attempt_dir / f"round_{iteration.round_number:02d}.py"
+            round_path.write_text(code + "\n", encoding="utf-8")
+            written_files.append(round_path)
+
+        latest_code = SkillGenerationService._get_last_generated_code(pipeline_result).strip()
+        if latest_code:
+            attempt_latest_path = attempt_dir / "latest.py"
+            attempt_latest_path.write_text(latest_code + "\n", encoding="utf-8")
+            written_files.append(attempt_latest_path)
+
+            session_latest_path = session_dir / "latest.py"
+            session_latest_path.write_text(latest_code + "\n", encoding="utf-8")
+            written_files.append(session_latest_path)
+
+        return written_files
+
+    @staticmethod
+    def _summarize_text(
+        text: Any,
+        *,
+        max_chars: int,
+        head_chars: Optional[int] = None,
+        separator: str = "\n... (中间省略) ...\n",
+    ) -> str:
+        """长文本摘要默认保留首尾，避免只看到前半段导致误判。"""
+        if text is None:
+            return ""
+
+        text_str = str(text)
+        if len(text_str) <= max_chars:
+            return text_str
+
+        if head_chars is None:
+            head_chars = max_chars // 2
+
+        head_chars = max(1, min(head_chars, max_chars - len(separator) - 1))
+        tail_chars = max_chars - head_chars - len(separator)
+        if tail_chars <= 0:
+            return text_str[:max_chars]
+
+        return text_str[:head_chars] + separator + text_str[-tail_chars:]
 
     @staticmethod
     def _format_single_pipeline(
@@ -121,10 +201,18 @@ class SkillGenerationService:
             if not compact and iteration.sandbox and iteration.sandbox.success and iteration.sandbox.output is not None:
                 import json as _json
                 try:
-                    out_str = _json.dumps(iteration.sandbox.output, ensure_ascii=False, default=str)[:800]
+                    out_str = SkillGenerationService._summarize_text(
+                        _json.dumps(iteration.sandbox.output, ensure_ascii=False, default=str),
+                        max_chars=1200,
+                        head_chars=700,
+                    )
                 except Exception:
-                    out_str = str(iteration.sandbox.output)[:800]
-                parts.append(f"沙箱返回值（截断）：{out_str}")
+                    out_str = SkillGenerationService._summarize_text(
+                        iteration.sandbox.output,
+                        max_chars=1200,
+                        head_chars=700,
+                    )
+                parts.append(f"沙箱返回值（摘要）：{out_str}")
 
             if iteration.eval_score:
                 parts.append(
@@ -143,7 +231,12 @@ class SkillGenerationService:
                     parts.append("修复计划：" + " → ".join(iteration.reflection.fix_plan[:5]))
 
             if not compact and iteration.feedback:
-                parts.append(f"系统反馈（截断）：{iteration.feedback[:500]}")
+                feedback_excerpt = SkillGenerationService._summarize_text(
+                    iteration.feedback,
+                    max_chars=1200,
+                    head_chars=700,
+                )
+                parts.append(f"系统反馈（摘要）：{feedback_excerpt}")
 
         return parts
 
@@ -290,8 +383,16 @@ class SkillGenerationService:
             current_pipeline=session.pipeline_result,
             user_feedback=feedback,
         )
+        pipeline_feedback = self._build_pipeline_failure_feedback(
+            session.pipeline_result,
+            feedback,
+        )
         last_code = self._get_last_generated_code(session.pipeline_result)
-        code_excerpt = (last_code or "")[:12000]
+        code_excerpt = self._summarize_text(
+            last_code,
+            max_chars=12000,
+            head_chars=7000,
+        )
         attempt_count = len(session.pipeline_history) + (1 if session.pipeline_result else 0)
         prompt = f"""
 你现在是 Skill 生成失败后的修正协作者。该 Skill 已经经过 {attempt_count} 次生成尝试，均未达标。
@@ -321,7 +422,7 @@ test_input: {spec.test_input}
 === 累积经验（共 {attempt_count} 次尝试）===
 {accumulated_exp}
 
-=== 最近一次生成的代码（截断） ===
+=== 最近一次生成的代码（摘要，保留首尾） ===
 {code_excerpt or '无'}
 
 请给出一份让用户可以确认的修正计划。
@@ -345,11 +446,13 @@ test_input: {spec.test_input}
         spec: SkillSpec,
         initial_feedback: str = "",
         initial_code: str = "",
+        fact_report: Optional[ImplementationFactReport] = None,
     ) -> Dict[str, Any]:
         session.status = SessionStatus.GENERATING
         if session.pipeline_result is not None:
             session.pipeline_history.append(session.pipeline_result)
         session.pipeline_result = None
+        attempt_number = len(session.pipeline_history) + 1
         await self._save_session(session)
         await self._db[SESSION_COLLECTION].update_one(
             {"session_id": session.session_id},
@@ -359,6 +462,7 @@ test_input: {spec.test_input}
                     "pipeline_message": "准备开始生成...",
                     "pipeline_iteration": 0,
                     "pipeline_progress": 0,
+                    "pipeline_details": [],
                     "updated_at": datetime.utcnow(),
                 }
             },
@@ -379,7 +483,19 @@ test_input: {spec.test_input}
                             "pipeline_iteration": iteration,
                             "pipeline_progress": progress,
                             "updated_at": datetime.utcnow(),
-                        }
+                        },
+                        "$push": {
+                            "pipeline_details": {
+                                "$each": [{
+                                    "stage": stage,
+                                    "message": message,
+                                    "iteration": iteration,
+                                    "progress": progress,
+                                    "timestamp": datetime.utcnow(),
+                                }],
+                                "$slice": -30,
+                            }
+                        },
                     },
                 )
             except Exception as e:
@@ -399,6 +515,8 @@ test_input: {spec.test_input}
                 except Exception as e:
                     logger.debug("[mem0] Skill 教训召回失败（已忽略）: %s", e)
 
+                # 捕获 fact_report 到局部变量，避免 lambda 闭包问题
+                _fr = fact_report
                 result = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: self._controller.run(
@@ -406,11 +524,27 @@ test_input: {spec.test_input}
                         initial_feedback=enriched_feedback,
                         initial_code=initial_code,
                         progress_callback=_progress_cb,
+                        fact_report=_fr,
                     ),
                 )
                 session.status = SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
                 session.pipeline_result = result
                 await self._save_session(session)
+
+                try:
+                    written_files = self._persist_generated_code_snapshots(
+                        session_id=session.session_id,
+                        tool_id=spec.tool_id,
+                        attempt_number=attempt_number,
+                        pipeline_result=result,
+                    )
+                    if written_files:
+                        logger.info(
+                            "📝 Skill 代码快照已保存: %s",
+                            str((SKILL_CODE_SNAPSHOT_DIR / spec.tool_id / session.session_id).resolve()),
+                        )
+                except Exception as e:
+                    logger.warning("⚠️ 保存 Skill 代码快照失败: %s", e)
 
                 if result.success:
                     await self._save_skill(session, spec, result)
@@ -430,7 +564,19 @@ test_input: {spec.test_input}
                             "pipeline_stage": "error",
                             "pipeline_message": str(e),
                             "updated_at": datetime.utcnow(),
-                        }
+                        },
+                        "$push": {
+                            "pipeline_details": {
+                                "$each": [{
+                                    "stage": "error",
+                                    "message": str(e),
+                                    "iteration": 0,
+                                    "progress": 0,
+                                    "timestamp": datetime.utcnow(),
+                                }],
+                                "$slice": -30,
+                            }
+                        },
                     },
                 )
 
@@ -586,18 +732,42 @@ test_input: {spec.test_input}
         """
         仅生成 SkillSpec 预览，不修改会话状态。
         用于规格确认步骤展示。
+
+        流程：先生成草稿 spec → 运行侦察 → 基于侦察事实重新生成 enriched spec。
         """
         session = await self._load_session(session_id)
         if not session:
             raise ValueError(f"会话 {session_id} 不存在")
-        spec = await asyncio.get_event_loop().run_in_executor(
+
+        # 第一遍：生成草稿 spec（无侦察事实）
+        draft_spec = await asyncio.get_event_loop().run_in_executor(
             None, self._analyzer.preview_spec, session, user_message
         )
-        if not spec:
+        if not draft_spec:
             return None
+
+        # 运行侦察层：基于草稿 spec 探测真实数据可用性
+        fact_report = await asyncio.get_event_loop().run_in_executor(
+            None, self._reconnaissance.analyze, draft_spec
+        )
+        logger.info("🧭 侦察完成 (preview)，置信度: %.0f%%", fact_report.confidence * 100)
+
+        # 第二遍：基于侦察事实重新生成 enriched spec
+        enriched_spec = await asyncio.get_event_loop().run_in_executor(
+            None, self._analyzer.preview_spec, session, user_message, fact_report
+        )
+        final_spec = enriched_spec or draft_spec
+
+        # 缓存 spec 与 fact_report 到 session，confirm_spec 时直接复用，
+        # 避免再次调用 LLM 生成规格导致前端长时间停留在 0%。
+        session.spec = final_spec
+        session.fact_report = fact_report
+        await self._save_session(session)
+
         return {
-            "spec": spec.model_dump(),
-            "recommendations": self._build_session_recommendations(spec=spec),
+            "spec": final_spec.model_dump(),
+            "recommendations": self._build_session_recommendations(spec=final_spec),
+            "fact_report": fact_report.model_dump() if fact_report else None,
         }
 
     async def confirm_spec(
@@ -606,6 +776,9 @@ test_input: {spec.test_input}
         """
         确认规格并触发代码生成
 
+        流程：复用 preview 阶段缓存的 fact_report，若无则现场侦察。
+        将 fact_report 同时注入 spec 生成和管线执行，实现"侦察→定规→生成"闭环。
+
         Returns:
             包含 status, spec, generation_result 等信息的 dict
         """
@@ -613,10 +786,39 @@ test_input: {spec.test_input}
         if not session:
             raise ValueError(f"会话 {session_id} 不存在")
 
-        # 生成 SkillSpec
-        session, spec = await asyncio.get_event_loop().run_in_executor(
-            None, self._analyzer.confirm_spec, session, user_message
+        # 复用 preview 阶段缓存的 fact_report，若无则先跑侦察
+        fact_report = session.fact_report
+        if fact_report is None:
+            # 需要先生成草稿 spec 用于侦察
+            draft_spec = await asyncio.get_event_loop().run_in_executor(
+                None, self._analyzer.preview_spec, session, user_message
+            )
+            if draft_spec:
+                fact_report = await asyncio.get_event_loop().run_in_executor(
+                    None, self._reconnaissance.analyze, draft_spec
+                )
+                logger.info("🧭 侦察完成 (confirm)，置信度: %.0f%%", fact_report.confidence * 100)
+
+        # 如果 preview 阶段已经缓存了规格，并且当前只是常规“确认”，
+        # 则直接复用，避免 confirm 时再次调用 LLM 生成 SkillSpec。
+        normalized_message = (user_message or "").strip()
+        can_reuse_preview_spec = bool(
+            session.spec
+            and fact_report is not None
+            and normalized_message in ("", "确认", "确认生成", "继续生成")
         )
+
+        if can_reuse_preview_spec:
+            spec = session.spec
+            session.spec_confirmed = True
+            session.status = SessionStatus.CONFIRMED
+            session.updated_at = datetime.utcnow()
+            await self._save_session(session)
+        else:
+            # 基于侦察事实生成最终 SkillSpec
+            session, spec = await asyncio.get_event_loop().run_in_executor(
+                None, self._analyzer.confirm_spec, session, user_message, fact_report
+            )
 
         if not spec:
             return {
@@ -624,7 +826,10 @@ test_input: {spec.test_input}
                 "message": "规格生成失败，请重新描述需求",
             }
 
-        return await self._launch_pipeline_task(session=session, spec=spec)
+        # fact_report 同时传递给管线，跳过内部重复侦察
+        return await self._launch_pipeline_task(
+            session=session, spec=spec, fact_report=fact_report
+        )
 
     async def repair_session(
         self,
@@ -1178,7 +1383,9 @@ test_input: {spec.test_input}
         try:
             from core.tools.registry import get_tool_registry
             from core.tools.external_skill_loader import register_single_external_skill
+            from app.services.capability_index_service import CapabilityIndexService
             register_single_external_skill(None, get_tool_registry(), skill_doc)
+            await CapabilityIndexService(self._db).ensure_index()
         except Exception as e:
             logger.warning(f"⚠️ Skill '{spec.tool_id}' 热注册失败（重启后生效）: {e}")
 

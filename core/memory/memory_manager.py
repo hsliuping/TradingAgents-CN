@@ -17,6 +17,8 @@ Memory 管理器 v2.0
 
 import logging
 import os
+import queue
+import threading
 from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -99,8 +101,18 @@ class AgentMemory:
     """
     Agent 记忆管理器
 
-    为单个 Agent 提供记忆存储和检索功能
+    为单个 Agent 提供记忆存储和检索功能。
+
+    记忆写入（add_memory）为异步非阻塞操作：
+    - 调用 add_memory() 会将任务提交到后台队列，立即返回
+    - 后台守护线程依次处理队列中的 embedding 生成 + 向量存储
+    - 避免分析主流程被 embedding API 调用和磁盘写入阻塞
     """
+
+    # 所有 AgentMemory 实例共享的后台工作线程和队列（节省线程资源）
+    _shared_queue: Optional[queue.Queue] = None
+    _shared_worker: Optional[threading.Thread] = None
+    _shared_lock = threading.Lock()
 
     def __init__(self, agent_id: str, embedding_manager):
         """
@@ -128,7 +140,47 @@ class AgentMemory:
 
         backend = self.vector_store_manager.backend
         logger.info(f"🧠 初始化 Agent 记忆: {agent_id} (后端: {backend})")
-    
+
+        # 确保共享后台工作线程已启动
+        self._ensure_worker_started()
+
+    @classmethod
+    def _ensure_worker_started(cls):
+        """确保共享后台工作线程已启动（线程安全）"""
+        if cls._shared_worker is not None and cls._shared_worker.is_alive():
+            return
+        with cls._shared_lock:
+            if cls._shared_worker is not None and cls._shared_worker.is_alive():
+                return
+            cls._shared_queue = queue.Queue(maxsize=500)
+            cls._shared_worker = threading.Thread(
+                target=cls._worker_loop,
+                name="memory-save-worker",
+                daemon=True,
+            )
+            cls._shared_worker.start()
+            logger.info("🚀 记忆后台保存线程已启动")
+
+    @classmethod
+    def _worker_loop(cls):
+        """后台线程：持续从队列取任务并执行同步写入"""
+        while True:
+            try:
+                task = cls._shared_queue.get()
+                if task is None:
+                    # 收到哨兵值，退出
+                    logger.info("🛑 记忆后台保存线程收到退出信号")
+                    break
+                agent_memory, content, metadata, memory_id = task
+                agent_memory._do_add_memory(content, metadata, memory_id)
+            except Exception as e:
+                logger.error(f"❌ 记忆后台保存线程异常: {e}", exc_info=True)
+            finally:
+                try:
+                    cls._shared_queue.task_done()
+                except ValueError:
+                    pass
+
     def add_memory(
         self,
         content: str,
@@ -136,15 +188,44 @@ class AgentMemory:
         memory_id: Optional[str] = None
     ) -> bool:
         """
-        添加记忆
-        
+        添加记忆（非阻塞）
+
+        将任务提交到后台队列，立即返回。后台线程负责实际的
+        embedding 生成和向量存储操作。
+
         Args:
             content: 记忆内容（文本）
             metadata: 元数据（如时间、股票代码等）
             memory_id: 记忆ID（可选，默认自动生成）
-        
+
         Returns:
-            是否成功
+            是否成功入队（True=已提交，False=队列已满或异常）
+        """
+        try:
+            self._ensure_worker_started()
+            self._shared_queue.put_nowait((self, content, metadata, memory_id))
+            logger.debug(f"📨 记忆已提交到后台队列: {self.agent_id} (队列长度: {self._shared_queue.qsize()})")
+            return True
+        except queue.Full:
+            logger.warning(f"⚠️ 记忆保存队列已满，跳过: {self.agent_id}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ 提交记忆到队列失败: {e}")
+            return False
+
+    def _do_add_memory(
+        self,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        memory_id: Optional[str] = None
+    ) -> bool:
+        """
+        实际执行记忆写入（在后台线程中调用）
+
+        Args:
+            content: 记忆内容（文本）
+            metadata: 元数据
+            memory_id: 记忆ID
         """
         try:
             # 获取 embedding

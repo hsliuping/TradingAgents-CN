@@ -20,6 +20,119 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/scheduler", tags=["scheduler"])
 
 
+SCHEDULER_STOPPING_STATUSES = {"cancelling", "cancelled", "failed", "success", "suspended"}
+
+
+def _serialize_scheduler_time(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _build_execution_progress_data(job_id: str, execution: Dict[str, Any]) -> Dict[str, Any]:
+    started_at = execution.get("timestamp") or execution.get("scheduled_time")
+    status = execution.get("status", "unknown")
+    if status == "running" and execution.get("cancel_requested"):
+        status = "cancelling"
+
+    message = execution.get("progress_message")
+    if not message and status == "cancelling":
+        message = "任务正在取消中..."
+    if not message and status in {"cancelled", "failed"}:
+        message = execution.get("error_message")
+
+    return {
+        "job_id": job_id,
+        "execution_id": str(execution.get("_id")) if execution.get("_id") else None,
+        "progress": execution.get("progress", 0),
+        "status": status,
+        "message": message,
+        "current_item": execution.get("current_item"),
+        "total_items": execution.get("total_items"),
+        "processed_items": execution.get("processed_items"),
+        "started_at": _serialize_scheduler_time(started_at),
+        "updated_at": _serialize_scheduler_time(execution.get("updated_at", started_at)),
+    }
+
+
+def _should_prefer_execution_progress(
+    redis_progress: Dict[str, Any],
+    execution_progress: Optional[Dict[str, Any]],
+) -> bool:
+    if not execution_progress:
+        return False
+
+    execution_status = execution_progress.get("status")
+    if execution_status not in SCHEDULER_STOPPING_STATUSES:
+        return False
+
+    redis_execution_id = redis_progress.get("execution_id")
+    execution_id = execution_progress.get("execution_id")
+    return not redis_execution_id or redis_execution_id == execution_id
+
+
+def _update_scheduler_progress_cache(
+    job_id: str,
+    execution_id: str,
+    status: str,
+    message: str,
+    progress: Optional[int] = None,
+    processed_items: Optional[int] = None,
+    total_items: Optional[int] = None,
+) -> None:
+    try:
+        import json
+        from app.core.database import get_redis_sync_client
+        from app.core.redis_client import RedisKeys
+
+        redis_sync = get_redis_sync_client()
+        if not redis_sync:
+            return
+
+        progress_key = RedisKeys.SCHEDULER_JOB_PROGRESS.format(job_id=job_id)
+        status_key = RedisKeys.SCHEDULER_JOB_STATUS.format(job_id=job_id)
+
+        existing_progress: Dict[str, Any] = {}
+        existing_progress_str = redis_sync.get(progress_key)
+        if existing_progress_str:
+            try:
+                existing_progress = json.loads(existing_progress_str)
+            except Exception:
+                existing_progress = {}
+
+        updated_at = datetime.utcnow().isoformat()
+        progress_data = dict(existing_progress)
+        progress_data.update({
+            "job_id": job_id,
+            "execution_id": execution_id,
+            "status": status,
+            "message": message,
+            "updated_at": updated_at,
+        })
+
+        if progress is not None:
+            progress_data["progress"] = progress
+        if processed_items is not None:
+            progress_data["processed_items"] = processed_items
+        if total_items is not None:
+            progress_data["total_items"] = total_items
+
+        ttl_seconds = 3600 if status in {"cancelling", "cancelled"} else 86400
+        redis_sync.setex(progress_key, ttl_seconds, json.dumps(progress_data, ensure_ascii=False, default=str))
+
+        status_data = {
+            "job_id": job_id,
+            "status": status,
+            "progress": progress_data.get("progress", 0),
+            "updated_at": updated_at,
+        }
+        redis_sync.setex(status_key, ttl_seconds, json.dumps(status_data, ensure_ascii=False, default=str))
+    except Exception as exc:
+        logger.warning(f"⚠️ 更新任务进度缓存失败（job_id={job_id}, status={status}）: {exc}")
+
+
 class JobTriggerRequest(BaseModel):
     """手动触发任务请求"""
     job_id: str
@@ -797,6 +910,11 @@ async def get_job_progress(
     try:
         import json
         from app.core.redis_client import RedisKeys
+        latest_execution = await service.get_latest_execution(job_id)
+        latest_execution_progress = (
+            _build_execution_progress_data(job_id, latest_execution)
+            if latest_execution else None
+        )
         
         # 🔥 尝试从Redis读取实时进度，如果Redis不可用则回退到MongoDB
         try:
@@ -805,7 +923,7 @@ async def get_job_progress(
             
             # 🔥 先检查MongoDB中是否有新的执行记录（手动触发，且时间戳很新，30秒内）
             # 如果有新的执行记录，优先返回新的执行记录，而不是旧的Redis缓存
-            recent_execution = await service.get_latest_execution(job_id)
+            recent_execution = latest_execution
             if recent_execution:
                 execution_time = recent_execution.get("timestamp") or recent_execution.get("scheduled_time")
                 if execution_time:
@@ -847,19 +965,7 @@ async def get_job_progress(
                             if is_recent and is_manual:
                                 logger.info(f"🔍 [进度查询] 检测到新的手动触发任务（30秒内），优先返回MongoDB记录: job_id={job_id}, execution_id={recent_execution.get('_id')}")
                                 # 跳过Redis缓存，直接返回MongoDB中的新记录
-                                started_at = execution_time_dt
-                                progress_data = {
-                                    "job_id": job_id,
-                                    "execution_id": str(recent_execution.get("_id")),
-                                    "progress": recent_execution.get("progress", 0),
-                                    "status": recent_execution.get("status", "running"),
-                                    "message": recent_execution.get("progress_message"),
-                                    "current_item": recent_execution.get("current_item"),
-                                    "total_items": recent_execution.get("total_items"),
-                                    "processed_items": recent_execution.get("processed_items"),
-                                    "started_at": started_at.isoformat() if started_at and hasattr(started_at, 'isoformat') else (str(started_at) if started_at else None),
-                                    "updated_at": recent_execution.get("updated_at", execution_time)
-                                }
+                                progress_data = _build_execution_progress_data(job_id, recent_execution)
                                 logger.info(f"🔍 [进度查询] 从MongoDB读取到新任务进度: job_id={job_id}, execution_id={progress_data.get('execution_id')}, progress={progress_data.get('progress')}, status={progress_data.get('status')}")
                                 return ok(data=progress_data, message="获取进度成功（新任务，来自数据库）")
                     except Exception as time_check_error:
@@ -872,11 +978,16 @@ async def get_job_progress(
             
             if progress_data_str:
                 progress_data = json.loads(progress_data_str)
+                if _should_prefer_execution_progress(progress_data, latest_execution_progress):
+                    logger.info(
+                        f"🔍 [进度查询] 检测到Redis状态滞后，改用MongoDB状态: "
+                        f"job_id={job_id}, execution_id={latest_execution_progress.get('execution_id')}, "
+                        f"redis_status={progress_data.get('status')}, mongo_status={latest_execution_progress.get('status')}"
+                    )
+                    return ok(data=latest_execution_progress, message="获取进度成功（以数据库状态为准）")
                 # 🔥 如果Redis中没有execution_id，尝试从MongoDB获取最新的执行记录
-                if not progress_data.get("execution_id"):
-                    execution = await service.get_latest_execution(job_id)
-                    if execution and execution.get("_id"):
-                        progress_data["execution_id"] = str(execution.get("_id"))
+                if not progress_data.get("execution_id") and latest_execution_progress:
+                    progress_data["execution_id"] = latest_execution_progress.get("execution_id")
                 logger.info(f"🔍 [进度查询] 从Redis读取到进度: job_id={job_id}, execution_id={progress_data.get('execution_id')}, progress={progress_data.get('progress')}, status={progress_data.get('status')}")
                 return ok(data=progress_data, message="获取实时进度成功")
             else:
@@ -889,21 +1000,9 @@ async def get_job_progress(
             logger.warning(f"⚠️ Redis读取失败，从MongoDB读取进度: {redis_error}")
         
         # 如果Redis中没有或Redis不可用，从MongoDB读取最新的执行记录
-        execution = await service.get_latest_execution(job_id)
+        execution = latest_execution
         if execution:
-            started_at = execution.get("timestamp") or execution.get("scheduled_time")
-            progress_data = {
-                "job_id": job_id,
-                "execution_id": str(execution.get("_id")),  # 🔥 添加执行记录ID，用于终止操作
-                "progress": execution.get("progress", 0),
-                "status": execution.get("status", "unknown"),
-                "message": execution.get("progress_message"),
-                "current_item": execution.get("current_item"),
-                "total_items": execution.get("total_items"),
-                "processed_items": execution.get("processed_items"),
-                "started_at": started_at.isoformat() if started_at and hasattr(started_at, 'isoformat') else (str(started_at) if started_at else None),
-                "updated_at": execution.get("updated_at", execution.get("timestamp"))
-            }
+            progress_data = _build_execution_progress_data(job_id, execution)
             logger.info(f"🔍 [进度查询] 从MongoDB读取到进度: job_id={job_id}, execution_id={progress_data.get('execution_id')}, progress={progress_data.get('progress')}, status={progress_data.get('status')}")
             return ok(data=progress_data, message="获取进度成功（来自数据库）")
         else:
@@ -976,6 +1075,15 @@ async def cancel_execution(
                     }
                 }
             )
+            _update_scheduler_progress_cache(
+                job_id=job_id,
+                execution_id=execution_id,
+                status="cancelled",
+                message="任务已取消（原状态: suspended）",
+                progress=exec_record.get("progress"),
+                processed_items=exec_record.get("processed_items"),
+                total_items=exec_record.get("total_items"),
+            )
             logger.info(f"✅ 已取消 {cancelled_result.modified_count} 个挂起任务")
             return ok(message=f"已取消 {cancelled_result.modified_count} 个挂起任务")
         elif status == "failed":
@@ -989,6 +1097,15 @@ async def cancel_execution(
                         "updated_at": datetime.utcnow()
                     }
                 }
+            )
+            _update_scheduler_progress_cache(
+                job_id=job_id,
+                execution_id=execution_id,
+                status="cancelled",
+                message="用户已终止此失败的任务",
+                progress=exec_record.get("progress"),
+                processed_items=exec_record.get("processed_items"),
+                total_items=exec_record.get("total_items"),
             )
             logger.info(f"✅ 已终止失败的任务: execution_id={execution_id}, job_id={job_id}")
             return ok(message="已终止失败的任务")
@@ -1004,10 +1121,28 @@ async def cancel_execution(
                     }
                 }
             )
+            _update_scheduler_progress_cache(
+                job_id=job_id,
+                execution_id=execution_id,
+                status="cancelled",
+                message="用户已终止此已完成的任务",
+                progress=exec_record.get("progress"),
+                processed_items=exec_record.get("processed_items"),
+                total_items=exec_record.get("total_items"),
+            )
             logger.info(f"✅ 已终止已完成的任务: execution_id={execution_id}, job_id={job_id}")
             return ok(message="已终止已完成的任务")
         elif status == "cancelled":
             # 已经是取消状态，直接返回成功
+            _update_scheduler_progress_cache(
+                job_id=job_id,
+                execution_id=execution_id,
+                status="cancelled",
+                message=exec_record.get("error_message") or "任务已经是取消状态",
+                progress=exec_record.get("progress"),
+                processed_items=exec_record.get("processed_items"),
+                total_items=exec_record.get("total_items"),
+            )
             logger.info(f"ℹ️ 任务已经是取消状态: execution_id={execution_id}, job_id={job_id}")
             return ok(message="任务已经是取消状态")
         else:
@@ -1021,6 +1156,15 @@ async def cancel_execution(
                         "updated_at": datetime.utcnow()
                     }
                 }
+            )
+            _update_scheduler_progress_cache(
+                job_id=job_id,
+                execution_id=execution_id,
+                status="cancelled",
+                message=f"已终止任务（原状态: {status}）",
+                progress=exec_record.get("progress"),
+                processed_items=exec_record.get("processed_items"),
+                total_items=exec_record.get("total_items"),
             )
             logger.info(f"✅ 已终止任务（原状态: {status}）: execution_id={execution_id}, job_id={job_id}")
             return ok(message=f"已终止任务（原状态: {status}）")

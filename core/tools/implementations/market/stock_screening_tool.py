@@ -13,62 +13,26 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from app.services.factor_registry_service import build_screening_fields_markdown, build_screening_tool_description
 from core.tools.base import register_tool
 
 logger = logging.getLogger(__name__)
 
-# 支持的字段说明（供 LLM 参考）
 SUPPORTED_FIELDS_DOC = """
 支持的筛选字段：
-- pe         市盈率（TTM）
-- pb         市净率
-- pe_ttm     滚动市盈率（同 pe）
-- pb_mrq     最新市净率
-- roe        净资产收益率（%）
-- roa        总资产收益率（%）
-- gross_margin 销售毛利率（%）
-- netprofit_margin 销售净利率（%）
-- revenue_ttm 滚动12个月营收（元）
-- net_profit_ttm 滚动12个月净利润（元）
-- n_cashflow_act 经营现金流净额（元）
-- total_mv   总市值（亿元）
-- circ_mv    流通市值（亿元）
-- turnover_rate 换手率（%）
-- volume_ratio  量比
-- pct_chg    当日涨跌幅（%）
-- amount     成交额（万元）
-- close      收盘价（元）
-- industry   行业名称（使用 == 或 in 操作符）
-- keyword    股票代码或名称模糊搜索（使用 contains 操作符）
-- debt_to_assets   资产负债率（%，注意银行等金融股通常 >90% 属正常）
-- assets_to_eqt    权益乘数（总资产/股东权益）
-- current_ratio    流动比率（流动资产/流动负债，>1 表示流动性良好）
-- quick_ratio      速动比率
-- cash_ratio       现金比率
-- dividend_yield   股息率（%，近12个月分红/当前股价）
-- report_period    最新财报期（如 20250930）
-- net_working_capital  净营运资本（亿元，= 流动资产 - 流动负债，> 0 为正）
-- is_st      是否为ST/＊ST股票（True/False，使用 == 操作符）
+{fields_markdown}
 
 支持的操作符：> < >= <= == != between in not_in contains
 - between 的 value 为 [最小值, 最大值]
 - in / not_in 的 value 为列表
-"""
+""".format(fields_markdown=build_screening_fields_markdown(public_only=True))
 
 
 @tool
 @register_tool(
     tool_id="screen_stocks_by_criteria",
     name="全市场股票批量筛选",
-    description=(
-        "按多个财务和行情指标批量筛选 A 股股票。"
-        "支持 PE、PB、ROE、ROA、毛利率、净利率、滚动营收、滚动净利润、经营现金流、市值、资产负债率、权益乘数、流动比率、速动比率、现金比率、股息率、净营运资本、ST状态、行业等多条件组合筛选。"
-        "条件以 JSON 数组形式传入，每个条件包含 field（字段名）、operator（操作符）、value（值）三个字段。"
-        "支持的字段：pe/pb/roe/roa/gross_margin/netprofit_margin/total_mv/circ_mv/debt_to_assets/assets_to_eqt/"
-        "current_ratio/quick_ratio/cash_ratio/dividend_yield/revenue_ttm/net_profit_ttm/n_cashflow_act/report_period/net_working_capital/is_st/turnover_rate/pct_chg/amount/close/industry/keyword 等。"
-        "支持的操作符：> < >= <= == != between in not_in contains。"
-        "返回符合条件的股票列表，包含代码、名称、行业、估值、盈利质量、现金流、偿债能力、股息率等信息。"
-    ),
+    description=build_screening_tool_description(),
     category="screening",
     is_online=False,
     auto_register=True,
@@ -88,7 +52,10 @@ def screen_stocks_by_criteria(
     order_by_field: Annotated[str, "排序字段，如 pe/pb/roe/total_mv，默认按总市值降序"] = "total_mv",
     order_direction: Annotated[str, "排序方向：asc（升序）或 desc（降序），默认 desc"] = "desc",
 ) -> str:
-    """全市场 A 股批量筛选工具，支持 PE/PB/ROE/市值/行业等多条件组合筛选"""
+    """全市场 A 股批量筛选工具。
+
+    {supported_fields_doc}
+    """
     try:
         # 解析条件
         try:
@@ -161,6 +128,7 @@ async def _run_screening(
         industry = item.get("industry", "-")
         pe = item.get("pe") or item.get("pe_ttm", "-")
         pb = item.get("pb") or item.get("pb_mrq", "-")
+        ps_ttm = item.get("ps_ttm")
         roe = item.get("roe", "-")
         total_mv = item.get("total_mv", "-")
         close = item.get("close", "-")
@@ -177,12 +145,38 @@ async def _run_screening(
         quick_ratio = item.get("quick_ratio")
         cash_ratio = item.get("cash_ratio")
         dividend_yield = item.get("dividend_yield")
+        peg = item.get("peg")
+        roic = item.get("roic")
+        cash_conversion = item.get("cash_conversion")
+        accrual_ratio = item.get("accrual_ratio")
+        asset_turnover = item.get("asset_turnover")
+        gross_profit_to_assets = item.get("gross_profit_to_assets")
+        interest_coverage = item.get("interest_coverage")
+        inventory_turnover = item.get("inventory_turnover")
+        receivable_turnover = item.get("receivable_turnover")
+        net_cash_position = item.get("net_cash_position")
+        piotroski_f_score = item.get("piotroski_f_score")
+        altman_z_score = item.get("altman_z_score")
+        beneish_m_score = item.get("beneish_m_score")
+        revenue_yoy = item.get("revenue_yoy")
+        revenue_cagr_3y = item.get("revenue_cagr_3y")
+        net_profit_yoy = item.get("net_profit_yoy")
+        profit_cagr_3y = item.get("profit_cagr_3y")
+        oper_profit_yoy = item.get("oper_profit_yoy")
+        fcf = item.get("fcf")
+        fcf_yield = item.get("fcf_yield")
+        fcf_margin = item.get("fcf_margin")
+        ocf_yield = item.get("ocf_yield")
         net_working_capital = item.get("net_working_capital")
+        working_capital_change = item.get("working_capital_change")
         report_period = item.get("report_period")
         is_st = item.get("is_st")
+        factor_diagnostics = item.get("factor_diagnostics") or {}
+        factor_warnings = item.get("factor_warnings") or {}
 
         pe_str = f"{pe:.2f}" if isinstance(pe, (int, float)) else str(pe)
         pb_str = f"{pb:.2f}" if isinstance(pb, (int, float)) else str(pb)
+        ps_str = f"{ps_ttm:.2f}" if isinstance(ps_ttm, (int, float)) else str(ps_ttm)
         roe_str = f"{roe:.2f}%" if isinstance(roe, (int, float)) else str(roe)
         mv_str = f"{total_mv:.2f}亿" if isinstance(total_mv, (int, float)) else str(total_mv)
         price_str = f"{close:.2f}元" if isinstance(close, (int, float)) else str(close)
@@ -214,17 +208,86 @@ async def _run_screening(
             extra_parts.append(f"现金比率={cash_ratio:.2f}")
         if dividend_yield is not None:
             extra_parts.append(f"股息率={dividend_yield:.2f}%")
+        if peg is not None:
+            extra_parts.append(f"PEG={peg:.2f}")
+        if roic is not None:
+            extra_parts.append(f"ROIC={roic:.2f}%")
+        if cash_conversion is not None:
+            extra_parts.append(f"利润现金转换率={cash_conversion:.2f}")
+        if accrual_ratio is not None:
+            extra_parts.append(f"应计利润比率={accrual_ratio:.2f}%")
+        if asset_turnover is not None:
+            extra_parts.append(f"资产周转率={asset_turnover:.2f}")
+        if gross_profit_to_assets is not None:
+            extra_parts.append(f"毛利资产比={gross_profit_to_assets:.2f}%")
+        if interest_coverage is not None:
+            extra_parts.append(f"利息保障={interest_coverage:.2f}x")
+        if inventory_turnover is not None:
+            extra_parts.append(f"存货周转={inventory_turnover:.2f}")
+        if receivable_turnover is not None:
+            extra_parts.append(f"应收周转={receivable_turnover:.2f}")
+        if net_cash_position is not None:
+            extra_parts.append(f"净现金头寸={net_cash_position:.2f}%")
+        if piotroski_f_score is not None:
+            extra_parts.append(f"F-Score={piotroski_f_score:.0f}")
+        if altman_z_score is not None:
+            extra_parts.append(f"AltmanZ={altman_z_score:.2f}")
+        if beneish_m_score is not None:
+            extra_parts.append(f"BeneishM={beneish_m_score:.2f}")
+        if revenue_yoy is not None:
+            extra_parts.append(f"营收同比={revenue_yoy:.2f}%")
+        if revenue_cagr_3y is not None:
+            extra_parts.append(f"营收3Y CAGR={revenue_cagr_3y:.2f}%")
+        if net_profit_yoy is not None:
+            extra_parts.append(f"净利同比={net_profit_yoy:.2f}%")
+        if profit_cagr_3y is not None:
+            extra_parts.append(f"净利3Y CAGR={profit_cagr_3y:.2f}%")
+        if oper_profit_yoy is not None:
+            extra_parts.append(f"营业利润同比={oper_profit_yoy:.2f}%")
+        if fcf is not None:
+            extra_parts.append(f"FCF={fcf / 1e8:.2f}亿")
+        if fcf_yield is not None:
+            extra_parts.append(f"FCF收益率={fcf_yield:.2f}%")
+        if fcf_margin is not None:
+            extra_parts.append(f"FCF率={fcf_margin:.2f}%")
+        if ocf_yield is not None:
+            extra_parts.append(f"经营现金流收益率={ocf_yield:.2f}%")
         if net_working_capital is not None:
             extra_parts.append(f"净营运资本={net_working_capital:.2f}亿")
+        if working_capital_change is not None:
+            extra_parts.append(f"营运资本变动={working_capital_change:.2f}亿")
         if report_period:
             extra_parts.append(f"财报期={report_period}")
         if is_st is True:
             extra_parts.append("⚠️ ST")
+        if factor_diagnostics:
+            diagnosis_parts = []
+            for field_name, label in [
+                ("piotroski_f_score", "F-Score"),
+                ("altman_z_score", "AltmanZ"),
+                ("beneish_m_score", "BeneishM"),
+            ]:
+                diagnostic = factor_diagnostics.get(field_name) or {}
+                state = diagnostic.get("data_quality_state")
+                if state:
+                    diagnosis_parts.append(f"{label}缺失={state}")
+            if diagnosis_parts:
+                extra_parts.append("; ".join(diagnosis_parts))
+        if factor_warnings:
+            warning_parts = []
+            for field_name, payload in factor_warnings.items():
+                categories = payload.get("warning_categories") or []
+                conditions = payload.get("warning_conditions") or []
+                category_str = "/".join(str(category) for category in categories) if categories else "warning"
+                condition_str = str(conditions[0]) if conditions else "triggered"
+                warning_parts.append(f"{field_name}={category_str}:{condition_str}")
+            if warning_parts:
+                extra_parts.append("Warnings=" + "; ".join(warning_parts))
         extra_str = (" | " + " ".join(extra_parts)) if extra_parts else ""
 
         lines.append(
             f"{i}. {code} {name}（{industry}）"
-            f" | PE={pe_str} PB={pb_str} ROE={roe_str}"
+            f" | PE={pe_str} PB={pb_str} PS={ps_str} ROE={roe_str}"
             f" | 市值={mv_str} 股价={price_str} 涨跌={chg_str}"
             f"{extra_str}"
         )

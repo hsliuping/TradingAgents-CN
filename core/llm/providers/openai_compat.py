@@ -92,6 +92,11 @@ class OpenAICompatAdapter(BaseAdapter):
         result = []
         for msg in messages:
             converted = {"role": msg.role, "content": msg.content or ""}
+
+            # 推理模型（如 Qwen thinking / DeepSeek reasoning）在工具回合中
+            # 需要回传上一轮 assistant 的 reasoning_content，否则 provider 会拒绝请求。
+            if getattr(msg, 'reasoning_content', None):
+                converted["reasoning_content"] = msg.reasoning_content
             
             if msg.name:
                 converted["name"] = msg.name
@@ -122,21 +127,27 @@ class OpenAICompatAdapter(BaseAdapter):
         tools: Optional[List[Dict[str, Any]]] = None,
         **kwargs
     ) -> Dict[str, Any]:
-        """构建请求参数"""
+        """构建请求参数
+
+        支持通过 kwargs 覆盖 temperature / max_tokens 等参数，
+        优先级：kwargs > self.config。
+        """
         request_kwargs = {
             "model": self.config.model,
             "messages": self._convert_messages(messages),
-            "temperature": kwargs.get("temperature", self.config.temperature),
+            "temperature": kwargs.pop("temperature", self.config.temperature),
         }
-        
-        if self.config.max_tokens:
-            request_kwargs["max_tokens"] = self.config.max_tokens
-        
+
+        # max_tokens: kwargs 优先，其次 config
+        max_tokens = kwargs.pop("max_tokens", None) or self.config.max_tokens
+        if max_tokens:
+            request_kwargs["max_tokens"] = max_tokens
+
         if tools:
             request_kwargs["tools"] = self.convert_tools_to_provider_format(tools)
             if self.config.tool_choice:
                 request_kwargs["tool_choice"] = self.config.tool_choice
-        
+
         return request_kwargs
     
     def chat(
@@ -249,9 +260,11 @@ class OpenAICompatAdapter(BaseAdapter):
         if raw_content is None or (isinstance(raw_content, str) and not raw_content.strip()):
             raw_content = getattr(message, 'reasoning_content', None)
         content = raw_content if raw_content else None
+        reasoning_content = getattr(message, 'reasoning_content', None)
 
         return LLMResponse(
             content=content,
+            reasoning_content=reasoning_content,
             tool_calls=tool_calls,
             finish_reason=choice.finish_reason if hasattr(choice, 'finish_reason') else None,
             model=response.model if hasattr(response, 'model') else None,

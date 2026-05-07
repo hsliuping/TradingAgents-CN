@@ -33,6 +33,8 @@ from app.services.memory_state_manager import get_memory_state_manager, TaskStat
 from app.services.redis_progress_tracker import RedisProgressTracker, get_progress_by_id
 from app.services.progress_log_handler import register_analysis_tracker, unregister_analysis_tracker
 
+ETF_CODE_PREFIXES = ("50", "51", "52", "56", "58", "15", "16", "18")
+
 # 股票基础信息获取（用于补充显示名称）
 try:
     from tradingagents.dataflows.data_source_manager import get_data_source_manager
@@ -43,6 +45,12 @@ try:
 except Exception:
     _get_stock_info_safe = None
 
+try:
+    from tradingagents.config.database_manager import get_mongodb_client, get_database_manager
+except Exception:
+    get_mongodb_client = None
+    get_database_manager = None
+
 # 设置日志
 logger = logging.getLogger("app.services.simple_analysis_service")
 
@@ -50,7 +58,52 @@ logger = logging.getLogger("app.services.simple_analysis_service")
 config_service = ConfigService()
 
 
-async def get_provider_by_model_name(model_name: str) -> str:
+def _is_cn_etf_symbol(code: Optional[str]) -> bool:
+    code_str = str(code or "").strip()
+    return len(code_str) == 6 and code_str.isdigit() and code_str.startswith(ETF_CODE_PREFIXES)
+
+
+def _get_cached_security_name(code: Optional[str]) -> Optional[str]:
+    if not code or get_mongodb_client is None:
+        return None
+
+    code_str = str(code).strip().zfill(6)
+
+    try:
+        client = get_mongodb_client()
+        if not client:
+            return None
+
+        db_name = "tradingagents"
+        if get_database_manager is not None:
+            try:
+                db_name = get_database_manager().mongodb_config.get("database", "tradingagents")
+            except Exception:
+                pass
+
+        db = client[db_name]
+
+        if _is_cn_etf_symbol(code_str):
+            doc = db["etf_basic_info"].find_one(
+                {"code": code_str},
+                {"name": 1, "fund_name": 1, "etf_name": 1, "symbol": 1, "_id": 0}
+            )
+            if doc:
+                return doc.get("name") or doc.get("fund_name") or doc.get("etf_name")
+
+        doc = db["stock_basic_info"].find_one(
+            {"$or": [{"code": code_str}, {"symbol": code_str}]},
+            {"name": 1, "stock_name": 1, "_id": 0}
+        )
+        if doc:
+            return doc.get("name") or doc.get("stock_name")
+    except Exception as e:
+        logger.debug(f"读取缓存名称失败（忽略）: {code_str} - {e}")
+
+    return None
+
+
+async def get_provider_by_model_name(model_name: str, preferred_provider: Optional[str] = None) -> str:
     """
     根据模型名称从数据库配置中查找对应的供应商（异步版本）
 
@@ -67,12 +120,17 @@ async def get_provider_by_model_name(model_name: str) -> str:
             logger.warning(f"⚠️ 系统配置为空，使用默认供应商映射")
             return _get_default_provider_by_model(model_name)
 
+        normalized_provider = str(preferred_provider or "").strip().lower()
+
         # 在LLM配置中查找匹配的模型
         for llm_config in system_config.llm_configs:
-            if llm_config.model_name == model_name:
-                provider = llm_config.provider.value if hasattr(llm_config.provider, 'value') else str(llm_config.provider)
-                logger.info(f"✅ 从数据库找到模型 {model_name} 的供应商: {provider}")
-                return provider
+            if llm_config.model_name != model_name:
+                continue
+            provider = llm_config.provider.value if hasattr(llm_config.provider, 'value') else str(llm_config.provider)
+            if normalized_provider and str(provider).lower() != normalized_provider:
+                continue
+            logger.info(f"✅ 从数据库找到模型 {model_name} 的供应商: {provider}")
+            return provider
 
         # 如果数据库中没有找到，使用默认映射
         logger.warning(f"⚠️ 数据库中未找到模型 {model_name}，使用默认映射")
@@ -83,7 +141,7 @@ async def get_provider_by_model_name(model_name: str) -> str:
         return _get_default_provider_by_model(model_name)
 
 
-def get_provider_by_model_name_sync(model_name: str) -> str:
+def get_provider_by_model_name_sync(model_name: str, preferred_provider: Optional[str] = None) -> str:
     """
     根据模型名称从数据库配置中查找对应的供应商（同步版本）
 
@@ -93,11 +151,15 @@ def get_provider_by_model_name_sync(model_name: str) -> str:
     Returns:
         str: 供应商名称，如 'dashscope', 'openai' 等
     """
-    provider_info = get_provider_and_url_by_model_sync(model_name)
+    provider_info = get_provider_and_url_by_model_sync(model_name, preferred_provider=preferred_provider)
     return provider_info["provider"]
 
 
-def get_provider_and_url_by_model_sync(model_name: str) -> dict:
+def get_provider_and_url_by_model_sync(
+    model_name: str,
+    preferred_provider: Optional[str] = None,
+    preferred_config_id: Optional[str] = None,
+) -> dict:
     """
     根据模型名称从数据库配置中查找对应的供应商和 API URL（同步版本）
 
@@ -120,83 +182,108 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
         configs_collection = db.system_configs
         doc = configs_collection.find_one({"is_active": True}, sort=[("version", -1)])
 
+        normalized_provider = str(preferred_provider or "").strip().lower()
+        normalized_config_id = str(preferred_config_id or "").strip()
+
+        def _build_provider_result(config_dict: dict) -> dict:
+            provider = str(config_dict.get("provider") or "").strip().lower()
+            api_base = config_dict.get("api_base")
+            model_api_key = config_dict.get("api_key")
+
+            providers_collection = db.llm_providers
+            provider_doc = providers_collection.find_one({"name": provider})
+
+            from app.utils.api_key_utils import is_valid_api_key
+
+            api_key = None
+            api_key_source = None
+            logger.info(f"🔍 [同步查询] 模型 {config_dict.get('model_name')} API Key 获取流程:")
+
+            if provider_doc and provider_doc.get("api_key"):
+                provider_api_key = provider_doc["api_key"]
+                logger.info(f"   - 厂家配置中的 api_key: {'有值' if provider_api_key else '空'}")
+                if is_valid_api_key(provider_api_key):
+                    api_key = provider_api_key.strip()
+                    api_key_source = "厂家配置"
+                    logger.info("✅ [同步查询] ✅ 使用厂家配置的 API Key（优先级1）")
+                else:
+                    logger.warning("⚠️ [同步查询] 厂家配置的 API Key 无效（可能是占位符或空值）")
+            else:
+                logger.info(f"   - 厂家配置: {'存在但无API Key' if provider_doc else '不存在'}")
+
+            if not api_key:
+                logger.info(f"   - 模型配置中的 api_key: {'有值' if model_api_key else '空'}")
+                if is_valid_api_key(model_api_key):
+                    api_key = model_api_key.strip()
+                    api_key_source = "模型配置"
+                    logger.info("✅ [同步查询] ✅ 使用模型配置的 API Key（优先级2，备选）")
+
+            if not api_key:
+                env_api_key = _get_env_api_key_for_provider(provider)
+                logger.info(f"   - 环境变量中的 api_key: {'有值' if env_api_key else '空'}")
+                if env_api_key:
+                    api_key = env_api_key
+                    api_key_source = "环境变量"
+                    logger.info("✅ [同步查询] ✅ 使用环境变量的 API Key（优先级3）")
+                else:
+                    logger.warning(f"⚠️ [同步查询] ❌ 未找到 {provider} 的 API Key（厂家配置、模型配置、环境变量都没有）")
+
+            if api_key_source:
+                logger.info(f"✅ [同步查询] 最终使用的 API Key 来源: {api_key_source}")
+
+            if api_base:
+                backend_url = api_base
+                logger.info(f"✅ [同步查询] 模型 {config_dict.get('model_name')} 使用自定义 API: {api_base}")
+            elif provider_doc and provider_doc.get("default_base_url"):
+                backend_url = provider_doc["default_base_url"]
+                logger.info(f"✅ [同步查询] 模型 {config_dict.get('model_name')} 使用厂家默认 API: {backend_url}")
+            else:
+                backend_url = _get_default_backend_url(provider)
+                logger.warning(f"⚠️ [同步查询] 厂家 {provider} 没有配置 default_base_url，使用硬编码默认值")
+
+            return {
+                "provider": provider,
+                "backend_url": backend_url,
+                "api_key": api_key,
+            }
+
         if doc and "llm_configs" in doc:
             llm_configs = doc["llm_configs"]
+            fallback_config = None
+
+            if normalized_config_id:
+                exact_config = next(
+                    (
+                        config_dict
+                        for config_dict in llm_configs
+                        if str(config_dict.get("config_id") or "").strip() == normalized_config_id
+                        and config_dict.get("enabled", True)
+                    ),
+                    None,
+                )
+                if exact_config is not None:
+                    result = _build_provider_result(exact_config)
+                    client.close()
+                    return result
 
             for config_dict in llm_configs:
-                if config_dict.get("model_name") == model_name:
-                    provider = config_dict.get("provider")
-                    api_base = config_dict.get("api_base")
-                    model_api_key = config_dict.get("api_key")  # 🔥 获取模型配置的 API Key
+                if config_dict.get("model_name") != model_name:
+                    continue
 
-                    # 从 llm_providers 集合中查找厂家配置
-                    providers_collection = db.llm_providers
-                    provider_doc = providers_collection.find_one({"name": provider})
+                provider = str(config_dict.get("provider") or "").strip().lower()
+                if fallback_config is None:
+                    fallback_config = config_dict
+                if normalized_provider and provider != normalized_provider:
+                    continue
+                result = _build_provider_result(config_dict)
+                client.close()
+                return result
 
-                    # 🔥 方案3：确定 API Key（新优先级：厂家配置 > 模型配置 > 环境变量）
-                    # 原因：
-                    # 1. 厂家配置是用户主动管理的，应该优先使用
-                    # 2. 模型配置中的 API Key 可能是历史遗留的"快照"
-                    # 3. 这样更新厂家配置后，所有模型立即生效
-                    from app.utils.api_key_utils import is_valid_api_key
-
-                    api_key = None
-                    api_key_source = None
-                    logger.info(f"🔍 [同步查询] 模型 {model_name} API Key 获取流程:")
-
-                    # 优先级1：厂家配置
-                    if provider_doc and provider_doc.get("api_key"):
-                        provider_api_key = provider_doc["api_key"]
-                        logger.info(f"   - 厂家配置中的 api_key: {'有值' if provider_api_key else '空'}")
-                        if is_valid_api_key(provider_api_key):
-                            api_key = provider_api_key.strip()
-                            api_key_source = "厂家配置"
-                            logger.info(f"✅ [同步查询] ✅ 使用厂家配置的 API Key（优先级1）")
-                        else:
-                            logger.warning(f"⚠️ [同步查询] 厂家配置的 API Key 无效（可能是占位符或空值）")
-                    else:
-                        logger.info(f"   - 厂家配置: {'存在但无API Key' if provider_doc else '不存在'}")
-
-                    # 优先级2：模型配置（作为备选）
-                    if not api_key:
-                        logger.info(f"   - 模型配置中的 api_key: {'有值' if model_api_key else '空'}")
-                        if is_valid_api_key(model_api_key):
-                            api_key = model_api_key.strip()
-                            api_key_source = "模型配置"
-                            logger.info(f"✅ [同步查询] ✅ 使用模型配置的 API Key（优先级2，备选）")
-
-                    # 优先级3：环境变量
-                    if not api_key:
-                        env_api_key = _get_env_api_key_for_provider(provider)
-                        logger.info(f"   - 环境变量中的 api_key: {'有值' if env_api_key else '空'}")
-                        if env_api_key:
-                            api_key = env_api_key
-                            api_key_source = "环境变量"
-                            logger.info(f"✅ [同步查询] ✅ 使用环境变量的 API Key（优先级3）")
-                        else:
-                            logger.warning(f"⚠️ [同步查询] ❌ 未找到 {provider} 的 API Key（厂家配置、模型配置、环境变量都没有）")
-
-                    if api_key_source:
-                        logger.info(f"✅ [同步查询] 最终使用的 API Key 来源: {api_key_source}")
-
-                    # 确定 backend_url
-                    backend_url = None
-                    if api_base:
-                        backend_url = api_base
-                        logger.info(f"✅ [同步查询] 模型 {model_name} 使用自定义 API: {api_base}")
-                    elif provider_doc and provider_doc.get("default_base_url"):
-                        backend_url = provider_doc["default_base_url"]
-                        logger.info(f"✅ [同步查询] 模型 {model_name} 使用厂家默认 API: {backend_url}")
-                    else:
-                        backend_url = _get_default_backend_url(provider)
-                        logger.warning(f"⚠️ [同步查询] 厂家 {provider} 没有配置 default_base_url，使用硬编码默认值")
-
-                    client.close()
-                    return {
-                        "provider": provider,
-                        "backend_url": backend_url,
-                        "api_key": api_key
-                    }
+            if fallback_config is not None:
+                logger.warning(f"⚠️ [同步查询] 模型 {model_name} 未找到 provider={normalized_provider or '-'} 的精确配置，回退到同名模型的首个配置")
+                result = _build_provider_result(fallback_config)
+                client.close()
+                return result
 
         client.close()
 
@@ -696,6 +783,11 @@ class SimpleAnalysisService:
             return self._stock_name_cache[code]
         name = None
         try:
+            name = _get_cached_security_name(code)
+            if name:
+                self._stock_name_cache[code] = name
+                return name
+
             if _get_stock_info_safe:
                 info = _get_stock_info_safe(code)
                 if isinstance(info, dict):
@@ -703,7 +795,7 @@ class SimpleAnalysisService:
         except Exception as e:
             logger.warning(f"⚠️ 获取股票名称失败: {code} - {e}")
         if not name:
-            name = f"股票{code}"
+            name = f"{'ETF' if _is_cn_etf_symbol(code) else '股票'}{code}"
         # 写缓存
         self._stock_name_cache[code] = name
         return name
@@ -2686,25 +2778,33 @@ class SimpleAnalysisService:
             stock_name = stock_symbol  # 默认使用股票代码
             try:
                 if market_info.get("market") == "china_a":
+                    if _is_cn_etf_symbol(stock_symbol):
+                        cached_name = _get_cached_security_name(stock_symbol)
+                        if cached_name:
+                            stock_name = cached_name
+                            logger.info(f"✅ 获取ETF名称: {stock_symbol} -> {stock_name}")
+                        else:
+                            stock_name = f"ETF{stock_symbol}"
                     # A股：使用统一接口获取股票信息
-                    from tradingagents.dataflows.interface import get_china_stock_info_unified
-                    stock_info = get_china_stock_info_unified(stock_symbol)
-                    logger.debug(f"📊 获取股票信息返回: {stock_info[:200] if stock_info else 'None'}...")
-
-                    if stock_info and "股票名称:" in stock_info:
-                        stock_name = stock_info.split("股票名称:")[1].split("\n")[0].strip()
-                        logger.info(f"✅ 获取A股名称: {stock_symbol} -> {stock_name}")
                     else:
-                        # 降级方案：尝试直接从数据源管理器获取
-                        logger.warning(f"⚠️ 无法从统一接口解析股票名称: {stock_symbol}，尝试降级方案")
-                        try:
-                            from tradingagents.dataflows.data_source_manager import get_china_stock_info_unified as get_info_dict
-                            info_dict = get_info_dict(stock_symbol)
-                            if info_dict and info_dict.get('name'):
-                                stock_name = info_dict['name']
-                                logger.info(f"✅ 降级方案成功获取股票名称: {stock_symbol} -> {stock_name}")
-                        except Exception as fallback_e:
-                            logger.error(f"❌ 降级方案也失败: {fallback_e}")
+                        from tradingagents.dataflows.interface import get_china_stock_info_unified
+                        stock_info = get_china_stock_info_unified(stock_symbol)
+                        logger.debug(f"📊 获取股票信息返回: {stock_info[:200] if stock_info else 'None'}...")
+
+                        if stock_info and "股票名称:" in stock_info:
+                            stock_name = stock_info.split("股票名称:")[1].split("\n")[0].strip()
+                            logger.info(f"✅ 获取A股名称: {stock_symbol} -> {stock_name}")
+                        else:
+                            # 降级方案：尝试直接从数据源管理器获取
+                            logger.warning(f"⚠️ 无法从统一接口解析股票名称: {stock_symbol}，尝试降级方案")
+                            try:
+                                from tradingagents.dataflows.data_source_manager import get_china_stock_info_unified as get_info_dict
+                                info_dict = get_info_dict(stock_symbol)
+                                if info_dict and info_dict.get('name'):
+                                    stock_name = info_dict['name']
+                                    logger.info(f"✅ 降级方案成功获取股票名称: {stock_symbol} -> {stock_name}")
+                            except Exception as fallback_e:
+                                logger.error(f"❌ 降级方案也失败: {fallback_e}")
 
                 elif market_info.get("market") == "hong_kong":
                     # 港股：使用改进的港股工具

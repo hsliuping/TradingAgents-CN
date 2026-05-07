@@ -7,6 +7,7 @@ logger = get_logger("default")
 
 # 导入模板客户端
 from tradingagents.utils.template_client import get_agent_prompt
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails, build_research_only_closing
 
 
 def create_neutral_debator(llm):
@@ -80,6 +81,7 @@ def create_neutral_debator(llm):
                 fallback_prompt=None
             )
 
+            system_prompt = apply_compliance_guardrails(system_prompt, "neutral_debator")
             logger.info(f"✅ [中性风险分析师] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
 
         except Exception as e:
@@ -94,6 +96,7 @@ def create_neutral_debator(llm):
 倡导更平衡的方法，说明为什么适度风险策略可能提供两全其美的效果。
 
 请用中文以对话方式输出。"""
+            system_prompt = apply_compliance_guardrails(system_prompt, "neutral_debator")
             logger.warning(f"⚠️ [中性风险分析师] 使用降级提示词 (长度: {len(system_prompt)})")
 
         # 构建完整提示词
@@ -112,7 +115,7 @@ def create_neutral_debator(llm):
 激进分析师的最后回应：{current_risky_response}
 安全分析师的最后回应：{current_safe_response}
 
-请提出您的中性观点，强调为什么平衡方法是最可靠的。"""
+{build_research_only_closing(["请提出您的中性研究观点，强调情景分歧与约束条件，但不要形成折中交易方案。"])}"""
 
         logger.info(f"⏱️ [Neutral Analyst] 开始调用LLM...")
         llm_start_time = time.time()

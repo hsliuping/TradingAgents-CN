@@ -16,13 +16,6 @@
           </span>
         </template>
       </el-table-column>
-      <el-table-column prop="overall_score" label="评分" width="100" align="center">
-        <template #default="{ row }">
-          <el-tag :type="getScoreType(row.overall_score)" size="small">
-            {{ row.overall_score }}分
-          </el-tag>
-        </template>
-      </el-table-column>
       <el-table-column prop="tags" label="标签" min-width="150">
         <template #default="{ row }">
           <el-tag 
@@ -95,12 +88,6 @@ const formatPnl = (value: number) => {
   if (value === undefined || value === null) return '-'
   const prefix = value >= 0 ? '+' : ''
   return prefix + value.toFixed(2)
-}
-
-const getScoreType = (score: number) => {
-  if (score >= 80) return 'success'
-  if (score >= 60) return 'warning'
-  return 'danger'
 }
 
 const handlePageChange = (page: number) => {

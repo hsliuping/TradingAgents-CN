@@ -87,13 +87,20 @@ class TestTushareSyncService:
             "errors": []
         })
         
-        result = await sync_service.sync_stock_basic_info()
+        with patch(
+            'app.services.official_industry_service.upsert_industry_mapping_from_records',
+            new_callable=AsyncMock,
+            return_value={"provider": "tushare_fallback", "total": 2, "upserted": 2, "modified": 0}
+        ) as mock_upsert_industry:
+            result = await sync_service.sync_stock_basic_info()
         
         assert result["total_processed"] == 2
         assert result["success_count"] == 2
         assert result["error_count"] == 0
         assert "duration" in result
         sync_service.provider.get_stock_list.assert_called_once_with(market="CN")
+        mock_upsert_industry.assert_awaited_once_with(mock_stock_list, provider="tushare_fallback")
+
     
     @pytest.mark.asyncio
     async def test_sync_stock_basic_info_no_data(self, sync_service):

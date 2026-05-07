@@ -171,40 +171,40 @@
                   </el-alert>
                 </div>
                 <!-- 任务进度显示 -->
-                <div v-if="taskProgress[task.id]" class="task-progress">
+                <div v-if="displayTaskProgress[task.id]" class="task-progress">
                   <el-progress
-                    :percentage="taskProgress[task.id].progress || 0"
-                    :status="getProgressStatus(taskProgress[task.id].status)"
+                    :percentage="displayTaskProgress[task.id].progress || 0"
+                    :status="getProgressStatus(displayTaskProgress[task.id].status)"
                     :stroke-width="6"
                   />
                   <div class="progress-info">
                     <div class="progress-row">
-                      <span v-if="taskProgress[task.id].message" class="progress-message">
-                        {{ taskProgress[task.id].message }}
+                      <span v-if="displayTaskProgress[task.id].message" class="progress-message">
+                        {{ displayTaskProgress[task.id].message }}
                       </span>
-                      <span v-if="taskProgress[task.id].processed_items !== undefined && taskProgress[task.id].total_items !== undefined" class="progress-count">
-                        {{ taskProgress[task.id].processed_items }}/{{ taskProgress[task.id].total_items }}
+                      <span v-if="displayTaskProgress[task.id].processed_items !== undefined && displayTaskProgress[task.id].total_items !== undefined" class="progress-count">
+                        {{ displayTaskProgress[task.id].processed_items }}/{{ displayTaskProgress[task.id].total_items }}
                       </span>
                     </div>
                     <div v-if="shouldShowProgressDetails(task.id)" class="progress-details">
-                      <span v-if="taskProgress[task.id].started_at" class="progress-time">
-                        开始时间: {{ formatTime(taskProgress[task.id].started_at) }}
+                      <span v-if="displayTaskProgress[task.id].started_at" class="progress-time">
+                        开始时间: {{ formatTime(displayTaskProgress[task.id].started_at) }}
                       </span>
                       <span class="progress-percentage">
-                        完成度: {{ taskProgress[task.id].progress || 0 }}%
+                        完成度: {{ displayTaskProgress[task.id].progress || 0 }}%
                       </span>
-                      <span v-if="taskProgress[task.id].started_at" class="progress-elapsed">
-                        已用时间: {{ calculateElapsedTime(taskProgress[task.id].started_at!) }}
+                      <span v-if="displayTaskProgress[task.id].started_at" class="progress-elapsed">
+                        已用时间: {{ calculateElapsedTime(displayTaskProgress[task.id].started_at!) }}
                       </span>
-                      <span v-if="taskProgress[task.id].started_at && (taskProgress[task.id].progress || 0) > 0" class="progress-remaining">
-                        剩余时间: {{ calculateRemainingTime(taskProgress[task.id].started_at!, taskProgress[task.id].progress || 0) }}
+                      <span v-if="displayTaskProgress[task.id].started_at && (displayTaskProgress[task.id].progress || 0) > 0" class="progress-remaining">
+                        剩余时间: {{ calculateRemainingTime(displayTaskProgress[task.id].started_at!, displayTaskProgress[task.id].progress || 0) }}
                       </span>
                       <el-button
-                        v-if="taskProgress[task.id].execution_id"
+                        v-if="displayTaskProgress[task.id].execution_id"
                         size="small"
                         type="danger"
                         :icon="CircleClose"
-                        @click="handleTerminateTask(task.id, taskProgress[task.id].execution_id!)"
+                        @click="handleTerminateTask(task.id, displayTaskProgress[task.id].execution_id!)"
                         style="margin-left: 8px;"
                       >
                         终止
@@ -359,40 +359,40 @@
                   </el-alert>
                 </div>
                 <!-- 任务进度显示 -->
-                <div v-if="taskProgress[task.id]" class="task-progress">
+                <div v-if="displayTaskProgress[task.id]" class="task-progress">
                   <el-progress
-                    :percentage="taskProgress[task.id].progress || 0"
-                    :status="getProgressStatus(taskProgress[task.id].status)"
+                    :percentage="displayTaskProgress[task.id].progress || 0"
+                    :status="getProgressStatus(displayTaskProgress[task.id].status)"
                     :stroke-width="6"
                   />
                   <div class="progress-info">
                     <div class="progress-row">
-                      <span v-if="taskProgress[task.id].message" class="progress-message">
-                        {{ taskProgress[task.id].message }}
+                      <span v-if="displayTaskProgress[task.id].message" class="progress-message">
+                        {{ displayTaskProgress[task.id].message }}
                       </span>
-                      <span v-if="taskProgress[task.id].processed_items !== undefined && taskProgress[task.id].total_items !== undefined" class="progress-count">
-                        {{ taskProgress[task.id].processed_items }}/{{ taskProgress[task.id].total_items }}
+                      <span v-if="displayTaskProgress[task.id].processed_items !== undefined && displayTaskProgress[task.id].total_items !== undefined" class="progress-count">
+                        {{ displayTaskProgress[task.id].processed_items }}/{{ displayTaskProgress[task.id].total_items }}
                       </span>
                     </div>
                     <div v-if="shouldShowProgressDetails(task.id)" class="progress-details">
-                      <span v-if="taskProgress[task.id].started_at" class="progress-time">
-                        开始时间: {{ formatTime(taskProgress[task.id].started_at) }}
+                      <span v-if="displayTaskProgress[task.id].started_at" class="progress-time">
+                        开始时间: {{ formatTime(displayTaskProgress[task.id].started_at) }}
                       </span>
                       <span class="progress-percentage">
-                        完成度: {{ taskProgress[task.id].progress || 0 }}%
+                        完成度: {{ displayTaskProgress[task.id].progress || 0 }}%
                       </span>
-                      <span v-if="taskProgress[task.id].started_at" class="progress-elapsed">
-                        已用时间: {{ calculateElapsedTime(taskProgress[task.id].started_at!) }}
+                      <span v-if="displayTaskProgress[task.id].started_at" class="progress-elapsed">
+                        已用时间: {{ calculateElapsedTime(displayTaskProgress[task.id].started_at!) }}
                       </span>
-                      <span v-if="taskProgress[task.id].started_at && (taskProgress[task.id].progress || 0) > 0" class="progress-remaining">
-                        剩余时间: {{ calculateRemainingTime(taskProgress[task.id].started_at!, taskProgress[task.id].progress || 0) }}
+                      <span v-if="displayTaskProgress[task.id].started_at && (displayTaskProgress[task.id].progress || 0) > 0" class="progress-remaining">
+                        剩余时间: {{ calculateRemainingTime(displayTaskProgress[task.id].started_at!, displayTaskProgress[task.id].progress || 0) }}
                       </span>
                       <el-button
-                        v-if="taskProgress[task.id].execution_id"
+                        v-if="displayTaskProgress[task.id].execution_id"
                         size="small"
                         type="danger"
                         :icon="CircleClose"
-                        @click="handleTerminateTask(task.id, taskProgress[task.id].execution_id!)"
+                        @click="handleTerminateTask(task.id, displayTaskProgress[task.id].execution_id!)"
                         style="margin-left: 8px;"
                       >
                         终止
@@ -547,40 +547,40 @@
                   </el-alert>
                 </div>
                 <!-- 任务进度显示 -->
-                <div v-if="taskProgress[task.id]" class="task-progress">
+                <div v-if="displayTaskProgress[task.id]" class="task-progress">
                   <el-progress
-                    :percentage="taskProgress[task.id].progress || 0"
-                    :status="getProgressStatus(taskProgress[task.id].status)"
+                    :percentage="displayTaskProgress[task.id].progress || 0"
+                    :status="getProgressStatus(displayTaskProgress[task.id].status)"
                     :stroke-width="6"
                   />
                   <div class="progress-info">
                     <div class="progress-row">
-                      <span v-if="taskProgress[task.id].message" class="progress-message">
-                        {{ taskProgress[task.id].message }}
+                      <span v-if="displayTaskProgress[task.id].message" class="progress-message">
+                        {{ displayTaskProgress[task.id].message }}
                       </span>
-                      <span v-if="taskProgress[task.id].processed_items !== undefined && taskProgress[task.id].total_items !== undefined" class="progress-count">
-                        {{ taskProgress[task.id].processed_items }}/{{ taskProgress[task.id].total_items }}
+                      <span v-if="displayTaskProgress[task.id].processed_items !== undefined && displayTaskProgress[task.id].total_items !== undefined" class="progress-count">
+                        {{ displayTaskProgress[task.id].processed_items }}/{{ displayTaskProgress[task.id].total_items }}
                       </span>
                     </div>
                     <div v-if="shouldShowProgressDetails(task.id)" class="progress-details">
-                      <span v-if="taskProgress[task.id].started_at" class="progress-time">
-                        开始时间: {{ formatTime(taskProgress[task.id].started_at) }}
+                      <span v-if="displayTaskProgress[task.id].started_at" class="progress-time">
+                        开始时间: {{ formatTime(displayTaskProgress[task.id].started_at) }}
                       </span>
                       <span class="progress-percentage">
-                        完成度: {{ taskProgress[task.id].progress || 0 }}%
+                        完成度: {{ displayTaskProgress[task.id].progress || 0 }}%
                       </span>
-                      <span v-if="taskProgress[task.id].started_at" class="progress-elapsed">
-                        已用时间: {{ calculateElapsedTime(taskProgress[task.id].started_at!) }}
+                      <span v-if="displayTaskProgress[task.id].started_at" class="progress-elapsed">
+                        已用时间: {{ calculateElapsedTime(displayTaskProgress[task.id].started_at!) }}
                       </span>
-                      <span v-if="taskProgress[task.id].started_at && (taskProgress[task.id].progress || 0) > 0" class="progress-remaining">
-                        剩余时间: {{ calculateRemainingTime(taskProgress[task.id].started_at!, taskProgress[task.id].progress || 0) }}
+                      <span v-if="displayTaskProgress[task.id].started_at && (displayTaskProgress[task.id].progress || 0) > 0" class="progress-remaining">
+                        剩余时间: {{ calculateRemainingTime(displayTaskProgress[task.id].started_at!, displayTaskProgress[task.id].progress || 0) }}
                       </span>
                       <el-button
-                        v-if="taskProgress[task.id].execution_id"
+                        v-if="displayTaskProgress[task.id].execution_id"
                         size="small"
                         type="danger"
                         :icon="CircleClose"
-                        @click="handleTerminateTask(task.id, taskProgress[task.id].execution_id!)"
+                        @click="handleTerminateTask(task.id, displayTaskProgress[task.id].execution_id!)"
                         style="margin-left: 8px;"
                       >
                         终止
@@ -644,6 +644,9 @@ const taskProgress = ref<Record<string, JobProgress>>({})
 const taskToggling = ref<Record<string, boolean>>({})
 const taskTriggering = ref<Record<string, boolean>>({})
 const progressPollingTimer = ref<NodeJS.Timeout | null>(null)
+
+const ACTIVE_PROGRESS_STATUSES = new Set<JobProgress['status']>(['running', 'cancelling', 'suspended'])
+const TERMINAL_PROGRESS_STATUSES = new Set<JobProgress['status']>(['success', 'failed', 'cancelled', 'unknown'])
 
 // 任务类型关键词映射
 const taskTypeKeywords: Record<string, string[]> = {
@@ -840,6 +843,92 @@ const loadTaskProgress = async (jobId: string) => {
   }
 }
 
+const buildRunningExecutionProgress = (jobId: string, task: JobStatus, storedProgress?: JobProgress): JobProgress | null => {
+  const runningExecution = task.running_execution
+  if (!runningExecution) return null
+
+  const isSameExecution = storedProgress?.execution_id === runningExecution.execution_id
+  return {
+    job_id: jobId,
+    execution_id: runningExecution.execution_id,
+    progress: typeof runningExecution.progress === 'number'
+      ? runningExecution.progress
+      : (storedProgress?.progress || 0),
+    status: isSameExecution && storedProgress?.status && ACTIVE_PROGRESS_STATUSES.has(storedProgress.status)
+      ? storedProgress.status
+      : 'running',
+    message: isSameExecution
+      ? (storedProgress?.message || '任务执行中...')
+      : '任务执行中...',
+    current_item: isSameExecution
+      ? (storedProgress?.current_item || runningExecution.current_item)
+      : runningExecution.current_item,
+    total_items: isSameExecution
+      ? (storedProgress?.total_items ?? runningExecution.total_items)
+      : runningExecution.total_items,
+    processed_items: isSameExecution
+      ? (storedProgress?.processed_items ?? runningExecution.processed_items)
+      : runningExecution.processed_items,
+    started_at: runningExecution.started_at || storedProgress?.started_at,
+    updated_at: runningExecution.updated_at || storedProgress?.updated_at,
+  }
+}
+
+const resolveTaskDisplayProgress = (jobId: string): JobProgress | null => {
+  const storedProgress = taskProgress.value[jobId]
+  const task = allTasks.value.find(item => item.id === jobId)
+
+  if (!task?.running_execution) {
+    return storedProgress || null
+  }
+
+  const runningExecution = task.running_execution
+  if (storedProgress?.execution_id === runningExecution.execution_id) {
+    if (storedProgress.status && TERMINAL_PROGRESS_STATUSES.has(storedProgress.status)) {
+      return storedProgress
+    }
+
+    return {
+      ...buildRunningExecutionProgress(jobId, task, storedProgress)!,
+      ...storedProgress,
+      execution_id: runningExecution.execution_id,
+      progress: typeof storedProgress.progress === 'number' ? storedProgress.progress : runningExecution.progress,
+      started_at: storedProgress.started_at || runningExecution.started_at,
+      updated_at: storedProgress.updated_at || runningExecution.updated_at,
+      total_items: storedProgress.total_items ?? runningExecution.total_items,
+      processed_items: storedProgress.processed_items ?? runningExecution.processed_items,
+      current_item: storedProgress.current_item || runningExecution.current_item,
+      status: storedProgress.status && ACTIVE_PROGRESS_STATUSES.has(storedProgress.status)
+        ? storedProgress.status
+        : 'running',
+      message: storedProgress.message || '任务执行中...',
+    }
+  }
+
+  return buildRunningExecutionProgress(jobId, task, storedProgress)
+}
+
+const displayTaskProgress = computed<Record<string, JobProgress>>(() => {
+  const displayProgressMap: Record<string, JobProgress> = {}
+  const jobIds = new Set<string>([
+    ...Object.keys(taskProgress.value),
+    ...allTasks.value.map(task => task.id)
+  ])
+
+  for (const jobId of jobIds) {
+    const progress = resolveTaskDisplayProgress(jobId)
+    if (progress) {
+      displayProgressMap[jobId] = progress
+    }
+  }
+
+  return displayProgressMap
+})
+
+const getTaskDisplayProgress = (jobId: string): JobProgress | null => {
+  return displayTaskProgress.value[jobId] || null
+}
+
 // 切换任务启用状态
 const handleToggleTask = async (jobId: string, enabled: boolean) => {
   try {
@@ -884,17 +973,28 @@ const isHistoricalTask = (jobId: string): boolean => {
 }
 
 const isTaskRunning = (jobId: string): boolean => {
+  const progress = getTaskDisplayProgress(jobId)
+  if (progress?.status) {
+    if (ACTIVE_PROGRESS_STATUSES.has(progress.status)) {
+      return true
+    }
+
+    if (TERMINAL_PROGRESS_STATUSES.has(progress.status)) {
+      return false
+    }
+  }
+
   const task = allTasks.value.find(item => item.id === jobId)
   if (task?.has_running_execution) {
     return true
   }
 
-  return taskProgress.value[jobId]?.status === 'running'
+  return false
 }
 
 const shouldShowProgressDetails = (jobId: string): boolean => {
-  const status = taskProgress.value[jobId]?.status as string | undefined
-  return status === 'running' || status === 'suspended'
+  const status = getTaskDisplayProgress(jobId)?.status
+  return !!(status && ACTIVE_PROGRESS_STATUSES.has(status))
 }
 
 const getTaskRunningHint = (jobId: string): string => {
@@ -906,7 +1006,7 @@ const getTaskRunningHint = (jobId: string): string => {
     return `${taskName}正在执行中，当前进度 ${runningExecution.progress}%，请稍后再试`
   }
 
-  const progress = taskProgress.value[jobId]
+  const progress = getTaskDisplayProgress(jobId)
   if (progress?.progress !== undefined) {
     return `${taskName}正在执行中，当前进度 ${progress.progress}%，请稍后再试`
   }
@@ -915,18 +1015,21 @@ const getTaskRunningHint = (jobId: string): string => {
 }
 
 const getTaskActiveProgress = (jobId: string): number | null => {
-  const task = allTasks.value.find(item => item.id === jobId)
-  if (task?.running_execution?.progress !== undefined) {
-    return task.running_execution.progress
+  const progress = getTaskDisplayProgress(jobId)
+  if (!progress || !ACTIVE_PROGRESS_STATUSES.has(progress.status)) {
+    return null
   }
 
-  const progress = taskProgress.value[jobId]?.progress
-  return progress !== undefined ? progress : null
+  return progress.progress !== undefined ? progress.progress : null
 }
 
 const getTaskActiveStartedAt = (jobId: string): string | null => {
-  const task = allTasks.value.find(item => item.id === jobId)
-  return task?.running_execution?.started_at || taskProgress.value[jobId]?.started_at || null
+  const progress = getTaskDisplayProgress(jobId)
+  if (!progress || !ACTIVE_PROGRESS_STATUSES.has(progress.status)) {
+    return null
+  }
+
+  return progress.started_at || null
 }
 
 // 计算已用时间
@@ -1202,6 +1305,7 @@ const handleTriggerTask = async (jobId: string, fullSync: boolean = false) => {
     
     // 执行新任务（重新开始）
     taskTriggering.value[jobId] = true
+    delete taskProgress.value[jobId]
     
     const options: { incremental?: boolean; force?: boolean } = {}
     if (isHistoricalTask(jobId)) {
@@ -1247,6 +1351,7 @@ const handleTriggerTask = async (jobId: string, fullSync: boolean = false) => {
           
           // 用户确认强制执行，传递 force=true
           options.force = true
+          delete taskProgress.value[jobId]
           await triggerJob(jobId, options)
           const syncMode = isHistoricalTask(jobId) ? (fullSync ? '全量同步' : '增量同步') : ''
           ElMessage.success(`任务已强制执行${syncMode ? `（${syncMode}）` : ''}`)
@@ -1304,14 +1409,15 @@ const startProgressPolling = () => {
       await loadTaskProgress(task.id)
       
       // 检查是否有运行中的任务（包括 suspended 状态）
-      const progress = taskProgress.value[task.id]
-      if (progress && shouldShowProgressDetails(task.id)) {
+      const progress = getTaskDisplayProgress(task.id)
+      if (progress && ACTIVE_PROGRESS_STATUSES.has(progress.status)) {
         hasRunningTask = true
       }
     }
     
     // 如果没有运行中的任务，停止轮询
     if (!hasRunningTask) {
+      await loadTasks()
       stopProgressPolling()
     }
   }, 3000) // 每3秒轮询一次

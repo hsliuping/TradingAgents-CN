@@ -1,7 +1,7 @@
 {
   "_description": "TradingAgents-CN 预配置数据说明",
-  "_note": "实际的配置数据文件是 database_export_config_2025-10-17.json，已打包到 Docker 镜像中",
-  "_image_path": "/app/install/database_export_config_2025-10-17.json",
+  "_note": "实际的配置数据文件是 database_export_config_2026-04-30.json，发布与安装时请以最新快照为准",
+  "_image_path": "/app/install/database_export_config_2026-04-30.json",
   "_usage": "docker exec -it tradingagents-backend python scripts/import_config_and_create_user.py",
   
   "预配置集合": {
@@ -125,7 +125,7 @@
   "使用说明": {
     "1. 首次部署（推荐）": {
       "命令": "docker exec -it tradingagents-backend python scripts/import_config_and_create_user.py",
-      "说明": "自动导入镜像内置的配置数据（/app/install/database_export_config_2025-10-17.json）"
+      "说明": "自动导入镜像内置的配置数据（/app/install/database_export_config_2026-04-30.json）"
     },
     
     "2. 只创建用户": {

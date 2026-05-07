@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """
 开发环境启动脚本
-同时启动后端和 Worker，方便调试
+支持按服务分别启动，方便调试
+
+用法:
+  python scripts/start_dev.py docker 3.0       # 启动 v3.0 的 MongoDB+Redis
+  python scripts/start_dev.py backend 3.0      # 启动 v3.0 后端
+  python scripts/start_dev.py frontend 3.0     # 启动 v3.0 前端
+  python scripts/start_dev.py status           # 查看各版本端口配置
 """
 
+import argparse
 import subprocess
 import sys
 import os
@@ -11,110 +18,117 @@ import signal
 import time
 from pathlib import Path
 
-# 确保在项目根目录
 project_root = Path(__file__).parent.parent
 os.chdir(project_root)
 
-# 存储进程对象
-processes = []
+VERSION_CONFIG = {
+    "2.0": {"project": "ta-v201", "mongodb": 27017, "redis": 6379, "backend": 8000, "frontend": 3000},
+    "2.1": {"project": "ta-v210", "mongodb": 27018, "redis": 6380, "backend": 8001, "frontend": 3001},
+    "3.0": {"project": "ta-v3",   "mongodb": 27019, "redis": 6381, "backend": 8002, "frontend": 3002},
+}
 
 
-def signal_handler(sig, frame):
-    """信号处理器，优雅关闭所有进程"""
-    print("\n\n🛑 收到中断信号，正在关闭所有服务...")
-    for proc in processes:
-        try:
-            proc.terminate()
-        except:
-            pass
-    
-    # 等待进程结束
-    for proc in processes:
-        try:
-            proc.wait(timeout=5)
-        except:
-            try:
-                proc.kill()
-            except:
-                pass
-    
-    print("✅ 所有服务已关闭")
-    sys.exit(0)
+def cmd_status():
+    print("\n  开发环境端口配置")
+    print("  " + "=" * 40)
+    for v in ["2.0", "2.1", "3.0"]:
+        c = VERSION_CONFIG[v]
+        print(f"  v{v}:")
+        print(f"    MongoDB:  {c['mongodb']}")
+        print(f"    Redis:    {c['redis']}")
+        print(f"    Backend:  {c['backend']}  -> http://127.0.0.1:{c['backend']}")
+        print(f"    Frontend: {c['frontend']} -> http://localhost:{c['frontend']}")
+        print()
+
+
+def cmd_docker(version):
+    config = VERSION_CONFIG[version]
+    compose_file = project_root / "docker" / "docker-compose.dev.yml"
+    if not compose_file.exists():
+        print(f"[ERROR] {compose_file} not found")
+        sys.exit(1)
+
+    env = os.environ.copy()
+    env["MONGODB_PORT"] = str(config["mongodb"])
+    env["REDIS_PORT"] = str(config["redis"])
+
+    print(f"[Docker] Starting MongoDB ({config['mongodb']}) + Redis ({config['redis']})...")
+    print(f"  Project: {config['project']}")
+    subprocess.run(
+        ["docker-compose", "-p", config["project"], "-f", str(compose_file), "up", "-d"],
+        env=env,
+    )
+    print(f"[OK] Docker services started (project: {config['project']})")
+    print(f"  MongoDB: mongodb://admin:tradingagents123@localhost:{config['mongodb']}/tradingagents?authSource=admin")
+    print(f"  Redis:   redis://:tradingagents123@localhost:{config['redis']}/0")
+
+
+def cmd_backend(version, port=None):
+    config = VERSION_CONFIG[version]
+    backend_port = port or config["backend"]
+
+    os.environ["PORT"] = str(backend_port)
+    os.environ["HOST"] = "127.0.0.1"
+    os.environ["MONGODB_HOST"] = "localhost"
+    os.environ["MONGODB_PORT"] = str(config["mongodb"])
+    os.environ["REDIS_HOST"] = "localhost"
+    os.environ["REDIS_PORT"] = str(config["redis"])
+
+    print(f"[Backend] Starting FastAPI + Uvicorn...")
+    print(f"  Port: {backend_port}")
+    print(f"  URL:  http://127.0.0.1:{backend_port}")
+    print(f"  Docs: http://127.0.0.1:{backend_port}/docs")
+
+    try:
+        subprocess.run([
+            sys.executable, "-m", "uvicorn", "app.main:app",
+            "--host", "127.0.0.1", "--port", str(backend_port), "--log-level", "info",
+        ])
+    except KeyboardInterrupt:
+        print("\n[INFO] Backend stopped")
+
+
+def cmd_frontend(version, port=None):
+    config = VERSION_CONFIG[version]
+    frontend_port = port or config["frontend"]
+
+    os.environ["VITE_PORT"] = str(frontend_port)
+    os.environ["VITE_API_TARGET"] = f"http://localhost:{config['backend']}"
+
+    frontend_dir = project_root / "frontend"
+    print(f"[Frontend] Starting Vite dev server...")
+    print(f"  Port: {frontend_port}")
+    print(f"  URL:  http://localhost:{frontend_port}")
+    print(f"  API proxy -> http://localhost:{config['backend']}")
+
+    try:
+        subprocess.run(["npm", "run", "dev"], cwd=str(frontend_dir))
+    except KeyboardInterrupt:
+        print("\n[INFO] Frontend stopped")
 
 
 def main():
-    """主函数"""
-    print("🚀 TradingAgents-CN 开发环境启动器")
-    print("=" * 60)
-    print("将同时启动：")
-    print("  1. FastAPI 后端服务")
-    print("  2. Worker 队列消费者")
-    print("=" * 60)
-    print()
-    
-    # 注册信号处理器
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    try:
-        # 启动后端服务
-        print("📡 启动 FastAPI 后端服务...")
-        backend_proc = subprocess.Popen(
-            [sys.executable, "-m", "app"],
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-            cwd=str(project_root)
-        )
-        processes.append(backend_proc)
-        print(f"   ✅ 后端服务已启动 (PID: {backend_proc.pid})")
-        
-        # 等待后端启动
-        print("   ⏳ 等待后端服务就绪...")
-        time.sleep(3)
-        
-        # 启动 Worker
-        print("\n🔧 启动 Worker 队列消费者...")
-        worker_proc = subprocess.Popen(
-            [sys.executable, "-m", "app.worker"],
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-            cwd=str(project_root)
-        )
-        processes.append(worker_proc)
-        print(f"   ✅ Worker 已启动 (PID: {worker_proc.pid})")
-        
-        print("\n" + "=" * 60)
-        print("✅ 所有服务启动成功！")
-        print("=" * 60)
-        print("\n📍 服务地址：")
-        print("  - API服务: http://127.0.0.1:8000")
-        print("  - API文档: http://127.0.0.1:8000/docs")
-        print("\n💡 提示：")
-        print("  - 按 Ctrl+C 停止所有服务")
-        print("  - 后端日志和 Worker 日志会同时输出到控制台")
-        print("  - 详细日志请查看 logs/ 目录")
-        print("\n" + "=" * 60)
-        
-        # 等待所有进程
-        while True:
-            # 检查进程是否还在运行
-            for i, proc in enumerate(processes):
-                if proc.poll() is not None:
-                    # 进程已退出
-                    service_name = "后端服务" if i == 0 else "Worker"
-                    print(f"\n⚠️  {service_name} (PID: {proc.pid}) 已退出，退出码: {proc.returncode}")
-                    # 退出所有进程
-                    signal_handler(None, None)
-                    return
-            
-            time.sleep(1)
-            
-    except KeyboardInterrupt:
-        signal_handler(None, None)
-    except Exception as e:
-        print(f"\n❌ 启动失败: {e}")
-        signal_handler(None, None)
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="TradingAgents-CN 开发环境启动器")
+    parser.add_argument("command", choices=["docker", "backend", "frontend", "status"],
+                        help="docker=启动MongoDB+Redis, backend=启动后端, frontend=启动前端, status=查看端口配置")
+    parser.add_argument("version", nargs="?", choices=["2.0", "2.1", "3.0"],
+                        help="版本号 (2.0, 2.1, 3.0)")
+    parser.add_argument("--port", type=int, default=0, help="手动指定端口")
+    args = parser.parse_args()
+
+    if args.command == "status":
+        cmd_status()
+        return
+
+    if not args.version:
+        parser.error("该命令需要指定版本号，如: start_dev.py backend 3.0")
+
+    if args.command == "docker":
+        cmd_docker(args.version)
+    elif args.command == "backend":
+        cmd_backend(args.version, args.port or None)
+    elif args.command == "frontend":
+        cmd_frontend(args.version, args.port or None)
 
 
 if __name__ == "__main__":

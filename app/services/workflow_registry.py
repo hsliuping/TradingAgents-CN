@@ -192,9 +192,9 @@ class AnalysisWorkflowRegistry:
 def initialize_builtin_workflows() -> None:
     """初始化内置工作流配置
 
-    注册系统内置的分析流程：
+    注册系统内置的研究流程：
     1. 股票分析（TradingAgents完整流程）
-    2. 持仓分析
+    2. 持仓研究
     3. 交易复盘
     """
     if AnalysisWorkflowRegistry.is_initialized():
@@ -208,7 +208,7 @@ def initialize_builtin_workflows() -> None:
         task_type=AnalysisTaskType.STOCK_ANALYSIS,
         workflow_id="v2_stock_analysis",
         name="股票完整分析",
-        description="基于v2.0 Agent架构的完整多智能体协作分析流程。包含6个专业分析师并行分析，2个研究员辩论，研究经理综合评估，交易员制定策略，风险经理把控风险。",
+        description="基于v2.0 Agent架构的完整多智能体协作分析流程。包含6个专业分析师并行分析，2个研究员辩论，研究经理综合评估，研究整合员汇总结论，风险经理把控风险。",
         default_engine="workflow",
         supported_engines=["workflow", "legacy"],
         required_params=["symbol", "market_type"],
@@ -227,12 +227,12 @@ def initialize_builtin_workflows() -> None:
         is_active=True
     ))
 
-    # 2. 持仓分析流程
+    # 2. 持仓研究流程
     AnalysisWorkflowRegistry.register(AnalysisWorkflowConfig(
         task_type=AnalysisTaskType.POSITION_ANALYSIS,
         workflow_id="position_analysis",
-        name="持仓分析",
-        description="单股持仓分析流程。包含持仓技术面分析师、持仓基本面分析师、持仓风险评估师、持仓操作建议师。",
+        name="持仓研究",
+        description="单股持仓研究流程。包含持仓技术研究、持仓基本面研究、持仓风险评估与持仓结论整合。",
         default_engine="workflow",
         supported_engines=["workflow", "llm"],
         required_params=["position_id"],
@@ -279,7 +279,7 @@ def initialize_builtin_workflows() -> None:
         task_type=AnalysisTaskType.TRADE_REVIEW,
         workflow_id="trade_review",
         name="交易复盘",
-        description="交易复盘分析流程。包含时机分析师、仓位分析师、情绪与纪律分析师、归因分析师、复盘总结师。",
+        description="交易复盘流程。包含时机复盘、仓位复盘、情绪与纪律复盘、归因复盘与复盘总结。",
         default_engine="workflow",
         supported_engines=["workflow", "llm"],
         required_params=["review_id"],
@@ -291,7 +291,7 @@ def initialize_builtin_workflows() -> None:
         max_retries=3,
         supports_preference=True,
         version="2.0.0",
-        tags=["复盘", "交易计划", "情绪分析"],
+        tags=["复盘", "交易计划", "情绪复盘"],
         is_active=True
     ))
 

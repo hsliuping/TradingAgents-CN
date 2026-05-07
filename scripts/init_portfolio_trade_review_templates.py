@@ -204,11 +204,11 @@ TRADE_REVIEWER_TEMPLATES = {
             system_prompt="""你是一位专业的交易复盘分析师，帮助投资者从历史交易中学习和改进。
 
 你的核心职责是：
-1. 客观评价交易的买卖时机
-2. 分析仓位控制是否合理
-3. 识别情绪化操作的迹象
+1. 客观复盘交易的入场与退出依据
+2. 分析仓位与风险暴露是否合理
+3. 识别情绪化操作与纪律偏差
 4. 结合大盘和行业环境进行收益归因
-5. 提供具体可行的改进建议
+5. 提炼研究准备、规则执行与复盘流程的改进重点
 
 复盘原则：重事实、轻情绪、找规律、促改进
 """,
@@ -242,20 +242,27 @@ TRADE_REVIEWER_TEMPLATES = {
 - 大盘贡献(Beta): {{attribution.beta_contribution}}%
 - 行业超额: {{attribution.industry_excess}}%
 - 个股Alpha: {{attribution.alpha}}%
+
+请重点说明：
+1. 本次交易最核心的得失与问题
+2. 做得好的地方
+3. 暴露的问题与成因
+4. 后续研究或流程改进重点
+5. 收益归因中哪些因素可复制、哪些仅属偶然
 """,
             output_format="""请以JSON格式输出复盘分析结果：
 
 ```json
 {
-    "overall_score": 0-100的综合评分,
-    "timing_score": 0-100的时机评分,
-    "position_score": 0-100的仓位评分,
-    "discipline_score": 0-100的纪律评分,
+    "overall_score": 0-100的综合评分（兼容保留字段，供内部归档使用）, 
+    "timing_score": 0-100的时机评分（兼容保留字段）, 
+    "position_score": 0-100的仓位评分（兼容保留字段）, 
+    "discipline_score": 0-100的纪律评分（兼容保留字段）, 
 
     "summary": "50字以内的总体评价",
     "strengths": ["做得好的地方1", "做得好的地方2"],
     "weaknesses": ["需要改进的地方1", "需要改进的地方2"],
-    "suggestions": ["具体建议1", "具体建议2"],
+    "suggestions": ["后续研究或流程改进重点1", "后续研究或流程改进重点2"],
 
     "timing_analysis": "买卖时机分析（100字以内）",
     "position_analysis": "仓位控制分析（50字以内）",
@@ -263,16 +270,12 @@ TRADE_REVIEWER_TEMPLATES = {
 
     "market_analysis": "大盘环境影响（50字以内）",
     "industry_analysis": "行业因素影响（50字以内）",
-    "attribution_summary": "收益归因总结：Beta/行业/Alpha各贡献多少",
-
-    "optimal_pnl": 理论最优收益金额,
-    "missed_profit": 错失的收益金额,
-    "avoided_loss": 避免的亏损金额
+    "attribution_summary": "收益归因总结：Beta/行业/Alpha各贡献多少"
 }
 ```""",
-            constraints="""1. 评分要客观公正，有理有据
+            constraints="""1. 分数字段仅作兼容保留，不得让结论围绕评分展开
 2. 收益归因要区分"运气"（市场/行业）和"能力"（选股/择时）
-3. 建议要具体可执行，不能空泛
+3. suggestions 只能写成研究准备、规则执行和复盘流程的改进重点，不得写成未来买卖、加减仓、止损止盈、目标价或仓位调整建议
 4. 情绪分析要基于交易行为特征，不做主观臆断"""
         )
     }
@@ -290,24 +293,13 @@ async def init_templates():
     print("🚀 开始初始化持仓分析与交易复盘系统模板")
     print("=" * 60)
 
-    created_count = 0
-    skipped_count = 0
+    synced_count = 0
+    failed_count = 0
 
     # 初始化持仓分析师模板
     print("\n📊 初始化持仓分析师(position_advisor)模板...")
     for preference_type, template_data in POSITION_ADVISOR_TEMPLATES.items():
         try:
-            existing = await service.get_system_templates(
-                agent_type="trader",
-                agent_name="position_advisor",
-                preference_type=preference_type
-            )
-
-            if existing:
-                print(f"⏭️  跳过: position_advisor/{preference_type} (已存在)")
-                skipped_count += 1
-                continue
-
             create_data = PromptTemplateCreate(
                 agent_type="trader",
                 agent_name="position_advisor",
@@ -317,33 +309,27 @@ async def init_templates():
                 status="active"
             )
 
-            # user_id=None 表示系统模板
-            template = await service.create_template(create_data, user_id=None)
+            template, operation = await service.upsert_system_template(
+                create_data,
+                remark_suffix="[2026-04-11] 幂等同步组合交易复盘模板",
+            )
 
             if template:
-                print(f"✅ 创建: position_advisor/{preference_type}")
-                created_count += 1
+                action_text = {"created": "创建", "updated": "更新", "unchanged": "保持"}.get(operation, operation)
+                print(f"✅ {action_text}: position_advisor/{preference_type}")
+                synced_count += 1
             else:
-                print(f"❌ 创建失败: position_advisor/{preference_type}")
+                print(f"❌ 同步失败: position_advisor/{preference_type}")
+                failed_count += 1
 
         except Exception as e:
             print(f"❌ 错误: position_advisor/{preference_type} - {e}")
+            failed_count += 1
 
     # 初始化交易复盘分析师模板
     print("\n📝 初始化交易复盘分析师(trade_reviewer)模板...")
     for preference_type, template_data in TRADE_REVIEWER_TEMPLATES.items():
         try:
-            existing = await service.get_system_templates(
-                agent_type="managers",
-                agent_name="trade_reviewer",
-                preference_type=preference_type
-            )
-
-            if existing:
-                print(f"⏭️  跳过: trade_reviewer/{preference_type} (已存在)")
-                skipped_count += 1
-                continue
-
             create_data = PromptTemplateCreate(
                 agent_type="managers",
                 agent_name="trade_reviewer",
@@ -353,20 +339,25 @@ async def init_templates():
                 status="active"
             )
 
-            # user_id=None 表示系统模板
-            template = await service.create_template(create_data, user_id=None)
+            template, operation = await service.upsert_system_template(
+                create_data,
+                remark_suffix="[2026-04-11] 幂等同步组合交易复盘模板",
+            )
 
             if template:
-                print(f"✅ 创建: trade_reviewer/{preference_type}")
-                created_count += 1
+                action_text = {"created": "创建", "updated": "更新", "unchanged": "保持"}.get(operation, operation)
+                print(f"✅ {action_text}: trade_reviewer/{preference_type}")
+                synced_count += 1
             else:
-                print(f"❌ 创建失败: trade_reviewer/{preference_type}")
+                print(f"❌ 同步失败: trade_reviewer/{preference_type}")
+                failed_count += 1
 
         except Exception as e:
             print(f"❌ 错误: trade_reviewer/{preference_type} - {e}")
+            failed_count += 1
 
     print("\n" + "=" * 60)
-    print(f"✅ 初始化完成: 创建 {created_count} 个，跳过 {skipped_count} 个")
+    print(f"✅ 初始化完成: 已同步 {synced_count} 个，失败 {failed_count} 个")
     print("=" * 60)
 
 

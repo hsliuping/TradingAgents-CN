@@ -34,7 +34,7 @@
         style="margin-top: 24px"
       >
         <el-icon><Key /></el-icon>
-        前往认证成为高级学员
+        前往授权管理完成高级学员认证
       </el-button>
     </div>
   </el-card>

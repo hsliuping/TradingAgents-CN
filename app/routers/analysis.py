@@ -130,6 +130,58 @@ def normalize_result_data(result_data: Dict[str, Any]) -> Dict[str, Any]:
     return result_data
 
 
+def _has_meaningful_text(value: Any, min_length: int = 1) -> bool:
+    return isinstance(value, str) and len(value.strip()) >= min_length
+
+
+def _summarize_result_completeness(result_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(result_data, dict):
+        return {
+            "has_summary": False,
+            "has_recommendation": False,
+            "report_count": 0,
+            "has_action": False,
+            "has_reasoning": False,
+            "has_price_range": False,
+            "has_confidence": False,
+            "has_risk_score": False,
+            "is_complete": False,
+        }
+
+    decision = result_data.get("decision") if isinstance(result_data.get("decision"), dict) else {}
+    reports = result_data.get("reports") if isinstance(result_data.get("reports"), dict) else {}
+    summary = {
+        "has_summary": _has_meaningful_text(result_data.get("summary"), 8),
+        "has_recommendation": _has_meaningful_text(result_data.get("recommendation"), 8),
+        "report_count": len([key for key, value in reports.items() if _has_meaningful_text(value, 10)]),
+        "has_action": bool(decision.get("analysis_view") or decision.get("action")),
+        "has_reasoning": _has_meaningful_text(decision.get("reasoning"), 10),
+        "has_price_range": decision.get("price_analysis_range") is not None,
+        "has_confidence": decision.get("confidence") is not None,
+        "has_risk_score": decision.get("risk_score") is not None,
+    }
+    summary["is_complete"] = bool(
+        summary["has_summary"] or
+        summary["report_count"] > 0 or
+        summary["has_action"] or
+        summary["has_reasoning"]
+    )
+    return summary
+
+
+def _log_result_completeness(source: str, task_id: str, result_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    completeness = _summarize_result_completeness(result_data)
+    logger.info(
+        f"📊 [RESULT] 来源={source} task={task_id} 完整性: "
+        f"summary={completeness['has_summary']} recommendation={completeness['has_recommendation']} "
+        f"reports={completeness['report_count']} action={completeness['has_action']} "
+        f"reasoning={completeness['has_reasoning']} price_range={completeness['has_price_range']} "
+        f"confidence={completeness['has_confidence']} risk_score={completeness['has_risk_score']} "
+        f"complete={completeness['is_complete']}"
+    )
+    return completeness
+
+
 def get_market_type_from_symbol(symbol: str) -> str:
     """根据股票代码获取 market_type
 
@@ -758,9 +810,15 @@ async def get_task_result(
                 # 🔥 统一格式化结果数据
                 result_data = normalize_result_data(result_data)
 
+                completeness = _log_result_completeness("memory", task_id, result_data)
+
                 logger.info(f"📊 [RESULT] ========== 格式化后 ==========")
                 logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
                 logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
+
+                if not completeness["is_complete"]:
+                    logger.warning(f"⚠️ [RESULT] 内存中的 result_data 不完整，继续回退查询持久化结果: {task_id}")
+                    result_data = None
             else:
                 logger.warning(f"⚠️ [RESULT] 内存中result_data为空")
 
@@ -836,12 +894,19 @@ async def get_task_result(
 
                 # 🔥 统一格式化结果数据
                 result_data = normalize_result_data(result_data)
+                completeness = _log_result_completeness("unified_tasks", task_id, result_data)
 
                 logger.info(f"📊 [RESULT] ========== unified_tasks 格式化后 ==========")
                 logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
                 logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
 
-            # 如果 unified_analysis_tasks 中没有找到，再从 analysis_reports 集合中查找
+                # 🔑 防御性检查：如果 unified_analysis_tasks 数据不完整，
+                # 回退到 analysis_reports（可能已经先保存了完整数据）
+                if not completeness["is_complete"]:
+                    logger.warning(f"⚠️ [RESULT] unified_analysis_tasks 数据不完整，回退查询 analysis_reports: {task_id}")
+                    result_data = None
+
+            # 如果 unified_analysis_tasks 中没有找到或数据不完整，再从 analysis_reports 集合中查找
             if not result_data:
                 mongo_result = await db.analysis_reports.find_one({"task_id": task_id})
 
@@ -891,6 +956,7 @@ async def get_task_result(
 
                 # 🔥 统一格式化结果数据
                 result_data = normalize_result_data(result_data)
+                _log_result_completeness("mongodb", task_id, result_data)
 
                 logger.info(f"📊 [RESULT] ========== MongoDB 格式化后 ==========")
                 logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
@@ -953,6 +1019,7 @@ async def get_task_result(
 
                     # 🔥 统一格式化结果数据
                     result_data = normalize_result_data(result_data)
+                    _log_result_completeness("analysis_tasks", task_id, result_data)
 
                     logger.info(f"📊 [RESULT] ========== analysis_tasks 格式化后 ==========")
                     logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
@@ -1285,6 +1352,7 @@ async def get_task_result(
             "stock_symbol": safe_string(result_data.get("stock_symbol"), "UNKNOWN"),
             "stock_code": safe_string(result_data.get("stock_code"), "UNKNOWN"),
             "analysis_date": safe_string(result_data.get("analysis_date"), "2025-08-20"),
+            "source": safe_string(result_data.get("source"), "unknown"),
             "summary": safe_string(result_data.get("summary"), "分析摘要暂无"),
             "recommendation": safe_string(result_data.get("recommendation"), "投资建议暂无"),
             "confidence_score": safe_number(result_data.get("confidence_score"), 0.0),

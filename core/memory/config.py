@@ -9,11 +9,62 @@ mem0 统一记忆层 — 配置加载
 
 import logging
 import os
+import hashlib
+import re
 from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 _QDRANT_COLLECTION = "mem0_memories"
+
+_MEM0_OPENAI_COMPATIBLE_PROVIDERS = {
+    "openai",
+    "dashscope",
+    "siliconflow",
+    "302ai",
+    "openrouter",
+    "localai",
+    "lmstudio",
+}
+
+_MEM0_DIRECT_PROVIDER_MAP = {
+    "google": "gemini",
+    "gemini": "gemini",
+    "ollama": "ollama",
+}
+
+_DEFAULT_EMBEDDING_MODELS = {
+    "dashscope": "text-embedding-v3",
+    "openai": "text-embedding-3-small",
+    "google": "text-embedding-004",
+    "gemini": "text-embedding-004",
+    "ollama": "nomic-embed-text",
+    "zhipu": "embedding-2",
+    "siliconflow": "BAAI/bge-large-zh-v1.5",
+    "302ai": "text-embedding-3-small",
+    "openrouter": "text-embedding-3-small",
+    "localai": "text-embedding-3-small",
+    "lmstudio": "text-embedding-3-small",
+}
+
+
+def _sanitize_collection_token(value: str, max_length: int = 24) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    if not normalized:
+        return "default"
+    return normalized[:max_length]
+
+
+def _build_mem0_collection_name(embedder: Optional[Dict[str, Any]]) -> str:
+    embedder = embedder or {}
+    embedder_cfg = embedder.get("config") or {}
+
+    provider = _sanitize_collection_token(embedder.get("provider") or "default", max_length=16)
+    model = _sanitize_collection_token(embedder_cfg.get("model") or "default", max_length=24)
+    dims = int(embedder_cfg.get("embedding_dims") or 0)
+    fingerprint_source = f"{provider}:{embedder_cfg.get('model') or ''}:{dims}"
+    fingerprint = hashlib.sha1(fingerprint_source.encode("utf-8")).hexdigest()[:8]
+    return f"{_QDRANT_COLLECTION}_{provider}_{model}_{dims or '0'}_{fingerprint}"
 
 
 def _env(key: str, default: str = "") -> str:
@@ -70,37 +121,134 @@ def _resolve_model_credentials(model_name: str) -> Optional[Dict[str, str]]:
     return None
 
 
-def _resolve_embedding_from_db(db_settings: dict) -> dict:
-    """从数据库 default_embedding_model 解析 embedding 配置"""
-    default_emb = db_settings.get("default_embedding_model", "")
+def _get_embedding_dimension(model_name: str) -> int:
+    try:
+        from core.llm.embedding_manager import EMBEDDING_DIMENSIONS
+
+        model_key = (model_name or "").strip()
+        return int(EMBEDDING_DIMENSIONS.get(model_key, EMBEDDING_DIMENSIONS.get("default", 1024)))
+    except Exception:
+        return 1024
+
+
+def _normalize_openai_base_url(base_url: str) -> str:
+    normalized = (base_url or "").strip()
+    if not normalized:
+        return ""
+    if normalized.rstrip("/").endswith("/v1"):
+        return normalized.rstrip("/")
+    return f"{normalized.rstrip('/')}/v1"
+
+
+def _parse_default_embedding_model(db_settings: dict) -> Tuple[str, str]:
+    default_emb = str(db_settings.get("default_embedding_model") or "").strip()
     if not default_emb or ":" not in default_emb:
+        return "", ""
+    provider_name, model_name = default_emb.split(":", 1)
+    return provider_name.strip().lower(), model_name.strip()
+
+
+def _get_embedding_provider_candidates(sync_db) -> list:
+    try:
+        cursor = sync_db.llm_providers.find(
+            {
+                "supported_features": {"$in": ["embedding"]},
+                "is_active": True,
+            }
+        ).sort("created_at", 1)
+        return list(cursor)
+    except Exception as e:
+        logger.debug("mem0 config: 无法读取 embedding provider 列表: %s", e)
+        return []
+
+
+def _resolve_mem0_provider(provider_name: str) -> Optional[str]:
+    normalized = (provider_name or "").strip().lower()
+    if normalized in _MEM0_OPENAI_COMPATIBLE_PROVIDERS:
+        return "openai"
+    return _MEM0_DIRECT_PROVIDER_MAP.get(normalized)
+
+
+def _build_embedder_config_from_provider_doc(provider_doc: dict, model_name: str) -> dict:
+    provider_name = str(provider_doc.get("name") or "").strip().lower()
+    mem0_provider = _resolve_mem0_provider(provider_name)
+    if not mem0_provider:
         return {}
 
-    provider_name, model_name = default_emb.split(":", 1)
+    selected_model = (model_name or "").strip() or str(provider_doc.get("embedding_model") or "").strip()
+    if not selected_model:
+        selected_model = _DEFAULT_EMBEDDING_MODELS.get(provider_name, _DEFAULT_EMBEDDING_MODELS.get(mem0_provider, ""))
+    if not selected_model:
+        return {}
+
+    config: Dict[str, Any] = {
+        "model": selected_model,
+        "embedding_dims": _get_embedding_dimension(selected_model),
+    }
+
+    api_key = str(provider_doc.get("api_key") or "").strip()
+    base_url = str(provider_doc.get("default_base_url") or provider_doc.get("base_url") or "").strip()
+
+    if mem0_provider == "openai":
+        if not api_key:
+            return {}
+        config["api_key"] = api_key
+        config["openai_base_url"] = _normalize_openai_base_url(base_url)
+    elif mem0_provider == "gemini":
+        if not api_key:
+            return {}
+        config["api_key"] = api_key
+        if not selected_model.startswith("models/"):
+            config["model"] = f"models/{selected_model}"
+    elif mem0_provider == "ollama":
+        config["ollama_base_url"] = base_url or "http://localhost:11434"
+
+    return {
+        "provider": mem0_provider,
+        "config": config,
+    }
+
+
+def _resolve_embedding_from_db(db_settings: dict) -> dict:
+    """从数据库 default_embedding_model 解析 embedding 配置"""
     sync_db = _get_sync_db()
     if sync_db is None:
         return {}
 
     try:
-        provider_doc = sync_db.llm_providers.find_one(
-            {"name": {"$regex": f"^{provider_name}$", "$options": "i"}, "is_active": True}
-        )
-        if not provider_doc or not provider_doc.get("api_key"):
+        preferred_provider_name, preferred_model_name = _parse_default_embedding_model(db_settings)
+        provider_docs = _get_embedding_provider_candidates(sync_db)
+        if not provider_docs:
             return {}
 
-        api_key = provider_doc["api_key"]
-        base_url = provider_doc.get("default_base_url") or ""
-        if base_url and "/v1" not in base_url:
-            base_url = f"{base_url.rstrip('/')}/v1"
+        preferred_doc = None
+        if preferred_provider_name:
+            for provider_doc in provider_docs:
+                provider_name = str(provider_doc.get("name") or "").strip().lower()
+                if provider_name == preferred_provider_name:
+                    preferred_doc = provider_doc
+                    break
 
-        return {
-            "provider": "openai",
-            "config": {
-                "api_key": api_key,
-                "openai_base_url": base_url,
-                "model": model_name,
-            },
-        }
+        if preferred_doc:
+            embedder = _build_embedder_config_from_provider_doc(preferred_doc, preferred_model_name)
+            if embedder:
+                return embedder
+            logger.warning(
+                "mem0 config: 默认 Embedding 模型 %s:%s 不兼容 mem0 或缺少凭证，尝试回退到其他可用 provider",
+                preferred_provider_name,
+                preferred_model_name,
+            )
+
+        for provider_doc in provider_docs:
+            provider_name = str(provider_doc.get("name") or "").strip().lower()
+            if preferred_provider_name and provider_name == preferred_provider_name:
+                continue
+            embedder = _build_embedder_config_from_provider_doc(provider_doc, "")
+            if embedder:
+                logger.info("mem0 config: Embedding provider 回退到 %s", provider_name)
+                return embedder
+
+        return {}
     except Exception as e:
         logger.debug("mem0 config: embedding 解析失败: %s", e)
         return {}
@@ -115,6 +263,10 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
     """
     db_settings, llm_configs = _read_system_settings(db)
 
+    # --- Embedder: 复用系统 default_embedding_model ---
+    embedder = _resolve_embedding_from_db(db_settings)
+    collection_name = _build_mem0_collection_name(embedder)
+
     # --- Vector Store: 独立子目录，避免与现有 QdrantAdapter 文件锁冲突 ---
     qdrant_base = _env("QDRANT_DATA_DIR", "./data/qdrant")
     mem0_qdrant_path = os.path.join(qdrant_base, "mem0")
@@ -122,7 +274,7 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
         "provider": "qdrant",
         "config": {
             "path": mem0_qdrant_path,
-            "collection_name": _QDRANT_COLLECTION,
+            "collection_name": collection_name,
             "on_disk": True,
         },
     }
@@ -166,9 +318,6 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
             },
         }
 
-    # --- Embedder: 复用系统 default_embedding_model ---
-    embedder = _resolve_embedding_from_db(db_settings)
-
     # --- 组装 ---
     from .prompts import FINANCIAL_FACT_EXTRACTION_PROMPT
 
@@ -182,3 +331,39 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
         config["embedder"] = embedder
 
     return config
+
+
+def describe_mem0_config(db=None) -> Dict[str, Any]:
+    """返回 mem0 当前解析配置的安全摘要，不包含明文密钥。"""
+    config = build_mem0_config(db)
+
+    vector_store = config.get("vector_store") or {}
+    vector_store_cfg = vector_store.get("config") or {}
+
+    llm = config.get("llm") or {}
+    llm_cfg = llm.get("config") or {}
+
+    embedder = config.get("embedder") or {}
+    embedder_cfg = embedder.get("config") or {}
+
+    return {
+        "vector_store": {
+            "provider": vector_store.get("provider") or "",
+            "collection_name": vector_store_cfg.get("collection_name") or "",
+            "path": vector_store_cfg.get("path") or "",
+            "on_disk": bool(vector_store_cfg.get("on_disk", False)),
+        },
+        "llm": {
+            "provider": llm.get("provider") or "",
+            "model": llm_cfg.get("model") or "",
+            "base_url": llm_cfg.get("openai_base_url") or "",
+            "has_api_key": bool(llm_cfg.get("api_key")),
+        },
+        "embedder": {
+            "provider": embedder.get("provider") or "",
+            "model": embedder_cfg.get("model") or "",
+            "base_url": embedder_cfg.get("openai_base_url") or embedder_cfg.get("ollama_base_url") or "",
+            "embedding_dims": embedder_cfg.get("embedding_dims") or 0,
+            "has_api_key": bool(embedder_cfg.get("api_key")),
+        },
+    }

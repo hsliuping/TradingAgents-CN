@@ -16,13 +16,18 @@ from typing import Any, Dict, List, Optional
 
 from core.llm import UnifiedLLMClient, Message
 
-from .skill_spec import GeneratedCode, SkillSpec, TestCase
+from .skill_spec import GeneratedCode, ImplementationFactReport, SkillSpec, TestCase
 from .symbol_utils import SYMBOL_NORMALIZE_INLINE
 from .external_data_source_catalog import build_external_data_source_doc_for_skill
-from .local_data import LOCAL_DATA_API_DOC
+from .data_contracts import build_data_contract_doc_for_skill
+from core.skill_runtime.data_access import LOCAL_DATA_API_DOC
+from core.skill_runtime.project_access import PROJECT_DATA_ACCESS_DOC
+from core.skill_runtime import build_factor_catalog_prompt_context
 from .stock_data_catalog import build_stock_data_collection_doc_for_skill
 
 logger = logging.getLogger(__name__)
+
+CODEGEN_LLM_TIMEOUT_SECONDS = 240
 
 # ==================== 内置工具模板映射 ====================
 
@@ -45,11 +50,12 @@ CODING_PATTERNS = """\
 3. 返回类型：返回 dict（结构化数据，必须包含 status 和 data 字段）或 str（Markdown 格式）
 4. 错误处理：所有外部调用用 try/except 包裹，出错时返回 {"status": "error", "message": "..."}
 5. 日志规范：使用 logger = logging.getLogger(__name__)，关键步骤用 emoji 日志
-6. 导入规范：只使用标准库和常见第三方库（requests, pandas, akshare 等）；允许 from core.tools.external.local_data import ... 获取本地数据库数据；禁止其他 from core.xxx import
+6. 导入规范：只使用标准库和常见第三方库（requests, pandas, akshare 等）；只允许从 core.skill_runtime.data_access 或 core.skill_runtime.project_access 导入项目运行时能力；严禁直接导入 tradingagents.dataflows.interface、tradingagents.dataflows.providers 及其任何子模块；禁止臆造其他未文档化项目接口
 7. 函数体 < 100 行，超过说明做的事太多
 8. 股票代码参数：本系统传递的股票代码为 6 位纯数字（如 600519、000001），不带 .SH/.SZ 后缀。生成的函数参数必须接收此格式；若数据源 API 需要其他格式（如 600519.SH），需在函数内部自行转换，不要要求调用方传入带后缀的格式。
 9. 禁止模拟数据：严禁使用 mock、模拟、假数据、占位数据。必须真实调用数据源（API、akshare、tushare、本地数据库等）获取数据。若无数据则返回 {"status": "success", "data": [], "message": "未找到xxx数据"}，绝不可返回伪造数据。
 10. 禁止占位代码：严禁写「这里需要实际的 API 调用」「由于无法直接调用」「需要配置 API 密钥」等注释后不实现。必须写出可执行的完整 API 调用（requests.get/post 等）。若某 API 需付费 Token，改用 akshare、tushare 等免费替代方案实现，不得用占位逻辑替代。
+11. 禁止自造项目能力：不要自行创建 MongoClient、不要硬编码数据库名、不要发明 get_mongo_connection 或未文档化 provider 方法；优先复用提示词中给出的 local_data helper 和外部数据源入口。
 """
 
 # 股票代码参数名（用于判断是否需要注入多格式支持）
@@ -86,10 +92,19 @@ class CodeGenerator:
     def _get_client(self) -> UnifiedLLMClient:
         """懒加载 LLM 客户端"""
         if self._client is None:
-            kwargs = {}
+            kwargs = {"timeout": CODEGEN_LLM_TIMEOUT_SECONDS}
             if self._model:
                 kwargs["model"] = self._model
             self._client = UnifiedLLMClient.from_provider(self._provider, **kwargs)
+        else:
+            adapter = getattr(self._client, "_adapter", None)
+            config = getattr(adapter, "config", None)
+            if config and getattr(config, "timeout", 0) < CODEGEN_LLM_TIMEOUT_SECONDS:
+                config.timeout = CODEGEN_LLM_TIMEOUT_SECONDS
+                try:
+                    adapter.initialize()
+                except Exception as e:
+                    logger.warning(f"更新代码生成 LLM 超时时间失败: {e}")
         return self._client
 
     def generate(
@@ -97,6 +112,7 @@ class CodeGenerator:
         spec: SkillSpec,
         feedback: str = "",
         previous_code: str = "",
+        fact_report: Optional[ImplementationFactReport] = None,
     ) -> GeneratedCode:
         """
         生成 Skill 代码
@@ -114,16 +130,34 @@ class CodeGenerator:
 
         # 构建 Prompt
         system_prompt = self._build_system_prompt(spec)
-        user_prompt = self._build_user_prompt(spec, feedback, previous_code)
+        user_prompt = self._build_user_prompt(spec, feedback, previous_code, fact_report)
 
         messages = [
             Message(role="system", content=system_prompt),
             Message(role="user", content=user_prompt),
         ]
 
-        # 调用 LLM
-        response = client.chat(messages)
+        # 调用 LLM — 代码生成需要较大的输出空间，显式设置 max_tokens
+        logger.info(
+            f"\n{'─'*50}\n"
+            f"📤 [CodeGenerator] LLM 输入 (tool_id={spec.tool_id})\n"
+            f"{'─'*50}\n"
+            f"🔧 System Prompt ({len(system_prompt)} 字符):\n{system_prompt[:2000]}\n"
+            f"{'...(截断)' if len(system_prompt) > 2000 else ''}\n"
+            f"📝 User Prompt ({len(user_prompt)} 字符):\n{user_prompt[:3000]}\n"
+            f"{'...(截断)' if len(user_prompt) > 3000 else ''}\n"
+            f"{'─'*50}"
+        )
+        response = client.chat(messages, max_tokens=8192)
         raw = response.content or ""
+        logger.info(
+            f"\n{'─'*50}\n"
+            f"📥 [CodeGenerator] LLM 输出 ({len(raw)} 字符)\n"
+            f"{'─'*50}\n"
+            f"{raw[:3000]}\n"
+            f"{'...(截断)' if len(raw) > 3000 else ''}\n"
+            f"{'─'*50}"
+        )
 
         # 解析结果
         result = self._parse_response(raw, spec)
@@ -137,21 +171,40 @@ class CodeGenerator:
         spec: SkillSpec,
         feedback: str = "",
         previous_code: str = "",
+        fact_report: Optional[ImplementationFactReport] = None,
     ) -> GeneratedCode:
         """异步版本的 generate"""
         start = time.time()
         client = self._get_client()
 
         system_prompt = self._build_system_prompt(spec)
-        user_prompt = self._build_user_prompt(spec, feedback, previous_code)
+        user_prompt = self._build_user_prompt(spec, feedback, previous_code, fact_report)
 
         messages = [
             Message(role="system", content=system_prompt),
             Message(role="user", content=user_prompt),
         ]
 
-        response = await client.achat(messages)
+        logger.info(
+            f"\n{'─'*50}\n"
+            f"📤 [CodeGenerator.async] LLM 输入 (tool_id={spec.tool_id})\n"
+            f"{'─'*50}\n"
+            f"🔧 System Prompt ({len(system_prompt)} 字符):\n{system_prompt[:2000]}\n"
+            f"{'...(截断)' if len(system_prompt) > 2000 else ''}\n"
+            f"📝 User Prompt ({len(user_prompt)} 字符):\n{user_prompt[:3000]}\n"
+            f"{'...(截断)' if len(user_prompt) > 3000 else ''}\n"
+            f"{'─'*50}"
+        )
+        response = await client.achat(messages, max_tokens=8192)
         raw = response.content or ""
+        logger.info(
+            f"\n{'─'*50}\n"
+            f"📥 [CodeGenerator.async] LLM 输出 ({len(raw)} 字符)\n"
+            f"{'─'*50}\n"
+            f"{raw[:3000]}\n"
+            f"{'...(截断)' if len(raw) > 3000 else ''}\n"
+            f"{'─'*50}"
+        )
 
         result = self._parse_response(raw, spec)
         result.generation_time = round(time.time() - start, 2)
@@ -165,7 +218,13 @@ class CodeGenerator:
         """构建系统提示词"""
         template_code = self._get_builtin_template(spec.category)
         stock_data_doc = build_stock_data_collection_doc_for_skill(spec)
+        data_contract_doc = build_data_contract_doc_for_skill(spec)
         external_source_doc = build_external_data_source_doc_for_skill(spec)
+        factor_catalog_doc = build_factor_catalog_prompt_context(
+            spec.description,
+            category=spec.category,
+            expected_fields=list(spec.expected_output.fields or []),
+        )
         template_section = ""
         if template_code:
             # 截取前 80 行作为参考，并去掉装饰器相关行
@@ -190,15 +249,25 @@ class CodeGenerator:
 
 {LOCAL_DATA_API_DOC}
 
+{PROJECT_DATA_ACCESS_DOC}
+
 {stock_data_doc}
+
+{data_contract_doc}
 
 {external_source_doc}
 
+{factor_catalog_doc}
+
 ⚠️ 关键要求：
 - 不要使用 @tool、@register_tool 等任何装饰器
-- 不要 from core.xxx import 任何模块
+- 生成的 Skill 若要访问项目能力，只能导入 core.skill_runtime.data_access 和 core.skill_runtime.project_access 这两个公开接口
+- 不要直接导入 core.skill_runtime.catalog、core.skill_runtime.external_sources、core.skill_runtime.sync_wrappers 等内部实现模块
+- 不要直接导入 tradingagents.dataflows.interface、tradingagents.dataflows.providers 或其任意子模块
+- 除上述公开接口外，不要 from core.xxx import 其他模块
 - 不要 from langchain_core.xxx import 任何模块
 - 生成的代码必须是独立可运行的纯 Python 函数
+- 如果任务命中了常用分析因子白名单，优先复用 catalog 中已有 factor_id、bundle helper 和固定公式，不要自造新的底层因子字段
 
 {CODING_PATTERNS}
 {template_section}
@@ -239,8 +308,228 @@ class CodeGenerator:
                     return True, name
         return False, None
 
+    @staticmethod
+    def _format_previous_code_for_prompt(
+        previous_code: str,
+        *,
+        full_code_line_limit: int = 260,
+        head_lines: int = 140,
+        tail_lines: int = 100,
+    ) -> str:
+        """优先保留完整上一轮代码，超长时退化为首尾关键片段。"""
+        if not previous_code:
+            return ""
+
+        code_lines = previous_code.splitlines()
+        if len(code_lines) <= full_code_line_limit:
+            return previous_code
+
+        return (
+            "\n".join(code_lines[:head_lines])
+            + f"\n# ... (中间省略，共 {len(code_lines)} 行) ...\n"
+            + "\n".join(code_lines[-tail_lines:])
+        )
+
+    @staticmethod
+    def _truncate_feedback_for_prompt(
+        feedback: str,
+        *,
+        max_chars: int = 6000,
+        head_chars: int = 3500,
+    ) -> str:
+        """保留反馈开头的执行上下文和结尾的根因/修复计划，避免关键信息丢失。"""
+        if len(feedback) <= max_chars:
+            return feedback
+
+        tail_chars = max_chars - head_chars - 24
+        if tail_chars <= 0:
+            return feedback[:max_chars]
+
+        return (
+            feedback[:head_chars]
+            + "\n... (中间省略) ...\n"
+            + feedback[-tail_chars:]
+        )
+
+    @staticmethod
+    def _build_fact_report_block(fact_report: Optional[ImplementationFactReport]) -> str:
+        """将侦察层产出的事实报告格式化为结构化 Prompt 区块。
+
+        分为多个子区块，让 LLM 清晰区分不同类型的实现事实：
+        - 策略概要：总体实现方向
+        - 可用 Helper：推荐调用的函数及签名
+        - 数据库字段事实：集合中实际存在的字段名
+        - 已确认事实：schema 探测发现的具体事实
+        - 禁止路径 & 缺口：必须规避的实现路径
+        - 验收条件：生成代码必须满足的业务检查
+        """
+        if not fact_report:
+            return ""
+
+        sections: list[str] = []
+
+        # ── 区块 1: 策略概要 ──
+        summary_lines: list[str] = []
+        if fact_report.task_summary:
+            summary_lines.append(f"任务: {fact_report.task_summary}")
+        if fact_report.recommended_strategy:
+            summary_lines.append(f"推荐策略: {fact_report.recommended_strategy}")
+        if summary_lines:
+            sections.append("▸ 策略概要\n" + "\n".join(f"  {l}" for l in summary_lines))
+
+        # ── 区块 2: 可用 Helper 函数 ──
+        if fact_report.available_helpers:
+            helper_lines: list[str] = []
+            for h in fact_report.available_helpers[:8]:
+                line = f"  from {h.module} import {h.name}"
+                if h.reason:
+                    line += f"  # {h.reason}"
+                helper_lines.append(line)
+            sections.append("▸ 可用 Helper（优先使用这些函数获取数据）\n" + "\n".join(helper_lines))
+
+        # ── 区块 3: 数据库集合字段（来自 sample_fields）──
+        if fact_report.sample_fields:
+            field_lines: list[str] = []
+            for coll, fields in list(fact_report.sample_fields.items())[:4]:
+                field_lines.append(f"  {coll}: {', '.join(fields[:15])}")
+            sections.append(
+                "▸ 数据库集合实际字段（侦察已验证存在，请直接使用这些字段名）\n"
+                + "\n".join(field_lines)
+            )
+
+        # ── 区块 4: 已确认的 Schema 事实 ──
+        if fact_report.schema_facts:
+            fact_lines: list[str] = []
+            for f in fact_report.schema_facts[:10]:
+                evidence_tag = f" [{f.evidence}]" if f.evidence else ""
+                fact_lines.append(f"  • [{f.source}] {f.fact}{evidence_tag}")
+            sections.append("▸ 已确认事实\n" + "\n".join(fact_lines))
+
+        # ── 区块 4.5: 金融 schema 指导卡 ──
+        schema_bundle_context = fact_report.schema_bundle_context or {}
+        method = schema_bundle_context.get("method") or {}
+        contract = schema_bundle_context.get("contract") or {}
+        verifier_rule = schema_bundle_context.get("verifier_rule") or {}
+        applicability_rules = schema_bundle_context.get("applicability_rules") or {}
+        if method or contract or verifier_rule or applicability_rules:
+            schema_lines: list[str] = []
+            if method:
+                method_name = str(method.get("name") or schema_bundle_context.get("method_id") or "schema_method")
+                schema_lines.append(f"  方法: {method_name}")
+                objective = str(method.get("objective") or "").strip()
+                if objective:
+                    schema_lines.append(f"  目标: {objective}")
+                required_metrics = list(method.get("required_metrics") or [])
+                if required_metrics:
+                    schema_lines.append(f"  必需指标: {', '.join(required_metrics[:6])}")
+                required_fields = list(method.get("required_fields") or [])
+                if required_fields:
+                    schema_lines.append(f"  必需输入字段: {', '.join(required_fields[:8])}")
+                steps = [str(item).strip() for item in method.get("steps") or [] if str(item).strip()]
+                if steps:
+                    schema_lines.append("  推荐步骤: " + " -> ".join(steps[:5]))
+                limitations = [str(item).strip() for item in method.get("limitations") or [] if str(item).strip()]
+                if limitations:
+                    schema_lines.append("  方法局限: " + "；".join(limitations[:4]))
+
+            if contract:
+                contract_fields = [
+                    str((field_def or {}).get("field_name") or "").strip()
+                    for field_def in contract.get("required_fields") or []
+                    if str((field_def or {}).get("field_name") or "").strip()
+                ]
+                if contract_fields:
+                    schema_lines.append(f"  输出契约字段: {', '.join(contract_fields[:10])}")
+                narrative_requirements = [
+                    str(item).strip()
+                    for item in contract.get("narrative_requirements") or []
+                    if str(item).strip()
+                ]
+                if narrative_requirements:
+                    schema_lines.append("  叙述要求: " + "；".join(narrative_requirements[:4]))
+                prohibited_patterns = [
+                    str(item).strip()
+                    for item in contract.get("prohibited_patterns") or []
+                    if str(item).strip()
+                ]
+                if prohibited_patterns:
+                    schema_lines.append("  禁止模式: " + "；".join(prohibited_patterns[:3]))
+
+            if verifier_rule:
+                failure_message = str(verifier_rule.get("failure_message") or "").strip()
+                remediation_hint = str(verifier_rule.get("remediation_hint") or "").strip()
+                if failure_message:
+                    schema_lines.append(f"  验收失败语义: {failure_message}")
+                if remediation_hint:
+                    schema_lines.append(f"  修复提示: {remediation_hint}")
+
+            if applicability_rules:
+                rule_lines = []
+                for rule_id, rule in list(applicability_rules.items())[:4]:
+                    human_description = str((rule or {}).get("human_description") or rule_id).strip()
+                    rationale = str((rule or {}).get("rationale") or "").strip()
+                    line = human_description
+                    if rationale:
+                        line += f" ({rationale})"
+                    rule_lines.append(line)
+                if rule_lines:
+                    schema_lines.append("  适用性规则: " + "；".join(rule_lines))
+
+            sections.append(
+                "▸ 金融 schema 指导卡（生成代码时必须显式落实这些方法/规则/契约）\n"
+                + "\n".join(schema_lines)
+            )
+
+        # ── 区块 5: 禁止路径 ──
+        if fact_report.blocked_paths:
+            blocked_lines = [
+                f"  ✘ {item.path}: {item.reason} ({item.severity})"
+                for item in fact_report.blocked_paths[:5]
+            ]
+            sections.append("▸ 禁止路径（不要使用以下方式实现）\n" + "\n".join(blocked_lines))
+
+        # ── 区块 6: Runtime 缺口 ──
+        if fact_report.runtime_gaps:
+            gap_lines = [
+                f"  ⚠ {item.path or '(未知)'}: {item.reason}"
+                for item in fact_report.runtime_gaps[:4]
+            ]
+            sections.append("▸ Runtime 缺口（需注意的限制）\n" + "\n".join(gap_lines))
+
+        # ── 区块 7: 验收条件（代码必须满足）──
+        if fact_report.validation_checks:
+            check_lines: list[str] = []
+            for vc in fact_report.validation_checks[:8]:
+                desc = vc.description or vc.name
+                field_tag = f" [字段: {vc.field}]" if vc.field else ""
+                check_lines.append(f"  ☑ {desc}{field_tag}")
+            sections.append(
+                "▸ 验收条件（生成代码的输出必须满足以下检查）\n"
+                + "\n".join(check_lines)
+            )
+
+        # ── 区块 8: 备注 ──
+        if fact_report.notes:
+            note_lines = [f"  - {n}" for n in fact_report.notes[:4]]
+            sections.append("▸ 侦察备注\n" + "\n".join(note_lines))
+
+        if not sections:
+            return ""
+
+        header = (
+            "\n【已查证实现事实 — 侦察层产出，置信度 {:.0%}】\n"
+            "以下事实来自前置侦察层的实际探测。生成代码时必须严格基于这些事实实现，\n"
+            "不要自行猜测新的内部接口、provider 方法或字段名称。"
+        ).format(fact_report.confidence)
+
+        return header + "\n\n" + "\n\n".join(sections)
+
     def _build_user_prompt(
-        self, spec: SkillSpec, feedback: str = "", previous_code: str = ""
+        self,
+        spec: SkillSpec,
+        feedback: str = "",
+        previous_code: str = "",
+        fact_report: Optional[ImplementationFactReport] = None,
     ) -> str:
         """构建用户提示词"""
         params_desc = "\n".join(
@@ -255,6 +544,12 @@ class CodeGenerator:
             f"  说明: {spec.expected_output.description}"
         )
 
+        validation_desc = "\n".join(
+            f"  - [{check.rule_level}] {check.name}: {check.description}"
+            + (" (阻断)" if check.blocking else " (告警)")
+            for check in spec.validation_checks[:10]
+        ) or "  无"
+
         constraints_desc = "\n".join(f"  - {c}" for c in spec.constraints) or "  无"
 
         is_valuation_skill = any(keyword in (spec.description or "").lower() for keyword in VALUATION_KEYWORDS)
@@ -263,17 +558,19 @@ class CodeGenerator:
             valuation_section = """
 
 【⚠️ 估值类 Skill 实现范式 — 必须遵守】
-- 优先调用 from core.tools.external.local_data import get_stock_valuation_context
+- 优先调用 from core.skill_runtime.data_access import get_stock_valuation_context
 - current_price 必须来自 get_stock_valuation_context()['current_price'] 或 get_latest_stock_price(symbol)
 - 若 current_price 缺失、<=0，必须直接返回 error/invalid，禁止默认设为 0 后继续估值
-- 财务数据必须优先使用 local_data 返回的 financial_data，并兼容 report_period / report_date
+- 财务数据必须优先使用 core.skill_runtime.data_access 返回的 financial_data，并兼容 report_period / report_date
+- raw_data.financial_indicators[].end_date / report_period 常是季报与年报混合序列，不能默认按“连续年报”理解
+- growth_years 当前若为 1，表示同口径同比；优先使用 netprofit_yoy / growth_YOYNI，若手工计算同比，也必须比较同口径期间，不能拿 2025Q3 直接对比 2024 年报
 - PE/PB/PS 估值若缺少必要输入，应返回 invalid，禁止输出 fair_value=0
 - DCF 若缺少 total_shares/净利润/有效增长率，必须明确返回 invalid 或降级说明，禁止静默返回 0
 - 不要只从 basic_info 生拼价格字段；价格优先级应为 market_quotes -> basic_info
 
 推荐骨架：
 ```python
-from core.tools.external.local_data import get_stock_valuation_context
+from core.skill_runtime.data_access import get_stock_valuation_context
 
 ctx = get_stock_valuation_context(symbol)
 current_price = ctx["current_price"]
@@ -300,6 +597,13 @@ financial_data = ctx["financial_data"]
 {SYMBOL_NORMALIZE_INLINE}
 """
 
+        fact_report_block = self._build_fact_report_block(fact_report)
+        factor_catalog_doc = build_factor_catalog_prompt_context(
+            spec.description,
+            category=spec.category,
+            expected_fields=list(spec.expected_output.fields or []),
+        )
+
         prompt = f"""请根据以下 Skill 规格书生成 Python 工具函数代码：
 
 【基本信息】
@@ -315,10 +619,33 @@ financial_data = ctx["financial_data"]
 【期望输出】
 {output_desc}
 
+【输出字段命名约束】
+- expected_output.fields 中列出的字段名是最终契约，必须严格使用，不要擅自改名、缩写或换同义词。
+- 例如规格若要求 earnings_growth_rate 和 peg_ratio，就不能输出成 growth_rate 或 peg。
+- 若某字段当前无法提供，应保留该字段语义并通过 failure_reason 等失效字段说明原因，不要私自改成另一套返回结构。
+
+【规格级验收规则】
+{validation_desc}
+
 【行为约束】
 {constraints_desc}
 {valuation_section}
 {symbol_section}
+{factor_catalog_doc}
+{fact_report_block}
+
+【⚠️ Skill Runtime 接口约束 — 必须遵守】
+- 本项目给生成 Skill 的正式运行时接口只有两个：core.skill_runtime.data_access 与 core.skill_runtime.project_access
+- 数据库 helper、外部数据源桥接、同步包装器都已经收口到 skill_runtime 内部；生成的代码不要直接导入其内部细分模块
+- 如果需要本地数据库数据，优先用 core.skill_runtime.data_access
+- 如果需要外部数据源桥接、同步 wrapper 或通用集合查询，优先用 core.skill_runtime.project_access
+- 严禁直接导入 tradingagents.dataflows.interface、tradingagents.dataflows.providers 或其任意子模块，即使你知道这些内部实现存在，也不能在生成代码中直接使用
+- 若某项能力当前在 skill_runtime 公开接口中不存在，也不要绕过公开接口直连内部 provider；应改用现有公开接口重构方案，或返回清晰的降级结果
+
+【⚠️ 常用分析因子约束 — 命中白名单时必须遵守】
+- 如果需求本质上只是 value_core / quality_core / growth_cashflow_core / technical_core 中的现有因子读取、组合或固定公式计算，优先复用现有 helper 或 bundle，不要重新发明同义字段。
+- 若 expected_output.fields 已经命中 catalog 因子字段，返回结构必须沿用这些 factor_id，不要改写为 growth_rate、profit_margin_pct、macdValue 这类新名字。
+- 若需求超出当前白名单因子范围，应明确新增的最小字段/计算缺口，不要把整个 Skill 实现都建立在自造底层因子上。
 
 【⚠️ 严禁模拟/占位 — 必须真实实现】
 - 禁止 mock、模拟、假数据、占位数据、_generate_mock_data 等
@@ -330,16 +657,18 @@ financial_data = ctx["financial_data"]
 {json.dumps(spec.test_input, ensure_ascii=False) if spec.test_input else '无'}
 """
         if feedback and previous_code:
+            truncated_code = self._format_previous_code_for_prompt(previous_code)
+            truncated_feedback = self._truncate_feedback_for_prompt(feedback)
             prompt += f"""
 【⚠️ 迭代修复 — 上一轮代码有问题，请定向修复】
 
 上一轮代码：
 ```python
-{previous_code}
+{truncated_code}
 ```
 
 完整执行上下文与反馈：
-{feedback}
+{truncated_feedback}
 
 【修复要求 — 极其重要】
 1. **定向修复**：只修改有问题的代码，保留已正确工作的部分

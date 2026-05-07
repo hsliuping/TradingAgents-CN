@@ -1,0 +1,71 @@
+{
+  "collection": "stock_financial_data",
+  "version": 1,
+  "summary": "统一财务主表。顶层是股票财务文档，常包含当前/汇总字段；多期明细通常位于 raw_data 下的嵌套数组中，而不是顶层多条文档逐期平铺。",
+  "structure": {
+    "top_level_shape": "优先按一股一文档理解；不要假设顶层每条文档只对应单一期财报。顶层 report_period 可表示当前主记录口径，但 raw_data 内部可能同时包含多期明细。",
+    "query_keys": ["symbol", "code", "report_period", "report_date", "report_type", "data_source"],
+    "stable_top_level_fields": [
+      "symbol",
+      "code",
+      "report_period",
+      "report_date",
+      "report_type",
+      "data_source",
+      "net_profit",
+      "net_income",
+      "revenue",
+      "roe",
+      "debt_to_assets",
+      "raw_data"
+    ],
+    "nested_paths": [
+      {
+        "path": "raw_data.income_statement",
+        "type": "array",
+        "description": "多期利润表数组。常见元素字段包括 end_date、revenue、n_income_attr_p、oper_profit 等。"
+      },
+      {
+        "path": "raw_data.balance_sheet",
+        "type": "array",
+        "description": "多期资产负债表数组。常见元素字段包括 end_date、total_assets、total_liab、total_hldr_eqy_exc_min_int 等。"
+      },
+      {
+        "path": "raw_data.cashflow_statement",
+        "type": "array",
+        "description": "多期现金流量表数组。常见元素字段包括 end_date、n_cashflow_act、n_cashflow_inv_act、n_cash_flows_fnc_act 等。"
+      },
+      {
+        "path": "raw_data.financial_indicators",
+        "type": "array",
+        "description": "多期财务指标数组，不是单个对象。常见元素字段包括 end_date、netprofit_yoy、growth_YOYNI、roe、grossprofit_margin、netprofit_margin。"
+      }
+    ]
+  },
+  "task_mappings": [
+    {
+      "task": "peg_valuation",
+      "primary_paths": [
+        "raw_data.financial_indicators[].netprofit_yoy",
+        "raw_data.financial_indicators[].growth_YOYNI"
+      ],
+      "fallback_paths": [
+        "顶层 net_profit / net_income 与 raw_data.income_statement[] 中同口径多期净利润做同比计算"
+      ],
+      "notes": [
+        "必须先判断 financial_indicators 是数组，再遍历元素取增长率字段。",
+        "financial_indicators[].end_date / report_period 表示财报期末日期，常见为 0331、0630、0930、1231，对应季报/年报混合序列，不可默认当作连续年报。",
+        "当 growth_years=1 时，优先使用字段自带的同比增速（如 netprofit_yoy / growth_YOYNI）；若需手工计算，也必须做同口径同比，不能把 2025Q3 与 2024 年报直接相比。",
+        "如果增长率字段缺失，才能退回到多期净利润同比计算。",
+        "不要因为顶层只有一条文档就断定只有一期数据。"
+      ]
+    }
+  ],
+  "pitfalls": [
+    "raw_data.financial_indicators 通常是数组，不是 dict；不能直接对整个 financial_indicators 调用 get('netprofit_yoy')。",
+    "顶层 report_period 不能代表 raw_data 下所有数组仅有一期。",
+    "不要把 end_date=20250331/20250630/20250930 这类记录误当成年报年份序列；这些通常是季度口径。",
+    "若数据库只有最近几份季报和一份年报，不可臆造更长的年度历史，更不能把季度序列当作 growth_years 对应的年数。",
+    "发现字段存在不等于已确认可直接用于当前任务，必须结合字段类型和层级。"
+  ]
+}

@@ -74,13 +74,13 @@ class AgentAPI:
 
     def list_available_for_tier(self, tier_str: str) -> List[Dict[str, Any]]:
         """
-        列出指定许可证级别可用的智能体
+        列出指定许可证级别下可见的维护中智能体
 
         Args:
             tier_str: 许可证级别字符串 ("free", "basic", "pro", "enterprise")
 
         Returns:
-            可用的智能体元数据列表
+            维护中的智能体元数据列表，包含可用性标记
         """
         # 转换为 LicenseTier
         try:
@@ -88,24 +88,24 @@ class AgentAPI:
         except ValueError:
             tier = LicenseTier.FREE
 
+        tier_order = ["free", "basic", "pro", "enterprise"]
+        current_tier_str = tier.value if hasattr(tier, 'value') else tier
+        current_index = tier_order.index(current_tier_str)
+
         agents = []
-
-        for metadata in self._registry.list_available(tier):
-            agent_dict = self._metadata_to_dict(metadata)
-            agent_dict["is_available"] = True
-            agents.append(agent_dict)
-
-        # 添加不可用的智能体（标记为锁定）
         all_agents = self._registry.list_all()
-        available_ids = {a["id"] for a in agents}
 
         for metadata in all_agents:
-            if metadata.id not in available_ids:
-                agent_dict = self._metadata_to_dict(metadata)
-                agent_dict["is_available"] = False
-                tier_value = metadata.license_tier.value if hasattr(metadata.license_tier, 'value') else metadata.license_tier
+            if self._resolve_maintenance_status(metadata) != AgentMaintenanceStatus.MAINTAINED.value:
+                continue
 
-                # 将英文 tier 转换为中文标签
+            agent_dict = self._metadata_to_dict(metadata)
+
+            tier_value = metadata.license_tier.value if hasattr(metadata.license_tier, 'value') else metadata.license_tier
+            required_index = tier_order.index(tier_value)
+            agent_dict["is_available"] = current_index >= required_index
+
+            if not agent_dict["is_available"]:
                 tier_labels = {
                     "free": "免费",
                     "basic": "基础",
@@ -114,7 +114,8 @@ class AgentAPI:
                 }
                 tier_label = tier_labels.get(tier_value, tier_value)
                 agent_dict["locked_reason"] = f"需要{tier_label}学员权限"
-                agents.append(agent_dict)
+
+            agents.append(agent_dict)
 
         return agents
     
@@ -154,7 +155,11 @@ class AgentAPI:
         """
         categories = []
         for cat in AgentCategory:
-            count = len(self._registry.list_by_category(cat))
+            count = sum(
+                1
+                for metadata in self._registry.list_by_category(cat)
+                if self._resolve_maintenance_status(metadata) == AgentMaintenanceStatus.MAINTAINED.value
+            )
             categories.append({
                 "id": cat.value,
                 "name": self._get_category_name(cat),
@@ -206,7 +211,7 @@ class AgentAPI:
         names = {
             AgentCategory.ANALYST: "分析师",
             AgentCategory.RESEARCHER: "研究员",
-            AgentCategory.TRADER: "交易员",
+            AgentCategory.TRADER: "研究整合员",
             AgentCategory.RISK: "风险管理",
             AgentCategory.MANAGER: "管理者",
             AgentCategory.POST_PROCESSOR: "后处理器",

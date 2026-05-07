@@ -246,26 +246,13 @@ async def init_index_sector_analyst_templates():
     print("🚀 开始初始化大盘/指数分析师和行业/板块分析师系统模板")
     print("=" * 60)
     
-    created_count = 0
-    skipped_count = 0
+    synced_count = 0
+    failed_count = 0
     
     # 初始化大盘/指数分析师模板
     print("\n📊 初始化大盘/指数分析师(index_analyst)模板...")
     for preference_type, template_data in INDEX_ANALYST_TEMPLATES.items():
         try:
-            # 检查是否已存在
-            existing_templates = await service.get_system_templates(
-                agent_type="analysts",
-                agent_name="index_analyst",
-                preference_type=preference_type
-            )
-
-            if existing_templates:
-                print(f"⏭️  跳过: index_analyst/{preference_type} (已存在)")
-                skipped_count += 1
-                continue
-            
-            # 创建模板
             template_create = PromptTemplateCreate(
                 agent_type="analysts",
                 agent_name="index_analyst",
@@ -280,34 +267,27 @@ async def init_index_sector_analyst_templates():
                 ),
                 status="active"
             )
-            
-            result = await service.create_template(template_create)
+
+            result, operation = await service.upsert_system_template(
+                template_create,
+                remark_suffix="[2026-04-11] 幂等同步指数与板块模板",
+            )
             if result:
-                print(f"✅ 创建成功: index_analyst/{preference_type}")
-                created_count += 1
+                action_text = {"created": "创建", "updated": "更新", "unchanged": "保持"}.get(operation, operation)
+                print(f"✅ {action_text}: index_analyst/{preference_type}")
+                synced_count += 1
             else:
-                print(f"❌ 创建失败: index_analyst/{preference_type}")
+                print(f"❌ 同步失败: index_analyst/{preference_type}")
+                failed_count += 1
                 
         except Exception as e:
             print(f"❌ 处理 index_analyst/{preference_type} 时出错: {e}")
+            failed_count += 1
     
     # 初始化行业/板块分析师模板
     print("\n🏭 初始化行业/板块分析师(sector_analyst)模板...")
     for preference_type, template_data in SECTOR_ANALYST_TEMPLATES.items():
         try:
-            # 检查是否已存在
-            existing_templates = await service.get_system_templates(
-                agent_type="analysts",
-                agent_name="sector_analyst",
-                preference_type=preference_type
-            )
-
-            if existing_templates:
-                print(f"⏭️  跳过: sector_analyst/{preference_type} (已存在)")
-                skipped_count += 1
-                continue
-            
-            # 创建模板
             template_create = PromptTemplateCreate(
                 agent_type="analysts",
                 agent_name="sector_analyst",
@@ -322,21 +302,27 @@ async def init_index_sector_analyst_templates():
                 ),
                 status="active"
             )
-            
-            result = await service.create_template(template_create)
+
+            result, operation = await service.upsert_system_template(
+                template_create,
+                remark_suffix="[2026-04-11] 幂等同步指数与板块模板",
+            )
             if result:
-                print(f"✅ 创建成功: sector_analyst/{preference_type}")
-                created_count += 1
+                action_text = {"created": "创建", "updated": "更新", "unchanged": "保持"}.get(operation, operation)
+                print(f"✅ {action_text}: sector_analyst/{preference_type}")
+                synced_count += 1
             else:
-                print(f"❌ 创建失败: sector_analyst/{preference_type}")
+                print(f"❌ 同步失败: sector_analyst/{preference_type}")
+                failed_count += 1
                 
         except Exception as e:
             print(f"❌ 处理 sector_analyst/{preference_type} 时出错: {e}")
+            failed_count += 1
     
     print("\n" + "=" * 60)
     print(f"🎉 初始化完成！")
-    print(f"✅ 新创建: {created_count} 个模板")
-    print(f"⏭️  已跳过: {skipped_count} 个模板")
+    print(f"✅ 已同步: {synced_count} 个模板")
+    print(f"❌ 失败: {failed_count} 个模板")
     print("=" * 60)
 
 

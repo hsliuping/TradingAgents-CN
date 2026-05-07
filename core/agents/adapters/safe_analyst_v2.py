@@ -1,8 +1,8 @@
 """
-保守风险分析师 v2.0
+防御情景分析师 v2.0
 
-基于 ResearcherAgent 基类的保守风险分析师实现。
-从保守角度评估交易计划，优先资本保护，规避潜在风险。
+基于 ResearcherAgent 基类的防御情景分析师实现。
+从保守角度审阅综合研究结论，优先识别脆弱点、失效条件与下行风险。
 支持多轮辩论和缓存系统。
 """
 
@@ -29,21 +29,21 @@ except (ImportError, KeyError):
 @register_agent
 class SafeAnalystV2(ResearcherAgent):
     """
-    保守风险分析师 v2.0
+    防御情景分析师 v2.0
 
     功能：
-    - 从保守角度评估交易计划
-    - 优先考虑资本保护
-    - 规避潜在风险
-    - 寻找防御性策略
+    - 从保守角度审阅综合研究结论
+    - 优先识别脆弱点和关键风险来源
+    - 关注失效条件与下行情景
+    - 强调需要先澄清的信息缺口
     - 支持多轮辩论（与激进、中性分析师辩论）
     - 支持缓存系统（避免重复分析）
 
     工作流程：
-    1. 读取投资计划和市场分析
+    1. 读取综合研究结论和市场分析
     2. 读取辩论历史和对手观点
-    3. 使用LLM从保守角度评估风险并反驳对手
-    4. 生成保守风险观点
+    3. 使用LLM从保守角度审阅结论脆弱点并反驳对手
+    4. 生成防御情景观点
     5. 更新辩论状态
 
     示例:
@@ -72,8 +72,8 @@ class SafeAnalystV2(ResearcherAgent):
     # Agent元数据
     metadata = AgentMetadata(
         id="safe_analyst_v2",
-        name="保守风险分析师 v2.0",
-        description="从保守角度评估交易计划，优先资本保护，规避潜在风险，支持多轮辩论",
+        name="防御情景分析师 v2.0",
+        description="从研究结论最易失效的角度审阅，识别脆弱前提、风险来源与下修触发条件",
         category=AgentCategory.RISK,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -81,9 +81,9 @@ class SafeAnalystV2(ResearcherAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_plan", type="string", description="投资计划", source="state", state_field="investment_plan", source_state_fields=["trader_investment_plan"], producer_hint="research_manager_v2"),
-            AgentInput(name="bull_opinion", type="string", description="看涨观点", required=False, source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
-            AgentInput(name="bear_opinion", type="string", description="看跌观点", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
+            AgentInput(name="investment_plan", type="string", description="综合研究结论", source="state", state_field="investment_plan", source_state_fields=["trader_investment_plan"], producer_hint="research_manager_v2"),
+            AgentInput(name="bull_opinion", type="string", description="乐观情景观点", required=False, source="state", state_field="bull_report", producer_hint="bull_researcher_v2"),
+            AgentInput(name="bear_opinion", type="string", description="审慎情景观点", required=False, source="state", state_field="bear_report", producer_hint="bear_researcher_v2"),
             AgentInput(name="risk_debate_state", type="dict", description="辩论状态", required=False, source="state", state_field="risk_debate_state", producer_hint="risk_manager_v2"),
             AgentInput(name="market_report", type="string", description="市场分析报告", required=False, source="state", state_field="market_report", producer_hint="market_analyst_v2"),
             AgentInput(name="fundamentals_report", type="string", description="基本面分析报告", required=False, source="state", state_field="fundamentals_report", producer_hint="fundamentals_analyst_v2"),
@@ -93,7 +93,7 @@ class SafeAnalystV2(ResearcherAgent):
             AgentInput(name="sector_report", type="string", description="板块分析报告", required=False, source="state", state_field="sector_report", producer_hint="sector_analyst_v2"),
         ],
         outputs=[
-            AgentOutput(name="safe_opinion", type="string", description="保守风险观点"),
+            AgentOutput(name="safe_opinion", type="string", description="防御情景观点"),
             AgentOutput(name="risk_debate_state", type="dict", description="更新后的辩论状态"),
         ],
         requires_tools=False,
@@ -146,34 +146,34 @@ class SafeAnalystV2(ResearcherAgent):
         
         logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
         if prompt:
-            logger.debug("✅ 从模板系统获取保守风险分析师系统提示词")
+            logger.debug("✅ 从模板系统获取防御情景分析师系统提示词")
             return prompt
 
         # 降级：使用默认提示词
-        return """你是一位保守的风险分析师。
+        return """你是一位防御情景分析师。
 
 你的角色特点：
-- 🛡️ 稳健保守，优先保护资本
-- 🔒 风险厌恶，宁可错过机会也不愿承担过高风险
-- 📉 关注下行风险和潜在损失
-- ⚠️ 倾向于谨慎的交易策略
+    - 🛡️ 稳健保守，优先识别研究结论的脆弱点
+    - 🔒 宁可错过机会，也不接受前提不清或证据不足的结论强化
+    - 📉 关注潜在风险来源、失效条件与下行情景
+    - ⚠️ 强调需要先澄清的问题，而不是直接给执行建议
 
 你的任务是：
-1. 从保守角度评估投资计划的风险
-2. 识别所有潜在的风险因素
-3. 评估最坏情况下的损失
-4. 提出更保守的操作建议（如减小仓位、设置严格止损等）
+    1. 从保守角度审阅当前研究结论的脆弱点。
+    2. 识别关键风险来源、失效条件与信息缺口。
+    3. 说明哪些负面信号会使当前判断下修。
+    4. 不输出仓位、止损止盈、价格区间或交易建议。
 
 评估要点：
-- 下行风险和最大回撤
-- 市场不确定性
-- 潜在的黑天鹅事件
-- 风险收益比（偏向风险）
+    - 研究结论最脆弱的前提
+    - 关键风险来源与潜在冲击
+    - 需要重点监测的负面公开信号
+    - 当前材料中尚未覆盖的信息缺口
 
 要求：
-- 保持保守但不失客观
-- 用数据支持你的观点
-- 使用中文撰写报告"""
+    - 保持保守但不失客观
+    - 用数据支持你的观点
+    - 使用中文撰写报告"""
 
     def _build_user_prompt(self, ticker: str, analysis_date: str, state: Dict[str, Any]) -> str:
         """构建用户提示词（从模板系统获取并渲染）"""
@@ -216,24 +216,47 @@ class SafeAnalystV2(ResearcherAgent):
                        len(current_risky_response) + len(current_neutral_response))
         logger.info(f"  - 总Prompt长度: {total_length:,} 字符 (~{total_length//4:,} tokens)")
 
-        # 降级提示词（如果模板系统不可用）- 参考旧版实现
-        fallback_prompt = f"""以下是交易员的决策：
-{template_variables['investment_plan']}
+        # 降级提示词（如果模板系统不可用）
+        fallback_prompt = f"""请从防御情景分析师的视角审阅以下综合研究结论，并说明哪些风险会导致判断下修：
 
-将以下来源的见解纳入您的论点：
-市场研究报告：{template_variables['market_report']}
-社交媒体情绪报告：{template_variables['sentiment_report']}
-最新世界事务报告：{template_variables['news_report']}
-公司基本面报告：{template_variables['fundamentals_report']}
+    【综合研究结论】
+    {template_variables['investment_plan'] or '无综合研究结论'}
 
-当前对话历史：{history}
-激进分析师的最后回应：{current_risky_response}
-中性分析师的最后回应：{current_neutral_response}
+    【乐观情景观点】
+    {template_variables['bull_opinion'] or '无乐观情景观点'}
 
-请提出您的保守观点，强调为什么低风险方法是最安全的。"""
+    【审慎情景观点】
+    {template_variables['bear_opinion'] or '无审慎情景观点'}
+
+    【市场分析报告】
+    {template_variables['market_report'] or '无市场分析报告'}
+
+    【社交媒体情绪报告】
+    {template_variables['sentiment_report'] or '无情绪分析报告'}
+
+    【新闻分析报告】
+    {template_variables['news_report'] or '无新闻分析报告'}
+
+    【基本面分析报告】
+    {template_variables['fundamentals_report'] or '无基本面分析报告'}
+
+    【当前辩论历史】
+    {history or '无辩论历史'}
+
+    【高弹性情景分析师最新回应】
+    {current_risky_response or '无'}
+
+    【基准情景分析师最新回应】
+    {current_neutral_response or '无'}
+
+    请输出你的防御情景观点，重点说明：
+    1. 当前研究结论最脆弱的前提是什么。
+    2. 哪些负面信号会使当前判断下修。
+    3. 还缺少哪些关键信息或验证。
+    4. 不要输出仓位、止损止盈、价格区间或交易建议。"""
 
         # 打印模板变量（调试用）
-        logger.info(f"📊 [保守风险分析师] 模板变量:")
+        logger.info(f"📊 [防御情景分析师] 模板变量:")
         for key, value in template_variables.items():
             if isinstance(value, str) and len(value) > 100:
                 logger.info(f"  - {key}: {value[:100]}...")
@@ -251,11 +274,11 @@ class SafeAnalystV2(ResearcherAgent):
             prompt_type="user"  # 🔑 明确指定获取用户提示词
         )
         if prompt:
-            logger.info(f"✅ 从模板系统获取保守风险分析师用户提示词 (长度: {len(prompt)})")
+            logger.info(f"✅ 从模板系统获取防御情景分析师用户提示词 (长度: {len(prompt)})")
             return prompt
 
         # 降级：使用硬编码提示词
-        logger.info(f"📝 [保守风险分析师] 使用降级提示词 (长度: {len(fallback_prompt)})")
+        logger.info(f"📝 [防御情景分析师] 使用降级提示词 (长度: {len(fallback_prompt)})")
         return fallback_prompt
 
     def _get_required_reports(self) -> list:
@@ -281,26 +304,26 @@ class SafeAnalystV2(ResearcherAgent):
     
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行保守风险分析（支持多轮辩论）
+        执行保守风险审阅（支持多轮辩论）
 
         Args:
             state: 包含以下键的状态字典:
                 - ticker: 股票代码
                 - analysis_date: 分析日期
-                - investment_plan: 投资计划
-                - bull_opinion: 看涨观点（可选）
-                - bear_opinion: 看跌观点（可选）
+                - investment_plan: 综合研究结论
+                - bull_opinion: 乐观情景观点（可选）
+                - bear_opinion: 审慎情景观点（可选）
                 - risk_debate_state: 辩论状态（可选）
 
         Returns:
             更新后的状态，包含:
-                - safe_opinion: 保守风险观点
+                - safe_opinion: 防御情景观点
                 - risk_debate_state: 更新后的辩论状态
         """
         ticker = state.get("ticker", "") or state.get("company_of_interest", "")
         analysis_date = state.get("analysis_date", "") or state.get("trade_date", "")
 
-        logger.info(f"🛡️ 保守风险分析师开始评估 {ticker} @ {analysis_date}")
+        logger.info(f"🛡️ 防御情景分析师开始评估 {ticker} @ {analysis_date}")
 
         # 🆕 获取辩论状态
         risk_debate_state = state.get("risk_debate_state", {})
@@ -339,7 +362,7 @@ class SafeAnalystV2(ResearcherAgent):
 
             # 🆕 更新辩论状态
             new_count = risk_debate_state.get("count", 0) + 1
-            logger.info(f"🛡️ [保守风险分析师] 发言完成，计数: {risk_debate_state.get('count', 0)} -> {new_count}")
+            logger.info(f"🛡️ [防御情景分析师] 发言完成，计数: {risk_debate_state.get('count', 0)} -> {new_count}")
 
             new_risk_debate_state = {
                 "history": history + "\n" + argument,

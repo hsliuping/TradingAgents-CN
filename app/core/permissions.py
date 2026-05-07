@@ -127,15 +127,18 @@ def require_feature(feature: str):
     return _check_feature
 
 
-# PRO 功能列表
+# 高级学员功能列表
 PRO_FEATURES = [
+    "advanced_courses",       # 高级学员课程
     "email_notification",      # 邮件通知
     "watchlist_groups",        # 自选股分组
     "scheduled_analysis",      # 定时分析
-    "portfolio_analysis",      # 持仓分析
-    "trade_review",            # 操作复盘
-    "advanced_screening",      # 高级选股
     "batch_analysis",          # 批量分析
     "export_reports",          # 导出报告
+    "trading_plan_check",      # 交易计划一致性检查
+    "workflow",                # 分析流
+    "workflow_tools",          # 配置Tools
+    "workflow_agents",         # 配置Agent
+    "prompt_templates",        # 提示词模板
 ]
 

@@ -1,7 +1,5 @@
 """
 交易复盘API路由
-
-[PRO功能] 此模块为专业版功能，需要专业版授权
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,19 +8,18 @@ from datetime import datetime
 import logging
 
 from app.routers.auth_db import get_current_user
-from app.core.permissions import require_pro
+from app.core.permissions import get_license_info
 from app.core.response import ok
+from app.services.license_service import LicenseInfo, get_license_service
 from app.services.trade_review_service import get_trade_review_service
 from app.models.review import (
     CreateTradeReviewRequest, CreatePeriodicReviewRequest,
     SaveAsCaseRequest, ReviewType
 )
 
-# 整个路由器都需要 PRO 权限
 router = APIRouter(
     prefix="/review",
-    tags=["review"],
-    dependencies=[Depends(require_pro)]
+    tags=["review"]
 )
 logger = logging.getLogger("webapi.review")
 
@@ -32,7 +29,8 @@ logger = logging.getLogger("webapi.review")
 @router.post("/trade", response_model=Dict[str, Any])
 async def create_trade_review(
     request: CreateTradeReviewRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    license_info: LicenseInfo = Depends(get_license_info)
 ):
     """
     创建交易复盘任务（统一使用任务中心模式）
@@ -57,6 +55,20 @@ async def create_trade_review(
     try:
         logger.info(f"📝 [交易复盘路由] 收到复盘请求: code={request.code}, trade_ids={request.trade_ids}")
         logger.info(f"🔧 [交易复盘路由] 统一使用任务中心模式")
+
+        if request.trading_system_id:
+            license_service = get_license_service()
+            if not license_service.has_feature(license_info, "trading_plan_check"):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "FEATURE_REQUIRED",
+                        "message": "交易计划一致性检查为高级学员专属",
+                        "feature": "trading_plan_check",
+                        "plan": license_info.plan,
+                        "upgrade_url": "/settings/license"
+                    }
+                )
 
         # 🆕 统一使用任务中心模式（支持进度查询）
         logger.info(f"=" * 60)
@@ -604,7 +616,10 @@ async def get_trades_by_code(
                     "amount": quantity * price,
                     "pnl": float(pnl),
                     "commission": 0.0,
-                    "timestamp": timestamp_str
+                    "timestamp": timestamp_str,
+                    "change_type": change_type,
+                    "quantity_after": c.get("quantity_after"),
+                    "created_at": c.get("created_at").isoformat() if c.get("created_at") else None
                 })
 
         # 计算汇总

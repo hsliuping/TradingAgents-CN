@@ -11,7 +11,7 @@
         <h1>🛠️ 创建新 Skill</h1>
       </div>
       <div class="header-right">
-        <el-button v-if="wizardStep < 2 && sessionId" text size="small" @click="goBack">
+        <el-button v-if="wizardStep < 3 && sessionId" text size="small" @click="goBack">
           保存草稿
         </el-button>
       </div>
@@ -142,6 +142,45 @@
             <el-descriptions-item label="数据源">{{ specPreview.data_source }}</el-descriptions-item>
             <el-descriptions-item label="描述">{{ specPreview.description }}</el-descriptions-item>
           </el-descriptions>
+          <div v-if="previewFactReport" class="spec-catalog-card">
+            <div class="spec-catalog-header">
+              <div>
+                <h4>实现事实与侦察记录</h4>
+                <p>这一步已经完成了代码生成前的事实准备。确认规格后会直接进入代码生成，不会再重新跑一遍同样的侦察。</p>
+              </div>
+            </div>
+            <el-descriptions :column="1" border size="small">
+              <el-descriptions-item label="推荐实现策略">{{ previewFactReport.recommended_strategy || '-' }}</el-descriptions-item>
+              <el-descriptions-item label="侦察置信度">{{ Math.round((previewFactReport.confidence || 0) * 100) }}%</el-descriptions-item>
+              <el-descriptions-item v-if="previewFactReport.available_helpers?.length" label="推荐 helper">
+                <div class="tag-wrap">
+                  <el-tag v-for="entry in previewFactReport.available_helpers" :key="`${entry.module}.${entry.name}`" class="tag-item" type="success" effect="plain">
+                    {{ entry.module }}.{{ entry.name }}
+                  </el-tag>
+                </div>
+              </el-descriptions-item>
+              <el-descriptions-item v-if="previewFactFieldSummaries.length" label="样本字段摘要">
+                <div v-for="[collection, fields] in previewFactFieldSummaries" :key="collection" class="catalog-note-item">
+                  {{ collection }}: {{ fields.slice(0, 8).join(', ') }}
+                </div>
+              </el-descriptions-item>
+              <el-descriptions-item v-if="previewFactReport.validation_checks?.length" label="动态验收字段">
+                {{ previewFactReport.validation_checks.map(item => item.field || item.name).join('、') }}
+              </el-descriptions-item>
+            </el-descriptions>
+            <div v-if="previewToolTraces.length" class="catalog-notes" style="margin-top: 12px;">
+              <div class="recommendation-label">侦察工具调用记录</div>
+              <div v-for="(trace, idx) in previewToolTraces" :key="`${trace.tool_name}-${idx}`" class="tool-trace-card">
+                <div class="tool-trace-header">
+                  <strong>{{ idx + 1 }}. {{ trace.tool_name }}</strong>
+                  <span>{{ trace.success ? '成功' : '失败' }} · {{ trace.duration_ms }}ms</span>
+                </div>
+                <div class="tool-trace-body">参数: {{ JSON.stringify(trace.arguments || {}) }}</div>
+                <div v-if="trace.result_preview" class="tool-trace-body">结果摘要: {{ trace.result_preview }}</div>
+                <div v-if="trace.error" class="tool-trace-body tool-trace-error">错误: {{ trace.error }}</div>
+              </div>
+            </div>
+          </div>
           <div v-if="specPreview?.parameters?.length" class="spec-params-section">
             <h4>输入参数</h4>
             <el-table :data="specPreview.parameters" size="small" border stripe>
@@ -538,7 +577,10 @@ import type {
   BoundaryCheck,
   ConfirmResult,
   ExternalDataSourceCatalogItem,
+  ImplementationFactReportView,
   PipelineResultDetail,
+  ReconToolTrace,
+  SessionDetail,
   SkillHandoffContext,
   SkillGenerationRecommendations,
   StockDataCatalogCollection,
@@ -579,8 +621,10 @@ watch(boundaryCheck, () => { boundaryExpanded.value = false })
 const canConfirm = computed(() => chatMessages.value.length >= 2)
 
 const specPreview = ref<Record<string, any> | null>(null)
+const previewFactReport = ref<ImplementationFactReportView | null>(null)
 const specConfirmLoading = ref(false)
 const pipelineMessage = ref('')
+const pipelineDetails = ref<Array<{ stage: string; message: string; iteration: number; progress: number; timestamp?: string }>>([])
 const stockCatalogLoading = ref(false)
 const stockCatalogDoc = ref('')
 const stockCatalogCollections = ref<StockDataCatalogCollection[]>([])
@@ -701,7 +745,6 @@ const genProgress = ref(0)
 const genSteps = ref([
   { label: '生成代码', status: 'pending' },
   { label: '语法检查', status: 'pending' },
-  { label: '安全扫描', status: 'pending' },
   { label: '沙箱执行', status: 'pending' },
   { label: '质量评估', status: 'pending' },
 ])
@@ -739,6 +782,12 @@ const generatedTestDefaults = computed(() => {
 const generatedTestResultText = computed(() => {
   if (!generatedTestResult.value) return ''
   return JSON.stringify(generatedTestResult.value.output, null, 2)
+})
+
+const previewToolTraces = computed<ReconToolTrace[]>(() => previewFactReport.value?.tool_traces || [])
+
+const previewFactFieldSummaries = computed(() => {
+  return Object.entries(previewFactReport.value?.sample_fields || {}).slice(0, 4)
 })
 const generatedTestDataState = computed(() => {
   const result = generatedTestResult.value
@@ -837,6 +886,39 @@ const prepareGeneratedTestPanel = () => {
   generatedTestResult.value = null
   generatedTestLoading.value = false
   resetGeneratedTestArgs()
+}
+
+const normalizePipelineProgress = (progress?: number | null) => {
+  if (typeof progress !== 'number' || Number.isNaN(progress)) return 0
+  const normalized = progress <= 1 ? progress * 100 : progress
+  return Math.max(0, Math.min(100, normalized))
+}
+
+const updateGenerationProgressUI = (stage?: string, message?: string, progress?: number | null) => {
+  const stageToStep: Record<string, number> = {
+    reconnaissance: 0,
+    code_generation: 0,
+    static_validation: 1,
+    sandbox_execution: 2,
+    output_evaluation: 3,
+    edge_testing: 3,
+    reflection: 3,
+    error: 3,
+  }
+
+  pipelineMessage.value = message || stage || ''
+
+  const normalizedProgress = normalizePipelineProgress(progress)
+  if (normalizedProgress > 0 || progress === 0) {
+    genProgress.value = Math.round(normalizedProgress * 100) / 100
+  }
+
+  if (!stage || stageToStep[stage] === undefined) return
+
+  const idx = stageToStep[stage]
+  genSteps.value.forEach((s, i) => {
+    s.status = i < idx ? 'done' : i === idx ? 'running' : 'pending'
+  })
 }
 
 // ==================== 方法 ====================
@@ -1095,6 +1177,35 @@ const focusConfirmFlow = async () => {
   await focusConfirmActions()
 }
 
+const buildGenResultFromSession = (session: SessionDetail): ConfirmResult | null => {
+  const pr = (session.pipeline_result || null) as PipelineResultDetail | null
+  if (!pr && session.status !== 'completed' && session.status !== 'failed') {
+    return null
+  }
+
+  const lastIter = pr?.iterations?.[pr.iterations.length - 1]
+  const es = lastIter?.eval_score
+  const finalScore = es ? Math.round(
+    (es.executability || 0) * 0.25 +
+    (es.authenticity || 0) * 0.25 +
+    (es.completeness || 0) * 0.2 +
+    (es.relevance || 0) * 0.2 +
+    (es.format_quality || 0) * 0.1
+  ) : null
+
+  return {
+    status: session.status,
+    session_id: session.session_id,
+    skill_id: pr?.tool_id ?? null,
+    spec: session.spec ?? null,
+    success: session.status === 'completed',
+    total_rounds: pr?.total_rounds ?? 0,
+    total_time: pr?.total_time ?? 0,
+    final_score: finalScore,
+    error: pr?.error ?? session.pipeline_message ?? null,
+  }
+}
+
 /** 初始化：新建或恢复草稿 */
 const initFromRoute = async () => {
   const sid = route.query.sessionId as string
@@ -1118,10 +1229,26 @@ const initFromRoute = async () => {
       genSteps.value.forEach(s => s.status = 'pending')
       userInput.value = ''
 
-      if (session.status === 'confirmed') {
+      specPreview.value = session.spec || null
+      backendRecommendations.value = session.recommendations || null
+      previewFactReport.value = session.fact_report || null
+      sessionPipelineResult.value = (session.pipeline_result || null) as PipelineResultDetail | null
+      pipelineDetails.value = Array.isArray(session.pipeline_details) ? session.pipeline_details : []
+
+      if (session.status === 'generating') {
+        wizardStep.value = 2
+        updateGenerationProgressUI(
+          session.pipeline_stage,
+          session.pipeline_message,
+          session.pipeline_progress ?? 0,
+        )
+      } else if (session.status === 'completed' || session.status === 'failed') {
+        genResult.value = buildGenResultFromSession(session)
+        if (session.status === 'completed') prepareGeneratedTestPanel()
+        pipelineMessage.value = session.pipeline_message || genResult.value?.error || ''
+        wizardStep.value = 3
+      } else if (session.status === 'confirmed') {
         wizardStep.value = 1
-        specPreview.value = session.spec || null
-        backendRecommendations.value = session.recommendations || null
         if (shouldFocusConfirmActions()) {
           await focusConfirmFlow()
         } else {
@@ -1186,7 +1313,7 @@ const handleChatSend = async () => {
   }
 }
 
-/** 查看规格：调用 previewSpec，进入步骤 1 */
+/** 查看规格：生成规格和侦察报告后进入规格确认 */
 const handleViewSpec = async () => {
   if (!sessionId.value) return
   const confirmMessage = userInput.value?.trim() || '确认'
@@ -1200,9 +1327,11 @@ const handleViewSpec = async () => {
     const res = await skillGenerationApi.previewSpec(sessionId.value, confirmMessage)
     specPreview.value = res.spec
     backendRecommendations.value = res.recommendations || null
+    previewFactReport.value = res.fact_report || null
     wizardStep.value = 1
   } catch (e: any) {
     ElMessage.error(e?.message || '获取规格失败')
+    wizardStep.value = 0
   } finally {
     chatLoading.value = false
   }
@@ -1234,17 +1363,12 @@ const handleConfirmAndGenerate = async () => {
   specConfirmLoading.value = true
   wizardStep.value = 2
   repairFeedback.value = ''
+  genResult.value = null
   sessionPipelineResult.value = null
   genSteps.value.forEach(s => s.status = 'pending')
   genProgress.value = 0
-  pipelineMessage.value = ''
-
-  const stageToStep: Record<string, number> = {
-    code_generation: 0,
-    static_validation: 1,
-    sandbox_execution: 2,
-    output_evaluation: 3,
-  }
+  pipelineMessage.value = '正在确认规格并启动生成任务...'
+  pipelineDetails.value = []
 
   try {
     const res = await skillGenerationApi.confirmSpec(sessionId.value, '确认')
@@ -1253,17 +1377,11 @@ const handleConfirmAndGenerate = async () => {
       const poll = async () => {
         const session = await skillGenerationApi.getSession(sessionId.value)
         sessionPipelineResult.value = (session.pipeline_result || null) as PipelineResultDetail | null
+        pipelineDetails.value = Array.isArray(session.pipeline_details) ? session.pipeline_details : []
         const stage = session.pipeline_stage
         const msg = session.pipeline_message
         const prog = session.pipeline_progress ?? 0
-        if (stage && stageToStep[stage] !== undefined) {
-          pipelineMessage.value = msg || stage
-          genProgress.value = Math.round(prog * 100) / 100
-          const idx = stageToStep[stage]
-          genSteps.value.forEach((s, i) => {
-            s.status = i < idx ? 'done' : i === idx ? 'running' : 'pending'
-          })
-        }
+        updateGenerationProgressUI(stage, msg, prog)
         if (session.status === 'completed' || session.status === 'failed') {
           const pr = session.pipeline_result
           const lastIter = pr?.iterations?.[pr.iterations.length - 1]
@@ -1273,8 +1391,12 @@ const handleConfirmAndGenerate = async () => {
             (es.completeness || 0) * 0.2 + (es.relevance || 0) * 0.2 +
             (es.format_quality || 0) * 0.1
           ) : null
-          genProgress.value = 100
-          genSteps.value.forEach(s => s.status = 'done')
+          if (session.status === 'completed') {
+            genProgress.value = 100
+            genSteps.value.forEach(s => s.status = 'done')
+          } else {
+            pipelineMessage.value = pr?.error || msg || stage || '生成失败'
+          }
           genResult.value = {
             status: session.status,
             session_id: sessionId.value,
@@ -1324,7 +1446,9 @@ const handleRepairAndRegenerate = async () => {
     wizardStep.value = 2
     genProgress.value = 0
     pipelineMessage.value = '已确认修正计划，正在重新生成...'
+    genResult.value = null
     genSteps.value.forEach(s => s.status = 'pending')
+    pipelineDetails.value = []
     sessionPipelineResult.value = null
     repairPlan.value = ''
     repairPlanFeedback.value = ''
@@ -1333,31 +1457,23 @@ const handleRepairAndRegenerate = async () => {
     const poll = async () => {
       const session = await skillGenerationApi.getSession(sessionId.value)
       sessionPipelineResult.value = (session.pipeline_result || null) as PipelineResultDetail | null
+      pipelineDetails.value = Array.isArray(session.pipeline_details) ? session.pipeline_details : []
       const stage = session.pipeline_stage
       const msg = session.pipeline_message
       const prog = session.pipeline_progress ?? 0
-      const stageToStep: Record<string, number> = {
-        code_generation: 0,
-        static_validation: 1,
-        sandbox_execution: 2,
-        output_evaluation: 3,
-      }
-      if (stage && stageToStep[stage] !== undefined) {
-        pipelineMessage.value = msg || stage
-        genProgress.value = Math.round(prog * 100) / 100
-        const idx = stageToStep[stage]
-        genSteps.value.forEach((s, i) => {
-          s.status = i < idx ? 'done' : i === idx ? 'running' : 'pending'
-        })
-      }
+      updateGenerationProgressUI(stage, msg, prog)
 
       if (session.status === 'completed' || session.status === 'failed') {
         const pr = session.pipeline_result as PipelineResultDetail | null
         const lastIter = pr?.iterations?.[pr.iterations.length - 1]
         const score = lastIter?.eval_score
         const finalScore = typeof score?.total === 'number' ? score.total : null
-        genProgress.value = 100
-        genSteps.value.forEach(s => s.status = 'done')
+        if (session.status === 'completed') {
+          genProgress.value = 100
+          genSteps.value.forEach(s => s.status = 'done')
+        } else {
+          pipelineMessage.value = pr?.error || msg || stage || '生成失败'
+        }
         genResult.value = {
           status: session.status,
           session_id: sessionId.value,
@@ -1951,6 +2067,35 @@ onMounted(async () => {
   font-size: 13px;
   line-height: 1.6;
 }
+
+.tool-trace-card {
+  padding: 10px 12px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 10px;
+  background: var(--el-fill-color-blank);
+}
+
+.tool-trace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+}
+
+.tool-trace-body {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+  word-break: break-word;
+}
+
+.tool-trace-error {
+  color: var(--el-color-danger);
+}
+
 .spec-confirm-actions {
   margin-top: 20px;
   padding-bottom: 8px;
@@ -2009,6 +2154,29 @@ onMounted(async () => {
     .gen-desc { color: var(--el-text-color-secondary); font-size: 14px; }
   }
 }
+
+  .gen-detail-panel {
+    margin: 24px auto 0;
+    max-width: 760px;
+    text-align: left;
+    background: #f6f8fb;
+    border: 1px solid #d9e2f2;
+    border-radius: 14px;
+    padding: 16px 18px;
+  }
+
+  .gen-detail-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #244a7c;
+    margin-bottom: 10px;
+  }
+
+  .gen-detail-item {
+    color: var(--el-text-color-regular);
+    font-size: 13px;
+    line-height: 1.7;
+  }
 
 .gen-spinner { animation: spin 1.5s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

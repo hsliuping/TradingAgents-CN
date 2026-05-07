@@ -7,9 +7,10 @@
 #
 # 选项:
 #   -r, --registry REGISTRY   Docker Hub 用户名（默认: hsliup）
-#   -t, --tag TAG             镜像标签（默认: latest）
+#   -t, --tag TAG             镜像标签（默认: 读取根目录 VERSION）
 #   -b, --backend-only        只推送后端镜像
 #   -f, --frontend-only       只推送前端镜像
+#   --no-push-latest          推送版本标签时不额外更新 latest
 #   -h, --help                显示帮助信息
 
 set -e  # 遇到错误立即退出
@@ -23,9 +24,14 @@ NC='\033[0m' # No Color
 
 # 默认参数
 REGISTRY="hsliup"
-TAG="latest"
+TAG=""
 PUSH_BACKEND=true
 PUSH_FRONTEND=true
+PUSH_LATEST=true
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+source "$SCRIPT_DIR/version-utils.sh"
 
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do
@@ -46,14 +52,19 @@ while [[ $# -gt 0 ]]; do
             PUSH_BACKEND=false
             shift
             ;;
+        --no-push-latest)
+            PUSH_LATEST=false
+            shift
+            ;;
         -h|--help)
             echo "用法: $0 [OPTIONS]"
             echo ""
             echo "选项:"
             echo "  -r, --registry REGISTRY   Docker Hub 用户名（默认: hsliup）"
-            echo "  -t, --tag TAG             镜像标签（默认: latest）"
+            echo "  -t, --tag TAG             镜像标签（默认: 读取根目录 VERSION）"
             echo "  -b, --backend-only        只推送后端镜像"
             echo "  -f, --frontend-only       只推送前端镜像"
+            echo "  --no-push-latest          推送版本标签时不额外更新 latest"
             echo "  -h, --help                显示帮助信息"
             exit 0
             ;;
@@ -64,6 +75,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+TAG="$(resolve_image_tag "$TAG" "$PROJECT_ROOT")"
+PUSH_LATEST_ALIAS=false
+if should_push_latest_alias "$TAG" "$PUSH_LATEST"; then
+    PUSH_LATEST_ALIAS=true
+fi
+
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}Docker 镜像推送${NC}"
 echo -e "${BLUE}========================================${NC}"
@@ -71,6 +88,7 @@ echo ""
 echo -e "${GREEN}📋 推送配置:${NC}"
 echo -e "  Registry: ${YELLOW}$REGISTRY${NC}"
 echo -e "  Tag: ${YELLOW}$TAG${NC}"
+echo -e "  Push latest alias: ${YELLOW}$PUSH_LATEST_ALIAS${NC}"
 echo -e "  推送后端: ${YELLOW}$PUSH_BACKEND${NC}"
 echo -e "  推送前端: ${YELLOW}$PUSH_FRONTEND${NC}"
 echo ""
@@ -87,42 +105,60 @@ echo ""
 
 # 推送后端镜像
 if [ "$PUSH_BACKEND" = true ]; then
-    BACKEND_IMAGE="$REGISTRY/tradingagents-backend:$TAG"
+    BACKEND_IMAGE="$REGISTRY/tradingagents-pro-backend:$TAG"
+    BACKEND_LATEST_IMAGE="$REGISTRY/tradingagents-pro-backend:latest"
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}推送后端镜像${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
     
     # 检查镜像是否存在
-    if ! docker images | grep -q "$REGISTRY/tradingagents-backend"; then
+    if ! docker image inspect "$BACKEND_IMAGE" >/dev/null 2>&1; then
         echo -e "${RED}❌ 错误: 后端镜像不存在，请先构建镜像${NC}"
         echo -e "  ${YELLOW}./docker/scripts/build-compile.sh${NC}"
         exit 1
     fi
+
+    if [ "$PUSH_LATEST_ALIAS" = true ]; then
+        docker tag "$BACKEND_IMAGE" "$BACKEND_LATEST_IMAGE"
+    fi
     
     echo -e "${GREEN}📤 推送镜像: ${YELLOW}$BACKEND_IMAGE${NC}"
     docker push "$BACKEND_IMAGE"
+    if [ "$PUSH_LATEST_ALIAS" = true ]; then
+        echo -e "${GREEN}📤 推送 latest 别名: ${YELLOW}$BACKEND_LATEST_IMAGE${NC}"
+        docker push "$BACKEND_LATEST_IMAGE"
+    fi
     echo -e "${GREEN}✅ 后端镜像推送完成${NC}"
     echo ""
 fi
 
 # 推送前端镜像
 if [ "$PUSH_FRONTEND" = true ]; then
-    FRONTEND_IMAGE="$REGISTRY/tradingagents-frontend:$TAG"
+    FRONTEND_IMAGE="$REGISTRY/tradingagents-pro-frontend:$TAG"
+    FRONTEND_LATEST_IMAGE="$REGISTRY/tradingagents-pro-frontend:latest"
     echo -e "${BLUE}========================================${NC}"
     echo -e "${BLUE}推送前端镜像${NC}"
     echo -e "${BLUE}========================================${NC}"
     echo ""
     
     # 检查镜像是否存在
-    if ! docker images | grep -q "$REGISTRY/tradingagents-frontend"; then
+    if ! docker image inspect "$FRONTEND_IMAGE" >/dev/null 2>&1; then
         echo -e "${RED}❌ 错误: 前端镜像不存在，请先构建镜像${NC}"
         echo -e "  ${YELLOW}docker-compose -f docker/docker-compose.compiled.yml build frontend${NC}"
         exit 1
     fi
+
+    if [ "$PUSH_LATEST_ALIAS" = true ]; then
+        docker tag "$FRONTEND_IMAGE" "$FRONTEND_LATEST_IMAGE"
+    fi
     
     echo -e "${GREEN}📤 推送镜像: ${YELLOW}$FRONTEND_IMAGE${NC}"
     docker push "$FRONTEND_IMAGE"
+    if [ "$PUSH_LATEST_ALIAS" = true ]; then
+        echo -e "${GREEN}📤 推送 latest 别名: ${YELLOW}$FRONTEND_LATEST_IMAGE${NC}"
+        docker push "$FRONTEND_LATEST_IMAGE"
+    fi
     echo -e "${GREEN}✅ 前端镜像推送完成${NC}"
     echo ""
 fi
@@ -133,19 +169,25 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "${GREEN}镜像信息:${NC}"
 if [ "$PUSH_BACKEND" = true ]; then
-    echo -e "  后端: ${YELLOW}$REGISTRY/tradingagents-backend:$TAG${NC}"
+    echo -e "  后端: ${YELLOW}$REGISTRY/tradingagents-pro-backend:$TAG${NC}"
+    if [ "$PUSH_LATEST_ALIAS" = true ]; then
+        echo -e "  后端 latest 别名: ${YELLOW}$REGISTRY/tradingagents-pro-backend:latest${NC}"
+    fi
 fi
 if [ "$PUSH_FRONTEND" = true ]; then
-    echo -e "  前端: ${YELLOW}$REGISTRY/tradingagents-frontend:$TAG${NC}"
+    echo -e "  前端: ${YELLOW}$REGISTRY/tradingagents-pro-frontend:$TAG${NC}"
+    if [ "$PUSH_LATEST_ALIAS" = true ]; then
+        echo -e "  前端 latest 别名: ${YELLOW}$REGISTRY/tradingagents-pro-frontend:latest${NC}"
+    fi
 fi
 echo ""
 echo -e "${GREEN}下一步:${NC}"
 echo -e "  在部署服务器上拉取镜像:"
 if [ "$PUSH_BACKEND" = true ]; then
-    echo -e "  ${YELLOW}docker pull $REGISTRY/tradingagents-backend:$TAG${NC}"
+    echo -e "  ${YELLOW}docker pull $REGISTRY/tradingagents-pro-backend:$TAG${NC}"
 fi
 if [ "$PUSH_FRONTEND" = true ]; then
-    echo -e "  ${YELLOW}docker pull $REGISTRY/tradingagents-frontend:$TAG${NC}"
+    echo -e "  ${YELLOW}docker pull $REGISTRY/tradingagents-pro-frontend:$TAG${NC}"
 fi
 echo -e "  启动服务:"
 echo -e "  ${YELLOW}docker-compose -f docker/docker-compose.compiled.yml up -d${NC}"

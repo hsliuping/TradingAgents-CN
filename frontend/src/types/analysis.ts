@@ -140,16 +140,32 @@ export interface StockInfo {
   dif?: number           // MACD-DIF
   dea?: number           // MACD-DEA
   macd_hist?: number     // MACD柱状图
+
+  // 基本面诊断/警告
+  factor_diagnostics?: Record<string, {
+    data_quality_tier?: string
+    field_name?: string
+    display_name?: string
+    data_quality_state?: string | null
+    unavailable_reason?: string | null
+    missing_inputs?: string[]
+    report_period?: string | null
+    comparison_period?: string | null
+  }>
+  factor_warnings?: Record<string, {
+    warning_conditions: string[]
+    warning_categories: Array<'fallback_used' | 'proxy_used' | 'low_sample_size' | 'precision_degraded'>
+  }>
 }
 
-// 单股分析请求
+// 单股研究请求
 export interface SingleAnalysisRequest {
   symbol?: string  // 主字段：6位股票代码
   stock_code?: string  // 兼容字段（已废弃）
   parameters?: AnalysisParameters
 }
 
-// 批量分析请求
+// 批量研究请求
 export interface BatchAnalysisRequest {
   title: string
   description?: string
@@ -158,7 +174,7 @@ export interface BatchAnalysisRequest {
   parameters?: AnalysisParameters
 }
 
-// 分析任务响应
+// 研究任务响应
 export interface AnalysisTaskResponse {
   task_id: string
   batch_id?: string
@@ -173,7 +189,7 @@ export interface AnalysisTaskResponse {
   result?: AnalysisResult
 }
 
-// 分析批次响应
+// 研究批次响应
 export interface AnalysisBatchResponse {
   batch_id: string
   title: string
@@ -189,7 +205,7 @@ export interface AnalysisBatchResponse {
   parameters: AnalysisParameters
 }
 
-// 分析历史查询参数
+// 研究历史查询参数
 export interface AnalysisHistoryQuery {
   status?: AnalysisStatus
   start_date?: string
@@ -201,7 +217,7 @@ export interface AnalysisHistoryQuery {
   page_size: number
 }
 
-// 分析历史响应
+// 研究历史响应
 export interface AnalysisHistoryResponse {
   tasks: AnalysisTask[]
   batches: AnalysisBatch[]
@@ -231,7 +247,7 @@ export interface BatchProgress {
   updated_at: string
 }
 
-// 分析统计信息
+// 研究统计信息
 export interface AnalysisStats {
   total_analyses: number
   successful_analyses: number
@@ -260,7 +276,7 @@ export interface UserQueueStatus {
   available_slots: number
 }
 
-// 分析报告
+// 研究报告
 export interface AnalysisReport {
   id: string
   task_id: string

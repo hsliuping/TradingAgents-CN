@@ -150,6 +150,72 @@ class UnifiedLLMClient:
         """
         self._tools.update(tools)
 
+    @staticmethod
+    def _estimate_message_chars(messages: List[Message]) -> int:
+        total = 0
+        for message in messages:
+            total += len(message.role or "")
+            total += len(message.name or "")
+            total += len(message.tool_call_id or "")
+            total += len(message.content or "")
+            if message.tool_calls:
+                for tool_call in message.tool_calls:
+                    total += len(tool_call.id or "")
+                    total += len(tool_call.name or "")
+                    try:
+                        total += len(json.dumps(tool_call.arguments or {}, ensure_ascii=False, default=str))
+                    except Exception:
+                        total += len(str(tool_call.arguments or {}))
+        return total
+
+    @staticmethod
+    def _build_message_size_summary(messages: List[Message]) -> List[Dict[str, Any]]:
+        summary: List[Dict[str, Any]] = []
+        for index, message in enumerate(messages):
+            tool_call_count = len(message.tool_calls or [])
+            content_len = len(message.content or "")
+            tool_args_len = 0
+            for tool_call in message.tool_calls or []:
+                try:
+                    tool_args_len += len(json.dumps(tool_call.arguments or {}, ensure_ascii=False, default=str))
+                except Exception:
+                    tool_args_len += len(str(tool_call.arguments or {}))
+            summary.append(
+                {
+                    "index": index,
+                    "role": message.role,
+                    "name": message.name,
+                    "content_len": content_len,
+                    "tool_call_count": tool_call_count,
+                    "tool_args_len": tool_args_len,
+                }
+            )
+        return summary
+
+    def _log_tool_round_state(
+        self,
+        *,
+        loop_name: str,
+        round_number: int,
+        stage: str,
+        messages: List[Message],
+    ) -> None:
+        total_chars = self._estimate_message_chars(messages)
+        top_messages = sorted(
+            self._build_message_size_summary(messages),
+            key=lambda item: item["content_len"] + item["tool_args_len"],
+            reverse=True,
+        )[:5]
+        logger.info(
+            "[%s] %s | round=%s | message_count=%s | approx_chars=%s | largest=%s",
+            loop_name,
+            stage,
+            round_number,
+            len(messages),
+            total_chars,
+            json.dumps(top_messages, ensure_ascii=False, default=str),
+        )
+
     async def _emit_progress(self, progress_callback: Optional[Callable], payload: Dict[str, Any]) -> None:
         """统一处理可选的进度回调，兼容同步/异步函数。"""
         if not progress_callback:
@@ -331,6 +397,12 @@ class UnifiedLLMClient:
         rounds = 0
         
         while current_response.has_tool_calls and rounds < max_rounds:
+            self._log_tool_round_state(
+                loop_name="UnifiedLLM·同步",
+                round_number=rounds + 1,
+                stage="tool_round_started",
+                messages=current_messages,
+            )
             # 添加助手消息
             current_messages.append(current_response.to_message())
             
@@ -346,9 +418,47 @@ class UnifiedLLMClient:
                     tool_call_id=result.tool_call_id,
                     name=result.name
                 ))
+                logger.info(
+                    "[UnifiedLLM·同步] tool_result_appended | round=%s | tool=%s | chars=%s | is_error=%s",
+                    rounds + 1,
+                    result.name,
+                    len(result.content or ""),
+                    result.is_error,
+                )
+
+            self._log_tool_round_state(
+                loop_name="UnifiedLLM·同步",
+                round_number=rounds + 1,
+                stage="before_retry_chat",
+                messages=current_messages,
+            )
             
             current_response = self._retry_chat(current_messages, tools, **kwargs)
             rounds += 1
+
+        # ── 最终综合：当工具轮次耗尽但 LLM 仍想调用工具时，强制生成文本回复 ──
+        if current_response.has_tool_calls:
+            logger.warning(
+                f"[UnifiedLLM·同步] 工具调用轮次已达上限 ({max_rounds})，"
+                f"LLM 仍请求工具调用，启动最终综合..."
+            )
+            # 不能把带 tool_calls 的 assistant 消息直接加入历史，
+            # 否则 API 会要求紧跟对应的 tool response 消息（400 错误）。
+            if current_response.content:
+                current_messages.append(Message(
+                    role="assistant",
+                    content=current_response.content,
+                ))
+            current_messages.append(Message(
+                role="user",
+                content=(
+                    "工具调用次数已达到上限，请不要再调用任何工具。"
+                    "请根据上面已经获取到的所有数据，直接生成完整的分析回复。"
+                ),
+            ))
+            current_response = self._retry_chat(
+                current_messages, tools=None, **kwargs
+            )
 
         return current_response
 
@@ -369,6 +479,12 @@ class UnifiedLLMClient:
         rounds = 0
 
         while current_response.has_tool_calls and rounds < max_rounds:
+            self._log_tool_round_state(
+                loop_name="UnifiedLLM·异步",
+                round_number=rounds + 1,
+                stage="tool_round_started",
+                messages=current_messages,
+            )
             current_messages.append(current_response.to_message())
             await self._emit_progress(progress_callback, {
                 "event": "tool_round_started",
@@ -420,6 +536,13 @@ class UnifiedLLMClient:
                     tool_call_id=result.tool_call_id,
                     name=result.name
                 ))
+                logger.info(
+                    "[UnifiedLLM·异步] tool_result_appended | round=%s | tool=%s | chars=%s | is_error=%s",
+                    rounds + 1,
+                    result.name,
+                    len(result.content or ""),
+                    result.is_error,
+                )
 
             # dry_run 模式：只看第一轮 LLM 选了什么工具，不继续后续轮次
             if dry_run:
@@ -431,6 +554,12 @@ class UnifiedLLMClient:
                     model=current_response.model,
                 )
 
+            self._log_tool_round_state(
+                loop_name="UnifiedLLM·异步",
+                round_number=rounds + 1,
+                stage="before_retry_chat",
+                messages=current_messages,
+            )
             current_response = await self._aretry_chat(current_messages, tools, **kwargs)
             await self._emit_progress(progress_callback, {
                 "event": "tool_round_completed",

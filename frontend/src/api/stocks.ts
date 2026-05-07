@@ -1,4 +1,5 @@
 import { ApiClient } from './request'
+import type { FactorDiagnosticPayload, FactorWarningPayload } from './screening'
 
 export interface QuoteResponse {
   symbol: string  // 主字段：6位股票代码
@@ -24,6 +25,25 @@ export interface FundamentalsResponse {
   industry?: string
   market?: string
   sector?: string  // 板块
+  security_type?: string
+  fund_type?: string
+  track_index?: string
+  fund_scale?: string | number
+  fund_share?: string | number
+  fund_share_date?: string
+  management?: string
+  custodian?: string
+  management_fee?: string | number
+  custodian_fee?: string | number
+  unit_nav?: number
+  accum_nav?: number
+  nav_change_value?: number
+  nav_growth_rate?: string | number
+  market_price?: number
+  premium_discount_rate?: string | number
+  latest_nav_date?: string
+  purchase_status?: string
+  redemption_status?: string
   pe?: number
   pb?: number
   ps?: number      // 🔥 新增：市销率
@@ -31,12 +51,15 @@ export interface FundamentalsResponse {
   pb_mrq?: number
   ps_ttm?: number  // 🔥 新增：市销率（TTM）
   roe?: number
+  roa?: number
   debt_ratio?: number  // 🔥 新增：负债率
+  debt_to_assets?: number
   dividend_yield?: number
   dividend_yield_ttm?: number
   current_ratio?: number
   quick_ratio?: number
   cash_ratio?: number
+  assets_to_eqt?: number
   gross_margin?: number
   netprofit_margin?: number
   revenue?: number
@@ -61,6 +84,8 @@ export interface FundamentalsResponse {
   pe_is_realtime?: boolean  // PE是否为实时数据
   pe_source?: string        // PE数据来源
   pe_updated_at?: string    // PE更新时间
+  factor_diagnostics?: Record<string, FactorDiagnosticPayload>
+  factor_warnings?: Record<string, FactorWarningPayload>
   updated_at?: string
 }
 
@@ -158,6 +183,9 @@ export interface StockFinancialsResponse {
   report_type?: string
   ann_date?: string
   summary: StockFinancialSummary
+  factor_snapshot?: Record<string, number | string | null>
+  factor_diagnostics?: Record<string, FactorDiagnosticPayload>
+  factor_warnings?: Record<string, FactorWarningPayload>
   raw_data?: Record<string, any[]>
   available_fields: string[]
 }

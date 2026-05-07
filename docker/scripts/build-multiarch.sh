@@ -12,10 +12,11 @@
 #
 # 选项:
 #   -r, --registry REGISTRY   Docker Hub 用户名（默认: hsliup）
-#   -t, --tag TAG             镜像标签（默认: latest）
+#   -t, --tag TAG             镜像标签（默认: 读取根目录 VERSION）
 #   --skip-backend            跳过后端镜像构建
 #   --skip-frontend           跳过前端镜像构建
 #   --skip-push               只构建不推送
+#   --no-push-latest          推送版本标签时不额外更新 latest
 #   -h, --help                显示帮助信息
 
 set -e  # 遇到错误立即退出
@@ -30,12 +31,15 @@ NC='\033[0m' # No Color
 
 # 默认参数
 REGISTRY="hsliup"
-TAG="latest"
+TAG=""
 SKIP_BACKEND=false
 SKIP_FRONTEND=false
 SKIP_PUSH=false
+PUSH_LATEST=true
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+source "$SCRIPT_DIR/version-utils.sh"
 
 # 解析命令行参数
 while [[ $# -gt 0 ]]; do
@@ -60,15 +64,20 @@ while [[ $# -gt 0 ]]; do
             SKIP_PUSH=true
             shift
             ;;
+        --no-push-latest)
+            PUSH_LATEST=false
+            shift
+            ;;
         -h|--help)
             echo "用法: $0 [OPTIONS]"
             echo ""
             echo "选项:"
             echo "  -r, --registry REGISTRY   Docker Hub 用户名（默认: hsliup）"
-            echo "  -t, --tag TAG             镜像标签（默认: latest）"
+            echo "  -t, --tag TAG             镜像标签（默认: 读取根目录 VERSION）"
             echo "  --skip-backend            跳过后端镜像构建"
             echo "  --skip-frontend           跳过前端镜像构建"
             echo "  --skip-push               只构建不推送"
+            echo "  --no-push-latest          推送版本标签时不额外更新 latest"
             echo "  -h, --help                显示帮助信息"
             exit 0
             ;;
@@ -79,9 +88,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+TAG="$(resolve_image_tag "$TAG" "$PROJECT_ROOT")"
+PUSH_LATEST_ALIAS=false
+if should_push_latest_alias "$TAG" "$PUSH_LATEST"; then
+    PUSH_LATEST_ALIAS=true
+fi
+
 # 镜像名称
 BACKEND_IMAGE="$REGISTRY/tradingagents-pro-backend:$TAG"
 FRONTEND_IMAGE="$REGISTRY/tradingagents-pro-frontend:$TAG"
+BACKEND_LATEST_IMAGE="$REGISTRY/tradingagents-pro-backend:latest"
+FRONTEND_LATEST_IMAGE="$REGISTRY/tradingagents-pro-frontend:latest"
 
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}TradingAgents-CN Pro - 多架构构建${NC}"
@@ -89,6 +106,7 @@ echo -e "${CYAN}========================================${NC}"
 echo ""
 echo -e "${GREEN}Registry: ${YELLOW}$REGISTRY${NC}"
 echo -e "${GREEN}Tag: ${YELLOW}$TAG${NC}"
+echo -e "${GREEN}推送 latest 别名: ${YELLOW}$PUSH_LATEST_ALIAS${NC}"
 echo -e "${GREEN}后端镜像: ${YELLOW}$BACKEND_IMAGE${NC}"
 echo -e "${GREEN}前端镜像: ${YELLOW}$FRONTEND_IMAGE${NC}"
 echo -e "${GREEN}架构: ${YELLOW}linux/amd64, linux/arm64${NC}"
@@ -134,15 +152,10 @@ echo ""
 BUILD_INFO_SCRIPT="${PROJECT_ROOT}/scripts/build/generate_build_info.sh"
 if [ -f "$BUILD_INFO_SCRIPT" ]; then
     bash "$BUILD_INFO_SCRIPT" "docker" "$PROJECT_ROOT"
-    # 读取BUILD_INFO获取完整版本号
     if [ -f "${PROJECT_ROOT}/BUILD_INFO" ]; then
         FULL_VERSION=$(grep -o '"full_version": "[^"]*"' "${PROJECT_ROOT}/BUILD_INFO" | cut -d'"' -f4)
-        if [ -n "$FULL_VERSION" ] && [ "$TAG" = "latest" ]; then
-            # 如果使用latest标签，同时使用完整版本号作为标签
-            TAG="$FULL_VERSION"
-            BACKEND_IMAGE="$REGISTRY/tradingagents-pro-backend:$TAG"
-            FRONTEND_IMAGE="$REGISTRY/tradingagents-pro-frontend:$TAG"
-            echo -e "${GREEN}使用完整版本号作为标签: ${TAG}${NC}"
+        if [ -n "$FULL_VERSION" ]; then
+            echo -e "${GREEN}BUILD_INFO full_version: ${YELLOW}$FULL_VERSION${NC}"
         fi
     fi
 else
@@ -152,12 +165,18 @@ fi
 echo ""
 
 # 构建参数
-PUSH_FLAG=""
+PUSH_ARGS=(--push)
 if [ "$SKIP_PUSH" = false ]; then
-    PUSH_FLAG="--push"
+    :
 else
     echo -e "${YELLOW}⚠️  注意：多架构构建不支持 --load，将自动推送到 Docker Hub${NC}"
-    PUSH_FLAG="--push"
+fi
+
+BACKEND_TAG_ARGS=(-t "$BACKEND_IMAGE")
+FRONTEND_TAG_ARGS=(-t "$FRONTEND_IMAGE")
+if [ "$PUSH_LATEST_ALIAS" = true ]; then
+    BACKEND_TAG_ARGS+=(-t "$BACKEND_LATEST_IMAGE")
+    FRONTEND_TAG_ARGS+=(-t "$FRONTEND_LATEST_IMAGE")
 fi
 
 # 步骤 1: 构建后端镜像
@@ -173,8 +192,8 @@ if [ "$SKIP_BACKEND" = false ]; then
     docker buildx build \
         --platform linux/amd64,linux/arm64 \
         -f "$PROJECT_ROOT/docker/Dockerfile.backend.compiled.ubuntu" \
-        -t "$BACKEND_IMAGE" \
-        $PUSH_FLAG \
+        "${BACKEND_TAG_ARGS[@]}" \
+        "${PUSH_ARGS[@]}" \
         "$PROJECT_ROOT"
 
     echo -e "${GREEN}✅ 后端镜像构建完成${NC}"
@@ -197,8 +216,8 @@ if [ "$SKIP_FRONTEND" = false ]; then
     docker buildx build \
         --platform linux/amd64,linux/arm64 \
         -f "$PROJECT_ROOT/docker/Dockerfile.frontend" \
-        -t "$FRONTEND_IMAGE" \
-        $PUSH_FLAG \
+        "${FRONTEND_TAG_ARGS[@]}" \
+        "${PUSH_ARGS[@]}" \
         "$PROJECT_ROOT"
 
     echo -e "${GREEN}✅ 前端镜像构建完成${NC}"
@@ -216,11 +235,17 @@ echo ""
 
 if [ "$SKIP_BACKEND" = false ]; then
     echo -e "${GREEN}后端镜像: ${YELLOW}$BACKEND_IMAGE${NC}"
+    if [ "$PUSH_LATEST_ALIAS" = true ]; then
+        echo -e "${GREEN}后端 latest 别名: ${YELLOW}$BACKEND_LATEST_IMAGE${NC}"
+    fi
     echo -e "  - linux/amd64"
     echo -e "  - linux/arm64"
 fi
 if [ "$SKIP_FRONTEND" = false ]; then
     echo -e "${GREEN}前端镜像: ${YELLOW}$FRONTEND_IMAGE${NC}"
+    if [ "$PUSH_LATEST_ALIAS" = true ]; then
+        echo -e "${GREEN}前端 latest 别名: ${YELLOW}$FRONTEND_LATEST_IMAGE${NC}"
+    fi
     echo -e "  - linux/amd64"
     echo -e "  - linux/arm64"
 fi

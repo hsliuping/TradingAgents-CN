@@ -47,7 +47,7 @@
               </div>
               <div class="step-item">
                 <div class="step-icon">💰</div>
-                <div class="step-text">仓位管理评分</div>
+                <div class="step-text">仓位与风险复核</div>
               </div>
               <div class="step-item">
                 <div class="step-icon">🧠</div>
@@ -78,52 +78,6 @@
 
       <!-- ✅ 完整结果显示界面（任务完成） -->
       <template v-else-if="report && report.status === 'completed'">
-        <!-- 评分概览 -->
-        <div class="score-section">
-          <div class="overall-score" :class="getScoreClass(report.ai_review?.overall_score)">
-            <div class="score-value">{{ report.ai_review?.overall_score || 0 }}</div>
-            <div class="score-label">综合评分</div>
-          </div>
-          <div class="sub-scores">
-            <div class="sub-score-item">
-              <span class="label">时机评分:</span>
-              <el-progress
-                :percentage="report.ai_review?.timing_score || 0"
-                :color="getProgressColor(report.ai_review?.timing_score || 0)"
-                :show-text="false"
-              />
-              <span class="score">{{ report.ai_review?.timing_score || 0 }}分</span>
-            </div>
-            <div class="sub-score-item">
-              <span class="label">仓位评分:</span>
-              <el-progress
-                :percentage="report.ai_review?.position_score || 0"
-                :color="getProgressColor(report.ai_review?.position_score || 0)"
-                :show-text="false"
-              />
-              <span class="score">{{ report.ai_review?.position_score || 0 }}分</span>
-            </div>
-            <div class="sub-score-item">
-              <span class="label">情绪评分:</span>
-              <el-progress
-                :percentage="report.ai_review?.emotion_score || 0"
-                :color="getProgressColor(report.ai_review?.emotion_score || 0)"
-                :show-text="false"
-              />
-              <span class="score">{{ report.ai_review?.emotion_score || 0 }}分</span>
-            </div>
-            <div class="sub-score-item">
-              <span class="label">归因评分:</span>
-              <el-progress
-                :percentage="report.ai_review?.attribution_score || 0"
-                :color="getProgressColor(report.ai_review?.attribution_score || 0)"
-                :show-text="false"
-              />
-              <span class="score">{{ report.ai_review?.attribution_score || 0 }}分</span>
-            </div>
-          </div>
-        </div>
-
         <!-- 交易摘要 -->
         <el-descriptions title="交易摘要" :column="3" border size="small" class="section">
           <el-descriptions-item label="股票代码">{{ report.trade_info?.code }}</el-descriptions-item>
@@ -144,27 +98,6 @@
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="手续费" :span="3">{{ report.trade_info?.total_commission?.toFixed(2) }}元</el-descriptions-item>
-        </el-descriptions>
-
-        <!-- 收益分析 -->
-        <el-descriptions title="收益分析" :column="2" border size="small" class="section">
-          <el-descriptions-item label="实际收益">
-            <span :class="getTotalPnl() >= 0 ? 'positive' : 'negative'">
-              {{ formatPnl(getTotalPnl()) }}
-            </span>
-            <span v-if="report.trade_info?.is_holding && report.trade_info?.unrealized_pnl" class="unrealized-hint">
-              (已实现: {{ formatPnl(report.trade_info.realized_pnl) }}, 浮动: {{ formatPnl(report.trade_info.unrealized_pnl) }})
-            </span>
-          </el-descriptions-item>
-          <el-descriptions-item label="理论最优">
-            <span class="positive">{{ formatPnl(report.ai_review?.optimal_pnl) }}</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="错失收益" v-if="(report.ai_review?.missed_profit || 0) > 0">
-            <span class="warning">{{ formatPnl(report.ai_review?.missed_profit) }}</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="避免亏损" v-if="(report.ai_review?.avoided_loss || 0) > 0">
-            <span class="positive">{{ formatPnl(report.ai_review?.avoided_loss) }}</span>
-          </el-descriptions-item>
         </el-descriptions>
 
         <!-- 关联交易计划 (如果有) -->
@@ -197,7 +130,7 @@
 
         <!-- AI分析 -->
         <div class="section">
-          <h4>AI分析总结</h4>
+          <h4>复盘结论</h4>
           <div class="summary markdown-content" v-html="renderMarkdown(report.ai_review?.summary)"></div>
         </div>
 
@@ -211,15 +144,15 @@
           </el-col>
           <el-col :span="12">
             <div class="analysis-card weaknesses">
-              <h4><el-icon><Warning /></el-icon> 需要改进的地方</h4>
+              <h4><el-icon><Warning /></el-icon> 暴露的问题</h4>
               <div class="markdown-content" v-html="renderMarkdown((report.ai_review?.weaknesses || []).join('\n\n'))"></div>
             </div>
           </el-col>
         </el-row>
 
-        <!-- 建议 -->
+        <!-- 复盘改进项 -->
         <div class="section" v-if="report.ai_review?.suggestions?.length">
-          <h4><el-icon><Pointer /></el-icon> 改进建议</h4>
+          <h4><el-icon><Pointer /></el-icon> 后续改进重点</h4>
           <div class="suggestions markdown-content" v-html="renderMarkdown((report.ai_review?.suggestions || []).join('\n\n'))"></div>
         </div>
 
@@ -229,16 +162,16 @@
 
         <!-- 详细分析 -->
         <el-collapse class="section">
-          <el-collapse-item title="时机分析" name="timing" v-if="report.ai_review?.timing_analysis">
+          <el-collapse-item title="时机复盘" name="timing" v-if="report.ai_review?.timing_analysis">
             <div class="markdown-content" v-html="renderMarkdown(report.ai_review?.timing_analysis)"></div>
           </el-collapse-item>
-          <el-collapse-item title="仓位分析" name="position" v-if="report.ai_review?.position_analysis">
+          <el-collapse-item title="仓位复盘" name="position" v-if="report.ai_review?.position_analysis">
             <div class="markdown-content" v-html="renderMarkdown(report.ai_review?.position_analysis)"></div>
           </el-collapse-item>
-          <el-collapse-item title="情绪分析" name="emotion" v-if="report.ai_review?.emotion_analysis">
+          <el-collapse-item title="情绪复盘" name="emotion" v-if="report.ai_review?.emotion_analysis">
             <div class="markdown-content" v-html="renderMarkdown(report.ai_review?.emotion_analysis)"></div>
           </el-collapse-item>
-          <el-collapse-item title="归因分析" name="attribution" v-if="report.ai_review?.attribution_analysis">
+          <el-collapse-item title="归因复盘" name="attribution" v-if="report.ai_review?.attribution_analysis">
             <div class="markdown-content" v-html="renderMarkdown(report.ai_review?.attribution_analysis)"></div>
           </el-collapse-item>
         </el-collapse>
@@ -249,7 +182,7 @@
         <div class="error-container">
           <el-result
             icon="error"
-            title="分析失败"
+            title="复盘失败"
             :sub-title="report.error_message || '未知错误'"
           >
             <template #extra>
@@ -406,20 +339,6 @@ const stopPolling = () => {
   pollingAttempts = 0
 }
 
-const getScoreClass = (score?: number) => {
-  if (!score) return ''
-  if (score >= 80) return 'excellent'
-  if (score >= 60) return 'good'
-  return 'poor'
-}
-
-const getProgressColor = (score?: number) => {
-  if (!score) return '#909399'
-  if (score >= 80) return '#67c23a'
-  if (score >= 60) return '#e6a23c'
-  return '#f56c6c'
-}
-
 const formatPnl = (value?: number) => {
   if (value === undefined || value === null) return '-'
   const prefix = value >= 0 ? '+' : ''
@@ -449,9 +368,7 @@ const getTotalPnlPct = () => {
   if (!report.value?.trade_info) return 0
   const tradeInfo = report.value.trade_info
   const realizedPct = tradeInfo.realized_pnl_pct || 0
-  // 如果还在持仓中，加上浮动盈亏百分比
   if (tradeInfo.is_holding && tradeInfo.unrealized_pnl_pct !== undefined) {
-    // 计算总收益率：基于总买入金额
     const totalBuyAmount = tradeInfo.total_buy_amount || 0
     if (totalBuyAmount > 0) {
       const totalPnl = getTotalPnl()
@@ -485,12 +402,10 @@ watch(() => [props.modelValue, props.reviewId], ([show, id]) => {
   if (show && id) {
     loadReport()
   } else if (!show) {
-    // 对话框关闭时，停止轮询
     stopPolling()
   }
 }, { immediate: true })
 
-// 🔥 组件卸载时清理资源（防止用户直接关闭页面时资源泄漏）
 onBeforeUnmount(() => {
   console.log('🧹 [复盘详情] 组件卸载，清理轮询资源...')
   stopPolling()
@@ -499,11 +414,9 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 .review-detail {
-  // 🔄 进度显示界面样式
   .progress-container {
     padding: 32px 24px;
 
-    // 顶部状态卡片
     .status-card {
       display: flex;
       align-items: center;
@@ -564,7 +477,6 @@ onBeforeUnmount(() => {
       }
     }
 
-    // 分析步骤说明
     .analysis-steps {
       margin-bottom: 32px;
 
@@ -614,7 +526,6 @@ onBeforeUnmount(() => {
       }
     }
 
-    // 预计时间提示
     .time-estimate {
       display: flex;
       align-items: center;
@@ -633,7 +544,6 @@ onBeforeUnmount(() => {
       }
     }
 
-    // 底部操作按钮
     .progress-actions {
       display: flex;
       justify-content: center;
@@ -641,7 +551,6 @@ onBeforeUnmount(() => {
     }
   }
 
-  // ❌ 错误显示界面样式
   .error-container {
     padding: 20px;
   }
@@ -657,82 +566,13 @@ onBeforeUnmount(() => {
 
   .section {
     margin-bottom: 20px;
+
     h4 {
       margin: 0 0 12px 0;
       font-size: 14px;
       display: flex;
       align-items: center;
       gap: 6px;
-    }
-  }
-
-  .score-section {
-    display: flex;
-    gap: 40px;
-    margin-bottom: 24px;
-    padding: 20px;
-    background: #f5f7fa;
-    border-radius: 8px;
-
-    .overall-score {
-      text-align: center;
-      padding: 16px 32px;
-      background: #fff;
-      border-radius: 8px;
-
-      .score-value {
-        font-size: 48px;
-        font-weight: 700;
-        line-height: 1;
-      }
-      .score-label {
-        margin-top: 8px;
-        font-size: 14px;
-        color: #909399;
-      }
-
-      &.excellent .score-value { color: #67c23a; }
-      &.good .score-value { color: #e6a23c; }
-      &.poor .score-value { color: #f56c6c; }
-    }
-
-    .sub-scores {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 12px;
-
-      .sub-score-item {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-
-        .label {
-          width: 70px;
-          font-size: 13px;
-          color: #606266;
-          flex-shrink: 0;
-        }
-
-        .el-progress {
-          flex: 1;
-
-          // 确保隐藏进度条内部文本
-          :deep(.el-progress__text) {
-            display: none !important;
-          }
-        }
-
-        .score {
-          width: 40px;
-          font-size: 13px;
-          color: #303133;
-          font-weight: 500;
-          text-align: right;
-          flex-shrink: 0;
-        }
-      }
     }
   }
 
@@ -839,6 +679,7 @@ onBeforeUnmount(() => {
 
   .suggestions {
     padding-left: 20px;
+
     li { margin-bottom: 8px; line-height: 1.5; }
   }
 
@@ -883,8 +724,8 @@ onBeforeUnmount(() => {
     }
   }
 
-  .positive { color: #f56c6c; }  // 中国习惯：红色表示盈利（正数）
-  .negative { color: #67c23a; }  // 中国习惯：绿色表示亏损（负数）
+  .positive { color: #f56c6c; }
+  .negative { color: #67c23a; }
   .warning { color: #e6a23c; }
 }
 </style>

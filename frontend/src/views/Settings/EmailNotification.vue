@@ -10,7 +10,7 @@
       <template #title>
         <span style="display: flex; align-items: center; gap: 8px;">
           <el-tag type="success" size="small" effect="dark">高级</el-tag>
-          <span>高级学员专属功能，分析完成后自动发送邮件通知</span>
+          <span>高级学员专属功能，研究完成后自动发送邮件通知</span>
         </span>
       </template>
     </el-alert>
@@ -119,9 +119,9 @@
         <!-- 通知类型 -->
         <el-divider content-position="left">通知类型</el-divider>
 
-        <el-form-item label="单股分析结果">
+        <el-form-item label="单股研究结果">
           <el-switch v-model="settings.single_analysis" />
-          <span class="form-tip">完成单只股票分析后发送邮件</span>
+          <span class="form-tip">完成单只股票研究后发送邮件</span>
         </el-form-item>
 
         <el-form-item label="批量分析结果">
@@ -129,9 +129,9 @@
           <span class="form-tip">完成批量分析后发送汇总邮件</span>
         </el-form-item>
 
-        <el-form-item label="定时分析报告">
+        <el-form-item label="定时研究报告">
           <el-switch v-model="settings.scheduled_analysis" />
-          <span class="form-tip">定时任务执行完成后发送报告</span>
+          <span class="form-tip">定时任务执行完成后发送研究报告</span>
         </el-form-item>
 
         <!-- 免打扰设置 -->
@@ -485,9 +485,9 @@ function handlePageChange(page: number) {
 // 辅助函数
 function getTypeLabel(type: string): string {
   const map: Record<string, string> = {
-    single_analysis: '单股分析',
+    single_analysis: '单股研究',
     batch_analysis: '批量分析',
-    scheduled_analysis: '定时报告',
+    scheduled_analysis: '定时研究报告',
     important_signal: '信号提醒',
     system_notification: '系统通知',
     test_email: '测试邮件'

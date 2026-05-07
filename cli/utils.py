@@ -177,6 +177,12 @@ def select_shallow_thinking_agent(provider) -> str:
             ("Meta: Llama 3.3 8B Instruct - A lightweight and ultra-fast variant of Llama 3.3 70B", "meta-llama/llama-3.3-8b-instruct:free"),
             ("google/gemini-2.0-flash-exp:free - Gemini Flash 2.0 offers a significantly faster time to first token", "google/gemini-2.0-flash-exp:free"),
         ],
+        "aihubmix": [
+            ("GPT-4o-mini - Fast and efficient for quick tasks", "gpt-4o-mini"),
+            ("DeepSeek V3 - Strong cost-performance model", "deepseek-chat"),
+            ("Claude 3.5 Haiku - Fast Anthropic model", "claude-3-5-haiku-latest"),
+            ("Gemini 2.0 Flash - Fast Google model", "gemini-2.0-flash"),
+        ],
         "ollama": [
             ("llama3.1 local", "llama3.1"),
             ("llama3.2 local", "llama3.2"),
@@ -274,6 +280,12 @@ def select_deep_thinking_agent(provider) -> str:
             ("DeepSeek V3 - a 685B-parameter, mixture-of-experts model", "deepseek/deepseek-chat-v3-0324:free"),
             ("Deepseek - latest iteration of the flagship chat model family from the DeepSeek team.", "deepseek/deepseek-chat-v3-0324:free"),
         ],
+        "aihubmix": [
+            ("GPT-4o - Standard model with solid capabilities", "gpt-4o"),
+            ("Claude Sonnet 4 - High performance and excellent reasoning", "claude-sonnet-4-0"),
+            ("Gemini 2.5 Pro - Latest flagship model", "gemini-2.5-pro"),
+            ("DeepSeek V3 - Strong reasoning and cost-performance", "deepseek-chat"),
+        ],
         "ollama": [
             ("llama3.1 local", "llama3.1"),
             ("qwen3", "qwen3"),
@@ -340,6 +352,7 @@ def select_llm_provider() -> tuple[str, str]:
     BASE_URLS = [
         ("阿里百炼 (DashScope)", "https://dashscope.aliyuncs.com/api/v1"),
         ("DeepSeek V3", "https://api.deepseek.com"),
+        ("AiHubMix", "https://aihubmix.com/v1"),
         ("OpenAI", "https://api.openai.com/v1"),
         ("🔧 自定义OpenAI端点", "custom"),
         ("Anthropic", "https://api.anthropic.com/"),

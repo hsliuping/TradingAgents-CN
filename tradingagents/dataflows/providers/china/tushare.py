@@ -759,7 +759,7 @@ class TushareProvider(BaseStockDataProvider):
             return None
     
     async def get_financial_data(self, symbol: str, report_type: str = "quarterly",
-                                period: str = None, limit: int = 4) -> Optional[Dict[str, Any]]:
+                                period: str = None, limit: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """
         获取财务数据
 
@@ -767,7 +767,7 @@ class TushareProvider(BaseStockDataProvider):
             symbol: 股票代码
             report_type: 报告类型 (quarterly/annual)
             period: 指定报告期 (YYYYMMDD格式)，为空则获取最新数据
-            limit: 获取记录数量，默认4条（最近4个季度）
+            limit: 获取记录数量，None 表示拉取该股票可获取的全部报告期
 
         Returns:
             财务数据字典，包含利润表、资产负债表、现金流量表和财务指标
@@ -782,8 +782,10 @@ class TushareProvider(BaseStockDataProvider):
             # 构建查询参数
             query_params = {
                 'ts_code': ts_code,
-                'limit': limit
             }
+
+            if limit is not None:
+                query_params['limit'] = limit
 
             # 如果指定了报告期，添加期间参数
             if period:
@@ -1385,10 +1387,16 @@ class TushareProvider(BaseStockDataProvider):
 
         # 6位数字代码，需要添加后缀
         if symbol.isdigit() and len(symbol) == 6:
-            if symbol.startswith(('60', '68', '90')):
+            # 上交所：60/68（A股）、50/51/52/58/56（ETF/LOF等）、11（国债/可转债）、90（B股）
+            if symbol.startswith(('60', '68', '90', '50', '51', '52', '58', '56', '11')):
                 return f"{symbol}.SH"  # 上交所
-            else:
+            # 深交所：00/30（A股）、15/16/12（ETF/LOF/可转债等）、20（B股）
+            elif symbol.startswith(('00', '30', '20', '15', '16', '12')):
                 return f"{symbol}.SZ"  # 深交所
+            elif symbol.startswith(('8', '4', '92')):
+                return f"{symbol}.BJ"  # 北交所
+            else:
+                return f"{symbol}.SZ"  # 默认深交所
 
         return symbol
 
@@ -1472,11 +1480,40 @@ class TushareProvider(BaseStockDataProvider):
             标准化后的财务数据
         """
         try:
-            # 获取最新的数据记录（第一条记录通常是最新的）
-            latest_income = financial_data.get('income_statement', [{}])[0] if financial_data.get('income_statement') else {}
-            latest_balance = financial_data.get('balance_sheet', [{}])[0] if financial_data.get('balance_sheet') else {}
-            latest_cashflow = financial_data.get('cashflow_statement', [{}])[0] if financial_data.get('cashflow_statement') else {}
-            latest_indicator = financial_data.get('financial_indicators', [{}])[0] if financial_data.get('financial_indicators') else {}
+            # 优先使用“已披露”的最新报告，避免未来预约披露期覆盖当前可用财报。
+            income_statements = financial_data.get('income_statement', []) or []
+            balance_statements = financial_data.get('balance_sheet', []) or []
+            cashflow_statements = financial_data.get('cashflow_statement', []) or []
+            indicator_statements = financial_data.get('financial_indicators', []) or []
+
+            latest_income = self._pick_latest_disclosed_record(income_statements)
+            if not latest_income and income_statements:
+                latest_income = income_statements[0]
+
+            latest_period = str((latest_income or {}).get('end_date') or '')
+
+            latest_balance = self._pick_record_by_period(balance_statements, latest_period)
+            if not latest_balance:
+                latest_balance = self._pick_latest_disclosed_record(balance_statements)
+            if not latest_balance and balance_statements:
+                latest_balance = balance_statements[0]
+
+            latest_cashflow = self._pick_record_by_period(cashflow_statements, latest_period)
+            if not latest_cashflow:
+                latest_cashflow = self._pick_latest_disclosed_record(cashflow_statements)
+            if not latest_cashflow and cashflow_statements:
+                latest_cashflow = cashflow_statements[0]
+
+            latest_indicator = self._pick_record_by_period(indicator_statements, latest_period)
+            if not latest_indicator:
+                latest_indicator = self._pick_latest_disclosed_record(indicator_statements)
+            if not latest_indicator and indicator_statements:
+                latest_indicator = indicator_statements[0]
+
+            latest_income = latest_income or {}
+            latest_balance = latest_balance or {}
+            latest_cashflow = latest_cashflow or {}
+            latest_indicator = latest_indicator or {}
 
             # 提取基础信息
             symbol = ts_code.split('.')[0] if '.' in ts_code else ts_code
@@ -1484,7 +1521,6 @@ class TushareProvider(BaseStockDataProvider):
             ann_date = latest_income.get('ann_date') or latest_balance.get('ann_date') or latest_cashflow.get('ann_date')
 
             # 计算 TTM 数据
-            income_statements = financial_data.get('income_statement', [])
             revenue_ttm = self._calculate_ttm_from_tushare(income_statements, 'revenue')
             net_profit_ttm = self._calculate_ttm_from_tushare(income_statements, 'n_income_attr_p')
 
@@ -1497,11 +1533,11 @@ class TushareProvider(BaseStockDataProvider):
                 "report_type": self._determine_report_type(report_period),
 
                 # 利润表核心指标
-                "revenue": self._safe_float(latest_income.get('revenue')),  # 营业收入（单期）
+                "revenue": self._safe_float(latest_income.get('revenue')),  # 营业收入（原始报告期口径，A股季报通常为年初累计）
                 "revenue_ttm": revenue_ttm,  # 营业收入（TTM）
                 "oper_rev": self._safe_float(latest_income.get('oper_rev')),  # 营业收入
-                "net_income": self._safe_float(latest_income.get('n_income')),  # 净利润（单期）
-                "net_profit": self._safe_float(latest_income.get('n_income_attr_p')),  # 归属母公司净利润（单期）
+                "net_income": self._safe_float(latest_income.get('n_income')),  # 净利润（原始报告期口径，A股季报通常为年初累计）
+                "net_profit": self._safe_float(latest_income.get('n_income_attr_p')),  # 归属母公司净利润（原始报告期口径，A股季报通常为年初累计）
                 "net_profit_ttm": net_profit_ttm,  # 归属母公司净利润（TTM）
                 "oper_profit": self._safe_float(latest_income.get('oper_profit')),  # 营业利润
                 "total_profit": self._safe_float(latest_income.get('total_profit')),  # 利润总额
@@ -1578,6 +1614,47 @@ class TushareProvider(BaseStockDataProvider):
                 "updated_at": datetime.utcnow(),
                 "error": str(e)
             }
+
+    def _pick_record_by_period(self, statements: List[Dict[str, Any]], period: str) -> Optional[Dict[str, Any]]:
+        """按报告期匹配记录。"""
+        if not statements or not period:
+            return None
+        target = str(period)
+        for record in statements:
+            if str(record.get('end_date') or '') == target:
+                return record
+        return None
+
+    def _pick_latest_disclosed_record(self, statements: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """
+        选择已披露记录中报告期最新的一条。
+
+        规则：
+        1. 优先 ann_date/f_ann_date <= 今天 的记录
+        2. 在可用记录中按 end_date 倒序选择最新
+        """
+        if not statements:
+            return None
+
+        today = datetime.utcnow().strftime('%Y%m%d')
+        disclosed: List[Dict[str, Any]] = []
+
+        for record in statements:
+            ann_date = str(record.get('ann_date') or record.get('f_ann_date') or '').replace('-', '')
+            end_date = str(record.get('end_date') or '').replace('-', '')
+
+            if not end_date:
+                continue
+
+            # ann_date 缺失时，默认保留该记录，避免误删历史数据。
+            if not ann_date or ann_date <= today:
+                disclosed.append(record)
+
+        if not disclosed:
+            return None
+
+        disclosed.sort(key=lambda rec: str(rec.get('end_date') or '').replace('-', ''), reverse=True)
+        return disclosed[0]
 
     def _calculate_ttm_from_tushare(self, income_statements: list, field: str) -> Optional[float]:
         """
@@ -2022,6 +2099,46 @@ class TushareProvider(BaseStockDataProvider):
             return None
         except Exception as e:
             self.logger.error(f"❌ 获取概念板块资金流向失败: {e}")
+            return None
+
+    async def get_moneyflow_ind_ths(self, trade_date: str = None,
+                                   ts_code: str = None) -> Optional[pd.DataFrame]:
+        """
+        获取同花顺行业资金流向
+
+        Args:
+            trade_date: 交易日期 YYYYMMDD
+            ts_code: 行业代码
+
+        Returns:
+            DataFrame，包含行业资金流向数据
+            - industry: 行业名称
+            - pct_change: 行业指数涨跌幅
+            - company_num: 成分股数量
+            - net_buy_amount: 流入资金（亿元）
+            - net_sell_amount: 流出资金（亿元）
+            - net_amount: 净额（亿元）
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if trade_date:
+                params['trade_date'] = trade_date.replace('-', '')
+            if ts_code:
+                params['ts_code'] = ts_code
+
+            df = await asyncio.to_thread(
+                self.api.moneyflow_ind_ths,
+                **params
+            )
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取行业资金流向数据: {len(df)} 条")
+                return df
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ 获取行业资金流向失败: {e}")
             return None
 
     def get_stock_industry_sync(self, ticker: str) -> Optional[str]:
@@ -2621,7 +2738,7 @@ class TushareProvider(BaseStockDataProvider):
         trade_date: str
     ) -> Optional[Dict[str, Any]]:
         """
-        获取每日市场统计（涨跌家数等）
+        获取每日市场统计（涨跌家数与涨跌幅分布）
 
         通过 daily 接口聚合计算
 
@@ -2652,10 +2769,6 @@ class TushareProvider(BaseStockDataProvider):
             down_count = len(df[df['pct_chg'] < 0])
             flat_count = len(df[df['pct_chg'] == 0])
 
-            # 涨停跌停（近似判断：涨幅>=9.9% 或 跌幅<=-9.9%）
-            limit_up = len(df[df['pct_chg'] >= 9.9])
-            limit_down = len(df[df['pct_chg'] <= -9.9])
-
             # 涨幅分布
             up_gt5 = len(df[df['pct_chg'] >= 5])
             up_3_5 = len(df[(df['pct_chg'] >= 3) & (df['pct_chg'] < 5)])
@@ -2668,8 +2781,6 @@ class TushareProvider(BaseStockDataProvider):
                 'up_count': up_count,
                 'down_count': down_count,
                 'flat_count': flat_count,
-                'limit_up': limit_up,
-                'limit_down': limit_down,
                 'up_ratio': up_count / total * 100 if total > 0 else 0,
                 'down_ratio': down_count / total * 100 if total > 0 else 0,
                 'up_gt5': up_gt5,

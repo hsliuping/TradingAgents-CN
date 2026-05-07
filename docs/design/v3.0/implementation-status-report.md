@@ -1,6 +1,6 @@
 # v3.0 设计实现状态报告
 
-**生成时间**: 2026-03-19
+**生成时间**: 2026-04-01
 **代码审计**: 2026-03-19（全量审计完成，已修复发现的 Bug）
 **对照文档**: `docs/design/v3.0/` 下各设计文档
 **补充清单**: `docs/design/v3.0/agent-design-maturity-checklist.md`
@@ -118,7 +118,35 @@
 
 ---
 
-## 七、Skill 自动生成系统
+## 七、Agent 工坊与版本迭代系统
+
+| 设计项 | 设计文档 | 实现状态 | 代码位置 |
+| -------- | ---------- | ---------- | ---------- |
+| AgentSpec / Session / Version / Evaluation 数据模型 | agent-workshop-iterative-design | ✅ 已实现并扩展 | `app/models/agent_workshop.py`：包含 `AgentSpec`、`AgentWorkshopSession`、`AgentVersion`、`AgentEvaluationReport`、`AgentWorkshopGapAnalysis`；已支持结构化 `inputs/outputs` 与 `capability_requirements` |
+| 会话启动、回复、规格预览 | agent-workshop-iterative-design §3、§5 | ✅ 已实现 | `app/routers/agent_workshop.py`、`app/services/agent_workshop_service.py`：`start_session`、`respond`、`preview_spec` |
+| 规格澄清状态字段 | agent-workshop-iterative-design §4、§5 | ✅ 已实现并增强 | `AgentWorkshopSession` 中已有 `pending_questions`、`completeness_score`、`feasibility_status`、`refusal_reason`；`_analyze_requirement_turn` 负责收敛 |
+| 五步工作台 | agent-workshop-iterative-design §3、§11 | ✅ 已实现 | `frontend/src/views/Workflow/AgentWorkshop.vue`：聊需求、看规格、查缺口、生成版本、评估迭代 |
+| 管理页与工作台拆分 | agent-workshop-iterative-design §11 | ✅ 已实现 | `frontend/src/views/Workflow/AgentWorkshopManager.vue` 管理页；`AgentWorkshop.vue` 单 Agent 工作台 |
+| 能力快照接口 | agent-workshop-iterative-design §6 | ✅ 已实现并增强 | `AgentWorkshopService.get_capability_snapshot()`；已汇总 builtin/external/valuation 能力，并带 `summary_text` 与 totals |
+| Capability Index 接入 requirement clarification / gap analysis | agent-workshop-iterative-design §6、CAPABILITY_INDEX_DESIGN | ✅ 已实现 | `app/services/agent_workshop_service.py`：能力检索失败时回退注册表快照；gap analysis 与规格澄清均已使用能力上下文 |
+| 缺口分析 | agent-workshop-iterative-design §6 | ✅ 已实现并增强 | `analyze_gaps`、`_build_gap_analysis`；包含 existing tools 过滤、reusable modules 过滤、LLM 失败显式透出 |
+| 估值类缺口后置纠偏 | agent-workshop-iterative-design §6 | ✅ 已实现 | `app/services/agent_workshop_service.py`：`_enforce_valuation_gap_report` 强制补齐 PE/PB/PEG 等估值方法级能力覆盖 |
+| 工具需求草案 tooling plan | agent-workshop-iterative-design §7 | ✅ 已实现 | `generate_tooling_plan`、`_generate_tooling_plan_with_llm`；前端 gap step 展示 `draft_tools`、依赖、输入输出、acceptance criteria |
+| 版本构建 | agent-workshop-iterative-design §8 | ✅ 已实现 | `build_version`：同步生成 `required_tools`、`required_capabilities`、`output_schema`、`evaluation_policy`、`prompt_template_ref`、`agent_metadata` |
+| 版本 Prompt 查看与更新 | agent-workshop-iterative-design §8、§10 | ✅ 已实现 | `GET/PUT /versions/{version_id}/prompt`；`AgentWorkshopService.get_version_prompt`、`update_version_prompt` |
+| 调试运行 | agent-workshop-iterative-design §9 | ✅ 已实现 | `POST /versions/{version_id}/debug`；支持指定 LLM、股票、目标，并返回 Prompt、工具轨迹、原始输出 |
+| 版本评估 | agent-workshop-iterative-design §9 | ✅ 已实现 | `evaluate_version`、`list_evaluations`；支持 `sandbox / benchmark / production-review` |
+| 基于评估发起下一轮 | agent-workshop-iterative-design §9 | ✅ 已实现 | `iterate_version`：基于最新 issues / recommendations / feedback 自动启动下一轮 session |
+| 版本发布 | agent-workshop-iterative-design §9 | ✅ 已实现 | `publish_version`：testing → active，自动归档旧 active，更新 runtime agent config 与 spec 状态 |
+| 全量 LLM trace 独立日志 | agent-workshop-iterative-design §12 | ✅ 已实现 | `logs/agent_workshop_llm_full.log`；`app/services/agent_workshop_service.py` 中独立写入 |
+| 标准样本集获取 | agent-workshop-iterative-design §10 | ✅ 已实现 | `GET /specs/{spec_id}/sample-sets` 与 `list_sample_sets` |
+| 发布审批、灰度发布、生产反馈回流 | agent-workshop-iterative-design §9、§13 | ⚠️ 未实现 | 当前没有多人审批、灰度放量和自动生产反馈闭环 |
+
+**小结**: Agent 工坊已经从“会话式规格草案”演进为完整的版本化工作台，覆盖规格澄清、能力快照、缺口分析、tooling plan、版本构建、Prompt 审阅、调试、评估、迭代和发布。当前主要未完成项集中在发布治理和生产反馈闭环，而不是核心功能缺失。
+
+---
+
+## 八、Skill 自动生成系统
 
 | 设计项 | 设计文档 | 实现状态 | 代码位置 |
 | -------- | ---------- | ---------- | ---------- |
@@ -135,7 +163,7 @@
 
 ---
 
-## 八、数据架构与 MCP 数据源（规划）
+## 九、数据架构与 MCP 数据源（规划）
 
 | 设计项 | 设计文档 | 实现状态 | 说明 |
 | -------- | ---------- | ---------- | ------ |
@@ -145,7 +173,7 @@
 
 ---
 
-## 九、分层提示词架构（prompt-layered-architecture）
+## 十、分层提示词架构（prompt-layered-architecture）
 
 | 设计项 | 设计文档 | 实现状态 | 说明 |
 | -------- | ---------- | ---------- | ------ |
@@ -154,7 +182,7 @@
 
 ---
 
-## 十、QMT 数据源与 ETF 同步
+## 十一、QMT 数据源与 ETF 同步
 
 | 设计项 | 设计文档 | 实现状态 | 代码位置 |
 | -------- | ---------- | ---------- | ---------- |
@@ -174,7 +202,7 @@
 
 ---
 
-## 十一、汇总表
+## 十二、汇总表
 
 | 模块 | 设计要点 | 状态 | 备注 |
 | ------ | ---------- | ------ | ------ |
@@ -184,22 +212,23 @@
 | 智能助手 v3.0 | 记忆、画像、意图、IM、RAG | ✅ 已实现 | — |
 | 统一通知 | create_and_publish、ChannelNotifier、QQ IM | ✅ 已实现 | — |
 | AI 工作流架构师 | 资源收集、规划、提示词、Skill 编排、三层配置、UniversalAgent | ✅ 已实现 | — |
+| Agent 工坊 | 规格澄清、能力快照、缺口分析、tooling plan、版本构建、Prompt 审阅、调试、评估、迭代、发布 | ✅ 已实现 | 发布审批、灰度策略、生产反馈回流尚未完成 |
 | Skill 生成系统 | 需求分析→代码→验证→沙箱→评估→迭代→入库 | ✅ 已实现 | — |
 | 数据架构 | 存储与降级链 | ✅ 已实现 | MCP 数据源类与审计扩展为部分/规划 |
 | QMT 与 ETF | QMT 配置桥接、5 类同步任务、历史/财务入库、QMT 分析模式、ETF 数据同步与基础工作流 | ✅ 已部分完整实现 | ETF 产品层与更完整 QMT 统计口径仍需继续补强 |
 | 分层提示词 | 五层组装与行业/个股/能力 | ⚠️ 部分 | 有相关服务，需与实施计划逐项对照 |
 
-**总体结论**：v3.0 设计中的**分析助理升级、MCP Server 六工具与认证、Gateway 框架与 QQ、通知、AI 工作流架构师、Skill 生成，以及 QMT 数据同步/分析模式与 ETF 基础工作流接入**均已在代码中实现；**ETF 产品层完善、飞书/钉钉适配器**仍属后续扩展；**MCP 数据源/审计的完整落地**可按文档后续补全。
+**总体结论**：v3.0 设计中的**分析助理升级、MCP Server 六工具与认证、Gateway 框架与 QQ、通知、AI 工作流架构师、Agent 工坊、Skill 生成，以及 QMT 数据同步/分析模式与 ETF 基础工作流接入**均已在代码中实现；**Agent 工坊当前主要缺口在审批、灰度和生产反馈闭环**；**ETF 产品层完善、飞书/钉钉适配器**仍属后续扩展；**MCP 数据源/审计的完整落地**可按文档后续补全。
 
 ---
 
-## v3.0 核心模块审计记录（2026-03-19）
+## v3.0 核心模块审计记录（2026-03-19，2026-04-01 文档补充）
 
 对所有 v3.0 设计文档对应的功能模块进行了逐行代码审计，结果如下：
 
 | # | 模块 | 审计结论 | Bug 修复 |
 |---|------|----------|----------|
-| 1 | Agent Workshop（工具注册/同步） | ✅ 通过 | 修复工具注册时 `tool_configs` 同步缺失、Agent 绑定未自动更新的问题 |
+| 1 | Agent Workshop（规格澄清 / 缺口分析 / 版本化链路） | ✅ 通过 | 2026-03-19 审计修复工具注册时 `tool_configs` 同步缺失、Agent 绑定未自动更新；2026-04-01 文档补充已覆盖现有五步工作台、Prompt 审阅、调试评估和发布链路 |
 | 2 | MCP Server（6 工具 + 认证 + 配额） | ✅ 通过 | 修复 `_check_daily_quota` 中 `source` 字段查询不匹配 + `user_id` 字符串与 ObjectId 类型不一致（2 个 Bug） |
 | 3 | AI Workflow Architect（工作流架构师） | ✅ 通过 | 修复 `WorkflowPlanner._call_llm_with_json` 中 `self.resource_collector` AttributeError |
 | 4 | Skill 自动生成系统 | ✅ 通过 | 无需修复，6 组件管线完整 |
@@ -207,4 +236,4 @@
 | 6 | Gateway IM 适配器（QQ/WebSocket） | ✅ 通过 | 无需修复，双模式 + Session 隔离 + 用户映射 + Markdown 转换均正确 |
 | 7 | 统一通知系统（Notification） | ✅ 通过 | 修复 `websocket_notifications.py` 中 WebSocket 两个端点 `user_id` 硬编码为 `"admin"` 的 Bug，改为从 JWT token 动态解析 |
 
-**审计总结**: 7 个核心模块全部审计通过，共发现并修复 **5 个 Bug**（MCP 2 个、Workflow Architect 1 个、Agent Workshop 1 个、WebSocket 通知 1 个），其余 3 个模块代码质量高、无需修复。
+**审计总结**: 7 个核心模块全部审计通过，共发现并修复 **5 个 Bug**（MCP 2 个、Workflow Architect 1 个、Agent Workshop 1 个、WebSocket 通知 1 个），其余 3 个模块代码质量高、无需修复。2026-04-01 已补充 Agent 工坊当前实现状态，确认其范围已明显超出最初“工具注册/同步”层面的审计描述。

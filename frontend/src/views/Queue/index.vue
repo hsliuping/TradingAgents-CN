@@ -188,11 +188,12 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 
 import { analysisApi } from '@/api/analysis'
+import { fetchTaskResultWithRetry } from '@/utils/taskResult'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { marked } from 'marked'
 
-// 简单Markdown渲染，与单股分析保持一致风格
+// 简单 Markdown 渲染，与单股研究保持一致风格
 marked.setOptions({ breaks: true, gfm: true })
 const renderMarkdown = (content: string) => {
   if (!content) return ''
@@ -342,13 +343,11 @@ const retryTask = (task: any) => {
 const viewResult = async (task: any) => {
   try {
     currentTaskRow.value = task
-    const res = await analysisApi.getTaskResult(task.task_id)
-    const payload = res?.data?.data ?? res?.data ?? res
-    // 可能返回 { success, data, message }
-    const success = (res?.data?.success ?? payload?.success ?? true) as boolean
-    const data = payload?.data ?? payload
-    if (!success || !data) {
-      ElMessage.warning(res?.data?.message || '任务结果暂不可用')
+    const data = await fetchTaskResultWithRetry(task.task_id, {
+      seedData: task.result_data
+    })
+    if (!data) {
+      ElMessage.warning('任务结果暂不可用')
       return
     }
     resultData.value = data

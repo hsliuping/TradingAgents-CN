@@ -49,12 +49,12 @@ SIMPLE_WORKFLOW = WorkflowDefinition(
             position=Position(x=400, y=100),
         ),
         
-        # 交易员
+        # 研究整合员
         NodeDefinition(
             id="trader",
             type=NodeType.TRADER,
             agent_id="trader",
-            label="交易员",
+            label="研究整合员",
             position=Position(x=250, y=200),
         ),
         

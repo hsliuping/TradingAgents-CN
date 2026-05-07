@@ -51,7 +51,6 @@
             type="primary" 
             link
             size="small" 
-            :disabled="!hasProPermission"
             @click="handleStartReview(row.code)"
           >
             发起复盘
@@ -83,9 +82,9 @@
         </template>
         <template #default>
           <ul>
-            <li>复盘可以帮助你分析买卖时机、发现操作中的问题</li>
-            <li>建议对每笔完成的交易都进行复盘，持续改进交易策略</li>
-            <li>持仓中的股票也可以复盘，分析买入时机是否合适</li>
+            <li>复盘可以帮助你回顾交易依据、发现执行中的问题</li>
+            <li>可按已完成交易逐笔复盘，持续完善研究准备与执行纪律</li>
+            <li>持仓中的股票也可以复盘，重点回看当时的入场依据是否充分</li>
           </ul>
         </template>
       </el-alert>
@@ -95,9 +94,6 @@
 
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import { computed } from 'vue'
-import { useLicenseStore } from '@/stores/license'
-import { ElMessage } from 'element-plus'
 import type { ReviewableStock } from '@/api/review'
 
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
@@ -114,33 +110,9 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
-const licenseStore = useLicenseStore()
-
-// 检查是否有 PRO 权限
-const hasProPermission = computed(() => {
-  const hasFeature = licenseStore.hasFeature('trade_review')
-  // 调试信息
-  if (!hasFeature) {
-    console.warn('[权限检查] 模拟交易复盘权限检查失败', {
-      isPro: licenseStore.isPro,
-      plan: licenseStore.plan,
-      is_valid: licenseStore.licenseInfo?.is_valid,
-      licenseInfo: licenseStore.licenseInfo
-    })
-  }
-  return hasFeature
-})
 
 // 处理发起复盘按钮点击
 const handleStartReview = (code: string) => {
-  if (!hasProPermission.value) {
-    const plan = licenseStore.plan
-    const isPro = licenseStore.isPro
-    const is_valid = licenseStore.licenseInfo?.is_valid
-    console.error('[权限检查] 发起复盘被阻止', { plan, isPro, is_valid, licenseInfo: licenseStore.licenseInfo })
-    ElMessage.warning('操作复盘功能需要 PRO 版本授权，请前往设置页面配置授权')
-    return
-  }
   emit('start-review', code)
 }
 

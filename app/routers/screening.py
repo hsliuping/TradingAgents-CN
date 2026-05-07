@@ -1,15 +1,21 @@
 
 import logging
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any
+from bson import ObjectId
+
+from app.core.database import get_mongo_db
+from app.core.response import ok, fail
+from app.utils.timezone import now_tz
 from app.routers.auth_db import get_current_user
 
+from app.services.factor_registry_service import get_factor_registry_service
 from app.services.screening_service import ScreeningService, ScreeningParams
 from app.services.enhanced_screening_service import get_enhanced_screening_service
 from app.models.screening import (
     ScreeningCondition, ScreeningRequest as NewScreeningRequest,
-    ScreeningResponse as NewScreeningResponse, FieldInfo, BASIC_FIELDS_INFO
+    ScreeningResponse as NewScreeningResponse, FieldInfo
 )
 
 router = APIRouter(tags=["screening"])
@@ -39,9 +45,29 @@ class ScreeningResponse(BaseModel):
     total: int
     items: List[dict]
 
+
+class ScreeningPresetPayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(..., min_length=1, max_length=100)
+    basic_filters: Dict[str, Any] = Field(default_factory=dict, alias="basicFilters")
+    field_filters: Dict[str, Any] = Field(default_factory=dict, alias="fieldFilters")
+
 # 服务实例
 svc = ScreeningService()
 enhanced_svc = get_enhanced_screening_service()
+factor_registry_svc = get_factor_registry_service()
+
+
+def _serialize_screening_preset(doc: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": str(doc.get("_id")),
+        "name": doc.get("name", ""),
+        "basicFilters": doc.get("basic_filters", {}),
+        "fieldFilters": doc.get("field_filters", {}),
+        "createdAt": doc.get("created_at"),
+        "updatedAt": doc.get("updated_at"),
+    }
 
 
 @router.get("/fields", response_model=FieldConfigResponse)
@@ -51,28 +77,8 @@ async def get_screening_fields(user: dict = Depends(get_current_user)):
     返回所有可用的筛选字段及其配置信息
     """
     try:
-        # 字段分类
-        categories = {
-            "basic": ["code", "name", "industry", "area", "market"],
-            "market_value": ["total_mv", "circ_mv"],
-            "financial": [
-                "pe", "pb", "pe_ttm", "pb_mrq",
-                "roe", "roa", "gross_margin", "netprofit_margin",
-                "debt_to_assets", "assets_to_eqt",
-                "current_ratio", "quick_ratio", "cash_ratio",
-                "dividend_yield", "revenue_ttm", "net_profit_ttm",
-                "n_cashflow_act", "report_period",
-                "net_working_capital", "is_st"
-            ],
-            "trading": ["turnover_rate", "volume_ratio"],
-            "price": ["close", "pct_chg", "amount"],
-            "technical": ["ma20", "rsi14", "kdj_k", "kdj_d", "kdj_j", "dif", "dea", "macd_hist"]
-        }
-
-        return FieldConfigResponse(
-            fields=BASIC_FIELDS_INFO,
-            categories=categories
-        )
+        config = factor_registry_svc.get_legacy_screening_field_config()
+        return FieldConfigResponse(**config)
 
     except Exception as e:
         logger.error(f"[get_screening_fields] 获取字段配置失败: {e}", exc_info=True)
@@ -239,9 +245,9 @@ async def enhanced_screening(req: NewScreeningRequest, user: dict = Depends(get_
 
 
 # 获取支持的字段信息
-@router.get("/fields", response_model=List[Dict[str, Any]])
+@router.get("/supported-fields", response_model=List[Dict[str, Any]])
 async def get_supported_fields(user: dict = Depends(get_current_user)):
-    """获取所有支持的筛选字段信息"""
+    """获取所有支持的筛选字段信息。"""
     try:
         fields = await enhanced_svc.get_all_supported_fields()
         return fields
@@ -264,6 +270,168 @@ async def get_field_info(field_name: str, user: dict = Depends(get_current_user)
     except Exception as e:
         logger.error(f"[screening] 获取字段信息失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取字段信息失败: {str(e)}")
+
+
+@router.get("/factor-registry", response_model=Dict[str, Any])
+async def get_factor_registry(
+    category: Optional[str] = None,
+    governance_scope: str = "all",
+    screening_only: bool = False,
+    user: dict = Depends(get_current_user),
+):
+    """获取受治理因子注册表，供前端、自然语言选股和 Skill 复用。"""
+    try:
+        if governance_scope not in {"all", "p0", "technical"}:
+            raise HTTPException(status_code=400, detail="governance_scope 只支持 all/p0/technical")
+        return factor_registry_svc.list_registry(
+            category=category,
+            governance_scope=governance_scope,
+            screening_only=screening_only,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[screening] 获取因子注册表失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取因子注册表失败: {str(e)}")
+
+
+@router.get("/factor-registry/{factor_id}", response_model=Dict[str, Any])
+async def get_factor_registry_item(factor_id: str, user: dict = Depends(get_current_user)):
+    """获取单个因子的 schema/catalog/runtime semantic contract 聚合信息。"""
+    try:
+        item = factor_registry_svc.get_registry_item(factor_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail=f"因子 '{factor_id}' 不存在")
+        return item
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[screening] 获取因子注册表详情失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取因子注册表详情失败: {str(e)}")
+
+
+@router.get("/presets", response_model=Dict[str, Any])
+async def list_screening_presets(user: dict = Depends(get_current_user)):
+    """获取当前用户保存的筛选方案。"""
+    db = get_mongo_db()
+    user_id = str(user["id"])
+
+    try:
+        items: List[Dict[str, Any]] = []
+        cursor = db.screening_presets.find({"user_id": user_id}).sort("updated_at", -1)
+        async for doc in cursor:
+            items.append(_serialize_screening_preset(doc))
+        return ok({"items": items})
+    except Exception as e:
+        logger.error(f"[screening] 获取筛选方案失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取筛选方案失败: {str(e)}")
+
+
+@router.post("/presets", response_model=Dict[str, Any])
+async def create_screening_preset(
+    payload: ScreeningPresetPayload,
+    user: dict = Depends(get_current_user),
+):
+    """创建新的筛选方案。"""
+    db = get_mongo_db()
+    user_id = str(user["id"])
+
+    name = payload.name.strip()
+    if not name:
+        return fail("筛选方案名称不能为空", code=400)
+
+    existing = await db.screening_presets.find_one({"user_id": user_id, "name": name})
+    if existing:
+        return fail("筛选方案名称已存在", code=400)
+
+    now = now_tz()
+    preset_doc = {
+        "user_id": user_id,
+        "name": name,
+        "basic_filters": payload.basic_filters,
+        "field_filters": payload.field_filters,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    try:
+        result = await db.screening_presets.insert_one(preset_doc)
+        preset_doc["_id"] = result.inserted_id
+        return ok({"preset": _serialize_screening_preset(preset_doc)}, message="筛选方案保存成功")
+    except Exception as e:
+        logger.error(f"[screening] 创建筛选方案失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"创建筛选方案失败: {str(e)}")
+
+
+@router.put("/presets/{preset_id}", response_model=Dict[str, Any])
+async def update_screening_preset(
+    preset_id: str,
+    payload: ScreeningPresetPayload,
+    user: dict = Depends(get_current_user),
+):
+    """更新已有筛选方案。"""
+    db = get_mongo_db()
+    user_id = str(user["id"])
+
+    try:
+        oid = ObjectId(preset_id)
+    except Exception:
+        return fail("无效的筛选方案ID", code=400)
+
+    existing = await db.screening_presets.find_one({"_id": oid, "user_id": user_id})
+    if not existing:
+        return fail("筛选方案不存在", code=404)
+
+    name = payload.name.strip()
+    if not name:
+        return fail("筛选方案名称不能为空", code=400)
+
+    conflict = await db.screening_presets.find_one({
+        "_id": {"$ne": oid},
+        "user_id": user_id,
+        "name": name,
+    })
+    if conflict:
+        return fail("筛选方案名称已存在", code=400)
+
+    update_data = {
+        "name": name,
+        "basic_filters": payload.basic_filters,
+        "field_filters": payload.field_filters,
+        "updated_at": now_tz(),
+    }
+
+    try:
+        await db.screening_presets.update_one(
+            {"_id": oid, "user_id": user_id},
+            {"$set": update_data},
+        )
+        updated = {**existing, **update_data, "_id": oid}
+        return ok({"preset": _serialize_screening_preset(updated)}, message="筛选方案更新成功")
+    except Exception as e:
+        logger.error(f"[screening] 更新筛选方案失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"更新筛选方案失败: {str(e)}")
+
+
+@router.delete("/presets/{preset_id}", response_model=Dict[str, Any])
+async def delete_screening_preset(preset_id: str, user: dict = Depends(get_current_user)):
+    """删除筛选方案。"""
+    db = get_mongo_db()
+    user_id = str(user["id"])
+
+    try:
+        oid = ObjectId(preset_id)
+    except Exception:
+        return fail("无效的筛选方案ID", code=400)
+
+    try:
+        result = await db.screening_presets.delete_one({"_id": oid, "user_id": user_id})
+        if result.deleted_count == 0:
+            return fail("筛选方案不存在", code=404)
+        return ok({"id": preset_id}, message="筛选方案删除成功")
+    except Exception as e:
+        logger.error(f"[screening] 删除筛选方案失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"删除筛选方案失败: {str(e)}")
 
 
 # 验证筛选条件
@@ -302,7 +470,7 @@ async def get_industries(user: dict = Depends(get_current_user)):
             {
                 "$match": {
                     "source": preferred_source,  # 🔥 只查询优先级最高的数据源
-                    "industry": {"$ne": None, "$ne": ""}  # 过滤空行业
+                    "industry": {"$nin": [None, "", "未知"]}  # 过滤空行业和未知行业
                 }
             },
             {

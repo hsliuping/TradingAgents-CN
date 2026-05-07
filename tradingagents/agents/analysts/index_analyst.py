@@ -17,6 +17,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from tradingagents.utils.tool_logging import log_analyst_module
 from tradingagents.utils.logging_init import get_logger
 from tradingagents.utils.template_client import get_agent_prompt
+from tradingagents.agents.utils.compliance_prompting import apply_compliance_guardrails
 
 logger = get_logger("default")
 
@@ -246,6 +247,7 @@ def _analyze_with_llm(llm, trade_date: str, index_data: str, state: dict) -> str
                 fallback_prompt=None,
                 context=None
             )
+            system_prompt = apply_compliance_guardrails(system_prompt, "index_analyst")
             logger.info(f"✅ [大盘分析师] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
 
         except Exception as e:
@@ -280,12 +282,12 @@ def _analyze_with_llm(llm, trade_date: str, index_data: str, state: dict) -> str
    - 板块分化程度
    - 市场参与度评估
 
-4. **风险评估与建议**
+4. **风险评估与研究结论**
    - 市场风险等级：🟢低风险 / 🟡中等风险 / 🔴高风险
    - 市场趋势：📈上涨 / 📉下跌 / ➡️震荡
-   - 仓位建议：基于当前市场环境的具体建议
+    - 后续观察点：基于当前市场环境需要继续跟踪的信号
 
-请用中文输出，分析要有理有据，结论要明确。"""
+请用中文输出，分析要有理有据，结论要明确，但不得形成投资建议或仓位指令。"""
 
         # 调用 LLM 生成分析报告
         logger.info(f"📤 [大盘分析师] 调用 LLM 生成分析报告...")
@@ -316,7 +318,7 @@ def _get_default_system_prompt(trade_date: str) -> str:
     Returns:
         默认系统提示词
     """
-    return f"""你是一位专业的大盘/指数分析师，专注于宏观市场分析和系统性风险评估。
+    prompt = f"""你是一位专业的大盘/指数分析师，专注于宏观市场分析和系统性风险评估。
 
 📋 **分析日期：** {trade_date}
 
@@ -324,7 +326,7 @@ def _get_default_system_prompt(trade_date: str) -> str:
 1. 分析主要指数（上证、深证、创业板等）的走势
 2. 评估市场整体环境和情绪
 3. 识别系统性风险和机会
-4. 提供市场层面的投资建议
+4. 提供市场层面的研究结论与风险观察
 
 📊 **分析维度：**
 - 指数表现：涨跌幅、成交额
@@ -332,4 +334,5 @@ def _get_default_system_prompt(trade_date: str) -> str:
 - 技术面：支撑压力、趋势判断
 - 风险评估：系统性风险水平
 
-请基于提供的数据进行专业分析，给出明确的结论和建议。"""
+请基于提供的数据进行专业分析，给出明确的研究结论、风险提示和后续观察点。"""
+    return apply_compliance_guardrails(prompt, "index_analyst")

@@ -73,10 +73,7 @@
         <el-card shadow="never" class="ai-section">
           <template #header>
             <div class="ai-header">
-              <span>AI分析报告</span>
-              <el-tag :type="getScoreType(detail.ai_review?.overall_score || 0)" size="large">
-                {{ detail.ai_review?.overall_score || 0 }}分
-              </el-tag>
+              <span>AI复盘报告</span>
             </div>
           </template>
           
@@ -98,14 +95,14 @@
             </div>
             
             <div class="analysis-item" v-if="detail.ai_review?.improvement_areas?.length">
-              <div class="item-title">改进方向</div>
+              <div class="item-title">复盘改进方向</div>
               <ul>
                 <li v-for="(item, idx) in detail.ai_review.improvement_areas" :key="idx">{{ item }}</li>
               </ul>
             </div>
             
             <div class="analysis-item" v-if="detail.ai_review?.action_plan?.length">
-              <div class="item-title">行动计划</div>
+              <div class="item-title">后续观察项</div>
               <ul>
                 <li v-for="(item, idx) in detail.ai_review.action_plan" :key="idx">{{ item }}</li>
               </ul>
@@ -176,12 +173,6 @@ const formatPnl = (value?: number) => {
   if (value === undefined || value === null) return '-'
   const prefix = value >= 0 ? '+' : ''
   return prefix + value.toFixed(2)
-}
-
-const getScoreType = (score: number) => {
-  if (score >= 80) return 'success'
-  if (score >= 60) return 'warning'
-  return 'danger'
 }
 
 const loadDetail = async () => {

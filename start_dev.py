@@ -12,6 +12,8 @@ import time
 import argparse
 from pathlib import Path
 
+from core.python_runtime import resolve_python_executable
+
 # Add project root to path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
@@ -19,18 +21,7 @@ sys.path.insert(0, str(project_root))
 
 def find_python_exe():
     """Find Python executable (venv/env/system)"""
-    candidates = [
-        project_root / "venv" / "Scripts" / "python.exe",
-        project_root / "env" / "Scripts" / "python.exe",
-        project_root / "vendors" / "python" / "python.exe",
-        sys.executable
-    ]
-    
-    for candidate in candidates:
-        if candidate.exists() if isinstance(candidate, Path) else True:
-            return str(candidate)
-    
-    return "python"
+    return resolve_python_executable(project_root, env_var_names=("TRADINGAGENTS_PYTHON_EXE",))
 
 
 def main():
