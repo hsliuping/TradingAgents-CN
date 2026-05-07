@@ -11,7 +11,11 @@
       "Bash(bash scripts/release/release.sh status)",
       "Bash(bash scripts/release/release.sh bump build)",
       "Bash(git check-ignore *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git cherry *)",
+      "Bash(docker exec *)",
+      "Bash(docker inspect *)",
+      "Bash(docker network *)"
     ]
   }
 }
