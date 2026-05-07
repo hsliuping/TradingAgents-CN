@@ -8,7 +8,7 @@ services:
     container_name: ta-v210-mongodb
     restart: unless-stopped
     ports:
-      - "27119:27017"
+      - "27018:27017"
     volumes:
       - ta-v210_mongodb_data:/data/db
     environment:
@@ -30,7 +30,7 @@ services:
     container_name: ta-v210-redis
     restart: unless-stopped
     ports:
-      - "6481:6379"
+      - "6380:6379"
     volumes:
       - ta-v210_redis_data:/data
     environment:
@@ -112,7 +112,7 @@ services:
     container_name: ta-v210-nginx
     restart: unless-stopped
     ports:
-      - "8182:80"
+      - "8081:80"
     volumes:
       - ./nginx/nginx-proxy.conf:/etc/nginx/nginx.conf:ro
     depends_on:

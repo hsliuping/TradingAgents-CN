@@ -14,6 +14,7 @@
 # 选项:
 #   -r, --registry REGISTRY   Docker Hub 用户名（默认: hsliup）
 #   -t, --tag TAG             镜像标签（默认: 读取根目录 VERSION）
+#   --push                    显式推送镜像（兼容旧调用，默认行为）
 #   --skip-backend            跳过后端镜像构建
 #   --skip-frontend           跳过前端镜像构建
 #   --skip-push               只构建不推送
@@ -60,6 +61,11 @@ while [[ $# -gt 0 ]]; do
             BASE_TAG="$2"
             shift 2
             ;;
+        --push)
+            # 默认行为就是推送，保留该参数用于兼容旧文档和旧调用。
+            SKIP_PUSH=false
+            shift
+            ;;
         --skip-backend)
             SKIP_BACKEND=true
             shift
@@ -83,6 +89,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -r, --registry REGISTRY   Docker Hub 用户名（默认: hsliup）"
             echo "  -t, --tag TAG             镜像标签（默认: 读取根目录 VERSION）"
             echo "  --base-tag TAG            基础镜像标签（默认: python3.10-bookworm）"
+            echo "  --push                    显式推送镜像（兼容旧调用，默认行为）"
             echo "  --skip-backend            跳过后端镜像构建"
             echo "  --skip-frontend           跳过前端镜像构建"
             echo "  --skip-push               只构建不推送"
