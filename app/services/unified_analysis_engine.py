@@ -63,11 +63,21 @@ class UnifiedAnalysisEngine:
 
         if task.task_type == AnalysisTaskType.STOCK_ANALYSIS:
             try:
-                active_workflow_id = get_default_workflow_provider().get_active_workflow_id()
-                if active_workflow_id and self._workflow_exists(active_workflow_id):
-                    self.logger.info(f"📋 工作流选择: 使用当前活动工作流 workflow_id={active_workflow_id}")
-                    return active_workflow_id
+                workflow_provider = get_default_workflow_provider()
+                active_workflow_id = workflow_provider.get_active_workflow_id()
                 if active_workflow_id:
+                    if self._workflow_exists(active_workflow_id):
+                        self.logger.info(f"📋 工作流选择: 使用当前活动工作流 workflow_id={active_workflow_id}")
+                        return active_workflow_id
+                    try:
+                        workflow_provider.load_workflow(active_workflow_id)
+                    except Exception as exc:
+                        self.logger.warning(
+                            f"⚠️ 活动工作流 {active_workflow_id} 无效，回退注册表默认值 {config.workflow_id}: {exc}"
+                        )
+                    else:
+                        self.logger.info(f"📋 工作流选择: 使用当前活动工作流 workflow_id={active_workflow_id}")
+                        return active_workflow_id
                     self.logger.warning(
                         f"⚠️ 当前活动工作流不存在，将回退到注册表默认流程: workflow_id={active_workflow_id}"
                     )

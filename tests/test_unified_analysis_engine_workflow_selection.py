@@ -39,7 +39,10 @@ def test_resolve_workflow_id_uses_active_stock_workflow(monkeypatch):
     task = _make_task()
     config = SimpleNamespace(workflow_id="v2_stock_analysis")
 
-    provider = SimpleNamespace(get_active_workflow_id=lambda: "540f497b-efcb-46e1-9f01-707c69396c93")
+    provider = SimpleNamespace(
+        get_active_workflow_id=lambda: "540f497b-efcb-46e1-9f01-707c69396c93",
+        load_workflow=lambda workflow_id: SimpleNamespace(id=workflow_id),
+    )
     monkeypatch.setattr(
         "app.services.unified_analysis_engine.get_default_workflow_provider",
         lambda: provider,
@@ -48,6 +51,28 @@ def test_resolve_workflow_id_uses_active_stock_workflow(monkeypatch):
     workflow_id = engine._resolve_workflow_id(task, config)
 
     assert workflow_id == "540f497b-efcb-46e1-9f01-707c69396c93"
+
+
+def test_resolve_workflow_id_falls_back_when_active_stock_workflow_is_missing(monkeypatch):
+    engine = UnifiedAnalysisEngine()
+    task = _make_task()
+    config = SimpleNamespace(workflow_id="v2_stock_analysis")
+
+    def _raise_missing(_workflow_id):
+        raise ValueError("工作流不存在")
+
+    provider = SimpleNamespace(
+        get_active_workflow_id=lambda: "legacy-custom-uuid",
+        load_workflow=_raise_missing,
+    )
+    monkeypatch.setattr(
+        "app.services.unified_analysis_engine.get_default_workflow_provider",
+        lambda: provider,
+    )
+
+    workflow_id = engine._resolve_workflow_id(task, config)
+
+    assert workflow_id == "v2_stock_analysis"
 
 
 def test_resolve_workflow_id_falls_back_to_registry_default_for_non_stock_tasks():
