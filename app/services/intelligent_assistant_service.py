@@ -418,6 +418,8 @@ def _get_system_prompt(
 - **操作类请求**（分析、报告、定时、自选股）优先使用 assistant_ops 类工具
 - 如果系统里已经存在合适的完整 Agent，优先考虑直接调用 Agent 完成任务；只有在没有合适 Agent 时，再退回到底层工具组合
 - 对“分析某只股票”“看看持仓”“查一下报告”这类零星查询，直接完成查询或分析，不要为了记录上下文而新建研究主题
+- 对股票筛选/智能筛选类请求，如果筛选工具返回“未找到符合条件的股票”或明确空结果，必须直接告诉用户当前没有符合其条件的标的。
+- 在股票筛选空结果场景下，严禁为了“给点参考”而推荐其它不符合筛选条件的股票，严禁擅自放宽条件后再给出候选名单；只有用户明确要求你放宽条件或改条件时，才可以继续下一步。
 {topic_block}
 {im_block}"""
 
@@ -1317,8 +1319,44 @@ def _is_visible_assistant_topic(doc: Dict[str, Any]) -> bool:
     return not _is_external_session_thread_id(doc.get("thread_id"))
 
 
+def _sanitize_thread_summary(summary: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not summary:
+        return None
+
+    abstract = str(summary.get("abstract") or "").strip()
+    confirmed_facts = summary.get("confirmed_facts") or []
+    open_questions = summary.get("open_questions") or []
+    next_actions = summary.get("next_actions") or []
+    focus_score = float(summary.get("focus_score") or 0.0)
+
+    # 历史坏数据特征：只有 abstract，被 assistant 原文切片覆盖，且仍保留初始化占位值。
+    if (
+        abstract
+        and not confirmed_facts
+        and not open_questions
+        and not next_actions
+        and focus_score <= 0
+        and (
+            "##" in abstract
+            or "|" in abstract
+            or "---" in abstract
+            or "**" in abstract
+            or len(abstract) > 100
+        )
+    ):
+        return None
+
+    return {
+        "abstract": abstract,
+        "confirmed_facts": confirmed_facts,
+        "open_questions": open_questions,
+        "next_actions": next_actions,
+        "focus_score": focus_score,
+    }
+
+
 def _thread_doc_to_item(doc: Dict[str, Any]) -> Dict[str, Any]:
-    summary = doc.get("current_summary") or {}
+    summary = _sanitize_thread_summary(doc.get("current_summary") or {})
     updated_at = doc.get("updated_at")
     if isinstance(updated_at, datetime):
         updated_at = updated_at.isoformat()
@@ -2039,6 +2077,127 @@ def _extract_sentences(text: str) -> List[str]:
     return fragments
 
 
+def _format_messages_for_summary(messages: List[Dict[str, Any]], limit: int = 12) -> str:
+    formatted: List[str] = []
+    for index, message in enumerate(messages[-limit:], start=1):
+        role = str(message.get("role") or "assistant").strip() or "assistant"
+        content = str(message.get("content") or "").strip()
+        if not content:
+            continue
+        content = re.sub(r"\s+", " ", content)
+        formatted.append(f"{index}. [{role}] {content[:800]}")
+    return "\n".join(formatted)
+
+
+def _strip_json_code_fence(text: str) -> str:
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, count=1, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    return cleaned.strip()
+
+
+def _load_summary_json(text: str) -> Dict[str, Any]:
+    cleaned = _strip_json_code_fence(text)
+    if not cleaned:
+        raise ValueError("摘要模型返回为空")
+
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+        if not match:
+            raise
+        data = json.loads(match.group(0))
+
+    if not isinstance(data, dict):
+        raise ValueError("摘要模型返回的不是 JSON object")
+    return data
+
+
+def _normalize_thread_summary_payload(payload: Dict[str, Any], fallback: Dict[str, Any]) -> Dict[str, Any]:
+    abstract = str(payload.get("abstract") or "").strip()
+    focus_score = payload.get("focus_score")
+    try:
+        focus_score = float(focus_score)
+    except (TypeError, ValueError):
+        focus_score = fallback.get("focus_score") or 0.0
+    focus_score = max(0.0, min(round(float(focus_score), 2), 1.0))
+
+    return {
+        "abstract": abstract[:160] or fallback.get("abstract") or "当前主题尚未形成摘要",
+        "confirmed_facts": _normalize_summary_items(payload.get("confirmed_facts") or fallback.get("confirmed_facts") or []),
+        "open_questions": _normalize_summary_items(payload.get("open_questions") or fallback.get("open_questions") or []),
+        "next_actions": _normalize_summary_items(payload.get("next_actions") or fallback.get("next_actions") or []),
+        "focus_score": focus_score,
+    }
+
+
+async def _build_thread_summary_with_llm(
+    db,
+    messages: List[Dict[str, Any]],
+    title: str = "",
+) -> Dict[str, Any]:
+    fallback = _build_thread_summary_from_messages(messages, title)
+    transcript = _format_messages_for_summary(messages)
+    if not transcript:
+        return fallback
+
+    try:
+        llm_config = await get_coding_llm_config(db)
+        if not llm_config:
+            logger.warning("[智能助手摘要] 未找到可用 LLM 配置，回退规则摘要")
+            return fallback
+
+        summary_config = llm_config.model_copy(deep=True) if hasattr(llm_config, "model_copy") else llm_config.copy(deep=True)
+        summary_config.temperature = 0.1
+        summary_config.max_tokens = min(int(summary_config.max_tokens or 600), 600)
+        summary_config.timeout = min(int(summary_config.timeout or 45), 45)
+
+        client = UnifiedLLMClient.from_config(summary_config)
+        messages_for_llm = [
+            Message(
+                role=MessageRole.SYSTEM,
+                content=(
+                    "你是研究主题摘要器。你的任务是为主题会话生成结构化摘要，供侧边栏和主题卡片展示。\n"
+                    "必须只输出一个 JSON object，不要输出 markdown、代码块、解释、前后缀。\n"
+                    "字段要求：\n"
+                    "- abstract: 1-2 句中文摘要，40-90 字，突出当前结论或讨论焦点，不要复制大段原文，不要保留 markdown 标题、表格、分隔线。\n"
+                    "- confirmed_facts: 1-3 条已被会话明确给出的事实，必须具体，不要写空话。\n"
+                    "- open_questions: 0-3 条仍待回答的问题；如果问题已经回答，不要重复放进去。\n"
+                    "- next_actions: 1-3 条下一步建议，必须贴合当前主题。\n"
+                    "- focus_score: 0 到 1 之间的小数，表示当前主题是否聚焦。\n"
+                    "如果信息不足，宁可简短，也不要抄录正文碎片。"
+                ),
+            ),
+            Message(
+                role=MessageRole.USER,
+                content=(
+                    f"主题标题: {title or '未命名主题'}\n"
+                    "最近消息如下：\n"
+                    f"{transcript}\n\n"
+                    "请输出 JSON：\n"
+                    "{\n"
+                    '  "abstract": "",\n'
+                    '  "confirmed_facts": [],\n'
+                    '  "open_questions": [],\n'
+                    '  "next_actions": [],\n'
+                    '  "focus_score": 0.0\n'
+                    "}"
+                ),
+            ),
+        ]
+
+        response = await client.achat(messages_for_llm)
+        payload = _load_summary_json(response.content or "")
+        summary = _normalize_thread_summary_payload(payload, fallback)
+        logger.info("[智能助手摘要] 使用 LLM 生成结构化摘要成功")
+        return summary
+    except Exception as exc:
+        logger.warning("[智能助手摘要] LLM 摘要生成失败，回退规则摘要: %s", exc)
+        return fallback
+
+
 def _build_thread_summary_from_messages(messages: List[Dict[str, Any]], title: str = "") -> Dict[str, Any]:
     user_messages = [m.get("content", "").strip() for m in messages if m.get("role") == "user" and m.get("content")]
     assistant_messages = [m.get("content", "").strip() for m in messages if m.get("role") == "assistant" and m.get("content")]
@@ -2361,8 +2520,6 @@ async def append_assistant_message(
     updates: Dict[str, Any] = {"updated_at": _now_utc()}
     if role == "user":
         updates["last_user_message"] = text[:200]
-    elif role == "assistant":
-        updates["current_summary.abstract"] = text[:120]
 
     await db.assistant_threads.update_one(
         {"user_id": user_id, "thread_id": thread_id},
@@ -2382,7 +2539,7 @@ async def summarize_assistant_thread(
 ) -> Dict[str, Any]:
     thread = await get_or_create_assistant_thread(db, user_id, conversation_id)
     _, messages = await get_assistant_thread_messages(db, user_id, thread["thread_id"])
-    summary = _build_thread_summary_from_messages(messages[-12:], thread.get("title") or "")
+    summary = await _build_thread_summary_with_llm(db, messages[-12:], thread.get("title") or "")
     now = _now_utc()
 
     await db.assistant_threads.update_one(
@@ -2405,7 +2562,76 @@ async def summarize_assistant_thread(
         "created_at": now,
     })
 
+    await _store_thread_summary_memory(
+        db,
+        user_id=user_id,
+        thread_id=thread["thread_id"],
+        title=thread.get("title") or "",
+        summary=summary,
+        summary_type=summary_type,
+    )
+
     return summary
+
+
+async def _store_thread_summary_memory(
+    db,
+    *,
+    user_id: str,
+    thread_id: str,
+    title: str,
+    summary: Dict[str, Any],
+    summary_type: str,
+) -> None:
+    """将结构化主题摘要中的事实写入 mem0，供后续智能助手继续分析时召回。"""
+    confirmed_facts = _normalize_summary_items(summary.get("confirmed_facts") or [], limit=5)
+    abstract = str(summary.get("abstract") or "").strip()
+    memory_lines = confirmed_facts or ([abstract] if abstract else [])
+    if not memory_lines:
+        return
+
+    try:
+        from core.memory.models import MemoryScope
+        from core.memory.service import get_memory_service
+
+        svc = get_memory_service(db)
+        normalized_title = str(title or "").strip()
+        messages = []
+        for line in memory_lines:
+            text = str(line or "").strip()
+            if not text:
+                continue
+            if normalized_title and normalized_title not in text:
+                text = f"{normalized_title}：{text}"
+            messages.append({"role": "assistant", "content": text})
+
+        if not messages:
+            return
+
+        result = await svc.store(
+            messages,
+            user_id=user_id,
+            session_id=thread_id,
+            scope=MemoryScope.ANALYSIS_INSIGHT,
+            metadata={
+                "source_agent": "assistant_summary",
+                "thread_id": thread_id,
+                "thread_title": normalized_title,
+                "summary_type": summary_type,
+            },
+            infer=False,
+        )
+        logger.info(
+            "[mem0] 主题摘要记忆写入结果 — user=%s thread=%s summary_type=%s facts=%d success=%s error=%s",
+            user_id,
+            thread_id,
+            summary_type,
+            result.facts_extracted,
+            result.success,
+            result.error or "",
+        )
+    except Exception as exc:
+        logger.debug("[mem0] 主题摘要记忆写入失败（已忽略）: %s", exc)
 
 
 async def save_assistant_message(

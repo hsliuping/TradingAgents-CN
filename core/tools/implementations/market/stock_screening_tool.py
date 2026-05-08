@@ -118,7 +118,7 @@ async def _run_screening(
     )
 
     if total == 0 or not items:
-        return "未找到符合条件的股票。请尝试放宽筛选条件。"
+        return "未找到符合条件的股票。当前没有适合该筛选要求的标的，不要推荐其它不符合条件的股票。"
 
     # 格式化输出
     lines = [f"共找到 {total} 只符合条件的股票，以下展示前 {len(items)} 只：\n"]

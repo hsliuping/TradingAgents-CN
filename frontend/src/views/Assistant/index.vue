@@ -84,12 +84,6 @@
                       </el-tooltip>
                     </div>
                   </div>
-                  <div class="thread-preview">{{ data.current_summary?.abstract || data.last_user_message || '进入主题开始研究' }}</div>
-                  <div class="thread-meta">
-                    <span>{{ data.message_count }} 条消息</span>
-                    <span v-if="data.children?.length">{{ data.children.length }} 个子主题</span>
-                    <span>{{ formatTime(data.updated_at) }}</span>
-                  </div>
                 </div>
               </div>
             </template>
@@ -1420,26 +1414,6 @@ onBeforeUnmount(() => {
   white-space: normal;
   word-break: break-word;
   overflow-wrap: anywhere;
-}
-
-.thread-preview {
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.thread-meta {
-  margin-top: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  color: var(--el-text-color-placeholder);
-  font-size: 12px;
 }
 
 .current-thread-path {

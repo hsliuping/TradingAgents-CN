@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.services.intelligent_assistant_service import (
-    _build_thread_summary_from_messages,
+    _build_thread_summary_with_llm,
     append_assistant_message,
     create_assistant_thread,
     summarize_assistant_thread,
@@ -94,7 +94,7 @@ class IMTopicDigestService:
         if len(formatted_messages) < min_messages:
             return False
 
-        summary = _build_thread_summary_from_messages(formatted_messages, title="外部会话沉淀")
+        summary = await _build_thread_summary_with_llm(self.db, formatted_messages, title="外部会话沉淀")
         summary_text = self._format_digest_message(session_key, formatted_messages, summary)
         target_thread_id = await self._resolve_target_thread_id(user_id, session_key)
         if not target_thread_id:
