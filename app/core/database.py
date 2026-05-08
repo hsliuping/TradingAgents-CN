@@ -5,8 +5,8 @@
 
 import logging
 import asyncio
-from typing import Optional
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from typing import Callable, Optional
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection, AsyncIOMotorDatabase
 from pymongo import MongoClient
 from pymongo.database import Database
 from redis.asyncio import Redis, ConnectionPool
@@ -42,6 +42,11 @@ mongo_client: Optional[AsyncIOMotorClient] = None
 mongo_db: Optional[AsyncIOMotorDatabase] = None
 redis_client: Optional[Redis] = None
 redis_pool: Optional[ConnectionPool] = None
+_mongo_runtime_loop: Optional[asyncio.AbstractEventLoop] = None
+_redis_runtime_loop: Optional[asyncio.AbstractEventLoop] = None
+_mongo_db_proxy = None
+_mongo_client_proxy = None
+_redis_client_proxy = None
 
 # 同步 MongoDB 连接（用于非异步上下文）
 _sync_mongo_client: Optional[MongoClient] = None
@@ -56,6 +61,7 @@ class DatabaseManager:
         self.mongo_db: Optional[AsyncIOMotorDatabase] = None
         self.redis_client: Optional[Redis] = None
         self.redis_pool: Optional[ConnectionPool] = None
+        self.redis_url_in_use: Optional[str] = None
         self._mongo_healthy = False
         self._redis_healthy = False
 
@@ -117,6 +123,7 @@ class DatabaseManager:
 
             try:
                 self.redis_pool, self.redis_client = await _connect(settings.REDIS_URL)
+                self.redis_url_in_use = settings.REDIS_URL
             except Exception as e:
                 if not (settings.REDIS_PASSWORD and _should_retry_redis_without_password(e)):
                     raise
@@ -127,6 +134,7 @@ class DatabaseManager:
                 )
                 fallback_url = _build_redis_url_without_password()
                 self.redis_pool, self.redis_client = await _connect(fallback_url)
+                self.redis_url_in_use = fallback_url
 
             self._redis_healthy = True
 
@@ -223,20 +231,77 @@ class DatabaseManager:
 db_manager = DatabaseManager()
 
 
+class _LoopSafeMongoCollectionProxy:
+    """集合代理：即使对象被缓存，也总是转发到当前 loop 绑定的 collection。"""
+
+    def __init__(self, resolver: Callable[[], AsyncIOMotorCollection]):
+        self._resolver = resolver
+
+    def _target(self) -> AsyncIOMotorCollection:
+        return self._resolver()
+
+    def __getattr__(self, name: str):
+        return getattr(self._target(), name)
+
+
+class _LoopSafeMongoDatabaseProxy:
+    """数据库代理：避免调用方缓存旧 loop 绑定的 AsyncIOMotorDatabase。"""
+
+    def __init__(self, resolver: Optional[Callable[[], AsyncIOMotorDatabase]] = None):
+        self._resolver = resolver or _get_bound_mongo_db
+
+    def _target(self) -> AsyncIOMotorDatabase:
+        return self._resolver()
+
+    def __getitem__(self, name: str):
+        return _LoopSafeMongoCollectionProxy(lambda: _get_bound_mongo_db()[name])
+
+    def __getattr__(self, name: str):
+        target = getattr(self._target(), name)
+        if isinstance(target, AsyncIOMotorCollection):
+            return _LoopSafeMongoCollectionProxy(lambda: getattr(_get_bound_mongo_db(), name))
+        return target
+
+
+class _LoopSafeMongoClientProxy:
+    """客户端代理：避免缓存旧 loop 绑定的 AsyncIOMotorClient。"""
+
+    def _target(self) -> AsyncIOMotorClient:
+        return _get_bound_mongo_client()
+
+    def __getattr__(self, name: str):
+        return getattr(self._target(), name)
+
+    def __getitem__(self, name: str):
+        return _LoopSafeMongoDatabaseProxy(lambda name=name: _get_bound_mongo_client()[name])
+
+
+class _LoopSafeRedisClientProxy:
+    """Redis 代理：即使对象被缓存，也总是转发到当前 loop 绑定的 Redis 客户端。"""
+
+    def _target(self) -> Redis:
+        return _get_bound_redis_client()
+
+    def __getattr__(self, name: str):
+        return getattr(self._target(), name)
+
+
 async def init_database():
     """初始化数据库连接"""
-    global mongo_client, mongo_db, redis_client, redis_pool
+    global mongo_client, mongo_db, redis_client, redis_pool, _mongo_runtime_loop, _redis_runtime_loop
 
     try:
         # 初始化MongoDB
         await db_manager.init_mongodb()
         mongo_client = db_manager.mongo_client
         mongo_db = db_manager.mongo_db
+        _mongo_runtime_loop = asyncio.get_running_loop()
 
         # 初始化Redis
         await db_manager.init_redis()
         redis_client = db_manager.redis_client
         redis_pool = db_manager.redis_pool
+        _redis_runtime_loop = asyncio.get_running_loop()
 
         logger.info("🎉 所有数据库连接初始化完成")
 
@@ -413,7 +478,7 @@ async def create_database_indexes(db):
 
 async def close_database():
     """关闭数据库连接"""
-    global mongo_client, mongo_db, redis_client, redis_pool
+    global mongo_client, mongo_db, redis_client, redis_pool, _mongo_runtime_loop, _redis_runtime_loop
 
     await db_manager.close_connections()
 
@@ -422,20 +487,133 @@ async def close_database():
     mongo_db = None
     redis_client = None
     redis_pool = None
+    _mongo_runtime_loop = None
+    _redis_runtime_loop = None
+
+
+def _recreate_async_mongo_binding() -> None:
+    """按当前事件循环重建异步 MongoDB 绑定，避免跨 loop 复用旧 Motor 客户端。"""
+    global mongo_client, mongo_db, _mongo_runtime_loop
+
+    current_loop = asyncio.get_running_loop()
+
+    old_client = mongo_client
+    mongo_client = AsyncIOMotorClient(
+        settings.MONGO_URI,
+        maxPoolSize=settings.MONGO_MAX_CONNECTIONS,
+        minPoolSize=settings.MONGO_MIN_CONNECTIONS,
+        maxIdleTimeMS=30000,
+        serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,
+        connectTimeoutMS=settings.MONGO_CONNECT_TIMEOUT_MS,
+        socketTimeoutMS=settings.MONGO_SOCKET_TIMEOUT_MS,
+    )
+    mongo_db = mongo_client[settings.MONGO_DB]
+    _mongo_runtime_loop = current_loop
+    db_manager.mongo_client = mongo_client
+    db_manager.mongo_db = mongo_db
+
+    if old_client is not None and old_client is not mongo_client:
+        try:
+            old_client.close()
+        except Exception as exc:
+            logger.warning(f"⚠️ 关闭旧 MongoDB 客户端失败（忽略）: {exc}")
+
+
+def _recreate_async_redis_binding() -> None:
+    """按当前事件循环重建异步 Redis 绑定，避免跨 loop 复用旧客户端。"""
+    global redis_client, redis_pool, _redis_runtime_loop
+
+    current_loop = asyncio.get_running_loop()
+    redis_url = db_manager.redis_url_in_use or settings.REDIS_URL
+
+    redis_pool = ConnectionPool.from_url(
+        redis_url,
+        max_connections=settings.REDIS_MAX_CONNECTIONS,
+        retry_on_timeout=settings.REDIS_RETRY_ON_TIMEOUT,
+        decode_responses=True,
+        socket_connect_timeout=5,
+        socket_timeout=10,
+    )
+    redis_client = Redis(connection_pool=redis_pool)
+    _redis_runtime_loop = current_loop
+    db_manager.redis_pool = redis_pool
+    db_manager.redis_client = redis_client
+
+
+def _ensure_async_redis_binding() -> None:
+    """确保返回的异步 Redis 连接绑定到当前运行中的事件循环。"""
+    global _redis_runtime_loop
+
+    if redis_client is None or redis_pool is None:
+        raise RuntimeError("Redis客户端未初始化")
+
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    if _redis_runtime_loop is None:
+        _redis_runtime_loop = current_loop
+        return
+
+    if _redis_runtime_loop.is_closed() or _redis_runtime_loop is not current_loop:
+        logger.warning("⚠️ 检测到异步 Redis 客户端绑定的事件循环已变化，正在重建连接")
+        _recreate_async_redis_binding()
+
+
+def _ensure_async_mongo_binding() -> None:
+    """确保返回的异步 MongoDB 连接绑定到当前运行中的事件循环。"""
+    global _mongo_runtime_loop
+
+    if mongo_client is None or mongo_db is None:
+        raise RuntimeError("MongoDB客户端未初始化")
+
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    if _mongo_runtime_loop is None:
+        _mongo_runtime_loop = current_loop
+        return
+
+    if _mongo_runtime_loop.is_closed() or _mongo_runtime_loop is not current_loop:
+        logger.warning("⚠️ 检测到异步 MongoDB 客户端绑定的事件循环已变化，正在重建连接")
+        _recreate_async_mongo_binding()
+
+
+def _get_bound_mongo_client() -> AsyncIOMotorClient:
+    _ensure_async_mongo_binding()
+    assert mongo_client is not None
+    return mongo_client
+
+
+def _get_bound_mongo_db() -> AsyncIOMotorDatabase:
+    _ensure_async_mongo_binding()
+    assert mongo_db is not None
+    return mongo_db
+
+
+def _get_bound_redis_client() -> Redis:
+    _ensure_async_redis_binding()
+    assert redis_client is not None
+    return redis_client
 
 
 def get_mongo_client() -> AsyncIOMotorClient:
     """获取MongoDB客户端"""
-    if mongo_client is None:
-        raise RuntimeError("MongoDB客户端未初始化")
-    return mongo_client
+    global _mongo_client_proxy
+    if _mongo_client_proxy is None:
+        _mongo_client_proxy = _LoopSafeMongoClientProxy()
+    return _mongo_client_proxy
 
 
 def get_mongo_db() -> AsyncIOMotorDatabase:
     """获取MongoDB数据库实例"""
-    if mongo_db is None:
-        raise RuntimeError("MongoDB数据库未初始化")
-    return mongo_db
+    global _mongo_db_proxy
+    if _mongo_db_proxy is None:
+        _mongo_db_proxy = _LoopSafeMongoDatabaseProxy()
+    return _mongo_db_proxy
 
 
 def get_mongo_db_sync() -> Database:
@@ -464,9 +642,10 @@ def get_mongo_db_sync() -> Database:
 
 def get_redis_client() -> Redis:
     """获取Redis客户端（异步）"""
-    if redis_client is None:
-        raise RuntimeError("Redis客户端未初始化")
-    return redis_client
+    global _redis_client_proxy
+    if _redis_client_proxy is None:
+        _redis_client_proxy = _LoopSafeRedisClientProxy()
+    return _redis_client_proxy
 
 
 # 同步Redis客户端（用于同步上下文）

@@ -29,20 +29,27 @@
                 暂无历史会话
               </div>
               <div v-else class="history-list">
-                <button
+                <div
                   v-for="item in aiConversationList"
                   :key="item.conversation_id"
-                  type="button"
                   :class="['history-item', { active: item.conversation_id === aiCurrentConversationId }]"
                   @click="openAiConversation(item.conversation_id)"
+                  @keydown.enter="openAiConversation(item.conversation_id)"
+                  @keydown.space.prevent="openAiConversation(item.conversation_id)"
+                  role="button"
+                  tabindex="0"
                 >
-                  <div class="history-item-title">{{ item.title || '未命名筛选' }}</div>
-                  <div class="history-item-preview">{{ item.preview || '暂无摘要' }}</div>
-                  <div class="history-item-meta">
-                    <span>{{ formatAiConversationTime(item.updated_at) }}</span>
-                    <span>{{ item.message_count }} 条</span>
+                  <div class="history-item-header">
+                    <div class="history-item-title">{{ item.title || '未命名筛选' }}</div>
+                    <div class="history-item-actions" @click.stop>
+                      <el-tooltip content="删除会话" placement="top">
+                        <el-button type="danger" link size="small" @click.stop="handleDeleteAiConversation(item)">
+                          <el-icon><Delete /></el-icon>
+                        </el-button>
+                      </el-tooltip>
+                    </div>
                   </div>
-                </button>
+                </div>
               </div>
             </aside>
 
@@ -688,7 +695,7 @@
 import { ref, computed, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh, TrendCharts, Download, Star, Connection, Warning, User } from '@element-plus/icons-vue'
+import { Search, Refresh, TrendCharts, Download, Star, Connection, Warning, User, Delete } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import type { StockInfo } from '@/types/analysis'
 import { screeningApi, type FieldConfigResponse, type FieldInfo, type ScreeningConditionItem, type ScreeningConversationSummary, type ScreeningMessageItem, type ScreeningPreset, type ScreeningWsEnvelope, type ScreeningWsProgressData, type StockRecommendation } from '@/api/screening'
@@ -748,18 +755,6 @@ const getPhaseLabel = (phase?: AiDisplayMessage['phase']) => {
 const formatAiAmountYi = (value?: number | null) => {
   if (value == null || Number.isNaN(value)) return ''
   return `${(value / 100000000).toFixed(2)}亿`
-}
-
-const formatAiConversationTime = (value?: string) => {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
 }
 
 const createAiConversationId = () => `screening-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -862,6 +857,37 @@ const startNewAiConversation = () => {
   aiMessages.value = []
   aiInput.value = ''
   aiPendingAssistantIndex.value = null
+}
+
+const handleDeleteAiConversation = async (conversation: ScreeningConversationSummary) => {
+  const conversationId = conversation.conversation_id
+  if (!conversationId) return
+
+  const title = conversation.title || '未命名筛选'
+  const isCurrentConversation = conversationId === aiCurrentConversationId.value
+
+  try {
+    await ElMessageBox.confirm(`确定删除「${title}」吗？相关筛选对话会一起删除。`, '删除筛选会话', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+      confirmButtonClass: 'el-button--danger',
+    })
+
+    await screeningApi.clearIntelligentConversation(conversationId)
+
+    if (isCurrentConversation) {
+      aiCurrentConversationId.value = null
+      aiMessages.value = []
+      aiPendingAssistantIndex.value = null
+      aiLoading.value = false
+    }
+
+    await loadAiConversationList(isCurrentConversation ? null : aiCurrentConversationId.value)
+    ElMessage.success('筛选会话已删除')
+  } catch {
+    // 用户取消时忽略
+  }
 }
 
 const updatePendingAssistantMessage = (patch: Partial<AiDisplayMessage>) => {
@@ -2312,32 +2338,29 @@ onUnmounted(() => {
       }
     }
 
+    .history-item-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
     .history-item-title {
       font-size: 13px;
       font-weight: 600;
       color: var(--el-text-color-primary);
       line-height: 1.5;
-      margin-bottom: 6px;
-    }
-
-    .history-item-preview {
-      font-size: 12px;
-      color: var(--el-text-color-regular);
-      line-height: 1.6;
-      min-height: 38px;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
+      min-width: 0;
+      flex: 1;
       overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
-    .history-item-meta {
-      margin-top: 8px;
+    .history-item-actions {
       display: flex;
-      justify-content: space-between;
-      gap: 8px;
-      font-size: 11px;
-      color: var(--el-text-color-secondary);
+      align-items: center;
+      flex-shrink: 0;
     }
 
     .chat-body {

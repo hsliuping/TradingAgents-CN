@@ -54,7 +54,7 @@ RESULT_TOOL_ALLOWLIST = {
 
 # 选股场景独立预算，默认比全局助手更紧，避免长尾请求拖垮体验
 SCREENING_MAX_TOOL_ROUNDS = int(os.environ.get("SCREENING_MAX_TOOL_ROUNDS", "4"))
-SCREENING_RESULT_TIMEOUT_SECONDS = int(os.environ.get("SCREENING_RESULT_TIMEOUT_SECONDS", "75"))
+SCREENING_RESULT_TIMEOUT_SECONDS = int(os.environ.get("SCREENING_RESULT_TIMEOUT_SECONDS", "180"))
 
 
 class IntelligentScreeningService:

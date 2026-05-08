@@ -815,7 +815,8 @@ async def lifespan(app: FastAPI):
 
         if scheduler:
             try:
-                scheduler.shutdown(wait=False)
+                # 等待正在执行的任务收尾，避免 job 仍在访问 Motor 时数据库/事件循环已被关闭。
+                scheduler.shutdown(wait=True)
                 logger.info("🛑 Scheduler stopped")
             except Exception as e:
                 logger.warning(f"Scheduler shutdown error: {e}")

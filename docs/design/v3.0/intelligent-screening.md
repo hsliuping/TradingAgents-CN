@@ -95,7 +95,7 @@
 | 阶段控制 | 三阶段流程：`confirmation` → `planning` → `result` |
 | 进度推送 | 通过 `progress_callback` 将阶段、工具和 fallback 事件推送给前端 |
 | 工具收敛 | result 阶段只允许批量筛选和自选股相关工具 |
-| 超时预算 | result 阶段独立使用 `SCREENING_RESULT_TIMEOUT_SECONDS=75` 秒 |
+| 超时预算 | result 阶段独立使用 `SCREENING_RESULT_TIMEOUT_SECONDS=180` 秒 |
 | 结构化结果 | 保持 `stocks` 字段，但当前仍依赖回复中的 JSON 代码块提取 |
 | 用户上下文 | 调用 `set_current_user_id(user_id)`，使 assistant_ops 类工具在智能筛选中可用 |
 

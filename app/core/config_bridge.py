@@ -782,58 +782,57 @@ def _handle_sync_task_result(task):
         logger.error(traceback.format_exc())
 
 
+def _sync_pricing_config_from_db_sync():
+    """从数据库同步定价配置（同步版本，避免依赖当前事件循环状态）。"""
+    from app.core.database import get_mongo_db_sync
+
+    db = get_mongo_db_sync()
+
+    config = db['system_configs'].find_one(
+        {'is_active': True},
+        sort=[('version', -1)]
+    )
+
+    if not config:
+        logger.warning("⚠️  未找到激活的配置")
+        return
+
+    project_root = Path(__file__).parent.parent.parent
+    config_dir = project_root / "config"
+    config_dir.mkdir(exist_ok=True)
+
+    pricing_file = config_dir / "pricing.json"
+
+    pricing_configs = []
+    for llm_config in config.get('llm_configs', []):
+        if llm_config.get('enabled', False):
+            provider = llm_config.get('provider')
+
+            if hasattr(provider, 'value'):
+                provider = provider.value
+
+            pricing_configs.append({
+                "provider": provider,
+                "model_name": llm_config.get('model_name'),
+                "input_price_per_1k": llm_config.get('input_price_per_1k') or 0.0,
+                "output_price_per_1k": llm_config.get('output_price_per_1k') or 0.0,
+                "currency": llm_config.get('currency') or "CNY"
+            })
+
+    with open(pricing_file, 'w', encoding='utf-8') as f:
+        json.dump(pricing_configs, f, ensure_ascii=False, indent=2)
+
+    logger.info(f"✅ 同步定价配置到 {pricing_file}: {len(pricing_configs)} 个模型")
+
+
 async def _sync_pricing_config_from_db():
     """
     从数据库同步定价配置（异步版本）
     """
     try:
-        from app.core.database import get_mongo_db
-        from app.models.config import LLMConfig
+        import asyncio
 
-        db = get_mongo_db()
-
-        # 获取最新的激活配置
-        config = await db['system_configs'].find_one(
-            {'is_active': True},
-            sort=[('version', -1)]
-        )
-
-        if not config:
-            logger.warning("⚠️  未找到激活的配置")
-            return
-
-        # 获取项目根目录的 config 目录
-        project_root = Path(__file__).parent.parent.parent
-        config_dir = project_root / "config"
-        config_dir.mkdir(exist_ok=True)
-
-        pricing_file = config_dir / "pricing.json"
-
-        # 构建定价配置列表
-        pricing_configs = []
-        for llm_config in config.get('llm_configs', []):
-            if llm_config.get('enabled', False):
-                # 从数据库读取的是字典，直接使用字符串 provider
-                provider = llm_config.get('provider')
-
-                # 如果 provider 是枚举类型，转换为字符串
-                if hasattr(provider, 'value'):
-                    provider = provider.value
-
-                pricing_config = {
-                    "provider": provider,
-                    "model_name": llm_config.get('model_name'),
-                    "input_price_per_1k": llm_config.get('input_price_per_1k') or 0.0,
-                    "output_price_per_1k": llm_config.get('output_price_per_1k') or 0.0,
-                    "currency": llm_config.get('currency') or "CNY"
-                }
-                pricing_configs.append(pricing_config)
-
-        # 保存到文件
-        with open(pricing_file, 'w', encoding='utf-8') as f:
-            json.dump(pricing_configs, f, ensure_ascii=False, indent=2)
-
-        logger.info(f"✅ 同步定价配置到 {pricing_file}: {len(pricing_configs)} 个模型")
+        await asyncio.to_thread(_sync_pricing_config_from_db_sync)
 
     except Exception as e:
         logger.error(f"❌ 从数据库同步定价配置失败: {e}")
