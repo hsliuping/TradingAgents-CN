@@ -531,7 +531,6 @@ const sidebarLoading = ref(false)
 const summaryLoading = ref(false)
 const showThreadSidebar = ref(true)
 const showSummarySidebar = ref(true)
-const analysisMode = ref<'react'>('react')
 const loadingSeconds = ref(0)
 const streamingToolHint = ref('')
 let activeStreamController: AbortController | null = null
@@ -790,32 +789,6 @@ const scrollToBottom = () => {
   })
 }
 
-const ensureStreamingAssistantMessage = () => {
-  const lastMessage = messages.value[messages.value.length - 1]
-  if (lastMessage?.role === 'assistant') {
-    return messages.value.length - 1
-  }
-
-  loading.value = false
-  streaming.value = true
-  messages.value.push({ role: 'assistant', content: '', tools_used: [], step_results: [] })
-  return messages.value.length - 1
-}
-
-const upsertStepResult = (streamMsgIdx: number, stepResult: PlannedStepResult) => {
-  const current = messages.value[streamMsgIdx]
-  if (!current) return
-
-  const results = [...(current.step_results || [])]
-  const index = results.findIndex(item => item.step_id === stepResult.step_id)
-  if (index >= 0) {
-    results[index] = stepResult
-  } else {
-    results.push(stepResult)
-  }
-  current.step_results = results.sort((left, right) => left.step_id - right.step_id)
-}
-
 const formatTime = (value?: string) => {
   if (!value) return '刚刚'
   const date = new Date(value)
@@ -1058,124 +1031,6 @@ const handleClear = async () => {
     await loadThreads(selectedThreadId.value)
     ElMessage.success('已清空当前主题')
   }).catch(() => {})
-}
-
-const handleSendPlanned = (text: string) => {
-  let streamMsgIdx = -1
-  let firstEventReceived = false
-
-  activeStreamController = assistantApi.plannedAnalysisStream(
-    text,
-    selectedThreadId.value,
-    selectedAssistantModel.value?.model_name,
-    selectedAssistantModel.value?.config_id,
-    {
-      onToken(content: string) {
-        if (!firstEventReceived) {
-          firstEventReceived = true
-          streamMsgIdx = ensureStreamingAssistantMessage()
-        }
-        if (streamMsgIdx < 0) {
-          streamMsgIdx = ensureStreamingAssistantMessage()
-        }
-        messages.value[streamMsgIdx].content += content
-        scrollToBottom()
-      },
-      onToolEvent(event: Record<string, any>) {
-        if (!firstEventReceived) {
-          firstEventReceived = true
-          streamMsgIdx = ensureStreamingAssistantMessage()
-        }
-        if (streamMsgIdx < 0) {
-          streamMsgIdx = ensureStreamingAssistantMessage()
-        }
-
-        const current = messages.value[streamMsgIdx]
-        const eventName = event.event || ''
-        if (eventName === 'plan_started') {
-          streamingToolHint.value = event.message || '正在规划分析步骤'
-        } else if (eventName === 'plan_ready') {
-          current.plan = event.plan
-          current.source = event.source
-          streamingToolHint.value = event.plan?.steps?.length
-            ? `已生成 ${event.plan.steps.length} 个分析步骤`
-            : '分析计划已生成'
-        } else if (eventName === 'step_started') {
-          streamingToolHint.value = `正在执行步骤 ${event.step_id}: ${event.intent || event.tool}`
-        } else if (eventName === 'step_completed') {
-          if (event.step_result) {
-            upsertStepResult(streamMsgIdx, event.step_result as PlannedStepResult)
-            streamingToolHint.value = event.step_result.success
-              ? `步骤 ${event.step_result.step_id} 已完成`
-              : `步骤 ${event.step_result.step_id} 执行失败`
-          }
-        } else if (eventName === 'synthesis_started') {
-          streamingToolHint.value = event.message || '正在汇总结论并生成报告'
-        } else if (eventName === 'supplement_started') {
-          streamingToolHint.value = event.message || '正在补充缺失数据'
-        } else if (eventName === 'mode_switch') {
-          current.source = event.source
-          streamingToolHint.value = event.message || '已切换分析模式'
-        }
-        scrollToBottom()
-      },
-      onDone(data) {
-        if ((data as any).error) {
-          loading.value = false
-          streaming.value = false
-          streamingToolHint.value = ''
-          activeStreamController = null
-          stopLoadingIndicator()
-          return
-        }
-
-        if (streamMsgIdx < 0) {
-          streamMsgIdx = ensureStreamingAssistantMessage()
-        }
-
-        if (data.conversation_id) selectedThreadId.value = data.conversation_id
-        messages.value[streamMsgIdx].tools_used = data.tools_used?.length ? data.tools_used : undefined
-        messages.value[streamMsgIdx].source = data.source
-        messages.value[streamMsgIdx].supplemented = data.supplemented
-        messages.value[streamMsgIdx].plan = data.plan
-        messages.value[streamMsgIdx].step_results = data.step_results
-        if (!messages.value[streamMsgIdx].content && data.reply) {
-          messages.value[streamMsgIdx].content = data.reply
-        }
-
-        loading.value = false
-        streaming.value = false
-        streamingToolHint.value = ''
-        activeStreamController = null
-        stopLoadingIndicator()
-        loadThreads(selectedThreadId.value)
-        scrollToBottom()
-      },
-      onError(msg: string) {
-        if (!firstEventReceived) {
-          messages.value.push({
-            role: 'assistant',
-            content: `抱歉，处理您的请求时出错：${msg}`,
-            tools_used: [],
-          })
-        } else if (streamMsgIdx >= 0) {
-          const existing = messages.value[streamMsgIdx].content.trim()
-          if (!existing) {
-            messages.value[streamMsgIdx].content = `抱歉，处理您的请求时出错：${msg}`
-          } else {
-            messages.value[streamMsgIdx].content += `\n\n---\n⚠️ 响应中断：${msg}`
-          }
-        }
-        ElMessage.error(msg)
-        loading.value = false
-        streaming.value = false
-        streamingToolHint.value = ''
-        activeStreamController = null
-        stopLoadingIndicator()
-        scrollToBottom()
-      },
-    },
-  )
 }
 
 const handleSendStream = (text: string) => {

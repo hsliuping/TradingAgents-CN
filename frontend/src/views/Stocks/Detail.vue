@@ -557,55 +557,57 @@ const kOption = ref<EChartsOption>({
   xAxis: {
     type: 'category',
     data: [],
-    // 同步状态
-    const syncStatus = ref<any>(null)
-    const availableSyncSources = reactive<Record<ManualSyncDataSource, boolean>>({
-      tushare: true,
-      akshare: true
-    })
-
-    // 数据同步对话框
-    const syncDialogVisible = ref(false)
-    const syncLoading = ref(false)
+    boundaryGap: true,
+    axisLine: { onZero: false }
+  },
+  yAxis: {
+    scale: true,
+    type: 'value'
+  },
+  dataZoom: [
+    { type: 'inside', start: 70, end: 100 },
     { start: 70, end: 100 }
   ],
   series: [
     {
       type: 'candlestick',
-    watch(isEtf, (value) => {
-      if (value) {
-        syncForm.syncTypes = syncForm.syncTypes.filter(type => type !== 'financial')
-      }
-    }, { immediate: true })
-
-    // 清除缓存
-    const clearCacheLoading = ref(false)
-
-    // 显示同步对话框
-    function showSyncDialog() {
-      syncDialogVisible.value = true
-    }
-
-    async function loadPreferredSyncDataSource() {
-      try {
-        const sourceState = await loadManualSyncSourceState()
-        availableSyncSources.tushare = sourceState.availableSources.tushare
-        availableSyncSources.akshare = sourceState.availableSources.akshare
-
-        if (sourceState.preferredSource) {
-          syncForm.dataSource = sourceState.preferredSource
-          return
-        }
-
-        if (availableSyncSources.akshare) {
-          syncForm.dataSource = 'akshare'
-        } else if (availableSyncSources.tushare) {
-          syncForm.dataSource = 'tushare'
-        }
-      } catch (error) {
-        console.warn('加载同步数据源优先级失败，保留当前默认值', error)
+      name: 'K线',
+      data: [],
+      itemStyle: {
+        color: '#ef4444',
+        color0: '#16a34a',
+        borderColor: '#ef4444',
+        borderColor0: '#16a34a'
       }
     }
+  ]
+})
+
+const lastKTime = ref<string | null>(null)
+const lastKClose = ref<number | null>(null)
+
+// 报价（初始化）
+const quote = reactive({
+  price: NaN,
+  changePercent: NaN,
+  open: NaN,
+  high: NaN,
+  low: NaN,
+  prevClose: NaN,
+  volume: NaN,
+  amount: NaN,
+  turnover: NaN,
+  amplitude: NaN,
+  tradeDate: null as string | null,
+  turnoverDate: null as string | null,
+  amplitudeDate: null as string | null,
+  updatedAt: null as string | null
+})
+
+const lastRefreshAt = ref<Date | null>(null)
+const refreshText = computed(() => lastRefreshAt.value ? `已刷新 ${lastRefreshAt.value.toLocaleTimeString()}` : '未刷新')
+const changeClass = computed(() => quote.changePercent > 0 ? 'up' : quote.changePercent < 0 ? 'down' : '')
+
 // 🔥 日期判断和格式化函数
 function isToday(dateStr: string | null): boolean {
   if (!dateStr) return false
