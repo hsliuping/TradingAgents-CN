@@ -471,7 +471,7 @@ class PlannedAnalysisService:
             yield _sse(
                 "plan_ready",
                 {
-                    "plan": plan.dict(),
+                    "plan": plan.model_dump(),
                     "source": plan.source.value,
                 },
             )
@@ -494,7 +494,7 @@ class PlannedAnalysisService:
                 step_queue.put_nowait(
                     {
                         "event": "step_completed",
-                        "step_result": sr.dict(),
+                        "step_result": sr.model_dump(),
                     }
                 )
 
@@ -535,7 +535,7 @@ class PlannedAnalysisService:
                 if supplement_result:
                     for sr in supplement_result:
                         collected_step_results.append(sr)
-                        yield _sse("step_completed", {"step_result": sr.dict()})
+                        yield _sse("step_completed", {"step_result": sr.model_dump()})
 
                     yield _sse("synthesis_started", {"message": "补充完成，正在重新整理答案"})
                     reply_parts = []
@@ -550,8 +550,8 @@ class PlannedAnalysisService:
                 {
                     "reply": reply,
                     "tools_used": list(set(tools_used)),
-                    "step_results": [sr.dict() for sr in collected_step_results],
-                    "plan": plan.dict() if plan else None,
+                    "step_results": [sr.model_dump() for sr in collected_step_results],
+                    "plan": plan.model_dump() if plan else None,
                     "source": plan.source.value if plan else PlanSource.LLM_PLAN.value,
                     "supplemented": supplemented,
                 },

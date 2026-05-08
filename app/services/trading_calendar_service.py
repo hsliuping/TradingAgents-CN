@@ -18,6 +18,7 @@ TTL: 25 小时（每天系统启动时刷新，不会无限期存在）
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, date, timedelta
@@ -47,6 +48,20 @@ class TradingCalendarService:
         if len(raw) == 8 and "-" not in raw:
             return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
         return raw
+
+    @staticmethod
+    def _is_loop_mismatch_error(error: Exception) -> bool:
+        error_text = str(error).lower()
+        return "attached to a different loop" in error_text or "different loop" in error_text
+
+    @staticmethod
+    def _build_cache_payload(last_trade_date: str, is_today: bool, source: str) -> dict:
+        return {
+            "last_trade_date": last_trade_date,
+            "is_today_trade_day": is_today,
+            "fetched_at": TradingCalendarService._today_str(),
+            "source": source,
+        }
 
     # ------------------------------------------------------------------ #
     # 从外部 API 获取最后交易日                                            #
@@ -146,22 +161,47 @@ class TradingCalendarService:
             if raw:
                 return json.loads(raw)
         except Exception as e:
+            if self._is_loop_mismatch_error(e):
+                logger.debug("[TradingCalendar] 异步 Redis 客户端跨事件循环，回退到同步 Redis 读取")
+                return await asyncio.to_thread(self._read_cache_sync)
             logger.debug(f"[TradingCalendar] 读取 Redis 缓存失败: {e}")
         return None
 
+    @staticmethod
+    def _read_cache_sync() -> Optional[dict]:
+        try:
+            from app.core.database import get_redis_sync_client
+
+            redis_sync = get_redis_sync_client()
+            raw = redis_sync.get(REDIS_KEY)
+            if raw:
+                return json.loads(raw)
+        except Exception as e:
+            logger.debug(f"[TradingCalendar] 同步 Redis 读取缓存失败: {e}")
+        return None
+
     async def _write_cache(self, last_trade_date: str, is_today: bool, source: str):
+        payload = self._build_cache_payload(last_trade_date, is_today, source)
         try:
             r = await self._redis()
-            payload = {
-                "last_trade_date": last_trade_date,
-                "is_today_trade_day": is_today,
-                "fetched_at": self._today_str(),
-                "source": source,
-            }
             await r.setex(REDIS_KEY, CACHE_TTL_SECONDS, json.dumps(payload, ensure_ascii=False))
             logger.info(f"✅ [TradingCalendar] 已缓存到 Redis: {payload}")
         except Exception as e:
+            if self._is_loop_mismatch_error(e):
+                try:
+                    await asyncio.to_thread(self._write_cache_sync, payload)
+                    logger.info(f"✅ [TradingCalendar] 已通过同步 Redis 回退缓存: {payload}")
+                    return
+                except Exception as sync_error:
+                    logger.warning(f"⚠️ [TradingCalendar] 同步 Redis 回退写入失败: {sync_error}")
             logger.warning(f"⚠️ [TradingCalendar] 写入 Redis 缓存失败: {e}")
+
+    @staticmethod
+    def _write_cache_sync(payload: dict) -> None:
+        from app.core.database import get_redis_sync_client
+
+        redis_sync = get_redis_sync_client()
+        redis_sync.setex(REDIS_KEY, CACHE_TTL_SECONDS, json.dumps(payload, ensure_ascii=False))
 
     # ------------------------------------------------------------------ #
     # 公开接口                                                            #

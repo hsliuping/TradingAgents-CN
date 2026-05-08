@@ -27,17 +27,10 @@
           <el-icon><Plus /></el-icon>
           新主题
         </el-button>
-        <el-radio-group v-model="analysisMode" size="small">
-          <el-radio-button value="react">
-            <el-icon style="vertical-align: -2px;"><ChatDotRound /></el-icon> 快速对话
-          </el-radio-button>
-          <el-radio-button value="planned">
-            <el-icon style="vertical-align: -2px;"><DataAnalysis /></el-icon> 深度分析
-          </el-radio-button>
-        </el-radio-group>
-        <el-tooltip :content="analysisMode === 'react' ? 'ReAct 模式：助手逐步调用工具回答问题' : '规划分析：先制定计划，并行执行多步骤，生成综合报告'" placement="bottom">
-          <el-icon class="mode-help"><QuestionFilled /></el-icon>
-        </el-tooltip>
+        <el-tag size="small" type="success" effect="plain">
+          <el-icon style="vertical-align: -2px;"><ChatDotRound /></el-icon>
+          当前仅开放快速对话
+        </el-tag>
       </div>
     </div>
 
@@ -314,7 +307,7 @@
             <ul v-if="currentSummary?.next_actions?.length" class="summary-list">
               <li v-for="item in currentSummary.next_actions" :key="item">{{ item }}</li>
             </ul>
-            <div v-else class="summary-empty">继续追问或触发深度分析来推进主题。</div>
+            <div v-else class="summary-empty">继续追问来推进主题。</div>
           </div>
         </div>
       </aside>
@@ -332,8 +325,8 @@
             <div class="assistant-llm-title">助手模型</div>
             <div class="assistant-llm-subtitle">智能助手优先使用系统“深度推理模型”，以获得更强的推理与工具调用能力</div>
           </div>
-          <el-tag size="small" :type="analysisMode === 'react' ? 'success' : 'warning'" effect="plain">
-            当前模式：{{ analysisMode === 'react' ? '快速对话 → 推理模型' : '深度分析 → 推理模型' }}
+          <el-tag size="small" type="success" effect="plain">
+            当前模式：快速对话 → 推理模型
           </el-tag>
           <el-tooltip :content="memoryStatusTip" placement="bottom">
             <el-tag
@@ -487,7 +480,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { ChatDotRound, DataAnalysis, Delete, Document, Expand, Fold, FolderOpened, Plus, QuestionFilled, Setting, User } from '@element-plus/icons-vue'
+import { ChatDotRound, Delete, Document, Expand, Fold, FolderOpened, Plus, Setting, User } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
@@ -538,7 +531,7 @@ const sidebarLoading = ref(false)
 const summaryLoading = ref(false)
 const showThreadSidebar = ref(true)
 const showSummarySidebar = ref(true)
-const analysisMode = ref<'react' | 'planned'>('react')
+const analysisMode = ref<'react'>('react')
 const loadingSeconds = ref(0)
 const streamingToolHint = ref('')
 let activeStreamController: AbortController | null = null
@@ -712,11 +705,6 @@ const currentThreadPath = computed(() => buildThreadPath(selectedThreadId.value)
 
 const loadingHint = computed(() => {
   if (streamingToolHint.value) return streamingToolHint.value
-  if (analysisMode.value === 'planned') {
-    if (loadingSeconds.value < 4) return '正在规划分析步骤'
-    if (loadingSeconds.value < 10) return '正在并行执行多智能体分析'
-    return '正在汇总结论并生成报告'
-  }
   if (loadingSeconds.value < 4) return '正在理解问题并匹配工具'
   if (loadingSeconds.value < 10) return '正在调用数据与分析工具'
   return '正在整理答案'
@@ -1283,11 +1271,7 @@ const handleSend = async () => {
   startLoadingIndicator()
   scrollToBottom()
 
-  if (analysisMode.value === 'planned') {
-    handleSendPlanned(text)
-  } else {
-    handleSendStream(text)
-  }
+  handleSendStream(text)
 }
 
 // ---- mem0 记忆状态 ----
