@@ -12,6 +12,7 @@ from pymongo.database import Database
 from redis.asyncio import Redis, ConnectionPool
 from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure
 from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import AuthenticationError as RedisAuthenticationError
 from .config import settings
 
 # 同步Redis客户端类型（延迟导入避免循环依赖）
@@ -21,6 +22,20 @@ except ImportError:
     redis_sync = None
 
 logger = logging.getLogger(__name__)
+
+
+def _should_retry_redis_without_password(error: Exception) -> bool:
+    """判断是否应在本地无密码 Redis 场景下回退重试。"""
+    if not isinstance(error, RedisAuthenticationError):
+        return False
+
+    error_text = str(error).lower()
+    return "without any password configured" in error_text
+
+
+def _build_redis_url_without_password() -> str:
+    """构建不带密码的 Redis URL，用于本地无密码实例回退。"""
+    return f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB}"
 
 # 全局连接实例
 mongo_client: Optional[AsyncIOMotorClient] = None
@@ -82,21 +97,37 @@ class DatabaseManager:
         try:
             logger.info("🔄 正在初始化Redis连接...")
 
-            # 创建Redis连接池
-            self.redis_pool = ConnectionPool.from_url(
-                settings.REDIS_URL,
-                max_connections=settings.REDIS_MAX_CONNECTIONS,
-                retry_on_timeout=settings.REDIS_RETRY_ON_TIMEOUT,
-                decode_responses=True,
-                socket_connect_timeout=5,  # 5秒连接超时
-                socket_timeout=10,  # 10秒套接字超时
-            )
+            async def _connect(redis_url: str) -> tuple[ConnectionPool, Redis]:
+                pool = ConnectionPool.from_url(
+                    redis_url,
+                    max_connections=settings.REDIS_MAX_CONNECTIONS,
+                    retry_on_timeout=settings.REDIS_RETRY_ON_TIMEOUT,
+                    decode_responses=True,
+                    socket_connect_timeout=5,  # 5秒连接超时
+                    socket_timeout=10,  # 10秒套接字超时
+                )
+                client = Redis(connection_pool=pool)
+                try:
+                    await client.ping()
+                    return pool, client
+                except Exception:
+                    await client.close()
+                    await pool.disconnect()
+                    raise
 
-            # 创建Redis客户端
-            self.redis_client = Redis(connection_pool=self.redis_pool)
+            try:
+                self.redis_pool, self.redis_client = await _connect(settings.REDIS_URL)
+            except Exception as e:
+                if not (settings.REDIS_PASSWORD and _should_retry_redis_without_password(e)):
+                    raise
 
-            # 测试连接
-            await self.redis_client.ping()
+                logger.warning(
+                    "⚠️ 当前 Redis 实例未配置密码，但环境变量提供了 REDIS_PASSWORD；"
+                    "将自动回退为无密码连接。"
+                )
+                fallback_url = _build_redis_url_without_password()
+                self.redis_pool, self.redis_client = await _connect(fallback_url)
+
             self._redis_healthy = True
 
             logger.info("✅ Redis连接成功建立")
@@ -469,8 +500,27 @@ def get_redis_sync_client() -> redis_sync.Redis:
             _redis_sync_client.ping()
             logger.debug("✅ 同步Redis客户端连接成功（使用系统配置）")
         except Exception as e:
-            logger.warning(f"⚠️ 同步Redis客户端初始化失败: {e}", exc_info=True)
-            raise RuntimeError(f"同步Redis客户端初始化失败: {e}")
+            if settings.REDIS_PASSWORD and _should_retry_redis_without_password(e):
+                try:
+                    fallback_url = _build_redis_url_without_password()
+                    logger.warning(
+                        "⚠️ 同步 Redis 客户端检测到本地实例未配置密码，"
+                        "将自动回退为无密码连接。"
+                    )
+                    _redis_sync_client = redis_sync.from_url(
+                        fallback_url,
+                        decode_responses=True,
+                        socket_connect_timeout=5,
+                        socket_timeout=10
+                    )
+                    _redis_sync_client.ping()
+                    logger.debug("✅ 同步Redis客户端连接成功（无密码回退）")
+                except Exception as fallback_error:
+                    logger.warning(f"⚠️ 同步Redis客户端初始化失败: {fallback_error}", exc_info=True)
+                    raise RuntimeError(f"同步Redis客户端初始化失败: {fallback_error}")
+            else:
+                logger.warning(f"⚠️ 同步Redis客户端初始化失败: {e}", exc_info=True)
+                raise RuntimeError(f"同步Redis客户端初始化失败: {e}")
     
     return _redis_sync_client
 

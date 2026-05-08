@@ -10,6 +10,12 @@ import os
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
+
+def _should_retry_redis_without_password(error: Exception) -> bool:
+    """判断是否应在本地无密码 Redis 场景下回退重试。"""
+    error_text = str(error).lower()
+    return "without any password configured" in error_text
+
 class DatabaseManager:
     """智能数据库管理器"""
 
@@ -131,23 +137,30 @@ class DatabaseManager:
         try:
             import redis
 
-            # 构建连接参数
-            connect_kwargs = {
-                "host": self.redis_config["host"],
-                "port": self.redis_config["port"],
-                "db": self.redis_config["db"],
-                "socket_timeout": self.redis_config["timeout"],
-                "socket_connect_timeout": self.redis_config["timeout"]
-            }
+            def _build_connect_kwargs(use_password: bool = True) -> Dict[str, Any]:
+                connect_kwargs = {
+                    "host": self.redis_config["host"],
+                    "port": self.redis_config["port"],
+                    "db": self.redis_config["db"],
+                    "socket_timeout": self.redis_config["timeout"],
+                    "socket_connect_timeout": self.redis_config["timeout"]
+                }
+                if use_password and self.redis_config["password"]:
+                    connect_kwargs["password"] = self.redis_config["password"]
+                return connect_kwargs
 
-            # 如果有密码，添加密码
-            if self.redis_config["password"]:
-                connect_kwargs["password"] = self.redis_config["password"]
-
-            client = redis.Redis(**connect_kwargs)
-
-            # 测试连接
-            client.ping()
+            try:
+                client = redis.Redis(**_build_connect_kwargs(use_password=True))
+                client.ping()
+            except Exception as e:
+                if not (self.redis_config["password"] and _should_retry_redis_without_password(e)):
+                    raise
+                self.logger.warning(
+                    "检测到当前 Redis 实例未配置密码，但环境变量提供了 REDIS_PASSWORD；"
+                    "将自动回退为无密码连接。"
+                )
+                client = redis.Redis(**_build_connect_kwargs(use_password=False))
+                client.ping()
 
             return True, "Redis连接成功"
 
@@ -228,19 +241,29 @@ class DatabaseManager:
             try:
                 import redis
 
-                # 构建连接参数
-                connect_kwargs = {
-                    "host": self.redis_config["host"],
-                    "port": self.redis_config["port"],
-                    "db": self.redis_config["db"],
-                    "socket_timeout": self.redis_config["timeout"]
-                }
+                def _build_connect_kwargs(use_password: bool = True) -> Dict[str, Any]:
+                    connect_kwargs = {
+                        "host": self.redis_config["host"],
+                        "port": self.redis_config["port"],
+                        "db": self.redis_config["db"],
+                        "socket_timeout": self.redis_config["timeout"]
+                    }
+                    if use_password and self.redis_config["password"]:
+                        connect_kwargs["password"] = self.redis_config["password"]
+                    return connect_kwargs
 
-                # 如果有密码，添加密码
-                if self.redis_config["password"]:
-                    connect_kwargs["password"] = self.redis_config["password"]
+                try:
+                    self.redis_client = redis.Redis(**_build_connect_kwargs(use_password=True))
+                    self.redis_client.ping()
+                except Exception as e:
+                    if not (self.redis_config["password"] and _should_retry_redis_without_password(e)):
+                        raise
+                    self.logger.warning(
+                        "Redis客户端检测到本地实例未配置密码，将自动回退为无密码连接。"
+                    )
+                    self.redis_client = redis.Redis(**_build_connect_kwargs(use_password=False))
+                    self.redis_client.ping()
 
-                self.redis_client = redis.Redis(**connect_kwargs)
                 self.logger.info("Redis客户端初始化成功")
             except Exception as e:
                 self.logger.error(f"Redis客户端初始化失败: {e}")

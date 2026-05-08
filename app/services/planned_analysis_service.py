@@ -827,16 +827,22 @@ async def stream_planned_analysis_with_assistant(
     user_id: str,
     conversation_id: Optional[str] = None,
     model: Optional[str] = None,
+    model_config_id: Optional[str] = None,
     quick_model: Optional[str] = None,
+    quick_model_config_id: Optional[str] = None,
     deep_model: Optional[str] = None,
+    deep_model_config_id: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """对外提供带持久化的规划分析流式接口。"""
     service = PlannedAnalysisService(
         db,
         preferred_models=_build_assistant_model_preferences(
             model=model,
+            model_config_id=model_config_id,
             quick_model=quick_model,
+            quick_model_config_id=quick_model_config_id,
             deep_model=deep_model,
+            deep_model_config_id=deep_model_config_id,
         ),
     )
 
