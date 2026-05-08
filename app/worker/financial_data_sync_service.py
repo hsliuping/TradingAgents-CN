@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 
-from app.core.database import get_mongo_db
+from app.core.database import create_isolated_async_mongo_binding, get_mongo_db
 from app.services.financial_data_service import get_financial_data_service
 from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
 from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
@@ -268,15 +268,10 @@ class FinancialDataSyncService:
         stats.start_time = datetime.now(timezone.utc)
         
         # 🔥 在线程池的线程中创建新的服务实例（避免事件循环冲突）
-        # 使用当前线程的事件循环创建新的异步数据库连接
+        # 使用当前线程的事件循环创建独立的异步数据库连接
         from app.services.financial_data_service import FinancialDataService
-        from motor.motor_asyncio import AsyncIOMotorClient
-        from app.core.config import settings
-        
-        # 在当前线程的事件循环中创建新的异步 MongoDB 客户端
-        # 这样数据库连接就绑定到当前线程的事件循环，而不是主事件循环
-        mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
-        mongo_db = mongo_client[settings.MONGODB_DATABASE]
+
+        mongo_client, mongo_db = create_isolated_async_mongo_binding()
         
         # 创建新的服务实例，使用当前线程事件循环的数据库连接
         financial_service = FinancialDataService()
@@ -299,179 +294,185 @@ class FinancialDataSyncService:
         
         # 串行处理每个股票
         processed_count = start_index  # 🔥 从恢复位置开始计数
-        for i, symbol in enumerate(symbols):
-            # 🔥 检查任务是否应该停止（通过查询数据库）
-            try:
-                # 🔥 检查任务是否被取消（在每次循环开始时检查）
-                should_stop = await self._should_stop_sync(job_id)
-                if should_stop:
-                    logger.warning(f"🛑 [{data_source}] 检测到取消请求，任务已取消，停止同步 (job_id={job_id})")
-                    # 更新进度为当前进度
+        try:
+            for i, symbol in enumerate(symbols):
+                # 🔥 检查任务是否应该停止（通过查询数据库）
+                try:
+                    # 🔥 检查任务是否被取消（在每次循环开始时检查）
+                    should_stop = await self._should_stop_sync(job_id)
+                    if should_stop:
+                        logger.warning(f"🛑 [{data_source}] 检测到取消请求，任务已取消，停止同步 (job_id={job_id})")
+                        # 更新进度为当前进度
+                        try:
+                            from app.services.scheduler_service import update_job_progress, TaskCancelledException
+                            # 🔥 计算进度时需要考虑已处理的股票数（恢复执行时）
+                            total_items = stats.total_symbols  # 使用总股票数（包括已处理的）
+                            progress_int = int((processed_count / total_items) * 100) if total_items > 0 else 0
+                            progress_int = min(progress_int, 100)
+                            await update_job_progress(
+                                job_id=job_id,
+                                progress=progress_int,
+                                current_item=f"[{data_source}] {symbol}",
+                                total_items=total_items,
+                                processed_items=processed_count,
+                                message=f"[{data_source}] 任务已被用户取消"
+                            )
+                        except TaskCancelledException:
+                            # 如果update_job_progress也检测到取消，直接退出
+                            logger.warning(f"🛑 [{data_source}] update_job_progress也检测到取消请求，立即停止")
+                            break
+                        except Exception as e:
+                            logger.warning(f"⚠️ 更新进度失败: {e}")
+                        break
+
+                    # 🔥 速率限制：在调用API之前等待（等待期间也检查取消）
+                    if delay_between_calls > 0:
+                        # 分段等待，每0.5秒检查一次取消状态
+                        wait_time = 0
+                        check_interval = 0.5
+                        while wait_time < delay_between_calls:
+                            await asyncio.sleep(min(check_interval, delay_between_calls - wait_time))
+                            wait_time += check_interval
+                            # 检查取消状态
+                            should_stop = await self._should_stop_sync(job_id)
+                            if should_stop:
+                                logger.warning(f"🛑 [{data_source}] 在等待期间检测到取消请求，停止同步 (job_id={job_id})")
+                                # 更新进度并退出循环
+                                try:
+                                    from app.services.scheduler_service import update_job_progress
+                                    # 🔥 计算进度时需要考虑已处理的股票数（恢复执行时）
+                                    total_items = stats.total_symbols  # 使用总股票数（包括已处理的）
+                                    progress_int = int((processed_count / total_items) * 100) if total_items > 0 else 0
+                                    progress_int = min(progress_int, 100)
+                                    await update_job_progress(
+                                        job_id=job_id,
+                                        progress=progress_int,
+                                        current_item=f"[{data_source}] {symbol}",
+                                        total_items=total_items,
+                                        processed_items=processed_count,
+                                        message=f"[{data_source}] 任务已被用户取消"
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"⚠️ 更新进度失败: {e}")
+                                break
+
+                    # 🔥 在同步股票数据之前，再次检查取消标记（防止在同步过程中收到取消请求）
+                    should_stop = await self._should_stop_sync(job_id)
+                    if should_stop:
+                        logger.warning(f"🛑 [{data_source}] 在同步前检测到取消请求，停止同步 (job_id={job_id})")
+                        break
+
+                    # 同步单只股票的财务数据
+                    success = await self._sync_symbol_financial_data_async(
+                        symbol=symbol,
+                        data_source=data_source,
+                        provider=provider,
+                        report_types=report_types,
+                        financial_service=financial_service
+                    )
+
+                    if success:
+                        stats.success_count += 1
+                    else:
+                        stats.skipped_count += 1
+
+                    processed_count += 1
+
+                    # 🔥 在同步完成后，再次检查取消标记
+                    should_stop = await self._should_stop_sync(job_id)
+                    if should_stop:
+                        logger.warning(f"🛑 [{data_source}] 在同步后检测到取消请求，停止同步 (job_id={job_id})")
+                        break
+
+                    # 🔥 每处理1个股票或完成时更新一次进度（更频繁的更新）
+                    # 计算进度百分比：确保即使进度很小也能正确显示（至少显示1%）
+                    # 🔥 计算进度时需要考虑已处理的股票数（恢复执行时）
+                    total_items = stats.total_symbols  # 使用总股票数（包括已处理的）
+                    if total_items > 0:
+                        progress_float = (processed_count / total_items) * 100
+                        # 🔥 如果进度大于0但小于1%，至少显示1%，避免显示0%
+                        if progress_float > 0 and progress_float < 1:
+                            progress_int = 1
+                        else:
+                            progress_int = int(round(progress_float))
+                        # 确保不超过100%
+                        progress_int = min(progress_int, 100)
+                    else:
+                        progress_int = 0
+
+                    # update_job_progress 是独立的异步函数
                     try:
                         from app.services.scheduler_service import update_job_progress, TaskCancelledException
-                        # 🔥 计算进度时需要考虑已处理的股票数（恢复执行时）
-                        total_items = stats.total_symbols  # 使用总股票数（包括已处理的）
-                        progress_int = int((processed_count / total_items) * 100) if total_items > 0 else 0
-                        progress_int = min(progress_int, 100)
+                        # 🔥 记录进度更新调用（用于调试）
+                        logger.debug(f"📊 [{data_source}] 准备更新进度: job_id={job_id}, progress={progress_int}%, "
+                                   f"processed={processed_count}/{total_items}, current_item={symbol}")
+
                         await update_job_progress(
                             job_id=job_id,
-                            progress=progress_int,
-                            current_item=f"[{data_source}] {symbol}",
-                            total_items=total_items,
+                            progress=progress_int,  # 使用整数百分比
+                            current_item=f"[{data_source}] {symbol}",  # 🔥 在current_item中标注数据源
+                            total_items=total_items,  # 🔥 使用总股票数（包括已处理的）
                             processed_items=processed_count,
-                            message=f"[{data_source}] 任务已被用户取消"
+                            message=f"[{data_source}] 正在同步: {symbol} ({processed_count}/{total_items})"  # 🔥 在消息中标注数据源和总股票数
                         )
-                    except TaskCancelledException:
-                        # 如果update_job_progress也检测到取消，直接退出
-                        logger.warning(f"🛑 [{data_source}] update_job_progress也检测到取消请求，立即停止")
+
+                        # 🔥 每10个股票记录一次详细日志，避免日志过多
+                        if processed_count % 10 == 0 or (i + 1) == len(symbols):
+                            logger.info(f"📊 [{data_source}] 进度更新成功: {processed_count}/{total_items} "
+                                       f"({progress_int}%), 成功={stats.success_count}, 跳过={stats.skipped_count}")
+                    except TaskCancelledException as cancel_error:
+                        # 🔥 如果收到取消请求，立即停止任务
+                        logger.warning(f"🛑 [{data_source}] 收到取消请求（通过update_job_progress），停止同步: {cancel_error}")
+                        # 🔥 设置一个标志，确保循环退出
+                        should_stop = True
+                        # 🔥 立即跳出循环
                         break
-                    except Exception as e:
-                        logger.warning(f"⚠️ 更新进度失败: {e}")
-                    break
-                
-                # 🔥 速率限制：在调用API之前等待（等待期间也检查取消）
-                if delay_between_calls > 0:
-                    # 分段等待，每0.5秒检查一次取消状态
-                    wait_time = 0
-                    check_interval = 0.5
-                    while wait_time < delay_between_calls:
-                        await asyncio.sleep(min(check_interval, delay_between_calls - wait_time))
-                        wait_time += check_interval
-                        # 检查取消状态
-                        should_stop = await self._should_stop_sync(job_id)
-                        if should_stop:
-                            logger.warning(f"🛑 [{data_source}] 在等待期间检测到取消请求，停止同步 (job_id={job_id})")
-                            # 更新进度并退出循环
-                            try:
-                                from app.services.scheduler_service import update_job_progress
-                                # 🔥 计算进度时需要考虑已处理的股票数（恢复执行时）
-                                total_items = stats.total_symbols  # 使用总股票数（包括已处理的）
-                                progress_int = int((processed_count / total_items) * 100) if total_items > 0 else 0
-                                progress_int = min(progress_int, 100)
-                                await update_job_progress(
-                                    job_id=job_id,
-                                    progress=progress_int,
-                                    current_item=f"[{data_source}] {symbol}",
-                                    total_items=total_items,
-                                    processed_items=processed_count,
-                                    message=f"[{data_source}] 任务已被用户取消"
-                                )
-                            except Exception as e:
-                                logger.warning(f"⚠️ 更新进度失败: {e}")
+                    except Exception as progress_error:
+                        # 🔥 检查是否是取消相关的异常（可能是其他形式的取消异常）
+                        error_msg = str(progress_error)
+                        error_type = type(progress_error).__name__
+                        logger.warning(f"🔍 [{data_source}] 进度更新异常类型: {error_type}, 消息: {error_msg}")
+
+                        error_lower = error_msg.lower()
+                        if "取消" in error_lower or "cancel" in error_lower or "cancelled" in error_lower or "TaskCancelledException" in error_type:
+                            logger.warning(f"🛑 [{data_source}] 进度更新时检测到取消相关异常，停止同步: {progress_error}")
                             break
-                
-                # 🔥 在同步股票数据之前，再次检查取消标记（防止在同步过程中收到取消请求）
-                should_stop = await self._should_stop_sync(job_id)
-                if should_stop:
-                    logger.warning(f"🛑 [{data_source}] 在同步前检测到取消请求，停止同步 (job_id={job_id})")
-                    break
-                
-                # 同步单只股票的财务数据
-                success = await self._sync_symbol_financial_data_async(
-                    symbol=symbol,
-                    data_source=data_source,
-                    provider=provider,
-                    report_types=report_types,
-                    financial_service=financial_service
-                )
-                
-                if success:
-                    stats.success_count += 1
-                else:
-                    stats.skipped_count += 1
-                
-                processed_count += 1
-                
-                # 🔥 在同步完成后，再次检查取消标记
-                should_stop = await self._should_stop_sync(job_id)
-                if should_stop:
-                    logger.warning(f"🛑 [{data_source}] 在同步后检测到取消请求，停止同步 (job_id={job_id})")
-                    break
-                
-                # 🔥 每处理1个股票或完成时更新一次进度（更频繁的更新）
-                # 计算进度百分比：确保即使进度很小也能正确显示（至少显示1%）
-                # 🔥 计算进度时需要考虑已处理的股票数（恢复执行时）
-                total_items = stats.total_symbols  # 使用总股票数（包括已处理的）
-                if total_items > 0:
-                    progress_float = (processed_count / total_items) * 100
-                    # 🔥 如果进度大于0但小于1%，至少显示1%，避免显示0%
-                    if progress_float > 0 and progress_float < 1:
-                        progress_int = 1
-                    else:
-                        progress_int = int(round(progress_float))
-                    # 确保不超过100%
-                    progress_int = min(progress_int, 100)
-                else:
-                    progress_int = 0
-                
-                # update_job_progress 是独立的异步函数
-                try:
-                    from app.services.scheduler_service import update_job_progress, TaskCancelledException
-                    # 🔥 记录进度更新调用（用于调试）
-                    logger.debug(f"📊 [{data_source}] 准备更新进度: job_id={job_id}, progress={progress_int}%, "
-                               f"processed={processed_count}/{total_items}, current_item={symbol}")
-                    
-                    await update_job_progress(
-                        job_id=job_id,
-                        progress=progress_int,  # 使用整数百分比
-                        current_item=f"[{data_source}] {symbol}",  # 🔥 在current_item中标注数据源
-                        total_items=total_items,  # 🔥 使用总股票数（包括已处理的）
-                        processed_items=processed_count,
-                        message=f"[{data_source}] 正在同步: {symbol} ({processed_count}/{total_items})"  # 🔥 在消息中标注数据源和总股票数
-                    )
-                    
-                    # 🔥 每10个股票记录一次详细日志，避免日志过多
-                    if processed_count % 10 == 0 or (i + 1) == len(symbols):
-                        logger.info(f"📊 [{data_source}] 进度更新成功: {processed_count}/{total_items} "
-                                   f"({progress_int}%), 成功={stats.success_count}, 跳过={stats.skipped_count}")
-                except TaskCancelledException as cancel_error:
-                    # 🔥 如果收到取消请求，立即停止任务
-                    logger.warning(f"🛑 [{data_source}] 收到取消请求（通过update_job_progress），停止同步: {cancel_error}")
-                    # 🔥 设置一个标志，确保循环退出
-                    should_stop = True
-                    # 🔥 立即跳出循环
-                    break
-                except Exception as progress_error:
-                    # 🔥 检查是否是取消相关的异常（可能是其他形式的取消异常）
-                    error_msg = str(progress_error)
-                    error_type = type(progress_error).__name__
-                    logger.warning(f"🔍 [{data_source}] 进度更新异常类型: {error_type}, 消息: {error_msg}")
-                    
+                        # 🔥 进度更新失败不应该影响主流程，但需要记录日志
+                        logger.error(f"❌ [{data_source}] 进度更新失败: job_id={job_id}, error={progress_error}", exc_info=True)
+                        # 每10个股票记录一次错误，避免日志过多
+                        if processed_count % 10 == 0:
+                            logger.warning(f"⚠️ [{data_source}] 进度更新失败，但继续执行: {progress_error}")
+
+                except Exception as e:
+                    # 🔥 检查是否是取消相关的异常
+                    error_msg = str(e)
+                    error_type = type(e).__name__
                     error_lower = error_msg.lower()
-                    if "取消" in error_lower or "cancel" in error_lower or "cancelled" in error_lower or "TaskCancelledException" in error_type:
-                        logger.warning(f"🛑 [{data_source}] 进度更新时检测到取消相关异常，停止同步: {progress_error}")
+
+                    # 🔥 检查是否是TaskCancelledException或其子类
+                    from app.services.scheduler_service import TaskCancelledException
+                    if isinstance(e, TaskCancelledException):
+                        logger.warning(f"🛑 [{data_source}] 检测到TaskCancelledException，停止同步: {error_msg}")
                         break
-                    # 🔥 进度更新失败不应该影响主流程，但需要记录日志
-                    logger.error(f"❌ [{data_source}] 进度更新失败: job_id={job_id}, error={progress_error}", exc_info=True)
-                    # 每10个股票记录一次错误，避免日志过多
-                    if processed_count % 10 == 0:
-                        logger.warning(f"⚠️ [{data_source}] 进度更新失败，但继续执行: {progress_error}")
-                
-            except Exception as e:
-                # 🔥 检查是否是取消相关的异常
-                error_msg = str(e)
-                error_type = type(e).__name__
-                error_lower = error_msg.lower()
-                
-                # 🔥 检查是否是TaskCancelledException或其子类
-                from app.services.scheduler_service import TaskCancelledException
-                if isinstance(e, TaskCancelledException):
-                    logger.warning(f"🛑 [{data_source}] 检测到TaskCancelledException，停止同步: {error_msg}")
-                    break
-                
-                # 🔥 检查异常类型名称或消息中是否包含取消相关关键词
-                if "取消" in error_lower or "cancel" in error_lower or "cancelled" in error_lower or "TaskCancelledException" in error_type:
-                    logger.warning(f"🛑 [{data_source}] 检测到取消相关异常，停止同步: 类型={error_type}, 消息={error_msg}")
-                    break
-                
-                stats.error_count += 1
-                stats.errors.append({
-                    "symbol": symbol,
-                    "error": error_msg,
-                    "data_source": data_source
-                })
-                logger.error(f"❌ [{data_source}] {symbol} 财务数据同步失败: {error_msg}")
-                processed_count += 1
+
+                    # 🔥 检查异常类型名称或消息中是否包含取消相关关键词
+                    if "取消" in error_lower or "cancel" in error_lower or "cancelled" in error_lower or "TaskCancelledException" in error_type:
+                        logger.warning(f"🛑 [{data_source}] 检测到取消相关异常，停止同步: 类型={error_type}, 消息={error_msg}")
+                        break
+
+                    stats.error_count += 1
+                    stats.errors.append({
+                        "symbol": symbol,
+                        "error": error_msg,
+                        "data_source": data_source
+                    })
+                    logger.error(f"❌ [{data_source}] {symbol} 财务数据同步失败: {error_msg}")
+                    processed_count += 1
+        finally:
+            try:
+                mongo_client.close()
+            except Exception as close_error:
+                logger.warning(f"⚠️ [{data_source}] 关闭线程内 MongoDB 客户端失败: {close_error}")
         
         # 🔥 检查任务是否因为取消而停止
         was_cancelled = False

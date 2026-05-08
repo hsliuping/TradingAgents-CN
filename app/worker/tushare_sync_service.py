@@ -11,7 +11,7 @@ from tradingagents.dataflows.providers.china.tushare import TushareProvider
 from app.services.stock_data_service import get_stock_data_service
 from app.services.historical_data_service import get_historical_data_service
 from app.services.news_data_service import get_news_data_service
-from app.core.database import get_mongo_db
+from app.core.database import bind_loop_safe_mongo_db, get_mongo_db
 from app.core.config import settings
 from app.core.rate_limiter import get_tushare_rate_limiter
 from app.utils.timezone import now_tz
@@ -617,39 +617,7 @@ class TushareSyncService:
 
         try:
             # 🔥 在线程池的线程中执行时，需要重新初始化数据库连接
-            # 因为数据库连接（Motor）绑定到事件循环，而线程池的线程有独立的事件循环
-            # 通过检查是否有运行的事件循环来判断是否在线程池的线程中
-            try:
-                # 尝试获取当前运行的事件循环
-                current_loop = asyncio.get_running_loop()
-                # 如果成功获取到事件循环，检查数据库连接是否可用
-                # 如果数据库连接不存在，重新创建
-                if not hasattr(self, 'db') or self.db is None:
-                    from motor.motor_asyncio import AsyncIOMotorClient
-                    from app.core.config import settings
-                    mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
-                    self.db = mongo_client[settings.MONGODB_DATABASE]
-                    logger.debug("🔄 重新创建数据库连接（db为None）")
-                else:
-                    # 🔥 尝试使用数据库连接，如果失败则重新创建
-                    # 通过尝试获取一个集合来测试连接是否可用
-                    try:
-                        # 这是一个轻量级的测试操作
-                        _ = self.db.stock_basic_info
-                    except Exception:
-                        # 如果测试失败，重新创建数据库连接
-                        from motor.motor_asyncio import AsyncIOMotorClient
-                        from app.core.config import settings
-                        mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
-                        self.db = mongo_client[settings.MONGODB_DATABASE]
-                        logger.debug("🔄 数据库连接测试失败，重新创建")
-            except RuntimeError:
-                # 没有运行的事件循环，在线程池的线程中，需要创建新的数据库连接
-                from motor.motor_asyncio import AsyncIOMotorClient
-                from app.core.config import settings
-                mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
-                self.db = mongo_client[settings.MONGODB_DATABASE]
-                logger.debug("🔄 在线程池线程中创建新的数据库连接（无运行循环）")
+            self.db = bind_loop_safe_mongo_db(self)
             
             # 1. 获取股票列表（排除退市股票）
             if symbols is None:
@@ -697,11 +665,8 @@ class TushareSyncService:
                         # 🔥 如果发生事件循环相关错误，重新创建数据库连接
                         error_msg = str(loop_error).lower()
                         if any(keyword in error_msg for keyword in ["loop", "event loop is closed", "attached to a different loop"]):
-                            logger.warning(f"⚠️ 检测到事件循环错误，重新创建数据库连接: {loop_error}")
-                            from motor.motor_asyncio import AsyncIOMotorClient
-                            from app.core.config import settings
-                            mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
-                            self.db = mongo_client[settings.MONGODB_DATABASE]
+                            logger.warning(f"⚠️ 检测到事件循环错误，重新绑定数据库代理: {loop_error}")
+                            self.db = bind_loop_safe_mongo_db(self)
                             # 重试查询
                             cursor = self.db.stock_basic_info.aggregate(pipeline)
                             symbols = [doc["code"] async for doc in cursor]
@@ -713,11 +678,8 @@ class TushareSyncService:
                     # 🔥 如果发生事件循环相关错误，重新创建数据库连接
                     error_msg = str(e).lower()
                     if any(keyword in error_msg for keyword in ["loop", "event loop is closed", "attached to a different loop"]):
-                        logger.warning(f"⚠️ 检测到事件循环错误，重新创建数据库连接: {e}")
-                        from motor.motor_asyncio import AsyncIOMotorClient
-                        from app.core.config import settings
-                        mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
-                        self.db = mongo_client[settings.MONGODB_DATABASE]
+                        logger.warning(f"⚠️ 检测到事件循环错误，重新绑定数据库代理: {e}")
+                        self.db = bind_loop_safe_mongo_db(self)
                     # 备用方法：使用 find() 查询（可能包含重复）
                     cursor = self.db.stock_basic_info.find(
                         {
@@ -746,11 +708,8 @@ class TushareSyncService:
                         # 🔥 如果发生事件循环相关错误，重新创建数据库连接并重试
                         error_msg = str(loop_error).lower()
                         if any(keyword in error_msg for keyword in ["loop", "event loop is closed", "attached to a different loop"]):
-                            logger.warning(f"⚠️ 备用方法也发生事件循环错误，重新创建数据库连接: {loop_error}")
-                            from motor.motor_asyncio import AsyncIOMotorClient
-                            from app.core.config import settings
-                            mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
-                            self.db = mongo_client[settings.MONGODB_DATABASE]
+                            logger.warning(f"⚠️ 备用方法也发生事件循环错误，重新绑定数据库代理: {loop_error}")
+                            self.db = bind_loop_safe_mongo_db(self)
                             # 重试查询
                             cursor = self.db.stock_basic_info.find(
                                 {

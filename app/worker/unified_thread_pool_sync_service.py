@@ -383,13 +383,12 @@ class UnifiedThreadPoolSyncService:
         """
         connections = {}
         try:
-            from motor.motor_asyncio import AsyncIOMotorClient
-            from app.core.config import settings
-            
+            from app.core.database import create_isolated_async_mongo_binding
+
             # 🔥 创建线程本地的MongoDB客户端（绑定到当前线程的事件循环）
-            mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
+            mongo_client, mongo_db = create_isolated_async_mongo_binding()
             connections['mongo_client'] = mongo_client  # 保存客户端引用，用于后续关闭
-            connections['db'] = mongo_client[settings.MONGODB_DATABASE]
+            connections['db'] = mongo_db
             
             # 🔥 创建线程本地的历史数据服务
             try:

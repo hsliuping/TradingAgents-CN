@@ -21,7 +21,6 @@ sys.path.insert(0, str(project_root))
 from app.services.queue_service import get_queue_service
 from app.services.analysis_service import get_analysis_service
 from app.core.database import init_database, close_database
-from app.core.redis_client import init_redis, close_redis
 from app.core.config import settings
 from app.models.analysis import AnalysisTask, AnalysisParameters, AnalysisStatus
 from app.services.config_provider import provider as config_provider
@@ -333,9 +332,8 @@ class AnalysisWorker:
         try:
             logger.info(f"🚀 启动分析Worker: {self.worker_id}")
 
-            # 初始化数据库连接
+            # 初始化数据库连接（Redis 生命周期已由 database 层统一管理）
             await init_database()
-            await init_redis()
             
             # 🔥 配置桥接：将统一配置写入环境变量，供 TradingAgents 核心库使用
             # 这必须在其他初始化之前执行，因为后续的 LLM、数据源等都需要从环境变量读取配置
@@ -1125,7 +1123,6 @@ class AnalysisWorker:
         try:
             # 关闭数据库连接
             await close_database()
-            await close_redis()
         except Exception as e:
             logger.error(f"关闭数据库连接失败: {e}")
 

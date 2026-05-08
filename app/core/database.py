@@ -5,7 +5,7 @@
 
 import logging
 import asyncio
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection, AsyncIOMotorDatabase
 from pymongo import MongoClient
 from pymongo.database import Database
@@ -313,6 +313,27 @@ async def init_database():
         raise
 
 
+async def init_redis_binding() -> None:
+    """仅初始化 Redis 绑定，供兼容层和独立组件复用。"""
+    global redis_client, redis_pool, _redis_runtime_loop
+
+    if redis_client is not None and redis_pool is not None:
+        try:
+            _ensure_async_redis_binding()
+        except RuntimeError:
+            pass
+        return
+
+    await db_manager.init_redis()
+    redis_client = db_manager.redis_client
+    redis_pool = db_manager.redis_pool
+
+    try:
+        _redis_runtime_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _redis_runtime_loop = None
+
+
 async def init_database_views_and_indexes():
     """初始化数据库视图和索引"""
     try:
@@ -491,6 +512,31 @@ async def close_database():
     _redis_runtime_loop = None
 
 
+async def close_redis_binding() -> None:
+    """仅关闭 Redis 绑定，供兼容层和独立组件复用。"""
+    global redis_client, redis_pool, _redis_runtime_loop
+
+    if db_manager.redis_client:
+        try:
+            await db_manager.redis_client.close()
+        except Exception as exc:
+            logger.error(f"❌ 关闭Redis连接时出错: {exc}")
+
+    if db_manager.redis_pool:
+        try:
+            await db_manager.redis_pool.disconnect()
+        except Exception as exc:
+            logger.error(f"❌ 关闭Redis连接池时出错: {exc}")
+
+    db_manager.redis_client = None
+    db_manager.redis_pool = None
+    db_manager.redis_url_in_use = None
+    db_manager._redis_healthy = False
+    redis_client = None
+    redis_pool = None
+    _redis_runtime_loop = None
+
+
 def _recreate_async_mongo_binding() -> None:
     """按当前事件循环重建异步 MongoDB 绑定，避免跨 loop 复用旧 Motor 客户端。"""
     global mongo_client, mongo_db, _mongo_runtime_loop
@@ -614,6 +660,27 @@ def get_mongo_db() -> AsyncIOMotorDatabase:
     if _mongo_db_proxy is None:
         _mongo_db_proxy = _LoopSafeMongoDatabaseProxy()
     return _mongo_db_proxy
+
+
+def bind_loop_safe_mongo_db(target: object, attr_name: str = "db") -> AsyncIOMotorDatabase:
+    """将 loop-safe MongoDB 代理绑定到对象属性，替代手动重建 AsyncIOMotorClient。"""
+    db = get_mongo_db()
+    setattr(target, attr_name, db)
+    return db
+
+
+def create_isolated_async_mongo_binding() -> Tuple[AsyncIOMotorClient, AsyncIOMotorDatabase]:
+    """创建与当前调用方独立的异步 MongoDB 连接，适用于线程池或临时隔离任务。"""
+    client = AsyncIOMotorClient(
+        settings.MONGO_URI,
+        maxPoolSize=settings.MONGO_MAX_CONNECTIONS,
+        minPoolSize=settings.MONGO_MIN_CONNECTIONS,
+        maxIdleTimeMS=30000,
+        serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,
+        connectTimeoutMS=settings.MONGO_CONNECT_TIMEOUT_MS,
+        socketTimeoutMS=settings.MONGO_SOCKET_TIMEOUT_MS,
+    )
+    return client, client[settings.MONGO_DB]
 
 
 def get_mongo_db_sync() -> Database:

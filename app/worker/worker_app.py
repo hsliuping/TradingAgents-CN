@@ -24,7 +24,6 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from app.core.database import init_database, close_database
-from app.core.redis_client import init_redis, close_redis
 from app.core.config import settings
 from app.worker.analysis_worker import AnalysisWorker
 
@@ -82,9 +81,8 @@ async def lifespan(app: FastAPI):
     logger.info(f"   工作目录: {Path.cwd()}")
     logger.info("=" * 60)
     
-    # 初始化数据库和 Redis
+    # 初始化数据库与统一 Redis 生命周期
     await init_database()
-    await init_redis()
     
     # 启动 Worker
     await start_worker()
@@ -97,7 +95,6 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Worker 服务关闭中...")
     
     await stop_worker()
-    await close_redis()
     await close_database()
     
     logger.info("✅ Worker 服务已关闭")

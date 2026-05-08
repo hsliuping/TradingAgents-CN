@@ -1,70 +1,29 @@
-"""
-Redis客户端配置和连接管理
+"""Redis 兼容层。
+
+历史调用方仍可从本模块导入接口，但实际连接生命周期统一委托给 app.core.database。
 """
 
 import redis.asyncio as redis
 import logging
-from typing import Optional
-from .config import settings
+
+from .database import close_redis_binding, get_redis_client, init_redis_binding
 
 logger = logging.getLogger(__name__)
 
-# 全局Redis连接池
-redis_pool: Optional[redis.ConnectionPool] = None
-redis_client: Optional[redis.Redis] = None
-
 
 async def init_redis():
-    """初始化Redis连接"""
-    global redis_pool, redis_client
-
-    try:
-        # 创建连接池
-        redis_pool = redis.ConnectionPool.from_url(
-            settings.REDIS_URL,
-            max_connections=settings.REDIS_MAX_CONNECTIONS,  # 使用配置文件中的值
-            retry_on_timeout=settings.REDIS_RETRY_ON_TIMEOUT,
-            decode_responses=True,
-            socket_keepalive=True,  # 启用 TCP keepalive
-            socket_keepalive_options={
-                1: 60,  # TCP_KEEPIDLE: 60秒后开始发送keepalive探测
-                2: 10,  # TCP_KEEPINTVL: 每10秒发送一次探测
-                3: 3,   # TCP_KEEPCNT: 最多发送3次探测
-            },
-            health_check_interval=30,  # 每30秒检查一次连接健康状态
-        )
-
-        # 创建Redis客户端
-        redis_client = redis.Redis(connection_pool=redis_pool)
-
-        # 测试连接
-        await redis_client.ping()
-        logger.info(f"✅ Redis连接成功建立 (max_connections={settings.REDIS_MAX_CONNECTIONS})")
-
-    except Exception as e:
-        logger.error(f"❌ Redis连接失败: {e}")
-        raise
+    """初始化Redis连接。"""
+    await init_redis_binding()
 
 
 async def close_redis():
-    """关闭Redis连接"""
-    global redis_pool, redis_client
-    
-    try:
-        if redis_client:
-            await redis_client.close()
-        if redis_pool:
-            await redis_pool.disconnect()
-        logger.info("✅ Redis连接已关闭")
-    except Exception as e:
-        logger.error(f"❌ 关闭Redis连接时出错: {e}")
+    """关闭Redis连接。"""
+    await close_redis_binding()
 
 
 def get_redis() -> redis.Redis:
-    """获取Redis客户端实例"""
-    if redis_client is None:
-        raise RuntimeError("Redis客户端未初始化")
-    return redis_client
+    """获取Redis客户端实例。"""
+    return get_redis_client()
 
 
 class RedisKeys:
@@ -109,25 +68,13 @@ class RedisKeys:
 class RedisService:
     """Redis服务封装类"""
 
-    def __init__(self):
-        self._redis = None
-
     @property
     def redis(self):
         """延迟获取Redis客户端"""
-        if self._redis is None:
-            try:
-                # 首先尝试从 redis_client 模块获取
-                self._redis = get_redis()
-            except RuntimeError:
-                # 如果全局 redis_client 未初始化，尝试从 database 模块获取
-                try:
-                    from app.core.database import get_redis_client
-                    self._redis = get_redis_client()
-                except RuntimeError:
-                    # 如果都未初始化，抛出更友好的错误
-                    raise RuntimeError("Redis客户端未初始化，请确保在应用启动时调用了 init_redis() 或 init_database()")
-        return self._redis
+        try:
+            return get_redis_client()
+        except RuntimeError:
+            raise RuntimeError("Redis客户端未初始化，请确保在应用启动时调用了 init_redis() 或 init_database()")
 
     async def set_with_ttl(self, key: str, value: str, ttl: int = 3600):
         """设置带TTL的键值"""

@@ -6,7 +6,6 @@ import json
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -20,108 +19,27 @@ CACHE_KEY_BAOSTOCK = f"{CACHE_KEY_PREFIX}:baostock"
 class TradeDateCacheService:
     """最后交易日期缓存服务"""
     
-    def __init__(self):
-        self._redis_sync = None
-        self._redis_async = None
-    
     @property
     def redis(self):
-        """延迟获取同步Redis客户端（用于同步方法）"""
-        if self._redis_sync is None:
-            try:
-                # 使用同步Redis客户端，避免事件循环问题
-                import redis
-                
-                # 从配置获取Redis URL
-                redis_url = settings.REDIS_URL
-                
-                # 使用redis.from_url自动解析URL，更可靠
-                try:
-                    self._redis_sync = redis.from_url(
-                        redis_url,
-                        decode_responses=True,
-                        socket_connect_timeout=5,
-                        socket_timeout=10
-                    )
-                    # 测试连接
-                    self._redis_sync.ping()
-                    logger.debug("✅ 同步Redis客户端连接成功（使用from_url）")
-                except Exception as e1:
-                    # 如果from_url失败，尝试手动解析
-                    logger.debug(f"from_url失败，尝试手动解析: {e1}")
-                    
-                    # 解析URL: redis://[:password@]host[:port][/db]
-                    if not redis_url.startswith('redis://'):
-                        redis_url = f"redis://{redis_url}"
-                    
-                    url_parts = redis_url.replace('redis://', '').split('@')
-                    if len(url_parts) == 2:
-                        # 有密码
-                        password = url_parts[0].split(':', 1)[-1] if ':' in url_parts[0] else url_parts[0]
-                        host_part = url_parts[1]
-                    else:
-                        password = None
-                        host_part = url_parts[0]
-                    
-                    # 解析主机、端口和数据库
-                    if '/' in host_part:
-                        host_port, db_str = host_part.rsplit('/', 1)
-                        db = int(db_str) if db_str.isdigit() else 0
-                    else:
-                        host_port = host_part
-                        db = 0
-                    
-                    if ':' in host_port:
-                        host, port_str = host_port.split(':', 1)
-                        port = int(port_str) if port_str.isdigit() else 6379
-                    else:
-                        host = host_port if host_port else 'localhost'
-                        port = 6379
-                    
-                    # 确保host不为空
-                    if not host:
-                        host = 'localhost'
-                    
-                    # 创建同步Redis客户端
-                    if password:
-                        self._redis_sync = redis.Redis(
-                            host=host,
-                            port=port,
-                            password=password,
-                            db=db,
-                            decode_responses=True,
-                            socket_connect_timeout=5,
-                            socket_timeout=10
-                        )
-                    else:
-                        self._redis_sync = redis.Redis(
-                            host=host,
-                            port=port,
-                            db=db,
-                            decode_responses=True,
-                            socket_connect_timeout=5,
-                            socket_timeout=10
-                        )
-                    
-                    # 测试连接
-                    self._redis_sync.ping()
-                    logger.debug("✅ 同步Redis客户端连接成功（手动解析）")
-            except Exception as e:
-                logger.warning(f"⚠️  同步Redis客户端初始化失败: {e}，将直接调用API获取交易日期", exc_info=True)
-                self._redis_sync = None
-        return self._redis_sync
+        """获取同步Redis客户端（用于同步方法）。"""
+        try:
+            from app.core.database import get_redis_sync_client
+
+            return get_redis_sync_client()
+        except Exception as e:
+            logger.warning(f"⚠️  同步Redis客户端初始化失败: {e}，将直接调用API获取交易日期", exc_info=True)
+            return None
     
     @property
     def redis_async(self):
-        """延迟获取异步Redis客户端（用于异步方法）"""
-        if self._redis_async is None:
-            try:
-                from app.core.redis_client import get_redis
-                self._redis_async = get_redis()
-            except RuntimeError:
-                logger.warning("异步Redis客户端未初始化，异步方法可能不可用")
-                self._redis_async = None
-        return self._redis_async
+        """获取异步Redis客户端（用于异步方法）。"""
+        try:
+            from app.core.database import get_redis_client
+
+            return get_redis_client()
+        except RuntimeError:
+            logger.warning("异步Redis客户端未初始化，异步方法可能不可用")
+            return None
     
     def _is_today(self, date_str: str) -> bool:
         """判断日期字符串是否是今天"""
