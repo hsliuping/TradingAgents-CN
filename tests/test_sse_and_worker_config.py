@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 # Import router and dependencies to override
 from app.routers import sse as sse_router_mod
 from app.routers.sse import router as sse_router
-from app.routers.auth import get_current_user
+from app.routers.auth_db import get_current_user
 from app.services.queue_service import QueueService, get_queue_service as real_get_queue_service
 
 
@@ -29,10 +29,44 @@ class FakePubSub:
         return None
     async def close(self):
         return None
+    async def reset(self):
+        return None
 
 class FakeRedis:
     def pubsub(self):
         return FakePubSub()
+
+
+class TrackingPubSub(FakePubSub):
+    def __init__(self):
+        self.subscribed_channels = []
+        self.unsubscribed_channels = []
+        self.close_calls = 0
+        self.reset_calls = 0
+
+    async def subscribe(self, channel: str):
+        self.subscribed_channels.append(channel)
+        return None
+
+    async def unsubscribe(self, *channels):
+        self.unsubscribed_channels.append(tuple(channels))
+        return None
+
+    async def close(self):
+        self.close_calls += 1
+        return None
+
+    async def reset(self):
+        self.reset_calls += 1
+        return None
+
+
+class TrackingRedis:
+    def __init__(self, pubsub: TrackingPubSub):
+        self._pubsub = pubsub
+
+    def pubsub(self):
+        return self._pubsub
 
 class FakeQueueService:
     async def get_task(self, task_id: str):
@@ -95,6 +129,24 @@ def test_sse_batch_connected_event(monkeypatch):
         assert body.strip().startswith("event: connected")
 
 
+def test_task_progress_generator_closes_pubsub_on_generator_close(monkeypatch):
+    fake_pubsub = TrackingPubSub()
+    monkeypatch.setattr(sse_router_mod, "get_redis_client", lambda: TrackingRedis(fake_pubsub))
+
+    async def _run():
+        generator = sse_router_mod.task_progress_generator("T123", "u1")
+        first_event = await generator.__anext__()
+        assert first_event.startswith("event: connected")
+        await generator.aclose()
+
+    asyncio.run(_run())
+
+    assert fake_pubsub.subscribed_channels == ["task_progress:T123"]
+    assert fake_pubsub.unsubscribed_channels == [("task_progress:T123",)]
+    assert fake_pubsub.close_calls == 1
+    assert fake_pubsub.reset_calls == 0
+
+
 # ---------- Tests: Worker config ----------
 
 def test_worker_intervals_env_and_dynamic_override(monkeypatch):
@@ -113,9 +165,7 @@ def test_worker_intervals_env_and_dynamic_override(monkeypatch):
         return None
 
     monkeypatch.setattr(analysis_worker, "init_database", noop)
-    monkeypatch.setattr(analysis_worker, "init_redis", noop)
     monkeypatch.setattr(analysis_worker, "close_database", noop)
-    monkeypatch.setattr(analysis_worker, "close_redis", noop, raising=False)
 
     # Make internal loops end instantly
     monkeypatch.setattr(analysis_worker.AnalysisWorker, "_work_loop", noop)

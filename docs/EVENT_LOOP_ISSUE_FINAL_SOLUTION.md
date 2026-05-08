@@ -227,6 +227,8 @@
 - `RedisService` 兼容封装已移除 Redis 客户端成员缓存，兼容层本身也不再长期持有 Redis 实例
 - worker_app 与 analysis_worker 已移除重复的 `init_redis()/close_redis()` 调用，统一只依赖 `init_database()/close_database()` 管理 Redis 生命周期
 - `TradeDateCacheService` 已移除自建/自缓存的同步与异步 Redis 客户端，统一改走数据库层同步/异步 Redis 入口
+- 已完成对 request-scoped `pubsub` 与局部 `pipeline` 的细粒度审计；当前仅发现 `sse.py` 的请求级 PubSub 与 `RedisService.increment_with_ttl()` 的局部 pipeline，均未发现跨请求缓存或异常路径泄漏
+- 已补 SSE 回归测试，验证 `task_progress_generator` 在生成器关闭时会执行 `unsubscribe + close`，确保 PubSub 连接按请求释放
 - config_bridge 配置同步改为同步 Mongo + 线程包装
 - TradingCalendarService 的 Redis fallback
 - scheduler shutdown 等待收尾再关数据库
@@ -238,13 +240,13 @@
 1. 扫描并整改所有 `self.db = get_mongo_db()` 的长生命周期服务
 2. 继续扫描并整改剩余手动创建 `AsyncIOMotorClient` 的 worker/sync service，尤其是初始化类与少量遗留线程池辅助路径
 3. 继续将 Redis 调用方迁移到数据库层统一入口，并逐步把 `app/core/redis_client.py` 压缩为纯兼容壳/常量壳
-4. 继续审视少量 request-scoped `pubsub` 与局部 `pipeline` 使用，重点保证它们不跨请求/跨 loop 长期缓存
+4. 继续保持对新增 request-scoped `pubsub` 与局部 `pipeline` 用法的代码审查约束，防止后续回归到跨请求/跨 loop 缓存模式
 
 ### 中优先级
 
 1. 继续将 scheduler/worker 场景分流为两类 helper：共享 loop-safe 代理与隔离连接 helper
 2. 为配置同步/状态刷新/进度更新这类轻量链路统一切到 sync client + `to_thread`
-3. 为关键服务补 event loop mismatch 的单测或集成回归用例
+3. 为关键服务继续补 event loop mismatch 的单测或集成回归用例；SSE PubSub 释放路径已补首个回归测试
 
 ### 低优先级
 

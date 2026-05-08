@@ -5,6 +5,7 @@
 
 import redis.asyncio as redis
 import logging
+from typing import Optional
 
 from .database import close_redis_binding, get_redis_client, init_redis_binding
 
