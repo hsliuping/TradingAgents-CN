@@ -157,11 +157,17 @@ def _create_provider_pair(
     deep_timeout: int,
     backend_url: Optional[str] = None,
     api_key: Optional[str] = None,
+    quick_api_key: Optional[str] = None,
+    deep_api_key: Optional[str] = None,
     quick_extra_kwargs: Optional[Dict[str, Any]] = None,
     deep_extra_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Any, Any]:
     resolved_backend_url = backend_url if backend_url is not None else config.get("backend_url", "")
-    shared_api_key = api_key or config.get("quick_api_key") or config.get("deep_api_key")
+    resolved_quick_api_key = quick_api_key if quick_api_key is not None else config.get("quick_api_key")
+    resolved_deep_api_key = deep_api_key if deep_api_key is not None else config.get("deep_api_key")
+    if api_key:
+        resolved_quick_api_key = resolved_quick_api_key or api_key
+        resolved_deep_api_key = resolved_deep_api_key or api_key
     quick_extra_kwargs = quick_extra_kwargs or {}
     deep_extra_kwargs = deep_extra_kwargs or {}
 
@@ -172,7 +178,7 @@ def _create_provider_pair(
         temperature=deep_temperature,
         max_tokens=deep_max_tokens,
         timeout=deep_timeout,
-        api_key=shared_api_key,
+        api_key=resolved_deep_api_key,
         **deep_extra_kwargs,
     )
     quick_llm = create_llm_by_provider(
@@ -182,7 +188,7 @@ def _create_provider_pair(
         temperature=quick_temperature,
         max_tokens=quick_max_tokens,
         timeout=quick_timeout,
-        api_key=shared_api_key,
+        api_key=resolved_quick_api_key,
         **quick_extra_kwargs,
     )
     return deep_llm, quick_llm
@@ -371,8 +377,9 @@ class TradingAgentsGraph:
             )
             logger.info("✅ [阿里百炼] 已通过 llm_clients 初始化成功并应用用户配置的模型参数")
         elif normalized_provider == "deepseek":
-            deepseek_api_key = self.config.get("quick_api_key") or self.config.get("deep_api_key") or os.getenv('DEEPSEEK_API_KEY')
-            if not deepseek_api_key:
+            quick_deepseek_api_key = self.config.get("quick_api_key")
+            deep_deepseek_api_key = self.config.get("deep_api_key")
+            if not (quick_deepseek_api_key or deep_deepseek_api_key or os.getenv('DEEPSEEK_API_KEY')):
                 raise ValueError("使用DeepSeek需要设置DEEPSEEK_API_KEY环境变量")
 
             deepseek_base_url = self.config.get("backend_url") or os.getenv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
@@ -386,7 +393,8 @@ class TradingAgentsGraph:
                 deep_max_tokens=deep_max_tokens,
                 deep_timeout=deep_timeout,
                 backend_url=deepseek_base_url,
-                api_key=deepseek_api_key,
+                quick_api_key=quick_deepseek_api_key,
+                deep_api_key=deep_deepseek_api_key,
             )
             logger.info("✅ [DeepSeek] 已通过 llm_clients 初始化成功并应用用户配置的模型参数")
         elif normalized_provider == "custom_openai":

@@ -7,6 +7,41 @@ from .base_client import BaseLLMClient, normalize_content
 from .validators import validate_model
 
 
+def _patch_reasoning_content_passthrough() -> None:
+    """Preserve DeepSeek V4 thinking-mode reasoning_content across turns."""
+    try:
+        import langchain_openai.chat_models.base as openai_base
+
+        if getattr(openai_base, "_tradingagents_reasoning_content_patch", False):
+            return
+
+        original_to_dict = openai_base._convert_message_to_dict
+        original_from_dict = openai_base._convert_dict_to_message
+
+        def _convert_message_to_dict_with_reasoning(message, *args, **kwargs):
+            message_dict = original_to_dict(message, *args, **kwargs)
+            reasoning_content = getattr(message, "additional_kwargs", {}).get("reasoning_content")
+            if message_dict.get("role") == "assistant" and reasoning_content:
+                message_dict["reasoning_content"] = reasoning_content
+            return message_dict
+
+        def _convert_dict_to_message_with_reasoning(_dict, *args, **kwargs):
+            message = original_from_dict(_dict, *args, **kwargs)
+            reasoning_content = _dict.get("reasoning_content")
+            if reasoning_content and hasattr(message, "additional_kwargs"):
+                message.additional_kwargs["reasoning_content"] = reasoning_content
+            return message
+
+        openai_base._convert_message_to_dict = _convert_message_to_dict_with_reasoning
+        openai_base._convert_dict_to_message = _convert_dict_to_message_with_reasoning
+        openai_base._tradingagents_reasoning_content_patch = True
+    except Exception:
+        return
+
+
+_patch_reasoning_content_passthrough()
+
+
 class NormalizedChatOpenAI(ChatOpenAI):
     """ChatOpenAI wrapper that normalizes typed content blocks to text."""
 
