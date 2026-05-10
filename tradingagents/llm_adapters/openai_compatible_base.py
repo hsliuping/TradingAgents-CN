@@ -434,6 +434,8 @@ OPENAI_COMPATIBLE_PROVIDERS = {
         "base_url": "https://api.deepseek.com",
         "api_key_env": "DEEPSEEK_API_KEY",
         "models": {
+            "deepseek-v4-flash": {"context_length": 1000000, "supports_function_calling": True},
+            "deepseek-v4-pro": {"context_length": 1000000, "supports_function_calling": True},
             "deepseek-chat": {"context_length": 32768, "supports_function_calling": True},
             "deepseek-coder": {"context_length": 16384, "supports_function_calling": True}
         }

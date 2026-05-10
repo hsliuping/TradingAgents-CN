@@ -101,6 +101,8 @@ export const MODEL_TO_PROVIDER_MAP: Record<string, string> = {
   'gemini-2.0-flash-thinking-exp': 'google',
 
   // DeepSeek
+  'deepseek-v4-flash': 'deepseek',
+  'deepseek-v4-pro': 'deepseek',
   'deepseek-chat': 'deepseek',
   'deepseek-coder': 'deepseek',
 

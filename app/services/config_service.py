@@ -989,7 +989,7 @@ class ConfigService:
             elif provider_str == "deepseek":
                 # DeepSeek 使用专门的测试方法
                 logger.info(f"🔍 使用 DeepSeek 专用测试方法")
-                result = self._test_deepseek_api(api_key, f"{provider_str} {llm_config.model_name}", llm_config.model_name)
+                result = self._test_deepseek_api(api_key, f"{provider_str} {llm_config.model_name}", llm_config.model_name, api_base)
                 result["response_time"] = time.time() - start_time
                 return result
             elif provider_str == "dashscope":
@@ -2580,6 +2580,22 @@ class ConfigService:
                 "provider_name": "DeepSeek",
                 "models": [
                     {
+                        "name": "deepseek-v4-flash",
+                        "display_name": "DeepSeek V4 Flash - 1M上下文",
+                        "input_price_per_1k": 0.001,
+                        "output_price_per_1k": 0.002,
+                        "context_length": 1000000,
+                        "currency": "CNY"
+                    },
+                    {
+                        "name": "deepseek-v4-pro",
+                        "display_name": "DeepSeek V4 Pro - 强推理",
+                        "input_price_per_1k": 0.003,
+                        "output_price_per_1k": 0.006,
+                        "context_length": 1000000,
+                        "currency": "CNY"
+                    },
+                    {
                         "name": "deepseek-chat",
                         "display_name": "DeepSeek Chat - 通用对话",
                         "input_price_per_1k": 0.0001,
@@ -3605,7 +3621,7 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    def _test_deepseek_api(self, api_key: str, display_name: str, model_name: str = None) -> dict:
+    def _test_deepseek_api(self, api_key: str, display_name: str, model_name: str = None, base_url: str = None) -> dict:
         """测试DeepSeek API"""
         try:
             import requests
@@ -3617,7 +3633,8 @@ class ConfigService:
 
             logger.info(f"🔍 [DeepSeek 测试] 使用模型: {model_name}")
 
-            url = "https://api.deepseek.com/chat/completions"
+            base_url = (base_url or "https://api.deepseek.com").rstrip("/")
+            url = f"{base_url}/chat/completions"
 
             headers = {
                 "Content-Type": "application/json",
@@ -3627,18 +3644,21 @@ class ConfigService:
             data = {
                 "model": model_name,
                 "messages": [
-                    {"role": "user", "content": "你好，请简单介绍一下你自己。"}
+                    {"role": "user", "content": "请只回复 OK。"}
                 ],
-                "max_tokens": 50,
+                "max_tokens": 100,
                 "temperature": 0.1
             }
+            if model_name and model_name.startswith("deepseek-v4"):
+                data["thinking"] = {"type": "disabled"}
 
             response = requests.post(url, json=data, headers=headers, timeout=10)
 
             if response.status_code == 200:
                 result = response.json()
                 if "choices" in result and len(result["choices"]) > 0:
-                    content = result["choices"][0]["message"]["content"]
+                    message = result["choices"][0].get("message") or {}
+                    content = message.get("content") or message.get("reasoning_content") or ""
                     if content and len(content.strip()) > 0:
                         return {
                             "success": True,
