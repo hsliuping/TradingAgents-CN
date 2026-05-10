@@ -216,6 +216,129 @@ class UnifiedLLMClient:
             json.dumps(top_messages, ensure_ascii=False, default=str),
         )
 
+    def _log_llm_call_timing(
+        self,
+        *,
+        loop_name: str,
+        stage: str,
+        elapsed_seconds: float,
+        messages: List[Message],
+        response: Optional[LLMResponse],
+        round_number: Optional[int] = None,
+    ) -> None:
+        logger.info(
+            "[%s] %s | round=%s | elapsed=%.2fs | message_count=%s | approx_chars=%s | has_tool_calls=%s | tool_call_count=%s | content_chars=%s | finish_reason=%s",
+            loop_name,
+            stage,
+            round_number if round_number is not None else "-",
+            elapsed_seconds,
+            len(messages),
+            self._estimate_message_chars(messages),
+            response.has_tool_calls if response else False,
+            len(response.tool_calls) if response and response.tool_calls else 0,
+            len(response.content or "") if response else 0,
+            response.finish_reason if response else None,
+        )
+
+    @staticmethod
+    def _serialize_message_for_log(message: Message) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "role": message.role,
+            "name": message.name,
+            "tool_call_id": message.tool_call_id,
+            "content": message.content,
+            "reasoning_content": message.reasoning_content,
+        }
+        if message.tool_calls:
+            payload["tool_calls"] = [
+                {
+                    "id": tool_call.id,
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                }
+                for tool_call in message.tool_calls
+            ]
+        return payload
+
+    @staticmethod
+    def _serialize_response_for_log(response: Optional[LLMResponse]) -> Dict[str, Any]:
+        if response is None:
+            return {}
+
+        return {
+            "content": response.content,
+            "reasoning_content": response.reasoning_content,
+            "finish_reason": response.finish_reason,
+            "model": response.model,
+            "provider": response.provider,
+            "usage": response.usage,
+            "tool_calls": [
+                {
+                    "id": tool_call.id,
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                }
+                for tool_call in response.tool_calls
+            ],
+        }
+
+    def _log_llm_payload(
+        self,
+        *,
+        loop_name: str,
+        stage: str,
+        payload_label: Optional[str],
+        round_number: Optional[int] = None,
+        messages: Optional[List[Message]] = None,
+        response: Optional[LLMResponse] = None,
+    ) -> None:
+        if messages is not None:
+            logger.info(
+                "[%s] %s | label=%s | round=%s | payload=%s",
+                loop_name,
+                stage,
+                payload_label or "-",
+                round_number if round_number is not None else "-",
+                json.dumps(
+                    [self._serialize_message_for_log(message) for message in messages],
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            )
+            return
+
+        logger.info(
+            "[%s] %s | label=%s | round=%s | payload=%s",
+            loop_name,
+            stage,
+            payload_label or "-",
+            round_number if round_number is not None else "-",
+            json.dumps(
+                self._serialize_response_for_log(response),
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
+
+    @staticmethod
+    def _log_tool_call_timing(
+        *,
+        loop_name: str,
+        round_number: int,
+        tool_name: str,
+        elapsed_seconds: float,
+        result: ToolResult,
+    ) -> None:
+        logger.info(
+            "[%s] tool_exec_completed | round=%s | tool=%s | elapsed=%.2fs | chars=%s | is_error=%s",
+            loop_name,
+            round_number,
+            tool_name,
+            elapsed_seconds,
+            len(result.content or ""),
+            result.is_error,
+        )
+
     async def _emit_progress(self, progress_callback: Optional[Callable], payload: Dict[str, Any]) -> None:
         """统一处理可选的进度回调，兼容同步/异步函数。"""
         if not progress_callback:
@@ -351,6 +474,8 @@ class UnifiedLLMClient:
         tools_used: Optional[List[str]] = None,
         dry_run: bool = False,
         progress_callback: Optional[Callable] = None,
+        log_payloads: bool = False,
+        payload_log_label: Optional[str] = None,
         **kwargs
     ) -> LLMResponse:
         """
@@ -360,7 +485,29 @@ class UnifiedLLMClient:
             tools_used: 可选，用于收集各轮工具调用名称（智能助手展示执行步骤用）
             dry_run: 若为 True，工具调用只记日志并返回模拟结果，不真正执行函数（用于意图路由测试）
         """
+        if log_payloads:
+            self._log_llm_payload(
+                loop_name="UnifiedLLM·异步",
+                stage="initial_llm_prompt",
+                payload_label=payload_log_label,
+                messages=messages,
+            )
+        initial_started_at = time.perf_counter()
         response = await self._aretry_chat(messages, tools, **kwargs)
+        if log_payloads:
+            self._log_llm_payload(
+                loop_name="UnifiedLLM·异步",
+                stage="initial_llm_response",
+                payload_label=payload_log_label,
+                response=response,
+            )
+        self._log_llm_call_timing(
+            loop_name="UnifiedLLM·异步",
+            stage="initial_llm_completed",
+            elapsed_seconds=time.perf_counter() - initial_started_at,
+            messages=messages,
+            response=response,
+        )
 
         if auto_execute_tools and response.has_tool_calls:
             return await self._aexecute_tool_loop(
@@ -368,6 +515,8 @@ class UnifiedLLMClient:
                 tools_used=tools_used,
                 dry_run=dry_run,
                 progress_callback=progress_callback,
+                log_payloads=log_payloads,
+                payload_log_label=payload_log_label,
                 **kwargs
             )
 
@@ -471,6 +620,8 @@ class UnifiedLLMClient:
         tools_used: Optional[List[str]] = None,
         dry_run: bool = False,
         progress_callback: Optional[Callable] = None,
+        log_payloads: bool = False,
+        payload_log_label: Optional[str] = None,
         **kwargs
     ) -> LLMResponse:
         """异步执行工具调用循环，可选收集每轮调用的工具名称"""
@@ -518,10 +669,35 @@ class UnifiedLLMClient:
                     )
                 else:
                     # ── 正常模式：真正执行工具 ──
+                    tool_started_at = time.perf_counter()
                     result = await ToolCallNormalizer.aexecute_tool_call(
                         tool_call,
                         self._tools
                     )
+                    self._log_tool_call_timing(
+                        loop_name="UnifiedLLM·异步",
+                        round_number=rounds + 1,
+                        tool_name=tool_call.name,
+                        elapsed_seconds=time.perf_counter() - tool_started_at,
+                        result=result,
+                    )
+                    if log_payloads:
+                        logger.info(
+                            "[%s] tool_exec_payload | label=%s | round=%s | tool=%s | payload=%s",
+                            "UnifiedLLM·异步",
+                            payload_log_label or "-",
+                            rounds + 1,
+                            tool_call.name,
+                            json.dumps(
+                                {
+                                    "arguments": tool_call.arguments,
+                                    "result": result.content,
+                                    "is_error": result.is_error,
+                                },
+                                ensure_ascii=False,
+                                default=str,
+                            ),
+                        )
                 await self._emit_progress(progress_callback, {
                     "event": "tool_completed",
                     "round": rounds + 1,
@@ -560,7 +736,32 @@ class UnifiedLLMClient:
                 stage="before_retry_chat",
                 messages=current_messages,
             )
+            if log_payloads:
+                self._log_llm_payload(
+                    loop_name="UnifiedLLM·异步",
+                    stage="post_tool_llm_prompt",
+                    payload_label=payload_log_label,
+                    round_number=rounds + 1,
+                    messages=current_messages,
+                )
+            retry_started_at = time.perf_counter()
             current_response = await self._aretry_chat(current_messages, tools, **kwargs)
+            if log_payloads:
+                self._log_llm_payload(
+                    loop_name="UnifiedLLM·异步",
+                    stage="post_tool_llm_response",
+                    payload_label=payload_log_label,
+                    round_number=rounds + 1,
+                    response=current_response,
+                )
+            self._log_llm_call_timing(
+                loop_name="UnifiedLLM·异步",
+                stage="post_tool_llm_completed",
+                round_number=rounds + 1,
+                elapsed_seconds=time.perf_counter() - retry_started_at,
+                messages=current_messages,
+                response=current_response,
+            )
             await self._emit_progress(progress_callback, {
                 "event": "tool_round_completed",
                 "round": rounds + 1,
@@ -593,8 +794,33 @@ class UnifiedLLMClient:
                     "请根据上面已经获取到的所有数据，直接生成完整的分析回复。"
                 ),
             ))
+            if log_payloads:
+                self._log_llm_payload(
+                    loop_name="UnifiedLLM·异步",
+                    stage="final_summary_llm_prompt",
+                    payload_label=payload_log_label,
+                    round_number=rounds + 1,
+                    messages=current_messages,
+                )
+            final_summary_started_at = time.perf_counter()
             current_response = await self._aretry_chat(
                 current_messages, tools=None, **kwargs
+            )
+            if log_payloads:
+                self._log_llm_payload(
+                    loop_name="UnifiedLLM·异步",
+                    stage="final_summary_llm_response",
+                    payload_label=payload_log_label,
+                    round_number=rounds + 1,
+                    response=current_response,
+                )
+            self._log_llm_call_timing(
+                loop_name="UnifiedLLM·异步",
+                stage="final_summary_llm_completed",
+                round_number=rounds + 1,
+                elapsed_seconds=time.perf_counter() - final_summary_started_at,
+                messages=current_messages,
+                response=current_response,
             )
             logger.info("[UnifiedLLM] ✅ 最终综合完成")
             await self._emit_progress(progress_callback, {

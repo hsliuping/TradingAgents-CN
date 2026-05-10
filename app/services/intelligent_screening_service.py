@@ -53,8 +53,8 @@ RESULT_TOOL_ALLOWLIST = {
 }
 
 # 选股场景独立预算，默认比全局助手更紧，避免长尾请求拖垮体验
-SCREENING_MAX_TOOL_ROUNDS = int(os.environ.get("SCREENING_MAX_TOOL_ROUNDS", "4"))
-SCREENING_RESULT_TIMEOUT_SECONDS = int(os.environ.get("SCREENING_RESULT_TIMEOUT_SECONDS", "180"))
+SCREENING_MAX_TOOL_ROUNDS = int(os.environ.get("SCREENING_MAX_TOOL_ROUNDS", "3"))
+SCREENING_RESULT_TIMEOUT_SECONDS = int(os.environ.get("SCREENING_RESULT_TIMEOUT_SECONDS", "300"))
 
 
 class IntelligentScreeningService:
@@ -129,19 +129,6 @@ class IntelligentScreeningService:
                 filtered.append(t)
         return filtered
 
-    def _get_last_successful_stocks_from_history(self, history: list, max_stocks: int = 5) -> list:
-        """从历史消息中提取最近一次非空股票结果，用于超时降级兜底。"""
-        if not history:
-            return []
-
-        for msg in reversed(history):
-            if msg.get("role") != "assistant":
-                continue
-            stocks = msg.get("stocks") or []
-            if isinstance(stocks, list) and stocks:
-                return stocks[:max_stocks]
-        return []
-
     def _infer_request_focus(self, message: str) -> str:
         """从用户请求中提取核心筛选诉求，用于无结果与降级提示。"""
         text = (message or "").strip()
@@ -162,71 +149,22 @@ class IntelligentScreeningService:
                 return label
         return "原筛选条件"
 
-    def _build_quality_fallback_reply(
-        self,
-        message: str,
-        fallback_stocks: list,
-        reason: str,
-    ) -> str:
-        """构造明确区分“未命中原条件”和“优质股替代候选”的回复。"""
+    def _build_no_match_reply(self, message: str) -> str:
+        """未命中条件时返回硬提示，不推荐任何替代股票。"""
         focus = self._infer_request_focus(message)
         return (
-            f"未能为您筛出明确符合“{focus}”条件的股票，{reason}\n\n"
-            f"下面先给您 {len(fallback_stocks)} 只优质股作为替代参考，它们**不等同于符合您原始条件的结果**。"
-            "如果您仍想继续找更贴近条件的股票，请进一步补充阈值或行业范围。\n\n"
-            "```json\n"
-            f"{json.dumps({'stocks': fallback_stocks}, ensure_ascii=False, indent=2)}\n"
-            "```"
+            f"未找到符合“{focus}”条件的股票。\n\n"
+            "当前没有适合该筛选要求的标的，不推荐其它不符合条件的股票。"
+            "如果您仍想继续筛选，请进一步补充阈值、缩小行业范围，或调整筛选条件后重试。"
         )
 
-    async def _quick_screen_fallback(self, limit: int = 5) -> list:
-        """超时后的数据库粗筛兜底：直接返回高流动性高市值候选。"""
-        try:
-            from app.services.database_screening_service import get_database_screening_service
-
-            service = get_database_screening_service()
-            # 仅做轻量硬条件，保证响应速度
-            conditions = [
-                {"field": "is_st", "operator": "==", "value": False},
-                {"field": "total_mv", "operator": ">", "value": 30},
-            ]
-            items, _ = await service.screen_stocks(
-                conditions=conditions,
-                limit=max(1, min(limit, 10)),
-                offset=0,
-                order_by=[{"field": "total_mv", "direction": "desc"}],
-            )
-
-            stocks = []
-            for item in items:
-                stocks.append({
-                    "code": item.get("code", ""),
-                    "name": item.get("name", ""),
-                    "industry": item.get("industry", ""),
-                    "price": item.get("close"),
-                    "pe": item.get("pe") or item.get("pe_ttm"),
-                    "pb": item.get("pb") or item.get("pb_mrq"),
-                    "roe": item.get("roe"),
-                    "roa": item.get("roa"),
-                    "gross_margin": item.get("gross_margin"),
-                    "netprofit_margin": item.get("netprofit_margin"),
-                    "dividend_yield": item.get("dividend_yield"),
-                    "debt_to_assets": item.get("debt_to_assets"),
-                    "assets_to_eqt": item.get("assets_to_eqt"),
-                    "current_ratio": item.get("current_ratio"),
-                    "quick_ratio": item.get("quick_ratio"),
-                    "cash_ratio": item.get("cash_ratio"),
-                    "revenue_ttm": item.get("revenue_ttm"),
-                    "net_profit_ttm": item.get("net_profit_ttm"),
-                    "n_cashflow_act": item.get("n_cashflow_act"),
-                    "report_period": item.get("report_period"),
-                    "pct_change": item.get("pct_chg"),
-                    "reason": "替代优质股候选：按非ST+市值排序的快速粗筛结果，并非原筛选条件的直接命中结果",
-                })
-            return stocks
-        except Exception as e:
-            logger.warning(f"[智能筛选] 快速粗筛降级失败: {e}")
-            return []
+    def _build_timeout_reply(self, timeout_seconds: int) -> str:
+        """执行超时时返回硬提示，不推荐任何替代股票。"""
+        return (
+            f"抱歉，处理您的选股需求已超时（超过 {timeout_seconds} 秒）。\n\n"
+            "本次不会改为推荐其它不符合原筛选条件的股票。"
+            "建议您缩小筛选范围、补充更明确的阈值或行业条件，或稍后重试。"
+        )
 
     async def _emit_progress(
         self,
@@ -370,6 +308,8 @@ class IntelligentScreeningService:
                     max_tool_rounds=SCREENING_MAX_TOOL_ROUNDS,
                     tools_used=tools_used,
                     progress_callback=progress_callback,
+                    log_payloads=True,
+                    payload_log_label=f"intelligent_screening:{phase}",
                 )
             else:
                 await self._emit_progress(
@@ -379,7 +319,12 @@ class IntelligentScreeningService:
                     message="正在生成阶段性回复",
                 )
                 # 阶段 1（confirmation）和阶段 2（planning）：均不调用工具
-                resp = await self._llm_client.achat(messages, tools=None)
+                resp = await self._llm_client.achat(
+                    messages,
+                    tools=None,
+                    log_payloads=True,
+                    payload_log_label=f"intelligent_screening:{phase}",
+                )
             return resp.content
 
         try:
@@ -409,48 +354,10 @@ class IntelligentScreeningService:
                 progress_callback,
                 "timeout",
                 phase=phase,
-                message=f"处理超时，开始尝试降级兜底（{timeout_seconds} 秒）",
+                message=f"处理超时（{timeout_seconds} 秒）",
             )
 
-            # result 阶段超时时，优先回退到最近一次成功结果，再回退到数据库快速粗筛
-            fallback_stocks = []
-            if phase == "result":
-                fallback_stocks = self._get_last_successful_stocks_from_history(history, max_stocks=5)
-                if not fallback_stocks:
-                    fallback_stocks = await self._quick_screen_fallback(limit=5)
-
-            if fallback_stocks:
-                reply = self._build_quality_fallback_reply(
-                    message,
-                    fallback_stocks,
-                    f"且本轮处理已超时（超过 {timeout_seconds} 秒）。",
-                )
-                await self._save_message(
-                    user_id, resolved_conversation_id, message, reply, tools_used, fallback_stocks, "result", is_fallback=True,
-                )
-                await self._emit_progress(
-                    progress_callback,
-                    "fallback_ready",
-                    phase="result",
-                    message=f"未找到可直接确认的命中结果，已生成 {len(fallback_stocks)} 只优质股替代候选",
-                    stocks=fallback_stocks,
-                )
-                return {
-                    "reply": reply,
-                    "tools_used": tools_used,
-                    "stocks": fallback_stocks,
-                    "phase": "result",
-                    "conversation_id": resolved_conversation_id,
-                    "is_fallback": True,
-                }
-
-            reply = (
-                f"抱歉，处理您的选股需求用时过长（已超过 {timeout_seconds} 秒）。\n\n"
-                "建议您：\n"
-                "• 保留 2-3 个硬条件（如 PE / 市值 / 非ST）\n"
-                "• 指定行业后再筛选\n"
-                "• 稍后重试"
-            )
+            reply = self._build_timeout_reply(timeout_seconds)
             await self._save_message(user_id, resolved_conversation_id, message, reply, tools_used, [], "result")
             return {
                 "reply": reply,
@@ -481,30 +388,24 @@ class IntelligentScreeningService:
         stocks = self._extract_stocks(reply) if phase == "result" else []
 
         if phase == "result" and not stocks and "screen_stocks_by_criteria" in tools_used:
-            fallback_stocks = await self._quick_screen_fallback(limit=5)
-            if fallback_stocks:
-                reply = self._build_quality_fallback_reply(
-                    message,
-                    fallback_stocks,
-                    "当前数据库里暂未查到满足该条件的直接结果。",
-                )
-                stocks = fallback_stocks
-                await self._emit_progress(
-                    progress_callback,
-                    "fallback_ready",
-                    phase="result",
-                    message=f"未查到符合条件的股票，已改为返回 {len(fallback_stocks)} 只优质股替代候选",
-                    stocks=fallback_stocks,
-                )
-                await self._save_message(user_id, resolved_conversation_id, message, reply, tools_used, stocks, phase, is_fallback=True)
-                return {
-                    "reply": reply,
-                    "tools_used": tools_used,
-                    "stocks": stocks,
-                    "phase": phase,
-                    "conversation_id": resolved_conversation_id,
-                    "is_fallback": True,
-                }
+            reply = self._build_no_match_reply(message)
+            stocks = []
+            await self._emit_progress(
+                progress_callback,
+                "no_match",
+                phase="result",
+                message="未找到符合原筛选条件的股票",
+                stocks=[],
+            )
+            await self._save_message(user_id, resolved_conversation_id, message, reply, tools_used, stocks, phase)
+            return {
+                "reply": reply,
+                "tools_used": tools_used,
+                "stocks": stocks,
+                "phase": phase,
+                "conversation_id": resolved_conversation_id,
+                "is_fallback": False,
+            }
 
         await self._save_message(user_id, resolved_conversation_id, message, reply, tools_used, stocks, phase)
         return {
@@ -753,6 +654,12 @@ class IntelligentScreeningService:
 ## 规则
 
 - 当前日期：{curr_date}
+- 默认最多执行 **两轮数据工具调用**：
+    - 第 1 轮：`screen_stocks_by_criteria`
+    - 第 2 轮：仅当确有必要时才调用 `batch_check_profit_consistency`
+- 若步骤 1 已能直接选出最终推荐，则**跳过**步骤 2，直接输出最终结果
+- 一旦已有足够数据生成最终推荐，**立即停止继续调用工具**
+- 不要为了“凑满信息”反复改阈值、重复筛选或重新扩大范围；当前条件下结果不足时，应直接说明限制
 - 每次推荐恰好 5 只股票，不多不少
 - 推荐理由要具体，结合数据说话
 - 若工具结果中已提供 ROE、股息率、资产负债率、流动比率、财报期，优先一并放入 JSON 字段，便于前端直接展示
@@ -865,32 +772,14 @@ class IntelligentScreeningService:
             elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
             logger.info(f"[智能筛选] run_direct_screening 完成 elapsed={elapsed:.2f}s tools_used={len(tools_used)}")
         except asyncio.TimeoutError:
-            fallback_stocks = await self._quick_screen_fallback(limit=max_stocks)
-            if fallback_stocks:
-                reply = self._build_quality_fallback_reply(
-                    criteria,
-                    fallback_stocks,
-                    f"且本轮处理已超时（超过 {SCREENING_RESULT_TIMEOUT_SECONDS} 秒）。",
-                )
-                return {"reply": reply, "stocks": fallback_stocks, "phase": "result", "is_fallback": True}
-
-            reply = (
-                f"选股处理超时（超过 {SCREENING_RESULT_TIMEOUT_SECONDS} 秒）。"
-                "建议缩小筛选范围或稍后重试。"
-            )
+            reply = self._build_timeout_reply(SCREENING_RESULT_TIMEOUT_SECONDS)
         except Exception as e:
             logger.exception("[智能筛选] run_direct_screening 失败")
             reply = f"处理选股请求时发生错误：{str(e)}。请稍后重试。"
         stocks = self._extract_stocks(reply)
         if not stocks and "screen_stocks_by_criteria" in tools_used:
-            fallback_stocks = await self._quick_screen_fallback(limit=max_stocks)
-            if fallback_stocks:
-                reply = self._build_quality_fallback_reply(
-                    criteria,
-                    fallback_stocks,
-                    "当前数据库里暂未查到满足该条件的直接结果。",
-                )
-                return {"reply": reply, "stocks": fallback_stocks, "phase": "result", "is_fallback": True}
+            reply = self._build_no_match_reply(criteria)
+            stocks = []
 
         return {"reply": reply, "stocks": stocks, "phase": "result"}
 

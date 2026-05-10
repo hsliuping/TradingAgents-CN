@@ -108,19 +108,20 @@ class EmbeddingManager:
         try:
             # 🔥 检查是否是异步数据库（AsyncIOMotorDatabase）
             # 如果是异步数据库，需要使用同步方式查询（通过 get_mongo_db_sync）
-            from motor.motor_asyncio import AsyncIOMotorDatabase
             from pymongo.database import Database
-            
-            if isinstance(self.db, AsyncIOMotorDatabase):
-                # 异步数据库：使用同步客户端查询
+
+            # 只有明确的 PyMongo 同步 Database 才直接使用；
+            # 其余情况（Motor 数据库或 loop-safe 代理）统一切到同步视图，
+            # 避免把 AsyncIOMotorCursor 当作同步游标迭代。
+            if isinstance(self.db, Database):
+                providers_collection = self.db.llm_providers
+                system_configs_collection = self.db.system_configs
+            else:
+                # 异步数据库或代理对象：使用同步客户端查询
                 from app.core.database import get_mongo_db_sync
                 sync_db = get_mongo_db_sync()
                 providers_collection = sync_db.llm_providers
                 system_configs_collection = sync_db.system_configs
-            else:
-                # 同步数据库：直接使用
-                providers_collection = self.db.llm_providers
-                system_configs_collection = self.db.system_configs
             
             # 🔥 新增：优先从系统配置读取默认 Embedding 模型
             default_embedding_model = None
@@ -144,13 +145,7 @@ class EmbeddingManager:
                 "is_active": True
             }).sort("created_at", 1)  # 按创建时间排序（因为 priority 字段不存在）
             
-            # 🔥 修复：将游标转换为列表（支持同步和异步游标）
-            if isinstance(self.db, AsyncIOMotorDatabase):
-                # 异步游标：需要同步执行（这里使用同步客户端，所以已经是同步游标）
-                provider_docs = list(cursor)
-            else:
-                # 同步游标：直接转换为列表
-                provider_docs = list(cursor)
+            provider_docs = list(cursor)
             
             # 🔥 如果配置了默认 Embedding 模型，解析并优先使用
             preferred_provider_name = None

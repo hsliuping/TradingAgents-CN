@@ -290,18 +290,27 @@ async def init_database():
     """初始化数据库连接"""
     global mongo_client, mongo_db, redis_client, redis_pool, _mongo_runtime_loop, _redis_runtime_loop
 
-    try:
-        # 初始化MongoDB
-        await db_manager.init_mongodb()
-        mongo_client = db_manager.mongo_client
-        mongo_db = db_manager.mongo_db
-        _mongo_runtime_loop = asyncio.get_running_loop()
+    mongo_ready = mongo_client is not None and mongo_db is not None and db_manager._mongo_healthy
+    redis_ready = redis_client is not None and redis_pool is not None and db_manager._redis_healthy
 
-        # 初始化Redis
-        await db_manager.init_redis()
-        redis_client = db_manager.redis_client
-        redis_pool = db_manager.redis_pool
-        _redis_runtime_loop = asyncio.get_running_loop()
+    if mongo_ready and redis_ready:
+        logger.debug("数据库连接已初始化且健康，跳过重复初始化")
+        return
+
+    try:
+        if not mongo_ready:
+            # 初始化MongoDB
+            await db_manager.init_mongodb()
+            mongo_client = db_manager.mongo_client
+            mongo_db = db_manager.mongo_db
+            _mongo_runtime_loop = asyncio.get_running_loop()
+
+        if not redis_ready:
+            # 初始化Redis
+            await db_manager.init_redis()
+            redis_client = db_manager.redis_client
+            redis_pool = db_manager.redis_pool
+            _redis_runtime_loop = asyncio.get_running_loop()
 
         logger.info("🎉 所有数据库连接初始化完成")
 

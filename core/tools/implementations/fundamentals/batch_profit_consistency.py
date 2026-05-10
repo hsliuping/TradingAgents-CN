@@ -5,8 +5,6 @@
 避免对每只股票单独发出 N 次查询，大幅提升效率。
 """
 
-import asyncio
-import concurrent.futures
 import json
 import logging
 import math
@@ -16,6 +14,8 @@ from langchain_core.tools import tool
 from core.tools.base import register_tool
 
 logger = logging.getLogger(__name__)
+
+MAX_DETAIL_PER_GROUP = 5
 
 
 @tool
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
     auto_register=True,
     timeout_tier="light",
 )
-def batch_check_profit_consistency(
+async def batch_check_profit_consistency(
     stock_codes_json: Annotated[
         str,
         '股票代码 JSON 数组，如 ["000001", "600519", "000858"]',
@@ -55,19 +55,7 @@ def batch_check_profit_consistency(
     except json.JSONDecodeError as e:
         return f"错误：stock_codes_json 格式不正确：{e}"
 
-    def _run_in_thread():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(
-                _async_check(codes, years, threshold_cv)
-            )
-        finally:
-            loop.close()
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(_run_in_thread)
-        return future.result(timeout=60)
+    return await _async_check(codes, years, threshold_cv)
 
 
 async def _async_check(
@@ -140,6 +128,47 @@ def _cv(values: List[float]) -> float:
     return std / abs(mean)
 
 
+def _build_detail_line(
+    code: str,
+    roe_values: List[float],
+    periods: List[str],
+    cv_val: float,
+    threshold_cv: float,
+    all_positive: bool,
+    is_stable: bool,
+) -> str:
+    actual_years = len(roe_values)
+    roe_str = " / ".join(f"{v:.1f}%" for v in roe_values)
+    periods_str = " / ".join(p[:4] for p in periods)
+
+    if is_stable:
+        return (
+            f"  ✅ {code}：稳定 | CV={cv_val:.2f} | ROE连续为正=是"
+            f" | 近{actual_years}年ROE({periods_str}): {roe_str}"
+        )
+
+    reasons = []
+    if cv_val > threshold_cv:
+        reasons.append(f"CV={cv_val:.2f}>{threshold_cv:.0%}")
+    if not all_positive:
+        reasons.append("ROE含负值")
+    reason_text = " / ".join(reasons) if reasons else "波动偏大"
+    return (
+        f"  ❌ {code}：不稳定 | {reason_text}"
+        f" | 近{actual_years}年ROE({periods_str}): {roe_str}"
+    )
+
+
+def _append_group_preview(lines: List[str], title: str, entries: List[str], total_count: int) -> None:
+    if not entries:
+        return
+    lines.append(title)
+    lines.extend(entries[:MAX_DETAIL_PER_GROUP])
+    if total_count > len(entries[:MAX_DETAIL_PER_GROUP]):
+        lines.append(f"  ... 其余 {total_count - len(entries[:MAX_DETAIL_PER_GROUP])} 只已省略详细展开")
+    lines.append("")
+
+
 def _format_results(
     codes: List[str],
     results_map: Dict[str, Any],
@@ -147,56 +176,56 @@ def _format_results(
     threshold_cv: float,
 ) -> str:
     lines = [
-        f"共验证 {len(codes)} 只股票近 {years} 年盈利稳定性（变异系数阈值 ≤ {threshold_cv:.0%}）：\n"
+        f"共验证 {len(codes)} 只股票近 {years} 年盈利稳定性（变异系数阈值 ≤ {threshold_cv:.0%}）。",
+        "结果已压缩为汇总摘要；如需继续筛选，请优先使用下方代码列表。",
+        "",
     ]
 
     stable_codes, volatile_codes, no_data_codes = [], [], []
+    stable_details: List[str] = []
+    volatile_details: List[str] = []
 
     for code in codes:
         data = results_map.get(code)
         if not data or not data["roe_values"]:
             no_data_codes.append(code)
-            lines.append(f"  ⚪ {code}：无年报数据，跳过")
             continue
 
         roe_values = data["roe_values"]
         periods = data["periods"]
-        actual_years = len(roe_values)
         cv_val = _cv(roe_values)
         all_positive = all(v > 0 for v in roe_values)
 
         # 判断稳定性：CV 需 ≤ 阈值 且 ROE 连续为正
         is_stable = (cv_val <= threshold_cv) and all_positive
 
-        roe_str = " / ".join(f"{v:.1f}%" for v in roe_values)
-        periods_str = " / ".join(p[:4] for p in periods)  # 只显示年份
-
         if is_stable:
             stable_codes.append(code)
-            lines.append(
-                f"  ✅ {code}：盈利稳定 | CV={cv_val:.2f} "
-                f"| ROE连续为正={'是' if all_positive else '否'} "
-                f"| 近{actual_years}年ROE({periods_str}): {roe_str}"
+            stable_details.append(
+                _build_detail_line(
+                    code, roe_values, periods, cv_val, threshold_cv, all_positive, is_stable=True
+                )
             )
         else:
             volatile_codes.append(code)
-            reason = []
-            if cv_val > threshold_cv:
-                reason.append(f"CV={cv_val:.2f}>{threshold_cv:.0%}")
-            if not all_positive:
-                reason.append("ROE含负值")
-            lines.append(
-                f"  ❌ {code}：盈利不稳定 | {' / '.join(reason)} "
-                f"| 近{actual_years}年ROE({periods_str}): {roe_str}"
+            volatile_details.append(
+                _build_detail_line(
+                    code, roe_values, periods, cv_val, threshold_cv, all_positive, is_stable=False
+                )
             )
 
-    lines.append(
-        f"\n📊 汇总：稳定 {len(stable_codes)} 只 | 不稳定 {len(volatile_codes)} 只 | 无数据 {len(no_data_codes)} 只"
-    )
+    lines.append(f"📊 汇总：稳定 {len(stable_codes)} 只 | 不稳定 {len(volatile_codes)} 只 | 无数据 {len(no_data_codes)} 只")
+    lines.append("")
+
+    _append_group_preview(lines, "稳定样例：", stable_details, len(stable_codes))
+    _append_group_preview(lines, "不稳定样例：", volatile_details, len(volatile_codes))
+
     if stable_codes:
         lines.append(f"✅ 稳定股票代码：{', '.join(stable_codes)}")
     if volatile_codes:
         lines.append(f"❌ 不稳定股票代码：{', '.join(volatile_codes)}")
+    if no_data_codes:
+        lines.append(f"⚪ 无数据股票代码：{', '.join(no_data_codes)}")
 
     return "\n".join(lines)
 
