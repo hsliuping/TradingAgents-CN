@@ -4,6 +4,7 @@
 """
 
 import logging
+from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -14,6 +15,44 @@ from app.services.log_export_service import get_log_export_service
 
 router = APIRouter(prefix="/system-logs", tags=["系统日志"])
 logger = logging.getLogger("webapi")
+
+
+def _validate_log_filename(filename: str, log_dir: Path) -> Path:
+    """
+    验证日志文件名，防止路径遍历攻击 (CWE-22)。
+
+    确保：
+      1. 文件名不包含路径分隔符或 ``..`` 序列
+      2. 文件名为非空字符串
+      3. 解析后的绝对路径仍位于 ``log_dir`` 内部
+
+    Args:
+        filename: 用户提供的文件名
+        log_dir: 允许访问的日志根目录
+
+    Returns:
+        经过验证的文件绝对路径 (Path)
+
+    Raises:
+        HTTPException: 文件名非法或越界
+    """
+    if not filename or not isinstance(filename, str):
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+
+    # 拒绝任何路径分隔符或父目录引用
+    if "/" in filename or "\\" in filename or filename in (".", "..") or ".." in filename:
+        raise HTTPException(status_code=400, detail="文件名包含非法字符")
+
+    resolved = (log_dir / filename).resolve()
+    log_dir_resolved = log_dir.resolve()
+
+    # 容器检查：解析后的路径必须位于 log_dir 内
+    try:
+        resolved.relative_to(log_dir_resolved)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="访问的路径超出日志目录范围")
+
+    return resolved
 
 
 # 请求模型
@@ -103,6 +142,8 @@ async def read_log_file(
         logger.info(f"📖 用户 {current_user['username']} 读取日志文件: {request.filename}")
         
         service = get_log_export_service()
+        # 路径遍历防护 (CWE-22)
+        _validate_log_filename(request.filename, service.log_dir)
         content = service.read_log_file(
             filename=request.filename,
             lines=request.lines,
@@ -114,6 +155,8 @@ async def read_log_file(
         
         return content
         
+    except HTTPException:
+        raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -142,6 +185,12 @@ async def export_logs(
         logger.info(f"📤 用户 {current_user['username']} 导出日志文件")
         
         service = get_log_export_service()
+
+        # 路径遍历防护 (CWE-22)：逐个验证请求的文件名
+        if request.filenames:
+            for fn in request.filenames:
+                _validate_log_filename(fn, service.log_dir)
+
         export_path = service.export_logs(
             filenames=request.filenames,
             level=request.level,
@@ -162,6 +211,8 @@ async def export_logs(
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
         
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -210,7 +261,9 @@ async def delete_log_file(
         logger.warning(f"🗑️ 用户 {current_user['username']} 删除日志文件: {filename}")
         
         service = get_log_export_service()
-        file_path = service.log_dir / filename
+
+        # 路径遍历防护 (CWE-22)：验证文件名并解析至 log_dir 内
+        file_path = _validate_log_filename(filename, service.log_dir)
         
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="日志文件不存在")
@@ -231,4 +284,3 @@ async def delete_log_file(
     except Exception as e:
         logger.error(f"❌ 删除日志文件失败: {e}")
         raise HTTPException(status_code=500, detail=f"删除日志文件失败: {str(e)}")
-
