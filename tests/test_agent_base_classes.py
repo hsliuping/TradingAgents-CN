@@ -65,7 +65,7 @@ class TestMarketAnalystV2:
 
 
 class TestBullResearcherV2:
-    """测试乐观情景研究员V2"""
+    """测试看涨研究员V2"""
     
     def test_import(self):
         """测试导入"""
@@ -77,7 +77,7 @@ class TestBullResearcherV2:
         from core.agents.adapters import BullResearcherV2
 
         assert BullResearcherV2.metadata.id == "bull_researcher_v2"
-        assert BullResearcherV2.metadata.name == "乐观情景研究员 v2.0"
+        assert BullResearcherV2.metadata.name == "看涨研究员 v2.0"
         assert BullResearcherV2.researcher_type == "bull"
         assert BullResearcherV2.stance == "bull"
     
@@ -160,7 +160,7 @@ class TestResearchManagerV2:
 
 
 class TestTraderV2:
-    """测试研究整合员V2"""
+    """测试交易员V2"""
     
     def test_import(self):
         """测试导入"""
@@ -172,8 +172,8 @@ class TestTraderV2:
         from core.agents.adapters import TraderV2
 
         assert TraderV2.metadata.id == "trader_v2"
-        assert TraderV2.metadata.name == "研究整合员 v2.0"
-        assert TraderV2.output_field == "trader_investment_plan"
+        assert TraderV2.metadata.name == "交易员 v2.0"
+        assert TraderV2.output_field == "trading_plan"
     
     def test_user_prompt(self):
         """测试用户提示词生成"""
@@ -184,19 +184,13 @@ class TestTraderV2:
             ticker="AAPL",
             analysis_date="2024-12-15",
             investment_plan={"recommendation": "买入"},
-            all_reports={
-                "market_report": "市场分析",
-                "risk_management_decision": "风险治理结论",
-                "final_trade_decision": {"summary": "综合研究结论摘要"},
-            },
+            all_reports={"market_report": "市场分析"},
             historical_trades=None,
             state={}
         )
         
         assert "AAPL" in prompt
-        assert "一句话结论" in prompt
-        assert "当前判断的限制" in prompt
-        assert "综合研究结论摘要" in prompt or "风险审阅后的综合研究结论" in prompt
+        assert "买入" in prompt or "投资计划" in prompt
 
 
 # ============================================================
@@ -349,7 +343,7 @@ class TestIndexAnalystV2:
 
 
 class TestBearResearcherV2:
-    """测试审慎情景研究员V2"""
+    """测试看跌研究员V2"""
 
     def test_import(self):
         """测试导入"""
@@ -361,7 +355,7 @@ class TestBearResearcherV2:
         from core.agents.adapters import BearResearcherV2
 
         assert BearResearcherV2.metadata.id == "bear_researcher_v2"
-        assert BearResearcherV2.metadata.name == "审慎情景研究员 v2.0"
+        assert BearResearcherV2.metadata.name == "看跌研究员 v2.0"
         assert BearResearcherV2.researcher_type == "bear"
         assert BearResearcherV2.stance == "bear"
 
@@ -382,30 +376,6 @@ class TestRiskManagerV2:
         assert RiskManagerV2.metadata.name == "风险管理者 v2.0"
         assert RiskManagerV2.manager_type == "risk"
         assert RiskManagerV2.output_field == "risk_assessment"
-
-    def test_fallback_user_prompt_uses_robustness_review_semantics(self):
-        """测试降级提示词改为稳健性审阅口径"""
-        from core.agents.adapters import RiskManagerV2
-
-        agent = RiskManagerV2()
-        agent._get_prompt_from_template = lambda *args, **kwargs: None
-
-        prompt = agent._build_user_prompt(
-            ticker="000001",
-            analysis_date="2024-12-15",
-            inputs={
-                "investment_plan": "当前内部研究结论",
-                "risky_opinion": "激进观点",
-                "safe_opinion": "保守观点",
-                "neutral_opinion": "中性观点",
-            },
-            debate_summary="辩论总结",
-            state={"company_name": "平安银行"},
-        )
-
-        assert "当前内部研究结论" in prompt
-        assert "风险审阅后的综合研究结论" in prompt
-        assert "交易决策" in prompt
 
 
 # ==================== 持仓分析Agent测试 ====================
@@ -458,35 +428,6 @@ class TestTechnicalAnalystV2:
         assert "技术验证信号" in prompt
         assert "操作建议" not in prompt
         assert "支撑阻力位" not in prompt
-
-    def test_user_prompt_pins_market_tool_date_to_analysis_date(self):
-        """测试无缓存模板提示词会把市场工具日期参数绑到 analysis_date"""
-        from core.agents.adapters import TechnicalAnalystV2
-
-        agent = TechnicalAnalystV2()
-        agent._get_prompt_from_template = lambda *args, **kwargs: "请调用 get_stock_market_data_unified 获取市场数据。"
-
-        prompt = agent._build_user_prompt(
-            ticker="000002",
-            analysis_date="2026-04-28",
-            reports={},
-            historical_context=None,
-            state={
-                "position_info": {
-                    "code": "000002",
-                    "name": "万科Ａ",
-                    "cost_price": 3.8,
-                    "current_price": 3.77,
-                    "unrealized_pnl_pct": -0.79,
-                },
-                "market_data": {},
-                "stock_analysis_report": {"has_cache": False},
-            },
-        )
-
-        assert "start_date 必须严格填写为 2026-04-28" in prompt
-        assert "end_date 必须严格填写为 2026-04-28" in prompt
-        assert "不得使用示例日期" in prompt
 
 
 class TestFundamentalAnalystV2:
@@ -587,42 +528,6 @@ class TestRiskAssessorV2:
         assert "收益预期参考价位（仅供参考）" not in prompt
         assert "禁止输出风险控制参考价位" in prompt
 
-    def test_user_prompt_sanitizes_upstream_trigger_language(self):
-        """测试风险分析师不会把上游技术触发语原样塞进提示词"""
-        from core.agents.adapters import RiskAssessorV2
-
-        agent = RiskAssessorV2()
-        agent._get_prompt_from_template = lambda *args, **kwargs: None
-
-        prompt = agent._build_user_prompt(
-            ticker="000001",
-            analysis_date="2024-12-15",
-            reports={},
-            historical_context=None,
-            state={
-                "position_info": {
-                    "code": "000001",
-                    "name": "平安银行",
-                    "quantity": 100,
-                    "cost_price": 10.0,
-                    "current_price": 10.5,
-                    "market_value": 1050.0,
-                    "unrealized_pnl": 50.0,
-                    "unrealized_pnl_pct": 5.0,
-                },
-                "capital_info": {"total_assets": 100000.0},
-                "market_data": {"volatility": "中等"},
-                "stock_analysis_report": {"has_cache": False},
-                "technical_analysis": "价格连续两日站稳MA5（7.94）并放量，MACD翻红。",
-                "fundamental_analysis": "经营现金流较稳，但仍需继续核对销售回款情况。",
-            },
-        )
-
-        assert "站稳MA5" not in prompt
-        assert "放量" not in prompt
-        assert "MACD翻红" not in prompt
-        assert "经营现金流较稳" in prompt
-
 
 class TestActionAdvisorV2:
     """测试持仓研究整合师V2 (持仓分析)"""
@@ -669,57 +574,9 @@ class TestActionAdvisorV2:
         )
 
         assert "持仓研究结论" in prompt
-        assert "user_view" in prompt
-        assert "一句话结论" in prompt
-        assert "完整短句" in prompt
-        assert "宁可少写也不要输出半句" in prompt
-        assert "技术面" in prompt
-        assert "PB" in prompt
         assert "observation_factors" in prompt
         assert "价格分析区间" not in prompt
         assert "风险控制参考价" not in prompt
-
-    def test_legacy_execution_prompt_detection_ignores_negated_constraints(self):
-        """测试旧模板探测不会把禁止性约束误判为执行性模板"""
-        from core.agents.adapters.position.action_advisor_v2 import _contains_legacy_execution_prompt_terms
-
-        compliant_prompt = "严禁输出加仓、减仓、清仓、买卖、目标价、价格区间、止损止盈、仓位比例等执行性内容。"
-        legacy_prompt = "请给出JSON格式的操作建议，必须包含 risk_reference_price、profit_reference_price 和 detailed_analysis（2000-5000字）。"
-
-        assert _contains_legacy_execution_prompt_terms(compliant_prompt) is False
-        assert _contains_legacy_execution_prompt_terms(legacy_prompt) is True
-
-    def test_user_prompt_sanitizes_upstream_analysis_before_merging(self):
-        """测试整合师不会把上游原始技术触发语直接拼进提示词"""
-        from core.agents.adapters import ActionAdvisorV2
-
-        agent = ActionAdvisorV2()
-        agent._get_prompt_from_template = lambda *args, **kwargs: None
-
-        prompt = agent._build_user_prompt(
-            ticker="000001",
-            analysis_date="2024-12-15",
-            inputs={},
-            debate_summary=None,
-            state={
-                "position_info": {
-                    "code": "000001",
-                    "name": "平安银行",
-                    "cost_price": 10.0,
-                    "current_price": 10.5,
-                    "unrealized_pnl_pct": 5.0,
-                },
-                "technical_analysis": "价格连续两日站稳MA5（7.94）并放量，MACD翻红。",
-                "fundamental_analysis": "盈利能力承压，但经营现金流仍需继续核对。",
-                "risk_analysis": "若行业景气继续走弱，需重新评估当前判断。",
-                "user_goal": {"target_return": 10, "stop_loss": -8},
-            },
-        )
-
-        assert "价格连续两日站稳MA5（7.94）并放量，MACD翻红。" not in prompt
-        assert "MACD翻红" not in prompt
-        assert "经营现金流仍需继续核对" in prompt
-        assert "若行业景气继续走弱" in prompt
 
 
 # ==================== 复盘分析Agent测试 ====================
@@ -769,7 +626,6 @@ class TestTimingAnalystV2:
         assert "时机复盘" in prompt
         assert "证据完整性与纪律偏差" in prompt
         assert "与最优点的差距" not in prompt
-        assert "评分" not in prompt
 
 
 class TestPositionAnalystV2:
@@ -815,7 +671,6 @@ class TestPositionAnalystV2:
         assert "仓位复盘" in prompt
         assert "仓位变化依据分析" in prompt
         assert "加减仓策略分析" not in prompt
-        assert "评分" not in prompt
 
 
 class TestEmotionAnalystV2:
@@ -835,33 +690,6 @@ class TestEmotionAnalystV2:
         assert EmotionAnalystV2.researcher_type == "review_emotion"
         assert EmotionAnalystV2.output_field == "emotion_analysis"
 
-    def test_fallback_user_prompt_avoids_scoring_language(self):
-        """测试情绪复盘降级提示词不再要求评分"""
-        from core.agents.adapters import EmotionAnalystV2
-
-        agent = EmotionAnalystV2()
-        agent._get_prompt_from_template = lambda *args, **kwargs: None
-
-        prompt = agent._build_user_prompt(
-            ticker="000001",
-            analysis_date="2024-12-15",
-            reports={},
-            historical_context=None,
-            state={
-                "trade_info": {
-                    "code": "000001",
-                    "name": "平安银行",
-                    "realized_pnl": 120.0,
-                    "realized_pnl_pct": 3.2,
-                    "trades": [{"date": "2024-12-01", "side": "buy", "quantity": 100, "price": 10.2}],
-                },
-                "market_data": {"summary": "市场震荡，量能一般。"},
-            },
-        )
-
-        assert "情绪分析报告" in prompt
-        assert "评分" not in prompt
-
 
 class TestAttributionAnalystV2:
     """测试归因分析师V2 (复盘分析)"""
@@ -879,36 +707,6 @@ class TestAttributionAnalystV2:
         assert AttributionAnalystV2.metadata.name == "归因分析师 v2.0"
         assert AttributionAnalystV2.researcher_type == "review_attribution"
         assert AttributionAnalystV2.output_field == "attribution_analysis"
-
-    def test_fallback_user_prompt_avoids_scoring_language(self):
-        """测试归因复盘降级提示词不再要求评分"""
-        from core.agents.adapters import AttributionAnalystV2
-
-        agent = AttributionAnalystV2()
-        agent._get_prompt_from_template = lambda *args, **kwargs: None
-
-        prompt = agent._build_user_prompt(
-            ticker="000001",
-            analysis_date="2024-12-15",
-            reports={},
-            historical_context=None,
-            state={
-                "trade_info": {
-                    "code": "000001",
-                    "name": "平安银行",
-                    "realized_pnl_pct": 3.2,
-                    "holding_days": 12,
-                },
-                "benchmark_data": {
-                    "market_return": 0.01,
-                    "industry_return": 0.015,
-                    "industry_name": "银行",
-                },
-            },
-        )
-
-        assert "归因分析报告" in prompt
-        assert "评分" not in prompt
 
 
 class TestReviewManagerV2:

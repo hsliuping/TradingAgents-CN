@@ -6,9 +6,7 @@ v2.0 新增：标准化工具调用循环处理
 """
 
 import logging
-import uuid
 from abc import ABC, abstractmethod
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Callable
 from app.utils.api_key_utils import truncate_api_key
 
@@ -16,25 +14,28 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage, HumanMessage
 from langchain_core.tools import BaseTool
 
-from ..collaboration_runtime import (
-    InvocationArtifactRef,
-    InvocationPolicy,
-    InvocationProvenance,
-    InvocationRequest,
-    InvocationResult,
-    InvocationSourceType,
-    InvocationStatus,
-    InvocationTargetType,
-    utc_now,
-)
 from .config import AgentMetadata, AgentConfig
 
 logger = logging.getLogger(__name__)
+GENERIC_REPORT_FALLBACK = "工具执行或模型生成未完成，当前结论仍待验证。"
+
+
+def is_retryable_llm_error(error_msg: str) -> bool:
+    normalized_error = str(error_msg or "").lower()
+    return (
+        "choices" in normalized_error or
+        "null value" in normalized_error or
+        "connection" in normalized_error or
+        "timeout" in normalized_error or
+        "timed out" in normalized_error or
+        "rate limit" in normalized_error or
+        "503" in normalized_error or
+        "502" in normalized_error or
+        "500" in normalized_error
+    )
 
 # 默认配置
 DEFAULT_MAX_TOOL_ITERATIONS = 3  # 最大工具调用迭代次数
-_DEFAULT_AGENT_CALLABLE_SURFACES = {"assistant", "workflow", "agent"}
-GENERIC_REPORT_FALLBACK = "工具执行或模型生成未完成，当前结论仍待验证。"
 
 
 class BaseAgent(ABC):
@@ -84,8 +85,6 @@ class BaseAgent(ABC):
         self._tools: Dict[str, Callable] = {}  # 旧版工具字典
         self._langchain_tools: List[BaseTool] = []  # 新版 LangChain 工具列表
         self._prompt_template: Optional[str] = None
-        self._last_llm_debug: Dict[str, Any] = {}
-        self._last_tool_debug: List[Dict[str, Any]] = []
 
         # v2.0: 动态加载工具
         if tool_ids is not None:
@@ -323,398 +322,6 @@ class BaseAgent(ABC):
         tool_def = self._llm_client.register_tool(func, name, description)
         tool_name = tool_def["function"]["name"]
         self._tools[tool_name] = func
-
-    def _normalize_callable_surfaces(self, raw_surfaces: Optional[List[Any]]) -> set:
-        normalized = {
-            str(item).strip().lower()
-            for item in (raw_surfaces or [])
-            if str(item).strip()
-        }
-        return normalized or set(_DEFAULT_AGENT_CALLABLE_SURFACES)
-
-    def _ensure_agent_surface_access(self, target_agent_id: str) -> None:
-        from app.core.database import get_mongo_db_sync
-
-        from .registry import get_registry
-
-        registry = get_registry()
-        metadata = registry.get_metadata(target_agent_id)
-        metadata_surfaces = getattr(metadata, "callable_surfaces", None)
-        db_surfaces = None
-
-        try:
-            db = get_mongo_db_sync()
-            if db is not None:
-                doc = db.agent_configs.find_one(
-                    {"agent_id": target_agent_id},
-                    {"metadata.callable_surfaces": 1},
-                ) or {}
-                db_surfaces = ((doc.get("metadata") or {}).get("callable_surfaces"))
-        except Exception as exc:
-            logger.warning("[BaseAgent] 读取 Agent 调用面配置失败 %s: %s", target_agent_id, exc)
-
-        allowed_surfaces = self._normalize_callable_surfaces(db_surfaces or metadata_surfaces)
-        if "agent" not in allowed_surfaces:
-            raise ValueError(f"Agent {target_agent_id} 当前不允许从 agent 入口直接调用")
-
-    def _extract_runtime_context(self, state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        runtime_context: Dict[str, Any] = {}
-        if not isinstance(state, dict):
-            return runtime_context
-
-        runtime_context.update(dict(state.get("_workflow_runtime") or {}))
-
-        lineage = state.get("invocation_lineage")
-        if isinstance(lineage, dict):
-            for field_name in ("current_invocation_id", "parent_invocation_id", "root_invocation_id"):
-                field_value = lineage.get(field_name)
-                if field_value and not runtime_context.get(field_name):
-                    runtime_context[field_name] = field_value
-
-        invocation_provenance = state.get("invocation_provenance")
-        if isinstance(invocation_provenance, dict):
-            provenance_metadata = invocation_provenance.get("metadata") if isinstance(invocation_provenance.get("metadata"), dict) else {}
-            for field_name in ("root_invocation_id", "parent_invocation_id"):
-                field_value = provenance_metadata.get(field_name)
-                if field_value and not runtime_context.get(field_name):
-                    runtime_context[field_name] = field_value
-
-        if state.get("workflow_id") and not runtime_context.get("workflow_id"):
-            runtime_context["workflow_id"] = state.get("workflow_id")
-        if state.get("node_id") and not runtime_context.get("node_id"):
-            runtime_context["node_id"] = state.get("node_id")
-        if state.get("user_id") and not runtime_context.get("user_id"):
-            runtime_context["user_id"] = state.get("user_id")
-        if state.get("thread_id") and not runtime_context.get("thread_id"):
-            runtime_context["thread_id"] = state.get("thread_id")
-
-        context = state.get("context")
-        if isinstance(context, dict):
-            if context.get("workflow_id") and not runtime_context.get("workflow_id"):
-                runtime_context["workflow_id"] = context.get("workflow_id")
-            if context.get("node_id") and not runtime_context.get("node_id"):
-                runtime_context["node_id"] = context.get("node_id")
-            if context.get("user_id") and not runtime_context.get("user_id"):
-                runtime_context["user_id"] = context.get("user_id")
-            if context.get("session_id") and not runtime_context.get("session_id"):
-                runtime_context["session_id"] = context.get("session_id")
-            if context.get("thread_id") and not runtime_context.get("thread_id"):
-                runtime_context["thread_id"] = context.get("thread_id")
-            extra = context.get("extra") if isinstance(context.get("extra"), dict) else {}
-            for field_name in ("invocation_id", "root_invocation_id", "parent_invocation_id"):
-                field_value = extra.get(field_name)
-                target_field = "current_invocation_id" if field_name == "invocation_id" else field_name
-                if field_value and not runtime_context.get(target_field):
-                    runtime_context[target_field] = field_value
-        elif context is not None:
-            for field_name in ("workflow_id", "node_id", "user_id", "session_id", "thread_id"):
-                field_value = getattr(context, field_name, None)
-                if field_value and not runtime_context.get(field_name):
-                    runtime_context[field_name] = field_value
-            extra = getattr(context, "extra", None)
-            if isinstance(extra, dict):
-                for field_name in ("invocation_id", "root_invocation_id", "parent_invocation_id"):
-                    field_value = extra.get(field_name)
-                    target_field = "current_invocation_id" if field_name == "invocation_id" else field_name
-                    if field_value and not runtime_context.get(target_field):
-                        runtime_context[target_field] = field_value
-
-        return runtime_context
-
-    def _sanitize_invocation_value(self, value: Any, max_text_length: int = 3000, depth: int = 0) -> Any:
-        if isinstance(value, str):
-            return value[:max_text_length]
-        if isinstance(value, (int, float, bool)) or value is None:
-            return value
-        if depth >= 1:
-            return str(value)[:max_text_length]
-        if isinstance(value, list):
-            return [self._sanitize_invocation_value(item, max_text_length=max_text_length, depth=depth + 1) for item in value[:10]]
-        if isinstance(value, dict):
-            sanitized: Dict[str, Any] = {}
-            for key, item in list(value.items())[:20]:
-                sanitized[str(key)] = self._sanitize_invocation_value(item, max_text_length=max_text_length, depth=depth + 1)
-            return sanitized
-        return str(value)[:max_text_length]
-
-    def _build_agent_invocation_payload(
-        self,
-        state: Optional[Dict[str, Any]],
-        payload: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        prepared_payload = dict(payload or {})
-        if not isinstance(state, dict):
-            return prepared_payload or {"raw_state": self._sanitize_invocation_value(state)}
-
-        preferred_keys = [
-            "symbol",
-            "ticker",
-            "stock_symbol",
-            "stock_code",
-            "trade_date",
-            "analysis_date",
-            "market_type",
-            "task",
-            "task_description",
-            "query",
-        ]
-        for key in preferred_keys:
-            if key in state and key not in prepared_payload:
-                prepared_payload[key] = self._sanitize_invocation_value(state.get(key))
-
-        if prepared_payload:
-            return prepared_payload
-
-        snapshot: Dict[str, Any] = {}
-        for key, value in state.items():
-            if str(key).startswith("_") or key in {"messages", "context"}:
-                continue
-            snapshot[str(key)] = self._sanitize_invocation_value(value)
-            if len(snapshot) >= 12:
-                break
-        return {"state_snapshot": snapshot}
-
-    def _resolve_agent_output_field(self, target_agent_id: str) -> Optional[str]:
-        from app.core.database import get_mongo_db_sync
-
-        from .registry import get_registry
-
-        try:
-            db = get_mongo_db_sync()
-            if db is not None:
-                doc = db.agent_configs.find_one(
-                    {"agent_id": target_agent_id},
-                    {"output_field": 1, "metadata.output_field": 1},
-                ) or {}
-                if doc.get("output_field"):
-                    return str(doc["output_field"])
-                if (doc.get("metadata") or {}).get("output_field"):
-                    return str(doc["metadata"]["output_field"])
-        except Exception as exc:
-            logger.warning("[BaseAgent] 读取 Agent 输出字段失败 %s: %s", target_agent_id, exc)
-
-        metadata = get_registry().get_metadata(target_agent_id)
-        if metadata and getattr(metadata, "output_field", None):
-            return str(metadata.output_field)
-        outputs = getattr(metadata, "outputs", None) or []
-        if outputs and getattr(outputs[0], "name", None):
-            return str(outputs[0].name)
-        return None
-
-    def _extract_invocation_output_text(self, result: Dict[str, Any], output_field: Optional[str]) -> str:
-        candidate_fields = [
-            output_field,
-            "final_report",
-            "analysis_report",
-            "summary",
-            "analysis_result",
-        ]
-        for field_name in candidate_fields:
-            if not field_name:
-                continue
-            value = result.get(field_name)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-            if isinstance(value, dict):
-                for nested_key in ("content", "markdown", "text", "message", "report"):
-                    nested_value = value.get(nested_key)
-                    if isinstance(nested_value, str) and nested_value.strip():
-                        return nested_value.strip()
-
-        for value in result.values():
-            if isinstance(value, str) and value.strip() and len(value.strip()) > 20:
-                return value.strip()
-        return ""
-
-    def _sanitize_structured_output(self, result: Any) -> Dict[str, Any]:
-        if not isinstance(result, dict):
-            return {"raw_result": self._sanitize_invocation_value(result, max_text_length=4000)}
-
-        sanitized: Dict[str, Any] = {}
-        for key, value in result.items():
-            if key == "messages":
-                continue
-            sanitized[str(key)] = self._sanitize_invocation_value(value, max_text_length=4000)
-        return sanitized
-
-    def _persist_agent_invocation_record(
-        self,
-        request: InvocationRequest,
-        result: InvocationResult,
-    ) -> None:
-        from app.core.database import get_mongo_db_sync
-
-        try:
-            db = get_mongo_db_sync()
-            if db is None:
-                return
-            db.agent_agent_invocations.update_one(
-                {"invocation_id": request.invocation_id},
-                {
-                    "$set": {
-                        "invocation_id": request.invocation_id,
-                        "root_invocation_id": request.metadata.get("root_invocation_id") or request.provenance.metadata.get("root_invocation_id") or request.invocation_id,
-                        "parent_invocation_id": request.metadata.get("parent_invocation_id") or request.provenance.metadata.get("parent_invocation_id"),
-                        "source_agent_id": request.provenance.source_id,
-                        "workflow_id": request.provenance.workflow_id,
-                        "execution_id": request.provenance.session_id,
-                        "step_id": request.provenance.step_id,
-                        "user_id": request.provenance.user_id,
-                        "thread_id": request.provenance.thread_id,
-                        "target_type": request.target_type.value,
-                        "target_id": request.target_id,
-                        "status": result.status.value,
-                        "request": request.to_python_dict(),
-                        "result": result.to_python_dict(),
-                        "updated_at": datetime.utcnow(),
-                    },
-                    "$setOnInsert": {"created_at": datetime.utcnow()},
-                },
-                upsert=True,
-            )
-        except Exception as exc:
-            logger.warning("[BaseAgent] 持久化 Agent 调用记录失败 %s -> %s: %s", request.provenance.source_id, request.target_id, exc)
-
-    def invoke_agent(
-        self,
-        *,
-        target_agent_id: str,
-        state: Dict[str, Any],
-        payload: Optional[Dict[str, Any]] = None,
-        config: Optional[AgentConfig] = None,
-        tool_ids: Optional[List[str]] = None,
-        visible_to_caller: bool = True,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """在 Agent 内部统一调用另一个 Agent，并记录协作运行时。"""
-        from .factory import AgentFactory
-
-        if self._llm is None:
-            raise ValueError(f"Agent {self.agent_id} 当前没有可复用的 LLM，无法委托调用 {target_agent_id}")
-
-        self._ensure_agent_surface_access(target_agent_id)
-
-        runtime_context = self._extract_runtime_context(state)
-        invocation_id = f"ginv_{uuid.uuid4().hex}"
-        source_node_id = runtime_context.get("node_id") or self.agent_id
-        execution_id = runtime_context.get("execution_id") or runtime_context.get("session_id")
-        parent_invocation_id = runtime_context.get("current_invocation_id") or runtime_context.get("parent_invocation_id")
-        root_invocation_id = runtime_context.get("root_invocation_id") or parent_invocation_id or invocation_id
-        invocation_request = InvocationRequest(
-            invocation_id=invocation_id,
-            target_type=InvocationTargetType.AGENT,
-            target_id=target_agent_id,
-            action="execute",
-            payload=self._build_agent_invocation_payload(state, payload),
-            provenance=InvocationProvenance(
-                source_type=InvocationSourceType.AGENT,
-                source_id=self.agent_id,
-                user_id=runtime_context.get("user_id"),
-                session_id=execution_id,
-                thread_id=runtime_context.get("thread_id"),
-                workflow_id=runtime_context.get("workflow_id"),
-                step_id=source_node_id,
-                trigger="agent_delegate",
-                metadata={
-                    "target_agent_id": target_agent_id,
-                    "source_node_id": source_node_id,
-                    "root_invocation_id": root_invocation_id,
-                    "parent_invocation_id": parent_invocation_id,
-                    **(metadata or {}),
-                },
-            ),
-            policy=InvocationPolicy(
-                idempotency_key=f"{self.agent_id}:{target_agent_id}:{execution_id or invocation_id}",
-                timeout_seconds=int((config or self.config).timeout if (config or self.config) else 180),
-                lane=f"agent.{runtime_context.get('workflow_id') or self.agent_id}",
-                visible_to_caller=visible_to_caller,
-            ),
-            metadata={
-                "invocation_source": "agent",
-                "source_agent_id": self.agent_id,
-                "root_invocation_id": root_invocation_id,
-                "parent_invocation_id": parent_invocation_id,
-                **(metadata or {}),
-            },
-        )
-        started_at = utc_now()
-        output_field = self._resolve_agent_output_field(target_agent_id)
-
-        try:
-            delegated_agent = AgentFactory().create(
-                target_agent_id,
-                config=config or AgentConfig(),
-                llm=self._llm,
-                tool_ids=tool_ids,
-                memory=getattr(self, "memory", None) or getattr(self, "_memory", None),
-            )
-            delegated_state = dict(state or {})
-            delegated_state["node_id"] = target_agent_id
-            delegated_state["invocation_provenance"] = invocation_request.provenance.to_python_dict()
-            delegated_state["invocation_lineage"] = {
-                "current_invocation_id": invocation_request.invocation_id,
-                "parent_invocation_id": parent_invocation_id,
-                "root_invocation_id": root_invocation_id,
-            }
-
-            raw_result = delegated_agent(delegated_state)
-            result = raw_result if isinstance(raw_result, dict) else {
-                (output_field or f"{target_agent_id}_report"): raw_result
-            }
-
-            invocation_result = InvocationResult(
-                invocation_id=invocation_request.invocation_id,
-                target_type=InvocationTargetType.AGENT,
-                target_id=target_agent_id,
-                status=InvocationStatus.SUCCEEDED,
-                started_at=started_at,
-                output_text=self._extract_invocation_output_text(result, output_field),
-                structured_output=self._sanitize_structured_output(result),
-                output_field=output_field,
-                artifacts=[
-                    InvocationArtifactRef(
-                        ref_type="agent_agent_invocation",
-                        artifact_key=invocation_request.invocation_id,
-                        title=f"Agent委托调用：{self.agent_id} -> {target_agent_id}",
-                        summary=self._extract_invocation_output_text(result, output_field)[:300],
-                        source_collection="agent_agent_invocations",
-                        output_field=output_field,
-                        metadata={
-                            "source_agent_id": self.agent_id,
-                            "target_agent_id": target_agent_id,
-                            "workflow_id": runtime_context.get("workflow_id"),
-                        },
-                    )
-                ],
-                metadata={
-                    "source_agent_id": self.agent_id,
-                    "workflow_id": runtime_context.get("workflow_id"),
-                    "root_invocation_id": root_invocation_id,
-                    "parent_invocation_id": parent_invocation_id,
-                    **(metadata or {}),
-                },
-            )
-            self._persist_agent_invocation_record(invocation_request, invocation_result)
-            return result
-        except Exception as exc:
-            invocation_result = InvocationResult(
-                invocation_id=invocation_request.invocation_id,
-                target_type=InvocationTargetType.AGENT,
-                target_id=target_agent_id,
-                status=InvocationStatus.FAILED,
-                started_at=started_at,
-                output_field=output_field,
-                error_message=str(exc),
-                metadata={
-                    "source_agent_id": self.agent_id,
-                    "workflow_id": runtime_context.get("workflow_id"),
-                    "root_invocation_id": root_invocation_id,
-                    "parent_invocation_id": parent_invocation_id,
-                    **(metadata or {}),
-                },
-            )
-            self._persist_agent_invocation_record(invocation_request, invocation_result)
-            raise
     
     @abstractmethod
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -727,69 +334,6 @@ class BaseAgent(ABC):
         Returns:
             更新后的状态字典
         """
-
-    def describe_capabilities(self) -> Dict[str, Any]:
-        """返回当前 Agent 的结构化能力声明。"""
-        metadata = self.get_metadata()
-        growth_outputs = list(metadata.growth_outputs or [])
-        if not growth_outputs and metadata.output_field:
-            growth_outputs = [metadata.output_field]
-
-        return {
-            "agent_id": metadata.id,
-            "category": metadata.category,
-            "reads_from": list(metadata.reads_from or []),
-            "output_field": metadata.output_field,
-            "requires_tools": metadata.requires_tools,
-            "default_tools": list(metadata.default_tools or []),
-            "max_tool_calls": metadata.max_tool_calls,
-            "growth_role": metadata.growth_role,
-            "growth_outputs": growth_outputs,
-            "memory_scope_hint": metadata.memory_scope_hint,
-            "review_level": metadata.review_level,
-            "growth_source_type": metadata.growth_source_type,
-            "maturity_level": metadata.maturity_level,
-            "input_mode": metadata.input_mode,
-            "debug_replay_mode": metadata.debug_replay_mode,
-            "maintenance_status": metadata.maintenance_status,
-            "callable_surfaces": list(metadata.callable_surfaces or []),
-        }
-
-    def get_growth_artifacts(
-        self,
-        result: Dict[str, Any],
-        state: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
-        """基于元数据返回适合进入成长抽取的候选产物。"""
-        metadata = self.get_metadata()
-        candidate_fields = list(metadata.growth_outputs or [])
-        if not candidate_fields and metadata.output_field:
-            candidate_fields = [metadata.output_field]
-
-        artifacts: List[Dict[str, Any]] = []
-        source_state = state or {}
-        for field_name in candidate_fields:
-            value = result.get(field_name)
-            if value is None:
-                value = source_state.get(field_name)
-            if value in (None, "", [], {}):
-                continue
-
-            artifacts.append(
-                {
-                    "field": field_name,
-                    "content": value,
-                    "review_level": metadata.review_level,
-                    "memory_scope_hint": metadata.memory_scope_hint,
-                    "growth_source_type": metadata.growth_source_type,
-                }
-            )
-
-        return artifacts
-
-    def get_review_requirement(self) -> str:
-        """返回成长产物的审核要求。"""
-        return str(self.get_metadata().review_level)
         pass
     
     def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -888,7 +432,6 @@ class BaseAgent(ABC):
             raise ValueError("LLM 未配置，无法执行工具调用")
 
         current_messages = list(messages)
-        self._last_tool_debug = []
 
         logger.info(f"🚀 [{self.agent_id}] 开始工具调用循环，最大迭代次数: {max_iterations}")
         logger.info(f"🔧 [{self.agent_id}] 可用工具数量: {len(self._langchain_tools) if self._langchain_tools else 0}")
@@ -991,15 +534,79 @@ class BaseAgent(ABC):
                     logger.info(f"  [{idx+1}] {msg_type}: {str(msg)[:200]}")
             logger.info(f"=" * 100)
 
-            from core.utils.retry import retry_sync, is_retryable
+            # 🔥 添加重试机制（使用 agent 配置的 max_retries，默认3次）
             max_retries = getattr(self.config, 'max_retries', 3)
-            response = retry_sync(
-                llm_with_tools.invoke,
-                current_messages,
-                max_retries=max_retries,
-                label=self.agent_id,
-                retryable=is_retryable,
-            )
+            retry_count = 0
+            last_error = None
+            
+            while retry_count <= max_retries:
+                try:
+                    if retry_count > 0:
+                        # 重试时等待（指数退避）
+                        import time
+                        wait_time = min(2 ** retry_count, 10)  # 最多等待10秒
+                        logger.info(f"⏳ [{self.agent_id}] 等待 {wait_time} 秒后重试（第 {retry_count}/{max_retries} 次）...")
+                        time.sleep(wait_time)
+                        logger.info(f"🔄 [{self.agent_id}] 开始第 {retry_count} 次重试...")
+                    
+                    # 🔥 重试时使用原始的 self._llm，确保参数（temperature, max_tokens等）保留
+                    if retry_count > 0:
+                        # 重试时重新绑定工具（如果需要）
+                        if self._langchain_tools:
+                            llm_with_tools = self._llm.bind_tools(self._langchain_tools)
+                            logger.info(f"🔗 [{self.agent_id}] 重试时重新绑定工具，保留原始LLM参数")
+                        else:
+                            llm_with_tools = self._llm
+                            logger.info(f"🔗 [{self.agent_id}] 重试时使用原始LLM，保留所有参数")
+                    
+                    response = llm_with_tools.invoke(current_messages)
+                    # 成功，跳出重试循环
+                    break
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    last_error = e
+                    
+                    # 🔥 检查是否是 choices 为 null 的错误或其他可重试的错误
+                    is_retryable = (
+                        "choices" in error_msg.lower() or 
+                        "null value" in error_msg.lower() or
+                        "connection" in error_msg.lower() or
+                        "timeout" in error_msg.lower() or
+                        "rate limit" in error_msg.lower() or
+                        "503" in error_msg or
+                        "502" in error_msg or
+                        "500" in error_msg
+                    )
+                    
+                    if is_retryable and retry_count < max_retries:
+                        retry_count += 1
+                        logger.warning(f"⚠️ [{self.agent_id}] LLM 调用失败（可重试错误）: {error_msg}")
+                        logger.warning(f"   将进行第 {retry_count}/{max_retries} 次重试...")
+                        continue
+                    else:
+                        # 不可重试的错误或已达到最大重试次数
+                        logger.error(f"❌ [{self.agent_id}] LLM API 调用失败")
+                        logger.error(f"   错误信息: {error_msg}")
+                        logger.error(f"   重试次数: {retry_count}/{max_retries}")
+                        
+                        if "choices" in error_msg.lower() or "null value" in error_msg.lower():
+                            logger.error(f"   这可能是因为：")
+                            logger.error(f"   1. LLM API 服务异常")
+                            logger.error(f"   2. API 密钥无效或过期")
+                            logger.error(f"   3. 请求参数不符合 API 要求")
+                            logger.error(f"   4. API 服务暂时不可用")
+                            # 🔥 尝试获取更多调试信息
+                            if hasattr(self._llm, 'model_name'):
+                                logger.error(f"   使用的模型: {self._llm.model_name}")
+                            elif hasattr(self._llm, 'model'):
+                                logger.error(f"   使用的模型: {self._llm.model}")
+                            if hasattr(self._llm, 'openai_api_base'):
+                                logger.error(f"   API Base: {self._llm.openai_api_base}")
+                            elif hasattr(self._llm, 'base_url'):
+                                logger.error(f"   API Base: {self._llm.base_url}")
+                        
+                        raise ValueError(f"LLM API 调用失败（已重试 {retry_count} 次）: {error_msg}") from last_error
 
             # 打印响应详情
             logger.info(f"=" * 100)
@@ -1076,14 +683,61 @@ class BaseAgent(ABC):
                 # 注意：不使用 bind_tools([])，因为 DashScope 不接受空的 tools 数组
                 logger.info(f"🔗 [{self.agent_id}] 直接调用 LLM 生成报告（无工具绑定）")
                 
+                # 🔥 添加重试机制（使用 agent 配置的 max_retries，默认3次）
                 max_retries = getattr(self.config, 'max_retries', 3)
-                final_response = retry_sync(
-                    self._llm.invoke,
-                    current_messages,
-                    max_retries=max_retries,
-                    label=f"{self.agent_id}/report",
-                    retryable=is_retryable,
-                )
+                retry_count = 0
+                last_error = None
+                
+                while retry_count <= max_retries:
+                    try:
+                        if retry_count > 0:
+                            # 重试时等待（指数退避）
+                            import time
+                            wait_time = min(2 ** retry_count, 10)  # 最多等待10秒
+                            logger.info(f"⏳ [{self.agent_id}] 等待 {wait_time} 秒后重试生成报告（第 {retry_count}/{max_retries} 次）...")
+                            time.sleep(wait_time)
+                            logger.info(f"🔄 [{self.agent_id}] 开始第 {retry_count} 次重试生成报告...")
+                        
+                        # 🔥 使用原始的 self._llm，确保参数（temperature, max_tokens等）保留
+                        final_response = self._llm.invoke(current_messages)
+                        # 成功，跳出重试循环
+                        break
+                        
+                    except Exception as e:
+                        error_msg = str(e)
+                        last_error = e
+                        
+                        # 🔥 检查是否是 choices 为 null 的错误或其他可重试的错误
+                        is_retryable = is_retryable_llm_error(error_msg)
+                        
+                        if is_retryable and retry_count < max_retries:
+                            retry_count += 1
+                            logger.warning(f"⚠️ [{self.agent_id}] 生成报告时 LLM 调用失败（可重试错误）: {error_msg}")
+                            logger.warning(f"   将进行第 {retry_count}/{max_retries} 次重试...")
+                            continue
+                        else:
+                            # 不可重试的错误或已达到最大重试次数
+                            logger.error(f"❌ [{self.agent_id}] 生成报告时 LLM API 调用失败")
+                            logger.error(f"   错误信息: {error_msg}")
+                            logger.error(f"   重试次数: {retry_count}/{max_retries}")
+                            
+                            if "choices" in error_msg.lower() or "null value" in error_msg.lower():
+                                logger.error(f"   这可能是因为：")
+                                logger.error(f"   1. LLM API 服务异常")
+                                logger.error(f"   2. API 密钥无效或过期")
+                                logger.error(f"   3. 请求参数不符合 API 要求")
+                                logger.error(f"   4. API 服务暂时不可用")
+                                # 🔥 尝试获取更多调试信息
+                                if hasattr(self._llm, 'model_name'):
+                                    logger.error(f"   使用的模型: {self._llm.model_name}")
+                                elif hasattr(self._llm, 'model'):
+                                    logger.error(f"   使用的模型: {self._llm.model}")
+                                if hasattr(self._llm, 'openai_api_base'):
+                                    logger.error(f"   API Base: {self._llm.openai_api_base}")
+                                elif hasattr(self._llm, 'base_url'):
+                                    logger.error(f"   API Base: {self._llm.base_url}")
+                            
+                            raise ValueError(f"LLM API 调用失败（已重试 {retry_count} 次）: {error_msg}") from last_error
 
                 # 打印最终响应详情
                 logger.info(f"=" * 100)
@@ -1149,14 +803,70 @@ class BaseAgent(ABC):
                     # 🔧 重试时直接调用 LLM（不绑定工具）
                     logger.info(f"🔗 [{self.agent_id}] 重试时直接调用 LLM（无工具绑定）")
                     
+                    # 🔥 添加重试机制（使用 agent 配置的 max_retries，默认3次）
                     max_retries = getattr(self.config, 'max_retries', 3)
-                    final_response = retry_sync(
-                        self._llm.invoke,
-                        current_messages,
-                        max_retries=max_retries,
-                        label=f"{self.agent_id}/retry-report",
-                        retryable=is_retryable,
-                    )
+                    retry_count = 0
+                    last_error = None
+                    
+                    while retry_count <= max_retries:
+                        try:
+                            if retry_count > 0:
+                                # 重试时等待（指数退避）
+                                import time
+                                wait_time = min(2 ** retry_count, 10)  # 最多等待10秒
+                                logger.info(f"⏳ [{self.agent_id}] 等待 {wait_time} 秒后重试（第 {retry_count}/{max_retries} 次）...")
+                                time.sleep(wait_time)
+                                logger.info(f"🔄 [{self.agent_id}] 开始第 {retry_count} 次重试...")
+                            
+                            # 🔥 使用原始的 self._llm，确保参数（temperature, max_tokens等）保留
+                            final_response = self._llm.invoke(current_messages)
+                            # 成功，跳出重试循环
+                            break
+                            
+                        except Exception as e:
+                            error_msg = str(e)
+                            last_error = e
+                            
+                            # 🔥 检查是否是 choices 为 null 的错误或其他可重试的错误
+                            is_retryable = (
+                                "choices" in error_msg.lower() or 
+                                "null value" in error_msg.lower() or
+                                "connection" in error_msg.lower() or
+                                "timeout" in error_msg.lower() or
+                                "rate limit" in error_msg.lower() or
+                                "503" in error_msg or
+                                "502" in error_msg or
+                                "500" in error_msg
+                            )
+                            
+                            if is_retryable and retry_count < max_retries:
+                                retry_count += 1
+                                logger.warning(f"⚠️ [{self.agent_id}] 重试时 LLM 调用失败（可重试错误）: {error_msg}")
+                                logger.warning(f"   将进行第 {retry_count}/{max_retries} 次重试...")
+                                continue
+                            else:
+                                # 不可重试的错误或已达到最大重试次数
+                                logger.error(f"❌ [{self.agent_id}] 重试时 LLM API 调用失败")
+                                logger.error(f"   错误信息: {error_msg}")
+                                logger.error(f"   重试次数: {retry_count}/{max_retries}")
+                                
+                                if "choices" in error_msg.lower() or "null value" in error_msg.lower():
+                                    logger.error(f"   这可能是因为：")
+                                    logger.error(f"   1. LLM API 服务异常")
+                                    logger.error(f"   2. API 密钥无效或过期")
+                                    logger.error(f"   3. 请求参数不符合 API 要求")
+                                    logger.error(f"   4. API 服务暂时不可用")
+                                    # 🔥 尝试获取更多调试信息
+                                    if hasattr(self._llm, 'model_name'):
+                                        logger.error(f"   使用的模型: {self._llm.model_name}")
+                                    elif hasattr(self._llm, 'model'):
+                                        logger.error(f"   使用的模型: {self._llm.model}")
+                                    if hasattr(self._llm, 'openai_api_base'):
+                                        logger.error(f"   API Base: {self._llm.openai_api_base}")
+                                    elif hasattr(self._llm, 'base_url'):
+                                        logger.error(f"   API Base: {self._llm.base_url}")
+                                
+                                raise ValueError(f"LLM API 调用失败（已重试 {retry_count} 次）: {error_msg}") from last_error
 
                     # 打印重试响应详情
                     logger.info(f"=" * 100)
@@ -1178,12 +888,6 @@ class BaseAgent(ABC):
                         return "分析报告生成失败：LLM 持续返回工具调用而不是报告内容。请更换模型或重试。"
 
                 content = final_response.content if hasattr(final_response, 'content') else str(final_response)
-                self._last_llm_debug = {
-                    "response_type": type(final_response).__name__,
-                    "final_response_content": content,
-                    "tool_mode": True,
-                    "tool_trace": list(self._last_tool_debug),
-                }
                 logger.info(f"✅ [{self.agent_id}] 报告生成完成，长度: {len(content)} 字符")
                 logger.debug(f"🔍 [{self.agent_id}] 报告内容预览: {content[:200] if content else '(空)'}")
                 if not content or len(content.strip()) == 0:
@@ -1199,12 +903,6 @@ class BaseAgent(ABC):
             else:
                 # 没有工具调用，直接返回内容
                 content = response.content if hasattr(response, 'content') else str(response)
-                self._last_llm_debug = {
-                    "response_type": type(response).__name__,
-                    "final_response_content": content,
-                    "tool_mode": False,
-                    "tool_trace": list(self._last_tool_debug),
-                }
                 logger.info(f"📝 [{self.agent_id}] 直接响应（无工具调用），长度: {len(content)} 字符")
                 return content
 
@@ -1228,7 +926,6 @@ class BaseAgent(ABC):
             tool_name = tool_call.get('name')
             tool_args = tool_call.get('args', {})
             tool_id = tool_call.get('id')
-            tool_success = False
 
             logger.info(f"🔧 [{self.agent_id}] 执行工具: {tool_name}")
             logger.info(f"🔧 [{self.agent_id}] 工具参数: {tool_args}")
@@ -1290,56 +987,22 @@ class BaseAgent(ABC):
                         else:
                             logger.info(f"✅ [{self.agent_id}] 工具 {tool_name} 执行成功，返回类型: {type(tool_result).__name__}")
                             logger.info(f"📄 [{self.agent_id}] 工具 {tool_name} 返回内容: {str(tool_result)[:200]}...")
-                        tool_success = True
 
                     except Exception as e:
                         logger.error(f"❌ [{self.agent_id}] 工具 {tool_name} 执行失败: {e}")
                         import traceback
                         logger.error(f"❌ [{self.agent_id}] 工具 {tool_name} 错误详情: {traceback.format_exc()}")
                         tool_result = f"工具执行失败: {str(e)}"
-                        # 🔧 上报工具执行失败缺口（fire-and-forget，不阻塞）
-                        try:
-                            from core.tools.external.skill_gap_detector import SkillGapDetector
-                            SkillGapDetector.report_gap(
-                                gap_type="tool_execution_error",
-                                tool_name=tool_name,
-                                agent_id=self.agent_id,
-                                error=str(e),
-                                context={"tool_call_args": tool_args},
-                            )
-                        except Exception:
-                            pass
                     break
 
             if tool_result is None:
                 tool_result = f"未找到工具: {tool_name}"
                 logger.warning(f"⚠️ [{self.agent_id}] {tool_result}")
                 logger.warning(f"⚠️ [{self.agent_id}] 可用工具列表: {[t.name for t in self._langchain_tools]}")
-                # 🔧 上报工具未找到缺口（fire-and-forget，不阻塞）
-                try:
-                    from core.tools.external.skill_gap_detector import SkillGapDetector
-                    SkillGapDetector.report_gap(
-                        gap_type="tool_not_found",
-                        tool_name=tool_name,
-                        agent_id=self.agent_id,
-                        context={"tool_call_args": tool_args},
-                    )
-                except Exception:
-                    pass
-
-            tool_result_text = str(tool_result)
-            self._last_tool_debug.append({
-                "tool_name": tool_name,
-                "tool_args": tool_args,
-                "success": tool_success,
-                "result_preview": tool_result_text[:800],
-                "result_length": len(tool_result_text),
-                "tool_call_id": tool_id,
-            })
 
             # 创建工具消息
             tool_messages.append(ToolMessage(
-                content=tool_result_text,
+                content=str(tool_result),
                 tool_call_id=tool_id
             ))
 
@@ -1361,16 +1024,13 @@ class BaseAgent(ABC):
         此方法被所有 Agent 基类共享，避免重复代码。
         自动从 state 中提取系统变量（如 current_price、industry 等）。
 
-        支持流程专属提示词：会自动从 state 或 context 中提取 workflow_id，
-        优先加载该流程的专属提示词，如果没有则回退到默认提示词。
-
         Args:
             agent_type: Agent 类型（如 "analysts_v2", "researchers_v2", "managers_v2", "trader_v2"）
             agent_name: Agent 名称（如 "market_analyst_v2", "bull_researcher_v2"）
             variables: 模板变量字典
-            context: AgentContext 对象（包含 user_id、preference_id、workflow_id）
+            context: AgentContext 对象（包含 user_id 和 preference_id）
             fallback_prompt: 降级提示词
-            state: 工作流状态（可选，用于提取系统变量和 workflow_id）
+            state: 工作流状态（可选，用于提取系统变量）
             prompt_type: 提示词类型（"user" 获取用户提示词，"system" 获取系统提示词）
 
         Returns:
@@ -1390,98 +1050,16 @@ class BaseAgent(ABC):
             if state:
                 system_vars = [
                     "current_price", "industry", "market_name",
-                    "currency_name", "currency_symbol", "current_date", "start_date",
-                    # 🆕 行业/个股分析维度（Phase 1 维度注入）
-                    "industry_dimensions", "industry_focus",
-                    "stock_dimensions", "stock_special_notes",
+                    "currency_name", "currency_symbol", "current_date", "start_date"
                 ]
                 for var in system_vars:
                     if var in state and var not in variables:
                         variables[var] = state[var]
-                        if var in ("industry_dimensions", "stock_dimensions"):
-                            logger.info(f"🏭 [维度注入] 自动提取 {var}: {len(str(state[var]))} 字符")
-                        else:
-                            logger.info(f"📊 [系统变量] 自动提取 {var}: {state[var]}")
+                        logger.info(f"📊 [系统变量] 自动提取 {var}: {state[var]}")
 
-            # 🆕 注入已批准的成长记忆（如果工作流传入了 growth_memory_recall）
-            if state and "growth_memory_recall" not in variables:
-                recall = None
-                runtime = state.get("_workflow_runtime")
-                if isinstance(runtime, dict):
-                    recall = runtime.get("growth_memory_recall")
-                if not recall:
-                    recall = state.get("growth_memory_recall")
-                if recall:
-                    variables["growth_memory_recall"] = recall
-
-            # 🆕 分层提示词组装：始终注入三块（analysis_context_block / capability_block / task_block）
-            # 设计文档 §5：通用分析也注入能力块；analysis_type 可推断
-            industry = state.get("industry") if state else None
-            stock_symbol = state.get("stock_symbol") if state else None
-            task_description = state.get("task_description", "") if state else ""
-            analysis_type = (state.get("analysis_type") if state else None) or (
-                "stock" if stock_symbol else "industry" if industry else "general"
-            )
-
-            try:
-                from app.services.prompt_assembly_service import get_prompt_assembly_service
-                assembly_service = get_prompt_assembly_service()
-
-                # 始终生成 analysis_context_block（general 时为空；策略 injection_mode=none 时也为空）
-                if "analysis_context_block" not in variables:
-                    context_block = assembly_service.build_analysis_context_block(
-                        analysis_type=analysis_type,
-                        industry=industry,
-                        stock_symbol=stock_symbol,
-                        agent_type=agent_type,
-                        agent_name=agent_name,
-                    )
-                    variables["analysis_context_block"] = context_block
-                    if context_block:
-                        logger.info(f"📋 [分层组装] analysis_context_block 注入，长度: {len(context_block)}")
-
-                # 始终生成 capability_block（策略可关闭；通用分析时也提供能力边界）
-                if "capability_block" not in variables:
-                    capability_block = assembly_service.build_capability_block(
-                        analysis_type=analysis_type,
-                        industry=industry,
-                        stock_symbol=stock_symbol,
-                        agent_type=agent_type,
-                        agent_name=agent_name,
-                    )
-                    variables["capability_block"] = capability_block
-                    if capability_block:
-                        logger.info(f"🔧 [分层组装] capability_block 注入，长度: {len(capability_block)}")
-
-                # 有任务描述时生成 task_block
-                if task_description and "task_block" not in variables:
-                    task_block = assembly_service.build_task_block(
-                        task_description=task_description,
-                        analysis_type=analysis_type,
-                    )
-                    variables["task_block"] = task_block
-                    if task_block:
-                        logger.info(f"🎯 [分层组装] task_block 注入，长度: {len(task_block)}")
-            except Exception as e:
-                logger.warning(f"⚠️ [分层组装] 生成块失败: {e}")
-            # 保证模板中占位符有默认值（未注入时由 template_client 统一置空）
-            variables.setdefault("analysis_context_block", "")
-            variables.setdefault("capability_block", "")
-            variables.setdefault("task_block", "")
-
-            # 从 context 中提取 user_id、preference_id、workflow_id 和 node_id
+            # 从 context 中提取 user_id 和 preference_id
             user_id = None
             preference_id = "neutral"
-            workflow_id = None  # 🆕 流程专属提示词支持
-            node_id = None      # 🆕 节点专属提示词支持
-
-            # 🆕 优先从 state 中提取 workflow_id 和 node_id
-            if state and 'workflow_id' in state:
-                workflow_id = state['workflow_id']
-                logger.info(f"📊 [workflow_id] 从 state 中提取: {workflow_id}")
-            if state and 'node_id' in state:
-                node_id = state['node_id']
-                logger.info(f"📊 [node_id] 从 state 中提取: {node_id}")
 
             if context:
                 # 🔍 诊断日志：打印 context 的类型和内容
@@ -1490,24 +1068,14 @@ class BaseAgent(ABC):
                     logger.info(f"🔍 [_get_prompt_from_template] context 是字典，内容: {context}")
                     user_id = context.get("user_id")
                     preference_id = context.get("preference_id", "neutral")
-                    # 🆕 从 context 中提取 workflow_id 和 node_id（如果 state 中没有）
-                    if not workflow_id:
-                        workflow_id = context.get("workflow_id")
-                    if not node_id:
-                        node_id = context.get("node_id")
                 else:
                     logger.info(f"🔍 [_get_prompt_from_template] context 是对象，属性: {dir(context)}")
                     if hasattr(context, 'user_id'):
                         user_id = context.user_id
                     if hasattr(context, 'preference_id'):
                         preference_id = context.preference_id or "neutral"
-                    # 🆕 从 context 对象中提取 workflow_id 和 node_id（如果 state 中没有）
-                    if not workflow_id and hasattr(context, 'workflow_id'):
-                        workflow_id = context.workflow_id
-                    if not node_id and hasattr(context, 'node_id'):
-                        node_id = context.node_id
-
-                logger.info(f"🔍 [_get_prompt_from_template] 提取的 preference_id: {preference_id}, user_id: {user_id}, workflow_id: {workflow_id}, node_id: {node_id}")
+                
+                logger.info(f"🔍 [_get_prompt_from_template] 提取的 preference_id: {preference_id}, user_id: {user_id}")
 
             # 🔍 调试：打印传递给模板系统的变量
             logger.info(f"🔍 [_get_prompt_from_template] 准备传递给模板系统的变量 (共 {len(variables)} 个):")
@@ -1525,10 +1093,10 @@ class BaseAgent(ABC):
                 f"🔍 [_get_prompt_from_template] 调用模板系统参数: "
                 f"agent_type={agent_type}, agent_name={agent_name}, "
                 f"preference_id={preference_id}, user_id={user_id}, "
-                f"workflow_id={workflow_id}, node_id={node_id}, variables数量={len(variables)}"
+                f"variables数量={len(variables)}"
             )
-
-            # 调用模板系统（🆕 支持流程专属提示词 + 节点专属提示词）
+            
+            # 调用模板系统
             prompt = get_prompt_func(
                 agent_type=agent_type,
                 agent_name=agent_name,
@@ -1536,15 +1104,13 @@ class BaseAgent(ABC):
                 preference_id=preference_id,
                 user_id=user_id,
                 fallback_prompt=fallback_prompt,
-                context=context,
-                workflow_id=workflow_id,  # 🆕 传递 workflow_id 用于加载流程专属提示词
-                node_id=node_id           # 🆕 传递 node_id 用于同一 agent 不同节点的提示词区分
+                context=context
             )
 
             if prompt:
                 logger.info(
                     f"✅ 从模板系统获取 {agent_name} {prompt_type} 提示词 "
-                    f"(user_id={user_id}, preference_id={preference_id}, workflow_id={workflow_id}, node_id={node_id}, 长度={len(prompt)})"
+                    f"(user_id={user_id}, preference_id={preference_id}, 长度={len(prompt)})"
                 )
                 # 🔍 诊断日志：打印提示词的前200字符，检查模板内容
                 prompt_preview = prompt[:200] if len(prompt) > 200 else prompt

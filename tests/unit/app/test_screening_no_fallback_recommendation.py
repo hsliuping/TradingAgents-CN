@@ -24,12 +24,20 @@ def test_system_prompt_forbids_recommending_other_stocks_on_empty_screening():
     from app.services.intelligent_screening_service import IntelligentScreeningService
 
     prompt = _get_system_prompt()
+    confirmation_prompt = IntelligentScreeningService(db=object())._get_system_prompt("confirmation", "")
     screening_prompt = IntelligentScreeningService(db=object())._get_system_prompt("result", "")
+    planning_prompt = IntelligentScreeningService(db=object())._get_system_prompt("planning", "工具清单")
 
     assert "未找到符合条件的股票" in prompt
     assert "严禁为了“给点参考”而推荐其它不符合筛选条件的股票" in prompt
+    assert "如果用户使用“低估值”“低PE”“低PB”这类模糊估值描述" in confirmation_prompt
+    assert "PE 相关口径要区分 `pe`（PE）和 `pe_ttm`（PE(TTM)）" in confirmation_prompt
+    assert "PB 相关口径要区分 `pb`（PB）和 `pb_mrq`（PB(MRQ)）" in confirmation_prompt
     assert "默认最多执行 **两轮数据工具调用**" in screening_prompt
     assert "一旦已有足够数据生成最终推荐，**立即停止继续调用工具**" in screening_prompt
+    assert "不要只写笼统的“PE/PB”" in planning_prompt
+    assert '使用 `pe_ttm`（PE(TTM)）<= 15' in planning_prompt
+    assert 'order_by_field: "pb_mrq"' in planning_prompt
 
 
 def test_screening_tool_compresses_large_candidate_output(monkeypatch):
@@ -69,6 +77,88 @@ def test_screening_tool_compresses_large_candidate_output(monkeypatch):
     assert "600011" in result
     assert "其余 4 只候选已省略详细展开" in result
     assert "毛利率=" not in result
+
+
+def test_screening_tool_uses_pe_ttm_display_when_condition_targets_pe_ttm(monkeypatch):
+    from core.tools.implementations.market import stock_screening_tool as tool_module
+
+    class DummyScreeningService:
+        async def screen_stocks(self, **kwargs):
+            return [
+                {
+                    "code": "002818",
+                    "name": "富森美",
+                    "industry": "商业贸易",
+                    "dividend_yield": 8.6164,
+                    "pe": 16.2629,
+                    "pe_ttm": 11.3633,
+                    "pb": 1.5115,
+                    "roe": 8.4305,
+                    "debt_to_assets": 13.4508,
+                    "n_cashflow_act": 1019082738.94,
+                    "total_mv": 110.0,
+                    "report_period": "20250930",
+                }
+            ], 1
+
+    async def fake_init_database():
+        return None
+
+    monkeypatch.setattr("app.services.database_screening_service.get_database_screening_service", lambda: DummyScreeningService())
+    monkeypatch.setattr("app.core.database.init_database", fake_init_database)
+
+    result = asyncio.run(
+        tool_module._run_screening(
+            [{"field": "pe_ttm", "operator": "<=", "value": 15}],
+            20,
+            "total_mv",
+            "desc",
+        )
+    )
+
+    assert "PE(TTM)=11.36" in result
+    assert "PE=16.26" not in result
+
+
+def test_screening_tool_uses_pb_mrq_display_when_condition_targets_pb_mrq(monkeypatch):
+    from core.tools.implementations.market import stock_screening_tool as tool_module
+
+    class DummyScreeningService:
+        async def screen_stocks(self, **kwargs):
+            return [
+                {
+                    "code": "600519",
+                    "name": "贵州茅台",
+                    "industry": "食品饮料",
+                    "dividend_yield": 3.15,
+                    "pe": 22.8,
+                    "pb": 8.4,
+                    "pb_mrq": 7.2,
+                    "roe": 31.5,
+                    "debt_to_assets": 18.2,
+                    "n_cashflow_act": 5.8e10,
+                    "total_mv": 21000.0,
+                    "report_period": "20250930",
+                }
+            ], 1
+
+    async def fake_init_database():
+        return None
+
+    monkeypatch.setattr("app.services.database_screening_service.get_database_screening_service", lambda: DummyScreeningService())
+    monkeypatch.setattr("app.core.database.init_database", fake_init_database)
+
+    result = asyncio.run(
+        tool_module._run_screening(
+            [{"field": "pb_mrq", "operator": "<=", "value": 8}],
+            20,
+            "total_mv",
+            "desc",
+        )
+    )
+
+    assert "PB(MRQ)=7.20" in result
+    assert "PB=8.40" not in result
 
 
 def test_batch_profit_consistency_compresses_large_output():

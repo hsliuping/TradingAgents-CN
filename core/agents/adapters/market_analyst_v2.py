@@ -1,3 +1,5 @@
+from core.agents.analyst import AnalystAgent
+from core.agents.base import GENERIC_REPORT_FALLBACK
 """
 市场分析师Agent v2.0
 
@@ -10,7 +12,6 @@ import re
 from typing import Any, Dict, Optional
 
 from langchain_core.messages import SystemMessage, HumanMessage
-from ..base import GENERIC_REPORT_FALLBACK
 from ..analyst import AnalystAgent
 from ..config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ..registry import register_agent
@@ -123,11 +124,6 @@ class MarketAnalystV2(AnalystAgent):
         requires_tools=True,
         output_field="market_report",
         report_label="【市场分析 v2】",
-        growth_role="extractor",
-        growth_outputs=["market_report"],
-        memory_scope_hint="object_tracking",
-        review_level="auto_pending",
-        growth_source_type="analysis_report",
     )
 
     # 分析师类型

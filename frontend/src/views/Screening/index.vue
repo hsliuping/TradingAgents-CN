@@ -106,8 +106,8 @@
                           </div>
                           <div class="stock-card-metrics">
                             <span v-if="s.price != null">价格: {{ s.price?.toFixed(2) }}</span>
-                            <span v-if="s.pe != null">PE: {{ s.pe?.toFixed(1) }}</span>
-                            <span v-if="s.pb != null">PB: {{ s.pb?.toFixed(2) }}</span>
+                            <span v-if="s.pe != null">{{ s.pe_display_label || 'PE' }}: {{ s.pe?.toFixed(1) }}</span>
+                            <span v-if="s.pb != null">{{ s.pb_display_label || 'PB' }}: {{ s.pb?.toFixed(2) }}</span>
                             <span v-if="s.roe != null">ROE: {{ s.roe?.toFixed(2) }}%</span>
                             <span v-if="s.roa != null">ROA: {{ s.roa?.toFixed(2) }}%</span>
                             <span v-if="s.gross_margin != null">毛利率: {{ s.gross_margin?.toFixed(1) }}%</span>

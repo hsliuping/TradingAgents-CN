@@ -11,6 +11,7 @@ from typing import Annotated
 
 from langchain_core.tools import tool
 
+from app.services.screening_metric_display import resolve_metric_value, select_metric_display_spec
 from app.services.factor_registry_service import build_screening_fields_markdown, build_screening_tool_description
 from core.tools.base import register_tool
 
@@ -35,15 +36,24 @@ def _format_metric(value, *, suffix: str = "", decimals: int = 2, scale: float =
     return f"{scaled:.{decimals}f}{suffix}"
 
 
-def _build_compact_candidate_line(index: int, item: dict) -> str:
+def _build_compact_candidate_line(
+    index: int,
+    item: dict,
+    pe_display_field: str,
+    pe_display_label: str,
+    pb_display_field: str,
+    pb_display_label: str,
+) -> str:
     code = item.get("code") or item.get("symbol", "")
     name = item.get("name", "")
     industry = item.get("industry", "-")
+    pe_value = resolve_metric_value(item, pe_display_field, "pe")
+    pb_value = resolve_metric_value(item, pb_display_field, "pb")
 
     parts = [
         f"股息率={_format_metric(item.get('dividend_yield'), suffix='%')}",
-        f"PE={_format_metric(item.get('pe') or item.get('pe_ttm'))}",
-        f"PB={_format_metric(item.get('pb') or item.get('pb_mrq'))}",
+        f"{pe_display_label}={_format_metric(pe_value)}",
+        f"{pb_display_label}={_format_metric(pb_value)}",
         f"ROE={_format_metric(item.get('roe'), suffix='%')}",
         f"负债率={_format_metric(item.get('debt_to_assets'), suffix='%', decimals=1)}",
         f"经营现金流={_format_metric(item.get('n_cashflow_act'), suffix='亿', decimals=2, scale=1e8)}",
@@ -116,13 +126,13 @@ async def screen_stocks_by_criteria(
         return f"筛选执行失败：{e}"
 
 
-async def _run_screening(
+async def _execute_screening_query(
     raw_conditions: list,
     limit: int,
     order_by_field: str,
     order_direction: str,
-) -> str:
-    """异步调用 DatabaseScreeningService 执行筛选"""
+) -> tuple[list, int]:
+    """异步调用 DatabaseScreeningService 执行筛选并返回结构化结果。"""
     from app.core.database import init_database
     from app.services.database_screening_service import get_database_screening_service
 
@@ -143,17 +153,39 @@ async def _run_screening(
         order_by=order_by,
     )
 
+    return items, total
+
+
+def _format_screening_output(
+    raw_conditions: list,
+    items: list,
+    total: int,
+    order_by_field: str,
+) -> str:
+    """将结构化筛选结果格式化为工具文本输出。"""
+
     if total == 0 or not items:
         return "未找到符合条件的股票。当前没有适合该筛选要求的标的，不要推荐其它不符合条件的股票。"
 
     display_count = min(len(items), MAX_DETAILED_RESULTS)
+    pe_display_field, pe_display_label = select_metric_display_spec(raw_conditions, order_by_field, "pe")
+    pb_display_field, pb_display_label = select_metric_display_spec(raw_conditions, order_by_field, "pb")
     lines = [
         f"共找到 {total} 只符合条件的股票，以下展示前 {display_count} 只核心候选：",
         "结果已压缩为摘要，避免占用过多上下文；如需继续验证，请优先使用下方代码列表调用后续工具。\n",
     ]
 
     for i, item in enumerate(items[:display_count], 1):
-        lines.append(_build_compact_candidate_line(i, item))
+        lines.append(
+            _build_compact_candidate_line(
+                i,
+                item,
+                pe_display_field,
+                pe_display_label,
+                pb_display_field,
+                pb_display_label,
+            )
+        )
 
     all_codes = [
         str(item.get("code") or item.get("symbol", "")).strip()
@@ -168,4 +200,14 @@ async def _run_screening(
         lines.append(f"其余 {len(items) - display_count} 只候选已省略详细展开。")
 
     return "\n".join(lines)
+
+
+async def _run_screening(
+    raw_conditions: list,
+    limit: int,
+    order_by_field: str,
+    order_direction: str,
+) -> str:
+    items, total = await _execute_screening_query(raw_conditions, limit, order_by_field, order_direction)
+    return _format_screening_output(raw_conditions, items, total, order_by_field)
 

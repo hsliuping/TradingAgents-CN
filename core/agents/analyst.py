@@ -1,3 +1,4 @@
+from core.agents.base import BaseAgent, GENERIC_REPORT_FALLBACK
 """
 分析师Agent基类
 
@@ -11,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from .base import BaseAgent, GENERIC_REPORT_FALLBACK
+from .base import BaseAgent
 from .config import AgentMetadata, AgentCategory
 
 logger = logging.getLogger(__name__)

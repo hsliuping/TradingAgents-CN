@@ -353,7 +353,9 @@ export interface StockRecommendation {
   industry: string
   price?: number
   pe?: number
+  pe_display_label?: string
   pb?: number
+  pb_display_label?: string
   roe?: number
   roa?: number
   gross_margin?: number

@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from core.agents.analyst import AnalystAgent
+from core.agents.analyst import AnalystAgent
 from core.agents.base import GENERIC_REPORT_FALLBACK
 from core.agents.config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from core.agents.registry import register_agent
@@ -71,11 +72,6 @@ class SocialMediaAnalystV2(AnalystAgent):
         requires_tools=True,
         output_field="sentiment_report",
         report_label="【社交媒体分析 v2】",
-        growth_role="extractor",
-        growth_outputs=["sentiment_report"],
-        memory_scope_hint="object_tracking",
-        review_level="manual_required",
-        growth_source_type="analysis_report",
     )
 
     # 分析师类型

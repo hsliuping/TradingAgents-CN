@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 # 复用智能助手的基础设施
 from app.services.factor_registry_service import build_screening_fields_markdown
+from app.services.screening_metric_display import resolve_metric_value, select_metric_display_spec
 from app.services.intelligent_assistant_service import (
     _get_assistant_llm_config,
     _get_latest_trade_date,
@@ -25,6 +27,7 @@ from app.services.intelligent_assistant_service import (
 )
 from core.tools import get_tool_registry, tool_metadata_list_to_openai
 from core.tools.context import set_current_user_id
+from core.tools.implementations.market.stock_screening_tool import _execute_screening_query, _format_screening_output
 from core.llm import UnifiedLLMClient
 from core.llm.models import Message, MessageRole
 
@@ -55,6 +58,94 @@ RESULT_TOOL_ALLOWLIST = {
 # 选股场景独立预算，默认比全局助手更紧，避免长尾请求拖垮体验
 SCREENING_MAX_TOOL_ROUNDS = int(os.environ.get("SCREENING_MAX_TOOL_ROUNDS", "3"))
 SCREENING_RESULT_TIMEOUT_SECONDS = int(os.environ.get("SCREENING_RESULT_TIMEOUT_SECONDS", "300"))
+
+SCREENING_ADJUST_KEYWORDS = [
+    "重新",
+    "修改",
+    "调整需求",
+    "换个",
+    "不对",
+    "重新描述",
+    "重新考虑",
+    "再低点",
+    "再高点",
+    "缩小",
+    "放宽",
+]
+
+SCREENING_APPROVAL_KEYWORDS = [
+    "执行筛选方案",
+    "按此方案",
+    "开始筛选",
+    "执行",
+    "同意",
+    "确认",
+    "按原需求筛选",
+]
+
+SCREENING_NEW_REQUEST_KEYWORDS = [
+    "帮我选",
+    "选几只",
+    "筛选",
+    "选股",
+    "推荐几只",
+    "找几只",
+    "高分红",
+    "低估值",
+    "股票",
+]
+
+SCREENING_RESULT_REFERENCE_KEYWORDS = [
+    "这5只",
+    "这五只",
+    "这几只",
+    "这些股票",
+    "刚才那5只",
+    "刚才推荐",
+    "当前推荐",
+    "上一轮",
+    "加入自选",
+    "加入自选股",
+    "打标签",
+    "分组",
+]
+
+SCREENING_FIELD_DISPLAY_LABELS = {
+    "industry": "行业",
+    "dividend_yield": "股息率",
+    "pe": "PE",
+    "pe_ttm": "PE(TTM)",
+    "pb": "PB",
+    "pb_mrq": "PB(MRQ)",
+    "roe": "ROE",
+    "roa": "ROA",
+    "gross_margin": "毛利率",
+    "netprofit_margin": "净利率",
+    "debt_to_assets": "资产负债率",
+    "assets_to_eqt": "权益乘数",
+    "current_ratio": "流动比率",
+    "quick_ratio": "速动比率",
+    "cash_ratio": "现金比率",
+    "total_mv": "总市值",
+    "close": "股价",
+    "pct_chg": "涨跌幅",
+    "report_period": "财报期",
+    "n_cashflow_act": "经营现金流",
+    "revenue_ttm": "营收TTM",
+    "net_profit_ttm": "净利TTM",
+}
+
+SCREENING_PERCENT_FIELDS = {
+    "dividend_yield",
+    "roe",
+    "roa",
+    "gross_margin",
+    "netprofit_margin",
+    "debt_to_assets",
+    "pct_chg",
+}
+
+SCREENING_YI_FIELDS = {"n_cashflow_act", "revenue_ttm", "net_profit_ttm"}
 
 
 class IntelligentScreeningService:
@@ -165,6 +256,467 @@ class IntelligentScreeningService:
             "本次不会改为推荐其它不符合原筛选条件的股票。"
             "建议您缩小筛选范围、补充更明确的阈值或行业条件，或稍后重试。"
         )
+
+    def _find_last_assistant(self, history: list) -> Optional[dict]:
+        for msg in reversed(history or []):
+            if msg.get("role") == "assistant":
+                return msg
+        return None
+
+    def _is_adjustment_message(self, message: str) -> bool:
+        text = (message or "").strip()
+        return any(keyword in text for keyword in SCREENING_ADJUST_KEYWORDS)
+
+    def _is_approval_message(self, message: str) -> bool:
+        text = (message or "").strip()
+        return any(keyword in text for keyword in SCREENING_APPROVAL_KEYWORDS)
+
+    def _looks_like_new_screening_request(self, message: str) -> bool:
+        text = (message or "").strip()
+        if not text:
+            return False
+        if self._is_adjustment_message(text) or self._is_approval_message(text):
+            return False
+        return any(keyword in text for keyword in SCREENING_NEW_REQUEST_KEYWORDS)
+
+    def _references_latest_result(self, message: str) -> bool:
+        text = (message or "").strip()
+        return any(keyword in text for keyword in SCREENING_RESULT_REFERENCE_KEYWORDS)
+
+    def _select_phase_history(self, history: list, phase: str, message: str) -> list:
+        """按阶段压缩历史，避免 result 阶段继续继承整段旧会话。"""
+        recent_history = history[-MAX_CONTEXT_MESSAGES:]
+        if not recent_history:
+            return []
+
+        last_assistant = self._find_last_assistant(recent_history)
+        if (
+            phase == "confirmation"
+            and last_assistant
+            and last_assistant.get("phase") == "result"
+            and self._looks_like_new_screening_request(message)
+        ):
+            return []
+
+        if phase != "result":
+            return recent_history
+
+        selected_history: List[dict] = []
+        latest_planning = None
+        latest_result = None
+        for item in reversed(recent_history):
+            if item.get("role") != "assistant":
+                continue
+            item_phase = item.get("phase")
+            if latest_result is None and item_phase == "result":
+                latest_result = item
+            if latest_planning is None and item_phase == "planning":
+                latest_planning = item
+            if latest_planning and latest_result:
+                break
+
+        if latest_planning:
+            selected_history.append(latest_planning)
+        if latest_result and self._references_latest_result(message):
+            selected_history.append(latest_result)
+
+        return selected_history or recent_history[-2:]
+
+    def _extract_locked_execution_plan(self, history: list) -> Optional[dict]:
+        """从最近的 planning 回复中提取已批准的批量执行参数。"""
+        latest_planning = None
+        for item in reversed(history or []):
+            if item.get("role") == "assistant" and item.get("phase") == "planning":
+                latest_planning = item
+                break
+
+        if not latest_planning:
+            return None
+
+        content = str(latest_planning.get("content") or "")
+        conditions_match = re.search(r"`?conditions`?\s*[:：]\s*`(\[[\s\S]*?\])`", content)
+        limit_match = re.search(r"`?limit`?\s*[:：]\s*(\d+)", content)
+        order_by_match = re.search(r'`?order_by_field`?\s*[:：]\s*"([^"]+)"', content)
+        order_direction_match = re.search(r'`?order_direction`?\s*[:：]\s*"([^"]+)"', content)
+
+        if not conditions_match:
+            return None
+
+        try:
+            raw_conditions = json.loads(conditions_match.group(1))
+        except json.JSONDecodeError:
+            return None
+
+        if not isinstance(raw_conditions, list) or not raw_conditions:
+            return None
+
+        plan: Dict[str, Any] = {
+            "planning_content": content,
+            "screen": {
+                "conditions_json": json.dumps(raw_conditions, ensure_ascii=False),
+                "limit": int(limit_match.group(1)) if limit_match else 50,
+                "order_by_field": order_by_match.group(1) if order_by_match else "total_mv",
+                "order_direction": order_direction_match.group(1) if order_direction_match else "desc",
+            },
+        }
+
+        years_match = re.search(r"`?years`?\s*[:：]\s*(\d+)", content)
+        threshold_match = re.search(r"`?threshold_cv`?\s*[:：]\s*([0-9.]+)", content)
+        if years_match or threshold_match:
+            plan["batch"] = {
+                "years": int(years_match.group(1)) if years_match else 3,
+                "threshold_cv": float(threshold_match.group(1)) if threshold_match else 0.3,
+            }
+
+        return plan
+
+    def _extract_candidate_codes(self, screening_output: str) -> list[str]:
+        match = re.search(r"候选代码列表（按当前排序，共\s*\d+\s*只）:\s*([^\n]+)", screening_output or "")
+        if not match:
+            return []
+        return [code.strip() for code in match.group(1).split(",") if code.strip()]
+
+    def _build_locked_plan_summary(self, locked_plan: dict) -> str:
+        screen_plan = locked_plan.get("screen", {})
+        try:
+            conditions = json.loads(screen_plan.get("conditions_json", "[]"))
+        except json.JSONDecodeError:
+            conditions = []
+
+        lines = ["已批准执行计划摘要："]
+        if conditions:
+            lines.append(f"- 筛选条件: {json.dumps(conditions, ensure_ascii=False)}")
+        lines.append(f"- limit: {screen_plan.get('limit', 50)}")
+        lines.append(f"- order_by_field: {screen_plan.get('order_by_field', 'total_mv')}")
+        lines.append(f"- order_direction: {screen_plan.get('order_direction', 'desc')}")
+
+        batch_plan = locked_plan.get("batch")
+        if batch_plan:
+            lines.append(
+                f"- 盈利稳定性验证: years={batch_plan.get('years', 3)}, "
+                f"threshold_cv={batch_plan.get('threshold_cv', 0.3)}"
+            )
+
+        return "\n".join(lines)
+
+    def _compact_screening_output_for_llm(self, screening_output: str) -> str:
+        lines = [line for line in (screening_output or "").splitlines() if line.strip()]
+        if not lines:
+            return "无筛选结果。"
+
+        summary_lines: List[str] = [lines[0]]
+        candidate_lines = [line for line in lines if re.match(r"^\d+\.\s", line)]
+        summary_lines.extend(candidate_lines[:5])
+        if len(candidate_lines) > 5:
+            summary_lines.append(f"其余 {len(candidate_lines) - 5} 只候选已省略。")
+        return "\n".join(summary_lines)
+
+    def _compact_batch_output_for_llm(self, batch_output: str) -> str:
+        lines = [line for line in (batch_output or "").splitlines() if line.strip()]
+        if not lines:
+            return "本轮未执行盈利稳定性验证。"
+
+        summary_lines = [lines[0]]
+        summary_match = next((line for line in lines if line.startswith("📊 汇总：")), "")
+        if summary_match:
+            summary_lines.append(summary_match)
+
+        stable_match = re.search(r"✅ 稳定股票代码：([^\n]+)", batch_output or "")
+        if stable_match:
+            stable_codes = [code.strip() for code in stable_match.group(1).split(",") if code.strip()]
+            preview = ", ".join(stable_codes[:8])
+            summary_lines.append(f"稳定股票代码预览: {preview}")
+            if len(stable_codes) > 8:
+                summary_lines.append(f"其余 {len(stable_codes) - 8} 只稳定股票代码已省略。")
+
+        no_data_match = re.search(r"无数据\s*(\d+)\s*只", batch_output or "")
+        if no_data_match:
+            summary_lines.append(f"无数据股票数量: {no_data_match.group(1)}")
+
+        return "\n".join(summary_lines)
+
+    def _extract_stable_codes(self, batch_output: str) -> list[str]:
+        stable_match = re.search(r"✅ 稳定股票代码：([^\n]+)", batch_output or "")
+        if not stable_match:
+            return []
+        return [code.strip() for code in stable_match.group(1).split(",") if code.strip()]
+
+    def _format_reason_metric_value(self, field: str, value: Any) -> str:
+        if value is None:
+            return "-"
+        if field in SCREENING_PERCENT_FIELDS and isinstance(value, (int, float)):
+            return f"{value:.2f}%"
+        if field in SCREENING_YI_FIELDS and isinstance(value, (int, float)):
+            return f"{value / 1e8:.2f}亿"
+        if field == "total_mv" and isinstance(value, (int, float)):
+            return f"{value:.2f}亿"
+        if field == "report_period":
+            return str(value)
+        if isinstance(value, (int, float)):
+            return f"{value:.2f}"
+        return str(value)
+
+    def _get_reason_field_label(self, field: str, pe_display_label: str, pb_display_label: str) -> str:
+        if field in {"pe", "pe_ttm"}:
+            return pe_display_label
+        if field in {"pb", "pb_mrq"}:
+            return pb_display_label
+        return SCREENING_FIELD_DISPLAY_LABELS.get(field, field)
+
+    def _build_stock_reason(
+        self,
+        item: dict,
+        raw_conditions: list,
+        pe_display_field: str,
+        pe_display_label: str,
+        pb_display_field: str,
+        pb_display_label: str,
+        stability_checked: bool,
+        stability_passed: bool,
+    ) -> str:
+        reason_parts: list[str] = []
+        seen_parts: set[str] = set()
+
+        for condition in raw_conditions:
+            if not isinstance(condition, dict):
+                continue
+            field = condition.get("field")
+            if field == "is_st" and condition.get("value") is False:
+                if "非ST" not in seen_parts:
+                    reason_parts.append("非ST")
+                    seen_parts.add("非ST")
+                continue
+
+            if field == "keyword":
+                continue
+
+            if field in {"pe", "pe_ttm"}:
+                value = resolve_metric_value(item, pe_display_field, "pe")
+            elif field in {"pb", "pb_mrq"}:
+                value = resolve_metric_value(item, pb_display_field, "pb")
+            else:
+                value = item.get(field)
+
+            if value is None:
+                continue
+
+            label = self._get_reason_field_label(field, pe_display_label, pb_display_label)
+            part = f"{label}={self._format_reason_metric_value(field, value)}"
+            if part not in seen_parts:
+                reason_parts.append(part)
+                seen_parts.add(part)
+
+        if not reason_parts:
+            fallback_fields = [
+                (pe_display_field, pe_display_label),
+                (pb_display_field, pb_display_label),
+                ("dividend_yield", "股息率"),
+                ("roe", "ROE"),
+                ("debt_to_assets", "资产负债率"),
+            ]
+            for field, label in fallback_fields:
+                value = resolve_metric_value(item, field, "pe") if field in {"pe", "pe_ttm"} else resolve_metric_value(item, field, "pb") if field in {"pb", "pb_mrq"} else item.get(field)
+                if value is None:
+                    continue
+                part = f"{label}={self._format_reason_metric_value(field, value)}"
+                if part not in seen_parts:
+                    reason_parts.append(part)
+                    seen_parts.add(part)
+
+        report_period = item.get("report_period")
+        if report_period and "财报期" not in seen_parts:
+            reason_parts.append(f"财报期={report_period}")
+
+        if stability_checked:
+            reason_parts.append("近3年盈利稳定性验证通过" if stability_passed else "本轮未纳入盈利稳定性通过名单")
+
+        if not reason_parts:
+            return "符合已批准的筛选条件。"
+
+        return "符合已批准条件：" + "，".join(reason_parts[:5]) + "。"
+
+    def _build_structured_stocks(
+        self,
+        items: list,
+        raw_conditions: list,
+        order_by_field: str,
+        batch_output: str,
+    ) -> list[dict[str, Any]]:
+        pe_display_field, pe_display_label = select_metric_display_spec(raw_conditions, order_by_field, "pe")
+        pb_display_field, pb_display_label = select_metric_display_spec(raw_conditions, order_by_field, "pb")
+        stable_codes = self._extract_stable_codes(batch_output)
+        stable_set = set(stable_codes)
+        selected_items = items or []
+        if stable_codes:
+            stable_items = [
+                item for item in selected_items
+                if str(item.get("code") or item.get("symbol", "")).strip() in stable_set
+            ]
+            if stable_items:
+                selected_items = stable_items
+
+        stocks: list[dict[str, Any]] = []
+        for item in selected_items[:5]:
+            code = str(item.get("code") or item.get("symbol", "")).strip()
+            if not code:
+                continue
+
+            stability_checked = bool(batch_output)
+            stability_passed = code in stable_set if stable_set else False
+            stocks.append({
+                "code": code,
+                "name": str(item.get("name") or ""),
+                "industry": str(item.get("industry") or ""),
+                "price": item.get("close"),
+                "pe": resolve_metric_value(item, pe_display_field, "pe"),
+                "pe_display_label": pe_display_label,
+                "pb": resolve_metric_value(item, pb_display_field, "pb"),
+                "pb_display_label": pb_display_label,
+                "roe": item.get("roe"),
+                "roa": item.get("roa"),
+                "gross_margin": item.get("gross_margin"),
+                "netprofit_margin": item.get("netprofit_margin"),
+                "dividend_yield": item.get("dividend_yield"),
+                "debt_to_assets": item.get("debt_to_assets"),
+                "assets_to_eqt": item.get("assets_to_eqt"),
+                "current_ratio": item.get("current_ratio"),
+                "quick_ratio": item.get("quick_ratio"),
+                "cash_ratio": item.get("cash_ratio"),
+                "revenue_ttm": item.get("revenue_ttm"),
+                "net_profit_ttm": item.get("net_profit_ttm"),
+                "n_cashflow_act": item.get("n_cashflow_act"),
+                "report_period": item.get("report_period"),
+                "pct_change": item.get("pct_chg"),
+                "reason": self._build_stock_reason(
+                    item,
+                    raw_conditions,
+                    pe_display_field,
+                    pe_display_label,
+                    pb_display_field,
+                    pb_display_label,
+                    stability_checked,
+                    stability_passed,
+                ),
+            })
+
+        return stocks
+
+    def _build_locked_result_reply(self, total_candidates: int, stocks: list[dict[str, Any]], batch_output: str) -> str:
+        lines = ["已按批准的筛选方案执行完成。"]
+        if total_candidates:
+            lines.append(f"共筛出 {total_candidates} 只候选。")
+
+        batch_summary = next(
+            (line.strip() for line in (batch_output or "").splitlines() if line.strip().startswith("📊 汇总：")),
+            "",
+        )
+        if batch_summary:
+            lines.append(batch_summary)
+
+        if not stocks:
+            if batch_output:
+                lines.append("原始筛选已有候选，但结合盈利稳定性验证后未形成最终清单，不再放宽阈值。")
+            else:
+                lines.append("当前未形成可展示的最终候选，不再放宽阈值。")
+        else:
+            if len(stocks) < 5:
+                lines.append(f"当前仅有 {len(stocks)} 只候选满足条件，不再放宽阈值。")
+            else:
+                lines.append("以下为最符合当前条件的 5 只候选：")
+
+            for index, stock in enumerate(stocks, 1):
+                metrics = []
+                if isinstance(stock.get("price"), (int, float)):
+                    metrics.append(f"价格={stock['price']:.2f}元")
+                if isinstance(stock.get("pe"), (int, float)):
+                    metrics.append(f"{stock.get('pe_display_label') or 'PE'}={stock['pe']:.2f}")
+                if isinstance(stock.get("pb"), (int, float)):
+                    metrics.append(f"{stock.get('pb_display_label') or 'PB'}={stock['pb']:.2f}")
+                if isinstance(stock.get("dividend_yield"), (int, float)):
+                    metrics.append(f"股息率={stock['dividend_yield']:.2f}%")
+                if isinstance(stock.get("roe"), (int, float)):
+                    metrics.append(f"ROE={stock['roe']:.2f}%")
+
+                header = f"{index}. {stock.get('code', '')} {stock.get('name', '')}"
+                if stock.get("industry"):
+                    header += f"（{stock['industry']}）"
+                lines.append(header)
+                if metrics:
+                    lines.append(f"   - 关键指标：{'；'.join(metrics[:5])}")
+                if stock.get("reason"):
+                    lines.append(f"   - 理由：{stock['reason']}")
+
+        lines.append("")
+        lines.append("```json")
+        lines.append(json.dumps({"stocks": stocks}, ensure_ascii=False, indent=2))
+        lines.append("```")
+        return "\n".join(lines)
+
+    async def _invoke_tool_function(self, tool_name: str, **kwargs) -> str:
+        func = (self._tool_functions or {}).get(tool_name)
+        if not func:
+            raise ValueError(f"工具不存在：{tool_name}")
+
+        result = func(**kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        return str(result or "")
+
+    async def _run_locked_result_execution(
+        self,
+        message: str,
+        locked_plan: dict,
+        progress_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    ) -> tuple[str, List[str], list[dict[str, Any]]]:
+        """按已批准的 planning 参数直接执行工具，并由服务端生成最终结构化结果。"""
+        tools_used: List[str] = []
+
+        screen_args = locked_plan["screen"]
+        raw_conditions = json.loads(screen_args.get("conditions_json", "[]"))
+        await self._emit_progress(
+            progress_callback,
+            "status",
+            phase="result",
+            message="按已批准的执行计划直接运行批量筛选",
+        )
+        screen_items, total_candidates = await _execute_screening_query(
+            raw_conditions,
+            int(screen_args.get("limit", 50)),
+            screen_args.get("order_by_field", "total_mv"),
+            screen_args.get("order_direction", "desc"),
+        )
+        screen_output = _format_screening_output(
+            raw_conditions,
+            screen_items,
+            total_candidates,
+            screen_args.get("order_by_field", "total_mv"),
+        )
+        tools_used.append("screen_stocks_by_criteria")
+
+        batch_output = ""
+        candidate_codes = [
+            str(item.get("code") or item.get("symbol", "")).strip()
+            for item in screen_items
+            if str(item.get("code") or item.get("symbol", "")).strip()
+        ]
+        batch_plan = locked_plan.get("batch")
+        if batch_plan and candidate_codes:
+            batch_args = {
+                "stock_codes_json": json.dumps(candidate_codes, ensure_ascii=False),
+                "years": batch_plan.get("years", 3),
+                "threshold_cv": batch_plan.get("threshold_cv", 0.3),
+            }
+            batch_output = await self._invoke_tool_function("batch_check_profit_consistency", **batch_args)
+            tools_used.append("batch_check_profit_consistency")
+
+        stocks = self._build_structured_stocks(
+            screen_items,
+            raw_conditions,
+            screen_args.get("order_by_field", "total_mv"),
+            batch_output,
+        )
+        reply = self._build_locked_result_reply(total_candidates, stocks, batch_output)
+        return reply, tools_used, stocks
 
     async def _emit_progress(
         self,
@@ -284,15 +836,22 @@ class IntelligentScreeningService:
         tool_summary = self._build_tool_summary(self._result_openai_tools) if phase == "planning" else ""
         system_prompt = self._get_system_prompt(phase, tool_summary)
         messages = [Message(role=MessageRole.SYSTEM, content=system_prompt)]
-        for h in history:
+        phase_history = self._select_phase_history(history, phase, message)
+        locked_plan = (
+            self._extract_locked_execution_plan(phase_history)
+            if phase == "result" and self._is_approval_message(message) and not self._references_latest_result(message)
+            else None
+        )
+        for h in phase_history:
             role = MessageRole.USER if h["role"] == "user" else MessageRole.ASSISTANT
             messages.append(Message(role=role, content=h["content"]))
         messages.append(Message(role=MessageRole.USER, content=message))
 
         tools_used: List[str] = []
+        structured_stocks: list = []
 
         async def _do_chat():
-            nonlocal tools_used
+            nonlocal tools_used, structured_stocks
             if phase == "result":
                 await self._emit_progress(
                     progress_callback,
@@ -300,6 +859,16 @@ class IntelligentScreeningService:
                     phase=phase,
                     message="已进入执行阶段，开始调用筛选与自选股工具",
                 )
+                if locked_plan:
+                    logger.info("[智能筛选] 使用已批准计划直接执行 result 阶段")
+                    content, locked_tools_used, locked_stocks = await self._run_locked_result_execution(
+                        message,
+                        locked_plan,
+                        progress_callback=progress_callback,
+                    )
+                    tools_used.extend(locked_tools_used)
+                    structured_stocks = locked_stocks
+                    return content
                 # 阶段 3：实际调用工具执行筛选
                 resp = await self._llm_client.achat(
                     messages,
@@ -385,7 +954,7 @@ class IntelligentScreeningService:
             }
 
         # 提取股票（仅 result 阶段）
-        stocks = self._extract_stocks(reply) if phase == "result" else []
+        stocks = structured_stocks if phase == "result" and structured_stocks else self._extract_stocks(reply) if phase == "result" else []
 
         if phase == "result" and not stocks and "screen_stocks_by_criteria" in tools_used:
             reply = self._build_no_match_reply(message)
@@ -430,11 +999,7 @@ class IntelligentScreeningService:
             return "confirmation"
 
         # 找到最近一条 assistant 消息
-        last_assistant = None
-        for msg in reversed(history):
-            if msg.get("role") == "assistant":
-                last_assistant = msg
-                break
+        last_assistant = self._find_last_assistant(history)
 
         if not last_assistant:
             return "confirmation"
@@ -448,14 +1013,15 @@ class IntelligentScreeningService:
         if last_phase == "planning":
             # 用户回应了规划消息
             # 检查是否要重新描述需求
-            adjust_keywords = ["重新", "修改", "调整需求", "换个", "不对", "重新描述", "重新考虑"]
-            for kw in adjust_keywords:
-                if kw in message:
-                    return "confirmation"
+            if self._is_adjustment_message(message):
+                return "confirmation"
             # 否则批准计划，进入执行阶段
             return "result"
 
-        # last_phase == "result" → 在结果基础上调整 → 直接再次执行
+        # last_phase == "result"：新的同类筛选请求重新开启确认；基于结果的追问/调整继续留在结果阶段
+        if self._looks_like_new_screening_request(message):
+            return "confirmation"
+
         return "result"
 
     async def _get_context_messages(self, user_id: str, conversation_id: Optional[str] = None) -> tuple[str, list]:
@@ -497,6 +1063,12 @@ class IntelligentScreeningService:
 3. **改进建议**：基于专业判断，提出 2-3 条可选的改进建议（增加筛选维度、调整阈值、补充考量因素等）
 4. **等待确认**：明确询问用户是"按原需求筛选"还是"采纳建议后再筛选"
 
+补充规则：
+- 如果用户使用“低估值”“低PE”“低PB”这类模糊估值描述，但没有明确口径，必须在确认阶段显式指出这一歧义
+- PE 相关口径要区分 `pe`（PE）和 `pe_ttm`（PE(TTM)）
+- PB 相关口径要区分 `pb`（PB）和 `pb_mrq`（PB(MRQ)）
+- 遇到这类模糊估值需求时，你可以先给出默认建议口径，但必须把口径写清，并提示用户确认是否采用该口径
+
 回复格式：
 ```
 ## 📋 需求分析
@@ -505,12 +1077,14 @@ class IntelligentScreeningService:
 - **行业范围**：xxx
 - **核心条件**：xxx
 - **筛选风格**：xxx
+- **待确认口径**：若您提到“低PE/低PB/低估值”，我会进一步确认是使用 `pe` / `pe_ttm`、`pb` / `pb_mrq`
 
 ## 💡 改进建议
 
 基于专业分析，我建议您可以考虑：
 1. xxx（原因）
 2. xxx（原因）
+3. 若“低估值”是核心要求，建议明确采用 `pe_ttm`（PE(TTM)）还是 `pe`（PE），以及采用 `pb_mrq`（PB(MRQ)）还是 `pb`（PB）
 
 ## ⏳ 请确认
 
@@ -542,12 +1116,15 @@ class IntelligentScreeningService:
 
 ## 推荐两步法工作流
 
-**第一步（宽口径批量筛选）**：调用 `screen_stocks_by_criteria`，设置 limit=50，按硬性指标（PE/PB/市值/资产负债率/is_st 等）过滤候选池。
+**第一步（宽口径批量筛选）**：调用 `screen_stocks_by_criteria`，设置 limit=50，按硬性指标（PE(TTM)/PE、PB(MRQ)/PB、市值、资产负债率、is_st 等）过滤候选池。
 **第二步（盈利稳定性验证）**：将候选股票代码列表传给 `batch_check_profit_consistency`，一次查询验证近N年ROE稳定性。**禁止对每只股票单独重复查询财务数据。**
 
 ## 字段使用建议
 
-- 优先使用可比较的比率型指标做硬筛选，如 PE、PB、ROE、毛利率、资产负债率、流动比率、股息率
+- 估值口径必须显式写清，不要只写笼统的“PE/PB”：`pe` 表示 PE，`pe_ttm` 表示 PE(TTM)，`pb` 表示 PB，`pb_mrq` 表示 PB(MRQ)
+- 如果用户只说“PE”但未说明口径，优先在计划中明确成你实际选择的字段，例如“使用 `pe_ttm`（PE(TTM)）<= 15”或“使用 `pe`（PE）<= 15”
+- 如果用户只说“PB”但未说明口径，优先在计划中明确成你实际选择的字段，例如“使用 `pb`（PB）<= 1.5”或“使用 `pb_mrq`（PB(MRQ)）<= 1.5”
+- 优先使用可比较的比率型指标做硬筛选，如 PE(TTM)/PE、PB(MRQ)/PB、ROE、毛利率、资产负债率、流动比率、股息率
 - `revenue_ttm`、`net_profit_ttm`、`n_cashflow_act` 更适合作为质量补充条件，不宜单独作为唯一标准
 - 如果用户强调“现金流好”“利润扎实”“财务稳健”，优先考虑 `n_cashflow_act > 0`、`net_profit_ttm > 0`、`debt_to_assets`、`current_ratio`
 - 如果用户强调“高分红”“防御型”，优先考虑 `dividend_yield` 并结合 `debt_to_assets`、`n_cashflow_act`
@@ -568,6 +1145,7 @@ class IntelligentScreeningService:
 1. **筛选策略**：总结最终采用的筛选条件，注明哪些需求能被现有字段支持，哪些无法精确筛选
 2. **工具调用计划**：**仅使用上方可用工具清单中的工具**，列出工具名和具体参数
    - 步骤1：`screen_stocks_by_criteria` 的 conditions JSON 数组（每个条件的 field/operator/value），limit 建议 30-50
+    - 若使用估值字段，必须在文字说明里同步写明展示口径，例如“`pe_ttm`（PE(TTM)）”“`pb_mrq`（PB(MRQ)）”
    - 步骤2（如需验证盈利稳定性）：`batch_check_profit_consistency`，传入步骤1的候选股代码列表
 3. **数据处理**：说明如何从工具返回结果中选出最终 5 只股票（排序依据、优先级等）
 4. **限制说明**：诚实告知用户哪些条件无法精确筛选（如审计意见类型、自定义安全边际评分）
@@ -578,7 +1156,7 @@ class IntelligentScreeningService:
 ## 🔧 执行计划
 
 ### 筛选条件（最终版）
-- PE < xxx（现有字段支持）
+- PE(TTM) < xxx（使用 `pe_ttm` 字段）
 - 市值 > 50亿（现有字段支持）
 - 资产负债率 ≤ 60%（debt_to_assets 字段支持）
 - 非ST股（is_st 字段支持）
@@ -586,9 +1164,9 @@ class IntelligentScreeningService:
 
 ### 工具调用
 **步骤 1**：调用 `screen_stocks_by_criteria`
-- conditions: [{{{{"field": "pe", "operator": "<", "value": 15}}}}, {{{{"field": "total_mv", "operator": ">", "value": 50}}}}, {{{{"field": "is_st", "operator": "==", "value": false}}}}]
+- conditions: [{{{{"field": "pe_ttm", "operator": "<", "value": 15}}}}, {{{{"field": "pb_mrq", "operator": "<=", "value": 1.5}}}}, {{{{"field": "total_mv", "operator": ">", "value": 50}}}}, {{{{"field": "is_st", "operator": "==", "value": false}}}}]
 - limit: 50
-- order_by_field: "pb"
+- order_by_field: "pb_mrq"
 - order_direction: "asc"
 
 **步骤 2**：调用 `batch_check_profit_consistency`（对步骤1的候选股批量验证盈利稳定性）
@@ -597,7 +1175,7 @@ class IntelligentScreeningService:
 - threshold_cv: 0.3
 
 ### 数据处理
-- 从步骤2结果中筛选"盈利稳定"的股票，按 PB 升序取前 5 只
+- 从步骤2结果中筛选"盈利稳定"的股票，按 PB(MRQ) 升序取前 5 只
 - 确保行业不重叠
 
 ## ✅ 请确认
@@ -629,7 +1207,9 @@ class IntelligentScreeningService:
       "industry": "白酒",
       "price": 1680.00,
       "pe": 25.3,
+    "pe_display_label": "PE",
       "pb": 8.5,
+    "pb_display_label": "PB",
             "roe": 32.1,
             "roa": 18.6,
             "gross_margin": 51.2,
@@ -664,6 +1244,7 @@ class IntelligentScreeningService:
 - 推荐理由要具体，结合数据说话
 - 若工具结果中已提供 ROE、股息率、资产负债率、流动比率、财报期，优先一并放入 JSON 字段，便于前端直接展示
 - 若工具结果中已提供 ROA、毛利率、净利率、滚动营收、滚动净利润、经营现金流、权益乘数、速动比率、现金比率，也可一并放入 JSON 字段，便于前端直接展示
+- 若实际筛选或展示口径使用 `pe_ttm` / `pb_mrq`，必须把对应数值写入 `pe` / `pb` 字段，并分别补充 `pe_display_label` / `pb_display_label`，严禁把 `PE(TTM)` 写成 `PE`、把 `PB(MRQ)` 写成 `PB`
 - 如果用户要求调整（如"换个行业""PE 再低点"），直接重新调用工具调整筛选
 - 如果用户明确要求将当前推荐结果加入自选股，可调用 `add_stocks_to_favorites` 一次性添加；若同时要求“打标签/标记”，把标签通过 `tags` 参数一并写入
 - 如果用户明确要求将当前推荐结果放入某个分类/分组，可调用 `add_stock_to_watchlist`，分组不存在时允许自动创建，例如“银行”“待分析”
@@ -744,44 +1325,61 @@ class IntelligentScreeningService:
                 "phase": "result",
             }
         set_current_user_id(user_id)
-        curr_date = _get_latest_trade_date()
-        direct_hint = (
-            f"【直接执行模式】请根据用户消息中的条件直接调用筛选工具执行，"
-            f"无需确认与规划。推荐最多 {max_stocks} 只股票，并在回复末尾用 JSON 代码块列出。"
-        )
-        system_prompt = direct_hint + "\n\n" + self._get_system_prompt("result", "")
-        user_message = f"请根据以下条件直接执行筛选并返回股票列表（最多 {max_stocks} 只）及简要理由。\n\n条件：{criteria}"
-        messages = [
-            Message(role=MessageRole.SYSTEM, content=system_prompt),
-            Message(role=MessageRole.USER, content=user_message),
-        ]
         tools_used: List[str] = []
+
+        async def _run_direct_flow() -> tuple[str, List[str], list]:
+            planning_messages = [
+                Message(
+                    role=MessageRole.SYSTEM,
+                    content=(
+                        "【直接执行模式】用户要求你在单轮内给出可执行的选股方案。"
+                        "你现在只负责生成 planning 阶段的工具执行计划，不要调用工具，不要输出最终股票推荐。"
+                        f"最终展示股票数量上限为 {max_stocks} 只。\n\n"
+                        + self._get_system_prompt("planning", self._build_tool_summary(self._result_openai_tools))
+                    ),
+                ),
+                Message(
+                    role=MessageRole.USER,
+                    content=f"请根据以下条件直接生成筛选执行计划，无需确认环节。\n\n条件：{criteria}",
+                ),
+            ]
+            planning_response = await self._llm_client.achat(
+                planning_messages,
+                tools=None,
+                log_payloads=True,
+                payload_log_label="intelligent_screening:direct_planning",
+            )
+            planning_content = (planning_response.content if planning_response else None) or ""
+            locked_plan = self._extract_locked_execution_plan([
+                {"role": "assistant", "phase": "planning", "content": planning_content}
+            ])
+            if not locked_plan:
+                raise ValueError("未能解析出可执行的筛选计划，请补充更明确的筛选条件后重试。")
+
+            locked_plan["screen"]["limit"] = min(int(locked_plan["screen"].get("limit", max_stocks)), max_stocks)
+            return await self._run_locked_result_execution(criteria, locked_plan)
+
         try:
             started_at = datetime.now(timezone.utc)
-            resp = await asyncio.wait_for(
-                self._llm_client.achat(
-                    messages,
-                    tools=self._result_openai_tools,
-                    auto_execute_tools=True,
-                    max_tool_rounds=SCREENING_MAX_TOOL_ROUNDS,
-                    tools_used=tools_used,
-                ),
+            reply, tools_used, stocks = await asyncio.wait_for(
+                _run_direct_flow(),
                 timeout=SCREENING_RESULT_TIMEOUT_SECONDS,
             )
-            reply = (resp.content if resp else None) or "未能生成选股结果，请稍后重试。"
             elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
             logger.info(f"[智能筛选] run_direct_screening 完成 elapsed={elapsed:.2f}s tools_used={len(tools_used)}")
         except asyncio.TimeoutError:
             reply = self._build_timeout_reply(SCREENING_RESULT_TIMEOUT_SECONDS)
+            stocks = []
+            tools_used = []
         except Exception as e:
             logger.exception("[智能筛选] run_direct_screening 失败")
             reply = f"处理选股请求时发生错误：{str(e)}。请稍后重试。"
-        stocks = self._extract_stocks(reply)
+            stocks = []
         if not stocks and "screen_stocks_by_criteria" in tools_used:
             reply = self._build_no_match_reply(criteria)
             stocks = []
 
-        return {"reply": reply, "stocks": stocks, "phase": "result"}
+        return {"reply": reply, "stocks": stocks, "phase": "result", "is_fallback": False}
 
     async def get_conversation(self, user_id: str, conversation_id: Optional[str] = None) -> tuple[Optional[str], list]:
         """获取完整对话历史"""
