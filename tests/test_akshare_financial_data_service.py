@@ -1,3 +1,5 @@
+import asyncio
+
 from app.services.financial_data_service import FinancialDataService
 
 
@@ -25,3 +27,74 @@ def test_extract_latest_period_and_indicators_from_akshare_matrix_records():
     assert indicators["total_equity"] == 394232291000.0
     assert indicators["roe"] == 5.973097
     assert indicators["debt_to_assets"] == 62.32234
+
+
+def test_save_financial_data_also_syncs_financial_periods(monkeypatch):
+    class _BulkWriteResult:
+        upserted_count = 1
+        modified_count = 0
+
+    class _FakeCollection:
+        def __init__(self):
+            self.operations = []
+
+        async def create_index(self, *_args, **_kwargs):
+            return None
+
+        async def bulk_write(self, operations, ordered=True):
+            self.operations.extend(operations)
+            return _BulkWriteResult()
+
+    class _FakeDB:
+        def __init__(self):
+            self.collections = {
+                "stock_financial_data": _FakeCollection(),
+                "stock_financial_periods": _FakeCollection(),
+            }
+
+        def __getitem__(self, name):
+            return self.collections[name]
+
+    service = FinancialDataService()
+    service.db = _FakeDB()
+
+    standardized_record = {
+        "code": "600519",
+        "symbol": "600519",
+        "report_period": "20260331",
+        "report_type": "quarterly",
+        "data_source": "tushare",
+        "ann_date": "20260425",
+        "updated_at": "2026-05-04T02:47:10Z",
+        "roe": 10.5687,
+        "revenue_ttm": 172146396849.52,
+        "net_profit_ttm": 82715105749.37,
+    }
+
+    monkeypatch.setattr(
+        service,
+        "_standardize_financial_data",
+        lambda *_args, **_kwargs: standardized_record,
+        raising=True,
+    )
+
+    async def _run():
+        saved = await service.save_financial_data(
+            symbol="600519",
+            financial_data={},
+            data_source="tushare",
+            market="CN",
+            report_period="20260331",
+            report_type="quarterly",
+        )
+        assert saved == 1
+
+    asyncio.run(_run())
+
+    raw_ops = service.db["stock_financial_data"].operations
+    period_ops = service.db["stock_financial_periods"].operations
+    assert len(raw_ops) == 1
+    assert len(period_ops) == 1
+    assert period_ops[0]._filter["symbol"] == "600519"
+    assert period_ops[0]._filter["source"] == "tushare"
+    assert period_ops[0]._filter["report_period"] == "20260331"

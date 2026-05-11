@@ -110,6 +110,30 @@ SCREENING_RESULT_REFERENCE_KEYWORDS = [
     "分组",
 ]
 
+SCREENING_MULTI_STOCK_REQUEST_KEYWORDS = [
+    "帮我选",
+    "筛选",
+    "推荐几只",
+    "找几只",
+    "候选",
+    "组合",
+]
+
+SINGLE_STOCK_QUERY_PREFIXES = (
+    "请问一下",
+    "请问",
+    "我想问一下",
+    "我想问",
+    "想问一下",
+    "想问",
+    "帮我看下",
+    "帮我判断一下",
+    "麻烦看下",
+    "麻烦问下",
+)
+
+SINGLE_STOCK_DIVIDEND_YIELD_THRESHOLD = 3.0
+
 SCREENING_FIELD_DISPLAY_LABELS = {
     "industry": "行业",
     "dividend_yield": "股息率",
@@ -239,6 +263,201 @@ class IntelligentScreeningService:
             if any(keyword in text or keyword in lower_text for keyword in keywords):
                 return label
         return "原筛选条件"
+
+    def _extract_single_stock_keyword(self, message: str) -> Optional[str]:
+        """从单股判断问题中提取股票代码或简称。"""
+        text = re.sub(r"\s+", "", message or "")
+        if not text:
+            return None
+
+        code_match = re.search(r"(?<!\d)(\d{6})(?!\d)", text)
+        if code_match:
+            return code_match.group(1)
+
+        normalized = text
+        for prefix in SINGLE_STOCK_QUERY_PREFIXES:
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix):]
+                break
+
+        normalized = re.sub(r"[？?！!。,.，：:；;]", "", normalized)
+        patterns = [
+            r"([A-Za-z\u4e00-\u9fa5]{2,16})(?:\(|（)?(?:\d{6})?(?:\)|）)?(?:是不是|是否|算不算|属不属于|属于|是)",
+            r"([A-Za-z\u4e00-\u9fa5]{2,16})(?:\(|（)?(?:\d{6})?(?:\)|）)?(?:的)?(?:股息率|分红)",
+        ]
+        stopwords = {"这个", "这只", "该股", "股票", "A股", "个股"}
+        for pattern in patterns:
+            match = re.search(pattern, normalized)
+            if not match:
+                continue
+            keyword = match.group(1).strip()
+            if keyword in stopwords or len(keyword) < 2:
+                continue
+            return keyword
+
+        return None
+
+    def _looks_like_single_stock_judgement_query(self, message: str) -> bool:
+        """识别“单只股票是否满足某属性”的直接判断问题。"""
+        text = re.sub(r"\s+", "", message or "")
+        if not text:
+            return False
+
+        if self._is_adjustment_message(text) or self._is_approval_message(text):
+            return False
+
+        if any(keyword in text for keyword in SCREENING_MULTI_STOCK_REQUEST_KEYWORDS):
+            return False
+
+        if self._infer_request_focus(text) != "高分红":
+            return False
+
+        if not self._extract_single_stock_keyword(text):
+            return False
+
+        return any(token in text for token in ("是不是", "是否", "算不算", "属于", "是", "吗"))
+
+    async def _fetch_single_stock_item(self, keyword: str) -> Optional[dict]:
+        """按代码或名称检索最匹配的单只股票快照。"""
+        items, _total = await _execute_screening_query(
+            [{"field": "keyword", "operator": "contains", "value": keyword}],
+            10,
+            "total_mv",
+            "desc",
+        )
+        if not items:
+            return None
+
+        normalized = keyword.strip().lower()
+
+        def score(item: dict) -> tuple[int, float]:
+            code = str(item.get("code") or item.get("symbol") or "").strip().lower()
+            name = str(item.get("name") or "").strip().lower()
+            item_score = 0
+            if normalized == code:
+                item_score += 100
+            if normalized == name:
+                item_score += 95
+            if normalized and normalized in name:
+                item_score += 80
+            if normalized and normalized in code:
+                item_score += 70
+            return item_score, float(item.get("total_mv") or 0)
+
+        return max(items, key=score)
+
+    def _build_single_stock_snapshot(self, item: dict, reason: str) -> dict[str, Any]:
+        pe_order_field = "pe_ttm" if item.get("pe_ttm") is not None else "pe"
+        pb_order_field = "pb_mrq" if item.get("pb_mrq") is not None else "pb"
+        pe_display_field, pe_display_label = select_metric_display_spec(None, pe_order_field, "pe")
+        pb_display_field, pb_display_label = select_metric_display_spec(None, pb_order_field, "pb")
+        code = str(item.get("code") or item.get("symbol") or "").strip()
+
+        return {
+            "code": code,
+            "name": str(item.get("name") or ""),
+            "industry": str(item.get("industry") or ""),
+            "price": item.get("close"),
+            "pe": resolve_metric_value(item, pe_display_field, "pe"),
+            "pe_display_label": pe_display_label,
+            "pb": resolve_metric_value(item, pb_display_field, "pb"),
+            "pb_display_label": pb_display_label,
+            "roe": item.get("roe"),
+            "roa": item.get("roa"),
+            "gross_margin": item.get("gross_margin"),
+            "netprofit_margin": item.get("netprofit_margin"),
+            "dividend_yield": item.get("dividend_yield"),
+            "debt_to_assets": item.get("debt_to_assets"),
+            "assets_to_eqt": item.get("assets_to_eqt"),
+            "current_ratio": item.get("current_ratio"),
+            "quick_ratio": item.get("quick_ratio"),
+            "cash_ratio": item.get("cash_ratio"),
+            "revenue_ttm": item.get("revenue_ttm"),
+            "net_profit_ttm": item.get("net_profit_ttm"),
+            "n_cashflow_act": item.get("n_cashflow_act"),
+            "report_period": item.get("report_period"),
+            "pct_change": item.get("pct_chg"),
+            "reason": reason,
+        }
+
+    async def _maybe_handle_single_stock_query(
+        self,
+        message: str,
+        progress_callback: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """对单股属性判断问题直接返回结果，避免误入全市场筛选流程。"""
+        if not self._looks_like_single_stock_judgement_query(message):
+            return None
+
+        await self._emit_progress(
+            progress_callback,
+            "status",
+            phase="result",
+            message="正在核验单只股票的分红指标",
+        )
+
+        keyword = self._extract_single_stock_keyword(message)
+        if not keyword:
+            return None
+
+        item = await self._fetch_single_stock_item(keyword)
+        if not item:
+            reply = f"未找到与“{keyword}”匹配的股票，暂时无法判断它是否属于高分红股票。"
+            return {
+                "reply": reply,
+                "tools_used": [],
+                "stocks": [],
+                "phase": "result",
+                "is_fallback": False,
+            }
+
+        stock_name = str(item.get("name") or keyword)
+        stock_code = str(item.get("code") or item.get("symbol") or "")
+        dividend_yield = item.get("dividend_yield")
+        if not isinstance(dividend_yield, (int, float)):
+            reply = f"已找到 {stock_name}（{stock_code}），但当前快照里没有可用的股息率数据，暂时无法判断它是否属于高分红股票。"
+            stock = self._build_single_stock_snapshot(item, "当前缺少可用股息率数据，无法直接判断是否属于高分红。")
+            return {
+                "reply": reply,
+                "tools_used": [],
+                "stocks": [stock],
+                "phase": "result",
+                "is_fallback": False,
+            }
+
+        is_high_dividend = dividend_yield >= SINGLE_STOCK_DIVIDEND_YIELD_THRESHOLD
+        verdict = "可以算" if is_high_dividend else "严格按当前默认口径暂不算"
+        reason = (
+            f"单股核验：默认以近12个月股息率 ≥ {SINGLE_STOCK_DIVIDEND_YIELD_THRESHOLD:.1f}% 作为高分红口径；"
+            f"当前股息率={dividend_yield:.2f}%，因此{verdict}高分红。"
+        )
+        stock = self._build_single_stock_snapshot(item, reason)
+
+        metrics: list[str] = [f"股息率={dividend_yield:.2f}%"]
+        if isinstance(stock.get("pe"), (int, float)):
+            metrics.append(f"{stock.get('pe_display_label') or 'PE'}={stock['pe']:.2f}")
+        if isinstance(stock.get("roe"), (int, float)):
+            metrics.append(f"ROE={stock['roe']:.2f}%")
+        if stock.get("report_period"):
+            metrics.append(f"财报期={stock['report_period']}")
+
+        reply_lines = [
+            f"结论：{stock_name}（{stock_code}）{verdict}高分红股票。",
+            f"判断口径：若未额外指定阈值，本系统默认把近12个月股息率 ≥ {SINGLE_STOCK_DIVIDEND_YIELD_THRESHOLD:.1f}% 视为高分红。",
+            f"当前指标：{'；'.join(metrics)}。",
+        ]
+        if is_high_dividend:
+            reply_lines.append("补充说明：它更接近稳定分红的高质量白马，不等同于市场里股息率最高的红利型标的。")
+        else:
+            reply_lines.append("补充说明：如果您更关注分红稳定性或分红比例，而不是静态股息率阈值，可以换该口径再判断。")
+
+        return {
+            "reply": "\n\n".join(reply_lines),
+            "tools_used": [],
+            "stocks": [stock],
+            "phase": "result",
+            "is_fallback": False,
+        }
 
     def _build_no_match_reply(self, message: str) -> str:
         """未命中条件时返回硬提示，不推荐任何替代股票。"""
@@ -800,6 +1019,29 @@ class IntelligentScreeningService:
         阶段 2 — 执行规划（planning）：LLM 说明具体调用哪些工具、用什么参数，不实际执行
         阶段 3 — 执行筛选（result）：LLM 调用工具，返回 5 只股票
         """
+        # 1. 获取历史对话
+        resolved_conversation_id, history = await self._get_context_messages(user_id, conversation_id)
+        if not resolved_conversation_id:
+            resolved_conversation_id = conversation_id or uuid.uuid4().hex
+
+        direct_result = await self._maybe_handle_single_stock_query(
+            message,
+            progress_callback=progress_callback,
+        )
+        if direct_result is not None:
+            await self._save_message(
+                user_id,
+                resolved_conversation_id,
+                message,
+                direct_result["reply"],
+                direct_result.get("tools_used", []),
+                direct_result.get("stocks", []),
+                direct_result.get("phase", "result"),
+                is_fallback=False,
+            )
+            direct_result["conversation_id"] = resolved_conversation_id
+            return direct_result
+
         if not await self._ensure_client():
             return {
                 "reply": "智能筛选暂时不可用，请检查 LLM 配置是否已在「设置」中正确配置。",
@@ -811,11 +1053,6 @@ class IntelligentScreeningService:
             }
 
         set_current_user_id(user_id)
-
-        # 1. 获取历史对话
-        resolved_conversation_id, history = await self._get_context_messages(user_id, conversation_id)
-        if not resolved_conversation_id:
-            resolved_conversation_id = conversation_id or uuid.uuid4().hex
 
         # 2. 判断当前应进入哪个阶段
         phase = self._determine_phase(history, message)

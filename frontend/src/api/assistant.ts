@@ -214,6 +214,7 @@ function createAssistantStream(
       const decoder = new TextDecoder()
       let buffer = ''
       let idleTimer: ReturnType<typeof setTimeout> | null = null
+      let receivedTerminalEvent = false
 
       const resetIdle = () => {
         if (idleTimer) clearTimeout(idleTimer)
@@ -223,12 +224,55 @@ function createAssistantStream(
         }, IDLE_TIMEOUT_MS)
       }
 
+      const processEventBlock = (part: string) => {
+        if (!part.trim() || part.startsWith(': ')) return
+
+        let eventType = ''
+        const dataLines: string[] = []
+
+        for (const rawLine of part.split('\n')) {
+          const line = rawLine.replace(/\r$/, '')
+          if (line.startsWith('event: ')) {
+            eventType = line.slice(7)
+          } else if (line.startsWith('data: ')) {
+            dataLines.push(line.slice(6))
+          }
+        }
+
+        const eventData = dataLines.join('\n')
+        if (!eventData) return
+
+        try {
+          const data = JSON.parse(eventData)
+          switch (eventType) {
+            case 'token':
+              callbacks?.onToken?.(data.content || '')
+              break
+            case 'done':
+              receivedTerminalEvent = true
+              callbacks?.onDone?.(data)
+              break
+            case 'error':
+              receivedTerminalEvent = true
+              callbacks?.onError?.(data.message || '未知错误')
+              break
+            default:
+              callbacks?.onToolEvent?.({ ...data, event: eventType || data.event })
+          }
+        } catch {
+          // Ignore malformed JSON
+        }
+      }
+
       resetIdle()
 
       try {
         while (true) {
           const { done, value } = await reader.read()
-          if (done) break
+          if (done) {
+            buffer += decoder.decode()
+            break
+          }
 
           resetIdle()
           buffer += decoder.decode(value, { stream: true })
@@ -236,40 +280,16 @@ function createAssistantStream(
           buffer = parts.pop() || ''
 
           for (const part of parts) {
-            if (!part.trim() || part.startsWith(': ')) continue
-
-            let eventType = ''
-            let eventData = ''
-
-            for (const line of part.split('\n')) {
-              if (line.startsWith('event: ')) {
-                eventType = line.slice(7)
-              } else if (line.startsWith('data: ')) {
-                eventData = line.slice(6)
-              }
-            }
-
-            if (!eventData) continue
-
-            try {
-              const data = JSON.parse(eventData)
-              switch (eventType) {
-                case 'token':
-                  callbacks?.onToken?.(data.content || '')
-                  break
-                case 'done':
-                  callbacks?.onDone?.(data)
-                  break
-                case 'error':
-                  callbacks?.onError?.(data.message || '未知错误')
-                  break
-                default:
-                  callbacks?.onToolEvent?.({ ...data, event: eventType || data.event })
-              }
-            } catch {
-              // Ignore malformed JSON
-            }
+            processEventBlock(part)
           }
+        }
+
+        if (buffer.trim()) {
+          processEventBlock(buffer)
+        }
+
+        if (!receivedTerminalEvent && !controller.signal.aborted) {
+          callbacks?.onDone?.({ tools_used: [] })
         }
       } finally {
         if (idleTimer) clearTimeout(idleTimer)

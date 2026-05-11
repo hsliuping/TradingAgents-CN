@@ -667,28 +667,6 @@
             <!-- 基础设置 -->
             <el-divider content-position="left">基础设置</el-divider>
 
-            <el-form-item label="数据供应商">
-              <el-select
-                v-model="systemSettings.default_provider"
-                :disabled="!isEditable('default_provider')"
-                placeholder="选择已启用的厂家"
-                filterable
-              >
-                <el-option
-                  v-for="provider in enabledProviders"
-                  :key="provider.id"
-                  :label="provider.display_name"
-                  :value="provider.name"
-                >
-                  <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span>{{ provider.display_name }}</span>
-                    <el-tag v-if="provider.is_active" type="success" size="small">已启用</el-tag>
-                  </div>
-                </el-option>
-              </el-select>
-              <div class="setting-description">从已配置的厂家中选择默认供应商</div>
-            </el-form-item>
-
             <el-form-item label="快速分析模型">
               <el-select
                 v-model="systemSettings.quick_analysis_model_config_id"
@@ -704,12 +682,12 @@
                   <el-option
                     v-for="model in group.models"
                     :key="model.config_id || `${model.provider}/${model.model_name}`"
-                    :label="model.model_display_name || model.model_name"
+                    :label="formatModelSelectionLabel(model)"
                     :value="model.config_id"
                   >
                     <div style="display: flex; flex-direction: column;">
-                      <span>{{ model.model_display_name || model.model_name }}</span>
-                      <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
+                      <span>{{ formatModelSelectionLabel(model) }}</span>
+                      <span style="font-size: 12px; color: #909399;">{{ formatModelSelectionMeta(model) }}</span>
                     </div>
                   </el-option>
                 </el-option-group>
@@ -732,12 +710,12 @@
                   <el-option
                     v-for="model in group.models"
                     :key="model.config_id || `${model.provider}/${model.model_name}`"
-                    :label="model.model_display_name || model.model_name"
+                    :label="formatModelSelectionLabel(model)"
                     :value="model.config_id"
                   >
                     <div style="display: flex; flex-direction: column;">
-                      <span>{{ model.model_display_name || model.model_name }}</span>
-                      <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
+                      <span>{{ formatModelSelectionLabel(model) }}</span>
+                      <span style="font-size: 12px; color: #909399;">{{ formatModelSelectionMeta(model) }}</span>
                     </div>
                   </el-option>
                 </el-option-group>
@@ -761,12 +739,12 @@
                   <el-option
                     v-for="model in group.models"
                     :key="model.config_id || `${model.provider}/${model.model_name}`"
-                    :label="model.model_display_name || model.model_name"
+                    :label="formatModelSelectionLabel(model)"
                     :value="model.config_id"
                   >
                     <div style="display: flex; flex-direction: column;">
-                      <span>{{ model.model_display_name || model.model_name }}</span>
-                      <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
+                      <span>{{ formatModelSelectionLabel(model) }}</span>
+                      <span style="font-size: 12px; color: #909399;">{{ formatModelSelectionMeta(model) }}</span>
                     </div>
                   </el-option>
                 </el-option-group>
@@ -790,12 +768,12 @@
                   <el-option
                     v-for="model in group.models"
                     :key="model.config_id || `${model.provider}/${model.model_name}`"
-                    :label="model.model_display_name || model.model_name"
+                    :label="formatModelSelectionLabel(model)"
                     :value="model.config_id"
                   >
                     <div style="display: flex; flex-direction: column;">
-                      <span>{{ model.model_display_name || model.model_name }}</span>
-                      <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
+                      <span>{{ formatModelSelectionLabel(model) }}</span>
+                      <span style="font-size: 12px; color: #909399;">{{ formatModelSelectionMeta(model) }}</span>
                     </div>
                   </el-option>
                 </el-option-group>
@@ -820,12 +798,12 @@
                   <el-option
                     v-for="model in getEmbeddingModelsForProvider(provider.name)"
                     :key="`${provider.name}/${model}`"
-                    :label="model"
+                    :label="formatEmbeddingSelectionLabel(provider, model)"
                     :value="`${provider.name}:${model}`"
                   >
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                      <span>{{ model }}</span>
-                      <el-tag size="small" type="info">{{ provider.display_name }}</el-tag>
+                    <div style="display: flex; flex-direction: column;">
+                      <span>{{ formatEmbeddingSelectionLabel(provider, model) }}</span>
+                      <span style="font-size: 12px; color: #909399;">{{ formatEmbeddingSelectionMeta(provider, model) }}</span>
                     </div>
                   </el-option>
                 </el-option-group>
@@ -1613,11 +1591,6 @@ const loadTabData = async (tab: string) => {
   }
 }
 
-// 计算属性：获取已启用的厂家
-const enabledProviders = computed(() => {
-  return providers.value.filter(p => p.is_active)
-})
-
 // 🔥 计算属性：按启用状态排序的厂家列表（启用的在上面，禁用的在下面）
 const sortedProviders = computed(() => {
   return [...providers.value].sort((a, b) => {
@@ -1667,6 +1640,35 @@ const groupedAvailableModels = computed(() => {
     })
   }))
 })
+
+const getProviderDisplayLabel = (providerName?: string, fallbackName?: string) => {
+  const normalizedProvider = String(providerName || '').trim()
+  if (!normalizedProvider) {
+    return String(fallbackName || '').trim()
+  }
+
+  return providerInfoMap.value[normalizedProvider]?.display_name || fallbackName || normalizedProvider
+}
+
+const formatModelSelectionLabel = (model: Pick<LLMConfig, 'provider' | 'provider_name' | 'model_display_name' | 'model_name'>) => {
+  const providerLabel = getProviderDisplayLabel(model.provider, model.provider_name)
+  const modelLabel = model.model_display_name || model.model_name
+  return providerLabel ? `${providerLabel} / ${modelLabel}` : modelLabel
+}
+
+const formatModelSelectionMeta = (model: Pick<LLMConfig, 'provider' | 'model_name'>) => {
+  const providerName = String(model.provider || '').trim()
+  return providerName ? `${providerName} / ${model.model_name}` : model.model_name
+}
+
+const formatEmbeddingSelectionLabel = (provider: { name: string; display_name: string }, model: string) => {
+  const providerLabel = provider.display_name || provider.name
+  return `${providerLabel} / ${model}`
+}
+
+const formatEmbeddingSelectionMeta = (provider: { name: string }, model: string) => {
+  return `${provider.name}:${model}`
+}
 
 const modelSettingPairs = [
   { modelKey: 'quick_analysis_model', configIdKey: 'quick_analysis_model_config_id' },

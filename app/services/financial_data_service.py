@@ -10,6 +10,7 @@ import pandas as pd
 from pymongo import ReplaceOne
 
 from app.core.database import get_mongo_db
+from core.skill_runtime.data_access import expand_financial_document_to_periods
 
 logger = logging.getLogger(__name__)
 
@@ -151,8 +152,12 @@ class FinancialDataService:
             if operations:
                 result = await collection.bulk_write(operations)
                 actual_saved = result.upserted_count + result.modified_count
+                standardized_records = standardized_data if isinstance(standardized_data, list) else [standardized_data]
+                period_saved = await self._sync_financial_period_records(standardized_records)
                 
-                logger.info(f"✅ {symbol} 财务数据保存完成: {actual_saved}条记录")
+                logger.info(
+                    f"✅ {symbol} 财务数据保存完成: 原始{actual_saved}条, 期间{period_saved}条"
+                )
                 return actual_saved
             
             return 0
@@ -160,6 +165,39 @@ class FinancialDataService:
         except Exception as e:
             logger.error(f"❌ 保存财务数据失败 {symbol}: {e}")
             return 0
+
+    async def _sync_financial_period_records(self, standardized_records: List[Dict[str, Any]]) -> int:
+        """将最新财务快照同步到按期展开集合，供筛选/因子链路直接读取。"""
+        period_collection = self.db["stock_financial_periods"]
+        operations: List[ReplaceOne] = []
+
+        for record in standardized_records:
+            for period_record in expand_financial_document_to_periods(record):
+                symbol = period_record.get("symbol") or period_record.get("code")
+                source = period_record.get("source") or period_record.get("data_source")
+                report_period = period_record.get("report_period") or period_record.get("report_date")
+                ann_date = period_record.get("ann_date") or ""
+                if not symbol or not source or not report_period:
+                    continue
+
+                operations.append(
+                    ReplaceOne(
+                        filter={
+                            "symbol": symbol,
+                            "source": source,
+                            "report_period": report_period,
+                            "ann_date": ann_date,
+                        },
+                        replacement=period_record,
+                        upsert=True,
+                    )
+                )
+
+        if not operations:
+            return 0
+
+        await period_collection.bulk_write(operations, ordered=False)
+        return len(operations)
     
     async def get_financial_data(
         self,
@@ -475,19 +513,67 @@ class FinancialDataService:
             else:
                 return f"{symbol}.SZ"
         return symbol
+
+    def _normalize_period_value(self, value: Any) -> Optional[str]:
+        """归一化报告期，兼容 YYYY-MM-DD 与 YYYYMMDD。"""
+        normalized = str(value or "").strip().replace('-', '')
+        if len(normalized) == 8 and normalized.isdigit():
+            return normalized
+        return None
+
+    def _extract_latest_period_from_records(self, records: Any) -> Optional[str]:
+        """从列表记录或矩阵列名中提取最新报告期。"""
+        if not isinstance(records, list):
+            return None
+
+        latest_period: Optional[str] = None
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+
+            for date_field in ['报告期', '报告日期', 'date', '日期', 'end_date', 'report_period']:
+                period = self._normalize_period_value(record.get(date_field))
+                if period and (latest_period is None or period > latest_period):
+                    latest_period = period
+
+            for key in record.keys():
+                period = self._normalize_period_value(key)
+                if period and (latest_period is None or period > latest_period):
+                    latest_period = period
+
+        return latest_period
+
+    def _extract_matrix_indicator_value(
+        self,
+        records: Any,
+        indicator_names: List[str],
+        report_period: Optional[str],
+    ) -> Optional[float]:
+        """从 AKShare 指标矩阵中提取指定报告期的指标值。"""
+        if not report_period or not isinstance(records, list):
+            return None
+
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            indicator_name = str(record.get('指标') or record.get('indicator') or '').strip()
+            if indicator_name not in indicator_names:
+                continue
+
+            for key, value in record.items():
+                if self._normalize_period_value(key) == report_period:
+                    return self._safe_float(value)
+
+        return None
     
     def _extract_latest_period(self, financial_data: Dict[str, Any]) -> str:
         """从AKShare数据中提取最新报告期"""
         # 尝试从各个数据集中提取报告期
         for key in ['main_indicators', 'balance_sheet', 'income_statement']:
             if key in financial_data and financial_data[key]:
-                records = financial_data[key]
-                if isinstance(records, list) and records:
-                    # 假设第一条记录是最新的
-                    first_record = records[0]
-                    for date_field in ['报告期', '报告日期', 'date', '日期']:
-                        if date_field in first_record:
-                            return str(first_record[date_field]).replace('-', '')
+                period = self._extract_latest_period_from_records(financial_data[key])
+                if period:
+                    return period
         
         # 如果无法提取，使用当前季度
         return self._generate_current_period()
@@ -535,10 +621,12 @@ class FinancialDataService:
     def _extract_akshare_indicators(self, financial_data: Dict[str, Any]) -> Dict[str, Any]:
         """从AKShare数据中提取关键财务指标"""
         indicators = {}
+        latest_period = self._extract_latest_period(financial_data)
 
         # 从主要财务指标中提取
         if 'main_indicators' in financial_data and financial_data['main_indicators']:
-            main_data = financial_data['main_indicators'][0] if financial_data['main_indicators'] else {}
+            main_records = financial_data['main_indicators']
+            main_data = main_records[0] if main_records else {}
             indicators.update({
                 "revenue": self._safe_float(main_data.get('营业收入')),
                 "net_income": self._safe_float(main_data.get('净利润')),
@@ -555,6 +643,25 @@ class FinancialDataService:
             debt_ratio = main_data.get('资产负债率') or main_data.get('负债率')
             if debt_ratio is not None:
                 indicators["debt_to_assets"] = self._safe_float(debt_ratio)
+
+            matrix_indicator_specs = {
+                "revenue": ["营业收入", "营业总收入"],
+                "net_income": ["净利润", "归母净利润", "归属于母公司股东的净利润"],
+                "total_assets": ["总资产"],
+                "total_equity": ["股东权益合计", "股东权益合计(净资产)", "所有者权益合计"],
+                "roe": ["净资产收益率(ROE)", "净资产收益率", "净资产收益率_平均"],
+                "debt_to_assets": ["资产负债率", "负债率"],
+            }
+            for field_name, indicator_names in matrix_indicator_specs.items():
+                if indicators.get(field_name) is not None:
+                    continue
+                matrix_value = self._extract_matrix_indicator_value(
+                    main_records,
+                    indicator_names,
+                    latest_period,
+                )
+                if matrix_value is not None:
+                    indicators[field_name] = matrix_value
 
         # 从资产负债表中提取
         if 'balance_sheet' in financial_data and financial_data['balance_sheet']:

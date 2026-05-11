@@ -490,6 +490,28 @@ class DatabaseScreeningService:
                     },
                 }
 
+            def is_newer_report_period(candidate: Any, current: Any) -> bool:
+                candidate_value = str(candidate or "")
+                current_value = str(current or "")
+                return bool(candidate_value) and candidate_value > current_value
+
+            snapshot_fields = (
+                "roe",
+                "roa",
+                "gross_margin",
+                "netprofit_margin",
+                "revenue_ttm",
+                "net_profit_ttm",
+                "n_cashflow_act",
+                "debt_to_assets",
+                "assets_to_eqt",
+                "current_ratio",
+                "quick_ratio",
+                "cash_ratio",
+                "dividend_yield",
+                "net_working_capital",
+            )
+
             # 批量查询最新的财务数据
             # 按 code 分组，取每个 code 的最新一期数据（只查询优先级最高的数据源）
             pipeline = [
@@ -741,32 +763,28 @@ class DatabaseScreeningService:
                         "total_mv": raw_basic_info.get("total_mv", result.get("total_mv")),
                         "market_cap": raw_basic_info.get("market_cap", result.get("total_mv")),
                     }
-                    # 只更新空缺字段（视图中已有的优先）
-                    if result.get("roe") is None:
-                        result["roe"] = financial_data.get("roe")
-                    if result.get("debt_to_assets") is None:
-                        result["debt_to_assets"] = financial_data.get("debt_to_assets")
-                    if result.get("assets_to_eqt") is None:
-                        result["assets_to_eqt"] = financial_data.get("assets_to_eqt")
-                    if result.get("current_ratio") is None:
-                        result["current_ratio"] = financial_data.get("current_ratio")
-                    if result.get("quick_ratio") is None:
-                        result["quick_ratio"] = financial_data.get("quick_ratio")
-                    if result.get("cash_ratio") is None:
-                        result["cash_ratio"] = financial_data.get("cash_ratio")
-                    if result.get("dividend_yield") is None:
-                        result["dividend_yield"] = financial_data.get("dividend_yield")
-                    if result.get("pb_mrq") is None:
+                    latest_report_period = financial_data.get("report_period")
+                    newer_snapshot = is_newer_report_period(latest_report_period, result.get("report_period"))
+                    if latest_report_period is not None and (newer_snapshot or result.get("report_period") is None):
+                        result["report_period"] = latest_report_period
+
+                    for field_name in snapshot_fields:
+                        field_value = financial_data.get(field_name)
+                        if field_value is None:
+                            continue
+                        if newer_snapshot or result.get(field_name) is None:
+                            result[field_name] = field_value
+
+                    if newer_snapshot or result.get("pb_mrq") is None:
                         total_mv = result.get("total_mv")
                         total_equity = financial_data.get("total_equity")
                         if total_mv not in (None, 0) and total_equity not in (None, 0):
                             result["pb_mrq"] = (total_mv * 100000000) / total_equity
-                    if result.get("net_working_capital") is None:
-                        result["net_working_capital"] = financial_data.get("net_working_capital")
-                    if result.get("roa") is None:
-                        result["roa"] = financial_data.get("roa")
-                    if result.get("gross_margin") is None:
-                        result["gross_margin"] = financial_data.get("gross_margin")
+                    if newer_snapshot or result.get("pe_ttm") is None:
+                        total_mv = result.get("total_mv")
+                        net_profit_ttm = financial_data.get("net_profit_ttm")
+                        if total_mv not in (None, 0) and net_profit_ttm not in (None, 0):
+                            result["pe_ttm"] = (total_mv * 100000000) / net_profit_ttm
                     if result.get("asset_turnover") is None:
                         result["asset_turnover"] = financial_data.get("asset_turnover")
                     if result.get("gross_profit_to_assets") is None:
@@ -783,14 +801,8 @@ class DatabaseScreeningService:
                         result["piotroski_f_score"] = financial_data.get("piotroski_f_score")
                     if result.get("beneish_m_score") is None:
                         result["beneish_m_score"] = financial_data.get("beneish_m_score")
-                    if result.get("netprofit_margin") is None:
-                        result["netprofit_margin"] = financial_data.get("netprofit_margin")
-                    if result.get("revenue_ttm") is None:
-                        result["revenue_ttm"] = financial_data.get("revenue_ttm")
                     if financial_data.get("revenue_yoy") is not None:
                         result["revenue_yoy"] = financial_data.get("revenue_yoy")
-                    if result.get("net_profit_ttm") is None:
-                        result["net_profit_ttm"] = financial_data.get("net_profit_ttm")
                     if financial_data.get("net_profit_yoy") is not None:
                         result["net_profit_yoy"] = financial_data.get("net_profit_yoy")
                     if financial_data.get("oper_profit_yoy") is not None:
@@ -799,8 +811,6 @@ class DatabaseScreeningService:
                         result["revenue_cagr_3y"] = financial_data.get("revenue_cagr_3y")
                     if financial_data.get("profit_cagr_3y") is not None:
                         result["profit_cagr_3y"] = financial_data.get("profit_cagr_3y")
-                    if result.get("n_cashflow_act") is None:
-                        result["n_cashflow_act"] = financial_data.get("n_cashflow_act")
                     if result.get("fcf") is None:
                         result["fcf"] = financial_data.get("fcf")
                     if result.get("fcf_margin") is None:
@@ -828,8 +838,6 @@ class DatabaseScreeningService:
                             result["ocf_yield"] = ocf / (total_mv * 1e8) * 100
                     if financial_data.get("working_capital_change") is not None:
                         result["working_capital_change"] = financial_data.get("working_capital_change")
-                    if result.get("report_period") is None:
-                        result["report_period"] = financial_data.get("report_period")
                     if result.get("altman_z_score") is None:
                         total_mv = result.get("total_mv")
                         financial_records = financial_data.get("_financial_records") or []
