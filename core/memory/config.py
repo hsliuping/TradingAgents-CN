@@ -11,6 +11,7 @@ import logging
 import os
 import hashlib
 import re
+import inspect
 from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -80,45 +81,44 @@ def _get_sync_db():
         return None
 
 
-def _read_system_settings(db=None) -> Tuple[dict, list]:
-    """从 system_configs 读取 system_settings 和 llm_configs"""
+def _read_active_system_config(db=None) -> Dict[str, Any]:
+    """读取当前生效的 system_configs 文档。"""
     sync_db = None
     try:
         if db is not None:
-            from motor.motor_asyncio import AsyncIOMotorDatabase
-            if isinstance(db, AsyncIOMotorDatabase):
-                sync_db = _get_sync_db()
-            else:
+            from pymongo.database import Database as SyncDatabase
+
+            if isinstance(db, SyncDatabase):
                 sync_db = db
+            else:
+                sync_db = _get_sync_db()
         else:
             sync_db = _get_sync_db()
 
         if sync_db is None:
-            return {}, []
+            return {}
 
         doc = sync_db.system_configs.find_one(
             {"is_active": True}, sort=[("version", -1)]
         )
-        if not doc:
-            return {}, []
-        return doc.get("system_settings") or {}, doc.get("llm_configs") or []
+        if inspect.isawaitable(doc):
+            logger.warning("mem0 config: 检测到异步数据库代理，自动回退到同步配置读取")
+            fallback_db = _get_sync_db()
+            if fallback_db is None:
+                return {}
+            doc = fallback_db.system_configs.find_one(
+                {"is_active": True}, sort=[("version", -1)]
+            )
+        return doc or {}
     except Exception as e:
         logger.debug("mem0 config: 无法从数据库读取配置: %s", e)
-        return {}, []
+        return {}
 
 
-def _resolve_model_credentials(model_name: str) -> Optional[Dict[str, str]]:
-    """复用系统已有的模型解析逻辑，返回 {provider, api_key, backend_url}"""
-    if not model_name:
-        return None
-    try:
-        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
-        info = get_provider_and_url_by_model_sync(model_name)
-        if info and info.get("api_key"):
-            return info
-    except Exception as e:
-        logger.debug("mem0 config: 模型 %s 凭证解析失败: %s", model_name, e)
-    return None
+def _read_system_settings(db=None) -> Tuple[dict, list]:
+    """从 system_configs 读取 system_settings 和 llm_configs"""
+    doc = _read_active_system_config(db)
+    return doc.get("system_settings") or {}, doc.get("llm_configs") or []
 
 
 def _get_embedding_dimension(model_name: str) -> int:
@@ -209,6 +209,42 @@ def _build_embedder_config_from_provider_doc(provider_doc: dict, model_name: str
     }
 
 
+def _build_mem0_llm_config_from_unified_config(llm_config: Any) -> dict:
+    """将统一 LLMConfig 转换为 mem0 所需的 LLM 配置。"""
+    provider_name = str(getattr(llm_config, "provider", "") or "").strip().lower()
+    model_name = str(getattr(llm_config, "model", "") or "").strip() or "deepseek-chat"
+    api_key = str(getattr(llm_config, "api_key", "") or "").strip()
+    base_url = str(getattr(llm_config, "base_url", "") or "").strip()
+
+    mem0_provider = "openai"
+    if provider_name in {"google", "gemini"}:
+        mem0_provider = "gemini"
+    elif provider_name == "ollama":
+        mem0_provider = "ollama"
+
+    config: Dict[str, Any] = {
+        "model": model_name,
+        "temperature": float(getattr(llm_config, "temperature", 0.1) or 0.1),
+        "max_tokens": int(getattr(llm_config, "max_tokens", 2000) or 2000),
+    }
+
+    if mem0_provider == "openai":
+        config["api_key"] = api_key
+        if base_url:
+            config["openai_base_url"] = _normalize_openai_base_url(base_url)
+    elif mem0_provider == "gemini":
+        config["api_key"] = api_key
+        if not model_name.startswith("models/"):
+            config["model"] = f"models/{model_name}"
+    else:
+        config["ollama_base_url"] = base_url or "http://localhost:11434"
+
+    return {
+        "provider": mem0_provider,
+        "config": config,
+    }
+
+
 def _resolve_embedding_from_db(db_settings: dict) -> dict:
     """从数据库 default_embedding_model 解析 embedding 配置"""
     sync_db = _get_sync_db()
@@ -261,7 +297,9 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
     LLM / Embedding 配置直接从数据库 system_configs + llm_providers 读取，
     与分析流程使用相同的模型和凭证。
     """
-    db_settings, llm_configs = _read_system_settings(db)
+    config_doc = _read_active_system_config(db)
+    db_settings = config_doc.get("system_settings") or {}
+    llm_configs = config_doc.get("llm_configs") or []
 
     # --- Embedder: 复用系统 default_embedding_model ---
     embedder = _resolve_embedding_from_db(db_settings)
@@ -279,35 +317,31 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
         },
     }
 
-    # --- LLM: 复用系统 quick_analysis_model ---
-    target_model = (
-        db_settings.get("quick_analysis_model")
-        or db_settings.get("deep_analysis_model")
-    )
-    # 如果 system_settings 里没配，从 llm_configs 找第一个启用的模型
-    if not target_model and llm_configs:
-        for cfg in llm_configs:
-            if cfg.get("enabled", True) and cfg.get("model_name"):
-                target_model = cfg["model_name"]
-                break
+    # --- LLM: 复用统一的系统模型选择与凭证解析逻辑 ---
+    llm = None
+    try:
+        from app.services.intelligent_assistant_service import get_system_llm_config_from_config_doc
 
-    llm_creds = _resolve_model_credentials(target_model) if target_model else None
+        resolved_llm_config = get_system_llm_config_from_config_doc(
+            config_doc,
+            model_keys=["quick_analysis_model", "deep_analysis_model"],
+        )
+        if resolved_llm_config is not None:
+            llm = _build_mem0_llm_config_from_unified_config(resolved_llm_config)
+    except Exception as e:
+        logger.debug("mem0 config: 统一 LLM 解析失败: %s", e)
 
-    if llm_creds and llm_creds.get("api_key"):
-        backend_url = llm_creds.get("backend_url", "")
-        if backend_url and "/v1" not in backend_url:
-            backend_url = f"{backend_url.rstrip('/')}/v1"
-        llm = {
-            "provider": "openai",
-            "config": {
-                "api_key": llm_creds["api_key"],
-                "openai_base_url": backend_url,
-                "model": target_model,
-                "temperature": 0.1,
-                "max_tokens": 2000,
-            },
-        }
-    else:
+    if llm is None:
+        target_model = (
+            db_settings.get("quick_analysis_model")
+            or db_settings.get("deep_analysis_model")
+        )
+        if not target_model and llm_configs:
+            for cfg in llm_configs:
+                if cfg.get("enabled", True) and cfg.get("model_name"):
+                    target_model = cfg["model_name"]
+                    break
+
         llm = {
             "provider": "openai",
             "config": {
@@ -333,10 +367,8 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
     return config
 
 
-def describe_mem0_config(db=None) -> Dict[str, Any]:
-    """返回 mem0 当前解析配置的安全摘要，不包含明文密钥。"""
-    config = build_mem0_config(db)
-
+def summarize_mem0_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """返回 mem0 配置的安全摘要，不包含明文密钥。"""
     vector_store = config.get("vector_store") or {}
     vector_store_cfg = vector_store.get("config") or {}
 
@@ -367,3 +399,8 @@ def describe_mem0_config(db=None) -> Dict[str, Any]:
             "has_api_key": bool(embedder_cfg.get("api_key")),
         },
     }
+
+
+def describe_mem0_config(db=None) -> Dict[str, Any]:
+    """返回 mem0 当前解析配置的安全摘要，不包含明文密钥。"""
+    return summarize_mem0_config(build_mem0_config(db))

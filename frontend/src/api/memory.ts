@@ -57,10 +57,19 @@ export const SCOPE_COLORS: Record<string, string> = {
 
 export const memoryApi = {
   async getHealth() {
-    const res = await request.get<{ ok: boolean; mem0_version?: string; error?: string }>(
-      '/api/memory/health',
-    )
-    return (res as any)?.data ?? res
+    try {
+      const res = await request.get<{ ok: boolean; mem0_version?: string; error?: string }>(
+        '/api/memory/health',
+        { skipErrorHandler: true },
+      )
+      return (res as any)?.data ?? res
+    } catch (error: any) {
+      const responseData = error?.response?.data
+      return responseData?.data ?? {
+        ok: false,
+        error: responseData?.message || error?.message || '记忆层不可用',
+      }
+    }
   },
 
   async getStats(): Promise<MemoryStatsData> {

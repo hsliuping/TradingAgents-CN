@@ -8,6 +8,7 @@ import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Body, Depends, Query
+from fastapi.responses import JSONResponse
 from app.routers.auth_db import get_current_user
 from app.core.database import get_mongo_db
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -31,7 +32,15 @@ async def memory_health(db: AsyncIOMotorDatabase = Depends(get_mongo_db)):
     from core.memory.service import get_memory_service
     svc = get_memory_service(db)
     result = await svc.health_check()
-    return {"success": result.get("ok", False), "data": result}
+    ok = bool(result.get("ok", False))
+    return JSONResponse(
+        status_code=200 if ok else 503,
+        content={
+            "success": ok,
+            "data": result,
+            "message": "" if ok else (result.get("error") or "记忆层不可用"),
+        },
+    )
 
 
 @router.get("/stats")

@@ -637,8 +637,25 @@ async def _get_llm_config_for_model(
         {"is_active": True},
         sort=[("version", -1)]
     )
+    return resolve_llm_config_from_config_doc(
+        config_doc,
+        target_model=target_model,
+        target_config_id=target_config_id,
+        purpose=purpose,
+    )
+
+
+def resolve_llm_config_from_config_doc(
+    config_doc: Optional[Dict[str, Any]],
+    *,
+    target_model: Optional[str],
+    target_config_id: Optional[str] = None,
+    purpose: str = "",
+) -> Optional[LLMConfig]:
+    """基于 system_configs 文档解析统一 LLMConfig，供各子系统共享。"""
     if not config_doc or "llm_configs" not in config_doc:
         return None
+
     model_config = _select_llm_config_from_doc(
         config_doc,
         config_id=target_config_id,
@@ -652,6 +669,7 @@ async def _get_llm_config_for_model(
         return None
 
     from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+
     provider_info = get_provider_and_url_by_model_sync(
         resolved_model_name,
         preferred_provider=str(model_config.get("provider") or _get_default_provider(config_doc) or "").strip().lower(),
@@ -659,6 +677,7 @@ async def _get_llm_config_for_model(
     )
     if not provider_info:
         return None
+
     provider_str = str(model_config.get("provider") or provider_info.get("provider") or "").lower()
     provider_map = {
         "openai": LLMProvider.OPENAI, "deepseek": LLMProvider.DEEPSEEK,
@@ -684,6 +703,45 @@ async def _get_llm_config_for_model(
         timeout=int(model_config.get("timeout", 60)),
         retry_times=int(model_config.get("retry_times", 3)),
     )
+
+
+def get_system_llm_config_from_config_doc(
+    config_doc: Optional[Dict[str, Any]],
+    *,
+    model_keys: Optional[List[str]] = None,
+) -> Optional[LLMConfig]:
+    """按系统设置中的模型选择顺序解析统一 LLMConfig。"""
+    if not config_doc or "llm_configs" not in config_doc:
+        return None
+
+    resolved_model_keys = model_keys or ["quick_analysis_model", "deep_analysis_model"]
+    for model_key in resolved_model_keys:
+        selection = _resolve_model_selection(config_doc, model_key)
+        if not selection:
+            continue
+
+        llm_config = resolve_llm_config_from_config_doc(
+            config_doc,
+            target_model=_selection_model_name(selection),
+            target_config_id=_selection_config_id(selection),
+            purpose=model_key,
+        )
+        if llm_config is not None:
+            return llm_config
+
+    for llm_config_doc in config_doc.get("llm_configs") or []:
+        if not llm_config_doc.get("enabled", True):
+            continue
+        llm_config = resolve_llm_config_from_config_doc(
+            config_doc,
+            target_model=_normalize_model_name(llm_config_doc.get("model_name")),
+            target_config_id=_normalize_config_id(llm_config_doc.get("config_id")),
+            purpose="first_enabled",
+        )
+        if llm_config is not None:
+            return llm_config
+
+    return None
 
 
 async def _get_assistant_llm_config(

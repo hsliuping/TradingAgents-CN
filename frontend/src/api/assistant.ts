@@ -448,10 +448,19 @@ export const assistantApi = {
 
   // ---- mem0 统一记忆层 ----
 
-  getMemoryHealth() {
-    return request.get<{ ok: boolean; mem0_version?: string; error?: string }>(
-      '/api/memory/health',
-    )
+  async getMemoryHealth() {
+    try {
+      return await request.get<{ ok: boolean; mem0_version?: string; error?: string }>(
+        '/api/memory/health',
+        { skipErrorHandler: true },
+      )
+    } catch (error: any) {
+      return error?.response?.data ?? {
+        success: false,
+        data: { ok: false, error: error?.message || '记忆层不可用' },
+        message: error?.message || '记忆层不可用',
+      }
+    }
   },
 
   getMemoryStats() {

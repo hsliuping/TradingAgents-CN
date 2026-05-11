@@ -75,7 +75,7 @@ class MemoryService:
     def available(self) -> bool:
         return self._mem is not None
 
-    async def _ensure_init(self) -> bool:
+    async def _ensure_init(self, config: Optional[Dict[str, Any]] = None) -> bool:
         """延迟初始化 mem0 AsyncMemory 实例（asyncio.Lock 保证并发安全）"""
         if self._mem is not None:
             return True
@@ -96,13 +96,13 @@ class MemoryService:
                 from mem0 import AsyncMemory
                 from .config import build_mem0_config
 
-                config = build_mem0_config(self._db)
-                if not config.get("llm", {}).get("config", {}).get("api_key"):
+                resolved_config = config or build_mem0_config(self._db)
+                if not resolved_config.get("llm", {}).get("config", {}).get("api_key"):
                     self._init_error = "缺少 LLM API Key，mem0 记忆层不可用"
                     logger.warning("[MemoryService] %s", self._init_error)
                     return False
 
-                embedder_error = _validate_embedder_config(config)
+                embedder_error = _validate_embedder_config(resolved_config)
                 if embedder_error:
                     self._init_error = f"{embedder_error}，mem0 记忆层不可用"
                     logger.warning("[MemoryService] %s", self._init_error)
@@ -115,8 +115,8 @@ class MemoryService:
                     "OPENROUTER_API_KEY": os.environ.get("OPENROUTER_API_KEY"),
                 }
 
-                llm_cfg = config.get("llm", {}).get("config", {})
-                embedder_cfg = config.get("embedder", {}).get("config", {})
+                llm_cfg = resolved_config.get("llm", {}).get("config", {})
+                embedder_cfg = resolved_config.get("embedder", {}).get("config", {})
                 selected_api_key = llm_cfg.get("api_key") or embedder_cfg.get("api_key") or ""
                 selected_base_url = llm_cfg.get("openai_base_url") or embedder_cfg.get("openai_base_url") or ""
 
@@ -130,7 +130,7 @@ class MemoryService:
                     os.environ.pop("OPENROUTER_API_KEY", None)
 
                 try:
-                    mem_client = AsyncMemory.from_config(config)
+                    mem_client = AsyncMemory.from_config(resolved_config)
                     if inspect.isawaitable(mem_client):
                         mem_client = await mem_client
                 finally:
@@ -434,10 +434,11 @@ class MemoryService:
 
     async def health_check(self) -> Dict[str, Any]:
         """连通性检查"""
-        from .config import describe_mem0_config
+        from .config import build_mem0_config, summarize_mem0_config
 
-        diagnostics = describe_mem0_config(self._db)
-        if not await self._ensure_init():
+        config = build_mem0_config(self._db)
+        diagnostics = summarize_mem0_config(config)
+        if not await self._ensure_init(config=config):
             return {
                 "ok": False,
                 "error": self._init_error,
