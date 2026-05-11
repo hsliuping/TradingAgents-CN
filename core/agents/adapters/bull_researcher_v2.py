@@ -268,7 +268,16 @@ class BullResearcherV2(ResearcherAgent):
                 logger.warning(f"⚠️ 从模板系统获取用户提示词失败: {e}，使用降级提示词")
 
         # 降级：使用与当前模板语义一致的硬编码提示词
-        prompt = """请基于提供的分析报告，构建偏乐观的研究论证。
+        market_name = state.get("market_name", "当前市场") if state else "当前市场"
+        currency_name = state.get("currency_name", "报告原始货币") if state else "报告原始货币"
+        currency_symbol = state.get("currency_symbol", "") if state else ""
+        currency_display = f"{currency_name}（{currency_symbol}）" if currency_symbol else currency_name
+
+        prompt = """请基于提供的分析报告，为 {company_name}（股票代码：{ticker}）构建偏乐观的研究论证。
+
+    当前分析市场：{market_name}
+    如材料中包含价格、估值或财务数值，请统一使用 {currency_display} 作为单位。
+    行文时请优先使用公司名称“{company_name}”，不要只用股票代码“{ticker}”指代公司。
 
     可用资源：
     - 市场研究报告：{market_report}
@@ -293,6 +302,10 @@ class BullResearcherV2(ResearcherAgent):
 
         # 替换变量（使用实际的报告内容）
         prompt = prompt.format(
+            company_name=company_name,
+            ticker=ticker,
+            market_name=market_name,
+            currency_display=currency_display,
             market_report=reports.get("market_report", ""),
             sentiment_report=reports.get("sentiment_report", ""),
             news_report=reports.get("news_report", ""),

@@ -55,13 +55,12 @@ class TestMarketAnalystV2:
         prompt = agent._build_user_prompt(
             ticker="000001",
             analysis_date="2024-12-15",
-            tool_data={"price": "10.5"},
-            state={}
+            state={"company_name": "平安银行"}
         )
         
         assert "000001" in prompt
         assert "2024-12-15" in prompt
-        assert "price" in prompt
+        assert "平安银行" in prompt
 
 
 class TestBullResearcherV2:
@@ -77,7 +76,7 @@ class TestBullResearcherV2:
         from core.agents.adapters import BullResearcherV2
 
         assert BullResearcherV2.metadata.id == "bull_researcher_v2"
-        assert BullResearcherV2.metadata.name == "看涨研究员 v2.0"
+        assert BullResearcherV2.metadata.name == "乐观情景研究员 v2.0"
         assert BullResearcherV2.researcher_type == "bull"
         assert BullResearcherV2.stance == "bull"
     
@@ -172,8 +171,8 @@ class TestTraderV2:
         from core.agents.adapters import TraderV2
 
         assert TraderV2.metadata.id == "trader_v2"
-        assert TraderV2.metadata.name == "交易员 v2.0"
-        assert TraderV2.output_field == "trading_plan"
+        assert TraderV2.metadata.name == "研究整合员 v2.0"
+        assert TraderV2.output_field == "trader_investment_plan"
     
     def test_user_prompt(self):
         """测试用户提示词生成"""
@@ -355,7 +354,7 @@ class TestBearResearcherV2:
         from core.agents.adapters import BearResearcherV2
 
         assert BearResearcherV2.metadata.id == "bear_researcher_v2"
-        assert BearResearcherV2.metadata.name == "看跌研究员 v2.0"
+        assert BearResearcherV2.metadata.name == "审慎情景研究员 v2.0"
         assert BearResearcherV2.researcher_type == "bear"
         assert BearResearcherV2.stance == "bear"
 

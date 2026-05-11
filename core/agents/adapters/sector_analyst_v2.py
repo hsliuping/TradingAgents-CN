@@ -511,7 +511,7 @@ class SectorAnalystV2(AnalystAgent):
         if mode == "qmt":
             return f"""## 分析任务
 
-    请对 **{ticker}（{company_name}）** 所属行业/板块进行 QMT 结构型板块分析。
+    请对 **{ticker}（{company_name}）** 所属行业/板块进行研究分析。
 
     **分析日期**: {analysis_date}
     **股票代码**: {ticker}
@@ -523,25 +523,37 @@ class SectorAnalystV2(AnalystAgent):
 
     **必须使用上述参数值**，不要编造板块资金流、概念排名或官方板块指数统计。
 
-    请基于 QMT 行情和行业内部结构数据，分析龙头强度、板块扩散度和活跃度。"""
+    请基于 QMT 行情和行业内部结构数据输出中文研究报告，至少包含：
+    1. 行业/板块现状与结构特征
+    2. 龙头强度、扩散度和活跃度
+    3. 主要支撑因素、主要风险与资料缺口
+    4. 后续观察事项
+
+    禁止输出配置价值判断、对冲安排、仓位配置、买卖建议、目标价、价格区间或任何执行性指令。"""
 
         return f"""## 分析任务
 
-请对 **{ticker}（{company_name}）** 所属的行业/板块进行全面分析。
+    请对 **{ticker}（{company_name}）** 所属行业/板块进行研究分析。
 
-**分析日期**: {analysis_date}
-**股票代码**: {ticker}
-**市场**: {market_type}
+    **分析日期**: {analysis_date}
+    **股票代码**: {ticker}
+    **市场**: {market_type}
 
-**重要提示**：调用工具时，必须使用以下参数：
-- get_china_market_overview: curr_date='{analysis_date}'
-- get_sector_data: ticker='{ticker}', trade_date='{analysis_date}', lookback_days=20
-- get_fund_flow_data: trade_date='{analysis_date}', top_n=10
-- get_peer_comparison: ticker='{ticker}', trade_date='{analysis_date}'（如果需要）
+    **重要提示**：调用工具时，必须使用以下参数：
+    - get_china_market_overview: curr_date='{analysis_date}'
+    - get_sector_data: ticker='{ticker}', trade_date='{analysis_date}', lookback_days=20
+    - get_fund_flow_data: trade_date='{analysis_date}', top_n=10
+    - get_peer_comparison: ticker='{ticker}', trade_date='{analysis_date}'（如果需要）
 
-**必须使用上述参数值**，不要使用其他股票代码或日期。
+    **必须使用上述参数值**，不要使用其他股票代码或日期。
 
-请调用工具获取板块数据，然后生成详细的板块分析报告。"""
+    请调用工具获取板块数据，然后基于真实结果输出中文研究报告，至少包含：
+    1. 行业/板块现状与结构特征
+    2. 板块内部强弱、资金或相对表现线索
+    3. 与个股研究相关的主要支撑因素、主要风险与资料缺口
+    4. 后续观察事项
+
+    禁止输出配置价值判断、对冲安排、仓位配置、买卖建议、目标价、价格区间或任何执行性指令。"""
 
     def _get_tool_suggestions(self) -> str:
         """生成工具调用建议"""

@@ -479,7 +479,7 @@ class IndexAnalystV2(AnalystAgent):
         if mode == "qmt":
             return f"""## 分析任务
 
-    请对 **{ticker}（{company_name}）** 所在的{market_type}市场进行 QMT 盘面型大盘分析。
+    请对 **{ticker}（{company_name}）** 所在的{market_type}市场进行宏观环境研究与盘面结构分析。
 
     **分析日期**: {analysis_date}
     **数据源模式**: QMT
@@ -489,28 +489,40 @@ class IndexAnalystV2(AnalystAgent):
 
     **必须使用上述参数值**，不要编造北向资金、两融、涨跌停官方统计或指数估值数据。
 
-    请基于 QMT 指数走势、快照代理指标、风格切换和市场扩散度生成详细报告。"""
+    请基于 QMT 指数走势、快照代理指标、风格切换和市场扩散度输出中文研究报告，至少包含：
+    1. 宏观环境研究
+    2. 指数与市场结构现状
+    3. 主要支撑因素、主要风险与资料缺口
+    4. 后续观察事项
+
+    禁止输出热点追逐表述、对冲安排、仓位配置、买卖建议、目标价、价格区间或任何执行性指令。"""
 
         return f"""## 分析任务
 
-请对 **{ticker}（{company_name}）** 所在的{market_type}市场进行全面的大盘分析。
+    请对 **{ticker}（{company_name}）** 所在的{market_type}市场进行宏观环境研究与市场结构分析。
 
-**分析日期**: {analysis_date}
+    **分析日期**: {analysis_date}
 
-**重要提示**：调用工具时，必须使用以下参数：
-- get_china_market_overview: curr_date='{analysis_date}'
-- get_index_data: trade_date='{analysis_date}', lookback_days=60
-- get_market_breadth: trade_date='{analysis_date}'
-- get_north_flow: trade_date='{analysis_date}', lookback_days=10
-- get_margin_trading: trade_date='{analysis_date}', lookback_days=10
-- get_limit_stats: trade_date='{analysis_date}'
-- get_index_technical: trade_date='{analysis_date}', lookback_days=60
-- get_market_environment: trade_date='{analysis_date}'
-- identify_market_cycle: trade_date='{analysis_date}'
+    **重要提示**：调用工具时，必须使用以下参数：
+    - get_china_market_overview: curr_date='{analysis_date}'
+    - get_index_data: trade_date='{analysis_date}', lookback_days=60
+    - get_market_breadth: trade_date='{analysis_date}'
+    - get_north_flow: trade_date='{analysis_date}', lookback_days=10
+    - get_margin_trading: trade_date='{analysis_date}', lookback_days=10
+    - get_limit_stats: trade_date='{analysis_date}'
+    - get_index_technical: trade_date='{analysis_date}', lookback_days=60
+    - get_market_environment: trade_date='{analysis_date}'
+    - identify_market_cycle: trade_date='{analysis_date}'
 
-**必须使用上述参数值**，不要使用其他日期。
+    **必须使用上述参数值**，不要使用其他日期。
 
-请调用工具获取市场数据，然后生成详细的大盘分析报告。"""
+    请调用工具获取市场数据，然后基于真实结果输出中文研究报告，至少包含：
+    1. 宏观环境研究
+    2. 指数与市场结构现状
+    3. 主要支撑因素、主要风险与资料缺口
+    4. 后续观察事项
+
+    禁止输出热点追逐表述、对冲安排、仓位配置、买卖建议、目标价、价格区间或任何执行性指令。"""
 
     def _get_tool_suggestions(self, market_type: str) -> str:
         """根据市场类型生成工具调用建议"""
