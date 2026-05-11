@@ -59,6 +59,18 @@ ANALYST_TOOL_MAPPING = {
 
 _DEFAULT_CALLABLE_SURFACES = {"assistant", "workflow"}
 
+_DEEP_AGENTS = {
+    "research_manager_v2", "risk_manager_v2",
+    "risky_analyst_v2", "safe_analyst_v2", "neutral_analyst_v2",
+    "index_analyst_v2", "sector_analyst_v2",
+    "research_manager", "risk_manager",
+}
+
+
+def _select_llm_type_for_agent(agent_id: str) -> str:
+    normalized_agent_id = str(agent_id or "").strip()
+    return "deep" if normalized_agent_id in _DEEP_AGENTS else "quick"
+
 
 class LegacyDependencyProvider:
     """
@@ -96,18 +108,34 @@ class LegacyDependencyProvider:
         """重置单例实例（用于测试或重新配置）"""
         cls._instance = None
 
-    def get_llm(self, llm_type: str = "quick", temperature: Optional[float] = None):
+    def get_llm(
+        self,
+        llm_type: str = "quick",
+        temperature: Optional[float] = None,
+        timeout: Optional[int] = None,
+        max_tokens: Optional[int] = None,
+    ):
         """
         获取 LLM 实例
 
         Args:
             llm_type: "quick" 或 "deep"
             temperature: 可选，如果指定则创建新的 LLM 实例（用于 Agent 特定的温度配置）
+            timeout: 可选，覆盖默认超时时间
+            max_tokens: 可选，覆盖默认最大输出长度
         """
-        # 如果指定了 temperature，创建新的 LLM 实例
-        if temperature is not None:
-            logger.info(f"[依赖提供者] 创建自定义温度 LLM: type={llm_type}, temperature={temperature}")
-            return self._create_custom_llm(llm_type, temperature)
+        # 只要存在任一 Agent 级 LLM 覆盖，就创建独立实例
+        if temperature is not None or timeout is not None or max_tokens is not None:
+            logger.info(
+                f"[依赖提供者] 创建自定义 LLM: type={llm_type}, "
+                f"temperature={temperature}, timeout={timeout}, max_tokens={max_tokens}"
+            )
+            return self._create_custom_llm(
+                llm_type,
+                temperature=temperature,
+                timeout=timeout,
+                max_tokens=max_tokens,
+            )
         
         # 🔥 每次调用时都检查配置是否变化，如果变化则重新创建 LLM 实例
         # 这样可以确保 API key 更新后立即生效，无需重启服务
@@ -227,13 +255,21 @@ class LegacyDependencyProvider:
             logger.error(f"[依赖提供者] LLM 创建失败: {e}")
             raise
 
-    def _create_custom_llm(self, llm_type: str, temperature: float):
+    def _create_custom_llm(
+        self,
+        llm_type: str,
+        temperature: Optional[float] = None,
+        timeout: Optional[int] = None,
+        max_tokens: Optional[int] = None,
+    ):
         """
-        创建自定义温度的 LLM 实例（用于 Agent 特定的温度配置）
+        创建带 Agent 级覆盖参数的 LLM 实例。
 
         Args:
             llm_type: "quick" 或 "deep"
             temperature: 温度参数
+            timeout: 超时参数
+            max_tokens: 最大输出长度
 
         Returns:
             LLM 实例
@@ -258,11 +294,24 @@ class LegacyDependencyProvider:
         api_key_from_db = config.get("api_key")
         api_key = api_key_from_config or api_key_from_db
 
-        # 使用默认的 max_tokens 和 timeout
-        max_tokens = self._config.get(f"{llm_type}_max_tokens", 2000 if llm_type == "quick" else 4000)
-        timeout = self._config.get(f"{llm_type}_timeout", 60 if llm_type == "quick" else 120)
+        # 使用默认参数，并允许 Agent 级覆盖
+        resolved_temperature = (
+            temperature if temperature is not None
+            else self._config.get(f"{llm_type}_temperature", 0.1)
+        )
+        resolved_max_tokens = (
+            max_tokens if max_tokens is not None
+            else self._config.get(f"{llm_type}_max_tokens", 2000 if llm_type == "quick" else 4000)
+        )
+        resolved_timeout = (
+            timeout if timeout is not None
+            else self._config.get(f"{llm_type}_timeout", 60 if llm_type == "quick" else 120)
+        )
 
-        logger.info(f"[依赖提供者] 创建自定义温度 LLM: type={llm_type}, model={model}, temperature={temperature}")
+        logger.info(
+            f"[依赖提供者] 创建自定义 LLM: type={llm_type}, model={model}, "
+            f"temperature={resolved_temperature}, timeout={resolved_timeout}, max_tokens={resolved_max_tokens}"
+        )
         logger.info(f"  - API Key 来源: {'用户显式指定' if api_key_from_config else ('数据库配置' if api_key_from_db else '未配置（将使用环境变量）')}")
         if api_key:
             logger.info(f"  - API Key: 已配置 ({truncate_api_key(api_key)})")
@@ -273,9 +322,9 @@ class LegacyDependencyProvider:
             provider=provider,
             model=model,
             backend_url=url,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
+            temperature=resolved_temperature,
+            max_tokens=resolved_max_tokens,
+            timeout=resolved_timeout,
             api_key=api_key
         )
 
@@ -1392,25 +1441,26 @@ class WorkflowBuilder:
                 logger.warning(f"[智能体创建] ⚠️ 未找到任何工具绑定: {agent_id}")
 
             # 🔥 关键修复：根据 agent_id 判断应该使用 quick 还是 deep LLM
-            # 使用深度模型的 Agent：
-            # 1. 管理者（research_manager, risk_manager）- 需要综合大量信息做决策
-            # 2. 风险分析师（risky/safe/neutral_analyst_v2）- 需要处理大量分析报告
-            # 其他 agent（普通分析师、研究员）使用快速模型
-            _DEEP_AGENTS = {
-                "research_manager_v2", "risk_manager_v2",
-                "risky_analyst_v2", "safe_analyst_v2", "neutral_analyst_v2",
-                "research_manager", "risk_manager",
-            }
-            llm_type = "deep" if agent_id in _DEEP_AGENTS else "quick"
-            agent_temperature = execution_config.get("temperature")
+            llm_type = _select_llm_type_for_agent(agent_id)
+            agent_temperature = node_config_clean.get("temperature", execution_config_clean.get("temperature"))
+            agent_timeout = node_config_clean.get("timeout", execution_config_clean.get("timeout"))
+            agent_max_tokens = node_config_clean.get("max_tokens", execution_config_clean.get("max_tokens"))
 
             if self.llm_override:
                 llm = self.llm_override
-            elif agent_temperature is not None:
-                llm = self._legacy_provider.get_llm(llm_type, temperature=agent_temperature)
+            elif any(value is not None for value in (agent_temperature, agent_timeout, agent_max_tokens)):
+                llm = self._legacy_provider.get_llm(
+                    llm_type,
+                    temperature=agent_temperature,
+                    timeout=agent_timeout,
+                    max_tokens=agent_max_tokens,
+                )
             else:
                 llm = self._legacy_provider.get_llm(llm_type)
-            logger.debug(f"[智能体创建] LLM: type={llm_type}, temp={agent_temperature}")
+            logger.debug(
+                f"[智能体创建] LLM: type={llm_type}, temp={agent_temperature}, "
+                f"timeout={agent_timeout}, max_tokens={agent_max_tokens}"
+            )
 
             agent_memory = None
             if self.memory_manager:

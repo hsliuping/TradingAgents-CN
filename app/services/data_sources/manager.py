@@ -25,6 +25,7 @@ class DataSourceManager:
     """
 
     def __init__(self):
+        self._configured_enabled_map: Dict[str, bool] = {}
         self.adapters: List[DataSourceAdapter] = [
             LocalAdapter(),      # 本地数据源（用户通过API导入）
             TushareAdapter(),
@@ -61,6 +62,8 @@ class DataSourceManager:
                 priority = ds_config.priority
                 enabled = ds_config.enabled
 
+                self._configured_enabled_map[data_source_name] = bool(enabled)
+
                 if enabled:
                     priority_map[data_source_name] = priority
                     logger.info(f"📊 从统一配置读取 {data_source_name} 优先级: {priority}, 启用: {enabled}")
@@ -87,6 +90,10 @@ class DataSourceManager:
     def get_available_adapters(self) -> List[DataSourceAdapter]:
         available: List[DataSourceAdapter] = []
         for adapter in self.adapters:
+            if self._configured_enabled_map.get(adapter.name) is False:
+                logger.info(f"Data source {adapter.name} is disabled in unified config, skipping availability probe")
+                continue
+
             if adapter.is_available():
                 available.append(adapter)
                 logger.info(

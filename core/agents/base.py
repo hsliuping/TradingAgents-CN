@@ -339,6 +339,46 @@ class BaseAgent(ABC):
     def __call__(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """使智能体可调用，用于 LangGraph 节点"""
         return self.execute(state)
+
+    def invoke_agent(
+        self,
+        target_agent_id: str,
+        state: Dict[str, Any],
+        payload: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """兼容旧委托接口：复用当前 LLM，动态创建并执行目标 Agent。"""
+        from .factory import AgentFactory
+
+        normalized_target = str(target_agent_id or "").strip()
+        if not normalized_target:
+            raise ValueError("target_agent_id 不能为空")
+
+        logger.info(f"[BaseAgent] {self.agent_id} 开始调用子 Agent: {normalized_target}")
+
+        factory = AgentFactory()
+        if self._llm is not None:
+            target_agent = factory.create_with_dynamic_tools(
+                normalized_target,
+                llm=self._llm,
+            )
+        else:
+            logger.warning(
+                f"[BaseAgent] {self.agent_id} 未持有 LangChain LLM，"
+                f"将降级为不显式注入 llm 创建子 Agent: {normalized_target}"
+            )
+            target_agent = factory.create(normalized_target)
+
+        delegated_state = {
+            **(state or {}),
+            **(payload or {}),
+        }
+        if metadata:
+            delegated_state["delegation_metadata"] = metadata
+
+        result = target_agent.execute(delegated_state)
+        logger.info(f"[BaseAgent] {self.agent_id} 子 Agent 调用完成: {normalized_target}")
+        return result
     
     def render_prompt(
         self,

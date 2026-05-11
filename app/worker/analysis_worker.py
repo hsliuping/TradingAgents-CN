@@ -731,6 +731,19 @@ class AnalysisWorker:
                 if not task:
                     raise ValueError(f"任务不存在: {task_id}")
 
+                memory_manager = get_memory_state_manager()
+                memory_task = await memory_manager.get_task(task_id)
+                if not memory_task:
+                    logger.info(f"📝 [Worker] 任务不在内存中，先创建内存状态: {task_id}")
+                    await memory_manager.create_task(
+                        task_id=task_id,
+                        user_id=user_id,
+                        stock_code=stock_code,
+                        parameters=parameters_dict,
+                        stock_name=None
+                    )
+                    logger.info(f"✅ [Worker] 任务已创建到内存状态管理器: {task_id}")
+
                 task.status = AnalysisStatus.PROCESSING
                 if not task.started_at:
                     task.started_at = now_tz()
@@ -739,7 +752,6 @@ class AnalysisWorker:
                 task.message = "正在准备分析所需数据..."
                 await task_service._update_task(task)
 
-                memory_manager = get_memory_state_manager()
                 await memory_manager.update_task_status(
                     task_id=task_id,
                     status=TaskStatus.RUNNING,

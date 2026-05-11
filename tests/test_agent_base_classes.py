@@ -157,6 +157,32 @@ class TestResearchManagerV2:
         assert "AAPL" in prompt
         assert "看涨" in prompt or "看跌" in prompt
 
+    def test_delegate_to_agent_uses_compatible_invoke_path(self):
+        """测试委托子 Agent 时不会因缺少 invoke_agent 而失败"""
+        from unittest.mock import Mock, patch
+        from core.agents.adapters import ResearchManagerV2
+
+        mock_llm = Mock()
+        mock_llm.invoke.return_value = Mock(content="综合结论：继续观察")
+
+        agent = ResearchManagerV2(llm=mock_llm)
+
+        delegated_agent = Mock()
+        delegated_agent.execute.return_value = {"chip_report": "筹码集中度较高"}
+
+        with patch("core.agents.factory.AgentFactory.create_with_dynamic_tools", return_value=delegated_agent) as mock_create:
+            result = agent._run_delegated_research_agents({
+                "ticker": "600519",
+                "analysis_date": "2026-05-11",
+                "node_config": {
+                    "delegated_agent_ids": ["chip_distribution_analyst_v2"],
+                },
+            })
+
+        mock_create.assert_called_once_with("chip_distribution_analyst_v2", llm=mock_llm)
+        delegated_agent.execute.assert_called_once()
+        assert result == {"chip_report": "筹码集中度较高"}
+
 
 class TestTraderV2:
     """测试交易员V2"""

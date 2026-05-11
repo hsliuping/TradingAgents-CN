@@ -8,6 +8,9 @@ These tests avoid touching real DB/Redis by mocking.
 """
 
 import asyncio
+from types import SimpleNamespace
+
+import pytest
 from fastapi import FastAPI, Depends
 from fastapi.testclient import TestClient
 
@@ -206,4 +209,77 @@ def test_worker_intervals_env_and_dynamic_override(monkeypatch):
     assert w.heartbeat_interval == 5
     assert abs(w.poll_interval - 0.2) < 1e-6
     assert w.cleanup_interval == 10
+
+
+@pytest.mark.asyncio
+async def test_worker_creates_memory_task_before_first_status_update(monkeypatch):
+    import app.services.memory_state_manager as memory_state_manager
+    import app.services.task_analysis_service as task_analysis_service
+    import app.worker.__main__ as worker_main
+    import app.worker.analysis_worker as analysis_worker
+
+    call_order = []
+
+    class _DummyQueue:
+        async def ack_task(self, task_id, success):
+            call_order.append(("ack", task_id, success))
+
+    class _DummyMemoryManager:
+        async def get_task(self, task_id):
+            call_order.append(("get_memory", task_id))
+            return None
+
+        async def create_task(self, **kwargs):
+            call_order.append(("create_memory", kwargs["task_id"]))
+            return None
+
+        async def update_task_status(self, **kwargs):
+            call_order.append(("update_memory", kwargs["task_id"]))
+            return True
+
+    task = SimpleNamespace(
+        task_id="task-1",
+        status=None,
+        started_at=None,
+        progress=0,
+        current_step=None,
+        message=None,
+    )
+
+    class _DummyTaskService:
+        async def get_task(self, task_id):
+            call_order.append(("get_db_task", task_id))
+            return task
+
+        async def _update_task(self, updated_task):
+            call_order.append(("update_db_task", updated_task.task_id))
+
+        async def execute_task(self, updated_task, progress_callback=None):
+            call_order.append(("execute_task", updated_task.task_id))
+
+    async def _fake_validate(stock_code, parameters_dict):
+        call_order.append(("validate", stock_code))
+        return SimpleNamespace(is_valid=True, message="")
+
+    monkeypatch.setattr(memory_state_manager, "get_memory_state_manager", lambda: _DummyMemoryManager())
+    monkeypatch.setattr(task_analysis_service, "get_task_analysis_service", lambda: _DummyTaskService())
+    monkeypatch.setattr(worker_main, "get_worker_state", lambda: {})
+    monkeypatch.setattr(analysis_worker, "_update_worker_state", lambda **kwargs: None)
+
+    worker = analysis_worker.AnalysisWorker(worker_id="wtest")
+    worker.queue_service = _DummyQueue()
+    monkeypatch.setattr(worker, "_validate_task_data", _fake_validate)
+
+    await worker._process_task(
+        {
+            "id": "task-1",
+            "symbol": "600519",
+            "user": "u1",
+            "parameters": {"engine": "v2", "market_type": "cn"},
+        }
+    )
+
+    create_index = next(i for i, item in enumerate(call_order) if item[0] == "create_memory")
+    update_index = next(i for i, item in enumerate(call_order) if item[0] == "update_memory")
+    assert create_index < update_index
 
