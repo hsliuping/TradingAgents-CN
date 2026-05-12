@@ -2641,55 +2641,8 @@ async def _store_thread_summary_memory(
     summary: Dict[str, Any],
     summary_type: str,
 ) -> None:
-    """将结构化主题摘要中的事实写入 mem0，供后续智能助手继续分析时召回。"""
-    confirmed_facts = _normalize_summary_items(summary.get("confirmed_facts") or [], limit=5)
-    abstract = str(summary.get("abstract") or "").strip()
-    memory_lines = confirmed_facts or ([abstract] if abstract else [])
-    if not memory_lines:
-        return
-
-    try:
-        from core.memory.models import MemoryScope
-        from core.memory.service import get_memory_service
-
-        svc = get_memory_service(db)
-        normalized_title = str(title or "").strip()
-        messages = []
-        for line in memory_lines:
-            text = str(line or "").strip()
-            if not text:
-                continue
-            if normalized_title and normalized_title not in text:
-                text = f"{normalized_title}：{text}"
-            messages.append({"role": "assistant", "content": text})
-
-        if not messages:
-            return
-
-        result = await svc.store(
-            messages,
-            user_id=user_id,
-            session_id=thread_id,
-            scope=MemoryScope.ANALYSIS_INSIGHT,
-            metadata={
-                "source_agent": "assistant_summary",
-                "thread_id": thread_id,
-                "thread_title": normalized_title,
-                "summary_type": summary_type,
-            },
-            infer=False,
-        )
-        logger.info(
-            "[mem0] 主题摘要记忆写入结果 — user=%s thread=%s summary_type=%s facts=%d success=%s error=%s",
-            user_id,
-            thread_id,
-            summary_type,
-            result.facts_extracted,
-            result.success,
-            result.error or "",
-        )
-    except Exception as exc:
-        logger.debug("[mem0] 主题摘要记忆写入失败（已忽略）: %s", exc)
+    """主题摘要只保留在 Mongo 线程摘要集合，不再写入 mem0 长期记忆。"""
+    return
 
 
 async def save_assistant_message(
@@ -2840,9 +2793,9 @@ async def _recall_memory_block(db, user_id: str, user_message: str) -> str:
         return await svc.recall_formatted(
             query=user_message,
             user_id=user_id,
-            scopes=["conversation", "user_preference", "analysis_insight", "trade_pattern"],
-            limit=8,
-            max_chars=2000,
+            scopes=["user_preference"],
+            limit=4,
+            max_chars=600,
         )
     except Exception as e:
         logger.debug("[mem0] 记忆召回失败（已忽略）: %s", e)
@@ -2854,63 +2807,8 @@ async def _store_conversation_memory(
     user_msg: str, assistant_msg: str,
     tools_used: List[str],
 ) -> None:
-    """异步将本轮对话写入 mem0（不阻塞主流程）"""
-    try:
-        from core.memory.service import get_memory_service
-        svc = get_memory_service(db)
-        messages = [
-            {"role": "user", "content": user_msg},
-            {"role": "assistant", "content": assistant_msg},
-        ]
-        meta = {}
-        meta["source_agent"] = "assistant"
-        if tools_used:
-            meta["tools_used"] = ",".join(tools_used[:5])
-        logger.info(
-            "[mem0] 对话记忆提交内容 — user=%s thread=%s user_msg=%s assistant_msg=%s tools=%s",
-            user_id,
-            thread_id,
-            (user_msg or "").replace("\n", "\\n")[:300],
-            (assistant_msg or "").replace("\n", "\\n")[:600],
-            ",".join(tools_used[:5]) if tools_used else "",
-        )
-        result = await svc.store(
-            messages,
-            user_id=user_id,
-            session_id=thread_id,
-            scope="conversation",
-            metadata=meta if meta else None,
-        )
-        logger.info(
-            "[mem0] 对话记忆写入结果 — user=%s thread=%s scope=conversation facts=%d success=%s error=%s",
-            user_id,
-            thread_id,
-            result.facts_extracted,
-            result.success,
-            result.error or "",
-        )
-        if result.success and result.facts_extracted == 0:
-            fallback_facts = _build_fallback_memory_facts(user_msg, assistant_msg)
-            if fallback_facts:
-                fallback_result = await svc.store(
-                    [{"role": "assistant", "content": fact} for fact in fallback_facts],
-                    user_id=user_id,
-                    session_id=thread_id,
-                    scope="analysis_insight",
-                    metadata={"fallback": "rule_based", **meta} if meta else {"fallback": "rule_based"},
-                    infer=False,
-                )
-                logger.info(
-                    "[mem0] 对话记忆兜底写入结果 — user=%s thread=%s facts=%d success=%s error=%s fallback_facts=%s",
-                    user_id,
-                    thread_id,
-                    fallback_result.facts_extracted,
-                    fallback_result.success,
-                    fallback_result.error or "",
-                    json.dumps(fallback_facts, ensure_ascii=False),
-                )
-    except Exception as e:
-        logger.debug("[mem0] 记忆存储失败（已忽略）: %s", e)
+    """助手对话只保留在线程消息集合，不再写入 mem0 长期记忆。"""
+    return
 
 
 async def chat_with_assistant(

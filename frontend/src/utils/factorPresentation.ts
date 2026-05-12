@@ -89,13 +89,5 @@ export const getFactorWarningEntries = (row: StockInfo): FactorWarningEntry[] =>
 }
 
 export const getFactorDiagnosticEntries = (row: StockInfo): FactorDiagnosticEntry[] => {
-  const diagnostics = row.factor_diagnostics || {}
-  return Object.entries(diagnostics).map(([fieldName, payload]: [string, FactorDiagnosticPayload]) => ({
-    key: fieldName,
-    label: diagnosticLabelMap[fieldName] || payload.display_name || fieldName,
-    state: diagnosticStateLabelMap[payload.data_quality_state || 'unknown'] || '状态未知',
-    reason: payload.unavailable_reason || '',
-    missingInputs: payload.missing_inputs || [],
-    tagType: 'danger',
-  }))
+  return []
 }

@@ -1,5 +1,5 @@
 <template>
-  <div class="growth-panel">
+  <div v-if="growthPanelEnabled" class="growth-panel">
     <el-collapse v-model="activeCollapse" class="growth-collapse">
       <el-collapse-item name="growth">
         <template #title>
@@ -196,6 +196,7 @@ const emit = defineEmits<{
 }>()
 
 const router = useRouter()
+const growthPanelEnabled = false
 const activeCollapse = ref<string[]>([])  // 默认折叠（空数组 = 无展开项）
 const growthLoading = ref(false)
 const growthContext = ref<TaskGrowthContextPayload | null>(props.initialContext)
@@ -451,6 +452,12 @@ const getFormattedSuggestionAction = (item: GrowthSuggestion): FormattedSuggesti
 }
 
 const refreshGrowthContext = async () => {
+  if (!growthPanelEnabled) {
+    growthContext.value = null
+    emit('updated', growthContext.value)
+    return
+  }
+
   if (!props.taskId) {
     growthContext.value = props.initialContext
     return

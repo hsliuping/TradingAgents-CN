@@ -810,6 +810,7 @@ class UnifiedAnalysisService:
             asyncio.create_task(
                 _store_analysis_insight(
                     self._get_db(), user_id, stock_code,
+                    analysis_date,
                     result.get("summary", ""),
                     result.get("recommendation", ""),
                     task_id,
@@ -972,6 +973,7 @@ class UnifiedAnalysisService:
             asyncio.create_task(
                 _store_analysis_insight(
                     self._get_db(), user_id, stock_code,
+                    analysis_date,
                     result.get("summary", ""),
                     result.get("recommendation", ""),
                     task_id,
@@ -1891,18 +1893,50 @@ def get_unified_analysis_service() -> UnifiedAnalysisService:
 #  mem0 统一记忆层 — 工作流分析集成
 # ------------------------------------------------------------------
 
+def _get_memory_market_type(stock_code: str) -> str:
+    try:
+        from tradingagents.utils.stock_utils import StockMarket, StockUtils
+
+        market = StockUtils.identify_stock_market(stock_code)
+        mapping = {
+            StockMarket.CHINA_A: "cn",
+            StockMarket.HONG_KONG: "hk",
+            StockMarket.US: "us",
+            StockMarket.UNKNOWN: "cn",
+        }
+        return mapping.get(market, "cn")
+    except Exception:
+        return "cn"
+
 async def _recall_analysis_memory(db, user_id: str, stock_code: str) -> str:
     """从 mem0 召回该用户对该股票的历史分析记忆"""
     try:
         from core.memory.service import get_memory_service
         svc = get_memory_service(db)
-        return await svc.recall_formatted(
-            query=f"分析 {stock_code} 股票",
+        normalized_symbol = str(stock_code or "").strip().upper()
+        market_type = _get_memory_market_type(normalized_symbol)
+
+        analysis_memory = await svc.recall_formatted(
+            query=f"{normalized_symbol} 历史分析结论",
             user_id=user_id,
-            scopes=["analysis_insight", "agent_experience", "user_preference"],
-            limit=5,
-            max_chars=1500,
+            scopes=["analysis_insight"],
+            metadata_filters={
+                "object_type": "stock",
+                "memory_kind": "stock_analysis",
+                "symbol": normalized_symbol,
+                "market": market_type,
+            },
+            limit=3,
+            max_chars=1200,
         )
+        preference_memory = await svc.recall_formatted(
+            query=f"{normalized_symbol} 分析偏好",
+            user_id=user_id,
+            scopes=["user_preference"],
+            limit=2,
+            max_chars=300,
+        )
+        return f"{analysis_memory}{preference_memory}"
     except Exception as e:
         logger.debug("[mem0] 分析记忆召回失败: %s", e)
         return ""
@@ -1910,23 +1944,37 @@ async def _recall_analysis_memory(db, user_id: str, stock_code: str) -> str:
 
 async def _store_analysis_insight(
     db, user_id: str, stock_code: str,
-    summary: str, recommendation: str, task_id: str,
+    analysis_date: str, summary: str, recommendation: str, task_id: str,
 ) -> None:
-    """将分析结论写入 mem0 analysis_insight（异步，不阻塞主流程）"""
+    """将分析结论写入对象化股票长期记忆（异步，不阻塞主流程）"""
     if not summary and not recommendation:
         return
     try:
         from core.memory.service import get_memory_service
         svc = get_memory_service(db)
-        content = f"分析 {stock_code}: {summary}"
-        if recommendation:
-            content += f" 建议: {recommendation}"
-        await svc.store(
-            [{"role": "assistant", "content": content}],
+        normalized_symbol = str(stock_code or "").strip().upper()
+        structured_summary = str(summary or recommendation or "").strip()
+        structured_recommendation = str(recommendation or "").strip()
+        result = await svc.store_stock_analysis(
             user_id=user_id,
+            symbol=normalized_symbol,
+            market=_get_memory_market_type(normalized_symbol),
+            summary=structured_summary,
+            recommendation=structured_recommendation,
+            analysis_date=analysis_date,
+            task_id=task_id,
             agent_id="workflow_analyst",
-            scope="analysis_insight",
-            metadata={"symbol": stock_code, "task_id": task_id},
+            session_id=task_id,
+            next_checks=[structured_recommendation] if structured_recommendation else None,
+        )
+        logger.info(
+            "[mem0] 对象化股票记忆写入结果 — user=%s symbol=%s task=%s facts=%d success=%s error=%s",
+            user_id,
+            normalized_symbol,
+            task_id,
+            result.facts_extracted,
+            result.success,
+            result.error or "",
         )
     except Exception as e:
         logger.debug("[mem0] 分析洞察存储失败（已忽略）: %s", e)

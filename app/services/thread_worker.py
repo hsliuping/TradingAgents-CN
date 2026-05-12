@@ -165,6 +165,17 @@ class ThreadWorker:
                     from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
                     from app.utils.timezone import now_tz
 
+                    memory_manager = get_memory_state_manager()
+                    memory_task = await memory_manager.get_task(task_id)
+                    if not memory_task:
+                        await memory_manager.create_task(
+                            task_id=task_id,
+                            user_id=user_id,
+                            stock_code=stock_code,
+                            parameters=parameters_dict,
+                            stock_name=None,
+                        )
+
                     existing_task.status = AnalysisStatus.PROCESSING
                     if not existing_task.started_at:
                         existing_task.started_at = now_tz()
@@ -173,7 +184,6 @@ class ThreadWorker:
                     existing_task.message = "正在准备分析所需数据..."
                     await self.task_service._update_task(existing_task)
 
-                    memory_manager = get_memory_state_manager()
                     await memory_manager.update_task_status(
                         task_id=task_id,
                         status=TaskStatus.RUNNING,

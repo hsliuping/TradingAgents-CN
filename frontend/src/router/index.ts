@@ -290,7 +290,7 @@ const routes: RouteRecordRaw[] = [
     name: 'Memory',
     component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
-      title: 'AI 记忆',
+      title: '对象记忆',
       icon: 'Coin',
       requiresAuth: true,
       transition: 'fade'
@@ -301,7 +301,7 @@ const routes: RouteRecordRaw[] = [
         name: 'MemoryHome',
         component: () => import('@/views/Memory/index.vue'),
         meta: {
-          title: 'AI 记忆管理',
+          title: '股票对象记忆',
           requiresAuth: true
         }
       }

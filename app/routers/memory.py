@@ -26,6 +26,25 @@ def _resolve_user_id(user: dict) -> str:
     return str(user.get("user_id") or user.get("id") or "")
 
 
+def _build_metadata_filters(
+    *,
+    object_type: Optional[str] = None,
+    symbol: Optional[str] = None,
+    market: Optional[str] = None,
+    memory_kind: Optional[str] = None,
+) -> Optional[dict[str, str]]:
+    filters: dict[str, str] = {}
+    if object_type:
+        filters["object_type"] = object_type.strip().lower()
+    if symbol:
+        filters["symbol"] = symbol.strip().upper()
+    if market:
+        filters["market"] = market.strip().lower()
+    if memory_kind:
+        filters["memory_kind"] = memory_kind.strip().lower()
+    return filters or None
+
+
 @router.get("/health")
 async def memory_health(db: AsyncIOMotorDatabase = Depends(get_mongo_db)):
     """mem0 记忆层健康检查"""
@@ -98,6 +117,10 @@ async def memory_stats(
 @router.get("/list")
 async def memory_list(
     scope: Optional[str] = Query(None, description="按 scope 过滤"),
+    object_type: Optional[str] = Query(None, description="按对象类型过滤"),
+    symbol: Optional[str] = Query(None, description="按股票代码过滤"),
+    market: Optional[str] = Query(None, description="按市场过滤"),
+    memory_kind: Optional[str] = Query(None, description="按记忆类型过滤"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     user: dict = Depends(get_current_user),
@@ -113,8 +136,18 @@ async def memory_list(
     svc = get_memory_service(db)
 
     scopes = [scope] if scope else None
+    metadata_filters = _build_metadata_filters(
+        object_type=object_type,
+        symbol=symbol,
+        market=market,
+        memory_kind=memory_kind,
+    )
     result = await svc.get_all(
-        user_id=user_id, scopes=scopes, limit=page_size, page=page,
+        user_id=user_id,
+        scopes=scopes,
+        metadata_filters=metadata_filters,
+        limit=page_size,
+        page=page,
     )
     return {
         "success": True,
@@ -131,6 +164,10 @@ async def memory_list(
 async def memory_recall(
     query: str = Query(..., min_length=1, description="查询文本"),
     scope: Optional[str] = Query(None, description="限定 scope"),
+    object_type: Optional[str] = Query(None, description="按对象类型过滤"),
+    symbol: Optional[str] = Query(None, description="按股票代码过滤"),
+    market: Optional[str] = Query(None, description="按市场过滤"),
+    memory_kind: Optional[str] = Query(None, description="按记忆类型过滤"),
     limit: int = Query(5, ge=1, le=20),
     user: dict = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
@@ -145,8 +182,18 @@ async def memory_recall(
     svc = get_memory_service(db)
 
     scopes = [scope] if scope else None
+    metadata_filters = _build_metadata_filters(
+        object_type=object_type,
+        symbol=symbol,
+        market=market,
+        memory_kind=memory_kind,
+    )
     items = await svc.recall(
-        query=query, user_id=user_id, scopes=scopes, limit=limit,
+        query=query,
+        user_id=user_id,
+        scopes=scopes,
+        metadata_filters=metadata_filters,
+        limit=limit,
     )
     return {
         "success": True,

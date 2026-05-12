@@ -61,73 +61,8 @@ async def _store_planned_analysis_memory(
     tools_used: List[str],
     source: str,
 ) -> None:
-    """将规划分析结果写入 mem0，供 AI 记忆页和后续召回使用。"""
-    if not reply:
-        return
-
-    try:
-        from core.memory.service import get_memory_service
-
-        svc = get_memory_service(db)
-        metadata: Dict[str, Any] = {
-            "analysis_mode": "planned",
-            "source": source,
-            "source_agent": "assistant_planned",
-        }
-        if tools_used:
-            metadata["tools_used"] = ",".join(tools_used[:8])
-
-        logger.info(
-            "[mem0] 规划分析记忆提交内容 — user=%s thread=%s source=%s user_msg=%s assistant_msg=%s tools=%s",
-            user_id,
-            conversation_id,
-            source,
-            (user_message or "").replace("\n", "\\n")[:300],
-            (reply or "").replace("\n", "\\n")[:800],
-            ",".join(tools_used[:8]) if tools_used else "",
-        )
-
-        result = await svc.store(
-            [
-                {"role": "user", "content": user_message},
-                {"role": "assistant", "content": reply},
-            ],
-            user_id=user_id,
-            session_id=conversation_id,
-            scope="analysis_insight",
-            metadata=metadata,
-        )
-        logger.info(
-            "[mem0] 规划分析记忆写入结果 — user=%s thread=%s scope=analysis_insight source=%s facts=%d success=%s error=%s",
-            user_id,
-            conversation_id,
-            source,
-            result.facts_extracted,
-            result.success,
-            result.error or "",
-        )
-        if result.success and result.facts_extracted == 0:
-            fallback_facts = _build_fallback_memory_facts(user_message, reply)
-            if fallback_facts:
-                fallback_result = await svc.store(
-                    [{"role": "assistant", "content": fact} for fact in fallback_facts],
-                    user_id=user_id,
-                    session_id=conversation_id,
-                    scope="analysis_insight",
-                    metadata={"fallback": "rule_based", **metadata},
-                    infer=False,
-                )
-                logger.info(
-                    "[mem0] 规划分析记忆兜底写入结果 — user=%s thread=%s facts=%d success=%s error=%s fallback_facts=%s",
-                    user_id,
-                    conversation_id,
-                    fallback_result.facts_extracted,
-                    fallback_result.success,
-                    fallback_result.error or "",
-                    json.dumps(fallback_facts, ensure_ascii=False),
-                )
-    except Exception as e:
-        logger.debug("[mem0] 规划分析记忆存储失败（已忽略）: %s", e)
+    """规划分析回复不再写入 mem0 长期记忆，避免自由文本污染。"""
+    return
 
 
 # ============================================================

@@ -18,7 +18,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from .models import MemoryItem, MemoryScope, StoreResult
+from .models import MemoryItem, MemoryScope, StockAnalysisMemory, StoreResult
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +226,46 @@ class MemoryService:
             logger.warning("[MemoryService] store 失败（已忽略）: %s", e)
             return StoreResult(success=False, error=str(e))
 
+    async def store_stock_analysis(
+        self,
+        *,
+        user_id: str,
+        symbol: str,
+        market: str,
+        summary: str,
+        recommendation: str = "",
+        analysis_date: str = "",
+        task_id: str = "",
+        agent_id: str = "workflow_analyst",
+        session_id: str = "",
+        evidence: Optional[List[str]] = None,
+        next_checks: Optional[List[str]] = None,
+    ) -> StoreResult:
+        """写入对象化股票分析长期记忆。"""
+        if not str(symbol or "").strip() or not str(summary or "").strip():
+            return StoreResult(success=False, error="缺少 symbol 或 summary，跳过对象化记忆写入")
+
+        payload = StockAnalysisMemory(
+            symbol=str(symbol or "").strip().upper(),
+            market=str(market or "").strip().lower() or "cn",
+            analysis_date=str(analysis_date or "").strip(),
+            summary=str(summary or "").strip(),
+            recommendation=str(recommendation or "").strip(),
+            task_id=str(task_id or "").strip(),
+            source_agent=str(agent_id or "").strip() or "workflow_analyst",
+            evidence=evidence or [],
+            next_checks=next_checks or ([recommendation] if str(recommendation or "").strip() else []),
+        )
+        return await self.store(
+            [{"role": "assistant", "content": payload.to_memory_text()}],
+            user_id=user_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            scope=MemoryScope.ANALYSIS_INSIGHT,
+            metadata=payload.to_metadata(),
+            infer=False,
+        )
+
     # ------------------------------------------------------------------
     #  召回
     # ------------------------------------------------------------------
@@ -237,6 +277,7 @@ class MemoryService:
         user_id: str = "",
         agent_id: str = "",
         scopes: Optional[List[str]] = None,
+        metadata_filters: Optional[Dict[str, Any]] = None,
         limit: int = 5,
     ) -> List[MemoryItem]:
         """
@@ -252,28 +293,43 @@ class MemoryService:
         if not await self._ensure_init():
             return []
 
+        normalized_scopes = _normalize_scopes(scopes)
+        normalized_metadata_filters = _normalize_metadata_filters(metadata_filters)
+
         kwargs: Dict[str, Any] = {"limit": limit}
         if user_id:
             kwargs["user_id"] = user_id
         if agent_id:
             kwargs["agent_id"] = agent_id
 
-        scope_filter = _build_mem0_scope_filter(scopes)
-        if scope_filter:
-            kwargs["filters"] = scope_filter
-        elif _normalize_scopes(scopes):
+        exact_filters = _build_mem0_exact_filters(normalized_scopes, normalized_metadata_filters)
+        if exact_filters:
+            kwargs["filters"] = exact_filters
+        if len(normalized_scopes) > 1 or normalized_metadata_filters:
+            kwargs["limit"] = max(limit * 10, 50)
+        elif normalized_scopes:
             # mem0 qdrant backend only supports scalar MatchValue filters, not Mongo-style $in.
             # For multiple scopes, fetch a larger candidate set and filter client-side.
             kwargs["limit"] = max(limit * 5, 20)
 
         try:
-            results = await self._mem.search(query, **kwargs)
+            try:
+                results = await self._mem.search(query, **kwargs)
+            except Exception:
+                if not exact_filters:
+                    raise
+                logger.debug("[MemoryService] recall 过滤器回退到客户端过滤")
+                fallback_kwargs = dict(kwargs)
+                fallback_kwargs.pop("filters", None)
+                fallback_kwargs["limit"] = max(fallback_kwargs.get("limit", limit), max(limit * 10, 50))
+                results = await self._mem.search(query, **fallback_kwargs)
             items = []
             raw_list = results.get("results", []) if isinstance(results, dict) else results
             for raw in raw_list:
                 if isinstance(raw, dict):
                     items.append(MemoryItem.from_mem0(raw))
-            items = _filter_items_by_scopes(items, scopes)
+            items = _filter_items_by_scopes(items, normalized_scopes)
+            items = _filter_items_by_metadata(items, normalized_metadata_filters)
             return items[:limit]
         except Exception as e:
             logger.warning("[MemoryService] recall 失败（已降级）: %s", e)
@@ -286,6 +342,7 @@ class MemoryService:
         user_id: str = "",
         agent_id: str = "",
         scopes: Optional[List[str]] = None,
+        metadata_filters: Optional[Dict[str, Any]] = None,
         limit: int = 5,
         max_chars: int = 1500,
     ) -> str:
@@ -295,7 +352,12 @@ class MemoryService:
         返回空字符串表示无可用记忆（调用方无需额外判断）。
         """
         items = await self.recall(
-            query, user_id=user_id, agent_id=agent_id, scopes=scopes, limit=limit,
+            query,
+            user_id=user_id,
+            agent_id=agent_id,
+            scopes=scopes,
+            metadata_filters=metadata_filters,
+            limit=limit,
         )
         if not items:
             return ""
@@ -303,8 +365,7 @@ class MemoryService:
         lines: List[str] = []
         total = 0
         for item in items:
-            scope_label = _SCOPE_LABEL.get(item.scope, item.scope)
-            line = f"- [{scope_label}] {item.memory}"
+            line = _format_recall_item(item)
             if total + len(line) > max_chars:
                 break
             lines.append(line)
@@ -355,6 +416,7 @@ class MemoryService:
         *,
         user_id: str = "",
         scopes: Optional[List[str]] = None,
+        metadata_filters: Optional[Dict[str, Any]] = None,
         limit: int = 50,
         page: int = 1,
     ) -> Dict[str, Any]:
@@ -371,22 +433,34 @@ class MemoryService:
             )
             return {"items": [], "total": 0}
 
+        normalized_scopes = _normalize_scopes(scopes)
+        normalized_metadata_filters = _normalize_metadata_filters(metadata_filters)
+
         kwargs: Dict[str, Any] = {"limit": 200}
         if user_id:
             kwargs["user_id"] = user_id
-        scope_filter = _build_mem0_scope_filter(scopes)
-        if scope_filter:
-            kwargs["filters"] = scope_filter
+        exact_filters = _build_mem0_exact_filters(normalized_scopes, normalized_metadata_filters)
+        if exact_filters:
+            kwargs["filters"] = exact_filters
 
         try:
-            results = await self._mem.get_all(**kwargs)
+            try:
+                results = await self._mem.get_all(**kwargs)
+            except Exception:
+                if not exact_filters:
+                    raise
+                logger.debug("[MemoryService] get_all 过滤器回退到客户端过滤")
+                fallback_kwargs = dict(kwargs)
+                fallback_kwargs.pop("filters", None)
+                results = await self._mem.get_all(**fallback_kwargs)
             raw_list = results.get("results", []) if isinstance(results, dict) else results
             all_items = [
                 MemoryItem.from_mem0(raw)
                 for raw in raw_list
                 if isinstance(raw, dict)
             ]
-            all_items = _filter_items_by_scopes(all_items, scopes)
+            all_items = _filter_items_by_scopes(all_items, normalized_scopes)
+            all_items = _filter_items_by_metadata(all_items, normalized_metadata_filters)
             total = len(all_items)
             start = (page - 1) * limit
             end = start + limit
@@ -486,6 +560,16 @@ def _normalize_scopes(scopes: Optional[List[str]]) -> List[str]:
     return normalized
 
 
+def _normalize_metadata_filters(filters: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    normalized: Dict[str, str] = {}
+    for key, value in (filters or {}).items():
+        normalized_key = str(key or "").strip()
+        normalized_value = str(value or "").strip()
+        if normalized_key and normalized_value:
+            normalized[normalized_key] = normalized_value
+    return normalized
+
+
 def _build_mem0_scope_filter(scopes: Optional[List[str]]) -> Optional[Dict[str, str]]:
     normalized = _normalize_scopes(scopes)
     if len(normalized) == 1:
@@ -493,11 +577,64 @@ def _build_mem0_scope_filter(scopes: Optional[List[str]]) -> Optional[Dict[str, 
     return None
 
 
+def _build_mem0_exact_filters(
+    scopes: Optional[List[str]],
+    metadata_filters: Optional[Dict[str, str]] = None,
+) -> Optional[Dict[str, str]]:
+    filters: Dict[str, str] = {}
+    scope_filter = _build_mem0_scope_filter(scopes)
+    if scope_filter:
+        filters.update(scope_filter)
+    for key, value in (metadata_filters or {}).items():
+        filters[key] = value
+    return filters or None
+
+
 def _filter_items_by_scopes(items: List[MemoryItem], scopes: Optional[List[str]]) -> List[MemoryItem]:
     normalized = set(_normalize_scopes(scopes))
     if not normalized:
         return items
     return [item for item in items if (item.scope or "") in normalized]
+
+
+def _filter_items_by_metadata(items: List[MemoryItem], filters: Optional[Dict[str, str]]) -> List[MemoryItem]:
+    normalized = _normalize_metadata_filters(filters)
+    if not normalized:
+        return items
+
+    matched: List[MemoryItem] = []
+    for item in items:
+        meta = item.metadata or {}
+        ok = True
+        for key, expected in normalized.items():
+            actual = str(meta.get(key) or "").strip()
+            if actual != expected:
+                ok = False
+                break
+        if ok:
+            matched.append(item)
+    return matched
+
+
+def _format_recall_item(item: MemoryItem) -> str:
+    scope_label = _SCOPE_LABEL.get(item.scope, item.scope)
+    meta = item.metadata or {}
+    if meta.get("memory_kind") == "stock_analysis":
+        object_key = str(meta.get("object_key") or item.object_key or "").strip()
+        analysis_date = str(meta.get("analysis_date") or "").strip()
+        summary = str(meta.get("summary") or item.memory or "").strip()
+        recommendation = str(meta.get("recommendation") or "").strip()
+        parts = []
+        if object_key:
+            parts.append(f"对象={object_key}")
+        if analysis_date:
+            parts.append(f"日期={analysis_date}")
+        if summary:
+            parts.append(f"结论={summary}")
+        if recommendation:
+            parts.append(f"建议={recommendation}")
+        return f"- [{scope_label}] " + "；".join(parts)
+    return f"- [{scope_label}] {item.memory}"
 
 
 def _truncate_messages(

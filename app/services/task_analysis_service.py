@@ -33,6 +33,30 @@ def _is_cn_etf_symbol(code: Optional[str]) -> bool:
     return len(code_str) == 6 and code_str.isdigit() and code_str.startswith(ETF_CODE_PREFIXES)
 
 
+def _normalize_memory_market(symbol: str, raw_market: Optional[str] = None) -> str:
+    normalized_market = str(raw_market or "").strip().lower()
+    if normalized_market in {"cn", "a股", "a_shares", "china", "china_a", "ashare"}:
+        return "cn"
+    if normalized_market in {"hk", "港股", "hongkong", "hong_kong"}:
+        return "hk"
+    if normalized_market in {"us", "美股", "usa", "united_states"}:
+        return "us"
+
+    try:
+        from tradingagents.utils.stock_utils import StockMarket, StockUtils
+
+        market = StockUtils.identify_stock_market(symbol)
+        mapping = {
+            StockMarket.CHINA_A: "cn",
+            StockMarket.HONG_KONG: "hk",
+            StockMarket.US: "us",
+            StockMarket.UNKNOWN: "cn",
+        }
+        return mapping.get(market, "cn")
+    except Exception:
+        return "cn"
+
+
 class TaskCancelledException(Exception):
     """任务被取消异常"""
     pass
@@ -142,6 +166,20 @@ class TaskAnalysisService:
 
         self.logger.info(f"🚀 执行任务: {task.task_id}")
 
+        from app.services.memory_state_manager import get_memory_state_manager
+
+        memory_manager = get_memory_state_manager()
+        memory_task = await memory_manager.get_task(task.task_id)
+        if not memory_task:
+            task_params = task.task_params or {}
+            await memory_manager.create_task(
+                task_id=task.task_id,
+                user_id=str(task.user_id),
+                stock_code=str(task_params.get("symbol") or task_params.get("stock_code") or ""),
+                parameters=task_params,
+                stock_name=None,
+            )
+
         # 创建一个包装的进度回调，用于更新数据库和内存
         async def wrapped_progress_callback(progress: int, message: str, **kwargs):
             """包装的进度回调：更新任务进度并保存到数据库和内存"""
@@ -162,8 +200,7 @@ class TaskAnalysisService:
             await self._update_task(task)
 
             # 🔑 关键：同时更新内存状态
-            from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
-            memory_manager = get_memory_state_manager()
+            from app.services.memory_state_manager import TaskStatus
             await memory_manager.update_task_status(
                 task_id=task.task_id,
                 status=TaskStatus.RUNNING,
@@ -254,6 +291,18 @@ class TaskAnalysisService:
                 if saved_analysis_id and task.result:
                     task.result["analysis_id"] = saved_analysis_id
                     self.logger.info(f"✅ 已更新任务结果中的 analysis_id: {saved_analysis_id}")
+
+            # 🧠 对象化股票记忆：只在真实股票分析完成后写入，避免自由文本污染。
+            if task.task_type == AnalysisTaskType.STOCK_ANALYSIS:
+                try:
+                    await asyncio.wait_for(
+                        self._store_stock_object_memory(task, formatted_result),
+                        timeout=20,
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning(f"⚠️ 对象化股票记忆写入超时(忽略): {task.task_id}")
+                except Exception as memory_err:
+                    self.logger.warning(f"⚠️ 对象化股票记忆写入失败(忽略): {memory_err}")
 
             # 🔑🔑🔑 关键修复：先持久化结果和更新内存状态为 COMPLETED，
             # 再执行慢操作（通知、邮件、用户画像、回写研究主题）。
@@ -2004,6 +2053,53 @@ class TaskAnalysisService:
         except Exception as e:
             self.logger.error(f"❌ 保存到 analysis_reports 失败: {e}", exc_info=True)
             return None  # 🔑 保存失败时返回 None
+
+    async def _store_stock_object_memory(self, task: UnifiedAnalysisTask, result: Dict[str, Any]) -> None:
+        """将后台任务的股票分析结果写入对象化长期记忆。"""
+        symbol = str((task.task_params or {}).get("symbol") or (task.task_params or {}).get("stock_code") or "").strip().upper()
+        if not symbol or _is_cn_etf_symbol(symbol):
+            return
+
+        summary = str(result.get("summary") or result.get("executive_summary") or "").strip()
+        recommendation = str(result.get("recommendation") or "").strip()
+        if not summary and not recommendation:
+            return
+
+        from core.memory.service import get_memory_service
+
+        svc = get_memory_service(self.db)
+        analysis_date = str(
+            result.get("analysis_date")
+            or (task.task_params or {}).get("analysis_date")
+            or now_tz().strftime("%Y-%m-%d")
+        ).strip()
+        evidence = [
+            str(item or "").strip()
+            for item in (result.get("key_points") or [])[:5]
+            if str(item or "").strip()
+        ]
+        memory_result = await svc.store_stock_analysis(
+            user_id=str(task.user_id or ""),
+            symbol=symbol,
+            market=_normalize_memory_market(symbol, (task.task_params or {}).get("market_type")),
+            summary=summary or recommendation,
+            recommendation=recommendation,
+            analysis_date=analysis_date,
+            task_id=str(task.task_id),
+            agent_id="workflow_analyst",
+            session_id=str(task.task_id),
+            evidence=evidence,
+            next_checks=[recommendation] if recommendation else None,
+        )
+        self.logger.info(
+            "[mem0] 对象化股票记忆写入结果 — user=%s symbol=%s task=%s facts=%d success=%s error=%s",
+            str(task.user_id or ""),
+            symbol,
+            str(task.task_id),
+            memory_result.facts_extracted,
+            memory_result.success,
+            memory_result.error or "",
+        )
     
     async def _find_one_compatible(self, collection, query: Dict[str, Any], projection: Optional[Dict[str, Any]] = None):
         """兼容同步/异步 Mongo collection 的 find_one 调用。"""

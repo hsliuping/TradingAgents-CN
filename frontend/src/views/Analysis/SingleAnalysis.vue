@@ -1700,16 +1700,52 @@ const analysisModuleMeta: Record<string, { title: string; description: string }>
   fundamentals_report: { title: '💰 基本面研究', description: '财务质量、估值水平与盈利能力研究' },
   sentiment_report: { title: '💭 情绪研究', description: '市场热度、投资者情绪与讨论偏差研究' },
   news_report: { title: '📰 新闻研究', description: '公告、新闻事件与催化影响研究' },
+  bull_researcher: { title: '🐂 乐观情景研究员', description: '围绕结论上修空间的研究论证' },
   bull_report: { title: '🐂 乐观情景研究员', description: '围绕结论上修空间的研究论证' },
+  bear_researcher: { title: '🐻 审慎情景研究员', description: '围绕脆弱前提与下修风险的研究论证' },
   bear_report: { title: '🐻 审慎情景研究员', description: '围绕脆弱前提与下修风险的研究论证' },
   research_team_decision: { title: '🔬 平衡研究结论', description: '综合乐观与审慎材料后的研究层结论' },
+  investment_plan: { title: '📋 研究经理简报', description: '研究经理对多维分析的整合摘要' },
   trader_investment_plan: { title: '🧩 研究简报', description: '面向用户的综合研究简报与阅读入口' },
+  risky_analyst: { title: '🔥 高弹性情景观点', description: '结论上修条件与强化催化研究' },
   risky_opinion: { title: '🔥 高弹性情景观点', description: '结论上修条件与强化催化研究' },
+  safe_analyst: { title: '🛡️ 防御情景观点', description: '脆弱前提、关键风险与下修条件研究' },
   safe_opinion: { title: '🛡️ 防御情景观点', description: '脆弱前提、关键风险与下修条件研究' },
+  neutral_analyst: { title: '⚖️ 基准情景观点', description: '基准情景、证据质量与信息缺口研究' },
   neutral_opinion: { title: '⚖️ 基准情景观点', description: '基准情景、证据质量与信息缺口研究' },
   risk_management_decision: { title: '⚠️ 风险治理结论', description: '综合情景审阅后的最终稳健性结论' },
   risk_assessment: { title: '⚠️ 风险治理结论', description: '综合情景审阅后的最终稳健性结论' },
   final_trade_decision: { title: '📝 综合研究结论', description: '融合研究结论与风险治理后的总览结论' },
+}
+
+const getResearchContentFingerprint = (moduleData: any) => {
+  const prepared = prepareMarkdownContent(getModuleContent(moduleData) || '')
+  if (!prepared) {
+    return ''
+  }
+
+  return prepared
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^\d+[.)]\s+/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\[(.*?)\]\([^)]*\)/g, '$1')
+    .replace(/[>_*|~]/g, ' ')
+    .replace(/[\s\u3000]+/g, '')
+}
+
+const shouldHideDuplicateResearchManagerBrief = (moduleKey: string, reportsData: any) => {
+  if (moduleKey !== 'investment_plan') {
+    return false
+  }
+
+  const researchDecision = getResearchContentFingerprint(reportsData?.research_team_decision)
+  const managerBrief = getResearchContentFingerprint(reportsData?.investment_plan)
+
+  return !!researchDecision && researchDecision === managerBrief
 }
 
 const extractReportsSource = (data: any): Record<string, any> | null => {
@@ -1863,24 +1899,32 @@ const getAnalysisReports = (data: any) => {
     { key: 'fundamentals_report', title: isEtfAnalysis ? '📊 ETF 分析' : '💰 基本面研究' },
     { key: 'sentiment_report', title: '💭 情绪研究' },
     { key: 'news_report', title: '📰 新闻研究' },
+    { key: 'bull_researcher', title: '🐂 乐观情景研究员' },
     { key: 'bull_report', title: '🐂 乐观情景研究员' },
+    { key: 'bear_researcher', title: '🐻 审慎情景研究员' },
     { key: 'bear_report', title: '🐻 审慎情景研究员' },
     { key: 'research_team_decision', title: '🔬 平衡研究结论' },
+    { key: 'investment_plan', title: '📋 研究经理简报' },
     { key: 'trader_investment_plan', title: '🧩 研究简报' },
+    { key: 'risky_analyst', title: '🔥 高弹性情景观点' },
     { key: 'risky_opinion', title: '🔥 高弹性情景观点' },
+    { key: 'safe_analyst', title: '🛡️ 防御情景观点' },
     { key: 'safe_opinion', title: '🛡️ 防御情景观点' },
+    { key: 'neutral_analyst', title: '⚖️ 基准情景观点' },
     { key: 'neutral_opinion', title: '⚖️ 基准情景观点' },
     { key: 'risk_management_decision', title: '⚠️ 风险治理结论' },
     { key: 'risk_assessment', title: '⚠️ 风险治理结论' },
     { key: 'final_trade_decision', title: '📝 综合研究结论' },
   ]
 
-  const hiddenKeys = ['investment_plan']
+  const addedKeys = new Set<string>()
 
   reportMappings.forEach(mapping => {
-    if (hiddenKeys.includes(mapping.key)) return
+    if (addedKeys.has(mapping.key)) return
+    if (shouldHideDuplicateResearchManagerBrief(mapping.key, reportsData)) return
     const content = reportsData?.[mapping.key]
     if (content) {
+      addedKeys.add(mapping.key)
       reports.push({ title: mapping.title, content })
     }
   })

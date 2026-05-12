@@ -14,6 +14,21 @@ export interface MemoryItem {
   metadata: Record<string, any>
   created_at: string
   updated_at: string
+  object_type?: string
+  object_key?: string
+  symbol?: string
+  market?: string
+  memory_kind?: string
+}
+
+export interface MemoryQueryParams {
+  scope?: string
+  page?: number
+  page_size?: number
+  object_type?: string
+  symbol?: string
+  market?: string
+  memory_kind?: string
 }
 
 export interface MemoryStatsData {
@@ -77,14 +92,14 @@ export const memoryApi = {
     return res?.data ?? res
   },
 
-  async getList(params: { scope?: string; page?: number; page_size?: number } = {}): Promise<MemoryListData> {
+  async getList(params: MemoryQueryParams = {}): Promise<MemoryListData> {
     const res: any = await request.get('/api/memory/list', { params })
     return res?.data ?? res
   },
 
-  async recall(query: string, scope?: string, limit = 10): Promise<MemoryRecallData> {
+  async recall(query: string, params: MemoryQueryParams = {}, limit = 10): Promise<MemoryRecallData> {
     const res: any = await request.get('/api/memory/recall', {
-      params: { query, scope, limit },
+      params: { query, limit, ...params },
     })
     return res?.data ?? res
   },
