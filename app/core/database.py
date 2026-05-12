@@ -5,7 +5,7 @@
 
 import logging
 import asyncio
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, Dict
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection, AsyncIOMotorDatabase
 from pymongo import MongoClient
 from pymongo.database import Database
@@ -47,6 +47,7 @@ _redis_runtime_loop: Optional[asyncio.AbstractEventLoop] = None
 _mongo_db_proxy = None
 _mongo_client_proxy = None
 _redis_client_proxy = None
+_mongo_loop_bindings: Dict[int, Tuple[asyncio.AbstractEventLoop, AsyncIOMotorClient, AsyncIOMotorDatabase]] = {}
 
 # 同步 MongoDB 连接（用于非异步上下文）
 _sync_mongo_client: Optional[MongoClient] = None
@@ -71,15 +72,7 @@ class DatabaseManager:
             logger.info("🔄 正在初始化MongoDB连接...")
 
             # 创建MongoDB客户端，配置连接池
-            self.mongo_client = AsyncIOMotorClient(
-                settings.MONGO_URI,
-                maxPoolSize=settings.MONGO_MAX_CONNECTIONS,
-                minPoolSize=settings.MONGO_MIN_CONNECTIONS,
-                maxIdleTimeMS=30000,  # 30秒空闲超时
-                serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,  # 服务器选择超时
-                connectTimeoutMS=settings.MONGO_CONNECT_TIMEOUT_MS,  # 连接超时
-                socketTimeoutMS=settings.MONGO_SOCKET_TIMEOUT_MS,  # 套接字超时
-            )
+            self.mongo_client = _create_async_mongo_client()
 
             # 获取数据库实例
             self.mongo_db = self.mongo_client[settings.MONGO_DB]
@@ -151,13 +144,12 @@ class DatabaseManager:
         logger.info("🔄 正在关闭数据库连接...")
 
         # 关闭MongoDB连接
-        if self.mongo_client:
-            try:
-                self.mongo_client.close()
-                self._mongo_healthy = False
-                logger.info("✅ MongoDB连接已关闭")
-            except Exception as e:
-                logger.error(f"❌ 关闭MongoDB连接时出错: {e}")
+        try:
+            await _close_all_async_mongo_bindings(log_message=False)
+            self._mongo_healthy = False
+            logger.info("✅ MongoDB连接已关闭")
+        except Exception as e:
+            logger.error(f"❌ 关闭MongoDB连接时出错: {e}")
 
         # 关闭Redis连接
         if self.redis_client:
@@ -185,8 +177,13 @@ class DatabaseManager:
 
         # 检查MongoDB
         try:
-            if self.mongo_client:
-                result = await self.mongo_client.admin.command('ping')
+            try:
+                mongo = _get_bound_mongo_client()
+            except RuntimeError:
+                mongo = None
+
+            if mongo:
+                result = await mongo.admin.command('ping')
                 health_status["mongodb"] = {
                     "status": "healthy",
                     "details": {"ping": result, "database": settings.MONGO_DB}
@@ -229,6 +226,76 @@ class DatabaseManager:
 
 # 全局数据库管理器实例
 db_manager = DatabaseManager()
+
+
+def _create_async_mongo_client() -> AsyncIOMotorClient:
+    return AsyncIOMotorClient(
+        settings.MONGO_URI,
+        maxPoolSize=settings.MONGO_MAX_CONNECTIONS,
+        minPoolSize=settings.MONGO_MIN_CONNECTIONS,
+        maxIdleTimeMS=30000,
+        serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,
+        connectTimeoutMS=settings.MONGO_CONNECT_TIMEOUT_MS,
+        socketTimeoutMS=settings.MONGO_SOCKET_TIMEOUT_MS,
+    )
+
+
+def _is_pymongo_client_closed(client: Optional[MongoClient]) -> bool:
+    if client is None:
+        return True
+
+    topology = getattr(client, "_topology", None)
+    if topology is None:
+        return False
+
+    return bool(getattr(topology, "_closed", False))
+
+
+def _is_async_mongo_client_closed(client: Optional[AsyncIOMotorClient]) -> bool:
+    if client is None:
+        return True
+
+    delegate = getattr(client, "delegate", None)
+    return _is_pymongo_client_closed(delegate)
+
+
+def _set_active_mongo_binding(
+    loop: Optional[asyncio.AbstractEventLoop],
+    client: AsyncIOMotorClient,
+    db: AsyncIOMotorDatabase,
+) -> None:
+    global mongo_client, mongo_db, _mongo_runtime_loop
+
+    mongo_client = client
+    mongo_db = db
+    _mongo_runtime_loop = loop
+    db_manager.mongo_client = client
+    db_manager.mongo_db = db
+
+
+def _store_mongo_loop_binding(
+    loop: asyncio.AbstractEventLoop,
+    client: AsyncIOMotorClient,
+    db: AsyncIOMotorDatabase,
+) -> None:
+    _mongo_loop_bindings[id(loop)] = (loop, client, db)
+    _set_active_mongo_binding(loop, client, db)
+
+
+def _prune_closed_mongo_loop_bindings() -> None:
+    stale_loop_ids = []
+
+    for loop_id, (loop, client, _) in list(_mongo_loop_bindings.items()):
+        if loop.is_closed() or _is_async_mongo_client_closed(client):
+            stale_loop_ids.append(loop_id)
+
+    for loop_id in stale_loop_ids:
+        _, client, _ = _mongo_loop_bindings.pop(loop_id)
+        if client is not None and not _is_async_mongo_client_closed(client):
+            try:
+                client.close()
+            except Exception as exc:
+                logger.warning(f"⚠️ 关闭失效 MongoDB 客户端失败（忽略）: {exc}")
 
 
 class _LoopSafeMongoCollectionProxy:
@@ -290,7 +357,15 @@ async def init_database():
     """初始化数据库连接"""
     global mongo_client, mongo_db, redis_client, redis_pool, _mongo_runtime_loop, _redis_runtime_loop
 
-    mongo_ready = mongo_client is not None and mongo_db is not None and db_manager._mongo_healthy
+    current_loop: Optional[asyncio.AbstractEventLoop]
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    mongo_binding = _get_current_mongo_loop_binding() if current_loop is not None else None
+
+    mongo_ready = mongo_binding is not None and db_manager._mongo_healthy
     redis_ready = redis_client is not None and redis_pool is not None and db_manager._redis_healthy
 
     if mongo_ready and redis_ready:
@@ -301,9 +376,12 @@ async def init_database():
         if not mongo_ready:
             # 初始化MongoDB
             await db_manager.init_mongodb()
-            mongo_client = db_manager.mongo_client
-            mongo_db = db_manager.mongo_db
-            _mongo_runtime_loop = asyncio.get_running_loop()
+            if current_loop is not None and db_manager.mongo_client is not None and db_manager.mongo_db is not None:
+                _store_mongo_loop_binding(current_loop, db_manager.mongo_client, db_manager.mongo_db)
+            else:
+                mongo_client = db_manager.mongo_client
+                mongo_db = db_manager.mongo_db
+                _mongo_runtime_loop = current_loop
 
         if not redis_ready:
             # 初始化Redis
@@ -548,30 +626,15 @@ async def close_redis_binding() -> None:
 
 def _recreate_async_mongo_binding() -> None:
     """按当前事件循环重建异步 MongoDB 绑定，避免跨 loop 复用旧 Motor 客户端。"""
-    global mongo_client, mongo_db, _mongo_runtime_loop
-
     current_loop = asyncio.get_running_loop()
+    existing = _get_current_mongo_loop_binding()
+    if existing is not None:
+        return
 
-    old_client = mongo_client
-    mongo_client = AsyncIOMotorClient(
-        settings.MONGO_URI,
-        maxPoolSize=settings.MONGO_MAX_CONNECTIONS,
-        minPoolSize=settings.MONGO_MIN_CONNECTIONS,
-        maxIdleTimeMS=30000,
-        serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,
-        connectTimeoutMS=settings.MONGO_CONNECT_TIMEOUT_MS,
-        socketTimeoutMS=settings.MONGO_SOCKET_TIMEOUT_MS,
-    )
-    mongo_db = mongo_client[settings.MONGO_DB]
-    _mongo_runtime_loop = current_loop
-    db_manager.mongo_client = mongo_client
-    db_manager.mongo_db = mongo_db
-
-    if old_client is not None and old_client is not mongo_client:
-        try:
-            old_client.close()
-        except Exception as exc:
-            logger.warning(f"⚠️ 关闭旧 MongoDB 客户端失败（忽略）: {exc}")
+    client = _create_async_mongo_client()
+    db = client[settings.MONGO_DB]
+    _store_mongo_loop_binding(current_loop, client, db)
+    db_manager._mongo_healthy = True
 
 
 def _recreate_async_redis_binding() -> None:
@@ -618,23 +681,24 @@ def _ensure_async_redis_binding() -> None:
 
 def _ensure_async_mongo_binding() -> None:
     """确保返回的异步 MongoDB 连接绑定到当前运行中的事件循环。"""
-    global _mongo_runtime_loop
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    binding = _get_current_mongo_loop_binding()
+    if binding is not None:
+        return
 
     if mongo_client is None or mongo_db is None:
         raise RuntimeError("MongoDB客户端未初始化")
 
-    try:
-        current_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return
+    if _is_async_mongo_client_closed(mongo_client):
+        logger.warning("⚠️ 检测到异步 MongoDB 客户端已关闭，正在为当前事件循环重建连接")
+    else:
+        logger.warning("⚠️ 检测到异步 MongoDB 客户端绑定的事件循环已变化，正在为当前事件循环创建独立连接")
 
-    if _mongo_runtime_loop is None:
-        _mongo_runtime_loop = current_loop
-        return
-
-    if _mongo_runtime_loop.is_closed() or _mongo_runtime_loop is not current_loop:
-        logger.warning("⚠️ 检测到异步 MongoDB 客户端绑定的事件循环已变化，正在重建连接")
-        _recreate_async_mongo_binding()
+    _recreate_async_mongo_binding()
 
 
 def _get_bound_mongo_client() -> AsyncIOMotorClient:
@@ -680,16 +744,68 @@ def bind_loop_safe_mongo_db(target: object, attr_name: str = "db") -> AsyncIOMot
 
 def create_isolated_async_mongo_binding() -> Tuple[AsyncIOMotorClient, AsyncIOMotorDatabase]:
     """创建与当前调用方独立的异步 MongoDB 连接，适用于线程池或临时隔离任务。"""
-    client = AsyncIOMotorClient(
-        settings.MONGO_URI,
-        maxPoolSize=settings.MONGO_MAX_CONNECTIONS,
-        minPoolSize=settings.MONGO_MIN_CONNECTIONS,
-        maxIdleTimeMS=30000,
-        serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,
-        connectTimeoutMS=settings.MONGO_CONNECT_TIMEOUT_MS,
-        socketTimeoutMS=settings.MONGO_SOCKET_TIMEOUT_MS,
-    )
+    client = _create_async_mongo_client()
     return client, client[settings.MONGO_DB]
+
+
+def _get_current_mongo_loop_binding() -> Optional[Tuple[asyncio.AbstractEventLoop, AsyncIOMotorClient, AsyncIOMotorDatabase]]:
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+    _prune_closed_mongo_loop_bindings()
+
+    binding = _mongo_loop_bindings.get(id(current_loop))
+    if binding is not None:
+        _, client, db = binding
+        _set_active_mongo_binding(current_loop, client, db)
+        return binding
+
+    if (
+        mongo_client is not None
+        and mongo_db is not None
+        and not _is_async_mongo_client_closed(mongo_client)
+        and (_mongo_runtime_loop is None or _mongo_runtime_loop is current_loop)
+    ):
+        _store_mongo_loop_binding(current_loop, mongo_client, mongo_db)
+        return _mongo_loop_bindings.get(id(current_loop))
+
+    return None
+
+
+async def _close_all_async_mongo_bindings(log_message: bool = True) -> None:
+    global mongo_client, mongo_db, _mongo_runtime_loop
+
+    if log_message:
+        logger.info("🔄 正在关闭全部 MongoDB 事件循环绑定...")
+
+    _prune_closed_mongo_loop_bindings()
+    closed_client_ids = set()
+
+    for _, client, _ in list(_mongo_loop_bindings.values()):
+        if client is None:
+            continue
+
+        client_id = id(client)
+        if client_id in closed_client_ids or _is_async_mongo_client_closed(client):
+            closed_client_ids.add(client_id)
+            continue
+
+        try:
+            client.close()
+        except Exception as exc:
+            logger.warning(f"⚠️ 关闭 MongoDB 客户端失败（忽略）: {exc}")
+
+        closed_client_ids.add(client_id)
+
+    _mongo_loop_bindings.clear()
+    mongo_client = None
+    mongo_db = None
+    _mongo_runtime_loop = None
+    db_manager.mongo_client = None
+    db_manager.mongo_db = None
+    db_manager._mongo_healthy = False
 
 
 def get_mongo_db_sync() -> Database:
@@ -792,6 +908,4 @@ close_db = close_database
 
 def get_database():
     """获取数据库实例"""
-    if db_manager.mongo_client is None:
-        raise RuntimeError("MongoDB客户端未初始化")
-    return db_manager.mongo_client.tradingagents
+    return get_mongo_db()
