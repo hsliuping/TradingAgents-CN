@@ -84,6 +84,7 @@ from app.routers import email as email_router
 from app.routers import intelligent_assistant as intelligent_assistant_router
 from app.routers import intelligent_screening as intelligent_screening_router
 from app.routers import memory as memory_router
+from app.routers import workflow_growth as workflow_growth_router
 
 
 def get_version() -> str:
@@ -1074,6 +1075,7 @@ app.include_router(review_router.router, prefix="/api", tags=["review"])
 app.include_router(email_router.router, tags=["email"])
 app.include_router(intelligent_assistant_router.router, tags=["assistant"])
 app.include_router(memory_router.router, tags=["memory"])
+app.include_router(workflow_growth_router.router, tags=["workflow-growth"])
 app.include_router(tushare_init.router, prefix="/api", tags=["tushare-init"])
 app.include_router(akshare_init.router, prefix="/api", tags=["akshare-init"])
 app.include_router(baostock_init.router, prefix="/api", tags=["baostock-init"])
