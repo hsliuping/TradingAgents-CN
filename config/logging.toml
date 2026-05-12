@@ -77,6 +77,12 @@ level = "WARNING"
 [logging.loggers.matplotlib]
 level = "WARNING"
 
+[logging.loggers.fontTools]
+level = "WARNING"
+
+[logging.loggers."fontTools.subset"]
+level = "WARNING"
+
 [logging.loggers.pandas]
 level = "WARNING"
 
