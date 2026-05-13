@@ -94,6 +94,23 @@ def _mock_financial_payload() -> dict:
     }
 
 
+def _mock_financial_payload_with_raw_gross_margin_conflict() -> dict:
+    payload = _mock_financial_payload()
+    payload["financial_indicators"] = [
+        {
+            "end_date": "20240930",
+            "roe": 11.6,
+            "roa": 0.84,
+            "gross_margin": 139609610.88,
+            "grossprofit_margin": 26.8,
+            "netprofit_margin": 12.9,
+            "debt_to_assets": 91.4,
+            "current_ratio": 0.88,
+        }
+    ]
+    return payload
+
+
 class TestFinancialStatementTools:
     def test_historical_valuation_section_from_frame(self):
         valuation_df = pd.DataFrame([
@@ -184,6 +201,18 @@ class TestFinancialStatementTools:
         assert "营业总收入（单季度推导）: 9.00亿元" in result
         assert "归母净利润（单季度推导）: 1.80亿元" in result
         assert "单季度净利率（推导）: 20.00%" in result
+
+    def test_financial_statements_prefer_grossprofit_margin_over_raw_gross_margin(self, monkeypatch):
+        monkeypatch.setattr(
+            fundamentals_tools,
+            "_load_recent_financial_data",
+            lambda ticker, limit=4: _mock_financial_payload_with_raw_gross_margin_conflict(),
+        )
+
+        result = fundamentals_tools.get_financial_statements.invoke({"ticker": "000001", "limit": 4})
+
+        assert "报告期毛利率: 26.80%" in result
+        assert "139609610.88%" not in result
 
     def test_financial_statement_tools_prefer_db_loaded_payload(self, monkeypatch):
         captured = []

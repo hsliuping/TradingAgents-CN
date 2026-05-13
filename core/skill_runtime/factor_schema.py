@@ -197,7 +197,7 @@ P0_SOURCE_PRIORITY_BY_FIELD: Dict[str, List[str]] = {
     "industry_pb_median": ["basic_info.industry", "industry_peer.pb|pb_mrq"],
     "roe": ["latest_financial.roe", "latest_financial.financial_indicators.roe", "latest_financial.financial_indicators.roe_avg"],
     "roa": ["latest_financial.roa", "latest_financial.financial_indicators.roa"],
-    "gross_margin": ["latest_financial.gross_margin", "latest_financial.financial_indicators.gross_margin", "latest_financial.financial_indicators.grossprofit_margin"],
+    "gross_margin": ["latest_financial.gross_margin", "latest_financial.financial_indicators.grossprofit_margin", "latest_financial.financial_indicators.gross_margin"],
     "netprofit_margin": ["latest_financial.netprofit_margin", "latest_financial.financial_indicators.netprofit_margin"],
     "debt_to_assets": ["latest_financial.debt_to_assets", "latest_financial.financial_indicators.debt_to_assets"],
     "assets_to_eqt": ["latest_financial.assets_to_eqt", "latest_financial.financial_indicators.assets_to_eqt"],

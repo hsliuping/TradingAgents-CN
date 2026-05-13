@@ -2269,6 +2269,7 @@ onUnmounted(() => {
     .history-panel {
       display: flex;
       flex-direction: column;
+      min-width: 0;
       min-height: 0;
       border: 1px solid var(--el-border-color-lighter);
       border-radius: 8px;
@@ -2310,7 +2311,9 @@ onUnmounted(() => {
       display: flex;
       flex-direction: column;
       gap: 10px;
+      min-width: 0;
       min-height: 0;
+      overflow-x: hidden;
       overflow-y: auto;
       padding-right: 2px;
     }
@@ -2318,10 +2321,12 @@ onUnmounted(() => {
     .history-item {
       appearance: none;
       width: 100%;
+      min-width: 0;
       border: 1px solid var(--el-border-color-lighter);
       border-radius: 10px;
       background: var(--el-fill-color-extra-light);
       padding: 12px;
+      overflow: hidden;
       text-align: left;
       cursor: pointer;
       transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
@@ -2334,7 +2339,6 @@ onUnmounted(() => {
       &.active {
         border-color: var(--el-color-primary);
         background: rgba(64, 158, 255, 0.08);
-        transform: translateY(-1px);
       }
     }
 
@@ -2343,6 +2347,7 @@ onUnmounted(() => {
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+      min-width: 0;
     }
 
     .history-item-title {
@@ -2361,6 +2366,12 @@ onUnmounted(() => {
       display: flex;
       align-items: center;
       flex-shrink: 0;
+
+      :deep(.el-button) {
+        margin: 0;
+        padding: 0;
+        min-width: auto;
+      }
     }
 
     .chat-body {

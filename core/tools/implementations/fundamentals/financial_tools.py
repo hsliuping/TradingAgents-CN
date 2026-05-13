@@ -54,6 +54,33 @@ def _safe_pct(val) -> str:
         return str(val)
 
 
+def _coerce_float(val) -> Optional[float]:
+    if val is None or val in ("N/A", "", "--"):
+        return None
+    try:
+        numeric = float(val)
+        if numeric != numeric:
+            return None
+        return numeric
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_gross_margin_percent(data: Dict[str, Any], indicator_list: List[Dict[str, Any]]) -> Optional[float]:
+    for candidate in (data.get('grossprofit_margin'), data.get('gross_margin')):
+        numeric = _coerce_float(candidate)
+        if numeric is not None and -100 <= numeric <= 100:
+            return numeric
+
+    for record in indicator_list or []:
+        for candidate in (record.get('grossprofit_margin'), record.get('gross_margin')):
+            numeric = _coerce_float(candidate)
+            if numeric is not None and -100 <= numeric <= 100:
+                return numeric
+
+    return None
+
+
 def _wan_yi(val) -> str:
     """将数值转为 万/亿 显示"""
     if val is None or val == "N/A":
@@ -169,7 +196,7 @@ def get_income_analysis(
         lines.append(f"- **归母净利润(TTM)**: {_wan_yi(data.get('net_profit_ttm'))}")
         lines.append(f"- **营业利润**: {_wan_yi(data.get('oper_profit'))}")
         lines.append(f"- **营业成本**: {_wan_yi(data.get('oper_cost'))}")
-        lines.append(f"- **毛利率**: {_safe_pct(data.get('gross_margin'))}")
+        lines.append(f"- **毛利率**: {_safe_pct(_resolve_gross_margin_percent(data, indicator_list))}")
         lines.append(f"- **净利率**: {_safe_pct(data.get('netprofit_margin'))}")
         lines.append(f"- **研发费用**: {_wan_yi(data.get('rd_exp'))}")
         lines.append("")
@@ -203,7 +230,7 @@ def get_income_analysis(
             lines.append("|--------|--------|--------|-----|")
             for rec in indicator_list[:periods]:
                 period = rec.get('end_date', 'N/A')
-                gm = _safe_pct(rec.get('grossprofit_margin'))
+                gm = _safe_pct(_resolve_gross_margin_percent({}, [rec]))
                 nm = _safe_pct(rec.get('netprofit_margin'))
                 roe = _safe_pct(rec.get('roe'))
                 lines.append(f"| {period} | {gm} | {nm} | {roe} |")

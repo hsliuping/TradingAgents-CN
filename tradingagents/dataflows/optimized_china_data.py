@@ -1035,20 +1035,36 @@ class OptimizedChinaDataProvider:
             else:
                 metrics["roa"] = "N/A"
 
-            # 毛利率 - 添加范围验证
-            gross_margin = latest_indicators.get('gross_margin')
-            if gross_margin is not None and str(gross_margin) != 'nan' and gross_margin != '--':
+            # 毛利率 - 优先使用百分比口径 grossprofit_margin，再回退 gross_margin
+            gross_margin_val = None
+            raw_data = financial_data.get('raw_data') if isinstance(financial_data.get('raw_data'), dict) else {}
+            raw_indicator_list = raw_data.get('financial_indicators') or []
+            gross_margin_candidates = [
+                latest_indicators.get('grossprofit_margin'),
+                latest_indicators.get('gross_margin'),
+            ]
+            for record in raw_indicator_list:
+                gross_margin_candidates.extend([
+                    record.get('grossprofit_margin'),
+                    record.get('gross_margin'),
+                ])
+
+            for candidate in gross_margin_candidates:
+                if candidate is None or str(candidate) == 'nan' or candidate == '--':
+                    continue
                 try:
-                    gross_margin_val = float(gross_margin)
-                    # 验证范围：毛利率应该在 -100% 到 100% 之间
-                    # 如果超出范围，可能是数据错误（如存储的是绝对金额而不是百分比）
-                    if -100 <= gross_margin_val <= 100:
-                        metrics["gross_margin"] = f"{gross_margin_val:.1f}%"
-                    else:
-                        logger.warning(f"⚠️ 毛利率数据异常: {gross_margin_val}，超出合理范围 [-100%, 100%]，设为 N/A")
-                        metrics["gross_margin"] = "N/A"
+                    candidate_val = float(candidate)
                 except (ValueError, TypeError):
-                    metrics["gross_margin"] = "N/A"
+                    continue
+
+                if -100 <= candidate_val <= 100:
+                    gross_margin_val = candidate_val
+                    break
+
+                logger.warning(f"⚠️ 毛利率数据异常: {candidate_val}，超出合理范围 [-100%, 100%]，继续尝试其他口径")
+
+            if gross_margin_val is not None:
+                metrics["gross_margin"] = f"{gross_margin_val:.1f}%"
             else:
                 metrics["gross_margin"] = "N/A"
 

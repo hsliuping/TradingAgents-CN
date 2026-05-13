@@ -111,7 +111,7 @@ def _build_quality_factor_warnings(context: Dict[str, Any], factors: Dict[str, A
 
     oper_cost = _extract_financial_field(latest_financial, ("oper_cost",), ("income_statement", "oper_cost"))
     revenue_base = _extract_financial_field(latest_financial, ("revenue_ttm",), ("revenue",), ("oper_rev",), ("income_statement", "revenue"), ("income_statement", "oper_rev"))
-    gross_margin = _extract_financial_field(latest_financial, ("gross_margin",), ("financial_indicators", "gross_margin"), ("financial_indicators", "grossprofit_margin"))
+    gross_margin = _extract_financial_field(latest_financial, ("gross_margin",), ("financial_indicators", "grossprofit_margin"), ("financial_indicators", "gross_margin"))
     if factors.get("inventory_turnover") is not None and oper_cost is None and revenue_base is not None and gross_margin is not None:
         _append_factor_warning(warnings, "inventory_turnover", "inventory_turnover cost_proxy_used")
 
@@ -463,8 +463,8 @@ def _estimate_gross_margin(record: Dict[str, Any]) -> Numeric:
     gross_margin = _extract_financial_field(
         record,
         ("gross_margin",),
-        ("financial_indicators", "gross_margin"),
         ("financial_indicators", "grossprofit_margin"),
+        ("financial_indicators", "gross_margin"),
     )
     if gross_margin is not None:
         return gross_margin
@@ -1204,8 +1204,8 @@ def get_quality_factor_bundle(symbol: str) -> Dict[str, Any]:
     gross_margin = _extract_financial_field(
         latest_financial,
         ("gross_margin",),
-        ("financial_indicators", "gross_margin"),
         ("financial_indicators", "grossprofit_margin"),
+        ("financial_indicators", "gross_margin"),
     )
     inventories = _extract_financial_field(
         latest_financial,

@@ -877,7 +877,7 @@ def get_financial_statements(
                 for line in [
                     _metric_line(indicators, '报告期净资产收益率 ROE', ['roe', 'roe_dt'], 'percent'),
                     _metric_line(indicators, '报告期总资产收益率 ROA', ['roa'], 'percent'),
-                    _metric_line(indicators, '报告期毛利率', ['gross_margin', 'grossprofit_margin'], 'percent'),
+                    _metric_line(indicators, '报告期毛利率', ['grossprofit_margin', 'gross_margin'], 'percent'),
                     _metric_line(indicators, '报告期净利率', ['netprofit_margin', 'net_margin'], 'percent'),
                     _metric_line(indicators, '资产负债率', ['debt_to_assets', 'debt_to_asset'], 'percent'),
                     _metric_line(indicators, '流动比率', ['current_ratio'], 'plain'),
