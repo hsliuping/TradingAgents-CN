@@ -6,6 +6,7 @@
 
 import json
 import logging
+import os
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
@@ -27,6 +28,23 @@ from app.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
 
+# 配置：是否使用V2版本
+USE_V2 = os.environ.get("SCREENING_USE_V2", "true").lower() in ("true", "1", "yes")
+
+# 延迟导入V2服务（避免循环依赖）
+def get_screening_service(db: AsyncIOMotorDatabase):
+    if USE_V2:
+        try:
+            from app.services.intelligent_screening_v2 import IntelligentScreeningServiceV2
+            logger.info("[智能筛选] 使用V2版本（基于意图理解）")
+            return IntelligentScreeningServiceV2(db)
+        except Exception as e:
+            logger.warning(f"[智能筛选] V2版本加载失败: {e}，回退到V1")
+
+    logger.info("[智能筛选] 使用V1版本（关键词匹配）")
+    return IntelligentScreeningService(db)
+
+
 router = APIRouter(prefix="/api/screening/intelligent")
 user_service = UserService()
 
@@ -41,10 +59,10 @@ async def chat(
     处理用户的选股对话请求。
 
     - 新需求：返回 phase="confirmation"，包含需求分析和改进建议
-    - 确认/追问：返回 phase="result"，包含 5 只推荐股票
+    - 确认/追问：返回 phase="result"，包含推荐股票
     """
     user_id = str(user.get("_id", user.get("id", "")))
-    service = IntelligentScreeningService(db)
+    service = get_screening_service(db)
     result = await service.chat(user_id, req.message, conversation_id=req.conversation_id)
     return result
 
@@ -114,7 +132,7 @@ async def websocket_chat(
                 })
                 continue
 
-            service = IntelligentScreeningService(db)
+            service = get_screening_service(db)
 
             async def progress_sender(event: dict):
                 await websocket.send_json({"type": "progress", "data": event})
@@ -156,7 +174,7 @@ async def get_conversation(
 ):
     """获取当前用户的智能筛选对话历史"""
     user_id = str(user.get("_id", user.get("id", "")))
-    service = IntelligentScreeningService(db)
+    service = get_screening_service(db)
     resolved_conversation_id, messages = await service.get_conversation(user_id, conversation_id)
     items = []
     for m in messages:
@@ -178,7 +196,7 @@ async def list_conversations(
 ):
     """获取当前用户的智能筛选历史会话列表"""
     user_id = str(user.get("_id", user.get("id", "")))
-    service = IntelligentScreeningService(db)
+    service = get_screening_service(db)
     conversations = await service.list_conversations(user_id)
     items = [ScreeningConversationSummary(**item) for item in conversations]
     return ScreeningConversationListResponse(items=items)
@@ -192,7 +210,7 @@ async def clear_conversation(
 ):
     """清空当前用户的智能筛选对话历史"""
     user_id = str(user.get("_id", user.get("id", "")))
-    service = IntelligentScreeningService(db)
+    service = get_screening_service(db)
     await service.clear_conversation(user_id, conversation_id)
     return {"message": "已清空智能筛选对话"}
 
