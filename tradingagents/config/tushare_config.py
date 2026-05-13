@@ -157,6 +157,34 @@ class TushareConfig:
         return fixes
 
 
+def apply_tushare_dataapi_base_url(url: Optional[str] = None) -> bool:
+    """
+    将 tushare Pro 接口请求指向自建代理（monkey-patch DataApi 类上的数据根 URL）。
+
+    tushare 1.4.x 在 ``tushare.pro.client.DataApi`` 中硬编码 ``__http_url``，
+    实际请求为 ``{base}/{api_name}``，例如 ``http://host:port/dataapi/stock_basic``。
+
+    Args:
+        url: 自定义根地址；为空则从环境变量 ``TUSHARE_DATAAPI_URL`` 读取。
+
+    Returns:
+        是否已写入自定义地址（未安装 tushare 或 URL 为空时返回 False）。
+    """
+    resolved = (url or "").strip()
+    if not resolved:
+        resolved = parse_str_env("TUSHARE_DATAAPI_URL", "")
+    if not resolved:
+        return False
+    try:
+        from tushare.pro import client
+    except ImportError:
+        return False
+    base = resolved.rstrip("/")
+    # 与库内私有属性名一致（name mangling: __http_url -> _DataApi__http_url）
+    client.DataApi._DataApi__http_url = base
+    return True
+
+
 def get_tushare_config() -> TushareConfig:
     """获取Tushare配置实例"""
     return TushareConfig()

@@ -4,12 +4,14 @@
 """
 from typing import Optional, Dict, Any, List, Union
 from datetime import datetime, date, timedelta
+import os
 import pandas as pd
 import asyncio
 import logging
 
 from ..base_provider import BaseStockDataProvider
 from tradingagents.config.providers_config import get_provider_config
+from tradingagents.config.tushare_config import apply_tushare_dataapi_base_url
 
 # 尝试导入tushare
 try:
@@ -20,6 +22,14 @@ except ImportError:
     ts = None
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_tushare_proxy_url(config: Dict[str, Any]) -> None:
+    """若配置了 TUSHARE_DATAAPI_URL / dataapi_url，则在创建 pro_api 前 patch 库默认地址。"""
+    url = (config.get("dataapi_url") or "").strip()
+    if apply_tushare_dataapi_base_url(url if url else None):
+        effective = url or os.getenv("TUSHARE_DATAAPI_URL", "").strip()
+        logger.info(f"🔧 Tushare DataApi 基址已设为: {effective}")
 
 
 class TushareProvider(BaseStockDataProvider):
@@ -90,6 +100,8 @@ class TushareProvider(BaseStockDataProvider):
         if not TUSHARE_AVAILABLE:
             self.logger.error("❌ Tushare库不可用")
             return False
+
+        _ensure_tushare_proxy_url(self.config)
 
         # 测试连接超时时间（秒）- 只是测试连通性，不需要很长时间
         test_timeout = 10
@@ -177,6 +189,8 @@ class TushareProvider(BaseStockDataProvider):
         if not TUSHARE_AVAILABLE:
             self.logger.error("❌ Tushare库不可用")
             return False
+
+        _ensure_tushare_proxy_url(self.config)
 
         # 测试连接超时时间（秒）- 只是测试连通性，不需要很长时间
         test_timeout = 10

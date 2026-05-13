@@ -20,6 +20,7 @@ from app.models.config import (
     MarketCategory, DataSourceGrouping, ModelCatalog, ModelInfo
 )
 from tradingagents.llm_clients.provider_keys import canonical_aliases, normalize_provider_key
+from tradingagents.config.tushare_config import apply_tushare_dataapi_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -1189,7 +1190,11 @@ class ConfigService:
             used_db_credentials = False
             used_env_credentials = False
 
-            logger.info(f"🔍 [TEST] Received API Key from config: {repr(api_key)} (type: {type(api_key).__name__}, length: {len(api_key) if api_key else 0})")
+            masked_api_key = self._truncate_api_key(api_key) if api_key else api_key
+            logger.info(
+                f"🔍 [TEST] Received API Key from config: {repr(masked_api_key)} "
+                f"(type: {type(api_key).__name__}, length: {len(api_key) if api_key else 0})"
+            )
 
             # 根据不同的数据源类型进行测试
             if ds_type == "tushare":
@@ -1288,10 +1293,39 @@ class ConfigService:
                 # 测试 Tushare API
                 try:
                     logger.info(f"🔌 [TEST] Calling Tushare API with token (length: {len(api_key)})")
+                    # 优先使用数据源配置中的代理地址，再回退到环境变量 TUSHARE_DATAAPI_URL
+                    cfg_params = ds_config.config_params or {}
+                    configured_dataapi_url = (
+                        (getattr(ds_config, "endpoint", None) or "").strip()
+                        or str(cfg_params.get("dataapi_url") or "").strip()
+                        or str(cfg_params.get("tushare_dataapi_url") or "").strip()
+                    )
+                    apply_tushare_dataapi_base_url(configured_dataapi_url or None)
                     import tushare as ts
+                    try:
+                        # 打印当前 DataApi 的基础请求地址，便于确认是否走代理
+                        from tushare.pro import client
+                        base_url = getattr(client.DataApi, "_DataApi__http_url", None)
+                        if base_url:
+                            if configured_dataapi_url:
+                                logger.info(
+                                    f"🧭 [TEST] Tushare URL source: datasource config ({configured_dataapi_url})"
+                                )
+                            else:
+                                logger.info(
+                                    "🧭 [TEST] Tushare URL source: environment variable TUSHARE_DATAAPI_URL "
+                                    "or tushare default"
+                                )
+                            logger.info(
+                                f"🌐 [TEST] Tushare request base URL: {base_url}, "
+                                f"example endpoint: {base_url.rstrip('/')}/trade_cal"
+                            )
+                    except Exception:
+                        # 日志辅助，不影响主流程
+                        pass
+
                     ts.set_token(api_key)
                     pro = ts.pro_api()
-                    # 获取交易日历（轻量级测试）
                     df = pro.trade_cal(exchange='SSE', start_date='20240101', end_date='20240101')
 
                     if df is not None and len(df) > 0:
