@@ -482,6 +482,101 @@ class IntelligentScreeningService:
                 return msg
         return None
 
+    async def _classify_intent(self, message: str, history: list) -> Dict[str, Any]:
+        """
+        让LLM来分析用户意图，而不是用硬编码关键词。
+
+        返回:
+        {
+            "intent": "adjustment" | "approval" | "new_request" | "follow_up" | "single_stock_query",
+            "adjustment_target": "roe" | "pe" | "pb" | "margin" | "other" | null,
+            "adjustment_direction": "loosen" | "tighten" | null,
+            "explicit_parameters": str | null,
+            "confidence": float
+        }
+        """
+        if not await self._ensure_client():
+            # 如果LLM不可用，回退到关键词方式
+            return {
+                "intent": "adjustment" if self._is_adjustment_message(message) else
+                          "approval" if self._is_approval_message(message) else
+                          "new_request" if self._looks_like_new_screening_request(message) else
+                          "single_stock_query" if self._looks_like_single_stock_judgement_query(message) else
+                          "follow_up",
+                "adjustment_target": None,
+                "adjustment_direction": None,
+                "explicit_parameters": None,
+                "confidence": 0.5
+            }
+
+        history_summary = ""
+        if history:
+            recent = history[-4:]  # 最近4条足够理解上下文
+            for h in recent:
+                role = "用户" if h["role"] == "user" else "助手"
+                content = h["content"][:200] + "..." if len(h["content"]) > 200 else h["content"]
+                history_summary += f"{role}: {content}\n"
+
+        system_prompt = """你是一个意图分类器。请分析用户最新消息，并结合对话历史，判断用户意图。
+
+返回JSON格式：
+{
+    "intent": "adjustment" | "approval" | "new_request" | "follow_up" | "single_stock_query",
+    "adjustment_target": "roe" | "pe" | "pb" | "margin" | "debt" | "cashflow" | "other" | null,
+    "adjustment_direction": "loosen" | "tighten" | null,
+    "explicit_parameters": "用户明确提到的具体参数，如'把ROE放宽到10%'中的'10%'" | null,
+    "confidence": 0.0-1.0之间的置信度
+}
+
+意图定义：
+- adjustment: 用户希望调整之前的筛选条件（放宽、收紧、修改等）
+- approval: 用户明确批准某个方案（"执行"、"按此方案"、"好的"等）
+- new_request: 用户提出了全新的选股需求，与之前的筛选关系不大
+- follow_up: 用户基于当前结果追问（"这几只怎么样"、"加入自选"等）
+- single_stock_query: 用户询问单只股票的情况
+
+adjustment_target: 当intent=adjustment时，指出用户想调整哪个指标
+adjustment_direction: 当intent=adjustment时，指出是放宽(loosen)还是收紧(tighten)
+
+注意：
+- 如果用户说"先放宽ROE吧"，intent=adjustment, adjustment_target=roe, adjustment_direction=loosen
+- 如果用户说"把PE改成<20"，intent=adjustment, adjustment_target=pe, adjustment_direction=loosen, explicit_parameters="20"
+- 如果用户说"执行筛选方案"，intent=approval
+- 如果用户说"重新帮我选科技股"，intent=new_request
+- 如果用户说"把这几只加入自选"，intent=follow_up
+- 如果用户问"贵州茅台怎么样"，intent=single_stock_query
+"""
+
+        messages = [
+            Message(role=MessageRole.SYSTEM, content=system_prompt),
+            Message(role=MessageRole.USER, content=f"对话历史：\n{history_summary}\n\n用户最新消息：{message}")
+        ]
+
+        try:
+            resp = await self._llm_client.achat(messages, tools=None, log_payloads=True, payload_log_label="intent_classification")
+            content = resp.content if resp else ""
+            # 提取JSON
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                result = json.loads(json_match.group(0))
+                return result
+        except Exception as e:
+            logger.warning(f"[智能筛选] 意图分类LLM调用失败: {e}")
+
+        # 失败时回退
+        return {
+            "intent": "adjustment" if self._is_adjustment_message(message) else
+                      "approval" if self._is_approval_message(message) else
+                      "new_request" if self._looks_like_new_screening_request(message) else
+                      "single_stock_query" if self._looks_like_single_stock_judgement_query(message) else
+                      "follow_up",
+            "adjustment_target": None,
+            "adjustment_direction": None,
+            "explicit_parameters": None,
+            "confidence": 0.3
+        }
+
     def _is_adjustment_message(self, message: str) -> bool:
         text = (message or "").strip()
         return any(keyword in text for keyword in SCREENING_ADJUST_KEYWORDS)
@@ -502,18 +597,23 @@ class IntelligentScreeningService:
         text = (message or "").strip()
         return any(keyword in text for keyword in SCREENING_RESULT_REFERENCE_KEYWORDS)
 
-    def _select_phase_history(self, history: list, phase: str, message: str) -> list:
+    def _select_phase_history(self, history: list, phase: str, message: str, intent: Dict[str, Any] = None) -> list:
         """按阶段压缩历史，避免 result 阶段继续继承整段旧会话。"""
         recent_history = history[-MAX_CONTEXT_MESSAGES:]
         if not recent_history:
             return []
+
+        # 如果是调整类、批准类或追问消息，保留完整历史以便 LLM 理解上下文
+        intent_type = intent.get("intent") if intent else None
+        if intent_type in ["adjustment", "approval", "follow_up"]:
+            return recent_history
 
         last_assistant = self._find_last_assistant(recent_history)
         if (
             phase == "confirmation"
             and last_assistant
             and last_assistant.get("phase") == "result"
-            and self._looks_like_new_screening_request(message)
+            and intent_type == "new_request"
         ):
             return []
 
@@ -536,7 +636,7 @@ class IntelligentScreeningService:
 
         if latest_planning:
             selected_history.append(latest_planning)
-        if latest_result and self._references_latest_result(message):
+        if latest_result and intent_type == "follow_up":
             selected_history.append(latest_result)
 
         return selected_history or recent_history[-2:]
@@ -1024,23 +1124,29 @@ class IntelligentScreeningService:
         if not resolved_conversation_id:
             resolved_conversation_id = conversation_id or uuid.uuid4().hex
 
-        direct_result = await self._maybe_handle_single_stock_query(
-            message,
-            progress_callback=progress_callback,
-        )
-        if direct_result is not None:
-            await self._save_message(
-                user_id,
-                resolved_conversation_id,
+        # 2. LLM意图分类
+        intent = await self._classify_intent(message, history)
+        logger.info(f"[智能筛选] 用户={user_id} 意图分类={intent.get('intent')} 置信度={intent.get('confidence'):.2f}")
+
+        # 3. 先检查是否是单只股票查询
+        if intent.get("intent") == "single_stock_query":
+            direct_result = await self._maybe_handle_single_stock_query(
                 message,
-                direct_result["reply"],
-                direct_result.get("tools_used", []),
-                direct_result.get("stocks", []),
-                direct_result.get("phase", "result"),
-                is_fallback=False,
+                progress_callback=progress_callback,
             )
-            direct_result["conversation_id"] = resolved_conversation_id
-            return direct_result
+            if direct_result is not None:
+                await self._save_message(
+                    user_id,
+                    resolved_conversation_id,
+                    message,
+                    direct_result["reply"],
+                    direct_result.get("tools_used", []),
+                    direct_result.get("stocks", []),
+                    direct_result.get("phase", "result"),
+                    is_fallback=False,
+                )
+                direct_result["conversation_id"] = resolved_conversation_id
+                return direct_result
 
         if not await self._ensure_client():
             return {
@@ -1054,8 +1160,8 @@ class IntelligentScreeningService:
 
         set_current_user_id(user_id)
 
-        # 2. 判断当前应进入哪个阶段
-        phase = self._determine_phase(history, message)
+        # 4. 判断当前应进入哪个阶段
+        phase = self._determine_phase(history, message, intent)
         logger.info(f"[智能筛选] 用户={user_id} 当前阶段={phase} 消息={message[:50]}")
         await self._emit_progress(
             progress_callback,
@@ -1068,15 +1174,15 @@ class IntelligentScreeningService:
             ),
         )
 
-        # 3. 构建消息列表（包含历史）
+        # 5. 构建消息列表（包含历史）
         # planning 阶段需要将实际可用的工具清单传入提示词，防止 LLM 幻觉工具名
         tool_summary = self._build_tool_summary(self._result_openai_tools) if phase == "planning" else ""
-        system_prompt = self._get_system_prompt(phase, tool_summary)
+        system_prompt = self._get_system_prompt(phase, tool_summary, intent)
         messages = [Message(role=MessageRole.SYSTEM, content=system_prompt)]
-        phase_history = self._select_phase_history(history, phase, message)
+        phase_history = self._select_phase_history(history, phase, message, intent)
         locked_plan = (
             self._extract_locked_execution_plan(phase_history)
-            if phase == "result" and self._is_approval_message(message) and not self._references_latest_result(message)
+            if phase == "result" and intent.get("intent") == "approval"
             else None
         )
         for h in phase_history:
@@ -1223,9 +1329,9 @@ class IntelligentScreeningService:
             "is_fallback": False,
         }
 
-    def _determine_phase(self, history: list, message: str) -> str:
+    def _determine_phase(self, history: list, message: str, intent: Dict[str, Any] = None) -> str:
         """
-        判断当前消息应进入哪个阶段
+        基于LLM意图分类来判断当前消息应进入哪个阶段
 
         返回 'confirmation' → 阶段 1：LLM 分析需求，不调用工具
         返回 'planning'     → 阶段 2：LLM 解释执行计划，不调用工具
@@ -1242,6 +1348,7 @@ class IntelligentScreeningService:
             return "confirmation"
 
         last_phase = last_assistant.get("phase", "")
+        intent_type = intent.get("intent") if intent else None
 
         if last_phase == "confirmation":
             # 用户回应了确认消息 → 进入规划阶段
@@ -1249,16 +1356,18 @@ class IntelligentScreeningService:
 
         if last_phase == "planning":
             # 用户回应了规划消息
-            # 检查是否要重新描述需求
-            if self._is_adjustment_message(message):
+            if intent_type == "adjustment":
+                # 用户要调整需求 → 回到确认阶段重新理解
                 return "confirmation"
-            # 否则批准计划，进入执行阶段
+            # 批准计划或其他 → 进入执行阶段
             return "result"
 
-        # last_phase == "result"：新的同类筛选请求重新开启确认；基于结果的追问/调整继续留在结果阶段
-        if self._looks_like_new_screening_request(message):
+        # last_phase == "result"
+        if intent_type == "new_request":
+            # 全新的选股需求 → 重新确认
             return "confirmation"
 
+        # adjustment/approval/follow_up/single_stock_query → 都留在 result 阶段处理
         return "result"
 
     async def _get_context_messages(self, user_id: str, conversation_id: Optional[str] = None) -> tuple[str, list]:
@@ -1284,7 +1393,7 @@ class IntelligentScreeningService:
             lines.append(f"- `{name}`：{desc}\n  参数：{param_names}")
         return "\n".join(lines)
 
-    def _get_system_prompt(self, phase: str, tool_summary: str = "") -> str:
+    def _get_system_prompt(self, phase: str, tool_summary: str = "", intent: Dict[str, Any] = None) -> str:
         """构建选股专家的系统提示词（根据阶段定制）"""
         curr_date = _get_latest_trade_date()
 
@@ -1427,8 +1536,33 @@ class IntelligentScreeningService:
 """
 
         # phase == "result"
-        return f"""你是一位专业的 A 股选股专家。用户已批准执行计划，请立即执行筛选并推荐股票。
+        intent_hint = ""
+        if intent:
+            intent_type = intent.get("intent")
+            if intent_type == "adjustment":
+                target = intent.get("adjustment_target")
+                direction = intent.get("adjustment_direction")
+                params = intent.get("explicit_parameters")
+                intent_hint = f"""
+## 当前用户意图分析（重要）
 
+用户希望**调整筛选条件**：
+- 调整目标：{target or '未知指标'}
+- 调整方向：{'放宽条件' if direction == 'loosen' else '收紧条件' if direction == 'tighten' else '未知'}
+- 明确参数：{params or '用户未明确给出具体数值，请根据对话历史中的建议推断'}
+
+请仔细阅读对话历史，找到之前的筛选条件，然后按用户意图调整后重新筛选。
+特别注意：如果历史中助手给出了具体的调整建议表格（如"放宽 ROE > 15% → ROE > 10%"），请优先采用那个建议值。
+"""
+            elif intent_type == "approval":
+                intent_hint = """
+## 当前用户意图分析（重要）
+
+用户已**批准执行计划**，请按之前规划的参数立即执行筛选。
+"""
+
+        return f"""你是一位专业的 A 股选股专家。用户已批准执行计划，请立即执行筛选并推荐股票。
+{intent_hint}
 ## 你的任务：执行筛选
 
 1. **调用工具**：按之前计划的参数调用 `screen_stocks_by_criteria` 等工具获取数据
