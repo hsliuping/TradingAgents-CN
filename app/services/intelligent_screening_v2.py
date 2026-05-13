@@ -560,6 +560,11 @@ class IntelligentScreeningServiceV2:
             if not structured_stocks:
                 structured_stocks = self._extract_stocks(reply)
 
+            # 清理reply中的JSON代码块（股票数据已通过stocks字段返回）
+            reply = re.sub(r'```json\s*\{[\s\S]*?\}\s*```', '', reply)
+            reply = re.sub(r'```\s*\{[\s\S]*?\}\s*```', '', reply)
+            reply = reply.strip()
+
             # 如果没有找到股票且用了筛选工具，返回明确的无结果提示
             if not structured_stocks and "screen_stocks_by_criteria" in tools_used:
                 reply = self._build_no_match_reply(message)
@@ -870,9 +875,6 @@ class IntelligentScreeningServiceV2:
                 if metrics:
                     lines.append(f"   - {'; '.join(metrics)}")
 
-        lines.append("\n```json")
-        lines.append(json.dumps({"stocks": stocks}, ensure_ascii=False, indent=2))
-        lines.append("```")
         return "\n".join(lines)
 
     def _extract_stocks(self, reply: str) -> List[dict]:

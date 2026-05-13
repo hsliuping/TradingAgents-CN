@@ -709,7 +709,15 @@ import { normalizeMarketForAnalysis, exchangeCodeToMarket, getMarketByStockCode 
 marked.setOptions({ breaks: true, gfm: true })
 const renderScreeningMarkdown = (content: string): string => {
   if (!content?.trim()) return ''
-  try { return marked.parse(content) as string } catch { return content }
+  try {
+    // 移除JSON代码块（股票数据已经通过msg.stocks渲染成卡片了）
+    let cleanContent = content
+      .replace(/```json\s*\{[\s\S]*?\}\s*```/g, '')
+      .replace(/```\s*\{[\s\S]*?\}\s*```/g, '')
+    return marked.parse(cleanContent) as string
+  } catch {
+    return content
+  }
 }
 
 // Tab 状态

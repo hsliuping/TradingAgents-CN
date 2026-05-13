@@ -1299,6 +1299,12 @@ adjustment_direction: 当intent=adjustment时，指出是放宽(loosen)还是收
         # 提取股票（仅 result 阶段）
         stocks = structured_stocks if phase == "result" and structured_stocks else self._extract_stocks(reply) if phase == "result" else []
 
+        # 清理reply中的JSON代码块（股票数据已通过stocks字段返回）
+        if phase == "result":
+            reply = re.sub(r'```json\s*\{[\s\S]*?\}\s*```', '', reply)
+            reply = re.sub(r'```\s*\{[\s\S]*?\}\s*```', '', reply)
+            reply = reply.strip()
+
         if phase == "result" and not stocks and "screen_stocks_by_criteria" in tools_used:
             reply = self._build_no_match_reply(message)
             stocks = []
