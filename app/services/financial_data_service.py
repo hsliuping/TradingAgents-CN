@@ -20,6 +20,7 @@ class FinancialDataService:
     
     def __init__(self):
         self.collection_name = "stock_financial_data"
+        self.period_collection_name = "stock_financial_periods"
         self.db = None
         
     async def initialize(self):
@@ -40,39 +41,75 @@ class FinancialDataService:
 
     async def _ensure_indexes(self):
         """确保必要的索引存在"""
+        snapshot_collection = self.db[self.collection_name]
+        period_collection = self.db[self.period_collection_name]
+
+        logger.info("📊 检查并创建财务数据索引...")
+
+        snapshot_indexes = [
+            {
+                "keys": [("symbol", 1), ("report_period", 1), ("data_source", 1)],
+                "name": "symbol_period_source_unique",
+                "unique": True,
+            },
+            {
+                "keys": [("symbol", 1)],
+                "name": "symbol_index",
+            },
+            {
+                "keys": [("report_period", -1)],
+                "name": "report_period_index",
+            },
+            {
+                "keys": [("symbol", 1), ("report_period", -1)],
+                "name": "symbol_period_index",
+            },
+            {
+                "keys": [("report_type", 1)],
+                "name": "report_type_index",
+            },
+            {
+                "keys": [("updated_at", -1)],
+                "name": "updated_at_index",
+            },
+        ]
+        period_indexes = [
+            {
+                "keys": [("symbol", 1), ("source", 1), ("report_period", -1), ("ann_date", -1)],
+                "name": "symbol_1_source_1_report_period_-1_ann_date_-1",
+            },
+            {
+                "keys": [("code", 1), ("source", 1), ("report_period", -1)],
+                "name": "code_1_source_1_report_period_-1",
+            },
+            {
+                "keys": [("symbol", 1), ("report_period", -1)],
+                "name": "symbol_1_report_period_-1",
+            },
+        ]
+
+        for index_spec in snapshot_indexes:
+            await self._create_index(snapshot_collection, self.collection_name, index_spec)
+
+        logger.info("📊 检查并创建按期财务数据索引...")
+        for index_spec in period_indexes:
+            await self._create_index(period_collection, self.period_collection_name, index_spec)
+
+        logger.info("✅ 财务数据索引检查完成")
+
+    async def _create_index(self, collection, collection_name: str, index_spec: Dict[str, Any]) -> None:
+        """逐条创建索引，避免单个索引失败阻断其余索引。"""
         try:
-            collection = self.db[self.collection_name]
-            logger.info("📊 检查并创建财务数据索引...")
-
-            # 1. 复合唯一索引：股票代码+报告期+数据源（用于 upsert）
-            await collection.create_index([
-                ("symbol", 1),
-                ("report_period", 1),
-                ("data_source", 1)
-            ], unique=True, name="symbol_period_source_unique", background=True)
-
-            # 2. 股票代码索引（查询单只股票的财务数据）
-            await collection.create_index([("symbol", 1)], name="symbol_index", background=True)
-
-            # 3. 报告期索引（按时间范围查询）
-            await collection.create_index([("report_period", -1)], name="report_period_index", background=True)
-
-            # 4. 复合索引：股票代码+报告期（常用查询）
-            await collection.create_index([
-                ("symbol", 1),
-                ("report_period", -1)
-            ], name="symbol_period_index", background=True)
-
-            # 5. 报告类型索引（按季报/年报筛选）
-            await collection.create_index([("report_type", 1)], name="report_type_index", background=True)
-
-            # 6. 更新时间索引（数据维护）
-            await collection.create_index([("updated_at", -1)], name="updated_at_index", background=True)
-
-            logger.info("✅ 财务数据索引检查完成")
+            await collection.create_index(
+                index_spec["keys"],
+                name=index_spec["name"],
+                background=True,
+                unique=index_spec.get("unique", False),
+            )
         except Exception as e:
-            # 索引创建失败不应该阻止服务启动
-            logger.warning(f"⚠️ 创建索引时出现警告（可能已存在）: {e}")
+            logger.warning(
+                f"⚠️ 创建索引时出现警告 {collection_name}.{index_spec['name']}（可能已存在或存在重复数据）: {e}"
+            )
     
     async def save_financial_data(
         self,
@@ -168,7 +205,7 @@ class FinancialDataService:
 
     async def _sync_financial_period_records(self, standardized_records: List[Dict[str, Any]]) -> int:
         """将最新财务快照同步到按期展开集合，供筛选/因子链路直接读取。"""
-        period_collection = self.db["stock_financial_periods"]
+        period_collection = self.db[self.period_collection_name]
         operations: List[ReplaceOne] = []
 
         for record in standardized_records:

@@ -1,5 +1,6 @@
 import asyncio
 
+import app.services.financial_data_service as financial_data_service_module
 from app.services.financial_data_service import FinancialDataService
 
 
@@ -98,3 +99,37 @@ def test_save_financial_data_also_syncs_financial_periods(monkeypatch):
     assert period_ops[0]._filter["symbol"] == "600519"
     assert period_ops[0]._filter["source"] == "tushare"
     assert period_ops[0]._filter["report_period"] == "20260331"
+
+
+def test_initialize_also_ensures_financial_period_indexes(monkeypatch):
+    class _FakeCollection:
+        def __init__(self):
+            self.index_names = []
+
+        async def create_index(self, _keys, **kwargs):
+            self.index_names.append(kwargs.get("name"))
+            return kwargs.get("name")
+
+    class _FakeDB:
+        def __init__(self):
+            self.collections = {
+                "stock_financial_data": _FakeCollection(),
+                "stock_financial_periods": _FakeCollection(),
+            }
+
+        def __getitem__(self, name):
+            return self.collections[name]
+
+    fake_db = _FakeDB()
+    monkeypatch.setattr(financial_data_service_module, "get_mongo_db", lambda: fake_db)
+
+    service = FinancialDataService()
+    asyncio.run(service.initialize())
+
+    snapshot_indexes = fake_db["stock_financial_data"].index_names
+    period_indexes = fake_db["stock_financial_periods"].index_names
+
+    assert "symbol_period_source_unique" in snapshot_indexes
+    assert "symbol_1_source_1_report_period_-1_ann_date_-1" in period_indexes
+    assert "code_1_source_1_report_period_-1" in period_indexes
+    assert "symbol_1_report_period_-1" in period_indexes
