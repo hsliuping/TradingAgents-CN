@@ -30,6 +30,9 @@
                 正在同步中... {{ syncStatus.total > 0 ? `${syncStatus.updated + syncStatus.inserted}/${syncStatus.total}` : '' }}
               </div>
             </div>
+            <div v-else-if="syncStatus?.status === 'queued'" class="progress-text">
+              同步任务已提交，后台正在启动，请稍候自动开始。
+            </div>
           </div>
         </div>
 
@@ -125,8 +128,8 @@
             <el-button
               type="primary"
               size="large"
-              :loading="syncing || syncStatus?.status === 'running'"
-              :disabled="syncStatus?.status === 'running' && !syncForm.force"
+              :loading="syncing || isSyncInProgress(syncStatus?.status)"
+              :disabled="isSyncInProgress(syncStatus?.status) && !syncForm.force"
               @click="startSync"
             >
               <el-icon><Refresh /></el-icon>
@@ -223,6 +226,8 @@ const syncForm = reactive({
   force: false
 })
 
+const isSyncInProgress = (status?: string) => ['queued', 'running'].includes(status || '')
+
 // 获取同步状态
 const fetchSyncStatus = async () => {
   try {
@@ -269,7 +274,11 @@ const startSync = async () => {
 
       syncStatus.value = response.data
 
-      if (responseStatus === 'running') {
+      if (responseStatus === 'queued') {
+        ElMessage.success(response.data.message || '同步任务已提交，后台正在启动，请稍候')
+        startStatusPolling()
+        console.log('⏳ 同步任务已提交到后台，开始轮询状态')
+      } else if (responseStatus === 'running') {
         ElMessage.success('同步任务已启动')
         // 开始轮询状态
         startStatusPolling()
@@ -280,7 +289,7 @@ const startSync = async () => {
         console.log('✅ 同步已完成，直接显示通知')
         showSyncCompletionNotification(responseStatus)
       } else {
-        ElMessage.info(`同步状态: ${responseStatus}`)
+        ElMessage.info(response.data.message || `同步状态：${getStatusText(responseStatus)}`)
       }
     } else {
       ElMessage.error(`同步启动失败: ${response.message}`)
@@ -352,7 +361,7 @@ const startStatusPolling = () => {
       console.log(`🔍 轮询 #${pollCount}: ${previousStatus} -> ${currentStatus}`)
 
       // 检查状态变化，提供用户反馈
-      if (previousStatus === 'running' && currentStatus && currentStatus !== 'running') {
+      if (['queued', 'running'].includes(previousStatus || '') && currentStatus && !['queued', 'running'].includes(currentStatus)) {
         // 同步完成，显示结果通知
         console.log('🎉 检测到同步完成，状态从', previousStatus, '变为', currentStatus)
         showSyncCompletionNotification(currentStatus)
@@ -364,7 +373,7 @@ const startStatusPolling = () => {
       previousStatus = currentStatus
 
       // 如果同步完成但没有状态变化检测到，也停止轮询
-      if (currentStatus && !['running'].includes(currentStatus)) {
+      if (currentStatus && !['queued', 'running'].includes(currentStatus)) {
         console.log('🛑 检测到非运行状态，停止轮询:', currentStatus)
         stopStatusPolling()
         return
@@ -450,6 +459,7 @@ const showSyncCompletionNotification = (status: string) => {
 const getStatusType = (status?: string): 'success' | 'warning' | 'info' | 'danger' => {
   const typeMap: Record<string, 'success' | 'warning' | 'info' | 'danger'> = {
     idle: 'info',
+    queued: 'warning',
     running: 'warning',
     success: 'success',
     success_with_errors: 'warning',
@@ -463,6 +473,7 @@ const getStatusType = (status?: string): 'success' | 'warning' | 'info' | 'dange
 const getStatusText = (status?: string) => {
   const textMap: Record<string, string> = {
     idle: '空闲',
+    queued: '后台启动中',
     running: '运行中',
     success: '成功',
     success_with_errors: '部分成功',
@@ -483,6 +494,9 @@ const getSyncButtonText = () => {
   if (syncing.value) return '启动中...'
 
   const status = syncStatus.value?.status
+  if (status === 'queued') {
+    return '后台启动中...'
+  }
   if (status === 'running') {
     const progress = getProgress()
     if (progress > 0) {
@@ -540,7 +554,7 @@ onMounted(async () => {
   ])
   
   // 如果正在同步，开始轮询
-  if (syncStatus.value?.status === 'running') {
+  if (isSyncInProgress(syncStatus.value?.status)) {
     startStatusPolling()
   }
 })

@@ -88,12 +88,12 @@
             type="primary"
             size="small"
             :loading="syncing"
-            :disabled="syncStatus?.status === 'running'"
+            :disabled="isSyncInProgress(syncStatus?.status)"
             @click="quickSync"
             style="width: 100%"
           >
             <el-icon><Refresh /></el-icon>
-            {{ syncStatus?.status === 'running' ? '同步中...' : '快速同步' }}
+            {{ isSyncInProgress(syncStatus?.status) ? '同步中...' : '快速同步' }}
           </el-button>
         </div>
 
@@ -143,6 +143,8 @@ const syncStatus = ref<SyncStatus | null>(null)
 const dataSources = ref<DataSourceStatus[]>([])
 const refreshTimer = ref<NodeJS.Timeout | null>(null)
 
+const isSyncInProgress = (status?: string) => ['queued', 'running'].includes(status || '')
+
 // 获取同步状态
 const fetchSyncStatus = async () => {
   try {
@@ -186,8 +188,12 @@ const quickSync = async () => {
     
     const response = await runStockBasicsSync()
     if (response.success) {
-      ElMessage.success('同步任务已启动')
       syncStatus.value = response.data
+      if (response.data.status === 'queued') {
+        ElMessage.success(response.data.message || '同步任务已提交，后台正在启动，请稍候')
+      } else {
+        ElMessage.success('同步任务已启动')
+      }
       startStatusPolling()
     } else {
       ElMessage.error(`同步启动失败: ${response.message}`)
@@ -215,7 +221,7 @@ const startStatusPolling = () => {
     await fetchSyncStatus()
     
     // 如果同步完成，停止轮询
-    if (syncStatus.value?.status && !['running'].includes(syncStatus.value.status)) {
+    if (syncStatus.value?.status && !isSyncInProgress(syncStatus.value.status)) {
       stopStatusPolling()
     }
   }, 3000)
@@ -233,6 +239,7 @@ const stopStatusPolling = () => {
 const getStatusType = (status?: SyncStatus['status'] | string): 'success' | 'info' | 'warning' | 'danger' => {
   const typeMap: Record<string, 'success' | 'info' | 'warning' | 'danger'> = {
     idle: 'info',
+    queued: 'warning',
     running: 'warning',
     success: 'success',
     success_with_errors: 'warning',
@@ -246,6 +253,7 @@ const getStatusType = (status?: SyncStatus['status'] | string): 'success' | 'inf
 const getStatusText = (status?: SyncStatus['status'] | string) => {
   const textMap: Record<string, string> = {
     idle: '空闲',
+    queued: '后台启动中',
     running: '运行中',
     success: '成功',
     success_with_errors: '部分成功',
@@ -288,7 +296,7 @@ onMounted(async () => {
   loading.value = false
   
   // 如果正在同步，开始轮询
-  if (syncStatus.value?.status === 'running') {
+  if (isSyncInProgress(syncStatus.value?.status)) {
     startStatusPolling()
   }
 })

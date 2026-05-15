@@ -15,7 +15,7 @@ export interface DataSourceStatus {
 // 同步状态接口
 export interface SyncStatus {
   job: string
-  status: 'idle' | 'running' | 'success' | 'success_with_errors' | 'failed' | 'never_run'
+  status: 'idle' | 'queued' | 'running' | 'success' | 'success_with_errors' | 'failed' | 'never_run'
   started_at?: string
   finished_at?: string
   total: number
