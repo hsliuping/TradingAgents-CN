@@ -191,6 +191,88 @@ def test_batch_profit_consistency_compresses_large_output():
     assert "⚪ 无数据股票代码：600010, 600011" in result
 
 
+def test_batch_profit_consistency_uses_period_collection_pipeline(monkeypatch):
+    from core.tools.implementations.fundamentals import batch_profit_consistency as tool_module
+
+    class _AsyncCursor:
+        def __init__(self, docs):
+            self._docs = docs
+
+        async def __aiter__(self):
+            for doc in self._docs:
+                yield doc
+
+    class _FakeCollection:
+        def __init__(self, docs):
+            self._docs = docs
+            self.last_pipeline = None
+
+        def aggregate(self, pipeline):
+            self.last_pipeline = pipeline
+            return _AsyncCursor(self._docs)
+
+    class _FakeDB:
+        def __init__(self, period_collection):
+            self._period_collection = period_collection
+
+        def __getitem__(self, name: str):
+            if name == "stock_financial_periods":
+                return self._period_collection
+            if name == "stock_financial_data":
+                raise AssertionError("should query stock_financial_periods for annual ROE history")
+            raise KeyError(name)
+
+    period_collection = _FakeCollection([
+        {
+            "_id": "600600",
+            "roe_list": [15.3681, 15.3778, 16.1220],
+            "periods": ["20251231", "20241231", "20231231"],
+        }
+    ])
+
+    async def _fake_init_database():
+        return None
+
+    monkeypatch.setattr("app.core.database.init_database", _fake_init_database)
+    monkeypatch.setattr("app.core.database.get_mongo_db", lambda: _FakeDB(period_collection))
+
+    result = asyncio.run(tool_module._async_check(["600600"], years=3, threshold_cv=0.3))
+
+    assert "600600：稳定" in result
+    assert "近3年ROE(2025 / 2024 / 2023): 15.4% / 15.4% / 16.1%" in result
+    assert period_collection.last_pipeline is not None
+    first_group_stage = next(
+        stage["$group"]
+        for stage in period_collection.last_pipeline
+        if "$group" in stage and isinstance(stage["$group"].get("_id"), dict)
+    )
+    assert first_group_stage["_id"] == {"code": "$normalized_code", "report_period": "$report_period"}
+
+
+def test_batch_profit_consistency_treats_insufficient_years_as_no_data():
+    from core.tools.implementations.fundamentals import batch_profit_consistency as tool_module
+
+    result = tool_module._format_results(
+        ["600600", "600601"],
+        {
+            "600600": {
+                "roe_values": [15.3681],
+                "periods": ["20251231"],
+            },
+            "600601": {
+                "roe_values": [12.0, 11.8, 11.6],
+                "periods": ["20241231", "20231231", "20221231"],
+            },
+        },
+        years=3,
+        threshold_cv=0.3,
+    )
+
+    assert "📊 汇总：稳定 1 只 | 不稳定 0 只 | 无数据 1 只" in result
+    assert "⚪ 无数据股票代码：600600" in result
+    assert "600600：稳定" not in result
+
+
 def test_init_database_skips_reinitialization_when_bindings_are_healthy(monkeypatch):
     from app.core import database as database_module
 

@@ -1,7 +1,7 @@
 """
 批量盈利稳定性验证工具
 
-一次 $in 查询 stock_financial_data，计算近 N 年 ROE / 净利润的稳定性，
+一次 $in 查询 stock_financial_periods，计算近 N 年 ROE / 净利润的稳定性，
 避免对每只股票单独发出 N 次查询，大幅提升效率。
 """
 
@@ -51,11 +51,78 @@ async def batch_check_profit_consistency(
             return "错误：stock_codes_json 必须是非空的 JSON 数组。"
         if len(codes) > 200:
             return "错误：单次最多验证 200 只股票，请分批提交。"
-        years = max(1, min(years, 10))
+        years = max(2, min(years, 10))
     except json.JSONDecodeError as e:
         return f"错误：stock_codes_json 格式不正确：{e}"
 
     return await _async_check(codes, years, threshold_cv)
+
+
+def _build_annual_roe_pipeline(codes: List[str]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "$addFields": {
+                "normalized_code": {"$ifNull": ["$code", "$symbol"]},
+                "effective_roe": {
+                    "$ifNull": [
+                        "$financial_indicators.roe",
+                        "$roe",
+                    ]
+                },
+                "has_roe": {
+                    "$cond": [
+                        {
+                            "$ne": [
+                                {
+                                    "$ifNull": [
+                                        "$financial_indicators.roe",
+                                        "$roe",
+                                    ]
+                                },
+                                None,
+                            ]
+                        },
+                        1,
+                        0,
+                    ]
+                },
+            }
+        },
+        {
+            "$match": {
+                "normalized_code": {"$in": codes},
+                "report_type": "annual",
+            }
+        },
+        {
+            "$sort": {
+                "normalized_code": 1,
+                "report_period": -1,
+                "has_roe": -1,
+                "ann_date": -1,
+                "updated_at": -1,
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+                    "code": "$normalized_code",
+                    "report_period": "$report_period",
+                },
+                "roe": {"$first": "$effective_roe"},
+                "period": {"$first": "$report_period"},
+            }
+        },
+        {"$match": {"roe": {"$ne": None}}},
+        {"$sort": {"_id.code": 1, "period": -1}},
+        {
+            "$group": {
+                "_id": "$_id.code",
+                "roe_list": {"$push": "$roe"},
+                "periods": {"$push": "$period"},
+            }
+        },
+    ]
 
 
 async def _async_check(
@@ -71,33 +138,8 @@ async def _async_check(
         pass
 
     db = get_mongo_db()
-    collection = db["stock_financial_data"]
-
-    # 一次 $in 查询：只取年报（report_period 以 "1231" 结尾）
-    pipeline = [
-        {
-            "$match": {
-                "code": {"$in": codes},
-                "report_period": {"$regex": "1231$"},
-            }
-        },
-        {"$sort": {"code": 1, "report_period": -1}},
-        {
-            "$group": {
-                "_id": "$code",
-                # 取最新 N 年的 ROE（兼容 flat 和 nested 两种存储路径）
-                "roe_list": {
-                    "$push": {
-                        "$ifNull": [
-                            "$financial_indicators.roe",
-                            {"$ifNull": ["$roe", None]},
-                        ]
-                    }
-                },
-                "periods": {"$push": "$report_period"},
-            }
-        },
-    ]
+    collection = db["stock_financial_periods"]
+    pipeline = _build_annual_roe_pipeline(codes)
 
     results_map: Dict[str, Any] = {}
     async for doc in collection.aggregate(pipeline):
@@ -187,7 +229,7 @@ def _format_results(
 
     for code in codes:
         data = results_map.get(code)
-        if not data or not data["roe_values"]:
+        if not data or len(data.get("roe_values", [])) < years:
             no_data_codes.append(code)
             continue
 
