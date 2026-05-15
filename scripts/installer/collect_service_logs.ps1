@@ -27,6 +27,9 @@ $root = if ($PSScriptRoot) {
 if (-not $OutputDir) {
     $OutputDir = Join-Path $root "logs"
 }
+if (-not (Test-Path $OutputDir)) {
+    New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+}
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 
 # Load port config from .env
@@ -203,6 +206,16 @@ Write-Host "  Packing..." -ForegroundColor Yellow
 if (Test-Path $outZip) { Remove-Item $outZip -Force }
 Compress-Archive -Path "$tempDir\*" -DestinationPath $outZip -CompressionLevel Optimal
 Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+
+if (-not (Test-Path $outZip)) {
+    Write-Host ""
+    Write-Host "============================================================================" -ForegroundColor Red
+    Write-Host "  Diagnostics package creation failed" -ForegroundColor Red
+    Write-Host "============================================================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Expected output not found: $outZip" -ForegroundColor Red
+    exit 1
+}
 
 Write-Host ""
 Write-Host "============================================================================" -ForegroundColor Green

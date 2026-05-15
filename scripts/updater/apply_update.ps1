@@ -108,6 +108,11 @@ try {
         "releases",
         "install",
         "config",
+        "start_all.ps1",
+        "start_services_clean.ps1",
+        "stop_all.ps1",
+        "restart_all.ps1",
+        "debug_services.ps1",
         "VERSION",
         "BUILD_INFO"
     )
@@ -159,6 +164,11 @@ $replaceItems = @(
     "releases",
     "install",
     "config",
+    "start_all.ps1",
+    "start_services_clean.ps1",
+    "stop_all.ps1",
+    "restart_all.ps1",
+    "debug_services.ps1",
     "VERSION",
     "BUILD_INFO"
 )
