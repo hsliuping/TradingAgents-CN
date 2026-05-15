@@ -41,6 +41,11 @@ export const PRO_FEATURES = [
 
 export type ProFeature = typeof PRO_FEATURES[number]
 
+const FREE_ACCESS_FEATURES = new Set<ProFeature>([
+  'portfolio_analysis',
+  'trade_review'
+])
+
 export const useLicenseStore = defineStore('license', () => {
   // 状态
   const appToken = ref<string | null>(localStorage.getItem('app-token'))
@@ -111,7 +116,9 @@ export const useLicenseStore = defineStore('license', () => {
   })
 
   const hasFeature = (_feature: ProFeature) => {
+    if (FREE_ACCESS_FEATURES.has(_feature)) return true
     if (!licenseInfo.value?.is_valid) return false
+    if (licenseInfo.value.features.includes(_feature)) return true
     // trial、pro、enterprise 用户拥有所有 PRO 功能
     if (['trial', 'pro', 'enterprise'].includes(licenseInfo.value.plan)) {
       return true

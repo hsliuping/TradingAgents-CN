@@ -166,7 +166,6 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Key, Delete, Refresh, Message, FolderOpened, Clock, DocumentChecked, SetUp, Tools, User, Document, Reading } from '@element-plus/icons-vue'
 import { PRO_FEATURES, useLicenseStore, type ProFeature } from '@/stores/license'
-import { PieChart } from '@element-plus/icons-vue'
 import request, { type ApiResponse } from '@/api/request'
 
 const licenseStore = useLicenseStore()
@@ -291,8 +290,6 @@ const proFeatureList = [
   { key: 'email_notification', name: '邮件通知', desc: '研究完成自动发送邮件', icon: Message },
   { key: 'watchlist_groups', name: '自选股分组', desc: '按策略分组管理自选股', icon: FolderOpened },
   { key: 'scheduled_analysis', name: '定时分析', desc: '多时段自动分析', icon: Clock },
-  { key: 'portfolio_analysis', name: '持仓研究', desc: 'AI 智能持仓诊断与跟踪', icon: PieChart },
-  { key: 'trade_review', name: '操作复盘', desc: '交易决策复盘分析', icon: DocumentChecked },
   { key: 'batch_analysis', name: '批量分析', desc: '一次提交多只股票进行研究', icon: DocumentChecked },
   { key: 'export_reports', name: '导出报告', desc: '导出研究结果与历史记录', icon: Document },
   { key: 'trading_plan_check', name: '交易计划一致性检查', desc: '复盘时对照交易计划检查执行一致性', icon: DocumentChecked },

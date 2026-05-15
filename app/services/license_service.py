@@ -45,6 +45,7 @@ class LicenseService:
     # 🔐 验证服务器地址（硬编码，防止用户修改）
     # ⚠️ 安全警告：不要从环境变量读取，否则用户可以搭建假服务器绕过验证
     BASE_URL = "https://www.tradingagentscn.com/api"
+    FREE_ACCESS_FEATURES = {"portfolio_analysis", "trade_review"}
 
     # 离线缓存有效期：7天
     OFFLINE_CACHE_TTL = 7 * 24 * 3600  # 7天（秒）
@@ -476,6 +477,10 @@ class LicenseService:
         """检查是否拥有特定功能"""
         if not license_info.is_valid:
             return False
+        if feature in self.FREE_ACCESS_FEATURES:
+            return True
+        if feature in license_info.features:
+            return True
         # trial、pro、enterprise 拥有所有 PRO 功能
         if license_info.plan in ("trial", "pro", "enterprise"):
             return True

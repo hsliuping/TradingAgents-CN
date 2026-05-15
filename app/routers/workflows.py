@@ -23,8 +23,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/workflows",
-    tags=["workflows"],
-    dependencies=[Depends(require_pro)]
+    tags=["workflows"]
 )
 
 
@@ -122,7 +121,7 @@ class ValidationResult(BaseModel):
 
 # ==================== API 端点 ====================
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_pro)])
 async def list_workflows():
     """获取所有工作流列表"""
     try:
@@ -136,7 +135,7 @@ async def list_workflows():
 
 
 @router.get("/templates")
-async def get_templates():
+async def get_templates(user: dict = Depends(get_current_user)):
     """获取预定义模板"""
     try:
         from core.api import WorkflowAPI
@@ -148,7 +147,7 @@ async def get_templates():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{workflow_id}")
+@router.get("/{workflow_id}", dependencies=[Depends(require_pro)])
 async def get_workflow(workflow_id: str):
     """获取单个工作流详情"""
     try:
@@ -165,7 +164,7 @@ async def get_workflow(workflow_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_pro)])
 async def create_workflow(data: WorkflowCreate):
     """创建新工作流"""
     try:
@@ -186,7 +185,7 @@ async def create_workflow(data: WorkflowCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/{workflow_id}")
+@router.put("/{workflow_id}", dependencies=[Depends(require_pro)])
 async def update_workflow(workflow_id: str, data: WorkflowUpdate):
     """更新工作流"""
     try:
@@ -207,7 +206,7 @@ async def update_workflow(workflow_id: str, data: WorkflowUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/{workflow_id}")
+@router.delete("/{workflow_id}", dependencies=[Depends(require_pro)])
 async def delete_workflow(workflow_id: str):
     """删除工作流"""
     try:
@@ -224,7 +223,7 @@ async def delete_workflow(workflow_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/validate")
+@router.post("/validate", dependencies=[Depends(require_pro)])
 async def validate_workflow(data: WorkflowCreate):
     """验证工作流定义"""
     try:
@@ -237,7 +236,7 @@ async def validate_workflow(data: WorkflowCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{workflow_id}/execute")
+@router.post("/{workflow_id}/execute", dependencies=[Depends(require_pro)])
 async def execute_workflow(
     workflow_id: str,
     data: WorkflowExecuteRequest,
@@ -949,7 +948,7 @@ class CreateFromTemplateRequest(BaseModel):
     name: str
 
 
-@router.post("/from-template")
+@router.post("/from-template", dependencies=[Depends(require_pro)])
 async def create_from_template(data: CreateFromTemplateRequest):
     """从模板创建工作流"""
     template_id = data.template_id
@@ -998,7 +997,7 @@ class DuplicateRequest(BaseModel):
     name: str
 
 
-@router.post("/{workflow_id}/duplicate")
+@router.post("/{workflow_id}/duplicate", dependencies=[Depends(require_pro)])
 async def duplicate_workflow(workflow_id: str, data: DuplicateRequest):
     """复制工作流"""
     try:
@@ -1038,7 +1037,7 @@ async def duplicate_workflow(workflow_id: str, data: DuplicateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{workflow_id}/set-default")
+@router.post("/{workflow_id}/set-default", dependencies=[Depends(require_pro)])
 async def set_as_default(workflow_id: str):
     """设为默认分析流"""
     try:

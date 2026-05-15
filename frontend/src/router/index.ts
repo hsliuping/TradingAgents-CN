@@ -718,7 +718,6 @@ const routes: RouteRecordRaw[] = [
       title: '交易计划',
       icon: 'Tickets',
       requiresAuth: true,
-      requiresPro: true,  // 🔥 需要高级学员权限
       transition: 'slide-up'
     },
     children: [
@@ -728,8 +727,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/TradingSystem/List.vue'),
         meta: {
           title: '交易计划列表',
-          requiresAuth: true,
-          requiresPro: true  // 🔥 需要高级学员权限
+          requiresAuth: true
         }
       },
       {
@@ -739,7 +737,6 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '创建交易计划',
           requiresAuth: true,
-          requiresPro: true,  // 🔥 需要高级学员权限
           hideInMenu: true
         }
       },
@@ -750,7 +747,6 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '交易计划详情',
           requiresAuth: true,
-          requiresPro: true,  // 🔥 需要高级学员权限
           hideInMenu: true
         }
       },
@@ -761,7 +757,6 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '编辑交易计划',
           requiresAuth: true,
-          requiresPro: true,  // 🔥 需要高级学员权限
           hideInMenu: true
         }
       }
@@ -1028,9 +1023,6 @@ router.beforeEach(async (to, _from, next) => {
     '/settings/watchlist-groups',
     '/settings/scheduled-analysis',
     '/settings/templates',  // 🔥 提示词模板需要高级学员权限
-    '/portfolio',
-    '/review',
-    '/trading-system',  // 🔥 交易计划需要高级学员权限
     '/workflow'  // 分析流功能需要高级学员权限
   ]
 
