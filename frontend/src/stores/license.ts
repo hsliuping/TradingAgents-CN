@@ -13,6 +13,8 @@ export interface LicenseInfo {
   email: string
   plan: 'free' | 'trial' | 'pro' | 'enterprise'
   features: string[]
+  auth_server?: string
+  auth_server_options?: Array<{ value: string; label: string }>
   device_registered: boolean
   is_valid: boolean
   error_message?: string
@@ -140,7 +142,7 @@ export const useLicenseStore = defineStore('license', () => {
     localStorage.removeItem('app-token')
   }
 
-  const verifyLicense = async (force = false): Promise<boolean> => {
+  const verifyLicense = async (force = false, authServer?: string): Promise<boolean> => {
     loading.value = true
     error.value = null
 
@@ -149,7 +151,10 @@ export const useLicenseStore = defineStore('license', () => {
       // 调用 /status 接口获取授权状态，force=true 时强制刷新（跳过后端缓存）
       // 注意：设备ID由后端基于硬件信息自动生成，前端不需要传递
       const response: any = await request.get('/api/license/status', {
-        params: { force_refresh: force }
+        params: {
+          force_refresh: force,
+          ...(authServer ? { auth_server: authServer } : {})
+        }
       })
       console.log('📋 License Store: 收到响应', response)
 
@@ -160,6 +165,8 @@ export const useLicenseStore = defineStore('license', () => {
             email: '',
             plan: 'free',
             features: [],
+            auth_server: response.data.auth_server,
+            auth_server_options: response.data.auth_server_options || [],
             device_registered: false,
             is_valid: true,
           }
@@ -172,6 +179,8 @@ export const useLicenseStore = defineStore('license', () => {
             email: response.data.email || '',
             plan: response.data.plan || 'free',
             features: response.data.features || [],
+            auth_server: response.data.auth_server,
+            auth_server_options: response.data.auth_server_options || [],
             device_registered: response.data.device_registered || false,
             is_valid: response.data.is_valid !== false,
             error_message: response.data.error_message,

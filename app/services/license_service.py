@@ -42,20 +42,51 @@ class LicenseInfo(BaseModel):
 class LicenseService:
     """授权验证服务"""
 
-    # 🔐 验证服务器地址（硬编码，防止用户修改）
-    # ⚠️ 安全警告：不要从环境变量读取，否则用户可以搭建假服务器绕过验证
-    BASE_URL = "https://www.tradingagentscn.com/api"
+    # 🔐 验证服务器白名单（硬编码，防止用户自定义伪造服务器）
+    # ⚠️ 安全警告：只允许在这里维护受信任的官方授权服务器
+    AUTH_SERVERS = {
+        "server1": {
+            "label": "服务器一",
+            "base_url": "https://www.tradingagentscn.com/api",
+        },
+        "server2": {
+            "label": "服务器二",
+            "base_url": "https://jq.tradingagentscn.com/api",
+        },
+    }
+    DEFAULT_AUTH_SERVER = "server1"
     FREE_ACCESS_FEATURES = {"portfolio_analysis", "trade_review"}
 
     # 离线缓存有效期：7天
     OFFLINE_CACHE_TTL = 7 * 24 * 3600  # 7天（秒）
 
     def __init__(self):
-        self.base_url = self.BASE_URL  # 使用硬编码的地址
         self.timeout = settings.LICENSE_SERVICE_TIMEOUT
         self.cache_ttl = settings.LICENSE_CACHE_TTL  # 在线缓存：1小时
         self._cache: dict[str, LicenseInfo] = {}  # 内存缓存（在线模式）
         self._machine_id = self._get_machine_id()  # 机器ID
+
+    def get_available_servers(self) -> list[dict[str, str]]:
+        """获取可选授权服务器列表"""
+        return [
+            {"value": server_id, "label": config["label"]}
+            for server_id, config in self.AUTH_SERVERS.items()
+        ]
+
+    def resolve_auth_server(self, auth_server: Optional[str] = None) -> str:
+        """解析授权服务器 ID，非法值回退到默认服务器"""
+        if auth_server in self.AUTH_SERVERS:
+            return auth_server
+        return self.DEFAULT_AUTH_SERVER
+
+    def get_base_url(self, auth_server: Optional[str] = None) -> str:
+        """获取授权服务器地址"""
+        server_id = self.resolve_auth_server(auth_server)
+        return self.AUTH_SERVERS[server_id]["base_url"]
+
+    def _build_cache_key(self, token: str, auth_server: Optional[str] = None) -> str:
+        server_id = self.resolve_auth_server(auth_server)
+        return f"{server_id}:{token}"
 
     def _get_machine_id(self) -> str:
         """
@@ -192,7 +223,7 @@ class LicenseService:
             logger.warning(f"⚠️ 获取机器ID失败: {e}，使用随机ID")
             return hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()
     
-    async def _load_persistent_cache(self, token: str) -> Optional[LicenseInfo]:
+    async def _load_persistent_cache(self, token: str, auth_server: Optional[str] = None) -> Optional[LicenseInfo]:
         """
         从数据库加载持久化缓存（7天有效期）
 
@@ -204,9 +235,11 @@ class LicenseService:
         """
         try:
             db = get_mongo_db()
+            server_id = self.resolve_auth_server(auth_server)
             cache_doc = await db.license_cache.find_one({
                 "token_hash": hashlib.sha256(token.encode()).hexdigest(),
-                "machine_id": self._machine_id
+                "machine_id": self._machine_id,
+                "auth_server": server_id,
             })
 
             if not cache_doc:
@@ -237,7 +270,7 @@ class LicenseService:
             logger.error(f"❌ 加载持久化缓存失败: {e}")
             return None
 
-    async def _save_persistent_cache(self, token: str, license_info: LicenseInfo):
+    async def _save_persistent_cache(self, token: str, license_info: LicenseInfo, auth_server: Optional[str] = None):
         """
         保存授权信息到数据库（7天有效期）
 
@@ -247,15 +280,18 @@ class LicenseService:
         """
         try:
             db = get_mongo_db()
+            server_id = self.resolve_auth_server(auth_server)
             cache_expires_at = datetime.now() + timedelta(seconds=self.OFFLINE_CACHE_TTL)
 
             await db.license_cache.update_one(
                 {
                     "token_hash": hashlib.sha256(token.encode()).hexdigest(),
-                    "machine_id": self._machine_id
+                    "machine_id": self._machine_id,
+                    "auth_server": server_id,
                 },
                 {
                     "$set": {
+                        "auth_server": server_id,
                         "email": license_info.email,
                         "plan": license_info.plan,
                         "features": license_info.features,
@@ -277,7 +313,8 @@ class LicenseService:
         self,
         token: str,
         app_version: Optional[str] = None,
-        use_cache: bool = True
+        use_cache: bool = True,
+        auth_server: Optional[str] = None,
     ) -> LicenseInfo:
         """
         验证 App Token
@@ -295,19 +332,23 @@ class LicenseService:
             - 用户无法获取或复制设备ID，防止冒用
             - 设备ID生成逻辑对用户透明，确保安全性
         """
+        server_id = self.resolve_auth_server(auth_server)
+        base_url = self.get_base_url(server_id)
+        cache_key = self._build_cache_key(token, server_id)
+
         # 1. 检查内存缓存（在线模式，1小时有效）
-        if use_cache and token in self._cache:
-            cached_info = self._cache[token]
+        if use_cache and cache_key in self._cache:
+            cached_info = self._cache[cache_key]
             if cached_info.cache_expires_at and datetime.now() < cached_info.cache_expires_at:
-                logger.debug(f"🔑 使用内存缓存的授权信息: {cached_info.email}")
+                logger.debug(f"🔑 使用内存缓存的授权信息: {cached_info.email} (server={server_id})")
                 return cached_info
 
         # 2. 检查持久化缓存（离线模式，7天有效）
         if use_cache:
-            persistent_cache = await self._load_persistent_cache(token)
+            persistent_cache = await self._load_persistent_cache(token, server_id)
             if persistent_cache:
                 # 同时更新内存缓存
-                self._cache[token] = persistent_cache
+                self._cache[cache_key] = persistent_cache
                 return persistent_cache
         
         # 3. 在线验证
@@ -321,7 +362,7 @@ class LicenseService:
                 pool=10.0      # 连接池超时：10秒
             )
             
-            logger.debug(f"🔗 连接授权服务: {self.base_url}/app/verify-token")
+            logger.debug(f"🔗 连接授权服务[{server_id}]: {base_url}/app/verify-token")
             logger.debug(f"   超时配置: connect=10s, read=30s")
             
             async with httpx.AsyncClient(
@@ -338,7 +379,7 @@ class LicenseService:
                 )
                 
                 response = await client.post(
-                    f"{self.base_url}/app/verify-token",
+                    f"{base_url}/app/verify-token",
                     json={
                         "token": token,
                         "device_id": self._machine_id,  # 始终使用后端硬件指纹
@@ -362,12 +403,12 @@ class LicenseService:
                     )
 
                     # 保存到内存缓存（1小时）
-                    self._cache[token] = license_info
+                    self._cache[cache_key] = license_info
 
                     # 保存到持久化缓存（7天）
-                    await self._save_persistent_cache(token, license_info)
+                    await self._save_persistent_cache(token, license_info, server_id)
 
-                    logger.info(f"✅ Token 验证成功: {license_info.email}, plan={license_info.plan}")
+                    logger.info(f"✅ Token 验证成功: {license_info.email}, plan={license_info.plan}, server={server_id}")
                     return license_info
                     
                 elif response.status_code == 401:
@@ -392,33 +433,33 @@ class LicenseService:
             logger.error(f"❌ 授权服务请求超时 (超时时间: {self.timeout}秒)")
             logger.debug(f"   详细错误: {type(e).__name__}: {e}")
             # 尝试使用持久化缓存（离线模式）
-            return await self._get_offline_fallback(token, f"授权服务请求超时（{self.timeout}秒）")
+            return await self._get_offline_fallback(token, f"授权服务请求超时（{self.timeout}秒）", server_id)
         except httpx.ConnectError as e:
             error_detail = str(e)
-            logger.error(f"❌ 无法连接到授权服务: {self.base_url}")
+            logger.error(f"❌ 无法连接到授权服务[{server_id}]: {base_url}")
             logger.error(f"   错误详情: {error_detail}")
             logger.info(f"   可能的原因:")
             logger.info(f"   1. 网络连接问题（防火墙、代理、VPN）")
-            logger.info(f"   2. API 端点不存在或路径错误: {self.base_url}/app/verify-token")
+            logger.info(f"   2. API 端点不存在或路径错误: {base_url}/app/verify-token")
             logger.info(f"   3. SSL/TLS 证书验证失败")
             logger.info(f"   4. 服务器暂时不可用")
             logger.info(f"   系统将使用离线缓存模式（如果可用）")
             # 尝试使用持久化缓存（离线模式）
-            return await self._get_offline_fallback(token, f"无法连接到授权服务: {error_detail}")
+            return await self._get_offline_fallback(token, f"无法连接到授权服务: {error_detail}", server_id)
         except httpx.HTTPStatusError as e:
             logger.error(f"❌ 授权服务返回 HTTP 错误: {e.response.status_code}")
             logger.error(f"   响应内容: {e.response.text[:200]}")
             # 尝试使用持久化缓存（离线模式）
-            return await self._get_offline_fallback(token, f"授权服务返回 HTTP {e.response.status_code}")
+            return await self._get_offline_fallback(token, f"授权服务返回 HTTP {e.response.status_code}", server_id)
         except Exception as e:
             error_type = type(e).__name__
             error_msg = str(e)
             logger.error(f"❌ 验证 Token 时发生错误: {error_type}: {error_msg}")
             logger.debug(f"   完整异常信息:", exc_info=True)
             # 尝试使用持久化缓存（离线模式）
-            return await self._get_offline_fallback(token, f"{error_type}: {error_msg}")
+            return await self._get_offline_fallback(token, f"{error_type}: {error_msg}", server_id)
     
-    async def _get_offline_fallback(self, token: str, error_message: str) -> LicenseInfo:
+    async def _get_offline_fallback(self, token: str, error_message: str, auth_server: Optional[str] = None) -> LicenseInfo:
         """
         离线降级处理：使用持久化缓存（7天有效期）
 
@@ -429,9 +470,12 @@ class LicenseService:
         Returns:
             LicenseInfo: 离线模式的授权信息（如果有持久化缓存）或免费版
         """
+        server_id = self.resolve_auth_server(auth_server)
+        cache_key = self._build_cache_key(token, server_id)
+
         # 1. 检查内存缓存
-        if token in self._cache:
-            cached_info = self._cache[token]
+        if cache_key in self._cache:
+            cached_info = self._cache[cache_key]
             logger.warning(f"⚠️ 使用离线模式（内存缓存）: {cached_info.email}, plan={cached_info.plan}")
             return LicenseInfo(
                 email=cached_info.email,
@@ -449,14 +493,14 @@ class LicenseService:
             )
 
         # 2. 检查持久化缓存（7天有效期）
-        persistent_cache = await self._load_persistent_cache(token)
+        persistent_cache = await self._load_persistent_cache(token, server_id)
         if persistent_cache:
             logger.warning(f"⚠️ 使用离线模式（持久化缓存）: {persistent_cache.email}, plan={persistent_cache.plan}")
             # 标记为离线模式
             persistent_cache.offline_mode = True
             persistent_cache.error_message = f"离线模式: {error_message}"
             # 更新内存缓存
-            self._cache[token] = persistent_cache
+            self._cache[cache_key] = persistent_cache
             return persistent_cache
 
         # 3. 没有任何缓存，返回免费版
@@ -486,10 +530,16 @@ class LicenseService:
             return True
         return False
     
-    def clear_cache(self, token: Optional[str] = None):
+    def clear_cache(self, token: Optional[str] = None, auth_server: Optional[str] = None):
         """清除缓存"""
         if token:
-            self._cache.pop(token, None)
+            if auth_server:
+                self._cache.pop(self._build_cache_key(token, auth_server), None)
+            else:
+                prefix = f":{token}"
+                for cache_key in list(self._cache.keys()):
+                    if cache_key.endswith(prefix):
+                        self._cache.pop(cache_key, None)
         else:
             self._cache.clear()
 

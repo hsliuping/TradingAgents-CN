@@ -72,6 +72,21 @@
           </el-alert>
 
           <el-form label-width="120px">
+            <el-form-item label="认证服务器">
+              <el-select
+                v-model="selectedAuthServer"
+                :disabled="saving || loading"
+                style="max-width: 240px"
+              >
+                <el-option
+                  v-for="option in authServerOptions"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
+            </el-form-item>
+
             <el-form-item label="App Token">
               <el-input
                 v-model="tokenInput"
@@ -162,7 +177,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Key, Delete, Refresh, Message, FolderOpened, Clock, DocumentChecked, SetUp, Tools, User, Document, Reading } from '@element-plus/icons-vue'
 import { PRO_FEATURES, useLicenseStore, type ProFeature } from '@/stores/license'
@@ -175,6 +190,7 @@ const tokenInput = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const removing = ref(false)
+const selectedAuthServer = ref('server1')
 
 // 计算属性
 const isPro = computed(() => licenseStore.isPro)
@@ -193,6 +209,16 @@ const availableFeatures = computed(() => {
   return [...new Set([...fallbackFeatures, ...rawFeatures]
     .map((feature) => feature === 'trading_system' ? 'trading_plan_check' : feature)
     .filter((feature) => feature !== 'advanced_screening'))]
+})
+
+const authServerOptions = computed(() => {
+  const options = licenseInfo.value?.auth_server_options || []
+  return options.length
+    ? options
+    : [
+      { value: 'server1', label: '服务器一' },
+      { value: 'server2', label: '服务器二' },
+    ]
 })
 
 const statusTagType = computed(() => {
@@ -307,7 +333,7 @@ const hasFeature = (feature: string) => {
 const refreshStatus = async () => {
   loading.value = true
   try {
-    await licenseStore.verifyLicense(true)
+    await licenseStore.verifyLicense(true, selectedAuthServer.value)
     ElMessage.success('状态已刷新')
   } catch (e: any) {
     ElMessage.error(e.message || '刷新失败')
@@ -325,7 +351,8 @@ const saveToken = async () => {
   saving.value = true
   try {
     const response = await request.post('/api/license/save-token', {
-      token: tokenInput.value
+      token: tokenInput.value,
+      auth_server: selectedAuthServer.value,
     }) as ApiResponse<{ plan: string }>
 
     if (response.success) {
@@ -371,6 +398,16 @@ const removeToken = async () => {
 onMounted(() => {
   refreshStatus()
 })
+
+watch(
+  () => licenseInfo.value?.auth_server,
+  (server) => {
+    if (server) {
+      selectedAuthServer.value = server
+    }
+  },
+  { immediate: true }
+)
 </script>
 
 <style scoped lang="scss">

@@ -115,7 +115,10 @@ async def get_user_license_tier(
 
     try:
         license_service = get_license_service()
-        license_info = await license_service.verify_app_token(x_app_token)
+        db = get_mongo_db()
+        user_doc = await db.users.find_one({"_id": ObjectId(str(user.get('id')))})
+        auth_server = user_doc.get("license_server") if user_doc else None
+        license_info = await license_service.verify_app_token(x_app_token, auth_server=auth_server)
         logger.info(f"🎫 许可证验证结果: plan={license_info.plan}, is_valid={license_info.is_valid}")
 
         if license_info.is_valid:

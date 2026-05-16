@@ -209,42 +209,12 @@
 
       <el-form :model="basicFilters" label-width="120px" class="filter-form">
         <el-row :gutter="24" class="filter-summary-row">
-          <el-col :span="8">
-            <el-form-item label="市场类型">
-              <el-select v-model="basicFilters.market" placeholder="选择市场" disabled>
-                <el-option label="A股" value="A股" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="16">
+          <el-col :span="24">
             <div class="registry-hint">
-              当前采用引导式筛选。先按思路选择核心条件，需要更细时再展开高级条件。全部可用字段共 {{ totalVisibleFieldCount }} 个。
+              默认先展示常用筛选参数；需要更细条件时，再从高级字段里按需添加。全部可用字段共 {{ totalVisibleFieldCount }} 个。
             </div>
           </el-col>
         </el-row>
-
-        <div class="guided-panel">
-          <div class="guided-panel-header">
-            <div>
-              <div class="guided-panel-title">第 1 步：先选筛选思路</div>
-              <div class="guided-panel-subtitle">不默认展示整版指标，只展示当前思路最常用的一组核心字段。</div>
-            </div>
-            <el-tag type="success" effect="plain" size="small">{{ currentGuideMode.label }}</el-tag>
-          </div>
-          <div class="guide-mode-grid">
-            <button
-              v-for="mode in guidedScreeningModes"
-              :key="mode.id"
-              type="button"
-              :class="['guide-mode-card', { active: mode.id === selectedGuideModeId }]"
-              @click="selectedGuideModeId = mode.id"
-            >
-              <div class="guide-mode-title">{{ mode.label }}</div>
-              <div class="guide-mode-description">{{ mode.description }}</div>
-              <div class="guide-mode-meta">{{ mode.hint }}</div>
-            </button>
-          </div>
-        </div>
 
         <el-empty
           v-if="!filterCategorySections.length && !fieldsLoading"
@@ -269,207 +239,311 @@
           </div>
         </div>
 
-        <div v-if="guidedFieldSections.length" class="guided-core-panel">
-          <div class="guided-core-header">
+        <div v-if="hasLegacyCommonFilters" class="common-filter-panel">
+          <div class="common-filter-header">
             <div>
-              <div class="guided-core-title">第 2 步：只调整核心条件</div>
-              <div class="guided-core-subtitle">当前策略下优先展示 {{ guidedFieldCount }} 个高频字段，先把关键条件定下来。</div>
+              <div class="common-filter-title">常用条件</div>
+              <div class="common-filter-subtitle">先用最常筛的 {{ commonFieldCount }} 个参数快速缩小范围；不常用字段放到下面的高级字段里再补。</div>
             </div>
           </div>
 
-          <div
-            v-for="category in guidedFieldSections"
-            :key="category.key"
-            class="guided-section"
-          >
-            <div class="guided-section-header">
-              <span>{{ category.label }}</span>
-              <el-tag size="small" type="info" effect="plain">{{ category.fields.length }}项</el-tag>
-            </div>
+          <el-row :gutter="24" class="common-field-grid">
+            <el-col :span="8">
+              <el-form-item label="股票代码/名称" class="dynamic-field-item">
+                <el-input
+                  v-model="fieldFilters.keyword.scalarValue"
+                  placeholder="请输入股票代码或名称"
+                  clearable
+                />
+              </el-form-item>
+            </el-col>
 
-            <el-row :gutter="24">
-              <el-col
-                v-for="field in category.fields"
-                :key="field.name"
-                :span="8"
-              >
-                <el-form-item :label="buildFieldLabel(field)" class="dynamic-field-item">
-                  <template v-if="field.name === 'industry'">
-                    <el-select
-                      v-model="fieldFilters[field.name].selectedValues"
-                      placeholder="选择行业"
-                      multiple
-                      filterable
-                      clearable
-                      collapse-tags
-                      collapse-tags-tooltip
-                    >
-                      <el-option
-                        v-for="industry in industryOptions"
-                        :key="industry.value"
-                        :label="industry.label"
-                        :value="industry.value"
-                      />
-                    </el-select>
-                  </template>
+            <el-col :span="8">
+              <el-form-item label="行业分类" class="dynamic-field-item">
+                <el-select
+                  v-model="fieldFilters.industry.selectedValues"
+                  placeholder="选择行业"
+                  multiple
+                  filterable
+                  clearable
+                  collapse-tags
+                  collapse-tags-tooltip
+                >
+                  <el-option
+                    v-for="industry in industryOptions"
+                    :key="industry.value"
+                    :label="industry.label"
+                    :value="industry.value"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
 
-                  <template v-else-if="isBooleanField(field)">
-                    <el-select
-                      v-model="fieldFilters[field.name].booleanValue"
-                      placeholder="不限"
-                      clearable
-                    >
-                      <el-option label="否" value="false" />
-                      <el-option label="是" value="true" />
-                    </el-select>
-                  </template>
+            <el-col :span="8">
+              <el-form-item label="市场类型" class="dynamic-field-item">
+                <el-select v-model="basicFilters.market" placeholder="选择市场" disabled>
+                  <el-option label="A股" value="A股" />
+                </el-select>
+              </el-form-item>
+            </el-col>
 
-                  <template v-else-if="isNumericField(field)">
-                    <div class="range-inputs">
-                      <el-input-number
-                        v-model="fieldFilters[field.name].min"
-                        placeholder="最小值"
-                        :controls="false"
-                        style="width: 45%"
-                      />
-                      <span class="range-separator">-</span>
-                      <el-input-number
-                        v-model="fieldFilters[field.name].max"
-                        placeholder="最大值"
-                        :controls="false"
-                        style="width: 45%"
-                      />
-                    </div>
-                  </template>
+            <el-col :span="8">
+              <el-form-item label="市值范围" class="dynamic-field-item">
+                <el-select
+                  v-model="basicFilters.marketCapRange"
+                  placeholder="选择市值范围"
+                  clearable
+                >
+                  <el-option
+                    v-for="option in marketCapRangeOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
 
-                  <template v-else>
-                    <div class="string-inputs">
-                      <el-select v-model="fieldFilters[field.name].operator" style="width: 120px">
-                        <el-option
-                          v-for="operator in getTextOperators(field)"
-                          :key="operator"
-                          :label="formatOperatorLabel(operator)"
-                          :value="operator"
-                        />
-                      </el-select>
-                      <el-input
-                        v-model="fieldFilters[field.name].scalarValue"
-                        :placeholder="buildFieldPlaceholder(field, fieldFilters[field.name].operator)"
-                        clearable
-                      />
-                    </div>
-                  </template>
+            <el-col :span="8">
+              <el-form-item label="市盈率 (PE)" class="dynamic-field-item">
+                <div class="range-inputs">
+                  <el-input-number
+                    v-model="fieldFilters.pe.min"
+                    placeholder="最小值"
+                    :controls="false"
+                    style="width: 45%"
+                  />
+                  <span class="range-separator">-</span>
+                  <el-input-number
+                    v-model="fieldFilters.pe.max"
+                    placeholder="最大值"
+                    :controls="false"
+                    style="width: 45%"
+                  />
+                </div>
+              </el-form-item>
+            </el-col>
 
-                  <div v-if="field.description" class="field-help">{{ field.description }}</div>
-                </el-form-item>
-              </el-col>
-            </el-row>
-          </div>
+            <el-col :span="8">
+              <el-form-item label="市净率 (PB)" class="dynamic-field-item">
+                <div class="range-inputs">
+                  <el-input-number
+                    v-model="fieldFilters.pb.min"
+                    placeholder="最小值"
+                    :controls="false"
+                    style="width: 45%"
+                  />
+                  <span class="range-separator">-</span>
+                  <el-input-number
+                    v-model="fieldFilters.pb.max"
+                    placeholder="最大值"
+                    :controls="false"
+                    style="width: 45%"
+                  />
+                </div>
+              </el-form-item>
+            </el-col>
+
+            <el-col :span="8">
+              <el-form-item label="ROE (%)" class="dynamic-field-item">
+                <div class="range-inputs">
+                  <el-input-number
+                    v-model="fieldFilters.roe.min"
+                    placeholder="最小值"
+                    :controls="false"
+                    style="width: 45%"
+                  />
+                  <span class="range-separator">-</span>
+                  <el-input-number
+                    v-model="fieldFilters.roe.max"
+                    placeholder="最大值"
+                    :controls="false"
+                    style="width: 45%"
+                  />
+                </div>
+              </el-form-item>
+            </el-col>
+
+            <el-col :span="8">
+              <el-form-item label="涨跌幅 (%)" class="dynamic-field-item">
+                <div class="range-inputs">
+                  <el-input-number
+                    v-model="fieldFilters.pct_chg.min"
+                    placeholder="最小值"
+                    :controls="false"
+                    style="width: 45%"
+                  />
+                  <span class="range-separator">-</span>
+                  <el-input-number
+                    v-model="fieldFilters.pct_chg.max"
+                    placeholder="最大值"
+                    :controls="false"
+                    style="width: 45%"
+                  />
+                </div>
+              </el-form-item>
+            </el-col>
+
+            <el-col :span="8">
+              <el-form-item label="成交量" class="dynamic-field-item">
+                <el-select
+                  v-model="basicFilters.volumeLevel"
+                  placeholder="选择成交量水平"
+                  clearable
+                >
+                  <el-option
+                    v-for="option in volumeLevelOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+          </el-row>
         </div>
 
-        <div v-if="advancedFilterSections.length" class="advanced-filter-panel">
+        <div v-if="availableAdvancedFieldCount" class="advanced-filter-panel">
           <div class="advanced-filter-header">
             <div>
-              <div class="advanced-filter-title">第 3 步：需要时再展开高级条件</div>
-              <div class="advanced-filter-subtitle">剩余字段都收在这里，默认不打扰用户视线。</div>
+              <div class="advanced-filter-title">高级字段</div>
+              <div class="advanced-filter-subtitle">不常用字段不默认铺开；需要时再主动添加到过滤条件里。</div>
             </div>
-            <el-button text @click="toggleAdvancedFilters">
-              {{ showAdvancedFilters ? '收起高级条件' : `展开高级条件（${advancedFieldCount} 项）` }}
-            </el-button>
+            <el-tag size="small" type="info" effect="plain">可选 {{ availableAdvancedFieldCount }} 项</el-tag>
           </div>
 
-          <el-collapse v-if="showAdvancedFilters" v-model="activeFilterCategories" class="dynamic-filter-groups">
-          <el-collapse-item
-            v-for="category in advancedFilterSections"
-            :key="category.key"
-            :name="category.key"
-          >
-            <template #title>
-              <div class="group-title">
+          <el-form-item label="添加字段" class="advanced-picker-item">
+            <el-select
+              v-model="selectedAdvancedFieldNames"
+              placeholder="选择要追加的高级字段"
+              multiple
+              filterable
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+            >
+              <el-option-group
+                v-for="group in advancedFieldOptionGroups"
+                :key="group.key"
+                :label="group.label"
+              >
+                <el-option
+                  v-for="field in group.fields"
+                  :key="field.name"
+                  :label="field.display_name"
+                  :value="field.name"
+                />
+              </el-option-group>
+            </el-select>
+            <div class="field-help">只显示你主动添加的字段；移除字段会同时清空对应条件。</div>
+          </el-form-item>
+
+          <div v-if="selectedAdvancedFields.length" class="advanced-selected-tags">
+            <el-tag
+              v-for="field in selectedAdvancedFields"
+              :key="field.name"
+              closable
+              effect="plain"
+              @close="removeAdvancedField(field.name)"
+            >
+              {{ buildFieldLabel(field) }}
+            </el-tag>
+          </div>
+
+          <div v-if="advancedFieldSections.length">
+            <div
+              v-for="category in advancedFieldSections"
+              :key="category.key"
+              class="condition-section"
+            >
+              <div class="condition-section-header">
                 <span>{{ category.label }}</span>
                 <el-tag size="small" type="info" effect="plain">{{ category.fields.length }}项</el-tag>
               </div>
-            </template>
 
-            <el-row :gutter="24">
-              <el-col
-                v-for="field in category.fields"
-                :key="field.name"
-                :span="8"
-              >
-                <el-form-item :label="buildFieldLabel(field)" class="dynamic-field-item">
-                  <template v-if="field.name === 'industry'">
-                    <el-select
-                      v-model="fieldFilters[field.name].selectedValues"
-                      placeholder="选择行业"
-                      multiple
-                      filterable
-                      clearable
-                      collapse-tags
-                      collapse-tags-tooltip
-                    >
-                      <el-option
-                        v-for="industry in industryOptions"
-                        :key="industry.value"
-                        :label="industry.label"
-                        :value="industry.value"
-                      />
-                    </el-select>
-                  </template>
-
-                  <template v-else-if="isBooleanField(field)">
-                    <el-select
-                      v-model="fieldFilters[field.name].booleanValue"
-                      placeholder="不限"
-                      clearable
-                    >
-                      <el-option label="否" value="false" />
-                      <el-option label="是" value="true" />
-                    </el-select>
-                  </template>
-
-                  <template v-else-if="isNumericField(field)">
-                    <div class="range-inputs">
-                      <el-input-number
-                        v-model="fieldFilters[field.name].min"
-                        placeholder="最小值"
-                        :controls="false"
-                        style="width: 45%"
-                      />
-                      <span class="range-separator">-</span>
-                      <el-input-number
-                        v-model="fieldFilters[field.name].max"
-                        placeholder="最大值"
-                        :controls="false"
-                        style="width: 45%"
-                      />
-                    </div>
-                  </template>
-
-                  <template v-else>
-                    <div class="string-inputs">
-                      <el-select v-model="fieldFilters[field.name].operator" style="width: 120px">
+              <el-row :gutter="24">
+                <el-col
+                  v-for="field in category.fields"
+                  :key="field.name"
+                  :span="8"
+                >
+                  <el-form-item :label="buildFieldLabel(field)" class="dynamic-field-item">
+                    <template v-if="field.name === 'industry'">
+                      <el-select
+                        v-model="fieldFilters[field.name].selectedValues"
+                        placeholder="选择行业"
+                        multiple
+                        filterable
+                        clearable
+                        collapse-tags
+                        collapse-tags-tooltip
+                      >
                         <el-option
-                          v-for="operator in getTextOperators(field)"
-                          :key="operator"
-                          :label="formatOperatorLabel(operator)"
-                          :value="operator"
+                          v-for="industry in industryOptions"
+                          :key="industry.value"
+                          :label="industry.label"
+                          :value="industry.value"
                         />
                       </el-select>
-                      <el-input
-                        v-model="fieldFilters[field.name].scalarValue"
-                        :placeholder="buildFieldPlaceholder(field, fieldFilters[field.name].operator)"
-                        clearable
-                      />
-                    </div>
-                  </template>
+                    </template>
 
-                  <div v-if="field.description" class="field-help">{{ field.description }}</div>
-                </el-form-item>
-              </el-col>
-            </el-row>
-          </el-collapse-item>
-          </el-collapse>
+                    <template v-else-if="isBooleanField(field)">
+                      <el-select
+                        v-model="fieldFilters[field.name].booleanValue"
+                        placeholder="不限"
+                        clearable
+                      >
+                        <el-option label="否" value="false" />
+                        <el-option label="是" value="true" />
+                      </el-select>
+                    </template>
+
+                    <template v-else-if="isNumericField(field)">
+                      <div class="range-inputs">
+                        <el-input-number
+                          v-model="fieldFilters[field.name].min"
+                          placeholder="最小值"
+                          :controls="false"
+                          style="width: 45%"
+                        />
+                        <span class="range-separator">-</span>
+                        <el-input-number
+                          v-model="fieldFilters[field.name].max"
+                          placeholder="最大值"
+                          :controls="false"
+                          style="width: 45%"
+                        />
+                      </div>
+                    </template>
+
+                    <template v-else>
+                      <div class="string-inputs">
+                        <el-select v-model="fieldFilters[field.name].operator" style="width: 120px">
+                          <el-option
+                            v-for="operator in getTextOperators(field)"
+                            :key="operator"
+                            :label="formatOperatorLabel(operator)"
+                            :value="operator"
+                          />
+                        </el-select>
+                        <el-input
+                          v-model="fieldFilters[field.name].scalarValue"
+                          :placeholder="buildFieldPlaceholder(field, fieldFilters[field.name].operator)"
+                          clearable
+                        />
+                      </div>
+                    </template>
+
+                    <div v-if="buildFieldHelp(field)" class="field-help">{{ buildFieldHelp(field) }}</div>
+                  </el-form-item>
+                </el-col>
+              </el-row>
+            </div>
+          </div>
+
+          <div v-else class="advanced-empty-state">
+            还没有添加高级字段。需要更细条件时，再从上方选择要补充的字段。
+          </div>
         </div>
 
         <!-- 筛选按钮 -->
@@ -692,7 +766,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, TrendCharts, Download, Star, Connection, Warning, User, Delete } from '@element-plus/icons-vue'
@@ -1140,7 +1214,6 @@ const currentDataSource = ref<{
 // 字段配置
 const fieldConfig = ref<FieldConfigResponse | null>(null)
 const fieldsLoading = ref(false)
-const activeFilterCategories = ref<string[]>(['basic', 'market_value', 'financial', 'trading', 'price', 'technical'])
 
 type DynamicFieldState = {
   operator: string
@@ -1160,56 +1233,107 @@ const savedFilterPresets = ref<SavedFilterPreset[]>([])
 const selectedPresetId = ref<string>('')
 const presetsLoading = ref(false)
 
-// 基础筛选条件
-const basicFilters = reactive({
+type BasicFiltersState = {
+  market: string
+  marketCapRange: '' | 'small' | 'medium' | 'large'
+  volumeLevel: '' | 'high' | 'medium' | 'low'
+}
+
+const createDefaultBasicFilters = (): BasicFiltersState => ({
   market: 'A股',
+  marketCapRange: '',
+  volumeLevel: '',
 })
+
+const basicFilters = reactive<BasicFiltersState>(createDefaultBasicFilters())
 
 // 行业选项（动态加载）
 const industryOptions = ref<Array<{label: string, value: string, count?: number}>>([])
 
-type GuidedScreeningMode = {
-  id: string
-  label: string
-  description: string
-  hint: string
-  fieldNames: string[]
-}
-
-const guidedScreeningModes: GuidedScreeningMode[] = [
-  {
-    id: 'balanced',
-    label: '稳妥入门',
-    description: '先看行业、估值、盈利和市值，适合大多数用户快速起步。',
-    hint: '适合第一次使用',
-    fieldNames: ['industry', 'pe_ttm', 'pb_mrq', 'roe', 'total_mv'],
-  },
-  {
-    id: 'value',
-    label: '低估值',
-    description: '重点看 PE、PB 和市值，适合找相对便宜的公司。',
-    hint: '偏价值风格',
-    fieldNames: ['industry', 'pe_ttm', 'pb_mrq', 'pe', 'pb', 'total_mv'],
-  },
-  {
-    id: 'quality',
-    label: '高质量',
-    description: '优先看 ROE 和估值，快速筛掉盈利质量偏弱的标的。',
-    hint: '偏基本面',
-    fieldNames: ['industry', 'roe', 'pe_ttm', 'pb_mrq', 'total_mv'],
-  },
-  {
-    id: 'momentum',
-    label: '趋势动量',
-    description: '只展示走势和交易活跃度相关的核心字段。',
-    hint: '偏交易节奏',
-    fieldNames: ['industry', 'pct_chg', 'turnover_rate', 'volume_ratio', 'rsi14', 'ma20', 'macd_hist'],
-  },
+const marketCapRangeOptions = [
+  { label: '小盘股 (< 100亿)', value: 'small' as const },
+  { label: '中盘股 (100-500亿)', value: 'medium' as const },
+  { label: '大盘股 (> 500亿)', value: 'large' as const },
 ]
 
-const defaultGuidedFieldNames = ['industry', 'pe_ttm', 'pb_mrq', 'roe', 'total_mv', 'pct_chg']
-const selectedGuideModeId = ref<GuidedScreeningMode['id']>('balanced')
-const showAdvancedFilters = ref(false)
+const volumeLevelOptions = [
+  { label: '活跃 (高成交量)', value: 'high' as const },
+  { label: '正常 (中等成交量)', value: 'medium' as const },
+  { label: '清淡 (低成交量)', value: 'low' as const },
+]
+
+const marketCapRangeLabels: Record<Exclude<BasicFiltersState['marketCapRange'], ''>, string> = {
+  small: '小盘股 (< 100亿)',
+  medium: '中盘股 (100-500亿)',
+  large: '大盘股 (> 500亿)',
+}
+
+const volumeLevelLabels: Record<Exclude<BasicFiltersState['volumeLevel'], ''>, string> = {
+  high: '活跃 (高成交量)',
+  medium: '正常 (中等成交量)',
+  low: '清淡 (低成交量)',
+}
+
+const marketCapRangeMap: Record<Exclude<BasicFiltersState['marketCapRange'], ''>, { min: number | null; max: number | null }> = {
+  small: { min: null, max: 100 },
+  medium: { min: 100, max: 500 },
+  large: { min: 500, max: null },
+}
+
+const volumeLevelMap: Record<Exclude<BasicFiltersState['volumeLevel'], ''>, { min: number | null; max: number | null }> = {
+  high: { min: 1000000000, max: null },
+  medium: { min: 300000000, max: 1000000000 },
+  low: { min: null, max: 300000000 },
+}
+
+const commonControlledFieldNames = new Set(['keyword', 'symbol', 'name', 'industry', 'total_mv', 'pe', 'pb', 'roe', 'pct_chg', 'amount'])
+
+const fieldEnglishMeta: Record<string, string> = {
+  keyword: 'Keyword Search',
+  symbol: 'Stock Code (Ticker)',
+  name: 'Stock Name',
+  industry: 'Industry',
+  area: 'Region',
+  total_mv: 'Total Market Value (Market Cap)',
+  circ_mv: 'Circulating Market Value (Float Cap)',
+  pe: 'Price-to-Earnings Ratio (P/E)',
+  pb: 'Price-to-Book Ratio (P/B)',
+  pe_ttm: 'Trailing Price-to-Earnings (P/E TTM)',
+  pb_mrq: 'Price-to-Book, Most Recent Quarter (P/B MRQ)',
+  ps: 'Price-to-Sales Ratio (P/S)',
+  ps_ttm: 'Trailing Price-to-Sales (P/S TTM)',
+  roe: 'Return on Equity (ROE)',
+  roa: 'Return on Assets (ROA)',
+  gross_margin: 'Gross Margin (GM)',
+  netprofit_margin: 'Net Profit Margin (NPM)',
+  revenue: 'Revenue',
+  revenue_ttm: 'Trailing Twelve-Month Revenue (Revenue TTM)',
+  net_profit: 'Net Profit',
+  net_profit_ttm: 'Trailing Twelve-Month Net Profit (Net Profit TTM)',
+  n_cashflow_act: 'Operating Cash Flow (OCF)',
+  debt_to_assets: 'Debt-to-Assets Ratio (D/A)',
+  assets_to_eqt: 'Equity Multiplier (EM)',
+  current_ratio: 'Current Ratio (CR)',
+  quick_ratio: 'Quick Ratio (QR)',
+  cash_ratio: 'Cash Ratio',
+  dividend_yield: 'Dividend Yield',
+  close: 'Closing Price',
+  pct_chg: 'Percentage Change (Pct Change)',
+  amount: 'Trading Amount',
+  turnover_rate: 'Turnover Rate',
+  volume_ratio: 'Volume Ratio (VR)',
+  ma20: '20-Day Moving Average (MA20)',
+  ma60: '60-Day Moving Average (MA60)',
+  rsi14: 'Relative Strength Index (RSI14)',
+  kdj_k: 'KDJ K Value (KDJ-K)',
+  kdj_d: 'KDJ D Value (KDJ-D)',
+  kdj_j: 'KDJ J Value (KDJ-J)',
+  dif: 'MACD Difference Line (DIF)',
+  dea: 'MACD Signal Line (DEA)',
+  macd_hist: 'MACD Histogram (MACD Hist)',
+}
+
+const selectedAdvancedFieldNames = ref<string[]>([])
 
 // 计算属性
 const paginatedResults = computed(() => {
@@ -1221,52 +1345,15 @@ const paginatedResults = computed(() => {
 const categoryOrder = computed(() => fieldConfig.value?.ui_metadata?.category_order || ['basic', 'market_value', 'financial', 'trading', 'price', 'technical'])
 const categoryLabels = computed(() => fieldConfig.value?.ui_metadata?.category_labels || {})
 const hiddenFieldNames = computed(() => new Set(fieldConfig.value?.ui_metadata?.hidden_fields || ['code', 'market']))
-const currentGuideMode = computed(() =>
-  guidedScreeningModes.find((mode) => mode.id === selectedGuideModeId.value) || guidedScreeningModes[0]
-)
 
 const isFieldVisible = (fieldName: string) => !hiddenFieldNames.value.has(fieldName)
 
-const buildFieldSections = (fieldNames: string[]) => {
-  if (!fieldConfig.value) return [] as Array<{ key: string; label: string; fields: FieldInfo[] }>
+const hasLegacyCommonFilters = computed(() =>
+  ['keyword', 'industry', 'total_mv', 'pe', 'pb', 'roe', 'pct_chg', 'amount'].every((fieldName) => !!fieldFilters[fieldName])
+)
 
-  const allowedFieldNames = new Set(fieldNames)
-  const visibleFieldsByCategory = fieldConfig.value.ui_metadata?.visible_fields_by_category || fieldConfig.value.categories
-
-  return categoryOrder.value
-    .map((categoryKey) => {
-      const categoryFieldNames = visibleFieldsByCategory[categoryKey] || []
-      const fields = categoryFieldNames
-        .filter((fieldName) => allowedFieldNames.has(fieldName))
-        .map((fieldName) => fieldConfig.value?.fields[fieldName])
-        .filter((field): field is FieldInfo => {
-          if (!field) return false
-          return isFieldVisible(field.name)
-        })
-
-      return {
-        key: categoryKey,
-        label: categoryLabels.value[categoryKey] || categoryKey,
-        fields,
-      }
-    })
-    .filter((section) => section.fields.length > 0)
-}
-
-const resolveGuidedFieldNames = (preferredFieldNames: string[]) => {
-  if (!fieldConfig.value) return [] as string[]
-
-  const visibleFieldNames = new Set(
-    Object.values(fieldConfig.value.fields)
-      .filter((field) => isFieldVisible(field.name))
-      .map((field) => field.name)
-  )
-
-  const resolvedPreferred = preferredFieldNames.filter((fieldName) => visibleFieldNames.has(fieldName))
-  if (resolvedPreferred.length > 0) return resolvedPreferred
-
-  return defaultGuidedFieldNames.filter((fieldName) => visibleFieldNames.has(fieldName))
-}
+const commonFieldCount = computed(() => hasLegacyCommonFilters.value ? 9 : 0)
+let suppressQuickSelectionSync = false
 
 const createEmptyFieldState = (field: FieldInfo): DynamicFieldState => {
   let operator = field.supported_operators[0] || 'contains'
@@ -1290,15 +1377,55 @@ const resetFieldFilters = (config: FieldConfigResponse | null = fieldConfig.valu
     delete fieldFilters[key]
   })
 
-  if (!config) return
+  selectedAdvancedFieldNames.value = []
+  basicFilters.marketCapRange = ''
+  basicFilters.volumeLevel = ''
 
-  activeFilterCategories.value = []
+  if (!config) return
 
   Object.values(config.fields)
     .filter((field) => isFieldVisible(field.name))
     .forEach((field) => {
       fieldFilters[field.name] = createEmptyFieldState(field)
     })
+}
+
+const setRangeFieldState = (
+  fieldName: 'total_mv' | 'amount',
+  range: { min: number | null; max: number | null } | null,
+) => {
+  const state = fieldFilters[fieldName]
+  if (!state) return
+
+  state.min = range?.min ?? null
+  state.max = range?.max ?? null
+}
+
+const normalizeRangeValue = (value: unknown) => value == null ? null : Number(value)
+
+const matchRangeSelection = <T extends string>(
+  state: Partial<DynamicFieldState> | undefined,
+  options: Record<T, { min: number | null; max: number | null }>,
+): T | '' => {
+  const min = normalizeRangeValue(state?.min)
+  const max = normalizeRangeValue(state?.max)
+
+  for (const [key, range] of Object.entries(options) as Array<[T, { min: number | null; max: number | null }]>) {
+    if (min === range.min && max === range.max) {
+      return key
+    }
+  }
+
+  return ''
+}
+
+const syncQuickSelectionsFromFieldFilters = () => {
+  suppressQuickSelectionSync = true
+  basicFilters.marketCapRange = matchRangeSelection(fieldFilters.total_mv, marketCapRangeMap)
+  basicFilters.volumeLevel = matchRangeSelection(fieldFilters.amount, volumeLevelMap)
+  void nextTick(() => {
+    suppressQuickSelectionSync = false
+  })
 }
 
 const filterCategorySections = computed(() => {
@@ -1325,34 +1452,75 @@ const filterCategorySections = computed(() => {
     .filter((section) => section.fields.length > 0)
 })
 
-const guidedFieldSections = computed(() =>
-  buildFieldSections(resolveGuidedFieldNames(currentGuideMode.value.fieldNames))
-)
-
-const guidedFieldNameSet = computed(() => new Set(
-  guidedFieldSections.value.flatMap((section) => section.fields.map((field) => field.name))
-))
-
-const guidedFieldCount = computed(() =>
-  guidedFieldSections.value.reduce((total, section) => total + section.fields.length, 0)
-)
-
-const advancedFilterSections = computed(() =>
+const advancedCandidateSections = computed(() =>
   filterCategorySections.value
     .map((section) => ({
       ...section,
-      fields: section.fields.filter((field) => !guidedFieldNameSet.value.has(field.name)),
+      fields: section.fields.filter((field) => !commonControlledFieldNames.has(field.name)),
     }))
     .filter((section) => section.fields.length > 0)
 )
 
-const advancedFieldCount = computed(() =>
-  advancedFilterSections.value.reduce((total, section) => total + section.fields.length, 0)
+const availableAdvancedFieldCount = computed(() =>
+  advancedCandidateSections.value.reduce((total, section) => total + section.fields.length, 0)
 )
 
 const totalVisibleFieldCount = computed(() =>
   filterCategorySections.value.reduce((total, section) => total + section.fields.length, 0)
 )
+
+const isFieldStateActive = (field: FieldInfo, state?: Partial<DynamicFieldState> | null) => {
+  if (!state) return false
+
+  if (field.name === 'industry') {
+    return Array.isArray(state.selectedValues) && state.selectedValues.length > 0
+  }
+
+  if (isBooleanField(field)) {
+    return state.booleanValue === 'true' || state.booleanValue === 'false'
+  }
+
+  if (isNumericField(field)) {
+    return state.min != null || state.max != null
+  }
+
+  return !!String(state.scalarValue || '').trim()
+}
+
+const collectActiveAdvancedFieldNames = (filters: Record<string, Partial<DynamicFieldState>> = fieldFilters) => {
+  const names: string[] = []
+
+  advancedCandidateSections.value.forEach((section) => {
+    section.fields.forEach((field) => {
+      if (isFieldStateActive(field, filters[field.name])) {
+        names.push(field.name)
+      }
+    })
+  })
+
+  return Array.from(new Set(names))
+}
+
+const advancedFieldOptionGroups = computed(() => advancedCandidateSections.value)
+
+const advancedFieldSections = computed(() => {
+  const selectedNames = new Set(selectedAdvancedFieldNames.value)
+
+  return advancedCandidateSections.value
+    .map((section) => ({
+      ...section,
+      fields: section.fields.filter((field) => selectedNames.has(field.name)),
+    }))
+    .filter((section) => section.fields.length > 0)
+})
+
+const selectedAdvancedFields = computed(() =>
+  advancedFieldSections.value.flatMap((section) => section.fields)
+)
+
+const availableAdvancedFieldNameSet = computed(() => new Set(
+  advancedCandidateSections.value.flatMap((section) => section.fields.map((field) => field.name))
+))
 
 const activeConditionSummaries = computed(() => {
   if (!fieldConfig.value) return [] as string[]
@@ -1361,6 +1529,14 @@ const activeConditionSummaries = computed(() => {
     const field = fieldConfig.value?.fields[condition.field]
     const label = field?.display_name || condition.field
     const value = condition.value
+
+    if (condition.field === 'total_mv' && basicFilters.marketCapRange) {
+      return `市值范围: ${marketCapRangeLabels[basicFilters.marketCapRange]}`
+    }
+
+    if (condition.field === 'amount' && basicFilters.volumeLevel) {
+      return `成交量水平: ${volumeLevelLabels[basicFilters.volumeLevel]}`
+    }
 
     if (Array.isArray(value)) {
       if (condition.operator === 'between') {
@@ -1396,14 +1572,34 @@ const formatOperatorLabel = (operator: string) => {
   return labels[operator] || operator
 }
 
-const toggleAdvancedFilters = () => {
-  showAdvancedFilters.value = !showAdvancedFilters.value
-  activeFilterCategories.value = showAdvancedFilters.value
-    ? advancedFilterSections.value.map((section) => section.key)
-    : []
+const resetFieldFilter = (fieldName: string) => {
+  const field = fieldConfig.value?.fields[fieldName]
+  if (!field || !fieldFilters[fieldName]) return
+  fieldFilters[fieldName] = createEmptyFieldState(field)
+}
+
+const removeAdvancedField = (fieldName: string) => {
+  selectedAdvancedFieldNames.value = selectedAdvancedFieldNames.value.filter((name) => name !== fieldName)
+  resetFieldFilter(fieldName)
 }
 
 const buildFieldLabel = (field: FieldInfo) => field.unit ? `${field.display_name} (${field.unit})` : field.display_name
+
+const buildFieldHelp = (field: FieldInfo) => {
+  const parts: string[] = []
+  const description = String(field.description || '').trim()
+  const englishMeta = fieldEnglishMeta[field.name]
+
+  if (description) {
+    parts.push(description)
+  }
+
+  if (englishMeta) {
+    parts.push(`英文：${englishMeta}`)
+  }
+
+  return parts.join(' ')
+}
 
 const buildFieldPlaceholder = (field: FieldInfo, operator: string) => {
   if (operator === 'in' || operator === 'not_in') {
@@ -1436,6 +1632,24 @@ const cloneFieldFilters = (): Record<string, DynamicFieldState> => {
   return snapshot
 }
 
+const buildPresetBasicFilters = () => ({
+  market: basicFilters.market,
+  marketCapRange: basicFilters.marketCapRange,
+  volumeLevel: basicFilters.volumeLevel,
+  selectedAdvancedFieldNames: [...selectedAdvancedFieldNames.value],
+})
+
+const resolvePresetAdvancedFieldNames = (preset: SavedFilterPreset) => {
+  const savedFieldNames = Array.isArray(preset.basicFilters?.selectedAdvancedFieldNames)
+    ? preset.basicFilters.selectedAdvancedFieldNames
+    : []
+
+  const activeFieldNames = collectActiveAdvancedFieldNames(preset.fieldFilters || {})
+
+  return Array.from(new Set([...savedFieldNames, ...activeFieldNames]))
+    .filter((fieldName): fieldName is string => typeof fieldName === 'string' && availableAdvancedFieldNameSet.value.has(fieldName))
+}
+
 const sortSavedPresets = (presets: SavedFilterPreset[]) =>
   [...presets].sort((a, b) => {
     const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime()
@@ -1449,7 +1663,10 @@ const normalizeSavedPreset = (preset: Partial<SavedFilterPreset> | null | undefi
   return {
     id: preset.id,
     name: preset.name,
-    basicFilters: preset.basicFilters || { market: 'A股' },
+    basicFilters: {
+      ...createDefaultBasicFilters(),
+      ...(preset.basicFilters || {}),
+    },
     fieldFilters: preset.fieldFilters || {},
     createdAt: preset.createdAt,
     updatedAt: preset.updatedAt,
@@ -1540,7 +1757,7 @@ const applyPreset = (preset: SavedFilterPreset) => {
   Object.entries(preset.fieldFilters || {}).forEach(([fieldName, state]) => {
     if (!fieldFilters[fieldName]) return
     fieldFilters[fieldName] = {
-      operator: state.operator || fieldFilters[fieldName].operator,
+      operator: fieldName === 'keyword' ? 'contains' : (state.operator || fieldFilters[fieldName].operator),
       scalarValue: state.scalarValue || '',
       min: state.min ?? null,
       max: state.max ?? null,
@@ -1548,6 +1765,20 @@ const applyPreset = (preset: SavedFilterPreset) => {
       booleanValue: state.booleanValue || '',
     }
   })
+
+  syncQuickSelectionsFromFieldFilters()
+
+  if (!basicFilters.marketCapRange && preset.basicFilters.marketCapRange in marketCapRangeMap) {
+    basicFilters.marketCapRange = preset.basicFilters.marketCapRange as BasicFiltersState['marketCapRange']
+    setRangeFieldState('total_mv', marketCapRangeMap[basicFilters.marketCapRange as Exclude<BasicFiltersState['marketCapRange'], ''>])
+  }
+
+  if (!basicFilters.volumeLevel && preset.basicFilters.volumeLevel in volumeLevelMap) {
+    basicFilters.volumeLevel = preset.basicFilters.volumeLevel as BasicFiltersState['volumeLevel']
+    setRangeFieldState('amount', volumeLevelMap[basicFilters.volumeLevel as Exclude<BasicFiltersState['volumeLevel'], ''>])
+  }
+
+  selectedAdvancedFieldNames.value = resolvePresetAdvancedFieldNames(preset)
 }
 
 const handlePresetSelect = (presetId?: string) => {
@@ -1576,12 +1807,12 @@ const saveCurrentPreset = async () => {
     const response = existing
       ? await screeningApi.updatePreset(existing.id, {
         name,
-        basicFilters: { market: basicFilters.market },
+        basicFilters: buildPresetBasicFilters(),
         fieldFilters: cloneFieldFilters(),
       })
       : await screeningApi.createPreset({
         name,
-        basicFilters: { market: basicFilters.market },
+        basicFilters: buildPresetBasicFilters(),
         fieldFilters: cloneFieldFilters(),
       })
 
@@ -1593,7 +1824,7 @@ const saveCurrentPreset = async () => {
     upsertSavedPreset({
       id: preset.id,
       name,
-      basicFilters: { market: basicFilters.market },
+      basicFilters: buildPresetBasicFilters(),
       fieldFilters: cloneFieldFilters(),
       createdAt: preset.createdAt,
       updatedAt: preset.updatedAt,
@@ -1637,6 +1868,14 @@ const buildDynamicConditions = (): ScreeningConditionItem[] => {
     if (field.name === 'industry') {
       if (state.selectedValues.length) {
         conditions.push({ field: field.name, operator: 'in', value: state.selectedValues })
+      }
+      continue
+    }
+
+    if (field.name === 'keyword') {
+      const rawValue = state.scalarValue.trim()
+      if (rawValue) {
+        conditions.push({ field: field.name, operator: 'contains', value: rawValue })
       }
       continue
     }
@@ -1756,14 +1995,29 @@ const performScreening = async () => {
 const resetFilters = () => {
   basicFilters.market = 'A股'
   resetFieldFilters()
-  selectedGuideModeId.value = 'balanced'
-  showAdvancedFilters.value = false
 
   screeningResults.value = []
   selectedStocks.value = []
   hasSearched.value = false
   currentPage.value = 1
 }
+
+watch(selectedAdvancedFieldNames, (next, prev) => {
+  const nextSet = new Set(next)
+  prev
+    .filter((fieldName) => !nextSet.has(fieldName))
+    .forEach((fieldName) => resetFieldFilter(fieldName))
+})
+
+watch(() => basicFilters.marketCapRange, (value) => {
+  if (suppressQuickSelectionSync) return
+  setRangeFieldState('total_mv', value ? marketCapRangeMap[value] : null)
+})
+
+watch(() => basicFilters.volumeLevel, (value) => {
+  if (suppressQuickSelectionSync) return
+  setRangeFieldState('amount', value ? volumeLevelMap[value] : null)
+})
 
 const handleSelectionChange = (selection: StockInfo[]) => {
   selectedStocks.value = selection
@@ -1898,6 +2152,7 @@ const loadFieldConfig = async () => {
     const response = await screeningApi.getFields()
     fieldConfig.value = response
     resetFieldFilters(fieldConfig.value)
+    syncQuickSelectionsFromFieldFilters()
     console.log('因子注册表字段配置加载成功:', fieldConfig.value)
   } catch (error) {
     console.error('加载因子注册表字段配置失败:', error)
@@ -2057,8 +2312,7 @@ onUnmounted(() => {
         color: var(--el-text-color-regular);
       }
 
-      .guided-panel,
-      .guided-core-panel,
+      .common-filter-panel,
       .advanced-filter-panel {
         margin-bottom: 16px;
         padding: 16px;
@@ -2067,8 +2321,7 @@ onUnmounted(() => {
         background: var(--el-bg-color-page);
       }
 
-      .guided-panel-header,
-      .guided-core-header,
+      .common-filter-header,
       .advanced-filter-header {
         display: flex;
         align-items: flex-start;
@@ -2077,16 +2330,14 @@ onUnmounted(() => {
         margin-bottom: 14px;
       }
 
-      .guided-panel-title,
-      .guided-core-title,
+      .common-filter-title,
       .advanced-filter-title {
         font-size: 15px;
         font-weight: 600;
         color: var(--el-text-color-primary);
       }
 
-      .guided-panel-subtitle,
-      .guided-core-subtitle,
+      .common-filter-subtitle,
       .advanced-filter-subtitle {
         margin-top: 4px;
         color: var(--el-text-color-secondary);
@@ -2094,59 +2345,11 @@ onUnmounted(() => {
         line-height: 1.6;
       }
 
-      .guide-mode-grid {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 12px;
-      }
-
-      .guide-mode-card {
-        appearance: none;
-        width: 100%;
-        padding: 14px;
-        text-align: left;
-        border: 1px solid var(--el-border-color);
-        border-radius: 12px;
-        background: var(--el-bg-color);
-        cursor: pointer;
-        transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
-
-        &:hover {
-          border-color: var(--el-color-primary-light-5);
-          transform: translateY(-1px);
-        }
-
-        &.active {
-          border-color: var(--el-color-primary);
-          box-shadow: 0 10px 24px rgba(64, 158, 255, 0.12);
-          background: rgba(64, 158, 255, 0.05);
-        }
-      }
-
-      .guide-mode-title {
-        font-size: 14px;
-        font-weight: 600;
-        color: var(--el-text-color-primary);
-      }
-
-      .guide-mode-description {
-        margin-top: 8px;
-        font-size: 13px;
-        line-height: 1.6;
-        color: var(--el-text-color-regular);
-      }
-
-      .guide-mode-meta {
-        margin-top: 10px;
-        font-size: 12px;
-        color: var(--el-color-primary);
-      }
-
-      .guided-section + .guided-section {
+      .condition-section + .condition-section {
         margin-top: 16px;
       }
 
-      .guided-section-header {
+      .condition-section-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -2155,14 +2358,21 @@ onUnmounted(() => {
         color: var(--el-text-color-primary);
       }
 
-      .dynamic-filter-groups {
+      .advanced-picker-item {
         margin-bottom: 16px;
       }
 
-      .group-title {
+      .advanced-selected-tags {
         display: flex;
-        align-items: center;
+        flex-wrap: wrap;
         gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .advanced-empty-state {
+        color: var(--el-text-color-secondary);
+        font-size: 13px;
+        line-height: 1.6;
       }
 
       .dynamic-field-item {
@@ -2199,22 +2409,11 @@ onUnmounted(() => {
         margin-top: 24px;
       }
 
-      @media (max-width: 1200px) {
-        .guide-mode-grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-
       @media (max-width: 768px) {
-        .guided-panel-header,
-        .guided-core-header,
+        .common-filter-header,
         .advanced-filter-header {
           flex-direction: column;
           align-items: stretch;
-        }
-
-        .guide-mode-grid {
-          grid-template-columns: 1fr;
         }
       }
     }

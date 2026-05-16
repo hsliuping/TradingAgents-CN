@@ -41,6 +41,8 @@ async def get_license_info(
     注意：设备ID由后端基于硬件信息自动生成，用户无法获取或复制
     """
     license_service = get_license_service()
+    user_doc = None
+    auth_server = None
     
     # 优先使用请求头中的 token
     token = app_token
@@ -52,6 +54,13 @@ async def get_license_info(
         user_doc = await db.users.find_one({"_id": ObjectId(user_id)})
         if user_doc:
             token = user_doc.get("app_token")
+            auth_server = user_doc.get("license_server")
+    else:
+        db = get_mongo_db()
+        user_id = str(user.get("id", ""))
+        user_doc = await db.users.find_one({"_id": ObjectId(user_id)})
+        if user_doc:
+            auth_server = user_doc.get("license_server")
     
     # 如果没有 token，返回免费用户信息
     if not token:
@@ -64,7 +73,7 @@ async def get_license_info(
         )
     
     # 验证 token（设备ID由后端自动生成）
-    license_info = await license_service.verify_app_token(token)
+    license_info = await license_service.verify_app_token(token, auth_server=auth_server)
     return license_info
 
 

@@ -24,11 +24,13 @@ class VerifyTokenRequest(BaseModel):
     """验证 Token 请求"""
     token: str = Field(..., description="App Token")
     app_version: Optional[str] = Field(None, description="应用版本")
+    auth_server: Optional[str] = Field(None, description="认证服务器")
 
 
 class SaveTokenRequest(BaseModel):
     """保存 Token 请求"""
     token: str = Field(..., description="App Token")
+    auth_server: Optional[str] = Field(None, description="认证服务器")
 
 
 @router.post("/verify")
@@ -45,7 +47,8 @@ async def verify_license(
     
     license_info = await license_service.verify_app_token(
         token=request.token,
-        app_version=request.app_version
+        app_version=request.app_version,
+        auth_server=request.auth_server,
     )
     
     return ok({
@@ -73,10 +76,12 @@ async def save_app_token(
     注意：设备ID由后端基于硬件信息自动生成，用户无法获取或复制
     """
     license_service = get_license_service()
+    auth_server = license_service.resolve_auth_server(request.auth_server)
     
     # 验证 token（设备ID由后端自动生成）
     license_info = await license_service.verify_app_token(
-        request.token
+        request.token,
+        auth_server=auth_server,
     )
     
     if not license_info.is_valid:
@@ -92,6 +97,7 @@ async def save_app_token(
             {
                 "$set": {
                     "app_token": request.token,
+                    "license_server": auth_server,
                     "license_plan": license_info.plan,
                     "license_email": license_info.email
                 }
@@ -102,6 +108,7 @@ async def save_app_token(
         
         return ok({
             "message": "Token 保存成功",
+            "auth_server": auth_server,
             "plan": license_info.plan,
             "email": license_info.email,
             "features": license_info.features
@@ -143,7 +150,8 @@ async def delete_app_token(user: dict = Depends(get_current_user)):
 @router.get("/status")
 async def get_license_status(
     user: dict = Depends(get_current_user),
-    force_refresh: bool = Query(False, description="是否强制刷新（跳过缓存）")
+    force_refresh: bool = Query(False, description="是否强制刷新（跳过缓存）"),
+    auth_server: Optional[str] = Query(None, description="认证服务器"),
 ):
     """
     获取当前用户的授权状态
@@ -163,33 +171,45 @@ async def get_license_status(
 
         # 从数据库获取用户的 token
         user_doc = await db.users.find_one({"_id": ObjectId(user_id)})
+        license_service = get_license_service()
+        selected_server = license_service.resolve_auth_server(auth_server or (user_doc or {}).get("license_server"))
+
+        if user_doc and selected_server != user_doc.get("license_server"):
+            await db.users.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$set": {"license_server": selected_server}}
+            )
+            user_doc["license_server"] = selected_server
 
         if not user_doc or not user_doc.get("app_token"):
             logger.info(f"📋 用户 {user_id} 没有配置 App Token")
             return ok({
                 "has_token": False,
+                "auth_server": selected_server,
+                "auth_server_options": license_service.get_available_servers(),
                 "plan": "free",
                 "is_valid": True,
                 "message": "未配置 App Token，使用免费版"
             })
 
         # 验证 token（强制刷新时跳过缓存）
-        license_service = get_license_service()
-
         # 如果强制刷新，先清除缓存
         if force_refresh:
-            license_service.clear_cache(user_doc["app_token"])
+            license_service.clear_cache(user_doc["app_token"], selected_server)
             logger.info("🔄 强制刷新：已清除 token 缓存")
 
         license_info = await license_service.verify_app_token(
             user_doc["app_token"],
-            use_cache=not force_refresh  # force_refresh=True 时不使用缓存
+            use_cache=not force_refresh,  # force_refresh=True 时不使用缓存
+            auth_server=selected_server,
         )
 
         logger.info(f"📋 授权验证结果: email={license_info.email}, plan={license_info.plan}, offline={license_info.offline_mode}")
 
         return ok({
             "has_token": True,
+            "auth_server": selected_server,
+            "auth_server_options": license_service.get_available_servers(),
             "plan": license_info.plan,
             "email": license_info.email,
             "features": license_info.features,
