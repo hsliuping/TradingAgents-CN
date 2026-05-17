@@ -1435,7 +1435,7 @@ class DataSourceManager:
 
     def _get_local_data(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> str:
         """
-        从 MongoDB stock_daily_quotes 集合获取 local 数据源的历史数据
+        从 MongoDB 本地缓存集合获取历史数据。
 
         Args:
             symbol: 股票代码
@@ -1450,21 +1450,27 @@ class DataSourceManager:
 
         try:
             from app.core.database import get_mongo_db_sync
+            from tradingagents.utils.stock_utils import StockUtils
+
             db = get_mongo_db_sync()
-            collection = db.stock_daily_quotes
+            code6 = str(symbol).zfill(6)
+            is_fund = StockUtils.is_fund(code6)
+            collection = db.etf_daily_quotes if is_fund else db.stock_daily_quotes
+            symbol_field = "code" if is_fund else "symbol"
 
             # 查询条件
             query = {
-                "symbol": symbol,
-                "data_source": "local",
-                "period": period
+                symbol_field: code6,
             }
+
+            if not is_fund:
+                query["data_source"] = "local"
+                query["period"] = period
 
             # 添加日期范围过滤（如果提供）
             if start_date and end_date:
-                # 将日期格式从 YYYY-MM-DD 转换为 YYYYMMDD
-                start_date_str = start_date.replace("-", "")
-                end_date_str = end_date.replace("-", "")
+                start_date_str = start_date if is_fund else start_date.replace("-", "")
+                end_date_str = end_date if is_fund else end_date.replace("-", "")
                 query["trade_date"] = {
                     "$gte": start_date_str,
                     "$lte": end_date_str
@@ -1482,6 +1488,9 @@ class DataSourceManager:
 
             # 转换为 DataFrame
             df = pd.DataFrame(records)
+
+            if is_fund:
+                df["symbol"] = code6
 
             # 标准化列名（确保与其他数据源一致）
             column_mapping = {
@@ -1512,9 +1521,21 @@ class DataSourceManager:
                 stock_name = df['name'].iloc[0]
             elif records and 'name' in records[0]:
                 stock_name = records[0]['name']
+            elif is_fund:
+                etf_info = db.etf_basic_info.find_one(
+                    {"code": code6},
+                    {"name": 1, "fund_name": 1, "etf_name": 1, "_id": 0}
+                )
+                if etf_info:
+                    stock_name = (
+                        etf_info.get("name")
+                        or etf_info.get("fund_name")
+                        or etf_info.get("etf_name")
+                        or stock_name
+                    )
 
             # 调用统一的格式化方法（包含技术指标计算）
-            result = self._format_stock_data_response(df, symbol, stock_name, start_date, end_date)
+            result = self._format_stock_data_response(df, code6, stock_name, start_date, end_date)
 
             logger.info(f"✅ [LOCAL] 已计算技术指标: MA5/10/20/60, MACD, RSI, BOLL")
             return result
@@ -1839,18 +1860,47 @@ class DataSourceManager:
                     logger.warning(f"⚠️ [数据来源: Tushare失败] 返回无效信息，尝试降级: {symbol}")
                     return self._try_fallback_stock_info(symbol)
             else:
-                adapter = self.get_data_adapter()
-                if adapter and hasattr(adapter, 'get_stock_info'):
-                    result = adapter.get_stock_info(symbol)
-                    if result.get('name') and result['name'] != f'股票{symbol}':
-                        logger.info(f"✅ [数据来源: {self.current_source.value}-股票信息] 成功获取: {symbol}")
-                        return result
+                # LOCAL / 未知数据源：直接从 MongoDB 读取基础信息，不调用 get_data_adapter()
+                try:
+                    from app.core.database import get_mongo_db_sync
+                    from tradingagents.utils.stock_utils import StockUtils
+                    db = get_mongo_db_sync()
+                    code6 = str(symbol).zfill(6)
+                    is_fund = StockUtils.is_fund(code6)
+                    if is_fund:
+                        doc = db.etf_basic_info.find_one(
+                            {"$or": [{"symbol": code6}, {"code": code6}]},
+                            {"_id": 0}
+                        )
+                        if doc:
+                            return {
+                                'symbol': symbol,
+                                'name': doc.get('name') or doc.get('fund_name') or f'ETF{symbol}',
+                                'area': '未知',
+                                'industry': 'ETF基金',
+                                'market': 'ETF',
+                                'list_date': doc.get('list_date', '未知'),
+                                'source': 'etf_basic_info'
+                            }
                     else:
-                        logger.warning(f"⚠️ [数据来源: {self.current_source.value}失败] 返回无效信息，尝试降级: {symbol}")
-                        return self._try_fallback_stock_info(symbol)
-                else:
-                    logger.warning(f"⚠️ [数据来源: {self.current_source.value}] 不支持股票信息获取，尝试降级: {symbol}")
-                    return self._try_fallback_stock_info(symbol)
+                        doc = db.stock_basic_info.find_one(
+                            {"$or": [{"symbol": code6}, {"code": code6}]},
+                            {"_id": 0}
+                        )
+                        if doc:
+                            return {
+                                'symbol': symbol,
+                                'name': doc.get('name') or doc.get('stock_name') or f'股票{symbol}',
+                                'area': doc.get('area', '未知'),
+                                'industry': doc.get('industry', '未知'),
+                                'market': doc.get('market', '未知'),
+                                'list_date': doc.get('list_date', '未知'),
+                                'source': 'local_mongo'
+                            }
+                except Exception as db_e:
+                    logger.warning(f"⚠️ [LOCAL] 直读 MongoDB 失败: {db_e}")
+
+                return self._try_fallback_stock_info(symbol)
 
         except Exception as e:
             logger.error(f"❌ [数据来源: {self.current_source.value}异常] 获取股票信息失败: {e}", exc_info=True)
@@ -1921,49 +1971,52 @@ class DataSourceManager:
         """尝试使用备用数据源获取股票基本信息"""
         logger.error(f"🔄 {self.current_source.value}失败，尝试备用数据源获取股票信息...")
 
-        # 获取所有可用数据源
-        available_sources = self.available_sources.copy()
-
-        # 移除当前数据源
-        if self.current_source.value in available_sources:
-            available_sources.remove(self.current_source.value)
+        # 获取所有可用数据源（枚举对象列表）
+        available_sources = [s for s in self.available_sources if s != self.current_source]
 
         # 尝试所有备用数据源
-        for source_name in available_sources:
+        for source in available_sources:
             try:
-                source = ChinaDataSource(source_name)
-                logger.info(f"🔄 尝试备用数据源获取股票信息: {source_name}")
+                logger.info(f"🔄 尝试备用数据源获取股票信息: {source}")
 
                 # 根据数据源类型获取股票信息
                 if source == ChinaDataSource.TUSHARE:
-                    # 🔥 直接调用 Tushare 适配器，避免循环调用
-                    result = self._get_tushare_stock_info(symbol)
+                    # 复用 AKShare 路径（Tushare 无独立 stock_info helper）
+                    result = self._get_akshare_stock_info(symbol)
                 elif source == ChinaDataSource.AKSHARE:
                     result = self._get_akshare_stock_info(symbol)
                 elif source == ChinaDataSource.BAOSTOCK:
                     result = self._get_baostock_stock_info(symbol)
+                elif source == ChinaDataSource.LOCAL:
+                    # LOCAL 分支：直读 MongoDB 基础信息集合
+                    try:
+                        from app.core.database import get_mongo_db_sync
+                        from tradingagents.utils.stock_utils import StockUtils
+                        _db = get_mongo_db_sync()
+                        _code6 = str(symbol).zfill(6)
+                        _is_fund = StockUtils.is_fund(_code6)
+                        _col = _db.etf_basic_info if _is_fund else _db.stock_basic_info
+                        _doc = _col.find_one({"$or": [{"symbol": _code6}, {"code": _code6}]}, {"_id": 0})
+                        result = {
+                            'symbol': symbol,
+                            'name': (_doc or {}).get('name') or f'股票{symbol}',
+                            'source': 'local_mongo'
+                        } if _doc else {'symbol': symbol, 'name': f'股票{symbol}'}
+                    except Exception as _le:
+                        result = {'symbol': symbol, 'name': f'股票{symbol}'}
                 else:
-                    # 尝试通用适配器
-                    original_source = self.current_source
-                    self.current_source = source
-                    adapter = self.get_data_adapter()
-                    self.current_source = original_source
-
-                    if adapter and hasattr(adapter, 'get_stock_info'):
-                        result = adapter.get_stock_info(symbol)
-                    else:
-                        logger.warning(f"⚠️ [股票信息] {source_name}不支持股票信息获取")
-                        continue
+                    logger.warning(f"⚠️ [股票信息] {source}不支持股票信息获取")
+                    continue
 
                 # 检查是否获取到有效信息
                 if result.get('name') and result['name'] != f'股票{symbol}':
-                    logger.info(f"✅ [数据来源: 备用数据源] 降级成功获取股票信息: {source_name}")
+                    logger.info(f"✅ [数据来源: 备用数据源] 降级成功获取股票信息: {source.value}")
                     return result
                 else:
-                    logger.warning(f"⚠️ [数据来源: {source_name}] 返回无效信息")
+                    logger.warning(f"⚠️ [数据来源: {source.value}] 返回无效信息")
 
             except Exception as e:
-                logger.error(f"❌ 备用数据源{source_name}失败: {e}")
+                logger.error(f"❌ 备用数据源{source}失败: {e}")
                 continue
 
         # 所有数据源都失败，返回默认值

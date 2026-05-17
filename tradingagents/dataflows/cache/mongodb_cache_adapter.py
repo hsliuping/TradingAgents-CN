@@ -183,8 +183,12 @@ class MongoDBCacheAdapter:
             return None
 
         try:
+            from tradingagents.utils.stock_utils import StockUtils
+
             code6 = str(symbol).zfill(6)
-            collection = self.db.stock_daily_quotes
+            is_fund = StockUtils.is_fund(code6)
+            collection = self.db.etf_daily_quotes if is_fund else self.db.stock_daily_quotes
+            symbol_field = "code" if is_fund else "symbol"
 
             # 获取数据源优先级（作为候选列表，不再决定返回顺序）
             priority_order = self._get_data_source_priority(symbol)
@@ -195,7 +199,11 @@ class MongoDBCacheAdapter:
 
             for data_source in priority_order:
                 latest_doc = collection.find_one(
-                    {"symbol": code6, "period": period, "data_source": data_source},
+                    {
+                        symbol_field: code6,
+                        **({"period": period} if not is_fund else {}),
+                        "data_source": data_source,
+                    },
                     {"trade_date": 1, "_id": 0},
                     sort=[("trade_date", -1)]
                 )
@@ -224,10 +232,11 @@ class MongoDBCacheAdapter:
 
             # Step 2：从数据最新的数据源查询完整数据
             query = {
-                "symbol": code6,
-                "period": period,
+                symbol_field: code6,
                 "data_source": freshest_source
             }
+            if not is_fund:
+                query["period"] = period
             if start_date:
                 query["trade_date"] = {"$gte": start_date}
             if end_date:
@@ -241,6 +250,8 @@ class MongoDBCacheAdapter:
 
             if data:
                 df = pd.DataFrame(data)
+                if is_fund:
+                    df["symbol"] = code6
                 logger.info(
                     f"✅ [数据来源: MongoDB-{freshest_source}] {symbol}, "
                     f"{len(df)}条记录 (period={period}, 最新日期={freshest_date})"

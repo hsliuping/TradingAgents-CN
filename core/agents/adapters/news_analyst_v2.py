@@ -11,7 +11,6 @@ from typing import Dict, Any, List, Optional, Tuple
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from core.agents.analyst import AnalystAgent
-from core.agents.analyst import AnalystAgent
 from core.agents.base import GENERIC_REPORT_FALLBACK
 from core.agents.config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from core.agents.registry import register_agent
@@ -203,7 +202,11 @@ class NewsAnalystV2(AnalystAgent):
 
         from datetime import datetime
 
-        effective_date = analysis_date or datetime.now().strftime("%Y-%m-%d")
+        _raw_date = analysis_date or datetime.now().strftime("%Y-%m-%d")
+        if isinstance(_raw_date, datetime):
+            effective_date = _raw_date.strftime("%Y-%m-%d")
+        else:
+            effective_date = str(_raw_date)
         sections: List[str] = []
         consumed_tool_names: List[str] = []
 
@@ -272,6 +275,11 @@ class NewsAnalystV2(AnalystAgent):
             response = self._llm.invoke(final_messages)
             report = response.content if hasattr(response, "content") else str(response)
 
+        # 兜底：若两次重试后 report 仍是工具调用 JSON/XML，降级为文本说明而非存入原始 JSON
+        if "</tool_call>" in report or '"name": "get_stock_news_' in report:
+            logger.error("[NewsAnalystV2] 两次重试后仍返回伪工具调用，降级处理")
+            report = "当前新闻数据已获取但分析模型未能正常展开，新闻研究结论暂时不可用，请参考其他维度报告。"
+
         return report
 
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -317,7 +325,9 @@ class NewsAnalystV2(AnalystAgent):
                             if getattr(tool, "name", "") not in prefetched_tool_names
                         ]
 
-                        if not self._langchain_tools:
+                        # 有预取数据（prefetched_message 已追加到 messages）时直接进入分析，
+                        # 避免 LLM 调用残余工具后把工具调用 JSON 存成报告
+                        if not self._langchain_tools or prefetched_message is not None:
                             report = self._invoke_prefetched_analysis(messages, analysis_prompt)
                         else:
                             report = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)

@@ -1264,6 +1264,12 @@ class WorkflowBuilder:
                 return right
             return left if left else right
 
+        def keep_latest_list(left: Any, right: Any) -> Any:
+            """列表字段始终采用最新值，允许用空列表显式清空消息历史。"""
+            if right is None:
+                return left
+            return right
+
         class WorkflowState(MessagesState):
             # 基本信息
             company_of_interest: Annotated[str, keep_non_empty]
@@ -1325,10 +1331,10 @@ class WorkflowBuilder:
 
             # 分析师独立消息历史（避免并行执行时消息混乱）
             # 注意：这些字段用于工具调用循环，每个分析师使用自己的消息历史
-            _market_messages: Annotated[List, keep_non_empty]
-            _social_messages: Annotated[List, keep_non_empty]
-            _news_messages: Annotated[List, keep_non_empty]
-            _fundamentals_messages: Annotated[List, keep_non_empty]
+            _market_messages: Annotated[List, keep_latest_list]
+            _social_messages: Annotated[List, keep_latest_list]
+            _news_messages: Annotated[List, keep_latest_list]
+            _fundamentals_messages: Annotated[List, keep_latest_list]
 
             # 分析师工具调用计数（防止死循环）
             market_tool_call_count: Annotated[int, keep_non_empty]

@@ -54,9 +54,24 @@ def get_basics_from_cache(stock_code: Optional[str] = None) -> Optional[Dict[str
             doc = coll.find_one({"$or": [{"symbol": code6}, {"code": code6}]})
             if not doc:
                 try:
-                    _logger.debug(f"[app_cache] 基础信息未命中 | db={db_name} coll={BASICS_COLLECTION} code={code6}")
+                    _logger.debug(f"[app_cache] 基础信息未命中 | db={db_name} coll={BASICS_COLLECTION} code={code6}，尝试 etf_basic_info")
                 except Exception:
                     pass
+                # ETF/基金代码：兜底查 etf_basic_info
+                try:
+                    etf_coll = db["etf_basic_info"]
+                    doc = etf_coll.find_one({"$or": [{"symbol": code6}, {"code": code6}]})
+                    if doc:
+                        # 补齐与 stock_basic_info 结构一致的字段
+                        doc.setdefault("area", "未知")
+                        doc.setdefault("industry", "ETF基金")
+                        doc.setdefault("market", "ETF")
+                        doc.setdefault("list_date", "未知")
+                except Exception as etf_e:
+                    try:
+                        _logger.debug(f"[app_cache] etf_basic_info 查询异常: {etf_e}")
+                    except Exception:
+                        pass
             return doc or None
         else:
             cursor = coll.find({})

@@ -5,7 +5,7 @@ DeepSeek LLM适配器，支持Token使用统计
 import os
 import time
 from typing import Any, Dict, List, Optional, Union
-from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_openai import ChatOpenAI
 from langchain_openai.chat_models.base import _convert_message_to_dict
@@ -176,6 +176,76 @@ class ChatDeepSeek(ChatOpenAI):
             message_dict["reasoning_content"] = reasoning_content
         return message_dict
 
+    @staticmethod
+    def _extract_tool_call_ids(message: BaseMessage) -> List[str]:
+        if not isinstance(message, AIMessage):
+            return []
+
+        tool_calls = getattr(message, "tool_calls", None) or []
+        tool_call_ids: List[str] = []
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            tool_call_id = str(tool_call.get("id") or "").strip()
+            if tool_call_id:
+                tool_call_ids.append(tool_call_id)
+        return tool_call_ids
+
+    def _sanitize_messages_for_deepseek(self, messages: List[BaseMessage]) -> List[BaseMessage]:
+        """移除 DeepSeek 严格校验下不合法的 tool_call 历史。"""
+        sanitized: List[BaseMessage] = []
+        index = 0
+
+        while index < len(messages):
+            message = messages[index]
+
+            if isinstance(message, AIMessage):
+                tool_call_ids = self._extract_tool_call_ids(message)
+                if tool_call_ids:
+                    contiguous_tool_messages: List[ToolMessage] = []
+                    matched_tool_ids: List[str] = []
+                    next_index = index + 1
+
+                    while next_index < len(messages) and isinstance(messages[next_index], ToolMessage):
+                        tool_message = messages[next_index]
+                        tool_call_id = str(getattr(tool_message, "tool_call_id", "") or "").strip()
+                        if tool_call_id and tool_call_id in tool_call_ids and tool_call_id not in matched_tool_ids:
+                            contiguous_tool_messages.append(tool_message)
+                            matched_tool_ids.append(tool_call_id)
+                        else:
+                            logger.warning(
+                                "⚠️ [DeepSeek] 丢弃孤立或不匹配的 ToolMessage: tool_call_id=%s",
+                                tool_call_id or "<empty>",
+                            )
+                        next_index += 1
+
+                    missing_tool_ids = [tool_call_id for tool_call_id in tool_call_ids if tool_call_id not in matched_tool_ids]
+                    if missing_tool_ids:
+                        logger.warning(
+                            "⚠️ [DeepSeek] 检测到未闭合的 assistant tool_calls，已丢弃该消息片段: missing_tool_call_ids=%s",
+                            missing_tool_ids,
+                        )
+                        index = next_index
+                        continue
+
+                    sanitized.append(message)
+                    sanitized.extend(contiguous_tool_messages)
+                    index = next_index
+                    continue
+
+            if isinstance(message, ToolMessage):
+                logger.warning(
+                    "⚠️ [DeepSeek] 检测到没有前置 assistant tool_calls 的 ToolMessage，已丢弃: tool_call_id=%s",
+                    str(getattr(message, "tool_call_id", "") or "<empty>"),
+                )
+                index += 1
+                continue
+
+            sanitized.append(message)
+            index += 1
+
+        return sanitized
+
     def _get_request_payload(
         self,
         input_: Any,
@@ -184,6 +254,7 @@ class ChatDeepSeek(ChatOpenAI):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         messages = self._convert_input(input_).to_messages()
+        messages = self._sanitize_messages_for_deepseek(messages)
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
         if "messages" in payload:
             payload["messages"] = [self._convert_message_to_deepseek_dict(message) for message in messages]

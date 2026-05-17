@@ -316,9 +316,12 @@ class TradingAgentsGraph:
         quick_backend_url = self.config.get("quick_backend_url")
         deep_backend_url = self.config.get("deep_backend_url")
 
-        if quick_provider and deep_provider and quick_provider != deep_provider:
-            # 混合模式：快速模型和深度模型来自不同厂家
-            logger.info(f"🔀 [混合模式] 检测到不同厂家的模型组合")
+        if quick_provider and deep_provider:
+            if quick_provider != deep_provider:
+                logger.info(f"🔀 [混合模式] 检测到不同厂家的模型组合")
+            else:
+                logger.info(f"🧩 [显式模型配置] 检测到同厂家的模型组合，优先使用请求携带的 provider/api_key/backend_url")
+
             logger.info(f"   快速模型: {self.config['quick_think_llm']} ({quick_provider})")
             logger.info(f"   深度模型: {self.config['deep_think_llm']} ({deep_provider})")
 
@@ -343,7 +346,7 @@ class TradingAgentsGraph:
                 api_key=self.config.get("deep_api_key")  # 🔥 传递 API Key
             )
 
-            logger.info(f"✅ [混合模式] LLM 实例创建成功")
+            logger.info(f"✅ [显式模型配置] LLM 实例创建成功")
 
         elif self.config["llm_provider"].lower() == "openai":
             logger.info(f"🔧 [OpenAI-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")

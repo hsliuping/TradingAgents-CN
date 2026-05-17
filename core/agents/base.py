@@ -1090,12 +1090,20 @@ class BaseAgent(ABC):
             if state:
                 system_vars = [
                     "current_price", "industry", "market_name",
-                    "currency_name", "currency_symbol", "current_date", "start_date"
+                    "currency_name", "currency_symbol", "current_date", "start_date",
+                    # 报告类变量：ETF/股票分析链路中下游 agent 模板可能引用
+                    "fundamentals_report", "market_report", "news_report",
+                    "bull_report", "bear_report", "investment_plan", "safe_opinion",
                 ]
                 for var in system_vars:
                     if var in state and var not in variables:
-                        variables[var] = state[var]
-                        logger.info(f"📊 [系统变量] 自动提取 {var}: {state[var]}")
+                        val = state[var]
+                        # 报告类字段只截取摘要用于日志，不截断实际值
+                        if isinstance(val, str) and len(val) > 200:
+                            logger.info(f"📊 [系统变量] 自动提取 {var}: (长度={len(val)})")
+                        else:
+                            logger.info(f"📊 [系统变量] 自动提取 {var}: {val}")
+                        variables[var] = val
 
             # 从 context 中提取 user_id 和 preference_id
             user_id = None

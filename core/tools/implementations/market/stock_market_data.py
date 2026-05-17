@@ -106,10 +106,10 @@ def _get_last_trade_date_sync() -> Optional[str]:
 
 
 def _get_db_latest_trade_date_sync(symbol: str, data_source: Optional[str] = None) -> Optional[str]:
-    """从 MongoDB stock_daily_quotes 同步查询股票的最新 trade_date。
+    """从 MongoDB 查询证券的最新 trade_date。
 
     Args:
-        symbol: 股票代码（6位或带后缀均可）
+        symbol: 证券代码（6位或带后缀均可）
         data_source: 指定数据源（如 "tushare"）；为 None 时查询所有数据源中最新日期。
 
     Returns:
@@ -117,12 +117,18 @@ def _get_db_latest_trade_date_sync(symbol: str, data_source: Optional[str] = Non
     """
     try:
         from app.core.database import get_mongo_db_sync
+        from tradingagents.utils.stock_utils import StockUtils
+
         db = get_mongo_db_sync()
         code6 = str(symbol).zfill(6)
-        query: dict = {"symbol": code6}
+        is_fund = StockUtils.is_fund(code6)
+        collection = db.etf_daily_quotes if is_fund else db.stock_daily_quotes
+        symbol_field = "code" if is_fund else "symbol"
+        query: dict = {symbol_field: code6}
         if data_source:
             query["data_source"] = data_source
-        doc = db.stock_daily_quotes.find_one(
+
+        doc = collection.find_one(
             query,
             {"trade_date": 1, "_id": 0},
             sort=[("trade_date", -1)]
