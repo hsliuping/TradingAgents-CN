@@ -356,7 +356,8 @@ class MarketAnalystV2(AnalystAgent):
 
                 if market_company_name:
                     company_name = market_company_name
-                elif lookup_company_name and not company_name:
+                elif lookup_company_name and (not company_name or company_name == ticker or company_name.isdigit()):
+                    # company_name 为空、等于 ticker 代码或纯数字时，均应使用 DB 查到的真实名称
                     company_name = lookup_company_name
             except Exception as e:
                 logger.warning(f"获取市场信息失败: {e}")

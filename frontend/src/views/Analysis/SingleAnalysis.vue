@@ -1868,6 +1868,17 @@ const getAnalysisReports = (data: any) => {
     return reports
   }
 
+  const isEtfAnalysis = data?.task_type === 'etf_analysis' || (Array.isArray(data?.analysts) && data.analysts.includes('etf_analyst'))
+  const addedKeys = new Set<string>()
+
+  const pushReport = (key: string, title: string, content: any) => {
+    if (!content || addedKeys.has(key)) {
+      return
+    }
+    addedKeys.add(key)
+    reports.push({ title, content })
+  }
+
   // 动态模式：使用 report_manifest（自定义工作流产出物描述）
   const manifest = data?.report_manifest as Array<{
     field: string; display_name: string; category: string; order: number; is_primary: boolean
@@ -1877,21 +1888,12 @@ const getAnalysisReports = (data: any) => {
     for (const m of sorted) {
       const content = reportsData[m.field]
       if (content) {
-        reports.push({
-          title: m.display_name || m.field.replace(/_/g, ' '),
-          content,
-        })
+        pushReport(m.field, m.display_name || m.field.replace(/_/g, ' '), content)
       }
     }
-    if (reports.length > 0 && !activeReportTab.value) {
-      activeReportTab.value = '0'
-    }
-    return reports
   }
 
   // --- 旧逻辑：内置工作流使用硬编码映射 ---
-  const isEtfAnalysis = data?.task_type === 'etf_analysis' || (Array.isArray(data?.analysts) && data.analysts.includes('etf_analyst'))
-
   const reportMappings = [
     { key: 'index_report', title: '📊 大盘环境研究' },
     { key: 'sector_report', title: '🏭 行业板块研究' },
@@ -1917,15 +1919,26 @@ const getAnalysisReports = (data: any) => {
     { key: 'final_trade_decision', title: '📝 综合研究结论' },
   ]
 
-  const addedKeys = new Set<string>()
-
   reportMappings.forEach(mapping => {
     if (addedKeys.has(mapping.key)) return
-    if (shouldHideDuplicateResearchManagerBrief(mapping.key, reportsData)) return
+    if (shouldHideDuplicateResearchManagerBrief(mapping.key, reportsData)) {
+      addedKeys.add(mapping.key)  // 标记为已处理，避免兜底遍历重复添加
+      return
+    }
     const content = reportsData?.[mapping.key]
     if (content) {
-      addedKeys.add(mapping.key)
-      reports.push({ title: mapping.title, content })
+      pushReport(mapping.key, mapping.title, content)
+    }
+  })
+
+  Object.keys(reportsData).forEach(key => {
+    if (key === 'structured_reports' || addedKeys.has(key)) {
+      return
+    }
+
+    const content = reportsData[key]
+    if (content) {
+      pushReport(key, key.replace(/_/g, ' '), content)
     }
   })
 

@@ -170,6 +170,32 @@ class ResearchManagerV2(ManagerAgent):
         else:
             logger.warning("⚠️ 看跌报告为空或过短！")
 
+        # 🔥 ETF工作流兜底：若无辩论报告，将三份分析师报告合成为研究材料
+        if not bull_report_str and not bear_report_str:
+            market_report = state.get("market_report", "")
+            news_report = state.get("news_report", "")
+            fundamentals_report = state.get("fundamentals_report", "")
+            parts = []
+            if fundamentals_report:
+                parts.append(f"### ETF/基本面分析\n{fundamentals_report}")
+            if market_report:
+                parts.append(f"### 市场与技术分析\n{market_report}")
+            if news_report:
+                parts.append(f"### 新闻面分析\n{news_report}")
+            if parts:
+                combined = "\n\n".join(parts)
+                state = {
+                    **state,
+                    "bull_report": combined,
+                    "bear_report": (
+                        "（本工作流为无辩论单路分析模式。"
+                        "请从上述综合分析材料中，同时识别支持上行的因素和支持下行的因素，进行平衡判断。）"
+                    ),
+                }
+                logger.info(
+                    f"[ResearchManagerV2] 无辩论报告，已将分析师报告合成为研究材料 ({len(combined)} 字符)"
+                )
+
         delegated_outputs = self._run_delegated_research_agents(state)
         if delegated_outputs:
             logger.info(f"🔗 [ResearchManagerV2] 已收到委托结果字段: {list(delegated_outputs.keys())}")

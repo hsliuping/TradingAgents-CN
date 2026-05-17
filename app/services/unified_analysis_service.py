@@ -159,16 +159,26 @@ class UnifiedAnalysisService:
             if is_china:
                 try:
                     db = self._get_db()
+                    from tradingagents.utils.stock_utils import StockUtils as _SU
+                    _is_fund = _SU.is_fund(stock_code)
 
-                    # 优先从 stock_basic_info 获取
+                    # 优先从 stock_basic_info 获取；ETF 降级到 etf_basic_info
                     stock_info = db.stock_basic_info.find_one(
                         {"$or": [{"code": stock_code}, {"symbol": stock_code}]},
                         {"_id": 0, "name": 1, "industry": 1}
                     )
 
+                    if not stock_info and _is_fund:
+                        stock_info = db.etf_basic_info.find_one(
+                            {"$or": [{"symbol": stock_code}, {"code": stock_code}]},
+                            {"_id": 0, "name": 1, "industry": 1, "fund_type": 1}
+                        )
+                        if stock_info:
+                            logger.info(f"📊 [系统变量-数据库] 从 etf_basic_info 获取基金信息: {stock_code}")
+
                     if stock_info:
                         company_name = stock_info.get("name", stock_code)
-                        industry = stock_info.get("industry", "未知")
+                        industry = stock_info.get("industry", stock_info.get("fund_type", "未知"))
                         logger.info(f"📊 [系统变量-数据库] 公司名称: {company_name}, 行业: {industry}")
                     else:
                         logger.warning(f"⚠️ 数据库中未找到股票 {stock_code} 的基础信息")
@@ -200,19 +210,33 @@ class UnifiedAnalysisService:
                         logger.info(f"✅ [系统变量-数据库] 当前价格: ¥{current_price} (日期: {quote.get('trade_date', 'N/A')})")
                     else:
                         logger.info(f"🔍 [价格查询] market_quotes 未找到数据，尝试步骤2...")
-                        # 回退到 stock_basic_info 的 current_price 字段
-                        logger.info(f"🔍 [价格查询] 步骤2: 从 stock_basic_info 查询...")
-                        stock_info = db.stock_basic_info.find_one(
-                            {"$or": [{"code": stock_code}, {"symbol": stock_code}]},
-                            {"_id": 0, "current_price": 1}
-                        )
-                        logger.info(f"🔍 [价格查询] stock_basic_info 查询结果: {stock_info}")
+                        # 对 ETF，优先尝试 etf_daily_quotes
+                        from tradingagents.utils.stock_utils import StockUtils as _SU2
+                        if _SU2.is_fund(stock_code):
+                            logger.info(f"🔍 [价格查询] 步骤2a: ETF，从 etf_daily_quotes 查询...")
+                            etf_quote = db.etf_daily_quotes.find_one(
+                                {"$or": [{"code": stock_code}, {"symbol": stock_code}, {"ts_code": {"$regex": f"^{stock_code}"}}]},
+                                {"_id": 0, "close": 1, "trade_date": 1},
+                                sort=[("trade_date", -1)]
+                            )
+                            logger.info(f"🔍 [价格查询] etf_daily_quotes 查询结果: {etf_quote}")
+                            if etf_quote and etf_quote.get("close"):
+                                current_price = str(etf_quote["close"])
+                                logger.info(f"✅ [系统变量-数据库] ETF当前价格: ¥{current_price}")
+                        if current_price == "未知":
+                            # 回退到 stock_basic_info 的 current_price 字段
+                            logger.info(f"🔍 [价格查询] 步骤2b: 从 stock_basic_info 查询...")
+                            stock_info = db.stock_basic_info.find_one(
+                                {"$or": [{"code": stock_code}, {"symbol": stock_code}]},
+                                {"_id": 0, "current_price": 1}
+                            )
+                            logger.info(f"🔍 [价格查询] stock_basic_info 查询结果: {stock_info}")
 
-                        if stock_info and stock_info.get("current_price"):
-                            current_price = str(stock_info["current_price"])
-                            logger.info(f"✅ [系统变量-数据库] 当前价格(备用): ¥{current_price}")
-                        else:
-                            logger.warning(f"⚠️ 数据库中未找到股票 {stock_code} 的价格信息")
+                            if stock_info and stock_info.get("current_price"):
+                                current_price = str(stock_info["current_price"])
+                                logger.info(f"✅ [系统变量-数据库] 当前价格(备用): ¥{current_price}")
+                            else:
+                                logger.warning(f"⚠️ 数据库中未找到股票 {stock_code} 的价格信息")
                 except Exception as e:
                     logger.warning(f"⚠️ 从数据库获取当前价格失败: {e}")
                     import traceback
