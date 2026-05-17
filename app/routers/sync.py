@@ -38,7 +38,7 @@ async def get_stock_basics_status():
 @router.post("/etf/run")
 async def trigger_etf_sync(
     force: bool = Query(False, description="是否强制覆盖已有数据"),
-    days: int = Query(30, ge=1, le=365, description="日线同步天数"),
+    days: int = Query(30, ge=1, le=365, description="强制同步回溯天数（force=false 时忽略，自动走首次全量/后续增量）"),
 ):
     """触发 ETF 数据同步（etf_basic_info + etf_daily_quotes）"""
     try:

@@ -17,7 +17,7 @@ from apscheduler.events import (
     JobExecutionEvent
 )
 
-from app.core.database import get_mongo_db
+from app.core.database import get_mongo_db, get_mongo_db_sync
 from tradingagents.utils.logging_manager import get_logger
 from app.utils.timezone import now_tz
 
@@ -1875,13 +1875,10 @@ async def update_job_progress(
     """
     try:
         import json
-        from pymongo import MongoClient
-        from app.core.config import settings
         from app.core.redis_client import RedisKeys
 
-        # 使用同步客户端避免事件循环冲突
-        sync_client = MongoClient(settings.MONGO_URI)
-        sync_db = sync_client[settings.MONGODB_DATABASE]
+        # 复用全局同步 MongoDB 单例，避免高频创建/关闭 PyMongo 后台线程。
+        sync_db = get_mongo_db_sync()
 
         # 🔥 提取原始job_id（如果job_id是 tushare_financial_sync_tushare，则原始是 tushare_financial_sync）
         # 检查job_id是否以数据源名称结尾（tushare、akshare、baostock）
@@ -2012,7 +2009,6 @@ async def update_job_progress(
                                 logger.debug(f"🔍 原始job_id 的活动执行记录未设置取消标记，不同步取消状态")
             
             if cancel_requested:
-                sync_client.close()
                 logger.warning(f"⚠️ 任务 {job_id} 收到取消请求，即将停止 (execution_job_id={execution_job_id})")
                 raise TaskCancelledException(f"任务 {job_id} 已被用户取消")
 
@@ -2133,7 +2129,6 @@ async def update_job_progress(
                 # 手动触发时，允许创建新记录（用户明确要求重新开始）
                 logger.warning(f"⚠️ 任务 {job_id} 在1小时内有失败/取消记录 ({recent_failed_or_cancelled.get('status')})，"
                              f"且不是手动触发，不创建新的执行记录，避免状态恢复为running")
-                sync_client.close()
                 return  # 不更新进度，保持失败/取消状态
             elif recent_failed_or_cancelled and is_manual:
                 # 🔥 手动触发时，即使有cancelled记录，也允许创建新记录（从头开始）
@@ -2177,8 +2172,6 @@ async def update_job_progress(
             # 🔥 保存新创建的execution_id，用于后续保存到Redis
             new_execution_id = str(result.inserted_id)
             logger.info(f"📝 任务 {job_id} 创建新执行记录，execution_id: {new_execution_id}")
-
-        sync_client.close()
 
         # 🔥 同时更新Redis缓存（使用系统统一的同步Redis客户端）
         try:
@@ -2313,14 +2306,10 @@ async def mark_job_completed(job_id: str, stats: Optional[Dict[str, Any]] = None
         error_message: 错误消息（可选，如果有则标记为失败）
     """
     try:
-        from pymongo import MongoClient
-        from app.core.config import settings
-
         logger.info(f"✅ [任务完成] 开始标记任务 {job_id} 为已完成状态")
 
-        # 使用同步 PyMongo 客户端（避免事件循环冲突）
-        sync_client = MongoClient(settings.MONGO_URI)
-        sync_db = sync_client[settings.MONGODB_DATABASE]
+        # 复用全局同步 MongoDB 单例，避免每次完成回写都创建/关闭独立客户端。
+        sync_db = get_mongo_db_sync()
 
         # 🔥 改进查找逻辑：
         # 1. 优先查找仍有活动心跳的 running 记录
@@ -2399,7 +2388,6 @@ async def mark_job_completed(job_id: str, stats: Optional[Dict[str, Any]] = None
 
         if not execution:
             logger.warning(f"⚠️ 未找到任务 {job_id} 的运行记录，无法标记为已完成")
-            sync_client.close()
             return
 
         # 🔥 修改逻辑：即使有 error_message，如果成功率 >= 80%，也应该标记为 success
@@ -2596,8 +2584,6 @@ async def mark_job_completed(job_id: str, stats: Optional[Dict[str, Any]] = None
                 logger.info(f"✅ [任务完成] Redis缓存已更新: job_id={job_id}, status={status}, progress={update_data.get('progress', 100)}")
         except Exception as redis_error:
             logger.warning(f"⚠️ 更新Redis缓存失败（不影响主流程）: {redis_error}")
-
-        sync_client.close()
 
     except Exception as e:
         logger.error(f"❌ 标记任务完成失败: {e}", exc_info=True)

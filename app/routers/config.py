@@ -34,6 +34,17 @@ router = APIRouter(prefix="/config", tags=["配置管理"])
 logger = logging.getLogger("webapi")
 
 
+def _reload_runtime_bridge(reason: str) -> None:
+    """在配置更新后立即刷新桥接环境变量，避免运行时继续使用旧值。"""
+    try:
+        from app.core.config_bridge import reload_bridged_config
+
+        reload_bridged_config()
+        logger.info(f"🔄 已刷新运行时配置桥接: {reason}")
+    except Exception as e:
+        logger.warning(f"⚠️ 刷新运行时配置桥接失败（忽略）: {reason}, error={e}")
+
+
 # ===== Gateway 平台配置端点 =====
 
 class GatewayConfigRequest(BaseModel):
@@ -642,6 +653,9 @@ async def add_llm_provider(
             )
         except Exception:
             pass
+
+        _reload_runtime_bridge(f"add_llm_provider:{request.name}")
+
         return {
             "success": True,
             "message": "厂家添加成功",
@@ -699,6 +713,9 @@ async def update_llm_provider(
                 )
             except Exception:
                 pass
+
+            _reload_runtime_bridge(f"update_llm_provider:{provider_id}")
+
             return {
                 "success": True,
                 "message": "厂家更新成功",
@@ -2130,15 +2147,27 @@ async def update_system_settings(
                 config_provider.invalidate()
             except Exception:
                 pass
-            # 若更新包含代理相关键，立即重载桥接的环境变量以生效
+            # 若更新包含运行时关键键，立即重载桥接的环境变量以生效
             try:
-                proxy_keys = {'http_proxy', 'https_proxy', 'no_proxy'}
-                if any(k in settings for k in proxy_keys):
-                    from app.core.config_bridge import reload_bridged_config
-                    reload_bridged_config()
-                    logger.info("🔄 代理相关系统设置已更新，已触发配置重载")
+                reload_keys = {
+                    'http_proxy',
+                    'https_proxy',
+                    'no_proxy',
+                    'default_provider',
+                    'quick_analysis_model',
+                    'quick_analysis_model_config_id',
+                    'deep_analysis_model',
+                    'deep_analysis_model_config_id',
+                    'deep_reasoning_model',
+                    'deep_reasoning_model_config_id',
+                    'coding_model',
+                    'coding_model_config_id',
+                }
+                changed_reload_keys = sorted(k for k in settings.keys() if k in reload_keys)
+                if changed_reload_keys:
+                    _reload_runtime_bridge(f"update_system_settings:{','.join(changed_reload_keys)}")
             except Exception as e:
-                logger.warning(f"⚠️  更新代理后触发重载失败（忽略）：{e}")
+                logger.warning(f"⚠️  更新系统设置后触发重载失败（忽略）：{e}")
             return ok(message="系统设置更新成功")
         else:
             raise HTTPException(

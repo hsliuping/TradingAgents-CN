@@ -270,10 +270,10 @@ class Settings(BaseSettings):
     AKSHARE_STATUS_CHECK_ENABLED: bool = Field(default=True, description="启用状态检查")
     AKSHARE_STATUS_CHECK_CRON: str = Field(default="30 * * * *", description="状态检查CRON表达式")  # 每小时30分
 
-    # ETF 数据同步配置（etf_basic_info、etf_daily_quotes）
+    # ETF 数据同步配置（首次全量，后续按最新入库日期增量补齐）
     ETF_SYNC_ENABLED: bool = Field(default=True, description="启用 ETF 数据同步")
     ETF_SYNC_CRON: str = Field(default="0 4 * * 1-5", description="ETF 同步 CRON 表达式")  # 工作日凌晨4点
-    ETF_SYNC_DAYS: int = Field(default=30, ge=1, le=365, description="ETF 日线同步天数")
+    ETF_SYNC_DAYS: int = Field(default=30, ge=1, le=365, description="ETF 强制同步回溯天数（force/manual 模式使用）")
 
     # 官方行业数据（从官网 URL 获取，避免 AKShare 轮询封号）
     OFFICIAL_INDUSTRY_DATA_URL: Optional[str] = Field(
