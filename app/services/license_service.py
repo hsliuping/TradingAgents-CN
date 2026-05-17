@@ -51,7 +51,7 @@ class LicenseService:
         },
         "server2": {
             "label": "服务器二",
-            "base_url": "https://jq.tradingagentscn.com/api",
+            "base_url": "https://www.tradingagents.cn/api",
         },
     }
     DEFAULT_AUTH_SERVER = "server1"
