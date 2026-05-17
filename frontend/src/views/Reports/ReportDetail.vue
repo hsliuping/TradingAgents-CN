@@ -955,7 +955,15 @@ const orderedModuleNames = computed(() => {
   }> | undefined
   if (manifest && manifest.length > 0) {
     const sorted = [...manifest].sort((a, b) => a.order - b.order)
-    return sorted.map(m => m.field).filter(f => availableModules.includes(f))
+    const manifestOrdered = sorted.map(m => m.field).filter(f => availableModules.includes(f))
+    const remainingOrdered = moduleOrder.filter(name => {
+      return availableModules.includes(name) && !manifestOrdered.includes(name)
+    })
+    const remaining = availableModules.filter(name => {
+      return !manifestOrdered.includes(name) && !moduleOrder.includes(name)
+    })
+
+    return [...manifestOrdered, ...remainingOrdered, ...remaining]
   }
 
   // 旧逻辑：按 moduleOrder 排序

@@ -546,37 +546,25 @@ function Create-7zPackage {
         throw "7z.exe not found at $7zExe. Please copy from C:\7-Zip"
     }
 
-    # If excluding vendors/7zip, create a copy without it
     $sourcePath = $TempDir
+    $excludeArgs = @()
     if ($ExcludeVendors7zip) {
         Write-Host "    Excluding vendors/7zip directory (for NSIS installer)..." -ForegroundColor Gray
-        $tempDir7z = Join-Path $env:TEMP "TradingAgentsCN-7z-$timestamp"
-
-        if (Test-Path $tempDir7z) {
-            Remove-Item -Path $tempDir7z -Recurse -Force -ErrorAction SilentlyContinue
-        }
-
-        Copy-Item -Path $TempDir -Destination $tempDir7z -Recurse -Force
-        $vendors7zipPath = Join-Path $tempDir7z "vendors\7zip"
-        if (Test-Path $vendors7zipPath) {
-            Remove-Item -Path $vendors7zipPath -Recurse -Force
-            Write-Host "    Removed vendors/7zip from package" -ForegroundColor Gray
-        }
-        $sourcePath = $tempDir7z
+        $excludeArgs += "-xr!vendors\7zip"
     }
 
     Write-Host "    Compression level: Medium (mx=5)" -ForegroundColor Gray
     Write-Host "    Multi-threading: Enabled" -ForegroundColor Gray
 
-    & $7zExe a -t7z -mx=5 -mmt=on -bsp1 "$OutputPath" "$sourcePath\*" | Out-Null
+    Push-Location $sourcePath
+    try {
+        & $7zExe a -t7z -mx=5 -mmt=on -bsp1 "$OutputPath" ".\*" @excludeArgs | Out-Null
+    } finally {
+        Pop-Location
+    }
 
     if ($LASTEXITCODE -ne 0) {
         throw "7z.exe exited with code $LASTEXITCODE"
-    }
-
-    # Clean up temp directory if created
-    if ($ExcludeVendors7zip -and (Test-Path $tempDir7z)) {
-        Remove-Item -Path $tempDir7z -Recurse -Force
     }
 
     $fileInfo = Get-Item $OutputPath
