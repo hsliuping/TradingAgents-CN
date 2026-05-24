@@ -9,6 +9,15 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
+def _get_app_db_name() -> str:
+    """获取 Web 应用 MongoDB 数据库名（market_quotes/stock_basic_info 所在库）"""
+    try:
+        from app.core.config import get_settings
+        return get_settings().MONGO_DB
+    except Exception:
+        return 'tradingagentscn'
+
+
 def calculate_realtime_pe_pb(
     symbol: str,
     db_client=None
@@ -60,7 +69,7 @@ def calculate_realtime_pe_pb(
             logger.debug(f"检测到异步客户端 {client_type}，转换为同步客户端")
             db_client = MongoClient(settings.MONGO_URI)
 
-        db = db_client['tradingagents']
+        db = db_client[_get_app_db_name()]
         code6 = str(symbol).zfill(6)
 
         logger.info(f"🔍 [实时PE计算] 开始计算股票 {code6}")
@@ -97,14 +106,21 @@ def calculate_realtime_pe_pb(
             basic_info = db.stock_basic_info.find_one({"code": code6})
             if not basic_info:
                 logger.warning(f"⚠️ [动态PE计算-失败] 未找到股票 {code6} 的基础信息")
-                logger.warning(f"   建议: 运行 Tushare 数据同步任务，确保 stock_basic_info 集合有 Tushare 数据")
                 return None
             else:
-                logger.warning(f"⚠️ [动态PE计算] 使用其他数据源: {basic_info.get('source', 'unknown')}")
-                # 如果不是 Tushare 数据，可能缺少关键字段，直接返回 None
-                if basic_info.get('source') != 'tushare':
-                    logger.warning(f"⚠️ [动态PE计算-失败] 数据源 {basic_info.get('source')} 不包含 pe_ttm 等字段")
-                    logger.warning(f"   可用字段: {list(basic_info.keys())}")
+                # 非 Tushare 数据源（如 AKShare/BaoStock）也可能有 PE/PB
+                alt_source = basic_info.get('source', 'unknown')
+                if alt_source != 'tushare':
+                    alt_pe = basic_info.get('pe')
+                    alt_pb = basic_info.get('pb')
+                    if alt_pe and alt_pe > 0:
+                        logger.info(f"✅ [动态PE计算] 使用 {alt_source} 静态PE/PB: PE={alt_pe}, PB={alt_pb}")
+                        return {
+                            "pe": alt_pe, "pb": alt_pb, "pe_ttm": alt_pe,
+                            "source": alt_source, "is_realtime": False,
+                            "note": f"使用 {alt_source} 估值数据"
+                        }
+                    logger.warning(f"⚠️ [动态PE计算-失败] {alt_source} 数据缺少有效 PE/PB")
                     return None
 
         # 获取 Tushare 的 pe_ttm（基于昨日收盘价）
@@ -398,7 +414,7 @@ def get_pe_pb_with_fallback(
     logger.info("   💡 说明: 使用Tushare官方PE_TTM，基于昨日收盘价")
 
     try:
-        db = db_client['tradingagents']
+        db = db_client[_get_app_db_name()]
         code6 = str(symbol).zfill(6)
 
         # 🔥 优先查询 Tushare 数据源

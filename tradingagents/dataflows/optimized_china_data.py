@@ -23,6 +23,15 @@ logger = get_logger('agents')
 from .cache.mongodb_cache_adapter import get_mongodb_cache_adapter, get_stock_data_with_fallback, get_financial_data_with_fallback
 
 
+def _get_mongo_db_name() -> str:
+    """获取配置的 MongoDB 数据库名（避免硬编码导致查错库）"""
+    try:
+        from app.core.config import get_settings
+        return get_settings().MONGO_DB
+    except Exception:
+        return 'tradingagentscn'
+
+
 class OptimizedChinaDataProvider:
     """优化的A股数据提供器 - 集成缓存和Tushare数据接口"""
 
@@ -352,44 +361,50 @@ class OptimizedChinaDataProvider:
         except Exception as e:
             logger.warning(f"⚠️ 获取股票基本信息失败: {e}")
 
-        # 若仍缺失当前价格/涨跌幅/成交量，且启用app缓存，则直接读取 market_quotes 兜底
+        # 🔥 优先使用 market_quotes 实时行情，确保价格数据来自真实成交价
+        real_market_price = None
         try:
-            if (current_price == "N/A" or change_pct == "N/A" or volume == "N/A"):
-                from tradingagents.config.runtime_settings import use_app_cache_enabled  # type: ignore
-                if use_app_cache_enabled(False):
-                    from .cache.app_adapter import get_market_quote_dataframe
-                    df_q = get_market_quote_dataframe(symbol)
-                    if df_q is not None and not df_q.empty:
-                        row_q = df_q.iloc[-1]
-                        if current_price == "N/A" and row_q.get('close') is not None:
-                            current_price = str(row_q.get('close'))
-                            logger.debug(f"🔍 [股票代码追踪] 从market_quotes补齐当前价格: {current_price}")
-                        if change_pct == "N/A" and row_q.get('pct_chg') is not None:
-                            try:
-                                change_pct = f"{float(row_q.get('pct_chg')):+.2f}%"
-                            except Exception:
-                                change_pct = str(row_q.get('pct_chg'))
-                            logger.debug(f"🔍 [股票代码追踪] 从market_quotes补齐涨跌幅: {change_pct}")
-                        if volume == "N/A" and row_q.get('volume') is not None:
-                            volume = str(row_q.get('volume'))
-                            logger.debug(f"🔍 [股票代码追踪] 从market_quotes补齐成交量: {volume}")
+            from tradingagents.config.runtime_settings import use_app_cache_enabled  # type: ignore
+            if use_app_cache_enabled(False):
+                from .cache.app_adapter import get_market_quote_dataframe
+                df_q = get_market_quote_dataframe(symbol)
+                if df_q is not None and not df_q.empty:
+                    row_q = df_q.iloc[-1]
+                    if row_q.get('close') is not None:
+                        real_market_price = str(row_q.get('close'))
+                        current_price = real_market_price
+                        logger.info(f"📊 [真实价格] 从market_quotes获取实时价格: ¥{current_price}")
+                    if row_q.get('pct_chg') is not None:
+                        try:
+                            change_pct = f"{float(row_q.get('pct_chg')):+.2f}%"
+                        except Exception:
+                            change_pct = str(row_q.get('pct_chg'))
+                    if row_q.get('volume') is not None:
+                        volume = str(row_q.get('volume'))
         except Exception as _qe:
             logger.debug(f"🔍 [股票代码追踪] 读取market_quotes失败（忽略）: {_qe}")
 
-        # 然后从股票数据中提取价格信息
+        # 然后从股票数据中提取价格信息（仅在无真实价格时作为兜底）
         if "股票名称:" in stock_data:
             lines = stock_data.split('\n')
             for line in lines:
                 if "股票名称:" in line and company_name == "未知公司":
                     company_name = line.split(':')[1].strip()
                 elif "当前价格:" in line:
-                    current_price = line.split(':')[1].strip()
+                    kline_price = line.split(':')[1].strip()
+                    if real_market_price is None:
+                        current_price = kline_price
+                    else:
+                        logger.info(f"⚠️ [价格校验] K线价格: {kline_price}, 实时行情: ¥{real_market_price}（已使用实时价格）")
                 elif "最新价格:" in line or "💰 最新价格:" in line:
-                    # 兼容另一种模板输出
                     try:
-                        current_price = line.split(':', 1)[1].strip().lstrip('¥').strip()
+                        kline_price = line.split(':', 1)[1].strip().lstrip('¥').strip()
                     except Exception:
-                        current_price = line.split(':')[-1].strip()
+                        kline_price = line.split(':')[-1].strip()
+                    if real_market_price is None:
+                        current_price = kline_price
+                    else:
+                        logger.info(f"⚠️ [价格校验] K线价格: {kline_price}, 实时行情: ¥{real_market_price}（已使用实时价格）")
                 elif "涨跌幅:" in line:
                     change_pct = line.split(':')[1].strip()
                 elif "成交量:" in line:
@@ -852,7 +867,7 @@ class OptimizedChinaDataProvider:
             if db_manager.is_mongodb_available():
                 try:
                     db_client = db_manager.get_mongodb_client()
-                    db = db_client['tradingagents']
+                    db = db_client[_get_mongo_db_name()]
 
                     # 标准化股票代码为6位
                     code6 = symbol.replace('.SH', '').replace('.SZ', '').zfill(6)
@@ -1117,13 +1132,26 @@ class OptimizedChinaDataProvider:
                                 metrics["pb"] = f"{pb_value:.2f}倍{realtime_tag}"
                                 logger.info(f"✅ [PB计算-第1层成功] PB={pb_value:.2f}倍 | 来源={realtime_metrics.get('source')} | 实时={is_realtime}")
                         else:
-                            # 🔥 检查是否因为亏损导致返回 None
-                            # 从 stock_basic_info 获取 pe_ttm 判断是否亏损
+                            # 🔥 实时PE计算返回空，尝试从 stock_basic_info 检查
                             pe_ttm_static = latest_indicators.get('pe_ttm')
-                            # pe_ttm 为 None、<= 0、'nan'、'--' 都认为是亏损股
                             if pe_ttm_static is None or pe_ttm_static <= 0 or str(pe_ttm_static) == 'nan' or pe_ttm_static == '--':
-                                is_loss_stock = True
-                                logger.info(f"⚠️ [PE计算-第1层失败] 检测到亏损股（pe_ttm={pe_ttm_static}），跳过降级计算")
+                                # latest_indicators 没有 PE_TTM，可能是数据缺失而非亏损
+                                # 从 stock_basic_info 交叉验证
+                                try:
+                                    db_manager3 = get_database_manager()
+                                    if db_manager3.is_mongodb_available():
+                                        client3 = db_manager3.get_mongodb_client()
+                                        db3 = client3[_get_mongo_db_name()]
+                                        code6_v = str(symbol).replace('.SH','').replace('.SZ','').zfill(6)
+                                        sbi_check = db3['stock_basic_info'].find_one({'code': code6_v}, {'pe': 1})
+                                        if sbi_check and sbi_check.get('pe') and sbi_check['pe'] > 0:
+                                            logger.info(f"ℹ️ [PE计算-第1层] stock_basic_info PE={sbi_check['pe']}，非亏损股，继续降级计算")
+                                        else:
+                                            is_loss_stock = True
+                                            logger.info(f"⚠️ [PE计算-第1层] stock_basic_info PE无效，确认为亏损股")
+                                except Exception:
+                                    is_loss_stock = True
+                                    logger.info(f"⚠️ [PE计算-第1层] 无法验证，假设为亏损股: {symbol}")
                             else:
                                 logger.warning(f"⚠️ [PE计算-第1层失败] 实时计算返回空结果，将尝试降级计算")
 
@@ -1147,6 +1175,31 @@ class OptimizedChinaDataProvider:
                     else:
                         metrics["total_mv"] = "N/A"
                         logger.warning(f"⚠️ [总市值-全部失败] 无可用总市值数据")
+
+            # 如果实时计算失败，优先从 stock_basic_info 获取 PE/PB
+            if pe_value is None and not is_loss_stock:
+                try:
+                    db_manager2 = get_database_manager()
+                    if db_manager2.is_mongodb_available():
+                        client2 = db_manager2.get_mongodb_client()
+                        db2 = client2[_get_mongo_db_name()]
+                        code6 = str(symbol).replace('.SH', '').replace('.SZ', '').zfill(6)
+                        sbi_pe = db2['stock_basic_info'].find_one({'code': code6}, {'pe': 1, 'pb': 1, 'pe_ttm': 1})
+                        if sbi_pe:
+                            if sbi_pe.get('pe') and sbi_pe['pe'] > 0:
+                                pe_value = float(sbi_pe['pe'])
+                                metrics["pe"] = f"{pe_value:.1f}倍"
+                                logger.info(f"✅ [PE计算-stock_basic_info] PE={pe_value:.2f}倍")
+                            if sbi_pe.get('pb') and sbi_pe['pb'] > 0:
+                                pb_value = float(sbi_pe['pb'])
+                                metrics["pb"] = f"{pb_value:.2f}倍"
+                                logger.info(f"✅ [PB计算-stock_basic_info] PB={pb_value:.2f}倍")
+                            if sbi_pe.get('pe_ttm') and sbi_pe['pe_ttm'] > 0:
+                                pe_ttm_value = float(sbi_pe['pe_ttm'])
+                                metrics["pe_ttm"] = f"{pe_ttm_value:.1f}倍"
+                                logger.info(f"✅ [PE_TTM计算-stock_basic_info] PE_TTM={pe_ttm_value:.2f}倍")
+                except Exception as _sbi_e:
+                    logger.warning(f"⚠️ 从 stock_basic_info 获取 PE/PB 失败: {_sbi_e}")
 
             # 如果实时计算失败，尝试传统计算方式
             if pe_value is None:
@@ -2173,7 +2226,7 @@ def _add_financial_cache_methods():
                 logger.debug(f"📊 [财务缓存] MongoDB客户端不可用")
                 return None
 
-            db = client.get_database('tradingagents')
+            db = client.get_database(_get_mongo_db_name())
 
             # 第一优先级：从 stock_financial_data 集合读取（定时任务同步的持久化数据）
             stock_financial_collection = db.stock_financial_data
@@ -2274,7 +2327,7 @@ def _add_financial_cache_methods():
             if not client:
                 return {}
 
-            db = client.get_database('tradingagents')
+            db = client.get_database(_get_mongo_db_name())
             collection = db.stock_basic_info
 
             # 查找股票基本信息
@@ -2324,7 +2377,7 @@ def _add_financial_cache_methods():
                 logger.debug(f"📊 [财务缓存] MongoDB客户端不可用")
                 return
 
-            db = client.get_database('tradingagents')
+            db = client.get_database(_get_mongo_db_name())
             collection = db.financial_data_cache
 
             from datetime import datetime

@@ -866,7 +866,27 @@ class Toolkit:
 
                     from tradingagents.dataflows.interface import get_china_stock_data_unified
                     logger.info(f"🔍 [股票代码追踪] 调用 get_china_stock_data_unified（仅获取最新价格），传入参数: ticker='{ticker}', start_date='{recent_start_date}', end_date='{recent_end_date}'")
-                    current_price_data = get_china_stock_data_unified(ticker, recent_start_date, recent_end_date)
+                    kline_data = get_china_stock_data_unified(ticker, recent_start_date, recent_end_date)
+
+                    # 🔥 从 market_quotes 获取真实行情价格（确保价格数据准确）
+                    real_price_note = ""
+                    try:
+                        from tradingagents.dataflows.cache.app_adapter import get_market_quote_dataframe
+                        df_q = get_market_quote_dataframe(ticker)
+                        if df_q is not None and not df_q.empty:
+                            row = df_q.iloc[-1]
+                            real_close = row.get('close')
+                            real_pct = row.get('pct_chg')
+                            if real_close is not None:
+                                real_price_note = f"📌 【实时行情】当前成交价：¥{real_close}"
+                                if real_pct is not None:
+                                    real_price_note += f"，涨跌幅：{float(real_pct):+.2f}%"
+                                real_price_note += "\n\n"
+                                logger.info(f"📊 [实时价格注入] {ticker}: ¥{real_close}")
+                    except Exception as _re:
+                        logger.debug(f"获取实时行情失败（忽略）: {_re}")
+
+                    current_price_data = real_price_note + kline_data
 
                     # 🔍 调试：打印返回数据的前500字符
                     logger.info(f"🔍 [基本面工具调试] A股价格数据返回长度: {len(current_price_data)}")
