@@ -21,7 +21,7 @@ cp .env.example .env
 docker-compose up -d
 
 # 4. 访问应用
-# 浏览器打开: http://localhost:8501
+# 浏览器打开: http://localhost:3000
 ```
 
 ### 💻 方式二：本地安装
@@ -47,8 +47,11 @@ pip install -r requirements.txt
 cp .env.example .env
 # 编辑.env文件，添加您的API密钥
 
-# 6. 启动应用
-python -m streamlit run web/app.py
+# 6. 启动后端服务
+python scripts/startup/start_backend.py
+
+# 7. 新开一个终端窗口，启动前端服务
+python scripts/startup/start_web.py
 ```
 
 ### 🤖 方式三：自动安装（最简单）
@@ -108,7 +111,7 @@ REDIS_ENABLED=false
 ## ✅ 验证安装
 
 ### 1. 访问Web界面
-打开浏览器访问: http://localhost:8501
+打开浏览器访问: http://localhost:3000
 
 ### 2. 测试分析功能
 - 输入股票代码（如：`000001`、`AAPL`、`0700.HK`）
@@ -159,7 +162,7 @@ tail -f logs/tradingagents.log
 1. Python版本是否为3.10+
 2. 是否正确配置了API密钥
 3. 网络连接是否正常
-4. 端口8501是否被占用
+4. 端口3000（前端）或8000（后端API）是否被占用
 
 ### Q: 分析失败怎么办？
 **A**: 检查以下几点：
