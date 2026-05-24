@@ -8,10 +8,43 @@ from .validators import validate_model
 
 
 class NormalizedChatOpenAI(ChatOpenAI):
-    """ChatOpenAI wrapper that normalizes typed content blocks to text."""
+    """ChatOpenAI wrapper that normalizes typed content blocks to text.
+
+    Also preserves reasoning_content for DeepSeek V4 thinking mode compatibility.
+    DeepSeek V4 requires reasoning_content to be passed back in multi-turn conversations.
+    """
 
     def invoke(self, input, config=None, **kwargs):
         return normalize_content(super().invoke(input, config, **kwargs))
+
+    def _create_chat_result(self, response, generation_info=None):
+        """Capture reasoning_content from API response into additional_kwargs."""
+        result = super()._create_chat_result(response, generation_info)
+
+        # DeepSeek V4 returns reasoning_content in the API response message
+        # LangChain's ChatOpenAI doesn't preserve it, so we inject it manually
+        response_dict = response if isinstance(response, dict) else response.model_dump()
+        for i, choice in enumerate(response_dict.get("choices", [])):
+            msg = choice.get("message", {})
+            reasoning = msg.get("reasoning_content", "")
+            if reasoning and i < len(result.generations):
+                result.generations[i].message.additional_kwargs["reasoning_content"] = reasoning
+
+        return result
+
+    def _get_request_payload(self, input_, *, stop=None, **kwargs):
+        """Inject reasoning_content back into outgoing assistant messages for DeepSeek V4."""
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+
+        messages = input_ if isinstance(input_, list) else []
+        for i, msg_dict in enumerate(payload.get("messages", [])):
+            if msg_dict.get("role") == "assistant" and i < len(messages):
+                original = messages[i]
+                reasoning = getattr(original, "additional_kwargs", {}).get("reasoning_content")
+                if reasoning:
+                    msg_dict["reasoning_content"] = reasoning
+
+        return payload
 
 
 _PASSTHROUGH_KWARGS = (

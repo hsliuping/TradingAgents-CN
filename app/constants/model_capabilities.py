@@ -191,9 +191,27 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.COST_EFFECTIVE],
         "recommended_depths": ["基础", "标准", "深度"],
         "performance_metrics": {"speed": 4, "cost": 5, "quality": 4},
-        "description": "DeepSeek Chat，性价比高"
+        "description": "DeepSeek Chat (已废弃，请使用 deepseek-v4-flash)"
     },
-    
+
+    # ==================== DeepSeek V4 ====================
+    "deepseek-v4-pro": {
+        "capability_level": 5,
+        "suitable_roles": [ModelRole.DEEP_ANALYSIS],
+        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING, ModelFeature.COST_EFFECTIVE],
+        "recommended_depths": ["标准", "深度", "全面"],
+        "performance_metrics": {"speed": 4, "cost": 4, "quality": 5},
+        "description": "DeepSeek V4 Pro 旗舰模型，1.6T参数，1M上下文，384K最大输出"
+    },
+    "deepseek-v4-flash": {
+        "capability_level": 4,
+        "suitable_roles": [ModelRole.QUICK_ANALYSIS],
+        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.FAST_RESPONSE, ModelFeature.COST_EFFECTIVE],
+        "recommended_depths": ["快速", "基础", "标准"],
+        "performance_metrics": {"speed": 5, "cost": 5, "quality": 4},
+        "description": "DeepSeek V4 Flash 轻量高效模型，284B参数，1M上下文"
+    },
+
     # ==================== 百度文心 (Qianfan) ====================
     "ernie-3.5": {
         "capability_level": 2,

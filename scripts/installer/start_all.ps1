@@ -97,7 +97,7 @@ if ($needsImport) {
         }
 
         $importScript = Join-Path $root 'scripts\import_config_and_create_user.py'
-        $configFile = Join-Path $root 'install\database_export_config_2025-10-31.json'
+        $configFile = Join-Path $root 'install\database_export_config_2026-05-23.json'
 
         if ((Test-Path $importScript) -and (Test-Path $configFile)) {
             try {

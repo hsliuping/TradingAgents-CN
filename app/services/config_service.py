@@ -3629,7 +3629,7 @@ class ConfigService:
                 "messages": [
                     {"role": "user", "content": "你好，请简单介绍一下你自己。"}
                 ],
-                "max_tokens": 50,
+                "max_tokens": 200,
                 "temperature": 0.1
             }
 

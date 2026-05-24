@@ -27,6 +27,9 @@ import argparse
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+# 工程默认导入配置（install/ 目录下）
+DEFAULT_EXPORT_CONFIG = "database_export_config_2026-05-23.json"
+
 from pymongo import MongoClient
 from bson import ObjectId
 
@@ -532,18 +535,21 @@ def main():
     if args.incremental:
         args.overwrite = False
 
-    # 如果没有指定文件，尝试从 install 目录查找
+    # 如果没有指定文件，使用工程默认配置
     if not args.create_user_only and not args.export_file:
         install_dir = project_root / "install"
         if install_dir.exists():
-            # 查找 database_export_config_*.json 文件
-            config_files = list(install_dir.glob("database_export_config_*.json"))
-            if config_files:
-                # 使用最新的文件
-                args.export_file = str(sorted(config_files)[-1])
+            default_file = install_dir / DEFAULT_EXPORT_CONFIG
+            if default_file.exists():
+                args.export_file = str(default_file)
                 print(f"💡 未指定文件，使用默认配置: {args.export_file}")
             else:
-                parser.error("install 目录中未找到配置文件 (database_export_config_*.json)")
+                config_files = list(install_dir.glob("database_export_config_*.json"))
+                if config_files:
+                    args.export_file = str(sorted(config_files)[-1])
+                    print(f"💡 默认配置不存在，使用最新导出: {args.export_file}")
+                else:
+                    parser.error("install 目录中未找到配置文件 (database_export_config_*.json)")
         else:
             parser.error("必须提供导出文件路径，或使用 --create-user-only")
     
