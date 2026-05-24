@@ -691,6 +691,70 @@ class Toolkit:
 
     @staticmethod
     @tool
+    @log_tool_call(tool_name="get_stock_peer_comparison", log_args=True)
+    def get_stock_peer_comparison(
+        ticker: Annotated[str, "股票代码（当前支持A股本地缓存数据）"],
+        peer_limit: Annotated[int, "可比公司数量，建议3-5只"] = 5,
+    ) -> str:
+        """
+        基于 stock_basic_info 按 industry 聚合同业均值/中位数，并选择3-5只可比公司。
+
+        Returns:
+            str: Markdown格式的同业估值对比报告
+        """
+        try:
+            from tradingagents.tools.analysis.peer_history import build_peer_comparison_report
+
+            return build_peer_comparison_report(ticker, peer_limit=peer_limit)
+        except Exception as e:
+            logger.error(f"❌ [同业对比工具] 执行失败: {e}", exc_info=True)
+            return f"同业对比工具执行失败: {e}"
+
+    @staticmethod
+    @tool
+    @log_tool_call(tool_name="get_stock_historical_percentiles", log_args=True)
+    def get_stock_historical_percentiles(
+        ticker: Annotated[str, "股票代码（当前支持A股本地缓存数据）"],
+        years: Annotated[int, "统计窗口年数，支持3或5"] = 5,
+    ) -> str:
+        """
+        基于 stock_daily_quotes 计算收盘价、PE/PB等历史分位。
+
+        Returns:
+            str: Markdown格式的历史分位报告
+        """
+        try:
+            from tradingagents.tools.analysis.peer_history import build_historical_percentile_report
+
+            return build_historical_percentile_report(ticker, years=years)
+        except Exception as e:
+            logger.error(f"❌ [历史分位工具] 执行失败: {e}", exc_info=True)
+            return f"历史分位工具执行失败: {e}"
+
+    @staticmethod
+    @tool
+    @log_tool_call(tool_name="get_stock_peer_history_analysis", log_args=True)
+    def get_stock_peer_history_analysis(
+        ticker: Annotated[str, "股票代码（当前支持A股本地缓存数据）"],
+        peer_limit: Annotated[int, "可比公司数量，建议3-5只"] = 5,
+        years: Annotated[int, "历史分位统计窗口年数，支持3或5"] = 5,
+    ) -> str:
+        """
+        综合生成同业对比和历史分位分析。
+
+        Returns:
+            str: Markdown格式的补充分析报告
+        """
+        try:
+            from tradingagents.tools.analysis.peer_history import build_peer_and_history_report
+
+            return build_peer_and_history_report(ticker, peer_limit=peer_limit, years=years)
+        except Exception as e:
+            logger.error(f"❌ [同业历史综合工具] 执行失败: {e}", exc_info=True)
+            return f"同业历史综合工具执行失败: {e}"
+
+    @staticmethod
+    @tool
     @log_tool_call(tool_name="get_stock_fundamentals_unified", log_args=True)
     def get_stock_fundamentals_unified(
         ticker: Annotated[str, "股票代码（支持A股、港股、美股）"],
@@ -849,6 +913,23 @@ class Toolkit:
                 end_date = curr_date
 
             result_data = []
+            priority_context = []
+
+            # 先生成估值事实上下文，避免后续数据源的降级说明误导LLM。
+            try:
+                from tradingagents.tools.analysis.peer_history import build_peer_and_history_report
+
+                peer_history_report = build_peer_and_history_report(ticker, peer_limit=5, years=5)
+                priority_context.append(
+                    "## 同业对比与历史分位补充分析（估值判断优先事实来源）\n"
+                    "以下同业表和历史分位表由结构化数据生成。生成报告时必须优先引用这些表中的行业、样本、公司、PE/PB/ROE和分位数据；"
+                    "禁止在这些数据已存在时声称无法进行同业对比，也禁止自行列举未出现在表内的可比公司。\n\n"
+                    f"{peer_history_report}"
+                )
+                logger.info(f"📊 [统一基本面工具] 同业/历史补充分析已生成，长度: {len(peer_history_report)}")
+            except Exception as e:
+                logger.warning(f"⚠️ [统一基本面工具] 同业/历史补充分析生成失败: {e}")
+                priority_context.append(f"## 同业对比与历史分位补充分析\n生成失败: {e}")
 
             if is_china:
                 # 中国A股：基本面分析优化策略 - 只获取必要的当前价格和基本面数据
@@ -1007,6 +1088,7 @@ class Toolkit:
                     logger.error(f"❌ [统一基本面工具] 美股数据获取失败: {e}")
 
             # 组合所有数据
+            all_result_data = priority_context + result_data
             combined_result = f"""# {ticker} 基本面分析数据
 
 **股票类型**: {market_info['market_name']}
@@ -1014,7 +1096,7 @@ class Toolkit:
 **分析日期**: {curr_date}
 **数据深度级别**: {data_depth}
 
-{chr(10).join(result_data)}
+{chr(10).join(all_result_data)}
 
 ---
 *数据来源: 根据股票类型自动选择最适合的数据源*
@@ -1025,11 +1107,11 @@ class Toolkit:
             logger.info(f"📊 [统一基本面工具] 股票代码: {ticker}")
             logger.info(f"📊 [统一基本面工具] 股票类型: {market_info['market_name']}")
             logger.info(f"📊 [统一基本面工具] 数据深度级别: {data_depth}")
-            logger.info(f"📊 [统一基本面工具] 获取的数据模块数量: {len(result_data)}")
+            logger.info(f"📊 [统一基本面工具] 获取的数据模块数量: {len(all_result_data)}")
             logger.info(f"📊 [统一基本面工具] 总数据长度: {len(combined_result)} 字符")
             
             # 记录每个数据模块的详细信息
-            for i, data_section in enumerate(result_data, 1):
+            for i, data_section in enumerate(all_result_data, 1):
                 section_lines = data_section.split('\n')
                 section_title = section_lines[0] if section_lines else "未知模块"
                 section_length = len(data_section)
@@ -1148,6 +1230,17 @@ class Toolkit:
                     result_data.append(f"## 美股市场数据\n{us_data}")
                 except Exception as e:
                     result_data.append(f"## 美股市场数据\n获取失败: {e}")
+
+            # 补充历史价格分位，辅助判断当前价格所处区间。
+            try:
+                from tradingagents.tools.analysis.peer_history import build_historical_percentile_report
+
+                percentile_report = build_historical_percentile_report(ticker, years=5)
+                result_data.append(f"## 历史价格与估值分位补充分析\n{percentile_report}")
+                logger.info(f"📈 [统一市场工具] 历史分位补充分析已生成，长度: {len(percentile_report)}")
+            except Exception as e:
+                logger.warning(f"⚠️ [统一市场工具] 历史分位补充分析生成失败: {e}")
+                result_data.append(f"## 历史价格与估值分位补充分析\n生成失败: {e}")
 
             # 组合所有数据
             combined_result = f"""# {ticker} 市场数据分析

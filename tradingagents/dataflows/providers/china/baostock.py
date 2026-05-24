@@ -574,7 +574,7 @@ class BaoStockProvider(BaseStockDataProvider):
                 try:
                     # 根据频率选择不同的字段（周线和月线支持的字段较少）
                     if bs_frequency == "d":
-                        fields_str = "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,isST"
+                        fields_str = "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,peTTM,pbMRQ,psTTM,pcfNcfTTM,isST"
                     else:
                         # 周线和月线只支持基础字段
                         fields_str = "date,code,open,high,low,close,volume,amount,pctChg"
@@ -609,7 +609,10 @@ class BaoStockProvider(BaseStockDataProvider):
             df = pd.DataFrame(data_list, columns=fields)
 
             # 数据类型转换
-            numeric_cols = ['open', 'high', 'low', 'close', 'preclose', 'volume', 'amount', 'pctChg', 'turn']
+            numeric_cols = [
+                'open', 'high', 'low', 'close', 'preclose', 'volume', 'amount',
+                'pctChg', 'turn', 'peTTM', 'pbMRQ', 'psTTM', 'pcfNcfTTM'
+            ]
             for col in numeric_cols:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -621,7 +624,11 @@ class BaoStockProvider(BaseStockDataProvider):
 
             # 标准化列名
             df = df.rename(columns={
-                'pctChg': 'change_percent'
+                'pctChg': 'change_percent',
+                'peTTM': 'pe',
+                'pbMRQ': 'pb',
+                'psTTM': 'ps',
+                'pcfNcfTTM': 'pcf_ttm',
             })
 
             # 添加标准化字段

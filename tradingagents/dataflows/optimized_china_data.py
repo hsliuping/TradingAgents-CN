@@ -906,6 +906,41 @@ class OptimizedChinaDataProvider:
                         logger.warning(f"⚠️ MongoDB 财务数据解析失败")
                 else:
                     logger.info(f"🔄 MongoDB 未找到{symbol}财务数据，尝试从 AKShare API 获取")
+
+                    # stock_basic_info 通常已包含估值、ROE、净利润等同步字段。
+                    # 当 stock_financial_data 未覆盖该股票时，先用这些结构化字段生成基本面指标，
+                    # 避免报告降级为“无法获取完整财务数据”。
+                    try:
+                        if db_client is not None:
+                            code6 = symbol.replace('.SH', '').replace('.SZ', '').zfill(6)
+                            basic_doc = db.stock_basic_info.find_one({
+                                "$or": [
+                                    {"code": code6},
+                                    {"symbol": code6},
+                                    {"ts_code": {"$regex": f"^{code6}\\."}},
+                                ]
+                            }, {"_id": 0})
+
+                            if basic_doc and any(
+                                basic_doc.get(field) is not None
+                                for field in (
+                                    "pe", "pe_ttm", "pb", "pb_mrq", "ps", "total_mv",
+                                    "roe", "net_profit", "gross_margin", "net_margin",
+                                )
+                            ):
+                                logger.info(f"✅ [财务数据] 使用 stock_basic_info 估值/盈利字段补充{symbol}财务指标")
+                                basic_doc.setdefault("code", code6)
+                                basic_doc.setdefault("symbol", code6)
+                                metrics = self._parse_mongodb_financial_data(basic_doc, price_value)
+                                if metrics:
+                                    if basic_doc.get("total_mv") is not None and metrics.get("total_mv") in (None, "N/A"):
+                                        metrics["total_mv"] = f"{float(basic_doc.get('total_mv')):.2f}亿元"
+                                    if basic_doc.get("ps") is not None and metrics.get("ps") in (None, "N/A"):
+                                        metrics["ps"] = f"{float(basic_doc.get('ps')):.2f}倍"
+                                    metrics["data_source"] = "MongoDB stock_basic_info"
+                                    return metrics
+                    except Exception as basic_error:
+                        logger.warning(f"⚠️ stock_basic_info 财务指标补充失败: {basic_error}")
             else:
                 logger.info(f"🔄 数据库缓存未启用，直接从AKShare API获取{symbol}财务数据")
 
@@ -991,6 +1026,8 @@ class OptimizedChinaDataProvider:
             if roe is not None and str(roe) != 'nan' and roe != '--':
                 try:
                     roe_val = float(roe)
+                    if -1 <= roe_val <= 1:
+                        roe_val *= 100
                     # ROE 通常在 -100% 到 100% 之间，极端情况可能超出
                     if -200 <= roe_val <= 200:
                         metrics["roe"] = f"{roe_val:.1f}%"
@@ -1023,6 +1060,8 @@ class OptimizedChinaDataProvider:
             if gross_margin is not None and str(gross_margin) != 'nan' and gross_margin != '--':
                 try:
                     gross_margin_val = float(gross_margin)
+                    if -1 <= gross_margin_val <= 1:
+                        gross_margin_val *= 100
                     # 验证范围：毛利率应该在 -100% 到 100% 之间
                     # 如果超出范围，可能是数据错误（如存储的是绝对金额而不是百分比）
                     if -100 <= gross_margin_val <= 100:
@@ -1036,10 +1075,12 @@ class OptimizedChinaDataProvider:
                 metrics["gross_margin"] = "N/A"
 
             # 净利率 - 添加范围验证
-            net_margin = latest_indicators.get('netprofit_margin')
+            net_margin = latest_indicators.get('netprofit_margin') or latest_indicators.get('net_margin')
             if net_margin is not None and str(net_margin) != 'nan' and net_margin != '--':
                 try:
                     net_margin_val = float(net_margin)
+                    if -1 <= net_margin_val <= 1:
+                        net_margin_val *= 100
                     # 验证范围：净利率应该在 -100% 到 100% 之间
                     if -100 <= net_margin_val <= 100:
                         metrics["net_margin"] = f"{net_margin_val:.1f}%"

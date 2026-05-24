@@ -159,6 +159,11 @@ class DataSourceManager:
             available_adapters = preferred + others
 
         for adapter in available_adapters:
+            if adapter.name == "baostock":
+                logger.info(
+                    "Skipping baostock for bulk daily basic; use akshare/tushare full-market snapshot instead"
+                )
+                continue
             try:
                 logger.info(f"Trying to fetch daily basic data from {adapter.name}")
                 df = adapter.get_daily_basic(trade_date)

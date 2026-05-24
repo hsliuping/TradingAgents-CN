@@ -599,6 +599,8 @@ class TradingAgentsGraph:
                 [
                     # 统一工具（推荐）
                     self.toolkit.get_stock_market_data_unified,
+                    # 补充分析工具
+                    self.toolkit.get_stock_historical_percentiles,
                     # 在线工具（备用）
                     self.toolkit.get_YFin_data_online,
                     self.toolkit.get_stockstats_indicators_report_online,
@@ -633,6 +635,10 @@ class TradingAgentsGraph:
                 [
                     # 统一工具（推荐）
                     self.toolkit.get_stock_fundamentals_unified,
+                    # 补充分析工具
+                    self.toolkit.get_stock_peer_comparison,
+                    self.toolkit.get_stock_historical_percentiles,
+                    self.toolkit.get_stock_peer_history_analysis,
                     # 离线工具（备用）
                     self.toolkit.get_finnhub_company_insider_sentiment,
                     self.toolkit.get_finnhub_company_insider_transactions,

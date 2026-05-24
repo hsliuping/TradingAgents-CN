@@ -385,6 +385,10 @@ class AKShareProvider(BaseStockDataProvider):
                 "last_sync": datetime.now(timezone.utc),
                 "sync_status": "success"
             }
+
+            for extra_field in ("total_mv", "circ_mv", "current_price", "total_share", "float_share"):
+                if extra_field in stock_info:
+                    basic_info[extra_field] = stock_info[extra_field]
             
             logger.debug(f"✅ {code}基础信息获取成功")
             return basic_info
@@ -437,8 +441,8 @@ class AKShareProvider(BaseStockDataProvider):
                     if not name_row.empty:
                         info['name'] = str(name_row['value'].iloc[0])
 
-                    # 提取行业信息
-                    industry_row = stock_info[stock_info['item'] == '所属行业']
+                    # 提取行业信息（AKShare不同接口/版本可能返回"行业"或"所属行业"）
+                    industry_row = stock_info[stock_info['item'].isin(['所属行业', '行业'])]
                     if not industry_row.empty:
                         info['industry'] = str(industry_row['value'].iloc[0])
 
@@ -451,6 +455,34 @@ class AKShareProvider(BaseStockDataProvider):
                     list_date_row = stock_info[stock_info['item'] == '上市时间']
                     if not list_date_row.empty:
                         info['list_date'] = str(list_date_row['value'].iloc[0])
+
+                    def _extract_float(item_name: str):
+                        row = stock_info[stock_info['item'] == item_name]
+                        if row.empty:
+                            return None
+                        try:
+                            value = row['value'].iloc[0]
+                            return float(value) if value not in (None, "") else None
+                        except (TypeError, ValueError):
+                            return None
+
+                    total_mv = _extract_float('总市值')
+                    circ_mv = _extract_float('流通市值')
+                    if total_mv is not None:
+                        # AKShare返回单位为元；stock_basic_info中统一存亿元。
+                        info['total_mv'] = total_mv / 100000000
+                    if circ_mv is not None:
+                        info['circ_mv'] = circ_mv / 100000000
+
+                    latest_price = _extract_float('最新')
+                    total_share = _extract_float('总股本')
+                    float_share = _extract_float('流通股')
+                    if latest_price is not None:
+                        info['current_price'] = latest_price
+                    if total_share is not None:
+                        info['total_share'] = total_share
+                    if float_share is not None:
+                        info['float_share'] = float_share
 
                     return info
             except Exception as e:

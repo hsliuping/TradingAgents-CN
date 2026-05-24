@@ -7,8 +7,14 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from .base import DataSourceAdapter
+from .baostock_utils import baostock_session, find_last_trade_date, relogin
 
 logger = logging.getLogger(__name__)
+
+# 全市场逐只拉取估值非常慢，且 Windows 长连接易触发 WinError 10038
+_BULK_VALUATION_MAX_STOCKS = 300
+_RELOGIN_INTERVAL = 100
+_CONSECUTIVE_FAIL_ABORT = 30
 
 
 class BaoStockAdapter(DataSourceAdapter):
@@ -36,11 +42,21 @@ class BaoStockAdapter(DataSourceAdapter):
             return None
         try:
             import baostock as bs
-            lg = bs.login()
-            if lg.error_code != '0':
-                logger.error(f"BaoStock: Login failed: {lg.error_msg}")
-                return None
-            try:
+            with baostock_session():
+                lg = bs.login()
+                if lg.error_code != '0':
+                    logger.error(f"BaoStock: Login failed: {lg.error_msg}")
+                    return None
+                try:
+                    return self._fetch_stock_list_locked(bs)
+                finally:
+                    bs.logout()
+        except Exception as e:
+            logger.error(f"BaoStock: Failed to fetch stock list: {e}")
+            return None
+
+    def _fetch_stock_list_locked(self, bs) -> Optional[pd.DataFrame]:
+        try:
                 logger.info("BaoStock: Querying stock basic info...")
                 rs = bs.query_stock_basic()
                 if rs.error_code != '0':
@@ -98,8 +114,6 @@ class BaoStockAdapter(DataSourceAdapter):
                 df['list_date'] = ''
                 logger.info(f"BaoStock: Successfully fetched {len(df)} stocks")
                 return df[['symbol', 'name', 'ts_code', 'area', 'industry', 'market', 'list_date']]
-            finally:
-                bs.logout()
         except Exception as e:
             logger.error(f"BaoStock: Failed to fetch stock list: {e}")
             return None
@@ -110,18 +124,37 @@ class BaoStockAdapter(DataSourceAdapter):
 
         Args:
             trade_date: 交易日期 (YYYYMMDD)
-            max_stocks: 最大处理股票数量，None表示处理所有股票
+            max_stocks: 最大处理股票数量；None 时使用保守上限，避免全市场逐只拉取
         """
         if not self.is_available():
             return None
+        if max_stocks is None:
+            max_stocks = _BULK_VALUATION_MAX_STOCKS
         try:
             import baostock as bs
+
+            resolved_date = find_last_trade_date()
+            if resolved_date and resolved_date != trade_date:
+                logger.warning(
+                    "BaoStock: 请求日期 %s 可能非交易日，改用最近交易日 %s",
+                    trade_date,
+                    resolved_date,
+                )
+                trade_date = resolved_date
+
             logger.info(f"BaoStock: Attempting to get valuation data for {trade_date}")
-            lg = bs.login()
-            if lg.error_code != '0':
-                logger.error(f"BaoStock: Login failed: {lg.error_msg}")
-                return None
-            try:
+            with baostock_session():
+                lg = bs.login()
+                if lg.error_code != '0':
+                    logger.error(f"BaoStock: Login failed: {lg.error_msg}")
+                    return None
+                return self._fetch_daily_basic_locked(bs, trade_date, max_stocks)
+        except Exception as e:
+            logger.error(f"BaoStock: Failed to fetch valuation data for {trade_date}: {e}")
+            return None
+
+    def _fetch_daily_basic_locked(self, bs, trade_date: str, max_stocks: int) -> Optional[pd.DataFrame]:
+        try:
                 logger.info("BaoStock: Querying stock basic info...")
                 rs = bs.query_stock_basic()
                 if rs.error_code != '0':
@@ -140,6 +173,8 @@ class BaoStockAdapter(DataSourceAdapter):
                 basic_data = []
                 processed_count = 0
                 failed_count = 0
+                consecutive_failures = 0
+                formatted_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
                 for stock in stock_list:
                     if max_stocks and processed_count >= max_stocks:
                         break
@@ -148,9 +183,9 @@ class BaoStockAdapter(DataSourceAdapter):
                     stock_type = stock[4] if len(stock) > 4 else '0'
                     status = stock[5] if len(stock) > 5 else '0'
                     if stock_type == '1' and status == '1':
+                        if processed_count > 0 and processed_count % _RELOGIN_INTERVAL == 0:
+                            relogin(bs)
                         try:
-                            formatted_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
-                            # 🔥 获取估值数据和总股本
                             rs_valuation = bs.query_history_k_data_plus(
                                 code,
                                 "date,code,close,peTTM,pbMRQ,psTTM,pcfNcfTTM,isST",
@@ -172,52 +207,76 @@ class BaoStockAdapter(DataSourceAdapter):
                                     ps_ttm = self._safe_float(row[5]) if len(row) > 5 else None
                                     pcf_ttm = self._safe_float(row[6]) if len(row) > 6 else None
                                     close_price = self._safe_float(row[2]) if len(row) > 2 else None
-
-                                    # 🔥 BaoStock 不直接提供总市值和总股本
-                                    # 为了避免同步超时，这里不调用额外的 API 获取总股本
-                                    # total_mv 留空，后续可以通过其他数据源补充
                                     total_mv = None
 
                                     basic_data.append({
                                         'ts_code': ts_code,
                                         'trade_date': trade_date,
                                         'name': name,
-                                        'pe': pe_ttm,  # 🔥 市盈率（TTM）
-                                        'pb': pb_mrq,  # 🔥 市净率（MRQ）
-                                        'ps': ps_ttm,  # 市销率
-                                        'pcf': pcf_ttm,  # 市现率
+                                        'pe': pe_ttm,
+                                        'pb': pb_mrq,
+                                        'ps': ps_ttm,
+                                        'pcf': pcf_ttm,
                                         'close': close_price,
-                                        'total_mv': total_mv,  # ⚠️ BaoStock 不提供，留空
-                                        'turnover_rate': None,  # ⚠️ BaoStock 不提供
+                                        'total_mv': total_mv,
+                                        'turnover_rate': None,
                                     })
                                     processed_count += 1
+                                    consecutive_failures = 0
 
-                                    # 🔥 每处理50只股票输出一次进度日志
                                     if processed_count % 50 == 0:
                                         progress_pct = (processed_count / total_stocks) * 100
-                                        logger.info(f"📈 BaoStock 同步进度: {processed_count}/{total_stocks} ({progress_pct:.1f}%) - 最新: {name}({ts_code})")
+                                        logger.info(
+                                            "📈 BaoStock 同步进度: %s/%s (%.1f%%) - 最新: %s(%s)",
+                                            processed_count,
+                                            total_stocks,
+                                            progress_pct,
+                                            name,
+                                            ts_code,
+                                        )
                                 else:
                                     failed_count += 1
+                                    consecutive_failures += 1
                             else:
                                 failed_count += 1
+                                consecutive_failures += 1
+                        except OSError as e:
+                            failed_count += 1
+                            consecutive_failures += 1
+                            if "10038" in str(e) or "套接字" in str(e):
+                                logger.warning("BaoStock: socket error, attempting relogin: %s", e)
+                                relogin(bs)
+                            if consecutive_failures >= _CONSECUTIVE_FAIL_ABORT:
+                                logger.error(
+                                    "BaoStock: 连续 %s 次失败，中止批量估值拉取（可能为非交易日或连接已损坏）",
+                                    consecutive_failures,
+                                )
+                                break
                         except Exception as e:
                             failed_count += 1
+                            consecutive_failures += 1
                             if failed_count % 50 == 0:
                                 logger.warning(f"⚠️ BaoStock: 已有 {failed_count} 只股票获取失败")
                             logger.debug(f"BaoStock: Failed to get valuation for {code}: {e}")
+                            if consecutive_failures >= _CONSECUTIVE_FAIL_ABORT:
+                                break
                             continue
                 if basic_data:
                     df = pd.DataFrame(basic_data)
                     logger.info(f"✅ BaoStock 同步完成: 成功 {len(df)} 只，失败 {failed_count} 只，日期 {trade_date}")
                     return df
-                else:
-                    logger.warning(f"⚠️ BaoStock: 未获取到任何估值数据（失败 {failed_count} 只）")
-                    return None
-            finally:
+                logger.warning(
+                    "⚠️ BaoStock: 未获取到任何估值数据（失败 %s 只，日期 %s）。"
+                    "全市场批量估值请优先使用 AKShare/Tushare。",
+                    failed_count,
+                    trade_date,
+                )
+                return None
+        finally:
+            try:
                 bs.logout()
-        except Exception as e:
-            logger.error(f"BaoStock: Failed to fetch valuation data for {trade_date}: {e}")
-            return None
+            except Exception:
+                pass
 
     def _safe_float(self, value) -> Optional[float]:
         try:
@@ -253,7 +312,7 @@ class BaoStockAdapter(DataSourceAdapter):
         """
 
     def find_latest_trade_date(self) -> Optional[str]:
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-        logger.info(f"BaoStock: Using yesterday as trade date: {yesterday}")
-        return yesterday
+        trade_date = find_last_trade_date()
+        logger.info("BaoStock: resolved latest trade date: %s", trade_date)
+        return trade_date
 

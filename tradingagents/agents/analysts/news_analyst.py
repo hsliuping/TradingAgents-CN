@@ -390,8 +390,47 @@ def create_news_analyst(llm, toolkit):
                     logger.error(f"[新闻分析师] 📋 异常堆栈: {traceback.format_exc()}")
                     report = result.content if hasattr(result, 'content') else ""
             else:
-                # 有工具调用，直接使用结果
-                report = result.content
+                # 有工具调用时，部分OpenAI兼容模型只返回tool_calls，content为空。
+                # 这里主动执行统一新闻工具并基于真实新闻重新生成报告，避免news_report丢失。
+                logger.info(f"[新闻分析师] 检测到工具调用，主动执行统一新闻工具生成报告")
+                try:
+                    tool_args = result.tool_calls[0].get('args', {}) if hasattr(result, 'tool_calls') and result.tool_calls else {}
+                    stock_code = tool_args.get('stock_code') or tool_args.get('ticker') or ticker
+                    max_news = tool_args.get('max_news', 10)
+
+                    fetched_news = unified_news_tool(
+                        stock_code=stock_code,
+                        max_news=max_news,
+                        model_info=model_info
+                    )
+
+                    logger.info(f"[新闻分析师] 工具调用分支获取新闻长度: {len(fetched_news) if fetched_news else 0} 字符")
+
+                    if fetched_news and len(fetched_news.strip()) > 100:
+                        tool_prompt = f"""
+您是一位专业的财经新闻分析师。请基于以下最新获取的新闻数据，对股票 {ticker}（{company_name}）进行详细的新闻分析：
+
+=== 最新新闻数据 ===
+{fetched_news}
+
+=== 分析要求 ===
+{system_message}
+
+请基于上述真实新闻数据撰写详细的中文分析报告。
+"""
+                        tool_result = llm.invoke([{"role": "user", "content": tool_prompt}])
+                        if hasattr(tool_result, 'content') and tool_result.content:
+                            report = tool_result.content
+                            logger.info(f"[新闻分析师] ✅ 工具调用分支成功生成报告，长度: {len(report)} 字符")
+                        else:
+                            report = fetched_news
+                            logger.warning("[新闻分析师] 工具调用分支LLM返回为空，直接使用新闻数据作为报告")
+                    else:
+                        report = result.content if hasattr(result, 'content') else ""
+                        logger.warning("[新闻分析师] 工具调用分支新闻数据为空，回退到原始LLM内容")
+                except Exception as e:
+                    logger.error(f"[新闻分析师] ❌ 执行工具调用分支失败: {e}", exc_info=True)
+                    report = result.content if hasattr(result, 'content') else ""
         
         total_time_taken = (datetime.now() - start_time).total_seconds()
         logger.info(f"[新闻分析师] 新闻分析完成，总耗时: {total_time_taken:.2f}秒")

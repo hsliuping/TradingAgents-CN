@@ -113,72 +113,69 @@ class AKShareAdapter(DataSourceAdapter):
             return None
 
     def get_daily_basic(self, trade_date: str) -> Optional[pd.DataFrame]:
-        """获取每日基础财务数据（快速版）"""
+        """获取全市场估值快照（东方财富一次拉取，避免逐只请求）。"""
         if not self.is_available():
             return None
         try:
-            import akshare as ak  # noqa: F401
-            logger.info(f"AKShare: Attempting to get basic financial data for {trade_date}")
+            import akshare as ak
+            logger.info("AKShare: fetching full-market valuation via stock_zh_a_spot_em for %s", trade_date)
 
-            stock_df = self.get_stock_list()
-            if stock_df is None or stock_df.empty:
-                logger.warning("AKShare: No stock list available")
+            df = ak.stock_zh_a_spot_em()
+            if df is None or df.empty:
+                logger.warning("AKShare: stock_zh_a_spot_em returned empty data")
                 return None
 
-            max_stocks = 10
-            stock_list = stock_df.head(max_stocks)
+            code_col = next((c for c in ["代码", "code", "symbol"] if c in df.columns), None)
+            name_col = next((c for c in ["名称", "name"] if c in df.columns), None)
+            price_col = next((c for c in ["最新价", "现价", "price"] if c in df.columns), None)
+            pe_col = next((c for c in ["市盈率-动态", "市盈率", "PE", "pe"] if c in df.columns), None)
+            pb_col = next((c for c in ["市净率", "PB", "pb"] if c in df.columns), None)
+            mv_col = next((c for c in ["总市值", "total_mv"] if c in df.columns), None)
+            turnover_col = next((c for c in ["换手率", "turnover_rate"] if c in df.columns), None)
+
+            if not code_col:
+                logger.error("AKShare: missing code column in spot snapshot: %s", list(df.columns))
+                return None
 
             basic_data = []
-            processed_count = 0
-            import time
-            start_time = time.time()
-            timeout_seconds = 30
-
-            for _, stock in stock_list.iterrows():
-                if time.time() - start_time > timeout_seconds:
-                    logger.warning(f"AKShare: Timeout reached, processed {processed_count} stocks")
-                    break
-                try:
-                    symbol = stock.get('symbol', '')
-                    name = stock.get('name', '')
-                    ts_code = stock.get('ts_code', '')
-                    if not symbol:
-                        continue
-                    info_data = ak.stock_individual_info_em(symbol=symbol)
-                    if info_data is not None and not info_data.empty:
-                        info_dict = {}
-                        for _, row in info_data.iterrows():
-                            item = row.get('item', '')
-                            value = row.get('value', '')
-                            info_dict[item] = value
-                        latest_price = self._safe_float(info_dict.get('最新', 0))
-                        # 🔥 AKShare 的"总市值"单位是万元，需要转换为亿元（与 Tushare 一致）
-                        total_mv_wan = self._safe_float(info_dict.get('总市值', 0))  # 万元
-                        total_mv_yi = total_mv_wan / 10000 if total_mv_wan else None  # 转换为亿元
-                        basic_data.append({
-                            'ts_code': ts_code,
-                            'trade_date': trade_date,
-                            'name': name,
-                            'close': latest_price,
-                            'total_mv': total_mv_yi,  # 亿元（与 Tushare 一致）
-                            'turnover_rate': None,
-                            'pe': None,
-                            'pb': None,
-                        })
-                        processed_count += 1
-                        if processed_count % 5 == 0:
-                            logger.debug(f"AKShare: Processed {processed_count} stocks in {time.time() - start_time:.1f}s")
-                except Exception as e:
-                    logger.debug(f"AKShare: Failed to get data for {symbol}: {e}")
+            for _, row in df.iterrows():
+                symbol_raw = str(row.get(code_col, "")).strip()
+                code_digits = "".join(ch for ch in symbol_raw if ch.isdigit())
+                if not code_digits:
                     continue
+                code = code_digits.zfill(6)
+                if code.startswith(("60", "68", "90")):
+                    ts_code = f"{code}.SH"
+                elif code.startswith(("8", "4")):
+                    ts_code = f"{code}.BJ"
+                else:
+                    ts_code = f"{code}.SZ"
 
-            if basic_data:
-                df = pd.DataFrame(basic_data)
-                logger.info(f"AKShare: Successfully fetched basic data for {trade_date}, {len(df)} records")
-                return df
-            else:
-                logger.warning("AKShare: No basic data collected")
+                total_mv = self._safe_float(row.get(mv_col)) if mv_col else None
+                if total_mv and total_mv > 1_000_000:
+                    # 东方财富总市值通常为「元」，统一转为「亿元」
+                    total_mv = total_mv / 100_000_000
+
+                basic_data.append({
+                    "ts_code": ts_code,
+                    "trade_date": trade_date,
+                    "name": str(row.get(name_col, "")) if name_col else "",
+                    "close": self._safe_float(row.get(price_col)) if price_col else None,
+                    "pe": self._safe_float(row.get(pe_col)) if pe_col else None,
+                    "pb": self._safe_float(row.get(pb_col)) if pb_col else None,
+                    "pe_ttm": self._safe_float(row.get(pe_col)) if pe_col else None,
+                    "pb_mrq": self._safe_float(row.get(pb_col)) if pb_col else None,
+                    "total_mv": total_mv,
+                    "turnover_rate": self._safe_float(row.get(turnover_col)) if turnover_col else None,
+                })
+
+            if not basic_data:
+                logger.warning("AKShare: no valuation rows parsed from spot snapshot")
                 return None
+
+            result = pd.DataFrame(basic_data)
+            logger.info("AKShare: fetched valuation snapshot for %s stocks on %s", len(result), trade_date)
+            return result
         except Exception as e:
             logger.error(f"AKShare: Failed to fetch basic data for {trade_date}: {e}")
             return None
@@ -386,7 +383,11 @@ class AKShareAdapter(DataSourceAdapter):
             return None
 
     def find_latest_trade_date(self) -> Optional[str]:
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-        logger.info(f"AKShare: Using yesterday as trade date: {yesterday}")
-        return yesterday
+        for delta in range(0, 10):
+            day = datetime.now() - timedelta(days=delta)
+            if day.weekday() < 5:
+                trade_date = day.strftime("%Y%m%d")
+                logger.info("AKShare: using latest weekday trade date: %s", trade_date)
+                return trade_date
+        return (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
 
