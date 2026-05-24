@@ -1118,7 +1118,7 @@ class DataSourceManager:
                               })
 
                 # 数据质量异常时也尝试降级到其他数据源
-                fallback_result = self._try_fallback_sources(symbol, start_date, end_date)
+                fallback_result, _fallback_source = self._try_fallback_sources(symbol, start_date, end_date, period)
                 if fallback_result and "❌" not in fallback_result and "错误" not in fallback_result:
                     logger.info(f"✅ [数据来源: 备用数据源] 降级成功获取数据: {symbol}")
                     return fallback_result

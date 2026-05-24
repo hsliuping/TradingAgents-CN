@@ -4,6 +4,7 @@
 用于在分析流程开始前验证股票是否存在，并预先获取和缓存必要的数据
 """
 
+import asyncio
 import re
 from typing import Dict, Tuple, Optional
 from datetime import datetime, timedelta
@@ -540,10 +541,12 @@ class StockDataPreparer:
                     logger.info(f"✅ [A股数据-异步] 基本信息获取成功: {stock_code} - {stock_name}")
                     cache_status += "基本信息已缓存; "
 
-            # 4. 获取历史数据（同步操作）
+            # 4. 获取历史数据（使用线程池避免阻塞事件循环）
             logger.debug(f"📊 [A股数据-异步] 获取{stock_code}历史数据...")
             from tradingagents.dataflows.interface import get_china_stock_data_unified
-            historical_data = get_china_stock_data_unified(stock_code, extended_start_date_str, end_date_str)
+            historical_data = await asyncio.to_thread(
+                get_china_stock_data_unified, stock_code, extended_start_date_str, end_date_str
+            )
 
             if historical_data and "❌" not in historical_data and "获取失败" not in historical_data:
                 data_indicators = ["开盘价", "收盘价", "最高价", "最低价", "成交量"]
