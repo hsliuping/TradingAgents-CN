@@ -1,0 +1,35 @@
+name: A股等突破扫描
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 3 * * 1-5"   # 北京时间 11:30
+    - cron: "30 6 * * 1-5"   # 北京时间 14:30
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install akshare pandas requests openpyxl
+
+      - name: Run breakout scan and send Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}
+          TZ: Asia/Shanghai
+        run: |
+          python scripts/breakout_alert.py

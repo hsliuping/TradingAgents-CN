@@ -1,0 +1,86 @@
+name: Trading Analysis & Telegram Notifications
+
+on:
+  schedule:
+    # 每个交易日 11:30 (UTC+8 -> UTC)
+    - cron: '30 03 * * 1-5'
+    # 每个交易日 14:30 (UTC+8 -> UTC)
+    - cron: '30 06 * * 1-5'
+    # 每个交易日 17:00 (UTC+8 -> UTC)
+    - cron: '00 09 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      stocks:
+        description: '股票代码(逗号分隔，如: 000001,000002)'
+        required: false
+        default: '000001,002463,000006'
+      analysis_type:
+        description: '分析类型'
+        required: false
+        type: choice
+        options:
+          - quick
+          - full
+        default: 'quick'
+
+jobs:
+  trading-analysis:
+    runs-on: ubuntu-latest
+    
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PYTHON_VERSION: '3.11'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install python-telegram-bot aiohttp pandas numpy scikit-learn
+      
+      - name: Sync stock data
+        run: |
+          python scripts/sync_stock_data.py --date today
+      
+      - name: Run trading analysis
+        id: analysis
+        run: |
+          python scripts/trading_analysis_main.py \
+            --stocks "${{ github.event.inputs.stocks || '000001,000858,001979' }}" \
+            --analysis_type "${{ github.event.inputs.analysis_type || 'quick' }}" \
+            --output json
+        continue-on-error: true
+      
+      - name: Send Telegram notification
+        if: always()
+        run: |
+          python scripts/send_telegram_notification.py \
+            --bot_token "${{ env.TELEGRAM_BOT_TOKEN }}" \
+            --chat_id "${{ env.TELEGRAM_CHAT_ID }}" \
+            --analysis_file analysis_results.json \
+            --status "${{ job.status }}"
+      
+      - name: Upload analysis results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: trading-analysis-results-${{ github.run_id }}
+          path: analysis_results.json
+          retention-days: 30
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f analysis_results.json
+          echo "Cleanup completed"

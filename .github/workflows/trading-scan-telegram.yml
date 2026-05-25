@@ -1,0 +1,88 @@
+name: A股等突破扫描 - Telegram 推送
+
+on:
+  schedule:
+    # 每个交易日 11:30 (UTC+8 -> UTC为03:30)
+    - cron: '30 03 * * 1-5'
+    # 每个交易日 14:30 (UTC+8 -> UTC为06:30)
+    - cron: '30 06 * * 1-5'
+    # 每个交易日 17:00 (UTC+8 -> UTC为09:00)
+    - cron: '00 09 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      stocks:
+        description: '股票代码(逗号分隔，如: 000001,000002)'
+        required: false
+        default: '000001,000858,001979,000333'
+
+jobs:
+  scan-and-notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      STOCK_SYMBOLS: ${{ github.event.inputs.stocks || '000001,000858,001979,000333' }}
+      TZ: Asia/Shanghai
+    
+    steps:
+      - name: ✅ 检出代码
+        uses: actions/checkout@v4
+      
+      - name: 🐍 设置 Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: 📦 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install akshare pandas numpy requests pytz
+      
+      - name: 📊 执行股票扫描
+        id: scan
+        run: |
+          python scripts/scan.py > msg_full.txt 2>&1
+          CODE=$?
+          
+          {
+            echo "A股等突破扫描结果"
+            echo "退出码：$CODE"
+            echo "北京时间：$(date '+%Y-%m-%d %H:%M:%S')"
+            echo ""
+            tail -c 3500 msg_full.txt
+          } > msg.txt
+          
+          echo "===== Telegram Message ====="
+          cat msg.txt
+          
+          exit $CODE
+        continue-on-error: true
+      
+      - name: 📤 发送 Telegram 通知
+        if: always()
+        run: |
+          python scripts/send_telegram_notification.py \
+            --bot_token "$TELEGRAM_BOT_TOKEN" \
+            --chat_id "$TELEGRAM_CHAT_ID" \
+            --analysis_file "analysis_results.json" \
+            --status "${{ job.status }}"
+      
+      - name: 📋 上传分析结果
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: scan-results-${{ github.run_id }}
+          path: |
+            analysis_results.json
+            msg_full.txt
+            msg.txt
+          retention-days: 7
+      
+      - name: 🧹 清理
+        if: always()
+        run: |
+          rm -f analysis_results.json msg_full.txt msg.txt
+          echo "✅ 清理完成"

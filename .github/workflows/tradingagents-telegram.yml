@@ -1,0 +1,47 @@
+name: TradingAgents Telegram Alert
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "35 1 * * 1-5" # 北京时间 09:35
+    - cron: "30 3 * * 1-5" # 北京时间 11:30
+    - cron: "30 6 * * 1-5" # 北京时间 14:30
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas requests akshare
+
+      - name: Run 30m breakout scan and send Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python scan.py > msg_full.txt 2>&1
+          CODE=$?
+
+          {
+            echo "A股等突破扫描结果"
+            echo "退出码：$CODE"
+            echo "北京时间：$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
+            echo ""
+            tail -c 3500 msg_full.txt
+          } > msg.txt
+
+          echo "===== Telegram Message ====="
+          cat msg.txt
+
+          curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            --data-urlencode text="$(cat msg.txt)"
