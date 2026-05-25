@@ -462,6 +462,18 @@
 
                   <div class="option-item">
                     <div class="option-info">
+                      <span class="option-name">风险偏好</span>
+                      <span class="option-desc">影响最终建议的仓位、目标价和风险取舍</span>
+                    </div>
+                    <el-select v-model="analysisForm.riskPreference" size="small" style="width: 100px">
+                      <el-option label="保守" value="conservative" />
+                      <el-option label="中性" value="neutral" />
+                      <el-option label="激进" value="aggressive" />
+                    </el-select>
+                  </div>
+
+                  <div class="option-item">
+                    <div class="option-info">
                       <span class="option-name">语言偏好</span>
                     </div>
                     <el-select v-model="analysisForm.language" size="small" style="width: 100px">
@@ -737,6 +749,7 @@ interface AnalysisForm {
   selectedAnalysts: string[]
   includeSentiment: boolean
   includeRisk: boolean
+  riskPreference: 'conservative' | 'neutral' | 'aggressive'
   language: 'zh-CN' | 'en-US'
 }
 
@@ -806,9 +819,10 @@ const analysisForm = reactive<AnalysisForm>({
   market: 'A股',
   analysisDate: new Date(),
   researchDepth: 3, // 默认选中3级标准分析（推荐），将在 onMounted 中从用户偏好加载
-  selectedAnalysts: ['市场分析师', '基本面分析师'], // 将在 onMounted 中从用户偏好加载
+  selectedAnalysts: ['市场分析师', '基本面分析师', '新闻分析师'], // 将在 onMounted 中从用户偏好加载
   includeSentiment: true,
   includeRisk: true,
+  riskPreference: 'neutral',
   language: 'zh-CN'
 })
 
@@ -946,6 +960,7 @@ const submitAnalysis = async () => {
         selected_analysts: convertAnalystNamesToIds(analysisForm.selectedAnalysts),
         include_sentiment: analysisForm.includeSentiment,
         include_risk: analysisForm.includeRisk,
+        risk_preference: analysisForm.riskPreference,
         language: analysisForm.language,
         quick_analysis_model: modelSettings.value.quickAnalysisModel,
         deep_analysis_model: modelSettings.value.deepAnalysisModel

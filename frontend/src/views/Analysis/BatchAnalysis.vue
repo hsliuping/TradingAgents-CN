@@ -213,29 +213,41 @@
                 <h4 class="config-title">⚙️ 分析选项</h4>
                 <div class="analysis-options">
                   <div class="option-item">
-                    <el-switch v-model="batchForm.includeSentiment" />
                     <div class="option-content">
                       <div class="option-name">情绪分析</div>
                       <div class="option-desc">分析市场情绪和投资者心理</div>
                     </div>
+                    <el-switch v-model="batchForm.includeSentiment" />
                   </div>
 
                   <div class="option-item">
-                    <el-switch v-model="batchForm.includeRisk" />
                     <div class="option-content">
                       <div class="option-name">风险评估</div>
                       <div class="option-desc">包含详细的风险因素分析</div>
                     </div>
+                    <el-switch v-model="batchForm.includeRisk" />
                   </div>
 
                   <div class="option-item">
-                    <el-select v-model="batchForm.language" size="small" style="width: 100%">
-                      <el-option label="中文" value="zh-CN" />
-                      <el-option label="English" value="en-US" />
+                    <div class="option-content">
+                      <div class="option-name">风险偏好</div>
+                      <div class="option-desc">影响最终建议的仓位、目标价和风险取舍</div>
+                    </div>
+                    <el-select v-model="batchForm.riskPreference" size="small" class="option-select">
+                      <el-option label="保守" value="conservative" />
+                      <el-option label="中性" value="neutral" />
+                      <el-option label="激进" value="aggressive" />
                     </el-select>
+                  </div>
+
+                  <div class="option-item">
                     <div class="option-content">
                       <div class="option-name">语言偏好</div>
                     </div>
+                    <el-select v-model="batchForm.language" size="small" class="option-select">
+                      <el-option label="中文" value="zh-CN" />
+                      <el-option label="English" value="en-US" />
+                    </el-select>
                   </div>
                 </div>
               </div>
@@ -324,9 +336,10 @@ const batchForm = reactive({
   title: '',
   description: '',
   depth: '3',  // 默认3级标准分析，将在 onMounted 中从用户偏好加载
-  analysts: [...DEFAULT_ANALYSTS],  // 将在 onMounted 中从用户偏好加载
+  analysts: [...DEFAULT_ANALYSTS, '新闻分析师'],  // 将在 onMounted 中从用户偏好加载
   includeSentiment: true,
   includeRisk: true,
+  riskPreference: 'neutral' as 'conservative' | 'neutral' | 'aggressive',
   language: 'zh-CN'
 })
 
@@ -521,6 +534,7 @@ const submitBatchAnalysis = async () => {
         selected_analysts: convertAnalystNamesToIds(batchForm.analysts),
         include_sentiment: batchForm.includeSentiment,
         include_risk: batchForm.includeRisk,
+        risk_preference: batchForm.riskPreference,
         language: batchForm.language,
         quick_analysis_model: modelSettings.value.quickAnalysisModel,
         deep_analysis_model: modelSettings.value.deepAnalysisModel
@@ -679,7 +693,8 @@ const submitBatchAnalysis = async () => {
           .analysis-options {
             .option-item {
               display: flex;
-              align-items: flex-start;
+              align-items: center;
+              justify-content: space-between;
               gap: 12px;
               padding: 12px 0;
               border-bottom: 1px solid #f3f4f6;
@@ -703,6 +718,11 @@ const submitBatchAnalysis = async () => {
                   font-size: 12px;
                   color: #6b7280;
                 }
+              }
+
+              .option-select {
+                width: 100px;
+                flex-shrink: 0;
               }
             }
           }

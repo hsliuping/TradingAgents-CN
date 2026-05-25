@@ -385,7 +385,8 @@ def create_analysis_config(
     llm_provider: str,
     market_type: str = "A股",
     quick_model_config: dict = None,  # 新增：快速模型的完整配置
-    deep_model_config: dict = None    # 新增：深度模型的完整配置
+    deep_model_config: dict = None,   # 新增：深度模型的完整配置
+    risk_preference: str = "neutral",
 ) -> dict:
     """
     创建分析配置 - 支持数字等级和中文等级
@@ -399,6 +400,7 @@ def create_analysis_config(
         market_type: 市场类型
         quick_model_config: 快速模型的完整配置（包含 max_tokens、temperature、timeout 等）
         deep_model_config: 深度模型的完整配置（包含 max_tokens、temperature、timeout 等）
+        risk_preference: 风险偏好，conservative/neutral/aggressive
 
     Returns:
         dict: 完整的分析配置
@@ -528,6 +530,7 @@ def create_analysis_config(
 
     # 添加分析师配置
     config["selected_analysts"] = selected_analysts
+    config["risk_preference"] = risk_preference if risk_preference in ["conservative", "neutral", "aggressive"] else "neutral"
     config["debug"] = False
 
     # 🔧 添加research_depth到配置中，使工具函数能够访问分析级别信息
@@ -1213,7 +1216,8 @@ class SimpleAnalysisService:
                 quick_model=quick_model,
                 deep_model=deep_model,
                 llm_provider=quick_provider,  # 主要使用快速模型的供应商
-                market_type=market_type  # 使用前端传递的市场类型
+                market_type=market_type,  # 使用前端传递的市场类型
+                risk_preference=request.parameters.risk_preference if request.parameters else "neutral"
             )
 
             # 🔧 添加混合模式配置

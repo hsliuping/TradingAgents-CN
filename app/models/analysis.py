@@ -47,6 +47,7 @@ class AnalysisParameters(BaseModel):
     custom_prompt: Optional[str] = None
     include_sentiment: bool = True
     include_risk: bool = True
+    risk_preference: str = "neutral"  # conservative / neutral / aggressive
     language: str = "zh-CN"
     # 模型配置
     quick_analysis_model: Optional[str] = "qwen-turbo"

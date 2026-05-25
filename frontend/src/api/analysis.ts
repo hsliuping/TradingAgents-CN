@@ -31,6 +31,7 @@ export interface SingleAnalysisRequest {
     custom_prompt?: string
     include_sentiment?: boolean
     include_risk?: boolean
+    risk_preference?: 'conservative' | 'neutral' | 'aggressive'
     language?: string
     quick_analysis_model?: string
     deep_analysis_model?: string

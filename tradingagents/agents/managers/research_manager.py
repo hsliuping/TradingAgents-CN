@@ -7,7 +7,7 @@ from tradingagents.agents.utils.instrument_utils import build_instrument_context
 logger = get_logger("default")
 
 
-def create_research_manager(llm, memory):
+def create_research_manager(llm, memory, config=None):
     def research_manager_node(state) -> dict:
         ticker = state["company_of_interest"]
         instrument_context = build_instrument_context(ticker)
@@ -32,6 +32,13 @@ def create_research_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
+        risk_preference = (config or {}).get("risk_preference", "neutral")
+        risk_preference_text = {
+            "conservative": "保守：优先控制回撤和本金安全，买入门槛更高，仓位和目标价采用更谨慎假设。",
+            "neutral": "中性：平衡收益和风险，避免因单一利好或利空过度偏向。",
+            "aggressive": "激进：允许更高波动和更积极仓位，但仍需给出明确风险边界。"
+        }.get(risk_preference, "中性：平衡收益和风险，避免因单一利好或利空过度偏向。")
+
         prompt = f"""作为投资组合经理和辩论主持人，您的职责是批判性地评估这轮辩论并做出明确决策：支持看跌分析师、看涨分析师，或者仅在基于所提出论点有强有力理由时选择持有。
 
 简洁地总结双方的关键观点，重点关注最有说服力的证据或推理。您的建议——买入、卖出或持有——必须明确且可操作。避免仅仅因为双方都有有效观点就默认选择持有；要基于辩论中最强有力的论点做出承诺。
@@ -49,6 +56,13 @@ def create_research_manager(llm, memory):
 - 风险调整价格情景（保守、基准、乐观）
 - 价格目标的时间范围（1个月、3个月、6个月）
 💰 您必须提供具体的目标价格 - 不要回复"无法确定"或"需要更多信息"。
+
+用户风险偏好：{risk_preference_text}
+
+决策校验要求：
+- 必须分别说明新闻面、基本面、同行业对比对建议的影响；如果某项报告为空或未被选择，请明确说明“本次未纳入”，不能假装已经分析。
+- 基本面报告中的同业均值/中位数、可比公司、历史分位等同业对比信息必须进入估值和目标价判断，不能只依赖技术面或情绪面。
+- 如果新闻面与基本面结论冲突，需要说明最终更采信哪一方以及原因。
 
 考虑您在类似情况下的过去错误。利用这些见解来完善您的决策制定，确保您在学习和改进。以对话方式呈现您的分析，就像自然说话一样，不使用特殊格式。
 

@@ -24,6 +24,9 @@ export interface AnalysisParameters {
   research_depth: '快速' | '基础' | '标准' | '深度' | '全面'
   selected_analysts: string[]
   custom_prompt?: string
+  include_sentiment?: boolean
+  include_risk?: boolean
+  risk_preference?: 'conservative' | 'neutral' | 'aggressive'
   include_charts: boolean
   language: 'zh-CN' | 'en-US'
 }

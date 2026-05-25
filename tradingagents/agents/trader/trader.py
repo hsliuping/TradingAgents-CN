@@ -8,7 +8,7 @@ from tradingagents.agents.utils.instrument_utils import build_instrument_context
 logger = get_logger("default")
 
 
-def create_trader(llm, memory):
+def create_trader(llm, memory, config=None):
     def trader_node(state, name):
         company_name = state["company_of_interest"]
         instrument_context = build_instrument_context(company_name)
@@ -50,6 +50,13 @@ def create_trader(llm, memory):
             past_memories = []
             past_memory_str = "暂无历史记忆数据可参考。"
 
+        risk_preference = (config or {}).get("risk_preference", "neutral")
+        risk_preference_text = {
+            "conservative": "保守：优先控制回撤和本金安全，降低仓位建议，只有风险收益比充分才建议买入。",
+            "neutral": "中性：平衡收益和风险，仓位与目标价采用基准假设。",
+            "aggressive": "激进：允许更高波动和更积极仓位，但必须保留止损和风险边界。"
+        }.get(risk_preference, "中性：平衡收益和风险，仓位与目标价采用基准假设。")
+
         context = {
             "role": "user",
             "content": f"Based on a comprehensive analysis by a team of analysts, here is an investment plan tailored for {company_name}. This plan incorporates insights from current technical market trends, macroeconomic indicators, and social media sentiment. Use this plan as a foundation for evaluating your next trading decision.\n\nProposed Investment Plan: {investment_plan}\n\nLeverage these insights to make an informed and strategic decision.",
@@ -78,6 +85,13 @@ def create_trader(llm, memory):
 3. **置信度**: 对决策的信心程度(0-1之间)
 4. **风险评分**: 投资风险等级(0-1之间，0为低风险，1为高风险)
 5. **详细推理**: 支持决策的具体理由
+
+用户风险偏好：{risk_preference_text}
+
+决策依据要求：
+- 必须逐项说明新闻面、基本面、同行业对比如何影响最终买入/持有/卖出建议。
+- 同行业对比属于基本面估值的重要依据，若基本面报告提供了同业均值/中位数、可比公司或历史分位，必须纳入目标价和仓位判断。
+- 如果新闻面、基本面、同业对比之间存在冲突，请说明你如何取舍，不能忽略任何已提供的报告。
 
 🎯 目标价位计算指导：
 - 基于基本面分析中的估值数据（P/E、P/B、DCF等）
