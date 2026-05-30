@@ -137,6 +137,29 @@ class OpenAICompatibleBase(ChatOpenAI):
         # 初始化父类
         super().__init__(**openai_kwargs)
 
+    def _get_model_context_length(self) -> int:
+        """获取当前模型的上下文窗口长度。"""
+        providers = globals().get("OPENAI_COMPATIBLE_PROVIDERS", {})
+        provider_config = providers.get(getattr(self, "_provider_name", ""), {})
+        model_config = provider_config.get("models", {}).get(
+            getattr(self, "_model_name_alias", ""),
+            {},
+        )
+        return int(model_config.get("context_length") or 4500)
+
+    def _get_input_token_budget(self) -> int:
+        """根据模型上下文长度和最大输出长度计算输入预算。"""
+        context_length = self._get_model_context_length()
+        configured_output = getattr(self, "max_tokens", None)
+
+        if configured_output:
+            reserved_output = min(int(configured_output), max(context_length - 1000, 1000))
+        else:
+            # 未显式设置输出长度时，保留约10%的上下文给回复，最多预留8192 tokens。
+            reserved_output = min(max(int(context_length * 0.1), 1024), 8192)
+
+        return max(context_length - reserved_output, 1000)
+
         # 再次确保元信息存在（有些实现会在super()中重置__dict__）
         object.__setattr__(self, "_provider_name", provider_name)
         object.__setattr__(self, "_model_name_alias", model)
@@ -309,8 +332,7 @@ class ChatQianfanOpenAI(OpenAICompatibleBase):
         return max(1, len(text) // 2)
     
     def _truncate_messages(self, messages: List[BaseMessage], max_tokens: int = 4500) -> List[BaseMessage]:
-        """截断消息以适应千帆模型的token限制"""
-        # 为千帆模型预留一些token空间，使用4500而不是5120
+        """截断消息以适应当前模型的上下文限制。"""
         truncated_messages = []
         total_tokens = 0
         
@@ -336,7 +358,12 @@ class ChatQianfanOpenAI(OpenAICompatibleBase):
                 break
         
         if len(truncated_messages) < len(messages):
-            logger.warning(f"⚠️ 千帆模型输入过长，已截断 {len(messages) - len(truncated_messages)} 条消息")
+            provider_name = getattr(self, "_provider_name", "unknown")
+            model_name = getattr(self, "_model_name_alias", "unknown")
+            logger.warning(
+                f"⚠️ {provider_name}/{model_name} 输入过长，已按 {max_tokens} token 预算截断 "
+                f"{len(messages) - len(truncated_messages)} 条消息"
+            )
         
         return truncated_messages
     
@@ -347,10 +374,13 @@ class ChatQianfanOpenAI(OpenAICompatibleBase):
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> ChatResult:
-        """生成聊天响应，包含千帆模型的token截断逻辑"""
+        """生成聊天响应，按模型上下文长度进行输入截断。"""
         
-        # 对千帆模型进行输入token截断
-        truncated_messages = self._truncate_messages(messages)
+        # 对OpenAI兼容模型进行输入token截断
+        truncated_messages = self._truncate_messages(
+            messages,
+            max_tokens=self._get_input_token_budget(),
+        )
         
         # 调用父类的_generate方法
         return super()._generate(truncated_messages, stop, run_manager, **kwargs)
@@ -435,7 +465,9 @@ OPENAI_COMPATIBLE_PROVIDERS = {
         "api_key_env": "DEEPSEEK_API_KEY",
         "models": {
             "deepseek-chat": {"context_length": 32768, "supports_function_calling": True},
-            "deepseek-coder": {"context_length": 16384, "supports_function_calling": True}
+            "deepseek-coder": {"context_length": 16384, "supports_function_calling": True},
+            "deepseek-v4-flash": {"context_length": 1000000, "supports_function_calling": True},
+            "deepseek-v4-pro": {"context_length": 1000000, "supports_function_calling": True}
         }
     },
     "dashscope": {

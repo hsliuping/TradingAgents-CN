@@ -78,7 +78,7 @@ class TestRiskDebateFlow:
     """测试风险讨论流程"""
 
     def test_level_4_risk_debate_2_rounds(self):
-        """测试4级深度分析的风险讨论（2轮）"""
+        """测试4级深度分析的风险讨论（独立初评 + 2轮交叉质询）"""
         logic = ConditionalLogic(max_debate_rounds=2, max_risk_discuss_rounds=2)
         
         # 模拟风险辩论状态
@@ -89,7 +89,7 @@ class TestRiskDebateFlow:
             }
         }
         
-        # 第1轮：Risky -> Safe -> Neutral
+        # 独立初评：Risky -> Safe -> Neutral
         # Risky -> Safe
         assert logic.should_continue_risk_analysis(state) == "Safe Analyst"
         state["risk_debate_state"]["count"] = 1
@@ -105,7 +105,7 @@ class TestRiskDebateFlow:
         state["risk_debate_state"]["count"] = 3
         state["risk_debate_state"]["latest_speaker"] = "Risky Analyst"  # 更新为Risky
 
-        # 第2轮：Risky -> Safe -> Neutral
+        # 交叉质询第1轮：Risky -> Safe -> Neutral
         # Risky -> Safe
         assert logic.should_continue_risk_analysis(state) == "Safe Analyst"
         state["risk_debate_state"]["count"] = 4
@@ -116,13 +116,23 @@ class TestRiskDebateFlow:
         state["risk_debate_state"]["count"] = 5
         state["risk_debate_state"]["latest_speaker"] = "Neutral Analyst"  # 更新为Neutral
 
-        # Neutral -> Risk Judge (结束)
-        # count = 6 >= 3 * 2 = 6
+        # 交叉质询第2轮：Risky -> Safe -> Neutral 后结束
         state["risk_debate_state"]["count"] = 6
+        state["risk_debate_state"]["latest_speaker"] = "Risky Analyst"
+        assert logic.should_continue_risk_analysis(state) == "Safe Analyst"
+        state["risk_debate_state"]["count"] = 7
+        state["risk_debate_state"]["latest_speaker"] = "Safe Analyst"
+        assert logic.should_continue_risk_analysis(state) == "Neutral Analyst"
+        state["risk_debate_state"]["count"] = 8
+        state["risk_debate_state"]["latest_speaker"] = "Neutral Analyst"
+        assert logic.should_continue_risk_analysis(state) == "Risky Analyst"
+
+        # count = 9 >= 3 + 3 * 2 = 9
+        state["risk_debate_state"]["count"] = 9
         assert logic.should_continue_risk_analysis(state) == "Risk Judge"
 
     def test_level_5_risk_debate_3_rounds(self):
-        """测试5级全面分析的风险讨论（3轮）"""
+        """测试5级全面分析的风险讨论（独立初评 + 3轮交叉质询）"""
         logic = ConditionalLogic(max_debate_rounds=3, max_risk_discuss_rounds=3)
         
         state = {
@@ -135,20 +145,20 @@ class TestRiskDebateFlow:
         speakers = ["Risky Analyst", "Safe Analyst", "Neutral Analyst"]
         expected_next = ["Safe Analyst", "Neutral Analyst", "Risky Analyst"]
         
-        # 3轮，每轮3个发言者
-        for round_num in range(3):
+        # 独立初评 + 3轮交叉质询，每轮3个发言者
+        for round_num in range(4):
             for speaker_idx in range(3):
                 current_count = round_num * 3 + speaker_idx
                 state["risk_debate_state"]["count"] = current_count
                 state["risk_debate_state"]["latest_speaker"] = speakers[speaker_idx]
                 
-                if current_count < 9:  # 3 * 3 = 9
+                if current_count < 12:  # 3 + 3 * 3 = 12
                     next_speaker = logic.should_continue_risk_analysis(state)
                     assert next_speaker == expected_next[speaker_idx], \
                         f"轮次{round_num+1}，发言者{speaker_idx+1}，期望下一个是{expected_next[speaker_idx]}，实际是{next_speaker}"
         
-        # count = 9 >= 3 * 3 = 9，结束
-        state["risk_debate_state"]["count"] = 9
+        # count = 12 >= 3 + 3 * 3 = 12，结束
+        state["risk_debate_state"]["count"] = 12
         assert logic.should_continue_risk_analysis(state) == "Risk Judge"
 
 
@@ -180,10 +190,10 @@ class TestDebateRoundsCalculation:
         assert logic.should_continue_debate(state) == "Research Manager"
 
     @pytest.mark.parametrize("max_risk_discuss_rounds,expected_total_count", [
-        (1, 3),   # 1轮 = 3次发言（Risky + Safe + Neutral）
-        (2, 6),   # 2轮 = 6次发言
-        (3, 9),   # 3轮 = 9次发言
-        (5, 15),  # 5轮 = 15次发言
+        (1, 6),   # 独立初评3次 + 1轮交叉质询3次
+        (2, 9),   # 独立初评3次 + 2轮交叉质询6次
+        (3, 12),  # 独立初评3次 + 3轮交叉质询9次
+        (5, 18),  # 独立初评3次 + 5轮交叉质询15次
     ])
     def test_risk_debate_total_count(self, max_risk_discuss_rounds, expected_total_count):
         """测试风险讨论的总发言次数"""
@@ -212,7 +222,7 @@ class TestDebateFlowSummary:
         logic = ConditionalLogic(max_debate_rounds=2, max_risk_discuss_rounds=2)
         
         # 投资辩论：2轮 = 4次发言
-        # 风险讨论：2轮 = 6次发言
+        # 风险讨论：独立初评3次 + 2轮交叉质询6次 = 9次发言
         
         print("\n4级深度分析流程：")
         print("投资辩论（2轮）：")
@@ -220,10 +230,11 @@ class TestDebateFlowSummary:
         print("  第2轮：Bull -> Bear")
         print("  总计：4次发言")
         
-        print("\n风险讨论（2轮）：")
-        print("  第1轮：Risky -> Safe -> Neutral")
-        print("  第2轮：Risky -> Safe -> Neutral")
-        print("  总计：6次发言")
+        print("\n风险讨论（独立初评 + 2轮交叉质询）：")
+        print("  独立初评：Risky -> Safe -> Neutral")
+        print("  交叉质询第1轮：Risky -> Safe -> Neutral")
+        print("  交叉质询第2轮：Risky -> Safe -> Neutral")
+        print("  总计：9次发言")
         
         assert logic.max_debate_rounds == 2
         assert logic.max_risk_discuss_rounds == 2
@@ -233,7 +244,7 @@ class TestDebateFlowSummary:
         logic = ConditionalLogic(max_debate_rounds=3, max_risk_discuss_rounds=3)
         
         # 投资辩论：3轮 = 6次发言
-        # 风险讨论：3轮 = 9次发言
+        # 风险讨论：独立初评3次 + 3轮交叉质询9次 = 12次发言
         
         print("\n5级全面分析流程：")
         print("投资辩论（3轮）：")
@@ -242,11 +253,12 @@ class TestDebateFlowSummary:
         print("  第3轮：Bull -> Bear")
         print("  总计：6次发言")
         
-        print("\n风险讨论（3轮）：")
-        print("  第1轮：Risky -> Safe -> Neutral")
-        print("  第2轮：Risky -> Safe -> Neutral")
-        print("  第3轮：Risky -> Safe -> Neutral")
-        print("  总计：9次发言")
+        print("\n风险讨论（独立初评 + 3轮交叉质询）：")
+        print("  独立初评：Risky -> Safe -> Neutral")
+        print("  交叉质询第1轮：Risky -> Safe -> Neutral")
+        print("  交叉质询第2轮：Risky -> Safe -> Neutral")
+        print("  交叉质询第3轮：Risky -> Safe -> Neutral")
+        print("  总计：12次发言")
         
         assert logic.max_debate_rounds == 3
         assert logic.max_risk_discuss_rounds == 3

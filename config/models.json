@@ -57,8 +57,8 @@
     "provider": "deepseek",
     "model_name": "deepseek-v4-flash",
     "api_key": "",
-    "base_url": null,
-    "max_tokens": 10000,
+    "base_url": "https://api.deepseek.com",
+    "max_tokens": 15000,
     "temperature": 0.7,
     "enabled": true
   },
@@ -66,8 +66,8 @@
     "provider": "deepseek",
     "model_name": "deepseek-v4-pro",
     "api_key": "",
-    "base_url": null,
-    "max_tokens": 10000,
+    "base_url": "https://api.deepseek.com",
+    "max_tokens": 20000,
     "temperature": 0.7,
     "enabled": true
   }

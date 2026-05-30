@@ -47,6 +47,16 @@ class Toolkit:
         """Update the class-level configuration."""
         cls._config.update(config)
 
+    @staticmethod
+    def _get_llm_peer_codes(ticker: str) -> list:
+        peer_recommendations = Toolkit._config.get("llm_peer_recommendations", {})
+        return (
+            peer_recommendations.get(ticker)
+            or peer_recommendations.get(str(ticker).upper())
+            or peer_recommendations.get(str(ticker).zfill(6))
+            or []
+        )
+
     @property
     def config(self):
         """Access the configuration."""
@@ -705,7 +715,12 @@ class Toolkit:
         try:
             from tradingagents.tools.analysis.peer_history import build_peer_comparison_report
 
-            return build_peer_comparison_report(ticker, peer_limit=peer_limit)
+            preferred_peer_codes = Toolkit._get_llm_peer_codes(ticker)
+            return build_peer_comparison_report(
+                ticker,
+                peer_limit=peer_limit,
+                preferred_peer_codes=preferred_peer_codes,
+            )
         except Exception as e:
             logger.error(f"❌ [同业对比工具] 执行失败: {e}", exc_info=True)
             return f"同业对比工具执行失败: {e}"
@@ -748,7 +763,13 @@ class Toolkit:
         try:
             from tradingagents.tools.analysis.peer_history import build_peer_and_history_report
 
-            return build_peer_and_history_report(ticker, peer_limit=peer_limit, years=years)
+            preferred_peer_codes = Toolkit._get_llm_peer_codes(ticker)
+            return build_peer_and_history_report(
+                ticker,
+                peer_limit=peer_limit,
+                years=years,
+                preferred_peer_codes=preferred_peer_codes,
+            )
         except Exception as e:
             logger.error(f"❌ [同业历史综合工具] 执行失败: {e}", exc_info=True)
             return f"同业历史综合工具执行失败: {e}"
@@ -919,10 +940,15 @@ class Toolkit:
             try:
                 from tradingagents.tools.analysis.peer_history import build_peer_and_history_report
 
-                peer_history_report = build_peer_and_history_report(ticker, peer_limit=5, years=5)
+                peer_history_report = build_peer_and_history_report(
+                    ticker,
+                    peer_limit=5,
+                    years=5,
+                    preferred_peer_codes=Toolkit._get_llm_peer_codes(ticker),
+                )
                 priority_context.append(
                     "## 同业对比与历史分位补充分析（估值判断优先事实来源）\n"
-                    "以下同业表和历史分位表由结构化数据生成。生成报告时必须优先引用这些表中的行业、样本、公司、PE/PB/ROE和分位数据；"
+                    "以下同业表和历史分位表由结构化数据生成。若存在LLM推荐同行，说明同行候选先由LLM按主营业务/产业链稳定可比关系给出，再由本地结构化数据补充估值指标。生成报告时必须优先引用这些表中的行业、样本、公司、PE/PB/ROE和分位数据；"
                     "禁止在这些数据已存在时声称无法进行同业对比，也禁止自行列举未出现在表内的可比公司。\n\n"
                     f"{peer_history_report}"
                 )

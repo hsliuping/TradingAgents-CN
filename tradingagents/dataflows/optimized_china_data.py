@@ -724,6 +724,20 @@ class OptimizedChinaDataProvider:
                         industry_val = sec_or_cat
                     logger.debug(f"🔧 [字段归一化] industry原值='{raw_industry}' → 行业='{industry_val}', 市场/板块='{market_val}'")
 
+                try:
+                    from tradingagents.tools.analysis.peer_history import resolve_stock_industry
+
+                    resolved_industry, resolved_source = resolve_stock_industry(symbol, doc)
+                    if resolved_industry and resolved_industry != "未知":
+                        if resolved_industry != industry_val:
+                            logger.info(
+                                f"🔧 [行业修正] {symbol} 行业由 {raw_industry or industry_val} "
+                                f"修正为 {resolved_industry} (来源: {resolved_source})"
+                            )
+                        industry_val = resolved_industry
+                except Exception as resolve_exc:
+                    logger.debug(f"行业修正跳过 {symbol}: {resolve_exc}")
+
                 # 构建行业信息
                 info = {
                     "industry": industry_val or '未知',

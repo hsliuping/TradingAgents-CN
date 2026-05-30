@@ -20,6 +20,7 @@ def create_risk_manager(llm, memory, config=None):
         fundamentals_report = state["fundamentals_report"]
         sentiment_report = state["sentiment_report"]
         trader_plan = state["investment_plan"]
+        trader_execution_plan = state.get("trader_investment_plan", "")
 
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
 
@@ -41,12 +42,15 @@ def create_risk_manager(llm, memory, config=None):
             "aggressive": "激进：最终建议可更重视上涨空间，但必须说明可接受的风险边界。"
         }.get(risk_preference, "中性：最终建议应平衡上涨空间、估值安全边际和风险暴露。")
 
-        prompt = f"""作为风险管理委员会主席和辩论主持人，您的目标是评估三位风险分析师——激进、中性和安全/保守——之间的辩论，并确定交易员的最佳行动方案。您的决策必须产生明确的建议：买入、卖出或持有。只有在有具体论据强烈支持时才选择持有，而不是在所有方面都似乎有效时作为后备选择。力求清晰和果断。
+        prompt = f"""作为风险管理委员会主席和投资组合经理，您的目标是评估三位风险分析师——激进、中性和安全/保守——在“独立初评 + 交叉质询”流程中形成的观点，并确定交易员的最佳行动方案。您的决策必须产生明确的建议：买入、卖出或持有。只有在有具体论据强烈支持时才选择持有，而不是在所有方面都似乎有效时作为后备选择。力求清晰、可执行、可复盘。
 
 决策指导原则：
-1. **总结关键论点**：提取每位分析师的最强观点，重点关注与背景的相关性。
-2. **提供理由**：用辩论中的直接引用和反驳论点支持您的建议。
-3. **完善交易员计划**：从交易员的原始计划**{trader_plan}**开始，根据分析师的见解进行调整。
+1. **分阶段阅读证据**：先看三位分析师的独立初评，识别各自原始判断；再看交叉质询，识别哪些观点经得起反驳。
+2. **按角色权重取证**：
+   - 激进分析师主要贡献机会、催化剂、预期差、赔率空间。
+   - 保守分析师主要贡献大盘、行业、流动性、本金损失和尾部风险。
+   - 中性分析师主要贡献风险收益比、证据质量、信号冲突和执行条件。
+3. **完善交易员计划**：从研究经理投资计划**{trader_plan}**和交易员执行计划**{trader_execution_plan}**开始，根据分析师的见解进行调整。
 4. **从过去的错误中学习**：使用**{past_memory_str}**中的经验教训来解决先前的误判，改进您现在做出的决策，确保您不会做出错误的买入/卖出/持有决定而亏损。
 
 用户风险偏好：{risk_preference_text}
@@ -55,10 +59,19 @@ def create_risk_manager(llm, memory, config=None):
 - 必须检查交易员计划是否已经纳入新闻面、基本面和同行业对比；若遗漏，您需要补充这些因素后再给最终建议。
 - 同行业对比是基本面风险校验的一部分；若同业估值、可比公司或历史分位显示估值偏离，必须影响风险评分、仓位或买卖建议。
 - 如果新闻面与基本面/同业对比信号冲突，请说明最终采用的主导依据。
+- 如果保守分析师指出大盘或行业系统性风险，必须说明这些风险是否会压低仓位、推迟买入或触发卖出。
+- 如果激进分析师指出机会窗口，必须说明机会是否足以补偿风险。
+- 如果中性分析师指出证据不足或风险收益不对称，必须在最终动作、仓位或止损中体现。
 
 交付成果：
-- 明确且可操作的建议：买入、卖出或持有。
-- 基于辩论和过去反思的详细推理。
+请按以下结构输出，使用中文：
+1. **最终建议**：买入 / 持有 / 卖出，并给出一句话结论。
+2. **风险评分**：分别给出基本面风险、估值风险、大盘/行业风险、技术面风险、新闻/政策风险、情绪/流动性风险、综合风险，均为0-10分。
+3. **证据裁决**：说明激进、保守、中性三方中哪些观点被采纳，哪些被否决，原因是什么。
+4. **价格与仓位**：给出目标价区间、止损价/减仓条件、建议仓位或仓位上限。
+5. **执行方案**：一次性买入、分批、观察、减仓或卖出的具体条件。
+6. **重新评估触发器**：列出会让结论升级或降级的关键条件。
+7. **置信度**：0-1之间，并解释主要不确定性。
 
 标的约束：
 {instrument_context}
@@ -161,15 +174,16 @@ def create_risk_manager(llm, memory, config=None):
 
         new_risk_debate_state = {
             "judge_decision": response_content,
-            "history": risk_debate_state["history"],
-            "risky_history": risk_debate_state["risky_history"],
-            "safe_history": risk_debate_state["safe_history"],
-            "neutral_history": risk_debate_state["neutral_history"],
+            "history": risk_debate_state.get("history", ""),
+            "risky_history": risk_debate_state.get("risky_history", ""),
+            "safe_history": risk_debate_state.get("safe_history", ""),
+            "neutral_history": risk_debate_state.get("neutral_history", ""),
             "latest_speaker": "Judge",
-            "current_risky_response": risk_debate_state["current_risky_response"],
-            "current_safe_response": risk_debate_state["current_safe_response"],
-            "current_neutral_response": risk_debate_state["current_neutral_response"],
-            "count": risk_debate_state["count"],
+            "stage": "decision",
+            "current_risky_response": risk_debate_state.get("current_risky_response", ""),
+            "current_safe_response": risk_debate_state.get("current_safe_response", ""),
+            "current_neutral_response": risk_debate_state.get("current_neutral_response", ""),
+            "count": risk_debate_state.get("count", 0),
         }
 
         logger.info(f"📋 [Risk Manager] 最终决策生成完成，内容长度: {len(response_content)} 字符")

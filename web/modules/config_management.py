@@ -110,7 +110,7 @@ def render_model_config():
                 new_api_key = st.text_input("API密钥", value=model.api_key, type="password", key=f"edit_api_key_{selected_model_idx}")
                 if env_has_key:
                     st.caption("⚠️ 此密钥来自 .env 文件，Web修改可能被覆盖")
-                new_max_tokens = st.number_input("最大Token数", value=model.max_tokens, min_value=1000, max_value=32000, key=f"edit_max_tokens_{selected_model_idx}")
+                new_max_tokens = st.number_input("最大Token数", value=model.max_tokens, min_value=1000, max_value=384000, key=f"edit_max_tokens_{selected_model_idx}")
                 new_temperature = st.slider("温度参数", 0.0, 2.0, model.temperature, 0.1, key=f"edit_temperature_{selected_model_idx}")
 
             with col2:
@@ -147,7 +147,7 @@ def render_model_config():
         new_api_key = st.text_input("API密钥", type="password", key="new_api_key")
 
     with col2:
-        new_max_tokens = st.number_input("最大Token数", value=4000, min_value=1000, max_value=32000, key="new_max_tokens")
+        new_max_tokens = st.number_input("最大Token数", value=4000, min_value=1000, max_value=384000, key="new_max_tokens")
         new_temperature = st.slider("温度参数", 0.0, 2.0, 0.7, 0.1, key="new_temperature")
         new_enabled = st.checkbox("启用模型", value=True, key="new_enabled")
     

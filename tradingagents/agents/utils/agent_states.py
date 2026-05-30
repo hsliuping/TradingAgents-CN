@@ -37,6 +37,7 @@ class RiskDebateState(TypedDict):
     ]  # Conversation history
     history: Annotated[str, "Conversation history"]  # Conversation history
     latest_speaker: Annotated[str, "Analyst that spoke last"]
+    stage: Annotated[str, "Risk workflow stage: independent_initial_review or cross_examination"]
     current_risky_response: Annotated[
         str, "Latest response by the risky analyst"
     ]  # Last response

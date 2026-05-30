@@ -217,13 +217,25 @@ class ConditionalLogic:
         return next_speaker
 
     def should_continue_risk_analysis(self, state: AgentState) -> str:
-        """Determine if risk analysis should continue."""
+        """Determine if risk analysis should continue.
+
+        风险管理流程分两段：
+        1. 独立初评：Risky -> Safe -> Neutral，各自不回应其他人。
+        2. 交叉质询：按配置轮次继续 Risky -> Safe -> Neutral。
+        """
         current_count = state["risk_debate_state"]["count"]
-        max_count = 3 * self.max_risk_discuss_rounds
+        initial_review_count = 3
+        cross_examination_count = 3 * self.max_risk_discuss_rounds
+        max_count = initial_review_count + cross_examination_count
         latest_speaker = state["risk_debate_state"]["latest_speaker"]
+        stage = "独立初评" if current_count < initial_review_count else "交叉质询"
 
         # 🔍 详细日志
-        logger.info(f"🔍 [风险讨论控制] 当前发言次数: {current_count}, 最大次数: {max_count} (配置轮次: {self.max_risk_discuss_rounds})")
+        logger.info(
+            f"🔍 [风险讨论控制] 当前发言次数: {current_count}, 最大次数: {max_count} "
+            f"(独立初评: {initial_review_count}, 交叉质询轮次: {self.max_risk_discuss_rounds})"
+        )
+        logger.info(f"🔍 [风险讨论控制] 当前阶段: {stage}")
         logger.info(f"🔍 [风险讨论控制] 最后发言者: {latest_speaker}")
 
         if current_count >= max_count:

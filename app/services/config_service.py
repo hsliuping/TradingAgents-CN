@@ -456,6 +456,26 @@ class ConfigService:
                     temperature=0.7,
                     enabled=False,
                     description="阿里云通义千问模型"
+                ),
+                LLMConfig(
+                    provider=ModelProvider.DEEPSEEK,
+                    model_name="deepseek-v4-flash",
+                    api_key="your-deepseek-api-key",
+                    api_base="https://api.deepseek.com",
+                    max_tokens=64000,
+                    temperature=0.7,
+                    enabled=False,
+                    description="DeepSeek V4 Flash，支持100万tokens上下文"
+                ),
+                LLMConfig(
+                    provider=ModelProvider.DEEPSEEK,
+                    model_name="deepseek-v4-pro",
+                    api_key="your-deepseek-api-key",
+                    api_base="https://api.deepseek.com",
+                    max_tokens=128000,
+                    temperature=0.7,
+                    enabled=False,
+                    description="DeepSeek V4 Pro，支持100万tokens上下文"
                 )
             ],
             default_llm="glm-4",
@@ -2594,6 +2614,24 @@ class ConfigService:
                         "output_price_per_1k": 0.0002,
                         "context_length": 16384,
                         "currency": "CNY"
+                    },
+                    {
+                        "name": "deepseek-v4-flash",
+                        "display_name": "DeepSeek V4 Flash - 轻量高效",
+                        "input_price_per_1k": 0.0001,
+                        "output_price_per_1k": 0.0002,
+                        "context_length": 1000000,
+                        "currency": "CNY",
+                        "description": "DeepSeek V4 Flash，支持100万tokens超长上下文"
+                    },
+                    {
+                        "name": "deepseek-v4-pro",
+                        "display_name": "DeepSeek V4 Pro - 旗舰模型",
+                        "input_price_per_1k": 0.0001,
+                        "output_price_per_1k": 0.0002,
+                        "context_length": 1000000,
+                        "currency": "CNY",
+                        "description": "DeepSeek V4 Pro，支持100万tokens超长上下文"
                     }
                 ]
             },

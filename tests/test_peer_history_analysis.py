@@ -60,6 +60,27 @@ class FakeDb:
         return self.collections[name]
 
 
+def test_clean_industry_name():
+    assert peer_history._clean_industry_name("E48土木工程建筑业") == "土木工程建筑业"
+    assert peer_history._clean_industry_name("化学工程") == "化学工程"
+
+
+def test_resolve_stock_industry_prefers_tushare(monkeypatch):
+    monkeypatch.setattr(
+        peer_history,
+        "_fetch_tushare_basic_info",
+        lambda code: {"industry": "化学工程", "name": "中国化学"},
+    )
+    monkeypatch.setattr(peer_history, "_fetch_akshare_basic_info", lambda code: {})
+
+    industry, source = peer_history.resolve_stock_industry(
+        "601117",
+        {"industry": "E48土木工程建筑业", "source": "baostock"},
+    )
+    assert industry == "化学工程"
+    assert source == "tushare"
+
+
 def test_peer_comparison_report(monkeypatch):
     basics = [
         {"code": "000001", "name": "平安银行", "industry": "银行", "total_mv": 1000, "pe_ttm": 6, "pb_mrq": 0.7, "ps": 2, "roe": 11},
@@ -69,7 +90,11 @@ def test_peer_comparison_report(monkeypatch):
     ]
     monkeypatch.setattr(peer_history, "_get_db", lambda: FakeDb(basics, []))
 
-    report = peer_history.build_peer_comparison_report("000001", peer_limit=3)
+    report = peer_history.build_peer_comparison_report(
+        "000001",
+        peer_limit=3,
+        preferred_peer_codes=["600036", "601398", "601939"],
+    )
 
     assert "## 同业对比" in report
     assert "行业估值统计" in report

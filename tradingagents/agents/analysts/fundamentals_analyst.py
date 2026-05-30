@@ -3,6 +3,7 @@
 使用统一工具自动识别股票类型并调用相应数据源
 """
 
+import re
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import AIMessage, ToolMessage
 
@@ -17,6 +18,110 @@ logger = get_logger("default")
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
 from tradingagents.agents.utils.instrument_utils import build_instrument_context
 from tradingagents.llm_clients import create_llm_client
+
+
+def _extract_peer_context_from_messages(messages) -> str:
+    """从工具消息中提取同业对比片段，供轻量LLM校验可比公司合理性。"""
+    chunks = []
+    for msg in messages or []:
+        if not isinstance(msg, ToolMessage):
+            continue
+        content = str(getattr(msg, "content", "") or "")
+        if "## 同业对比" not in content and "可比公司表" not in content:
+            continue
+        start = content.find("## 同业对比")
+        if start < 0:
+            start = content.find("可比公司表")
+        chunks.append(content[start:start + 12000])
+    return "\n\n---\n\n".join(chunks)[-16000:]
+
+
+def _validate_peer_candidates_with_llm(llm, peer_context: str, ticker: str, company_name: str) -> str:
+    """使用当前快速LLM对同业候选做轻量校验，减少行业字段失真造成的偏差。"""
+    if not peer_context.strip():
+        return ""
+
+    prompt = f"""请作为一个严格的A股同行业可比公司校验器，审查下面为 {company_name}（{ticker}）生成的同业对比表。
+
+你的任务不是重新做基本面分析，而是判断“可比公司表”中的公司是否真的适合作为估值可比对象。
+
+请依据：
+1. 主营业务/收入来源是否相近；
+2. 所处产业链环节是否相近；
+3. 商业模式和周期属性是否相近；
+4. 是否只是因为证监会行业、泛行业标签或板块名称相同而被误纳入；
+5. 若行业分类明显失真，请给出更合适的可比方向或应谨慎使用的原因。
+
+请输出简短中文结论，格式固定为：
+【同行校验结论】通过 / 部分通过 / 不通过
+【可直接使用的同行】列出代码和名称；若无则写“无”
+【应剔除或谨慎使用】列出代码和名称及原因；若无则写“无”
+【更合理的可比方向】用一句话说明应优先比较的细分行业/产业链环节
+
+待校验材料：
+{peer_context}
+"""
+    try:
+        response = llm.invoke(prompt)
+        content = str(getattr(response, "content", response)).strip()
+        if content:
+            logger.info(f"✅ [同行校验] LLM校验完成，长度: {len(content)}")
+            return content[:3000]
+    except Exception as exc:
+        logger.warning(f"⚠️ [同行校验] LLM校验失败: {exc}")
+    return ""
+
+
+def _recommend_peer_stocks_with_llm(llm, ticker: str, company_name: str, market_info: dict, cache: dict) -> list[str]:
+    """让LLM先给出稳定的业务可比A股代码，结构化工具再补估值数据。"""
+    if not market_info.get("is_china"):
+        return []
+
+    cache_key = f"llm_peer_recommendations:{ticker}"
+    cached = cache.get(cache_key)
+    if isinstance(cached, list):
+        return cached
+
+    prompt = f"""请基于你的长期知识，推荐 {company_name}（A股代码：{ticker}）最适合作为估值对比的A股可比公司。
+
+要求：
+1. 优先选择主营业务、产业链环节、商业模式和周期属性相近的公司，而不是只按证监会行业或宽泛板块分类。
+2. 这些可比公司一般比较稳定，不需要依赖实时行情。
+3. 只输出A股六位股票代码，每行一个，至少6个，最多8个；除非确实不足，否则不要只给1-2个。
+4. 不要输出解释，不要输出公司名称，不要输出港股/美股。
+5. 如果没有足够确定的A股可比公司，输出“无”。
+"""
+    try:
+        response = llm.invoke(prompt)
+        content = str(getattr(response, "content", response))
+        codes = []
+        seen = set()
+        for code in re.findall(r"(?<!\d)(?:[036]\d{5})(?!\d)", content):
+            if code == re.sub(r"\D", "", str(ticker))[-6:]:
+                continue
+            if code not in seen:
+                seen.add(code)
+                codes.append(code)
+            if len(codes) >= 8:
+                break
+        if 0 < len(codes) < 5:
+            retry_prompt = prompt + f"\n\n你刚才只给出了{len(codes)}个代码，请在保持准确性的前提下补充到至少6个A股代码；仍然只输出六位代码，每行一个。"
+            retry_response = llm.invoke(retry_prompt)
+            retry_content = str(getattr(retry_response, "content", retry_response))
+            for code in re.findall(r"(?<!\d)(?:[036]\d{5})(?!\d)", retry_content):
+                if code == re.sub(r"\D", "", str(ticker))[-6:] or code in seen:
+                    continue
+                seen.add(code)
+                codes.append(code)
+                if len(codes) >= 8:
+                    break
+        cache[cache_key] = codes
+        logger.info(f"✅ [LLM同行推荐] {ticker} 推荐同行: {codes}")
+        return codes
+    except Exception as exc:
+        logger.warning(f"⚠️ [LLM同行推荐] 生成失败: {exc}")
+        cache[cache_key] = []
+        return []
 
 
 def _get_company_name_for_fundamentals(ticker: str, market_info: dict) -> str:
@@ -160,6 +265,19 @@ def create_fundamentals_analyst(llm, toolkit):
         instrument_context = build_instrument_context(ticker)
         logger.debug(f"📊 [DEBUG] 公司名称: {ticker} -> {company_name}")
 
+        peer_recommendations_cache = toolkit.config.setdefault("llm_peer_recommendations", {})
+        llm_recommended_peers = _recommend_peer_stocks_with_llm(
+            llm,
+            ticker,
+            company_name,
+            market_info,
+            peer_recommendations_cache,
+        )
+        if llm_recommended_peers:
+            peer_recommendations_cache[ticker] = llm_recommended_peers
+            peer_recommendations_cache[str(ticker).upper()] = llm_recommended_peers
+            peer_recommendations_cache[str(ticker).zfill(6)] = llm_recommended_peers
+
         # 统一使用 get_stock_fundamentals_unified 工具
         # 该工具内部会自动识别股票类型（A股/港股/美股）并调用相应的数据源
         # 对于A股，它会自动获取价格数据和基本面数据，无需LLM调用多个工具
@@ -194,9 +312,16 @@ def create_fundamentals_analyst(llm, toolkit):
             "- 包含PE、PB等估值指标分析；PEG只有在工具返回盈利增速或PEG时才能分析，否则必须明确写'PEG数据不足，不能用技术指标替代PEG'"
             "- 必须结合工具返回的同业对比和历史分位，判断当前估值是高于/低于行业中位数，以及处于历史高位/低位"
             "- 如果工具返回包含'## 同业对比'、'行业估值统计'或'可比公司表'，必须直接使用这些表格中的行业、样本和公司；禁止再写'无法进行精确的行业同业对比'"
+            "- 如果工具返回包含'同业对比不可直接使用'，必须明确说明同业对比暂不可用，禁止自行生成可比公司估值表，禁止引用泛行业公司作为估值锚"
             "- 同业公司只能引用工具返回的'可比公司表'中的公司和数值；禁止自行列举未出现在工具结果中的公司或PE/PB区间"
             "- 如果工具返回历史分位，必须使用分位表中的真实百分位；禁止把均线、布林带、RSI等技术指标当作估值分位或低估依据"
             "- 结合市场特点进行分析"
+            "📐 Markdown格式硬约束："
+            "- 所有表格必须是标准Markdown表格，表头、分隔行、数据行的列数必须完全一致"
+            "- 表格分隔行必须使用形如 |---|---:|---:| 的格式；有8列表头就必须有8个分隔单元，禁止多写或少写"
+            "- 表格前后必须各空一行，禁止使用Tab或空格对齐的伪表格"
+            "- 如果整理'行业估值中位数基准'，必须输出为Markdown表格：| 指标 | 行业中位数 | 标的 | 对比结论 |"
+            "- 如果不能保证手工重排表格正确，优先原样引用工具返回的Markdown表格，不要改写列结构"
             "🌍 语言和货币要求："
             "- 所有分析内容必须使用中文"
             "- 投资建议必须使用中文：买入、持有、卖出"
@@ -220,6 +345,22 @@ def create_fundamentals_analyst(llm, toolkit):
             "现在立即开始调用工具！不要说任何其他话！"
         )
 
+        peer_context_for_validation = _extract_peer_context_from_messages(state.get("messages", []))
+        peer_validation_note = _validate_peer_candidates_with_llm(
+            llm,
+            peer_context_for_validation,
+            ticker,
+            company_name,
+        )
+        if peer_validation_note:
+            system_message += (
+                "\n\n## 同行业可比公司LLM校验结果（必须优先遵守）\n"
+                "以下校验用于修正数据库行业字段或泛行业分类造成的同行失真。"
+                "如果校验结论为“部分通过”或“不通过”，最终报告必须标记存疑同行，"
+                "不得把被剔除或谨慎使用的公司当作可靠估值锚。\n"
+                f"{peer_validation_note}\n"
+            )
+
         # 系统提示模板
         system_prompt = (
             "🔴 强制要求：你必须调用工具获取真实数据！"
@@ -239,6 +380,8 @@ def create_fundamentals_analyst(llm, toolkit):
             "4. 🚨 重要：工具只需调用一次！一次调用返回所有需要的数据！不要重复调用！🚨"
             "5. 🚨 如果你已经看到ToolMessage，说明工具已经返回数据，直接生成报告，不要再调用工具！🚨"
             "6. 🚨 同业/估值硬约束：如果ToolMessage中包含'## 同业对比'、'行业估值统计'、'可比公司表'或'## 历史分位'，必须逐项引用这些数据。禁止声称无法同业对比；禁止自行列举工具结果以外的同行公司；禁止用技术指标替代PE/PB/PEG。🚨"
+            "7. 🚨 如果ToolMessage中包含'同业对比不可直接使用'，最终报告不得输出可比公司估值表；只能说明当前同行候选池失真、不可作为估值锚，并等待LLM同行推荐或人工确认。🚨"
+            "8. 🚨 Markdown表格格式硬约束：所有表格必须使用标准Markdown；表头、分隔行、每一行数据列数必须一致。禁止输出Tab/空格分隔的伪表格。行业中位数对比必须使用 | 指标 | 行业中位数 | 标的 | 对比结论 | 表格。🚨"
             "可用工具：{tool_names}。\n{system_message}"
             "当前日期：{current_date}。"
             "分析目标：{company_name}（股票代码：{ticker}）。"
@@ -471,6 +614,7 @@ def create_fundamentals_analyst(llm, toolkit):
                         f"1. 公司基本信息和财务数据分析\n"
                         f"2. PE、PB等估值指标分析；PEG只有在工具返回盈利增速或PEG时才能分析，否则说明数据不足\n"
                         f"3. 同业对比分析：如果消息历史中包含'## 同业对比'、'行业估值统计'或'可比公司表'，必须引用该表中的行业、样本、公司和数值，禁止声称无法进行精确同业对比\n"
+                        f"   如果消息历史中包含'同业对比不可直接使用'，禁止输出可比公司估值表，只能说明同业候选池失真、不可作为估值锚\n"
                         f"4. 历史分位分析：如果消息历史中包含'## 历史分位'，必须引用真实分位百分比，禁止用技术指标替代估值分位\n"
                         f"5. 当前股价是否被低估或高估的判断\n"
                         f"6. 合理价位区间和目标价位建议\n"
@@ -478,8 +622,12 @@ def create_fundamentals_analyst(llm, toolkit):
                         f"要求：\n"
                         f"- 使用中文撰写报告\n"
                         f"- 基于消息历史中的真实数据进行分析\n"
+                        f"- 如果存在'同行业可比公司LLM校验结果'，必须优先采用其结论；对被标记为剔除或谨慎使用的同行，不得作为核心估值锚\n"
                         f"- 同业公司只能来自工具返回的可比公司表，禁止自行列举未出现在工具结果中的公司或估值区间\n"
                         f"- 禁止把均线、布林带、RSI等技术指标写成PE/PB/PEG估值依据\n"
+                        f"- Markdown表格必须严格有效：表头、分隔行、每行数据列数完全一致；禁止多一个或少一个 |---| 分隔单元\n"
+                        f"- 表格前后必须空一行，禁止使用Tab/空格伪表格；行业中位数基准必须写成 | 指标 | 行业中位数 | 标的 | 对比结论 | 的Markdown表\n"
+                        f"- 如果不能保证重排表格正确，必须原样引用工具返回的Markdown表格，不要自行改变列结构\n"
                         f"- 分析要详细且专业\n"
                         f"- 投资建议必须明确（买入/持有/卖出）"
                     )
@@ -644,6 +792,13 @@ def create_fundamentals_analyst(llm, toolkit):
                             logger.debug(f"🧾 [基本面分析师] 统一工具返回完整数据:\n{_full}")
                         except Exception as _log_err:
                             logger.warning(f"⚠️ [基本面分析师] 记录统一工具数据时出错: {_log_err}")
+
+                        peer_validation_note = _validate_peer_candidates_with_llm(
+                            fresh_llm,
+                            str(combined_data),
+                            ticker,
+                            company_name,
+                        )
                     else:
                         combined_data = "统一基本面分析工具不可用"
                         logger.debug(f"📊 [DEBUG] 统一工具未找到")
@@ -658,6 +813,9 @@ def create_fundamentals_analyst(llm, toolkit):
 
 {combined_data}
 
+同行业可比公司LLM校验结果（若为空则说明未取得同业表或校验失败）：
+{peer_validation_note or "无"}
+
 请提供：
 1. 公司基本信息分析（{company_name}，股票代码：{ticker}）
 2. 财务状况评估
@@ -667,6 +825,11 @@ def create_fundamentals_analyst(llm, toolkit):
 
 要求：
 - 基于提供的真实数据进行分析
+- 如果同行校验结果标记某些同行“应剔除或谨慎使用”，不得把这些公司作为核心估值锚
+- 如果真实数据中写明“同业对比不可直接使用”，不得生成可比公司估值表
+- Markdown表格必须严格有效：表头、分隔行、每行数据列数完全一致；例如8列表头只能有8个分隔单元，禁止多写一个|---|
+- 表格前后必须空一行，禁止使用Tab/空格伪表格；“行业估值中位数基准”必须写成Markdown表：| 指标 | 行业中位数 | 标的 | 对比结论 |
+- 如果不能保证手工重排表格正确，必须原样引用工具返回的Markdown表格，不要自行改变列结构
 - 正确使用公司名称"{company_name}"和股票代码"{ticker}"
 - 价格使用{currency_info}
 - 投资建议使用中文

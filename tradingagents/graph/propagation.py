@@ -42,6 +42,8 @@ class Propagator:
                     "current_risky_response": "",
                     "current_safe_response": "",
                     "current_neutral_response": "",
+                    "latest_speaker": "",
+                    "stage": "independent_initial_review",
                     "count": 0,
                 }
             ),

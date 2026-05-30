@@ -88,6 +88,72 @@ def _company_name(doc: Dict[str, Any]) -> str:
     return str(doc.get("name") or doc.get("stock_name") or doc.get("symbol") or doc.get("code") or "未知")
 
 
+CSRC_INDUSTRY_PATTERN = re.compile(r"^[A-Z]\d+")
+
+BROAD_INDUSTRIES_REQUIRING_LLM_PEERS = {
+    "商务服务业",
+    "通用设备制造业",
+    "专用设备制造业",
+    "零售业",
+    "批发业",
+    "土木工程建筑业",
+}
+
+
+def _clean_industry_name(industry: Any) -> str:
+    text = str(industry or "").strip()
+    if not text or text.upper() in {"N/A", "NA", "NONE", "NULL", "未知"}:
+        return ""
+    return CSRC_INDUSTRY_PATTERN.sub("", text, count=1).strip()
+
+
+def _is_low_quality_industry(industry: Any) -> bool:
+    text = str(industry or "").strip()
+    if not text or text == "未知":
+        return True
+    return bool(CSRC_INDUSTRY_PATTERN.match(text))
+
+
+def _requires_llm_peer_recommendation(industry: str) -> bool:
+    cleaned = _clean_industry_name(industry)
+    return any(term in cleaned or cleaned in term for term in BROAD_INDUSTRIES_REQUIRING_LLM_PEERS)
+
+
+def _fetch_tushare_basic_info(code: str) -> Dict[str, Any]:
+    try:
+        from tradingagents.dataflows.providers.china.tushare import TushareProvider
+
+        provider = TushareProvider()
+        if not provider.is_available():
+            return {}
+        info = _run_async(provider.get_stock_basic_info(code))
+        return info or {}
+    except Exception as exc:
+        logger.warning(f"Tushare基础信息获取失败 {code}: {exc}")
+        return {}
+
+
+def resolve_stock_industry(code: str, target_doc: Optional[Dict[str, Any]] = None) -> Tuple[str, str]:
+    """Resolve display/compare industry, preferring Tushare/AKShare over CSRC-coded BaoStock labels."""
+    target_doc = target_doc or {}
+
+    stored_raw = target_doc.get("industry") or target_doc.get("industry_name") or ""
+    stored = _clean_industry_name(stored_raw)
+    stored_source = str(target_doc.get("source") or target_doc.get("data_source") or "mongodb")
+    if stored and not _is_low_quality_industry(stored_raw):
+        return stored, stored_source
+
+    for source, fetcher in (("tushare", _fetch_tushare_basic_info), ("akshare", _fetch_akshare_basic_info)):
+        info = fetcher(code)
+        industry = _clean_industry_name(info.get("industry"))
+        if industry:
+            return industry, source
+
+    if stored:
+        return stored, stored_source
+    return "未知", "unknown"
+
+
 def _basic_query(code: str) -> Dict[str, Any]:
     return {
         "$or": [
@@ -97,6 +163,31 @@ def _basic_query(code: str) -> Dict[str, Any]:
             {"ts_code": f"{code}.SH"},
         ]
     }
+
+
+def _query_rows_by_codes(db, codes: List[str]) -> List[Dict[str, Any]]:
+    """Query metric rows by explicit peer code list, preserving LLM recommendation order."""
+    coll = db[BASIC_COLLECTION]
+    rows: List[Dict[str, Any]] = []
+    seen = set()
+
+    for raw_code in codes:
+        code = normalize_stock_code(raw_code)
+        if not code or code in seen:
+            continue
+        doc = coll.find_one(_basic_query(code), {"_id": 0})
+        if not doc:
+            doc = _merge_basic_fallback(db, code)
+        else:
+            doc = _enrich_basic_doc_if_needed(db, doc, code)
+        if doc:
+            row = _metric_row(doc)
+            if any(row.get(field) is not None for field in ("total_mv", "pe", "pb", "ps", "roe")):
+                rows.append(row)
+                seen.add(code)
+            else:
+                logger.warning(f"LLM推荐同行 {code} 缺少估值/盈利数据，已从可比表剔除")
+    return rows
 
 
 def _run_async(coro):
@@ -197,10 +288,21 @@ def _merge_basic_fallback(db, code: str) -> Dict[str, Any]:
             }
         )
 
+    ts_info = _fetch_tushare_basic_info(code)
+    if ts_info:
+        doc.update({k: v for k, v in ts_info.items() if k != "industry" and v not in (None, "", "未知")})
+        ts_industry = _clean_industry_name(ts_info.get("industry"))
+        if ts_industry:
+            doc["industry"] = ts_industry
+            doc["source"] = "tushare"
+
     ak_info = _fetch_akshare_basic_info(code)
     if ak_info:
-        doc.update({k: v for k, v in ak_info.items() if v not in (None, "", "未知")})
-        doc["source"] = "akshare"
+        doc.update({k: v for k, v in ak_info.items() if k != "industry" and v not in (None, "", "未知")})
+        ak_industry = _clean_industry_name(ak_info.get("industry"))
+        if ak_industry and "industry" not in doc:
+            doc["industry"] = ak_industry
+            doc["source"] = "akshare"
 
     valuation = _fetch_baostock_latest_valuation(code)
     if valuation:
@@ -222,7 +324,59 @@ def _merge_basic_fallback(db, code: str) -> Dict[str, Any]:
     if profit:
         doc.update(profit)
 
+    resolved_industry, resolved_source = resolve_stock_industry(code, doc)
+    if resolved_industry != "未知":
+        doc["industry"] = resolved_industry
+        doc["industry_source"] = resolved_source
+
     _upsert_basic_info(db, doc)
+    return doc
+
+
+def _has_core_peer_metrics(doc: Dict[str, Any]) -> bool:
+    row = _metric_row(doc)
+    return any(row.get(field) is not None for field in ("total_mv", "pe", "pb", "ps", "roe"))
+
+
+def _enrich_basic_doc_if_needed(db, doc: Dict[str, Any], code: str) -> Dict[str, Any]:
+    """补齐已有基础信息文档缺失的估值/盈利指标，避免LLM推荐同行入表后全是N/A。"""
+    doc = dict(doc or {})
+    code = normalize_stock_code(code)
+    if not doc:
+        return _merge_basic_fallback(db, code)
+
+    doc.setdefault("code", code)
+    doc.setdefault("symbol", code)
+
+    if _has_core_peer_metrics(doc):
+        return doc
+
+    valuation = _fetch_baostock_latest_valuation(code)
+    if valuation:
+        doc.update(
+            {
+                "pe": valuation.get("pe_ttm") or doc.get("pe"),
+                "pe_ttm": valuation.get("pe_ttm") or doc.get("pe_ttm"),
+                "pb": valuation.get("pb_mrq") or doc.get("pb"),
+                "pb_mrq": valuation.get("pb_mrq") or doc.get("pb_mrq"),
+                "ps": valuation.get("ps_ttm") or doc.get("ps"),
+                "ps_ttm": valuation.get("ps_ttm") or doc.get("ps_ttm"),
+                "pcf_ttm": valuation.get("pcf_ttm") or doc.get("pcf_ttm"),
+                "close": valuation.get("close") or doc.get("close") or doc.get("current_price"),
+                "valuation_date": valuation.get("date") or doc.get("valuation_date"),
+            }
+        )
+
+    profit = _fetch_baostock_profit(code)
+    if profit:
+        doc.update({key: value for key, value in profit.items() if value is not None})
+        close = _first_number(doc, ("close", "current_price", "price"))
+        total_share = _first_number(doc, ("total_share",))
+        if close and total_share and not _first_number(doc, ("total_mv", "market_cap", "money_cap")):
+            doc["total_mv"] = close * total_share / 100000000
+
+    if _has_core_peer_metrics(doc):
+        _upsert_basic_info(db, doc)
     return doc
 
 
@@ -230,7 +384,7 @@ def _metric_row(doc: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "code": str(doc.get("code") or doc.get("symbol") or ""),
         "name": _company_name(doc),
-        "industry": str(doc.get("industry") or doc.get("industry_name") or "未知"),
+        "industry": _clean_industry_name(doc.get("industry") or doc.get("industry_name")) or "未知",
         "total_mv": _first_number(doc, ("total_mv", "market_cap", "money_cap")),
         "pe": _first_number(doc, ("pe_ttm", "pe")),
         "pb": _first_number(doc, ("pb_mrq", "pb")),
@@ -412,14 +566,16 @@ def _fetch_baostock_peer_rows_inner(code: str, peer_limit: int) -> Tuple[List[Di
             target_industry = ""
             for row in industry_rows:
                 if row.get("code") == target_bs_code:
-                    target_industry = row.get("industry") or ""
+                    target_industry = _clean_industry_name(row.get("industry") or "")
                     break
             if not target_industry:
                 return [], ""
 
             candidates = [
                 row for row in industry_rows
-                if row.get("industry") == target_industry and row.get("code_name") and row.get("code", "").startswith(("sh.", "sz."))
+                if _clean_industry_name(row.get("industry") or "") == target_industry
+                and row.get("code_name")
+                and row.get("code", "").startswith(("sh.", "sz."))
             ]
 
             def latest_valuation(bs_code: str) -> Dict[str, Any]:
@@ -492,7 +648,7 @@ def _fetch_baostock_peer_rows_inner(code: str, peer_limit: int) -> Tuple[List[Di
         return [], ""
 
 
-def build_peer_comparison_report(symbol: str, peer_limit: int = 5) -> str:
+def build_peer_comparison_report(symbol: str, peer_limit: int = 5, preferred_peer_codes: Optional[List[str]] = None) -> str:
     """Build a same-industry comparison table from stock_basic_info."""
     code = normalize_stock_code(symbol)
     db = _get_db()
@@ -508,8 +664,48 @@ def build_peer_comparison_report(symbol: str, peer_limit: int = 5) -> str:
                 return f"## 同业对比\n\nstock_basic_info 中未找到 {code} 的基础信息，且实时补取失败，无法生成同业对比。"
 
         target = _metric_row(target_doc)
-        industry = target["industry"]
+        industry, industry_source = resolve_stock_industry(code, target_doc)
+        if industry != "未知":
+            target_doc["industry"] = industry
+            target_doc["industry_source"] = industry_source
+            target["industry"] = industry
+            _upsert_basic_info(db, {"code": code, "symbol": code, "industry": industry, "industry_source": industry_source})
+
         rows: List[Dict[str, Any]] = []
+        match_scope = "精确细分行业"
+        used_llm_peers = False
+        llm_peer_codes = [
+            normalize_stock_code(peer_code)
+            for peer_code in (preferred_peer_codes or [])
+            if normalize_stock_code(peer_code) and normalize_stock_code(peer_code) != code
+        ]
+
+        if llm_peer_codes:
+            logger.info(f"LLM推荐同行输入 {code}: {llm_peer_codes}")
+            recommended_rows = _query_rows_by_codes(db, llm_peer_codes)
+            if recommended_rows:
+                rows = [target] + recommended_rows
+                match_scope = "LLM推荐核心可比公司（按主营业务/产业链判断，估值数据来自本地结构化数据）"
+                industry_source = "LLM推荐 + 本地结构化数据"
+                used_llm_peers = True
+        else:
+            logger.warning(f"LLM推荐同行为空 {code}，行业字段为 {industry}")
+
+        if not used_llm_peers and _requires_llm_peer_recommendation(industry):
+            return f"""## 同业对比
+
+**行业**: {industry}
+**行业来源**: {industry_source if industry_source not in {"unknown", ""} else "数据库/补取"}
+**匹配口径**: 宽行业分类，未取得LLM推荐核心可比公司
+**LLM推荐同行**: 未使用
+
+### 同业对比不可直接使用
+
+{code} 当前行业分类为“{industry}”，该分类过宽，容易把商业模式完全不同的公司混入同业池。
+为避免估值偏差，本次不输出宽行业下的可比公司估值表。
+
+请在基本面分析中明确说明：本次缺少可靠的核心可比公司池，不能使用泛行业公司作为估值锚；需等待LLM同行推荐或人工确认主营业务相近的可比公司后再做同业估值。
+""".strip()
 
         baostock_rows: List[Dict[str, Any]] = []
         baostock_industry = ""
@@ -518,40 +714,43 @@ def build_peer_comparison_report(symbol: str, peer_limit: int = 5) -> str:
             if baostock_rows:
                 rows = [_metric_row(row) for row in baostock_rows]
                 target = _metric_row(baostock_rows[0])
-                industry = baostock_industry or target["industry"]
+                industry = resolve_stock_industry(code, baostock_rows[0])[0] or baostock_industry or target["industry"]
+                target["industry"] = industry
                 for row in baostock_rows:
+                    row["industry"] = industry
                     _upsert_basic_info(db, row)
             else:
                 return f"## 同业对比\n\n{code} 缺少明确行业字段，且BaoStock行业分类补取失败，无法按 industry 聚合同业。"
 
         if not rows:
-            cursor = coll.find(
-                {
-                    "industry": industry,
-                    "$or": [
-                        {"pe": {"$exists": True}},
-                        {"pe_ttm": {"$exists": True}},
-                        {"pb": {"$exists": True}},
-                        {"pb_mrq": {"$exists": True}},
-                        {"total_mv": {"$exists": True}},
-                    ],
-                },
-                {"_id": 0},
-            ).limit(2000)
-            rows = [_metric_row(doc) for doc in cursor]
-            rows = [row for row in rows if row["code"]]
-
-        if len(rows) < peer_limit + 1 or not any(row.get("pe") for row in rows):
             baostock_rows, baostock_industry = _fetch_baostock_peer_rows(code, peer_limit)
-            if baostock_rows:
+            if baostock_rows and (
+                industry_source not in {"tushare", "akshare"}
+                or _clean_industry_name(baostock_industry) == industry
+            ):
                 rows = [_metric_row(row) for row in baostock_rows]
-                target = rows[0]
-                industry = baostock_industry or industry
+                target = _metric_row(baostock_rows[0])
+                target["industry"] = industry
+                match_scope = "BaoStock行业分类补取（需结合LLM同行校验）"
                 for row in baostock_rows:
+                    row["industry"] = industry
                     _upsert_basic_info(db, row)
 
         if not rows:
-            return f"## 同业对比\n\n未找到 {industry} 行业的可比股票数据。"
+            return f"""## 同业对比
+
+**行业**: {industry}
+**行业来源**: {industry_source if industry_source not in {"unknown", ""} else "数据库/补取"}
+**匹配口径**: 未取得LLM推荐核心可比公司
+**LLM推荐同行**: 未使用
+
+### 同业对比不可直接使用
+
+{code} 当前未取得可靠的 LLM 推荐可比公司，且 BaoStock 补取也未获得足够样本。
+为避免使用行业字段泛匹配造成估值偏差，本次不输出可比公司估值表。
+
+请在基本面分析中明确说明：需等待 LLM 同行推荐或人工确认主营业务相近的可比公司后再做同业估值。
+""".strip()
 
         pe_values = [row["pe"] for row in rows if row["pe"] and row["pe"] > 0]
         pb_values = [row["pb"] for row in rows if row["pb"] and row["pb"] > 0]
@@ -560,7 +759,13 @@ def build_peer_comparison_report(symbol: str, peer_limit: int = 5) -> str:
         profit_values = [row["net_profit"] for row in rows if row["net_profit"] is not None]
 
         peer_display_limit = max(3, min(peer_limit, 5))
-        peers = _select_representative_peers(rows, target, peer_display_limit)
+        if used_llm_peers:
+            peers = [
+                row for row in rows
+                if normalize_stock_code(row["code"]) != normalize_stock_code(target["code"])
+            ][:peer_display_limit]
+        else:
+            peers = _select_representative_peers(rows, target, peer_display_limit)
 
         display_rows = [target] + peers
         table_lines = [
@@ -587,7 +792,10 @@ def build_peer_comparison_report(symbol: str, peer_limit: int = 5) -> str:
         report = f"""## 同业对比
 
 **行业**: {industry}  
+**行业来源**: {industry_source if industry_source not in {"unknown", ""} else "数据库/补取"}  
+**匹配口径**: {match_scope}
 **样本数量**: {len(rows)} 只股票（最多读取2000条基础信息）  
+**LLM推荐同行**: {", ".join(llm_peer_codes) if llm_peer_codes else "未使用"}
 **展示样本选择**: 覆盖行业龙头、标的市值附近、估值中位附近和估值接近标的的代表性公司
 
 ### 行业估值统计
@@ -610,7 +818,7 @@ def build_peer_comparison_report(symbol: str, peer_limit: int = 5) -> str:
 - PB/PB_MRQ：{_relation(target["pb"], _median(pb_values), lower_is_better=True)}
 - ROE：{_relation(target["roe"], _median(roe_values), lower_is_better=False)}
 
-> 数据说明：若 MongoDB 缺少 `stock_basic_info`，本工具会按需使用 AKShare/BaoStock 补取基础信息、行业分类和最新估值。PEG 需要未来盈利增速预测，当前数据源未稳定提供，禁止用技术指标替代PEG。
+> 数据说明：若 MongoDB 缺少 `stock_basic_info`，本工具会按需使用 AKShare/BaoStock 补取基础信息、行业分类和最新估值。若未使用 LLM 推荐同行或匹配口径为“BaoStock行业分类补取”，必须结合 LLM 同行校验后再作为估值锚。PEG 需要未来盈利增速预测，当前数据源未稳定提供，禁止用技术指标替代PEG。
 """
         return report.strip()
     except Exception as exc:
@@ -836,10 +1044,15 @@ def build_historical_percentile_report(symbol: str, years: int = 5) -> str:
         return f"## 历史分位\n\n生成历史分位失败: {exc}"
 
 
-def build_peer_and_history_report(symbol: str, peer_limit: int = 5, years: int = 5) -> str:
+def build_peer_and_history_report(
+    symbol: str,
+    peer_limit: int = 5,
+    years: int = 5,
+    preferred_peer_codes: Optional[List[str]] = None,
+) -> str:
     """Build the combined supplemental report used by analysts."""
     parts = [
-        build_peer_comparison_report(symbol, peer_limit=peer_limit),
+        build_peer_comparison_report(symbol, peer_limit=peer_limit, preferred_peer_codes=preferred_peer_codes),
         build_historical_percentile_report(symbol, years=years),
     ]
     return "\n\n---\n\n".join(parts)

@@ -11,6 +11,7 @@ def create_risky_debator(llm):
         risk_debate_state = state["risk_debate_state"]
         history = risk_debate_state.get("history", "")
         risky_history = risk_debate_state.get("risky_history", "")
+        stage = "independent_initial_review" if risk_debate_state.get("count", 0) < 3 else "cross_examination"
 
         current_safe_response = risk_debate_state.get("current_safe_response", "")
         current_neutral_response = risk_debate_state.get("current_neutral_response", "")
@@ -36,19 +37,73 @@ def create_risky_debator(llm):
                        len(current_safe_response) + len(current_neutral_response))
         logger.info(f"  - 总Prompt长度: {total_length:,} 字符 (~{total_length//4:,} tokens)")
 
-        prompt = f"""作为激进风险分析师，您的职责是积极倡导高回报、高风险的投资机会，强调大胆策略和竞争优势。在评估交易员的决策或计划时，请重点关注潜在的上涨空间、增长潜力和创新收益——即使这些伴随着较高的风险。使用提供的市场数据和情绪分析来加强您的论点，并挑战对立观点。具体来说，请直接回应保守和中性分析师提出的每个观点，用数据驱动的反驳和有说服力的推理进行反击。突出他们的谨慎态度可能错过的关键机会，或者他们的假设可能过于保守的地方。以下是交易员的决策：
+        if stage == "independent_initial_review":
+            prompt = f"""作为激进风险分析师，您是风险管理团队中的“机会捕手”。您的职责不是盲目看多，而是独立识别市场可能低估的上行机会、催化剂和预期差，并判断这些机会是否值得承担风险。
 
+当前是【独立初评阶段】。请不要回应保守或中性分析师，也不要引用尚未出现的观点。只基于交易员计划和四份报告形成您的独立机会评估。
+
+请优先检查：
+1. 上涨催化剂：业绩反转、政策利好、行业景气度改善、资金关注、技术突破或事件驱动。
+2. 预期差：利空是否已被充分定价，利好是否尚未被市场反映。
+3. 赔率空间：当前价格到合理目标价的潜在涨幅是否足以补偿风险。
+4. 动量与相对强度：个股是否强于大盘或行业，是否有放量、突破、趋势延续等信号。
+5. 行业风口/主题动量：公司所在细分行业或概念主题是否处于市场风口（如CPO、算力、有色金属、商业航天、机器人、低空经济、AI应用等），是否有政策、产业趋势、订单、涨价或资金共识支撑。
+6. 可承受风险：哪些风险可以通过仓位、止损或分批参与来管理，而不是完全回避。
+
+请必须说明乐观假设失败时的代价，包括止损条件、最大主要回撤来源和需要放弃交易的触发条件。如果判断行业处于风口，还必须说明风口持续性和拥挤交易/退潮风险；如果没有可靠风口证据，必须明确写“未发现可靠风口证据”。
+
+交易员计划：
 {trader_decision}
-
-您的任务是通过质疑和批评保守和中性立场来为交易员的决策创建一个令人信服的案例，证明为什么您的高回报视角提供了最佳的前进道路。将以下来源的见解纳入您的论点：
 
 市场研究报告：{market_research_report}
 社交媒体情绪报告：{sentiment_report}
 最新世界事务报告：{news_report}
 公司基本面报告：{fundamentals_report}
-以下是当前对话历史：{history} 以下是保守分析师的最后论点：{current_safe_response} 以下是中性分析师的最后论点：{current_neutral_response}。如果其他观点没有回应，请不要虚构，只需提出您的观点。
 
-积极参与，解决提出的任何具体担忧，反驳他们逻辑中的弱点，并断言承担风险的好处以超越市场常规。专注于辩论和说服，而不仅仅是呈现数据。挑战每个反驳点，强调为什么高风险方法是最优的。请用中文以对话方式输出，就像您在说话一样，不使用任何特殊格式。"""
+请按以下结构输出，使用中文：
+【阶段】独立初评
+【核心结论】
+【最强机会依据】
+【关键催化剂与预期差】
+【行业风口与主题动量】
+【可承受风险与止损条件】
+【仓位/目标价倾向】
+【置信度】"""
+        else:
+            prompt = f"""作为激进风险分析师，您现在进入【交叉质询阶段】。您的任务是针对保守和中性分析师的观点，指出他们可能低估机会、过度惩罚风险或忽略预期差的地方，但仍必须承认真实存在的风险边界。
+
+请重点回应：
+1. 保守分析师提出的大盘、行业、财务、估值或流动性风险中，哪些是致命风险，哪些只是可承受波动。
+2. 中性分析师对风险收益比和证据质量的校准是否过于保守。
+3. 行业风口或主题动量是否足以提高交易赔率；如果对方忽略了风口，请指出其机会成本；如果风口证据不足，也必须主动降权。
+4. 如果仍支持进攻，必须给出更清晰的催化剂、目标价、止损位和仓位上限。
+5. 如果发现机会不足以覆盖风险，也可以下调激进程度，但要解释原因。
+
+交易员计划：
+{trader_decision}
+
+市场研究报告：{market_research_report}
+社交媒体情绪报告：{sentiment_report}
+最新世界事务报告：{news_report}
+公司基本面报告：{fundamentals_report}
+
+当前风险讨论历史：
+{history}
+
+保守分析师最新观点：
+{current_safe_response}
+
+中性分析师最新观点：
+{current_neutral_response}
+
+请按以下结构输出，使用中文：
+【阶段】交叉质询
+【我接受的风险点】
+【我反驳的保守/中性观点】
+【仍然值得进攻的理由】
+【行业风口是否改变赔率】
+【修正后的仓位、目标价和止损】
+【置信度】"""
 
         logger.info(f"⏱️ [Risky Analyst] 开始调用LLM...")
         import time
@@ -70,6 +125,7 @@ def create_risky_debator(llm):
             "safe_history": risk_debate_state.get("safe_history", ""),
             "neutral_history": risk_debate_state.get("neutral_history", ""),
             "latest_speaker": "Risky",
+            "stage": stage,
             "current_risky_response": argument,
             "current_safe_response": risk_debate_state.get("current_safe_response", ""),
             "current_neutral_response": risk_debate_state.get(
