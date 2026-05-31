@@ -89,6 +89,17 @@ jobs:
                   body = resp.read().decode("utf-8", errors="replace")
                   return resp.status, body
 
+          def extract_file_sha(data, filename="update-manifest.json"):
+              if isinstance(data, dict):
+                  return data.get("sha", "") or ""
+              if isinstance(data, list):
+                  for item in data:
+                      if isinstance(item, dict) and item.get("name") == filename:
+                          return item.get("sha", "") or ""
+                  if len(data) == 1 and isinstance(data[0], dict):
+                      return data[0].get("sha", "") or ""
+              return ""
+
           existing_sha = ""
           try:
               status, body = gitee_request(
@@ -96,12 +107,15 @@ jobs:
                   params={"access_token": token, "ref": branch},
               )
               if status == 200:
-                  existing_sha = json.loads(body).get("sha", "")
-                  print(f"Existing file sha: {existing_sha}")
+                  parsed = json.loads(body)
+                  existing_sha = extract_file_sha(parsed, file_path)
+                  print(f"Existing file sha: {existing_sha or '(none, will create)'}")
           except urllib.error.HTTPError as err:
               if err.code != 404:
                   print(f"::warning::GET manifest failed: HTTP {err.code}")
                   print(err.read().decode("utf-8", errors="replace"))
+          except json.JSONDecodeError as err:
+              print(f"::warning::GET manifest returned invalid JSON: {err}")
 
           payload = {
               "access_token": token,
