@@ -23,85 +23,122 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Generate update-manifest.json
+      - name: Generate and upload update-manifest.json
         env:
           TAG: ${{ steps.version.outputs.tag }}
           DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-        run: |
-          cat > update-manifest.json <<EOF
-          {
-            "version": "${TAG}",
-            "images": {
-              "backend": "${DOCKER_USER}/tradingagents-backend:${TAG}",
-              "frontend": "${DOCKER_USER}/tradingagents-frontend:${TAG}"
-            }
-          }
-          EOF
-          echo "Generated manifest:"
-          cat update-manifest.json
-
-      - name: Upload manifest to Gitee
-        env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           GITEE_OWNER: ${{ secrets.GITEE_OWNER }}
           GITEE_REPO: ${{ secrets.GITEE_REPO }}
           GITEE_BRANCH: ${{ secrets.GITEE_BRANCH }}
-          TAG: ${{ steps.version.outputs.tag }}
-          DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          if [ -z "$GITEE_TOKEN" ] || [ -z "$GITEE_OWNER" ] || [ -z "$GITEE_REPO" ] || [ -z "$DOCKER_USER" ]; then
-            echo "::error::Required secrets: DOCKERHUB_USERNAME, GITEE_TOKEN, GITEE_OWNER, GITEE_REPO"
-            exit 1
-          fi
+          python3 <<'PY'
+          import base64
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
 
-          BRANCH="${GITEE_BRANCH:-main}"
-          FILE_PATH="update-manifest.json"
-          API="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/contents/${FILE_PATH}"
+          tag = os.environ.get("TAG", "").strip()
+          docker_user = os.environ.get("DOCKER_USER", "").strip()
+          token = os.environ.get("GITEE_TOKEN", "").strip()
+          owner = os.environ.get("GITEE_OWNER", "").strip()
+          repo = os.environ.get("GITEE_REPO", "").strip()
+          branch = os.environ.get("GITEE_BRANCH", "").strip() or "master"
 
-          CONTENT_B64=$(base64 -w 0 update-manifest.json 2>/dev/null || base64 update-manifest.json | tr -d '\n')
+          missing = [name for name, val in [
+              ("TAG", tag),
+              ("DOCKERHUB_USERNAME", docker_user),
+              ("GITEE_TOKEN", token),
+              ("GITEE_OWNER", owner),
+              ("GITEE_REPO", repo),
+          ] if not val]
+          if missing:
+              print(f"::error::Missing required values: {', '.join(missing)}")
+              sys.exit(1)
 
-          SHA=""
-          EXISTING=$(curl -sf "${API}?access_token=${GITEE_TOKEN}&ref=${BRANCH}" || true)
-          if [ -n "$EXISTING" ]; then
-            SHA=$(echo "$EXISTING" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('sha',''))")
-          fi
-
-          export CONTENT_B64 SHA BRANCH
-          PAYLOAD=$(python3 <<'PY'
-          import json, os
-          payload = {
-              "access_token": os.environ["GITEE_TOKEN"],
-              "content": os.environ["CONTENT_B64"],
-              "message": f"OTA release {os.environ['TAG']}",
-              "branch": os.environ.get("BRANCH", "main"),
+          manifest = {
+              "version": tag,
+              "images": {
+                  "backend": f"{docker_user}/tradingagents-backend:{tag}",
+                  "frontend": f"{docker_user}/tradingagents-frontend:{tag}",
+              },
           }
-          sha = os.environ.get("SHA", "")
-          if sha:
-              payload["sha"] = sha
-          print(json.dumps(payload))
-          PY
+          manifest_text = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
+          print("Generated manifest:")
+          print(manifest_text)
+
+          file_path = "update-manifest.json"
+          api_url = (
+              f"https://gitee.com/api/v5/repos/{owner}/{repo}/contents/"
+              f"{urllib.parse.quote(file_path)}"
           )
 
-          HTTP_CODE=$(curl -s -o /tmp/gitee_response.json -w "%{http_code}" \
-            -X POST "${API}" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD")
+          def gitee_request(method, payload=None, params=None):
+              url = api_url
+              if params:
+                  url += "?" + urllib.parse.urlencode(params)
+              data = None
+              headers = {"Content-Type": "application/json"}
+              if payload is not None:
+                  data = json.dumps(payload).encode("utf-8")
+              req = urllib.request.Request(url, data=data, headers=headers, method=method)
+              with urllib.request.urlopen(req, timeout=60) as resp:
+                  body = resp.read().decode("utf-8", errors="replace")
+                  return resp.status, body
 
-          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-            echo "Manifest uploaded to Gitee successfully."
-          else
-            echo "::error::Gitee upload failed (HTTP ${HTTP_CODE})"
-            cat /tmp/gitee_response.json
-            exit 1
-          fi
+          existing_sha = ""
+          try:
+              status, body = gitee_request(
+                  "GET",
+                  params={"access_token": token, "ref": branch},
+              )
+              if status == 200:
+                  existing_sha = json.loads(body).get("sha", "")
+                  print(f"Existing file sha: {existing_sha}")
+          except urllib.error.HTTPError as err:
+              if err.code != 404:
+                  print(f"::warning::GET manifest failed: HTTP {err.code}")
+                  print(err.read().decode("utf-8", errors="replace"))
+
+          payload = {
+              "access_token": token,
+              "content": base64.b64encode(manifest_text.encode("utf-8")).decode("ascii"),
+              "message": f"OTA release {tag}",
+              "branch": branch,
+          }
+          if existing_sha:
+              payload["sha"] = existing_sha
+
+          method = "PUT" if existing_sha else "POST"
+          print(f"Uploading via {method} to branch '{branch}' ...")
+
+          try:
+              status, body = gitee_request(method, payload=payload)
+              print(f"Gitee response HTTP {status}")
+              print(body)
+          except urllib.error.HTTPError as err:
+              print(f"::error::Gitee upload failed: HTTP {err.code}")
+              print(err.read().decode("utf-8", errors="replace"))
+              sys.exit(1)
+
+          print(f"::notice::Manifest URL: https://gitee.com/{owner}/{repo}/raw/{branch}/{file_path}")
+          PY
 
       - name: Summary
+        env:
+          GITEE_OWNER: ${{ secrets.GITEE_OWNER }}
+          GITEE_REPO: ${{ secrets.GITEE_REPO }}
+          GITEE_BRANCH: ${{ secrets.GITEE_BRANCH }}
         run: |
+          BRANCH="${GITEE_BRANCH:-master}"
           echo "## OTA Manifest Synced" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Version: \`${{ steps.version.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Gitee repo: \`${{ secrets.GITEE_OWNER }}/${{ secrets.GITEE_REPO }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Gitee repo: \`${GITEE_OWNER}/${GITEE_REPO}\` (branch: \`${BRANCH}\`)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "部署 Mac \`MANIFEST_URL\`:" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`https://gitee.com/${{ secrets.GITEE_OWNER }}/${{ secrets.GITEE_REPO }}/raw/main/update-manifest.json\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}/raw/${BRANCH}/update-manifest.json\`" >> "$GITHUB_STEP_SUMMARY"

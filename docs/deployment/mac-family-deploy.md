@@ -35,10 +35,10 @@ Docker Hub 为 **Public** 时，部署 Mac **不需要** Docker 登录凭证。
 
 1. 在 Gitee 新建仓库 `TradingAgents-OTA`（可为私有）
 2. 首次可为空；发版 tag 后 CI 会自动创建 `update-manifest.json`
-3. 部署 Mac 使用的 manifest 地址：
+3. 部署 Mac 使用的 manifest 地址（默认分支多为 `master`，以仓库实际为准）：
 
 ```
-https://gitee.com/YOUR_USER/TradingAgents-OTA/raw/main/update-manifest.json
+https://gitee.com/zhouhe-joer/trading-agent-mirror/raw/master/update-manifest.json
 ```
 
 ### 3. Workflows

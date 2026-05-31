@@ -60,9 +60,9 @@ DOCKERHUB_USER="${DOCKERHUB_USER:-YOUR_DOCKERHUB}"
 
 echo ""
 cyan "请输入 Gitee OTA manifest URL（发版后 CI 同步的地址）:"
-cyan "示例: https://gitee.com/YOUR_USER/TradingAgents-OTA/raw/main/update-manifest.json"
+cyan "示例: https://gitee.com/zhouhe-joer/trading-agent-mirror/raw/master/update-manifest.json"
 read -r MANIFEST_URL
-MANIFEST_URL="${MANIFEST_URL:-https://gitee.com/YOUR_USER/TradingAgents-OTA/raw/main/update-manifest.json}"
+MANIFEST_URL="${MANIFEST_URL:-https://gitee.com/zhouhe-joer/trading-agent-mirror/raw/master/update-manifest.json}"
 
 echo ""
 cyan "请输入初始版本 tag（直接回车使用 ${DEFAULT_VERSION}）:"
