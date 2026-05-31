@@ -64,7 +64,7 @@ services:
 
   # FastAPI后端服务
   backend:
-    image: hsliup/tradingagents-backend:v1.0.1
+    image: ${BACKEND_IMAGE:-hsliup/tradingagents-backend:v1.0.1}
     platform: linux/arm64  # 显式指定 ARM64 平台
     container_name: tradingagents-backend
     restart: unless-stopped
@@ -142,7 +142,7 @@ services:
 
   # Vue 3前端服务
   frontend:
-    image: hsliup/tradingagents-frontend:v1.0.1
+    image: ${FRONTEND_IMAGE:-hsliup/tradingagents-frontend:v1.0.1}
     platform: linux/arm64  # 显式指定 ARM64 平台
     container_name: tradingagents-frontend
     restart: unless-stopped
