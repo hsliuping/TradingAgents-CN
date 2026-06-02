@@ -15,6 +15,11 @@ logger = get_logger('agents')
 # 导入配置
 from tradingagents.config.runtime_settings import use_app_cache_enabled
 
+# 数据新鲜度阈值（自然日）
+STALENESS_THRESHOLD_NORMAL = 3   # ≤3天视为正常（覆盖周末：周五→周一）
+STALENESS_THRESHOLD_HOLIDAY = 15 # ≤15天可能是长假（春节/国庆）
+
+
 class MongoDBCacheAdapter:
     """MongoDB 缓存适配器（从 app 的 MongoDB 读取同步数据）"""
     
@@ -217,7 +222,44 @@ class MongoDBCacheAdapter:
         except Exception as e:
             logger.warning(f"⚠️ 获取历史数据失败: {e}")
             return None
-    
+
+    def check_data_freshness(self, df: pd.DataFrame, end_date: str) -> dict:
+        """
+        检查缓存数据相对于请求 end_date 的新鲜度。
+
+        Returns:
+            dict: is_fresh, latest_date, gap_days, severity('ok'/'warning'/'critical')
+        """
+        if df is None or df.empty:
+            return {"is_fresh": False, "latest_date": None, "gap_days": None, "severity": "critical"}
+
+        date_col = 'trade_date' if 'trade_date' in df.columns else ('date' if 'date' in df.columns else None)
+        if date_col is None:
+            return {"is_fresh": True, "latest_date": None, "gap_days": None, "severity": "ok"}
+
+        latest_date_str = str(df[date_col].max())[:10]
+
+        try:
+            latest_dt = datetime.strptime(latest_date_str, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date[:10], "%Y-%m-%d")
+            gap_days = (end_dt - latest_dt).days
+        except (ValueError, TypeError):
+            return {"is_fresh": True, "latest_date": latest_date_str, "gap_days": None, "severity": "ok"}
+
+        if gap_days <= STALENESS_THRESHOLD_NORMAL:
+            severity = "ok"
+        elif gap_days <= STALENESS_THRESHOLD_HOLIDAY:
+            severity = "warning"
+        else:
+            severity = "critical"
+
+        return {
+            "is_fresh": severity == "ok",
+            "latest_date": latest_date_str,
+            "gap_days": gap_days,
+            "severity": severity,
+        }
+
     def get_financial_data(self, symbol: str, report_period: str = None) -> Optional[Dict[str, Any]]:
         """获取财务数据，按数据源优先级查询"""
         if not self.use_app_cache or self.db is None:
@@ -384,8 +426,12 @@ def get_stock_data_with_fallback(symbol: str, start_date: str = None, end_date: 
     if adapter.use_app_cache:
         df = adapter.get_historical_data(symbol, start_date, end_date)
         if df is not None and not df.empty:
-            logger.info(f"📊 使用MongoDB历史数据: {symbol}")
-            return df
+            freshness = adapter.check_data_freshness(df, end_date) if end_date else {"is_fresh": True}
+            if freshness["is_fresh"]:
+                logger.info(f"📊 使用MongoDB历史数据: {symbol}")
+                return df
+            else:
+                logger.warning(f"⚠️ [数据新鲜度] MongoDB数据过期(gap={freshness.get('gap_days')}天), 降级: {symbol}")
     
     # 降级到传统方式
     if fallback_func:

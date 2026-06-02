@@ -1157,15 +1157,44 @@ class DataSourceManager:
             df = adapter.get_historical_data(symbol, start_date, end_date, period=period)
 
             if df is not None and not df.empty:
+                # 数据新鲜度校验：检查缓存数据是否过期
+                freshness = adapter.check_data_freshness(df, end_date)
+
+                if not freshness["is_fresh"]:
+                    logger.warning(
+                        f"⚠️ [数据新鲜度] MongoDB数据可能过期: {symbol}, "
+                        f"最新数据日期={freshness['latest_date']}, "
+                        f"请求截止日期={end_date}, "
+                        f"差距={freshness['gap_days']}天, "
+                        f"严重程度={freshness['severity']}"
+                    )
+                    # 尝试从实时数据源获取最新数据
+                    fallback_result, fallback_source = self._try_fallback_sources(symbol, start_date, end_date, period)
+                    if fallback_result and "❌" not in fallback_result:
+                        logger.info(f"✅ [数据新鲜度] 备用数据源成功获取最新数据: {symbol} (来源: {fallback_source})")
+                        return fallback_result, fallback_source
+
+                    # 所有实时数据源均失败，返回缓存数据并附加时效性警告
+                    logger.warning(f"⚠️ [数据新鲜度] 所有备用数据源失败，使用过期缓存数据: {symbol}")
+                    stock_name = f'股票{symbol}'
+                    if 'name' in df.columns and not df['name'].empty:
+                        stock_name = df['name'].iloc[0]
+                    result = self._format_stock_data_response(df, symbol, stock_name, start_date, end_date)
+                    staleness_warning = (
+                        f"\n⚠️ 【数据时效性警告】\n"
+                        f"当前数据最新日期为 {freshness['latest_date']}，"
+                        f"距离请求日期 {end_date} 已有 {freshness['gap_days']} 个自然日。\n"
+                        f"数据同步可能失败，以下分析基于非最新数据，请注意时效性。\n\n"
+                    )
+                    return staleness_warning + result, "mongodb(stale)"
+
+                # 数据新鲜，正常返回
                 logger.info(f"✅ [数据来源: MongoDB缓存] 成功获取{period}数据: {symbol} ({len(df)}条记录)")
 
-                # 🔧 修复：使用统一的格式化方法，包含技术指标计算
-                # 获取股票名称（从DataFrame中提取或使用默认值）
                 stock_name = f'股票{symbol}'
                 if 'name' in df.columns and not df['name'].empty:
                     stock_name = df['name'].iloc[0]
 
-                # 调用统一的格式化方法（包含技术指标计算）
                 result = self._format_stock_data_response(df, symbol, stock_name, start_date, end_date)
 
                 logger.info(f"✅ [MongoDB] 已计算技术指标: MA5/10/20/60, MACD, RSI, BOLL")
