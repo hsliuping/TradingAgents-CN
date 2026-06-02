@@ -751,12 +751,13 @@ class AKShareSyncService:
             # 出错时返回30天前，确保不漏数据
             return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
 
-    async def sync_financial_data(self, symbols: List[str] = None) -> Dict[str, Any]:
+    async def sync_financial_data(self, symbols: List[str] = None, limit: int = None, **kwargs) -> Dict[str, Any]:
         """
         同步财务数据
 
         Args:
             symbols: 指定股票代码列表
+            limit: 财报期数限制（AKShare 底层 API 不支持按期数请求，此参数仅为兼容调用方签名，传入后不生效）
 
         Returns:
             同步结果统计

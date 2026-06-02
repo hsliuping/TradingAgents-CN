@@ -123,8 +123,12 @@ class OptimizedChinaDataProvider:
             if adapter.use_app_cache:
                 df = adapter.get_historical_data(symbol, start_date, end_date)
                 if df is not None and not df.empty:
-                    logger.info(f"📊 [数据来源: MongoDB] 使用MongoDB历史数据: {symbol} ({len(df)}条记录)")
-                    return df.to_string()
+                    freshness = adapter.check_data_freshness(df, end_date)
+                    if freshness["is_fresh"]:
+                        logger.info(f"📊 [数据来源: MongoDB] 使用MongoDB历史数据: {symbol} ({len(df)}条记录)")
+                        return df.to_string()
+                    else:
+                        logger.warning(f"⚠️ [数据新鲜度] MongoDB数据过期(gap={freshness['gap_days']}天)，跳过缓存: {symbol}")
 
         # 2. 检查文件缓存（除非强制刷新）
         if not force_refresh:
