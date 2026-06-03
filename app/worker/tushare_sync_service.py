@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 # UTC+8 时区
 UTC_8 = timezone(timedelta(hours=8))
+ETF_SH_PREFIXES = ("50", "51", "52", "56", "58")
+ETF_SZ_PREFIXES = ("15", "16", "18")
 
 
 def get_utc8_now():
@@ -30,6 +32,13 @@ def get_utc8_now():
     这样前端可以直接添加 +08:00 后缀显示
     """
     return now_tz().replace(tzinfo=None)
+
+
+def _is_etf_code(symbol: str) -> bool:
+    """判断代码是否属于 ETF/FUND，避免误走股票历史同步链路。"""
+    digits = "".join(ch for ch in str(symbol or "") if ch.isdigit())
+    normalized = digits[-6:].zfill(6) if digits else ""
+    return len(normalized) == 6 and normalized.startswith(ETF_SH_PREFIXES + ETF_SZ_PREFIXES)
 
 
 class TushareSyncService:
@@ -735,6 +744,39 @@ class TushareSyncService:
                             logger.warning(f"⚠️ 使用备用方法获取到 {len(symbols)} 只股票（已去重，已重新创建连接）")
                         else:
                             raise
+
+            skipped_etf_symbols = []
+            if symbols:
+                stock_symbols = []
+                for symbol in symbols:
+                    if _is_etf_code(symbol):
+                        skipped_etf_symbols.append(str(symbol))
+                    else:
+                        stock_symbols.append(symbol)
+                symbols = stock_symbols
+
+            if skipped_etf_symbols:
+                preview = ", ".join(skipped_etf_symbols[:10])
+                if len(skipped_etf_symbols) > 10:
+                    preview = f"{preview}, ..."
+                logger.info(
+                    f"⏭️ 股票历史同步检测到 ETF 代码，已切换为跳过处理，请使用 ETF 专用同步链路: "
+                    f"count={len(skipped_etf_symbols)}, symbols={preview}"
+                )
+                stats["skipped_etf_count"] = len(skipped_etf_symbols)
+                stats["skipped_etf_symbols"] = skipped_etf_symbols
+
+            if not symbols:
+                skip_message = "传入代码均为 ETF/FUND，已跳过股票历史同步，请使用 ETF 专用同步链路"
+                logger.info(skip_message)
+                stats["skipped"] = True
+                stats["skip_reason"] = skip_message
+                return {
+                    "success": True,
+                    "skipped": True,
+                    "message": skip_message,
+                    "stats": stats,
+                }
 
             stats["total_processed"] = len(symbols)
 

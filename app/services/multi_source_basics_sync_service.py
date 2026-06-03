@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 COLLECTION_NAME = "stock_basic_info"
 STATUS_COLLECTION = "sync_status"
 JOB_KEY = "stock_basics_multi_source"
+STOCK_LIST_FETCH_TIMEOUT_SECONDS = 45
 
 
 class DataSourcePriority(Enum):
@@ -237,6 +239,74 @@ class MultiSourceBasicsSyncService:
 
         return await self._run_full_sync_impl(db, stats, preferred_sources)
 
+    @staticmethod
+    def _normalize_preferred_sources(preferred_sources: Optional[List[str]]) -> Optional[List[str]]:
+        if not preferred_sources:
+            return preferred_sources
+
+        normalized: List[str] = []
+        removed_sources: List[str] = []
+        for source in preferred_sources:
+            source_name = str(source or "").strip().lower()
+            if not source_name:
+                continue
+            if source_name == "qmt":
+                removed_sources.append(source_name)
+                continue
+            if source_name not in normalized:
+                normalized.append(source_name)
+
+        if removed_sources:
+            logger.info(
+                "🧹 [多数据源基础信息同步] 已从优先数据源中排除不适合基础信息启动同步的来源: %s",
+                removed_sources,
+            )
+        return normalized or None
+
+    async def _fetch_stock_list_with_retry(
+        self,
+        manager,
+        preferred_sources: Optional[List[str]],
+    ) -> Tuple[Any, Optional[str]]:
+        async def _fetch_once(sources: Optional[List[str]], attempt_label: str) -> Tuple[Any, Optional[str]]:
+            start = time.perf_counter()
+            logger.info(
+                "📥 [多数据源基础信息同步] 开始获取股票列表: attempt=%s, preferred_sources=%s, timeout=%ss",
+                attempt_label,
+                sources or [],
+                STOCK_LIST_FETCH_TIMEOUT_SECONDS,
+            )
+            stock_df, source_used = await asyncio.wait_for(
+                asyncio.to_thread(manager.get_stock_list_with_fallback, sources, True),
+                timeout=STOCK_LIST_FETCH_TIMEOUT_SECONDS,
+            )
+            elapsed = time.perf_counter() - start
+            logger.info(
+                "📥 [多数据源基础信息同步] 股票列表获取完成: attempt=%s, source=%s, records=%s, elapsed=%.2fs",
+                attempt_label,
+                source_used,
+                0 if stock_df is None else len(stock_df),
+                elapsed,
+            )
+            return stock_df, source_used
+
+        try:
+            return await _fetch_once(preferred_sources, "primary")
+        except asyncio.TimeoutError:
+            logger.warning(
+                "⏱ [多数据源基础信息同步] 股票列表获取超时: preferred_sources=%s, timeout=%ss",
+                preferred_sources or [],
+                STOCK_LIST_FETCH_TIMEOUT_SECONDS,
+            )
+            retry_sources = [source for source in (preferred_sources or []) if source != "qmt"]
+            if retry_sources:
+                logger.warning(
+                    "↩️ [多数据源基础信息同步] 重试股票列表获取，并将 QMT 延后: retry_sources=%s",
+                    retry_sources,
+                )
+                return await _fetch_once(retry_sources, "retry_without_qmt")
+            raise
+
     async def _run_full_sync_impl(
         self,
         db: AsyncIOMotorDatabase,
@@ -246,24 +316,34 @@ class MultiSourceBasicsSyncService:
         """执行真实同步逻辑；由同步入口或后台任务入口复用。"""
 
         try:
+            preferred_sources = self._normalize_preferred_sources(preferred_sources)
+            sync_start = time.perf_counter()
+            logger.info(
+                "🚀 [多数据源基础信息同步] 开始执行: preferred_sources=%s",
+                preferred_sources or [],
+            )
+
             # Step 1: 获取数据源管理器
             from app.services.data_sources.manager import DataSourceManager
+            step_start = time.perf_counter()
             manager = DataSourceManager()
             available_adapters = manager.get_available_adapters()
 
             if not available_adapters:
                 raise RuntimeError("No available data sources found")
 
-            logger.info(f"Available data sources: {[adapter.name for adapter in available_adapters]}")
+            logger.info(
+                "✅ [多数据源基础信息同步] 可用数据源=%s，耗时=%.2fs",
+                [adapter.name for adapter in available_adapters],
+                time.perf_counter() - step_start,
+            )
 
             # 如果指定了优先数据源，记录日志
             if preferred_sources:
                 logger.info(f"Using preferred data sources: {preferred_sources}")
 
             # Step 2: 尝试从数据源获取股票列表（排除本地数据源）
-            stock_df, source_used = await asyncio.to_thread(
-                manager.get_stock_list_with_fallback, preferred_sources, True  # exclude_local=True
-            )
+            stock_df, source_used = await self._fetch_stock_list_with_retry(manager, preferred_sources)
             if stock_df is None or getattr(stock_df, "empty", True):
                 raise RuntimeError("All data sources failed to provide stock list")
 
@@ -271,14 +351,21 @@ class MultiSourceBasicsSyncService:
             logger.info(f"Successfully fetched {len(stock_df)} stocks from {source_used}")
 
             # Step 3: 获取最新交易日期和财务数据
+            step_start = time.perf_counter()
             latest_trade_date = await asyncio.to_thread(
                 manager.find_latest_trade_date_with_fallback, preferred_sources
             )
             stats.last_trade_date = latest_trade_date
+            logger.info(
+                "🗓️ [多数据源基础信息同步] 最新交易日=%s，耗时=%.2fs",
+                latest_trade_date,
+                time.perf_counter() - step_start,
+            )
 
             daily_data_map = {}
             daily_source = ""
             if latest_trade_date:
+                step_start = time.perf_counter()
                 daily_df, daily_source = await asyncio.to_thread(
                     manager.get_daily_basic_with_fallback, latest_trade_date, preferred_sources
                 )
@@ -288,17 +375,29 @@ class MultiSourceBasicsSyncService:
                         if ts_code:
                             daily_data_map[ts_code] = row.to_dict()
                     stats.data_sources_used.append(f"daily_data:{daily_source}")
+                logger.info(
+                    "📈 [多数据源基础信息同步] daily_basic source=%s, records=%s, elapsed=%.2fs",
+                    daily_source or "-",
+                    0 if daily_df is None else len(daily_df),
+                    time.perf_counter() - step_start,
+                )
 
             from app.services.official_industry_service import (
                 INDUSTRY_SOURCE_SYSTEM,
                 fetch_industry_mapping,
             )
 
+            step_start = time.perf_counter()
             industry_mapping = await fetch_industry_mapping(refresh_if_empty=True)
             use_system_industry_mapping = bool(industry_mapping)
             if use_system_industry_mapping:
                 stats.data_sources_used.append(f"industry_mapping:{INDUSTRY_SOURCE_SYSTEM}")
                 logger.info(f"📊 使用系统行业映射集合: {len(industry_mapping)} 只股票")
+            logger.info(
+                "🏷️ [多数据源基础信息同步] 行业映射加载完成: enabled=%s, elapsed=%.2fs",
+                use_system_industry_mapping,
+                time.perf_counter() - step_start,
+            )
 
             # Step 5: 处理和更新数据（分批处理）
             ops = []
@@ -420,6 +519,10 @@ class MultiSourceBasicsSyncService:
                 logger.info(
                     f"✅ Multi-source sync finished: total={stats.total} inserted={inserted} "
                     f"updated={updated} errors={errors} sources={stats.data_sources_used}"
+                )
+                logger.info(
+                    "✅ [多数据源基础信息同步] 总耗时 %.2fs",
+                    time.perf_counter() - sync_start,
                 )
             except Exception as persist_error:
                 logger.error(f"❌ 保存成功状态时出错: {persist_error}")

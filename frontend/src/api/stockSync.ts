@@ -10,7 +10,7 @@ export interface SingleStockSyncRequest {
   sync_historical: boolean
   sync_financial: boolean
   sync_basic?: boolean
-  data_source: 'tushare' | 'akshare'
+  data_source: 'tushare' | 'akshare' | 'qmt'
   days: number
 }
 
@@ -19,7 +19,7 @@ export interface BatchStockSyncRequest {
   sync_historical: boolean
   sync_financial: boolean
   sync_basic?: boolean
-  data_source: 'tushare' | 'akshare'
+  data_source: 'tushare' | 'akshare' | 'qmt'
   days: number
 }
 

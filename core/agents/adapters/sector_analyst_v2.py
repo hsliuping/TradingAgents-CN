@@ -198,7 +198,7 @@ class SectorAnalystV2(AnalystAgent):
         category=AgentCategory.ANALYST,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
-        default_tools=["get_sector_data", "get_fund_flow_data"],
+        default_tools=["get_sector_analysis"],
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
@@ -223,9 +223,7 @@ class SectorAnalystV2(AnalystAgent):
     output_field = "sector_report"
 
     def _get_tool_ids_for_mode(self, mode: str) -> list[str]:
-        if mode == "qmt":
-            return ["get_sector_analysis_qmt"]
-        return ["get_sector_data", "get_fund_flow_data"]
+        return ["get_sector_analysis"]
 
     def _prepare_analysis_mode(self, state: Dict[str, Any]) -> str:
         mode = resolve_market_data_mode(state)
@@ -245,7 +243,7 @@ class SectorAnalystV2(AnalystAgent):
 1. 重点分析行业内部强弱、龙头带动、扩散度和成交活跃度。
 2. 不要要求或假设存在同花顺板块资金净流入、概念板块官方排名等 Tushare 专属统计。
 3. 如果行业分类来自本地 stock_basic_info，必须明确说明“行业映射来自本地，行情来自 QMT”。
-4. 优先使用 get_sector_analysis_qmt 获取完整板块结构分析数据。
+4. 优先使用 get_sector_analysis 获取完整板块结构分析数据。
 """
         if prompt_type == "user":
             suffix += "\n5. 报告应突出结构强弱和龙头扩散，不要把代理指标表述成官方板块资金流。\n"
@@ -519,7 +517,7 @@ class SectorAnalystV2(AnalystAgent):
     **数据源模式**: QMT
 
     **重要提示**：调用工具时，必须使用以下参数：
-    - get_sector_analysis_qmt: ticker='{ticker}', trade_date='{analysis_date}', lookback_days=20, top_n=10
+    - get_sector_analysis: ticker='{ticker}', trade_date='{analysis_date}', lookback_days=20, top_n=10
 
     **必须使用上述参数值**，不要编造板块资金流、概念排名或官方板块指数统计。
 
@@ -540,10 +538,7 @@ class SectorAnalystV2(AnalystAgent):
     **市场**: {market_type}
 
     **重要提示**：调用工具时，必须使用以下参数：
-    - get_china_market_overview: curr_date='{analysis_date}'
-    - get_sector_data: ticker='{ticker}', trade_date='{analysis_date}', lookback_days=20
-    - get_fund_flow_data: trade_date='{analysis_date}', top_n=10
-    - get_peer_comparison: ticker='{ticker}', trade_date='{analysis_date}'（如果需要）
+    - get_sector_analysis: ticker='{ticker}', trade_date='{analysis_date}', lookback_days=20, top_n=10
 
     **必须使用上述参数值**，不要使用其他股票代码或日期。
 
@@ -564,10 +559,7 @@ class SectorAnalystV2(AnalystAgent):
 
         # 根据工具名称给出调用建议
         tool_hints = {
-            "get_sector_data": "获取板块基础数据（行业分类、板块走势）",
-            "get_fund_flow_data": "获取板块资金流向数据",
-            "get_industry_comparison": "获取同业公司对比数据",
-            "get_sector_stocks": "获取板块成分股列表",
+            "get_sector_analysis": "按当前数据源自动获取完整行业分析数据",
         }
 
         for tool_name in self.tool_names:

@@ -960,7 +960,18 @@ class BaseAgent(ABC):
         Returns:
             List[ToolMessage]: 工具执行结果消息列表
         """
+        from core.tools.context import (
+            reset_current_analysis_data_source,
+            set_current_analysis_data_source,
+        )
+
         tool_messages = []
+        current_state = getattr(self, "_current_state", None)
+        analysis_data_source = None
+        if isinstance(current_state, dict):
+            value = current_state.get("_analysis_data_source")
+            if isinstance(value, str) and value.strip():
+                analysis_data_source = value.strip().lower()
 
         for tool_call in tool_calls:
             tool_name = tool_call.get('name')
@@ -978,8 +989,11 @@ class BaseAgent(ABC):
                         logger.info(f"🔄 [{self.agent_id}] 开始调用工具 {tool_name}...")
                         logger.debug(f"🔍 [{self.agent_id}] 工具类型: {type(tool)}")
                         logger.debug(f"🔍 [{self.agent_id}] 工具 func: {getattr(tool, 'func', 'N/A')}")
-                        
-                        tool_result = tool.invoke(tool_args)
+                        source_token = set_current_analysis_data_source(analysis_data_source)
+                        try:
+                            tool_result = tool.invoke(tool_args)
+                        finally:
+                            reset_current_analysis_data_source(source_token)
                         
                         # 🔥 检查返回的是否是协程对象（修复异步函数问题）
                         import asyncio

@@ -10,8 +10,17 @@ from typing import Annotated
 from langchain_core.tools import tool
 
 from core.tools.base import register_tool
+from core.tools.context import get_current_analysis_data_source
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_market_analysis_source() -> str:
+    """获取当前大盘分析工具应使用的数据源。"""
+    current_source = get_current_analysis_data_source()
+    if current_source == "qmt":
+        return "qmt"
+    return "tushare"
 
 
 @tool
@@ -176,6 +185,53 @@ def get_market_overview(
     except Exception as e:
         logger.error(f"获取市场概览失败: {e}")
         return f"❌ 获取市场概览失败: {e}"
+
+
+@tool
+@register_tool(
+    tool_id="get_market_analysis",
+    name="统一大盘分析",
+    description="根据当前分析数据源自动选择 QMT 或 Tushare 路径，返回统一的大盘分析结果。",
+    category="market",
+    is_online=True,
+    auto_register=True
+)
+def get_market_analysis(
+    trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"],
+    lookback_days: Annotated[int, "回看天数，默认60天"] = 60
+) -> str:
+    """统一的大盘分析工具，自动按当前数据源路由。"""
+    source = _resolve_market_analysis_source()
+
+    if source == "qmt":
+        try:
+            from core.tools.qmt_market_tools import get_market_overview_qmt_sync
+            return get_market_overview_qmt_sync(trade_date, lookback_days)
+        except Exception as e:
+            logger.error(f"QMT 大盘分析失败: {e}")
+            return f"❌ QMT 大盘分析失败: {e}"
+
+    sections = []
+    tool_calls = [
+        ("指数趋势", lambda: get_index_data(trade_date, lookback_days)),
+        ("市场宽度", lambda: get_market_breadth(trade_date)),
+        ("市场环境", lambda: get_market_environment(trade_date)),
+        ("市场周期", lambda: identify_market_cycle(trade_date)),
+        ("北向资金", lambda: get_north_flow(trade_date, min(lookback_days, 10))),
+        ("两融余额", lambda: get_margin_trading(trade_date, min(lookback_days, 10))),
+        ("涨跌停统计", lambda: get_limit_stats(trade_date)),
+        ("指数技术面", lambda: get_index_technical(trade_date, lookback_days)),
+    ]
+
+    for title, producer in tool_calls:
+        try:
+            content = producer()
+        except Exception as exc:
+            logger.error(f"统一大盘分析组装失败 [{title}]: {exc}")
+            content = f"❌ {title} 获取失败: {exc}"
+        sections.append(f"## {title}\n{content}")
+
+    return "\n\n".join(sections)
 
 
 # ==================== 新增大盘分析工具 ====================

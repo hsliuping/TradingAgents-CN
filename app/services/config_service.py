@@ -1170,7 +1170,14 @@ class ConfigService:
             elif provider_str == "deepseek":
                 # DeepSeek 使用专门的测试方法
                 logger.info(f"🔍 使用 DeepSeek 专用测试方法")
-                result = self._test_deepseek_api(api_key, f"{provider_str} {llm_config.model_name}", llm_config.model_name)
+                result = self._test_deepseek_api(
+                    api_key,
+                    f"{provider_str} {llm_config.model_name}",
+                    llm_config.model_name,
+                    llm_config.temperature,
+                    llm_config.max_tokens,
+                    llm_config.timeout,
+                )
                 result["response_time"] = time.time() - start_time
                 return result
             elif provider_str == "dashscope":
@@ -1690,9 +1697,20 @@ class ConfigService:
 
                     from app.services.data_sources.qmt_adapter import QMTAdapter
 
+                    logger.info(
+                        "QMT 测试连接开始: data_dir=%s, init_markets=%s, start_local_service=%s",
+                        temp_env.get("QMT_DATA_DIR", ""),
+                        temp_env.get("QMT_INIT_MARKETS", ""),
+                        temp_env.get("QMT_START_LOCAL_SERVICE", ""),
+                    )
+
                     adapter = QMTAdapter()
-                    available = adapter.is_available()
+                    available = await asyncio.wait_for(
+                        asyncio.to_thread(adapter.is_available),
+                        timeout=15.0,
+                    )
                     if not available:
+                        logger.warning("QMT 测试连接失败: adapter.is_available() returned False")
                         return {
                             "success": False,
                             "message": "QMT 不可用：请确认 xtquant 已安装、MiniQMT 已启动，且本地行情连接参数正确",
@@ -1703,16 +1721,24 @@ class ConfigService:
                             }
                         }
 
-                    stock_df = adapter.get_stock_list()
-                    stock_count = len(stock_df) if stock_df is not None else 0
                     return {
                         "success": True,
                         "message": "成功连接到 QMT 数据源",
                         "response_time": time.time() - start_time,
                         "details": {
                             "type": ds_type,
-                            "test_result": f"QMT 可用，股票列表检测返回 {stock_count} 条记录",
-                            "stock_count": stock_count,
+                            "test_result": "QMT 可用，本地 MiniQMT 连接检测通过",
+                        }
+                    }
+                except asyncio.TimeoutError:
+                    logger.error("QMT 测试连接超时: adapter.is_available() exceeded 15 seconds")
+                    return {
+                        "success": False,
+                        "message": "QMT 测试超时：本地连接检测超过 15 秒，请检查 MiniQMT 当前状态后重试",
+                        "response_time": time.time() - start_time,
+                        "details": {
+                            "type": ds_type,
+                            "tested_params": sorted(list((ds_config.config_params or {}).keys())),
                         }
                     }
                 except ImportError:
@@ -4109,7 +4135,16 @@ class ConfigService:
                 base_url = provider_data.get("default_base_url") if provider_data else None
                 return await asyncio.get_event_loop().run_in_executor(None, self._test_google_api, api_key, display_name, base_url, test_model)
             elif provider_name == "deepseek":
-                return await asyncio.get_event_loop().run_in_executor(None, self._test_deepseek_api, api_key, display_name, test_model)
+                return await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    self._test_deepseek_api,
+                    api_key,
+                    display_name,
+                    test_model,
+                    llm_temperature,
+                    llm_max_tokens,
+                    llm_timeout,
+                )
             elif provider_name == "dashscope":
                 return await asyncio.get_event_loop().run_in_executor(None, self._test_dashscope_api, api_key, display_name, test_model)
             elif provider_name == "openrouter":
@@ -4346,10 +4381,35 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    def _test_deepseek_api(self, api_key: str, display_name: str, test_model: str = None) -> dict:
+    def _test_deepseek_api(
+        self,
+        api_key: str,
+        display_name: str,
+        test_model: str = None,
+        temperature: float = 0.1,
+        max_tokens: int = 200,
+        timeout: int = 15,
+    ) -> dict:
         """测试DeepSeek API"""
         try:
             import requests
+
+            def _normalize_message_text(value: Any) -> str:
+                if value is None:
+                    return ""
+                if isinstance(value, str):
+                    return value.strip()
+                if isinstance(value, list):
+                    text_parts = []
+                    for item in value:
+                        if isinstance(item, dict):
+                            text = item.get("text") or item.get("content") or item.get("reasoning_content")
+                            if text:
+                                text_parts.append(str(text))
+                        elif item:
+                            text_parts.append(str(item))
+                    return "".join(text_parts).strip()
+                return str(value).strip()
 
             # 🔥 优先使用用户填写的测试模型，如果没有则使用默认模型
             if test_model and test_model.strip():
@@ -4362,6 +4422,15 @@ class ConfigService:
             logger.info(f"🔍 [DeepSeek 测试] 使用模型: {model_name}")
 
             url = "https://api.deepseek.com/chat/completions"
+            effective_temperature = float(temperature if temperature is not None else 0.1)
+            effective_timeout = max(int(timeout if timeout is not None else 15), 1)
+            requested_max_tokens = int(max_tokens if max_tokens is not None else 200)
+            effective_max_tokens = max(requested_max_tokens, 256)
+
+            logger.info(
+                f"🔧 [DeepSeek 测试] 使用测试参数: "
+                f"temperature={effective_temperature}, max_tokens={effective_max_tokens}, timeout={effective_timeout}"
+            )
 
             headers = {
                 "Content-Type": "application/json",
@@ -4373,22 +4442,50 @@ class ConfigService:
                 "messages": [
                     {"role": "user", "content": "你好，请简单介绍一下你自己。"}
                 ],
-                "max_tokens": 50,
-                "temperature": 0.1
+                "max_tokens": effective_max_tokens,
+                "temperature": effective_temperature
             }
 
-            response = requests.post(url, json=data, headers=headers, timeout=10)
+            response = requests.post(url, json=data, headers=headers, timeout=effective_timeout)
 
             if response.status_code == 200:
                 result = response.json()
                 if "choices" in result and len(result["choices"]) > 0:
-                    content = result["choices"][0]["message"]["content"]
+                    choice = result["choices"][0] or {}
+                    message = choice.get("message") or {}
+                    content = _normalize_message_text(message.get("content"))
+                    reasoning_content = _normalize_message_text(message.get("reasoning_content"))
+                    finish_reason = str(choice.get("finish_reason") or "").lower()
+
                     if content and len(content.strip()) > 0:
                         return {
                             "success": True,
                             "message": f"{display_name} API连接测试成功"
                         }
+                    elif reasoning_content:
+                        logger.info(
+                            f"✅ [{display_name}] DeepSeek 测试返回 reasoning_content，视为连接成功: "
+                            f"finish_reason={finish_reason or 'N/A'}"
+                        )
+                        return {
+                            "success": True,
+                            "message": f"{display_name} API连接测试成功"
+                        }
+                    elif finish_reason in {"length", "max_tokens"}:
+                        logger.info(
+                            f"✅ [{display_name}] DeepSeek 测试响应因 token 限制截断，视为连接成功: "
+                            f"finish_reason={finish_reason}, max_tokens={effective_max_tokens}"
+                        )
+                        return {
+                            "success": True,
+                            "message": f"{display_name} API连接测试成功（响应因 token 限制截断）"
+                        }
                     else:
+                        logger.warning(
+                            f"⚠️ [{display_name}] DeepSeek 测试返回空内容: "
+                            f"finish_reason={finish_reason or 'N/A'}, has_reasoning={bool(reasoning_content)}, "
+                            f"response_keys={list(result.keys())}"
+                        )
                         return {
                             "success": False,
                             "message": f"{display_name} API响应为空"
@@ -4398,6 +4495,21 @@ class ConfigService:
                         "success": False,
                         "message": f"{display_name} API响应格式异常"
                     }
+            elif response.status_code == 401:
+                return {
+                    "success": False,
+                    "message": f"{display_name} 账号认证失败，请检查 API Key、账号状态和模型访问权限"
+                }
+            elif response.status_code == 402:
+                return {
+                    "success": False,
+                    "message": f"{display_name} 账号额度不足，请检查余额、套餐配额或模型付费权限"
+                }
+            elif response.status_code == 403:
+                return {
+                    "success": False,
+                    "message": f"{display_name} 账号权限不足，或当前模型配额已用完，请检查套餐和模型授权"
+                }
             else:
                 return {
                     "success": False,

@@ -55,6 +55,7 @@ status: updated
 ### 🎯 专项指南
 - **[成本控制指南](./cost-control-guide.md)** - API成本管理和优化
 - **[数据源配置指南](./data-source-guide.md)** - 数据源配置和使用
+- **[QMT 联用手册](./qmt-usage-guide.md)** - QMT 与项目联用、同步、分析与排障说明
 - **[模型选择指南](./model-selection-guide.md)** - LLM模型选择建议
 
 ## 🎯 使用路径推荐

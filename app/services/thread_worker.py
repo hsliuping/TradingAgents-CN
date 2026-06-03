@@ -52,19 +52,28 @@ class ThreadWorker:
         logger.info("=" * 60)
         
         # 初始化服务
+        logger.info("⏳ [ThreadWorker] 初始化 Redis 客户端代理")
         redis = get_redis_client()
+        logger.info("✅ [ThreadWorker] Redis 客户端代理初始化完成")
+        logger.info("⏳ [ThreadWorker] 初始化 QueueService")
         self.queue_service = QueueService(redis)
+        logger.info("✅ [ThreadWorker] QueueService 初始化完成")
+        logger.info("⏳ [ThreadWorker] 初始化 TaskAnalysisService")
         self.task_service = TaskAnalysisService()
+        logger.info("✅ [ThreadWorker] TaskAnalysisService 初始化完成")
         
         # 创建线程池
+        logger.info("⏳ [ThreadWorker] 创建线程池执行器")
         self.executor = ThreadPoolExecutor(
             max_workers=self.max_workers,
             thread_name_prefix="analysis-worker"
         )
+        logger.info("✅ [ThreadWorker] 线程池执行器创建完成")
         
         self.running = True
         
         # 启动队列监听循环
+        logger.info("⏳ [ThreadWorker] 启动队列监听循环")
         self._loop_task = asyncio.create_task(self._queue_loop())
         
         logger.info("✅ 线程池 Worker 启动成功")

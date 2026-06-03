@@ -158,10 +158,10 @@ if ($Command -eq "backend" -or $Command -eq "all") {
         $pythonCandidates += $env:TRADINGAGENTS_PYTHON_EXE
     }
     $pythonCandidates += @(
-        (Join-Path $root "release\TradingAgentsCN-portable\vendors\python\python.exe"),
         (Join-Path $root "env\Scripts\python.exe"),
         (Join-Path $root "venv\Scripts\python.exe"),
-        (Join-Path $root "vendors\python\python.exe")
+        (Join-Path $root "vendors\python\python.exe"),
+        (Join-Path $root "release\TradingAgentsCN-portable\vendors\python\python.exe")
     )
 
     foreach ($path in $pythonCandidates) {

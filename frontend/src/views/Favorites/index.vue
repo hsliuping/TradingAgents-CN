@@ -431,6 +431,7 @@
           <el-radio-group v-model="batchSyncForm.dataSource">
             <el-radio label="tushare" :disabled="!availableSyncSources.tushare">Tushare</el-radio>
             <el-radio label="akshare" :disabled="!availableSyncSources.akshare">AKShare</el-radio>
+            <el-radio label="qmt" :disabled="!availableSyncSources.qmt">QMT</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="历史数据天数" v-if="batchSyncForm.syncTypes.includes('historical')">
@@ -482,6 +483,7 @@
           <el-radio-group v-model="singleSyncForm.dataSource">
             <el-radio label="tushare" :disabled="!availableSyncSources.tushare">Tushare</el-radio>
             <el-radio label="akshare" :disabled="!availableSyncSources.akshare">AKShare</el-radio>
+            <el-radio label="qmt" :disabled="!availableSyncSources.qmt">QMT</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="历史数据天数" v-if="singleSyncForm.syncTypes.includes('historical')">
@@ -565,7 +567,8 @@ const batchSyncLoading = ref(false)
 const syncAllStocks = ref(false)  // 标记是否同步所有A股股票
 const availableSyncSources = ref<Record<ManualSyncDataSource, boolean>>({
   tushare: true,
-  akshare: true
+  akshare: true,
+  qmt: true
 })
 const batchSyncForm = ref({
   syncTypes: ['historical', 'financial'],
@@ -781,7 +784,7 @@ const syncAllRealtime = async () => {
   syncRealtimeLoading.value = true
   try {
     const preferredSource = await loadPreferredAvailableSyncSource()
-    const realtimeSource = preferredSource || (availableSyncSources.value.akshare ? 'akshare' : 'tushare')
+    const realtimeSource = preferredSource || (availableSyncSources.value.qmt ? 'qmt' : availableSyncSources.value.akshare ? 'akshare' : 'tushare')
     const res = await favoritesApi.syncRealtime(realtimeSource)
 
     if ((res as any)?.success) {

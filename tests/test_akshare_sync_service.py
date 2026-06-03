@@ -6,6 +6,21 @@ import pytest
 from app.worker.akshare_sync_service import AKShareSyncService
 
 
+class AsyncCursor:
+    def __init__(self, docs):
+        self._docs = list(docs)
+
+    def __aiter__(self):
+        self._iterator = iter(self._docs)
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._iterator)
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
+
+
 @pytest.fixture
 def akshare_sync_service():
     service = AKShareSyncService()
@@ -57,3 +72,42 @@ async def test_process_basic_info_batch_skips_fresh_record_when_mapping_already_
     assert result["success_count"] == 0
     assert result["skipped_count"] == 1
     akshare_sync_service.db.stock_basic_info.update_one.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_favorite_stocks_uses_valid_user_favorites_only(akshare_sync_service):
+    akshare_sync_service.db.users.find = Mock(return_value=AsyncCursor([
+        {"_id": "user-1"},
+        {"_id": "user-2"},
+    ]))
+    akshare_sync_service.db.user_favorites.find = Mock(return_value=AsyncCursor([
+        {
+            "user_id": "user-1",
+            "favorites": [
+                {"stock_code": "000001"},
+                {"stock_code": "000002"},
+            ],
+        },
+        {
+            "user_id": "user-2",
+            "favorites": [
+                {"stock_code": "000002"},
+                {"stock_code": "000003"},
+            ],
+        },
+        {
+            "user_id": "stale-user",
+            "favorites": [
+                {"stock_code": "999999"},
+            ],
+        },
+    ]))
+
+    result = await akshare_sync_service._get_favorite_stocks()
+
+    assert result == ["000001", "000002", "000003"]
+    akshare_sync_service.db.users.find.assert_called_once_with({}, {"_id": 1})
+    akshare_sync_service.db.user_favorites.find.assert_called_once_with(
+        {"favorites": {"$exists": True, "$ne": []}},
+        {"user_id": 1, "favorites.stock_code": 1, "_id": 0},
+    )

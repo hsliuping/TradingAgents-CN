@@ -5,13 +5,14 @@
 """
 
 import logging
-from typing import List, Set, Dict, Any
+from typing import List, Set, Dict, Any, Tuple
 from datetime import datetime
 
 from app.core.database import get_mongo_db
 from app.core.data_source_priority import get_enabled_data_sources_async
 from app.worker.tushare_sync_service import get_tushare_sync_service
 from app.worker.akshare_sync_service import get_akshare_sync_service
+from app.worker.etf_sync_service import get_etf_sync_service
 from app.worker.financial_data_sync_service import FinancialDataSyncService
 
 logger = logging.getLogger("webapi")
@@ -70,9 +71,24 @@ def _is_etf_code(code: str) -> bool:
     return len(normalized) == 6 and normalized.startswith(ETF_SH_PREFIXES + ETF_SZ_PREFIXES)
 
 
+def _split_stock_and_etf_codes(codes: List[str]) -> Tuple[List[str], List[str]]:
+    """将代码列表拆分为普通股票和 ETF。"""
+    stock_codes: List[str] = []
+    etf_codes: List[str] = []
+
+    for code in codes:
+        if _is_etf_code(code):
+            etf_codes.append(code)
+        else:
+            stock_codes.append(code)
+
+    return stock_codes, etf_codes
+
+
 def _filter_stock_codes_for_financial_sync(codes: List[str]) -> List[str]:
     """财务同步仅保留股票代码，排除 ETF。"""
-    return [code for code in codes if not _is_etf_code(code)]
+    stock_codes, _ = _split_stock_and_etf_codes(codes)
+    return stock_codes
 
 
 async def sync_favorites_historical_data():
@@ -98,6 +114,12 @@ async def sync_favorites_historical_data():
                 "synced_count": 0,
                 "data_source": None
             }
+
+        stock_codes, etf_codes = _split_stock_and_etf_codes(a_stock_codes)
+        if etf_codes:
+            logger.info(f"🔀 自选股历史同步识别出 ETF，改走 ETF 专用链路: {len(etf_codes)} 只")
+        if not stock_codes:
+            logger.info("ℹ️ 自选股历史同步未包含普通股票，将仅执行 ETF 历史同步")
         
         # 2. 按数据源优先级获取同步数据源列表（排除 local）
         enabled_sources = await get_enabled_data_sources_async("a_shares")
@@ -124,10 +146,13 @@ async def sync_favorites_historical_data():
             if source_lower == "baostock":
                 logger.debug("BaoStock 历史同步不支持指定股票列表，跳过")
                 continue
+
+            if not stock_codes:
+                continue
             
             # 🔥 创建任务（使用统一线程池服务执行，避免事件循环冲突）
             if source_lower == "tushare":
-                async def sync_tushare(codes=a_stock_codes):
+                async def sync_tushare(codes=stock_codes):
                     service = await get_tushare_sync_service()
                     # 🔥 在线程池中执行同步方法
                     sync_result = await unified_service.execute_sync_method(
@@ -147,7 +172,7 @@ async def sync_favorites_historical_data():
                 tasks.append(sync_tushare())
                 task_sources.append("tushare")
             elif source_lower == "akshare":
-                async def sync_akshare(codes=a_stock_codes):
+                async def sync_akshare(codes=stock_codes):
                     service = await get_akshare_sync_service()
                     # 🔥 在线程池中执行同步方法
                     sync_result = await unified_service.execute_sync_method(
@@ -166,6 +191,19 @@ async def sync_favorites_historical_data():
                         raise RuntimeError(sync_result.error)
                 tasks.append(sync_akshare())
                 task_sources.append("akshare")
+
+        if etf_codes:
+            async def sync_etf(codes=etf_codes):
+                service = await get_etf_sync_service()
+                return await service.sync_symbols(
+                    symbols=codes,
+                    force_update=False,
+                    days=30,
+                    job_id="favorites_etf_historical_sync",
+                )
+
+            tasks.append(sync_etf())
+            task_sources.append("etf")
         
         # 并行执行所有数据源的同步任务
         if tasks:
@@ -175,8 +213,10 @@ async def sync_favorites_historical_data():
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
             # 处理结果：合并所有成功的数据源结果
-            total_success_count = 0
-            total_records = 0
+            stock_success_count = 0
+            stock_records = 0
+            etf_success_count = 0
+            etf_records = 0
             used_sources = []
             all_details = {}
             
@@ -200,7 +240,18 @@ async def sync_favorites_historical_data():
                         # 🔥 跳过的情况也计入used_sources，但不计入成功数量
                         used_sources.append(source)
                         continue
-                    
+
+                    if source == "etf":
+                        success_count = result.get("success_count", 0)
+                        records = result.get("records_inserted", 0)
+                        etf_success_count = success_count
+                        etf_records += records
+                        etf_source = result.get("data_source_used")
+                        used_sources.append(f"etf:{etf_source}" if etf_source else "etf")
+                        all_details[source] = result
+                        logger.info(f"✅ ETF 历史数据同步完成: 成功={success_count}, 记录={records}, 数据源={etf_source}")
+                        continue
+
                     # 🔥 检查返回结果中是否有嵌套的stats（某些情况下返回格式可能是 {"stats": {...}}）
                     if "stats" in result and isinstance(result["stats"], dict):
                         stats = result["stats"]
@@ -216,14 +267,16 @@ async def sync_favorites_historical_data():
                                f"total_processed={result.get('total_processed', result.get('stats', {}).get('total_processed', 'N/A'))}, "
                                f"error_count={result.get('error_count', result.get('stats', {}).get('error_count', 'N/A'))}, "
                                f"result keys={list(result.keys())}")
-                    
-                    total_success_count = max(total_success_count, success_count)  # 取最大值（因不同数据源可能覆盖相同的股票）
-                    total_records += records  # 累加记录数（不同数据源的数据会合并）
+
+                    stock_success_count = max(stock_success_count, success_count)  # 取最大值（因不同数据源可能覆盖相同的股票）
+                    stock_records += records  # 累加记录数（不同数据源的数据会合并）
                     used_sources.append(source)
                     all_details[source] = result
-                    
                     logger.info(f"✅ {source} 历史数据同步完成: 成功={success_count}, 记录={records}")
-            
+
+            total_success_count = stock_success_count + etf_success_count
+            total_records = stock_records + etf_records
+
             if not used_sources:
                 logger.warning("⚠️ 自选股历史数据同步：所有数据源都失败")
                 return {
@@ -247,6 +300,8 @@ async def sync_favorites_historical_data():
                 "total_count": len(a_stock_codes),
                 "synced_count": total_success_count,
                 "total_records": total_records,
+                "stock_count": len(stock_codes),
+                "etf_count": len(etf_codes),
                 "data_source": ", ".join(used_sources) if used_sources else None,
                 "data_sources": used_sources,  # 🔥 新增：返回所有成功的数据源列表
                 "details": all_details  # 🔥 新增：返回所有数据源的详细结果

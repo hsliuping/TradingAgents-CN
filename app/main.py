@@ -339,14 +339,18 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ 工作流注册表初始化失败: {e}")
 
     # 显示配置摘要
+    logger.info("⏳ 开始显示配置摘要")
     await _print_config_summary(logger)
+    logger.info("✅ 配置摘要显示完成")
 
     # 🔥 启动线程池 Worker（在 Backend 进程内处理队列任务）
     try:
+        logger.info("⏳ 开始启动线程池 Worker")
         from app.services.thread_worker import start_thread_worker
         max_workers = getattr(settings, 'WORKER_MAX_CONCURRENT', 3)
-        await start_thread_worker(max_workers=max_workers)
+        await asyncio.wait_for(start_thread_worker(max_workers=max_workers), timeout=20.0)
         logger.info(f"✅ 线程池 Worker 已启动 (max_workers={max_workers})")
+        logger.info("✅ 线程池 Worker 启动阶段完成")
     except Exception as e:
         logger.error(f"❌ 线程池 Worker 启动失败: {e}", exc_info=True)
         # 不阻止 Backend 启动，只是队列任务不会被处理
@@ -411,9 +415,13 @@ async def lifespan(app: FastAPI):
                 all_sources = await get_enabled_data_sources_async("a_shares")
                 # 排除缓存层，只保留真实 API 数据源
                 api_sources = [s for s in all_sources if s not in ("local", "mongodb", "local_file")]
+                # 启动期股票基础信息同步不使用 QMT 作为首选源，避免 MiniQMT 全市场列表拖慢启动。
+                filtered_sources = [s for s in api_sources if s != "qmt"]
                 if api_sources:
-                    logger.info(f"📊 股票基础信息同步数据源优先级（来自数据库）: {' > '.join(api_sources)}")
-                    return api_sources
+                    logger.info(f"📊 股票基础信息同步原始数据源优先级（来自数据库）: {' > '.join(api_sources)}")
+                    if filtered_sources != api_sources:
+                        logger.info(f"🧹 股票基础信息同步已排除 QMT 首选优先级，实际顺序: {' > '.join(filtered_sources)}")
+                    return filtered_sources or None
                 else:
                     logger.warning("⚠️ 数据库中没有启用的 API 数据源，使用默认配置")
                     return None

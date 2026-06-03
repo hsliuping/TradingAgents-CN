@@ -24,6 +24,11 @@ _current_assistant_thread_id: contextvars.ContextVar[Optional[str]] = contextvar
     'current_assistant_thread_id', default=None
 )
 
+# 当前分析数据源（在 Agent 工具调用前设置）
+_current_analysis_data_source: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    'current_analysis_data_source', default=None
+)
+
 
 def set_current_user_id(user_id: str) -> contextvars.Token:
     """设置当前用户 ID
@@ -94,4 +99,30 @@ def set_current_assistant_thread_id(thread_id: Optional[str]) -> contextvars.Tok
 def get_current_assistant_thread_id() -> Optional[str]:
     """获取当前智能助手主题 ID"""
     return _current_assistant_thread_id.get()
+
+
+def set_current_analysis_data_source(data_source: Optional[str]) -> contextvars.Token:
+    """设置当前分析数据源。
+
+    Args:
+        data_source: 数据源名称，如 "qmt"、"tushare"
+
+    Returns:
+        contextvars.Token，可用于 reset
+    """
+    normalized = None
+    if isinstance(data_source, str):
+        text = data_source.strip().lower()
+        normalized = text or None
+    return _current_analysis_data_source.set(normalized)
+
+
+def reset_current_analysis_data_source(token: contextvars.Token) -> None:
+    """重置当前分析数据源。"""
+    _current_analysis_data_source.reset(token)
+
+
+def get_current_analysis_data_source() -> Optional[str]:
+    """获取当前分析数据源。"""
+    return _current_analysis_data_source.get()
 

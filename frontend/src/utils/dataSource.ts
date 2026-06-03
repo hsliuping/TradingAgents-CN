@@ -5,7 +5,7 @@ import {
   type DataSourceStatus,
 } from '@/api/sync'
 
-export type ManualSyncDataSource = 'tushare' | 'akshare'
+export type ManualSyncDataSource = 'tushare' | 'akshare' | 'qmt'
 
 export interface CurrentDataSourceInfo {
   name: string
@@ -20,7 +20,7 @@ export interface ManualSyncSourceState {
   availableSources: Record<ManualSyncDataSource, boolean>
 }
 
-const MANUAL_SYNC_SOURCES: ManualSyncDataSource[] = ['tushare', 'akshare']
+const MANUAL_SYNC_SOURCES: ManualSyncDataSource[] = ['tushare', 'akshare', 'qmt']
 
 const normalizeManualSyncSource = (value: unknown): ManualSyncDataSource | null => {
   const normalized = String(value || '').toLowerCase()
@@ -56,6 +56,7 @@ export const loadManualSyncSourceState = async (): Promise<ManualSyncSourceState
   const availableSources: Record<ManualSyncDataSource, boolean> = {
     tushare: false,
     akshare: false,
+    qmt: false,
   }
 
   let preferredSource: ManualSyncDataSource | null = null

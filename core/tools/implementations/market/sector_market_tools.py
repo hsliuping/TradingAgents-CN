@@ -10,8 +10,17 @@ from typing import Annotated
 from langchain_core.tools import tool
 
 from core.tools.base import register_tool
+from core.tools.context import get_current_analysis_data_source
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_sector_analysis_source() -> str:
+    """获取当前行业分析工具应使用的数据源。"""
+    current_source = get_current_analysis_data_source()
+    if current_source == "qmt":
+        return "qmt"
+    return "tushare"
 
 
 @tool
@@ -151,6 +160,50 @@ def analyze_sector(
     except Exception as e:
         logger.error(f"综合板块分析失败: {e}")
         return f"❌ 综合板块分析失败: {e}"
+
+
+@tool
+@register_tool(
+    tool_id="get_sector_analysis",
+    name="统一行业分析",
+    description="根据当前分析数据源自动选择 QMT 或 Tushare 路径，返回统一的行业分析结果。",
+    category="market",
+    is_online=True,
+    auto_register=True
+)
+def get_sector_analysis(
+    ticker: Annotated[str, "股票代码（如 000001 或 000001.SZ）"],
+    trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"],
+    lookback_days: Annotated[int, "回看天数，默认20天"] = 20,
+    top_n: Annotated[int, "返回前N个结果，默认10"] = 10
+) -> str:
+    """统一的行业分析工具，自动按当前数据源路由。"""
+    source = _resolve_sector_analysis_source()
+
+    if source == "qmt":
+        try:
+            from core.tools.qmt_market_tools import get_sector_analysis_qmt_sync
+            return get_sector_analysis_qmt_sync(ticker, trade_date, lookback_days, top_n)
+        except Exception as e:
+            logger.error(f"QMT 行业分析失败: {e}")
+            return f"❌ QMT 行业分析失败: {e}"
+
+    sections = []
+    tool_calls = [
+        ("板块表现", lambda: get_sector_data(ticker, trade_date, lookback_days)),
+        ("板块资金流向", lambda: get_fund_flow_data(trade_date, top_n, 1)),
+        ("同业对比", lambda: get_peer_comparison(ticker, trade_date, top_n)),
+    ]
+
+    for title, producer in tool_calls:
+        try:
+            content = producer()
+        except Exception as exc:
+            logger.error(f"统一行业分析组装失败 [{title}]: {exc}")
+            content = f"❌ {title} 获取失败: {exc}"
+        sections.append(f"## {title}\n{content}")
+
+    return "\n\n".join(sections)
 
 
 # ============================================================

@@ -3,6 +3,7 @@ Data source manager that orchestrates multiple adapters with priority and option
 """
 from typing import List, Optional, Tuple, Dict
 import logging
+import time
 from datetime import datetime, timedelta
 import pandas as pd
 
@@ -137,12 +138,29 @@ class DataSourceManager:
 
         for adapter in available_adapters:
             try:
+                adapter_start = time.perf_counter()
                 logger.info(f"Trying to fetch stock list from {adapter.name}")
                 df = adapter.get_stock_list()
                 if df is not None and not df.empty:
+                    logger.info(
+                        "Stock list fetch succeeded from %s: records=%s elapsed=%.2fs",
+                        adapter.name,
+                        len(df),
+                        time.perf_counter() - adapter_start,
+                    )
                     return df, adapter.name
+                logger.warning(
+                    "Stock list fetch returned empty from %s after %.2fs",
+                    adapter.name,
+                    time.perf_counter() - adapter_start,
+                )
             except Exception as e:
-                logger.error(f"Failed to fetch stock list from {adapter.name}: {e}")
+                logger.error(
+                    "Failed to fetch stock list from %s after %.2fs: %s",
+                    adapter.name,
+                    time.perf_counter() - adapter_start,
+                    e,
+                )
                 continue
         return None, None
 

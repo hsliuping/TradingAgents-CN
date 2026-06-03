@@ -89,7 +89,7 @@
       <!-- 连接配置 -->
       <el-divider content-position="left">连接配置</el-divider>
 
-      <el-form-item label="API端点" prop="endpoint">
+      <el-form-item v-if="!isQmtType" label="API端点" prop="endpoint">
         <el-input
           v-model="formData.endpoint"
           placeholder="请输入API端点URL"
@@ -97,16 +97,16 @@
       </el-form-item>
 
       <!-- API Key 输入框 -->
-      <el-form-item label="API Key" prop="api_key">
+      <el-form-item :label="apiKeyLabel" prop="api_key">
         <el-input
           v-model="formData.api_key"
           type="password"
-          placeholder="输入 API Key（可选，留空则使用环境变量）"
+          :placeholder="apiKeyPlaceholder"
           show-password
           clearable
         />
         <div class="form-tip">
-          优先级：数据库配置 > 环境变量。留空则使用 .env 文件中的配置
+          {{ apiKeyTip }}
         </div>
       </el-form-item>
 
@@ -123,6 +123,119 @@
           某些数据源（如 Alpha Vantage）需要额外的 Secret Key
         </div>
       </el-form-item>
+
+      <template v-if="isQmtType">
+        <el-divider content-position="left">QMT 连接设置</el-divider>
+
+        <el-form-item label="安装目录" prop="qmt_data_dir">
+          <el-input
+            v-model="formData.qmt_data_dir"
+            placeholder="例如：D:\gjzq\bin.x64"
+          />
+          <div class="form-tip">
+            QMT 与 Tushare 不同，需填写本地 MiniQMT 安装目录或可用数据目录。
+          </div>
+        </el-form-item>
+
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="监听端口">
+              <el-input-number
+                v-model="formData.qmt_listen_port"
+                :min="0"
+                :max="65535"
+                controls-position="right"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="端口范围" prop="qmt_listen_port_range">
+              <el-input
+                v-model="formData.qmt_listen_port_range"
+                placeholder="例如：58620-58650"
+              />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-form-item label="初始化市场" prop="qmt_init_markets">
+          <el-input
+            v-model="formData.qmt_init_markets"
+            placeholder="例如：SH,SZ,BJ"
+          />
+          <div class="form-tip">
+            多个市场使用英文逗号分隔，推荐填写 `SH,SZ,BJ`。
+          </div>
+        </el-form-item>
+
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="启动本地服务">
+              <el-switch v-model="formData.qmt_start_local_service" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="启用 K 线全推">
+              <el-switch v-model="formData.qmt_kline_mirror_enabled" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-form-item label="K 线全推市场">
+          <el-input
+            v-model="formData.qmt_kline_mirror_markets"
+            placeholder="可选，例如：SH,SZ"
+          />
+        </el-form-item>
+
+        <el-form-item label="优选服务器">
+          <el-input
+            v-model="formData.qmt_allow_optimize_addresses"
+            placeholder="可选，多个地址用英文逗号分隔"
+          />
+        </el-form-item>
+
+        <el-divider content-position="left">QMT 自动补数</el-divider>
+
+        <el-row :gutter="16">
+          <el-col :span="8">
+            <el-form-item label="自动补历史">
+              <el-switch v-model="formData.qmt_auto_download_history" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="自动补财务">
+              <el-switch v-model="formData.qmt_auto_download_financial" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="自动补板块">
+              <el-switch v-model="formData.qmt_auto_download_sector" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-form-item label="历史起始日期">
+          <el-input
+            v-model="formData.qmt_history_start_time"
+            placeholder="可选，格式例如：20240101"
+          />
+        </el-form-item>
+
+        <el-form-item label="本地状态检测">
+          <el-button
+            type="success"
+            :loading="testing"
+            @click="handleTest"
+          >
+            检测本地 QMT 是否已启动
+          </el-button>
+          <div class="form-tip">
+            将使用当前填写的 QMT 参数检测本地 MiniQMT 和 xtquant 是否可用。
+          </div>
+        </el-form-item>
+      </template>
 
       <!-- 性能配置 -->
       <el-divider content-position="left">性能配置</el-divider>
@@ -198,7 +311,7 @@
       </el-form-item>
 
       <!-- 自定义参数 -->
-      <el-form-item label="自定义参数">
+      <el-form-item :label="isQmtType ? '其他自定义参数' : '自定义参数'">
         <div class="config-params">
           <div
             v-for="(_value, key, index) in formData.config_params"
@@ -233,6 +346,9 @@
             添加参数
           </el-button>
         </div>
+        <div class="form-tip">
+          {{ isQmtType ? 'QMT 常用参数已做成专用表单，这里只用于补充额外高级参数。' : '可按需补充当前数据源的额外参数。' }}
+        </div>
       </el-form-item>
     </el-form>
 
@@ -248,7 +364,7 @@
           :loading="testing"
           @click="handleTest"
         >
-          测试连接
+          {{ testButtonText }}
         </el-button>
       </div>
     </template>
@@ -290,6 +406,19 @@ const marketCategories = ref<MarketCategory[]>([])
 
 // Computed
 const isEdit = computed(() => !!props.config)
+const isQmtType = computed(() => (formData.value.type?.toLowerCase() || '') === 'qmt')
+const apiKeyLabel = computed(() => (isQmtType.value ? 'QMT Token' : 'API Key'))
+const apiKeyPlaceholder = computed(() =>
+  isQmtType.value
+    ? '输入 QMT Token（可选，留空则优先使用本地 MiniQMT 环境）'
+    : '输入 API Key（可选，留空则使用环境变量）'
+)
+const apiKeyTip = computed(() =>
+  isQmtType.value
+    ? 'QMT Token 为可选项。优先级：数据库配置 > 环境变量。未填写时优先使用本地 MiniQMT 环境。'
+    : '优先级：数据库配置 > 环境变量。留空则使用 .env 文件中的配置'
+)
+const testButtonText = computed(() => (isQmtType.value ? '检测本地 QMT' : '测试连接'))
 
 // 判断是否需要显示 API Secret 字段
 const needsApiSecret = computed(() => {
@@ -303,6 +432,36 @@ const currentDataSourceInfo = computed(() => {
   if (!formData.value.type) return null
   return dataSourceTypes.find(ds => ds.value === formData.value.type)
 })
+
+const qmtConfigKeys = [
+  'data_dir',
+  'listen_port',
+  'listen_port_range',
+  'init_markets',
+  'kline_mirror_markets',
+  'allow_optimize_addresses',
+  'history_start_time',
+  'start_local_service',
+  'kline_mirror_enabled',
+  'auto_download_history',
+  'auto_download_financial',
+  'auto_download_sector'
+]
+
+const qmtDefaultConfig = {
+  data_dir: 'D:\\gjzq\\bin.x64',
+  listen_port: 0,
+  listen_port_range: '58620-58650',
+  init_markets: 'SH,SZ,BJ',
+  kline_mirror_markets: '',
+  allow_optimize_addresses: '',
+  history_start_time: '',
+  start_local_service: false,
+  kline_mirror_enabled: false,
+  auto_download_history: true,
+  auto_download_financial: false,
+  auto_download_sector: true
+}
 
 // 打开注册链接
 const openRegisterUrl = () => {
@@ -328,6 +487,15 @@ const handleTypeChange = () => {
       }
     }
   }
+
+  if (selectedType === 'qmt') {
+    formData.value.provider = formData.value.provider || 'QMT / MiniQMT'
+    formData.value.endpoint = 'miniqmt://local'
+    formData.value.qmt_data_dir = formData.value.qmt_data_dir || qmtDefaultConfig.data_dir
+    formData.value.qmt_listen_port = formData.value.qmt_listen_port ?? qmtDefaultConfig.listen_port
+    formData.value.qmt_listen_port_range = formData.value.qmt_listen_port_range || qmtDefaultConfig.listen_port_range
+    formData.value.qmt_init_markets = formData.value.qmt_init_markets || qmtDefaultConfig.init_markets
+  }
 }
 
 // 表单数据
@@ -345,11 +513,109 @@ const defaultFormData = {
   priority: 0,
   config_params: {} as Record<string, any>,
   description: '',
-  market_categories: [] as string[]
+  market_categories: [] as string[],
+  qmt_data_dir: qmtDefaultConfig.data_dir,
+  qmt_listen_port: qmtDefaultConfig.listen_port,
+  qmt_listen_port_range: qmtDefaultConfig.listen_port_range,
+  qmt_init_markets: qmtDefaultConfig.init_markets,
+  qmt_kline_mirror_markets: qmtDefaultConfig.kline_mirror_markets,
+  qmt_allow_optimize_addresses: qmtDefaultConfig.allow_optimize_addresses,
+  qmt_history_start_time: qmtDefaultConfig.history_start_time,
+  qmt_start_local_service: qmtDefaultConfig.start_local_service,
+  qmt_kline_mirror_enabled: qmtDefaultConfig.kline_mirror_enabled,
+  qmt_auto_download_history: qmtDefaultConfig.auto_download_history,
+  qmt_auto_download_financial: qmtDefaultConfig.auto_download_financial,
+  qmt_auto_download_sector: qmtDefaultConfig.auto_download_sector
 }
 
 const formData = ref({ ...defaultFormData })
 const paramKeys = ref<string[]>([])
+
+const buildQmtFormFields = (configParams: Record<string, any> = {}) => ({
+  qmt_data_dir: configParams.data_dir ?? qmtDefaultConfig.data_dir,
+  qmt_listen_port: Number(configParams.listen_port ?? qmtDefaultConfig.listen_port),
+  qmt_listen_port_range: String(configParams.listen_port_range ?? qmtDefaultConfig.listen_port_range),
+  qmt_init_markets: String(configParams.init_markets ?? qmtDefaultConfig.init_markets),
+  qmt_kline_mirror_markets: String(configParams.kline_mirror_markets ?? qmtDefaultConfig.kline_mirror_markets),
+  qmt_allow_optimize_addresses: String(configParams.allow_optimize_addresses ?? qmtDefaultConfig.allow_optimize_addresses),
+  qmt_history_start_time: String(configParams.history_start_time ?? qmtDefaultConfig.history_start_time),
+  qmt_start_local_service: Boolean(configParams.start_local_service ?? qmtDefaultConfig.start_local_service),
+  qmt_kline_mirror_enabled: Boolean(configParams.kline_mirror_enabled ?? qmtDefaultConfig.kline_mirror_enabled),
+  qmt_auto_download_history: Boolean(configParams.auto_download_history ?? qmtDefaultConfig.auto_download_history),
+  qmt_auto_download_financial: Boolean(configParams.auto_download_financial ?? qmtDefaultConfig.auto_download_financial),
+  qmt_auto_download_sector: Boolean(configParams.auto_download_sector ?? qmtDefaultConfig.auto_download_sector)
+})
+
+const stripQmtConfigParams = (configParams: Record<string, any> = {}) => {
+  const next: Record<string, any> = {}
+  Object.entries(configParams || {}).forEach(([key, value]) => {
+    if (!qmtConfigKeys.includes(key)) {
+      next[key] = value
+    }
+  })
+  return next
+}
+
+const createFormDataFromConfig = (config?: any) => {
+  const base = {
+    ...defaultFormData,
+    ...(config || {}),
+    market_categories: config?.market_categories || []
+  }
+  const configParams = config?.config_params || {}
+  const isQmtConfig = (config?.type || '').toLowerCase() === 'qmt'
+
+  return {
+    ...base,
+    endpoint: isQmtConfig ? (config?.endpoint || 'miniqmt://local') : (config?.endpoint || ''),
+    config_params: isQmtConfig ? stripQmtConfigParams(configParams) : configParams,
+    ...buildQmtFormFields(configParams)
+  }
+}
+
+const buildPayload = () => {
+  const payload: any = { ...formData.value }
+  const qmtFieldMap: Record<string, string> = {
+    qmt_data_dir: 'data_dir',
+    qmt_listen_port: 'listen_port',
+    qmt_listen_port_range: 'listen_port_range',
+    qmt_init_markets: 'init_markets',
+    qmt_kline_mirror_markets: 'kline_mirror_markets',
+    qmt_allow_optimize_addresses: 'allow_optimize_addresses',
+    qmt_history_start_time: 'history_start_time',
+    qmt_start_local_service: 'start_local_service',
+    qmt_kline_mirror_enabled: 'kline_mirror_enabled',
+    qmt_auto_download_history: 'auto_download_history',
+    qmt_auto_download_financial: 'auto_download_financial',
+    qmt_auto_download_sector: 'auto_download_sector'
+  }
+
+  if ((payload.type || '').toLowerCase() === 'qmt') {
+    payload.endpoint = 'miniqmt://local'
+    payload.provider = payload.provider || 'QMT / MiniQMT'
+    payload.config_params = { ...(payload.config_params || {}) }
+
+    Object.entries(qmtFieldMap).forEach(([fieldKey, configKey]) => {
+      const value = payload[fieldKey]
+      if (typeof value === 'string') {
+        if (value.trim() !== '') {
+          payload.config_params[configKey] = value.trim()
+        } else {
+          delete payload.config_params[configKey]
+        }
+      } else if (value !== undefined && value !== null) {
+        payload.config_params[configKey] = value
+      }
+      delete payload[fieldKey]
+    })
+  } else {
+    Object.keys(qmtFieldMap).forEach(fieldKey => {
+      delete payload[fieldKey]
+    })
+  }
+
+  return payload
+}
 
 /**
  * 数据源类型选项
@@ -381,7 +647,7 @@ const dataSourceTypes = [
     label: 'QMT / MiniQMT',
     value: 'qmt',
     register_url: 'https://dict.thinktrader.net/nativeApi/code_examples.html',
-    register_guide: 'QMT 需要本地安装并启动 MiniQMT/xtquant。可在自定义参数中配置 data_dir、listen_port_range、init_markets、auto_download_history 等参数。'
+    register_guide: 'QMT 需要本地安装并启动 MiniQMT/xtquant。当前界面可直接配置安装目录、端口范围、初始化市场和自动补数等参数。'
   },
 
   // 美股数据源
@@ -449,6 +715,54 @@ const rules: FormRules = {
   timeout: [{ required: true, message: '请输入超时时间', trigger: 'blur' }],
   rate_limit: [{ required: true, message: '请输入速率限制', trigger: 'blur' }],
   priority: [{ required: true, message: '请输入优先级', trigger: 'blur' }],
+  qmt_data_dir: [
+    {
+      validator: (_rule: any, value: string, callback: any) => {
+        if (!isQmtType.value) {
+          callback()
+          return
+        }
+        if (!value || !value.trim()) {
+          callback(new Error('请输入 QMT 安装目录'))
+          return
+        }
+        callback()
+      },
+      trigger: 'blur'
+    }
+  ],
+  qmt_listen_port_range: [
+    {
+      validator: (_rule: any, value: string, callback: any) => {
+        if (!isQmtType.value) {
+          callback()
+          return
+        }
+        if (!value || !value.trim()) {
+          callback(new Error('请输入 QMT 端口范围'))
+          return
+        }
+        callback()
+      },
+      trigger: 'blur'
+    }
+  ],
+  qmt_init_markets: [
+    {
+      validator: (_rule: any, value: string, callback: any) => {
+        if (!isQmtType.value) {
+          callback()
+          return
+        }
+        if (!value || !value.trim()) {
+          callback(new Error('请输入初始化市场'))
+          return
+        }
+        callback()
+      },
+      trigger: 'blur'
+    }
+  ],
   // API Key 验证规则
   api_key: [
     {
@@ -526,14 +840,8 @@ watch(
   () => props.config,
   (config) => {
     if (config) {
-      // 编辑模式：合并默认值和传入的配置
-      formData.value = {
-        ...defaultFormData,
-        ...config,
-        market_categories: config.market_categories || []
-      }
-      // 初始化参数键列表
-      paramKeys.value = Object.keys(config.config_params || {})
+      formData.value = createFormDataFromConfig(config)
+      paramKeys.value = Object.keys(formData.value.config_params || {})
     } else {
       // 新增模式：使用默认值
       formData.value = { ...defaultFormData }
@@ -550,13 +858,8 @@ watch(
     if (visible) {
       loadMarketCategories()
       if (props.config) {
-        // 编辑模式
-        formData.value = {
-          ...defaultFormData,
-          ...props.config,
-          market_categories: props.config.market_categories || []
-        }
-        paramKeys.value = Object.keys(props.config.config_params || {})
+        formData.value = createFormDataFromConfig(props.config)
+        paramKeys.value = Object.keys(formData.value.config_params || {})
       } else {
         // 新增模式
         formData.value = { ...defaultFormData }
@@ -581,7 +884,7 @@ const handleSubmit = async () => {
 
     // 🔥 修复：直接发送截断的 API Key 给后端
     // 后端会判断截断值是否与数据库中的原值匹配
-    const payload: any = { ...formData.value }
+    const payload: any = buildPayload()
 
     // 添加日志，显示发送的 API Key
     if (payload.api_key) {
@@ -661,7 +964,7 @@ const handleTest = async () => {
 
     // 🔥 修复：直接发送截断的 API Key 给后端
     // 后端会判断截断值是否与数据库中的原值匹配
-    const testPayload: any = { ...formData.value }
+    const testPayload: any = buildPayload()
 
     // 添加日志，显示发送的 API Key
     if (testPayload.api_key) {
@@ -682,9 +985,11 @@ const handleTest = async () => {
     })
 
     if (result.success) {
-      ElMessage.success(`连接测试成功: ${result.message}`)
+      const successText = isQmtType.value ? '本地 QMT 检测成功' : '连接测试成功'
+      ElMessage.success(`${successText}: ${result.message}`)
     } else {
-      ElMessage.error(`连接测试失败: ${result.message}`)
+      const failText = isQmtType.value ? '本地 QMT 检测失败' : '连接测试失败'
+      ElMessage.error(`${failText}: ${result.message}`)
     }
   } catch (error) {
     console.error('测试连接失败:', error)

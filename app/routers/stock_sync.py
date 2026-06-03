@@ -321,6 +321,10 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                 service = await get_tushare_sync_service()
             elif actual_data_source == "akshare":
                 service = await get_akshare_sync_service()
+            elif actual_data_source == "qmt":
+                from app.worker.qmt_sync_service import get_qmt_sync_service
+
+                service = await get_qmt_sync_service()
             else:
                 raise ValueError(f"不支持的数据源: {actual_data_source}")
 
@@ -330,6 +334,11 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                     symbols=[request.symbol],
                     force=True,
                     manual_mode=True  # 手动接口不应继承调度任务取消状态
+                )
+            elif actual_data_source == "qmt":
+                realtime_result = await service.sync_realtime_quotes(
+                    symbols=[str(request.symbol).zfill(6)],
+                    force=True
                 )
             else:
                 realtime_result = await service.sync_realtime_quotes(
@@ -380,6 +389,10 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                     service = await get_tushare_sync_service()
                 elif request.data_source == "akshare":
                     service = await get_akshare_sync_service()
+                elif request.data_source == "qmt":
+                    from app.worker.qmt_sync_service import get_qmt_sync_service
+
+                    service = await get_qmt_sync_service()
                 else:
                     raise ValueError(f"不支持的数据源: {request.data_source}")
 
@@ -394,6 +407,13 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                         incremental=False,
                         manual_mode=True,
                     )
+                elif request.data_source == "qmt":
+                    hist_result = await service.sync_historical_data(
+                        symbols=[str(request.symbol).zfill(6)],
+                        days=request.days,
+                        period="daily",
+                        incremental=False,
+                    )
                 else:
                     hist_result = await service.sync_historical_data(
                         symbols=[request.symbol],
@@ -404,10 +424,15 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
 
                 result["historical_sync"] = {
                     "success": hist_result.get("success_count", 0) > 0,
-                    "records": hist_result.get("total_records", 0),
-                    "message": f"同步了 {hist_result.get('total_records', 0)} 条历史记录"
+                    "records": hist_result.get("total_records", hist_result.get("historical_records", 0)),
+                    "message": (
+                        f"同步了 {hist_result.get('total_records', hist_result.get('historical_records', 0))} 条历史记录"
+                    )
                 }
-                logger.info(f"✅ {request.symbol} 历史数据同步完成: {hist_result.get('total_records', 0)} 条记录")
+                logger.info(
+                    f"✅ {request.symbol} 历史数据同步完成: "
+                    f"{hist_result.get('total_records', hist_result.get('historical_records', 0))} 条记录"
+                )
 
                 if hist_result.get("success_count", 0) > 0:
                     try:
@@ -426,14 +451,21 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
     # 同步财务数据
     if request.sync_financial:
         try:
-            financial_service = await get_financial_sync_service()
+            if request.data_source == "qmt":
+                from app.worker.qmt_sync_service import get_qmt_sync_service
 
-            fin_result = await financial_service.sync_single_stock(
-                symbol=request.symbol,
-                data_sources=[request.data_source]
-            )
+                qmt_service = await get_qmt_sync_service()
+                fin_result = await qmt_service.sync_financial_data(symbols=[str(request.symbol).zfill(6)])
+                success = fin_result.get("success_count", 0) > 0
+            else:
+                financial_service = await get_financial_sync_service()
 
-            success = fin_result.get(request.data_source, False)
+                fin_result = await financial_service.sync_single_stock(
+                    symbol=request.symbol,
+                    data_sources=[request.data_source]
+                )
+
+                success = fin_result.get(request.data_source, False)
             result["financial_sync"] = {
                 "success": success,
                 "message": "财务数据同步成功" if success else "财务数据同步失败"
@@ -761,24 +793,39 @@ async def run_batch_stock_sync(request: BatchStockSyncRequest) -> dict:
                     service = await get_tushare_sync_service()
                 elif request.data_source == "akshare":
                     service = await get_akshare_sync_service()
+                elif request.data_source == "qmt":
+                    from app.worker.qmt_sync_service import get_qmt_sync_service
+
+                    service = await get_qmt_sync_service()
                 else:
                     raise ValueError(f"不支持的数据源: {request.data_source}")
 
                 end_date = datetime.now().strftime('%Y-%m-%d')
                 start_date = (datetime.now() - timedelta(days=request.days)).strftime('%Y-%m-%d')
 
-                hist_result = await service.sync_historical_data(
-                    symbols=request.symbols,
-                    start_date=start_date,
-                    end_date=end_date,
-                    incremental=False
-                )
+                if request.data_source == "qmt":
+                    hist_result = await service.sync_historical_data(
+                        symbols=[str(symbol).zfill(6) for symbol in request.symbols],
+                        days=request.days,
+                        period="daily",
+                        incremental=False,
+                    )
+                else:
+                    hist_result = await service.sync_historical_data(
+                        symbols=request.symbols,
+                        start_date=start_date,
+                        end_date=end_date,
+                        incremental=False
+                    )
 
                 result["historical_sync"] = {
                     "success_count": hist_result.get("success_count", 0),
                     "error_count": hist_result.get("error_count", 0),
-                    "total_records": hist_result.get("total_records", 0),
-                    "message": f"成功同步 {hist_result.get('success_count', 0)}/{len(request.symbols)} 只股票，共 {hist_result.get('total_records', 0)} 条记录"
+                    "total_records": hist_result.get("total_records", hist_result.get("historical_records", 0)),
+                    "message": (
+                        f"成功同步 {hist_result.get('success_count', 0)}/{len(request.symbols)} 只股票，"
+                        f"共 {hist_result.get('total_records', hist_result.get('historical_records', 0))} 条记录"
+                    )
                 }
                 logger.info(f"✅ 批量历史数据同步完成: {hist_result.get('success_count', 0)}/{len(request.symbols)}")
 
@@ -792,28 +839,45 @@ async def run_batch_stock_sync(request: BatchStockSyncRequest) -> dict:
 
         if request.sync_financial:
             try:
-                financial_service = await get_financial_sync_service()
+                if request.data_source == "qmt":
+                    from app.worker.qmt_sync_service import get_qmt_sync_service
 
-                fin_results = await financial_service.sync_financial_data(
-                    symbols=request.symbols,
-                    data_sources=[request.data_source],
-                    batch_size=10
-                )
-
-                source_stats = fin_results.get(request.data_source)
-                if source_stats:
+                    qmt_service = await get_qmt_sync_service()
+                    fin_results = await qmt_service.sync_financial_data(
+                        symbols=[str(symbol).zfill(6) for symbol in request.symbols]
+                    )
                     result["financial_sync"] = {
-                        "success_count": source_stats.success_count,
-                        "error_count": source_stats.error_count,
-                        "total_symbols": source_stats.total_symbols,
-                        "message": f"成功同步 {source_stats.success_count}/{source_stats.total_symbols} 只股票的财务数据"
+                        "success_count": fin_results.get("success_count", 0),
+                        "error_count": fin_results.get("error_count", 0),
+                        "total_symbols": fin_results.get("total_symbols", len(request.symbols)),
+                        "message": (
+                            f"成功同步 {fin_results.get('success_count', 0)}/"
+                            f"{fin_results.get('total_symbols', len(request.symbols))} 只股票的财务数据"
+                        )
                     }
                 else:
-                    result["financial_sync"] = {
-                        "success_count": 0,
-                        "error_count": len(request.symbols),
-                        "message": "财务数据同步失败"
-                    }
+                    financial_service = await get_financial_sync_service()
+
+                    fin_results = await financial_service.sync_financial_data(
+                        symbols=request.symbols,
+                        data_sources=[request.data_source],
+                        batch_size=10
+                    )
+
+                    source_stats = fin_results.get(request.data_source)
+                    if source_stats:
+                        result["financial_sync"] = {
+                            "success_count": source_stats.success_count,
+                            "error_count": source_stats.error_count,
+                            "total_symbols": source_stats.total_symbols,
+                            "message": f"成功同步 {source_stats.success_count}/{source_stats.total_symbols} 只股票的财务数据"
+                        }
+                    else:
+                        result["financial_sync"] = {
+                            "success_count": 0,
+                            "error_count": len(request.symbols),
+                            "message": "财务数据同步失败"
+                        }
 
                 logger.info(f"✅ 批量财务数据同步完成: {result['financial_sync']['success_count']}/{len(request.symbols)}")
 

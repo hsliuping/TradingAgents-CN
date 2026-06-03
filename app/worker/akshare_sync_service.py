@@ -15,6 +15,16 @@ from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
 
 logger = logging.getLogger(__name__)
 
+ETF_SH_PREFIXES = ("50", "51", "52", "56", "58")
+ETF_SZ_PREFIXES = ("15", "16", "18")
+
+
+def _is_etf_code(symbol: str) -> bool:
+    """判断代码是否属于 ETF/FUND，避免误走股票历史同步链路。"""
+    digits = "".join(ch for ch in str(symbol or "") if ch.isdigit())
+    normalized = digits[-6:].zfill(6) if digits else ""
+    return len(normalized) == 6 and normalized.startswith(ETF_SH_PREFIXES + ETF_SZ_PREFIXES)
+
 
 class AKShareSyncService:
     """
@@ -1015,7 +1025,40 @@ class AKShareSyncService:
                         logger.error(f"❌ [AKShare] 获取股票列表失败: {loop_error}")
                         raise
 
+            skipped_etf_symbols = []
+            if symbols:
+                stock_symbols = []
+                for symbol in symbols:
+                    if _is_etf_code(symbol):
+                        skipped_etf_symbols.append(str(symbol))
+                    else:
+                        stock_symbols.append(symbol)
+                symbols = stock_symbols
+
+            if skipped_etf_symbols:
+                preview = ", ".join(skipped_etf_symbols[:10])
+                if len(skipped_etf_symbols) > 10:
+                    preview = f"{preview}, ..."
+                logger.info(
+                    f"⏭️ [AKShare] 股票历史同步检测到 ETF 代码，已切换为跳过处理，请使用 ETF 专用同步链路: "
+                    f"count={len(skipped_etf_symbols)}, symbols={preview}"
+                )
+                stats["skipped_etf_count"] = len(skipped_etf_symbols)
+                stats["skipped_etf_symbols"] = skipped_etf_symbols
+
             if not symbols:
+                if skipped_etf_symbols:
+                    skip_message = "传入代码均为 ETF/FUND，已跳过股票历史同步，请使用 ETF 专用同步链路"
+                    logger.info(skip_message)
+                    stats["skipped"] = True
+                    stats["skip_reason"] = skip_message
+                    return {
+                        "success": True,
+                        "skipped": True,
+                        "message": skip_message,
+                        "stats": stats,
+                    }
+
                 logger.warning("⚠️ 没有找到要同步的股票")
                 return stats
 
@@ -1772,44 +1815,52 @@ class AKShareSyncService:
 
     async def _get_favorite_stocks(self) -> List[str]:
         """
-        获取所有用户的自选股列表（去重）
-        注意：只获取最新的文档，避免获取历史旧数据
+        获取有效用户的自选股列表（去重）
+
+        自选股当前统一存储在 user_favorites 集合。
+        这里只聚合 users 集合中仍存在的有效用户，避免把历史遗留
+        或错误账号的数据带入新闻同步任务。
 
         Returns:
             自选股代码列表
         """
         try:
-            favorite_codes = set()
-
-            # 方法1：从 users 集合的 favorite_stocks 字段获取
-            users_cursor = self.db.users.find(
-                {"favorite_stocks": {"$exists": True, "$ne": []}},
-                {"favorite_stocks.stock_code": 1, "_id": 0}
-            )
+            valid_user_ids = set()
+            users_cursor = self.db.users.find({}, {"_id": 1})
 
             async for user in users_cursor:
-                for fav in user.get("favorite_stocks", []):
-                    code = fav.get("stock_code")
-                    if code:
-                        favorite_codes.add(code)
+                user_id = user.get("_id")
+                if user_id is not None:
+                    valid_user_ids.add(str(user_id))
 
-            # 方法2：从 user_favorites 集合获取（兼容旧数据结构）
-            # 🔥 只获取最新的一个文档（按 updated_at 降序排序）
-            latest_doc = await self.db.user_favorites.find_one(
+            favorite_codes = set()
+            skipped_count = 0
+
+            favorites_cursor = self.db.user_favorites.find(
                 {"favorites": {"$exists": True, "$ne": []}},
-                {"favorites.stock_code": 1, "_id": 0},
-                sort=[("updated_at", -1)]  # 按更新时间降序，获取最新的
+                {"user_id": 1, "favorites.stock_code": 1, "_id": 0}
             )
 
-            if latest_doc:
-                logger.info(f"📌 从 user_favorites 获取最新文档的自选股")
-                for fav in latest_doc.get("favorites", []):
-                    code = fav.get("stock_code")
+            async for doc in favorites_cursor:
+                user_id = str(doc.get("user_id") or "")
+                if not user_id or user_id not in valid_user_ids:
+                    skipped_count += 1
+                    logger.warning(
+                        "⚠️ 新闻同步跳过无效用户自选股文档: %s",
+                        user_id or "unknown",
+                    )
+                    continue
+
+                for fav in doc.get("favorites", []):
+                    code = str(fav.get("stock_code") or "").strip()
                     if code:
                         favorite_codes.add(code)
 
+            if skipped_count:
+                logger.info("🗑️ 新闻同步已跳过 %s 条无效用户自选股文档", skipped_count)
+
             result = sorted(list(favorite_codes))
-            logger.info(f"📌 获取到 {len(result)} 只自选股")
+            logger.info("📌 从 %s 个有效用户聚合到 %s 只自选股", len(valid_user_ids), len(result))
             return result
 
         except Exception as e:

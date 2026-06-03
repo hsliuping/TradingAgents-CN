@@ -2,6 +2,8 @@
 
 欢迎来到 TradingAgents-CN 多智能体金融交易框架的文档中心。本文档适用于中文增强版 v0.1.12，包含智能新闻分析模块、多LLM提供商集成、模型选择持久化、完整的A股支持、国产LLM集成、Docker容器化部署和专业报告导出功能。
 
+> 说明：本索引保留了较多 v0.1.x 历史条目。当前主线版本的系统结构请优先查看 [当前系统架构](./architecture/system-architecture.md)；带版本目录的架构稿视为历史参考。
+
 ## 🎯 版本亮点 (v0.1.12)
 
 - 🧠 **智能新闻分析模块** - AI驱动的新闻过滤、质量评估、相关性分析
@@ -16,20 +18,26 @@
 ## 文档结构
 
 ### 📋 概览文档
+
 - [项目概述](./overview/project-overview.md) - 项目的基本介绍和目标
 - [快速开始](./overview/quick-start.md) - 快速上手指南
 - [安装指南](./overview/installation.md) - 详细的安装说明
 
 ### 🏗️ 架构文档
-- [系统架构](./architecture/system-architecture.md) - 整体系统架构设计 (v0.1.7更新) ✨
-- [容器化架构](./architecture/containerization-architecture.md) - Docker容器化架构设计 (v0.1.7新增) ✨
-- [数据库架构](./architecture/database-architecture.md) - MongoDB+Redis数据库架构
-- [智能体架构](./architecture/agent-architecture.md) - 智能体设计模式
-- [数据流架构](./architecture/data-flow-architecture.md) - 数据处理流程
-- [图结构设计](./architecture/graph-structure.md) - LangGraph 图结构设计
-- [配置优化指南](./architecture/configuration-optimization.md) - 架构优化历程详解
+
+- [当前系统架构](./architecture/system-architecture.md) - v3.0 当前运行架构、组件拓扑与技术框架
+- [部署拓扑图](./architecture/deployment-topology.md) - 当前部署形态、端口、网络和侧车组件说明
+- [当前数据流架构](./architecture/data-flow-architecture.md) - 当前分析、通知、同步、IM 助手链路
+- [后端模块架构](./architecture/backend-module-architecture.md) - 当前后端目录边界与职责说明
+- [历史系统架构（v0.1.16）](./architecture/v0.1.16/system-architecture.md) - 旧版系统架构说明
+- [历史智能体架构（v0.1.13）](./architecture/v0.1.13/agent-architecture.md) - 旧版智能体设计
+- [历史数据流架构（v0.1.13）](./architecture/v0.1.13/data-flow-architecture.md) - 旧版数据处理流程
+- [历史图结构设计（v0.1.13）](./architecture/v0.1.13/graph-structure.md) - 旧版 LangGraph 图结构
+- [技术因子治理](./architecture/technical-factor-governance.md) - 当前技术因子治理架构
+- [报告模块结构](./architecture/report-modules-structure.md) - 当前报告模块编排结构
 
 ### 🤖 智能体文档
+
 - [分析师团队](./agents/analysts.md) - 各类分析师智能体详解
 - [研究员团队](./agents/researchers.md) - 研究员智能体设计
 - [交易员](./agents/trader.md) - 交易决策智能体
@@ -37,12 +45,14 @@
 - [管理层](./agents/managers.md) - 管理层智能体
 
 ### 📊 数据处理
+
 - [数据源集成](./data/data-sources.md) - 支持的数据源和API (含A股支持) ✨
 - [Tushare数据接口集成](./data/china_stock-api-integration.md) - A股数据源详解 ✨
 - [数据处理流程](./data/data-processing.md) - 数据获取和处理
 - [缓存机制](./data/caching.md) - 数据缓存策略
 
 ### 🎯 核心功能
+
 - [🧠 智能新闻分析模块](./features/NEWS_FILTERING_SOLUTION_DESIGN.md) - AI驱动的新闻过滤与质量评估 (v0.1.12新增) ✨
 - [📊 新闻质量分析](./features/NEWS_QUALITY_ANALYSIS_REPORT.md) - 新闻质量评估与相关性分析 (v0.1.12新增) ✨
 - [🔧 新闻分析师工具修复](./features/NEWS_ANALYST_TOOL_CALL_FIX_REPORT.md) - 工具调用修复报告 (v0.1.12新增) ✨
@@ -53,6 +63,7 @@
 - [📰 新闻分析系统](./features/news-analysis-system.md) - 多源实时新闻聚合与分析 ✨
 
 ### ⚙️ 配置与部署
+
 - [配置说明](./configuration/config-guide.md) - 配置文件详解 (v0.1.11更新) ✨
 - [LLM配置](./configuration/llm-config.md) - 大语言模型配置 (v0.1.11更新) ✨
 - [多提供商配置](./configuration/multi-provider-config.md) - 4大LLM提供商配置指南 (v0.1.11新增) ✨
@@ -66,29 +77,34 @@
 - [Web界面配置](../web/README.md) - Web管理界面使用指南
 
 ### 🤖 LLM集成专区
+
 - [📚 LLM文档目录](./llm/README.md) - 大语言模型集成完整文档 ✨
 - [🔧 LLM集成指南](./llm/LLM_INTEGRATION_GUIDE.md) - 新LLM提供商接入指导 ✨
 - [🧪 LLM测试验证](./llm/LLM_TESTING_VALIDATION_GUIDE.md) - LLM功能测试指南 ✨
 - [🎯 千帆模型接入](./llm/QIANFAN_INTEGRATION_GUIDE.md) - 百度千帆专项接入指南 ✨
 
 ### 🔧 开发指南
+
 - [开发环境搭建](./development/dev-setup.md) - 开发环境配置
 - [代码结构](./development/code-structure.md) - 代码组织结构
 - [扩展开发](./development/extending.md) - 如何扩展框架
 - [测试指南](./development/testing.md) - 测试策略和方法
 
 ### 📋 版本发布 (v0.1.7更新)
+
 - [更新日志](./releases/CHANGELOG.md) - 所有版本更新记录 ✨
 - [v0.1.7发布说明](./releases/v0.1.7-release-notes.md) - 最新版本详细说明 ✨
 - [版本对比](./releases/version-comparison.md) - 各版本功能对比 ✨
 - [升级指南](./releases/upgrade-guide.md) - 版本升级详细指南 ✨
 
 ### 📚 API参考
+
 - [核心API](./api/core-api.md) - 核心类和方法
 - [智能体API](./api/agents-api.md) - 智能体接口
 - [数据API](./api/data-api.md) - 数据处理接口
 
 ### 🌐 使用指南
+
 - [🧠 新闻过滤使用指南](./guides/NEWS_FILTERING_USER_GUIDE.md) - 智能新闻分析模块使用方法 (v0.1.12新增) ✨
 - [🤖 多LLM提供商使用指南](./guides/multi-llm-usage-guide.md) - 4大提供商使用方法 (v0.1.11) ✨
 - [💾 模型选择持久化指南](./guides/model-persistence-guide.md) - 配置保存和分享方法 (v0.1.11) ✨
@@ -103,15 +119,18 @@
 - [📰 新闻分析系统使用指南](./guides/news-analysis-guide.md) - 实时新闻获取与分析指南 ✨
 
 ### 💡 示例和教程
+
 - [基础示例](./examples/basic-examples.md) - 基本使用示例
 - [高级示例](./examples/advanced-examples.md) - 高级功能示例
 - [自定义智能体](./examples/custom-agents.md) - 创建自定义智能体
 
 ### ❓ 常见问题
+
 - [FAQ](./faq/faq.md) - 常见问题解答
 - [故障排除](./faq/troubleshooting.md) - 问题诊断和解决
 
 ### 📋 版本历史
+
 - [📄 v0.1.12 发布说明](./releases/v0.1.12-release-notes.md) - 智能新闻分析模块与项目结构优化 ✨
 - [📄 v0.1.12 更新日志](./releases/CHANGELOG_v0.1.12.md) - 详细技术更新记录 ✨
 - [📄 v0.1.11 发布说明](./releases/v0.1.11-release-notes.md) - 多LLM提供商集成与模型选择持久化
@@ -127,6 +146,6 @@
 ## 联系我们
 
 - **GitHub Issues**: [提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
-- **邮箱**: hsliup@163.com
+- **邮箱**: [hsliup@163.com](mailto:hsliup@163.com)
 - 项目ＱＱ群：782124367
 - **原项目**: [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)

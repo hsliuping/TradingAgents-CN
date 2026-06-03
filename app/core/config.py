@@ -274,6 +274,7 @@ class Settings(BaseSettings):
     ETF_SYNC_ENABLED: bool = Field(default=True, description="启用 ETF 数据同步")
     ETF_SYNC_CRON: str = Field(default="0 4 * * 1-5", description="ETF 同步 CRON 表达式")  # 工作日凌晨4点
     ETF_SYNC_DAYS: int = Field(default=30, ge=1, le=365, description="ETF 强制同步回溯天数（force/manual 模式使用）")
+    ETF_SYNC_ITEM_TIMEOUT_SECONDS: int = Field(default=60, ge=5, le=600, description="ETF 单只标的日线抓取超时时间（秒）")
 
     # 官方行业数据（从官网 URL 获取，避免 AKShare 轮询封号）
     OFFICIAL_INDUSTRY_DATA_URL: Optional[str] = Field(
@@ -335,7 +336,7 @@ class Settings(BaseSettings):
     QMT_KLINE_MIRROR_ENABLED: bool = Field(default=False, description="是否启用QMT K线全推")
     QMT_AUTO_DOWNLOAD_HISTORY: bool = Field(default=True, description="读取QMT K线前自动补充历史数据")
     QMT_AUTO_DOWNLOAD_FINANCIAL: bool = Field(default=False, description="读取QMT财务数据前自动下载财务数据")
-    QMT_AUTO_DOWNLOAD_SECTOR: bool = Field(default=True, description="读取QMT股票列表前自动下载板块数据")
+    QMT_AUTO_DOWNLOAD_SECTOR: bool = Field(default=False, description="读取QMT股票列表前自动下载板块数据（默认关闭，避免卡死）")
     QMT_HISTORY_START_TIME: str = Field(default="", description="QMT历史数据自动下载起始日期 YYYYMMDD")
     QMT_HISTORICAL_SYNC_DAYS: int = Field(default=365, ge=1, le=3650, description="QMT历史数据同步天数")
     QMT_HISTORICAL_BATCH_SIZE: int = Field(default=100, ge=1, le=1000, description="QMT历史数据同步批量大小")

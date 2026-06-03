@@ -429,6 +429,7 @@
           <el-radio-group v-model="syncForm.dataSource">
             <el-radio label="tushare" :disabled="!availableSyncSources.tushare">Tushare</el-radio>
             <el-radio label="akshare" :disabled="!availableSyncSources.akshare">AKShare</el-radio>
+            <el-radio label="qmt" :disabled="!availableSyncSources.qmt">QMT</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="历史数据天数" v-if="syncForm.syncTypes.includes('historical')">
@@ -634,11 +635,12 @@ const syncDialogVisible = ref(false)
 const syncLoading = ref(false)
 const availableSyncSources = reactive<Record<ManualSyncDataSource, boolean>>({
   tushare: true,
-  akshare: true
+  akshare: true,
+  qmt: true
 })
 const syncForm = reactive({
   syncTypes: ['realtime'],  // 默认选中实时行情
-  dataSource: 'tushare' as 'tushare' | 'akshare',
+  dataSource: 'tushare' as ManualSyncDataSource,
   days: 365
 })
 
@@ -661,13 +663,16 @@ async function loadPreferredSyncDataSource() {
     const sourceState = await loadManualSyncSourceState()
     availableSyncSources.tushare = sourceState.availableSources.tushare
     availableSyncSources.akshare = sourceState.availableSources.akshare
+    availableSyncSources.qmt = sourceState.availableSources.qmt
 
     if (sourceState.preferredSource) {
       syncForm.dataSource = sourceState.preferredSource
       return
     }
 
-    if (availableSyncSources.akshare) {
+    if (availableSyncSources.qmt) {
+      syncForm.dataSource = 'qmt'
+    } else if (availableSyncSources.akshare) {
       syncForm.dataSource = 'akshare'
     } else if (availableSyncSources.tushare) {
       syncForm.dataSource = 'tushare'

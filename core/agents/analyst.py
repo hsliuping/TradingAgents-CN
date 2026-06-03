@@ -103,6 +103,7 @@ class AnalystAgent(BaseAgent):
             更新后的状态字典，包含分析报告
         """
         logger.info(f"开始执行分析师Agent: {self.agent_id}")
+        self._current_state = state
 
         try:
             # 1. 提取输入参数（兼容多种参数名）
@@ -215,6 +216,8 @@ class AnalystAgent(BaseAgent):
                     "success": False
                 }
             }
+        finally:
+            self._current_state = None
     
     def _fetch_data_with_tools(
         self, 

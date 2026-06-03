@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from functools import partial
 from typing import Dict, Any, List, Optional, Callable
 
+from app.core.config import settings
 from app.core.database import get_mongo_db
 from app.core.data_source_priority import get_enabled_data_sources_async
 from app.services.data_sources.qmt_adapter import QMTAdapter
@@ -608,6 +609,79 @@ class EtfSyncService:
         self.db = None
         self.batch_size = 50
         self.rate_limit_delay = 0.3
+        self.item_timeout_seconds = settings.ETF_SYNC_ITEM_TIMEOUT_SECONDS
+
+    @staticmethod
+    def _find_index_name(index_info: Dict[str, Any], keys: List[tuple[str, int]]) -> Optional[str]:
+        expected_keys = tuple(keys)
+        for index_name, spec in index_info.items():
+            if tuple(spec.get("key", [])) == expected_keys:
+                return index_name
+        return None
+
+    async def _find_duplicate_key_sample(self, collection, keys: List[tuple[str, int]]) -> Optional[Dict[str, Any]]:
+        group_id = {field: f"${field}" for field, _ in keys}
+        duplicates = await collection.aggregate(
+            [
+                {"$group": {"_id": group_id, "count": {"$sum": 1}}},
+                {"$match": {"count": {"$gt": 1}}},
+                {"$limit": 1},
+            ]
+        ).to_list(length=1)
+        return duplicates[0] if duplicates else None
+
+    async def _ensure_unique_index(self, collection, collection_name: str, keys: List[tuple[str, int]]) -> None:
+        index_info = await collection.index_information()
+        index_name = self._find_index_name(index_info, keys)
+
+        if index_name and index_info[index_name].get("unique"):
+            return
+
+        duplicate_sample = await self._find_duplicate_key_sample(collection, keys)
+        if duplicate_sample:
+            logger.warning(
+                f"⚠️ {collection_name} 存在重复数据，暂时无法升级唯一索引: "
+                f"keys={list(duplicate_sample.get('_id', {}).items())}, count={duplicate_sample.get('count')}"
+            )
+            return
+
+        if index_name:
+            await collection.drop_index(index_name)
+            logger.info(
+                f"🧹 已移除 {collection_name} 的旧非唯一索引，准备升级为唯一索引: {index_name}"
+            )
+
+        await collection.create_index(keys, unique=True, background=True)
+        logger.info(f"✅ 已确保 {collection_name} 唯一索引: {keys}")
+
+    async def _ensure_indexes(self):
+        """确保 ETF 基础信息和日线集合具备关键索引。"""
+        try:
+            if self.db is None:
+                self.db = get_mongo_db()
+
+            basic_collection = self.db[ETF_BASIC_INFO_COLLECTION]
+            daily_collection = self.db[ETF_DAILY_QUOTES_COLLECTION]
+
+            logger.info("📊 检查并创建 ETF 集合索引...")
+
+            await self._ensure_unique_index(
+                basic_collection,
+                ETF_BASIC_INFO_COLLECTION,
+                [("code", 1), ("source", 1)],
+            )
+            await basic_collection.create_index([("code", 1)], background=True)
+
+            await self._ensure_unique_index(
+                daily_collection,
+                ETF_DAILY_QUOTES_COLLECTION,
+                [("code", 1), ("trade_date", -1)],
+            )
+            await daily_collection.create_index([("symbol", 1), ("trade_date", -1)], background=True)
+
+            logger.info("✅ ETF 集合索引检查完成")
+        except Exception as e:
+            logger.warning(f"⚠️ ETF 集合索引检查/创建失败（不阻塞主流程）: {e}")
 
     @staticmethod
     def _calculate_stage_progress(stage_start: int, stage_end: int, processed_items: int, total_items: int) -> int:
@@ -756,6 +830,7 @@ class EtfSyncService:
     async def initialize(self):
         """初始化数据库连接"""
         self.db = get_mongo_db()
+        await self._ensure_indexes()
         logger.info("✅ ETF 同步服务初始化完成")
 
     async def _get_source_priority(self) -> List[str]:
@@ -996,30 +1071,122 @@ class EtfSyncService:
                         smart_incremental=smart_incremental,
                     )
 
+                    fetch_started_at = loop.time()
                     if start_date > end_date:
+                        logger.info(
+                            f"🌐 [{source}] 跳过网络抓取: code={code}, name={current_name or '-'}, "
+                            f"reason=同步窗口为空, start_date={start_date}, end_date={end_date}"
+                        )
                         records = []
                     else:
-                        records = await loop.run_in_executor(None, partial(fetch_fn, code, start_date, end_date))
+                        logger.info(
+                            f"🌐 [{source}] 开始抓取 ETF 日线: code={code}, name={current_name or '-'}, "
+                            f"start_date={start_date}, end_date={end_date}"
+                        )
+                        records = await asyncio.wait_for(
+                            loop.run_in_executor(None, partial(fetch_fn, code, start_date, end_date)),
+                            timeout=self.item_timeout_seconds,
+                        )
+                        fetch_elapsed = loop.time() - fetch_started_at
+                        logger.info(
+                            f"🌐 [{source}] 抓取完成: code={code}, records={len(records)}, "
+                            f"elapsed={fetch_elapsed:.2f}s"
+                        )
                     if not records:
                         inserted = 0
+                        logger.info(
+                            f"💾 [{source}] 跳过数据库写入: code={code}, name={current_name or '-'}, records=0"
+                        )
                     else:
-                        inserted = 0
+                        from pymongo import UpdateOne
+
+                        written_count = 0
+                        updated_count = 0
+                        skipped_existing = 0
+                        write_started_at = loop.time()
+                        write_timestamp = datetime.utcnow()
+                        logger.info(
+                            f"💾 [{source}] 开始写入 ETF 日线: code={code}, name={current_name or '-'}, "
+                            f"records={len(records)}, force_update={force_update}"
+                        )
+
+                        existing_trade_dates = set()
+                        existing_query_code = records[0].get("code") or code
+                        record_trade_dates = [rec.get("trade_date") for rec in records if rec.get("trade_date") is not None]
+                        if record_trade_dates:
+                            existing_cursor = collection.find(
+                                {"code": existing_query_code, "trade_date": {"$in": record_trade_dates}},
+                                {"trade_date": 1, "_id": 0},
+                            )
+                            async for existing_doc in existing_cursor:
+                                existing_trade_dates.add(existing_doc.get("trade_date"))
+
+                        known_trade_dates = set(existing_trade_dates)
+                        bulk_operations = []
+                        bulk_batch_size = 200
+
                         for rec in records:
                             rec["data_source"] = source
-                            key = {"symbol": rec["symbol"], "trade_date": rec["trade_date"]}
-                            if not force_update:
-                                existing = await collection.find_one(key)
-                                if existing:
-                                    continue
-                            await collection.update_one(key, {"$set": {**rec, "updated_at": datetime.utcnow()}}, upsert=True)
-                            inserted += 1
+                            record_code = rec.get("code") or rec.get("symbol") or code
+                            rec["code"] = record_code
+                            trade_date = rec.get("trade_date")
+                            key = {"code": record_code, "trade_date": trade_date}
+                            record_exists = trade_date in known_trade_dates
 
-                        stats["records_inserted"] += inserted
+                            if not force_update and record_exists:
+                                skipped_existing += 1
+                                logger.info(
+                                    f"💾 [{source}] 跳过已存在日线: code={record_code}, "
+                                    f"trade_date={trade_date}, action=skip_existing"
+                                )
+                                continue
+
+                            known_trade_dates.add(trade_date)
+                            bulk_operations.append(
+                                UpdateOne(
+                                    key,
+                                    {"$set": {**rec, "updated_at": write_timestamp}},
+                                    upsert=True,
+                                )
+                            )
+
+                            action = "updated" if record_exists else "inserted"
+                            if action == "updated":
+                                updated_count += 1
+                            written_count += 1
+                            logger.info(
+                                f"💾 [{source}] 写入日线记录: code={record_code}, "
+                                f"trade_date={trade_date}, action={action}"
+                            )
+
+                            if len(bulk_operations) >= bulk_batch_size:
+                                await collection.bulk_write(bulk_operations, ordered=False)
+                                bulk_operations = []
+
+                        if bulk_operations:
+                            await collection.bulk_write(bulk_operations, ordered=False)
+
+                        write_elapsed = loop.time() - write_started_at
+                        logger.info(
+                            f"💾 [{source}] 写入完成: code={code}, inserted={written_count}, "
+                            f"updated={updated_count}, skipped_existing={skipped_existing}, elapsed={write_elapsed:.2f}s"
+                        )
+
+                        stats["records_inserted"] += written_count
 
                     stats["success_count"] += 1
 
                     if i % 20 == 0:
                         logger.info(f"📈 [{source}] ETF 日线同步进度: {i}/{len(code_entries)}")
+                except asyncio.TimeoutError:
+                    stats["error_count"] += 1
+                    timeout_message = f"抓取超时（>{self.item_timeout_seconds}s）"
+                    stats["errors"].append({"code": code, "error": timeout_message})
+                    sync_window_desc = timeout_message
+                    logger.warning(
+                        f"⏰ [{source}] ETF 日线抓取超时: code={code}, "
+                        f"timeout={self.item_timeout_seconds}s, start_date={start_date}, end_date={end_date}"
+                    )
                 except Exception as e:
                     stats["error_count"] += 1
                     stats["errors"].append({"code": code, "error": str(e)})
@@ -1107,6 +1274,8 @@ class EtfSyncService:
 
                 # 基础信息同步成功：获取到数据即可（total_processed > 0）
                 if basic_stats.get("total_processed", 0) > 0:
+                    # 一旦当前数据源拿到了 ETF 列表，当前任务就会直接使用该数据源完成日线同步并返回，
+                    # 不会再继续尝试后续数据源；因此日线阶段应覆盖到全任务的完成区间，而不是停留在当前槽位上限。
                     daily_stats = await self._sync_daily_by_source(
                         source,
                         None,
@@ -1114,7 +1283,7 @@ class EtfSyncService:
                         force_update,
                         job_id=job_id,
                         stage_start=daily_start,
-                        stage_end=slot_end,
+                        stage_end=95,
                         smart_incremental=True,
                     )
                     result = self._build_sync_result(basic_stats, daily_stats, source)
@@ -1158,6 +1327,114 @@ class EtfSyncService:
             "success_count": 0,
             "error_count": 1,
             "errors": [{"error": str(last_error)}],
+        }
+
+    async def sync_symbols(
+        self,
+        symbols: List[str],
+        force_update: bool = False,
+        days: int = 30,
+        job_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """按指定 ETF 代码同步基础信息与日线数据。"""
+        if self.db is None:
+            await self.initialize()
+
+        normalized_symbols = sorted(
+            {
+                normalized
+                for normalized in (_normalize_etf_code(symbol) for symbol in (symbols or []))
+                if _is_etf_code(normalized)
+            }
+        )
+
+        if not normalized_symbols:
+            return {
+                "basic_info": {"total_processed": 0, "errors": [{"error": "未提供有效的 ETF 代码"}]},
+                "daily_quotes": {"records_inserted": 0, "total_processed": 0},
+                "data_source_used": None,
+                "total_processed": 0,
+                "success_count": 0,
+                "error_count": 1,
+                "errors": [{"error": "未提供有效的 ETF 代码"}],
+                "requested_symbols": [],
+            }
+
+        priority = await self._get_source_priority()
+        valid_sources = [source for source in priority if source in _FETCH_BASIC]
+        last_error = None
+
+        await self._report_job_progress(
+            job_id,
+            1,
+            "开始同步指定 ETF 数据...",
+            total_items=len(normalized_symbols),
+            processed_items=0,
+        )
+
+        if not valid_sources:
+            return {
+                "basic_info": {"total_processed": 0, "errors": [{"error": "未找到可用的 ETF 数据源"}]},
+                "daily_quotes": {"records_inserted": 0, "total_processed": 0},
+                "data_source_used": None,
+                "total_processed": 0,
+                "success_count": 0,
+                "error_count": 1,
+                "errors": [{"error": "未找到可用的 ETF 数据源"}],
+                "requested_symbols": normalized_symbols,
+            }
+
+        for source in valid_sources:
+            logger.info(f"🔄 [ETF 同步] 尝试指定代码同步，数据源: {source}, 数量: {len(normalized_symbols)}")
+            await self._report_job_progress(
+                job_id,
+                5,
+                f"准备同步指定 ETF 数据（{source.upper()}）",
+                current_item=source.upper(),
+                total_items=len(normalized_symbols),
+                processed_items=0,
+            )
+
+            try:
+                basic_stats = await self._sync_basic_by_source(
+                    source,
+                    force_update,
+                    symbols=normalized_symbols,
+                    job_id=job_id,
+                    stage_start=5,
+                    stage_end=45,
+                )
+
+                if basic_stats.get("total_processed", 0) > 0:
+                    daily_stats = await self._sync_daily_by_source(
+                        source,
+                        normalized_symbols,
+                        days,
+                        force_update,
+                        job_id=job_id,
+                        stage_start=50,
+                        stage_end=95,
+                        smart_incremental=True,
+                    )
+                    result = self._build_sync_result(basic_stats, daily_stats, source)
+                    result["requested_symbols"] = normalized_symbols
+                    return result
+
+                last_error = basic_stats.get("errors", [{"error": "未获取到 ETF 列表"}])
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"⚠️ [ETF 同步] 指定 ETF 同步失败: source={source}, error={e}")
+
+        logger.error(f"❌ [ETF 同步] 指定 ETF 同步失败，最后错误: {last_error}")
+        return {
+            "basic_info": {"total_processed": 0, "errors": [{"error": str(last_error)}]},
+            "daily_quotes": {"records_inserted": 0, "total_processed": 0},
+            "data_source_used": None,
+            "total_processed": 0,
+            "success_count": 0,
+            "error_count": 1,
+            "errors": [{"error": str(last_error)}],
+            "requested_symbols": normalized_symbols,
         }
 
     def _is_fresh(self, updated_at: Any, hours: int = 24) -> bool:

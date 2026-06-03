@@ -146,7 +146,7 @@ class IndexAnalystV2(AnalystAgent):
         category=AgentCategory.ANALYST,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
-        default_tools=["get_index_data", "get_market_breadth"],
+        default_tools=["get_market_analysis"],
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
@@ -171,18 +171,7 @@ class IndexAnalystV2(AnalystAgent):
     output_field = "index_report"
 
     def _get_tool_ids_for_mode(self, mode: str) -> list[str]:
-        if mode == "qmt":
-            return ["get_market_overview_qmt"]
-        return [
-            "get_index_data",
-            "get_market_breadth",
-            "get_market_environment",
-            "identify_market_cycle",
-            "get_north_flow",
-            "get_margin_trading",
-            "get_limit_stats",
-            "get_index_technical",
-        ]
+        return ["get_market_analysis"]
 
     def _prepare_analysis_mode(self, state: Dict[str, Any]) -> str:
         mode = resolve_market_data_mode(state)
@@ -202,7 +191,7 @@ class IndexAnalystV2(AnalystAgent):
 1. 重点分析指数趋势、市场扩散、成交活跃度、风格切换与盘面结构。
 2. 不要要求或假设存在北向资金、两融、涨跌停官方统计、指数估值快照。
 3. 如果缺少官方统计口径，必须明确说明当前结论基于 QMT 行情口径与快照代理指标。
-4. 优先使用 get_market_overview_qmt 获取完整盘面分析数据。
+4. 优先使用 get_market_analysis 获取完整盘面分析数据。
 """
         if prompt_type == "user":
             suffix += "\n5. 报告应突出交易盘面视角，不要将 QMT 代理指标表述成 Tushare 官方统计。\n"
@@ -485,7 +474,7 @@ class IndexAnalystV2(AnalystAgent):
     **数据源模式**: QMT
 
     **重要提示**：调用工具时，必须使用以下参数：
-    - get_market_overview_qmt: trade_date='{analysis_date}', lookback_days=60
+    - get_market_analysis: trade_date='{analysis_date}', lookback_days=60
 
     **必须使用上述参数值**，不要编造北向资金、两融、涨跌停官方统计或指数估值数据。
 
@@ -504,15 +493,7 @@ class IndexAnalystV2(AnalystAgent):
     **分析日期**: {analysis_date}
 
     **重要提示**：调用工具时，必须使用以下参数：
-    - get_china_market_overview: curr_date='{analysis_date}'
-    - get_index_data: trade_date='{analysis_date}', lookback_days=60
-    - get_market_breadth: trade_date='{analysis_date}'
-    - get_north_flow: trade_date='{analysis_date}', lookback_days=10
-    - get_margin_trading: trade_date='{analysis_date}', lookback_days=10
-    - get_limit_stats: trade_date='{analysis_date}'
-    - get_index_technical: trade_date='{analysis_date}', lookback_days=60
-    - get_market_environment: trade_date='{analysis_date}'
-    - identify_market_cycle: trade_date='{analysis_date}'
+    - get_market_analysis: trade_date='{analysis_date}', lookback_days=60
 
     **必须使用上述参数值**，不要使用其他日期。
 
@@ -533,14 +514,7 @@ class IndexAnalystV2(AnalystAgent):
 
         # 根据工具名称给出调用建议
         tool_hints = {
-            "get_index_data": "获取指数走势和均线数据",
-            "get_market_breadth": "获取市场宽度（成交量、涨跌家数）",
-            "get_market_environment": "获取市场环境（估值、波动率）",
-            "identify_market_cycle": "识别当前市场周期阶段",
-            "get_north_flow": "获取北向资金流向（仅A股）",
-            "get_margin_trading": "获取两融余额数据（仅A股）",
-            "get_limit_stats": "获取涨跌停统计（仅A股）",
-            "get_index_technical": "获取技术指标（MACD/RSI/KDJ）",
+            "get_market_analysis": "按当前数据源自动获取完整大盘分析数据",
         }
 
         for tool_name in self.tool_names:

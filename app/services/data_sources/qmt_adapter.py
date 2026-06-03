@@ -11,6 +11,7 @@ QMT (迅投 MiniQMT) 数据源适配器
 from typing import Optional, Dict, List, Any, Tuple
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 import pandas as pd
 
@@ -152,6 +153,47 @@ class QMTAdapter(DataSourceAdapter):
         except ValueError:
             return None
 
+    def _has_existing_connection(self, xt: Any) -> bool:
+        """优先复用已启动的 MiniQMT 连接，避免默认配置误触发独立初始化。"""
+        if xt is None:
+            return False
+        try:
+            ticks = xt.get_full_tick([])
+            if ticks is not None:
+                self._available = True
+                return True
+            # get_full_tick([]) 可能返回空 dict，也视为可用
+            self._available = True
+            return True
+        except Exception:
+            return False
+
+    def _should_initialize_connection(
+        self,
+        token: str,
+        optimize_addresses: List[str],
+        mirror_markets: List[str],
+        mirror_enabled: bool,
+        start_local_service: bool,
+        listen_port: Any,
+    ) -> bool:
+        """仅在显式独立连接场景下执行 xtdatacenter 主动初始化。"""
+        try:
+            parsed_port = int(listen_port or 0)
+        except (TypeError, ValueError):
+            parsed_port = 0
+
+        return any(
+            [
+                bool(token),
+                bool(optimize_addresses),
+                bool(mirror_markets),
+                bool(mirror_enabled),
+                bool(start_local_service),
+                parsed_port > 0,
+            ]
+        )
+
     def _bootstrap_connection(self) -> None:
         if self._bootstrapped:
             return
@@ -173,19 +215,23 @@ class QMTAdapter(DataSourceAdapter):
         listen_port = self._get_runtime_setting("QMT_LISTEN_PORT", 0)
         listen_port_range = self._parse_port_range(self._get_runtime_setting("QMT_LISTEN_PORT_RANGE", "58620-58650"))
 
-        should_initialize = any(
-            [
-                data_dir,
-                token,
-                init_markets,
-                optimize_addresses,
-                mirror_markets,
-                mirror_enabled,
-                listen_port,
-                listen_port_range,
-            ]
+        if self._has_existing_connection(xt):
+            logger.info("QMT: 检测到现有 MiniQMT 连接，跳过主动初始化")
+            return
+
+        should_initialize = self._should_initialize_connection(
+            token=token,
+            optimize_addresses=optimize_addresses,
+            mirror_markets=mirror_markets,
+            mirror_enabled=mirror_enabled,
+            start_local_service=start_local_service,
+            listen_port=listen_port,
         )
         if not should_initialize:
+            logger.info(
+                "QMT: 未检测到现有 MiniQMT 连接，且当前为默认 MiniQMT 模式，"
+                "跳过 xtdatacenter 主动初始化，请先启动并保持 MiniQMT 客户端运行"
+            )
             return
 
         try:
@@ -231,19 +277,21 @@ class QMTAdapter(DataSourceAdapter):
         if self._sector_data_prepared:
             return
 
-        if not self._parse_bool(self._get_runtime_setting("QMT_AUTO_DOWNLOAD_SECTOR", True)):
-            self._sector_data_prepared = True
-            return
+        # 默认不自动下载板块数据，避免 xt.download_sector_data / download_history_data2 卡死
+        if self._parse_bool(self._get_runtime_setting("QMT_AUTO_DOWNLOAD_SECTOR", False)):
+            xt = _get_xtdata()
+            if xt is None:
+                self._sector_data_prepared = True
+                return
 
-        xt = _get_xtdata()
-        if xt is None:
-            return
-
-        try:
-            xt.download_sector_data()
-        except Exception as e:
-            logger.debug(f"QMT: 下载板块数据失败，将继续尝试读取本地缓存: {e}")
-        finally:
+            try:
+                logger.info("QMT: 正在下载板块数据（默认关闭）")
+                xt.download_sector_data()
+            except Exception as e:
+                logger.debug(f"QMT: 下载板块数据失败，将继续尝试读取本地缓存: {e}")
+            finally:
+                self._sector_data_prepared = True
+        else:
             self._sector_data_prepared = True
 
     def _download_history_if_needed(self, xt_code: str, xt_period: str) -> None:
@@ -289,17 +337,11 @@ class QMTAdapter(DataSourceAdapter):
         xt = _get_xtdata()
         if xt is None:
             return False
-        try:
-            # 尝试简单调用以检测 MiniQMT 是否已连接
-            ticks = xt.get_full_tick([])
-            if ticks is not None:
-                self._available = True
-                return True
-            # get_full_tick([]) 可能返回空 dict，也算可用
+        if self._has_existing_connection(xt):
             return True
-        except Exception as e:
-            logger.debug(f"QMT 不可用: {e}")
-            return False
+
+        logger.debug("QMT 不可用: 未检测到可复用的 MiniQMT 连接")
+        return False
 
     def get_stock_list(self) -> Optional[pd.DataFrame]:
         """获取股票列表（通过沪深成分股组合）"""
@@ -309,8 +351,10 @@ class QMTAdapter(DataSourceAdapter):
         if xt is None:
             return None
         try:
-            self._prepare_sector_data()
-            # 沪深 A 股：通过板块获取
+            start_time = time.perf_counter()
+
+            # 沪深 A 股：通过板块获取（不等待板块数据下载）
+            sector_query_start = time.perf_counter()
             sh_stocks = xt.get_stock_list_in_sector("沪深A股", 0) or []
             if not sh_stocks:
                 sh_stocks = xt.get_stock_list_in_sector("沪市A股", 0) or []
@@ -318,23 +362,53 @@ class QMTAdapter(DataSourceAdapter):
                 stocks = list(sh_stocks) + list(sz_stocks)
             else:
                 stocks = list(sh_stocks)
+            sector_query_elapsed = time.perf_counter() - sector_query_start
 
             if not stocks:
                 logger.warning("QMT: 未获取到股票列表")
                 return None
 
+            max_count_raw = self._get_runtime_setting("QMT_STOCK_LIST_MAX_COUNT", 10000)
+            detail_limit_raw = self._get_runtime_setting("QMT_STOCK_LIST_DETAIL_LIMIT", 300)
+            detail_budget_raw = self._get_runtime_setting("QMT_STOCK_LIST_DETAIL_TIMEOUT_SECONDS", 5)
+            try:
+                max_count = max(1, int(str(max_count_raw)))
+            except (TypeError, ValueError):
+                max_count = 10000
+            try:
+                detail_lookup_limit = max(0, int(str(detail_limit_raw)))
+            except (TypeError, ValueError):
+                detail_lookup_limit = 300
+            try:
+                detail_time_budget = max(0.0, float(str(detail_budget_raw)))
+            except (TypeError, ValueError):
+                detail_time_budget = 5.0
+
             rows = []
-            for xt_code in stocks[:10000]:  # 限制数量
+            detail_lookup_count = 0
+            detail_lookup_start = time.perf_counter()
+            detail_budget_exhausted = False
+
+            for xt_code in stocks[:max_count]:
                 code6 = _code_to_6digit(xt_code)
                 if len(code6) != 6:
                     continue
+
+                use_detail_lookup = (
+                    detail_lookup_count < detail_lookup_limit
+                    and (time.perf_counter() - detail_lookup_start) < detail_time_budget
+                )
                 try:
-                    detail = xt.get_instrument_detail(xt_code)
                     name = ""
-                    if detail and isinstance(detail, dict):
-                        name = detail.get("InstrumentName", "") or detail.get("name", "")
-                    elif detail and hasattr(detail, "InstrumentName"):
-                        name = getattr(detail, "InstrumentName", "")
+                    if use_detail_lookup:
+                        detail = xt.get_instrument_detail(xt_code)
+                        detail_lookup_count += 1
+                        if detail and isinstance(detail, dict):
+                            name = detail.get("InstrumentName", "") or detail.get("name", "")
+                        elif detail and hasattr(detail, "InstrumentName"):
+                            name = getattr(detail, "InstrumentName", "")
+                    else:
+                        detail_budget_exhausted = True
                     rows.append({
                         "symbol": code6,
                         "ts_code": xt_code,
@@ -349,7 +423,17 @@ class QMTAdapter(DataSourceAdapter):
 
             if rows:
                 df = pd.DataFrame(rows)
-                logger.info(f"QMT: 获取到 {len(df)} 只股票")
+                total_elapsed = time.perf_counter() - start_time
+                logger.info(
+                    "QMT: 获取到 %s 只股票，板块查询 %.2fs，详情补充 %s/%s，详情预算 %.2fs，耗时 %.2fs%s",
+                    len(df),
+                    sector_query_elapsed,
+                    detail_lookup_count,
+                    min(len(stocks), max_count),
+                    detail_time_budget,
+                    total_elapsed,
+                    "（已提前停止详情补充）" if detail_budget_exhausted else "",
+                )
                 return df
             return None
         except Exception as e:
@@ -365,7 +449,6 @@ class QMTAdapter(DataSourceAdapter):
             return None
 
         try:
-            self._prepare_sector_data()
             sector_candidates = [
                 "沪深ETF",
                 "ETF",
