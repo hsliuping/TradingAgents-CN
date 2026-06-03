@@ -99,7 +99,7 @@ def get_market_overview_qmt_sync(trade_date: str, lookback_days: int = 60) -> st
         f"- 请求日期: {normalized_trade_date}",
         f"- QMT 最近交易日: {latest_trade_date_display}",
         "- 分析口径: 基于 QMT 指数行情、全市场快照与成交活跃度代理指标",
-        "- 缺失口径: 北向资金、两融、涨跌停官方统计、指数估值快照",
+        "- 缺失口径: 北向资金、两融、指数估值快照",
         "",
         "## 主要指数趋势",
     ]
@@ -161,6 +161,36 @@ def get_market_overview_qmt_sync(trade_date: str, lookback_days: int = 60) -> st
         ])
     else:
         report_lines.append("- 当前无法从 QMT 获取有效全市场快照，市场扩散度代理指标缺失")
+
+    report_lines.append("")
+    report_lines.append("## 涨跌停统计（QMT 快照代理）")
+    limit_stats = adapter.get_limit_stats(trade_date=normalized_trade_date)
+    if limit_stats:
+        source_tag = "实时快照" if limit_stats.get("source") == "realtime" else "历史日线回算"
+        report_lines.extend([
+            f"- 涨停: {limit_stats['up_limit']} 家",
+            f"- 跌停: {limit_stats['down_limit']} 家",
+            f"- 数据来源: {source_tag}",
+        ])
+        if limit_stats["up_limit_stocks"]:
+            names = ", ".join(f"{n}({c})" for c, n, _ in limit_stats["up_limit_stocks"][:10])
+            report_lines.append(f"- 涨停股（前10）: {names}")
+        if limit_stats["down_limit_stocks"]:
+            names = ", ".join(f"{n}({c})" for c, n, _ in limit_stats["down_limit_stocks"][:10])
+            report_lines.append(f"- 跌停股（前10）: {names}")
+    else:
+        report_lines.append("- 暂无涨跌停统计数据")
+
+    report_lines.append("")
+    report_lines.append("## 成交额排名（QMT 快照代理）")
+    amount_ranking = adapter.get_amount_ranking(10, trade_date=normalized_trade_date)
+    if amount_ranking:
+        for i, row in enumerate(amount_ranking, 1):
+            amt_yi = row["amount"] / 100000000 if row["amount"] else 0
+            pct_str = f"{row['pct_chg']:+.2f}%" if row["pct_chg"] is not None else "-"
+            report_lines.append(f"  {i:2d}. {row['name']}({row['code']}): {amt_yi:.2f} 亿 | {pct_str}")
+    else:
+        report_lines.append("- 暂无成交额排名数据")
 
     report_lines.append("")
     report_lines.append("## 风格与结构判断")
@@ -312,3 +342,76 @@ def get_sector_analysis_qmt_sync(ticker: str, trade_date: str, lookback_days: in
     report_lines.append("- 该分析适合判断行业内部强弱分层、龙头带动和扩散程度。")
     report_lines.append("- 该分析不等价于同花顺板块资金流统计，不能直接替代 Tushare 的板块资金工具。")
     return "\n".join(report_lines)
+
+
+# ==================== 涨跌停统计（QMT 降级） ====================
+
+def get_limit_stats_qmt_sync(trade_date: str) -> str:
+    """QMT 降级：统计涨跌停和涨跌家数（盘中用实时快照，盘后用历史日线）。"""
+    adapter = _get_qmt_adapter()
+    if adapter is None:
+        return "❌ QMT 不可用，无法获取涨跌停统计。"
+
+    stats = adapter.get_limit_stats(trade_date=trade_date)
+    if stats is None:
+        return "⚠️ QMT 未返回涨跌停统计数据。"
+
+    source_tag = "实时快照" if stats.get("source") == "realtime" else "历史日线回算"
+    lines = [
+        f"📊 涨跌停与涨跌家数统计（基于 QMT {source_tag}，Tushare 不可用时的降级数据）",
+        "",
+        f"- 涨停: {stats['up_limit']} 家",
+        f"- 跌停: {stats['down_limit']} 家",
+        f"- 上涨: {stats['rising']} 家",
+        f"- 下跌: {stats['falling']} 家",
+        f"- 平盘: {stats['flat']} 家",
+        f"- 合计: {stats['total']} 家",
+        "",
+    ]
+
+    if stats["up_limit_stocks"]:
+        lines.append("## 涨停股（前20）")
+        for code, name, pct in stats["up_limit_stocks"]:
+            lines.append(f"- {name}({code}): {pct:+.2f}%")
+        lines.append("")
+
+    if stats["down_limit_stocks"]:
+        lines.append("## 跌停股（前20）")
+        for code, name, pct in stats["down_limit_stocks"]:
+            lines.append(f"- {name}({code}): {pct:+.2f}%")
+        lines.append("")
+
+    lines.append("## 口径说明")
+    lines.append("- 涨跌停判断基于 QMT 行情数据，盘中用实时快照涨跌停价，盘后用历史日线回算，非交易所官方统计。")
+    lines.append("- 科创板/创业板涨跌幅阈值 20%，北交所 30%，主板 10%。")
+
+    return "\n".join(lines)
+
+
+# ==================== 成交额排名（QMT 降级） ====================
+
+def get_amount_ranking_qmt_sync(top_n: int = 20, trade_date: Optional[str] = None) -> str:
+    """QMT 降级：成交额排名（盘中用实时快照，盘后用历史日线）。"""
+    adapter = _get_qmt_adapter()
+    if adapter is None:
+        return "❌ QMT 不可用，无法获取成交额排名。"
+
+    ranking = adapter.get_amount_ranking(top_n, trade_date=trade_date)
+    if ranking is None:
+        return "⚠️ QMT 未返回成交额排名数据。"
+
+    lines = [
+        "📊 成交额排名（基于 QMT 行情数据，Tushare 不可用时的降级数据）",
+        "",
+    ]
+
+    for i, row in enumerate(ranking, 1):
+        amt_yi = row["amount"] / 100000000 if row["amount"] else 0
+        pct_str = f"{row['pct_chg']:+.2f}%" if row["pct_chg"] is not None else "-"
+        lines.append(f"{i:2d}. {row['name']}({row['code']}): 成交额 {amt_yi:.2f} 亿 | 涨跌 {pct_str}")
+
+    lines.append("")
+    lines.append("## 口径说明")
+    lines.append("- 成交额基于 QMT 行情数据，盘中为实时快照，盘后为历史日线。")
+
+    return "\n".join(lines)

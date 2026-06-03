@@ -23,6 +23,32 @@ def _resolve_sector_analysis_source() -> str:
     return "tushare"
 
 
+def _is_tushare_available() -> bool:
+    """检查 Tushare 数据源是否可用。"""
+    try:
+        from app.services.data_sources.tushare_adapter import TushareAdapter
+        return TushareAdapter().is_available()
+    except Exception:
+        return False
+
+
+def _is_qmt_available() -> bool:
+    """检查 QMT 数据源是否可用。"""
+    try:
+        from app.services.data_sources.qmt_adapter import QMTAdapter
+        return QMTAdapter().is_available()
+    except Exception:
+        return False
+
+
+def _tushare_unavailable_msg(dimensions: str) -> str:
+    """Tushare 不可用且 QMT 无法替代时的统一提示。"""
+    return (
+        f"⚠️ 当前 Tushare 数据源不可用，{dimensions}数据仅 Tushare 提供，QMT 不支持此维度。"
+        f"请优先参考 get_sector_analysis 工具返回的 QMT 行业分析数据。"
+    )
+
+
 @tool
 @register_tool(
     tool_id="get_sector_data",
@@ -39,14 +65,14 @@ def get_sector_data(
 ) -> str:
     """
     获取股票所属板块的表现数据
-    
+
     分析股票所属行业板块的近期表现，包括涨跌幅、资金流向、板块排名等。
-    
+
     Args:
         ticker: 股票代码（如 000001 或 000001.SZ）
         trade_date: 交易日期（格式：YYYY-MM-DD）
         lookback_days: 回看天数（默认20天）
-    
+
     Returns:
         str: 板块表现分析报告
     """
@@ -55,6 +81,15 @@ def get_sector_data(
         return get_sector_performance_sync(ticker, trade_date, lookback_days)
     except Exception as e:
         logger.error(f"获取板块数据失败: {e}")
+        # Tushare 失败时尝试 QMT 降级
+        if _is_qmt_available():
+            logger.info("Tushare 获取板块数据失败，尝试 QMT 降级")
+            try:
+                from core.tools.qmt_market_tools import get_sector_analysis_qmt_sync
+                report = get_sector_analysis_qmt_sync(ticker, trade_date, lookback_days)
+                return f"📊 以下数据基于 QMT 行情口径（Tushare 不可用时的降级数据）\n\n{report}"
+            except Exception as qmt_e:
+                return f"❌ 获取板块数据失败: Tushare={e}, QMT降级={qmt_e}"
         return f"❌ 获取板块数据失败: {e}"
 
 
@@ -91,6 +126,8 @@ def get_fund_flow_data(
         return get_sector_rotation_sync(trade_date, top_n, lookback_days)
     except Exception as e:
         logger.error(f"获取资金流向失败: {e}")
+        if not _is_tushare_available():
+            return _tushare_unavailable_msg("板块资金流向")
         return f"❌ 获取资金流向失败: {e}"
 
 
@@ -110,14 +147,14 @@ def get_peer_comparison(
 ) -> str:
     """
     获取同行业股票对比数据
-    
+
     分析目标股票在同行业中的表现排名，包括涨跌幅、市值、估值等维度的对比。
-    
+
     Args:
         ticker: 股票代码（如 000001 或 000001.SZ）
         trade_date: 交易日期（格式：YYYY-MM-DD）
         top_n: 返回前N个同业股票（默认10）
-    
+
     Returns:
         str: 同业对比分析报告
     """
@@ -126,6 +163,15 @@ def get_peer_comparison(
         return get_peer_comparison_sync(ticker, trade_date, top_n)
     except Exception as e:
         logger.error(f"获取同业对比失败: {e}")
+        # Tushare 失败时尝试 QMT 降级
+        if _is_qmt_available():
+            logger.info("Tushare 获取同业对比失败，尝试 QMT 降级")
+            try:
+                from core.tools.qmt_market_tools import get_sector_analysis_qmt_sync
+                report = get_sector_analysis_qmt_sync(ticker, trade_date, 20, top_n)
+                return f"📊 以下数据基于 QMT 行情口径（Tushare 不可用时的降级数据）\n\n{report}"
+            except Exception as qmt_e:
+                return f"❌ 获取同业对比失败: Tushare={e}, QMT降级={qmt_e}"
         return f"❌ 获取同业对比失败: {e}"
 
 
@@ -144,13 +190,13 @@ def analyze_sector(
 ) -> str:
     """
     综合板块分析
-    
+
     整合板块表现、资金流向、同业对比等多维度数据，给出综合板块分析报告。
-    
+
     Args:
         ticker: 股票代码（如 000001 或 000001.SZ）
         trade_date: 交易日期（格式：YYYY-MM-DD）
-    
+
     Returns:
         str: 综合板块分析报告
     """
@@ -159,6 +205,15 @@ def analyze_sector(
         return analyze_sector_sync(ticker, trade_date)
     except Exception as e:
         logger.error(f"综合板块分析失败: {e}")
+        # Tushare 失败时尝试 QMT 降级
+        if _is_qmt_available():
+            logger.info("Tushare 综合板块分析失败，尝试 QMT 降级")
+            try:
+                from core.tools.qmt_market_tools import get_sector_analysis_qmt_sync
+                report = get_sector_analysis_qmt_sync(ticker, trade_date, 20, 10)
+                return f"📊 以下数据基于 QMT 行情口径（Tushare 不可用时的降级数据）\n\n{report}"
+            except Exception as qmt_e:
+                return f"❌ 综合板块分析失败: Tushare={e}, QMT降级={qmt_e}"
         return f"❌ 综合板块分析失败: {e}"
 
 
@@ -186,13 +241,21 @@ def get_sector_analysis(
             return get_sector_analysis_qmt_sync(ticker, trade_date, lookback_days, top_n)
         except Exception as e:
             logger.error(f"QMT 行业分析失败: {e}")
+            # QMT 失败时尝试 Tushare
+            if _is_tushare_available():
+                logger.info("QMT 行业分析失败，尝试 Tushare 降级")
+                try:
+                    from core.tools.sector_tools import analyze_sector_sync
+                    return analyze_sector_sync(ticker, trade_date)
+                except Exception as ts_e:
+                    return f"❌ 行业分析失败: QMT={e}, Tushare={ts_e}"
             return f"❌ QMT 行业分析失败: {e}"
 
     sections = []
     tool_calls = [
-        ("板块表现", lambda: get_sector_data(ticker, trade_date, lookback_days)),
-        ("板块资金流向", lambda: get_fund_flow_data(trade_date, top_n, 1)),
-        ("同业对比", lambda: get_peer_comparison(ticker, trade_date, top_n)),
+        ("板块表现", lambda: get_sector_data.invoke({"ticker": ticker, "trade_date": trade_date, "lookback_days": lookback_days})),
+        ("板块资金流向", lambda: get_fund_flow_data.invoke({"trade_date": trade_date, "top_n": top_n, "lookback_days": 1})),
+        ("同业对比", lambda: get_peer_comparison.invoke({"ticker": ticker, "trade_date": trade_date, "top_n": top_n})),
     ]
 
     for title, producer in tool_calls:
@@ -241,6 +304,8 @@ def search_sector_tool(
         return search_sector_sync(keyword, sector_type)
     except Exception as e:
         logger.error(f"板块搜索失败: {e}")
+        if not _is_tushare_available():
+            return _tushare_unavailable_msg("板块搜索（同花顺板块列表）")
         return f"❌ 板块搜索失败: {e}"
 
 
@@ -275,6 +340,8 @@ def get_sector_daily_tool(
         return get_sector_daily_sync(sector_name, trade_date, lookback_days)
     except Exception as e:
         logger.error(f"板块行情获取失败: {e}")
+        if not _is_tushare_available():
+            return _tushare_unavailable_msg("板块行情（同花顺板块指数日线）")
         return f"❌ 板块行情获取失败: {e}"
 
 
@@ -309,6 +376,8 @@ def get_sector_constituents_tool(
         return get_sector_constituents_sync(sector_name, trade_date, top_n)
     except Exception as e:
         logger.error(f"板块成分股获取失败: {e}")
+        if not _is_tushare_available():
+            return _tushare_unavailable_msg("板块成分股（同花顺板块成分列表）")
         return f"❌ 板块成分股获取失败: {e}"
 
 
@@ -341,5 +410,6 @@ def analyze_sector_by_name_tool(
         return analyze_sector_by_name_sync(sector_name, trade_date)
     except Exception as e:
         logger.error(f"板块综合分析失败: {e}")
+        if not _is_tushare_available():
+            return _tushare_unavailable_msg("板块综合分析（同花顺板块体系）")
         return f"❌ 板块综合分析失败: {e}"
-

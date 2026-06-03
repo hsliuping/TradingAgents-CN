@@ -23,6 +23,160 @@ def _resolve_market_analysis_source() -> str:
     return "tushare"
 
 
+def _is_tushare_available() -> bool:
+    """检查 Tushare 数据源是否可用。"""
+    try:
+        from app.services.data_sources.tushare_adapter import TushareAdapter
+        return TushareAdapter().is_available()
+    except Exception:
+        return False
+
+
+def _is_qmt_available() -> bool:
+    """检查 QMT 数据源是否可用。"""
+    try:
+        from app.services.data_sources.qmt_adapter import QMTAdapter
+        return QMTAdapter().is_available()
+    except Exception:
+        return False
+
+
+def _qmt_fallback_index_trend(trade_date: str, lookback_days: int = 60) -> str:
+    """QMT 降级：获取主要指数趋势数据。"""
+    try:
+        from core.tools.qmt_market_tools import get_market_overview_qmt_sync
+        report = get_market_overview_qmt_sync(trade_date, lookback_days)
+        # 从完整报告中提取指数趋势部分
+        lines = report.split("\n")
+        result_lines = ["📊 以下数据基于 QMT 行情口径（Tushare 不可用时的降级数据）", ""]
+        capture = False
+        for line in lines:
+            if "主要指数趋势" in line:
+                capture = True
+            if capture:
+                result_lines.append(line)
+                if line.strip().startswith("##") and "主要指数趋势" not in line:
+                    break
+        captured = "\n".join(result_lines)
+        return captured if len(captured) > 50 else report
+    except Exception as e:
+        return f"⚠️ Tushare 不可用，QMT 降级获取指数数据也失败: {e}"
+
+
+def _qmt_fallback_market_breadth(trade_date: str) -> str:
+    """QMT 降级：通过全市场快照代理涨跌家数。"""
+    try:
+        from core.tools.qmt_market_tools import get_market_overview_qmt_sync
+        report = get_market_overview_qmt_sync(trade_date, 5)
+        lines = report.split("\n")
+        result_lines = ["📊 以下数据基于 QMT 快照代理指标（Tushare 不可用时的降级数据）", ""]
+        capture = False
+        for line in lines:
+            if "市场快照代理" in line:
+                capture = True
+            if capture:
+                result_lines.append(line)
+                if line.strip().startswith("##") and "市场快照代理" not in line:
+                    break
+        captured = "\n".join(result_lines)
+        return captured if len(captured) > 50 else report
+    except Exception as e:
+        return f"⚠️ Tushare 不可用，QMT 降级获取市场宽度也失败: {e}"
+
+
+def _qmt_fallback_technical(trade_date: str, lookback_days: int = 60) -> str:
+    """QMT 降级：通过指数K线计算技术指标。"""
+    try:
+        from app.services.data_sources.qmt_adapter import QMTAdapter
+        from statistics import median as _median
+
+        adapter = QMTAdapter()
+        if not adapter.is_available():
+            return "⚠️ Tushare 不可用，QMT 也不可用，无法获取技术指标数据。"
+
+        index_codes = {
+            "000001.SH": "上证指数",
+            "399006.SZ": "创业板指",
+            "000300.SH": "沪深300",
+        }
+
+        result_lines = [
+            "📊 指数技术指标（基于 QMT K线计算，Tushare 不可用时的降级数据）",
+            "",
+        ]
+
+        for code, name in index_codes.items():
+            items = adapter.get_kline(code, period="day", limit=max(lookback_days, 60) + 5)
+            if not items:
+                result_lines.append(f"- {name}: 暂无数据")
+                continue
+
+            closes = []
+            for item in items:
+                c = item.get("close")
+                if c is not None:
+                    try:
+                        closes.append(float(c))
+                    except (TypeError, ValueError):
+                        pass
+
+            if len(closes) < 20:
+                result_lines.append(f"- {name}: 数据不足")
+                continue
+
+            # 计算 MA
+            ma5 = sum(closes[-5:]) / 5 if len(closes) >= 5 else None
+            ma10 = sum(closes[-10:]) / 10 if len(closes) >= 10 else None
+            ma20 = sum(closes[-20:]) / 20 if len(closes) >= 20 else None
+            ma60 = sum(closes[-60:]) / 60 if len(closes) >= 60 else None
+
+            # 计算 RSI(14)
+            rsi = None
+            if len(closes) >= 15:
+                gains, losses = [], []
+                for i in range(-14, 0):
+                    diff = closes[i] - closes[i - 1]
+                    gains.append(max(diff, 0))
+                    losses.append(max(-diff, 0))
+                avg_gain = sum(gains) / 14
+                avg_loss = sum(losses) / 14
+                if avg_loss > 0:
+                    rs = avg_gain / avg_loss
+                    rsi = 100 - (100 / (1 + rs))
+                else:
+                    rsi = 100
+
+            # 趋势判断
+            latest = closes[-1]
+            trend = "数据不足"
+            if ma5 and ma10 and ma20 and ma60:
+                if latest > ma5 > ma20 > ma60:
+                    trend = "多头排列"
+                elif latest < ma5 < ma20 < ma60:
+                    trend = "空头排列"
+                else:
+                    trend = "震荡整理"
+
+            ma60_str = f"{ma60:.2f}" if ma60 else "-"
+            rsi_str = f"{rsi:.1f}" if rsi else "-"
+            result_lines.append(
+                f"- {name}: 最新 {latest:.2f} | MA5={ma5:.2f} MA20={ma20:.2f} MA60={ma60_str} | "
+                f"RSI(14)={rsi_str} | {trend}"
+            )
+
+        return "\n".join(result_lines)
+    except Exception as e:
+        return f"⚠️ Tushare 不可用，QMT 降级获取技术指标也失败: {e}"
+
+
+def _tushare_unavailable_msg(dimensions: str) -> str:
+    """Tushare 不可用且 QMT 无法替代时的统一提示。"""
+    return (
+        f"⚠️ 当前 Tushare 数据源不可用，{dimensions}数据仅 Tushare 提供，QMT 不支持此维度。"
+        f"请优先参考 get_market_analysis 工具返回的 QMT 大盘分析数据。"
+    )
+
+
 @tool
 @register_tool(
     tool_id="get_index_data",
@@ -38,14 +192,14 @@ def get_index_data(
 ) -> str:
     """
     获取主要指数数据和走势分析
-    
+
     分析上证指数、深证成指、创业板指、沪深300、中证500等主要指数的走势，
     包括今日涨跌、5日/20日涨跌幅、均线位置和趋势判断。
-    
+
     Args:
         trade_date: 交易日期（格式：YYYY-MM-DD）
         lookback_days: 回看天数，用于计算均线和趋势（默认60天）
-    
+
     Returns:
         str: 指数走势分析报告
     """
@@ -54,6 +208,10 @@ def get_index_data(
         return get_index_trend_sync(trade_date, lookback_days)
     except Exception as e:
         logger.error(f"获取指数数据失败: {e}")
+        # Tushare 失败时尝试 QMT 降级
+        if _is_qmt_available():
+            logger.info("Tushare 获取指数数据失败，尝试 QMT 降级")
+            return _qmt_fallback_index_trend(trade_date, lookback_days)
         return f"❌ 获取指数数据失败: {e}"
 
 
@@ -71,12 +229,12 @@ def get_market_breadth(
 ) -> str:
     """
     分析市场宽度
-    
+
     统计涨跌家数、涨停跌停数量、成交量分布等，评估市场整体参与度和情绪。
-    
+
     Args:
         trade_date: 交易日期（格式：YYYY-MM-DD）
-    
+
     Returns:
         str: 市场宽度分析报告
     """
@@ -85,6 +243,10 @@ def get_market_breadth(
         return get_market_breadth_sync(trade_date)
     except Exception as e:
         logger.error(f"获取市场宽度失败: {e}")
+        # Tushare 失败时尝试 QMT 降级
+        if _is_qmt_available():
+            logger.info("Tushare 获取市场宽度失败，尝试 QMT 降级")
+            return _qmt_fallback_market_breadth(trade_date)
         return f"❌ 获取市场宽度失败: {e}"
 
 
@@ -102,12 +264,12 @@ def get_market_environment(
 ) -> str:
     """
     综合评估市场环境
-    
+
     整合波动、换手和市场规模等多维度数据，给出市场环境综合评估。
-    
+
     Args:
         trade_date: 交易日期（格式：YYYY-MM-DD）
-    
+
     Returns:
         str: 市场环境综合评估报告
     """
@@ -116,6 +278,15 @@ def get_market_environment(
         return get_market_environment_sync(trade_date)
     except Exception as e:
         logger.error(f"获取市场环境失败: {e}")
+        # Tushare 失败时尝试 QMT 降级（返回 QMT 大盘概览作为替代）
+        if _is_qmt_available():
+            logger.info("Tushare 获取市场环境失败，尝试 QMT 降级")
+            try:
+                from core.tools.qmt_market_tools import get_market_overview_qmt_sync
+                report = get_market_overview_qmt_sync(trade_date, 60)
+                return f"📊 以下数据基于 QMT 行情口径（Tushare 不可用时的降级数据）\n\n{report}"
+            except Exception as qmt_e:
+                return f"❌ 获取市场环境失败: Tushare={e}, QMT降级={qmt_e}"
         return f"❌ 获取市场环境失败: {e}"
 
 
@@ -147,6 +318,19 @@ def identify_market_cycle(
         return identify_market_cycle_sync(trade_date)
     except Exception as e:
         logger.error(f"识别市场周期失败: {e}")
+        # Tushare 失败时尝试 QMT 降级（基于指数趋势判断周期）
+        if _is_qmt_available():
+            logger.info("Tushare 识别市场周期失败，尝试 QMT 降级")
+            try:
+                from core.tools.qmt_market_tools import get_market_overview_qmt_sync
+                report = get_market_overview_qmt_sync(trade_date, 60)
+                return (
+                    "📊 市场周期识别（基于 QMT 指数趋势代理，Tushare 不可用时的降级分析）\n\n"
+                    "⚠️ 注意：此降级分析仅基于指数趋势和均线排列，不如 Tushare 版本全面。\n\n"
+                    f"{report}"
+                )
+            except Exception as qmt_e:
+                return f"❌ 识别市场周期失败: Tushare={e}, QMT降级={qmt_e}"
         return f"❌ 识别市场周期失败: {e}"
 
 
@@ -184,6 +368,15 @@ def get_market_overview(
         return get_market_environment_sync(trade_date)
     except Exception as e:
         logger.error(f"获取市场概览失败: {e}")
+        # Tushare 失败时尝试 QMT 降级
+        if _is_qmt_available():
+            logger.info("Tushare 获取市场概览失败，尝试 QMT 降级")
+            try:
+                from core.tools.qmt_market_tools import get_market_overview_qmt_sync
+                report = get_market_overview_qmt_sync(trade_date, 60)
+                return f"📊 以下数据基于 QMT 行情口径（Tushare 不可用时的降级数据）\n\n{report}"
+            except Exception as qmt_e:
+                return f"❌ 获取市场概览失败: Tushare={e}, QMT降级={qmt_e}"
         return f"❌ 获取市场概览失败: {e}"
 
 
@@ -209,18 +402,26 @@ def get_market_analysis(
             return get_market_overview_qmt_sync(trade_date, lookback_days)
         except Exception as e:
             logger.error(f"QMT 大盘分析失败: {e}")
+            # QMT 失败时尝试 Tushare
+            if _is_tushare_available():
+                logger.info("QMT 大盘分析失败，尝试 Tushare 降级")
+                try:
+                    from core.tools.index_tools import get_market_environment_sync
+                    return get_market_environment_sync(trade_date)
+                except Exception as ts_e:
+                    return f"❌ 大盘分析失败: QMT={e}, Tushare={ts_e}"
             return f"❌ QMT 大盘分析失败: {e}"
 
     sections = []
     tool_calls = [
-        ("指数趋势", lambda: get_index_data(trade_date, lookback_days)),
-        ("市场宽度", lambda: get_market_breadth(trade_date)),
-        ("市场环境", lambda: get_market_environment(trade_date)),
-        ("市场周期", lambda: identify_market_cycle(trade_date)),
-        ("北向资金", lambda: get_north_flow(trade_date, min(lookback_days, 10))),
-        ("两融余额", lambda: get_margin_trading(trade_date, min(lookback_days, 10))),
-        ("涨跌停统计", lambda: get_limit_stats(trade_date)),
-        ("指数技术面", lambda: get_index_technical(trade_date, lookback_days)),
+        ("指数趋势", lambda: get_index_data.invoke({"trade_date": trade_date, "lookback_days": lookback_days})),
+        ("市场宽度", lambda: get_market_breadth.invoke({"trade_date": trade_date})),
+        ("市场环境", lambda: get_market_environment.invoke({"trade_date": trade_date})),
+        ("市场周期", lambda: identify_market_cycle.invoke({"trade_date": trade_date})),
+        ("北向资金", lambda: get_north_flow.invoke({"trade_date": trade_date, "lookback_days": min(lookback_days, 10)})),
+        ("两融余额", lambda: get_margin_trading.invoke({"trade_date": trade_date, "lookback_days": min(lookback_days, 10)})),
+        ("涨跌停统计", lambda: get_limit_stats.invoke({"trade_date": trade_date})),
+        ("指数技术面", lambda: get_index_technical.invoke({"trade_date": trade_date, "lookback_days": lookback_days})),
     ]
 
     for title, producer in tool_calls:
@@ -266,6 +467,8 @@ def get_north_flow(
         return get_north_flow_sync(trade_date, lookback_days)
     except Exception as e:
         logger.error(f"获取北向资金失败: {e}")
+        if not _is_tushare_available():
+            return _tushare_unavailable_msg("北向资金")
         return f"❌ 获取北向资金失败: {e}"
 
 
@@ -299,6 +502,8 @@ def get_margin_trading(
         return get_margin_trading_sync(trade_date, lookback_days)
     except Exception as e:
         logger.error(f"获取两融余额失败: {e}")
+        if not _is_tushare_available():
+            return _tushare_unavailable_msg("两融余额")
         return f"❌ 获取两融余额失败: {e}"
 
 
@@ -330,6 +535,16 @@ def get_limit_stats(
         return get_limit_stats_sync(trade_date)
     except Exception as e:
         logger.error(f"获取涨跌停统计失败: {e}")
+        # Tushare 失败时尝试 QMT 降级
+        if _is_qmt_available():
+            logger.info("Tushare 获取涨跌停统计失败，尝试 QMT 降级")
+            try:
+                from core.tools.qmt_market_tools import get_limit_stats_qmt_sync
+                return get_limit_stats_qmt_sync(trade_date)
+            except Exception as qmt_e:
+                return f"❌ 获取涨跌停统计失败: Tushare={e}, QMT降级={qmt_e}"
+        if not _is_tushare_available():
+            return _tushare_unavailable_msg("涨跌停统计")
         return f"❌ 获取涨跌停统计失败: {e}"
 
 
@@ -363,5 +578,8 @@ def get_index_technical(
         return get_index_technical_sync(trade_date, lookback_days)
     except Exception as e:
         logger.error(f"获取指数技术指标失败: {e}")
+        # Tushare 失败时尝试 QMT 降级
+        if _is_qmt_available():
+            logger.info("Tushare 获取技术指标失败，尝试 QMT 降级")
+            return _qmt_fallback_technical(trade_date, lookback_days)
         return f"❌ 获取指数技术指标失败: {e}"
-

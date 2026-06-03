@@ -509,7 +509,7 @@ class QMTAdapter(DataSourceAdapter):
             return None
 
     def get_daily_basic(self, trade_date: str) -> Optional[pd.DataFrame]:
-        """获取每日基础数据（通过 get_market_data 日线，PE/PB 可能缺失）"""
+        """获取每日基础数据（通过 get_market_data_ex 日线）"""
         if not self.is_available():
             return None
         xt = _get_xtdata()
@@ -520,33 +520,36 @@ class QMTAdapter(DataSourceAdapter):
             if stock_list is None or stock_list.empty:
                 return None
             codes = stock_list["ts_code"].head(500).tolist()
-            trade_date_str = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
-            data = xt.get_market_data(
+            # get_market_data_ex 的 start_time/end_time 需要 YYYYMMDD 格式
+            trade_date_compact = trade_date.replace("-", "")
+
+            data = xt.get_market_data_ex(
                 field_list=["open", "high", "low", "close", "volume", "amount"],
                 stock_list=codes,
                 period="1d",
-                start_time=trade_date_str,
-                end_time=trade_date_str,
+                start_time=trade_date_compact,
+                end_time=trade_date_compact,
             )
             if not data or not isinstance(data, dict):
                 return None
+
             rows = []
-            for xt_code, v in data.items():
-                if v is None:
+            for xt_code, df in data.items():
+                if df is None:
                     continue
                 code6 = _code_to_6digit(xt_code)
                 if len(code6) != 6:
                     continue
                 close, vol, amt = None, None, None
-                if isinstance(v, pd.DataFrame) and not v.empty:
-                    row0 = v.iloc[0]
+                if isinstance(df, pd.DataFrame) and not df.empty:
+                    row0 = df.iloc[0]
                     close = row0.get("close")
                     vol = row0.get("volume")
                     amt = row0.get("amount")
-                elif isinstance(v, dict):
-                    close = v.get("close")
-                    vol = v.get("volume")
-                    amt = v.get("amount")
+                elif isinstance(df, dict):
+                    close = df.get("close")
+                    vol = df.get("volume")
+                    amt = df.get("amount")
                 rows.append({
                     "ts_code": xt_code,
                     "trade_date": trade_date,
@@ -567,39 +570,70 @@ class QMTAdapter(DataSourceAdapter):
             return None
 
     def find_latest_trade_date(self) -> Optional[str]:
-        """查找最新交易日期"""
-        if not self.is_available():
-            return None
-        try:
-            from datetime import date
-            d = date.today()
-            for _ in range(10):
-                s = d.strftime("%Y%m%d")
-                if self.get_daily_basic(s) is not None:
-                    return s
-                d -= timedelta(days=1)
-            return (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-        except Exception as e:
-            logger.error(f"QMT: find_latest_trade_date 失败: {e}")
-            return (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-
-    def get_realtime_quotes(self) -> Optional[Dict[str, Dict[str, Optional[float]]]]:
-        """获取全市场实时快照"""
+        """查找最新交易日期（用上证指数最近一根日线判断，轻量高效）"""
         if not self.is_available():
             return None
         xt = _get_xtdata()
         if xt is None:
             return None
         try:
-            ticks = xt.get_full_tick([])
+            data = xt.get_market_data_ex(
+                field_list=["close"],
+                stock_list=["000001.SH"],
+                period="1d",
+                count=1,
+            )
+            if data and isinstance(data, dict):
+                for xt_code, df in data.items():
+                    if df is not None and not df.empty:
+                        latest = df.index[-1]
+                        # index 可能是字符串或 Timestamp
+                        return str(latest)[:10].replace("-", "")
+            # 兜底
+            return (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+        except Exception as e:
+            logger.error(f"QMT: find_latest_trade_date 失败: {e}")
+            return (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+
+    def get_realtime_quotes(self, symbols: Optional[List[str]] = None) -> Optional[Dict[str, Dict[str, Optional[float]]]]:
+        """获取实时快照
+
+        Args:
+            symbols: 可选，指定股票代码列表（6位纯数字），为空则获取全市场
+        """
+        if not self.is_available():
+            return None
+        xt = _get_xtdata()
+        if xt is None:
+            return None
+        try:
+            # 将6位代码转为 xtdata 格式（如 300750 -> 300750.SZ）
+            # 不传 symbols 时用市场代码 ['SH', 'SZ'] 获取沪深全市场行情
+            xt_codes = []
+            if symbols:
+                for s in symbols:
+                    code = _normalize_code(str(s).strip())
+                    if code:
+                        xt_codes.append(code)
+            else:
+                xt_codes = ["SH", "SZ", "BJ"]
+
+            ticks = xt.get_full_tick(xt_codes)
             if not ticks or not isinstance(ticks, dict):
                 return None
+            # A股+ETF有效前缀：00/30/20(深市A股) 60/68(沪市A股) 8/4/9(北交所)
+            # 50/51/52/56/58(沪市ETF) 15/16/18(深市ETF)
+            # 排除债券等：10/11/12/13/18/19/7x 等
+            _STOCK_ETF_PREFIXES = ("00", "30", "20", "60", "68", "50", "51", "52", "56", "58", "15", "16", "18", "8", "4", "9")
+
             result: Dict[str, Dict[str, Optional[float]]] = {}
             for xt_code, t in ticks.items():
                 if t is None:
                     continue
                 code6 = _code_to_6digit(xt_code)
                 if len(code6) != 6:
+                    continue
+                if not code6.startswith(_STOCK_ETF_PREFIXES):
                     continue
                 last_price = getattr(t, "lastPrice", None) or (t.get("lastPrice") if isinstance(t, dict) else None)
                 pct = getattr(t, "pctChange", None) or (t.get("pctChange") if isinstance(t, dict) else None)
@@ -851,4 +885,429 @@ class QMTAdapter(DataSourceAdapter):
 
         except Exception as e:
             logger.error(f"QMT: 获取财务数据失败 {code}: {e}", exc_info=True)
+            return None
+
+    # ==================== 大盘/行业分析辅助接口 ====================
+
+    @staticmethod
+    def _is_market_session() -> bool:
+        """判断当前是否在A股交易时段（含收盘后30分钟缓冲期）。"""
+        try:
+            from app.utils.trading_time import is_trading_time
+            return is_trading_time()
+        except Exception:
+            # 无法判断时，保守返回 True，让实时快照先尝试
+            return True
+
+    def get_limit_stats(self, trade_date: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """获取涨跌停统计（优先实时快照，盘后自动切换历史日线）
+
+        Args:
+            trade_date: 交易日期（格式 YYYY-MM-DD 或 YYYYMMDD），为空则取最近交易日
+
+        Returns:
+            dict: {
+                "up_limit": 涨停数,
+                "down_limit": 跌停数,
+                "rising": 上涨数,
+                "falling": 下跌数,
+                "flat": 平盘数,
+                "total": 总数,
+                "up_limit_stocks": [(code, name, pct), ...],  # 涨停股前20
+                "down_limit_stocks": [(code, name, pct), ...],  # 跌停股前20
+                "source": "realtime" | "history",
+            }
+        """
+        if not self.is_available():
+            return None
+        xt = _get_xtdata()
+        if xt is None:
+            return None
+
+        # 盘后/休市直接走历史日线，避免无效的实时快照请求
+        if not self._is_market_session():
+            logger.info("QMT: 当前非交易时段，直接使用历史日线回算涨跌停")
+            result = self._get_limit_stats_history(xt, trade_date)
+            if result:
+                result["source"] = "history"
+            return result
+
+        # 盘中先尝试实时快照
+        result = self._get_limit_stats_realtime(xt)
+        if result and result.get("total", 0) > 0:
+            result["source"] = "realtime"
+            return result
+
+        # 实时快照无数据，切换到历史日线
+        logger.info("QMT: 实时快照无涨跌停数据，切换到历史日线回算")
+        result = self._get_limit_stats_history(xt, trade_date)
+        if result:
+            result["source"] = "history"
+        return result
+
+    def _get_limit_stats_realtime(self, xt) -> Optional[Dict[str, Any]]:
+        """基于实时快照的涨跌停统计。"""
+        try:
+            ticks = xt.get_full_tick(["SH", "SZ", "BJ"])
+            if not ticks or not isinstance(ticks, dict):
+                return None
+
+            _STOCK_PREFIXES = ("00", "30", "20", "60", "68", "8", "4")
+            _EXCLUDE_PREFIXES = ("000", "399", "899", "204", "1318")
+
+            up_limit_stocks = []
+            down_limit_stocks = []
+            rising = 0
+            falling = 0
+            flat = 0
+
+            for xt_code, t in ticks.items():
+                if t is None:
+                    continue
+                code6 = _code_to_6digit(xt_code)
+                if len(code6) != 6 or not code6.startswith(_STOCK_PREFIXES):
+                    continue
+                if code6.startswith(_EXCLUDE_PREFIXES):
+                    continue
+
+                last_price = getattr(t, "lastPrice", None) or (t.get("lastPrice") if isinstance(t, dict) else None)
+                pct = getattr(t, "pctChange", None) or (t.get("pctChange") if isinstance(t, dict) else None)
+                up_stop = getattr(t, "upStopPrice", None) or (t.get("upStopPrice") if isinstance(t, dict) else None)
+                down_stop = getattr(t, "downStopPrice", None) or (t.get("downStopPrice") if isinstance(t, dict) else None)
+
+                if last_price is None or pct is None:
+                    continue
+
+                try:
+                    last_price = float(last_price)
+                    pct = float(pct)
+                    up_stop = float(up_stop) if up_stop is not None else None
+                    down_stop = float(down_stop) if down_stop is not None else None
+                except (ValueError, TypeError):
+                    continue
+
+                is_up_limit = self._check_up_limit(code6, pct, last_price, up_stop)
+                is_down_limit = self._check_down_limit(code6, pct, last_price, down_stop)
+
+                if is_up_limit:
+                    name = self._get_instrument_name(xt, xt_code, code6)
+                    up_limit_stocks.append((code6, name, pct))
+                elif is_down_limit:
+                    name = self._get_instrument_name(xt, xt_code, code6)
+                    down_limit_stocks.append((code6, name, pct))
+                elif pct > 0:
+                    rising += 1
+                elif pct < 0:
+                    falling += 1
+                else:
+                    flat += 1
+
+            return {
+                "up_limit": len(up_limit_stocks),
+                "down_limit": len(down_limit_stocks),
+                "rising": rising,
+                "falling": falling,
+                "flat": flat,
+                "total": len(up_limit_stocks) + len(down_limit_stocks) + rising + falling + flat,
+                "up_limit_stocks": sorted(up_limit_stocks, key=lambda x: x[2], reverse=True)[:20],
+                "down_limit_stocks": sorted(down_limit_stocks, key=lambda x: x[2])[:20],
+            }
+        except Exception as e:
+            logger.error(f"QMT: 实时快照涨跌停统计失败: {e}")
+            return None
+
+    def _get_limit_stats_history(self, xt, trade_date: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """基于历史日线的涨跌停统计（盘后降级）。"""
+        try:
+            # 获取沪深A股列表
+            stock_list = xt.get_stock_list_in_sector("沪深A股")
+            if not stock_list:
+                return None
+
+            # 直接用 get_market_data_ex + count=1 获取最近一条日线
+            # 不需要 download_history_data2，QMT 本地缓存已有数据
+            stock_codes = list(stock_list)
+
+            # 分批获取（每批1000只，避免内存问题）
+            batch_size = 1000
+            all_rows = []  # [(code6, name, close, preClose, pct)]
+
+            for i in range(0, len(stock_codes), batch_size):
+                batch = stock_codes[i:i + batch_size]
+                try:
+                    data = xt.get_market_data_ex([], batch, "1d", count=1)
+                except Exception:
+                    continue
+
+                if not data:
+                    continue
+
+                for xt_code, df in data.items():
+                    if df is None or df.empty:
+                        continue
+                    code6 = _code_to_6digit(xt_code)
+                    if len(code6) != 6:
+                        continue
+
+                    row = df.iloc[-1]
+                    close = row.get("close")
+                    pre_close = row.get("preClose")
+                    suspend = row.get("suspendFlag", 0)
+
+                    if close is None or pre_close is None or pre_close == 0:
+                        continue
+                    if suspend and int(suspend) != 0:
+                        continue
+
+                    try:
+                        close = float(close)
+                        pre_close = float(pre_close)
+                    except (ValueError, TypeError):
+                        continue
+
+                    pct = (close - pre_close) / pre_close * 100
+                    name = self._get_instrument_name(xt, xt_code, code6)
+                    all_rows.append((code6, name, close, pre_close, pct))
+
+            if not all_rows:
+                return None
+
+            up_limit_stocks = []
+            down_limit_stocks = []
+            rising = 0
+            falling = 0
+            flat = 0
+
+            for code6, name, close, pre_close, pct in all_rows:
+                # 用 close / pre_close 判断是否触及涨跌停价
+                up_stop = round(pre_close * 1.1, 2) if code6.startswith(("60", "00")) else \
+                          round(pre_close * 1.2, 2) if code6.startswith(("30", "68")) else \
+                          round(pre_close * 1.3, 2) if code6.startswith(("8", "4")) else None
+                down_stop = round(pre_close * 0.9, 2) if code6.startswith(("60", "00")) else \
+                            round(pre_close * 0.8, 2) if code6.startswith(("30", "68")) else \
+                            round(pre_close * 0.7, 2) if code6.startswith(("8", "4")) else None
+
+                is_up_limit = False
+                if up_stop and close >= up_stop:
+                    is_up_limit = True
+                elif pct >= 9.9 and code6.startswith(("60", "00")):
+                    is_up_limit = True
+                elif pct >= 19.9 and code6.startswith(("30", "68")):
+                    is_up_limit = True
+                elif pct >= 29.9 and code6.startswith(("8", "4")):
+                    is_up_limit = True
+
+                is_down_limit = False
+                if down_stop and close <= down_stop:
+                    is_down_limit = True
+                elif pct <= -9.9 and code6.startswith(("60", "00")):
+                    is_down_limit = True
+                elif pct <= -19.9 and code6.startswith(("30", "68")):
+                    is_down_limit = True
+                elif pct <= -29.9 and code6.startswith(("8", "4")):
+                    is_down_limit = True
+
+                if is_up_limit:
+                    up_limit_stocks.append((code6, name, pct))
+                elif is_down_limit:
+                    down_limit_stocks.append((code6, name, pct))
+                elif pct > 0:
+                    rising += 1
+                elif pct < 0:
+                    falling += 1
+                else:
+                    flat += 1
+
+            return {
+                "up_limit": len(up_limit_stocks),
+                "down_limit": len(down_limit_stocks),
+                "rising": rising,
+                "falling": falling,
+                "flat": flat,
+                "total": len(up_limit_stocks) + len(down_limit_stocks) + rising + falling + flat,
+                "up_limit_stocks": sorted(up_limit_stocks, key=lambda x: x[2], reverse=True)[:20],
+                "down_limit_stocks": sorted(down_limit_stocks, key=lambda x: x[2])[:20],
+            }
+        except Exception as e:
+            logger.error(f"QMT: 历史日线涨跌停统计失败: {e}")
+            return None
+
+    @staticmethod
+    def _check_up_limit(code6: str, pct: float, last_price: float, up_stop: Optional[float]) -> bool:
+        """判断是否涨停。"""
+        if up_stop and up_stop > 0 and last_price >= up_stop * 0.998:
+            return True
+        if pct >= 9.9 and code6.startswith(("60", "00")):
+            return True
+        if pct >= 19.9 and code6.startswith(("30", "68")):
+            return True
+        if pct >= 29.9 and code6.startswith(("8", "4")):
+            return True
+        return False
+
+    @staticmethod
+    def _check_down_limit(code6: str, pct: float, last_price: float, down_stop: Optional[float]) -> bool:
+        """判断是否跌停。"""
+        if down_stop and down_stop > 0 and last_price <= down_stop * 1.002:
+            return True
+        if pct <= -9.9 and code6.startswith(("60", "00")):
+            return True
+        if pct <= -19.9 and code6.startswith(("30", "68")):
+            return True
+        if pct <= -29.9 and code6.startswith(("8", "4")):
+            return True
+        return False
+
+    @staticmethod
+    def _get_instrument_name(xt, xt_code: str, code6: str) -> str:
+        """获取股票名称。"""
+        try:
+            detail = xt.get_instrument_detail(xt_code)
+            if detail and isinstance(detail, dict):
+                return detail.get("InstrumentName", code6)
+        except Exception:
+            pass
+        return code6
+
+    def get_amount_ranking(self, top_n: int = 20, trade_date: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
+        """获取成交额排名（优先实时快照，盘后自动切换历史日线）
+
+        Args:
+            top_n: 返回前N只
+            trade_date: 交易日期（格式 YYYY-MM-DD 或 YYYYMMDD），为空则取最近交易日
+
+        Returns:
+            list: [{"code": str, "name": str, "amount": float, "pct_chg": float}, ...]
+        """
+        if not self.is_available():
+            return None
+        xt = _get_xtdata()
+        if xt is None:
+            return None
+
+        # 盘后/休市直接走历史日线
+        if not self._is_market_session():
+            logger.info("QMT: 当前非交易时段，直接使用历史日线获取成交额排名")
+            return self._get_amount_ranking_history(xt, top_n, trade_date)
+
+        # 盘中先尝试实时快照
+        result = self._get_amount_ranking_realtime(xt, top_n)
+        # 如果实时快照返回了数据但涨跌幅缺失过多（盘后快照残留），走历史降级
+        if result:
+            missing_pct = sum(1 for r in result if r.get("pct_chg") is None)
+            if missing_pct > len(result) * 0.5:
+                logger.info("QMT: 实时快照涨跌幅缺失过多，切换到历史日线")
+                result = self._get_amount_ranking_history(xt, top_n, trade_date)
+        if result:
+            return result
+
+        # 盘后降级：历史日线
+        logger.info("QMT: 实时快照无成交额数据，切换到历史日线")
+        return self._get_amount_ranking_history(xt, top_n, trade_date)
+
+    def _get_amount_ranking_realtime(self, xt, top_n: int) -> Optional[List[Dict[str, Any]]]:
+        """基于实时快照的成交额排名。"""
+        try:
+            ticks = xt.get_full_tick(["SH", "SZ", "BJ"])
+            if not ticks or not isinstance(ticks, dict):
+                return None
+
+            _STOCK_PREFIXES = ("00", "30", "20", "60", "68", "8", "4")
+            _EXCLUDE_PREFIXES = ("000", "399", "899", "204", "1318")
+            rows = []
+
+            for xt_code, t in ticks.items():
+                if t is None:
+                    continue
+                code6 = _code_to_6digit(xt_code)
+                if len(code6) != 6 or not code6.startswith(_STOCK_PREFIXES):
+                    continue
+                if code6.startswith(_EXCLUDE_PREFIXES):
+                    continue
+
+                amt = getattr(t, "amount", None) or (t.get("amount") if isinstance(t, dict) else None)
+                pct = getattr(t, "pctChange", None) or (t.get("pctChange") if isinstance(t, dict) else None)
+
+                if amt is None:
+                    continue
+                try:
+                    amt = float(amt)
+                    pct = float(pct) if pct is not None else None
+                except (ValueError, TypeError):
+                    continue
+
+                # 过滤掉成交额为0的（盘后快照残留）
+                if amt <= 0:
+                    continue
+
+                name = self._get_instrument_name(xt, xt_code, code6)
+                rows.append({"code": code6, "name": name, "amount": amt, "pct_chg": pct})
+
+            if not rows:
+                return None
+            rows.sort(key=lambda x: x["amount"], reverse=True)
+            return rows[:top_n]
+        except Exception as e:
+            logger.error(f"QMT: 实时快照成交额排名失败: {e}")
+            return None
+
+    def _get_amount_ranking_history(self, xt, top_n: int, trade_date: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
+        """基于历史日线的成交额排名（盘后降级）。"""
+        try:
+            stock_list = xt.get_stock_list_in_sector("沪深A股")
+            if not stock_list:
+                return None
+
+            stock_codes = list(stock_list)
+            batch_size = 1000
+            rows = []
+
+            for i in range(0, len(stock_codes), batch_size):
+                batch = stock_codes[i:i + batch_size]
+                try:
+                    data = xt.get_market_data_ex([], batch, "1d", count=1)
+                except Exception:
+                    continue
+
+                if not data:
+                    continue
+
+                for xt_code, df in data.items():
+                    if df is None or df.empty:
+                        continue
+                    code6 = _code_to_6digit(xt_code)
+                    if len(code6) != 6:
+                        continue
+
+                    row = df.iloc[-1]
+                    amt = row.get("amount")
+                    close = row.get("close")
+                    pre_close = row.get("preClose")
+                    suspend = row.get("suspendFlag", 0)
+
+                    if amt is None or close is None or pre_close is None or pre_close == 0:
+                        continue
+                    if suspend and int(suspend) != 0:
+                        continue
+
+                    try:
+                        amt = float(amt)
+                        close = float(close)
+                        pre_close = float(pre_close)
+                    except (ValueError, TypeError):
+                        continue
+
+                    if amt <= 0:
+                        continue
+
+                    pct = (close - pre_close) / pre_close * 100
+                    name = self._get_instrument_name(xt, xt_code, code6)
+                    rows.append({"code": code6, "name": name, "amount": amt, "pct_chg": pct})
+
+            if not rows:
+                return None
+            rows.sort(key=lambda x: x["amount"], reverse=True)
+            return rows[:top_n]
+        except Exception as e:
+            logger.error(f"QMT: 历史日线成交额排名失败: {e}")
             return None

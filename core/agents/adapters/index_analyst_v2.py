@@ -170,8 +170,22 @@ class IndexAnalystV2(AnalystAgent):
     # 输出字段名
     output_field = "index_report"
 
+    # 工具列表（与提示词模板中列出的工具一致，所有数据源模式共用）
+    _TOOL_IDS = [
+        "get_china_market_overview",
+        "get_index_data",
+        "get_market_breadth",
+        "get_market_environment",
+        "identify_market_cycle",
+        "get_north_flow",
+        "get_margin_trading",
+        "get_limit_stats",
+        "get_index_technical",
+        "get_market_analysis",
+    ]
+
     def _get_tool_ids_for_mode(self, mode: str) -> list[str]:
-        return ["get_market_analysis"]
+        return self._TOOL_IDS
 
     def _prepare_analysis_mode(self, state: Dict[str, Any]) -> str:
         mode = resolve_market_data_mode(state)
@@ -188,13 +202,11 @@ class IndexAnalystV2(AnalystAgent):
 
 ## QMT 模式约束
 当前分析数据源为 QMT，请遵循以下要求：
-1. 重点分析指数趋势、市场扩散、成交活跃度、风格切换与盘面结构。
-2. 不要要求或假设存在北向资金、两融、涨跌停官方统计、指数估值快照。
+1. 优先调用 get_market_analysis 获取 QMT 行情口径的完整盘面分析数据。
+2. 北向资金、两融余额、涨跌停统计等维度可调用对应工具获取 Tushare 数据作为补充。
 3. 如果缺少官方统计口径，必须明确说明当前结论基于 QMT 行情口径与快照代理指标。
-4. 优先使用 get_market_analysis 获取完整盘面分析数据。
+4. 报告应突出交易盘面视角，不要将 QMT 代理指标表述成 Tushare 官方统计。
 """
-        if prompt_type == "user":
-            suffix += "\n5. 报告应突出交易盘面视角，不要将 QMT 代理指标表述成 Tushare 官方统计。\n"
         return f"{prompt}{suffix}"
 
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
