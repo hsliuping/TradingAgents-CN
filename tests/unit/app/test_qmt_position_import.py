@@ -153,6 +153,63 @@ def test_import_positions_replace_existing_clears_current_positions(monkeypatch)
     assert result["replace_existing"] is True
 
 
+def test_preview_qmt_position_import_builds_summary(monkeypatch):
+    class _FakeCollection:
+        def __init__(self, count):
+            self.count = count
+
+        async def count_documents(self, _query):
+            return self.count
+
+    class _FakeDB:
+        def __getitem__(self, name):
+            mapping = {
+                "real_positions": _FakeCollection(2),
+                "position_changes": _FakeCollection(3),
+            }
+            return mapping[name]
+
+    monkeypatch.setattr("app.services.portfolio_service.get_mongo_db", lambda: _FakeDB(), raising=True)
+    service = PortfolioService()
+
+    class _FakeQMTAdapter:
+        def query_account_snapshot(self, account_id, account_type="STOCK"):
+            assert account_id == "123456"
+            assert account_type == "STOCK"
+            return {
+                "positions_df": pd.DataFrame([
+                    {
+                        "code": "600000",
+                        "name": "浦发银行",
+                        "market": "CN",
+                        "currency": "CNY",
+                        "quantity": 100,
+                        "cost_price": 10.25,
+                        "buy_date": None,
+                        "notes": "QMT 持仓导入 | 账户 123456",
+                    }
+                ]),
+                "asset": {"cash": 1000.0, "market_value": 1025.0, "total_asset": 2025.0},
+            }
+
+    async def fake_get_account_summary(_user_id):
+        return SimpleNamespace(cash={"CNY": 5000.0}, total_assets={"CNY": 8000.0})
+
+    monkeypatch.setattr("app.services.data_sources.qmt_adapter.QMTAdapter", _FakeQMTAdapter, raising=True)
+    monkeypatch.setattr(service, "get_account_summary", fake_get_account_summary, raising=True)
+
+    result = asyncio.run(service.preview_qmt_position_import("user-1", "123456"))
+
+    assert result["will_replace_position_count"] == 2
+    assert result["will_clear_change_count"] == 3
+    assert result["local_cash"] == 5000.0
+    assert result["qmt_position_count"] == 1
+    assert result["qmt_importable_count"] == 1
+    assert result["qmt_cash"] == 1000.0
+    assert result["qmt_total_asset"] == 2025.0
+    assert result["will_sync_cash"] is True
+
+
 def test_import_positions_from_qmt_converts_rows(monkeypatch):
     monkeypatch.setattr("app.services.portfolio_service.get_mongo_db", lambda: object(), raising=True)
     service = PortfolioService()
@@ -171,10 +228,13 @@ def test_import_positions_from_qmt_converts_rows(monkeypatch):
     ])
 
     class _FakeQMTAdapter:
-        def query_account_positions(self, account_id, account_type="STOCK"):
+        def query_account_snapshot(self, account_id, account_type="STOCK"):
             assert account_id == "123456"
             assert account_type == "STOCK"
-            return fake_df
+            return {
+                "positions_df": fake_df,
+                "asset": {"cash": 1000.0, "market_value": 1025.0, "total_asset": 2025.0},
+            }
 
     monkeypatch.setattr("app.services.data_sources.qmt_adapter.QMTAdapter", _FakeQMTAdapter, raising=True)
 
@@ -187,7 +247,13 @@ def test_import_positions_from_qmt_converts_rows(monkeypatch):
         captured["replace_existing"] = replace_existing
         return {"success_count": len(positions), "failed_count": 0, "errors": []}
 
+    async def fake_sync_cash(user_id, asset_summary):
+        captured["cash_user_id"] = user_id
+        captured["asset_summary"] = asset_summary
+        return {"cash_synced": True, "synced_currency": "CNY", "synced_cash": 1000.0}
+
     monkeypatch.setattr(service, "import_positions", fake_import_positions, raising=True)
+    monkeypatch.setattr(service, "_sync_qmt_cash_to_account", fake_sync_cash, raising=True)
 
     result = asyncio.run(service.import_positions_from_qmt("user-1", "123456"))
 
@@ -200,3 +266,51 @@ def test_import_positions_from_qmt_converts_rows(monkeypatch):
     assert captured["positions"][0].code == "600000"
     assert captured["validate_input"] is False
     assert captured["replace_existing"] is True
+    assert captured["cash_user_id"] == "user-1"
+    assert captured["asset_summary"]["cash"] == 1000.0
+    assert result["cash_synced"] is True
+    assert result["synced_cash"] == 1000.0
+
+
+def test_import_positions_from_qmt_allows_empty_positions_when_cash_available(monkeypatch):
+    monkeypatch.setattr("app.services.portfolio_service.get_mongo_db", lambda: object(), raising=True)
+    service = PortfolioService()
+
+    class _FakeQMTAdapter:
+        def query_account_snapshot(self, account_id, account_type="STOCK"):
+            assert account_id == "123456"
+            assert account_type == "STOCK"
+            return {
+                "positions_df": pd.DataFrame([], columns=["code", "quantity", "cost_price"]),
+                "asset": {"cash": 3000.0, "market_value": 0.0, "total_asset": 3000.0},
+            }
+
+    captured = {}
+
+    async def fake_import_positions(user_id, positions, validate_input=True, replace_existing=False):
+        captured["user_id"] = user_id
+        captured["positions"] = positions
+        captured["validate_input"] = validate_input
+        captured["replace_existing"] = replace_existing
+        return {"success_count": 0, "failed_count": 0, "errors": []}
+
+    async def fake_sync_cash(user_id, asset_summary):
+        captured["cash_user_id"] = user_id
+        captured["asset_summary"] = asset_summary
+        return {"cash_synced": True, "synced_currency": "CNY", "synced_cash": 3000.0}
+
+    monkeypatch.setattr("app.services.data_sources.qmt_adapter.QMTAdapter", _FakeQMTAdapter, raising=True)
+    monkeypatch.setattr(service, "import_positions", fake_import_positions, raising=True)
+    monkeypatch.setattr(service, "_sync_qmt_cash_to_account", fake_sync_cash, raising=True)
+
+    result = asyncio.run(service.import_positions_from_qmt("user-1", "123456"))
+
+    assert captured["user_id"] == "user-1"
+    assert captured["positions"] == []
+    assert captured["validate_input"] is False
+    assert captured["replace_existing"] is True
+    assert captured["cash_user_id"] == "user-1"
+    assert captured["asset_summary"]["cash"] == 3000.0
+    assert result["imported_count"] == 0
+    assert result["cash_synced"] is True
+    assert result["synced_cash"] == 3000.0

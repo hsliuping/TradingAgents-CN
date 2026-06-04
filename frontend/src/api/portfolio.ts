@@ -64,6 +64,43 @@ export interface QMTPositionImportPayload {
   account_type?: string
 }
 
+export interface QMTPositionSyncPreview {
+  account_id: string
+  account_type: string
+  will_replace_position_count: number
+  will_clear_change_count: number
+  local_cash: number | null
+  local_total_assets: number | null
+  qmt_position_count: number
+  qmt_importable_count: number
+  qmt_cash: number | null
+  qmt_market_value: number | null
+  qmt_total_asset: number | null
+  will_sync_cash: boolean
+  cash_currency: string
+  sync_note: string
+}
+
+export interface QMTPositionSyncResult {
+  success_count: number
+  failed_count: number
+  errors: Array<{ code: string; error: string }>
+  account_id: string
+  account_type: string
+  queried_count: number
+  imported_count: number
+  deleted_positions: number
+  deleted_changes: number
+  restored_cash: Record<string, number>
+  replace_existing: boolean
+  cash_synced: boolean
+  synced_currency?: string | null
+  synced_cash?: number | null
+  qmt_market_value?: number | null
+  qmt_total_asset?: number | null
+  sync_note?: string
+}
+
 /** 更新持仓请求 */
 export interface PositionUpdatePayload {
   name?: string
@@ -272,9 +309,18 @@ export const portfolioApi = {
     )
   },
 
+  /** 预览从 QMT 覆盖同步持仓 */
+  async previewQmtPositionImport(data: QMTPositionImportPayload) {
+    return ApiClient.post<QMTPositionSyncPreview>(
+      '/api/portfolio/positions/import/qmt/preview',
+      data,
+      { showLoading: true }
+    )
+  },
+
   /** 从 QMT 只读查询并导入持仓 */
   async importPositionsFromQmt(data: QMTPositionImportPayload) {
-    return ApiClient.post<{ success_count: number; failed_count: number; errors: any[] }>(
+    return ApiClient.post<QMTPositionSyncResult>(
       '/api/portfolio/positions/import/qmt',
       data,
       { showLoading: true }

@@ -8,6 +8,7 @@
       </div>
       <div class="actions">
         <el-button :icon="Refresh" text size="small" @click="refreshData">刷新</el-button>
+        <el-button v-if="activeTab === 'real'" type="success" plain :loading="qmtSyncing" @click="syncPositionsFromQmt">QMT同步</el-button>
         <el-button v-if="activeTab === 'real'" type="primary" :icon="Plus" @click="showAddDialog = true">添加持仓</el-button>
         <el-button v-if="activeTab === 'real'" type="info" :icon="List" @click="showChangesDialog = true">变动记录</el-button>
         <el-button v-if="activeTab === 'real'" type="warning" :icon="Clock" @click="showHistoryDialog = true">历史持仓</el-button>
@@ -507,7 +508,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Plus, PieChart, List, Clock, ArrowDown } from '@element-plus/icons-vue'
 import type { TabPaneName } from 'element-plus'
-import { portfolioApi, type PositionItem, type PortfolioStats, type PortfolioAnalysisReport } from '@/api/portfolio'
+import { portfolioApi, type PositionItem, type PortfolioStats, type PortfolioAnalysisReport, type QMTPositionSyncPreview } from '@/api/portfolio'
 import AddPositionDialog from './components/AddPositionDialog.vue'
 import AnalysisResultDialog from './components/AnalysisResultDialog.vue'
 import PositionAnalysisDialog from './components/PositionAnalysisDialog.vue'
@@ -549,6 +550,9 @@ const selectedStockForHistory = ref<{ code: string; name?: string; market: strin
 const selectedPositionForAnalysisHistory = ref<PositionItem | null>(null)
 const operationType = ref<'add' | 'reduce' | 'dividend' | 'split' | 'merge' | 'adjust' | 'other'>('add')
 const analysisReport = ref<PortfolioAnalysisReport | null>(null)
+const qmtSyncing = ref(false)
+
+const QMT_ACCOUNT_ID_STORAGE_KEY = 'portfolio:qmt-account-id'
 
 // 用户持仓和模拟持仓
 const realPositions = ref<PositionItem[]>([])
@@ -607,6 +611,11 @@ const formatPct = (val?: number) => {
   if (val === undefined || val === null || Number.isNaN(val) || typeof val !== 'number') return '-'
   const prefix = val >= 0 ? '+' : ''
   return prefix + val.toFixed(2) + '%'
+}
+
+const formatSyncMoney = (val?: number | null, symbol = '¥') => {
+  if (val === undefined || val === null || Number.isNaN(val) || typeof val !== 'number') return '-'
+  return `${symbol}${formatNumber(val)}`
 }
 
 const pnlClass = (val?: number) => {
@@ -859,6 +868,103 @@ const refreshData = () => {
   loadPositions()
   loadStats()
   accountCardRef.value?.loadData()
+}
+
+const getLastQmtAccountId = () => {
+  if (typeof window === 'undefined') return ''
+  return window.localStorage.getItem(QMT_ACCOUNT_ID_STORAGE_KEY) || ''
+}
+
+const setLastQmtAccountId = (accountId: string) => {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(QMT_ACCOUNT_ID_STORAGE_KEY, accountId)
+}
+
+const buildQmtPreviewMessage = (preview: QMTPositionSyncPreview) => {
+  const lines = [
+    `QMT账号：${preview.account_id}`,
+    '',
+    `本地将覆盖持仓：${preview.will_replace_position_count} 个`,
+    `本地将清空变动记录：${preview.will_clear_change_count} 条`,
+    `本地当前 CNY 现金：${formatSyncMoney(preview.local_cash)}`,
+    `本地当前 CNY 总资产：${formatSyncMoney(preview.local_total_assets)}`,
+    '',
+    `QMT 返回持仓：${preview.qmt_position_count} 条`,
+    `可导入持仓：${preview.qmt_importable_count} 条`,
+    `QMT 可用现金：${formatSyncMoney(preview.qmt_cash)}`,
+    `QMT 持仓市值：${formatSyncMoney(preview.qmt_market_value)}`,
+    `QMT 总资产：${formatSyncMoney(preview.qmt_total_asset)}`,
+    '',
+    `说明：${preview.sync_note}`
+  ]
+  return `<div style="white-space: pre-line; line-height: 1.7;">${lines.join('\n')}</div>`
+}
+
+const syncPositionsFromQmt = async () => {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '请输入 QMT 资金账号。系统会先展示覆盖预览，确认后再执行同步。',
+      'QMT 持仓同步',
+      {
+        confirmButtonText: '查看预览',
+        cancelButtonText: '取消',
+        inputValue: getLastQmtAccountId(),
+        inputPattern: /^\d{4,}$/,
+        inputErrorMessage: '请输入数字资金账号'
+      }
+    )
+
+    const accountId = String(value || '').trim()
+    if (!accountId) {
+      ElMessage.warning('请输入 QMT 资金账号')
+      return
+    }
+
+    qmtSyncing.value = true
+
+    const previewRes = await portfolioApi.previewQmtPositionImport({
+      account_id: accountId,
+      account_type: 'STOCK'
+    })
+    const preview = previewRes.data
+    if (!preview) {
+      ElMessage.error('未获取到 QMT 同步预览')
+      return
+    }
+
+    await ElMessageBox.confirm(
+      buildQmtPreviewMessage(preview),
+      '确认覆盖同步',
+      {
+        type: 'warning',
+        confirmButtonText: '开始同步',
+        cancelButtonText: '取消',
+        dangerouslyUseHTMLString: true
+      }
+    )
+
+    const syncRes = await portfolioApi.importPositionsFromQmt({
+      account_id: accountId,
+      account_type: 'STOCK'
+    })
+    const syncResult = syncRes.data
+
+    setLastQmtAccountId(accountId)
+
+    const cashHint = syncResult?.cash_synced
+      ? `，CNY 现金同步为 ${formatSyncMoney(syncResult.synced_cash)}`
+      : ''
+    ElMessage.success(
+      `QMT 同步完成：覆盖 ${syncResult?.deleted_positions ?? 0} 个旧持仓，导入 ${syncResult?.imported_count ?? 0} 条${cashHint}`
+    )
+    refreshData()
+  } catch (e: any) {
+    if (e !== 'cancel' && e !== 'close') {
+      ElMessage.error(e?.message || 'QMT 同步失败')
+    }
+  } finally {
+    qmtSyncing.value = false
+  }
 }
 
 // 持仓操作

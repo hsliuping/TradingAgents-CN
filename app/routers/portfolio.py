@@ -186,6 +186,33 @@ async def import_positions(
         )
 
 
+@router.post("/positions/import/qmt/preview", response_model=dict)
+async def preview_positions_from_qmt(
+    data: QMTPositionImportRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """预览从 QMT 覆盖同步当前账户持仓的影响。"""
+    try:
+        service = get_portfolio_service()
+        result = await service.preview_qmt_position_import(
+            user_id=current_user["id"],
+            account_id=data.account_id,
+            account_type=data.account_type,
+        )
+        return ok(data=result)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"QMT 持仓同步预览失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 @router.post("/positions/import/qmt", response_model=dict)
 async def import_positions_from_qmt(
     data: QMTPositionImportRequest,

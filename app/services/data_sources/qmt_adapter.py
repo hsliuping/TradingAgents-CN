@@ -278,21 +278,21 @@ class QMTAdapter(DataSourceAdapter):
         except ValueError:
             return None
 
-    def query_account_positions(self, account_id: str, account_type: str = "STOCK") -> Optional[pd.DataFrame]:
-        """只读查询 QMT 账户持仓，返回可导入持仓的 DataFrame。"""
+    def query_account_snapshot(self, account_id: str, account_type: str = "STOCK") -> Optional[Dict[str, Any]]:
+        """只读查询 QMT 账户快照，返回持仓 DataFrame 和账户资产摘要。"""
         account_id = str(account_id or "").strip()
         if not account_id:
-            logger.warning("QMT: 账户号为空，无法查询持仓")
+            logger.warning("QMT: 账户号为空，无法查询账户快照")
             return None
 
         xttrader = _get_xttrader()
         if xttrader is None:
-            logger.warning("QMT: xttrader 不可用，无法查询持仓")
+            logger.warning("QMT: xttrader 不可用，无法查询账户快照")
             return None
 
         userdata_dir = self._resolve_qmt_userdata_dir()
         if not userdata_dir:
-            logger.warning("QMT: 未找到 userdata 目录，无法查询持仓")
+            logger.warning("QMT: 未找到 userdata 目录，无法查询账户快照")
             return None
 
         try:
@@ -373,6 +373,27 @@ class QMTAdapter(DataSourceAdapter):
             ]
             df = pd.DataFrame(rows, columns=columns)
 
+            market_value_total = 0.0
+            if not df.empty and "market_value" in df.columns:
+                market_value_total = float(df["market_value"].fillna(0).sum())
+
+            asset_cash = self._safe_float(getattr(asset, "cash", None)) if asset is not None else None
+            asset_frozen_cash = self._safe_float(getattr(asset, "frozen_cash", None)) if asset is not None else None
+            asset_market_value = self._safe_float(getattr(asset, "market_value", None)) if asset is not None else None
+            asset_total_asset = self._safe_float(getattr(asset, "total_asset", None)) if asset is not None else None
+
+            if asset_market_value is None:
+                asset_market_value = round(market_value_total, 2)
+            if asset_total_asset is None and asset_cash is not None:
+                asset_total_asset = round(asset_cash + (asset_market_value or 0.0), 2)
+
+            asset_summary = {
+                "cash": asset_cash,
+                "frozen_cash": asset_frozen_cash,
+                "market_value": asset_market_value,
+                "total_asset": asset_total_asset,
+            }
+
             if asset is not None:
                 logger.info(
                     "QMT: 持仓查询完成，账户=%s，持仓=%s 只，现金=%s，总资产=%s",
@@ -384,9 +405,14 @@ class QMTAdapter(DataSourceAdapter):
             else:
                 logger.info("QMT: 持仓查询完成，账户=%s，持仓=%s 只", account_id, len(df))
 
-            return df
+            return {
+                "account_id": account_id,
+                "account_type": account_type,
+                "positions_df": df,
+                "asset": asset_summary,
+            }
         except Exception as e:
-            logger.error(f"QMT: 查询持仓失败: {e}")
+            logger.error(f"QMT: 查询账户快照失败: {e}")
             return None
         finally:
             if trader is not None:
@@ -394,6 +420,13 @@ class QMTAdapter(DataSourceAdapter):
                     trader.stop()
                 except Exception:
                     pass
+
+    def query_account_positions(self, account_id: str, account_type: str = "STOCK") -> Optional[pd.DataFrame]:
+        """只读查询 QMT 账户持仓，返回可导入持仓的 DataFrame。"""
+        snapshot = self.query_account_snapshot(account_id, account_type)
+        if snapshot is None:
+            return None
+        return snapshot.get("positions_df")
 
     def _has_existing_connection(self, xt: Any) -> bool:
         """优先复用已启动的 MiniQMT 连接，避免默认配置误触发独立初始化。"""

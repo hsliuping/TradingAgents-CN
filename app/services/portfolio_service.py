@@ -836,6 +836,111 @@ class PortfolioService:
             "restored_cash": restored_cash,
         }
 
+    def _build_qmt_import_positions(self, positions_df: Any) -> List[PositionCreate]:
+        """将 QMT 持仓 DataFrame 转为系统导入使用的 PositionCreate 列表。"""
+        positions: List[PositionCreate] = []
+        if positions_df is None:
+            return positions
+
+        for _, row in positions_df.iterrows():
+            code = str(row.get("code", "")).strip().zfill(6)
+            if not code or len(code) != 6:
+                continue
+
+            try:
+                quantity = int(float(row.get("quantity", 0)))
+                cost_price = float(row.get("cost_price", 0))
+            except (TypeError, ValueError):
+                continue
+
+            if quantity <= 0 or cost_price <= 0:
+                continue
+
+            buy_date = row.get("buy_date")
+            notes = row.get("notes")
+            positions.append(PositionCreate(
+                code=code,
+                name=(str(row.get("name", "")).strip() or None),
+                market=str(row.get("market", "CN") or "CN").strip() or "CN",
+                quantity=quantity,
+                cost_price=round(cost_price, 4),
+                buy_date=buy_date if isinstance(buy_date, datetime) else None,
+                notes=str(notes).strip() if notes not in (None, "") else None,
+            ))
+
+        return positions
+
+    async def _sync_qmt_cash_to_account(self, user_id: str, asset_summary: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """将 QMT 账户可用现金镜像到本地资金账户。"""
+        asset_summary = asset_summary or {}
+        qmt_cash = asset_summary.get("cash")
+        if qmt_cash is None:
+            return {
+                "cash_synced": False,
+                "synced_currency": None,
+                "synced_cash": None,
+            }
+
+        synced_cash = round(float(qmt_cash), 2)
+        await self.get_or_create_account(user_id)
+        await self.db[self.accounts_collection].update_one(
+            {"user_id": user_id},
+            {"$set": {"cash.CNY": synced_cash, "updated_at": now_tz()}}
+        )
+
+        logger.info("QMT 现金同步完成: user=%s, CNY=%s", user_id, synced_cash)
+        return {
+            "cash_synced": True,
+            "synced_currency": "CNY",
+            "synced_cash": synced_cash,
+        }
+
+    async def preview_qmt_position_import(
+        self,
+        user_id: str,
+        account_id: str,
+        account_type: str = "STOCK",
+    ) -> Dict[str, Any]:
+        """预览 QMT 持仓覆盖同步对当前账户的影响。"""
+        from app.services.data_sources.qmt_adapter import QMTAdapter
+
+        adapter = QMTAdapter()
+        snapshot = await asyncio.to_thread(adapter.query_account_snapshot, account_id, account_type)
+        if snapshot is None:
+            raise ValueError("QMT 未查询到账户信息，请确认 MiniQMT 已登录且账号可用")
+
+        positions_df = snapshot.get("positions_df")
+        asset_summary = snapshot.get("asset") or {}
+        importable_positions = self._build_qmt_import_positions(positions_df)
+
+        current_position_count = await self.db[self.positions_collection].count_documents(
+            {"user_id": user_id, "quantity": {"$gt": 0}}
+        )
+        current_change_count = await self.db[self.position_changes_collection].count_documents({"user_id": user_id})
+        account_summary = await self.get_account_summary(user_id)
+
+        qmt_position_count = 0 if positions_df is None else len(positions_df)
+        qmt_cash = asset_summary.get("cash")
+        qmt_market_value = asset_summary.get("market_value")
+        qmt_total_asset = asset_summary.get("total_asset")
+
+        return {
+            "account_id": account_id,
+            "account_type": account_type,
+            "will_replace_position_count": current_position_count,
+            "will_clear_change_count": current_change_count,
+            "local_cash": round(account_summary.cash.get("CNY", 0.0), 2),
+            "local_total_assets": round(account_summary.total_assets.get("CNY", 0.0), 2),
+            "qmt_position_count": qmt_position_count,
+            "qmt_importable_count": len(importable_positions),
+            "qmt_cash": round(float(qmt_cash), 2) if qmt_cash is not None else None,
+            "qmt_market_value": round(float(qmt_market_value), 2) if qmt_market_value is not None else None,
+            "qmt_total_asset": round(float(qmt_total_asset), 2) if qmt_total_asset is not None else None,
+            "will_sync_cash": qmt_cash is not None,
+            "cash_currency": "CNY",
+            "sync_note": "将覆盖本地实盘持仓，并把 CNY 可用现金更新为 QMT 账户现金；初始资金和累计入出金记录保持不变。",
+        }
+
     # ==================== 持仓管理 ====================
 
     async def get_positions(
@@ -1839,40 +1944,16 @@ class PortfolioService:
         from app.services.data_sources.qmt_adapter import QMTAdapter
 
         adapter = QMTAdapter()
-        positions_df = await asyncio.to_thread(adapter.query_account_positions, account_id, account_type)
+        snapshot = await asyncio.to_thread(adapter.query_account_snapshot, account_id, account_type)
+        if snapshot is None:
+            raise ValueError("QMT 未查询到账户信息，请确认 MiniQMT 已登录且账号可用")
 
-        if positions_df is None or positions_df.empty:
-            raise ValueError("QMT 未查询到可导入的持仓")
+        positions_df = snapshot.get("positions_df")
+        asset_summary = snapshot.get("asset") or {}
+        positions = self._build_qmt_import_positions(positions_df)
 
-        positions: List[PositionCreate] = []
-        for _, row in positions_df.iterrows():
-            code = str(row.get("code", "")).strip().zfill(6)
-            if not code or len(code) != 6:
-                continue
-
-            try:
-                quantity = int(float(row.get("quantity", 0)))
-                cost_price = float(row.get("cost_price", 0))
-            except (TypeError, ValueError):
-                continue
-
-            if quantity <= 0 or cost_price <= 0:
-                continue
-
-            buy_date = row.get("buy_date")
-            notes = row.get("notes")
-            positions.append(PositionCreate(
-                code=code,
-                name=(str(row.get("name", "")).strip() or None),
-                market=str(row.get("market", "CN") or "CN").strip() or "CN",
-                quantity=quantity,
-                cost_price=round(cost_price, 4),
-                buy_date=buy_date if isinstance(buy_date, datetime) else None,
-                notes=str(notes).strip() if notes not in (None, "") else None,
-            ))
-
-        if not positions:
-            raise ValueError("QMT 持仓数据中没有可导入的有效记录")
+        if (positions_df is None or len(positions_df) == 0) and asset_summary.get("cash") is None:
+            raise ValueError("QMT 未查询到可同步的持仓或账户资产")
 
         result = await self.import_positions(
             user_id,
@@ -1880,11 +1961,15 @@ class PortfolioService:
             validate_input=False,
             replace_existing=True,
         )
+        result.update(await self._sync_qmt_cash_to_account(user_id, asset_summary))
         result.update({
             "account_id": account_id,
             "account_type": account_type,
-            "queried_count": len(positions_df),
+            "queried_count": 0 if positions_df is None else len(positions_df),
             "imported_count": len(positions),
+            "qmt_market_value": asset_summary.get("market_value"),
+            "qmt_total_asset": asset_summary.get("total_asset"),
+            "sync_note": "已覆盖本地实盘持仓，并将 CNY 可用现金同步为 QMT 账户现金。初始资金和累计入出金记录未改动。",
         })
         return result
 
