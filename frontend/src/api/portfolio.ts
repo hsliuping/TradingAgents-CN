@@ -58,6 +58,12 @@ export interface PositionCreatePayload {
   notes?: string
 }
 
+/** QMT 持仓覆盖同步请求 */
+export interface QMTPositionImportPayload {
+  account_id: string
+  account_type?: string
+}
+
 /** 更新持仓请求 */
 export interface PositionUpdatePayload {
   name?: string
@@ -262,6 +268,15 @@ export const portfolioApi = {
     return ApiClient.post<{ success_count: number; failed_count: number; errors: any[] }>(
       '/api/portfolio/positions/import',
       { positions },
+      { showLoading: true }
+    )
+  },
+
+  /** 从 QMT 只读查询并导入持仓 */
+  async importPositionsFromQmt(data: QMTPositionImportPayload) {
+    return ApiClient.post<{ success_count: number; failed_count: number; errors: any[] }>(
+      '/api/portfolio/positions/import/qmt',
+      data,
       { showLoading: true }
     )
   },

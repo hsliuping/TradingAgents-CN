@@ -1,18 +1,21 @@
 """
 QMT (迅投 MiniQMT) 数据源适配器
 
-通过 xtquant.xtdata 连接本地 MiniQMT 客户端获取行情数据。
+通过 xtquant.xtdata 连接本地 MiniQMT 客户端获取行情数据，并通过 xtquant.xttrader
+提供只读的持仓/资产查询能力。
 前置条件：
-  1. MiniQMT 客户端需已启动（仅 Windows 支持）
-  2. 获取行情数据不需要登录券商账户
-  3. 交易功能需要登录券商账户（本适配器不涉及交易）
+    1. MiniQMT 客户端需已启动（仅 Windows 支持）
+    2. 获取行情数据不需要登录券商账户
+    3. 持仓/资产查询需要券商账户已在 MiniQMT 中登录（本适配器不提供下单能力）
 新闻不支持，统一使用 AKShare 数据源。
 """
 from typing import Optional, Dict, List, Any, Tuple
 import logging
 import os
+import sys
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 import pandas as pd
 
 from .base import DataSourceAdapter
@@ -22,6 +25,58 @@ logger = logging.getLogger(__name__)
 # xtquant 可选依赖，未安装时适配器不可用
 _xtdata = None
 _xtdatacenter = None
+_xttrader = None
+
+
+def _iter_qmt_root_candidates() -> List[Path]:
+    """收集 QMT 安装根路径候选，用于自动发现 xtquant 包。"""
+    raw_candidates: List[Path] = []
+    configured = os.getenv("QMT_DATA_DIR", "")
+    if configured:
+        raw_candidates.append(Path(configured).expanduser())
+
+    raw_candidates.extend([
+        Path(r"D:\gjzq\bin.x64"),
+        Path(r"D:\gjzq"),
+        Path(r"C:\gjzq\bin.x64"),
+        Path(r"C:\gjzq"),
+    ])
+
+    seen: set[str] = set()
+    roots: List[Path] = []
+    for base in raw_candidates:
+        for candidate in (base, base.parent, base.parent.parent):
+            try:
+                resolved = candidate.resolve()
+            except Exception:
+                continue
+            if not resolved.exists():
+                continue
+            key = str(resolved).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            roots.append(resolved)
+    return roots
+
+
+def _ensure_qmt_python_path() -> Optional[str]:
+    """将 QMT 自带的 xtquant/site-packages 加入 sys.path。"""
+    for root in _iter_qmt_root_candidates():
+        for site_packages in (
+            root / "Lib" / "site-packages",
+            root / "bin.x64" / "Lib" / "site-packages",
+        ):
+            xtquant_dir = site_packages / "xtquant"
+            if not xtquant_dir.is_dir():
+                continue
+
+            site_packages_str = str(site_packages)
+            if site_packages_str not in sys.path:
+                sys.path.insert(0, site_packages_str)
+                logger.info("QMT: 已添加 xtquant 路径 %s", site_packages_str)
+            return site_packages_str
+    return None
 
 
 def _get_xtdata():
@@ -29,6 +84,7 @@ def _get_xtdata():
     global _xtdata
     if _xtdata is None:
         try:
+            _ensure_qmt_python_path()
             import xtquant.xtdata as xt  # type: ignore
             _xtdata = xt
         except ImportError:
@@ -42,12 +98,27 @@ def _get_xtdatacenter():
     global _xtdatacenter
     if _xtdatacenter is None:
         try:
+            _ensure_qmt_python_path()
             from xtquant import xtdatacenter as xtdc  # type: ignore
             _xtdatacenter = xtdc
         except ImportError:
             logger.debug("xtquant.xtdatacenter 未安装，跳过 QMT 主动初始化")
             return None
     return _xtdatacenter
+
+
+def _get_xttrader():
+    """延迟导入 xtquant.xttrader"""
+    global _xttrader
+    if _xttrader is None:
+        try:
+            _ensure_qmt_python_path()
+            from xtquant import xttrader as xtt  # type: ignore
+            _xttrader = xtt
+        except ImportError:
+            logger.debug("xtquant.xttrader 未安装，跳过 QMT 持仓查询")
+            return None
+    return _xttrader
 
 
 def _normalize_code(code: str) -> str:
@@ -104,6 +175,60 @@ class QMTAdapter(DataSourceAdapter):
         except (ValueError, TypeError):
             return None
 
+    def _safe_int(self, value) -> Optional[int]:
+        try:
+            if value is None or value == "" or (hasattr(value, "__int__") and str(value) == "nan"):
+                return None
+            return int(float(value))
+        except (ValueError, TypeError):
+            return None
+
+    def _resolve_qmt_userdata_dir(self) -> Optional[str]:
+        """解析 QMT userdata 目录，用于 xttrader 只读查询。"""
+        raw_candidates: List[Path] = []
+        configured = self._get_runtime_setting("QMT_DATA_DIR", "")
+        if configured:
+            raw_candidates.append(Path(str(configured)).expanduser())
+
+        raw_candidates.extend([
+            Path(r"D:\gjzq\userdata"),
+            Path(r"D:\gjzq\userdata_mini"),
+            Path(r"D:\gjzq\bin.x64"),
+            Path(r"D:\gjzq"),
+            Path(r"C:\gjzq\userdata"),
+            Path(r"C:\gjzq\userdata_mini"),
+            Path(r"C:\gjzq\bin.x64"),
+            Path(r"C:\gjzq"),
+        ])
+
+        seen: set[str] = set()
+        for base in raw_candidates:
+            for candidate in (
+                base,
+                base.parent,
+                base.parent.parent,
+            ):
+                try:
+                    resolved = candidate.resolve()
+                except Exception:
+                    continue
+                if not resolved.exists():
+                    continue
+                key = str(resolved).lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                if resolved.name.lower() in {"userdata", "userdata_mini"}:
+                    return str(resolved)
+
+                for child_name in ("userdata", "userdata_mini"):
+                    child = resolved / child_name
+                    if child.is_dir():
+                        return str(child)
+
+        return None
+
     def _get_runtime_setting(self, name: str, default: Any = None) -> Any:
         env_value = os.getenv(name)
         if env_value not in (None, ""):
@@ -152,6 +277,123 @@ class QMTAdapter(DataSourceAdapter):
             return int(parts[0]), int(parts[1])
         except ValueError:
             return None
+
+    def query_account_positions(self, account_id: str, account_type: str = "STOCK") -> Optional[pd.DataFrame]:
+        """只读查询 QMT 账户持仓，返回可导入持仓的 DataFrame。"""
+        account_id = str(account_id or "").strip()
+        if not account_id:
+            logger.warning("QMT: 账户号为空，无法查询持仓")
+            return None
+
+        xttrader = _get_xttrader()
+        if xttrader is None:
+            logger.warning("QMT: xttrader 不可用，无法查询持仓")
+            return None
+
+        userdata_dir = self._resolve_qmt_userdata_dir()
+        if not userdata_dir:
+            logger.warning("QMT: 未找到 userdata 目录，无法查询持仓")
+            return None
+
+        try:
+            from xtquant.xttype import StockAccount  # type: ignore
+        except ImportError:
+            logger.warning("QMT: xttype 不可用，无法构建账户对象")
+            return None
+
+        trader = None
+        try:
+            session = int(time.time() * 1000) % 2147483647
+            trader = xttrader.XtQuantTrader(userdata_dir, session)
+            trader.start()
+            connect_result = trader.connect()
+            if connect_result != 0:
+                logger.warning("QMT: 交易客户端连接失败，返回码=%s", connect_result)
+                return None
+
+            account = StockAccount(account_id, account_type)
+            positions = trader.query_stock_positions(account) or []
+            asset = trader.query_stock_asset(account)
+            xt = _get_xtdata()
+
+            rows: List[Dict[str, Any]] = []
+            for item in positions:
+                stock_code = getattr(item, "stock_code", "") or getattr(item, "m_strStockCode", "")
+                code6 = _code_to_6digit(stock_code)
+                volume = self._safe_int(getattr(item, "volume", None))
+                if not code6 or volume is None or volume <= 0:
+                    continue
+
+                can_use_volume = self._safe_int(getattr(item, "can_use_volume", None))
+                open_price = self._safe_float(getattr(item, "open_price", None))
+                market_value = self._safe_float(getattr(item, "market_value", None))
+                frozen_volume = self._safe_int(getattr(item, "frozen_volume", None))
+                on_road_volume = self._safe_int(getattr(item, "on_road_volume", None))
+                yesterday_volume = self._safe_int(getattr(item, "yesterday_volume", None))
+
+                xt_code = _normalize_code(code6)
+                name = code6
+                if xt is not None and xt_code:
+                    try:
+                        name = self._get_instrument_name(xt, xt_code, code6)
+                    except Exception:
+                        name = code6
+
+                notes = f"QMT 持仓导入 | 账户 {account_id}"
+                if can_use_volume is not None and can_use_volume != volume:
+                    notes += f" | 可用 {can_use_volume}"
+                if frozen_volume is not None and frozen_volume > 0:
+                    notes += f" | 冻结 {frozen_volume}"
+                if on_road_volume is not None and on_road_volume > 0:
+                    notes += f" | 在途 {on_road_volume}"
+                if yesterday_volume is not None and yesterday_volume > 0:
+                    notes += f" | 昨仓 {yesterday_volume}"
+
+                rows.append({
+                    "code": code6,
+                    "name": name,
+                    "market": "CN",
+                    "currency": "CNY",
+                    "quantity": volume,
+                    "cost_price": round(open_price, 4) if open_price is not None else 0.0,
+                    "buy_date": None,
+                    "notes": notes,
+                    "qmt_stock_code": stock_code,
+                    "can_use_quantity": can_use_volume,
+                    "market_value": market_value,
+                    "frozen_volume": frozen_volume,
+                    "on_road_volume": on_road_volume,
+                    "yesterday_volume": yesterday_volume,
+                })
+
+            columns = [
+                "code", "name", "market", "currency", "quantity", "cost_price",
+                "buy_date", "notes", "qmt_stock_code", "can_use_quantity",
+                "market_value", "frozen_volume", "on_road_volume", "yesterday_volume",
+            ]
+            df = pd.DataFrame(rows, columns=columns)
+
+            if asset is not None:
+                logger.info(
+                    "QMT: 持仓查询完成，账户=%s，持仓=%s 只，现金=%s，总资产=%s",
+                    account_id,
+                    len(df),
+                    getattr(asset, "cash", None),
+                    getattr(asset, "total_asset", None),
+                )
+            else:
+                logger.info("QMT: 持仓查询完成，账户=%s，持仓=%s 只", account_id, len(df))
+
+            return df
+        except Exception as e:
+            logger.error(f"QMT: 查询持仓失败: {e}")
+            return None
+        finally:
+            if trader is not None:
+                try:
+                    trader.stop()
+                except Exception:
+                    pass
 
     def _has_existing_connection(self, xt: Any) -> bool:
         """优先复用已启动的 MiniQMT 连接，避免默认配置误触发独立初始化。"""

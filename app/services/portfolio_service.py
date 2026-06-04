@@ -3,6 +3,7 @@
 提供持仓管理和AI分析功能
 """
 
+import asyncio
 import os
 import uuid
 import logging
@@ -784,6 +785,57 @@ class PortfolioService:
             "deleted_positions": deleted_positions.deleted_count
         }
 
+    async def _clear_existing_real_positions_for_sync(self, user_id: str) -> Dict[str, Any]:
+        """清空当前用户的实盘持仓，并把持仓成本退回到现金中，用于 QMT 覆盖同步。"""
+        positions = await self.db[self.positions_collection].find(
+            {"user_id": user_id, "quantity": {"$gt": 0}}
+        ).to_list(None)
+
+        if not positions:
+            return {
+                "deleted_positions": 0,
+                "deleted_changes": 0,
+                "restored_cash": {"CNY": 0.0, "HKD": 0.0, "USD": 0.0},
+            }
+
+        restored_cash: Dict[str, float] = {"CNY": 0.0, "HKD": 0.0, "USD": 0.0}
+        for position in positions:
+            currency = position.get("currency", "CNY")
+            position_cost = float(position.get("quantity", 0) or 0) * float(position.get("cost_price", 0.0) or 0.0)
+            restored_cash[currency] = round(restored_cash.get(currency, 0.0) + position_cost, 2)
+
+        deleted_changes = await self.db[self.position_changes_collection].delete_many({"user_id": user_id})
+        deleted_positions = await self.db[self.positions_collection].delete_many({"user_id": user_id})
+
+        account = await self.get_or_create_account(user_id)
+        current_cash = account.get("cash", {})
+        update_doc: Dict[str, Any] = {"updated_at": now_tz()}
+        cash_updated = False
+        for currency, amount in restored_cash.items():
+            if amount <= 0:
+                continue
+            update_doc[f"cash.{currency}"] = round(current_cash.get(currency, 0.0) + amount, 2)
+            cash_updated = True
+
+        if cash_updated:
+            await self.db[self.accounts_collection].update_one(
+                {"user_id": user_id},
+                {"$set": update_doc}
+            )
+
+        logger.info(
+            "QMT 覆盖同步前清空本地实盘持仓: user=%s, 删除 %s 个持仓, %s 条变动, 退回资金 %s",
+            user_id,
+            deleted_positions.deleted_count,
+            deleted_changes.deleted_count,
+            restored_cash,
+        )
+        return {
+            "deleted_positions": deleted_positions.deleted_count,
+            "deleted_changes": deleted_changes.deleted_count,
+            "restored_cash": restored_cash,
+        }
+
     # ==================== 持仓管理 ====================
 
     async def get_positions(
@@ -1062,24 +1114,31 @@ class PortfolioService:
             updated_at=position.get("updated_at", now_tz())
         )
 
-    async def add_position(self, user_id: str, data: PositionCreate) -> PositionResponse:
+    async def add_position(
+        self,
+        user_id: str,
+        data: PositionCreate,
+        source: PositionSource = PositionSource.MANUAL,
+        validate_input: bool = True,
+    ) -> PositionResponse:
         """添加用户持仓（如果已有持仓则自动加仓）"""
-        # 🔥 添加前检查：必须有行情/历史数据，否则无法正确显示市值和浮动盈亏
-        current_price = await self._get_stock_price(data.code, data.market)
-        if not current_price or current_price <= 0:
-            raise ValueError(
-                f"股票 {data.code} 暂无行情数据，无法添加持仓。请先在「股票筛选」或「单股分析」中同步该股票的历史数据后再添加。"
-            )
+        # 手工录入时仍然保留历史数据校验；QMT 快照同步会跳过这层校验，直接按已知持仓写入。
+        if validate_input:
+            current_price = await self._get_stock_price(data.code, data.market)
+            if not current_price or current_price <= 0:
+                raise ValueError(
+                    f"股票 {data.code} 暂无行情数据，无法添加持仓。请先在「股票筛选」或「单股分析」中同步该股票的历史数据后再添加。"
+                )
 
-        # 🔥 必须填写买入日期，并校验成本价是否在该日历史高低价范围内
-        if not data.buy_date:
-            raise ValueError("添加持仓时必须填写买入日期，以便校验成本价是否正确。")
-        await self._validate_cost_price_against_historical(
-            code=data.code,
-            market=data.market,
-            buy_date=data.buy_date,
-            cost_price=data.cost_price
-        )
+            # 🔥 必须填写买入日期，并校验成本价是否在该日历史高低价范围内
+            if not data.buy_date:
+                raise ValueError("添加持仓时必须填写买入日期，以便校验成本价是否正确。")
+            await self._validate_cost_price_against_historical(
+                code=data.code,
+                market=data.market,
+                buy_date=data.buy_date,
+                cost_price=data.cost_price
+            )
 
         # 获取股票名称和行业
         name = data.name
@@ -1188,7 +1247,7 @@ class PortfolioService:
             "buy_date": data.buy_date,
             "industry": industry,
             "notes": data.notes,
-            "source": PositionSource.MANUAL.value,
+            "source": source.value,
             "created_at": now,
             "updated_at": now
         }
@@ -1733,27 +1792,101 @@ class PortfolioService:
     async def import_positions(
         self,
         user_id: str,
-        positions: List[PositionCreate]
+        positions: List[PositionCreate],
+        validate_input: bool = True,
+        replace_existing: bool = False,
     ) -> Dict[str, Any]:
         """批量导入持仓"""
+        sync_result: Optional[Dict[str, Any]] = None
+        if replace_existing:
+            sync_result = await self._clear_existing_real_positions_for_sync(user_id)
+
         success_count = 0
         failed_count = 0
         errors = []
 
         for pos in positions:
             try:
-                await self.add_position(user_id, pos)
+                await self.add_position(
+                    user_id,
+                    pos,
+                    source=PositionSource.IMPORT,
+                    validate_input=validate_input,
+                )
                 success_count += 1
             except Exception as e:
                 failed_count += 1
                 errors.append({"code": pos.code, "error": str(e)})
 
         logger.info(f"✅ 批量导入完成: 成功 {success_count}, 失败 {failed_count}")
-        return {
+        result = {
             "success_count": success_count,
             "failed_count": failed_count,
             "errors": errors
         }
+        if sync_result:
+            result.update(sync_result)
+        result["replace_existing"] = replace_existing
+        return result
+
+    async def import_positions_from_qmt(
+        self,
+        user_id: str,
+        account_id: str,
+        account_type: str = "STOCK",
+    ) -> Dict[str, Any]:
+        """从 QMT 只读查询持仓并导入到当前用户的持仓列表。"""
+        from app.services.data_sources.qmt_adapter import QMTAdapter
+
+        adapter = QMTAdapter()
+        positions_df = await asyncio.to_thread(adapter.query_account_positions, account_id, account_type)
+
+        if positions_df is None or positions_df.empty:
+            raise ValueError("QMT 未查询到可导入的持仓")
+
+        positions: List[PositionCreate] = []
+        for _, row in positions_df.iterrows():
+            code = str(row.get("code", "")).strip().zfill(6)
+            if not code or len(code) != 6:
+                continue
+
+            try:
+                quantity = int(float(row.get("quantity", 0)))
+                cost_price = float(row.get("cost_price", 0))
+            except (TypeError, ValueError):
+                continue
+
+            if quantity <= 0 or cost_price <= 0:
+                continue
+
+            buy_date = row.get("buy_date")
+            notes = row.get("notes")
+            positions.append(PositionCreate(
+                code=code,
+                name=(str(row.get("name", "")).strip() or None),
+                market=str(row.get("market", "CN") or "CN").strip() or "CN",
+                quantity=quantity,
+                cost_price=round(cost_price, 4),
+                buy_date=buy_date if isinstance(buy_date, datetime) else None,
+                notes=str(notes).strip() if notes not in (None, "") else None,
+            ))
+
+        if not positions:
+            raise ValueError("QMT 持仓数据中没有可导入的有效记录")
+
+        result = await self.import_positions(
+            user_id,
+            positions,
+            validate_input=False,
+            replace_existing=True,
+        )
+        result.update({
+            "account_id": account_id,
+            "account_type": account_type,
+            "queried_count": len(positions_df),
+            "imported_count": len(positions),
+        })
+        return result
 
     # ==================== 持仓统计 ====================
 

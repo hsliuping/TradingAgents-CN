@@ -461,6 +461,12 @@ class PositionImport(BaseModel):
     positions: List[PositionCreate] = Field(..., min_length=1, max_length=50)
 
 
+class QMTPositionImportRequest(BaseModel):
+    """QMT 持仓覆盖同步请求"""
+    account_id: str = Field(..., description="QMT 资金账号")
+    account_type: str = Field("STOCK", description="QMT 账号类型，如 STOCK/CREDIT")
+
+
 class PortfolioAnalysisRequest(BaseModel):
     """持仓研究请求"""
     include_paper: bool = Field(True, description="是否包含模拟交易持仓")

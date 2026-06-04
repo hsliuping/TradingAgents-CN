@@ -18,6 +18,7 @@ from app.models.portfolio import (
     PositionAnalysisRequest, PositionAnalysisByCodeRequest,
     AccountInitRequest, AccountTransactionRequest,
     AccountSettingsRequest, CapitalTransactionType, PositionChangeType,
+    QMTPositionImportRequest,
     PortfolioAnalysisStatus
 )
 from app.core.response import ok
@@ -179,6 +180,39 @@ async def import_positions(
         return ok(data=result, message=f"导入完成: 成功 {result['success_count']}, 失败 {result['failed_count']}")
     except Exception as e:
         logger.error(f"导入持仓失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/positions/import/qmt", response_model=dict)
+async def import_positions_from_qmt(
+    data: QMTPositionImportRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """从 QMT 只读查询当前账户持仓并覆盖同步到系统持仓。"""
+    try:
+        service = get_portfolio_service()
+        result = await service.import_positions_from_qmt(
+            user_id=current_user["id"],
+            account_id=data.account_id,
+            account_type=data.account_type,
+        )
+        return ok(
+            data=result,
+            message=(
+                f"QMT 持仓同步完成: 已覆盖 {result.get('deleted_positions', 0)} 个旧持仓, "
+                f"成功 {result['success_count']}, 失败 {result['failed_count']}"
+            )
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"QMT 持仓导入失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
