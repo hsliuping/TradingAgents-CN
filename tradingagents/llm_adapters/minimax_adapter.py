@@ -1,7 +1,7 @@
 """
 MiniMax LLM适配器
 为 TradingAgents 提供 MiniMax 大模型的 OpenAI 兼容接口
-MiniMax 提供高性能的 AI 推理服务，支持 204K tokens 上下文窗口
+MiniMax 提供高性能的 AI 推理服务，旗舰模型 MiniMax-M3 支持 512K tokens 上下文窗口、最大输出 128K，并支持图片输入
 """
 
 import os
@@ -50,13 +50,14 @@ class ChatMiniMax(ChatOpenAI):
     MiniMax 聊天模型适配器，支持 Token 使用统计
 
     继承自 ChatOpenAI，通过 OpenAI 兼容接口调用 MiniMax 模型。
-    MiniMax 提供 MiniMax-M2.7 和 MiniMax-M2.7-highspeed 两款模型，
-    均支持 204,800 tokens 上下文窗口和最大 192K token 输出。
+    MiniMax 提供 MiniMax-M3（默认）、MiniMax-M2.7 和 MiniMax-M2.7-highspeed 三款模型。
+    旗舰模型 MiniMax-M3 支持 512K tokens 上下文窗口、最大输出 128K，并支持图片输入；
+    MiniMax-M2.7 系列支持 204K tokens 上下文。
     """
 
     def __init__(
         self,
-        model: str = "MiniMax-M2.7",
+        model: str = "MiniMax-M3",
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         temperature: float = 0.1,
@@ -67,7 +68,7 @@ class ChatMiniMax(ChatOpenAI):
         初始化 MiniMax 适配器
 
         Args:
-            model: 模型名称，默认为 MiniMax-M2.7
+            model: 模型名称，默认为 MiniMax-M3
             api_key: API 密钥，如果不提供则从环境变量 MINIMAX_API_KEY 获取
             base_url: API 基础 URL，默认为海外版 https://api.minimax.io/v1，
                       国内版可设为 https://api.minimaxi.com/v1
@@ -291,6 +292,18 @@ class ChatMiniMax(ChatOpenAI):
 
 # 支持的模型列表
 MINIMAX_MODELS = {
+    "MiniMax-M3": {
+        "description": "MiniMax M3 - 旗舰模型，512K 上下文，最大输出 128K，支持图片输入（默认）",
+        "context_length": 512000,
+        "max_output_tokens": 128000,
+        "supports_function_calling": True,
+        "supports_images": True,
+        "recommended_for": ["复杂推理", "专业分析", "长文档处理", "图文理解", "多模态输入"],
+        "input_price_per_million": 0.6,
+        "output_price_per_million": 2.4,
+        "cache_reads_price_per_million": 0.12,
+        "currency": "USD"
+    },
     "MiniMax-M2.7": {
         "description": "MiniMax M2.7 - Peak Performance. Ultimate Value. Master the Complex",
         "context_length": 204800,
@@ -320,7 +333,7 @@ def get_available_minimax_models() -> Dict[str, Dict[str, Any]]:
 
 
 def create_minimax_llm(
-    model: str = "MiniMax-M2.7",
+    model: str = "MiniMax-M3",
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     temperature: float = 0.1,
@@ -340,7 +353,7 @@ def create_minimax_llm(
 
 
 def test_minimax_connection(
-    model: str = "MiniMax-M2.7",
+    model: str = "MiniMax-M3",
     api_key: Optional[str] = None
 ) -> bool:
     """测试 MiniMax OpenAI 兼容接口连接"""
@@ -373,7 +386,7 @@ def test_minimax_connection(
 
 
 def test_minimax_function_calling(
-    model: str = "MiniMax-M2.7",
+    model: str = "MiniMax-M3",
     api_key: Optional[str] = None
 ) -> bool:
     """测试 MiniMax OpenAI 兼容接口的 Function Calling"""

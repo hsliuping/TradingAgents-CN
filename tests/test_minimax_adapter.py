@@ -52,36 +52,51 @@ class TestMiniMaxModels(unittest.TestCase):
     """测试 MiniMax 模型列表"""
 
     def test_model_list_has_required_models(self):
-        """模型列表应包含 MiniMax-M2.7 和 MiniMax-M2.7-highspeed"""
+        """模型列表应包含 MiniMax-M3、MiniMax-M2.7 和 MiniMax-M2.7-highspeed"""
         from tradingagents.llm_adapters.minimax_adapter import MINIMAX_MODELS
+        self.assertIn("MiniMax-M3", MINIMAX_MODELS)
         self.assertIn("MiniMax-M2.7", MINIMAX_MODELS)
         self.assertIn("MiniMax-M2.7-highspeed", MINIMAX_MODELS)
 
     def test_model_context_length(self):
-        """模型上下文长度应为 204800"""
+        """模型上下文长度应符合预期：M3 512K，M2.7 系列 204800"""
         from tradingagents.llm_adapters.minimax_adapter import MINIMAX_MODELS
+        self.assertEqual(MINIMAX_MODELS["MiniMax-M3"]["context_length"], 512000)
         self.assertEqual(MINIMAX_MODELS["MiniMax-M2.7"]["context_length"], 204800)
         self.assertEqual(MINIMAX_MODELS["MiniMax-M2.7-highspeed"]["context_length"], 204800)
 
-    def test_model_supports_function_calling(self):
-        """两个模型都应支持 Function Calling"""
+    def test_m3_max_output_tokens(self):
+        """M3 最大输出应为 128000"""
         from tradingagents.llm_adapters.minimax_adapter import MINIMAX_MODELS
+        self.assertEqual(MINIMAX_MODELS["MiniMax-M3"]["max_output_tokens"], 128000)
+
+    def test_m3_supports_images(self):
+        """M3 应支持图片输入"""
+        from tradingagents.llm_adapters.minimax_adapter import MINIMAX_MODELS
+        self.assertTrue(MINIMAX_MODELS["MiniMax-M3"].get("supports_images", False))
+
+    def test_model_supports_function_calling(self):
+        """所有模型都应支持 Function Calling"""
+        from tradingagents.llm_adapters.minimax_adapter import MINIMAX_MODELS
+        self.assertTrue(MINIMAX_MODELS["MiniMax-M3"]["supports_function_calling"])
         self.assertTrue(MINIMAX_MODELS["MiniMax-M2.7"]["supports_function_calling"])
         self.assertTrue(MINIMAX_MODELS["MiniMax-M2.7-highspeed"]["supports_function_calling"])
 
     def test_get_available_models(self):
-        """get_available_minimax_models 应返回模型列表"""
+        """get_available_minimax_models 应返回 M3 + M2.7 系列"""
         from tradingagents.llm_adapters.minimax_adapter import get_available_minimax_models
         models = get_available_minimax_models()
-        self.assertEqual(len(models), 2)
+        self.assertEqual(len(models), 3)
+        self.assertIn("MiniMax-M3", models)
         self.assertIn("MiniMax-M2.7", models)
 
-    def test_model_only_m27(self):
-        """模型列表应仅包含 M2.7 系列，不含 M1 等旧模型"""
+    def test_no_legacy_models(self):
+        """模型列表不应包含已废弃的旧版本（M2.5/M2.1/M2/M1）"""
         from tradingagents.llm_adapters.minimax_adapter import MINIMAX_MODELS
+        legacy = {"MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-M2", "MiniMax-M1"}
         for model_name in MINIMAX_MODELS:
-            self.assertTrue(model_name.startswith("MiniMax-M2.7"),
-                            f"模型 {model_name} 不是 M2.7 系列")
+            self.assertNotIn(model_name, legacy,
+                             f"旧版模型 {model_name} 不应出现在列表中")
 
 
 class TestChatMiniMaxInit(unittest.TestCase):
@@ -108,13 +123,13 @@ class TestChatMiniMaxInit(unittest.TestCase):
         """有效 API Key 应被接受并成功初始化"""
         from tradingagents.llm_adapters.minimax_adapter import ChatMiniMax
         llm = ChatMiniMax(api_key="sk-test-valid-minimax-api-key-12345")
-        self.assertEqual(llm.model_name, "MiniMax-M2.7")
+        self.assertEqual(llm.model_name, "MiniMax-M3")
 
     def test_default_model(self):
-        """默认模型应为 MiniMax-M2.7"""
+        """默认模型应为 MiniMax-M3"""
         from tradingagents.llm_adapters.minimax_adapter import ChatMiniMax
         llm = ChatMiniMax(api_key="sk-test-valid-minimax-api-key-12345")
-        self.assertEqual(llm.model_name, "MiniMax-M2.7")
+        self.assertEqual(llm.model_name, "MiniMax-M3")
 
     def test_custom_model(self):
         """自定义模型应被接受"""
@@ -169,8 +184,22 @@ class TestOpenAICompatibleRegistry(unittest.TestCase):
         """注册表中的模型列表应正确"""
         from tradingagents.llm_adapters.openai_compatible_base import OPENAI_COMPATIBLE_PROVIDERS
         minimax = OPENAI_COMPATIBLE_PROVIDERS["minimax"]
+        self.assertIn("MiniMax-M3", minimax["models"])
         self.assertIn("MiniMax-M2.7", minimax["models"])
         self.assertIn("MiniMax-M2.7-highspeed", minimax["models"])
+
+    def test_minimax_registry_m3_first(self):
+        """注册表中 M3 应该是第一个模型（默认模型）"""
+        from tradingagents.llm_adapters.openai_compatible_base import OPENAI_COMPATIBLE_PROVIDERS
+        minimax = OPENAI_COMPATIBLE_PROVIDERS["minimax"]
+        first_model = next(iter(minimax["models"]))
+        self.assertEqual(first_model, "MiniMax-M3")
+
+    def test_minimax_registry_m3_context_length(self):
+        """注册表中 M3 上下文长度应为 512000"""
+        from tradingagents.llm_adapters.openai_compatible_base import OPENAI_COMPATIBLE_PROVIDERS
+        minimax = OPENAI_COMPATIBLE_PROVIDERS["minimax"]
+        self.assertEqual(minimax["models"]["MiniMax-M3"]["context_length"], 512000)
 
     def test_minimax_registry_base_url(self):
         """注册表中的 base_url 应为海外版"""
@@ -196,7 +225,7 @@ class TestOpenAICompatibleRegistry(unittest.TestCase):
         """统一适配器类应能使用测试 API Key 实例化"""
         from tradingagents.llm_adapters.openai_compatible_base import ChatMiniMaxOpenAI
         adapter = ChatMiniMaxOpenAI(
-            model="MiniMax-M2.7",
+            model="MiniMax-M3",
             api_key="sk-test-valid-minimax-api-key-12345"
         )
         self.assertIsNotNone(adapter)
@@ -206,7 +235,7 @@ class TestOpenAICompatibleRegistry(unittest.TestCase):
         from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
         llm = create_openai_compatible_llm(
             provider="minimax",
-            model="MiniMax-M2.7",
+            model="MiniMax-M3",
             api_key="sk-test-valid-minimax-api-key-12345"
         )
         self.assertIsNotNone(llm)
@@ -240,14 +269,14 @@ class TestMiniMaxIntegration(unittest.TestCase):
             cls.api_key = None
 
     def test_integration_basic_chat(self):
-        """集成测试：基本聊天功能"""
+        """集成测试：基本聊天功能（默认 M3 模型）"""
         if not self.api_key:
             self.skipTest("MINIMAX_API_KEY 未设置，跳过集成测试")
 
         from tradingagents.llm_adapters.minimax_adapter import create_minimax_llm
 
         llm = create_minimax_llm(
-            model="MiniMax-M2.7",
+            model="MiniMax-M3",
             api_key=self.api_key,
             max_tokens=50
         )

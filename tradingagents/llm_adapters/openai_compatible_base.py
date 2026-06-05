@@ -399,7 +399,7 @@ class ChatMiniMaxOpenAI(OpenAICompatibleBase):
 
     def __init__(
         self,
-        model: str = "MiniMax-M2.7",
+        model: str = "MiniMax-M3",
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         temperature: float = 0.1,
@@ -514,6 +514,7 @@ OPENAI_COMPATIBLE_PROVIDERS = {
         "base_url": "https://api.minimax.io/v1",
         "api_key_env": "MINIMAX_API_KEY",
         "models": {
+            "MiniMax-M3": {"context_length": 512000, "supports_function_calling": True, "supports_images": True},
             "MiniMax-M2.7": {"context_length": 204800, "supports_function_calling": True},
             "MiniMax-M2.7-highspeed": {"context_length": 204800, "supports_function_calling": True}
         }
