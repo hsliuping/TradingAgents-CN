@@ -60,6 +60,16 @@
 
 **🎯 我们的定位与使命**: 专注学习与研究，提供中文化学习中心与工具，合规友好，支持 A股/港股/美股 的分析与教学，推动 AI 金融技术在中文社区的普及与正确使用。
 
+## 🆕 Claude Code 原生化模块(claude_native/)
+
+本 fork 新增 [`claude_native/`](./claude_native/) 模块:**无需任何 LLM API key**,用 Claude Code 的 Workflow + subagent 原生重建多智能体分析(四分析师 + 多空辩论 + 风控终裁),数据走 `quant_db`(PostgreSQL,K线/估值)+ `a-stock-data` skill(研报/资金/财务快照)。
+
+- **为什么**:原项目每个分析师依赖 LLM 的 function-calling 工具调用,而本地 Claude Code 模型服务不是标准带工具调用的 API 端点;本模块改为「主控预取数据 → JSON → Workflow 多智能体只读定性」,LLM 即 Claude subagent。
+- **产出**:对 A 股出「信号灯 + BUY/HOLD/SELL + 仓位 + 目标价区间」的决策卡,批量出汇总榜。
+- **与原项目关系**:原 FastAPI/Vue/CLI 链路保持不变,`claude_native/` 是并存的轻量替代路径。
+- **用法详见** [claude_native/README.md](./claude_native/README.md)。
+- ⚠️ 仅研究学习用途,不构成投资建议。
+
 ## 🎉 v1.0.1 版本说明 - 配置体验与同步稳定性增强
 
 > 🚀 **当前推荐版本**: `v1.0.1` 已正式可用，在 `v1.0.0-preview` 架构基础上，重点增强配置管理、聚合厂家、页面切换、单股同步和上游能力吸收。
