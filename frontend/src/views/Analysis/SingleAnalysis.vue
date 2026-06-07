@@ -97,6 +97,43 @@
                 </el-form-item>
               </div>
 
+              <!-- 调用引擎 -->
+              <div class="form-section">
+                <h4 class="section-title">调用引擎</h4>
+                <div class="engine-selector">
+                  <div
+                    v-for="engine in agentEngineOptions"
+                    :key="engine.id"
+                    class="engine-option"
+                    :class="{ active: analysisForm.agentEngine === engine.id, disabled: engine.disabled }"
+                    @click="selectAgentEngine(engine)"
+                  >
+                    <div class="engine-icon">
+                      <el-icon>
+                        <component :is="engine.icon" />
+                      </el-icon>
+                    </div>
+                    <div class="engine-info">
+                      <div class="engine-name">
+                        <span>{{ engine.name }}</span>
+                        <el-tag v-if="engine.tag" size="small" effect="plain" :type="engine.tagType">
+                          {{ engine.tag }}
+                        </el-tag>
+                      </div>
+                      <div class="engine-desc">{{ engine.description }}</div>
+                      <div v-if="engine.disabled && engine.reason" class="engine-reason">
+                        {{ engine.reason }}
+                      </div>
+                    </div>
+                    <div class="engine-check">
+                      <el-icon v-if="analysisForm.agentEngine === engine.id" class="check-icon">
+                        <Check />
+                      </el-icon>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <!-- 分析深度 -->
               <div class="form-section">
                 <h4 class="section-title">🎯 分析深度</h4>
@@ -157,6 +194,58 @@
                   :closable="false"
                   style="margin-top: 12px"
                 />
+              </div>
+
+              <!-- 研究委员会 -->
+              <div class="form-section">
+                <div class="section-header-row">
+                  <h4 class="section-title">🧠 研究委员会</h4>
+                  <el-switch
+                    v-model="enhancedCommitteeEnabled"
+                    active-text="增强"
+                    inactive-text="标准"
+                  />
+                </div>
+
+                <div class="fixed-agents-grid">
+                  <div
+                    v-for="agent in FIXED_WORKFLOW_AGENTS"
+                    :key="agent.id"
+                    class="fixed-agent-card"
+                  >
+                    <div class="fixed-agent-main">
+                      <div class="fixed-agent-name">{{ agent.name }}</div>
+                      <div class="fixed-agent-desc">{{ agent.description }}</div>
+                    </div>
+                    <el-tag size="small" type="success">{{ agent.tag }}</el-tag>
+                  </div>
+                </div>
+
+                <div v-if="analysisForm.committeeMode === 'enhanced'" class="enhanced-committee">
+                  <div class="committee-subtitle">增强维度</div>
+                  <div class="analysts-grid committee-grid">
+                    <div
+                      v-for="agent in ENHANCED_COMMITTEE_AGENTS"
+                      :key="agent.id"
+                      class="analyst-card committee-agent-card"
+                      :class="{ active: analysisForm.selectedCommitteeAgents.includes(agent.id) }"
+                      @click="toggleCommitteeAgent(agent.id)"
+                    >
+                      <div class="analyst-avatar committee-avatar">
+                        {{ agent.name.charAt(0) }}
+                      </div>
+                      <div class="analyst-content">
+                        <div class="analyst-name">{{ agent.name }}</div>
+                        <div class="analyst-desc">{{ agent.description }}</div>
+                      </div>
+                      <div class="analyst-check">
+                        <el-icon v-if="analysisForm.selectedCommitteeAgents.includes(agent.id)" class="check-icon">
+                          <Check />
+                        </el-icon>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
 
@@ -357,7 +446,7 @@
 
             <div class="config-content">
               <!-- AI模型配置 -->
-              <div class="config-section">
+              <div v-if="analysisForm.agentEngine === 'tradingagents'" class="config-section">
                 <h4 class="config-title">🤖 AI模型配置</h4>
                 <div class="model-config">
                   <div class="model-item">
@@ -574,6 +663,71 @@
                   </div>
                 </div>
 
+                <!-- 交易执行计划 -->
+                <div v-if="currentTradePlan" class="trade-plan-section">
+                  <h4>交易执行计划</h4>
+                  <div class="trade-plan-card">
+                    <div class="trade-plan-header">
+                      <div class="trade-plan-action">
+                        <span class="label">动作参考:</span>
+                        <el-tag :type="getTradePlanTagType(currentTradePlan.action)" size="large">
+                          {{ getTradePlanActionText(currentTradePlan.action) }}
+                        </el-tag>
+                        <el-tag type="info" size="small">模拟辅助</el-tag>
+                      </div>
+                      <div class="trade-plan-meta">
+                        <el-tag type="warning" effect="plain">{{ currentTradePlan.time_horizon || '5-20个交易日' }}</el-tag>
+                        <el-tag type="info" effect="plain">证据 {{ currentTradePlan.evidence_grade || 'C' }}</el-tag>
+                      </div>
+                    </div>
+
+                    <div class="trade-plan-grid">
+                      <div class="trade-plan-item">
+                        <span class="item-label">入场观察区</span>
+                        <span class="item-value">{{ currentTradePlan.entry_zone?.text || '暂无明确区间' }}</span>
+                      </div>
+                      <div class="trade-plan-item">
+                        <span class="item-label">入场触发</span>
+                        <span class="item-value">{{ currentTradePlan.entry_trigger || '等待更明确的价格信号' }}</span>
+                      </div>
+                      <div class="trade-plan-item">
+                        <span class="item-label">止损价</span>
+                        <span class="item-value">{{ formatTradePlanPrice(currentTradePlan.stop_loss?.price) }}</span>
+                      </div>
+                      <div class="trade-plan-item">
+                        <span class="item-label">止损理由</span>
+                        <span class="item-value">{{ currentTradePlan.stop_loss?.reason || '暂无' }}</span>
+                      </div>
+                      <div class="trade-plan-item">
+                        <span class="item-label">止盈区</span>
+                        <span class="item-value">{{ currentTradePlan.take_profit?.zone || formatTradePlanPrice(currentTradePlan.take_profit?.price) }}</span>
+                      </div>
+                      <div class="trade-plan-item">
+                        <span class="item-label">止盈策略</span>
+                        <span class="item-value">{{ currentTradePlan.take_profit?.strategy || '分批止盈' }}</span>
+                      </div>
+                      <div class="trade-plan-item">
+                        <span class="item-label">置信度</span>
+                        <span class="item-value">{{ formatTradePlanPercent(currentTradePlan.confidence) }}</span>
+                      </div>
+                      <div class="trade-plan-item">
+                        <span class="item-label">风险等级</span>
+                        <span class="item-value">{{ currentTradePlan.risk_level || '中等' }}</span>
+                      </div>
+                    </div>
+
+                    <div class="trade-plan-note">
+                      <strong>仓位提示：</strong>{{ currentTradePlan.position_hint || '不读取账户资金，仅提供通用比例参考。' }}
+                    </div>
+                    <div v-if="currentTradePlan.invalidations?.length" class="trade-plan-invalidations">
+                      <h5>策略失效条件</h5>
+                      <ul>
+                        <li v-for="item in currentTradePlan.invalidations" :key="item">{{ item }}</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- 分析概览 -->
                 <div v-if="analysisResults" class="overview-section">
                   <h4>📊 分析概览</h4>
@@ -705,7 +859,7 @@ import {
   QuestionFilled,
   ArrowDown,
 } from '@element-plus/icons-vue'
-import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
+import { analysisApi, type AgentEngineCapability } from '@/api/analysis'
 import { paperApi } from '@/api/paper'
 import { stocksApi } from '@/api/stocks'
 import { useAppStore } from '@/stores/app'
@@ -713,10 +867,26 @@ import { useAuthStore } from '@/stores/auth'
 import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import { ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
+import {
+  DEFAULT_SELECTED_COMMITTEE_AGENTS,
+  ENHANCED_COMMITTEE_AGENTS,
+  FIXED_WORKFLOW_AGENTS,
+  type CommitteeMode
+} from '@/constants/committeeAgents'
 import { marked } from 'marked'
 import { recommendModels } from '@/api/modelCapabilities'
 import { validateStockCode, getStockCodeFormatHelp } from '@/utils/stockValidator'
 import { normalizeMarketForAnalysis, getMarketByStockCode } from '@/utils/market'
+import { buildSingleAnalysisRequest } from '@/utils/analysisRequest'
+import { getCurrencyAmount } from '@/utils/number'
+import {
+  buildTradePlanOrderSeed,
+  formatTradePlanPercent,
+  formatTradePlanPrice,
+  getTradePlanFromAnalysisResult,
+  normalizeTradePlanAction,
+  type TradePlan
+} from '@/utils/tradePlan'
 
 // 配置marked选项
 marked.setOptions({
@@ -726,18 +896,34 @@ marked.setOptions({
 
 // 市场类型定义
 type MarketType = 'A股' | '美股' | '港股'
+type AgentEngine = 'tradingagents' | 'codex'
+type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
 
 // 表单类型定义
 interface AnalysisForm {
   stockCode: string
   symbol: string
   market: MarketType
+  agentEngine: AgentEngine
   analysisDate: Date
   researchDepth: number
   selectedAnalysts: string[]
+  committeeMode: CommitteeMode
+  selectedCommitteeAgents: string[]
   includeSentiment: boolean
   includeRisk: boolean
   language: 'zh-CN' | 'en-US'
+}
+
+interface AgentEngineOption {
+  id: AgentEngine
+  name: string
+  description: string
+  icon: string
+  tag?: string
+  tagType?: TagType
+  disabled?: boolean
+  reason?: string
 }
 
 // 使用store
@@ -752,6 +938,7 @@ const currentTaskId = ref('')
 const analysisStatus = ref('idle') // 'idle', 'running', 'completed', 'failed'
 const showResults = ref(false)
 const analysisResults = ref<any>(null)
+const currentTradePlan = computed<TradePlan | null>(() => getTradePlanFromAnalysisResult(analysisResults.value))
 const activeReportTab = ref('') // 当前激活的报告标签页
 const progressInfo = ref({
   progress: 0,
@@ -804,13 +991,128 @@ const analysisForm = reactive<AnalysisForm>({
   stockCode: '',  // 保留用于表单绑定
   symbol: '',     // 标准化后的代码
   market: 'A股',
+  agentEngine: 'tradingagents',
   analysisDate: new Date(),
   researchDepth: 3, // 默认选中3级标准分析（推荐），将在 onMounted 中从用户偏好加载
   selectedAnalysts: ['市场分析师', '基本面分析师'], // 将在 onMounted 中从用户偏好加载
+  committeeMode: 'standard',
+  selectedCommitteeAgents: [...DEFAULT_SELECTED_COMMITTEE_AGENTS],
   includeSentiment: true,
   includeRisk: true,
   language: 'zh-CN'
 })
+
+const enhancedCommitteeEnabled = computed({
+  get: () => analysisForm.committeeMode === 'enhanced',
+  set: (enabled: boolean) => {
+    analysisForm.committeeMode = enabled ? 'enhanced' : 'standard'
+    if (enabled && analysisForm.selectedCommitteeAgents.length === 0) {
+      analysisForm.selectedCommitteeAgents = [...DEFAULT_SELECTED_COMMITTEE_AGENTS]
+    }
+  }
+})
+
+const agentEnginesLoaded = ref(false)
+const agentEngineCapabilities = ref<Record<AgentEngine, AgentEngineCapability>>({
+  tradingagents: {
+    id: 'tradingagents',
+    name: '平台多智能体',
+    available: true,
+    configured: true,
+    reason: null
+  },
+  codex: {
+    id: 'codex',
+    name: 'Codex Agent',
+    available: false,
+    configured: false,
+    reason: 'Codex Agent 尚未配置'
+  }
+})
+
+const agentEngineOptions = computed<AgentEngineOption[]>(() => {
+  const codex = agentEngineCapabilities.value.codex
+  const codexAvailable = Boolean(codex?.available && codex?.configured)
+  return [
+    {
+      id: 'tradingagents',
+      name: '平台多智能体',
+      description: '使用当前 API 模型配置和 TradingAgents 工作流',
+      icon: 'TrendCharts',
+      tag: '默认',
+      tagType: 'success'
+    },
+    {
+      id: 'codex',
+      name: 'Codex Agent',
+      description: codexAvailable
+        ? `通过 ${codex.mode === 'command' ? '本机命令' : 'HTTP bridge'} 调用 Codex Agent`
+        : '需要先配置 Codex bridge 后才能使用',
+      icon: 'Cpu',
+      tag: codexAvailable ? '实验' : '未配置',
+      tagType: codexAvailable ? 'warning' : 'info',
+      disabled: !codexAvailable,
+      reason: codexAvailable ? undefined : (codex?.reason || '请配置 CODEX_AGENT_ENDPOINT 或 CODEX_AGENT_COMMAND')
+    }
+  ]
+})
+
+const loadAgentEngineCapabilities = async () => {
+  try {
+    const response = await analysisApi.getAgentEngines()
+    const capabilities = response.data
+    const nextCapabilities = { ...agentEngineCapabilities.value }
+
+    capabilities?.engines?.forEach((engine) => {
+      if (engine.id === 'tradingagents' || engine.id === 'codex') {
+        nextCapabilities[engine.id] = engine
+      }
+    })
+
+    agentEngineCapabilities.value = nextCapabilities
+    agentEnginesLoaded.value = true
+
+    const selected = agentEngineCapabilities.value[analysisForm.agentEngine]
+    if (!selected?.available || !selected?.configured) {
+      analysisForm.agentEngine = 'tradingagents'
+    }
+  } catch (error) {
+    console.error('获取分析引擎能力失败:', error)
+    agentEnginesLoaded.value = true
+    if (analysisForm.agentEngine === 'codex') {
+      analysisForm.agentEngine = 'tradingagents'
+    }
+  }
+}
+
+const selectAgentEngine = (engine: AgentEngineOption) => {
+  if (engine.disabled) {
+    analysisForm.agentEngine = 'tradingagents'
+    ElMessage.warning(engine.reason || 'Codex Agent 尚未配置，已切换为平台多智能体')
+    return
+  }
+
+  analysisForm.agentEngine = engine.id
+}
+
+const ensureAgentEngineAvailable = async () => {
+  if (analysisForm.agentEngine !== 'codex') {
+    return true
+  }
+
+  if (!agentEnginesLoaded.value) {
+    await loadAgentEngineCapabilities()
+  }
+
+  const codex = agentEngineCapabilities.value.codex
+  if (codex?.available && codex?.configured) {
+    return true
+  }
+
+  analysisForm.agentEngine = 'tradingagents'
+  ElMessage.warning(codex?.reason || 'Codex Agent 尚未配置，请使用平台多智能体或先配置 Codex bridge')
+  return false
+}
 
 // 股票代码验证相关
 const stockCodeError = ref<string>('')
@@ -904,6 +1206,15 @@ const toggleAnalyst = (analystName: string) => {
   }
 }
 
+const toggleCommitteeAgent = (agentId: string) => {
+  const index = analysisForm.selectedCommitteeAgents.indexOf(agentId)
+  if (index > -1) {
+    analysisForm.selectedCommitteeAgents.splice(index, 1)
+  } else {
+    analysisForm.selectedCommitteeAgents.push(agentId)
+  }
+}
+
 // 提交分析
 const submitAnalysis = async () => {
   const stockCode = analysisForm.stockCode.trim()
@@ -928,6 +1239,10 @@ const submitAnalysis = async () => {
     return
   }
 
+  if (!(await ensureAgentEngineAvailable())) {
+    return
+  }
+
   submitting.value = true
 
   try {
@@ -936,21 +1251,21 @@ const submitAnalysis = async () => {
       ? analysisForm.analysisDate
       : new Date(analysisForm.analysisDate)
 
-    const request: SingleAnalysisRequest = {
+    const request = buildSingleAnalysisRequest({
       symbol: analysisForm.symbol,
-      stock_code: analysisForm.symbol,  // 兼容字段
-      parameters: {
-        market_type: analysisForm.market,
-        analysis_date: analysisDate.toISOString().split('T')[0],
-        research_depth: getDepthDescription(analysisForm.researchDepth),
-        selected_analysts: convertAnalystNamesToIds(analysisForm.selectedAnalysts),
-        include_sentiment: analysisForm.includeSentiment,
-        include_risk: analysisForm.includeRisk,
-        language: analysisForm.language,
-        quick_analysis_model: modelSettings.value.quickAnalysisModel,
-        deep_analysis_model: modelSettings.value.deepAnalysisModel
-      }
-    }
+      market: analysisForm.market,
+      analysisDate,
+      researchDepth: getDepthDescription(analysisForm.researchDepth),
+      selectedAnalysts: convertAnalystNamesToIds(analysisForm.selectedAnalysts),
+      includeSentiment: analysisForm.includeSentiment,
+      includeRisk: analysisForm.includeRisk,
+      language: analysisForm.language,
+      agentEngine: analysisForm.agentEngine,
+      quickAnalysisModel: modelSettings.value.quickAnalysisModel,
+      deepAnalysisModel: modelSettings.value.deepAnalysisModel,
+      committeeMode: analysisForm.committeeMode,
+      selectedCommitteeAgents: analysisForm.selectedCommitteeAgents
+    })
 
     const response = await analysisApi.startSingleAnalysis(request)
 
@@ -1241,6 +1556,26 @@ const getActionTagType = (action: string): 'primary' | 'success' | 'warning' | '
   return actionTypes[action] || 'info'
 }
 
+const getTradePlanActionText = (action: unknown): string => {
+  const actionText: Record<string, string> = {
+    buy: '买入',
+    sell: '卖出',
+    hold: '持有',
+    watch: '观望'
+  }
+  return actionText[normalizeTradePlanAction(action)] || '观望'
+}
+
+const getTradePlanTagType = (action: unknown): 'primary' | 'success' | 'warning' | 'info' | 'danger' => {
+  const tagTypes: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
+    buy: 'success',
+    sell: 'danger',
+    hold: 'warning',
+    watch: 'info'
+  }
+  return tagTypes[normalizeTradePlanAction(action)] || 'info'
+}
+
 // 获取分析报告
 const getAnalysisReports = (data: any) => {
   console.log('📊 getAnalysisReports 输入数据:', data)
@@ -1281,7 +1616,17 @@ const getAnalysisReports = (data: any) => {
     { key: 'neutral_analyst', title: '⚖️ 中性分析师', category: '风险管理团队' },
     { key: 'risk_management_decision', title: '👔 投资组合经理', category: '风险管理团队' },
 
+    // 增强研究委员会
+    { key: 'committee_data_steward', title: '🧾 数据质量官', category: '增强研究委员会' },
+    { key: 'committee_industry_macro', title: '🌐 行业与宏观分析', category: '增强研究委员会' },
+    { key: 'committee_business_moat', title: '🏰 商业与护城河', category: '增强研究委员会' },
+    { key: 'committee_valuation', title: '💎 估值分析', category: '增强研究委员会' },
+    { key: 'committee_flow_positioning', title: '🌊 资金流与持仓', category: '增强研究委员会' },
+    { key: 'committee_scorecard', title: '📋 研究委员会评分卡', category: '增强研究委员会' },
+    { key: 'committee_reconciliation', title: '🧩 分歧调和摘要', category: '增强研究委员会' },
+
     // 最终决策 (1个)
+    { key: 'trade_timing_plan', title: '🧭 交易执行计划', category: '最终决策' },
     { key: 'final_trade_decision', title: '🎯 最终交易决策', category: '最终决策' },
 
     // 兼容旧格式
@@ -1323,6 +1668,14 @@ const getReportIcon = (title: string) => {
     '🔬 研究团队决策': '🔬',
     '💼 交易团队计划': '💼',
     '⚖️ 风险管理团队': '⚖️',
+    '🧾 数据质量官': '🧾',
+    '🌐 行业与宏观分析': '🌐',
+    '🏰 商业与护城河': '🏰',
+    '💎 估值分析': '💎',
+    '🌊 资金流与持仓': '🌊',
+    '📋 研究委员会评分卡': '📋',
+    '🧩 分歧调和摘要': '🧩',
+    '🧭 交易执行计划': '🧭',
     '🎯 最终交易决策': '🎯'
   }
   return iconMap[title] || '📊'
@@ -1344,6 +1697,14 @@ const getReportDescription = (title: string) => {
     '🔬 研究团队决策': '多头/空头研究员辩论分析，研究经理综合决策',
     '💼 交易团队计划': '专业交易员制定的具体交易执行计划',
     '⚖️ 风险管理团队': '激进/保守/中性分析师风险评估，投资组合经理最终决策',
+    '🧾 数据质量官': '数据新鲜度、缺失项、证据等级和置信度上限',
+    '🌐 行业与宏观分析': '行业周期、政策、宏观变量和同业背景',
+    '🏰 商业与护城河': '商业模式、竞争壁垒、客户供应商和管理执行',
+    '💎 估值分析': '历史估值、同业比较和情景空间',
+    '🌊 资金流与持仓': '资金流、流动性、换手和拥挤度',
+    '📋 研究委员会评分卡': '增强委员会结构化评分和证据等级',
+    '🧩 分歧调和摘要': '跨维度分歧、低证据项和降级条件',
+    '🧭 交易执行计划': '波段交易入场、止损、止盈和策略失效条件',
     '🎯 最终交易决策': '综合所有团队分析后的最终投资决策'
   }
   return descMap[title] || '详细分析报告'
@@ -1531,8 +1892,16 @@ const parseRecommendation = () => {
     action,
     targetPrice,
     confidence: typeof confidence === 'number' ? confidence : 0,
-    riskLevel: String(riskLevel)
+    riskLevel: String(riskLevel),
+    source: 'recommendation'
   }
+}
+
+const getTradeCurrency = (stockCode: string): 'CNY' | 'HKD' | 'USD' => {
+  const market = getMarketByStockCode(stockCode)
+  if (market === '港股') return 'HKD'
+  if (market === '美股') return 'USD'
+  return 'CNY'
 }
 
 // 一键模拟下单（应用到交易）
@@ -1554,10 +1923,30 @@ const goSimOrder = async () => {
       return
     }
 
-    // 解析投资建议
-    const recommendation = parseRecommendation()
+    // 获取当前实时价格
+    let currentPrice = 10 // 默认价格
+    try {
+      const quoteRes = await stocksApi.getQuote(code)
+      if (quoteRes.success && quoteRes.data && quoteRes.data.price) {
+        currentPrice = quoteRes.data.price
+      }
+    } catch (error) {
+      console.warn('获取实时价格失败，使用默认价格')
+    }
+
+    const tradePlan = currentTradePlan.value
+    const orderSeed = buildTradePlanOrderSeed(tradePlan, currentPrice)
+    const recommendation = orderSeed
+      ? {
+          action: orderSeed.side,
+          targetPrice: orderSeed.price,
+          confidence: tradePlan?.confidence || 0,
+          riskLevel: tradePlan?.risk_level || '中等',
+          source: 'trade_plan'
+        }
+      : parseRecommendation()
     if (!recommendation) {
-      ElMessage.warning('无法解析投资建议，请检查分析结果')
+      ElMessage.warning('无法解析投资建议或交易执行计划，请检查分析结果')
       return
     }
 
@@ -1574,25 +1963,19 @@ const goSimOrder = async () => {
     // 查找当前持仓
     const currentPosition = positions.find(p => p.code === code)
 
-    // 获取当前实时价格
-    let currentPrice = 10 // 默认价格
-    try {
-      const quoteRes = await stocksApi.getQuote(code)
-      if (quoteRes.success && quoteRes.data && quoteRes.data.price) {
-        currentPrice = quoteRes.data.price
-      }
-    } catch (error) {
-      console.warn('获取实时价格失败，使用默认价格')
-    }
-
     // 计算建议交易数量
     let suggestedQuantity = 0
     let maxQuantity = 0
 
     if (recommendation.action === 'buy') {
       // 买入：根据可用资金和当前价格计算
-      const availableCash = account.cash
-      maxQuantity = Math.floor(Number(availableCash) / Number(currentPrice) / 100) * 100 // 100股为单位
+      const availableCash = getCurrencyAmount(account.cash, getTradeCurrency(code))
+      const referencePrice = recommendation.targetPrice || currentPrice
+      maxQuantity = Math.floor(Number(availableCash) / Number(referencePrice) / 100) * 100 // 100股为单位
+      if (maxQuantity < 100) {
+        ElMessage.warning('当前可用资金不足以买入一手')
+        return
+      }
       const suggested = Math.floor(maxQuantity * 0.2) // 建议使用20%资金
       suggestedQuantity = Math.floor(suggested / 100) * 100 // 向下取整到100的倍数
       suggestedQuantity = Math.max(100, suggestedQuantity) // 至少100股
@@ -1609,7 +1992,7 @@ const goSimOrder = async () => {
 
     // 用户可修改的价格和数量（使用reactive）
     const tradeForm = reactive({
-      price: currentPrice,
+      price: recommendation.targetPrice || currentPrice,
       quantity: suggestedQuantity
     })
 
@@ -1638,10 +2021,30 @@ const goSimOrder = async () => {
             h('strong', '当前价格：'),
             h('span', `${currentPrice.toFixed(2)}元`)
           ]),
+          recommendation.source === 'trade_plan' && tradePlan ? h('div', {
+            style: 'background-color: #F4F7FF; border: 1px solid #C6D8FF; border-radius: 4px; padding: 12px; margin: 12px 0;'
+          }, [
+            h('p', { style: 'margin: 4px 0;' }, [
+              h('strong', '计划来源：'),
+              h('span', '交易执行计划')
+            ]),
+            h('p', { style: 'margin: 4px 0;' }, [
+              h('strong', '入场触发：'),
+              h('span', tradePlan.entry_trigger || '等待更明确的价格信号')
+            ]),
+            h('p', { style: 'margin: 4px 0;' }, [
+              h('strong', '止损参考：'),
+              h('span', `${formatTradePlanPrice(tradePlan.stop_loss?.price)}，${tradePlan.stop_loss?.reason || '暂无'}`)
+            ]),
+            h('p', { style: 'margin: 4px 0;' }, [
+              h('strong', '止盈参考：'),
+              h('span', tradePlan.take_profit?.zone || formatTradePlanPrice(tradePlan.take_profit?.price))
+            ])
+          ]) : null,
           h('div', { style: 'margin: 16px 0;' }, [
             h('p', { style: 'margin-bottom: 8px;' }, [
-              h('strong', '交易价格：'),
-              h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(可修改)')
+              h('strong', '参考触发价：'),
+              h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(可修改，实际模拟订单按最新价成交)')
             ]),
             h(ElInputNumber, {
               modelValue: tradeForm.price,
@@ -1682,7 +2085,7 @@ const goSimOrder = async () => {
             h('span', recommendation.riskLevel)
           ]),
           recommendation.action === 'buy' ? h('p', { style: 'color: #909399; font-size: 12px; margin-top: 12px;' },
-            `可用资金：${typeof account.cash === 'number' ? account.cash.toFixed(2) : account.cash}元，最大可买：${maxQuantity}股`
+            `可用资金：${getCurrencyAmount(account.cash, getTradeCurrency(code)).toFixed(2)}，最大可买：${maxQuantity}股`
           ) : null,
           recommendation.action === 'sell' ? h('p', { style: 'color: #909399; font-size: 12px; margin-top: 12px;' },
             `当前持仓：${maxQuantity}股`
@@ -1716,7 +2119,7 @@ const goSimOrder = async () => {
           // 检查资金是否充足
           if (recommendation.action === 'buy') {
             const totalAmount = tradeForm.price * tradeForm.quantity
-            if (totalAmount > Number(account.cash)) {
+            if (totalAmount > getCurrencyAmount(account.cash, getTradeCurrency(code))) {
               ElMessage.error('可用资金不足')
               return
             }
@@ -2080,6 +2483,11 @@ const isQuickAnalysisRole = (roles: string[] | undefined): boolean => {
  * 显示分析深度的模型推荐说明
  */
 const checkModelSuitability = async () => {
+  if (analysisForm.agentEngine !== 'tradingagents') {
+    modelRecommendation.value = null
+    return
+  }
+
   const depthNames: Record<number, string> = {
     1: '快速',
     2: '基础',
@@ -2185,9 +2593,14 @@ watch([() => modelSettings.value.quickAnalysisModel, () => modelSettings.value.d
   checkModelSuitability()
 })
 
+watch(() => analysisForm.agentEngine, () => {
+  checkModelSuitability()
+})
+
 // 页面初始化
 onMounted(async () => {
   initializeModelSettings()
+  await loadAgentEngineCapabilities()
 
   // 🆕 从用户偏好加载默认设置
   const authStore = useAuthStore()
@@ -2339,6 +2752,19 @@ onMounted(async () => {
           padding-bottom: 8px;
           border-bottom: 2px solid #e2e8f0;
         }
+
+        .section-header-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          margin-bottom: 16px;
+
+          .section-title {
+            margin-bottom: 0;
+            flex: 1;
+          }
+        }
       }
 
       .stock-input {
@@ -2377,6 +2803,97 @@ onMounted(async () => {
 
         .el-icon {
           font-size: 14px;
+        }
+      }
+
+      .engine-selector {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 12px;
+
+        .engine-option {
+          display: grid;
+          grid-template-columns: 44px 1fr 24px;
+          align-items: center;
+          gap: 12px;
+          min-height: 92px;
+          padding: 16px;
+          border: 2px solid #e2e8f0;
+          border-radius: 12px;
+          cursor: pointer;
+          transition: all 0.3s ease;
+
+          &:hover {
+            border-color: #3b82f6;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+          }
+
+          &.active {
+            border-color: #3b82f6;
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            color: #1e40af;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.15);
+          }
+
+          &.disabled {
+            cursor: not-allowed;
+            opacity: 0.72;
+            background: #f8fafc;
+
+            &:hover {
+              border-color: #e2e8f0;
+              transform: none;
+              box-shadow: none;
+            }
+          }
+
+          .engine-icon {
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 10px;
+            background: #f8fafc;
+            color: #3b82f6;
+
+            .el-icon {
+              font-size: 24px;
+            }
+          }
+
+          .engine-info {
+            min-width: 0;
+
+            .engine-name {
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              font-weight: 600;
+              margin-bottom: 6px;
+            }
+
+            .engine-desc {
+              font-size: 12px;
+              line-height: 1.5;
+              color: #64748b;
+            }
+
+            .engine-reason {
+              margin-top: 6px;
+              font-size: 12px;
+              line-height: 1.45;
+              color: #909399;
+            }
+          }
+
+          .engine-check {
+            display: flex;
+            justify-content: flex-end;
+            color: #3b82f6;
+          }
         }
       }
 
@@ -2508,6 +3025,65 @@ onMounted(async () => {
           &.active .analyst-check .check-icon {
             color: #1e40af;
           }
+        }
+      }
+
+      .fixed-agents-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 12px;
+        margin-bottom: 16px;
+
+        .fixed-agent-card {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          min-height: 84px;
+          padding: 14px 16px;
+          border: 1px solid #e2e8f0;
+          border-radius: 10px;
+          background: #f8fafc;
+
+          .fixed-agent-main {
+            min-width: 0;
+          }
+
+          .fixed-agent-name {
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 4px;
+          }
+
+          .fixed-agent-desc {
+            font-size: 12px;
+            line-height: 1.45;
+            color: #64748b;
+          }
+        }
+      }
+
+      .enhanced-committee {
+        .committee-subtitle {
+          font-size: 13px;
+          font-weight: 600;
+          color: #374151;
+          margin: 4px 0 12px;
+        }
+
+        .committee-grid {
+          grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        }
+
+        .committee-agent-card {
+          min-height: 92px;
+        }
+
+        .committee-avatar {
+          border-radius: 12px;
+          background: #eef2ff;
+          color: #4338ca;
+          font-weight: 700;
         }
       }
     }
@@ -3157,6 +3733,93 @@ onMounted(async () => {
   margin: 0;
   color: #6b7280;
   line-height: 1.6;
+}
+
+.trade-plan-section {
+  margin-bottom: 32px;
+}
+
+.trade-plan-section h4 {
+  color: #1f2937;
+  margin-bottom: 16px;
+}
+
+.trade-plan-card {
+  background: #f8fafc;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.trade-plan-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.trade-plan-action,
+.trade-plan-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.trade-plan-action .label {
+  font-weight: 600;
+  color: #374151;
+}
+
+.trade-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.trade-plan-item {
+  min-height: 74px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trade-plan-item .item-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.trade-plan-item .item-value {
+  color: #111827;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.trade-plan-note {
+  margin-top: 14px;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.trade-plan-invalidations {
+  margin-top: 14px;
+  color: #475569;
+}
+
+.trade-plan-invalidations h5 {
+  margin: 0 0 8px 0;
+  color: #374151;
+}
+
+.trade-plan-invalidations ul {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.7;
 }
 
 .reports-section {

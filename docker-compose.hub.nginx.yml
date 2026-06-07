@@ -127,6 +127,11 @@ services:
       OPENROUTER_ENABLED: "${OPENROUTER_ENABLED:-false}"
       AIHUBMIX_API_KEY: "${AIHUBMIX_API_KEY}"
       AIHUBMIX_ENABLED: "${AIHUBMIX_ENABLED:-false}"
+      # Codex Agent bridge（可选）
+      CODEX_AGENT_ENDPOINT: "${CODEX_AGENT_ENDPOINT:-}"
+      CODEX_AGENT_API_KEY: "${CODEX_AGENT_API_KEY:-}"
+      CODEX_AGENT_COMMAND: "${CODEX_AGENT_COMMAND:-}"
+      CODEX_AGENT_TIMEOUT: "${CODEX_AGENT_TIMEOUT:-900}"
       # 数据源API密钥
       TUSHARE_TOKEN: "${TUSHARE_TOKEN}"
       TUSHARE_ENABLED: "${TUSHARE_ENABLED:-false}"
@@ -205,4 +210,3 @@ volumes:
 networks:
   tradingagents-network:
     driver: bridge
-

@@ -1138,7 +1138,17 @@ function formatReportName(key: string): string {
     'neutral_analyst': '⚖️ 中性分析师',
     'risk_management_decision': '👔 投资组合经理',
 
+    // 增强研究委员会
+    'committee_data_steward': '🧾 数据质量官',
+    'committee_industry_macro': '🌐 行业与宏观分析',
+    'committee_business_moat': '🏰 商业与护城河',
+    'committee_valuation': '💎 估值分析',
+    'committee_flow_positioning': '🌊 资金流与持仓',
+    'committee_scorecard': '📋 研究委员会评分卡',
+    'committee_reconciliation': '🧩 分歧调和摘要',
+
     // 最终决策 (1个)
+    'trade_timing_plan': '🧭 交易执行计划',
     'final_trade_decision': '🎯 最终交易决策',
 
     // 兼容旧字段

@@ -6,6 +6,11 @@
 import asyncio
 import uuid
 import logging
+import json
+import os
+import shlex
+import subprocess
+import time
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from pathlib import Path
@@ -32,6 +37,8 @@ from app.services.config_service import ConfigService
 from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
 from app.services.redis_progress_tracker import RedisProgressTracker, get_progress_by_id
 from app.services.progress_log_handler import register_analysis_tracker, unregister_analysis_tracker
+from app.services.enhanced_committee_service import enhanced_committee_service
+from app.services.trade_timing_service import trade_timing_service
 
 # 股票基础信息获取（用于补充显示名称）
 try:
@@ -708,6 +715,10 @@ class SimpleAnalysisService:
     ) -> Dict[str, Any]:
         """创建分析任务（立即返回，不执行分析）"""
         try:
+            engine_error = self.validate_agent_engine_request(request)
+            if engine_error:
+                raise ValueError(engine_error)
+
             # 生成任务ID
             task_id = str(uuid.uuid4())
 
@@ -1057,6 +1068,493 @@ class SimpleAnalysisService:
         logger.info(f"✅ [线程池] 分析任务执行完成: {task_id}")
         return result
 
+    def _get_agent_engine(self, request: SingleAnalysisRequest) -> str:
+        """获取分析引擎，默认保持现有 TradingAgents 流程。"""
+        params = getattr(request, "parameters", None)
+        raw_engine = getattr(params, "agent_engine", None) if params else None
+        engine = str(raw_engine or "tradingagents").strip().lower()
+        aliases = {
+            "api": "tradingagents",
+            "default": "tradingagents",
+            "trading_agents": "tradingagents",
+            "codex_agent": "codex",
+        }
+        engine = aliases.get(engine, engine)
+        if engine not in {"tradingagents", "codex"}:
+            logger.warning(f"⚠️ 未知分析引擎 {raw_engine}，回退到 TradingAgents")
+            return "tradingagents"
+        return engine
+
+    def _get_codex_agent_config(self) -> Dict[str, Any]:
+        endpoint = os.getenv("CODEX_AGENT_ENDPOINT", "").strip()
+        command = os.getenv("CODEX_AGENT_COMMAND", "").strip()
+        timeout = os.getenv("CODEX_AGENT_TIMEOUT", "900").strip() or "900"
+        endpoint_healthy = self._codex_agent_endpoint_healthy(endpoint) if endpoint else False
+        command_configured = bool(command)
+        available = endpoint_healthy or command_configured
+        return {
+            "configured": bool(endpoint or command),
+            "available": available,
+            "endpoint_configured": bool(endpoint),
+            "endpoint_healthy": endpoint_healthy,
+            "command_configured": command_configured,
+            "mode": "endpoint" if endpoint_healthy else ("command" if command_configured else None),
+            "timeout": timeout,
+        }
+
+    def _codex_agent_health_url(self, endpoint: str) -> str:
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(endpoint)
+        return urlunparse((parsed.scheme, parsed.netloc, "/health", "", "", ""))
+
+    def _codex_agent_endpoint_healthy(self, endpoint: str, timeout: int = 2) -> bool:
+        """检查 Codex Agent HTTP bridge 是否可达。"""
+        if not endpoint:
+            return False
+
+        try:
+            import requests
+
+            response = requests.get(self._codex_agent_health_url(endpoint), timeout=timeout)
+            return response.ok
+        except Exception as exc:
+            logger.warning(f"⚠️ Codex Agent bridge 健康检查失败: {exc}")
+            return False
+
+    def is_codex_agent_configured(self) -> bool:
+        """检查 Codex Agent bridge 是否已配置且可用。"""
+        return bool(self._get_codex_agent_config()["available"])
+
+    def get_agent_engine_capabilities(self) -> Dict[str, Any]:
+        """返回前端可用的分析引擎能力。"""
+        codex_config = self._get_codex_agent_config()
+        codex_reason = None
+        if not codex_config["configured"]:
+            codex_reason = (
+                "Codex Agent 尚未配置。请在后端环境变量中设置 CODEX_AGENT_ENDPOINT "
+                "指向 Codex bridge HTTP 服务，或设置 CODEX_AGENT_COMMAND 指向 Codex CLI/脚本。"
+            )
+        elif not codex_config["available"]:
+            codex_reason = (
+                "Codex Agent bridge 无法连接。请确认宿主机 bridge 服务已启动，"
+                "且 CODEX_AGENT_ENDPOINT 可从后端容器访问。"
+            )
+
+        return {
+            "default_engine": "tradingagents",
+            "engines": [
+                {
+                    "id": "tradingagents",
+                    "name": "平台多智能体",
+                    "available": True,
+                    "configured": True,
+                    "reason": None,
+                },
+                {
+                    "id": "codex",
+                    "name": "Codex Agent",
+                    "available": codex_config["available"],
+                    "configured": codex_config["configured"],
+                    "mode": codex_config["mode"],
+                    "endpoint_configured": codex_config["endpoint_configured"],
+                    "endpoint_healthy": codex_config["endpoint_healthy"],
+                    "command_configured": codex_config["command_configured"],
+                    "reason": codex_reason,
+                },
+            ],
+        }
+
+    def validate_agent_engine_request(self, request: SingleAnalysisRequest) -> Optional[str]:
+        """提交前校验分析引擎，避免后台任务创建后才失败。"""
+        if self._get_agent_engine(request) != "codex":
+            return None
+        codex_config = self._get_codex_agent_config()
+        if codex_config["available"]:
+            return None
+        if codex_config["configured"]:
+            return (
+                "Codex Agent bridge 无法连接，无法启动分析。请确认宿主机 bridge 服务已启动，"
+                "且 CODEX_AGENT_ENDPOINT 可从后端容器访问；或切换为“平台多智能体”。"
+            )
+        return (
+            "Codex Agent 引擎未配置，无法启动分析。请先配置 CODEX_AGENT_ENDPOINT "
+            "或 CODEX_AGENT_COMMAND，或切换为“平台多智能体”继续使用当前 API 模型分析。"
+        )
+
+    def _build_enhanced_committee_reports(
+        self,
+        request: SingleAnalysisRequest,
+        reports: Dict[str, Any],
+        state: Dict[str, Any],
+        decision: Dict[str, Any],
+        llm: Optional[Any] = None,
+    ) -> Dict[str, str]:
+        """Build optional enhanced committee reports after the standard graph finishes."""
+        return enhanced_committee_service.build_reports(
+            request=request,
+            reports=reports,
+            state=state if isinstance(state, dict) else {},
+            decision=decision if isinstance(decision, dict) else {},
+            llm=llm,
+        )
+
+    def _build_trade_timing_plan(
+        self,
+        request: SingleAnalysisRequest,
+        reports: Dict[str, Any],
+        decision: Dict[str, Any],
+        llm: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Build a structured swing-trading execution plan after analysis."""
+        return trade_timing_service.build_plan(
+            request=request,
+            reports=reports,
+            decision=decision if isinstance(decision, dict) else {},
+            llm=llm,
+        )
+
+    def _normalize_trade_timing_plan(
+        self,
+        raw_plan: Dict[str, Any],
+        request: SingleAnalysisRequest,
+        reports: Dict[str, Any],
+        decision: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Normalize externally supplied trade plans, mainly from Codex Agent."""
+        return trade_timing_service.normalize_plan(
+            raw_plan,
+            request=request,
+            reports=reports,
+            decision=decision if isinstance(decision, dict) else {},
+        )
+
+    def _render_trade_timing_report(self, trade_plan: Dict[str, Any]) -> str:
+        return trade_timing_service.render_report(trade_plan)
+
+    def _run_codex_agent_analysis_sync(
+        self,
+        task_id: str,
+        user_id: str,
+        request: SingleAnalysisRequest,
+        progress_tracker: Optional[RedisProgressTracker],
+        update_progress_sync
+    ) -> Dict[str, Any]:
+        """通过可配置 bridge 调用 Codex Agent，并归一化为平台分析结果。"""
+        start_time = time.time()
+        stock_code = request.get_symbol()
+        params = request.parameters or AnalysisParameters()
+        analysis_date = params.analysis_date
+        if isinstance(analysis_date, datetime):
+            analysis_date = analysis_date.strftime("%Y-%m-%d")
+        elif not analysis_date:
+            analysis_date = datetime.now().strftime("%Y-%m-%d")
+        else:
+            analysis_date = str(analysis_date)
+
+        logger.info(f"🤖 [CodexAgent] 开始执行: task_id={task_id}, stock_code={stock_code}")
+        update_progress_sync(35, "🤖 Codex Agent 接收分析任务", "codex_agent")
+
+        context = {
+            "task_id": task_id,
+            "user_id": str(user_id),
+            "stock_code": stock_code,
+            "market_type": params.market_type,
+            "analysis_date": analysis_date,
+            "research_depth": params.research_depth,
+            "selected_analysts": params.selected_analysts,
+            "include_sentiment": params.include_sentiment,
+            "include_risk": params.include_risk,
+            "language": params.language,
+            "custom_prompt": params.custom_prompt,
+            "committee_mode": params.committee_mode,
+            "selected_committee_agents": params.selected_committee_agents,
+        }
+        prompt = self._build_codex_agent_prompt(context)
+
+        update_progress_sync(55, "🤖 Codex Agent 正在生成分析", "codex_agent")
+        bridge_response = self._invoke_codex_agent_bridge(prompt, context)
+
+        update_progress_sync(85, "🧾 整理 Codex Agent 输出", "codex_result")
+        result = self._normalize_codex_agent_response(
+            task_id=task_id,
+            request=request,
+            response=bridge_response,
+            analysis_date=analysis_date,
+            execution_time=time.time() - start_time,
+        )
+        logger.info(f"✅ [CodexAgent] 分析完成: task_id={task_id}")
+        return result
+
+    def _build_codex_agent_prompt(self, context: Dict[str, Any]) -> str:
+        analyst_names = ", ".join(context.get("selected_analysts") or [])
+        committee_mode = context.get("committee_mode") or "standard"
+        committee_agents = ", ".join(context.get("selected_committee_agents") or [])
+        custom_prompt = context.get("custom_prompt") or "无"
+        return f"""你是 TradingAgents-CN 平台中的 Codex Agent 分析引擎。
+
+请基于以下任务上下文生成一份结构化股票分析报告：
+
+- 股票代码：{context.get("stock_code")}
+- 市场类型：{context.get("market_type")}
+- 分析日期：{context.get("analysis_date")}
+- 研究深度：{context.get("research_depth")}
+- 关注分析师维度：{analyst_names or "默认维度"}
+- 增强研究委员会：{committee_mode}
+- 增强委员会维度：{committee_agents or "未启用"}
+- 是否包含情绪分析：{context.get("include_sentiment")}
+- 是否包含风险评估：{context.get("include_risk")}
+- 输出语言：{context.get("language")}
+- 用户补充要求：{custom_prompt}
+
+请输出 Markdown，并尽量包含：
+1. 核心结论
+2. 市场/技术分析
+3. 基本面分析
+4. 新闻与情绪影响
+5. 风险因素
+6. 最终动作建议：买入、持有、卖出或观望
+7. 交易执行计划：入场区间、买入/卖出触发条件、止损、止盈、策略失效条件、仓位提示
+8. 置信度和主要依据
+
+如可以返回 JSON，请额外返回 trade_plan 字段：
+{{
+  "action": "buy/sell/hold/watch",
+  "entry_zone": {{"low": 数字或null, "high": 数字或null, "text": "区间说明"}},
+  "entry_trigger": "触发条件",
+  "stop_loss": {{"price": 数字或null, "reason": "止损理由"}},
+  "take_profit": {{"price": 数字或null, "zone": "止盈区间", "strategy": "分批止盈策略"}},
+  "invalidations": ["策略失效条件"],
+  "time_horizon": "5-20个交易日",
+  "position_hint": "不读取账户资金的通用仓位提示",
+  "confidence": 0.0,
+  "risk_level": "低/中等/高",
+  "evidence_grade": "A/B/C/D"
+}}
+
+如无法访问实时行情或外部数据，请明确说明数据限制，不要编造精确行情。"""
+
+    def _invoke_codex_agent_bridge(self, prompt: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """调用 Codex Agent bridge。支持 HTTP endpoint 或本机命令。"""
+        endpoint = os.getenv("CODEX_AGENT_ENDPOINT", "").strip()
+        command = os.getenv("CODEX_AGENT_COMMAND", "").strip()
+        timeout = int(os.getenv("CODEX_AGENT_TIMEOUT", "900"))
+        codex_config = self._get_codex_agent_config()
+
+        if endpoint and (codex_config["endpoint_healthy"] or not command):
+            try:
+                return self._invoke_codex_agent_endpoint(endpoint, prompt, context, timeout)
+            except Exception:
+                if not command:
+                    raise
+                logger.warning("⚠️ Codex Agent endpoint 调用失败，回退到 CODEX_AGENT_COMMAND", exc_info=True)
+        if command:
+            return self._invoke_codex_agent_command(command, prompt, context, timeout)
+
+        raise RuntimeError(
+            "Codex Agent 引擎未配置。请在后端环境变量中设置 CODEX_AGENT_ENDPOINT "
+            "指向 Codex bridge HTTP 服务，或设置 CODEX_AGENT_COMMAND 指向本机 Codex CLI/脚本。"
+        )
+
+    def _invoke_codex_agent_endpoint(
+        self,
+        endpoint: str,
+        prompt: str,
+        context: Dict[str, Any],
+        timeout: int
+    ) -> Dict[str, Any]:
+        import requests
+
+        headers = {"Content-Type": "application/json"}
+        api_key = os.getenv("CODEX_AGENT_API_KEY", "").strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        payload = {
+            "prompt": prompt,
+            "context": context,
+            "task_id": context.get("task_id"),
+        }
+        response = requests.post(endpoint, json=payload, headers=headers, timeout=timeout)
+        response.raise_for_status()
+
+        try:
+            data = response.json()
+        except ValueError:
+            data = {"content": response.text}
+        return data if isinstance(data, dict) else {"content": str(data)}
+
+    def _invoke_codex_agent_command(
+        self,
+        command: str,
+        prompt: str,
+        context: Dict[str, Any],
+        timeout: int
+    ) -> Dict[str, Any]:
+        payload = json.dumps(
+            {"prompt": prompt, "context": context, "task_id": context.get("task_id")},
+            ensure_ascii=False,
+        )
+        completed = subprocess.run(
+            shlex.split(command),
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=str(project_root),
+        )
+        if completed.returncode != 0:
+            stderr = completed.stderr.strip()
+            raise RuntimeError(f"Codex Agent 命令执行失败: {stderr or completed.returncode}")
+
+        output = completed.stdout.strip()
+        if not output:
+            raise RuntimeError("Codex Agent 命令没有返回内容")
+
+        try:
+            data = json.loads(output)
+        except ValueError:
+            data = {"content": output}
+        return data if isinstance(data, dict) else {"content": str(data)}
+
+    def _normalize_codex_agent_response(
+        self,
+        task_id: str,
+        request: SingleAnalysisRequest,
+        response: Dict[str, Any],
+        analysis_date: str,
+        execution_time: float,
+    ) -> Dict[str, Any]:
+        stock_code = request.get_symbol()
+        params = request.parameters or AnalysisParameters()
+        content = self._extract_codex_content(response)
+        decision = response.get("decision") if isinstance(response.get("decision"), dict) else {}
+        if not decision:
+            decision = self._extract_codex_decision(content)
+
+        reports = response.get("reports") if isinstance(response.get("reports"), dict) else {}
+        reports.setdefault("codex_agent_report", content)
+        reports.setdefault("final_trade_decision", content)
+
+        raw_trade_plan = response.get("trade_plan") if isinstance(response.get("trade_plan"), dict) else None
+        if raw_trade_plan:
+            trade_plan = self._normalize_trade_timing_plan(
+                raw_trade_plan,
+                request=request,
+                reports=reports,
+                decision=decision,
+            )
+        else:
+            trade_plan = self._build_trade_timing_plan(
+                request=request,
+                reports=reports,
+                decision=decision,
+            )
+        reports.setdefault("trade_timing_plan", self._render_trade_timing_report(trade_plan))
+
+        summary = response.get("summary") or self._summarize_codex_text(content)
+        recommendation = response.get("recommendation") or self._build_codex_recommendation(decision)
+        model_info = response.get("model_info") or "Codex Agent Bridge"
+
+        state = {
+            "agent_engine": "codex",
+            "final_trade_decision": content,
+            "codex_agent_response": response,
+            "committee_mode": params.committee_mode,
+            "selected_committee_agents": params.selected_committee_agents,
+        }
+
+        return {
+            "analysis_id": str(uuid.uuid4()),
+            "stock_code": stock_code,
+            "stock_symbol": stock_code,
+            "analysis_date": analysis_date,
+            "summary": summary,
+            "recommendation": recommendation,
+            "confidence_score": decision.get("confidence", 0.5),
+            "risk_level": self._risk_level_from_score(decision.get("risk_score", 0.5)),
+            "key_points": response.get("key_points", []),
+            "detailed_analysis": {
+                "agent_engine": "codex",
+                "raw_response": response,
+                "content": content,
+            },
+            "execution_time": execution_time,
+            "tokens_used": response.get("tokens_used", 0),
+            "state": state,
+            "analysts": params.selected_analysts,
+            "research_depth": params.research_depth,
+            "reports": reports,
+            "decision": decision,
+            "trade_plan": trade_plan,
+            "committee_mode": params.committee_mode,
+            "selected_committee_agents": params.selected_committee_agents,
+            "model_info": model_info,
+            "agent_engine": "codex",
+            "performance_metrics": response.get("performance_metrics", {}),
+        }
+
+    def _extract_codex_content(self, response: Dict[str, Any]) -> str:
+        for key in ("content", "report", "markdown", "text", "output"):
+            value = response.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return json.dumps(response, ensure_ascii=False, indent=2)
+
+    def _extract_codex_decision(self, content: str) -> Dict[str, Any]:
+        lowered = content.lower()
+        if any(phrase in content for phrase in ("建议卖出", "应卖出", "卖出评级")) or "recommend sell" in lowered:
+            action = "卖出"
+        elif any(phrase in content for phrase in ("建议持有", "维持持有", "保持持有", "持有观望")):
+            action = "持有"
+        elif any(phrase in content for phrase in ("建议观望", "暂时观望")) or "wait" in lowered:
+            action = "观望"
+        elif any(phrase in content for phrase in ("建议买入", "可以买入", "买入评级", "增持")) or "recommend buy" in lowered:
+            action = "买入"
+        elif "卖出" in content or "sell" in lowered:
+            action = "卖出"
+        elif "观望" in content:
+            action = "观望"
+        else:
+            action = "持有"
+
+        if "高风险" in content or "high risk" in lowered:
+            risk_score = 0.75
+        elif "低风险" in content or "low risk" in lowered:
+            risk_score = 0.3
+        else:
+            risk_score = 0.5
+
+        return {
+            "action": action,
+            "confidence": 0.5,
+            "risk_score": risk_score,
+            "target_price": None,
+            "reasoning": self._summarize_codex_text(content, limit=500),
+        }
+
+    def _summarize_codex_text(self, content: str, limit: int = 200) -> str:
+        clean = content.replace("#", "").replace("*", "").strip()
+        lines = [line.strip() for line in clean.splitlines() if line.strip()]
+        summary = " ".join(lines[:3]) if lines else "Codex Agent 分析已完成，请查看详细报告。"
+        return summary[:limit] + ("..." if len(summary) > limit else "")
+
+    def _build_codex_recommendation(self, decision: Dict[str, Any]) -> str:
+        action = decision.get("action", "持有")
+        reasoning = decision.get("reasoning", "请参考 Codex Agent 详细报告。")
+        return f"投资建议：{action}。决策依据：{reasoning}"
+
+    def _risk_level_from_score(self, risk_score: float) -> str:
+        try:
+            score = float(risk_score)
+        except (TypeError, ValueError):
+            score = 0.5
+        if score >= 0.7:
+            return "高"
+        if score <= 0.35:
+            return "低"
+        return "中等"
+
     def _run_analysis_sync(
         self,
         task_id: str,
@@ -1130,6 +1628,17 @@ class SimpleAnalysisService:
 
                 except Exception as e:
                     logger.warning(f"⚠️ 进度更新失败: {e}")
+
+            agent_engine = self._get_agent_engine(request)
+            if agent_engine == "codex":
+                logger.info(f"🤖 [线程池] 使用 Codex Agent 引擎: {task_id}")
+                return self._run_codex_agent_analysis_sync(
+                    task_id=task_id,
+                    user_id=user_id,
+                    request=request,
+                    progress_tracker=progress_tracker,
+                    update_progress_sync=update_progress_sync,
+                )
 
             # 配置阶段 - 对应步骤3 "⚙️ 参数设置" (6-8%)
             update_progress_sync(7, "⚙️ 配置分析参数", "configuration")
@@ -1694,6 +2203,33 @@ class SimpleAnalysisService:
                     'reasoning': '暂无分析推理'
                 }
 
+            try:
+                committee_reports = self._build_enhanced_committee_reports(
+                    request=request,
+                    reports=reports,
+                    state=state if isinstance(state, dict) else {},
+                    decision=formatted_decision,
+                    llm=getattr(trading_graph, "quick_thinking_llm", None),
+                )
+                if committee_reports:
+                    reports.update(committee_reports)
+                    logger.info(f"📊 [COMMITTEE] 已追加增强研究委员会报告: {list(committee_reports.keys())}")
+            except Exception as committee_error:
+                logger.warning(f"⚠️ 增强研究委员会报告生成失败，保留标准分析结果: {committee_error}")
+
+            try:
+                trade_plan = self._build_trade_timing_plan(
+                    request=request,
+                    reports=reports,
+                    decision=formatted_decision,
+                    llm=getattr(trading_graph, "quick_thinking_llm", None),
+                )
+                reports["trade_timing_plan"] = self._render_trade_timing_report(trade_plan)
+                logger.info(f"📊 [TRADE_PLAN] 已生成交易执行计划: action={trade_plan.get('action')}")
+            except Exception as trade_plan_error:
+                logger.warning(f"⚠️ 交易执行计划生成失败，使用空计划: {trade_plan_error}")
+                trade_plan = {}
+
             # 🔥 按照web目录的方式生成summary和recommendation
             summary = ""
             recommendation = ""
@@ -1776,6 +2312,9 @@ class SimpleAnalysisService:
                 "reports": reports,
                 # 🔥 关键修复：添加格式化后的decision字段！
                 "decision": formatted_decision,
+                "trade_plan": trade_plan,
+                "committee_mode": request.parameters.committee_mode if request.parameters else "standard",
+                "selected_committee_agents": request.parameters.selected_committee_agents if request.parameters else [],
                 # 🔥 添加模型信息字段
                 "model_info": model_info,
                 # 🆕 性能指标数据
@@ -2562,6 +3101,9 @@ class SimpleAnalysisService:
                 "stock_name": stock_name,  # 🔥 添加股票名称字段
                 "market_type": market_type,  # 🔥 添加市场类型字段
                 "model_info": result.get("model_info", "Unknown"),  # 🔥 添加模型信息字段
+                "agent_engine": result.get("agent_engine", "tradingagents"),
+                "committee_mode": result.get("committee_mode", "standard"),
+                "selected_committee_agents": result.get("selected_committee_agents", []),
                 "analysis_date": timestamp.strftime('%Y-%m-%d'),
                 "timestamp": timestamp,
                 "status": "completed",
@@ -2577,6 +3119,7 @@ class SimpleAnalysisService:
 
                 # 🔥 关键修复：添加格式化后的decision字段！
                 "decision": result.get("decision", {}),
+                "trade_plan": result.get("trade_plan", {}),
 
                 # 元数据
                 "created_at": timestamp,
@@ -2618,8 +3161,12 @@ class SimpleAnalysisService:
                         "execution_time": result.get("execution_time", 0),
                         "tokens_used": result.get("tokens_used", 0),
                         "reports": reports,  # 包含提取的报告内容
+                        "agent_engine": result.get("agent_engine", "tradingagents"),
+                        "committee_mode": result.get("committee_mode", "standard"),
+                        "selected_committee_agents": result.get("selected_committee_agents", []),
                         # 🔥 关键修复：添加格式化后的decision字段！
-                        "decision": result.get("decision", {})
+                        "decision": result.get("decision", {}),
+                        "trade_plan": result.get("trade_plan", {})
                     }}}
                 )
                 logger.info(f"💾 分析结果已保存 (web风格): {task_id}")

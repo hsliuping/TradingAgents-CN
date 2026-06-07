@@ -67,6 +67,8 @@ yarn-error.log*
 # 前端构建产物（在Dockerfile中会重新构建）
 # 注意：只排除构建产物和node_modules，不排除源代码
 frontend/dist/
+!frontend/dist/
+!frontend/dist/**
 frontend/node_modules/
 frontend/.vite/
 frontend/coverage/
@@ -134,4 +136,3 @@ scripts/full_redeploy_*.sh
 .editorconfig
 .prettierrc
 # 注意：不排除 tsconfig.json、vite.config.js 等，因为前端构建需要这些文件
-

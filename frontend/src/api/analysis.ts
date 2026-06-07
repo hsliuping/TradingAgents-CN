@@ -4,6 +4,7 @@
  */
 
 import { request, type ApiResponse } from './request'
+import type { TradePlan } from '@/utils/tradePlan'
 
 // 分析相关类型定义
 export interface AnalysisRequest {
@@ -32,9 +33,28 @@ export interface SingleAnalysisRequest {
     include_sentiment?: boolean
     include_risk?: boolean
     language?: string
+    agent_engine?: 'tradingagents' | 'codex'
+    committee_mode?: 'standard' | 'enhanced'
+    selected_committee_agents?: string[]
     quick_analysis_model?: string
     deep_analysis_model?: string
   }
+}
+
+export interface AgentEngineCapability {
+  id: 'tradingagents' | 'codex'
+  name: string
+  available: boolean
+  configured: boolean
+  mode?: 'endpoint' | 'command' | null
+  endpoint_configured?: boolean
+  command_configured?: boolean
+  reason?: string | null
+}
+
+export interface AgentEngineCapabilities {
+  default_engine: 'tradingagents' | 'codex'
+  engines: AgentEngineCapability[]
 }
 
 export interface AnalysisProgress {
@@ -85,6 +105,9 @@ export interface AnalysisResult {
   news_analysis?: string
   recommendation: string
   risk_assessment: string
+  trade_plan?: TradePlan
+  decision?: Record<string, any>
+  reports?: Record<string, any>
 
   // 评分
   technical_score: number
@@ -125,6 +148,11 @@ export const analysisApi = {
   // 开始单股分析（使用后端期望的格式）
   startSingleAnalysis(analysisRequest: SingleAnalysisRequest): Promise<ApiResponse<any>> {
     return request.post('/api/analysis/single', analysisRequest)
+  },
+
+  // 获取分析引擎能力
+  getAgentEngines(): Promise<ApiResponse<AgentEngineCapabilities>> {
+    return request.get('/api/analysis/agent-engines')
   },
 
   // 获取任务状态
@@ -476,7 +504,3 @@ export const getStockPlaceholder = (market: string): string => {
   }
   return placeholders[market] ?? '输入股票代码'
 }
-
-
-
-

@@ -297,6 +297,8 @@ async def get_report_detail(
                 "recommendation": r.get("recommendation", ""),
                 "confidence_score": r.get("confidence_score", 0.0),
                 "risk_level": r.get("risk_level", "中等"),
+                "trade_plan": r.get("trade_plan", {}),
+                "decision": r.get("decision", {}),
                 "key_points": r.get("key_points", []),
                 "execution_time": r.get("execution_time", 0),
                 "tokens_used": r.get("tokens_used", 0)
@@ -335,6 +337,8 @@ async def get_report_detail(
                 "recommendation": doc.get("recommendation", ""),
                 "confidence_score": doc.get("confidence_score", 0.0),
                 "risk_level": doc.get("risk_level", "中等"),
+                "trade_plan": doc.get("trade_plan", {}),
+                "decision": doc.get("decision", {}),
                 "key_points": doc.get("key_points", []),
                 "execution_time": doc.get("execution_time", 0),
                 "tokens_used": doc.get("tokens_used", 0)

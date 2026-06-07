@@ -1,3 +1,5 @@
+import type { TradePlan } from '@/utils/tradePlan'
+
 // 分析状态枚举
 export enum AnalysisStatus {
   PENDING = 'pending',
@@ -26,6 +28,9 @@ export interface AnalysisParameters {
   custom_prompt?: string
   include_charts: boolean
   language: 'zh-CN' | 'en-US'
+  agent_engine?: 'tradingagents' | 'codex'
+  committee_mode?: 'standard' | 'enhanced'
+  selected_committee_agents?: string[]
 }
 
 // 分析结果
@@ -37,6 +42,9 @@ export interface AnalysisResult {
   risk_level?: string
   key_points: string[]
   detailed_analysis?: Record<string, any>
+  trade_plan?: TradePlan
+  decision?: Record<string, any>
+  reports?: Record<string, any>
   charts: string[]
   tokens_used: number
   execution_time: number

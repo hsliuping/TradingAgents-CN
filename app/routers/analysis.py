@@ -36,6 +36,20 @@ class BatchAnalyzeRequest(BaseModel):
     title: str = Field(default="批量分析", description="批次标题")
     description: Optional[str] = Field(None, description="批次描述")
 
+@router.get("/agent-engines", response_model=Dict[str, Any])
+async def get_agent_engines(user: dict = Depends(get_current_user)):
+    """获取当前可用的分析引擎能力。"""
+    try:
+        analysis_service = get_simple_analysis_service()
+        return {
+            "success": True,
+            "data": analysis_service.get_agent_engine_capabilities(),
+            "message": "分析引擎能力获取成功",
+        }
+    except Exception as e:
+        logger.error(f"❌ 获取分析引擎能力失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # 新版API端点
 @router.post("/single", response_model=Dict[str, Any])
 async def submit_single_analysis(
@@ -51,6 +65,11 @@ async def submit_single_analysis(
 
         # 立即创建任务记录并返回，不等待执行完成
         analysis_service = get_simple_analysis_service()
+        engine_error = analysis_service.validate_agent_engine_request(request)
+        if engine_error:
+            logger.warning(f"❌ 分析引擎不可用: {engine_error}")
+            raise HTTPException(status_code=400, detail=engine_error)
+
         result = await analysis_service.create_analysis_task(user["id"], request)
 
         # 提取变量，避免闭包问题
@@ -90,6 +109,8 @@ async def submit_single_analysis(
             "data": result,
             "message": "分析任务已在后台启动"
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ 提交单股分析任务失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))

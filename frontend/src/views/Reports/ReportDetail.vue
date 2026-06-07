@@ -203,6 +203,61 @@
         </div>
       </el-card>
 
+      <!-- 交易执行计划 -->
+      <el-card v-if="currentTradePlan" class="trade-plan-card" shadow="never">
+        <template #header>
+          <div class="card-header">
+            <el-icon><TrendCharts /></el-icon>
+            <span>交易执行计划</span>
+            <el-tag type="info" size="small">模拟辅助</el-tag>
+          </div>
+        </template>
+        <div class="trade-plan-content">
+          <div class="trade-plan-topline">
+            <div class="trade-plan-action">
+              <span class="label">动作参考</span>
+              <el-tag :type="getTradePlanTagType(currentTradePlan.action)" size="large">
+                {{ getTradePlanActionText(currentTradePlan.action) }}
+              </el-tag>
+            </div>
+            <div class="trade-plan-tags">
+              <el-tag type="warning" effect="plain">{{ currentTradePlan.time_horizon || '5-20个交易日' }}</el-tag>
+              <el-tag type="info" effect="plain">证据 {{ currentTradePlan.evidence_grade || 'C' }}</el-tag>
+              <el-tag type="info" effect="plain">置信度 {{ formatTradePlanPercent(currentTradePlan.confidence) }}</el-tag>
+            </div>
+          </div>
+          <div class="trade-plan-grid">
+            <div class="trade-plan-item">
+              <span>入场观察区</span>
+              <strong>{{ currentTradePlan.entry_zone?.text || '暂无明确区间' }}</strong>
+            </div>
+            <div class="trade-plan-item">
+              <span>入场触发</span>
+              <strong>{{ currentTradePlan.entry_trigger || '等待更明确的价格信号' }}</strong>
+            </div>
+            <div class="trade-plan-item">
+              <span>止损</span>
+              <strong>{{ formatTradePlanPrice(currentTradePlan.stop_loss?.price) }}</strong>
+              <small>{{ currentTradePlan.stop_loss?.reason || '暂无' }}</small>
+            </div>
+            <div class="trade-plan-item">
+              <span>止盈</span>
+              <strong>{{ currentTradePlan.take_profit?.zone || formatTradePlanPrice(currentTradePlan.take_profit?.price) }}</strong>
+              <small>{{ currentTradePlan.take_profit?.strategy || '分批止盈' }}</small>
+            </div>
+          </div>
+          <div class="trade-plan-note">
+            <strong>仓位提示：</strong>{{ currentTradePlan.position_hint || '不读取账户资金，仅提供通用比例参考。' }}
+          </div>
+          <div v-if="currentTradePlan.invalidations?.length" class="trade-plan-invalidations">
+            <strong>策略失效条件：</strong>
+            <ul>
+              <li v-for="item in currentTradePlan.invalidations" :key="item">{{ item }}</li>
+            </ul>
+          </div>
+        </div>
+      </el-card>
+
       <!-- 报告摘要 -->
       <el-card v-if="report.summary" class="summary-card" shadow="never">
         <template #header>
@@ -289,6 +344,14 @@ import { useAuthStore } from '@/stores/auth'
 import { marked } from 'marked'
 import { getMarketByStockCode } from '@/utils/market'
 import type { CurrencyAmount } from '@/api/paper'
+import {
+  buildTradePlanOrderSeed,
+  formatTradePlanPercent,
+  formatTradePlanPrice,
+  getTradePlanFromAnalysisResult,
+  normalizeTradePlanAction,
+  type TradePlan
+} from '@/utils/tradePlan'
 
 type ReportModuleContent = string | Record<string, unknown>
 
@@ -305,6 +368,8 @@ type ReportDetailData = {
   recommendation?: string
   risk_level?: string
   confidence_score?: number
+  trade_plan?: TradePlan
+  decision?: Record<string, unknown>
   key_points?: string[]
   summary?: string
   reports: Record<string, ReportModuleContent>
@@ -321,6 +386,7 @@ marked.setOptions({ breaks: true, gfm: true })
 // 响应式数据
 const loading = ref(true)
 const report = ref<ReportDetailData | null>(null)
+const currentTradePlan = computed<TradePlan | null>(() => getTradePlanFromAnalysisResult(report.value))
 const activeModule = ref('')
 const llmConfigs = ref<LLMConfig[]>([]) // 存储所有模型配置
 const reportModuleKeys = computed<string[]>(() => report.value ? Object.keys(report.value.reports || {}) : [])
@@ -455,6 +521,8 @@ const getFileExtension = (format: string): string => {
 // 判断是否可以应用到交易
 const canApplyToTrading = computed(() => {
   if (!report.value) return false
+  const planAction = normalizeTradePlanAction(currentTradePlan.value?.action)
+  if (planAction === 'buy' || planAction === 'sell') return true
   const rec = report.value.recommendation || ''
   // 检查是否包含买入或卖出建议
   return rec.includes('买入') || rec.includes('卖出') || rec.toLowerCase().includes('buy') || rec.toLowerCase().includes('sell')
@@ -490,8 +558,29 @@ const parseRecommendation = () => {
     action,
     targetPrice,
     confidence: report.value.confidence_score || 0,
-    riskLevel: report.value.risk_level || '中等'
+    riskLevel: report.value.risk_level || '中等',
+    source: 'recommendation'
   }
+}
+
+const getTradePlanActionText = (action: unknown): string => {
+  const actionText: Record<string, string> = {
+    buy: '买入',
+    sell: '卖出',
+    hold: '持有',
+    watch: '观望'
+  }
+  return actionText[normalizeTradePlanAction(action)] || '观望'
+}
+
+const getTradePlanTagType = (action: unknown): 'primary' | 'success' | 'warning' | 'info' | 'danger' => {
+  const tagTypes: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
+    buy: 'success',
+    sell: 'danger',
+    hold: 'warning',
+    watch: 'info'
+  }
+  return tagTypes[normalizeTradePlanAction(action)] || 'info'
 }
 
 // 辅助函数：根据股票代码获取对应货币的现金金额
@@ -524,11 +613,6 @@ const getCashByCurrency = (account: any, stockSymbol: string): number => {
 
 // 应用到模拟交易
 const applyToTrading = async () => {
-  const recommendation = parseRecommendation()
-  if (!recommendation) {
-    ElMessage.warning('无法解析投资建议，请检查报告内容')
-    return
-  }
   if (!report.value) return
   const currentReport = report.value
 
@@ -557,6 +641,22 @@ const applyToTrading = async () => {
       console.warn('获取实时价格失败，使用默认价格')
     }
 
+    const tradePlan = currentTradePlan.value
+    const orderSeed = buildTradePlanOrderSeed(tradePlan, currentPrice)
+    const recommendation = orderSeed
+      ? {
+          action: orderSeed.side,
+          targetPrice: orderSeed.price,
+          confidence: tradePlan?.confidence || currentReport.confidence_score || 0,
+          riskLevel: tradePlan?.risk_level || currentReport.risk_level || '中等',
+          source: 'trade_plan'
+        }
+      : parseRecommendation()
+    if (!recommendation) {
+      ElMessage.warning('无法解析投资建议或交易执行计划，请检查报告内容')
+      return
+    }
+
     // 获取对应货币的可用资金
     const availableCash = getCashByCurrency(account, currentReport.stock_symbol)
 
@@ -566,7 +666,12 @@ const applyToTrading = async () => {
 
     if (recommendation.action === 'buy') {
       // 买入：根据可用资金和当前价格计算
-      maxQuantity = Math.floor(availableCash / currentPrice / 100) * 100 // 100股为单位
+      const referencePrice = recommendation.targetPrice || currentPrice
+      maxQuantity = Math.floor(availableCash / referencePrice / 100) * 100 // 100股为单位
+      if (maxQuantity < 100) {
+        ElMessage.warning('当前可用资金不足以买入一手')
+        return
+      }
       const suggested = Math.floor(maxQuantity * 0.2) // 建议使用20%资金
       suggestedQuantity = Math.floor(suggested / 100) * 100 // 向下取整到100的倍数
       suggestedQuantity = Math.max(100, suggestedQuantity) // 至少100股
@@ -583,7 +688,7 @@ const applyToTrading = async () => {
 
     // 用户可修改的价格和数量（使用reactive）
     const tradeForm = reactive({
-      price: currentPrice,
+      price: recommendation.targetPrice || currentPrice,
       quantity: suggestedQuantity
     })
 
@@ -624,7 +729,7 @@ const applyToTrading = async () => {
             h('span', { style: `color: ${actionColor}; font-weight: bold;` }, actionText)
           ]),
           recommendation.targetPrice ? h('p', [
-            h('strong', '目标价格：'),
+            h('strong', recommendation.source === 'trade_plan' ? '参考触发价：' : '目标价格：'),
             h('span', { style: 'color: #E6A23C;' }, `${recommendation.targetPrice.toFixed(2)}元`),
             h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(仅供参考)')
           ]) : null,
@@ -632,10 +737,30 @@ const applyToTrading = async () => {
             h('strong', '当前价格：'),
             h('span', `${currentPrice.toFixed(2)}元`)
           ]),
+          recommendation.source === 'trade_plan' && tradePlan ? h('div', {
+            style: 'background-color: #F4F7FF; border: 1px solid #C6D8FF; border-radius: 4px; padding: 12px; margin: 12px 0;'
+          }, [
+            h('p', { style: 'margin: 4px 0;' }, [
+              h('strong', '计划来源：'),
+              h('span', '交易执行计划')
+            ]),
+            h('p', { style: 'margin: 4px 0;' }, [
+              h('strong', '入场触发：'),
+              h('span', tradePlan.entry_trigger || '等待更明确的价格信号')
+            ]),
+            h('p', { style: 'margin: 4px 0;' }, [
+              h('strong', '止损参考：'),
+              h('span', `${formatTradePlanPrice(tradePlan.stop_loss?.price)}，${tradePlan.stop_loss?.reason || '暂无'}`)
+            ]),
+            h('p', { style: 'margin: 4px 0;' }, [
+              h('strong', '止盈参考：'),
+              h('span', tradePlan.take_profit?.zone || formatTradePlanPrice(tradePlan.take_profit?.price))
+            ])
+          ]) : null,
           h('div', { style: 'margin: 16px 0;' }, [
             h('p', { style: 'margin-bottom: 8px;' }, [
-              h('strong', '交易价格：'),
-              h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(可修改)')
+              h('strong', '参考触发价：'),
+              h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(可修改，实际模拟订单按最新价成交)')
             ]),
             h(ElInputNumber, {
               modelValue: tradeForm.price,
@@ -851,7 +976,17 @@ const getModuleDisplayName = (moduleName: string) => {
     neutral_analyst: '⚖️ 中性分析师',
     risk_management_decision: '👔 投资组合经理',
 
+    // 增强研究委员会
+    committee_data_steward: '🧾 数据质量官',
+    committee_industry_macro: '🌐 行业与宏观分析',
+    committee_business_moat: '🏰 商业与护城河',
+    committee_valuation: '💎 估值分析',
+    committee_flow_positioning: '🌊 资金流与持仓',
+    committee_scorecard: '📋 研究委员会评分卡',
+    committee_reconciliation: '🧩 分歧调和摘要',
+
     // 最终决策 (1个)
+    trade_timing_plan: '🧭 交易执行计划',
     final_trade_decision: '🎯 最终交易决策',
 
     // 兼容旧字段
@@ -1051,6 +1186,7 @@ watch(
 
     .summary-card,
     .metrics-card,
+    .trade-plan-card,
     .modules-card {
       margin-bottom: 24px;
 
@@ -1065,6 +1201,74 @@ watch(
     .summary-content {
       line-height: 1.6;
       color: var(--el-text-color-primary);
+    }
+
+    .trade-plan-content {
+      .trade-plan-topline {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+
+      .trade-plan-action,
+      .trade-plan-tags {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .trade-plan-action .label {
+        color: var(--el-text-color-regular);
+        font-weight: 600;
+      }
+
+      .trade-plan-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .trade-plan-item {
+        min-height: 86px;
+        border: 1px solid var(--el-border-color-light);
+        border-radius: 8px;
+        padding: 12px;
+        background: var(--el-fill-color-lighter);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+
+        span {
+          font-size: 12px;
+          color: var(--el-text-color-secondary);
+        }
+
+        strong {
+          color: var(--el-text-color-primary);
+          line-height: 1.5;
+          word-break: break-word;
+        }
+
+        small {
+          color: var(--el-text-color-secondary);
+          line-height: 1.4;
+        }
+      }
+
+      .trade-plan-note,
+      .trade-plan-invalidations {
+        margin-top: 14px;
+        color: var(--el-text-color-regular);
+        line-height: 1.6;
+      }
+
+      .trade-plan-invalidations ul {
+        margin: 8px 0 0 0;
+        padding-left: 18px;
+      }
     }
 
     .metrics-content {

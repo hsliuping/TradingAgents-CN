@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { ElMessage } from 'element-plus'
 import { useStorage } from '@vueuse/core'
 import { authApi } from '@/api/auth'
 import type { User, LoginForm, RegisterForm } from '@/types/auth'

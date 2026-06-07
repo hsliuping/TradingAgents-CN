@@ -1,0 +1,25 @@
+services:
+  backend:
+    image: hsliup/tradingagents-backend:latest
+    platform: linux/amd64
+    environment:
+      MONGODB_DATABASE_SCOPE: explicit
+      ALLOW_SHARED_DB_IN_DEBUG: "true"
+      CODEX_AGENT_ENDPOINT: http://host.docker.internal:8787/analyze
+      CODEX_AGENT_TIMEOUT: "900"
+    volumes:
+      - ./app:/app/app
+      - ./tradingagents:/app/tradingagents
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend.local
+    image: tradingagents-frontend:local-console-fix
+    platform: linux/arm64
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1"]
+
+  nginx:
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/health"]

@@ -115,6 +115,7 @@ class ReportExporter:
             "market_analysis",
             "risk_analysis",
             "valuation_analysis",
+            "trade_timing_plan",
             "investment_recommendation"
         ]
         
@@ -125,6 +126,7 @@ class ReportExporter:
             "market_analysis": "🌍 市场分析",
             "risk_analysis": "⚠️ 风险分析",
             "valuation_analysis": "💎 估值分析",
+            "trade_timing_plan": "🧭 交易执行计划",
             "investment_recommendation": "🎯 投资建议"
         }
         
@@ -665,4 +667,3 @@ pre, code {
 
 # 创建全局导出器实例
 report_exporter = ReportExporter()
-

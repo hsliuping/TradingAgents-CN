@@ -319,6 +319,7 @@ import { favoritesApi } from '@/api/favorites'
 import { analysisApi } from '@/api/analysis'
 import { newsApi } from '@/api/news'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
+import { formatMoney, getCurrencyAmount } from '@/utils/number'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -342,17 +343,6 @@ const marketNews = ref<any[]>([])
 
 // 模拟交易账户数据
 const paperAccount = ref<PaperAccountSummary | null>(null)
-
-const getCurrencyAmount = (
-  amount: number | { CNY: number; HKD: number; USD: number } | undefined,
-  currency: 'CNY' | 'HKD' | 'USD',
-  fallback = 0
-): number => {
-  if (typeof amount === 'number') return amount
-  return amount?.[currency] ?? fallback
-}
-
-
 
 // 方法
 const quickAnalysis = () => {
@@ -562,11 +552,6 @@ const loadPaperAccount = async () => {
 // 跳转到模拟交易页面
 const goToPaperTrading = () => {
   router.push('/paper')
-}
-
-// 格式化金额
-const formatMoney = (value: number) => {
-  return value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
 // 生命周期

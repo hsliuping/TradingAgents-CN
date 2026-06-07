@@ -48,6 +48,9 @@ class AnalysisParameters(BaseModel):
     include_sentiment: bool = True
     include_risk: bool = True
     language: str = "zh-CN"
+    agent_engine: str = "tradingagents"
+    committee_mode: str = "standard"
+    selected_committee_agents: List[str] = Field(default_factory=list)
     # 模型配置
     quick_analysis_model: Optional[str] = "qwen-turbo"
     deep_analysis_model: Optional[str] = "qwen-max"
@@ -67,6 +70,7 @@ class AnalysisResult(BaseModel):
     execution_time: float = 0.0
     error_message: Optional[str] = None
     model_info: Optional[str] = None  # 🔥 添加模型信息字段
+    trade_plan: Optional[Dict[str, Any]] = None
 
 
 class AnalysisTask(BaseModel):

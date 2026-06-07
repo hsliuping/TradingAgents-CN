@@ -22,6 +22,7 @@ class ErrorCategory(str, Enum):
     DATA_SOURCE_NOT_FOUND = "data_source_not_found"  # 数据源找不到数据
     DATA_SOURCE_OTHER = "data_source_other"  # 数据源其他错误
 
+    CODEX_AGENT_CONFIG = "codex_agent_config"  # Codex Agent bridge 未配置
     STOCK_CODE_INVALID = "stock_code_invalid"  # 股票代码无效
     NETWORK = "network"  # 网络连接错误
     SYSTEM = "system"  # 系统错误
@@ -91,6 +92,12 @@ class ErrorFormatter:
             (错误类别, 相关厂商/数据源名称)
         """
         error_lower = error_message.lower()
+
+        # 0. Codex Agent 配置错误
+        if "codex agent" in error_lower and any(keyword in error_lower for keyword in [
+            "未配置", "not configured", "codeX_agent".lower(), "bridge"
+        ]):
+            return ErrorCategory.CODEX_AGENT_CONFIG, None
         
         # 1. 检查是否是 LLM 相关错误
         llm_provider = context.get("llm_provider") or cls._extract_llm_provider(error_message)
@@ -349,6 +356,20 @@ class ErrorFormatter:
                 ),
                 "technical_detail": original_error
             }
+
+        elif category == ErrorCategory.CODEX_AGENT_CONFIG:
+            return {
+                "category": "Codex Agent 配置错误",
+                "title": "⚠️ Codex Agent 未配置",
+                "message": "当前后端没有可用的 Codex Agent bridge，无法用 Codex Agent 执行分析。",
+                "suggestion": (
+                    "建议：\n"
+                    "1. 在单股分析页切换为“平台多智能体”继续使用当前 API 模型分析\n"
+                    "2. 如需使用 Codex Agent，请先配置 CODEX_AGENT_ENDPOINT 或 CODEX_AGENT_COMMAND\n"
+                    "3. 配置完成后重启后端服务再重试"
+                ),
+                "technical_detail": original_error
+            }
         
         elif category == ErrorCategory.STOCK_CODE_INVALID:
             return {
@@ -408,4 +429,3 @@ class ErrorFormatter:
                 ),
                 "technical_detail": original_error
             }
-
