@@ -21,6 +21,9 @@ logger = get_logger('agents')
 SLEEP_MIN = get_float("TA_GOOGLE_NEWS_SLEEP_MIN_SECONDS", "ta_google_news_sleep_min_seconds", 2.0)
 SLEEP_MAX = get_float("TA_GOOGLE_NEWS_SLEEP_MAX_SECONDS", "ta_google_news_sleep_max_seconds", 6.0)
 
+# 死循环防护: 限制最大翻页数，防止无限循环
+MAX_PAGES = 50
+
 
 def is_rate_limited(response):
     """Check if the response indicates rate limiting (status code 429)"""
@@ -31,6 +34,7 @@ def is_rate_limited(response):
     retry=(retry_if_result(is_rate_limited) | retry_if_exception_type(requests.exceptions.ConnectionError) | retry_if_exception_type(requests.exceptions.Timeout)),
     wait=wait_exponential(multiplier=1, min=4, max=60),
     stop=stop_after_attempt(5),
+    reraise=True,
 )
 def make_request(url, headers):
     """Make a request with retry logic for rate limiting and connection issues"""
@@ -66,6 +70,11 @@ def getNewsData(query, start_date, end_date):
     news_results = []
     page = 0
     while True:
+        # 死循环防护: 达到最大翻页数时强制退出
+        if page >= MAX_PAGES:
+            logger.warning(f"达到最大翻页数({MAX_PAGES})，停止获取Google新闻")
+            break
+
         offset = page * 10
         url = (
             f"https://www.google.com/search?q={query}"
