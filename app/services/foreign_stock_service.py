@@ -12,6 +12,8 @@ import re
 import asyncio
 from collections import defaultdict
 
+from app.core.mapping_loader import get_mapping_loader
+
 # 复用现有缓存系统
 from tradingagents.dataflows.cache import get_cache
 
@@ -24,18 +26,10 @@ logger = logging.getLogger(__name__)
 class ForeignStockService:
     """港股和美股数据服务（复用统一数据源管理器，按数据库优先级调用）"""
 
-    # 缓存时间配置（秒）
-    CACHE_TTL = {
-        "HK": {
-            "quote": 600,        # 10分钟（实时行情）
-            "info": 86400,       # 1天（基础信息）
-            "kline": 7200,       # 2小时（K线数据）
-        },
-        "US": {
-            "quote": 600,        # 10分钟
-            "info": 86400,       # 1天
-            "kline": 7200,       # 2小时
-        }
+    # 缓存时间配置（秒，从配置文件加载）
+    CACHE_TTL = get_mapping_loader().get_cache_ttl_config() if get_mapping_loader().get_cache_ttl_config() else {
+        "HK": {"quote": 600, "info": 86400, "kline": 7200},
+        "US": {"quote": 600, "info": 86400, "kline": 7200},
     }
 
     def __init__(self, db=None):
@@ -241,11 +235,7 @@ class ForeignStockService:
         从数据库获取数据源优先级（统一方法）
         🔥 复用 UnifiedStockService 的实现
         """
-        market_category_map = {
-            "CN": "a_shares",
-            "HK": "hk_stocks",
-            "US": "us_stocks"
-        }
+        market_category_map = get_mapping_loader().get_market_category_map()
 
         market_category_id = market_category_map.get(market)
 
@@ -263,12 +253,8 @@ class ForeignStockService:
         except Exception as e:
             logger.warning(f"⚠️ [{market}数据源优先级] 从数据库读取失败: {e}，使用默认顺序")
 
-        # 默认优先级
-        default_priority = {
-            "CN": ["tushare", "akshare", "baostock"],
-            "HK": ["yfinance", "akshare"],
-            "US": ["yfinance", "alpha_vantage", "finnhub"]
-        }
+        # 默认优先级（从配置文件加载）
+        default_priority = get_mapping_loader().get_data_source_priority()
         priority_list = default_priority.get(market, [])
         logger.info(f"📊 [{market}数据源优先级] 使用默认: {priority_list}")
         return priority_list

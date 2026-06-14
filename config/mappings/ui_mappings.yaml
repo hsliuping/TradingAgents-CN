@@ -1,0 +1,119 @@
+# UI 显示映射配置
+# 统一管理报告标题、模块名称、操作日志名称等
+
+# 报告模块标题
+module_titles:
+  company_overview: "公司概况"
+  financial_analysis: "财务分析"
+  technical_analysis: "技术分析"
+  market_analysis: "市场分析"
+  risk_analysis: "风险分析"
+  valuation_analysis: "估值分析"
+  investment_recommendation: "投资建议"
+
+# CLI 报告章节标题
+cli_section_titles:
+  market_report: "Market Analysis"
+  sentiment_report: "Social Sentiment"
+  news_report: "News Analysis"
+  fundamentals_report: "Fundamentals Analysis"
+  investment_plan: "Research Team Decision"
+  trader_investment_plan: "Trading Team Plan"
+  final_trade_decision: "Portfolio Management Decision"
+
+# 分析步骤显示名称
+analysis_step_names:
+  market_report: "市场分析师"
+  fundamentals_report: "基本面分析师"
+  technical_report: "技术分析师"
+  sentiment_report: "情感分析师"
+  final_report: "信号处理器"
+
+# 操作日志动作类型名称
+action_type_names:
+  stock_analysis: "股票分析"
+  config_management: "配置管理"
+  cache_operation: "缓存操作"
+  data_import: "数据导入"
+  data_export: "数据导出"
+  system_settings: "系统设置"
+  user_login: "用户登录"
+  user_logout: "用户登出"
+  user_management: "用户管理"
+  database_operation: "数据库操作"
+  screening: "股票筛选"
+  report_generation: "报告生成"
+
+# 能力等级徽章样式
+capability_badges:
+  1:
+    text: "基础"
+    color: "#909399"
+    icon: "⚡"
+  2:
+    text: "标准"
+    color: "#409EFF"
+    icon: "📊"
+  3:
+    text: "高级"
+    color: "#67C23A"
+    icon: "🎯"
+  4:
+    text: "专业"
+    color: "#E6A23C"
+    icon: "🔥"
+  5:
+    text: "旗舰"
+    color: "#F56C6C"
+    icon: "👑"
+
+# 角色徽章样式
+role_badges:
+  quick_analysis:
+    text: "快速分析"
+    color: "success"
+    icon: "⚡"
+  deep_analysis:
+    text: "深度推理"
+    color: "warning"
+    icon: "🧠"
+  both:
+    text: "通用"
+    color: "primary"
+    icon: "🎯"
+
+# 特性徽章样式
+feature_badges:
+  tool_calling:
+    text: "工具调用"
+    color: "info"
+    icon: "🔧"
+  long_context:
+    text: "长上下文"
+    color: "success"
+    icon: "📚"
+  reasoning:
+    text: "强推理"
+    color: "warning"
+    icon: "🧠"
+  vision:
+    text: "视觉"
+    color: "primary"
+    icon: "👁️"
+  fast_response:
+    text: "快速"
+    color: "success"
+    icon: "⚡"
+  cost_effective:
+    text: "经济"
+    color: "success"
+    icon: "💰"
+
+# 敏感配置键（不应在API响应中暴露明文）
+sensitive_keys:
+  - MONGODB_PASSWORD
+  - REDIS_PASSWORD
+  - JWT_SECRET
+  - CSRF_SECRET
+  - STOCK_DATA_API_KEY
+  - REFRESH_TOKEN_EXPIRE_DAYS

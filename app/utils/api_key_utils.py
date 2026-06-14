@@ -7,6 +7,8 @@ API Key 处理工具函数
 import os
 from typing import Optional
 
+from app.core.mapping_loader import get_mapping_loader
+
 
 def is_valid_api_key(api_key: Optional[str]) -> bool:
     """
@@ -112,15 +114,8 @@ def get_env_api_key_for_datasource(ds_type: str) -> Optional[str]:
     Returns:
         str: 环境变量中的 API Key，如果不存在或无效则返回 None
     """
-    # 数据源类型到环境变量名的映射
-    env_key_map = {
-        "tushare": "TUSHARE_TOKEN",
-        "finnhub": "FINNHUB_API_KEY",
-        "polygon": "POLYGON_API_KEY",
-        "iex": "IEX_API_KEY",
-        "quandl": "QUANDL_API_KEY",
-        "alphavantage": "ALPHAVANTAGE_API_KEY",
-    }
+    # 数据源类型到环境变量名的映射（从配置文件加载）
+    env_key_map = get_mapping_loader().get_data_source_env_key_mapping()
     
     env_key_name = env_key_map.get(ds_type.lower())
     if not env_key_name:

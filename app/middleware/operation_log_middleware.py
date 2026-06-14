@@ -12,6 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.services.operation_log_service import log_operation
 from app.models.operation_log import ActionType
+from app.core.mapping_loader import get_mapping_loader
 
 logger = logging.getLogger(__name__)
 
@@ -176,13 +177,8 @@ class OperationLogMiddleware(BaseHTTPMiddleware):
 
     def _get_action_description(self, method: str, path: str, request: Request) -> str:
         """生成操作描述"""
-        # 基础描述
-        action_map = {
-            "POST": "创建",
-            "PUT": "更新",
-            "PATCH": "修改",
-            "DELETE": "删除"
-        }
+        # 基础描述（从配置文件加载）
+        action_map = get_mapping_loader().get_http_method_names()
 
         action_verb = action_map.get(method, method)
 

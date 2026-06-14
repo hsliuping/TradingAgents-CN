@@ -9,6 +9,8 @@ import os
 import logging
 import time
 
+from app.core.mapping_loader import get_mapping_loader
+
 
 
 logger = logging.getLogger("app.services.progress.tracker")
@@ -208,25 +210,14 @@ class RedisProgressTracker:
         4. 分析师之间有并行处理，不是线性叠加
         """
 
-        # 🔧 支持5个级别的分析深度
-        depth_map = {
-            "快速": 1,  # 1级 - 快速分析
-            "基础": 2,  # 2级 - 基础分析
-            "标准": 3,  # 3级 - 标准分析（推荐）
-            "深度": 4,  # 4级 - 深度分析
-            "全面": 5   # 5级 - 全面分析
-        }
+        # 🔧 支持5个级别的分析深度（从配置文件加载）
+        loader = get_mapping_loader()
+        depth_map = loader.get_depth_to_numeric()
         d = depth_map.get(self.research_depth, 3)  # 默认标准分析
 
-        # 📊 基于实际测试数据的基础时间（秒）
-        # 这是单个分析师的基础耗时
-        base_time_per_depth = {
-            1: 150,  # 1级：2.5分钟（实测4-5分钟是多个分析师的情况）
-            2: 180,  # 2级：3分钟（实测5-6分钟是多个分析师的情况）
-            3: 240,  # 3级：4分钟（前端显示：6-10分钟）
-            4: 330,  # 4级：5.5分钟（实测：3个分析师11分钟，反推单个约5.5分钟）
-            5: 480   # 5级：8分钟（前端显示：15-25分钟）
-        }.get(d, 240)
+        # 📊 基于实际测试数据的基础时间（秒，从配置文件加载）
+        base_time_config = loader.get_base_time_per_depth()
+        base_time_per_depth = base_time_config.get(d, 240)
 
         # 📈 分析师数量影响系数（基于实际测试数据）
         # 实测：4级 + 3个分析师 = 11分钟 = 660秒
@@ -243,13 +234,9 @@ class RedisProgressTracker:
         else:
             analyst_multiplier = 2.4 + (analyst_count - 4) * 0.3  # 每增加1个分析师增加30%
 
-        # 🚀 模型速度影响（基于实际测试）
-        model_mult = {
-            'qwen': 1.0,       # 阿里百炼（通义千问）速度适中
-            'dashscope': 1.0,  # 阿里百炼速度适中
-            'deepseek': 0.8,   # DeepSeek较快
-            'google': 1.2      # Google较慢
-        }.get(self.llm_provider, 1.0)
+        # 🚀 模型速度影响（从配置文件加载）
+        model_mult_config = loader.get_model_time_multiplier()
+        model_mult = model_mult_config.get(self.llm_provider, 1.0)
 
         # 计算总时间
         total_time = base_time_per_depth * analyst_multiplier * model_mult

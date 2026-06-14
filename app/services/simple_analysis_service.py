@@ -28,6 +28,7 @@ from app.models.user import PyObjectId
 from app.models.notification import NotificationCreate
 from bson import ObjectId
 from app.core.database import get_mongo_db
+from app.core.mapping_loader import get_mapping_loader
 from app.services.config_service import ConfigService
 from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
 from app.services.redis_progress_tracker import RedisProgressTracker, get_progress_by_id
@@ -341,36 +342,8 @@ def _get_default_provider_by_model(model_name: str) -> str:
     根据模型名称返回默认的供应商映射
     这是一个后备方案，当数据库查询失败时使用
     """
-    # 模型名称到供应商的默认映射
-    model_provider_map = {
-        # 阿里百炼 (DashScope)
-        'qwen-turbo': 'qwen',
-        'qwen-plus': 'qwen',
-        'qwen-max': 'qwen',
-        'qwen-plus-latest': 'qwen',
-        'qwen-max-longcontext': 'qwen',
-
-        # OpenAI
-        'gpt-3.5-turbo': 'openai',
-        'gpt-4': 'openai',
-        'gpt-4-turbo': 'openai',
-        'gpt-4o': 'openai',
-        'gpt-4o-mini': 'openai',
-
-        # Google
-        'gemini-pro': 'google',
-        'gemini-2.0-flash': 'google',
-        'gemini-2.0-flash-thinking-exp': 'google',
-
-        # DeepSeek
-        'deepseek-chat': 'deepseek',
-        'deepseek-coder': 'deepseek',
-
-        # 智谱AI
-        'glm-4': 'glm',
-        'glm-3-turbo': 'glm',
-        'chatglm3-6b': 'glm'
-    }
+    # 模型名称到供应商的默认映射（从配置文件加载）
+    model_provider_map = get_mapping_loader().get_model_provider_map()
 
     provider = model_provider_map.get(model_name, 'qwen')  # 默认使用阿里百炼
     logger.info(f"🔧 使用默认映射: {model_name} -> {provider}")
@@ -406,14 +379,8 @@ def create_analysis_config(
     # 🔍 [调试] 记录接收到的原始参数
     logger.info(f"🔍 [配置创建] 接收到的research_depth参数: {research_depth} (类型: {type(research_depth).__name__})")
 
-    # 数字等级到中文等级的映射
-    numeric_to_chinese = {
-        1: "快速",
-        2: "基础",
-        3: "标准",
-        4: "深度",
-        5: "全面"
-    }
+    # 数字等级到中文等级的映射（从配置文件加载）
+    numeric_to_chinese = get_mapping_loader().get_numeric_to_depth()
 
     # 标准化研究深度：支持数字输入
     if isinstance(research_depth, (int, float)):

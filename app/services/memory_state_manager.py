@@ -11,6 +11,8 @@ import logging
 from dataclasses import dataclass, asdict
 from enum import Enum
 
+from app.core.mapping_loader import get_mapping_loader
+
 logger = logging.getLogger(__name__)
 
 class TaskStatus(Enum):
@@ -149,33 +151,24 @@ class MemoryStateManager:
 
         llm_provider = normalize_provider_key(parameters.get('llm_provider', 'dashscope'))
 
-        # 研究深度映射
-        depth_map = {"快速": 1, "标准": 2, "深度": 3}
+        # 研究深度映射（从配置文件加载）
+        loader = get_mapping_loader()
+        depth_map = loader.get_depth_to_numeric()
         d = depth_map.get(research_depth, 2)
 
-        # 每个分析师的基础耗时（基于真实测试数据）
-        analyst_base_time = {
-            1: 180,  # 快速分析：每个分析师约3分钟
-            2: 360,  # 标准分析：每个分析师约6分钟
-            3: 600   # 深度分析：每个分析师约10分钟
-        }.get(d, 360)
+        # 每个分析师的基础耗时（从配置文件加载）
+        base_time_config = loader.get_base_time_per_depth()
+        analyst_base_time = base_time_config.get(d, 360)
 
         analyst_time = len(selected_analysts) * analyst_base_time
 
-        # 模型速度影响（基于实际测试）
-        model_multiplier = {
-            'qwen': 1.0,       # 阿里百炼（通义千问）速度适中
-            'dashscope': 1.0,  # 阿里百炼速度适中
-            'deepseek': 0.7,   # DeepSeek较快
-            'google': 1.3      # Google较慢
-        }.get(llm_provider, 1.0)
+        # 模型速度影响（从配置文件加载）
+        model_mult_config = loader.get_model_time_multiplier()
+        model_multiplier = model_mult_config.get(llm_provider, 1.0)
 
-        # 研究深度额外影响（工具调用复杂度）
-        depth_multiplier = {
-            1: 0.8,  # 快速分析，较少工具调用
-            2: 1.0,  # 标准分析，标准工具调用
-            3: 1.3   # 深度分析，更多工具调用和推理
-        }.get(d, 1.0)
+        # 研究深度额外影响（从配置文件加载）
+        depth_mult_config = loader.get_depth_time_multiplier()
+        depth_multiplier = depth_mult_config.get(d, 1.0)
 
         total_time = (base_time + analyst_time) * model_multiplier * depth_multiplier
         return total_time

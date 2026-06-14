@@ -8,6 +8,8 @@ import re
 from typing import Dict, Optional, Tuple
 from enum import Enum
 
+from app.core.mapping_loader import get_mapping_loader
+
 
 class ErrorCategory(str, Enum):
     """错误类别"""
@@ -30,31 +32,15 @@ class ErrorCategory(str, Enum):
 
 class ErrorFormatter:
     """错误信息格式化器"""
-    
-    # LLM 厂商名称映射
-    LLM_PROVIDERS = {
-        "google": "Google Gemini",
-        "qwen": "阿里百炼（通义千问）",
-        "dashscope": "阿里百炼（通义千问）",
-        "qianfan": "百度千帆",
-        "deepseek": "DeepSeek",
-        "openai": "OpenAI",
-        "openrouter": "OpenRouter",
-        "aihubmix": "AiHubMix",
-        "anthropic": "Anthropic Claude",
-        "glm": "智谱AI",
-        "zhipu": "智谱AI",
-        "moonshot": "月之暗面（Kimi）",
-    }
-    
-    # 数据源名称映射
-    DATA_SOURCES = {
-        "tushare": "Tushare",
-        "akshare": "AKShare",
-        "baostock": "BaoStock",
-        "finnhub": "Finnhub",
-        "mongodb": "MongoDB缓存",
-    }
+
+    # LLM 厂商名称映射（从配置文件加载）
+    @classmethod
+    def _get_llm_providers(cls) -> Dict[str, str]:
+        return get_mapping_loader().get_llm_provider_names()
+
+    @classmethod
+    def _get_data_sources(cls) -> Dict[str, str]:
+        return get_mapping_loader().get_data_source_names()
     
     @classmethod
     def format_error(cls, error_message: str, context: Optional[Dict] = None) -> Dict[str, str]:
@@ -181,7 +167,7 @@ class ErrorFormatter:
     def _extract_llm_provider(cls, error_message: str) -> Optional[str]:
         """从错误信息中提取 LLM 厂商"""
         error_lower = error_message.lower()
-        for key, name in cls.LLM_PROVIDERS.items():
+        for key, name in cls._get_llm_providers().items():
             if key in error_lower or name.lower() in error_lower:
                 return key
         return None
@@ -190,7 +176,7 @@ class ErrorFormatter:
     def _extract_data_source(cls, error_message: str) -> Optional[str]:
         """从错误信息中提取数据源"""
         error_lower = error_message.lower()
-        for key, name in cls.DATA_SOURCES.items():
+        for key, name in cls._get_data_sources().items():
             if key in error_lower or name.lower() in error_lower:
                 return key
         return None
@@ -208,8 +194,8 @@ class ErrorFormatter:
         # 获取友好的厂商/数据源名称
         friendly_name = None
         if provider_or_source:
-            friendly_name = cls.LLM_PROVIDERS.get(provider_or_source) or \
-                           cls.DATA_SOURCES.get(provider_or_source) or \
+            friendly_name = cls._get_llm_providers().get(provider_or_source) or \
+                           cls._get_data_sources().get(provider_or_source) or \
                            provider_or_source
         
         # 根据类别生成消息

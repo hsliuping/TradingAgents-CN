@@ -13,6 +13,7 @@ from app.constants.model_capabilities import (
     ModelFeature
 )
 from app.core.unified_config import unified_config
+from app.core.mapping_loader import get_mapping_loader
 import logging
 import re
 
@@ -43,19 +44,8 @@ class ModelCapabilityService:
                 provider_hint = parts[0].lower()
                 original_model = parts[1]
 
-                # 映射提供商提示到标准名称
-                provider_map = {
-                    "openai": "openai",
-                    "anthropic": "anthropic",
-                    "google": "google",
-                    "deepseek": "deepseek",
-                    "alibaba": "qwen",
-                    "qwen": "qwen",
-                    "zhipu": "glm",
-                    "glm": "glm",
-                    "baidu": "baidu",
-                    "moonshot": "moonshot"
-                }
+                # 映射提供商提示到标准名称（从配置文件加载）
+                provider_map = get_mapping_loader().get_provider_normalization()
 
                 provider = provider_map.get(provider_hint)
                 return provider, original_model

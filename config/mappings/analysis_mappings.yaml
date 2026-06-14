@@ -1,0 +1,102 @@
+# 分析相关映射配置
+# 统一管理分析深度、时间估算、模型倍率等
+
+# 数字等级 -> 中文等级映射
+numeric_to_depth:
+  1: "快速"
+  2: "基础"
+  3: "标准"
+  4: "深度"
+  5: "全面"
+
+# 中文等级 -> 数字等级映射
+depth_to_numeric:
+  快速: 1
+  基础: 2
+  标准: 3
+  深度: 4
+  全面: 5
+
+# 分析师步骤信息
+analyst_steps:
+  market:
+    name: "市场分析师"
+    icon: "📊"
+    description: "分析市场走势和技术指标"
+  fundamentals:
+    name: "基本面分析师"
+    icon: "💼"
+    description: "分析公司财务和基本面数据"
+  news:
+    name: "新闻分析师"
+    icon: "📰"
+    description: "分析新闻和公告影响"
+  social:
+    name: "社交媒体分析师"
+    icon: "💬"
+    description: "分析社交媒体情绪"
+
+# 分析深度 -> 基础时间估算（秒）
+base_time_per_depth:
+  1: 150
+  2: 180
+  3: 240
+  4: 330
+  5: 480
+
+# 供应商 -> 时间倍率（影响预估时间计算）
+model_time_multiplier:
+  qwen: 1.0
+  dashscope: 1.0
+  deepseek: 0.8
+  google: 1.2
+  openai: 1.1
+  anthropic: 1.1
+  glm: 1.0
+  moonshot: 1.0
+
+# 深度等级 -> 时间倍率
+depth_time_multiplier:
+  1: 0.8
+  2: 1.0
+  3: 1.2
+  4: 1.3
+  5: 1.5
+
+# 交易动作翻译
+action_translation:
+  BUY: "买入"
+  SELL: "卖出"
+  HOLD: "持有"
+  buy: "买入"
+  sell: "卖出"
+  hold: "持有"
+
+# 任务状态映射
+status_mapping:
+  processing: "running"
+  pending: "pending"
+  completed: "completed"
+  failed: "failed"
+  cancelled: "cancelled"
+
+# HTTP 方法 -> 中文操作名
+http_method_names:
+  POST: "创建"
+  PUT: "更新"
+  PATCH: "修改"
+  DELETE: "删除"
+
+# 季度末月份
+quarter_end_months:
+  1: "03"
+  2: "06"
+  3: "09"
+  4: "12"
+
+# 季度末日期
+quarter_end_days:
+  1: "31"
+  2: "30"
+  3: "30"
+  4: "31"

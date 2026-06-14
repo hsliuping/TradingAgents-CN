@@ -1,0 +1,178 @@
+# LLM 供应商映射配置
+# 统一管理供应商名称、环境变量映射、聚合渠道等
+
+# LLM 供应商显示名称
+llm_provider_names:
+  google: "Google Gemini"
+  qwen: "阿里百炼（通义千问）"
+  dashscope: "阿里百炼（通义千问）"
+  qianfan: "百度千帆"
+  deepseek: "DeepSeek"
+  openai: "OpenAI"
+  openrouter: "OpenRouter"
+  aihubmix: "AiHubMix"
+  anthropic: "Anthropic Claude"
+  glm: "智谱AI"
+  zhipu: "智谱AI"
+  moonshot: "月之暗面（Kimi）"
+  azure: "Azure OpenAI"
+  siliconflow: "SiliconFlow"
+
+# 数据源显示名称
+data_source_names:
+  tushare: "Tushare"
+  akshare: "AKShare"
+  baostock: "BaoStock"
+  finnhub: "Finnhub"
+  mongodb: "MongoDB缓存"
+  alpha_vantage: "Alpha Vantage"
+  yfinance: "Yahoo Finance"
+
+# 供应商 -> 环境变量名映射（LLM）
+llm_env_key_mapping:
+  openai: "OPENAI_API_KEY"
+  anthropic: "ANTHROPIC_API_KEY"
+  google: "GOOGLE_API_KEY"
+  zhipu: "ZHIPU_API_KEY"
+  glm: "ZHIPU_API_KEY"
+  deepseek: "DEEPSEEK_API_KEY"
+  dashscope: "DASHSCOPE_API_KEY"
+  qwen: "DASHSCOPE_API_KEY"
+  qianfan: "QIANFAN_API_KEY"
+  azure: "AZURE_OPENAI_API_KEY"
+  siliconflow: "SILICONFLOW_API_KEY"
+  openrouter: "OPENROUTER_API_KEY"
+  "302ai": "AI302_API_KEY"
+  aihubmix: "AIHUBMIX_API_KEY"
+  oneapi: "ONEAPI_API_KEY"
+  newapi: "NEWAPI_API_KEY"
+  custom_aggregator: "CUSTOM_AGGREGATOR_API_KEY"
+
+# 数据源 -> 环境变量名映射
+data_source_env_key_mapping:
+  tushare: "TUSHARE_TOKEN"
+  finnhub: "FINNHUB_API_KEY"
+  polygon: "POLYGON_API_KEY"
+  iex: "IEX_API_KEY"
+  quandl: "QUANDL_API_KEY"
+  alphavantage: "ALPHAVANTAGE_API_KEY"
+
+# 模型名称前缀 -> 供应商映射（用于自动识别供应商）
+model_prefixes:
+  gpt-: "openai"
+  o1-: "openai"
+  o4-: "openai"
+  claude-: "anthropic"
+  gemini: "google"
+  deepseek-: "deepseek"
+  qwen: "qwen"
+  ernie: "qianfan"
+  glm: "glm"
+  moonshot: "moonshot"
+
+# 模型名称 -> 供应商映射（后备方案）
+model_provider_map:
+  # 阿里百炼 (DashScope)
+  qwen-turbo: "qwen"
+  qwen-plus: "qwen"
+  qwen-max: "qwen"
+  qwen-plus-latest: "qwen"
+  qwen-max-longcontext: "qwen"
+  # OpenAI
+  gpt-3.5-turbo: "openai"
+  gpt-4: "openai"
+  gpt-4-turbo: "openai"
+  gpt-4o: "openai"
+  gpt-4o-mini: "openai"
+  # Google
+  gemini-pro: "google"
+  gemini-2.0-flash: "google"
+  gemini-2.0-flash-thinking-exp: "google"
+  # DeepSeek
+  deepseek-chat: "deepseek"
+  deepseek-coder: "deepseek"
+  # 智谱AI
+  glm-4: "glm"
+  glm-3-turbo: "glm"
+  chatglm3-6b: "glm"
+
+# 供应商 -> 标准化供应商名映射
+provider_normalization:
+  openai: "openai"
+  anthropic: "anthropic"
+  google: "google"
+  deepseek: "deepseek"
+  alibaba: "qwen"
+  qwen: "qwen"
+  zhipu: "glm"
+  glm: "glm"
+  baidu: "baidu"
+  moonshot: "moonshot"
+  dashscope: "qwen"
+  qianfan: "qianfan"
+
+# 聚合渠道配置
+aggregator_providers:
+  "302ai":
+    display_name: "302.AI"
+    description: "302.AI 聚合平台，提供多厂商模型统一接口"
+    website: "https://302.ai"
+    api_doc_url: "https://doc.302.ai"
+    default_base_url: "https://api.302.ai/v1"
+    model_name_format: "{provider}/{model}"
+    supported_providers:
+      - openai
+      - anthropic
+      - google
+      - deepseek
+      - qwen
+  openrouter:
+    display_name: "OpenRouter"
+    description: "OpenRouter 聚合平台，支持多种 AI 模型"
+    website: "https://openrouter.ai"
+    api_doc_url: "https://openrouter.ai/docs"
+    default_base_url: "https://openrouter.ai/api/v1"
+    model_name_format: "{provider}/{model}"
+    supported_providers:
+      - openai
+      - anthropic
+      - google
+      - meta
+      - mistral
+  aihubmix:
+    display_name: "AIHubMix"
+    description: "AIHubMix 深度适配全球顶级模型"
+    website: "https://aihubmix.com"
+    api_doc_url: "https://docs.aihubmix.com/cn/quick-start"
+    default_base_url: "https://aihubmix.com/v1"
+    model_name_format: "{model}"
+    supported_providers:
+      - openai
+      - anthropic
+      - google
+      - deepseek
+      - qwen
+  oneapi:
+    display_name: "One API"
+    description: "One API 开源聚合平台"
+    website: "https://github.com/songquanpeng/one-api"
+    default_base_url: "http://localhost:3000/v1"
+    model_name_format: "{model}"
+    supported_providers:
+      - openai
+      - anthropic
+      - google
+      - azure
+      - claude
+  newapi:
+    display_name: "New API"
+    description: "New API 聚合平台"
+    website: "https://github.com/Calcium-Ion/new-api"
+    default_base_url: "http://localhost:3000/v1"
+    model_name_format: "{model}"
+    supported_providers:
+      - openai
+      - anthropic
+      - google
+      - azure
+      - claude

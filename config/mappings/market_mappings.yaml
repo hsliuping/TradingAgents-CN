@@ -1,0 +1,115 @@
+# 市场相关映射配置
+# 统一管理市场类型、数据源优先级、周期映射等
+
+# 市场代码 -> 分类ID映射
+market_category_map:
+  CN: "a_shares"
+  HK: "hk_stocks"
+  US: "us_stocks"
+
+# 市场代码 -> 中文名称映射
+market_type_names:
+  china_a: "A股"
+  hong_kong: "港股"
+  us: "美股"
+  unknown: "A股"
+  china_stock: "A股"
+  yahoo_finance: "美股"
+
+# 市场代码 -> 货币映射
+market_currency_map:
+  CN: "CNY"
+  HK: "HKD"
+  US: "USD"
+
+# 初始资金配置（按货币）
+initial_cash_by_market:
+  CNY: 1000000.0
+  HKD: 1000000.0
+  USD: 100000.0
+
+# 各市场数据源优先级（列表顺序即优先级）
+data_source_priority:
+  CN:
+    - tushare
+    - akshare
+    - baostock
+  HK:
+    - yfinance
+    - akshare
+  US:
+    - yfinance
+    - alpha_vantage
+    - finnhub
+
+# 周期映射 -> Yahoo Finance 格式
+period_map_yahoo:
+  day: "1d"
+  week: "1wk"
+  month: "1mo"
+  "5m": "5m"
+  "15m": "15m"
+  "30m": "30m"
+  "60m": "60m"
+
+# 周期映射 -> AKShare 格式
+period_map_akshare:
+  day: "daily"
+  week: "weekly"
+  month: "monthly"
+
+# 周期映射 -> AKShare 分钟级别
+period_map_akshare_minutes:
+  "5m": "5"
+  "15m": "15"
+  "30m": "30"
+  "60m": "60"
+
+# 周期映射 -> Tushare 格式
+period_map_tushare:
+  day: "D"
+  week: "W"
+  month: "M"
+  "5m": "5min"
+  "15m": "15min"
+  "30m": "30min"
+  "60m": "60min"
+
+# 复权映射 -> AKShare 格式
+adjust_map:
+  "": ""
+  qfq: "qfq"
+  hfq: "hfq"
+
+# 缓存TTL配置（秒）
+cache_ttl:
+  HK:
+    quote: 600
+    info: 86400
+    kline: 7200
+  US:
+    quote: 600
+    info: 86400
+    kline: 7200
+  CN:
+    quote: 300
+    info: 86400
+    kline: 3600
+
+# Tushare 速率限制（按级别）
+tushare_rate_limits:
+  free:
+    max_calls: 100
+    time_window: 60
+  basic:
+    max_calls: 200
+    time_window: 60
+  standard:
+    max_calls: 400
+    time_window: 60
+  premium:
+    max_calls: 600
+    time_window: 60
+  vip:
+    max_calls: 800
+    time_window: 60

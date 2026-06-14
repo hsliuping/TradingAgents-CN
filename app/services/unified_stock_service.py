@@ -19,6 +19,8 @@ import logging
 from typing import Dict, List, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from app.core.mapping_loader import get_mapping_loader
+
 logger = logging.getLogger(__name__)
 
 
@@ -109,34 +111,26 @@ class UnifiedStockService:
         Returns:
             数据源优先级列表
         """
-        market_category_map = {
-            "CN": "a_shares",
-            "HK": "hk_stocks",
-            "US": "us_stocks"
-        }
-        
+        market_category_map = get_mapping_loader().get_market_category_map()
+
         market_category_id = market_category_map.get(market)
-        
+
         try:
             # 从 datasource_groupings 集合查询
             groupings = await self.db.datasource_groupings.find({
                 "market_category_id": market_category_id,
                 "enabled": True
             }).sort("priority", -1).to_list(length=None)
-            
+
             if groupings:
                 priority_list = [g["data_source_name"] for g in groupings]
                 logger.debug(f"📊 {market} 数据源优先级（从数据库）: {priority_list}")
                 return priority_list
         except Exception as e:
             logger.warning(f"⚠️ 从数据库读取数据源优先级失败: {e}")
-        
-        # 默认优先级
-        default_priority = {
-            "CN": ["tushare", "akshare", "baostock"],
-            "HK": ["yfinance_hk", "akshare_hk"],
-            "US": ["yfinance_us"]
-        }
+
+        # 默认优先级（从配置文件加载）
+        default_priority = get_mapping_loader().get_data_source_priority()
         priority_list = default_priority.get(market, [])
         logger.debug(f"📊 {market} 数据源优先级（默认）: {priority_list}")
         return priority_list
