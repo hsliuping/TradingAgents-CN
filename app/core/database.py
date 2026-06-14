@@ -5,6 +5,7 @@
 
 import logging
 import asyncio
+import threading
 from typing import Optional
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo import MongoClient
@@ -25,6 +26,7 @@ redis_pool: Optional[ConnectionPool] = None
 # 同步 MongoDB 连接（用于非异步上下文）
 _sync_mongo_client: Optional[MongoClient] = None
 _sync_mongo_db: Optional[Database] = None
+_sync_mongo_lock = threading.Lock()
 
 
 class DatabaseManager:
@@ -405,18 +407,21 @@ def get_mongo_db_sync() -> Database:
     if _sync_mongo_db is not None:
         return _sync_mongo_db
 
-    # 创建同步 MongoDB 客户端
-    if _sync_mongo_client is None:
-        _sync_mongo_client = MongoClient(
-            settings.MONGO_URI,
-            maxPoolSize=settings.MONGO_MAX_CONNECTIONS,
-            minPoolSize=settings.MONGO_MIN_CONNECTIONS,
-            maxIdleTimeMS=30000,
-            serverSelectionTimeoutMS=5000
-        )
+    with _sync_mongo_lock:
+        if _sync_mongo_db is not None:
+            return _sync_mongo_db
 
-    _sync_mongo_db = _sync_mongo_client[settings.MONGO_DB]
-    return _sync_mongo_db
+        if _sync_mongo_client is None:
+            _sync_mongo_client = MongoClient(
+                settings.MONGO_URI,
+                maxPoolSize=settings.MONGO_MAX_CONNECTIONS,
+                minPoolSize=settings.MONGO_MIN_CONNECTIONS,
+                maxIdleTimeMS=30000,
+                serverSelectionTimeoutMS=5000
+            )
+
+        _sync_mongo_db = _sync_mongo_client[settings.MONGO_DB]
+        return _sync_mongo_db
 
 
 def get_redis_client() -> Redis:

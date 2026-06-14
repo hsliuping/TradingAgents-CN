@@ -5,6 +5,7 @@
 import asyncio
 import time
 import logging
+import threading
 from collections import deque
 from typing import Optional
 
@@ -192,37 +193,48 @@ class BaoStockRateLimiter(RateLimiter):
 _tushare_limiter: Optional[TushareRateLimiter] = None
 _akshare_limiter: Optional[AKShareRateLimiter] = None
 _baostock_limiter: Optional[BaoStockRateLimiter] = None
+_limiter_lock = threading.Lock()
 
 
 def get_tushare_rate_limiter(tier: str = "standard", safety_margin: float = 0.8) -> TushareRateLimiter:
     """获取Tushare速率限制器（单例）"""
     global _tushare_limiter
-    if _tushare_limiter is None:
-        _tushare_limiter = TushareRateLimiter(tier=tier, safety_margin=safety_margin)
+    if _tushare_limiter is not None:
+        return _tushare_limiter
+    with _limiter_lock:
+        if _tushare_limiter is None:
+            _tushare_limiter = TushareRateLimiter(tier=tier, safety_margin=safety_margin)
     return _tushare_limiter
 
 
 def get_akshare_rate_limiter() -> AKShareRateLimiter:
     """获取AKShare速率限制器（单例）"""
     global _akshare_limiter
-    if _akshare_limiter is None:
-        _akshare_limiter = AKShareRateLimiter()
+    if _akshare_limiter is not None:
+        return _akshare_limiter
+    with _limiter_lock:
+        if _akshare_limiter is None:
+            _akshare_limiter = AKShareRateLimiter()
     return _akshare_limiter
 
 
 def get_baostock_rate_limiter() -> BaoStockRateLimiter:
     """获取BaoStock速率限制器（单例）"""
     global _baostock_limiter
-    if _baostock_limiter is None:
-        _baostock_limiter = BaoStockRateLimiter()
+    if _baostock_limiter is not None:
+        return _baostock_limiter
+    with _limiter_lock:
+        if _baostock_limiter is None:
+            _baostock_limiter = BaoStockRateLimiter()
     return _baostock_limiter
 
 
 def reset_all_limiters():
-    """重置所有速率限制器"""
+    """重置所有速率限制器（原子操作）"""
     global _tushare_limiter, _akshare_limiter, _baostock_limiter
-    _tushare_limiter = None
-    _akshare_limiter = None
-    _baostock_limiter = None
+    with _limiter_lock:
+        _tushare_limiter = None
+        _akshare_limiter = None
+        _baostock_limiter = None
     logger.info("🔄 所有速率限制器已重置")
 

@@ -15,19 +15,20 @@ from app.worker.akshare_init_service import get_akshare_init_service
 from app.worker.akshare_sync_service import get_akshare_sync_service
 from app.routers.auth_db import get_current_user
 from app.utils.timezone import now_tz
+from app.core.singleton import ThreadSafeState
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/akshare-init", tags=["AKShare初始化"])
 
-# 全局任务状态存储
-_initialization_status = {
+# 线程安全的全局任务状态存储
+_initialization_status = ThreadSafeState({
     "is_running": False,
     "current_task": None,
     "start_time": None,
     "progress": None,
     "result": None
-}
+})
 
 
 class InitializationRequest(BaseModel):
@@ -159,11 +160,9 @@ async def start_full_initialization(
     Returns:
         初始化启动结果
     """
-    global _initialization_status
-    
     if _initialization_status["is_running"]:
         raise HTTPException(status_code=400, detail="初始化任务正在运行中")
-    
+
     try:
         # 设置任务状态
         _initialization_status.update({
@@ -217,8 +216,6 @@ async def start_basic_sync(
     Returns:
         同步启动结果
     """
-    global _initialization_status
-    
     if _initialization_status["is_running"]:
         raise HTTPException(status_code=400, detail="同步任务正在运行中")
     
@@ -264,8 +261,6 @@ async def get_initialization_status():
     Returns:
         当前任务状态
     """
-    global _initialization_status
-    
     return {
         "success": True,
         "data": {
@@ -294,8 +289,6 @@ async def stop_initialization(current_user: dict = Depends(get_current_user)):
     Returns:
         停止结果
     """
-    global _initialization_status
-    
     if not _initialization_status["is_running"]:
         raise HTTPException(status_code=400, detail="没有正在运行的任务")
     
@@ -325,8 +318,6 @@ async def stop_initialization(current_user: dict = Depends(get_current_user)):
 
 async def _run_full_initialization_background(historical_days: int, force: bool):
     """后台运行完整初始化"""
-    global _initialization_status
-    
     try:
         service = await get_akshare_init_service()
         result = await service.run_full_initialization(
@@ -351,8 +342,6 @@ async def _run_full_initialization_background(historical_days: int, force: bool)
 
 async def _run_basic_sync_background(force_update: bool):
     """后台运行基础信息同步"""
-    global _initialization_status
-    
     try:
         service = await get_akshare_sync_service()
         result = await service.sync_stock_basic_info(force_update=force_update)

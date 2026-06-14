@@ -14,23 +14,23 @@ from pydantic import BaseModel
 from .auth_db import get_current_user
 from ..core.database import get_mongo_db
 from ..utils.timezone import to_config_tz
+from ..core.singleton import BoundedCache
 import logging
 
 logger = logging.getLogger("webapi")
 
-# 股票名称缓存
-_stock_name_cache = {}
+# 有界股票名称缓存（最大 5000 条，1 小时 TTL）
+_stock_name_cache = BoundedCache(max_size=5000, ttl=3600)
 
 def get_stock_name(stock_code: str) -> str:
     """
     获取股票名称
     优先级：缓存 -> MongoDB（按数据源优先级） -> 默认返回股票代码
     """
-    global _stock_name_cache
-
     # 检查缓存
-    if stock_code in _stock_name_cache:
-        return _stock_name_cache[stock_code]
+    cached = _stock_name_cache.get(stock_code)
+    if cached is not None:
+        return cached
 
     try:
         # 从 MongoDB 获取股票名称

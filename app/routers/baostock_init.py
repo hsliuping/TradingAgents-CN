@@ -12,19 +12,20 @@ from pydantic import BaseModel, Field
 
 from app.worker.baostock_init_service import BaoStockInitService
 from app.worker.baostock_sync_service import BaoStockSyncService
+from app.core.singleton import ThreadSafeState
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/baostock-init", tags=["BaoStock初始化"])
 
-# 全局状态管理
-_initialization_status = {
+# 线程安全的全局状态管理
+_initialization_status = ThreadSafeState({
     "is_running": False,
     "current_task": None,
     "stats": None,
     "start_time": None,
     "last_update": None
-}
+})
 
 
 class InitializationRequest(BaseModel):
@@ -86,8 +87,6 @@ async def start_full_initialization(
     background_tasks: BackgroundTasks
 ):
     """启动完整初始化"""
-    global _initialization_status
-    
     if _initialization_status["is_running"]:
         raise HTTPException(
             status_code=409, 
@@ -135,8 +134,6 @@ async def start_full_initialization(
 @router.post("/start-basic", response_model=InitializationResponse)
 async def start_basic_initialization(background_tasks: BackgroundTasks):
     """启动基础初始化"""
-    global _initialization_status
-    
     if _initialization_status["is_running"]:
         raise HTTPException(
             status_code=409,
@@ -177,10 +174,8 @@ async def start_basic_initialization(background_tasks: BackgroundTasks):
 @router.get("/initialization-status", response_model=Dict[str, Any])
 async def get_initialization_status():
     """获取初始化状态"""
-    global _initialization_status
-    
     try:
-        status = _initialization_status.copy()
+        status = _initialization_status.snapshot()
         
         # 计算运行时间
         if status["start_time"]:
@@ -221,8 +216,6 @@ async def get_initialization_status():
 @router.post("/stop", response_model=Dict[str, Any])
 async def stop_initialization():
     """停止初始化任务"""
-    global _initialization_status
-    
     if not _initialization_status["is_running"]:
         return {
             "success": True,
@@ -251,8 +244,6 @@ async def stop_initialization():
 
 async def _run_full_initialization_task(historical_days: int, force: bool, task_id: str):
     """运行完整初始化任务"""
-    global _initialization_status
-    
     try:
         logger.info(f"🚀 开始BaoStock完整初始化任务: {task_id}")
         
@@ -284,8 +275,6 @@ async def _run_full_initialization_task(historical_days: int, force: bool, task_
 
 async def _run_basic_initialization_task(task_id: str):
     """运行基础初始化任务"""
-    global _initialization_status
-    
     try:
         logger.info(f"🚀 开始BaoStock基础初始化任务: {task_id}")
         

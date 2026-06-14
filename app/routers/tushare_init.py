@@ -12,6 +12,7 @@ from app.routers.auth_db import get_current_user
 from app.core.database import get_mongo_db
 from app.worker.tushare_init_service import get_tushare_init_service
 from app.core.response import ok
+from app.core.singleton import ThreadSafeState
 
 router = APIRouter(prefix="/api/tushare-init", tags=["Tushare初始化"])
 
@@ -42,14 +43,14 @@ class InitializationStatusResponse(BaseModel):
     estimated_completion: Optional[datetime] = Field(description="预计完成时间")
 
 
-# 全局初始化状态跟踪
-_initialization_status = {
+# 线程安全的全局初始化状态跟踪
+_initialization_status = ThreadSafeState({
     "is_running": False,
     "current_step": None,
     "progress": None,
     "started_at": None,
     "task": None
-}
+})
 
 
 @router.get("/status", response_model=dict)
