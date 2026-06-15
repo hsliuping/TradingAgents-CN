@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from typing import Optional, Dict, Any
 import yfinance as yf
 import pandas as pd
+import requests
 
 # 导入缓存管理器（支持新旧路径）
 try:
@@ -404,6 +405,10 @@ class OptimizedUSDataProvider:
 
     def _get_data_from_yfinance(self, symbol: str, start_date: str, end_date: str) -> str:
         """从 Yahoo Finance API 获取股票数据"""
+        chart_data = self._get_data_from_yahoo_chart(symbol, start_date, end_date)
+        if chart_data:
+            return chart_data
+
         try:
             # 获取数据
             ticker = yf.Ticker(symbol.upper())
@@ -412,7 +417,7 @@ class OptimizedUSDataProvider:
             if data.empty:
                 error_msg = f"未找到股票 '{symbol}' 在 {start_date} 到 {end_date} 期间的数据"
                 logger.error(f"❌ Yahoo Finance数据为空: {error_msg}")
-                return None
+                return self._get_data_from_yahoo_chart(symbol, start_date, end_date)
 
             # 格式化数据
             formatted_data = self._format_stock_data(symbol, data, start_date, end_date)
@@ -420,7 +425,90 @@ class OptimizedUSDataProvider:
 
         except Exception as e:
             logger.error(f"❌ Yahoo Finance数据获取失败: {e}")
+            return self._get_data_from_yahoo_chart(symbol, start_date, end_date)
+
+    def _get_data_from_yahoo_chart(self, symbol: str, start_date: str, end_date: str) -> Optional[str]:
+        """直接调用 Yahoo chart API，避开 yfinance crumb/rate-limit 抖动。"""
+        original_no_proxy = os.environ.get("NO_PROXY")
+        original_lower_no_proxy = os.environ.get("no_proxy")
+        try:
+            # Yahoo 会对直连请求返回 403；清空 NO_PROXY 可避免绕过用户系统代理设置。
+            os.environ["NO_PROXY"] = ""
+            os.environ["no_proxy"] = ""
+
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol.upper()}"
+            params = {
+                "period1": int(start_dt.timestamp()),
+                "period2": int(end_dt.timestamp()),
+                "interval": "1d",
+            }
+            headers = {"User-Agent": "Mozilla/5.0"}
+            response = requests.get(url, params=params, headers=headers, timeout=30)
+            if response.status_code == 403:
+                logger.warning("⚠️ Yahoo Chart API 精确日期请求被拒，改用 range 参数重试")
+                response = requests.get(
+                    url,
+                    params={"range": "3mo", "interval": "1d"},
+                    headers=headers,
+                    timeout=30,
+                )
+            response.raise_for_status()
+            payload = response.json().get("chart", {})
+
+            if payload.get("error"):
+                logger.error(f"❌ Yahoo Chart API 错误: {payload['error']}")
+                return None
+
+            results = payload.get("result") or []
+            if not results:
+                logger.error(f"❌ Yahoo Chart API 返回为空: {symbol}")
+                return None
+
+            result = results[0]
+            timestamps = result.get("timestamp") or []
+            quote = (result.get("indicators", {}).get("quote") or [{}])[0]
+            adjusted = (result.get("indicators", {}).get("adjclose") or [{}])[0]
+
+            if not timestamps or not quote:
+                logger.error(f"❌ Yahoo Chart API 缺少行情字段: {symbol}")
+                return None
+
+            data = pd.DataFrame({
+                "Open": quote.get("open", []),
+                "High": quote.get("high", []),
+                "Low": quote.get("low", []),
+                "Close": quote.get("close", []),
+                "Volume": quote.get("volume", []),
+            }, index=pd.to_datetime(timestamps, unit="s"))
+
+            adj_close = adjusted.get("adjclose")
+            if adj_close:
+                data["Adj Close"] = adj_close
+
+            data = data.dropna(subset=["Open", "High", "Low", "Close"])
+            data = data[(data.index >= start_dt) & (data.index <= end_dt)]
+            if data.empty:
+                logger.error(f"❌ Yahoo Chart API 数据为空: {symbol}")
+                return None
+
+            logger.info(f"✅ Yahoo Chart API 数据获取成功: {symbol}")
+            return self._format_stock_data(symbol, data, start_date, end_date)
+
+        except Exception as e:
+            logger.error(f"❌ Yahoo Chart API 获取失败: {e}")
             return None
+        finally:
+            if original_no_proxy is None:
+                os.environ.pop("NO_PROXY", None)
+            else:
+                os.environ["NO_PROXY"] = original_no_proxy
+
+            if original_lower_no_proxy is None:
+                os.environ.pop("no_proxy", None)
+            else:
+                os.environ["no_proxy"] = original_lower_no_proxy
 
     def _get_data_from_alpha_vantage(self, symbol: str, start_date: str, end_date: str) -> str:
         """从 Alpha Vantage API 获取股票数据"""

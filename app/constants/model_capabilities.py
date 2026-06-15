@@ -193,6 +193,14 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "performance_metrics": {"speed": 4, "cost": 5, "quality": 4},
         "description": "DeepSeek Chat，性价比高"
     },
+    "deepseek-v4-pro": {
+        "capability_level": 4,
+        "suitable_roles": [ModelRole.BOTH],
+        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING],
+        "recommended_depths": ["标准", "深度", "全面"],
+        "performance_metrics": {"speed": 3, "cost": 3, "quality": 5},
+        "description": "DeepSeek V4 Pro，适合深度分析和多轮推理"
+    },
     
     # ==================== 百度文心 (Qianfan) ====================
     "ernie-3.5": {
@@ -464,4 +472,3 @@ def parse_aggregator_model(model_name: str) -> Tuple[str, str]:
         parts = model_name.split("/", 1)
         return parts[0], parts[1]
     return "", model_name
-

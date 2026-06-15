@@ -364,6 +364,7 @@ def _get_default_provider_by_model(model_name: str) -> str:
 
         # DeepSeek
         'deepseek-chat': 'deepseek',
+        'deepseek-v4-pro': 'deepseek',
         'deepseek-coder': 'deepseek',
 
         # 智谱AI
@@ -975,9 +976,9 @@ class SimpleAnalysisService:
                     payload=NotificationCreate(
                         user_id=str(user_id),
                         type='analysis',
-                        title=f"{request.stock_code} 分析完成",
+                        title=f"{stock_code} 分析完成",
                         content=summary,
-                        link=f"/stocks/{request.stock_code}",
+                        link=f"/stocks/{stock_code}",
                         source='analysis'
                     )
                 )
@@ -1045,7 +1046,8 @@ class SimpleAnalysisService:
         # 🔧 使用共享线程池，支持多个任务并发执行
         # 不再每次创建新的线程池，避免串行执行
         loop = asyncio.get_event_loop()
-        logger.info(f"🚀 [线程池] 提交分析任务到共享线程池: {task_id} - {request.stock_code}")
+        stock_code = request.get_symbol()
+        logger.info(f"🚀 [线程池] 提交分析任务到共享线程池: {task_id} - {stock_code}")
         result = await loop.run_in_executor(
             self._thread_pool,  # 使用共享线程池
             self._run_analysis_sync,
@@ -1070,9 +1072,10 @@ class SimpleAnalysisService:
             from tradingagents.utils.logging_init import init_logging, get_logger
             init_logging()
             thread_logger = get_logger('analysis_thread')
+            stock_code = request.get_symbol()
 
-            thread_logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {request.stock_code}")
-            logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {request.stock_code}")
+            thread_logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {stock_code}")
+            logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {stock_code}")
 
             # 🔧 根据 RedisProgressTracker 的步骤权重计算准确的进度
             # 基础准备阶段 (10%): 0.03 + 0.02 + 0.01 + 0.02 + 0.02 = 0.10
@@ -1474,7 +1477,7 @@ class SimpleAnalysisService:
 
             # 执行实际分析，传递进度回调和task_id
             state, decision = trading_graph.propagate(
-                request.stock_code,
+                stock_code,
                 analysis_date,
                 progress_callback=graph_progress_callback,
                 task_id=task_id
@@ -1744,7 +1747,7 @@ class SimpleAnalysisService:
 
             # 5. 最后的备用方案
             if not summary:
-                summary = f"对{request.stock_code}的分析已完成，请查看详细报告。"
+                summary = f"对{stock_code}的分析已完成，请查看详细报告。"
                 logger.warning(f"⚠️ [SUMMARY] 使用备用摘要")
 
             if not recommendation:
@@ -1757,8 +1760,8 @@ class SimpleAnalysisService:
             # 构建结果
             result = {
                 "analysis_id": str(uuid.uuid4()),
-                "stock_code": request.stock_code,
-                "stock_symbol": request.stock_code,  # 添加stock_symbol字段以保持兼容性
+                "stock_code": stock_code,
+                "stock_symbol": stock_code,  # 添加stock_symbol字段以保持兼容性
                 "analysis_date": analysis_date,
                 "summary": summary,
                 "recommendation": recommendation,
