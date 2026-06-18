@@ -1,0 +1,1 @@
+call python -m app

@@ -1,0 +1,66 @@
+@echo off
+REM ============================================================================
+REM AITrading Electron ???????????
+REM ????????????
+REM ============================================================================
+
+echo.
+echo ============================================================
+echo          AITrading Electron ???? v1.0.0
+echo ============================================================
+echo.
+
+cd /d "%~dp0"
+
+REM 1. ????
+echo [1/3] ?? Vue ????...
+cd /d "%~dp0..\frontend"
+call npx vite build
+if %ERRORLEVEL% NEQ 0 (
+    echo [??] ???????
+    pause
+    exit /b 1
+)
+echo   ???????
+echo.
+
+REM 2. ????
+echo [2/3] ????? Electron ??...
+cd /d "%~dp0"
+if not exist "node_modules\electron" (
+    echo   ????????????????...
+    call npm install
+    if %ERRORLEVEL% NEQ 0 (
+        echo [??] ???????
+        pause
+        exit /b 1
+    )
+) else (
+    echo   ??????????
+)
+echo.
+
+REM 3. ??
+echo [3/3] ?? Electron ??...
+echo   ??: Windows 64-bit portable (.exe)
+echo   ????????...
+echo.
+call npx electron-builder --win portable --x64
+if %ERRORLEVEL% NEQ 0 (
+    echo [??] Electron ?????
+    pause
+    exit /b 1
+)
+
+echo.
+echo ============================================================
+echo            ?????
+echo ============================================================
+echo.
+echo   ??????: %~dp0release\
+echo   ?? .exe ????????????
+echo.
+
+dir /s /b "%~dp0release\*.exe" 2>nul
+echo.
+pause
