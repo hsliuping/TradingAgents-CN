@@ -73,7 +73,8 @@ export const LogsApi = {
    * 导出日志文件
    */
   async exportLogs(request: LogExportRequest): Promise<Blob> {
-    const response = await fetch('/api/system/system-logs/export', {
+    const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+    const response = await fetch(`${baseURL}/api/system/system-logs/export`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

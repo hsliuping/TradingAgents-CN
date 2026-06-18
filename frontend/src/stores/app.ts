@@ -2,6 +2,9 @@ import { defineStore } from 'pinia'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useStorage } from '@vueuse/core'
 
+// 获取 API 基础 URL（Electron 生产环境下从环境变量读取，开发环境走 Vite 代理）
+const apiBase = import.meta.env.VITE_API_BASE_URL || ''
+
 export interface AppState {
   // 应用基础状态
   loading: boolean
@@ -204,7 +207,7 @@ export const useAppStore = defineStore('app', {
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), 3000) // 3秒超时
 
-        const response = await fetch('/api/health', {
+        const response = await fetch(`${apiBase}/api/health`, {
           method: 'GET',
           signal: controller.signal
         })
@@ -232,7 +235,7 @@ export const useAppStore = defineStore('app', {
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), 3000) // 3秒超时
 
-        const response = await fetch('/api/health', {
+        const response = await fetch(`${apiBase}/api/health`, {
           signal: controller.signal
         })
 

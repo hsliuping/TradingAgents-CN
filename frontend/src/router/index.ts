@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { nextTick } from 'vue'
 import { useAuthStore } from '@/stores/auth'
@@ -396,7 +396,8 @@ const routes: RouteRecordRaw[] = [
 
 // 创建路由实例
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  // 使用 Hash 模式：适配 Electron 的 file:// 协议加载，避免打包后白屏
+  history: createWebHashHistory(),
   routes,
   scrollBehavior(_to, _from, savedPosition) {
     if (savedPosition) {

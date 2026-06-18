@@ -171,7 +171,7 @@ class ConfigManager:
             connection_string = os.getenv("MONGODB_CONNECTION_STRING")
             database_name = os.getenv("MONGODB_DATABASE_NAME", "tradingagents")
 
-            logger.info(f"🔍 [ConfigManager] MONGODB_CONNECTION_STRING={'已设置' if connection_string else '未设置'}")
+            logger.info(f"🔍 [ConfigManager] MONGODB_CONNECTION_STRING={f'已设置 {connection_string}' if connection_string else '未设置'}")
             logger.info(f"🔍 [ConfigManager] MONGODB_DATABASE_NAME={database_name}")
 
             if not connection_string:

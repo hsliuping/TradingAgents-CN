@@ -167,7 +167,8 @@ export class OperationLogsApi {
     if (params.end_date) queryParams.append('end_date', params.end_date)
     if (params.action_type) queryParams.append('action_type', params.action_type)
     
-    const url = `/api/system/logs/export/csv${queryParams.toString() ? '?' + queryParams.toString() : ''}`
+    const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+    const url = `${baseURL}/api/system/logs/export/csv${queryParams.toString() ? '?' + queryParams.toString() : ''}`
     const token = useAuthStore().token
     return fetch(url, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined

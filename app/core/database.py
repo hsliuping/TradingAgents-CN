@@ -74,7 +74,7 @@ class DatabaseManager:
     async def init_redis(self):
         """初始化Redis连接"""
         try:
-            logger.info("🔄 正在初始化Redis连接...")
+            logger.info(f"🔄 正在初始化Redis连接...{settings.REDIS_URL}")
 
             # 创建Redis连接池
             self.redis_pool = ConnectionPool.from_url(
@@ -84,6 +84,7 @@ class DatabaseManager:
                 decode_responses=True,
                 socket_connect_timeout=5,  # 5秒连接超时
                 socket_timeout=10,  # 10秒套接字超时
+                protocol=2
             )
 
             # 创建Redis客户端
@@ -97,7 +98,7 @@ class DatabaseManager:
             logger.info(f"🔗 连接池大小: {settings.REDIS_MAX_CONNECTIONS}")
 
         except Exception as e:
-            logger.error(f"❌ Redis连接失败: {e}")
+            logger.error(f"❌ Redis连接失败: {e} {settings.REDIS_URL}")
             self._redis_healthy = False
             raise
 

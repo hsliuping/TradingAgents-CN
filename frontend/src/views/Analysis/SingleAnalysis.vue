@@ -708,6 +708,9 @@ import {
 import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
 import { paperApi } from '@/api/paper'
 import { stocksApi } from '@/api/stocks'
+
+// API 基础路径（Electron 生产环境需完整 URL）
+const apiBase = import.meta.env.VITE_API_BASE_URL || ''
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { configApi } from '@/api/config'
@@ -1056,7 +1059,7 @@ const startPollingTaskStatus = () => {
         console.log('🎉 分析完成，正在获取完整结果...')
 
         try {
-          const resultResponse = await fetch(`/api/analysis/tasks/${currentTaskId.value}/result`, {
+          const resultResponse = await fetch(`${apiBase}/api/analysis/tasks/${currentTaskId.value}/result`, {
             headers: {
               'Authorization': `Bearer ${authStore.token}`,
               'Content-Type': 'application/json'

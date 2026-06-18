@@ -7,6 +7,8 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  // 使用相对路径：适配 Electron file:// 协议加载，避免静态资源 404
+  base: './',
   plugins: [
     vue(),
     AutoImport({

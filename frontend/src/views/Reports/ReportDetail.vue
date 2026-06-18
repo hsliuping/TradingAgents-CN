@@ -290,6 +290,9 @@ import { marked } from 'marked'
 import { getMarketByStockCode } from '@/utils/market'
 import type { CurrencyAmount } from '@/api/paper'
 
+// API 基础路径（Electron 生产环境需完整 URL）
+const apiBase = import.meta.env.VITE_API_BASE_URL || ''
+
 type ReportModuleContent = string | Record<string, unknown>
 
 type ReportDetailData = {
@@ -341,7 +344,7 @@ const fetchReportDetail = async () => {
   try {
     const reportId = route.params.id as string
 
-    const response = await fetch(`/api/reports/${reportId}/detail`, {
+    const response = await fetch(`${apiBase}/api/reports/${reportId}/detail`, {
       headers: {
         'Authorization': `Bearer ${authStore.token}`,
         'Content-Type': 'application/json'

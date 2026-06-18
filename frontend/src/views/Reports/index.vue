@@ -196,6 +196,9 @@ import {
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
+// API 基础路径（Electron 生产环境需完整 URL）
+const apiBase = import.meta.env.VITE_API_BASE_URL || ''
+
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
 
 type ReportListItem = {
@@ -253,7 +256,7 @@ const fetchReports = async () => {
       params.append('end_date', dateRange.value[1])
     }
 
-    const response = await fetch(`/api/reports/list?${params}`, {
+    const response = await fetch(`${apiBase}/api/reports/list?${params}`, {
       headers: {
         'Authorization': `Bearer ${authStore.token}`,
         'Content-Type': 'application/json'
@@ -314,7 +317,7 @@ const downloadReport = async (report: ReportListItem, format: string = 'markdown
       duration: 0
     })
 
-    const response = await fetch(`/api/reports/${report.id}/download?format=${format}`, {
+    const response = await fetch(`${apiBase}/api/reports/${report.id}/download?format=${format}`, {
       headers: {
         'Authorization': `Bearer ${authStore.token}`
       }
@@ -393,7 +396,7 @@ const deleteReport = async (report: ReportListItem) => {
     )
 
     // 调用删除API
-    const response = await fetch(`/api/reports/${report.id}`, {
+    const response = await fetch(`${apiBase}/api/reports/${report.id}`, {
       method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${authStore.token}`,

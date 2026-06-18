@@ -47,7 +47,7 @@ def load_env_config(script_dir: Path) -> dict:
         'mongodb_port': 27017,  # 默认端口
         'mongodb_host': 'localhost',
         'mongodb_username': 'admin',
-        'mongodb_password': 'tradingagents123',
+        'mongodb_password': '123456',
         'mongodb_database': 'tradingagents',
         'mongodb_auth_source': 'admin',
         'mongodb_connection_string': None,
@@ -96,7 +96,7 @@ def load_env_config(script_dir: Path) -> dict:
 # 默认管理员用户
 DEFAULT_ADMIN = {
     "username": "admin",
-    "password": "admin123",
+    "password": "123456",
     "email": "admin@tradingagents.cn"
 }
 

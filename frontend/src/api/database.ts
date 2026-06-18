@@ -156,7 +156,8 @@ export const databaseApi = {
     sanitize?: boolean  // 是否脱敏（清空敏感字段，用于演示系统）
   }): Promise<Blob> {
     const token = useAuthStore().token
-    return fetch('/api/system/database/export', {
+    const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+    return fetch(`${baseURL}/api/system/database/export`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
