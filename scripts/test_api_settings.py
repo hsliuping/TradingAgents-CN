@@ -14,13 +14,13 @@ def main():
     
     try:
         # 调用 API（不需要认证，因为是本地测试）
-        response = requests.get("http://127.0.0.1:8000/api/config/settings", timeout=5)
+        response = requests.get("http://127.0.0.1:8100/api/config/settings", timeout=5)
         
         if response.status_code == 401:
             print("\n⚠️  需要认证，尝试登录...")
             # 登录获取 token (使用 JSON)
             login_response = requests.post(
-                "http://127.0.0.1:8000/api/auth/login",
+                "http://127.0.0.1:8100/api/auth/login",
                 json={"username": "admin", "password": "admin123"},
                 timeout=5
             )
@@ -34,7 +34,7 @@ def main():
                     print(f"获取到 token: {token[:50]}...")
                     # 重新请求
                     response = requests.get(
-                        "http://127.0.0.1:8000/api/config/settings",
+                        "http://127.0.0.1:8100/api/config/settings",
                         headers={"Authorization": f"Bearer {token}"},
                         timeout=5
                     )

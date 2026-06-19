@@ -36,7 +36,7 @@ def login_and_get_token(base_url):
 
 def test_reports_api():
     """测试报告API功能"""
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
 
     # 先登录获取token
     print("0. 登录获取token...")
@@ -194,7 +194,7 @@ def test_reports_api():
 
 def test_reports_with_filters():
     """测试带筛选条件的报告查询"""
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
 
     # 获取token
     token = login_and_get_token(base_url)

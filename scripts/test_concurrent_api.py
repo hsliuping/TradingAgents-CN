@@ -9,7 +9,7 @@ from datetime import datetime
 
 async def test_notifications_api(session: aiohttp.ClientSession, test_id: int):
     """测试通知接口"""
-    url = "http://localhost:8000/api/notifications/unread_count"
+    url = "http://localhost:8100/api/notifications/unread_count"
     headers = {
         "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImV4cCI6MTc2MzIwMzIwMH0.Zr8vY_4xQKqZ5xZ5xZ5xZ5xZ5xZ5xZ5xZ5xZ5xZ5xZ5"
     }
@@ -37,7 +37,7 @@ async def test_notifications_api(session: aiohttp.ClientSession, test_id: int):
 
 async def test_data_sources_api(session: aiohttp.ClientSession):
     """测试数据源测试接口"""
-    url = "http://localhost:8000/api/sync/multi-source/test-sources"
+    url = "http://localhost:8100/api/sync/multi-source/test-sources"
     
     start = time.time()
     try:

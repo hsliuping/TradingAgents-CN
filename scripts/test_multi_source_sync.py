@@ -56,7 +56,7 @@ def print_result(test_name: str, result: Dict[str, Any]):
 
 def main():
     """主测试函数"""
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     print("🚀 多数据源同步功能测试")
     print(f"测试服务器: {base_url}")

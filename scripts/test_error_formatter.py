@@ -83,7 +83,7 @@ def main():
     # 7. 网络连接错误
     print_formatted_error(
         "网络连接错误",
-        "Network connection failed: Unable to reach server at localhost:8000",
+        "Network connection failed: Unable to reach server at localhost:8100",
         {}
     )
     

@@ -12,7 +12,7 @@ import json
 async def test_non_blocking_analysis():
     """测试非阻塞分析功能"""
     
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     # 首先登录获取token
     login_data = {
@@ -108,7 +108,7 @@ async def test_concurrent_requests():
     """测试并发请求"""
     print("\n🔄 测试并发请求...")
     
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     async def make_health_check():
         async with aiohttp.ClientSession() as session:

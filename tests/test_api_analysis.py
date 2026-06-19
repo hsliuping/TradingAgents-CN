@@ -13,7 +13,7 @@ def test_api_analysis():
     print("=" * 60)
     
     # API基础URL
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     try:
         # 1. 检查API健康状态

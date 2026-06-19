@@ -224,7 +224,7 @@ def main():
     api_success = manager.start_service(
         "FastAPI服务",
         [sys.executable, "-m", "uvicorn", "webapi.main:app", 
-         "--host", "0.0.0.0", "--port", "8000", "--reload"],
+         "--host", "0.0.0.0", "--port", "8100", "--reload"],
         cwd=str(project_root)
     )
     
@@ -249,9 +249,9 @@ def main():
     
     print("\n🎉 所有服务启动成功!")
     print("📍 服务地址:")
-    print("  - API服务: http://localhost:8000")
-    print("  - API文档: http://localhost:8000/docs")
-    print("  - 健康检查: http://localhost:8000/api/health")
+    print("  - API服务: http://localhost:8100")
+    print("  - API文档: http://localhost:8100/docs")
+    print("  - 健康检查: http://localhost:8100/api/health")
     print("\n💡 提示:")
     print("  - 按 Ctrl+C 停止所有服务")
     print("  - 查看日志: tail -f logs/tradingagents.log")

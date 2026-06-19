@@ -240,8 +240,8 @@ def main():
     
     print("\n🌐 访问地址:")
     print("  前端: http://your-server-ip:80")
-    print("  后端API: http://your-server-ip:8000")
-    print("  API文档: http://your-server-ip:8000/docs")
+    print("  后端API: http://your-server-ip:8100")
+    print("  API文档: http://your-server-ip:8100/docs")
     
     print("\n📋 建议:")
     print("  1. 立即登录并修改默认密码")

@@ -8,7 +8,7 @@ import json
 from typing import Dict, Any
 
 
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = "http://127.0.0.1:8100"
 TOKEN = None  # 将在登录后设置
 
 

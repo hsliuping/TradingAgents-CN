@@ -53,7 +53,7 @@ def reset_stock_basics():
         # 2. 清空相关缓存
         print("\n2️⃣ 清空缓存...")
         try:
-            response = requests.delete('http://localhost:8000/api/cache/clear', timeout=30)
+            response = requests.delete('http://localhost:8100/api/cache/clear', timeout=30)
             if response.ok:
                 print("   ✅ 缓存已清空")
             else:
@@ -64,7 +64,7 @@ def reset_stock_basics():
         # 3. 重新同步数据
         print("\n3️⃣ 重新同步股票基础信息...")
         try:
-            response = requests.post('http://localhost:8000/api/sync/stock_basics/run', timeout=300)
+            response = requests.post('http://localhost:8100/api/sync/stock_basics/run', timeout=300)
             if response.ok:
                 data = response.json()['data']
                 print("   ✅ 同步完成:")

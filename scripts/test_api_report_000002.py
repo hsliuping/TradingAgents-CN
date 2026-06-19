@@ -6,7 +6,7 @@ import requests
 import time
 
 # API 基础 URL
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = "http://127.0.0.1:8100"
 
 def test_report_generation():
     print("🔍 测试通过 API 生成 000002 的报告...")

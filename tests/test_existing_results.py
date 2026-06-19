@@ -72,7 +72,7 @@ def test_existing_result(task_id, stock_symbol):
     print("=" * 60)
     
     # API基础URL
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     try:
         # 1. 登录获取token

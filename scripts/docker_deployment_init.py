@@ -70,7 +70,7 @@ async def wait_for_services():
             
             # 检查后端 API
             import requests
-            response = requests.get("http://localhost:8000/api/health", timeout=5)
+            response = requests.get("http://localhost:8100/api/health", timeout=5)
             if response.status_code == 200:
                 logger.info("✅ 后端 API 连接成功")
                 return True
@@ -371,8 +371,8 @@ async def main():
         logger.info("=" * 60)
         logger.info("\n📋 系统信息:")
         logger.info("- 前端地址: http://localhost:80")
-        logger.info("- 后端 API: http://localhost:8000")
-        logger.info("- API 文档: http://localhost:8000/docs")
+        logger.info("- 后端 API: http://localhost:8100")
+        logger.info("- API 文档: http://localhost:8100/docs")
         
         # 读取当前管理员密码
         config_file = project_root / "config" / "admin_password.json"

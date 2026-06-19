@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { useStorage } from '@vueuse/core'
 import { authApi } from '@/api/auth'
+import router from '@/router'
 import type { User, LoginForm, RegisterForm } from '@/types/auth'
 
 export interface AuthState {
@@ -162,13 +163,11 @@ export const useAuthStore = defineStore('auth', {
 
     // 跳转到登录页
     redirectToLogin() {
-      // 避免在非浏览器环境中使用router
       if (typeof window !== 'undefined') {
-        // 使用window.location进行跳转，避免router依赖问题
-        const currentPath = window.location.pathname
-        if (currentPath !== '/login') {
+        const currentRoute = router.currentRoute.value.fullPath
+        if (currentRoute !== '/login') {
           console.log('🔄 跳转到登录页...')
-          window.location.href = '/login'
+          router.push('/login')
         }
       }
     },

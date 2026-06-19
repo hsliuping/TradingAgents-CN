@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # API基础URL
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8100"
 
 # 测试用的JWT Token (需要先登录获取)
 # 这里使用一个示例token，实际使用时需要替换

@@ -462,7 +462,7 @@ export const testApiConnection = async (): Promise<boolean> => {
   try {
     console.log('🔍 [API_TEST] 开始测试API连接')
     console.log('🔍 [API_TEST] 基础URL:', import.meta.env.VITE_API_BASE_URL || '使用代理')
-    console.log('🔍 [API_TEST] 代理目标:', 'http://localhost:8000 (根据vite.config.ts)')
+    console.log('🔍 [API_TEST] 代理目标:', 'http://localhost:8100 (根据vite.config.ts)')
 
     const response = await request.get('/api/health', {
       timeout: 5000,
@@ -477,7 +477,7 @@ export const testApiConnection = async (): Promise<boolean> => {
     if (error.code === 'ECONNABORTED') {
       console.error('🔍 [API_TEST] 连接超时 - 后端服务可能未启动')
     } else if (error.message === 'Network Error' || error.message.includes('Failed to fetch')) {
-      console.error('🔍 [API_TEST] 网络错误 - 后端服务可能未在 http://localhost:8000 运行')
+      console.error('🔍 [API_TEST] 网络错误 - 后端服务可能未在 http://localhost:8100 运行')
     } else if (error.response?.status === 404) {
       console.error('🔍 [API_TEST] 404错误 - /api/health 端点不存在')
     } else {

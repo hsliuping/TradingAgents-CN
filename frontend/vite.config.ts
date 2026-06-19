@@ -53,7 +53,7 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8100',
         changeOrigin: true,
         secure: false,
         ws: true  // 🔥 启用 WebSocket 代理支持
@@ -65,6 +65,9 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     sourcemap: false,
+    // Electron file:// 协议不支持 crossorigin，需要移除
+    // @ts-expect-error Vite 5.4 build.crossorigin is valid, TS version mismatch
+    crossorigin: '',
     rollupOptions: {
       output: {
         chunkFileNames: 'js/[name]-[hash].js',

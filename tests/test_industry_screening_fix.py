@@ -10,7 +10,7 @@ import json
 from typing import Dict, Any
 
 # 配置
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8100"
 FRONTEND_URL = "http://localhost:3000"
 
 async def test_industry_screening():

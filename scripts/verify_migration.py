@@ -183,7 +183,7 @@ async def main():
         print("✅ 所有验证通过！配置迁移成功且功能正常")
         print("💡 现在可以通过webapi使用新的配置系统了")
         print("🌐 前端访问地址: http://localhost:3000/settings")
-        print("📡 API文档地址: http://localhost:8000/docs")
+        print("📡 API文档地址: http://localhost:8100/docs")
     else:
         print("❌ 验证失败，请检查配置迁移结果")
     print("=" * 60)

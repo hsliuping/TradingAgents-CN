@@ -98,6 +98,8 @@ fi
 if ! $QUICK; then
   echo -e "${YELLOW}[1/4] 构建 Vue 前端项目...${NC}"
   cd "$FRONTEND_DIR"
+  # Electron 生产环境通过 file:// 加载页面，需要指定后端 API 地址
+  export VITE_API_BASE_URL=http://localhost:8100
   npx vite build
   if [ $? -ne 0 ]; then
     echo -e "${RED}[错误] 前端构建失败${NC}"
@@ -145,14 +147,32 @@ echo ""
 
 # ---------- 步骤 4：打包 ----------
 echo -e "${YELLOW}[4/4] 打包 Electron 应用（macOS DMG）...${NC}"
-echo -e "${GRAY}  目标: macOS DMG (x64 + arm64 universal)，请耐心等待...${NC}"
+echo -e "${GRAY}  目标: .dmg 文件${NC}"
 echo ""
 
 # 跳过代码签名（本地打包无需 Apple Developer 证书）
 export CSC_IDENTITY_AUTO_DISCOVERY=false
 
-npx electron-builder --mac --x64 --arm64
-if [ $? -ne 0 ]; then
+# 临时修改 package.json，只构建 arm64 避免双架构冲突
+echo -e "${GRAY}  临时修改 package.json, 仅构建 arm64...${NC}"
+cp package.json package.json.bak
+node -e "
+const fs = require('fs');
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+if (pkg.build && pkg.build.mac && pkg.build.mac.target && pkg.build.mac.target[0].arch) {
+  pkg.build.mac.target[0].arch = ['arm64'];
+}
+fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+"
+
+npx electron-builder --mac --arm64
+BUILD_EXIT_CODE=$?
+
+# 恢复 package.json 原始配置
+mv package.json.bak package.json
+echo -e "${GRAY}  已恢复 package.json 原始配置${NC}"
+
+if [ $BUILD_EXIT_CODE -ne 0 ]; then
   echo -e "${RED}[错误] 打包失败${NC}"
   exit 1
 fi

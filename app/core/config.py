@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # 基础配置
     DEBUG: bool = Field(default=True)
     HOST: str = Field(default="0.0.0.0")
-    PORT: int = Field(default=8000)
+    PORT: int = Field(default=8100)
     ALLOWED_ORIGINS: List[str] = Field(default_factory=lambda: ["*"])
     ALLOWED_HOSTS: List[str] = Field(default_factory=lambda: ["*"])
 

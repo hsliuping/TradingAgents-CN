@@ -11,7 +11,7 @@ import json
 def test_frontend_backend_integration():
     """测试前后端集成"""
     
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     print("🧪 测试前后端集成")
     print("=" * 40)

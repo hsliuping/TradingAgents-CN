@@ -48,7 +48,7 @@ def test_selections_dictionary_keys():
             mock_prompt.side_effect = ['600036', '2024-12-01']  # ticker, date
             mock_analysts.return_value = [MagicMock(value='market')]
             mock_depth.return_value = 3
-            mock_llm.return_value = ('dashscope', 'http://localhost:8000')
+            mock_llm.return_value = ('dashscope', 'http://localhost:8100')
             mock_shallow.return_value = 'qwen-turbo'
             mock_deep.return_value = 'qwen-max'
             

@@ -3,6 +3,7 @@
 """
 
 import hashlib
+import sys
 import time
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -36,11 +37,16 @@ class UserService:
         """关闭数据库连接"""
         if hasattr(self, 'client') and self.client:
             self.client.close()
-            logger.info("✅ UserService MongoDB 连接已关闭")
+            # 避免在 Python 关闭期间记录日志（sys.meta_path 可能为 None）
+            if sys.meta_path is not None:
+                logger.info("✅ UserService MongoDB 连接已关闭")
 
     def __del__(self):
         """析构函数，确保连接被关闭"""
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
     
     @staticmethod
     def hash_password(password: str) -> str:

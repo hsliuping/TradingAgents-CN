@@ -114,7 +114,7 @@ async def websocket_notifications_endpoint(
     """
     WebSocket 通知端点
     
-    客户端连接: ws://localhost:8000/api/ws/notifications?token=<jwt_token>
+    客户端连接: ws://localhost:8100/api/ws/notifications?token=<jwt_token>
     
     消息格式:
     {
@@ -206,7 +206,7 @@ async def websocket_task_progress_endpoint(
     """
     WebSocket 任务进度端点
     
-    客户端连接: ws://localhost:8000/api/ws/tasks/<task_id>?token=<jwt_token>
+    客户端连接: ws://localhost:8100/api/ws/tasks/<task_id>?token=<jwt_token>
     
     消息格式:
     {

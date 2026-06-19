@@ -7,7 +7,7 @@ import requests
 import json
 
 # 配置
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8100"
 
 def test_industries_api():
     """测试行业API"""

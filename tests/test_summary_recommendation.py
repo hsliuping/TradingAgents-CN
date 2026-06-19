@@ -7,7 +7,7 @@ import json
 
 def test_summary_recommendation():
     """测试summary和recommendation字段"""
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     # 登录获取token
     login_data = {

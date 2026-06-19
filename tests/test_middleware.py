@@ -15,7 +15,7 @@ async def test_middleware():
     """测试中间件是否正常工作"""
     print("🧪 测试操作日志中间件...")
     
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     async with httpx.AsyncClient() as client:
         try:

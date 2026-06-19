@@ -54,8 +54,8 @@ const handleCommand = async (command: string) => {
       break
     case 'logout':
       await authStore.logout()
+      // redirectToLogin() 已在 store 中处理导航
       ElMessage.success('已退出登录')
-      router.push('/login')
       break
   }
 }

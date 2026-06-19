@@ -13,7 +13,7 @@ from pathlib import Path
 def check_api_running():
     """检查API是否在运行"""
     try:
-        response = requests.get("http://localhost:8000/api/health", timeout=5)
+        response = requests.get("http://localhost:8100/api/health", timeout=5)
         return response.status_code == 200
     except:
         return False
@@ -24,7 +24,7 @@ def test_analysis_with_save():
     print("=" * 60)
     
     # API基础URL
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     try:
         # 1. 检查API健康状态

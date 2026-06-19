@@ -8,7 +8,7 @@ from datetime import datetime
 
 def test_analysis_result():
     """测试分析结果的数据结构"""
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     # 登录获取token
     login_data = {

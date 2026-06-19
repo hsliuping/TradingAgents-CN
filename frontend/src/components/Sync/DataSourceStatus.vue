@@ -119,7 +119,7 @@ const fetchDataSourcesStatus = async () => {
 
     if (!connectionOk) {
       console.error('🔍 [DataSourceStatus] API连接测试失败，停止后续操作')
-      error.value = '无法连接到后端服务，请确保后端服务正在 http://localhost:8000 运行'
+      error.value = '无法连接到后端服务，请确保后端服务正在 http://localhost:8100 运行'
       return
     }
 

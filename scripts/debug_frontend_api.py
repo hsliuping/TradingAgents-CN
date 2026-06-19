@@ -6,7 +6,7 @@
 import requests
 import json
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8100"
 
 def debug_frontend_api():
     """调试前端API调用"""

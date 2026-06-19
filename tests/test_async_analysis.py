@@ -14,8 +14,8 @@ from datetime import datetime
 async def test_async_analysis():
     """测试异步分析功能"""
     
-    base_url = "http://localhost:8000"
-    ws_url = "ws://localhost:8000"
+    base_url = "http://localhost:8100"
+    ws_url = "ws://localhost:8100"
     
     print("🧪 开始测试新的异步分析实现")
     print("=" * 50)
@@ -194,7 +194,7 @@ async def test_concurrent_requests():
     """测试并发请求能力"""
     print("\n🔄 测试并发请求能力...")
     
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     async def make_health_check():
         async with aiohttp.ClientSession() as session:

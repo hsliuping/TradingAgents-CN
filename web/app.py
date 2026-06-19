@@ -988,7 +988,7 @@ def main():
 
         # 展示股票基础信息同步状态
         import requests
-        backend_url = os.getenv('WEBAPI_BASE_URL', 'http://localhost:8000')
+        backend_url = os.getenv('WEBAPI_BASE_URL', 'http://localhost:8100')
         try:
             resp = requests.get(f"{backend_url}/api/sync/stock_basics/status", timeout=5)
             if resp.ok:

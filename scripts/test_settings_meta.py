@@ -15,7 +15,7 @@ def main():
     try:
         # 登录获取 token
         login_response = requests.post(
-            "http://127.0.0.1:8000/api/auth/login",
+            "http://127.0.0.1:8100/api/auth/login",
             json={"username": "admin", "password": "admin123"},
             timeout=5
         )
@@ -31,7 +31,7 @@ def main():
         
         # 获取元数据
         response = requests.get(
-            "http://127.0.0.1:8000/api/config/settings/meta",
+            "http://127.0.0.1:8100/api/config/settings/meta",
             headers={"Authorization": f"Bearer {token}"},
             timeout=5
         )

@@ -86,7 +86,7 @@ class ConfigService:
             categories.sort(key=lambda x: x.sort_order)
             return categories
         except Exception as e:
-            print(f"❌ 获取市场分类失败: {e}")
+            logger.error(f"❌ 获取市场分类失败: {e}")
             return []
 
     async def _create_default_market_categories(self) -> List[MarketCategory]:
@@ -157,7 +157,7 @@ class ConfigService:
             await categories_collection.insert_one(category.model_dump())
             return True
         except Exception as e:
-            print(f"❌ 添加市场分类失败: {e}")
+            logger.error(f"❌ 添加市场分类失败: {e}")
             return False
 
     async def update_market_category(self, category_id: str, updates: Dict[str, Any]) -> bool:
@@ -173,7 +173,7 @@ class ConfigService:
             )
             return result.modified_count > 0
         except Exception as e:
-            print(f"❌ 更新市场分类失败: {e}")
+            logger.error(f"❌ 更新市场分类失败: {e}")
             return False
 
     async def delete_market_category(self, category_id: str) -> bool:
@@ -193,7 +193,7 @@ class ConfigService:
             result = await categories_collection.delete_one({"id": category_id})
             return result.deleted_count > 0
         except Exception as e:
-            print(f"❌ 删除市场分类失败: {e}")
+            logger.error(f"❌ 删除市场分类失败: {e}")
             return False
 
     # ==================== 数据源分组管理 ====================
@@ -207,7 +207,7 @@ class ConfigService:
             groupings_data = await groupings_collection.find({}).to_list(length=None)
             return [DataSourceGrouping(**data) for data in groupings_data]
         except Exception as e:
-            print(f"❌ 获取数据源分组关系失败: {e}")
+            logger.error(f"❌ 获取数据源分组关系失败: {e}")
             return []
 
     async def add_datasource_to_category(self, grouping: DataSourceGrouping) -> bool:
@@ -227,7 +227,7 @@ class ConfigService:
             await groupings_collection.insert_one(grouping.model_dump())
             return True
         except Exception as e:
-            print(f"❌ 添加数据源到分类失败: {e}")
+            logger.error(f"❌ 添加数据源到分类失败: {e}")
             return False
 
     async def remove_datasource_from_category(self, data_source_name: str, category_id: str) -> bool:
@@ -242,7 +242,7 @@ class ConfigService:
             })
             return result.deleted_count > 0
         except Exception as e:
-            print(f"❌ 从分类中移除数据源失败: {e}")
+            logger.error(f"❌ 从分类中移除数据源失败: {e}")
             return False
 
     async def update_datasource_grouping(self, data_source_name: str, category_id: str, updates: Dict[str, Any]) -> bool:
@@ -360,7 +360,7 @@ class ConfigService:
                     if ds_name in priority_map:
                         ds_config["priority"] = priority_map[ds_name]
                         updated = True
-                        print(f"📊 [优先级同步] 更新数据源 {ds_name} 的优先级为 {priority_map[ds_name]}")
+                        logger.info(f"📊 [优先级同步] 更新数据源 {ds_name} 的优先级为 {priority_map[ds_name]}")
 
                 # 如果有更新，保存回数据库
                 if updated:
@@ -374,15 +374,15 @@ class ConfigService:
                             }
                         }
                     )
-                    print(f"✅ [优先级同步] 已同步更新 system_configs 集合，新版本: {config_data.get('version', 0) + 1}")
+                    logger.info(f"✅ [优先级同步] 已同步更新 system_configs 集合，新版本: {config_data.get('version', 0) + 1}")
                 else:
-                    print(f"⚠️ [优先级同步] 没有找到需要更新的数据源配置")
+                    logger.warning(f"⚠️ [优先级同步] 没有找到需要更新的数据源配置")
             else:
-                print(f"⚠️ [优先级同步] 未找到激活的系统配置")
+                logger.warning(f"⚠️ [优先级同步] 未找到激活的系统配置")
 
             return True
         except Exception as e:
-            print(f"❌ 更新分类数据源排序失败: {e}")
+            logger.error(f"❌ 更新分类数据源排序失败: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -400,24 +400,24 @@ class ConfigService:
             )
 
             if config_data:
-                print(f"📊 从数据库获取配置，版本: {config_data.get('version', 0)}, LLM配置数量: {len(config_data.get('llm_configs', []))}")
+                logger.info(f"📊 从数据库获取配置，版本: {config_data.get('version', 0)}, LLM配置数量: {len(config_data.get('llm_configs', []))}")
                 return SystemConfig(**config_data)
 
             # 如果没有配置，创建默认配置
-            print("⚠️ 数据库中没有配置，创建默认配置")
+            logger.warning("⚠️ 数据库中没有配置，创建默认配置")
             return await self._create_default_config()
 
         except Exception as e:
-            print(f"❌ 从数据库获取配置失败: {e}")
+            logger.error(f"❌ 从数据库获取配置失败: {e}")
 
             # 作为最后的回退，尝试从统一配置管理器获取
             try:
                 unified_system_config = await unified_config.get_unified_system_config()
                 if unified_system_config:
-                    print("🔄 回退到统一配置管理器")
+                    logger.info("🔄 回退到统一配置管理器")
                     return unified_system_config
             except Exception as e2:
-                print(f"从统一配置获取也失败: {e2}")
+                logger.error(f"从统一配置获取也失败: {e2}")
 
             return None
     
@@ -544,7 +544,7 @@ class ConfigService:
     async def save_system_config(self, config: SystemConfig) -> bool:
         """保存系统配置到数据库"""
         try:
-            print(f"💾 开始保存配置，LLM配置数量: {len(config.llm_configs)}")
+            logger.info(f"💾 开始保存配置，LLM配置数量: {len(config.llm_configs)}")
 
             # 保存到数据库
             db = await self._get_db()
@@ -559,7 +559,7 @@ class ConfigService:
                 {"is_active": True},
                 {"$set": {"is_active": False}}
             )
-            print(f"📝 禁用旧配置数量: {update_result.modified_count}")
+            logger.info(f"📝 禁用旧配置数量: {update_result.modified_count}")
 
             # 插入新配置 - 移除_id字段让MongoDB自动生成新的
             config_dict = config.model_dump(by_alias=True)
@@ -568,34 +568,34 @@ class ConfigService:
 
             # 打印即将保存的 system_settings
             system_settings = config_dict.get('system_settings', {})
-            print(f"📝 即将保存的 system_settings 包含 {len(system_settings)} 项")
+            logger.info(f"📝 即将保存的 system_settings 包含 {len(system_settings)} 项")
             if 'quick_analysis_model' in system_settings:
-                print(f"  ✓ 包含 quick_analysis_model: {system_settings['quick_analysis_model']}")
+                logger.info(f"  ✓ 包含 quick_analysis_model: {system_settings['quick_analysis_model']}")
             else:
-                print(f"  ⚠️  不包含 quick_analysis_model")
+                logger.warning(f"  ⚠️  不包含 quick_analysis_model")
             if 'deep_analysis_model' in system_settings:
-                print(f"  ✓ 包含 deep_analysis_model: {system_settings['deep_analysis_model']}")
+                logger.info(f"  ✓ 包含 deep_analysis_model: {system_settings['deep_analysis_model']}")
             else:
-                print(f"  ⚠️  不包含 deep_analysis_model")
+                logger.warning(f"  ⚠️  不包含 deep_analysis_model")
 
             insert_result = await config_collection.insert_one(config_dict)
-            print(f"📝 新配置ID: {insert_result.inserted_id}")
+            logger.info(f"📝 新配置ID: {insert_result.inserted_id}")
 
             # 验证保存结果
             saved_config = await config_collection.find_one({"_id": insert_result.inserted_id})
             if saved_config:
-                print(f"✅ 配置保存成功，验证LLM配置数量: {len(saved_config.get('llm_configs', []))}")
+                logger.info(f"✅ 配置保存成功，验证LLM配置数量: {len(saved_config.get('llm_configs', []))}")
 
                 # 暂时跳过统一配置同步，避免冲突
                 # unified_config.sync_to_legacy_format(config)
 
                 return True
             else:
-                print("❌ 配置保存验证失败")
+                logger.error("❌ 配置保存验证失败")
                 return False
 
         except Exception as e:
-            print(f"❌ 保存配置失败: {e}")
+            logger.error(f"❌ 保存配置失败: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -603,19 +603,19 @@ class ConfigService:
     async def delete_llm_config(self, provider: str, model_name: str) -> bool:
         """删除大模型配置"""
         try:
-            print(f"🗑️ 删除大模型配置 - provider: {provider}, model_name: {model_name}")
+            logger.info(f"🗑️ 删除大模型配置 - provider: {provider}, model_name: {model_name}")
 
             config = await self.get_system_config()
             if not config:
-                print("❌ 系统配置为空")
+                logger.error("❌ 系统配置为空")
                 return False
 
-            print(f"📊 当前大模型配置数量: {len(config.llm_configs)}")
+            logger.info(f"📊 当前大模型配置数量: {len(config.llm_configs)}")
 
             # 打印所有现有配置
             for i, llm in enumerate(config.llm_configs):
                 provider_str = self._provider_to_string(getattr(llm, "provider", ""))
-                print(f"   {i+1}. provider: {provider_str}, model_name: {llm.model_name}")
+                logger.debug(f"   {i+1}. provider: {provider_str}, model_name: {llm.model_name}")
 
             # 查找并删除指定的LLM配置
             original_count = len(config.llm_configs)
@@ -630,20 +630,20 @@ class ConfigService:
             ]
 
             new_count = len(config.llm_configs)
-            print(f"🔄 删除后配置数量: {new_count} (原来: {original_count})")
+            logger.info(f"🔄 删除后配置数量: {new_count} (原来: {original_count})")
 
             if new_count == original_count:
-                print(f"❌ 没有找到匹配的配置: {provider}/{model_name}")
+                logger.error(f"❌ 没有找到匹配的配置: {provider}/{model_name}")
                 return False  # 没有找到要删除的配置
 
             # 保存更新后的配置
             save_result = await self.save_system_config(config)
-            print(f"💾 保存结果: {save_result}")
+            logger.info(f"💾 保存结果: {save_result}")
 
             return save_result
 
         except Exception as e:
-            print(f"❌ 删除LLM配置失败: {e}")
+            logger.error(f"❌ 删除LLM配置失败: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -667,7 +667,7 @@ class ConfigService:
             return await self.save_system_config(config)
 
         except Exception as e:
-            print(f"设置默认LLM失败: {e}")
+            logger.error(f"设置默认LLM失败: {e}")
             return False
 
     async def set_default_data_source(self, data_source_name: str) -> bool:
@@ -689,7 +689,7 @@ class ConfigService:
             return await self.save_system_config(config)
 
         except Exception as e:
-            print(f"设置默认数据源失败: {e}")
+            logger.error(f"设置默认数据源失败: {e}")
             return False
 
     async def update_system_settings(self, settings: Dict[str, Any]) -> bool:
@@ -700,25 +700,25 @@ class ConfigService:
                 return False
 
             # 打印更新前的系统设置
-            print(f"📝 更新前 system_settings 包含 {len(config.system_settings)} 项")
+            logger.info(f"📝 更新前 system_settings 包含 {len(config.system_settings)} 项")
             if 'quick_analysis_model' in config.system_settings:
-                print(f"  ✓ 更新前包含 quick_analysis_model: {config.system_settings['quick_analysis_model']}")
+                    logger.info(f"  ✓ 更新前包含 quick_analysis_model: {config.system_settings['quick_analysis_model']}")
             else:
-                print(f"  ⚠️  更新前不包含 quick_analysis_model")
+                    logger.warning(f"  ⚠️  更新前不包含 quick_analysis_model")
 
             # 更新系统设置
             config.system_settings.update(settings)
 
             # 打印更新后的系统设置
-            print(f"📝 更新后 system_settings 包含 {len(config.system_settings)} 项")
+            logger.info(f"📝 更新后 system_settings 包含 {len(config.system_settings)} 项")
             if 'quick_analysis_model' in config.system_settings:
-                print(f"  ✓ 更新后包含 quick_analysis_model: {config.system_settings['quick_analysis_model']}")
+                    logger.info(f"  ✓ 更新后包含 quick_analysis_model: {config.system_settings['quick_analysis_model']}")
             else:
-                print(f"  ⚠️  更新后不包含 quick_analysis_model")
+                logger.warning(f"  ⚠️  更新后不包含 quick_analysis_model")
             if 'deep_analysis_model' in config.system_settings:
-                print(f"  ✓ 更新后包含 deep_analysis_model: {config.system_settings['deep_analysis_model']}")
+                logger.info(f"  ✓ 更新后包含 deep_analysis_model: {config.system_settings['deep_analysis_model']}")
             else:
-                print(f"  ⚠️  更新后不包含 deep_analysis_model")
+                logger.warning(f"  ⚠️  更新后不包含 deep_analysis_model")
 
             result = await self.save_system_config(config)
 
@@ -727,14 +727,14 @@ class ConfigService:
                 try:
                     from app.core.unified_config import unified_config
                     unified_config.sync_to_legacy_format(config)
-                    print(f"✅ 系统设置已同步到文件系统")
+                    logger.info(f"✅ 系统设置已同步到文件系统")
                 except Exception as e:
-                    print(f"⚠️  同步系统设置到文件系统失败: {e}")
+                    logger.warning(f"⚠️  同步系统设置到文件系统失败: {e}")
 
             return result
 
         except Exception as e:
-            print(f"更新系统设置失败: {e}")
+            logger.error(f"更新系统设置失败: {e}")
             return False
 
     async def get_system_settings(self) -> Dict[str, Any]:
@@ -745,7 +745,7 @@ class ConfigService:
                 return {}
             return config.system_settings
         except Exception as e:
-            print(f"获取系统设置失败: {e}")
+            logger.error(f"获取系统设置失败: {e}")
             return {}
 
     async def export_config(self) -> Dict[str, Any]:
@@ -797,7 +797,7 @@ class ConfigService:
             return export_data
 
         except Exception as e:
-            print(f"导出配置失败: {e}")
+            logger.error(f"导出配置失败: {e}")
             return {}
 
     async def import_config(self, config_data: Dict[str, Any]) -> bool:
@@ -848,7 +848,7 @@ class ConfigService:
             return await self.save_system_config(new_config)
 
         except Exception as e:
-            print(f"导入配置失败: {e}")
+            logger.error(f"导入配置失败: {e}")
             return False
 
     def _validate_config_data(self, config_data: Dict[str, Any]) -> bool:
@@ -857,13 +857,13 @@ class ConfigService:
             required_fields = ["llm_configs", "data_source_configs", "database_configs", "system_settings"]
             for field in required_fields:
                 if field not in config_data:
-                    print(f"配置数据缺少必需字段: {field}")
+                    logger.error(f"配置数据缺少必需字段: {field}")
                     return False
 
             return True
 
         except Exception as e:
-            print(f"验证配置数据失败: {e}")
+            logger.error(f"验证配置数据失败: {e}")
             return False
 
     async def migrate_legacy_config(self) -> bool:
@@ -877,7 +877,7 @@ class ConfigService:
             return await migrator.migrate_all_configs()
 
         except Exception as e:
-            print(f"迁移传统配置失败: {e}")
+            logger.error(f"迁移传统配置失败: {e}")
             return False
     
     async def update_llm_config(self, llm_config: LLMConfig) -> bool:
@@ -921,7 +921,7 @@ class ConfigService:
 
             return await self.save_system_config(config)
         except Exception as e:
-            print(f"更新LLM配置失败: {e}")
+            logger.error(f"更新LLM配置失败: {e}")
             return False
     
     async def test_llm_config(self, llm_config: LLMConfig) -> Dict[str, Any]:
@@ -2343,7 +2343,7 @@ class ConfigService:
 
             return catalogs
         except Exception as e:
-            print(f"获取模型目录失败: {e}")
+            logger.error(f"获取模型目录失败: {e}")
             return []
 
     async def get_provider_models(self, provider: str) -> Optional[ModelCatalog]:
@@ -2357,7 +2357,7 @@ class ConfigService:
                 return ModelCatalog(**doc)
             return None
         except Exception as e:
-            print(f"获取厂家模型目录失败: {e}")
+            logger.error(f"获取厂家模型目录失败: {e}")
             return None
 
     async def save_model_catalog(self, catalog: ModelCatalog) -> bool:
@@ -2377,7 +2377,7 @@ class ConfigService:
 
             return result.acknowledged
         except Exception as e:
-            print(f"保存模型目录失败: {e}")
+            logger.error(f"保存模型目录失败: {e}")
             return False
 
     async def delete_model_catalog(self, provider: str) -> bool:
@@ -2389,7 +2389,7 @@ class ConfigService:
             result = await catalog_collection.delete_one({"provider": provider})
             return result.deleted_count > 0
         except Exception as e:
-            print(f"删除模型目录失败: {e}")
+            logger.error(f"删除模型目录失败: {e}")
             return False
 
     async def init_default_model_catalog(self) -> bool:
@@ -2401,7 +2401,7 @@ class ConfigService:
             # 检查是否已有数据
             count = await catalog_collection.count_documents({})
             if count > 0:
-                print("模型目录已存在，跳过初始化")
+                logger.info("模型目录已存在，跳过初始化")
                 return True
 
             # 创建默认目录
@@ -2411,10 +2411,10 @@ class ConfigService:
                 catalog = ModelCatalog(**catalog_data)
                 await self.save_model_catalog(catalog)
 
-            print(f"✅ 初始化了 {len(default_catalogs)} 个厂家的模型目录")
+            logger.info(f"✅ 初始化了 {len(default_catalogs)} 个厂家的模型目录")
             return True
         except Exception as e:
-            print(f"初始化模型目录失败: {e}")
+            logger.error(f"初始化模型目录失败: {e}")
             return False
 
     def _get_default_model_catalog(self) -> List[Dict[str, Any]]:
@@ -2720,7 +2720,7 @@ class ConfigService:
 
             # 如果数据库中没有数据，初始化默认目录
             if not catalogs:
-                print("📦 模型目录为空，初始化默认目录...")
+                logger.info("📦 模型目录为空，初始化默认目录...")
                 await self.init_default_model_catalog()
                 catalogs = await self.get_model_catalog()
 
@@ -2746,7 +2746,7 @@ class ConfigService:
 
             return result
         except Exception as e:
-            print(f"获取模型列表失败: {e}")
+            logger.error(f"获取模型列表失败: {e}")
             # 失败时返回默认数据
             return self._get_default_model_catalog()
 
@@ -2770,7 +2770,7 @@ class ConfigService:
             config.default_llm = model_name
             return await self.save_system_config(config)
         except Exception as e:
-            print(f"设置默认LLM失败: {e}")
+            logger.error(f"设置默认LLM失败: {e}")
             return False
 
     async def set_default_data_source(self, source_name: str) -> bool:
@@ -2792,7 +2792,7 @@ class ConfigService:
             config.default_data_source = source_name
             return await self.save_system_config(config)
         except Exception as e:
-            print(f"设置默认数据源失败: {e}")
+            logger.error(f"设置默认数据源失败: {e}")
             return False
 
     # ========== 大模型厂家管理 ==========
@@ -2954,7 +2954,7 @@ class ConfigService:
             result = await providers_collection.insert_one(provider_data)
             return str(result.inserted_id)
         except Exception as e:
-            print(f"添加厂家失败: {e}")
+            logger.error(f"添加厂家失败: {e}")
             raise
 
     async def update_llm_provider(self, provider_id: str, update_data: Dict[str, Any]) -> bool:
@@ -2992,7 +2992,7 @@ class ConfigService:
             # 如果记录存在但值相同，modified_count 为 0，但这不应该返回 404
             return result.matched_count > 0
         except Exception as e:
-            print(f"更新厂家失败: {e}")
+            logger.error(f"更新厂家失败: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -3000,20 +3000,20 @@ class ConfigService:
     async def delete_llm_provider(self, provider_id: str) -> bool:
         """删除大模型厂家"""
         try:
-            print(f"🗑️ 删除厂家 - provider_id: {provider_id}")
-            print(f"🔍 ObjectId类型: {type(ObjectId(provider_id))}")
+            logger.info(f"🗑️ 删除厂家 - provider_id: {provider_id}")
+            logger.debug(f"🔍 ObjectId类型: {type(ObjectId(provider_id))}")
 
             db = await self._get_db()
             providers_collection = db.llm_providers
-            print(f"📊 数据库: {db.name}, 集合: {providers_collection.name}")
+            logger.debug(f"📊 数据库: {db.name}, 集合: {providers_collection.name}")
 
             # 先列出所有厂家的ID，看看格式
             all_providers = await providers_collection.find({}, {"_id": 1, "display_name": 1}).to_list(length=None)
-            print(f"📋 数据库中所有厂家ID:")
+            logger.debug(f"📋 数据库中所有厂家ID:")
             for p in all_providers:
-                print(f"   - {p['_id']} ({type(p['_id'])}) - {p.get('display_name')}")
+                logger.debug(f"   - {p['_id']} ({type(p['_id'])}) - {p.get('display_name')}")
                 if str(p['_id']) == provider_id:
-                    print(f"   ✅ 找到匹配的ID!")
+                    logger.debug(f"   ✅ 找到匹配的ID!")
 
             # 尝试不同的查找方式
             print(f"🔍 尝试用ObjectId查找...")

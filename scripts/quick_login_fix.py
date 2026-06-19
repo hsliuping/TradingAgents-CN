@@ -293,8 +293,8 @@ def main():
         
         print(f"\n🌐 访问地址:")
         print(f"- 前端应用: http://localhost:80")
-        print(f"- 后端 API: http://localhost:8000")
-        print(f"- API 文档: http://localhost:8000/docs")
+        print(f"- 后端 API: http://localhost:8100")
+        print(f"- API 文档: http://localhost:8100/docs")
         
         print(f"\n📋 下一步:")
         print("1. 尝试使用上述账号密码登录系统")

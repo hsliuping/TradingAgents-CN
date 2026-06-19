@@ -28,7 +28,7 @@ def check_mongodb_before_after():
         return False
     
     # API基础URL
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     try:
         # 1. 登录获取token

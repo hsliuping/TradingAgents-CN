@@ -8,7 +8,7 @@ import json
 import time
 
 # API基础URL
-API_BASE = "http://localhost:8000/api"
+API_BASE = "http://localhost:8100/api"
 
 def create_user_via_api(username: str, email: str, password: str):
     """通过API创建用户"""
@@ -51,7 +51,7 @@ def main():
         print("✅ API服务运行正常")
     except:
         print("❌ 无法连接到API服务，请先启动后端服务:")
-        print("   python -m uvicorn webapi.main:app --host 0.0.0.0 --port 8000 --reload")
+        print("   python -m uvicorn webapi.main:app --host 0.0.0.0 --port 8100 --reload")
         return
     
     # 创建默认用户

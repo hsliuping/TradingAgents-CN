@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 
 # API基础URL
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8100"
 
 def get_auth_token():
     """获取认证token"""

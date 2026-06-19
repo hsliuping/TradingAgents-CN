@@ -11,7 +11,7 @@ import json
 def test_api_non_blocking():
     """测试API非阻塞功能"""
     
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     print("🧪 快速测试API非阻塞功能")
     print("=" * 40)
@@ -137,7 +137,7 @@ def test_multiple_concurrent_requests():
     """测试多个并发请求"""
     print("\n🔄 测试并发请求...")
     
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     import threading
     import queue

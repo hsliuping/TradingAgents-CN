@@ -17,7 +17,7 @@ def test_screening_api():
     """测试筛选API"""
     print("🧪 测试修复后的筛选功能...")
     
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     try:
         # 1. 登录获取token

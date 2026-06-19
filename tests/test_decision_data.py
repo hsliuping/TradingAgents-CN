@@ -8,7 +8,7 @@ from datetime import datetime
 
 def test_decision_data():
     """测试decision数据的完整流程"""
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     # 登录获取token
     login_data = {

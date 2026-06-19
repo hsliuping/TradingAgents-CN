@@ -45,7 +45,7 @@ def print_result(test_name, result):
 
 def main():
     """主测试函数"""
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8100"
     
     print("🚀 前端API接口测试")
     print(f"测试服务器: {base_url}")
