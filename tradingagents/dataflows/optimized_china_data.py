@@ -1664,18 +1664,23 @@ class OptimizedChinaDataProvider:
                 except Exception as e:
                     logger.debug(f"计算 TTM EPS 失败: {e}")
 
-                # 使用 TTM EPS 或单期 EPS 计算 PE
-                eps_for_pe = ttm_eps if ttm_eps else None
-                pe_type = "TTM" if ttm_eps else "单期"
+                # 使用单期 EPS 计算 PE（静态PE）
+                # 同时保留 TTM EPS 用于后续 PE_TTM 计算
+                eps_for_pe = None
+                pe_type = "单期"
 
-                if not eps_for_pe:
-                    # 降级到单期 EPS
-                    eps_value = indicators_dict.get('基本每股收益')
-                    if eps_value is not None and str(eps_value) != 'nan' and eps_value != '--':
-                        try:
-                            eps_for_pe = float(eps_value)
-                        except (ValueError, TypeError):
-                            pass
+                # 先尝试获取单期 EPS
+                eps_value = indicators_dict.get('基本每股收益')
+                if eps_value is not None and str(eps_value) != 'nan' and eps_value != '--':
+                    try:
+                        eps_for_pe = float(eps_value)
+                    except (ValueError, TypeError):
+                        pass
+
+                if not eps_for_pe and ttm_eps:
+                    # 降级到 TTM EPS
+                    eps_for_pe = ttm_eps
+                    pe_type = "TTM(降级)"
 
                 if eps_for_pe and eps_for_pe > 0:
                     pe_val = price_value / eps_for_pe
@@ -1689,6 +1694,69 @@ class OptimizedChinaDataProvider:
                     logger.error(f"❌ [AKShare-PE计算-全部失败] 无可用EPS数据")
 
             # 🔥 如果实时PB计算失败，降级到传统计算方式
+            # 先设置 PE_TTM 回退计算（如果 Layer 1 未获取到）
+            if "pe_ttm" not in metrics:
+                logger.info(f"📊 [AKShare-PE_TTM计算-第2层] 尝试使用TTM EPS计算PE_TTM")
+
+                # 尝试从 main_indicators DataFrame 计算 TTM EPS（最近4季度之和）
+                ttm_eps_for_pe_ttm = None
+                try:
+                    if main_indicators is not None and hasattr(main_indicators, '__getitem__') and '指标' in getattr(main_indicators, 'columns', []):
+                        if '基本每股收益' in main_indicators['指标'].values:
+                            eps_row = main_indicators[main_indicators['指标'] == '基本每股收益']
+                            if not eps_row.empty:
+                                value_cols = [col for col in eps_row.columns if col != '指标']
+
+                                import pandas as pd
+                                eps_data = []
+                                for col in value_cols:
+                                    eps_val = eps_row[col].iloc[0]
+                                    if eps_val is not None and str(eps_val) != 'nan' and eps_val != '--':
+                                        eps_data.append({'报告期': col, '基本每股收益': eps_val})
+
+                                if len(eps_data) >= 2:
+                                    eps_df = pd.DataFrame(eps_data)
+                                    try:
+                                        from scripts.sync_financial_data import _calculate_ttm_metric
+                                        ttm_eps_for_pe_ttm = _calculate_ttm_metric(eps_df, '基本每股收益')
+                                        if ttm_eps_for_pe_ttm:
+                                            logger.info(f"✅ 计算 TTM EPS: {ttm_eps_for_pe_ttm:.4f} 元")
+                                    except ImportError:
+                                        # 如果导入失败，手动计算最近4期之和
+                                        eps_values = []
+                                        for item in eps_data:
+                                            try:
+                                                eps_values.append(float(item['基本每股收益']))
+                                            except (ValueError, TypeError):
+                                                pass
+                                        if len(eps_values) >= 1:
+                                            ttm_eps_for_pe_ttm = sum(eps_values[-4:])
+                                            logger.info(f"✅ 手动计算 TTM EPS: {ttm_eps_for_pe_ttm:.4f} 元（最近{len(eps_values[-4:])}期之和）")
+                except Exception as e:
+                    logger.debug(f"计算 TTM EPS 失败: {e}")
+
+                if ttm_eps_for_pe_ttm and ttm_eps_for_pe_ttm > 0:
+                    pe_ttm_val = price_value / ttm_eps_for_pe_ttm
+                    metrics["pe_ttm"] = f"{pe_ttm_val:.1f}倍"
+                    logger.info(f"✅ [AKShare-PE_TTM计算-第2层成功] PE_TTM: 股价{price_value} / TTM_EPS{ttm_eps_for_pe_ttm:.4f} = {metrics['pe_ttm']}")
+                else:
+                    # 降级：如果只有单期EPS，用单期PE作为PE_TTM的近似
+                    eps_latest = indicators_dict.get('基本每股收益')
+                    if eps_latest is not None and str(eps_latest) != 'nan' and eps_latest != '--':
+                        try:
+                            eps_float = float(eps_latest)
+                            if eps_float > 0:
+                                pe_ttm_approx = price_value / eps_float
+                                metrics["pe_ttm"] = f"{pe_ttm_approx:.1f}倍(单期近似)"
+                                logger.info(f"⚠️ [AKShare-PE_TTM计算-第3层] 无TTM数据，使用单期EPS近似: PE_TTM={metrics['pe_ttm']}")
+                            else:
+                                metrics["pe_ttm"] = "N/A（亏损）"
+                        except (ValueError, TypeError):
+                            metrics["pe_ttm"] = "N/A"
+                    else:
+                        metrics["pe_ttm"] = "N/A"
+                        logger.warning(f"⚠️ [AKShare-PE_TTM计算-全部失败] 无可用EPS数据")
+
             if pb_value is None:
                 logger.info(f"📊 [AKShare-PB计算-第2层] 尝试使用股价/BPS计算")
 
@@ -1778,6 +1846,100 @@ class OptimizedChinaDataProvider:
                     metrics["quick_ratio"] = "N/A"
             else:
                 metrics["quick_ratio"] = "N/A"
+
+            # 🔥 从 cash_flow DataFrame 提取经营现金流（关键指标）
+            try:
+                if cash_flow and len(cash_flow) > 0:
+                    import pandas as pd
+                    if isinstance(cash_flow, pd.DataFrame) and not cash_flow.empty:
+                        # cash_flow 是 DataFrame，第一行是最新数据
+                        latest_cash = cash_flow.iloc[0].to_dict()
+                    elif isinstance(cash_flow, list):
+                        latest_cash = cash_flow[0] if isinstance(cash_flow[0], dict) else {}
+                    else:
+                        latest_cash = {}
+
+                    # 尝试多种字段名
+                    operating_cf = (
+                        latest_cash.get('n_cashflow_act') or
+                        latest_cash.get('经营活动产生的现金流量净额') or
+                        latest_cash.get('经营活动产生的现金流量净额_合并报表') or
+                        latest_cash.get('operating_cash_flow') or
+                        latest_cash.get('经营活动现金流入小计')
+                    )
+                    if operating_cf is not None and str(operating_cf) != 'nan' and operating_cf != '--':
+                        cf_val = float(operating_cf)
+                        # 🔥 提取同比数据：比较最近两期
+                        cf_yoy = None
+                        if isinstance(cash_flow, pd.DataFrame) and len(cash_flow) >= 2:
+                            prev_cash = cash_flow.iloc[1].to_dict()
+                            prev_cf = (
+                                prev_cash.get('n_cashflow_act') or
+                                prev_cash.get('经营活动产生的现金流量净额') or
+                                prev_cash.get('经营活动产生的现金流量净额_合并报表')
+                            )
+                            if prev_cf and prev_cf != 0 and str(prev_cf) != 'nan':
+                                cf_yoy = ((cf_val - float(prev_cf)) / abs(float(prev_cf))) * 100
+
+                        if abs(cf_val) >= 100_000_000:
+                            metrics['operating_cash_flow'] = f"{cf_val / 100_000_000:.2f}亿元"
+                        elif abs(cf_val) >= 10000:
+                            metrics['operating_cash_flow'] = f"{cf_val / 10000:.2f}万元"
+                        else:
+                            metrics['operating_cash_flow'] = f"{cf_val:.2f}元"
+                        metrics['operating_cash_flow_raw'] = cf_val
+                        if cf_yoy is not None:
+                            metrics['operating_cash_flow_yoy'] = f"{cf_yoy:+.1f}%"
+                        logger.info(f"✅ [AKShare-经营现金流] 提取成功: {metrics['operating_cash_flow']}" + (f" (同比{metrics['operating_cash_flow_yoy']})" if cf_yoy is not None else ""))
+            except Exception as e:
+                logger.debug(f"⚠️ [AKShare-经营现金流] 提取失败: {e}")
+
+            # 🔥 从 income_statement 提取研发费用及同比增速
+            try:
+                if income_statement and len(income_statement) > 0:
+                    import pandas as pd
+                    if isinstance(income_statement, pd.DataFrame) and not income_statement.empty:
+                        latest_income = income_statement.iloc[0].to_dict()
+                        if len(income_statement) >= 2:
+                            prev_income = income_statement.iloc[1].to_dict()
+                        else:
+                            prev_income = {}
+                    elif isinstance(income_statement, list):
+                        latest_income = income_statement[0] if isinstance(income_statement[0], dict) else {}
+                        prev_income = income_statement[1] if len(income_statement) > 1 and isinstance(income_statement[1], dict) else {}
+                    else:
+                        latest_income = {}
+                        prev_income = {}
+
+                    rd_expense = (
+                        latest_income.get('rd_expense') or
+                        latest_income.get('研发费用') or
+                        latest_income.get('research_expense')
+                    )
+                    if rd_expense is not None and str(rd_expense) != 'nan' and rd_expense != '--':
+                        rd_val = float(rd_expense)
+                        # 计算同比增速
+                        rd_yoy = None
+                        prev_rd = (
+                            prev_income.get('rd_expense') or
+                            prev_income.get('研发费用') or
+                            prev_income.get('research_expense')
+                        )
+                        if prev_rd and prev_rd != 0 and str(prev_rd) != 'nan':
+                            rd_yoy = ((rd_val - float(prev_rd)) / abs(float(prev_rd))) * 100
+
+                        if abs(rd_val) >= 100_000_000:
+                            metrics['rd_expense'] = f"{rd_val / 100_000_000:.2f}亿元"
+                        elif abs(rd_val) >= 10000:
+                            metrics['rd_expense'] = f"{rd_val / 10000:.2f}万元"
+                        else:
+                            metrics['rd_expense'] = f"{rd_val:.2f}元"
+                        metrics['rd_expense_raw'] = rd_val
+                        if rd_yoy is not None:
+                            metrics['rd_expense_yoy'] = f"{rd_yoy:+.1f}%"
+                        logger.info(f"✅ [AKShare-研发费用] 提取成功: {metrics['rd_expense']}" + (f" (同比{metrics['rd_expense_yoy']})" if rd_yoy is not None else ""))
+            except Exception as e:
+                logger.debug(f"⚠️ [AKShare-研发费用] 提取失败: {e}")
 
             # 计算 PS - 市销率（优先使用 TTM 营业收入）
             # 尝试从 main_indicators DataFrame 计算 TTM 营业收入

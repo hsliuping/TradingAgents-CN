@@ -121,7 +121,15 @@
           </template>
           <div class="kline-container">
             <v-chart class="k-chart" :option="kOption" autoresize />
-            <div class="legend">当前周期：{{ period }} · 数据源：{{ klineSource || '-' }} · 最近：{{ lastKTime || '-' }} · 收：{{ fmtPrice(lastKClose) }}</div>
+            <div class="legend">
+              当前周期：{{ period }} · 数据源：{{ klineSource || '-' }} · 最近：{{ lastKTime || '-' }} · 收：{{ fmtPrice(lastKClose) }}
+              <span v-if="analysisMarkers.length > 0" class="marker-legend">
+                · 分析标记: {{ analysisMarkers.length }} 条
+                <span class="marker-dot buy" title="买入"></span>买入
+                <span class="marker-dot sell" title="卖出"></span>卖出
+                <span class="marker-dot hold" title="持有"></span>持有
+              </span>
+            </div>
           </div>
         </el-card>
 
@@ -369,14 +377,15 @@ import { clearAllCache } from '@/api/cache'
 import { use as echartsUse } from 'echarts/core'
 import { CandlestickChart } from 'echarts/charts'
 
-import { GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent } from 'echarts/components'
+import { GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, MarkPointComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
 import { favoritesApi } from '@/api/favorites'
+import type { AnalysisMarker } from '@/types/analysis'
 
 
-echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
+echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, MarkPointComponent, CanvasRenderer])
 
 const route = useRoute()
 const router = useRouter()
@@ -389,6 +398,7 @@ const analysisMessage = ref('')
 const currentTaskId = ref<string | null>(null)
 const lastAnalysis = ref<any | null>(null)
 const lastTaskInfo = ref<any | null>(null) // 保存任务信息（包含 end_time 等）
+const analysisMarkers = ref<AnalysisMarker[]>([]) // K线图分析标记
 
 // 报告对话框
 const showReportsDialog = ref(false)
@@ -744,7 +754,8 @@ async function loadPageData() {
     fetchNews(),
     checkFavorite(),
     fetchLatestAnalysis(),  // 获取最新的历史分析报告
-    fetchSyncStatus()  // 获取同步状态
+    fetchSyncStatus(),      // 获取同步状态
+    fetchAnalysisMarkers()  // 获取分析标记（用于K线图叠加）
   ])
 }
 
@@ -845,6 +856,9 @@ async function fetchKline() {
         }
       ]
     }
+
+    // 应用分析标记
+    applyMarkersToKline(category, values)
   } catch (e) {
     console.error('获取K线失败', e)
   }
@@ -1008,6 +1022,91 @@ async function fetchLatestAnalysis() {
     }
   } catch (e) {
     console.warn('⚠️ 获取历史分析报告失败:', e)
+  }
+}
+
+// 获取分析标记（用于K线图叠加）
+async function fetchAnalysisMarkers() {
+  try {
+    const res: any = await stocksApi.getAnalysisMarkers(symbol.value)
+    const data = res?.data || res
+    analysisMarkers.value = data?.markers || []
+    console.log(`📊 获取到 ${analysisMarkers.value.length} 条分析标记`)
+  } catch (e) {
+    console.warn('⚠️ 获取分析标记失败:', e)
+    analysisMarkers.value = []
+  }
+}
+
+// 将分析标记叠加到K线图上
+function applyMarkersToKline(category: string[], values: number[][]) {
+  if (!category.length || !analysisMarkers.value.length) return
+
+  // 标准化K线日期数组为 YYYYMMDD 格式，用于快速查找
+  const normalizedDates: string[] = category.map(d => String(d).replace(/-/g, ''))
+
+  // 查找日期对应的K线索引：如果分析日期是非交易日，找最近的前一个交易日
+  function findTradingDateIdx(targetDate: string): number {
+    const target = targetDate.replace(/-/g, '')
+    const exactIdx = normalizedDates.findIndex(d => d === target)
+    if (exactIdx !== -1) return exactIdx
+    for (let i = normalizedDates.length - 1; i >= 0; i--) {
+      if (normalizedDates[i] < target) return i
+    }
+    return -1
+  }
+
+  // 同一天多次分析只取最新的一条（markers已按日期倒序排列，先出现的优先）
+  const deduped = new Map<string, typeof analysisMarkers.value[0]>()
+  for (const marker of analysisMarkers.value) {
+    const key = marker.date.split('T')[0]
+    if (!deduped.has(key)) {
+      deduped.set(key, marker)
+    }
+  }
+
+  const markPointData: any[] = []
+
+  for (const [dateKey, marker] of deduped.entries()) {
+    const idx = findTradingDateIdx(dateKey)
+    if (idx === -1) continue
+
+    const isBuy = marker.action === '买入'
+    const isSell = marker.action === '卖出'
+    const [, , l, h] = values[idx]
+
+    // 买入/持有放K线下方，卖出放上方，都离K线近一点
+    const y = isSell ? h * 1.005 : l * 0.995
+
+    markPointData.push({
+      name: marker.action,
+      coord: [idx, y],
+      value: isBuy ? '↑' : isSell ? '↓' : '●',
+      symbol: isBuy ? 'arrow' : isSell ? 'arrow' : 'circle',
+      symbolSize: 10,
+      symbolRotate: isBuy ? 0 : 180,
+      itemStyle: {
+        color: isBuy ? '#22c55e' : isSell ? '#ef4444' : '#eab308'
+      },
+      label: {
+        show: true,
+        position: isSell ? 'top' : 'bottom',
+        offset: [0, 0],
+        formatter: marker.action,
+        fontSize: 10,
+        color: isBuy ? '#22c55e' : isSell ? '#ef4444' : '#eab308'
+      }
+    })
+  }
+
+  if (markPointData.length) {
+    const series = (kOption.value as any).series
+    if (series && series[0]) {
+      series[0].markPoint = {
+        data: markPointData,
+        silent: false
+      }
+    }
   }
 }
 
@@ -1248,7 +1347,12 @@ function exportReport() {
 .body { margin-top: 4px; }
 .card-hd { display: flex; align-items: center; justify-content: space-between; }
 .k-chart { height: 320px; }
-.legend { margin-top: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
+.legend { margin-top: 8px; font-size: 12px; color: var(--el-text-color-secondary); display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.marker-legend { display: inline-flex; align-items: center; gap: 4px; }
+.marker-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 2px; vertical-align: middle; }
+.marker-dot.buy { background: #22c55e; }
+.marker-dot.sell { background: #ef4444; }
+.marker-dot.hold { background: #eab308; }
 
 .news-card .news-list { display: flex; flex-direction: column; }
 .news-item { padding: 10px 12px; border-bottom: 1px solid var(--el-border-color-lighter); transition: background-color .2s ease; }

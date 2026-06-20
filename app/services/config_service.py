@@ -433,7 +433,7 @@ class ConfigService:
                     model_name="gpt-3.5-turbo",
                     api_key="your-openai-api-key",
                     api_base="https://api.openai.com/v1",
-                    max_tokens=4000,
+                    max_tokens=20000,
                     temperature=0.7,
                     enabled=False,
                     description="OpenAI GPT-3.5 Turbo模型"
@@ -443,7 +443,7 @@ class ConfigService:
                     model_name="glm-4",
                     api_key="your-zhipu-api-key",
                     api_base="https://open.bigmodel.cn/api/paas/v4",
-                    max_tokens=4000,
+                    max_tokens=20000,
                     temperature=0.7,
                     enabled=True,
                     description="智谱AI GLM-4模型（推荐）"
@@ -453,7 +453,7 @@ class ConfigService:
                     model_name="qwen-turbo",
                     api_key="your-qwen-api-key",
                     api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    max_tokens=4000,
+                    max_tokens=20000,
                     temperature=0.7,
                     enabled=False,
                     description="阿里云通义千问模型"
@@ -764,7 +764,7 @@ class ConfigService:
                 # 确保必填字段有默认值（防止导出 None 或空字符串）
                 # 注意：max_tokens 在 system_configs 中已经有正确的值，直接使用
                 if not d.get("max_tokens") or d.get("max_tokens") == "":
-                    d["max_tokens"] = 4000
+                    d["max_tokens"] = 20000
                 if not d.get("temperature") and d.get("temperature") != 0:
                     d["temperature"] = 0.7
                 if not d.get("timeout") or d.get("timeout") == "":

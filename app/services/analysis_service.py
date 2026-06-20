@@ -139,7 +139,7 @@ class AnalysisService:
                     for llm_config in llm_configs:
                         if llm_config.get("model_name") == quick_model:
                             quick_model_config = {
-                                "max_tokens": llm_config.get("max_tokens", 4000),
+                                "max_tokens": llm_config.get("max_tokens", 20000),
                                 "temperature": llm_config.get("temperature", 0.7),
                                 "timeout": llm_config.get("timeout", 180),
                                 "retry_times": llm_config.get("retry_times", 3),
@@ -152,7 +152,7 @@ class AnalysisService:
 
                         if llm_config.get("model_name") == deep_model:
                             deep_model_config = {
-                                "max_tokens": llm_config.get("max_tokens", 4000),
+                                "max_tokens": llm_config.get("max_tokens", 20000),
                                 "temperature": llm_config.get("temperature", 0.7),
                                 "timeout": llm_config.get("timeout", 180),
                                 "retry_times": llm_config.get("retry_times", 3),
@@ -269,7 +269,7 @@ class AnalysisService:
                     for llm_config in llm_configs:
                         if llm_config.get("model_name") == quick_model:
                             quick_model_config = {
-                                "max_tokens": llm_config.get("max_tokens", 4000),
+                                "max_tokens": llm_config.get("max_tokens", 20000),
                                 "temperature": llm_config.get("temperature", 0.7),
                                 "timeout": llm_config.get("timeout", 180),
                                 "retry_times": llm_config.get("retry_times", 3),
@@ -282,7 +282,7 @@ class AnalysisService:
 
                         if llm_config.get("model_name") == deep_model:
                             deep_model_config = {
-                                "max_tokens": llm_config.get("max_tokens", 4000),
+                                "max_tokens": llm_config.get("max_tokens", 20000),
                                 "temperature": llm_config.get("temperature", 0.7),
                                 "timeout": llm_config.get("timeout", 180),
                                 "retry_times": llm_config.get("retry_times", 3),

@@ -227,7 +227,7 @@ class TradingAgentsGraph:
         quick_timeout = quick_config.get("timeout", 180)
 
         # 读取深度模型参数
-        deep_max_tokens = deep_config.get("max_tokens", 4000)
+        deep_max_tokens = deep_config.get("max_tokens", 20000)
         deep_temperature = deep_config.get("temperature", 0.7)
         deep_timeout = deep_config.get("timeout", 180)
 
@@ -257,6 +257,11 @@ class TradingAgentsGraph:
                 api_key=self.config.get("quick_api_key")  # 🔥 传递 API Key
             )
 
+            # When deep provider is qwen reasoning model, enable thinking for deep analysis
+            deep_extra_kwargs = {}
+            if normalized_deep_provider == "qwen":
+                deep_extra_kwargs = {"model_kwargs": {"extra_body": {"enable_thinking": True}}}
+
             self.deep_thinking_llm = create_llm_by_provider(
                 provider=normalized_deep_provider,
                 model=self.config["deep_think_llm"],
@@ -264,7 +269,8 @@ class TradingAgentsGraph:
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
                 timeout=deep_timeout,
-                api_key=self.config.get("deep_api_key")  # 🔥 传递 API Key
+                api_key=self.config.get("deep_api_key"),  # 🔥 传递 API Key
+                **deep_extra_kwargs,
             )
 
             logger.info(f"✅ [混合模式] LLM 实例创建成功")
@@ -368,6 +374,8 @@ class TradingAgentsGraph:
                 deep_max_tokens=deep_max_tokens,
                 deep_timeout=deep_timeout,
                 backend_url=self.config.get("backend_url"),
+                quick_extra_kwargs={"model_kwargs": {"extra_body": {"enable_thinking": False}}},
+                deep_extra_kwargs={"model_kwargs": {"extra_body": {"enable_thinking": True}}},
             )
             logger.info("✅ [阿里百炼] 已通过 llm_clients 初始化成功并应用用户配置的模型参数")
         elif normalized_provider == "deepseek":
@@ -440,7 +448,7 @@ class TradingAgentsGraph:
             quick_temperature = quick_config.get("temperature", 0.7)
             quick_timeout = quick_config.get("timeout", 180)
             
-            deep_max_tokens = deep_config.get("max_tokens", 4000)
+            deep_max_tokens = deep_config.get("max_tokens", 20000)
             deep_temperature = deep_config.get("temperature", 0.7)
             deep_timeout = deep_config.get("timeout", 180)
             
@@ -507,7 +515,7 @@ class TradingAgentsGraph:
             quick_temperature = quick_config.get("temperature", 0.7)
             quick_timeout = quick_config.get("timeout", 180)
 
-            deep_max_tokens = deep_config.get("max_tokens", 4000)
+            deep_max_tokens = deep_config.get("max_tokens", 20000)
             deep_temperature = deep_config.get("temperature", 0.7)
             deep_timeout = deep_config.get("timeout", 180)
 

@@ -569,6 +569,25 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📰 新闻数据同步已配置（仅自选股）: {settings.NEWS_SYNC_CRON}")
 
+        # 收盘自动分析任务（工作日20:00）
+        from app.services.auto_analysis_service import get_auto_analysis_service
+
+        async def run_auto_daily_analysis():
+            """收盘自动分析定时任务"""
+            try:
+                service = get_auto_analysis_service()
+                await service.run_daily_auto_analysis()
+            except Exception as e:
+                logger.error(f"收盘自动分析定时任务执行失败: {e}", exc_info=True)
+
+        scheduler.add_job(
+            run_auto_daily_analysis,
+            CronTrigger(hour=20, minute=0, day_of_week='mon-fri', timezone=settings.TIMEZONE),
+            id="auto_analysis_daily",
+            name="收盘自动分析（自选股）"
+        )
+        logger.info(f"📅 收盘自动分析已配置: 工作日 20:00 ({settings.TIMEZONE})")
+
         scheduler.start()
 
         # 设置调度器实例到服务中，以便API可以管理任务

@@ -48,6 +48,7 @@ class FavoritesService:
             "notes": favorite.get("notes", ""),
             "alert_price_high": favorite.get("alert_price_high"),
             "alert_price_low": favorite.get("alert_price_low"),
+            "auto_analyze_enabled": favorite.get("auto_analyze_enabled", False),
             # 行情占位，稍后填充
             "current_price": None,
             "change_percent": None,
@@ -311,6 +312,51 @@ class FavoritesService:
                 }
             )
             return result.modified_count > 0
+
+    async def toggle_auto_analyze(
+        self,
+        user_id: str,
+        stock_code: str,
+        enabled: bool
+    ) -> bool:
+        """切换自选股收盘自动分析开关"""
+        db = await self._get_db()
+        is_oid = self._is_valid_object_id(user_id)
+        prefix = "favorite_stocks.$." if is_oid else "favorites.$."
+
+        if is_oid:
+            result = await db.users.update_one(
+                {"_id": ObjectId(user_id), "favorite_stocks.stock_code": stock_code},
+                {"$set": {prefix + "auto_analyze_enabled": enabled}}
+            )
+        else:
+            result = await db.user_favorites.update_one(
+                {"user_id": user_id, "favorites.stock_code": stock_code},
+                {
+                    "$set": {
+                        prefix + "auto_analyze_enabled": enabled,
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+        return result.modified_count > 0
+
+    async def get_auto_analyze_favorites(self) -> List[Dict[str, Any]]:
+        """获取所有启用自动分析的自选股（跨所有用户）"""
+        db = await self._get_db()
+        pipeline = [
+            {"$unwind": "$favorites"},
+            {"$match": {"favorites.auto_analyze_enabled": True}},
+            {"$project": {
+                "user_id": 1,
+                "stock_code": "$favorites.stock_code",
+                "stock_name": "$favorites.stock_name",
+                "market": "$favorites.market",
+                "_id": 0
+            }}
+        ]
+        results = await db.user_favorites.aggregate(pipeline).to_list(length=None)
+        return results or []
 
     async def is_favorite(self, user_id: str, stock_code: str) -> bool:
         """检查股票是否在自选股中（兼容字符串ID与ObjectId）"""

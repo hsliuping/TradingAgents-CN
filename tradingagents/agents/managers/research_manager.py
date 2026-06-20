@@ -118,8 +118,21 @@ def create_research_manager(llm, memory):
         response_length = len(response.content) if response and hasattr(response, 'content') else 0
         estimated_output_tokens = int(response_length / 1.8)
 
+        # 🏁 检查 finish_reason 以检测截断
+        finish_reason = None
+        if response and hasattr(response, 'response_metadata') and response.response_metadata:
+            metadata = response.response_metadata
+            finish_reason = metadata.get('finish_reason')
+
         logger.info(f"⏱️ [Research Manager] LLM调用耗时: {elapsed_time:.2f}秒")
         logger.info(f"📊 [Research Manager] 响应统计: {response_length} 字符, 估算~{estimated_output_tokens} tokens")
+        if finish_reason:
+            logger.info(f"🏁 [Research Manager] finish_reason: {finish_reason}")
+
+        # 🚨 检测截断
+        if finish_reason == 'length':
+            logger.warning(f"⚠️ [Research Manager] LLM响应被截断! finish_reason='length', 响应长度: {response_length} 字符")
+            logger.warning(f"⚠️ [Research Manager] 建议增加 max_tokens 配置或使用上下文窗口更大的模型")
 
         new_investment_debate_state = {
             "judge_decision": response.content,

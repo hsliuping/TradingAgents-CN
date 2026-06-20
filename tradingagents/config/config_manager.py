@@ -210,7 +210,7 @@ class ConfigManager:
                     provider="dashscope",
                     model_name="qwen-plus-latest",
                     api_key="",
-                    max_tokens=8000,
+                    max_tokens=20000,
                     temperature=0.7
                 ),
                 ModelConfig(
@@ -225,7 +225,7 @@ class ConfigManager:
                     provider="openai",
                     model_name="gpt-4",
                     api_key="",
-                    max_tokens=8000,
+                    max_tokens=20000,
                     temperature=0.7,
                     enabled=False
                 ),
@@ -233,7 +233,7 @@ class ConfigManager:
                     provider="google",
                     model_name="gemini-2.5-pro",
                     api_key="",
-                    max_tokens=4000,
+                    max_tokens=20000,
                     temperature=0.7,
                     enabled=False
                 ),

@@ -68,6 +68,7 @@ class FavoriteStock(BaseModel):
     notes: str = Field(default="", description="用户备注")
     alert_price_high: Optional[float] = Field(None, description="价格上限提醒")
     alert_price_low: Optional[float] = Field(None, description="价格下限提醒")
+    auto_analyze_enabled: bool = Field(default=False, description="是否启用收盘自动分析")
 
 
 class User(BaseModel):

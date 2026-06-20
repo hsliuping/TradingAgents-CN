@@ -124,6 +124,41 @@ async def add_favorite(
         )
 
 
+class AutoAnalyzeToggleRequest(BaseModel):
+    """切换自动分析开关请求"""
+    enabled: bool = True
+
+
+@router.put("/{stock_code}/auto-analyze", response_model=dict)
+async def toggle_auto_analyze(
+    stock_code: str,
+    request: AutoAnalyzeToggleRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """切换自选股收盘自动分析开关"""
+    try:
+        success = await favorites_service.toggle_auto_analyze(
+            user_id=current_user["id"],
+            stock_code=stock_code,
+            enabled=request.enabled
+        )
+        if success:
+            return ok({"stock_code": stock_code, "enabled": request.enabled},
+                       "已开启自动分析" if request.enabled else "已关闭自动分析")
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="自选股不存在"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"设置自动分析失败: {str(e)}"
+        )
+
+
 @router.put("/{stock_code}", response_model=dict)
 async def update_favorite(
     stock_code: str,

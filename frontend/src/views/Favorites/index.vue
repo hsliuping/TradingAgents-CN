@@ -168,6 +168,20 @@
           </template>
         </el-table-column>
 
+        <el-table-column label="自动分析" width="90" align="center">
+          <template #default="{ row }">
+            <el-switch
+              v-model="row.auto_analyze_enabled"
+              :loading="autoAnalyzeLoading[row.stock_code || row.symbol]"
+              @change="handleAutoAnalyzeToggle(row)"
+              size="small"
+              active-text="开"
+              inactive-text="关"
+              inline-prompt
+            />
+          </template>
+        </el-table-column>
+
         <el-table-column prop="added_at" label="添加时间" width="120">
           <template #default="{ row }">
             {{ formatDate(row.added_at) }}
@@ -544,6 +558,9 @@ const selectedExchange = ref('')
 
 // 批量选择
 const selectedStocks = ref<FavoriteItem[]>([])
+
+// 自动分析开关loading状态
+const autoAnalyzeLoading = ref<Record<string, boolean>>({})
 
 // 批量同步对话框
 const batchSyncDialogVisible = ref(false)
@@ -1007,6 +1024,26 @@ const removeFavorite = async (row: any) => {
     await loadFavorites()
   } catch (e) {
     // 用户取消或失败
+  }
+}
+
+const handleAutoAnalyzeToggle = async (row: FavoriteItem) => {
+  const symbol = row.stock_code || row.symbol || ''
+  if (!symbol) return
+
+  const prevState = !row.auto_analyze_enabled
+  const key = symbol
+
+  autoAnalyzeLoading.value[key] = true
+  try {
+    await favoritesApi.toggleAutoAnalyze(symbol, !prevState)
+    ElMessage.success(!prevState ? '已开启自动分析' : '已关闭自动分析')
+  } catch (error: any) {
+    // 失败时回滚
+    row.auto_analyze_enabled = prevState
+    ElMessage.error(error?.message || '设置失败')
+  } finally {
+    autoAnalyzeLoading.value[key] = false
   }
 }
 

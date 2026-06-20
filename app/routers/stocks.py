@@ -748,3 +748,34 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
             }
             return ok(data)
 
+
+@router.get("/{code}/analysis-markers", response_model=dict)
+async def get_analysis_markers(
+    code: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """获取某股票所有分析标记（用于K线图叠加展示）"""
+    try:
+        db = get_mongo_db()
+        cursor = db.analysis_reports.find(
+            {"stock_symbol": code, "status": "completed"},
+            {"analysis_date": 1, "decision": 1, "summary": 1, "_id": 0}
+        ).sort("analysis_date", -1)
+
+        markers = []
+        async for doc in cursor:
+            decision = doc.get("decision", {})
+            markers.append({
+                "date": doc.get("analysis_date"),
+                "action": decision.get("action", "持有"),
+                "confidence": decision.get("confidence", 0),
+                "risk_score": decision.get("risk_score", 0),
+                "target_price": decision.get("target_price"),
+                "summary": (doc.get("summary", "") or "")[:200]
+            })
+
+        return ok(data={"markers": markers, "total": len(markers)})
+    except Exception as e:
+        logger.error(f"获取分析标记失败: {e}", exc_info=True)
+        return ok(data={"markers": [], "total": 0})
+
