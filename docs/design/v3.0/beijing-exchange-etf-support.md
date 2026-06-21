@@ -4,9 +4,9 @@
 
 | 项目 | 内容 |
 |------|------|
-| 版本 | v1.2 |
-| 状态 | 部分实现，持续迭代 |
-| 日期 | 2026-03-19 |
+| 版本 | v1.3 |
+| 状态 | 核心能力已实现，持续迭代 |
+| 日期 | 2026-06-21 |
 | 目标 | 支持北交所股票和 ETF 的分析能力 |
 
 ---
@@ -25,7 +25,7 @@
 
 ---
 
-## 0.1 近期落地进展（2026-03）
+## 0.1 近期落地进展（2026-06-21 更新）
 
 最近一轮已经完成的部分：
 
@@ -33,12 +33,22 @@
 2. 已实现 `app/worker/etf_sync_service.py`，支持 ETF 基础信息与 ETF 历史日线同步。
 3. 已将 QMT 接入 ETF 同步源，支持 ETF 列表获取、ETF 日线拉取，以及沪深 ETF 代码前缀纠正。
 4. 已完成 QMT 历史数据和财务数据入库，分别写入 `stock_daily_quotes` 与 `stock_financial_data`。
+5. 已实现 ETF 分析工作流 `v2_etf_analysis_workflow`，含 ETF 分析师 + 市场分析师 + 新闻分析师 + 风控。
+6. 已实现 `get_etf_fundamentals` 工具，支持本地数据优先 + AKShare/Tushare 在线回退。
+7. 已实现 `etf_analyst_v2` 分析师，系统提示词明确禁止 PE/PB/ROE，使用 ETF 专用指标。
+8. 已实现 ETF 工作流专属提示词模板补齐（`etf_workflow_prompt_template_service.py`），覆盖全部 7 个 Agent。
+9. 已实现前端单股分析页面 ETF 入口：市场选择器有「ETF 基金」选项，输入 ETF 代码自动识别并切换。
+10. 已实现报告展示 ETF 适配：`ReportDetail.vue` 支持 ETF 分析师映射和 `isEtfAnalysis` 判断。
+11. 已实现定时分析/自选股 ETF 支持：`watchlist_analysis_task.py` 自动识别 ETF → `ETF_ANALYSIS`。
+12. 已实现 `UnifiedStockService` ETF 映射：`collection_map["ETF"]` 指向 `etf_basic_info` / `etf_daily_quotes`。
+13. 已实现行情/基本面/K 线 API 的 ETF 支持：`/api/stocks/{code}/quote`、`/fundamentals`、`/kline`。
+14. 已实现模拟交易 ETF 支持：下单、持仓、价格查询均支持 ETF 代码。
+15. 已实现 `planned_analysis_service.py` 中 `_ETF_FUND_KEYWORDS = []`，不再阻止 ETF 相关提问。
 
 仍未完成的部分：
 
-1. ETF 分析链路虽已具备工作流、任务类型、分析路由、ETF 分析师与基础工具，但成熟度仍弱于普通股票主流程。
-2. `planned_analysis` 的 ETF 路由与放行策略仍需按产品决策继续推进。
-3. ETF 报告展示、更多工具覆盖与产品入口打磨仍需继续推进。
+1. `core/tools/external/local_data.py` 未增加 ETF 函数（`get_etf_basic_info`、`get_etf_daily_quotes`）。
+2. 北交所 ETF 适配：Tushare `exchange` 需扩展 `BSE`，`symbol_utils` 需增加 `.BJ` 支持。
 
 ---
 
@@ -66,12 +76,20 @@
 | 模块 | 当前状态 | 说明 |
 |------|----------|------|
 | **planned_analysis** | ✅ 已放行 | `_ETF_FUND_KEYWORDS = []`，ETF 不再在该层被直接阻止 |
-| **StockUtils** | ✅ 可识别 | `identify_security_type()` 可识别 ETF，当前同步侧也已覆盖更多前缀 |
-| **ETF 同步存储** | ✅ 已实现 | 已落地 `etf_basic_info`、`etf_daily_quotes`，由 `etf_sync_service` 负责同步 |
-| **数据源** | ✅ 已部分确认 | AKShare、Tushare、QMT 已纳入 ETF 同步映射；其中 QMT 已补齐 ETF 列表与历史日线能力 |
-| **ETF 工作流** | ✅ 已实现 | 已存在 `ETF_ANALYSIS` 任务类型、`v2_etf_analysis_workflow` 与分析入口路由 |
-| **ETF 工具与分析师** | ✅ 已部分实现 | 已存在 `etf_analyst_v2` 与 ETF 基础工具，但覆盖深度仍需继续增强 |
-| **分析逻辑** | ⚠️ 需区分 | ETF 无个股财务指标（PE/PB/ROE 等），提示词、工具与报告层仍需继续细化 |
+| **StockUtils** | ✅ 可识别 | `identify_security_type()` 可识别 ETF，`SecurityType.FUND` |
+| **ETF 同步存储** | ✅ 已实现 | `etf_basic_info`、`etf_daily_quotes`，由 `etf_sync_service` 负责同步 |
+| **数据源** | ✅ 已确认 | AKShare、Tushare、QMT 已纳入 ETF 同步映射 |
+| **ETF 工作流** | ✅ 已实现 | `ETF_ANALYSIS` 任务类型、`v2_etf_analysis_workflow`、分析入口路由 |
+| **ETF 工具** | ✅ 已实现 | `get_etf_fundamentals`：本地数据优先 + AKShare/Tushare 在线回退 |
+| **ETF 分析师** | ✅ 已实现 | `etf_analyst_v2`：默认工具 `get_etf_fundamentals`，明确禁止 PE/PB/ROE |
+| **ETF 提示词模板** | ✅ 已实现 | `etf_workflow_prompt_template_service.py`：覆盖全部 7 个 Agent |
+| **前端 ETF 入口** | ✅ 已实现 | `SingleAnalysis.vue`：市场选择器「ETF 基金」、代码自动识别 |
+| **ETF 报告展示** | ✅ 已实现 | `ReportDetail.vue`：ETF 分析师映射、`isEtfAnalysis` 判断 |
+| **定时分析/自选股 ETF** | ✅ 已实现 | `watchlist_analysis_task.py`：自动识别 ETF → `ETF_ANALYSIS` |
+| **UnifiedStockService** | ✅ 已实现 | `collection_map["ETF"]` 已配置 |
+| **行情/K 线/基本面 API** | ✅ 已实现 | `stocks.py` 各端点均支持 ETF 代码 |
+| **模拟交易 ETF** | ✅ 已实现 | `paper.py` 支持 ETF 下单、持仓、价格查询 |
+| **local_data ETF 支持** | ❌ 未实现 | `core/tools/external/local_data.py` 未增加 ETF 函数 |
 
 **ETF 代码规则**（参考 `stock_utils.py`）：
 - 上海：`50xxxx`、`51xxxx`、`52xxxx`、`56xxxx`、`58xxxx`
@@ -95,12 +113,12 @@
 
 | 序号 | 改进项 | 文件/模块 | 改动说明 |
 |------|--------|-----------|----------|
-| 1 | **解除 planned_analysis 阻止** | `app/services/planned_analysis_service.py` | 已完成，当前 `_ETF_FUND_KEYWORDS = []`，ETF 不再在该层被阻止 |
-| 2 | **ETF 基础信息同步** | `app/worker/etf_sync_service.py` | 已实现，当前写入 `etf_basic_info`，并支持 AKShare/Tushare/QMT 多源获取 |
-| 3 | **ETF 日线/行情同步** | `app/worker/etf_sync_service.py` | 已实现 ETF 历史日线同步，当前写入 `etf_daily_quotes` |
-| 4 | **local_data 支持 ETF** | `core/tools/external/local_data.py` | 若 ETF 存于独立集合，增加 `get_etf_basic_info`、`get_etf_daily_quotes` 等 |
-| 5 | **分析逻辑差异化** | 智能分析 / Skill | ETF 分析跳过财务指标（PE/PB/ROE），侧重净值、跟踪误差、规模、费率等 |
-| 6 | **前端市场/品种选择** | 单股分析、自选等 | 增加「ETF」选项或自动识别 5/15/16 开头为 ETF |
+| 1 | **解除 planned_analysis 阻止** | `app/services/planned_analysis_service.py` | ✅ 已完成，`_ETF_FUND_KEYWORDS = []`，ETF 不再被阻止 |
+| 2 | **ETF 基础信息同步** | `app/worker/etf_sync_service.py` | ✅ 已完成，写入 `etf_basic_info`，支持 AKShare/Tushare/QMT 多源 |
+| 3 | **ETF 日线/行情同步** | `app/worker/etf_sync_service.py` | ✅ 已完成，写入 `etf_daily_quotes` |
+| 4 | **local_data 支持 ETF** | `core/tools/external/local_data.py` | ❌ 未实现，需增加 `get_etf_basic_info`、`get_etf_daily_quotes` |
+| 5 | **分析逻辑差异化** | 智能分析 / Skill | ✅ 已完成，`etf_analyst_v2` 使用 ETF 专用指标，`get_etf_fundamentals` 跳过 PE/PB/ROE |
+| 6 | **前端市场/品种选择** | 单股分析、自选等 | ✅ 已完成，`SingleAnalysis.vue` 增加「ETF 基金」选项，输入 ETF 代码自动识别 |
 
 ### 2.3 数据源能力确认（实施前必做）
 
@@ -326,25 +344,25 @@ ETF 需要的是：
 1. 调研 Tushare `fund_basic`/`fund_daily`、AKShare ETF 接口（列表、日线、净值）  ✅ 已完成并接入同步实现
 2. **新建集合**：`etf_basic_info`、`etf_daily_quotes`（参考 2.4.2 节）  ✅ 已完成
 3. 实现 ETF 同步服务（`etf_sync_service` 或扩展现有 sync）  ✅ 已完成
-4. 解除 `planned_analysis` 对 ETF 的阻止（可先做开关）  ⏳ 未完成
+4. 解除 `planned_analysis` 对 ETF 的阻止（可先做开关）  ✅ 已完成
 
 ### 阶段三：ETF 工具、提示词与工作流（4–5 天）
 
-1. **新增 ETF 工具**：`get_etf_basic_info`、`get_etf_fundamentals`（参考 2.4.3 节）  ⚠️ 已部分完成，已存在 ETF 基础工具，仍可继续补充更多工具
-2. **UnifiedStockService**：增加 `ETF` 的 `collection_map`  ⏳ 未完成
-3. **新增 ETF 分析师**：`etf_analyst` Agent，绑定 `get_etf_fundamentals`  ✅ 已完成，当前已存在 ETF 分析师适配器
-4. **ETF 提示词模板**：入库 `prompt_templates`，分析净值、规模、费率、跟踪误差（参考 2.5.5 节）  ⚠️ 已部分完成，仍需继续完善成熟度
-5. **分析流程分支**：方案 A 用 ETF 分析师替换基本面分析师，或方案 B 新建 `v2_etf_analysis_workflow`  ✅ 已完成，当前已有 ETF 专用工作流分支
-6. **研究员/风险提示词**：调整引用逻辑，ETF 分支引用 `etf_report` 而非 `fundamentals_report`  ⚠️ 部分完成，仍需继续核对全链路引用
-7. 前端单股分析：市场选择增加「ETF」或自动识别 5/15/16 开头  ⏳ 未完成
+1. **新增 ETF 工具**：`get_etf_basic_info`、`get_etf_fundamentals`（参考 2.4.3 节）  ✅ 已完成，`get_etf_fundamentals` 已实现，支持本地+在线多源回退
+2. **UnifiedStockService**：增加 `ETF` 的 `collection_map`  ✅ 已完成
+3. **新增 ETF 分析师**：`etf_analyst` Agent，绑定 `get_etf_fundamentals`  ✅ 已完成，`etf_analyst_v2` 已实现
+4. **ETF 提示词模板**：入库 `prompt_templates`，分析净值、规模、费率、跟踪误差（参考 2.5.5 节）  ✅ 已完成，`etf_workflow_prompt_template_service.py` 覆盖全部 7 个 Agent
+5. **分析流程分支**：方案 A 用 ETF 分析师替换基本面分析师，或方案 B 新建 `v2_etf_analysis_workflow`  ✅ 已完成，ETF 专用工作流已存在
+6. **研究员/风险提示词**：调整引用逻辑，ETF 分支引用 `etf_report` 而非 `fundamentals_report`  ✅ 已完成，`research_manager_v2` 已做 ETF 工作流兜底
+7. 前端单股分析：市场选择增加「ETF」或自动识别 5/15/16 开头  ✅ 已完成
 
 ### 阶段四：界面与定时任务（1–2 天）
 
-1. **单股分析页面**：市场选择器增加「ETF」，输入 5/15/16 开头时自动识别
-2. **提交逻辑**：根据 `market` 或 `security_type` 选择 `v2_stock_analysis` 或 `v2_etf_analysis`
-3. **定时分析**：`AnalysisTaskType` 新增 `ETF_ANALYSIS`，`workflow_registry` 注册 ETF 工作流
-4. **watchlist_analysis_task**：遍历 code 时调用 `identify_security_type`，按类型选择 `STOCK_ANALYSIS` 或 `ETF_ANALYSIS`
-5. **报告展示**：TaskDetailDialog、ReportDetail 等支持 ETF 报告结构（净值、跟踪误差等）
+1. **单股分析页面**：市场选择器增加「ETF」，输入 5/15/16 开头时自动识别  ✅ 已完成
+2. **提交逻辑**：根据 `market` 或 `security_type` 选择 `v2_stock_analysis` 或 `v2_etf_analysis`  ✅ 已完成
+3. **定时分析**：`AnalysisTaskType` 新增 `ETF_ANALYSIS`，`workflow_registry` 注册 ETF 工作流  ✅ 已完成
+4. **watchlist_analysis_task**：遍历 code 时调用 `identify_security_type`，按类型选择 `STOCK_ANALYSIS` 或 `ETF_ANALYSIS`  ✅ 已完成
+5. **报告展示**：TaskDetailDialog、ReportDetail 等支持 ETF 报告结构（净值、跟踪误差等）  ✅ 已完成
 
 ### 阶段五：Skill 生成与前端（1–2 天）
 

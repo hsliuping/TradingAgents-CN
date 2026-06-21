@@ -10,6 +10,8 @@
         get_stock_daily_quotes,
         get_stock_news,
         get_market_quotes,
+        get_etf_basic_info,
+        get_etf_daily_quotes,
     )
 """
 
@@ -25,6 +27,10 @@ _COL_DAILY = "stock_daily_quotes"
 _COL_NEWS = "stock_news"
 _COL_QUOTES = "market_quotes"
 _COL_FINANCIAL = "stock_financial_data"
+
+# 集合名（ETF）
+_COL_ETF_BASIC = "etf_basic_info"
+_COL_ETF_DAILY = "etf_daily_quotes"
 
 
 def _get_db():
@@ -291,6 +297,63 @@ def get_stock_valuation_context(symbol: str, financial_limit: int = 8) -> Dict[s
     }
 
 
+# ─── ETF 数据访问 ──────────────────────────────────────────────
+
+
+def get_etf_basic_info(symbol: str) -> Optional[Dict[str, Any]]:
+    """
+    获取 ETF 基础信息（从本地数据库）
+
+    Args:
+        symbol: 6 位 ETF 代码，如 510050、159919
+
+    Returns:
+        ETF 基础信息字典，含 name、fund_type、track_index、fund_scale、
+        management_fee、unit_nav、accum_nav 等；无数据返回 None
+    """
+    symbol = str(symbol).strip().zfill(6)
+    db = _get_db()
+    doc = db[_COL_ETF_BASIC].find_one({"code": symbol}, {"_id": 0})
+    return doc
+
+
+def get_etf_daily_quotes(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    limit: int = 1000,
+) -> List[Dict[str, Any]]:
+    """
+    获取 ETF 日线数据（从本地数据库）
+
+    Args:
+        symbol: 6 位 ETF 代码
+        start_date: 开始日期，格式 YYYYMMDD 或 YYYY-MM-DD
+        end_date: 结束日期，格式同上
+        limit: 最大条数，默认 1000
+
+    Returns:
+        日线列表，按 trade_date 升序；含 close、pct_chg、volume、amount、unit_nav、accum_nav
+    """
+    symbol = str(symbol).strip().zfill(6)
+    start = start_date.replace("-", "")[:8]
+    end = end_date.replace("-", "")[:8]
+    db = _get_db()
+    col = db[_COL_ETF_DAILY]
+    cursor = (
+        col.find(
+            {"code": symbol, "trade_date": {"$gte": start, "$lte": end}},
+            {"_id": 0},
+        )
+        .sort("trade_date", 1)
+        .limit(limit)
+    )
+    return list(cursor)
+
+
+# ─── API 文档（供代码生成器引用）────────────────────────────────
+
+
 # 供代码生成器 Prompt 引用的文档
 LOCAL_DATA_API_DOC = """
 【本地数据访问 — 可从数据库获取已有数据】
@@ -326,6 +389,14 @@ LOCAL_DATA_API_DOC = """
 
 7. get_stock_valuation_context(symbol, financial_limit=8) -> dict
    - 估值场景标准入口：一次返回 basic_info、market_quotes、current_price、pe_ttm、pb、ps_ttm、financial_data
+
+8. get_etf_basic_info(symbol: str) -> dict | None
+   - ETF 基础信息：name、fund_type、track_index、fund_scale、management_fee、unit_nav、accum_nav 等
+   - symbol: 6 位 ETF 代码，如 510050、159919
+
+9. get_etf_daily_quotes(symbol, start_date, end_date, limit=1000) -> list
+   - ETF 日线数据：close、pct_chg、volume、amount、unit_nav、accum_nav
+   - 日期格式：YYYYMMDD 或 YYYY-MM-DD
 
 示例1：先查本地，无数据再调外部 API
     from core.tools.external.local_data import get_stock_basic_info, get_stock_daily_quotes
