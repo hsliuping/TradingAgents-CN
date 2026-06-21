@@ -177,8 +177,15 @@
 
 | 设计项 | 设计文档 | 实现状态 | 说明 |
 | -------- | ---------- | ---------- | ------ |
-| 五层语义（基础角色 / 场景 / 画像 / 能力 / 任务） | prompt-layered-architecture §3 | ⚠️ 部分 | `prompt_assembly_service`、`prompt_injection_policy_service` 存在，是否完全按五层组装需对照 prompt-layered-implementation-plan 逐项核对 |
-| 行业/个股画像、能力块注入 | prompt-layered-architecture §3.2 | ⚠️ 部分 | 有 analysis_profile、injection_policy 等，与设计文档的完全分层是否一致需进一步对照 |
+| 五层语义（基础角色 / 场景 / 画像 / 能力 / 任务） | prompt-layered-architecture §3 | ✅ 已简化落地 | 原设计五层组装过于复杂（策略层、能力块、任务块对个股分析无必要），已简化为"行业画像注入"方案：`base.py` 执行时根据股票所属行业，从 `industry_analysis_profiles` 查询行业配置，注入到 Agent 提示词末尾 |
+| 行业画像注入 | prompt-layered-architecture §3.2 | ✅ 已实现 | `analysis_profile_service.py`：`build_industry_prompt_block()` 方法；`base.py`：`_get_prompt_from_template()` 末尾自动注入；37 个行业大类配置已入库 |
+| 策略配置层（prompt_injection_policies） | prompt-layered-architecture §7.2 | ⚠️ 已实现但未接入 | 模型、服务、路由、前端管理页均已实现，但策略层增加了不必要的复杂度，已决定不接入运行时 |
+| 能力块/任务块注入 | prompt-layered-architecture §4.4、§4.5 | ⚠️ 已实现但未接入 | 同上，代码已实现但产品价值待验证 |
+| Prompt 预览 API | prompt-layered-implementation-plan §1.3 | ✅ 已实现 | `app/routers/prompt_preview.py`：`/api/v1/prompt-preview/assemble` 可预览组装效果 |
+| 聊天式 Prompt 设计助手 | prompt-layered-implementation-plan §3 | ✅ 已实现 | `app/services/prompt_design_assistant_service.py` |
+| 前端管理页 | — | ✅ 已实现 | `PromptPreview.vue`、`PromptPolicyManager.vue`、`PromptDesignWorkspace.vue` |
+
+**小结**: 分层提示词原设计过于复杂（六层动态组装、策略配置、能力块、任务块），对个股分析产品价值有限。已简化为"行业画像注入"方案——Agent 执行时自动注入行业分析维度，简单有效。原设计中的 Prompt 预览、策略管理、设计助手等基础设施已实现，保留作为调试和配置工具。
 
 ---
 
@@ -227,9 +234,9 @@
 | Skill 生成系统 | 需求分析→代码→验证→沙箱→评估→迭代→入库 | ✅ 已实现 | — |
 | 数据架构 | 存储与降级链 | ✅ 已实现 | MCP 数据源类与审计扩展为部分/规划 |
 | QMT 与 ETF | QMT 配置桥接、5 类同步任务、历史/财务入库、QMT 分析模式、ETF 数据同步、ETF 工作流、ETF 工具、ETF 分析师、ETF 提示词模板、ETF 前端入口、ETF 报告展示、ETF 定时分析/自选股集成、ETF 行情/基本面/K线 API | ✅ 已实现 | 仅 `local_data.py` ETF 函数和北交所 ETF 适配尚未完成 |
-| 分层提示词 | 五层组装与行业/个股/能力 | ⚠️ 部分 | 有相关服务，需与实施计划逐项对照 |
+| 分层提示词 | 行业画像注入（简化方案），37 个行业配置，运行时自动注入 | ✅ 已实现 | 原五层方案已简化，Prompt 预览/策略管理/设计助手已实现但未接入运行时 |
 
-**总体结论**：v3.0 设计中的**分析助理升级、MCP Server 六工具与认证、Gateway 框架与 QQ、通知、AI 工作流架构师、Agent 工坊、Skill 生成，以及 QMT 数据同步/分析模式与 ETF 全链路能力**均已在代码中实现；**Agent 工坊当前主要缺口在审批、灰度和生产反馈闭环**；**飞书/钉钉适配器**仍属后续扩展；**`local_data.py` ETF 函数、北交所 ETF 适配**为少量未完成项；**MCP 数据源/审计的完整落地**可按文档后续补全。
+**总体结论**：v3.0 设计中的**分析助理升级、MCP Server 六工具与认证、Gateway 框架与 QQ、通知、AI 工作流架构师、Agent 工坊、Skill 生成、QMT 数据同步/分析模式、ETF 全链路能力、北交所支持、行业画像注入**均已在代码中实现；**Agent 工坊当前主要缺口在审批、灰度和生产反馈闭环**；**飞书/钉钉适配器**仍属后续扩展；**MCP 数据源/审计的完整落地**可按文档后续补全。
 
 ---
 

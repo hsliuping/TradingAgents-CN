@@ -1,14 +1,16 @@
 # TradingAgents-CN v3.0 — 分层提示词架构设计方案
 
+> **2026-06-21 落地说明**: 原设计中的五层动态组装（基础模板→场景策略→行业画像→个股画像→能力块→任务块）过于复杂。实际落地采用简化方案——仅保留行业画像注入：Agent 执行时根据股票所属行业，从 `industry_analysis_profiles` 查询行业配置，格式化为分析维度追加到提示词末尾。37 个行业大类配置已入库，运行时注入已接入 `base.py`。详见 [行业分析框架速查手册](../reference/industry-analysis-framework.md)。
+
 ## 📋 文档信息
 
 | 项目 | 内容 |
 |------|------|
-| 版本 | v1.0 |
-| 状态 | 设计完成，留档 |
-| 日期 | 2026-03-07 |
+| 版本 | v1.1 |
+| 状态 | 已简化落地 — 行业画像注入方案替代原五层组装 |
+| 日期 | 2026-06-21 |
 | 作者 | TradingAgents-CN Pro Team |
-| 关联文档 | [AI 工作流架构师技术设计](ai-workflow-generation.md)、[AI 工作流架构师产品规划](ai-workflow-generation-product.md)、[v4.0 提示词优化讨论稿](../v4.0/analysis-workflow-and-prompt-optimization-next-stage.md)、[实施拆解清单](prompt-layered-implementation-plan.md) |
+| 关联文档 | [AI 工作流架构师技术设计](ai-workflow-generation.md)、[实施拆解清单](prompt-layered-implementation-plan.md)、[行业分析框架速查](../reference/industry-analysis-framework.md) |
 
 ---
 
