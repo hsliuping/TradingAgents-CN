@@ -12,6 +12,7 @@ export interface FavoriteItem {
   notes?: string
   alert_price_high?: number | null
   alert_price_low?: number | null
+  auto_analyze_enabled?: boolean
   current_price?: number | null
   change_percent?: number | null
   volume?: number | null
@@ -77,6 +78,17 @@ export const favoritesApi = {
       symbols: string[]
       data_source: string
       message: string
-    }>('/api/favorites/sync-realtime', { data_source })
+    }>('/api/favorites/sync-realtime', { data_source }),
+
+  /**
+   * 切换自动分析开关
+   * @param symbol 股票代码
+   * @param enabled 是否启用
+   */
+  toggleAutoAnalyze: (symbol: string, enabled: boolean) =>
+    ApiClient.put<{ stock_code?: string; enabled: boolean; message: string }>(
+      `/api/favorites/${symbol}/auto-analyze`,
+      { enabled }
+    )
 }
 

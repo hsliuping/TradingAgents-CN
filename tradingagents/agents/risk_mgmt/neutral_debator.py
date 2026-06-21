@@ -22,6 +22,9 @@ def create_neutral_debator(llm):
 
         trader_decision = state["trader_investment_plan"]
 
+        # 获取当前分析日期，用于事实约束
+        current_date = state.get("trade_date", "未知")
+
         # 📊 记录所有输入数据的长度，用于性能分析
         logger.info(f"📊 [Neutral Analyst] 输入数据长度统计:")
         logger.info(f"  - market_report: {len(market_research_report):,} 字符 (~{len(market_research_report)//4:,} tokens)")
@@ -43,6 +46,14 @@ def create_neutral_debator(llm):
         prompt = f"""作为中性风险分析师，您的角色是提供平衡的视角，权衡交易员决策或计划的潜在收益和风险。您优先考虑全面的方法，评估上行和下行风险，同时考虑更广泛的市场趋势、潜在的经济变化和多元化策略。以下是交易员的决策：
 
 {trader_decision}
+
+🚫 事实约束（绝对遵守）：
+1. 你只能引用下方报告中已经出现的数据
+2. 禁止引用报告中不存在的任何财务数据、销量数据、增长率
+3. 禁止编造尚未发生的事件（如未来销量、未来产品发布）作为事实
+4. 如果报告中没有提供某项数据，请说"数据不可获取"
+5. 当前日期是 {current_date}，此日期之后的任何事件都不是事实
+6. 你引用的所有数值必须与提供的报告中的数据一致
 
 您的任务是挑战激进和安全分析师，指出每种观点可能过于乐观或过于谨慎的地方。使用以下数据来源的见解来支持调整交易员决策的温和、可持续策略：
 

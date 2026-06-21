@@ -618,9 +618,11 @@ const analyzeSingle = (stock: StockInfo) => {
 }
 
 const viewStockDetail = (stock: StockInfo) => {
-  const stockCode = stock.code || stock.symbol || ''
-  if (!stockCode) return
-  // 跳转到股票详情页面
+  const stockCode = (stock.code || stock.symbol || '').toUpperCase()
+  if (!stockCode) {
+    ElMessage.warning('股票代码为空，无法查看详情')
+    return
+  }
   router.push({
     name: 'StockDetail',
     params: { code: stockCode }

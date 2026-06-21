@@ -124,6 +124,104 @@ async def add_favorite(
         )
 
 
+class AutoAnalyzeToggleRequest(BaseModel):
+    """切换自动分析开关请求"""
+    enabled: bool = True
+
+
+@router.put("/{stock_code}/auto-analyze", response_model=dict)
+async def toggle_auto_analyze(
+    stock_code: str,
+    request: AutoAnalyzeToggleRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """切换自选股收盘自动分析开关"""
+    try:
+        success = await favorites_service.toggle_auto_analyze(
+            user_id=current_user["id"],
+            stock_code=stock_code,
+            enabled=request.enabled
+        )
+        if success:
+            return ok({"stock_code": stock_code, "enabled": request.enabled},
+                       "已开启自动分析" if request.enabled else "已关闭自动分析")
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="自选股不存在"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"设置自动分析失败: {str(e)}"
+        )
+
+
+@router.post("/auto-analyze/trigger", response_model=dict)
+async def trigger_auto_analyze(
+    current_user: dict = Depends(get_current_user)
+):
+    """手动触发收盘自动分析（测试用，跳过星期/时间检查）
+
+    会立即为所有启用了自动分析的自选股执行分析。
+    """
+    try:
+        from app.services.auto_analysis_service import get_auto_analysis_service
+        import asyncio
+
+        service = get_auto_analysis_service()
+
+        # 直接调用内部方法，跳过 run_daily_auto_analysis 的星期检查
+        auto_favorites = await favorites_service.get_auto_analyze_favorites()
+        if not auto_favorites:
+            return ok({"analyzed": [], "skipped": 0}, "没有启用自动分析的自选股")
+
+        # 按用户分组
+        by_user: dict = {}
+        for fav in auto_favorites:
+            uid = fav["user_id"]
+            by_user.setdefault(uid, []).append(fav)
+
+        results = []
+        for user_id, stocks in by_user.items():
+            for stock in stocks:
+                try:
+                    r = await service._analyze_stock(
+                        user_id,
+                        stock["stock_code"],
+                        stock.get("market", "A股")
+                    )
+                    results.append({
+                        "stock_code": stock["stock_code"],
+                        "stock_name": stock.get("stock_name"),
+                        "user_id": user_id,
+                        **r
+                    })
+                except Exception as e:
+                    results.append({
+                        "stock_code": stock["stock_code"],
+                        "user_id": user_id,
+                        "success": False,
+                        "error": str(e)
+                    })
+
+        success_count = sum(1 for r in results if r.get("success"))
+        return ok({
+            "analyzed": results,
+            "total": len(results),
+            "success": success_count,
+            "failed": len(results) - success_count
+        }, f"手动触发完成：成功 {success_count}/{len(results)}")
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"触发自动分析失败: {str(e)}"
+        )
+
+
 @router.put("/{stock_code}", response_model=dict)
 async def update_favorite(
     stock_code: str,

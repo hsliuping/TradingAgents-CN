@@ -1474,7 +1474,7 @@ class SimpleAnalysisService:
 
             # 执行实际分析，传递进度回调和task_id
             state, decision = trading_graph.propagate(
-                request.stock_code,
+                request.get_symbol(),
                 analysis_date,
                 progress_callback=graph_progress_callback,
                 task_id=task_id

@@ -148,6 +148,12 @@ class ModelCapabilityService:
                         logger.info(f"🔍 [MongoDB] 找到模型配置: {model_name}")
                         # 🔧 将字符串列表转换为枚举列表
                         features_str = config_dict.get('features', [])
+
+                        # 🔧 安全网：如果 MongoDB 配置中 features 为空，回退到默认能力映射
+                        if not features_str and model_name in DEFAULT_MODEL_CAPABILITIES:
+                            logger.warning(f"⚠️ [MongoDB] {model_name} 的 features 为空，使用默认能力映射")
+                            return DEFAULT_MODEL_CAPABILITIES[model_name]
+
                         features_enum = []
                         for feature_str in features_str:
                             try:

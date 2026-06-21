@@ -29,7 +29,7 @@ class ModelConfig:
     model_name: str  # 模型名称
     api_key: str  # API密钥
     base_url: Optional[str] = None  # 自定义API地址
-    max_tokens: int = 4000  # 最大token数
+    max_tokens: int = 20000  # 最大token数
     temperature: float = 0.7  # 温度参数
     enabled: bool = True  # 是否启用
 

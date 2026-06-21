@@ -17,7 +17,25 @@ def create_research_manager(llm, memory):
         news_report = state["news_report"]
         fundamentals_report = state["fundamentals_report"]
 
+        # 数据质量门：检测分析师数据是否全部失败
+        data_all_failed = state.get("data_all_failed", False)
+        if data_all_failed:
+            logger.error("❌ [研究经理] 检测到关键数据获取失败标记")
+        failed_reports = []
+        for name, report in [("市场", market_research_report), ("基本面", fundamentals_report),
+                             ("新闻", news_report), ("社媒", sentiment_report)]:
+            if report and "获取失败" in report:
+                failed_reports.append(name)
+        if failed_reports:
+            data_warning = f"⚠️ 以下数据源获取失败，请勿编造相关分析: {', '.join(failed_reports)}。\n\n"
+            logger.warning(f"⚠️ [研究经理] 数据失败警告: {', '.join(failed_reports)}")
+        else:
+            data_warning = ""
+
         investment_debate_state = state["investment_debate_state"]
+
+        # 获取当前分析日期，用于事实约束
+        current_date = state.get("trade_date", "未知")
 
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
 
@@ -32,7 +50,7 @@ def create_research_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""作为投资组合经理和辩论主持人，您的职责是批判性地评估这轮辩论并做出明确决策：支持看跌分析师、看涨分析师，或者仅在基于所提出论点有强有力理由时选择持有。
+        prompt = f"""{data_warning}作为投资组合经理和辩论主持人，您的职责是批判性地评估这轮辩论并做出明确决策：支持看跌分析师、看涨分析师，或者仅在基于所提出论点有强有力理由时选择持有。
 
 简洁地总结双方的关键观点，重点关注最有说服力的证据或推理。您的建议——买入、卖出或持有——必须明确且可操作。避免仅仅因为双方都有有效观点就默认选择持有；要基于辩论中最强有力的论点做出承诺。
 
@@ -57,6 +75,12 @@ def create_research_manager(llm, memory):
 
 标的约束：
 {instrument_context}
+
+🚫 事实约束：
+- 当前日期是 {current_date}，任何此日期之后的事件都不是事实
+- 请验证辩论中出现的数值声明是否与基本面报告中的数据一致
+- 如果辩论中引用了基本面报告中不存在的数据，请明确指出并忽略
+- 你的投资计划中引用的所有数据必须来自下方提供的真实报告
 
 以下是综合分析报告：
 市场研究：{market_research_report}
@@ -94,8 +118,21 @@ def create_research_manager(llm, memory):
         response_length = len(response.content) if response and hasattr(response, 'content') else 0
         estimated_output_tokens = int(response_length / 1.8)
 
+        # 🏁 检查 finish_reason 以检测截断
+        finish_reason = None
+        if response and hasattr(response, 'response_metadata') and response.response_metadata:
+            metadata = response.response_metadata
+            finish_reason = metadata.get('finish_reason')
+
         logger.info(f"⏱️ [Research Manager] LLM调用耗时: {elapsed_time:.2f}秒")
         logger.info(f"📊 [Research Manager] 响应统计: {response_length} 字符, 估算~{estimated_output_tokens} tokens")
+        if finish_reason:
+            logger.info(f"🏁 [Research Manager] finish_reason: {finish_reason}")
+
+        # 🚨 检测截断
+        if finish_reason == 'length':
+            logger.warning(f"⚠️ [Research Manager] LLM响应被截断! finish_reason='length', 响应长度: {response_length} 字符")
+            logger.warning(f"⚠️ [Research Manager] 建议增加 max_tokens 配置或使用上下文窗口更大的模型")
 
         new_investment_debate_state = {
             "judge_decision": response.content,

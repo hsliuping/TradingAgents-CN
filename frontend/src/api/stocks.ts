@@ -1,4 +1,5 @@
 import { ApiClient } from './request'
+import type { AnalysisMarker } from '@/types/analysis'
 
 export interface QuoteResponse {
   symbol: string  // 主字段：6位股票代码
@@ -117,6 +118,14 @@ export const stocksApi = {
    */
   async getNews(symbol: string, days = 30, limit = 50, includeAnnouncements = true) {
     return ApiClient.get<NewsResponse>(`/api/stocks/${symbol}/news`, { days, limit, include_announcements: includeAnnouncements })
+  },
+
+  /**
+   * 获取某股票所有分析标记（用于K线图叠加展示）
+   * @param symbol 6位股票代码
+   */
+  async getAnalysisMarkers(symbol: string) {
+    return ApiClient.get<{ markers: AnalysisMarker[]; total: number }>(`/api/stocks/${symbol}/analysis-markers`)
   }
 }
 

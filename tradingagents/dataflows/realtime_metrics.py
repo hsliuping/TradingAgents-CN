@@ -60,13 +60,33 @@ def calculate_realtime_pe_pb(
             logger.debug(f"检测到异步客户端 {client_type}，转换为同步客户端")
             db_client = MongoClient(settings.MONGO_URI)
 
-        db = db_client['tradingagents']
         code6 = str(symbol).zfill(6)
 
         logger.info(f"🔍 [实时PE计算] 开始计算股票 {code6}")
 
-        # 1. 获取实时行情（market_quotes）
-        quote = db.market_quotes.find_one({"code": code6})
+        # 🔥 关键修复：stock_basic_info 可能在不同的数据库（历史遗留问题）
+        # tradingagents 模块默认用 'tradingagents'，但 CN fork 的数据同步写到 'tradingagentscn_v0_admin'
+        # 需要尝试多个数据库，避免查不到数据
+        db_for_basic_info = None
+        for candidate_db in ['tradingagentscn_v0_admin', 'tradingagents']:
+            test_db = db_client[candidate_db]
+            if 'stock_basic_info' in test_db.list_collection_names():
+                if test_db.stock_basic_info.find_one({"code": code6}):
+                    db_for_basic_info = test_db
+                    logger.info(f"✅ [数据库选择] stock_basic_info 在 {candidate_db}")
+                    break
+        if db_for_basic_info is None:
+            db_for_basic_info = db_client['tradingagents']
+            logger.warning(f"⚠️ [数据库选择] 所有候选库都未找到 {code6} 的 stock_basic_info，使用默认 tradingagents")
+
+        # 1. 获取实时行情（market_quotes）- 同样尝试多个库
+        quote = None
+        for candidate_db in ['tradingagentscn_v0_admin', 'tradingagents']:
+            test_db = db_client[candidate_db]
+            if 'market_quotes' in test_db.list_collection_names():
+                quote = test_db.market_quotes.find_one({"code": code6})
+                if quote:
+                    break
         if not quote:
             logger.warning(f"⚠️ [实时PE计算-失败] 未找到股票 {code6} 的实时行情数据")
             return None
@@ -85,16 +105,16 @@ def calculate_realtime_pe_pb(
         # 2. 获取基础信息（stock_basic_info）- 获取 Tushare 的 pe_ttm 和市值数据
         # 🔥 优先查询 Tushare 数据源（因为只有 Tushare 有 pe_ttm、total_mv、total_share 等字段）
         logger.info(f"🔍 [MongoDB查询] 查询条件: code={code6}, source=tushare")
-        basic_info = db.stock_basic_info.find_one({"code": code6, "source": "tushare"})
+        basic_info = db_for_basic_info.stock_basic_info.find_one({"code": code6, "source": "tushare"})
 
         if not basic_info:
             # 🔥 诊断：查看 MongoDB 中有哪些数据源
-            all_sources = list(db.stock_basic_info.find({"code": code6}, {"source": 1, "_id": 0}))
+            all_sources = list(db_for_basic_info.stock_basic_info.find({"code": code6}, {"source": 1, "_id": 0}))
             logger.warning(f"⚠️ [动态PE计算] 未找到 Tushare 数据")
             logger.warning(f"   MongoDB 中该股票的数据源: {[s.get('source') for s in all_sources]}")
 
             # 如果没有 Tushare 数据，尝试查询其他数据源
-            basic_info = db.stock_basic_info.find_one({"code": code6})
+            basic_info = db_for_basic_info.stock_basic_info.find_one({"code": code6})
             if not basic_info:
                 logger.warning(f"⚠️ [动态PE计算-失败] 未找到股票 {code6} 的基础信息")
                 logger.warning(f"   建议: 运行 Tushare 数据同步任务，确保 stock_basic_info 集合有 Tushare 数据")
@@ -250,8 +270,14 @@ def calculate_realtime_pe_pb(
         dynamic_pe_ttm = realtime_mv_yi / ttm_net_profit_yi
         logger.info(f"   ✓ 动态PE_TTM计算: {realtime_mv_yi:.2f}亿元 / {ttm_net_profit_yi:.2f}亿元 = {dynamic_pe_ttm:.2f}倍")
 
-        # 8. 获取财务数据（用于计算 PB）
-        financial_data = db.stock_financial_data.find_one({"code": code6}, sort=[("report_period", -1)])
+        # 8. 获取财务数据（用于计算 PB）- 同样尝试多个库
+        financial_data = None
+        for candidate_db in ['tradingagentscn_v0_admin', 'tradingagents']:
+            test_db = db_client[candidate_db]
+            if 'stock_financial_data' in test_db.list_collection_names():
+                financial_data = test_db.stock_financial_data.find_one({"code": code6}, sort=[("report_period", -1)])
+                if financial_data:
+                    break
         pb = None
         total_equity_yi = None
 
@@ -398,14 +424,24 @@ def get_pe_pb_with_fallback(
     logger.info("   💡 说明: 使用Tushare官方PE_TTM，基于昨日收盘价")
 
     try:
-        db = db_client['tradingagents']
         code6 = str(symbol).zfill(6)
 
+        # 🔥 同样尝试多个数据库
+        db_for_basic_info = None
+        for candidate_db in ['tradingagentscn_v0_admin', 'tradingagents']:
+            test_db = db_client[candidate_db]
+            if 'stock_basic_info' in test_db.list_collection_names():
+                if test_db.stock_basic_info.find_one({"code": code6}):
+                    db_for_basic_info = test_db
+                    break
+        if db_for_basic_info is None:
+            db_for_basic_info = db_client['tradingagents']
+
         # 🔥 优先查询 Tushare 数据源
-        basic_info = db.stock_basic_info.find_one({"code": code6, "source": "tushare"})
+        basic_info = db_for_basic_info.stock_basic_info.find_one({"code": code6, "source": "tushare"})
         if not basic_info:
             # 如果没有 Tushare 数据，尝试查询其他数据源
-            basic_info = db.stock_basic_info.find_one({"code": code6})
+            basic_info = db_for_basic_info.stock_basic_info.find_one({"code": code6})
 
         if basic_info:
             pe_static = basic_info.get("pe")

@@ -1,4 +1,5 @@
 import os
+import logging
 from typing import Any, Optional
 
 from langchain_openai import ChatOpenAI
@@ -6,12 +7,29 @@ from langchain_openai import ChatOpenAI
 from .base_client import BaseLLMClient, normalize_content
 from .validators import validate_model
 
+logger = logging.getLogger(__name__)
+
+# DashScope reasoning models that require special handling
+_REASONING_MODELS = {"qwen3.6-plus", "qwen-3", "qwq", "qwq-plus", "qwq-max"}
+
 
 class NormalizedChatOpenAI(ChatOpenAI):
-    """ChatOpenAI wrapper that normalizes typed content blocks to text."""
+    """ChatOpenAI wrapper that normalizes typed content blocks to text
+    AND handles DashScope reasoning models where visible output may be
+    in additional_kwargs['reasoning_content'] when content is empty."""
 
     def invoke(self, input, config=None, **kwargs):
-        return normalize_content(super().invoke(input, config, **kwargs))
+        response = normalize_content(super().invoke(input, config, **kwargs))
+
+        # 🚨 Reasoning model fallback: if content is empty, try reasoning_content
+        if response and hasattr(response, "content") and not response.content:
+            extra = getattr(response, "additional_kwargs", {}) or {}
+            # DashScope reasoning model stores visible text in reasoning_content
+            rc = extra.get("reasoning_content")
+            if rc:
+                response.content = rc
+
+        return response
 
 
 _PASSTHROUGH_KWARGS = (
@@ -22,6 +40,7 @@ _PASSTHROUGH_KWARGS = (
     "callbacks",
     "http_client",
     "http_async_client",
+    "model_kwargs",
 )
 
 _PROVIDER_CONFIG = {
@@ -71,6 +90,19 @@ class OpenAIClient(BaseLLMClient):
         for key in _PASSTHROUGH_KWARGS:
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
+
+        # Reasoning model special handling: respect caller-provided enable_thinking
+        if self.model in _REASONING_MODELS:
+            caller_mk = self.kwargs.get("model_kwargs", {})
+            extra_body = caller_mk.get("extra_body", {}) if isinstance(caller_mk, dict) else {}
+
+            if "enable_thinking" not in extra_body:
+                logger.info(f"🧠 [OpenAIClient] 推理模型 {self.model}，默认禁用 thinking")
+                llm_kwargs["model_kwargs"] = {"extra_body": {"enable_thinking": False}}
+            else:
+                thinking_val = extra_body["enable_thinking"]
+                logger.info(f"🧠 [OpenAIClient] 推理模型 {self.model}，enable_thinking={thinking_val} (调用方指定)")
+                llm_kwargs["model_kwargs"] = caller_mk
 
         return NormalizedChatOpenAI(**llm_kwargs)
 

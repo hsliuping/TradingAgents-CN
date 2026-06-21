@@ -17,6 +17,7 @@ logger = get_logger("default")
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
 from tradingagents.agents.utils.instrument_utils import build_instrument_context
 from tradingagents.llm_clients import create_llm_client
+from tradingagents.utils.data_quality import check_report_data
 
 
 def _get_company_name_for_fundamentals(ticker: str, market_info: dict) -> str:
@@ -191,20 +192,28 @@ def create_fundamentals_analyst(llm, toolkit):
             f"- 计算并提供合理价位区间（使用{market_info['currency_name']}{market_info['currency_symbol']}）"
             "- 分析当前股价是否被低估或高估"
             "- 提供基于基本面的目标价位建议"
-            "- 包含PE、PB、PEG等估值指标分析"
+            "- 包含PE、PE_TTM（滚动市盈率）、PB、PEG等估值指标分析"
+            "- 🚨 必须同时展示 PE（单期）和 PE_TTM（滚动12个月），并对比分析两者差异"
+            "- 如果工具返回了 PE_TTM 数据，必须在报告中明确列出并解释含义"
             "- 结合市场特点进行分析"
             "🌍 语言和货币要求："
             "- 所有分析内容必须使用中文"
             "- 投资建议必须使用中文：买入、持有、卖出"
             "- 绝对不允许使用英文：buy、hold、sell"
             f"- 货币单位使用：{market_info['currency_name']}（{market_info['currency_symbol']}）"
-            "🚫 严格禁止："
+            f"🚫 严格禁止："
             "- 不允许说'我将调用工具'"
             "- 不允许假设任何数据"
             "- 不允许编造公司信息"
             "- 不允许直接回答而不调用工具"
             "- 不允许回复'无法确定价位'或'需要更多信息'"
             "- 不允许使用英文投资建议（buy/hold/sell）"
+            "🚫 关于未来事件和催化剂的绝对禁令："
+            f"- 当前日期是 {current_date}，任何在此日期之后发生的事件都是未来的、尚未发生的"
+            "- 绝对不允许编造或引用尚未发生的销量数据、产品发布、财报数据等作为事实"
+            "- 不允许说'某月销量将突破X万辆'、'某新款车型即将上市'等具体预测，除非这些数据来自工具返回的真实研报"
+            "- 如果报告中需要提及催化剂，只能说'关注 upcoming XX事件'，不能作为确定性事实描述"
+            "- 举例：如果说'2026年6月销量突破4万辆'，但今天才2026年5月24日，这是编造！"
             "✅ 你必须："
             "- 立即调用统一基本面分析工具"
             "- 等待工具返回真实数据"
@@ -218,6 +227,7 @@ def create_fundamentals_analyst(llm, toolkit):
         system_prompt = (
             "🔴 强制要求：你必须调用工具获取真实数据！"
             "🚫 绝对禁止：不允许假设、编造或直接回答任何问题！"
+            "🚫 关于未来事件：禁止编造尚未发生的销量、产品发布、财报等数据作为事实！"
             "✅ 工作流程："
             "1. 【第一次调用】如果消息历史中没有工具结果（ToolMessage），立即调用 get_stock_fundamentals_unified 工具"
             "2. 【收到数据后】如果消息历史中已经有工具结果（ToolMessage），🚨 绝对禁止再次调用工具！🚨"
@@ -486,6 +496,20 @@ def create_fundamentals_analyst(llm, toolkit):
                     report = str(force_result.content) if hasattr(force_result, 'content') else "基本面分析完成"
                     logger.info(f"✅ [强制生成报告] 成功生成报告，长度: {len(report)}字符")
 
+                    # 检查工具返回的原始数据是否全部为错误信息
+                    for msg in messages:
+                        if isinstance(msg, ToolMessage):
+                            quality = check_report_data(str(msg.content), ticker, "基本面分析")
+                            if quality["has_failure"]:
+                                logger.error(f"❌ [数据质量门] 基本面工具返回数据为错误信息: {quality['error_message']}")
+                                report = f"❌ 基本面数据获取失败: {quality['error_message']}。无法基于错误数据进行有效分析。"
+                                return {
+                                    "fundamentals_report": report,
+                                    "messages": [force_result],
+                                    "fundamentals_tool_call_count": tool_call_count,
+                                    "data_all_failed": True,
+                                }
+
                     return {
                         "fundamentals_report": report,
                         "messages": [force_result],
@@ -639,7 +663,18 @@ def create_fundamentals_analyst(llm, toolkit):
                     logger.debug(f"📊 [DEBUG] 统一工具调用异常: {e}")
                 
                 currency_info = f"{market_info['currency_name']}（{market_info['currency_symbol']}）"
-                
+
+                # 在调用LLM前检查数据质量 — 防止对错误数据进行分析
+                quality = check_report_data(str(combined_data), ticker, "基本面分析")
+                if quality["has_failure"]:
+                    logger.error(f"❌ [数据质量门] 基本面工具返回错误数据，跳过LLM分析: {quality['error_message']}")
+                    report = f"❌ 基本面数据获取失败: {quality['error_message']}。建议检查数据源配置或稍后重试。"
+                    return {
+                        "fundamentals_report": report,
+                        "fundamentals_tool_call_count": tool_call_count,
+                        "data_all_failed": True,
+                    }
+
                 # 生成基于真实数据的分析报告
                 analysis_prompt = f"""基于以下真实数据，对{company_name}（股票代码：{ticker}）进行详细的基本面分析：
 

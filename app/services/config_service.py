@@ -5,6 +5,7 @@
 import time
 import asyncio
 import logging
+import os
 import re
 from collections import defaultdict
 from typing import List, Optional, Dict, Any
@@ -432,7 +433,7 @@ class ConfigService:
                     model_name="gpt-3.5-turbo",
                     api_key="your-openai-api-key",
                     api_base="https://api.openai.com/v1",
-                    max_tokens=4000,
+                    max_tokens=20000,
                     temperature=0.7,
                     enabled=False,
                     description="OpenAI GPT-3.5 Turbo模型"
@@ -442,7 +443,7 @@ class ConfigService:
                     model_name="glm-4",
                     api_key="your-zhipu-api-key",
                     api_base="https://open.bigmodel.cn/api/paas/v4",
-                    max_tokens=4000,
+                    max_tokens=20000,
                     temperature=0.7,
                     enabled=True,
                     description="智谱AI GLM-4模型（推荐）"
@@ -452,7 +453,7 @@ class ConfigService:
                     model_name="qwen-turbo",
                     api_key="your-qwen-api-key",
                     api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    max_tokens=4000,
+                    max_tokens=20000,
                     temperature=0.7,
                     enabled=False,
                     description="阿里云通义千问模型"
@@ -763,7 +764,7 @@ class ConfigService:
                 # 确保必填字段有默认值（防止导出 None 或空字符串）
                 # 注意：max_tokens 在 system_configs 中已经有正确的值，直接使用
                 if not d.get("max_tokens") or d.get("max_tokens") == "":
-                    d["max_tokens"] = 4000
+                    d["max_tokens"] = 20000
                 if not d.get("temperature") and d.get("temperature") != 0:
                     d["temperature"] = 0.7
                 if not d.get("timeout") or d.get("timeout") == "":
@@ -1285,62 +1286,114 @@ class ConfigService:
                     # API Key 是完整的，直接使用
                     logger.info(f"✅ [TEST] Using complete API Key from config (length: {len(api_key)})")
 
-                # 测试 Tushare API
-                try:
-                    logger.info(f"🔌 [TEST] Calling Tushare API with token (length: {len(api_key)})")
-                    import tushare as ts
-                    ts.set_token(api_key)
-                    pro = ts.pro_api()
-                    # 获取交易日历（轻量级测试）
-                    df = pro.trade_cal(exchange='SSE', start_date='20240101', end_date='20240101')
+                # 检查是否配置了自定义 API
+                use_custom_api = os.getenv("TUSHARE_USE_CUSTOM_API", "false").lower() == "true"
+                custom_api_url = os.getenv("TUSHARE_API_URL")
 
-                    if df is not None and len(df) > 0:
-                        response_time = time.time() - start_time
-                        logger.info(f"✅ [TEST] Tushare API call successful (response time: {response_time:.2f}s)")
-
-                        # 构建消息，说明使用了哪个来源的凭证
-                        credential_source = "配置"
-                        if used_db_credentials:
-                            credential_source = "数据库"
-                        elif used_env_credentials:
-                            credential_source = "环境变量"
-
-                        return {
-                            "success": True,
-                            "message": f"成功连接到 Tushare 数据源（使用{credential_source}中的凭证）",
-                            "response_time": response_time,
-                            "details": {
-                                "type": ds_type,
-                                "test_result": "获取交易日历成功",
-                                "credential_source": credential_source,
-                                "used_db_credentials": used_db_credentials,
-                                "used_env_credentials": used_env_credentials
-                            }
+                if use_custom_api and custom_api_url:
+                    # 使用自定义 API 测试连接
+                    logger.info(f"🔌 [TEST] Testing custom Tushare API: {custom_api_url}")
+                    import requests as req
+                    try:
+                        token = api_key or os.getenv("TUSHARE_TOKEN", "")
+                        payload = {
+                            "api_name": "trade_cal",
+                            "token": token,
+                            "params": {"exchange": "SSE", "start_date": "20240101", "end_date": "20240101"},
+                            "fields": "exchange,cal_date,is_open,pretrade_date"
                         }
-                    else:
-                        logger.error(f"❌ [TEST] Tushare API returned empty data")
+                        resp = req.post(custom_api_url, json=payload, timeout=10)
+                        data = resp.json()
+                        if data.get("code") == 0 and data.get("data", {}).get("items"):
+                            response_time = time.time() - start_time
+                            logger.info(f"✅ [TEST] Custom Tushare API call successful (response time: {response_time:.2f}s)")
+                            credential_source = "自定义API" if used_env_credentials else "配置"
+                            return {
+                                "success": True,
+                                "message": f"成功连接到 Tushare 数据源（使用{credential_source}自定义API）",
+                                "response_time": response_time,
+                                "details": {
+                                    "type": ds_type,
+                                    "test_result": "获取交易日历成功（自定义API）",
+                                    "credential_source": credential_source,
+                                    "used_db_credentials": used_db_credentials,
+                                    "used_env_credentials": used_env_credentials,
+                                    "custom_api_url": custom_api_url
+                                }
+                            }
+                        else:
+                            logger.error(f"❌ [TEST] Custom API returned error: {data.get('msg')}")
+                            return {
+                                "success": False,
+                                "message": f"自定义API返回错误: {data.get('msg')}",
+                                "response_time": time.time() - start_time,
+                                "details": None
+                            }
+                    except Exception as e:
+                        logger.error(f"❌ [TEST] Custom Tushare API call failed: {e}")
                         return {
                             "success": False,
-                            "message": "Tushare API 返回数据为空",
+                            "message": f"自定义API调用失败: {str(e)}",
                             "response_time": time.time() - start_time,
                             "details": None
                         }
-                except ImportError:
-                    logger.error(f"❌ [TEST] Tushare library not installed")
-                    return {
-                        "success": False,
-                        "message": "Tushare 库未安装，请运行: pip install tushare",
-                        "response_time": time.time() - start_time,
-                        "details": None
-                    }
-                except Exception as e:
-                    logger.error(f"❌ [TEST] Tushare API call failed: {e}")
-                    return {
-                        "success": False,
-                        "message": f"Tushare API 调用失败: {str(e)}",
-                        "response_time": time.time() - start_time,
-                        "details": None
-                    }
+                else:
+                    # 测试官方 Tushare API
+                    try:
+                        logger.info(f"🔌 [TEST] Calling Tushare API with token (length: {len(api_key)})")
+                        import tushare as ts
+                        ts.set_token(api_key)
+                        pro = ts.pro_api()
+                        # 获取交易日历（轻量级测试）
+                        df = pro.trade_cal(exchange='SSE', start_date='20240101', end_date='20240101')
+
+                        if df is not None and len(df) > 0:
+                            response_time = time.time() - start_time
+                            logger.info(f"✅ [TEST] Tushare API call successful (response time: {response_time:.2f}s)")
+
+                            # 构建消息，说明使用了哪个来源的凭证
+                            credential_source = "配置"
+                            if used_db_credentials:
+                                credential_source = "数据库"
+                            elif used_env_credentials:
+                                credential_source = "环境变量"
+
+                            return {
+                                "success": True,
+                                "message": f"成功连接到 Tushare 数据源（使用{credential_source}中的凭证）",
+                                "response_time": response_time,
+                                "details": {
+                                    "type": ds_type,
+                                    "test_result": "获取交易日历成功",
+                                    "credential_source": credential_source,
+                                    "used_db_credentials": used_db_credentials,
+                                    "used_env_credentials": used_env_credentials
+                                }
+                            }
+                        else:
+                            logger.error(f"❌ [TEST] Tushare API returned empty data")
+                            return {
+                                "success": False,
+                                "message": "Tushare API 返回数据为空",
+                                "response_time": time.time() - start_time,
+                                "details": None
+                            }
+                    except ImportError:
+                        logger.error(f"❌ [TEST] Tushare library not installed")
+                        return {
+                            "success": False,
+                            "message": "Tushare 库未安装，请运行: pip install tushare",
+                            "response_time": time.time() - start_time,
+                            "details": None
+                        }
+                    except Exception as e:
+                        logger.error(f"❌ [TEST] Tushare API call failed: {e}")
+                        return {
+                            "success": False,
+                            "message": f"Tushare API 调用失败: {str(e)}",
+                            "response_time": time.time() - start_time,
+                            "details": None
+                        }
 
             elif ds_type == "akshare":
                 # AKShare 不需要 API Key，直接测试

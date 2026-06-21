@@ -237,10 +237,106 @@ class BaoStockAdapter(DataSourceAdapter):
         return None
 
     def get_kline(self, code: str, period: str = "day", limit: int = 120, adj: Optional[str] = None):
-        """BaoStock not used for K-line here; return None to allow fallback"""
+        """BaoStock K线数据获取（A股日线/周线/月线/分钟线）"""
         if not self.is_available():
             return None
-        return None
+        try:
+            import baostock as bs
+
+            code6 = str(code).zfill(6)
+            # 构造 BaoStock 格式代码: sh.601127 / sz.000001
+            if code6.startswith(('6', '9')):
+                bs_code = f"sh.{code6}"
+            else:
+                bs_code = f"sz.{code6}"
+
+            # 周期映射
+            freq_map = {"day": "d", "week": "w", "month": "m", "5m": "5", "15m": "15", "30m": "30", "60m": "60"}
+            if period not in freq_map:
+                logger.warning(f"BaoStock: 不支持的周期 {period}")
+                return None
+            frequency = freq_map[period]
+
+            # 复权映射: None/none -> 3(不复权), qfq -> 2(前复权), hfq -> 1(后复权)
+            adj_map = {None: "3", "none": "3", "": "3", "qfq": "2", "hfq": "1"}
+            adjustflag = adj_map.get(adj, "3")
+
+            # 计算日期范围（多取一些以覆盖 limit）
+            end_date = datetime.now()
+            if frequency in ("d", "w", "m"):
+                start_date = end_date - timedelta(days=max(limit * 3, 365))
+            else:
+                # 分钟线：每天约 4 小时交易 = 48 根 5 分钟 K 线
+                bars_per_day = {
+                    "5": 48, "15": 16, "30": 8, "60": 4
+                }.get(frequency, 48)
+                days_needed = max(limit // bars_per_day + 5, 5)
+                start_date = end_date - timedelta(days=days_needed)
+
+            start_str = start_date.strftime("%Y-%m-%d")
+            end_str = end_date.strftime("%Y-%m-%d")
+
+            fields = "date,open,high,low,close,volume,amount"
+            lg = bs.login()
+            if lg.error_code != '0':
+                logger.error(f"BaoStock: Login failed: {lg.error_msg}")
+                return None
+            try:
+                rs = bs.query_history_k_data_plus(
+                    bs_code, fields,
+                    start_date=start_str,
+                    end_date=end_str,
+                    frequency=frequency,
+                    adjustflag=adjustflag,
+                )
+                if rs.error_code != '0':
+                    logger.error(f"BaoStock: K线查询失败: {rs.error_msg}")
+                    return None
+
+                data_list = []
+                while (rs.error_code == '0') and rs.next():
+                    data_list.append(rs.get_row_data())
+
+                if not data_list:
+                    logger.info(f"BaoStock: {bs_code} 无K线数据")
+                    return None
+
+                items = []
+                for row in data_list:
+                    # row: [date, open, high, low, close, volume, amount]
+                    date_str = row[0] if len(row) > 0 else ''
+                    # 标准化日期格式：BaoStock 返回 YYYY-MM-DD
+                    open_p = self._safe_float(row[1]) if len(row) > 1 else None
+                    high_p = self._safe_float(row[2]) if len(row) > 2 else None
+                    low_p = self._safe_float(row[3]) if len(row) > 3 else None
+                    close_p = self._safe_float(row[4]) if len(row) > 4 else None
+                    vol = self._safe_float(row[5]) if len(row) > 5 else None
+                    amt = self._safe_float(row[6]) if len(row) > 6 else None
+                    # 跳过无效数据
+                    if close_p is None or open_p is None:
+                        continue
+                    items.append({
+                        "time": date_str,
+                        "open": open_p,
+                        "high": high_p,
+                        "low": low_p,
+                        "close": close_p,
+                        "volume": vol,
+                        "amount": amt,
+                    })
+
+                if not items:
+                    return None
+
+                # 只返回最新的 limit 条
+                items = items[-limit:]
+                logger.info(f"✅ BaoStock: {bs_code} 获取 {len(items)} 条 {period} K线数据")
+                return items
+            finally:
+                bs.logout()
+        except Exception as e:
+            logger.error(f"BaoStock get_kline failed for {code}: {e}")
+            return None
 
     def get_news(self, code: str, days: int = 2, limit: int = 50, include_announcements: bool = True):
         """BaoStock does not provide news in this adapter; return None"""
@@ -248,9 +344,6 @@ class BaoStockAdapter(DataSourceAdapter):
             return None
         return None
 
-        """Placeholder: BaoStock  does not provide full-market realtime snapshot in our adapter.
-        Return None to allow fallback to higher-priority sources.
-        """
 
     def find_latest_trade_date(self) -> Optional[str]:
         yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")

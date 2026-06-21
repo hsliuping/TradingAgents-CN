@@ -23,6 +23,9 @@ def create_risk_manager(llm, memory):
 
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
 
+        # 获取当前分析日期，用于事实约束
+        current_date = state.get("trade_date", "未知")
+
         # 安全检查：确保memory不为None
         if memory is not None:
             past_memories = memory.get_memories(curr_situation, n_matches=2)
@@ -48,6 +51,11 @@ def create_risk_manager(llm, memory):
 
 标的约束：
 {instrument_context}
+
+🚫 事实约束：
+- 当前日期是 {current_date}，任何此日期之后的事件都不是事实
+- 请验证辩论中出现的数值声明是否与基本面报告中的数据一致
+- 你的决策和建议中引用的所有数据必须来自下方提供的真实报告
 
 ---
 
@@ -96,16 +104,25 @@ def create_risk_manager(llm, memory):
 
                     # 尝试获取实际的 token 使用情况（如果 LLM 返回了）
                     usage_info = ""
+                    finish_reason = None
                     if hasattr(response, 'response_metadata') and response.response_metadata:
                         metadata = response.response_metadata
+                        finish_reason = metadata.get('finish_reason')
                         if 'token_usage' in metadata:
                             token_usage = metadata['token_usage']
                             usage_info = f", 实际Token: 输入={token_usage.get('prompt_tokens', 'N/A')} 输出={token_usage.get('completion_tokens', 'N/A')} 总计={token_usage.get('total_tokens', 'N/A')}"
 
                     logger.info(f"⏱️ [Risk Manager] LLM调用耗时: {elapsed_time:.2f}秒")
                     logger.info(f"📊 [Risk Manager] 响应统计: {response_length} 字符, 估算~{estimated_output_tokens} tokens{usage_info}")
+                    if finish_reason:
+                        logger.info(f"🏁 [Risk Manager] finish_reason: {finish_reason}")
 
-                    if len(response_content) > 10:  # 确保响应有实质内容
+                    # 🚨 检测截断：如果 finish_reason 为 length，说明响应被截断
+                    if finish_reason == 'length':
+                        logger.warning(f"⚠️ [Risk Manager] LLM响应被截断! finish_reason='length', 响应长度: {response_length} 字符")
+                        logger.warning(f"⚠️ [Risk Manager] 建议增加 max_tokens 配置或使用上下文窗口更大的模型")
+                        response_content = ""  # 清空内容以触发重试
+                    elif len(response_content) > 10:  # 确保响应有实质内容
                         logger.info(f"✅ [Risk Manager] LLM调用成功")
                         break
                     else:

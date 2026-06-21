@@ -271,3 +271,18 @@ export interface AnalysisReport {
   created_at: string
   download_url?: string
 }
+
+// K线图分析标记
+export interface AnalysisMarker {
+  date: string           // YYYY-MM-DD
+  action: string         // 买入/卖出/持有
+  confidence: number     // 0-1
+  risk_score: number     // 0-1
+  target_price: number | null
+  summary: string
+}
+
+export interface AnalysisMarkersResponse {
+  markers: AnalysisMarker[]
+  total: number
+}

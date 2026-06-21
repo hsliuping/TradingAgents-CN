@@ -7,6 +7,7 @@ from datetime import datetime, date, timedelta
 import pandas as pd
 import asyncio
 import logging
+import os
 
 from ..base_provider import BaseStockDataProvider
 from tradingagents.config.providers_config import get_provider_config
@@ -33,9 +34,28 @@ class TushareProvider(BaseStockDataProvider):
         self.api = None
         self.config = get_provider_config("tushare")
         self.token_source = None  # 记录 Token 来源: 'database' 或 'env'
+        self.custom_api_url = os.getenv("TUSHARE_API_URL")
+        self.use_custom_api = bool(self.custom_api_url)
+        self._check_custom_api_config()
 
         if not TUSHARE_AVAILABLE:
             self.logger.error("❌ Tushare库未安装，请运行: pip install tushare")
+
+    def _check_custom_api_config(self):
+        """检查是否配置了自定义API地址"""
+        if self.use_custom_api:
+            self.logger.info(f"🔧 检测到自定义API配置: {self.custom_api_url}")
+
+    def _apply_custom_url(self):
+        """
+        将自定义 URL 注入到 tushare DataApi 的私有属性。
+        Tushare SDK 的 DataApi 使用 class-level __http_url 硬编码了官方地址，
+        通过 Python name-mangling 机制覆盖它，使所有 self.api.xxx() 调用
+        自动走自定义端点，无需在每个方法中做分支判断。
+        """
+        if self.use_custom_api and self.api is not None:
+            self.api._DataApi__http_url = self.custom_api_url.rstrip('/')
+            self.logger.info(f"已注入自定义URL到Tushare SDK: {self.custom_api_url}")
 
     def _get_token_from_database(self) -> Optional[str]:
         """
@@ -116,6 +136,7 @@ class TushareProvider(BaseStockDataProvider):
                     self.logger.info(f"🔄 [步骤3] 尝试使用数据库中的 Tushare Token (超时: {test_timeout}秒)...")
                     ts.set_token(db_token)
                     self.api = ts.pro_api()
+                    self._apply_custom_url()
 
                     # 测试连接 - 直接调用同步方法（不使用 asyncio.run）
                     try:
@@ -142,6 +163,7 @@ class TushareProvider(BaseStockDataProvider):
                     self.logger.info(f"🔄 [步骤4] 尝试使用 .env 中的 Tushare Token (超时: {test_timeout}秒)...")
                     ts.set_token(env_token)
                     self.api = ts.pro_api()
+                    self._apply_custom_url()
 
                     # 测试连接 - 直接调用同步方法（不使用 asyncio.run）
                     try:
@@ -192,6 +214,7 @@ class TushareProvider(BaseStockDataProvider):
                     self.logger.info(f"🔄 尝试使用数据库中的 Tushare Token (超时: {test_timeout}秒)...")
                     ts.set_token(db_token)
                     self.api = ts.pro_api()
+                    self._apply_custom_url()
 
                     # 测试连接（异步）- 使用超时
                     try:
@@ -222,6 +245,7 @@ class TushareProvider(BaseStockDataProvider):
                     self.logger.info(f"🔄 尝试使用 .env 中的 Tushare Token (超时: {test_timeout}秒)...")
                     ts.set_token(env_token)
                     self.api = ts.pro_api()
+                    self._apply_custom_url()
 
                     # 测试连接（异步）- 使用超时
                     try:
@@ -258,7 +282,9 @@ class TushareProvider(BaseStockDataProvider):
     
     def is_available(self) -> bool:
         """检查Tushare是否可用"""
-        return TUSHARE_AVAILABLE and self.connected and self.api is not None
+        if not TUSHARE_AVAILABLE or not self.connected:
+            return False
+        return self.api is not None
     
     # ==================== 基础数据接口 ====================
     
@@ -425,17 +451,13 @@ class TushareProvider(BaseStockDataProvider):
             return None
 
         try:
-            # 使用通配符一次性获取全市场行情
-            # 3*.SZ: 创业板  6*.SH: 上交所  0*.SZ: 深交所主板  9*.BJ: 北交所
-            df = await asyncio.to_thread(
-                self.api.rt_k,
-                ts_code='3*.SZ,6*.SH,0*.SZ,9*.BJ'
+            df = self.api.rt_k(
+                ts_code="3*.SZ,6*.SH,0*.SZ,9*.BJ",
+                fields="ts_code,name,open,high,low,close,pre_close,vol,amount,num"
             )
-
             if df is None or df.empty:
                 self.logger.warning("⚠️ rt_k 接口返回空数据")
                 return None
-
             self.logger.info(f"✅ 获取到 {len(df)} 只股票的实时行情")
 
             # 🔥 获取当前日期（UTC+8）
@@ -533,10 +555,6 @@ class TushareProvider(BaseStockDataProvider):
             # 格式化日期
             start_str = self._format_date(start_date)
             end_str = self._format_date(end_date) if end_date else datetime.now().strftime('%Y%m%d')
-
-            # 🔧 使用 pro_bar 接口获取前复权数据（与同花顺一致）
-            # 注意：Tushare 的 daily/weekly/monthly 接口不支持复权
-            # 必须使用 ts.pro_bar() 函数并指定 adj='qfq' 参数
 
             # 周期映射
             freq_map = {

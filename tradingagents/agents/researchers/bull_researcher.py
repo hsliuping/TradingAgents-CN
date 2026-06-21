@@ -75,6 +75,9 @@ def create_bull_researcher(llm, memory):
         currency = market_info['currency_name']
         currency_symbol = market_info['currency_symbol']
 
+        # 获取当前分析日期，用于事实约束
+        current_date = state.get("trade_date", "未知")
+
         logger.debug(f"🐂 [DEBUG] 接收到的报告:")
         logger.debug(f"🐂 [DEBUG] - 市场报告长度: {len(market_research_report)}")
         logger.debug(f"🐂 [DEBUG] - 情绪报告长度: {len(sentiment_report)}")
@@ -101,6 +104,15 @@ def create_bull_researcher(llm, memory):
 
 ⚠️ 重要提醒：当前分析的是 {'中国A股' if is_china else '海外股票'}，所有价格和估值请使用 {currency}（{currency_symbol}）作为单位。
 ⚠️ 在你的分析中，请始终使用公司名称"{company_name}"而不是股票代码"{ticker}"来称呼这家公司。
+
+🚫 事实约束（绝对遵守）：
+1. 你只能引用下方"可用资源"中已经出现的数据
+2. 禁止引用资源中不存在的任何财务数据、销量数据、增长率
+3. 禁止编造尚未发生的事件（如未来销量、未来产品发布）作为事实
+4. 如果资源中没有提供某项数据，请说"数据不可获取"
+5. 当前日期是 {current_date}，此日期之后的任何事件都不是事实，不能作为确定性论据
+6. 你引用的所有数值（营收、净利润、增长率、销量等）必须与基本面报告中的数据一致
+7. 如果你不确定某个数据是否真实，请跳过，不要编造
 
 你的任务是构建基于证据的强有力案例，强调增长潜力、竞争优势和积极的市场指标。利用提供的研究和数据来解决担忧并有效反驳看跌论点。
 

@@ -110,7 +110,7 @@ class UnifiedConfigManager:
                     model_name=model.get("model_name", ""),
                     api_key="",
                     api_base=model.get("base_url"),
-                    max_tokens=model.get("max_tokens", 4000),
+                    max_tokens=model.get("max_tokens", 20000),
                     temperature=model.get("temperature", 0.7),
                     enabled=model.get("enabled", True),
                     description=f"{model.get('provider', '')} {model.get('model_name', '')}"

@@ -10,6 +10,7 @@ logger = get_logger("analysts.social_media")
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
 from tradingagents.agents.utils.instrument_utils import build_instrument_context
+from tradingagents.utils.data_quality import check_report_data
 
 
 def _get_company_name_for_social_media(ticker: str, market_info: dict) -> str:
@@ -224,11 +225,21 @@ def create_social_media_analyst(llm, toolkit):
             if len(result.tool_calls) == 0:
                 report = result.content
 
+        # 数据质量检查
+        ticker = state.get("company_of_interest", "")
+        quality = check_report_data(str(report), ticker, "社媒分析")
+        if quality["has_failure"]:
+            logger.error(f"❌ [数据质量门] 社媒数据获取失败: {quality['error_message']}")
+            report = f"❌ 社媒数据获取失败: {quality['error_message']}。无法基于错误数据进行有效分析。"
+
         # 🔧 更新工具调用计数器
-        return {
+        result_dict = {
             "messages": [result],
             "sentiment_report": report,
             "sentiment_tool_call_count": tool_call_count + 1
         }
+        if quality.get("has_failure"):
+            result_dict["data_all_failed"] = True
+        return result_dict
 
     return social_media_analyst_node

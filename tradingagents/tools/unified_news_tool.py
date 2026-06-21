@@ -279,6 +279,87 @@ class UnifiedNewsAnalyzer:
             logger.error(traceback.format_exc())
             return False
 
+    def _get_tushare_news(self, stock_code: str, max_news: int = 10) -> str:
+        """通过 Tushare 自定义 API 获取新闻（同步包装器）
+
+        Args:
+            stock_code: 股票代码，如 "601127"
+            max_news: 最大新闻数量
+
+        Returns:
+            str: 格式化的新闻内容，失败返回空字符串
+        """
+        try:
+            import asyncio
+            import threading
+            from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+
+            provider = get_tushare_provider()
+            if not provider or not getattr(provider, "connected", False):
+                logger.warning("[统一新闻工具] Tushare provider 未连接，跳过新闻获取")
+                return ""
+
+            clean_code = stock_code.replace('.SH', '').replace('.SZ', '').replace('.SS', '')\
+                                   .replace('.XSHE', '').replace('.XSHG', '').replace('.HK', '')
+
+            result_holder = [None]
+            exception_holder = [None]
+
+            def _run_in_new_thread():
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    news_list = new_loop.run_until_complete(
+                        provider.get_stock_news(symbol=clean_code, limit=max_news, hours_back=48)
+                    )
+                    result_holder[0] = news_list
+                except Exception as e:
+                    exception_holder[0] = e
+                finally:
+                    new_loop.close()
+
+            t = threading.Thread(target=_run_in_new_thread)
+            t.start()
+            t.join(timeout=20)
+
+            if exception_holder[0]:
+                raise exception_holder[0]
+
+            if t.is_alive():
+                logger.warning("[统一新闻工具] Tushare新闻获取超时")
+                return ""
+
+            news_list = result_holder[0]
+            if not news_list or (isinstance(news_list, list) and len(news_list) == 0):
+                return ""
+
+            # 格式化新闻列表为字符串
+            lines = [f"# {clean_code} 相关新闻 (来源: Tushare自定义API)\n"]
+            for i, item in enumerate(news_list[:max_news], 1):
+                title = item.get('title', '')
+                content = item.get('content', '') or item.get('summary', '')
+                source = item.get('source', '')
+                publish_time = item.get('publish_time', '')
+                sentiment = item.get('sentiment', '')
+                keywords = item.get('keywords', '')
+
+                lines.append(f"\n{i}. [{source}] {title}")
+                if publish_time:
+                    lines.append(f"   时间: {publish_time}")
+                if sentiment:
+                    lines.append(f"   情感: {sentiment}")
+                if keywords:
+                    lines.append(f"   关键词: {keywords}")
+                if content:
+                    preview = content[:300] if len(content) > 300 else content
+                    lines.append(f"   内容: {preview}")
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            logger.warning(f"[统一新闻工具] Tushare新闻获取异常: {e}")
+            return ""
+
     def _get_a_share_news(self, stock_code: str, max_news: int, model_info: str = "") -> str:
         """获取A股新闻"""
         logger.info(f"[统一新闻工具] 获取A股 {stock_code} 新闻")
@@ -318,7 +399,18 @@ class UnifiedNewsAnalyzer:
         except Exception as e:
             logger.warning(f"[统一新闻工具] 数据库新闻获取失败: {e}")
 
-        # 优先级1: 东方财富实时新闻
+        # 优先级1: Tushare 自定义 API 新闻（新浪财经、东方财富、同花顺、财联社等）
+        try:
+            tushare_news = self._get_tushare_news(stock_code, max_news)
+            if tushare_news and len(tushare_news.strip()) > 100:
+                logger.info(f"[统一新闻工具] ✅ Tushare新闻获取成功: {len(tushare_news)} 字符")
+                return self._format_news_result(tushare_news, "Tushare自定义API新闻", model_info)
+            else:
+                logger.warning(f"[统一新闻工具] ⚠️ Tushare新闻内容过短或为空")
+        except Exception as e:
+            logger.warning(f"[统一新闻工具] Tushare新闻获取失败: {e}")
+
+        # 优先级2: 东方财富实时新闻
         try:
             if hasattr(self.toolkit, 'get_realtime_stock_news'):
                 logger.info(f"[统一新闻工具] 尝试东方财富实时新闻...")
@@ -337,7 +429,7 @@ class UnifiedNewsAnalyzer:
         except Exception as e:
             logger.warning(f"[统一新闻工具] 东方财富新闻获取失败: {e}")
         
-        # 优先级2: Google新闻（中文搜索）
+        # 优先级3: Google新闻（中文搜索）
         try:
             if hasattr(self.toolkit, 'get_google_news'):
                 logger.info(f"[统一新闻工具] 尝试Google新闻...")
@@ -350,7 +442,7 @@ class UnifiedNewsAnalyzer:
         except Exception as e:
             logger.warning(f"[统一新闻工具] Google新闻获取失败: {e}")
         
-        # 优先级3: OpenAI全球新闻
+        # 优先级4: OpenAI全球新闻
         try:
             if hasattr(self.toolkit, 'get_global_news_openai'):
                 logger.info(f"[统一新闻工具] 尝试OpenAI全球新闻...")

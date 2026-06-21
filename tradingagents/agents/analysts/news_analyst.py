@@ -13,6 +13,7 @@ from tradingagents.utils.stock_utils import StockUtils
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
 from tradingagents.agents.utils.instrument_utils import build_instrument_context
+from tradingagents.utils.data_quality import check_report_data
 
 logger = get_logger("analysts.news")
 
@@ -273,6 +274,20 @@ def create_news_analyst(llm, toolkit):
                         from langchain_core.messages import AIMessage
                         clean_message = AIMessage(content=report)
 
+                        # 数据质量检查
+                        ticker = state.get("company_of_interest", "")
+                        quality = check_report_data(str(report), ticker, "新闻分析")
+                        if quality["has_failure"]:
+                            logger.error(f"❌ [数据质量门] 新闻数据获取失败: {quality['error_message']}")
+                            report = f"❌ 新闻数据获取失败: {quality['error_message']}。无法基于错误数据进行有效分析。"
+                            clean_message = AIMessage(content=report)
+                            return {
+                                "messages": [clean_message],
+                                "news_report": report,
+                                "news_tool_call_count": tool_call_count + 1,
+                                "data_all_failed": True,
+                            }
+
                         end_time = datetime.now()
                         time_taken = (end_time - start_time).total_seconds()
                         logger.info(f"[新闻分析师] 新闻分析完成（预处理模式），总耗时: {time_taken:.2f}秒")
@@ -390,11 +405,52 @@ def create_news_analyst(llm, toolkit):
                     logger.error(f"[新闻分析师] 📋 异常堆栈: {traceback.format_exc()}")
                     report = result.content if hasattr(result, 'content') else ""
             else:
-                # 有工具调用，直接使用结果
-                report = result.content
+                # LLM调用了工具 → 强制执行工具并生成报告
+                logger.info(f"[新闻分析师] 🔧 LLM请求了工具调用，执行工具并生成分析报告...")
+                try:
+                    forced_news = unified_news_tool(stock_code=ticker, max_news=10, model_info=model_info)
+                    logger.info(f"[新闻分析师] 📋 工具执行返回结果长度: {len(forced_news) if forced_news else 0} 字符")
+
+                    if forced_news and len(forced_news.strip()) > 100:
+                        analysis_prompt = f"""基于以下真实新闻数据，对{company_name}（股票代码：{ticker}）进行详细的新闻分析：
+
+{forced_news}
+
+请提供：
+1. 重要新闻事件及其对股价的潜在影响
+2. 行业趋势和政策变化
+3. 市场情绪分析
+4. 投资建议
+
+要求：
+- 基于提供的真实数据进行分析
+- 正确使用公司名称"{company_name}"和股票代码"{ticker}"
+- 使用中文撰写"""
+
+                        analysis_result = llm.invoke([{"role": "user", "content": analysis_prompt}])
+                        if hasattr(analysis_result, 'content') and analysis_result.content:
+                            report = analysis_result.content
+                            logger.info(f"[新闻分析师] ✅ 工具执行+分析成功，报告长度: {len(report)} 字符")
+                        else:
+                            logger.warning(f"[新闻分析师] ⚠️ LLM分析返回为空")
+                            report = ""
+                    else:
+                        logger.warning(f"[新闻分析师] ⚠️ 新闻工具返回数据为空或过短")
+                        report = "⚠️ 新闻数据获取失败或内容为空，无法进行有效分析。"
+
+                except Exception as e:
+                    logger.error(f"[新闻分析师] ❌ 工具执行失败: {e}")
+                    report = f"❌ 新闻工具执行失败: {str(e)}"
         
         total_time_taken = (datetime.now() - start_time).total_seconds()
         logger.info(f"[新闻分析师] 新闻分析完成，总耗时: {total_time_taken:.2f}秒")
+
+        # 数据质量检查
+        ticker = state.get("company_of_interest", "")
+        quality = check_report_data(str(report), ticker, "新闻分析")
+        if quality["has_failure"]:
+            logger.error(f"❌ [数据质量门] 新闻数据获取失败: {quality['error_message']}")
+            report = f"❌ 新闻数据获取失败: {quality['error_message']}。无法基于错误数据进行有效分析。"
 
         # 🔧 修复死循环问题：返回清洁的AIMessage，不包含tool_calls
         # 这确保工作流图能正确判断分析已完成，避免重复调用
@@ -403,11 +459,14 @@ def create_news_analyst(llm, toolkit):
 
         logger.info(f"[新闻分析师] ✅ 返回清洁消息，报告长度: {len(report)} 字符")
 
-        # 🔧 更新工具调用计数器
-        return {
+        result_dict = {
             "messages": [clean_message],
             "news_report": report,
             "news_tool_call_count": tool_call_count + 1
         }
+        if quality and quality.get("has_failure"):
+            result_dict["data_all_failed"] = True
+
+        return result_dict
 
     return news_analyst_node

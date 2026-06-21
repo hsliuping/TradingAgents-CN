@@ -13,6 +13,7 @@ logger = get_logger("default")
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
 from tradingagents.agents.utils.instrument_utils import build_instrument_context
+from tradingagents.utils.data_quality import check_report_data
 
 
 def _get_company_name(ticker: str, market_info: dict) -> str:
@@ -280,6 +281,19 @@ def create_market_analyst(llm, toolkit):
                 analyst_name="市场分析师"
             )
 
+            # 数据质量检查
+            ticker = state.get("company_of_interest", "")
+            quality = check_report_data(str(report), ticker, "市场分析")
+            if quality["has_failure"]:
+                logger.error(f"❌ [数据质量门] 市场数据获取失败: {quality['error_message']}")
+                report = f"❌ 市场数据获取失败: {quality['error_message']}。无法基于错误数据进行有效分析。"
+                return {
+                    "messages": [result],
+                    "market_report": report,
+                    "market_tool_call_count": tool_call_count + 1,
+                    "data_all_failed": True,
+                }
+
             # 🔧 更新工具调用计数器
             return {
                 "messages": [result],
@@ -446,7 +460,6 @@ def create_market_analyst(llm, toolkit):
 - **投资评级**：买入/持有/卖出
 - **目标价位**：[给出具体价格区间] {market_info['currency_symbol']}
 - **止损位**：[给出止损价格] {market_info['currency_symbol']}
-- **风险提示**：[列出主要风险因素]
 
 ### 3. 关键价格区间
 
@@ -465,7 +478,7 @@ def create_market_analyst(llm, toolkit):
 - 报告标题必须是：# **{company_name}（{ticker}）技术分析报告**
 - 报告必须基于工具返回的真实数据进行分析
 - 包含具体的技术指标数值和专业分析
-- 提供明确的投资建议和风险提示
+- 提供明确的投资建议
 - 报告长度不少于800字
 - 使用中文撰写
 - 使用表格展示数据时，确保格式规范"""
@@ -478,6 +491,19 @@ def create_market_analyst(llm, toolkit):
                     report = final_result.content
 
                     logger.info(f"📊 [市场分析师] 生成完整分析报告，长度: {len(report)}")
+
+                    # 数据质量检查
+                    ticker = state.get("company_of_interest", "")
+                    quality = check_report_data(str(report), ticker, "市场分析")
+                    if quality["has_failure"]:
+                        logger.error(f"❌ [数据质量门] 市场数据获取失败: {quality['error_message']}")
+                        report = f"❌ 市场数据获取失败: {quality['error_message']}。无法基于错误数据进行有效分析。"
+                        return {
+                            "messages": [result] + tool_messages + [final_result],
+                            "market_report": report,
+                            "market_tool_call_count": tool_call_count + 1,
+                            "data_all_failed": True,
+                        }
 
                     # 返回包含工具调用和最终分析的完整消息序列
                     # 🔧 更新工具调用计数器
@@ -500,6 +526,19 @@ def create_market_analyst(llm, toolkit):
                         "market_report": report,
                         "market_tool_call_count": tool_call_count + 1
                     }
+
+            # 没有工具调用时的返回路径 — 数据质量检查
+            ticker = state.get("company_of_interest", "")
+            quality = check_report_data(str(report), ticker, "市场分析")
+            if quality["has_failure"]:
+                logger.error(f"❌ [数据质量门] 市场数据获取失败: {quality['error_message']}")
+                report = f"❌ 市场数据获取失败: {quality['error_message']}。无法基于错误数据进行有效分析。"
+                return {
+                    "messages": [result],
+                    "market_report": report,
+                    "market_tool_call_count": tool_call_count + 1,
+                    "data_all_failed": True,
+                }
 
             # 🔧 更新工具调用计数器
             return {

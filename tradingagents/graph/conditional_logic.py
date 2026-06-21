@@ -47,6 +47,11 @@ class ConditionalLogic:
             logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数，强制结束: Msg Clear Market")
             return "Msg Clear Market"
 
+        # 数据质量门: 检查是否关键数据获取失败
+        if state.get("data_all_failed"):
+            logger.error(f"❌ [数据质量门] 检测到关键数据获取失败标记，终止分析链")
+            return "Msg Clear Market"
+
         # 如果已经有报告内容，说明分析已完成，不再循环
         if market_report and len(market_report) > 100:
             logger.info(f"🔀 [条件判断] ✅ 报告已完成，返回: Msg Clear Market")
@@ -85,6 +90,11 @@ class ConditionalLogic:
             logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数，强制结束: Msg Clear Social")
             return "Msg Clear Social"
 
+        # 数据质量门: 检查是否关键数据获取失败
+        if state.get("data_all_failed"):
+            logger.error(f"❌ [数据质量门] 检测到关键数据获取失败标记，终止分析链")
+            return "Msg Clear Social"
+
         # 如果已经有报告内容，说明分析已完成，不再循环
         if sentiment_report and len(sentiment_report) > 100:
             logger.info(f"🔀 [条件判断] ✅ 报告已完成，返回: Msg Clear Social")
@@ -121,6 +131,11 @@ class ConditionalLogic:
         # 死循环修复: 如果达到最大工具调用次数，强制结束
         if tool_call_count >= max_tool_calls:
             logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数，强制结束: Msg Clear News")
+            return "Msg Clear News"
+
+        # 数据质量门: 检查是否关键数据获取失败
+        if state.get("data_all_failed"):
+            logger.error(f"❌ [数据质量门] 检测到关键数据获取失败标记，终止分析链")
             return "Msg Clear News"
 
         # 如果已经有报告内容，说明分析已完成，不再循环
@@ -178,6 +193,11 @@ class ConditionalLogic:
                 logger.info(f"🔧 [条件判断] tool_calls为空列表")
         else:
             logger.info(f"🔧 [条件判断] 无tool_calls属性")
+
+        # ✅ 优先级0: 检查是否所有关键数据获取失败（防止LLM编造数据）
+        if state.get("data_all_failed"):
+            logger.error(f"❌ [数据质量门] 检测到关键数据获取失败标记，终止分析链")
+            return "Msg Clear Fundamentals"
 
         # ✅ 优先级1: 如果已经有报告内容，说明分析已完成，不再循环
         if fundamentals_report and len(fundamentals_report) > 100:

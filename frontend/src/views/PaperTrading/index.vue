@@ -12,31 +12,6 @@
       </div>
     </div>
 
-    <!-- 风险提示横幅 -->
-    <el-alert
-      type="warning"
-      :closable="false"
-      show-icon
-      style="margin-bottom: 16px;"
-    >
-      <template #title>
-        <div style="font-weight: 600; font-size: 14px;">⚠️ 模拟交易风险提示</div>
-      </template>
-      <div style="font-size: 13px; line-height: 1.8;">
-        <p style="margin: 0 0 8px 0;">
-          <strong>1. 模拟性质：</strong>本功能为模拟交易工具，使用虚拟资金，不涉及真实资金交易，仅供学习和练习使用。
-        </p>
-        <p style="margin: 0 0 8px 0;">
-          <strong>2. 数据延迟：</strong>模拟交易使用的行情数据可能存在延迟，与实际市场行情存在差异，成交价格和时机仅供参考。
-        </p>
-        <p style="margin: 0 0 8px 0;">
-          <strong>3. 实盘差异：</strong>模拟交易环境与真实交易存在显著差异，包括但不限于：滑点、流动性、交易成本、心理压力等因素，模拟盈利不代表实盘能够盈利。
-        </p>
-        <p style="margin: 0;">
-          <strong>4. 投资风险：</strong>股票投资存在市场风险，可能导致本金损失。请勿将模拟交易结果作为实盘投资决策依据，实盘交易前请充分评估自身风险承受能力并咨询专业投资顾问。
-        </p>
-      </div>
-    </el-alert>
 
     <el-row :gutter="16" class="body">
       <el-col :span="8">

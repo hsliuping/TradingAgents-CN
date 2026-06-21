@@ -497,32 +497,6 @@
               </template>
 
               <div class="results-content">
-                <!-- 风险提示 -->
-                <div class="risk-disclaimer">
-                  <el-alert
-                    type="warning"
-                    :closable="false"
-                    show-icon
-                  >
-                    <template #title>
-                      <div class="disclaimer-content">
-                        <el-icon class="disclaimer-icon"><WarningFilled /></el-icon>
-                        <div class="disclaimer-text">
-                          <p style="margin: 0 0 8px 0;"><strong>⚠️ 重要风险提示与免责声明</strong></p>
-                          <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
-                            <li><strong>工具性质：</strong>本系统为股票分析辅助工具，使用AI技术对公开市场数据进行分析，不具备证券投资咨询资质。</li>
-                            <li><strong>非投资建议：</strong>所有分析结果、评分、建议仅为技术分析参考，不构成任何买卖建议或投资决策依据。</li>
-                            <li><strong>数据局限性：</strong>分析基于历史数据和公开信息，可能存在延迟、不完整或不准确的情况，无法预测未来市场走势。</li>
-                            <li><strong>投资风险：</strong>股票投资存在市场风险、流动性风险、政策风险等多种风险，可能导致本金损失。</li>
-                            <li><strong>独立决策：</strong>投资者应基于自身风险承受能力、投资目标和财务状况独立做出投资决策。</li>
-                            <li><strong>专业咨询：</strong>重大投资决策建议咨询具有合法资质的专业投资顾问或金融机构。</li>
-                            <li><strong>责任声明：</strong>使用本工具产生的任何投资决策及其后果由投资者自行承担，本系统不承担任何责任。</li>
-                          </ul>
-                        </div>
-                      </div>
-                    </template>
-                  </el-alert>
-                </div>
 
                 <!-- 最终决策 -->
                 <div v-if="analysisResults.decision" class="decision-section">
@@ -667,17 +641,6 @@
                   </el-dropdown>
                 </div>
 
-                <!-- 风险提示 -->
-                <el-alert
-                  type="warning"
-                  :closable="false"
-                  show-icon
-                  class="risk-disclaimer"
-                >
-                  <template #title>
-                    <span style="font-weight: bold;">报告依据真实交易数据使用AI分析生成，仅供参考，不构成任何投资建议。市场有风险，投资需谨慎。</span>
-                  </template>
-                </el-alert>
               </div>
             </el-card>
           </el-col>
@@ -3023,61 +2986,6 @@ onMounted(async () => {
   gap: 8px;
 }
 
-/* 风险提示样式 */
-.risk-disclaimer {
-  margin-bottom: 24px;
-  animation: fadeInDown 0.5s ease-out;
-}
-
-.risk-disclaimer :deep(.el-alert) {
-  background: linear-gradient(135deg, #fff3cd 0%, #ffe69c 100%);
-  border: 2px solid #ffc107;
-  border-radius: 12px;
-  padding: 16px 20px;
-  box-shadow: 0 4px 12px rgba(255, 193, 7, 0.2);
-}
-
-.risk-disclaimer :deep(.el-alert__icon) {
-  font-size: 24px;
-  color: #ff6b00;
-}
-
-.disclaimer-content {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 15px;
-  line-height: 1.6;
-}
-
-.disclaimer-icon {
-  font-size: 24px;
-  color: #ff6b00;
-  flex-shrink: 0;
-  animation: pulse 2s ease-in-out infinite;
-}
-
-.disclaimer-text {
-  color: #856404;
-  flex: 1;
-}
-
-.disclaimer-text strong {
-  color: #d63031;
-  font-size: 16px;
-  font-weight: 700;
-}
-
-@keyframes pulse {
-  0%, 100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.1);
-    opacity: 0.8;
-  }
-}
 
 @keyframes fadeInDown {
   from {
@@ -3389,19 +3297,4 @@ onMounted(async () => {
   }
 }
 
-/* 风险提示样式 */
-.risk-disclaimer {
-  margin-top: 24px;
-  border-radius: 8px;
-
-  :deep(.el-alert__content) {
-    width: 100%;
-  }
-
-  :deep(.el-alert__title) {
-    font-size: 14px;
-    line-height: 1.6;
-    color: #e6a23c;
-  }
-}
 </style>

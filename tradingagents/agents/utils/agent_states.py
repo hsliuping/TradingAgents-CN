@@ -83,3 +83,6 @@ class AgentState(MessagesState):
         RiskDebateState, "Current state of the debate on evaluating risk"
     ]
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
+
+    # Data quality: set when critical data sources fail, stops LLM fabrication
+    data_all_failed: Annotated[bool, "Flag indicating all critical data sources failed"]
