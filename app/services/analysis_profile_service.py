@@ -554,6 +554,52 @@ class AnalysisProfileService:
         return result
 
     @staticmethod
+    def build_industry_prompt_block(industry: str) -> str:
+        """
+        同步获取行业分析配置，格式化为可直接追加到 Prompt 的文本块。
+
+        返回空字符串表示该行业无配置或查询失败。
+        """
+        try:
+            from app.core.database import get_mongo_db_sync
+            db = get_mongo_db_sync()
+            profile = db[INDUSTRY_COLLECTION].find_one(
+                {"industry": industry, "is_active": True}
+            )
+            if not profile:
+                return ""
+
+            dimensions = profile.get("analysis_dimensions", [])
+            if not dimensions:
+                return ""
+
+            blocks = ["\n\n## 行业分析重点\n"]
+
+            # 分析维度
+            blocks.append("### 核心分析维度\n")
+            for d in dimensions:
+                imp = d.get("importance", "high")
+                imp_label = {"critical": "★", "high": "▲", "medium": "●", "low": "○"}.get(imp, "")
+                blocks.append(f"- **{d.get('name', '')}** {imp_label}: {d.get('description', '')}")
+
+            # 分析重点
+            focus = profile.get("analysis_focus", "")
+            if focus:
+                blocks.append(f"\n### 行业分析总览\n{focus}")
+
+            # 关键指标
+            key_metrics = profile.get("key_metrics", [])
+            if key_metrics:
+                blocks.append(f"\n### 关键跟踪指标\n{', '.join(key_metrics)}")
+
+            result = "\n".join(blocks)
+            logger.info(f"🏭 [行业Prompt注入] {industry}: {len(dimensions)} 维度, 长度={len(result)}")
+            return result
+        except Exception as e:
+            logger.warning(f"⚠️ 构建行业Prompt块失败: {e}")
+            return ""
+
+    @staticmethod
     def get_stock_dimensions_sync(stock_code: str) -> Dict[str, str]:
         """
         同步获取个股分析维度（用于 _prepare_system_variables）

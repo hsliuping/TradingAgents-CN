@@ -1177,6 +1177,18 @@ class BaseAgent(ABC):
                 # 🔍 诊断日志：打印提示词的前200字符，检查模板内容
                 prompt_preview = prompt[:200] if len(prompt) > 200 else prompt
                 logger.info(f"🔍 [_get_prompt_from_template] 提示词预览: {prompt_preview}")
+
+                # 🏭 行业上下文注入：根据股票所属行业，追加行业分析维度到提示词
+                if state and state.get("industry") and state.get("industry") != "未知":
+                    try:
+                        from app.services.analysis_profile_service import AnalysisProfileService
+                        industry_block = AnalysisProfileService.build_industry_prompt_block(state["industry"])
+                        if industry_block:
+                            prompt = prompt + industry_block
+                            logger.info(f"🏭 [行业注入] {agent_name}: 已追加 {state['industry']} 行业分析维度")
+                    except Exception as e:
+                        logger.warning(f"⚠️ [行业注入] 失败: {e}")
+
                 return prompt
             else:
                 logger.warning(f"模板系统返回空提示词，使用降级提示词")
