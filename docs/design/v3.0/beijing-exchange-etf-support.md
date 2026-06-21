@@ -44,11 +44,8 @@
 13. 已实现行情/基本面/K 线 API 的 ETF 支持：`/api/stocks/{code}/quote`、`/fundamentals`、`/kline`。
 14. 已实现模拟交易 ETF 支持：下单、持仓、价格查询均支持 ETF 代码。
 15. 已实现 `planned_analysis_service.py` 中 `_ETF_FUND_KEYWORDS = []`，不再阻止 ETF 相关提问。
-
-仍未完成的部分：
-
-1. `core/tools/external/local_data.py` 未增加 ETF 函数（`get_etf_basic_info`、`get_etf_daily_quotes`）。
-2. 北交所 ETF 适配：Tushare `exchange` 需扩展 `BSE`，`symbol_utils` 需增加 `.BJ` 支持。
+16. 已实现北交所支持：Tushare `exchange` 含 `BSE`，`symbol_utils` 支持 `.BJ` 前缀/后缀，`stock_utils` 识别 `8xxxxx/4xxxxx/92xxxx`，前端 `stockValidator` 支持 `43/83/87/89/92` 前缀，AKShare/QMT 适配器均支持 `.BJ`。
+17. 已实现 `local_data.py` ETF 函数：`get_etf_basic_info`、`get_etf_daily_quotes`。
 
 ---
 
@@ -60,11 +57,12 @@
 |------|----------|------|
 | **数据层** | ✅ 部分支持 | AKShare、BaoStock、QMT、MultiSourceBasicsSync 均支持 8/4 开头 → `.BJ` |
 | **Tushare 股票列表** | ❌ 未包含 | `get_stock_list(market="CN")` 使用 `exchange='SSE,SZSE'`，**排除北交所** |
-| **Tushare rt_k 实时行情** | ⚠️ 需确认 | 使用 `9*.BJ` 通配符，北交所实际代码为 43/83/87/89 开头 |
-| **symbol_utils** | ❌ 缺 .BJ | `normalize_a_share_symbol` 仅支持 .SH/.SZ/.SS，**无 .BJ** |
-| **前端 stockValidator** | ✅ 已支持 | 43/83/87 前缀已纳入 A 股验证 |
+| **Tushare rt_k 实时行情** | ✅ 已支持 | 使用 `4*.BJ,8*.BJ,9*.BJ` 通配符 |
+| **symbol_utils** | ✅ 已支持 | `normalize_a_share_symbol` 支持 `SH/SZ/SS/BJ` 前缀/后缀 |
+| **前端 stockValidator** | ✅ 已支持 | `43/83/87/89/92` 前缀已纳入 A 股验证 |
 | **planned_analysis** | ✅ 无阻止 | 北交所属于 A 股，未被 `_check_unsupported_asset` 拦截 |
 | **财务/日线同步** | ✅ 已支持 | 查询条件含 `market: 北交所` |
+| **AKShare/QMT 适配器** | ✅ 已支持 | 均支持 `.BJ` 后缀和北交所代码格式 |
 
 **北交所代码规则**（参考 `stock_code_validation.md`）：
 - `92xxxx` - **北交所统一号段**（2025年10月9日起，存量公司全部切换，如海泰新能 920985）
@@ -89,7 +87,7 @@
 | **UnifiedStockService** | ✅ 已实现 | `collection_map["ETF"]` 已配置 |
 | **行情/K 线/基本面 API** | ✅ 已实现 | `stocks.py` 各端点均支持 ETF 代码 |
 | **模拟交易 ETF** | ✅ 已实现 | `paper.py` 支持 ETF 下单、持仓、价格查询 |
-| **local_data ETF 支持** | ❌ 未实现 | `core/tools/external/local_data.py` 未增加 ETF 函数 |
+| **local_data ETF 支持** | ✅ 已实现 | `core/tools/external/local_data.py`：`get_etf_basic_info`、`get_etf_daily_quotes` |
 
 **ETF 代码规则**（参考 `stock_utils.py`）：
 - 上海：`50xxxx`、`51xxxx`、`52xxxx`、`56xxxx`、`58xxxx`
@@ -103,11 +101,11 @@
 
 | 序号 | 改进项 | 文件/模块 | 改动说明 |
 |------|--------|-----------|----------|
-| 1 | **Tushare 股票列表包含北交所** | `tradingagents/dataflows/providers/china/tushare.py` | `get_stock_list(market="CN")` 将 `exchange='SSE,SZSE'` 改为 `'SSE,SZSE,BSE'` |
-| 2 | **symbol_utils 支持 .BJ** | `core/tools/external/symbol_utils.py` | `normalize_a_share_symbol` 增加 `.BJ` 前缀/后缀处理；`SYMBOL_NORMALIZE_INLINE` 同步更新 |
-| 3 | **Tushare rt_k 北交所通配符** | `tradingagents/dataflows/providers/china/tushare.py` | 确认北交所代码格式，若 Tushare 使用 `4*.BJ,8*.BJ,9*.BJ` 等，需调整 `rt_k` 的 `ts_code` 参数 |
-| 4 | **前端 A 股验证补全** | `frontend/src/utils/stockValidator.ts` | 若需支持 89 开头，补充 `89` 到 `validPrefixes` |
-| 5 | **Skill 生成编码规范** | `core/tools/external/code_generator.py` | 在编码规范中说明北交所代码（43/83/87/89）及 `.BJ` 后缀，确保生成代码正确处理 |
+| 1 | **Tushare 股票列表包含北交所** | `tradingagents/dataflows/providers/china/tushare.py` | ✅ 已完成，`exchange='SSE,SZSE,BSE'` |
+| 2 | **symbol_utils 支持 .BJ** | `core/tools/external/symbol_utils.py` | ✅ 已完成，`normalize_a_share_symbol` 支持 `SH/SZ/SS/BJ` 前缀/后缀 |
+| 3 | **Tushare rt_k 北交所通配符** | `tradingagents/dataflows/providers/china/tushare.py` | ✅ 已完成，已确认 `4*.BJ,8*.BJ,9*.BJ` 通配 |
+| 4 | **前端 A 股验证补全** | `frontend/src/utils/stockValidator.ts` | ✅ 已完成，`validPrefixes` 含 `43/83/87/89/92` |
+| 5 | **Skill 生成编码规范** | `core/tools/external/code_generator.py` | ✅ 已完成，北交所代码格式已纳入编码规范 |
 
 ### 2.2 ETF 支持（优先级：中）
 
