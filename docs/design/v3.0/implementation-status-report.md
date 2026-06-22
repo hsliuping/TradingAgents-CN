@@ -254,4 +254,102 @@
 | 6 | Gateway IM 适配器（QQ/WebSocket） | ✅ 通过 | 无需修复，双模式 + Session 隔离 + 用户映射 + Markdown 转换均正确 |
 | 7 | 统一通知系统（Notification） | ✅ 通过 | 修复 `websocket_notifications.py` 中 WebSocket 两个端点 `user_id` 硬编码为 `"admin"` 的 Bug，改为从 JWT token 动态解析 |
 
-**审计总结**: 7 个核心模块全部审计通过，共发现并修复 **5 个 Bug**（MCP 2 个、Workflow Architect 1 个、Agent Workshop 1 个、WebSocket 通知 1 个），其余 3 个模块代码质量高、无需修复。2026-04-01 已补充 Agent 工坊当前实现状态，确认其范围已明显超出最初“工具注册/同步”层面的审计描述。
+**审计总结**: 7 个核心模块全部审计通过，共发现并修复 **5 个 Bug**（MCP 2 个、Workflow Architect 1 个、Agent Workshop 1 个、WebSocket 通知 1 个），其余 3 个模块代码质量高、无需修复。2026-04-01 已补充 Agent 工坊当前实现状态，确认其范围已明显超出最初"工具注册/同步"层面的审计描述。
+
+---
+
+## 十三、v3.1.0 跟踪闭环版实现状态
+
+> 更新日期：2026-06-03
+
+### 13.1 定时分析
+
+| 设计项 | 实现状态 | 代码位置 |
+|--------|----------|----------|
+| 定时分析配置 CRUD | ✅ 已实现 | `app/routers/scheduled_analysis.py`：10 个 API 端点 |
+| APScheduler 定时调度 | ✅ 已实现 | `app/services/scheduler_service.py`：AsyncIOScheduler，支持 cron/interval |
+| 配置启停切换 | ✅ 已实现 | `scheduler_service.py`：enable/disable_job |
+| 手动测试执行 | ✅ 已实现 | `scheduler_service.py`：test_run_config |
+| 执行历史记录 | ✅ 已实现 | `scheduler_service.py`：get_config_history |
+| 助手操作工具 | ✅ 已实现 | `core/tools/implementations/assistant_ops/schedule_manager.py`：list_scheduled_configs、create_scheduled_analysis、toggle_scheduled_config |
+| 数据模型 | ✅ 已实现 | `app/models/scheduled_analysis.py` |
+
+### 13.2 持仓分析
+
+| 设计项 | 实现状态 | 代码位置 |
+|--------|----------|----------|
+| 持仓 CRUD | ✅ 已实现 | `app/routers/portfolio.py`：30 个 API 端点 |
+| 真实/模拟持仓区分 | ✅ 已实现 | `app/models/portfolio.py`：PositionSource 枚举 |
+| QMT 持仓导入 | ✅ 已实现 | `portfolio.py`：import/qmt/preview + import/qmt |
+| AI 持仓分析 | ✅ 已实现 | `app/services/portfolio_service.py`：analyze_portfolio、analyze_position |
+| 持仓快照与统计 | ✅ 已实现 | `portfolio_service.py`：PortfolioSnapshot、IndustryDistribution |
+| 账户管理（模拟账户） | ✅ 已实现 | `portfolio.py`：account/initialize、deposit、withdraw |
+| 助手操作工具 | ✅ 已实现 | `core/tools/implementations/assistant_ops/position_analysis.py`：list_positions、get_position_analysis |
+
+### 13.3 交易复盘
+
+| 设计项 | 实现状态 | 代码位置 |
+|--------|----------|----------|
+| 交易复盘 CRUD | ✅ 已实现 | `app/routers/review.py`：12 个 API 端点 |
+| 阶段复盘 | ✅ 已实现 | `review.py`：case 相关端点 |
+| 定期复盘 | ✅ 已实现 | `review.py`：periodic 相关端点 |
+| AI 复盘分析 | ✅ 已实现 | `app/services/trade_review_service.py` |
+| 可复盘交易查询 | ✅ 已实现 | `review.py`：reviewable-trades |
+| 复盘统计 | ✅ 已实现 | `review.py`：statistics |
+| 工作流引擎支持 | ✅ 已实现 | `trade_review_service.py`：USE_STOCK_ENGINE 特性开关 |
+| 助手操作工具 | ✅ 已实现 | `core/tools/implementations/assistant_ops/trade_review_ops.py`：list_trade_reviews、get_trade_review_detail |
+
+### 13.4 投资计划
+
+| 设计项 | 实现状态 | 代码位置 |
+|--------|----------|----------|
+| 交易计划 CRUD | ✅ 已实现 | `app/routers/trading_system.py`：18 个 API 端点 |
+| 计划发布与激活 | ✅ 已实现 | `trading_system.py`：publish、activate |
+| AI 计划评估 | ✅ 已实现 | `app/services/trading_plan_evaluation_service.py` |
+| 风险规则生成 | ✅ 已实现 | `trading_system.py`：generate-risk-rules |
+| 模块规则生成 | ✅ 已实现 | `trading_system.py`：generate-module-rules |
+| 版本管理 | ✅ 已实现 | `trading_system.py`：versions 相关端点 |
+| 优化讨论 | ✅ 已实现 | `trading_system.py`：optimize-discussion |
+| 助手操作工具 | ✅ 已实现 | `core/tools/implementations/assistant_ops/trading_plan.py`：list_trading_plans、get_active_trading_plan |
+
+### 13.5 通知中心
+
+| 设计项 | 实现状态 | 代码位置 |
+|--------|----------|----------|
+| 通知持久化 | ✅ 已实现 | `app/services/notifications_service.py`：MongoDB 存储 |
+| WebSocket 实时推送 | ✅ 已实现 | `app/routers/websocket_notifications.py` |
+| 通知列表/已读/未读 | ✅ 已实现 | `app/routers/notifications.py`：5 个 API 端点 |
+| IM 渠道推送 | ✅ 已实现 | `app/services/channel_notifier.py`：按 user_channel_configs 分发 |
+| 分析完成自动通知 | ✅ 已实现 | `task_analysis_service.py` → `notifications_service.py` |
+| 邮件通知（可选） | ✅ 已实现 | `app/services/email_service.py` |
+
+### 13.6 QQ Gateway
+
+| 设计项 | 实现状态 | 代码位置 |
+|--------|----------|----------|
+| Webhook 入口 | ✅ 已实现 | `app/routers/gateway.py`：POST /api/gateway/{platform} |
+| 路由分发 | ✅ 已实现 | `core/gateway/router.py`：GatewayRouter 单例 |
+| QQ Webhook 适配器 | ✅ 已实现 | `core/gateway/adapters/qq.py` |
+| QQ WebSocket 适配器 | ✅ 已实现 | `core/gateway/adapters/qq_ws.py` |
+| 用户身份映射 | ✅ 已实现 | `core/gateway/user_mapping.py`：IM user → system user |
+| 多通道 Session | ✅ 已实现 | `core/gateway/session.py` |
+| 飞书适配器 | ❌ 骨架代码 | `core/gateway/adapters/feishu.py` |
+| 钉钉适配器 | ❌ 骨架代码 | `core/gateway/adapters/dingtalk.py` |
+
+### 13.7 QMT 增强（v3.2.0 前置完成项）
+
+| 设计项 | 实现状态 | 代码位置 |
+|--------|----------|----------|
+| QMT 涨跌停统计（实时+历史双模式） | ✅ 已实现 | `app/services/data_sources/qmt_adapter.py`：get_limit_stats |
+| QMT 成交额排名（实时+历史双模式） | ✅ 已实现 | `qmt_adapter.py`：get_amount_ranking |
+| 盘后自动降级（实时→历史K线） | ✅ 已实现 | `qmt_adapter.py`：_is_market_session 判断 |
+| 交易时段判断 | ✅ 已实现 | `qmt_adapter.py`：_is_market_session，调用 trading_time.is_trading_time |
+| 大盘分析工具 QMT 降级 | ✅ 已实现 | `core/tools/implementations/market/index_market_tools.py` |
+| 行业分析工具 QMT 降级 | ✅ 已实现 | `core/tools/implementations/market/sector_market_tools.py` |
+| 批量数据获取优化 | ✅ 已实现 | `qmt_adapter.py`：get_market_data_ex(count=1)，全市场 3.9s |
+| find_latest_trade_date 优化 | ✅ 已实现 | `qmt_adapter.py`：改用上证指数单条日线查询 |
+| 日期格式修复 | ✅ 已实现 | `qmt_adapter.py`：start_time/end_time YYYY-MM-DD → YYYYMMDD |
+
+### v3.1.0 小结
+
+v3.1.0 六大功能模块（定时分析、持仓分析、交易复盘、投资计划、通知中心、QQ Gateway）**全部已实现**。代码、前端、助手工具均已就绪，验收计划已编写。QMT 增强部分工作（涨跌停统计、成交额排名、盘后降级、交易时段判断）已提前完成，属于 v3.2.0 前置项。
