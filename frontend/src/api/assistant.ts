@@ -2,7 +2,7 @@
  * 智能助手 API
  */
 
-import { request } from './request'
+import { ApiClient, request } from './request'
 
 export interface ChatRequest {
   message: string
@@ -267,11 +267,13 @@ function createAssistantStream(
       resetIdle()
 
       try {
-        while (true) {
+        let reading = true
+        while (reading) {
           const { done, value } = await reader.read()
           if (done) {
             buffer += decoder.decode()
-            break
+            reading = false
+            continue
           }
 
           resetIdle()
@@ -450,8 +452,9 @@ export const assistantApi = {
 
   async getMemoryHealth() {
     try {
-      return await request.get<{ ok: boolean; mem0_version?: string; error?: string }>(
+      return await ApiClient.get<{ ok: boolean; mem0_version?: string; error?: string }>(
         '/api/memory/health',
+        undefined,
         { skipErrorHandler: true },
       )
     } catch (error: any) {

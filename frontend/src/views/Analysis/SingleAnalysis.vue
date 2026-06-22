@@ -1183,9 +1183,24 @@ const validateStockCodeInput = () => {
   fetchStockInfo()
 }
 
-// 获取股票信息
-const fetchStockInfo = () => {
-  // TODO: 实现股票信息获取
+// 获取股票信息（实时行情，用于显示股票名称和当前价格）
+const fetchStockInfo = async () => {
+  const code = analysisForm.stockCode.trim()
+  if (!code) return
+
+  try {
+    const response = await stocksApi.getQuote(code)
+    const data = (response as any)?.data
+    if (data) {
+      // 更新 factorPreviewRow 中的名称（如果行情返回了名称）
+      if (data.name && factorPreviewRow.value) {
+        factorPreviewRow.value.name = data.name
+      }
+    }
+  } catch (error) {
+    // 行情获取失败不影响主流程，静默处理
+    console.warn('获取股票行情失败', error)
+  }
 }
 
 // 切换分析师

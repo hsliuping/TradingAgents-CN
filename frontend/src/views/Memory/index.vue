@@ -356,8 +356,10 @@ function getScopeLabel(scope: string) {
   return SCOPE_LABELS[scope] || scope
 }
 
-function getScopeColor(scope: string) {
-  return SCOPE_COLORS[scope] || 'info'
+type ElTagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
+
+function getScopeColor(scope: string): ElTagType {
+  return (SCOPE_COLORS[scope] || 'info') as ElTagType
 }
 
 function getMarketLabel(market: string) {
@@ -570,8 +572,9 @@ async function handleBatchDelete() {
 async function collectObjectMemoryIds() {
   const ids: string[] = []
   let page = 1
+  let hasMore = true
 
-  while (true) {
+  while (hasMore) {
     const data = await memoryApi.getList({
       ...buildObjectBaseParams(),
       page,
@@ -579,9 +582,7 @@ async function collectObjectMemoryIds() {
     })
     ids.push(...data.items.map(item => item.id))
 
-    if (!data.items.length || ids.length >= data.total) {
-      break
-    }
+    hasMore = Boolean(data.items.length && ids.length < data.total)
     page += 1
   }
 

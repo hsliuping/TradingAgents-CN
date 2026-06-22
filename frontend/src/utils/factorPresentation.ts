@@ -1,5 +1,5 @@
 import type { StockInfo } from '@/types/analysis'
-import type { FactorDiagnosticPayload, FactorWarningPayload, WarningCategory } from '@/api/screening'
+import type { FactorWarningPayload, WarningCategory } from '@/api/screening'
 
 type FactorTagType = 'warning' | 'danger' | 'info' | 'success'
 
@@ -89,5 +89,13 @@ export const getFactorWarningEntries = (row: StockInfo): FactorWarningEntry[] =>
 }
 
 export const getFactorDiagnosticEntries = (row: StockInfo): FactorDiagnosticEntry[] => {
-  return []
+  const diagnostics = row.factor_diagnostics || {}
+  return Object.entries(diagnostics).map(([key, payload]: [string, any]) => ({
+    key,
+    label: diagnosticLabelMap[key] || key,
+    state: diagnosticStateLabelMap[payload?.state] || payload?.state || '状态未知',
+    reason: payload?.reason || '',
+    missingInputs: payload?.missing_inputs || [],
+    tagType: 'danger',
+  }))
 }

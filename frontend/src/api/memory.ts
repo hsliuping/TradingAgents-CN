@@ -2,7 +2,7 @@
  * mem0 统一记忆层 API
  */
 
-import { request } from './request'
+import { ApiClient, request } from './request'
 
 export interface MemoryItem {
   id: string
@@ -73,8 +73,9 @@ export const SCOPE_COLORS: Record<string, string> = {
 export const memoryApi = {
   async getHealth() {
     try {
-      const res = await request.get<{ ok: boolean; mem0_version?: string; error?: string }>(
+      const res = await ApiClient.get<{ ok: boolean; mem0_version?: string; error?: string }>(
         '/api/memory/health',
+        undefined,
         { skipErrorHandler: true },
       )
       return (res as any)?.data ?? res
