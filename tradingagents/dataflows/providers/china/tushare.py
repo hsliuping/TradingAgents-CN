@@ -468,10 +468,10 @@ class TushareProvider(BaseStockDataProvider):
 
         try:
             # 使用通配符一次性获取全市场行情
-            # 3*.SZ: 创业板  6*.SH: 上交所  0*.SZ: 深交所主板  9*.BJ: 北交所
+            # 3*.SZ: 创业板  6*.SH: 上交所  0*.SZ: 深交所主板  4*.BJ,8*.BJ,9*.BJ: 北交所
             df = await asyncio.to_thread(
                 self.api.rt_k,
-                ts_code='3*.SZ,6*.SH,0*.SZ,9*.BJ'
+                ts_code='3*.SZ,6*.SH,0*.SZ,4*.BJ,8*.BJ,9*.BJ'
             )
 
             if df is None or df.empty:

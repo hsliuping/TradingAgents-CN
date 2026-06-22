@@ -28,6 +28,7 @@ ETF_FULL_SYNC_FALLBACK_START = "19900101"
 
 ETF_SH_PREFIXES = ("50", "51", "52", "56", "58")
 ETF_SZ_PREFIXES = ("15", "16", "18")
+ETF_BJ_PREFIXES = ("89",)  # 北交所 ETF 前缀
 
 
 def _is_missing(value: Any) -> bool:
@@ -107,11 +108,13 @@ def _get_full_symbol(code: str) -> str:
         return f"{code}.SH"
     if code.startswith(ETF_SZ_PREFIXES):
         return f"{code}.SZ"
+    if code.startswith(ETF_BJ_PREFIXES):
+        return f"{code}.BJ"
     return f"{code}.SH"
 
 
 def _is_etf_code(code: str) -> bool:
-    return bool(code) and len(code) == 6 and code.startswith(ETF_SH_PREFIXES + ETF_SZ_PREFIXES)
+    return bool(code) and len(code) == 6 and code.startswith(ETF_SH_PREFIXES + ETF_SZ_PREFIXES + ETF_BJ_PREFIXES)
 
 
 def _normalize_source_name(name: str) -> str:
@@ -335,7 +338,7 @@ def _fetch_etf_share_map_tushare(target_codes: Optional[set[str]] = None, recent
         start_dt = end_dt - timedelta(days=recent_days)
         rows: List[Dict[str, Any]] = []
 
-        for market in ("SH", "SZ"):
+        for market in ("SH", "SZ", "BJ"):
             df = pro.fund_share(
                 market=market,
                 start_date=start_dt.strftime("%Y%m%d"),
