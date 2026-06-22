@@ -282,8 +282,8 @@ def get_market_environment(
         if _is_qmt_available():
             logger.info("Tushare 获取市场环境失败，尝试 QMT 降级")
             try:
-                from core.tools.qmt_market_tools import get_market_overview_qmt_sync
-                report = get_market_overview_qmt_sync(trade_date, 60)
+                from core.tools.qmt_market_tools import get_market_overview_qmt_enhanced
+                report = get_market_overview_qmt_enhanced(trade_date, 60)
                 return f"📊 以下数据基于 QMT 行情口径（Tushare 不可用时的降级数据）\n\n{report}"
             except Exception as qmt_e:
                 return f"❌ 获取市场环境失败: Tushare={e}, QMT降级={qmt_e}"
@@ -322,11 +322,11 @@ def identify_market_cycle(
         if _is_qmt_available():
             logger.info("Tushare 识别市场周期失败，尝试 QMT 降级")
             try:
-                from core.tools.qmt_market_tools import get_market_overview_qmt_sync
-                report = get_market_overview_qmt_sync(trade_date, 60)
+                from core.tools.qmt_market_tools import get_market_overview_qmt_enhanced
+                report = get_market_overview_qmt_enhanced(trade_date, 60)
                 return (
-                    "📊 市场周期识别（基于 QMT 指数趋势代理，Tushare 不可用时的降级分析）\n\n"
-                    "⚠️ 注意：此降级分析仅基于指数趋势和均线排列，不如 Tushare 版本全面。\n\n"
+                    "📊 市场周期识别（基于 QMT 增强版分析，Tushare 不可用时的降级分析）\n\n"
+                    "⚠️ 注意：此降级分析基于指数趋势、均线排列和 MACD 信号，不如 Tushare 版本全面。\n\n"
                     f"{report}"
                 )
             except Exception as qmt_e:
@@ -372,8 +372,8 @@ def get_market_overview(
         if _is_qmt_available():
             logger.info("Tushare 获取市场概览失败，尝试 QMT 降级")
             try:
-                from core.tools.qmt_market_tools import get_market_overview_qmt_sync
-                report = get_market_overview_qmt_sync(trade_date, 60)
+                from core.tools.qmt_market_tools import get_market_overview_qmt_enhanced
+                report = get_market_overview_qmt_enhanced(trade_date, 60)
                 return f"📊 以下数据基于 QMT 行情口径（Tushare 不可用时的降级数据）\n\n{report}"
             except Exception as qmt_e:
                 return f"❌ 获取市场概览失败: Tushare={e}, QMT降级={qmt_e}"
@@ -398,8 +398,8 @@ def get_market_analysis(
 
     if source == "qmt":
         try:
-            from core.tools.qmt_market_tools import get_market_overview_qmt_sync
-            return get_market_overview_qmt_sync(trade_date, lookback_days)
+            from core.tools.qmt_market_tools import get_market_overview_qmt_enhanced
+            return get_market_overview_qmt_enhanced(trade_date, lookback_days)
         except Exception as e:
             logger.error(f"QMT 大盘分析失败: {e}")
             # QMT 失败时尝试 Tushare

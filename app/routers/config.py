@@ -1775,6 +1775,104 @@ async def delete_data_source_config(
         )
 
 
+@router.get("/datasource-quality", response_model=dict)
+async def get_data_source_quality(
+    current_user: User = Depends(get_current_user)
+):
+    """获取数据源质量统计（QMT 等）"""
+    result = {}
+    try:
+        from app.services.data_sources.qmt_adapter import QMTAdapter
+        adapter = QMTAdapter()
+        result["qmt"] = adapter.get_quality_stats()
+    except Exception as e:
+        result["qmt"] = {"error": str(e)}
+
+    return result
+
+
+@router.get("/qmt-diagnosis", response_model=dict)
+async def qmt_diagnosis(
+    current_user: User = Depends(get_current_user)
+):
+    """QMT 连接诊断，返回详细的连接状态和常见问题提示"""
+    diagnosis = {
+        "available": False,
+        "connection": "unknown",
+        "checks": [],
+        "suggestions": [],
+    }
+
+    # 1. 检查 QMT 是否启用
+    try:
+        from app.core.config import settings as app_settings
+        if not app_settings.QMT_UNIFIED_ENABLED:
+            diagnosis["checks"].append({"item": "QMT 配置开关", "status": "disabled", "detail": "QMT_UNIFIED_ENABLED=False"})
+            diagnosis["suggestions"].append("在 .env 中设置 QMT_UNIFIED_ENABLED=True 启用 QMT")
+            return diagnosis
+        diagnosis["checks"].append({"item": "QMT 配置开关", "status": "ok", "detail": "QMT_UNIFIED_ENABLED=True"})
+    except Exception as e:
+        diagnosis["checks"].append({"item": "QMT 配置开关", "status": "error", "detail": str(e)})
+
+    # 2. 检查 xtquant 是否可导入
+    try:
+        from app.services.data_sources.qmt_adapter import _get_xtdata
+        xt = _get_xtdata()
+        if xt is None:
+            diagnosis["checks"].append({"item": "xtquant 导入", "status": "failed", "detail": "xtquant 模块未找到"})
+            diagnosis["suggestions"].append("确认 MiniQMT 已安装，且 QMT_DATA_DIR 环境变量指向正确路径")
+            diagnosis["suggestions"].append("常见路径: D:\\gjzq\\bin.x64 或 C:\\gjzq\\bin.x64")
+        else:
+            diagnosis["checks"].append({"item": "xtquant 导入", "status": "ok", "detail": "xtdata 模块已加载"})
+    except Exception as e:
+        diagnosis["checks"].append({"item": "xtquant 导入", "status": "error", "detail": str(e)})
+        diagnosis["suggestions"].append("xtquant 导入失败，请确认 MiniQMT 客户端已安装")
+
+    # 3. 检查 MiniQMT 连接
+    try:
+        from app.services.data_sources.qmt_adapter import QMTAdapter
+        adapter = QMTAdapter()
+        available = adapter.is_available()
+        diagnosis["available"] = available
+        if available:
+            diagnosis["connection"] = "connected"
+            diagnosis["checks"].append({"item": "MiniQMT 连接", "status": "ok", "detail": "MiniQMT 已连接"})
+
+            # 4. 测试数据获取
+            try:
+                items = adapter.get_kline("000001.SH", period="day", limit=5)
+                if items and len(items) > 0:
+                    diagnosis["checks"].append({"item": "数据获取测试", "status": "ok", "detail": f"上证指数返回 {len(items)} 条K线"})
+                else:
+                    diagnosis["checks"].append({"item": "数据获取测试", "status": "warning", "detail": "上证指数返回空数据"})
+                    diagnosis["suggestions"].append("MiniQMT 已连接但数据为空，可能需要等待数据同步")
+            except Exception as e:
+                diagnosis["checks"].append({"item": "数据获取测试", "status": "failed", "detail": str(e)[:200]})
+        else:
+            diagnosis["connection"] = "disconnected"
+            diagnosis["checks"].append({"item": "MiniQMT 连接", "status": "failed", "detail": "未检测到 MiniQMT 连接"})
+            diagnosis["suggestions"].append("请确认 MiniQMT 客户端已启动并登录")
+            diagnosis["suggestions"].append("MiniQMT 需要在本机运行，不支持远程连接")
+    except Exception as e:
+        diagnosis["checks"].append({"item": "MiniQMT 连接", "status": "error", "detail": str(e)[:200]})
+        diagnosis["suggestions"].append(f"连接检查异常: {str(e)[:100]}")
+
+    # 5. 检查 QMT_DATA_DIR 环境变量
+    import os
+    qmt_dir = os.getenv("QMT_DATA_DIR", "")
+    if qmt_dir:
+        from pathlib import Path
+        if Path(qmt_dir).exists():
+            diagnosis["checks"].append({"item": "QMT_DATA_DIR", "status": "ok", "detail": f"路径存在: {qmt_dir}"})
+        else:
+            diagnosis["checks"].append({"item": "QMT_DATA_DIR", "status": "warning", "detail": f"路径不存在: {qmt_dir}"})
+            diagnosis["suggestions"].append(f"QMT_DATA_DIR={qmt_dir} 路径不存在，请检查配置")
+    else:
+        diagnosis["checks"].append({"item": "QMT_DATA_DIR", "status": "info", "detail": "未设置，使用默认路径搜索"})
+
+    return diagnosis
+
+
 # ==================== 市场分类管理 ====================
 
 @router.get("/market-categories", response_model=List[MarketCategory])

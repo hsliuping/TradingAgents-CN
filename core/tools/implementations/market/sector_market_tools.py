@@ -85,8 +85,8 @@ def get_sector_data(
         if _is_qmt_available():
             logger.info("Tushare 获取板块数据失败，尝试 QMT 降级")
             try:
-                from core.tools.qmt_market_tools import get_sector_analysis_qmt_sync
-                report = get_sector_analysis_qmt_sync(ticker, trade_date, lookback_days)
+                from core.tools.qmt_market_tools import get_sector_analysis_qmt_enhanced
+                report = get_sector_analysis_qmt_enhanced(ticker, trade_date, lookback_days)
                 return f"📊 以下数据基于 QMT 行情口径（Tushare 不可用时的降级数据）\n\n{report}"
             except Exception as qmt_e:
                 return f"❌ 获取板块数据失败: Tushare={e}, QMT降级={qmt_e}"
@@ -167,8 +167,8 @@ def get_peer_comparison(
         if _is_qmt_available():
             logger.info("Tushare 获取同业对比失败，尝试 QMT 降级")
             try:
-                from core.tools.qmt_market_tools import get_sector_analysis_qmt_sync
-                report = get_sector_analysis_qmt_sync(ticker, trade_date, 20, top_n)
+                from core.tools.qmt_market_tools import get_sector_analysis_qmt_enhanced
+                report = get_sector_analysis_qmt_enhanced(ticker, trade_date, 20, top_n)
                 return f"📊 以下数据基于 QMT 行情口径（Tushare 不可用时的降级数据）\n\n{report}"
             except Exception as qmt_e:
                 return f"❌ 获取同业对比失败: Tushare={e}, QMT降级={qmt_e}"
@@ -209,8 +209,8 @@ def analyze_sector(
         if _is_qmt_available():
             logger.info("Tushare 综合板块分析失败，尝试 QMT 降级")
             try:
-                from core.tools.qmt_market_tools import get_sector_analysis_qmt_sync
-                report = get_sector_analysis_qmt_sync(ticker, trade_date, 20, 10)
+                from core.tools.qmt_market_tools import get_sector_analysis_qmt_enhanced
+                report = get_sector_analysis_qmt_enhanced(ticker, trade_date, 20, 10)
                 return f"📊 以下数据基于 QMT 行情口径（Tushare 不可用时的降级数据）\n\n{report}"
             except Exception as qmt_e:
                 return f"❌ 综合板块分析失败: Tushare={e}, QMT降级={qmt_e}"
@@ -237,8 +237,8 @@ def get_sector_analysis(
 
     if source == "qmt":
         try:
-            from core.tools.qmt_market_tools import get_sector_analysis_qmt_sync
-            return get_sector_analysis_qmt_sync(ticker, trade_date, lookback_days, top_n)
+            from core.tools.qmt_market_tools import get_sector_analysis_qmt_enhanced
+            return get_sector_analysis_qmt_enhanced(ticker, trade_date, lookback_days, top_n)
         except Exception as e:
             logger.error(f"QMT 行业分析失败: {e}")
             # QMT 失败时尝试 Tushare

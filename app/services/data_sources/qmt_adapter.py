@@ -159,6 +159,15 @@ class QMTAdapter(DataSourceAdapter):
         self._available: Optional[bool] = None
         self._bootstrapped = False
         self._sector_data_prepared = False
+        # 数据质量统计
+        self._quality_stats: Dict[str, Any] = {
+            "total_calls": 0,
+            "success_calls": 0,
+            "failed_calls": 0,
+            "last_error": None,
+            "last_error_time": None,
+            "by_method": {},
+        }
 
     @property
     def name(self) -> str:
@@ -618,6 +627,40 @@ class QMTAdapter(DataSourceAdapter):
         logger.debug("QMT 不可用: 未检测到可复用的 MiniQMT 连接")
         return False
 
+    # ==================== 数据质量监控 ====================
+
+    def _record_quality(self, method: str, success: bool, error: Optional[str] = None, duration_ms: float = 0) -> None:
+        """记录数据获取质量指标。"""
+        self._quality_stats["total_calls"] += 1
+        if success:
+            self._quality_stats["success_calls"] += 1
+        else:
+            self._quality_stats["failed_calls"] += 1
+            self._quality_stats["last_error"] = error
+            self._quality_stats["last_error_time"] = datetime.now().isoformat()
+
+        by_method = self._quality_stats["by_method"]
+        if method not in by_method:
+            by_method[method] = {"total": 0, "success": 0, "failed": 0, "avg_duration_ms": 0, "last_error": None}
+        m = by_method[method]
+        m["total"] += 1
+        if success:
+            m["success"] += 1
+        else:
+            m["failed"] += 1
+            m["last_error"] = error
+        if duration_ms > 0:
+            m["avg_duration_ms"] = (m["avg_duration_ms"] * (m["total"] - 1) + duration_ms) / m["total"]
+
+    def get_quality_stats(self) -> Dict[str, Any]:
+        """获取数据质量统计。"""
+        stats = dict(self._quality_stats)
+        stats["success_rate"] = (
+            stats["success_calls"] / stats["total_calls"] * 100
+            if stats["total_calls"] > 0 else 0
+        )
+        return stats
+
     def get_stock_list(self) -> Optional[pd.DataFrame]:
         """获取股票列表（通过沪深成分股组合）"""
         if not self.is_available():
@@ -939,9 +982,11 @@ class QMTAdapter(DataSourceAdapter):
         xt = _get_xtdata()
         if xt is None:
             return None
+        _start = time.perf_counter()
         try:
             xt_code = _normalize_code(code)
             if not xt_code:
+                self._record_quality("get_kline", False, "invalid_code")
                 return None
             period_map = {
                 "day": "1d",
@@ -999,10 +1044,13 @@ class QMTAdapter(DataSourceAdapter):
                         "volume": self._safe_float(row.get("volume")),
                         "amount": self._safe_float(row.get("amount")),
                     })
+                self._record_quality("get_kline", True, duration_ms=(time.perf_counter() - _start) * 1000)
                 return items
+            self._record_quality("get_kline", False, "no_data_format")
             return None
         except Exception as e:
             logger.error(f"QMT: get_kline 失败: {e}", exc_info=True)
+            self._record_quality("get_kline", False, str(e)[:200], (time.perf_counter() - _start) * 1000)
             return None
 
     def get_news(self, code: str, days: int = 2, limit: int = 50, include_announcements: bool = True) -> Optional[List[Dict]]:

@@ -6,7 +6,7 @@ from typing import Annotated
 from langchain_core.tools import tool
 
 from core.tools.base import register_tool
-from core.tools.qmt_market_tools import get_market_overview_qmt_sync, get_sector_analysis_qmt_sync
+from core.tools.qmt_market_tools import get_market_overview_qmt_enhanced, get_sector_analysis_qmt_enhanced
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def get_market_overview_qmt(
         str: 大盘分析报告
     """
     try:
-        return get_market_overview_qmt_sync(trade_date, lookback_days)
+        return get_market_overview_qmt_enhanced(trade_date, lookback_days)
     except Exception as exc:
         logger.error(f"QMT 大盘概览失败: {exc}")
         return f"❌ QMT 大盘概览失败: {exc}"
@@ -67,7 +67,7 @@ def get_sector_analysis_qmt(
         str: 板块分析报告
     """
     try:
-        return get_sector_analysis_qmt_sync(ticker, trade_date, lookback_days, top_n)
+        return get_sector_analysis_qmt_enhanced(ticker, trade_date, lookback_days, top_n)
     except Exception as exc:
         logger.error(f"QMT 板块分析失败: {exc}")
         return f"❌ QMT 板块分析失败: {exc}"
