@@ -2894,6 +2894,13 @@ class TradeReviewService:
         except Exception as e:
             logger.warning(f"⚠️ [工作流复盘] 获取基准数据失败: {e}")
 
+        # 构建K线日期索引，用于计算交易前价格变化
+        kline_by_date = {}
+        for k in (market_snapshot.kline_data or []):
+            kd = k.get("date", "")
+            if kd:
+                kline_by_date[kd[:10]] = k
+
         # 3. 准备工作流输入
         # 🆕 添加 user_id 和 trade_ids，供 Agent 通过工具获取完整数据
         inputs = {
@@ -2928,7 +2935,7 @@ class TradeReviewService:
                         "quantity": t.quantity,
                         "price": t.price,
                         "pnl": t.pnl or 0,
-                        "price_change_before": 0,  # TODO: 计算交易前价格变化
+                        "price_change_before": self._calc_price_change_before(t, kline_by_date),
                     }
                     for t in trade_info.trades
                 ],
@@ -3188,6 +3195,30 @@ class TradeReviewService:
         logger.info(f"✅ [工作流复盘] 解析完成 - 总分: {result.overall_score}")
 
         return self._sanitize_trade_review_result(result)
+
+    @staticmethod
+    def _calc_price_change_before(trade, kline_by_date: dict) -> float:
+        """计算交易前价格变化：交易当日开盘价相对前一日收盘价的涨跌幅(%)。"""
+        try:
+            trade_date = trade.timestamp[:10] if trade.timestamp else ""
+            if not trade_date or not kline_by_date:
+                return 0.0
+            # 找到交易日K线和前一日K线
+            sorted_dates = sorted(kline_by_date.keys())
+            if trade_date not in kline_by_date:
+                return 0.0
+            idx = sorted_dates.index(trade_date)
+            if idx == 0:
+                return 0.0  # 没有前一日数据
+            prev_kline = kline_by_date[sorted_dates[idx - 1]]
+            trade_kline = kline_by_date[trade_date]
+            prev_close = prev_kline.get("close", 0)
+            trade_open = trade_kline.get("open", 0)
+            if not prev_close or not trade_open:
+                return 0.0
+            return round((trade_open - prev_close) / prev_close * 100, 2)
+        except Exception:
+            return 0.0
 
     def _calculate_max_profit_pct(self, trade_info: TradeInfo, market_snapshot: MarketSnapshot) -> float:
         """计算最大可能盈利百分比"""

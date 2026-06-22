@@ -341,7 +341,76 @@ class TradingSystemService:
             return None
 
         logger.info(f"激活交易计划成功: system_id={system_id}")
-        return self.get_system(system_id, user_id)
+
+        # 激活后同步风险规则到持仓
+        system = self.get_system(system_id, user_id)
+        if system:
+            self._sync_risk_rules_to_positions(system, user_id)
+
+        return system
+
+    def _sync_risk_rules_to_positions(self, system: TradingSystem, user_id: str) -> None:
+        """将激活的交易计划的风险规则同步到用户持仓的止损/止盈价。
+
+        仅同步 percentage 类型的止损/止盈规则（可计算具体价格），
+        technical/atr/trailing/scaled 类型无法直接计算价格，跳过。
+        """
+        try:
+            risk_mgmt = getattr(system, "risk_management", None)
+            if not risk_mgmt:
+                return
+
+            stop_loss = risk_mgmt.stop_loss or {}
+            take_profit = risk_mgmt.take_profit or {}
+
+            # 仅处理 percentage 类型
+            stop_loss_pct = None
+            if stop_loss.get("type") == "percentage":
+                stop_loss_pct = stop_loss.get("percentage")  # 如 0.08 表示 8%
+
+            take_profit_pct = None
+            if take_profit.get("type") == "percentage":
+                take_profit_pct = take_profit.get("percentage")  # 如 0.2 表示 20%
+
+            if stop_loss_pct is None and take_profit_pct is None:
+                logger.info(f"交易计划风险规则非 percentage 类型，跳过持仓同步")
+                return
+
+            # 查询用户所有活跃持仓
+            db = get_mongo_db_sync()
+            positions = db.portfolio_positions.find({
+                "user_id": user_id,
+                "is_active": True
+            })
+
+            synced = 0
+            for pos in positions:
+                cost_price = pos.get("cost_price")
+                if not cost_price or cost_price <= 0:
+                    continue
+
+                update_fields = {}
+                if stop_loss_pct is not None:
+                    stop_loss_price = round(cost_price * (1 - stop_loss_pct), 2)
+                    update_fields["price_targets.stop_loss_price"] = stop_loss_price
+                    update_fields["price_targets.stop_loss_pct"] = round(stop_loss_pct * 100, 2)
+
+                if take_profit_pct is not None:
+                    take_profit_price = round(cost_price * (1 + take_profit_pct), 2)
+                    update_fields["price_targets.take_profit_price"] = take_profit_price
+                    update_fields["price_targets.take_profit_pct"] = round(take_profit_pct * 100, 2)
+
+                if update_fields:
+                    db.portfolio_positions.update_one(
+                        {"_id": pos["_id"]},
+                        {"$set": update_fields}
+                    )
+                    synced += 1
+
+            if synced > 0:
+                logger.info(f"✅ 已将交易计划风险规则同步到 {synced} 个持仓的止损/止盈价")
+        except Exception as e:
+            logger.warning(f"⚠️ 同步风险规则到持仓失败(不影响激活操作): {e}")
 
     def check_compliance(
         self,
