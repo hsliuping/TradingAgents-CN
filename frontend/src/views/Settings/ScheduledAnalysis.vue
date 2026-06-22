@@ -27,6 +27,9 @@
       </template>
 
       <el-table :data="configs" v-loading="loading">
+        <template #empty>
+          <el-empty description="暂无定时分析配置，点击上方按钮创建" />
+        </template>
         <el-table-column prop="name" label="配置名称" min-width="150" />
         <el-table-column prop="description" label="描述" min-width="200" />
         <el-table-column label="时间段" width="100" align="center">
@@ -78,6 +81,9 @@
       size="600px"
     >
       <el-table :data="historyList" v-loading="historyLoading" stripe>
+        <template #empty>
+          <el-empty description="暂无执行历史" />
+        </template>
         <el-table-column label="执行时间" width="160">
           <template #default="{ row }">
             {{ formatTime(row.created_at) }}

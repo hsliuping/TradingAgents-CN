@@ -843,3 +843,35 @@ async def run_scheduled_analysis_slot(config_id: str, user_id: str, slot_index: 
     except Exception as e:
         logger.error(f"❌ 定时分析时间段任务执行失败: {e}", exc_info=True)
 
+        # 记录失败历史，确保前端能看到执行失败记录
+        try:
+            from app.utils.timezone import now_tz
+            from bson import ObjectId
+            db = get_mongo_db()
+            history_doc = {
+                "config_id": config_id,
+                "config_name": "未知",
+                "time_slot_name": "未知",
+                "created_at": now_tz(),
+                "status": "failed",
+                "total_count": 0,
+                "success_count": 0,
+                "failed_count": 0,
+                "task_ids": [],
+                "result_summary": f"执行异常: {str(e)[:200]}"
+            }
+            # 尝试获取配置名称
+            try:
+                config = await db.scheduled_analysis_configs.find_one({"_id": ObjectId(config_id)})
+                if config:
+                    history_doc["config_name"] = config.get("name", "未知")
+                    time_slots = config.get("time_slots", [])
+                    if slot_index < len(time_slots):
+                        history_doc["time_slot_name"] = time_slots[slot_index].get("name", "未知")
+            except Exception:
+                pass
+
+            await db.scheduled_analysis_history.insert_one(history_doc)
+        except Exception as hist_err:
+            logger.error(f"❌ 记录失败历史也失败: {hist_err}")
+

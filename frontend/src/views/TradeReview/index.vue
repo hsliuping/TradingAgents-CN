@@ -147,6 +147,9 @@
           </el-button>
         </div>
         <el-table :data="periodicReviews" v-loading="loading.periodic" stripe>
+          <template #empty>
+            <el-empty description="暂无阶段性复盘记录" />
+          </template>
           <el-table-column label="复盘周期" width="100">
             <template #default="{ row }">
               {{ getPeriodTypeLabel(row.period_type) }}
@@ -299,6 +302,9 @@
             </el-button>
           </div>
           <el-table :data="positionPeriodicReviews" v-loading="loading.positionPeriodic" stripe>
+            <template #empty>
+              <el-empty description="暂无阶段性复盘记录" />
+            </template>
             <el-table-column label="复盘周期" width="100">
               <template #default="{ row }">
                 {{ getPeriodTypeLabel(row.period_type) }}
