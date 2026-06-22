@@ -799,6 +799,68 @@ class AgentWorkshopService:
             "previous_active_archived": True,
         }
 
+    async def rollback_version(self, spec_id: str) -> Dict[str, Any]:
+        """一键回滚到上一个 active 版本。
+
+        流程：
+        1. 找到当前 active 版本，将其归档
+        2. 找到最近一个 archived 版本，恢复为 active
+        3. 更新 Spec 的 current_version_id
+        """
+        spec_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": spec_id})
+        if not spec_doc:
+            raise ValueError(f"规格 {spec_id} 不存在")
+        spec = AgentSpec(**spec_doc)
+
+        # 找到当前 active 版本
+        current_active = await self._db[VERSION_COLLECTION].find_one(
+            {"spec_id": spec_id, "status": AgentVersionStatus.ACTIVE.value}
+        )
+        if not current_active:
+            raise ValueError("没有当前 active 版本，无法回滚")
+
+        # 找到最近一个 archived 版本
+        previous_version = await self._db[VERSION_COLLECTION].find_one(
+            {"spec_id": spec_id, "status": AgentVersionStatus.ARCHIVED.value},
+            sort=[("updated_at", -1)],
+        )
+        if not previous_version:
+            raise ValueError("没有可回滚的历史版本")
+
+        # 归档当前 active 版本
+        await self._db[VERSION_COLLECTION].update_one(
+            {"version_id": current_active["version_id"]},
+            {"$set": {"status": AgentVersionStatus.ARCHIVED.value, "updated_at": now_tz().isoformat()}},
+        )
+
+        # 恢复上一个版本为 active
+        await self._db[VERSION_COLLECTION].update_one(
+            {"version_id": previous_version["version_id"]},
+            {"$set": {"status": AgentVersionStatus.ACTIVE.value, "updated_at": now_tz().isoformat()}},
+        )
+
+        # 更新 Spec
+        spec.current_version_id = previous_version["version_id"]
+        await self._save_spec(spec)
+
+        # 重新注册到 agent_configs
+        prev_version = AgentVersion(**previous_version)
+        await self._ensure_runtime_agent_config(prev_version, spec)
+
+        logger.info(
+            "[AgentWorkshop] 版本回滚成功: spec_id=%s, %s → %s",
+            spec_id,
+            current_active["version_id"],
+            previous_version["version_id"],
+        )
+
+        return {
+            "spec_id": spec_id,
+            "rolled_back_from": current_active["version_id"],
+            "rolled_back_to": previous_version["version_id"],
+            "previous_version_number": previous_version.get("version", "?"),
+        }
+
     async def list_evaluations(
         self,
         version_id: str,

@@ -261,3 +261,36 @@ async def list_mcp_tools():
         "total": len(mcp_tools),
     }
 
+
+@router.get("/audit-logs", summary="查询 MCP 审计日志")
+async def get_audit_logs(
+    server_name: Optional[str] = None,
+    tool_name: Optional[str] = None,
+    category: Optional[str] = None,
+    user_id: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """查询 MCP 工具调用审计日志"""
+    db = get_mongo_db()
+    query = {}
+    if server_name:
+        query["server_name"] = server_name
+    if tool_name:
+        query["tool_name"] = tool_name
+    if category:
+        query["category"] = category
+    if user_id:
+        query["user_id"] = user_id
+
+    total = await db.mcp_audit_logs.count_documents(query)
+    cursor = db.mcp_audit_logs.find(query).sort("created_at", -1).skip(offset).limit(limit)
+    logs = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        if "created_at" in doc and doc["created_at"]:
+            doc["created_at"] = str(doc["created_at"])
+        logs.append(doc)
+
+    return {"logs": logs, "total": total, "limit": limit, "offset": offset}
+

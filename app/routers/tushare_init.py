@@ -3,7 +3,7 @@ Tushare数据初始化API路由
 提供Web界面的数据初始化功能
 """
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
@@ -117,12 +117,29 @@ async def get_initialization_status(
     检查当前是否有初始化任务在运行
     """
     try:
+        # 根据进度估算完成时间
+        estimated_completion = None
+        if (_initialization_status["is_running"]
+            and _initialization_status["started_at"]
+            and _initialization_status["progress"]):
+            try:
+                parts = _initialization_status["progress"].split("/")
+                completed = int(parts[0])
+                total = int(parts[1])
+                if completed > 0 and total > 0:
+                    elapsed = (datetime.utcnow() - _initialization_status["started_at"]).total_seconds()
+                    estimated_total = elapsed / (completed / total)
+                    remaining = estimated_total - elapsed
+                    estimated_completion = (datetime.utcnow() + timedelta(seconds=remaining)).isoformat()
+            except (ValueError, IndexError, ZeroDivisionError):
+                pass
+
         status = InitializationStatusResponse(
             is_running=_initialization_status["is_running"],
             current_step=_initialization_status["current_step"],
             progress=_initialization_status["progress"],
             started_at=_initialization_status["started_at"],
-            estimated_completion=None  # TODO: 可以根据历史数据估算
+            estimated_completion=estimated_completion
         )
         
         return ok(data=status,

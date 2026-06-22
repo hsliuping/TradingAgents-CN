@@ -358,6 +358,23 @@ async def publish_version(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/specs/{spec_id}/rollback")
+async def rollback_version(
+    spec_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """一键回滚到上一个 active 版本"""
+    try:
+        svc = _get_service(db)
+        result = await svc.rollback_version(spec_id)
+        return ok(result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Agent 版本回滚失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class UpdateVersionPromptRequest(BaseModel):
     content: dict = Field(..., description="提示词内容（6 字段结构）")
     status: Optional[str] = Field(default=None, description="模板状态: draft, active")

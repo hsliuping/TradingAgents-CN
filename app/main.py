@@ -1151,6 +1151,10 @@ register_router_with_log(app, trading_system_router.router, "交易计划路由 
 from app.routers import unified_tasks as unified_tasks_router
 register_router_with_log(app, unified_tasks_router.router, "统一任务中心路由 (unified-tasks)", tags=["unified-task-center"])
 
+# MCP 路由
+from app.routers import mcp as mcp_router
+app.include_router(mcp_router.router)
+
 # 路由注册完成，打印总结
 logger.info("=" * 70)
 logger.info("✅ 路由注册完成")

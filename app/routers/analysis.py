@@ -26,6 +26,7 @@ from app.models.analysis import (
 )
 from tradingagents.utils.stock_utils import StockUtils, StockMarket, SecurityType
 from app.core.database import get_mongo_db
+from app.utils.timezone import now_tz
 from bson import ObjectId
 
 router = APIRouter()
@@ -1413,6 +1414,55 @@ async def get_task_result(
     except Exception as e:
         logger.error(f"❌ [RESULT] 获取任务结果失败: {e}")
         raise HTTPException(status_code=400, detail=format_http_error_detail(e))
+
+
+class AnalysisFeedbackRequest(BaseModel):
+    """分析任务反馈请求"""
+    rating: int = Field(..., ge=1, le=5, description="评分 1-5")
+    comment: str = Field(default="", description="反馈内容")
+
+
+@router.post("/tasks/{task_id}/feedback")
+async def submit_analysis_feedback(
+    task_id: str,
+    req: AnalysisFeedbackRequest,
+    user: dict = Depends(get_current_user),
+):
+    """提交分析任务反馈（评分+评论）"""
+    try:
+        db = get_mongo_db()
+        # 检查任务是否存在
+        task = await db.analysis_tasks.find_one({"task_id": task_id})
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        # 写入反馈
+        feedback_doc = {
+            "task_id": task_id,
+            "user_id": str(user["id"]),
+            "rating": req.rating,
+            "comment": req.comment,
+            "code": task.get("code", ""),
+            "created_at": now_tz(),
+        }
+        await db.analysis_feedback.replace_one(
+            {"task_id": task_id, "user_id": str(user["id"])},
+            feedback_doc,
+            upsert=True,
+        )
+
+        # 更新任务中的评分字段
+        await db.analysis_tasks.update_one(
+            {"task_id": task_id},
+            {"$set": {"user_rating": req.rating, "user_feedback": req.comment}},
+        )
+
+        return {"message": "反馈提交成功", "rating": req.rating}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 提交分析反馈失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/tasks/all", response_model=Dict[str, Any])
 async def list_all_tasks(
