@@ -1,0 +1,23 @@
+# 股票价值投资分析 - Python 依赖
+# 安装命令: pip install -r requirements.txt
+
+# 核心数据获取
+akshare>=1.15.0
+
+# 数据处理
+pandas>=2.0.0
+numpy>=1.24.0
+
+# 终端输出美化
+rich>=13.0.0
+tabulate>=0.9.0
+
+# HTTP 请求
+requests>=2.31.0
+
+# 日期时间处理
+python-dateutil>=2.8.0
+
+# 可选：PDF生成（用于输出PDF报告）
+# weasyprint>=60.0
+# markdown>=3.5.0

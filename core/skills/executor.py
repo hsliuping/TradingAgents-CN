@@ -4,7 +4,7 @@ Skill 执行器
 负责根据 Skill 的 implementation 配置执行实际调用：
 - python: 调用内置 Python 函数
 - http: 调用外部 HTTP API
-- mcp: 调用 MCP Server（预留）
+- mcp: 调用 MCP Server（通过 MCPClientManager）
 """
 
 import asyncio
@@ -96,7 +96,26 @@ class SkillExecutor:
 
     @staticmethod
     async def _execute_python(impl: PythonImplementation, **kwargs) -> Any:
-        """执行 Python 函数"""
+        """执行 Python 函数、代码或本地脚本"""
+        # 如果提供了 code，使用沙箱执行
+        if impl.code:
+            return await SkillExecutor._execute_python_code(impl.code, **kwargs)
+
+        # ClawHub/OpenClaw 本地脚本型 Skill
+        if impl.script_path and impl.skill_dir:
+            from core.skills.script_executor import ScriptSkillExecutor
+            result = await asyncio.to_thread(
+                ScriptSkillExecutor.execute,
+                skill_dir=impl.skill_dir,
+                script_path=impl.script_path,
+                args=kwargs,
+                credentials={},
+                timeout=impl.timeout,
+            )
+            if not result.get("success"):
+                raise RuntimeError(result.get("error") or "脚本执行失败")
+            return result.get("result")
+
         # 优先从 ToolRegistry 查找已注册的函数
         from core.tools.registry import get_tool_registry
 
@@ -123,6 +142,45 @@ class SkillExecutor:
             return await func(**kwargs)
         else:
             return func(**kwargs)
+
+    @staticmethod
+    async def _execute_python_code(code: str, **kwargs) -> Any:
+        """在子进程沙箱中执行 Python 代码"""
+        import subprocess
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
+            f.write(code)
+            temp_path = f.name
+
+        try:
+            input_data = json.dumps(kwargs, ensure_ascii=False)
+            proc = subprocess.run(
+                ["python", temp_path],
+                input=input_data,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=str(Path(__file__).parent.parent.parent),
+            )
+
+            if proc.returncode != 0:
+                raise RuntimeError(proc.stderr or "代码执行失败")
+
+            stdout = proc.stdout.strip()
+            if "__SANDBOX_OUTPUT_START__" in stdout:
+                start = stdout.index("__SANDBOX_OUTPUT_START__") + len("__SANDBOX_OUTPUT_START__")
+                end = stdout.index("__SANDBOX_OUTPUT_END__")
+                result_str = stdout[start:end].strip()
+                try:
+                    return json.loads(result_str)
+                except Exception:
+                    return result_str
+            else:
+                return stdout
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
 
     @staticmethod
     async def _execute_http(impl: HttpImplementation, **kwargs) -> Any:
@@ -186,11 +244,53 @@ class SkillExecutor:
 
     @staticmethod
     async def _execute_mcp(impl: McpImplementation, **kwargs) -> Any:
-        """执行 MCP Server 调用（预留实现）"""
-        raise NotImplementedError(
-            "MCP Server 执行协议尚未实现，将在后续版本支持。"
-            f"目标 MCP Server: {impl.server_url}, 工具: {impl.tool_name}"
-        )
+        """执行 MCP Server 调用
+
+        通过 MCPClientManager 连接 MCP 服务器并调用指定工具。
+        支持三种传输协议：stdio、sse、streamable_http。
+        """
+        from core.tools.mcp.client_manager import get_mcp_client_manager
+
+        # 根据 transport 构造 MCP 服务器配置
+        transport = (impl.transport or "sse").lower()
+        if transport == "stdio":
+            # stdio 模式下 server_url 用作 command
+            config = {
+                "transport_type": "stdio",
+                "connection": {"command": impl.server_url, "args": []},
+            }
+        elif transport in ("sse", "streamable_http"):
+            config = {
+                "transport_type": transport,
+                "connection": {"url": impl.server_url},
+            }
+        else:
+            raise ValueError(f"不支持的 MCP 传输协议: {transport}")
+
+        manager = get_mcp_client_manager()
+        # MCPClientManager.call_tool 是同步方法（内部用后台事件循环），
+        # 用 asyncio.to_thread 避免阻塞当前事件循环
+        try:
+            result = await asyncio.to_thread(
+                manager.call_tool,
+                config,
+                impl.tool_name,
+                kwargs,
+                60,
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"MCP 工具调用失败 (server={impl.server_url}, "
+                f"tool={impl.tool_name}): {e}"
+            ) from e
+
+        # 尝试将字符串结果解析为 JSON，便于下游处理
+        if isinstance(result, str):
+            try:
+                return json.loads(result)
+            except (json.JSONDecodeError, ValueError):
+                return result
+        return result
 
     # =========================================================================
     # 辅助方法

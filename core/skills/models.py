@@ -21,14 +21,24 @@ class ImplementationType(str, Enum):
     """执行协议类型"""
     PYTHON = "python"   # 内置 Python 函数
     HTTP = "http"       # 外部 HTTP API
-    MCP = "mcp"         # MCP Server（预留）
+    MCP = "mcp"         # MCP Server
 
 
 class PythonImplementation(BaseModel):
-    """Python 函数执行配置"""
+    """Python 函数执行配置
+    
+    支持三种执行方式：
+    1. module + function：调用项目内部已存在的 Python 函数
+    2. code：直接执行一段 Python 代码（沙箱执行），适合外部导入的 Skill
+    3. skill_dir + script_path：执行本地 Skill 包中的 Python 脚本（ClawHub/OpenClaw）
+    """
     type: ImplementationType = ImplementationType.PYTHON
-    module: str = Field(..., description="Python 模块路径，如 'core.tools.implementations.market.stock_data'")
-    function: str = Field(..., description="函数名称，如 'get_stock_market_data_unified'")
+    module: Optional[str] = Field(default=None, description="Python 模块路径，如 'core.tools.implementations.market.stock_data'")
+    function: Optional[str] = Field(default=None, description="函数名称，如 'get_stock_market_data_unified'")
+    code: Optional[str] = Field(default=None, description="可直接执行的 Python 代码，优先于 module/function")
+    script_path: Optional[str] = Field(default=None, description="本地 Skill 包内的脚本路径，如 'scripts/fetch_data.py'")
+    skill_dir: Optional[str] = Field(default=None, description="本地 Skill 包目录")
+    timeout: int = Field(default=60, description="脚本执行超时时间（秒）")
     is_async: bool = Field(default=False, description="是否为异步函数")
 
 
@@ -48,11 +58,11 @@ class HttpImplementation(BaseModel):
 
 
 class McpImplementation(BaseModel):
-    """MCP Server 执行配置（预留）"""
+    """MCP Server 执行配置"""
     type: ImplementationType = ImplementationType.MCP
-    server_url: str = Field(..., description="MCP Server URL")
+    server_url: str = Field(..., description="MCP Server URL（sse/streamable_http）或命令路径（stdio）")
     tool_name: str = Field(..., description="MCP 工具名称")
-    transport: str = Field(default="stdio", description="传输协议: stdio, sse")
+    transport: str = Field(default="sse", description="传输协议: stdio, sse, streamable_http")
 
 
 # 联合类型

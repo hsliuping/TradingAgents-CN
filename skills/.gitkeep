@@ -1,0 +1,13 @@
+# 此目录用于存储从 ClawHub 安装的本地 Skill 包
+# 每个 Skill 一个子目录，包含 SKILL.md + scripts/ + references/ + assets/
+# 例如:
+#   skills/
+#   ├── ifind-repilot-finance-data-search/
+#   │   ├── SKILL.md
+#   │   ├── scripts/
+#   │   │   └── fetch_data.py
+#   │   └── references/
+#   └── weather-query/
+#       ├── SKILL.md
+#       └── scripts/
+#           └── weather.py
