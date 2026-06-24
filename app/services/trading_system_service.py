@@ -216,7 +216,9 @@ class TradingSystemService:
             system_id: 系统ID
             user_id: 用户ID
             update_data: 更新数据
-            save_as_draft: 是否保存为草稿（如果系统已发布，草稿数据不会影响正式版本）
+            save_as_draft: 是否保存为草稿
+                - 编辑已发布版本 → 保存为草稿：创建新版本（状态为草稿）
+                - 编辑草稿版本 → 保存为草稿：直接更新，不创建新版本
             
         Returns:
             更新后的交易计划，如果不存在返回None
@@ -231,10 +233,11 @@ class TradingSystemService:
         if not update_dict:
             return current_system
 
-        # 如果系统已发布且保存为草稿，只更新草稿数据
-        if save_as_draft and self._is_published_status(current_system.status):
-            # 将更新数据保存到 draft_data（不包含元数据字段），并与已有草稿做深合并。
-            # 这样即使传入的是增量 patch，也不会丢失既有草稿字段。
+        is_published = self._is_published_status(current_system.status)
+
+        # 情况1：系统已发布，且保存为草稿 → 创建一个新版本（状态为草稿）
+        if save_as_draft and is_published:
+            # 先构建完整的草稿数据（与已有草稿合并）
             incoming_draft_data = update_dict.copy()
             incoming_draft_data.pop("status", None)
             incoming_draft_data.pop("is_active", None)
@@ -257,6 +260,7 @@ class TradingSystemService:
             merged_draft_data = self._deep_merge_dict(base_snapshot, existing_draft_data)
             merged_draft_data = self._deep_merge_dict(merged_draft_data, incoming_draft_data)
             
+            # 保存到 draft_data
             result = self.collection.update_one(
                 {"_id": ObjectId(system_id), "user_id": user_id},
                 {"$set": {"draft_data": merged_draft_data, "draft_updated_at": datetime.utcnow()}}
@@ -265,15 +269,69 @@ class TradingSystemService:
             if result.matched_count == 0:
                 return None
             
-            logger.info(f"保存草稿成功: system_id={system_id}, status={current_system.status}")
+            # 同时创建一个草稿版本（用于版本历史展示）
+            # 先删除已有的草稿版本（避免多个草稿版本）
+            self.version_collection.delete_many({
+                "system_id": system_id,
+                "status": TradingSystemStatus.DRAFT.value
+            })
+            
+            # 生成下一个版本号（与发布时的版本递增逻辑一致）
+            current_version = current_system.version
+            try:
+                version_parts = [int(x) for x in current_version.split(".")]
+                version_parts[0] += 1
+                version_parts[1] = 0
+                version_parts[2] = 0
+                next_version = ".".join(str(x) for x in version_parts)
+            except Exception:
+                next_version = f"{current_version}.1"
+            
+            # 草稿版本号 = 下一个版本号 + -draft
+            draft_version = f"{next_version}-draft"
+            
+            # 构建完整的系统快照
+            draft_snapshot = current_system.copy(update=merged_draft_data)
+            
+            # 创建草稿版本
+            version_doc = {
+                "system_id": system_id,
+                "version": draft_version,
+                "improvement_summary": "草稿版本",
+                "status": TradingSystemStatus.DRAFT.value,
+                "snapshot": draft_snapshot.dict(),
+                "created_at": datetime.utcnow(),
+                "created_by": user_id
+            }
+            self.version_collection.insert_one(version_doc)
+            
+            logger.info(f"保存草稿成功，已创建草稿版本: system_id={system_id}, draft_version={draft_version}")
             return self.get_system(system_id, user_id)
 
-        if save_as_draft:
-            logger.warning(
-                f"请求保存草稿，但系统未命中已发布草稿分支: system_id={system_id}, status={current_system.status}"
+        # 情况2：系统是草稿状态，且保存为草稿 → 直接更新，不创建新版本
+        if save_as_draft and not is_published:
+            update_dict["updated_at"] = datetime.utcnow()
+            
+            # 如果要激活此系统，先将其他系统设为非激活
+            if update_dict.get("is_active") is True:
+                self.collection.update_many(
+                    {"user_id": user_id, "is_active": True, "_id": {"$ne": ObjectId(system_id)}},
+                    {"$set": {"is_active": False}}
+                )
+
+            # 直接更新系统
+            result = self.collection.update_one(
+                {"_id": ObjectId(system_id), "user_id": user_id},
+                {"$set": update_dict}
             )
+
+            if result.matched_count == 0:
+                return None
+
+            logger.info(f"更新草稿版本成功: system_id={system_id}")
+            return self.get_system(system_id, user_id)
         
-        # 否则，正常更新（草稿状态或直接更新）
+        # 情况3：不保存为草稿（直接更新）
         update_dict["updated_at"] = datetime.utcnow()
 
         # 如果要激活此系统，先将其他系统设为非激活
@@ -325,6 +383,16 @@ class TradingSystemService:
         Returns:
             激活后的交易计划，如果不存在返回None
         """
+        # 先检查系统是否存在且已发布
+        current_system = self.get_system(system_id, user_id)
+        if not current_system:
+            return None
+
+        # 只允许激活已发布的交易计划，不允许激活草稿
+        if current_system.status != TradingSystemStatus.PUBLISHED.value:
+            logger.warning(f"不允许激活草稿状态的交易计划: system_id={system_id}, status={current_system.status}")
+            return None
+
         # 先将该用户的所有系统设为非激活
         self.collection.update_many(
             {"user_id": user_id, "is_active": True},
@@ -587,6 +655,7 @@ class TradingSystemService:
             "system_id": system_id,
             "version": new_version,
             "improvement_summary": version_data.improvement_summary,
+            "status": TradingSystemStatus.PUBLISHED.value,
             "snapshot": current_system.dict(),
             "created_at": datetime.utcnow(),
             "created_by": user_id
@@ -671,6 +740,94 @@ class TradingSystemService:
         except Exception as e:
             logger.error(f"获取版本详情失败: {e}")
             return None
+
+    def restore_version_as_draft(
+        self,
+        system_id: str,
+        version_id: str,
+        user_id: str
+    ) -> Optional[TradingSystem]:
+        """将指定版本恢复为草稿
+        
+        Args:
+            system_id: 系统ID
+            version_id: 版本ID
+            user_id: 用户ID
+            
+        Returns:
+            更新后的交易计划，如果不存在返回None
+        """
+        # 获取版本详情
+        version = self.get_version(version_id, user_id)
+        if not version:
+            return None
+        
+        # 获取当前系统
+        current_system = self.get_system(system_id, user_id)
+        if not current_system:
+            return None
+        
+        # 使用版本快照数据作为草稿
+        snapshot_data = version.snapshot.dict()
+        
+        # 移除不需要的字段
+        snapshot_data.pop("id", None)
+        snapshot_data.pop("_id", None)
+        snapshot_data.pop("user_id", None)
+        snapshot_data.pop("status", None)
+        snapshot_data.pop("version", None)
+        snapshot_data.pop("is_active", None)
+        snapshot_data.pop("created_at", None)
+        snapshot_data.pop("updated_at", None)
+        snapshot_data.pop("draft_data", None)
+        snapshot_data.pop("draft_updated_at", None)
+        
+        # 如果当前系统已发布，保存到草稿数据
+        if self._is_published_status(current_system.status):
+            # 先删除已有的草稿版本
+            self.version_collection.delete_many({
+                "system_id": system_id,
+                "status": TradingSystemStatus.DRAFT.value
+            })
+            
+            # 生成新版本号
+            current_version = current_system.version
+            try:
+                version_parts = [int(x) for x in current_version.split(".")]
+                version_parts[0] += 1
+                version_parts[1] = 0
+                version_parts[2] = 0
+                next_version = ".".join(str(x) for x in version_parts)
+            except Exception:
+                next_version = f"{current_version}.1"
+            
+            draft_version = f"{next_version}-draft"
+            
+            # 创建草稿版本记录
+            version_doc = {
+                "system_id": system_id,
+                "version": draft_version,
+                "improvement_summary": f"基于 v{version.version} 编辑",
+                "status": TradingSystemStatus.DRAFT.value,
+                "snapshot": snapshot_data,
+                "created_at": datetime.utcnow(),
+                "created_by": user_id
+            }
+            self.version_collection.insert_one(version_doc)
+            
+            # 保存到 draft_data
+            self.collection.update_one(
+                {"_id": ObjectId(system_id), "user_id": user_id},
+                {"$set": {"draft_data": snapshot_data, "draft_updated_at": datetime.utcnow()}}
+            )
+            
+            logger.info(f"已将版本 v{version.version} 恢复为草稿: system_id={system_id}, draft_version={draft_version}")
+        else:
+            # 如果系统本身是草稿，直接更新
+            update_data = TradingSystemUpdate(**snapshot_data)
+            return self.update_system(system_id, user_id, update_data, save_as_draft=False)
+        
+        return self.get_system(system_id, user_id)
 
     def update_system_with_version(
         self,
@@ -785,6 +942,12 @@ class TradingSystemService:
         
         if result.matched_count == 0:
             return None
+        
+        # 发布成功后删除草稿版本记录
+        self.version_collection.delete_many({
+            "system_id": system_id,
+            "status": TradingSystemStatus.DRAFT.value
+        })
         
         logger.info(f"发布交易计划成功: system_id={system_id}, version={version.version}")
         return self.get_system(system_id, user_id)

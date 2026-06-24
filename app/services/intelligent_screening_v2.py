@@ -41,6 +41,43 @@ MAX_CONTEXT_MESSAGES = 20
 SCREENING_CONVERSATION_LIMIT = 50
 
 
+async def _recall_user_plans_memory(db, user_id: str, query: str) -> str:
+    """召回该用户的交易计划纪律 / 偏好（user_preference）记忆，注入到选股 prompt。
+
+    参考：docs/design/v3.0/unified-memory-layer-mem0.md §15.5 P0-2
+    """
+    if not user_id:
+        return ""
+    try:
+        from core.memory.service import get_memory_service
+        svc = get_memory_service(db)
+        return await svc.recall_formatted(
+            query=query or "选股偏好",
+            user_id=user_id,
+            scopes=["user_preference", "trade_pattern"],
+            limit=8,
+            max_chars=900,
+        )
+    except Exception as e:
+        logger.debug(f"[智能筛选V2][mem0] 记忆召回失败（已忽略）: {e}")
+        return ""
+
+
+def _build_plan_directive(memory_block: str) -> str:
+    """构造『多交易计划处理规则』指引片段；memory_block 为空时返回空串。"""
+    if not memory_block:
+        return ""
+    return (
+        f"\n{memory_block}\n"
+        "【多交易计划处理规则】如果【历史记忆】中出现多个『用户当前交易计划：xxx（v数字）』条目"
+        "（例如『中长期价值』『短期波段』『机动备用』），说明用户同时维护多套并存策略。本次选股请按以下规则：\n"
+        "1) 优先看用户本轮消息是否明确指定（如『按中长期计划选股』『短线机会』），如有则用对应计划纪律。\n"
+        "2) 如未明确指定，但需求强相关（『长期持有』倾向中长期；『短线追涨』倾向短期），按相关性选择并在回复中说明『按您的xxx计划』。\n"
+        "3) 风格不明显时，先反问用户『您想按哪个计划来选股？(中长期/短期/机动)』，再继续；不要默认按第一个或混用多个计划纪律。\n"
+        "4) 严禁把不同计划的止损/仓位/选股口径混在一起。\n"
+    )
+
+
 class DialogState(Enum):
     """对话状态枚举"""
     IDLE = "idle"
@@ -423,7 +460,11 @@ class IntelligentScreeningServiceV2:
         """处理确认阶段"""
         await self._emit_progress(progress_callback, "phase_determined", phase="confirmation", message="正在分析您的筛选需求")
 
-        system_prompt = self._get_confirmation_prompt()
+        # 召回用户交易计划/偏好记忆，注入到 prompt（多计划场景）
+        memory_block = await _recall_user_plans_memory(self._db, user_id, message)
+        plan_directive = _build_plan_directive(memory_block)
+
+        system_prompt = self._get_confirmation_prompt() + plan_directive
         messages = [Message(role=MessageRole.SYSTEM, content=system_prompt)]
         for h in history[-MAX_CONTEXT_MESSAGES:]:
             role = MessageRole.USER if h["role"] == "user" else MessageRole.ASSISTANT
@@ -466,7 +507,10 @@ class IntelligentScreeningServiceV2:
         await self._emit_progress(progress_callback, "phase_determined", phase="planning", message="正在生成筛选执行计划")
 
         tool_summary = self._build_tool_summary(self._result_openai_tools)
-        system_prompt = self._get_planning_prompt(tool_summary)
+        # 召回交易计划/偏好记忆
+        memory_block = await _recall_user_plans_memory(self._db, user_id, message)
+        plan_directive = _build_plan_directive(memory_block)
+        system_prompt = self._get_planning_prompt(tool_summary) + plan_directive
 
         messages = [Message(role=MessageRole.SYSTEM, content=system_prompt)]
         for h in history[-MAX_CONTEXT_MESSAGES:]:
@@ -512,7 +556,10 @@ class IntelligentScreeningServiceV2:
         # 先检查是否有已批准的计划可以直接执行
         locked_plan = self._extract_locked_execution_plan(history) if intent.intent == IntentType.APPROVE else None
 
-        system_prompt = self._get_execution_prompt(intent, history)
+        # 召回交易计划/偏好记忆
+        memory_block = await _recall_user_plans_memory(self._db, user_id, message)
+        plan_directive = _build_plan_directive(memory_block)
+        system_prompt = self._get_execution_prompt(intent, history) + plan_directive
         messages = [Message(role=MessageRole.SYSTEM, content=system_prompt)]
         for h in history[-MAX_CONTEXT_MESSAGES:]:
             role = MessageRole.USER if h["role"] == "user" else MessageRole.ASSISTANT

@@ -10,6 +10,7 @@ Phase 1 目标：
 """
 
 import logging
+import hashlib
 import json
 import re
 import uuid
@@ -758,10 +759,14 @@ class AgentWorkshopService:
             raise ValueError(f"规格 {version.spec_id} 不存在")
         spec = AgentSpec(**spec_doc)
 
-        # 将之前 active 的版本归档
+        # 将之前 active 的版本归档，并从运行时配置中禁用旧发布版本
         await self._db[VERSION_COLLECTION].update_many(
             {"spec_id": spec.spec_id, "status": AgentVersionStatus.ACTIVE.value},
             {"$set": {"status": AgentVersionStatus.ARCHIVED.value, "updated_at": now_tz().isoformat()}},
+        )
+        await self._db.agent_configs.update_many(
+            {"metadata.source": "agent_workshop", "metadata.spec_id": spec.spec_id},
+            {"$set": {"enabled": False, "runtime_status": "archived", "version_status": AgentVersionStatus.ARCHIVED.value, "updated_at": now_tz().isoformat()}},
         )
 
         # 更新版本状态为 active
@@ -843,8 +848,13 @@ class AgentWorkshopService:
         spec.current_version_id = previous_version["version_id"]
         await self._save_spec(spec)
 
-        # 重新注册到 agent_configs
+        # 重新注册到 agent_configs：禁用同规格旧运行时配置，只启用回滚后的 active 版本
+        await self._db.agent_configs.update_many(
+            {"metadata.source": "agent_workshop", "metadata.spec_id": spec_id},
+            {"$set": {"enabled": False, "runtime_status": "archived", "version_status": AgentVersionStatus.ARCHIVED.value, "updated_at": now_tz().isoformat()}},
+        )
         prev_version = AgentVersion(**previous_version)
+        prev_version.status = AgentVersionStatus.ACTIVE
         await self._ensure_runtime_agent_config(prev_version, spec)
 
         logger.info(
@@ -1164,7 +1174,8 @@ class AgentWorkshopService:
         else:
             result = await asyncio.to_thread(agent, inputs)
 
-        output_field = str(version.agent_metadata.get("output_field") or "analysis_result")
+        output_field_raw = str(version.agent_metadata.get("output_field") or "analysis_result")
+        output_field = self._normalize_output_field_name(output_field_raw, "analysis")  # 🔥 规范化字段名
         debug_prompt = (result.get("__debug_prompt__") if isinstance(result, dict) else None) or {}
         llm_final_response = debug_prompt.get("llm_final_response") if isinstance(debug_prompt, dict) else None
         if isinstance(llm_final_response, str) and llm_final_response.strip():
@@ -1786,17 +1797,39 @@ class AgentWorkshopService:
                 return value.strip()
         return ""
 
+    def _normalize_runtime_field_name(self, raw: Any, fallback: str = "field") -> str:
+        """将工坊 IO 字段名规范为运行时稳定字段名。"""
+        text = str(raw or "").strip()
+        if not text:
+            text = fallback
+
+        normalized = re.sub(r"[^a-zA-Z0-9_]+", "_", text).strip("_").lower()
+        normalized = re.sub(r"_+", "_", normalized)
+
+        if not normalized or not re.match(r"^[a-z][a-z0-9_]*$", normalized):
+            digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+            normalized = f"{fallback}_{digest}"
+
+        return normalized[:80]
+
+    def _normalize_output_field_name(self, raw: Any, fallback: str = "analysis") -> str:
+        normalized = self._normalize_runtime_field_name(raw, fallback)
+        if not normalized.endswith(("_report", "_result", "_summary", "_decision", "_plan", "_opinion", "_assessment")):
+            normalized = f"{normalized}_report"
+        return normalized[:80]
+
     def _get_io_field_name(self, value: Any, fallback: str = "") -> str:
         if isinstance(value, AgentSpecIOField):
-            return self._pick_str(value.name, fallback)
+            return self._normalize_runtime_field_name(self._pick_str(value.name, fallback), fallback or "field")
         if isinstance(value, dict):
-            return self._pick_str(
+            raw_name = self._pick_str(
                 value.get("name"),
                 self._pick_str(value.get("field_name"), self._pick_str(value.get("key"), fallback)),
             )
+            return self._normalize_runtime_field_name(raw_name, fallback or "field")
         if isinstance(value, str):
-            return value.strip()
-        return self._pick_str(value, fallback)
+            return self._normalize_runtime_field_name(value.strip(), fallback or "field")
+        return self._normalize_runtime_field_name(self._pick_str(value, fallback), fallback or "field")
 
     def _get_io_field_type(self, value: Any, fallback: str = "string") -> str:
         if isinstance(value, AgentSpecIOField):
@@ -1834,6 +1867,15 @@ class AgentWorkshopService:
                 names.append(name)
         return self._dedupe(names)
 
+    def _list_output_field_names(self, values: List[Any]) -> List[str]:
+        names: List[str] = []
+        for item in values or []:
+            raw_name = self._get_io_field_name(item)
+            name = self._normalize_output_field_name(raw_name, "analysis")
+            if name:
+                names.append(name)
+        return self._dedupe(names)
+
     def _list_io_field_labels(self, values: List[Any]) -> List[str]:
         labels: List[str] = []
         for item in values or []:
@@ -1865,7 +1907,10 @@ class AgentWorkshopService:
             if isinstance(item, (str, int, float)):
                 text = str(item).strip()
                 if text:
-                    normalized.append(text)
+                    normalized.append(
+                        AgentSpecIOField(name=self._normalize_output_field_name(text, "analysis"), type="string", description=text)
+                        if key == "outputs" else text
+                    )
                 continue
             if not isinstance(item, dict):
                 continue
@@ -1874,17 +1919,22 @@ class AgentWorkshopService:
             if not has_structured_shape:
                 text = self._extract_object_text(item)
                 if text:
-                    normalized.append(text)
+                    normalized.append(
+                        AgentSpecIOField(name=self._normalize_output_field_name(text, "analysis"), type="string", description=text)
+                        if key == "outputs" else text
+                    )
                 continue
 
             name = self._get_io_field_name(item)
             description = self._pick_str(item.get("description"), self._pick_str(item.get("summary"), ""))
+            if key == "outputs":
+                name = self._normalize_output_field_name(name or description, "analysis")
             if not name and not description:
                 raise ValueError(f"{stage} {key}[{index}] 缺少 name/description")
 
             normalized.append(
                 AgentSpecIOField(
-                    name=name or description[:80],
+                    name=name or self._normalize_runtime_field_name(description[:80], "field"),
                     type=self._get_io_field_type(item),
                     required=self._get_io_field_required(item),
                     description=description,
@@ -1957,7 +2007,7 @@ class AgentWorkshopService:
             if method and method.lower() not in conversation_text:
                 return True
 
-        for output_label in self._list_io_field_names(spec.outputs):
+        for output_label in self._list_output_field_names(spec.outputs):
             normalized_output = output_label.lower()
             if normalized_output and normalized_output not in conversation_text and any(token in normalized_output for token in ("估值", "score", "评级", "结论")):
                 return True
@@ -2454,7 +2504,7 @@ class AgentWorkshopService:
     def _build_gap_analysis_spec_brief(self, spec: AgentSpec) -> str:
         summary = {
             "goal": spec.primary_goal,
-            "required_outputs": self._list_io_field_names(spec.outputs)[:4],
+            "required_outputs": self._list_output_field_names(spec.outputs)[:4],
             "hard_constraints": self._dedupe([*spec.constraints, *spec.non_goals])[:6],
             "success_criteria": spec.success_criteria[:4],
             "preferred_methods": spec.preferred_methods[:4],
@@ -2567,7 +2617,9 @@ class AgentWorkshopService:
             "3. 如果用户后续补充了限制、目标、输出、方法、样本或验收标准，必须覆盖到结果里。",
             "3.1 任何用户明确给出的数字型要求都必须原样保留，禁止擅自泛化。例如用户说“三种估值方式”，结果里不能偷换成“多种估值方法”。",
             "3.2 任何用户明确给出的交付方式都必须落到结构化字段里。例如用户说“根据这三种估值方式分别返回数据，并进行解读”，你就必须在 responsibilities、outputs、success_criteria 或 constraints 中明确体现“分别返回三种方法结果”和“对三种结果做解读”，不能只保留一个模糊的总目标。",
-            "3.2.1 responsibilities 只写职责动作和交付要求，不写具体工具名、函数名或内部实现名。不要写“调用 get_peer_comparison 获取同业数据”，应改写成“获取同业估值数据，用于相对估值基准”。",
+            "3.2.1 outputs 必须使用结构化对象数组，且 name 必须是稳定英文蛇形字段名，只能包含小写字母、数字和下划线，例如 valuation_report、industry_comparison_report、financial_health_report；不要把中文描述、长句、冒号、逗号写进 name，中文说明写到 description。",
+            "3.2.2 output 字段名建议以 _report、_result、_summary、_assessment、_decision、_plan 或 _opinion 结尾，便于进入动态 Schema、阶段聚合和最终报告。",
+            "3.2.3 responsibilities 只写职责动作和交付要求，不写具体工具名、函数名或内部实现名。不要写“调用 get_peer_comparison 获取同业数据”，应改写成“获取同业估值数据，用于相对估值基准”。",
             "3.3 任何用户明确给出的非目标和禁止项都必须保留在 non_goals 或 constraints 中。例如“不直接给买卖建议”不能在整理过程中弱化或遗漏。",
             "3.4 primary_goal 可以概括，但不得吞掉关键限定词；如果用户要求里含有具体数量、方法清单、返回方式、解释要求，这些必须出现在 responsibilities / outputs / success_criteria / preferred_methods 中，而不是只剩一个抽象摘要。",
             "3.5 你必须显式产出 capability_requirements，把这个 Agent 真正依赖的能力项拆出来。能力项不是工具名清单，而是执行链路里的能力原语，例如数据获取、确定性计算、结果编排、输出格式控制、适用性/失效条件判定等。",
@@ -2612,8 +2664,8 @@ class AgentWorkshopService:
             '  "primary_goal": "",',
             '  "responsibilities": [],',
             '  "non_goals": [],',
-            '  "inputs": [],',
-            '  "outputs": [],',
+            '  "inputs": [{"name": "ticker", "type": "string", "description": "股票代码"}],',
+            '  "outputs": [{"name": "valuation_report", "type": "string", "description": "估值分析报告，包含估值区间、关键假设和失效条件"}],',
             '  "success_criteria": [],',
             '  "constraints": [],',
             '  "preferred_methods": [],',
@@ -2808,6 +2860,7 @@ class AgentWorkshopService:
             "你不能脱离业务背景机械列工具，而要先理解这个客户真正要交付什么结果、当前系统已有何种能力、还缺哪一层能力，最后再决定工具方案。",
             "重点不是重复描述问题，而是回答 4 件事：缺什么工具、为什么缺、没补齐前如何降级、下一步先实现什么。",
             "draft_tools 里的 capability_description 必须是一句直接给界面展示的功能说明，用中文写清这个能力具体做什么、产出什么结果、补的是哪一段执行链路。不要写空话，也不要只重复 tool_id。",
+            "draft_tools.inputs/outputs 也必须使用结构化对象数组；其中 name 必须是稳定英文蛇形字段名，只能包含小写字母、数字和下划线，中文说明写 description。",
             "只输出 JSON，不要输出 Markdown 或额外解释。",
             design_context,
             "JSON 结构必须如下：",
@@ -2824,8 +2877,8 @@ class AgentWorkshopService:
                         "solves_gaps": [],
                         "fallback_before_ready": "",
                         "dependencies": [],
-                        "inputs": [{"name": "", "type": "", "required": True, "description": ""}],
-                        "outputs": [{"name": "", "type": "", "description": ""}],
+                        "inputs": [{"name": "ticker", "type": "string", "required": True, "description": "股票代码"}],
+                        "outputs": [{"name": "valuation_data", "type": "object", "description": "工具返回的估值计算数据"}],
                         "acceptance_criteria": [],
                     }
                 ],
@@ -3302,7 +3355,7 @@ class AgentWorkshopService:
             "name": spec.name,
             "domain": spec.domain,
             "primary_goal": spec.primary_goal,
-            "outputs": self._list_io_field_names(spec.outputs)[:5],
+            "outputs": self._list_output_field_names(spec.outputs)[:5],
             "non_goals": spec.non_goals[:3],
         }
 
@@ -3683,14 +3736,14 @@ class AgentWorkshopService:
         return filtered[:8]
 
     def _build_output_schema(self, spec: AgentSpec) -> Dict[str, Any]:
-        output_names = self._list_io_field_names(spec.outputs)
+        output_names = self._list_output_field_names(spec.outputs)
         properties = {
             output_name: {
                 "type": self._get_io_field_type(item),
                 "description": self._get_io_field_label(item) or output_name,
             }
             for item in spec.outputs
-            for output_name in [self._get_io_field_name(item)]
+            for output_name in [self._normalize_output_field_name(self._get_io_field_name(item), "analysis")]
             if output_name
         }
         return {
@@ -3736,7 +3789,12 @@ class AgentWorkshopService:
         success_criteria = "\n".join(f"- {item}" for item in spec.success_criteria)
         non_goals = "\n".join(f"- {item}" for item in spec.non_goals)
         constraint_lines = [f"- {item}" for item in spec.constraints]
-        output_fields = "\n".join(f"- {item}" for item in self._list_io_field_labels(spec.outputs))
+        output_fields = "\n".join(
+            f"- {field_name}: {self._get_io_field_label(item) or field_name}"
+            for item in spec.outputs
+            for field_name in [self._normalize_output_field_name(self._get_io_field_name(item), "analysis")]
+            if field_name
+        )
         tools_text = "\n".join(f"- {item}" for item in required_tools) if required_tools else "- 当前版本尚未绑定工具"
         gap_existing_tools = self._dedupe((gap_report.existing_tools if gap_report else []) or [])[:8]
         gap_existing_tool_lookup: Dict[str, str] = {}
@@ -3863,11 +3921,16 @@ class AgentWorkshopService:
         return result
 
     async def _ensure_runtime_agent_config(self, version: AgentVersion, spec: AgentSpec) -> None:
-        output_names = self._list_io_field_names(spec.outputs)
-        output_field = version.agent_metadata.get("output_field") or (output_names[0] if output_names else "analysis_result")
+        output_names = self._list_output_field_names(spec.outputs)
+        output_field_raw = version.agent_metadata.get("output_field") or (output_names[0] if output_names else "analysis_report")
+        output_field = self._normalize_output_field_name(output_field_raw, "analysis")  # 🔥 规范化字段名
         category = version.agent_metadata.get("category")
         if hasattr(category, "value"):
             category = category.value
+        workflow_stage = version.agent_metadata.get("workflow_stage") or ("analyst" if category == "analyst" else "research")
+        license_tier = version.agent_metadata.get("license_tier") or "free"
+        if hasattr(license_tier, "value"):
+            license_tier = license_tier.value
 
         await self._db.agent_configs.update_one(
             {"agent_id": version.version_id},
@@ -3878,7 +3941,14 @@ class AgentWorkshopService:
                     "description": version.agent_metadata.get("description") or spec.primary_goal or spec.name,
                     "category": category or "analyst",
                     "version": version.agent_metadata.get("version") or f"0.{version.version}.0",
-                    "enabled": True,
+                    "license_tier": license_tier,
+                    "inputs": [item.model_dump() if hasattr(item, "model_dump") else item for item in (version.agent_metadata.get("inputs") or [])],
+                    "outputs": [item.model_dump() if hasattr(item, "model_dump") else item for item in (version.agent_metadata.get("outputs") or [])],
+                    "tags": version.agent_metadata.get("tags") or [spec.domain],
+                    "enabled": version.status == AgentVersionStatus.ACTIVE,
+                    "runtime_status": "active" if version.status == AgentVersionStatus.ACTIVE else "disabled",
+                    "version_status": version.status.value,
+                    "published": version.status == AgentVersionStatus.ACTIVE,
                     "config": {
                         "max_iterations": int(version.agent_metadata.get("max_tool_calls") or 4),
                         "timeout": 180,
@@ -3889,11 +3959,16 @@ class AgentWorkshopService:
                     "default_tools": version.required_tools,
                     "required_tools": version.required_tools,
                     "output_field": output_field,
+                    "workflow_stage": workflow_stage,
                     "metadata": {
                         "source": "agent_workshop",
                         "spec_id": version.spec_id,
                         "version_id": version.version_id,
                         "template_id": version.prompt_template_ref.get("template_id"),
+                        "icon": version.agent_metadata.get("icon") or "🤖",
+                        "color": version.agent_metadata.get("color") or "#67C23A",
+                        "workflow_stage": workflow_stage,
+                        "callable_surfaces": ["workflow", "agent_workshop"],
                     },
                     "updated_at": now_tz(),
                 },
@@ -3916,13 +3991,14 @@ class AgentWorkshopService:
         ]
         outputs = [
             AgentOutput(
-                name=self._get_io_field_name(output_item, "summary"),
+                name=self._normalize_output_field_name(self._get_io_field_name(output_item, "analysis"), "analysis"),
                 type=self._get_io_field_type(output_item),
                 description=self._get_io_field_label(output_item) or self._get_io_field_name(output_item, "summary"),
             )
             for output_item in (spec.outputs or ["summary"])
         ]
-        output_names = self._list_io_field_names(spec.outputs)
+        output_names = self._list_output_field_names(spec.outputs)
+        workflow_stage = "analyst" if category == AgentCategory.ANALYST else "research"
         metadata = AgentMetadata(
             id=version_id,
             name=spec.name,
@@ -3940,10 +4016,11 @@ class AgentWorkshopService:
             icon="🧪",
             color="#0f8a7d",
             requires_tools=bool(required_tools),
-            output_field=(output_names[0] if output_names else "analysis_result"),
+            output_field=(output_names[0] if output_names else "analysis_report"),
             report_label=f"【{spec.name}】",
             node_name=spec.name,
             execution_order=50,
+            workflow_stage=workflow_stage,
         )
         return metadata.model_dump(mode="json")
 
@@ -3963,7 +4040,7 @@ class AgentWorkshopService:
                         case_id="generic_case_1",
                         title="基础能力验证",
                         input_payload={"user_request": spec.primary_goal or spec.name},
-                        expected_outputs=self._list_io_field_names(spec.outputs)[:4],
+                        expected_outputs=self._list_output_field_names(spec.outputs)[:4],
                         required_keywords=spec.preferred_methods[:2],
                         forbidden_keywords=spec.non_goals[:2],
                     )
@@ -4044,13 +4121,13 @@ class AgentWorkshopService:
 
             if has_runtime_output:
                 output_coverage_detail = self._analyze_expected_outputs_runtime(
-                    case.expected_outputs or self._list_io_field_names(spec.outputs),
+                    case.expected_outputs or self._list_output_field_names(spec.outputs),
                     provided.get("output_payload"),
                     output_text,
                 )
             else:
                 schema_props = set((version.output_schema.get("properties") or {}).keys())
-                expected_outputs = case.expected_outputs or self._list_io_field_names(spec.outputs)
+                expected_outputs = case.expected_outputs or self._list_output_field_names(spec.outputs)
                 matched_outputs = [item for item in expected_outputs if item in schema_props]
                 output_coverage_detail = {
                     "matched": matched_outputs,
@@ -4226,7 +4303,7 @@ class AgentWorkshopService:
         output_text = self._normalize_output_text(runtime_result.get("output_text"), runtime_result.get("output_payload"))
         payload = runtime_result.get("output_payload") if isinstance(runtime_result.get("output_payload"), dict) else {}
         has_runtime_output = bool(output_text.strip())
-        output_names = self._list_io_field_names(spec.outputs)
+        output_names = self._list_output_field_names(spec.outputs)
         output_evidence = self._analyze_expected_outputs_runtime(output_names, payload, output_text)
         explain_evidence = self._analyze_keywords(["假设", "风险", "失效", "不确定性"], output_text, has_runtime_output)
         method_evidence = self._analyze_keywords(spec.preferred_methods[:3], output_text, has_runtime_output) if spec.preferred_methods else {
@@ -4828,10 +4905,10 @@ class AgentWorkshopService:
         has_runtime_output: bool,
     ) -> float:
         if has_runtime_output:
-            return self._score_expected_outputs_runtime(case.expected_outputs or self._list_io_field_names(spec.outputs), output_payload, output_text)
+            return self._score_expected_outputs_runtime(case.expected_outputs or self._list_output_field_names(spec.outputs), output_payload, output_text)
 
         schema_props = set((version.output_schema.get("properties") or {}).keys())
-        expected = case.expected_outputs or self._list_io_field_names(spec.outputs)
+        expected = case.expected_outputs or self._list_output_field_names(spec.outputs)
         if not expected:
             return 0.6
         matched = sum(1 for item in expected if item in schema_props)
@@ -5017,7 +5094,7 @@ class AgentWorkshopService:
     ) -> Dict[str, float]:
         role_alignment = 0.9 if spec.primary_goal and len(spec.responsibilities) >= 3 else 0.55
         user_goal_alignment = 0.88 if len(spec.success_criteria) >= 3 else 0.6
-        output_completeness = min(1.0, len(version.output_schema.get("properties", {})) / max(1, len(self._list_io_field_names(spec.outputs)) or 1))
+        output_completeness = min(1.0, len(version.output_schema.get("properties", {})) / max(1, len(self._list_output_field_names(spec.outputs)) or 1))
         explainability = 0.9 if version.prompt_template_ref.get("template_id") else 0.62
 
         if not version.required_tools:

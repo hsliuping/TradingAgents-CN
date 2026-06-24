@@ -182,8 +182,8 @@ async def update_gateway_config(
                 from core.gateway.router import gateway_router
                 if platform == "qq":
                     await gateway_router.stop_ws_client()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
 
         await log_operation(
             user_id=str(current_user.get("user_id", current_user.get("id", ""))),
@@ -651,8 +651,8 @@ async def add_llm_provider(
                 details={"provider_id": str(provider_id), "name": request.name},
                 success=True,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[config] 操作失败: {e}")
 
         _reload_runtime_bridge(f"add_llm_provider:{request.name}")
 
@@ -711,8 +711,8 @@ async def update_llm_provider(
                     details={"provider_id": provider_id, "changed_keys": list(request.model_dump().keys())},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
 
             _reload_runtime_bridge(f"update_llm_provider:{provider_id}")
 
@@ -755,8 +755,8 @@ async def delete_llm_provider(
                     details={"provider_id": provider_id},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {
                 "success": True,
                 "message": "厂家删除成功",
@@ -798,8 +798,8 @@ async def toggle_llm_provider(
                     details={"provider_id": provider_id, "is_active": bool(is_active)},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {
                 "success": True,
                 "message": f"厂家已{'启用' if is_active else '禁用'}",
@@ -864,8 +864,8 @@ async def migrate_env_to_providers(
                 },
                 success=bool(result.get("success", False)),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[config] 操作失败: {e}")
 
         return {
             "success": result["success"],
@@ -903,8 +903,8 @@ async def init_aggregator_providers(
                 },
                 success=bool(result.get("success", False)),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[config] 操作失败: {e}")
 
         return {
             "success": result["success"],
@@ -1024,8 +1024,8 @@ async def add_llm_config(
                     details={"provider": llm_config.provider, "model_name": llm_config.model_name},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": "大模型配置更新成功", "model_name": llm_config.model_name}
         else:
             logger.error(f"❌ 大模型配置保存失败")
@@ -1131,8 +1131,8 @@ async def add_data_source_config(
                     details={"name": ds_config.name, "market_categories": market_categories},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": "数据源配置添加成功", "name": ds_config.name}
         else:
             raise HTTPException(
@@ -1183,8 +1183,8 @@ async def add_database_config(
                     details={"name": db_config.name},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": "数据库配置添加成功", "name": db_config.name}
         else:
             raise HTTPException(
@@ -1439,8 +1439,8 @@ async def delete_llm_config(
                     details={"provider": provider, "model_name": model_name},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": "大模型配置删除成功"}
         else:
             logger.warning(f"⚠️ 未找到大模型配置 - {provider}/{model_name}")
@@ -1477,8 +1477,8 @@ async def set_default_llm(
                     details={"name": request.name},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": "默认大模型设置成功", "default_llm": request.name}
         else:
             raise HTTPException(
@@ -1911,8 +1911,8 @@ async def add_market_category(
                     details={"id": str(getattr(category, 'id', ''))},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": "市场分类添加成功", "id": category.id}
         else:
             raise HTTPException(
@@ -1949,8 +1949,8 @@ async def update_market_category(
                     details={"category_id": category_id, "changed_keys": list(request.keys())},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": "市场分类更新成功"}
         else:
             raise HTTPException(
@@ -1986,8 +1986,8 @@ async def delete_market_category(
                     details={"category_id": category_id},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": "市场分类删除成功"}
         else:
             raise HTTPException(
@@ -2041,8 +2041,8 @@ async def add_datasource_to_category(
                     details={"data_source_name": request.data_source_name, "category_id": request.category_id},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": "数据源添加到分类成功"}
         else:
             raise HTTPException(
@@ -2079,8 +2079,8 @@ async def remove_datasource_from_category(
                     details={"data_source_name": data_source_name, "category_id": category_id},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": "数据源从分类中移除成功"}
         else:
             raise HTTPException(
@@ -2118,8 +2118,8 @@ async def update_datasource_grouping(
                     details={"data_source_name": data_source_name, "category_id": category_id, "changed_keys": list(request.keys())},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": "数据源分组关系更新成功"}
         else:
             raise HTTPException(
@@ -2156,8 +2156,8 @@ async def update_category_datasource_order(
                     details={"category_id": category_id, "data_sources": request.data_sources},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": "数据源排序更新成功"}
         else:
             raise HTTPException(
@@ -2238,13 +2238,13 @@ async def update_system_settings(
                     details={"changed_keys": list(settings.keys())},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             # 失效缓存
             try:
                 config_provider.invalidate()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             # 若更新包含运行时关键键，立即重载桥接的环境变量以生效
             try:
                 reload_keys = {
@@ -2286,8 +2286,8 @@ async def update_system_settings(
                 success=False,
                 error_message=str(e),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[config] 操作失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"更新系统设置失败: {str(e)}"
@@ -2311,8 +2311,8 @@ async def export_config(
                 details={"size": len(str(config_data))},
                 success=True,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[config] 操作失败: {e}")
         return {
             "message": "配置导出成功",
             "data": config_data,
@@ -2344,8 +2344,8 @@ async def import_config(
                     details={"keys": list(config_data.keys())[:10]},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": "配置导入成功"}
         else:
             raise HTTPException(
@@ -2379,8 +2379,8 @@ async def migrate_legacy_config(
                     details={},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": "传统配置迁移成功"}
         else:
             raise HTTPException(
@@ -2417,8 +2417,8 @@ async def set_default_llm(
                     details={"name": request.name},
                     success=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[config] 操作失败: {e}")
             return {"message": f"默认大模型已设置为: {request.name}"}
         else:
             raise HTTPException(

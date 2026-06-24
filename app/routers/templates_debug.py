@@ -1,3 +1,21 @@
+"""
+模板调试路由 (v1.0)
+
+⚠️⚠️⚠️ DEPRECATED - v1 调试系统 ⚠️⚠️⚠️
+====================================
+此路由是 v1.0 调试系统的一部分，已废弃。
+- 废弃日期: 2026-06-23
+- 移除计划: v4.0 版本（与 v1 Agent 同步移除）
+
+请使用新的调试系统：
+- v2 Agent 调试：通过 Agent 工坊测试功能
+- 工作流调试：通过 WorkflowEngine 的 debug_mode 参数
+
+注意：此路由仍有前端页面 TemplateDebug.vue 使用，
+移除前需要先迁移前端页面或废弃相关功能。
+====================================
+"""
+
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
@@ -9,6 +27,16 @@ from app.core.database import get_mongo_db
 from app.core.permissions import require_pro
 from app.services.license_service import LicenseInfo
 from tradingagents.agents.utils.agent_context import AgentContext
+
+# 🔥 发出废弃警告
+import warnings
+warnings.warn(
+    "templates_debug router is DEPRECATED (v1.0 debug system). "
+    "Please use Agent Workshop test feature or WorkflowEngine debug_mode instead. "
+    "This router will be removed in v4.0 along with v1 Agents.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 router = APIRouter(prefix="/api/templates/debug", tags=["templates-debug"])
 

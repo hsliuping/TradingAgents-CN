@@ -312,8 +312,36 @@ class UserService:
             logger.error(f"❌ 重置密码失败: {e}")
             return False
     
-    async def create_admin_user(self, username: str = "admin", password: str = "admin123", email: str = "admin@tradingagents.cn") -> Optional[User]:
-        """创建管理员用户"""
+    async def create_admin_user(
+        self,
+        username: str = "admin",
+        password: Optional[str] = None,  # 🔥 改为可选，必须通过环境变量或参数指定
+        email: str = "admin@tradingagents.cn"
+    ) -> Optional[User]:
+        """创建管理员用户
+        
+        ⚠️ 安全警告：不再使用硬编码默认密码。
+        必须通过以下方式之一指定密码：
+        1. 通过参数 password 指定
+        2. 通过环境变量 ADMIN_DEFAULT_PASSWORD 指定
+        
+        如果两者都未指定，将抛出 ValueError。
+        """
+        # 🔥 从环境变量或参数获取密码，不再使用硬编码默认值
+        if password is None:
+            import os
+            password = os.getenv("ADMIN_DEFAULT_PASSWORD")
+        
+        if password is None:
+            raise ValueError(
+                "创建管理员用户必须指定密码。请设置环境变量 ADMIN_DEFAULT_PASSWORD "
+                "或在调用 create_admin_user() 时传入 password 参数。"
+            )
+        
+        # 检查密码强度（至少 8 位）
+        if len(password) < 8:
+            logger.warning(f"⚠️ 管理员密码长度不足（{len(password)} 位），建议至少 8 位")
+        
         try:
             # 检查是否已存在管理员
             existing_admin = self.users_collection.find_one({"username": username})

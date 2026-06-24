@@ -23,6 +23,302 @@ from app.routers.auth_db import get_current_user
 
 logger = logging.getLogger(__name__)
 
+
+def _to_dict(obj) -> dict:
+    """统一将 Pydantic 模型或普通对象转为 dict。"""
+    if obj is None:
+        return {}
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if hasattr(obj, "dict"):
+        return obj.dict()
+    if isinstance(obj, dict):
+        return obj
+    return {}
+
+
+def _format_stock_rules(stock_selection: dict) -> str:
+    """格式化选股规则为人类可读文本。"""
+    if not stock_selection:
+        return ""
+    parts = []
+    must_have = stock_selection.get("must_have") or []
+    exclude = stock_selection.get("exclude") or []
+    bonus = stock_selection.get("bonus") or []
+    
+    if must_have:
+        parts.append(f"  - 必备条件: {[item.get('description', str(item)) for item in must_have if item]}")
+    if exclude:
+        parts.append(f"  - 排除条件: {[item.get('description', str(item)) for item in exclude if item]}")
+    if bonus:
+        parts.append(f"  - 加分条件: {[item.get('description', str(item)) for item in bonus if item]}")
+    return "\n".join(parts)
+
+
+def _format_timing_rules(timing: dict) -> str:
+    """格式化择时规则为人类可读文本。"""
+    if not timing:
+        return ""
+    entry_signals = timing.get("entry_signals") or []
+    if not entry_signals:
+        return ""
+    signals = [item.get("description", str(item)) for item in entry_signals if item]
+    if signals:
+        return f"  - 入场信号: {signals}"
+    return ""
+
+
+def _format_position_rules(position: dict) -> str:
+    """格式化仓位规则为人类可读文本。"""
+    if not position:
+        return ""
+    parts = []
+    max_per_stock = position.get("max_per_stock")
+    max_holdings = position.get("max_holdings")
+    min_holdings = position.get("min_holdings")
+    
+    if max_per_stock is not None:
+        parts.append(f"  - 单只股票仓位上限: {max_per_stock * 100}%")
+    if max_holdings is not None:
+        parts.append(f"  - 最大持股数: {max_holdings}只")
+    if min_holdings is not None:
+        parts.append(f"  - 最小持股数: {min_holdings}只")
+    return "\n".join(parts)
+
+
+def _format_risk_rules(risk_mgmt: dict) -> str:
+    """格式化风险规则为人类可读文本。"""
+    if not risk_mgmt:
+        return ""
+    parts = []
+    stop_loss = risk_mgmt.get("stop_loss") or {}
+    take_profit = risk_mgmt.get("take_profit") or {}
+    
+    sl_type = stop_loss.get("type", "")
+    if sl_type == "percentage":
+        pct = stop_loss.get("percentage")
+        if pct:
+            parts.append(f"  - 止损: {pct * 100}%")
+    elif sl_type:
+        parts.append(f"  - 止损: {stop_loss}")
+    
+    tp_type = take_profit.get("type", "")
+    if tp_type == "percentage":
+        pct = take_profit.get("percentage")
+        if pct:
+            parts.append(f"  - 止盈: {pct * 100}%")
+    elif tp_type == "trailing":
+        pullback = take_profit.get("trailing_pullback_pct")
+        activation = take_profit.get("activation_profit_pct")
+        if pullback and activation:
+            parts.append(f"  - 止盈: 移动止盈，浮盈{activation * 100}%后激活，回撤{pullback * 100}%触发")
+    elif tp_type:
+        parts.append(f"  - 止盈: {take_profit}")
+    
+    return "\n".join(parts)
+
+
+def _format_discipline_rules(discipline: dict) -> str:
+    """格式化纪律规则为人类可读文本。"""
+    if not discipline:
+        return ""
+    parts = []
+    must_do = discipline.get("must_do") or []
+    must_not = discipline.get("must_not") or []
+    
+    if must_do:
+        parts.append(f"  - 必须做: {[str(item) for item in must_do if item]}")
+    if must_not:
+        parts.append(f"  - 严禁做: {[str(item) for item in must_not if item]}")
+    return "\n".join(parts)
+
+
+async def _sync_trading_system_to_user_preference(
+    user_id: str,
+    system,
+    source: str = "trading_system_activated",
+) -> None:
+    """将激活/发布的交易计划核心要素同步到 mem0 user_preference scope。
+
+    完整同步交易计划的所有核心要素，让智能助手真正理解用户的交易体系。
+    包括：基本信息、选股规则、择时规则、仓位管理、风险控制、交易纪律。
+    """
+    if not user_id or system is None:
+        return
+    try:
+        name = getattr(system, "name", "") or ""
+        style = getattr(system, "style", "") or getattr(system, "trading_style", "") or ""
+        risk_profile = getattr(system, "risk_profile", "") or ""
+        version = str(getattr(system, "version", "") or "")
+        description = getattr(system, "description", "") or ""
+        
+        # 获取完整交易计划数据
+        stock_selection = _to_dict(getattr(system, "stock_selection", None))
+        timing = _to_dict(getattr(system, "timing", None))
+        position = _to_dict(getattr(system, "position", None))
+        risk_mgmt = _to_dict(getattr(system, "risk_management", None))
+        discipline = _to_dict(getattr(system, "discipline", None))
+
+        # 构建标题
+        title = f"用户当前交易计划：{name}"
+        if version:
+            title += f"（v{version}）"
+        
+        parts = [title]
+        
+        # 基本描述
+        if description:
+            parts.append(f"交易理念: {description[:100]}...")
+        
+        # 交易风格和风险偏好
+        style_map = {
+            "short_term": "短线（持仓1-5天）",
+            "medium_term": "中线（持仓1-3月）",
+            "long_term": "长线（持仓3月+）"
+        }
+        risk_map = {
+            "conservative": "保守（低风险，低回撤）",
+            "balanced": "中性（平衡风险收益）",
+            "aggressive": "激进（高风险，高收益）"
+        }
+        if style:
+            parts.append(f"交易风格: {style_map.get(style, style)}")
+        if risk_profile:
+            parts.append(f"风险偏好: {risk_map.get(risk_profile, risk_profile)}")
+        
+        # 选股规则
+        stock_rules_text = _format_stock_rules(stock_selection)
+        if stock_rules_text:
+            parts.append("【选股规则】")
+            parts.append(stock_rules_text)
+        
+        # 择时规则
+        timing_text = _format_timing_rules(timing)
+        if timing_text:
+            parts.append("【择时规则】")
+            parts.append(timing_text)
+        
+        # 仓位规则
+        position_text = _format_position_rules(position)
+        if position_text:
+            parts.append("【仓位管理】")
+            parts.append(position_text)
+        
+        # 风险规则
+        risk_text = _format_risk_rules(risk_mgmt)
+        if risk_text:
+            parts.append("【风险控制】")
+            parts.append(risk_text)
+        
+        # 纪律规则
+        discipline_text = _format_discipline_rules(discipline)
+        if discipline_text:
+            parts.append("【交易纪律】")
+            parts.append(discipline_text)
+
+        content = "\n".join(parts).strip()
+
+        from app.core.database import get_mongo_db
+        from core.memory.service import get_memory_service
+        from core.memory.models import MemoryScope
+
+        system_id_str = str(getattr(system, "id", "") or "")
+
+        db = get_mongo_db()
+        svc = get_memory_service(db)
+
+        # 仅清理"同一 system_id"的旧记忆，保证每个交易计划在 user_preference
+        # 中始终只有最新一条；不影响其他计划（用户可能有中长期/短期/机动多个计划并存）
+        # 也不影响用户通过 remember_this 主动登记的偏好。
+        if system_id_str:
+            try:
+                old_items = await svc.get_all(
+                    user_id=user_id,
+                    scopes=[MemoryScope.USER_PREFERENCE],
+                    metadata_filters={
+                        "category": "trading_discipline",
+                        "system_id": system_id_str,
+                    },
+                    limit=50,
+                )
+                removed = 0
+                for item in (old_items.get("items") or []):
+                    meta = getattr(item, "metadata", None) or {}
+                    src = (meta.get("source") or "").strip()
+                    # 仅清理由交易计划同步进来的，不动用户 remember_this 写入的
+                    if src.startswith("trading_system_"):
+                        try:
+                            if await svc.delete_memory(item.id):
+                                removed += 1
+                        except Exception:
+                            pass
+                if removed:
+                    logger.info(
+                        f"[trading_system] 清理了 system={system_id_str} 的 {removed} 条旧记忆 user={user_id}"
+                    )
+            except Exception as e:
+                logger.debug(f"[trading_system] 清理旧记忆失败（已忽略）: {e}")
+
+        result = await svc.store(
+            [{"role": "user", "content": content}],
+            user_id=user_id,
+            agent_id="assistant",
+            scope=MemoryScope.USER_PREFERENCE,
+            metadata={
+                "source": source,
+                "category": "trading_discipline",
+                "system_id": system_id_str,
+                "system_name": name,
+                "system_version": version,
+            },
+            infer=False,
+        )
+        if result.success:
+            logger.info(
+                f"[trading_system] 已同步到 user_preference: user={user_id} source={source} system={system_id_str}"
+            )
+        else:
+            logger.warning(
+                f"[trading_system] 同步 user_preference 失败: {result.error}"
+            )
+    except Exception as e:
+        logger.warning(f"[trading_system] 同步 user_preference 异常（已忽略）: {e}")
+
+
+async def _purge_trading_system_memory(user_id: str, system_id: str) -> None:
+    """删除交易计划时，清理 mem0 中由该计划产生的 user_preference 记忆。"""
+    if not user_id or not system_id:
+        return
+    try:
+        from app.core.database import get_mongo_db
+        from core.memory.service import get_memory_service
+        from core.memory.models import MemoryScope
+
+        sid = str(system_id)
+        db = get_mongo_db()
+        svc = get_memory_service(db)
+        old_items = await svc.get_all(
+            user_id=user_id,
+            scopes=[MemoryScope.USER_PREFERENCE],
+            metadata_filters={"category": "trading_discipline", "system_id": sid},
+            limit=50,
+        )
+        removed = 0
+        for item in (old_items.get("items") or []):
+            meta = getattr(item, "metadata", None) or {}
+            if (meta.get("source") or "").strip().startswith("trading_system_"):
+                try:
+                    if await svc.delete_memory(item.id):
+                        removed += 1
+                except Exception:
+                    pass
+        if removed:
+            logger.info(
+                f"[trading_system] 已随计划删除清理 {removed} 条记忆 user={user_id} system={sid}"
+            )
+    except Exception as e:
+        logger.debug(f"[trading_system] 删除计划时清理记忆失败（已忽略）: {e}")
+
 router = APIRouter(
     prefix="/api/v1/trading-systems",
     tags=["trading-systems"]
@@ -217,6 +513,8 @@ async def publish_trading_system(
         system = service.publish_system(system_id, user_id, publish_info, update_data)
         if not system:
             return error(message="交易计划不存在")
+        # 同步到 mem0 user_preference（异步、降级安全）
+        await _sync_trading_system_to_user_preference(user_id, system, source="trading_system_published")
         return ok(
             data={"system": serialize_system(service, system)},
             message=f"交易计划已发布，版本号：v{system.version}"
@@ -238,6 +536,8 @@ async def delete_trading_system(
         success = service.delete_system(system_id, user_id)
         if not success:
             return error(message="交易计划不存在或删除失败")
+        # 同步清理 mem0 中由该计划产生的 user_preference 记忆
+        await _purge_trading_system_memory(user_id, system_id)
         return ok(message="交易计划删除成功")
     except Exception as e:
         logger.error(f"删除交易计划失败: {e}")
@@ -253,9 +553,19 @@ async def activate_trading_system(
     """激活交易计划"""
     try:
         user_id = current_user["id"]
-        system = service.activate_system(system_id, user_id)
+        # 先检查系统是否存在
+        system = service.get_system(system_id, user_id)
         if not system:
             return error(message="交易计划不存在")
+        # 检查是否为草稿状态
+        if system.status != "published":
+            return error(message="草稿状态的交易计划不能设为默认，请先发布")
+        # 执行激活
+        system = service.activate_system(system_id, user_id)
+        if not system:
+            return error(message="激活失败")
+        # 同步到 mem0 user_preference（异步、降级安全）
+        await _sync_trading_system_to_user_preference(user_id, system)
         return ok(data={"system": serialize_system(service, system)}, message="交易计划激活成功")
     except Exception as e:
         logger.error(f"激活交易计划失败: {e}")
@@ -501,4 +811,23 @@ async def get_trading_system_version(
     except Exception as e:
         logger.error(f"获取版本详情失败: {e}")
         return error(message=f"获取版本详情失败: {str(e)}")
+
+
+@router.post("/{system_id}/versions/{version_id}/restore", response_model=ApiResponse)
+async def restore_version_as_draft(
+    system_id: str,
+    version_id: str,
+    current_user: dict = Depends(get_current_user),
+    service: TradingSystemService = Depends(get_trading_system_service)
+):
+    """将指定版本恢复为草稿"""
+    try:
+        user_id = current_user["id"]
+        system = service.restore_version_as_draft(system_id, version_id, user_id)
+        if not system:
+            return error(message="版本不存在或恢复失败")
+        return ok(data={"system": serialize_system(service, system)}, message="版本已恢复为草稿")
+    except Exception as e:
+        logger.error(f"恢复版本为草稿失败: {e}")
+        return error(message=f"恢复版本为草稿失败: {str(e)}")
 

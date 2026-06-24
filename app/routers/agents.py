@@ -87,7 +87,6 @@ router = APIRouter(
 )
 
 # ==================== 辅助函数 ====================
-
 async def _get_tool_overrides(db: AsyncIOMotorDatabase) -> Dict[str, Dict[str, Any]]:
     """获取所有工具的覆盖配置"""
     cursor = db.tool_configs.find({})
@@ -95,6 +94,58 @@ async def _get_tool_overrides(db: AsyncIOMotorDatabase) -> Dict[str, Dict[str, A
     async for doc in cursor:
         overrides[doc["tool_id"]] = doc
     return overrides
+
+
+def _db_agent_to_metadata(doc: Dict[str, Any], is_available: bool = True) -> Dict[str, Any]:
+    """将 agent_configs 中的工坊 Agent 转为前端 Agent 元数据。"""
+    metadata = doc.get("metadata") or {}
+    config = doc.get("config") or {}
+    default_tools = doc.get("default_tools") or doc.get("required_tools") or doc.get("tools") or []
+    return {
+        "id": doc.get("agent_id"),
+        "name": doc.get("name") or doc.get("agent_name") or doc.get("agent_id"),
+        "description": doc.get("description") or "Agent 工坊生成的智能体",
+        "category": doc.get("category") or "analyst",
+        "version": doc.get("version") or "1.0.0",
+        "license_tier": doc.get("license_tier") or metadata.get("license_tier") or "free",
+        "maintenance_status": "maintained",
+        "inputs": doc.get("inputs") or [],
+        "outputs": doc.get("outputs") or [],
+        "icon": metadata.get("icon") or "🤖",
+        "color": metadata.get("color") or "#67C23A",
+        "tags": doc.get("tags") or ["agent_workshop"],
+        "tools": default_tools,
+        "default_tools": default_tools,
+        "max_tool_calls": doc.get("max_tool_calls") or config.get("max_iterations") or 4,
+        "output_field": doc.get("output_field") or metadata.get("output_field"),
+        "workflow_stage": doc.get("workflow_stage") or metadata.get("workflow_stage"),
+        "is_available": is_available,
+        "is_implemented": True,
+        "source": "agent_workshop",
+    }
+
+
+async def _list_workshop_agents(db: AsyncIOMotorDatabase, is_available: bool = True) -> List[Dict[str, Any]]:
+    """读取已发布到运行时配置的 Agent 工坊智能体。"""
+    cursor = db.agent_configs.find({
+        "enabled": True,
+        "metadata.source": "agent_workshop",
+        "version_status": "active",
+        "runtime_status": "active",
+    })
+    agents = []
+    async for doc in cursor:
+        metadata = _db_agent_to_metadata(doc, is_available=is_available)
+        if metadata.get("id"):
+            agents.append(metadata)
+    return agents
+
+
+def _merge_agents(registry_agents: List[Dict[str, Any]], db_agents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    merged: Dict[str, Dict[str, Any]] = {agent["id"]: agent for agent in registry_agents if agent.get("id")}
+    for agent in db_agents:
+        merged[agent["id"]] = agent
+    return list(merged.values())
 
 async def get_user_license_tier(
     user: dict = Depends(get_current_user),
@@ -142,12 +193,12 @@ async def get_user_license_tier(
 # ==================== API 端点 ====================
 
 @router.get("")
-async def list_all_agents():
-    """获取所有智能体"""
+async def list_all_agents(db: AsyncIOMotorDatabase = Depends(get_mongo_db)):
+    """获取所有智能体（包含 Agent 工坊发布的动态 Agent）"""
     try:
         from core.api import AgentAPI
         api = AgentAPI()
-        agents = api.list_all()
+        agents = _merge_agents(api.list_all(), await _list_workshop_agents(db))
         return ok(agents)
     except Exception as e:
         logger.error(f"获取智能体列表失败: {e}")
@@ -156,13 +207,14 @@ async def list_all_agents():
 
 @router.get("/available")
 async def list_available_agents(
-    user_tier: str = Depends(get_user_license_tier)
+    user_tier: str = Depends(get_user_license_tier),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
-    """获取当前许可证可用的智能体"""
+    """获取当前许可证可用的智能体（包含 Agent 工坊发布的动态 Agent）"""
     try:
         from core.api import AgentAPI
         api = AgentAPI()
-        agents = api.list_available_for_tier(user_tier)
+        agents = _merge_agents(api.list_available_for_tier(user_tier), await _list_workshop_agents(db))
         return ok(agents)
     except Exception as e:
         logger.error(f"获取可用智能体失败: {e}")
@@ -178,12 +230,18 @@ async def update_agent_tools(
     """更新 Agent 的工具配置"""
     # 先从 BUILTIN_AGENTS 查找
     agent = BUILTIN_AGENTS.get(agent_id)
+    db_agent_doc = None
 
     # 如果不在 BUILTIN_AGENTS 中，从注册表查找
     if not agent:
         from core.agents import get_registry
         agent_registry = get_registry()
         agent = agent_registry.get_metadata(agent_id)
+
+        if not agent:
+            db_agent_doc = await db.agent_configs.find_one({"agent_id": agent_id, "enabled": {"$ne": False}})
+            if db_agent_doc:
+                agent = type("DynamicAgentMetadata", (), _db_agent_to_metadata(db_agent_doc))()
 
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent {agent_id} 不存在")
@@ -251,6 +309,11 @@ async def get_agent_tools(
         agent = agent_registry.get_metadata(agent_id)
 
         if not agent:
+            db_agent_doc = await db.agent_configs.find_one({"agent_id": agent_id, "enabled": {"$ne": False}})
+            if db_agent_doc:
+                agent = type("DynamicAgentMetadata", (), _db_agent_to_metadata(db_agent_doc))()
+
+        if not agent:
             raise HTTPException(status_code=404, detail=f"Agent {agent_id} 不存在")
 
     # 优先从 tool_agent_bindings 集合获取工具配置（v2.0 架构）
@@ -309,25 +372,40 @@ async def get_agent_tools(
 
 
 @router.get("/categories")
-async def get_categories():
-    """获取所有类别"""
+async def get_categories(db: AsyncIOMotorDatabase = Depends(get_mongo_db)):
+    """获取所有类别（包含 Agent 工坊发布的动态 Agent）"""
     try:
         from core.api import AgentAPI
         api = AgentAPI()
         categories = api.get_categories()
-        return ok(categories)
+        category_map = {item["id"]: item for item in categories}
+
+        workshop_agents = await _list_workshop_agents(db)
+        for agent in workshop_agents:
+            category_id = agent.get("category") or "analyst"
+            if category_id in category_map:
+                category_map[category_id]["count"] += 1
+            else:
+                category_map[category_id] = {
+                    "id": category_id,
+                    "name": category_id,
+                    "count": 1,
+                }
+
+        return ok(list(category_map.values()))
     except Exception as e:
         logger.error(f"获取类别失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/category/{category}")
-async def list_by_category(category: str):
-    """按类别获取智能体"""
+async def list_by_category(category: str, db: AsyncIOMotorDatabase = Depends(get_mongo_db)):
+    """按类别获取智能体（包含 Agent 工坊发布的动态 Agent）"""
     try:
         from core.api import AgentAPI
         api = AgentAPI()
-        agents = api.list_by_category(category)
+        workshop_agents = [agent for agent in await _list_workshop_agents(db) if agent.get("category") == category]
+        agents = _merge_agents(api.list_by_category(category), workshop_agents)
         return ok(agents)
     except Exception as e:
         logger.error(f"按类别获取智能体失败: {e}")
@@ -335,12 +413,17 @@ async def list_by_category(category: str):
 
 
 @router.get("/{agent_id}")
-async def get_agent(agent_id: str):
-    """获取智能体详情"""
+async def get_agent(agent_id: str, db: AsyncIOMotorDatabase = Depends(get_mongo_db)):
+    """获取智能体详情（包含 Agent 工坊发布的动态 Agent）"""
     try:
         from core.api import AgentAPI
         api = AgentAPI()
         agent = api.get(agent_id)
+
+        if agent is None:
+            doc = await db.agent_configs.find_one({"agent_id": agent_id, "enabled": {"$ne": False}})
+            if doc:
+                agent = _db_agent_to_metadata(doc)
 
         if agent is None:
             raise HTTPException(status_code=404, detail="智能体不存在")

@@ -73,6 +73,81 @@ from tradingagents.dataflows.providers.us.optimized import get_optimized_us_data
 logger = logging.getLogger("app.services.trade_review")
 
 
+async def _store_trade_pattern_memory(
+    db,
+    user_id: str,
+    trade_info,
+    ai_review,
+    review_id: str,
+) -> None:
+    """复盘完成后，将关键纪律要点写入 mem0 trade_pattern scope。
+
+    只要 AI 复盘有产出（summary/strengths/weaknesses/suggestions/plan_deviation 任一非空），
+    就写入 trade_pattern 记忆，便于后续在智能助手中作为「交易纪律」展示与召回。
+    """
+    if not user_id:
+        logger.warning(f"[trade_review] trade_pattern 跳过：user_id 为空, review_id={review_id}")
+        return
+    if ai_review is None:
+        logger.warning(f"[trade_review] trade_pattern 跳过：ai_review 为空, review_id={review_id}")
+        return
+    try:
+        weaknesses = list(getattr(ai_review, "weaknesses", []) or [])
+        strengths = list(getattr(ai_review, "strengths", []) or [])
+        suggestions = list(getattr(ai_review, "suggestions", []) or [])
+        plan_deviation = (getattr(ai_review, "plan_deviation", "") or "").strip()
+        summary = (getattr(ai_review, "summary", "") or "").strip()
+
+        # 没有任何 AI 复盘产出则跳过
+        if not weaknesses and not suggestions and not plan_deviation and not summary and not strengths:
+            logger.info(f"[trade_review] trade_pattern 跳过：AI 复盘内容为空, review_id={review_id}")
+            return
+
+        code = getattr(trade_info, "code", "") or ""
+        name = getattr(trade_info, "name", "") or ""
+        first_buy = getattr(trade_info, "first_buy_date", "") or ""
+
+        parts = [f"交易复盘 {name}({code}) {first_buy}: {summary}" if summary else f"交易复盘 {name}({code})"]
+        if strengths:
+            parts.append("做得好: " + "；".join(str(s).strip() for s in strengths[:3] if s))
+        if weaknesses:
+            parts.append("不足: " + "；".join(str(w).strip() for w in weaknesses[:3] if w))
+        if plan_deviation:
+            parts.append("计划偏差: " + plan_deviation[:200])
+        if suggestions:
+            parts.append("改进建议: " + "；".join(str(s).strip() for s in suggestions[:3] if s))
+
+        content = "\n".join(parts).strip()
+        if not content:
+            logger.info(f"[trade_review] trade_pattern 跳过：content 为空, review_id={review_id}")
+            return
+
+        from core.memory.service import get_memory_service
+        from core.memory.models import MemoryScope
+        svc = get_memory_service(db)
+        result = await svc.store(
+            [{"role": "assistant", "content": content}],
+            user_id=user_id,
+            agent_id="trade_review",
+            scope=MemoryScope.TRADE_PATTERN,
+            metadata={
+                "review_id": review_id,
+                "symbol": str(code).upper(),
+                "name": name,
+                "source": "trade_review_completed",
+            },
+            infer=False,  # 已经是结构化要点
+        )
+        if result.success:
+            logger.info(
+                f"[trade_review] 已写入 trade_pattern 记忆: user={user_id} symbol={code} review={review_id}"
+            )
+        else:
+            logger.warning(f"[trade_review] trade_pattern 写入失败: {result.error}")
+    except Exception as e:
+        logger.warning(f"[trade_review] trade_pattern 写入异常: {e}", exc_info=True)
+
+
 class TradeReviewService:
     """交易复盘服务"""
 
@@ -310,6 +385,9 @@ class TradeReviewService:
 
             logger.info(f"✅ 交易复盘完成: {review_id}, 股票: {trade_info.code}")
 
+            # 注意：trade_pattern 记忆只在用户主动「保存到案例库」时写入
+            # 复盘完成时不自动写入，避免记忆库被低价值复盘填满
+
             # 🔍 详细日志：检查返回的 TradeReviewResponse
             response = TradeReviewResponse(
                 review_id=review_id,
@@ -472,6 +550,9 @@ class TradeReviewService:
             )
 
             logger.info(f"✅ [交易复盘v2.0] 复盘完成: {review_id}, 任务ID: {task.task_id}")
+
+            # 注意：trade_pattern 记忆只在用户主动「保存到案例库」时写入
+            # 复盘完成时不自动写入，避免记忆库被低价值复盘填满
 
             # 11. 返回响应
             return TradeReviewResponse(
@@ -1886,6 +1967,27 @@ class TradeReviewService:
         # 即使 modified_count == 0（字段值相同），也认为成功
         if result.matched_count > 0:
             logger.info(f"✅ [保存案例] 成功: user_id={user_id}, review_id={review_id}, modified={result.modified_count > 0}")
+            
+            # 保存案例后，写入交易纪律记忆（mem0 trade_pattern scope）
+            try:
+                # 重新读取完整报告（含 ai_review、trade_info）
+                full_report = await self.db[self.trade_reviews_collection].find_one({
+                    "user_id": user_id,
+                    "review_id": review_id
+                })
+                if full_report:
+                    ai_review_dict = full_report.get("ai_review") or {}
+                    trade_info_dict = full_report.get("trade_info") or {}
+                    # 构造轻量对象供 _store_trade_pattern_memory 使用
+                    ai_review_obj = AITradeReview(**ai_review_dict) if ai_review_dict else None
+                    trade_info_obj = TradeInfo(**trade_info_dict) if trade_info_dict else None
+                    if ai_review_obj and trade_info_obj:
+                        await _store_trade_pattern_memory(
+                            self.db, user_id, trade_info_obj, ai_review_obj, review_id,
+                        )
+            except Exception as mem_err:
+                logger.warning(f"[保存案例] 写入 trade_pattern 记忆失败（已忽略）: {mem_err}", exc_info=True)
+            
             return True
         else:
             logger.warning(f"⚠️ [保存案例] 更新失败: user_id={user_id}, review_id={review_id}")

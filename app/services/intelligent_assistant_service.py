@@ -129,6 +129,87 @@ def _should_force_tool_retry(user_message: str) -> bool:
     return (has_personal and has_domain) or (has_domain and has_query) or (has_market and has_recency)
 
 
+# =============================================================================
+# 用户记忆元工具：让 LLM 在用户表达"请记住""请帮我记下"等意图时主动登记
+# 设计文档参考：docs/design/v3.0/unified-memory-layer-mem0.md §15.5 P0-1
+# =============================================================================
+
+REMEMBER_THIS_TOOL_NAME = "remember_this"
+
+
+def _build_remember_this_tool_def() -> Dict[str, Any]:
+    """构造 `remember_this` 的 OpenAI Function Calling 定义"""
+    return {
+        "type": "function",
+        "function": {
+            "name": REMEMBER_THIS_TOOL_NAME,
+            "description": (
+                "当用户明确表达「请记住」「请帮我记下」「我希望以后也按这个偏好」等意图时调用此工具，"
+                "把这条偏好/事实写入用户长期记忆（user_preference）。"
+                "调用后请告知用户『已记下』，然后继续完成原本的任务。"
+                "禁止滥用：仅当用户**明确表达需要记忆**时调用；用户随口提到的偏好不要写入。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "需要记住的事实文本（一句话，包含足够上下文，如『用户偏好分红率>3%的高股息蓝筹股，回避高市盈率成长股』）",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "偏好类型：investment_style（投资风格）/ risk_tolerance（风险偏好）/ industry_preference（行业偏好）/ trading_discipline（交易纪律）/ other",
+                        "enum": [
+                            "investment_style",
+                            "risk_tolerance",
+                            "industry_preference",
+                            "trading_discipline",
+                            "other",
+                        ],
+                    },
+                },
+                "required": ["content"],
+            },
+        },
+    }
+
+
+def _make_remember_this_callable(db, user_id: str):
+    """生成绑定了 db + user_id 的 remember_this 异步实现。"""
+
+    async def _remember_this(content: str, category: str = "other") -> str:
+        if not user_id:
+            return "记忆失败：当前会话未关联用户。"
+        text = (content or "").strip()
+        if not text:
+            return "记忆失败：内容为空。"
+        try:
+            from core.memory.service import get_memory_service
+            from core.memory.models import MemoryScope
+            svc = get_memory_service(db)
+            result = await svc.store(
+                [{"role": "user", "content": text}],
+                user_id=user_id,
+                agent_id="assistant",
+                scope=MemoryScope.USER_PREFERENCE,
+                metadata={
+                    "source": "user_explicit_remember",
+                    "category": (category or "other").strip().lower(),
+                },
+                infer=False,  # 用户已明确表达，不需要 LLM 再提取
+            )
+            if not result.success:
+                logger.warning(f"[智能助手] remember_this 写入失败: {result.error}")
+                return f"记忆失败：{result.error or '记忆层不可用'}"
+            logger.info(f"[智能助手] remember_this 已写入: user={user_id} category={category}")
+            return f"已记下：{text[:60]}{'...' if len(text) > 60 else ''}。下次对话会自动参考此偏好。"
+        except Exception as e:
+            logger.warning(f"[智能助手] remember_this 异常: {e}")
+            return f"记忆失败：{e}"
+
+    return _remember_this
+
+
 def _should_use_recent_search(user_message: str) -> bool:
     """判断是否属于应优先走近期搜索的事实确认类问题。"""
     text = (user_message or "").strip().lower()
@@ -301,6 +382,21 @@ def _get_system_prompt(
 - 如果用户明确要求切换到别的主题，请先调用主题切换工具，再继续后续操作
 """
 
+    # 当存在记忆时，附加「多交易计划处理规则」指引；构造在 f-string 之外以避免 Py3.10 的反斜杠限制
+    if memory_block:
+        memory_directive = (
+            "【记忆使用要求】回复中如确实参考了上述【历史记忆】中的某条偏好或纪律，"
+            "请在相关句末用『（来自您之前的记忆）』自然标注，让用户感知到记忆在起作用；如未参考则不要硬加。\n"
+            "【多交易计划处理规则】如果【历史记忆】中出现多个『用户当前交易计划：xxx（v数字）』条目"
+            "（例如『中长期价值』『短期波段』『机动备用』），说明用户同时维护多套并存策略。处理规则：\n"
+            "1) 优先看用户本轮消息是否明确指定（如『按我的中长期计划』『短线视角』等），如有则用对应计划的纪律。\n"
+            "2) 如未明确指定，且问题与某计划风格强相关（如『值得长期持有吗』倾向中长期；『今天追涨XX』倾向短线），按相关性选择并在回答中说明『按您的xxx计划』。\n"
+            "3) 如风格不明显，先反问用户『您想按哪个计划来分析？(中长期/短期/机动)』，再继续；不要默认按第一个或自行混用多个计划纪律。\n"
+            "4) 严禁把不同计划的止损/仓位规则混在一起给建议。\n\n"
+        )
+    else:
+        memory_directive = ""
+
     return f"""你是 TradingAgents-CN 平台的**{assistant_name}（操作员）**，同时具备投资教练能力。你既能帮用户执行操作（触发分析、查报告、管理定时任务、管理自选股），也能教用户投资分析方法。
 
 {personalization_block}
@@ -329,6 +425,12 @@ def _get_system_prompt(
 - 只承诺你确实能通过工具完成的事情，不要编造不存在的功能
 - 如果用户的需求超出上述能力范围，直接坦诚告知「目前不支持该功能」，不要虚构解决方案
 - 回答问题时只使用工具返回的真实数据，不要凭空捏造数字或结论
+
+【长期记忆管理】
+- 当用户**明确表达**「请记住」「请帮我记下」「我希望你以后也按这个偏好」等意图时，调用 `remember_this` 工具将其偏好写入长期记忆
+- 仅在用户**明确表达**时调用，不要把对话中随口提到的偏好都写入
+- 写入后告诉用户「已记下」并继续完成原任务
+- 上方"【你对该用户的了解】"或类似段落中的记忆均来自该机制，如果用户问「你都记住了我什么」，可基于这些内容如实回答
 
 【领域边界（重要）】
 - 你的核心服务范围是：股票/基金/宏观经济/行业研究、交易计划、持仓分析、交易复盘、金融数据解读。
@@ -401,8 +503,7 @@ def _get_system_prompt(
 
 {knowledge_snippets}
 {_build_profile_block(user_profile)}
-{memory_block}
-【合规原则】
+{memory_block}{memory_directive}【合规原则】
 - 你是助理+教练，不是投顾：**教分析方法，不给"买入/卖出/持有"的直接建议**
 - 所有观点必须有工具返回的数据支撑，不做主观臆断
 - 不提供目标价、仓位建议、具体买卖时点
@@ -862,6 +963,7 @@ class IntelligentAssistantService:
         db,
         preferred_models: Optional[Dict[str, Any]] = None,
         prefer_reasoning_model: bool = False,
+        user_id: str = "",
     ):
         self._db = db
         self._llm_client: Optional[UnifiedLLMClient] = None
@@ -870,6 +972,7 @@ class IntelligentAssistantService:
         self._preferred_model = _get_preferred_assistant_model(preferred_models)
         self._preferred_model_config_id = _get_preferred_assistant_config_id(preferred_models)
         self._prefer_reasoning_model = prefer_reasoning_model
+        self._user_id = user_id  # 用于构造带 user_id 闭包的元工具（如 remember_this）
 
     async def _ensure_client(self) -> bool:
         """确保 LLM 客户端和工具已加载"""
@@ -899,11 +1002,19 @@ class IntelligentAssistantService:
 
         self._tool_functions = {}
         for tool in all_metadata:
-            # 无参数工具同样需要注入，否则会出现“工具已加载但无法执行”
+            # 无参数工具同样需要注入，否则会出现"工具已加载但无法执行"
             if tool.fc_enabled:
                 func = registry.get_function(tool.id)
                 if func:
                     self._tool_functions[tool.id] = func
+
+        # 注入 `remember_this` 元工具：允许用户主动让助手记住偏好
+        # 参考：docs/design/v3.0/unified-memory-layer-mem0.md §15.5 P0-1
+        if self._user_id:
+            self._openai_tools.append(_build_remember_this_tool_def())
+            self._tool_functions[REMEMBER_THIS_TOOL_NAME] = _make_remember_this_callable(
+                self._db, self._user_id,
+            )
 
         self._llm_client.inject_tools(self._tool_functions)
         logger.info(f"[智能助手] 已加载 {len(self._openai_tools)} 个工具")
@@ -1083,6 +1194,7 @@ class IntelligentAssistantService:
             else:
                 logger.info("[智能助手] 未调用任何工具（纯文本回复）")
             logger.info("[智能助手] 回复内容(前200字): %s", reply[:200])
+
             return {
                 "reply": reply,
                 "tools_used": tools_used,
@@ -2786,29 +2898,25 @@ async def _load_assistant_settings(db, user_id: str) -> Optional[dict]:
 # ------------------------------------------------------------------
 
 async def _recall_memory_block(db, user_id: str, user_message: str) -> str:
-    """从 mem0 召回与当前用户/问题相关的记忆，格式化为可注入 prompt 的文本。"""
+    """从 mem0 召回与当前用户/问题相关的记忆，格式化为可注入 prompt 的文本。
+
+    召回范围：
+    - user_preference: 用户偏好（通过 remember_this 显式登记）
+    - trade_pattern:   交易纪律记忆（复盘完成后写入）
+    """
     try:
         from core.memory.service import get_memory_service
         svc = get_memory_service(db)
         return await svc.recall_formatted(
             query=user_message,
             user_id=user_id,
-            scopes=["user_preference"],
-            limit=4,
-            max_chars=600,
+            scopes=["user_preference", "trade_pattern"],
+            limit=6,
+            max_chars=800,
         )
     except Exception as e:
         logger.debug("[mem0] 记忆召回失败（已忽略）: %s", e)
         return ""
-
-
-async def _store_conversation_memory(
-    db, user_id: str, thread_id: str,
-    user_msg: str, assistant_msg: str,
-    tools_used: List[str],
-) -> None:
-    """助手对话只保留在线程消息集合，不再写入 mem0 长期记忆。"""
-    return
 
 
 async def chat_with_assistant(
@@ -2902,6 +3010,7 @@ async def chat_with_assistant(
             deep_model=deep_model,
             deep_model_config_id=deep_model_config_id,
         ),
+        user_id=user_id or "",
     )
     result = await service.chat(
         user_message,
@@ -2926,14 +3035,8 @@ async def chat_with_assistant(
         except Exception as e:
             logger.warning("[智能助手] 保存会话失败: %s", e)
 
-        # mem0 记忆存储（异步后台，不阻塞响应）
-        asyncio.create_task(
-            _store_conversation_memory(
-                db, user_id, conversation_id or "",
-                user_message, result["reply"],
-                result.get("tools_used") or [],
-            )
-        )
+        # 注：mem0 conversation scope 已废弃，对话不再自动写入长期记忆。
+        # 用户偏好通过 `remember_this` 元工具显式登记，详见 mem0 §15.5 P0-1。
     if user_id:
         thread = await get_or_create_assistant_thread(db, user_id, conversation_id)
         result["conversation_id"] = thread["thread_id"]
@@ -3022,6 +3125,7 @@ async def stream_chat_with_assistant(
             deep_model=deep_model,
             deep_model_config_id=deep_model_config_id,
         ),
+        user_id=user_id or "",
     )
 
     collected_reply = ""
@@ -3066,14 +3170,8 @@ async def stream_chat_with_assistant(
         except Exception as e:
             logger.warning("[智能助手·流式] 保存会话失败: %s", e)
 
-        # mem0 记忆存储（异步后台）
-        asyncio.create_task(
-            _store_conversation_memory(
-                db, user_id, conversation_id or "",
-                user_message, collected_reply,
-                collected_tools,
-            )
-        )
+        # 注：mem0 conversation scope 已废弃，对话不再自动写入长期记忆。
+        # 用户偏好通过 `remember_this` 元工具显式登记，详见 mem0 §15.5 P0-1。
 
     conv_id = conversation_id
     if user_id:

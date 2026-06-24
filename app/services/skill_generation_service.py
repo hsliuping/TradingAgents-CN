@@ -1119,16 +1119,40 @@ test_input: {spec.test_input}
     async def update_skill_status(
         self, skill_id: str, new_status: str
     ) -> bool:
-        """更新 Skill 状态（active / disabled / archived）"""
+        """更新 Skill 状态（active / disabled / archived），并同步运行时 ToolRegistry。"""
+        skill_doc = await self._db[SKILL_COLLECTION].find_one({"tool_id": skill_id})
+        if not skill_doc:
+            return False
+
         result = await self._db[SKILL_COLLECTION].update_one(
             {"tool_id": skill_id},
             {"$set": {"status": new_status, "updated_at": datetime.utcnow().isoformat()}},
         )
+
+        try:
+            from core.tools.registry import get_tool_registry
+            registry = get_tool_registry()
+            if new_status == "active":
+                from core.tools.external_skill_loader import register_single_external_skill
+                skill_doc["status"] = new_status
+                register_single_external_skill(None, registry, skill_doc)
+            else:
+                registry.unregister(skill_id)
+        except Exception as e:
+            logger.warning(f"⚠️ Skill '{skill_id}' 运行时状态同步失败: {e}")
+
         return result.modified_count > 0
 
     async def delete_skill(self, skill_id: str) -> bool:
-        """删除 Skill"""
+        """删除 Skill，并清理运行时注册和工具绑定。"""
         result = await self._db[SKILL_COLLECTION].delete_one({"tool_id": skill_id})
+        if result.deleted_count:
+            await self._db.tool_agent_bindings.delete_many({"tool_id": skill_id})
+            try:
+                from core.tools.registry import get_tool_registry
+                get_tool_registry().unregister(skill_id)
+            except Exception as e:
+                logger.warning(f"⚠️ Skill '{skill_id}' 运行时注销失败: {e}")
         return result.deleted_count > 0
 
     async def test_skill(

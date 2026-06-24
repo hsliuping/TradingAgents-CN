@@ -229,6 +229,7 @@ class TradingSystemVersion(BaseModel):
     system_id: str = Field(..., description="关联的交易计划ID")
     version: str = Field(..., description="版本号，如 '1.0.0', '2.0.0'")
     improvement_summary: str = Field(default="", description="改进总结")
+    status: TradingSystemStatus = Field(default=TradingSystemStatus.PUBLISHED, description="版本状态：草稿/已发布")
     
     # 完整的系统快照
     snapshot: TradingSystem = Field(..., description="该版本的完整系统快照")

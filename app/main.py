@@ -39,7 +39,7 @@ from app.routers import notifications as notifications_router
 from app.routers import websocket_notifications as websocket_notifications_router
 from app.routers import scheduler as scheduler_router
 from app.routers import prompt_templates as prompt_templates_router
-from app.routers import templates_debug as templates_debug_router
+from app.routers import templates_debug as templates_debug_router  # ⚠️ DEPRECATED: v1 调试路由，v4.0 移除
 from app.routers import analysis_preferences as analysis_preferences_router
 from app.routers import user_template_configs as user_template_configs_router
 from app.routers import template_history as template_history_router
@@ -305,6 +305,38 @@ async def lifespan(app: FastAPI):
         logger.info("Custom tools initialization completed")
     except Exception as e:
         logger.error(f"❌ Custom tools initialization failed: {e}")
+
+    # 初始化 Skill：将 active/enabled 的 Skill 注册到 ToolRegistry，供 Agent 运行时调用
+    try:
+        from app.core.database import get_mongo_db
+        from core.tools import get_tool_registry
+        from core.tools.external_skill_loader import load_external_skills_to_registry
+        from app.routers.skills import _register_skill_to_registry
+
+        db = get_mongo_db()
+        standard_count = 0
+        async for doc in db.skills.find({"enabled": True}):
+            await _register_skill_to_registry(doc)
+            standard_count += 1
+        external_count = await load_external_skills_to_registry(db, get_tool_registry())
+        logger.info(f"✅ Skill 初始化完成，已加载 {standard_count} 个标准 Skill、{external_count} 个 AI 生成 Skill")
+
+        # 初始化工具执行日志记录器
+        from core.tools.execution_logger import get_tool_execution_logger
+        get_tool_execution_logger().set_db(db)
+        logger.info("✅ 工具执行日志记录器已初始化")
+    except Exception as e:
+        logger.error(f"❌ Skill 初始化失败: {e}", exc_info=True)
+
+    # 恢复已启用的 MCP 服务器工具到 ToolRegistry
+    # 后端重启后，MCP 工具不会自动注册，需要从 mcp_server_configs 集合恢复
+    try:
+        from app.services.mcp_service import MCPService
+        mcp_service = MCPService(db)
+        await mcp_service.restore_enabled_servers()
+        logger.info("✅ MCP 服务器工具恢复完成")
+    except Exception as e:
+        logger.error(f"❌ MCP 服务器工具恢复失败: {e}", exc_info=True)
 
     #  配置桥接：将统一配置写入环境变量，供 TradingAgents 核心库使用
     try:
@@ -1117,7 +1149,7 @@ app.include_router(internal_messages.router, tags=["internal-messages"])
 
 # 提示词模板系统路由
 app.include_router(prompt_templates_router.router, tags=["prompt-templates"])
-app.include_router(templates_debug_router.router, tags=["templates-debug"])
+app.include_router(templates_debug_router.router, tags=["templates-debug"])  # ⚠️ DEPRECATED: v1 调试路由
 app.include_router(analysis_preferences_router.router, tags=["analysis-preferences"])
 app.include_router(user_template_configs_router.router, tags=["user-template-configs"])
 app.include_router(template_history_router.router, tags=["template-history"])
@@ -1135,13 +1167,23 @@ app.include_router(scheduled_analysis_router.router, tags=["scheduled-analysis"]
 from app.routers import license as license_router
 register_router_with_log(app, license_router.router, "授权验证路由 (license)", tags=["license"])
 
-# v2.0 工作流和智能体路由
+# v2.0 工作流、智能体、工具和 Skill 路由
 from app.routers import workflows as workflows_router
 from app.routers import agents as agents_router
 from app.routers import tools as tools_router
+from app.routers import skills as skills_router
+from app.routers import skill_generation as skill_generation_router
+from app.routers import skill_gaps as skill_gaps_router
+from app.routers import skill_center as skill_center_router
+from app.routers import agent_workshop as agent_workshop_router
 register_router_with_log(app, workflows_router.router, "工作流路由 (workflows)", tags=["workflows"])
 register_router_with_log(app, agents_router.router, "智能体路由 (agents)", tags=["agents"])
 register_router_with_log(app, tools_router.router, "工具路由 (tools)", tags=["tools"])
+register_router_with_log(app, skills_router.router, "Skill 管理路由 (skills)", tags=["skills"])
+register_router_with_log(app, skill_generation_router.router, "AI Skill 工坊路由 (skill-generation)", tags=["skill-generation"])
+register_router_with_log(app, skill_gaps_router.router, "Skill 缺口路由 (skill-gaps)", tags=["skill-gaps"])
+register_router_with_log(app, skill_center_router.router, "Skill 中心聚合路由 (skill-center)", tags=["skill-center"])
+register_router_with_log(app, agent_workshop_router.router, "Agent 工坊路由 (agent-workshop)", tags=["agent-workshop"])
 
 # v2.0 个人交易计划路由
 from app.routers import trading_system as trading_system_router

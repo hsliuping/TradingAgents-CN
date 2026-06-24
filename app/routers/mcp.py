@@ -8,6 +8,7 @@ MCP 服务器管理 API
 """
 
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -293,4 +294,212 @@ async def get_audit_logs(
         logs.append(doc)
 
     return {"logs": logs, "total": total, "limit": limit, "offset": offset}
+
+
+# =============================================================================
+# 凭证保险箱 — 加密存储 MCP Server 所需的 API Key
+# =============================================================================
+
+import hashlib
+import base64
+import os
+
+
+CREDENTIALS_COLLECTION = "mcp_credentials"
+
+
+def _get_encryption_key() -> bytes:
+    """获取加密密钥（基于 JWT_SECRET 或固定 fallback）"""
+    secret = os.getenv("JWT_SECRET", "trading-agents-default-secret")
+    return hashlib.sha256(secret.encode()).digest()
+
+
+def _get_fernet() -> "Fernet":
+    """获取 Fernet 实例（AES-128-CBC + HMAC-SHA256）"""
+    from cryptography.fernet import Fernet
+    # Fernet 密钥需要 urlsafe base64 编码的 32 字节
+    key = base64.urlsafe_b64encode(_get_encryption_key())
+    return Fernet(key)
+
+
+def _encrypt_value(plain: str) -> str:
+    """加密凭证（使用 Fernet，AES-128-CBC + HMAC）
+
+    输出格式：v2:<fernet_token>
+    加 v2: 前缀便于解密时区分新旧格式。
+    """
+    f = _get_fernet()
+    token = f.encrypt(plain.encode("utf-8")).decode("ascii")
+    return f"v2:{token}"
+
+
+def _decrypt_value(cipher: str) -> str:
+    """解密凭证
+
+    支持两种格式：
+    - v2:<fernet_token>：新格式，Fernet 解密
+    - <base64>：旧格式，XOR + base64 解密（向后兼容）
+    """
+    if cipher.startswith("v2:"):
+        # 新格式：Fernet 解密
+        f = _get_fernet()
+        token = cipher[3:].encode("ascii")
+        return f.decrypt(token).decode("utf-8")
+    else:
+        # 旧格式：XOR + base64 解密（向后兼容已存的凭证）
+        key = _get_encryption_key()
+        data = base64.b64decode(cipher)
+        decrypted = bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
+        return decrypted.decode("utf-8")
+
+
+def _mask_value(value: str) -> str:
+    """遮蔽显示：只显示前4位和后4位"""
+    if len(value) <= 8:
+        return "****"
+    return value[:4] + "****" + value[-4:]
+
+
+class CredentialCreateRequest(BaseModel):
+    """创建凭证请求"""
+    name: str = Field(..., description="凭证名称，如 Tushare API Key")
+    key_name: str = Field(..., description="环境变量名或 Header 名，如 TUSHARE_TOKEN")
+    key_value: str = Field(..., description="密钥值（将被加密存储）")
+    server_id: Optional[str] = Field(None, description="关联的 MCP Server ID")
+    description: str = Field("", description="说明")
+
+
+class CredentialResponse(BaseModel):
+    """凭证响应（密钥遮蔽显示）"""
+    id: str
+    name: str
+    key_name: str
+    key_value_masked: str
+    server_id: Optional[str] = None
+    description: str
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class CredentialTestRequest(BaseModel):
+    """测试凭证请求"""
+    credential_id: str = Field(..., description="凭证 ID")
+    test_url: str = Field("", description="测试 URL（可选）")
+
+
+@router.post("/credentials", response_model=CredentialResponse)
+async def create_credential(
+    req: CredentialCreateRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """创建凭证（加密存储 API Key）"""
+    encrypted = _encrypt_value(req.key_value)
+    doc = {
+        "name": req.name,
+        "key_name": req.key_name,
+        "key_value_encrypted": encrypted,
+        "server_id": req.server_id,
+        "description": req.description,
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    result = await db[CREDENTIALS_COLLECTION].insert_one(doc)
+    doc["_id"] = str(result.inserted_id)
+
+    return CredentialResponse(
+        id=doc["_id"],
+        name=doc["name"],
+        key_name=doc["key_name"],
+        key_value_masked=_mask_value(req.key_value),
+        server_id=doc.get("server_id"),
+        description=doc.get("description", ""),
+        created_at=doc.get("created_at", ""),
+        updated_at=doc.get("updated_at", ""),
+    )
+
+
+@router.get("/credentials", response_model=List[CredentialResponse])
+async def list_credentials(
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """列出所有凭证（密钥遮蔽显示）"""
+    docs = await db[CREDENTIALS_COLLECTION].find().to_list(100)
+    result = []
+    for doc in docs:
+        doc["_id"] = str(doc["_id"])
+        # 解密后遮蔽，确保显示的是真实密钥的前后 4 位
+        try:
+            key_value = _decrypt_value(doc.get("key_value_encrypted", ""))
+            masked = _mask_value(key_value)
+        except Exception:
+            masked = "****"
+        result.append(CredentialResponse(
+            id=doc["_id"],
+            name=doc.get("name", ""),
+            key_name=doc.get("key_name", ""),
+            key_value_masked=masked,
+            server_id=doc.get("server_id"),
+            description=doc.get("description", ""),
+            created_at=doc.get("created_at", ""),
+            updated_at=doc.get("updated_at", ""),
+        ))
+    return result
+
+
+@router.delete("/credentials/{credential_id}")
+async def delete_credential(
+    credential_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """删除凭证"""
+    from bson import ObjectId
+    try:
+        await db[CREDENTIALS_COLLECTION].delete_one({"_id": ObjectId(credential_id)})
+    except Exception:
+        raise HTTPException(status_code=400, detail="无效的凭证 ID")
+    return {"message": "已删除"}
+
+
+@router.post("/credentials/{credential_id}/apply/{server_id}")
+async def apply_credential_to_server(
+    credential_id: str,
+    server_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """将凭证应用到 MCP Server（自动填入 connection.env 或 connection.headers）"""
+    from bson import ObjectId
+
+    # 获取凭证
+    cred_doc = await db[CREDENTIALS_COLLECTION].find_one({"_id": ObjectId(credential_id)})
+    if not cred_doc:
+        raise HTTPException(status_code=404, detail="凭证不存在")
+
+    # 解密
+    key_value = _decrypt_value(cred_doc["key_value_encrypted"])
+    key_name = cred_doc["key_name"]
+
+    # 获取 MCP Server
+    server_doc = await db["mcp_server_configs"].find_one({"server_id": server_id})
+    if not server_doc:
+        raise HTTPException(status_code=404, detail="MCP Server 不存在")
+
+    # 根据传输类型决定放在 env 还是 headers
+    connection = server_doc.get("connection", {})
+    transport_type = server_doc.get("transport_type", "stdio")
+
+    if transport_type == "stdio":
+        env = connection.get("env") or {}
+        env[key_name] = key_value
+        connection["env"] = env
+    else:
+        headers = connection.get("headers") or {}
+        headers[key_name] = key_value
+        connection["headers"] = headers
+
+    await db["mcp_server_configs"].update_one(
+        {"server_id": server_id},
+        {"$set": {"connection": connection, "updated_at": datetime.utcnow().isoformat()}}
+    )
+
+    return {"message": f"已将凭证 {cred_doc['name']} 应用到 MCP Server {server_id}"}
 
