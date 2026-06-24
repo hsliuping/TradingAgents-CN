@@ -91,6 +91,46 @@
       </el-button>
     </el-empty>
 
+    <!-- 凭证保险箱 -->
+    <el-card style="margin-top: 20px;">
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <span style="font-weight: 600; font-size: 16px;">凭证保险箱</span>
+            <span style="color: var(--el-text-color-secondary); font-size: 13px; margin-left: 8px;">加密存储 MCP Server 所需的 API Key</span>
+          </div>
+          <el-button type="primary" size="small" @click="showCredentialDialog">
+            <el-icon><Plus /></el-icon>
+            添加凭证
+          </el-button>
+        </div>
+      </template>
+
+      <el-table v-if="credentials.length" :data="credentials" size="small" border stripe>
+        <el-table-column prop="name" label="名称" width="180" />
+        <el-table-column prop="key_name" label="变量名 / Header" width="180" />
+        <el-table-column prop="key_value_masked" label="密钥" width="180" />
+        <el-table-column prop="server_id" label="关联 Server" width="180">
+          <template #default="{ row }">
+            <span v-if="row.server_id">{{ row.server_id }}</span>
+            <el-text v-else type="info" size="small">未关联</el-text>
+          </template>
+        </el-table-column>
+        <el-table-column prop="description" label="说明" show-overflow-tooltip />
+        <el-table-column label="操作" width="200" fixed="right">
+          <template #default="{ row }">
+            <el-button type="primary" link size="small" @click="applyCredential(row)" :disabled="!row.server_id">
+              应用到 Server
+            </el-button>
+            <el-button type="danger" link size="small" @click="deleteCredential(row)">
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-else description="暂无凭证，点击「添加凭证」存储 API Key" :image-size="60" />
+    </el-card>
+
     <!-- 工具列表对话框 -->
     <el-dialog
       v-model="toolsVisible"
@@ -433,6 +473,33 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 凭证添加对话框 -->
+    <el-dialog v-model="credDialogVisible" title="添加凭证" width="500px" destroy-on-close>
+      <el-form :model="credForm" label-width="120px">
+        <el-form-item label="凭证名称" required>
+          <el-input v-model="credForm.name" placeholder="如 Tushare API Key" />
+        </el-form-item>
+        <el-form-item label="变量名 / Header" required>
+          <el-input v-model="credForm.key_name" placeholder="如 TUSHARE_TOKEN 或 Authorization" />
+        </el-form-item>
+        <el-form-item label="密钥值" required>
+          <el-input v-model="credForm.key_value" type="password" show-password placeholder="输入 API Key" />
+        </el-form-item>
+        <el-form-item label="关联 MCP Server">
+          <el-select v-model="credForm.server_id" clearable placeholder="选择关联的 MCP Server" style="width: 100%;">
+            <el-option v-for="s in servers" :key="s.server_id" :label="s.name" :value="s.server_id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="说明">
+          <el-input v-model="credForm.description" placeholder="凭证用途说明" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="credDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="credSaving" @click="saveCredential">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -440,7 +507,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Connection, Plus, Refresh, Delete, Loading } from '@element-plus/icons-vue'
-import { mcpApi, type MCPServer, type MCPDiscoveredTool, type MCPProbeResult } from '@/api/mcp'
+import { mcpApi, type MCPServer, type MCPDiscoveredTool, type MCPProbeResult, type CredentialItem } from '@/api/mcp'
 
 const loading = ref(false)
 const servers = ref<MCPServer[]>([])
@@ -504,7 +571,69 @@ const loadData = async () => {
   try { servers.value = (await mcpApi.listServers()).servers || [] }
   catch { ElMessage.error('加载 MCP 服务器失败') }
   finally { loading.value = false }
+  loadCredentials()
 }
+
+// 凭证保险箱
+const credentials = ref<CredentialItem[]>([])
+const credDialogVisible = ref(false)
+const credSaving = ref(false)
+const credForm = ref({ name: '', key_name: '', key_value: '', server_id: '', description: '' })
+
+const loadCredentials = async () => {
+  try { credentials.value = await mcpApi.listCredentials() }
+  catch { /* ignore */ }
+}
+
+const showCredentialDialog = () => {
+  credForm.value = { name: '', key_name: '', key_value: '', server_id: '', description: '' }
+  credDialogVisible.value = true
+}
+
+const saveCredential = async () => {
+  if (!credForm.value.name || !credForm.value.key_name || !credForm.value.key_value) {
+    ElMessage.warning('请填写凭证名称、变量名和密钥值')
+    return
+  }
+  credSaving.value = true
+  try {
+    await mcpApi.createCredential({
+      name: credForm.value.name,
+      key_name: credForm.value.key_name,
+      key_value: credForm.value.key_value,
+      server_id: credForm.value.server_id || undefined,
+      description: credForm.value.description || undefined,
+    })
+    ElMessage.success('凭证已保存')
+    credDialogVisible.value = false
+    loadCredentials()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '保存凭证失败')
+  } finally {
+    credSaving.value = false
+  }
+}
+
+const applyCredential = async (cred: CredentialItem) => {
+  if (!cred.server_id) return
+  try {
+    await mcpApi.applyCredentialToServer(cred.id, cred.server_id)
+    ElMessage.success(`已将凭证 ${cred.name} 应用到 MCP Server`)
+    loadData()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '应用凭证失败')
+  }
+}
+
+const deleteCredential = async (cred: CredentialItem) => {
+  try {
+    await ElMessageBox.confirm(`确定删除凭证「${cred.name}」？`, '确认删除', { type: 'warning' })
+    await mcpApi.deleteCredential(cred.id)
+    ElMessage.success('已删除')
+    loadCredentials()
+  } catch { /* cancelled */ }
+}
+
 onMounted(loadData)
 
 const getTransportTag = (t: string) => ({ sse: '', streamable_http: 'success', stdio: 'warning' }[t] || 'info') as any

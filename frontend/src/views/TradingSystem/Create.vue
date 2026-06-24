@@ -164,7 +164,7 @@
           </div>
         </el-alert>
 
-        <el-form :model="positionConfig" label-width="120px" label-position="top">
+        <el-form label-width="120px" label-position="top">
           <el-row :gutter="20">
             <el-col :span="8">
               <el-form-item label="单只股票仓位上限">
@@ -176,12 +176,12 @@
             </el-col>
             <el-col :span="8">
               <el-form-item label="最大持股数">
-                <el-input-number v-model="positionConfig.max_holdings" :min="1" :max="50" />
+                <el-input-number v-model="maxHoldings" :min="1" :max="50" />
               </el-form-item>
             </el-col>
             <el-col :span="8">
               <el-form-item label="最小持股数">
-                <el-input-number v-model="positionConfig.min_holdings" :min="1" :max="20" />
+                <el-input-number v-model="minHoldings" :min="1" :max="20" />
               </el-form-item>
             </el-col>
           </el-row>
@@ -462,7 +462,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
@@ -556,7 +556,18 @@ const positionMaxPerStock = computed({
   }
 })
 
-const positionConfig = computed(() => formData.value.position || createDefaultPositionConfig())
+// 使用独立 ref 绑定，避免 computed 响应性问题
+const maxHoldings = ref(10)
+const minHoldings = ref(3)
+
+// 同步到 formData
+watch([maxHoldings, minHoldings], ([newMax, newMin]) => {
+  if (!formData.value.position) {
+    formData.value.position = createDefaultPositionConfig()
+  }
+  formData.value.position.max_holdings = newMax
+  formData.value.position.min_holdings = newMin
+})
 
 // 是否可以下一步
 const canNext = computed(() => {
@@ -615,6 +626,8 @@ onMounted(async () => {
         ? mergeDeep(system, system.draft_data)
         : system
       
+      const positionData = sourceData.position || createDefaultPositionConfig()
+      
       formData.value = {
         name: sourceData.name,
         description: sourceData.description || '',
@@ -622,7 +635,7 @@ onMounted(async () => {
         risk_profile: sourceData.risk_profile,
         stock_selection: sourceData.stock_selection || { must_have: [], exclude: [], bonus: [] },
         timing: sourceData.timing || { entry_signals: [] },
-        position: sourceData.position || createDefaultPositionConfig(),
+        position: positionData,
         holding: sourceData.holding || { add_conditions: [], reduce_conditions: [] },
         risk_management: sourceData.risk_management || {
           stop_loss: { type: 'percentage', percentage: 0.08 },
@@ -633,6 +646,10 @@ onMounted(async () => {
         review: sourceData.review || { checklist: [] },
         discipline: sourceData.discipline || { must_do: [], must_not: [] }
       }
+      
+      // 同步仓位配置到绑定的 ref
+      maxHoldings.value = positionData.max_holdings ?? 10
+      minHoldings.value = positionData.min_holdings ?? 3
     }
   }
 })

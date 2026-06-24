@@ -111,6 +111,27 @@ export interface AIMappingResult {
   collection_field_descriptions: Record<string, string>
 }
 
+// 凭证响应
+export interface CredentialItem {
+  id: string
+  name: string
+  key_name: string
+  key_value_masked: string
+  server_id: string | null
+  description: string
+  created_at: string
+  updated_at: string
+}
+
+// 创建凭证请求
+export interface CredentialCreateRequest {
+  name: string
+  key_name: string
+  key_value: string
+  server_id?: string
+  description?: string
+}
+
 // ==================== API 函数 ====================
 
 export const mcpApi = {
@@ -179,6 +200,23 @@ export const mcpApi = {
       tool_name: toolName,
       target_collection: targetCollection,
     }),
+
+  // 凭证保险箱
+  listCredentials: async (): Promise<CredentialItem[]> => {
+    return await request.get<CredentialItem[]>('/api/mcp/credentials') as unknown as CredentialItem[]
+  },
+
+  createCredential: async (data: CredentialCreateRequest): Promise<CredentialItem> => {
+    return await request.post<CredentialItem>('/api/mcp/credentials', data) as unknown as CredentialItem
+  },
+
+  deleteCredential: async (id: string): Promise<void> => {
+    await request.delete(`/api/mcp/credentials/${id}`)
+  },
+
+  applyCredentialToServer: async (credentialId: string, serverId: string): Promise<void> => {
+    await request.post(`/api/mcp/credentials/${credentialId}/apply/${serverId}`)
+  },
 }
 
 export default mcpApi

@@ -320,6 +320,7 @@ export interface TradingSystemVersion {
   system_id: string
   version: string
   improvement_summary: string
+  status?: TradingSystemStatus
   snapshot: TradingSystem
   created_at: string
   created_by: string
@@ -350,6 +351,15 @@ export function getTradingSystemVersions(systemId: string) {
  */
 export function getTradingSystemVersion(versionId: string) {
   return ApiClient.get<{ version: TradingSystemVersion }>(`/api/v1/trading-systems/versions/${versionId}`)
+}
+
+/**
+ * 将指定版本恢复为草稿
+ */
+export function restoreVersionAsDraft(systemId: string, versionId: string) {
+  return ApiClient.post<{ system: TradingSystem }>(
+    `/api/v1/trading-systems/${systemId}/versions/${versionId}/restore`
+  )
 }
 
 /**

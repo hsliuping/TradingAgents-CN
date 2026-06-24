@@ -258,13 +258,86 @@
         />
       </div>
     </el-card>
+
+    <!-- 偏好与纪律记忆（user_preference + trade_pattern）-->
+    <el-card shadow="never" class="preference-card">
+      <template #header>
+        <div class="preference-header">
+          <div class="preference-title">
+            <el-icon><Memo /></el-icon>
+            <span>我的偏好与纪律记忆</span>
+            <el-tag size="small" effect="plain">user_preference</el-tag>
+            <el-tag size="small" type="warning" effect="plain">trade_pattern</el-tag>
+          </div>
+          <div class="preference-actions">
+            <el-button :loading="preferenceLoading" @click="fetchPreferenceList">
+              <el-icon><Refresh /></el-icon>
+              刷新
+            </el-button>
+          </div>
+        </div>
+        <p class="preference-hint">
+          这里展示助手通过 `remember_this` 工具登记的用户偏好，以及交易复盘和投资计划同步的纪律要点。
+          可以在对话中直接说"请记住……"让助手主动记下偏好。
+        </p>
+      </template>
+
+      <div v-loading="preferenceLoading">
+        <el-empty v-if="!preferenceList.length" :image-size="100">
+          <template #description>
+            <p>暂无偏好/纪律记忆。试试在助手对话中说："请记住我偏好分红率高的蓝筹股"。</p>
+          </template>
+        </el-empty>
+
+        <div v-else class="preference-list">
+          <div
+            v-for="item in preferenceList"
+            :key="item.id"
+            class="preference-item"
+          >
+            <div class="preference-item-header">
+              <el-tag
+                :type="item.scope === 'trade_pattern' ? 'warning' : 'primary'"
+                size="small"
+                effect="plain"
+              >
+                {{ item.scope === 'trade_pattern' ? '交易纪律' : '用户偏好' }}
+              </el-tag>
+              <span class="preference-item-time">{{ formatTime(item.created_at || item.updated_at || '') }}</span>
+              <el-popconfirm
+                title="确定删除这条记忆？"
+                @confirm="handleDeletePreference(item.id)"
+              >
+                <template #reference>
+                  <el-button type="danger" text size="small">
+                    <el-icon><Delete /></el-icon>
+                  </el-button>
+                </template>
+              </el-popconfirm>
+            </div>
+            <p class="preference-item-content">{{ item.memory }}</p>
+            <div v-if="item.metadata && Object.keys(item.metadata).length" class="preference-item-meta">
+              <el-tag
+                v-for="(value, key) in normalizeMetadataTags(item.metadata)"
+                :key="key"
+                size="small"
+                effect="plain"
+                class="meta-tag"
+              >
+                {{ key }}: {{ value }}
+              </el-tag>
+            </div>
+          </div>
+        </div>
+      </div>
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Coin, Delete, Refresh, Search } from '@element-plus/icons-vue'
+import { Coin, Delete, Refresh, Search, Memo } from '@element-plus/icons-vue'
 import { memoryApi, SCOPE_COLORS, SCOPE_LABELS } from '@/api/memory'
 import type { MemoryItem, MemoryQueryParams } from '@/api/memory'
 
@@ -624,8 +697,72 @@ async function fetchAll() {
   }
 }
 
+// ============================================================================
+// 偏好与纪律记忆（user_preference + trade_pattern）
+// 参考：docs/design/v3.0/unified-memory-layer-mem0.md §15.5 P0-3
+// ============================================================================
+
+const preferenceList = ref<MemoryItem[]>([])
+const preferenceLoading = ref(false)
+
+async function fetchPreferenceList() {
+  preferenceLoading.value = true
+  try {
+    // 并行获取 user_preference + trade_pattern
+    const [prefRes, patternRes] = await Promise.all([
+      memoryApi.getList({ scope: 'user_preference', page: 1, page_size: 50 }),
+      memoryApi.getList({ scope: 'trade_pattern', page: 1, page_size: 50 }),
+    ])
+    const items: MemoryItem[] = []
+    if (prefRes?.items) {
+      items.push(...prefRes.items)
+    }
+    if (patternRes?.items) {
+      items.push(...patternRes.items)
+    }
+    // 按时间倒序
+    items.sort((a, b) => {
+      const ta = String(a.created_at || a.updated_at || '')
+      const tb = String(b.created_at || b.updated_at || '')
+      return tb.localeCompare(ta)
+    })
+    preferenceList.value = items
+  } catch (e: any) {
+    ElMessage.error(`加载偏好记忆失败：${e?.message || e}`)
+  } finally {
+    preferenceLoading.value = false
+  }
+}
+
+async function handleDeletePreference(id: string) {
+  try {
+    const ok = await memoryApi.deleteMemory(id)
+    if (ok) {
+      ElMessage.success('已删除')
+      await fetchPreferenceList()
+    } else {
+      ElMessage.error('删除失败')
+    }
+  } catch (e: any) {
+    ElMessage.error(`删除失败：${e?.message || e}`)
+  }
+}
+
+function normalizeMetadataTags(metadata: Record<string, any>): Record<string, string> {
+  // 只展示用户关心的字段，过滤内部字段
+  const KEEP_KEYS = ['category', 'source', 'symbol', 'name', 'review_id', 'system_id']
+  const result: Record<string, string> = {}
+  for (const key of KEEP_KEYS) {
+    if (metadata[key]) {
+      result[key] = String(metadata[key])
+    }
+  }
+  return result
+}
+
 onMounted(() => {
   fetchAll()
+  fetchPreferenceList()
 })
 </script>
 
@@ -894,6 +1031,78 @@ onMounted(() => {
   .list-card {
     .card-footer {
       flex-direction: column;
+    }
+  }
+}
+
+.preference-card {
+  margin-top: 16px;
+
+  .preference-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .preference-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 15px;
+  }
+
+  .preference-hint {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    line-height: 1.5;
+  }
+
+  .preference-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .preference-item {
+    padding: 12px 14px;
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 6px;
+    background: var(--el-fill-color-blank);
+
+    .preference-item-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .preference-item-time {
+      flex: 1;
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+    }
+
+    .preference-item-content {
+      margin: 0 0 8px;
+      font-size: 14px;
+      color: var(--el-text-color-primary);
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .preference-item-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+
+      .meta-tag {
+        font-size: 11px;
+      }
     }
   }
 }

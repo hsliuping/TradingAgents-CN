@@ -796,22 +796,16 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'agents',
-        name: 'WorkflowAgents',
-        component: () => import('@/views/Workflow/Agents.vue'),
-        meta: {
-          title: 'Agent配置',
-          requiresAuth: true,
-          requiresPro: true  // 🔥 需要高级学员权限
-        }
+        redirect: '/workflow/agent-workshop'
       },
       {
         path: 'skills',
         name: 'WorkflowSkills',
-        component: () => import('@/views/Workflow/Skills.vue'),
+        component: () => import('@/views/Workflow/SkillCenter.vue'),
         meta: {
-          title: 'Skill 管理',
+          title: 'Skill 中心',
           requiresAuth: true,
-          requiresPro: true  // 🔥 需要高级学员权限
+          requiresPro: true
         }
       },
       {
@@ -826,23 +820,11 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'skill-gaps',
-        name: 'SkillGaps',
-        component: () => import('@/views/Workflow/SkillGaps.vue'),
-        meta: {
-          title: '工具缺口',
-          requiresAuth: true,
-          requiresPro: true  // 🔥 需要高级学员权限
-        }
+        redirect: '/workflow/skills'
       },
       {
         path: 'skill-generation',
-        name: 'SkillGeneration',
-        component: () => import('@/views/Workflow/SkillGeneration.vue'),
-        meta: {
-          title: 'AI Skill 工坊',
-          requiresAuth: true,
-          requiresPro: true  // 🔥 需要高级学员权限
-        }
+        redirect: '/workflow/skills'
       },
       {
         path: 'skill-generation/create',

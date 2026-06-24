@@ -60,48 +60,20 @@
         <el-tag v-if="isAdvancedMenuItem('/workflow')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </el-menu-item>
       <el-menu-item index="/workflow/tools">
-        配置Tools
+        工具配置
         <el-tag v-if="isAdvancedMenuItem('/workflow/tools')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/agents">
-        配置Agent
-        <el-tag v-if="isAdvancedMenuItem('/workflow/agents')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/skills">
-        Skill 管理
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/skill-generation">
-        AI Skill 工坊
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </el-menu-item>
       <el-menu-item index="/workflow/agent-workshop">
         Agent 工坊
         <el-tag type="primary" size="small" style="margin-left: 4px; transform: scale(0.85);">迭代</el-tag>
       </el-menu-item>
+      <el-menu-item index="/workflow/skills">
+        Skill 中心
+        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+      </el-menu-item>
       <el-menu-item index="/workflow/mcp-servers">
         MCP 服务器
         <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/skill-gaps">
-        工具缺口
-        <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">感知</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/settings/templates">
-        提示词模板
-        <el-tag v-if="isAdvancedMenuItem('/settings/templates')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/settings/prompt-policies">
-        注入策略管理
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/settings/prompt-design">
-        Prompt 设计助手
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/settings/analysis-profiles">
-        行业/个股配置
-        <el-tag type="info" size="small" style="margin-left: 4px; transform: scale(0.85);">智能</el-tag>
       </el-menu-item>
     </el-sub-menu>
 
@@ -183,6 +155,27 @@
         <template #title>系统配置</template>
         <el-menu-item index="/settings/config">配置管理</el-menu-item>
         <el-menu-item index="/settings/cache">缓存管理</el-menu-item>
+      </el-sub-menu>
+
+      <!-- 分析配置 -->
+      <el-sub-menu index="/settings-analysis">
+        <template #title>分析配置</template>
+        <el-menu-item index="/settings/templates">
+          提示词模板
+          <el-tag v-if="isAdvancedMenuItem('/settings/templates')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/settings/prompt-policies">
+          注入策略管理
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/settings/prompt-design">
+          Prompt 设计助手
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/settings/analysis-profiles">
+          行业/个股配置
+          <el-tag type="info" size="small" style="margin-left: 4px; transform: scale(0.85);">智能</el-tag>
+        </el-menu-item>
       </el-sub-menu>
 
       <!-- 系统管理 -->

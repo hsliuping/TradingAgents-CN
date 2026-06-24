@@ -41,7 +41,7 @@
           发布
         </el-button>
         <el-button
-          v-if="!system.is_active"
+          v-if="!system.is_active && system.status === 'published'"
           type="success"
           @click="handleActivate"
         >
@@ -462,9 +462,16 @@
 
         <!-- 版本列表 -->
         <el-table :data="versions" stripe style="margin-top: 20px">
-          <el-table-column prop="version" label="版本号" width="120" align="center">
+          <el-table-column prop="version" label="版本号" width="140" align="center">
             <template #default="{ row }">
-              <el-tag type="primary" size="large">v{{ row.version }}</el-tag>
+              <el-tag :type="row.status === 'draft' ? 'info' : 'primary'" size="large">v{{ row.version }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="100" align="center">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 'draft' ? 'info' : 'success'" size="small">
+                {{ row.status === 'draft' ? '草稿' : '已发布' }}
+              </el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="improvement_summary" label="改进总结" min-width="300">
@@ -477,10 +484,13 @@
               {{ formatDateTime(row.created_at) }}
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="150" align="center">
+          <el-table-column label="操作" width="220" align="center">
             <template #default="{ row }">
               <el-button link type="primary" @click="viewVersionDetail(row)">
                 查看详情
+              </el-button>
+              <el-button link type="success" @click="editVersion(row)">
+                编辑此版本
               </el-button>
             </template>
           </el-table-column>
@@ -541,7 +551,12 @@
         <el-card class="version-info-card" shadow="never">
           <el-descriptions :column="3" border>
             <el-descriptions-item label="版本号">
-              <el-tag type="primary" size="large">v{{ selectedVersion.version }}</el-tag>
+              <el-tag :type="selectedVersion.status === 'draft' ? 'info' : 'primary'" size="large">v{{ selectedVersion.version }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="状态">
+              <el-tag :type="selectedVersion.status === 'draft' ? 'info' : 'success'">
+                {{ selectedVersion.status === 'draft' ? '草稿' : '已发布' }}
+              </el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="创建时间">
               {{ formatDateTime(selectedVersion.created_at) }}
@@ -722,6 +737,7 @@ import {
   getTradingSystemVersions,
   createTradingSystemVersion,
   publishTradingSystem,
+  restoreVersionAsDraft,
   type OptimizationSuggestionUpdate,
   type TradingPlanEvaluation,
   type EvaluationHistoryItem,
@@ -1154,6 +1170,27 @@ async function handleCreateVersion() {
 function viewVersionDetail(version: TradingSystemVersion) {
   selectedVersion.value = version
   versionDetailDialogVisible.value = true
+}
+
+async function editVersion(version: TradingSystemVersion) {
+  if (!systemId.value || !version.id) {
+    return
+  }
+  
+  try {
+    const res = await restoreVersionAsDraft(systemId.value, version.id)
+    if (res.success) {
+      ElMessage.success('版本已恢复为草稿')
+      versionDialogVisible.value = false
+      // 跳转到编辑页面
+      router.push(`/trading-system/${systemId.value}/edit`)
+    } else {
+      ElMessage.error(res.message || '恢复失败')
+    }
+  } catch (error: any) {
+    console.error('恢复版本失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '恢复失败，请重试')
+  }
 }
 
 // 检查历史相关函数

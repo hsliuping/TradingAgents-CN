@@ -3,7 +3,7 @@
     <div class="page-header">
       <div class="header-left">
         <h1>Agent 工坊</h1>
-        <span class="subtitle">先在管理页挑选或新建 Agent，再进入独立工作页做讨论、生成和评估。</span>
+        <span class="subtitle">管理工坊 Agent 和已发布 Agent，支持讨论、生成、评估和发布。</span>
       </div>
       <div class="header-right">
         <el-button type="primary" @click="goToWorkshop()">
@@ -16,6 +16,8 @@
       </div>
     </div>
 
+    <el-tabs v-model="activeTab" type="card" class="workshop-tabs">
+      <el-tab-pane label="工坊 Agent" name="workshop">
     <div class="summary-grid">
       <el-card shadow="never" class="summary-card">
         <div class="summary-label">草稿会话</div>
@@ -137,6 +139,12 @@
         <el-empty v-else description="没有匹配的 Agent，可以清空搜索或新建一个 Agent。" />
       </div>
     </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="已发布 Agent" name="published">
+        <PublishedAgents />
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
@@ -145,10 +153,12 @@ import { computed, onActivated, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
+import PublishedAgents from './Agents.vue'
 import agentWorkshopApi, { type AgentSpec, type AgentSpecIOItem, type AgentWorkshopSessionDetail } from '@/api/agentWorkshop'
 
 const router = useRouter()
 
+const activeTab = ref('workshop')
 const draftLoading = ref(false)
 const listLoading = ref(false)
 const filterStatus = ref('')

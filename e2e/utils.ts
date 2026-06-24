@@ -19,32 +19,19 @@ export async function login(page: Page): Promise<void> {
   await page.goto('/login')
 
   // 等待登录表单加载
-  await page.waitForSelector('input[placeholder*="用户名"], input[type="text"]', { timeout: 10000 })
+  await page.waitForSelector('.login-card', { timeout: 10000 })
 
   // 填写用户名和密码
-  const usernameInput = page.locator('input[placeholder*="用户名"], input[type="text"]').first()
-  const passwordInput = page.locator('input[type="password"]').first()
-  await usernameInput.fill(TEST_USER.username)
-  await passwordInput.fill(TEST_USER.password)
+  await page.locator('.el-form-item').filter({ hasText: '用户名' }).locator('input').fill(TEST_USER.username)
+  await page.locator('.el-form-item').filter({ hasText: '密码' }).locator('input').fill(TEST_USER.password)
 
-  // 勾选用户协议复选框（页面上有两个checkbox：记住我、同意协议）
-  // Element Plus 的 checkbox 需要点击 label 或 span
-  // 第二个 checkbox 是"同意协议"
-  const agreementLabel = page.locator('.el-checkbox:has-text("同意")').first()
-  if (await agreementLabel.isVisible({ timeout: 3000 }).catch(() => false)) {
-    await agreementLabel.click()
-  } else {
-    // 降级：直接点击第二个checkbox的input
-    const checkboxes = page.locator('.el-checkbox__input input[type="checkbox"]')
-    const count = await checkboxes.count()
-    if (count >= 2) {
-      await checkboxes.nth(1).click({ force: true })
-    }
-  }
+  // 勾选"我已阅读并同意"协议复选框
+  const agreementCheckbox = page.locator('.agreement-check .el-checkbox')
+  await agreementCheckbox.click()
+  await page.waitForTimeout(500)
 
   // 点击登录按钮
-  const loginButton = page.locator('button:has-text("登录"), button[type="submit"]').first()
-  await loginButton.click()
+  await page.locator('button:has-text("登录")').first().click()
 
   // 等待跳转到 dashboard 或其他已认证页面
   await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 15000 })
@@ -87,4 +74,93 @@ export async function getElMessage(page: Page): Promise<string | null> {
     return message.textContent()
   }
   return null
+}
+
+/**
+ * 选择股票代码（自动完成场景）
+ */
+export async function selectStock(page: Page, stockCode: string): Promise<void> {
+  const input = page.locator('input[placeholder*="000001"], input[placeholder*="股票"], input[placeholder*="代码"], .stock-input input').first()
+  await input.fill(stockCode)
+  await page.waitForTimeout(1500)
+  
+  const dropdownOption = page.locator('.el-select-dropdown__item, .el-autocomplete-suggestion li').first()
+  if (await dropdownOption.isVisible({ timeout: 3000 })) {
+    await dropdownOption.click()
+  }
+}
+
+/**
+ * 等待模态框关闭
+ */
+export async function waitForModalClose(page: Page): Promise<void> {
+  const modal = page.locator('.el-modal')
+  if (await modal.isVisible({ timeout: 1000 })) {
+    await modal.waitFor({ state: 'hidden', timeout: 10000 })
+  }
+}
+
+/**
+ * 点击确认按钮（处理 Element Plus 对话框）
+ */
+export async function clickConfirm(page: Page): Promise<void> {
+  const confirmBtn = page.locator('.el-dialog__footer button:has-text("确定"), .el-dialog__footer button[type="primary"]').first()
+  if (await confirmBtn.isVisible({ timeout: 3000 })) {
+    await confirmBtn.click()
+    await waitForModalClose(page)
+  }
+}
+
+/**
+ * 点击取消按钮（处理 Element Plus 对话框）
+ */
+export async function clickCancel(page: Page): Promise<void> {
+  const cancelBtn = page.locator('.el-dialog__footer button:has-text("取消")').first()
+  if (await cancelBtn.isVisible({ timeout: 3000 })) {
+    await cancelBtn.click()
+    await waitForModalClose(page)
+  }
+}
+
+/**
+ * 等待侧边栏菜单展开
+ */
+export async function waitForSidebarMenu(page: Page): Promise<void> {
+  await page.waitForSelector('.el-menu, .sidebar-menu', { timeout: 10000 })
+}
+
+/**
+ * 导航到指定页面（通过侧边栏）
+ */
+export async function navigateBySidebar(page: Page, menuText: string): Promise<void> {
+  await waitForSidebarMenu(page)
+  const menuItem = page.locator(`.el-menu-item:has-text("${menuText}"), .sidebar-item:has-text("${menuText}")`).first()
+  if (await menuItem.isVisible({ timeout: 5000 })) {
+    await menuItem.click()
+    await waitForLoadingDone(page)
+  }
+}
+
+/**
+ * 等待表格数据加载完成
+ */
+export async function waitForTableData(page: Page): Promise<void> {
+  await page.waitForSelector('table tbody tr', { timeout: 15000 })
+  await waitForLoadingDone(page)
+}
+
+/**
+ * 验证页面标题
+ */
+export async function verifyPageTitle(page: Page, title: string): Promise<void> {
+  const pageTitle = page.locator('h1, .page-title, .el-page-header__title').first()
+  await expect(pageTitle).toHaveText(title, { timeout: 10000 })
+}
+
+/**
+ * 随机等待（模拟用户思考时间）
+ */
+export async function randomWait(minMs: number = 500, maxMs: number = 2000): Promise<void> {
+  const waitTime = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs
+  await new Promise(resolve => setTimeout(resolve, waitTime))
 }
