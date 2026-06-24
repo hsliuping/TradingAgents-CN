@@ -101,6 +101,7 @@ class NeutralAnalystV2(ResearcherAgent):
         requires_tools=False,
         output_field="neutral_opinion",
         report_label="【中性风险评估】",
+        workflow_stage="risk",
         growth_role="reviewer",
         growth_outputs=["neutral_opinion"],
         memory_scope_hint="pattern",

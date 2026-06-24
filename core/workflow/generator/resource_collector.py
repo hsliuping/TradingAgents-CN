@@ -4,7 +4,7 @@
 收集内容：
 1. BUILTIN_AGENTS — 内置 Agent 列表（id, name, description, category, tools）
 2. BUILTIN_TOOLS — 内置工具列表（id, name, description, category）
-3. external_skills — MongoDB 中的外部 Skill
+3. skills/external_skills — MongoDB 中的标准 Skill 和外部 Skill
 4. agent_configs — MongoDB 中的 Agent 配置（可能包含用户自定义 Agent）
 5. prompt_templates — 提示词模板摘要（用于理解 Agent 默认能力）
 
@@ -126,22 +126,33 @@ class ResourceCollector:
         return tools
 
     async def _collect_external_skills(self) -> List[Dict[str, Any]]:
-        """收集外部 Skill"""
+        """收集标准 Skill 和外部 Skill"""
         skills = []
         if self._db is None:
             return skills
         try:
-            docs = self._db.external_skills.find({"status": "active"})
-            async for doc in docs:
+            standard_docs = self._db.skills.find({"enabled": True})
+            async for doc in standard_docs:
+                name = doc.get("name", "")
+                skills.append({
+                    "id": name.replace("-", "_"),
+                    "name": name,
+                    "description": doc.get("description", ""),
+                    "category": doc.get("category", "standard"),
+                    "source": "standard_skill",
+                })
+
+            external_docs = self._db.external_skills.find({"status": "active"})
+            async for doc in external_docs:
                 skills.append({
                     "id": doc.get("tool_id", ""),
-                    "name": doc.get("display_name", ""),
+                    "name": doc.get("display_name") or doc.get("name", ""),
                     "description": doc.get("description", ""),
                     "category": doc.get("metadata", {}).get("category", "external"),
                     "source": "external_skill",
                 })
         except Exception as e:
-            logger.warning(f"从数据库加载外部 Skill 失败: {e}")
+            logger.warning(f"从数据库加载 Skill 失败: {e}")
         return skills
 
     async def _collect_prompt_summaries(self) -> List[Dict[str, str]]:

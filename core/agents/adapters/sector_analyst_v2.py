@@ -209,6 +209,7 @@ class SectorAnalystV2(AnalystAgent):
         requires_tools=True,
         output_field="sector_report",
         report_label="【板块分析 v2】",
+        workflow_stage="analyst",
         growth_role="extractor",
         growth_outputs=["sector_report"],
         memory_scope_hint="object_tracking",

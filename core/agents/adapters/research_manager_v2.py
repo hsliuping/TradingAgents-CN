@@ -84,6 +84,7 @@ class ResearchManagerV2(ManagerAgent):
         requires_tools=False,
         output_field="investment_advice",
         report_label="【平衡研究结论 v2】",
+        workflow_stage="manager",
         growth_role="optimizer",
         growth_outputs=["investment_plan", "investment_debate_state"],
         memory_scope_hint="research_asset",

@@ -216,6 +216,37 @@ class ToolCallNormalizer:
         import inspect
 
         if tool_call.name not in tools:
+            # 上报能力缺口：LLM 调用了不存在的工具
+            try:
+                from core.tools.external.skill_gap_detector import SkillGapDetector
+                SkillGapDetector.report_gap(
+                    gap_type="tool_not_found",
+                    tool_name=tool_call.name,
+                    agent_id="intelligent_assistant",
+                    error="工具不存在于当前注册表",
+                    context={
+                        "tool_call_args": tool_call.arguments,
+                        "available_tools_sample": list(tools.keys())[:20],
+                    },
+                )
+            except Exception:
+                pass
+
+            # 记录到执行日志
+            try:
+                from core.tools.execution_logger import get_tool_execution_logger
+                get_tool_execution_logger().log(
+                    tool_id=tool_call.name,
+                    agent_id="intelligent_assistant",
+                    tool_args=tool_call.arguments,
+                    result=None,
+                    success=False,
+                    execution_time_ms=0,
+                    error="tool_not_found",
+                )
+            except Exception:
+                pass
+
             return ToolResult(
                 tool_call_id=tool_call.id,
                 name=tool_call.name,
@@ -224,6 +255,23 @@ class ToolCallNormalizer:
             )
 
         timeout_seconds = ToolCallNormalizer._get_tool_timeout(tool_call.name)
+        import time as _time
+        _exec_start = _time.perf_counter()
+
+        def _log_exec(success: bool, result_str=None, error_str=None):
+            try:
+                from core.tools.execution_logger import get_tool_execution_logger
+                get_tool_execution_logger().log(
+                    tool_id=tool_call.name,
+                    agent_id="intelligent_assistant",
+                    tool_args=tool_call.arguments,
+                    result=result_str,
+                    success=success,
+                    execution_time_ms=int((_time.perf_counter() - _exec_start) * 1000),
+                    error=error_str,
+                )
+            except Exception:
+                pass
 
         try:
             func = tools[tool_call.name]
@@ -243,6 +291,7 @@ class ToolCallNormalizer:
             if not isinstance(result, str):
                 result = json.dumps(result, ensure_ascii=False, default=str)
 
+            _log_exec(success=True, result_str=result)
             return ToolResult(
                 tool_call_id=tool_call.id,
                 name=tool_call.name,
@@ -254,6 +303,19 @@ class ToolCallNormalizer:
                 "[ToolNormalizer] 工具 %s 执行超时（%ds），已中断",
                 tool_call.name, timeout_seconds,
             )
+            _log_exec(success=False, error_str=f"timeout {timeout_seconds}s")
+            # 上报执行超时为能力缺口（间接说明工具效率不达预期）
+            try:
+                from core.tools.external.skill_gap_detector import SkillGapDetector
+                SkillGapDetector.report_gap(
+                    gap_type="tool_execution_error",
+                    tool_name=tool_call.name,
+                    agent_id="intelligent_assistant",
+                    error=f"工具执行超时（{timeout_seconds}秒）",
+                    context={"tool_call_args": tool_call.arguments},
+                )
+            except Exception:
+                pass
             return ToolResult(
                 tool_call_id=tool_call.id,
                 name=tool_call.name,
@@ -262,6 +324,19 @@ class ToolCallNormalizer:
             )
         except Exception as e:
             logger.exception("[ToolNormalizer] 工具 %s 异步执行异常: %s", tool_call.name, e)
+            _log_exec(success=False, error_str=str(e))
+            # 上报执行错误为能力缺口
+            try:
+                from core.tools.external.skill_gap_detector import SkillGapDetector
+                SkillGapDetector.report_gap(
+                    gap_type="tool_execution_error",
+                    tool_name=tool_call.name,
+                    agent_id="intelligent_assistant",
+                    error=str(e),
+                    context={"tool_call_args": tool_call.arguments},
+                )
+            except Exception:
+                pass
             return ToolResult(
                 tool_call_id=tool_call.id,
                 name=tool_call.name,

@@ -202,9 +202,15 @@ class AnalystAgent(BaseAgent):
             output_key = self.output_field or f"{self.analyst_type}_report"
 
             logger.info(f"分析师Agent {self.agent_id} 执行成功")
-            return {
-                output_key: report
-            }
+            result = {output_key: report}
+
+            # 🆕 附带工具调用摘要，供下游 Agent 引用
+            tool_summary = self._format_tool_call_summary()
+            if tool_summary:
+                result["tool_call_summaries"] = {self.analyst_type: tool_summary}
+                logger.info(f"📊 [{self.agent_id}] 工具调用摘要已生成（{len(self._tool_call_summaries_collected)} 次调用）")
+
+            return result
 
         except Exception as e:
             logger.error(f"分析师Agent {self.agent_id} 执行失败: {e}", exc_info=True)

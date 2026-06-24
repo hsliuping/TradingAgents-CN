@@ -2,12 +2,26 @@
 智能体适配器
 
 将现有的函数式智能体适配为 BaseAgent 子类
+
+⚠️ 废弃警告：
+- 所有 v1.0 Agent（不带 _v2 后缀）已废弃，将在未来版本中移除。
+- 请使用对应的 v2 版本（如 MarketAnalystV2 替代 MarketAnalystAgent）。
+- v1 Agent 仍保留以支持向后兼容，但不应在新代码中使用。
 """
 
 import logging
+import warnings
 from .legacy_adapter import LegacyAgentAdapter
 
 logger = logging.getLogger(__name__)
+
+# 🔥 发出模块级废弃警告
+warnings.warn(
+    "v1.0 Agent（不带 _v2 后缀）已废弃，请使用 v2 版本。"
+    "v1 Agent 将在 TradingAgentsCN v4.0 中被移除。",
+    DeprecationWarning,
+    stacklevel=2
+)
 from .market_analyst import MarketAnalystAgent
 from .market_analyst_v2 import MarketAnalystV2
 from .news_analyst import NewsAnalystAgent

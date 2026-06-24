@@ -69,6 +69,7 @@ class FundamentalsAnalystAgentV2(BaseAgent):
         requires_tools=True,
         output_field="fundamentals_report",
         report_label="【基本面分析 v2】",
+        workflow_stage="analyst",
         growth_role="extractor",
         growth_outputs=["fundamentals_report"],
         memory_scope_hint="object_tracking",
@@ -172,9 +173,12 @@ class FundamentalsAnalystAgentV2(BaseAgent):
         logger.info(f"✅ 基本面分析完成，报告长度: {len(analysis)} 字符")
 
         # 只返回新增的字段，避免覆盖并行节点的更新
-        return {
-            "fundamentals_report": analysis
-        }
+        result = {"fundamentals_report": analysis}
+        # 🆕 附带工具调用摘要
+        tool_summary = self._format_tool_call_summary()
+        if tool_summary:
+            result["tool_call_summaries"] = {self.agent_id: tool_summary}
+        return result
 
     def _build_system_prompt(self, state: Dict[str, Any] = None) -> str:
         """

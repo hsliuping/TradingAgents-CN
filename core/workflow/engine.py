@@ -7,7 +7,7 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, AsyncIterator, Callable, Dict, Optional, Protocol
+from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Protocol
 
 from .models import (
     NodeType,
@@ -22,18 +22,79 @@ from .validator import WorkflowValidator, ValidationResult
 logger = logging.getLogger(__name__)
 
 _BUILTIN_REPORT_FIELDS = [
+    # analyst 阶段
     "market_report",
     "sentiment_report",
     "news_report",
     "fundamentals_report",
     "index_report",
     "sector_report",
+    "social_report",
+    "chip_report",
+    # research 阶段
     "bull_report",
     "bear_report",
     "investment_plan",
+    # risk 阶段
+    "risky_opinion",
+    "safe_opinion",
+    "neutral_opinion",
+    "risk_assessment",
+    # manager 阶段
     "trader_investment_plan",
+    "risk_conclusion",
+    # trader 阶段
     "final_trade_decision",
+    # 持仓分析阶段
+    "technical_analysis",
+    "fundamental_analysis",
+    "risk_analysis",
+    "action_advice",
+    # 复盘阶段
+    "timing_analysis",
+    "position_analysis",
+    "emotion_analysis",
+    "attribution_analysis",
+    "review_summary",
 ]
+
+
+def _get_dynamic_report_fields(agent_ids: List[str]) -> List[str]:
+    """从 Agent metadata 和 agent_configs 动态推导报告字段列表（替代硬编码）"""
+    fields = []
+
+    try:
+        from core.agents.registry import get_registry
+        registry = get_registry()
+        for meta in registry.list_all():
+            if meta.id in agent_ids and meta.output_field and meta.output_field not in fields:
+                fields.append(meta.output_field)
+    except Exception as e:
+        logger.warning(f"[动态报告字段] 从 AgentRegistry 获取失败: {e}")
+
+    try:
+        from pymongo import MongoClient
+        from tradingagents.config.mongodb_utils import build_mongodb_connection_string, get_mongodb_database_name
+
+        client = MongoClient(build_mongodb_connection_string(), serverSelectionTimeoutMS=2000)
+        db = client[get_mongodb_database_name()]
+        docs = list(db.agent_configs.find({
+            "agent_id": {"$in": agent_ids},
+            "enabled": True,
+            "version_status": "active",
+            "runtime_status": "active",
+        }))
+        client.close()
+        for doc in docs:
+            output_field = doc.get("output_field") or (doc.get("metadata") or {}).get("output_field")
+            if output_field and output_field not in fields:
+                fields.append(output_field)
+    except Exception as e:
+        logger.warning(f"[动态报告字段] 从 agent_configs 获取失败: {e}")
+
+    if "final_trade_decision" not in fields:
+        fields.append("final_trade_decision")
+    return fields if fields else _BUILTIN_REPORT_FIELDS
 
 _AGENT_CATEGORY_DISPLAY = {
     "analyst": "分析师团队",
@@ -135,7 +196,7 @@ class WorkflowEngine:
         self,
         legacy_config: Optional[Dict[str, Any]] = None,
         task_id: Optional[str] = None,
-        use_dynamic_state: bool = False,
+        use_dynamic_state: bool = True,  # 🔥 改为默认启用，动态 Agent 工作流需要
         llm: Optional[Any] = None
     ):
         """
@@ -144,7 +205,7 @@ class WorkflowEngine:
         Args:
             legacy_config: 遗留智能体配置（用于创建 LLM 和 Toolkit）
             task_id: 任务 ID（用于进度跟踪）
-            use_dynamic_state: 是否使用动态状态生成（默认 False 保持向后兼容）
+            use_dynamic_state: 是否使用动态状态生成（默认 True，支持动态 Agent 字段）
             llm: 可选的 LLM 实例（优先于 legacy_config）
         """
         self._definition: Optional[WorkflowDefinition] = None
@@ -224,11 +285,20 @@ class WorkflowEngine:
         return self
 
     def _extract_agent_ids(self, definition: WorkflowDefinition) -> list:
-        """从工作流定义中提取 Agent ID 列表"""
+        """从工作流定义中提取 Agent ID 列表（含辩论参与者和委派 Agent）"""
         agent_ids = []
         for node in definition.nodes:
-            if node.agent_id and node.agent_id not in agent_ids:
-                agent_ids.append(node.agent_id)
+            candidates = []
+            if node.agent_id:
+                candidates.append(node.agent_id)
+
+            node_config = getattr(node, "config", None) or {}
+            candidates.extend(node_config.get("participants") or [])
+            candidates.extend(node_config.get("delegated_agent_ids") or [])
+
+            for agent_id in candidates:
+                if agent_id and agent_id not in agent_ids:
+                    agent_ids.append(agent_id)
         return agent_ids
     
     def set_progress_callback(self, callback: Optional[Callable]) -> "WorkflowEngine":
@@ -896,9 +966,13 @@ class WorkflowEngine:
         return result
 
     def _build_builtin_output(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """内置工作流的旧产出物逻辑（完全兼容）"""
+        """内置工作流的产出物逻辑（动态字段 + 向后兼容）"""
+        # 动态推导报告字段列表（新 Agent 的 output_field 自动包含）
+        agent_ids = self._extract_agent_ids(self._definition) if self._definition else []
+        report_fields = _get_dynamic_report_fields(agent_ids) if agent_ids else _BUILTIN_REPORT_FIELDS
+
         structured = {}
-        for f in _BUILTIN_REPORT_FIELDS:
+        for f in report_fields:
             if f in result:
                 text = self._extract_text_value(result.get(f))
                 success = bool(isinstance(text, str) and text.strip())

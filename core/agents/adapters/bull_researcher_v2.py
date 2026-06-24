@@ -84,6 +84,7 @@ class BullResearcherV2(ResearcherAgent):
         requires_tools=False,
         output_field="bull_report",
         report_label="【乐观情景研究 v2】",
+        workflow_stage="research",
         growth_role="reviewer",
         growth_outputs=["bull_report"],
         memory_scope_hint="pattern",
@@ -280,10 +281,8 @@ class BullResearcherV2(ResearcherAgent):
     行文时请优先使用公司名称“{company_name}”，不要只用股票代码“{ticker}”指代公司。
 
     可用资源：
-    - 市场研究报告：{market_report}
-    - 社交媒体情绪报告：{sentiment_report}
-    - 最新世界事务新闻：{news_report}
-    - 公司基本面报告：{fundamentals_report}
+    - 所有分析师报告（含市场/基本面/新闻/情绪/大盘/板块等）：
+    {analyst_reports}
     - 辩论对话历史：{historical_context}
     - 最后的看跌论点：{current_response}
     - 类似情况的反思和经验教训：{past_memory_str}
@@ -300,16 +299,25 @@ class BullResearcherV2(ResearcherAgent):
     严格禁止输出目标价、价格区间、关键价位、收益空间、概率数值和任何交易建议。
     """
 
-        # 替换变量（使用实际的报告内容）
+        # 聚合所有分析师报告
+        try:
+            from core.workflow.stage_aggregator import aggregate_stage_reports
+            analyst_reports_text = aggregate_stage_reports(state or {}, "analyst")
+        except Exception:
+            analyst_reports_text = ""
+
+        # 替换变量（使用聚合报告 + 保留个别字段兼容）
         prompt = prompt.format(
             company_name=company_name,
             ticker=ticker,
             market_name=market_name,
             currency_display=currency_display,
-            market_report=reports.get("market_report", ""),
-            sentiment_report=reports.get("sentiment_report", ""),
-            news_report=reports.get("news_report", ""),
-            fundamentals_report=reports.get("fundamentals_report", ""),
+            analyst_reports=analyst_reports_text or "\n".join([
+                f"- 市场研究报告：{reports.get('market_report', '')}",
+                f"- 社交媒体情绪报告：{reports.get('sentiment_report', '')}",
+                f"- 最新世界事务新闻：{reports.get('news_report', '')}",
+                f"- 公司基本面报告：{reports.get('fundamentals_report', '')}",
+            ]),
             historical_context=historical_context or (state.get("history", "") if state else ""),
             current_response=state.get("current_response", "") if state else "",
             past_memory_str=state.get("past_memory_str", "") if state else ""

@@ -5,6 +5,7 @@ ToolMetadata → OpenAI Function Calling 格式转换器
 与 SkillConverter 对齐，确保工具描述与 Skill 元数据一致。
 """
 
+import re
 from typing import Any, Dict, List
 
 from .config import ToolMetadata, ToolParameter
@@ -24,6 +25,24 @@ _TYPE_MAP = {
     "object": "object",
     "dict": "object",
 }
+
+# OpenAI 工具名合法字符正则：^[a-zA-Z0-9_-]+$
+_OPENAI_NAME_PATTERN = re.compile(r"[^a-zA-Z0-9_-]")
+
+
+def sanitize_function_name(name: str) -> str:
+    """将任意字符串清理成符合 OpenAI 工具名规范的字符串
+
+    - 把非法字符（中文、空格、括号、点等）替换为下划线
+    - 合并多余的连续下划线
+    - 去掉首尾下划线
+    - 如果清理后为空，返回 'tool'
+    """
+    if not name:
+        return "tool"
+    cleaned = _OPENAI_NAME_PATTERN.sub("_", str(name))
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_-")
+    return cleaned or "tool"
 
 
 def tool_metadata_to_openai(tool: ToolMetadata) -> Dict[str, Any]:
@@ -73,7 +92,7 @@ def tool_metadata_to_openai(tool: ToolMetadata) -> Dict[str, Any]:
     return {
         "type": "function",
         "function": {
-            "name": tool.id,  # 使用 id 作为 function name（OpenAI 要求）
+            "name": sanitize_function_name(tool.id),  # OpenAI 要求 ^[a-zA-Z0-9_-]+$
             "description": description,
             "parameters": {
                 "type": "object",

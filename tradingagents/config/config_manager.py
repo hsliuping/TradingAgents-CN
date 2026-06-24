@@ -3,10 +3,17 @@
 配置管理器
 管理API密钥、模型配置、费率设置等
 
-⚠️ DEPRECATED: 此模块已废弃，将在 2026-03-31 后移除
-   请使用新的配置系统: app.services.config_service.ConfigService
-   迁移指南: docs/DEPRECATION_NOTICE.md
-   迁移脚本: scripts/migrate_config_to_db.py
+⚠️⚠️⚠️ DEPRECATED - 已过期 83 天 ⚠️⚠️⚠️
+====================================
+此模块已废弃，原计划移除日期：2026-03-31
+当前日期：2026-06-23（已过期）
+
+请使用新的配置系统: app.services.config_service.ConfigService
+迁移指南: docs/DEPRECATION_NOTICE.md
+迁移脚本: scripts/migrate_config_to_db.py
+
+🔴 紧急：仍有 44 个文件引用此模块，请尽快迁移！
+====================================
 """
 
 import json
@@ -20,11 +27,11 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from dotenv import load_dotenv
 
-# 发出废弃警告
+# 🔴 发出废弃警告（已过期）
 warnings.warn(
-    "ConfigManager is deprecated and will be removed in version 2.0 (2026-03-31). "
+    "ConfigManager is DEPRECATED and EXPIRED (planned removal: 2026-03-31, now 2026-06-23). "
     "Please use app.services.config_service.ConfigService instead. "
-    "See docs/DEPRECATION_NOTICE.md for migration guide.",
+    "44 files still reference this module - migration required before removal!",
     DeprecationWarning,
     stacklevel=2
 )

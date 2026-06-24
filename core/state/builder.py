@@ -126,13 +126,25 @@ class StateSchemaBuilder:
         return io_def
     
     def _get_io_from_config(self, agent_id: str) -> Optional[AgentIODefinition]:
-        """从代码配置获取 IO 定义"""
+        """从代码配置获取 IO 定义（BUILTIN_AGENTS → AgentRegistry 回退）"""
         from core.agents.config import BUILTIN_AGENTS
-        
-        if agent_id not in BUILTIN_AGENTS:
+
+        agent_meta = None
+
+        # 1. 先查 BUILTIN_AGENTS
+        if agent_id in BUILTIN_AGENTS:
+            agent_meta = BUILTIN_AGENTS[agent_id]
+
+        # 2. 回退到 AgentRegistry（v2 适配器通过 @register_agent 注册）
+        if agent_meta is None:
+            try:
+                from core.agents.registry import get_registry
+                agent_meta = get_registry().get_metadata(agent_id)
+            except Exception as e:
+                logger.debug(f"从 AgentRegistry 获取 {agent_id} 元数据失败: {e}")
+
+        if agent_meta is None:
             return None
-        
-        agent_meta = BUILTIN_AGENTS[agent_id]
         
         # 构建输入字段
         inputs = []
@@ -200,34 +212,45 @@ class StateSchemaBuilder:
 
     def generate_typed_dict(self, schema: WorkflowStateSchema) -> Type:
         """
-        根据 Schema 生成 TypedDict 类
+        根据 Schema 生成 TypedDict 类（带 LangGraph reducer 注解）
 
-        用于 LangGraph StateGraph 的类型定义
+        生成的 TypedDict 每个字段都带有 Annotated reducer，
+        确保并行节点执行时状态正确合并：
+        - string → Annotated[str, keep_non_empty]（保留非空值）
+        - object → Annotated[dict, merge_dict]（智能合并字典）
+        - array  → Annotated[list, keep_latest_list]（采用最新列表）
+        - messages → Annotated[List[BaseMessage], add_messages]（LangGraph 内置）
         """
         from typing import TypedDict, Annotated, List
         from langgraph.graph.message import add_messages
+        from .reducers import keep_non_empty, merge_dict, keep_latest_list
 
-        # 动态创建字段
+        # 动态创建字段（全部带 reducer 注解）
         annotations = {}
 
         for name, field in schema.fields.items():
             if field.type == FieldType.LIST_MESSAGES:
                 annotations[name] = Annotated[List[BaseMessage], add_messages]
             elif field.type == FieldType.STRING:
-                annotations[name] = str
+                annotations[name] = Annotated[str, keep_non_empty]
             elif field.type == FieldType.NUMBER:
-                annotations[name] = float
+                annotations[name] = Annotated[float, keep_non_empty]
             elif field.type == FieldType.BOOLEAN:
-                annotations[name] = bool
+                annotations[name] = Annotated[bool, keep_non_empty]
             elif field.type == FieldType.OBJECT:
-                annotations[name] = dict
+                annotations[name] = Annotated[dict, merge_dict]
             elif field.type == FieldType.ARRAY:
-                annotations[name] = list
+                annotations[name] = Annotated[list, keep_latest_list]
             else:
-                annotations[name] = str
+                annotations[name] = Annotated[str, keep_non_empty]
 
         # 创建 TypedDict
         state_class = TypedDict(f"{schema.workflow_id}_State", annotations)
+
+        logger.info(
+            f"生成动态 TypedDict: {schema.workflow_id}_State, "
+            f"字段数={len(annotations)}（全部带 reducer 注解）"
+        )
 
         return state_class
 

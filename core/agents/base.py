@@ -6,6 +6,7 @@ v2.0 新增：标准化工具调用循环处理
 """
 
 import logging
+import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Callable
 from app.utils.api_key_utils import truncate_api_key
@@ -266,6 +267,67 @@ class BaseAgent(ABC):
 
         logger.info(f"🔧 [Agent {self.agent_id}] 工具加载完成: {len(self._langchain_tools)}/{len(tool_ids)} 个工具")
 
+    def _load_bound_knowledge_skills(self, agent_name: str) -> Optional[str]:
+        """加载绑定到当前 Agent 的 knowledge 类型 Skill，返回提示词块
+
+        knowledge 类型 Skill 没有 implementation，不注册为可调用工具，
+        而是作为上下文注入到 Agent 的提示词中。
+
+        Args:
+            agent_name: Agent 名称（如 market_analyst_v2）
+
+        Returns:
+            格式化的知识块文本，如果没有则返回 None
+        """
+        try:
+            from core.config.binding_manager import BindingManager
+            from app.core.database import get_mongo_db_sync
+
+            # 获取绑定到当前 Agent 的所有 tool_ids
+            binding_manager = BindingManager()
+            tool_ids = binding_manager.get_tools_for_agent(agent_name)
+            if not tool_ids:
+                return None
+
+            # 从 MongoDB 查询 knowledge 类型 Skill（无 implementation 字段）
+            db = get_mongo_db_sync()
+            if db is None:
+                return None
+
+            # tool_ids 中的格式是 skill_name（带下划线），需要转回带连字符的 name
+            # Skill 注册时 tool_id = name.replace("-", "_")，所以这里要反向转换
+            possible_names = []
+            for tid in tool_ids:
+                # 同时尝试原始 tool_id 和转换后的 name
+                possible_names.append(tid)
+                possible_names.append(tid.replace("_", "-"))
+
+            knowledge_skills = list(db["skills"].find({
+                "name": {"$in": possible_names},
+                "implementation": None,  # knowledge 类型
+                "enabled": True,
+            }))
+
+            if not knowledge_skills:
+                return None
+
+            # 构建知识块
+            parts = ["\n\n## 📚 可用知识库\n"]
+            for skill in knowledge_skills:
+                name = skill.get("name", "")
+                description = skill.get("description", "")
+                instructions = skill.get("instructions", "")
+                parts.append(f"\n### {name}\n")
+                if description:
+                    parts.append(f"{description}\n")
+                if instructions:
+                    parts.append(f"\n{instructions}\n")
+
+            return "".join(parts)
+        except Exception as e:
+            logger.warning(f"⚠️ 加载知识型 Skill 失败: {e}")
+            return None
+
     def load_tools_from_config(self) -> List[str]:
         """
         v2.0: 从配置加载工具列表
@@ -472,6 +534,8 @@ class BaseAgent(ABC):
             raise ValueError("LLM 未配置，无法执行工具调用")
 
         current_messages = list(messages)
+        # 🆕 重置工具调用摘要收集器（每次 invoke_with_tools 独立统计）
+        self._tool_call_summaries_collected = []
 
         logger.info(f"🚀 [{self.agent_id}] 开始工具调用循环，最大迭代次数: {max_iterations}")
         logger.info(f"🔧 [{self.agent_id}] 可用工具数量: {len(self._langchain_tools) if self._langchain_tools else 0}")
@@ -950,6 +1014,34 @@ class BaseAgent(ABC):
         logger.warning(f"⚠️ [{self.agent_id}] 达到最大迭代次数 {max_iterations}")
         return f"分析未能完成（达到最大迭代次数 {max_iterations}）"
 
+    def _format_tool_call_summary(self) -> str:
+        """将本 Agent 执行期间收集的工具调用摘要格式化为 Markdown 文本
+
+        供下游 Agent 在提示词中引用，了解前序 Agent 调用了哪些工具、获取了什么数据。
+
+        Returns:
+            str: 格式化的工具调用摘要（Markdown），无工具调用时返回空字符串
+        """
+        summaries = getattr(self, "_tool_call_summaries_collected", [])
+        if not summaries:
+            return ""
+
+        lines = [f"### {self.agent_id} 工具调用记录（共 {len(summaries)} 次）"]
+        for idx, s in enumerate(summaries, 1):
+            status = "✅成功" if s.get("success") else f"❌失败({s.get('error', 'unknown')})"
+            args_str = str(s.get("tool_args", {}))
+            if len(args_str) > 150:
+                args_str = args_str[:150] + "..."
+            preview = s.get("result_preview", "")
+            if len(preview) > 200:
+                preview = preview[:200] + "..."
+            lines.append(
+                f"{idx}. **{s['tool_name']}** {status}\n"
+                f"   - 参数: `{args_str}`\n"
+                f"   - 结果预览(长度{s.get('result_length', 0)}): {preview}"
+            )
+        return "\n".join(lines)
+
     def _execute_tool_calls(self, tool_calls: List[Dict]) -> List[ToolMessage]:
         """
         执行工具调用并返回 ToolMessage 列表
@@ -966,12 +1058,17 @@ class BaseAgent(ABC):
         )
 
         tool_messages = []
+        # 🆕 收集工具调用摘要，供下游 Agent 引用
+        if not hasattr(self, "_tool_call_summaries_collected"):
+            self._tool_call_summaries_collected = []
         current_state = getattr(self, "_current_state", None)
         analysis_data_source = None
+        analysis_id = None
         if isinstance(current_state, dict):
             value = current_state.get("_analysis_data_source")
             if isinstance(value, str) and value.strip():
                 analysis_data_source = value.strip().lower()
+            analysis_id = current_state.get("analysis_id") or current_state.get("task_id")
 
         for tool_call in tool_calls:
             tool_name = tool_call.get('name')
@@ -983,8 +1080,11 @@ class BaseAgent(ABC):
 
             # 找到对应的工具并执行
             tool_result = None
+            _tool_success = True
+            _tool_error = None
             for tool in self._langchain_tools:
                 if hasattr(tool, 'name') and tool.name == tool_name:
+                    _exec_start = time.time()
                     try:
                         logger.info(f"🔄 [{self.agent_id}] 开始调用工具 {tool_name}...")
                         logger.debug(f"🔍 [{self.agent_id}] 工具类型: {type(tool)}")
@@ -1042,17 +1142,98 @@ class BaseAgent(ABC):
                             logger.info(f"✅ [{self.agent_id}] 工具 {tool_name} 执行成功，返回类型: {type(tool_result).__name__}")
                             logger.info(f"📄 [{self.agent_id}] 工具 {tool_name} 返回内容: {str(tool_result)[:200]}...")
 
+                        # 记录到工具执行日志
+                        _exec_ms = int((time.time() - _exec_start) * 1000)
+                        try:
+                            from core.tools.execution_logger import get_tool_execution_logger
+                            get_tool_execution_logger().log(
+                                tool_id=tool_name,
+                                agent_id=self.agent_id,
+                                tool_args=tool_args if isinstance(tool_args, dict) else {"value": str(tool_args)},
+                                result=tool_result,
+                                success=True,
+                                execution_time_ms=_exec_ms,
+                                analysis_id=analysis_id,
+                            )
+                        except Exception:
+                            pass  # 日志记录失败不影响主流程
+
                     except Exception as e:
                         logger.error(f"❌ [{self.agent_id}] 工具 {tool_name} 执行失败: {e}")
                         import traceback
                         logger.error(f"❌ [{self.agent_id}] 工具 {tool_name} 错误详情: {traceback.format_exc()}")
                         tool_result = f"工具执行失败: {str(e)}"
+                        _tool_success = False
+                        _tool_error = str(e)
+
+                        # 记录失败日志
+                        _exec_ms = int((time.time() - _exec_start) * 1000)
+                        try:
+                            from core.tools.execution_logger import get_tool_execution_logger
+                            get_tool_execution_logger().log(
+                                tool_id=tool_name,
+                                agent_id=self.agent_id,
+                                tool_args=tool_args if isinstance(tool_args, dict) else {"value": str(tool_args)},
+                                result=None,
+                                success=False,
+                                execution_time_ms=_exec_ms,
+                                analysis_id=analysis_id,
+                                error=str(e),
+                            )
+                        except Exception:
+                            pass
+
+                        # 上报能力缺口
+                        try:
+                            from core.tools.external.skill_gap_detector import SkillGapDetector
+                            SkillGapDetector.report_gap(
+                                gap_type="tool_execution_error",
+                                tool_name=tool_name,
+                                agent_id=self.agent_id,
+                                error=str(e),
+                                context={
+                                    "tool_call_args": tool_args if isinstance(tool_args, dict) else {"value": str(tool_args)},
+                                    "analysis_id": analysis_id or "",
+                                },
+                            )
+                        except Exception:
+                            pass
+
                     break
 
             if tool_result is None:
                 tool_result = f"未找到工具: {tool_name}"
                 logger.warning(f"⚠️ [{self.agent_id}] {tool_result}")
                 logger.warning(f"⚠️ [{self.agent_id}] 可用工具列表: {[t.name for t in self._langchain_tools]}")
+                _tool_success = False
+                _tool_error = "tool_not_found"
+
+                # 上报工具缺失缺口
+                try:
+                    from core.tools.external.skill_gap_detector import SkillGapDetector
+                    SkillGapDetector.report_gap(
+                        gap_type="tool_not_found",
+                        tool_name=tool_name,
+                        agent_id=self.agent_id,
+                        error="工具不存在于当前注册表",
+                        context={
+                            "available_tools": [t.name for t in self._langchain_tools],
+                            "analysis_id": analysis_id or "",
+                        },
+                    )
+                except Exception:
+                    pass
+
+            # 🆕 收集工具调用摘要
+            _result_str = str(tool_result) if tool_result else ""
+            self._tool_call_summaries_collected.append({
+                "tool_name": tool_name,
+                "tool_args": tool_args if isinstance(tool_args, dict) else {"value": str(tool_args)},
+                "result_preview": _result_str[:300] + ("..." if len(_result_str) > 300 else ""),
+                "result_length": len(_result_str),
+                "success": _tool_success,
+                "error": _tool_error,
+            })
 
             # 创建工具消息
             tool_messages.append(ToolMessage(
@@ -1102,22 +1283,47 @@ class BaseAgent(ABC):
         try:
             # 🆕 自动从 state 中提取系统变量（由工作流引擎准备）
             if state:
-                system_vars = [
+                # 自动注入所有报告类字段（不再硬编码列表）
+                # 匹配 _report、_plan、_opinion、_decision、_assessment、_analysis、_advice、_summary、_result 后缀的字段
+                report_suffixes = ("_report", "_plan", "_opinion", "_decision", "_assessment", "_analysis", "_advice", "_summary", "_result")
+                for key, val in state.items():
+                    if key.endswith(report_suffixes) and key not in variables:
+                        if isinstance(val, str) and len(val) > 200:
+                            logger.info(f"📊 [系统变量] 自动提取 {key}: (长度={len(val)})")
+                        elif isinstance(val, str):
+                            logger.info(f"📊 [系统变量] 自动提取 {key}: {val[:50]}...")
+                        if isinstance(val, (str, dict)):
+                            variables[key] = val
+
+                # 保留基础系统变量的注入（非报告类）
+                base_vars = [
                     "current_price", "industry", "market_name",
                     "currency_name", "currency_symbol", "current_date", "start_date",
-                    # 报告类变量：ETF/股票分析链路中下游 agent 模板可能引用
-                    "fundamentals_report", "market_report", "news_report",
-                    "bull_report", "bear_report", "investment_plan", "safe_opinion",
                 ]
-                for var in system_vars:
+                for var in base_vars:
                     if var in state and var not in variables:
                         val = state[var]
-                        # 报告类字段只截取摘要用于日志，不截断实际值
-                        if isinstance(val, str) and len(val) > 200:
-                            logger.info(f"📊 [系统变量] 自动提取 {var}: (长度={len(val)})")
-                        else:
-                            logger.info(f"📊 [系统变量] 自动提取 {var}: {val}")
+                        logger.info(f"📊 [系统变量] 自动提取 {var}: {val}")
                         variables[var] = val
+
+                # 🆕 自动注入阶段聚合报告（analyst_reports / research_reports / risk_reports）
+                try:
+                    from core.workflow.stage_aggregator import inject_stage_reports
+                    inject_stage_reports(state, variables)
+                except Exception as e:
+                    logger.debug(f"阶段报告聚合失败（非致命）: {e}")
+
+                # 🆕 自动提取工具调用摘要，格式化为字符串供模板引用
+                tool_summaries = state.get("tool_call_summaries")
+                if tool_summaries and isinstance(tool_summaries, dict) and "tool_call_summaries" not in variables:
+                    summary_parts = []
+                    for agent_key, summary_text in tool_summaries.items():
+                        if summary_text:
+                            summary_parts.append(str(summary_text))
+                    if summary_parts:
+                        formatted = "\n\n".join(summary_parts)
+                        variables["tool_call_summaries"] = formatted
+                        logger.info(f"📊 [系统变量] 自动提取 tool_call_summaries: ({len(tool_summaries)} 个 Agent 的工具记录，总长度 {len(formatted)})")
 
             # 从 context 中提取 user_id 和 preference_id
             user_id = None
@@ -1188,6 +1394,15 @@ class BaseAgent(ABC):
                             logger.info(f"🏭 [行业注入] {agent_name}: 已追加 {state['industry']} 行业分析维度")
                     except Exception as e:
                         logger.warning(f"⚠️ [行业注入] 失败: {e}")
+
+                # 📚 知识型 Skill 注入：将绑定到当前 Agent 的 knowledge Skill 内容追加到提示词
+                try:
+                    knowledge_block = self._load_bound_knowledge_skills(agent_name)
+                    if knowledge_block:
+                        prompt = prompt + knowledge_block
+                        logger.info(f"📚 [知识注入] {agent_name}: 已追加知识型 Skill 内容")
+                except Exception as e:
+                    logger.warning(f"⚠️ [知识注入] 失败: {e}")
 
                 return prompt
             else:

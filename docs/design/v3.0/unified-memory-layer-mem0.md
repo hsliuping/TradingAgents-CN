@@ -646,4 +646,138 @@ core/memory/
 |------|------|
 | v3.x | mem0 统一记忆层上线，6 个孤岛收口 |
 | v4.0 | 在 mem0 之上叠加 Cognee Graph Memory，支持关系推理 |
+| v4.0 | **共享领域知识库（domain_knowledge）独立模块**：概念股映射、产业链、术语词典、公式手册，与 mem0（用户私有）解耦，以 Function Call 工具形式暴露给 LLM，解决跨 LLM 概念股幻觉、术语理解不一致问题。详见下方 14.1 待办说明 |
 | v4.x | 记忆过期/衰减策略、记忆质量评估、用户可见的"我的记忆"管理页面 |
+
+### 14.1 v4.0 待办：共享领域知识库（domain_knowledge）
+
+**问题背景**（2026-06-24 用户反馈）：
+> 目前调用不同 LLM 进行智能选股或分析时，"苹果概念股""华为概念股"这类概念依赖 LLM 自带训练知识，存在三大问题：
+> 1. 不同 LLM（DeepSeek / Qwen / GLM 等）对同一概念股的清单不一致；
+> 2. LLM 训练有截止时间，新增/调出的概念股无法及时反映；
+> 3. 容易幻觉（编造看似合理但实际不在概念里的股票）。
+
+**与 mem0 的边界**：
+- mem0 = **用户私有**（按 user_id 隔离），存的是"我偏好高股息""我上次复盘止损不及时"
+- domain_knowledge = **全局共享**（无 user 隔离），存的是"苹果概念股=立讯/歌尔/蓝思""PEG=PE/净利润增速"
+- 两者**独立模块**，不混进 unified memory layer 的 scope 体系
+
+**计划架构**：
+```
+core/domain_knowledge/
+├── concepts/          # 概念股映射（最高频）
+├── glossary/          # 交易术语
+├── formulas/          # 计算公式
+├── industry_chain/    # 产业链上中下游
+└── sector_map/        # 行业-板块-标签
+```
+
+**暴露方式**：注册为 Function Call 工具（`get_concept_stocks`/`get_industry_chain`/`lookup_term` 等），LLM 按需调用，命中即用，未命中走兜底（推理 + 标注"未在内置库中找到"）。
+
+**落地阶段**（v4.0 启动）：
+| 阶段 | 范围 |
+|-----|------|
+| P0 | 概念股查询工具（接同花顺/东方财富的概念板块数据，定时同步） |
+| P1 | 行业链/板块映射（含上下游） |
+| P2 | 术语词典 + 公式手册（手工维护 + 用户补充） |
+| P3 | 用户自定义概念组合（与 mem0 联动） |
+
+**v3.0 暂不实施**：v3.0 已完成 mem0 统一记忆层，本待办留作 v4.0 与 Cognee Graph Memory 同期规划。
+
+---
+
+## 15. v3.0 落地现状与产品再定位（2026-06-24 更新）
+
+### 15.1 工程落地盘点
+
+经全量代码扫描，原设计中的 6 个 scope 实际写入/召回链路如下：
+
+| scope | 写入路径 | 召回路径 | 状态 |
+|-------|---------|---------|------|
+| `conversation` | 设计中：助手对话后写入 | 设计中：助手 prompt 注入 | ❌ `_store_conversation_memory` 函数体已被改为 `return`，从未真正写入 |
+| `user_preference` | 无任何代码路径写入 | 助手 `_recall_memory_block` 召回 + 工作流 `_recall_analysis_memory` 召回 | ⚠️ 召回方在查，写入方为空 |
+| `analysis_insight` | `unified_analysis_service._store_analysis_insight` → `svc.store_stock_analysis()` | `_recall_analysis_memory` 在工作流分析前召回 | ✅ 真正工作 |
+| `skill_lesson` | `skill_generation_service._store_skill_lessons` | `_recall_skill_lessons` 在代码生成前召回 | ✅ 真正工作 |
+| `agent_experience` | 无任何代码路径写入 | 无 | ❌ 完全未落地 |
+| `trade_pattern` | 无任何代码路径写入 | 无 | ❌ 完全未落地 |
+
+**实际可用范围**：只有 `analysis_insight`（用户重复分析同股时召回历史结论）和 `skill_lesson`（Skill 生成时共享教训）两条线在真正运行。
+
+### 15.2 偏离原设计的关键决策
+
+1. **`_store_conversation_memory` 被刻意禁用**
+   - 函数体仅保留 `return`，注释写明"助手对话只保留在线程消息集合，不再写入 mem0 长期记忆"
+   - 推测原因：mem0 每次 add 需 LLM 调用做事实提取，成本/噪音权衡后被关闭
+   - 副作用：召回侧仍在查 `user_preference` 等 scope，但写入方为空，等于死循环
+
+2. **Phase 3 仅落地"对象化股票分析记忆"**
+   - 工作流 Agent（`core/agents/`）**0 处**调用 `MemoryService`
+   - `agent_experience` 设计中"由 Agent 完成后沉淀"未实现
+   - 实际效果只是"再次分析同一股票时给 prompt 多塞几行历史结论"
+
+3. **前端 UI 已对齐这个收窄的现状**
+   - `views/memory/index.vue` 头部直接写"股票对象记忆"，硬过滤 `analysis_insight + memory_kind=stock_analysis`
+   - 不再展示其他 scope，避免出现"有列表但永远为空"
+
+### 15.3 产品视角：现在的功能价值评估
+
+| 维度 | 现状 |
+|------|------|
+| 用户感知度 | ⚠️ 低 — "下次分析时召回上次结论"用户基本看不到效果 |
+| 替代方案 | 🟡 「研究报告」列表已能直接给出完整历史报告，比"模糊语义召回"更准确 |
+| 决策影响 | ⚠️ 间接 — 给 prompt 多塞几行，不一定影响结论 |
+| 持续运行成本 | 每次写入一次 LLM 调用 + 每次召回 embedding 检索 |
+
+**结论**：技术红利存在（Skill 生成跨 session 共享教训），但 ToC 产品价值不明确。
+
+### 15.4 产品再定位
+
+把记忆模块从「**统一记忆基础设施**」（工程视角）转向「**金融纪律 & 用户偏好的可见记忆**」（产品视角）。核心调整：
+
+- ❌ 不再追求"6 个孤岛收口"的全面工程统一
+- ✅ 聚焦"用户能直接看到/感受到记忆在起作用"的金融场景
+- ✅ 让记忆从"幕后玄学"变成"用户可控的产品"
+
+### 15.5 迭代计划
+
+> **进度图例**：✅ 已完成 / 🚧 进行中 / ⏸ 暂未启动
+
+#### P0 — 让"记忆"被用户主动感知
+
+| 任务 | 状态 | 实施落点 | 实现思路 |
+|------|------|---------|---------|
+| **P0-1: `remember_this` 元工具** | ✅ 已完成（2026-06-24） | `app/services/intelligent_assistant_service.py` — `REMEMBER_THIS_TOOL_NAME` / `_build_remember_this_tool_def` / `_make_remember_this_callable`；`IntelligentAssistantService.__init__` 接收 `user_id` 并在 `_ensure_client` 注入元工具 | 在智能助手注入一个元工具，让 LLM 在用户表达"请记住""我希望"等明确指令时主动调用，把陈述以 `user_preference` scope 存入 mem0（`infer=False`，不再二次提取）。和 `report_capability_gap` 不同，这是用户**主动**触发，可靠性远高于回扫文本 |
+| **P0-2: 召回结果可视化引用** | ✅ 已完成（2026-06-24） | `_recall_memory_block` 召回 scope 从 `["user_preference"]` 扩展为 `["user_preference","trade_pattern"]`；`_get_system_prompt` 在 `memory_block` 非空时插入「请在相关句末用『来自您之前的记忆』自然标注」指引 | 让 LLM 在确实参考了记忆时自然标注来源；不强制硬拼前缀，避免 emoji 污染和误标 |
+| **P0-3: 用户主动记忆开关** | ✅ 已完成（2026-06-24，最小改造） | `frontend/src/views/memory/index.vue` 在现有"股票对象记忆"卡片下方新增"我的偏好与纪律记忆"区块，展示 `user_preference + trade_pattern` 列表（含来源 tag、删除按钮、空态提示） | 用户可以直接看到通过 `remember_this` / 复盘 / 计划同步进来的条目；卡片上的「（category/source/symbol/...）」tag 体现条目来源 |
+
+#### P1 — 真正打开金融业务维度
+
+| 任务 | 状态 | 实施落点 | 实现思路 |
+|------|------|---------|---------|
+| **P1-1: 复盘完成后写 `trade_pattern`** | ✅ 已完成（2026-06-24） | `app/services/trade_review_service.py` — 新增 `_store_trade_pattern_memory()`；v1 路径（`create_review` 完成后）和 v2 路径（`create_review_with_workflow` 完成后）均调用 | 从 `ai_review.weaknesses / suggestions / plan_deviation / summary` 拼接成结构化纪律要点（`infer=False`），写入 mem0 `trade_pattern` scope；写入失败/异常均静默降级 |
+| **P1-2: 助手讨论交易意图时召回 `trade_pattern`** | ✅ 已完成（合并入 P0-2） | `_recall_memory_block` 召回 scope 已包含 `trade_pattern` | 助手对话时自然召回历史纪律偏差 |
+| **P1-3: 投资计划激活时同步 `user_preference`** | ✅ 已完成（2026-06-24） | `app/routers/trading_system.py` — 新增 `_sync_trading_system_to_user_preference()`；`POST /{system_id}/activate` 后调用 | 把激活计划的名称/交易风格/止损规则/止盈规则/仓位规则提取为一条 `user_preference` 记忆（`category=trading_discipline`，`source=trading_system_activated`） |
+
+#### P2 — 现有红利兑现
+
+| 任务 | 状态 | 实施落点 | 实现思路 |
+|------|------|---------|---------|
+| **P2-1: 工作流 Agent 接入** | ⏸ 暂未启动 | 计划落点：`core/agents/base.py` 的 prompt 构建处 | 涉及多智能体主流程，需要回归验证 Bull/Bear/Risk 等 Agent 行为，留作后续单独迭代 |
+| **P2-2: 不重新启用全量对话记忆** | ✅ 已完成（保持现状） | — | 仍然保持 conversation scope 关闭；改由 P0-1 的"半主动"路径补齐用户偏好覆盖 |
+
+#### P3 — 清理与降级
+
+| 任务 | 状态 | 实施落点 | 实现思路 |
+|------|------|---------|---------|
+| **P3-1: 删除/标记 v1.x 遗留向量库代码** | ⏸ 暂未启动 | `core/memory/memory_manager.py` | 仍在评估是否还有依赖方，暂时保留 |
+| **P3-2: 清理空壳函数与无效路径** | ✅ 已完成（2026-06-24） | `app/services/intelligent_assistant_service.py` 删除 `_store_conversation_memory()` 及其两处 `asyncio.create_task` 调用，替换为注释说明 | 不再保留空壳，避免误导后续阅读者 |
+| **P3-3: scope 重新对齐** | 🚧 部分完成 | `core/memory/models.py` 中 6 个 scope 常量仍保留 | 实际可用 scope 为 `user_preference / analysis_insight / trade_pattern / skill_lesson` 四项；`conversation` 和 `agent_experience` 仍声明但暂无写入路径，等 P2-1 落地后再决定是否删除 `agent_experience` |
+
+### 15.6 验收标准（再定位后）
+
+- ✅ 用户在助手对话中说"请记住我偏好分红率高的股票"，能在「我的记忆」页面看到对应条目
+- ✅ 用户三天后再问选股，助手回复开头有"📌 根据您之前提到的'偏好分红率高'"
+- ✅ 用户完成一次复盘后，"我的记忆" `trade_pattern` 下出现纪律总结
+- ✅ 助手在用户描述追高意图时，能召回过去类似纪律偏差并提醒
+- ❌ 不要求 `conversation` 自动写入、不要求 `agent_experience` 全量覆盖
+

@@ -142,6 +142,13 @@ class ToolRegistry:
             parameters: 参数定义列表（可选，如果提供则覆盖元数据中的参数）
             timeout_tier: 超时分层 light/medium/heavy
         """
+        # 防御性：tool_id 必须符合 OpenAI 工具名规范（^[a-zA-Z0-9_-]+$）
+        from .fc_converter import sanitize_function_name
+        sanitized = sanitize_function_name(tool_id)
+        if sanitized != tool_id:
+            logger.warning(f"⚠️ tool_id '{tool_id}' 含非法字符，已规范化为 '{sanitized}'")
+            tool_id = sanitized
+
         if tool_id in self._tools:
             if tool_id not in self._functions:
                 self._functions[tool_id] = func

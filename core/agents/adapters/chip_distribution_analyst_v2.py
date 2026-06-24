@@ -64,6 +64,7 @@ class ChipDistributionAnalystV2(AnalystAgent):
         requires_tools=True,
         output_field="chip_report",
         report_label="【筹码分布分析 v2】",
+        workflow_stage="analyst",
         execution_order=15,
     )
 

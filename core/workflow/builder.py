@@ -1222,53 +1222,7 @@ class WorkflowBuilder:
         from typing_extensions import TypedDict
         from langgraph.graph import MessagesState
         import operator
-
-        def merge_dict(left: dict, right: dict) -> dict:
-            """
-            智能合并两个字典，用于处理并发更新
-
-            特殊处理：对于辩论状态的历史字段（*_history），
-            优先保留非空值，避免被空字符串覆盖
-            """
-            if left is None:
-                return right
-            if right is None:
-                return left
-
-            result = left.copy()
-
-            # 需要特殊处理的历史字段
-            history_fields = [
-                'bull_history', 'bear_history', 'history',
-                'risky_history', 'safe_history', 'neutral_history'
-            ]
-
-            for key, value in right.items():
-                # 对于历史字段，只有当新值非空时才更新
-                if key in history_fields:
-                    old_value = result.get(key, "")
-                    # 如果新值为空但旧值非空，保留旧值
-                    if not value and old_value:
-                        continue
-                    # 如果两者都非空，保留更长的那个（包含更多内容）
-                    if value and old_value and len(old_value) > len(value):
-                        continue
-                result[key] = value
-
-            return result
-
-        # 定义一个reducer函数，用于处理并发更新（保留非空值）
-        def keep_non_empty(left: Any, right: Any) -> Any:
-            """保留非空值，优先使用right（新值）"""
-            if right:
-                return right
-            return left if left else right
-
-        def keep_latest_list(left: Any, right: Any) -> Any:
-            """列表字段始终采用最新值，允许用空列表显式清空消息历史。"""
-            if right is None:
-                return left
-            return right
+        from core.state.reducers import keep_non_empty, merge_dict, keep_latest_list
 
         class WorkflowState(MessagesState):
             # 基本信息
@@ -1294,6 +1248,10 @@ class WorkflowBuilder:
             sentiment_report: Annotated[str, keep_non_empty]
             index_report: Annotated[str, keep_non_empty]
             sector_report: Annotated[str, keep_non_empty]
+
+            # 🆕 工具调用摘要（各分析师的工具调用记录，供下游 Agent 引用）
+            # key: analyst_type 或 agent_id，value: Markdown 格式的摘要文本
+            tool_call_summaries: Annotated[dict, merge_dict]
 
             # 研究结果
             bull_report: Annotated[str, keep_non_empty]
@@ -1558,7 +1516,14 @@ class WorkflowBuilder:
             db = self.binding_manager._db
             if db is None:
                 return False
-            doc = db.agent_configs.find_one({"agent_id": agent_id}, {"_id": 1})
+            doc = db.agent_configs.find_one({
+                "agent_id": agent_id,
+                "enabled": True,
+                "$or": [
+                    {"metadata.source": {"$ne": "agent_workshop"}},
+                    {"metadata.source": "agent_workshop", "version_status": "active", "runtime_status": "active"},
+                ],
+            }, {"_id": 1})
             return doc is not None
         except Exception:
             return False
@@ -1840,6 +1805,16 @@ class WorkflowBuilder:
         else:
             normalized_version = str(agent_version or "").lower()
             agent_maintenance_status = "unmaintained" if normalized_version.startswith(("1", "v1")) else "maintained"
+
+        # 🔥 检查是否为废弃 Agent
+        if agent_maintenance_status == "deprecated":
+            import warnings
+            warnings.warn(
+                f"Agent '{agent_id}' 已废弃，请使用 v2 版本。该 Agent 将在未来的版本中被移除。",
+                DeprecationWarning,
+                stacklevel=3
+            )
+            logger.warning(f"[节点执行] ⚠️ Agent '{agent_id}' 已废弃，建议使用 v2 版本")
 
         invocation_request = self._build_workflow_invocation_request(
             state=state,

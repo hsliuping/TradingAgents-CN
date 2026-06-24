@@ -4,12 +4,13 @@
 整合A股、港股、美股等不同市场的新闻获取逻辑到一个工具函数中
 让大模型只需要调用一个工具就能获取所有类型股票的新闻数据
 
-⚠️ DEPRECATED - 此文件已废弃
+⚠️⚠️⚠️ DEPRECATED - 已过期 8 天 ⚠️⚠️⚠️
 ====================================
 此工具已迁移到新的工具系统：
 - 新位置: core/tools/implementations/news/stock_news.py
 - 迁移日期: 2025-12-15
-- 移除计划: 2026-06-15 (6个月后)
+- 原计划移除日期: 2026-06-15
+- 当前日期: 2026-06-23（已过期）
 
 请使用新的工具系统：
     from core.tools.implementations.news import get_stock_news_unified
@@ -18,12 +19,7 @@
     from core.tools import get_tool
     tool = get_tool("get_stock_news_unified")
 
-注意：新工具使用了更简洁的实现（减少76%代码），但可能缺少以下功能：
-- MongoDB数据库缓存
-- 复杂的同步机制（线程池+事件循环）
-
-如果需要这些功能，请参考迁移指南：
-docs/design/v2.0/tools/TOOLS_MIGRATION_GUIDE.md
+🔴 紧急：仍有 11 个文件引用此模块，请尽快迁移！
 ====================================
 """
 
@@ -32,9 +28,12 @@ import warnings
 from datetime import datetime
 import re
 
-# 发出废弃警告
+# 🔴 发出废弃警告（已过期）
 warnings.warn(
-    "tradingagents.tools.unified_news_tool 已废弃，请使用 core.tools.implementations.news.stock_news",
+    "tradingagents.tools.unified_news_tool is DEPRECATED and EXPIRED "
+    "(planned removal: 2026-06-15, now 2026-06-23). "
+    "Please use core.tools.implementations.news.stock_news instead. "
+    "11 files still reference this module - migration required before removal!",
     DeprecationWarning,
     stacklevel=2
 )

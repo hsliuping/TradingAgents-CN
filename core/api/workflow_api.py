@@ -59,10 +59,15 @@ class WorkflowAPI:
     def _init_db(self) -> None:
         """初始化数据库连接"""
         try:
-            mongo_uri = os.getenv(
-                "MONGODB_CONNECTION_STRING",
-                "mongodb://admin:tradingagents123@127.0.0.1:27017/tradingagents?authSource=admin"
-            )
+            # ⚠️ 安全警告：不再使用硬编码凭证作为默认值
+            mongo_uri = os.getenv("MONGODB_CONNECTION_STRING")
+            
+            if not mongo_uri:
+                raise ValueError(
+                    "必须设置环境变量 MONGODB_CONNECTION_STRING。"
+                    "示例: mongodb://user:password@host:port/database?authSource=admin"
+                )
+            
             db_name = os.getenv("MONGODB_DATABASE_NAME", "tradingagents")
 
             client = MongoClient(mongo_uri)

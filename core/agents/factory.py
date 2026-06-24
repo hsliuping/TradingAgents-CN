@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional, Type, List
 from langchain_core.language_models import BaseChatModel
 
 from .base import BaseAgent
-from .config import AgentConfig, AgentMetadata
+from .config import AgentConfig, AgentMetadata, AgentMaintenanceStatus
 from .registry import AgentRegistry, get_registry
 from .universal import UniversalAgent
 
@@ -66,6 +66,18 @@ class AgentFactory:
         logger.info(f"   - llm: {type(llm).__name__ if llm else 'None'}")
         logger.info(f"   - tool_ids: {tool_ids}")
         logger.info(f"   - config_overrides: {config_overrides}")
+
+        # 🔥 检查是否为废弃 Agent
+        metadata = self.registry.get_metadata(agent_id)
+        if metadata and metadata.maintenance_status == AgentMaintenanceStatus.DEPRECATED:
+            import warnings
+            warnings.warn(
+                f"Agent '{agent_id}' 已废弃，请使用 v2 版本（如 '{agent_id}_v2'）。"
+                f"该 Agent 将在未来的版本中被移除。",
+                DeprecationWarning,
+                stacklevel=3
+            )
+            logger.warning(f"[AgentFactory] ⚠️ Agent '{agent_id}' 已废弃，建议使用 v2 版本")
 
         agent_class = self.registry.get(agent_id)
 
@@ -211,9 +223,16 @@ class AgentFactory:
                 logger.warning(f"[AgentFactory] 数据库未连接，无法创建 UniversalAgent: {agent_id}")
                 return None
 
-            doc = db.agent_configs.find_one({"agent_id": agent_id})
+            doc = db.agent_configs.find_one({
+                "agent_id": agent_id,
+                "enabled": True,
+                "$or": [
+                    {"metadata.source": {"$ne": "agent_workshop"}},
+                    {"metadata.source": "agent_workshop", "version_status": "active", "runtime_status": "active"},
+                ],
+            })
             if doc is None:
-                logger.debug(f"[AgentFactory] agent_configs 中找不到 '{agent_id}'，无法创建 UniversalAgent")
+                logger.debug(f"[AgentFactory] agent_configs 中找不到可运行的 '{agent_id}'，无法创建 UniversalAgent")
                 return None
 
             agent_name = doc.get("name") or doc.get("agent_name") or agent_id

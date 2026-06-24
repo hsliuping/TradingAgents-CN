@@ -80,6 +80,7 @@ class AgentMaintenanceStatus(str, Enum):
     """Agent 维护状态声明"""
     MAINTAINED = "maintained"
     UNMAINTAINED = "unmaintained"
+    DEPRECATED = "deprecated"  # 🔥 新增：已废弃，不应被新代码引用
 
 
 class AgentInputSource(str, Enum):
@@ -182,6 +183,7 @@ class AgentMetadata(BaseModel):
     report_label: str = ""            # 报告标签，如 "【市场分析】"
     node_name: str = ""               # 工作流节点名称，如 "Market Analyst"
     execution_order: int = 100        # 执行顺序（越小越先执行）
+    workflow_stage: str = ""          # 工作流阶段：analyst/research/risk/manager/trader
 
     # 🆕 成长能力声明
     growth_role: GrowthRole = GrowthRole.NONE
@@ -242,7 +244,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="市场分析师",
         description="分析市场数据、价格走势和技术指标",
         category=AgentCategory.ANALYST,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="📈",
         color="#2ecc71",
         tags=["技术分析", "市场数据"],
@@ -262,13 +264,14 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【技术分析】",
         node_name="市场分析师",
         execution_order=10,
+        workflow_stage="analyst",  # 🔥 新增：分析师阶段
     ),
     "fundamentals_analyst": AgentMetadata(
         id="fundamentals_analyst",
         name="基本面分析师",
         description="分析公司财务数据和基本面指标",
         category=AgentCategory.ANALYST,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="📊",
         color="#3498db",
         tags=["基本面", "财务分析"],
@@ -281,13 +284,14 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【基本面分析】",
         node_name="基本面分析师",
         execution_order=40,
+        workflow_stage="analyst",  # 🔥 新增：分析师阶段
     ),
     "news_analyst": AgentMetadata(
         id="news_analyst",
         name="新闻分析师",
         description="分析财经新闻和事件影响",
         category=AgentCategory.ANALYST,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="📰",
         color="#9b59b6",
         tags=["新闻", "事件驱动"],
@@ -300,13 +304,14 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【新闻分析】",
         node_name="新闻分析师",
         execution_order=30,
+        workflow_stage="analyst",  # 🔥 新增：分析师阶段
     ),
     "social_analyst": AgentMetadata(
         id="social_analyst",
         name="社交媒体分析师",
         description="分析社交媒体情绪和舆论",
         category=AgentCategory.ANALYST,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="💬",
         color="#e74c3c",
         tags=["情绪分析", "舆情"],
@@ -319,13 +324,14 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【舆情分析】",
         node_name="社交媒体分析师",
         execution_order=20,
+        workflow_stage="analyst",  # 🔥 新增：分析师阶段
     ),
     "sector_analyst": AgentMetadata(
         id="sector_analyst",
         name="行业/板块分析师",
         description="分析行业趋势、板块轮动和行业对比",
         category=AgentCategory.ANALYST,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         license_tier=LicenseTier.PRO,
         icon="🏭",
         color="#f39c12",
@@ -339,13 +345,14 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【行业板块分析】",
         node_name="板块分析师",
         execution_order=5,  # 在技术分析之前
+        workflow_stage="analyst",  # 🔥 新增：分析师阶段
     ),
     "index_analyst": AgentMetadata(
         id="index_analyst",
         name="大盘/指数分析师",
         description="分析大盘指数、市场环境和系统性风险",
         category=AgentCategory.ANALYST,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         license_tier=LicenseTier.PRO,
         icon="🌐",
         color="#1abc9c",
@@ -359,115 +366,125 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【宏观大盘分析】",
         node_name="大盘分析师",
         execution_order=1,  # 最先执行
+        workflow_stage="analyst",  # 🔥 新增：分析师阶段
     ),
     "bull_researcher": AgentMetadata(
         id="bull_researcher",
         name="看涨研究员",
         description="从乐观角度分析投资机会",
         category=AgentCategory.RESEARCHER,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="🐂",
         color="#27ae60",
         tags=["看涨", "机会"],
         tools=[],  # 研究员不直接调用工具，基于分析师报告
         max_tool_calls=0,
+        workflow_stage="research",  # 🔥 新增：研究阶段
     ),
     "bear_researcher": AgentMetadata(
         id="bear_researcher",
         name="看跌研究员",
         description="从谨慎角度分析投资风险",
         category=AgentCategory.RESEARCHER,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="🐻",
         color="#c0392b",
         tags=["看跌", "风险"],
         tools=[],
         max_tool_calls=0,
+        workflow_stage="research",  # 🔥 新增：研究阶段
     ),
     "trader": AgentMetadata(
         id="trader",
         name="交易员",
         description="综合分析结果做出交易决策",
         category=AgentCategory.TRADER,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="💰",
         color="#f1c40f",
         tags=["交易", "决策"],
         tools=[],
         max_tool_calls=0,
+        workflow_stage="trader",  # 🔥 新增：交易决策阶段
     ),
     "position_advisor": AgentMetadata(
         id="position_advisor",
         name="持仓分析师",
         description="基于单股分析报告和持仓信息，提供个性化的持仓操作建议",
         category=AgentCategory.TRADER,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="💼",
         color="#2980b9",
         tags=["持仓", "操作建议", "风险评估"],
         tools=[],
         max_tool_calls=0,
         requires_tools=False,
+        workflow_stage="trader",  # 🔥 新增：交易决策阶段
     ),
     "risky_analyst": AgentMetadata(
         id="risky_analyst",
         name="激进风险分析师",
         description="从激进角度评估交易计划，关注高收益机会，容忍较高风险",
         category=AgentCategory.RISK,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="🔥",
         color="#e74c3c",
         tags=["风险", "激进", "收益"],
         tools=[],
         max_tool_calls=0,
+        workflow_stage="risk",  # 🔥 新增：风险阶段
     ),
     "safe_analyst": AgentMetadata(
         id="safe_analyst",
         name="保守风险分析师",
         description="从保守角度评估交易计划，优先资本保护，规避潜在风险",
         category=AgentCategory.RISK,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="🛡️",
         color="#27ae60",
         tags=["风险", "保守", "保护"],
         tools=[],
         max_tool_calls=0,
+        workflow_stage="risk",  # 🔥 新增：风险阶段
     ),
     "neutral_analyst": AgentMetadata(
         id="neutral_analyst",
         name="中性风险分析师",
         description="从中性角度评估交易计划，平衡收益与风险，寻求最优解",
         category=AgentCategory.RISK,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="⚖️",
         color="#3498db",
         tags=["风险", "中性", "平衡"],
         tools=[],
         max_tool_calls=0,
+        workflow_stage="risk",  # 🔥 新增：风险阶段
     ),
     "risk_manager": AgentMetadata(
         id="risk_manager",
         name="风险经理",
         description="综合三方风险分析师观点，做出最终风险调整决策",
         category=AgentCategory.MANAGER,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="👨‍⚖️",
         color="#9b59b6",
         tags=["风险", "裁决", "决策"],
         tools=[],
         max_tool_calls=0,
+        workflow_stage="manager",  # 🔥 新增：经理阶段
     ),
     "research_manager": AgentMetadata(
         id="research_manager",
         name="研究经理",
         description="综合多空研究员观点，形成投资建议",
         category=AgentCategory.MANAGER,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="👔",
         color="#9b59b6",
         tags=["管理", "综合", "决策"],
         tools=[],
         max_tool_calls=0,
+        workflow_stage="manager",  # 🔥 新增：经理阶段
     ),
     # ==================== 交易复盘 Agent ====================
     "timing_analyst": AgentMetadata(
@@ -475,7 +492,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="时机分析师",
         description="分析买入卖出时机，评估交易时机选择的合理性",
         category=AgentCategory.ANALYST,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="⏰",
         color="#e67e22",
         tags=["复盘", "时机", "买卖点"],
@@ -496,13 +513,14 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【时机分析】",
         node_name="时机分析师",
         execution_order=10,
+        workflow_stage="analyst",  # 🔥 新增：分析师阶段（复盘流程）
     ),
     "position_analyst": AgentMetadata(
         id="position_analyst",
         name="仓位分析师",
         description="分析仓位控制和加减仓策略的合理性",
         category=AgentCategory.ANALYST,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="📊",
         color="#3498db",
         tags=["复盘", "仓位", "资金管理"],
@@ -523,13 +541,14 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【仓位分析】",
         node_name="仓位分析师",
         execution_order=20,
+        workflow_stage="analyst",  # 🔥 新增：分析师阶段（复盘流程）
     ),
     "emotion_analyst": AgentMetadata(
         id="emotion_analyst",
         name="情绪分析师",
         description="分析交易中的情绪化操作和纪律执行情况",
         category=AgentCategory.ANALYST,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="🧠",
         color="#9b59b6",
         tags=["复盘", "情绪", "纪律"],
@@ -550,13 +569,14 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【情绪分析】",
         node_name="情绪分析师",
         execution_order=30,
+        workflow_stage="analyst",  # 🔥 新增：分析师阶段（复盘流程）
     ),
     "attribution_analyst": AgentMetadata(
         id="attribution_analyst",
         name="归因分析师",
         description="分析收益来源，区分大盘/行业/个股Alpha贡献",
         category=AgentCategory.ANALYST,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="🎯",
         color="#1abc9c",
         tags=["复盘", "归因", "Alpha"],
@@ -577,13 +597,14 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【归因分析】",
         node_name="归因分析师",
         execution_order=40,
+        workflow_stage="analyst",  # 🔥 新增：分析师阶段（复盘流程）
     ),
     "review_manager": AgentMetadata(
         id="review_manager",
         name="复盘总结师",
         description="综合所有分析维度，生成完整复盘报告和改进建议",
         category=AgentCategory.MANAGER,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="📝",
         color="#2c3e50",
         tags=["复盘", "总结", "建议"],
@@ -603,6 +624,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【复盘总结】",
         node_name="复盘总结师",
         execution_order=100,
+        workflow_stage="manager",  # 🔥 新增：经理阶段（复盘流程）
     ),
     # ==================== 持仓分析 Agent ====================
     "pa_technical": AgentMetadata(
@@ -610,7 +632,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         name="持仓技术面分析师",
         description="分析K线走势、技术指标、支撑阻力位，评估技术面状态",
         category=AgentCategory.ANALYST,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="📈",
         color="#2ecc71",
         tags=["持仓分析", "技术面", "趋势"],
@@ -621,13 +643,14 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【技术面分析】",
         node_name="技术面分析师",
         execution_order=10,
+        workflow_stage="analyst",  # 🔥 新增：分析师阶段（持仓分析流程）
     ),
     "pa_fundamental": AgentMetadata(
         id="pa_fundamental",
         name="持仓基本面分析师",
         description="分析财务数据、估值水平、行业地位，评估基本面价值",
         category=AgentCategory.ANALYST,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="📊",
         color="#3498db",
         tags=["持仓分析", "基本面", "估值"],
@@ -638,13 +661,14 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【基本面分析】",
         node_name="基本面分析师",
         execution_order=20,
+        workflow_stage="analyst",  # 🔥 新增：分析师阶段（持仓分析流程）
     ),
     "pa_risk": AgentMetadata(
         id="pa_risk",
         name="持仓风险评估师",
         description="评估持仓风险、设置止损止盈、分析仓位合理性",
         category=AgentCategory.ANALYST,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="⚠️",
         color="#e74c3c",
         tags=["持仓分析", "风险", "止损"],
@@ -655,13 +679,14 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【风险评估】",
         node_name="风险评估师",
         execution_order=30,
+        workflow_stage="analyst",  # 🔥 新增：分析师阶段（持仓分析流程）
     ),
     "pa_advisor": AgentMetadata(
         id="pa_advisor",
         name="持仓操作建议师",
         description="综合技术面、基本面、风险评估，给出持仓操作建议",
         category=AgentCategory.MANAGER,
-        maintenance_status=AgentMaintenanceStatus.UNMAINTAINED,
+        maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="💡",
         color="#9b59b6",
         tags=["持仓分析", "建议", "决策"],
@@ -674,6 +699,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         execution_order=100,
         # 🆕 读取其他 Agent 的输出
         reads_from=["technical_analysis", "fundamental_analysis", "risk_analysis"],
+        workflow_stage="manager",  # 🔥 新增：经理阶段（持仓分析流程）
     ),
     # 🆕 v2.0 架构的 Agent
     "market_analyst_v2": AgentMetadata(

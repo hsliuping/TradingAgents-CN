@@ -124,6 +124,7 @@ class MarketAnalystV2(AnalystAgent):
         requires_tools=True,
         output_field="market_report",
         report_label="【市场分析 v2】",
+        workflow_stage="analyst",
     )
 
     # 分析师类型
@@ -220,7 +221,12 @@ class MarketAnalystV2(AnalystAgent):
 
             report = self._sanitize_report(report)
 
-            return {self.output_field: report}
+            result = {self.output_field: report}
+            # 🆕 附带工具调用摘要
+            tool_summary = self._format_tool_call_summary()
+            if tool_summary:
+                result["tool_call_summaries"] = {self.analyst_type: tool_summary}
+            return result
 
         except Exception as e:
             logger.error(f"[{self.agent_id}] 执行失败: {e}", exc_info=True)

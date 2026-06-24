@@ -89,6 +89,7 @@ class TraderV2(TraderAgent):
         requires_tools=False,
         output_field="trader_investment_plan",
         report_label="【用户版研究简报 v2】",
+        workflow_stage="trader",
         growth_role="optimizer",
         growth_outputs=["trader_investment_plan"],
         memory_scope_hint="pattern",
