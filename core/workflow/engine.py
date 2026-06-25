@@ -61,7 +61,10 @@ _BUILTIN_REPORT_FIELDS = [
 
 
 def _get_dynamic_report_fields(agent_ids: List[str]) -> List[str]:
-    """从 Agent metadata 和 agent_configs 动态推导报告字段列表（替代硬编码）"""
+    """从 Agent metadata 和 agent_configs 动态推导报告字段列表（替代硬编码）
+
+    只返回 show_in_reports=True 的 agent 的 output_field。
+    """
     fields = []
 
     try:
@@ -69,7 +72,9 @@ def _get_dynamic_report_fields(agent_ids: List[str]) -> List[str]:
         registry = get_registry()
         for meta in registry.list_all():
             if meta.id in agent_ids and meta.output_field and meta.output_field not in fields:
-                fields.append(meta.output_field)
+                # 检查 show_in_reports 标志，默认 True
+                if getattr(meta, 'show_in_reports', True):
+                    fields.append(meta.output_field)
     except Exception as e:
         logger.warning(f"[动态报告字段] 从 AgentRegistry 获取失败: {e}")
 
@@ -89,7 +94,12 @@ def _get_dynamic_report_fields(agent_ids: List[str]) -> List[str]:
         for doc in docs:
             output_field = doc.get("output_field") or (doc.get("metadata") or {}).get("output_field")
             if output_field and output_field not in fields:
-                fields.append(output_field)
+                # 检查 show_in_reports 标志，默认 True
+                show = doc.get("show_in_reports")
+                if show is None:
+                    show = (doc.get("metadata") or {}).get("show_in_reports", True)
+                if show:
+                    fields.append(output_field)
     except Exception as e:
         logger.warning(f"[动态报告字段] 从 agent_configs 获取失败: {e}")
 
@@ -866,6 +876,9 @@ class WorkflowEngine:
         field_infos = []
         for node in agent_nodes:
             meta = self._lookup_agent_metadata(node.agent_id)
+            # 检查 show_in_reports 标志，默认 True
+            if meta and not getattr(meta, 'show_in_reports', True):
+                continue
             field_name = (meta.output_field if meta and meta.output_field
                           else f"{node.agent_id}_report")
             display_name = ""
@@ -888,6 +901,8 @@ class WorkflowEngine:
                 "is_primary": False,
                 "format_hint": "markdown",
                 "agent_id": node.agent_id,
+                "icon": meta.icon if meta else "📄",
+                "description": meta.description if meta else "",
             })
 
         if field_infos:
@@ -921,6 +936,9 @@ class WorkflowEngine:
         field_infos = []
         for node in agent_nodes:
             meta = self._lookup_agent_metadata(node.agent_id)
+            # 检查 show_in_reports 标志，默认 True
+            if meta and not getattr(meta, 'show_in_reports', True):
+                continue
             field_name = (meta.output_field if meta and meta.output_field
                           else f"{node.agent_id}_report")
             display_name = ""
@@ -937,6 +955,8 @@ class WorkflowEngine:
                 "is_primary": True,
                 "format_hint": "markdown",
                 "agent_id": node.agent_id,
+                "icon": meta.icon if meta else "📄",
+                "description": meta.description if meta else "",
             })
 
         return self._extract_from_state(state, field_infos)
@@ -953,6 +973,8 @@ class WorkflowEngine:
                 "is_primary": fc.is_primary,
                 "format_hint": fc.format_hint or "markdown",
                 "agent_id": "",
+                "icon": getattr(fc, "icon", "") or "📄",
+                "description": getattr(fc, "description", "") or "",
             })
         if field_infos and not any(f["is_primary"] for f in field_infos):
             max_order = max(field_infos, key=lambda f: f["order"])
@@ -990,6 +1012,8 @@ class WorkflowEngine:
                 "is_primary": info["is_primary"],
                 "format_hint": info["format_hint"],
                 "agent_id": info.get("agent_id", ""),
+                "icon": info.get("icon", "📄"),
+                "description": info.get("description", ""),
                 "has_content": has_content,
             })
 

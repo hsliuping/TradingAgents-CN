@@ -1221,58 +1221,27 @@ class TaskAnalysisService:
                         return x
             return ""
 
-        # 🔑 第一步：从顶层提取标准报告字段
-        report_fields = [
-            # 🆕 宏观分析报告（优先提取）
-            'index_report',
-            'sector_report',
-            # 个股分析报告
-            'market_report',
-            'sentiment_report',
-            'news_report',
-            'fundamentals_report',
-            # 投资计划
-            'investment_plan',
-            'trader_investment_plan',
-            'final_trade_decision',
-            # 🔥 新增：从顶层提取的研究员报告（v2.0工作流可能直接返回这些字段）
-            'bull_report',
-            'bear_report',
-        ]
-
-        # 从 raw_result 中提取报告内容（与旧流程保持一致）
-        for field in report_fields:
-            content_raw = raw_result.get(field, "")
-            content = _extract_text(content_raw, field)  # 🔥 传入字段名，以便特殊处理
-            if content and isinstance(content, str) and len(content.strip()) > 5:
-                # 🔥 新增：对于 investment_plan 和 final_trade_decision，如果是 JSON 格式，转换为 Markdown
-                # 🔥 修复：final_trade_decision 如果已经有 content 字段（格式化的 Markdown），直接使用，不再转换
-                if field in ['investment_plan', 'final_trade_decision']:
-                    # 🔥 final_trade_decision 如果是从 content 字段提取的（已经是 Markdown），直接使用
-                    if field == 'final_trade_decision' and content_raw and isinstance(content_raw, dict) and content_raw.get("content"):
+        # 🔑 第一步：从引擎产出的 structured_reports 动态提取报告字段
+        # engine 已按 show_in_reports 过滤，这里直接复用，不维护硬编码列表
+        structured_reports = raw_result.get("structured_reports", {})
+        if structured_reports and isinstance(structured_reports, dict):
+            for field, entry in structured_reports.items():
+                if isinstance(entry, dict) and entry.get("success") and entry.get("content"):
+                    content = entry["content"]
+                    if isinstance(content, str) and len(content.strip()) > 5:
                         reports[field] = content.strip()
-                        self.logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(content.strip())} (使用 content 字段的 Markdown)")
-                    else:
-                        # 否则，尝试转换 JSON 为 Markdown
-                        if field == 'investment_plan':
-                            report_type = "investment"
-                        else:  # final_trade_decision
-                            report_type = "final_decision"
-                        markdown_content = _convert_json_to_markdown(content.strip(), report_type)
-                        reports[field] = markdown_content
-                        self.logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(markdown_content)} (已转换JSON->Markdown)")
-                # 🔥 特殊处理：bull_report 和 bear_report 映射到 bull_researcher 和 bear_researcher
-                elif field == 'bull_report':
-                    reports["bull_researcher"] = content.strip()
-                    self.logger.info(f"📊 [REPORTS] 提取报告: bull_researcher (来自 bull_report) - 长度: {len(content.strip())}")
-                elif field == 'bear_report':
-                    reports["bear_researcher"] = content.strip()
-                    self.logger.info(f"📊 [REPORTS] 提取报告: bear_researcher (来自 bear_report) - 长度: {len(content.strip())}")
-                else:
-                    reports[field] = content.strip()
-                    self.logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(content.strip())}")
-            else:
-                self.logger.debug(f"⚠️ [REPORTS] 跳过报告: {field} - 内容为空或太短")
+                        self.logger.info(f"📊 [REPORTS] 从 structured_reports 提取: {field} - 长度: {len(content.strip())}")
+        else:
+            # 回退：从 raw_result 顶层提取 report_manifest 中的字段
+            manifest = raw_result.get("report_manifest", [])
+            if manifest:
+                for m in manifest:
+                    field = m.get("field")
+                    if field and field not in reports:
+                        content = _extract_text(raw_result.get(field), field)
+                        if content and isinstance(content, str) and len(content.strip()) > 5:
+                            reports[field] = content.strip()
+                            self.logger.info(f"📊 [REPORTS] 从 manifest 提取: {field} - 长度: {len(content.strip())}")
 
         # 🔑 第二步：处理研究团队辩论状态（字典类型）- 拆分为独立子报告（与旧流程保持一致）
         # 🔥 注意：如果顶层已经有 bull_report/bear_report，优先使用顶层的；否则从 investment_debate_state 提取

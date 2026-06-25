@@ -1840,43 +1840,57 @@ class SimpleAnalysisService:
             # 从state中提取reports字段
             reports = {}
             try:
-                # 定义所有可能的报告字段
-                report_fields = [
-                    # 🆕 宏观分析报告（优先提取）
-                    'index_report',
-                    'sector_report',
-                    # 个股分析报告
-                    'market_report',
-                    'sentiment_report',
-                    'news_report',
-                    'fundamentals_report',
-                    'investment_plan',
-                    'trader_investment_plan',
-                    'final_trade_decision'
-                ]
+                # 优先从引擎产出的 structured_reports 动态提取
+                structured_reports = state.get('structured_reports', {}) if isinstance(state, dict) else {}
+                if isinstance(structured_reports, dict) and structured_reports:
+                    for field, entry in structured_reports.items():
+                        if isinstance(entry, dict) and entry.get("success") and entry.get("content"):
+                            content = entry["content"]
+                            if isinstance(content, str) and len(content.strip()) > 10:
+                                reports[field] = content.strip()
+                else:
+                    # 回退：从 report_manifest 推导
+                    manifest = state.get('report_manifest', []) if isinstance(state, dict) else []
+                    if manifest:
+                        for m in manifest:
+                            field = m.get("field")
+                            if field:
+                                value = state.get(field)
+                                if isinstance(value, str) and len(value.strip()) > 10:
+                                    reports[field] = value.strip()
+                    if not reports:
+                        # 最后回退：旧版硬编码列表
+                        report_fields = [
+                            'index_report',
+                            'sector_report',
+                            'market_report',
+                            'sentiment_report',
+                            'news_report',
+                            'fundamentals_report',
+                            'chip_report',
+                            'investment_plan',
+                            'trader_investment_plan',
+                            'final_trade_decision'
+                        ]
 
-                # 🔥 导入 JSON 转换函数
-                from app.utils.report_formatter import _convert_json_to_markdown
+                        from app.utils.report_formatter import _convert_json_to_markdown
 
-                # 从state中提取报告内容
-                for field in report_fields:
-                    if hasattr(state, field):
-                        value = getattr(state, field, "")
-                    elif isinstance(state, dict) and field in state:
-                        value = state[field]
-                    else:
-                        value = ""
+                        for field in report_fields:
+                            if hasattr(state, field):
+                                value = getattr(state, field, "")
+                            elif isinstance(state, dict) and field in state:
+                                value = state[field]
+                            else:
+                                value = ""
 
-                    if isinstance(value, str) and len(value.strip()) > 10:  # 只保存有实际内容的报告
-                        # 🔥 新增：对于可能是 JSON 格式的报告，转换为 Markdown
-                        if field in ['investment_plan', 'final_trade_decision']:
-                            # 🔥 修复：final_trade_decision 使用 "final_decision" 类型，而不是 "risk"
-                            if field == 'investment_plan':
-                                report_type = "investment"
-                            else:  # final_trade_decision
-                                report_type = "final_decision"
-                            markdown_value = _convert_json_to_markdown(value.strip(), report_type)
-                            reports[field] = markdown_value
+                            if isinstance(value, str) and len(value.strip()) > 10:
+                                if field in ['investment_plan', 'final_trade_decision']:
+                                    if field == 'investment_plan':
+                                        report_type = "investment"
+                                    else:
+                                        report_type = "final_decision"
+                                    markdown_value = _convert_json_to_markdown(value.strip(), report_type)
+                                    reports[field] = markdown_value
                             logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
                         else:
                             reports[field] = value.strip()

@@ -31,6 +31,10 @@ export const REPORT_INFO_MAP: Record<string, ReportInfo> = {
     name: '💰 基本面分析师',
     description: '估值、财务、增长性基本面分析',
   },
+  'chip_report': {
+    name: '🧮 筹码分布分析师',
+    description: '获利比例、筹码集中度与成本分布分析',
+  },
   // 研究团队 (3个)
   'bull_researcher': {
     name: '🐂 乐观情景研究员',
@@ -116,18 +120,51 @@ export const REPORT_INFO_MAP: Record<string, ReportInfo> = {
   },
 }
 
-export function getReportName(key: string, isEtf?: boolean): string {
+export interface ManifestEntry {
+  field: string
+  display_name: string
+  icon?: string
+  description?: string
+  category?: string
+  order?: number
+  is_primary?: boolean
+  agent_id?: string
+  has_content?: boolean
+}
+
+export function getReportName(key: string, manifestOrIsEtf?: ManifestEntry[] | boolean): string {
+  const isEtf = typeof manifestOrIsEtf === 'boolean' ? manifestOrIsEtf : false
+  const manifest = Array.isArray(manifestOrIsEtf) ? manifestOrIsEtf : undefined
+
   if (isEtf && key === 'fundamentals_report') {
     return '📊 ETF 分析'
   }
+  // 1. 优先从 manifest 获取 display_name
+  if (manifest) {
+    const entry = manifest.find((m) => m.field === key)
+    if (entry?.display_name) {
+      const icon = entry.icon || ''
+      return icon ? `${icon} ${entry.display_name}` : entry.display_name
+    }
+  }
+  // 2. 回退到硬编码 REPORT_INFO_MAP
   const info = REPORT_INFO_MAP[key]
   if (info?.name) {
     return info.name
   }
+  // 3. 最终兜底：纯文本格式化
   return key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
 }
 
-export function getReportIcon(key: string): string {
+export function getReportIcon(key: string, manifest?: ManifestEntry[]): string {
+  // 1. 优先从 manifest 获取 icon
+  if (manifest) {
+    const entry = manifest.find((m) => m.field === key)
+    if (entry?.icon) {
+      return entry.icon
+    }
+  }
+  // 2. 回退到硬编码 REPORT_INFO_MAP
   const info = REPORT_INFO_MAP[key]
   if (!info?.name) {
     return ''
@@ -136,6 +173,14 @@ export function getReportIcon(key: string): string {
   return match?.[1] || ''
 }
 
-export function getReportDescription(key: string): string {
+export function getReportDescription(key: string, manifest?: ManifestEntry[]): string {
+  // 1. 优先从 manifest 获取 description
+  if (manifest) {
+    const entry = manifest.find((m) => m.field === key)
+    if (entry?.description) {
+      return entry.description
+    }
+  }
+  // 2. 回退到硬编码 REPORT_INFO_MAP
   return REPORT_INFO_MAP[key]?.description || ''
 }

@@ -1091,16 +1091,25 @@ async def get_task_result(
                 state = result_data.get('state', {})
 
                 if isinstance(state, dict):
-                    # 定义所有可能的报告字段
-                    report_fields = [
-                        'market_report',
-                        'sentiment_report',
-                        'news_report',
-                        'fundamentals_report',
-                        'investment_plan',
-                        'trader_investment_plan',
-                        'final_trade_decision'
-                    ]
+                    # 优先从引擎产出的 structured_reports 动态提取报告字段
+                    structured_reports = state.get('structured_reports', {})
+                    if isinstance(structured_reports, dict) and structured_reports:
+                        report_fields = [
+                            field for field, entry in structured_reports.items()
+                            if isinstance(entry, dict) and entry.get("success") and entry.get("content")
+                        ]
+                    else:
+                        # 回退：旧版硬编码列表
+                        report_fields = [
+                            'market_report',
+                            'sentiment_report',
+                            'news_report',
+                            'fundamentals_report',
+                            'chip_report',
+                            'investment_plan',
+                            'trader_investment_plan',
+                            'final_trade_decision'
+                        ]
 
                     # 从state中提取报告内容
                     for field in report_fields:

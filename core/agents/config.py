@@ -181,6 +181,7 @@ class AgentMetadata(BaseModel):
     requires_tools: bool = True       # 是否需要工具调用（False 则直接执行）
     output_field: str = ""            # 输出到 state 的字段名，如 "market_report"
     report_label: str = ""            # 报告标签，如 "【市场分析】"
+    show_in_reports: bool = True      # 是否在分析结果报告列表中展示此 agent 的输出
     node_name: str = ""               # 工作流节点名称，如 "Market Analyst"
     execution_order: int = 100        # 执行顺序（越小越先执行）
     workflow_stage: str = ""          # 工作流阶段：analyst/research/risk/manager/trader

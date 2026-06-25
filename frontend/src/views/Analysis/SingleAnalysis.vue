@@ -621,10 +621,10 @@
                         <!-- 标签页内容头部 -->
                         <div class="report-header">
                           <div class="report-title">
-                            <span class="report-icon">{{ getReportIcon(report.title) }}</span>
+                            <span class="report-icon">{{ getReportIcon(report.field, report.title) }}</span>
                             <span class="report-name">{{ getReportName(report.title) }}</span>
                           </div>
-                          <div class="report-description">{{ getReportDescription(report.title) }}</div>
+                          <div class="report-description">{{ getReportDescription(report.field, report.title) }}</div>
                         </div>
 
                         <!-- 报告内容 -->
@@ -856,6 +856,7 @@ const currentTaskId = ref('')
 const analysisStatus = ref('idle') // 'idle', 'running', 'completed', 'failed'
 const showResults = ref(false)
 const analysisResults = ref<any>(null)
+const analysisReportManifest = ref<Array<{ field: string; display_name: string; icon?: string; description?: string }>>([])
 const activeReportTab = ref('') // 当前激活的报告标签页
 const growthTaskId = computed(() => analysisResults.value?.task_id || currentTaskId.value || null)
 const progressInfo = ref({
@@ -1826,7 +1827,7 @@ const overviewBriefContent = computed(() => getOverviewBriefContent(analysisResu
 
 // 获取分析报告
 const getAnalysisReports = (data: any) => {
-  const reports: Array<{title: string, content: any}> = []
+  const reports: Array<{field: string, title: string, content: any}> = []
 
   const reportsData = extractReportsSource(data)
   if (!reportsData) {
@@ -1841,13 +1842,14 @@ const getAnalysisReports = (data: any) => {
       return
     }
     addedKeys.add(key)
-    reports.push({ title, content })
+    reports.push({ field: key, title, content })
   }
 
   // 动态模式：使用 report_manifest（自定义工作流产出物描述）
   const manifest = data?.report_manifest as Array<{
-    field: string; display_name: string; category: string; order: number; is_primary: boolean
+    field: string; display_name: string; icon?: string; description?: string; category: string; order: number; is_primary: boolean
   }> | undefined
+  analysisReportManifest.value = manifest || []
   if (reportsData && manifest && manifest.length > 0) {
     const sorted = [...manifest].sort((a, b) => a.order - b.order)
     for (const m of sorted) {
@@ -1866,6 +1868,7 @@ const getAnalysisReports = (data: any) => {
     { key: 'fundamentals_report', title: isEtfAnalysis ? '📊 ETF 分析' : '💰 基本面研究' },
     { key: 'sentiment_report', title: '💭 情绪研究' },
     { key: 'news_report', title: '📰 新闻研究' },
+    { key: 'chip_report', title: '🧮 筹码分布研究' },
     { key: 'bull_researcher', title: '🐂 乐观情景研究员' },
     { key: 'bull_report', title: '🐂 乐观情景研究员' },
     { key: 'bear_researcher', title: '🐻 审慎情景研究员' },
@@ -1918,7 +1921,13 @@ const getAnalysisReports = (data: any) => {
 }
 
 // 获取报告图标
-const getReportIcon = (title: string) => {
+const getReportIcon = (field: string, title: string) => {
+  // 1. 优先从 manifest 获取 icon
+  const manifestEntry = analysisReportManifest.value.find((m) => m.field === field)
+  if (manifestEntry?.icon) {
+    return manifestEntry.icon
+  }
+  // 2. 回退到硬编码 iconMap
   const iconMap: Record<string, string> = {
     // 🆕 宏观分析师图标
     '📊 大盘指数分析': '📊',
@@ -1929,7 +1938,7 @@ const getReportIcon = (title: string) => {
     '📊 ETF 分析': '📊',
     '📰 新闻事件分析': '📰',
     '💭 市场情绪分析': '💭',
-    '💡 初步投资建议': '💡',  // 🔑 更新
+    '💡 初步投资建议': '💡',
     '🔬 研究团队分析': '🔬',
     '🐂 看涨研究': '🐂',
     '🐻 看跌研究': '🐻',
@@ -1939,18 +1948,24 @@ const getReportIcon = (title: string) => {
     '🛡️ 保守风险观点': '🛡️',
     '⚖️ 中性风险观点': '⚖️',
     '⚠️ 风险评估': '⚠️',
-    '🎯 最终分析结果': '🎯'  // 🔑 更新
+    '🎯 最终分析结果': '🎯'
   }
   return iconMap[title] || '📊'
 }
 
-// 获取报告名称（去掉图标）
+// 获取报告名称（去掉图标前缀）
 const getReportName = (title: string) => {
   return title.replace(/^[^\s]+\s/, '')
 }
 
 // 获取报告描述
-const getReportDescription = (title: string) => {
+const getReportDescription = (field: string, title: string) => {
+  // 1. 优先从 manifest 获取 description
+  const manifestEntry = analysisReportManifest.value.find((m) => m.field === field)
+  if (manifestEntry?.description) {
+    return manifestEntry.description
+  }
+  // 2. 回退到硬编码 analysisModuleMeta
   const plainTitle = title.replace(/^[^\s]+\s/, '')
   return Object.values(analysisModuleMeta).find(meta => meta.title === title)?.description
     || Object.values(analysisModuleMeta).find(meta => meta.title.endsWith(plainTitle))?.description

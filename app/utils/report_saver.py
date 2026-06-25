@@ -24,20 +24,29 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
     """
     reports = {}
     
-    # 定义所有可能的报告字段
-    report_fields = [
-        # 🆕 宏观分析报告（优先提取）
-        'index_report',
-        'sector_report',
-        # 个股分析报告
-        'market_report',
-        'sentiment_report',
-        'news_report',
-        'fundamentals_report',
-        'investment_plan',
-        'trader_investment_plan',
-        'final_trade_decision'
-    ]
+    # 定义所有可能的报告字段（优先从引擎产出的 structured_reports 读取）
+    report_fields = []
+    if isinstance(state, dict):
+        structured_reports = state.get('structured_reports', {})
+        if isinstance(structured_reports, dict) and structured_reports:
+            report_fields = [
+                field for field, entry in structured_reports.items()
+                if isinstance(entry, dict) and entry.get("success") and entry.get("content")
+            ]
+    if not report_fields:
+        # 回退：旧版硬编码列表
+        report_fields = [
+            'index_report',
+            'sector_report',
+            'market_report',
+            'sentiment_report',
+            'news_report',
+            'fundamentals_report',
+            'chip_report',
+            'investment_plan',
+            'trader_investment_plan',
+            'final_trade_decision'
+        ]
     
     # 从state中提取报告内容
     for field in report_fields:

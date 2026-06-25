@@ -73,6 +73,7 @@ STANDARD_REPORT_FIELDS = [
     'sentiment_report',       # 社交媒体情绪分析
     'news_report',            # 新闻研究
     'fundamentals_report',    # 基本面分析
+    'chip_report',            # 筹码分布分析
     # 研究结论报告
     # 'investment_plan',        # 研究经理结论（作为 research_team_decision 的备选）
     'trader_investment_plan', # 研究整合意见
@@ -167,18 +168,39 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
         elif not has_nested_reports:
             logger.warning(f"⚠️ [ReportFormatter] sector_report 字段不存在于 state 中")
 
-    # 1. 提取标准报告字段
-    for field in STANDARD_REPORT_FIELDS:
-        if field in reports:
-            continue
-        value = _get_field_value(state, field)
-        extracted = _extract_report_text(field, value)
-        if extracted:
-            reports[field] = extracted
-            logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(extracted)}")
-        elif field in ['index_report', 'sector_report'] and not has_nested_reports:
-            # 特别记录宏观报告的提取失败
-            logger.warning(f"⚠️ [ReportFormatter] 宏观报告 {field} 未能提取: value={type(value)}, 内容长度={len(str(value)) if value else 0}")
+    # 1. 提取报告字段（优先从引擎产出的 structured_reports 读取，自动包含新 agent 输出）
+    structured_reports = _get_field_value(state, 'structured_reports')
+    if isinstance(structured_reports, dict) and structured_reports:
+        for field, entry in structured_reports.items():
+            if field in reports:
+                continue
+            if isinstance(entry, dict) and entry.get("success") and entry.get("content"):
+                content = entry["content"]
+                if isinstance(content, str) and len(content.strip()) > 10:
+                    reports[field] = content.strip()
+                    logger.info(f"📊 [ReportFormatter] 从 structured_reports 提取: {field} - 长度: {len(content.strip())}")
+    else:
+        # 回退：从 report_manifest 推导
+        manifest = _get_field_value(state, 'report_manifest')
+        if isinstance(manifest, list) and manifest:
+            for m in manifest:
+                field = m.get("field")
+                if field and field not in reports:
+                    value = _get_field_value(state, field)
+                    extracted = _extract_report_text(field, value)
+                    if extracted:
+                        reports[field] = extracted
+                        logger.info(f"📊 [ReportFormatter] 从 manifest 提取: {field} - 长度: {len(extracted)}")
+        else:
+            # 最后回退：旧版硬编码列表
+            for field in STANDARD_REPORT_FIELDS:
+                if field in reports:
+                    continue
+                value = _get_field_value(state, field)
+                extracted = _extract_report_text(field, value)
+                if extracted:
+                    reports[field] = extracted
+                    logger.info(f"📊 [ReportFormatter] 从硬编码列表提取: {field} - 长度: {len(extracted)}")
 
     # 2. 提取研究团队辩论状态报告（investment_debate_state）
     debate_state = _get_field_value(state, 'investment_debate_state')
