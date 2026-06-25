@@ -189,7 +189,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import PublishedAgents from './Agents.vue'
-import agentWorkshopApi, { type AgentSpec, type AgentSpecIOItem, type AgentWorkshopSessionDetail } from '@/api/agentWorkshop'
+import agentWorkshopApi, { type AgentSpec, type AgentSpecIOItem, type AgentVersion, type AgentWorkshopSessionDetail } from '@/api/agentWorkshop'
 
 const router = useRouter()
 

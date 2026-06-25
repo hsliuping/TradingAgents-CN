@@ -1,5 +1,5 @@
 <template>
-  <div class="nanobot-agent-studio-page">
+  <div class="agent-studio-page">
     <div class="page-header">
       <div class="header-left">
         <h1 class="page-title">Agent 工坊助手</h1>
@@ -577,7 +577,20 @@
       <div v-loading="versionDetailLoading" class="version-detail-body">
         <div v-if="versionDetailVersion" class="version-detail-grid">
           <section class="version-detail-section summary-section">
-            <div class="version-detail-section-title">基础信息</div>
+            <div class="version-detail-section-title">
+              基础信息
+              <el-button
+                v-if="!editingVersionMetadata"
+                size="small"
+                text
+                type="primary"
+                @click="startEditingVersionMetadata"
+              >编辑</el-button>
+              <template v-else>
+                <el-button size="small" type="primary" :loading="savingVersionMetadata" @click="saveVersionMetadata">保存</el-button>
+                <el-button size="small" @click="cancelEditingVersionMetadata">取消</el-button>
+              </template>
+            </div>
             <div class="version-detail-summary-grid">
               <div class="version-detail-summary-item">
                 <span>版本号</span>
@@ -593,11 +606,62 @@
               </div>
               <div class="version-detail-summary-item">
                 <span>输出字段</span>
-                <strong>{{ versionDetailOutputFieldText }}</strong>
+                <strong v-if="!editingVersionMetadata">{{ versionDetailOutputFieldText }}</strong>
+                <el-input v-else v-model="versionMetadataEditForm.output_field" size="small" placeholder="analysis" />
+              </div>
+              <div class="version-detail-summary-item">
+                <span>工作流阶段</span>
+                <strong v-if="!editingVersionMetadata">{{ versionDetailWorkflowStageText }}</strong>
+                <el-select v-else v-model="versionMetadataEditForm.workflow_stage" size="small">
+                  <el-option label="analyst" value="analyst" />
+                  <el-option label="research" value="research" />
+                  <el-option label="risk" value="risk" />
+                  <el-option label="manager" value="manager" />
+                  <el-option label="trader" value="trader" />
+                </el-select>
+              </div>
+              <div class="version-detail-summary-item">
+                <span>报告标签</span>
+                <strong v-if="!editingVersionMetadata">{{ versionDetailReportLabelText }}</strong>
+                <el-input v-else v-model="versionMetadataEditForm.report_label" size="small" placeholder="【Agent名称】" />
+              </div>
+              <div class="version-detail-summary-item">
+                <span>报告展示</span>
+                <strong v-if="!editingVersionMetadata">{{ versionDetailShowInReportsText }}</strong>
+                <el-switch v-else v-model="versionMetadataEditForm.show_in_reports" size="small" />
+              </div>
+              <div class="version-detail-summary-item">
+                <span>执行顺序</span>
+                <strong v-if="!editingVersionMetadata">{{ versionDetailExecutionOrderText }}</strong>
+                <el-input-number v-else v-model="versionMetadataEditForm.execution_order" size="small" :min="0" :max="999" />
+              </div>
+              <div class="version-detail-summary-item">
+                <span>节点名称</span>
+                <strong v-if="!editingVersionMetadata">{{ versionDetailNodeNameText }}</strong>
+                <el-input v-else v-model="versionMetadataEditForm.node_name" size="small" placeholder="Agent 节点名称" />
               </div>
             </div>
             <div class="version-detail-description">
               {{ versionDetailVersion.agent_metadata?.description || versionDetailSpec?.primary_goal || '暂无描述' }}
+            </div>
+          </section>
+
+          <!-- 发布校验错误展示 -->
+          <section v-if="versionDetailPublishErrors.length || versionDetailPublishWarnings.length" class="version-detail-section publish-validation-section">
+            <div class="version-detail-section-title">发布校验结果</div>
+            <div v-if="versionDetailPublishErrors.length" class="publish-validation-errors">
+              <div class="publish-validation-subtitle">错误（必须修复才能发布）</div>
+              <div v-for="err in versionDetailPublishErrors" :key="err" class="publish-validation-item publish-validation-item-error">
+                <el-icon><CircleCloseFilled /></el-icon>
+                <span>{{ err }}</span>
+              </div>
+            </div>
+            <div v-if="versionDetailPublishWarnings.length" class="publish-validation-warnings">
+              <div class="publish-validation-subtitle">警告</div>
+              <div v-for="warn in versionDetailPublishWarnings" :key="warn" class="publish-validation-item publish-validation-item-warning">
+                <el-icon><WarningFilled /></el-icon>
+                <span>{{ warn }}</span>
+              </div>
             </div>
           </section>
 
@@ -626,6 +690,8 @@
             <div class="version-detail-meta-line">
               <span>模板：{{ versionDetailPrompt?.template_name || versionDetailVersion.prompt_template_ref?.template_name || '未命名模板' }}</span>
               <span>状态：{{ versionDetailPrompt?.status || versionDetailVersion.prompt_template_ref?.status || 'unknown' }}</span>
+              <span>Agent 类型：{{ versionDetailPromptAgentTypeText }}</span>
+              <span>Agent 名称：{{ versionDetailPromptAgentNameText }}</span>
             </div>
             <div v-if="versionDetailPromptSections.length" class="prompt-section-list">
               <div v-for="section in versionDetailPromptSections" :key="section.key" class="prompt-section-card">
@@ -875,6 +941,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { CircleCloseFilled, WarningFilled } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { useAuthStore } from '@/stores/auth'
 import { isTokenValid } from '@/utils/auth'
@@ -934,9 +1001,9 @@ type NanobotStudioPersistedState = {
 
 marked.setOptions({ breaks: true, gfm: true })
 
-const NANOBOT_WORKSHOP_SESSION_PREFIX = 'embedded:nanobot-agent-studio:'
+const AGENT_STUDIO_SESSION_PREFIX = 'embedded:agent-studio:'
 const NANOBOT_SKILLS = ['nanobot-agent-design']
-const NANOBOT_STUDIO_STATE_STORAGE_KEY = 'nanobot-agent-studio:state'
+const AGENT_STUDIO_STATE_STORAGE_KEY = 'agent-studio:state'
 
 const route = useRoute()
 const router = useRouter()
@@ -971,6 +1038,11 @@ const versionDetailSpec = ref<AgentSpec | null>(null)
 const versionDetailVersion = ref<AgentVersion | null>(null)
 const versionDetailPrompt = ref<AgentWorkshopVersionPrompt | null>(null)
 const versionDetailEvaluation = ref<AgentEvaluationReport | null>(null)
+const versionDetailPublishErrors = ref<string[]>([])
+const versionDetailPublishWarnings = ref<string[]>([])
+const editingVersionMetadata = ref(false)
+const savingVersionMetadata = ref(false)
+const versionMetadataEditForm = ref<Record<string, any>>({})
 const evaluationArtifactReviewDialogVisible = ref(false)
 const submittingEvaluationArtifactReview = ref(false)
 const evaluationArtifactReviewForm = ref({
@@ -1025,7 +1097,7 @@ const getThreadTimestamp = (thread?: EmbeddedNanobotThreadItem | null) => {
 
 const readPersistedStudioState = (): NanobotStudioPersistedState | null => {
   try {
-    const raw = localStorage.getItem(NANOBOT_STUDIO_STATE_STORAGE_KEY)
+    const raw = localStorage.getItem(AGENT_STUDIO_STATE_STORAGE_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw)
     return parsed && typeof parsed === 'object' ? parsed as NanobotStudioPersistedState : null
@@ -1036,7 +1108,7 @@ const readPersistedStudioState = (): NanobotStudioPersistedState | null => {
 
 const clearPersistedStudioState = () => {
   try {
-    localStorage.removeItem(NANOBOT_STUDIO_STATE_STORAGE_KEY)
+    localStorage.removeItem(AGENT_STUDIO_STATE_STORAGE_KEY)
   } catch {
     // Ignore storage failures and keep the page usable.
   }
@@ -1335,7 +1407,7 @@ const persistState = () => {
       showNanobotThreadPanel: showNanobotThreadPanel.value,
       selectedThreadScope: selectedThreadScope.value,
     }
-    localStorage.setItem(NANOBOT_STUDIO_STATE_STORAGE_KEY, JSON.stringify(payload))
+    localStorage.setItem(AGENT_STUDIO_STATE_STORAGE_KEY, JSON.stringify(payload))
   } catch {
     // Ignore storage failures and keep the page usable.
   }
@@ -1565,7 +1637,7 @@ const syncRoute = () => {
 
   suppressNextRouteInit = true
   pendingRouteSync = false
-  router.replace({ path: '/workflow/nanobot-agent-studio', query: nextQuery })
+  router.replace({ path: '/workflow/agent-studio', query: nextQuery })
 }
 
 const displaySpec = computed(() => currentSession.value?.current_spec_snapshot || standaloneSpec.value || null)
@@ -1768,6 +1840,61 @@ const versionDetailOutputFieldText = computed(() => {
   if (outputFields.length) return outputFields.join(' / ')
   return String(versionDetailVersion.value.agent_metadata?.output_field || '-').trim() || '-'
 })
+const getVersionDetailMetadataValue = (key: string) => versionDetailVersion.value?.agent_metadata?.[key] ?? versionDetailVersion.value?.evaluation_policy?.runtime_contract?.[key]
+const versionDetailWorkflowStageText = computed(() => String(getVersionDetailMetadataValue('workflow_stage') || '-').trim() || '-')
+const versionDetailReportLabelText = computed(() => String(getVersionDetailMetadataValue('report_label') || '-').trim() || '-')
+const versionDetailShowInReportsText = computed(() => {
+  const value = getVersionDetailMetadataValue('show_in_reports')
+  if (value === false || value === 'false') return '不展示'
+  if (value === true || value === 'true') return '展示'
+  return '-'
+})
+const versionDetailExecutionOrderText = computed(() => {
+  const value = getVersionDetailMetadataValue('execution_order')
+  return value === undefined || value === null || value === '' ? '-' : String(value)
+})
+const versionDetailNodeNameText = computed(() => String(getVersionDetailMetadataValue('node_name') || '-').trim() || '-')
+const versionDetailPromptContract = computed(() => versionDetailVersion.value?.evaluation_policy?.prompt_contract || {})
+const versionDetailPromptAgentTypeText = computed(() => String(versionDetailPromptContract.value?.agent_type || 'universal').trim() || 'universal')
+const versionDetailPromptAgentNameText = computed(() => String(versionDetailPromptContract.value?.agent_name || versionDetailVersion.value?.version_id || '-').trim() || '-')
+const startEditingVersionMetadata = () => {
+  const meta = versionDetailVersion.value?.agent_metadata || {}
+  versionMetadataEditForm.value = {
+    output_field: String(meta.output_field || 'analysis').trim() || 'analysis',
+    workflow_stage: String(meta.workflow_stage || 'analyst').trim() || 'analyst',
+    report_label: String(meta.report_label || '').trim(),
+    show_in_reports: meta.show_in_reports !== false,
+    execution_order: Number(meta.execution_order ?? 50),
+    node_name: String(meta.node_name || '').trim(),
+  }
+  editingVersionMetadata.value = true
+}
+const cancelEditingVersionMetadata = () => {
+  editingVersionMetadata.value = false
+  versionMetadataEditForm.value = {}
+}
+const saveVersionMetadata = async () => {
+  const versionId = String(versionDetailVersion.value?.version_id || '').trim()
+  if (!versionId) return
+  savingVersionMetadata.value = true
+  try {
+    const result = await agentWorkshopApi.updateVersionMetadata(versionId, versionMetadataEditForm.value)
+    if (versionDetailVersion.value) {
+      versionDetailVersion.value.agent_metadata = result.agent_metadata
+    }
+    editingVersionMetadata.value = false
+    versionMetadataEditForm.value = {}
+    ElMessage.success('运行时字段已更新')
+  } catch (error: any) {
+    ElMessage.error(error?.message || '更新失败')
+  } finally {
+    savingVersionMetadata.value = false
+  }
+}
+const clearVersionDetailPublishValidation = () => {
+  versionDetailPublishErrors.value = []
+  versionDetailPublishWarnings.value = []
+}
 const iterationReminderMessage = computed(() => {
   const messages = currentSession.value?.messages || []
   const matched = [...messages].reverse().find(item => item.role === 'assistant' && String(item.content || '').includes('上一轮评估摘要'))
@@ -2736,8 +2863,13 @@ const publishVersionFromDetail = async () => {
   }
 
   publishingVersionDetail.value = true
+  clearVersionDetailPublishValidation()
   try {
     const result = await agentWorkshopApi.publishVersion(versionId)
+    if (result.workflow_compatibility) {
+      versionDetailPublishErrors.value = result.workflow_compatibility.errors || []
+      versionDetailPublishWarnings.value = result.workflow_compatibility.warnings || []
+    }
     await Promise.all([
       loadVersionDetail(result.version_id),
       ensureSpecVersionsLoaded(specId, true),
@@ -2979,7 +3111,7 @@ const sendNanobotMessage = async (message: string) => {
 
   const payloadMessage = buildNanobotPayload(normalized)
   const requestedAtMs = Date.now()
-  const sessionKey = currentNanobotSessionKey.value || `${NANOBOT_WORKSHOP_SESSION_PREFIX}${requestedAtMs}`
+  const sessionKey = currentNanobotSessionKey.value || `${AGENT_STUDIO_SESSION_PREFIX}${requestedAtMs}`
   const now = new Date().toISOString()
   const nextMessages = [
     ...displayedMessages.value,
@@ -3326,7 +3458,7 @@ const handleIterateVersion = async () => {
       sessionId: result.session_id,
     }
     if (!currentNanobotSessionKey.value) {
-      currentNanobotSessionKey.value = `${NANOBOT_WORKSHOP_SESSION_PREFIX}${Date.now()}`
+      currentNanobotSessionKey.value = `${AGENT_STUDIO_SESSION_PREFIX}${Date.now()}`
     }
     nanobotMessages.value = [...(currentSession.value?.messages || [])]
     nanobotIterationBootstrapPending.value = true
@@ -3351,7 +3483,7 @@ const cancelNanobotStreaming = () => {
 
 const resetStudio = () => {
   clearStudioState()
-  router.push('/workflow/nanobot-agent-studio')
+  router.push('/workflow/agent-studio')
 }
 
 const initFromRoute = async () => {
@@ -3477,7 +3609,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="scss">
-.nanobot-agent-studio-page {
+.agent-studio-page {
   min-height: calc(100vh - 108px);
   padding: 20px;
   display: flex;
@@ -4623,6 +4755,43 @@ onUnmounted(() => {
   font-size: 14px;
   font-weight: 700;
   color: #123f39;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.publish-validation-section {
+  background: #fef7f0;
+  border: 1px solid #f0d4b0;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.publish-validation-subtitle {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #5a3e1b;
+}
+
+.publish-validation-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.publish-validation-item-error {
+  color: #c0392b;
+}
+
+.publish-validation-item-warning {
+  color: #b87a14;
+}
+
+.publish-validation-errors {
+  margin-bottom: 12px;
 }
 
 .version-detail-section-head {
@@ -4899,7 +5068,7 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
-  .nanobot-agent-studio-page {
+  .agent-studio-page {
     min-height: auto;
     padding: 16px;
   }

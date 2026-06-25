@@ -640,13 +640,36 @@ export const agentWorkshopApi = {
     spec_id: string
     status: string
     previous_active_archived: boolean
+    workflow_compatibility?: {
+      valid: boolean
+      errors: string[]
+      warnings: string[]
+    }
   }> => {
     const res = await request.post<ApiOk<{
       version_id: string
       spec_id: string
       status: string
       previous_active_archived: boolean
+      workflow_compatibility?: {
+        valid: boolean
+        errors: string[]
+        warnings: string[]
+      }
     }>>(`${BASE}/versions/${versionId}/publish`, {})
+    return (res as any).data
+  },
+
+  updateVersionMetadata: async (versionId: string, metadata: Record<string, any>): Promise<{
+    version_id: string
+    updated_fields: string[]
+    agent_metadata: Record<string, any>
+  }> => {
+    const res = await request.put<ApiOk<{
+      version_id: string
+      updated_fields: string[]
+      agent_metadata: Record<string, any>
+    }>>(`${BASE}/versions/${versionId}/metadata`, { metadata })
     return (res as any).data
   },
 

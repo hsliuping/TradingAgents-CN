@@ -11,7 +11,7 @@
         <p>这里是标准工作页：先聊需求，再直接生成可测试版本，最后做验证和迭代。若你更偏好对话式操作，可以切到助手模式。</p>
       </div>
       <div class="header-actions">
-        <el-button plain @click="router.push('/workflow/nanobot-agent-studio')">
+        <el-button plain @click="router.push('/workflow/agent-studio')">
           助手模式
         </el-button>
         <el-button type="primary" plain @click="startNewDraft">

@@ -811,7 +811,6 @@ import { validateStockCode, getStockCodeFormatHelp } from '@/utils/stockValidato
 import { normalizeMarketForAnalysis, getMarketByStockCode } from '@/utils/market'
 import { fetchTaskResultWithRetry, hasTaskResultContent, mergeTaskResult } from '@/utils/taskResult'
 import type { StockInfo } from '@/types/analysis'
-import { getFactorDiagnosticEntries, getFactorWarningEntries } from '@/utils/factorPresentation'
 
 // 配置marked选项
 marked.setOptions({
@@ -989,10 +988,6 @@ const factorPreviewRow = computed<StockInfo>(() => ({
   factor_diagnostics: factorPreview.value?.factor_diagnostics || {},
   factor_warnings: factorPreview.value?.factor_warnings || {},
 }))
-
-const analysisFactorWarningEntries = computed(() => getFactorWarningEntries(factorPreviewRow.value))
-const analysisFactorDiagnosticEntries = computed(() => getFactorDiagnosticEntries(factorPreviewRow.value))
-const analysisFactorReportPeriod = computed(() => factorPreview.value?.report_period || '')
 
 const clearFactorPreview = () => {
   factorPreview.value = null

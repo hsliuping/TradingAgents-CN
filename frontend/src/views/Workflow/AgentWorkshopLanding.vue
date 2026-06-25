@@ -92,7 +92,7 @@ const goToWorkshopCreate = () => {
 }
 
 const goToAssistantStudio = () => {
-  router.push('/workflow/nanobot-agent-studio')
+  router.push('/workflow/agent-studio')
 }
 
 const goToManager = () => {

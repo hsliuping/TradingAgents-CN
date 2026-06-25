@@ -904,9 +904,9 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
-        path: 'nanobot-agent-studio',
-        name: 'NanobotAgentStudio',
-        component: () => import('@/views/Workflow/NanobotAgentStudio.vue'),
+        path: 'agent-studio',
+        name: 'AgentStudio',
+        component: () => import('@/views/Workflow/AgentStudio.vue'),
         meta: {
           title: 'Agent 工坊助手',
           requiresAuth: true,

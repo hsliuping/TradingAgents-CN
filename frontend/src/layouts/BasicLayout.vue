@@ -107,11 +107,11 @@ const keepAliveComponents = computed(() => [
 ])
 
 const isFullWidthRoute = computed(() => {
-  return route.path.startsWith('/assistant') || route.path.startsWith('/workflow/nanobot-agent-studio')
+  return route.path.startsWith('/assistant') || route.path.startsWith('/workflow/agent-studio')
 })
 
 const hideFooterRoute = computed(() => {
-  return route.path.startsWith('/workflow/nanobot-agent-studio')
+  return route.path.startsWith('/workflow/agent-studio')
 })
 
 // 移动端判断
