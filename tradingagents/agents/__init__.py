@@ -1,6 +1,6 @@
 from .utils.agent_utils import Toolkit, create_msg_delete
 from .utils.agent_states import AgentState, InvestDebateState, RiskDebateState
-from .utils.memory import FinancialSituationMemory
+from .utils import memory as _legacy_memory_module
 
 from .analysts.fundamentals_analyst import create_fundamentals_analyst
 from .analysts.market_analyst import create_market_analyst
@@ -26,7 +26,6 @@ from tradingagents.utils.logging_init import get_logger
 logger = get_logger("default")
 
 __all__ = [
-    "FinancialSituationMemory",
     "Toolkit",
     "AgentState",
     "create_msg_delete",

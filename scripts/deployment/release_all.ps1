@@ -4,21 +4,25 @@
 .DESCRIPTION
     After dev/test, run this to:
     1. Auto-prepare releases/{version}/, migrations if missing
-    2. Generate BUILD_INFO
-    3. Build Pro portable package
-    4. Build NSIS installer
-    5. Build update package (update-{version}.zip)
+    2. Run governance validations
+    3. Generate BUILD_INFO
+    4. Build Pro portable package
+    5. Build NSIS installer
+    6. Build update package (update-{version}.zip)
 .PARAMETER Version
     Override version. Default: read from VERSION file.
 .PARAMETER SkipInstaller
     Skip NSIS installer, only build portable + update package.
 .PARAMETER SkipPrepare
     Skip auto-prepare (releases/, migrations/). Use when already prepared.
+.PARAMETER SkipGovernanceValidations
+    Skip governance validation suite before packaging. Use only when the validation result has already been confirmed separately.
 #>
 param(
     [string]$Version = "",
     [switch]$SkipInstaller = $false,
     [switch]$SkipPrepare = $false,
+    [switch]$SkipGovernanceValidations = $false,
     [string]$ArchiveRoot = "D:\release"
 )
 
@@ -42,6 +46,8 @@ $versionUnderscore = $Version -replace '\.', '_'
 $releasesDir = Join-Path $root "releases"
 $versionDir = Join-Path $releasesDir $Version
 $migrationFile = Join-Path $root "migrations\v$versionUnderscore.py"
+$venvPython = Join-Path $root "env\Scripts\python.exe"
+$pythonCmd = if (Test-Path $venvPython) { $venvPython } else { "python" }
 
 Write-Host "============================================================================" -ForegroundColor Cyan
 Write-Host "  One-Click Release: $Version" -ForegroundColor Cyan
@@ -52,7 +58,7 @@ Write-Host ""
 
 # ── Step 0: Auto-prepare ───────────────────────────────────────────────────────
 if (-not $SkipPrepare) {
-    Write-Host "[0/4] Auto-prepare release files..." -ForegroundColor Yellow
+    Write-Host "[0/5] Auto-prepare release files..." -ForegroundColor Yellow
 
     if (-not (Test-Path $versionDir)) {
         New-Item -ItemType Directory -Path $versionDir -Force | Out-Null
@@ -126,8 +132,27 @@ async def downgrade(db):
     Write-Host ""
 }
 
-# ── Step 1: Generate BUILD_INFO ─────────────────────────────────────────────────
-Write-Host "[1/4] Generating BUILD_INFO..." -ForegroundColor Yellow
+# ── Step 1: Governance validations ──────────────────────────────────────────────
+Write-Host "[1/5] Running governance validations..." -ForegroundColor Yellow
+if ($SkipGovernanceValidations) {
+    Write-Host "  Skipped (SkipGovernanceValidations)" -ForegroundColor Gray
+} else {
+    $governanceValidationScript = Join-Path $root "scripts\run_governance_validations.py"
+    if (-not (Test-Path $governanceValidationScript)) {
+        Write-Host "  ERROR: run_governance_validations.py not found" -ForegroundColor Red
+        exit 1
+    }
+
+    & $pythonCmd $governanceValidationScript
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  ERROR: governance validations failed" -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+}
+Write-Host ""
+
+# ── Step 2: Generate BUILD_INFO ─────────────────────────────────────────────────
+Write-Host "[2/5] Generating BUILD_INFO..." -ForegroundColor Yellow
 $buildInfoScript = Join-Path $root "scripts\build\generate_build_info.ps1"
 $resolvedBuildVersion = $Version
 if (Test-Path $buildInfoScript) {
@@ -145,8 +170,8 @@ if (Test-Path $buildInfoScript) {
 }
 Write-Host ""
 
-# ── Step 2: Build installer (includes portable + 7z + update package) ─────────
-Write-Host "[2/4] Building installer (portable + 7z + NSIS + update package)..." -ForegroundColor Yellow
+# ── Step 3: Build installer (includes portable + 7z + update package) ─────────
+Write-Host "[3/5] Building installer (portable + 7z + NSIS + update package)..." -ForegroundColor Yellow
 $installerScript = Join-Path $root "scripts\windows-installer\build\build_installer.ps1"
 if ($SkipInstaller) {
     Write-Host "  Skipped (SkipInstaller)" -ForegroundColor Gray
@@ -171,8 +196,8 @@ if ($SkipInstaller) {
 }
 Write-Host ""
 
-# ── Step 3: Summary ───────────────────────────────────────────────────────────
-Write-Host "[3/4] Release complete" -ForegroundColor Green
+# ── Step 4: Summary ───────────────────────────────────────────────────────────
+Write-Host "[4/5] Release complete" -ForegroundColor Green
 $packagesDir = Join-Path $root "release\packages"
 if (Test-Path $packagesDir) {
     Get-ChildItem -Path $packagesDir -Filter "*.exe" | ForEach-Object { Write-Host "  Installer: $($_.Name)" -ForegroundColor White }

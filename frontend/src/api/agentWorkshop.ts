@@ -61,6 +61,7 @@ export interface AgentWorkshopMessage {
   role: string
   content: string
   timestamp: string
+  progressSteps?: Array<{ text: string; tone?: 'info' | 'success' | 'warning'; meta?: string }>
 }
 
 export interface AgentSpecIOField {
@@ -187,6 +188,25 @@ export interface AgentWorkshopToolingPlanResult {
   tooling_plan: AgentWorkshopToolingPlan
 }
 
+export interface AgentExecutionPlanStep {
+  step_id: string
+  title: string
+  objective: string
+  suggested_tools: string[]
+  expected_evidence: string[]
+  failure_signals: string[]
+}
+
+export interface AgentExecutionValidationPlan {
+  mode: string
+  validation_status: string
+  rationale: string
+  sample_input: Record<string, any>
+  execution_steps: AgentExecutionPlanStep[]
+  acceptance_checks: string[]
+  fallback_rules: string[]
+}
+
 export interface AgentVersion {
   version_id: string
   spec_id: string
@@ -203,6 +223,11 @@ export interface AgentVersion {
   required_capabilities: string[]
   output_schema: Record<string, any>
   evaluation_policy: Record<string, any>
+  execution_plan?: AgentExecutionValidationPlan
+  debug_result?: Record<string, any>
+  runtime_result?: Record<string, any>
+  prompt_template_project_memory_binding_summary?: AgentProjectMemoryBindingSummary
+  last_evaluation_summary?: AgentEvaluationSummary | null
   published_from_session_id?: string | null
   created_at: string
   updated_at: string
@@ -223,9 +248,165 @@ export interface AgentEvaluationReport {
   issues: string[]
   recommendations: string[]
   details?: Record<string, any>
+  evidence_bundle?: AgentEvaluationEvidenceBundle | null
+  evaluation_summary?: AgentEvaluationSummary
+  project_memory_binding_summary?: AgentProjectMemoryBindingSummary
   decision: string
   created_at: string
   updated_at: string
+}
+
+export interface AgentProjectMemoryBindingSummary {
+  source: string
+  enabled: boolean
+  valid: boolean
+  review_status: string
+  summary: string
+  system_prompt_present?: boolean | null
+  marker_present?: boolean | null
+  matched_items: number
+  expected_items: number
+  missing_item_count: number
+  missing_items_preview: string[]
+  evaluation_valid?: boolean | null
+  evaluation_status?: string | null
+  decision?: string | null
+}
+
+export interface AgentEvaluationSummary {
+  evaluation_id: string
+  evaluation_type: string
+  decision: string
+  overall_score?: number | null
+  created_at?: string | null
+  evaluation_valid: boolean
+  evaluation_status: string
+  review_mode?: string
+  worker_execution_mode?: string
+  content_quality_decision?: string
+  publish_readiness_decision?: string
+  project_memory_binding: AgentProjectMemoryBindingSummary
+}
+
+export interface AgentEvaluationFinding {
+  category: string
+  severity?: string
+  status: string
+  title: string
+  issue?: string
+  evidence: string[]
+}
+
+export interface AgentEvaluationLayerSummary {
+  score: number
+  decision: string
+  blockers?: string[]
+  warnings?: string[]
+}
+
+export interface AgentEvaluationLayeredReview {
+  content_quality?: AgentEvaluationLayerSummary
+  publish_readiness?: AgentEvaluationLayerSummary
+  blockers?: string[]
+  warnings?: string[]
+}
+
+export interface AgentEvaluationRuntimeSummary {
+  has_output_text: boolean
+  has_output_payload: boolean
+  has_debug_prompt: boolean
+  tool_trace_observed: boolean
+  required_tools: string[]
+  spec_outputs: string[]
+}
+
+export interface AgentEvaluationEvidenceArtifact {
+  artifact_type: string
+  title: string
+  path?: string
+  content?: string
+  metadata?: Record<string, any>
+}
+
+export interface AgentEvaluationManualReview {
+  review_id: string
+  target_path: string
+  target_title?: string
+  artifact_type?: string
+  finding_id?: string
+  worker_name?: string
+  approved: boolean
+  reason: string
+  comment?: string
+  reviewer?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentEvaluationCandidateFinding {
+  finding_id: string
+  category: string
+  severity?: string
+  title: string
+  trigger: string
+  status: string
+}
+
+export interface AgentEvaluationEvidenceTask {
+  task_id: string
+  finding_id: string
+  worker_name: string
+  objective: string
+  evidence_targets: string[]
+  status: string
+}
+
+export interface AgentEvaluationWorkerResult {
+  task_id: string
+  finding_id: string
+  worker_name: string
+  status: string
+  source: string
+  summary: string
+  evidence: string[]
+  artifacts: AgentEvaluationEvidenceArtifact[]
+}
+
+export interface AgentEvaluationOrchestrationSummary {
+  mode: string
+  worker_execution_mode: string
+  nanobot_worker_enabled: boolean
+  planned_task_count: number
+  completed_worker_count: number
+}
+
+export interface AgentEvaluationEvidenceBundle {
+  review_mode: string
+  evaluation_valid: boolean
+  evaluation_status: string
+  findings: AgentEvaluationFinding[]
+  official_issues: string[]
+  insufficient_evidence: AgentEvaluationFinding[]
+  invalid_reasons: string[]
+  runtime_summary: AgentEvaluationRuntimeSummary
+  candidate_findings?: AgentEvaluationCandidateFinding[]
+  evidence_tasks?: AgentEvaluationEvidenceTask[]
+  worker_results?: AgentEvaluationWorkerResult[]
+  manual_reviews?: AgentEvaluationManualReview[]
+  orchestrator?: AgentEvaluationOrchestrationSummary
+}
+
+export const getAgentEvaluationEvidenceBundle = (evaluation?: AgentEvaluationReport | null): AgentEvaluationEvidenceBundle | null => {
+  if (!evaluation) return null
+  const explicitBundle = evaluation.evidence_bundle
+  if (explicitBundle && typeof explicitBundle === 'object') {
+    return explicitBundle
+  }
+  const nestedBundle = evaluation.details?.evidence_bundle
+  if (nestedBundle && typeof nestedBundle === 'object') {
+    return nestedBundle as AgentEvaluationEvidenceBundle
+  }
+  return null
 }
 
 export interface AgentWorkshopValuationTraceabilityItem {
@@ -261,6 +442,14 @@ export interface AgentBenchmarkSampleSet {
 export interface AgentWorkshopEvaluateVersionResult {
   version_id: string
   evaluation: AgentEvaluationReport
+}
+
+export interface AgentWorkshopReviewEvaluationArtifactResult {
+  evaluation_id: string
+  version_id: string
+  publish_ready: boolean
+  evaluation: AgentEvaluationReport
+  manual_review: AgentEvaluationManualReview
 }
 
 export interface AgentWorkshopDebugVersionResult {
@@ -424,8 +613,40 @@ export const agentWorkshopApi = {
     return (res as any).data
   },
 
+  deleteVersion: async (versionId: string): Promise<{
+    deleted: boolean
+    version_id: string
+    spec_id: string
+    current_version_id?: string | null
+    remaining_versions: number
+  }> => {
+    const res = await request.delete<ApiOk<{
+      deleted: boolean
+      version_id: string
+      spec_id: string
+      current_version_id?: string | null
+      remaining_versions: number
+    }>>(`${BASE}/versions/${versionId}`)
+    return (res as any).data
+  },
+
   getVersionPrompt: async (versionId: string): Promise<AgentWorkshopVersionPrompt> => {
     const res = await request.get<ApiOk<AgentWorkshopVersionPrompt>>(`${BASE}/versions/${versionId}/prompt`)
+    return (res as any).data
+  },
+
+  publishVersion: async (versionId: string): Promise<{
+    version_id: string
+    spec_id: string
+    status: string
+    previous_active_archived: boolean
+  }> => {
+    const res = await request.post<ApiOk<{
+      version_id: string
+      spec_id: string
+      status: string
+      previous_active_archived: boolean
+    }>>(`${BASE}/versions/${versionId}/publish`, {})
     return (res as any).data
   },
 
@@ -437,6 +658,21 @@ export const agentWorkshopApi = {
     runtime_result?: Record<string, any>
   }): Promise<AgentWorkshopEvaluateVersionResult> => {
     const res = await request.post<ApiOk<AgentWorkshopEvaluateVersionResult>>(`${BASE}/versions/${versionId}/evaluate`, payload || {})
+    return (res as any).data
+  },
+
+  reviewEvaluationArtifact: async (evaluationId: string, payload: {
+    target_path: string
+    target_title?: string
+    artifact_type?: string
+    finding_id?: string
+    worker_name?: string
+    approved: boolean
+    reason: string
+    comment?: string
+    reviewer?: string
+  }): Promise<AgentWorkshopReviewEvaluationArtifactResult> => {
+    const res = await request.post<ApiOk<AgentWorkshopReviewEvaluationArtifactResult>>(`${BASE}/evaluations/${evaluationId}/manual-reviews`, payload)
     return (res as any).data
   },
 

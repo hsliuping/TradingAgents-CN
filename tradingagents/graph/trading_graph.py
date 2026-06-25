@@ -16,7 +16,7 @@ from langgraph.prebuilt import ToolNode
 
 from tradingagents.agents import *
 from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.agents.utils.memory import FinancialSituationMemory
+from tradingagents.core.engine.memory_provider import MemoryProvider
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
@@ -862,12 +862,12 @@ class TradingAgentsGraph:
         # Initialize memories (如果启用)
         memory_enabled = self.config.get("memory_enabled", True)
         if memory_enabled:
-            # 使用单例ChromaDB管理器，避免并发创建冲突
-            self.bull_memory = FinancialSituationMemory("bull_memory", self.config)
-            self.bear_memory = FinancialSituationMemory("bear_memory", self.config)
-            self.trader_memory = FinancialSituationMemory("trader_memory", self.config)
-            self.invest_judge_memory = FinancialSituationMemory("invest_judge_memory", self.config)
-            self.risk_manager_memory = FinancialSituationMemory("risk_manager_memory", self.config)
+            memory_provider = MemoryProvider(config=self.config, memory_enabled=True)
+            self.bull_memory = memory_provider.get_memory("bull_memory")
+            self.bear_memory = memory_provider.get_memory("bear_memory")
+            self.trader_memory = memory_provider.get_memory("trader_memory")
+            self.invest_judge_memory = memory_provider.get_memory("invest_judge_memory")
+            self.risk_manager_memory = memory_provider.get_memory("risk_manager_memory")
         else:
             # 创建空的内存对象
             self.bull_memory = None

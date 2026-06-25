@@ -9,6 +9,7 @@ Phase 1 目标：
 - 基础资源缺口分析
 """
 
+import copy
 import logging
 import hashlib
 import json
@@ -20,17 +21,33 @@ from threading import Lock
 from time import perf_counter
 from typing import Any, Dict, List, Optional, Tuple
 
+from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
+
+try:
+    import json_repair  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    json_repair = None
 
 from app.models.prompt_template import PromptTemplateCreate, TemplateContent
 from app.models.agent_workshop import (
     AgentCapabilityRequirement,
     AgentBenchmarkCase,
     AgentBenchmarkSampleSet,
+    AgentEvaluationCandidateFinding,
+    AgentEvaluationEvidenceBundle,
+    AgentEvaluationEvidenceTask,
+    AgentEvaluationFinding,
+    AgentEvaluationManualReview,
+    AgentEvaluationOrchestrationSummary,
+    AgentExecutionPlanStep,
+    AgentExecutionValidationPlan,
     AgentSpec,
     AgentSpecIOField,
     AgentSpecStatus,
     AgentEvaluationReport,
+    AgentEvaluationRuntimeSummary,
+    AgentEvaluationWorkerResult,
     AgentVersion,
     AgentVersionStatus,
     AgentWorkshopGapAnalysis,
@@ -42,12 +59,18 @@ from app.models.agent_workshop import (
 from app.services.capability_index_service import CapabilityIndexService
 from app.services.prompt_template_service import PromptTemplateService
 from app.utils.timezone import now_tz
+from core.memory.models import MemoryScope
 from core.agents.config import AgentCategory, AgentInput, AgentMaintenanceStatus, AgentMetadata, AgentOutput, LicenseTier
 from core.llm import UnifiedLLMClient, Message
 from core.tools import get_tool_registry
 from core.tools.config import ToolCategory
 
 logger = logging.getLogger(__name__)
+
+GLOBAL_NO_TRADING_ADVICE_CONSTRAINT = (
+    "全局铁律：禁止输出任何交易建议、买卖/持有判断、仓位建议、目标价、止损止盈、"
+    "建仓区间、择时结论和其他可直接执行的操作性指令；只能提供研究结论、关键依据、风险揭示与情景分析。"
+)
 
 _AGENT_WORKSHOP_LLM_TRACE_LOCK = Lock()
 _AGENT_WORKSHOP_LLM_TRACE_PATH = Path(__file__).resolve().parents[2] / "logs" / "agent_workshop_llm_full.log"
@@ -56,6 +79,7 @@ SPEC_COLLECTION = "agent_specs"
 SESSION_COLLECTION = "agent_workshop_sessions"
 VERSION_COLLECTION = "agent_versions"
 EVALUATION_COLLECTION = "agent_evaluations"
+_AGENT_BUILDER_PROJECT_ID = "tradingagents-cn"
 
 
 class AgentWorkshopLLMStageError(Exception):
@@ -197,6 +221,72 @@ class AgentWorkshopService:
             },
         )
 
+    def _log_production_review_evidence_state(
+        self,
+        evidence_bundle: AgentEvaluationEvidenceBundle,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        orchestrator = evidence_bundle.orchestrator.model_dump(mode="json") if evidence_bundle.orchestrator else {}
+        candidate_findings = [
+            {
+                "finding_id": item.finding_id,
+                "category": item.category,
+                "title": item.title,
+                "status": item.status,
+            }
+            for item in (evidence_bundle.candidate_findings or [])
+        ]
+        evidence_tasks = [
+            {
+                "task_id": item.task_id,
+                "finding_id": item.finding_id,
+                "worker_name": item.worker_name,
+                "objective": item.objective,
+            }
+            for item in (evidence_bundle.evidence_tasks or [])
+        ]
+        worker_results = [
+            {
+                "task_id": item.task_id,
+                "finding_id": item.finding_id,
+                "worker_name": item.worker_name,
+                "status": item.status,
+                "source": item.source,
+                "summary": item.summary,
+                "artifact_count": len(item.artifacts or []),
+            }
+            for item in (evidence_bundle.worker_results or [])
+        ]
+        evidence_summary = {
+            "review_mode": evidence_bundle.review_mode,
+            "evaluation_valid": evidence_bundle.evaluation_valid,
+            "evaluation_status": evidence_bundle.evaluation_status,
+            "official_issues": list(evidence_bundle.official_issues or []),
+            "invalid_reasons": list(evidence_bundle.invalid_reasons or []),
+            "insufficient_evidence_count": len(evidence_bundle.insufficient_evidence or []),
+            "finding_count": len(evidence_bundle.findings or []),
+            "orchestrator": orchestrator,
+        }
+        self._log_generated_result(
+            "production_review_orchestrator",
+            {
+                "orchestrator": orchestrator,
+                "candidate_findings": candidate_findings,
+                "evidence_tasks": evidence_tasks,
+            },
+            context=context,
+        )
+        self._log_generated_result(
+            "production_review_worker_results",
+            worker_results,
+            context=context,
+        )
+        self._log_generated_result(
+            "production_review_evidence_bundle",
+            evidence_summary,
+            context=context,
+        )
+
     def _log_llm_failure(
         self,
         stage: str,
@@ -220,6 +310,124 @@ class AgentWorkshopService:
                 "raw_response": raw_response or "",
             },
         )
+
+    @staticmethod
+    def _has_production_review_runtime_evidence(runtime_result: Optional[Dict[str, Any]]) -> bool:
+        if not isinstance(runtime_result, dict) or not runtime_result:
+            return False
+
+        if str(runtime_result.get("output_text") or "").strip():
+            return True
+        if runtime_result.get("output_payload"):
+            return True
+        if runtime_result.get("tool_trace"):
+            return True
+
+        debug_prompt = runtime_result.get("debug_prompt")
+        if not isinstance(debug_prompt, dict):
+            return False
+        if debug_prompt.get("tool_trace"):
+            return True
+        if str(debug_prompt.get("system_prompt") or "").strip():
+            return True
+        if str(debug_prompt.get("user_prompt") or "").strip():
+            return True
+        if str(debug_prompt.get("output_text") or "").strip():
+            return True
+        return False
+
+    @staticmethod
+    def _normalize_production_review_runtime_result(runtime_result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not isinstance(runtime_result, dict):
+            return {}
+
+        normalized = dict(runtime_result)
+        raw_result = normalized.get("raw_result") if isinstance(normalized.get("raw_result"), dict) else None
+        output_payload = normalized.get("output_payload") if isinstance(normalized.get("output_payload"), dict) else None
+        debug_prompt = normalized.get("debug_prompt") if isinstance(normalized.get("debug_prompt"), dict) else None
+
+        if output_payload is None and raw_result is not None:
+            output_payload = dict(raw_result)
+            normalized["output_payload"] = output_payload
+
+        nested_debug_prompt = {}
+        if isinstance(output_payload, dict):
+            nested = output_payload.get("__debug_prompt__")
+            if isinstance(nested, dict):
+                nested_debug_prompt = dict(nested)
+
+        if debug_prompt is None and nested_debug_prompt:
+            debug_prompt = nested_debug_prompt
+            normalized["debug_prompt"] = debug_prompt
+        elif isinstance(debug_prompt, dict) and nested_debug_prompt:
+            merged_debug_prompt = dict(nested_debug_prompt)
+            merged_debug_prompt.update({key: value for key, value in debug_prompt.items() if value not in (None, "", [], {})})
+            debug_prompt = merged_debug_prompt
+            normalized["debug_prompt"] = merged_debug_prompt
+
+        if not str(normalized.get("output_text") or "").strip():
+            report = normalized.get("report")
+            if isinstance(report, str) and report.strip():
+                normalized["output_text"] = report.strip()
+
+        if not normalized.get("user_goal"):
+            metadata = normalized.get("metadata") if isinstance(normalized.get("metadata"), dict) else {}
+            user_goal = metadata.get("user_goal")
+            if isinstance(user_goal, str) and user_goal.strip():
+                normalized["user_goal"] = user_goal.strip()
+
+        if not normalized.get("tool_trace") and isinstance(debug_prompt, dict) and isinstance(debug_prompt.get("tool_trace"), list):
+            normalized["tool_trace"] = debug_prompt.get("tool_trace")
+
+        if not normalized.get("tool_trace") and isinstance(output_payload, dict) and isinstance(output_payload.get("tool_trace"), list):
+            normalized["tool_trace"] = output_payload.get("tool_trace")
+
+        if not normalized.get("tool_trace") and isinstance(raw_result, dict) and isinstance(raw_result.get("tool_trace"), list):
+            normalized["tool_trace"] = raw_result.get("tool_trace")
+
+        return normalized
+
+    def _build_runtime_result_from_debug_result(self, debug_result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not isinstance(debug_result, dict):
+            return {}
+
+        debug_prompt = debug_result.get("debug_prompt") if isinstance(debug_result.get("debug_prompt"), dict) else {}
+        raw_result = debug_result.get("raw_result") if isinstance(debug_result.get("raw_result"), dict) else {}
+        metadata = debug_result.get("metadata") if isinstance(debug_result.get("metadata"), dict) else {}
+
+        runtime_result = {
+            "report": debug_result.get("report") or "",
+            "raw_result": raw_result,
+            "output_text": debug_prompt.get("llm_final_response") or debug_result.get("report") or "",
+            "output_payload": raw_result,
+            "debug_prompt": debug_prompt,
+            "tool_trace": debug_prompt.get("tool_trace") or raw_result.get("tool_trace") or [],
+            "user_goal": metadata.get("user_goal") or "",
+            "symbol": debug_result.get("symbol"),
+            "analysis_date": debug_result.get("analysis_date"),
+            "template": debug_result.get("template") if isinstance(debug_result.get("template"), dict) else {},
+            "metadata": metadata,
+        }
+        return self._normalize_production_review_runtime_result(runtime_result)
+
+    def _resolve_production_review_runtime_result(
+        self,
+        version: AgentVersion,
+        provided_runtime_result: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        normalized_runtime_result = self._normalize_production_review_runtime_result(provided_runtime_result)
+        if self._has_production_review_runtime_evidence(normalized_runtime_result):
+            return normalized_runtime_result
+
+        stored_runtime_result = self._normalize_production_review_runtime_result(version.runtime_result)
+        if self._has_production_review_runtime_evidence(stored_runtime_result):
+            return stored_runtime_result
+
+        stored_debug_runtime_result = self._build_runtime_result_from_debug_result(version.debug_result)
+        if self._has_production_review_runtime_evidence(stored_debug_runtime_result):
+            return stored_debug_runtime_result
+
+        return normalized_runtime_result
 
     def _get_llm_runtime_config(self, client: UnifiedLLMClient) -> Dict[str, Any]:
         adapter = getattr(client, "_adapter", None)
@@ -288,6 +496,131 @@ class AgentWorkshopService:
             "feasibility_status": feasibility_status,
             "refusal_reason": refusal_reason,
             "pending_questions": pending_questions,
+            "spec_overview": self._build_spec_overview(spec),
+        }
+
+    async def create_nanobot_draft(
+        self,
+        *,
+        agent_id: str,
+        agent_name: str,
+        target_responsibility: str,
+        output_field: str = "analysis_report",
+        tool_ids: Optional[List[str]] = None,
+        non_goals: Optional[List[str]] = None,
+        preferred_methods: Optional[List[str]] = None,
+        constraints: Optional[List[str]] = None,
+        owner_user_id: str = "",
+        source_thread_id: str = "",
+    ) -> Dict[str, Any]:
+        clean_agent_id = str(agent_id or "").strip()
+        clean_agent_name = str(agent_name or "").strip()
+        clean_responsibility = str(target_responsibility or "").strip()
+        if not clean_agent_id or not clean_agent_name or not clean_responsibility:
+            raise ValueError("agent_id、agent_name、target_responsibility 不能为空")
+
+        clean_output_field = self._normalize_nanobot_output_field(
+            clean_agent_id,
+            str(output_field or "analysis_report").strip(),
+        )
+
+        spec_id = await self._resolve_nanobot_spec_id(clean_agent_id)
+        session_id = str(uuid.uuid4())
+
+        existing_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": spec_id})
+        existing_spec = AgentSpec(**existing_doc) if existing_doc else None
+
+        normalized_non_goals = self._normalize_unique_list(non_goals)
+        normalized_methods = self._normalize_unique_list(preferred_methods)
+        normalized_constraints = self._normalize_unique_list(constraints)
+        normalized_tools = self._normalize_unique_list(tool_ids)
+        normalized_outputs = self._normalize_nanobot_output_items(
+            existing_spec.outputs if existing_spec and existing_spec.outputs else [clean_output_field],
+            clean_agent_id,
+        )
+
+        if GLOBAL_NO_TRADING_ADVICE_CONSTRAINT not in normalized_constraints:
+            normalized_constraints.append(GLOBAL_NO_TRADING_ADVICE_CONSTRAINT)
+
+        spec = AgentSpec(
+            spec_id=spec_id,
+            name=clean_agent_name,
+            domain=self._infer_nanobot_spec_domain(clean_agent_name, clean_responsibility, normalized_methods),
+            primary_goal=clean_responsibility,
+            responsibilities=[clean_responsibility],
+            non_goals=normalized_non_goals,
+            inputs=existing_spec.inputs if existing_spec and existing_spec.inputs else ["user_request", "symbol"],
+            outputs=normalized_outputs,
+            constraints=normalized_constraints,
+            preferred_methods=normalized_methods,
+            success_criteria=existing_spec.success_criteria if existing_spec else [],
+            capability_requirements=existing_spec.capability_requirements if existing_spec else [],
+            sample_symbols=existing_spec.sample_symbols if existing_spec else [],
+            status=existing_spec.status if existing_spec else AgentSpecStatus.DRAFT,
+            source="nanobot",
+            owner_user_id=owner_user_id or (existing_spec.owner_user_id if existing_spec else ""),
+            latest_session_id=session_id,
+            current_version_id=existing_spec.current_version_id if existing_spec else None,
+            version_count=existing_spec.version_count if existing_spec else 0,
+            created_at=existing_spec.created_at if existing_spec else now_tz(),
+        )
+
+        summary_lines = [
+            f"Nanobot 已将候选 Agent 同步为 Agent 工坊 Draft：{clean_agent_name}（{clean_agent_id}）。",
+            f"单一职责：{clean_responsibility}",
+            f"输出字段：{clean_output_field}",
+        ]
+        if normalized_tools:
+            summary_lines.append(f"候选工具：{'、'.join(normalized_tools)}")
+        if normalized_non_goals:
+            summary_lines.append(f"非目标：{'、'.join(normalized_non_goals)}")
+        if normalized_methods:
+            summary_lines.append(f"方法范围：{'、'.join(normalized_methods)}")
+        if source_thread_id:
+            summary_lines.append(f"来源线程：{source_thread_id}")
+
+        session = AgentWorkshopSession(
+            session_id=session_id,
+            spec_id=spec.spec_id,
+            user_id=spec.owner_user_id,
+            stage=self._infer_stage("feasible", 1.0),
+            current_round=1,
+            messages=[
+                AgentWorkshopMessage(
+                    role="user",
+                    content=self._build_nanobot_draft_user_message(
+                        agent_id=clean_agent_id,
+                        agent_name=clean_agent_name,
+                        target_responsibility=clean_responsibility,
+                        output_field=clean_output_field,
+                        tool_ids=normalized_tools,
+                        non_goals=normalized_non_goals,
+                        preferred_methods=normalized_methods,
+                    ),
+                ),
+                AgentWorkshopMessage(role="assistant", content="\n".join(summary_lines)),
+            ],
+            current_spec_snapshot=spec,
+            pending_questions=[],
+            completeness_score=1.0,
+            feasibility_status="feasible",
+            refusal_reason="",
+        )
+
+        await self._save_spec(spec, session_id=session.session_id)
+        await self._save_session(session)
+
+        return {
+            "session_id": session.session_id,
+            "spec_id": spec.spec_id,
+            "stage": session.stage.value,
+            "status": spec.status.value,
+            "source": spec.source,
+            "owner_user_id": spec.owner_user_id,
+            "linked_agent_id": clean_agent_id,
+            "output_field": clean_output_field,
+            "tool_ids": normalized_tools,
+            "updated_existing_spec": existing_spec is not None,
             "spec_overview": self._build_spec_overview(spec),
         }
 
@@ -447,46 +780,191 @@ class AgentWorkshopService:
             "tooling_plan": tooling_plan,
         }
 
+    async def sync_version_required_tools(
+        self,
+        version_id: str,
+        required_tools: List[str],
+        default_tools: Optional[List[str]] = None,
+        max_tool_calls: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        version_doc = await self._db[VERSION_COLLECTION].find_one({"version_id": version_id})
+        if not version_doc:
+            raise ValueError(f"版本 {version_id} 不存在")
+
+        version = self._parse_agent_version_doc(version_doc)
+        spec_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": version.spec_id})
+        if not spec_doc:
+            raise ValueError(f"规格 {version.spec_id} 不存在")
+        spec = self._parse_agent_spec_doc(spec_doc)
+
+        normalized_required_tools = self._dedupe([
+            str(item).strip() for item in (required_tools or []) if str(item).strip()
+        ])
+        normalized_default_tools = self._dedupe([
+            str(item).strip() for item in (default_tools or []) if str(item).strip()
+        ]) or normalized_required_tools[:2] or list(normalized_required_tools)
+
+        gap_report = None
+        tooling_plan = None
+        lesson_user_id = str(spec.owner_user_id or "").strip()
+        context_session_id = str(version.published_from_session_id or spec.latest_session_id or "").strip()
+        if context_session_id:
+            session = await self._load_session(context_session_id)
+            if session is not None:
+                gap_report = session.gap_report
+                tooling_plan = session.tooling_plan
+            lesson_user_id = str(session.user_id or lesson_user_id).strip()
+
+        version.required_tools = normalized_required_tools
+        metadata = dict(version.agent_metadata or {})
+        metadata["tools"] = list(normalized_required_tools)
+        metadata["default_tools"] = list(normalized_default_tools)
+        if max_tool_calls is not None:
+            metadata["max_tool_calls"] = int(max_tool_calls)
+        version.agent_metadata = metadata
+
+        output_schema = version.output_schema or self._build_output_schema(spec)
+        version.output_schema = output_schema
+        version.execution_plan = self._build_execution_validation_plan(
+            spec,
+            normalized_required_tools,
+            output_schema,
+            gap_report=gap_report,
+            tooling_plan=tooling_plan,
+        )
+
+        evaluation_policy = dict(version.evaluation_policy or {})
+        evaluation_policy["creation_mode"] = "execution-first"
+        evaluation_policy["execution_validation_required"] = True
+        evaluation_policy["execution_validation_status"] = version.execution_plan.validation_status
+        version.evaluation_policy = evaluation_policy
+        agent_builder_lesson_block = await self._recall_agent_builder_lessons_for_spec(
+            spec,
+            user_id=lesson_user_id,
+            query_text=" ".join(normalized_required_tools[:4]),
+            source_stage="sync_version_required_tools",
+        )
+
+        prompt_content = self._build_prompt_template_content(
+            spec,
+            normalized_required_tools,
+            gap_report=gap_report,
+            tooling_plan=tooling_plan,
+            agent_builder_lesson_block=agent_builder_lesson_block,
+        )
+        version.prompt_template_ref = await self._upsert_version_prompt_template(
+            version,
+            spec,
+            prompt_content,
+        )
+
+        version.updated_at = now_tz()
+        await self._save_version(version)
+
+        return {
+            "version_id": version.version_id,
+            "spec_id": version.spec_id,
+            "required_tools": version.required_tools,
+            "default_tools": normalized_default_tools,
+            "prompt_template_ref": version.prompt_template_ref,
+            "execution_validation_status": version.execution_plan.validation_status,
+        }
+
     async def build_version(self, session_id: str) -> Dict[str, Any]:
         session = await self._load_session(session_id)
         if not session:
             raise ValueError(f"会话 {session_id} 不存在")
-        self._ensure_session_can_continue(session)
 
         spec = session.current_spec_snapshot
-        if session.gap_report is None:
-            session.gap_report = await self._build_gap_analysis(spec)
+        existing_draft_version = await self._resolve_session_draft_version(session, spec)
+        if existing_draft_version is None:
+            self._ensure_session_can_continue(session)
 
-        version_number = await self._get_next_version_number(spec.spec_id)
-        version_id = f"{spec.spec_id}_v{version_number}"
+        gap_report = session.gap_report
+        if gap_report is None:
+            if existing_draft_version is not None or spec.source == "nanobot":
+                gap_report = AgentWorkshopGapAnalysis()
+            else:
+                gap_report = await self._build_gap_analysis(spec)
+                session.gap_report = gap_report
 
-        required_tools = self._select_required_tools(spec, session.gap_report)
+        if existing_draft_version is not None:
+            version_number = existing_draft_version.version
+            version_id = existing_draft_version.version_id
+        else:
+            version_number = await self._get_next_version_number(spec.spec_id)
+            version_id = f"{spec.spec_id}_v{version_number}"
+
+        required_tools = self._select_required_tools(spec, gap_report)
         capability_snapshot = await self._collect_capability_snapshot(self._build_valuation_requirement_text(spec))
-        required_capabilities = self._select_required_capabilities(session.gap_report, session.tooling_plan, capability_snapshot)
+        required_capabilities = self._select_required_capabilities(gap_report, session.tooling_plan, capability_snapshot)
         output_schema = self._build_output_schema(spec)
         evaluation_policy = self._build_evaluation_policy(spec)
-        prompt_template = await self._create_prompt_template(
-            version_id,
+        execution_plan = self._build_execution_validation_plan(
             spec,
             required_tools,
-            gap_report=session.gap_report,
+            output_schema,
+            gap_report=gap_report,
             tooling_plan=session.tooling_plan,
         )
+        evaluation_policy["creation_mode"] = "execution-first"
+        evaluation_policy["execution_validation_required"] = True
+        evaluation_policy["execution_validation_status"] = execution_plan.validation_status
         metadata = self._build_agent_metadata(version_id, spec, required_tools)
-
-        version = AgentVersion(
-            version_id=version_id,
-            spec_id=spec.spec_id,
-            version=version_number,
-            status=AgentVersionStatus.DRAFT,
-            agent_metadata=metadata,
-            prompt_template_ref=prompt_template,
-            required_tools=required_tools,
-            required_capabilities=required_capabilities,
-            output_schema=output_schema,
-            evaluation_policy=evaluation_policy,
-            published_from_session_id=session.session_id,
+        agent_builder_lesson_block = await self._recall_agent_builder_lessons_for_spec(
+            spec,
+            user_id=str(session.user_id or spec.owner_user_id or "").strip(),
+            query_text=" ".join([*spec.preferred_methods[:4], *required_tools[:4]]),
+            source_stage="build_version",
         )
+
+        if existing_draft_version is not None:
+            version = existing_draft_version
+            version.status = AgentVersionStatus.TESTING
+            version.agent_metadata = metadata
+            version.required_tools = required_tools
+            version.required_capabilities = required_capabilities
+            version.output_schema = output_schema
+            version.evaluation_policy = evaluation_policy
+            version.execution_plan = execution_plan
+            version.runtime_result = None
+            version.debug_result = None
+            version.prompt_template_ref = await self._upsert_version_prompt_template(
+                version,
+                spec,
+                self._build_prompt_template_content(
+                    spec,
+                    required_tools,
+                    gap_report=gap_report,
+                    tooling_plan=session.tooling_plan,
+                    agent_builder_lesson_block=agent_builder_lesson_block,
+                ),
+            )
+            version.published_from_session_id = session.session_id
+            version.updated_at = now_tz()
+        else:
+            prompt_template = await self._create_prompt_template(
+                version_id,
+                spec,
+                required_tools,
+                gap_report=gap_report,
+                tooling_plan=session.tooling_plan,
+                agent_builder_lesson_block=agent_builder_lesson_block,
+            )
+            version = AgentVersion(
+                version_id=version_id,
+                spec_id=spec.spec_id,
+                version=version_number,
+                status=AgentVersionStatus.TESTING,
+                agent_metadata=metadata,
+                prompt_template_ref=prompt_template,
+                required_tools=required_tools,
+                required_capabilities=required_capabilities,
+                output_schema=output_schema,
+                evaluation_policy=evaluation_policy,
+                execution_plan=execution_plan,
+                published_from_session_id=session.session_id,
+            )
 
         await self._save_version(version)
 
@@ -498,6 +976,7 @@ class AgentWorkshopService:
         spec.version_count = max(spec.version_count, version_number)
         spec.current_version_id = version.version_id
         spec.latest_session_id = session.session_id
+        spec.status = AgentSpecStatus.TESTING
         spec.updated_at = now_tz()
         await self._save_spec(spec, session_id=session.session_id)
 
@@ -598,6 +1077,13 @@ class AgentWorkshopService:
 
         version_docs = await self._db[VERSION_COLLECTION].find({"spec_id": spec_id}).to_list(length=200)
         version_ids = [item.get("version_id") for item in version_docs if item.get("version_id")]
+        runtime_agent_ids: List[str] = []
+
+        for item in version_docs:
+            agent_metadata = item.get("agent_metadata") or {}
+            agent_id = str(agent_metadata.get("id") or item.get("version_id") or "").strip()
+            if agent_id:
+                runtime_agent_ids.append(agent_id)
 
         prompt_template_ids: List[str] = []
         for item in version_docs:
@@ -610,6 +1096,24 @@ class AgentWorkshopService:
         deleted_versions = await self._db[VERSION_COLLECTION].delete_many({"spec_id": spec_id})
         deleted_evaluations = await self._db[EVALUATION_COLLECTION].delete_many({"version_id": {"$in": version_ids}}) if version_ids else None
         deleted_prompts = await self._db["prompt_templates"].delete_many({"_id": {"$in": prompt_template_ids}}) if prompt_template_ids else None
+        runtime_config_query: Dict[str, Any] = {"$or": [{"metadata.spec_id": spec_id}]}
+        runtime_binding_queries: List[Dict[str, Any]] = []
+        if runtime_agent_ids:
+            runtime_config_query["$or"].append({"agent_id": {"$in": runtime_agent_ids}})
+            runtime_binding_queries.append({"agent_id": {"$in": runtime_agent_ids}})
+        orphan_runtime_docs = await self._db["agent_configs"].find({"metadata.spec_id": spec_id}, {"agent_id": 1}).to_list(length=200)
+        orphan_runtime_agent_ids = [
+            str(item.get("agent_id") or "").strip()
+            for item in orphan_runtime_docs
+            if str(item.get("agent_id") or "").strip()
+        ]
+        if orphan_runtime_agent_ids:
+            runtime_binding_queries.append({"agent_id": {"$in": orphan_runtime_agent_ids}})
+        deleted_runtime_configs = await self._db["agent_configs"].delete_many(runtime_config_query)
+        if runtime_binding_queries:
+            deleted_runtime_bindings = await self._db["tool_agent_bindings"].delete_many({"$or": runtime_binding_queries})
+        else:
+            deleted_runtime_bindings = None
         deleted_spec = await self._db[SPEC_COLLECTION].delete_one({"spec_id": spec_id})
 
         return {
@@ -619,6 +1123,8 @@ class AgentWorkshopService:
             "deleted_versions": deleted_versions.deleted_count,
             "deleted_evaluations": deleted_evaluations.deleted_count if deleted_evaluations is not None else 0,
             "deleted_prompts": deleted_prompts.deleted_count if deleted_prompts is not None else 0,
+            "deleted_runtime_configs": deleted_runtime_configs.deleted_count if deleted_runtime_configs is not None else 0,
+            "deleted_runtime_bindings": deleted_runtime_bindings.deleted_count if deleted_runtime_bindings is not None else 0,
         }
 
     async def list_sample_sets(self, spec_id: str) -> Dict[str, Any]:
@@ -656,6 +1162,22 @@ class AgentWorkshopService:
         items: List[Dict[str, Any]] = []
         async for doc in cursor:
             doc.pop("_id", None)
+            version = AgentVersion(**doc)
+            doc["prompt_template_project_memory_binding_summary"] = self._build_project_memory_binding_summary(
+                await self._review_prompt_template_project_memory_binding(version),
+                source="prompt_template",
+            )
+            latest_evaluation_doc = await self._db[EVALUATION_COLLECTION].find_one(
+                {"version_id": version.version_id},
+                sort=[("created_at", -1)],
+            )
+            if latest_evaluation_doc:
+                latest_evaluation_doc.pop("_id", None)
+                doc["last_evaluation_summary"] = self._build_evaluation_summary(
+                    AgentEvaluationReport(**latest_evaluation_doc)
+                )
+            else:
+                doc["last_evaluation_summary"] = None
             items.append(doc)
 
         return {
@@ -670,7 +1192,85 @@ class AgentWorkshopService:
         if not doc:
             return None
         doc.pop("_id", None)
+        version = AgentVersion(**doc)
+        doc["prompt_template_project_memory_binding_summary"] = self._build_project_memory_binding_summary(
+            await self._review_prompt_template_project_memory_binding(version),
+            source="prompt_template",
+        )
+        latest_evaluation_doc = await self._db[EVALUATION_COLLECTION].find_one(
+            {"version_id": version_id},
+            sort=[("created_at", -1)],
+        )
+        if latest_evaluation_doc:
+            latest_evaluation_doc.pop("_id", None)
+            doc["last_evaluation_summary"] = self._build_evaluation_summary(
+                AgentEvaluationReport(**latest_evaluation_doc)
+            )
+        else:
+            doc["last_evaluation_summary"] = None
         return doc
+
+    async def delete_version(self, version_id: str) -> Dict[str, Any]:
+        version_doc = await self._db[VERSION_COLLECTION].find_one({"version_id": version_id})
+        if not version_doc:
+            return {"deleted": False, "version_id": version_id}
+
+        version = AgentVersion(**version_doc)
+        spec_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": version.spec_id})
+        spec = AgentSpec(**spec_doc) if spec_doc else None
+
+        agent_metadata = version.agent_metadata or {}
+        runtime_agent_id = str(agent_metadata.get("id") or version.version_id or "").strip()
+        template_ref = version.prompt_template_ref or {}
+        prompt_template_id = str(template_ref.get("template_id") or "").strip()
+
+        deleted_evaluations = await self._db[EVALUATION_COLLECTION].delete_many({"version_id": version_id})
+        deleted_prompts = await self._db["prompt_templates"].delete_many({"_id": {"$in": [prompt_template_id]}}) if prompt_template_id else None
+        runtime_config_query: Dict[str, Any] = {"$or": [{"metadata.version_id": version_id}]}
+        runtime_binding_queries: List[Dict[str, Any]] = []
+        if runtime_agent_id:
+            runtime_config_query["$or"].append({"agent_id": {"$in": [runtime_agent_id]}})
+            runtime_binding_queries.append({"agent_id": {"$in": [runtime_agent_id]}})
+        linked_runtime_docs = await self._db["agent_configs"].find({"metadata.version_id": version_id}, {"agent_id": 1}).to_list(length=50)
+        linked_runtime_agent_ids = [
+            str(item.get("agent_id") or "").strip()
+            for item in linked_runtime_docs
+            if str(item.get("agent_id") or "").strip()
+        ]
+        if linked_runtime_agent_ids:
+            runtime_binding_queries.append({"agent_id": {"$in": linked_runtime_agent_ids}})
+        deleted_runtime_configs = await self._db["agent_configs"].delete_many(runtime_config_query)
+        if runtime_binding_queries:
+            deleted_runtime_bindings = await self._db["tool_agent_bindings"].delete_many({"$or": runtime_binding_queries})
+        else:
+            deleted_runtime_bindings = None
+        deleted_version = await self._db[VERSION_COLLECTION].delete_one({"version_id": version_id})
+
+        fallback_version_id = None
+        remaining_version_count = 0
+        if spec:
+            fallback_version = await self._db[VERSION_COLLECTION].find_one(
+                {"spec_id": version.spec_id},
+                sort=[("version", -1)],
+            )
+            fallback_version_id = str((fallback_version or {}).get("version_id") or "").strip() or None
+            remaining_version_count = await self._db[VERSION_COLLECTION].count_documents({"spec_id": version.spec_id})
+            spec.current_version_id = fallback_version_id
+            spec.version_count = remaining_version_count
+            spec.updated_at = now_tz()
+            await self._save_spec(spec)
+
+        return {
+            "deleted": deleted_version.deleted_count > 0,
+            "version_id": version_id,
+            "spec_id": version.spec_id,
+            "current_version_id": fallback_version_id,
+            "remaining_versions": remaining_version_count,
+            "deleted_evaluations": deleted_evaluations.deleted_count,
+            "deleted_prompts": deleted_prompts.deleted_count if deleted_prompts is not None else 0,
+            "deleted_runtime_configs": deleted_runtime_configs.deleted_count if deleted_runtime_configs is not None else 0,
+            "deleted_runtime_bindings": deleted_runtime_bindings.deleted_count if deleted_runtime_bindings is not None else 0,
+        }
 
     async def evaluate_version(
         self,
@@ -690,24 +1290,49 @@ class AgentWorkshopService:
         if not spec_doc:
             raise ValueError(f"规格 {version.spec_id} 不存在")
         spec = AgentSpec(**spec_doc)
+        normalized_runtime_result = self._resolve_production_review_runtime_result(version, runtime_result)
 
         evaluation_details: Dict[str, Any] = {}
         if evaluation_type == "benchmark":
             raise ValueError("样本基准评估已暂时禁用，请改用真实结果评估。")
         elif evaluation_type == "production-review":
+            if not self._has_production_review_runtime_evidence(normalized_runtime_result):
+                raise ValueError(
+                    "production-review 缺少必要的 runtime_result 证据，至少需要 output_text、output_payload、debug_prompt 或 tool_trace 之一"
+                )
             scores, issues, recommendations, evaluation_details = await self._evaluate_runtime_result(
                 version,
                 spec,
-                runtime_result or {},
+                normalized_runtime_result,
                 user_feedback=user_feedback,
             )
         else:
             scores = self._calculate_evaluation_scores(version, spec, user_feedback=user_feedback)
             issues = self._build_evaluation_issues(version, spec, scores, user_feedback=user_feedback)
             recommendations = self._build_evaluation_recommendations(version, spec, scores, issues)
-        overall_score = round(sum(scores.values()) / len(scores), 2) if scores else 0.0
         minimum_score = float((version.evaluation_policy or {}).get("minimum_score", 0.75))
-        decision = self._decide_evaluation(overall_score, minimum_score, issues)
+        if evaluation_type == "production-review":
+            layered_review = evaluation_details.get("layered_review") if isinstance(evaluation_details, dict) else {}
+            content_quality = layered_review.get("content_quality", {}) if isinstance(layered_review, dict) else {}
+            publish_readiness = layered_review.get("publish_readiness", {}) if isinstance(layered_review, dict) else {}
+            if content_quality or publish_readiness:
+                content_score = float(content_quality.get("score", 0.0) or 0.0)
+                publish_score = float(publish_readiness.get("score", 0.0) or 0.0)
+                overall_score = round((content_score * 0.45) + (publish_score * 0.55), 2)
+                decision = str(publish_readiness.get("decision") or self._decide_evaluation(overall_score, minimum_score, issues))
+            else:
+                overall_score = round(sum(scores.values()) / len(scores), 2) if scores else 0.0
+                decision = self._decide_evaluation(overall_score, minimum_score, issues)
+        else:
+            overall_score = round(sum(scores.values()) / len(scores), 2) if scores else 0.0
+            decision = self._decide_evaluation(overall_score, minimum_score, issues)
+
+        evidence_bundle = None
+        if evaluation_type == "production-review":
+            evidence_bundle = self._coerce_evidence_bundle(
+                evaluation_details.get("evidence_bundle"),
+                evaluation_details,
+            )
 
         report = AgentEvaluationReport(
             evaluation_id=str(uuid.uuid4()),
@@ -718,15 +1343,24 @@ class AgentWorkshopService:
             issues=issues,
             recommendations=recommendations,
             details=evaluation_details,
+            evidence_bundle=evidence_bundle,
             decision=decision,
         )
 
+        report = self._attach_evaluation_summary(report)
+
         await self._save_evaluation(report)
+        await self._store_agent_builder_lesson(version, spec, report)
 
         if decision == "pass" and version.status == AgentVersionStatus.DRAFT:
             version.status = AgentVersionStatus.TESTING
             version.updated_at = now_tz()
             await self._save_version(version)
+
+        if decision == "pass" and spec.status == AgentSpecStatus.DRAFT:
+            spec.status = AgentSpecStatus.TESTING
+            spec.updated_at = now_tz()
+            await self._save_spec(spec)
 
         # 更新关联 session 的 stage 为 EVALUATING
         if spec.latest_session_id:
@@ -754,10 +1388,26 @@ class AgentWorkshopService:
                 f"版本 {version_id} 当前状态为 {version.status.value}，只有 testing 状态的版本可以发布"
             )
 
+        latest_evaluation_doc = await self._db[EVALUATION_COLLECTION].find_one(
+            {"version_id": version_id},
+            sort=[("created_at", -1)],
+        )
+        latest_decision = str((latest_evaluation_doc or {}).get("decision") or "").strip().lower()
+        if latest_decision != "pass":
+            raise ValueError(
+                f"版本 {version_id} 尚未通过最新一次真数据测试评估，当前最新结论为 {latest_decision or 'none'}，不能发布"
+            )
+
         spec_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": version.spec_id})
         if not spec_doc:
             raise ValueError(f"规格 {version.spec_id} 不存在")
         spec = AgentSpec(**spec_doc)
+        project_memory_binding = await self._review_prompt_template_project_memory_binding(version)
+        if project_memory_binding["enabled"] and not project_memory_binding["valid"]:
+            missing_preview = "；".join(project_memory_binding["missing_items"][:4]) or "缺少项目长期记忆绑定标记"
+            raise ValueError(
+                f"版本 {version_id} 的 Prompt Template 尚未绑定当前 L4 项目长期记忆，不能发布：{missing_preview}"
+            )
 
         # 将之前 active 的版本归档，并从运行时配置中禁用旧发布版本
         await self._db[VERSION_COLLECTION].update_many(
@@ -774,8 +1424,29 @@ class AgentWorkshopService:
         version.updated_at = now_tz()
         await self._save_version(version)
 
+        template_id = str(version.prompt_template_ref.get("template_id") or "").strip()
+        if template_id:
+            template_filter: Dict[str, Any]
+            if ObjectId.is_valid(template_id):
+                template_filter = {"_id": ObjectId(template_id)}
+            else:
+                template_filter = {"_id": template_id}
+            await self._db["prompt_templates"].update_one(
+                template_filter,
+                {"$set": {"status": "active", "updated_at": now_tz()}},
+            )
+            version.prompt_template_ref["status"] = "active"
+            version.prompt_template_ref["project_memory_binding"] = {
+                "enabled": project_memory_binding["enabled"],
+                "valid": project_memory_binding["valid"],
+                "matched_items": project_memory_binding["matched_items"],
+                "expected_items": project_memory_binding["expected_items"],
+            }
+            version.updated_at = now_tz()
+            await self._save_version(version)
+
         # 注册到 agent_configs，确保发布的 Agent 能被工作流引擎调度
-        await self._ensure_runtime_agent_config(version, spec)
+        await self._ensure_runtime_agent_config(version, spec, project_memory_binding=project_memory_binding)
 
         # 更新 Spec 的 current_version_id 和状态
         spec.current_version_id = version.version_id
@@ -802,6 +1473,7 @@ class AgentWorkshopService:
             "spec_id": spec.spec_id,
             "status": version.status.value,
             "previous_active_archived": True,
+            "project_memory_binding": project_memory_binding,
         }
 
     async def rollback_version(self, spec_id: str) -> Dict[str, Any]:
@@ -889,6 +1561,10 @@ class AgentWorkshopService:
         items: List[Dict[str, Any]] = []
         async for doc in cursor:
             doc.pop("_id", None)
+            report = AgentEvaluationReport(**doc)
+            evaluation_summary = self._build_evaluation_summary(report)
+            doc["evaluation_summary"] = evaluation_summary
+            doc["project_memory_binding_summary"] = evaluation_summary.get("project_memory_binding", {})
             items.append(doc)
 
         return {
@@ -897,6 +1573,614 @@ class AgentWorkshopService:
             "page_size": page_size,
             "items": items,
         }
+
+    async def review_evaluation_artifact(
+        self,
+        evaluation_id: str,
+        target_path: str,
+        target_title: str = "",
+        artifact_type: str = "",
+        finding_id: str = "",
+        worker_name: str = "",
+        approved: bool = False,
+        reason: str = "",
+        comment: str = "",
+        reviewer: str = "",
+    ) -> Dict[str, Any]:
+        evaluation_doc = await self._db[EVALUATION_COLLECTION].find_one({"evaluation_id": evaluation_id})
+        if not evaluation_doc:
+            raise ValueError(f"评估 {evaluation_id} 不存在")
+
+        report = AgentEvaluationReport(**evaluation_doc)
+        bundle = self._coerce_evidence_bundle(report.evidence_bundle or report.details.get("evidence_bundle"), report.details)
+        if not bundle:
+            raise ValueError("当前评估没有可审核的 evidence bundle")
+
+        artifact = self._find_evaluation_artifact(bundle, target_path, finding_id=finding_id, worker_name=worker_name)
+        if artifact is None:
+            raise ValueError(f"证据项 {target_path} 不存在")
+
+        now = now_tz()
+        manual_review = AgentEvaluationManualReview(
+            review_id=str(uuid.uuid4()),
+            target_path=target_path.strip(),
+            target_title=target_title.strip() or str(artifact.get("title") or "").strip(),
+            artifact_type=artifact_type.strip() or str(artifact.get("artifact_type") or "").strip(),
+            finding_id=finding_id.strip(),
+            worker_name=worker_name.strip(),
+            approved=approved,
+            reason=reason.strip(),
+            comment=comment.strip(),
+            reviewer=reviewer.strip(),
+            created_at=now,
+            updated_at=now,
+        )
+
+        bundle.manual_reviews = self._upsert_evaluation_manual_reviews(bundle.manual_reviews or [], manual_review)
+        self._annotate_artifact_manual_reviews(bundle)
+
+        report.evidence_bundle = bundle
+        report.details = dict(report.details or {})
+        report.details.setdefault("machine_decision", report.decision)
+        report.details.setdefault("machine_issues", list(report.issues or []))
+        report = await self._rebuild_evaluation_after_manual_reviews(report)
+        await self._save_evaluation(report)
+
+        return {
+            "evaluation_id": report.evaluation_id,
+            "version_id": report.version_id,
+            "publish_ready": report.decision == "pass",
+            "evaluation": report,
+            "manual_review": manual_review,
+        }
+
+    def _find_evaluation_artifact(
+        self,
+        bundle: AgentEvaluationEvidenceBundle,
+        target_path: str,
+        finding_id: str = "",
+        worker_name: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        normalized_path = str(target_path or "").strip()
+        for worker_result in (bundle.worker_results or []):
+            if finding_id and worker_result.finding_id != finding_id:
+                continue
+            if worker_name and worker_result.worker_name != worker_name:
+                continue
+            for artifact in (worker_result.artifacts or []):
+                if str((artifact or {}).get("path") or "").strip() == normalized_path:
+                    return artifact
+        return None
+
+    def _upsert_evaluation_manual_reviews(
+        self,
+        reviews: List[AgentEvaluationManualReview],
+        manual_review: AgentEvaluationManualReview,
+    ) -> List[AgentEvaluationManualReview]:
+        updated: List[AgentEvaluationManualReview] = []
+        replaced = False
+        for item in reviews:
+            if item.target_path == manual_review.target_path:
+                replacement = manual_review.model_copy(update={
+                    "review_id": item.review_id or manual_review.review_id,
+                    "created_at": item.created_at or manual_review.created_at,
+                    "updated_at": now_tz(),
+                })
+                updated.append(replacement)
+                replaced = True
+            else:
+                updated.append(item)
+        if not replaced:
+            updated.append(manual_review)
+        return updated
+
+    def _annotate_artifact_manual_reviews(self, bundle: AgentEvaluationEvidenceBundle) -> None:
+        review_map = {
+            str(item.target_path or "").strip(): item.model_dump(mode="json")
+            for item in (bundle.manual_reviews or [])
+            if str(item.target_path or "").strip()
+        }
+        for worker_result in (bundle.worker_results or []):
+            for artifact in (worker_result.artifacts or []):
+                path = str((artifact or {}).get("path") or "").strip()
+                if not path:
+                    continue
+                metadata = artifact.get("metadata") if isinstance(artifact.get("metadata"), dict) else {}
+                metadata = dict(metadata)
+                if path in review_map:
+                    metadata["manual_review"] = review_map[path]
+                elif "manual_review" in metadata:
+                    metadata.pop("manual_review", None)
+                artifact["metadata"] = metadata
+
+    async def _rebuild_evaluation_after_manual_reviews(
+        self,
+        report: AgentEvaluationReport,
+    ) -> AgentEvaluationReport:
+        details = dict(report.details or {})
+        bundle = self._coerce_evidence_bundle(report.evidence_bundle or details.get("evidence_bundle"), details)
+        if not bundle:
+            return report
+
+        version_doc = await self._db[VERSION_COLLECTION].find_one({"version_id": report.version_id})
+        if not version_doc:
+            raise ValueError(f"版本 {report.version_id} 不存在")
+        version = AgentVersion(**version_doc)
+
+        rule_details = self._build_rule_details_from_evaluation_details(details)
+        rule_details = self._apply_manual_reviews_to_rule_details(bundle, rule_details)
+        effective_bundle = self._build_effective_evidence_bundle_from_manual_reviews(bundle, rule_details)
+        layered_review = self._build_production_review_layered_assessment(
+            version,
+            rule_details.get("scores", {}),
+            rule_details,
+            effective_bundle,
+        )
+
+        content_quality = layered_review.get("content_quality", {}) if isinstance(layered_review, dict) else {}
+        publish_readiness = layered_review.get("publish_readiness", {}) if isinstance(layered_review, dict) else {}
+        overall_score = round((float(content_quality.get("score", 0.0) or 0.0) * 0.45) + (float(publish_readiness.get("score", 0.0) or 0.0) * 0.55), 2)
+        issues = self._dedupe([
+            *[str(item).strip() for item in (layered_review.get("publish_readiness", {}).get("blockers") or []) if str(item).strip()],
+            *[str(item).strip() for item in (effective_bundle.official_issues or []) if str(item).strip()],
+        ])
+
+        details["valuation_traceability"] = rule_details.get("valuation_traceability", {})
+        details["evidence_bundle"] = effective_bundle.model_dump(mode="json")
+        details["evaluation_valid"] = effective_bundle.evaluation_valid
+        details["evaluation_status"] = effective_bundle.evaluation_status
+        details["warning_issues"] = layered_review.get("warnings", [])
+        details["blocker_issues"] = layered_review.get("blockers", [])
+        details["layered_review"] = layered_review
+        details["manual_review_summary"] = {
+            "reviewed_count": len(effective_bundle.manual_reviews or []),
+            "approved_count": len([item for item in (effective_bundle.manual_reviews or []) if item.approved]),
+            "rejected_count": len([item for item in (effective_bundle.manual_reviews or []) if not item.approved]),
+        }
+
+        report.evidence_bundle = effective_bundle
+        report.details = details
+        report.issues = issues
+        report.decision = str(publish_readiness.get("decision") or report.decision)
+        report.scores = {**dict(report.scores or {}), "overall": overall_score}
+        report.updated_at = now_tz()
+        return self._attach_evaluation_summary(report)
+
+    def _attach_evaluation_summary(
+        self,
+        report: AgentEvaluationReport,
+    ) -> AgentEvaluationReport:
+        details = dict(report.details or {})
+        summary = self._build_evaluation_summary(report)
+        details["evaluation_summary"] = summary
+        details["project_memory_binding_summary"] = summary.get("project_memory_binding", {})
+        report.details = details
+        return report
+
+    def _build_evaluation_summary(
+        self,
+        report: AgentEvaluationReport,
+    ) -> Dict[str, Any]:
+        details = dict(report.details or {})
+        evidence_bundle = self._coerce_evidence_bundle(report.evidence_bundle or details.get("evidence_bundle"), details)
+        layered_review = details.get("layered_review") if isinstance(details.get("layered_review"), dict) else {}
+        publish_readiness = layered_review.get("publish_readiness", {}) if isinstance(layered_review, dict) else {}
+        content_quality = layered_review.get("content_quality", {}) if isinstance(layered_review, dict) else {}
+        project_memory_binding = details.get("project_memory_binding") if isinstance(details.get("project_memory_binding"), dict) else {}
+        evaluation_valid = evidence_bundle.evaluation_valid if evidence_bundle else bool(details.get("evaluation_valid", True))
+        evaluation_status = str(
+            (evidence_bundle.evaluation_status if evidence_bundle else details.get("evaluation_status")) or ("valid" if evaluation_valid else "unknown")
+        ).strip()
+        worker_execution_mode = ""
+        review_mode = ""
+        if evidence_bundle is not None:
+            worker_execution_mode = str(evidence_bundle.orchestrator.worker_execution_mode or "").strip()
+            review_mode = str(evidence_bundle.review_mode or "").strip()
+
+        return {
+            "evaluation_id": report.evaluation_id,
+            "evaluation_type": report.evaluation_type,
+            "decision": report.decision,
+            "overall_score": report.scores.get("overall"),
+            "created_at": report.created_at.isoformat() if report.created_at else None,
+            "evaluation_valid": evaluation_valid,
+            "evaluation_status": evaluation_status,
+            "review_mode": review_mode,
+            "worker_execution_mode": worker_execution_mode,
+            "content_quality_decision": str(content_quality.get("decision") or "").strip(),
+            "publish_readiness_decision": str(publish_readiness.get("decision") or report.decision or "").strip(),
+            "project_memory_binding": self._build_project_memory_binding_summary(
+                project_memory_binding,
+                source="runtime",
+                evaluation_valid=evaluation_valid,
+                evaluation_status=evaluation_status,
+                decision=report.decision,
+            ),
+        }
+
+    def _build_agent_builder_lesson_metadata(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+        report: AgentEvaluationReport,
+    ) -> Dict[str, Any]:
+        template_id = str((version.prompt_template_ref or {}).get("template_id") or "").strip()
+        success = str(report.decision or "").strip().lower() == "pass"
+        return {
+            "project_id": _AGENT_BUILDER_PROJECT_ID,
+            "source": "agent_workshop",
+            "lesson_type": "evaluation_success" if success else "evaluation_failure",
+            "object_type": "agent_version",
+            "object_key": version.version_id,
+            "spec_id": spec.spec_id,
+            "version_id": version.version_id,
+            "template_id": template_id,
+            "evaluation_type": str(report.evaluation_type or "").strip(),
+            "success": success,
+        }
+
+    def _build_agent_builder_lesson_text(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+        report: AgentEvaluationReport,
+    ) -> str:
+        decision = str(report.decision or "").strip().lower() or "revise"
+        evaluation_type = str(report.evaluation_type or "").strip() or "sandbox"
+        overall_score = (report.scores or {}).get("overall")
+        parts = [
+            f"Agent Workshop 版本 {version.version_id}（{spec.name or spec.spec_id}）在 {evaluation_type} 评估中结论为 {decision}。",
+        ]
+        if overall_score is not None:
+            parts.append(f"综合分：{overall_score}。")
+
+        issues = self._dedupe([str(item).strip() for item in (report.issues or []) if str(item).strip()])[:3]
+        if issues:
+            parts.append("主要问题：" + "；".join(issues) + "。")
+
+        recommendations = self._dedupe([
+            str(item).strip() for item in (report.recommendations or []) if str(item).strip()
+        ])[:3]
+        if recommendations:
+            parts.append("修正动作：" + "；".join(recommendations) + "。")
+
+        return "\n".join(parts).strip()
+
+    async def _resolve_agent_builder_lesson_user_context(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+    ) -> Tuple[str, str]:
+        session_id = str(spec.latest_session_id or version.published_from_session_id or "").strip()
+        if not session_id:
+            return "", ""
+
+        session_doc = await self._db[SESSION_COLLECTION].find_one({"session_id": session_id})
+        if not session_doc:
+            return "", session_id
+
+        session = AgentWorkshopSession(**session_doc)
+        return str(session.user_id or "").strip(), session_id
+
+    async def _store_agent_builder_lesson(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+        report: AgentEvaluationReport,
+    ) -> None:
+        evaluation_type = str(report.evaluation_type or "").strip()
+        if evaluation_type not in {"sandbox", "production-review"}:
+            return
+
+        lesson_text = self._build_agent_builder_lesson_text(version, spec, report)
+        if not lesson_text:
+            return
+
+        try:
+            from core.memory.service import get_memory_service
+
+            user_id, session_id = await self._resolve_agent_builder_lesson_user_context(version, spec)
+            await get_memory_service(self._db).store(
+                [{"role": "system", "content": lesson_text}],
+                user_id=user_id,
+                agent_id="agent_builder",
+                session_id=session_id,
+                scope=MemoryScope.AGENT_BUILDER_LESSON.value,
+                metadata=self._build_agent_builder_lesson_metadata(version, spec, report),
+            )
+        except Exception as exc:
+            logger.debug("[AgentWorkshop] store agent builder lesson skipped: %s", exc)
+
+    async def _recall_agent_builder_lessons(
+        self,
+        source_version: AgentVersion,
+        spec: AgentSpec,
+    ) -> str:
+        try:
+            user_id, _session_id = await self._resolve_agent_builder_lesson_user_context(source_version, spec)
+            latest_evaluation_doc = await self._db[EVALUATION_COLLECTION].find_one(
+                {"version_id": source_version.version_id},
+                sort=[("created_at", -1)],
+            )
+            latest_evaluation = AgentEvaluationReport(**latest_evaluation_doc) if latest_evaluation_doc else None
+
+            query_parts = [
+                source_version.version_id,
+                " ".join((latest_evaluation.issues or [])[:2]) if latest_evaluation else "",
+                " ".join((latest_evaluation.recommendations or [])[:2]) if latest_evaluation else "",
+            ]
+            return await self._recall_agent_builder_lessons_for_spec(
+                spec,
+                user_id=user_id,
+                query_text=" ".join(part for part in query_parts if str(part or "").strip()),
+                source_stage="iteration_prompt_clone",
+            )
+        except Exception as exc:
+            logger.debug("[AgentWorkshop] recall agent builder lessons skipped: %s", exc)
+            return ""
+
+    def _build_agent_builder_lesson_query_text(self, spec: AgentSpec, extra_text: str = "") -> str:
+        parts: List[str] = [
+            spec.name,
+            spec.primary_goal,
+            *spec.responsibilities[:4],
+            *spec.success_criteria[:4],
+            *spec.preferred_methods[:4],
+            *spec.constraints[:4],
+            *self._list_io_field_names(spec.outputs)[:4],
+            extra_text,
+        ]
+        return " ".join(part for part in parts if str(part or "").strip())
+
+    def _format_agent_builder_lesson_block(self, recalled: str) -> str:
+        if not recalled.strip():
+            return ""
+        return (
+            "【Agent 工坊历史教训】\n"
+            "以下内容来自同一规格或相近版本的已验证评估结论。当前这轮规格确认、版本构建或迭代必须优先避免重复这些问题，并优先采用已经验证过的修正动作。\n\n"
+            f"{recalled.strip()}"
+        )
+
+    def _log_agent_builder_lesson_recall_observation(
+        self,
+        *,
+        spec: AgentSpec,
+        source_stage: str,
+        user_id: str,
+        query: str,
+        metadata_filters: Dict[str, Any],
+        recalled: str,
+        status: str,
+        error: str = "",
+    ) -> None:
+        query_text = str(query or "")
+        recalled_text = str(recalled or "")
+        payload = {
+            "source_stage": source_stage or "unknown",
+            "status": status,
+            "hit": bool(recalled_text.strip()),
+            "query_chars": len(query_text),
+            "query_preview": query_text[:240],
+            "result_chars": len(recalled_text),
+            "result_preview": recalled_text[:240],
+            "metadata_filters": dict(metadata_filters or {}),
+            "ranking_profile": "agent_builder",
+            "scope": MemoryScope.AGENT_BUILDER_LESSON.value,
+            "error": error,
+        }
+        self._log_generated_result(
+            "agent_builder_lesson_recall_observation",
+            payload,
+            context={
+                "spec_id": spec.spec_id,
+                "spec_name": spec.name,
+                "user_id": user_id,
+            },
+        )
+
+    async def _recall_agent_builder_lessons_for_spec(
+        self,
+        spec: AgentSpec,
+        *,
+        user_id: str = "",
+        query_text: str = "",
+        source_stage: str = "",
+    ) -> str:
+        try:
+            from core.memory.service import get_memory_service
+
+            resolved_user_id = str(user_id or spec.owner_user_id or "").strip()
+            recall_query = self._build_agent_builder_lesson_query_text(spec, query_text)
+            metadata_filters = {"spec_id": spec.spec_id}
+            recalled = await get_memory_service(self._db).recall_formatted(
+                query=recall_query,
+                user_id=resolved_user_id,
+                agent_id="agent_builder",
+                scopes=[MemoryScope.AGENT_BUILDER_LESSON.value],
+                metadata_filters=metadata_filters,
+                limit=4,
+                max_chars=900,
+                ranking_profile="agent_builder",
+                group_by_scope=True,
+                per_scope_limit=4,
+            )
+            self._log_agent_builder_lesson_recall_observation(
+                spec=spec,
+                source_stage=source_stage,
+                user_id=resolved_user_id,
+                query=recall_query,
+                metadata_filters=metadata_filters,
+                recalled=recalled,
+                status="hit" if recalled.strip() else "miss",
+            )
+            return self._format_agent_builder_lesson_block(recalled)
+        except Exception as exc:
+            resolved_user_id = str(user_id or spec.owner_user_id or "").strip()
+            recall_query = self._build_agent_builder_lesson_query_text(spec, query_text)
+            self._log_agent_builder_lesson_recall_observation(
+                spec=spec,
+                source_stage=source_stage,
+                user_id=resolved_user_id,
+                query=recall_query,
+                metadata_filters={"spec_id": spec.spec_id},
+                recalled="",
+                status="error",
+                error=str(exc),
+            )
+            logger.debug("[AgentWorkshop] recall agent builder lessons skipped: %s", exc)
+            return ""
+
+    def _build_project_memory_binding_summary(
+        self,
+        review: Optional[Dict[str, Any]],
+        *,
+        source: str,
+        evaluation_valid: Optional[bool] = None,
+        evaluation_status: str = "",
+        decision: str = "",
+    ) -> Dict[str, Any]:
+        payload = dict(review or {})
+        enabled = bool(payload.get("enabled"))
+        valid = bool(payload.get("valid", True))
+        missing_items = self._dedupe([
+            str(item).strip() for item in (payload.get("missing_items") or []) if str(item).strip()
+        ])
+        system_prompt_present = payload.get("system_prompt_present") if "system_prompt_present" in payload else None
+        marker_present = payload.get("marker_present") if "marker_present" in payload else None
+        expected_items = int(payload.get("expected_items") or 0)
+        matched_items = int(payload.get("matched_items") or 0)
+
+        if not enabled:
+            review_status = "not_enabled"
+            summary_text = "当前未启用 L4 项目长期记忆校验。"
+        elif source == "prompt_template":
+            if valid:
+                review_status = "pass"
+                summary_text = "当前 Prompt Template 已绑定当前 L4 项目长期记忆。"
+            else:
+                review_status = "failed"
+                summary_text = "当前 Prompt Template 还没有完整绑定当前 L4 项目长期记忆。"
+        elif system_prompt_present is False:
+            review_status = "evidence_incomplete"
+            summary_text = "缺少 runtime system_prompt 证据，暂时无法确认当前 L4 项目长期记忆是否真实注入。"
+        elif valid:
+            review_status = "pass"
+            summary_text = "运行时 system_prompt 已覆盖当前 L4 项目长期记忆。"
+        else:
+            review_status = "failed"
+            summary_text = "运行时 system_prompt 没有完整覆盖当前 L4 项目长期记忆。"
+
+        return {
+            "source": source,
+            "enabled": enabled,
+            "valid": valid,
+            "review_status": review_status,
+            "summary": summary_text,
+            "system_prompt_present": system_prompt_present,
+            "marker_present": marker_present,
+            "matched_items": matched_items,
+            "expected_items": expected_items,
+            "missing_item_count": len(missing_items),
+            "missing_items_preview": missing_items[:3],
+            "evaluation_valid": evaluation_valid,
+            "evaluation_status": evaluation_status or None,
+            "decision": decision or None,
+        }
+
+    def _build_rule_details_from_evaluation_details(self, details: Dict[str, Any]) -> Dict[str, Any]:
+        rule_review = details.get("rule_review") if isinstance(details.get("rule_review"), dict) else {}
+        return {
+            "scores": rule_review.get("scores", {}),
+            "score_breakdown": rule_review.get("score_breakdown", {}),
+            "execution_plan_review": details.get("execution_plan_review") if isinstance(details.get("execution_plan_review"), dict) else rule_review.get("execution_plan_review", {}),
+            "valuation_guardrail": details.get("valuation_guardrail") if isinstance(details.get("valuation_guardrail"), dict) else rule_review.get("valuation_guardrail", {}),
+            "valuation_traceability": details.get("valuation_traceability") if isinstance(details.get("valuation_traceability"), dict) else rule_review.get("valuation_traceability", {}),
+        }
+
+    def _apply_manual_reviews_to_rule_details(
+        self,
+        bundle: AgentEvaluationEvidenceBundle,
+        rule_details: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        updated_rule_details = dict(rule_details or {})
+        valuation_traceability = dict(updated_rule_details.get("valuation_traceability") or {})
+        items: List[Dict[str, Any]] = []
+        review_map = {
+            str(item.target_path or "").strip(): item
+            for item in (bundle.manual_reviews or [])
+            if str(item.target_path or "").strip()
+        }
+        for index, raw_item in enumerate(valuation_traceability.get("items") or []):
+            if not isinstance(raw_item, dict):
+                items.append(raw_item)
+                continue
+            item = dict(raw_item)
+            path = f"rule_review.valuation_traceability.items[{index}]"
+            review = review_map.get(path)
+            if review:
+                item["manual_review"] = review.model_dump(mode="json")
+                if review.approved and str(item.get("source_type") or "") == "unverified":
+                    item["source_type"] = "manual_review_approved"
+                    item["judgement"] = "人工审核通过"
+            items.append(item)
+        valuation_traceability["items"] = items
+        unresolved = [item for item in items if isinstance(item, dict) and str(item.get("source_type") or "") == "unverified"]
+        valuation_traceability["summary"] = "已识别的数值结果均具备可追溯依据。" if not unresolved else "检测到精确数值，但其中部分仍缺少可追溯依据。"
+        updated_rule_details["valuation_traceability"] = valuation_traceability
+        return updated_rule_details
+
+    def _build_effective_evidence_bundle_from_manual_reviews(
+        self,
+        bundle: AgentEvaluationEvidenceBundle,
+        rule_details: Dict[str, Any],
+    ) -> AgentEvaluationEvidenceBundle:
+        updated_bundle = self._coerce_evidence_bundle(bundle.model_dump(mode="json"), {}) or AgentEvaluationEvidenceBundle()
+        manual_reviews = list(updated_bundle.manual_reviews or [])
+        approved_category_map: Dict[str, str] = {}
+        candidate_by_id = {item.finding_id: item for item in (updated_bundle.candidate_findings or []) if item.finding_id}
+        for review in manual_reviews:
+            if review.approved and review.finding_id and review.finding_id in candidate_by_id:
+                approved_category_map[review.finding_id] = candidate_by_id[review.finding_id].category
+
+        valuation_traceability = rule_details.get("valuation_traceability", {}) if isinstance(rule_details.get("valuation_traceability"), dict) else {}
+        remaining_unverified_high_risk = [
+            item for item in (valuation_traceability.get("items") or [])
+            if isinstance(item, dict)
+            and str(item.get("source_type") or "") == "unverified"
+            and str(item.get("risk_level") or "") == "high"
+        ]
+
+        filtered_findings: List[AgentEvaluationFinding] = []
+        for finding in (updated_bundle.findings or []):
+            if finding.category == "numeric_traceability" and not remaining_unverified_high_risk:
+                continue
+            if any(category == finding.category for category in approved_category_map.values()):
+                continue
+            filtered_findings.append(finding)
+
+        updated_bundle.findings = filtered_findings
+        updated_bundle.official_issues = self._dedupe([
+            finding.issue for finding in filtered_findings if finding.status == "confirmed_issue" and finding.issue
+        ])
+        updated_bundle.insufficient_evidence = [
+            finding for finding in filtered_findings if finding.status == "insufficient_evidence"
+        ]
+
+        filtered_invalid_reasons: List[str] = []
+        for reason in (updated_bundle.invalid_reasons or []):
+            normalized = str(reason).strip()
+            if not normalized:
+                continue
+            if "tool_trace" in normalized and "tool_usage" in approved_category_map.values():
+                continue
+            if "runtime output" in normalized and "runtime_output" in approved_category_map.values():
+                continue
+            filtered_invalid_reasons.append(normalized)
+        updated_bundle.invalid_reasons = self._dedupe(filtered_invalid_reasons)
+        updated_bundle.evaluation_valid = not updated_bundle.invalid_reasons
+        updated_bundle.evaluation_status = "valid" if updated_bundle.evaluation_valid else "evidence_incomplete"
+        self._annotate_artifact_manual_reviews(updated_bundle)
+        return updated_bundle
 
     async def iterate_version(self, version_id: str, feedback: str = "") -> Dict[str, Any]:
         version_doc = await self._db[VERSION_COLLECTION].find_one({"version_id": version_id})
@@ -925,9 +2209,54 @@ class AgentWorkshopService:
             recommendation_summary,
             feedback,
         )
-        result = await self.start_session(iterate_description, user_id=spec.owner_user_id)
+        turn_result = await self._analyze_requirement_turn(
+            [iterate_description],
+            user_id=spec.owner_user_id,
+            fallback_spec_id=spec.spec_id,
+            existing_spec=spec,
+        )
 
-        new_session = await self._load_session(result["session_id"])
+        iterated_spec = turn_result["spec"]
+        session_id = str(uuid.uuid4())
+        pending_questions = turn_result["pending_questions"]
+        completeness_score = turn_result["completeness_score"]
+        ai_message = turn_result["ai_message"]
+        feasibility_status = turn_result["feasibility_status"]
+        refusal_reason = turn_result["refusal_reason"]
+
+        new_session = AgentWorkshopSession(
+            session_id=session_id,
+            spec_id=iterated_spec.spec_id,
+            user_id=spec.owner_user_id,
+            stage=self._infer_stage(feasibility_status, completeness_score),
+            current_round=1,
+            messages=[
+                AgentWorkshopMessage(role="user", content=iterate_description),
+                AgentWorkshopMessage(role="assistant", content=ai_message),
+            ],
+            current_spec_snapshot=iterated_spec,
+            pending_questions=pending_questions,
+            completeness_score=completeness_score,
+            feasibility_status=feasibility_status,
+            refusal_reason=refusal_reason,
+        )
+
+        iterated_version = await self._create_iteration_draft_version(
+            source_version=version,
+            iterated_spec=iterated_spec,
+            session_id=session_id,
+        )
+        new_session.proposed_version = iterated_version.model_dump(mode="json", by_alias=True)
+
+        iterated_spec.version_count = max(iterated_spec.version_count, iterated_version.version)
+        iterated_spec.current_version_id = iterated_version.version_id
+        iterated_spec.status = AgentSpecStatus.DRAFT
+        iterated_spec.latest_session_id = session_id
+
+        await self._save_version(iterated_version)
+        await self._save_spec(iterated_spec, session_id=session_id)
+        await self._save_session(new_session)
+
         if new_session and latest_evaluation:
             reminder = self._build_iteration_reminder(latest_evaluation, feedback)
             new_session.messages.append(AgentWorkshopMessage(role="assistant", content=reminder))
@@ -940,10 +2269,141 @@ class AgentWorkshopService:
 
         return {
             "source_version_id": version_id,
-            "session_id": result["session_id"],
-            "spec_id": result["spec_id"],
-            "ai_message": result["ai_message"],
+            "session_id": session_id,
+            "spec_id": iterated_spec.spec_id,
+            "version_id": iterated_version.version_id,
+            "version_status": iterated_version.status.value,
+            "ai_message": ai_message,
         }
+
+    async def _resolve_session_draft_version(self, session: AgentWorkshopSession, spec: AgentSpec) -> Optional[AgentVersion]:
+        candidate_ids = []
+        proposed_version_id = str((session.proposed_version or {}).get("version_id") or "").strip()
+        if proposed_version_id:
+            candidate_ids.append(proposed_version_id)
+        current_version_id = str(spec.current_version_id or "").strip()
+        if current_version_id and current_version_id not in candidate_ids:
+            candidate_ids.append(current_version_id)
+
+        for candidate_id in candidate_ids:
+            version_doc = await self._db[VERSION_COLLECTION].find_one({"version_id": candidate_id})
+            if not version_doc:
+                continue
+            version = AgentVersion(**version_doc)
+            if version.spec_id != spec.spec_id:
+                continue
+            if version.status != AgentVersionStatus.DRAFT:
+                continue
+            return version
+        return None
+
+    async def _create_iteration_draft_version(
+        self,
+        *,
+        source_version: AgentVersion,
+        iterated_spec: AgentSpec,
+        session_id: str,
+    ) -> AgentVersion:
+        version_number = await self._get_next_version_number(iterated_spec.spec_id)
+        version_id = f"{iterated_spec.spec_id}_v{version_number}"
+
+        metadata = copy.deepcopy(source_version.agent_metadata or {})
+        metadata["id"] = version_id
+        metadata["name"] = f"{iterated_spec.name} v{version_number}"
+        metadata["description"] = iterated_spec.primary_goal or metadata.get("description") or iterated_spec.name
+        metadata["version"] = f"0.{version_number}.0"
+
+        execution_plan = source_version.execution_plan.model_copy(deep=True)
+        execution_plan.validation_status = "not-run"
+
+        evaluation_policy = copy.deepcopy(source_version.evaluation_policy or {})
+        evaluation_policy["creation_mode"] = "iteration-clone"
+        evaluation_policy["execution_validation_required"] = True
+        evaluation_policy["execution_validation_status"] = execution_plan.validation_status
+        evaluation_policy["source_version_id"] = source_version.version_id
+
+        prompt_template_ref = await self._clone_prompt_template_for_iteration(
+            source_version,
+            iterated_spec,
+            version_id,
+        )
+
+        return AgentVersion(
+            version_id=version_id,
+            spec_id=iterated_spec.spec_id,
+            version=version_number,
+            status=AgentVersionStatus.DRAFT,
+            agent_metadata=metadata,
+            prompt_template_ref=prompt_template_ref,
+            required_tools=copy.deepcopy(source_version.required_tools or []),
+            required_capabilities=copy.deepcopy(source_version.required_capabilities or []),
+            output_schema=copy.deepcopy(source_version.output_schema or {}),
+            evaluation_policy=evaluation_policy,
+            execution_plan=execution_plan,
+            runtime_result=None,
+            debug_result=None,
+            published_from_session_id=session_id,
+        )
+
+    async def _clone_prompt_template_for_iteration(
+        self,
+        source_version: AgentVersion,
+        spec: AgentSpec,
+        new_version_id: str,
+    ) -> Dict[str, Any]:
+        agent_builder_lesson_block = await self._recall_agent_builder_lessons(source_version, spec)
+        template_id = str((source_version.prompt_template_ref or {}).get("template_id") or "").strip()
+        if template_id:
+            try:
+                prompt_service = PromptTemplateService(db=self._db)
+                source_template = await prompt_service.get_template(template_id)
+                if source_template is not None:
+                    content = source_template.content.model_copy(deep=True)
+                    if agent_builder_lesson_block:
+                        lesson_guidance = (
+                            "\n你还必须结合以下 Agent 工坊历史教训修正这轮迭代，"
+                            "对已经被上一轮评估证实的问题，不得原样重复失败。"
+                            f"\n{agent_builder_lesson_block.strip()}"
+                        )
+                        content.system_prompt = f"{content.system_prompt}{lesson_guidance}"
+                        lesson_constraint_lines = [
+                            "- 必须结合 Agent 工坊历史教训修正上一轮或同类版本已确认的问题。",
+                            *[
+                                f"- {line.strip()}"
+                                for line in agent_builder_lesson_block.splitlines()
+                                if line.strip() and not line.strip().startswith("【")
+                            ],
+                        ]
+                        content.constraints = "\n".join(self._dedupe([
+                            str(content.constraints or "").strip(),
+                            *lesson_constraint_lines,
+                        ]))
+                    cloned_template = await prompt_service.create_template(
+                        PromptTemplateCreate(
+                            agent_type=source_template.agent_type or "custom_agent",
+                            agent_name=new_version_id,
+                            template_name=f"{spec.name} v{new_version_id.split('_v')[-1]} 草案",
+                            content=content,
+                            remark=f"Agent 工坊迭代复制的草案模板，来源版本 {source_version.version_id}",
+                            status="draft",
+                        )
+                    )
+                    if cloned_template is not None:
+                        return {
+                            "template_id": str(cloned_template.id),
+                            "template_name": cloned_template.template_name,
+                            "status": cloned_template.status,
+                        }
+            except (AttributeError, KeyError):
+                # 测试桩或最小运行环境未提供 prompt_templates 集合时，回退到重新生成模板。
+                pass
+
+        return await self._create_prompt_template(
+            new_version_id,
+            spec,
+            list(source_version.required_tools or []),
+            agent_builder_lesson_block=agent_builder_lesson_block,
+        )
 
     async def get_version_prompt(self, version_id: str) -> Dict[str, Any]:
         """获取版本关联的提示词模板完整内容"""
@@ -1075,6 +2535,9 @@ class AgentWorkshopService:
         spec = AgentSpec(**spec_doc)
 
         symbol = str((stock or {}).get("symbol") or "").strip()
+        sample_input = version.execution_plan.sample_input if version.execution_plan else {}
+        if not symbol:
+            symbol = str(sample_input.get("symbol") or "").strip()
         if not symbol:
             raise ValueError("stock.symbol 不能为空")
 
@@ -1120,8 +2583,10 @@ class AgentWorkshopService:
         )
 
         analysis_date = str(stock.get("analysis_date") or now_tz().strftime("%Y-%m-%d"))
-        market_type = str(stock.get("market_type") or "A股")
-        task_description = user_goal or spec.primary_goal or spec.name
+        if not stock.get("analysis_date") and sample_input.get("analysis_date"):
+            analysis_date = str(sample_input.get("analysis_date") or analysis_date)
+        market_type = str(stock.get("market_type") or sample_input.get("market_type") or "A股")
+        task_description = user_goal or str(sample_input.get("task_description") or "").strip() or spec.primary_goal or spec.name
 
         ctx = AgentContext(
             user_id=spec.owner_user_id or "agent_workshop",
@@ -1155,6 +2620,7 @@ class AgentWorkshopService:
             "prompt_overrides": prompt_overrides or {},
             "task_description": task_description,
             "workflow_id": f"agent_workshop_debug_{version.version_id}",
+            "agent_workshop_execution_plan": version.execution_plan.model_dump(mode="json") if version.execution_plan else {},
         }
 
         try:
@@ -1198,6 +2664,7 @@ class AgentWorkshopService:
                 "template_id": template_id,
                 "template_name": version.prompt_template_ref.get("template_name"),
             },
+            "execution_plan": version.execution_plan.model_dump(mode="json") if version.execution_plan else {},
             "metadata": {
                 "agent_id": version.agent_metadata.get("id") or version.version_id,
                 "agent_name": version.agent_metadata.get("name") or spec.name,
@@ -1206,6 +2673,10 @@ class AgentWorkshopService:
                 "user_goal": user_goal,
             },
         }
+        version.debug_result = debug_result
+        version.runtime_result = self._build_runtime_result_from_debug_result(debug_result)
+        version.updated_at = now_tz()
+        await self._save_version(version)
         self._log_generated_result(
             "runtime_debug_execution",
             {
@@ -1269,6 +2740,169 @@ class AgentWorkshopService:
             set_on_insert["created_at"] = created_at
 
         return set_doc, set_on_insert
+
+    def _parse_agent_version_doc(self, version_doc: Dict[str, Any]) -> AgentVersion:
+        normalized_doc = dict(version_doc or {})
+        version_id = str(normalized_doc.get("version_id") or "").strip()
+        if not normalized_doc.get("version"):
+            matched = re.search(r"_v(\d+)$", version_id)
+            normalized_doc["version"] = int(matched.group(1)) if matched else 1
+        return AgentVersion(**normalized_doc)
+
+    def _parse_agent_spec_doc(self, spec_doc: Dict[str, Any]) -> AgentSpec:
+        normalized_doc = dict(spec_doc or {})
+        spec_id = str(normalized_doc.get("spec_id") or "").strip()
+        fallback_name = spec_id or "nanobot_spec"
+        normalized_doc.setdefault("name", fallback_name)
+        normalized_doc.setdefault("primary_goal", normalized_doc["name"])
+        normalized_doc.setdefault("responsibilities", [normalized_doc["primary_goal"]])
+        normalized_doc.setdefault("inputs", ["user_request", "symbol"])
+        normalized_doc.setdefault("outputs", ["analysis_report"])
+        return AgentSpec(**normalized_doc)
+
+    def _normalize_nanobot_identifier(self, identifier: str) -> str:
+        normalized = re.sub(r"[^a-zA-Z0-9_]+", "_", str(identifier or "").strip()).strip("_")
+        if not normalized:
+            normalized = uuid.uuid4().hex[:12]
+        return normalized
+
+    async def _resolve_nanobot_spec_id(self, agent_id: str) -> str:
+        normalized = self._normalize_nanobot_identifier(agent_id)
+
+        existing_spec_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": normalized})
+        if existing_spec_doc:
+            return str(existing_spec_doc.get("spec_id") or normalized)
+
+        try:
+            existing_version_doc = await self._db[VERSION_COLLECTION].find_one({"version_id": normalized})
+        except KeyError:
+            existing_version_doc = None
+        existing_version_spec_id = str((existing_version_doc or {}).get("spec_id") or "").strip()
+        if existing_version_spec_id:
+            return existing_version_spec_id
+
+        if normalized.startswith("spec_nanobot_"):
+            return normalized
+        return f"spec_nanobot_{normalized}"
+
+    def _build_nanobot_spec_id(self, agent_id: str) -> str:
+        normalized = self._normalize_nanobot_identifier(agent_id)
+        return f"spec_nanobot_{normalized}"
+
+    def _normalize_generated_output_identifier(self, identifier: str) -> str:
+        raw_identifier = str(identifier or "").strip().lower()
+        normalized_identifier = re.sub(r"[^a-zA-Z0-9_]+", "_", raw_identifier).strip("_")
+        normalized_identifier = re.sub(r"^spec_nanobot_", "", normalized_identifier)
+        normalized_identifier = re.sub(r"^spec_", "", normalized_identifier)
+        normalized_identifier = re.sub(r"_v\d+$", "", normalized_identifier)
+        if normalized_identifier:
+          return normalized_identifier
+        digest = hashlib.md5(raw_identifier.encode("utf-8")).hexdigest()[:8] if raw_identifier else uuid.uuid4().hex[:8]
+        return f"spec_{digest}"
+
+    def _normalize_generated_output_field(self, identifier: str, output_field: str) -> str:
+        generic_suffix_map = {
+            "analysis_report": "report",
+            "report": "report",
+            "analysis": "analysis",
+            "summary": "summary",
+            "result": "result",
+            "output": "output",
+            "response": "response",
+            "final_response": "response",
+            "analysis_result": "result",
+            "agent_output": "output",
+            "agent_result": "result",
+        }
+        normalized_output = re.sub(r"[^a-zA-Z0-9_]+", "_", str(output_field or "").strip()).strip("_").lower()
+        normalized_identifier = self._normalize_generated_output_identifier(identifier)
+
+        if normalized_output and normalized_output not in generic_suffix_map:
+            if re.match(r"^\d", normalized_output):
+                return f"field_{normalized_output}"
+            return normalized_output
+
+        suffix = generic_suffix_map.get(normalized_output or "", "report")
+        return f"{normalized_identifier}_{suffix}"
+
+    def _normalize_generated_output_items(self, outputs: List[Any], identifier: str) -> List[Any]:
+        normalized_items: List[Any] = []
+        used_names: set[str] = set()
+
+        for index, item in enumerate(outputs or []):
+            raw_name = self._get_io_field_name(item)
+            normalized_name = self._normalize_generated_output_field(
+                identifier,
+                raw_name or ("analysis_report" if index == 0 else f"output_{index + 1}"),
+            )
+            deduped_name = normalized_name
+            duplicate_index = 2
+            while deduped_name in used_names:
+                deduped_name = f"{normalized_name}_{duplicate_index}"
+                duplicate_index += 1
+            used_names.add(deduped_name)
+
+            if isinstance(item, AgentSpecIOField):
+                normalized_items.append(item.model_copy(update={"name": deduped_name}))
+            elif isinstance(item, dict):
+                updated = dict(item)
+                updated["name"] = deduped_name
+                normalized_items.append(updated)
+            else:
+                normalized_items.append(deduped_name)
+
+        return normalized_items or [self._normalize_generated_output_field(identifier, "analysis_report")]
+
+    def _normalize_nanobot_output_field(self, agent_id: str, output_field: str) -> str:
+        return self._normalize_generated_output_field(agent_id, output_field)
+
+    def _normalize_nanobot_output_items(self, outputs: List[Any], agent_id: str) -> List[Any]:
+        return self._normalize_generated_output_items(outputs, agent_id)
+
+    def _infer_nanobot_spec_domain(self, agent_name: str, responsibility: str, preferred_methods: List[str]) -> str:
+        haystack = " ".join([agent_name or "", responsibility or "", " ".join(preferred_methods or [])]).lower()
+        if any(keyword in haystack for keyword in ["估值", "a股", "stock", "pe", "pb", "peg", "财务", "基本面"]):
+            return "stock_analysis"
+        if any(keyword in haystack for keyword in ["风险", "复盘", "review"]):
+            return "risk_management"
+        return "general"
+
+    @staticmethod
+    def _normalize_unique_list(values: Optional[List[str]]) -> List[str]:
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for value in values or []:
+            text = str(value or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            normalized.append(text)
+        return normalized
+
+    @staticmethod
+    def _build_nanobot_draft_user_message(
+        *,
+        agent_id: str,
+        agent_name: str,
+        target_responsibility: str,
+        output_field: str,
+        tool_ids: List[str],
+        non_goals: List[str],
+        preferred_methods: List[str],
+    ) -> str:
+        lines = [
+            f"请基于 Nanobot 已确认的候选方案继续治理这个 Agent：{agent_name}（{agent_id}）。",
+            f"职责：{target_responsibility}",
+            f"输出字段：{output_field}",
+        ]
+        if tool_ids:
+            lines.append(f"候选工具：{'、'.join(tool_ids)}")
+        if non_goals:
+            lines.append(f"非目标：{'、'.join(non_goals)}")
+        if preferred_methods:
+            lines.append(f"方法范围：{'、'.join(preferred_methods)}")
+        lines.append("这是一份从 Nanobot 同步进 Agent 工坊的 Draft，请在此基础上继续做缺口分析、版本构建和治理。")
+        return "\n".join(lines)
 
     async def _load_session(self, session_id: str) -> Optional[AgentWorkshopSession]:
         doc = await self._db[SESSION_COLLECTION].find_one({"session_id": session_id})
@@ -2281,8 +3915,128 @@ class AgentWorkshopService:
         if policy["requires_exact_numeric_outputs"]:
             rules.append("- 当前规格要求精确数值、区间、评分、排序或权重结果时，若缺少原始数据、工具计算结果或关键输入参数，必须明确降级，禁止继续输出看似精确的数字。")
         if policy["requires_source_labels"]:
-            rules.append("- 每个关键数值都必须标明来源数据、来源工具、关键输入参数或引用的上游计算结果。")
+            rules.append("- 关键数值必须能够追溯到来源数据、来源工具、关键输入参数或引用的上游计算结果。")
+            rules.append("- 对财报表格、基础指标、多期对比等直接来自工具返回的内容，允许采用表级、节级或附录级来源映射，只要能明确对应来源工具、报告期/参数，并能从成功 tool_trace 复核。")
+            rules.append("- 对目标价、估值区间、排序、权重、概率等高风险精确结论，仍要求在数字附近给出更强的来源或计算依据，不能只做全文笼统标注。")
         return rules
+
+    def _extract_markdown_section_context(self, text: str, needle: str, max_chars: int = 1800) -> str:
+        if not text or not needle:
+            return ""
+        index = text.find(needle)
+        if index < 0:
+            return ""
+
+        start = max(0, index - 400)
+        end = min(len(text), index + len(needle) + 400)
+
+        heading_pattern = re.compile(r"\n#{2,4}\s")
+        previous_headings = [match.start() for match in heading_pattern.finditer(text[:index])]
+        next_heading = heading_pattern.search(text[index + len(needle):])
+
+        if previous_headings:
+            start = max(start, previous_headings[-1])
+        if next_heading:
+            end = min(end + 400, index + len(needle) + next_heading.start())
+
+        if end - start > max_chars:
+            end = min(len(text), start + max_chars)
+        return text[start:end]
+
+    def _is_high_risk_numeric_mention(self, mention: str, context: str = "") -> bool:
+        text = f"{mention} {context}".lower()
+        high_risk_patterns = [
+            r"目标价",
+            r"价格区间",
+            r"估值区间",
+            r"合理区间",
+            r"排序",
+            r"排名",
+            r"权重",
+            r"仓位",
+            r"概率",
+            r"target\s*price",
+            r"fair\s*value",
+            r"valuation\s*range",
+            r"weight",
+            r"probability",
+            r"rank(?:ing)?",
+        ]
+        if any(re.search(pattern, text, re.IGNORECASE) for pattern in high_risk_patterns):
+            return True
+
+        low_risk_patterns = [
+            r"板块",
+            r"行业",
+            r"景气",
+            r"情绪",
+            r"涨跌幅",
+            r"跌幅",
+            r"涨幅",
+            r"回看周期",
+            r"近\d+日",
+            r"今日",
+            r"成交额",
+            r"换手率",
+            r"sector",
+            r"market",
+            r"drawdown",
+            r"performance",
+        ]
+        if any(re.search(pattern, text, re.IGNORECASE) for pattern in low_risk_patterns):
+            return False
+
+        return False
+
+    def _has_report_level_traceability_context(self, text: str, used_tool_names: List[str]) -> bool:
+        if not text:
+            return False
+        has_source_label = any(keyword in text for keyword in ["数据来源", "来源工具", "来源", "数据源"])
+        has_period = bool(re.search(r"20\d{2}Q[1-4]|20\d{6,8}|报告期|报告期范围|分析日期|period", text, re.IGNORECASE))
+        has_tool_reference = any(tool_name and tool_name in text for tool_name in used_tool_names)
+        return has_source_label and has_period and has_tool_reference
+
+    def _is_ranking_numeric_mention(self, mention: str, context: str = "") -> bool:
+        text = f"{mention} {context}".lower()
+        ranking_patterns = [
+            r"排名",
+            r"排序",
+            r"第\s*\d+\s*名",
+            r"rank(?:ing)?",
+            r"top\s*\d+",
+        ]
+        return any(re.search(pattern, text, re.IGNORECASE) for pattern in ranking_patterns)
+
+    def _has_tabular_derivation_context(self, text: str) -> bool:
+        if not text:
+            return False
+        lines = [line.strip() for line in str(text).splitlines() if line.strip()]
+        markdown_table_lines = sum(1 for line in lines if line.count("|") >= 2)
+        ranked_list_lines = sum(1 for line in lines if re.search(r"^(?:\d+[\.|、]|[⭐★]?\d+\.)", line))
+        return markdown_table_lines >= 2 or ranked_list_lines >= 2
+
+    def _has_ranking_derivation_support(
+        self,
+        mention: str,
+        context: str,
+        section_context: str,
+        used_tool_names: List[str],
+        has_report_level_context: bool,
+    ) -> bool:
+        if not self._is_ranking_numeric_mention(mention, section_context):
+            return False
+
+        local_has_source_label = any(keyword in context for keyword in ["来源", "数据源", "计算依据", "输入参数", "工具计算"])
+        section_has_source_label = any(keyword in section_context for keyword in ["来源", "数据源", "来源工具", "数据来源", "计算依据", "输入参数", "工具计算"])
+        local_has_tool = any(tool_name in context for tool_name in used_tool_names)
+        section_has_tool = any(tool_name in section_context for tool_name in used_tool_names)
+        has_tabular_support = self._has_tabular_derivation_context(section_context)
+
+        if has_tabular_support and ((local_has_tool and local_has_source_label) or (section_has_tool and section_has_source_label)):
+            return True
+        if has_tabular_support and has_report_level_context:
+            return True
+        return False
 
     def _build_capability_context(self, snapshot: Dict[str, Any], compact: bool = False) -> str:
         item_limit = 2 if compact else 4
@@ -2521,6 +4275,7 @@ class AgentWorkshopService:
         key_tool_detail_lines: List[str],
         capability_coverage_map_lines: List[str],
         valuation_reuse_guidance_lines: List[str],
+        agent_builder_lesson_block: str = "",
         compact: bool = False,
     ) -> str:
         tools_enum_lines = "\n".join(f"  - {t}" for t in known_tools) if known_tools else "  （暂无）"
@@ -2557,6 +4312,14 @@ class AgentWorkshopService:
                 "",
                 "【重点工具能力说明 - 用于理解工具覆盖范围，existing_tools 仍只能从上方合法清单中原样复制】",
                 "\n".join(key_tool_detail_lines[:6]) if key_tool_detail_lines else "- 暂无",
+            ])
+
+        if agent_builder_lesson_block:
+            prompt_lines.extend([
+                "",
+                agent_builder_lesson_block,
+                "",
+                "使用要求：如果这些历史教训与当前规格不冲突，你必须优先避免重复这些已验证失败，不要在缺口分析阶段再次提出已经被证伪的补法。",
             ])
 
         prompt_lines.extend([
@@ -2608,8 +4371,14 @@ class AgentWorkshopService:
         application_scene_context = self._build_application_scene_context()
         agent_role_pattern_context = self._build_agent_role_pattern_context()
         capability_context = self._build_capability_context(capability_snapshot, compact=True)
+        agent_builder_lesson_context = await self._recall_agent_builder_lessons_for_spec(
+            base_spec,
+            user_id=user_id,
+            query_text=conversation,
+            source_stage="requirement_clarification",
+        )
 
-        prompt = "\n".join([
+        prompt_sections = [
             "请基于下列材料整理一版可执行的 Agent 规格草案，核心任务是完成需求拆解、能力拆解和规格结构化，而不是继续做开放式追问。",
             "要求：",
             "1. 你不能把本应由专家判断的内容全部留空或退回给用户，但默认方案必须从简、够用、能落地，优先给出最小可用草案，而不是一次性补成重型专业系统。",
@@ -2644,6 +4413,15 @@ class AgentWorkshopService:
             agent_role_pattern_context,
             "",
             capability_context,
+        ]
+        if agent_builder_lesson_context:
+            prompt_sections.extend([
+                "",
+                agent_builder_lesson_context,
+                "",
+                "使用要求：如果这些历史教训与当前新增需求不冲突，你必须优先继承这些已验证修正，避免在规格确认阶段重复过去的问题。",
+            ])
+        prompt_sections.extend([
             "",
             "当前已有草案（如果有）：",
             json.dumps(self._build_requirement_spec_snapshot(base_spec), ensure_ascii=False, indent=2),
@@ -2683,6 +4461,7 @@ class AgentWorkshopService:
             "}",
             "自检要求：输出前请检查，用户原始需求里凡是出现了明确数量（如三种）、明确方法（如 DCF/PE-PB/PEG）、明确交付动作（如分别返回/进行解读）、明确禁止项（如不要直接给买卖建议），都必须在 JSON 中找到对应落点；找不到就说明你整理丢了。并且必须检查 capability_requirements 是否已经把能力原语拆清楚，而不是只重复业务目标。",
         ])
+        prompt = "\n".join(prompt_sections)
 
         system_prompt = "你服务于 TradingAgents-CN。它是一个面向股票投研、交易分析、Agent 编排与能力复用的金融分析系统。你的角色不是通用助手，而是金融行业专家兼 Agent 规格架构师。你的任务是基于已经收集到的需求材料，完成需求拆解、能力拆解和规格结构化，形成可执行的 Agent 规格草案，明确目标、职责边界、输入输出、依赖能力、约束条件和交付方式。你只能依据用户输入、系统背景、典型接入场景、角色模式、当前能力快照和已有草案做判断，不能臆造系统现状。这个阶段的重点不是继续和用户对话，而是把前面的需求分析结果收敛成结构化规格；如果确实存在信息缺口，只能把少数关键待确认项写入输出字段 pending_questions。你的输出必须是纯 JSON，内容要能直接用于后续规格确认与版本构建，不能输出 Markdown、寒暄或额外解释。"
         prompt_metrics = {
@@ -2693,6 +4472,7 @@ class AgentWorkshopService:
             "application_scene_chars": len(application_scene_context),
             "agent_role_pattern_chars": len(agent_role_pattern_context),
             "capability_context_chars": len(capability_context),
+            "agent_builder_lesson_chars": len(agent_builder_lesson_context),
             "capability_snapshot_elapsed_seconds": capability_elapsed,
             **self._summarize_capability_snapshot(capability_snapshot),
             **{f"llm_{key}": value for key, value in llm_runtime.items()},
@@ -3099,6 +4879,11 @@ class AgentWorkshopService:
         if not resolved_spec_id or resolved_spec_id.startswith("agent-workshop-"):
             resolved_spec_id = self._slugify(name or fallback_spec.name or f"agent-workshop-{uuid.uuid4().hex[:8]}")
 
+        normalized_outputs = self._normalize_generated_output_items(
+            self._require_io_fields_field(data, "outputs", "requirement_clarification"),
+            resolved_spec_id,
+        )
+
         return AgentSpec(
             spec_id=resolved_spec_id,
             name=name,
@@ -3110,7 +4895,7 @@ class AgentWorkshopService:
             ),
             non_goals=self._require_list_field(data, "non_goals", "requirement_clarification"),
             inputs=self._require_io_fields_field(data, "inputs", "requirement_clarification"),
-            outputs=self._require_io_fields_field(data, "outputs", "requirement_clarification"),
+            outputs=normalized_outputs,
             success_criteria=self._require_list_field(data, "success_criteria", "requirement_clarification"),
             constraints=self._require_list_field(data, "constraints", "requirement_clarification"),
             preferred_methods=self._require_list_field(data, "preferred_methods", "requirement_clarification"),
@@ -3471,6 +5256,15 @@ class AgentWorkshopService:
         capability_requirement_lines = self._build_capability_requirement_lines(spec)
         decision_rule_lines = self._build_gap_analysis_decision_rules(spec)
         spec_brief = self._build_gap_analysis_spec_brief(spec)
+        agent_builder_lesson_block = await self._recall_agent_builder_lessons_for_spec(
+            spec,
+            user_id=str(spec.owner_user_id or "").strip(),
+            query_text=" ".join([
+                spec_brief,
+                self._build_capability_requirement_text(spec),
+            ]),
+            source_stage="gap_analysis",
+        )
         enriched_prompt = self._build_gap_analysis_prompt(
             spec=spec,
             known_tools=known_tools,
@@ -3480,6 +5274,7 @@ class AgentWorkshopService:
             key_tool_detail_lines=key_tool_detail_lines,
             capability_coverage_map_lines=capability_coverage_map_lines,
             valuation_reuse_guidance_lines=valuation_reuse_guidance_lines,
+            agent_builder_lesson_block=agent_builder_lesson_block,
             compact=False,
         )
         compact_prompt = self._build_gap_analysis_prompt(
@@ -3491,6 +5286,7 @@ class AgentWorkshopService:
             key_tool_detail_lines=key_tool_detail_lines,
             capability_coverage_map_lines=capability_coverage_map_lines,
             valuation_reuse_guidance_lines=valuation_reuse_guidance_lines,
+            agent_builder_lesson_block=agent_builder_lesson_block,
             compact=True,
         )
         system_prompt = "你是 TradingAgents-CN Agent 工坊的缺口分析器。先判断现有能力能否满足规格，再识别真正缺失的最小能力原语。禁止因为命名对称或类比现有工具而臆造新工具。只输出合法 JSON。"
@@ -3508,6 +5304,7 @@ class AgentWorkshopService:
                         "known_tools": min(len(known_tools), 8),
                         "selected_tool_details": min(len(selected_tool_details), 6),
                         "capability_requirements": len(spec.capability_requirements or []),
+                        "agent_builder_lesson_chars": len(agent_builder_lesson_block),
                     },
                 ),
                 (
@@ -3517,6 +5314,7 @@ class AgentWorkshopService:
                         "known_tools": len(known_tools),
                         "selected_tool_details": len(selected_tool_details),
                         "capability_requirements": len(spec.capability_requirements or []),
+                        "agent_builder_lesson_chars": len(agent_builder_lesson_block),
                     },
                 ),
             ]
@@ -3775,16 +5573,15 @@ class AgentWorkshopService:
             }
         return policy
 
-    async def _create_prompt_template(
+    def _build_prompt_template_content(
         self,
-        version_id: str,
         spec: AgentSpec,
         required_tools: List[str],
         gap_report: Optional[AgentWorkshopGapAnalysis] = None,
         tooling_plan: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        prompt_service = PromptTemplateService(db=self._db)
-
+        project_memory_block: str = "",
+        agent_builder_lesson_block: str = "",
+    ) -> TemplateContent:
         responsibilities = "\n".join(f"- {item}" for item in spec.responsibilities)
         success_criteria = "\n".join(f"- {item}" for item in spec.success_criteria)
         non_goals = "\n".join(f"- {item}" for item in spec.non_goals)
@@ -3802,10 +5599,7 @@ class AgentWorkshopService:
             normalized = self._normalize_capability_id(item)
             if normalized and normalized not in gap_existing_tool_lookup:
                 gap_existing_tool_lookup[normalized] = item
-        tool_display_lines = [
-            f"- {gap_existing_tool_lookup.get(tool_id, tool_id)}"
-            for tool_id in required_tools
-        ] if required_tools else ["- 当前版本尚未绑定工具"]
+        tool_display_lines = self._build_required_tool_display_lines(required_tools, gap_existing_tool_lookup)
         missing_capabilities = self._dedupe([
             *((tooling_plan or {}).get("missing_capabilities", []) if isinstance(tooling_plan, dict) else []),
             *([item.tool_id for item in (gap_report.suggested_tools or []) if isinstance(item, SuggestedToolItem)] if gap_report else []),
@@ -3815,17 +5609,14 @@ class AgentWorkshopService:
         if numeric_rules:
             constraint_lines.extend(numeric_rules)
         constraints = "\n".join(self._dedupe(constraint_lines))
-        tool_strategy_lines = [
-            "- required_tools 表示当前版本允许且优先考虑的候选工具集，不是要求把全部工具机械调用一遍。",
-            "- 你必须先判断当前任务需要哪些证据，再在 required_tools 中选择最少且足够的工具完成分析。",
-            "- 如果某个结论，尤其是估值区间、目标价、评分、排序、权重等精确数值，理论上应由工具或结构化数据支撑，就必须调用对应工具或引用上游已提供的可追溯数据。",
-            "- 如果当前 required_tools 里没有能支撑该数字的工具，或者数据不足，就明确说明无法给出该精确数字，只能输出定性判断或降级结论。",
-        ]
+        tool_binding_contract_lines = self._build_required_tool_binding_contract(required_tools, tool_display_lines)
+        tool_strategy_lines = self._build_required_tool_strategy_lines(required_tools)
 
         tool_guidance_title = "优先使用以下工具获取事实依据："
         if gap_existing_tools:
             tool_guidance_title = "优先使用以下工具获取事实依据（已继承第二步缺口分析确认的可复用工具）："
         tool_guidance = f"{tool_guidance_title}\n" + "\n".join(tool_display_lines)
+        tool_guidance = f"{tool_guidance}\n\n当前版本绑定工具与约束联动：\n" + "\n".join(tool_binding_contract_lines)
         tool_guidance = f"{tool_guidance}\n\nrequired_tools 使用策略：\n" + "\n".join(tool_strategy_lines)
         if numeric_rules:
             tool_guidance = f"{tool_guidance}\n\n数值输出总原则：\n" + "\n".join(numeric_rules)
@@ -3841,7 +5632,26 @@ class AgentWorkshopService:
                 "若输出估值区间，必须同时说明区间来自哪组数据、哪一个工具结果或哪段上游结构化输入；不能只给区间而不交代证据链。",
             ])
 
-        content = TemplateContent(
+        binding_source_text = "当前版本绑定工具来自 Agent 工坊版本构建结果；若某能力未被绑定或未在上游结果中提供，不得自行假设可用。"
+        if gap_report and (gap_report.existing_tools or gap_report.suggested_tools or gap_report.suggested_capabilities):
+            binding_source_text = "当前版本绑定工具来自 Agent 工坊缺口分析与版本构建结果；若某能力未被绑定或未在上游结果中提供，不得自行假设可用。"
+
+        project_memory_guidance = ""
+        if project_memory_block:
+            project_memory_guidance = (
+                "\n你还必须遵守以下项目长期记忆中的稳定规则、治理约束、输出约束与研究模板；这些约束优先级高于临时表述偏好，不得在版本生成时弱化或省略。"
+                f"\n{project_memory_block.strip()}"
+            )
+
+        agent_builder_lesson_guidance = ""
+        if agent_builder_lesson_block:
+            agent_builder_lesson_guidance = (
+                "\n你还必须参考以下 Agent 工坊历史教训；这些内容来自上一轮或同类版本的已验证评估结论，"
+                "应优先用于避免重复失败并收敛修正动作。"
+                f"\n{agent_builder_lesson_block.strip()}"
+            )
+
+        return TemplateContent(
             system_prompt=(
                 f"你正在 TradingAgents-CN 中运行。TradingAgents-CN 是一个面向投研、交易分析与 Agent 编排场景的多智能体金融分析系统，系统内已有行情、财务、新闻、研究、筛选、复盘、报告、工作流与工具注册等能力模块。"
                 f"\n你的角色是{spec.name}。你不是通用聊天助手，而是这个系统里的专业金融分析 Agent，负责在当前规格定义的职责范围内，为用户完成可落地、可复核的分析交付。"
@@ -3850,7 +5660,10 @@ class AgentWorkshopService:
                 f"\n你必须体现该角色对应的金融行业专业判断，但所有事实、数字、结论都必须建立在输入信息、可追溯数据和工具结果之上；不得把本应由数据或工具支撑的内容改成主观臆测。"
                 f"\nrequired_tools 表示当前版本允许且优先考虑的候选工具集。它不是要求你把所有工具都调用一遍，而是要求你根据任务子问题选择最少且足够的工具；但凡涉及估值区间、目标价、评分、排序、权重等精确数值，你必须调用对应工具或引用上游已提供的可追溯数据，否则不得输出该精确数字。"
                 f"\n你必须坚持角色边界，不扩展到未授权的交易建议或其他职责；如果当前信息或能力不足，就明确说明依据不足和降级边界。"
-                f"\n当前版本绑定工具来自 Agent 工坊第二步缺口分析与第三步版本构建结果；若某能力未被绑定或未在上游结果中提供，不得自行假设可用。"
+                f"\n{GLOBAL_NO_TRADING_ADVICE_CONSTRAINT}"
+                f"\n{binding_source_text}"
+                f"{project_memory_guidance}"
+                f"{agent_builder_lesson_guidance}"
             ),
             user_prompt="请先识别本次任务所在的业务场景、你的角色职责、当前可用能力和已知系统现状，再结合输入标的、业务目标、上下文数据与可用工具，完成一次面向真实业务交付的分析。",
             tool_guidance=tool_guidance,
@@ -3865,11 +5678,149 @@ class AgentWorkshopService:
             constraints="\n".join(self._dedupe([
                 constraints or "- 不得伪造数据\n- 必须显式说明关键假设和不确定性来源",
                 "- 第三步生成版本时，必须继承第二步缺口分析已确认的工具绑定，不得重新假设一套新的可用工具集。",
+                *tool_binding_contract_lines,
                 "- required_tools 是允许且优先考虑的候选工具集，按任务需要选择性调用；不得为了凑工具调用记录而机械调用全部工具。",
                 "- 若输出估值区间、目标价、评分、排序、权重等精确数值，必须给出可追溯的数据依据、来源标签以及对应工具结果；没有依据时禁止输出精确数字。",
+                f"- {GLOBAL_NO_TRADING_ADVICE_CONSTRAINT}",
+                *((["- 必须同时遵守项目长期记忆中的稳定规则、治理约束、输出约束与研究模板。"] + [f"- {line.strip()}" for line in project_memory_block.splitlines() if line.strip() and not line.strip().startswith("【")]) if project_memory_block else []),
+                *((["- 必须结合 Agent 工坊历史教训修正上一轮或同类版本已确认的问题。"] + [f"- {line.strip()}" for line in agent_builder_lesson_block.splitlines() if line.strip() and not line.strip().startswith("【")]) if agent_builder_lesson_block else []),
                 *((["- 第二步仍标记为缺失的能力：" + "；".join(missing_capabilities)] if missing_capabilities else [])),
             ])),
         )
+
+    async def _build_project_memory_block_for_workshop(self) -> str:
+        try:
+            from app.services.project_memory_service import get_project_memory_service
+
+            return await get_project_memory_service(self._db).build_prompt_block(
+                categories=[
+                    "project_rule",
+                    "governance_constraint",
+                    "analysis_output_constraint",
+                    "research_template",
+                ],
+                max_items=6,
+                max_chars=1200,
+            )
+        except Exception as exc:
+            logger.debug("[AgentWorkshop] 项目长期记忆注入已忽略: %s", exc)
+            return ""
+
+    def _normalize_project_memory_binding_line(self, line: Any) -> str:
+        normalized = re.sub(r"^[\-\s]+", "", str(line or "").strip())
+        normalized = re.sub(r"\s+", " ", normalized)
+        return normalized.strip()
+
+    async def _review_prompt_template_project_memory_binding(self, version: AgentVersion) -> Dict[str, Any]:
+        project_memory_block = await self._build_project_memory_block_for_workshop()
+        template_id = str((version.prompt_template_ref or {}).get("template_id") or "").strip()
+        review = {
+            "enabled": bool(project_memory_block.strip()),
+            "template_id": template_id or None,
+            "valid": True,
+            "marker_present": False,
+            "expected_items": 0,
+            "matched_items": 0,
+            "missing_items": [],
+        }
+        if not review["enabled"]:
+            return review
+
+        template_doc = await self._find_prompt_template_doc(template_id) if template_id else None
+        if template_doc is None:
+            review["valid"] = False
+            review["missing_items"] = ["缺少 Prompt Template 文档"]
+            return review
+
+        content = template_doc.get("content") if isinstance(template_doc.get("content"), dict) else {}
+        system_prompt = str(content.get("system_prompt") or "")
+        constraints = str(content.get("constraints") or "")
+        review["marker_present"] = "【项目长期记忆】" in system_prompt
+
+        actual_items = {
+            self._normalize_project_memory_binding_line(line)
+            for line in f"{system_prompt}\n{constraints}".splitlines()
+            if self._normalize_project_memory_binding_line(line)
+        }
+        expected_pairs = [
+            (str(line).strip(), self._normalize_project_memory_binding_line(line))
+            for line in project_memory_block.splitlines()
+            if str(line).strip() and not str(line).strip().startswith("【")
+        ]
+        missing_items = [
+            original for original, normalized in expected_pairs
+            if normalized and normalized not in actual_items
+        ]
+
+        review["expected_items"] = len(expected_pairs)
+        review["matched_items"] = max(0, len(expected_pairs) - len(missing_items))
+        review["missing_items"] = missing_items
+        review["valid"] = review["marker_present"] and not missing_items
+        return review
+
+    async def _review_runtime_result_project_memory_binding(self, runtime_result: Dict[str, Any]) -> Dict[str, Any]:
+        project_memory_block = await self._build_project_memory_block_for_workshop()
+        debug_prompt = self._extract_runtime_debug_prompt(runtime_result)
+        system_prompt = str(debug_prompt.get("system_prompt") or "")
+        review = {
+            "enabled": bool(project_memory_block.strip()),
+            "valid": True,
+            "system_prompt_present": bool(system_prompt.strip()),
+            "marker_present": False,
+            "expected_items": 0,
+            "matched_items": 0,
+            "missing_items": [],
+        }
+        if not review["enabled"]:
+            return review
+
+        review["marker_present"] = "【项目长期记忆】" in system_prompt
+        if not review["system_prompt_present"]:
+            review["valid"] = False
+            review["missing_items"] = ["缺少 runtime_result.debug_prompt.system_prompt"]
+            return review
+
+        actual_items = {
+            self._normalize_project_memory_binding_line(line)
+            for line in system_prompt.splitlines()
+            if self._normalize_project_memory_binding_line(line)
+        }
+        expected_pairs = [
+            (str(line).strip(), self._normalize_project_memory_binding_line(line))
+            for line in project_memory_block.splitlines()
+            if str(line).strip() and not str(line).strip().startswith("【")
+        ]
+        missing_items = [
+            original for original, normalized in expected_pairs
+            if normalized and normalized not in actual_items
+        ]
+
+        review["expected_items"] = len(expected_pairs)
+        review["matched_items"] = max(0, len(expected_pairs) - len(missing_items))
+        review["missing_items"] = missing_items
+        review["valid"] = review["marker_present"] and not missing_items
+        return review
+
+    async def _create_prompt_template(
+        self,
+        version_id: str,
+        spec: AgentSpec,
+        required_tools: List[str],
+        gap_report: Optional[AgentWorkshopGapAnalysis] = None,
+        tooling_plan: Optional[Dict[str, Any]] = None,
+        agent_builder_lesson_block: str = "",
+    ) -> Dict[str, Any]:
+        prompt_service = PromptTemplateService(db=self._db)
+        project_memory_block = await self._build_project_memory_block_for_workshop()
+        content = self._build_prompt_template_content(
+            spec,
+            required_tools,
+            gap_report=gap_report,
+            tooling_plan=tooling_plan,
+            project_memory_block=project_memory_block,
+            agent_builder_lesson_block=agent_builder_lesson_block,
+        )
+
         self._log_generated_result(
             "runtime_prompt_template_content",
             {
@@ -3920,7 +5871,158 @@ class AgentWorkshopService:
         )
         return result
 
-    async def _ensure_runtime_agent_config(self, version: AgentVersion, spec: AgentSpec) -> None:
+    async def _find_prompt_template_doc(self, template_id: str) -> Optional[Dict[str, Any]]:
+        templates = self._db["prompt_templates"]
+        template_doc = None
+        if ObjectId.is_valid(template_id):
+            template_doc = await templates.find_one({"_id": ObjectId(template_id)})
+        if template_doc is None:
+            template_doc = await templates.find_one({"_id": template_id})
+        return template_doc
+
+    async def _upsert_version_prompt_template(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+        content: TemplateContent,
+    ) -> Dict[str, Any]:
+        template_ref = dict(version.prompt_template_ref or {})
+        template_id = str(template_ref.get("template_id") or "").strip()
+
+        if template_id:
+            template_doc = await self._find_prompt_template_doc(template_id)
+            if template_doc is not None:
+                template_name = str(template_doc.get("template_name") or template_ref.get("template_name") or f"{spec.name} 草案模板").strip()
+                template_status = str(template_doc.get("status") or template_ref.get("status") or "draft").strip() or "draft"
+                next_version = int(template_doc.get("version") or 1) + 1
+                update_doc = {
+                    "content": content.model_dump(),
+                    "template_name": template_name,
+                    "status": template_status,
+                    "remark": str(template_doc.get("remark") or f"Agent 工坊自动同步工具绑定后的版本模板，来源会话 {spec.latest_session_id or ''}"),
+                    "updated_at": now_tz(),
+                    "version": next_version,
+                }
+                if ObjectId.is_valid(template_id):
+                    await self._db["prompt_templates"].update_one(
+                        {"_id": ObjectId(template_id)},
+                        {"$set": update_doc},
+                    )
+                else:
+                    await self._db["prompt_templates"].update_one(
+                        {"_id": template_id},
+                        {"$set": update_doc},
+                    )
+                return {
+                    "template_id": template_id,
+                    "template_name": template_name,
+                    "status": template_status,
+                }
+
+        try:
+            prompt_service = PromptTemplateService(db=self._db)
+            template = await prompt_service.create_template(
+                PromptTemplateCreate(
+                    agent_type="universal",
+                    agent_name=version.version_id,
+                    template_name=f"{spec.name} v{version.version} 草案",
+                    content=content,
+                    remark=f"Agent 工坊自动生成的版本草案模板，来源会话 {spec.latest_session_id or ''}",
+                    status="draft",
+                )
+            )
+        except (AttributeError, KeyError) as exc:
+            logger.warning("[AgentWorkshop] PromptTemplateService 不可用，回退为直接写入 prompt_templates: %s", exc)
+            templates = self._db["prompt_templates"]
+            existing_template_doc = await templates.find_one({
+                "agent_name": version.version_id,
+                "workflow_id": None,
+                "node_id": None,
+            })
+            template_name = f"{spec.name} v{version.version} 草案"
+            update_doc = {
+                "agent_type": "universal",
+                "agent_name": version.version_id,
+                "template_name": template_name,
+                "content": content.model_dump(),
+                "remark": f"Agent 工坊自动生成的版本草案模板，来源会话 {spec.latest_session_id or ''}",
+                "status": "draft",
+                "workflow_id": None,
+                "node_id": None,
+                "updated_at": now_tz(),
+                "version": int((existing_template_doc or {}).get("version") or 0) + 1,
+            }
+            if existing_template_doc is not None:
+                existing_template_id = existing_template_doc.get("_id")
+                await templates.update_one({"_id": existing_template_id}, {"$set": update_doc})
+                return {
+                    "template_id": str(existing_template_id),
+                    "template_name": template_name,
+                    "status": "draft",
+                }
+
+            insert_doc = dict(update_doc)
+            insert_doc["created_at"] = now_tz()
+            insert_result = await templates.insert_one(insert_doc)
+            return {
+                "template_id": str(insert_result.inserted_id),
+                "template_name": template_name,
+                "status": "draft",
+            }
+        if template is None:
+            logger.warning("[AgentWorkshop] Prompt 草案创建失败，返回内联引用")
+            return {
+                "template_id": None,
+                "template_name": f"{spec.name} 草案模板",
+                "status": "draft",
+            }
+        return {
+            "template_id": str(template.id),
+            "template_name": template.template_name,
+            "status": template.status,
+        }
+
+    def _build_required_tool_display_lines(
+        self,
+        required_tools: List[str],
+        gap_existing_tool_lookup: Dict[str, str],
+    ) -> List[str]:
+        if not required_tools:
+            return ["- 当前版本尚未绑定工具"]
+        return [
+            f"- {gap_existing_tool_lookup.get(tool_id, tool_id)}"
+            for tool_id in required_tools
+        ]
+
+    def _build_required_tool_strategy_lines(self, required_tools: List[str]) -> List[str]:
+        lines = [
+            "- required_tools 表示当前版本允许且优先考虑的候选工具集，不是要求把全部工具机械调用一遍。",
+            "- 你必须先判断当前任务需要哪些证据，再在 required_tools 中选择最少且足够的工具完成分析。",
+            "- 如果某个结论，尤其是估值区间、目标价、评分、排序、权重等精确数值，理论上应由工具或结构化数据支撑，就必须调用对应工具或引用上游已提供的可追溯数据。",
+            "- 如果当前 required_tools 里没有能支撑该数字的工具，或者数据不足，就明确说明无法给出该精确数字，只能输出定性判断或降级结论。",
+        ]
+        if required_tools:
+            lines.append("- 修改 agent 的绑定工具时，本段策略与下方约束块必须同步理解；只有当前 required_tools 中出现的工具才属于本次允许使用的证据来源。")
+        return lines
+
+    def _build_required_tool_binding_contract(self, required_tools: List[str], tool_display_lines: List[str]) -> List[str]:
+        lines = [
+            "- 当前版本绑定工具与工具使用约束是绑定在一起的：修改 required_tools 时，必须同步按新的工具集合理解本次证据来源与数值输出边界。",
+        ]
+        if required_tools:
+            lines.append("- 当前版本绑定工具（也是本次工具约束生效范围）：")
+            lines.extend(tool_display_lines)
+            lines.append("- 任何未出现在当前 required_tools 中的工具，都视为本次未绑定能力；即使系统里存在该工具，也不得假设自己本次可以调用。")
+        else:
+            lines.append("- 当前版本未绑定任何工具；若任务需要工具证据，只能明确降级，不能假设存在可用工具。")
+        return lines
+
+    async def _ensure_runtime_agent_config(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+        project_memory_binding: Optional[Dict[str, Any]] = None,
+    ) -> None:
         output_names = self._list_output_field_names(spec.outputs)
         output_field_raw = version.agent_metadata.get("output_field") or (output_names[0] if output_names else "analysis_report")
         output_field = self._normalize_output_field_name(output_field_raw, "analysis")  # 🔥 规范化字段名
@@ -3965,10 +6067,15 @@ class AgentWorkshopService:
                         "spec_id": version.spec_id,
                         "version_id": version.version_id,
                         "template_id": version.prompt_template_ref.get("template_id"),
+                        "template_status": version.prompt_template_ref.get("status"),
                         "icon": version.agent_metadata.get("icon") or "🤖",
                         "color": version.agent_metadata.get("color") or "#67C23A",
                         "workflow_stage": workflow_stage,
                         "callable_surfaces": ["workflow", "agent_workshop"],
+                        "project_memory_binding_active": bool((project_memory_binding or {}).get("enabled")),
+                        "project_memory_binding_valid": bool((project_memory_binding or {}).get("valid")),
+                        "version_status": version.status.value if hasattr(version.status, "value") else str(version.status),
+                        "execution_plan": version.execution_plan.model_dump(mode="json") if version.execution_plan else {},
                     },
                     "updated_at": now_tz(),
                 },
@@ -4023,6 +6130,126 @@ class AgentWorkshopService:
             workflow_stage=workflow_stage,
         )
         return metadata.model_dump(mode="json")
+
+    def _build_execution_validation_plan(
+        self,
+        spec: AgentSpec,
+        required_tools: List[str],
+        output_schema: Dict[str, Any],
+        gap_report: Optional[AgentWorkshopGapAnalysis] = None,
+        tooling_plan: Optional[Dict[str, Any]] = None,
+    ) -> AgentExecutionValidationPlan:
+        sample_input = self._build_execution_sample_input(spec)
+        output_fields = self._list_io_field_labels(spec.outputs) or list((output_schema.get("properties") or {}).keys())
+        top_tools = self._dedupe(required_tools)
+        evidence_tools = top_tools[: min(3, len(top_tools))]
+        capability_gaps = self._dedupe([
+            *((gap_report.blocking_gaps if gap_report else []) or []),
+            *(((tooling_plan or {}).get("missing_capabilities") or []) if isinstance(tooling_plan, dict) else []),
+        ])
+
+        steps = [
+            AgentExecutionPlanStep(
+                step_id="understand-task",
+                title="确认任务与交付边界",
+                objective="根据规格确认本次运行必须覆盖的输出、边界和非目标。",
+                suggested_tools=[],
+                expected_evidence=self._dedupe([
+                    f"至少覆盖这些输出：{'；'.join(output_fields[:4])}" if output_fields else "明确本次输出字段",
+                    *( [f"遵守这些关键约束：{'；'.join(spec.constraints[:3])}"] if spec.constraints else [] ),
+                ]),
+                failure_signals=[
+                    "输出只是在泛泛描述职责，没有回应这次具体任务。",
+                    "回答越过了规格中的 non_goals 或 constraints。",
+                ],
+            ),
+            AgentExecutionPlanStep(
+                step_id="collect-evidence",
+                title="收集核心证据",
+                objective="优先通过当前版本绑定的工具拿到支撑结论的核心事实，而不是先写结论。",
+                suggested_tools=top_tools,
+                expected_evidence=self._dedupe([
+                    "至少出现 1 次成功的绑定工具调用。" if top_tools else "若当前版本没有绑定工具，应明确说明这次只能做约束内的降级输出。",
+                    *( [f"优先复用这些工具：{'、'.join(top_tools)}"] if top_tools else [] ),
+                ]),
+                failure_signals=[
+                    "最终报告出现了关键结论，但 tool_trace 中没有对应事实获取过程。",
+                    "把 required_tools 当成装饰信息，实际没有用于证据收集。",
+                ],
+            ),
+            AgentExecutionPlanStep(
+                step_id="deliver-output",
+                title="生成可验证交付",
+                objective="基于已获取证据输出结果，并对关键数字、结论和降级边界做说明。",
+                suggested_tools=evidence_tools,
+                expected_evidence=self._dedupe([
+                    *( [f"输出字段可在结果中找到：{'；'.join(output_fields[:4])}"] if output_fields else [] ),
+                    "若输出精确数值、区间、排序或评分，必须能在工具结果或上游结构化输入中追溯。",
+                ]),
+                failure_signals=[
+                    "出现精确数字或区间，但没有对应来源、参数或工具证据。",
+                    "明明数据不足，却仍然输出了完整确定性结论。",
+                ],
+            ),
+        ]
+
+        acceptance_checks = self._dedupe([
+            *( [f"结果中应覆盖输出字段：{label}" for label in output_fields[:6]] ),
+            *( [f"成功标准：{item}" for item in spec.success_criteria[:4]] ),
+            *( ["tool_trace 中至少出现 1 个来自 required_tools 的成功调用。"] if required_tools else [] ),
+            *( ["若输出估值区间、目标价、评分、排序、权重等精确数值，必须具备工具或结构化数据依据。"] if self._get_numeric_traceability_policy(spec)["enabled"] else [] ),
+        ])
+
+        fallback_rules = self._dedupe([
+            "如果当前绑定工具不足以支撑精确结论，应降级为定性判断并说明原因。",
+            "如果核心字段缺失，不要伪造数字，应直接说明缺失维度。",
+            *( [f"当前仍存在未补齐能力：{'；'.join(capability_gaps[:4])}"] if capability_gaps else [] ),
+        ])
+
+        rationale_parts = [
+            "创建阶段同步生成执行验证计划，目的是把版本从“规格草案”推进到“可运行交付单元”。",
+            "调试和评估应优先验证是否真的调用到了所需工具、是否真的覆盖了目标输出，而不是只看 Prompt 是否写得完整。",
+        ]
+        if required_tools:
+            rationale_parts.append(f"当前版本绑定的核心工具有：{'、'.join(top_tools)}。")
+        if capability_gaps:
+            rationale_parts.append(f"当前仍需关注的缺口有：{'；'.join(capability_gaps[:4])}。")
+
+        return AgentExecutionValidationPlan(
+            mode="tool-driven",
+            validation_status="not-run",
+            rationale="\n".join(rationale_parts),
+            sample_input=sample_input,
+            execution_steps=steps,
+            acceptance_checks=acceptance_checks,
+            fallback_rules=fallback_rules,
+        )
+
+    def _build_execution_sample_input(self, spec: AgentSpec) -> Dict[str, Any]:
+        symbol = "600519"
+        domain_text = " ".join([
+            spec.domain or "",
+            spec.primary_goal or "",
+            " ".join(spec.preferred_methods or []),
+            " ".join(spec.responsibilities or []),
+        ]).lower()
+        if any(keyword in domain_text for keyword in ["银行", "pb", "roe", "金融"]):
+            symbol = "600036"
+        elif any(keyword in domain_text for keyword in ["新能源", "成长", "peg"]):
+            symbol = "300750"
+        elif spec.sample_symbols:
+            symbol = str(spec.sample_symbols[0]).strip() or symbol
+
+        task_description = spec.primary_goal or spec.name
+        if spec.outputs:
+            task_description = f"{task_description}。请至少覆盖这些输出：{'、'.join(self._list_io_field_labels(spec.outputs)[:4])}"
+
+        return {
+            "symbol": symbol,
+            "market_type": "A股",
+            "analysis_date": now_tz().strftime("%Y-%m-%d"),
+            "task_description": task_description,
+        }
 
     def _build_sample_sets_for_spec(self, spec: AgentSpec) -> List[AgentBenchmarkSampleSet]:
         if self._is_valuation_spec(spec):
@@ -4216,6 +6443,35 @@ class AgentWorkshopService:
             runtime_result,
             user_feedback=user_feedback,
         )
+        project_memory_binding = await self._review_runtime_result_project_memory_binding(runtime_result)
+        rule_details["project_memory_binding"] = project_memory_binding
+
+        evidence_bundle = self._build_production_review_evidence_bundle(
+            version,
+            spec,
+            runtime_result,
+            rule_scores,
+            rule_details,
+        )
+        if self._should_use_nanobot_evidence_workers(version, runtime_result):
+            evidence_bundle = await self._run_nanobot_assisted_evidence_workers(
+                evidence_bundle,
+                version,
+                spec,
+                runtime_result,
+                rule_details,
+            )
+
+        review_context = {
+            "version_id": version.version_id,
+            "spec_id": spec.spec_id,
+            "spec_name": spec.name,
+            "symbol": runtime_result.get("symbol"),
+            "analysis_date": runtime_result.get("analysis_date"),
+            "worker_execution_mode": evidence_bundle.orchestrator.worker_execution_mode if evidence_bundle.orchestrator else None,
+            "nanobot_worker_enabled": evidence_bundle.orchestrator.nanobot_worker_enabled if evidence_bundle.orchestrator else None,
+        }
+        self._log_production_review_evidence_state(evidence_bundle, context=review_context)
 
         llm_review: Dict[str, Any] = {}
         llm_review_error = ""
@@ -4231,52 +6487,40 @@ class AgentWorkshopService:
             llm_review_error = str(exc)
             logger.warning("[AgentWorkshop] LLM 结果评估失败，直接暴露错误: %s", exc, exc_info=True)
 
-        if not llm_review:
-            failed_details = {
-                "mode": "production-review",
-                "evaluation_engine": "llm_failed",
-                "judge_model": {
-                    **self._llm_client_meta,
-                    "fallback_used": False,
-                },
-                "runtime_result": runtime_result,
-                "parsed_output_excerpt": rule_details.get("parsed_output_excerpt", ""),
-                "valuation_traceability": rule_details.get("valuation_traceability", {}),
-                "llm_review_error": llm_review_error or "LLM 评审未返回有效结果。",
-                "rule_review": {
-                    "scores": rule_scores,
-                    "score_breakdown": rule_details.get("score_breakdown", {}),
-                    "issues": rule_issues,
-                    "recommendations": rule_recommendations,
-                },
-            }
-            return {}, [f"LLM 结果评估失败：{failed_details['llm_review_error']}"], [
-                "先查看 runtime_review 的 system_prompt、user_prompt 和 raw_response，确认评审提示词或输出约束哪里失效。",
-                "修复前不要把这次 production-review 当成有效评估结论；规则检查只保留在下方作为辅助证据。",
-            ], failed_details
-
-        llm_scores = llm_review.get("scores") or {}
-        scores = {
-            "runtime_goal_alignment": round(self._pick_float(llm_scores.get("runtime_goal_alignment"), rule_scores.get("runtime_goal_alignment", 0.0)), 2),
-            "runtime_output_quality": round(self._pick_float(llm_scores.get("runtime_output_quality"), rule_scores.get("runtime_output_coverage", 0.0)), 2),
-            "runtime_reasoning_quality": round(self._pick_float(llm_scores.get("runtime_reasoning_quality"), rule_scores.get("runtime_explainability", 0.0)), 2),
-            "runtime_tool_usage": round(self._pick_float(llm_scores.get("runtime_tool_usage"), rule_scores.get("runtime_explainability", 0.0)), 2),
-            "runtime_prompt_quality": round(self._pick_float(llm_scores.get("runtime_prompt_quality"), 0.0), 2),
-            "runtime_constraint_control": round(self._pick_float(llm_scores.get("runtime_constraint_control"), rule_scores.get("runtime_constraint_control", 0.0)), 2),
-        }
-
+        scores = self._build_production_review_scores(rule_scores, runtime_result)
+        layered_review = self._build_production_review_layered_assessment(
+            version,
+            rule_scores,
+            rule_details,
+            evidence_bundle,
+        )
         issues = self._dedupe([
-            *(llm_review.get("issues") or []),
-            *(rule_issues if llm_review_error else []),
+            *[str(item).strip() for item in (layered_review.get("publish_readiness", {}).get("blockers") or []) if str(item).strip()],
+            *[str(item).strip() for item in (evidence_bundle.official_issues or []) if str(item).strip()],
         ])
         recommendations = self._dedupe([
-            *(llm_review.get("recommendations") or []),
             *rule_recommendations,
+            *([
+                "重新使用当前 L4 项目长期记忆刷新版本模板，并确保运行时 debug_prompt.system_prompt 带上最新项目规则后，再重新发起 production-review。",
+            ] if project_memory_binding.get("enabled") and project_memory_binding.get("system_prompt_present") and not project_memory_binding.get("valid") else []),
+            *([
+                "补齐运行时 debug_prompt.system_prompt 证据，否则无法确认当前版本是否真实继承了项目长期记忆。",
+            ] if project_memory_binding.get("enabled") and not project_memory_binding.get("system_prompt_present") else []),
+            *([
+                "补齐 runtime_result 的 output_text、output_payload、debug_prompt 与 tool_trace 后，再重新发起 production-review。",
+            ] if evidence_bundle.evaluation_valid is False else []),
         ])
 
         details = {
             "mode": "production-review",
-            "evaluation_engine": "llm-judge-primary",
+            "evaluation_engine": (
+                "evidence-first-nanobot-assisted"
+                if evidence_bundle.orchestrator and evidence_bundle.orchestrator.worker_execution_mode == "nanobot-assisted"
+                else "evidence-first-primary"
+            ),
+            "review_mode": "evidence-first",
+            "evaluation_valid": evidence_bundle.evaluation_valid,
+            "evaluation_status": evidence_bundle.evaluation_status,
             "judge_model": {
                 **self._llm_client_meta,
                 "fallback_used": False,
@@ -4284,14 +6528,968 @@ class AgentWorkshopService:
             "runtime_result": runtime_result,
             "parsed_output_excerpt": rule_details.get("parsed_output_excerpt", ""),
             "valuation_traceability": rule_details.get("valuation_traceability", {}),
-            "llm_review": llm_review,
+            "project_memory_binding": project_memory_binding,
+            "evidence_bundle": evidence_bundle.model_dump(mode="json"),
+            "warning_issues": layered_review.get("warnings", []),
+            "blocker_issues": layered_review.get("blockers", []),
+            "layered_review": layered_review,
+            "llm_advisory": llm_review,
+            "llm_review_error": llm_review_error,
             "rule_review": {
                 "scores": rule_scores,
                 "score_breakdown": rule_details.get("score_breakdown", {}),
-                "issues": rule_issues,
+                "issues": issues,
+                "warning_issues": layered_review.get("warnings", []),
+                "recommendations": rule_recommendations,
             },
         }
         return scores, issues, recommendations, details
+
+    def _build_production_review_layered_assessment(
+        self,
+        version: AgentVersion,
+        rule_scores: Dict[str, float],
+        rule_details: Dict[str, Any],
+        evidence_bundle: AgentEvaluationEvidenceBundle,
+    ) -> Dict[str, Any]:
+        score_breakdown = rule_details.get("score_breakdown", {}) if isinstance(rule_details, dict) else {}
+        output_breakdown = score_breakdown.get("runtime_output_coverage", {}) if isinstance(score_breakdown, dict) else {}
+        explain_breakdown = score_breakdown.get("runtime_explainability", {}) if isinstance(score_breakdown, dict) else {}
+        constraint_breakdown = score_breakdown.get("runtime_constraint_control", {}) if isinstance(score_breakdown, dict) else {}
+        execution_plan_review = rule_details.get("execution_plan_review", {}) if isinstance(rule_details, dict) else {}
+        valuation_guardrail = rule_details.get("valuation_guardrail", {}) if isinstance(rule_details, dict) else {}
+        minimum_score = float((version.evaluation_policy or {}).get("minimum_score", 0.75))
+
+        confirmed_issue_groups: Dict[str, List[str]] = {}
+        for finding in (evidence_bundle.findings or []):
+            if finding.status != "confirmed_issue" or not str(finding.issue or "").strip():
+                continue
+            confirmed_issue_groups.setdefault(str(finding.category or "").strip(), []).append(str(finding.issue).strip())
+
+        content_warnings: List[str] = []
+        publish_blockers: List[str] = []
+        publish_warnings: List[str] = []
+
+        if output_breakdown.get("missing") and rule_scores.get("runtime_output_coverage", 0.0) < 0.7:
+            if rule_scores.get("runtime_output_coverage", 0.0) < 0.55:
+                publish_blockers.append("运行结果没有覆盖足够的核心输出字段。")
+            else:
+                content_warnings.append("运行结果对部分核心输出字段覆盖不足，但主体输出已基本成型。")
+                publish_warnings.append("建议补齐少量缺失的核心输出字段后再作为发布候选。")
+
+        if explain_breakdown.get("missing") and rule_scores.get("runtime_explainability", 0.0) < 0.7:
+            content_warnings.append("运行结果对关键假设、方法依据或失效条件说明不足。")
+
+        publish_blockers.extend(confirmed_issue_groups.get("constraint_control", []))
+        publish_blockers.extend(confirmed_issue_groups.get("numeric_traceability", []))
+        publish_blockers.extend(confirmed_issue_groups.get("project_memory_binding", []))
+        publish_blockers.extend(confirmed_issue_groups.get("execution_plan", []))
+        publish_blockers.extend(confirmed_issue_groups.get("output_coverage", []))
+
+        guardrail_severity = str(valuation_guardrail.get("severity") or "none")
+        if guardrail_severity == "warning":
+            publish_warnings.append("部分数值缺少逐项可追溯说明，但已具备节级/表级来源映射，可继续优化展示。")
+
+        publish_warnings.extend([str(item).strip() for item in (execution_plan_review.get("warning_issues") or []) if str(item).strip()])
+        publish_blockers.extend([str(item).strip() for item in (evidence_bundle.invalid_reasons or []) if str(item).strip()])
+
+        content_score = round((
+            rule_scores.get("runtime_goal_alignment", 0.0)
+            + rule_scores.get("runtime_output_coverage", 0.0)
+            + rule_scores.get("runtime_explainability", 0.0)
+            + rule_scores.get("runtime_constraint_control", 0.0)
+        ) / 4, 2)
+
+        if confirmed_issue_groups.get("numeric_traceability"):
+            traceability_score = 0.35
+        elif guardrail_severity == "warning":
+            traceability_score = 0.8
+        else:
+            traceability_score = 1.0
+
+        evidence_score = 1.0 if evidence_bundle.evaluation_valid else 0.4
+        publish_score = round((
+            rule_scores.get("runtime_output_coverage", 0.0)
+            + rule_scores.get("runtime_execution_readiness", 0.0)
+            + rule_scores.get("runtime_constraint_control", 0.0)
+            + traceability_score
+            + evidence_score
+        ) / 5, 2)
+
+        if publish_blockers:
+            publish_decision = "reject" if publish_score < 0.55 else "revise"
+        elif publish_score >= minimum_score:
+            publish_decision = "pass"
+        elif publish_score < 0.55:
+            publish_decision = "reject"
+        else:
+            publish_decision = "revise"
+
+        if content_score >= 0.75 and not content_warnings:
+            content_decision = "pass"
+        elif content_score >= 0.75:
+            content_decision = "pass_with_warnings"
+        elif content_score >= 0.55:
+            content_decision = "revise"
+        else:
+            content_decision = "reject"
+
+        blockers = self._dedupe(publish_blockers)
+        warnings = self._dedupe([*content_warnings, *publish_warnings])
+        return {
+            "content_quality": {
+                "score": content_score,
+                "decision": content_decision,
+                "blockers": [],
+                "warnings": self._dedupe(content_warnings),
+            },
+            "publish_readiness": {
+                "score": publish_score,
+                "decision": publish_decision,
+                "blockers": blockers,
+                "warnings": self._dedupe(publish_warnings),
+            },
+            "blockers": blockers,
+            "warnings": warnings,
+        }
+
+    def _build_production_review_scores(
+        self,
+        rule_scores: Dict[str, float],
+        runtime_result: Dict[str, Any],
+    ) -> Dict[str, float]:
+        debug_prompt = self._extract_runtime_debug_prompt(runtime_result)
+        has_system_prompt = bool(str(debug_prompt.get("system_prompt") or "").strip())
+        has_user_prompt = bool(str(debug_prompt.get("user_prompt") or "").strip())
+        if has_system_prompt and has_user_prompt:
+            prompt_quality_score = 0.75
+        elif debug_prompt:
+            prompt_quality_score = 0.6
+        else:
+            prompt_quality_score = 0.4
+
+        return {
+            "runtime_goal_alignment": round(rule_scores.get("runtime_goal_alignment", 0.0), 2),
+            "runtime_output_quality": round(rule_scores.get("runtime_output_coverage", 0.0), 2),
+            "runtime_reasoning_quality": round(rule_scores.get("runtime_explainability", 0.0), 2),
+            "runtime_tool_usage": round(rule_scores.get("runtime_execution_readiness", 0.0), 2),
+            "runtime_prompt_quality": round(prompt_quality_score, 2),
+            "runtime_constraint_control": round(rule_scores.get("runtime_constraint_control", 0.0), 2),
+        }
+
+    def _coerce_evidence_bundle(
+        self,
+        evidence_bundle: Any,
+        evaluation_details: Optional[Dict[str, Any]] = None,
+    ) -> Optional[AgentEvaluationEvidenceBundle]:
+        if isinstance(evidence_bundle, AgentEvaluationEvidenceBundle):
+            return evidence_bundle
+        if not isinstance(evidence_bundle, dict):
+            return None
+
+        details = evaluation_details if isinstance(evaluation_details, dict) else {}
+        payload = dict(evidence_bundle)
+        if "evaluation_valid" not in payload and "evaluation_valid" in details:
+            payload["evaluation_valid"] = details.get("evaluation_valid")
+        if "evaluation_status" not in payload and "evaluation_status" in details:
+            payload["evaluation_status"] = details.get("evaluation_status")
+        return AgentEvaluationEvidenceBundle(**payload)
+
+    def _build_production_review_evidence_bundle(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+        runtime_result: Dict[str, Any],
+        rule_scores: Dict[str, float],
+        rule_details: Dict[str, Any],
+    ) -> AgentEvaluationEvidenceBundle:
+        output_text = self._normalize_output_text(runtime_result.get("output_text"), runtime_result.get("output_payload"))
+        payload = runtime_result.get("output_payload") if isinstance(runtime_result.get("output_payload"), dict) else {}
+        debug_prompt = self._extract_runtime_debug_prompt(runtime_result)
+        tool_trace_observed = isinstance(debug_prompt, dict) and "tool_trace" in debug_prompt
+
+        score_breakdown = rule_details.get("score_breakdown", {}) if isinstance(rule_details, dict) else {}
+        output_breakdown = score_breakdown.get("runtime_output_coverage", {}) if isinstance(score_breakdown, dict) else {}
+        explain_breakdown = score_breakdown.get("runtime_explainability", {}) if isinstance(score_breakdown, dict) else {}
+        constraint_breakdown = score_breakdown.get("runtime_constraint_control", {}) if isinstance(score_breakdown, dict) else {}
+        execution_plan_review = rule_details.get("execution_plan_review", {}) if isinstance(rule_details, dict) else {}
+        valuation_traceability = rule_details.get("valuation_traceability", {}) if isinstance(rule_details, dict) else {}
+        project_memory_binding = rule_details.get("project_memory_binding", {}) if isinstance(rule_details, dict) else {}
+
+        candidate_findings = self._plan_production_review_candidate_findings(
+            version,
+            spec,
+            runtime_result,
+            rule_scores,
+            rule_details,
+        )
+        evidence_tasks = self._plan_production_review_evidence_tasks(candidate_findings)
+        worker_results = self._run_production_review_evidence_workers(
+            candidate_findings,
+            evidence_tasks,
+            version,
+            spec,
+            runtime_result,
+            rule_scores,
+            rule_details,
+        )
+
+        evidence_bundle = AgentEvaluationEvidenceBundle(
+            review_mode="evidence-first",
+            runtime_summary=AgentEvaluationRuntimeSummary(
+                has_output_text=bool(output_text.strip()),
+                has_output_payload=bool(payload),
+                has_debug_prompt=bool(debug_prompt),
+                has_system_prompt=bool(str(debug_prompt.get("system_prompt") or "").strip()),
+                tool_trace_observed=tool_trace_observed,
+                project_memory_binding_enabled=bool(project_memory_binding.get("enabled")),
+                project_memory_binding_valid=bool(project_memory_binding.get("valid", True)),
+                required_tools=self._dedupe([str(item).strip() for item in (version.required_tools or []) if str(item).strip()]),
+                spec_outputs=self._list_io_field_names(spec.outputs),
+            ),
+            candidate_findings=candidate_findings,
+            evidence_tasks=evidence_tasks,
+            worker_results=worker_results,
+            orchestrator=AgentEvaluationOrchestrationSummary(
+                mode="evidence-first",
+                worker_execution_mode="rules-primary",
+                nanobot_worker_enabled=False,
+                planned_task_count=len(evidence_tasks),
+                completed_worker_count=len(worker_results),
+            ),
+        )
+        self._refresh_production_review_evidence_bundle(evidence_bundle, rule_details)
+        return evidence_bundle
+
+    def _refresh_production_review_evidence_bundle(
+        self,
+        evidence_bundle: AgentEvaluationEvidenceBundle,
+        rule_details: Dict[str, Any],
+    ) -> AgentEvaluationEvidenceBundle:
+        worker_results_by_finding_id = {
+            item.finding_id: item
+            for item in (evidence_bundle.worker_results or [])
+            if item.finding_id
+        }
+        findings: List[AgentEvaluationFinding] = []
+        official_issues: List[str] = []
+        invalid_reasons: List[str] = []
+
+        for candidate in evidence_bundle.candidate_findings or []:
+            worker_result = worker_results_by_finding_id.get(candidate.finding_id)
+            if worker_result is None:
+                continue
+            candidate.status = worker_result.status
+            synthesized_findings, synthesized_invalid_reasons = self._synthesize_production_review_worker_outcome(
+                candidate,
+                worker_result,
+                evidence_bundle.runtime_summary,
+                rule_details,
+            )
+            findings.extend(synthesized_findings)
+            invalid_reasons.extend(synthesized_invalid_reasons)
+
+        evidence_bundle.findings = findings
+        evidence_bundle.official_issues = self._dedupe([
+            finding.issue
+            for finding in findings
+            if finding.status == "confirmed_issue" and finding.issue
+        ])
+        evidence_bundle.insufficient_evidence = [
+            finding for finding in findings
+            if finding.status == "insufficient_evidence"
+        ]
+        evidence_bundle.invalid_reasons = self._dedupe(invalid_reasons)
+        evidence_bundle.evaluation_valid = not evidence_bundle.invalid_reasons
+        evidence_bundle.evaluation_status = "valid" if evidence_bundle.evaluation_valid else "evidence_incomplete"
+        return evidence_bundle
+
+    def _synthesize_production_review_worker_outcome(
+        self,
+        candidate: AgentEvaluationCandidateFinding,
+        worker_result: AgentEvaluationWorkerResult,
+        runtime_summary: AgentEvaluationRuntimeSummary,
+        rule_details: Dict[str, Any],
+    ) -> Tuple[List[AgentEvaluationFinding], List[str]]:
+        if worker_result.status == "disproved":
+            return [], []
+
+        status = "confirmed_issue" if worker_result.status == "confirmed" else "insufficient_evidence"
+        evidence = self._build_production_review_finding_evidence(candidate, worker_result, runtime_summary, rule_details)
+        invalid_reasons: List[str] = []
+        findings: List[AgentEvaluationFinding] = []
+
+        def append_finding(title: str, issue: str = "") -> None:
+            findings.append(AgentEvaluationFinding(
+                category=candidate.category,
+                severity=getattr(candidate, "severity", "blocker"),
+                status=status,
+                title=title,
+                issue=issue if status == "confirmed_issue" else "",
+                evidence=evidence,
+            ))
+
+        if candidate.category == "runtime_output":
+            append_finding("缺少运行结果内容", "未提供运行结果内容，无法完成有效的 production-review。")
+            if status == "insufficient_evidence":
+                invalid_reasons.append("缺少 runtime output 证据，当前评估不能作为正式发布依据。")
+            else:
+                invalid_reasons.append("缺少 runtime output 证据，当前评估不能作为正式发布依据。")
+            return findings, invalid_reasons
+
+        if candidate.category == "output_coverage":
+            append_finding("核心输出字段覆盖不足", "运行结果没有覆盖足够的核心输出字段。")
+            return findings, invalid_reasons
+
+        if candidate.category == "reasoning_quality":
+            append_finding("关键解释要素不足", "运行结果对关键假设、方法依据或失效条件说明不足。")
+            return findings, invalid_reasons
+
+        if candidate.category == "constraint_control":
+            append_finding("存在越界或约束冲突", "运行结果出现了越界表达，和规格中的非目标不一致。")
+            return findings, invalid_reasons
+
+        if candidate.category == "numeric_traceability":
+            append_finding(
+                "数值结果缺少可追溯依据",
+                "数值类结果违反可追溯硬约束：输出了精确数字或区间，但没有提供可追溯的数据源或工具计算依据。",
+            )
+            return findings, invalid_reasons
+
+        if candidate.category == "project_memory_binding":
+            if not runtime_summary.has_system_prompt:
+                append_finding("缺少运行时项目记忆证据")
+                invalid_reasons.append("缺少 runtime system_prompt 证据，无法确认当前 L4 项目长期记忆是否真实注入。")
+            else:
+                append_finding(
+                    "运行时 Prompt 缺少当前项目长期记忆",
+                    "本次运行使用的 system_prompt 没有完整包含当前 L4 项目长期记忆，说明版本模板或运行时注入已偏离当前稳定项目规则。",
+                )
+            return findings, invalid_reasons
+
+        if candidate.category == "tool_usage":
+            if "缺少工具轨迹证据" in candidate.title or not runtime_summary.tool_trace_observed:
+                append_finding("缺少工具轨迹证据")
+                invalid_reasons.append("缺少 required_tools 的 tool_trace 证据，当前工具使用评估不能定案。")
+            else:
+                append_finding(
+                    "关键工具未命中",
+                    "这次运行没有真正调用到版本声明的关键工具，当前结果更像 Prompt 演示，不像可复核的执行结果。",
+                )
+            return findings, invalid_reasons
+
+        if candidate.category == "execution_plan":
+            execution_plan_review = rule_details.get("execution_plan_review", {}) if isinstance(rule_details, dict) else {}
+            issue_items = [str(item).strip() for item in (execution_plan_review.get("issues") or []) if str(item).strip()]
+            if status == "confirmed_issue" and issue_items:
+                for item in issue_items:
+                    findings.append(AgentEvaluationFinding(
+                        category=candidate.category,
+                        severity=getattr(candidate, "severity", "blocker"),
+                        status=status,
+                        title="执行验证未通过",
+                        issue=item,
+                        evidence=evidence,
+                    ))
+            else:
+                append_finding("执行验证未通过")
+            return findings, invalid_reasons
+
+        if candidate.category == "prompt_quality":
+            append_finding("缺少 prompt 调试证据")
+            return findings, invalid_reasons
+
+        append_finding(candidate.title, worker_result.summary)
+        return findings, invalid_reasons
+
+    def _build_production_review_finding_evidence(
+        self,
+        candidate: AgentEvaluationCandidateFinding,
+        worker_result: AgentEvaluationWorkerResult,
+        runtime_summary: AgentEvaluationRuntimeSummary,
+        rule_details: Dict[str, Any],
+    ) -> List[str]:
+        if worker_result.evidence:
+            return self._dedupe([str(item).strip() for item in worker_result.evidence if str(item).strip()])
+
+        score_breakdown = rule_details.get("score_breakdown", {}) if isinstance(rule_details, dict) else {}
+        execution_plan_review = rule_details.get("execution_plan_review", {}) if isinstance(rule_details, dict) else {}
+        valuation_traceability = rule_details.get("valuation_traceability", {}) if isinstance(rule_details, dict) else {}
+        project_memory_binding = rule_details.get("project_memory_binding", {}) if isinstance(rule_details, dict) else {}
+
+        if candidate.category == "runtime_output":
+            return ["runtime_result 中没有可用的 output_text，也没有可用的 output_payload。"]
+        if candidate.category == "output_coverage":
+            detail = score_breakdown.get("runtime_output_coverage", {}) if isinstance(score_breakdown, dict) else {}
+            return self._dedupe([str(item).strip() for item in (detail.get("missing") or []) if str(item).strip()][:6])
+        if candidate.category == "reasoning_quality":
+            detail = score_breakdown.get("runtime_explainability", {}) if isinstance(score_breakdown, dict) else {}
+            return self._dedupe([str(item).strip() for item in (detail.get("missing") or []) if str(item).strip()][:6])
+        if candidate.category == "constraint_control":
+            detail = score_breakdown.get("runtime_constraint_control", {}) if isinstance(score_breakdown, dict) else {}
+            return self._dedupe([str(item).strip() for item in (detail.get("missing") or []) if str(item).strip()][:6])
+        if candidate.category == "numeric_traceability":
+            values = [
+                str(item.get("value") or "").strip()
+                for item in (valuation_traceability.get("items") or [])
+                if isinstance(item, dict) and str(item.get("source_type") or "") == "unverified"
+            ]
+            return self._dedupe([item for item in values if item][:6])
+        if candidate.category == "project_memory_binding":
+            if not runtime_summary.has_system_prompt:
+                return ["runtime_result.debug_prompt.system_prompt 缺失，无法核验当前 L4 项目长期记忆是否进入运行时 prompt。"]
+            return self._dedupe([str(item).strip() for item in (project_memory_binding.get("missing_items") or []) if str(item).strip()][:6])
+        if candidate.category == "tool_usage":
+            if "缺少工具轨迹证据" in candidate.title or not runtime_summary.tool_trace_observed:
+                return self._dedupe([
+                    "runtime_result 中没有可用的 debug_prompt.tool_trace，无法确认 required_tools 是否真实调用。",
+                    *(runtime_summary.required_tools or []),
+                ])[:6]
+            return self._dedupe([
+                str(item).strip()
+                for item in (execution_plan_review.get("missing_required_tools") or [])
+                if str(item).strip()
+            ])[:6]
+        if candidate.category == "execution_plan":
+            return self._dedupe([
+                str(item).strip()
+                for item in (execution_plan_review.get("missing") or [])
+                if str(item).strip()
+            ])[:6]
+        if candidate.category == "prompt_quality":
+            return ["runtime_result 中没有 debug_prompt，无法基于证据评估 prompt 设计质量。"]
+        return []
+
+    def _should_use_nanobot_evidence_workers(
+        self,
+        version: AgentVersion,
+        runtime_result: Dict[str, Any],
+    ) -> bool:
+        runtime_flag = runtime_result.get("nanobot_evidence_workers")
+        if isinstance(runtime_flag, bool):
+            return runtime_flag
+        worker_mode = str(runtime_result.get("review_worker_mode") or "").strip().lower()
+        if worker_mode == "nanobot-assisted":
+            return True
+        return bool((version.evaluation_policy or {}).get("nanobot_evidence_workers"))
+
+    async def _run_nanobot_assisted_evidence_workers(
+        self,
+        evidence_bundle: AgentEvaluationEvidenceBundle,
+        version: AgentVersion,
+        spec: AgentSpec,
+        runtime_result: Dict[str, Any],
+        rule_details: Dict[str, Any],
+    ) -> AgentEvaluationEvidenceBundle:
+        eligible_tasks = [
+            task for task in (evidence_bundle.evidence_tasks or [])
+            if task.worker_name in {"ToolUsageWorker", "NumericTraceabilityWorker", "RuntimeFailureWorker", "PromptEvidenceWorker"}
+        ]
+        if not eligible_tasks:
+            evidence_bundle.orchestrator.worker_execution_mode = "nanobot-assisted"
+            evidence_bundle.orchestrator.nanobot_worker_enabled = True
+            return evidence_bundle
+
+        existing_results = {item.task_id: item for item in (evidence_bundle.worker_results or [])}
+        updated_results: List[AgentEvaluationWorkerResult] = []
+        for task in evidence_bundle.evidence_tasks:
+            current_result = existing_results.get(task.task_id)
+            if task not in eligible_tasks:
+                if current_result is not None:
+                    updated_results.append(current_result)
+                continue
+            finding = next((item for item in evidence_bundle.candidate_findings if item.finding_id == task.finding_id), None)
+            nanobot_result = await self._run_nanobot_evidence_worker_task(
+                task,
+                finding,
+                version,
+                spec,
+                runtime_result,
+                rule_details,
+                fallback_result=current_result,
+            )
+            updated_results.append(nanobot_result)
+
+        evidence_bundle.worker_results = updated_results
+        evidence_bundle.orchestrator.worker_execution_mode = "nanobot-assisted"
+        evidence_bundle.orchestrator.nanobot_worker_enabled = True
+        evidence_bundle.orchestrator.completed_worker_count = len(updated_results)
+        return self._refresh_production_review_evidence_bundle(evidence_bundle, rule_details)
+
+    async def _run_nanobot_evidence_worker_task(
+        self,
+        task: AgentEvaluationEvidenceTask,
+        finding: Optional[AgentEvaluationCandidateFinding],
+        version: AgentVersion,
+        spec: AgentSpec,
+        runtime_result: Dict[str, Any],
+        rule_details: Dict[str, Any],
+        fallback_result: Optional[AgentEvaluationWorkerResult] = None,
+    ) -> AgentEvaluationWorkerResult:
+        try:
+            from app.services.embedded_nanobot_service import EmbeddedNanobotService
+
+            user_id, _session_id = await self._resolve_agent_builder_lesson_user_context(version, spec)
+            service = EmbeddedNanobotService(
+                db=self._db,
+                workspace=Path(__file__).resolve().parents[2],
+            )
+            prompt = self._build_nanobot_evidence_worker_prompt(
+                task,
+                finding,
+                version,
+                spec,
+                runtime_result,
+                rule_details,
+            )
+            response = await service.chat(
+                user_message=prompt,
+                session_key=f"embedded:agent-workshop-eval:{version.version_id}:{task.task_id}",
+                user_id=user_id or None,
+                channel="agent_workshop_evaluation",
+                chat_id=f"agent-workshop-eval:{version.version_id}:{task.task_id}",
+                skill_names=["nanobot-agent-design"],
+                thread_context={
+                    "spec_id": spec.spec_id,
+                    "spec_name": spec.name,
+                    "workshop_session_id": version.published_from_session_id,
+                    "version_id": version.version_id,
+                    "version_status": version.status.value if hasattr(version.status, "value") else str(version.status),
+                },
+            )
+            parsed = self._load_json_response(str((response or {}).get("content") or ""))
+            status = str(parsed.get("status") or "").strip().lower()
+            if status not in {"confirmed", "disproved", "insufficient_evidence"}:
+                status = "insufficient_evidence"
+            evidence = [str(item).strip() for item in (parsed.get("evidence") or []) if str(item).strip()]
+            artifacts = self._normalize_production_review_worker_artifacts(parsed.get("artifacts"))
+            summary = str(parsed.get("summary") or finding.title if finding else task.objective).strip()
+            return AgentEvaluationWorkerResult(
+                task_id=task.task_id,
+                finding_id=task.finding_id,
+                worker_name=task.worker_name,
+                status=status,
+                source="nanobot",
+                summary=summary,
+                evidence=self._dedupe(evidence),
+                artifacts=artifacts,
+            )
+        except Exception as exc:
+            logger.warning("[AgentWorkshop] Nanobot evidence worker 执行失败: %s", exc, exc_info=True)
+            fallback_evidence = list((fallback_result.evidence if fallback_result else []) or [])
+            fallback_artifacts = list((fallback_result.artifacts if fallback_result else []) or [])
+            fallback_evidence.append(f"Nanobot worker 执行失败：{exc}")
+            return AgentEvaluationWorkerResult(
+                task_id=task.task_id,
+                finding_id=task.finding_id,
+                worker_name=task.worker_name,
+                status=fallback_result.status if fallback_result else "insufficient_evidence",
+                source="nanobot-fallback",
+                summary=fallback_result.summary if fallback_result and fallback_result.summary else f"Nanobot worker 执行失败，回退到规则结果：{task.objective}",
+                evidence=self._dedupe(fallback_evidence),
+                artifacts=fallback_artifacts,
+            )
+
+    def _build_nanobot_evidence_worker_prompt(
+        self,
+        task: AgentEvaluationEvidenceTask,
+        finding: Optional[AgentEvaluationCandidateFinding],
+        version: AgentVersion,
+        spec: AgentSpec,
+        runtime_result: Dict[str, Any],
+        rule_details: Dict[str, Any],
+    ) -> str:
+        debug_prompt = self._extract_runtime_debug_prompt(runtime_result)
+        tool_trace = self._extract_runtime_tool_trace(runtime_result)
+        payload_preview = self._truncate_text(self._json_preview(runtime_result.get("output_payload") or {}), 1600)
+        rule_review = {
+            "score_breakdown": rule_details.get("score_breakdown", {}),
+            "execution_plan_review": rule_details.get("execution_plan_review", {}),
+            "valuation_traceability": rule_details.get("valuation_traceability", {}),
+            "project_memory_binding": rule_details.get("project_memory_binding", {}),
+        }
+        prompt_payload = {
+            "task": {
+                "task_id": task.task_id,
+                "worker_name": task.worker_name,
+                "objective": task.objective,
+                "evidence_targets": task.evidence_targets,
+            },
+            "finding": {
+                "finding_id": finding.finding_id if finding else "",
+                "category": finding.category if finding else "",
+                "title": finding.title if finding else task.objective,
+                "trigger": finding.trigger if finding else "",
+            },
+            "version": {
+                "version_id": version.version_id,
+                "required_tools": version.required_tools,
+                "evaluation_policy": version.evaluation_policy,
+            },
+            "spec": {
+                "spec_id": spec.spec_id,
+                "name": spec.name,
+                "primary_goal": spec.primary_goal,
+                "outputs": self._serialize_io_fields(spec.outputs, 8),
+                "constraints": spec.constraints,
+                "non_goals": spec.non_goals,
+            },
+            "runtime_result": {
+                "output_text": self._truncate_text(runtime_result.get("output_text"), 3000),
+                "output_payload_preview": payload_preview,
+                "debug_prompt": {
+                    "system_prompt_excerpt": self._truncate_text(debug_prompt.get("system_prompt"), 800),
+                    "user_prompt_excerpt": self._truncate_text(debug_prompt.get("user_prompt"), 1000),
+                    "tool_trace": self._sanitize_tool_trace(tool_trace),
+                },
+            },
+            "rule_review": rule_review,
+        }
+        return "\n".join([
+            "你是 TradingAgents-CN 的证据核查 worker。你只允许依据输入中的 runtime_result、tool_trace、rule_review 与 spec/version 信息做核查。",
+            "不要脑补不存在的日志、工具调用、系统能力或计算过程。",
+            "如果当前 finding.category 是 project_memory_binding，你必须重点检查 runtime_result.debug_prompt.system_prompt 是否真实包含 rule_review.project_memory_binding 中要求的项目长期记忆片段；system_prompt 缺失时只能返回 insufficient_evidence。",
+            "请仅输出 JSON，不要输出 Markdown。JSON 结构必须为：",
+            json.dumps({
+                "status": "confirmed",
+                "summary": "中文摘要",
+                "evidence": ["证据1", "证据2"],
+                "artifacts": [
+                    {
+                        "artifact_type": "tool_trace",
+                        "title": "命中的工具轨迹",
+                        "path": "runtime_result.debug_prompt.tool_trace[0]",
+                        "content": "get_value_factor_bundle_tool success=true",
+                        "metadata": {"tool_name": "get_value_factor_bundle_tool"},
+                    }
+                ],
+            }, ensure_ascii=False, indent=2),
+            "其中 status 只能是 confirmed、disproved、insufficient_evidence 之一。",
+            "artifacts 是可选数组；如果能指出证据来自哪段 tool_trace、output_payload 路径、rule_review 字段或日志摘录，请尽量结构化填写，不要只写在 evidence 文本里。",
+            json.dumps(prompt_payload, ensure_ascii=False, indent=2),
+        ])
+
+    def _build_production_review_worker_artifacts(
+        self,
+        finding: AgentEvaluationCandidateFinding,
+        task: AgentEvaluationEvidenceTask,
+        runtime_result: Dict[str, Any],
+        rule_details: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        artifacts: List[Dict[str, Any]] = []
+        tool_trace = self._sanitize_tool_trace(self._extract_runtime_tool_trace(runtime_result))
+        output_text = self._normalize_output_text(runtime_result.get("output_text"), runtime_result.get("output_payload"))
+        output_payload = runtime_result.get("output_payload") if isinstance(runtime_result.get("output_payload"), dict) else {}
+        score_breakdown = rule_details.get("score_breakdown", {}) if isinstance(rule_details, dict) else {}
+        execution_plan_review = rule_details.get("execution_plan_review", {}) if isinstance(rule_details, dict) else {}
+        valuation_traceability = rule_details.get("valuation_traceability", {}) if isinstance(rule_details, dict) else {}
+        project_memory_binding = rule_details.get("project_memory_binding", {}) if isinstance(rule_details, dict) else {}
+
+        if finding.category == "tool_usage":
+            if tool_trace:
+                for index, item in enumerate(tool_trace[:4]):
+                    artifacts.append({
+                        "artifact_type": "tool_trace",
+                        "title": f"工具轨迹 {index + 1}",
+                        "path": f"runtime_result.debug_prompt.tool_trace[{index}]",
+                        "content": self._truncate_text(self._json_preview(item), 600),
+                        "metadata": {
+                            "tool_name": item.get("tool_name"),
+                            "success": item.get("success"),
+                        },
+                    })
+            else:
+                artifacts.append({
+                    "artifact_type": "tool_trace_gap",
+                    "title": "缺少 tool_trace",
+                    "path": "runtime_result.debug_prompt.tool_trace",
+                    "content": "debug_prompt 中没有可用的 tool_trace。",
+                    "metadata": {"evidence_targets": list(task.evidence_targets or [])},
+                })
+
+        if finding.category in {"output_coverage", "runtime_output"} and output_payload:
+            artifacts.append({
+                "artifact_type": "output_payload",
+                "title": "输出载荷预览",
+                "path": "runtime_result.output_payload",
+                "content": self._truncate_text(self._json_preview(output_payload), 800),
+                "metadata": {"keys": list(output_payload.keys())[:10]},
+            })
+
+        if finding.category in {"output_coverage", "reasoning_quality", "constraint_control"}:
+            breakdown_key = {
+                "output_coverage": "runtime_output_coverage",
+                "reasoning_quality": "runtime_explainability",
+                "constraint_control": "runtime_constraint_control",
+            }.get(finding.category, "")
+            breakdown = score_breakdown.get(breakdown_key, {}) if breakdown_key else {}
+            if breakdown:
+                artifacts.append({
+                    "artifact_type": "rule_breakdown",
+                    "title": "规则评估明细",
+                    "path": f"rule_review.score_breakdown.{breakdown_key}",
+                    "content": self._truncate_text(self._json_preview(breakdown), 600),
+                    "metadata": {"category": finding.category},
+                })
+
+        if finding.category == "numeric_traceability":
+            unresolved_items = [
+                (index, item)
+                for index, item in enumerate(valuation_traceability.get("items") or [])
+                if isinstance(item, dict) and str(item.get("source_type") or "") == "unverified"
+            ]
+            for display_index, (index, item) in enumerate(unresolved_items[:4], start=1):
+                location = self._locate_text_position(output_text, str(item.get("value") or ""))
+                artifacts.append({
+                    "artifact_type": "traceability_gap",
+                    "title": f"未验证数值证据 {display_index}",
+                    "path": f"rule_review.valuation_traceability.items[{index}]",
+                    "content": self._truncate_text(self._json_preview(item), 500),
+                    "metadata": {
+                        "value": item.get("value"),
+                        "source_type": item.get("source_type"),
+                        "line_number": location.get("line_number"),
+                        "column_number": location.get("column_number"),
+                        "line_excerpt": location.get("line_excerpt"),
+                    },
+                })
+
+        if finding.category == "project_memory_binding":
+            system_prompt = str(self._extract_runtime_debug_prompt(runtime_result).get("system_prompt") or "")
+            artifacts.append({
+                "artifact_type": "runtime_system_prompt",
+                "title": "运行时 system_prompt 摘录",
+                "path": "runtime_result.debug_prompt.system_prompt",
+                "content": self._truncate_text(system_prompt or "<missing>", 800),
+                "metadata": {
+                    "marker_present": project_memory_binding.get("marker_present"),
+                    "matched_items": project_memory_binding.get("matched_items"),
+                    "expected_items": project_memory_binding.get("expected_items"),
+                },
+            })
+            if project_memory_binding.get("missing_items"):
+                artifacts.append({
+                    "artifact_type": "project_memory_binding_gap",
+                    "title": "缺失的项目长期记忆片段",
+                    "path": "runtime_result.debug_prompt.system_prompt",
+                    "content": self._truncate_text("\n".join(project_memory_binding.get("missing_items") or []), 600),
+                    "metadata": {},
+                })
+
+        if finding.category == "execution_plan" and execution_plan_review:
+            artifacts.append({
+                "artifact_type": "execution_plan_review",
+                "title": "执行计划验收结果",
+                "path": "rule_review.execution_plan_review",
+                "content": self._truncate_text(self._json_preview(execution_plan_review), 700),
+                "metadata": {
+                    "missing_required_tools": execution_plan_review.get("missing_required_tools"),
+                    "issues_count": len(execution_plan_review.get("issues") or []),
+                },
+            })
+
+        if finding.category == "prompt_quality":
+            artifacts.append({
+                "artifact_type": "prompt_gap",
+                "title": "缺少 debug_prompt",
+                "path": "runtime_result.debug_prompt",
+                "content": "runtime_result 中没有 debug_prompt，无法核查 prompt 设计质量。",
+                "metadata": {},
+            })
+
+        return self._normalize_production_review_worker_artifacts(artifacts)
+
+    def _normalize_production_review_worker_artifacts(self, artifacts: Any) -> List[Dict[str, Any]]:
+        if not isinstance(artifacts, list):
+            return []
+
+        normalized: List[Dict[str, Any]] = []
+        for item in artifacts[:8]:
+            if not isinstance(item, dict):
+                continue
+            artifact_type = str(item.get("artifact_type") or item.get("type") or "evidence_artifact").strip()
+            title = str(item.get("title") or item.get("label") or artifact_type).strip()
+            path = str(item.get("path") or item.get("pointer") or "").strip()
+            content = self._truncate_text(item.get("content") or item.get("snippet") or item.get("value") or "", 800)
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            normalized.append({
+                "artifact_type": artifact_type,
+                "title": title,
+                "path": path,
+                "content": content,
+                "metadata": metadata,
+            })
+        return normalized
+
+    def _plan_production_review_candidate_findings(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+        runtime_result: Dict[str, Any],
+        rule_scores: Dict[str, float],
+        rule_details: Dict[str, Any],
+    ) -> List[AgentEvaluationCandidateFinding]:
+        del spec
+        candidates: List[AgentEvaluationCandidateFinding] = []
+        score_breakdown = rule_details.get("score_breakdown", {}) if isinstance(rule_details, dict) else {}
+        output_breakdown = score_breakdown.get("runtime_output_coverage", {}) if isinstance(score_breakdown, dict) else {}
+        explain_breakdown = score_breakdown.get("runtime_explainability", {}) if isinstance(score_breakdown, dict) else {}
+        constraint_breakdown = score_breakdown.get("runtime_constraint_control", {}) if isinstance(score_breakdown, dict) else {}
+        execution_plan_review = rule_details.get("execution_plan_review", {}) if isinstance(rule_details, dict) else {}
+        valuation_traceability = rule_details.get("valuation_traceability", {}) if isinstance(rule_details, dict) else {}
+        project_memory_binding = rule_details.get("project_memory_binding", {}) if isinstance(rule_details, dict) else {}
+        output_text = self._normalize_output_text(runtime_result.get("output_text"), runtime_result.get("output_payload"))
+        payload = runtime_result.get("output_payload") if isinstance(runtime_result.get("output_payload"), dict) else {}
+        debug_prompt = self._extract_runtime_debug_prompt(runtime_result)
+        tool_trace_observed = isinstance(debug_prompt, dict) and "tool_trace" in debug_prompt
+
+        def append_candidate(category: str, title: str, trigger: str, severity: str = "blocker") -> None:
+            candidate_index = len(candidates) + 1
+            candidates.append(AgentEvaluationCandidateFinding(
+                finding_id=f"{category}_{candidate_index}",
+                category=category,
+                severity=severity,
+                title=title,
+                trigger=trigger,
+                status="pending",
+            ))
+
+        if not output_text.strip() and not payload:
+            append_candidate("runtime_output", "缺少运行结果内容", "runtime_result 中缺少 output_text/output_payload")
+        if output_breakdown.get("missing") and rule_scores.get("runtime_output_coverage", 0.0) < 0.7:
+            if rule_scores.get("runtime_output_coverage", 0.0) < 0.55:
+                append_candidate("output_coverage", "核心输出字段覆盖不足", "score_breakdown.runtime_output_coverage.missing 非空")
+        if constraint_breakdown.get("matched") and rule_scores.get("runtime_constraint_control", 1.0) < 0.8:
+            append_candidate("constraint_control", "存在越界或约束冲突", "score_breakdown.runtime_constraint_control.matched 非空")
+        unresolved_trace_items = [
+            item for item in (valuation_traceability.get("items") or [])
+            if isinstance(item, dict) and str(item.get("source_type") or "") == "unverified"
+        ]
+        if any(str(item.get("risk_level") or "") == "high" for item in unresolved_trace_items):
+            append_candidate("numeric_traceability", "数值结果缺少可追溯依据", "valuation_traceability.items 中存在 unverified 项")
+        if project_memory_binding.get("enabled") and not project_memory_binding.get("valid"):
+            if project_memory_binding.get("system_prompt_present"):
+                append_candidate("project_memory_binding", "运行时 Prompt 缺少当前项目长期记忆", "debug_prompt.system_prompt 未完整包含当前 L4 项目长期记忆")
+            else:
+                append_candidate("project_memory_binding", "缺少运行时项目记忆证据", "debug_prompt.system_prompt 缺失，无法核验当前 L4 项目长期记忆")
+        missing_required_tools = execution_plan_review.get("missing_required_tools") if isinstance(execution_plan_review, dict) else []
+        if version.required_tools and not tool_trace_observed:
+            append_candidate("tool_usage", "缺少工具轨迹证据", "required_tools 已声明但 debug_prompt.tool_trace 缺失")
+        elif missing_required_tools:
+            append_candidate("tool_usage", "关键工具未命中", "execution_plan_review.missing_required_tools 非空")
+        if (execution_plan_review.get("blocker_issues") or []):
+            append_candidate("execution_plan", "执行验证未通过", "execution_plan_review.issues 非空")
+
+        return candidates
+
+    def _plan_production_review_evidence_tasks(
+        self,
+        candidate_findings: List[AgentEvaluationCandidateFinding],
+    ) -> List[AgentEvaluationEvidenceTask]:
+        worker_map = {
+            "runtime_output": "OutputCoverageWorker",
+            "output_coverage": "OutputCoverageWorker",
+            "reasoning_quality": "OutputCoverageWorker",
+            "constraint_control": "ConstraintWorker",
+            "numeric_traceability": "NumericTraceabilityWorker",
+            "project_memory_binding": "PromptEvidenceWorker",
+            "tool_usage": "ToolUsageWorker",
+            "execution_plan": "RuntimeFailureWorker",
+            "prompt_quality": "PromptEvidenceWorker",
+        }
+        tasks: List[AgentEvaluationEvidenceTask] = []
+        for index, finding in enumerate(candidate_findings, start=1):
+            worker_name = worker_map.get(finding.category, "NanobotEvidenceWorker")
+            tasks.append(AgentEvaluationEvidenceTask(
+                task_id=f"task_{index}",
+                finding_id=finding.finding_id,
+                worker_name=worker_name,
+                objective=f"查证候选问题：{finding.title}",
+                evidence_targets=[finding.trigger],
+                status="planned",
+            ))
+        return tasks
+
+    def _run_production_review_evidence_workers(
+        self,
+        candidate_findings: List[AgentEvaluationCandidateFinding],
+        evidence_tasks: List[AgentEvaluationEvidenceTask],
+        version: AgentVersion,
+        spec: AgentSpec,
+        runtime_result: Dict[str, Any],
+        rule_scores: Dict[str, float],
+        rule_details: Dict[str, Any],
+    ) -> List[AgentEvaluationWorkerResult]:
+        del version, spec
+        task_by_finding_id = {task.finding_id: task for task in evidence_tasks}
+        score_breakdown = rule_details.get("score_breakdown", {}) if isinstance(rule_details, dict) else {}
+        execution_plan_review = rule_details.get("execution_plan_review", {}) if isinstance(rule_details, dict) else {}
+        valuation_traceability = rule_details.get("valuation_traceability", {}) if isinstance(rule_details, dict) else {}
+        project_memory_binding = rule_details.get("project_memory_binding", {}) if isinstance(rule_details, dict) else {}
+        results: List[AgentEvaluationWorkerResult] = []
+
+        for finding in candidate_findings:
+            task = task_by_finding_id.get(finding.finding_id)
+            if not task:
+                continue
+            status = "confirmed"
+            evidence: List[str] = []
+            summary = finding.title
+
+            if finding.category == "tool_usage" and "缺少工具轨迹证据" in finding.title:
+                status = "insufficient_evidence"
+                evidence = ["debug_prompt.tool_trace 缺失，无法确认 required_tools 真实调用情况。"]
+                summary = "当前只能确认存在证据缺口，不能正式判定工具调用失败。"
+            elif finding.category == "prompt_quality":
+                status = "insufficient_evidence"
+                evidence = ["runtime_result 中没有 debug_prompt，无法核验 prompt 设计质量。"]
+                summary = "Prompt 质量评估当前缺少直接证据。"
+            elif finding.category == "numeric_traceability":
+                evidence = [
+                    str(item.get("value") or "")
+                    for item in (valuation_traceability.get("items") or [])
+                    if isinstance(item, dict) and str(item.get("source_type") or "") == "unverified"
+                ]
+                summary = "数值结果中仍存在未验证来源的区间或精确数字。"
+            elif finding.category == "project_memory_binding":
+                if not project_memory_binding.get("system_prompt_present"):
+                    status = "insufficient_evidence"
+                    evidence = ["debug_prompt.system_prompt 缺失，无法确认当前 L4 项目长期记忆是否真实注入。"]
+                    summary = "当前缺少运行时 system_prompt 证据，不能正式判定项目长期记忆是否生效。"
+                else:
+                    evidence = [str(item) for item in (project_memory_binding.get("missing_items") or [])[:6]]
+                    summary = "运行时 system_prompt 没有完整覆盖当前 L4 项目长期记忆。"
+            elif finding.category == "execution_plan":
+                evidence = [str(item) for item in (execution_plan_review.get("issues") or [])[:6]]
+                summary = "execution_plan 的验收检查仍存在未通过项。"
+            else:
+                detail = score_breakdown.get(f"runtime_{finding.category}") or score_breakdown.get(finding.category) or {}
+                if finding.category == "output_coverage":
+                    detail = score_breakdown.get("runtime_output_coverage", {})
+                elif finding.category == "reasoning_quality":
+                    detail = score_breakdown.get("runtime_explainability", {})
+                elif finding.category == "constraint_control":
+                    detail = score_breakdown.get("runtime_constraint_control", {})
+                evidence = [str(item) for item in ((detail.get("matched") or detail.get("missing") or [])[:6])]
+                summary = f"规则证据已命中：{finding.title}。"
+
+            results.append(AgentEvaluationWorkerResult(
+                task_id=task.task_id,
+                finding_id=finding.finding_id,
+                worker_name=task.worker_name,
+                status=status,
+                source="rules",
+                summary=summary,
+                evidence=self._dedupe([item for item in evidence if item]),
+                artifacts=self._build_production_review_worker_artifacts(
+                    finding,
+                    task,
+                    runtime_result,
+                    rule_details,
+                ),
+            ))
+
+        return results
 
     def _evaluate_runtime_result_rules(
         self,
@@ -4315,6 +7513,15 @@ class AgentWorkshopService:
         goal_evidence = self._analyze_goal_alignment(runtime_result.get("user_goal", spec.primary_goal), output_text, payload)
         valuation_guardrail = self._analyze_valuation_numeric_guardrail(spec, runtime_result, output_text)
         valuation_traceability = self._build_valuation_traceability(spec, runtime_result, output_text)
+        execution_plan_review = self._evaluate_execution_plan_review(
+            version,
+            spec,
+            runtime_result,
+            output_text,
+            output_evidence,
+            goal_evidence,
+            valuation_guardrail,
+        )
 
         output_coverage = output_evidence["score"]
         explainability = explain_evidence["score"]
@@ -4326,22 +7533,30 @@ class AgentWorkshopService:
             "runtime_goal_alignment": round(goal_alignment, 2),
             "runtime_output_coverage": round(output_coverage, 2),
             "runtime_explainability": round((explainability + method_quality) / 2, 2),
+            "runtime_execution_readiness": round(execution_plan_review["score"], 2),
             "runtime_constraint_control": round(max(0.0, 1.0 - forbidden_penalty), 2),
         }
         issues: List[str] = []
+        warning_issues: List[str] = []
         if not output_text.strip() and not payload:
             issues.append("未提供运行结果内容，无法完成运行结果评估。")
         if scores["runtime_output_coverage"] < 0.7:
-            issues.append("运行结果没有覆盖足够的核心输出字段。")
+            if scores["runtime_output_coverage"] < 0.55:
+                issues.append("运行结果没有覆盖足够的核心输出字段。")
+            else:
+                warning_issues.append("运行结果对部分核心输出字段覆盖不足。")
         if scores["runtime_explainability"] < 0.7:
-            issues.append("运行结果对关键假设、方法依据或失效条件说明不足。")
+            warning_issues.append("运行结果对关键假设、方法依据或失效条件说明不足。")
         if scores["runtime_constraint_control"] < 0.8:
             issues.append("运行结果出现了越界表达，和规格中的非目标不一致。")
         if valuation_guardrail["violation"]:
-            issues.append("数值类结果违反可追溯硬约束：输出了精确数字或区间，但没有提供可追溯的数据源或工具计算依据。")
-            issues.append("当前更核心的问题不是文案表达，而是缺少可复核的数据链路或直接计算工具，导致 Agent 只能生成看似合理但不可复核的数字。")
+            issues.append("数值类结果违反可追溯硬约束：输出了高风险精确结论，但没有提供可追溯的数据源或工具计算依据。")
+            issues.append("当前更核心的问题不是文案表达，而是缺少可复核的数据链路或直接计算工具，导致 Agent 只能生成不可复核的发布级精确结论。")
+        warning_issues.extend([str(item).strip() for item in (valuation_guardrail.get("warnings") or []) if str(item).strip()])
+        issues.extend([str(item).strip() for item in (execution_plan_review.get("blocker_issues") or []) if str(item).strip()])
+        warning_issues.extend([str(item).strip() for item in (execution_plan_review.get("warning_issues") or []) if str(item).strip()])
         if user_feedback.strip():
-            issues.append(f"用户反馈中提到的问题待处理：{user_feedback.strip()}")
+            warning_issues.append(f"用户反馈中提到的问题待处理：{user_feedback.strip()}")
 
         recommendations = self._dedupe([
             "把当前运行结果中缺失的输出字段补进 Prompt 和输出 Schema。",
@@ -4349,12 +7564,16 @@ class AgentWorkshopService:
             "把这次 production review 中暴露的问题加入下一轮真实结果验收清单。",
             *( ["对数值类结果增加原始数据、工具计算结果、输入参数和来源标签；没有足够依据时不要输出精确数字。"] if valuation_guardrail["violation"] else [] ),
             *( ["下一轮工坊应优先补数据链路或直接计算工具，而不是继续微调 Prompt 让模型自己编数字。"] if valuation_guardrail["violation"] else [] ),
+            *execution_plan_review["recommendations"],
         ])
         details = {
             "mode": "production-review",
             "runtime_result": runtime_result,
             "parsed_output_excerpt": output_text[:1200],
+            "valuation_guardrail": valuation_guardrail,
             "valuation_traceability": valuation_traceability,
+            "execution_plan_review": execution_plan_review,
+            "warning_issues": self._dedupe(warning_issues),
             "score_breakdown": {
                 "runtime_goal_alignment": {
                     "matched": goal_evidence["matched"],
@@ -4373,6 +7592,11 @@ class AgentWorkshopService:
                         "检查是否解释了假设、风险、失效条件，以及规格要求的方法依据。",
                     ],
                 },
+                "runtime_execution_readiness": {
+                    "matched": execution_plan_review["matched"],
+                    "missing": execution_plan_review["missing"],
+                    "notes": execution_plan_review["notes"],
+                },
                 "runtime_constraint_control": {
                     "matched": self._dedupe([*forbidden_evidence["matched"], *valuation_guardrail["matched"]]),
                     "missing": self._dedupe([*forbidden_evidence["missing"], *valuation_guardrail["missing"]]),
@@ -4380,7 +7604,153 @@ class AgentWorkshopService:
                 },
             },
         }
-        return scores, issues, recommendations, details
+        return scores, self._dedupe(issues), recommendations, details
+
+    def _evaluate_execution_plan_review(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+        runtime_result: Dict[str, Any],
+        output_text: str,
+        output_evidence: Dict[str, Any],
+        goal_evidence: Dict[str, Any],
+        valuation_guardrail: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        plan = version.execution_plan or AgentExecutionValidationPlan()
+        debug_prompt = self._extract_runtime_debug_prompt(runtime_result)
+        tool_trace = self._sanitize_tool_trace(debug_prompt.get("tool_trace"))
+        successful_tool_names = self._dedupe([
+            str(item.get("tool_name") or "").strip()
+            for item in tool_trace
+            if isinstance(item, dict) and item.get("success") and str(item.get("tool_name") or "").strip()
+        ])
+        required_tools = self._dedupe([str(item).strip() for item in (version.required_tools or []) if str(item).strip()])
+        successful_required_tools = [tool for tool in required_tools if tool in successful_tool_names]
+        missing_required_tools = [tool for tool in required_tools if tool not in successful_required_tools]
+
+        runtime_symbol = str(
+            runtime_result.get("symbol")
+            or runtime_result.get("stock_symbol")
+            or runtime_result.get("metadata", {}).get("symbol")
+            or ""
+        ).strip()
+        sample_symbol = str((plan.sample_input or {}).get("symbol") or "").strip()
+        sample_symbol_aligned = not sample_symbol or not runtime_symbol or runtime_symbol == sample_symbol
+
+        output_labels = self._list_io_field_labels(spec.outputs)
+        matched_outputs = self._dedupe([str(item) for item in (output_evidence.get("matched") or []) if item])
+        missing_outputs = self._dedupe([str(item) for item in (output_evidence.get("missing") or []) if item])
+
+        acceptance_results: List[Dict[str, Any]] = []
+        for label in output_labels[:6]:
+            matched = any(self._match_concept(label, candidate) for candidate in matched_outputs)
+            acceptance_results.append({
+                "label": f"覆盖输出字段：{label}",
+                "passed": matched,
+                "detail": "已在结果或结构化输出中识别到。" if matched else "本次运行没有稳定覆盖该字段。",
+                "category": "output",
+            })
+
+        success_criteria = self._dedupe([str(item).strip() for item in (spec.success_criteria or []) if str(item).strip()])
+        for item in success_criteria[:4]:
+            matched = self._match_concept(item, output_text) or any(self._match_concept(item, matched_item) for matched_item in goal_evidence.get("matched") or [])
+            acceptance_results.append({
+                "label": f"满足成功标准：{item}",
+                "passed": matched,
+                "detail": "输出中存在对应响应。" if matched else "当前输出还看不到这个成功标准的直接证据。",
+                "category": "success_criteria",
+            })
+
+        if required_tools:
+            acceptance_results.append({
+                "label": "至少命中一个 required_tools 成功调用",
+                "passed": bool(successful_required_tools),
+                "detail": (
+                    f"已命中：{'、'.join(successful_required_tools[:4])}" if successful_required_tools
+                    else "tool_trace 中还没有看到 required_tools 的成功调用。"
+                ),
+                "category": "tool_usage",
+            })
+
+        numeric_policy = self._get_numeric_traceability_policy(spec)
+        if numeric_policy["enabled"]:
+            acceptance_results.append({
+                "label": "精确数字具备可追溯来源",
+                "passed": not valuation_guardrail.get("violation"),
+                "detail": "本次运行没有触发不可追溯数值问题。" if not valuation_guardrail.get("violation") else "出现了精确数字，但缺少结构化来源或工具证据。",
+                "category": "traceability",
+            })
+
+        passed_count = sum(1 for item in acceptance_results if item.get("passed"))
+        acceptance_score = passed_count / max(1, len(acceptance_results)) if acceptance_results else 0.7
+        tool_score = 1.0 if not required_tools else len(successful_required_tools) / len(required_tools)
+        sample_input_score = 1.0 if sample_symbol_aligned else 0.4
+        score = round((acceptance_score * 0.55) + (tool_score * 0.3) + (sample_input_score * 0.15), 2)
+
+        matched: List[str] = []
+        if sample_symbol:
+            matched.append(f"默认样本标的：{sample_symbol}") if sample_symbol_aligned else None
+        if successful_required_tools:
+            matched.append(f"已命中的 required_tools：{'、'.join(successful_required_tools[:4])}")
+        if not missing_outputs:
+            matched.append("规格要求的核心输出字段已全部覆盖。")
+        matched.extend([item["label"] for item in acceptance_results if item.get("passed")][:6])
+
+        missing: List[str] = []
+        if sample_symbol and not sample_symbol_aligned:
+            missing.append(f"默认样本建议标的为 {sample_symbol}，但本次调试输入是 {runtime_symbol or '空'}")
+        if missing_required_tools:
+            missing.append(f"未命中的 required_tools：{'、'.join(missing_required_tools[:4])}")
+        if missing_outputs:
+            missing.append(f"未覆盖输出字段：{'、'.join(missing_outputs[:4])}")
+        missing.extend([item["label"] for item in acceptance_results if not item.get("passed")][:6])
+
+        blocker_issues: List[str] = []
+        warning_issues: List[str] = []
+        if missing_required_tools:
+            blocker_issues.append("这次运行没有真正调用到版本声明的关键工具，当前结果更像 Prompt 演示，不像可复核的执行结果。")
+        severe_output_mismatch = bool(missing_outputs) and (score < 0.55 or len(missing_outputs) >= max(1, len(output_labels) // 2 or 1))
+        if severe_output_mismatch:
+            blocker_issues.append("execution_plan 要求的核心输出字段仍有缺失，说明版本草案和实际运行结果还没对齐。")
+        elif missing_outputs:
+            warning_issues.append("execution_plan 仍有少量输出字段未完全覆盖，建议在发布前补齐。")
+        if sample_symbol and not sample_symbol_aligned:
+            warning_issues.append("本次调试输入偏离了版本默认样本，当前评估结论不能直接代表 build_version 生成的执行计划是否成立。")
+        if score < 0.75 and not blocker_issues:
+            warning_issues.append("execution_plan 验收仍有未通过项，建议继续补强执行一致性。")
+
+        recommendations = self._dedupe([
+            *( ["先按 execution_plan.sample_input 重新跑一次调试，确保版本默认样本能稳定通过。"] if sample_symbol and not sample_symbol_aligned else [] ),
+            *( ["把 required_tools 的调用前置到分析主链路，而不是只在 Prompt 里声明。"] if missing_required_tools else [] ),
+            *( ["按 execution_plan.acceptance_checks 逐项补齐输出字段，再重新发起结果评估。"] if missing_outputs else [] ),
+            *( ["如果当前工具无法支撑精确结论，就按 execution_plan.fallback_rules 降级输出，不要硬给确定性数字。"] if valuation_guardrail.get("violation") else [] ),
+        ])
+
+        status = "pass" if score >= 0.8 else "revise" if score >= 0.55 else "fail"
+        notes = self._dedupe([
+            f"执行计划模式：{plan.mode or 'tool-driven'}",
+            f"执行计划状态：{plan.validation_status or 'not-run'}",
+            *( [f"计划理由：{plan.rationale.strip()}"] if str(plan.rationale or '').strip() else [] ),
+            *( [f"成功工具轨迹：{'、'.join(successful_tool_names[:6])}"] if successful_tool_names else ["当前 debug_prompt 里没有成功的 tool_trace。"] ),
+            *( [f"降级规则：{'；'.join((plan.fallback_rules or [])[:3])}"] if plan.fallback_rules else [] ),
+        ])
+
+        return {
+            "status": status,
+            "score": score,
+            "sample_input": plan.sample_input,
+            "successful_tools": successful_tool_names,
+            "successful_required_tools": successful_required_tools,
+            "missing_required_tools": missing_required_tools,
+            "acceptance_results": acceptance_results,
+            "matched": self._dedupe(matched),
+            "missing": self._dedupe(missing),
+            "issues": self._dedupe([*blocker_issues, *warning_issues]),
+            "blocker_issues": self._dedupe(blocker_issues),
+            "warning_issues": self._dedupe(warning_issues),
+            "recommendations": recommendations,
+            "notes": notes,
+        }
 
     def _analyze_valuation_numeric_guardrail(self, spec: AgentSpec, runtime_result: Dict[str, Any], output_text: str) -> Dict[str, Any]:
         policy = self._get_numeric_traceability_policy(spec)
@@ -4401,8 +7771,7 @@ class AgentWorkshopService:
             }
 
         payload = runtime_result.get("output_payload") if isinstance(runtime_result.get("output_payload"), dict) else {}
-        debug_prompt = self._extract_runtime_debug_prompt(runtime_result)
-        tool_trace = debug_prompt.get("tool_trace") if isinstance(debug_prompt, dict) else []
+        tool_trace = self._extract_runtime_tool_trace(runtime_result)
         has_structured_calc = any(
             key in payload for key in [
                 "valuation_calculations",
@@ -4423,21 +7792,28 @@ class AgentWorkshopService:
         ]
         traceability_items = self._build_numeric_traceability_items(range_mentions, output_text, used_calc_tools, has_structured_calc)
         unresolved_items = [item for item in traceability_items if item.get("source_type") == "unverified"]
-        violation = bool(unresolved_items)
+        blocker_items = [item for item in unresolved_items if str(item.get("risk_level") or "") == "high"]
+        warning_items = [item for item in unresolved_items if str(item.get("risk_level") or "") != "high"]
+        violation = bool(blocker_items)
+        severity = "blocker" if blocker_items else "warning" if warning_items else "none"
 
         notes = [
             "数值类结果一旦出现，就必须来自数据源、工具计算或结构化计算结果，不能只由模型根据文本自行给出。",
             *( [f"检测到精确区间: {'；'.join(range_mentions[:4])}"] if range_mentions else [] ),
             *( [f"已识别到可用工具轨迹: {', '.join(used_calc_tools)}"] if used_calc_tools else ["当前未识别到可支撑这些数字的工具轨迹。"] ),
-            *( [f"以下数值仍缺少就地可追溯依据: {'；'.join(str(item.get('value')) for item in unresolved_items[:4])}"] if unresolved_items else [] ),
+            *( [f"以下高风险数值仍缺少可追溯依据: {'；'.join(str(item.get('value')) for item in blocker_items[:4])}"] if blocker_items else [] ),
+            *( [f"以下一般财务数值仍建议补充更清晰的来源映射: {'；'.join(str(item.get('value')) for item in warning_items[:4])}"] if warning_items else [] ),
         ]
         if not policy["requires_exact_numeric_outputs"]:
             notes.append("当前规格本身未强制要求精确数值；本次拦截是因为实际输出出现了不可追溯的精确数字。")
         return {
             "violation": violation,
-            "penalty": 0.6 if violation else 0.0,
+            "severity": severity,
+            "penalty": 0.6 if blocker_items else 0.15 if warning_items else 0.0,
             "matched": (["数值结果具备可追溯的数据或工具依据。"] if range_mentions and not unresolved_items else []),
-            "missing": (["精确数值或区间缺少可追溯的数据或工具依据。"] if violation else []),
+            "missing": (["高风险精确数值缺少可追溯的数据或工具依据。"] if blocker_items else []),
+            "warnings": (["一般财务数值缺少更细粒度的来源映射。"] if warning_items else []),
+            "unresolved_items": unresolved_items,
             "notes": notes,
         }
 
@@ -4472,20 +7848,51 @@ class AgentWorkshopService:
     ) -> List[Dict[str, Any]]:
         items: List[Dict[str, Any]] = []
         unique_tool_names = self._dedupe([str(name) for name in used_tool_names if name])
+        has_report_level_context = self._has_report_level_traceability_context(output_text, unique_tool_names)
         for mention in range_mentions:
             context = self._extract_local_context(output_text, mention, window=120)
+            section_context = self._extract_markdown_section_context(output_text, mention)
             local_has_tool = any(tool_name in context for tool_name in unique_tool_names)
             local_has_source_label = any(keyword in context for keyword in ["来源", "数据源", "计算依据", "输入参数", "工具计算"])
-            source_type = "tool_or_data_backed" if has_structured_calc or (local_has_tool and local_has_source_label) else "unverified"
+            section_has_tool = any(tool_name in section_context for tool_name in unique_tool_names)
+            section_has_source_label = any(keyword in section_context for keyword in ["来源", "数据源", "来源工具", "数据来源", "计算依据", "输入参数", "工具计算"])
+            section_has_period = bool(re.search(r"20\d{2}Q[1-4]|20\d{6,8}|报告期|报告期范围|分析日期|period", section_context, re.IGNORECASE))
+            is_high_risk = self._is_high_risk_numeric_mention(mention, section_context)
+            has_ranking_derivation_support = self._has_ranking_derivation_support(
+                mention,
+                context,
+                section_context,
+                unique_tool_names,
+                has_report_level_context,
+            )
+
+            if has_structured_calc:
+                source_type = "tool_or_data_backed"
+            elif local_has_tool and local_has_source_label:
+                source_type = "tool_or_data_backed"
+            elif is_high_risk and has_ranking_derivation_support:
+                source_type = "tool_or_data_backed"
+            elif not is_high_risk and section_has_tool and section_has_source_label and section_has_period:
+                source_type = "tool_or_data_backed"
+            elif not is_high_risk and has_report_level_context:
+                source_type = "tool_or_data_backed"
+            else:
+                source_type = "unverified"
+
             items.append({
                 "label": "数值结果",
                 "value": mention,
+                "risk_level": "high" if is_high_risk else "normal",
                 "source_type": source_type,
                 "judgement": "具备可追溯依据" if source_type == "tool_or_data_backed" else "证据不足",
                 "evidence_tools": unique_tool_names if source_type == "tool_or_data_backed" else [],
                 "notes": [
                     "检测到结构化数值来源。" if has_structured_calc else (
-                        "数值附近同时出现了来源标签和工具名。" if source_type == "tool_or_data_backed" else "数值附近没有发现足够的来源标签或对应工具名。"
+                        "数值附近同时出现了来源标签和工具名。" if local_has_tool and local_has_source_label else (
+                            "该排名可由同报告内已标注来源的表格/列表数据直接复核。" if has_ranking_derivation_support and source_type == "tool_or_data_backed" else (
+                                "该数值所在小节具备来源映射、报告期和成功工具轨迹。" if source_type == "tool_or_data_backed" else "没有发现足够的来源标签、报告期或对应工具名。"
+                            )
+                        )
                     )
                 ],
             })
@@ -4501,12 +7908,31 @@ class AgentWorkshopService:
         end = min(len(text), index + len(needle) + window)
         return text[start:end]
 
+    def _locate_text_position(self, text: str, needle: str) -> Dict[str, Any]:
+        if not text or not needle:
+            return {}
+        index = text.find(needle)
+        if index < 0:
+            return {}
+        lines = str(text).splitlines()
+        consumed = 0
+        for line_number, line in enumerate(lines, start=1):
+            line_length = len(line)
+            if consumed + line_length >= index:
+                column_number = max(1, index - consumed + 1)
+                return {
+                    "line_number": line_number,
+                    "column_number": column_number,
+                    "line_excerpt": line.strip(),
+                }
+            consumed += line_length + 1
+        return {}
+
     def _build_valuation_traceability(self, spec: AgentSpec, runtime_result: Dict[str, Any], output_text: str) -> Dict[str, Any]:
         if not self._get_numeric_traceability_policy(spec)["enabled"]:
             return {"enabled": False, "items": [], "summary": "当前版本未启用数值来源追踪。"}
 
-        debug_prompt = self._extract_runtime_debug_prompt(runtime_result)
-        tool_trace = debug_prompt.get("tool_trace") if isinstance(debug_prompt, dict) else []
+        tool_trace = self._extract_runtime_tool_trace(runtime_result)
         used_tool_names = [item.get("tool_name") for item in tool_trace if isinstance(item, dict) and item.get("tool_name")]
         range_mentions = self._extract_valuation_range_mentions(output_text)
         runtime_payload = runtime_result.get("output_payload") if isinstance(runtime_result.get("output_payload"), dict) else {}
@@ -4547,7 +7973,7 @@ class AgentWorkshopService:
     ) -> Dict[str, Any]:
         client = await self._ensure_llm_client()
         debug_prompt = self._extract_runtime_debug_prompt(runtime_result)
-        tool_trace = debug_prompt.get("tool_trace") if isinstance(debug_prompt, dict) else []
+        tool_trace = self._extract_runtime_tool_trace(runtime_result)
         runtime_payload = runtime_result.get("output_payload") if isinstance(runtime_result.get("output_payload"), dict) else {}
         valuation_traceability = rule_details.get("valuation_traceability", {})
         prompt_metrics = {
@@ -4780,6 +8206,13 @@ class AgentWorkshopService:
                 return nested
         return {}
 
+    def _extract_runtime_tool_trace(self, runtime_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        debug_prompt = self._extract_runtime_debug_prompt(runtime_result)
+        raw_tool_trace = debug_prompt.get("tool_trace") if isinstance(debug_prompt, dict) else []
+        if not isinstance(raw_tool_trace, list):
+            return []
+        return [item for item in raw_tool_trace if isinstance(item, dict)]
+
     def _sanitize_tool_trace(self, tool_trace: Any) -> List[Dict[str, Any]]:
         if not isinstance(tool_trace, list):
             return []
@@ -4809,19 +8242,74 @@ class AgentWorkshopService:
             return text
         return f"{text[:limit]}\n...（截断，原始长度 {len(text)}）"
 
+    def _repair_common_json_issues(self, content: str) -> str:
+        repaired: List[str] = []
+        in_string = False
+        for index, char in enumerate(content):
+            if char != '"':
+                repaired.append(char)
+                continue
+
+            backslash_count = 0
+            cursor = index - 1
+            while cursor >= 0 and content[cursor] == "\\":
+                backslash_count += 1
+                cursor -= 1
+            is_escaped = backslash_count % 2 == 1
+            if is_escaped:
+                repaired.append(char)
+                continue
+
+            if not in_string:
+                in_string = True
+                repaired.append(char)
+                continue
+
+            next_non_space = ""
+            cursor = index + 1
+            while cursor < len(content):
+                probe = content[cursor]
+                if not probe.isspace():
+                    next_non_space = probe
+                    break
+                cursor += 1
+
+            if next_non_space in {",", "}", "]", ":"} or next_non_space == "":
+                in_string = False
+                repaired.append(char)
+            else:
+                repaired.append(r'\"')
+        return "".join(repaired)
+
+    def _try_load_json_with_repair(self, content: str) -> Optional[Dict[str, Any]]:
+        candidates = [content, self._repair_common_json_issues(content)]
+        for candidate in candidates:
+            try:
+                data = json.loads(candidate)
+                if isinstance(data, dict):
+                    return data
+            except Exception:
+                pass
+            if json_repair is not None:
+                try:
+                    data = json_repair.loads(candidate)
+                    if isinstance(data, dict):
+                        return data
+                except Exception:
+                    pass
+        return None
+
     def _load_json_response(self, raw_content: str) -> Dict[str, Any]:
         content = self._strip_markdown_fence(raw_content)
-        try:
-            data = json.loads(content)
-            if isinstance(data, dict):
-                return data
-        except Exception:
-            pass
+        data = self._try_load_json_with_repair(content)
+        if data is not None:
+            return data
 
         json_match = re.search(r"\{.*\}", content, re.DOTALL)
         if json_match:
-            data = json.loads(json_match.group(0))
-            if isinstance(data, dict):
+            json_block = json_match.group(0)
+            data = self._try_load_json_with_repair(json_block)
+            if data is not None:
                 return data
 
         raise ValueError("LLM 评审结果不是合法 JSON")
@@ -4987,7 +8475,15 @@ class AgentWorkshopService:
                 "notes": ["没有发现明显越界内容。"] if has_runtime_output else ["当前没有可检查的输出。"],
             }
 
-        matched = [item for item in keywords if item and self._match_concept(item, output_text)]
+        matched: List[str] = []
+        negated_mentions: List[str] = []
+        for item in keywords:
+            if not item or not self._match_concept(item, output_text):
+                continue
+            if self._is_forbidden_keyword_negated(item, output_text):
+                negated_mentions.append(item)
+                continue
+            matched.append(item)
         safe_items = [item for item in keywords if item and item not in matched]
         return {
             "matched": matched,
@@ -4996,8 +8492,65 @@ class AgentWorkshopService:
             "notes": [
                 "matched 表示命中了非目标或越界词，命中越多扣分越多。",
                 f"当前非目标词：{', '.join(keywords)}" if keywords else "",
+                *( [f"以下词只出现在否定性声明或免责声明中，未计入越界命中：{', '.join(self._dedupe(negated_mentions))}"] if negated_mentions else [] ),
             ],
         }
+
+    def _is_forbidden_keyword_negated(self, keyword: str, output_text: str) -> bool:
+        text = str(output_text or "")
+        if not text.strip():
+            return False
+
+        aliases = self._concept_aliases(keyword)
+        contexts: List[str] = []
+        for alias in aliases:
+            alias_text = str(alias or "").strip()
+            if not alias_text:
+                continue
+            contexts.extend(self._extract_keyword_contexts(text, alias_text, window=30))
+
+        if not contexts:
+            return False
+
+        return all(self._is_negated_disclaimer_context(context, keyword) for context in contexts)
+
+    def _extract_keyword_contexts(self, text: str, keyword: str, window: int = 30) -> List[str]:
+        contexts: List[str] = []
+        start = 0
+        while True:
+            index = text.find(keyword, start)
+            if index < 0:
+                break
+            left = max(0, index - window)
+            right = min(len(text), index + len(keyword) + window)
+            contexts.append(text[left:right])
+            start = index + len(keyword)
+        return contexts
+
+    def _is_negated_disclaimer_context(self, context: str, keyword: str) -> bool:
+        normalized_context = str(context or "").lower()
+        normalized_keyword = str(keyword or "").lower()
+        if not normalized_context or not normalized_keyword:
+            return False
+
+        negation_markers = [
+            "不构成", "不作为", "不是", "并非", "非", "不提供", "不得", "禁止", "无意", "避免", "仅供参考", "仅作参考",
+        ]
+        disclaimer_markers = [
+            "声明", "风险揭示", "免责声明", "仅供", "研究结论", "事实核验", "情景分析",
+        ]
+
+        has_negation = any(marker in normalized_context for marker in negation_markers)
+        has_disclaimer = any(marker in normalized_context for marker in disclaimer_markers)
+        keyword_index = normalized_context.find(normalized_keyword)
+        if keyword_index < 0:
+            return False
+
+        near_prefix = normalized_context[max(0, keyword_index - 12):keyword_index]
+        near_suffix = normalized_context[keyword_index: min(len(normalized_context), keyword_index + len(normalized_keyword) + 12)]
+        near_has_negation = any(marker in near_prefix or marker in near_suffix for marker in negation_markers)
+
+        return near_has_negation or (has_negation and has_disclaimer)
 
     def _analyze_goal_alignment(self, user_goal: Any, output_text: str, output_payload: Dict[str, Any]) -> Dict[str, Any]:
         if not user_goal:

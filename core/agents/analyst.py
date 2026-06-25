@@ -159,6 +159,7 @@ class AnalystAgent(BaseAgent):
             user_prompt = self._build_user_prompt(ticker, analysis_date, {}, state)
 
             # 3. 调用LLM分析（使用工具调用）
+            system_prompt = self._apply_global_trading_advice_guard(system_prompt)
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)

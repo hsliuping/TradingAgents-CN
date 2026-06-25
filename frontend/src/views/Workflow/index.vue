@@ -10,6 +10,10 @@
         <span class="subtitle">设计和管理 AI 多智能体协作分析流程</span>
       </div>
       <div class="header-right">
+        <el-button type="primary" plain @click="router.push('/workflow/agent-workshop')">
+          <el-icon><ChatDotRound /></el-icon>
+          Agent 工坊入口
+        </el-button>
         <el-button @click="router.push('/workflow/agent-workshop')">
           <el-icon><SetUp /></el-icon>
           Agent 工坊
@@ -34,12 +38,12 @@
               <span>Agent 工坊</span>
             </div>
             <p class="workshop-entry-desc">
-              用规格定义、缺口评估、版本生成、Benchmark 和 production review，验证新的 Agent 生命周期闭环。
+              先进入独立引导页，再选择标准工作页、助手模式或管理列表，避免把模式选择和资产管理混在一起。
             </p>
           </div>
           <div class="workshop-entry-actions">
             <el-button type="primary" @click="router.push('/workflow/agent-workshop')">
-              进入工坊
+              打开工坊入口
             </el-button>
           </div>
         </div>

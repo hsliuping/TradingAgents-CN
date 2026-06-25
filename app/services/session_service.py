@@ -39,6 +39,21 @@ class SessionService:
             logger.debug("✅ Session 索引创建成功")
         except Exception as e:
             logger.warning(f"⚠️ Session 索引创建失败: {e}")
+
+    def _get_session_ttl_seconds(self, session_doc: dict) -> int:
+        """从会话文档中恢复原始 TTL，用于活跃续期。"""
+        ttl_seconds = session_doc.get("session_ttl_seconds")
+        if isinstance(ttl_seconds, (int, float)) and ttl_seconds > 0:
+            return int(ttl_seconds)
+
+        created_at = session_doc.get("created_at")
+        expires_at = session_doc.get("expires_at")
+        if isinstance(created_at, datetime) and isinstance(expires_at, datetime):
+            inferred = int((expires_at - created_at).total_seconds())
+            if inferred > 0:
+                return inferred
+
+        return 3600
     
     def create_session(
         self,
@@ -73,6 +88,7 @@ class SessionService:
                 "user_id": user_id,
                 "created_at": now_utc,
                 "expires_at": expires_at_utc,
+                "session_ttl_seconds": expires_in_seconds,
                 "last_activity": now_utc,
                 "ip_address": ip_address,
                 "user_agent": user_agent
@@ -117,10 +133,13 @@ class SessionService:
 
             # 更新最后活动时间
             if update_activity:
+                renewed_expires_at = now_utc + timedelta(seconds=self._get_session_ttl_seconds(session_doc))
                 self.sessions_collection.update_one(
                     {"session_id": session_id},
-                    {"$set": {"last_activity": now_utc}}
+                    {"$set": {"last_activity": now_utc, "expires_at": renewed_expires_at}}
                 )
+                session_doc["last_activity"] = now_utc
+                session_doc["expires_at"] = renewed_expires_at
             
             logger.debug(f"✅ 会话有效: user_id={session_doc['user_id']}, session_id={session_id[:16]}...")
             return UserSession(**session_doc)

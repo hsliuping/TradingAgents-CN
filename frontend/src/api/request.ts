@@ -4,6 +4,21 @@ import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import router from '@/router'
+import { isTokenValid } from '@/utils/auth'
+
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    skipAuth?: boolean
+    skipAuthError?: boolean
+    skipErrorHandler?: boolean
+    showLoading?: boolean
+    loadingText?: string
+    retryCount?: number
+    retryDelay?: number
+    _retry?: boolean
+    __retryCount?: number
+  }
+}
 
 // API响应接口
 export interface ApiResponse<T = any> {
@@ -24,6 +39,8 @@ export interface RequestConfig extends AxiosRequestConfig {
   loadingText?: string
   retryCount?: number  // 重试次数
   retryDelay?: number  // 重试延迟（毫秒）
+  _retry?: boolean
+  __retryCount?: number
 }
 
 // 消息去重：记录最近显示的错误消息
@@ -32,6 +49,31 @@ const MESSAGE_THROTTLE_TIME = 3000 // 3秒内相同消息不重复显示
 
 // 401 错误处理标志（避免多个请求同时触发登录跳转）
 let isHandling401 = false
+
+// Token 刷新单飞控制，避免并发 401 触发刷新风暴
+let refreshTokenPromise: Promise<boolean> | null = null
+
+const maskTokenFingerprint = (token?: string | null): string => {
+  if (!token) {
+    return 'none'
+  }
+
+  if (token.length <= 16) {
+    return token
+  }
+
+  return `${token.substring(0, 8)}...${token.substring(token.length - 8)}`
+}
+
+const ensureSingleFlightTokenRefresh = (authStore: any) => {
+  if (!refreshTokenPromise) {
+    refreshTokenPromise = authStore.refreshAccessToken()
+      .finally(() => {
+        refreshTokenPromise = null
+      })
+  }
+  return refreshTokenPromise
+}
 
 // 显示错误消息（带去重）
 const showErrorMessage = (message: string) => {
@@ -95,21 +137,45 @@ const createAxiosInstance = (): AxiosInstance => {
 
   // 请求拦截器
   instance.interceptors.request.use(
-    (config: any) => {
+    async (config: any) => {
       const authStore = useAuthStore()
       const appStore = useAppStore()
 
       // 添加认证头（总是覆盖为最新Token；支持localStorage兜底，避免早期请求丢Token）
       if (!config.skipAuth) {
+        const storedToken = authStore.token || localStorage.getItem('auth-token')
+        const shouldTryRefresh = Boolean(
+          storedToken
+          && !isTokenValid(storedToken)
+          && authStore.refreshToken
+          && !String(config.url || '').includes('/auth/refresh')
+        )
+
+        if (shouldTryRefresh) {
+          console.log('🔄 请求发送前检测到 access token 已过期，先尝试刷新', {
+            url: config.url,
+            staleTokenFingerprint: maskTokenFingerprint(storedToken),
+            refreshTokenFingerprint: maskTokenFingerprint(authStore.refreshToken),
+          })
+          const refreshed = await ensureSingleFlightTokenRefresh(authStore)
+          if (!refreshed) {
+            console.warn('⚠️ 请求发送前刷新 token 失败，将继续按原有 401 流程处理')
+          }
+        }
+
         const token = authStore.token || localStorage.getItem('auth-token')
         if (token) {
           config.headers = config.headers || {}
           config.headers.Authorization = `Bearer ${token}`
           console.log('🔐 已设置Authorization头:', {
+            url: config.url,
             hasToken: !!token,
             tokenLength: token?.length || 0,
             tokenPrefix: token?.substring(0, 20) || 'None',
-            authHeader: config.headers.Authorization?.substring(0, 30) || 'None'
+            authHeader: config.headers.Authorization?.substring(0, 30) || 'None',
+            tokenFingerprint: maskTokenFingerprint(token),
+            authStoreTokenFingerprint: maskTokenFingerprint(authStore.token),
+            localStorageTokenFingerprint: maskTokenFingerprint(localStorage.getItem('auth-token')),
           })
         } else {
           console.log('⚠️ 未设置Authorization头:', {
@@ -253,26 +319,44 @@ const createAxiosInstance = (): AxiosInstance => {
 
         switch (status) {
           case 401:
-            // 如果请求标记为跳过认证错误处理（如登录请求），直接返回错误
-            if (config?.skipAuthError) {
-              console.log('⏭️ 跳过 401 错误自动处理（skipAuthError=true）')
-              break
-            }
-
             // 如果是refresh请求本身失败，不要再次尝试刷新（避免无限循环）
             if (config?.url?.includes('/auth/refresh')) {
               console.error('❌ Refresh token请求失败')
+              if (config?.skipAuthError) {
+                console.log('⏭️ refresh 请求 401，且 skipAuthError=true，跳过自动登录跳转')
+                ;(error as any).__skipGlobalAuthRedirect = true
+                break
+              }
               handle401Error(authStore, '登录已过期，请重新登录')
               break
             }
 
-            // 未授权，尝试刷新token
-            if (!config?.skipAuth && authStore.refreshToken) {
+            // 未授权时优先尝试刷新 token，即使 skipAuthError=true 也不应跳过刷新。
+            if (!config?.skipAuth && authStore.refreshToken && !config?._retry) {
               try {
                 console.log('🔄 401错误，尝试刷新token...')
-                const success = await authStore.refreshAccessToken()
+                config._retry = true
+                const failedAuthHeader = typeof config?.headers?.Authorization === 'string'
+                  ? config.headers.Authorization
+                  : typeof config?.headers?.authorization === 'string'
+                    ? config.headers.authorization
+                    : ''
+                console.log('🔍 401原始请求认证信息:', {
+                  url: config?.url,
+                  retryFlag: config?._retry,
+                  authHeaderFingerprint: failedAuthHeader.startsWith('Bearer ')
+                    ? maskTokenFingerprint(failedAuthHeader.slice(7))
+                    : failedAuthHeader || 'none',
+                  authStoreTokenFingerprint: maskTokenFingerprint(authStore.token),
+                  localStorageTokenFingerprint: maskTokenFingerprint(localStorage.getItem('auth-token')),
+                  refreshTokenFingerprint: maskTokenFingerprint(authStore.refreshToken),
+                })
+                const success = await ensureSingleFlightTokenRefresh(authStore)
                 if (success) {
-                  console.log('✅ Token刷新成功，重试原请求')
+                  console.log('✅ Token刷新成功，重试原请求', {
+                    url: config?.url,
+                    refreshedTokenFingerprint: maskTokenFingerprint(authStore.token || localStorage.getItem('auth-token')),
+                  })
                   // 重新发送原请求
                   return instance.request(config)
                 } else {
@@ -281,6 +365,13 @@ const createAxiosInstance = (): AxiosInstance => {
               } catch (refreshError) {
                 console.error('❌ Token刷新异常:', refreshError)
               }
+            }
+
+            // 如果请求标记为跳过认证错误处理（如局部可降级接口），不要自动登出/跳转。
+            if (config?.skipAuthError) {
+              console.log('⏭️ 401 最终仍失败，但 skipAuthError=true，跳过自动登录跳转')
+              ;(error as any).__skipGlobalAuthRedirect = true
+              break
             }
 
             // 清除认证信息并跳转到登录页

@@ -53,6 +53,27 @@ def _get_sync_db():
     return get_mongo_db_sync()
 
 
+def _is_orphaned_workshop_agent_config(doc: Dict[str, Any], db: Any) -> bool:
+    metadata = doc.get("metadata") or {}
+    source = str(metadata.get("source") or "").strip().lower()
+    if source != "agent_workshop":
+        return False
+
+    version_id = str(metadata.get("version_id") or "").strip()
+    spec_id = str(metadata.get("spec_id") or "").strip()
+
+    try:
+        if version_id and db.agent_versions.find_one({"version_id": version_id}, {"_id": 1}):
+            return False
+        if spec_id and db.agent_specs.find_one({"spec_id": spec_id}, {"_id": 1}):
+            return False
+    except Exception as exc:
+        logger.warning("[assistant agent executor] 检查工坊 Agent 关联资产失败: %s", exc)
+        return False
+
+    return bool(version_id or spec_id)
+
+
 def _collect_callable_agents() -> List[Dict[str, Any]]:
     from core.agents import get_registry
 
@@ -79,6 +100,8 @@ def _collect_callable_agents() -> List[Dict[str, Any]]:
         for doc in docs:
             agent_id = (doc.get("agent_id") or "").strip()
             if not agent_id:
+                continue
+            if _is_orphaned_workshop_agent_config(doc, db):
                 continue
             category = str(doc.get("category") or "analyst")
             if category not in _ALLOWED_AGENT_CATEGORIES:

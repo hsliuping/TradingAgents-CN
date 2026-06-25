@@ -286,6 +286,29 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/debug/embedded-nanobot',
+    name: 'EmbeddedNanobotDebug',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '助手调试',
+      hideInMenu: true,
+      requiresAuth: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'EmbeddedNanobotDebugHome',
+        component: () => import('@/views/Debug/EmbeddedNanobot.vue'),
+        meta: {
+          title: '助手调试',
+          hideInMenu: true,
+          requiresAuth: true
+        }
+      }
+    ]
+  },
+  {
     path: '/memory',
     name: 'Memory',
     component: () => import('@/layouts/BasicLayout.vue'),
@@ -851,11 +874,22 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'agent-workshop',
         name: 'AgentWorkshop',
-        component: () => import('@/views/Workflow/AgentWorkshopManager.vue'),
+        component: () => import('@/views/Workflow/AgentWorkshopLanding.vue'),
         meta: {
           title: 'Agent 工坊',
           requiresAuth: true,
           requiresPro: true
+        }
+      },
+      {
+        path: 'agent-workshop/manage',
+        name: 'AgentWorkshopManager',
+        component: () => import('@/views/Workflow/AgentWorkshopManager.vue'),
+        meta: {
+          title: 'Agent 管理',
+          requiresAuth: true,
+          requiresPro: true,
+          hideInMenu: true
         }
       },
       {
@@ -864,6 +898,17 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Workflow/AgentWorkshop.vue'),
         meta: {
           title: 'Agent 工坊工作页',
+          requiresAuth: true,
+          requiresPro: true,
+          hideInMenu: true
+        }
+      },
+      {
+        path: 'nanobot-agent-studio',
+        name: 'NanobotAgentStudio',
+        component: () => import('@/views/Workflow/NanobotAgentStudio.vue'),
+        meta: {
+          title: 'Agent 工坊助手',
           requiresAuth: true,
           requiresPro: true,
           hideInMenu: true

@@ -140,8 +140,11 @@ releases/2.0.2/
 1. 从 VERSION 文件读取版本号
 2. 若 `releases/{version}/` 不存在，自动创建 manifest.json、upgrade_config.json
 3. 若 `migrations/v{version}.py` 不存在，自动创建模板
-4. 生成 BUILD_INFO
-5. 构建 Pro 便携版、7z 包、NSIS 安装包、更新包
+4. 先执行 `python scripts/run_governance_validations.py`，阻断明显的记忆与治理链路回归
+5. 生成 BUILD_INFO
+6. 构建 Pro 便携版、7z 包、NSIS 安装包、更新包
+
+如已单独完成治理回归且确认通过，可使用 `-SkipGovernanceValidations` 跳过该步骤。
 
 > 构建过程仍以 `release/packages/` 作为中间输出目录，方便 NSIS 和更新包脚本互相取源。
 > 正式留档与上传目录统一为 `D:/release/{VERSION}/revNNN/`。每次打包自动递增 `revNNN` 子版本号，便于核对每一轮发布尝试。
@@ -227,11 +230,14 @@ flowchart TD
 | 检查项 | 脚本/方法 |
 |--------|-----------|
 | 版本一致性 | `python utils/check_version_consistency.py`（检查 VERSION、pyproject.toml、README 等） |
+| 记忆与治理回归 | `python scripts/run_governance_validations.py`（覆盖 L4 项目长期记忆、Agent Builder governance、Agent Workshop production-review 与 L6 历史教训组合链路） |
 | 便携版依赖 | `.\scripts\deployment\verify_portable_dependencies.ps1` |
 | prompts 完整性 | `.\scripts\deployment\verify_prompts_in_portable.ps1` |
 | 升级配置 | 手动确认 `releases/{version}/upgrade_config.json` 存在且格式正确 |
 | 迁移脚本 | 手动确认 `migrations/v{version}.py` 存在且可导入（`python -m migrations.cli status`） |
 | 更新器替换清单 | 手动确认 `scripts/updater/apply_update.ps1` 的替换项与 `build_update_package.ps1` 的打包项一致 |
+
+如仅需快速复核 Agent Workshop governance 组合链路，可单独执行：`python scripts/run_governance_validations.py --only agent_workshop_governance_l4_l6`
 
 ---
 
@@ -239,7 +245,7 @@ flowchart TD
 
 | 工具 | 用途 | 路径 |
 |------|------|------|
-| **release_all.ps1** | **一键发布**（推荐） | `scripts/deployment/` |
+| **release_all.ps1** | **一键发布**（推荐，默认先跑 governance validations） | `scripts/deployment/` |
 | generate_build_info.ps1 | 生成 BUILD_INFO | `scripts/build/` |
 | sync_to_portable_pro.ps1 | Pro 版同步 | `scripts/deployment/` |
 | build_pro_package.ps1 | Pro 版完整构建 | `scripts/deployment/` |
@@ -280,6 +286,11 @@ flowchart TD
 
 - **状态**：`utils/check_version_consistency.py` 存在
 - **建议**：将 `python utils/check_version_consistency.py` 纳入发布前检查清单（已列入本文档第 5 节）
+
+### 7.5 记忆与治理回归入口
+
+- **状态**：`scripts/run_governance_validations.py` 已存在
+- **建议**：发布前至少执行一次完整 governance validation；若只需复核 Agent Workshop 的最新治理链路，可使用 `--only agent_workshop_governance_l4_l6`
 
 ---
 

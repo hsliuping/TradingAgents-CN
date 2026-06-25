@@ -78,16 +78,32 @@ async def get_current_user(
     1. JWT Token（优先）- 用于 API 调用
     2. Session Cookie（回退）- 用于 Web 前端
     """
-    logger.debug(f"🔐 认证检查开始")
+    request_path = request.url.path if hasattr(request, 'url') else 'unknown'
+    has_session_cookie = bool(request.session.get("user_id")) if "session" in request.scope else False
+    logger.debug(
+        "🔐 认证检查开始: path=%s has_authorization=%s has_session_cookie=%s",
+        request_path,
+        bool(authorization),
+        has_session_cookie,
+    )
+
+    jwt_failed_reason: Optional[str] = None
 
     # 方式 1: JWT Token 认证（优先）
     if authorization and authorization.lower().startswith("bearer "):
         logger.debug(f"📋 使用 JWT Token 认证")
 
         token = authorization.split(" ", 1)[1]
-        logger.debug(f"🎫 Token长度: {len(token)}")
+        logger.debug(
+            "🎫 Token信息: length=%s fingerprint=%s",
+            len(token),
+            f"{token[:8]}...{token[-8:]}" if len(token) > 16 else token,
+        )
 
         token_data = AuthService.verify_token(token)
+        if not token_data:
+            jwt_failed_reason = "token_invalid"
+            logger.warning("❌ JWT 认证失败: token_invalid path=%s", request_path)
 
         if token_data:
             # 验证 session（如果 token 中包含 session_id）
@@ -97,24 +113,37 @@ async def get_current_user(
 
                 if not session:
                     logger.warning(f"❌ JWT Session 无效或已过期: {token_data.session_id[:16]}...")
-                    raise HTTPException(status_code=401, detail="Session expired or invalid")
+                    jwt_failed_reason = "session_expired"
+                else:
+                    logger.debug(f"✅ JWT Session 验证成功: {token_data.session_id[:16]}...")
+            else:
+                logger.warning("⚠️ JWT 中未携带 session_id: user=%s path=%s", token_data.sub, request_path)
 
-                logger.debug(f"✅ JWT Session 验证成功: {token_data.session_id[:16]}...")
+            if jwt_failed_reason is None:
+                # 从数据库获取用户信息
+                user = await user_service.get_user_by_username(token_data.sub)
+                if user and user.is_active:
+                    logger.debug(f"✅ JWT 认证成功，用户: {token_data.sub}")
+                    return {
+                        "id": str(user.id),
+                        "user_id": str(user.id),
+                        "username": user.username,
+                        "email": user.email,
+                        "name": user.username,
+                        "is_admin": user.is_admin,
+                        "roles": ["admin"] if user.is_admin else ["user"],
+                        "preferences": user.preferences.model_dump() if user.preferences else {}
+                    }
+                jwt_failed_reason = "user_inactive_or_missing"
+                logger.warning("❌ JWT 认证失败: %s user=%s path=%s", jwt_failed_reason, token_data.sub, request_path)
+    elif authorization:
+        jwt_failed_reason = "authorization_header_not_bearer"
+        logger.warning("❌ Authorization 头存在但不是 Bearer: path=%s prefix=%s", request_path, authorization[:24])
+    else:
+        logger.info("ℹ️ 请求未携带 Authorization 头: path=%s", request_path)
 
-            # 从数据库获取用户信息
-            user = await user_service.get_user_by_username(token_data.sub)
-            if user and user.is_active:
-                logger.debug(f"✅ JWT 认证成功，用户: {token_data.sub}")
-                return {
-                    "id": str(user.id),
-                    "user_id": str(user.id),
-                    "username": user.username,
-                    "email": user.email,
-                    "name": user.username,
-                    "is_admin": user.is_admin,
-                    "roles": ["admin"] if user.is_admin else ["user"],
-                    "preferences": user.preferences.model_dump() if user.preferences else {}
-                }
+    if jwt_failed_reason:
+        logger.info(f"🔁 JWT 认证失败({jwt_failed_reason})，尝试回退到 Session Cookie: {request_path}")
 
     # 方式 2: Session Cookie 认证（回退）
     user_id = request.session.get("user_id")
@@ -138,9 +167,17 @@ async def get_current_user(
             logger.warning(f"❌ Session 中的用户不存在或已禁用: {user_id}")
             # 清除无效的 session
             request.session.clear()
+    else:
+        logger.info("ℹ️ Session Cookie 中没有 user_id: path=%s", request_path)
 
     # 两种方式都失败
-    logger.warning(f"❌ 认证失败：没有有效的 JWT Token 或 Session Cookie (路径: {request.url.path if hasattr(request, 'url') else 'unknown'})")
+    logger.warning(
+        "❌ 认证失败：没有有效的 JWT Token 或 Session Cookie (路径: %s, jwt_failed_reason=%s, has_authorization=%s, has_session_cookie=%s)",
+        request_path,
+        jwt_failed_reason or "none",
+        bool(authorization),
+        has_session_cookie,
+    )
     raise HTTPException(status_code=401, detail="未登录或登录已过期")
 
 

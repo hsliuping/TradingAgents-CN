@@ -55,11 +55,13 @@ app.config.errorHandler = (err, _vm, info) => {
     const error = err as any
     // 检查错误消息或状态码
     if (
-      error.message?.includes('认证失败') ||
-      error.message?.includes('登录已过期') ||
-      error.message?.includes('Token') ||
-      error.response?.status === 401 ||
-      error.code === 401
+      !error.__skipGlobalAuthRedirect && (
+        error.message?.includes('认证失败') ||
+        error.message?.includes('登录已过期') ||
+        error.message?.includes('Token') ||
+        error.response?.status === 401 ||
+        error.code === 401
+      )
     ) {
       console.log('🔒 全局错误处理：检测到认证错误，跳转登录页')
       const authStore = useAuthStore()

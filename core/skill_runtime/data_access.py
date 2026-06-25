@@ -390,13 +390,13 @@ def get_latest_stock_price(symbol: str) -> Optional[float]:
     symbol = str(symbol).strip().zfill(6)
 
     quotes = get_market_quotes(symbol) or {}
-    for field in ("current_price", "close", "pre_close", "open"):
+    for field in ("close", "current_price", "pre_close", "open"):
         value = quotes.get(field)
         if isinstance(value, (int, float)) and value > 0:
             return float(value)
 
     basic_info = get_stock_basic_info(symbol) or {}
-    for field in ("current_price", "close", "pre_close", "open"):
+    for field in ("close", "current_price", "pre_close", "open"):
         value = basic_info.get(field)
         if isinstance(value, (int, float)) and value > 0:
             return float(value)

@@ -308,6 +308,7 @@ class ActionAdvisorV2(ManagerAgent):
             
             # 5. 调用LLM做决策
             from langchain_core.messages import SystemMessage, HumanMessage
+            system_prompt = self._apply_global_trading_advice_guard(system_prompt)
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)

@@ -110,6 +110,18 @@ export const useAuthStore = defineStore('auth', {
   },
 
   actions: {
+    maskTokenFingerprint(token?: string | null) {
+      if (!token) {
+        return 'none'
+      }
+
+      if (token.length <= 16) {
+        return token
+      }
+
+      return `${token.substring(0, 8)}...${token.substring(token.length - 8)}`
+    },
+
     // 设置认证信息
     setAuthInfo(token: string, refreshToken?: string, user?: User) {
       this.token = token
@@ -139,7 +151,9 @@ export const useAuthStore = defineStore('auth', {
         token: token ? '已设置' : '未设置',
         refreshToken: refreshToken ? '已设置' : '未设置',
         user: user ? user.username : '未设置',
-        isAuthenticated: this.isAuthenticated
+        isAuthenticated: this.isAuthenticated,
+        tokenFingerprint: this.maskTokenFingerprint(token),
+        refreshTokenFingerprint: this.maskTokenFingerprint(refreshToken),
       })
     },
     
@@ -288,7 +302,12 @@ export const useAuthStore = defineStore('auth', {
 
         if (response.success) {
           const { access_token, refresh_token } = response.data
-          console.log('✅ Token刷新成功')
+          console.log('✅ Token刷新成功', {
+            oldAccessTokenFingerprint: this.maskTokenFingerprint(this.token),
+            oldRefreshTokenFingerprint: this.maskTokenFingerprint(this.refreshToken),
+            newAccessTokenFingerprint: this.maskTokenFingerprint(access_token),
+            newRefreshTokenFingerprint: this.maskTokenFingerprint(refresh_token),
+          })
           this.setAuthInfo(access_token, refresh_token)
           return true
         } else {

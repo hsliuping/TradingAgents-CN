@@ -44,6 +44,7 @@ from app.routers import analysis_preferences as analysis_preferences_router
 from app.routers import user_template_configs as user_template_configs_router
 from app.routers import template_history as template_history_router
 from app.routers import advanced_courses as advanced_courses_router
+from app.routers import embedded_nanobot as embedded_nanobot_router
 from app.services.basics_sync_service import get_basics_sync_service
 from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
 from app.services.scheduler_service import set_scheduler_instance
@@ -883,6 +884,11 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.warning(f"Scheduler shutdown error: {e}")
 
+        try:
+            stop_gain_alert_service.stop()
+        except Exception as e:
+            logger.warning(f"StopGainAlertService cleanup error: {e}")
+
         # 关闭 UserService MongoDB 连接
         try:
             from app.services.user_service import user_service
@@ -1154,6 +1160,7 @@ app.include_router(analysis_preferences_router.router, tags=["analysis-preferenc
 app.include_router(user_template_configs_router.router, tags=["user-template-configs"])
 app.include_router(template_history_router.router, tags=["template-history"])
 app.include_router(advanced_courses_router.router, tags=["advanced-courses"])
+app.include_router(embedded_nanobot_router.router, tags=["embedded-nanobot"])
 
 # 自选股分组管理路由
 from app.routers import watchlist_groups as watchlist_groups_router

@@ -3,6 +3,35 @@ import { ref, computed } from 'vue'
 import { notificationsApi, type NotificationItem } from '@/api/notifications'
 import { useAuthStore } from '@/stores/auth'
 
+type NotificationSocketState = {
+  socket: WebSocket | null
+  reconnectTimer: ReturnType<typeof setTimeout> | null
+  reconnectAttempts: number
+  shouldReconnect: boolean
+  currentToken: string
+  isConnecting: boolean
+}
+
+declare global {
+  interface Window {
+    __TA_NOTIFICATION_SOCKET_STATE__?: NotificationSocketState
+  }
+}
+
+function getGlobalSocketState(): NotificationSocketState {
+  if (!window.__TA_NOTIFICATION_SOCKET_STATE__) {
+    window.__TA_NOTIFICATION_SOCKET_STATE__ = {
+      socket: null,
+      reconnectTimer: null,
+      reconnectAttempts: 0,
+      shouldReconnect: false,
+      currentToken: '',
+      isConnecting: false,
+    }
+  }
+  return window.__TA_NOTIFICATION_SOCKET_STATE__
+}
+
 export const useNotificationStore = defineStore('notifications', () => {
   const items = ref<NotificationItem[]>([])
   const unreadCount = ref(0)
@@ -12,9 +41,21 @@ export const useNotificationStore = defineStore('notifications', () => {
   // 🔥 WebSocket 连接状态
   const ws = ref<WebSocket | null>(null)
   const wsConnected = ref(false)
-  let wsReconnectTimer: any = null
-  let wsReconnectAttempts = 0
   const maxReconnectAttempts = 10  // 增加重连次数
+
+  const syncSocketRefs = () => {
+    const state = getGlobalSocketState()
+    ws.value = state.socket
+    wsConnected.value = Boolean(state.socket && state.socket.readyState === WebSocket.OPEN)
+  }
+
+  const clearReconnectTimer = () => {
+    const state = getGlobalSocketState()
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer)
+      state.reconnectTimer = null
+    }
+  }
 
   // 连接状态
   const connected = computed(() => wsConnected.value)
@@ -75,22 +116,42 @@ export const useNotificationStore = defineStore('notifications', () => {
   // 🔥 连接 WebSocket（优先）
   function connectWebSocket() {
     try {
-      // 若已存在连接，先关闭
-      if (ws.value) {
-        try {
-          ws.value.close()
-        } catch (error) {
-          console.debug('[WS] 关闭旧连接失败:', error)
-        }
-        ws.value = null
-      }
-      if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null }
-
       const authStore = useAuthStore()
       const token = authStore.token || localStorage.getItem('auth-token') || ''
       if (!token) {
         console.warn('[WS] 未找到 token，无法连接 WebSocket')
+        disconnectWebSocket()
         return
+      }
+
+      const state = getGlobalSocketState()
+      state.shouldReconnect = true
+
+      if (state.isConnecting) {
+        console.debug('[WS] 已在连接中，跳过重复连接请求')
+        return
+      }
+
+      if (
+        state.socket
+        && (state.socket.readyState === WebSocket.OPEN || state.socket.readyState === WebSocket.CONNECTING)
+        && state.currentToken === token
+      ) {
+        console.debug('[WS] 复用现有通知连接')
+        syncSocketRefs()
+        return
+      }
+
+      clearReconnectTimer()
+
+      if (state.socket) {
+        try {
+          state.socket.close()
+        } catch (error) {
+          console.debug('[WS] 关闭旧连接失败:', error)
+        } finally {
+          state.socket = null
+        }
       }
 
       // WebSocket 连接地址
@@ -102,35 +163,47 @@ export const useNotificationStore = defineStore('notifications', () => {
       console.log('[WS] 连接到:', wsUrl)
 
       const socket = new WebSocket(wsUrl)
-      ws.value = socket
+      state.socket = socket
+      state.currentToken = token
+      state.isConnecting = true
+      syncSocketRefs()
 
       socket.onopen = () => {
         console.log('[WS] 连接成功')
+        state.isConnecting = false
         wsConnected.value = true
-        wsReconnectAttempts = 0
+        state.reconnectAttempts = 0
+        syncSocketRefs()
       }
 
       socket.onclose = (event) => {
         console.log('[WS] 连接关闭:', event.code, event.reason)
+        state.isConnecting = false
         wsConnected.value = false
-        ws.value = null
+        if (state.socket === socket) {
+          state.socket = null
+        }
+        syncSocketRefs()
 
         // 自动重连
-        if (wsReconnectAttempts < maxReconnectAttempts) {
-          const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts), 30000)
-          console.log(`[WS] ${delay}ms 后重连 (尝试 ${wsReconnectAttempts + 1}/${maxReconnectAttempts})`)
+        if (state.shouldReconnect && state.reconnectAttempts < maxReconnectAttempts) {
+          const delay = Math.min(1000 * Math.pow(2, state.reconnectAttempts), 30000)
+          console.log(`[WS] ${delay}ms 后重连 (尝试 ${state.reconnectAttempts + 1}/${maxReconnectAttempts})`)
 
-          wsReconnectTimer = setTimeout(() => {
-            wsReconnectAttempts++
+          state.reconnectTimer = setTimeout(() => {
+            state.reconnectAttempts++
             connectWebSocket()
           }, delay)
         } else {
-          console.error('[WS] 达到最大重连次数，停止重连')
+          if (state.shouldReconnect) {
+            console.error('[WS] 达到最大重连次数，停止重连')
+          }
         }
       }
 
       socket.onerror = (error) => {
         console.error('[WS] 连接错误:', error)
+        state.isConnecting = false
         wsConnected.value = false
       }
 
@@ -143,6 +216,8 @@ export const useNotificationStore = defineStore('notifications', () => {
         }
       }
     } catch (error) {
+      const state = getGlobalSocketState()
+      state.isConnecting = false
       console.error('[WS] 连接失败:', error)
       wsConnected.value = false
     }
@@ -184,22 +259,24 @@ export const useNotificationStore = defineStore('notifications', () => {
 
   // 断开 WebSocket
   function disconnectWebSocket() {
-    if (wsReconnectTimer) {
-      clearTimeout(wsReconnectTimer)
-      wsReconnectTimer = null
-    }
+    const state = getGlobalSocketState()
+    state.shouldReconnect = false
+    state.isConnecting = false
+    state.currentToken = ''
+    clearReconnectTimer()
 
-    if (ws.value) {
+    if (state.socket) {
       try {
-        ws.value.close()
+        state.socket.close()
       } catch (error) {
         console.debug('[WS] 断开连接时关闭失败:', error)
       }
-      ws.value = null
+      state.socket = null
     }
 
     wsConnected.value = false
-    wsReconnectAttempts = 0
+    state.reconnectAttempts = 0
+    syncSocketRefs()
   }
 
   // 🔥 连接 WebSocket

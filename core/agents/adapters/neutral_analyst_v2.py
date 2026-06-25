@@ -353,6 +353,7 @@ class NeutralAnalystV2(ResearcherAgent):
             user_prompt = self._build_user_prompt(ticker, analysis_date, state)
 
             # 调用LLM
+            system_prompt = self._apply_global_trading_advice_guard(system_prompt)
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)

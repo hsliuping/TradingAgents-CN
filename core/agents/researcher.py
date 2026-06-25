@@ -157,6 +157,7 @@ class ResearcherAgent(BaseAgent):
             user_prompt = self._build_user_prompt(ticker, analysis_date, reports, historical_context, state)
             
             # 5. 调用LLM分析
+            system_prompt = self._apply_global_trading_advice_guard(system_prompt)
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
@@ -268,21 +269,16 @@ class ResearcherAgent(BaseAgent):
                 "timestamp": datetime.now().isoformat()
             }
 
-            # 🆕 v2.0: 使用 AgentMemory.add_memory()
-            # v1.x: 使用 FinancialSituationMemory.add_situations()
-            if hasattr(self.memory, 'add_memory'):
-                # v2.0 AgentMemory
-                success = self.memory.add_memory(
-                    content=content,
-                    metadata=metadata
-                )
-                if success:
-                    logger.info(f"✅ 保存到记忆系统: {ticker}, stance={self.stance}")
+            if not hasattr(self.memory, 'add_memory'):
+                logger.warning("记忆实例不支持 add_memory，已跳过保存: %s", type(self.memory).__name__)
+                return
 
-            elif hasattr(self.memory, 'add_situations'):
-                # v1.x FinancialSituationMemory (向后兼容)
-                self.memory.add_situations([(content, content)])
-                logger.info(f"✅ 保存到记忆系统 (v1.x): {ticker}")
+            success = self.memory.add_memory(
+                content=content,
+                metadata=metadata
+            )
+            if success:
+                logger.info(f"✅ 保存到记忆系统: {ticker}, stance={self.stance}")
 
         except Exception as e:
             logger.warning(f"保存到记忆系统失败: {e}")
@@ -505,40 +501,28 @@ class ResearcherAgent(BaseAgent):
                 logger.info(f"📭 记忆功能已禁用（快速分析模式）")
                 return ""
 
-            # 🆕 v2.0: 使用 AgentMemory.search_memories()
-            # v1.x: 使用 FinancialSituationMemory.get_memories()
-            if hasattr(self.memory, 'search_memories'):
-                # v2.0 AgentMemory
-                past_memories = self.memory.search_memories(
-                    query=curr_situation,
-                    n_results=3,
-                    filter_metadata={"ticker": ticker} if ticker else None
-                )
+            if not hasattr(self.memory, 'search_memories'):
+                logger.warning("记忆实例不支持 search_memories，已跳过召回: %s", type(self.memory).__name__)
+                return ""
 
-                memory_str = ""
-                for i, mem in enumerate(past_memories, 1):
-                    content = mem.get("content", "")
-                    metadata = mem.get("metadata", {})
-                    similarity = mem.get("similarity", 0.0)
+            past_memories = self.memory.search_memories(
+                query=curr_situation,
+                n_results=3,
+                filter_metadata={"ticker": ticker} if ticker else None
+            )
 
-                    # 只使用相似度 > 0.7 的记忆
-                    if similarity > 0.7:
-                        memory_str += f"[相似度: {similarity:.2f}] {content}\n\n"
+            memory_str = ""
+            for i, mem in enumerate(past_memories, 1):
+                content = mem.get("content", "")
+                similarity = mem.get("similarity", 0.0)
 
-                if memory_str:
-                    logger.info(f"🧠 从记忆系统检索到 {len(past_memories)} 条相关经验")
-                    return f"\n【历史经验】\n{memory_str}"
+                # 只使用相似度 > 0.7 的记忆
+                if similarity > 0.7:
+                    memory_str += f"[相似度: {similarity:.2f}] {content}\n\n"
 
-            elif hasattr(self.memory, 'get_memories'):
-                # v1.x FinancialSituationMemory (向后兼容)
-                past_memories = self.memory.get_memories(curr_situation, n_matches=2)
-
-                memory_str = ""
-                for i, rec in enumerate(past_memories, 1):
-                    memory_str += rec.get("recommendation", "") + "\n\n"
-
-                if memory_str:
-                    return f"\n【历史经验】\n{memory_str}"
+            if memory_str:
+                logger.info(f"🧠 从记忆系统检索到 {len(past_memories)} 条相关经验")
+                return f"\n【历史经验】\n{memory_str}"
 
         except Exception as e:
             logger.warning(f"获取 Memory 上下文失败: {e}")

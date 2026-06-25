@@ -67,6 +67,10 @@
         Agent 工坊
         <el-tag type="primary" size="small" style="margin-left: 4px; transform: scale(0.85);">迭代</el-tag>
       </el-menu-item>
+      <el-menu-item index="/workflow/nanobot-agent-studio">
+        Nanobot 工作室
+        <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">实验</el-tag>
+      </el-menu-item>
       <el-menu-item index="/workflow/skills">
         Skill 中心
         <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>

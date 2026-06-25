@@ -43,6 +43,18 @@ class IterateVersionRequest(BaseModel):
     feedback: str = Field(default="", description="基于评估的迭代反馈")
 
 
+class ReviewEvaluationArtifactRequest(BaseModel):
+    target_path: str = Field(..., min_length=1, description="证据项路径")
+    target_title: str = Field(default="", description="证据项标题")
+    artifact_type: str = Field(default="", description="证据项类型")
+    finding_id: str = Field(default="", description="关联 finding_id")
+    worker_name: str = Field(default="", description="关联 worker 名称")
+    approved: bool = Field(..., description="是否人工审核通过")
+    reason: str = Field(default="", description="审核原因")
+    comment: str = Field(default="", description="审核说明")
+    reviewer: str = Field(default="", description="审核人")
+
+
 class DebugVersionLLMRequest(BaseModel):
     provider: str = Field(..., description="LLM 提供商")
     model: str = Field(..., description="模型名称")
@@ -289,6 +301,18 @@ async def get_version(
     return ok(version)
 
 
+@router.delete("/versions/{version_id}")
+async def delete_version(
+    version_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    svc = _get_service(db)
+    result = await svc.delete_version(version_id)
+    if not result.get("deleted"):
+        raise HTTPException(status_code=404, detail=f"版本 {version_id} 不存在")
+    return ok(result)
+
+
 @router.post("/versions/{version_id}/evaluate")
 async def evaluate_version(
     version_id: str,
@@ -307,7 +331,9 @@ async def evaluate_version(
         )
         return ok(result)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        detail = str(e)
+        status_code = 404 if "不存在" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail)
     except Exception as e:
         logger.error(f"❌ Agent 工坊版本评估失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -323,6 +349,36 @@ async def list_evaluations(
     svc = _get_service(db)
     result = await svc.list_evaluations(version_id=version_id, page=page, page_size=page_size)
     return ok(result)
+
+
+@router.post("/evaluations/{evaluation_id}/manual-reviews")
+async def review_evaluation_artifact(
+    evaluation_id: str,
+    req: ReviewEvaluationArtifactRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    try:
+        svc = _get_service(db)
+        result = await svc.review_evaluation_artifact(
+            evaluation_id=evaluation_id,
+            target_path=req.target_path,
+            target_title=req.target_title,
+            artifact_type=req.artifact_type,
+            finding_id=req.finding_id,
+            worker_name=req.worker_name,
+            approved=req.approved,
+            reason=req.reason,
+            comment=req.comment,
+            reviewer=req.reviewer,
+        )
+        return ok(result)
+    except ValueError as e:
+        detail = str(e)
+        status_code = 404 if "不存在" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail)
+    except Exception as e:
+        logger.error(f"❌ Agent 工坊评估人工审核失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/versions/{version_id}/iterate")

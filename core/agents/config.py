@@ -913,6 +913,42 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         execution_order=15,
     ),
 
+    # 🆕 估值分析师 Agent
+    "valuation_analyst_v2": AgentMetadata(
+        id="valuation_analyst_v2",
+        name="估值分析师 v2.0",
+        description="分析股票估值水平，包括PE/PB/PS/PEG等指标、历史估值区间、同行业估值对比，评估当前估值合理性并给出合理估值区间",
+        category=AgentCategory.ANALYST,
+        version="2.0.0",
+        license_tier=LicenseTier.FREE,
+        icon="💎",
+        color="#9b59b6",
+        tags=["估值分析", "PE/PB", "DCF", "相对估值", "v2.0"],
+        tools=["get_stock_fundamentals_unified", "get_industry_valuation_comparison", "get_historical_valuation_range"],
+        default_tools=["get_stock_fundamentals_unified"],
+        max_tool_calls=5,
+        inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
+            AgentInput(name="analysis_date", type="string", description="分析日期"),
+            AgentInput(name="valuation_method", type="string", description="估值方法（PE/PB/DCF/综合）", required=False, default="综合"),
+        ],
+        outputs=[
+            AgentOutput(name="valuation_report", type="string", description="估值分析报告"),
+            AgentOutput(name="fair_value_range", type="object", description="合理估值区间（低/中/高）"),
+            AgentOutput(name="valuation_rating", type="string", description="估值评级（低估/合理/高估）"),
+        ],
+        requires_tools=True,
+        output_field="valuation_report",
+        report_label="【估值分析 v2】",
+        node_name="估值分析师 v2",
+        execution_order=45,  # 在基本面分析之后
+        growth_role="extractor",
+        growth_outputs=["valuation_report"],
+        memory_scope_hint="object_tracking",
+        review_level="auto_pending",
+        growth_source_type="analysis_report",
+    ),
+
     # 🆕 报告生成器 Agent (智能报告生成)
     "report_generator_v2": AgentMetadata(
         id="report_generator_v2",

@@ -140,6 +140,7 @@ class FundamentalsAnalystAgentV2(BaseAgent):
         if not user_prompt:
             user_prompt = self._build_user_prompt(ticker, trade_date, state)
 
+        system_prompt = self._apply_global_trading_advice_guard(system_prompt)
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)

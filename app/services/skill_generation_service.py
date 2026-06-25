@@ -1420,6 +1420,24 @@ test_input: {spec.test_input}
 #  mem0 统一记忆层 — Skill 生成集成
 # ------------------------------------------------------------------
 
+def _build_skill_memory_metadata_filters(spec: SkillSpec) -> Optional[Dict[str, str]]:
+    filters: Dict[str, str] = {}
+
+    category = (spec.category or "").strip()
+    data_source = (spec.data_source or "").strip()
+    tool_id = (spec.tool_id or "").strip()
+
+    if category:
+        filters["category"] = category
+    if data_source:
+        filters["data_source"] = data_source
+    if filters:
+        return filters
+    if tool_id:
+        return {"tool_id": tool_id}
+    return None
+
+
 async def _recall_skill_lessons(db, spec: SkillSpec) -> str:
     """从 mem0 召回同类 Skill 的历史教训"""
     try:
@@ -1432,6 +1450,10 @@ async def _recall_skill_lessons(db, spec: SkillSpec) -> str:
             scopes=["skill_lesson"],
             limit=10,
             max_chars=2000,
+            metadata_filters=_build_skill_memory_metadata_filters(spec),
+            ranking_profile="skill_generation",
+            group_by_scope=True,
+            per_scope_limit=5,
         )
     except Exception as e:
         logger.debug("[mem0] Skill 教训召回失败: %s", e)

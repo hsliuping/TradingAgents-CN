@@ -114,6 +114,19 @@ class ToolCallNormalizer:
             dict: "object",
         }
         return type_map.get(python_type, "string")
+
+    @staticmethod
+    def _merge_tool_arguments(arguments: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """兼容历史/异常工具调用格式，自动解包 kwargs。"""
+        merged = {**(arguments or {}), **context}
+        nested_kwargs = merged.get("kwargs")
+        if isinstance(nested_kwargs, dict):
+            normalized = {**nested_kwargs}
+            for key, value in merged.items():
+                if key != "kwargs":
+                    normalized[key] = value
+            return normalized
+        return merged
     
     @staticmethod
     def execute_tool_call(
@@ -145,7 +158,7 @@ class ToolCallNormalizer:
         try:
             func = tools[tool_call.name]
             # 合并参数
-            kwargs = {**tool_call.arguments, **context}
+            kwargs = ToolCallNormalizer._merge_tool_arguments(tool_call.arguments, context)
             # 规范化股票代码：分析引擎统一使用无后缀格式（002594 而非 002594.SZ）
             for key in ('ticker', 'symbol'):
                 if key in kwargs and kwargs[key]:
@@ -275,7 +288,7 @@ class ToolCallNormalizer:
 
         try:
             func = tools[tool_call.name]
-            kwargs = {**tool_call.arguments, **context}
+            kwargs = ToolCallNormalizer._merge_tool_arguments(tool_call.arguments, context)
             for key in ('ticker', 'symbol'):
                 if key in kwargs and kwargs[key]:
                     kwargs[key] = normalize_ticker_for_engine(str(kwargs[key]))

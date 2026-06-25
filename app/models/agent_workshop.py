@@ -218,6 +218,29 @@ class AgentWorkshopSession(BaseModel):
     )
 
 
+class AgentExecutionPlanStep(BaseModel):
+    """Agent 版本执行验证步骤"""
+
+    step_id: str = ""
+    title: str = ""
+    objective: str = ""
+    suggested_tools: List[str] = Field(default_factory=list)
+    expected_evidence: List[str] = Field(default_factory=list)
+    failure_signals: List[str] = Field(default_factory=list)
+
+
+class AgentExecutionValidationPlan(BaseModel):
+    """Agent 版本的执行验证计划"""
+
+    mode: str = "tool-driven"
+    validation_status: str = "not-run"
+    rationale: str = ""
+    sample_input: Dict[str, Any] = Field(default_factory=dict)
+    execution_steps: List[AgentExecutionPlanStep] = Field(default_factory=list)
+    acceptance_checks: List[str] = Field(default_factory=list)
+    fallback_rules: List[str] = Field(default_factory=list)
+
+
 class AgentVersion(BaseModel):
     """Agent 版本记录"""
 
@@ -236,6 +259,9 @@ class AgentVersion(BaseModel):
     )
     output_schema: Dict[str, Any] = Field(default_factory=dict)
     evaluation_policy: Dict[str, Any] = Field(default_factory=dict)
+    execution_plan: AgentExecutionValidationPlan = Field(default_factory=AgentExecutionValidationPlan)
+    runtime_result: Optional[Dict[str, Any]] = Field(default=None, description="最近一次真实运行结果")
+    debug_result: Optional[Dict[str, Any]] = Field(default=None, description="最近一次调试结果")
     published_from_session_id: Optional[str] = None
     created_at: datetime = Field(default_factory=now_tz)
     updated_at: datetime = Field(default_factory=now_tz)
@@ -276,6 +302,115 @@ class AgentBenchmarkSampleSet(BaseModel):
     )
 
 
+class AgentEvaluationFinding(BaseModel):
+    """评估中的结构化发现项"""
+
+    category: str = ""
+    severity: str = "blocker"
+    status: str = ""
+    title: str = ""
+    issue: str = ""
+    evidence: List[str] = Field(default_factory=list)
+
+
+class AgentEvaluationRuntimeSummary(BaseModel):
+    """评估时的运行时证据摘要"""
+
+    has_output_text: bool = False
+    has_output_payload: bool = False
+    has_debug_prompt: bool = False
+    has_system_prompt: bool = False
+    tool_trace_observed: bool = False
+    project_memory_binding_enabled: bool = False
+    project_memory_binding_valid: bool = True
+    required_tools: List[str] = Field(default_factory=list)
+    spec_outputs: List[str] = Field(default_factory=list)
+
+
+class AgentEvaluationCandidateFinding(BaseModel):
+    """待查证候选问题"""
+
+    finding_id: str = ""
+    category: str = ""
+    severity: str = "blocker"
+    title: str = ""
+    trigger: str = ""
+    status: str = "pending"
+
+
+class AgentEvaluationEvidenceTask(BaseModel):
+    """证据核查任务"""
+
+    task_id: str = ""
+    finding_id: str = ""
+    worker_name: str = ""
+    objective: str = ""
+    evidence_targets: List[str] = Field(default_factory=list)
+    status: str = "planned"
+
+
+class AgentEvaluationWorkerResult(BaseModel):
+    """证据核查任务的执行结果"""
+
+    task_id: str = ""
+    finding_id: str = ""
+    worker_name: str = ""
+    status: str = "insufficient_evidence"
+    source: str = "rules"
+    summary: str = ""
+    evidence: List[str] = Field(default_factory=list)
+    artifacts: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class AgentEvaluationManualReview(BaseModel):
+    """评估证据项的人工审核记录"""
+
+    review_id: str = ""
+    target_path: str = ""
+    target_title: str = ""
+    artifact_type: str = ""
+    finding_id: str = ""
+    worker_name: str = ""
+    approved: bool = False
+    reason: str = ""
+    comment: str = ""
+    reviewer: str = ""
+    created_at: datetime = Field(default_factory=now_tz)
+    updated_at: datetime = Field(default_factory=now_tz)
+
+    model_config = ConfigDict(
+        json_encoders={datetime: lambda dt: dt.isoformat() if dt else None},
+    )
+
+
+class AgentEvaluationOrchestrationSummary(BaseModel):
+    """证据链编排摘要"""
+
+    mode: str = "evidence-first"
+    worker_execution_mode: str = "rules-primary"
+    nanobot_worker_enabled: bool = False
+    planned_task_count: int = 0
+    completed_worker_count: int = 0
+
+
+class AgentEvaluationEvidenceBundle(BaseModel):
+    """证据优先评审的结构化证据包"""
+
+    review_mode: str = "evidence-first"
+    evaluation_valid: bool = True
+    evaluation_status: str = "valid"
+    findings: List[AgentEvaluationFinding] = Field(default_factory=list)
+    official_issues: List[str] = Field(default_factory=list)
+    insufficient_evidence: List[AgentEvaluationFinding] = Field(default_factory=list)
+    invalid_reasons: List[str] = Field(default_factory=list)
+    runtime_summary: AgentEvaluationRuntimeSummary = Field(default_factory=AgentEvaluationRuntimeSummary)
+    candidate_findings: List[AgentEvaluationCandidateFinding] = Field(default_factory=list)
+    evidence_tasks: List[AgentEvaluationEvidenceTask] = Field(default_factory=list)
+    worker_results: List[AgentEvaluationWorkerResult] = Field(default_factory=list)
+    manual_reviews: List[AgentEvaluationManualReview] = Field(default_factory=list)
+    orchestrator: AgentEvaluationOrchestrationSummary = Field(default_factory=AgentEvaluationOrchestrationSummary)
+
+
 class AgentEvaluationReport(BaseModel):
     """Agent 评估报告"""
 
@@ -288,6 +423,7 @@ class AgentEvaluationReport(BaseModel):
     issues: List[str] = Field(default_factory=list)
     recommendations: List[str] = Field(default_factory=list)
     details: Dict[str, Any] = Field(default_factory=dict)
+    evidence_bundle: Optional[AgentEvaluationEvidenceBundle] = None
     decision: str = "revise"
     created_at: datetime = Field(default_factory=now_tz)
     updated_at: datetime = Field(default_factory=now_tz)
@@ -297,3 +433,38 @@ class AgentEvaluationReport(BaseModel):
         arbitrary_types_allowed=True,
         json_encoders={ObjectId: str, datetime: lambda dt: dt.isoformat() if dt else None},
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_evidence_bundle(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        details = data.get("details") if isinstance(data.get("details"), dict) else {}
+        evidence_bundle = data.get("evidence_bundle")
+
+        if evidence_bundle is None and isinstance(details.get("evidence_bundle"), dict):
+            data["evidence_bundle"] = details.get("evidence_bundle")
+            evidence_bundle = data["evidence_bundle"]
+
+        if isinstance(evidence_bundle, BaseModel):
+            serialized_bundle = evidence_bundle.model_dump(mode="json")
+        elif isinstance(evidence_bundle, dict):
+            serialized_bundle = dict(evidence_bundle)
+        else:
+            serialized_bundle = None
+
+        if serialized_bundle is not None:
+            if "evaluation_valid" not in serialized_bundle and "evaluation_valid" in details:
+                serialized_bundle["evaluation_valid"] = details.get("evaluation_valid")
+            if "evaluation_status" not in serialized_bundle and "evaluation_status" in details:
+                serialized_bundle["evaluation_status"] = details.get("evaluation_status")
+            merged_details = dict(details)
+            merged_details["evidence_bundle"] = serialized_bundle
+            if "evaluation_valid" not in merged_details:
+                merged_details["evaluation_valid"] = serialized_bundle.get("evaluation_valid", True)
+            if "evaluation_status" not in merged_details:
+                merged_details["evaluation_status"] = serialized_bundle.get("evaluation_status", "valid")
+            data["details"] = merged_details
+
+        return data
