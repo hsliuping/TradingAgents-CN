@@ -34,8 +34,8 @@ RUN mkdir -p /app/logs /app/data /app/config && \
         fonts-noto-cjk \
         wget \
         xvfb && \
-    # 根据架构设置变量
-    if [ "$TARGETARCH" = "arm64" ]; then \
+    # 根据架构设置变量（使用 uname 检测，兼容有/无 BuildKit 场景）
+    if [ "$TARGETARCH" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then \
         PANDOC_ARCH="arm64"; \
         WKHTMLTOPDF_ARCH="arm64"; \
     else \
