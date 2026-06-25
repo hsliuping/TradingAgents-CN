@@ -158,7 +158,7 @@
 
 重要说明：
 
-- 如果从“用户当前实际工作方式”看，首入口应该是 NanobotAgentStudio，而不是旧的 AgentWorkshop 页面。
+- 如果从“用户当前实际工作方式”看，首入口应该是 AgentStudio，而不是旧的 AgentWorkshop 页面。
 - 如果从“后端当前 artifact 如何落库、如何生成、如何发布”看，核心仍然是 AgentWorkshopService。
 - 所以下面描述的是底层真实数据流，不代表产品交互层仍应以旧 Workshop 页面为主。
 
@@ -197,7 +197,7 @@
 
 ```mermaid
 flowchart TD
-  A[用户在 NanobotAgentStudio 输入需求] --> B[前端 sendNanobotMessage 组装 payload]
+  A[用户在 AgentStudio 输入需求] --> B[前端 sendNanobotMessage 组装 payload]
   B --> C[embeddedNanobotApi.chatStream]
   C --> D[embedded_nanobot_chat_stream API]
   D --> E[EmbeddedNanobotService.chat]
@@ -265,7 +265,7 @@ flowchart TD
 
 #### 代码落点
 
-- 前端发送与同步：frontend/src/views/Workflow/NanobotAgentStudio.vue
+- 前端发送与同步：frontend/src/views/Workflow/AgentStudio.vue
 - Nanobot 流式接口：app/routers/embedded_nanobot.py
 - Nanobot 对话服务：app/services/embedded_nanobot_service.py
 - Nanobot 运行时工具注册：core/embedded_nanobot/runtime.py

@@ -34,7 +34,7 @@
 
 | 分支 | 领先提交 | HEAD | 内容概要 |
 |------|---------|------|---------|
-| `test/agent-workshop-validation` | 12 | `e8e8c688` | **Nanobot 工坊链路**：Embedded Nanobot 运行时、NanobotAgentStudio 页面、Agent Workshop 阶段流转、会话恢复 |
+| `test/agent-workshop-validation` | 12 | `e8e8c688` | **Nanobot 工坊链路**：Embedded Nanobot 运行时、AgentStudio 页面、Agent Workshop 阶段流转、会话恢复 |
 | `pro/release/2.1.x` | 14 | `5bba1fcb` | 2.1.x 发布分支：A 股数据源使用指南、Pro Docker 代理 503 修复、多架构脚本 BUILD_INFO 兜底 |
 | `pro/v3.1-cognee-integration` | 3 | `5cfb0f9f` | **v4.0 设计文档体系 + MCP/Cognee 集成实验**、v3.0 版本文档目录 |
 | `pro-main` | 11 | `b95118c8` | Pro 主线：A 股数据源指南、Pro Docker 修复、高级课程安装包修复 |

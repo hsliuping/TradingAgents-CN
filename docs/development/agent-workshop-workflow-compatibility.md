@@ -144,14 +144,14 @@ app/services/embedded_nanobot_service.py
 core/embedded_nanobot/runtime.py
 core/embedded_nanobot/agent/*
 frontend/src/api/embeddedNanobot.ts
-frontend/src/views/Workflow/NanobotAgentStudio.vue
+frontend/src/views/Workflow/AgentStudio.vue
 frontend/src/views/Debug/EmbeddedNanobot.vue
 ```
 
 历史版本中的调用方式是：
 
 ```text
-NanobotAgentStudio.vue
+AgentStudio.vue
   → embeddedNanobotApi.chatStream()
   → /api/embedded-nanobot/chat/stream
   → EmbeddedNanobotService.chat()
@@ -163,7 +163,7 @@ NanobotAgentStudio.vue
 
 | 能力 | 当前状态 |
 |------|---------|
-| `NanobotAgentStudio.vue` | 缺失 |
+| `AgentStudio.vue` | 缺失 |
 | `embeddedNanobot.ts` | 缺失 |
 | `/api/embedded-nanobot/*` 路由 | 缺失 |
 | `EmbeddedNanobotService` | 缺失 |
@@ -548,7 +548,7 @@ nanobot/skills/tradingagents-agent-builder/SKILL.md
 历史分支中曾存在：
 
 ```text
-NanobotAgentStudio.vue
+AgentStudio.vue
 embeddedNanobotApi.chatStream()
 /api/embedded-nanobot/chat/stream
 EmbeddedNanobotRuntime.handle_message()
@@ -1064,12 +1064,12 @@ AgentSpec.status
    - app/services/embedded_nanobot_service.py
    - core/embedded_nanobot/*
    - frontend/src/api/embeddedNanobot.ts
-   - frontend/src/views/Workflow/NanobotAgentStudio.vue
+   - frontend/src/views/Workflow/AgentStudio.vue
    - frontend/src/views/Debug/EmbeddedNanobot.vue
 
 2. 恢复路由注册：
    - app/main.py 注册 embedded_nanobot_router
-   - frontend/src/router/index.ts 恢复 /workflow/nanobot-agent-studio 或等价入口
+   - frontend/src/router/index.ts 恢复 /workflow/agent-studio 或等价入口
 
 3. 在合并后的链路上新增 EmbeddedNanobotBuilderProvider：
    - 封装 EmbeddedNanobotRuntime.handle_message()
@@ -1083,7 +1083,7 @@ AgentSpec.status
 迁移完成后的目标形态：
 
 ```text
-NanobotAgentStudio.vue / AgentWorkshop.vue
+AgentStudio.vue / AgentWorkshop.vue
   → AgentBuilderProvider
   → EmbeddedNanobotBuilderProvider（默认）
   → AgentWorkshopService 校验、版本化、发布
@@ -1105,7 +1105,7 @@ app/schemas/embedded_nanobot.py
 app/services/embedded_nanobot_service.py
 core/embedded_nanobot/**
 frontend/src/api/embeddedNanobot.ts
-frontend/src/views/Workflow/NanobotAgentStudio.vue
+frontend/src/views/Workflow/AgentStudio.vue
 frontend/src/views/Debug/EmbeddedNanobot.vue
 ```
 
@@ -1117,7 +1117,7 @@ app/main.py
 
 frontend/src/router/index.ts
   → /debug/embedded-nanobot
-  → /workflow/nanobot-agent-studio
+  → /workflow/agent-studio
 ```
 
 恢复时要特别检查当前分支已经变更过的：
@@ -1494,12 +1494,52 @@ report_manifest 包含 display_name/icon/description
 
 ## 13. 推荐实施顺序
 
-### 阶段 1：合并 Embedded Nanobot 工坊链路
+### 阶段 0：入口收敛（新增，2026-06-26 决策）
 
-1. 从 `test/agent-workshop-validation` 分支 cherry-pick/合并 `embedded_nanobot` 后端路由、服务、schema、runtime 与前端 `NanobotAgentStudio`。
-2. 恢复 `/api/embedded-nanobot/*`、`/debug/embedded-nanobot`、`/workflow/nanobot-agent-studio` 等入口。
+**背景**：当前存在两套 Agent 创建入口——`AgentWorkshop.vue`（标准工作页）和 `AgentStudio.vue`（助手模式）。经产品、用户、工程三角度分析，结论如下：
+
+1. **产品角度**：两套入口做的是同一件事，定位模糊，维护成本翻倍，质量不一致，产品信号混乱。不是"互补"而是"重复"。
+2. **用户角度**：新用户困惑于选哪个；进阶用户在两个页面间切换时上下文断裂。用户需要的是"对话→结构化"的自然流转，不是两个独立页面。
+3. **工程角度**：后端已统一，前端两套是 UI 层重复。已经出现 drift（本轮 AgentStudio 加了运行时字段展示，AgentWorkshop 还没加）。Nanobot 已经是两套入口的共同依赖。
+
+**实际原因**：旧 `AgentWorkshop.vue` 标准工作页效果不好——慢、生成的 Agent 质量不理想。因此引入了 Nanobot 的自迭代方式作为替代。旧代码是遗留代码，不是"另一种产品路径"。
+
+**决策**：**收敛为 AgentStudio 作为唯一主入口。**
+
+| 动作 | 说明 |
+|------|------|
+| 总览页入口全部指向 `AgentStudio` | 不再引导用户进入旧标准工作页 |
+| 旧 `AgentWorkshop.vue` 标记为废弃 | 路由保留但不再作为主入口，一个版本周期后移除 |
+| 管理页"继续讨论"等入口指向 `AgentStudio` | 传递 session_id 恢复上下文 |
+| 旧标准工作页的结构化编辑能力 | 后续抽取为独立组件，嵌入助手模式 |
+
+**与 Hermes 迁移的关系**：入口收敛和构建器抽象是两件独立但协同的事：
+
+```text
+入口收敛（前端层）
+  → 只有一个 Agent 创建页面（AgentStudio）
+  → 用户不感知底层构建器是 nanobot 还是 Hermes
+
+构建器抽象（后端层）
+  → AgentBuilderProvider 接口
+  → EmbeddedNanobotBuilderProvider（当前）
+  → HermesBuilderProvider（未来，通过 Provider 切换）
+```
+
+入口收敛先做（减少前端维护面），构建器抽象后续做（为 Hermes 迁移铺路）。两者解耦，互不阻塞。
+
+- [x] 总览页入口指向 `AgentStudio`（2026-06-26 完成）。
+- [x] 管理页"继续讨论"等入口指向 `AgentStudio`（2026-06-26 完成）。
+- [x] 旧 `AgentWorkshop.vue` 标记废弃，路由保留（2026-06-26 完成）。
+- [x] 结构化编辑能力已嵌入 `AgentStudio` 版本详情（2026-06-26 完成）。
+- [x] `NanobotAgentStudio.vue` → `AgentStudio.vue` 重命名，去 nanobot 绑定（2026-06-26 完成）。
+
+### 阶段 1：合并 Embedded Nanobot 工坊链路 ✅ (2026-06-25 完成)
+
+1. 从 `test/agent-workshop-validation` 分支 cherry-pick/合并 `embedded_nanobot` 后端路由、服务、schema、runtime 与前端 `AgentStudio`。
+2. 恢复 `/api/embedded-nanobot/*`、`/debug/embedded-nanobot`、`/workflow/agent-studio` 等入口。
 3. 确认 Nanobot 对话可以重新驱动 Agent Workshop draft / session / stage 流转。
-4. 保留当前 `AgentWorkshop.vue` 直连流程作为兼容入口，但不作为唯一主链路。
+4. ~~保留当前 `AgentWorkshop.vue` 直连流程作为兼容入口，但不作为唯一主链路。~~ → 已更新为阶段 0 的入口收敛策略。
 
 ### 阶段 2：构建器抽象层落地
 
@@ -1551,28 +1591,31 @@ report_manifest 包含 display_name/icon/description
 
 ## 14. 关键风险
 
-1. **Embedded Nanobot 工坊链路未合并**  
-   当前分支缺少历史 `embedded_nanobot` 路由、服务、runtime 和 `NanobotAgentStudio` 页面。这些提交存在于 `test/agent-workshop-validation` 独立验证分支，从未被合并到 v3.0 或 integration 线。如果不先合并，后续会把原来的 Nanobot 交互体验替换成普通 LLM 表单流程，偏离原产品设计。
+1. **Embedded Nanobot 工坊链路未合并** ✅ 已解决（2026-06-25）  
+   已通过 `git merge test/agent-workshop-validation` 合并到当前分支。
 
-2. **构建器抽象层缺失导致后续迁移成本高**  
-   当前 `AgentWorkshopService` 直接拼 prompt 调 LLM。如果不先抽象 Provider，后续接入恢复后的 Embedded Nanobot 或 Hermes 会变成服务层重写。
+2. **两套 Agent 创建入口并存导致维护成本翻倍** 🆕  
+   当前 `AgentWorkshop.vue`（标准工作页）和 `AgentStudio.vue`（助手模式）同时存在。旧标准工作页效果不好（慢、质量差），是遗留代码。两套入口已经出现 drift（本轮 AgentStudio 加了运行时字段展示，AgentWorkshop 还没加）。已决策收敛为 AgentStudio 唯一主入口（见阶段 0）。
 
-3. **nanobot 生成契约未强制执行**  
+3. **构建器抽象层缺失导致后续迁移成本高**  
+   当前 `AgentWorkshopService` 直接拼 prompt 调 LLM。如果不先抽象 Provider，后续接入 Hermes 会变成服务层重写。入口收敛（前端层）和 Provider 抽象（后端层）解耦，可并行推进。
+
+4. **nanobot 生成契约未强制执行**  
    如果只在 Agent 工坊后处理阶段兜底，nanobot 仍可能生成不符合运行时的 Agent 草案。必须在 nanobot Skill/Prompt 层和后端校验层同时约束。
 
-4. **模板 agent_type 改动影响旧数据**  
+5. **模板 agent_type 改动影响旧数据**  
    需要兼容 `custom_agent` 旧模板，或提供迁移。
 
-5. **发布时激活模板可能影响调试流程**  
+6. **发布时激活模板可能影响调试流程**  
    需明确 draft/testing/active 的模板生命周期。
 
-6. **字段双写带来一致性问题**  
+7. **字段双写带来一致性问题**  
    建议所有写入都通过统一构建函数完成，禁止散落 `$set`。
 
-7. **旧 AgentConfigs 缺字段**  
+8. **旧 AgentConfigs 缺字段**  
    必须提供迁移或读取 fallback。
 
-8. **UniversalAgent fallback 掩盖错误**  
+9. **UniversalAgent fallback 掩盖错误**  
    发布阶段应强校验模板可命中，避免运行时悄悄降级。
 
 ---
@@ -1582,44 +1625,93 @@ report_manifest 包含 display_name/icon/description
 ### 阶段 1：合并 Embedded Nanobot 工坊链路 ✅ (2026-06-25 完成)
 
 - [x] 从 `test/agent-workshop-validation` 分支 cherry-pick/合并 Embedded Nanobot 工坊链路。
-- [x] 恢复 `/api/embedded-nanobot/*` 后端路由和前端 `NanobotAgentStudio` 入口。
+- [x] 恢复 `/api/embedded-nanobot/*` 后端路由和前端 `AgentStudio` 入口。
 - [ ] 验证 Nanobot 对话能驱动 Agent Workshop draft / session / stage 流转。
 
-> 合并详情：通过 `git merge test/agent-workshop-validation` 完成三方合并（共同祖先 `7a0ac1d0`），共解决 18 个冲突，提交 `de52590b`。关键文件已到位：`app/routers/embedded_nanobot.py`、`app/schemas/embedded_nanobot.py`、`app/services/embedded_nanobot_service.py`、`core/embedded_nanobot/*`、`frontend/src/api/embeddedNanobot.ts`、`frontend/src/views/Workflow/NanobotAgentStudio.vue`、`frontend/src/views/Debug/EmbeddedNanobot.vue`。前端路由 `/debug/embedded-nanobot` 和 `/workflow/nanobot-agent-studio` 已就绪。
+> 合并详情：通过 `git merge test/agent-workshop-validation` 完成三方合并（共同祖先 `7a0ac1d0`），共解决 18 个冲突，提交 `de52590b`。关键文件已到位：`app/routers/embedded_nanobot.py`、`app/schemas/embedded_nanobot.py`、`app/services/embedded_nanobot_service.py`、`core/embedded_nanobot/*`、`frontend/src/api/embeddedNanobot.ts`、`frontend/src/views/Workflow/AgentStudio.vue`、`frontend/src/views/Debug/EmbeddedNanobot.vue`。前端路由 `/debug/embedded-nanobot` 和 `/workflow/agent-studio` 已就绪。
 
-### 阶段 2：构建器抽象层落地
+### 阶段 2：构建器抽象层落地 ✅ (2026-06-26 完成)
 
-- [ ] 新增 `AgentBuilderProvider` 抽象接口和 DTO。
-- [ ] 新增 `EmbeddedNanobotBuilderProvider`，封装 `EmbeddedNanobotRuntime.handle_message()`。
-- [ ] 新增 `LLMBuilderProvider` 作为测试/降级实现。
-- [ ] `AgentWorkshopService` 改为通过 provider 进行需求澄清、缺口分析、工具规划。
+- [x] 新增 `AgentBuilderProvider` 抽象接口和 DTO（`app/services/agent_builders/base.py`）。
+- [x] 新增 `EmbeddedNanobotBuilderProvider`，封装 `EmbeddedNanobotRuntime.handle_message()`（`app/services/agent_builders/embedded_nanobot_builder.py`）。
+- [x] 新增 `LLMBuilderProvider` 作为测试/降级实现（`app/services/agent_builders/llm_builder.py`）。
+- [x] 新增 `HermesBuilderProvider` 预留占位（`app/services/agent_builders/hermes_builder.py`）。
+- [ ] `AgentWorkshopService` 改为通过 provider 进行需求澄清、缺口分析、工具规划（后续逐步迁移，当前仍保留直连逻辑作为兼容）。
 
-### 阶段 3：nanobot 构建契约补齐
+> 当前决策：Provider 抽象层已建好，后续接入 Hermes 只需实现 `HermesBuilderProvider` 并切换引用，无需改动 `AgentWorkshopService` 核心逻辑。
+
+### 阶段 3：nanobot 构建契约补齐 🔄 (2026-06-26 已部分落地)
 
 - [ ] 新增 nanobot `tradingagents-agent-builder` Skill 或等价生成规范。
-- [ ] Agent 工坊解析并校验 nanobot 输出的 `runtime_contract` 和 `prompt_contract`。
+- [x] Agent 工坊会话保存 `builder_contracts`，包含 `agent_spec`、`runtime_contract`、`prompt_contract`、`tooling_contract`。
+- [x] `create_nanobot_draft()` 接收并标准化 Nanobot 输出的运行时、Prompt、工具契约。
+- [x] Nanobot Agent Builder 工具透传 `workflow_stage`、`report_label`、`show_in_reports`、`execution_order` 等运行时字段。
+- [x] `build_version()` 将契约写入 `AgentVersion.evaluation_policy`，并用于生成 `agent_metadata`。
 
-### 阶段 4：规范与字段补齐
+### 阶段 4：规范与字段补齐 ✅ (2026-06-26 已落地核心链路)
 
-- [ ] 定义 AgentRuntimeConfig Schema。
-- [ ] `_build_agent_metadata()` 补齐 `show_in_reports` 与运行时控制字段。
-- [ ] `_ensure_runtime_agent_config()` 使用统一 runtime config 构建。
+- [ ] 定义独立 `AgentRuntimeConfig` Schema。
+- [x] `_build_agent_metadata()` 补齐 `output_field`、`workflow_stage`、`report_label`、`show_in_reports`、`node_name`、`execution_order`、`callable_surfaces`。
+- [x] `_ensure_runtime_agent_config()` 写入 agent_configs 顶层运行时字段和 metadata 字段。
+- [x] 发布后的 `agent_configs.metadata` 保存 `runtime_contract`、`prompt_contract`、`tooling_contract`，便于排查和后续迁移。
+- [x] `stage_aggregator` / 工作流报告侧已具备按 `show_in_reports` 和动态 `output_field` 聚合的读取能力，本轮未再改动。
 
-### 阶段 5：Prompt 模板链路修复
+### 阶段 5：Prompt 模板链路修复 ✅ (2026-06-26 已落地核心链路)
 
-- [ ] `_create_prompt_template()` 改为生成 UniversalAgent 可命中的模板。
-- [ ] `publish_version()` 激活当前模板、归档旧模板。
+- [x] `_create_prompt_template()` 改为生成 UniversalAgent 可命中的模板：`agent_type=universal`、`agent_name=version_id`。
+- [x] `_upsert_version_prompt_template()` 更新已有模板时强制保持 UniversalAgent 命中字段。
+- [x] `publish_version()` 激活当前模板，并强制写入 `agent_type=universal`、`agent_name=version_id`、`workflow_id=None`、`node_id=None`。
+- [ ] 旧 `custom_agent` Prompt 模板迁移脚本。
+- [ ] 旧模板归档/降级策略。
 
-### 阶段 6：发布前校验
+### 阶段 6：发布前校验 ✅ (2026-06-26 已落地)
 
-- [ ] 新增 `_validate_version_workflow_compatibility()`。
+- [x] 新增 `_validate_version_workflow_compatibility()`。
+- [x] `publish_version()` 发布前校验 `output_field`、`workflow_stage`、`report_label`、`show_in_reports`、PromptTemplate 是否存在以及 UniversalAgent 是否可命中。
+- [x] 修正模板生命周期：发布前允许模板仍为 `draft`，发布流程负责激活为 `active`，避免发布被自身前置条件阻断。
+- [x] 发布接口返回 `workflow_compatibility` 结果，便于前端/日志排查。
 
-### 阶段 7：前端配置与可视化
+### 阶段 7：前端配置与可视化 ✅ (2026-06-26 完成)
 
-- [ ] `stage_aggregator` 按 `show_in_reports` 过滤。
-- [ ] 前端 Agent 工坊展示并可编辑报告控制字段。
+- [x] `AgentStudio` 版本详情展示运行时控制字段：`workflow_stage`、`report_label`、`show_in_reports`、`execution_order`、`node_name`。
+- [x] `AgentStudio` 版本详情展示 Prompt contract 的 `agent_type`、`agent_name`，便于确认 UniversalAgent 命中参数。
+- [x] 前端支持编辑 `show_in_reports`、`report_label`、`workflow_stage`、`output_field`、`execution_order`、`node_name`。
+- [x] 发布失败时在前端结构化展示具体校验项（错误和警告分别展示）。
 
-### 阶段 8：迁移与测试
+### 阶段 8：迁移与测试 🔄 (2026-06-26 迁移脚本已完成，端到端验证待做)
 
-- [ ] 编写旧数据迁移脚本。
-- [ ] 增加端到端测试。
+- [x] 编写旧 `agent_configs` 迁移脚本（`migrations/v3_1_0.py`，补齐运行时字段）。
+- [x] 编写旧 Prompt 模板迁移脚本（`migrations/v3_1_0.py`，`custom_agent` → `universal`）。
+- [ ] 增加端到端测试：工坊 Agent → 发布 → 工作流调用 → 报告展示。
+- [x] 本轮静态验证通过：`python -m py_compile ...`。
+- [x] 本轮前端类型验证通过：`npm run type-check`。
+- [x] 本轮差异格式验证通过：`git diff --check`。
+
+### 15.1 本轮实现记录（2026-06-26）
+
+本轮已完成 Nanobot Agent 工坊生成 Agent 与工作流运行时规格一致性的核心闭环：
+
+1. Nanobot 工具输出/透传运行时契约。
+2. Agent 工坊会话保存 `builder_contracts`。
+3. 构建版本时把 runtime/prompt/tooling contract 写入 `AgentVersion.evaluation_policy`。
+4. 生成 `AgentMetadata` 和 `agent_configs` 时补齐工作流报告字段。
+5. PromptTemplate 改为 UniversalAgent 可命中格式。
+6. 发布前增加工作流兼容性校验。
+7. 前端版本详情展示运行时字段和 Prompt 命中参数。
+
+### 15.2 第二轮实现记录（2026-06-26）
+
+本轮完成了入口收敛、前端编辑、Provider 抽象和迁移脚本：
+
+1. **入口收敛**：`NanobotAgentStudio.vue` → `AgentStudio.vue`，路由 `/workflow/nanobot-agent-studio` → `/workflow/agent-studio`，所有前端引用和文档同步更新。
+2. **前端编辑**：`AgentStudio` 版本详情支持内联编辑 `output_field`、`workflow_stage`、`report_label`、`show_in_reports`、`execution_order`、`node_name`，通过 `PUT /api/agent-workshop/versions/{id}/metadata` 保存并同步 `agent_configs`。
+3. **发布校验展示**：发布成功后在前端展示 `workflow_compatibility` 的 errors 和 warnings。
+4. **Provider 抽象层**：新建 `app/services/agent_builders/`，包含 `base.py`（抽象接口）、`embedded_nanobot_builder.py`（当前主力）、`llm_builder.py`（回退）、`hermes_builder.py`（预留）。后续接入 Hermes 只需实现 `HermesBuilderProvider` 并切换引用。
+5. **迁移脚本**：`migrations/v3_1_0.py`，幂等补齐旧 `agent_configs` 运行时字段，迁移旧 `prompt_templates` 的 `custom_agent` → `universal`。
+
+### 15.3 剩余待完成
+
+- [ ] 端到端真实流程验证：Nanobot 对话 → 生成版本 → 评估 → 发布 → 工作流运行。
+- [ ] `AgentWorkshopService` 逐步迁移到 Provider 抽象层（当前保留直连逻辑兼容）。
+- [ ] 旧 `AgentWorkshop.vue` 一个版本周期后移除。
+- [ ] 运行 `migrations/v3_1_0.py` 迁移脚本。
