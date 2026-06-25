@@ -207,6 +207,7 @@ class AgentWorkshopSession(BaseModel):
     refusal_reason: str = ""
     gap_report: Optional[AgentWorkshopGapAnalysis] = None
     tooling_plan: Optional[Dict[str, Any]] = None
+    builder_contracts: Dict[str, Any] = Field(default_factory=dict)
     proposed_version: Optional[Dict[str, Any]] = None
     created_at: datetime = Field(default_factory=now_tz)
     updated_at: datetime = Field(default_factory=now_tz)

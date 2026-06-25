@@ -2121,6 +2121,10 @@ async def create_or_update_runtime_agent_config(
     agent_name: Annotated[str, "Agent 显示名称"],
     description: Annotated[str, "Agent 的单一职责描述"],
     output_field: Annotated[str, "输出字段名，默认 analysis_report"] = "analysis_report",
+    workflow_stage: Annotated[str, "工作流阶段，默认 analyst"] = "analyst",
+    report_label: Annotated[str, "报告展示标签，可为空"] = "",
+    show_in_reports: Annotated[bool, "是否进入工作流报告列表，默认 true"] = True,
+    execution_order: Annotated[int, "工作流展示/执行顺序，默认 50"] = 50,
     category: Annotated[str, "Agent 分类，默认 analyst"] = "analyst",
     callable_surfaces: Annotated[str, "允许调用入口，逗号分隔，默认 assistant,workflow,agent"] = "assistant,workflow,agent",
     input_mode: Annotated[str, "输入模式，默认 standalone"] = "standalone",
@@ -2146,6 +2150,11 @@ async def create_or_update_runtime_agent_config(
             "source": metadata.get("source") or "nanobot_generated",
             "callable_surfaces": surfaces,
             "input_mode": input_mode,
+            "workflow_stage": workflow_stage,
+            "output_field": output_field,
+            "report_label": report_label or f"【{clean_name}】",
+            "show_in_reports": show_in_reports,
+            "execution_order": int(execution_order),
             "generation_status": "candidate",
         })
 
@@ -2155,6 +2164,12 @@ async def create_or_update_runtime_agent_config(
             "agent_name": clean_name,
             "description": clean_description,
             "output_field": output_field,
+            "workflow_stage": workflow_stage,
+            "report_label": report_label or f"【{clean_name}】",
+            "node_name": clean_name,
+            "execution_order": int(execution_order),
+            "show_in_reports": show_in_reports,
+            "callable_surfaces": surfaces,
             "category": category,
             "enabled": enabled,
             "metadata": metadata,
@@ -2165,10 +2180,24 @@ async def create_or_update_runtime_agent_config(
 
         await collection.update_one({"agent_id": clean_agent_id}, {"$set": update_doc}, upsert=True)
         persisted = await collection.find_one({"agent_id": clean_agent_id}, {"_id": 0}) or update_doc
+        runtime_contract = {
+            "agent_id": clean_agent_id,
+            "agent_name": clean_name,
+            "description": clean_description,
+            "output_field": output_field,
+            "workflow_stage": workflow_stage,
+            "report_label": report_label or f"【{clean_name}】",
+            "node_name": clean_name,
+            "execution_order": int(execution_order),
+            "show_in_reports": show_in_reports,
+            "category": category,
+            "callable_surfaces": surfaces,
+        }
         return _json_response({
             "status": "ok",
             "action": "updated" if existing else "created",
             "agent": _format_runtime_agent_config(persisted, [], None),
+            "runtime_contract": runtime_contract,
         })
     except Exception as exc:
         logger.error("创建或更新运行时 Agent 配置失败: %s", exc, exc_info=True)
@@ -2195,6 +2224,10 @@ async def create_or_update_agent_workshop_draft(
     agent_name: Annotated[str, "Agent 显示名称"],
     target_responsibility: Annotated[str, "单一职责描述"],
     output_field: Annotated[str, "输出字段名；若留空或给出通用名，系统会自动生成带 agent 语义的专属字段名"] = "analysis_report",
+    workflow_stage: Annotated[str, "工作流阶段，默认 analyst"] = "analyst",
+    report_label: Annotated[str, "报告展示标签，可为空"] = "",
+    show_in_reports: Annotated[bool, "是否进入工作流报告列表，默认 true"] = True,
+    execution_order: Annotated[int, "工作流展示/执行顺序，默认 50"] = 50,
     tool_ids: Annotated[str, "候选工具 ID，逗号分隔"] = "",
     non_goals: Annotated[str, "非目标列表，逗号分隔"] = "",
     preferred_methods: Annotated[str, "方法范围或偏好，逗号分隔"] = "",
@@ -2254,6 +2287,22 @@ async def create_or_update_agent_workshop_draft(
             non_goals=_parse_string_list(non_goals),
             preferred_methods=_parse_string_list(preferred_methods),
             constraints=_parse_string_list(constraints),
+            runtime_contract={
+                "output_field": output_field,
+                "workflow_stage": workflow_stage,
+                "report_label": report_label,
+                "show_in_reports": show_in_reports,
+                "execution_order": int(execution_order),
+                "category": "analyst" if str(workflow_stage or "").strip().lower() == "analyst" else "researcher",
+            },
+            prompt_contract={
+                "agent_type": "universal",
+                "agent_name": clean_agent_id,
+                "must_match_universal_agent": True,
+            },
+            tooling_contract={
+                "required_tools": _parse_string_list(tool_ids),
+            },
             owner_user_id=user_id,
             source_thread_id=current_thread_id,
         )
@@ -3145,6 +3194,15 @@ async def create_or_update_universal_agent_prompt_template(
             "status": "ok",
             "action": action,
             "template": _format_prompt_template_record(persisted),
+            "prompt_contract": {
+                "agent_type": "universal",
+                "agent_name": clean_agent_id,
+                "template_name": clean_template_name,
+                "status": status,
+                "workflow_id": None,
+                "node_id": None,
+                "must_match_universal_agent": True,
+            },
         })
     except Exception as exc:
         logger.error("创建或更新 UniversalAgent 提示词模板失败: %s", exc, exc_info=True)
@@ -3304,6 +3362,10 @@ async def generate_confirmed_candidate_agent(
     output_format: Annotated[str, "输出格式"] = "请输出结构化结论，并明确核心判断、关键依据、风险提示。",
     constraints: Annotated[str, "约束条件"] = "不要超出该 Agent 的单一职责范围。",
     output_field: Annotated[str, "输出字段名，默认 analysis_report"] = "analysis_report",
+    workflow_stage: Annotated[str, "工作流阶段，默认 analyst"] = "analyst",
+    report_label: Annotated[str, "报告展示标签，可为空"] = "",
+    show_in_reports: Annotated[bool, "是否进入工作流报告列表，默认 true"] = True,
+    execution_order: Annotated[int, "工作流展示/执行顺序，默认 50"] = 50,
     template_name: Annotated[str, "模板名称；为空时自动生成"] = "",
     default_tools: Annotated[str, "默认工具 ID，逗号分隔；为空则默认取 tool_ids 前两项"] = "",
     max_tool_calls: Annotated[int, "最大工具调用次数，默认 5"] = 5,
@@ -3349,6 +3411,10 @@ async def generate_confirmed_candidate_agent(
                 "agent_name": clean_agent_name,
                 "target_responsibility": clean_responsibility,
                 "output_field": output_field,
+                "workflow_stage": workflow_stage,
+                "report_label": report_label,
+                "show_in_reports": show_in_reports,
+                "execution_order": execution_order,
                 "tool_ids": tool_ids,
                 "preferred_methods": "",
                 "constraints": constraints,
@@ -3361,6 +3427,10 @@ async def generate_confirmed_candidate_agent(
             "agent_name": clean_agent_name,
             "description": clean_responsibility,
             "output_field": output_field,
+            "workflow_stage": workflow_stage,
+            "report_label": report_label,
+            "show_in_reports": show_in_reports,
+            "execution_order": int(execution_order),
             "category": category,
             "callable_surfaces": callable_surfaces,
             "input_mode": input_mode,

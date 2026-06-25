@@ -510,6 +510,9 @@ class AgentWorkshopService:
         non_goals: Optional[List[str]] = None,
         preferred_methods: Optional[List[str]] = None,
         constraints: Optional[List[str]] = None,
+        runtime_contract: Optional[Dict[str, Any]] = None,
+        prompt_contract: Optional[Dict[str, Any]] = None,
+        tooling_contract: Optional[Dict[str, Any]] = None,
         owner_user_id: str = "",
         source_thread_id: str = "",
     ) -> Dict[str, Any]:
@@ -534,6 +537,21 @@ class AgentWorkshopService:
         normalized_methods = self._normalize_unique_list(preferred_methods)
         normalized_constraints = self._normalize_unique_list(constraints)
         normalized_tools = self._normalize_unique_list(tool_ids)
+        builder_contracts = self._build_nanobot_builder_contracts(
+            agent_id=clean_agent_id,
+            agent_name=clean_agent_name,
+            responsibility=clean_responsibility,
+            output_field=clean_output_field,
+            tool_ids=normalized_tools,
+            runtime_contract=runtime_contract,
+            prompt_contract=prompt_contract,
+            tooling_contract=tooling_contract,
+        )
+        runtime_contract = builder_contracts["runtime_contract"]
+        prompt_contract = builder_contracts["prompt_contract"]
+        tooling_contract = builder_contracts["tooling_contract"]
+        if runtime_contract.get("workflow_stage"):
+            normalized_methods = self._dedupe([*normalized_methods, f"workflow_stage:{runtime_contract['workflow_stage']}"])
         normalized_outputs = self._normalize_nanobot_output_items(
             existing_spec.outputs if existing_spec and existing_spec.outputs else [clean_output_field],
             clean_agent_id,
@@ -605,6 +623,8 @@ class AgentWorkshopService:
             completeness_score=1.0,
             feasibility_status="feasible",
             refusal_reason="",
+            tooling_plan=tooling_contract,
+            builder_contracts=builder_contracts,
         )
 
         await self._save_spec(spec, session_id=session.session_id)
@@ -620,6 +640,9 @@ class AgentWorkshopService:
             "linked_agent_id": clean_agent_id,
             "output_field": clean_output_field,
             "tool_ids": normalized_tools,
+            "runtime_contract": runtime_contract,
+            "prompt_contract": prompt_contract,
+            "tooling_contract": tooling_contract,
             "updated_existing_spec": existing_spec is not None,
             "spec_overview": self._build_spec_overview(spec),
         }
@@ -837,7 +860,24 @@ class AgentWorkshopService:
         evaluation_policy["creation_mode"] = "execution-first"
         evaluation_policy["execution_validation_required"] = True
         evaluation_policy["execution_validation_status"] = version.execution_plan.validation_status
+        runtime_contract = self._resolve_session_runtime_contract(session, spec, version.version_id) if context_session_id and session is not None else dict(evaluation_policy.get("runtime_contract") or {})
+        tooling_contract = dict(evaluation_policy.get("tooling_contract") or {})
+        tooling_contract["required_tools"] = normalized_required_tools
+        tooling_contract["default_tools"] = normalized_default_tools
+        evaluation_policy["runtime_contract"] = runtime_contract
+        prompt_contract = dict(evaluation_policy.get("prompt_contract") or {})
+        if not prompt_contract and context_session_id and session is not None:
+            prompt_contract = self._resolve_session_prompt_contract(session, spec, version.version_id)
+        evaluation_policy["prompt_contract"] = prompt_contract
+        evaluation_policy["tooling_contract"] = tooling_contract
         version.evaluation_policy = evaluation_policy
+        if runtime_contract:
+            version.agent_metadata = self._build_agent_metadata(
+                version.version_id,
+                spec,
+                normalized_required_tools,
+                runtime_contract=runtime_contract,
+            )
         agent_builder_lesson_block = await self._recall_agent_builder_lessons_for_spec(
             spec,
             user_id=lesson_user_id,
@@ -899,6 +939,9 @@ class AgentWorkshopService:
         capability_snapshot = await self._collect_capability_snapshot(self._build_valuation_requirement_text(spec))
         required_capabilities = self._select_required_capabilities(gap_report, session.tooling_plan, capability_snapshot)
         output_schema = self._build_output_schema(spec)
+        runtime_contract = self._resolve_session_runtime_contract(session, spec, version_id)
+        prompt_contract = self._resolve_session_prompt_contract(session, spec, version_id)
+        tooling_contract = self._resolve_session_tooling_contract(session, required_tools)
         evaluation_policy = self._build_evaluation_policy(spec)
         execution_plan = self._build_execution_validation_plan(
             spec,
@@ -910,7 +953,10 @@ class AgentWorkshopService:
         evaluation_policy["creation_mode"] = "execution-first"
         evaluation_policy["execution_validation_required"] = True
         evaluation_policy["execution_validation_status"] = execution_plan.validation_status
-        metadata = self._build_agent_metadata(version_id, spec, required_tools)
+        evaluation_policy["runtime_contract"] = runtime_contract
+        evaluation_policy["prompt_contract"] = prompt_contract
+        evaluation_policy["tooling_contract"] = tooling_contract
+        metadata = self._build_agent_metadata(version_id, spec, required_tools, runtime_contract=runtime_contract)
         agent_builder_lesson_block = await self._recall_agent_builder_lessons_for_spec(
             spec,
             user_id=str(session.user_id or spec.owner_user_id or "").strip(),
@@ -1403,6 +1449,11 @@ class AgentWorkshopService:
             raise ValueError(f"规格 {version.spec_id} 不存在")
         spec = AgentSpec(**spec_doc)
         project_memory_binding = await self._review_prompt_template_project_memory_binding(version)
+        compatibility = await self._validate_version_workflow_compatibility(version, spec, require_active_template=False)
+        if not compatibility["valid"]:
+            raise ValueError(
+                f"版本 {version_id} 未通过工作流兼容性校验，不能发布：" + "；".join(compatibility["errors"])
+            )
         if project_memory_binding["enabled"] and not project_memory_binding["valid"]:
             missing_preview = "；".join(project_memory_binding["missing_items"][:4]) or "缺少项目长期记忆绑定标记"
             raise ValueError(
@@ -1433,7 +1484,16 @@ class AgentWorkshopService:
                 template_filter = {"_id": template_id}
             await self._db["prompt_templates"].update_one(
                 template_filter,
-                {"$set": {"status": "active", "updated_at": now_tz()}},
+                {
+                    "$set": {
+                        "agent_type": "universal",
+                        "agent_name": version.version_id,
+                        "workflow_id": None,
+                        "node_id": None,
+                        "status": "active",
+                        "updated_at": now_tz(),
+                    }
+                },
             )
             version.prompt_template_ref["status"] = "active"
             version.prompt_template_ref["project_memory_binding"] = {
@@ -1474,6 +1534,7 @@ class AgentWorkshopService:
             "status": version.status.value,
             "previous_active_archived": True,
             "project_memory_binding": project_memory_binding,
+            "workflow_compatibility": compatibility,
         }
 
     async def rollback_version(self, spec_id: str) -> Dict[str, Any]:
@@ -2516,6 +2577,82 @@ class AgentWorkshopService:
             "content": updated_template.content.model_dump() if updated_template and updated_template.content else content,
         }
 
+    async def update_version_metadata(
+        self,
+        version_id: str,
+        metadata_updates: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """更新版本的 agent_metadata 运行时控制字段，同步写入 agent_configs"""
+        version_doc = await self._db[VERSION_COLLECTION].find_one({"version_id": version_id})
+        if not version_doc:
+            raise ValueError(f"版本 {version_id} 不存在")
+        version = AgentVersion(**version_doc)
+
+        if version.status == AgentVersionStatus.ARCHIVED:
+            raise ValueError("已归档的版本不允许修改")
+
+        allowed_keys = {
+            "output_field", "workflow_stage", "report_label",
+            "show_in_reports", "node_name", "execution_order",
+            "callable_surfaces", "category",
+        }
+        updates = {k: v for k, v in metadata_updates.items() if k in allowed_keys}
+        if not updates:
+            raise ValueError("没有有效的可更新字段")
+
+        current_metadata = dict(version.agent_metadata or {})
+        current_metadata.update(updates)
+
+        if "output_field" in updates:
+            current_metadata["output_field"] = self._normalize_output_field_name(updates["output_field"], "analysis")
+        if "workflow_stage" in updates:
+            current_metadata["workflow_stage"] = self._normalize_workflow_stage(updates["workflow_stage"], "analyst")
+        if "report_label" in updates:
+            current_metadata["report_label"] = self._normalize_report_label(updates["report_label"], current_metadata.get("name") or version_id)
+        if "show_in_reports" in updates:
+            current_metadata["show_in_reports"] = self._normalize_show_in_reports(updates["show_in_reports"], True)
+        if "execution_order" in updates:
+            current_metadata["execution_order"] = self._normalize_execution_order(updates["execution_order"], 50)
+        if "callable_surfaces" in updates:
+            current_metadata["callable_surfaces"] = self._normalize_callable_surfaces(updates["callable_surfaces"])
+
+        version.agent_metadata = current_metadata
+        version.updated_at = now_tz()
+        await self._save_version(version)
+
+        # 同步更新 agent_configs
+        existing_config = await self._db.agent_configs.find_one({"agent_id": version_id})
+        if existing_config:
+            config_updates: Dict[str, Any] = {}
+            for key in updates:
+                if key in {"output_field", "workflow_stage", "report_label", "show_in_reports", "node_name", "execution_order", "callable_surfaces"}:
+                    config_updates[key] = current_metadata.get(key)
+            if config_updates:
+                config_updates["metadata.workflow_stage"] = current_metadata.get("workflow_stage")
+                config_updates["metadata.output_field"] = current_metadata.get("output_field")
+                config_updates["metadata.report_label"] = current_metadata.get("report_label")
+                config_updates["metadata.show_in_reports"] = current_metadata.get("show_in_reports")
+                config_updates["metadata.node_name"] = current_metadata.get("node_name")
+                config_updates["metadata.execution_order"] = current_metadata.get("execution_order")
+                config_updates["metadata.callable_surfaces"] = current_metadata.get("callable_surfaces")
+                config_updates["updated_at"] = now_tz()
+                await self._db.agent_configs.update_one(
+                    {"agent_id": version_id},
+                    {"$set": config_updates},
+                )
+
+        logger.info(
+            "[AgentWorkshop] 版本 metadata 已更新: version_id=%s fields=%s",
+            version_id,
+            list(updates.keys()),
+        )
+
+        return {
+            "version_id": version_id,
+            "updated_fields": list(updates.keys()),
+            "agent_metadata": current_metadata,
+        }
+
     async def debug_version(
         self,
         version_id: str,
@@ -2858,6 +2995,171 @@ class AgentWorkshopService:
 
     def _normalize_nanobot_output_items(self, outputs: List[Any], agent_id: str) -> List[Any]:
         return self._normalize_generated_output_items(outputs, agent_id)
+
+    def _normalize_workflow_stage(self, value: Any, fallback: str = "analyst") -> str:
+        text = str(value or "").strip().lower().replace("-", "_")
+        aliases = {
+            "analysts": "analyst",
+            "researcher": "research",
+            "researchers": "research",
+            "research_stage": "research",
+            "risk_manager": "risk",
+            "risk_management": "risk",
+            "portfolio_manager": "manager",
+            "management": "manager",
+            "trading": "trader",
+        }
+        text = aliases.get(text, text)
+        if text in {"analyst", "research", "risk", "manager", "trader"}:
+            return text
+        return fallback
+
+    def _normalize_report_label(self, value: Any, fallback_name: str) -> str:
+        text = str(value or "").strip()
+        if text:
+            return text
+        name = str(fallback_name or "Agent").strip() or "Agent"
+        return f"【{name}】"
+
+    def _normalize_show_in_reports(self, value: Any, default: bool = True) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return default
+        text = str(value).strip().lower()
+        if text in {"false", "0", "no", "off", "hide", "hidden"}:
+            return False
+        if text in {"true", "1", "yes", "on", "show", "visible"}:
+            return True
+        return default
+
+    def _normalize_callable_surfaces(self, value: Any) -> List[str]:
+        if isinstance(value, list):
+            surfaces = [str(item).strip() for item in value if str(item).strip()]
+        elif isinstance(value, str):
+            surfaces = [item.strip() for item in value.split(",") if item.strip()]
+        else:
+            surfaces = []
+        return self._dedupe(surfaces) or ["assistant", "workflow", "agent_workshop"]
+
+    def _normalize_execution_order(self, value: Any, default: int = 50) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(0, min(parsed, 999))
+
+    def _build_nanobot_builder_contracts(
+        self,
+        *,
+        agent_id: str,
+        agent_name: str,
+        responsibility: str,
+        output_field: str,
+        tool_ids: List[str],
+        runtime_contract: Optional[Dict[str, Any]] = None,
+        prompt_contract: Optional[Dict[str, Any]] = None,
+        tooling_contract: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        runtime_source = dict(runtime_contract or {})
+        prompt_source = dict(prompt_contract or {})
+        tooling_source = dict(tooling_contract or {})
+
+        normalized_output_field = self._normalize_output_field_name(
+            runtime_source.get("output_field") or output_field,
+            "analysis",
+        )
+        workflow_stage = self._normalize_workflow_stage(runtime_source.get("workflow_stage"), "analyst")
+        runtime = {
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+            "description": responsibility,
+            "output_field": normalized_output_field,
+            "workflow_stage": workflow_stage,
+            "report_label": self._normalize_report_label(runtime_source.get("report_label"), agent_name),
+            "node_name": str(runtime_source.get("node_name") or agent_name or agent_id).strip(),
+            "execution_order": self._normalize_execution_order(runtime_source.get("execution_order"), 50),
+            "show_in_reports": self._normalize_show_in_reports(runtime_source.get("show_in_reports"), True),
+            "category": str(runtime_source.get("category") or "analyst").strip() or "analyst",
+            "callable_surfaces": self._normalize_callable_surfaces(runtime_source.get("callable_surfaces")),
+        }
+
+        prompt = {
+            "agent_type": "universal",
+            "agent_name": str(prompt_source.get("agent_name") or agent_id).strip() or agent_id,
+            "template_name": str(prompt_source.get("template_name") or f"{agent_name} 默认模板").strip(),
+            "status": str(prompt_source.get("status") or "draft").strip() or "draft",
+            "workflow_id": prompt_source.get("workflow_id"),
+            "node_id": prompt_source.get("node_id"),
+            "must_match_universal_agent": True,
+        }
+
+        tooling = {
+            "required_tools": self._dedupe([
+                *tool_ids,
+                *self._normalize_unique_list(tooling_source.get("required_tools") if isinstance(tooling_source.get("required_tools"), list) else []),
+            ]),
+            "default_tools": self._dedupe(
+                self._normalize_unique_list(tooling_source.get("default_tools") if isinstance(tooling_source.get("default_tools"), list) else [])
+                or tool_ids[:2]
+            ),
+            "missing_capabilities": self._normalize_unique_list(tooling_source.get("missing_capabilities") if isinstance(tooling_source.get("missing_capabilities"), list) else []),
+        }
+
+        return {
+            "agent_spec": {
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "primary_goal": responsibility,
+            },
+            "runtime_contract": runtime,
+            "prompt_contract": prompt,
+            "tooling_contract": tooling,
+        }
+
+    def _resolve_session_runtime_contract(self, session: AgentWorkshopSession, spec: AgentSpec, version_id: str) -> Dict[str, Any]:
+        contracts = session.builder_contracts if isinstance(session.builder_contracts, dict) else {}
+        source = dict(contracts.get("runtime_contract") or {})
+        output_names = self._list_output_field_names(spec.outputs)
+        category = source.get("category") or ("analyst" if spec.domain == "stock_analysis" else "researcher")
+        workflow_stage = self._normalize_workflow_stage(source.get("workflow_stage"), "analyst" if category == "analyst" else "research")
+        return {
+            "agent_id": version_id,
+            "agent_name": source.get("agent_name") or spec.name,
+            "description": source.get("description") or spec.primary_goal or spec.name,
+            "output_field": self._normalize_output_field_name(source.get("output_field") or (output_names[0] if output_names else "analysis_report"), "analysis"),
+            "workflow_stage": workflow_stage,
+            "report_label": self._normalize_report_label(source.get("report_label"), spec.name),
+            "node_name": str(source.get("node_name") or spec.name or version_id).strip(),
+            "execution_order": self._normalize_execution_order(source.get("execution_order"), 50),
+            "show_in_reports": self._normalize_show_in_reports(source.get("show_in_reports"), True),
+            "category": category,
+            "callable_surfaces": self._normalize_callable_surfaces(source.get("callable_surfaces")),
+        }
+
+    def _resolve_session_prompt_contract(self, session: AgentWorkshopSession, spec: AgentSpec, version_id: str) -> Dict[str, Any]:
+        contracts = session.builder_contracts if isinstance(session.builder_contracts, dict) else {}
+        source = dict(contracts.get("prompt_contract") or {})
+        return {
+            "agent_type": "universal",
+            "agent_name": version_id,
+            "template_name": str(source.get("template_name") or f"{spec.name} v{version_id.split('_v')[-1]} 草案").strip(),
+            "status": str(source.get("status") or "draft").strip() or "draft",
+            "workflow_id": source.get("workflow_id"),
+            "node_id": source.get("node_id"),
+            "must_match_universal_agent": True,
+        }
+
+    def _resolve_session_tooling_contract(self, session: AgentWorkshopSession, required_tools: List[str]) -> Dict[str, Any]:
+        contracts = session.builder_contracts if isinstance(session.builder_contracts, dict) else {}
+        source = dict(contracts.get("tooling_contract") or {})
+        source_required_tools = source.get("required_tools") if isinstance(source.get("required_tools"), list) else []
+        source_default_tools = source.get("default_tools") if isinstance(source.get("default_tools"), list) else []
+        return {
+            "required_tools": self._dedupe([*required_tools, *self._normalize_unique_list(source_required_tools)]),
+            "default_tools": self._dedupe(self._normalize_unique_list(source_default_tools) or required_tools[:2]),
+            "missing_capabilities": self._normalize_unique_list(source.get("missing_capabilities") if isinstance(source.get("missing_capabilities"), list) else []),
+        }
 
     def _infer_nanobot_spec_domain(self, agent_name: str, responsibility: str, preferred_methods: List[str]) -> str:
         haystack = " ".join([agent_name or "", responsibility or "", " ".join(preferred_methods or [])]).lower()
@@ -5758,6 +6060,61 @@ class AgentWorkshopService:
         review["valid"] = review["marker_present"] and not missing_items
         return review
 
+    async def _validate_version_workflow_compatibility(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+        require_active_template: bool = True,
+    ) -> Dict[str, Any]:
+        errors: List[str] = []
+        warnings: List[str] = []
+        metadata = dict(version.agent_metadata or {})
+        output_field = self._normalize_output_field_name(metadata.get("output_field"), "analysis")
+        workflow_stage = self._normalize_workflow_stage(metadata.get("workflow_stage"), "analyst")
+        report_label = self._normalize_report_label(metadata.get("report_label"), spec.name)
+        prompt_ref = dict(version.prompt_template_ref or {})
+        template_id = str(prompt_ref.get("template_id") or "").strip()
+        template_doc = await self._find_prompt_template_doc(template_id) if template_id else None
+
+        if not output_field:
+            errors.append("缺少 output_field")
+        if metadata.get("output_field") != output_field:
+            version.agent_metadata["output_field"] = output_field
+        version.agent_metadata["workflow_stage"] = workflow_stage
+        version.agent_metadata["report_label"] = report_label
+        version.agent_metadata["show_in_reports"] = self._normalize_show_in_reports(metadata.get("show_in_reports"), True)
+        version.agent_metadata["node_name"] = str(metadata.get("node_name") or spec.name or version.version_id).strip()
+        version.agent_metadata["execution_order"] = self._normalize_execution_order(metadata.get("execution_order"), 50)
+        if output_field not in self._list_output_field_names(spec.outputs):
+            warnings.append(f"output_field={output_field} 不在 spec.outputs 中，将以运行时字段为准")
+        if workflow_stage not in {"analyst", "research", "risk", "manager", "trader"}:
+            errors.append(f"workflow_stage={workflow_stage} 非法")
+        if not report_label:
+            errors.append("缺少 report_label")
+        if version.agent_metadata.get("show_in_reports") is None:
+            errors.append("缺少 show_in_reports")
+        if template_doc is None:
+            errors.append("缺少 PromptTemplate")
+        else:
+            if template_doc.get("agent_type") != "universal":
+                errors.append(f"PromptTemplate.agent_type={template_doc.get('agent_type')}，UniversalAgent 无法命中")
+            if template_doc.get("agent_name") != version.version_id:
+                errors.append(f"PromptTemplate.agent_name={template_doc.get('agent_name')} 与 version_id 不一致")
+            if require_active_template and str(template_doc.get("status") or "") != "active":
+                errors.append("PromptTemplate 不是 active 状态")
+
+        return {
+            "valid": not errors,
+            "errors": errors,
+            "warnings": warnings,
+            "output_field": output_field,
+            "workflow_stage": workflow_stage,
+            "report_label": report_label,
+            "template_id": template_id or None,
+            "template_status": str((template_doc or {}).get("status") or "") or None,
+            "require_active_template": require_active_template,
+        }
+
     async def _review_runtime_result_project_memory_binding(self, runtime_result: Dict[str, Any]) -> Dict[str, Any]:
         project_memory_block = await self._build_project_memory_block_for_workshop()
         debug_prompt = self._extract_runtime_debug_prompt(runtime_result)
@@ -5838,9 +6195,11 @@ class AgentWorkshopService:
 
         template = await prompt_service.create_template(
             PromptTemplateCreate(
-                agent_type="custom_agent",
+                agent_type="universal",
                 agent_name=version_id,
                 template_name=f"{spec.name} v{version_id.split('_v')[-1]} 草案",
+                workflow_id=None,
+                node_id=None,
                 content=content,
                 remark=f"Agent 工坊自动生成的版本草案模板，来源会话 {spec.latest_session_id or ''}",
                 status="draft",
@@ -5896,6 +6255,10 @@ class AgentWorkshopService:
                 template_status = str(template_doc.get("status") or template_ref.get("status") or "draft").strip() or "draft"
                 next_version = int(template_doc.get("version") or 1) + 1
                 update_doc = {
+                    "agent_type": "universal",
+                    "agent_name": version.version_id,
+                    "workflow_id": None,
+                    "node_id": None,
                     "content": content.model_dump(),
                     "template_name": template_name,
                     "status": template_status,
@@ -5926,6 +6289,8 @@ class AgentWorkshopService:
                     agent_type="universal",
                     agent_name=version.version_id,
                     template_name=f"{spec.name} v{version.version} 草案",
+                    workflow_id=None,
+                    node_id=None,
                     content=content,
                     remark=f"Agent 工坊自动生成的版本草案模板，来源会话 {spec.latest_session_id or ''}",
                     status="draft",
@@ -5935,6 +6300,7 @@ class AgentWorkshopService:
             logger.warning("[AgentWorkshop] PromptTemplateService 不可用，回退为直接写入 prompt_templates: %s", exc)
             templates = self._db["prompt_templates"]
             existing_template_doc = await templates.find_one({
+                "agent_type": "universal",
                 "agent_name": version.version_id,
                 "workflow_id": None,
                 "node_id": None,
@@ -6030,6 +6396,12 @@ class AgentWorkshopService:
         if hasattr(category, "value"):
             category = category.value
         workflow_stage = version.agent_metadata.get("workflow_stage") or ("analyst" if category == "analyst" else "research")
+        workflow_stage = self._normalize_workflow_stage(workflow_stage, "analyst" if category == "analyst" else "research")
+        report_label = self._normalize_report_label(version.agent_metadata.get("report_label"), spec.name)
+        node_name = str(version.agent_metadata.get("node_name") or spec.name or version.version_id).strip()
+        execution_order = self._normalize_execution_order(version.agent_metadata.get("execution_order"), 50)
+        show_in_reports = self._normalize_show_in_reports(version.agent_metadata.get("show_in_reports"), True)
+        callable_surfaces = self._normalize_callable_surfaces(version.agent_metadata.get("callable_surfaces"))
         license_tier = version.agent_metadata.get("license_tier") or "free"
         if hasattr(license_tier, "value"):
             license_tier = license_tier.value
@@ -6062,6 +6434,11 @@ class AgentWorkshopService:
                     "required_tools": version.required_tools,
                     "output_field": output_field,
                     "workflow_stage": workflow_stage,
+                    "report_label": report_label,
+                    "node_name": node_name,
+                    "execution_order": execution_order,
+                    "show_in_reports": show_in_reports,
+                    "callable_surfaces": callable_surfaces,
                     "metadata": {
                         "source": "agent_workshop",
                         "spec_id": version.spec_id,
@@ -6071,7 +6448,15 @@ class AgentWorkshopService:
                         "icon": version.agent_metadata.get("icon") or "🤖",
                         "color": version.agent_metadata.get("color") or "#67C23A",
                         "workflow_stage": workflow_stage,
-                        "callable_surfaces": ["workflow", "agent_workshop"],
+                        "output_field": output_field,
+                        "report_label": report_label,
+                        "node_name": node_name,
+                        "execution_order": execution_order,
+                        "show_in_reports": show_in_reports,
+                        "callable_surfaces": callable_surfaces,
+                        "runtime_contract": version.evaluation_policy.get("runtime_contract") if isinstance(version.evaluation_policy, dict) else {},
+                        "prompt_contract": version.evaluation_policy.get("prompt_contract") if isinstance(version.evaluation_policy, dict) else {},
+                        "tooling_contract": version.evaluation_policy.get("tooling_contract") if isinstance(version.evaluation_policy, dict) else {},
                         "project_memory_binding_active": bool((project_memory_binding or {}).get("enabled")),
                         "project_memory_binding_valid": bool((project_memory_binding or {}).get("valid")),
                         "version_status": version.status.value if hasattr(version.status, "value") else str(version.status),
@@ -6086,8 +6471,16 @@ class AgentWorkshopService:
             upsert=True,
         )
 
-    def _build_agent_metadata(self, version_id: str, spec: AgentSpec, required_tools: List[str]) -> Dict[str, Any]:
-        category = AgentCategory.ANALYST if spec.domain == "stock_analysis" else AgentCategory.RESEARCHER
+    def _build_agent_metadata(
+        self,
+        version_id: str,
+        spec: AgentSpec,
+        required_tools: List[str],
+        runtime_contract: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        runtime_contract = dict(runtime_contract or {})
+        category_value = str(runtime_contract.get("category") or "").strip()
+        category = AgentCategory.ANALYST if (category_value == "analyst" or spec.domain == "stock_analysis") else AgentCategory.RESEARCHER
         inputs = [
             AgentInput(
                 name=self._get_io_field_name(input_item, "user_request"),
@@ -6105,7 +6498,14 @@ class AgentWorkshopService:
             for output_item in (spec.outputs or ["summary"])
         ]
         output_names = self._list_output_field_names(spec.outputs)
-        workflow_stage = "analyst" if category == AgentCategory.ANALYST else "research"
+        output_field = self._normalize_output_field_name(
+            runtime_contract.get("output_field") or (output_names[0] if output_names else "analysis_report"),
+            "analysis",
+        )
+        workflow_stage = self._normalize_workflow_stage(
+            runtime_contract.get("workflow_stage"),
+            "analyst" if category == AgentCategory.ANALYST else "research",
+        )
         metadata = AgentMetadata(
             id=version_id,
             name=spec.name,
@@ -6123,11 +6523,13 @@ class AgentWorkshopService:
             icon="🧪",
             color="#0f8a7d",
             requires_tools=bool(required_tools),
-            output_field=(output_names[0] if output_names else "analysis_report"),
-            report_label=f"【{spec.name}】",
-            node_name=spec.name,
-            execution_order=50,
+            output_field=output_field,
+            report_label=self._normalize_report_label(runtime_contract.get("report_label"), spec.name),
+            show_in_reports=self._normalize_show_in_reports(runtime_contract.get("show_in_reports"), True),
+            node_name=str(runtime_contract.get("node_name") or spec.name or version_id).strip(),
+            execution_order=self._normalize_execution_order(runtime_contract.get("execution_order"), 50),
             workflow_stage=workflow_stage,
+            callable_surfaces=self._normalize_callable_surfaces(runtime_contract.get("callable_surfaces")),
         )
         return metadata.model_dump(mode="json")
 

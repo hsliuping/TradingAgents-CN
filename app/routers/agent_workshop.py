@@ -436,6 +436,27 @@ class UpdateVersionPromptRequest(BaseModel):
     status: Optional[str] = Field(default=None, description="模板状态: draft, active")
 
 
+class UpdateVersionMetadataRequest(BaseModel):
+    metadata: dict = Field(..., description="要更新的 agent_metadata 字段")
+
+
+@router.put("/versions/{version_id}/metadata")
+async def update_version_metadata(
+    version_id: str,
+    req: UpdateVersionMetadataRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    try:
+        svc = _get_service(db)
+        result = await svc.update_version_metadata(version_id, req.metadata)
+        return ok(result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Agent 工坊更新版本 metadata 失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/versions/{version_id}/prompt")
 async def get_version_prompt(
     version_id: str,
