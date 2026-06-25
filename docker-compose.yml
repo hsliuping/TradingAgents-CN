@@ -30,7 +30,9 @@ services:
       TRADINGAGENTS_LOG_LEVEL: "INFO"
       TRADINGAGENTS_LOG_DIR: "/app/logs"
       TRADINGAGENTS_LOG_FILE: "/app/logs/tradingagents.log"
-      # Docker专用数据库配置
+      # Docker专用数据库配置 - 覆盖宿主机 .env 中的 localhost
+      MONGODB_HOST: mongodb
+      REDIS_HOST: redis
       TRADINGAGENTS_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin
       TRADINGAGENTS_REDIS_URL: redis://:tradingagents123@redis:6379
       TRADINGAGENTS_CACHE_TYPE: redis
