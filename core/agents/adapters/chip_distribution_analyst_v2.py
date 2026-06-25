@@ -136,18 +136,66 @@ class ChipDistributionAnalystV2(AnalystAgent):
 
             if self._llm:
                 if self._langchain_tools:
-                    report = self.invoke_with_tools(messages, analysis_prompt=analysis_override)
+                    analysis_prompt = analysis_override or self._build_analysis_prompt(ticker, analysis_date)
+                    report = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)
+                    tool_summary = self._format_tool_call_summary()
+                    if self._chip_tool_unavailable():
+                        report = self._build_unavailable_report(ticker, analysis_date)
                 else:
                     response = self._llm.invoke(messages)
                     report = response.content if hasattr(response, "content") else str(response)
+                    tool_summary = ""
             else:
                 raise ValueError("LLM未初始化")
 
-            return {self.output_field: report}
+            result = {self.output_field: report}
+            if tool_summary:
+                result["tool_call_summaries"] = {self.analyst_type: tool_summary}
+            return result
 
         except Exception as e:
             logger.error(f"[{self.agent_id}] 执行失败: {e}", exc_info=True)
             return {self.output_field: f"筹码分布分析失败: {str(e)}"}
+
+    def _chip_tool_unavailable(self) -> bool:
+        summaries = getattr(self, "_tool_call_summaries_collected", []) or []
+        chip_calls = [s for s in summaries if s.get("tool_name") == "get_chip_distribution"]
+        if not chip_calls:
+            return False
+
+        last_call = chip_calls[-1]
+        result = str(last_call.get("result_preview") or "")
+        error_markers = ("❌", "工具执行失败", "无法获取", "未能获取")
+        return (not last_call.get("success")) or any(marker in result for marker in error_markers)
+
+    def _build_unavailable_report(self, ticker: str, analysis_date: str) -> str:
+        summaries = getattr(self, "_tool_call_summaries_collected", []) or []
+        chip_calls = [s for s in summaries if s.get("tool_name") == "get_chip_distribution"]
+        reason = "筹码分布工具未返回有效数据"
+        if chip_calls:
+            last_call = chip_calls[-1]
+            reason = last_call.get("error") or last_call.get("result_preview") or reason
+
+        return f"""⚠️ **筹码分布数据暂不可用**
+
+股票代码：{ticker}  
+分析日期：{analysis_date}
+
+本次未能生成有效筹码分布分析报告，原因是筹码分布工具没有返回可分析的数据。
+
+**工具返回信息**：{reason}
+
+为避免产生误导性结论，本节点不基于模型猜测或补写筹码结构、获利比例、平均成本、支撑压力位等指标。请稍后重试，或检查 AkShare/Tushare 数据源、网络连接与本机 socket 资源状态。"""
+
+    def _build_analysis_prompt(self, ticker: str, analysis_date: str) -> str:
+        return f"""基于筹码分布工具返回的真实数据，生成 {ticker} 在 {analysis_date} 的筹码分布分析报告。
+
+要求：
+1. 只能使用 ToolMessage 中实际返回的数据，不得使用模型知识判断当前年份或日期是否存在。
+2. 如果工具返回以“❌”开头，或内容包含“工具执行失败”“无法获取”“未能获取”，请直接说明“筹码分布数据暂不可用”，并引用工具失败原因。
+3. 工具失败时禁止编造获利比例、平均成本、筹码区间、支撑压力位，也不要生成未来日期不可分析之类的推断。
+4. 工具成功时，围绕获利比例、平均成本、90%/70%筹码区间、集中度、支撑压力关系进行分析。
+5. 使用中文 Markdown 输出。"""
 
     def _build_system_prompt(self, state: Dict[str, Any] = None) -> str:
         """构建默认系统提示词（数据库模板优先）"""

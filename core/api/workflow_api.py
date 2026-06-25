@@ -79,6 +79,8 @@ class WorkflowAPI:
             self._workflows_collection.create_index("id", unique=True)
             self._workflows_collection.create_index("is_system")
             self._workflows_collection.create_index("created_by")
+            self._workflows_collection.create_index("is_default")
+            self._workflows_collection.create_index("workflow_type")
             self._history_collection.create_index("workflow_id")
             self._history_collection.create_index([("workflow_id", 1), ("version", -1)])
 
@@ -157,6 +159,8 @@ class WorkflowAPI:
         workflow_dict = definition.to_dict()
         workflow_dict["version"] = data.get("version", 1)
         workflow_dict["is_system"] = data.get("is_system", False)
+        workflow_dict["is_default"] = bool(data.get("is_default", False))
+        workflow_dict["workflow_type"] = data.get("workflow_type") or get_default_workflow_provider().infer_workflow_type(workflow_dict)
         if user_id:
             workflow_dict["created_by"] = user_id
 
@@ -266,6 +270,8 @@ class WorkflowAPI:
         workflow_dict = definition.to_dict()
         workflow_dict["version"] = data["version"]
         workflow_dict["is_system"] = data.get("is_system", False)
+        workflow_dict["is_default"] = bool(data.get("is_default", existing.get("is_default", False)))
+        workflow_dict["workflow_type"] = data.get("workflow_type") or existing.get("workflow_type") or get_default_workflow_provider().infer_workflow_type(workflow_dict)
         if data.get("created_by"):
             workflow_dict["created_by"] = data["created_by"]
 
@@ -337,6 +343,8 @@ class WorkflowAPI:
                         "tags": doc.get("tags", []),
                         "is_template": doc.get("is_template", False),
                         "is_system": doc.get("is_system", False),
+                        "is_default": doc.get("is_default", False),
+                        "workflow_type": doc.get("workflow_type") or get_default_workflow_provider().infer_workflow_type(doc),
                         "created_at": doc.get("created_at"),
                         "updated_at": doc.get("updated_at"),
                         "nodes": doc.get("nodes", []),
@@ -360,6 +368,8 @@ class WorkflowAPI:
                             "tags": data.get("tags", []),
                             "is_template": data.get("is_template", False),
                             "is_system": data.get("is_system", False),
+                            "is_default": data.get("is_default", False),
+                            "workflow_type": data.get("workflow_type") or get_default_workflow_provider().infer_workflow_type(data),
                             "created_at": data.get("created_at"),
                             "updated_at": data.get("updated_at"),
                             "nodes": data.get("nodes", []),

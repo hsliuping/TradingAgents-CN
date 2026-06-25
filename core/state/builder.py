@@ -40,6 +40,7 @@ class StateSchemaBuilder:
         workflow_id: str,
         agent_ids: List[str],
         input_fields: Optional[List[StateFieldDefinition]] = None,
+        internal_state_fields: Optional[Dict[str, Any]] = None,
     ) -> WorkflowStateSchema:
         """
         根据 Agent 列表构建状态 Schema
@@ -63,12 +64,6 @@ class StateSchemaBuilder:
             is_input=True,
         ))
         
-        # 添加额外输入字段
-        if input_fields:
-            for field in input_fields:
-                field.is_input = True
-                schema.add_field(field)
-        
         # 收集所有 Agent 的 IO 定义
         for agent_id in agent_ids:
             io_def = self._get_agent_io(agent_id)
@@ -90,6 +85,22 @@ class StateSchemaBuilder:
             # 记录依赖关系
             if io_def.reads_from:
                 schema.agent_dependencies[agent_id] = io_def.reads_from
+        
+        # 添加额外输入字段
+        if input_fields:
+            for field in input_fields:
+                field.is_input = True
+                schema.add_field(field)
+
+        # 添加工作流内部控制字段
+        if internal_state_fields:
+            for name, field_type in internal_state_fields.items():
+                if name not in schema.fields:
+                    schema.add_field(StateFieldDefinition(
+                        name=name,
+                        type=field_type,
+                        description="工作流内部控制字段",
+                    ))
         
         logger.info(
             f"构建状态 Schema: {workflow_id}, "
@@ -222,6 +233,7 @@ class StateSchemaBuilder:
         - messages → Annotated[List[BaseMessage], add_messages]（LangGraph 内置）
         """
         from typing import TypedDict, Annotated, List
+        import operator
         from langgraph.graph.message import add_messages
         from .reducers import keep_non_empty, merge_dict, keep_latest_list
 
@@ -229,7 +241,11 @@ class StateSchemaBuilder:
         annotations = {}
 
         for name, field in schema.fields.items():
-            if field.type == FieldType.LIST_MESSAGES:
+            if name == "context":
+                annotations[name] = Annotated[Any, keep_non_empty]
+            elif name.startswith("_debate_") and name.endswith("_count"):
+                annotations[name] = Annotated[int, operator.add]
+            elif field.type == FieldType.LIST_MESSAGES:
                 annotations[name] = Annotated[List[BaseMessage], add_messages]
             elif field.type == FieldType.STRING:
                 annotations[name] = Annotated[str, keep_non_empty]

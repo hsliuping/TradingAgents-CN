@@ -188,56 +188,6 @@
                 </div>
               </div>
 
-              <div
-                v-if="analysisForm.market === 'A股' && (factorPreviewLoading || factorPreview || analysisFactorWarningEntries.length || analysisFactorDiagnosticEntries.length)"
-                class="form-section"
-              >
-                <h4 class="section-title">🧭 因子口径提示</h4>
-                <div class="factor-preview-card">
-                  <div class="factor-preview-meta">
-                    <span>最新财报期：{{ analysisFactorReportPeriod || '-' }}</span>
-                    <el-tag v-if="factorPreviewLoading" size="small" type="info">加载中</el-tag>
-                  </div>
-                  <div v-if="analysisFactorWarningEntries.length || analysisFactorDiagnosticEntries.length" class="factor-preview-tags">
-                    <el-popover
-                      v-for="warning in analysisFactorWarningEntries"
-                      :key="warning.key"
-                      placement="top-start"
-                      width="320"
-                      trigger="hover"
-                    >
-                      <template #reference>
-                        <el-tag :type="warning.tagType" effect="plain" class="factor-preview-tag">{{ warning.label }}</el-tag>
-                      </template>
-                      <div class="factor-preview-popover">
-                        <div class="factor-preview-popover-title">{{ warning.label }}</div>
-                        <div v-for="condition in warning.conditions" :key="condition" class="factor-preview-line">{{ condition }}</div>
-                      </div>
-                    </el-popover>
-                    <el-popover
-                      v-for="diagnostic in analysisFactorDiagnosticEntries"
-                      :key="diagnostic.key"
-                      placement="top-start"
-                      width="340"
-                      trigger="hover"
-                    >
-                      <template #reference>
-                        <el-tag :type="diagnostic.tagType" effect="plain" class="factor-preview-tag">{{ diagnostic.label }}</el-tag>
-                      </template>
-                      <div class="factor-preview-popover">
-                        <div class="factor-preview-popover-title">{{ diagnostic.label }}</div>
-                        <div class="factor-preview-line">状态：{{ diagnostic.state }}</div>
-                        <div v-if="diagnostic.reason" class="factor-preview-line">原因：{{ diagnostic.reason }}</div>
-                        <div v-if="diagnostic.missingInputs.length" class="factor-preview-line">缺失输入：{{ diagnostic.missingInputs.join('、') }}</div>
-                      </div>
-                    </el-popover>
-                  </div>
-                  <el-empty v-else-if="factorPreview && !factorPreviewLoading" description="当前无额外口径提示" :image-size="56" />
-                </div>
-              </div>
-
-
-
               <!-- 操作按钮 -->
               <div class="form-section">
                 <div class="action-buttons" style="display: flex; justify-content: center; align-items: center; width: 100%; text-align: center;">

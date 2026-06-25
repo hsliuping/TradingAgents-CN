@@ -121,17 +121,25 @@ class SkillExecutor:
 
         registry = get_tool_registry()
         func_name = impl.function
-        func = registry.get_function(func_name)
+        func = None
 
-        if func is None and impl.module:
-            # 动态导入模块并获取函数
+        # ⚠️ 如果提供了 module，直接导入模块获取原始函数，不使用 ToolRegistry
+        #    因为 ToolRegistry 中可能存的是 Skill wrapper 包装函数，
+        #    会导致无限递归：wrapper → execute_sync → _execute_python → wrapper → ...
+        if impl.module:
             try:
                 module = importlib.import_module(impl.module)
                 func = getattr(module, func_name)
+                # 如果模块层函数被 @tool 装饰成了 StructuredTool，取出原始函数
+                from langchain_core.tools import StructuredTool
+                if isinstance(func, StructuredTool):
+                    func = func.func
             except (ImportError, AttributeError) as e:
                 raise RuntimeError(
                     f"无法加载 Python 函数 {impl.module}.{func_name}: {e}"
                 )
+        else:
+            func = registry.get_function(func_name)
 
         if func is None:
             raise RuntimeError(f"找不到 Python 函数: {func_name}")

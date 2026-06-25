@@ -6,7 +6,7 @@
 
 import logging
 import threading
-from typing import Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type
 
 from .models import WorkflowStateSchema, AgentIODefinition
 from .builder import StateSchemaBuilder
@@ -56,6 +56,7 @@ class StateRegistry:
         workflow_id: str,
         agent_ids: List[str],
         force_rebuild: bool = False,
+        internal_state_fields: Optional[Dict[str, Any]] = None,
     ) -> WorkflowStateSchema:
         """
         获取或构建工作流状态 Schema
@@ -69,9 +70,24 @@ class StateRegistry:
             WorkflowStateSchema 实例
         """
         if workflow_id in self._schemas and not force_rebuild:
-            return self._schemas[workflow_id]
+            schema = self._schemas[workflow_id]
+            missing_internal_fields = []
+            if internal_state_fields:
+                missing_internal_fields = [
+                    name for name in internal_state_fields
+                    if name not in schema.fields
+                ]
+            if not missing_internal_fields:
+                return schema
+            logger.info(
+                f"状态 Schema 缺少内部字段，重新生成: {workflow_id}, missing={missing_internal_fields}"
+            )
         
-        schema = self._builder.build_from_agents(workflow_id, agent_ids)
+        schema = self._builder.build_from_agents(
+            workflow_id,
+            agent_ids,
+            internal_state_fields=internal_state_fields,
+        )
         self._schemas[workflow_id] = schema
         
         # 同时生成 TypedDict 类

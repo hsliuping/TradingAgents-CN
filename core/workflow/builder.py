@@ -2163,6 +2163,16 @@ class WorkflowBuilder:
         """
         start_node = definition.get_start_node()
         added_edges: Set[tuple] = set()
+        merge_barriers: Dict[str, Set[str]] = {}
+
+        def add_merge_predecessor(merge_node_id: str, predecessor: str) -> None:
+            merge_barriers.setdefault(merge_node_id, set()).add(predecessor)
+            logger.info(f"[合并屏障] 收集上游: {predecessor} -> {merge_node_id}")
+
+        def merge_waits_all(merge_node: NodeDefinition) -> bool:
+            config = merge_node.config or {}
+            strategy = str(config.get("strategy") or config.get("merge_strategy") or "wait_all").strip().lower()
+            return strategy in {"", "wait_all", "wait-all", "all"}
 
         if debate_configs is None:
             debate_configs = self._identify_debate_configs(definition)
@@ -2223,9 +2233,13 @@ class WorkflowBuilder:
                 # 消息清理节点 → 原来的目标节点
                 if target_node and target_node.type == NodeType.END:
                     graph.add_edge(clear_node_id, END)
+                    logger.info(f"[工具循环] 添加出边: {clear_node_id} -> END")
+                elif target_node and target_node.type == NodeType.MERGE and merge_waits_all(target_node):
+                    add_merge_predecessor(target, clear_node_id)
+                    logger.info(f"[工具循环] 延迟添加合并屏障出边: {clear_node_id} -> {target}")
                 else:
                     graph.add_edge(clear_node_id, target)
-                logger.info(f"[工具循环] 添加出边: {clear_node_id} -> {target}")
+                    logger.info(f"[工具循环] 添加出边: {clear_node_id} -> {target}")
 
                 # 标记边为已处理
                 added_edges.add((node_id, target))
@@ -2261,9 +2275,27 @@ class WorkflowBuilder:
                 graph.add_edge(edge.source, END)
             elif edge.type == EdgeType.CONDITIONAL:
                 self._add_conditional_edge(graph, edge, definition)
+            elif target_node.type == NodeType.MERGE and merge_waits_all(target_node):
+                add_merge_predecessor(edge.target, edge.source)
             else:
                 graph.add_edge(edge.source, edge.target)
             added_edges.add(edge_key)
+
+        # 4. 为合并节点添加真正的 barrier 边
+        # LangGraph 支持 graph.add_edge([a, b, c], merge)，只有所有上游都完成后才触发 merge。
+        # 否则多个并行分支逐个到达 merge 时，会重复触发 merge 以及其下游节点。
+        for merge_node_id, predecessors in merge_barriers.items():
+            ordered_predecessors = sorted(predecessors)
+            if len(ordered_predecessors) == 1:
+                graph.add_edge(ordered_predecessors[0], merge_node_id)
+                logger.info(
+                    f"[合并屏障] 单上游普通边: {ordered_predecessors[0]} -> {merge_node_id}"
+                )
+            else:
+                graph.add_edge(ordered_predecessors, merge_node_id)
+                logger.info(
+                    f"[合并屏障] 添加 barrier 边: {ordered_predecessors} -> {merge_node_id}"
+                )
 
     def _add_participant_conditional_edge(
         self,

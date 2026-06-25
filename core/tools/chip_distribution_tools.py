@@ -8,10 +8,15 @@
 """
 
 import logging
+import random
+import time
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
+
+# === Mock 开关：设为 True 时不调用真实 API，返回随机模拟数据 ===
+_MOCK_CHIP_DATA = False
 
 
 def _normalize_ticker(ticker: str) -> str:
@@ -48,11 +53,15 @@ def get_chip_distribution_akshare(ticker: str, trade_date: str) -> Optional[Dict
         import akshare as ak
 
         symbol = _normalize_ticker(ticker)
+        t0 = time.time()
+        logger.info(f"[AkShare筹码] 开始调用 stock_cyq_em: symbol={symbol}, adjust=''")
         # akshare stock_cyq_em 返回历史筹码分布
         df = ak.stock_cyq_em(symbol=symbol, adjust="")
+        elapsed = time.time() - t0
+        logger.info(f"[AkShare筹码] stock_cyq_em 调用完成: 耗时={elapsed:.2f}s, 行数={len(df) if df is not None else 0}")
 
         if df is None or df.empty:
-            logger.warning(f"[AkShare筹码] {symbol} 返回空数据")
+            logger.warning(f"[AkShare筹码] {symbol} 返回空数据 (耗时={elapsed:.2f}s)")
             return None
 
         # 将日期列规范化
@@ -127,6 +136,7 @@ def get_chip_distribution_tushare(ticker: str, trade_date: str) -> Optional[Dict
         筹码分布数据字典，或 None（失败时）
     """
     try:
+        t0 = time.time()
         from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
 
         provider = get_tushare_provider()
@@ -148,6 +158,7 @@ def get_chip_distribution_tushare(ticker: str, trade_date: str) -> Optional[Dict
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
 
+        logger.info(f"[Tushare筹码] 开始调用 cyq_perf: ts_code={ts_code}, trade_date={trade_date_fmt}")
         # Tushare cyq_perf API: 筹码分析
         df = provider.api.cyq_perf(
             ts_code=ts_code,
@@ -159,6 +170,7 @@ def get_chip_distribution_tushare(ticker: str, trade_date: str) -> Optional[Dict
         if df is None or df.empty:
             # 尝试获取最近几天的数据
             start = (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=10)).strftime("%Y%m%d")
+            logger.info(f"[Tushare筹码] 精确日期无数据，回退查询范围: {start}~{trade_date_fmt}")
             df = provider.api.cyq_perf(
                 ts_code=ts_code,
                 start_date=start,
@@ -193,12 +205,49 @@ def get_chip_distribution_tushare(ticker: str, trade_date: str) -> Optional[Dict
             rng70 = result["cost_70_high"] - result["cost_70_low"]
             result["concentration_70"] = round(rng70 / result["avg_cost"], 4)
 
-        logger.info(f"[Tushare筹码] {ts_code} 获取成功")
+        logger.info(f"[Tushare筹码] {ts_code} 获取成功 (耗时={time.time() - t0:.2f}s)")
         return result
 
     except Exception as e:
         logger.warning(f"[Tushare筹码] {ticker} 获取失败: {e}")
         return None
+
+
+def _mock_chip_report(symbol: str, trade_date: str) -> str:
+    """生成随机模拟筹码分布报告（用于隔离测试）"""
+    avg_cost = round(random.uniform(8.0, 15.0), 2)
+    current_price = round(avg_cost * random.uniform(0.85, 1.15), 2)
+    profit_ratio = round(random.uniform(25, 60), 1)
+    cost_90_low = round(avg_cost * random.uniform(0.75, 0.88), 2)
+    cost_90_high = round(avg_cost * random.uniform(1.12, 1.35), 2)
+    conc_90 = round((cost_90_high - cost_90_low) / avg_cost, 4)
+    cost_70_low = round(avg_cost * random.uniform(0.85, 0.93), 2)
+    cost_70_high = round(avg_cost * random.uniform(1.05, 1.15), 2)
+    conc_70 = round((cost_70_high - cost_70_low) / avg_cost, 4)
+
+    logger.info(f"[筹码分布-MOCK] {symbol} 返回模拟数据 (avg_cost={avg_cost}, profit_ratio={profit_ratio}%)")
+
+    return f"""## 📊 筹码分布分析 - {symbol} ({trade_date})
+
+**数据来源**: mock（模拟数据，用于功能验证）
+
+### 核心指标
+- **获利比例**: {profit_ratio}%（当前价格下持有浮盈的筹码占比）
+- **平均成本**: {avg_cost} 元
+
+### 筹码集中度
+| 区间 | 成本下限 | 成本上限 | 集中度 |
+|------|---------|---------|------|
+| 90%筹码 | {cost_90_low} 元 | {cost_90_high} 元 | {conc_90} |
+| 70%筹码 | {cost_70_low} 元 | {cost_70_high} 元 | {conc_70} |
+
+### 分析要点
+- 当前价格: {current_price} 元 (vs 平均成本 {avg_cost} 元)
+- 90%筹码区间: [{cost_90_low}, {cost_90_high}]，集中度 {conc_90}（{'较为集中' if conc_90 < 0.3 else '较为分散'}）
+- 70%筹码区间: [{cost_70_low}, {cost_70_high}]，集中度 {conc_70}
+
+> ⚠️ 此数据为模拟生成，仅用于排除 API 调用问题。如需真实数据请关闭 mock 模式。
+"""
 
 
 def get_chip_distribution_unified(ticker: str, trade_date: str) -> str:
@@ -213,18 +262,29 @@ def get_chip_distribution_unified(ticker: str, trade_date: str) -> str:
         str: 筹码分布分析报告文本
     """
     symbol = _normalize_ticker(ticker)
+    t0 = time.time()
+
+    # Mock 模式：直接返回随机模拟数据，不调用真实 API
+    if _MOCK_CHIP_DATA:
+        return _mock_chip_report(symbol, trade_date)
 
     # 优先 AkShare
+    logger.info(f"[筹码分布] 开始获取 {symbol} 筹码数据，优先使用 AkShare")
     data = get_chip_distribution_akshare(symbol, trade_date)
     if data is None:
-        logger.info(f"[筹码分布] AkShare失败，切换到Tushare: {symbol}")
+        elapsed_ak = time.time() - t0
+        logger.info(f"[筹码分布] AkShare失败 (耗时={elapsed_ak:.2f}s)，切换到Tushare: {symbol}")
         data = get_chip_distribution_tushare(symbol, trade_date)
 
+    total_elapsed = time.time() - t0
     if data is None:
+        logger.warning(f"[筹码分布] {symbol} 所有数据源均失败 (总耗时={total_elapsed:.2f}s)")
         return (
             f"❌ 无法获取 {ticker} 的筹码分布数据（{trade_date}）。\n"
             "可能原因：数据源不可用、该日期非交易日或股票代码不正确。"
         )
+
+    logger.info(f"[筹码分布] {symbol} 获取成功 (总耗时={total_elapsed:.2f}s, 来源={data['source']})")
 
     # 格式化输出
     profit_pct = data["profit_ratio"] * 100 if data["profit_ratio"] <= 1 else data["profit_ratio"]

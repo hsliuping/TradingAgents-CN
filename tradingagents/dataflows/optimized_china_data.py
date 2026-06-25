@@ -964,8 +964,8 @@ class OptimizedChinaDataProvider:
             import asyncio
 
             provider = get_tushare_provider()
-            if not provider.connected:
-                logger.debug(f"Tushare未连接，无法获取{symbol}真实财务数据")
+            if not provider.is_available():
+                logger.debug(f"Tushare API Client 未就绪，无法获取{symbol}真实财务数据")
                 return None
 
             # 获取财务数据（异步方法）

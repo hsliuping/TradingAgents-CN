@@ -140,13 +140,16 @@ export const TemplatesDebugApi = {
    * 执行指定的工作流并返回所有 Agent 的输出结果
    */
   async debugWorkflow(payload: WorkflowDebugPayload): Promise<ApiResponse<{
+    task_id?: string
+    status?: string
     workflow_id: string
     workflow_name: string
     symbol: string
     analysis_date?: string
-    report: string
-    agent_reports: Record<string, string>
-    report_length: number
+    message?: string
+    report?: string
+    agent_reports?: Record<string, string>
+    report_length?: number
   }>> {
     return ApiClient.post('/api/templates/debug/workflow', payload, {
       timeout: 15 * 60 * 1000,  // 15 分钟超时（完整工作流可能需要更长时间）

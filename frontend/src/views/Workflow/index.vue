@@ -215,7 +215,10 @@
           <el-card class="workflow-card" shadow="hover">
             <template #header>
               <div class="card-header">
-                <span class="workflow-name">{{ workflow.name }}</span>
+                <span class="workflow-name">
+                  {{ workflow.name }}
+                  <el-tag v-if="workflow.is_default" type="success" size="small" effect="dark">默认</el-tag>
+                </span>
                 <el-dropdown trigger="click" @command="handleCommand($event, workflow.id)">
                   <el-button text size="small" @click.stop>
                     <el-icon><MoreFilled /></el-icon>

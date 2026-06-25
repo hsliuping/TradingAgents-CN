@@ -4985,9 +4985,11 @@ class PortfolioService:
                 legacy_config["llm_provider"] = "dashscope"
 
             # 执行工作流（注意：WorkflowAPI.execute() 是同步方法，不需要 await）
+            from core.workflow.default_workflow_provider import get_default_workflow_provider
+            workflow_id = get_default_workflow_provider().get_active_workflow_id("position_analysis")
             workflow_api = WorkflowAPI()
             result = workflow_api.execute(
-                workflow_id="position_analysis_v2",
+                workflow_id=workflow_id,
                 inputs=workflow_inputs,
                 legacy_config=legacy_config if legacy_config else None  # 🔥 传递模型配置
             )

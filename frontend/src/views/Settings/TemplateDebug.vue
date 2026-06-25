@@ -271,6 +271,12 @@
           <el-button type="primary" @click="runDebug" :loading="loading">
             {{ debugMode === 'workflow' ? '运行工作流调试' : debugMode === 'invocations' ? '查询调用记录' : '运行调试' }}
           </el-button>
+          <span v-if="workflowDebugTaskId && debugMode === 'workflow'" class="debug-task-tip">
+            任务 {{ workflowDebugTaskId }} · {{ workflowDebugMessage || '正在执行...' }}
+          </span>
+        </el-form-item>
+        <el-form-item v-if="workflowDebugTaskId && debugMode === 'workflow'" label="调试进度">
+          <el-progress :percentage="workflowDebugProgress" style="width: 420px" />
         </el-form-item>
       </el-form>
     </el-card>
@@ -639,11 +645,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { TemplatesDebugApi, type WorkflowInfo, type TemplateDebugInvocationListResult, type TemplateDebugInvocationRecord, type DebugAgentInfo, type DebugAgentInputField, type DebugAgentInputContractField } from '@/api/templates_debug'
+import { analysisApi } from '@/api/analysis'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { configApi } from '@/api/config'
+import { fetchTaskResultWithRetry } from '@/utils/taskResult'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import { marked } from 'marked'
 import { ArrowLeft } from '@element-plus/icons-vue'
@@ -688,6 +696,10 @@ const form = ref({
 const loading = ref(false)
 const result = ref<any>(null)
 const workflowResult = ref<any>(null)  // 🆕 工作流调试结果
+const workflowDebugTaskId = ref<string | null>(null)
+const workflowDebugPollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
+const workflowDebugProgress = ref(0)
+const workflowDebugMessage = ref('')
 const invocationResult = ref<TemplateDebugInvocationListResult | null>(null)
 const selectedInvocation = ref<TemplateDebugInvocationRecord | null>(null)
 const invocationChainCache = ref<Record<string, TemplateDebugInvocationRecord[]>>({})
@@ -1563,11 +1575,100 @@ const needsStockSymbol = computed(() => {
   return form.value.analyst_type !== 'index_analyst'
 })
 
+const clearWorkflowDebugPolling = () => {
+  if (workflowDebugPollingTimer.value) {
+    clearInterval(workflowDebugPollingTimer.value)
+    workflowDebugPollingTimer.value = null
+  }
+}
+
+const buildWorkflowDebugResult = (rawResult: any, fallback: any = {}) => {
+  const resultData = rawResult || {}
+  const reportFields = [
+    'final_report',
+    'market_report',
+    'fundamentals_report',
+    'news_report',
+    'sentiment_report',
+    'index_report',
+    'sector_report',
+    'risk_report',
+    'risk_assessment',
+    'trading_decision',
+    'final_trade_decision',
+    'recommendation',
+    'summary'
+  ]
+  const agentReports: Record<string, string> = {}
+
+  for (const field of reportFields) {
+    const value = resultData[field]
+    if (typeof value === 'string' && value.trim()) {
+      agentReports[field] = value
+    } else if (value && typeof value === 'object') {
+      const text = value.content || value.markdown || value.text || value.report || value.summary || value.reasoning
+      if (typeof text === 'string' && text.trim()) {
+        agentReports[field] = text
+      }
+    }
+  }
+
+  const finalReport = agentReports.final_report || agentReports.recommendation || agentReports.summary || Object.entries(agentReports)
+    .filter(([, value]) => value)
+    .map(([key, value]) => `## ${formatAgentReportLabel(key)}\n${value}`)
+    .join('\n\n---\n\n')
+
+  return {
+    workflow_id: fallback.workflow_id || form.value.workflow_id,
+    workflow_name: fallback.workflow_name || availableWorkflows.value.find(w => w.id === form.value.workflow_id)?.name || form.value.workflow_id,
+    symbol: fallback.symbol || form.value.stock.symbol,
+    analysis_date: fallback.analysis_date || form.value.stock.analysis_date,
+    report: finalReport,
+    agent_reports: agentReports,
+    report_length: finalReport.length
+  }
+}
+
+const startWorkflowDebugPolling = (taskId: string, fallback: any = {}) => {
+  clearWorkflowDebugPolling()
+  workflowDebugTaskId.value = taskId
+  workflowDebugProgress.value = 0
+  workflowDebugMessage.value = fallback.message || '工作流调试任务已提交'
+
+  workflowDebugPollingTimer.value = setInterval(async () => {
+    try {
+      const response = await analysisApi.getTaskStatus(taskId)
+      const status = response.data || response
+      workflowDebugProgress.value = Number(status.progress || 0)
+      workflowDebugMessage.value = status.current_step_description || status.message || workflowDebugMessage.value
+
+      if (status.status === 'completed') {
+        clearWorkflowDebugPolling()
+        const rawResult = await fetchTaskResultWithRetry(taskId, { seedData: status.result_data })
+        workflowResult.value = buildWorkflowDebugResult(rawResult, fallback)
+        activeReportTab.value = 'summary'
+        loading.value = false
+        ElMessage.success('工作流调试完成')
+      } else if (status.status === 'failed' || status.status === 'cancelled') {
+        clearWorkflowDebugPolling()
+        loading.value = false
+        ElMessage.error(status.error_message || status.message || '工作流调试失败')
+      }
+    } catch (error: any) {
+      console.error('轮询工作流调试状态失败:', error)
+    }
+  }, 2000)
+}
+
 const runDebug = async () => {
   loading.value = true
   // 清空之前的结果
+  clearWorkflowDebugPolling()
   result.value = null
   workflowResult.value = null
+  workflowDebugTaskId.value = null
+  workflowDebugProgress.value = 0
+  workflowDebugMessage.value = ''
   invocationResult.value = null
   selectedInvocation.value = null
 
@@ -1600,11 +1701,16 @@ const runDebug = async () => {
         stock: { ...form.value.stock, symbol }
       })
 
-      if (res.success) {
-        workflowResult.value = res.data
+      if (res.success && res.data?.task_id) {
+        startWorkflowDebugPolling(res.data.task_id, res.data)
+        ElMessage.success('工作流调试任务已提交，正在后台执行')
+      } else if (res.success && res.data?.report) {
+        workflowResult.value = buildWorkflowDebugResult(res.data, res.data)
         activeReportTab.value = 'summary'
+        loading.value = false
         ElMessage.success('工作流调试完成')
       } else {
+        loading.value = false
         ElMessage.error(res.message || '工作流调试失败')
       }
       return
@@ -1661,9 +1767,15 @@ const runDebug = async () => {
     }
     ElMessage.error(e?.response?.data?.detail || e?.message || '调试失败')
   } finally {
-    loading.value = false
+    if (!workflowDebugPollingTimer.value) {
+      loading.value = false
+    }
   }
 }
+
+onUnmounted(() => {
+  clearWorkflowDebugPolling()
+})
 
 onMounted(async () => {
   try {
@@ -1879,6 +1991,7 @@ const goBack = () => {
 .ta-result { margin-top: 12px }
 .ta-pre { white-space: pre-wrap; background: var(--el-fill-color); color: var(--el-text-color-primary); padding: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 6px }
 .ta-meta { color: var(--el-text-color-secondary); margin-bottom: 6px }
+.debug-task-tip { margin-left: 12px; color: var(--el-text-color-secondary); font-size: 12px }
 
 .invocation-detail {
   margin-top: 16px;

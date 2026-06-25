@@ -154,6 +154,13 @@ def _code_to_6digit(xt_code: str) -> str:
 class QMTAdapter(DataSourceAdapter):
     """QMT 数据源适配器（需 MiniQMT 运行，新闻用 AKShare）"""
 
+    _UNAVAILABLE_CACHE_UNTIL = 0.0
+    _AVAILABLE_CACHE_UNTIL = 0.0
+    _AVAILABILITY_PROBE_UNTIL = 0.0
+    _UNAVAILABLE_CACHE_SECONDS = 30.0
+    _AVAILABLE_CACHE_SECONDS = 10.0
+    _PROBE_GUARD_SECONDS = 5.0
+
     def __init__(self):
         super().__init__()
         self._available: Optional[bool] = None
@@ -606,26 +613,53 @@ class QMTAdapter(DataSourceAdapter):
         code = str(code).strip().zfill(6)
         return code.startswith(("50", "51", "52", "56", "58", "15", "16", "18"))
 
+    def _mark_qmt_available(self) -> None:
+        type(self)._AVAILABLE_CACHE_UNTIL = time.monotonic() + self._AVAILABLE_CACHE_SECONDS
+        type(self)._UNAVAILABLE_CACHE_UNTIL = 0.0
+        self._available = True
+
+    def _mark_qmt_unavailable(self) -> None:
+        type(self)._UNAVAILABLE_CACHE_UNTIL = time.monotonic() + self._UNAVAILABLE_CACHE_SECONDS
+        type(self)._AVAILABLE_CACHE_UNTIL = 0.0
+        self._available = False
+
     def is_available(self) -> bool:
         """检查 xtquant 是否可用且 MiniQMT 已连接"""
-        # 快速短路：如果 QMT 在配置中未启用，直接返回 False（跳过约 2 秒连接超时）
+        now = time.monotonic()
+        if now < type(self)._UNAVAILABLE_CACHE_UNTIL:
+            return False
+        if now < type(self)._AVAILABLE_CACHE_UNTIL:
+            return True
+        if now < type(self)._AVAILABILITY_PROBE_UNTIL:
+            logger.debug("QMT 可用性探测正在进行，当前请求快速跳过")
+            return False
+
+        # 快速短路：如果 QMT 在配置中未启用，直接返回 False（跳过连接探测）
         try:
             from app.core.config import settings as app_settings
             if not app_settings.QMT_UNIFIED_ENABLED:
+                self._mark_qmt_unavailable()
                 return False
         except Exception:
             pass
 
-        self._bootstrap_connection()
+        type(self)._AVAILABILITY_PROBE_UNTIL = now + self._PROBE_GUARD_SECONDS
+        try:
+            self._bootstrap_connection()
 
-        xt = _get_xtdata()
-        if xt is None:
+            xt = _get_xtdata()
+            if xt is None:
+                self._mark_qmt_unavailable()
+                return False
+            if self._has_existing_connection(xt):
+                self._mark_qmt_available()
+                return True
+
+            logger.debug("QMT 不可用: 未检测到可复用的 MiniQMT 连接")
+            self._mark_qmt_unavailable()
             return False
-        if self._has_existing_connection(xt):
-            return True
-
-        logger.debug("QMT 不可用: 未检测到可复用的 MiniQMT 连接")
-        return False
+        finally:
+            type(self)._AVAILABILITY_PROBE_UNTIL = 0.0
 
     # ==================== 数据质量监控 ====================
 

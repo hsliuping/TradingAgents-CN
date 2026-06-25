@@ -178,9 +178,10 @@ if ($Command -eq "backend" -or $Command -eq "all") {
 
     Write-Host ""
     Write-Host "[Backend] Starting FastAPI + Uvicorn..." -ForegroundColor Yellow
-    Write-Host "  Port: $BackendPort" -ForegroundColor Gray
-    Write-Host "  URL:  http://127.0.0.1:$BackendPort" -ForegroundColor Gray
-    Write-Host "  Docs: http://127.0.0.1:$BackendPort/docs" -ForegroundColor Gray
+    Write-Host "  Python: $pythonExe ($(& $pythonExe --version 2>&1))" -ForegroundColor Gray
+    Write-Host "  Port:   $BackendPort" -ForegroundColor Gray
+    Write-Host "  URL:    http://127.0.0.1:$BackendPort" -ForegroundColor Gray
+    Write-Host "  Docs:   http://127.0.0.1:$BackendPort/docs" -ForegroundColor Gray
     Write-Host ""
 
     if ($Command -eq "backend") {

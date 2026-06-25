@@ -68,6 +68,7 @@ class WorkflowCreate(BaseModel):
     tags: List[str] = Field(default_factory=list)
     is_template: bool = False
     config: Dict[str, Any] = Field(default_factory=dict)
+    workflow_type: Optional[str] = None
 
 
 class WorkflowUpdate(BaseModel):
@@ -79,6 +80,7 @@ class WorkflowUpdate(BaseModel):
     edges: Optional[List[EdgeDefinition]] = None
     tags: Optional[List[str]] = None
     config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    workflow_type: Optional[str] = None
 
 
 class ModelConfig(BaseModel):
@@ -126,6 +128,7 @@ async def list_workflows():
     """获取所有工作流列表"""
     try:
         from core.api import WorkflowAPI
+        from core.workflow.default_workflow_provider import get_default_workflow_provider
         api = WorkflowAPI()
         workflows = api.list_all()
         return ok(workflows)
@@ -139,6 +142,7 @@ async def get_templates(user: dict = Depends(get_current_user)):
     """获取预定义模板"""
     try:
         from core.api import WorkflowAPI
+        from core.workflow.default_workflow_provider import get_default_workflow_provider
         api = WorkflowAPI()
         templates = api.get_templates()
         return ok(templates)
@@ -1042,6 +1046,7 @@ async def set_as_default(workflow_id: str):
     """设为默认分析流"""
     try:
         from core.api import WorkflowAPI
+        from core.workflow.default_workflow_provider import get_default_workflow_provider
         api = WorkflowAPI()
 
         # 获取工作流
@@ -1049,8 +1054,11 @@ async def set_as_default(workflow_id: str):
         if workflow is None:
             raise HTTPException(status_code=404, detail="工作流不存在")
 
-        # 保存为默认分析流配置
-        # 这里将默认工作流ID保存到配置文件
+        workflow_name = workflow.get("name", "")
+        provider = get_default_workflow_provider()
+        workflow_type = provider.infer_workflow_type(workflow, workflow_id)
+
+        # 保存为默认分析流配置：文件用于本地兜底，数据库用于运行时加载
         import json
         from pathlib import Path
 
@@ -1060,14 +1068,59 @@ async def set_as_default(workflow_id: str):
             with open(config_path, "r", encoding="utf-8") as f:
                 config = json.load(f)
 
-        config["default_workflow_id"] = workflow_id
-        config["default_workflow_name"] = workflow.get("name", "")
+        config.setdefault("default_workflows", {})
+        config["default_workflows"][workflow_type] = {
+            "workflow_id": workflow_id,
+            "workflow_name": workflow_name,
+        }
+        if workflow_type == "stock_analysis":
+            config["default_workflow_id"] = workflow_id
+            config["default_workflow_name"] = workflow_name
 
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
 
-        return ok(message=f"已将 '{workflow.get('name')}' 设为默认分析流")
+        from app.core.database import get_mongo_db
+        db = get_mongo_db()
+        await db.workflows.update_many(
+            {"workflow_type": workflow_type, "is_default": True},
+            {"$set": {"is_default": False, "updated_at": datetime.utcnow()}},
+        )
+        await db.workflows.update_many(
+            {"config.workflow_type": workflow_type, "is_default": True},
+            {"$set": {"is_default": False, "updated_at": datetime.utcnow()}},
+        )
+        await db.workflows.update_one(
+            {"id": workflow_id},
+            {
+                "$set": {
+                    "is_default": True,
+                    "workflow_type": workflow_type,
+                    "updated_at": datetime.utcnow(),
+                }
+            },
+        )
+        await db.system_configs.update_one(
+            {"is_active": True},
+            {
+                "$set": {
+                    "active_workflow_id": workflow_id,
+                    "active_workflow_name": workflow_name,
+                    "default_workflow_id": workflow_id,
+                    "default_workflow_name": workflow_name,
+                    f"default_workflows.{workflow_type}": {
+                        "workflow_id": workflow_id,
+                        "workflow_name": workflow_name,
+                    },
+                    "updated_at": datetime.utcnow(),
+                },
+                "$setOnInsert": {"created_at": datetime.utcnow()},
+            },
+            upsert=True,
+        )
+
+        return ok(message=f"已将 '{workflow_name}' 设为 {workflow_type} 默认分析流")
     except HTTPException:
         raise
     except Exception as e:

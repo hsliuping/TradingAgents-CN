@@ -152,26 +152,15 @@
               </span>
             </div>
 
-            <!-- 投资建议 - 重点突出 -->
+            <!-- 一句话分析 -->
             <div class="recommendation-box">
               <div class="recommendation-header">
                 <el-icon class="icon"><TrendCharts /></el-icon>
-                <span class="title">投资建议</span>
+                <span class="title">一句话分析</span>
               </div>
               <div class="recommendation-content">
-                <div class="recommendation-text">
-                  {{ lastAnalysis?.recommendation || '-' }}
-                </div>
+                <div class="recommendation-text markdown-body" v-html="renderMarkdown(oneSentenceConclusion)"></div>
               </div>
-            </div>
-
-            <!-- 分析摘要 -->
-            <div class="summary-section">
-              <div class="summary-title">
-                <el-icon><Reading /></el-icon>
-                分析摘要
-              </div>
-              <div class="summary-text markdown-body" v-html="renderMarkdown(lastAnalysis?.summary || '-')"></div>
             </div>
 
             <!-- 详细报告展示 -->
@@ -454,7 +443,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { TrendCharts, Star, Refresh, Link, Document, Clock, Reading, CreditCard, Delete } from '@element-plus/icons-vue'
+import { TrendCharts, Star, Refresh, Link, Document, Clock, CreditCard, Delete } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { stocksApi } from '@/api/stocks'
 import { analysisApi } from '@/api/analysis'
@@ -478,6 +467,7 @@ import { useAuthStore } from '@/stores/auth'
 import type { StockInfo } from '@/types/analysis'
 import { getFactorDiagnosticEntries, getFactorWarningEntries } from '@/utils/factorPresentation'
 import { loadManualSyncSourceState, type ManualSyncDataSource } from '@/utils/dataSource'
+import { getReportName } from '@/utils/reportPresentation'
 
 
 echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
@@ -502,6 +492,11 @@ const showReportsDialog = ref(false)
 const activeReportTab = ref('')
 
 const reportKeys = computed(() => Object.keys(lastAnalysis.value?.reports || {}))
+const oneSentenceConclusion = computed(() => {
+  const traderPlan = getReportContent(lastAnalysis.value?.reports?.trader_investment_plan)
+  const conclusion = extractMarkdownSection(traderPlan, '一句话结论')
+  return conclusion || lastAnalysis.value?.summary || '-'
+})
 
 // 股票代码（从路由参数获取）
 watch(
@@ -1475,52 +1470,18 @@ function formatNewsTime(dateStr: string | null | undefined): string {
 // 格式化报告名称
 function formatReportName(key: string): string {
   const isEtfAnalysis = Array.isArray(lastAnalysis.value?.analysts) && lastAnalysis.value.analysts.includes('etf_analyst')
-  if (key === 'fundamentals_report' && isEtfAnalysis) {
-    return '📊 ETF 分析'
-  }
+  return getReportName(key, isEtfAnalysis)
+}
 
-  // 完整的13个报告映射
-  const nameMap: Record<string, string> = {
-    // 🆕 宏观分析师团队 (2个)
-    'index_report': '📊 大盘指数分析',
-    'sector_report': '🏭 行业板块分析',
-    // 分析师团队 (4个)
-    'market_report': '📈 市场技术分析',
-    'sentiment_report': '💭 市场情绪分析',
-    'news_report': '📰 新闻事件分析',
-    'fundamentals_report': '💰 基本面分析',
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
-    // 研究团队 (3个)
-    'bull_researcher': '🐂 多头研究员',
-    'bear_researcher': '🐻 空头研究员',
-    'research_team_decision': '🔬 研究经理分析',
-    // v2.0 直出字段
-    'bull_report': '🐂 看涨研究',
-    'bear_report': '🐻 看跌研究',
-
-    // 交易团队 (1个)
-    'trader_investment_plan': '💼 交易员计划',
-
-    // 风险管理团队 (4个)
-    'risky_analyst': '⚡ 激进分析师',
-    'safe_analyst': '🛡️ 保守分析师',
-    'neutral_analyst': '⚖️ 中性分析师',
-    'risk_management_decision': '⚠️ 风险经理',
-    // v2.0 风险观点与评估直出字段
-    'risky_opinion': '🔥 激进风险观点',
-    'safe_opinion': '🛡️ 保守风险观点',
-    'neutral_opinion': '⚖️ 中性风险观点',
-    'risk_assessment': '⚠️ 风险评估',
-
-    // 最终决策 (1个)
-    'final_trade_decision': '🎯 最终分析结果',
-
-    // 兼容旧字段
-    'investment_plan': '📋 投资建议',
-    'investment_debate_state': '🔬 研究团队分析（旧）',
-    'risk_debate_state': '⚖️ 风险管理团队（旧）'
-  }
-  return nameMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+function extractMarkdownSection(content: string, heading: string): string {
+  if (!content) return ''
+  const headingPattern = escapeRegExp(heading)
+  const match = content.match(new RegExp(`(?:^|\\n)#{1,6}\\s*${headingPattern}\\s*\\n([\\s\\S]*?)(?=\\n#{1,6}\\s+|$)`, 'i'))
+  return match?.[1]?.trim() || ''
 }
 
 // 🔥 提取报告内容（支持对象中的 content 字段）
@@ -1930,39 +1891,6 @@ function exportReport() {
   white-space: pre-wrap;
 }
 
-/* 分析摘要 */
-.summary-section {
-  padding: 18px 20px;
-  background: #f8fafc;
-  border-radius: 8px;
-  border-left: 4px solid #3b82f6;
-  margin-top: 16px;
-}
-
-.summary-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 15px;
-  font-weight: 600;
-  color: #1e40af;
-  margin-bottom: 12px;
-}
-
-.summary-title .el-icon {
-  font-size: 18px;
-  color: #3b82f6;
-}
-
-.summary-text {
-  color: #334155;
-  line-height: 1.8;
-  font-size: 14px;
-  word-wrap: break-word;
-  word-break: break-word;
-  white-space: pre-wrap;
-}
-
 /* 同步状态提示 */
 .sync-status {
   display: flex;
@@ -1989,3 +1917,4 @@ function exportReport() {
   flex-wrap: wrap;
 }
 </style>
+

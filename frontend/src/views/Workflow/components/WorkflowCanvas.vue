@@ -140,6 +140,7 @@ const emit = defineEmits<{
   (e: 'nodes-change', nodes: NodeDefinition[]): void
   (e: 'edges-change', edges: EdgeDefinition[]): void
   (e: 'node-click', node: NodeDefinition): void
+  (e: 'canvas-click'): void
 }>()
 
 // 常量
@@ -400,7 +401,14 @@ const onWheel = (event: WheelEvent) => {
 }
 
 // 平移
+const hasPanned = ref(false)
+const canvasClickStart = ref({ x: 0, y: 0 })
+
 const startPan = (event: MouseEvent) => {
+  // 记录点击位置，用于判断是否是点击空白区域
+  canvasClickStart.value = { x: event.clientX, y: event.clientY }
+  hasPanned.value = false
+
   // 只有按住空格键或中键才平移
   if (event.button === 1 || event.shiftKey) {
     isPanning.value = true
@@ -411,12 +419,26 @@ const startPan = (event: MouseEvent) => {
 
 const onPan = (event: MouseEvent) => {
   if (!isPanning.value) return
+  hasPanned.value = true
   panX.value = (event.clientX - panStart.value.x) / zoom.value
   panY.value = (event.clientY - panStart.value.y) / zoom.value
 }
 
-const stopPan = () => {
+const stopPan = (event: MouseEvent) => {
+  // 如果没有发生平移，且是左键点击（mouseleave 事件没有 button，默认处理），且点击位置与起始位置相近，则认为是点击画布空白区域
+  const isLeftClick = event.type === 'mouseleave' || event.button === 0
+  if (!hasPanned.value && isLeftClick) {
+    const dx = Math.abs(event.clientX - canvasClickStart.value.x)
+    const dy = Math.abs(event.clientY - canvasClickStart.value.y)
+    if (dx < 5 && dy < 5) {
+      // 清除选中节点
+      selectedNodeId.value = null
+      emit('canvas-click')
+    }
+  }
+
   isPanning.value = false
+  hasPanned.value = false
 }
 
 // 小地图点击

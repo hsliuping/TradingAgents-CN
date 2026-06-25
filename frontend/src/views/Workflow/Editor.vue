@@ -10,6 +10,7 @@
         <el-divider direction="vertical" />
         <span class="workflow-title">{{ workflow?.name || '加载中...' }}</span>
         <el-tag v-if="hasUnsavedChanges" type="warning" size="small">未保存</el-tag>
+        <el-tag v-if="workflow?.is_default" type="success" size="small" effect="dark">默认</el-tag>
       </div>
       <div class="toolbar-center">
         <el-button-group>
@@ -129,10 +130,11 @@
           @nodes-change="onNodesChange"
           @edges-change="onEdgesChange"
           @node-click="onNodeClick"
+          @canvas-click="onCanvasClick"
         />
       </div>
 
-      <!-- 右侧属性面板 -->
+      <!-- 右侧属性面板（仅在选中节点且编辑模式下显示） -->
       <div class="property-panel" v-if="selectedNode && isEditMode">
         <h3>节点属性</h3>
         <el-form label-position="top">
@@ -340,22 +342,6 @@
           </div>
         </div>
       </div>
-
-      <!-- 空状态提示 -->
-      <div class="property-panel" v-else-if="isEditMode">
-        <div class="empty-panel">
-          <el-icon :size="48" color="var(--el-text-color-placeholder)"><InfoFilled /></el-icon>
-          <p>选择节点查看属性</p>
-          <el-divider />
-          <h4>操作提示</h4>
-          <ul class="tips-list">
-            <li>从左侧拖拽节点到画布添加</li>
-            <li>从节点右侧圆点拖动连线</li>
-            <li>点击连线可删除</li>
-            <li>点击节点可编辑属性</li>
-          </ul>
-        </div>
-      </div>
     </div>
 
     <!-- 验证结果对话框 -->
@@ -427,7 +413,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, ArrowRight, Check, DocumentChecked, VideoPlay, Lock, InfoFilled, Star } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Check, DocumentChecked, VideoPlay, Lock, Star } from '@element-plus/icons-vue'
 import { workflowApi, type WorkflowDefinition, type NodeDefinition, type EdgeDefinition, type ValidationResult } from '@/api/workflow'
 import { agentApi, type AgentMetadata, type AgentCategory, type AgentToolsConfig } from '@/api/agents'
 import { TemplatesApi, type TemplateItem } from '@/api/templates'
@@ -442,7 +428,12 @@ const route = useRoute()
 const router = useRouter()
 
 // 状态
-const workflow = ref<WorkflowDefinition | null>(null)
+type EditableWorkflowDefinition = WorkflowDefinition & {
+  is_default?: boolean
+  workflow_type?: string
+}
+
+const workflow = ref<EditableWorkflowDefinition | null>(null)
 const nodes = ref<NodeDefinition[]>([])
 const edges = ref<EdgeDefinition[]>([])
 const agents = ref<AgentMetadata[]>([])
@@ -738,6 +729,9 @@ const setAsDefault = async () => {
   try {
     const result = await workflowApi.setAsDefault(workflowId.value)
     if (result.success) {
+      if (workflow.value) {
+        workflow.value.is_default = true
+      }
       ElMessage.success('已设为默认分析流')
     } else {
       ElMessage.error(result.message || '设置失败')
@@ -865,6 +859,14 @@ const onNodeClick = async (node: NodeDefinition) => {
     agentToolsConfig.value = null
     agentTemplates.value = []
   }
+}
+
+// 点击画布空白区域取消选中
+const onCanvasClick = () => {
+  selectedNode.value = null
+  nodeConfig.value = {}
+  agentToolsConfig.value = null
+  agentTemplates.value = []
 }
 
 // 加载 Agent 工具配置

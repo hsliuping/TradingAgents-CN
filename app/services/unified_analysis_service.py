@@ -948,7 +948,7 @@ class UnifiedAnalysisService:
             if parameters and hasattr(parameters, "workflow_id"):
                 workflow_id = parameters.workflow_id
             if not workflow_id:
-                workflow_id = self._workflow_provider.get_active_workflow_id()
+                workflow_id = self._workflow_provider.get_active_workflow_id("stock_analysis")
 
             try:
                 wf = self._workflow_provider.load_workflow(workflow_id)

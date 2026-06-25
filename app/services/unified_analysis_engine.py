@@ -50,8 +50,51 @@ class UnifiedAnalysisEngine:
             self.logger.warning(f"⚠️ 校验工作流存在性失败: workflow_id={workflow_id}, error={exc}")
             return False
 
+    def _workflow_type_for_task(self, task_type: AnalysisTaskType) -> str:
+        """将任务类型映射为工作流类型。"""
+        mapping = {
+            AnalysisTaskType.STOCK_ANALYSIS: "stock_analysis",
+            AnalysisTaskType.ETF_ANALYSIS: "etf_analysis",
+            AnalysisTaskType.POSITION_ANALYSIS: "position_analysis",
+            AnalysisTaskType.TRADE_REVIEW: "trade_review",
+        }
+        return mapping.get(task_type, task_type.value if hasattr(task_type, "value") else str(task_type))
+
     def _resolve_workflow_id(self, task: UnifiedAnalysisTask, config) -> str:
         """解析本次任务应使用的工作流 ID。"""
+        task_type = task.task_type
+        if isinstance(task_type, str):
+            task_type = AnalysisTaskType(task_type)
+
+        workflow_type = self._workflow_type_for_task(task_type)
+        if task_type in (
+            AnalysisTaskType.STOCK_ANALYSIS,
+            AnalysisTaskType.ETF_ANALYSIS,
+            AnalysisTaskType.POSITION_ANALYSIS,
+            AnalysisTaskType.TRADE_REVIEW,
+        ):
+            try:
+                workflow_provider = get_default_workflow_provider()
+                active_workflow_id = workflow_provider.get_active_workflow_id(workflow_type)
+                if active_workflow_id:
+                    if self._workflow_exists(active_workflow_id):
+                        self.logger.info(f"📋 工作流选择: 使用我的分析流配置 type={workflow_type}, workflow_id={active_workflow_id}")
+                        return active_workflow_id
+                    try:
+                        workflow_provider.load_workflow(active_workflow_id)
+                    except Exception as exc:
+                        self.logger.warning(
+                            f"⚠️ 我的分析流配置 {active_workflow_id} 无效，继续检查任务显式 workflow_id: {exc}"
+                        )
+                    else:
+                        self.logger.info(f"📋 工作流选择: 使用我的分析流配置 type={workflow_type}, workflow_id={active_workflow_id}")
+                        return active_workflow_id
+                    self.logger.warning(
+                        f"⚠️ 我的分析流配置不存在，将继续检查任务显式 workflow_id: workflow_id={active_workflow_id}"
+                    )
+            except Exception as exc:
+                self.logger.warning(f"⚠️ 获取我的分析流配置失败，继续检查任务显式 workflow_id: {exc}")
+
         explicit_workflow_id = task.workflow_id or task.task_params.get("workflow_id")
         if explicit_workflow_id:
             if self._workflow_exists(explicit_workflow_id):
@@ -61,36 +104,13 @@ class UnifiedAnalysisEngine:
                 f"⚠️ 任务显式指定的工作流不存在，将回退到默认流程: workflow_id={explicit_workflow_id}"
             )
 
-        if task.task_type == AnalysisTaskType.STOCK_ANALYSIS:
-            try:
-                workflow_provider = get_default_workflow_provider()
-                active_workflow_id = workflow_provider.get_active_workflow_id()
-                if active_workflow_id:
-                    if self._workflow_exists(active_workflow_id):
-                        self.logger.info(f"📋 工作流选择: 使用当前活动工作流 workflow_id={active_workflow_id}")
-                        return active_workflow_id
-                    try:
-                        workflow_provider.load_workflow(active_workflow_id)
-                    except Exception as exc:
-                        self.logger.warning(
-                            f"⚠️ 活动工作流 {active_workflow_id} 无效，回退注册表默认值 {config.workflow_id}: {exc}"
-                        )
-                    else:
-                        self.logger.info(f"📋 工作流选择: 使用当前活动工作流 workflow_id={active_workflow_id}")
-                        return active_workflow_id
-                    self.logger.warning(
-                        f"⚠️ 当前活动工作流不存在，将回退到注册表默认流程: workflow_id={active_workflow_id}"
-                    )
-            except Exception as exc:
-                self.logger.warning(f"⚠️ 获取活动工作流失败，回退注册表默认值: {exc}")
-
         if self._workflow_exists(config.workflow_id):
             self.logger.info(f"📋 工作流选择: 使用注册表默认 workflow_id={config.workflow_id}")
             return config.workflow_id
 
-        fallback_workflow_id = get_default_workflow_provider().get_default_workflow().id
+        fallback_workflow_id = get_default_workflow_provider().get_default_workflow_id_for_type(workflow_type)
         self.logger.warning(
-            f"⚠️ 注册表默认工作流不存在，回退到系统默认工作流: workflow_id={fallback_workflow_id}"
+            f"⚠️ 注册表默认工作流不存在，回退到系统默认工作流: type={workflow_type}, workflow_id={fallback_workflow_id}"
         )
         return fallback_workflow_id
 
@@ -474,8 +494,9 @@ class UnifiedAnalysisEngine:
             preference_id=task.preference_type,  # 使用任务的偏好类型
             session_id=None,
             request_id=None,
-            is_debug_mode=False,  # 正式流程不启用调试模式
-            debug_template_id=None
+            is_debug_mode=bool(task.task_params.get("debug_mode", False)),
+            debug_template_id=task.task_params.get("debug_template_id"),
+            workflow_id=workflow_id,
         )
 
         # 将 AgentContext 添加到工作流输入
@@ -509,6 +530,23 @@ class UnifiedAnalysisEngine:
         legacy_config = {
             "preference_type": task.preference_type,
         }
+
+        if workflow_inputs.get("debug_mode"):
+            if workflow_inputs.get("debug_llm_provider"):
+                legacy_config["llm_provider"] = workflow_inputs["debug_llm_provider"]
+            if workflow_inputs.get("debug_llm_backend_url"):
+                legacy_config["backend_url"] = workflow_inputs["debug_llm_backend_url"]
+            if workflow_inputs.get("debug_llm_api_key"):
+                legacy_config["quick_api_key"] = workflow_inputs["debug_llm_api_key"]
+                legacy_config["deep_api_key"] = workflow_inputs["debug_llm_api_key"]
+            if workflow_inputs.get("debug_llm_temperature") is not None or workflow_inputs.get("debug_llm_max_tokens") is not None:
+                debug_model_config = {
+                    "temperature": workflow_inputs.get("debug_llm_temperature"),
+                    "max_tokens": workflow_inputs.get("debug_llm_max_tokens"),
+                    "timeout": 300 if str(workflow_inputs.get("debug_llm_provider", "")).lower() == "ollama" else 180,
+                }
+                legacy_config["quick_model_config"] = debug_model_config
+                legacy_config["deep_model_config"] = debug_model_config
 
         # 🔑 关键：从任务参数中提取 selected_analysts（用于动态裁剪工作流）
         if "selected_analysts" in workflow_inputs:
@@ -555,6 +593,23 @@ class UnifiedAnalysisEngine:
         if quick_model or deep_model:
             full_config = await self._build_llm_config(quick_model, deep_model)
             legacy_config.update(full_config)
+
+            if workflow_inputs.get("debug_mode"):
+                if workflow_inputs.get("debug_llm_provider"):
+                    legacy_config["llm_provider"] = workflow_inputs["debug_llm_provider"]
+                if workflow_inputs.get("debug_llm_backend_url"):
+                    legacy_config["backend_url"] = workflow_inputs["debug_llm_backend_url"]
+                if workflow_inputs.get("debug_llm_api_key"):
+                    legacy_config["quick_api_key"] = workflow_inputs["debug_llm_api_key"]
+                    legacy_config["deep_api_key"] = workflow_inputs["debug_llm_api_key"]
+                if workflow_inputs.get("debug_llm_temperature") is not None or workflow_inputs.get("debug_llm_max_tokens") is not None:
+                    debug_model_config = {
+                        "temperature": workflow_inputs.get("debug_llm_temperature"),
+                        "max_tokens": workflow_inputs.get("debug_llm_max_tokens"),
+                        "timeout": 300 if str(workflow_inputs.get("debug_llm_provider", "")).lower() == "ollama" else 180,
+                    }
+                    legacy_config["quick_model_config"] = debug_model_config
+                    legacy_config["deep_model_config"] = debug_model_config
 
         self.logger.info(f"🔧 LLM配置: quick={legacy_config.get('quick_think_llm')}, "
                         f"deep={legacy_config.get('deep_think_llm')}, "

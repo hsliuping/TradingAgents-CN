@@ -53,6 +53,8 @@ export interface WorkflowSummary {
   version: string
   tags: string[]
   is_template: boolean
+  is_default?: boolean
+  workflow_type?: string
   created_at?: string
   updated_at?: string
 }

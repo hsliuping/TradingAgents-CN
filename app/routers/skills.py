@@ -386,6 +386,22 @@ async def _register_skill_to_registry(doc: Dict[str, Any]):
             registry = get_tool_registry()
             from core.tools.fc_converter import sanitize_function_name
             tool_id = sanitize_function_name(skill.name.replace("-", "_"))
+
+            # ⚠️ 命名冲突检查：Skill name → tool_id 不能与 impl.function 同名
+            #    否则 ToolRegistry 中的 wrapper 会与原始函数 key 冲突，
+            #    导致 SkillExecutor 调用时形成死循环。
+            impl_type_str = impl.get("type") if isinstance(impl, dict) else getattr(impl, "type", None)
+            impl_func = impl.get("function") if isinstance(impl, dict) else getattr(impl, "function", None)
+            if impl_type_str == "python" and impl_func and impl_func == tool_id:
+                suggested_name = f"{doc.get('name', 'unnamed')}-tool"
+                logger.warning(
+                    f"⚠️ Skill 命名冲突: tool_id '{tool_id}' 与 impl.function '{impl_func}' 同名！"
+                    f" 这会导致执行时的无限递归。建议将 Skill name 改为 '{suggested_name}' 以避免冲突。"
+                )
+                logger.warning(
+                    f"   冲突 Skill: name={doc.get('name')}, function={impl_func}, module={impl.get('module')}"
+                )
+
             # 兼容：如果 impl 里没有 skill_dir，从 doc 顶层补
             if isinstance(impl, dict) and impl.get("script_path") and not impl.get("skill_dir"):
                 if doc.get("skill_dir"):

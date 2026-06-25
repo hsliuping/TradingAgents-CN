@@ -16,7 +16,8 @@ from .models import (
     WorkflowExecution,
     WorkflowExecutionState,
 )
-from .builder import WorkflowBuilder
+from core.state.models import FieldType
+from .builder import WorkflowBuilder, ANALYST_TOOL_MAPPING
 from .validator import WorkflowValidator, ValidationResult
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,18 @@ def _prepare_workflow_runtime_inputs(
 
     if prepared_inputs.get("growth_memory_recall"):
         runtime_context["growth_memory_recall"] = prepared_inputs["growth_memory_recall"]
+
+    ticker = prepared_inputs.get("ticker") or prepared_inputs.get("symbol") or prepared_inputs.get("stock_symbol") or prepared_inputs.get("company_of_interest")
+    if ticker:
+        prepared_inputs.setdefault("ticker", ticker)
+        prepared_inputs.setdefault("stock_symbol", ticker)
+        prepared_inputs.setdefault("symbol", ticker)
+        prepared_inputs.setdefault("company_of_interest", ticker)
+
+    analysis_date = prepared_inputs.get("analysis_date") or prepared_inputs.get("trade_date")
+    if analysis_date:
+        prepared_inputs.setdefault("analysis_date", analysis_date)
+        prepared_inputs.setdefault("trade_date", analysis_date)
 
     prepared_inputs["_workflow_runtime"] = runtime_context
     return prepared_inputs
@@ -270,10 +283,13 @@ class WorkflowEngine:
             if agent_ids:
                 logger.info(f"[WorkflowEngine] 为工作流 {self._definition.id} 生成动态状态，Agent 列表: {agent_ids}")
 
+                internal_state_fields = self._build_internal_state_fields(self._definition)
+
                 # 使用 StateRegistry 获取或构建状态类
                 schema = self._state_registry.get_or_build(
                     workflow_id=self._definition.id,
-                    agent_ids=agent_ids
+                    agent_ids=agent_ids,
+                    internal_state_fields=internal_state_fields,
                 )
                 state_schema = self._state_registry.get_state_class(self._definition.id)
 
@@ -301,6 +317,47 @@ class WorkflowEngine:
                     agent_ids.append(agent_id)
         return agent_ids
     
+    def _build_internal_state_fields(self, definition: WorkflowDefinition) -> Dict[str, FieldType]:
+        """根据工作流定义补齐动态 State 需要的内部控制字段。"""
+        fields: Dict[str, FieldType] = {
+            "investment_debate_state": FieldType.OBJECT,
+            "risk_debate_state": FieldType.OBJECT,
+            "_max_debate_rounds": FieldType.NUMBER,
+            "_max_risk_rounds": FieldType.NUMBER,
+            "context": FieldType.OBJECT,
+            "skip_cache": FieldType.BOOLEAN,
+            "prompt_overrides": FieldType.OBJECT,
+            "_workflow_runtime": FieldType.OBJECT,
+            "_node_errors": FieldType.OBJECT,
+            "tool_call_summaries": FieldType.OBJECT,
+            "_condition_result": FieldType.BOOLEAN,
+            "_condition_error": FieldType.STRING,
+            "_analysis_data_source": FieldType.STRING,
+        }
+
+        for node in definition.nodes:
+            node_type = node.type.value if hasattr(node.type, "value") else str(node.type)
+            if node_type == "debate":
+                fields[f"_debate_{node.id}_count"] = FieldType.NUMBER
+
+            if node.agent_id:
+                normalized = node.agent_id.replace("_analyst_v2", "").replace("_analyst", "")
+                if normalized:
+                    fields[f"_{normalized}_messages"] = FieldType.ARRAY
+                    fields[f"{normalized}_tool_call_count"] = FieldType.NUMBER
+
+                analyst_type = ANALYST_TOOL_MAPPING.get(node.agent_id)
+                if analyst_type:
+                    fields[f"_{analyst_type}_messages"] = FieldType.ARRAY
+                    fields[f"{analyst_type}_tool_call_count"] = FieldType.NUMBER
+
+            node_config = getattr(node, "config", None) or {}
+            output_field = node_config.get("output_field")
+            if output_field:
+                fields[output_field] = FieldType.STRING
+
+        return fields
+    
     def set_progress_callback(self, callback: Optional[Callable]) -> "WorkflowEngine":
         """设置进度回调"""
         self._progress_callback = callback
@@ -325,6 +382,21 @@ class WorkflowEngine:
                 )
             except Exception as e:
                 logger.warning(f"进度回调失败: {e}")
+
+    def _build_execution_config(
+        self,
+        config: Optional[Dict[str, Any]],
+        inputs: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        execution_config = dict(config or {})
+        if "recursion_limit" not in execution_config:
+            recursion_limit = None
+            if inputs:
+                recursion_limit = inputs.get("recursion_limit") or inputs.get("workflow_recursion_limit")
+            if recursion_limit is None and self._legacy_config:
+                recursion_limit = self._legacy_config.get("recursion_limit")
+            execution_config["recursion_limit"] = int(recursion_limit or 100)
+        return execution_config
 
     def execute(
         self,
@@ -355,6 +427,7 @@ class WorkflowEngine:
             self._definition.id if self._definition else None,
             self._task_id,
         )
+        execution_config = self._build_execution_config(config, runtime_inputs)
 
         # 创建执行记录
         execution = self._create_execution(inputs)
@@ -370,7 +443,7 @@ class WorkflowEngine:
             # stream_mode 应该作为关键字参数传递，而不是放在 config 字典中
             final_state = inputs.copy() if inputs else {}
 
-            for chunk in self._compiled_graph.stream(runtime_inputs, config=config, stream_mode="updates"):
+            for chunk in self._compiled_graph.stream(runtime_inputs, config=execution_config, stream_mode="updates"):
                 # chunk 格式: {node_name: state_update}
                 if isinstance(chunk, dict):
                     for node_name, node_update in chunk.items():
@@ -571,6 +644,7 @@ class WorkflowEngine:
             self._definition.id if self._definition else None,
             self._task_id,
         )
+        execution_config = self._build_execution_config(config, runtime_inputs)
 
         execution = self._create_execution(inputs)
         self._report_progress(10, "开始执行工作流", "start")
@@ -585,7 +659,7 @@ class WorkflowEngine:
             # stream_mode 应该作为关键字参数传递，而不是放在 config 字典中
             final_state = inputs.copy() if inputs else {}
 
-            async for chunk in self._compiled_graph.astream(runtime_inputs, config=config, stream_mode="updates"):
+            async for chunk in self._compiled_graph.astream(runtime_inputs, config=execution_config, stream_mode="updates"):
                 # chunk 格式: {node_name: state_update}
                 if isinstance(chunk, dict):
                     for node_name, node_update in chunk.items():

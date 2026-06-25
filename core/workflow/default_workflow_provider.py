@@ -22,7 +22,8 @@ from .templates.v2_etf_analysis_workflow import V2_ETF_ANALYSIS_WORKFLOW
 logger = logging.getLogger(__name__)
 
 # 系统默认工作流 ID
-SYSTEM_DEFAULT_WORKFLOW_ID = "default_analysis"
+SYSTEM_DEFAULT_WORKFLOW_ID = "v2_stock_analysis"
+SYSTEM_LEGACY_WORKFLOW_ID = "default_analysis"
 SYSTEM_SIMPLE_WORKFLOW_ID = "simple_analysis"
 SYSTEM_TRADE_REVIEW_WORKFLOW_ID = "trade_review"
 SYSTEM_POSITION_ANALYSIS_WORKFLOW_ID = "position_analysis"
@@ -31,6 +32,23 @@ SYSTEM_POSITION_ANALYSIS_WORKFLOW_V2_ID = "position_analysis_v2"
 SYSTEM_V2_STOCK_ANALYSIS_WORKFLOW_ID = "v2_stock_analysis"
 SYSTEM_V2_ETF_ANALYSIS_WORKFLOW_ID = "v2_etf_analysis"
 
+WORKFLOW_TYPE_DEFAULTS = {
+    "stock_analysis": SYSTEM_V2_STOCK_ANALYSIS_WORKFLOW_ID,
+    "etf_analysis": SYSTEM_V2_ETF_ANALYSIS_WORKFLOW_ID,
+    "position_analysis": SYSTEM_POSITION_ANALYSIS_WORKFLOW_V2_ID,
+    "trade_review": SYSTEM_TRADE_REVIEW_WORKFLOW_V2_ID,
+}
+
+WORKFLOW_ID_TO_TYPE = {
+    SYSTEM_LEGACY_WORKFLOW_ID: "stock_analysis",
+    SYSTEM_V2_STOCK_ANALYSIS_WORKFLOW_ID: "stock_analysis",
+    SYSTEM_SIMPLE_WORKFLOW_ID: "stock_analysis",
+    SYSTEM_V2_ETF_ANALYSIS_WORKFLOW_ID: "etf_analysis",
+    SYSTEM_POSITION_ANALYSIS_WORKFLOW_ID: "position_analysis",
+    SYSTEM_POSITION_ANALYSIS_WORKFLOW_V2_ID: "position_analysis",
+    SYSTEM_TRADE_REVIEW_WORKFLOW_ID: "trade_review",
+    SYSTEM_TRADE_REVIEW_WORKFLOW_V2_ID: "trade_review",
+}
 
 class DefaultWorkflowProvider:
     """
@@ -44,7 +62,7 @@ class DefaultWorkflowProvider:
 
     # 系统预置工作流
     SYSTEM_WORKFLOWS = {
-        SYSTEM_DEFAULT_WORKFLOW_ID: DEFAULT_WORKFLOW,
+        SYSTEM_LEGACY_WORKFLOW_ID: DEFAULT_WORKFLOW,
         SYSTEM_SIMPLE_WORKFLOW_ID: SIMPLE_WORKFLOW,
         SYSTEM_TRADE_REVIEW_WORKFLOW_ID: TRADE_REVIEW_WORKFLOW,
         SYSTEM_POSITION_ANALYSIS_WORKFLOW_ID: POSITION_ANALYSIS_WORKFLOW,
@@ -56,7 +74,7 @@ class DefaultWorkflowProvider:
 
     def __init__(self):
         self._db = None
-        self._active_workflow_id: Optional[str] = None
+        self._active_workflow_ids: Dict[str, str] = {}
 
     def _get_db(self):
         """获取数据库连接（懒加载）"""
@@ -86,8 +104,8 @@ class DefaultWorkflowProvider:
         return self._db
 
     def get_default_workflow(self) -> WorkflowDefinition:
-        """获取系统默认工作流"""
-        return DEFAULT_WORKFLOW
+        """获取系统默认工作流（股票分析默认使用 v2 流程）"""
+        return V2_STOCK_ANALYSIS_WORKFLOW
 
     def get_simple_workflow(self) -> WorkflowDefinition:
         """获取简单工作流"""
@@ -96,6 +114,48 @@ class DefaultWorkflowProvider:
     def get_system_workflow(self, workflow_id: str) -> Optional[WorkflowDefinition]:
         """获取系统预置工作流"""
         return self.SYSTEM_WORKFLOWS.get(workflow_id)
+
+    def infer_workflow_type(self, workflow: Dict[str, Any] | WorkflowDefinition | None = None, workflow_id: str = "") -> str:
+        """推断工作流所属分析类型。"""
+        if workflow is None:
+            return WORKFLOW_ID_TO_TYPE.get(workflow_id, "stock_analysis")
+
+        if isinstance(workflow, WorkflowDefinition):
+            config = workflow.config or {}
+            tags = workflow.tags or []
+            wf_id = workflow.id
+            name = workflow.name or ""
+        else:
+            config = workflow.get("config") or {}
+            tags = workflow.get("tags") or []
+            wf_id = workflow.get("id") or workflow_id
+            name = workflow.get("name") or ""
+
+        explicit_type = config.get("workflow_type") or config.get("task_type")
+        if explicit_type:
+            return str(explicit_type)
+
+        mapped_type = WORKFLOW_ID_TO_TYPE.get(str(wf_id))
+        if mapped_type:
+            return mapped_type
+
+        text = " ".join([str(wf_id), name, " ".join(map(str, tags))]).lower()
+        if "etf" in text or "基金" in text:
+            return "etf_analysis"
+        if "position" in text or "持仓" in text:
+            return "position_analysis"
+        if "trade_review" in text or "复盘" in text:
+            return "trade_review"
+        return "stock_analysis"
+
+    def get_default_workflow_id_for_type(self, workflow_type: str = "stock_analysis") -> str:
+        """获取指定分析类型的系统默认工作流 ID。"""
+        return WORKFLOW_TYPE_DEFAULTS.get(workflow_type, SYSTEM_DEFAULT_WORKFLOW_ID)
+
+    def get_default_workflow_for_type(self, workflow_type: str = "stock_analysis") -> WorkflowDefinition:
+        """获取指定分析类型的系统默认工作流。"""
+        workflow_id = self.get_default_workflow_id_for_type(workflow_type)
+        return self.SYSTEM_WORKFLOWS.get(workflow_id, V2_STOCK_ANALYSIS_WORKFLOW)
 
     def _build_system_workflow_doc(
         self,
@@ -109,6 +169,8 @@ class DefaultWorkflowProvider:
         doc["updated_at"] = timestamp
         doc["created_by"] = "system"
         doc["is_system"] = True
+        doc["workflow_type"] = self.infer_workflow_type(workflow)
+        doc.setdefault("is_default", False)
         return doc
 
     def _normalize_workflow_doc_for_compare(self, doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -153,19 +215,66 @@ class DefaultWorkflowProvider:
         """检查是否为系统预置工作流"""
         return workflow_id in self.SYSTEM_WORKFLOWS
 
-    def get_active_workflow_id(self) -> str:
+    def get_active_workflow_id(self, workflow_type: str = "stock_analysis") -> str:
         """
         获取当前活动工作流 ID
 
         优先级：
-        1. config/settings.json 中的 default_workflow_id（前端设置）
-        2. 数据库中的 system_configs.active_workflow_id
-        3. 系统默认工作流
+        1. 数据库 workflows 中 workflow_type 匹配且 is_default=True 的工作流
+        2. 数据库 system_configs 中对应类型的默认工作流（兼容旧配置）
+        3. config/settings.json 中对应类型的默认工作流（本地兜底）
+        4. 指定类型的系统 v2 默认工作流
         """
-        if self._active_workflow_id:
-            return self._active_workflow_id
+        cache_key = workflow_type or "stock_analysis"
+        if cache_key in self._active_workflow_ids:
+            return self._active_workflow_ids[cache_key]
 
-        # 🆕 优先从 config/settings.json 读取（前端"设为默认"功能）
+        db = self._get_db()
+        if db is not None:
+            try:
+                workflow = db.workflows.find_one(
+                    {"workflow_type": cache_key, "is_default": True},
+                    sort=[("updated_at", -1)]
+                )
+                if not workflow:
+                    workflow = db.workflows.find_one(
+                        {"config.workflow_type": cache_key, "is_default": True},
+                        sort=[("updated_at", -1)]
+                    )
+                if workflow and workflow.get("id"):
+                    self._active_workflow_ids[cache_key] = workflow["id"]
+                    logger.info(
+                        f"从数据库 workflows 获取默认分析流: type={cache_key}, workflow_id={workflow['id']} ({workflow.get('name', '')})"
+                    )
+                    return workflow["id"]
+            except Exception as e:
+                logger.warning(f"从数据库 workflows 获取默认分析流失败: type={cache_key}, error={e}")
+
+        # 兼容旧配置：从 system_configs 获取对应类型活动工作流
+        if db is not None:
+            try:
+                config = db.system_configs.find_one(
+                    {"is_active": True},
+                    sort=[("version", -1)]
+                )
+                if config:
+                    typed_defaults = config.get("default_workflows") or {}
+                    typed_config = typed_defaults.get(cache_key) or {}
+                    workflow_id = typed_config.get("workflow_id")
+                    workflow_name = typed_config.get("workflow_name", "")
+
+                    if not workflow_id and cache_key == "stock_analysis":
+                        workflow_id = config.get("active_workflow_id") or config.get("default_workflow_id")
+                        workflow_name = config.get("active_workflow_name") or config.get("default_workflow_name") or ""
+
+                    if workflow_id:
+                        self._active_workflow_ids[cache_key] = workflow_id
+                        logger.info(f"从数据库获取活动工作流: type={cache_key}, workflow_id={workflow_id} ({workflow_name})")
+                        return workflow_id
+            except Exception as e:
+                logger.warning(f"从数据库获取活动工作流失败: type={cache_key}, error={e}")
+
+        # 再从 config/settings.json 读取本地兜底配置
         try:
             import json
             from pathlib import Path
@@ -174,34 +283,28 @@ class DefaultWorkflowProvider:
             if config_path.exists():
                 with open(config_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
-                    if config.get("default_workflow_id"):
-                        self._active_workflow_id = config["default_workflow_id"]
-                        logger.info(f"从配置文件获取活动工作流: {self._active_workflow_id} ({config.get('default_workflow_name', '')})")
-                        return self._active_workflow_id
+                    typed_defaults = config.get("default_workflows") or {}
+                    typed_config = typed_defaults.get(cache_key) or {}
+                    workflow_id = typed_config.get("workflow_id")
+                    workflow_name = typed_config.get("workflow_name", "")
+
+                    if not workflow_id and cache_key == "stock_analysis":
+                        workflow_id = config.get("default_workflow_id")
+                        workflow_name = config.get("default_workflow_name", "")
+
+                    if workflow_id:
+                        self._active_workflow_ids[cache_key] = workflow_id
+                        logger.info(f"从配置文件获取活动工作流: type={cache_key}, workflow_id={workflow_id} ({workflow_name})")
+                        return workflow_id
         except Exception as e:
-            logger.warning(f"从配置文件获取活动工作流失败: {e}")
+            logger.warning(f"从配置文件获取活动工作流失败: type={cache_key}, error={e}")
 
-        # 从数据库获取
-        db = self._get_db()
-        if db is not None:
-            try:
-                config = db.system_configs.find_one(
-                    {"is_active": True},
-                    sort=[("version", -1)]
-                )
-                if config and config.get("active_workflow_id"):
-                    self._active_workflow_id = config["active_workflow_id"]
-                    logger.info(f"从数据库获取活动工作流: {self._active_workflow_id}")
-                    return self._active_workflow_id
-            except Exception as e:
-                logger.warning(f"从数据库获取活动工作流失败: {e}")
+        default_workflow_id = self.get_default_workflow_id_for_type(cache_key)
+        self._active_workflow_ids[cache_key] = default_workflow_id
+        logger.info(f"使用系统默认工作流: type={cache_key}, workflow_id={default_workflow_id}")
+        return default_workflow_id
 
-        # 默认使用系统默认工作流
-        self._active_workflow_id = SYSTEM_DEFAULT_WORKFLOW_ID
-        logger.info(f"使用系统默认工作流: {self._active_workflow_id}")
-        return self._active_workflow_id
-
-    def set_active_workflow_id(self, workflow_id: str, workflow_name: str = "") -> bool:
+    def set_active_workflow_id(self, workflow_id: str, workflow_name: str = "", workflow_type: str = "stock_analysis") -> bool:
         """设置活动工作流 ID"""
         success = True
 
@@ -216,9 +319,15 @@ class DefaultWorkflowProvider:
                 with open(config_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
 
-            config["default_workflow_id"] = workflow_id
-            if workflow_name:
-                config["default_workflow_name"] = workflow_name
+            config.setdefault("default_workflows", {})
+            config["default_workflows"][workflow_type] = {
+                "workflow_id": workflow_id,
+                "workflow_name": workflow_name,
+            }
+            if workflow_type == "stock_analysis":
+                config["default_workflow_id"] = workflow_id
+                if workflow_name:
+                    config["default_workflow_name"] = workflow_name
 
             config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_path, "w", encoding="utf-8") as f:
@@ -229,21 +338,41 @@ class DefaultWorkflowProvider:
             logger.warning(f"更新配置文件失败: {e}")
             success = False
 
-        # 更新数据库
+        # 更新数据库默认分析流状态
         db = self._get_db()
         if db is not None:
             try:
+                db.workflows.update_many(
+                    {"workflow_type": workflow_type, "is_default": True},
+                    {"$set": {"is_default": False, "updated_at": datetime.utcnow()}},
+                )
+                db.workflows.update_many(
+                    {"config.workflow_type": workflow_type, "is_default": True},
+                    {"$set": {"is_default": False, "updated_at": datetime.utcnow()}},
+                )
+                db.workflows.update_one(
+                    {"id": workflow_id},
+                    {"$set": {"is_default": True, "workflow_type": workflow_type, "updated_at": datetime.utcnow()}},
+                )
                 db.system_configs.update_one(
                     {"is_active": True},
                     {
                         "$set": {
                             "active_workflow_id": workflow_id,
+                            "active_workflow_name": workflow_name,
+                            "default_workflow_id": workflow_id,
+                            "default_workflow_name": workflow_name,
+                            f"default_workflows.{workflow_type}": {
+                                "workflow_id": workflow_id,
+                                "workflow_name": workflow_name,
+                            },
                             "updated_at": datetime.utcnow()
-                        }
+                        },
+                        "$setOnInsert": {"created_at": datetime.utcnow()},
                     },
                     upsert=True
                 )
-                logger.info(f"已更新数据库: {workflow_id}")
+                logger.info(f"已更新数据库默认分析流: {workflow_id}")
             except Exception as e:
                 logger.warning(f"更新数据库失败: {e}")
                 success = False
@@ -251,8 +380,8 @@ class DefaultWorkflowProvider:
             logger.warning("无法更新数据库: 连接失败")
 
         if success:
-            self._active_workflow_id = workflow_id
-            logger.info(f"已设置活动工作流: {workflow_id}")
+            self._active_workflow_ids[workflow_type] = workflow_id
+            logger.info(f"已设置活动工作流: type={workflow_type}, workflow_id={workflow_id}")
 
         return success
 
@@ -269,9 +398,9 @@ class DefaultWorkflowProvider:
         import json
         from pathlib import Path
 
-        # 如果未指定，使用活动工作流
+        # 如果未指定，使用股票分析活动工作流
         if workflow_id is None:
-            workflow_id = self.get_active_workflow_id()
+            workflow_id = self.get_active_workflow_id("stock_analysis")
 
         logger.info(f"📋 [工作流加载] 开始加载工作流: {workflow_id}")
 
@@ -341,9 +470,10 @@ class DefaultWorkflowProvider:
             except Exception as e:
                 logger.error(f"❌ [工作流加载] 从文件系统加载失败: {e}")
 
-        # 3. 回退到默认工作流
-        logger.warning(f"⚠️ [工作流加载] 工作流 {workflow_id} 不存在，使用系统默认工作流")
-        default_workflow = DEFAULT_WORKFLOW
+        # 3. 回退到该流程类型的默认工作流
+        fallback_type = self.infer_workflow_type(workflow_id=workflow_id)
+        logger.warning(f"⚠️ [工作流加载] 工作流 {workflow_id} 不存在，使用系统默认工作流: type={fallback_type}")
+        default_workflow = self.get_default_workflow_for_type(fallback_type)
         analyst_nodes = [n for n in default_workflow.nodes if n.type == "analyst"]
         analyst_ids = [n.agent_id for n in analyst_nodes]
         logger.info(f"   默认工作流: {default_workflow.name}")

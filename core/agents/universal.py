@@ -68,6 +68,8 @@ class UniversalAgent(BaseAgent):
         self._agent_name = agent_name
         self._agent_description = agent_description
         self._output_field = output_field
+        self._last_tool_debug = []
+        self._last_llm_debug = {}
 
         super().__init__(config=config, llm=llm, tool_ids=tool_ids)
 

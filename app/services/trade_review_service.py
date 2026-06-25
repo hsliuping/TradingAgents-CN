@@ -2978,10 +2978,11 @@ class TradeReviewService:
         logger.info(f"🔍 [工作流复盘] 原始数据 - trade_info 类型: {type(trade_info)}")
         logger.info(f"🔍 [工作流复盘] 原始数据 - trade_info 属性: {[attr for attr in dir(trade_info) if not attr.startswith('_')]}")
 
-        # 1. 加载复盘工作流 (v2.0)
+        # 1. 加载复盘工作流 (优先使用“我的分析流”中 trade_review 类型的默认流程)
         provider = get_default_workflow_provider()
-        workflow = provider.load_workflow("trade_review_v2")  # 🔧 改为 v2.0 工作流
-        logger.info(f"✅ [工作流复盘] 加载工作流: {workflow.name}")
+        workflow_id = provider.get_active_workflow_id("trade_review")
+        workflow = provider.load_workflow(workflow_id)
+        logger.info(f"✅ [工作流复盘] 加载工作流: {workflow.name} ({workflow.id})")
 
         # 2. 获取基准数据
         benchmark_data = {}

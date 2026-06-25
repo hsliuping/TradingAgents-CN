@@ -1117,10 +1117,11 @@ async def debug_workflow(
     """
     调试完整工作流
 
-    执行指定的工作流并返回所有 Agent 的输出结果
+    使用统一任务引擎在后台执行，避免长时间占用 API 请求线程/事件循环。
     """
-    import logging
     import asyncio
+    import logging
+
     logger = logging.getLogger("webapi")
 
     try:
@@ -1132,148 +1133,97 @@ async def debug_workflow(
         logger.info(f"   stock.symbol: {req.stock.symbol}")
         logger.info("=" * 80)
 
-        # 1. 加载工作流定义
+        from app.models.analysis import AnalysisTaskType
+        from app.models.user import PyObjectId
+        from app.services.task_analysis_service import get_task_analysis_service
         from core.api import WorkflowAPI
-        from core.workflow.engine import WorkflowEngine
-        from core.workflow.models import WorkflowDefinition
-        from tradingagents.graph.trading_graph import create_llm_by_provider
-        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+        from tradingagents.utils.stock_utils import StockMarket, StockUtils
 
         api = WorkflowAPI()
         workflow_dict = api.get(req.workflow_id)
-
         if not workflow_dict:
             raise HTTPException(status_code=404, detail=f"工作流 {req.workflow_id} 不存在")
 
-        # 2. 创建 LLM
-        backend_url = None
-        api_key = None
+        user_id = str(user.get("id") or user.get("user_id") or user.get("_id"))
+        symbol = str(req.stock.symbol or "").strip()
+        if not symbol:
+            raise HTTPException(status_code=400, detail="请提供股票代码")
 
-        if req.llm.backend_url and req.llm.backend_url.strip():
-            backend_url = req.llm.backend_url
+        if req.stock.market_type:
+            market_type = req.stock.market_type
         else:
-            try:
-                provider_info = get_provider_and_url_by_model_sync(req.llm.model)
-                backend_url = provider_info["backend_url"]
-                api_key = provider_info.get("api_key")
-            except Exception as e:
-                logger.warning(f"无法从数据库获取配置: {e}")
+            market = StockUtils.identify_stock_market(symbol)
+            market_type_mapping = {
+                StockMarket.CHINA_A: "cn",
+                StockMarket.HONG_KONG: "hk",
+                StockMarket.US: "us",
+                StockMarket.UNKNOWN: "cn",
+            }
+            market_type = market_type_mapping.get(market, "cn")
 
-        if req.llm.api_key:
-            api_key = req.llm.api_key
-
-        timeout = 300 if req.llm.provider.lower() == "ollama" else 180
-
-        llm = create_llm_by_provider(
-            provider=req.llm.provider,
-            model=req.llm.model,
-            temperature=req.llm.temperature,
-            max_tokens=req.llm.max_tokens,
-            backend_url=backend_url,
-            timeout=timeout,
-            api_key=api_key
-        )
-
-        # 3. 创建 AgentContext（带 workflow_id）
-        ctx = AgentContext(
-            user_id=str(user["id"]),
-            preference_id="neutral",
-            is_debug_mode=True,
-            workflow_id=req.workflow_id  # 🆕 传递 workflow_id 用于流程专属提示词
-        )
-
-        logger.info(f"✅ [工作流调试] AgentContext 创建完成，workflow_id={ctx.workflow_id}")
-
-        # 4. 创建并执行工作流
-        workflow_def = WorkflowDefinition.from_dict(workflow_dict)
-
-        # 创建 legacy config
-        cfg = {
-            "llm_provider": req.llm.provider,
-            "backend_url": backend_url,
-            "quick_think_llm": req.llm.model,
-            "deep_think_llm": req.llm.model,
-            "quick_model_config": {"max_tokens": req.llm.max_tokens, "temperature": req.llm.temperature, "timeout": timeout},
-            "deep_model_config": {"max_tokens": req.llm.max_tokens, "temperature": req.llm.temperature, "timeout": timeout},
-        }
-        if api_key:
-            cfg["quick_api_key"] = api_key
-            cfg["deep_api_key"] = api_key
-
-        engine = WorkflowEngine(legacy_config=cfg, llm=llm)
-        engine.load(workflow_def)
-
-        # 准备输入
-        inputs = {
-            "ticker": req.stock.symbol,
-            "stock_symbol": req.stock.symbol,
-            "trade_date": req.stock.analysis_date or "2025-12-16",
-            "analysis_date": req.stock.analysis_date or "2025-12-16",
-            "company_of_interest": req.stock.symbol,
-            "market_type": req.stock.market_type or "A股",
-            "context": ctx,
-            "workflow_id": req.workflow_id,  # 🆕 传递到 state
+        task_params = {
+            "symbol": symbol,
+            "stock_code": symbol,
+            "market_type": market_type,
+            "analysis_date": req.stock.analysis_date or datetime.now().strftime("%Y-%m-%d"),
+            "research_depth": "标准",
+            "quick_analysis_model": req.llm.model,
+            "deep_analysis_model": req.llm.model,
+            "lookback_days": 30,
+            "max_debate_rounds": 3,
+            "recursion_limit": 100,
             "skip_cache": True,
-            "prompt_overrides": req.prompt_overrides or {}
+            "prompt_overrides": req.prompt_overrides or {},
+            "debug_mode": True,
+            "debug_llm_provider": req.llm.provider,
+            "debug_llm_backend_url": req.llm.backend_url,
+            "debug_llm_api_key": req.llm.api_key,
+            "debug_llm_temperature": req.llm.temperature,
+            "debug_llm_max_tokens": req.llm.max_tokens,
         }
+        if req.dataopts:
+            task_params.update(req.dataopts)
 
-        logger.info(f"📝 [工作流调试] 开始执行工作流: {req.workflow_id}")
+        task_service = get_task_analysis_service()
+        task = await task_service.create_task(
+            user_id=PyObjectId(user_id),
+            task_type=AnalysisTaskType.STOCK_ANALYSIS,
+            task_params=task_params,
+            engine_type="workflow",
+            preference_type="neutral",
+            workflow_id=req.workflow_id,
+        )
 
-        # 执行
-        if req.llm.provider.lower() == "ollama":
-            result = await asyncio.wait_for(
-                engine.execute_async(inputs),
-                timeout=timeout + 120
-            )
-        else:
-            result = await engine.execute_async(inputs)
+        background_task = asyncio.create_task(task_service.execute_task(task))
 
-        logger.info(f"✅ [工作流调试] 工作流执行完成")
+        def _log_background_task_error(done_task: asyncio.Task) -> None:
+            try:
+                done_task.result()
+            except Exception as task_error:
+                logger.error(f"❌ [工作流调试] 后台任务执行失败: task_id={task.task_id} - {task_error}")
 
-        # 5. 提取报告
-        # 尝试从结果中提取各个 Agent 的报告
-        agent_reports = {}
-        final_report = ""
+        background_task.add_done_callback(_log_background_task_error)
 
-        report_fields = [
-            "final_report", "market_report", "fundamentals_report",
-            "news_report", "sentiment_report", "index_report",
-            "sector_report", "risk_report", "trading_decision"
-        ]
-
-        for field in report_fields:
-            if field in result and result[field]:
-                agent_reports[field] = result[field]
-                if field == "final_report":
-                    final_report = result[field]
-
-        if not final_report:
-            # 尝试合并所有报告
-            final_report = "\n\n---\n\n".join([
-                f"## {k}\n{v}" for k, v in agent_reports.items() if v
-            ])
+        logger.info(f"✅ [工作流调试] 后台任务已创建: task_id={task.task_id}, workflow_id={req.workflow_id}")
 
         return {
             "success": True,
             "data": {
+                "task_id": task.task_id,
+                "status": task.status,
                 "workflow_id": req.workflow_id,
                 "workflow_name": workflow_dict.get("name", req.workflow_id),
-                "symbol": req.stock.symbol,
-                "analysis_date": req.stock.analysis_date,
-                "report": final_report,
-                "agent_reports": agent_reports,
-                "report_length": len(final_report) if final_report else 0
+                "symbol": symbol,
+                "analysis_date": task_params["analysis_date"],
+                "message": "工作流调试任务已提交，正在后台执行",
             },
-            "message": "工作流调试完成"
+            "message": "工作流调试任务已提交",
         }
 
-    except asyncio.TimeoutError:
-        logger.error(f"❌ [工作流调试] 执行超时")
-        raise HTTPException(status_code=504, detail="工作流执行超时")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ [工作流调试] 执行失败: {e}", exc_info=True)
+        logger.error(f"❌ [工作流调试] 创建后台任务失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -230,7 +230,7 @@ def initialize_builtin_workflows() -> None:
     # 2. 持仓研究流程
     AnalysisWorkflowRegistry.register(AnalysisWorkflowConfig(
         task_type=AnalysisTaskType.POSITION_ANALYSIS,
-        workflow_id="position_analysis",
+        workflow_id="position_analysis_v2",
         name="持仓研究",
         description="单股持仓研究流程。包含持仓技术研究、持仓基本面研究、持仓风险评估与持仓结论整合。",
         default_engine="workflow",
@@ -277,7 +277,7 @@ def initialize_builtin_workflows() -> None:
     # 3. 交易复盘流程
     AnalysisWorkflowRegistry.register(AnalysisWorkflowConfig(
         task_type=AnalysisTaskType.TRADE_REVIEW,
-        workflow_id="trade_review",
+        workflow_id="trade_review_v2",
         name="交易复盘",
         description="交易复盘流程。包含时机复盘、仓位复盘、情绪与纪律复盘、归因复盘与复盘总结。",
         default_engine="workflow",
