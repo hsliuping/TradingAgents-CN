@@ -12,6 +12,8 @@
     python scripts/create_default_admin.py --username myuser --password mypass123
 """
 
+import os
+import re
 import sys
 import hashlib
 from datetime import datetime
@@ -25,9 +27,23 @@ sys.path.insert(0, str(project_root))
 from pymongo import MongoClient
 
 
-# 配置
-MONGO_URI = "mongodb://admin:tradingagents123@localhost:27017/tradingagentscn?authSource=admin"
-DB_NAME = "tradingagentscn"
+# 配置 — 优先从环境变量读取，回退到默认值
+# 加载项目 .env 文件
+from dotenv import load_dotenv
+load_dotenv(project_root / ".env")
+
+MONGO_URI = os.getenv("MONGODB_URL") or os.getenv("MONGODB_CONNECTION_STRING") or \
+    "mongodb://admin:tradingagents123@localhost:27017/tradingagentscn?authSource=admin"
+
+# 从 URI 中提取数据库名，回退到环境变量 MONGODB_DATABASE
+def _extract_db_from_uri(uri: str) -> str:
+    """从 MongoDB URI 中提取数据库名"""
+    match = re.search(r"/([^/?]+)(\?|$)", uri)
+    if match:
+        return match.group(1)
+    return "tradingagentscn"
+
+DB_NAME = os.getenv("MONGODB_DATABASE") or _extract_db_from_uri(MONGO_URI)
 
 
 def hash_password(password: str) -> str:
