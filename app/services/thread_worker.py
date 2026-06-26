@@ -148,7 +148,10 @@ class ThreadWorker:
                 process_agent_workshop_gap_resolution_jobs_once,
             )
 
-            result = await process_agent_workshop_gap_resolution_jobs_once(limit=1)
+            result = await process_agent_workshop_gap_resolution_jobs_once(
+                limit=1,
+                worker_id=self.worker_id,
+            )
             if str((result or {}).get("status") or "").strip().lower() != "ok":
                 logger.debug("Gap resolution job 轮询返回异常: %s", result)
                 return

@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Annotated, Any
 
 from langchain_core.tools import tool
@@ -154,6 +154,10 @@ _GAP_RESOLUTION_JOB_COLLECTION = "agent_workshop_gap_resolution_jobs"
 _GAP_JOB_ACTIVE_STATUSES = {"pending", "running", "partial_completed"}
 _GAP_JOB_TERMINAL_STATUSES = {"completed", "failed", "timeout", "cancelled"}
 _GAP_ITEM_TIMEOUT_SECONDS = 1800
+_GAP_JOB_CLAIM_LEASE_SECONDS = 30
+_GAP_AUTO_RETRY_MAX_ATTEMPTS = 3
+_GAP_AUTO_RETRY_BASE_DELAY_SECONDS = 30
+_GAP_AUTO_RETRY_MAX_DELAY_SECONDS = 600
 
 
 def _build_gap_resolution_job_id(seed: str) -> str:
@@ -232,6 +236,199 @@ def _iso_elapsed_seconds(started_at: str, now_utc: datetime | None = None) -> in
     return max(int((now - start).total_seconds()), 0)
 
 
+def _is_claim_expired(expires_at: str, now_utc: datetime | None = None) -> bool:
+    text = str(expires_at or "").strip()
+    if not text:
+        return True
+    try:
+        expires = datetime.fromisoformat(text)
+    except Exception:
+        return True
+    now = now_utc or datetime.utcnow()
+    return expires <= now
+
+
+def _is_retry_due(next_retry_at: str, now_utc: datetime | None = None) -> bool:
+    text = str(next_retry_at or "").strip()
+    if not text:
+        return True
+    try:
+        next_at = datetime.fromisoformat(text)
+    except Exception:
+        return True
+    now = now_utc or datetime.utcnow()
+    return next_at <= now
+
+
+def _read_gap_retry_policy(job_doc: dict[str, Any]) -> dict[str, int]:
+    execution = dict((job_doc or {}).get("execution") or {})
+    policy = dict(execution.get("retry_policy") or {})
+
+    max_attempts = int(policy.get("max_attempts") or _GAP_AUTO_RETRY_MAX_ATTEMPTS)
+    base_delay_seconds = int(policy.get("base_delay_seconds") or _GAP_AUTO_RETRY_BASE_DELAY_SECONDS)
+    max_delay_seconds = int(policy.get("max_delay_seconds") or _GAP_AUTO_RETRY_MAX_DELAY_SECONDS)
+
+    return {
+        "max_attempts": max(0, min(max_attempts, 10)),
+        "base_delay_seconds": max(1, min(base_delay_seconds, 3600)),
+        "max_delay_seconds": max(1, min(max_delay_seconds, 3600)),
+    }
+
+
+def _compute_retry_backoff_seconds(attempt: int, retry_policy: dict[str, int]) -> int:
+    base = int(retry_policy.get("base_delay_seconds") or _GAP_AUTO_RETRY_BASE_DELAY_SECONDS)
+    cap = int(retry_policy.get("max_delay_seconds") or _GAP_AUTO_RETRY_MAX_DELAY_SECONDS)
+    step = max(0, int(attempt) - 1)
+    delay = base * (2 ** step)
+    return max(1, min(delay, cap))
+
+
+def _apply_gap_retry_or_dead_letter(
+    target_gap: dict[str, Any],
+    *,
+    reason_code: str,
+    reason_message: str,
+    terminal_status: str,
+    now_utc: datetime,
+    now_iso: str,
+    retry_policy: dict[str, int],
+) -> dict[str, Any]:
+    max_attempts = int(retry_policy.get("max_attempts") or 0)
+    current_retry = int(target_gap.get("auto_retry_count") or 0)
+
+    if max_attempts > 0 and current_retry < max_attempts:
+        next_retry = current_retry + 1
+        delay_seconds = _compute_retry_backoff_seconds(next_retry, retry_policy)
+        next_retry_at = (now_utc + timedelta(seconds=delay_seconds)).isoformat()
+
+        target_gap["status"] = "pending"
+        target_gap["pipeline_stage"] = "retry_backoff"
+        target_gap["pipeline_message"] = (
+            f"{reason_message}；将在 {delay_seconds}s 后自动重试（{next_retry}/{max_attempts}）"
+        )
+        target_gap["error"] = str(reason_code or "retryable_failure").strip() or "retryable_failure"
+        target_gap["last_error"] = target_gap["error"]
+        target_gap["last_error_message"] = str(reason_message or "").strip()
+        target_gap["last_failure_at"] = now_iso
+        target_gap["next_retry_at"] = next_retry_at
+        target_gap["auto_retry_count"] = next_retry
+        target_gap["dead_letter"] = {}
+        return target_gap
+
+    terminal = str(terminal_status or "failed").strip().lower() or "failed"
+    if terminal not in {"failed", "timeout", "cancelled", "completed"}:
+        terminal = "failed"
+    target_gap["status"] = terminal
+    target_gap["pipeline_stage"] = "dead_letter"
+    target_gap["pipeline_message"] = (
+        f"{reason_message}；已达自动重试上限（{max_attempts}），转入 dead-letter"
+    )
+    target_gap["error"] = str(reason_code or "dead_lettered").strip() or "dead_lettered"
+    target_gap["last_error"] = target_gap["error"]
+    target_gap["last_error_message"] = str(reason_message or "").strip()
+    target_gap["last_failure_at"] = now_iso
+    target_gap["next_retry_at"] = ""
+    target_gap["dead_letter"] = {
+        "reason_code": target_gap["error"],
+        "reason_message": str(reason_message or "").strip(),
+        "failed_at": now_iso,
+        "auto_retry_count": int(target_gap.get("auto_retry_count") or 0),
+        "max_attempts": max_attempts,
+    }
+    return target_gap
+
+
+def _build_gap_job_claim_token(job_id: str, worker_id: str, now_iso: str) -> str:
+    seed = f"{job_id}:{worker_id}:{now_iso}"
+    return hashlib.sha1(seed.encode("utf-8")).hexdigest()
+
+
+async def _try_claim_gap_resolution_job(
+    collection: Any,
+    job_doc: dict[str, Any],
+    worker_id: str,
+    lease_seconds: int,
+) -> dict[str, Any]:
+    clean_job_id = str((job_doc or {}).get("job_id") or "").strip()
+    if not clean_job_id:
+        return {"claimed": False, "reason": "job_id_missing"}
+
+    current_status = str((job_doc or {}).get("status") or "").strip().lower()
+    if current_status not in _GAP_JOB_ACTIVE_STATUSES:
+        return {"claimed": False, "reason": "job_not_active"}
+
+    now_utc = datetime.utcnow()
+    now_iso = now_utc.isoformat()
+    lease = max(5, min(int(lease_seconds), 300))
+    expires_iso = (now_utc + timedelta(seconds=lease)).isoformat()
+
+    execution = dict((job_doc or {}).get("execution") or {})
+    claim = dict(execution.get("claim") or {})
+    owner = str(claim.get("owner") or "").strip()
+    expires_at = str(claim.get("expires_at") or "").strip()
+    if owner and owner != worker_id and not _is_claim_expired(expires_at, now_utc):
+        return {"claimed": False, "reason": "already_claimed", "owner": owner}
+
+    token = _build_gap_job_claim_token(clean_job_id, worker_id, now_iso)
+    update_result = await collection.update_one(
+        {
+            "job_id": clean_job_id,
+            "status": current_status,
+            "updated_at": (job_doc or {}).get("updated_at"),
+        },
+        {
+            "$set": {
+                "execution.claim.owner": worker_id,
+                "execution.claim.token": token,
+                "execution.claim.claimed_at": now_iso,
+                "execution.claim.heartbeat_at": now_iso,
+                "execution.claim.expires_at": expires_iso,
+                "execution.claim.lease_seconds": lease,
+                "execution.last_worker_id": worker_id,
+                "updated_at": now_iso,
+            }
+        },
+    )
+
+    modified_count = getattr(update_result, "modified_count", None)
+    if modified_count is not None and int(modified_count) <= 0:
+        return {"claimed": False, "reason": "claim_conflict"}
+
+    return {
+        "claimed": True,
+        "owner": worker_id,
+        "token": token,
+        "claimed_at": now_iso,
+        "expires_at": expires_iso,
+    }
+
+
+async def _release_gap_resolution_job_claim(
+    collection: Any,
+    job_id: str,
+    worker_id: str,
+    token: str,
+) -> None:
+    now_iso = _utc_now_iso()
+    await collection.update_one(
+        {
+            "job_id": str(job_id or "").strip(),
+            "execution.claim.owner": str(worker_id or "").strip(),
+            "execution.claim.token": str(token or "").strip(),
+        },
+        {
+            "$set": {
+                "execution.claim.released_at": now_iso,
+                "execution.claim.owner": "",
+                "execution.claim.token": "",
+                "execution.claim.expires_at": now_iso,
+                "execution.claim.heartbeat_at": now_iso,
+                "updated_at": now_iso,
+            }
+        },
+    )
+
+
 async def _process_single_gap_resolution_job(db: Any, job_doc: dict[str, Any]) -> dict[str, Any]:
     from app.services.skill_generation_service import SkillGenerationService, SESSION_COLLECTION
 
@@ -250,6 +447,7 @@ async def _process_single_gap_resolution_job(db: Any, job_doc: dict[str, Any]) -
         return {"status": "ok", "job_id": clean_job_id, "processed": False, "message": "job 已在终态"}
 
     workshop_session_id = str((job_doc or {}).get("workshop_session_id") or "").strip()
+    retry_policy = _read_gap_retry_policy(job_doc)
     mode = str((job_doc or {}).get("mode") or "manual_confirmed").strip().lower() or "manual_confirmed"
     allow_medium_similarity_autocreate = mode == "auto"
 
@@ -294,6 +492,8 @@ async def _process_single_gap_resolution_job(db: Any, job_doc: dict[str, Any]) -
     target_index = -1
     for idx, gap in enumerate(gaps):
         if str(gap.get("status") or "").strip().lower() == "pending":
+            if not _is_retry_due(str(gap.get("next_retry_at") or ""), now_utc):
+                continue
             target_index = idx
             break
     if target_index < 0:
@@ -355,6 +555,8 @@ async def _process_single_gap_resolution_job(db: Any, job_doc: dict[str, Any]) -
         target_gap["pipeline_stage"] = "planning"
         target_gap["pipeline_message"] = "worker 已接单，开始处理"
         target_gap.setdefault("retry_count", 0)
+        target_gap.setdefault("auto_retry_count", 0)
+        target_gap["next_retry_at"] = ""
         target_gap.setdefault("created_at", now_iso)
         target_gap.setdefault("started_at", now_iso)
 
@@ -405,6 +607,7 @@ async def _process_single_gap_resolution_job(db: Any, job_doc: dict[str, Any]) -
             target_gap["pipeline_stage"] = "dedup_confirmation"
             target_gap["pipeline_message"] = "命中中等相似度候选 Skill，等待用户确认复用/新建"
             target_gap["error"] = "needs_dedup_confirmation"
+            target_gap["next_retry_at"] = ""
             target_gap["elapsed_seconds"] = _iso_elapsed_seconds(str(target_gap.get("started_at") or now_iso), now_utc)
             return await _persist_gap(target_gap)
 
@@ -428,10 +631,15 @@ async def _process_single_gap_resolution_job(db: Any, job_doc: dict[str, Any]) -
         )
         skill_session_id = str((start_result or {}).get("session_id") or "").strip()
         if not skill_session_id:
-            target_gap["status"] = "failed"
-            target_gap["pipeline_stage"] = "start_session"
-            target_gap["pipeline_message"] = "启动 Skill 生成会话失败"
-            target_gap["error"] = "skill_session_start_failed"
+            target_gap = _apply_gap_retry_or_dead_letter(
+                target_gap,
+                reason_code="skill_session_start_failed",
+                reason_message="启动 Skill 生成会话失败",
+                terminal_status="failed",
+                now_utc=now_utc,
+                now_iso=now_iso,
+                retry_policy=retry_policy,
+            )
             target_gap["elapsed_seconds"] = _iso_elapsed_seconds(str(target_gap.get("started_at") or now_iso), now_utc)
             return await _persist_gap(target_gap)
 
@@ -444,25 +652,36 @@ async def _process_single_gap_resolution_job(db: Any, job_doc: dict[str, Any]) -
         target_gap["pipeline_message"] = "Skill 生成已提交，等待完成"
         target_gap["skill_session_id"] = skill_session_id
         target_gap["error"] = None
+        target_gap["next_retry_at"] = ""
         target_gap["elapsed_seconds"] = _iso_elapsed_seconds(str(target_gap.get("started_at") or now_iso), now_utc)
         return await _persist_gap(target_gap)
 
     # running 状态：轮询 Skill 生成会话
     skill_session_id = str(target_gap.get("skill_session_id") or "").strip()
     if not skill_session_id:
-        target_gap["status"] = "failed"
-        target_gap["pipeline_stage"] = "polling"
-        target_gap["pipeline_message"] = "running gap 缺少 skill_session_id"
-        target_gap["error"] = "missing_skill_session_id"
+        target_gap = _apply_gap_retry_or_dead_letter(
+            target_gap,
+            reason_code="missing_skill_session_id",
+            reason_message="running gap 缺少 skill_session_id",
+            terminal_status="failed",
+            now_utc=now_utc,
+            now_iso=now_iso,
+            retry_policy=retry_policy,
+        )
         target_gap["elapsed_seconds"] = _iso_elapsed_seconds(str(target_gap.get("started_at") or now_iso), now_utc)
         return await _persist_gap(target_gap)
 
     session_doc = await db[SESSION_COLLECTION].find_one({"session_id": skill_session_id})
     if not session_doc:
-        target_gap["status"] = "failed"
-        target_gap["pipeline_stage"] = "polling"
-        target_gap["pipeline_message"] = "Skill 生成会话不存在"
-        target_gap["error"] = "skill_session_not_found"
+        target_gap = _apply_gap_retry_or_dead_letter(
+            target_gap,
+            reason_code="skill_session_not_found",
+            reason_message="Skill 生成会话不存在",
+            terminal_status="failed",
+            now_utc=now_utc,
+            now_iso=now_iso,
+            retry_policy=retry_policy,
+        )
         target_gap["elapsed_seconds"] = _iso_elapsed_seconds(str(target_gap.get("started_at") or now_iso), now_utc)
         return await _persist_gap(target_gap)
 
@@ -477,25 +696,43 @@ async def _process_single_gap_resolution_job(db: Any, job_doc: dict[str, Any]) -
         target_gap["skill_tool_id"] = str(spec.get("tool_id") or "")
         target_gap["skill_display_name"] = str(spec.get("display_name") or "")
         target_gap["error"] = None
+        target_gap["next_retry_at"] = ""
+        target_gap["dead_letter"] = {}
         return await _persist_gap(target_gap)
 
     if skill_status == "failed":
-        target_gap["status"] = "failed"
-        target_gap["error"] = str(session_doc.get("pipeline_message") or "skill_generation_failed")
+        target_gap = _apply_gap_retry_or_dead_letter(
+            target_gap,
+            reason_code="skill_generation_failed",
+            reason_message=str(session_doc.get("pipeline_message") or "Skill 生成失败").strip() or "Skill 生成失败",
+            terminal_status="failed",
+            now_utc=now_utc,
+            now_iso=now_iso,
+            retry_policy=retry_policy,
+        )
         return await _persist_gap(target_gap)
 
     if target_gap["elapsed_seconds"] >= _GAP_ITEM_TIMEOUT_SECONDS:
-        target_gap["status"] = "timeout"
-        target_gap["pipeline_stage"] = "timeout"
-        target_gap["pipeline_message"] = f"Skill 生成超时（>{_GAP_ITEM_TIMEOUT_SECONDS}s）"
-        target_gap["error"] = "skill_generation_timeout"
+        target_gap = _apply_gap_retry_or_dead_letter(
+            target_gap,
+            reason_code="skill_generation_timeout",
+            reason_message=f"Skill 生成超时（>{_GAP_ITEM_TIMEOUT_SECONDS}s）",
+            terminal_status="timeout",
+            now_utc=now_utc,
+            now_iso=now_iso,
+            retry_policy=retry_policy,
+        )
         return await _persist_gap(target_gap)
 
     # 尚未完成，保持 running
     return await _persist_gap(target_gap)
 
 
-async def process_agent_workshop_gap_resolution_jobs_once(limit: int = 1) -> dict[str, Any]:
+async def process_agent_workshop_gap_resolution_jobs_once(
+    limit: int = 1,
+    worker_id: str = "",
+    claim_lease_seconds: int = _GAP_JOB_CLAIM_LEASE_SECONDS,
+) -> dict[str, Any]:
     """由后台 worker 调用：单次消费并推进 gap resolution jobs 状态机。"""
     try:
         db = get_mongo_db()
@@ -508,6 +745,8 @@ async def process_agent_workshop_gap_resolution_jobs_once(limit: int = 1) -> dic
             }
 
         cap = max(1, min(int(limit), 20))
+        effective_worker_id = str(worker_id or "").strip() or "gap-worker"
+        lease_seconds = max(5, min(int(claim_lease_seconds), 300))
         docs = await collection.find({}).to_list(length=200)
         active_docs = [
             doc
@@ -517,13 +756,39 @@ async def process_agent_workshop_gap_resolution_jobs_once(limit: int = 1) -> dic
         active_docs.sort(key=lambda item: str((item or {}).get("updated_at") or ""))
 
         handled: list[dict[str, Any]] = []
+        claim_skipped = 0
         for doc in active_docs[:cap]:
-            handled.append(await _process_single_gap_resolution_job(db, doc))
+            claim = await _try_claim_gap_resolution_job(
+                collection=collection,
+                job_doc=doc,
+                worker_id=effective_worker_id,
+                lease_seconds=lease_seconds,
+            )
+            if not bool(claim.get("claimed")):
+                claim_skipped += 1
+                continue
+
+            try:
+                handled.append(await _process_single_gap_resolution_job(db, doc))
+            finally:
+                try:
+                    await _release_gap_resolution_job_claim(
+                        collection=collection,
+                        job_id=str((doc or {}).get("job_id") or ""),
+                        worker_id=effective_worker_id,
+                        token=str(claim.get("token") or ""),
+                    )
+                except Exception as release_exc:
+                    logger.debug("释放 gap job claim 失败（忽略）: %s", release_exc)
+
+        processed_count = sum(1 for item in handled if bool((item or {}).get("processed")))
 
         return {
             "status": "ok",
             "active_jobs": len(active_docs),
-            "processed": len(handled),
+            "processed": processed_count,
+            "attempted": len(handled),
+            "claim_skipped": claim_skipped,
             "results": handled,
         }
     except Exception as exc:
@@ -4571,6 +4836,9 @@ async def start_agent_workshop_gap_resolution(
                 "skill_tool_id": "",
                 "skill_display_name": "",
                 "retry_count": 0,
+                "auto_retry_count": 0,
+                "next_retry_at": "",
+                "dead_letter": {},
                 "created_at": now_iso,
                 "updated_at": now_iso,
             }
@@ -4590,6 +4858,11 @@ async def start_agent_workshop_gap_resolution(
                 "runner": "worker_required",
                 "state": "queued",
                 "note": "Phase 3 先落 job 协议；执行由后台 worker 接管",
+                "retry_policy": {
+                    "max_attempts": _GAP_AUTO_RETRY_MAX_ATTEMPTS,
+                    "base_delay_seconds": _GAP_AUTO_RETRY_BASE_DELAY_SECONDS,
+                    "max_delay_seconds": _GAP_AUTO_RETRY_MAX_DELAY_SECONDS,
+                },
             },
             "gaps": job_gaps,
             "created_at": now_iso,
@@ -4833,6 +5106,9 @@ async def retry_agent_workshop_gap_resolution_item(
             item["error"] = None
             item["updated_at"] = now_iso
             item["retry_count"] = int(item.get("retry_count") or 0) + 1
+            item["auto_retry_count"] = 0
+            item["next_retry_at"] = ""
+            item["dead_letter"] = {}
             target_after = item
             updated_gaps.append(item)
 

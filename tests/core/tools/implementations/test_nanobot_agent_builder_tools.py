@@ -1568,6 +1568,287 @@ async def test_worker_process_gap_resolution_job_running_to_completed(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_worker_process_gap_resolution_job_skips_other_worker_claim(monkeypatch):
+    fake_db = _FakeDb({
+        "agent_workshop_gap_resolution_jobs": _FakeCollection([
+            {
+                "job_id": "gap_job_claim_001",
+                "workshop_session_id": "ws_claim_001",
+                "spec_id": "spec_claim_001",
+                "user_id": "user_claim_001",
+                "status": "pending",
+                "mode": "auto",
+                "idempotency_key": "idem_claim_001",
+                "execution": {
+                    "runner": "worker_required",
+                    "state": "queued",
+                    "claim": {
+                        "owner": "worker-A",
+                        "token": "token-A",
+                        "expires_at": "2099-01-01T00:00:00",
+                    },
+                },
+                "gaps": [
+                    {
+                        "gap_id": "gap_1",
+                        "description": "缺少行业对比能力",
+                        "status": "pending",
+                        "pipeline_stage": "queued",
+                        "pipeline_message": "等待 worker 执行",
+                    }
+                ],
+                "created_at": "2026-06-27T00:00:00",
+                "updated_at": "2026-06-27T00:00:00",
+            }
+        ]),
+    })
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: fake_db,
+    )
+
+    payload = await process_agent_workshop_gap_resolution_jobs_once(limit=1, worker_id="worker-B")
+    assert payload["status"] == "ok"
+    assert payload["processed"] == 0
+    assert payload["claim_skipped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_gap_resolution_job_e2e_start_worker_and_inspect(monkeypatch):
+    fake_db = _FakeDb({
+        "agent_workshop_gap_resolution_jobs": _FakeCollection([]),
+        "skill_creation_sessions": _FakeCollection([]),
+    })
+
+    class _FakeWorkshopService:
+        def __init__(self, db):
+            self.db = db
+
+        async def _load_session(self, session_id):
+            assert session_id == "ws_e2e_001"
+            return types.SimpleNamespace(
+                spec_id="spec_e2e_001",
+                user_id="user_e2e_001",
+                gap_report=types.SimpleNamespace(blocking_gaps=["缺少行业对比能力"]),
+                current_spec_snapshot=types.SimpleNamespace(name="测试 Agent", primary_goal="补齐能力缺口"),
+            )
+
+    class _FakeCapabilityService:
+        def __init__(self, db):
+            self.db = db
+
+        async def search_capabilities(self, query, top_k, bindable_only, source_types):
+            del query, top_k, bindable_only, source_types
+            return []
+
+    class _FakeSkillService:
+        def __init__(self, db):
+            self.db = db
+
+        async def start_session(self, *args, **kwargs):
+            del args, kwargs
+            return {"session_id": "skill_session_e2e_001"}
+
+        async def respond_to_session(self, *args, **kwargs):
+            del args, kwargs
+            return {"status": "ok"}
+
+        async def preview_spec(self, *args, **kwargs):
+            del args, kwargs
+            return {"status": "ok"}
+
+        async def confirm_spec(self, *args, **kwargs):
+            del args, kwargs
+            return {"status": "ok"}
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: fake_db,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.AgentWorkshopService",
+        _FakeWorkshopService,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.CapabilityIndexService",
+        _FakeCapabilityService,
+    )
+    monkeypatch.setattr(
+        "app.services.skill_generation_service.SkillGenerationService",
+        _FakeSkillService,
+    )
+
+    start_raw = await start_agent_workshop_gap_resolution.ainvoke({"session_id": "ws_e2e_001"})
+    start_payload = json.loads(start_raw)
+    assert start_payload["status"] == "ok"
+    job_id = start_payload["job"]["job_id"]
+
+    first_tick = await process_agent_workshop_gap_resolution_jobs_once(limit=1, worker_id="worker-e2e")
+    assert first_tick["status"] == "ok"
+    assert first_tick["processed"] == 1
+
+    fake_db["skill_creation_sessions"]._items.append({
+        "session_id": "skill_session_e2e_001",
+        "status": "completed",
+        "pipeline_stage": "completed",
+        "pipeline_message": "完成",
+        "spec": {
+            "tool_id": "auto_gap_skill_e2e_001",
+            "display_name": "自动补齐技能E2E",
+        },
+    })
+
+    second_tick = await process_agent_workshop_gap_resolution_jobs_once(limit=1, worker_id="worker-e2e")
+    assert second_tick["status"] == "ok"
+    assert second_tick["processed"] == 1
+
+    inspect_raw = await inspect_agent_workshop_gap_resolution.ainvoke({"job_id": job_id})
+    inspect_payload = json.loads(inspect_raw)
+    assert inspect_payload["status"] == "ok"
+    assert inspect_payload["job"]["status"] == "completed"
+    assert inspect_payload["job"]["summary"]["completed"] == 1
+    assert inspect_payload["job"]["gaps"][0]["skill_tool_id"] == "auto_gap_skill_e2e_001"
+
+
+@pytest.mark.asyncio
+async def test_worker_auto_retry_backoff_for_failed_skill_session(monkeypatch):
+    fake_db = _FakeDb({
+        "agent_workshop_gap_resolution_jobs": _FakeCollection([
+            {
+                "job_id": "gap_job_retry_001",
+                "workshop_session_id": "ws_retry_001",
+                "spec_id": "spec_retry_001",
+                "user_id": "user_retry_001",
+                "status": "running",
+                "mode": "auto",
+                "idempotency_key": "idem_retry_001",
+                "execution": {
+                    "runner": "worker_required",
+                    "state": "running",
+                    "retry_policy": {
+                        "max_attempts": 2,
+                        "base_delay_seconds": 120,
+                        "max_delay_seconds": 300,
+                    },
+                },
+                "gaps": [
+                    {
+                        "gap_id": "gap_1",
+                        "description": "缺少行业对比能力",
+                        "status": "running",
+                        "pipeline_stage": "generating",
+                        "pipeline_message": "等待生成完成",
+                        "skill_session_id": "skill_session_retry_001",
+                        "retry_count": 0,
+                        "auto_retry_count": 0,
+                        "created_at": "2026-06-27T00:00:00",
+                        "started_at": "2026-06-27T00:00:00",
+                        "updated_at": "2026-06-27T00:00:00",
+                    }
+                ],
+                "created_at": "2026-06-27T00:00:00",
+                "updated_at": "2026-06-27T00:00:00",
+            }
+        ]),
+        "skill_creation_sessions": _FakeCollection([
+            {
+                "session_id": "skill_session_retry_001",
+                "status": "failed",
+                "pipeline_stage": "failed",
+                "pipeline_message": "mock failed",
+            }
+        ]),
+    })
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: fake_db,
+    )
+
+    first_tick = await process_agent_workshop_gap_resolution_jobs_once(limit=1, worker_id="worker-retry")
+    assert first_tick["status"] == "ok"
+    assert first_tick["processed"] == 1
+
+    job_doc = fake_db["agent_workshop_gap_resolution_jobs"]._items[0]
+    gap_doc = job_doc["gaps"][0]
+    assert gap_doc["status"] == "pending"
+    assert gap_doc["pipeline_stage"] == "retry_backoff"
+    assert gap_doc["auto_retry_count"] == 1
+    assert gap_doc["next_retry_at"]
+
+    second_tick = await process_agent_workshop_gap_resolution_jobs_once(limit=1, worker_id="worker-retry")
+    assert second_tick["status"] == "ok"
+    assert second_tick["processed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_worker_dead_letter_after_max_auto_retries(monkeypatch):
+    fake_db = _FakeDb({
+        "agent_workshop_gap_resolution_jobs": _FakeCollection([
+            {
+                "job_id": "gap_job_retry_002",
+                "workshop_session_id": "ws_retry_002",
+                "spec_id": "spec_retry_002",
+                "user_id": "user_retry_002",
+                "status": "running",
+                "mode": "auto",
+                "idempotency_key": "idem_retry_002",
+                "execution": {
+                    "runner": "worker_required",
+                    "state": "running",
+                    "retry_policy": {
+                        "max_attempts": 2,
+                        "base_delay_seconds": 30,
+                        "max_delay_seconds": 300,
+                    },
+                },
+                "gaps": [
+                    {
+                        "gap_id": "gap_1",
+                        "description": "缺少行业对比能力",
+                        "status": "running",
+                        "pipeline_stage": "generating",
+                        "pipeline_message": "等待生成完成",
+                        "skill_session_id": "skill_session_retry_002",
+                        "retry_count": 0,
+                        "auto_retry_count": 2,
+                        "created_at": "2026-06-27T00:00:00",
+                        "started_at": "2026-06-27T00:00:00",
+                        "updated_at": "2026-06-27T00:00:00",
+                    }
+                ],
+                "created_at": "2026-06-27T00:00:00",
+                "updated_at": "2026-06-27T00:00:00",
+            }
+        ]),
+        "skill_creation_sessions": _FakeCollection([
+            {
+                "session_id": "skill_session_retry_002",
+                "status": "failed",
+                "pipeline_stage": "failed",
+                "pipeline_message": "mock failed final",
+            }
+        ]),
+    })
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: fake_db,
+    )
+
+    tick = await process_agent_workshop_gap_resolution_jobs_once(limit=1, worker_id="worker-retry")
+    assert tick["status"] == "ok"
+    assert tick["processed"] == 1
+
+    job_doc = fake_db["agent_workshop_gap_resolution_jobs"]._items[0]
+    gap_doc = job_doc["gaps"][0]
+    assert gap_doc["status"] == "failed"
+    assert gap_doc["pipeline_stage"] == "dead_letter"
+    assert gap_doc["dead_letter"]["reason_code"] == "skill_generation_failed"
+
+
+@pytest.mark.asyncio
 async def test_create_or_update_universal_agent_prompt_template_writes_template(monkeypatch):
     fake_db = _FakeDb({
         "prompt_templates": _FakeCollection([]),

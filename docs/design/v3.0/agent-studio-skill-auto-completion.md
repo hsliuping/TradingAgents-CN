@@ -1179,6 +1179,38 @@ cancelled
 1. 基础追溯：先补 `origin_*`、`auto_resolved_gaps`、引用关系查询。
 2. 严格绑定：后续再补 `skill_version_ref` 或等价快照机制。
 
+### 9.1 当前开发进度（截至 2026-06-27）
+
+已完成：
+
+1. `Phase 2` 主链路可用：
+  - `resolve_agent_workshop_blocking_gaps` 已实现真实 `user_id` 透传与结构化返回。
+  - 支持补齐后自动续建（能力重检 -> gap 重算 -> tooling_plan -> build_version）。
+2. `Phase 2.5` 去重前置：
+  - 已实现高相似度复用、边界相似度确认分流，避免明显重复 Skill 生成。
+3. `Phase 3` 协议层与执行层均已落地：
+  - 控制面工具已就位：`start / inspect / cancel / retry`。
+  - worker 可消费 `agent_workshop_gap_resolution_jobs` 并推进状态机（pending -> running -> completed/failed/timeout）。
+  - `ThreadWorker` 已接入周期轮询消费。
+4. `Phase 3` 并发安全与失败治理已补：
+  - 增加 job claim 租约（owner/token/expires_at），防止多 worker 重复消费。
+  - 增加自动重试策略（指数退避 + 上限控制 + `next_retry_at`）。
+  - 超过上限进入 dead-letter，保留原因与失败上下文。
+
+已验证：
+
+1. 相关单测已覆盖并通过：
+  - worker 消费与状态推进。
+  - claim 冲突跳过。
+  - start -> worker -> inspect 的端到端闭环。
+  - 自动重试退避与 dead-letter 收敛。
+2. 最近一轮聚焦回归结果：`13 passed, 49 deselected`。
+
+当前仍在推进：
+
+1. 将 dead-letter 管理动作进一步产品化（例如批量恢复、失败原因分组统计、告警入口）。
+2. 将 `Phase 4/5` 的展示与追溯字段在前端视图中完整打通。
+
 本阶段验收：
 
 1. 可以从 AgentVersion 追溯到自动补齐生成的 Skill。
