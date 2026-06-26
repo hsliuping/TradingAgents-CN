@@ -6,6 +6,7 @@
 import asyncio
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -36,6 +37,8 @@ class ThreadWorker:
         self.queue_service: Optional[QueueService] = None
         self.task_service: Optional[TaskAnalysisService] = None
         self._loop_task: Optional[asyncio.Task] = None
+        self._gap_resolution_poll_interval_seconds = 2.0
+        self._gap_resolution_last_poll_at = 0.0
         
         logger.info(f"🔧 ThreadWorker 初始化: max_workers={max_workers}")
     
@@ -108,6 +111,11 @@ class ThreadWorker:
 
         while self.running:
             try:
+                now_ts = time.time()
+                if now_ts - self._gap_resolution_last_poll_at >= self._gap_resolution_poll_interval_seconds:
+                    await self._tick_gap_resolution_jobs()
+                    self._gap_resolution_last_poll_at = now_ts
+
                 # 从队列获取任务
                 task_data = await self.queue_service.dequeue_task(self.worker_id)
 
@@ -132,6 +140,23 @@ class ThreadWorker:
                 await asyncio.sleep(1)
 
         logger.info("📡 队列监听循环结束")
+
+    async def _tick_gap_resolution_jobs(self):
+        """轮询并推进 Agent 工坊缺口补齐异步 job。"""
+        try:
+            from core.tools.implementations.agent_builder.nanobot_agent_builder_tools import (
+                process_agent_workshop_gap_resolution_jobs_once,
+            )
+
+            result = await process_agent_workshop_gap_resolution_jobs_once(limit=1)
+            if str((result or {}).get("status") or "").strip().lower() != "ok":
+                logger.debug("Gap resolution job 轮询返回异常: %s", result)
+                return
+            processed = int((result or {}).get("processed") or 0)
+            if processed > 0:
+                logger.info("🔁 已推进 %d 个 gap resolution job", processed)
+        except Exception as exc:
+            logger.warning("Gap resolution job 轮询失败: %s", exc)
     
 
 

@@ -14,6 +14,10 @@ from .nanobot_agent_builder_tools import (
     prepare_agent_requirement_intake,
     prepare_agent_generation_confirmation,
     resolve_agent_workshop_blocking_gaps,
+    start_agent_workshop_gap_resolution,
+    inspect_agent_workshop_gap_resolution,
+    cancel_agent_workshop_gap_resolution,
+    retry_agent_workshop_gap_resolution_item,
     search_project_capabilities,
 )
 
@@ -34,4 +38,8 @@ __all__ = [
     "bind_agent_tools_and_validate_candidate",
     "generate_confirmed_candidate_agent",
     "resolve_agent_workshop_blocking_gaps",
+    "start_agent_workshop_gap_resolution",
+    "inspect_agent_workshop_gap_resolution",
+    "cancel_agent_workshop_gap_resolution",
+    "retry_agent_workshop_gap_resolution_item",
 ]

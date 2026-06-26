@@ -33,6 +33,11 @@ from core.tools.implementations.agent_builder.nanobot_agent_builder_tools import
     prepare_agent_requirement_intake,
     prepare_agent_generation_confirmation,
     resolve_agent_workshop_blocking_gaps,
+    process_agent_workshop_gap_resolution_jobs_once,
+    start_agent_workshop_gap_resolution,
+    inspect_agent_workshop_gap_resolution,
+    cancel_agent_workshop_gap_resolution,
+    retry_agent_workshop_gap_resolution_item,
     run_agent_workshop_real_data_test,
     search_project_capabilities,
 )
@@ -1266,6 +1271,300 @@ async def test_resolve_agent_workshop_blocking_gaps_auto_continue_builds_version
     assert payload["summary"]["successful"] == 1
     assert payload["auto_continue"]["status"] == "completed"
     assert payload["auto_continue"]["build_version"]["version_id"] == "spec_auto_continue_001_v1"
+
+
+@pytest.mark.asyncio
+async def test_start_agent_workshop_gap_resolution_creates_job(monkeypatch):
+    fake_db = _FakeDb({
+        "agent_workshop_gap_resolution_jobs": _FakeCollection([]),
+    })
+
+    class _FakeWorkshopService:
+        def __init__(self, db):
+            self.db = db
+
+        async def _load_session(self, session_id):
+            assert session_id == "ws_job_001"
+            return types.SimpleNamespace(
+                spec_id="spec_job_001",
+                user_id="user_001",
+                gap_report=types.SimpleNamespace(blocking_gaps=["缺少行业对比能力"]),
+            )
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: fake_db,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.AgentWorkshopService",
+        _FakeWorkshopService,
+    )
+
+    raw = await start_agent_workshop_gap_resolution.ainvoke({"session_id": "ws_job_001"})
+    payload = json.loads(raw)
+
+    assert payload["status"] == "ok"
+    assert payload["created"] is True
+    assert payload["job"]["status"] == "pending"
+    assert payload["job"]["summary"]["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_start_agent_workshop_gap_resolution_is_idempotent(monkeypatch):
+    fake_db = _FakeDb({
+        "agent_workshop_gap_resolution_jobs": _FakeCollection([]),
+    })
+
+    class _FakeWorkshopService:
+        def __init__(self, db):
+            self.db = db
+
+        async def _load_session(self, session_id):
+            assert session_id == "ws_job_idempotent_001"
+            return types.SimpleNamespace(
+                spec_id="spec_job_idempotent_001",
+                user_id="user_001",
+                gap_report=types.SimpleNamespace(blocking_gaps=["缺少行业对比能力"]),
+            )
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: fake_db,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.AgentWorkshopService",
+        _FakeWorkshopService,
+    )
+
+    first_raw = await start_agent_workshop_gap_resolution.ainvoke({"session_id": "ws_job_idempotent_001"})
+    first_payload = json.loads(first_raw)
+    assert first_payload["status"] == "ok"
+    assert first_payload["created"] is True
+
+    second_raw = await start_agent_workshop_gap_resolution.ainvoke({"session_id": "ws_job_idempotent_001"})
+    second_payload = json.loads(second_raw)
+    assert second_payload["status"] == "ok"
+    assert second_payload["created"] is False
+    assert second_payload["job"]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_inspect_cancel_retry_gap_resolution_job(monkeypatch):
+    fake_db = _FakeDb({
+        "agent_workshop_gap_resolution_jobs": _FakeCollection([
+            {
+                "job_id": "gap_job_manual_001",
+                "workshop_session_id": "ws_job_manual_001",
+                "spec_id": "spec_job_manual_001",
+                "status": "pending",
+                "mode": "manual_confirmed",
+                "idempotency_key": "idem001",
+                "execution": {"runner": "worker_required", "state": "queued"},
+                "gaps": [
+                    {
+                        "gap_id": "gap_1",
+                        "description": "缺少行业对比能力",
+                        "status": "failed",
+                        "pipeline_stage": "validating",
+                        "pipeline_message": "sandbox timeout",
+                        "error": "timeout",
+                        "retry_count": 0,
+                    }
+                ],
+                "created_at": "2026-06-27T00:00:00",
+                "updated_at": "2026-06-27T00:00:00",
+            }
+        ])
+    })
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: fake_db,
+    )
+
+    inspect_raw = await inspect_agent_workshop_gap_resolution.ainvoke({"job_id": "gap_job_manual_001"})
+    inspect_payload = json.loads(inspect_raw)
+    assert inspect_payload["status"] == "ok"
+    assert inspect_payload["job"]["summary"]["failed"] == 1
+
+    retry_raw = await retry_agent_workshop_gap_resolution_item.ainvoke({
+        "job_id": "gap_job_manual_001",
+        "gap_id": "gap_1",
+        "reason": "再次尝试",
+    })
+    retry_payload = json.loads(retry_raw)
+    assert retry_payload["status"] == "ok"
+    assert retry_payload["gap"]["status"] == "pending"
+    assert retry_payload["gap"]["retry_count"] == 1
+
+    cancel_raw = await cancel_agent_workshop_gap_resolution.ainvoke({
+        "job_id": "gap_job_manual_001",
+        "reason": "用户停止",
+    })
+    cancel_payload = json.loads(cancel_raw)
+    assert cancel_payload["status"] == "ok"
+    assert cancel_payload["job"]["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_worker_process_gap_resolution_job_pending_to_running(monkeypatch):
+    fake_db = _FakeDb({
+        "agent_workshop_gap_resolution_jobs": _FakeCollection([
+            {
+                "job_id": "gap_job_worker_001",
+                "workshop_session_id": "ws_job_worker_001",
+                "spec_id": "spec_job_worker_001",
+                "user_id": "user_worker_001",
+                "status": "pending",
+                "mode": "auto",
+                "idempotency_key": "idem_worker_001",
+                "execution": {"runner": "worker_required", "state": "queued"},
+                "gaps": [
+                    {
+                        "gap_id": "gap_1",
+                        "description": "缺少行业对比能力",
+                        "status": "pending",
+                        "pipeline_stage": "queued",
+                        "pipeline_message": "等待 worker 执行",
+                        "retry_count": 0,
+                        "created_at": "2026-06-27T00:00:00",
+                        "updated_at": "2026-06-27T00:00:00",
+                    }
+                ],
+                "created_at": "2026-06-27T00:00:00",
+                "updated_at": "2026-06-27T00:00:00",
+            }
+        ]),
+        "skill_creation_sessions": _FakeCollection([]),
+    })
+
+    class _FakeWorkshopService:
+        def __init__(self, db):
+            self.db = db
+
+        async def _load_session(self, session_id):
+            assert session_id == "ws_job_worker_001"
+            return types.SimpleNamespace(
+                spec_id="spec_job_worker_001",
+                user_id="user_worker_001",
+                current_spec_snapshot=types.SimpleNamespace(name="测试 Agent", primary_goal="补齐能力缺口"),
+            )
+
+    class _FakeCapabilityService:
+        def __init__(self, db):
+            self.db = db
+
+        async def search_capabilities(self, query, top_k, bindable_only, source_types):
+            del query, top_k, bindable_only, source_types
+            return []
+
+    class _FakeSkillService:
+        def __init__(self, db):
+            self.db = db
+
+        async def start_session(self, *args, **kwargs):
+            del args, kwargs
+            return {"session_id": "skill_session_worker_001"}
+
+        async def respond_to_session(self, *args, **kwargs):
+            del args, kwargs
+            return {"status": "ok"}
+
+        async def preview_spec(self, *args, **kwargs):
+            del args, kwargs
+            return {"status": "ok"}
+
+        async def confirm_spec(self, *args, **kwargs):
+            del args, kwargs
+            return {"status": "ok"}
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: fake_db,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.AgentWorkshopService",
+        _FakeWorkshopService,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.CapabilityIndexService",
+        _FakeCapabilityService,
+    )
+    monkeypatch.setattr(
+        "app.services.skill_generation_service.SkillGenerationService",
+        _FakeSkillService,
+    )
+
+    payload = await process_agent_workshop_gap_resolution_jobs_once(limit=1)
+    assert payload["status"] == "ok"
+    assert payload["processed"] == 1
+
+    job_doc = fake_db["agent_workshop_gap_resolution_jobs"]._items[0]
+    assert job_doc["status"] == "running"
+    assert job_doc["execution"]["state"] == "running"
+    assert job_doc["gaps"][0]["status"] == "running"
+    assert job_doc["gaps"][0]["skill_session_id"] == "skill_session_worker_001"
+
+
+@pytest.mark.asyncio
+async def test_worker_process_gap_resolution_job_running_to_completed(monkeypatch):
+    fake_db = _FakeDb({
+        "agent_workshop_gap_resolution_jobs": _FakeCollection([
+            {
+                "job_id": "gap_job_worker_002",
+                "workshop_session_id": "ws_job_worker_002",
+                "spec_id": "spec_job_worker_002",
+                "user_id": "user_worker_002",
+                "status": "running",
+                "mode": "auto",
+                "idempotency_key": "idem_worker_002",
+                "execution": {"runner": "worker_required", "state": "running"},
+                "gaps": [
+                    {
+                        "gap_id": "gap_1",
+                        "description": "缺少行业对比能力",
+                        "status": "running",
+                        "pipeline_stage": "generating",
+                        "pipeline_message": "等待生成完成",
+                        "skill_session_id": "skill_session_worker_002",
+                        "retry_count": 0,
+                        "created_at": "2026-06-27T00:00:00",
+                        "started_at": "2026-06-27T00:00:00",
+                        "updated_at": "2026-06-27T00:00:00",
+                    }
+                ],
+                "created_at": "2026-06-27T00:00:00",
+                "updated_at": "2026-06-27T00:00:00",
+            }
+        ]),
+        "skill_creation_sessions": _FakeCollection([
+            {
+                "session_id": "skill_session_worker_002",
+                "status": "completed",
+                "pipeline_stage": "completed",
+                "pipeline_message": "完成",
+                "spec": {
+                    "tool_id": "auto_gap_skill_worker_002",
+                    "display_name": "自动补齐技能#2",
+                },
+            }
+        ]),
+    })
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: fake_db,
+    )
+
+    payload = await process_agent_workshop_gap_resolution_jobs_once(limit=1)
+    assert payload["status"] == "ok"
+    assert payload["processed"] == 1
+
+    job_doc = fake_db["agent_workshop_gap_resolution_jobs"]._items[0]
+    assert job_doc["status"] == "completed"
+    assert job_doc["execution"]["state"] == "completed"
+    assert job_doc["gaps"][0]["status"] == "completed"
+    assert job_doc["gaps"][0]["skill_tool_id"] == "auto_gap_skill_worker_002"
 
 
 @pytest.mark.asyncio

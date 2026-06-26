@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import datetime
@@ -147,6 +148,394 @@ def _contains_external_data_risk(text: str) -> bool:
 def _is_skill_source_type(source_type: str) -> bool:
     source = str(source_type or "").strip().lower()
     return source in {"skill", "external_skill"}
+
+
+_GAP_RESOLUTION_JOB_COLLECTION = "agent_workshop_gap_resolution_jobs"
+_GAP_JOB_ACTIVE_STATUSES = {"pending", "running", "partial_completed"}
+_GAP_JOB_TERMINAL_STATUSES = {"completed", "failed", "timeout", "cancelled"}
+_GAP_ITEM_TIMEOUT_SECONDS = 1800
+
+
+def _build_gap_resolution_job_id(seed: str) -> str:
+    now_token = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:8]
+    return f"gap_job_{now_token}_{digest}"
+
+
+def _build_gap_resolution_idempotency_key(session_id: str, gaps: list[str]) -> str:
+    normalized = "|".join(_dedupe_string_list(gaps))
+    payload = f"{session_id}::{normalized}"
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _summarize_gap_job_gaps(gaps: list[dict[str, Any]]) -> dict[str, int]:
+    summary: dict[str, int] = {
+        "total": 0,
+        "pending": 0,
+        "running": 0,
+        "completed": 0,
+        "failed": 0,
+        "timeout": 0,
+        "cancelled": 0,
+    }
+    for item in gaps:
+        summary["total"] += 1
+        status = str((item or {}).get("status") or "").strip().lower()
+        if status in summary:
+            summary[status] += 1
+    return summary
+
+
+def _derive_gap_job_status(gaps: list[dict[str, Any]]) -> str:
+    summary = _summarize_gap_job_gaps(gaps)
+    total = int(summary.get("total") or 0)
+    if total <= 0:
+        return "completed"
+
+    pending_or_running = int(summary.get("pending") or 0) + int(summary.get("running") or 0)
+    if pending_or_running > 0:
+        return "running"
+
+    completed = int(summary.get("completed") or 0)
+    failed = int(summary.get("failed") or 0) + int(summary.get("timeout") or 0)
+    cancelled = int(summary.get("cancelled") or 0)
+
+    if completed == total:
+        return "completed"
+    if cancelled == total:
+        return "cancelled"
+    if completed > 0 and (failed > 0 or cancelled > 0):
+        return "partial_completed"
+    if failed > 0 and completed <= 0:
+        return "failed"
+    return "failed"
+
+
+def _derive_gap_execution_state(status: str) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"pending", "running", "partial_completed"}:
+        return "running"
+    if normalized in {"completed", "failed", "timeout", "cancelled"}:
+        return normalized
+    return "queued"
+
+
+def _iso_elapsed_seconds(started_at: str, now_utc: datetime | None = None) -> int:
+    text = str(started_at or "").strip()
+    if not text:
+        return 0
+    try:
+        start = datetime.fromisoformat(text)
+    except Exception:
+        return 0
+    now = now_utc or datetime.utcnow()
+    return max(int((now - start).total_seconds()), 0)
+
+
+async def _process_single_gap_resolution_job(db: Any, job_doc: dict[str, Any]) -> dict[str, Any]:
+    from app.services.skill_generation_service import SkillGenerationService, SESSION_COLLECTION
+
+    collection = _get_collection(db, _GAP_RESOLUTION_JOB_COLLECTION)
+    if collection is None:
+        return {"status": "error", "message": f"数据库中不可用集合: {_GAP_RESOLUTION_JOB_COLLECTION}"}
+
+    clean_job_id = str((job_doc or {}).get("job_id") or "").strip()
+    if not clean_job_id:
+        return {"status": "error", "message": "job_id 为空"}
+
+    now_iso = _utc_now_iso()
+    now_utc = datetime.utcnow()
+    job_status = str((job_doc or {}).get("status") or "").strip().lower()
+    if job_status in _GAP_JOB_TERMINAL_STATUSES:
+        return {"status": "ok", "job_id": clean_job_id, "processed": False, "message": "job 已在终态"}
+
+    workshop_session_id = str((job_doc or {}).get("workshop_session_id") or "").strip()
+    mode = str((job_doc or {}).get("mode") or "manual_confirmed").strip().lower() or "manual_confirmed"
+    allow_medium_similarity_autocreate = mode == "auto"
+
+    ws_service = AgentWorkshopService(db=db)
+    workshop_session = None
+    if workshop_session_id:
+        try:
+            workshop_session = await ws_service._load_session(workshop_session_id)
+        except Exception as exc:
+            logger.debug("worker 读取 workshop session 失败，降级继续: session_id=%s err=%s", workshop_session_id, exc)
+    agent_spec_id = str((job_doc or {}).get("spec_id") or "").strip()
+    if not agent_spec_id and workshop_session is not None:
+        agent_spec_id = str(getattr(workshop_session, "spec_id", "") or "").strip()
+
+    agent_name = ""
+    agent_goal = ""
+    session_owner = str((job_doc or {}).get("user_id") or "").strip()
+    if workshop_session is not None:
+        snapshot = getattr(workshop_session, "current_spec_snapshot", None)
+        if snapshot is not None:
+            agent_name = str(getattr(snapshot, "name", "") or "").strip()
+            agent_goal = str(getattr(snapshot, "primary_goal", "") or "").strip()
+        if not session_owner:
+            session_owner = str(getattr(workshop_session, "user_id", "") or "").strip()
+    effective_user_id = session_owner or "nanobot"
+
+    gaps: list[dict[str, Any]] = [dict(item or {}) for item in list((job_doc or {}).get("gaps") or [])]
+    if not gaps:
+        derived_status = "completed"
+        await collection.update_one(
+            {"job_id": clean_job_id},
+            {
+                "$set": {
+                    "status": derived_status,
+                    "execution.state": _derive_gap_execution_state(derived_status),
+                    "updated_at": now_iso,
+                }
+            },
+        )
+        return {"status": "ok", "job_id": clean_job_id, "processed": False, "message": "job 无 gaps"}
+
+    target_index = -1
+    for idx, gap in enumerate(gaps):
+        if str(gap.get("status") or "").strip().lower() == "pending":
+            target_index = idx
+            break
+    if target_index < 0:
+        for idx, gap in enumerate(gaps):
+            if str(gap.get("status") or "").strip().lower() == "running":
+                target_index = idx
+                break
+
+    if target_index < 0:
+        derived_status = _derive_gap_job_status(gaps)
+        await collection.update_one(
+            {"job_id": clean_job_id},
+            {
+                "$set": {
+                    "status": derived_status,
+                    "execution.state": _derive_gap_execution_state(derived_status),
+                    "updated_at": now_iso,
+                }
+            },
+        )
+        return {"status": "ok", "job_id": clean_job_id, "processed": False, "message": "job 无可执行 gap"}
+
+    target_gap = dict(gaps[target_index] or {})
+    gap_id = str(target_gap.get("gap_id") or f"gap_{target_index + 1}").strip() or f"gap_{target_index + 1}"
+    gap_desc = str(target_gap.get("description") or "").strip()
+    gap_status = str(target_gap.get("status") or "").strip().lower()
+
+    async def _persist_gap(target: dict[str, Any]) -> dict[str, Any]:
+        target["gap_id"] = gap_id
+        target["updated_at"] = now_iso
+        gaps[target_index] = target
+        derived = _derive_gap_job_status(gaps)
+        await collection.update_one(
+            {"job_id": clean_job_id},
+            {
+                "$set": {
+                    "gaps": gaps,
+                    "status": derived,
+                    "updated_at": now_iso,
+                    "execution.state": _derive_gap_execution_state(derived),
+                    "execution.last_gap_id": gap_id,
+                    "execution.last_gap_status": str(target.get("status") or "").strip().lower(),
+                    "execution.last_gap_message": str(target.get("pipeline_message") or "").strip(),
+                }
+            },
+        )
+        return {
+            "status": "ok",
+            "job_id": clean_job_id,
+            "processed": True,
+            "job_status": derived,
+            "gap": target,
+            "summary": _summarize_gap_job_gaps(gaps),
+        }
+
+    if gap_status == "pending":
+        # 先切到 running，避免并发 worker 重复抢占
+        target_gap["status"] = "running"
+        target_gap["pipeline_stage"] = "planning"
+        target_gap["pipeline_message"] = "worker 已接单，开始处理"
+        target_gap.setdefault("retry_count", 0)
+        target_gap.setdefault("created_at", now_iso)
+        target_gap.setdefault("started_at", now_iso)
+
+        dedup_hits = await CapabilityIndexService(db).search_capabilities(
+            query=gap_desc,
+            top_k=8,
+            bindable_only=True,
+            source_types=["skill", "external_skill"],
+        )
+        dedup_candidates: list[dict[str, Any]] = []
+        for hit in dedup_hits:
+            capability = hit.capability
+            dedup_candidates.append({
+                "source_type": str(getattr(capability, "source_type", "") or ""),
+                "registry_tool_id": str(getattr(capability, "registry_tool_id", "") or ""),
+                "name": str(getattr(capability, "name", "") or ""),
+                "score": float(getattr(hit, "score", 0.0) or 0.0),
+            })
+        high_match = next(
+            (
+                item for item in dedup_candidates
+                if _is_skill_source_type(item.get("source_type"))
+                and str(item.get("registry_tool_id") or "").strip()
+                and float(item.get("score") or 0.0) >= 0.85
+            ),
+            None,
+        )
+        if high_match is not None:
+            target_gap["status"] = "completed"
+            target_gap["pipeline_stage"] = "dedup_reuse"
+            target_gap["pipeline_message"] = "命中高相似度已有 Skill，直接复用"
+            target_gap["skill_tool_id"] = str(high_match.get("registry_tool_id") or "")
+            target_gap["skill_display_name"] = str(high_match.get("name") or "")
+            target_gap["elapsed_seconds"] = _iso_elapsed_seconds(str(target_gap.get("started_at") or now_iso), now_utc)
+            return await _persist_gap(target_gap)
+
+        medium_match = next(
+            (
+                item for item in dedup_candidates
+                if _is_skill_source_type(item.get("source_type"))
+                and str(item.get("registry_tool_id") or "").strip()
+                and 0.6 <= float(item.get("score") or 0.0) < 0.85
+            ),
+            None,
+        )
+        if medium_match is not None and not allow_medium_similarity_autocreate:
+            target_gap["status"] = "failed"
+            target_gap["pipeline_stage"] = "dedup_confirmation"
+            target_gap["pipeline_message"] = "命中中等相似度候选 Skill，等待用户确认复用/新建"
+            target_gap["error"] = "needs_dedup_confirmation"
+            target_gap["elapsed_seconds"] = _iso_elapsed_seconds(str(target_gap.get("started_at") or now_iso), now_utc)
+            return await _persist_gap(target_gap)
+
+        skill_service = SkillGenerationService(db=db)
+        start_result = await skill_service.start_session(
+            description=gap_desc,
+            user_id=effective_user_id,
+            handoff_context={
+                "source": "agent_studio_gap",
+                "source_spec_id": agent_spec_id,
+                "source_name": agent_name,
+                "target_capability": gap_desc,
+                "handoff_intent": "async_gap_resolution_worker",
+                "user_id": effective_user_id,
+                "workshop_session_id": workshop_session_id,
+                "spec_id": agent_spec_id,
+                "gap_id": gap_id,
+                "agent_name": agent_name,
+                "agent_goal": agent_goal,
+            },
+        )
+        skill_session_id = str((start_result or {}).get("session_id") or "").strip()
+        if not skill_session_id:
+            target_gap["status"] = "failed"
+            target_gap["pipeline_stage"] = "start_session"
+            target_gap["pipeline_message"] = "启动 Skill 生成会话失败"
+            target_gap["error"] = "skill_session_start_failed"
+            target_gap["elapsed_seconds"] = _iso_elapsed_seconds(str(target_gap.get("started_at") or now_iso), now_utc)
+            return await _persist_gap(target_gap)
+
+        await skill_service.respond_to_session(skill_session_id, "确认按可复用能力来设计，这是一个可参数化、可绑定到 Agent 的工具。")
+        await skill_service.preview_spec(skill_session_id, "确认")
+        await skill_service.confirm_spec(skill_session_id, "确认生成")
+
+        target_gap["status"] = "running"
+        target_gap["pipeline_stage"] = "generating"
+        target_gap["pipeline_message"] = "Skill 生成已提交，等待完成"
+        target_gap["skill_session_id"] = skill_session_id
+        target_gap["error"] = None
+        target_gap["elapsed_seconds"] = _iso_elapsed_seconds(str(target_gap.get("started_at") or now_iso), now_utc)
+        return await _persist_gap(target_gap)
+
+    # running 状态：轮询 Skill 生成会话
+    skill_session_id = str(target_gap.get("skill_session_id") or "").strip()
+    if not skill_session_id:
+        target_gap["status"] = "failed"
+        target_gap["pipeline_stage"] = "polling"
+        target_gap["pipeline_message"] = "running gap 缺少 skill_session_id"
+        target_gap["error"] = "missing_skill_session_id"
+        target_gap["elapsed_seconds"] = _iso_elapsed_seconds(str(target_gap.get("started_at") or now_iso), now_utc)
+        return await _persist_gap(target_gap)
+
+    session_doc = await db[SESSION_COLLECTION].find_one({"session_id": skill_session_id})
+    if not session_doc:
+        target_gap["status"] = "failed"
+        target_gap["pipeline_stage"] = "polling"
+        target_gap["pipeline_message"] = "Skill 生成会话不存在"
+        target_gap["error"] = "skill_session_not_found"
+        target_gap["elapsed_seconds"] = _iso_elapsed_seconds(str(target_gap.get("started_at") or now_iso), now_utc)
+        return await _persist_gap(target_gap)
+
+    skill_status = str(session_doc.get("status") or "").strip().lower()
+    target_gap["pipeline_stage"] = str(session_doc.get("pipeline_stage") or target_gap.get("pipeline_stage") or "")
+    target_gap["pipeline_message"] = str(session_doc.get("pipeline_message") or target_gap.get("pipeline_message") or "")
+    target_gap["elapsed_seconds"] = _iso_elapsed_seconds(str(target_gap.get("started_at") or now_iso), now_utc)
+
+    if skill_status == "completed":
+        spec = session_doc.get("spec") or {}
+        target_gap["status"] = "completed"
+        target_gap["skill_tool_id"] = str(spec.get("tool_id") or "")
+        target_gap["skill_display_name"] = str(spec.get("display_name") or "")
+        target_gap["error"] = None
+        return await _persist_gap(target_gap)
+
+    if skill_status == "failed":
+        target_gap["status"] = "failed"
+        target_gap["error"] = str(session_doc.get("pipeline_message") or "skill_generation_failed")
+        return await _persist_gap(target_gap)
+
+    if target_gap["elapsed_seconds"] >= _GAP_ITEM_TIMEOUT_SECONDS:
+        target_gap["status"] = "timeout"
+        target_gap["pipeline_stage"] = "timeout"
+        target_gap["pipeline_message"] = f"Skill 生成超时（>{_GAP_ITEM_TIMEOUT_SECONDS}s）"
+        target_gap["error"] = "skill_generation_timeout"
+        return await _persist_gap(target_gap)
+
+    # 尚未完成，保持 running
+    return await _persist_gap(target_gap)
+
+
+async def process_agent_workshop_gap_resolution_jobs_once(limit: int = 1) -> dict[str, Any]:
+    """由后台 worker 调用：单次消费并推进 gap resolution jobs 状态机。"""
+    try:
+        db = get_mongo_db()
+        collection = _get_collection(db, _GAP_RESOLUTION_JOB_COLLECTION)
+        if collection is None:
+            return {
+                "status": "error",
+                "message": f"数据库中不可用集合: {_GAP_RESOLUTION_JOB_COLLECTION}",
+                "processed": 0,
+            }
+
+        cap = max(1, min(int(limit), 20))
+        docs = await collection.find({}).to_list(length=200)
+        active_docs = [
+            doc
+            for doc in docs
+            if str((doc or {}).get("status") or "").strip().lower() in _GAP_JOB_ACTIVE_STATUSES
+        ]
+        active_docs.sort(key=lambda item: str((item or {}).get("updated_at") or ""))
+
+        handled: list[dict[str, Any]] = []
+        for doc in active_docs[:cap]:
+            handled.append(await _process_single_gap_resolution_job(db, doc))
+
+        return {
+            "status": "ok",
+            "active_jobs": len(active_docs),
+            "processed": len(handled),
+            "results": handled,
+        }
+    except Exception as exc:
+        logger.error("worker 消费 gap resolution jobs 失败: %s", exc, exc_info=True)
+        return {"status": "error", "message": f"worker 消费 gap jobs 失败: {exc}", "processed": 0}
+
+
+def _extract_blocking_gaps_from_report(gap_report: Any) -> list[str]:
+    blocking_gaps = _read_mapping_or_attr(gap_report, "blocking_gaps", []) or []
+    if not isinstance(blocking_gaps, list):
+        return []
+    return [str(item).strip() for item in blocking_gaps if str(item).strip()]
 
 
 def _parse_optional_json_list(raw: str, field_name: str) -> list[Any]:
@@ -4076,6 +4465,408 @@ async def resolve_agent_workshop_blocking_gaps(
         return _json_response({"status": "error", "message": f"补全能力缺口失败: {exc}"})
 
 
+@tool
+@register_tool(
+    tool_id="start_agent_workshop_gap_resolution",
+    name="启动 Agent 能力缺口异步补齐任务",
+    description="创建 gap resolution job 并返回 job_id，供后续轮询进度与控制。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="当缺口补齐可能耗时较长时，先创建异步 job，再通过 inspect/cancel/retry 工具治理。",
+    when_not_to_use="不适合在 session_id 无效时调用。",
+    returns="返回 JSON 字符串，包含 job_id、status、gaps 与 idempotency_key。",
+    example="start_agent_workshop_gap_resolution(session_id='ws_123')",
+    related_tools=[
+        "inspect_agent_workshop_gap_resolution",
+        "cancel_agent_workshop_gap_resolution",
+        "retry_agent_workshop_gap_resolution_item",
+    ],
+)
+async def start_agent_workshop_gap_resolution(
+    session_id: Annotated[str, "Agent 工坊会话 ID"],
+    blocking_gaps_json: Annotated[str, "可选 JSON 数组，直接指定缺口描述；为空时从 session gap_report 读取"] = "",
+    mode: Annotated[str, "任务模式：auto 或 manual_confirmed，默认 manual_confirmed"] = "manual_confirmed",
+    idempotency_key: Annotated[str, "幂等键；为空时按 session_id + gaps 自动生成"] = "",
+    max_items: Annotated[int, "最多纳入 job 的缺口数，默认 3，最大 10"] = 3,
+) -> str:
+    """创建 Agent 能力缺口异步补齐 job，并返回 job_id 与初始状态。"""
+    try:
+        clean_session_id = str(session_id or "").strip()
+        if not clean_session_id:
+            return _json_response({"status": "error", "message": "session_id 不能为空"})
+
+        db = get_mongo_db()
+        ws_service = AgentWorkshopService(db=db)
+        workshop_session = await ws_service._load_session(clean_session_id)
+        if workshop_session is None:
+            return _json_response({"status": "error", "message": f"Agent 工坊会话 {clean_session_id} 不存在"})
+
+        gaps: list[str] = []
+        if str(blocking_gaps_json or "").strip():
+            try:
+                parsed = json.loads(blocking_gaps_json)
+                if isinstance(parsed, list):
+                    gaps = [str(item).strip() for item in parsed if str(item).strip()]
+            except Exception as exc:
+                return _json_response({"status": "error", "message": f"blocking_gaps_json 解析失败: {exc}"})
+        if not gaps:
+            gap_report = getattr(workshop_session, "gap_report", None)
+            if gap_report is None:
+                analysis = await ws_service.analyze_gaps(clean_session_id)
+                gap_report = analysis.get("gap_report") if isinstance(analysis, dict) else None
+            gaps = _extract_blocking_gaps_from_report(gap_report)
+
+        capped_limit = max(1, min(int(max_items), 10))
+        gaps = gaps[:capped_limit]
+        if not gaps:
+            return _json_response({
+                "status": "ok",
+                "message": "当前没有 blocking gaps，无需创建异步补齐任务",
+                "workshop_session_id": clean_session_id,
+                "created": False,
+            })
+
+        clean_mode = str(mode or "manual_confirmed").strip().lower() or "manual_confirmed"
+        if clean_mode not in {"auto", "manual_confirmed"}:
+            clean_mode = "manual_confirmed"
+
+        effective_idempotency_key = str(idempotency_key or "").strip() or _build_gap_resolution_idempotency_key(clean_session_id, gaps)
+        collection = _get_collection(db, _GAP_RESOLUTION_JOB_COLLECTION)
+        if collection is None:
+            return _json_response({"status": "error", "message": f"数据库中不可用集合: {_GAP_RESOLUTION_JOB_COLLECTION}"})
+
+        existing_docs = await collection.find({
+            "workshop_session_id": clean_session_id,
+            "idempotency_key": effective_idempotency_key,
+        }).to_list(length=5)
+        for doc in existing_docs:
+            if str((doc or {}).get("status") or "").strip().lower() in _GAP_JOB_ACTIVE_STATUSES:
+                return _json_response({
+                    "status": "ok",
+                    "created": False,
+                    "message": "命中幂等任务，返回现有进行中 job",
+                    "job": {
+                        "job_id": doc.get("job_id"),
+                        "status": doc.get("status"),
+                        "workshop_session_id": doc.get("workshop_session_id"),
+                        "mode": doc.get("mode"),
+                        "idempotency_key": doc.get("idempotency_key"),
+                    },
+                })
+
+        now_iso = _utc_now_iso()
+        seed = f"{clean_session_id}:{effective_idempotency_key}:{now_iso}"
+        job_id = _build_gap_resolution_job_id(seed)
+        job_gaps = [
+            {
+                "gap_id": f"gap_{index + 1}",
+                "description": gap,
+                "status": "pending",
+                "pipeline_stage": "queued",
+                "pipeline_message": "等待 worker 执行",
+                "error": None,
+                "skill_session_id": "",
+                "skill_tool_id": "",
+                "skill_display_name": "",
+                "retry_count": 0,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            }
+            for index, gap in enumerate(gaps)
+        ]
+
+        job_doc = {
+            "job_id": job_id,
+            "workshop_session_id": clean_session_id,
+            "spec_id": str(getattr(workshop_session, "spec_id", "") or ""),
+            "version_id": "",
+            "user_id": str(getattr(workshop_session, "user_id", "") or ""),
+            "status": "pending",
+            "mode": clean_mode,
+            "idempotency_key": effective_idempotency_key,
+            "execution": {
+                "runner": "worker_required",
+                "state": "queued",
+                "note": "Phase 3 先落 job 协议；执行由后台 worker 接管",
+            },
+            "gaps": job_gaps,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        await collection.insert_one(job_doc)
+
+        return _json_response({
+            "status": "ok",
+            "created": True,
+            "message": "已创建 gap resolution job，等待 worker 消费",
+            "job": {
+                "job_id": job_id,
+                "status": "pending",
+                "workshop_session_id": clean_session_id,
+                "spec_id": job_doc.get("spec_id"),
+                "mode": clean_mode,
+                "idempotency_key": effective_idempotency_key,
+                "summary": _summarize_gap_job_gaps(job_gaps),
+            },
+        })
+    except Exception as exc:
+        logger.error("启动 Agent 缺口异步补齐任务失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"启动异步补齐任务失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="inspect_agent_workshop_gap_resolution",
+    name="查看 Agent 能力缺口异步补齐任务",
+    description="查询 gap resolution job 的当前状态与每个 gap 的进度。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="需要在 Agent Studio 里持续查看补齐任务进度时使用。",
+    when_not_to_use="不适合在 job_id 不存在时调用。",
+    returns="返回 JSON 字符串，包含 job 状态、gap 列表与汇总计数。",
+    example="inspect_agent_workshop_gap_resolution(job_id='gap_job_xxx')",
+    related_tools=[
+        "start_agent_workshop_gap_resolution",
+        "cancel_agent_workshop_gap_resolution",
+        "retry_agent_workshop_gap_resolution_item",
+    ],
+)
+async def inspect_agent_workshop_gap_resolution(
+    job_id: Annotated[str, "gap resolution job_id"],
+    include_gaps: Annotated[bool, "是否返回每个 gap 明细，默认 true"] = True,
+) -> str:
+    """查询 gap resolution job 的状态、汇总与（可选）gap 明细。"""
+    try:
+        clean_job_id = str(job_id or "").strip()
+        if not clean_job_id:
+            return _json_response({"status": "error", "message": "job_id 不能为空"})
+
+        db = get_mongo_db()
+        collection = _get_collection(db, _GAP_RESOLUTION_JOB_COLLECTION)
+        if collection is None:
+            return _json_response({"status": "error", "message": f"数据库中不可用集合: {_GAP_RESOLUTION_JOB_COLLECTION}"})
+
+        doc = await collection.find_one({"job_id": clean_job_id})
+        if not doc:
+            return _json_response({"status": "error", "message": f"job {clean_job_id} 不存在"})
+
+        gaps = list(doc.get("gaps") or [])
+        payload = {
+            "status": "ok",
+            "job": {
+                "job_id": doc.get("job_id"),
+                "workshop_session_id": doc.get("workshop_session_id"),
+                "spec_id": doc.get("spec_id"),
+                "version_id": doc.get("version_id"),
+                "user_id": doc.get("user_id"),
+                "status": doc.get("status"),
+                "mode": doc.get("mode"),
+                "idempotency_key": doc.get("idempotency_key"),
+                "execution": doc.get("execution") or {},
+                "summary": _summarize_gap_job_gaps(gaps),
+                "created_at": doc.get("created_at"),
+                "updated_at": doc.get("updated_at"),
+            },
+        }
+        if include_gaps:
+            payload["job"]["gaps"] = gaps
+        return _json_response(payload)
+    except Exception as exc:
+        logger.error("查看 Agent 缺口异步补齐任务失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"查看异步补齐任务失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="cancel_agent_workshop_gap_resolution",
+    name="取消 Agent 能力缺口异步补齐任务",
+    description="将 pending/running 的 gap resolution job 标记为 cancelled。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="用户明确要求停止当前补齐任务时使用。",
+    when_not_to_use="不适合取消已完成任务。",
+    returns="返回 JSON 字符串，包含取消结果与更新后的汇总。",
+    example="cancel_agent_workshop_gap_resolution(job_id='gap_job_xxx')",
+    related_tools=[
+        "inspect_agent_workshop_gap_resolution",
+        "retry_agent_workshop_gap_resolution_item",
+    ],
+)
+async def cancel_agent_workshop_gap_resolution(
+    job_id: Annotated[str, "gap resolution job_id"],
+    reason: Annotated[str, "取消原因，可选"] = "",
+) -> str:
+    """取消 pending/running 的 gap resolution job。"""
+    try:
+        clean_job_id = str(job_id or "").strip()
+        if not clean_job_id:
+            return _json_response({"status": "error", "message": "job_id 不能为空"})
+
+        db = get_mongo_db()
+        collection = _get_collection(db, _GAP_RESOLUTION_JOB_COLLECTION)
+        if collection is None:
+            return _json_response({"status": "error", "message": f"数据库中不可用集合: {_GAP_RESOLUTION_JOB_COLLECTION}"})
+
+        doc = await collection.find_one({"job_id": clean_job_id})
+        if not doc:
+            return _json_response({"status": "error", "message": f"job {clean_job_id} 不存在"})
+
+        current_status = str(doc.get("status") or "").strip().lower()
+        if current_status in _GAP_JOB_TERMINAL_STATUSES:
+            return _json_response({
+                "status": "ok",
+                "message": f"job 已处于终态: {current_status}，无需取消",
+                "job": {
+                    "job_id": clean_job_id,
+                    "status": current_status,
+                    "summary": _summarize_gap_job_gaps(list(doc.get("gaps") or [])),
+                },
+            })
+
+        now_iso = _utc_now_iso()
+        updated_gaps: list[dict[str, Any]] = []
+        for gap in list(doc.get("gaps") or []):
+            item = dict(gap or {})
+            gap_status = str(item.get("status") or "").strip().lower()
+            if gap_status not in {"completed", "failed", "timeout"}:
+                item["status"] = "cancelled"
+                item["pipeline_message"] = str(reason or "用户取消任务")
+                item["updated_at"] = now_iso
+            updated_gaps.append(item)
+
+        await collection.update_one(
+            {"job_id": clean_job_id},
+            {
+                "$set": {
+                    "status": "cancelled",
+                    "gaps": updated_gaps,
+                    "updated_at": now_iso,
+                    "execution.state": "cancelled",
+                    "execution.cancel_reason": str(reason or "").strip(),
+                }
+            },
+        )
+
+        return _json_response({
+            "status": "ok",
+            "message": "已取消 gap resolution job",
+            "job": {
+                "job_id": clean_job_id,
+                "status": "cancelled",
+                "summary": _summarize_gap_job_gaps(updated_gaps),
+                "updated_at": now_iso,
+            },
+        })
+    except Exception as exc:
+        logger.error("取消 Agent 缺口异步补齐任务失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"取消异步补齐任务失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="retry_agent_workshop_gap_resolution_item",
+    name="重试 Agent 缺口补齐任务中的单个缺口",
+    description="将某个 gap 重新置为 pending，等待 worker 重新执行该项。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use="当某个 gap 失败/超时/取消后，希望单项重试时使用。",
+    when_not_to_use="不适合对仍在运行的 gap 重复重试。",
+    returns="返回 JSON 字符串，包含重试后的 job 汇总与目标 gap 状态。",
+    example="retry_agent_workshop_gap_resolution_item(job_id='gap_job_xxx', gap_id='gap_1')",
+    related_tools=[
+        "inspect_agent_workshop_gap_resolution",
+        "cancel_agent_workshop_gap_resolution",
+    ],
+)
+async def retry_agent_workshop_gap_resolution_item(
+    job_id: Annotated[str, "gap resolution job_id"],
+    gap_id: Annotated[str, "目标缺口 ID，如 gap_1"],
+    reason: Annotated[str, "重试原因，可选"] = "",
+) -> str:
+    """重试 gap resolution job 中的单个失败/超时/取消项。"""
+    try:
+        clean_job_id = str(job_id or "").strip()
+        clean_gap_id = str(gap_id or "").strip()
+        if not clean_job_id:
+            return _json_response({"status": "error", "message": "job_id 不能为空"})
+        if not clean_gap_id:
+            return _json_response({"status": "error", "message": "gap_id 不能为空"})
+
+        db = get_mongo_db()
+        collection = _get_collection(db, _GAP_RESOLUTION_JOB_COLLECTION)
+        if collection is None:
+            return _json_response({"status": "error", "message": f"数据库中不可用集合: {_GAP_RESOLUTION_JOB_COLLECTION}"})
+
+        doc = await collection.find_one({"job_id": clean_job_id})
+        if not doc:
+            return _json_response({"status": "error", "message": f"job {clean_job_id} 不存在"})
+
+        now_iso = _utc_now_iso()
+        target_after: dict[str, Any] | None = None
+        updated_gaps: list[dict[str, Any]] = []
+        found = False
+        for gap in list(doc.get("gaps") or []):
+            item = dict(gap or {})
+            if str(item.get("gap_id") or "").strip() != clean_gap_id:
+                updated_gaps.append(item)
+                continue
+
+            found = True
+            current_status = str(item.get("status") or "").strip().lower()
+            if current_status in {"pending", "running"}:
+                return _json_response({
+                    "status": "error",
+                    "message": f"gap {clean_gap_id} 当前状态为 {current_status}，无需重试",
+                })
+
+            item["status"] = "pending"
+            item["pipeline_stage"] = "queued"
+            item["pipeline_message"] = str(reason or "已提交重试，等待 worker 执行")
+            item["error"] = None
+            item["updated_at"] = now_iso
+            item["retry_count"] = int(item.get("retry_count") or 0) + 1
+            target_after = item
+            updated_gaps.append(item)
+
+        if not found:
+            return _json_response({"status": "error", "message": f"job {clean_job_id} 中不存在 gap_id={clean_gap_id}"})
+
+        await collection.update_one(
+            {"job_id": clean_job_id},
+            {
+                "$set": {
+                    "status": "pending",
+                    "gaps": updated_gaps,
+                    "updated_at": now_iso,
+                    "execution.state": "queued",
+                }
+            },
+        )
+
+        return _json_response({
+            "status": "ok",
+            "message": "已重置目标 gap 为 pending",
+            "job": {
+                "job_id": clean_job_id,
+                "status": "pending",
+                "summary": _summarize_gap_job_gaps(updated_gaps),
+                "updated_at": now_iso,
+            },
+            "gap": target_after,
+        })
+    except Exception as exc:
+        logger.error("重试 Agent 缺口异步补齐项失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"重试异步补齐项失败: {exc}"})
+
+
 __all__ = [
     "search_project_capabilities",
     "inspect_runtime_agent_configs",
@@ -4098,6 +4889,10 @@ __all__ = [
     "bind_agent_tools_and_validate_candidate",
     "generate_confirmed_candidate_agent",
     "resolve_agent_workshop_blocking_gaps",
+    "start_agent_workshop_gap_resolution",
+    "inspect_agent_workshop_gap_resolution",
+    "cancel_agent_workshop_gap_resolution",
+    "retry_agent_workshop_gap_resolution_item",
 ]
 
 
