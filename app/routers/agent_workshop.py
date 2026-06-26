@@ -77,6 +77,16 @@ class DebugVersionRequest(BaseModel):
     prompt_overrides: Optional[dict[str, Any]] = Field(default=None, description="Prompt 覆盖")
 
 
+class RecoverGapResolutionDeadLettersRequest(BaseModel):
+    job_id: Optional[str] = Field(default=None, description="指定 job_id 恢复")
+    gap_ids: List[str] = Field(default_factory=list, description="指定 gap_id 列表恢复")
+    session_id: Optional[str] = Field(default=None, description="指定 Agent Studio 会话恢复")
+    spec_id: Optional[str] = Field(default=None, description="指定 Agent Spec 恢复")
+    reason_code: Optional[str] = Field(default=None, description="按失败原因恢复")
+    recover_all: bool = Field(default=False, description="是否恢复全部匹配 dead-letter")
+    reason: str = Field(default="", description="人工恢复原因")
+
+
 def _get_service(db: AsyncIOMotorDatabase) -> AgentWorkshopService:
     return AgentWorkshopService(db=db)
 
@@ -197,6 +207,46 @@ async def get_capability_snapshot(
     svc = _get_service(db)
     result = await svc.get_capability_snapshot()
     return ok(result)
+
+
+@router.get("/gap-resolution/dead-letters")
+async def list_gap_resolution_dead_letters(
+    session_id: Optional[str] = Query(None, description="按 Agent Studio 会话筛选"),
+    spec_id: Optional[str] = Query(None, description="按 Agent Spec 筛选"),
+    limit: int = Query(50, ge=1, le=200, description="最多扫描的 job 数"),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    try:
+        svc = _get_service(db)
+        result = await svc.list_gap_resolution_dead_letters(session_id=session_id, spec_id=spec_id, limit=limit)
+        return ok(result)
+    except Exception as e:
+        logger.error(f"❌ Agent 工坊 dead-letter 列表获取失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/gap-resolution/dead-letters/recover")
+async def recover_gap_resolution_dead_letters(
+    req: RecoverGapResolutionDeadLettersRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    try:
+        svc = _get_service(db)
+        result = await svc.recover_gap_resolution_dead_letters(
+            job_id=req.job_id,
+            gap_ids=req.gap_ids,
+            session_id=req.session_id,
+            spec_id=req.spec_id,
+            reason_code=req.reason_code,
+            recover_all=req.recover_all,
+            reason=req.reason,
+        )
+        return ok(result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ Agent 工坊 dead-letter 批量恢复失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/sessions/{session_id}")

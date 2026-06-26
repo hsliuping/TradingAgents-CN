@@ -1208,8 +1208,48 @@ cancelled
 
 当前仍在推进：
 
-1. 将 dead-letter 管理动作进一步产品化（例如批量恢复、失败原因分组统计、告警入口）。
-2. 将 `Phase 4/5` 的展示与追溯字段在前端视图中完整打通。
+1. 继续观察 Phase 4/5 在真实 Agent Studio 创建链路中的端到端表现。
+2. 后续如需要“严格冻结绑定”，再补 `skill_version_ref` 或等价快照机制。
+
+### 9.2 Phase 4/5 推进记录（2026-06-27）
+
+已完成：
+
+1. Skill 工坊治理化基础改造：
+   - `SkillGeneration.vue` 页面定位从“AI Skill 工坊”调整为“Skill 能力中心”。
+   - 主按钮文案调整为“手动创建 Skill”，弱化创建入口、强化资产管理心智。
+   - 列表增加来源筛选：全部来源 / Agent Studio 自动补齐 / 手动或其它创建。
+   - 列表增加“来源”列，展示 `origin_source`、来源 Agent、来源 gap。
+   - 列表增加“使用关系”列，展示当前 Skill 被哪些 Agent 版本使用。
+   - 沟通记录弹窗补充治理与追溯信息。
+2. 后端追溯字段与查询能力补齐：
+   - `SkillGenerationService.list_skills()` 支持 `source` 查询参数。
+   - `SkillGenerationService` 为 Skill 列表和详情补充 `used_by_agents` 反查结果。
+   - `skill_generation` 路由透传 `source` 筛选参数。
+3. AgentVersion 自动补齐 Skill 记录：
+   - `AgentWorkshopService.build_version()` 会收集当前 session 已完成的 gap resolution job。
+   - 自动补齐/复用的 `skill_tool_id` 会加入 `required_tools`。
+   - 自动补齐明细写入 `agent_metadata.auto_resolved_gaps`、`evaluation_policy.auto_resolved_gaps`、`tooling_contract.auto_resolved_gaps`。
+4. Agent Studio 追溯展示：
+   - Agent 版本详情的“绑定工具”区块展示“自动补齐 Skill”。
+   - 支持从 Agent Studio 跳转到 Skill 能力中心，并通过 `skill_id` 高亮对应 Skill。
+5. dead-letter 管理产品化：
+   - `AgentWorkshopService` 新增 gap resolution dead-letter 查询能力，返回失败项列表、job 汇总和按 `reason_code` 分组统计。
+   - `agent_workshop` 路由新增 `GET /api/agent-workshop/gap-resolution/dead-letters`。
+   - `agent_workshop` 路由新增 `POST /api/agent-workshop/gap-resolution/dead-letters/recover`，支持按 job、session、gap_ids、reason_code 或全部匹配项批量恢复。
+   - `AgentStudio.vue` 右侧栏增加“补齐异常”告警入口，展示失败原因分组、最近失败项、单项重试、同类恢复和批量恢复。
+   - `frontend/src/api/agentWorkshop.ts` 补齐 dead-letter 相关类型与 API 封装。
+
+已验证：
+
+1. 前端类型检查通过：`npm run type-check`。
+2. 后端改动文件语法校验通过：`python -m py_compile app/services/agent_workshop_service.py app/services/skill_generation_service.py app/routers/skill_generation.py`。
+3. dead-letter 后端新增改动语法校验通过：`python -m py_compile app/services/agent_workshop_service.py app/routers/agent_workshop.py`。
+
+待处理：
+
+1. `tests/core/tools/implementations/test_nanobot_agent_builder_tools.py` 全量回归当前仍有 4 个历史失败，失败点集中在旧的 spec_id 断言、线程模板默认 agent_type、迭代前置评估拦截等，与本次 Phase 4/5 展示和追溯字段改造无直接关系。
+2. dead-letter 恢复后仍依赖后台 worker 继续消费 `pending` gap，生产环境需要确认 worker 常驻与告警通知策略。
 
 本阶段验收：
 

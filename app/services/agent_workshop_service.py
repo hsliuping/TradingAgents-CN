@@ -79,6 +79,7 @@ SPEC_COLLECTION = "agent_specs"
 SESSION_COLLECTION = "agent_workshop_sessions"
 VERSION_COLLECTION = "agent_versions"
 EVALUATION_COLLECTION = "agent_evaluations"
+GAP_RESOLUTION_JOB_COLLECTION = "agent_workshop_gap_resolution_jobs"
 _AGENT_BUILDER_PROJECT_ID = "tradingagents-cn"
 
 
@@ -936,6 +937,27 @@ class AgentWorkshopService:
             version_id = f"{spec.spec_id}_v{version_number}"
 
         required_tools = self._select_required_tools(spec, gap_report)
+        auto_resolved_gaps = await self._collect_auto_resolved_gaps_for_session(session.session_id)
+
+        logger.info(
+            "[AgentWorkshop][BuildVersion] gap auto_resolved session_id=%s spec_id=%s version_id=%s auto_resolved_count=%s tool_ids=%s",
+            session.session_id,
+            spec.spec_id,
+            version_id,
+            len(auto_resolved_gaps),
+            [
+                str(item.get("skill_tool_id") or "")
+                for item in auto_resolved_gaps
+                if str(item.get("skill_tool_id") or "").strip()
+            ],
+        )
+
+        auto_resolved_tool_ids = self._dedupe([
+            str(item.get("skill_tool_id") or "").strip()
+            for item in auto_resolved_gaps
+            if str(item.get("skill_tool_id") or "").strip()
+        ])
+        required_tools = self._dedupe([*required_tools, *auto_resolved_tool_ids])
         capability_snapshot = await self._collect_capability_snapshot(self._build_valuation_requirement_text(spec))
         required_capabilities = self._select_required_capabilities(gap_report, session.tooling_plan, capability_snapshot)
         output_schema = self._build_output_schema(spec)
@@ -957,6 +979,18 @@ class AgentWorkshopService:
         evaluation_policy["prompt_contract"] = prompt_contract
         evaluation_policy["tooling_contract"] = tooling_contract
         metadata = self._build_agent_metadata(version_id, spec, required_tools, runtime_contract=runtime_contract)
+        if auto_resolved_gaps:
+            metadata["auto_resolved_gaps"] = auto_resolved_gaps
+            evaluation_policy["auto_resolved_gaps"] = auto_resolved_gaps
+            tooling_contract["auto_resolved_gaps"] = auto_resolved_gaps
+
+        logger.info(
+            "[AgentWorkshop][BuildVersion] metadata injected session_id=%s version_id=%s has_auto_resolved=%s required_tools=%s",
+            session.session_id,
+            version_id,
+            len(auto_resolved_gaps) > 0,
+            len(required_tools),
+        )
         agent_builder_lesson_block = await self._recall_agent_builder_lessons_for_spec(
             spec,
             user_id=str(session.user_id or spec.owner_user_id or "").strip(),
@@ -1031,6 +1065,348 @@ class AgentWorkshopService:
             "session_id": session.session_id,
             "spec_id": spec.spec_id,
             "version": version,
+        }
+
+    async def _collect_auto_resolved_gaps_for_session(self, session_id: str) -> List[Dict[str, Any]]:
+        """收集当前 Agent Studio 会话中已自动补齐/复用的 Skill，用于版本追溯。"""
+        clean_session_id = str(session_id or "").strip()
+        if not clean_session_id:
+            return []
+
+        logger.info(
+            "[AgentWorkshop][CollectAutoResolved] start session_id=%s",
+            clean_session_id,
+        )
+        try:
+            cursor = self._db[GAP_RESOLUTION_JOB_COLLECTION].find(
+                {"workshop_session_id": clean_session_id},
+                {"_id": 0, "job_id": 1, "gaps": 1, "created_at": 1, "updated_at": 1},
+            ).sort("created_at", 1)
+            docs = await cursor.to_list(length=100)
+        except Exception as exc:
+            logger.debug("[AgentWorkshop][CollectAutoResolved] query fail session_id=%s err=%s", clean_session_id, exc)
+            return []
+
+        results: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for doc in docs or []:
+            job_id = str((doc or {}).get("job_id") or "").strip()
+            for gap in list((doc or {}).get("gaps") or []):
+                if str((gap or {}).get("status") or "").strip().lower() != "completed":
+                    continue
+                skill_tool_id = str((gap or {}).get("skill_tool_id") or "").strip()
+                if not skill_tool_id:
+                    continue
+                gap_id = str((gap or {}).get("gap_id") or "").strip()
+                key = f"{job_id}:{gap_id}:{skill_tool_id}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                results.append({
+                    "job_id": job_id,
+                    "gap_id": gap_id,
+                    "gap": str((gap or {}).get("description") or "").strip(),
+                    "skill_tool_id": skill_tool_id,
+                    "skill_display_name": str((gap or {}).get("skill_display_name") or "").strip(),
+                    "skill_session_id": str((gap or {}).get("skill_session_id") or "").strip(),
+                    "resolution_stage": str((gap or {}).get("pipeline_stage") or "").strip(),
+                    "resolved_at": str((gap or {}).get("updated_at") or (doc or {}).get("updated_at") or "").strip(),
+                })
+
+        logger.info(
+            "[AgentWorkshop][CollectAutoResolved] done session_id=%s jobs=%s completed_gaps=%s",
+            clean_session_id,
+            len(docs or []),
+            len(results),
+        )
+        return results
+
+    def _summarize_gap_resolution_gaps(self, gaps: List[Dict[str, Any]]) -> Dict[str, int]:
+        summary = {
+            "total": 0,
+            "pending": 0,
+            "running": 0,
+            "completed": 0,
+            "failed": 0,
+            "timeout": 0,
+            "cancelled": 0,
+        }
+        for item in gaps or []:
+            summary["total"] += 1
+            status = str((item or {}).get("status") or "").strip().lower()
+            if status in summary:
+                summary[status] += 1
+        return summary
+
+    def _derive_gap_resolution_job_status(self, gaps: List[Dict[str, Any]]) -> str:
+        summary = self._summarize_gap_resolution_gaps(gaps)
+        total = int(summary.get("total") or 0)
+        if total <= 0:
+            return "completed"
+        pending_or_running = int(summary.get("pending") or 0) + int(summary.get("running") or 0)
+        if pending_or_running > 0:
+            return "running"
+        completed = int(summary.get("completed") or 0)
+        failed = int(summary.get("failed") or 0) + int(summary.get("timeout") or 0)
+        cancelled = int(summary.get("cancelled") or 0)
+        if completed == total:
+            return "completed"
+        if cancelled == total:
+            return "cancelled"
+        if completed > 0 and (failed > 0 or cancelled > 0):
+            return "partial_completed"
+        if failed > 0:
+            return "failed"
+        return "failed"
+
+    def _build_dead_letter_gap_item(self, doc: Dict[str, Any], gap: Dict[str, Any]) -> Dict[str, Any]:
+        dead_letter = gap.get("dead_letter") if isinstance(gap.get("dead_letter"), dict) else {}
+        reason_code = str(dead_letter.get("reason_code") or gap.get("last_error") or gap.get("error") or "unknown").strip() or "unknown"
+        reason_message = str(dead_letter.get("reason_message") or gap.get("last_error_message") or gap.get("pipeline_message") or "").strip()
+        return {
+            "job_id": str(doc.get("job_id") or ""),
+            "workshop_session_id": str(doc.get("workshop_session_id") or ""),
+            "spec_id": str(doc.get("spec_id") or ""),
+            "version_id": str(doc.get("version_id") or ""),
+            "user_id": str(doc.get("user_id") or ""),
+            "job_status": str(doc.get("status") or ""),
+            "gap_id": str(gap.get("gap_id") or ""),
+            "description": str(gap.get("description") or ""),
+            "status": str(gap.get("status") or ""),
+            "pipeline_stage": str(gap.get("pipeline_stage") or ""),
+            "pipeline_message": str(gap.get("pipeline_message") or ""),
+            "reason_code": reason_code,
+            "reason_message": reason_message,
+            "failed_at": str(dead_letter.get("failed_at") or gap.get("last_failure_at") or gap.get("updated_at") or doc.get("updated_at") or ""),
+            "auto_retry_count": int(gap.get("auto_retry_count") or dead_letter.get("auto_retry_count") or 0),
+            "max_attempts": int(dead_letter.get("max_attempts") or 0),
+            "retry_count": int(gap.get("retry_count") or 0),
+            "created_at": str(gap.get("created_at") or ""),
+            "updated_at": str(gap.get("updated_at") or doc.get("updated_at") or ""),
+        }
+
+    async def list_gap_resolution_dead_letters(
+        self,
+        session_id: Optional[str] = None,
+        spec_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """列出 Agent Studio 自动补齐任务的 dead-letter 项，并按失败原因分组。"""
+        query: Dict[str, Any] = {
+            "gaps": {"$elemMatch": {"pipeline_stage": "dead_letter"}},
+        }
+        clean_session_id = str(session_id or "").strip()
+        clean_spec_id = str(spec_id or "").strip()
+        if clean_session_id:
+            query["workshop_session_id"] = clean_session_id
+        if clean_spec_id:
+            query["spec_id"] = clean_spec_id
+
+        safe_limit = max(1, min(int(limit or 50), 200))
+        logger.info(
+            "[AgentWorkshop][GapDeadLetter] list start session_id=%s spec_id=%s limit=%s query=%s",
+            clean_session_id or "-",
+            clean_spec_id or "-",
+            safe_limit,
+            query,
+        )
+        cursor = (
+            self._db[GAP_RESOLUTION_JOB_COLLECTION]
+            .find(query, {"_id": 0})
+            .sort("updated_at", -1)
+            .limit(safe_limit)
+        )
+
+        items: List[Dict[str, Any]] = []
+        reason_map: Dict[str, Dict[str, Any]] = {}
+        job_map: Dict[str, Dict[str, Any]] = {}
+        async for doc in cursor:
+            gaps = list(doc.get("gaps") or [])
+            dead_gaps = [
+                self._build_dead_letter_gap_item(doc, dict(gap or {}))
+                for gap in gaps
+                if str((gap or {}).get("pipeline_stage") or "").strip().lower() == "dead_letter"
+            ]
+            if not dead_gaps:
+                continue
+
+            job_id = str(doc.get("job_id") or "")
+            job_map[job_id] = {
+                "job_id": job_id,
+                "workshop_session_id": str(doc.get("workshop_session_id") or ""),
+                "spec_id": str(doc.get("spec_id") or ""),
+                "status": str(doc.get("status") or ""),
+                "summary": self._summarize_gap_resolution_gaps(gaps),
+                "dead_letter_count": len(dead_gaps),
+                "updated_at": str(doc.get("updated_at") or ""),
+            }
+
+            for item in dead_gaps:
+                items.append(item)
+                code = str(item.get("reason_code") or "unknown")
+                if code not in reason_map:
+                    reason_map[code] = {
+                        "reason_code": code,
+                        "reason_message": str(item.get("reason_message") or ""),
+                        "count": 0,
+                        "job_count": 0,
+                        "latest_failed_at": "",
+                        "job_ids": set(),
+                    }
+                group = reason_map[code]
+                group["count"] = int(group.get("count") or 0) + 1
+                group["job_ids"].add(str(item.get("job_id") or ""))
+                failed_at = str(item.get("failed_at") or "")
+                if failed_at > str(group.get("latest_failed_at") or ""):
+                    group["latest_failed_at"] = failed_at
+                    group["reason_message"] = str(item.get("reason_message") or "")
+
+        items.sort(key=lambda item: str(item.get("failed_at") or item.get("updated_at") or ""), reverse=True)
+        groups: List[Dict[str, Any]] = []
+        for group in reason_map.values():
+            job_ids = sorted([item for item in group.pop("job_ids", set()) if item])
+            group["job_ids"] = job_ids
+            group["job_count"] = len(job_ids)
+            groups.append(group)
+        groups.sort(key=lambda item: int(item.get("count") or 0), reverse=True)
+        logger.info(
+            "[AgentWorkshop][GapDeadLetter] list done session_id=%s spec_id=%s total=%s groups=%s jobs=%s top_reason=%s",
+            clean_session_id or "-",
+            clean_spec_id or "-",
+            len(items),
+            len(groups),
+            len(job_map),
+            groups[0].get("reason_code") if groups else "-",
+        )
+
+        return {
+            "total": len(items),
+            "items": items,
+            "groups": groups,
+            "jobs": list(job_map.values()),
+        }
+
+    async def recover_gap_resolution_dead_letters(
+        self,
+        job_id: Optional[str] = None,
+        gap_ids: Optional[List[str]] = None,
+        session_id: Optional[str] = None,
+        spec_id: Optional[str] = None,
+        reason_code: Optional[str] = None,
+        recover_all: bool = False,
+        reason: str = "",
+    ) -> Dict[str, Any]:
+        """批量恢复 dead-letter gap 为 pending，等待后台 worker 重新补齐。"""
+        clean_job_id = str(job_id or "").strip()
+        clean_session_id = str(session_id or "").strip()
+        clean_spec_id = str(spec_id or "").strip()
+        clean_reason_code = str(reason_code or "").strip()
+        clean_gap_ids = {str(item or "").strip() for item in (gap_ids or []) if str(item or "").strip()}
+        if not (clean_job_id or clean_session_id or clean_spec_id or clean_reason_code or clean_gap_ids or recover_all):
+            raise ValueError("请指定 job_id、session_id、spec_id、reason_code、gap_ids 或 recover_all")
+
+        query: Dict[str, Any] = {"gaps": {"$elemMatch": {"pipeline_stage": "dead_letter"}}}
+        if clean_job_id:
+            query["job_id"] = clean_job_id
+        if clean_session_id:
+            query["workshop_session_id"] = clean_session_id
+        if clean_spec_id:
+            query["spec_id"] = clean_spec_id
+
+        logger.info(
+            "[AgentWorkshop][GapDeadLetter] recover start job_id=%s session_id=%s spec_id=%s reason_code=%s gap_ids=%s recover_all=%s reason=%s query=%s",
+            clean_job_id or "-",
+            clean_session_id or "-",
+            clean_spec_id or "-",
+            clean_reason_code or "-",
+            sorted(clean_gap_ids),
+            recover_all,
+            str(reason or "").strip() or "-",
+            query,
+        )
+        cursor = self._db[GAP_RESOLUTION_JOB_COLLECTION].find(query, {"_id": 0}).sort("updated_at", -1).limit(200)
+        now_iso = now_tz().isoformat()
+        recovered_items: List[Dict[str, Any]] = []
+        touched_jobs: List[Dict[str, Any]] = []
+        touched_gap_keys: set[str] = set()
+
+        async for doc in cursor:
+            updated_gaps: List[Dict[str, Any]] = []
+            changed = False
+            for gap in list(doc.get("gaps") or []):
+                item = dict(gap or {})
+                is_dead_letter = str(item.get("pipeline_stage") or "").strip().lower() == "dead_letter"
+                if is_dead_letter:
+                    item_gap_id = str(item.get("gap_id") or "").strip()
+                    dead_letter = item.get("dead_letter") if isinstance(item.get("dead_letter"), dict) else {}
+                    item_reason_code = str(dead_letter.get("reason_code") or item.get("last_error") or item.get("error") or "unknown").strip()
+                    matches_gap = not clean_gap_ids or item_gap_id in clean_gap_ids
+                    matches_reason = not clean_reason_code or item_reason_code == clean_reason_code
+                    recover_key = f"{doc.get('job_id')}:{item_gap_id}"
+                    if matches_gap and matches_reason and recover_key not in touched_gap_keys:
+                        item["status"] = "pending"
+                        item["pipeline_stage"] = "queued"
+                        item["pipeline_message"] = str(reason or "已批量恢复，等待 worker 重新执行")
+                        item["error"] = None
+                        item["updated_at"] = now_iso
+                        item["retry_count"] = int(item.get("retry_count") or 0) + 1
+                        item["auto_retry_count"] = 0
+                        item["next_retry_at"] = ""
+                        item["dead_letter"] = {}
+                        recovered_items.append({
+                            "job_id": str(doc.get("job_id") or ""),
+                            "gap_id": item_gap_id,
+                            "description": str(item.get("description") or ""),
+                        })
+                        touched_gap_keys.add(recover_key)
+                        changed = True
+                updated_gaps.append(item)
+
+            if not changed:
+                continue
+
+            new_status = self._derive_gap_resolution_job_status(updated_gaps)
+            recovered_count_before_update = len(recovered_items)
+            await self._db[GAP_RESOLUTION_JOB_COLLECTION].update_one(
+                {"job_id": doc.get("job_id")},
+                {
+                    "$set": {
+                        "status": new_status,
+                        "gaps": updated_gaps,
+                        "updated_at": now_iso,
+                        "execution.state": "queued" if new_status in {"pending", "running", "partial_completed"} else new_status,
+                        "execution.last_manual_recover_at": now_iso,
+                        "execution.last_manual_recover_reason": str(reason or "").strip(),
+                    }
+                },
+            )
+            touched_jobs.append({
+                "job_id": str(doc.get("job_id") or ""),
+                "status": new_status,
+                "summary": self._summarize_gap_resolution_gaps(updated_gaps),
+                "updated_at": now_iso,
+            })
+            logger.info(
+                "[AgentWorkshop][GapDeadLetter] recover job updated job_id=%s new_status=%s recovered_total=%s summary=%s",
+                str(doc.get("job_id") or ""),
+                new_status,
+                recovered_count_before_update,
+                self._summarize_gap_resolution_gaps(updated_gaps),
+            )
+
+        logger.info(
+            "[AgentWorkshop][GapDeadLetter] recover done job_id=%s session_id=%s spec_id=%s recovered=%s touched_jobs=%s",
+            clean_job_id or "-",
+            clean_session_id or "-",
+            clean_spec_id or "-",
+            len(recovered_items),
+            len(touched_jobs),
+        )
+
+        return {
+            "recovered": len(recovered_items),
+            "items": recovered_items,
+            "jobs": touched_jobs,
         }
 
     async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:

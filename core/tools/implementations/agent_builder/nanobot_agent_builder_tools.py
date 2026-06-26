@@ -451,6 +451,14 @@ async def _process_single_gap_resolution_job(db: Any, job_doc: dict[str, Any]) -
     mode = str((job_doc or {}).get("mode") or "manual_confirmed").strip().lower() or "manual_confirmed"
     allow_medium_similarity_autocreate = mode == "auto"
 
+    logger.info(
+        "[GapJob][ProcessJob] start job_id=%s session_id=%s mode=%s status=%s",
+        clean_job_id,
+        workshop_session_id or "-",
+        mode,
+        job_status,
+    )
+
     ws_service = AgentWorkshopService(db=db)
     workshop_session = None
     if workshop_session_id:
@@ -526,6 +534,15 @@ async def _process_single_gap_resolution_job(db: Any, job_doc: dict[str, Any]) -
         target["updated_at"] = now_iso
         gaps[target_index] = target
         derived = _derive_gap_job_status(gaps)
+        logger.info(
+            "[GapJob][PersistGap] job_id=%s gap_id=%s gap_status=%s stage=%s derived_job_status=%s skill_tool_id=%s",
+            clean_job_id,
+            gap_id,
+            target.get("status"),
+            target.get("pipeline_stage"),
+            derived,
+            target.get("skill_tool_id") or "-",
+        )
         await collection.update_one(
             {"job_id": clean_job_id},
             {
@@ -755,6 +772,14 @@ async def process_agent_workshop_gap_resolution_jobs_once(
         ]
         active_docs.sort(key=lambda item: str((item or {}).get("updated_at") or ""))
 
+        logger.info(
+            "[GapJob][Worker] worker_id=%s total_jobs=%s active_jobs=%s cap=%s",
+            effective_worker_id,
+            len(docs),
+            len(active_docs),
+            cap,
+        )
+
         handled: list[dict[str, Any]] = []
         claim_skipped = 0
         for doc in active_docs[:cap]:
@@ -779,9 +804,17 @@ async def process_agent_workshop_gap_resolution_jobs_once(
                         token=str(claim.get("token") or ""),
                     )
                 except Exception as release_exc:
-                    logger.debug("释放 gap job claim 失败（忽略）: %s", release_exc)
+                    logger.debug("[GapJob][Worker] release_claim_fail job_id=%s err=%s", (doc or {}).get("job_id"), release_exc)
 
         processed_count = sum(1 for item in handled if bool((item or {}).get("processed")))
+
+        logger.info(
+            "[GapJob][Worker] done worker_id=%s handled=%s processed=%s claim_skipped=%s",
+            effective_worker_id,
+            len(handled),
+            processed_count,
+            claim_skipped,
+        )
 
         return {
             "status": "ok",
@@ -4808,6 +4841,13 @@ async def start_agent_workshop_gap_resolution(
         }).to_list(length=5)
         for doc in existing_docs:
             if str((doc or {}).get("status") or "").strip().lower() in _GAP_JOB_ACTIVE_STATUSES:
+                logger.info(
+                    "[GapJob][Start] idempotent_hit session_id=%s key=%s existing_job_id=%s status=%s",
+                    clean_session_id,
+                    effective_idempotency_key,
+                    doc.get("job_id"),
+                    doc.get("status"),
+                )
                 return _json_response({
                     "status": "ok",
                     "created": False,
@@ -4870,6 +4910,15 @@ async def start_agent_workshop_gap_resolution(
         }
         await collection.insert_one(job_doc)
 
+        logger.info(
+            "[GapJob][Start] created session_id=%s job_id=%s gaps=%d mode=%s key=%s",
+            clean_session_id,
+            job_id,
+            len(job_gaps),
+            clean_mode,
+            effective_idempotency_key,
+        )
+
         return _json_response({
             "status": "ok",
             "created": True,
@@ -4928,6 +4977,13 @@ async def inspect_agent_workshop_gap_resolution(
             return _json_response({"status": "error", "message": f"job {clean_job_id} 不存在"})
 
         gaps = list(doc.get("gaps") or [])
+        summary = _summarize_gap_job_gaps(gaps)
+        logger.info(
+            "[GapJob][Inspect] job_id=%s status=%s summary=%s",
+            clean_job_id,
+            doc.get("status"),
+            summary,
+        )
         payload = {
             "status": "ok",
             "job": {
@@ -5024,6 +5080,13 @@ async def cancel_agent_workshop_gap_resolution(
                     "execution.cancel_reason": str(reason or "").strip(),
                 }
             },
+        )
+
+        logger.info(
+            "[GapJob][Cancel] done job_id=%s reason=%s summary=%s",
+            clean_job_id,
+            str(reason or "").strip() or "-",
+            _summarize_gap_job_gaps(updated_gaps),
         )
 
         return _json_response({

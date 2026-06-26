@@ -152,14 +152,27 @@ class ThreadWorker:
                 limit=1,
                 worker_id=self.worker_id,
             )
-            if str((result or {}).get("status") or "").strip().lower() != "ok":
-                logger.debug("Gap resolution job 轮询返回异常: %s", result)
-                return
+            status = str((result or {}).get("status") or "").strip().lower()
             processed = int((result or {}).get("processed") or 0)
-            if processed > 0:
-                logger.info("🔁 已推进 %d 个 gap resolution job", processed)
+            attempted = int((result or {}).get("attempted") or 0)
+            claim_skipped = int((result or {}).get("claim_skipped") or 0)
+            active_jobs = int((result or {}).get("active_jobs") or 0)
+
+            if status != "ok":
+                logger.debug("[GapJob][Tick] status=%s err=%s", status, result.get("message", ""))
+                return
+
+            if processed > 0 or attempted > 0:
+                logger.info(
+                    "[GapJob][Tick] worker_id=%s active_jobs=%s processed=%s attempted=%s claim_skipped=%s",
+                    self.worker_id,
+                    active_jobs,
+                    processed,
+                    attempted,
+                    claim_skipped,
+                )
         except Exception as exc:
-            logger.warning("Gap resolution job 轮询失败: %s", exc)
+            logger.warning("[GapJob][Tick] worker_id=%s err=%s", self.worker_id, exc)
     
 
 

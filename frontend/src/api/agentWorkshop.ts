@@ -207,6 +207,71 @@ export interface AgentExecutionValidationPlan {
   fallback_rules: string[]
 }
 
+export interface AgentAutoResolvedGap {
+  job_id?: string
+  gap_id?: string
+  gap?: string
+  skill_tool_id: string
+  skill_display_name?: string
+  skill_session_id?: string
+  resolution_stage?: string
+  resolved_at?: string
+}
+
+export interface AgentGapResolutionDeadLetterItem {
+  job_id: string
+  workshop_session_id: string
+  spec_id: string
+  version_id?: string
+  user_id?: string
+  job_status: string
+  gap_id: string
+  description: string
+  status: string
+  pipeline_stage: string
+  pipeline_message: string
+  reason_code: string
+  reason_message: string
+  failed_at: string
+  auto_retry_count: number
+  max_attempts: number
+  retry_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentGapResolutionDeadLetterGroup {
+  reason_code: string
+  reason_message: string
+  count: number
+  job_count: number
+  latest_failed_at: string
+  job_ids: string[]
+}
+
+export interface AgentGapResolutionJobSummary {
+  job_id: string
+  workshop_session_id: string
+  spec_id: string
+  status: string
+  summary: Record<string, number>
+  dead_letter_count: number
+  updated_at: string
+}
+
+export interface AgentGapResolutionDeadLettersResult {
+  total: number
+  items: AgentGapResolutionDeadLetterItem[]
+  groups: AgentGapResolutionDeadLetterGroup[]
+  jobs: AgentGapResolutionJobSummary[]
+}
+
+export interface AgentGapResolutionRecoverResult {
+  recovered: number
+  items: Array<{ job_id: string; gap_id: string; description: string }>
+  jobs: Array<{ job_id: string; status: string; summary: Record<string, number>; updated_at: string }>
+}
+
 export interface AgentVersion {
   version_id: string
   spec_id: string
@@ -217,6 +282,7 @@ export interface AgentVersion {
     name?: string
     version?: string
     maintenance_status?: 'maintained' | 'unmaintained'
+    auto_resolved_gaps?: AgentAutoResolvedGap[]
   }
   prompt_template_ref: Record<string, any>
   required_tools: string[]
@@ -575,6 +641,24 @@ export const agentWorkshopApi = {
 
   getCapabilitySnapshot: async (): Promise<AgentWorkshopCapabilitySnapshot> => {
     const res = await request.get<ApiOk<AgentWorkshopCapabilitySnapshot>>(`${BASE}/capability-snapshot`)
+    return (res as any).data
+  },
+
+  listGapResolutionDeadLetters: async (params?: { session_id?: string; spec_id?: string; limit?: number }): Promise<AgentGapResolutionDeadLettersResult> => {
+    const res = await request.get<ApiOk<AgentGapResolutionDeadLettersResult>>(`${BASE}/gap-resolution/dead-letters`, { params })
+    return (res as any).data
+  },
+
+  recoverGapResolutionDeadLetters: async (payload: {
+    job_id?: string
+    gap_ids?: string[]
+    session_id?: string
+    spec_id?: string
+    reason_code?: string
+    recover_all?: boolean
+    reason?: string
+  }): Promise<AgentGapResolutionRecoverResult> => {
+    const res = await request.post<ApiOk<AgentGapResolutionRecoverResult>>(`${BASE}/gap-resolution/dead-letters/recover`, payload)
     return (res as any).data
   },
 

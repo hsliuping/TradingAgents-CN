@@ -376,6 +376,7 @@ async def delete_session(
 async def list_skills(
     category: Optional[str] = Query(None, description="按分类筛选"),
     status: Optional[str] = Query(None, description="按状态筛选: active/disabled/archived"),
+    source: Optional[str] = Query(None, description="按来源筛选: agent_studio_auto_gap_resolution/manual_or_other/generated"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页条数"),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
@@ -383,7 +384,7 @@ async def list_skills(
     """获取 AI 生成的 Skill 列表（分页）"""
     svc = await _get_service_with_llm(db)
     result = await svc.list_skills(
-        category=category, status=status, page=page, page_size=page_size
+        category=category, status=status, source=source, page=page, page_size=page_size
     )
     return ok(result)
 

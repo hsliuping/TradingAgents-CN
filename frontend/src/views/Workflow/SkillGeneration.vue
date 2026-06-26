@@ -5,14 +5,14 @@
       <div class="header-left">
         <h1>
           <el-icon class="header-icon"><MagicStick /></el-icon>
-          AI Skill 工坊
+          Skill 能力中心
         </h1>
-        <span class="subtitle">用自然语言描述需求，AI 自动生成并验证工具</span>
+        <span class="subtitle">管理 AI 生成与 Agent Studio 自动补齐的可复用能力</span>
       </div>
       <div class="header-right">
         <el-button type="primary" @click="() => goToCreate()">
           <el-icon><Plus /></el-icon>
-          创建新 Skill
+          手动创建 Skill
         </el-button>
         <el-button @click="loadSkills">
           <el-icon><Refresh /></el-icon>
@@ -110,16 +110,26 @@
 
     <!-- Skill 列表 -->
     <div class="skill-list-section">
-      <div class="section-header">
-        <h2>已生成的 Skill</h2>
-        <el-radio-group v-model="filterStatus" size="small" @change="loadSkills">
-          <el-radio-button label="">全部</el-radio-button>
-          <el-radio-button label="active">已启用</el-radio-button>
-          <el-radio-button label="disabled">已禁用</el-radio-button>
-        </el-radio-group>
+      <div class="section-header skill-list-header">
+        <div>
+          <h2>能力资产</h2>
+          <span class="section-subtitle">查看来源、被哪些 Agent 使用，以及当前运行状态</span>
+        </div>
+        <div class="skill-filters">
+          <el-select v-model="filterSource" placeholder="来源" size="small" style="width: 180px" @change="loadSkills">
+            <el-option label="全部来源" value="" />
+            <el-option label="Agent Studio 自动补齐" value="agent_studio_auto_gap_resolution" />
+            <el-option label="手动/其它创建" value="manual_or_other" />
+          </el-select>
+          <el-radio-group v-model="filterStatus" size="small" @change="loadSkills">
+            <el-radio-button label="">全部</el-radio-button>
+            <el-radio-button label="active">已启用</el-radio-button>
+            <el-radio-button label="disabled">已禁用</el-radio-button>
+          </el-radio-group>
+        </div>
       </div>
 
-      <el-table v-loading="listLoading" :data="skills" style="width: 100%" border stripe empty-text="还没有生成任何 Skill，点击上方按钮创建">
+      <el-table v-loading="listLoading" :data="skills" style="width: 100%" border stripe empty-text="还没有生成任何 Skill，点击上方按钮创建" :row-class-name="getSkillRowClassName">
         <el-table-column prop="display_name" label="名称" min-width="160">
           <template #default="{ row }">
             <span class="skill-name-cell">
@@ -129,6 +139,31 @@
           </template>
         </el-table-column>
         <el-table-column prop="description" label="描述" min-width="240" show-overflow-tooltip />
+        <el-table-column label="来源" min-width="210">
+          <template #default="{ row }">
+            <div class="source-cell">
+              <el-tag :type="getSkillSourceTagType(row)" size="small" effect="plain">
+                {{ getSkillSourceLabel(row) }}
+              </el-tag>
+              <span v-if="row.origin_agent_name" class="source-agent">{{ row.origin_agent_name }}</span>
+              <span v-else-if="row.origin_spec_id" class="source-agent">{{ row.origin_spec_id }}</span>
+              <span v-if="row.origin_gap_id" class="source-gap">{{ row.origin_gap_id }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="使用关系" min-width="220">
+          <template #default="{ row }">
+            <div v-if="row.used_by_agents?.length" class="usage-cell">
+              <el-tag v-for="usage in row.used_by_agents.slice(0, 2)" :key="usage.version_id" size="small" effect="plain" type="success">
+                {{ usage.agent_name || usage.spec_id }} v{{ usage.version || '-' }}
+              </el-tag>
+              <el-tooltip v-if="row.used_by_agents.length > 2" :content="getSkillUsageTooltip(row)" placement="top">
+                <span class="usage-more">+{{ row.used_by_agents.length - 2 }}</span>
+              </el-tooltip>
+            </div>
+            <span v-else class="strategy-empty">暂未绑定 Agent</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="90" align="center">
           <template #default="{ row }">
             <el-tag :type="row.status === 'active' ? 'success' : row.status === 'disabled' ? 'info' : 'warning'" size="small">
@@ -296,8 +331,21 @@
         <p>加载中...</p>
       </div>
       <div v-else>
-        <div v-if="historySkillRow && hasGenerationContext(historySkillRow)" class="history-strategy-panel">
-          <div class="history-strategy-title">本次生成采用的复用策略</div>
+        <div v-if="historySkillRow && (hasGenerationContext(historySkillRow) || historySkillRow.origin_source || historySkillRow.used_by_agents?.length)" class="history-strategy-panel">
+          <div class="history-strategy-title">治理与追溯信息</div>
+          <div v-if="historySkillRow.origin_source || historySkillRow.origin_agent_name || historySkillRow.origin_gap_id" class="strategy-detail-row">
+            <span class="strategy-detail-label">来源</span>
+            <el-tag :type="getSkillSourceTagType(historySkillRow)" size="small" effect="plain">{{ getSkillSourceLabel(historySkillRow) }}</el-tag>
+            <span v-if="historySkillRow.origin_agent_name" class="source-agent">{{ historySkillRow.origin_agent_name }}</span>
+            <span v-if="historySkillRow.origin_gap_id" class="source-gap">{{ historySkillRow.origin_gap_id }}</span>
+          </div>
+          <div v-if="historySkillRow.used_by_agents?.length" class="strategy-detail-row">
+            <span class="strategy-detail-label">被使用</span>
+            <el-tag v-for="usage in historySkillRow.used_by_agents" :key="usage.version_id" size="small" type="success" effect="plain">
+              {{ usage.agent_name || usage.spec_id }} v{{ usage.version || '-' }}
+            </el-tag>
+          </div>
+          <div v-if="hasGenerationContext(historySkillRow)" class="history-strategy-title">本次生成采用的复用策略</div>
           <div class="history-strategy-tags">
             <el-tag v-if="historySkillRow.generation_context?.category_hint" size="small" type="success" effect="plain">
               {{ historySkillRow.generation_context.category_hint }}
@@ -488,7 +536,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onActivated } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { Plus, Refresh, User, MagicStick, Loading, DocumentCopy } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
@@ -513,6 +561,7 @@ const formatTime = (t: string): string => {
 }
 
 const router = useRouter()
+const route = useRoute()
 
 // ==================== 状态 ====================
 
@@ -520,6 +569,8 @@ const router = useRouter()
 const skills = ref<ExternalSkill[]>([])
 const listLoading = ref(false)
 const filterStatus = ref('')
+const filterSource = ref('')
+const highlightedSkillId = ref('')
 
 // 代码查看
 const codeDialogVisible = ref(false)
@@ -676,6 +727,35 @@ const getGenerationStrategySummary = (row: ExternalSkill) => {
   return parts.join(' · ') || '已记录策略'
 }
 
+const getSkillSourceLabel = (row: ExternalSkill) => {
+  if (row.origin_source === 'agent_studio_auto_gap_resolution') return 'Agent Studio 自动补齐'
+  if (row.source === 'generated') return '手动创建'
+  return row.source || '未知来源'
+}
+
+const getSkillSourceTagType = (row: ExternalSkill): 'success' | 'warning' | 'info' | 'primary' => {
+  if (row.origin_source === 'agent_studio_auto_gap_resolution') return 'success'
+  if (row.source === 'generated') return 'primary'
+  return 'info'
+}
+
+const getSkillUsageTooltip = (row: ExternalSkill) => {
+  return (row.used_by_agents || [])
+    .map(item => `${item.agent_name || item.spec_id} v${item.version || '-'}（${item.status || 'unknown'}）`)
+    .join('\n')
+}
+
+const getSkillRowClassName = ({ row }: { row: ExternalSkill }) => {
+  return row.tool_id === highlightedSkillId.value ? 'highlight-skill-row' : ''
+}
+
+const applyRouteFilters = () => {
+  const source = typeof route.query.source === 'string' ? route.query.source.trim() : ''
+  const skillId = typeof route.query.skill_id === 'string' ? route.query.skill_id.trim() : ''
+  if (source) filterSource.value = source
+  if (skillId) highlightedSkillId.value = skillId
+}
+
 // ==================== 方法 ====================
 
 /** 跳转到创建页（新建或恢复草稿） */
@@ -697,6 +777,7 @@ const loadSkills = async () => {
   try {
     const res = await skillGenerationApi.listSkills({
       status: filterStatus.value || undefined,
+      source: filterSource.value || undefined,
       page: 1,
       page_size: 100,
     })
@@ -908,8 +989,8 @@ const handleDeleteDraft = (draft: SessionDetail) => {
   }).catch(() => {})
 }
 
-onMounted(() => { loadSkills(); loadDrafts() })
-onActivated(() => { loadSkills(); loadDrafts() })
+onMounted(() => { applyRouteFilters(); loadSkills(); loadDrafts() })
+onActivated(() => { applyRouteFilters(); loadSkills(); loadDrafts() })
 </script>
 
 
@@ -1069,9 +1150,52 @@ onActivated(() => { loadSkills(); loadDrafts() })
   h2 { font-size: 16px; margin: 0; }
 }
 
+.section-subtitle {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.skill-list-header {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.skill-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .skill-name-cell {
   display: flex;
   align-items: center;
+}
+
+.source-cell,
+.usage-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.source-agent,
+.source-gap,
+.usage-more {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.usage-more {
+  cursor: default;
+}
+
+:deep(.highlight-skill-row) {
+  --el-table-tr-bg-color: #f0f9ff;
+  box-shadow: inset 4px 0 0 var(--el-color-primary);
 }
 
 .strategy-cell {

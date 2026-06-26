@@ -221,6 +221,46 @@
             </div>
           </section>
 
+          <section v-if="hasGapDeadLetters" class="right-section dead-letter-section">
+            <div class="section-title section-title-with-action">
+              <span>补齐异常</span>
+              <el-tag size="small" type="danger" effect="plain">{{ activeGapDeadLetters.length }}</el-tag>
+            </div>
+            <div v-loading="loadingGapDeadLetters" class="plain-card dead-letter-card">
+              <div class="dead-letter-alert">
+                <strong>自动补齐 Skill 有失败项</strong>
+                <span>{{ gapDeadLetterSummaryText }}</span>
+                <span v-if="latestGapDeadLetter?.reason_message" class="dead-letter-message">{{ latestGapDeadLetter.reason_message }}</span>
+              </div>
+              <div v-if="activeGapDeadLetterGroups.length" class="dead-letter-groups">
+                <div v-for="group in activeGapDeadLetterGroups.slice(0, 3)" :key="group.reason_code" class="dead-letter-group">
+                  <div>
+                    <strong>{{ group.reason_code }}</strong>
+                    <span>{{ group.count }} 项 / {{ group.job_count }} 个任务</span>
+                  </div>
+                  <el-button link type="primary" size="small" :loading="recoveringGapDeadLetters" @click="recoverGapDeadLettersByReason(group)">
+                    恢复同类
+                  </el-button>
+                </div>
+              </div>
+              <div class="dead-letter-items">
+                <div v-for="item in activeGapDeadLetters.slice(0, 3)" :key="`${item.job_id}-${item.gap_id}`" class="dead-letter-item">
+                  <div class="dead-letter-item-main">
+                    <strong>{{ item.description || item.gap_id }}</strong>
+                    <span>{{ item.reason_code }} · {{ item.failed_at || item.updated_at }}</span>
+                  </div>
+                  <el-button link type="primary" size="small" :loading="recoveringGapDeadLetters" @click="recoverSingleGapDeadLetter(item)">
+                    重试
+                  </el-button>
+                </div>
+              </div>
+              <div class="dead-letter-actions">
+                <el-button size="small" :loading="loadingGapDeadLetters" @click="loadGapDeadLetters()">刷新</el-button>
+                <el-button type="primary" size="small" :loading="recoveringGapDeadLetters" @click="recoverGapDeadLetters({ recover_all: true })">批量恢复</el-button>
+              </div>
+            </div>
+          </section>
+
           <section class="right-section">
             <div class="section-title">构建进度</div>
             <div class="progress-list">
@@ -484,6 +524,20 @@
                       </el-tag>
                     </div>
                     <div v-else class="empty-note">当前版本没有绑定工具。</div>
+                    <div v-if="versionDetailAutoResolvedGaps.length" class="auto-resolved-list">
+                      <div class="detail-subtitle">自动补齐 Skill</div>
+                      <div v-for="item in versionDetailAutoResolvedGaps" :key="`${item.job_id || ''}-${item.gap_id || ''}-${item.skill_tool_id}`" class="auto-resolved-item">
+                        <div class="auto-resolved-main">
+                          <el-tag size="small" type="success" effect="plain">自动补齐</el-tag>
+                          <strong>{{ item.skill_display_name || item.skill_tool_id }}</strong>
+                          <el-button link type="primary" size="small" @click="openSkillTrace(item.skill_tool_id)">查看 Skill</el-button>
+                        </div>
+                        <div class="auto-resolved-meta">
+                          <span v-if="item.gap">缺口：{{ item.gap }}</span>
+                          <span v-if="item.resolution_stage">阶段：{{ item.resolution_stage }}</span>
+                        </div>
+                      </div>
+                    </div>
                   </section>
                 </div>
               </el-tab-pane>
@@ -675,7 +729,11 @@ import embeddedNanobotApi, {
   type EmbeddedNanobotThreadItem,
 } from '@/api/embeddedNanobot'
 import agentWorkshopApi, {
+  type AgentAutoResolvedGap,
   type AgentEvaluationReport,
+  type AgentGapResolutionDeadLettersResult,
+  type AgentGapResolutionDeadLetterGroup,
+  type AgentGapResolutionDeadLetterItem,
   type AgentSpec,
   type AgentVersion,
   type AgentWorkshopMessage,
@@ -776,6 +834,9 @@ const renameInputRef = ref<HTMLElement | null>(null)
 const loadingNanobotThreads = ref(false)
 const showLeftSidebar = ref(true)
 const showStatusSidebar = ref(true)
+const gapDeadLetters = ref<AgentGapResolutionDeadLettersResult | null>(null)
+const loadingGapDeadLetters = ref(false)
+const recoveringGapDeadLetters = ref(false)
 const mainGridStyle = computed(() => {
   const l = showLeftSidebar.value
   const r = showStatusSidebar.value
@@ -1157,6 +1218,15 @@ const governanceReferences = computed(() => {
 })
 const activeAgentId = computed(() => String(displaySpec.value?.spec_id || '').trim())
 const activeTreeKey = computed(() => selectedVersionId.value ? `version:${selectedVersionId.value}` : (activeAgentId.value ? `spec:${activeAgentId.value}` : ''))
+const activeGapDeadLetters = computed<AgentGapResolutionDeadLetterItem[]>(() => gapDeadLetters.value?.items || [])
+const activeGapDeadLetterGroups = computed<AgentGapResolutionDeadLetterGroup[]>(() => gapDeadLetters.value?.groups || [])
+const hasGapDeadLetters = computed(() => activeGapDeadLetters.value.length > 0)
+const latestGapDeadLetter = computed(() => activeGapDeadLetters.value[0] || null)
+const gapDeadLetterSummaryText = computed(() => {
+  if (!hasGapDeadLetters.value) return '暂无异常'
+  const top = activeGapDeadLetterGroups.value[0]
+  return top ? `${activeGapDeadLetters.value.length} 个失败项，主要原因：${top.reason_code}` : `${activeGapDeadLetters.value.length} 个失败项`
+})
 const latestVersionRuntimeContract = computed(() => latestVersion.value?.evaluation_policy?.runtime_contract || {})
 const getLatestVersionMetadataValue = (key: string) => latestVersion.value?.agent_metadata?.[key] ?? latestVersionRuntimeContract.value?.[key]
 const rightPanelOutputField = computed(() => String(getLatestVersionMetadataValue('output_field') || 'analysis').trim() || 'analysis')
@@ -1404,6 +1474,12 @@ const versionDetailNodeNameText = computed(() => {
 })
 
 const versionDetailPromptContract = computed(() => versionDetailVersion.value?.evaluation_policy?.prompt_contract || {})
+const versionDetailAutoResolvedGaps = computed(() => {
+  const metaGaps = versionDetailVersion.value?.agent_metadata?.auto_resolved_gaps
+  const policyGaps = versionDetailVersion.value?.evaluation_policy?.auto_resolved_gaps
+  const gaps: AgentAutoResolvedGap[] = Array.isArray(metaGaps) ? metaGaps : (Array.isArray(policyGaps) ? policyGaps : [])
+  return gaps.filter(item => item && item.skill_tool_id)
+})
 const versionDetailPromptAgentTypeText = computed(() => String(versionDetailPromptContract.value?.agent_type ?? 'universal').trim() || 'universal')
 const versionDetailPromptAgentNameText = computed(() => String(versionDetailPromptContract.value?.agent_name ?? versionDetailVersion.value?.version_id ?? '-').trim() || '-')
 
@@ -1472,6 +1548,12 @@ const versionDetailOverviewDescription = computed(() => {
 })
 const canReEvaluateVersionDetail = computed(() => !!versionDetailVersion.value)
 const canPublishVersionDetail = computed(() => !!versionDetailVersion.value && versionDetailEvaluation.value?.decision === 'pass' && versionDetailVersion.value.status !== 'active')
+
+const openSkillTrace = (skillId?: string) => {
+  const normalized = String(skillId || '').trim()
+  if (!normalized) return
+  router.push({ path: '/workflow/skill-generation', query: { skill_id: normalized, source: 'agent_studio_auto_gap_resolution' } })
+}
 
 const startEditingVersionMetadata = () => {
   const meta = versionDetailVersion.value?.agent_metadata || {}
@@ -1640,6 +1722,62 @@ const resetVersionContext = () => {
   latestEvaluation.value = null
 }
 
+const loadGapDeadLetters = async (options?: { silent?: boolean }) => {
+  const sessionId = currentWorkshopSessionId.value
+  const specId = activeAgentId.value
+  if (!sessionId && !specId) {
+    gapDeadLetters.value = null
+    return
+  }
+  loadingGapDeadLetters.value = true
+  try {
+    gapDeadLetters.value = await agentWorkshopApi.listGapResolutionDeadLetters({
+      session_id: sessionId || undefined,
+      spec_id: sessionId ? undefined : specId,
+      limit: 80,
+    })
+  } catch (error: any) {
+    if (!options?.silent) {
+      ElMessage.error(error?.message || '加载补齐异常失败')
+    }
+    gapDeadLetters.value = null
+  } finally {
+    loadingGapDeadLetters.value = false
+  }
+}
+
+const recoverGapDeadLetters = async (payload?: { reason_code?: string; gap_ids?: string[]; job_id?: string; recover_all?: boolean }) => {
+  const sessionId = currentWorkshopSessionId.value
+  const specId = activeAgentId.value
+  if (!sessionId && !specId && !payload?.job_id) return
+  try {
+    recoveringGapDeadLetters.value = true
+    const result = await agentWorkshopApi.recoverGapResolutionDeadLetters({
+      job_id: payload?.job_id,
+      session_id: payload?.job_id ? undefined : (sessionId || undefined),
+      spec_id: payload?.job_id || sessionId ? undefined : (specId || undefined),
+      reason_code: payload?.reason_code,
+      gap_ids: payload?.gap_ids,
+      recover_all: payload?.recover_all ?? Boolean(!payload?.reason_code && !payload?.gap_ids?.length && !payload?.job_id),
+      reason: 'Agent Studio 人工恢复 dead-letter',
+    })
+    ElMessage.success(result.recovered ? `已恢复 ${result.recovered} 个补齐失败项` : '没有可恢复的失败项')
+    await loadGapDeadLetters({ silent: true })
+  } catch (error: any) {
+    ElMessage.error(error?.message || '恢复失败')
+  } finally {
+    recoveringGapDeadLetters.value = false
+  }
+}
+
+const recoverGapDeadLettersByReason = async (group: AgentGapResolutionDeadLetterGroup) => {
+  await recoverGapDeadLetters({ reason_code: group.reason_code })
+}
+
+const recoverSingleGapDeadLetter = async (item: AgentGapResolutionDeadLetterItem) => {
+  await recoverGapDeadLetters({ job_id: item.job_id, gap_ids: [item.gap_id] })
+}
+
 const loadLatestVersionContext = async (specId?: string) => {
   const normalized = String(specId || '').trim()
   if (!normalized) {
@@ -1690,6 +1828,7 @@ const loadSession = async (sessionId?: string, options?: { syncNanobotThread?: b
       expandAgentBranch(currentSession.value.current_spec_snapshot?.spec_id || '')
       await ensureSpecVersionsLoaded(currentSession.value.current_spec_snapshot?.spec_id || '')
       await loadLatestVersionContext(currentSession.value.current_spec_snapshot?.spec_id || '')
+      await loadGapDeadLetters({ silent: true })
       if (options?.syncNanobotThread && currentNanobotSessionKey.value) {
         await loadNanobotThreadMessages({ sessionKey: currentNanobotSessionKey.value, silent: true })
       }
@@ -1726,6 +1865,7 @@ const openAgentItem = async (item: AgentSpec) => {
     specName: item.name || '当前 Draft',
     sessionId: item.latest_session_id || undefined,
   }
+  await loadGapDeadLetters({ silent: true })
 
   // 恢复目标 Agent 的聊天记录
   const savedMessages = specMessagesMap.value[item.spec_id]
@@ -2148,6 +2288,7 @@ const clearStudioState = (preserveStorage = false) => {
   nanobotStreaming.value = false
   nanobotProgressHint.value = ''
   nanobotToolEvents.value = []
+  gapDeadLetters.value = null
   composerText.value = ''
   selectedVersionId.value = ''
   resetVersionContext()
@@ -2899,6 +3040,86 @@ const formatDisplayTime = (value?: string | null) => {
   margin-bottom: 10px;
 }
 
+.section-title-with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dead-letter-card {
+  border-color: rgba(239, 68, 68, 0.24);
+  background: #fff7f7;
+}
+
+.dead-letter-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #7f1d1d;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dead-letter-alert strong {
+  color: #991b1b;
+  font-size: 13px;
+}
+
+.dead-letter-message {
+  color: #b45309;
+}
+
+.dead-letter-groups,
+.dead-letter-items {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dead-letter-group,
+.dead-letter-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid rgba(239, 68, 68, 0.16);
+  background: #fff;
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+
+.dead-letter-group > div,
+.dead-letter-item-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.dead-letter-group strong,
+.dead-letter-item-main strong {
+  color: #1e293b;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dead-letter-group span,
+.dead-letter-item-main span {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.dead-letter-actions {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .progress-list {
   display: flex;
   flex-direction: column;
@@ -3465,6 +3686,41 @@ details.advanced summary::-webkit-details-marker {
   background: #f8fafc;
   color: #1e293b;
   border: 1px solid rgba(30, 58, 95, 0.08);
+}
+
+.auto-resolved-list {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.detail-subtitle {
+  font-size: 12px;
+  font-weight: 800;
+  color: #475569;
+}
+
+.auto-resolved-item {
+  border: 1px solid rgba(34, 197, 94, 0.18);
+  border-radius: 12px;
+  background: #f0fdf4;
+  padding: 10px;
+}
+
+.auto-resolved-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #14532d;
+}
+
+.auto-resolved-meta {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: #64748b;
 }
 
 .evaluation-layer-grid {

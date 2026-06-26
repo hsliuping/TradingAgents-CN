@@ -121,6 +121,16 @@ export interface BoundaryCheck {
   decomposition_suggestions: string[]
 }
 
+export interface SkillAgentUsage {
+  version_id: string
+  spec_id: string
+  version?: number | null
+  status: string
+  agent_name: string
+  published_from_session_id?: string
+  updated_at?: string
+}
+
 /** 外部 Skill */
 export interface ExternalSkill {
   tool_id: string
@@ -132,6 +142,13 @@ export interface ExternalSkill {
   code: string
   status: string
   source: string
+  origin_source?: string
+  origin_workshop_session_id?: string
+  origin_spec_id?: string
+  origin_version_id?: string
+  origin_gap_id?: string
+  origin_agent_name?: string
+  used_by_agents?: SkillAgentUsage[]
   session_id: string
   generation_rounds: number
   generation_time: number
@@ -397,7 +414,7 @@ export const skillGenerationApi = {
   // ---------- Skill 管理 ----------
 
   /** 列出外部 Skill */
-  listSkills: async (params?: { category?: string; status?: string; page?: number; page_size?: number }): Promise<PaginatedSkills> => {
+  listSkills: async (params?: { category?: string; status?: string; source?: string; page?: number; page_size?: number }): Promise<PaginatedSkills> => {
     const res = await request.get<ApiOk<PaginatedSkills>>(`${BASE}/skills`, { params })
     return (res as any).data
   },

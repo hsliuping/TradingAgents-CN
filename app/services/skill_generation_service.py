@@ -999,6 +999,7 @@ test_input: {spec.test_input}
         self,
         category: Optional[str] = None,
         status: Optional[str] = None,
+        source: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> Dict[str, Any]:
@@ -1008,6 +1009,24 @@ test_input: {spec.test_input}
             query["category"] = category
         if status:
             query["status"] = status
+        if source:
+            clean_source = str(source or "").strip()
+            if clean_source == "agent_studio_auto_gap_resolution":
+                query["origin_source"] = clean_source
+            elif clean_source == "manual_or_other":
+                query["origin_source"] = {"$ne": "agent_studio_auto_gap_resolution"}
+            else:
+                query["source"] = clean_source
+
+        logger.info(
+            "[SkillGeneration][ListSkills] start source=%s category=%s status=%s page=%s page_size=%s query=%s",
+            source or "-",
+            category or "-",
+            status or "-",
+            page,
+            page_size,
+            query,
+        )
 
         total = await self._db[SKILL_COLLECTION].count_documents(query)
         skip = (page - 1) * page_size
@@ -1023,7 +1042,15 @@ test_input: {spec.test_input}
         async for doc in cursor:
             doc.pop("_id", None)
             doc = await self._hydrate_skill_generation_context(doc)
+            doc["used_by_agents"] = await self._find_skill_agent_usage(str(doc.get("tool_id") or ""))
             skills.append(doc)
+
+        logger.info(
+            "[SkillGeneration][ListSkills] done source=%s total=%s returned=%s",
+            source or "-",
+            total,
+            len(skills),
+        )
 
         return {
             "total": total,
@@ -1034,12 +1061,71 @@ test_input: {spec.test_input}
 
     async def get_skill(self, skill_id: str) -> Optional[Dict[str, Any]]:
         """获取 Skill 详情"""
-        doc = await self._db[SKILL_COLLECTION].find_one({"tool_id": skill_id})
+        clean_skill_id = str(skill_id or "").strip()
+        logger.info(
+            "[SkillGeneration][GetSkill] start skill_id=%s",
+            clean_skill_id or "-",
+        )
+        doc = await self._db[SKILL_COLLECTION].find_one({"tool_id": clean_skill_id})
         if not doc:
+            logger.info("[SkillGeneration][GetSkill] not_found skill_id=%s", clean_skill_id or "-")
             return None
         doc.pop("_id", None)
         doc = await self._hydrate_skill_generation_context(doc)
+        doc["used_by_agents"] = await self._find_skill_agent_usage(str(doc.get("tool_id") or ""))
+        logger.info(
+            "[SkillGeneration][GetSkill] done skill_id=%s status=%s source=%s origin_source=%s",
+            clean_skill_id or "-",
+            doc.get("status", ""),
+            doc.get("source", ""),
+            doc.get("origin_source", ""),
+        )
         return doc
+
+    async def _find_skill_agent_usage(self, skill_id: str) -> List[Dict[str, Any]]:
+        """反查 Skill 被哪些 Agent 版本使用。"""
+        clean_skill_id = str(skill_id or "").strip()
+        if not clean_skill_id:
+            return []
+
+        try:
+            cursor = self._db["agent_versions"].find(
+                {"required_tools": clean_skill_id},
+                {
+                    "_id": 0,
+                    "version_id": 1,
+                    "spec_id": 1,
+                    "version": 1,
+                    "status": 1,
+                    "agent_metadata": 1,
+                    "published_from_session_id": 1,
+                    "updated_at": 1,
+                },
+            ).sort("updated_at", -1).limit(20)
+            docs = await cursor.to_list(length=20)
+        except Exception as exc:
+            logger.debug("[SkillGeneration][AgentUsage] query failed skill_id=%s err=%s", clean_skill_id, exc)
+            return []
+
+        usage: List[Dict[str, Any]] = []
+        for doc in docs or []:
+            metadata = doc.get("agent_metadata") if isinstance(doc.get("agent_metadata"), dict) else {}
+            usage.append({
+                "version_id": str(doc.get("version_id") or ""),
+                "spec_id": str(doc.get("spec_id") or ""),
+                "version": doc.get("version"),
+                "status": str(doc.get("status") or ""),
+                "agent_name": str(metadata.get("name") or metadata.get("agent_name") or ""),
+                "published_from_session_id": str(doc.get("published_from_session_id") or ""),
+                "updated_at": str(doc.get("updated_at") or ""),
+            })
+
+        logger.info(
+            "[SkillGeneration][AgentUsage] done skill_id=%s agents=%s",
+            clean_skill_id,
+            len(usage),
+        )
+        return usage
 
     async def get_skill_code(self, skill_id: str) -> Optional[str]:
         """获取 Skill 源代码"""
