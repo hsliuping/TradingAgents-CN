@@ -56,8 +56,9 @@ class SkillsLoader:
             lines.append(f"- {name}: {description} ({item['path']})")
         return "\n".join(lines)
 
-    def build_skills_summary(self) -> str:
-        all_skills = self.list_skills(filter_unavailable=False)
+    def build_skills_summary(self, excluded_names: list[str] | None = None) -> str:
+        excluded = {name for name in (excluded_names or []) if name}
+        all_skills = [item for item in self.list_skills(filter_unavailable=False) if item["name"] not in excluded]
         if not all_skills:
             return ""
         def escape_xml(value: str) -> str:

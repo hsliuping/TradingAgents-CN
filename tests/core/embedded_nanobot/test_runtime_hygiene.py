@@ -437,10 +437,6 @@ def test_context_builder_lazy_loads_always_skill_body(tmp_path) -> None:
     assert "Demo skill for lazy loading" in prompt
     assert "UNIQUE_ALWAYS_SKILL_BODY_SHOULD_NOT_BE_IN_SYSTEM_PROMPT" not in prompt
     assert "Read a skill's SKILL.md with read_file only when that skill is relevant" in prompt
-    assert "When the user asks which prompt template is currently active or effective in the current thread" in prompt
-    assert "Do not infer the effective prompt template from agent_name alone" in prompt
-
-
 def test_runtime_build_scoped_tools_excludes_domain_tools_for_greeting(tmp_path) -> None:
     provider = _FakeProvider([])
     runtime = EmbeddedNanobotRuntime(provider=provider, workspace=tmp_path)

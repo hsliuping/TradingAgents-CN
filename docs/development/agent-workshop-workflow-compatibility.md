@@ -1455,6 +1455,20 @@ agent_name = version_id
 status = active
 ```
 
+### 11.4 回退说明（2026-06-27）
+
+以下修改均为运行时行为调整，无需数据迁移；如需回退可按文件逐项还原。
+
+| 文件 | 改动 | 回退方式 |
+|------|------|----------|
+| `core/agents/universal.py` | 构造时从 kwargs 提取 `_version_status`/`_prompt_template_id`；execute() 中自动注入 `workflow_id`、`is_debug_mode`、`debug_template_id` 到 context dict | 删除 `_version_status`/`_prompt_template_id` 两行 + 删除 context 注入块（约 15 行），恢复为 `context = state.get("context")` 直接传参 |
+| `core/embedded_nanobot/runtime.py` | `_build_agent_builder_guidance()` 中 spec_id 存在时增加 `inspect_agent_workshop_assets()` 精确检查引导 | 删除 `if has_spec_context and spec_id:` 分支内新增的引导段落（约 6 行） |
+| `core/embedded_nanobot/agent/context.py` | `build_skills_summary()` 调用时传入 `excluded_names=always_skills` | 将 `excluded_names=always_skills` 改回无参调用 |
+| `core/embedded_nanobot/agent/skills.py` | `build_skills_summary()` 新增 `excluded_names` 参数并在汇总时过滤 | 删除 `excluded_names` 参数及过滤逻辑（约 5 行） |
+| `core/tools/implementations/agent_builder/nanobot_agent_builder_tools.py` | `_resolve_thread_template_context()` 默认 `agent_type` 从 `"custom_agent"` 改为 `"universal"` | 将第 1130 行 `"universal"` 改回 `"custom_agent"` |
+
+**已存在的 `custom_agent` 模板不受影响**：`agent_type` 默认值只影响新建模板；已有模板的 `agent_type` 字段由数据库记录决定，不会因代码变更而改变。
+
 ---
 
 ## 12. 验收标准

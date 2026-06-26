@@ -604,11 +604,28 @@ class EmbeddedNanobotRuntime:
             guidance_lines.extend([
                 "",
                 f"🔴 CRITICAL: The user is currently operating on Agent **{spec_name or spec_id}** in the Agent Studio UI.",
-                f"Thread context: spec_id={spec_id}" + (f", version_id={version_id}" if version_id else ""),
+                f"Thread context: spec_id={spec_id}" + (f", version_id={version_id}" if version_id else "") + (f", version_status={version_status}" if version_status else ""),
                 f"When users say '这个agent', 'this agent', '这个', '它', '重新生成', '测试这个', or use any demonstrative pronoun referring to an agent, they ALWAYS mean THIS agent (spec_id={spec_id}).",
                 "DO NOT ask 'which agent do you mean?' or list other agents. DO NOT offer a choice between agents. There is only one candidate: the one in this thread context.",
                 "You can verify the agent's state via inspect_agent_workshop_assets if needed, but the target is already determined. Never question which agent the user is referring to.",
             ])
+            if "inspect_agent_workshop_assets" in tool_names and (spec_id or version_id):
+                exact_args = []
+                if spec_id:
+                    exact_args.append(f"spec_id='{spec_id}'")
+                if version_id:
+                    exact_args.append(f"version_id='{version_id}'")
+                guidance_lines.append(
+                    f"If you need to verify the current state of THIS agent, use inspect_agent_workshop_assets({', '.join(exact_args)}). Do NOT use keyword-based search since the target is already known."
+                )
+            elif "inspect_agent_workshop_assets" in tool_names and workshop_session_id:
+                guidance_lines.append(
+                    f"Preferred verification call for this thread: inspect_agent_workshop_assets(workshop_session_id='{workshop_session_id}') before falling back to keyword search."
+                )
+            if "inspect_runtime_agent_configs" in tool_names and spec_name:
+                guidance_lines.append(
+                    f"If Workshop inspection is empty but the runtime layer still needs checking, inspect_runtime_agent_configs(keyword='{spec_name}') is the preferred fallback."
+                )
         elif has_spec_context:
             guidance_lines.extend([
                 "",

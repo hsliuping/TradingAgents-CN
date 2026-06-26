@@ -1266,7 +1266,7 @@ def test_universal_agent_testing_mode_maps_to_template_debug_mode(monkeypatch):
 
     assert result["risk_report"] == "ok"
     assert len(captured) == 2
-    assert captured[0]["agent_type"] == "custom_agent"
+    assert captured[0]["agent_type"] == "universal"
     assert captured[0]["agent_name"] == "spec_nanobot_financial_report_risk_tracker_v2_v1"
     assert captured[0]["context"]["is_debug_mode"] is True
     assert captured[0]["context"]["debug_template_id"] == "tpl_debug_001"

@@ -70,6 +70,9 @@ class UniversalAgent(BaseAgent):
         self._output_field = output_field
         self._last_tool_debug = []
         self._last_llm_debug = {}
+        # Agent Workshop 调试态：testing 版本 + debug template
+        self._version_status = kwargs.pop('version_status', None)
+        self._prompt_template_id = kwargs.pop('prompt_template_id', None)
 
         super().__init__(config=config, llm=llm, tool_ids=tool_ids)
 
@@ -92,6 +95,26 @@ class UniversalAgent(BaseAgent):
         try:
             context = state.get("context")
             prompt_variables = self._build_prompt_variables(state)
+
+            # 🔥 Agent Workshop 上下文注入：workflow_id + 调试态标记
+            if isinstance(context, dict):
+                workflow_id = state.get("workflow_id")
+                if workflow_id and "workflow_id" not in context:
+                    context["workflow_id"] = workflow_id
+                version_status = getattr(self, '_version_status', None)
+                prompt_template_id = getattr(self, '_prompt_template_id', None)
+                if version_status == "testing" and prompt_template_id:
+                    context["is_debug_mode"] = True
+                    context["debug_template_id"] = prompt_template_id
+            elif context is not None:
+                workflow_id = state.get("workflow_id")
+                if workflow_id and not hasattr(context, 'workflow_id'):
+                    context.workflow_id = workflow_id
+                version_status = getattr(self, '_version_status', None)
+                prompt_template_id = getattr(self, '_prompt_template_id', None)
+                if version_status == "testing" and prompt_template_id:
+                    context.is_debug_mode = True
+                    context.debug_template_id = prompt_template_id
 
             # 1. 系统提示词（从模板系统，三层优先级）
             system_prompt = self._get_prompt_from_template(

@@ -1127,7 +1127,7 @@ async def _resolve_current_thread_effective_template_input(
     resolved_agent_name = str(agent_name or "").strip()
     if version_doc is not None:
         if not resolved_agent_type:
-            resolved_agent_type = "custom_agent"
+            resolved_agent_type = "universal"
         if not resolved_agent_name:
             resolved_agent_name = str(version_doc.get("version_id") or resolved_version_id).strip()
 

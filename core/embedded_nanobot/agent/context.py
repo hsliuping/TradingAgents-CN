@@ -43,7 +43,7 @@ class ContextBuilder:
                     "These skills were explicitly requested for this run. Read the corresponding SKILL.md files with read_file before relying on them.\n\n"
                     f"{requested_briefs}"
                 )
-        skills_summary = self.skills.build_skills_summary()
+        skills_summary = self.skills.build_skills_summary(excluded_names=always_skills)
         if skills_summary:
             parts.append(
                 "# Skills\n\n"
