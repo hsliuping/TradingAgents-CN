@@ -702,6 +702,23 @@ class EmbeddedNanobotRuntime:
                 "Use publish_agent_workshop_version only after the latest official evaluation decision is pass and the user explicitly confirms publication in the current turn. A pass result only moves the version into publish-ready; it must not trigger automatic publication."
             )
 
+        if "resolve_agent_workshop_blocking_gaps" in tool_names:
+            guidance_lines.append(
+                "When analyze_agent_workshop_gaps reports blocking_gaps, do not silently auto-generate skills. First explain each blocking gap to the user, then obtain explicit confirmation before calling resolve_agent_workshop_blocking_gaps."
+            )
+            guidance_lines.append(
+                "For any gap that requires external data sources, third-party interfaces, or live web access, disclose the data source and its risk to the user and get confirmation before triggering generation."
+            )
+            guidance_lines.append(
+                "Refuse to generate, or enforce explicit compliance constraints, for any capability that would produce trading advice, buy/sell signals, or position recommendations; reuse the project's existing no-investment-advice compliance rules instead of inventing new ones."
+            )
+            guidance_lines.append(
+                "Resolve at most 3 gaps per resolve_agent_workshop_blocking_gaps call; if there are more blocking gaps, propose resolving them in batches."
+            )
+            guidance_lines.append(
+                "After resolve_agent_workshop_blocking_gaps completes, re-run search_project_capabilities and then build_agent_workshop_version to bind the newly generated skills, rather than treating skill generation as the final step."
+            )
+
         guidance_lines.extend([
             "Do not claim that an agent or version still exists, or claim that the current config is known, unless a live inspection tool has just confirmed that state.",
             "If Workshop assets are absent but runtime-configured agents still exist, describe that as runtime residue or config-layer state rather than as an active Workshop version.",

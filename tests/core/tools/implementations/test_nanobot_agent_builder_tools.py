@@ -32,6 +32,7 @@ from core.tools.implementations.agent_builder.nanobot_agent_builder_tools import
     publish_agent_workshop_version,
     prepare_agent_requirement_intake,
     prepare_agent_generation_confirmation,
+    resolve_agent_workshop_blocking_gaps,
     run_agent_workshop_real_data_test,
     search_project_capabilities,
 )
@@ -848,6 +849,423 @@ async def test_build_agent_workshop_version_blocks_when_session_not_ready(monkey
     assert payload["current_phase"] == "confirmation"
     assert payload["session_id"] == "session_pending_001"
     assert payload["_tool_events"][0]["name"] == "build_agent_workshop_version.phase_guard"
+
+
+@pytest.mark.asyncio
+async def test_resolve_agent_workshop_blocking_gaps_requires_external_data_confirmation(monkeypatch):
+    class _FakeWorkshopService:
+        def __init__(self, db):
+            self.db = db
+
+        async def _load_session(self, session_id):
+            assert session_id == "ws_ext_001"
+            return types.SimpleNamespace(
+                spec_id="spec_ext_001",
+                user_id="user_001",
+                current_spec_snapshot=types.SimpleNamespace(name="外部数据Agent", primary_goal="联网数据分析"),
+                gap_report=types.SimpleNamespace(blocking_gaps=["需要 akshare 实时数据接口"]),
+            )
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.AgentWorkshopService",
+        _FakeWorkshopService,
+    )
+
+    raw = await resolve_agent_workshop_blocking_gaps.ainvoke({"session_id": "ws_ext_001"})
+    payload = json.loads(raw)
+
+    assert payload["status"] == "blocked"
+    assert payload["blocked_by"] == "external_data_risk_confirmation"
+    assert payload["workshop_session_id"] == "ws_ext_001"
+    assert payload["risky_gaps"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_agent_workshop_blocking_gaps_reuses_high_similarity_skill(monkeypatch):
+    class _FakeWorkshopService:
+        def __init__(self, db):
+            self.db = db
+
+        async def _load_session(self, session_id):
+            assert session_id == "ws_dedup_high_001"
+            return types.SimpleNamespace(
+                spec_id="spec_dedup_001",
+                user_id="user_001",
+                current_spec_snapshot=types.SimpleNamespace(name="估值Agent", primary_goal="估值输出"),
+                gap_report=types.SimpleNamespace(blocking_gaps=[]),
+            )
+
+    class _FakeCapabilityService:
+        def __init__(self, db):
+            self.db = db
+
+        async def search_capabilities(self, query, top_k, bindable_only, source_types):
+            del query, top_k, bindable_only, source_types
+            return [
+                CapabilitySearchHit(
+                    capability=CapabilityDocument(
+                        capability_id="external.skill.longhubang",
+                        registry_tool_id="longhubang_query",
+                        source_type="external_skill",
+                        bindable=True,
+                        name="龙虎榜查询",
+                    ),
+                    score=0.92,
+                )
+            ]
+
+    class _FakeSkillService:
+        def __init__(self, db):
+            self.db = db
+
+        async def start_session(self, *args, **kwargs):
+            raise AssertionError("high similarity should reuse existing skill and not start generation session")
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.AgentWorkshopService",
+        _FakeWorkshopService,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.CapabilityIndexService",
+        _FakeCapabilityService,
+    )
+    monkeypatch.setattr(
+        "app.services.skill_generation_service.SkillGenerationService",
+        _FakeSkillService,
+    )
+
+    raw = await resolve_agent_workshop_blocking_gaps.ainvoke({
+        "session_id": "ws_dedup_high_001",
+        "blocking_gaps_json": json.dumps(["缺少龙虎榜数据查询能力"], ensure_ascii=False),
+        "auto_continue_build": False,
+        "confirm_external_data_risk": True,
+    })
+    payload = json.loads(raw)
+
+    assert payload["status"] == "ok"
+    assert payload["summary"]["reused"] == 1
+    assert payload["summary"]["generated"] == 0
+    assert payload["results"][0]["status"] == "reused_existing"
+    assert payload["results"][0]["skill_tool_id"] == "longhubang_query"
+
+
+@pytest.mark.asyncio
+async def test_resolve_agent_workshop_blocking_gaps_medium_similarity_needs_confirmation(monkeypatch):
+    class _FakeWorkshopService:
+        def __init__(self, db):
+            self.db = db
+
+        async def _load_session(self, session_id):
+            assert session_id == "ws_dedup_mid_001"
+            return types.SimpleNamespace(
+                spec_id="spec_dedup_mid_001",
+                user_id="user_001",
+                current_spec_snapshot=types.SimpleNamespace(name="估值Agent", primary_goal="估值输出"),
+                gap_report=types.SimpleNamespace(blocking_gaps=[]),
+            )
+
+    class _FakeCapabilityService:
+        def __init__(self, db):
+            self.db = db
+
+        async def search_capabilities(self, query, top_k, bindable_only, source_types):
+            del query, top_k, bindable_only, source_types
+            return [
+                CapabilitySearchHit(
+                    capability=CapabilityDocument(
+                        capability_id="external.skill.industry.compare",
+                        registry_tool_id="industry_compare_skill",
+                        source_type="external_skill",
+                        bindable=True,
+                        name="行业对比能力",
+                    ),
+                    score=0.72,
+                )
+            ]
+
+    class _FakeSkillService:
+        def __init__(self, db):
+            self.db = db
+
+        async def start_session(self, *args, **kwargs):
+            raise AssertionError("medium similarity without explicit allow should not start generation session")
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.AgentWorkshopService",
+        _FakeWorkshopService,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.CapabilityIndexService",
+        _FakeCapabilityService,
+    )
+    monkeypatch.setattr(
+        "app.services.skill_generation_service.SkillGenerationService",
+        _FakeSkillService,
+    )
+
+    raw = await resolve_agent_workshop_blocking_gaps.ainvoke({
+        "session_id": "ws_dedup_mid_001",
+        "blocking_gaps_json": json.dumps(["缺少行业对比能力"], ensure_ascii=False),
+        "auto_continue_build": False,
+        "confirm_external_data_risk": True,
+    })
+    payload = json.loads(raw)
+
+    assert payload["status"] == "ok"
+    assert payload["summary"]["needs_confirmation"] == 1
+    assert payload["results"][0]["status"] == "needs_dedup_confirmation"
+
+
+@pytest.mark.asyncio
+async def test_resolve_agent_workshop_blocking_gaps_medium_similarity_can_autocreate_when_allowed(monkeypatch):
+    fake_db = _FakeDb({
+        "skill_creation_sessions": _FakeCollection([
+            {
+                "session_id": "skill_session_allowed_001",
+                "status": "completed",
+                "pipeline_stage": "registering",
+                "pipeline_message": "完成",
+                "spec": {"tool_id": "industry_compare_v2", "display_name": "行业对比能力V2"},
+            }
+        ])
+    })
+
+    class _FakeWorkshopService:
+        def __init__(self, db):
+            self.db = db
+
+        async def _load_session(self, session_id):
+            assert session_id == "ws_dedup_mid_allow_001"
+            return types.SimpleNamespace(
+                spec_id="spec_dedup_mid_allow_001",
+                user_id="user_001",
+                current_spec_snapshot=types.SimpleNamespace(name="估值Agent", primary_goal="估值输出"),
+                gap_report=types.SimpleNamespace(blocking_gaps=[]),
+            )
+
+    class _FakeCapabilityService:
+        def __init__(self, db):
+            self.db = db
+
+        async def search_capabilities(self, query, top_k, bindable_only, source_types):
+            del query, top_k, bindable_only, source_types
+            return [
+                CapabilitySearchHit(
+                    capability=CapabilityDocument(
+                        capability_id="external.skill.industry.compare",
+                        registry_tool_id="industry_compare_skill",
+                        source_type="external_skill",
+                        bindable=True,
+                        name="行业对比能力",
+                    ),
+                    score=0.72,
+                )
+            ]
+
+    class _FakeSkillService:
+        def __init__(self, db):
+            self.db = db
+
+        async def start_session(self, *args, **kwargs):
+            del args, kwargs
+            return {"session_id": "skill_session_allowed_001"}
+
+        async def respond_to_session(self, *args, **kwargs):
+            del args, kwargs
+            return {"status": "ok"}
+
+        async def preview_spec(self, *args, **kwargs):
+            del args, kwargs
+            return {"preview": "ok"}
+
+        async def confirm_spec(self, *args, **kwargs):
+            del args, kwargs
+            return {"status": "ok"}
+
+    async def _instant_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: fake_db,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.AgentWorkshopService",
+        _FakeWorkshopService,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.CapabilityIndexService",
+        _FakeCapabilityService,
+    )
+    monkeypatch.setattr(
+        "app.services.skill_generation_service.SkillGenerationService",
+        _FakeSkillService,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.asyncio.sleep",
+        _instant_sleep,
+    )
+
+    raw = await resolve_agent_workshop_blocking_gaps.ainvoke({
+        "session_id": "ws_dedup_mid_allow_001",
+        "blocking_gaps_json": json.dumps(["缺少行业对比能力"], ensure_ascii=False),
+        "auto_continue_build": False,
+        "confirm_external_data_risk": True,
+        "allow_medium_similarity_autocreate": True,
+        "max_wait_seconds": 60,
+    })
+    payload = json.loads(raw)
+
+    assert payload["status"] == "ok"
+    assert payload["summary"]["generated"] == 1
+    assert payload["summary"]["needs_confirmation"] == 0
+    assert payload["results"][0]["status"] == "completed"
+    assert payload["results"][0]["skill_tool_id"] == "industry_compare_v2"
+
+
+@pytest.mark.asyncio
+async def test_resolve_agent_workshop_blocking_gaps_auto_continue_builds_version(monkeypatch):
+    fake_db = _FakeDb({
+        "skill_creation_sessions": _FakeCollection([
+            {
+                "session_id": "skill_session_auto_001",
+                "status": "completed",
+                "pipeline_stage": "registering",
+                "pipeline_message": "完成",
+                "spec": {"tool_id": "auto_gap_skill", "display_name": "自动补齐技能"},
+            }
+        ])
+    })
+
+    class _FakeWorkshopService:
+        def __init__(self, db):
+            self.db = db
+
+        async def _load_session(self, session_id):
+            assert session_id == "ws_auto_continue_001"
+            return types.SimpleNamespace(
+                spec_id="spec_auto_continue_001",
+                user_id="user_001",
+                current_spec_snapshot=types.SimpleNamespace(name="自动续建Agent", primary_goal="输出结构化研究"),
+                gap_report=types.SimpleNamespace(blocking_gaps=[]),
+            )
+
+        async def analyze_gaps(self, session_id):
+            assert session_id == "ws_auto_continue_001"
+            return {
+                "session_id": session_id,
+                "spec_id": "spec_auto_continue_001",
+                "gap_report": {"blocking_gaps": []},
+            }
+
+        async def generate_tooling_plan(self, session_id):
+            assert session_id == "ws_auto_continue_001"
+            return {
+                "session_id": session_id,
+                "spec_id": "spec_auto_continue_001",
+                "tooling_plan": {"missing_capabilities": []},
+            }
+
+        async def build_version(self, session_id):
+            assert session_id == "ws_auto_continue_001"
+            return {
+                "session_id": session_id,
+                "spec_id": "spec_auto_continue_001",
+                "version": {
+                    "version_id": "spec_auto_continue_001_v1",
+                    "required_tools": ["auto_gap_skill"],
+                    "required_capabilities": ["auto_gap_capability"],
+                },
+            }
+
+    class _FakeCapabilityService:
+        def __init__(self, db):
+            self.db = db
+
+        async def search_capabilities(self, query, top_k, bindable_only, source_types):
+            del query, top_k, bindable_only, source_types
+            return [
+                CapabilitySearchHit(
+                    capability=CapabilityDocument(
+                        capability_id="external.skill.auto_gap_skill",
+                        registry_tool_id="auto_gap_skill",
+                        source_type="external_skill",
+                        bindable=True,
+                        name="自动补齐技能",
+                    ),
+                    score=0.55,
+                )
+            ]
+
+    class _FakeSkillService:
+        def __init__(self, db):
+            self.db = db
+
+        async def start_session(self, *args, **kwargs):
+            del args, kwargs
+            return {"session_id": "skill_session_auto_001"}
+
+        async def respond_to_session(self, *args, **kwargs):
+            del args, kwargs
+            return {"status": "ok"}
+
+        async def preview_spec(self, *args, **kwargs):
+            del args, kwargs
+            return {"preview": "ok"}
+
+        async def confirm_spec(self, *args, **kwargs):
+            del args, kwargs
+            return {"status": "ok"}
+
+    async def _instant_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: fake_db,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.AgentWorkshopService",
+        _FakeWorkshopService,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.CapabilityIndexService",
+        _FakeCapabilityService,
+    )
+    monkeypatch.setattr(
+        "app.services.skill_generation_service.SkillGenerationService",
+        _FakeSkillService,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.asyncio.sleep",
+        _instant_sleep,
+    )
+
+    raw = await resolve_agent_workshop_blocking_gaps.ainvoke({
+        "session_id": "ws_auto_continue_001",
+        "blocking_gaps_json": json.dumps(["缺少自动补齐能力"], ensure_ascii=False),
+        "confirm_external_data_risk": True,
+        "auto_continue_build": True,
+        "max_wait_seconds": 60,
+    })
+    payload = json.loads(raw)
+
+    assert payload["status"] == "ok"
+    assert payload["summary"]["successful"] == 1
+    assert payload["auto_continue"]["status"] == "completed"
+    assert payload["auto_continue"]["build_version"]["version_id"] == "spec_auto_continue_001_v1"
 
 
 @pytest.mark.asyncio

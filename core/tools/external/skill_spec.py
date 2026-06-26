@@ -280,6 +280,14 @@ class SkillHandoffContext(BaseModel):
     source_name: str = ""
     target_capability: str = ""
     handoff_intent: str = ""
+    # Agent Studio 缺口补齐的反向追溯字段（Phase 2）
+    user_id: str = ""                # 发起补齐的真实用户，决定 Skill 归属与权限
+    workshop_session_id: str = ""    # 来源 Agent 工坊会话
+    spec_id: str = ""                # 来源 Agent 规格
+    version_id: str = ""             # 来源 Agent 版本（如已生成）
+    gap_id: str = ""                 # 来源能力缺口标识
+    agent_name: str = ""             # 来源 Agent 名称
+    agent_goal: str = ""             # 来源 Agent 主要目标
 
 
 class PipelineProgressEvent(BaseModel):

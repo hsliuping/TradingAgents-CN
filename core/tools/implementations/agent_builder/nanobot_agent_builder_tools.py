@@ -118,6 +118,37 @@ def _parse_optional_json_object(raw: str, field_name: str) -> dict[str, Any]:
     return data
 
 
+_EXTERNAL_DATA_RISK_KEYWORDS = (
+    "akshare",
+    "tushare",
+    "yfinance",
+    "wind",
+    "同花顺",
+    "网络",
+    "联网",
+    "实时",
+    "api",
+    "http",
+    "third-party",
+    "第三方",
+    "外部数据",
+    "爬取",
+    "抓取",
+)
+
+
+def _contains_external_data_risk(text: str) -> bool:
+    lower_text = str(text or "").strip().lower()
+    if not lower_text:
+        return False
+    return any(keyword in lower_text for keyword in _EXTERNAL_DATA_RISK_KEYWORDS)
+
+
+def _is_skill_source_type(source_type: str) -> bool:
+    source = str(source_type or "").strip().lower()
+    return source in {"skill", "external_skill"}
+
+
 def _parse_optional_json_list(raw: str, field_name: str) -> list[Any]:
     text = str(raw or "").strip()
     if not text:
@@ -3632,7 +3663,7 @@ async def generate_confirmed_candidate_agent(
     ),
     when_not_to_use=(
         "不适合在缺口分析尚未完成时调用；"
-        "不适合一次性补全过多（>5 个）缺口，那种情况建议分批处理。"
+        "不适合一次性补全过多（>3 个）缺口，那种情况建议分批处理。"
     ),
     returns="返回 JSON 字符串，包含每个缺口的处理结果、生成的 Skill 信息，以及后续建议。",
     example="resolve_agent_workshop_blocking_gaps(session_id='ws_abc123')",
@@ -3646,6 +3677,9 @@ async def resolve_agent_workshop_blocking_gaps(
     session_id: Annotated[str, "Agent 工坊会话 ID"],
     blocking_gaps_json: Annotated[str, "可选 JSON 数组，直接指定要补全的缺口描述；若为空则从 session 的 gap_report 中读取"] = "",
     max_wait_seconds: Annotated[int, "每个 Skill 生成的最长等待时间（秒），默认 300"] = 300,
+    auto_continue_build: Annotated[bool, "补齐后是否自动执行能力重检并继续构建版本，默认 true"] = True,
+    confirm_external_data_risk: Annotated[bool, "若缺口涉及外部数据源/第三方接口，是否已向用户明确披露风险并获得确认"] = False,
+    allow_medium_similarity_autocreate: Annotated[bool, "命中中等相似度（0.6-0.85）候选 Skill 时，是否允许直接继续新建"] = False,
 ) -> str:
     """自动补全 Agent 工坊的能力缺口。
 
@@ -3665,6 +3699,32 @@ async def resolve_agent_workshop_blocking_gaps(
 
         skill_service = SkillGenerationService(db=db)
 
+        # 解析真实发起用户（用于 Skill 归属与权限），失败回退到 nanobot
+        resolved_user_id = ""
+        try:
+            resolved_user_id = str(require_current_user_id() or "").strip()
+        except Exception:
+            resolved_user_id = ""
+        effective_user_id = resolved_user_id or "nanobot"
+
+        # 始终加载工坊会话，提取 Agent 来源上下文（spec_id / 名称 / 目标），用于反向追溯
+        ws_service = AgentWorkshopService(db=db)
+        workshop_session = await ws_service._load_session(clean_session_id)
+        agent_spec_id = ""
+        agent_name = ""
+        agent_goal = ""
+        if workshop_session is not None:
+            agent_spec_id = str(getattr(workshop_session, "spec_id", "") or "")
+            spec_snapshot = getattr(workshop_session, "current_spec_snapshot", None)
+            if spec_snapshot is not None:
+                agent_name = str(getattr(spec_snapshot, "name", "") or "")
+                agent_goal = str(getattr(spec_snapshot, "primary_goal", "") or "")
+            # 调用方无用户上下文时，回退到工坊会话归属用户，避免落到匿名 nanobot
+            if not resolved_user_id:
+                session_user = str(getattr(workshop_session, "user_id", "") or "").strip()
+                if session_user:
+                    effective_user_id = session_user
+
         # 1. 获取 blocking_gaps
         gaps: list[str] = []
         if blocking_gaps_json.strip():
@@ -3676,17 +3736,15 @@ async def resolve_agent_workshop_blocking_gaps(
                 return _json_response({"status": "error", "message": "blocking_gaps_json 不是有效的 JSON 数组"})
 
         if not gaps:
-            # 从 workshop session 中读取
-            ws_service = AgentWorkshopService(db=db)
-            session = await ws_service._load_session(clean_session_id)
-            if not session:
+            # 从已加载的 workshop session 中读取
+            if workshop_session is None:
                 return _json_response({"status": "error", "message": f"Agent 工坊会话 {clean_session_id} 不存在"})
 
-            gap_report = session.gap_report
+            gap_report = workshop_session.gap_report
             if not gap_report:
                 # 尝试先执行缺口分析
-                gap_result = await ws_service.analyze_gaps(clean_session_id)
-                gap_report = gap_result.get("gap_report") if isinstance(gap_result, dict) else None
+                gap_analysis = await ws_service.analyze_gaps(clean_session_id)
+                gap_report = gap_analysis.get("gap_report") if isinstance(gap_analysis, dict) else None
 
             if not gap_report:
                 return _json_response({"status": "error", "message": "无法获取缺口分析报告，请先执行 analyze_agent_workshop_gaps"})
@@ -3703,12 +3761,23 @@ async def resolve_agent_workshop_blocking_gaps(
                 "skills_generated": [],
             })
 
-        capped_gaps = gaps[:5]
-        if len(gaps) > 5:
+        capped_gaps = gaps[:3]
+        if len(gaps) > 3:
             logger.warning(
-                "[resolve_gaps] 缺口数量 %d 超过上限，只处理前 5 个: %s",
+                "[resolve_gaps] 缺口数量 %d 超过默认上限，只处理前 3 个，其余建议分批: %s",
                 len(gaps), capped_gaps,
             )
+
+        risky_gaps = [gap for gap in capped_gaps if _contains_external_data_risk(gap)]
+        if risky_gaps and not confirm_external_data_risk:
+            return _json_response({
+                "status": "blocked",
+                "blocked_by": "external_data_risk_confirmation",
+                "message": "检测到缺口可能依赖外部数据源或第三方接口，需先向用户披露来源与风险并获得确认后再生成。",
+                "workshop_session_id": clean_session_id,
+                "risky_gaps": risky_gaps,
+                "next_action": "与用户确认后，重新调用 resolve_agent_workshop_blocking_gaps 并传 confirm_external_data_risk=true",
+            })
 
         wait_seconds = max(60, min(int(max_wait_seconds), 600))
 
@@ -3721,10 +3790,14 @@ async def resolve_agent_workshop_blocking_gaps(
         results: list[dict[str, Any]] = []
 
         async def _process_single_gap(gap_index: int, gap_description: str) -> dict[str, Any]:
+            gap_id = f"gap_{gap_index + 1}"
             gap_result: dict[str, Any] = {
                 "gap_index": gap_index,
+                "gap_id": gap_id,
                 "gap_description": gap_description,
                 "status": "pending",
+                "pipeline_stage": "",
+                "dedup": {},
                 "skill_tool_id": None,
                 "skill_display_name": None,
                 "session_id": None,
@@ -3733,16 +3806,78 @@ async def resolve_agent_workshop_blocking_gaps(
             }
 
             try:
-                # Step 1: 启动 Skill 生成会话
+                # Step 0: 去重检查（Phase 2.5 前置）
+                dedup_hits = await CapabilityIndexService(db).search_capabilities(
+                    query=gap_description,
+                    top_k=8,
+                    bindable_only=True,
+                    source_types=["skill", "external_skill"],
+                )
+                dedup_candidates = []
+                for hit in dedup_hits:
+                    capability = hit.capability
+                    source_type = str(getattr(capability, "source_type", "") or "")
+                    registry_tool_id = str(getattr(capability, "registry_tool_id", "") or "")
+                    score = float(getattr(hit, "score", 0.0) or 0.0)
+                    dedup_candidates.append({
+                        "capability_id": str(getattr(capability, "capability_id", "") or ""),
+                        "source_type": source_type,
+                        "registry_tool_id": registry_tool_id,
+                        "name": str(getattr(capability, "name", "") or ""),
+                        "score": score,
+                    })
+
+                gap_result["dedup"] = {
+                    "candidate_count": len(dedup_candidates),
+                    "top_candidates": dedup_candidates[:3],
+                }
+
+                high_match = next(
+                    (
+                        item for item in dedup_candidates
+                        if _is_skill_source_type(item.get("source_type"))
+                        and str(item.get("registry_tool_id") or "").strip()
+                        and float(item.get("score") or 0.0) >= 0.85
+                    ),
+                    None,
+                )
+                if high_match is not None:
+                    gap_result["status"] = "reused_existing"
+                    gap_result["skill_tool_id"] = str(high_match.get("registry_tool_id") or "")
+                    gap_result["skill_display_name"] = str(high_match.get("name") or "")
+                    gap_result["pipeline_message"] = "命中高相似度已有 Skill，直接复用"
+                    return gap_result
+
+                medium_match = next(
+                    (
+                        item for item in dedup_candidates
+                        if _is_skill_source_type(item.get("source_type"))
+                        and str(item.get("registry_tool_id") or "").strip()
+                        and 0.6 <= float(item.get("score") or 0.0) < 0.85
+                    ),
+                    None,
+                )
+                if medium_match is not None and not allow_medium_similarity_autocreate:
+                    gap_result["status"] = "needs_dedup_confirmation"
+                    gap_result["pipeline_message"] = "命中中等相似度候选 Skill，需用户确认是复用还是新建"
+                    return gap_result
+
+                # Step 1: 启动 Skill 生成会话（透传真实用户与工坊来源，确保归属与可追溯）
                 start_result = await skill_service.start_session(
                     description=gap_description,
-                    user_id="nanobot",
+                    user_id=effective_user_id,
                     handoff_context={
-                        "source": "agent_workshop_gap",
-                        "source_spec_id": "",
-                        "source_name": "",
+                        "source": "agent_studio_gap",
+                        "source_spec_id": agent_spec_id,
+                        "source_name": agent_name,
                         "target_capability": gap_description,
                         "handoff_intent": "auto_resolve_blocking_gap",
+                        "user_id": effective_user_id,
+                        "workshop_session_id": clean_session_id,
+                        "spec_id": agent_spec_id,
+                        "gap_id": gap_id,
+                        "agent_name": agent_name,
+                        "agent_goal": agent_goal,
                     },
                 )
                 skill_session_id = start_result.get("session_id")
@@ -3786,6 +3921,7 @@ async def resolve_agent_workshop_blocking_gaps(
                     status = session_doc.get("status", "")
                     pipeline_stage = session_doc.get("pipeline_stage", "")
                     pipeline_message = session_doc.get("pipeline_message", "")
+                    gap_result["pipeline_stage"] = pipeline_stage
 
                     if status == "completed":
                         spec = session_doc.get("spec") or {}
@@ -3830,17 +3966,90 @@ async def resolve_agent_workshop_blocking_gaps(
         ]
         results = await asyncio.gather(*tasks)
 
+        successful = [r for r in results if r["status"] in ("completed", "reused_existing")]
         completed = [r for r in results if r["status"] == "completed"]
+        reused = [r for r in results if r["status"] == "reused_existing"]
+        pending_confirmation = [r for r in results if r["status"] == "needs_dedup_confirmation"]
         failed = [r for r in results if r["status"] in ("failed", "timeout")]
+
+        auto_continue = {
+            "enabled": bool(auto_continue_build),
+            "status": "skipped",
+            "capability_search": None,
+            "gap_analysis": None,
+            "tooling_plan": None,
+            "build_version": None,
+            "error": None,
+        }
+
+        if auto_continue_build and successful:
+            try:
+                # Step A: 重新检索能力，帮助后续缺口/工具规划消费新生成 Skill
+                capability_query = " ".join(_dedupe_string_list([
+                    *capped_gaps,
+                    agent_name,
+                    agent_goal,
+                    *[str(item.get("skill_display_name") or "") for item in successful],
+                    *[str(item.get("skill_tool_id") or "") for item in successful],
+                ])).strip()
+                capability_hits = await CapabilityIndexService(db).search_capabilities(
+                    query=capability_query or "agent capability",
+                    top_k=12,
+                    bindable_only=True,
+                    source_types=["builtin_tool", "skill", "external_skill", "mcp_tool"],
+                )
+                auto_continue["capability_search"] = {
+                    "query": capability_query or "agent capability",
+                    "count": len(capability_hits),
+                    "top_results": [_format_capability_hit(hit) for hit in capability_hits[:5]],
+                }
+
+                # Step B/C/D: 重新分析缺口 -> 生成工具计划 -> 构建版本
+                gap_analysis_result = await ws_service.analyze_gaps(clean_session_id)
+                tooling_plan_result = await ws_service.generate_tooling_plan(clean_session_id)
+                build_result = await ws_service.build_version(clean_session_id)
+
+                version = build_result.get("version") if isinstance(build_result, dict) else None
+                auto_continue["gap_analysis"] = {
+                    "spec_id": gap_analysis_result.get("spec_id") if isinstance(gap_analysis_result, dict) else "",
+                    "blocking_gaps": len(_read_mapping_or_attr(gap_analysis_result.get("gap_report") if isinstance(gap_analysis_result, dict) else None, "blocking_gaps", []) or []),
+                }
+                auto_continue["tooling_plan"] = {
+                    "spec_id": tooling_plan_result.get("spec_id") if isinstance(tooling_plan_result, dict) else "",
+                    "missing_capabilities": len(_read_mapping_or_attr(tooling_plan_result.get("tooling_plan") if isinstance(tooling_plan_result, dict) else None, "missing_capabilities", []) or []),
+                }
+                auto_continue["build_version"] = {
+                    "spec_id": build_result.get("spec_id") if isinstance(build_result, dict) else "",
+                    "version_id": _read_mapping_or_attr(version, "version_id", "") if version is not None else "",
+                    "required_tools": len(_read_mapping_or_attr(version, "required_tools", []) or []) if version is not None else 0,
+                    "required_capabilities": len(_read_mapping_or_attr(version, "required_capabilities", []) or []) if version is not None else 0,
+                }
+                auto_continue["status"] = "completed"
+            except Exception as auto_exc:
+                logger.warning("[resolve_gaps] 自动续建失败: %s", auto_exc, exc_info=True)
+                auto_continue["status"] = "failed"
+                auto_continue["error"] = str(auto_exc)
 
         summary = {
             "total_gaps": len(capped_gaps),
+            "generated": len(completed),
+            "reused": len(reused),
             "completed": len(completed),
+            "successful": len(successful),
+            "needs_confirmation": len(pending_confirmation),
             "failed": len(failed),
             "generated_tool_ids": [r["skill_tool_id"] for r in completed if r["skill_tool_id"]],
+            "reused_tool_ids": [r["skill_tool_id"] for r in reused if r["skill_tool_id"]],
             "next_action": (
-                "所有缺口已补全，建议重新调用 build_agent_workshop_version 构建版本"
-                if len(completed) == len(capped_gaps)
+                "所有缺口已补全，且已自动完成能力重检与版本构建"
+                if len(successful) == len(capped_gaps) and auto_continue.get("status") == "completed"
+                else "所有缺口已处理（含复用），建议重新调用 build_agent_workshop_version 构建版本"
+                if len(successful) == len(capped_gaps)
+                else (
+                    f"存在 {len(pending_confirmation)} 个中等相似度候选等待确认，"
+                    "请先确认复用或新建后再继续补齐。"
+                )
+                if pending_confirmation
                 else (
                     f"已补全 {len(completed)}/{len(capped_gaps)} 个缺口，"
                     "剩余缺口可能需要手动处理。建议调用 build_agent_workshop_version 构建版本，"
@@ -3859,6 +4068,7 @@ async def resolve_agent_workshop_blocking_gaps(
             "workshop_session_id": clean_session_id,
             "summary": summary,
             "results": results,
+            "auto_continue": auto_continue,
         })
 
     except Exception as exc:

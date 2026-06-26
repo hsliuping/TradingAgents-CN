@@ -551,6 +551,20 @@ inspect_agent_workshop_gap_resolution
 3. 失败后可以单独重试某个缺口。
 4. 后续可接通知系统。
 
+#### 5.3.3 异步任务的执行载体与生命周期（关键约束）
+
+异步化最大的实现风险不在工具签名，而在“后台任务跑在哪、谁来保活”。Skill 生成是分钟级长任务，必须明确执行载体，否则会出现“`start_*` 返回 job_id，但后台协程随请求结束被取消”的隐性失败。
+
+硬约束：
+
+1. **禁止用请求事件循环里的 `asyncio.create_task` 承载补齐任务。** 在 FastAPI 请求生命周期内创建的协程，会在请求/连接结束时被取消，导致 job 卡在 `running` 永不推进。
+2. **优先复用项目已有的后台 worker / 任务队列基础设施**（与定时任务、分析任务同一套承载），而不是为 gap resolution 新造一套并发模型。
+3. `start_agent_workshop_gap_resolution` 只负责：写入 `agent_workshop_gap_resolution_jobs`（status=pending）+ 投递后台作业 + 立即返回 `job_id`。
+4. 真正的 Skill 生成由 worker 进程消费，进度通过更新 job 文档落库，前端/`inspect_*` 一律以 job 文档为单一事实来源（拉取式），不依赖内存态。
+5. worker 重启后应能从 `pending / running` 的 job 文档恢复或安全标记为 `failed`，避免“孤儿 running”。
+
+这样异步模式才真正解决等待问题，而不是把阻塞从“工具调用内”挪到“一个会被回收的协程里”。
+
 ### 5.4 建议新增集合（目标态）
 
 如果实现异步模式，建议新增：
@@ -632,11 +646,11 @@ agent_workshop_gap_resolution_jobs
 - 这套去重机制目前还没有落地到 `resolve_agent_workshop_blocking_gaps`。
 - 因此本节应视为 Phase 2.5 的目标设计，而不是当前已具备能力。
 
-目标去重机制：
+目标去重机制（两段式，先廉价后精确）：
 
-1. 对每个 blocking_gap 的描述，调用 `SkillGenerationService.list_skills()` 获取已有 Skill 列表。
-2. 用 LLM 做模糊匹配（功能相似度判断），而非字符串精确匹配。
-3. 匹配结果分级：
+1. 对每个 blocking_gap 的描述，**先用 `CapabilityIndexService` 的能力索引（embedding 检索）做初筛**，而不是一上来就调 LLM。这能复用既有索引、避免 LLM 级联，成本低、可批量。
+2. 仅对落在**边界区间（相似度 0.6–0.85）**的候选，再调一次 LLM 做功能相似度复核；高于上界直接判为高匹配、低于下界直接判为新能力，都不需要 LLM。
+3. 匹配结果分级（相似度阈值同时供 embedding 初筛与 LLM 复核使用）：
    - **高匹配（相似度 > 0.85）**：提示用户"已有近似 Skill X，是否直接复用？"并提供选项：复用现有 / 创建新版本 / 仍新建。
    - **中匹配（相似度 0.6-0.85）**：列出候选 Skill，让用户确认是复用还是新建。
    - **低匹配（相似度 < 0.6）**：视为新能力，正常进入生成流程。
@@ -700,6 +714,8 @@ Skill 后续被优化后，已绑定旧版 Skill 的 Agent 版本会面临行为
 | 需要联网抓取或依赖第三方接口 | 必须提示数据来源和风险 |
 | 可能涉及交易建议、买卖信号、仓位建议 | 拒绝生成或强制加入合规约束 |
 | 一次超过 3 个 Skill | 提示分批生成 |
+
+合规约束落地要求：涉及交易建议/买卖信号/仓位建议的判定与拦截，应**复用项目既有的全局非投顾合规校验**，不要在补齐链路里新写一套独立规则，避免口径漂移。
 
 ### 5.9 Skill 规范来源
 
@@ -875,10 +891,13 @@ retry_agent_workshop_gap_resolution_item
    - `handoff_intent`
 2. `_save_skill()` 当前会入库、热注册、重建能力索引，但还不会写入完整的反向来源字段。
 
+> 归属问题（需在 Phase 2 一并处理）：当前 `resolve_agent_workshop_blocking_gaps` 启动 Skill 会话时硬编码 `user_id="nanobot"`，会导致生成的 Skill 不归属真实用户，进而让 Skill 工坊的来源筛选、权限校验、配额统计全部错位。补 `handoff_context` 时必须**同步透传发起补齐的真实 `user_id`**，而不是留到 Phase 5 再补。
+
 建议增强：
 
 1. `start_session()` 支持更完整的 `handoff_context`：
    - `source = agent_studio_gap`
+   - `user_id`（发起补齐的真实用户，替换硬编码的 `nanobot`，用于归属与权限）
    - `workshop_session_id`
    - `spec_id`
    - `version_id`
@@ -1042,7 +1061,7 @@ cancelled
 
 内容：
 
-1. 补充更完整的 `handoff_context`。
+1. 补充更完整的 `handoff_context`（含真实 `user_id` 透传，替换硬编码 `nanobot`，确保 Skill 归属与权限正确）。
 2. 返回更结构化的阶段信息。
 3. 限制默认一次最多补 1~3 个缺口。
 4. 对需要外部数据源的 Skill 增加用户确认提示。
@@ -1109,6 +1128,7 @@ cancelled
 1. 明确 `job` 的唯一键与幂等策略，避免重复点击生成多个并行任务。
 2. 明确 `start / inspect / cancel / retry` 的状态流转和权限边界。
 3. 明确“半成功”补偿机制，例如 Skill 已生成但 job 状态写回失败时如何修复。
+4. 明确执行载体（见 §5.3.3）：补齐任务由后台 worker / 任务队列承载，禁止用请求事件循环的 `asyncio.create_task`；`inspect_*` 与前端以 job 文档为单一事实来源，worker 重启需能恢复或安全终结遗留 job。
 
 本阶段验收：
 

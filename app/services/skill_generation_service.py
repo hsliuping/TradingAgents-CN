@@ -1401,6 +1401,19 @@ test_input: {spec.test_input}
             "created_at": now,
             "updated_at": now,
         }
+
+        # 反向来源追溯：来自 Agent Studio 缺口补齐的 Skill 写回 origin_* 字段（Phase 2）
+        handoff = session.handoff_context
+        if handoff is not None:
+            handoff_source = str(getattr(handoff, "source", "") or "").strip()
+            if handoff_source in ("agent_studio_gap", "agent_workshop_gap"):
+                skill_doc["origin_source"] = "agent_studio_auto_gap_resolution"
+                skill_doc["origin_workshop_session_id"] = str(getattr(handoff, "workshop_session_id", "") or "")
+                skill_doc["origin_spec_id"] = str(getattr(handoff, "spec_id", "") or getattr(handoff, "source_spec_id", "") or "")
+                skill_doc["origin_version_id"] = str(getattr(handoff, "version_id", "") or "")
+                skill_doc["origin_gap_id"] = str(getattr(handoff, "gap_id", "") or "")
+                skill_doc["origin_agent_name"] = str(getattr(handoff, "agent_name", "") or getattr(handoff, "source_name", "") or "")
+
         await self._db[SKILL_COLLECTION].insert_one(skill_doc)
         logger.info(f"✅ Skill '{spec.tool_id}' 已保存到数据库")
 
