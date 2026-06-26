@@ -702,6 +702,47 @@ For reusable gaps, Nanobot should explicitly report:
 `temp/*.py` is acceptable only for short-lived inspection, schema probing, or data validation.
 It is not an acceptable final delivery for a reusable stock-analysis capability.
 
+## External Skills Creation Workflow
+
+When Nanobot identifies a reusable capability gap during Agent design, it should prefer creating an External Skill over embedding logic directly in the Agent or writing temporary scripts.
+
+### Trigger Conditions
+
+Nanobot should initiate the External Skills creation path when ALL of the following are true:
+
+1. The requested capability does not exist in current project resources (tools, skills, MCP, built-in agents).
+2. The capability is reusable — parameterized by stable inputs and would be useful for other Agents.
+3. The user agrees that a reusable Skill artifact is the right deliverable.
+
+### Available Tools
+
+The following dedicated tools form the External Skill creation chain:
+
+| Tool | Purpose |
+|------|---------|
+| `start_external_skill_generation_session` | Initialize a structured skill creation session |
+| `respond_to_external_skill_generation_session` | Provide user answers to skill specification questions |
+| `preview_external_skill_spec` | Preview the skill specification before final generation |
+| `generate_confirmed_external_skill` | Write the confirmed skill artifact to `external_skills/` |
+| `inspect_external_skill_generation_session` | Check the current status of an in-progress skill session |
+
+### Workflow Steps
+
+1. **Identify the gap** during Agent resource scouting. Mark it as a reusable gap, not a one-off.
+2. **Propose a Skill** to the user: explain what the skill would do, what inputs it takes, and why it deserves to be a standalone skill rather than embedded Agent logic.
+3. **Get user confirmation** before starting the skill generation session.
+4. **Call `start_external_skill_generation_session`** to begin structured generation.
+5. **Iterate with `respond_to_external_skill_generation_session`** as the system asks clarification questions.
+6. **Use `preview_external_skill_spec`** to show the user the specification before final write.
+7. **Call `generate_confirmed_external_skill`** to persist the skill artifact.
+8. **Return to the Agent design workflow**: the newly created skill will be discoverable by `search_project_capabilities` and can be bound to the Agent.
+
+### Relationship to Agent Creation
+
+- External Skill creation can happen in parallel with or as a prerequisite to Agent creation.
+- If an Agent depends on a capability that should be an External Skill, create the skill first, then bind it to the Agent.
+- Do not block Agent creation indefinitely waiting for skill creation — if the user wants to move forward with the Agent first, allow it and note the skill as a follow-up.
+
 ## Required Output Contract
 
 When Nanobot proposes or creates an agent, its answer must contain these sections in this order.

@@ -1,231 +1,129 @@
 <template>
   <div class="agent-studio-page">
-    <div class="page-header">
-      <div class="header-left">
-        <h1 class="page-title">Agent 工坊助手</h1>
-        <div class="page-subtitle">左侧管理 Agent，中央通过助手模式快速讨论、生成和迭代，右侧只保留后台状态。</div>
-      </div>
-      <div class="header-right">
-        <div class="layout-toggle-group">
-          <span class="layout-toggle-label">布局</span>
-          <el-button size="small" :type="showAgentSidebar ? 'primary' : 'default'" plain @click="showAgentSidebar = !showAgentSidebar">
-            {{ showAgentSidebar ? '隐藏左栏' : '显示左栏' }}
-          </el-button>
-          <el-button size="small" :type="showStatusSidebar ? 'primary' : 'default'" plain @click="showStatusSidebar = !showStatusSidebar">
-            {{ showStatusSidebar ? '隐藏右栏' : '显示右栏' }}
-          </el-button>
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="brand-mark">A</div>
+        <div class="brand-text">
+          <div class="brand-title">Agent 工作室</div>
+          <div class="brand-subtitle">通过对话创建、测试并发布可用于工作流的 Agent</div>
         </div>
-        <el-button size="small" plain @click="router.push('/workflow/agent-workshop')">返回 Agent 工坊</el-button>
-        <el-button size="small" plain @click="router.push('/workflow')">返回分析流</el-button>
-        <el-button size="small" @click="refreshWorkspace" :loading="loadingSession">刷新</el-button>
-        <el-button size="small" type="primary" @click="resetStudio">新建 Agent</el-button>
       </div>
-    </div>
+      <div class="topbar-actions">
+        <el-button class="btn btn-ghost" plain @click="router.push('/workflow')">返回分析流</el-button>
+        <el-button class="btn btn-primary" type="primary" @click="resetStudio">新建 Agent</el-button>
+      </div>
+    </header>
 
-    <div :class="['workspace-body', { 'left-sidebar-hidden': !showAgentSidebar, 'right-sidebar-hidden': !showStatusSidebar }]">
-      <aside v-if="showAgentSidebar" class="agent-sidebar">
-        <div class="sidebar-header sidebar-header-compact">
-          <div class="sidebar-header-actions">
-            <el-button size="small" text @click="showNanobotThreadPanel = !showNanobotThreadPanel">
-              {{ showNanobotThreadPanel ? '隐藏会话' : '最近会话' }}
-            </el-button>
-            <el-button size="small" text @click="resetStudio">新建</el-button>
+    <div class="main">
+      <aside class="sidebar">
+        <div class="panel-head">
+          <div class="panel-title-row">
+            <span class="panel-title">我的 Agent</span>
+            <span class="count-pill">{{ filteredAgentItems.length }} 个</span>
           </div>
-        </div>
-
-        <div v-if="showNanobotThreadPanel" class="nanobot-thread-panel">
-          <div class="thread-panel-header">
-            <div>
-              <div class="sidebar-title">最近助手会话</div>
-              <div class="sidebar-subtitle">从数据库恢复后端已保存的对话</div>
-            </div>
-            <div class="thread-panel-actions">
-              <el-button size="small" text @click="loadNanobotThreads" :loading="loadingNanobotThreads">刷新</el-button>
-              <el-button size="small" text @click="showNanobotThreadPanel = false">收起</el-button>
-            </div>
-          </div>
-          <div class="thread-filter-grid">
-            <el-select v-model="selectedThreadScope" size="small" placeholder="活动会话" @change="loadNanobotThreads">
-              <el-option label="活动会话" value="active" />
-              <el-option label="已归档会话" value="archived" />
-            </el-select>
-            <el-input v-model="threadSearchText" size="small" clearable placeholder="搜索标题、摘要、最近问题" />
-            <el-select v-model="selectedThreadAgentFilter" size="small" placeholder="全部 Agent">
-              <el-option label="全部 Agent" value="all" />
-              <el-option
-                v-for="option in nanobotThreadAgentOptions"
-                :key="option.value"
-                :label="option.label"
-                :value="option.value"
-              />
-            </el-select>
-            <el-select v-model="selectedThreadTimeFilter" size="small" placeholder="全部时间">
-              <el-option label="全部时间" value="all" />
-              <el-option label="最近 24 小时" value="24h" />
-              <el-option label="最近 7 天" value="7d" />
-              <el-option label="最近 30 天" value="30d" />
-            </el-select>
-          </div>
-          <div v-if="loadingNanobotThreads" class="tree-inline-note">正在加载会话...</div>
-          <div v-else-if="!filteredNanobotThreads.length" class="tree-inline-note">{{ selectedThreadScope === 'archived' ? '没有符合筛选条件的已归档会话' : '没有符合筛选条件的会话' }}</div>
-          <div v-else class="nanobot-thread-list">
-            <div
-              v-for="thread in filteredNanobotThreads"
-              :key="thread.thread_id"
-              :class="['nanobot-thread-item', { active: activeNanobotThreadId === thread.thread_id }]"
+          <el-input
+            v-model="agentSearchText"
+            class="search-box"
+            placeholder="搜索 Agent"
+            clearable
+            size="default"
+          />
+          <div class="filter-row">
+            <button
+              v-for="option in agentStatusFilterOptions"
+              :key="option.value"
+              type="button"
+              :class="['filter-chip', { active: selectedAgentStatusFilter === option.value }]"
+              @click="selectedAgentStatusFilter = option.value"
             >
-              <button type="button" class="nanobot-thread-main" @click="openNanobotThread(thread)">
-                <div class="nanobot-thread-title-row">
-                  <span class="nanobot-thread-title">{{ thread.title || '助手会话' }}</span>
-                  <el-tag size="small" effect="plain">{{ thread.message_count }}</el-tag>
-                </div>
-                <div class="nanobot-thread-desc">{{ thread.last_user_message || thread.summary || '暂无摘要' }}</div>
-                <div class="nanobot-thread-meta-row">
-                  <span class="nanobot-thread-meta">{{ formatThreadMeta(thread) }}</span>
-                  <span class="nanobot-thread-meta-badges">
-                    <el-tag v-if="thread.archived" size="small" type="info" effect="plain">已归档</el-tag>
-                    <span v-if="thread.thread_context?.spec_name" class="nanobot-thread-agent">{{ thread.thread_context.spec_name }}</span>
-                  </span>
-                </div>
-              </button>
-              <el-button
-                v-if="thread.archived"
-                type="primary"
-                link
-                class="thread-delete-btn"
-                @click.stop="handleRestoreNanobotThread(thread)"
-              >恢复</el-button>
-              <el-button
-                v-else
-                type="danger"
-                link
-                class="thread-delete-btn"
-                @click.stop="handleDeleteNanobotThread(thread)"
-              >归档</el-button>
-            </div>
+              {{ option.label }}
+            </button>
           </div>
         </div>
-
-        <button v-else type="button" class="nanobot-thread-panel-collapsed" @click="showNanobotThreadPanel = true">
-          <span class="collapsed-panel-title">最近助手会话</span>
-          <span class="collapsed-panel-desc">点击展开数据库会话列表、筛选和归档记录</span>
-        </button>
-
-        <div class="agent-tree">
-          <el-empty v-if="!agentItems.length" description="暂无 Agent" :image-size="56" />
-          <div v-else class="agent-tree-list">
-            <div v-for="item in agentItems" :key="item.spec_id" class="agent-tree-branch">
-              <div :class="['agent-tree-parent', { active: activeTreeKey === `spec:${item.spec_id}` }]">
-                <button type="button" class="tree-toggle" @click.stop="toggleAgentBranch(item.spec_id)">
-                  <span :class="['tree-chevron', { expanded: isAgentBranchExpanded(item.spec_id) }]"></span>
-                </button>
-                <button type="button" class="tree-main" @click="openAgentItem(item)">
-                  <div class="agent-list-top">
-                    <div class="agent-list-title">{{ item.name || '未命名 Agent' }}</div>
-                    <el-tag size="small" :type="getSpecTagType(item)" effect="plain">{{ getSpecStatusLabel(item) }}</el-tag>
-                  </div>
-                  <div class="agent-list-desc">{{ item.primary_goal || '等待补充目标描述' }}</div>
-                  <div class="agent-list-meta">
-                    <span>版本 {{ (versionItemsBySpec[item.spec_id] || []).length || item.version_count || 0 }}</span>
-                    <span>{{ getSpecMetaText(item) }}</span>
-                  </div>
-                </button>
-                <el-button type="danger" link class="tree-delete-btn" @click.stop="handleDeleteSpec(item)">删除</el-button>
-              </div>
-
-              <div v-if="isAgentBranchExpanded(item.spec_id)" class="agent-tree-children">
-                <div v-if="loadingSpecVersions[item.spec_id]" class="tree-inline-note">正在加载版本...</div>
-                <div v-else-if="!(versionItemsBySpec[item.spec_id] || []).length" class="tree-inline-note">暂无版本</div>
-                <div v-else class="agent-version-list">
-                  <button
-                    v-for="version in versionItemsBySpec[item.spec_id] || []"
-                    :key="version.version_id"
-                    type="button"
-                    :class="['agent-version-item', { active: activeTreeKey === `version:${version.version_id}` }]"
-                    @click="openAgentVersion(item, version)"
-                  >
-                    <div class="agent-version-main">
-                      <div class="agent-version-title-row">
-                        <span class="agent-version-title">v{{ version.version }}</span>
-                        <el-tag size="small" effect="plain" :type="getVersionTagType(version)">{{ getVersionStatusLabel(version) }}</el-tag>
-                        <el-tag
-                          v-if="version.last_evaluation_summary"
-                          size="small"
-                          effect="plain"
-                          :type="getEvaluationDecisionTagType(version.last_evaluation_summary.decision)"
-                        >
-                          {{ getEvaluationDecisionLabel(version.last_evaluation_summary.decision) }}
-                        </el-tag>
-                      </div>
-                      <div class="agent-version-desc">
-                        {{ version.prompt_template_project_memory_binding_summary?.summary || item.name || version.agent_metadata?.name || 'Agent 版本' }}
-                      </div>
-                      <div
-                        v-if="getVersionProjectMemorySummary(version) || typeof version.last_evaluation_summary?.overall_score === 'number'"
-                        class="agent-version-meta"
-                      >
-                        <el-tag
-                          v-if="getVersionProjectMemorySummary(version)"
-                          size="small"
-                          effect="plain"
-                          :type="getProjectMemorySummaryTagType(getVersionProjectMemorySummary(version)?.review_status)"
-                        >
-                          {{ getProjectMemorySummaryStatusText(getVersionProjectMemorySummary(version)?.review_status) }}
-                        </el-tag>
-                        <span v-if="typeof version.last_evaluation_summary?.overall_score === 'number'">
-                          综合分 {{ version.last_evaluation_summary?.overall_score }}
-                        </span>
-                      </div>
-                    </div>
-                    <el-button type="danger" link class="tree-delete-btn" @click.stop="handleDeleteVersion(item, version)">删除</el-button>
-                  </button>
-                </div>
-              </div>
+        <div class="agent-list">
+          <div
+            v-for="item in filteredAgentItems"
+            :key="item.spec_id"
+            :class="['agent-card', { active: activeTreeKey.startsWith('spec:' + item.spec_id) || (latestVersion?.spec_id === item.spec_id) }]"
+            @click="openAgentItem(item)"
+          >
+            <div class="agent-card-top">
+              <div class="agent-name">{{ item.name || '未命名 Agent' }}</div>
+              <el-tag size="small" effect="plain" :type="getSpecTagType(item)" class="status-tag">
+                {{ getSpecStatusLabel(item) }}
+              </el-tag>
+            </div>
+            <div class="agent-desc">{{ item.primary_goal || '等待补充目标描述' }}</div>
+            <div class="agent-meta">
+              <span>{{ (versionItemsBySpec[item.spec_id] || []).length ? `v${Math.max(...(versionItemsBySpec[item.spec_id] || []).map(v => v.version))}` : '暂无版本' }}</span>
+              <span>{{ getSpecMetaText(item) }}</span>
             </div>
           </div>
         </div>
       </aside>
 
-      <section class="chat-panel">
-        <div class="chat-panel-header">
+      <main class="content">
+        <div class="chat-head">
           <div>
-            <div class="current-thread-title">{{ displaySpec?.name || '新建 Agent' }}</div>
-            <div class="current-thread-subtitle">{{ focusSubtitle }}</div>
+            <div class="chat-title">{{ displaySpec?.name || '新建 Agent' }}</div>
+            <div class="chat-subtitle">{{ focusSubtitle }}</div>
           </div>
-          <div class="chat-panel-actions">
-            <el-tag size="small" effect="plain">齐备度 {{ completenessPercent }}%</el-tag>
-            <el-tag size="small" :type="draftStatusTagType" effect="plain">{{ draftStatusText }}</el-tag>
-            <el-button size="small" @click="handleRefreshDraft" :loading="refreshingDraft">检查 Draft</el-button>
+          <div class="chat-head-actions">
+            <el-button class="btn btn-ghost mobile-panel-btn" plain @click="showStatusSidebar = !showStatusSidebar">
+              查看状态
+            </el-button>
+            <el-tag size="small" effect="plain" :type="draftStatusTagType" class="status-tag">
+              {{ latestVersion ? `v${latestVersion.version}` : '' }} {{ draftStatusText }}
+            </el-tag>
           </div>
         </div>
 
-        <div ref="messagesContainer" class="messages-container">
-          <el-empty
-            v-if="displayedMessages.length === 0"
-            description="先描述你要创建的 Agent，例如：做一个能跟踪财报变化并总结风险提示的助手。"
-            :image-size="72"
-          />
+        <div v-if="!displayedMessages.length" class="empty-preview">
+          <div class="empty-preview-title">你想创建什么样的 Agent？</div>
+          <div class="empty-preview-desc">
+            描述你的目标后，助手会帮你设计职责、选择工具、生成测试版本并在发布前检查是否能接入工作流。
+          </div>
+          <div class="example-grid">
+            <div
+              v-for="example in exampleQuestions"
+              :key="example"
+              class="example-card"
+              @click="composerText = example"
+            >
+              <strong>{{ example.split('，')[0] }}</strong>
+              <span>{{ example.split('，').slice(1).join('，') }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div ref="messagesContainer" class="messages">
+          <div v-if="!displayedMessages.length" class="empty-spacer" />
           <div v-else class="messages-list">
             <div
               v-for="(message, index) in displayedMessages"
               :key="index"
-              :class="['message-item', message.role === 'user' ? 'message-user' : 'message-assistant', nanobotStreaming && index === displayedMessages.length - 1 && message.role === 'assistant' ? 'streaming-message' : '']"
+              :class="['message-row', message.role === 'user' ? 'user' : 'assistant', (nanobotStreaming && index === displayedMessages.length - 1 && message.role === 'assistant') ? 'streaming-message' : '']"
             >
               <template v-if="message.role === 'user'">
-                <div class="message-content">
-                  <div class="message-text">{{ message.content }}</div>
+                <div class="bubble">
+                  <div class="bubble-title">你的需求</div>
+                  <div class="message-text markdown-content" v-html="renderMarkdown(message.content)"></div>
                 </div>
-                <div class="message-avatar user-avatar">你</div>
+                <div class="avatar">你</div>
               </template>
               <template v-else>
-                <div class="message-avatar assistant-avatar">小助手</div>
-                <div class="message-content">
+                <div class="avatar">助</div>
+                <div class="bubble">
                   <div v-if="message.progressSteps?.length" class="progress-timeline">
-                    <div v-for="(step, stepIdx) in message.progressSteps" :key="`${index}-${stepIdx}`" class="timeline-step">
-                      <span class="step-dot" :class="[{ success: step.tone === 'success' }, { warning: step.tone === 'warning' }, { active: nanobotStreaming && index === displayedMessages.length - 1 && stepIdx === message.progressSteps.length - 1 }] "></span>
-                      <div class="step-content">
-                        <span class="step-text">{{ step.text }}</span>
-                        <span v-if="step.meta" class="step-meta">{{ step.meta }}</span>
+                    <div
+                      v-for="(step, stepIdx) in message.progressSteps"
+                      :key="stepIdx"
+                      :class="['progress-item', step.tone, (nanobotStreaming && index === displayedMessages.length - 1 && stepIdx === message.progressSteps.length - 1) ? 'current' : '']"
+                    >
+                      <span class="step-no">{{ stepIdx + 1 }}</span>
+                      <div class="step-copy">
+                        <strong>{{ step.text }}</strong>
+                        <span v-if="step.meta">{{ step.meta }}</span>
                       </div>
                     </div>
                   </div>
@@ -234,714 +132,516 @@
               </template>
             </div>
 
-            <div v-if="nanobotStreaming && !displayedMessages.length" class="message-item message-assistant thinking-bubble">
-              <div class="message-avatar assistant-avatar">小助手</div>
-              <div class="message-content thinking-content">
-                <div class="thinking-main-row">
-                  <span class="thinking-text">{{ loadingHint }}</span>
-                  <span class="thinking-dots">
-                    <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
-                  </span>
-                </div>
-                <div class="thinking-sub-row">已等待 {{ loadingSeconds }}s</div>
-              </div>
+            <div v-if="latestVersion" class="quick-actions">
+              <el-button class="quick-action" plain size="small" @click="openLatestVersionDetail">
+                查看测试结果
+              </el-button>
+              <el-button class="quick-action" plain size="small" @click="openLatestVersionDetail">
+                检查发布配置
+              </el-button>
+              <el-button class="quick-action" type="primary" plain size="small" :disabled="!canPublishLatestVersion" @click="openLatestPublishConfirm">
+                发布版本
+              </el-button>
+              <el-button class="quick-action" plain size="small" @click="composerText = '我想继续优化这个 Agent 的职责和输出效果。'">
+                继续优化职责
+              </el-button>
             </div>
           </div>
         </div>
 
         <div class="input-area">
-          <div class="input-row">
+          <div class="input-shell">
             <el-input
               v-model="composerText"
+              class="chat-input"
               type="textarea"
-              :rows="3"
-              :autosize="{ minRows: 3, maxRows: 6 }"
-              :placeholder="composerPlaceholder"
+              :autosize="{ minRows: 1, maxRows: 6 }"
+              placeholder="继续描述你的需求，或直接说：发布版本、重新测试、修改报告展示名称..."
               :disabled="nanobotStreaming"
-              @keydown.enter.ctrl.prevent="handleSendMessage"
             />
             <el-button
               type="primary"
               :loading="sending"
               :disabled="!composerText.trim() || nanobotStreaming"
-              class="send-btn"
               @click="handleSendMessage"
             >
-              {{ sendButtonText }}
+              发送
             </el-button>
           </div>
-          <div class="input-tip-row">
-            <span class="input-tip">Ctrl + Enter 发送</span>
-            <el-button v-if="nanobotStreaming" type="danger" link @click="cancelNanobotStreaming">停止本轮生成</el-button>
+          <div class="input-tip">
+            <template v-if="nanobotStreaming">
+              <el-button link type="danger" size="small" @click="cancelNanobotStreaming">停止本轮生成</el-button>
+            </template>
+            <template v-else>
+              建议：用自然语言描述目标即可，具体字段和工具由助手生成并在发布前确认。
+            </template>
           </div>
         </div>
+      </main>
 
-      </section>
+      <aside v-if="showStatusSidebar" class="inspector">
+        <div class="inspector-scroll">
+          <section class="status-card">
+            <div class="status-eyebrow">{{ latestVersion ? `当前版本 v${latestVersion.version}` : '当前 Agent' }}</div>
+            <div class="status-title">{{ rightPanelStatusTitle }}</div>
+            <div class="status-desc">{{ rightPanelStatusDescription }}</div>
+            <div v-if="latestVersion" class="score-row">
+              <div class="score-value">{{ overallScoreText }}</div>
+              <div class="score-copy">
+                <strong>{{ rightPanelScoreTitle }}</strong>
+                <span>{{ rightPanelScoreDescription }}</span>
+              </div>
+            </div>
+            <div class="status-actions">
+              <el-button type="primary" :disabled="!canPublishLatestVersion" @click="openLatestPublishConfirm">
+                发布
+              </el-button>
+              <el-button :disabled="!latestVersion" @click="openLatestVersionDetail">
+                详情
+              </el-button>
+            </div>
+          </section>
 
-      <aside v-if="showStatusSidebar" class="status-sidebar">
-        <div class="status-sidebar-header">
-          <div>
-            <div class="sidebar-title">助手状态</div>
-            <div class="sidebar-subtitle">这里只看后台状态和工具轨迹</div>
-          </div>
-          <el-button v-if="nanobotStreaming" size="small" text @click="cancelNanobotStreaming">停止</el-button>
+          <section class="right-section">
+            <div class="section-title">构建进度</div>
+            <div class="progress-list">
+              <div
+                v-for="(item, index) in workflowStageItems"
+                :key="item.key"
+                :class="['progress-item', item.state]"
+              >
+                <span class="step-no">{{ index + 1 }}</span>
+                <div class="step-copy">
+                  <strong>{{ item.title }}</strong>
+                  <span>{{ item.description }}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="right-section">
+            <div class="section-title">发布后展示</div>
+            <div class="plain-card report-preview">
+              <div class="report-row">
+                <span>报告名称</span>
+                <span class="report-label"><strong>{{ rightPanelReportLabel }}</strong></span>
+              </div>
+              <div class="report-row">
+                <span>展示位置</span>
+                <span class="report-stage"><strong>{{ rightPanelWorkflowStageText }}</strong></span>
+              </div>
+              <div class="report-row">
+                <span>报告状态</span>
+                <span class="report-show"><strong>{{ rightPanelReportVisibilityText }}</strong></span>
+              </div>
+            </div>
+          </section>
+
+          <details class="advanced">
+            <summary>高级配置</summary>
+            <div class="advanced-body">
+              <div class="kv"><span>输出字段</span><span><strong>{{ rightPanelOutputField }}</strong></span></div>
+              <div class="kv"><span>工作流阶段</span><span><strong>{{ rightPanelWorkflowStage }}</strong></span></div>
+              <div class="kv"><span>执行顺序</span><span><strong>{{ rightPanelExecutionOrder }}</strong></span></div>
+              <div class="kv"><span>Prompt Agent</span><span><strong>{{ rightPanelPromptAgentType }}</strong></span></div>
+              <div class="kv"><span>模板状态</span><span><strong>{{ rightPanelPromptStatus }}</strong></span></div>
+            </div>
+          </details>
+
+          <section v-if="callableAgents.length" class="right-section">
+            <div class="section-title">可调用 Agent</div>
+            <div class="plain-card callable-list">
+              <div
+                v-for="agent in callableAgents"
+                :key="agent.spec_id"
+                class="callable-item"
+                @click="openAgentItem(agent)"
+              >
+                <div class="callable-name">{{ agent.name || '未命名' }}</div>
+                <div class="callable-desc">{{ (agent.primary_goal || '').slice(0, 40) || '无描述' }}</div>
+              </div>
+            </div>
+          </section>
+
+          <section v-if="governanceReferences.length" class="right-section">
+            <div class="section-title">治理参考</div>
+            <div class="plain-card governance-refs">
+              <div
+                v-for="(ref, idx) in governanceReferences"
+                :key="idx"
+                :class="['governance-ref-item', ref.tone]"
+              >
+                <div class="governance-ref-label">{{ ref.label }}</div>
+                <div class="governance-ref-text">{{ ref.text }}</div>
+              </div>
+            </div>
+          </section>
+
+          <details class="advanced debug-config-card">
+            <summary>后台轨迹</summary>
+            <div class="advanced-body">
+              <el-card shadow="never">
+                <div class="status-main-hint">{{ nanobotProgressHint || '等待新的助手动作。' }}</div>
+                <div class="status-metrics">
+                  <div class="status-metric-item">
+                    <span>会话</span>
+                    <strong>{{ currentNanobotSessionKey ? '已连接' : '未连接' }}</strong>
+                  </div>
+                  <div class="status-metric-item">
+                    <span>Draft</span>
+                    <strong>{{ displaySpec ? '已同步' : '未同步' }}</strong>
+                  </div>
+                  <div class="status-metric-item">
+                    <span>版本</span>
+                    <strong>{{ latestVersion ? `v${latestVersion.version}` : '无' }}</strong>
+                  </div>
+                </div>
+              </el-card>
+
+              <el-card class="status-card" shadow="never" style="margin-top: 12px;">
+                <template #header>
+                  <div class="card-header">
+                    <span>工具轨迹</span>
+                    <el-tag size="small" effect="plain">{{ nanobotToolEvents.length }}</el-tag>
+                  </div>
+                </template>
+                <div v-if="!nanobotToolEvents.length" class="empty-note">开始对话后，这里会显示助手模式的后台处理轨迹。</div>
+                <div v-else class="tool-event-list">
+                  <div v-for="event in nanobotToolEvents" :key="event.key" :class="['tool-event-card', event.tone]">
+                    <span class="tool-event-status">{{ event.statusLabel }}</span>
+                    <strong>{{ event.title }}</strong>
+                    <span v-if="event.detail">{{ event.detail }}</span>
+                  </div>
+                </div>
+              </el-card>
+            </div>
+          </details>
         </div>
-
-        <div class="status-sidebar-scroll">
-          <div class="result-panels">
-            <el-collapse v-model="activeResultPanels" class="result-collapse">
-              <el-collapse-item name="draft">
-                <template #title>
-                  <div class="result-collapse-title-row">
-                    <span>Draft 结果</span>
-                    <el-tag v-if="displaySpec" type="success" size="small" effect="plain">已同步</el-tag>
-                  </div>
-                </template>
-                <div v-if="!displaySpec" class="empty-note">助手还没有同步出可用 Draft。</div>
-                <div v-else class="result-section">
-                  <div class="result-title">{{ displaySpec.name }}</div>
-                  <div class="result-desc">{{ displaySpec.primary_goal }}</div>
-                  <div v-if="displaySpec.responsibilities?.length" class="result-block">
-                    <div class="result-label">职责</div>
-                    <div class="tag-wrap">
-                      <el-tag v-for="item in displaySpec.responsibilities" :key="item" class="tag-item">{{ item }}</el-tag>
-                    </div>
-                  </div>
-                  <div v-if="displaySpecOutputTags.length" class="result-block">
-                    <div class="result-label">输出</div>
-                    <div class="tag-wrap">
-                      <el-tag v-for="item in displaySpecOutputTags" :key="item" class="tag-item" type="success">{{ item }}</el-tag>
-                    </div>
-                  </div>
-                  <div v-if="pendingQuestions.length" class="result-block">
-                    <div class="result-label">待确认点</div>
-                    <div class="compact-list">
-                      <div v-for="(item, index) in pendingQuestions" :key="`${index}-${item}`" class="list-row">{{ index + 1 }}. {{ item }}</div>
-                    </div>
-                  </div>
-                </div>
-              </el-collapse-item>
-
-              <el-collapse-item name="version">
-                <template #title>
-                  <div class="result-collapse-title-row">
-                    <span>版本与评估</span>
-                    <el-tag v-if="latestVersion" type="warning" size="small" effect="plain">v{{ latestVersion.version }}</el-tag>
-                  </div>
-                </template>
-                <div v-if="!latestVersion" class="empty-note">还没有生成可测试版本。</div>
-                <div v-else class="result-section">
-                  <div class="result-title">{{ latestVersion.agent_metadata?.name || latestVersion.version_id }}</div>
-                  <div class="meta-row">
-                    <span>{{ latestVersion.version_id }}</span>
-                    <span>{{ latestVersion.status }}</span>
-                  </div>
-                  <div v-if="versionOutputFields.length" class="result-block">
-                    <div class="result-label">输出字段</div>
-                    <div class="tag-wrap">
-                      <el-tag v-for="item in versionOutputFields" :key="item" class="tag-item" type="success">{{ item }}</el-tag>
-                    </div>
-                  </div>
-                  <div v-if="versionPromptProjectMemorySummary || latestEvaluationSummaryForDisplay || latestEvaluationProjectMemorySummary" class="result-block">
-                    <div class="result-label">L4 项目长期记忆</div>
-                    <div class="memory-summary-grid">
-                      <div v-if="versionPromptProjectMemorySummary" class="memory-summary-card">
-                        <div class="memory-summary-head">
-                          <strong class="memory-summary-title">模板绑定</strong>
-                          <el-tag
-                            size="small"
-                            effect="plain"
-                            :type="getProjectMemorySummaryTagType(versionPromptProjectMemorySummary.review_status)"
-                          >
-                            {{ getProjectMemorySummaryStatusText(versionPromptProjectMemorySummary.review_status) }}
-                          </el-tag>
-                        </div>
-                        <div class="memory-summary-body">{{ versionPromptProjectMemorySummary.summary }}</div>
-                        <div class="memory-summary-meta">
-                          <span>命中 {{ versionPromptProjectMemorySummary.matched_items }}/{{ versionPromptProjectMemorySummary.expected_items }}</span>
-                          <span v-if="versionPromptProjectMemorySummary.missing_item_count">缺口 {{ versionPromptProjectMemorySummary.missing_item_count }}</span>
-                        </div>
-                        <div v-if="versionPromptProjectMemorySummary.missing_items_preview?.length" class="memory-summary-missing">
-                          <div
-                            v-for="item in versionPromptProjectMemorySummary.missing_items_preview.slice(0, 2)"
-                            :key="item"
-                            class="memory-summary-missing-item"
-                          >
-                            {{ item }}
-                          </div>
-                        </div>
-                      </div>
-                      <div v-if="latestEvaluationSummaryForDisplay" class="memory-summary-card">
-                        <div class="memory-summary-head">
-                          <strong class="memory-summary-title">最近评估摘要</strong>
-                          <el-tag size="small" effect="plain" :type="getEvaluationDecisionTagType(latestEvaluationSummaryForDisplay.decision)">
-                            {{ getEvaluationDecisionLabel(latestEvaluationSummaryForDisplay.decision) }}
-                          </el-tag>
-                        </div>
-                        <div class="memory-summary-body">
-                          {{ latestEvaluationProjectMemorySummary?.summary || (latestEvaluationSummaryForDisplay.evaluation_valid ? '最近评估已产出可消费摘要。' : '最近评估仍有证据缺口，需要继续补齐。') }}
-                        </div>
-                        <div class="memory-summary-meta">
-                          <span v-if="latestEvaluationSummaryForDisplay.created_at">{{ formatDisplayTime(latestEvaluationSummaryForDisplay.created_at) }}</span>
-                          <span v-if="typeof latestEvaluationSummaryForDisplay.overall_score === 'number'">综合分 {{ latestEvaluationSummaryForDisplay.overall_score }}</span>
-                          <span v-if="latestEvaluationSummaryForDisplay.worker_execution_mode">Worker {{ latestEvaluationSummaryForDisplay.worker_execution_mode }}</span>
-                        </div>
-                        <div v-if="latestEvaluationProjectMemorySummary" class="memory-summary-meta subtle">
-                          <el-tag
-                            size="small"
-                            effect="plain"
-                            :type="getProjectMemorySummaryTagType(latestEvaluationProjectMemorySummary.review_status)"
-                          >
-                            {{ getProjectMemorySummaryStatusText(latestEvaluationProjectMemorySummary.review_status) }}
-                          </el-tag>
-                          <span>命中 {{ latestEvaluationProjectMemorySummary.matched_items }}/{{ latestEvaluationProjectMemorySummary.expected_items }}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div v-if="latestEvaluation" class="result-block">
-                    <div class="result-label">最近评估</div>
-                    <div class="meta-row">
-                      <span>结论 {{ evaluationDecisionText }}</span>
-                      <span>得分 {{ overallScoreText }}</span>
-                    </div>
-                    <div v-if="latestEvaluationLayerCards.length" class="evaluation-layer-grid compact-layer-grid">
-                      <div v-for="item in latestEvaluationLayerCards" :key="item.key" class="evaluation-layer-card">
-                        <div class="evaluation-layer-title-row">
-                          <strong>{{ item.label }}</strong>
-                          <el-tag size="small" effect="plain" :type="item.tagType">{{ item.decisionLabel }}</el-tag>
-                        </div>
-                        <div class="evaluation-layer-meta">得分 {{ item.scoreText }}</div>
-                      </div>
-                    </div>
-                    <div v-if="latestEvaluationBlockers.length" class="compact-list">
-                      <div v-for="(item, index) in latestEvaluationBlockers.slice(0, 4)" :key="`${index}-${item}`" class="list-row list-row-danger">阻断项 {{ index + 1 }}：{{ item }}</div>
-                    </div>
-                    <div v-if="latestEvaluationWarnings.length" class="compact-list">
-                      <div v-for="(item, index) in latestEvaluationWarnings.slice(0, 4)" :key="`${index}-${item}`" class="list-row list-row-warning">提示项 {{ index + 1 }}：{{ item }}</div>
-                    </div>
-                    <div v-if="latestEvaluationEvidenceIncomplete || latestEvaluationInvalidReasons.length" class="compact-list">
-                      <div v-if="latestEvaluationEvidenceIncomplete" class="list-row">当前评估未定案：存在关键证据缺口，不能直接作为正式发布依据。</div>
-                      <div v-for="item in latestEvaluationInvalidReasons.slice(0, 3)" :key="item" class="list-row">证据缺口：{{ item }}</div>
-                    </div>
-                    <div v-if="latestEvaluationConfirmedIssues.length" class="compact-list">
-                      <div v-for="(item, index) in latestEvaluationConfirmedIssues.slice(0, 4)" :key="`${index}-${item}`" class="list-row">已证实问题 {{ index + 1 }}：{{ item }}</div>
-                    </div>
-                    <div v-else-if="latestEvaluationInsufficientTitles.length" class="compact-list">
-                      <div v-for="(item, index) in latestEvaluationInsufficientTitles.slice(0, 3)" :key="`${index}-${item}`" class="list-row">证据不足 {{ index + 1 }}：{{ item }}</div>
-                    </div>
-                    <div v-if="latestEvaluationWorkerCards.length" class="result-worker-list">
-                      <div v-for="item in latestEvaluationWorkerCards.slice(0, 2)" :key="item.key" class="result-worker-card">
-                        <div class="result-worker-title-row">
-                          <strong>{{ item.workerName }}</strong>
-                          <span>{{ item.statusText }} / {{ item.sourceText }}</span>
-                        </div>
-                        <div v-if="item.summary" class="result-worker-summary">{{ item.summary }}</div>
-                        <div v-for="group in item.artifactGroups" :key="`${item.key}-${group.key}`" class="result-worker-group">
-                          <div class="result-worker-group-title">{{ group.label }}</div>
-                          <div v-for="artifact in group.items" :key="`${item.key}-${group.key}-${artifact.title}`" class="result-worker-artifact">
-                            <div class="result-worker-artifact-title">{{ artifact.title }}</div>
-                            <div v-for="entry in artifact.detailLines" :key="entry" class="result-worker-artifact-content">{{ entry }}</div>
-                            <div v-if="artifact.tagEntries.length" class="tag-wrap worker-artifact-tags">
-                              <el-tag v-for="entry in artifact.tagEntries" :key="entry" class="tag-item" effect="plain">{{ entry }}</el-tag>
-                            </div>
-                            <div class="result-worker-artifact-actions">
-                              <el-tag v-if="artifact.manualReview" size="small" effect="plain" :type="getManualReviewTagType(artifact.manualReview)">
-                                {{ getManualReviewStatusLabel(artifact.manualReview) }}
-                              </el-tag>
-                              <el-button size="small" text @click="openEvaluationArtifactReviewDialog(artifact)">人工审核</el-button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="result-block">
-                    <div class="result-label">发布状态</div>
-                    <div class="meta-row">
-                      <span>{{ publishStatusHint }}</span>
-                    </div>
-                  </div>
-                  <div class="result-block">
-                    <div class="result-label">真实流程状态</div>
-                    <div class="meta-row">
-                      <span>当前阶段 {{ workspacePhaseLabel }}</span>
-                    </div>
-                    <div class="workflow-stage-list">
-                      <div v-for="item in workflowStageItems" :key="item.key" :class="['workflow-stage-item', item.state]">
-                        <span class="workflow-stage-dot"></span>
-                        <div class="workflow-stage-body">
-                          <div class="workflow-stage-name">{{ item.title }}</div>
-                          <div class="workflow-stage-desc">{{ item.description }}</div>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="workflow-next-action">下一步：{{ nextRequiredAction }}</div>
-                  </div>
-                  <div class="result-block nanobot-action-guide">
-                    <div class="result-label">执行入口</div>
-                    <div class="compact-list">
-                      <div class="list-row">当前页面已移除前端直连的版本操作。</div>
-                      <div v-for="item in phaseActionGuideItems" :key="item" class="list-row">{{ item }}</div>
-                    </div>
-                  </div>
-                </div>
-              </el-collapse-item>
-            </el-collapse>
-          </div>
-
-          <el-card class="status-card" shadow="never">
-            <div class="status-main-hint">{{ nanobotProgressHint || '等待新的助手动作。' }}</div>
-            <div class="status-metrics">
-              <div class="status-metric-item">
-                <span>会话</span>
-                <strong>{{ currentNanobotSessionKey ? '已连接' : '未连接' }}</strong>
-              </div>
-              <div class="status-metric-item">
-                <span>Draft</span>
-                <strong>{{ displaySpec ? '已同步' : '未同步' }}</strong>
-              </div>
-              <div class="status-metric-item">
-                <span>版本</span>
-                <strong>{{ latestVersion ? `v${latestVersion.version}` : '无' }}</strong>
-              </div>
-            </div>
-          </el-card>
-
-          <el-card class="status-card" shadow="never">
-            <template #header>
-              <div class="card-header">
-                <span>工具轨迹</span>
-                <el-tag size="small" effect="plain">{{ nanobotToolEvents.length }}</el-tag>
-              </div>
-            </template>
-            <div v-if="!nanobotToolEvents.length" class="empty-note">开始对话后，这里会显示助手模式的后台处理轨迹。</div>
-            <div v-else class="tool-event-list">
-              <div v-for="event in nanobotToolEvents" :key="event.key" :class="['tool-event-card', event.tone]">
-                <span class="tool-event-status">{{ event.statusLabel }}</span>
-                <strong>{{ event.title }}</strong>
-                <span v-if="event.detail">{{ event.detail }}</span>
-              </div>
-            </div>
-          </el-card>
-
-          <el-card v-if="hasIterationContext" class="status-card" shadow="never">
-            <template #header>
-              <div class="card-header">
-                <span>本轮重点</span>
-              </div>
-            </template>
-            <div class="compact-list">
-              <div v-for="(item, index) in iterationImprovementItems" :key="`${index}-${item}`" class="list-row">{{ index + 1 }}. {{ item }}</div>
-            </div>
-          </el-card>
-          </div>
       </aside>
     </div>
 
     <el-dialog
       v-model="versionDetailDialogVisible"
-      width="min(960px, calc(100vw - 32px))"
+      width="min(900px, 100vw - 48px)"
       destroy-on-close
       class="version-detail-dialog"
     >
       <template #header>
-        <div class="version-detail-header">
+        <div class="dialog-head">
           <div>
-            <div class="version-detail-title">{{ versionDetailVersion?.agent_metadata?.name || versionDetailSpec?.name || 'Agent 详情' }}</div>
-            <div class="version-detail-subtitle">{{ versionDetailVersion?.version_id || versionDetailSpec?.spec_id || '' }}</div>
+            <div class="dialog-title">{{ versionDetailVersion?.agent_metadata?.name || versionDetailSpec?.name || 'Agent 详情' }}</div>
+            <div class="dialog-subtitle">{{ versionDetailVersion?.version_id || versionDetailSpec?.spec_id || '' }}</div>
           </div>
-          <div class="version-detail-header-actions">
-            <div class="version-detail-header-tags">
-              <el-tag v-if="versionDetailVersion" size="small" effect="plain" :type="getVersionTagType(versionDetailVersion)">
-                {{ getVersionStatusLabel(versionDetailVersion) }}
-              </el-tag>
-              <el-tag v-if="versionDetailSpec" size="small" effect="plain" :type="getSpecTagType(versionDetailSpec)">
-                {{ getSpecStatusLabel(versionDetailSpec) }}
-              </el-tag>
-            </div>
-            <el-button
-              v-if="versionDetailVersion"
-              type="primary"
-              size="small"
-              :loading="publishingVersionDetail"
-              :disabled="!canPublishVersionDetail"
-              @click="publishVersionFromDetail"
-            >
-              {{ versionDetailPublishButtonText }}
-            </el-button>
-          </div>
+          <el-button class="icon-btn" link @click="versionDetailDialogVisible = false">✕</el-button>
         </div>
       </template>
 
-      <div v-loading="versionDetailLoading" class="version-detail-body">
-        <div v-if="versionDetailVersion" class="version-detail-grid">
-          <section class="version-detail-section summary-section">
-            <div class="version-detail-section-title">
-              基础信息
-              <el-button
-                v-if="!editingVersionMetadata"
-                size="small"
-                text
-                type="primary"
-                @click="startEditingVersionMetadata"
-              >编辑</el-button>
-              <template v-else>
-                <el-button size="small" type="primary" :loading="savingVersionMetadata" @click="saveVersionMetadata">保存</el-button>
-                <el-button size="small" @click="cancelEditingVersionMetadata">取消</el-button>
-              </template>
-            </div>
-            <div class="version-detail-summary-grid">
-              <div class="version-detail-summary-item">
-                <span>版本号</span>
-                <strong>v{{ versionDetailVersion.version }}</strong>
-              </div>
-              <div class="version-detail-summary-item">
-                <span>版本状态</span>
-                <strong>{{ getVersionStatusLabel(versionDetailVersion) }}</strong>
-              </div>
-              <div class="version-detail-summary-item">
-                <span>Spec</span>
-                <strong>{{ versionDetailSpec?.name || versionDetailVersion.spec_id }}</strong>
-              </div>
-              <div class="version-detail-summary-item">
-                <span>输出字段</span>
-                <strong v-if="!editingVersionMetadata">{{ versionDetailOutputFieldText }}</strong>
-                <el-input v-else v-model="versionMetadataEditForm.output_field" size="small" placeholder="analysis" />
-              </div>
-              <div class="version-detail-summary-item">
-                <span>工作流阶段</span>
-                <strong v-if="!editingVersionMetadata">{{ versionDetailWorkflowStageText }}</strong>
-                <el-select v-else v-model="versionMetadataEditForm.workflow_stage" size="small">
-                  <el-option label="analyst" value="analyst" />
-                  <el-option label="research" value="research" />
-                  <el-option label="risk" value="risk" />
-                  <el-option label="manager" value="manager" />
-                  <el-option label="trader" value="trader" />
-                </el-select>
-              </div>
-              <div class="version-detail-summary-item">
-                <span>报告标签</span>
-                <strong v-if="!editingVersionMetadata">{{ versionDetailReportLabelText }}</strong>
-                <el-input v-else v-model="versionMetadataEditForm.report_label" size="small" placeholder="【Agent名称】" />
-              </div>
-              <div class="version-detail-summary-item">
-                <span>报告展示</span>
-                <strong v-if="!editingVersionMetadata">{{ versionDetailShowInReportsText }}</strong>
-                <el-switch v-else v-model="versionMetadataEditForm.show_in_reports" size="small" />
-              </div>
-              <div class="version-detail-summary-item">
-                <span>执行顺序</span>
-                <strong v-if="!editingVersionMetadata">{{ versionDetailExecutionOrderText }}</strong>
-                <el-input-number v-else v-model="versionMetadataEditForm.execution_order" size="small" :min="0" :max="999" />
-              </div>
-              <div class="version-detail-summary-item">
-                <span>节点名称</span>
-                <strong v-if="!editingVersionMetadata">{{ versionDetailNodeNameText }}</strong>
-                <el-input v-else v-model="versionMetadataEditForm.node_name" size="small" placeholder="Agent 节点名称" />
-              </div>
-            </div>
-            <div class="version-detail-description">
-              {{ versionDetailVersion.agent_metadata?.description || versionDetailSpec?.primary_goal || '暂无描述' }}
-            </div>
-          </section>
-
-          <!-- 发布校验错误展示 -->
-          <section v-if="versionDetailPublishErrors.length || versionDetailPublishWarnings.length" class="version-detail-section publish-validation-section">
-            <div class="version-detail-section-title">发布校验结果</div>
-            <div v-if="versionDetailPublishErrors.length" class="publish-validation-errors">
-              <div class="publish-validation-subtitle">错误（必须修复才能发布）</div>
-              <div v-for="err in versionDetailPublishErrors" :key="err" class="publish-validation-item publish-validation-item-error">
-                <el-icon><CircleCloseFilled /></el-icon>
-                <span>{{ err }}</span>
-              </div>
-            </div>
-            <div v-if="versionDetailPublishWarnings.length" class="publish-validation-warnings">
-              <div class="publish-validation-subtitle">警告</div>
-              <div v-for="warn in versionDetailPublishWarnings" :key="warn" class="publish-validation-item publish-validation-item-warning">
-                <el-icon><WarningFilled /></el-icon>
-                <span>{{ warn }}</span>
-              </div>
-            </div>
-          </section>
-
-          <section class="version-detail-section">
-            <div class="version-detail-section-title">绑定工具</div>
-            <div v-if="versionDetailVersion.required_tools?.length" class="tag-wrap detail-tag-wrap">
-              <el-tag v-for="tool in versionDetailVersion.required_tools" :key="tool" class="tag-item" type="success">
-                {{ tool }}
-              </el-tag>
-            </div>
-            <div v-else class="empty-note">当前版本没有绑定工具。</div>
-          </section>
-
-          <section class="version-detail-section">
-            <div class="version-detail-section-title">能力声明</div>
-            <div v-if="versionDetailVersion.required_capabilities?.length" class="tag-wrap detail-tag-wrap">
-              <el-tag v-for="capability in versionDetailVersion.required_capabilities" :key="capability" class="tag-item" effect="plain">
-                {{ capability }}
-              </el-tag>
-            </div>
-            <div v-else class="empty-note">当前版本没有额外的能力声明。</div>
-          </section>
-
-          <section class="version-detail-section">
-            <div class="version-detail-section-title">Prompt 模板</div>
-            <div class="version-detail-meta-line">
-              <span>模板：{{ versionDetailPrompt?.template_name || versionDetailVersion.prompt_template_ref?.template_name || '未命名模板' }}</span>
-              <span>状态：{{ versionDetailPrompt?.status || versionDetailVersion.prompt_template_ref?.status || 'unknown' }}</span>
-              <span>Agent 类型：{{ versionDetailPromptAgentTypeText }}</span>
-              <span>Agent 名称：{{ versionDetailPromptAgentNameText }}</span>
-            </div>
-            <div v-if="versionDetailPromptSections.length" class="prompt-section-list">
-              <div v-for="section in versionDetailPromptSections" :key="section.key" class="prompt-section-card">
-                <div class="prompt-section-title">{{ section.label }}</div>
-                <pre class="prompt-section-content">{{ section.value }}</pre>
-              </div>
-            </div>
-            <div v-else class="empty-note">当前版本没有可展示的 Prompt 内容。</div>
-          </section>
-
-          <section v-if="versionDetailPromptProjectMemorySummary || versionDetailEvaluationSummaryForDisplay || versionDetailEvaluationProjectMemorySummary" class="version-detail-section">
-            <div class="version-detail-section-title">L4 项目长期记忆</div>
-            <div class="memory-summary-grid">
-              <div v-if="versionDetailPromptProjectMemorySummary" class="memory-summary-card">
-                <div class="memory-summary-head">
-                  <strong class="memory-summary-title">模板绑定</strong>
-                  <el-tag
-                    size="small"
-                    effect="plain"
-                    :type="getProjectMemorySummaryTagType(versionDetailPromptProjectMemorySummary.review_status)"
-                  >
-                    {{ getProjectMemorySummaryStatusText(versionDetailPromptProjectMemorySummary.review_status) }}
-                  </el-tag>
-                </div>
-                <div class="memory-summary-body">{{ versionDetailPromptProjectMemorySummary.summary }}</div>
-                <div class="memory-summary-meta">
-                  <span>命中 {{ versionDetailPromptProjectMemorySummary.matched_items }}/{{ versionDetailPromptProjectMemorySummary.expected_items }}</span>
-                  <span v-if="versionDetailPromptProjectMemorySummary.missing_item_count">缺口 {{ versionDetailPromptProjectMemorySummary.missing_item_count }}</span>
-                </div>
-                <div v-if="versionDetailPromptProjectMemorySummary.missing_items_preview?.length" class="memory-summary-missing">
-                  <div
-                    v-for="item in versionDetailPromptProjectMemorySummary.missing_items_preview.slice(0, 3)"
-                    :key="item"
-                    class="memory-summary-missing-item"
-                  >
-                    {{ item }}
+      <div class="dialog-body">
+        <div v-loading="versionDetailLoading" class="dialog-content">
+          <div v-if="versionDetailVersion" class="tab-container">
+            <el-tabs v-model="versionDetailActiveTab" class="tab-bar">
+              <el-tab-pane label="概览" name="overview">
+                <div class="version-overview-hero">
+                  <div class="score-value">{{ versionDetailScoreText }}</div>
+                  <div class="version-overview-copy">
+                    <h3>{{ versionDetailOverviewTitle }}</h3>
+                    <p>{{ versionDetailOverviewDescription }}</p>
                   </div>
                 </div>
-              </div>
-              <div v-if="versionDetailEvaluationSummaryForDisplay" class="memory-summary-card">
-                <div class="memory-summary-head">
-                  <strong class="memory-summary-title">最近评估摘要</strong>
-                  <el-tag size="small" effect="plain" :type="getEvaluationDecisionTagType(versionDetailEvaluationSummaryForDisplay.decision)">
-                    {{ getEvaluationDecisionLabel(versionDetailEvaluationSummaryForDisplay.decision) }}
-                  </el-tag>
-                </div>
-                <div class="memory-summary-body">
-                  {{ versionDetailEvaluationProjectMemorySummary?.summary || (versionDetailEvaluationSummaryForDisplay.evaluation_valid ? '最近评估已产出可消费摘要。' : '最近评估仍有证据缺口，需要继续补齐。') }}
-                </div>
-                <div class="memory-summary-meta">
-                  <span v-if="versionDetailEvaluationSummaryForDisplay.created_at">{{ formatDisplayTime(versionDetailEvaluationSummaryForDisplay.created_at) }}</span>
-                  <span v-if="typeof versionDetailEvaluationSummaryForDisplay.overall_score === 'number'">综合分 {{ versionDetailEvaluationSummaryForDisplay.overall_score }}</span>
-                  <span v-if="versionDetailEvaluationSummaryForDisplay.evaluation_status">状态 {{ versionDetailEvaluationSummaryForDisplay.evaluation_status }}</span>
-                </div>
-                <div v-if="versionDetailEvaluationProjectMemorySummary" class="memory-summary-meta subtle">
-                  <el-tag
-                    size="small"
-                    effect="plain"
-                    :type="getProjectMemorySummaryTagType(versionDetailEvaluationProjectMemorySummary.review_status)"
-                  >
-                    {{ getProjectMemorySummaryStatusText(versionDetailEvaluationProjectMemorySummary.review_status) }}
-                  </el-tag>
-                  <span>命中 {{ versionDetailEvaluationProjectMemorySummary.matched_items }}/{{ versionDetailEvaluationProjectMemorySummary.expected_items }}</span>
-                </div>
-              </div>
-            </div>
-          </section>
 
-          <section class="version-detail-section">
-            <div class="version-detail-section-title">最近测试报告</div>
-            <div v-if="versionDetailLatestRuntimeReportText || versionDetailLatestRuntimePayloadText || versionDetailLatestRuntimeMeta.length" class="version-detail-runtime-card">
-              <div v-if="versionDetailLatestRuntimeMeta.length" class="version-detail-meta-line">
-                <span v-for="item in versionDetailLatestRuntimeMeta" :key="item">{{ item }}</span>
-              </div>
-              <div v-if="versionDetailLatestRuntimeReportText" class="prompt-section-card runtime-report-card">
-                <div class="prompt-section-title">报告正文</div>
-                <div
-                  class="prompt-section-content runtime-report-content runtime-report-markdown"
-                  v-html="renderMarkdown(versionDetailLatestRuntimeReportText)"
-                ></div>
-              </div>
-              <div v-if="versionDetailLatestRuntimePayloadText" class="prompt-section-card runtime-report-card">
-                <div class="prompt-section-title runtime-json-title-row">
-                  <span>结构化输出预览</span>
-                  <el-button size="small" text @click="copyRuntimePayloadJson">复制 JSON</el-button>
-                </div>
-                <pre class="prompt-section-content runtime-report-content runtime-json-content">{{ versionDetailLatestRuntimePayloadText }}</pre>
-              </div>
-            </div>
-            <div v-else class="empty-note">最近一次测试没有保存可展示的报告正文。</div>
-          </section>
-
-          <section class="version-detail-section">
-            <div class="version-detail-section-head">
-              <div class="version-detail-section-title">最近评估</div>
-              <div class="version-detail-section-actions">
-                <el-button
-                  v-if="versionDetailVersion"
-                  size="small"
-                  :loading="reEvaluatingVersionDetail"
-                  :disabled="!canReEvaluateVersionDetail"
-                  @click="reEvaluateVersionFromDetail"
-                >
-                  {{ versionDetailReEvaluateButtonText }}
-                </el-button>
-                <el-button
-                  v-if="versionDetailVersion"
-                  type="primary"
-                  size="small"
-                  :loading="publishingVersionDetail"
-                  :disabled="!canPublishVersionDetail"
-                  @click="publishVersionFromDetail"
-                >
-                  {{ versionDetailPublishButtonText }}
-                </el-button>
-              </div>
-            </div>
-            <div v-if="versionDetailEvaluation" class="version-detail-evaluation-card">
-              <div class="version-detail-summary-grid">
-                <div class="version-detail-summary-item">
-                  <span>结论</span>
-                  <strong>{{ getEvaluationDecisionLabel(versionDetailEvaluation.decision) }}</strong>
-                </div>
-                <div class="version-detail-summary-item">
-                  <span>总分</span>
-                  <strong>{{ String(versionDetailEvaluation.scores?.overall ?? '-') }}</strong>
-                </div>
-                <div class="version-detail-summary-item">
-                  <span>评估类型</span>
-                  <strong>{{ versionDetailEvaluation.evaluation_type || '-' }}</strong>
-                </div>
-                <div class="version-detail-summary-item">
-                  <span>更新时间</span>
-                  <strong>{{ versionDetailEvaluation.updated_at || versionDetailEvaluation.created_at || '-' }}</strong>
-                </div>
-              </div>
-              <div v-if="versionDetailLayerCards.length" class="evaluation-layer-grid">
-                <div v-for="item in versionDetailLayerCards" :key="item.key" class="evaluation-layer-card">
-                  <div class="evaluation-layer-title-row">
-                    <strong>{{ item.label }}</strong>
-                    <el-tag size="small" effect="plain" :type="item.tagType">{{ item.decisionLabel }}</el-tag>
-                  </div>
-                  <div class="evaluation-layer-meta">得分 {{ item.scoreText }}</div>
-                  <div v-if="item.summaryItems.length" class="compact-list layer-summary-list">
-                    <div v-for="entry in item.summaryItems" :key="`${item.key}-${entry}`" class="list-row">{{ entry }}</div>
-                  </div>
-                </div>
-              </div>
-              <div v-if="versionDetailBlockers.length" class="compact-list">
-                <div v-for="(issue, index) in versionDetailBlockers" :key="`${index}-${issue}`" class="list-row list-row-danger">
-                  阻断项 {{ index + 1 }}：{{ issue }}
-                </div>
-              </div>
-              <div v-if="versionDetailWarnings.length" class="compact-list">
-                <div v-for="(issue, index) in versionDetailWarnings" :key="`${index}-${issue}`" class="list-row list-row-warning">
-                  提示项 {{ index + 1 }}：{{ issue }}
-                </div>
-              </div>
-              <div v-if="versionDetailConfirmedIssues.length" class="compact-list">
-                <div v-for="(issue, index) in versionDetailConfirmedIssues" :key="`${index}-${issue}`" class="list-row">
-                  已证实问题 {{ index + 1 }}：{{ issue }}
-                </div>
-              </div>
-              <div v-else-if="versionDetailInsufficientTitles.length" class="compact-list">
-                <div v-for="(item, index) in versionDetailInsufficientTitles" :key="`${index}-${item}`" class="list-row">
-                  证据不足 {{ index + 1 }}：{{ item }}
-                </div>
-              </div>
-              <div v-if="versionDetailEvidenceIncomplete || versionDetailInvalidReasons.length" class="compact-list" style="margin-top: 10px;">
-                <div v-if="versionDetailEvidenceIncomplete" class="list-row">当前评估未定案：存在关键证据缺口。</div>
-                <div v-for="item in versionDetailInvalidReasons" :key="item" class="list-row">证据缺口：{{ item }}</div>
-              </div>
-              <div v-if="versionDetailWorkerCards.length" class="result-worker-list">
-                <div v-for="item in versionDetailWorkerCards.slice(0, 4)" :key="item.key" class="result-worker-card">
-                  <div class="result-worker-title-row">
-                    <strong>{{ item.workerName }}</strong>
-                    <span>{{ item.statusText }} / {{ item.sourceText }}</span>
-                  </div>
-                  <div v-if="item.summary" class="result-worker-summary">{{ item.summary }}</div>
-                  <div v-for="group in item.artifactGroups" :key="`${item.key}-${group.key}`" class="result-worker-group">
-                    <div class="result-worker-group-title">{{ group.label }}</div>
-                    <div v-for="artifact in group.items" :key="`${item.key}-${group.key}-${artifact.title}`" class="result-worker-artifact">
-                      <div class="result-worker-artifact-title">{{ artifact.title }}</div>
-                      <div v-for="entry in artifact.detailLines" :key="entry" class="result-worker-artifact-content">{{ entry }}</div>
-                      <div v-if="artifact.tagEntries.length" class="tag-wrap worker-artifact-tags">
-                        <el-tag v-for="entry in artifact.tagEntries" :key="entry" class="tag-item" effect="plain">{{ entry }}</el-tag>
+                <div class="version-detail-card-grid">
+                  <section class="detail-card">
+                    <div class="detail-title">
+                      基础信息
+                      <el-button v-if="!editingVersionMetadata" link type="primary" @click="startEditingVersionMetadata">
+                        编辑
+                      </el-button>
+                      <template v-else>
+                        <el-button type="primary" size="small" :loading="savingVersionMetadata" @click="saveVersionMetadata">保存</el-button>
+                        <el-button size="small" @click="cancelEditingVersionMetadata">取消</el-button>
+                      </template>
+                    </div>
+                    <div class="detail-grid">
+                      <div class="kv">
+                        <span>版本号</span>
+                        <span><strong>v{{ versionDetailVersion.version }}</strong></span>
                       </div>
-                      <div class="result-worker-artifact-actions">
-                        <el-tag v-if="artifact.manualReview" size="small" effect="plain" :type="getManualReviewTagType(artifact.manualReview)">
-                          {{ getManualReviewStatusLabel(artifact.manualReview) }}
-                        </el-tag>
-                        <el-button size="small" text @click="openEvaluationArtifactReviewDialog(artifact)">人工审核</el-button>
+                      <div class="kv">
+                        <span>版本状态</span>
+                        <span><strong>{{ getVersionStatusLabel(versionDetailVersion) }}</strong></span>
+                      </div>
+                      <div class="kv">
+                        <span>Spec</span>
+                        <span><strong>{{ versionDetailSpec?.name || versionDetailVersion.spec_id }}</strong></span>
+                      </div>
+                      <div class="kv">
+                        <span>输出字段</span>
+                        <template v-if="!editingVersionMetadata">
+                          <span><strong>{{ versionDetailOutputFieldText }}</strong></span>
+                        </template>
+                        <template v-else>
+                          <el-input v-model="versionMetadataEditForm.output_field" size="small" placeholder="analysis" />
+                        </template>
+                      </div>
+                      <div class="kv">
+                        <span>工作流阶段</span>
+                        <template v-if="!editingVersionMetadata">
+                          <span><strong>{{ versionDetailWorkflowStageText }}</strong></span>
+                        </template>
+                        <template v-else>
+                          <el-select v-model="versionMetadataEditForm.workflow_stage" size="small">
+                            <el-option label="analyst" value="analyst" />
+                            <el-option label="research" value="research" />
+                            <el-option label="risk" value="risk" />
+                            <el-option label="manager" value="manager" />
+                            <el-option label="trader" value="trader" />
+                          </el-select>
+                        </template>
+                      </div>
+                      <div class="kv">
+                        <span>报告标签</span>
+                        <template v-if="!editingVersionMetadata">
+                          <span><strong>{{ versionDetailReportLabelText }}</strong></span>
+                        </template>
+                        <template v-else>
+                          <el-input v-model="versionMetadataEditForm.report_label" size="small" placeholder="【Agent名称】" />
+                        </template>
+                      </div>
+                      <div class="kv">
+                        <span>报告展示</span>
+                        <template v-if="!editingVersionMetadata">
+                          <span><strong>{{ versionDetailShowInReportsText }}</strong></span>
+                        </template>
+                        <template v-else>
+                          <el-switch v-model="versionMetadataEditForm.show_in_reports" size="small" />
+                        </template>
+                      </div>
+                      <div class="kv">
+                        <span>执行顺序</span>
+                        <template v-if="!editingVersionMetadata">
+                          <span><strong>{{ versionDetailExecutionOrderText }}</strong></span>
+                        </template>
+                        <template v-else>
+                          <el-input-number v-model="versionMetadataEditForm.execution_order" size="small" :min="0" :max="999" />
+                        </template>
+                      </div>
+                      <div class="kv">
+                        <span>节点名称</span>
+                        <template v-if="!editingVersionMetadata">
+                          <span><strong>{{ versionDetailNodeNameText }}</strong></span>
+                        </template>
+                        <template v-else>
+                          <el-input v-model="versionMetadataEditForm.node_name" size="small" placeholder="Agent 节点名称" />
+                        </template>
                       </div>
                     </div>
+                  </section>
+
+                  <section v-if="versionDetailPublishErrors.length || versionDetailPublishWarnings.length" class="detail-card">
+                    <div class="detail-title">发布校验结果</div>
+                    <div v-if="versionDetailPublishErrors.length" class="notice notice-amber">
+                      <div class="notice-title">错误（必须修复才能发布）</div>
+                      <ul style="padding-left: 18px; margin-top: 8px;">
+                        <li v-for="err in versionDetailPublishErrors" :key="err">{{ err }}</li>
+                      </ul>
+                    </div>
+                    <div v-if="versionDetailPublishWarnings.length" class="notice notice-amber" style="margin-top: 10px;">
+                      <div class="notice-title">警告</div>
+                      <ul style="padding-left: 18px; margin-top: 8px;">
+                        <li v-for="warn in versionDetailPublishWarnings" :key="warn">{{ warn }}</li>
+                      </ul>
+                    </div>
+                  </section>
+
+                  <section class="detail-card">
+                    <div class="detail-title">绑定工具</div>
+                    <div v-if="versionDetailVersion.required_tools?.length" class="tool-tags">
+                      <el-tag v-for="tool in versionDetailVersion.required_tools" :key="tool" class="tag-item" effect="plain">
+                        {{ tool }}
+                      </el-tag>
+                    </div>
+                    <div v-else class="empty-note">当前版本没有绑定工具。</div>
+                  </section>
+                </div>
+              </el-tab-pane>
+
+              <el-tab-pane label="Prompt 模板" name="prompt">
+                <section class="detail-card">
+                  <div class="detail-title">模板基本信息</div>
+                  <div class="detail-grid">
+                    <div class="kv">
+                      <span>模板</span>
+                      <span><strong>{{ versionDetailPrompt?.template_name || versionDetailVersion?.prompt_template_ref?.template_name || '未命名模板' }}</strong></span>
+                    </div>
+                    <div class="kv">
+                      <span>状态</span>
+                      <span><strong>{{ versionDetailPrompt?.status || versionDetailVersion?.prompt_template_ref?.status || 'unknown' }}</strong></span>
+                    </div>
+                    <div class="kv">
+                      <span>Agent 类型</span>
+                      <span><strong>{{ versionDetailPromptAgentTypeText }}</strong></span>
+                    </div>
+                    <div class="kv">
+                      <span>Agent 名称</span>
+                      <span><strong>{{ versionDetailPromptAgentNameText }}</strong></span>
+                    </div>
+                  </div>
+                  <div class="detail-title" style="margin-top: 12px;">Prompt 内容</div>
+                  <div v-if="versionDetailPromptSections.length" class="prompt-section-list">
+                    <div v-for="section in versionDetailPromptSections" :key="section.key" class="prompt-section-card">
+                      <div class="prompt-section-title">{{ section.label }}</div>
+                      <pre class="prompt-section-content">{{ section.value }}</pre>
+                    </div>
+                  </div>
+                  <div v-else class="empty-note">当前版本没有可展示的 Prompt 内容。</div>
+                </section>
+              </el-tab-pane>
+
+              <el-tab-pane label="测试结果" name="test">
+                <div v-if="versionDetailEvaluation" class="version-overview-hero">
+                  <div class="score-value">{{ String(versionDetailEvaluation.scores?.overall ?? '-') }}</div>
+                  <div class="version-overview-copy">
+                    <h3>{{ getEvaluationDecisionLabel(versionDetailEvaluation.decision) }}</h3>
+                    <p>点击“重新评估”可基于当前证据再次运行评估。</p>
                   </div>
                 </div>
-              </div>
-              <div v-if="!versionDetailConfirmedIssues.length && !versionDetailInsufficientTitles.length && !versionDetailEvidenceIncomplete && !versionDetailInvalidReasons.length" class="empty-note">最近评估没有记录问题项。</div>
-            </div>
-            <div v-else class="empty-note">当前版本还没有评估记录。</div>
-          </section>
-        </div>
 
-        <div v-else class="empty-note">当前没有可展示的版本详情。</div>
+                <div class="version-detail-card-grid" style="margin-top: 12px;">
+                  <section v-if="versionDetailPromptProjectMemorySummary" class="detail-card">
+                    <div class="detail-title">项目记忆 - 模板绑定</div>
+                    <div class="memory-summary-head">
+                      <strong>{{ getProjectMemorySummaryStatusText(versionDetailPromptProjectMemorySummary.review_status) }}</strong>
+                      <el-tag
+                        size="small"
+                        effect="plain"
+                        :type="getProjectMemorySummaryTagType(versionDetailPromptProjectMemorySummary.review_status)"
+                      >
+                        {{ getProjectMemorySummaryStatusText(versionDetailPromptProjectMemorySummary.review_status) }}
+                      </el-tag>
+                    </div>
+                    <div class="memory-summary-body">{{ versionDetailPromptProjectMemorySummary.summary }}</div>
+                    <div class="memory-summary-meta" style="margin-top: 10px;">
+                      <span>命中 {{ versionDetailPromptProjectMemorySummary.matched_items }}/{{ versionDetailPromptProjectMemorySummary.expected_items }}</span>
+                      <span v-if="versionDetailPromptProjectMemorySummary.missing_item_count">缺口 {{ versionDetailPromptProjectMemorySummary.missing_item_count }}</span>
+                    </div>
+                  </section>
+
+                  <section v-if="versionDetailEvaluationSummaryForDisplay" class="detail-card">
+                    <div class="detail-title">最近评估摘要</div>
+                    <div class="memory-summary-head">
+                      <strong>{{ getEvaluationDecisionLabel(versionDetailEvaluationSummaryForDisplay.decision) }}</strong>
+                      <el-tag size="small" effect="plain" :type="getEvaluationDecisionTagType(versionDetailEvaluationSummaryForDisplay.decision)">
+                        {{ getEvaluationDecisionLabel(versionDetailEvaluationSummaryForDisplay.decision) }}
+                      </el-tag>
+                    </div>
+                    <div class="memory-summary-body">{{ versionDetailEvaluationProjectMemorySummary?.summary || '最近评估已运行。' }}</div>
+                    <div class="memory-summary-meta" style="margin-top: 10px;">
+                      <span v-if="versionDetailEvaluationSummaryForDisplay.created_at">{{ formatDisplayTime(versionDetailEvaluationSummaryForDisplay.created_at) }}</span>
+                      <span v-if="typeof versionDetailEvaluationSummaryForDisplay.overall_score === 'number'">综合分 {{ versionDetailEvaluationSummaryForDisplay.overall_score }}</span>
+                    </div>
+                  </section>
+
+                  <section class="detail-card">
+                    <div class="detail-title">最近测试报告</div>
+                    <div v-if="versionDetailLatestRuntimeReportText || versionDetailLatestRuntimePayloadText || versionDetailLatestRuntimeMeta.length" class="version-detail-runtime-card">
+                      <div v-if="versionDetailLatestRuntimeMeta.length" class="version-detail-meta-line">
+                        <span v-for="item in versionDetailLatestRuntimeMeta" :key="item">{{ item }}</span>
+                      </div>
+                      <div v-if="versionDetailLatestRuntimeReportText" class="prompt-section-card runtime-report-card">
+                        <div class="prompt-section-title">报告正文</div>
+                        <div class="prompt-section-content runtime-report-content runtime-report-markdown" v-html="renderMarkdown(versionDetailLatestRuntimeReportText)"></div>
+                      </div>
+                      <div v-if="versionDetailLatestRuntimePayloadText" class="prompt-section-card runtime-report-card">
+                        <div class="prompt-section-title runtime-json-title-row">
+                          <span>结构化输出预览</span>
+                          <el-button size="small" link @click="copyRuntimePayloadJson">复制 JSON</el-button>
+                        </div>
+                        <pre class="prompt-section-content runtime-report-content runtime-json-content">{{ versionDetailLatestRuntimePayloadText }}</pre>
+                      </div>
+                    </div>
+                    <div v-else class="empty-note">最近一次测试没有保存可展示的报告正文。</div>
+                  </section>
+
+                  <section class="detail-card">
+                    <div class="detail-title">
+                      最近评估
+                      <div class="detail-actions">
+                        <el-button
+                          size="small"
+                          :loading="reEvaluatingVersionDetail"
+                          :disabled="!canReEvaluateVersionDetail"
+                          @click="reEvaluateVersionFromDetail"
+                        >
+                          重新评估
+                        </el-button>
+                        <el-button
+                          size="small"
+                          type="primary"
+                          :loading="publishingVersionDetail"
+                          :disabled="!canPublishVersionDetail"
+                          @click="publishVersionFromDetail"
+                        >
+                          发布
+                        </el-button>
+                      </div>
+                    </div>
+                    <div v-if="versionDetailEvaluation" class="version-detail-runtime-card">
+                      <div class="detail-grid">
+                        <div class="kv">
+                          <span>结论</span>
+                          <span><strong>{{ getEvaluationDecisionLabel(versionDetailEvaluation.decision) }}</strong></span>
+                        </div>
+                        <div class="kv">
+                          <span>总分</span>
+                          <span><strong>{{ String(versionDetailEvaluation.scores?.overall ?? '-') }}</strong></span>
+                        </div>
+                        <div class="kv">
+                          <span>评估类型</span>
+                          <span><strong>{{ versionDetailEvaluation.evaluation_type || '-' }}</strong></span>
+                        </div>
+                        <div class="kv">
+                          <span>更新时间</span>
+                          <span><strong>{{ versionDetailEvaluation.updated_at || versionDetailEvaluation.created_at || '-' }}</strong></span>
+                        </div>
+                      </div>
+                      <div v-if="versionDetailLayerCards.length" class="evaluation-layer-grid">
+                        <div v-for="item in versionDetailLayerCards" :key="item.key" class="evaluation-layer-card">
+                          <div class="evaluation-layer-title-row">
+                            <strong>{{ item.label }}</strong>
+                            <el-tag size="small" effect="plain" :type="(item.tagType as any)">{{ item.decisionLabel }}</el-tag>
+                          </div>
+                          <div class="evaluation-layer-meta">得分 {{ item.scoreText }}</div>
+                        </div>
+                      </div>
+                      <div v-if="versionDetailBlockers.length" class="compact-list">
+                        <div v-for="(item, idx) in versionDetailBlockers.slice(0, 4)" :key="idx" class="list-row list-row-danger">
+                          阻断项 {{ idx + 1 }}：{{ item }}
+                        </div>
+                      </div>
+                      <div v-if="versionDetailWarnings.length" class="compact-list">
+                        <div v-for="(item, idx) in versionDetailWarnings.slice(0, 4)" :key="idx" class="list-row list-row-warning">
+                          提示项 {{ idx + 1 }}：{{ item }}
+                        </div>
+                      </div>
+                    </div>
+                    <div v-else class="empty-note">当前版本还没有评估记录。</div>
+                  </section>
+                </div>
+              </el-tab-pane>
+            </el-tabs>
+          </div>
+
+          <div v-else class="empty-note">当前没有可展示的版本详情。</div>
+        </div>
       </div>
     </el-dialog>
-
-    <el-dialog
-      v-model="evaluationArtifactReviewDialogVisible"
-      width="min(560px, calc(100vw - 32px))"
-      destroy-on-close
-      title="人工审核证据项"
-    >
-      <div class="evaluation-review-form">
-        <div class="compact-list">
-          <div class="list-row">路径：{{ evaluationArtifactReviewForm.targetPath || '-' }}</div>
-          <div class="list-row">标题：{{ evaluationArtifactReviewForm.targetTitle || '-' }}</div>
-        </div>
-        <div class="evaluation-review-field">
-          <div class="evaluation-review-label">审核结果</div>
-          <el-radio-group v-model="evaluationArtifactReviewForm.approved">
-            <el-radio :label="true">误报，忽略该项</el-radio>
-            <el-radio :label="false">保留问题项</el-radio>
-          </el-radio-group>
-        </div>
-        <div class="evaluation-review-field">
-          <div class="evaluation-review-label">审核原因</div>
-          <el-input v-model="evaluationArtifactReviewForm.reason" type="textarea" :rows="3" placeholder="例如：该数值可由同报告内已标注来源的表格直接复核，属于误报。" />
-        </div>
-        <div class="evaluation-review-field">
-          <div class="evaluation-review-label">补充说明</div>
-          <el-input v-model="evaluationArtifactReviewForm.comment" type="textarea" :rows="2" placeholder="可选，补充人工判断依据。" />
-        </div>
-      </div>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="evaluationArtifactReviewDialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="submittingEvaluationArtifactReview" @click="submitEvaluationArtifactReview">保存审核</el-button>
-        </div>
-      </template>
-    </el-dialog>
-
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CircleCloseFilled, WarningFilled } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { useAuthStore } from '@/stores/auth'
 import { isTokenValid } from '@/utils/auth'
@@ -953,20 +653,11 @@ import embeddedNanobotApi, {
 } from '@/api/embeddedNanobot'
 import agentWorkshopApi, {
   type AgentEvaluationReport,
-  type AgentEvaluationEvidenceArtifact,
-  type AgentEvaluationEvidenceBundle,
-  type AgentEvaluationSummary,
-  type AgentEvaluationLayeredReview,
-  type AgentEvaluationManualReview,
-  type AgentProjectMemoryBindingSummary,
-  type AgentEvaluationWorkerResult,
   type AgentSpec,
-  type AgentSpecIOItem,
   type AgentVersion,
   type AgentWorkshopMessage,
   type AgentWorkshopSessionDetail,
   type AgentWorkshopVersionPrompt,
-  getAgentEvaluationEvidenceBundle,
 } from '@/api/agentWorkshop'
 
 type NanobotToolEventCard = {
@@ -977,26 +668,12 @@ type NanobotToolEventCard = {
   tone: 'info' | 'success' | 'warning'
 }
 
-type EvaluationArtifactView = {
-  type: string
-  title: string
-  path: string
-  detailLines: string[]
-  tagEntries: string[]
-  manualReview: AgentEvaluationManualReview | null
-  artifactType: string
-  findingId: string
-  workerName: string
-}
-
 type NanobotStudioPersistedState = {
   nanobotSessionKey?: string
   sessionId?: string
   specId?: string
   specName?: string
   versionId?: string
-  showNanobotThreadPanel?: boolean
-  selectedThreadScope?: string
 }
 
 marked.setOptions({ breaks: true, gfm: true })
@@ -1005,6 +682,12 @@ const AGENT_STUDIO_SESSION_PREFIX = 'embedded:agent-studio:'
 const NANOBOT_SKILLS = ['nanobot-agent-design']
 const AGENT_STUDIO_STATE_STORAGE_KEY = 'agent-studio:state'
 
+const exampleQuestions = [
+  '我要一个能识别财报风险信号的助手，重点关注商誉减值、应收账款异常和现金流恶化。',
+  '帮我创建一个多维度估值助手，要能对比行业估值、历史估值、DCF模型估值。',
+  '我需要一个新闻情绪助手，能抓取个股相关新闻并给出偏多/偏空/中性判断。',
+]
+
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
@@ -1012,6 +695,14 @@ let suppressNextRouteInit = false
 let pendingRouteSync = false
 
 const composerText = ref('')
+const agentSearchText = ref('')
+const selectedAgentStatusFilter = ref('all')
+const agentStatusFilterOptions = [
+  { label: '全部', value: 'all' },
+  { label: '草稿', value: 'draft' },
+  { label: '测试中', value: 'testing' },
+  { label: '已发布', value: 'published' },
+]
 const agentItems = ref<AgentSpec[]>([])
 const versionItemsBySpec = ref<Record<string, AgentVersion[]>>({})
 const loadingSpecVersions = ref<Record<string, boolean>>({})
@@ -1022,7 +713,6 @@ const standaloneSpec = ref<AgentSpec | null>(null)
 const currentNanobotSessionKey = ref('')
 const nanobotMessages = ref<AgentWorkshopMessage[]>([])
 const nanobotDraftLink = ref<{ specId: string; specName: string; sessionId?: string } | null>(null)
-const nanobotIterationBootstrapPending = ref(false)
 const nanobotStreaming = ref(false)
 const nanobotProgressHint = ref('')
 const nanobotToolEvents = ref<NanobotToolEventCard[]>([])
@@ -1038,62 +728,25 @@ const versionDetailSpec = ref<AgentSpec | null>(null)
 const versionDetailVersion = ref<AgentVersion | null>(null)
 const versionDetailPrompt = ref<AgentWorkshopVersionPrompt | null>(null)
 const versionDetailEvaluation = ref<AgentEvaluationReport | null>(null)
+const versionDetailActiveTab = ref('overview')
 const versionDetailPublishErrors = ref<string[]>([])
 const versionDetailPublishWarnings = ref<string[]>([])
 const editingVersionMetadata = ref(false)
 const savingVersionMetadata = ref(false)
 const versionMetadataEditForm = ref<Record<string, any>>({})
-const evaluationArtifactReviewDialogVisible = ref(false)
-const submittingEvaluationArtifactReview = ref(false)
-const evaluationArtifactReviewForm = ref({
-  evaluationId: '',
-  targetPath: '',
-  targetTitle: '',
-  artifactType: '',
-  findingId: '',
-  workerName: '',
-  approved: true,
-  reason: '',
-  comment: '',
-})
-const activeResultPanels = ref<string[]>(['draft'])
-const loadingSeconds = ref(0)
-const recentNanobotThreads = ref<EmbeddedNanobotThreadItem[]>([])
 const loadingNanobotThreads = ref(false)
-const showNanobotThreadPanel = ref(false)
-const showAgentSidebar = ref(true)
 const showStatusSidebar = ref(true)
+const recentNanobotThreads = ref<EmbeddedNanobotThreadItem[]>([])
 const selectedThreadScope = ref('active')
-const threadSearchText = ref('')
-const selectedThreadAgentFilter = ref('all')
-const selectedThreadTimeFilter = ref('all')
 
 const sending = ref(false)
-const refreshingDraft = ref(false)
-const buildingVersion = ref(false)
-const iteratingVersion = ref(false)
 const loadingSession = ref(false)
 
 let activeNanobotStreamController: AbortController | null = null
-let loadingTimer: number | null = null
-let persistThreadContextPromise: Promise<void> | null = null
-let queuedThreadContextSignature: string | null = null
-let lastPersistedThreadContextSignature = ''
-let initFromRoutePromise: Promise<void> | null = null
 const versionContextRequests = new Map<string, Promise<void>>()
 const latestVersionContextRequests = new Map<string, Promise<void>>()
 const sessionRequests = new Map<string, Promise<void>>()
 const threadMessageRequests = new Map<string, Promise<boolean>>()
-const THREAD_CONTEXT_PERSIST_DEBOUNCE_MS = 180
-
-const sleep = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
-
-const getThreadTimestamp = (thread?: EmbeddedNanobotThreadItem | null) => {
-  const raw = String(thread?.updated_at || thread?.created_at || '').trim()
-  if (!raw) return 0
-  const timestamp = Date.parse(raw)
-  return Number.isFinite(timestamp) ? timestamp : 0
-}
 
 const readPersistedStudioState = (): NanobotStudioPersistedState | null => {
   try {
@@ -1109,9 +762,22 @@ const readPersistedStudioState = (): NanobotStudioPersistedState | null => {
 const clearPersistedStudioState = () => {
   try {
     localStorage.removeItem(AGENT_STUDIO_STATE_STORAGE_KEY)
-  } catch {
-    // Ignore storage failures and keep the page usable.
-  }
+  } catch {}
+}
+
+const persistState = () => {
+  try {
+    localStorage.setItem(
+      AGENT_STUDIO_STATE_STORAGE_KEY,
+      JSON.stringify({
+        nanobotSessionKey: currentNanobotSessionKey.value,
+        sessionId: currentSession.value?.session_id,
+        specId: nanobotDraftLink.value?.specId || displaySpec.value?.spec_id,
+        specName: nanobotDraftLink.value?.specName || displaySpec.value?.name,
+        versionId: selectedVersionId.value || latestVersion.value?.version_id,
+      }),
+    )
+  } catch {}
 }
 
 const ensureNanobotContextAuth = async (): Promise<boolean> => {
@@ -1140,91 +806,14 @@ const renderMarkdown = (content: string) => {
 }
 
 const copyRuntimePayloadJson = async () => {
-  const text = versionDetailLatestRuntimePayloadText.value
-  if (!text) {
-    ElMessage.warning('当前没有可复制的结构化输出')
-    return
-  }
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('结构化输出 JSON 已复制')
-  } catch {
-    ElMessage.error('复制失败，请手动选择文本复制')
-  }
-}
-
-const openEvaluationArtifactReviewDialog = (artifact: any) => {
-  if (!versionDetailEvaluation.value?.evaluation_id || !artifact?.path) {
-    ElMessage.warning('当前证据项缺少可审核的路径信息')
-    return
-  }
-  evaluationArtifactReviewForm.value = {
-    evaluationId: versionDetailEvaluation.value.evaluation_id,
-    targetPath: String(artifact.path || '').trim(),
-    targetTitle: String(artifact.title || '').trim(),
-    artifactType: String(artifact.artifactType || artifact.type || '').trim(),
-    findingId: String(artifact.findingId || '').trim(),
-    workerName: String(artifact.workerName || '').trim(),
-    approved: artifact.manualReview ? Boolean(artifact.manualReview.approved) : true,
-    reason: artifact.manualReview?.reason || '',
-    comment: artifact.manualReview?.comment || '',
-  }
-  evaluationArtifactReviewDialogVisible.value = true
-}
-
-const submitEvaluationArtifactReview = async () => {
-  const form = evaluationArtifactReviewForm.value
-  if (!form.evaluationId || !form.targetPath) {
-    ElMessage.warning('缺少待审核的证据项信息')
-    return
-  }
-  if (!String(form.reason || '').trim()) {
-    ElMessage.warning('请填写审核原因')
-    return
-  }
-
-  submittingEvaluationArtifactReview.value = true
-  try {
-    const result = await agentWorkshopApi.reviewEvaluationArtifact(form.evaluationId, {
-      target_path: form.targetPath,
-      target_title: form.targetTitle,
-      artifact_type: form.artifactType,
-      finding_id: form.findingId,
-      worker_name: form.workerName,
-      approved: form.approved,
-      reason: form.reason,
-      comment: form.comment,
-    })
-    versionDetailEvaluation.value = result.evaluation
-    if (latestVersion.value?.version_id && latestVersion.value.version_id === result.version_id) {
-      latestEvaluation.value = result.evaluation
-    }
-    evaluationArtifactReviewDialogVisible.value = false
-    ElMessage.success(result.publish_ready ? '人工审核已保存，误报已生效，当前可以直接发布' : '人工审核已保存')
-  } catch (error: any) {
-    ElMessage.error(error?.message || '保存人工审核失败')
-  } finally {
-    submittingEvaluationArtifactReview.value = false
-  }
-}
-
-const getSpecIoText = (item: AgentSpecIOItem) => {
-  if (typeof item === 'string') return item
-  const name = String(item.name || '').trim()
-  const descriptionText = String(item.description || '').trim()
-  if (name && descriptionText && name !== descriptionText) {
-    return `${name}：${descriptionText}`
-  }
-  return name || descriptionText
+  ElMessage.warning('请直接查看当前版本详情获取内容')
 }
 
 const buildThreadContext = (): EmbeddedNanobotThreadContext => {
   const versionId = String(selectedVersionId.value || latestVersion.value?.version_id || '').trim() || undefined
   const workflowId = versionId ? `agent_workshop_debug_${versionId}` : undefined
   const debugTemplateId = String(
-    latestVersionPrompt.value?.template_id
-    || latestVersion.value?.prompt_template_ref?.template_id
-    || ''
+    latestVersionPrompt.value?.template_id || latestVersion.value?.prompt_template_ref?.template_id || ''
   ).trim() || undefined
   return {
     spec_id: String(displaySpec.value?.spec_id || '').trim() || undefined,
@@ -1262,12 +851,12 @@ const applyThreadContext = async (threadContext?: EmbeddedNanobotThreadContext |
     if (currentSpecId !== specId || !latestVersion.value) {
       try {
         standaloneSpec.value = await agentWorkshopApi.getSpec(specId)
-        currentSession.value = null
+        selectedVersionId.value = ''
         expandAgentBranch(specId)
         await ensureSpecVersionsLoaded(specId)
         await loadLatestVersionContext(specId)
       } catch {
-        // Ignore stale draft references when restoring old context.
+        // Ignore stale draft references
       }
     }
   }
@@ -1280,411 +869,28 @@ const applyThreadContext = async (threadContext?: EmbeddedNanobotThreadContext |
   }
 }
 
-const persistThreadContext = async () => {
-  const threadId = String(currentNanobotSessionKey.value || '').trim()
-  if (!threadId || nanobotStreaming.value) return
-  const signature = JSON.stringify({
-    threadId,
-    payload: {
-      session_key: currentNanobotSessionKey.value,
-      channel: 'agent_workshop' as const,
-      thread_context: buildThreadContext(),
-    },
+const getAgentStatusGroup = (item: AgentSpec) => {
+  const versions = versionItemsBySpec.value[item.spec_id] || []
+  if (versions.some(v => v.status === 'active')) return 'published'
+  if (versions.some(v => v.status === 'testing')) return 'testing'
+  return 'draft'
+}
+
+const filteredAgentItems = computed(() => {
+  const keyword = agentSearchText.value.trim().toLowerCase()
+  const status = selectedAgentStatusFilter.value
+  return agentItems.value.filter(item => {
+    const matchesKeyword = !keyword ||
+      String(item.name || '').toLowerCase().includes(keyword) ||
+      String(item.primary_goal || '').toLowerCase().includes(keyword) ||
+      String(item.spec_id || '').toLowerCase().includes(keyword)
+    const matchesStatus = status === 'all' || getAgentStatusGroup(item) === status
+    return matchesKeyword && matchesStatus
   })
-
-  if (signature === lastPersistedThreadContextSignature) {
-    return
-  }
-
-  if (persistThreadContextPromise) {
-    queuedThreadContextSignature = signature
-    return persistThreadContextPromise
-  }
-
-  try {
-    persistThreadContextPromise = (async () => {
-      await sleep(THREAD_CONTEXT_PERSIST_DEBOUNCE_MS)
-
-      const latestThreadId = String(currentNanobotSessionKey.value || '').trim()
-      if (!latestThreadId || nanobotStreaming.value) {
-        return
-      }
-
-      const latestPayload = {
-        session_key: currentNanobotSessionKey.value,
-        channel: 'agent_workshop' as const,
-        thread_context: buildThreadContext(),
-      }
-      const latestSignature = JSON.stringify({ threadId: latestThreadId, payload: latestPayload })
-
-      if (latestSignature === lastPersistedThreadContextSignature) {
-        return
-      }
-
-      const authReady = await ensureNanobotContextAuth()
-      if (!authReady) {
-        return
-      }
-
-      await embeddedNanobotApi.updateThreadContext(latestThreadId, latestPayload)
-      lastPersistedThreadContextSignature = latestSignature
-      await loadNanobotThreads()
-    })()
-    await persistThreadContextPromise
-  } catch {
-    // Keep UI usable even if context persistence is temporarily unavailable.
-  } finally {
-    persistThreadContextPromise = null
-    if (queuedThreadContextSignature && queuedThreadContextSignature !== lastPersistedThreadContextSignature) {
-      const nextSignature = queuedThreadContextSignature
-      queuedThreadContextSignature = null
-      await persistThreadContext()
-      if (nextSignature === lastPersistedThreadContextSignature) {
-        queuedThreadContextSignature = null
-      }
-    } else {
-      queuedThreadContextSignature = null
-    }
-  }
-}
-
-const mapDbMessagesToWorkshopMessages = (items: EmbeddedNanobotMessageItem[]): AgentWorkshopMessage[] => {
-  return items.map(item => ({
-    role: item.role === 'user' ? 'user' : 'assistant',
-    content: normalizeAssistantDisplayText(String(item.content || '')),
-    timestamp: String(item.created_at || ''),
-  }))
-}
-
-const resetVersionContext = () => {
-  latestVersion.value = null
-  latestVersionPrompt.value = null
-  latestEvaluation.value = null
-}
-
-const normalizeAssistantDisplayText = (value?: string | null) => {
-  const text = String(value || '')
-  if (!text) return ''
-  return text
-    .replace(/Nanobot Agent 工作台/g, 'Agent 工坊助手')
-    .replace(/Nanobot 会话/g, '助手会话')
-    .replace(/Embedded Nanobot/g, '工坊助手')
-    .replace(/\bNanobot\b/g, '工坊助手')
-}
-
-const clearStudioState = (preserveStorage = false) => {
-  if (activeNanobotStreamController) {
-    activeNanobotStreamController.abort()
-    activeNanobotStreamController = null
-  }
-  currentSession.value = null
-  standaloneSpec.value = null
-  currentNanobotSessionKey.value = ''
-  nanobotMessages.value = []
-  nanobotDraftLink.value = null
-  nanobotIterationBootstrapPending.value = false
-  nanobotStreaming.value = false
-  nanobotProgressHint.value = ''
-  nanobotToolEvents.value = []
-  composerText.value = ''
-  selectedVersionId.value = ''
-  resetVersionContext()
-  lastPersistedThreadContextSignature = ''
-  queuedThreadContextSignature = null
-  if (!preserveStorage) {
-    clearPersistedStudioState()
-  }
-}
-
-const persistState = () => {
-  try {
-    const payload: NanobotStudioPersistedState = {
-      nanobotSessionKey: String(currentNanobotSessionKey.value || '').trim() || undefined,
-      sessionId: String(currentSession.value?.session_id || nanobotDraftLink.value?.sessionId || '').trim() || undefined,
-      specId: String(displaySpec.value?.spec_id || nanobotDraftLink.value?.specId || '').trim() || undefined,
-      specName: String(displaySpec.value?.name || nanobotDraftLink.value?.specName || '').trim() || undefined,
-      versionId: String(selectedVersionId.value || latestVersion.value?.version_id || '').trim() || undefined,
-      showNanobotThreadPanel: showNanobotThreadPanel.value,
-      selectedThreadScope: selectedThreadScope.value,
-    }
-    localStorage.setItem(AGENT_STUDIO_STATE_STORAGE_KEY, JSON.stringify(payload))
-  } catch {
-    // Ignore storage failures and keep the page usable.
-  }
-}
-
-const restoreState = (sessionKey?: string) => {
-  const persisted = readPersistedStudioState()
-  if (!persisted) return false
-
-  showNanobotThreadPanel.value = Boolean(persisted.showNanobotThreadPanel)
-  if (persisted.selectedThreadScope === 'active' || persisted.selectedThreadScope === 'archived') {
-    selectedThreadScope.value = persisted.selectedThreadScope
-  }
-
-  const restoredSessionKey = String(sessionKey || persisted.nanobotSessionKey || '').trim()
-  if (restoredSessionKey) {
-    currentNanobotSessionKey.value = restoredSessionKey
-  }
-
-  const restoredSpecId = String(persisted.specId || '').trim()
-  const restoredSessionId = String(persisted.sessionId || '').trim()
-  const restoredSpecName = String(persisted.specName || '').trim()
-  if (restoredSpecId || restoredSessionId) {
-    nanobotDraftLink.value = {
-      specId: restoredSpecId,
-      specName: restoredSpecName || '当前 Draft',
-      sessionId: restoredSessionId || undefined,
-    }
-  }
-
-  const restoredVersionId = String(persisted.versionId || '').trim()
-  if (restoredVersionId) {
-    selectedVersionId.value = restoredVersionId
-  }
-
-  return Boolean(restoredSessionKey || restoredSessionId || restoredSpecId)
-}
-
-const loadNanobotThreads = async () => {
-  loadingNanobotThreads.value = true
-  try {
-    const result = await embeddedNanobotApi.listThreads(80, selectedThreadScope.value === 'archived')
-    recentNanobotThreads.value = result.items || []
-  } catch {
-    recentNanobotThreads.value = []
-  } finally {
-    loadingNanobotThreads.value = false
-  }
-}
-
-const formatThreadMeta = (thread: EmbeddedNanobotThreadItem) => {
-  const raw = String(thread.updated_at || thread.created_at || '').trim()
-  if (!raw) return '未知时间'
-  const date = new Date(raw)
-  if (Number.isNaN(date.getTime())) return raw
-  return date.toLocaleString('zh-CN', { hour12: false })
-}
-
-const doesThreadMatchWorkspace = (
-  thread?: EmbeddedNanobotThreadItem | null,
-  options?: {
-    sessionId?: string
-    specId?: string
-    versionId?: string
-  },
-) => {
-  if (!thread) return false
-
-  const sessionId = String(options?.sessionId || currentSession.value?.session_id || nanobotDraftLink.value?.sessionId || '').trim()
-  const specId = String(options?.specId || displaySpec.value?.spec_id || nanobotDraftLink.value?.specId || '').trim()
-  const versionId = String(options?.versionId || selectedVersionId.value || latestVersion.value?.version_id || '').trim()
-
-  const threadSessionId = String(thread.thread_context?.workshop_session_id || '').trim()
-  const threadSpecId = String(thread.thread_context?.spec_id || '').trim()
-  const threadVersionId = String(thread.thread_context?.version_id || '').trim()
-
-  if (sessionId && threadSessionId && threadSessionId !== sessionId) return false
-  if (specId && threadSpecId && threadSpecId !== specId) return false
-  if (versionId && threadVersionId && threadVersionId !== versionId) return false
-
-  if (sessionId && threadSessionId === sessionId) return true
-  if (versionId && threadVersionId === versionId) return true
-  if (specId && threadSpecId === specId) return true
-
-  return !sessionId && !specId && !versionId
-}
-
-const findBestMatchingNanobotThread = (options?: {
-  sessionId?: string
-  specId?: string
-  versionId?: string
-  sessionKey?: string
-}) => {
-  const sessionId = String(options?.sessionId || '').trim()
-  const specId = String(options?.specId || '').trim()
-  const versionId = String(options?.versionId || '').trim()
-  const sessionKey = String(options?.sessionKey || '').trim()
-  const hasWorkspaceIdentity = Boolean(sessionId || specId || versionId)
-
-  const ranked = recentNanobotThreads.value
-    .map(thread => {
-      const threadSessionId = String(thread.thread_context?.workshop_session_id || '').trim()
-      const threadSpecId = String(thread.thread_context?.spec_id || '').trim()
-      const threadVersionId = String(thread.thread_context?.version_id || '').trim()
-      const threadSessionKey = String(thread.session_key || thread.thread_id || '').trim()
-      let score = 0
-
-      if (hasWorkspaceIdentity && !doesThreadMatchWorkspace(thread, { sessionId, specId, versionId })) {
-        return null
-      }
-
-      if (!hasWorkspaceIdentity && sessionKey && threadSessionKey === sessionKey) score += 1000
-      if (sessionId && threadSessionId === sessionId) score += 400
-      if (specId && threadSpecId === specId) score += 120
-      if (versionId && threadVersionId === versionId) score += 80
-
-      if (!score) return null
-      return {
-        thread,
-        score,
-        timestamp: getThreadTimestamp(thread),
-      }
-    })
-    .filter((item): item is { thread: EmbeddedNanobotThreadItem; score: number; timestamp: number } => Boolean(item))
-    .sort((left, right) => right.score - left.score || right.timestamp - left.timestamp)
-
-  return ranked[0]?.thread || null
-}
-
-const alignNanobotThreadWithWorkspace = async (options?: {
-  silent?: boolean
-  forceReload?: boolean
-}) => {
-  const sessionId = String(currentSession.value?.session_id || nanobotDraftLink.value?.sessionId || '').trim()
-  const specId = String(displaySpec.value?.spec_id || nanobotDraftLink.value?.specId || '').trim()
-  const versionId = String(selectedVersionId.value || latestVersion.value?.version_id || '').trim()
-  const currentSessionKey = String(currentNanobotSessionKey.value || '').trim()
-
-  const matchedThread = findBestMatchingNanobotThread({
-    sessionId,
-    specId,
-    versionId,
-    sessionKey: currentSessionKey,
-  })
-
-  if (matchedThread) {
-    const matchedSessionKey = String(matchedThread.session_key || matchedThread.thread_id || '').trim()
-    if (options?.forceReload || matchedSessionKey !== currentSessionKey || !nanobotMessages.value.length) {
-      return await loadNanobotThreadMessages({ threadId: matchedThread.thread_id, silent: options?.silent })
-    }
-    return true
-  }
-
-  if (currentSessionKey || nanobotMessages.value.length) {
-    currentNanobotSessionKey.value = ''
-    nanobotMessages.value = []
-    nanobotToolEvents.value = []
-    nanobotProgressHint.value = ''
-    persistState()
-  }
-  return false
-}
-
-const loadNanobotThreadMessages = async (options?: {
-  threadId?: string
-  sessionKey?: string
-  silent?: boolean
-}) => {
-  const requestedThreadId = String(options?.threadId || options?.sessionKey || currentNanobotSessionKey.value || '').trim()
-  if (!requestedThreadId) return false
-
-  if (threadMessageRequests.has(requestedThreadId)) {
-    return threadMessageRequests.get(requestedThreadId) as Promise<boolean>
-  }
-
-  const request = (async () => {
-    let targetThread = recentNanobotThreads.value.find(item => item.thread_id === requestedThreadId || item.session_key === requestedThreadId) || null
-    if (!targetThread) {
-      await loadNanobotThreads()
-      targetThread = recentNanobotThreads.value.find(item => item.thread_id === requestedThreadId || item.session_key === requestedThreadId) || null
-    }
-    if (!targetThread) return false
-
-    try {
-      const result = await embeddedNanobotApi.getThreadMessages(targetThread.thread_id)
-      currentNanobotSessionKey.value = result.thread?.session_key || targetThread.session_key || targetThread.thread_id
-      nanobotMessages.value = mapDbMessagesToWorkshopMessages(result.messages || [])
-      await applyThreadContext(result.thread?.thread_context)
-      persistState()
-      return true
-    } catch (error: any) {
-      if (!options?.silent) {
-        ElMessage.error(error?.message || '加载数据库会话历史失败')
-      }
-      return false
-    }
-  })()
-
-  threadMessageRequests.set(requestedThreadId, request)
-  try {
-    return await request
-  } finally {
-    threadMessageRequests.delete(requestedThreadId)
-  }
-}
-
-const syncRoute = () => {
-  if (nanobotStreaming.value) {
-    pendingRouteSync = true
-    return
-  }
-
-  const nextQuery: Record<string, string> = {}
-  const sessionId = String(currentSession.value?.session_id || nanobotDraftLink.value?.sessionId || '').trim()
-  const specId = String(displaySpec.value?.spec_id || '').trim()
-  if (sessionId) nextQuery.sessionId = sessionId
-  else if (specId) nextQuery.specId = specId
-  if (currentNanobotSessionKey.value) nextQuery.nanobotSessionKey = currentNanobotSessionKey.value
-
-  if (
-    String(route.query.sessionId || '') === String(nextQuery.sessionId || '')
-    && String(route.query.specId || '') === String(nextQuery.specId || '')
-    && String(route.query.nanobotSessionKey || '') === String(nextQuery.nanobotSessionKey || '')
-  ) {
-    return
-  }
-
-  suppressNextRouteInit = true
-  pendingRouteSync = false
-  router.replace({ path: '/workflow/agent-studio', query: nextQuery })
-}
+})
 
 const displaySpec = computed(() => currentSession.value?.current_spec_snapshot || standaloneSpec.value || null)
-const activeNanobotThread = computed(() => {
-  const sessionKey = String(currentNanobotSessionKey.value || '').trim()
-  if (!sessionKey) return null
-  return recentNanobotThreads.value.find(item => item.session_key === sessionKey || item.thread_id === sessionKey) || null
-})
-const activeNanobotThreadMatchesWorkspace = computed(() => {
-  if (!nanobotMessages.value.length) return false
-  return doesThreadMatchWorkspace(activeNanobotThread.value)
-})
-const displayedMessages = computed(() => {
-  const workspaceSessionId = String(currentSession.value?.session_id || nanobotDraftLink.value?.sessionId || '').trim()
-  const workspaceSpecId = String(displaySpec.value?.spec_id || nanobotDraftLink.value?.specId || '').trim()
-  const workspaceVersionId = String(selectedVersionId.value || latestVersion.value?.version_id || '').trim()
-  const hasWorkspaceIdentity = Boolean(workspaceSessionId || workspaceSpecId || workspaceVersionId)
-
-  if (nanobotMessages.value.length && (!hasWorkspaceIdentity || activeNanobotThreadMatchesWorkspace.value)) {
-    return nanobotMessages.value
-  }
-  return currentSession.value?.messages || []
-})
-const activeNanobotThreadId = computed(() => {
-  const sessionKey = String(currentNanobotSessionKey.value || '').trim()
-  if (!sessionKey) return ''
-  const matched = recentNanobotThreads.value.find(item => item.session_key === sessionKey || item.thread_id === sessionKey)
-  return matched?.thread_id || sessionKey
-})
-const loadingHint = computed(() => {
-  if (nanobotProgressHint.value.trim()) {
-    return nanobotProgressHint.value.trim()
-  }
-  const latestEvent = nanobotToolEvents.value[nanobotToolEvents.value.length - 1]
-  if (latestEvent) {
-    return latestEvent.detail || latestEvent.title || '工坊助手正在整理方案'
-  }
-  return '工坊助手正在思考你的 Agent 方案'
-})
-const hasWorkspaceContext = computed(() => Boolean(displaySpec.value || displayedMessages.value.length || latestVersion.value || latestEvaluation.value))
-const currentWorkshopSessionId = computed(() => String(nanobotDraftLink.value?.sessionId || currentSession.value?.session_id || '').trim())
-const activeAgentId = computed(() => String(displaySpec.value?.spec_id || '').trim())
-const activeTreeKey = computed(() => selectedVersionId.value ? `version:${selectedVersionId.value}` : (activeAgentId.value ? `spec:${activeAgentId.value}` : ''))
-const displaySpecOutputTags = computed(() => (displaySpec.value?.outputs || []).map(item => getSpecIoText(item)).filter(Boolean))
-const pendingQuestions = computed(() => (currentSession.value?.pending_questions || []).filter(Boolean))
-const completenessPercent = computed(() => Math.round((currentSession.value?.completeness_score || 0) * 100))
-type WorkspacePhase = 'requirement-intake' | 'confirmation' | 'generation' | 'testing' | 'evaluation' | 'publish-ready' | 'published' | 'blocked'
+type WorkspacePhase = 'requirement-intake' | 'confirmation' | 'generation' | 'governance' | 'testing' | 'evaluation' | 'publish-ready' | 'published' | 'blocked'
 
 const generationReady = computed(() => Boolean(
   currentWorkshopSessionId.value
@@ -1709,6 +915,12 @@ const workspacePhase = computed<WorkspacePhase>(() => {
   }
   if (versionStatus === 'testing') {
     return 'testing'
+  }
+  if (versionStatus === 'draft') {
+    return 'governance'
+  }
+  if (currentSession.value?.gap_report || currentSession.value?.tooling_plan) {
+    return 'governance'
   }
   if (latestVersion.value || generationReady.value) {
     return 'generation'
@@ -1759,6 +971,19 @@ const workspacePhaseMeta = computed(() => {
           ? ['请直接在中间对话区告诉助手：开始真数据测试。']
           : ['请直接在中间对话区告诉助手：补建测试版本。'],
       }
+    case 'governance':
+      return {
+        label: '资产治理中',
+        tagType: 'warning' as const,
+        subtitle: latestVersion.value
+          ? `Draft 版本已存在（${latestVersion.value.version_id?.slice(-8) || ''}），可进行缺口分析、工具规划或构建测试版本。`
+          : '需求已确认，Draft 已写入。接下来进行缺口分析、工具规划或版本构建。',
+        publishHint: '当前还在治理阶段，版本尚未进入测试。',
+        nextAction: '在对话中协作完成缺口分析和版本构建，准备进入真数据测试。',
+        actionGuideItems: [
+          '可在对话中要求分析缺口、生成工具规划，或直接让助手构建测试版本。',
+        ],
+      }
     case 'testing':
       return {
         label: '真数据测试中',
@@ -1772,10 +997,17 @@ const workspacePhaseMeta = computed(() => {
       return {
         label: '待修正',
         tagType: 'warning' as const,
-        subtitle: `最近一次真数据测试结论：${evaluationDecisionText.value}。请根据结果决定是否继续修改或重新测试。`,
+        subtitle: `最近一次真数据测试结论：${evaluationDecisionText.value}。`,
         publishHint: '当前已有真数据测试结论，但尚未满足正式发布条件。',
-        nextAction: '根据最新评估问题继续修改，必要时重新发起测试。',
-        actionGuideItems: ['在中间对话区继续和小助手讨论修改方案；版本类操作请使用页面按钮。'],
+        nextAction: latestEvaluation.value?.decision === 'pass'
+          ? '评估已通过，可进入待确认发布状态。'
+          : '评估未通过，需要在对话中讨论修改方案，回到治理阶段重新迭代。',
+        actionGuideItems: latestEvaluation.value?.decision === 'pass'
+          ? ['评估已通过，请使用发布按钮确认发布。']
+          : [
+            '在中间对话区和小助手讨论修改方案。',
+            '修改完成后，需要重新构建版本并运行真数据测试。',
+          ],
       }
     case 'publish-ready':
       return {
@@ -1793,7 +1025,7 @@ const workspacePhaseMeta = computed(() => {
         subtitle: '当前版本已经正式发布。后续如需修改，请基于下一轮迭代继续讨论。',
         publishHint: '当前版本已经是正式版本。',
         nextAction: '如果要继续优化，请开启下一轮迭代。',
-        actionGuideItems: ['如需继续优化，请使用页面中的下一轮/迭代入口，不再通过输入框触发。'],
+        actionGuideItems: ['如需继续优化，请使用页面中的下一轮/迭代入口，不再通过输入框自动触发。'],
       }
     case 'requirement-intake':
     default:
@@ -1809,59 +1041,321 @@ const workspacePhaseMeta = computed(() => {
       }
   }
 })
-const workspacePhaseLabel = computed(() => workspacePhaseMeta.value.label)
 const draftStatusText = computed(() => workspacePhaseMeta.value.label)
 const focusSubtitle = computed(() => workspacePhaseMeta.value.subtitle)
-const versionOutputFields = computed(() => Object.keys(latestVersion.value?.output_schema?.properties || {}))
-const promptSections = computed(() => {
-  const content = latestVersionPrompt.value?.content
-  if (!content) return []
-  return [
-    { key: 'system_prompt', label: 'System Prompt', value: String(content.system_prompt || '').trim() },
-    { key: 'user_prompt', label: 'User Prompt', value: String(content.user_prompt || '').trim() },
-    { key: 'output_format', label: '输出格式', value: String(content.output_format || '').trim() },
-  ].filter(item => item.value)
+const draftStatusTagType = computed(() => workspacePhaseMeta.value.tagType)
+const callableAgents = computed(() => {
+  return agentItems.value
+    .filter(item => {
+      const versions = versionItemsBySpec.value[item.spec_id] || []
+      return versions.some(v => v.status === 'active')
+    })
+    .slice(0, 8)
 })
+const governanceReferences = computed(() => {
+  const refs: { label: string; text: string; tone: string }[] = []
+  const lr = getEvaluationLayeredReview(latestEvaluation.value)
+  if (lr) {
+    const blockers = getBlockers(latestEvaluation.value)
+    const warnings = getWarnings(latestEvaluation.value)
+    for (const b of blockers.slice(0, 2)) {
+      refs.push({ label: '需修复', text: b.slice(0, 80), tone: 'danger' })
+    }
+    for (const w of warnings.slice(0, 2)) {
+      refs.push({ label: '建议', text: w.slice(0, 80), tone: 'warning' })
+    }
+  }
+  if (workspacePhase.value === 'governance' && !refs.length) {
+    refs.push({ label: '当前阶段', text: '请完成缺口分析和版本构建后再进入测试。', tone: 'info' })
+  }
+  return refs
+})
+const activeAgentId = computed(() => String(displaySpec.value?.spec_id || '').trim())
+const activeTreeKey = computed(() => selectedVersionId.value ? `version:${selectedVersionId.value}` : (activeAgentId.value ? `spec:${activeAgentId.value}` : ''))
+const latestVersionRuntimeContract = computed(() => latestVersion.value?.evaluation_policy?.runtime_contract || {})
+const getLatestVersionMetadataValue = (key: string) => latestVersion.value?.agent_metadata?.[key] ?? latestVersionRuntimeContract.value?.[key]
+const rightPanelOutputField = computed(() => String(getLatestVersionMetadataValue('output_field') || 'analysis').trim() || 'analysis')
+const rightPanelWorkflowStage = computed(() => String(getLatestVersionMetadataValue('workflow_stage') || 'research').trim() || 'research')
+const rightPanelWorkflowStageText = computed(() => {
+  const stage = rightPanelWorkflowStage.value
+  const labels: Record<string, string> = {
+    analyst: '分析师部分',
+    research: '研究分析部分',
+    risk: '风险管理部分',
+    manager: '组合决策部分',
+    trader: '交易执行部分',
+  }
+  return labels[stage] || stage
+})
+const rightPanelReportLabel = computed(() => String(getLatestVersionMetadataValue('report_label') || latestVersion.value?.agent_metadata?.name || displaySpec.value?.name || '-').trim() || '-')
+const rightPanelReportVisibilityText = computed(() => getLatestVersionMetadataValue('show_in_reports') === false ? '不展示在最终报告中' : '将展示在最终报告中')
+const rightPanelExecutionOrder = computed(() => String(getLatestVersionMetadataValue('execution_order') ?? '-'))
+const rightPanelPromptContract = computed(() => latestVersion.value?.evaluation_policy?.prompt_contract || {})
+const rightPanelPromptAgentType = computed(() => String(rightPanelPromptContract.value?.agent_type || 'universal').trim() || 'universal')
+const rightPanelPromptStatus = computed(() => String(latestVersionPrompt.value?.status || latestVersion.value?.prompt_template_ref?.status || '-').trim() || '-')
+const rightPanelStatusTitle = computed(() => {
+  if (workspacePhase.value === 'publish-ready') return '测试通过，可以发布'
+  if (workspacePhase.value === 'published') return '已正式发布'
+  if (workspacePhase.value === 'testing') return '测试中'
+  if (workspacePhase.value === 'evaluation') return '等待修订或确认'
+  if (workspacePhase.value === 'generation') return latestVersion.value ? '已生成版本，等待测试' : '需求已齐备，等待生成版本'
+  return '开始创建 Agent'
+})
+const rightPanelStatusDescription = computed(() => {
+  if (workspacePhase.value === 'publish-ready') return '当前版本已完成真数据测试，发布后将进入工作流报告。'
+  if (workspacePhase.value === 'published') return '当前版本已经是工作流可用的正式版本。'
+  if (latestVersion.value) return workspacePhaseMeta.value.subtitle
+  return '描述你的目标后，助手会帮你设计职责、选择工具、生成测试版本。'
+})
+const rightPanelScoreTitle = computed(() => workspacePhase.value === 'publish-ready' ? '建议发布' : evaluationDecisionText.value)
+const rightPanelScoreDescription = computed(() => latestEvaluation.value ? '内容质量、工具调用和输出格式会在这里汇总。' : '生成版本并完成评估后显示评分。')
+const canPublishLatestVersion = computed(() => Boolean(latestVersion.value && latestEvaluation.value?.decision === 'pass' && latestVersion.value.status !== 'active'))
+
+const latestVersionSpecFallback = computed<AgentSpec>(() => displaySpec.value || {
+  spec_id: latestVersion.value?.spec_id || '',
+  name: latestVersion.value?.agent_metadata?.name || latestVersion.value?.version_id || 'Agent',
+  primary_goal: latestVersion.value?.agent_metadata?.description || '',
+  status: 'draft',
+} as AgentSpec)
+
+const hasWorkspaceContext = computed(() => Boolean(displaySpec.value || displayedMessages.value.length))
+const currentWorkshopSessionId = computed(() => String(nanobotDraftLink.value?.sessionId || currentSession.value?.session_id || '').trim())
+const displayedMessages = computed(() => {
+  if (nanobotMessages.value.length) {
+    return nanobotMessages.value
+  }
+  return currentSession.value?.messages || []
+})
+
+const loadingHint = computed(() => {
+  if (nanobotProgressHint.value.trim()) {
+    return nanobotProgressHint.value.trim()
+  }
+  const latestEvent = nanobotToolEvents.value[nanobotToolEvents.value.length - 1]
+  if (latestEvent) {
+    return latestEvent.detail || latestEvent.title || '工坊助手正在整理方案'
+  }
+  return '工坊助手正在思考你的 Agent 方案'
+})
+
+const hasPassedLatestEvaluation = computed(() => latestEvaluation.value?.decision === 'pass')
+const evaluationDecisionText = computed(() => latestEvaluation.value?.decision === 'pass' ? '通过' : '未评估')
+const overallScoreText = computed(() => String(latestEvaluation.value?.scores?.overall ?? '-'))
+
+const workflowStageItems = computed(() => {
+  const hasVersion = Boolean(latestVersion.value)
+  return [
+    {
+      key: 'requirement',
+      title: '需求澄清',
+      description: hasWorkspaceContext.value ? '已确认需求，正在整理 Draft' : '请先描述你的目标',
+      state: hasWorkspaceContext.value ? 'done' : 'current',
+    },
+    {
+      key: 'generated',
+      title: '生成版本',
+      description: hasVersion
+        ? `已创建测试版本 v${latestVersion.value?.version}`
+        : '需求已齐备，等待补建版本',
+      state: hasVersion ? 'done' : 'current',
+    },
+    {
+      key: 'verified',
+      title: '真数据测试',
+      description: workspacePhase.value === 'publish-ready' || workspacePhase.value === 'published'
+        ? '最新一次真数据测试已通过'
+        : latestEvaluation.value
+          ? `最近评估结论：${evaluationDecisionText.value}`
+          : '尚未开始真数据测试',
+      state: workspacePhase.value === 'publish-ready' || workspacePhase.value === 'published'
+        ? 'done'
+        : latestEvaluation.value || workspacePhase.value === 'testing' || workspacePhase.value === 'evaluation'
+          ? 'current'
+          : hasVersion ? 'current' : 'pending',
+    },
+    {
+      key: 'published',
+      title: '确认发布',
+      description: latestVersion.value?.status === 'active'
+        ? '当前版本已经是正式版本'
+        : '只有真数据测试评估通过后的 testing 版本才能正式发布',
+      state: workspacePhase.value === 'published'
+        ? 'done'
+        : workspacePhase.value === 'publish-ready'
+          ? 'current'
+          : 'pending',
+    },
+  ]
+})
+
+const getSpecStatusLabel = (item: AgentSpec) => {
+  const versions = versionItemsBySpec.value[item.spec_id] || []
+  if (versions.some(v => v.status === 'active')) return '已发布'
+  if (versions.some(v => v.status === 'testing')) return '测试中'
+  return '草稿'
+}
+
+const getSpecTagType = (item: AgentSpec) => {
+  const label = getSpecStatusLabel(item)
+  if (label === '已发布') return 'primary'
+  if (label === '测试中') return 'warning'
+  return 'info'
+}
+
+const getSpecMetaText = (item: AgentSpec) => {
+  const versions = versionItemsBySpec.value[item.spec_id] || []
+  if (!versions.length) return '暂无版本'
+  const latestVersionItem = versions.sort((a, b) => b.version - a.version)[0]
+  if (latestVersionItem.last_evaluation_summary) {
+    const score = typeof latestVersionItem.last_evaluation_summary.overall_score === 'number'
+      ? `评分 ${latestVersionItem.last_evaluation_summary.overall_score}`
+      : ''
+    const decision = getEvaluationDecisionLabel(latestVersionItem.last_evaluation_summary.decision)
+    return [score, decision].filter(Boolean).join('，')
+  }
+  return '等待评估'
+}
+
+const getVersionStatusLabel = (version: AgentVersion) => {
+  if (version.status === 'active') return '已发布'
+  if (version.status === 'testing') return '测试中'
+  return '草稿'
+}
+
+const getEvaluationDecisionLabel = (decision?: string) => {
+  if (decision === 'pass') return '通过'
+  if (decision === 'reject') return '拒绝'
+  if (decision === 'revise') return '需要修订'
+  return decision || '未评估'
+}
+
+const getEvaluationDecisionTagType = (decision?: string) => {
+  const label = getEvaluationDecisionLabel(decision)
+  if (label === '通过') return 'success'
+  if (label === '拒绝') return 'danger'
+  if (label === '需要修订') return 'warning'
+  return 'info'
+}
+
+const getProjectMemorySummaryTagType = (status?: string) => {
+  if (status === 'reviewed') return 'success'
+  if (status === 'needs-review') return 'warning'
+  return 'info'
+}
+
+const getProjectMemorySummaryStatusText = (status?: string) => {
+  if (status === 'reviewed') return '已审核'
+  if (status === 'needs-review') return '待审核'
+  return '未审核'
+}
+
+const getEvaluationSummary = (evaluation?: AgentEvaluationReport | null) => evaluation?.evaluation_summary || null
+
+const buildLayerCards = (evaluation?: AgentEvaluationReport | null) => {
+  const lr = evaluation?.details?.layered_review
+  if (!lr) return []
+  const entries: Array<[string, any]> = []
+  if (lr.content_quality) entries.push(['content_quality', lr.content_quality])
+  if (lr.publish_readiness) entries.push(['publish_readiness', lr.publish_readiness])
+  return entries.map(([key, layer]: [string, any]) => ({
+    key,
+    label: key === 'content_quality' ? '内容质量' : '发布就绪',
+    decision: layer.decision,
+    decisionLabel: getEvaluationDecisionLabel(layer.decision),
+    tagType: getEvaluationDecisionTagType(layer.decision),
+    scoreText: typeof layer.score === 'number' ? String(layer.score) : '-',
+  }))
+}
+
+const versionDetailLayerCards = computed(() => buildLayerCards(versionDetailEvaluation.value))
+
+const getEvaluationLayeredReview = (evaluation?: AgentEvaluationReport | null) => evaluation?.details?.layered_review || null
+const getBlockers = (evaluation?: AgentEvaluationReport | null): string[] => {
+  const lr = getEvaluationLayeredReview(evaluation)
+  const raw = lr?.blockers
+  return Array.isArray(raw) ? raw.filter((b): b is string => typeof b === 'string') : []
+}
+const getWarnings = (evaluation?: AgentEvaluationReport | null): string[] => {
+  const lr = getEvaluationLayeredReview(evaluation)
+  const raw = lr?.warnings
+  return Array.isArray(raw) ? raw.filter((w): w is string => typeof w === 'string') : []
+}
+const versionDetailBlockers = computed(() => getBlockers(versionDetailEvaluation.value))
+const versionDetailWarnings = computed(() => getWarnings(versionDetailEvaluation.value))
+
+const versionDetailOutputFieldText = computed(() => {
+  if (!versionDetailVersion.value) return '-'
+  return String(versionDetailVersion.value.agent_metadata?.output_field ?? '-').trim() || '-'
+})
+const versionDetailWorkflowStageText = computed(() => {
+  if (!versionDetailVersion.value) return '-'
+  return String(versionDetailVersion.value.agent_metadata?.workflow_stage ?? '-').trim() || '-'
+})
+const versionDetailReportLabelText = computed(() => {
+  if (!versionDetailVersion.value) return '-'
+  return String(versionDetailVersion.value.agent_metadata?.report_label ?? '-').trim() || '-'
+})
+const versionDetailShowInReportsText = computed(() => {
+  if (!versionDetailVersion.value) return '-'
+  return versionDetailVersion.value.agent_metadata?.show_in_reports === false ? '不展示' : '展示'
+})
+const versionDetailExecutionOrderText = computed(() => {
+  if (!versionDetailVersion.value) return '-'
+  const val = versionDetailVersion.value.agent_metadata?.execution_order
+  return val == null ? '-' : String(val)
+})
+const versionDetailNodeNameText = computed(() => {
+  if (!versionDetailVersion.value) return '-'
+  return String(versionDetailVersion.value.agent_metadata?.node_name ?? '-').trim() || '-'
+})
+
+const versionDetailPromptContract = computed(() => versionDetailVersion.value?.evaluation_policy?.prompt_contract || {})
+const versionDetailPromptAgentTypeText = computed(() => String(versionDetailPromptContract.value?.agent_type ?? 'universal').trim() || 'universal')
+const versionDetailPromptAgentNameText = computed(() => String(versionDetailPromptContract.value?.agent_name ?? versionDetailVersion.value?.version_id ?? '-').trim() || '-')
+
+const versionDetailPromptProjectMemorySummary = computed(() => versionDetailVersion.value?.prompt_template_project_memory_binding_summary || null)
+const versionDetailEvaluationSummaryForDisplay = computed(() => getEvaluationSummary(versionDetailEvaluation.value) || versionDetailVersion.value?.last_evaluation_summary || null)
+const versionDetailEvaluationProjectMemorySummary = computed(() => versionDetailEvaluationSummaryForDisplay.value?.project_memory_binding || null)
+
 const versionDetailPromptSections = computed(() => {
   const content = versionDetailPrompt.value?.content
   if (!content) return []
   return [
     { key: 'system_prompt', label: 'System Prompt', value: String(content.system_prompt || '').trim() },
     { key: 'user_prompt', label: 'User Prompt', value: String(content.user_prompt || '').trim() },
-    { key: 'tool_guidance', label: '工具使用约束', value: String(content.tool_guidance || '').trim() },
-    { key: 'analysis_requirements', label: '分析要求', value: String(content.analysis_requirements || '').trim() },
     { key: 'output_format', label: '输出格式', value: String(content.output_format || '').trim() },
-    { key: 'constraints', label: '额外约束', value: String(content.constraints || '').trim() },
   ].filter(item => item.value)
 })
-const versionDetailOutputFieldText = computed(() => {
-  if (!versionDetailVersion.value) return '-'
-  const outputFields = Object.keys(versionDetailVersion.value.output_schema?.properties || {})
-  if (outputFields.length) return outputFields.join(' / ')
-  return String(versionDetailVersion.value.agent_metadata?.output_field || '-').trim() || '-'
+const versionDetailLatestRuntimeReportText = computed(() => {
+  return ''
 })
-const getVersionDetailMetadataValue = (key: string) => versionDetailVersion.value?.agent_metadata?.[key] ?? versionDetailVersion.value?.evaluation_policy?.runtime_contract?.[key]
-const versionDetailWorkflowStageText = computed(() => String(getVersionDetailMetadataValue('workflow_stage') || '-').trim() || '-')
-const versionDetailReportLabelText = computed(() => String(getVersionDetailMetadataValue('report_label') || '-').trim() || '-')
-const versionDetailShowInReportsText = computed(() => {
-  const value = getVersionDetailMetadataValue('show_in_reports')
-  if (value === false || value === 'false') return '不展示'
-  if (value === true || value === 'true') return '展示'
-  return '-'
+const versionDetailLatestRuntimePayloadText = computed(() => '')
+const versionDetailLatestRuntimeMeta = computed(() => [])
+
+const versionDetailScoreText = computed(() => {
+  const score = versionDetailEvaluation.value?.scores?.overall ?? versionDetailVersion.value?.last_evaluation_summary?.overall_score
+  return String(score ?? '-')
 })
-const versionDetailExecutionOrderText = computed(() => {
-  const value = getVersionDetailMetadataValue('execution_order')
-  return value === undefined || value === null || value === '' ? '-' : String(value)
+const versionDetailOverviewTitle = computed(() => {
+  if (versionDetailVersion.value?.status === 'active') return '已正式发布'
+  if (versionDetailEvaluation.value?.decision === 'pass') return '测试通过，建议发布'
+  if (versionDetailEvaluation.value) return getEvaluationDecisionLabel(versionDetailEvaluation.value.decision)
+  return '等待真数据测试'
 })
-const versionDetailNodeNameText = computed(() => String(getVersionDetailMetadataValue('node_name') || '-').trim() || '-')
-const versionDetailPromptContract = computed(() => versionDetailVersion.value?.evaluation_policy?.prompt_contract || {})
-const versionDetailPromptAgentTypeText = computed(() => String(versionDetailPromptContract.value?.agent_type || 'universal').trim() || 'universal')
-const versionDetailPromptAgentNameText = computed(() => String(versionDetailPromptContract.value?.agent_name || versionDetailVersion.value?.version_id || '-').trim() || '-')
+const versionDetailOverviewDescription = computed(() => {
+  if (versionDetailVersion.value?.status === 'active') return '当前版本已经接入工作流，可在分析报告中使用。'
+  if (versionDetailEvaluation.value?.decision === 'pass') return `发布后将在最终分析报告中展示为 ${versionDetailReportLabelText.value}`
+  if (versionDetailEvaluation.value) return '请根据评估结果继续修订后再发布。'
+  return '生成版本并完成真数据测试后，才能进入发布确认。'
+})
+const canReEvaluateVersionDetail = computed(() => !!versionDetailVersion.value)
+const canPublishVersionDetail = computed(() => !!versionDetailVersion.value && versionDetailEvaluation.value?.decision === 'pass' && versionDetailVersion.value.status !== 'active')
+
 const startEditingVersionMetadata = () => {
   const meta = versionDetailVersion.value?.agent_metadata || {}
   versionMetadataEditForm.value = {
     output_field: String(meta.output_field || 'analysis').trim() || 'analysis',
-    workflow_stage: String(meta.workflow_stage || 'analyst').trim() || 'analyst',
+    workflow_stage: String(meta.workflow_stage || 'research').trim() || 'research',
     report_label: String(meta.report_label || '').trim(),
     show_in_reports: meta.show_in_reports !== false,
     execution_order: Number(meta.execution_order ?? 50),
@@ -1869,10 +1363,12 @@ const startEditingVersionMetadata = () => {
   }
   editingVersionMetadata.value = true
 }
+
 const cancelEditingVersionMetadata = () => {
   editingVersionMetadata.value = false
   versionMetadataEditForm.value = {}
 }
+
 const saveVersionMetadata = async () => {
   const versionId = String(versionDetailVersion.value?.version_id || '').trim()
   if (!versionId) return
@@ -1881,6 +1377,9 @@ const saveVersionMetadata = async () => {
     const result = await agentWorkshopApi.updateVersionMetadata(versionId, versionMetadataEditForm.value)
     if (versionDetailVersion.value) {
       versionDetailVersion.value.agent_metadata = result.agent_metadata
+    }
+    if (latestVersion.value?.version_id === versionId) {
+      latestVersion.value.agent_metadata = result.agent_metadata
     }
     editingVersionMetadata.value = false
     versionMetadataEditForm.value = {}
@@ -1891,844 +1390,13 @@ const saveVersionMetadata = async () => {
     savingVersionMetadata.value = false
   }
 }
-const clearVersionDetailPublishValidation = () => {
-  versionDetailPublishErrors.value = []
-  versionDetailPublishWarnings.value = []
-}
-const iterationReminderMessage = computed(() => {
-  const messages = currentSession.value?.messages || []
-  const matched = [...messages].reverse().find(item => item.role === 'assistant' && String(item.content || '').includes('上一轮评估摘要'))
-  return matched?.content || ''
-})
-const iterationImprovementItems = computed(() => pendingQuestions.value.slice(0, 4))
-const hasIterationContext = computed(() => Boolean(iterationReminderMessage.value || iterationImprovementItems.value.length))
-const getEvaluationEvidenceBundle = (evaluation?: AgentEvaluationReport | null): AgentEvaluationEvidenceBundle | null => {
-  return getAgentEvaluationEvidenceBundle(evaluation)
-}
-const getEvaluationLayeredReview = (evaluation?: AgentEvaluationReport | null): AgentEvaluationLayeredReview | null => {
-  const layeredReview = evaluation?.details?.layered_review
-  if (layeredReview && typeof layeredReview === 'object') {
-    return layeredReview as AgentEvaluationLayeredReview
-  }
-  return null
-}
-const getConfirmedIssues = (evaluation?: AgentEvaluationReport | null) => {
-  const bundle = getEvaluationEvidenceBundle(evaluation)
-  const officialIssues = Array.isArray(bundle?.official_issues) ? bundle.official_issues.filter(Boolean) : []
-  if (officialIssues.length) return officialIssues
-  return Array.isArray(evaluation?.issues) ? evaluation.issues.filter(Boolean) : []
-}
-const getBlockerIssues = (evaluation?: AgentEvaluationReport | null) => {
-  const layeredReview = getEvaluationLayeredReview(evaluation)
-  const blockers = Array.isArray(layeredReview?.blockers) ? layeredReview.blockers.filter(Boolean) : []
-  if (blockers.length) return blockers
-  const detailBlockers = evaluation?.details?.blocker_issues
-  if (Array.isArray(detailBlockers) && detailBlockers.length) return detailBlockers.filter(Boolean)
-  return getConfirmedIssues(evaluation)
-}
-const getWarningIssues = (evaluation?: AgentEvaluationReport | null) => {
-  const layeredReview = getEvaluationLayeredReview(evaluation)
-  const warnings = Array.isArray(layeredReview?.warnings) ? layeredReview.warnings.filter(Boolean) : []
-  if (warnings.length) return warnings
-  const detailWarnings = evaluation?.details?.warning_issues
-  return Array.isArray(detailWarnings) ? detailWarnings.filter(Boolean) : []
-}
-const getLayerDecisionLabel = (decision?: string) => {
-  if (decision === 'pass') return '通过'
-  if (decision === 'pass_with_warnings') return '通过但有提示'
-  if (decision === 'revise') return '需修订'
-  if (decision === 'reject') return '拒绝'
-  return decision || '未评估'
-}
-const getLayerDecisionTagType = (decision?: string): 'success' | 'warning' | 'danger' | 'info' => {
-  if (decision === 'pass') return 'success'
-  if (decision === 'pass_with_warnings' || decision === 'revise') return 'warning'
-  if (decision === 'reject') return 'danger'
-  return 'info'
-}
-const buildLayerCards = (evaluation?: AgentEvaluationReport | null) => {
-  const layeredReview = getEvaluationLayeredReview(evaluation)
-  if (!layeredReview) return []
-  const layers = [
-    {
-      key: 'content_quality',
-      label: '内容质量',
-      layer: layeredReview.content_quality,
-    },
-    {
-      key: 'publish_readiness',
-      label: '发布就绪',
-      layer: layeredReview.publish_readiness,
-    },
-  ]
-  return layers
-    .filter(item => item.layer)
-    .map(item => ({
-      key: item.key,
-      label: item.label,
-      decisionLabel: getLayerDecisionLabel(item.layer?.decision),
-      tagType: getLayerDecisionTagType(item.layer?.decision),
-      scoreText: typeof item.layer?.score === 'number' ? item.layer.score.toFixed(2) : '-',
-      summaryItems: [
-        ...(Array.isArray(item.layer?.blockers) ? item.layer?.blockers.slice(0, 2).map(entry => `阻断：${entry}`) : []),
-        ...(Array.isArray(item.layer?.warnings) ? item.layer?.warnings.slice(0, 2).map(entry => `提示：${entry}`) : []),
-      ],
-    }))
-}
-const getInsufficientEvidenceTitles = (evaluation?: AgentEvaluationReport | null) => {
-  const bundle = getEvaluationEvidenceBundle(evaluation)
-  if (!Array.isArray(bundle?.insufficient_evidence)) return []
-  return bundle.insufficient_evidence.map(item => item.title || '未命名项').filter(Boolean)
-}
-const getWorkerStatusText = (status?: string) => {
-  if (status === 'confirmed') return '已证实'
-  if (status === 'disproved') return '已排除'
-  if (status === 'insufficient_evidence') return '证据不足'
-  return status || '未知'
-}
-const getWorkerSourceText = (source?: string) => {
-  if (source === 'nanobot') return '工坊助手'
-  if (source === 'nanobot-fallback') return '工坊助手回退'
-  if (source === 'rules') return '规则'
-  return source || '未知来源'
-}
-const truncateArtifactContent = (value?: string, limit = 160) => {
-  const text = String(value || '').trim()
-  if (!text) return ''
-  return text.length > limit ? `${text.slice(0, limit)}...` : text
-}
-const getArtifactTypeLabel = (type?: string) => {
-  const normalized = String(type || '').trim()
-  if (normalized === 'tool_trace') return '工具轨迹'
-  if (normalized === 'tool_trace_gap') return '工具轨迹缺口'
-  if (normalized === 'output_payload') return '输出载荷'
-  if (normalized === 'rule_breakdown') return '规则评估明细'
-  if (normalized === 'traceability_gap') return '可追溯性缺口'
-  if (normalized === 'execution_plan_review') return '执行计划验收'
-  if (normalized === 'prompt_gap') return 'Prompt 证据缺口'
-  return normalized || '其他证据'
-}
-const normalizeArtifactMetadataEntries = (metadata?: Record<string, any>) => {
-  if (!metadata || typeof metadata !== 'object') return []
-  return Object.entries(metadata)
-    .filter(([key]) => key !== 'manual_review')
-    .flatMap(([key, value]) => {
-      if (Array.isArray(value)) {
-        return value.slice(0, 3).map(entry => `${key}: ${typeof entry === 'string' ? entry : JSON.stringify(entry)}`)
-      }
-      return [`${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`]
-    })
-    .filter(Boolean)
-    .slice(0, 4)
-}
-const getArtifactManualReview = (metadata?: Record<string, any>): AgentEvaluationManualReview | null => {
-  const review = metadata?.manual_review
-  return review && typeof review === 'object' ? review as AgentEvaluationManualReview : null
-}
-const getManualReviewStatusLabel = (review?: AgentEvaluationManualReview | null) => {
-  if (!review) return ''
-  return review.approved ? '已标记误报' : '保留问题项'
-}
-const getManualReviewTagType = (review?: AgentEvaluationManualReview | null): 'success' | 'danger' | 'info' => {
-  if (!review) return 'info'
-  return review.approved ? 'success' : 'danger'
-}
-const buildArtifactView = (
-  item?: AgentEvaluationEvidenceArtifact | null,
-  context?: { findingId?: string; workerName?: string },
-): EvaluationArtifactView => {
-  const type = String(item?.artifact_type || 'evidence_artifact').trim() || 'evidence_artifact'
-  const title = String(item?.title || item?.artifact_type || '未命名证据').trim() || '未命名证据'
-  const path = String(item?.path || '').trim()
-  const content = truncateArtifactContent(String(item?.content || ''))
-  const metadata = item?.metadata && typeof item.metadata === 'object' ? item.metadata as Record<string, any> : {}
-  const metadataEntries = normalizeArtifactMetadataEntries(metadata)
-  const manualReview = getArtifactManualReview(metadata)
-  const detailLines: string[] = []
-
-  if (type === 'tool_trace') {
-    const toolName = String(metadata.tool_name || '').trim()
-    const success = typeof metadata.success === 'boolean' ? (metadata.success ? 'success=true' : 'success=false') : ''
-    if (toolName || success) detailLines.push([toolName, success].filter(Boolean).join(' / '))
-  } else if (type === 'traceability_gap') {
-    if (metadata.value) detailLines.push(`数值：${metadata.value}`)
-    if (metadata.source_type) detailLines.push(`来源类型：${metadata.source_type}`)
-    if (metadata.line_number) {
-      detailLines.push(`报告位置：第 ${metadata.line_number} 行${metadata.column_number ? `，第 ${metadata.column_number} 列` : ''}`)
-    }
-    if (metadata.line_excerpt) {
-      detailLines.push(`行内容：${metadata.line_excerpt}`)
-    }
-  } else if (type === 'execution_plan_review' && typeof metadata.issues_count !== 'undefined') {
-    detailLines.push(`问题数：${metadata.issues_count}`)
-  }
-
-  if (path) detailLines.push(`路径：${path}`)
-  if (content) detailLines.push(content)
-
-  return {
-    type,
-    title,
-    path,
-    detailLines: detailLines.filter(Boolean),
-    tagEntries: metadataEntries.filter(Boolean),
-    manualReview,
-    artifactType: type,
-    findingId: String(context?.findingId || '').trim(),
-    workerName: String(context?.workerName || '').trim(),
-  }
-}
-const normalizeWorkerArtifacts = (artifacts?: AgentEvaluationEvidenceArtifact[] | null, context?: { findingId?: string; workerName?: string }) => {
-  if (!Array.isArray(artifacts)) return []
-  return artifacts
-    .map(item => buildArtifactView(item, context))
-    .filter(item => item.title || item.detailLines.length || item.tagEntries.length)
-}
-const getWorkerResultCards = (evaluation?: AgentEvaluationReport | null) => {
-  const bundle = getEvaluationEvidenceBundle(evaluation)
-  if (!Array.isArray(bundle?.worker_results)) return []
-  return bundle.worker_results.map((item: AgentEvaluationWorkerResult) => ({
-    key: `${item.task_id}-${item.worker_name}`,
-    workerName: item.worker_name || '未命名 worker',
-    statusText: getWorkerStatusText(item.status),
-    sourceText: getWorkerSourceText(item.source),
-    summary: String(item.summary || '').trim(),
-    artifactGroups: Object.values(normalizeWorkerArtifacts(item.artifacts, { findingId: item.finding_id, workerName: item.worker_name }).reduce((groups, artifact) => {
-      const key = artifact.type
-      if (!groups[key]) {
-        groups[key] = {
-          key,
-          label: getArtifactTypeLabel(key),
-          items: [],
-        }
-      }
-      groups[key].items.push(artifact)
-      return groups
-    }, {} as Record<string, { key: string; label: string; items: EvaluationArtifactView[] }>)).map(group => ({
-      ...group,
-      items: group.items.slice(0, 2),
-    })),
-  }))
-}
-const getInvalidReasons = (evaluation?: AgentEvaluationReport | null) => {
-  const bundle = getEvaluationEvidenceBundle(evaluation)
-  return Array.isArray(bundle?.invalid_reasons) ? bundle.invalid_reasons.filter(Boolean) : []
-}
-const isEvaluationEvidenceIncomplete = (evaluation?: AgentEvaluationReport | null) => {
-  const bundle = getEvaluationEvidenceBundle(evaluation)
-  const status = String(bundle?.evaluation_status || evaluation?.details?.evaluation_status || '').trim()
-  return status === 'evidence_incomplete'
-}
-const getEvaluationRuntimeResult = (evaluation?: AgentEvaluationReport | null) => {
-  const runtimeResult = evaluation?.details?.runtime_result
-  if (runtimeResult && typeof runtimeResult === 'object') {
-    return runtimeResult as Record<string, any>
-  }
-  return null
-}
-const getVersionRuntimeResult = (version?: AgentVersion | null) => {
-  const runtimeResult = version?.runtime_result
-  if (runtimeResult && typeof runtimeResult === 'object') {
-    return runtimeResult as Record<string, any>
-  }
-
-  const debugResult = version?.debug_result
-  if (debugResult && typeof debugResult === 'object') {
-    const rawResult = debugResult.raw_result && typeof debugResult.raw_result === 'object'
-      ? debugResult.raw_result as Record<string, any>
-      : {}
-    const debugPrompt = debugResult.debug_prompt && typeof debugResult.debug_prompt === 'object'
-      ? debugResult.debug_prompt as Record<string, any>
-      : {}
-    return {
-      output_text: String(debugResult.report || '').trim(),
-      output_payload: rawResult,
-      debug_prompt: debugPrompt,
-      tool_trace: debugPrompt.tool_trace || rawResult.tool_trace || [],
-      symbol: debugResult.symbol,
-      analysis_date: debugResult.analysis_date,
-      user_goal: debugResult.metadata?.user_goal,
-    }
-  }
-
-  return null
-}
-const stringifyRuntimePayload = (payload: unknown) => {
-  if (payload == null) return ''
-  if (typeof payload === 'string') return payload.trim()
-  try {
-    return JSON.stringify(payload, null, 2)
-  } catch {
-    return String(payload)
-  }
-}
-const deriveRuntimeReportText = (evaluation?: AgentEvaluationReport | null, version?: AgentVersion | null) => {
-  const runtimeResult = getEvaluationRuntimeResult(evaluation) || getVersionRuntimeResult(version)
-  const outputText = String(runtimeResult?.output_text || '').trim()
-  if (outputText) return outputText
-
-  const outputPayload = runtimeResult?.output_payload
-  if (outputPayload && typeof outputPayload === 'object') {
-    const preferredText = [
-      outputPayload.llm_final_response,
-      outputPayload.analysis_report,
-      outputPayload.report,
-    ].find(item => typeof item === 'string' && String(item).trim())
-    if (typeof preferredText === 'string') {
-      return preferredText.trim()
-    }
-    const firstStringValue = Object.values(outputPayload).find(item => typeof item === 'string' && String(item).trim())
-    if (typeof firstStringValue === 'string') {
-      return firstStringValue.trim()
-    }
-  }
-
-  if (evaluation) {
-    return String(evaluation.details?.parsed_output_excerpt || '').trim()
-  }
-
-  return ''
-}
-const deriveRuntimePayloadText = (evaluation?: AgentEvaluationReport | null, version?: AgentVersion | null) => {
-  const runtimeResult = getEvaluationRuntimeResult(evaluation) || getVersionRuntimeResult(version)
-  return stringifyRuntimePayload(runtimeResult?.output_payload).trim()
-}
-const deriveRuntimeMeta = (evaluation?: AgentEvaluationReport | null, version?: AgentVersion | null) => {
-  const runtimeResult = getEvaluationRuntimeResult(evaluation) || getVersionRuntimeResult(version)
-  return [
-    runtimeResult?.symbol ? `标的：${String(runtimeResult.symbol).trim()}` : '',
-    runtimeResult?.analysis_date ? `分析日期：${String(runtimeResult.analysis_date).trim()}` : '',
-    runtimeResult?.user_goal ? `测试目标：${String(runtimeResult.user_goal).trim()}` : '',
-  ].filter(Boolean)
-}
-const evaluationDecisionText = computed(() => {
-  if (latestEvaluation.value?.decision === 'pass') return '通过'
-  if (latestEvaluation.value?.decision === 'reject') return '拒绝'
-  if (latestEvaluation.value?.decision === 'revise') return '需要修改'
-  return latestEvaluation.value?.decision || '未评估'
-})
-const overallScoreText = computed(() => String(latestEvaluation.value?.scores?.overall ?? '-'))
-const latestEvaluationConfirmedIssues = computed(() => getConfirmedIssues(latestEvaluation.value))
-const latestEvaluationBlockers = computed(() => getBlockerIssues(latestEvaluation.value))
-const latestEvaluationWarnings = computed(() => getWarningIssues(latestEvaluation.value))
-const latestEvaluationLayerCards = computed(() => buildLayerCards(latestEvaluation.value))
-const latestEvaluationInsufficientTitles = computed(() => getInsufficientEvidenceTitles(latestEvaluation.value))
-const latestEvaluationWorkerCards = computed(() => getWorkerResultCards(latestEvaluation.value))
-const latestEvaluationInvalidReasons = computed(() => getInvalidReasons(latestEvaluation.value))
-const latestEvaluationEvidenceIncomplete = computed(() => isEvaluationEvidenceIncomplete(latestEvaluation.value))
-const versionDetailConfirmedIssues = computed(() => getConfirmedIssues(versionDetailEvaluation.value))
-const versionDetailBlockers = computed(() => getBlockerIssues(versionDetailEvaluation.value))
-const versionDetailWarnings = computed(() => getWarningIssues(versionDetailEvaluation.value))
-const versionDetailLayerCards = computed(() => buildLayerCards(versionDetailEvaluation.value))
-const versionDetailInsufficientTitles = computed(() => getInsufficientEvidenceTitles(versionDetailEvaluation.value))
-const versionDetailWorkerCards = computed(() => getWorkerResultCards(versionDetailEvaluation.value))
-const versionDetailInvalidReasons = computed(() => getInvalidReasons(versionDetailEvaluation.value))
-const versionDetailEvidenceIncomplete = computed(() => isEvaluationEvidenceIncomplete(versionDetailEvaluation.value))
-const versionDetailLatestRuntimeReportText = computed(() => deriveRuntimeReportText(versionDetailEvaluation.value, versionDetailVersion.value))
-const versionDetailLatestRuntimePayloadText = computed(() => deriveRuntimePayloadText(versionDetailEvaluation.value, versionDetailVersion.value))
-const versionDetailLatestRuntimeMeta = computed(() => deriveRuntimeMeta(versionDetailEvaluation.value, versionDetailVersion.value))
-const canReEvaluateVersionDetail = computed(() => {
-  if (!versionDetailVersion.value) return false
-  return !versionDetailLoading.value && !reEvaluatingVersionDetail.value && !publishingVersionDetail.value
-})
-const versionDetailReEvaluateButtonText = computed(() => reEvaluatingVersionDetail.value ? '基于当前证据重新评估中...' : '基于当前证据重新评估')
-const canPublishVersionDetail = computed(() => {
-  if (!versionDetailVersion.value) return false
-  if (publishingVersionDetail.value || versionDetailLoading.value || reEvaluatingVersionDetail.value) return false
-  if (versionDetailVersion.value.status === 'active') return false
-  return versionDetailEvaluation.value?.decision === 'pass'
-})
-const versionDetailPublishButtonText = computed(() => {
-  if (publishingVersionDetail.value) return '发布中...'
-  if (versionDetailVersion.value?.status === 'active') return '已正式发布'
-  if (versionDetailEvaluation.value?.decision === 'pass') return '手动确认发布'
-  return '等待评估通过'
-})
-const versionPromptProjectMemorySummary = computed(() => latestVersion.value?.prompt_template_project_memory_binding_summary || null)
-const latestEvaluationSummaryForDisplay = computed(() => getEvaluationSummary(latestEvaluation.value) || latestVersion.value?.last_evaluation_summary || null)
-const latestEvaluationProjectMemorySummary = computed(() => getProjectMemoryBindingSummary(latestEvaluation.value) || latestEvaluationSummaryForDisplay.value?.project_memory_binding || null)
-const versionDetailPromptProjectMemorySummary = computed(() => versionDetailVersion.value?.prompt_template_project_memory_binding_summary || null)
-const versionDetailEvaluationSummaryForDisplay = computed(() => getEvaluationSummary(versionDetailEvaluation.value) || versionDetailVersion.value?.last_evaluation_summary || null)
-const versionDetailEvaluationProjectMemorySummary = computed(() => getProjectMemoryBindingSummary(versionDetailEvaluation.value) || versionDetailEvaluationSummaryForDisplay.value?.project_memory_binding || null)
-const hasPassedLatestEvaluation = computed(() => latestEvaluation.value?.decision === 'pass')
-const draftStatusTagType = computed(() => workspacePhaseMeta.value.tagType)
-const publishStatusHint = computed(() => workspacePhaseMeta.value.publishHint)
-const workflowStageItems = computed(() => {
-  const phase = workspacePhase.value
-  const hasVersion = Boolean(latestVersion.value)
-  const versionStatus = latestVersion.value?.status
-  return [
-    {
-      key: 'generated',
-      title: '1. 测试版本',
-      description: hasVersion
-        ? `已创建测试版本 v${latestVersion.value?.version}。`
-        : generationReady.value
-          ? '需求已齐备，等待补建测试版本。'
-          : '尚无测试版本。',
-      state: hasVersion
-        ? 'done'
-        : phase === 'generation'
-          ? 'current'
-          : phase === 'testing' || phase === 'evaluation' || phase === 'publish-ready' || phase === 'published'
-            ? 'done'
-            : 'pending',
-    },
-    {
-      key: 'verified',
-      title: '2. 真数据测试',
-      description: phase === 'publish-ready' || phase === 'published'
-        ? '最新一次真数据测试已通过。'
-        : latestEvaluation.value
-          ? `最近评估结论：${evaluationDecisionText.value}。`
-          : versionStatus === 'testing'
-            ? '已进入 testing，可直接发起真数据测试。'
-            : '尚未开始真数据测试。',
-      state: phase === 'publish-ready' || phase === 'published'
-        ? 'done'
-        : phase === 'testing' || phase === 'evaluation'
-          ? 'current'
-          : hasVersion
-            ? 'current'
-            : 'pending',
-    },
-    {
-      key: 'published',
-      title: '3. 正式发布',
-      description: versionStatus === 'active' ? '当前版本已经是 active。' : '只有真数据测试评估通过后的 testing 版本才能正式发布。',
-      state: phase === 'published'
-        ? 'done'
-        : phase === 'publish-ready'
-          ? 'current'
-          : 'pending',
-    },
-  ]
-})
-const nextRequiredAction = computed(() => workspacePhaseMeta.value.nextAction)
-const phaseActionGuideItems = computed(() => workspacePhaseMeta.value.actionGuideItems)
-const realStateGuardText = computed(() => {
-  const specStatus = displaySpec.value?.status || 'draft'
-  const versionStatus = latestVersion.value?.status || 'none'
-  const evaluationStatus = latestEvaluation.value ? evaluationDecisionText.value : '未评估'
-  return [
-    `真实状态：spec=${specStatus}；version=${versionStatus}；evaluation=${evaluationStatus}。`,
-    '状态约束：进入 testing 只代表已进入真数据测试阶段，不代表已经通过；只有最新一次真数据测试评估为 pass 的 testing 版本，才能声称“可正式发布”。',
-    '如果当前仍是 draft，只能说“待补建测试版本”；如果当前是 testing 但评估未通过，只能说“测试中/待修正”，不能说“已通过”。',
-    '测试验收约束：默认直接用真实股票做真数据测试；测试通过就是通过，测试不通过就是失败或待修正，不能把临时脚本、MongoDB 直查、stdout/file 探测当作正式结论。',
-    '失败处理约束：如果真数据测试失败，只能把它表述为 Agent Workshop 测试链路问题、运行时问题或系统默认模型配置问题；不要把失败改写成“去直接调用已注册 Agent”或“改走蓝图复用路径”。',
-  ].join('\n')
-})
-const composerPlaceholder = computed(() => {
-  if (!hasWorkspaceContext.value) {
-    return '直接描述你想创建的 Agent，例如：做一个能跟踪财报变化并总结风险提示的助手。'
-  }
-  return '继续补充你的要求，或告诉 Nanobot 哪些地方需要修改。'
-})
-const sendButtonText = computed(() => hasWorkspaceContext.value ? '发送' : '开始创建')
-const nanobotThreadAgentOptions = computed(() => {
-  const seen = new Map<string, string>()
-  for (const item of recentNanobotThreads.value) {
-    const specId = String(item.thread_context?.spec_id || '').trim()
-    const specName = String(item.thread_context?.spec_name || '').trim()
-    if (!specId || seen.has(specId)) continue
-    seen.set(specId, specName || specId)
-  }
-  return Array.from(seen.entries()).map(([value, label]) => ({ value, label }))
-})
-const filteredNanobotThreads = computed(() => {
-  const keyword = String(threadSearchText.value || '').trim().toLowerCase()
-  const now = Date.now()
-  const windowMap: Record<string, number> = {
-    '24h': 24 * 60 * 60 * 1000,
-    '7d': 7 * 24 * 60 * 60 * 1000,
-    '30d': 30 * 24 * 60 * 60 * 1000,
-  }
-  return recentNanobotThreads.value.filter(item => {
-    if (selectedThreadAgentFilter.value !== 'all') {
-      if (String(item.thread_context?.spec_id || '').trim() !== selectedThreadAgentFilter.value) {
-        return false
-      }
-    }
-
-    if (selectedThreadTimeFilter.value !== 'all') {
-      const timestamp = Date.parse(String(item.updated_at || item.created_at || ''))
-      const range = windowMap[selectedThreadTimeFilter.value]
-      if (!Number.isFinite(timestamp) || !range || now - timestamp > range) {
-        return false
-      }
-    }
-
-    if (!keyword) return true
-    const haystack = [
-      item.title,
-      item.last_user_message,
-      item.summary,
-      item.thread_context?.spec_name,
-    ].join(' ').toLowerCase()
-    return haystack.includes(keyword)
-  })
-})
-
-type ContextChoiceOption = {
-  order: number
-  label: string
-  text: string
-}
-
-type ContextualReplyIntent = {
-  selectionIndex: number
-  selectedOption: string
-  optionsText: string
-}
-
-const CHINESE_NUMERAL_INDEX_MAP: Record<string, number> = {
-  一: 1,
-  二: 2,
-  三: 3,
-  四: 4,
-  五: 5,
-  六: 6,
-  七: 7,
-  八: 8,
-  九: 9,
-  十: 10,
-}
-
-const getLatestAssistantMessageContent = () => {
-  const matched = [...displayedMessages.value].reverse().find(item => item.role === 'assistant' && String(item.content || '').trim())
-  return String(matched?.content || '').trim()
-}
-
-const normalizeContextLines = (content: string) => {
-  return String(content || '')
-    .split(/\r?\n/)
-    .map(line => line.trim())
-    .filter(Boolean)
-}
-
-const isChoiceCueLine = (line: string) => /(你想要|你是指|请选择|请确认.*意图|下一步操作|可选操作|请告诉我下一步|请确认你的选择)/.test(line)
-
-const isChoiceTerminatorLine = (line: string) => /^(请告诉我|请确认|告诉我|请回复|回复我|说明你的选择|请说明下一步)/.test(line)
-
-const stripChoicePrefix = (line: string) => {
-  return line
-    .replace(/^[-*•]+\s*/, '')
-    .replace(/^([A-Za-z]|\d+|第[一二三四五六七八九十]+(?:项|个)?|[一二三四五六七八九十])[\)\.、：:．]\s*/, '')
-    .trim()
-}
-
-const extractContextChoiceOptions = (content: string): ContextChoiceOption[] => {
-  const lines = normalizeContextLines(content)
-  if (!lines.length) return []
-
-  let startIndex = -1
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    if (isChoiceCueLine(lines[index])) {
-      startIndex = index + 1
-      break
-    }
-  }
-
-  const candidateLines = (startIndex >= 0 ? lines.slice(startIndex) : lines.slice(-6))
-  const options: ContextChoiceOption[] = []
-
-  for (const line of candidateLines) {
-    if (isChoiceTerminatorLine(line)) break
-    if (/^(当前状态|Spec ID|Session ID|Version|项目\s*状态|状态说明|📊|✅|⚠️|❌)/.test(line)) continue
-
-    const explicitLabelMatch = line.match(/^([A-Za-z]|\d+|第[一二三四五六七八九十]+(?:项|个)?|[一二三四五六七八九十])[\)\.、：:．]\s*(.+)$/)
-    if (explicitLabelMatch) {
-      options.push({
-        order: options.length + 1,
-        label: explicitLabelMatch[1],
-        text: explicitLabelMatch[2].trim(),
-      })
-      continue
-    }
-
-    if (line.includes(' - ') || line.includes('：') || line.includes(':')) {
-      options.push({
-        order: options.length + 1,
-        label: String(options.length + 1),
-        text: stripChoicePrefix(line),
-      })
-      continue
-    }
-
-    if (candidateLines.length <= 5 && line.length <= 48) {
-      options.push({
-        order: options.length + 1,
-        label: String(options.length + 1),
-        text: stripChoicePrefix(line),
-      })
-    }
-  }
-
-  return options.filter(item => item.text)
-}
-
-const resolveSelectionIndex = (message: string) => {
-  const normalized = String(message || '')
-    .trim()
-    .replace(/[\s\u3000'"“”‘’。！？!?,，；;：:]/g, '')
-    .toLowerCase()
-
-  if (!normalized || normalized.length > 12) return null
-  if (/^\d+$/.test(normalized)) {
-    const value = Number(normalized)
-    return Number.isFinite(value) && value > 0 ? value : null
-  }
-  if (/^[a-z]$/.test(normalized)) {
-    return normalized.charCodeAt(0) - 96
-  }
-
-  const ordinalMatch = normalized.match(/^第([一二三四五六七八九十]+)(项|个)?$/)
-  if (ordinalMatch) {
-    return CHINESE_NUMERAL_INDEX_MAP[ordinalMatch[1]] || null
-  }
-
-  if (CHINESE_NUMERAL_INDEX_MAP[normalized]) {
-    return CHINESE_NUMERAL_INDEX_MAP[normalized]
-  }
-
-  return null
-}
-
-const resolveContextualReplyIntent = (message: string): ContextualReplyIntent | null => {
-  const selectionIndex = resolveSelectionIndex(message)
-  if (!selectionIndex) return null
-
-  const latestAssistantMessage = getLatestAssistantMessageContent()
-  if (!latestAssistantMessage) return null
-
-  const options = extractContextChoiceOptions(latestAssistantMessage)
-  if (options.length < selectionIndex) return null
-
-  const selectedOption = options[selectionIndex - 1]
-  return {
-    selectionIndex,
-    selectedOption: selectedOption.text,
-    optionsText: options.map(item => `${item.order}. ${item.text}`).join('\n'),
-  }
-}
-
-const getSpecStatusLabel = (spec?: AgentSpec | null) => {
-  const status = String(spec?.status || '').trim()
-  const specId = String(spec?.spec_id || '').trim()
-
-  if (status === 'archived') return '已归档'
-  if (status === 'active') return '已发布'
-  if (specId && specId === activeAgentId.value) {
-    return workspacePhaseMeta.value.label
-  }
-  if (spec?.current_version_id) return '待测试'
-  return '需求中'
-}
-
-const getSpecTagType = (spec?: AgentSpec | null) => {
-  const status = String(spec?.status || '').trim()
-  const specId = String(spec?.spec_id || '').trim()
-
-  if (status === 'archived') return 'info'
-  if (status === 'active') return 'success'
-  if (specId && specId === activeAgentId.value) {
-    return workspacePhaseMeta.value.tagType
-  }
-  if (spec?.current_version_id) return 'success'
-  return 'primary'
-}
-
-const getSpecMetaText = (spec?: AgentSpec | null) => {
-  const status = String(spec?.status || '').trim()
-  const specId = String(spec?.spec_id || '').trim()
-
-  if (status === 'archived') return '当前已归档'
-  if (status === 'active') return '当前已有正式版本'
-  if (spec?.current_version_id) return '当前已有测试版本'
-  if (specId && specId === activeAgentId.value) {
-    if (workspacePhase.value === 'confirmation') return '仍有待确认点'
-    if (workspacePhase.value === 'blocked') return '当前不可继续'
-    if (workspacePhase.value === 'generation') return '等待补建测试版本'
-  }
-  return '暂无测试版本'
-}
-
-const getVersionStatusLabel = (version?: AgentVersion | null) => {
-  const status = String(version?.status || '').trim()
-  const versionId = String(version?.version_id || '').trim()
-
-  if (status === 'active') return '已发布'
-  if (status === 'archived') return '已归档'
-  if (status === 'testing') {
-    if (versionId && versionId === latestVersion.value?.version_id && hasPassedLatestEvaluation.value) {
-      return '待确认发布'
-    }
-    return '真数据测试中'
-  }
-  if (status === 'draft') return '草稿'
-  return status || '草稿'
-}
-
-const getVersionTagType = (version?: AgentVersion | null) => {
-  const status = String(version?.status || '').trim()
-  const versionId = String(version?.version_id || '').trim()
-
-  if (status === 'active') return 'success'
-  if (status === 'archived') return 'info'
-  if (status === 'testing') {
-    if (versionId && versionId === latestVersion.value?.version_id && hasPassedLatestEvaluation.value) {
-      return 'success'
-    }
-    return 'warning'
-  }
-  return 'primary'
-}
-
-const formatDisplayTime = (value?: string | null) => {
-  const raw = String(value || '').trim()
-  if (!raw) return ''
-  const date = new Date(raw)
-  if (Number.isNaN(date.getTime())) return raw
-  return date.toLocaleString('zh-CN', { hour12: false })
-}
-
-const getProjectMemorySummaryTagType = (status?: string): 'success' | 'warning' | 'danger' | 'info' => {
-  if (status === 'pass') return 'success'
-  if (status === 'evidence_incomplete') return 'warning'
-  if (status === 'failed') return 'danger'
-  return 'info'
-}
-
-const getProjectMemorySummaryStatusText = (status?: string) => {
-  if (status === 'pass') return '已绑定'
-  if (status === 'failed') return '缺失'
-  if (status === 'evidence_incomplete') return '证据不足'
-  if (status === 'not_enabled') return '未启用'
-  return status || '未知'
-}
-
-const getEvaluationDecisionTagType = (decision?: string): 'success' | 'warning' | 'danger' | 'info' => {
-  if (decision === 'pass') return 'success'
-  if (decision === 'reject') return 'danger'
-  if (decision === 'revise') return 'warning'
-  return 'info'
-}
-
-const getEvaluationSummary = (evaluation?: AgentEvaluationReport | null): AgentEvaluationSummary | null => {
-  const explicitSummary = evaluation?.evaluation_summary
-  if (explicitSummary && typeof explicitSummary === 'object') {
-    return explicitSummary
-  }
-  const nestedSummary = evaluation?.details?.evaluation_summary
-  if (nestedSummary && typeof nestedSummary === 'object') {
-    return nestedSummary as AgentEvaluationSummary
-  }
-  return null
-}
-
-const getProjectMemoryBindingSummary = (evaluation?: AgentEvaluationReport | null): AgentProjectMemoryBindingSummary | null => {
-  const explicitSummary = evaluation?.project_memory_binding_summary
-  if (explicitSummary && typeof explicitSummary === 'object') {
-    return explicitSummary
-  }
-  const nestedSummary = evaluation?.details?.project_memory_binding_summary
-  if (nestedSummary && typeof nestedSummary === 'object') {
-    return nestedSummary as AgentProjectMemoryBindingSummary
-  }
-  const evaluationSummary = getEvaluationSummary(evaluation)
-  return evaluationSummary?.project_memory_binding || null
-}
-
-const getVersionProjectMemorySummary = (version?: AgentVersion | null): AgentProjectMemoryBindingSummary | null => {
-  if (!version) return null
-  return version.last_evaluation_summary?.project_memory_binding || version.prompt_template_project_memory_binding_summary || null
-}
-
-const getEvaluationDecisionLabel = (decision?: string) => {
-  if (decision === 'pass') return '通过'
-  if (decision === 'reject') return '拒绝'
-  if (decision === 'revise') return '需修订'
-  return decision || '未评估'
-}
-
-const fillExample = (type: 'valuation' | 'industry' | 'watcher') => {
-  if (type === 'valuation') {
-    composerText.value = '我要做一个股票估值分析师，负责根据行情、财务数据和行业背景给出估值区间，解释关键假设，说明失效条件，但不要直接给交易建议。'
-    return
-  }
-  if (type === 'industry') {
-    composerText.value = '我想做一个行业比较研究员，负责横向比较行业格局、盈利质量、估值水平和景气位置，输出结构化对比结论。'
-    return
-  }
-  composerText.value = '我想做一个财报跟踪助手，负责跟踪重点公司的季报变化、提炼异常指标、总结风险提示，但不做独立投资建议。'
-}
-
-const isAgentBranchExpanded = (specId: string) => expandedSpecIds.value.includes(specId)
-
-const expandAgentBranch = (specId?: string) => {
-  const normalized = String(specId || '').trim()
-  if (!normalized || expandedSpecIds.value.includes(normalized)) return
-  expandedSpecIds.value = [...expandedSpecIds.value, normalized]
-}
-
-const ensureSpecVersionsLoaded = async (specId?: string, force = false) => {
-  const normalized = String(specId || '').trim()
-  if (!normalized) return
-  if (!force && versionItemsBySpec.value[normalized]) return
-  loadingSpecVersions.value = { ...loadingSpecVersions.value, [normalized]: true }
-  try {
-    const result = await agentWorkshopApi.listVersions({ spec_id: normalized, page: 1, page_size: 100 })
-    versionItemsBySpec.value = {
-      ...versionItemsBySpec.value,
-      [normalized]: [...(result.items || [])].sort((left, right) => right.version - left.version),
-    }
-  } catch {
-    versionItemsBySpec.value = { ...versionItemsBySpec.value, [normalized]: [] }
-  } finally {
-    loadingSpecVersions.value = { ...loadingSpecVersions.value, [normalized]: false }
-  }
-}
-
-const toggleAgentBranch = async (specId: string) => {
-  if (isAgentBranchExpanded(specId)) {
-    expandedSpecIds.value = expandedSpecIds.value.filter(item => item !== specId)
-    return
-  }
-  expandAgentBranch(specId)
-  await ensureSpecVersionsLoaded(specId)
-}
-
-const scrollMessagesToBottom = (behavior: ScrollBehavior = 'smooth') => {
-  nextTick(() => {
-    const container = messagesContainer.value
-    if (!container) return
-    container.scrollTo({ top: container.scrollHeight, behavior })
-  })
-}
-
-const startLoadingTimer = () => {
-  if (loadingTimer !== null) {
-    window.clearInterval(loadingTimer)
-  }
-  loadingSeconds.value = 0
-  loadingTimer = window.setInterval(() => {
-    loadingSeconds.value += 1
-  }, 1000)
-}
-
-const stopLoadingTimer = () => {
-  if (loadingTimer !== null) {
-    window.clearInterval(loadingTimer)
-    loadingTimer = null
-  }
-}
 
 const loadAgentItems = async () => {
   try {
     const result = await agentWorkshopApi.listSpecs({ page: 1, page_size: 100 })
-    agentItems.value = [...(result.items || [])].sort((left, right) => {
-      const leftTime = Date.parse(left.updated_at || left.created_at || '') || 0
-      const rightTime = Date.parse(right.updated_at || right.created_at || '') || 0
+    agentItems.value = [...(result.items || [])].sort((a, b) => {
+      const leftTime = Date.parse(a.updated_at || a.created_at || '') || 0
+      const rightTime = Date.parse(b.updated_at || b.created_at || '') || 0
       return rightTime - leftTime
     })
   } catch {
@@ -2736,18 +1404,30 @@ const loadAgentItems = async () => {
   }
 }
 
-const reconcileDeletedWorkspaceState = () => {
-  const currentSpecId = String(displaySpec.value?.spec_id || nanobotDraftLink.value?.specId || '').trim()
-  if (!currentSpecId) {
-    return false
+const expandAgentBranch = (specId: string) => {
+  if (!expandedSpecIds.value.includes(specId)) {
+    expandedSpecIds.value.push(specId)
   }
-  const stillExists = agentItems.value.some(item => item.spec_id === currentSpecId)
-  if (stillExists) {
-    return false
+}
+
+const ensureSpecVersionsLoaded = async (specId: string, force?: boolean) => {
+  const normalized = String(specId || '').trim()
+  if (!normalized) return
+  if (!force && versionItemsBySpec.value[normalized]) {
+    return
   }
-  resetStudio()
-  ElMessage.info('当前 Agent 已不存在，已同步清空对话与缓存状态')
-  return true
+  if (loadingSpecVersions.value[normalized]) {
+    return
+  }
+  loadingSpecVersions.value[normalized] = true
+  try {
+    const result = await agentWorkshopApi.listVersions({ spec_id: normalized, page: 1, page_size: 20 })
+    versionItemsBySpec.value[normalized] = [...(result.items || [])].sort((a, b) => b.version - a.version)
+  } catch {
+    versionItemsBySpec.value[normalized] = []
+  } finally {
+    loadingSpecVersions.value[normalized] = false
+  }
 }
 
 const loadVersionContext = async (versionId?: string) => {
@@ -2759,7 +1439,7 @@ const loadVersionContext = async (versionId?: string) => {
   if (versionContextRequests.has(normalized)) {
     return versionContextRequests.get(normalized) as Promise<void>
   }
-  const request = (async () => {
+  const request = async () => {
     try {
       const [versionResult, versionPromptResult, evaluationResult] = await Promise.all([
         agentWorkshopApi.getVersion(normalized),
@@ -2772,41 +1452,19 @@ const loadVersionContext = async (versionId?: string) => {
     } catch {
       resetVersionContext()
     }
-  })()
-  versionContextRequests.set(normalized, request)
+  }
+  versionContextRequests.set(normalized, request())
   try {
-    await request
+    await versionContextRequests.get(normalized)
   } finally {
     versionContextRequests.delete(normalized)
   }
 }
 
-const openVersionDetailDialog = async (item: AgentSpec, version: AgentVersion) => {
-  versionDetailDialogVisible.value = true
-  versionDetailLoading.value = true
-  versionDetailSpec.value = item
-  try {
-    await loadVersionDetail(version.version_id)
-  } catch (error: any) {
-    versionDetailDialogVisible.value = false
-    ElMessage.error(error?.message || '加载版本详情失败')
-  } finally {
-    versionDetailLoading.value = false
-  }
-}
-
-const loadVersionDetail = async (versionId: string) => {
-  versionDetailVersion.value = null
-  versionDetailPrompt.value = null
-  versionDetailEvaluation.value = null
-  const [versionResult, versionPromptResult, evaluationResult] = await Promise.all([
-    agentWorkshopApi.getVersion(versionId),
-    agentWorkshopApi.getVersionPrompt(versionId).catch(() => null),
-    agentWorkshopApi.listEvaluations(versionId, { page: 1, page_size: 1 }).catch(() => null),
-  ])
-  versionDetailVersion.value = versionResult
-  versionDetailPrompt.value = versionPromptResult
-  versionDetailEvaluation.value = evaluationResult?.items?.[0] || null
+const resetVersionContext = () => {
+  latestVersion.value = null
+  latestVersionPrompt.value = null
+  latestEvaluation.value = null
 }
 
 const loadLatestVersionContext = async (specId?: string) => {
@@ -2818,7 +1476,7 @@ const loadLatestVersionContext = async (specId?: string) => {
   if (latestVersionContextRequests.has(normalized)) {
     return latestVersionContextRequests.get(normalized) as Promise<void>
   }
-  const request = (async () => {
+  const request = async () => {
     try {
       const result = await agentWorkshopApi.listVersions({ spec_id: normalized, page: 1, page_size: 1 })
       const latestVersionId = result.items?.[0]?.version_id
@@ -2830,105 +1488,22 @@ const loadLatestVersionContext = async (specId?: string) => {
     } catch {
       resetVersionContext()
     }
-  })()
-  latestVersionContextRequests.set(normalized, request)
+  }
+  latestVersionContextRequests.set(normalized, request())
   try {
-    await request
+    await latestVersionContextRequests.get(normalized)
   } finally {
     latestVersionContextRequests.delete(normalized)
   }
 }
 
-const publishVersionFromDetail = async () => {
-  const versionId = String(versionDetailVersion.value?.version_id || '').trim()
-  const specId = String(versionDetailSpec.value?.spec_id || versionDetailVersion.value?.spec_id || '').trim()
-  if (!versionId) return
-  if (!canPublishVersionDetail.value) {
-    ElMessage.warning(versionDetailVersion.value?.status === 'active' ? '当前版本已经是正式版本' : '当前版本尚未满足发布条件')
-    return
-  }
-
-  try {
-    await ElMessageBox.confirm(
-      `版本 v${versionDetailVersion.value?.version || ''} 已通过最新真数据测试，但不会自动发布。确认现在手动发布为正式版本吗？`,
-      '确认发布',
-      {
-        confirmButtonText: '确认发布',
-        cancelButtonText: '取消',
-        type: 'warning',
-      },
-    )
-  } catch {
-    return
-  }
-
-  publishingVersionDetail.value = true
-  clearVersionDetailPublishValidation()
-  try {
-    const result = await agentWorkshopApi.publishVersion(versionId)
-    if (result.workflow_compatibility) {
-      versionDetailPublishErrors.value = result.workflow_compatibility.errors || []
-      versionDetailPublishWarnings.value = result.workflow_compatibility.warnings || []
-    }
-    await Promise.all([
-      loadVersionDetail(result.version_id),
-      ensureSpecVersionsLoaded(specId, true),
-      loadAgentItems(),
-      selectedVersionId.value === result.version_id || latestVersion.value?.version_id === result.version_id
-        ? loadVersionContext(result.version_id)
-        : Promise.resolve(),
-      specId && displaySpec.value?.spec_id === specId
-        ? loadLatestVersionContext(specId)
-        : Promise.resolve(),
-    ])
-    await persistThreadContext()
-    ElMessage.success(result.previous_active_archived ? '版本已手动发布，上一正式版本已自动归档' : '版本已手动发布')
-  } catch (error: any) {
-    ElMessage.error(error?.message || '发布失败')
-  } finally {
-    publishingVersionDetail.value = false
-  }
-}
-
-const reEvaluateVersionFromDetail = async () => {
-  const versionId = String(versionDetailVersion.value?.version_id || '').trim()
-  const specId = String(versionDetailSpec.value?.spec_id || versionDetailVersion.value?.spec_id || '').trim()
-  const evaluationType = String(versionDetailEvaluation.value?.evaluation_type || 'production-review').trim() || 'production-review'
-  if (!versionId) return
-
-  reEvaluatingVersionDetail.value = true
-  try {
-    const result = await agentWorkshopApi.evaluateVersion(versionId, {
-      evaluation_type: evaluationType,
-    })
-    await Promise.all([
-      loadVersionDetail(result.version_id),
-      selectedVersionId.value === result.version_id || latestVersion.value?.version_id === result.version_id
-        ? loadVersionContext(result.version_id)
-        : Promise.resolve(),
-      specId && displaySpec.value?.spec_id === specId
-        ? loadLatestVersionContext(specId)
-        : Promise.resolve(),
-      loadAgentItems(),
-    ])
-    await persistThreadContext()
-    ElMessage.success(result.evaluation.decision === 'pass' ? '重新评估完成，当前已满足发布条件' : '重新评估完成')
-  } catch (error: any) {
-    ElMessage.error(error?.message || '重新评估失败')
-  } finally {
-    reEvaluatingVersionDetail.value = false
-  }
-}
-
-const loadSession = async (sessionId?: string, options?: {
-  syncNanobotThread?: boolean
-}) => {
+const loadSession = async (sessionId?: string, options?: { syncNanobotThread?: boolean }) => {
   const normalized = String(sessionId || '').trim()
   if (!normalized) return
   if (sessionRequests.has(normalized)) {
     return sessionRequests.get(normalized) as Promise<void>
   }
-  const request = (async () => {
+  const request = async () => {
     loadingSession.value = true
     try {
       currentSession.value = await agentWorkshopApi.getSession(normalized)
@@ -2939,2184 +1514,1736 @@ const loadSession = async (sessionId?: string, options?: {
         sessionId: currentSession.value.session_id,
       }
       selectedVersionId.value = ''
-      expandAgentBranch(currentSession.value.current_spec_snapshot?.spec_id)
-      await ensureSpecVersionsLoaded(currentSession.value.current_spec_snapshot?.spec_id)
-      await loadLatestVersionContext(currentSession.value.current_spec_snapshot?.spec_id)
+      expandAgentBranch(currentSession.value.current_spec_snapshot?.spec_id || '')
+      await ensureSpecVersionsLoaded(currentSession.value.current_spec_snapshot?.spec_id || '')
+      await loadLatestVersionContext(currentSession.value.current_spec_snapshot?.spec_id || '')
       if (options?.syncNanobotThread && currentNanobotSessionKey.value) {
         await loadNanobotThreadMessages({ sessionKey: currentNanobotSessionKey.value, silent: true })
-      } else {
-        await alignNanobotThreadWithWorkspace({ silent: true })
       }
     } catch (error: any) {
       ElMessage.error(error?.message || '加载会话失败')
     } finally {
       loadingSession.value = false
     }
-  })()
-  sessionRequests.set(normalized, request)
+  }
+  sessionRequests.set(normalized, request())
   try {
-    await request
+    await sessionRequests.get(normalized)
   } finally {
     sessionRequests.delete(normalized)
   }
 }
 
-const findLatestNanobotSpec = async (requestedAtMs?: number) => {
-  const result = await agentWorkshopApi.listSpecs({ page: 1, page_size: 50 })
-  const sortedSpecs = [...(result.items || [])].sort((left, right) => {
-    const leftTime = Date.parse(left.updated_at || left.created_at || '') || 0
-    const rightTime = Date.parse(right.updated_at || right.created_at || '') || 0
-    return rightTime - leftTime
-  })
-  return sortedSpecs.find(item => {
-    if (item.source !== 'nanobot') return false
-    if (!requestedAtMs) return true
-    const updatedAt = Date.parse(item.updated_at || item.created_at || '') || 0
-    return updatedAt >= requestedAtMs - 5000
-  }) || null
-}
-
-const syncDraftAfterNanobot = async (options?: {
-  response?: EmbeddedNanobotChatResponse
-  requestedAtMs?: number
-  force?: boolean
-  silent?: boolean
-}) => {
-  const toolsUsed = options?.response?.tools_used || []
-  const shouldCheckDraft = Boolean(options?.force || toolsUsed.some(toolId => (
-    toolId === 'create_or_update_agent_workshop_draft' || toolId === 'generate_confirmed_candidate_agent'
-  )))
-  if (!shouldCheckDraft) return false
-
-  const matchedSpec = await findLatestNanobotSpec(options?.requestedAtMs)
-  if (!matchedSpec) {
-    if (options?.force && !options?.silent) {
-      ElMessage.warning('助手还没有同步出可用 Draft，请继续补充。')
-    }
-    return false
-  }
-
-  standaloneSpec.value = matchedSpec
-  nanobotDraftLink.value = {
-    specId: matchedSpec.spec_id,
-    specName: matchedSpec.name,
-    sessionId: matchedSpec.latest_session_id,
-  }
-  expandAgentBranch(matchedSpec.spec_id)
-  await ensureSpecVersionsLoaded(matchedSpec.spec_id, true)
-  if (matchedSpec.latest_session_id) {
-    await loadSession(matchedSpec.latest_session_id)
-  } else {
-    currentSession.value = null
-    selectedVersionId.value = ''
-    await loadLatestVersionContext(matchedSpec.spec_id)
-  }
-  await loadAgentItems()
-  await loadNanobotThreads()
-  persistState()
-  syncRoute()
-  return true
-}
-
-const pushNanobotToolEvent = (event: Record<string, any>) => {
-  const toolName = normalizeAssistantDisplayText(String(event.title || event.name || event.tool || event.tool_id || event.step || '未命名步骤').trim()) || '未命名步骤'
-  const rawStatus = String(event.status || event.event || '').trim().toLowerCase()
-  const detail = normalizeAssistantDisplayText(String(event.detail || event.message || event.summary || '').trim())
-  let statusLabel = '处理中'
-  let tone: 'info' | 'success' | 'warning' = 'info'
-
-  if (rawStatus.includes('complete') || rawStatus.includes('done') || rawStatus.includes('success')) {
-    statusLabel = '已完成'
-    tone = 'success'
-  } else if (rawStatus.includes('fail') || rawStatus.includes('error')) {
-    statusLabel = '失败'
-    tone = 'warning'
-  } else if (rawStatus.includes('start') || rawStatus.includes('progress')) {
-    statusLabel = '执行中'
-  }
-
-  nanobotToolEvents.value = [
-    ...nanobotToolEvents.value,
-    {
-      key: `${Date.now()}-${nanobotToolEvents.value.length}`,
-      title: toolName,
-      detail,
-      statusLabel,
-      tone,
-    },
-  ].slice(-8)
-}
-
-const appendAssistantProgressStep = (
-  messages: AgentWorkshopMessage[],
-  assistantIndex: number,
-  step: { text: string; tone?: 'info' | 'success' | 'warning'; meta?: string },
-) => {
-  const normalizedText = normalizeAssistantDisplayText(step.text).trim()
-  const normalizedMeta = normalizeAssistantDisplayText(step.meta || '').trim()
-  if (!messages[assistantIndex] || !normalizedText) return
-  const currentSteps = [...(messages[assistantIndex].progressSteps || [])]
-  const previous = currentSteps[currentSteps.length - 1]
-  if (previous?.text === normalizedText && previous?.meta === normalizedMeta && previous?.tone === step.tone) {
-    return
-  }
-  currentSteps.push({
-    ...step,
-    text: normalizedText,
-    meta: normalizedMeta || undefined,
-  })
-  messages[assistantIndex] = {
-    ...messages[assistantIndex],
-    progressSteps: currentSteps,
-  }
-  nanobotMessages.value = [...messages]
-  persistState()
-}
-
-const buildNanobotPayload = (message: string) => {
-  const normalized = message.trim()
-  if (!normalized) return ''
-  const contextualIntent = resolveContextualReplyIntent(normalized)
-  if (!currentWorkshopSessionId.value) {
-    if (!contextualIntent) return normalized
-    return [
-      normalized,
-      '补充上下文：这是一个基于上一轮助手选项的简短选择。',
-      `上一轮可选项：\n${contextualIntent.optionsText}`,
-      `本次短回复更可能表示：选择第 ${contextualIntent.selectionIndex} 项「${contextualIntent.selectedOption}」。如果无冲突，请直接按该意图执行，不要重复追问编号含义。`,
-    ].join('\n\n')
-  }
-
-  const blocks = [
-    '继续当前 Agent Workshop Draft 讨论，不要重新新建一个 Agent。',
-    `session_id='${currentWorkshopSessionId.value}'。`,
-    displaySpec.value?.spec_id ? `spec_id='${displaySpec.value.spec_id}'。` : '',
-    realStateGuardText.value,
-    '当前任务是沿着现有 Workshop 版本继续执行或诊断测试链路，不要切换到内置 Agent 蓝图侦察、已注册 Agent 直调或重新设计路径，除非用户明确要求重做。',
-    contextualIntent ? `上一轮可选项：\n${contextualIntent.optionsText}` : '',
-    contextualIntent ? `本次短回复更可能表示：选择第 ${contextualIntent.selectionIndex} 项「${contextualIntent.selectedOption}」。如果无冲突，请直接按该意图执行，不要重复追问编号含义。` : '',
-    nanobotIterationBootstrapPending.value && iterationReminderMessage.value ? `上一轮评估摘要如下：\n${iterationReminderMessage.value}` : '',
-    nanobotIterationBootstrapPending.value && iterationImprovementItems.value.length
-      ? `本轮优先处理的问题：\n${iterationImprovementItems.value.map((item, index) => `${index + 1}. ${item}`).join('\n')}`
-      : '',
-    `用户本次补充：${normalized}`,
-  ].filter(Boolean)
-
-  return blocks.join('\n\n')
-}
-
-const sendNanobotMessage = async (message: string) => {
-  const normalized = message.trim()
-  if (!normalized) return null
-
-  const payloadMessage = buildNanobotPayload(normalized)
-  const requestedAtMs = Date.now()
-  const sessionKey = currentNanobotSessionKey.value || `${AGENT_STUDIO_SESSION_PREFIX}${requestedAtMs}`
-  const now = new Date().toISOString()
-  const nextMessages = [
-    ...displayedMessages.value,
-    { role: 'user', content: normalized, timestamp: now },
-    { role: 'assistant', content: '', timestamp: now, progressSteps: [] },
-  ]
-  const assistantIndex = nextMessages.length - 1
-
-  currentNanobotSessionKey.value = sessionKey
-  nanobotMessages.value = nextMessages
-  nanobotStreaming.value = true
-  nanobotProgressHint.value = '正在发送给工坊助手'
-  nanobotToolEvents.value = []
-  startLoadingTimer()
-  persistState()
-  syncRoute()
-  scrollMessagesToBottom('auto')
-
-  const appendAssistantChunk = (chunk?: string) => {
-    const text = normalizeAssistantDisplayText(String(chunk || ''))
-    if (!text.trim()) return
-    nextMessages[assistantIndex].content = nextMessages[assistantIndex].content
-      ? `${nextMessages[assistantIndex].content}\n${text}`
-      : text
-    nanobotMessages.value = [...nextMessages]
-    persistState()
-  }
-
-  try {
-    const response = await new Promise<EmbeddedNanobotChatResponse>((resolve, reject) => {
-      activeNanobotStreamController = embeddedNanobotApi.chatStream({
-        message: payloadMessage,
-        display_message: normalized,
-        session_key: sessionKey,
-        chat_id: sessionKey,
-        channel: 'agent_workshop',
-        skill_names: NANOBOT_SKILLS,
-        thread_context: buildThreadContext(),
-      }, {
-        onStarted(data) {
-          currentNanobotSessionKey.value = data.session_key || sessionKey
-          nanobotProgressHint.value = normalizeAssistantDisplayText(data.message) || '工坊助手已开始处理当前需求'
-          appendAssistantProgressStep(nextMessages, assistantIndex, {
-            text: normalizeAssistantDisplayText(data.message) || '工坊助手已开始处理当前需求',
-            tone: 'info',
-          })
-          persistState()
-          syncRoute()
-          scrollMessagesToBottom('auto')
-        },
-        onProgress(data) {
-          currentNanobotSessionKey.value = data.session_key || currentNanobotSessionKey.value || sessionKey
-          nanobotProgressHint.value = normalizeAssistantDisplayText(data.message) || '工坊助手正在处理中'
-          appendAssistantProgressStep(nextMessages, assistantIndex, {
-            text: normalizeAssistantDisplayText(data.message) || '工坊助手正在处理中',
-            tone: 'info',
-          })
-          persistState()
-          scrollMessagesToBottom('auto')
-        },
-        onToken(content) {
-          appendAssistantChunk(content)
-          scrollMessagesToBottom('auto')
-        },
-        onToolEvent(event) {
-          pushNanobotToolEvent(event)
-          const toolName = String(event.name || event.tool || event.tool_id || '工具').trim() || '工具'
-          nanobotProgressHint.value = event.status === 'started'
-            ? `正在执行 ${toolName}`
-            : `已处理 ${toolName} 的最新动作`
-          scrollMessagesToBottom('auto')
-        },
-        onStepEvent(event) {
-          pushNanobotToolEvent(event)
-          const stepTitle = normalizeAssistantDisplayText(String(event.title || event.step || '步骤').trim()) || '步骤'
-          const detail = normalizeAssistantDisplayText(String(event.detail || '').trim())
-          const isCompleted = String(event.status || '').trim().toLowerCase() === 'completed'
-          nanobotProgressHint.value = event.status === 'started'
-            ? (detail || `正在执行 ${stepTitle}`)
-            : (detail || `${stepTitle} 已完成`)
-          appendAssistantProgressStep(nextMessages, assistantIndex, {
-            text: `${stepTitle}${isCompleted ? ' 已完成' : ' 开始'}`,
-            tone: isCompleted ? 'success' : 'info',
-            meta: detail || undefined,
-          })
-          persistState()
-          scrollMessagesToBottom('auto')
-        },
-        onDone(data) {
-          currentNanobotSessionKey.value = data.session_key || currentNanobotSessionKey.value || sessionKey
-          if (!nextMessages[assistantIndex].content.trim()) {
-            nextMessages[assistantIndex].content = normalizeAssistantDisplayText(data.content) || '工坊助手已处理当前需求。'
-          }
-          nanobotMessages.value = [...nextMessages]
-          nanobotProgressHint.value = data.tools_used?.length
-            ? `本轮已完成，调用了 ${data.tools_used.length} 个工具`
-            : '本轮已完成'
-          stopLoadingTimer()
-          persistState()
-          syncRoute()
-          resolve(data)
-        },
-        onError(messageText) {
-          nextMessages[assistantIndex].content = nextMessages[assistantIndex].content || `请求失败：${messageText || '未知错误'}`
-          nanobotMessages.value = [...nextMessages]
-          stopLoadingTimer()
-          persistState()
-          reject(new Error(messageText || '未知错误'))
-        },
-        onAbort() {
-          nextMessages[assistantIndex].content = nextMessages[assistantIndex].content || '已停止本轮生成。'
-          nanobotMessages.value = [...nextMessages]
-          stopLoadingTimer()
-          persistState()
-          reject(new Error('已停止生成'))
-        },
-      })
-    })
-
-    await syncDraftAfterNanobot({ response, requestedAtMs, silent: true })
-    await loadNanobotThreadMessages({ threadId: response.thread_id || sessionKey, silent: true })
-    nanobotIterationBootstrapPending.value = false
-    return response
-  } finally {
-    activeNanobotStreamController = null
-    nanobotStreaming.value = false
-    stopLoadingTimer()
-  }
-}
-
-const refreshWorkspace = async () => {
-  await loadAgentItems()
-  await loadNanobotThreads()
-  if (reconcileDeletedWorkspaceState()) {
-    return
-  }
-  if (currentWorkshopSessionId.value) {
-    await loadSession(currentWorkshopSessionId.value)
-  } else if (displaySpec.value?.spec_id) {
-    await loadLatestVersionContext(displaySpec.value.spec_id)
-  } else if (currentNanobotSessionKey.value) {
-    await loadNanobotThreadMessages({ sessionKey: currentNanobotSessionKey.value, silent: true })
-  }
-  await alignNanobotThreadWithWorkspace({ silent: true })
-}
-
-const openNanobotThread = async (thread: EmbeddedNanobotThreadItem) => {
-  clearStudioState(true)
-  currentNanobotSessionKey.value = thread.session_key || thread.thread_id
-  await loadNanobotThreadMessages({ threadId: thread.thread_id })
-  syncRoute()
-}
-
-const handleDeleteNanobotThread = async (thread: EmbeddedNanobotThreadItem) => {
-  try {
-    await ElMessageBox.confirm(`归档会话「${thread.title || thread.thread_id}」后，它会从活动列表隐藏，但历史消息仍会保留。是否继续？`, '归档会话', {
-      type: 'warning',
-      confirmButtonText: '归档',
-      cancelButtonText: '取消',
-      confirmButtonClass: 'el-button--danger',
-    })
-    await embeddedNanobotApi.deleteThread(thread.thread_id)
-    if (activeNanobotThreadId.value === thread.thread_id) {
-      resetStudio()
-    } else {
-      await loadNanobotThreads()
-    }
-    ElMessage.success('会话已归档')
-  } catch (error: any) {
-    if (error === 'cancel' || error === 'close' || error?.action === 'cancel' || error?.action === 'close') return
-    ElMessage.error(error?.message || '归档会话失败')
-  }
-}
-
-const handleRestoreNanobotThread = async (thread: EmbeddedNanobotThreadItem) => {
-  try {
-    await embeddedNanobotApi.restoreThread(thread.thread_id)
-    await loadNanobotThreads()
-    ElMessage.success('会话已恢复到活动列表')
-  } catch (error: any) {
-    ElMessage.error(error?.message || '恢复会话失败')
-  }
-}
-
 const openAgentItem = async (item: AgentSpec) => {
-  selectedVersionId.value = ''
+  standaloneSpec.value = item
   expandAgentBranch(item.spec_id)
   await ensureSpecVersionsLoaded(item.spec_id)
-  standaloneSpec.value = item
+  await loadLatestVersionContext(item.spec_id)
+  currentSession.value = null
   nanobotDraftLink.value = {
     specId: item.spec_id,
-    specName: item.name,
-    sessionId: item.latest_session_id,
+    specName: item.name || '当前 Draft',
+    sessionId: item.latest_session_id || undefined,
   }
-  if (item.latest_session_id) {
-    await loadSession(item.latest_session_id)
-  } else {
-    currentSession.value = null
-    await alignNanobotThreadWithWorkspace({ silent: true, forceReload: true })
-    await loadLatestVersionContext(item.spec_id)
-    syncRoute()
-  }
-  await persistThreadContext()
+  persistState()
+  ElMessage.info('已选择该 Agent，继续对话可以创建/迭代版本')
 }
 
-const openAgentVersion = async (item: AgentSpec, version: AgentVersion) => {
-  selectedVersionId.value = version.version_id
-  expandAgentBranch(item.spec_id)
-  await ensureSpecVersionsLoaded(item.spec_id)
-  standaloneSpec.value = item
-  nanobotDraftLink.value = {
-    specId: item.spec_id,
-    specName: item.name,
-    sessionId: item.latest_session_id,
+const openLatestVersionDetail = async () => {
+  if (!latestVersion.value) {
+    ElMessage.warning('当前还没有版本')
+    return
   }
-  if (item.latest_session_id) {
-    await loadSession(item.latest_session_id)
-  } else {
-    currentSession.value = null
-    await alignNanobotThreadWithWorkspace({ silent: true, forceReload: true })
-    syncRoute()
-  }
-  selectedVersionId.value = version.version_id
-  await loadVersionContext(version.version_id)
-  await alignNanobotThreadWithWorkspace({ silent: true, forceReload: true })
-  await persistThreadContext()
-  await openVersionDetailDialog(item, version)
-}
-
-const handleDeleteSpec = async (item: AgentSpec) => {
+  versionDetailDialogVisible.value = true
+  versionDetailLoading.value = true
+  versionDetailActiveTab.value = 'overview'
+  versionDetailSpec.value = displaySpec.value || latestVersionSpecFallback.value
   try {
-    await ElMessageBox.confirm(`删除 Agent「${item.name || item.spec_id}」后，其所有版本、评估和运行配置都会一起删除。是否继续？`, '删除 Agent', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-      confirmButtonClass: 'el-button--danger',
-    })
-    await agentWorkshopApi.deleteSpec(item.spec_id)
-    if (activeAgentId.value === item.spec_id) {
-      resetStudio()
-    }
-    delete versionItemsBySpec.value[item.spec_id]
-    expandedSpecIds.value = expandedSpecIds.value.filter(specId => specId !== item.spec_id)
-    await loadAgentItems()
-    reconcileDeletedWorkspaceState()
-    ElMessage.success('Agent 已删除')
+    await loadVersionDetail(latestVersion.value.version_id)
   } catch (error: any) {
-    if (error === 'cancel' || error === 'close' || error?.action === 'cancel' || error?.action === 'close') return
-    ElMessage.error(error?.message || '删除 Agent 失败')
-  }
-}
-
-const handleDeleteVersion = async (item: AgentSpec, version: AgentVersion) => {
-  try {
-    await ElMessageBox.confirm(`删除版本 v${version.version} 后，关联评估和运行配置也会一起删除。是否继续？`, '删除版本', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-      confirmButtonClass: 'el-button--danger',
-    })
-    await agentWorkshopApi.deleteVersion(version.version_id)
-    await ensureSpecVersionsLoaded(item.spec_id, true)
-    await loadAgentItems()
-    if (selectedVersionId.value === version.version_id) {
-      selectedVersionId.value = ''
-      if (activeAgentId.value === item.spec_id) {
-        if (currentWorkshopSessionId.value) {
-          await loadSession(currentWorkshopSessionId.value)
-        } else {
-          await loadLatestVersionContext(item.spec_id)
-        }
-      }
-    } else if (activeAgentId.value === item.spec_id && latestVersion.value?.version_id === version.version_id) {
-      await loadLatestVersionContext(item.spec_id)
-    }
-    ElMessage.success('版本已删除')
-  } catch (error: any) {
-    if (error === 'cancel' || error === 'close' || error?.action === 'cancel' || error?.action === 'close') return
-    ElMessage.error(error?.message || '删除版本失败')
-  }
-}
-
-const handleSendMessage = async () => {
-  if (!composerText.value.trim()) return
-  sending.value = true
-  try {
-    const shouldStartFresh = !hasWorkspaceContext.value && !currentNanobotSessionKey.value
-    await sendNanobotMessage(composerText.value.trim())
-    if (shouldStartFresh) {
-      await loadAgentItems()
-      ElMessage.success('已接入 Nanobot，开始创建 Agent')
-    }
-    composerText.value = ''
-  } catch (error: any) {
-    ElMessage.error(error?.message || '发送失败')
+    versionDetailDialogVisible.value = false
+    ElMessage.error(error?.message || '加载版本详情失败')
   } finally {
-    sending.value = false
+    versionDetailLoading.value = false
   }
 }
 
-const handleRefreshDraft = async () => {
-  refreshingDraft.value = true
+const openLatestPublishConfirm = async () => {
+  if (!canPublishLatestVersion.value || !latestVersion.value) {
+    ElMessage.warning('当前版本不满足发布条件')
+    return
+  }
+  await openLatestVersionDetail()
+  if (versionDetailDialogVisible.value && canPublishVersionDetail.value) {
+    await publishVersionFromDetail()
+  }
+}
+
+const loadVersionDetail = async (versionId: string) => {
+  versionDetailVersion.value = null
+  versionDetailPrompt.value = null
+  versionDetailEvaluation.value = null
+  versionDetailPublishErrors.value = []
+  versionDetailPublishWarnings.value = []
+  const [versionResult, versionPromptResult, evaluationResult] = await Promise.all([
+    agentWorkshopApi.getVersion(versionId),
+    agentWorkshopApi.getVersionPrompt(versionId).catch(() => null),
+    agentWorkshopApi.listEvaluations(versionId, { page: 1, page_size: 1 }).catch(() => null),
+  ])
+  versionDetailVersion.value = versionResult
+  versionDetailPrompt.value = versionPromptResult
+  versionDetailEvaluation.value = evaluationResult?.items?.[0] || null
+}
+
+const publishVersionFromDetail = async () => {
+  const versionId = String(versionDetailVersion.value?.version_id || '').trim()
+  const specId = String(versionDetailSpec.value?.spec_id || versionDetailVersion.value?.spec_id || '').trim()
+  if (!versionId) return
+  if (!canPublishVersionDetail.value) {
+    ElMessage.warning(versionDetailVersion.value?.status === 'active' ? '当前版本已经是正式版本' : '当前版本未满足发布条件')
+    return
+  }
   try {
-    const synced = await syncDraftAfterNanobot({ force: true })
-    if (!synced) {
-      ElMessage.warning('还没有可打开的 Draft，请继续补充需求。')
-      return
+    await ElMessageBox.confirm('确认发布当前版本为正式版本？', '确认发布', { confirmButtonText: '确认发布', cancelButtonText: '取消', type: 'warning' })
+  } catch {
+    return
+  }
+  publishingVersionDetail.value = true
+  versionDetailPublishErrors.value = []
+  versionDetailPublishWarnings.value = []
+  try {
+    const result = await agentWorkshopApi.publishVersion(versionId)
+    if (result.workflow_compatibility) {
+      versionDetailPublishErrors.value = result.workflow_compatibility.errors || []
+      versionDetailPublishWarnings.value = result.workflow_compatibility.warnings || []
     }
-    ElMessage.success('Draft 已刷新')
-  } catch (error: any) {
-    ElMessage.error(error?.message || '刷新 Draft 失败')
-  } finally {
-    refreshingDraft.value = false
-  }
-}
-
-const handleBuildVersion = async () => {
-  if (!currentWorkshopSessionId.value) return
-  buildingVersion.value = true
-  try {
-    const result = await agentWorkshopApi.buildVersion(currentWorkshopSessionId.value)
-    latestVersion.value = result.version
-    await loadSession(currentWorkshopSessionId.value)
-    await loadLatestVersionContext(result.spec_id)
+    await ensureSpecVersionsLoaded(specId, true)
+    await loadVersionDetail(versionId)
     await loadAgentItems()
-    await persistThreadContext()
-    ElMessage.success('测试版本已补建')
+    if (latestVersion.value?.version_id === versionId) {
+      await loadVersionContext(versionId)
+    }
+    ElMessage.success(result.previous_active_archived ? '版本已发布，上一正式版本已归档' : '版本已发布')
   } catch (error: any) {
-    ElMessage.error(error?.message || '补建测试版本失败')
+    ElMessage.error(error?.message || '发布失败')
   } finally {
-    buildingVersion.value = false
+    publishingVersionDetail.value = false
   }
 }
 
-const handleIterateVersion = async () => {
-  if (!latestVersion.value?.version_id) return
-  iteratingVersion.value = true
+const reEvaluateVersionFromDetail = async () => {
+  const versionId = String(versionDetailVersion.value?.version_id || '').trim()
+  const specId = String(versionDetailSpec.value?.spec_id || versionDetailVersion.value?.spec_id || '').trim()
+  if (!versionId) return
+  reEvaluatingVersionDetail.value = true
   try {
-    const result = await agentWorkshopApi.iterateVersion(latestVersion.value.version_id)
-    await loadSession(result.session_id)
-    nanobotDraftLink.value = {
-      specId: currentSession.value?.current_spec_snapshot?.spec_id || result.spec_id,
-      specName: currentSession.value?.current_spec_snapshot?.name || '当前 Draft',
-      sessionId: result.session_id,
+    const result = await agentWorkshopApi.evaluateVersion(versionId)
+    await loadVersionDetail(versionId)
+    if (latestVersion.value?.version_id === versionId) {
+      await loadVersionContext(versionId)
     }
-    if (!currentNanobotSessionKey.value) {
-      currentNanobotSessionKey.value = `${AGENT_STUDIO_SESSION_PREFIX}${Date.now()}`
+    if (specId && displaySpec.value?.spec_id === specId) {
+      await loadLatestVersionContext(specId)
     }
-    nanobotMessages.value = [...(currentSession.value?.messages || [])]
-    nanobotIterationBootstrapPending.value = true
     await loadAgentItems()
-    await persistThreadContext()
-    persistState()
-    syncRoute()
-    ElMessage.success('已基于当前 Agent 创建下一轮迭代，会继续由工坊助手接手讨论')
+    ElMessage.success(result.evaluation?.decision === 'pass' ? '重新评估完成，已满足发布条件' : '重新评估完成')
   } catch (error: any) {
-    ElMessage.error(error?.message || '发起下一轮失败')
+    ElMessage.error(error?.message || '重新评估失败')
   } finally {
-    iteratingVersion.value = false
+    reEvaluatingVersionDetail.value = false
   }
-}
-
-void [restoreState, promptSections, fillExample, handleBuildVersion, handleIterateVersion]
-
-const cancelNanobotStreaming = () => {
-  if (!activeNanobotStreamController) return
-  activeNanobotStreamController.abort()
 }
 
 const resetStudio = () => {
   clearStudioState()
-  router.push('/workflow/agent-studio')
+  ElMessage.success('已重置，可以开始创建新 Agent')
 }
 
-const initFromRoute = async () => {
-  if (initFromRoutePromise) {
-    return initFromRoutePromise
-  }
-
-  initFromRoutePromise = (async () => {
-    clearStudioState(true)
-    const routeNanobotSessionKey = typeof route.query.nanobotSessionKey === 'string' ? route.query.nanobotSessionKey : ''
-    const routeSessionId = typeof route.query.sessionId === 'string' ? route.query.sessionId : ''
-    const routeSpecId = typeof route.query.specId === 'string' ? route.query.specId : ''
-    const restoredFromStorage = !routeNanobotSessionKey && !routeSessionId && !routeSpecId ? restoreState() : false
-    const nanobotSessionKey = routeNanobotSessionKey || String(currentNanobotSessionKey.value || '').trim()
-    const sessionId = routeSessionId || String(nanobotDraftLink.value?.sessionId || '').trim()
-    const specId = routeSpecId || String(nanobotDraftLink.value?.specId || '').trim()
-    let restoredFromNanobotThread = false
-
-    await loadNanobotThreads()
-
-    if (nanobotSessionKey) {
-      restoredFromNanobotThread = await loadNanobotThreadMessages({ sessionKey: nanobotSessionKey, silent: true })
-    }
-
-    if (sessionId) {
-      if (!restoredFromNanobotThread || String(currentSession.value?.session_id || '').trim() !== sessionId) {
-        await loadSession(sessionId, { syncNanobotThread: false })
-      }
-    } else if (specId) {
-      if (!restoredFromNanobotThread || String(displaySpec.value?.spec_id || '').trim() !== specId) {
-        try {
-          standaloneSpec.value = await agentWorkshopApi.getSpec(specId)
-          selectedVersionId.value = ''
-          expandAgentBranch(specId)
-          await ensureSpecVersionsLoaded(specId)
-          await loadLatestVersionContext(specId)
-        } catch (error: any) {
-          ElMessage.error(error?.message || '加载 Draft 失败')
-        }
-      }
-    } else if (nanobotDraftLink.value?.sessionId && !restoredFromNanobotThread) {
-      await loadSession(nanobotDraftLink.value.sessionId, { syncNanobotThread: false })
-    }
-
-    if (!restoredFromNanobotThread && (sessionId || specId || restoredFromStorage)) {
-      await alignNanobotThreadWithWorkspace({ silent: true, forceReload: true })
-    }
-
-    await loadAgentItems()
-    reconcileDeletedWorkspaceState()
-    persistState()
-    syncRoute()
-  })()
-
+const handleSendMessage = async () => {
+  const text = composerText.value.trim()
+  if (!text) return
+  sending.value = true
   try {
-    await initFromRoutePromise
+    const hasAuth = await ensureNanobotContextAuth()
+    if (!hasAuth) {
+      ElMessage.warning('请先登录后再使用')
+      return
+    }
+
+    if (!recentNanobotThreads.value.length) {
+      await loadNanobotThreads()
+    }
+
+    const sessionKey = currentNanobotSessionKey.value || `${AGENT_STUDIO_SESSION_PREFIX}${Date.now()}`
+    const now = new Date().toISOString()
+    const nextMessages = [
+      ...displayedMessages.value,
+      { role: 'user', content: text, timestamp: now },
+      { role: 'assistant', content: '', timestamp: now, progressSteps: [] },
+    ]
+    const assistantIndex = nextMessages.length - 1
+
+    currentNanobotSessionKey.value = sessionKey
+    nanobotMessages.value = nextMessages
+    nanobotStreaming.value = true
+    nanobotProgressHint.value = '正在发送给工坊助手'
+    nanobotToolEvents.value = []
+    composerText.value = ''
+    persistState()
+
+    const appendAssistantChunk = (chunk?: string) => {
+      const t = String(chunk || '')
+      if (!t.trim()) return
+      nextMessages[assistantIndex].content = nextMessages[assistantIndex].content
+        ? `${nextMessages[assistantIndex].content}\n${t}`
+        : t
+      nanobotMessages.value = [...nextMessages]
+    }
+
+    try {
+      await new Promise<EmbeddedNanobotChatResponse>((resolve, reject) => {
+        activeNanobotStreamController = embeddedNanobotApi.chatStream({
+          message: text,
+          session_key: sessionKey,
+          channel: 'agent_workshop',
+          skill_names: NANOBOT_SKILLS,
+          thread_context: buildThreadContext(),
+        }, {
+          onStarted(data) {
+            currentNanobotSessionKey.value = data.session_key || sessionKey
+            nanobotProgressHint.value = data.message || '工坊助手已开始处理'
+            persistState()
+          },
+          onToken(content) {
+            appendAssistantChunk(content)
+          },
+          onToolEvent(event) {
+            const toolName = String(event.title || event.name || '工具').trim() || '工具'
+            const rawStatus = String(event.status || '').trim().toLowerCase()
+            let statusLabel = '处理中'
+            let tone: 'info' | 'success' | 'warning' = 'info'
+            if (rawStatus.includes('complete') || rawStatus.includes('done')) { statusLabel = '已完成'; tone = 'success' }
+            else if (rawStatus.includes('fail') || rawStatus.includes('error')) { statusLabel = '失败'; tone = 'warning' }
+            nanobotToolEvents.value = [...nanobotToolEvents.value, { key: `${Date.now()}-${nanobotToolEvents.value.length}`, title: toolName, detail: String(event.detail || ''), statusLabel, tone }].slice(-8)
+            nanobotProgressHint.value = event.status === 'started' ? `正在执行 ${toolName}` : `已处理 ${toolName}`
+          },
+          onDone(data) {
+            currentNanobotSessionKey.value = data.session_key || sessionKey
+            if (!nextMessages[assistantIndex].content.trim()) {
+              nextMessages[assistantIndex].content = data.content || '工坊助手已处理当前需求。'
+            }
+            nanobotMessages.value = [...nextMessages]
+            nanobotProgressHint.value = data.tools_used?.length ? `本轮已完成，调用了 ${data.tools_used.length} 个工具` : '本轮已完成'
+            persistState()
+            resolve(data)
+          },
+          onError(messageText) {
+            nextMessages[assistantIndex].content = `请求失败：${messageText || '未知错误'}`
+            nanobotMessages.value = [...nextMessages]
+            reject(new Error(messageText || '未知错误'))
+          },
+          onAbort() {
+            nextMessages[assistantIndex].content = '已停止本轮生成。'
+            nanobotMessages.value = [...nextMessages]
+            reject(new Error('已停止生成'))
+          },
+        })
+      })
+
+      await loadNanobotThreadMessages({ threadId: sessionKey, silent: true })
+      await loadAgentItems()
+      if (displaySpec.value?.spec_id) {
+        await ensureSpecVersionsLoaded(displaySpec.value.spec_id)
+        await loadLatestVersionContext(displaySpec.value.spec_id)
+      }
+      persistState()
+    } finally {
+      activeNanobotStreamController = null
+      nanobotStreaming.value = false
+    }
+  } catch (error: any) {
+    if (error?.name === 'AbortError' || error?.message === '已停止生成') {
+      ElMessage.info('已停止')
+    } else {
+      ElMessage.error(error?.message || '发送失败')
+    }
   } finally {
-    initFromRoutePromise = null
+    sending.value = false
+    nanobotStreaming.value = false
   }
 }
 
-watch(
-  () => [
-    currentNanobotSessionKey.value,
-    displaySpec.value?.spec_id || '',
-    displaySpec.value?.name || '',
-    currentSession.value?.session_id || '',
-    selectedVersionId.value || '',
-    latestVersion.value?.version_id || '',
-    latestVersion.value?.status || '',
-  ].join('|'),
-  async (value, previousValue) => {
-    if (!value || value === previousValue) return
-    await persistThreadContext()
-  },
-)
+const cancelNanobotStreaming = () => {
+  if (activeNanobotStreamController) {
+    activeNanobotStreamController.abort()
+  }
+}
 
-watch(
-  () => `${route.query.sessionId || ''}|${route.query.specId || ''}|${route.query.nanobotSessionKey || ''}`,
-  async (value, previousValue) => {
-    if (value === previousValue) return
-    if (suppressNextRouteInit) {
-      suppressNextRouteInit = false
-      return
+const normalizeAssistantDisplayText = (value?: string | null) => {
+  const text = String(value || '')
+  if (!text) return ''
+  return text
+}
+
+const loadInitialState = async () => {
+  await loadAgentItems()
+  await loadNanobotThreads()
+
+  const restored = restoreState()
+
+  const routeSessionId = String(route.query.sessionId || '').trim()
+  const routeSpecId = String(route.query.specId || '').trim()
+  const routeNanobotSessionKey = String(route.query.nanobotSessionKey || '').trim()
+
+  if (routeSessionId) {
+    await loadSession(routeSessionId, { syncNanobotThread: false })
+  } else if (routeSpecId) {
+    try {
+      standaloneSpec.value = await agentWorkshopApi.getSpec(routeSpecId)
+      expandAgentBranch(routeSpecId)
+      await ensureSpecVersionsLoaded(routeSpecId)
+      await loadLatestVersionContext(routeSpecId)
+      nanobotDraftLink.value = {
+        specId: routeSpecId,
+        specName: standaloneSpec.value.name || '当前 Draft',
+        sessionId: standaloneSpec.value.latest_session_id || undefined,
+      }
+    } catch {}
+  } else if (restored) {
+    const persisted = readPersistedStudioState()
+    if (persisted?.sessionId) {
+      await loadSession(persisted.sessionId, { syncNanobotThread: false })
+    } else if (persisted?.specId) {
+      try {
+        standaloneSpec.value = await agentWorkshopApi.getSpec(persisted.specId)
+        expandAgentBranch(persisted.specId)
+        await ensureSpecVersionsLoaded(persisted.specId)
+        await loadLatestVersionContext(persisted.specId)
+      } catch {}
     }
-    await initFromRoute()
-  },
-)
-
-watch(
-  () => displayedMessages.value.length,
-  () => {
-    scrollMessagesToBottom('smooth')
-  },
-)
-
-watch(
-  () => nanobotStreaming.value,
-  (streaming) => {
-    if (streaming) {
-      scrollMessagesToBottom('smooth')
-      return
+    if (persisted?.nanobotSessionKey && !nanobotMessages.value.length) {
+      await loadNanobotThreadMessages({ sessionKey: persisted.nanobotSessionKey, silent: true })
     }
-    stopLoadingTimer()
-    if (pendingRouteSync) {
-      syncRoute()
-    }
-  },
-)
+  }
 
-onMounted(async () => {
-  await initFromRoute()
-  scrollMessagesToBottom('auto')
+  if (routeNanobotSessionKey) {
+    currentNanobotSessionKey.value = routeNanobotSessionKey
+    if (!nanobotMessages.value.length) {
+      await loadNanobotThreadMessages({ sessionKey: routeNanobotSessionKey, silent: true })
+    }
+  }
+
+  if (displaySpec.value?.spec_id && !versionItemsBySpec.value[displaySpec.value.spec_id]) {
+    await ensureSpecVersionsLoaded(displaySpec.value.spec_id)
+    if (!latestVersion.value) {
+      await loadLatestVersionContext(displaySpec.value.spec_id)
+    }
+  }
+}
+
+onMounted(() => {
+  loadInitialState()
 })
 
-onUnmounted(() => {
-  stopLoadingTimer()
+watch(() => route.fullPath, () => {
+  if (suppressNextRouteInit) {
+    suppressNextRouteInit = false
+    return
+  }
+  if (!pendingRouteSync) {
+    loadInitialState()
+  }
+})
+
+const clearStudioState = (preserveStorage = false) => {
   if (activeNanobotStreamController) {
     activeNanobotStreamController.abort()
     activeNanobotStreamController = null
   }
-})
+  currentSession.value = null
+  standaloneSpec.value = null
+  currentNanobotSessionKey.value = ''
+  nanobotMessages.value = []
+  nanobotDraftLink.value = null
+  nanobotStreaming.value = false
+  nanobotProgressHint.value = ''
+  nanobotToolEvents.value = []
+  composerText.value = ''
+  selectedVersionId.value = ''
+  resetVersionContext()
+  if (!preserveStorage) {
+    clearPersistedStudioState()
+  }
+}
+
+const restoreState = (sessionKey?: string) => {
+  const persisted = readPersistedStudioState()
+  if (!persisted) return false
+
+  const restoredSessionKey = String(sessionKey || persisted.nanobotSessionKey || '').trim()
+  if (restoredSessionKey) {
+    currentNanobotSessionKey.value = restoredSessionKey
+  }
+
+  const restoredSpecId = String(persisted.specId || '').trim()
+  const restoredSessionId = String(persisted.sessionId || '').trim()
+  const restoredSpecName = String(persisted.specName || '').trim()
+  if (restoredSpecId || restoredSessionId) {
+    nanobotDraftLink.value = {
+      specId: restoredSpecId,
+      specName: restoredSpecName || '当前 Draft',
+      sessionId: restoredSessionId || undefined,
+    }
+  }
+
+  const restoredVersionId = String(persisted.versionId || '').trim()
+  if (restoredVersionId) {
+    selectedVersionId.value = restoredVersionId
+  }
+
+  return Boolean(restoredSessionKey || restoredSpecId)
+}
+
+const loadNanobotThreads = async () => {
+  loadingNanobotThreads.value = true
+  try {
+    const result = await embeddedNanobotApi.listThreads(80, selectedThreadScope.value === 'archived')
+    recentNanobotThreads.value = result.items || []
+  } catch {
+    recentNanobotThreads.value = []
+  } finally {
+    loadingNanobotThreads.value = false
+  }
+}
+
+const loadNanobotThreadMessages = async (options?: {
+  threadId?: string
+  sessionKey?: string
+  silent?: boolean
+}) => {
+  const requestedThreadId = String(options?.threadId || options?.sessionKey || currentNanobotSessionKey.value || '').trim()
+  if (!requestedThreadId) return false
+
+  if (threadMessageRequests.has(requestedThreadId)) {
+    return threadMessageRequests.get(requestedThreadId) as Promise<boolean>
+  }
+
+  const request = (async () => {
+    let targetThread = recentNanobotThreads.value.find(item => item.thread_id === requestedThreadId || item.session_key === requestedThreadId) || null
+    if (!targetThread) {
+      await loadNanobotThreads()
+      targetThread = recentNanobotThreads.value.find(item => item.thread_id === requestedThreadId || item.session_key === requestedThreadId) || null
+    }
+    if (!targetThread) return false
+
+    try {
+      const result = await embeddedNanobotApi.getThreadMessages(targetThread.thread_id)
+      currentNanobotSessionKey.value = result.thread?.session_key || targetThread.session_key || targetThread.thread_id
+      nanobotMessages.value = mapDbMessagesToWorkshopMessages(result.messages || [])
+      await applyThreadContext(result.thread?.thread_context)
+      persistState()
+      return true
+    } catch (error: any) {
+      if (!options?.silent) {
+        ElMessage.error(error?.message || '加载会话历史失败')
+      }
+      return false
+    }
+  })()
+
+  threadMessageRequests.set(requestedThreadId, request)
+  try {
+    return await request
+  } finally {
+    threadMessageRequests.delete(requestedThreadId)
+  }
+}
+
+const mapDbMessagesToWorkshopMessages = (items: EmbeddedNanobotMessageItem[]): AgentWorkshopMessage[] => {
+  return items.map(item => ({
+    role: item.role === 'user' ? 'user' : 'assistant',
+    content: normalizeAssistantDisplayText(String(item.content || '')),
+    timestamp: String(item.created_at || ''),
+  }))
+}
+
+const formatDisplayTime = (value?: string | null) => {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) return raw
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
+
 </script>
-
-<style scoped lang="scss">
+<style scoped>
 .agent-studio-page {
-  min-height: calc(100vh - 108px);
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  background:
-    radial-gradient(circle at top left, rgba(6, 95, 70, 0.08), transparent 28%),
-    linear-gradient(180deg, #f6fbfa 0%, #ffffff 100%);
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-
-.header-left {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 28px;
-  color: #123f39;
-}
-
-.page-subtitle {
-  color: #5a726c;
-  line-height: 1.6;
-}
-
-.header-right,
-.chat-panel-actions,
-.meta-row,
-.tag-wrap,
-.result-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.layout-toggle-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border: 1px solid rgba(15, 61, 54, 0.08);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.88);
-}
-
-.layout-toggle-label {
-  font-size: 12px;
-  font-weight: 700;
-  color: #5a726c;
-}
-
-.workspace-body {
-  display: grid;
-  grid-template-columns: 280px minmax(0, 1fr) 320px;
-  gap: 16px;
-  min-height: 0;
-  flex: 1;
-}
-
-.workspace-body.left-sidebar-hidden {
-  grid-template-columns: minmax(0, 1fr) 320px;
-}
-
-.workspace-body.right-sidebar-hidden {
-  grid-template-columns: 280px minmax(0, 1fr);
-}
-
-.workspace-body.left-sidebar-hidden.right-sidebar-hidden {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.agent-sidebar,
-.chat-panel,
-.status-sidebar {
-  min-width: 0;
-  min-height: 0;
-  border: 1px solid rgba(15, 61, 54, 0.08);
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(8px);
-}
-
-.agent-sidebar,
-.status-sidebar {
-  display: flex;
-  flex-direction: column;
-  padding: 14px;
-  gap: 14px;
-  overflow: hidden;
-}
-
-.chat-panel {
+  height: 100vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  min-height: 0;
+  background: linear-gradient(180deg, #f4f6fb 0%, #fafbfc 100%);
+  color: #1e293b;
 }
 
-.status-sidebar-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
+.topbar {
+  height: 64px;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(30, 58, 95, 0.08);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
   gap: 14px;
-  padding-right: 4px;
-}
-
-.sidebar-header,
-.status-sidebar-header,
-.chat-panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 16px 18px 0;
-}
-
-.sidebar-header-compact {
-  justify-content: flex-end;
-  align-items: center;
-  padding: 4px 4px 0;
-}
-
-.sidebar-header-actions,
-.thread-panel-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.sidebar-title,
-.current-thread-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: #123f39;
-}
-
-.sidebar-subtitle,
-.current-thread-subtitle,
-.input-tip,
-.page-subtitle {
-  font-size: 12px;
-  color: #6b7f79;
-  line-height: 1.6;
-}
-
-.agent-tree {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow: auto;
-  min-height: 0;
-}
-
-.nanobot-thread-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid #dce8e3;
-  border-radius: 16px;
-  background: linear-gradient(180deg, #fbfefd 0%, #f4faf7 100%);
-}
-
-.nanobot-thread-panel-collapsed {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-  padding: 14px 16px;
-  border: 1px dashed rgba(15, 138, 125, 0.24);
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(251, 254, 253, 0.92) 0%, rgba(244, 250, 247, 0.96) 100%);
-  text-align: left;
-  cursor: pointer;
-  transition: all 0.18s ease;
-
-  &:hover {
-    border-color: rgba(15, 138, 125, 0.42);
-    background: linear-gradient(180deg, rgba(244, 253, 250, 0.96) 0%, rgba(255, 255, 255, 1) 100%);
-  }
-}
-
-.collapsed-panel-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: #123f39;
-}
-
-.collapsed-panel-desc {
-  font-size: 12px;
-  line-height: 1.6;
-  color: #6b7f79;
-}
-
-.thread-panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.thread-filter-grid {
-  display: grid;
-  gap: 8px;
-}
-
-.nanobot-thread-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.nanobot-thread-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: flex-start;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: #fff;
-  box-shadow: inset 0 0 0 1px rgba(15, 61, 54, 0.05);
-
-  &.active {
-    background: linear-gradient(180deg, rgba(240, 253, 250, 0.96) 0%, rgba(255, 255, 255, 1) 100%);
-    box-shadow:
-      inset 0 0 0 1px rgba(15, 138, 125, 0.14),
-      0 8px 18px rgba(15, 138, 125, 0.08);
-  }
-}
-
-.nanobot-thread-main {
-  border: 0;
-  background: transparent;
-  padding: 0;
-  text-align: left;
-  cursor: pointer;
-}
-
-.nanobot-thread-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.nanobot-thread-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: #123f39;
-}
-
-.nanobot-thread-desc {
-  margin-top: 6px;
-  font-size: 12px;
-  color: #5a726c;
-  line-height: 1.6;
-}
-
-.nanobot-thread-meta {
-  font-size: 11px;
-  color: #6b7f79;
-}
-
-.nanobot-thread-meta-row {
-  margin-top: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.nanobot-thread-meta-badges {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   min-width: 0;
 }
 
-.nanobot-thread-agent {
-  font-size: 11px;
-  color: #0f8a7d;
-  white-space: nowrap;
-}
-
-.thread-delete-btn {
-  align-self: center;
-}
-
-.agent-tree-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.agent-tree-branch {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.agent-tree-parent {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: stretch;
-  border: 1px solid #dce8e3;
-  border-radius: 16px;
-  padding: 10px;
-  background: #fff;
-  transition: all 0.18s ease;
-
-  &:hover {
-    border-color: rgba(15, 138, 125, 0.32);
-    background: #f7fbfa;
-  }
-
-  &.active {
-    border-color: rgba(15, 138, 125, 0.42);
-    background: linear-gradient(180deg, rgba(240, 253, 250, 0.96) 0%, rgba(255, 255, 255, 1) 100%);
-    box-shadow: 0 10px 24px rgba(15, 138, 125, 0.08);
-  }
-}
-
-.tree-toggle,
-.tree-main,
-.agent-version-item {
-  border: 0;
-  background: transparent;
-}
-
-.tree-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.tree-chevron {
-  width: 8px;
-  height: 8px;
-  border-right: 1.5px solid #5a726c;
-  border-bottom: 1.5px solid #5a726c;
-  transform: rotate(-45deg);
-  transition: transform 0.18s ease;
-
-  &.expanded {
-    transform: rotate(45deg);
-  }
-}
-
-.tree-main {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  text-align: left;
-  cursor: pointer;
-}
-
-.tree-delete-btn {
-  align-self: center;
-}
-
-.agent-tree-children {
-  margin-left: 18px;
-  padding-left: 14px;
-  border-left: 1px dashed rgba(15, 138, 125, 0.22);
-}
-
-.agent-version-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.agent-version-item {
-  width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: #f7fbfa;
-  box-shadow: inset 0 0 0 1px rgba(15, 61, 54, 0.05);
-  cursor: pointer;
-  text-align: left;
-
-  &.active {
-    background: linear-gradient(180deg, rgba(240, 253, 250, 0.96) 0%, rgba(255, 255, 255, 1) 100%);
-    box-shadow:
-      inset 0 0 0 1px rgba(15, 138, 125, 0.14),
-      0 8px 18px rgba(15, 138, 125, 0.08);
-  }
-}
-
-.agent-version-main {
-  min-width: 0;
-}
-
-.agent-version-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.agent-version-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: #123f39;
-}
-
-.agent-version-desc {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #6b7f79;
-  display: -webkit-box;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  line-clamp: 2;
-}
-
-.agent-version-meta {
-  margin-top: 8px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 11px;
-  color: #6b7f79;
-}
-
-.tree-inline-note {
-  padding: 8px 12px;
-  font-size: 12px;
-  color: #6b7f79;
-}
-
-.agent-list-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-.agent-list-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: #123f39;
-}
-
-.agent-list-desc,
-.agent-list-meta,
-.status-main-hint,
-.empty-note,
-.result-desc,
-.result-label,
-.tool-event-card span {
-  color: #5a726c;
-  line-height: 1.6;
-}
-
-.agent-list-desc {
-  margin-top: 8px;
-  font-size: 13px;
-}
-
-.agent-list-meta {
-  margin-top: 10px;
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-size: 12px;
-}
-
-.messages-container {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 18px;
-  padding-bottom: 28px;
-  scroll-behavior: smooth;
-}
-
-.messages-list {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.message-item {
-  display: flex;
-  gap: 12px;
-
-  &.message-user {
-    justify-content: flex-end;
-
-    .message-content {
-      background: linear-gradient(135deg, #0f8a7d, #145d55);
-      color: #fff;
-    }
-
-    .message-text {
-      color: #fff;
-    }
-  }
-}
-
-.streaming-message {
-  .message-content {
-    box-shadow:
-      inset 0 0 0 1px rgba(15, 138, 125, 0.1),
-      0 10px 24px rgba(15, 138, 125, 0.08);
-  }
-}
-
-.message-avatar {
+.brand-mark {
   width: 34px;
   height: 34px;
-  border-radius: 999px;
-  display: inline-flex;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #fff;
+  display: flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 auto;
-  font-size: 13px;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.24);
+  flex-shrink: 0;
 }
 
-.assistant-avatar {
-  background: rgba(15, 138, 125, 0.12);
-  color: #0f5a4e;
-  width: auto;
-  min-width: 52px;
-  padding: 0 10px;
-  font-size: 11px;
-}
-
-.thinking-bubble {
-  align-items: center;
-}
-
-.thinking-content {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.thinking-main-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #123f39;
-  font-weight: 600;
-}
-
-.thinking-sub-row {
-  font-size: 12px;
-  color: #6b7f79;
-}
-
-.thinking-dots {
-  display: inline-flex;
-  gap: 2px;
-  color: #0f8a7d;
-}
-
-.thinking-dots .dot {
-  animation: thinkingBlink 1.2s infinite ease-in-out;
-}
-
-.thinking-dots .dot:nth-child(2) {
-  animation-delay: 0.2s;
-}
-
-.thinking-dots .dot:nth-child(3) {
-  animation-delay: 0.4s;
-}
-
-.user-avatar {
-  background: rgba(15, 61, 54, 0.08);
-  color: #123f39;
-}
-
-.message-content {
-  max-width: min(880px, 88%);
-  padding: 14px 16px;
-  border-radius: 18px;
-  background: #f3f8f6;
-  box-shadow: inset 0 0 0 1px rgba(15, 61, 54, 0.05);
-}
-
-.progress-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid rgba(15, 61, 54, 0.08);
-}
-
-.timeline-step {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.step-dot {
-  width: 10px;
-  height: 10px;
-  margin-top: 5px;
-  border-radius: 999px;
-  background: rgba(20, 184, 166, 0.25);
-  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.08);
-  flex: none;
-}
-
-.step-dot.active {
-  background: #14b8a6;
-  box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.14);
-}
-
-.step-dot.success {
-  background: #16a34a;
-  box-shadow: 0 0 0 4px rgba(22, 163, 74, 0.12);
-}
-
-.step-dot.warning {
-  background: #f59e0b;
-  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12);
-}
-
-.step-content {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.brand-text {
   min-width: 0;
 }
 
-.step-text {
-  font-size: 13px;
-  font-weight: 600;
-  color: #123f39;
+.brand-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: #1e293b;
+  margin: 0;
 }
 
-.step-meta {
+.brand-subtitle {
   font-size: 12px;
-  color: #6b7f79;
+  color: #64748b;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.btn {
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  transition: all 0.15s ease;
+  cursor: pointer;
+  background: #fff;
+  color: #475569;
+  border: 1px solid rgba(30, 58, 95, 0.14);
+}
+
+.btn:hover {
+  background: #f8fafc;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.22);
+  border: 0;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.26);
+}
+
+.main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 340px;
+  overflow: hidden;
+}
+
+.sidebar, .inspector {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar {
+  border-right: 1px solid rgba(30, 58, 95, 0.08);
+}
+
+.inspector {
+  border-left: 1px solid rgba(30, 58, 95, 0.08);
+}
+
+.content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.panel-head {
+  padding: 16px;
+  border-bottom: 1px solid rgba(30, 58, 95, 0.08);
+}
+
+.panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #1e293b;
+  margin: 0;
+}
+
+.count-pill {
+  font-size: 12px;
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+
+.search-box {
+  width: 100%;
+  border: 1px solid rgba(30, 58, 95, 0.14);
+  border-radius: 10px;
+  padding: 9px 12px;
+  outline: none;
+  color: #1e293b;
+  background: #fff;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.search-box:focus {
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+}
+
+.filter-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.filter-chip {
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  background: #fff;
+  color: #64748b;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.filter-chip:hover {
+  background: #f8fafc;
+}
+
+.filter-chip.active {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+  font-weight: 700;
+}
+
+.agent-list {
+  padding: 10px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.agent-card {
+  padding: 13px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  margin-bottom: 8px;
+  transition: all 0.15s ease;
+  background: transparent;
+  cursor: pointer;
+}
+
+.agent-card:hover {
+  background: rgba(37, 99, 235, 0.04);
+  border-color: rgba(37, 99, 235, 0.1);
+}
+
+.agent-card.active {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(37, 99, 235, 0.02));
+  border-color: rgba(37, 99, 235, 0.18);
+}
+
+.agent-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agent-name {
+  font-size: 14px;
+  font-weight: 800;
+  color: #1e293b;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  margin: 0;
+}
+
+.status-tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.agent-desc {
+  margin-top: 7px;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.agent-meta {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.chat-head {
+  padding: 16px 24px;
+  border-bottom: 1px solid rgba(30, 58, 95, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.chat-head-left {
+  min-width: 0;
+}
+
+.chat-title {
+  font-size: 17px;
+  font-weight: 850;
+  color: #1e293b;
+  margin: 0;
+}
+
+.chat-subtitle {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 3px;
+}
+
+.chat-head-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.mobile-panel-btn {
+  display: none;
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  padding-bottom: 120px;
+}
+
+.empty-spacer {
+  display: none;
+}
+
+.empty-preview {
+  margin: 18px 24px 0;
+  border: 1px dashed #bfdbfe;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.05), rgba(255, 255, 255, 0.7));
+  padding: 22px;
+}
+
+.empty-preview-title {
+  font-size: 18px;
+  font-weight: 900;
+  color: #1e293b;
+  margin: 0 0 8px;
+}
+
+.empty-preview-desc {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 0;
+}
+
+.example-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.example-card {
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  border-radius: 14px;
+  background: #fff;
+  padding: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.example-card:hover {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: rgba(37, 99, 235, 0.02);
+}
+
+.example-card strong {
+  display: block;
+  font-size: 13px;
+  color: #1e293b;
+  margin-bottom: 6px;
+}
+
+.example-card span {
+  font-size: 12px;
+  color: #64748b;
   line-height: 1.5;
 }
 
-.message-text {
-  line-height: 1.65;
-  color: inherit;
+.message-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 18px;
+  max-width: 84%;
 }
 
-.message-text:deep(p),
-.message-text:deep(ul),
-.message-text:deep(ol),
-.message-text:deep(table),
-.message-text:deep(blockquote),
-.message-text:deep(pre) {
-  margin: 0 0 12px;
+.message-row.user {
+  margin-left: auto;
+  flex-direction: row-reverse;
 }
 
-.message-text:deep(*:last-child) {
-  margin-bottom: 0;
+.avatar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
 }
 
-.message-text:deep(ul),
-.message-text:deep(ol) {
-  padding-left: 20px;
+.message-row.assistant .avatar {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #fff;
 }
 
-.message-text:deep(code) {
-  padding: 2px 6px;
-  border-radius: 6px;
-  background: rgba(15, 61, 54, 0.08);
+.message-row.user .avatar {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.bubble {
+  background: #fff;
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  border-radius: 16px;
+  padding: 14px 16px;
+  color: #1e293b;
+  font-size: 14px;
+  line-height: 1.7;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.035);
+  flex: 1;
+  min-width: 0;
+}
+
+.message-row.user .bubble {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #fff;
+  border-color: transparent;
+}
+
+.bubble-title {
+  font-weight: 800;
+  color: #1d4ed8;
+  margin-bottom: 6px;
+}
+
+.message-row.user .bubble-title {
+  color: #fff;
+}
+
+.bubble ul {
+  padding-left: 18px;
+  margin: 6px 0;
+}
+
+.bubble code {
+  background: #f1f5f9;
+  color: #1d4ed8;
+  padding: 2px 5px;
+  border-radius: 5px;
   font-size: 12px;
 }
 
-.message-user .message-text:deep(code) {
-  background: rgba(255, 255, 255, 0.16);
+.quick-actions {
+  margin: 4px 0 20px 46px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.quick-action {
+  border: 1px solid #bfdbfe;
+  background: #fff;
+  color: #1d4ed8;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.quick-action:hover {
+  background: #eff6ff;
 }
 
 .input-area {
-  padding: 0 18px 18px;
   position: sticky;
   bottom: 0;
-  z-index: 2;
-  border-top: 1px solid rgba(15, 61, 54, 0.08);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86) 0%, rgba(255, 255, 255, 0.98) 24%, #ffffff 100%);
-  box-shadow: 0 -10px 24px rgba(15, 61, 54, 0.06);
+  left: 0;
+  right: 0;
+  padding: 14px 24px 18px;
+  background: linear-gradient(to top, rgba(244, 246, 251, 0.98) 70%, rgba(244, 246, 251, 0.7) 95%, rgba(244, 246, 251, 0));
 }
 
-.input-row {
-  display: flex;
-  gap: 12px;
-  align-items: flex-end;
-  margin-top: 18px;
-}
-
-.send-btn {
-  height: 42px;
-}
-
-.input-tip-row {
-  margin-top: 10px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-
-.result-panels {
-  display: block;
-  min-height: 0;
-}
-
-.result-collapse {
-  border-top: 1px solid rgba(15, 61, 54, 0.08);
-  border-bottom: 1px solid rgba(15, 61, 54, 0.08);
-}
-
-.result-collapse :deep(.el-collapse-item__header) {
-  min-height: 56px;
-  padding: 0 18px;
-  background: rgba(247, 251, 250, 0.92);
-  color: #123f39;
-  font-weight: 700;
-}
-
-.result-collapse :deep(.el-collapse-item__wrap) {
-  background: transparent;
-}
-
-.result-collapse :deep(.el-collapse-item__content) {
-  padding-bottom: 0;
-}
-
-.result-collapse-title-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.result-card,
-.status-card {
-  border-radius: 18px;
-  border: 1px solid rgba(15, 61, 54, 0.08);
+.input-shell {
+  max-width: 960px;
+  margin: 0 auto;
   background: #fff;
-}
-
-.result-section {
+  border: 1px solid rgba(30, 58, 95, 0.14);
+  border-radius: 20px;
+  padding: 8px 12px 10px;
   display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 18px;
-}
-
-.result-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: #123f39;
-}
-
-.result-block {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.memory-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  align-items: flex-end;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
 }
 
-.memory-summary-card {
-  padding: 12px;
+.chat-input {
+  flex: 1;
+  min-height: 42px;
+  max-height: 140px;
+  resize: none;
   border-radius: 14px;
-  border: 1px solid rgba(18, 63, 57, 0.08);
-  background: linear-gradient(180deg, rgba(251, 254, 253, 0.94) 0%, rgba(244, 250, 247, 0.98) 100%);
-  display: grid;
-  gap: 8px;
+  border: none;
+  padding: 10px 12px;
+  outline: none;
+  background: transparent;
+  color: #1e293b;
+  font-size: 14px;
 }
 
-.memory-summary-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 10px;
+.input-tip {
+  max-width: 960px;
+  margin: 8px auto 0;
+  color: #94a3b8;
+  font-size: 11px;
+  text-align: center;
 }
 
-.memory-summary-title {
+.inspector-scroll {
+  overflow-y: auto;
+  padding: 16px;
+  flex: 1;
+}
+
+.status-card {
+  border: 1px solid #bfdbfe;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #eff6ff, #ffffff);
+  padding: 16px;
+  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.08);
+}
+
+.status-eyebrow {
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 850;
+  margin-bottom: 6px;
+}
+
+.status-title {
+  color: #1e293b;
+  font-size: 18px;
+  font-weight: 900;
+  margin-bottom: 6px;
+}
+
+.status-desc {
+  color: #475569;
   font-size: 13px;
-  color: #123f39;
+  line-height: 1.6;
 }
 
-.memory-summary-body {
-  font-size: 12px;
-  line-height: 1.7;
-  color: #35524c;
-}
-
-.memory-summary-meta {
+.score-row {
+  margin-top: 14px;
   display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
   align-items: center;
-  font-size: 12px;
-  color: #6b7f79;
+  gap: 12px;
 }
 
-.memory-summary-meta.subtle {
-  margin-top: -2px;
+.score-value {
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid #bfdbfe;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 900;
+  color: #2563eb;
+  flex-shrink: 0;
 }
 
-.memory-summary-missing {
-  display: grid;
-  gap: 6px;
+.score-copy {
+  flex: 1;
+  min-width: 0;
 }
 
-.memory-summary-missing-item {
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(18, 63, 57, 0.05);
-  color: #4f6660;
+.score-copy strong {
+  display: block;
+  font-size: 13px;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+
+.score-copy span {
+  color: #64748b;
   font-size: 12px;
   line-height: 1.5;
 }
 
-.workflow-stage-list {
+.status-actions {
+  margin-top: 14px;
   display: grid;
-  gap: 10px;
-}
-
-.workflow-stage-item {
-  display: grid;
-  grid-template-columns: 10px minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(18, 63, 57, 0.04);
-
-  &.done {
-    background: rgba(22, 163, 74, 0.08);
-  }
-
-  &.current {
-    background: rgba(59, 130, 246, 0.08);
-  }
-}
-
-.workflow-stage-dot {
-  width: 10px;
-  height: 10px;
-  margin-top: 6px;
-  border-radius: 999px;
-  background: #cbd5e1;
-}
-
-.workflow-stage-item.done .workflow-stage-dot {
-  background: #16a34a;
-}
-
-.workflow-stage-item.current .workflow-stage-dot {
-  background: #2563eb;
-}
-
-.workflow-stage-name {
-  font-size: 13px;
-  font-weight: 700;
-  color: #123f39;
-}
-
-.workflow-stage-desc,
-.workflow-next-action {
-  font-size: 12px;
-  line-height: 1.6;
-  color: #5a726c;
-}
-
-.compact-list {
-  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
-.list-row {
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(18, 63, 57, 0.04);
-  color: #35524c;
-  line-height: 1.6;
+.right-section {
+  margin-top: 18px;
 }
 
-.result-worker-list {
-  display: grid;
+.section-title {
+  font-size: 13px;
+  font-weight: 850;
+  color: #1e293b;
+  margin-bottom: 10px;
+}
+
+.progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.progress-item {
+  display: flex;
   gap: 10px;
-  margin-top: 10px;
+  align-items: flex-start;
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  background: #fff;
+  border-radius: 13px;
+  padding: 10px 12px;
 }
 
-.result-worker-card {
-  padding: 12px;
-  border-radius: 14px;
-  background: rgba(18, 63, 57, 0.04);
-  border: 1px solid rgba(18, 63, 57, 0.08);
+.progress-item.current {
+  border-color: #bfdbfe;
+  background: #eff6ff;
 }
 
-.result-worker-group {
-  margin-top: 8px;
+.progress-item.done .step-no {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
 }
 
-.result-worker-group-title {
+.step-no {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
   font-size: 11px;
-  font-weight: 700;
-  color: #1d7b52;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-weight: 900;
+  background: #f8fafc;
+  color: #64748b;
+  border: 1px solid rgba(30, 58, 95, 0.08);
 }
 
-.result-worker-title-row {
+.step-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.step-copy strong {
+  display: block;
+  font-size: 13px;
+  color: #1e293b;
+  margin-bottom: 2px;
+}
+
+.step-copy span {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.plain-card {
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  border-radius: 14px;
+  background: #fff;
+  padding: 14px;
+}
+
+.report-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.report-row {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font-size: 12px;
-  color: #6b7f79;
-
-  strong {
-    color: #123f39;
-    font-size: 13px;
-  }
-}
-
-.result-worker-summary {
-  margin-top: 8px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #35524c;
-}
-
-.result-worker-artifact {
-  margin-top: 8px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: #ffffff;
-  border: 1px solid rgba(18, 63, 57, 0.08);
-}
-
-.result-worker-artifact-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: #123f39;
-}
-
-.result-worker-artifact-path {
-  margin-top: 4px;
-  font-size: 11px;
-  color: #6b7f79;
-  word-break: break-all;
-}
-
-.result-worker-artifact-content {
-  margin-top: 6px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #35524c;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.result-worker-artifact-actions {
-  margin-top: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.evaluation-review-form {
-  display: grid;
-  gap: 14px;
-}
-
-.evaluation-review-field {
-  display: grid;
-  gap: 8px;
-}
-
-.evaluation-review-label {
   font-size: 13px;
-  font-weight: 700;
-  color: #123f39;
 }
 
-.dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
+.report-row span:first-child {
+  color: #64748b;
 }
 
-.status-main-hint {
-  font-size: 14px;
+.report-row span:last-child {
+  color: #1e293b;
+  font-weight: 750;
+  text-align: right;
 }
 
-.status-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.status-metric-item {
-  padding: 12px;
-  border-radius: 14px;
-  background: linear-gradient(180deg, #f6fbf9 0%, #edf6f2 100%);
+.callable-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
-
-  span {
-    font-size: 12px;
-    color: #6b7f79;
-  }
-
-  strong {
-    color: #123f39;
-    font-size: 15px;
-  }
 }
 
-.tool-event-list {
-  display: grid;
-  gap: 10px;
+.callable-item {
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border: 1px solid transparent;
 }
 
-.tool-event-card {
+.callable-item:hover {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+
+.callable-name {
+  font-size: 13px;
+  font-weight: 750;
+  color: #1e293b;
+}
+
+.callable-desc {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.governance-refs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.governance-ref-item {
+  border-radius: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  background: #fff;
+}
+
+.governance-ref-item.danger {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.governance-ref-item.warning {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.governance-ref-item.info {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.governance-ref-label {
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 3px;
+}
+
+.governance-ref-item.danger .governance-ref-label { color: #dc2626; }
+.governance-ref-item.warning .governance-ref-label { color: #ea580c; }
+.governance-ref-item.info .governance-ref-label { color: #2563eb; }
+
+.governance-ref-text {
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.45;
+}
+
+details.advanced {
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+
+details.advanced summary {
+  list-style: none;
+  padding: 13px 14px;
+  color: #1e293b;
+  font-size: 13px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+details.advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-body {
+  border-top: 1px solid rgba(30, 58, 95, 0.08);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.86);
-  color: #35524c;
-  border-radius: 14px;
+  gap: 8px;
 }
 
-.tool-event-card.info {
-  border: 1px solid rgba(15, 90, 78, 0.1);
-}
-
-.tool-event-card.success {
-  border: 1px solid rgba(29, 122, 74, 0.16);
-}
-
-.tool-event-card.warning {
-  border: 1px solid rgba(196, 98, 49, 0.18);
-}
-
-.tool-event-status {
-  width: auto;
-  min-width: 56px;
-  padding: 2px 8px;
-  background: rgba(15, 90, 78, 0.08);
-  color: #0f5a4e;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.version-detail-header {
+.kv {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.version-detail-header-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
   gap: 10px;
-  flex-wrap: wrap;
-}
-
-.version-detail-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: #123f39;
-}
-
-.version-detail-subtitle {
-  margin-top: 6px;
   font-size: 12px;
-  color: #6b7f79;
-  word-break: break-all;
 }
 
-.version-detail-header-tags {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+.kv span:first-child {
+  color: #64748b;
 }
 
-.version-detail-body {
-  min-height: 160px;
+.kv span:last-child {
+  color: #1e293b;
+  font-weight: 750;
+  text-align: right;
 }
 
-.version-detail-grid {
-  display: grid;
-  gap: 16px;
-}
-
-.version-detail-section {
-  padding: 16px;
-  border-radius: 16px;
-  border: 1px solid rgba(15, 61, 54, 0.08);
-  background: linear-gradient(180deg, #fbfefd 0%, #f6fbf9 100%);
-}
-
-.summary-section {
-  background: linear-gradient(180deg, rgba(240, 253, 250, 0.92) 0%, #ffffff 100%);
-}
-
-.version-detail-section-title {
-  margin-bottom: 12px;
-  font-size: 14px;
-  font-weight: 700;
-  color: #123f39;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.publish-validation-section {
-  background: #fef7f0;
-  border: 1px solid #f0d4b0;
-  border-radius: 8px;
-  padding: 16px;
-}
-
-.publish-validation-subtitle {
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 8px;
-  color: #5a3e1b;
-}
-
-.publish-validation-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  font-size: 13px;
-  padding: 4px 0;
-}
-
-.publish-validation-item-error {
-  color: #c0392b;
-}
-
-.publish-validation-item-warning {
-  color: #b87a14;
-}
-
-.publish-validation-errors {
-  margin-bottom: 12px;
-}
-
-.version-detail-section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-
-.version-detail-section-head .version-detail-section-title {
-  margin-bottom: 0;
-}
-
-.version-detail-section-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.version-detail-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.version-detail-summary-item {
-  padding: 12px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.86);
+.tool-event-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-
-  span {
-    font-size: 12px;
-    color: #6b7f79;
-  }
-
-  strong {
-    color: #123f39;
-    word-break: break-word;
-  }
-}
-
-.version-detail-description {
-  margin-top: 14px;
-  line-height: 1.7;
-  color: #35524c;
-}
-
-.detail-tag-wrap {
   gap: 8px;
+}
+
+.tool-event-card {
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  border-radius: 13px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.tool-event-card .tool-event-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.tool-event-card.info .tool-event-status {
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.tool-event-card.success .tool-event-status {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.tool-event-card.warning .tool-event-status {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.tool-event-card strong {
+  display: block;
+  font-size: 13px;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+
+.tool-event-card span {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.status-main-hint {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.status-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.status-metric-item {
+  flex: 1;
+  min-width: 0;
+  background: #f8fafc;
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  border-radius: 13px;
+  padding: 10px 12px;
+  text-align: center;
+}
+
+.status-metric-item span {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.status-metric-item strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 800;
+  color: #1e293b;
+}
+
+.dialog-head {
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(30, 58, 95, 0.08);
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.dialog-title {
+  font-size: 18px;
+  font-weight: 900;
+  color: #1e293b;
+  margin: 0;
+}
+
+.dialog-subtitle {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.dialog-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+
+.dialog-footer {
+  padding: 16px 24px;
+  border-top: 1px solid rgba(30, 58, 95, 0.08);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.tab-container {
+  width: 100%;
+}
+
+.tab-bar {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid rgba(30, 58, 95, 0.08);
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.tab-btn {
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  background: #fff;
+  color: #64748b;
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tab-btn:hover {
+  background: #f8fafc;
+}
+
+.tab-btn.active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.version-detail-card-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.detail-card {
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  border-radius: 16px;
+  background: #f8fafc;
+  padding: 16px;
+}
+
+.detail-title {
+  font-size: 13px;
+  font-weight: 850;
+  color: #1e293b;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.detail-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.version-overview-hero {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.version-overview-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.version-overview-copy h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 850;
+  color: #1e293b;
+}
+
+.version-overview-copy p {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.version-detail-runtime-card {
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  border-radius: 16px;
+  background: #fff;
+  padding: 14px;
 }
 
 .version-detail-meta-line {
   display: flex;
-  gap: 12px;
   flex-wrap: wrap;
+  gap: 10px;
   margin-bottom: 12px;
-  color: #5a726c;
-  font-size: 13px;
+}
+
+.version-detail-meta-line span {
+  font-size: 11px;
+  color: #64748b;
+  background: #f8fafc;
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  border-radius: 999px;
+  padding: 2px 9px;
 }
 
 .prompt-section-list {
-  display: grid;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .prompt-section-card {
+  border: 1px solid rgba(30, 58, 95, 0.08);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(15, 61, 54, 0.06);
-  overflow: hidden;
+  background: #fff;
+  padding: 14px;
 }
 
 .prompt-section-title {
-  padding: 12px 14px;
   font-size: 13px;
-  font-weight: 700;
-  color: #123f39;
-  border-bottom: 1px solid rgba(15, 61, 54, 0.06);
+  font-weight: 800;
+  color: #1e293b;
+  margin-bottom: 8px;
 }
 
 .prompt-section-content {
-  margin: 0;
-  padding: 14px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.7;
-  color: #35524c;
-  background: transparent;
-  font-family: "Cascadia Code", "Consolas", monospace;
-  font-size: 12px;
-}
-
-.version-detail-evaluation-card {
-  display: grid;
-  gap: 12px;
-}
-
-.evaluation-layer-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.compact-layer-grid {
-  margin-top: 10px;
-}
-
-.evaluation-layer-card {
-  border: 1px solid rgba(71, 118, 110, 0.16);
+  background: #0f172a;
+  color: #dbeafe;
   border-radius: 14px;
-  background: rgba(250, 248, 242, 0.86);
-  padding: 12px 14px;
-  display: grid;
-  gap: 8px;
-}
-
-.evaluation-layer-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.evaluation-layer-meta {
+  padding: 14px;
+  font-family: "Cascadia Code", Consolas, monospace;
   font-size: 12px;
-  color: #6b7d78;
-}
-
-.layer-summary-list {
-  margin-top: 0;
-}
-
-.list-row-danger {
-  color: #9f2f2f;
-}
-
-.list-row-warning {
-  color: #8a5d12;
-}
-
-.version-detail-runtime-card {
-  display: grid;
-  gap: 12px;
-}
-
-.runtime-report-card {
-  background: rgba(255, 255, 255, 0.92);
-}
-
-.runtime-report-content {
-  max-height: 420px;
-  overflow: auto;
-}
-
-.runtime-report-markdown {
-  white-space: normal;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 13px;
-}
-
-.runtime-report-markdown:deep(h1),
-.runtime-report-markdown:deep(h2),
-.runtime-report-markdown:deep(h3),
-.runtime-report-markdown:deep(h4),
-.runtime-report-markdown:deep(h5),
-.runtime-report-markdown:deep(h6) {
-  margin: 0 0 12px;
-  color: #123f39;
-  line-height: 1.45;
-}
-
-.runtime-report-markdown:deep(p),
-.runtime-report-markdown:deep(ul),
-.runtime-report-markdown:deep(ol),
-.runtime-report-markdown:deep(table),
-.runtime-report-markdown:deep(blockquote),
-.runtime-report-markdown:deep(pre) {
-  margin: 0 0 12px;
-}
-
-.runtime-report-markdown:deep(*:last-child) {
-  margin-bottom: 0;
-}
-
-.runtime-report-markdown:deep(ul),
-.runtime-report-markdown:deep(ol) {
-  padding-left: 20px;
-}
-
-.runtime-report-markdown:deep(table) {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.runtime-report-markdown:deep(th),
-.runtime-report-markdown:deep(td) {
-  padding: 8px 10px;
-  border: 1px solid rgba(15, 61, 54, 0.12);
-  text-align: left;
-  vertical-align: top;
-}
-
-.runtime-report-markdown:deep(thead th) {
-  background: rgba(15, 61, 54, 0.05);
-}
-
-.runtime-report-markdown:deep(code) {
-  padding: 2px 6px;
-  border-radius: 6px;
-  background: rgba(15, 61, 54, 0.08);
-  font-size: 12px;
-  font-family: "Cascadia Code", "Consolas", monospace;
-}
-
-.runtime-report-markdown:deep(pre) {
-  padding: 12px;
-  border-radius: 10px;
-  background: rgba(15, 61, 54, 0.04);
-  overflow: auto;
-}
-
-.runtime-report-markdown:deep(pre code) {
-  padding: 0;
-  background: transparent;
-}
-
-.runtime-report-markdown:deep(blockquote) {
-  padding-left: 12px;
-  border-left: 3px solid rgba(15, 61, 54, 0.18);
-  color: #4f6762;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  max-height: 260px;
+  overflow-y: auto;
 }
 
 .runtime-json-title-row {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  align-items: center;
+  gap: 10px;
 }
 
-.runtime-json-content {
-  white-space: pre;
-  font-family: "Cascadia Code", "Consolas", monospace;
+.runtime-json-title-row button {
   font-size: 12px;
 }
 
-.evaluation-dialog {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.notice {
+  border-radius: 14px;
+  padding: 14px;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
-.card-header {
+.notice-blue {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+}
+
+.notice-amber {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #d97706;
+}
+
+.tool-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag-item {
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: #f8fafc;
+  color: #1e293b;
+  border: 1px solid rgba(30, 58, 95, 0.08);
+}
+
+.evaluation-layer-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.evaluation-layer-card {
+  border: 1px solid rgba(30, 58, 95, 0.08);
+  border-radius: 14px;
+  background: #fff;
+  padding: 14px;
+}
+
+.evaluation-layer-title-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  font-weight: 600;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
-@media (max-width: 1200px) {
-  .workspace-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .status-sidebar-scroll {
-    overflow: visible;
-    padding-right: 0;
-  }
+.evaluation-layer-title-row strong {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1e293b;
 }
 
-@media (max-width: 768px) {
-  .agent-studio-page {
-    min-height: auto;
-    padding: 16px;
-  }
+.evaluation-layer-meta {
+  font-size: 12px;
+  color: #64748b;
+}
 
-  .page-header,
-  .input-row,
-  .input-tip-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
+.compact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
-  .status-metrics {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.list-row {
+  font-size: 13px;
+  color: #475569;
+}
 
-  .memory-summary-grid,
-  .version-detail-summary-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.list-row-danger {
+  color: #dc2626;
+}
 
+.list-row-warning {
+  color: #d97706;
+}
+
+.evaluation-review-form {
+  padding: 10px 0;
+}
+
+.evaluation-review-field {
+  margin-bottom: 14px;
+}
+
+.evaluation-review-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  margin-bottom: 6px;
+  display: block;
+}
+
+.empty-note {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+@media (max-width: 1280px) {
+  .main {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+  .inspector {
+    display: none;
+  }
+  .mobile-panel-btn {
+    display: inline-flex;
+  }
+  .message-row {
+    max-width: 90%;
+  }
+  .example-grid {
+    grid-template-columns: 1fr;
+  }
   .evaluation-layer-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .version-detail-header {
-    flex-direction: column;
-  }
-
-  .version-detail-header-actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .version-detail-section-actions {
-    width: 100%;
+    grid-template-columns: 1fr;
   }
 }
 
-@keyframes thinkingBlink {
-  0%,
-  80%,
-  100% {
-    opacity: 0.25;
-    transform: translateY(0);
+@media (max-width: 900px) {
+  .topbar {
+    padding: 0 14px;
   }
-  40% {
-    opacity: 1;
-    transform: translateY(-1px);
+  .brand-subtitle {
+    display: none;
+  }
+  .main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sidebar {
+    display: none;
+  }
+  .chat-head {
+    padding: 14px 16px;
+  }
+  .messages {
+    padding: 18px 16px;
+    padding-bottom: 120px;
+  }
+  .input-area {
+    padding: 12px 16px 16px;
+  }
+  .topbar-actions .btn-ghost {
+    display: none;
   }
 }
 </style>
+
