@@ -983,6 +983,7 @@ class AgentWorkshopService:
                     required_tools,
                     gap_report=gap_report,
                     tooling_plan=session.tooling_plan,
+                    project_memory_block=await self._build_project_memory_block_for_workshop(),
                     agent_builder_lesson_block=agent_builder_lesson_block,
                 ),
             )
@@ -1115,6 +1116,33 @@ class AgentWorkshopService:
             return None
         doc.pop("_id", None)
         return doc
+
+    async def update_spec(self, spec_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """更新 spec 的可编辑字段（如 name, primary_goal）。"""
+        spec_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": spec_id})
+        if not spec_doc:
+            raise ValueError(f"规格 {spec_id} 不存在")
+
+        allowed = {"name", "primary_goal"}
+        safe_updates = {key: value for key, value in updates.items() if key in allowed}
+        if not safe_updates:
+            return {"spec_id": spec_id, "updated_fields": []}
+
+        safe_updates["updated_at"] = now_tz()
+        await self._db[SPEC_COLLECTION].update_one(
+            {"spec_id": spec_id},
+            {"$set": safe_updates},
+        )
+
+        # 同步更新 agent_configs 中的 name（短名和 workshop 版本配置都更新）
+        if "name" in safe_updates:
+            new_name = safe_updates["name"]
+            await self._db.agent_configs.update_many(
+                {"metadata.spec_id": spec_id},
+                {"$set": {"name": new_name}},
+            )
+
+        return {"spec_id": spec_id, "updated_fields": list(safe_updates.keys())}
 
     async def delete_spec(self, spec_id: str) -> Dict[str, Any]:
         spec_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": spec_id})
@@ -1448,6 +1476,7 @@ class AgentWorkshopService:
         if not spec_doc:
             raise ValueError(f"规格 {version.spec_id} 不存在")
         spec = AgentSpec(**spec_doc)
+        publish_warnings: List[str] = []
         project_memory_binding = await self._review_prompt_template_project_memory_binding(version)
         compatibility = await self._validate_version_workflow_compatibility(version, spec, require_active_template=False)
         if not compatibility["valid"]:
@@ -1456,8 +1485,8 @@ class AgentWorkshopService:
             )
         if project_memory_binding["enabled"] and not project_memory_binding["valid"]:
             missing_preview = "；".join(project_memory_binding["missing_items"][:4]) or "缺少项目长期记忆绑定标记"
-            raise ValueError(
-                f"版本 {version_id} 的 Prompt Template 尚未绑定当前 L4 项目长期记忆，不能发布：{missing_preview}"
+            publish_warnings.append(
+                f"版本 {version_id} 的 Prompt Template 尚未绑定当前 L4 项目长期记忆：{missing_preview}。建议补充后重新发布以获得更好的规则一致性。"
             )
 
         # 将之前 active 的版本归档，并从运行时配置中禁用旧发布版本
@@ -1534,6 +1563,7 @@ class AgentWorkshopService:
             "status": version.status.value,
             "previous_active_archived": True,
             "project_memory_binding": project_memory_binding,
+            "publish_warnings": publish_warnings,
             "workflow_compatibility": compatibility,
         }
 
@@ -2439,6 +2469,14 @@ class AgentWorkshopService:
                             str(content.constraints or "").strip(),
                             *lesson_constraint_lines,
                         ]))
+                    project_memory_block = await self._build_project_memory_block_for_workshop()
+                    if project_memory_block:
+                        content.system_prompt = (
+                            f"{content.system_prompt}"
+                            f"\n你还必须遵守以下项目长期记忆中的稳定规则、治理约束、输出约束与研究模板；"
+                            f"这些约束优先级高于临时表述偏好，不得在版本生成时弱化或省略。"
+                            f"\n{project_memory_block.strip()}"
+                        )
                     cloned_template = await prompt_service.create_template(
                         PromptTemplateCreate(
                             agent_type=source_template.agent_type or "custom_agent",
@@ -2661,6 +2699,35 @@ class AgentWorkshopService:
         user_goal: str = "",
         prompt_overrides: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        # 🔥 清理上一次测试遗留的进度记录
+        from core.tools.implementations.agent_builder.nanobot_agent_builder_tools import _get_progress_collection
+
+        progress_coll = await _get_progress_collection()
+        if progress_coll is not None:
+            await progress_coll.delete_one({"version_id": version_id})
+
+        async def _emit_progress(stage: str, message: str) -> None:
+            if progress_coll is None:
+                return
+            try:
+                await progress_coll.update_one(
+                    {"version_id": version_id},
+                    {
+                        "$set": {
+                            "version_id": version_id,
+                            "stage": stage,
+                            "message": message,
+                            "status": "running",
+                            "updated_at": now_tz(),
+                        },
+                        "$setOnInsert": {"started_at": now_tz()},
+                    },
+                    upsert=True,
+                )
+            except Exception:
+                pass
+
+        await _emit_progress("init", "正在初始化测试环境...")
         version_doc = await self._db[VERSION_COLLECTION].find_one({"version_id": version_id})
         if not version_doc:
             raise ValueError(f"版本 {version_id} 不存在")
@@ -2689,8 +2756,10 @@ class AgentWorkshopService:
         if not template_id:
             raise ValueError("当前版本还没有可调试的 Prompt 模板")
 
+        await _emit_progress("config", "正在配置 Agent 运行环境...")
         await self._ensure_runtime_agent_config(version, spec)
 
+        await _emit_progress("model", f"正在连接推理模型 {llm_model}...")
         from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
         from core.agents.config import AgentConfig
         from core.agents.factory import create_agent
@@ -2735,6 +2804,7 @@ class AgentWorkshopService:
             workflow_id=None,
         )
 
+        await _emit_progress("agent", f"正在创建 Agent 实例（绑定 {len(version.required_tools)} 个工具）...")
         agent = create_agent(
             version.version_id,
             config=AgentConfig(
@@ -2745,6 +2815,7 @@ class AgentWorkshopService:
             tool_ids=version.required_tools,
         )
 
+        await _emit_progress("analysis", f"正在对 {symbol} 执行分析任务...")
         inputs: Dict[str, Any] = {
             "stock_symbol": symbol,
             "ticker": symbol,
@@ -2777,6 +2848,7 @@ class AgentWorkshopService:
         else:
             result = await asyncio.to_thread(agent, inputs)
 
+        await _emit_progress("report", "Agent 分析完成，正在提取报告...")
         output_field_raw = str(version.agent_metadata.get("output_field") or "analysis_result")
         output_field = self._normalize_output_field_name(output_field_raw, "analysis")  # 🔥 规范化字段名
         debug_prompt = (result.get("__debug_prompt__") if isinstance(result, dict) else None) or {}
@@ -2831,6 +2903,8 @@ class AgentWorkshopService:
                 "analysis_date": analysis_date,
             },
         )
+        # 标记进度完成
+        await _emit_progress("done", "测试完成")
         return debug_result
 
     async def _save_session(self, session: AgentWorkshopSession) -> None:
@@ -2899,6 +2973,9 @@ class AgentWorkshopService:
 
     def _normalize_nanobot_identifier(self, identifier: str) -> str:
         normalized = re.sub(r"[^a-zA-Z0-9_]+", "_", str(identifier or "").strip()).strip("_")
+        # 去掉末尾的 _vN，避免与 workshop 版本号冲突
+        # 例如 moat_analyst_v2 → moat_analyst，workshop 会自己加 _v1
+        normalized = re.sub(r"_v\d+$", "", normalized)
         if not normalized:
             normalized = uuid.uuid4().hex[:12]
         return normalized
@@ -4298,6 +4375,38 @@ class AgentWorkshopService:
         has_tool_reference = any(tool_name and tool_name in text for tool_name in used_tool_names)
         return has_source_label and has_period and has_tool_reference
 
+    def _section_has_numeric_qualifier_disclaimer(self, section_text: str) -> bool:
+        """检测文本中是否包含数值估算/非精确标准的免责声明。
+
+        当报告明确标注某些数值基于公开认知估算、缺乏工具直出数据时，
+        不应再将该 section 内的不可追溯数值视为高风险硬拦截。
+        """
+        if not section_text:
+            return False
+        # ⚠️ 警告行：明确表达估算性质
+        warning_match = re.search(r'⚠️[^\n]{0,300}', section_text)
+        if warning_match:
+            warning = warning_match.group(0)
+            if any(kw in warning for kw in [
+                "估算", "缺乏", "未达到精确", "公开", "参考", "谨慎",
+                "非精确", "定性判断", "行业认知", "工具直出",
+            ]):
+                return True
+        # 免责关键字组合
+        qualifier_pairs = [
+            ("估算", "缺乏"),
+            ("公开", "谨慎"),
+            ("参考值", "非精确"),
+            ("基于公开", ""),
+            ("行业认知", "估算"),
+            ("未达到精确输出标准", ""),
+            ("仅供参考", ""),
+        ]
+        for kw1, kw2 in qualifier_pairs:
+            if kw1 in section_text and (not kw2 or kw2 in section_text):
+                return True
+        return False
+
     def _is_ranking_numeric_mention(self, mention: str, context: str = "") -> bool:
         text = f"{mention} {context}".lower()
         ranking_patterns = [
@@ -5175,8 +5284,27 @@ class AgentWorkshopService:
         return f"这个能力用于让 Agent 在“{title}”这段执行链路中稳定产出可直接消费的结构化结果。"
 
     def _merge_llm_spec_data(self, data: Dict[str, Any], fallback_spec: AgentSpec, fallback_spec_id: Optional[str] = None) -> AgentSpec:
-        name = self._require_string_field(data, "name", "requirement_clarification")
+        llm_name = self._require_string_field(data, "name", "requirement_clarification")
         domain = self._require_domain_field(data, "domain", "requirement_clarification")
+
+        # 🔥 保护 spec 名称不被 LLM 意外覆盖
+        # 场景1：已存在的 spec 名称不是占位值 → 强制保留
+        # 场景2：LLM 产出的名称看起来是 slu（纯英文+下划线，不含中文）→ 用已有名称覆盖
+        fallback_name = str(fallback_spec.name or "").strip()
+        is_placeholder_name = not fallback_name or fallback_name in {"待确认 Agent", "新 Agent", "未命名 Agent"} or fallback_name.startswith("agent-workshop-")
+        llm_is_slug = bool(re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", llm_name)) and not re.search(r"[\u4e00-\u9fff]", llm_name)
+
+        if not is_placeholder_name and llm_is_slug:
+            # LLM 产出了英文 slu（如 financial_report_risk_tracker），但已有中文名（如 财报风险跟踪助手 v2）
+            # 保留已有中文名
+            name = fallback_name
+        elif not is_placeholder_name:
+            # 已有非占位名称，保留
+            name = fallback_name
+        else:
+            # 全新 spec，使用 LLM 产出
+            name = llm_name
+
         resolved_spec_id = fallback_spec_id or fallback_spec.spec_id
         if not resolved_spec_id or resolved_spec_id.startswith("agent-workshop-"):
             resolved_spec_id = self._slugify(name or fallback_spec.name or f"agent-workshop-{uuid.uuid4().hex[:8]}")
@@ -6419,8 +6547,8 @@ class AgentWorkshopService:
                     "inputs": [item.model_dump() if hasattr(item, "model_dump") else item for item in (version.agent_metadata.get("inputs") or [])],
                     "outputs": [item.model_dump() if hasattr(item, "model_dump") else item for item in (version.agent_metadata.get("outputs") or [])],
                     "tags": version.agent_metadata.get("tags") or [spec.domain],
-                    "enabled": version.status == AgentVersionStatus.ACTIVE,
-                    "runtime_status": "active" if version.status == AgentVersionStatus.ACTIVE else "disabled",
+                    "enabled": version.status in (AgentVersionStatus.TESTING, AgentVersionStatus.ACTIVE),
+                    "runtime_status": "active" if version.status in (AgentVersionStatus.TESTING, AgentVersionStatus.ACTIVE) else "disabled",
                     "version_status": version.status.value,
                     "published": version.status == AgentVersionStatus.ACTIVE,
                     "config": {
@@ -6470,6 +6598,31 @@ class AgentWorkshopService:
             },
             upsert=True,
         )
+
+        # 同步短名 agent_config 的模板绑定
+        # Nanobot 的 create_or_update_runtime_agent_config 会创建短名配置（如 moat_analyst_v2），
+        # 但不设 prompt_template_type。前端 AgentDetail / 模板管理 / 流程编辑查询的是短名，
+        # 因此必须将 workshop 版本 ID 的模板绑定同步过去。
+        short_name_config = await self._db.agent_configs.find_one({
+            "agent_id": {"$ne": version.version_id},
+            "metadata.spec_id": version.spec_id,
+        })
+        if short_name_config:
+            template_id = version.prompt_template_ref.get("template_id")
+            template_status = version.prompt_template_ref.get("status")
+            update_fields: dict = {
+                "prompt_template_type": "universal",
+                "prompt_template_name": version.version_id,
+                "updated_at": now_tz(),
+            }
+            if template_id is not None:
+                update_fields["metadata.template_id"] = template_id
+            if template_status is not None:
+                update_fields["metadata.template_status"] = template_status
+            await self._db.agent_configs.update_one(
+                {"_id": short_name_config["_id"]},
+                {"$set": update_fields},
+            )
 
     def _build_agent_metadata(
         self,
@@ -6984,7 +7137,7 @@ class AgentWorkshopService:
 
         publish_blockers.extend(confirmed_issue_groups.get("constraint_control", []))
         publish_blockers.extend(confirmed_issue_groups.get("numeric_traceability", []))
-        publish_blockers.extend(confirmed_issue_groups.get("project_memory_binding", []))
+        publish_warnings.extend(confirmed_issue_groups.get("project_memory_binding", []))
         publish_blockers.extend(confirmed_issue_groups.get("execution_plan", []))
         publish_blockers.extend(confirmed_issue_groups.get("output_coverage", []))
 
@@ -7261,7 +7414,6 @@ class AgentWorkshopService:
         if candidate.category == "project_memory_binding":
             if not runtime_summary.has_system_prompt:
                 append_finding("缺少运行时项目记忆证据")
-                invalid_reasons.append("缺少 runtime system_prompt 证据，无法确认当前 L4 项目长期记忆是否真实注入。")
             else:
                 append_finding(
                     "运行时 Prompt 缺少当前项目长期记忆",
@@ -8260,6 +8412,10 @@ class AgentWorkshopService:
             section_has_source_label = any(keyword in section_context for keyword in ["来源", "数据源", "来源工具", "数据来源", "计算依据", "输入参数", "工具计算"])
             section_has_period = bool(re.search(r"20\d{2}Q[1-4]|20\d{6,8}|报告期|报告期范围|分析日期|period", section_context, re.IGNORECASE))
             is_high_risk = self._is_high_risk_numeric_mention(mention, section_context)
+            # 若 section 内包含明确免责声明（数值基于公开认知估算、缺乏工具数据），
+            # 即使当前无工具轨迹可追溯，也不再当作硬拦截（blocker），降级为正常风险（warning）。
+            if is_high_risk and self._section_has_numeric_qualifier_disclaimer(section_context):
+                is_high_risk = False
             has_ranking_derivation_support = self._has_ranking_derivation_support(
                 mention,
                 context,

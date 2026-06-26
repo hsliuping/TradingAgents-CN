@@ -228,7 +228,7 @@ class AgentFactory:
                 "enabled": True,
                 "$or": [
                     {"metadata.source": {"$ne": "agent_workshop"}},
-                    {"metadata.source": "agent_workshop", "version_status": "active", "runtime_status": "active"},
+                    {"metadata.source": "agent_workshop", "version_status": {"$in": ["active", "testing"]}, "runtime_status": "active"},
                 ],
             })
             if doc is None:

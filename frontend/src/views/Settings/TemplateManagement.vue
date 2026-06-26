@@ -389,6 +389,12 @@ const agentTypeMapList: Record<string, string[]> = {
 const availableAgentCodes = ref<string[]>([])
 const agentOptions = computed(() => {
   const currentType = filters.agent_type || (typeof route.query.agent_type === 'string' ? (route.query.agent_type as string) : undefined)
+  // 工坊自定义 Agent 没有预定义映射，直接用从 API 获取到的所有 agent_name
+  if (currentType === 'universal') {
+    return availableAgentCodes.value
+      .map((code) => ({ code, cn: agentNameMap[code] || code }))
+      .sort((a, b) => a.cn.localeCompare(b.cn))
+  }
   const baseCodes = currentType ? (agentTypeMapList[currentType] || []) : Object.keys(agentNameMap)
   const codes = availableAgentCodes.value.length ? baseCodes.filter(c => availableAgentCodes.value.includes(c)) : baseCodes
   return codes.map((code) => ({ code, cn: agentNameMap[code] })).sort((a, b) => a.cn.localeCompare(b.cn))
@@ -404,7 +410,10 @@ const loadAvailableAgents = async () => {
     const res = await TemplatesApi.list({ agent_type: currentType, limit: 200 })
     const items = (res.data && (res.data as any).items) ? (res.data as any).items : []
     const codes = Array.from(new Set(items.map((it: any) => it.agent_name).filter(Boolean)))
-    availableAgentCodes.value = codes as string[]
+    // 工坊自定义 Agent 分类：只保留 workshop 版本模板（agent_name 以 spec_nanobot_ 开头），过滤 nanobot 生成的默认短名模板
+    const isUniversal = (filters.agent_type || (typeof route.query.agent_type === 'string' ? route.query.agent_type : '')) === 'universal'
+    const workshopCodes = isUniversal ? codes.filter((c) => (c as string).startsWith('spec_nanobot_')) : codes
+    availableAgentCodes.value = workshopCodes as string[]
     // 选中值无效时清空
     if (filters.agent_name && !codes.includes(filters.agent_name)) {
       filters.agent_name = undefined
@@ -469,7 +478,12 @@ const loadTemplates = async () => {
     
     // 🔥 过滤掉v1.0版本的模板，只保留v2.0版本
     const v1AgentTypes = ['analysts', 'researchers', 'debators', 'managers', 'trader', 'reviewers', 'position_analysis']
+    // 工坊自定义 Agent 分类：只保留 workshop 版本模板
+    const isUniversal = filters.agent_type === 'universal'
     items.value = allItems.filter((item: any) => {
+      if (isUniversal && item.agent_name && !item.agent_name.startsWith('spec_nanobot_')) {
+        return false
+      }
       // 如果指定了agent_type，且是v1.0类型，则过滤掉
       if (item.agent_type && v1AgentTypes.includes(item.agent_type)) {
         return false
@@ -654,6 +668,10 @@ onMounted(() => {
     filters.agent_type = qp.agent_type
   }
   if (typeof qp.agent_name === 'string') filters.agent_name = qp.agent_name
+  // 工坊自定义 Agent 默认只显示已发布（active）的 workshop 版本模板
+  if (filters.agent_type === 'universal' && !qp.status) {
+    filters.status = 'active'
+  }
   if (typeof qp.is_system === 'string') {
     // 同步设置 is_system 和 is_system_str
     if (qp.is_system === 'true') {

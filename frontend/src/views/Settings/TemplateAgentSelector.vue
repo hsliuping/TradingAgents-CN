@@ -44,7 +44,7 @@ const cards = [
   { type: 'position_analysis_v2', cn: '仓位分析 v2.0', desc: 'v2.0 仓位分析相关的提示词模板', examples: ['技术面分析师 v2.0','基本面分析师 v2.0','风险评估师 v2.0'] },
   { type: 'post_processors_v2', cn: '后处理器 v2.0', desc: 'v2.0 数据准备与报告生成的提示词模板', examples: ['数据准备器 v2.0','报告生成器 v2.0'] },
   // 工坊自定义 Agent
-  { type: 'custom_agent', cn: '工坊自定义 Agent', desc: 'Agent 工坊创建的自定义智能体提示词模板，由 LLM 自动生成并可手动调整', examples: ['自定义分析师','自定义研究员','自定义策略师'] },
+  { type: 'universal', cn: '工坊自定义 Agent', desc: 'Agent 工坊创建的自定义智能体提示词模板，由 LLM 自动生成并可手动调整', examples: ['自定义分析师','自定义研究员','自定义策略师'] },
   // v1.0 agents
   //{ type: 'analysts', cn: '分析师 v1.0', desc: '市场、基本面、新闻、社媒等分析任务的提示词模板', examples: ['市场分析师','基本面分析师','新闻分析师','社媒分析师'] },
   //{ type: 'researchers', cn: '研究员 v1.0', desc: '研究观点与报告撰写的提示词模板', examples: ['看涨研究员','看跌研究员'] },

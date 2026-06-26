@@ -95,6 +95,7 @@ class EmbeddedNanobotRuntime:
         "create_or_update_universal_agent_prompt_template",
         "bind_agent_tools_and_validate_candidate",
         "generate_confirmed_candidate_agent",
+        "resolve_agent_workshop_blocking_gaps",
     }
     SKILL_CREATION_TOOL_IDS = {
         "start_external_skill_generation_session",
@@ -597,7 +598,18 @@ class EmbeddedNanobotRuntime:
         if workshop_session_id:
             context_bits.append(f"workshop_session_id={workshop_session_id}")
         spec_name = str(thread_context.get("spec_name") or "").strip()
-        if context_bits:
+        has_spec_context = bool(spec_id or version_id or workshop_session_id)
+
+        if has_spec_context and spec_id:
+            guidance_lines.extend([
+                "",
+                f"🔴 CRITICAL: The user is currently operating on Agent **{spec_name or spec_id}** in the Agent Studio UI.",
+                f"Thread context: spec_id={spec_id}" + (f", version_id={version_id}" if version_id else ""),
+                f"When users say '这个agent', 'this agent', '这个', '它', '重新生成', '测试这个', or use any demonstrative pronoun referring to an agent, they ALWAYS mean THIS agent (spec_id={spec_id}).",
+                "DO NOT ask 'which agent do you mean?' or list other agents. DO NOT offer a choice between agents. There is only one candidate: the one in this thread context.",
+                "You can verify the agent's state via inspect_agent_workshop_assets if needed, but the target is already determined. Never question which agent the user is referring to.",
+            ])
+        elif has_spec_context:
             guidance_lines.extend([
                 "",
                 f"Current thread context already points to: {', '.join(context_bits)}.",
@@ -610,7 +622,7 @@ class EmbeddedNanobotRuntime:
                 if version_id:
                     exact_args.append(f"version_id='{version_id}'")
                 guidance_lines.append(
-                    f"Preferred verification call for this thread: inspect_agent_workshop_assets({', '.join(exact_args)}) before falling back to keyword search."
+                    f"If you need to verify the current state of THIS agent, use inspect_agent_workshop_assets({', '.join(exact_args)}). Do NOT use keyword-based search since the target is already known."
                 )
             elif "inspect_agent_workshop_assets" in tool_names and workshop_session_id:
                 guidance_lines.append(
@@ -621,7 +633,7 @@ class EmbeddedNanobotRuntime:
                     f"If Workshop inspection is empty but the runtime layer still needs checking, inspect_runtime_agent_configs(keyword='{spec_name}') is the preferred fallback."
                 )
 
-        if "inspect_agent_workshop_assets" in tool_names:
+        if not has_spec_context and "inspect_agent_workshop_assets" in tool_names:
             guidance_lines.append(
                 "Recommended first step for existing Workshop assets: call inspect_agent_workshop_assets before claiming which spec, version, prompt lineage, or published state currently exists."
             )
@@ -702,7 +714,10 @@ class EmbeddedNanobotRuntime:
             from app.models.project_memory import ProjectMemoryCategory
             from app.services.project_memory_service import get_project_memory_service
 
-            del user_message, thread_context
+            clean_thread_context = dict(thread_context or {})
+            spec_id = str(clean_thread_context.get("spec_id") or "").strip()
+
+            del user_message
             block = await get_project_memory_service(self.memory_db).build_prompt_block(
                 categories=[
                     ProjectMemoryCategory.PROJECT_RULE.value,
@@ -714,9 +729,93 @@ class EmbeddedNanobotRuntime:
             )
             if not block:
                 return None
-            return "# Agent Workshop project memory\n\nUse the following stable project rules and governance constraints as hard context for Agent Workshop reasoning.\n\n" + block
+
+            lines = [
+                "# Agent Workshop project memory",
+                "",
+                "Use the following stable project rules and governance constraints as hard context for Agent Workshop reasoning.",
+                "",
+                block,
+            ]
+
+            # 当已选定具体 Agent 时，注入该 Agent 的聚焦信息，替代通用的"所有 Agent 列表"
+            if spec_id:
+                spec_focus = await self._build_current_spec_focus_block(spec_id, clean_thread_context)
+                if spec_focus:
+                    lines.append("")
+                    lines.append(spec_focus)
+
+            return "\n".join(lines)
         except Exception as exc:
             logger.debug("EmbeddedNanobot project memory guidance skipped: %s", exc)
+            return None
+
+    async def _build_current_spec_focus_block(
+        self,
+        spec_id: str,
+        thread_context: dict[str, Any],
+    ) -> str | None:
+        """根据 thread_context.spec_id 加载当前 Agent 的聚焦信息块。"""
+        try:
+            spec_name = str(thread_context.get("spec_name") or "").strip()
+            version_id = str(thread_context.get("version_id") or "").strip()
+            version_status = str(thread_context.get("version_status") or "").strip()
+
+            db = self.memory_db
+            spec_doc = await db.agent_workshop_specs.find_one({"spec_id": spec_id}) if hasattr(db, "agent_workshop_specs") else None
+            if not spec_doc and hasattr(db, "agent_specs"):
+                spec_doc = await db.agent_specs.find_one({"spec_id": spec_id})
+
+            version_doc = None
+            if version_id:
+                try:
+                    version_doc = await db.agent_workshop_versions.find_one({"version_id": version_id}) if hasattr(db, "agent_workshop_versions") else None
+                except Exception:
+                    pass
+                if not version_doc and hasattr(db, "agent_versions"):
+                    try:
+                        version_doc = await db.agent_versions.find_one({"version_id": version_id})
+                    except Exception:
+                        pass
+
+            if not spec_doc and not spec_name:
+                return None
+
+            name = spec_name or (spec_doc.get("name") if isinstance(spec_doc, dict) else "未知 Agent")
+            primary_goal = (spec_doc.get("primary_goal") or "") if isinstance(spec_doc, dict) else ""
+            domain = (spec_doc.get("domain") or "") if isinstance(spec_doc, dict) else ""
+
+            lines = [
+                "## Current Agent Focus",
+                "",
+                f"**当前正在操作的 Agent**：{name}（spec_id={spec_id}）",
+            ]
+            if primary_goal:
+                lines.append(f"**目标**：{primary_goal}")
+            if domain:
+                lines.append(f"**领域**：{domain}")
+
+            if version_doc and isinstance(version_doc, dict):
+                status = version_doc.get("status") or version_status
+                required_tools = version_doc.get("required_tools") or []
+                lines.append(f"**当前版本**：{version_id}（状态：{status}）")
+                if required_tools:
+                    lines.append(f"**绑定工具**：{', '.join(required_tools[:8])}")
+                evaluation_policy = version_doc.get("evaluation_policy") or {}
+                if isinstance(evaluation_policy, dict):
+                    min_score = evaluation_policy.get("minimum_score")
+                    if min_score:
+                        lines.append(f"**达标线**：{min_score}")
+            elif version_id:
+                lines.append(f"**当前版本**：{version_id}（状态：{version_status or '未知'}）")
+
+            lines.append("")
+            lines.append("你对这个 Agent 的讨论、修改、测试和发布操作都应该以该 Agent 为目标。")
+            lines.append("如果需要查看该 Agent 的详细资产（规范、版本、配置、提示词），优先调用 inspect_agent_workshop_assets 或 inspect_runtime_agent_configs。")
+
+            return "\n".join(lines)
+        except Exception as exc:
+            logger.debug("EmbeddedNanobot spec focus block skipped: %s", exc)
             return None
 
     def _log_agent_builder_lesson_recall_observation(

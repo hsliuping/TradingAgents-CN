@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -900,6 +901,57 @@ def _format_agent_version(doc: dict[str, Any]) -> dict[str, Any]:
         "prompt_template_ref": doc.get("prompt_template_ref") or {},
         "updated_at": doc.get("updated_at"),
     }
+
+
+async def _merge_latest_evaluations_into_versions(
+    version_results: list[dict[str, Any]],
+    db,
+) -> None:
+    """批量查询最新评估记录，合并评分/结论到 version_results 中。"""
+    if not version_results:
+        return
+    version_ids = [str(v.get("version_id") or "").strip() for v in version_results if v.get("version_id")]
+    if not version_ids:
+        return
+
+    try:
+        evaluations_collection = _get_collection(db, _WORKSHOP_EVALUATION_COLLECTION)
+        if evaluations_collection is None:
+            return
+
+        # 批量查询所有相关评估，按 created_at 降序
+        eval_cursor = evaluations_collection.find(
+            {"version_id": {"$in": version_ids}},
+            {"_id": 0, "evaluation_id": 1, "version_id": 1, "decision": 1, "scores": 1, "issues": 1, "created_at": 1},
+        )
+        if hasattr(eval_cursor, "sort"):
+            eval_cursor = eval_cursor.sort("created_at", -1)
+
+        eval_docs = await eval_cursor.to_list(length=len(version_ids) * 3)
+
+        # 按 version_id 分组，取每个版本最新的评估
+        latest_eval_by_version: dict[str, dict[str, Any]] = {}
+        for doc in eval_docs:
+            vid = str(doc.get("version_id") or "").strip()
+            if vid and vid not in latest_eval_by_version:
+                latest_eval_by_version[vid] = doc
+
+        for version in version_results:
+            vid = str(version.get("version_id") or "").strip()
+            if not vid:
+                continue
+            eval_doc = latest_eval_by_version.get(vid)
+            if not eval_doc:
+                continue
+            scores = eval_doc.get("scores") or {}
+            version["latest_evaluation"] = {
+                "decision": str(eval_doc.get("decision") or ""),
+                "overall_score": scores.get("overall") if isinstance(scores, dict) else None,
+                "issues_count": len(eval_doc.get("issues") or []),
+                "evaluation_id": str(eval_doc.get("evaluation_id") or ""),
+            }
+    except Exception:
+        pass
 
 
 def _format_prompt_template_record(doc: dict[str, Any]) -> dict[str, Any]:
@@ -1835,6 +1887,9 @@ async def inspect_agent_workshop_assets(
                 existing_spec_ids.add(formatted_spec_id)
                 if len(spec_results) >= capped_limit:
                     break
+
+        # 🔥 批量获取每个版本的最新评估数据，避免 Nanobot 依赖 stale 对话记忆
+        await _merge_latest_evaluations_into_versions(version_results, db)
 
         return _json_response({
             "keyword": clean_keyword,
@@ -3024,7 +3079,7 @@ async def iterate_agent_workshop_version(
         if phase_context.get("guard_available"):
             version_status = str(phase_context.get("version_status") or "").strip().lower()
             current_phase = str(phase_context.get("phase") or "").strip().lower()
-            allowed_phases = {"evaluation", "publish-ready", "published"}
+            allowed_phases = {"testing", "evaluation", "publish-ready", "published"}
             if current_phase not in allowed_phases:
                 blocked_code = "phase_not_ready"
                 next_action = "请先完成至少一轮正式评估，再决定是否开始下一轮。"
@@ -3488,8 +3543,11 @@ async def generate_confirmed_candidate_agent(
                 workshop_version_result = await _auto_build_workshop_version_result(workshop_session_id)
                 if workshop_version_result.get("status") != "ok":
                     return _json_response({"status": "error", "stage": "workshop_version", "result": workshop_version_result})
-                built_version = workshop_version_result.get("version") or {}
-                built_version_id = str(built_version.get("version_id") or "").strip()
+                built_version = workshop_version_result.get("version")
+                if isinstance(built_version, dict):
+                    built_version_id = str(built_version.get("version_id") or "").strip()
+                else:
+                    built_version_id = str(built_version or "").strip()
                 if built_version_id and agent_configs is not None:
                     await agent_configs.update_one(
                         {"agent_id": clean_agent_id},
@@ -3559,6 +3617,255 @@ async def generate_confirmed_candidate_agent(
         return _json_response({"status": "error", "message": f"确认后生成候选 Agent 失败: {exc}"})
 
 
+@tool
+@register_tool(
+    tool_id="resolve_agent_workshop_blocking_gaps",
+    name="补全 Agent 工坊能力缺口",
+    description="当缺口分析发现 blocking_gaps 时，自动为每个缺口创建 Skill 生成会话并等待完成，返回可绑定的新能力。",
+    category="assistant_ops",
+    is_online=True,
+    auto_register=True,
+    timeout_tier="heavy",
+    when_to_use=(
+        "当 analyze_agent_workshop_gaps 返回 blocking_gaps 不为空，且这些缺口确实是可复用能力时使用。"
+        "Nanobot 无需手动逐个调用 Skill 创建工具，一个调用即可完成缺口补全。"
+    ),
+    when_not_to_use=(
+        "不适合在缺口分析尚未完成时调用；"
+        "不适合一次性补全过多（>5 个）缺口，那种情况建议分批处理。"
+    ),
+    returns="返回 JSON 字符串，包含每个缺口的处理结果、生成的 Skill 信息，以及后续建议。",
+    example="resolve_agent_workshop_blocking_gaps(session_id='ws_abc123')",
+    related_tools=[
+        "analyze_agent_workshop_gaps",
+        "build_agent_workshop_version",
+        "search_project_capabilities",
+    ],
+)
+async def resolve_agent_workshop_blocking_gaps(
+    session_id: Annotated[str, "Agent 工坊会话 ID"],
+    blocking_gaps_json: Annotated[str, "可选 JSON 数组，直接指定要补全的缺口描述；若为空则从 session 的 gap_report 中读取"] = "",
+    max_wait_seconds: Annotated[int, "每个 Skill 生成的最长等待时间（秒），默认 300"] = 300,
+) -> str:
+    """自动补全 Agent 工坊的能力缺口。
+
+    流程：
+    1. 从 workshop session 中读取 gap_report.blocking_gaps
+    2. 对每个缺口并行启动 Skill 生成会话
+    3. 等待所有 Skill 生成完成（带超时）
+    4. 返回结果，供后续 build_version 使用
+    """
+    try:
+        clean_session_id = str(session_id or "").strip()
+        if not clean_session_id:
+            return _json_response({"status": "error", "message": "session_id 不能为空"})
+
+        db = get_mongo_db()
+        from app.services.skill_generation_service import SkillGenerationService, SESSION_COLLECTION
+
+        skill_service = SkillGenerationService(db=db)
+
+        # 1. 获取 blocking_gaps
+        gaps: list[str] = []
+        if blocking_gaps_json.strip():
+            try:
+                parsed = json.loads(blocking_gaps_json)
+                if isinstance(parsed, list):
+                    gaps = [str(g).strip() for g in parsed if str(g).strip()]
+            except (json.JSONDecodeError, TypeError):
+                return _json_response({"status": "error", "message": "blocking_gaps_json 不是有效的 JSON 数组"})
+
+        if not gaps:
+            # 从 workshop session 中读取
+            ws_service = AgentWorkshopService(db=db)
+            session = await ws_service._load_session(clean_session_id)
+            if not session:
+                return _json_response({"status": "error", "message": f"Agent 工坊会话 {clean_session_id} 不存在"})
+
+            gap_report = session.gap_report
+            if not gap_report:
+                # 尝试先执行缺口分析
+                gap_result = await ws_service.analyze_gaps(clean_session_id)
+                gap_report = gap_result.get("gap_report") if isinstance(gap_result, dict) else None
+
+            if not gap_report:
+                return _json_response({"status": "error", "message": "无法获取缺口分析报告，请先执行 analyze_agent_workshop_gaps"})
+
+            blocking_gaps = getattr(gap_report, "blocking_gaps", None) or []
+            if isinstance(blocking_gaps, list):
+                gaps = [str(g).strip() for g in blocking_gaps if str(g).strip()]
+
+        if not gaps:
+            return _json_response({
+                "status": "ok",
+                "message": "没有需要补全的阻塞缺口",
+                "gaps_found": 0,
+                "skills_generated": [],
+            })
+
+        capped_gaps = gaps[:5]
+        if len(gaps) > 5:
+            logger.warning(
+                "[resolve_gaps] 缺口数量 %d 超过上限，只处理前 5 个: %s",
+                len(gaps), capped_gaps,
+            )
+
+        wait_seconds = max(60, min(int(max_wait_seconds), 600))
+
+        logger.info(
+            "[resolve_gaps] 开始补全 %d 个能力缺口 (workshop_session=%s, timeout=%ds): %s",
+            len(capped_gaps), clean_session_id, wait_seconds, capped_gaps,
+        )
+
+        # 2. 对每个缺口启动 Skill 生成
+        results: list[dict[str, Any]] = []
+
+        async def _process_single_gap(gap_index: int, gap_description: str) -> dict[str, Any]:
+            gap_result: dict[str, Any] = {
+                "gap_index": gap_index,
+                "gap_description": gap_description,
+                "status": "pending",
+                "skill_tool_id": None,
+                "skill_display_name": None,
+                "session_id": None,
+                "error": None,
+                "elapsed_seconds": 0,
+            }
+
+            try:
+                # Step 1: 启动 Skill 生成会话
+                start_result = await skill_service.start_session(
+                    description=gap_description,
+                    user_id="nanobot",
+                    handoff_context={
+                        "source": "agent_workshop_gap",
+                        "source_spec_id": "",
+                        "source_name": "",
+                        "target_capability": gap_description,
+                        "handoff_intent": "auto_resolve_blocking_gap",
+                    },
+                )
+                skill_session_id = start_result.get("session_id")
+                if not skill_session_id:
+                    gap_result["status"] = "failed"
+                    gap_result["error"] = "启动 Skill 生成会话失败"
+                    return gap_result
+                gap_result["session_id"] = skill_session_id
+
+                # Step 2: 需求澄清（确认生成）
+                respond_result = await skill_service.respond_to_session(
+                    skill_session_id,
+                    "确认按可复用能力来设计，这是一个可参数化、可绑定到 Agent 的工具。",
+                )
+
+                # Step 3: 预览规格
+                preview = await skill_service.preview_spec(skill_session_id, "确认")
+                if not preview:
+                    gap_result["status"] = "failed"
+                    gap_result["error"] = "预览 Skill 规格失败"
+                    return gap_result
+
+                # Step 4: 确认并触发生成
+                gen_result = await skill_service.confirm_spec(skill_session_id, "确认生成")
+                gap_result["status"] = "generating"
+
+                # Step 5: 轮询等待生成完成
+                poll_interval = 5
+                elapsed = 0
+                while elapsed < wait_seconds:
+                    await asyncio.sleep(poll_interval)
+                    elapsed += poll_interval
+                    gap_result["elapsed_seconds"] = elapsed
+
+                    session_doc = await db[SESSION_COLLECTION].find_one({"session_id": skill_session_id})
+                    if not session_doc:
+                        gap_result["status"] = "failed"
+                        gap_result["error"] = "Skill 生成会话丢失"
+                        return gap_result
+
+                    status = session_doc.get("status", "")
+                    pipeline_stage = session_doc.get("pipeline_stage", "")
+                    pipeline_message = session_doc.get("pipeline_message", "")
+
+                    if status == "completed":
+                        spec = session_doc.get("spec") or {}
+                        gap_result["status"] = "completed"
+                        gap_result["skill_tool_id"] = spec.get("tool_id", "")
+                        gap_result["skill_display_name"] = spec.get("display_name", "")
+                        gap_result["pipeline_message"] = pipeline_message
+                        logger.info(
+                            "[resolve_gaps] Skill #%d 生成完成: tool_id=%s display_name=%s elapsed=%ds",
+                            gap_index,
+                            gap_result["skill_tool_id"],
+                            gap_result["skill_display_name"],
+                            elapsed,
+                        )
+                        return gap_result
+
+                    if status == "failed":
+                        gap_result["status"] = "failed"
+                        gap_result["error"] = f"Skill 生成失败: {pipeline_message}"
+                        return gap_result
+
+                    logger.debug(
+                        "[resolve_gaps] Skill #%d 仍在生成中: status=%s stage=%s elapsed=%ds",
+                        gap_index, status, pipeline_stage, elapsed,
+                    )
+
+                # 超时
+                gap_result["status"] = "timeout"
+                gap_result["error"] = f"Skill 生成超时（{wait_seconds}s）"
+                return gap_result
+
+            except Exception as exc:
+                logger.error("[resolve_gaps] Skill #%d 处理异常: %s", gap_index, exc, exc_info=True)
+                gap_result["status"] = "failed"
+                gap_result["error"] = str(exc)
+                return gap_result
+
+        # 并行处理所有缺口
+        tasks = [
+            _process_single_gap(i, gap_desc)
+            for i, gap_desc in enumerate(capped_gaps)
+        ]
+        results = await asyncio.gather(*tasks)
+
+        completed = [r for r in results if r["status"] == "completed"]
+        failed = [r for r in results if r["status"] in ("failed", "timeout")]
+
+        summary = {
+            "total_gaps": len(capped_gaps),
+            "completed": len(completed),
+            "failed": len(failed),
+            "generated_tool_ids": [r["skill_tool_id"] for r in completed if r["skill_tool_id"]],
+            "next_action": (
+                "所有缺口已补全，建议重新调用 build_agent_workshop_version 构建版本"
+                if len(completed) == len(capped_gaps)
+                else (
+                    f"已补全 {len(completed)}/{len(capped_gaps)} 个缺口，"
+                    "剩余缺口可能需要手动处理。建议调用 build_agent_workshop_version 构建版本，"
+                    "已生成的 Skill 会被自动绑定。"
+                )
+            ),
+        }
+
+        logger.info(
+            "[resolve_gaps] 补全完成: completed=%d failed=%d tool_ids=%s",
+            len(completed), len(failed), summary["generated_tool_ids"],
+        )
+
+        return _json_response({
+            "status": "ok",
+            "workshop_session_id": clean_session_id,
+            "summary": summary,
+            "results": results,
+        })
+
+    except Exception as exc:
+        logger.error("补全 Agent 工坊能力缺口失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"补全能力缺口失败: {exc}"})
+
+
 __all__ = [
     "search_project_capabilities",
     "inspect_runtime_agent_configs",
@@ -3580,4 +3887,16 @@ __all__ = [
     "create_or_update_universal_agent_prompt_template",
     "bind_agent_tools_and_validate_candidate",
     "generate_confirmed_candidate_agent",
+    "resolve_agent_workshop_blocking_gaps",
 ]
+
+
+async def _get_progress_collection():
+    """获取 workshop_test_progress 集合（懒初始化）。"""
+    try:
+        db = get_mongo_db()
+        collection = db.get_collection("workshop_test_progress")
+        await collection.create_index("version_id", unique=True)
+        return collection
+    except Exception:
+        return None

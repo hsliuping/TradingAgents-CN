@@ -248,6 +248,32 @@ async def get_spec(
     return ok(spec)
 
 
+class UpdateSpecRequest(BaseModel):
+    name: Optional[str] = Field(default=None, description="Agent 显示名称")
+    primary_goal: Optional[str] = Field(default=None, description="Agent 主要目标")
+
+
+@router.put("/specs/{spec_id}")
+async def update_spec(
+    spec_id: str,
+    req: UpdateSpecRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    try:
+        svc = _get_service(db)
+        updates = {}
+        if req.name is not None:
+            updates["name"] = str(req.name).strip()
+        if req.primary_goal is not None:
+            updates["primary_goal"] = str(req.primary_goal).strip()
+        if not updates:
+            raise HTTPException(status_code=400, detail="没有要更新的字段")
+        result = await svc.update_spec(spec_id, updates)
+        return ok(result)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.delete("/specs/{spec_id}")
 async def delete_spec(
     spec_id: str,
@@ -515,3 +541,26 @@ async def debug_version(
     except Exception as e:
         logger.error(f"❌ Agent 工坊版本调试失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/test-progress/{version_id}")
+async def get_test_progress(version_id: str):
+    """获取指定版本的测试进度（用于前端轮询）。"""
+    from core.tools.implementations.agent_builder.nanobot_agent_builder_tools import _get_progress_collection
+
+    coll = await _get_progress_collection()
+    if coll is None:
+        return ok({"version_id": version_id, "status": "unknown", "message": "进度服务不可用"})
+
+    doc = await coll.find_one({"version_id": version_id})
+    if not doc:
+        return ok({"version_id": version_id, "status": "idle", "message": "没有正在进行的测试"})
+
+    return ok({
+        "version_id": version_id,
+        "status": doc.get("status"),
+        "stage": doc.get("stage"),
+        "message": doc.get("message"),
+        "started_at": doc.get("started_at"),
+        "updated_at": doc.get("updated_at"),
+    })

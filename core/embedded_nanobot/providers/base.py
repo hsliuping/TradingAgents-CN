@@ -57,7 +57,7 @@ class GenerationSettings:
 
 class LLMProvider(ABC):
     _CHAT_RETRY_DELAYS = (1, 2, 4)
-    _TRANSIENT_ERROR_MARKERS = ("429", "rate limit", "500", "502", "503", "504", "overloaded", "timeout", "timed out", "connection", "server error", "temporarily unavailable")
+    _TRANSIENT_ERROR_MARKERS = ("429", "rate limit", "500", "502", "503", "504", "overloaded", "timeout", "timed out", "connection", "server error", "temporarily unavailable", "unterminated string", "jsondecodeerror")
     _SENTINEL = object()
 
     def __init__(self, api_key: str | None = None, api_base: str | None = None):

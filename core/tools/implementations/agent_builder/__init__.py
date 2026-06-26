@@ -13,6 +13,7 @@ from .nanobot_agent_builder_tools import (
     inspect_runtime_agent_configs,
     prepare_agent_requirement_intake,
     prepare_agent_generation_confirmation,
+    resolve_agent_workshop_blocking_gaps,
     search_project_capabilities,
 )
 
@@ -32,4 +33,5 @@ __all__ = [
     "create_or_update_universal_agent_prompt_template",
     "bind_agent_tools_and_validate_candidate",
     "generate_confirmed_candidate_agent",
+    "resolve_agent_workshop_blocking_gaps",
 ]

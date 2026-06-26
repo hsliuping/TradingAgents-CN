@@ -349,6 +349,9 @@ Condition: a Workshop version exists and is ready for real-data testing, whether
 5. `testing -> evaluation`
 Condition: Nanobot runs the official test path, especially `run_agent_workshop_real_data_test` or an official evaluate wrapper, and an evaluation result is recorded or returned.
 
+5b. `testing -> governance`
+Condition: the version is in testing but configuration is broken (tools not bound, template still draft, or version won't run), and user confirms iteration is needed.
+
 6. `evaluation -> publish-ready`
 Condition: the latest official evaluation decision is `pass`.
 
@@ -391,7 +394,8 @@ Condition: `publish_agent_workshop_version` succeeds and the version becomes `ac
 
 1. allowed: `debug_agent_workshop_version`
 2. allowed: `run_agent_workshop_real_data_test`
-3. disallowed: claiming publish readiness before a `pass` evaluation
+3. allowed: `iterate_agent_workshop_version` when the version configuration is broken and cannot run tests
+4. disallowed: claiming publish readiness before a `pass` evaluation
 
 `evaluation`
 

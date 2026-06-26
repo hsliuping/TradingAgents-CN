@@ -140,6 +140,12 @@ class UniversalAgent(BaseAgent):
                     f"工具数: {len(self._langchain_tools)}"
                 )
                 report = self.invoke_with_tools(messages)
+                self._last_llm_debug = {
+                    "response_type": "tool_invoke",
+                    "final_response_content": report,
+                    "tool_mode": True,
+                    "tool_trace": list(getattr(self, '_tool_call_summaries_collected', [])),
+                }
             else:
                 logger.warning(f"[UniversalAgent:{self.agent_id}] 无工具，直接调用 LLM")
                 response = self._llm.invoke(messages)

@@ -9,13 +9,15 @@
         </div>
       </div>
       <div class="topbar-actions">
+        <el-button class="btn btn-ghost" plain :class="{ active: showLeftSidebar }" @click="showLeftSidebar = !showLeftSidebar">Agent 列表</el-button>
+        <el-button class="btn btn-ghost" plain :class="{ active: showStatusSidebar }" @click="showStatusSidebar = !showStatusSidebar">查看状态</el-button>
         <el-button class="btn btn-ghost" plain @click="router.push('/workflow')">返回分析流</el-button>
         <el-button class="btn btn-primary" type="primary" @click="resetStudio">新建 Agent</el-button>
       </div>
     </header>
 
-    <div class="main">
-      <aside class="sidebar">
+    <div class="main" :style="mainGridStyle">
+      <aside v-if="showLeftSidebar" class="sidebar">
         <div class="panel-head">
           <div class="panel-title-row">
             <span class="panel-title">我的 Agent</span>
@@ -65,12 +67,30 @@
       <main class="content">
         <div class="chat-head">
           <div>
-            <div class="chat-title">{{ displaySpec?.name || '新建 Agent' }}</div>
+            <div class="chat-title" @dblclick="startRenameSpec" :title="displaySpec?.spec_id ? '双击可重命名' : ''">
+              <template v-if="renamingSpecId && renamingSpecId === displaySpec?.spec_id">
+                <el-input
+                  ref="renameInputRef"
+                  v-model="renameSpecName"
+                  size="small"
+                  class="rename-inline-input"
+                  @blur="confirmRenameSpec"
+                  @keydown.enter="confirmRenameSpec"
+                  @keydown.escape="cancelRenameSpec"
+                />
+              </template>
+              <template v-else>
+                {{ displaySpec?.name || '新建 Agent' }}
+              </template>
+            </div>
             <div class="chat-subtitle">{{ focusSubtitle }}</div>
           </div>
           <div class="chat-head-actions">
-            <el-button class="btn btn-ghost mobile-panel-btn" plain @click="showStatusSidebar = !showStatusSidebar">
-              查看状态
+            <el-button v-if="!showLeftSidebar" class="btn btn-ghost mobile-panel-btn" plain @click="showLeftSidebar = true">
+              显示列表
+            </el-button>
+            <el-button v-if="!showStatusSidebar" class="btn btn-ghost mobile-panel-btn" plain @click="showStatusSidebar = true">
+              显示状态
             </el-button>
             <el-tag size="small" effect="plain" :type="draftStatusTagType" class="status-tag">
               {{ latestVersion ? `v${latestVersion.version}` : '' }} {{ draftStatusText }}
@@ -105,14 +125,13 @@
               :class="['message-row', message.role === 'user' ? 'user' : 'assistant', (nanobotStreaming && index === displayedMessages.length - 1 && message.role === 'assistant') ? 'streaming-message' : '']"
             >
               <template v-if="message.role === 'user'">
+                <div class="avatar user-avatar">你</div>
                 <div class="bubble">
-                  <div class="bubble-title">你的需求</div>
                   <div class="message-text markdown-content" v-html="renderMarkdown(message.content)"></div>
                 </div>
-                <div class="avatar">你</div>
               </template>
               <template v-else>
-                <div class="avatar">助</div>
+                <div class="avatar assistant-avatar">助</div>
                 <div class="bubble">
                   <div v-if="message.progressSteps?.length" class="progress-timeline">
                     <div
@@ -282,6 +301,10 @@
             <div class="advanced-body">
               <el-card shadow="never">
                 <div class="status-main-hint">{{ nanobotProgressHint || '等待新的助手动作。' }}</div>
+                <div v-if="testProgress" class="test-progress-bar">
+                  <el-progress :percentage="Math.max(5, Math.min(95, ['init','config','model','agent','analysis','report'].indexOf(testProgress.stage) * 15 + 10))" :stroke-width="6" :show-text="false" />
+                  <span class="test-progress-label">{{ testProgress.message }}</span>
+                </div>
                 <div class="status-metrics">
                   <div class="status-metric-item">
                     <span>会话</span>
@@ -639,7 +662,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
@@ -712,11 +735,24 @@ const currentSession = ref<AgentWorkshopSessionDetail | null>(null)
 const standaloneSpec = ref<AgentSpec | null>(null)
 const currentNanobotSessionKey = ref('')
 const nanobotMessages = ref<AgentWorkshopMessage[]>([])
+// 按 spec_id 隔离聊天记录，切换 Agent 时自动保存/恢复
+const specMessagesMap = ref<Record<string, AgentWorkshopMessage[]>>({})
+const specSessionKeyMap = ref<Record<string, string>>({})
 const nanobotDraftLink = ref<{ specId: string; specName: string; sessionId?: string } | null>(null)
 const nanobotStreaming = ref(false)
 const nanobotProgressHint = ref('')
 const nanobotToolEvents = ref<NanobotToolEventCard[]>([])
+const testProgress = ref<{ stage: string; message: string; status: string } | null>(null)
+let testPollTimer: ReturnType<typeof setInterval> | null = null
 const messagesContainer = ref<HTMLElement | null>(null)
+const scrollToLatestMessage = () => {
+  nextTick(() => {
+    const el = messagesContainer.value
+    if (el) {
+      el.scrollTop = el.scrollHeight
+    }
+  })
+}
 const latestVersion = ref<AgentVersion | null>(null)
 const latestVersionPrompt = ref<AgentWorkshopVersionPrompt | null>(null)
 const latestEvaluation = ref<AgentEvaluationReport | null>(null)
@@ -734,8 +770,20 @@ const versionDetailPublishWarnings = ref<string[]>([])
 const editingVersionMetadata = ref(false)
 const savingVersionMetadata = ref(false)
 const versionMetadataEditForm = ref<Record<string, any>>({})
+const renamingSpecId = ref('')
+const renameSpecName = ref('')
+const renameInputRef = ref<HTMLElement | null>(null)
 const loadingNanobotThreads = ref(false)
+const showLeftSidebar = ref(true)
 const showStatusSidebar = ref(true)
+const mainGridStyle = computed(() => {
+  const l = showLeftSidebar.value
+  const r = showStatusSidebar.value
+  if (l && r) return { gridTemplateColumns: '280px minmax(0, 1fr) 340px' }
+  if (!l && !r) return { gridTemplateColumns: 'minmax(0, 1fr)' }
+  if (!l) return { gridTemplateColumns: 'minmax(0, 1fr) 340px' }
+  return { gridTemplateColumns: '280px minmax(0, 1fr)' }
+})
 const recentNanobotThreads = ref<EmbeddedNanobotThreadItem[]>([])
 const selectedThreadScope = ref('active')
 
@@ -743,6 +791,36 @@ const sending = ref(false)
 const loadingSession = ref(false)
 
 let activeNanobotStreamController: AbortController | null = null
+
+/** 停止测试进度轮询 */
+function stopTestProgressPolling() {
+  if (testPollTimer) {
+    clearInterval(testPollTimer)
+    testPollTimer = null
+  }
+  testProgress.value = null
+}
+
+/** 启动测试进度轮询（每2秒获取一次进度） */
+function startTestProgressPolling(versionId: string) {
+  stopTestProgressPolling()
+  const poll = async () => {
+    try {
+      const data = await agentWorkshopApi.getTestProgress(versionId)
+      if (data.status === 'running') {
+        testProgress.value = { stage: data.stage, message: data.message, status: 'running' }
+      } else if (data.status === 'done' || data.status === 'idle' || !data.status) {
+        stopTestProgressPolling()
+      } else {
+        testProgress.value = { stage: data.stage, message: data.message, status: data.status }
+      }
+    } catch {
+      // 轮询失败不打断用户体验
+    }
+  }
+  poll()
+  testPollTimer = setInterval(poll, 2000)
+}
 const versionContextRequests = new Map<string, Promise<void>>()
 const latestVersionContextRequests = new Map<string, Promise<void>>()
 const sessionRequests = new Map<string, Promise<void>>()
@@ -806,7 +884,14 @@ const renderMarkdown = (content: string) => {
 }
 
 const copyRuntimePayloadJson = async () => {
-  ElMessage.warning('请直接查看当前版本详情获取内容')
+  const text = versionDetailLatestRuntimePayloadText.value
+  if (!text) { ElMessage.warning('当前没有可复制的结构化输出'); return }
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('JSON 已复制到剪贴板')
+  } catch {
+    ElMessage.warning('复制失败，请手动选择文本')
+  }
 }
 
 const buildThreadContext = (): EmbeddedNanobotThreadContext => {
@@ -1189,6 +1274,14 @@ const workflowStageItems = computed(() => {
 })
 
 const getSpecStatusLabel = (item: AgentSpec) => {
+  // 优先使用 spec 自身的 status 字段
+  const specStatus = String((item as any).status || '').trim().toLowerCase()
+  if (specStatus === 'active') return '已发布'
+  if (specStatus === 'testing') return '测试中'
+  if (specStatus === 'draft') return '草稿'
+  if (specStatus === 'archived') return '已归档'
+
+  // 兜底：从已加载的版本数据推断
   const versions = versionItemsBySpec.value[item.spec_id] || []
   if (versions.some(v => v.status === 'active')) return '已发布'
   if (versions.some(v => v.status === 'testing')) return '测试中'
@@ -1196,10 +1289,11 @@ const getSpecStatusLabel = (item: AgentSpec) => {
 }
 
 const getSpecTagType = (item: AgentSpec) => {
-  const label = getSpecStatusLabel(item)
-  if (label === '已发布') return 'primary'
-  if (label === '测试中') return 'warning'
-  return 'info'
+  const specStatus = String((item as any).status || '').trim().toLowerCase()
+  if (specStatus === 'active') return 'primary'
+  if (specStatus === 'testing') return 'warning'
+  if (specStatus === 'archived') return 'info'
+  return getSpecStatusLabel(item) === '草稿' ? 'info' : 'primary'
 }
 
 const getSpecMetaText = (item: AgentSpec) => {
@@ -1327,10 +1421,38 @@ const versionDetailPromptSections = computed(() => {
   ].filter(item => item.value)
 })
 const versionDetailLatestRuntimeReportText = computed(() => {
+  const runtime = versionDetailVersion.value?.runtime_result
+  const debug = versionDetailVersion.value?.debug_result
+  if (runtime && typeof runtime === 'object') {
+    return String((runtime as any).output_text || (runtime as any).report || '').trim()
+  }
+  if (debug && typeof debug === 'object') {
+    return String((debug as any).report || '').trim()
+  }
   return ''
 })
-const versionDetailLatestRuntimePayloadText = computed(() => '')
-const versionDetailLatestRuntimeMeta = computed(() => [])
+const versionDetailLatestRuntimePayloadText = computed(() => {
+  const runtime = versionDetailVersion.value?.runtime_result
+  if (runtime && typeof runtime === 'object') {
+    const payload = (runtime as any).output_payload
+    if (payload && typeof payload === 'object' && Object.keys(payload).length) {
+      return JSON.stringify(payload, null, 2)
+    }
+    return ''
+  }
+  return ''
+})
+const versionDetailLatestRuntimeMeta = computed(() => {
+  const runtime = versionDetailVersion.value?.runtime_result
+  const debug = versionDetailVersion.value?.debug_result
+  const data = (runtime && typeof runtime === 'object' ? runtime : debug && typeof debug === 'object' ? debug : {}) as Record<string, any>
+  const result: string[] = []
+  const symbol = String(data?.symbol || '').trim()
+  const analysisDate = String(data?.analysis_date || '').trim()
+  if (symbol) result.push(`标的: ${symbol}`)
+  if (analysisDate) result.push(`分析日期: ${analysisDate}`)
+  return result
+})
 
 const versionDetailScoreText = computed(() => {
   const score = versionDetailEvaluation.value?.scores?.overall ?? versionDetailVersion.value?.last_evaluation_summary?.overall_score
@@ -1388,6 +1510,57 @@ const saveVersionMetadata = async () => {
     ElMessage.error(error?.message || '更新失败')
   } finally {
     savingVersionMetadata.value = false
+  }
+}
+
+const startRenameSpec = () => {
+  const specId = String(displaySpec.value?.spec_id || '').trim()
+  if (!specId) return
+  renamingSpecId.value = specId
+  renameSpecName.value = String(displaySpec.value?.name || '').trim()
+  setTimeout(() => {
+    const input = (renameInputRef.value as any)?.$el?.querySelector?.('input')
+    if (input) {
+      input.focus()
+      input.select()
+    }
+  }, 50)
+}
+
+const cancelRenameSpec = () => {
+  renamingSpecId.value = ''
+  renameSpecName.value = ''
+}
+
+const confirmRenameSpec = async () => {
+  const specId = String(renamingSpecId.value || '').trim()
+  const newName = String(renameSpecName.value || '').trim()
+  if (!specId || !newName) {
+    cancelRenameSpec()
+    return
+  }
+  renamingSpecId.value = ''
+  renameSpecName.value = ''
+
+  try {
+    await agentWorkshopApi.updateSpec(specId, { name: newName })
+
+    // 更新 standaloneSpec（displaySpec computed 会自动刷新）
+    if (standaloneSpec.value?.spec_id === specId) {
+      standaloneSpec.value = { ...standaloneSpec.value, name: newName }
+    }
+    // 更新 currentSession 中的 current_spec_snapshot
+    if (currentSession.value?.current_spec_snapshot?.spec_id === specId) {
+      currentSession.value.current_spec_snapshot.name = newName
+    }
+    // 更新 agentItems 列表
+    const idx = agentItems.value.findIndex((it: any) => it.spec_id === specId)
+    if (idx >= 0) {
+      agentItems.value[idx] = { ...agentItems.value[idx], name: newName }
+    }
+    ElMessage.success('名称已更新')
+  } catch (error: any) {
+    ElMessage.error(error?.message || '重命名失败')
   }
 }
 
@@ -1535,6 +1708,14 @@ const loadSession = async (sessionId?: string, options?: { syncNanobotThread?: b
 }
 
 const openAgentItem = async (item: AgentSpec) => {
+  // 保存当前 Agent 的聊天记录
+  const currentSpecId = String(displaySpec.value?.spec_id || '').trim()
+  if (currentSpecId && nanobotMessages.value.length) {
+    specMessagesMap.value[currentSpecId] = [...nanobotMessages.value]
+    specSessionKeyMap.value[currentSpecId] = currentNanobotSessionKey.value
+  }
+
+  // 切换到目标 Agent
   standaloneSpec.value = item
   expandAgentBranch(item.spec_id)
   await ensureSpecVersionsLoaded(item.spec_id)
@@ -1545,6 +1726,31 @@ const openAgentItem = async (item: AgentSpec) => {
     specName: item.name || '当前 Draft',
     sessionId: item.latest_session_id || undefined,
   }
+
+  // 恢复目标 Agent 的聊天记录
+  const savedMessages = specMessagesMap.value[item.spec_id]
+  const savedSessionKey = specSessionKeyMap.value[item.spec_id]
+  if (savedMessages && savedMessages.length) {
+    nanobotMessages.value = [...savedMessages]
+    currentNanobotSessionKey.value = savedSessionKey || ''
+  } else {
+    // 没有内存记录 → 从数据库查找该 Agent 的历史会话
+    nanobotMessages.value = []
+    currentNanobotSessionKey.value = ''
+
+    await loadNanobotThreads()
+    const matchingThread = recentNanobotThreads.value.find(t => {
+      const ctx = (t as any).thread_context || {}
+      return String(ctx.spec_id || '').trim() === item.spec_id
+    })
+    if (matchingThread) {
+      await loadNanobotThreadMessages({ sessionKey: matchingThread.session_key || matchingThread.thread_id, silent: true })
+    }
+  }
+  nanobotStreaming.value = false
+  nanobotProgressHint.value = ''
+  nanobotToolEvents.value = []
+
   persistState()
   ElMessage.info('已选择该 Agent，继续对话可以创建/迭代版本')
 }
@@ -1655,6 +1861,12 @@ const reEvaluateVersionFromDetail = async () => {
 }
 
 const resetStudio = () => {
+  // 保存当前 Agent 的聊天记录
+  const specId = String(displaySpec.value?.spec_id || '').trim()
+  if (specId && nanobotMessages.value.length) {
+    specMessagesMap.value[specId] = [...nanobotMessages.value]
+    specSessionKeyMap.value[specId] = currentNanobotSessionKey.value
+  }
   clearStudioState()
   ElMessage.success('已重置，可以开始创建新 Agent')
 }
@@ -1712,7 +1924,21 @@ const handleSendMessage = async () => {
           onStarted(data) {
             currentNanobotSessionKey.value = data.session_key || sessionKey
             nanobotProgressHint.value = data.message || '工坊助手已开始处理'
+            nextMessages[assistantIndex].progressSteps = nextMessages[assistantIndex].progressSteps || []
+            nanobotMessages.value = [...nextMessages]
             persistState()
+          },
+          onProgress(data) {
+            const msg = String(data.message || '').trim()
+            if (!msg) return
+            nanobotProgressHint.value = msg
+            if (!nextMessages[assistantIndex].progressSteps) nextMessages[assistantIndex].progressSteps = []
+            const steps = nextMessages[assistantIndex].progressSteps || []
+            nextMessages[assistantIndex].progressSteps = [
+              ...steps,
+              { text: msg, tone: 'info' as const },
+            ]
+            nanobotMessages.value = [...nextMessages]
           },
           onToken(content) {
             appendAssistantChunk(content)
@@ -1726,8 +1952,46 @@ const handleSendMessage = async () => {
             else if (rawStatus.includes('fail') || rawStatus.includes('error')) { statusLabel = '失败'; tone = 'warning' }
             nanobotToolEvents.value = [...nanobotToolEvents.value, { key: `${Date.now()}-${nanobotToolEvents.value.length}`, title: toolName, detail: String(event.detail || ''), statusLabel, tone }].slice(-8)
             nanobotProgressHint.value = event.status === 'started' ? `正在执行 ${toolName}` : `已处理 ${toolName}`
+
+            // 🔥 测试工具开始 → 轮询进度
+            const isTestTool = ['run_agent_workshop_real_data_test', 'debug_agent_workshop_version'].includes(String(event.name || ''))
+            if (isTestTool && event.status === 'started') {
+              const vid = latestVersion.value?.version_id
+                || versionDetailVersion.value?.version_id
+                || selectedVersionId.value
+                || buildThreadContext().version_id
+              if (vid) {
+                startTestProgressPolling(vid)
+              }
+            }
+            if (isTestTool && (rawStatus.includes('complete') || rawStatus.includes('done') || rawStatus.includes('fail') || rawStatus.includes('error'))) {
+              stopTestProgressPolling()
+            }
+
+            if (!nextMessages[assistantIndex].progressSteps) nextMessages[assistantIndex].progressSteps = []
+            const existingSteps = nextMessages[assistantIndex].progressSteps || []
+            nextMessages[assistantIndex].progressSteps = [
+              ...existingSteps,
+              { text: event.status === 'started' ? `执行：${toolName}` : `完成：${toolName}`, tone, meta: String(event.detail || '') },
+            ]
+            nanobotMessages.value = [...nextMessages]
+          },
+          onStepEvent(event) {
+            const title = String(event.title || '').trim()
+            const detail = String(event.detail || '').trim()
+            if (!title && !detail) return
+            const status = String(event.status || '').trim().toLowerCase()
+            const tone: 'info' | 'success' | 'warning' = status === 'completed' ? 'success' : status === 'error' ? 'warning' : 'info'
+            if (!nextMessages[assistantIndex].progressSteps) nextMessages[assistantIndex].progressSteps = []
+            const stepItems = nextMessages[assistantIndex].progressSteps || []
+            nextMessages[assistantIndex].progressSteps = [
+              ...stepItems,
+              { text: title, tone, meta: detail },
+            ]
+            nanobotMessages.value = [...nextMessages]
           },
           onDone(data) {
+            stopTestProgressPolling()
             currentNanobotSessionKey.value = data.session_key || sessionKey
             if (!nextMessages[assistantIndex].content.trim()) {
               nextMessages[assistantIndex].content = data.content || '工坊助手已处理当前需求。'
@@ -1738,11 +2002,13 @@ const handleSendMessage = async () => {
             resolve(data)
           },
           onError(messageText) {
+            stopTestProgressPolling()
             nextMessages[assistantIndex].content = `请求失败：${messageText || '未知错误'}`
             nanobotMessages.value = [...nextMessages]
             reject(new Error(messageText || '未知错误'))
           },
           onAbort() {
+            stopTestProgressPolling()
             nextMessages[assistantIndex].content = '已停止本轮生成。'
             nanobotMessages.value = [...nextMessages]
             reject(new Error('已停止生成'))
@@ -1757,6 +2023,12 @@ const handleSendMessage = async () => {
         await loadLatestVersionContext(displaySpec.value.spec_id)
       }
       persistState()
+      // 保存当前 Agent 的聊天记录到隔离 map
+      const specId = String(displaySpec.value?.spec_id || '').trim()
+      if (specId && nanobotMessages.value.length) {
+        specMessagesMap.value[specId] = [...nanobotMessages.value]
+        specSessionKeyMap.value[specId] = currentNanobotSessionKey.value
+      }
     } finally {
       activeNanobotStreamController = null
       nanobotStreaming.value = false
@@ -1855,15 +2127,23 @@ watch(() => route.fullPath, () => {
   }
 })
 
+/** 聊天消息变化时自动滚到底部 */
+watch(() => displayedMessages.value.length, () => {
+  scrollToLatestMessage()
+})
+
 const clearStudioState = (preserveStorage = false) => {
   if (activeNanobotStreamController) {
     activeNanobotStreamController.abort()
     activeNanobotStreamController = null
   }
+  stopTestProgressPolling()
   currentSession.value = null
   standaloneSpec.value = null
   currentNanobotSessionKey.value = ''
   nanobotMessages.value = []
+  specMessagesMap.value = {}
+  specSessionKeyMap.value = {}
   nanobotDraftLink.value = null
   nanobotStreaming.value = false
   nanobotProgressHint.value = ''
@@ -1940,6 +2220,12 @@ const loadNanobotThreadMessages = async (options?: {
       const result = await embeddedNanobotApi.getThreadMessages(targetThread.thread_id)
       currentNanobotSessionKey.value = result.thread?.session_key || targetThread.session_key || targetThread.thread_id
       nanobotMessages.value = mapDbMessagesToWorkshopMessages(result.messages || [])
+      // 同步保存到隔离 map
+      const specId = String(displaySpec.value?.spec_id || '').trim()
+      if (specId && nanobotMessages.value.length) {
+        specMessagesMap.value[specId] = [...nanobotMessages.value]
+        specSessionKeyMap.value[specId] = currentNanobotSessionKey.value
+      }
       await applyThreadContext(result.thread?.thread_context)
       persistState()
       return true
@@ -2048,6 +2334,12 @@ const formatDisplayTime = (value?: string | null) => {
   align-items: center;
 }
 
+.btn-ghost.active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #2563eb;
+}
+
 .btn {
   border: 0;
   border-radius: 10px;
@@ -2102,8 +2394,10 @@ const formatDisplayTime = (value?: string | null) => {
 
 .content {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   position: relative;
 }
 
@@ -2275,6 +2569,15 @@ const formatDisplayTime = (value?: string | null) => {
   font-weight: 850;
   color: #1e293b;
   margin: 0;
+  cursor: default;
+}
+
+.chat-title:hover {
+  color: #3b82f6;
+}
+
+.rename-inline-input {
+  max-width: 260px;
 }
 
 .chat-subtitle {
@@ -2411,6 +2714,7 @@ const formatDisplayTime = (value?: string | null) => {
   background: linear-gradient(135deg, #2563eb, #1d4ed8);
   color: #fff;
   border-color: transparent;
+  text-align: right;
 }
 
 .bubble-title {
@@ -2505,7 +2809,7 @@ const formatDisplayTime = (value?: string | null) => {
 
 .inspector-scroll {
   overflow-y: auto;
-  padding: 16px;
+  padding: 10px 16px 16px 16px;
   flex: 1;
 }
 
@@ -2862,6 +3166,16 @@ details.advanced summary::-webkit-details-marker {
   line-height: 1.5;
 }
 
+.test-progress-bar {
+  margin: 8px 0;
+}
+.test-progress-label {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #4b5563;
+}
+
 .status-metrics {
   display: flex;
   flex-wrap: wrap;
@@ -3088,6 +3402,35 @@ details.advanced summary::-webkit-details-marker {
 
 .runtime-json-title-row button {
   font-size: 12px;
+}
+
+.runtime-report-content.runtime-report-markdown {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  color: #1e293b;
+  font-family: "Noto Sans SC", "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  line-height: 1.8;
+  max-height: 420px;
+  padding: 16px 20px;
+}
+
+.runtime-report-content.runtime-report-markdown h1,
+.runtime-report-content.runtime-report-markdown h2,
+.runtime-report-content.runtime-report-markdown h3 {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  font-weight: 800;
+}
+
+.runtime-report-content.runtime-report-markdown p {
+  margin-bottom: 10px;
+}
+
+.runtime-report-content.runtime-report-markdown ul,
+.runtime-report-content.runtime-report-markdown ol {
+  padding-left: 20px;
+  margin-bottom: 10px;
 }
 
 .notice {

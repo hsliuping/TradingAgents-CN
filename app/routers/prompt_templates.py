@@ -129,8 +129,8 @@ async def get_all_templates(
                 "is_system": template_doc.get("is_system"),
                 "status": template_doc.get("status"),
                 "version": template_doc.get("version"),
-                "created_at": template_doc.get("created_at").isoformat() if template_doc.get("created_at") else None,
-                "updated_at": template_doc.get("updated_at").isoformat() if template_doc.get("updated_at") else None
+                "created_at": template_doc.get("created_at").isoformat() if isinstance(template_doc.get("created_at"), datetime) else template_doc.get("created_at"),
+                "updated_at": template_doc.get("updated_at").isoformat() if isinstance(template_doc.get("updated_at"), datetime) else template_doc.get("updated_at")
             })
 
         return ok({
@@ -314,7 +314,7 @@ async def get_agent_templates(
                         "version": template_doc.get("version"),
                         "is_system": True,
                         "created_by": None,
-                        "created_at": template_doc.get("created_at").isoformat() if template_doc.get("created_at") else None
+                        "created_at": template_doc.get("created_at").isoformat() if isinstance(template_doc.get("created_at"), datetime) else template_doc.get("created_at")
                     })
 
         # 2. 获取用户创建的模板
@@ -339,7 +339,7 @@ async def get_agent_templates(
                         "version": template_doc.get("version"),
                         "is_system": False,
                         "created_by": user_id,
-                        "created_at": template_doc.get("created_at").isoformat() if template_doc.get("created_at") else None
+                        "created_at": template_doc.get("created_at").isoformat() if isinstance(template_doc.get("created_at"), datetime) else template_doc.get("created_at")
                     })
 
         return ok({

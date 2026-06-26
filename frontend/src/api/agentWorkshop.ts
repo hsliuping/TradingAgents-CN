@@ -741,6 +741,30 @@ export const agentWorkshopApi = {
     const res = await request.get<ApiOk<AgentSampleSetListResult>>(`${BASE}/specs/${specId}/sample-sets`)
     return (res as any).data
   },
+
+  updateSpec: async (specId: string, payload: { name?: string; primary_goal?: string }): Promise<{ spec_id: string; updated_fields: string[] }> => {
+    const res = await request.put<ApiOk<{ spec_id: string; updated_fields: string[] }>>(`${BASE}/specs/${specId}`, payload)
+    return (res as any).data
+  },
+
+  getTestProgress: async (versionId: string): Promise<{
+    version_id: string
+    status: string
+    stage: string
+    message: string
+    started_at?: string
+    updated_at?: string
+  }> => {
+    const res = await request.get<ApiOk<{
+      version_id: string
+      status: string
+      stage: string
+      message: string
+      started_at?: string
+      updated_at?: string
+    }>>(`/api/agent-workshop/test-progress/${versionId}`)
+    return (res as any).data
+  },
 }
 
 export default agentWorkshopApi

@@ -95,7 +95,7 @@ class TradingAgentsLLMProvider(LLMProvider):
         provider = cls(client=client, model=config.model)
         provider.generation = provider.generation.__class__(
             temperature=config.temperature,
-            max_tokens=config.max_tokens or 4096,
+            max_tokens=max(config.max_tokens or 4096, 16384),
             reasoning_effort=None,
         )
         return provider
