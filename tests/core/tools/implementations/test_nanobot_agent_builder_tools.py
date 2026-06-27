@@ -122,7 +122,11 @@ class _FakeCollection:
         filtered = []
         for item in self._items:
             if self._match(item, query):
-                filtered.append(item)
+                if projection:
+                    include_keys = {key for key, enabled in projection.items() if enabled}
+                    filtered.append({key: item[key] for key in include_keys if key in item})
+                else:
+                    filtered.append(item)
         return _FakeCursor(filtered)
 
     async def find_one(self, query=None, projection=None, sort=None):
