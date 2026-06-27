@@ -32,6 +32,20 @@ _GLOBAL_NO_TRADING_ADVICE_POLICY = (
     "目标价、止损止盈、建仓区间、择时结论和其他操作性指令；只能提供研究结论、"
     "关键依据、风险因素与情景分析。"
 )
+_GLOBAL_NUMERICAL_TOOL_POLICY = (
+    "全局铁律：所有关键数值计算必须通过项目提供的工具或 Skill 完成，"
+    "禁止 LLM 自行计算。包括但不限于 DCF 估值、相对估值指标、财务比率、"
+    "评分、排序、权重、公允价格、目标价区间等任何精确数值。"
+    "若缺少对应工具或 Skill，必须标记为 blocking gap 并补齐，"
+    "不得以「LLM 自己算也可以」作为降级方案。"
+)
+_GLOBAL_DATA_SOURCE_POLICY = (
+    "全局铁律：优先使用本系统提供的数据源（tushare、akshare、QMT 等）。"
+    "Skill 中若使用非系统数据源（如直接爬取网页、第三方 API、自有数据接口等），"
+    "必须在 data_source 字段和 Skill 描述中明确标注来源，"
+    "方便用户判断数据可靠性和可追溯性。"
+    "禁止在使用外部数据源时隐瞒或模糊数据来源。"
+)
 _OUTPUT_PREVIEW_KEYWORDS = (
     "样式",
     "模板",
@@ -104,6 +118,30 @@ def _parse_json_tool_result(raw: str) -> dict[str, Any]:
         return data if isinstance(data, dict) else {"status": "error", "message": "工具返回不是 JSON 对象"}
     except Exception as exc:
         return {"status": "error", "message": f"工具返回无法解析为 JSON: {exc}", "raw": raw}
+
+
+async def _create_skill_generation_service_with_system_llm(db: Any) -> Any:
+    """创建 SkillGenerationService，按系统设置读取推理模型和编程模型配置。"""
+    from app.services.skill_generation_service import SkillGenerationService
+    from app.services.intelligent_assistant_service import get_coding_llm_config, get_reasoning_llm_config
+    from core.llm import UnifiedLLMClient
+
+    reasoning_config = await get_reasoning_llm_config(db)
+    coding_config = await get_coding_llm_config(db)
+    reasoning_client = UnifiedLLMClient.from_config(reasoning_config) if reasoning_config else None
+    coding_client = UnifiedLLMClient.from_config(coding_config) if coding_config else None
+    if coding_config:
+        logger.info(
+            "[SkillGeneration][LLMConfig] coding provider=%s model=%s base_url=%s",
+            getattr(coding_config, "provider", ""),
+            getattr(coding_config, "model", ""),
+            getattr(coding_config, "base_url", ""),
+        )
+    return SkillGenerationService(
+        db=db,
+        reasoning_llm_client=reasoning_client,
+        coding_llm_client=coding_client,
+    )
 
 
 def _parse_optional_json_object(raw: str, field_name: str) -> dict[str, Any]:
@@ -1456,6 +1494,18 @@ async def _auto_build_workshop_version_result(session_id: str) -> dict[str, Any]
     }))
 
 
+def _extract_governance_version_id(version_result: dict[str, Any] | None) -> str | None:
+    """从 build_workshop_version 结果中安全提取 version_id，兼容 version 字段为 dict 或 str 的情况。"""
+    if not isinstance(version_result, dict):
+        return None
+    version = version_result.get("version")
+    if isinstance(version, dict):
+        return str(version.get("version_id") or "").strip() or None
+    if isinstance(version, str):
+        return version.strip() or None
+    return None
+
+
 def _looks_unspecified(value: str) -> bool:
     text = str(value or "").strip().lower()
     if not text:
@@ -1585,25 +1635,33 @@ def _build_confirmation_template(
 
 
 def _normalize_recommendation_policy(_: str = "") -> str:
-    return _GLOBAL_NO_TRADING_ADVICE_POLICY
+    return f"{_GLOBAL_NO_TRADING_ADVICE_POLICY}\n\n{_GLOBAL_NUMERICAL_TOOL_POLICY}"
 
 
 def _append_trading_guard(text: str) -> str:
     clean_text = str(text or "").strip()
     if not clean_text:
-        return _GLOBAL_NO_TRADING_ADVICE_POLICY
-    if _GLOBAL_NO_TRADING_ADVICE_POLICY in clean_text:
+        return f"{_GLOBAL_NO_TRADING_ADVICE_POLICY}\n\n{_GLOBAL_NUMERICAL_TOOL_POLICY}"
+    if _GLOBAL_NO_TRADING_ADVICE_POLICY in clean_text and _GLOBAL_NUMERICAL_TOOL_POLICY in clean_text:
         return clean_text
-    return f"{clean_text}\n\n{_GLOBAL_NO_TRADING_ADVICE_POLICY}"
+    if _GLOBAL_NO_TRADING_ADVICE_POLICY in clean_text:
+        return f"{clean_text}\n\n{_GLOBAL_NUMERICAL_TOOL_POLICY}"
+    if _GLOBAL_NUMERICAL_TOOL_POLICY in clean_text:
+        return f"{clean_text}\n\n{_GLOBAL_NO_TRADING_ADVICE_POLICY}"
+    return f"{clean_text}\n\n{_GLOBAL_NO_TRADING_ADVICE_POLICY}\n\n{_GLOBAL_NUMERICAL_TOOL_POLICY}"
 
 
 def _append_trading_guard_constraint(text: str) -> str:
     clean_text = str(text or "").strip()
-    if _GLOBAL_NO_TRADING_ADVICE_POLICY in clean_text:
+    if _GLOBAL_NO_TRADING_ADVICE_POLICY in clean_text and _GLOBAL_NUMERICAL_TOOL_POLICY in clean_text:
         return clean_text
+    if _GLOBAL_NO_TRADING_ADVICE_POLICY in clean_text:
+        return f"{clean_text}\n{_GLOBAL_NUMERICAL_TOOL_POLICY}"
+    if _GLOBAL_NUMERICAL_TOOL_POLICY in clean_text:
+        return f"{clean_text}\n{_GLOBAL_NO_TRADING_ADVICE_POLICY}"
     if not clean_text:
-        return _GLOBAL_NO_TRADING_ADVICE_POLICY
-    return f"{clean_text}\n{_GLOBAL_NO_TRADING_ADVICE_POLICY}"
+        return f"{_GLOBAL_NO_TRADING_ADVICE_POLICY}\n{_GLOBAL_NUMERICAL_TOOL_POLICY}"
+    return f"{clean_text}\n{_GLOBAL_NO_TRADING_ADVICE_POLICY}\n{_GLOBAL_NUMERICAL_TOOL_POLICY}"
 
 
 def _match_keyword(keyword: str, *values: Any) -> bool:
@@ -2082,7 +2140,7 @@ def prepare_agent_requirement_intake(
     preview_mode: Annotated[str, "如果用户在问报告样式，是只看结构骨架，还是允许带占位符示例"] = "",
     report_section_scope: Annotated[str, "报告章节边界，如 仅估值相关章节，不含技术面/交易计划/多空辩论"] = "",
 ) -> str:
-    """生成 Agent 创建前的需求采集提纲。"""
+    """生成 Agent 创建前的需求采集提纲 —— 自动补全智能默认值，只将最关键决策提升给用户。"""
     try:
         clean_request = str(user_request or "").strip()
         if not clean_request:
@@ -2094,46 +2152,65 @@ def prepare_agent_requirement_intake(
         output_preview_request = _is_output_preview_request(clean_request, desired_output_shape)
         effective_recommendation_policy = _normalize_recommendation_policy(recommendation_policy)
 
-        missing_decisions: list[str] = []
-        follow_up_questions: list[str] = []
+        # === 智能默认值：用户没说的情况下，自动补全 ===
+        smart_defaults = {
+            "output_shape": "结构化的自然语言报告，包含评分/评级和关键数据依据",
+            "non_goals": "不做交易建议/仓位建议/目标价区间/止损止盈/技术择时",
+            "preferred_tools": resolved_tools,  # 如果为空，让缺口分析阶段自动推荐
+            "creation_mode": "new",  # 默认新建
+            "recommendation_policy": "只做研究分析，不输出任何买卖建议、仓位建议、目标价、止损止盈等操作性指令",
+            "valuation_method_scope": "综合估值（行业对比PE/PB + 历史估值分位 + DCF），如用户指定则优先用户",
+            "test_strategy": "auto_test",  # 默认允许自动跑样例验证
+            "preview_mode": "structure_only",  # 报告样式预览只看结构骨架
+            "report_section_scope": "仅保留估值/分析相关章节，不扩展到技术面、交易计划、多空辩论",
+        }
 
-        if _looks_unspecified(target_responsibility):
-            missing_decisions.append("single_responsibility")
-            follow_up_questions.append("这个 Agent 的单一职责是什么？请用一句话描述，并说明它最核心的交付物。")
+        # 确定实际值（用户提供 > 智能默认）
+        effective_output_shape = desired_output_shape if not _looks_unspecified(desired_output_shape) else smart_defaults["output_shape"]
+        effective_non_goals = resolved_non_goals if resolved_non_goals else _parse_string_list(smart_defaults["non_goals"])
+        effective_tools = resolved_tools if resolved_tools else []
+        effective_creation_mode = "new" if not existing_agent_id.strip() else "overwrite"
+        effective_valuation_scope = valuation_method_scope if not _looks_unspecified(valuation_method_scope) else smart_defaults["valuation_method_scope"]
+        effective_test_strategy = test_strategy if not _looks_unspecified(test_strategy) else smart_defaults["test_strategy"]
+        effective_preview_mode = preview_mode if not _looks_unspecified(preview_mode) else smart_defaults["preview_mode"]
+        effective_report_scope = report_section_scope if not _looks_unspecified(report_section_scope) else smart_defaults["report_section_scope"]
 
-        if _looks_unspecified(desired_output_shape):
-            missing_decisions.append("output_shape")
-            follow_up_questions.append("你希望它输出什么形状的结果？是自然语言报告、结构化字段，还是两者都要？")
+        # === 只将真正关键的决策提升给用户（最多2个） ===
+        critical_questions: list[dict] = []
+        has_critical_single_responsibility_gap = _looks_unspecified(target_responsibility)
 
-        if not resolved_non_goals:
-            missing_decisions.append("non_goals")
-            follow_up_questions.append("这个 Agent 明确不做什么？例如不做交易建议、不做仓位决策、不做技术择时。")
+        if has_critical_single_responsibility_gap:
+            critical_questions.append({
+                "id": "single_responsibility",
+                "question": "这个 Agent 要做什么？请用一句话描述它的核心任务。",
+                "why_critical": "没有明确的职责边界，后续的工具选择、输出结构都无法精准匹配。",
+            })
 
-        if not resolved_tools:
-            missing_decisions.append("tool_preferences")
-            follow_up_questions.append("你是否已经知道它必须依赖哪些工具或数据来源？如果没有，可以让我先给出推荐工具集合。")
+        if not effective_tools and not has_critical_single_responsibility_gap:
+            # 工具偏好缺失但在职责明确时可以自动推荐
+            critical_questions.append({
+                "id": "tool_preferences",
+                "question": "你是否已经知道它必须依赖哪些工具或数据来源？如果没有偏好，我会在缺口分析阶段自动推荐最适合的工具。",
+                "why_critical": "工具范围影响能力边界，但你也可以完全交给我推荐。",
+            })
 
-        if not existing_agent_id.strip():
-            missing_decisions.append("creation_mode")
-            follow_up_questions.append("这是要创建一个全新 Agent，还是基于已有 Agent 做覆盖/迭代？")
+        # === 构建提案 ===
+        proposed_plan = {
+            "single_responsibility": target_responsibility if not has_critical_single_responsibility_gap else "（待确认）",
+            "output_shape": effective_output_shape,
+            "non_goals": effective_non_goals,
+            "preferred_tools": effective_tools if effective_tools else "（缺口分析阶段自动推荐）",
+            "creation_mode": effective_creation_mode,
+            "recommendation_policy": effective_recommendation_policy,
+        }
+        if stock_analysis_request:
+            proposed_plan["valuation_method_scope"] = effective_valuation_scope
+            proposed_plan["test_strategy"] = effective_test_strategy
+            proposed_plan["preview_mode"] = effective_preview_mode
+            proposed_plan["report_section_scope"] = effective_report_scope
 
-        if output_preview_request and _looks_unspecified(preview_mode):
-            missing_decisions.append("preview_mode")
-            follow_up_questions.append("你现在问的是报告样式预览。是只看章节骨架/字段模板，还是允许带占位符示例？默认应只给结构骨架，不填充真实内容。")
+        can_proceed_to_confirmation = len(critical_questions) == 0
 
-        if stock_analysis_request and output_preview_request and _looks_unspecified(report_section_scope):
-            missing_decisions.append("report_section_scope")
-            follow_up_questions.append("这个估值报告样式里只保留估值相关章节，还是还要纳入基本面摘要、方法说明、风险提示？默认不扩展到技术面、交易计划、多空辩论。")
-
-        if stock_analysis_request and _looks_unspecified(valuation_method_scope):
-            missing_decisions.append("valuation_method_scope")
-            follow_up_questions.append("你希望它使用哪些估值方法？例如仅 PE/PB/PEG，相对估值优先，还是允许扩展到 DCF、情绪、资金面解释？")
-
-        if stock_analysis_request and _looks_unspecified(test_strategy):
-            missing_decisions.append("test_strategy")
-            follow_up_questions.append("生成完成后你希望它只做配置校验，还是允许我立刻拿真实股票跑一份样例报告？默认更稳妥的是只做配置校验。")
-
-        can_proceed_to_confirmation = len(missing_decisions) == 0
         return _json_response({
             "status": "ok",
             "user_request": clean_request,
@@ -2141,22 +2218,25 @@ def prepare_agent_requirement_intake(
                 "stock_analysis_request": stock_analysis_request,
                 "output_preview_request": output_preview_request,
             },
-            "known_context": {
-                "target_responsibility": target_responsibility,
-                "desired_output_shape": desired_output_shape,
-                "non_goals": resolved_non_goals,
-                "preferred_tools": resolved_tools,
-                "existing_agent_id": existing_agent_id.strip(),
-                "recommendation_policy": effective_recommendation_policy,
-                "valuation_method_scope": valuation_method_scope,
-                "test_strategy": test_strategy,
-                "preview_mode": preview_mode,
-                "report_section_scope": report_section_scope,
-            },
-            "missing_decisions": missing_decisions,
-            "follow_up_questions": follow_up_questions,
+            "proposed_plan": proposed_plan,
+            "critical_questions": critical_questions,
             "can_proceed_to_confirmation": can_proceed_to_confirmation,
-            "recommended_next_step": "prepare_agent_generation_confirmation" if can_proceed_to_confirmation else "ask_requirement_questions",
+            "recommended_next_step": (
+                "prepare_agent_generation_confirmation" if can_proceed_to_confirmation
+                else "present_proposed_plan_and_ask_critical_questions"
+            ),
+            "nanobot_guidance": (
+                "✅ 方案已自动补全。把 proposed_plan 用自然语言呈现给用户，说明每个选择的理由——例如为什么默认选综合估值而非单一方法，为什么默认允许测试。"
+                "多轮沟通没问题，但每次都要有含金量：解释区别、讲清利弊、给出推荐理由。你是领域专家，用户希望听到你的分析和判断。"
+                "如果 critical_questions 非空（最多1-2个），展开说明：比如用户提到的「行业估值」是不是已经包含了 PE/PB 对比？DCF 和相对估值的适用场景差异是什么？"
+                "不要问用户「要不要包含PE/PB」这种没有上下文的选择题——你应该告诉用户「行业估值通常包含PE/PB/PEG等相对估值法，DCF是绝对估值法，两者互补。我建议都纳入，你看呢？」"
+                "用户说「可以」或表示认可即可推进。不要逐条列出所有维度让用户审阅。"
+            ) if can_proceed_to_confirmation else (
+                "✅ 方案已自动补全大部分维度。先简要呈现 proposed_plan 并说明理由。"
+                "然后针对 critical_questions（最多1-2个）展开——每个问题都要给出背景、区别、你的推荐方案和理由，不要只扔问题。"
+                "比如不要说「你希望用哪些估值方法？」，而要说「估值有两大类：相对估值（PE/PB/PEG等，看同行业对比）和绝对估值（DCF等，看内在价值）。两者互补，我建议都纳入。你觉得呢？」"
+                "多轮沟通没问题，关键是每轮都有专业含金量。"
+            ),
         })
     except Exception as exc:
         logger.error("生成 Agent 需求采集提纲失败: %s", exc, exc_info=True)
@@ -4974,7 +5054,8 @@ async def resolve_agent_workshop_blocking_gaps(
         )
 
         return _json_response({
-            "status": "ok",
+            "status": "error" if failed else "ok",
+            "message": summary.get("user_facing_message", ""),
             "workshop_session_id": clean_session_id,
             "summary": summary,
             "results": results,

@@ -71,6 +71,17 @@ GLOBAL_NO_TRADING_ADVICE_CONSTRAINT = (
     "全局铁律：禁止输出任何交易建议、买卖/持有判断、仓位建议、目标价、止损止盈、"
     "建仓区间、择时结论和其他可直接执行的操作性指令；只能提供研究结论、关键依据、风险揭示与情景分析。"
 )
+GLOBAL_NUMERICAL_TOOL_CONSTRAINT = (
+    "全局铁律：所有关键数值计算（估值、财务比率、评分、排序、权重等）"
+    "必须通过项目工具或 Skill 完成，严禁 LLM 自行计算。"
+    "若缺少对应工具或 Skill，必须标记为能力缺口，"
+    "不得以「LLM 可以自行推算」作为替代方案。"
+)
+GLOBAL_DATA_SOURCE_CONSTRAINT = (
+    "全局铁律：优先使用本系统提供的数据源（tushare、akshare、QMT 等）。"
+    "若使用非系统数据源（如爬虫、第三方 API、自有数据接口），"
+    "必须在 Skill 描述和 data_source 字段中明确标注，方便用户判断数据可靠性。"
+)
 
 _AGENT_WORKSHOP_LLM_TRACE_LOCK = Lock()
 _AGENT_WORKSHOP_LLM_TRACE_PATH = Path(__file__).resolve().parents[2] / "logs" / "agent_workshop_llm_full.log"
@@ -560,6 +571,10 @@ class AgentWorkshopService:
 
         if GLOBAL_NO_TRADING_ADVICE_CONSTRAINT not in normalized_constraints:
             normalized_constraints.append(GLOBAL_NO_TRADING_ADVICE_CONSTRAINT)
+        if GLOBAL_NUMERICAL_TOOL_CONSTRAINT not in normalized_constraints:
+            normalized_constraints.append(GLOBAL_NUMERICAL_TOOL_CONSTRAINT)
+        if GLOBAL_DATA_SOURCE_CONSTRAINT not in normalized_constraints:
+            normalized_constraints.append(GLOBAL_DATA_SOURCE_CONSTRAINT)
 
         spec = AgentSpec(
             spec_id=spec_id,
@@ -938,6 +953,18 @@ class AgentWorkshopService:
 
         required_tools = self._select_required_tools(spec, gap_report)
         auto_resolved_gaps = await self._collect_auto_resolved_gaps_for_session(session.session_id)
+        unresolved_blocking_gaps = self._find_unresolved_blocking_gaps(gap_report, auto_resolved_gaps)
+        if unresolved_blocking_gaps:
+            logger.warning(
+                "[AgentWorkshop][BuildVersion] blocked unresolved gaps session_id=%s spec_id=%s gaps=%s",
+                session.session_id,
+                spec.spec_id,
+                unresolved_blocking_gaps,
+            )
+            raise ValueError(
+                "当前 Agent 仍存在未补齐的 blocking gaps，不能构建/评审为通过版本："
+                + "；".join(unresolved_blocking_gaps[:5])
+            )
 
         logger.info(
             "[AgentWorkshop][BuildVersion] gap auto_resolved session_id=%s spec_id=%s version_id=%s auto_resolved_count=%s tool_ids=%s",
@@ -1066,6 +1093,69 @@ class AgentWorkshopService:
             "spec_id": spec.spec_id,
             "version": version,
         }
+
+    async def _assert_no_unresolved_blocking_gaps_for_version(
+        self,
+        version: AgentVersion,
+        spec: AgentSpec,
+        *,
+        stage: str,
+    ) -> None:
+        """评审/发布前强制检查：存在未补齐 blocking gap 时不能通过。"""
+        session_id = str(version.published_from_session_id or spec.latest_session_id or "").strip()
+        if not session_id:
+            return
+        session = await self._load_session(session_id)
+        if not session:
+            return
+        gap_report = session.gap_report
+        if gap_report is None:
+            return
+        auto_resolved_gaps = await self._collect_auto_resolved_gaps_for_session(session_id)
+        unresolved = self._find_unresolved_blocking_gaps(gap_report, auto_resolved_gaps)
+        if not unresolved:
+            return
+        logger.warning(
+            "[AgentWorkshop][GapGuard] blocked stage=%s version_id=%s session_id=%s unresolved=%s",
+            stage,
+            version.version_id,
+            session_id,
+            unresolved,
+        )
+        action = "评审" if stage == "evaluate" else "发布"
+        raise ValueError(
+            f"当前 Agent 仍有 {len(unresolved)} 个 blocking gap 未补齐，不能{action}为通过："
+            + "；".join(unresolved[:5])
+        )
+
+    def _find_unresolved_blocking_gaps(
+        self,
+        gap_report: Optional[AgentWorkshopGapAnalysis],
+        auto_resolved_gaps: List[Dict[str, Any]],
+    ) -> List[str]:
+        """找出仍未被自动补齐 Skill 覆盖的 blocking gaps。"""
+        blocking_gaps = [
+            str(item or "").strip()
+            for item in list(getattr(gap_report, "blocking_gaps", None) or [])
+            if str(item or "").strip()
+        ]
+        if not blocking_gaps:
+            return []
+
+        resolved_texts = {
+            str((item or {}).get("gap") or "").strip()
+            for item in auto_resolved_gaps or []
+            if str((item or {}).get("skill_tool_id") or "").strip()
+        }
+        resolved_count = len([
+            item for item in auto_resolved_gaps or []
+            if str((item or {}).get("skill_tool_id") or "").strip()
+        ])
+
+        unresolved = [gap for gap in blocking_gaps if gap not in resolved_texts]
+        if resolved_count >= len(blocking_gaps):
+            return []
+        return unresolved
 
     async def _collect_auto_resolved_gaps_for_session(self, session_id: str) -> List[Dict[str, Any]]:
         """收集当前 Agent Studio 会话中已自动补齐/复用的 Skill，用于版本追溯。"""
@@ -1545,7 +1635,12 @@ class AgentWorkshopService:
         deleted_sessions = await self._db[SESSION_COLLECTION].delete_many({"spec_id": spec_id})
         deleted_versions = await self._db[VERSION_COLLECTION].delete_many({"spec_id": spec_id})
         deleted_evaluations = await self._db[EVALUATION_COLLECTION].delete_many({"version_id": {"$in": version_ids}}) if version_ids else None
-        deleted_prompts = await self._db["prompt_templates"].delete_many({"_id": {"$in": prompt_template_ids}}) if prompt_template_ids else None
+        # 🔑 prompt_template_ids 是字符串，需转为 ObjectId 才能匹配 prompt_templates 集合中的 _id
+        prompt_template_object_ids: list[ObjectId] = []
+        for tid in prompt_template_ids:
+            if ObjectId.is_valid(tid):
+                prompt_template_object_ids.append(ObjectId(tid))
+        deleted_prompts = await self._db["prompt_templates"].delete_many({"_id": {"$in": prompt_template_object_ids}}) if prompt_template_object_ids else None
         runtime_config_query: Dict[str, Any] = {"$or": [{"metadata.spec_id": spec_id}]}
         runtime_binding_queries: List[Dict[str, Any]] = []
         if runtime_agent_ids:
@@ -1564,7 +1659,17 @@ class AgentWorkshopService:
             deleted_runtime_bindings = await self._db["tool_agent_bindings"].delete_many({"$or": runtime_binding_queries})
         else:
             deleted_runtime_bindings = None
+        # 🔑 清理 gap_resolution_jobs 和 template_history 中的孤儿数据
+        deleted_gap_jobs = await self._db["agent_workshop_gap_resolution_jobs"].delete_many({"spec_id": spec_id}) if "agent_workshop_gap_resolution_jobs" in await self._db.list_collection_names() else None
+        deleted_template_history = await self._db["template_history"].delete_many({"template_id": {"$in": prompt_template_ids}}) if prompt_template_ids else None
         deleted_spec = await self._db[SPEC_COLLECTION].delete_one({"spec_id": spec_id})
+
+        # 🔑 清理长期记忆（mem0）中与此 Agent 相关的记录
+        memory_deleted_count = await self._cleanup_spec_memories(
+            spec_id=spec_id,
+            owner_user_id=spec_doc.get("owner_user_id", ""),
+            spec_name=spec_doc.get("name", ""),
+        )
 
         return {
             "deleted": deleted_spec.deleted_count > 0,
@@ -1575,7 +1680,145 @@ class AgentWorkshopService:
             "deleted_prompts": deleted_prompts.deleted_count if deleted_prompts is not None else 0,
             "deleted_runtime_configs": deleted_runtime_configs.deleted_count if deleted_runtime_configs is not None else 0,
             "deleted_runtime_bindings": deleted_runtime_bindings.deleted_count if deleted_runtime_bindings is not None else 0,
+            "deleted_gap_jobs": deleted_gap_jobs.deleted_count if deleted_gap_jobs is not None else 0,
+            "deleted_template_history": deleted_template_history.deleted_count if deleted_template_history is not None else 0,
+            "deleted_memories": memory_deleted_count,
         }
+
+    async def _cleanup_spec_memories(self, spec_id: str, owner_user_id: str, spec_name: str = "") -> int:
+        """清理 mem0 长期记忆中与此 Agent 相关的记录。"""
+        try:
+            from core.memory.service import get_memory_service
+
+            svc = get_memory_service(self._db)
+            if svc is None:
+                return 0
+
+            deleted_total = 0
+            scopes_to_check = [
+                MemoryScope.AGENT_BUILDER_LESSON.value,
+                MemoryScope.CONVERSATION.value,
+                MemoryScope.AGENT_EXPERIENCE.value,
+            ]
+
+            for scope in scopes_to_check:
+                try:
+                    result = await svc.get_all(
+                        user_id=owner_user_id,
+                        scopes=[scope],
+                        metadata_filters={"spec_id": spec_id},
+                        limit=200,
+                    )
+                    items = result.get("items") or []
+                    for item in items:
+                        try:
+                            await svc.delete_memory(item.id)
+                            deleted_total += 1
+                        except Exception:
+                            pass
+                except Exception:
+                    continue
+
+            if deleted_total > 0:
+                logger.info(
+                    "[AgentWorkshop][delete_spec] spec_id=%s cleaned %d mem0 memories",
+                    spec_id,
+                    deleted_total,
+                )
+
+            # 🔑 在 Nanobot 文件层记忆（HISTORY.md / MEMORY.md）中追加删除记录
+            self._append_spec_deletion_to_file_memory(spec_id, spec_name)
+
+            return deleted_total
+        except Exception as exc:
+            logger.warning("[AgentWorkshop][delete_spec] spec_id=%s mem0 cleanup failed: %s", spec_id, exc)
+            return 0
+
+    async def _cleanup_version_memories(self, version_id: str, owner_user_id: str) -> int:
+        """清理 mem0 长期记忆中与此版本相关的记录。"""
+        try:
+            from core.memory.service import get_memory_service
+
+            svc = get_memory_service(self._db)
+            if svc is None:
+                return 0
+
+            deleted_total = 0
+            scopes_to_check = [
+                MemoryScope.AGENT_BUILDER_LESSON.value,
+            ]
+
+            for scope in scopes_to_check:
+                try:
+                    result = await svc.get_all(
+                        user_id=owner_user_id,
+                        scopes=[scope],
+                        metadata_filters={"version_id": version_id},
+                        limit=200,
+                    )
+                    items = result.get("items") or []
+                    for item in items:
+                        try:
+                            await svc.delete_memory(item.id)
+                            deleted_total += 1
+                        except Exception:
+                            pass
+                except Exception:
+                    continue
+
+            if deleted_total > 0:
+                logger.info(
+                    "[AgentWorkshop][delete_version] version_id=%s cleaned %d mem0 memories",
+                    version_id,
+                    deleted_total,
+                )
+            return deleted_total
+        except Exception as exc:
+            logger.warning("[AgentWorkshop][delete_version] version_id=%s mem0 cleanup failed: %s", version_id, exc)
+            return 0
+
+    @staticmethod
+    def _append_spec_deletion_to_file_memory(spec_id: str, spec_name: str) -> None:
+        """在 Nanobot 文件层记忆（HISTORY.md）中追加 Agent 删除记录。
+        
+        Nanobot 读取 MEMORY.md/HISTORY.md 来了解历史。删 Agent 时在这里加一条，
+        下次 Nanobot 看到就知道这个 Agent 已不存在，不会产生幻觉。
+        """
+        try:
+            from datetime import datetime
+
+            workspace = Path(__file__).resolve().parents[2]
+            history_file = workspace / "memory" / "HISTORY.md"
+
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            label = spec_name or spec_id
+            entry = (
+                f"[{timestamp}] **Agent 已删除** — "
+                f"{label}（{spec_id}）已被用户从 Agent 工坊中删除，"
+                f"不再存在于系统中，所有关联的版本、配置和提示词模板已一并清理。"
+                f"如果后续对话中提到此 Agent，请告知用户该 Agent 已不存在。"
+            )
+
+            history_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(history_file, "a", encoding="utf-8") as f:
+                f.write(entry.rstrip() + "\n\n")
+
+            # 同时追加到 MEMORY.md，确保即时生效（不等下次 compact）
+            memory_file = workspace / "memory" / "MEMORY.md"
+            if memory_file.exists():
+                with open(memory_file, "a", encoding="utf-8") as f:
+                    f.write(f"\n\n> **注意**：{entry}\n")
+
+            logger.info(
+                "[AgentWorkshop][delete_spec] spec_id=%s file memory updated",
+                spec_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[AgentWorkshop][delete_spec] spec_id=%s file memory update failed: %s",
+                spec_id,
+                exc,
+            )
 
     async def list_sample_sets(self, spec_id: str) -> Dict[str, Any]:
         spec_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": spec_id})
@@ -1675,7 +1918,11 @@ class AgentWorkshopService:
         prompt_template_id = str(template_ref.get("template_id") or "").strip()
 
         deleted_evaluations = await self._db[EVALUATION_COLLECTION].delete_many({"version_id": version_id})
-        deleted_prompts = await self._db["prompt_templates"].delete_many({"_id": {"$in": [prompt_template_id]}}) if prompt_template_id else None
+        # 🔑 prompt_template_id 是字符串，需转为 ObjectId 才能匹配 prompt_templates 集合中的 _id
+        if prompt_template_id and ObjectId.is_valid(prompt_template_id):
+            deleted_prompts = await self._db["prompt_templates"].delete_one({"_id": ObjectId(prompt_template_id)})
+        else:
+            deleted_prompts = None
         runtime_config_query: Dict[str, Any] = {"$or": [{"metadata.version_id": version_id}]}
         runtime_binding_queries: List[Dict[str, Any]] = []
         if runtime_agent_id:
@@ -1695,6 +1942,15 @@ class AgentWorkshopService:
         else:
             deleted_runtime_bindings = None
         deleted_version = await self._db[VERSION_COLLECTION].delete_one({"version_id": version_id})
+
+        # 🔑 清理长期记忆（mem0）中与此版本相关的记录
+        memory_deleted_count = 0
+        owner_user_id = str(spec_doc.get("owner_user_id") or "").strip() if spec_doc else ""
+        if owner_user_id:
+            memory_deleted_count = await self._cleanup_version_memories(
+                version_id=version_id,
+                owner_user_id=owner_user_id,
+            )
 
         fallback_version_id = None
         remaining_version_count = 0
@@ -1720,6 +1976,7 @@ class AgentWorkshopService:
             "deleted_prompts": deleted_prompts.deleted_count if deleted_prompts is not None else 0,
             "deleted_runtime_configs": deleted_runtime_configs.deleted_count if deleted_runtime_configs is not None else 0,
             "deleted_runtime_bindings": deleted_runtime_bindings.deleted_count if deleted_runtime_bindings is not None else 0,
+            "deleted_memories": memory_deleted_count,
         }
 
     async def evaluate_version(
@@ -1740,6 +1997,7 @@ class AgentWorkshopService:
         if not spec_doc:
             raise ValueError(f"规格 {version.spec_id} 不存在")
         spec = AgentSpec(**spec_doc)
+        await self._assert_no_unresolved_blocking_gaps_for_version(version, spec, stage="evaluate")
         normalized_runtime_result = self._resolve_production_review_runtime_result(version, runtime_result)
 
         evaluation_details: Dict[str, Any] = {}
@@ -1852,6 +2110,7 @@ class AgentWorkshopService:
         if not spec_doc:
             raise ValueError(f"规格 {version.spec_id} 不存在")
         spec = AgentSpec(**spec_doc)
+        await self._assert_no_unresolved_blocking_gaps_for_version(version, spec, stage="publish")
         publish_warnings: List[str] = []
         project_memory_binding = await self._review_prompt_template_project_memory_binding(version)
         compatibility = await self._validate_version_workflow_compatibility(version, spec, require_active_template=False)
@@ -3371,19 +3630,26 @@ class AgentWorkshopService:
         if existing_version_spec_id:
             return existing_version_spec_id
 
-        if normalized.startswith("spec_nanobot_"):
-            return normalized
-        return f"spec_nanobot_{normalized}"
+        candidate_spec_id = self._build_nanobot_spec_id(normalized)
+        existing_candidate_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": candidate_spec_id})
+        if existing_candidate_doc:
+            return str(existing_candidate_doc.get("spec_id") or candidate_spec_id)
+        return candidate_spec_id
 
     def _build_nanobot_spec_id(self, agent_id: str) -> str:
-        normalized = self._normalize_nanobot_identifier(agent_id)
-        return f"spec_nanobot_{normalized}"
+        normalized = self._normalize_nanobot_identifier(agent_id).lower()
+        normalized = re.sub(r"^spec_nanobot_", "", normalized)
+        normalized = re.sub(r"^spec_", "", normalized)
+        normalized = re.sub(r"^agent_", "", normalized)
+        normalized = normalized or uuid.uuid4().hex[:12]
+        return f"agent_{normalized}"
 
     def _normalize_generated_output_identifier(self, identifier: str) -> str:
         raw_identifier = str(identifier or "").strip().lower()
         normalized_identifier = re.sub(r"[^a-zA-Z0-9_]+", "_", raw_identifier).strip("_")
         normalized_identifier = re.sub(r"^spec_nanobot_", "", normalized_identifier)
         normalized_identifier = re.sub(r"^spec_", "", normalized_identifier)
+        normalized_identifier = re.sub(r"^agent_", "", normalized_identifier)
         normalized_identifier = re.sub(r"_v\d+$", "", normalized_identifier)
         if normalized_identifier:
           return normalized_identifier
@@ -5308,7 +5574,24 @@ class AgentWorkshopService:
             },
         )
         try:
-            data = json.loads(self._strip_markdown_fence(raw_content))
+            stripped = self._strip_markdown_fence(raw_content)
+            if not stripped:
+                raise ValueError("LLM 返回空内容，无法解析为 JSON")
+            try:
+                data = json.loads(stripped)
+            except (json.JSONDecodeError, ValueError):
+                if json_repair is not None:
+                    try:
+                        data = json_repair.loads(stripped)
+                        logger.info(
+                            "[AgentWorkshop][requirement_clarification] spec_id=%s spec_name=%s json_repaired=True",
+                            base_spec.spec_id,
+                            base_spec.name,
+                        )
+                    except Exception:
+                        raise
+                else:
+                    raise
             if not isinstance(data, dict):
                 raise ValueError("requirement clarification LLM 返回的不是 JSON object")
 
@@ -6466,7 +6749,10 @@ class AgentWorkshopService:
                 f"\n你必须体现该角色对应的金融行业专业判断，但所有事实、数字、结论都必须建立在输入信息、可追溯数据和工具结果之上；不得把本应由数据或工具支撑的内容改成主观臆测。"
                 f"\nrequired_tools 表示当前版本允许且优先考虑的候选工具集。它不是要求你把所有工具都调用一遍，而是要求你根据任务子问题选择最少且足够的工具；但凡涉及估值区间、目标价、评分、排序、权重等精确数值，你必须调用对应工具或引用上游已提供的可追溯数据，否则不得输出该精确数字。"
                 f"\n你必须坚持角色边界，不扩展到未授权的交易建议或其他职责；如果当前信息或能力不足，就明确说明依据不足和降级边界。"
+                f"\n优先使用本系统提供的数据源（tushare、akshare、QMT 等）。若所用工具依赖非系统数据源（如爬虫、第三方 API），必须在输出中标注数据来源，方便用户判断可靠性。"
                 f"\n{GLOBAL_NO_TRADING_ADVICE_CONSTRAINT}"
+                f"\n{GLOBAL_NUMERICAL_TOOL_CONSTRAINT}"
+                f"\n{GLOBAL_DATA_SOURCE_CONSTRAINT}"
                 f"\n{binding_source_text}"
                 f"{project_memory_guidance}"
                 f"{agent_builder_lesson_guidance}"
@@ -6488,6 +6774,8 @@ class AgentWorkshopService:
                 "- required_tools 是允许且优先考虑的候选工具集，按任务需要选择性调用；不得为了凑工具调用记录而机械调用全部工具。",
                 "- 若输出估值区间、目标价、评分、排序、权重等精确数值，必须给出可追溯的数据依据、来源标签以及对应工具结果；没有依据时禁止输出精确数字。",
                 f"- {GLOBAL_NO_TRADING_ADVICE_CONSTRAINT}",
+                f"- {GLOBAL_NUMERICAL_TOOL_CONSTRAINT}",
+                f"- {GLOBAL_DATA_SOURCE_CONSTRAINT}",
                 *((["- 必须同时遵守项目长期记忆中的稳定规则、治理约束、输出约束与研究模板。"] + [f"- {line.strip()}" for line in project_memory_block.splitlines() if line.strip() and not line.strip().startswith("【")]) if project_memory_block else []),
                 *((["- 必须结合 Agent 工坊历史教训修正上一轮或同类版本已确认的问题。"] + [f"- {line.strip()}" for line in agent_builder_lesson_block.splitlines() if line.strip() and not line.strip().startswith("【")]) if agent_builder_lesson_block else []),
                 *((["- 第二步仍标记为缺失的能力：" + "；".join(missing_capabilities)] if missing_capabilities else [])),
