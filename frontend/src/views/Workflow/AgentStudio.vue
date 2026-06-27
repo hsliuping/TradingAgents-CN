@@ -4,7 +4,7 @@
       <div class="topbar-left">
         <div class="brand-mark">A</div>
         <div class="brand-text">
-          <div class="brand-title">Agent 工作室</div>
+          <div class="brand-title">Agent 工坊 · 助手模式</div>
           <div class="brand-subtitle">通过对话创建、测试并发布可用于工作流的 Agent</div>
         </div>
       </div>
@@ -21,7 +21,10 @@
         <div class="panel-head">
           <div class="panel-title-row">
             <span class="panel-title">我的 Agent</span>
-            <span class="count-pill">{{ filteredAgentItems.length }} 个</span>
+            <div class="panel-title-actions">
+              <span class="count-pill">{{ filteredAgentItems.length }} 个</span>
+              <el-button size="small" text type="primary" @click="router.push('/workflow/agent-workshop/manage')">管理</el-button>
+            </div>
           </div>
           <el-input
             v-model="agentSearchText"
@@ -904,6 +907,23 @@ const clearPersistedStudioState = () => {
   } catch {}
 }
 
+const isNotFoundError = (error: any) => {
+  return error?.response?.status === 404 || error?.status === 404 || String(error?.message || '').includes('404')
+}
+
+const clearInvalidPersistedSpec = (specId?: string) => {
+  const invalidSpecId = String(specId || '').trim()
+  const persisted = readPersistedStudioState()
+  if (!persisted || (invalidSpecId && persisted.specId !== invalidSpecId)) {
+    return
+  }
+  clearPersistedStudioState()
+  nanobotDraftLink.value = null
+  selectedVersionId.value = ''
+  standaloneSpec.value = null
+  resetVersionContext()
+}
+
 const persistState = () => {
   try {
     localStorage.setItem(
@@ -1008,6 +1028,13 @@ const applyThreadContext = async (threadContext?: EmbeddedNanobotThreadContext |
   }
 
   if (versionId) {
+    // 🔑 校验 version_id 是否属于当前 Agent，防止旧的线程上下文中的 version_id 污染
+    // 版本 ID 格式: {spec_id}_v{N}，如 spec_nanobot_moat_analyst_v2_v1
+    const currentSpecId = String(displaySpec.value?.spec_id || '').trim()
+    if (currentSpecId && !versionId.startsWith(currentSpecId + '_v')) {
+      // version_id 不属于当前 Agent，跳过加载
+      return
+    }
     selectedVersionId.value = versionId
     if (String(latestVersion.value?.version_id || '').trim() !== versionId || !latestVersionPrompt.value) {
       await loadVersionContext(versionId)
@@ -1950,7 +1977,19 @@ const publishVersionFromDetail = async () => {
     return
   }
   try {
-    await ElMessageBox.confirm('确认发布当前版本为正式版本？', '确认发布', { confirmButtonText: '确认发布', cancelButtonText: '取消', type: 'warning' })
+    const agentName = versionDetailVersion.value?.agent_metadata?.name || versionDetailSpec.value?.name || specId
+    const versionLabel = versionDetailVersion.value?.version != null ? `v${versionDetailVersion.value.version}` : versionId
+    const autoResolvedSkills = versionDetailAutoResolvedGaps.value
+      .map(item => item.skill_display_name || item.skill_tool_id)
+      .filter(Boolean)
+    const skillNote = autoResolvedSkills.length
+      ? `\n\n本次版本包含 ${autoResolvedSkills.length} 个自动补齐的 Skill：${autoResolvedSkills.join('、')}`
+      : ''
+    await ElMessageBox.confirm(
+      `确认将 Agent「${agentName}」(${versionLabel}) 发布为正式版本？${skillNote}`,
+      '确认发布',
+      { confirmButtonText: '确认发布', cancelButtonText: '取消', type: 'warning' }
+    )
   } catch {
     return
   }
@@ -2162,6 +2201,15 @@ const handleSendMessage = async () => {
         await ensureSpecVersionsLoaded(displaySpec.value.spec_id)
         await loadLatestVersionContext(displaySpec.value.spec_id)
       }
+      // 同步 Nanobot 线程上下文：确保 spec_id 写入线程，切换 Agent 后可恢复聊天记录
+      if (displaySpec.value?.spec_id && currentNanobotSessionKey.value) {
+        try {
+          await embeddedNanobotApi.updateThreadContext(
+            currentNanobotSessionKey.value,
+            { thread_context: buildThreadContext() },
+          )
+        } catch {}
+      }
       persistState()
       // 保存当前 Agent 的聊天记录到隔离 map
       const specId = String(displaySpec.value?.spec_id || '').trim()
@@ -2201,26 +2249,46 @@ const loadInitialState = async () => {
   await loadAgentItems()
   await loadNanobotThreads()
 
-  const restored = restoreState()
-
   const routeSessionId = String(route.query.sessionId || '').trim()
-  const routeSpecId = String(route.query.specId || '').trim()
+  const routeAgentId = String(route.query.agent_id || route.query.agentId || '').trim()
+  const routeSpecId = String(route.query.specId || routeAgentId || '').trim()
   const routeNanobotSessionKey = String(route.query.nanobotSessionKey || '').trim()
+
+  const hasExplicitRouteTarget = routeSessionId || routeSpecId || routeNanobotSessionKey
+
+  // 🔑 如果有明确的 URL 目标（agent_id/specId/sessionId），先清除旧状态，
+  // 防止并发 onMounted + watch 调用时从 localStorage 恢复的旧 selectedVersionId 污染新 Agent
+  if (hasExplicitRouteTarget) {
+    selectedVersionId.value = ''
+    resetVersionContext()
+  }
+
+  const restored = !hasExplicitRouteTarget ? restoreState() : false
 
   if (routeSessionId) {
     await loadSession(routeSessionId, { syncNanobotThread: false })
   } else if (routeSpecId) {
-    try {
-      standaloneSpec.value = await agentWorkshopApi.getSpec(routeSpecId)
-      expandAgentBranch(routeSpecId)
-      await ensureSpecVersionsLoaded(routeSpecId)
-      await loadLatestVersionContext(routeSpecId)
-      nanobotDraftLink.value = {
-        specId: routeSpecId,
-        specName: standaloneSpec.value.name || '当前 Draft',
-        sessionId: standaloneSpec.value.latest_session_id || undefined,
+    const matchedAgent = agentItems.value.find(item => item.spec_id === routeSpecId)
+    if (matchedAgent) {
+      await openAgentItem(matchedAgent)
+    } else {
+      try {
+        standaloneSpec.value = await agentWorkshopApi.getSpec(routeSpecId)
+        expandAgentBranch(routeSpecId)
+        await ensureSpecVersionsLoaded(routeSpecId)
+        await loadLatestVersionContext(routeSpecId)
+        nanobotDraftLink.value = {
+          specId: routeSpecId,
+          specName: standaloneSpec.value.name || '当前 Draft',
+          sessionId: standaloneSpec.value.latest_session_id || undefined,
+        }
+      } catch (error: any) {
+        if (isNotFoundError(error)) {
+          clearInvalidPersistedSpec(routeSpecId)
+          ElMessage.warning('该 Agent 已不存在，已清理本地缓存')
+        }
       }
-    } catch {}
+    }
   } else if (restored) {
     const persisted = readPersistedStudioState()
     if (persisted?.sessionId) {
@@ -2231,7 +2299,12 @@ const loadInitialState = async () => {
         expandAgentBranch(persisted.specId)
         await ensureSpecVersionsLoaded(persisted.specId)
         await loadLatestVersionContext(persisted.specId)
-      } catch {}
+      } catch (error: any) {
+        if (isNotFoundError(error)) {
+          clearInvalidPersistedSpec(persisted.specId)
+          ElMessage.warning('上次打开的 Agent 已被删除，已清理本地缓存')
+        }
+      }
     }
     if (persisted?.nanobotSessionKey && !nanobotMessages.value.length) {
       await loadNanobotThreadMessages({ sessionKey: persisted.nanobotSessionKey, silent: true })
@@ -2560,6 +2633,12 @@ const formatDisplayTime = (value?: string | null) => {
   font-weight: 800;
   color: #1e293b;
   margin: 0;
+}
+
+.panel-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .count-pill {

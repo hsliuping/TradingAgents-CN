@@ -137,10 +137,9 @@ class BaseAgent(ABC):
         # 🔥 如果已经传入了 llm，就不需要创建 _llm_client
         # LLM provider 和 model 应该由分析流程指定，而不是 Agent 配置
         if self._llm is None:
-            logger.warning(
-                f"⚠️ Agent {self.agent_id} 的 _llm 为 None，将尝试从配置创建 LLM 客户端。"
+            logger.info(
+                f"Agent {self.agent_id} 的 _llm 为 None（dry-run 或未传入 LLM），将尝试从配置创建 LLM 客户端。"
                 f"这通常不应该发生，因为 LLM 应该由 WorkflowBuilder 在创建 Agent 时传入。"
-                f"请检查：1) WorkflowBuilder 是否正确传入了 llm 参数；2) AgentFactory 是否正确传递了 llm 参数。"
             )
             self._setup_llm()
         else:

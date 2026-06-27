@@ -410,9 +410,12 @@ const loadAvailableAgents = async () => {
     const res = await TemplatesApi.list({ agent_type: currentType, limit: 200 })
     const items = (res.data && (res.data as any).items) ? (res.data as any).items : []
     const codes = Array.from(new Set(items.map((it: any) => it.agent_name).filter(Boolean)))
-    // 工坊自定义 Agent 分类：只保留 workshop 版本模板（agent_name 以 spec_nanobot_ 开头），过滤 nanobot 生成的默认短名模板
+    // 工坊自定义 Agent 分类：只保留 Agent 工坊生成的模板，兼容旧的 spec_nanobot_ 与新的 agent_ 命名
     const isUniversal = (filters.agent_type || (typeof route.query.agent_type === 'string' ? route.query.agent_type : '')) === 'universal'
-    const workshopCodes = isUniversal ? codes.filter((c) => (c as string).startsWith('spec_nanobot_')) : codes
+    const workshopCodes = isUniversal ? codes.filter((c) => {
+      const code = String(c)
+      return code.startsWith('agent_') || code.startsWith('spec_nanobot_')
+    }) : codes
     availableAgentCodes.value = workshopCodes as string[]
     // 选中值无效时清空
     if (filters.agent_name && !codes.includes(filters.agent_name)) {
@@ -478,11 +481,14 @@ const loadTemplates = async () => {
     
     // 🔥 过滤掉v1.0版本的模板，只保留v2.0版本
     const v1AgentTypes = ['analysts', 'researchers', 'debators', 'managers', 'trader', 'reviewers', 'position_analysis']
-    // 工坊自定义 Agent 分类：只保留 workshop 版本模板
+    // 工坊自定义 Agent 分类：只保留 Agent 工坊生成的模板
     const isUniversal = filters.agent_type === 'universal'
     items.value = allItems.filter((item: any) => {
-      if (isUniversal && item.agent_name && !item.agent_name.startsWith('spec_nanobot_')) {
-        return false
+      if (isUniversal && item.agent_name) {
+        const code = String(item.agent_name)
+        if (!code.startsWith('agent_') && !code.startsWith('spec_nanobot_')) {
+          return false
+        }
       }
       // 如果指定了agent_type，且是v1.0类型，则过滤掉
       if (item.agent_type && v1AgentTypes.includes(item.agent_type)) {

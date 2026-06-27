@@ -2830,14 +2830,62 @@ async def delete_skill(
     # 3. 删除 Agent 绑定关系
     await db.tool_agent_bindings.delete_many({"tool_id": tool_id})
 
-    # 4. 删除本地 skills/ 目录（同时尝试 skill_name 和 real_name）
+    # 4. 删除本地 skills/ 目录（同时尝试多种名称匹配）
     deleted_dir = False
-    for name_to_try in [real_name, skill_name]:
+    # 尝试直接匹配 name / display_name / skill_id
+    candidates = [
+        real_name,
+        skill_name,
+        existing.get("display_name", ""),
+        existing.get("skill_id", ""),
+    ]
+    # 去重
+    seen = set()
+    unique_candidates = []
+    for c in candidates:
+        c = str(c or "").strip()
+        if c and c not in seen:
+            seen.add(c)
+            unique_candidates.append(c)
+
+    for name_to_try in unique_candidates:
         try:
             result = ClawHubSkillService.uninstall_local_skill(name_to_try)
             if result.get("success"):
                 deleted_dir = True
                 break
+        except Exception:
+            pass
+
+    # 如果直接匹配都失败，扫描 skill_import_* 目录，通过 SKILL.md 中的 skill_id 匹配
+    if not deleted_dir:
+        try:
+            import re
+            skills_dir = Path(__file__).resolve().parents[2] / "skills"
+            for child in skills_dir.iterdir():
+                if not child.is_dir():
+                    continue
+                if not child.name.startswith("skill_import_"):
+                    continue
+                skill_md = child / "SKILL.md"
+                if not skill_md.exists():
+                    continue
+                content = skill_md.read_text(encoding="utf-8", errors="ignore")
+                # 检查是否包含该 skill 的 skill_id 或 name
+                doc_skill_id = str(existing.get("skill_id", "")).strip()
+                doc_name = str(existing.get("name", "")).strip()
+                if doc_skill_id and doc_skill_id in content:
+                    import shutil
+                    shutil.rmtree(child)
+                    deleted_dir = True
+                    logger.info(f"✅ 通过 SKILL.md 匹配删除了 import 目录: {child.name} (skill_id={doc_skill_id})")
+                    break
+                if doc_name and doc_name in content:
+                    import shutil
+                    shutil.rmtree(child)
+                    deleted_dir = True
+                    logger.info(f"✅ 通过 SKILL.md 匹配删除了 import 目录: {child.name} (name={doc_name})")
+                    break
         except Exception:
             pass
 

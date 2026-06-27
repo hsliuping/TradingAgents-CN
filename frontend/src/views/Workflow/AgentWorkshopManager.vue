@@ -9,7 +9,7 @@
         <el-button plain @click="goToLanding()">
           返回总览
         </el-button>
-        <el-button type="primary" @click="goToWorkshop()">
+        <el-button type="primary" @click="router.push('/workflow/agent-studio')">
           新建 Agent
         </el-button>
         <el-button @click="refreshAll" :loading="draftLoading || listLoading">
@@ -76,6 +76,7 @@
           <div class="draft-actions">
             <el-button type="primary" size="small" @click="goToWorkshop(draft.session_id)">继续讨论</el-button>
             <el-button size="small" @click="goToWorkshop(draft.session_id)">进入工作页</el-button>
+            <el-button type="danger" size="small" plain @click="handleDeleteDraftSession(draft)">删除</el-button>
           </div>
         </el-card>
       </div>
@@ -120,7 +121,12 @@
                   <div class="spec-card-title">{{ spec.name }}</div>
                   <el-tag size="small" :type="specStatusTagType(spec.status)">{{ specStatusText(spec.status) }}</el-tag>
                 </div>
-                <div class="spec-card-goal">{{ spec.primary_goal || '还没有填写主要目标' }}</div>
+                <div class="spec-card-goal" v-if="spec.primary_goal">
+                  <el-tooltip placement="top" :show-after="400" :content="spec.primary_goal" effect="light" popper-class="long-text-tooltip">
+                    <span class="text-ellipsis-2" @click.stop>{{ spec.primary_goal }}</span>
+                  </el-tooltip>
+                </div>
+                <div class="spec-card-goal placeholder" v-else>还没有填写主要目标</div>
                 <div class="spec-card-meta">
                   <span>{{ spec.domain || '未分类' }}</span>
                   <span>{{ getLatestSpecVersion(spec)?.version_id || spec.current_version_id || '无版本' }}</span>
@@ -142,7 +148,16 @@
                     </el-tag>
                   </div>
                   <div v-if="getLatestSpecVersion(spec)?.prompt_template_project_memory_binding_summary" class="spec-card-summary-text">
-                    {{ getLatestSpecVersion(spec)?.prompt_template_project_memory_binding_summary?.summary }}
+                    <el-popover
+                      placement="top"
+                      :width="360"
+                      trigger="click"
+                      :content="getLatestSpecVersion(spec)?.prompt_template_project_memory_binding_summary?.summary"
+                    >
+                      <template #reference>
+                        <span class="text-ellipsis-3 clickable">{{ getLatestSpecVersion(spec)?.prompt_template_project_memory_binding_summary?.summary }}</span>
+                      </template>
+                    </el-popover>
                   </div>
                   <div v-if="getLatestSpecVersion(spec)?.prompt_template_project_memory_binding_summary || getLatestSpecVersion(spec)?.last_evaluation_summary?.project_memory_binding" class="spec-card-summary-meta">
                     <el-tag
@@ -159,10 +174,20 @@
                   </div>
                 </div>
                 <div class="spec-card-tags" v-if="spec.outputs?.length">
-                  <el-tag v-for="item in getSpecOutputTags(spec).slice(0, 4)" :key="item" size="small" effect="plain">{{ item }}</el-tag>
+                  <el-tooltip
+                    v-for="(item, idx) in getSpecOutputTags(spec).slice(0, 4)"
+                    :key="idx"
+                    placement="top"
+                    trigger="click"
+                    :content="item"
+                    effect="light"
+                    popper-class="long-text-tooltip"
+                  >
+                    <div class="spec-output-item text-ellipsis-1 clickable">{{ item }}</div>
+                  </el-tooltip>
                 </div>
                 <div class="spec-card-actions">
-                  <el-button type="primary" size="small" @click="openSpec(spec)">进入工坊</el-button>
+                  <el-button type="primary" size="small" @click="openAgentStudio(spec)">Agent 工作室</el-button>
                   <el-button size="small" @click="openSpec(spec)">查看规格</el-button>
                   <el-button type="danger" size="small" plain @click="handleDeleteSpec(spec)">删除</el-button>
                 </div>
@@ -379,6 +404,10 @@ const goToLanding = () => {
   router.push('/workflow/agent-workshop')
 }
 
+const openAgentStudio = (spec: AgentSpec) => {
+  router.push({ path: '/workflow/agent-studio', query: { agent_id: spec.spec_id } })
+}
+
 const openSpec = (spec: AgentSpec) => {
   if (spec.latest_session_id) {
     goToWorkshop(spec.latest_session_id)
@@ -438,6 +467,31 @@ const loadSpecs = async () => {
 
 const refreshAll = async () => {
   await Promise.all([loadDrafts(), loadSpecs()])
+}
+
+const handleDeleteDraftSession = async (draft: AgentWorkshopSessionDetail) => {
+  const agentName = draft.current_spec_snapshot?.name || '未命名 Agent'
+  try {
+    await ElMessageBox.confirm(
+      `确定删除“${agentName}”这条进行中的工坊会话吗？这只会删除当前会话记录，不会删除已沉淀的 Agent 规格。`,
+      '删除工坊会话',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--danger',
+      }
+    )
+
+    await agentWorkshopApi.deleteSession(draft.session_id)
+    ElMessage.success('工坊会话已删除')
+    await loadDrafts()
+  } catch (error: any) {
+    if (error === 'cancel' || error?.message === 'cancel') {
+      return
+    }
+    ElMessage.error(error?.message || '删除工坊会话失败')
+  }
 }
 
 const handleDeleteSpec = async (spec: AgentSpec) => {
@@ -684,9 +738,14 @@ onActivated(refreshAll)
 
 .spec-card-goal {
   margin-top: 10px;
-  min-height: 44px;
+  min-height: 22px;
   line-height: 1.65;
   color: #4e5b57;
+}
+
+.spec-card-goal.placeholder {
+  color: #9aada6;
+  font-style: italic;
 }
 
 .spec-card-meta {
@@ -724,6 +783,47 @@ onActivated(refreshAll)
   line-height: 1.6;
 }
 
+/* 多行省略号通用类 */
+.text-ellipsis-1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-ellipsis-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.text-ellipsis-3 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.clickable {
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.clickable:hover {
+  color: #123f39;
+}
+
+/* 长文本提示框 */
+:deep(.long-text-tooltip) {
+  max-width: 420px;
+  word-break: break-word;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
 .spec-card-summary-meta {
   margin-top: 8px;
   color: #70837d;
@@ -732,7 +832,19 @@ onActivated(refreshAll)
 
 .spec-card-tags {
   margin-top: 12px;
-  flex-wrap: wrap;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.spec-output-item {
+  font-size: 12px;
+  color: #4e5b57;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(18, 63, 57, 0.04);
+  border: 1px solid rgba(18, 63, 57, 0.06);
 }
 
 .spec-card-actions {

@@ -247,15 +247,27 @@ class ToolRegistry:
         if hasattr(func, 'invoke') or hasattr(func, 'run'):
             return func
 
-        # 🔥 检查函数是否为异步函数
+        # 🔥 检查函数是否为异步函数，若是则自动包装为同步函数
         import asyncio
         import inspect
-        
+        import functools
+
         if inspect.iscoroutinefunction(func):
-            logger.warning(
-                f"⚠️ 工具 {tool_id} 的函数是异步函数，LangChain 工具需要同步函数。"
-                f"这可能导致工具调用返回协程对象而不是实际结果。"
-                f"请确保工具注册时使用同步包装函数。"
+            @functools.wraps(func)
+            def _sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+                if loop is not None and loop.is_running():
+                    import concurrent.futures
+                    future = asyncio.run_coroutine_threadsafe(func(*args, **kwargs), loop)
+                    return future.result(timeout=120)
+                return asyncio.run(func(*args, **kwargs))
+
+            func = _sync_wrapper
+            logger.info(
+                f"✅ 工具 {tool_id} 的异步函数已自动包装为同步函数，LangChain 可正常调用。"
             )
         
         # 否则包装为 LangChain tool

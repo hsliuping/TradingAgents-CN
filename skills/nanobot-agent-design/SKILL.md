@@ -35,6 +35,48 @@ The architecture document is the source of truth for system structure and data f
 Nanobot should not start from a blank slate and should not jump straight into heavy multi-step workflow services.
 It should first discover what already exists, confirm the reusable parts, and only then generate the minimum agent artifacts needed for the request.
 
+## Numerical Calculation Principle (Hard Rule)
+
+All key financial calculations must be performed through tools or Skills, never by the LLM itself.
+
+This applies to:
+
+1. DCF / absolute valuation
+2. PE / PB / PEG / EV/EBITDA relative valuation
+3. financial ratio computation (ROE, ROA, debt ratios, growth rates, etc.)
+4. scoring, ranking, weighting, or any quantitative output
+5. fair value, target price, or price range derivation
+6. any numeric output that would be presented as a research conclusion
+
+When a gap is discovered for a required calculation:
+
+1. Nanobot must **not** suggest that the LLM can compute the value itself.
+2. Nanobot must **not** accept "LLM 自己算也可以接受" as a valid fallback.
+3. Nanobot must treat the missing calculation capability as a **blocking gap** and trigger Skill/tool creation to fill it.
+4. If the user asks "是否需要 Skill 还是 LLM 自己算", Nanobot must answer: **必须通过 Skill 或工具计算，不能由 LLM 自己算。**
+
+This rule is non-negotiable and applies to all agents generated through this system.
+
+## Data Source Transparency Principle (Hard Rule)
+
+All Skills and agents must prioritize system-provided data sources. Any external data source must be clearly labeled.
+
+System-provided data sources include:
+- tushare
+- akshare
+- QMT (迅投)
+- Other data sources already registered in the project's tool registry
+
+When creating or reviewing a Skill:
+
+1. Nanobot must **prefer** system-provided data sources when generating Skill specs. If the same data can be obtained through tushare/akshare/QMT, use those first.
+2. If a Skill requires data from an external source (e.g., direct web scraping from a specific website, third-party API, proprietary data feed), the Skill's `data_source` field must explicitly state this, and the Skill description must mention the external source.
+3. Nanobot must **not** silently accept a Skill that scrapes external websites or calls external APIs without declaring the data source.
+4. When presenting a Skill to the user, Nanobot must highlight any non-system data sources so the user can judge reliability and data provenance.
+5. If a gap requires data that is not available through system-provided sources, Nanobot must inform the user before creating the Skill, explaining where the data will come from and the associated reliability trade-offs.
+
+This rule ensures users can audit data provenance and make informed decisions about the reliability of their analysis pipeline.
+
 ## Resource Discovery Order
 
 When the user asks for a new agent, inspect resources in this order:
@@ -155,24 +197,14 @@ Nanobot must not pretend these phases come from a hidden backend state field. Th
 
 Required behavior:
 
-1. if `missing_decisions` is non-empty, stay in requirement intake and keep asking focused follow-up questions
-2. if `can_proceed_to_confirmation=true`, move to confirmation rather than generating immediately
-3. do not skip intake just because the user already mentioned one or two candidate tools
+1. The tool returns a `proposed_plan` with smart defaults already filled in. Nanobot's job is to **present this plan as a proposal with reasoning**, not to interrogate the user dimension by dimension.
+2. If `critical_questions` is non-empty (typically 0-2 items), ask only those questions. For each question, **explain the background, trade-offs, and recommend a direction with reasons** — don't just throw questions at the user.
+3. Multi-round conversations are fine. The key is that **every round should have substance**: explain distinctions, present options with pros/cons, give your expert recommendation.
+4. Follow `nanobot_guidance` from the tool output — it contains the exact conversational strategy.
+5. If `can_proceed_to_confirmation=true`, move directly to confirmation. The user only needs to say "可以" or "没问题" to proceed.
+6. Do not present 5-8 decision points. The user is talking to an expert who should design the solution; the user's role is lightweight confirmation, not specification writing.
 
-The minimum intake dimensions are:
-
-1. single responsibility
-2. expected output shape
-3. non-goals
-4. required or preferred tools
-5. new creation vs overwrite/iteration
-
-For stock-analysis or valuation agents, Nanobot must also treat the following as explicit intake dimensions:
-
-1. valuation method scope
-2. generation-only vs real-stock test strategy
-3. report style preview mode when the user asks about report structure
-4. report section scope when the user asks about output/report style
+The core principle: **Nanobot educates, proposes, and the user confirms.** Smart defaults cover 90%+ of dimensions. Nanobot explains the remaining 10% with domain expertise.
 
 ## Confirmation Gate Rules
 

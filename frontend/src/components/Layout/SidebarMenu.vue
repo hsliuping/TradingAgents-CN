@@ -67,10 +67,6 @@
         Agent 工坊
         <el-tag type="primary" size="small" style="margin-left: 4px; transform: scale(0.85);">迭代</el-tag>
       </el-menu-item>
-      <el-menu-item index="/workflow/agent-studio">
-        Agent 工作室
-        <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">实验</el-tag>
-      </el-menu-item>
       <el-menu-item index="/workflow/skills">
         Skill 中心
         <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
@@ -249,7 +245,11 @@ const advancedMenuItems = new Set([
 
 const isAdvancedMenuItem = (index: string) => advancedMenuItems.has(index)
 
-const activeMenu = computed(() => route.path)
+const activeMenu = computed(() => {
+  if (route.path.startsWith('/workflow/agent-studio')) return '/workflow/agent-workshop'
+  if (route.path.startsWith('/workflow/agent-workshop/')) return '/workflow/agent-workshop'
+  return route.path
+})
 </script>
 
 <style lang="scss" scoped>
