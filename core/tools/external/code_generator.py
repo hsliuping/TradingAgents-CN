@@ -726,6 +726,8 @@ financial_data = ctx["financial_data"]
             logger.warning("无法从 LLM 输出中提取代码")
             code = raw  # 兜底：使用完整输出
 
+        code = self._sanitize_extracted_code(code)
+
         # 构建测试用例
         test_cases = []
         if isinstance(tests_raw, list):
@@ -742,6 +744,24 @@ financial_data = ctx["financial_data"]
             metadata=metadata if isinstance(metadata, dict) else {},
             test_cases=test_cases,
         )
+
+    def _sanitize_extracted_code(self, code: str) -> str:
+        """清理 LLM 输出中残留的 Markdown fence 和 CODE START/END 标记。"""
+        text = str(code or "").strip()
+
+        # LLM 有时输出未闭合的 ```python fence，fallback raw 后会把 fence 当成代码首行。
+        text = re.sub(r"^```(?:python|py)?\s*\n", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\n```\s*$", "", text)
+
+        lines = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if re.match(r"^#\s*===\s*CODE\s+(START|END)\s*===\s*$", stripped, flags=re.IGNORECASE):
+                continue
+            if stripped == "```":
+                continue
+            lines.append(line)
+        return "\n".join(lines).strip()
 
     def _extract_block(self, text: str, start_marker: str, end_marker: str) -> str:
         """提取标记之间的文本块"""

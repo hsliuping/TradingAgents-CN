@@ -36,7 +36,7 @@ SKILL_CODE_SNAPSHOT_DIR = PROJECT_ROOT / "data" / "code" / "skill"
 # MongoDB 集合名
 SESSION_COLLECTION = "skill_creation_sessions"
 SKILL_COLLECTION = "external_skills"
-SKILL_PIPELINE_MAX_ITERATIONS = 5
+SKILL_PIPELINE_MAX_ITERATIONS = 8
 
 
 class SkillGenerationService:

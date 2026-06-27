@@ -23,7 +23,7 @@ from .skill_spec import EvalScore, SandboxResult, SkillSpec
 logger = logging.getLogger(__name__)
 
 JUDGE_LLM_TIMEOUT_SECONDS = 25
-JUDGE_LLM_MAX_TOKENS = 300
+JUDGE_LLM_MAX_TOKENS = 1200
 
 
 class OutputEvaluator:
@@ -165,7 +165,7 @@ class OutputEvaluator:
             f"- 期望输出类型: {spec.expected_output.type}\n"
             f"- 期望字段: {', '.join(spec.expected_output.fields) or '无'}\n\n"
             f"【执行结果】\n{output_preview}\n\n"
-            f"【生成的代码】\n```python\n{code[:2000]}\n```\n\n"
+            f"【生成的代码】\n```python\n{code[:8000]}\n```\n\n"
             "【评分说明】\n"
             "- 若返回 {\"status\": \"success\", \"data\": [], \"message\": \"未找到xxx数据\"}，说明真实调用了数据源但无数据，应给 authenticity≥7、completeness≥6，不要因数据为空而打低分。\n"
             "- 若返回了 mock/模拟/假数据，authenticity 应打低分。\n"
@@ -211,7 +211,7 @@ class OutputEvaluator:
                 score.format_quality = float(scores.get("format_quality", score.format_quality))
                 logger.info(f"🎯 Judge LLM 评分: {score.total}")
             else:
-                logger.warning(f"⚠️ Judge LLM 输出中未找到 JSON: {raw[:500]}")
+                logger.warning(f"⚠️ Judge LLM 输出中未找到 JSON: {raw[:1000]}")
         except Exception as e:
             logger.warning(f"Judge LLM 评分失败，保留基础检查分数: {e}")
 
@@ -249,7 +249,7 @@ class OutputEvaluator:
     # ==================== 工具方法 ====================
 
     @staticmethod
-    def _format_output_preview(output: Any, max_len: int = 1500) -> str:
+    def _format_output_preview(output: Any, max_len: int = 8000) -> str:
         """格式化输出预览"""
         if output is None:
             return "(空)"

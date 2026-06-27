@@ -1346,13 +1346,13 @@ class RequirementAnalyzer:
                     # 第 2 次：将上次失败的输出反馈给 LLM，要求修正
                     retry_prompt = (
                         f"你上次的输出无法被解析为合法 JSON，请修正后重新输出。\n"
-                        f"上次输出（截断）:\n{last_raw[:800]}\n\n"
+                        f"上次输出:\n{last_raw[:8000]}\n\n"
                         f"错误: {last_error}\n\n"
                         "请只输出纯 JSON，不要包含任何 Markdown 标记或解释文字。"
                     )
                     response = client.chat([
                         Message(role="user", content=prompt),
-                        Message(role="assistant", content=last_raw[:1000]),
+                        Message(role="assistant", content=last_raw[:8000]),
                         Message(role="user", content=retry_prompt),
                     ])
 

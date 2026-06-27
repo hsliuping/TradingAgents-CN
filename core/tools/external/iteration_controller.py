@@ -24,6 +24,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 from core.llm import UnifiedLLMClient, Message
 
+from core.skill_runtime.project_access import PROJECT_DATA_ACCESS_DOC
+from core.skill_runtime.data_access import LOCAL_DATA_API_DOC
+
 from .business_verifier import BusinessVerifierRegistry
 from .code_generator import CodeGenerator
 from .output_evaluator import OutputEvaluator
@@ -46,7 +49,7 @@ logger = logging.getLogger(__name__)
 MAX_ITERATIONS = 8
 PASS_THRESHOLD = 8.0
 # 连续相同失败检测阈值：连续 N 轮业务验收失败项完全一致则判定为不可恢复
-_STALE_FAILURE_THRESHOLD = 3
+_STALE_FAILURE_THRESHOLD = 5
 
 # 快照落盘根目录（与 SkillGenerationService 保持一致）
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -837,9 +840,9 @@ class IterationController:
         output_preview = ""
         if output is not None:
             try:
-                output_preview = json.dumps(output, ensure_ascii=False, indent=2, default=str)[:2000]
+                output_preview = json.dumps(output, ensure_ascii=False, indent=2, default=str)[:10000]
             except Exception:
-                output_preview = str(output)[:2000]
+                output_preview = str(output)[:10000]
 
         code_context = self._format_code_for_prompt(code)
         extra_context_block = f"\n【补充上下文】\n{extra_context}\n" if extra_context else ""
@@ -852,6 +855,11 @@ class IterationController:
 - 功能: {spec.description}
 - 数据源: {spec.data_source or '未指定'}
 
+【平台可用数据函数 — 如果失效可能与用错函数有关，请检查】
+{LOCAL_DATA_API_DOC}
+
+{PROJECT_DATA_ACCESS_DOC}
+
 【生成的代码】
 ```python
 {code_context}
@@ -863,10 +871,10 @@ class IterationController:
 {error}
 
 【标准输出 stdout】
-{(stdout or '(空)')[:1500]}
+{(stdout or '(空)')[:8000]}
 
 【标准错误 stderr】
-{(stderr or '(空)')[:1500]}
+{(stderr or '(空)')[:8000]}
 
 【函数返回值】
 {output_preview or '(空)'}
