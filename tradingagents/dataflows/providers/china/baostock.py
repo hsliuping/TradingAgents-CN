@@ -285,6 +285,81 @@ class BaoStockProvider(BaseStockDataProvider):
             logger.error(f"❌ BaoStock获取{code}估值数据失败: {e}")
             return {}
     
+    async def get_valuation_history(
+        self,
+        code: str,
+        start_date: str,
+        end_date: str,
+        fields: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """获取股票历史估值序列（PE_TTM、PB_MRQ 等）。
+
+        Args:
+            code: 6位股票代码
+            start_date: 起始日期 YYYY-MM-DD
+            end_date: 结束日期 YYYY-MM-DD
+            fields: 可选字段子集，默认全部
+
+        Returns:
+            {source: "baostock", data: [{date, pe_ttm, pb_mrq, ps_ttm, pcf_ttm, close}, ...]}
+        """
+        if not self.connected:
+            return {"source": "baostock", "data": []}
+
+        try:
+            def fetch_valuation_history():
+                bs_code = self._to_baostock_code(code)
+                lg = self.bs.login()
+                if lg.error_code != '0':
+                    raise Exception(f"登录失败: {lg.error_msg}")
+                try:
+                    field_str = "date,code,close,peTTM,pbMRQ,psTTM,pcfNcfTTM"
+                    rs = self.bs.query_history_k_data_plus(
+                        code=bs_code,
+                        fields=field_str,
+                        start_date=start_date,
+                        end_date=end_date,
+                        frequency="d",
+                        adjustflag="3",
+                    )
+                    if rs.error_code != '0':
+                        raise Exception(f"查询失败: {rs.error_msg}")
+                    records = []
+                    while (rs.error_code == '0') & rs.next():
+                        row = rs.get_row_data()
+                        # fields: date, code, close, peTTM, pbMRQ, psTTM, pcfNcfTTM
+                        records.append({
+                            "date": str(row[0]) if len(row) > 0 else "",
+                            "close": self._safe_float(row[2]) if len(row) > 2 else None,
+                            "pe_ttm": self._safe_float(row[3]) if len(row) > 3 else None,
+                            "pb_mrq": self._safe_float(row[4]) if len(row) > 4 else None,
+                            "ps_ttm": self._safe_float(row[5]) if len(row) > 5 else None,
+                            "pcf_ttm": self._safe_float(row[6]) if len(row) > 6 else None,
+                        })
+                    return records
+                finally:
+                    self.bs.logout()
+
+            records = await asyncio.to_thread(fetch_valuation_history)
+
+            # 按请求的 fields 过滤
+            if fields:
+                allowed = set(fields)
+                records = [
+                    {k: v for k, v in r.items() if k in allowed or k == "date"}
+                    for r in records
+                ]
+
+            logger.info(
+                "✅ BaoStock 估值历史获取完成: %s %s→%s 共 %d 条",
+                code, start_date, end_date, len(records),
+            )
+            return {"source": "baostock", "data": records}
+
+        except Exception as e:
+            logger.error("❌ BaoStock获取%s估值历史失败: %s", code, e)
+            return {"source": "baostock", "data": []}
+    
     async def _get_stock_info_detail(self, code: str) -> Dict[str, Any]:
         """获取股票详细信息"""
         try:

@@ -14,6 +14,7 @@ from .data_access import _get_db
 from .external_sources import (
     get_external_financial_data,
     get_external_historical_data,
+    get_external_valuation_data,
     get_external_query_news,
     get_external_stock_news,
 )
@@ -380,7 +381,12 @@ PROJECT_DATA_ACCESS_DOC = """
 10. get_external_financial_data(symbol, source=None, market_category="a_shares", report_type="quarterly", period=None, limit=4) -> dict
    - 同步获取外部财务数据，内部已桥接异步 provider
 
-11. get_external_query_news(query, curr_date, look_back_days=7, source="google_news") -> dict
+11. get_external_valuation_data(symbol, start_date, end_date, source=None, market_category="a_shares") -> dict
+   - 同步获取外部历史估值序列（PE_TTM、PB_MRQ、PS_TTM、PCF_TTM），内部使用 BaoStock
+   - 返回 {source: "baostock", data: [{date, close, pe_ttm, pb_mrq, ps_ttm, pcf_ttm}, ...]}
+   - 估值类 Skill（历史分位数、安全边际、PE/PB 通道等）优先用这个函数，不要用 get_external_historical_data（那个只含 OHLCV 价格）
+
+12. get_external_query_news(query, curr_date, look_back_days=7, source="google_news") -> dict
    - 通过项目已有接口获取 Google News / Finnhub 新闻
 
 使用示例1：直接读本地集合

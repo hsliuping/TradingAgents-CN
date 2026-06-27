@@ -656,6 +656,15 @@ LOCAL_DATA_API_DOC = """
    - 基于本地同行样本，返回 average / median / min / max / count
    - 相对估值类 Skill 优先用这个函数，不要自行写 Mongo 聚合
 
+⚠️ 注意：以上函数 4-5（get_market_quotes、get_latest_stock_price）和 7（get_stock_valuation_context）只能拿到当前 PE/PB 快照。
+需要 **历史 PE/PB 时间序列**（如历史分位数、PE 通道、安全边际）时，请用 project_access 的专用函数：
+
+    from core.skill_runtime.project_access import get_external_valuation_data
+    result = get_external_valuation_data("600519", "2020-01-01", "2025-06-01")
+    # 返回 {source: "baostock", data: [{date, close, pe_ttm, pb_mrq, ps_ttm, pcf_ttm}, ...]}
+
+不要用 get_external_historical_data 代替——它只含 OHLCV 价格，不含 PE/PB 字段。
+
 示例1：先查本地，无数据再调外部 API
     from core.skill_runtime.data_access import get_stock_basic_info, get_stock_daily_quotes
     info = get_stock_basic_info("600519")
