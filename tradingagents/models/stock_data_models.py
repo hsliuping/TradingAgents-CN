@@ -152,6 +152,7 @@ class BalanceSheetData(BaseModel):
     total_cur_liab: Optional[float] = Field(None, description="流动负债合计")
     total_ncl: Optional[float] = Field(None, description="非流动负债合计")
     cash_and_equivalents: Optional[float] = Field(None, description="货币资金")
+    goodwill: Optional[float] = Field(None, description="商誉（并购形成的溢价资产，Q4年报完整披露，季报可能为空）")
 
 
 class IncomeStatementData(BaseModel):

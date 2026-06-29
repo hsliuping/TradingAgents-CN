@@ -101,7 +101,11 @@ class DataSourceManager:
                     f"Data source {adapter.name} is available (priority: {adapter.priority})"
                 )
             else:
-                logger.warning(f"Data source {adapter.name} is not available")
+                log_message = f"Data source {adapter.name} is not available"
+                if adapter.name == "qmt":
+                    logger.info(log_message)
+                else:
+                    logger.warning(log_message)
         return available
 
     def get_stock_list_with_fallback(self, preferred_sources: Optional[List[str]] = None, exclude_local: bool = False) -> Tuple[Optional[pd.DataFrame], Optional[str]]:

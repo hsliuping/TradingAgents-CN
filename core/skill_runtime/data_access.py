@@ -313,12 +313,20 @@ def get_stock_daily_quotes(
     symbol = str(symbol).strip().zfill(6)
     start = start_date.replace("-", "")[:8]
     end = end_date.replace("-", "")[:8]
+    start_dash = f"{start[:4]}-{start[4:6]}-{start[6:8]}" if len(start) == 8 else start_date
+    end_dash = f"{end[:4]}-{end[4:6]}-{end[6:8]}" if len(end) == 8 else end_date
     db = _get_db()
     col = db[_COL_DAILY]
+    date_filter = {
+        "$or": [
+            {"trade_date": {"$gte": start, "$lte": end}},
+            {"trade_date": {"$gte": start_dash, "$lte": end_dash}},
+        ]
+    }
     query = {
         "symbol": symbol,
-        "trade_date": {"$gte": start, "$lte": end},
         "period": period,
+        **date_filter,
     }
     if source:
         query["data_source"] = source
@@ -656,8 +664,32 @@ LOCAL_DATA_API_DOC = """
    - 基于本地同行样本，返回 average / median / min / max / count
    - 相对估值类 Skill 优先用这个函数，不要自行写 Mongo 聚合
 
-⚠️ 注意：以上函数 4-5（get_market_quotes、get_latest_stock_price）和 7（get_stock_valuation_context）只能拿到当前 PE/PB 快照。
-需要 **历史 PE/PB 时间序列**（如历史分位数、PE 通道、安全边际）时，请用 project_access 的专用函数：
+【标准结构化金融数据能力 — 推荐 Agent/Skill 优先复用】
+允许导入：from core.skill_runtime.standard_financial_apis import ...
+
+11. get_historical_financial_annual_series(symbol, years=10, source=None) -> dict
+   - 一键返回最近 N 年年报序列，字段含 revenue、net_profit、roe、gross_margin、operating_cashflow、free_cashflow、debt_to_assets 等
+   - 适合巴菲特深度分析、长期财务台账、5-10 年趋势，不要用 get_income_analysis 的 Markdown 表格替代
+
+12. get_profitability_stability_metrics(symbol, years=10, source=None) -> dict
+   - 基于年报序列计算营收/净利/ROE/毛利率及同比增长的均值、中位数、波动率、变异系数
+   - 盈利稳定性、护城河财务证据、质量分析优先用这个函数
+
+13. get_cashflow_quality_trend(symbol, years=10, source=None) -> dict
+   - 基于年报序列返回 OCF/净利、FCF/净利、OCF margin、FCF margin 的年度趋势和统计摘要
+   - 现金流质量、利润含金量、自由现金流分析优先用这个函数
+
+14. get_historical_valuation_percentile(symbol, metrics=None, lookback_years=5, as_of_date=None) -> dict
+   - 结构化返回 pe_ttm / pb / ps_ttm / pcf_ttm 的历史分位、当前值、中位数、样本数和窗口
+   - 替代 get_stock_fundamentals_unified 中隐藏的 3 年文本分位输出
+
+⚠️ 注意：以上函数 4-5（get_market_quotes、get_latest_stock_price）和 8（get_stock_valuation_context）只能拿到当前 PE/PB 快照。
+需要 **结构化历史 PE/PB 分位**（如历史分位数、PE 通道、安全边际）时，优先用标准函数：
+
+    from core.skill_runtime.standard_financial_apis import get_historical_valuation_percentile
+    result = get_historical_valuation_percentile("600519", metrics=["pe_ttm", "pb"], lookback_years=5)
+
+如果只需要原始历史估值序列，可用 project_access 的专用函数：
 
     from core.skill_runtime.project_access import get_external_valuation_data
     result = get_external_valuation_data("600519", "2020-01-01", "2025-06-01")

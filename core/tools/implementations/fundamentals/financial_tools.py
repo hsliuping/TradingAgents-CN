@@ -1,12 +1,14 @@
 """
 专项财务分析工具
 
-提供 5 个细分财务工具：
+提供 7 个细分财务工具：
 1. get_income_analysis - 利润表分析（营收、利润趋势）
 2. get_balance_sheet_analysis - 资产负债表分析（财务健康度）
 3. get_cashflow_analysis - 现金流量表分析
-4. get_dividend_data - 分红送股数据
-5. get_main_business - 主营业务构成
+4. get_goodwill_analysis - 商誉分析（估值、减值风险信号）
+5. get_dupont_analysis - 杜邦分析（ROE 三因子/五因子拆解）
+6. get_dividend_data - 分红送股数据
+7. get_main_business - 主营业务构成
 """
 
 import logging
@@ -295,6 +297,13 @@ def get_balance_sheet_analysis(
         lines.append(f"- **应收账款**: {_wan_yi(data.get('accounts_receiv'))}")
         lines.append(f"- **存货**: {_wan_yi(data.get('inventories'))}")
         lines.append(f"- **固定资产**: {_wan_yi(data.get('fix_assets'))}")
+
+        # 商誉（仅在年报披露时有效值）
+        goodwill = data.get('goodwill')
+        if goodwill is not None and goodwill > 0:
+            lines.append(f"- **商誉**: {_wan_yi(goodwill)} | 商誉/净资产: {_safe_pct(goodwill / data.get('total_equity') * 100 if data.get('total_equity') else None)}")
+        else:
+            lines.append(f"- **商誉**: 数据不足（季报通常不披露商誉明细，建议查询年报数据）")
         lines.append("")
 
         # 偿债能力
@@ -319,15 +328,16 @@ def get_balance_sheet_analysis(
         # 多期趋势
         if balance_list and len(balance_list) > 1:
             lines.append("## 📈 资产负债趋势")
-            lines.append("| 报告期 | 总资产 | 总负债 | 股东权益 | 货币资金 |")
-            lines.append("|--------|--------|--------|----------|----------|")
+            lines.append("| 报告期 | 总资产 | 总负债 | 股东权益 | 货币资金 | 商誉 |")
+            lines.append("|--------|--------|--------|----------|----------|------|")
             for rec in balance_list[:periods]:
                 period = rec.get('end_date', 'N/A')
                 ta = _wan_yi(rec.get('total_assets'))
                 tl = _wan_yi(rec.get('total_liab'))
                 eq = _wan_yi(rec.get('total_hldr_eqy_exc_min_int'))
                 mc = _wan_yi(rec.get('money_cap'))
-                lines.append(f"| {period} | {ta} | {tl} | {eq} | {mc} |")
+                gw = _wan_yi(rec.get('goodwill'))
+                lines.append(f"| {period} | {ta} | {tl} | {eq} | {mc} | {gw} |")
             lines.append("")
 
         # 偿债能力趋势
@@ -461,9 +471,360 @@ def get_cashflow_analysis(
         return f"❌ 现金流分析执行失败: {e}"
 
 
+# ============================================================
+# Tool 4: 商誉分析
+# ============================================================
+@tool
+@register_tool(
+    tool_id="get_goodwill_analysis",
+    name="商誉分析",
+    description="分析股票的商誉规模、占比及变动趋势，评估商誉减值风险。从年报资产负债表提取 goodwill 字段，计算商誉/净资产比率和同比变化。",
+    category="fundamentals",
+    is_online=True,
+    auto_register=True
+)
+def get_goodwill_analysis(
+    ticker: Annotated[str, "股票代码，6位数字（如 002230、600519、000001）"],
+    years: Annotated[int, "回溯年数，默认5年"] = 5
+) -> str:
+    """
+    商誉分析工具 —— 评估商誉规模与减值风险
+
+    从资产负债表年报数据中提取商誉(goodwill)字段，计算：
+    - 商誉账面金额
+    - 商誉/净资产比率
+    - 商誉/总资产比率
+    - 同比变化趋势（识别减值信号）
+
+    ⚠️ 商誉仅在年报（Q4）完整披露，本工具从 raw_data 中筛选年报数据，
+    不会出现季报空值问题。
+
+    Args:
+        ticker: 股票代码（如 002230、600519）
+        years: 回溯年数，默认5年
+
+    Returns:
+        str: 商誉分析报告
+    """
+    logger.info(f"📊 [商誉分析] 分析股票: {ticker}, 回溯{years}年")
+    try:
+        data = _get_financial_data_from_cache_or_api(ticker, limit=years * 4 + 4)
+        if not data:
+            return f"❌ 未获取到 {ticker} 的财务数据"
+
+        raw = data.get("raw_data", {})
+        balance_list = raw.get("balance_sheet", [])
+
+        # 筛选年报：取每年最后一个报告期（end_date 含 -12-31 或按年度去重取最后一条）
+        annual_records: List[Dict[str, Any]] = []
+        seen_years: set = set()
+        for rec in balance_list:
+            end_date = str(rec.get('end_date', '') or rec.get('f_ann_date', ''))
+            if not end_date:
+                continue
+            # 提取年份
+            year = end_date[:4]
+            if year not in seen_years:
+                seen_years.add(year)
+                annual_records.append(rec)
+
+        # 取最近 years 年的年报
+        annual_records = sorted(annual_records, key=lambda r: str(r.get('end_date', '')), reverse=True)[:years]
+
+        if not annual_records:
+            return f"📊 {ticker} 暂无商誉数据（资产负债表缓存中未找到年报记录，建议先拉取数据）"
+
+        goodwill_by_year: Dict[str, Optional[float]] = {}
+        equity_by_year: Dict[str, Optional[float]] = {}
+        assets_by_year: Dict[str, Optional[float]] = {}
+
+        for rec in annual_records:
+            year = str(rec.get('end_date', ''))[:4] or 'N/A'
+            goodwill_by_year[year] = rec.get('goodwill')
+            equity_by_year[year] = rec.get('total_hldr_eqy_exc_min_int')
+            assets_by_year[year] = rec.get('total_assets')
+
+        lines = [f"# {ticker} 商誉分析\n"]
+
+        # 最新一期商誉概况
+        latest_year = list(goodwill_by_year.keys())[0]
+        latest_gw = goodwill_by_year.get(latest_year)
+        latest_equity = equity_by_year.get(latest_year)
+        latest_assets = assets_by_year.get(latest_year)
+
+        lines.append("## 📊 最新一期商誉概况")
+        lines.append(f"- **报告年度**: {latest_year}")
+
+        if latest_gw is not None and latest_gw > 0:
+            lines.append(f"- **商誉账面金额**: {_wan_yi(latest_gw)}")
+            if latest_equity:
+                gw_to_equity = latest_gw / latest_equity * 100
+                lines.append(f"- **商誉/净资产**: {gw_to_equity:.1f}%")
+                risk_flag = "🔴 高风险（商誉占净资产比例过高，减值压力大）" if gw_to_equity > 20 else ("🟡 关注（商誉占比偏高）" if gw_to_equity > 10 else "🟢 正常")
+                lines.append(f"- **风险信号**: {risk_flag}")
+            if latest_assets:
+                lines.append(f"- **商誉/总资产**: {latest_gw / latest_assets * 100:.1f}%")
+        elif latest_gw is not None and latest_gw == 0:
+            lines.append(f"- **商誉账面金额**: 0（该公司无商誉）")
+            lines.append(f"- **风险信号**: 🟢 无商誉减值风险")
+        else:
+            lines.append(f"- **商誉账面金额**: 数据缺失（年报未披露 goodwill 字段）")
+            lines.append(f"- **风险信号**: ⬜ 数据不足，无法判断")
+        lines.append("")
+
+        # 多年趋势
+        if len(annual_records) > 1:
+            lines.append("## 📈 商誉年度趋势")
+            lines.append("| 报告年度 | 商誉 | 净资产 | 商誉/净资产 | 商誉/总资产 |")
+            lines.append("|----------|------|--------|------------|------------|")
+            sorted_years = sorted(goodwill_by_year.keys(), reverse=True)
+            prev_gw = None
+            for year in sorted_years:
+                gw = goodwill_by_year.get(year)
+                eq = equity_by_year.get(year)
+                ta = assets_by_year.get(year)
+                gwe = f"{gw / eq * 100:.1f}%" if (gw is not None and eq and eq > 0) else "-"
+                gwt = f"{gw / ta * 100:.1f}%" if (gw is not None and ta and ta > 0) else "-"
+                lines.append(f"| {year} | {_wan_yi(gw)} | {_wan_yi(eq)} | {gwe} | {gwt} |")
+
+                # 检测同比大幅下降（减值信号）
+                if prev_gw is not None and gw is not None and prev_gw > 0 and gw > 0:
+                    change = (gw - prev_gw) / prev_gw * 100
+                    if change < -20:
+                        lines.append(f"  ⚠️ {year}年商誉同比下降 {abs(change):.0f}%，可能存在减值！")
+                prev_gw = gw
+            lines.append("")
+
+        lines.append("## 🔍 减值风险判读")
+        if latest_gw is not None and latest_gw > 0 and latest_equity:
+            ratio = latest_gw / latest_equity * 100
+            lines.append(f"- 商誉/净资产比率 = {ratio:.1f}%")
+            if ratio > 20:
+                lines.append(f"- ⚠️ 超过 20% 警戒线，减值对净资产的冲击显著")
+                lines.append(f"- 建议关注：标的公司业绩承诺完成情况、行业景气度变化")
+            elif ratio > 10:
+                lines.append(f"- 处于 10%-20% 关注区间，需持续跟踪")
+            else:
+                lines.append(f"- 低于 10%，商誉减值对净资产影响有限")
+        lines.append("")
+
+        lines.append("---")
+        lines.append("*数据来源: 年报资产负债表 (Tushare) | 商誉字段仅在年报中完整披露*")
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.error(f"❌ [商誉分析] 执行失败: {e}")
+        return f"❌ 商誉分析执行失败: {e}"
+
 
 # ============================================================
-# Tool 4: 分红送股数据
+# Tool 5: 杜邦分析
+# ============================================================
+@tool
+@register_tool(
+    tool_id="get_dupont_analysis",
+    name="杜邦分析",
+    description="对股票进行杜邦分析，拆解ROE为三因子（净利率×资产周转率×权益乘数）和五因子（税负×利息负担×经营利润率×资产周转率×权益乘数），支持多年趋势对比。",
+    category="fundamentals",
+    is_online=True,
+    auto_register=True
+)
+def get_dupont_analysis(
+    ticker: Annotated[str, "股票代码，6位数字（如 600519、000001、002230）"],
+    years: Annotated[int, "回溯年数，默认5年"] = 5
+) -> str:
+    """
+    杜邦分析工具 — ROE 三因子 / 五因子拆解
+
+    从缓存中读取 TTM 利润表和资产负债表数据，计算：
+
+    **三因子拆解**：
+    - 净利率 = 净利润(TTM) / 营业收入(TTM)
+    - 资产周转率 = 营业收入(TTM) / 总资产
+    - 权益乘数 = 总资产 / 净资产
+    - ROE = 净利率 × 资产周转率 × 权益乘数
+
+    **五因子拆解**（需要营业利润数据）：
+    - 税负因子 = 净利润 / 利润总额
+    - 利息负担 = 利润总额 / 营业利润
+    - 经营利润率 = 营业利润 / 营业收入
+    - 资产周转率 = 营业收入 / 总资产
+    - 权益乘数 = 总资产 / 净资产
+
+    Args:
+        ticker: 股票代码（如 600519、002230）
+        years: 回溯年数，默认5年
+
+    Returns:
+        str: 杜邦分析报告
+    """
+    logger.info(f"📊 [杜邦分析] 分析股票: {ticker}, 回溯{years}年")
+    try:
+        data = _get_financial_data_from_cache_or_api(ticker, limit=years * 4 + 4)
+        if not data:
+            return f"❌ 未获取到 {ticker} 的财务数据"
+
+        lines = [f"# {ticker} 杜邦分析\n"]
+
+        # ── 三因子杜邦 ──
+        npm, at, em, roe_3f = None, None, None, None
+
+        revenue = _coerce_float(data.get('revenue_ttm'))
+        net_profit = _coerce_float(data.get('net_profit_ttm'))
+        total_assets = _coerce_float(data.get('total_assets'))
+        total_equity = _coerce_float(data.get('total_equity'))
+
+        if all([net_profit, revenue, total_assets, total_equity]) and revenue != 0 and total_equity != 0:
+            npm = net_profit / revenue  # 净利率（小数）
+            at = revenue / total_assets   # 资产周转率
+            em = total_assets / total_equity  # 权益乘数
+            roe_3f = npm * at * em * 100     # 杜邦 ROE（百分比）
+            roe_direct = net_profit / total_equity * 100
+
+            lines.append("## 三因子拆解（标准杜邦）\n")
+            lines.append(f"**ROE = 净利率 × 资产周转率 × 权益乘数**\n")
+            lines.append("| 因子 | 含义 | 数值 |")
+            lines.append("|------|------|------|")
+            lines.append(f"| 净利率 | 净利润(TTM) / 营业收入(TTM) | {npm*100:.2f}% |")
+            lines.append(f"| 资产周转率 | 营业收入(TTM) / 总资产 | {at:.3f} 次 |")
+            lines.append(f"| 权益乘数 | 总资产 / 净资产 | {em:.2f} |")
+            lines.append(f"| **ROE** | 三因子相乘 | **{roe_3f:.2f}%** |")
+            lines.append("")
+            lines.append(f"- 验证：直接 ROE = 净利润/净资产 = {roe_direct:.2f}%（{'✅ 一致' if abs(roe_3f - roe_direct) < 0.1 else '⚠️ 偏差（可能因四舍五入）'}）")
+            lines.append("")
+
+            # ROE 质量提示
+            lines.append("### ROE 驱动因素判断\n")
+            parts = []
+            if npm and npm * 100 > 15:
+                parts.append(f"- 🟢 **高利润率驱动**：净利率 {npm*100:.1f}%，产品/品牌壁垒强")
+            elif npm and npm * 100 < 3:
+                parts.append(f"- 🔴 **低利润率**：净利率仅 {npm*100:.1f}%，盈利空间薄")
+            else:
+                parts.append(f"- 🟡 **中等利润率**：净利率 {npm*100:.1f}%")
+            if at and at > 1:
+                parts.append(f"- 🟢 **高效资产周转**：周转率 {at:.2f} 次，轻资产模式或运营高效")
+            elif at and at < 0.3:
+                parts.append(f"- 🔴 **资产周转慢**：周转率仅 {at:.2f} 次，重资产或产能未充分利用")
+            if em and em > 3:
+                parts.append(f"- 🔴 **高杠杆**：权益乘数 {em:.1f}，财务杠杆放大收益也放大风险")
+            elif em and em < 1.5:
+                parts.append(f"- 🟢 **低杠杆**：权益乘数 {em:.1f}，财务结构稳健")
+            lines.extend(parts)
+            lines.append("")
+        else:
+            lines.append("## 三因子拆解（标准杜邦）\n")
+            lines.append("⚠️ 数据不足，无法完成三因子拆解。")
+            lines.append(f"  revenue_ttm={revenue}  net_profit_ttm={net_profit}  total_assets={total_assets}  total_equity={total_equity}")
+            lines.append("")
+
+        # ── 五因子杜邦 ──
+        oper_profit = _coerce_float(data.get('oper_profit'))
+        total_profit = _coerce_float(data.get('total_profit'))
+
+        if all([net_profit, total_profit, oper_profit, revenue, total_assets, total_equity]) \
+                and revenue != 0 and total_equity != 0 and oper_profit != 0:
+            tb = net_profit / total_profit        # 税负因子
+            ib = total_profit / oper_profit       # 利息负担
+            om = oper_profit / revenue            # 经营利润率
+            roe_5f = tb * ib * om * at * em * 100
+
+            lines.append("## 五因子拆解（扩展杜邦）\n")
+            lines.append(f"**ROE = 税负因子 × 利息负担 × 经营利润率 × 资产周转率 × 权益乘数**\n")
+            lines.append("| 因子 | 含义 | 数值 |")
+            lines.append("|------|------|------|")
+            lines.append(f"| 税负因子 | 净利润 / 利润总额 | {tb:.3f}（{'所得税率 ' + str(int((1-tb)*100)) + '%' if 0 < tb <= 1 else '异常'}）|")
+            lines.append(f"| 利息负担 | 利润总额 / 营业利润 | {ib:.3f}（{'利息侵蚀小' if 0.9 < ib < 1.1 else '利息/非经常损益影响显著'}）|")
+            lines.append(f"| 经营利润率 | 营业利润 / 营业收入(TTM) | {om*100:.2f}% |")
+            lines.append(f"| 资产周转率 | 营业收入(TTM) / 总资产 | {at:.3f} 次 |")
+            lines.append(f"| 权益乘数 | 总资产 / 净资产 | {em:.2f} |")
+            lines.append(f"| **ROE** | 五因子相乘 | **{roe_5f:.2f}%** |")
+            lines.append("")
+
+            # 评价
+            qualifiers = []
+            if 0.7 <= tb <= 0.9:
+                qualifiers.append("税负水平正常")
+            if ib > 1.1:
+                qualifiers.append("⚠️ 利息负担因子 > 1，营业外收入对利润贡献大（非经营性收益）")
+            elif ib < 0.9:
+                qualifiers.append("⚠️ 利息负担因子 < 1，财务费用/非经常损失侵蚀营业利润")
+            if om and om > 0.2:
+                qualifiers.append("经营利润率优秀")
+            if qualifiers:
+                lines.append("### 评价\n")
+                for q in qualifiers:
+                    lines.append(f"- {q}")
+                lines.append("")
+        elif oper_profit is None:
+            lines.append("## 五因子拆解（扩展杜邦）\n")
+            lines.append("⚠️ 营业利润数据缺失，无法完成五因子拆解。")
+            lines.append("*若数据源为 Tushare 且刚修复 `operate_profit` 字段映射，需重新拉取数据。*")
+            lines.append("")
+        else:
+            lines.append("## 五因子拆解（扩展杜邦）\n")
+            lines.append("⚠️ 五因子拆解所需字段异常（可能有零值或数据不完整）。")
+            lines.append("")
+
+        # ── 多年趋势 ──
+        raw = data.get("raw_data", {})
+        inc_list = raw.get("income_statement", [])
+        bs_list = raw.get("balance_sheet", [])
+
+        if inc_list and bs_list:
+            # 取每年年报数据用于趋势
+            annual_inc = {}
+            for rec in inc_list:
+                end = str(rec.get('end_date', ''))
+                if not end:
+                    continue
+                year = end[:4]
+                if year not in annual_inc:
+                    annual_inc[year] = rec
+
+            annual_bs = {}
+            for rec in bs_list:
+                end = str(rec.get('end_date', ''))
+                if not end:
+                    continue
+                year = end[:4]
+                if year not in annual_bs:
+                    annual_bs[year] = rec
+
+            # 交叉对齐
+            common_years = sorted(set(annual_inc.keys()) & set(annual_bs.keys()), reverse=True)[:years]
+
+            if len(common_years) >= 2:
+                lines.append("## 杜邦因子年度趋势\n")
+                lines.append("| 年度 | 净利率 | 资产周转率 | 权益乘数 | ROE |")
+                lines.append("|------|--------|------------|----------|-----|")
+                for yr in common_years:
+                    inc = annual_inc[yr]
+                    bs = annual_bs[yr]
+                    r = _coerce_float(inc.get('total_revenue') or inc.get('revenue'))
+                    n = _coerce_float(inc.get('n_income') or inc.get('n_income_attr_p'))
+                    ta = _coerce_float(bs.get('total_assets'))
+                    eq = _coerce_float(bs.get('total_hldr_eqy_exc_min_int'))
+                    if all([n, r, ta, eq]) and r != 0 and eq != 0:
+                        n_pm = n / r * 100
+                        a_t = r / ta
+                        e_m = ta / eq
+                        r_oe = n / eq * 100
+                        lines.append(f"| {yr} | {n_pm:.1f}% | {a_t:.3f} | {e_m:.2f} | {r_oe:.2f}% |")
+                lines.append("")
+
+        lines.append("---")
+        lines.append("*杜邦分析 — ROE = 净利率 × 资产周转率 × 权益乘数*")
+        lines.append(f"*数据来源：Tushare | 基于TTM数据计算*")
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.error(f"❌ [杜邦分析] 执行失败: {e}")
+        return f"❌ 杜邦分析执行失败: {e}"
+
+
+# ============================================================
+# Tool 6: 分红送股数据
 # ============================================================
 @tool
 @register_tool(
@@ -559,7 +920,7 @@ def get_dividend_data(
 
 
 # ============================================================
-# Tool 5: 主营业务构成
+# Tool 7: 主营业务构成
 # ============================================================
 @tool
 @register_tool(

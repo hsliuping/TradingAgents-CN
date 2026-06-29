@@ -21,6 +21,12 @@ from .fundamentals.factor_bundle_tools import (
     get_quality_factor_bundle_tool,
     get_value_factor_bundle_tool,
 )
+from .fundamentals.standard_financial_tools import (
+    get_cashflow_quality_trend_tool,
+    get_historical_financial_annual_series_tool,
+    get_historical_valuation_percentile_tool,
+    get_profitability_stability_metrics_tool,
+)
 from .news.stock_news import get_stock_news_unified
 from .social.stock_sentiment import get_stock_sentiment_unified
 from . import legacy_bridge
@@ -70,6 +76,10 @@ __all__ = [
     'get_quality_factor_bundle_tool',
     'get_growth_cashflow_factor_bundle_tool',
     'get_fundamental_factor_snapshot_tool',
+    'get_historical_financial_annual_series_tool',
+    'get_profitability_stability_metrics_tool',
+    'get_cashflow_quality_trend_tool',
+    'get_historical_valuation_percentile_tool',
     'get_technical_factor_bundle_tool',
     # 大盘/指数分析工具
     'get_index_data',

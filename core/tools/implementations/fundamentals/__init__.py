@@ -14,6 +14,12 @@ from .factor_bundle_tools import (
     get_quality_factor_bundle_tool,
     get_value_factor_bundle_tool,
 )
+from .standard_financial_tools import (
+    get_cashflow_quality_trend_tool,
+    get_historical_financial_annual_series_tool,
+    get_historical_valuation_percentile_tool,
+    get_profitability_stability_metrics_tool,
+)
 
 __all__ = [
     'get_stock_fundamentals_unified',
@@ -26,5 +32,9 @@ __all__ = [
     'get_quality_factor_bundle_tool',
     'get_growth_cashflow_factor_bundle_tool',
     'get_fundamental_factor_snapshot_tool',
+    'get_historical_financial_annual_series_tool',
+    'get_profitability_stability_metrics_tool',
+    'get_cashflow_quality_trend_tool',
+    'get_historical_valuation_percentile_tool',
 ]
 

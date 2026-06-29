@@ -1399,7 +1399,7 @@ class TushareProvider(BaseStockDataProvider):
                 "net_income": self._safe_float(latest_income.get('n_income')),  # 净利润（原始报告期口径，A股季报通常为年初累计）
                 "net_profit": self._safe_float(latest_income.get('n_income_attr_p')),  # 归属母公司净利润（原始报告期口径，A股季报通常为年初累计）
                 "net_profit_ttm": net_profit_ttm,  # 归属母公司净利润（TTM）
-                "oper_profit": self._safe_float(latest_income.get('oper_profit')),  # 营业利润
+                "oper_profit": self._safe_float(latest_income.get('operate_profit')),  # 营业利润
                 "total_profit": self._safe_float(latest_income.get('total_profit')),  # 利润总额
                 "oper_cost": self._safe_float(latest_income.get('oper_cost')),  # 营业成本
                 "oper_exp": self._safe_float(latest_income.get('oper_exp')),  # 营业费用
@@ -1419,6 +1419,7 @@ class TushareProvider(BaseStockDataProvider):
                 "accounts_receiv": self._safe_float(latest_balance.get('accounts_receiv')),  # 应收账款
                 "inventories": self._safe_float(latest_balance.get('inventories')),  # 存货
                 "fix_assets": self._safe_float(latest_balance.get('fix_assets')),  # 固定资产
+                "goodwill": self._safe_float(latest_balance.get('goodwill')),  # 商誉（并购溢价形成的无形资产，Q4年报通常才有完整数据）
 
                 # 现金流量表核心指标
                 "n_cashflow_act": self._safe_float(latest_cashflow.get('n_cashflow_act')),  # 经营活动现金流
@@ -1787,13 +1788,17 @@ class TushareProvider(BaseStockDataProvider):
             return None
 
     async def get_moneyflow_ths(self, trade_date: str = None,
-                               ts_code: str = None) -> Optional[pd.DataFrame]:
+                               ts_code: str = None,
+                               start_date: str = None,
+                               end_date: str = None) -> Optional[pd.DataFrame]:
         """
         获取同花顺**个股**资金流向（注意：这是个股级别，不是板块级别）
 
         Args:
             trade_date: 交易日期 YYYYMMDD
             ts_code: 股票代码
+            start_date: 开始日期 YYYYMMDD
+            end_date: 结束日期 YYYYMMDD
 
         Returns:
             DataFrame，包含个股资金流向数据
@@ -1813,6 +1818,10 @@ class TushareProvider(BaseStockDataProvider):
                 params['trade_date'] = trade_date.replace('-', '')
             if ts_code:
                 params['ts_code'] = ts_code
+            if start_date:
+                params['start_date'] = start_date.replace('-', '')
+            if end_date:
+                params['end_date'] = end_date.replace('-', '')
 
             df = await asyncio.to_thread(
                 self.api.moneyflow_ths,

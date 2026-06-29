@@ -36,7 +36,13 @@ def normalize_tabular_result(data: Any) -> Any:
         return None
     if hasattr(data, "to_dict"):
         try:
-            return data.to_dict("records")
+            tabular = data
+            if hasattr(tabular, "reset_index") and hasattr(tabular, "index"):
+                index_name = getattr(tabular.index, "name", None)
+                index_type = type(tabular.index).__name__
+                if index_name or index_type != "RangeIndex":
+                    tabular = tabular.reset_index()
+            return tabular.to_dict("records")
         except TypeError:
             return data.to_dict()
     return data
