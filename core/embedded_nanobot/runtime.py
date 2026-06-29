@@ -212,6 +212,7 @@ class EmbeddedNanobotRuntime:
         register_builtin_commands(self.commands)
         self._capability_sync_lock = asyncio.Lock()
         self._dynamic_tool_names: set[str] = set()
+        self._capability_index_service = None  # 延迟初始化
         self._register_default_tools()
         self._default_tool_names = set(self.tools.tool_names)
 
@@ -556,6 +557,210 @@ class EmbeddedNanobotRuntime:
             "model_decision": payload,
         }
 
+    # ── 语义搜索相关方法 ──
+
+    ROLE_HINT_PRIORITY: dict[str, int] = {
+        "specialized": 30,
+        "supporting": 15,
+        "generic": 5,
+        "fallback": 0,
+    }
+
+    def _get_capability_index_service(self):
+        """延迟获取 CapabilityIndexService。"""
+        if self._capability_index_service is not None:
+            return self._capability_index_service
+        if self.memory_db is None:
+            logger.debug("未配置 memory_db，语义搜索不可用")
+            self._capability_index_service = False
+            return False
+        try:
+            from app.services.capability_index_service import CapabilityIndexService
+            self._capability_index_service = CapabilityIndexService(self.memory_db)
+            logger.info("✅ CapabilityIndexService 延迟初始化成功")
+        except Exception as exc:
+            logger.warning("⚠️ CapabilityIndexService 不可用，将回退关键词匹配: %s", exc)
+            self._capability_index_service = False
+        return self._capability_index_service
+
+    def _try_semantic_tool_search(
+        self,
+        query: str,
+        selected_names: set[str],
+    ) -> list[tuple[int, str, dict[str, Any]]] | None:
+        """尝试语义搜索，失败返回 None 以触发回退。"""
+        service = self._get_capability_index_service()
+        if not service or service is False:
+            return None
+        try:
+            import asyncio as _asyncio
+            loop = _asyncio.get_event_loop()
+            if loop.is_running():
+                # 在已有事件循环中，用 run_until_complete 不行，改用同步方式
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(_asyncio.run, service.search_capabilities(
+                        query=query,
+                        top_k=24,
+                        bindable_only=True,
+                        source_types=["builtin_tool"],
+                    ))
+                    hits = future.result(timeout=5)
+            else:
+                hits = _asyncio.run(service.search_capabilities(
+                    query=query,
+                    top_k=24,
+                    bindable_only=True,
+                    source_types=["builtin_tool"],
+                ))
+        except Exception as exc:
+            logger.warning("语义搜索失败，回退关键词匹配: %s", exc)
+            return None
+
+        if not hits:
+            return None
+
+        # role_hint 加权
+        scored: list[tuple[int, str, dict[str, Any]]] = []
+        for hit in hits:
+            cap = hit.capability
+            tool_id = cap.capability_id
+            if tool_id in selected_names:
+                continue
+
+            base_score = int(hit.score * 100)
+            role_bonus = EmbeddedNanobotRuntime.ROLE_HINT_PRIORITY.get(
+                cap.tool_role_hint, 0
+            )
+            score = base_score + role_bonus
+
+            scored.append((score, tool_id, {
+                "category": cap.category,
+                "description": cap.description,
+                "semantic_score": hit.score,
+                "role_hint": cap.tool_role_hint,
+                "matched_category_terms": [],
+            }))
+
+        # 同类去重
+        scored = EmbeddedNanobotRuntime._deduplicate_similar_tools(scored)
+
+        return scored
+
+    @staticmethod
+    def _deduplicate_similar_tools(
+        scored: list[tuple[int, str, dict[str, Any]]],
+    ) -> list[tuple[int, str, dict[str, Any]]]:
+        """同类工具去重：capability_tags 重叠 > 75% 只保留得分最高的。"""
+        from core.tools import get_tool_registry
+
+        # 排除过于通用的标签，避免误判
+        GENERIC_TAGS = {
+            "valuation", "fundamental", "risk", "technical", "portfolio",
+            "macro", "screening", "derivatives", "statistics", "analysis",
+            "event", "market", "financial", "stock", "china",
+        }
+
+        registry = get_tool_registry()
+        result: list[tuple[int, str, dict[str, Any]]] = []
+        for score, tool_id, meta in scored:
+            tool = registry.get_function(tool_id)
+            if tool is None:
+                result.append((score, tool_id, meta))
+                continue
+
+            tool_tags = set(getattr(tool, "capability_tags", []) or []) - GENERIC_TAGS
+            if not tool_tags:
+                result.append((score, tool_id, meta))
+                continue
+
+            duplicate = False
+            for existing_score, existing_id, _ in result:
+                existing_tool = registry.get_function(existing_id)
+                if existing_tool is None:
+                    continue
+                existing_tags = set(getattr(existing_tool, "capability_tags", []) or []) - GENERIC_TAGS
+                if not existing_tags:
+                    continue
+                overlap = len(tool_tags & existing_tags) / min(len(tool_tags), len(existing_tags))
+                if overlap > 0.75:
+                    duplicate = True
+                    break
+
+            if not duplicate:
+                result.append((score, tool_id, meta))
+
+        return result
+
+    def _keyword_tool_search(
+        self,
+        query: str,
+        query_lower: str,
+        query_terms: list[str],
+        selected_names: set[str],
+        category_matches: dict[str, list[str]],
+    ) -> list[tuple[int, str, dict[str, Any]]]:
+        """关键词匹配（回退路径）。"""
+        registry_scores: list[tuple[int, str, dict[str, Any]]] = []
+        for tool_name in self.tools.tool_names:
+            if tool_name in self.CORE_TOOL_NAMES or tool_name in selected_names:
+                continue
+
+            tool = self.tools.get(tool_name)
+            metadata = getattr(tool, "metadata", None)
+            if metadata is None:
+                selected_names.add(tool_name)
+                continue
+
+            if tool_name in self.CALLABLE_AGENT_TOOL_IDS and self._should_suppress_callable_agent_tools(query):
+                continue
+
+            score = 0
+            haystack = " ".join(filter(None, [
+                str(getattr(metadata, "id", "")),
+                str(getattr(metadata, "name", "")),
+                str(getattr(metadata, "description", "")),
+                str(getattr(metadata, "when_to_use", "")),
+                str(getattr(metadata, "when_not_to_use", "")),
+                str(getattr(metadata, "returns", "")),
+                " ".join(getattr(metadata, "related_tools", []) or []),
+                " ".join(getattr(metadata, "capability_tags", []) or []),
+                " ".join(getattr(metadata, "preferred_for", []) or []),
+            ])).lower()
+            category = str(getattr(metadata, "category", "") or "")
+            category_rule = self.CATEGORY_FEATURE_RULES.get(category)
+            matched_category_terms = category_matches.get(category, [])
+
+            if category_rule is not None and matched_category_terms:
+                score += len(matched_category_terms) * int(category_rule.score)
+
+            if tool_name in self.AGENT_BUILDER_TOOL_IDS or tool_name in self.SKILL_CREATION_TOOL_IDS:
+                if tool_name in selected_names:
+                    score += 120
+
+            if tool_name in self.CALLABLE_AGENT_TOOL_IDS and tool_name in selected_names:
+                score += 160
+
+            if tool_name.lower() in query_lower:
+                score += 60
+
+            for term in query_terms:
+                if term.lower() in haystack:
+                    score += 4 if len(term) <= 2 else 8
+
+            related_tools = getattr(metadata, "related_tools", []) or []
+            if any(related in query_lower for related in related_tools):
+                score += 12
+
+            if score > 0:
+                registry_scores.append((score, tool_name, {
+                    "category": category,
+                    "description": getattr(metadata, "description", ""),
+                    "matched_category_terms": matched_category_terms,
+                }))
+
+        return registry_scores
+
     @classmethod
     def _build_agent_first_guidance(cls, user_message: str, tool_names: set[str]) -> str | None:
         intent = cls._classify_query_intent(user_message)
@@ -711,9 +916,20 @@ class EmbeddedNanobotRuntime:
                 "Use publish_agent_workshop_version only after the latest official evaluation decision is pass and the user explicitly confirms publication in the current turn. A pass result only moves the version into publish-ready; it must not trigger automatic publication."
             )
 
+        if "prepare_agent_generation_confirmation" in tool_names:
+            guidance_lines.extend([
+                "V2 creation flow: before generating an Agent, prepare_agent_generation_confirmation must perform capability inventory and gap analysis, then present candidate plans (direct/complete/quick/narrow) for the user to choose.",
+                "Do not present prepare_agent_generation_confirmation as a final yes/no confirmation only. It is a plan-selection checkpoint: show existing capabilities, blocking gaps, risks, and candidate plans before asking the user to confirm.",
+            ])
+        if "generate_confirmed_candidate_agent" in tool_names:
+            guidance_lines.extend([
+                "When calling generate_confirmed_candidate_agent after the V2 confirmation step, pass selected_plan_id and acknowledged_gaps from the user's selected option. If the user chose quick, preserve the quick-plan limitation; if the user chose narrow, return to requirement exploration instead of generating.",
+                "Do not re-run a new gap analysis after the user has selected a plan. Use the gap_report/candidate_plans from the confirmation step and proceed according to the selected plan.",
+            ])
+
         if "resolve_agent_workshop_blocking_gaps" in tool_names:
             guidance_lines.append(
-                "When blocking gaps are discovered (from any source: auto-build, analyze_agent_workshop_gaps, or gap report), do not silently auto-generate skills. First explain each blocking gap to the user, then obtain explicit confirmation before calling resolve_agent_workshop_blocking_gaps."
+                "When blocking gaps are discovered (from any source: prepare confirmation gap_report, auto-build, analyze_agent_workshop_gaps, or evaluation feedback), do not silently auto-generate skills. First explain each blocking gap to the user, then obtain explicit confirmation before calling resolve_agent_workshop_blocking_gaps."
             )
             guidance_lines.append(
                 "For any gap that requires external data sources, third-party interfaces, or live web access, disclose the data source and its risk to the user and get confirmation before triggering generation."
@@ -1077,57 +1293,15 @@ class EmbeddedNanobotRuntime:
             selected_names.update(self.CALLABLE_AGENT_TOOL_IDS)
 
         if not focused_factory_scope:
-            for tool_name in self.tools.tool_names:
-                if tool_name not in self.CORE_TOOL_NAMES and tool_name not in selected_names:
-                    tool = self.tools.get(tool_name)
-                    metadata = getattr(tool, "metadata", None)
-                    if metadata is None:
-                        selected_names.add(tool_name)
-                        continue
-
-                    if tool_name in self.CALLABLE_AGENT_TOOL_IDS and self._should_suppress_callable_agent_tools(query):
-                        continue
-
-                    score = 0
-                    haystack = " ".join(filter(None, [
-                        str(getattr(metadata, "id", "")),
-                        str(getattr(metadata, "name", "")),
-                        str(getattr(metadata, "description", "")),
-                        str(getattr(metadata, "when_to_use", "")),
-                        str(getattr(metadata, "returns", "")),
-                        " ".join(getattr(metadata, "related_tools", []) or []),
-                    ])).lower()
-                    category = str(getattr(metadata, "category", "") or "")
-                    category_rule = self.CATEGORY_FEATURE_RULES.get(category)
-                    matched_category_terms = category_matches.get(category, [])
-
-                    if category_rule is not None and matched_category_terms:
-                        score += len(matched_category_terms) * int(category_rule.score)
-
-                    if tool_name in self.AGENT_BUILDER_TOOL_IDS or tool_name in self.SKILL_CREATION_TOOL_IDS:
-                        if tool_name in selected_names:
-                            score += 120
-
-                    if tool_name in self.CALLABLE_AGENT_TOOL_IDS and tool_name in selected_names:
-                        score += 160
-
-                    if tool_name.lower() in query_lower:
-                        score += 60
-
-                    for term in query_terms:
-                        if term.lower() in haystack:
-                            score += 4 if len(term) <= 2 else 8
-
-                    related_tools = getattr(metadata, "related_tools", []) or []
-                    if any(related in query_lower for related in related_tools):
-                        score += 12
-
-                    if score > 0:
-                        registry_scores.append((score, tool_name, {
-                            "category": category,
-                            "description": getattr(metadata, "description", ""),
-                            "matched_category_terms": matched_category_terms,
-                        }))
+            # 优先尝试语义搜索
+            semantic_hits = self._try_semantic_tool_search(query, selected_names)
+            if semantic_hits:
+                registry_scores = semantic_hits
+            else:
+                # 回退关键词匹配
+                registry_scores = self._keyword_tool_search(
+                    query, query_lower, query_terms, selected_names, category_matches
+                )
 
         registry_scores.sort(key=lambda item: (-item[0], item[1]))
         selected_dynamic = registry_scores[:self.MAX_DYNAMIC_TOOLS]
