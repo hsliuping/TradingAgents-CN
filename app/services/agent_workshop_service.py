@@ -545,6 +545,18 @@ class AgentWorkshopService:
         existing_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": spec_id})
         existing_spec = AgentSpec(**existing_doc) if existing_doc else None
 
+        # 🔥 防止 LLM 名称漂移：如果已有 spec 且名称非占位值，对比 LLM 传入的名称
+        if existing_spec and existing_spec.name and existing_spec.name.strip():
+            existing_name = existing_spec.name.strip()
+            if existing_name.lower() != clean_agent_name.lower():
+                logger.warning(
+                    "[AgentWorkshop][create_nanobot_draft] ⚠️ LLM名称漂移检测！"
+                    " spec_id=%s existing_name='%s' llm_passed_name='%s' "
+                    "→ 保留已有名称，拒绝 LLM 的 renaming",
+                    spec_id, existing_name, clean_agent_name,
+                )
+                clean_agent_name = existing_name
+
         normalized_non_goals = self._normalize_unique_list(non_goals)
         normalized_methods = self._normalize_unique_list(preferred_methods)
         normalized_constraints = self._normalize_unique_list(constraints)
@@ -855,9 +867,12 @@ class AgentWorkshopService:
             lesson_user_id = str(session.user_id or lesson_user_id).strip()
 
         version.required_tools = normalized_required_tools
+        tool_selection_policy = self._build_tool_selection_policy(spec, normalized_required_tools)
+        normalized_default_tools = self._ordered_tools_from_selection_policy(normalized_default_tools, tool_selection_policy)
         metadata = dict(version.agent_metadata or {})
         metadata["tools"] = list(normalized_required_tools)
         metadata["default_tools"] = list(normalized_default_tools)
+        metadata["tool_selection_policy"] = tool_selection_policy
         if max_tool_calls is not None:
             metadata["max_tool_calls"] = int(max_tool_calls)
         version.agent_metadata = metadata
@@ -880,12 +895,14 @@ class AgentWorkshopService:
         tooling_contract = dict(evaluation_policy.get("tooling_contract") or {})
         tooling_contract["required_tools"] = normalized_required_tools
         tooling_contract["default_tools"] = normalized_default_tools
+        tooling_contract["tool_selection_policy"] = tool_selection_policy
         evaluation_policy["runtime_contract"] = runtime_contract
         prompt_contract = dict(evaluation_policy.get("prompt_contract") or {})
         if not prompt_contract and context_session_id and session is not None:
             prompt_contract = self._resolve_session_prompt_contract(session, spec, version.version_id)
         evaluation_policy["prompt_contract"] = prompt_contract
         evaluation_policy["tooling_contract"] = tooling_contract
+        evaluation_policy["tool_selection_policy"] = tool_selection_policy
         version.evaluation_policy = evaluation_policy
         if runtime_contract:
             version.agent_metadata = self._build_agent_metadata(
@@ -894,6 +911,10 @@ class AgentWorkshopService:
                 normalized_required_tools,
                 runtime_contract=runtime_contract,
             )
+            version.agent_metadata["tool_selection_policy"] = tool_selection_policy
+            version.agent_metadata["default_tools"] = list(normalized_default_tools)
+            if max_tool_calls is not None:
+                version.agent_metadata["max_tool_calls"] = int(max_tool_calls)
         agent_builder_lesson_block = await self._recall_agent_builder_lessons_for_spec(
             spec,
             user_id=lesson_user_id,
@@ -906,6 +927,7 @@ class AgentWorkshopService:
             normalized_required_tools,
             gap_report=gap_report,
             tooling_plan=tooling_plan,
+            tool_selection_policy=tool_selection_policy,
             agent_builder_lesson_block=agent_builder_lesson_block,
         )
         version.prompt_template_ref = await self._upsert_version_prompt_template(
@@ -922,6 +944,7 @@ class AgentWorkshopService:
             "spec_id": version.spec_id,
             "required_tools": version.required_tools,
             "default_tools": normalized_default_tools,
+            "tool_selection_policy": tool_selection_policy,
             "prompt_template_ref": version.prompt_template_ref,
             "execution_validation_status": version.execution_plan.validation_status,
         }
@@ -991,7 +1014,32 @@ class AgentWorkshopService:
         runtime_contract = self._resolve_session_runtime_contract(session, spec, version_id)
         prompt_contract = self._resolve_session_prompt_contract(session, spec, version_id)
         tooling_contract = self._resolve_session_tooling_contract(session, required_tools)
+        # 🔥 将 session builder_contracts 和运行时 config 中已有的工具合并回 required_tools，
+        #    防止 Runtime effective_tools（如已绑定的 get_financial_risk_factors）被 Workshop 丢弃。
+        required_tools = self._dedupe([*required_tools, *tooling_contract.get("required_tools", [])])
+        runtime_tools = await self._read_existing_runtime_tools_for_spec(spec.spec_id)
+        if runtime_tools:
+            required_tools = self._dedupe([*required_tools, *runtime_tools])
+            logger.info(
+                "[AgentWorkshop][BuildVersion] merged %s runtime tools into required_tools, total=%s",
+                len(runtime_tools),
+                len(required_tools),
+            )
+        # 必须在 required_tools 最终合并完成后再生成路由策略，避免新增的 Runtime/External Skill
+        # 没有进入 primary/specialized/supporting 分组，导致 Prompt 和评估仍按旧工具集运行。
+        tool_selection_policy = self._build_tool_selection_policy(spec, required_tools)
+        tooling_contract["required_tools"] = list(required_tools)
+        tooling_contract["tool_selection_policy"] = tool_selection_policy
+        logger.info(
+            "[AgentWorkshop][ToolRoutingPolicy] version_id=%s primary=%s specialized=%s supporting=%s fallback=%s",
+            version_id,
+            tool_selection_policy.get("primary_tools"),
+            tool_selection_policy.get("specialized_tools"),
+            tool_selection_policy.get("supporting_tools"),
+            tool_selection_policy.get("fallback_tools"),
+        )
         evaluation_policy = self._build_evaluation_policy(spec)
+        evaluation_policy["tool_selection_policy"] = tool_selection_policy
         execution_plan = self._build_execution_validation_plan(
             spec,
             required_tools,
@@ -1006,6 +1054,8 @@ class AgentWorkshopService:
         evaluation_policy["prompt_contract"] = prompt_contract
         evaluation_policy["tooling_contract"] = tooling_contract
         metadata = self._build_agent_metadata(version_id, spec, required_tools, runtime_contract=runtime_contract)
+        metadata["tool_selection_policy"] = tool_selection_policy
+        metadata["default_tools"] = self._ordered_tools_from_selection_policy(required_tools, tool_selection_policy)
         if auto_resolved_gaps:
             metadata["auto_resolved_gaps"] = auto_resolved_gaps
             evaluation_policy["auto_resolved_gaps"] = auto_resolved_gaps
@@ -1044,6 +1094,7 @@ class AgentWorkshopService:
                     required_tools,
                     gap_report=gap_report,
                     tooling_plan=session.tooling_plan,
+                    tool_selection_policy=tool_selection_policy,
                     project_memory_block=await self._build_project_memory_block_for_workshop(),
                     agent_builder_lesson_block=agent_builder_lesson_block,
                 ),
@@ -1101,18 +1152,65 @@ class AgentWorkshopService:
         *,
         stage: str,
     ) -> None:
-        """评审/发布前强制检查：存在未补齐 blocking gap 时不能通过。"""
+        """评审/发布前强制检查：存在未补齐 blocking gap 时不能通过。
+
+        如果 Workshop 会话丢失但版本已存在，会直接基于 spec 重新评估 gap，
+        然后检查 version.required_tools 是否覆盖了 gap。
+        """
         session_id = str(version.published_from_session_id or spec.latest_session_id or "").strip()
-        if not session_id:
-            return
-        session = await self._load_session(session_id)
-        if not session:
-            return
-        gap_report = session.gap_report
+        session = session_id and await self._load_session(session_id) or None
+
+        gap_report: Optional[AgentWorkshopGapAnalysis] = None
+        if session is not None and session.gap_report is not None:
+            gap_report = session.gap_report
+        else:
+            # 会话丢失但有版本，说明之前已生成过版本，直接基于 spec 重新评估 gap
+            gap_report = await self._build_gap_analysis(spec)
+
         if gap_report is None:
             return
+
         auto_resolved_gaps = await self._collect_auto_resolved_gaps_for_session(session_id)
         unresolved = self._find_unresolved_blocking_gaps(gap_report, auto_resolved_gaps)
+
+        # 如果版本已绑定 required_tools，再检查 required_tools 是否覆盖了 gap
+        if unresolved and version.required_tools:
+            still_unresolved = []
+            for gap in unresolved:
+                gap_lower = str(gap).lower()
+                covered = False
+                for tool in version.required_tools:
+                    tool_lower = str(tool).lower()
+                    # 检查工具名是否与 gap 描述中的关键词匹配
+                    if any(keyword in gap_lower and keyword in tool_lower for keyword in [
+                        "risk", "factor", "quality", "trend", "signal", "flag",
+                        "商誉", "风险", "质量", "趋势", "异常", "信号",
+                    ]):
+                        covered = True
+                        break
+                    # 🔥 跨语言匹配：利用 tool 注册表的 description / capability_tags
+                    if self._tool_covers_gap_cross_language(tool, gap):
+                        logger.info(
+                            "[AgentWorkshop][GapGuard][CrossLang] tool=%s covers gap=%s via cross-language matching",
+                            tool,
+                            gap,
+                        )
+                        covered = True
+                        break
+                    # 检查工具是否在 existing_tools 里（即 gap 已被现有工具覆盖）
+                    if gap in (gap_report.existing_tools or []):
+                        covered = True
+                        break
+                if not covered:
+                    still_unresolved.append(gap)
+            if still_unresolved != unresolved:
+                logger.info(
+                    "[AgentWorkshop][GapGuard] resolved %s gaps via cross-language matching, still_unresolved=%s",
+                    len(unresolved) - len(still_unresolved),
+                    still_unresolved,
+                )
+            unresolved = still_unresolved
+
         if not unresolved:
             return
         logger.warning(
@@ -1128,12 +1226,137 @@ class AgentWorkshopService:
             + "；".join(unresolved[:5])
         )
 
+    def _builtin_tool_evidence_for_gap(self, gap: str) -> Optional[Dict[str, str]]:
+        """根据已注册标准工具判断旧 gap 是否已由内置能力覆盖。"""
+        text = str(gap or "").strip().lower()
+        if not text:
+            return None
+
+        candidates: List[Tuple[List[str], List[str], str]] = [
+            (
+                ["get_historical_financial_annual_series_tool", "get_profitability_stability_metrics_tool", "get_cashflow_quality_trend_tool"],
+                ["历史财务", "财务指标时间序列", "多年序列", "年报序列", "盈利稳定性", "现金流质量", "长期趋势", "波动性"],
+                "历史财务指标时间序列能力已由标准财务序列、盈利稳定性和现金流质量趋势工具覆盖",
+            ),
+            (
+                ["get_cashflow_quality_trend_tool", "get_growth_cashflow_factor_bundle_tool", "get_cashflow_analysis"],
+                ["cash_flow_quality_metrics_tool", "现金流质量指标", "经营现金流/净利润", "自由现金流/营收", "经营现金流/负债", "cfo/净利", "fcf/净利", "fcf_margin"],
+                "现金流质量指标已由现金流质量趋势工具和成长现金流因子包覆盖，不需要新建同名 External Skill",
+            ),
+            (
+                ["get_debt_solvency_trend_tool", "get_quality_factor_bundle_tool", "get_balance_sheet_analysis"],
+                ["financial_health_metrics_tool", "财务健康指标", "资产负债率", "流动比率", "利息覆盖", "利息保障", "偿债能力", "长期债务/fcf", "经营现金流债务覆盖"],
+                "财务健康/偿债指标已由偿债能力趋势工具、质量因子包和资产负债分析覆盖，不需要新建同名 External Skill",
+            ),
+            (
+                ["get_historical_valuation_percentile_tool"],
+                ["历史pe", "历史 pe", "pe/pb", "pe / pb", "pb分位", "pe分位", "估值分位", "分位数"],
+                "历史 PE/PB 分位数能力已由历史估值分位工具覆盖",
+            ),
+        ]
+
+        registry = get_tool_registry()
+        for tool_ids, keywords, reason in candidates:
+            if not any(keyword in text for keyword in keywords):
+                continue
+            available = [tool_id for tool_id in tool_ids if registry.get(tool_id)]
+            if not available:
+                continue
+            return {
+                "gap": str(gap or "").strip(),
+                "skill_tool_id": available[0],
+                "skill_display_name": available[0],
+                "additional_tool_ids": available[1:],
+                "resolution_stage": "builtin_tool_evidence",
+                "reason": reason,
+            }
+        return None
+
+    def _tool_covers_gap_cross_language(self, tool_id: str, gap_text: str) -> bool:
+        """跨语言检测：工具是否覆盖某个中文描述的能力缺口。
+
+        解决纯中文 gap（如"商誉减值风险"）与纯英文 tool_id（如"get_financial_risk_factors"）
+        之间同一 token 无法匹配的问题。通过 tool 注册表的 description / capability_tags
+        以及 external_skills 中的中文描述做跨语言匹配。
+        """
+        gap_lower = str(gap_text or "").strip().lower()
+        if not gap_lower or not tool_id:
+            return False
+        tool_id_lower = str(tool_id).strip().lower()
+
+        # 1. 从工具注册表获取 description / capability_tags
+        try:
+            registry = get_tool_registry()
+            if registry:
+                meta = registry.get(tool_id)
+                if meta and isinstance(meta, object):
+                    # ToolMetadata 有 description, capability_tags, name 字段
+                    tool_desc = str(getattr(meta, "description", "") or "").lower()
+                    tool_name = str(getattr(meta, "name", "") or "").lower()
+                    capability_tags = [str(t or "").lower() for t in (getattr(meta, "capability_tags", None) or [])]
+                    preferred_for = [str(t or "").lower() for t in (getattr(meta, "preferred_for", None) or [])]
+
+                    all_tool_text = " ".join([tool_desc, tool_name] + capability_tags + preferred_for)
+
+                    # 金融概念的跨语言映射
+                    cross_lang_map = {
+                        "商誉": ["goodwill", "声誉", "并购溢价", "无形资产", "brand"],
+                        "减值": ["impairment", "write down", "write-down", "减记", "贬值"],
+                        "应收账款": ["receivable", "account receiv", "ar", "trade receivable", "客户欠款", "应收"],
+                        "应付账款": ["payable", "account payab", "ap", "trade payable", "供应商欠款", "应付"],
+                        "现金流": ["cashflow", "cash flow", "cfo", "fcf", "经营现金流", "自由现金流", "cash"],
+                        "存货": ["inventory", "stock", "周转", "库存"],
+                        "负债": ["debt", "liability", "leverag", "付息", "债务", "负债率", "贷款"],
+                        "盈利": ["profit", "earning", "income", "margin", "roa", "roe", "净利", "毛利", "营收", "eps"],
+                        "财务健康": ["financial health", "financial strength", "solvency", "liquidity", "z-score", "altman", "流动性", "偿债"],
+                        "估值": ["valuation", "pe", "pb", "ev/ebitda", "dcf", "dividend yield", "市值", "股息率"],
+                        "分红": ["dividend", "payout", "dividend yield", "现金分红", "派息", "股息"],
+                        "风险": ["risk", "hazard", "volatility", "波动", "sigma", "downturn", "var", "回撤", "预警"],
+                        "异常": ["anomal", "outlier", "flag", "warning", "预警", "信号", "检测", "可疑", "fraud"],
+                        "质量": ["quality", "efficiency", "ratio", "coverage", "稳定", "持续", "可靠性"],
+                        "趋势": ["trend", "momentum", "historical", "moving average", "动态", "变化", "历史"],
+                        "信号": ["signal", "indicator", "flag", "alert", "事件", "触发"],
+                        "成长": ["growth", "growth rate", "yoy", "qoq", "同比增长", "环比增长"],
+                        "护城河": ["moat", "competitive advantage", "barrier", "pricing power", "竞争", "品牌", "网络效应"],
+                        "管理层": ["management", "insider", "ownership", "governance", "ceo", "高管", "董事", "内部人", "治理"],
+                        "历史": ["historical", "time series", "annual", "quarterly", "历年", "各期", "回溯"],
+                    }
+
+                    for cn_keyword, en_keywords in cross_lang_map.items():
+                        if cn_keyword in gap_lower or any(ek in gap_lower for ek in en_keywords):
+                            # gap 提到了这个金融概念 → 检查 tool 是否也覆盖
+                            if cn_keyword in all_tool_text or any(ek in all_tool_text for ek in en_keywords):
+                                return True
+        except Exception:
+            pass
+
+        # 2. 回退：检查 tool_id 本身或已知映射
+        #    例如 get_financial_risk_factors → 覆盖 风险/财务/商誉/应收账款
+        known_coverage = {
+            "get_financial_risk_factors": ["商誉", "应收账款", "现金流", "风险", "减计", "减值", "异常", "财务"],
+            "get_cashflow_quality_trend_tool": ["现金流", "质量", "趋势", "波动"],
+            "get_risk_event_flags_tool": ["风险", "事件", "信号", "预警", "异常"],
+            "get_balance_sheet_analysis": ["资产负债表", "负债", "资产", "商誉", "应收", "应付", "存货"],
+            "get_cashflow_analysis": ["现金流", "经营", "投资", "融资"],
+            "get_income_analysis": ["盈利", "营收", "净利", "毛利"],
+            "get_stock_fundamentals_unified": ["基本面", "财务", "估值", "盈利"],
+            "get_value_factor_bundle_tool": ["估值", "因子", "pe", "pb"],
+            "get_quality_factor_bundle_tool": ["质量", "因子", "roe", "毛利"],
+            "get_historical_valuation_percentile_tool": ["历史", "估值", "分位"],
+            "get_debt_solvency_trend_tool": ["负债", "偿债", "利息"],
+        }
+        for known_tool_id, keywords in known_coverage.items():
+            if known_tool_id in tool_id_lower:
+                return any(kw in gap_lower for kw in keywords)
+
+        return False
+
     def _find_unresolved_blocking_gaps(
         self,
         gap_report: Optional[AgentWorkshopGapAnalysis],
         auto_resolved_gaps: List[Dict[str, Any]],
     ) -> List[str]:
-        """找出仍未被自动补齐 Skill 覆盖的 blocking gaps。"""
+        """找出仍未被自动补齐 Skill 或已注册内置工具覆盖的 blocking gaps。"""
         blocking_gaps = [
             str(item or "").strip()
             for item in list(getattr(gap_report, "blocking_gaps", None) or [])
@@ -1152,8 +1375,18 @@ class AgentWorkshopService:
             if str((item or {}).get("skill_tool_id") or "").strip()
         ])
 
-        unresolved = [gap for gap in blocking_gaps if gap not in resolved_texts]
-        if resolved_count >= len(blocking_gaps):
+        builtin_resolved_texts = {
+            gap for gap in blocking_gaps
+            if self._builtin_tool_evidence_for_gap(gap) is not None
+        }
+        if builtin_resolved_texts:
+            logger.info(
+                "[AgentWorkshop][GapGuard][BuiltinEvidence] resolved_by_builtin count=%s gaps=%s",
+                len(builtin_resolved_texts),
+                list(builtin_resolved_texts)[:5],
+            )
+        unresolved = [gap for gap in blocking_gaps if gap not in resolved_texts and gap not in builtin_resolved_texts]
+        if resolved_count + len(builtin_resolved_texts) >= len(blocking_gaps):
             return []
         return unresolved
 
@@ -1779,43 +2012,91 @@ class AgentWorkshopService:
 
     @staticmethod
     def _append_spec_deletion_to_file_memory(spec_id: str, spec_name: str) -> None:
-        """在 Nanobot 文件层记忆（HISTORY.md）中追加 Agent 删除记录。
+        """在 Nanobot 文件层记忆（HISTORY.md / MEMORY.md）中强制清理已删除 Agent 的记录。
         
-        Nanobot 读取 MEMORY.md/HISTORY.md 来了解历史。删 Agent 时在这里加一条，
-        下次 Nanobot 看到就知道这个 Agent 已不存在，不会产生幻觉。
+        问题背景：仅追加一行"已删除"注记远远不够。Nanobot 的 save_memory 会在
+        MEMORY.md 积累大量关于该 Agent 的创建方案、工具选择、缺口分析等信息。
+        用户删除 Agent 后重建同名 Agent 时，LLM 从 MEMORY.md 中读到这些旧方案，
+        会直接复用，不检查新的 skill，也不生成新方案。
+        
+        改为：对 MEMORY.md 中的每一段提及旧 spec_id/spec_name 的内容，
+        在段落前插入不可忽略的删除声明块。对 HISTORY.md 中的所有相关条目
+        追加删除标记。
         """
         try:
+            import re
             from datetime import datetime
 
             workspace = Path(__file__).resolve().parents[2]
-            history_file = workspace / "memory" / "HISTORY.md"
-
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
             label = spec_name or spec_id
-            entry = (
-                f"[{timestamp}] **Agent 已删除** — "
-                f"{label}（{spec_id}）已被用户从 Agent 工坊中删除，"
-                f"不再存在于系统中，所有关联的版本、配置和提示词模板已一并清理。"
-                f"如果后续对话中提到此 Agent，请告知用户该 Agent 已不存在。"
+            deletion_block = (
+                f"> 🔴 **已删除 Agent — 严禁复用**\n"
+                f"> Agent **{label}**（{spec_id}）已被用户从 Agent 工坊中删除。\n"
+                f"> ❌ 以下段落中涉及该 Agent 的创建方案、工具选择、缺口分析、提示词设计、\n"
+                f">    版本计划等所有决策一律失效，不得在新建 Agent 时直接复用。\n"
+                f"> ✅ 如果用户新建同名 Agent，必须基于当前最新的工具能力、skill 列表\n"
+                f">    和 Runtime 配置重新设计方案，不能从下方旧记忆中照搬。\n"
+                f"> 删除时间：{timestamp}\n"
+                f"> ---"
             )
 
+            # ── 处理 HISTORY.md ──
+            history_file = workspace / "memory" / "HISTORY.md"
             history_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(history_file, "a", encoding="utf-8") as f:
-                f.write(entry.rstrip() + "\n\n")
+            if history_file.exists():
+                with open(history_file, "r", encoding="utf-8") as f:
+                    history_content = f.read()
+                # 追加删除记录
+                entry = (
+                    f"[{timestamp}] 🔴 **Agent 已删除** — "
+                    f"{label}（{spec_id}）已被用户从 Agent 工坊中删除，"
+                    f"所有关联的版本、配置和提示词模板已一并清理。"
+                    f"⚠️ 此 Agent 不可恢复，旧方案不可复用。"
+                )
+                with open(history_file, "w", encoding="utf-8") as f:
+                    f.write(history_content.rstrip() + "\n\n" + deletion_block + "\n\n" + entry.rstrip() + "\n\n")
+            else:
+                with open(history_file, "w", encoding="utf-8") as f:
+                    f.write(deletion_block + "\n\n")
 
-            # 同时追加到 MEMORY.md，确保即时生效（不等下次 compact）
+            # ── 处理 MEMORY.md ──
             memory_file = workspace / "memory" / "MEMORY.md"
             if memory_file.exists():
-                with open(memory_file, "a", encoding="utf-8") as f:
-                    f.write(f"\n\n> **注意**：{entry}\n")
+                with open(memory_file, "r", encoding="utf-8") as f:
+                    memory_content = f.read()
+
+                # 检查 MEMORY.md 是否提及该 spec
+                has_spec_id = spec_id.lower() in memory_content.lower()
+                has_spec_name = spec_name and spec_name.lower() in memory_content.lower()
+                if has_spec_id or has_spec_name:
+                    # 在文件开头插入删除声明块
+                    with open(memory_file, "w", encoding="utf-8") as f:
+                        f.write(deletion_block + "\n\n" + memory_content)
+                    logger.info(
+                        "[AgentWorkshop][delete_spec] MEMORY.md 已插入删除声明块 spec_id=%s spec_name=%s "
+                        "has_spec_id=%s has_spec_name=%s",
+                        spec_id, spec_name, has_spec_id, has_spec_name,
+                    )
+                else:
+                    # 未提及，追加删除声明让 Nanobot 知道
+                    with open(memory_file, "a", encoding="utf-8") as f:
+                        f.write("\n\n" + deletion_block + "\n")
+                    logger.info(
+                        "[AgentWorkshop][delete_spec] MEMORY.md 未找到 spec 提及，追加删除声明 spec_id=%s",
+                        spec_id,
+                    )
+            else:
+                with open(memory_file, "w", encoding="utf-8") as f:
+                    f.write(deletion_block + "\n")
 
             logger.info(
-                "[AgentWorkshop][delete_spec] spec_id=%s file memory updated",
+                "[AgentWorkshop][delete_spec] spec_id=%s file memory aggressively updated",
                 spec_id,
             )
         except Exception as exc:
             logger.warning(
-                "[AgentWorkshop][delete_spec] spec_id=%s file memory update failed: %s",
+                "[AgentWorkshop][delete_spec] spec_id=%s file memory aggressive update failed: %s",
                 spec_id,
                 exc,
             )
@@ -2120,8 +2401,8 @@ class AgentWorkshopService:
             )
         if project_memory_binding["enabled"] and not project_memory_binding["valid"]:
             missing_preview = "；".join(project_memory_binding["missing_items"][:4]) or "缺少项目长期记忆绑定标记"
-            publish_warnings.append(
-                f"版本 {version_id} 的 Prompt Template 尚未绑定当前 L4 项目长期记忆：{missing_preview}。建议补充后重新发布以获得更好的规则一致性。"
+            raise ValueError(
+                f"版本 {version_id} 的 Prompt Template 尚未绑定当前 L4 项目长期记忆：{missing_preview}。"
             )
 
         # 将之前 active 的版本归档，并从运行时配置中禁用旧发布版本
@@ -3388,8 +3669,53 @@ class AgentWorkshopService:
             raise ValueError("llm.provider 不能为空")
 
         template_id = str(version.prompt_template_ref.get("template_id") or "").strip()
+        logger.info(f"[AgentWorkshop][debug_version] 版本 {version_id} prompt_template_ref={version.prompt_template_ref}")
         if not template_id:
-            raise ValueError("当前版本还没有可调试的 Prompt 模板")
+            # 🔥 缺失模板时自动重建，不阻塞调试
+            logger.warning(f"[AgentWorkshop][debug_version] 版本 {version_id} 缺少提示词模板，自动重建")
+            try:
+                from app.services.prompt_template_service import PromptTemplateService
+                prompt_ref = await self._create_prompt_template(
+                    version.version_id,
+                    spec,
+                    list(version.required_tools or []),
+                )
+                template_id = str(prompt_ref.get("template_id") or "").strip()
+                if template_id:
+                    version.prompt_template_ref = prompt_ref
+                    await self._db[VERSION_COLLECTION].update_one(
+                        {"version_id": version_id},
+                        {"$set": {"prompt_template_ref": prompt_ref}},
+                    )
+                    logger.info(f"[AgentWorkshop][debug_version] 自动重建模板成功: {template_id}")
+            except Exception as exc:
+                logger.warning(f"[AgentWorkshop][debug_version] 自动重建模板失败: {exc}")
+        if not template_id:
+            raise ValueError("当前版本还没有可调试的 Prompt 模板，且自动重建失败")
+
+        # 🔥 验证模板文档是否真实存在
+        try:
+            prompt_service = PromptTemplateService(db=self._db)
+            existing = await prompt_service.get_template(template_id)
+            if existing is None:
+                logger.warning(f"[AgentWorkshop][debug_version] 模板 {template_id} 在 MongoDB 中不存在，自动重建")
+                prompt_ref = await self._create_prompt_template(
+                    version.version_id, spec, list(version.required_tools or []),
+                )
+                new_id = str(prompt_ref.get("template_id") or "").strip()
+                if new_id:
+                    template_id = new_id
+                    version.prompt_template_ref = prompt_ref
+                    await self._db[VERSION_COLLECTION].update_one(
+                        {"version_id": version_id},
+                        {"$set": {"prompt_template_ref": prompt_ref}},
+                    )
+                    logger.info(f"[AgentWorkshop][debug_version] 重建模板成功: {template_id}")
+            else:
+                logger.info(f"[AgentWorkshop][debug_version] 模板文档存在: {template_id} "
+                            f"template_name={existing.template_name} status={existing.status}")
+        except Exception as exc:
+            logger.warning(f"[AgentWorkshop][debug_version] 模板验证失败（将继续执行）: {exc}")
 
         await _emit_progress("config", "正在配置 Agent 运行环境...")
         await self._ensure_runtime_agent_config(version, spec)
@@ -3439,7 +3765,60 @@ class AgentWorkshopService:
             workflow_id=None,
         )
 
-        await _emit_progress("agent", f"正在创建 Agent 实例（绑定 {len(version.required_tools)} 个工具）...")
+        # 🔥 合并 Runtime effective_tools，防止 External Skill 被丢弃
+        tool_ids = list(version.required_tools or [])
+        try:
+            runtime_config = await self._db.agent_configs.find_one({"agent_id": spec.spec_id})
+            if runtime_config:
+                effective = [str(t).strip() for t in (runtime_config.get("effective_tools") or runtime_config.get("tools") or []) if str(t).strip()]
+                before = len(tool_ids)
+                tool_ids = self._dedupe([*tool_ids, *effective])
+                added = len(tool_ids) - before
+                if added > 0:
+                    logger.info(f"[AgentWorkshop][debug_version] 从 Runtime config 合并了 {added} 个工具（如 {[t for t in effective if t not in version.required_tools][:5]}），总工具数: {len(tool_ids)}")
+        except Exception as exc:
+            logger.warning(f"[AgentWorkshop][debug_version] 读取 Runtime config 失败，继续使用 version.required_tools: {exc}")
+
+        # 调试运行必须以实际绑定到 Agent 的工具集生成 execution_plan。
+        # 对历史版本而言，version.execution_plan 可能是在 Runtime/External Skill 合并前生成的，
+        # 如果继续注入旧 plan，LLM 会按旧工具链运行，导致声明工具未调用。
+        runtime_execution_plan = version.execution_plan
+        if tool_ids and set(tool_ids) != set(version.required_tools or []):
+            runtime_execution_plan = self._build_execution_validation_plan(
+                spec,
+                tool_ids,
+                version.output_schema or self._build_output_schema(spec),
+                gap_report=None,
+                tooling_plan=None,
+            )
+            logger.info(
+                "[AgentWorkshop][debug_version] runtime execution_plan 已按实际 tool_ids 重建: version_tools=%s runtime_tools=%s",
+                len(version.required_tools or []),
+                len(tool_ids),
+            )
+
+        # 🔥 如果传入了 prompt_overrides，同步更新到版本绑定的模板，让 debug_template_id 指向最新内容
+        if prompt_overrides and template_id:
+            try:
+                # 先加载现有模板内容，再合并 override
+                prompt_service = PromptTemplateService(db=self._db)
+                existing = await prompt_service.get_template(template_id)
+                if existing and existing.content:
+                    new_system = prompt_overrides.get("system_prompt") or prompt_overrides.get("system") or existing.content.system_prompt
+                    new_user = prompt_overrides.get("user_prompt") or prompt_overrides.get("user") or existing.content.user_prompt
+                else:
+                    new_system = prompt_overrides.get("system_prompt") or prompt_overrides.get("system") or ""
+                    new_user = prompt_overrides.get("user_prompt") or prompt_overrides.get("user") or ""
+                await self.update_version_prompt(
+                    version.version_id,
+                    content={"system_prompt": new_system, "user_prompt": new_user},
+                    status="draft",
+                )
+                logger.info(f"[AgentWorkshop][debug_version] prompt_overrides 已同步到模板 {template_id}")
+            except Exception as exc:
+                logger.warning(f"[AgentWorkshop][debug_version] 同步 prompt_overrides 到模板失败（不影响执行）: {exc}")
+
+        await _emit_progress("agent", f"正在创建 Agent 实例（绑定 {len(tool_ids)} 个工具）...")
         agent = create_agent(
             version.version_id,
             config=AgentConfig(
@@ -3447,7 +3826,7 @@ class AgentWorkshopService:
                 max_retries=3,
             ),
             llm=llm_instance,
-            tool_ids=version.required_tools,
+            tool_ids=tool_ids,
         )
 
         await _emit_progress("analysis", f"正在对 {symbol} 执行分析任务...")
@@ -3463,7 +3842,7 @@ class AgentWorkshopService:
             "prompt_overrides": prompt_overrides or {},
             "task_description": task_description,
             "workflow_id": f"agent_workshop_debug_{version.version_id}",
-            "agent_workshop_execution_plan": version.execution_plan.model_dump(mode="json") if version.execution_plan else {},
+            "agent_workshop_execution_plan": runtime_execution_plan.model_dump(mode="json") if runtime_execution_plan else {},
         }
 
         try:
@@ -3508,7 +3887,7 @@ class AgentWorkshopService:
                 "template_id": template_id,
                 "template_name": version.prompt_template_ref.get("template_name"),
             },
-            "execution_plan": version.execution_plan.model_dump(mode="json") if version.execution_plan else {},
+            "execution_plan": runtime_execution_plan.model_dump(mode="json") if runtime_execution_plan else {},
             "metadata": {
                 "agent_id": version.agent_metadata.get("id") or version.version_id,
                 "agent_name": version.agent_metadata.get("name") or spec.name,
@@ -3616,6 +3995,30 @@ class AgentWorkshopService:
         return normalized
 
     async def _resolve_nanobot_spec_id(self, agent_id: str) -> str:
+        raw_normalized = re.sub(r"[^a-zA-Z0-9_]+", "_", str(agent_id or "").strip()).strip("_")
+        raw_body = raw_normalized.lower()
+        raw_body = re.sub(r"^spec_nanobot_", "", raw_body)
+        raw_body = re.sub(r"^spec_", "", raw_body)
+        raw_body = re.sub(r"^agent_", "", raw_body)
+        raw_candidates = self._dedupe([
+            raw_normalized,
+            f"spec_nanobot_{raw_body}" if raw_body else "",
+            self._build_nanobot_spec_id(raw_normalized) if raw_normalized else "",
+        ])
+        for candidate in raw_candidates:
+            if not candidate:
+                continue
+            existing_spec_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": candidate})
+            if existing_spec_doc:
+                return str(existing_spec_doc.get("spec_id") or candidate)
+            try:
+                existing_version_doc = await self._db[VERSION_COLLECTION].find_one({"version_id": candidate})
+            except KeyError:
+                existing_version_doc = None
+            existing_version_spec_id = str((existing_version_doc or {}).get("spec_id") or "").strip()
+            if existing_version_spec_id:
+                return existing_version_spec_id
+
         normalized = self._normalize_nanobot_identifier(agent_id)
 
         existing_spec_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": normalized})
@@ -3899,6 +4302,24 @@ class AgentWorkshopService:
             seen.add(text)
             normalized.append(text)
         return normalized
+
+    async def _read_existing_runtime_tools_for_spec(self, spec_id: str) -> List[str]:
+        """读取当前 spec 在运行时配置中已绑定的 effective_tools。
+
+        用于 build_version 时合并 Runtime 侧已有的工具，防止 Workshop 的
+        _select_required_tools（只读硬编码列表）丢弃已绑定的 External Skill（如
+        get_financial_risk_factors）。
+        """
+        try:
+            if not hasattr(self._db, "agent_configs") or self._db.agent_configs is None:
+                return []
+            doc = await self._db.agent_configs.find_one({"agent_id": spec_id})
+            if not doc:
+                return []
+            effective_tools: list = doc.get("effective_tools") or doc.get("tools") or []
+            return [str(t).strip() for t in effective_tools if str(t).strip()]
+        except Exception:
+            return []
 
     @staticmethod
     def _build_nanobot_draft_user_message(
@@ -4187,6 +4608,10 @@ class AgentWorkshopService:
             (r"可比公司|同业对比|peer comparison|peer", "peer_comparison"),
             (r"估值|估价|定价|目标价|价格区间|估值区间|相对估值", "valuation_cn"),
             (r"敏感性分析", "sensitivity"),
+            (r"历史|多年|年报序列|时间序列|trend|series", "historical_series"),
+            (r"分位|percentile|估值分位", "percentile"),
+            (r"现金流|cashflow|fcf|ocf|经营现金流|自由现金流", "cashflow"),
+            (r"roe|roa|roic|毛利率|净利率|利润率|盈利稳定性|资本效率", "quality"),
         ]
         matched: List[str] = []
         for pattern, normalized in patterns:
@@ -4325,6 +4750,8 @@ class AgentWorkshopService:
             "dcf": "DCF",
             "ev_ebitda": "EV/EBITDA",
             "sensitivity": "敏感性分析",
+            "historical_series": "历史序列",
+            "percentile": "历史分位",
         }
         return labels.get(term, term)
 
@@ -4799,6 +5226,10 @@ class AgentWorkshopService:
             "get_stock_fundamentals_unified",
             "get_peer_comparison",
             "get_value_factor_bundle_tool",
+            "get_quality_factor_bundle_tool",
+            "get_growth_cashflow_factor_bundle_tool",
+            "get_cashflow_quality_trend_tool",
+            "get_debt_solvency_trend_tool",
         ]
 
         if any(keyword in text for keyword in ["pe", "pb", "peg", "市盈率", "市净率", "估值"]):
@@ -4837,6 +5268,14 @@ class AgentWorkshopService:
             guidance_lines.append(
                 "- get_peer_comparison 已提供同业估值对比，不能因为没有同名 PE 工具就忽略已有 peer valuation 能力。"
             )
+        if "get_cashflow_quality_trend_tool" in registered_ids or "get_growth_cashflow_factor_bundle_tool" in registered_ids:
+            guidance_lines.append(
+                "- 现金流质量类指标不要新建 cash_flow_quality_metrics_tool：get_cashflow_quality_trend_tool 已计算 OCF/净利、FCF/净利、OCF/营收、FCF/营收等长期趋势；get_growth_cashflow_factor_bundle_tool 已提供 FCF、FCF margin、OCF yield 等现金流因子。"
+            )
+        if "get_debt_solvency_trend_tool" in registered_ids or "get_quality_factor_bundle_tool" in registered_ids:
+            guidance_lines.append(
+                "- 财务健康/偿债类指标不要新建 financial_health_metrics_tool：get_debt_solvency_trend_tool 已覆盖资产负债率、流动比率、债务权益比、OCF/负债；get_quality_factor_bundle_tool 已覆盖资产负债率、流动比率、速动比率、现金比率、利息保障倍数等质量因子。"
+            )
         if "calculate_pb_relative_valuation" in registered_ids or "calculate_peg_valuation" in registered_ids:
             guidance_lines.append(
                 "- 已有 PB/PEG 估值工具 + 价值因子包 + 同业对比，说明系统已经具备估值分析闭环的主要组件；除非规格明确要求当前系统无法通过组合产出的确定性结果，否则不要再建议新增平行的 calculate_pe_relative_valuation。"
@@ -4868,14 +5307,30 @@ class AgentWorkshopService:
             if item
         }
         added_labels = [label for label in enforced_labels if self._normalize_capability_id(label) not in existing_tool_ids]
+        builtin_resolved_gaps = [gap for gap in (gap_report.blocking_gaps or []) if self._builtin_tool_evidence_for_gap(gap) is not None]
+        builtin_resolved_tool_ids = {
+            str((self._builtin_tool_evidence_for_gap(gap) or {}).get("skill_tool_id") or "").strip()
+            for gap in builtin_resolved_gaps
+        }
+        existing_capability_aliases = {
+            "cash_flow_quality_metrics_tool",
+            "financial_health_metrics_tool",
+            *builtin_resolved_tool_ids,
+        }
 
         filtered_suggested_tools = [
             item for item in (gap_report.suggested_tools or [])
             if self._normalize_capability_id(item.tool_id) not in required_ids
+            and self._normalize_capability_id(item.tool_id) not in existing_capability_aliases
         ]
         filtered_suggested_capabilities = [
             item for item in (gap_report.suggested_capabilities or [])
             if self._normalize_capability_id(item.tool_id) not in required_ids
+            and self._normalize_capability_id(item.tool_id) not in existing_capability_aliases
+        ]
+        filtered_blocking_gaps = [
+            gap for gap in (gap_report.blocking_gaps or [])
+            if gap not in builtin_resolved_gaps
         ]
 
         notes = list(gap_report.notes or [])
@@ -4884,13 +5339,36 @@ class AgentWorkshopService:
             notes.append(
                 "估值类规格已自动补齐现有能力识别：" + "、".join(added_labels)
             )
+            logger.info(
+                "[AgentWorkshop][GapAnalysis][BuiltinEnforce] spec_id=%s added_existing_tools=%s",
+                spec.spec_id,
+                added_labels[:8],
+            )
+        if builtin_resolved_gaps:
+            notes.append(
+                "已将可由现有标准金融工具覆盖的 blocking gaps 解除：" + "、".join(builtin_resolved_gaps[:4])
+            )
+            logger.info(
+                "[AgentWorkshop][GapAnalysis][BuiltinResolvedGaps] spec_id=%s removed_blocking_gaps=%s",
+                spec.spec_id,
+                builtin_resolved_gaps[:8],
+            )
         if len(filtered_suggested_tools) != len(gap_report.suggested_tools or []) or len(filtered_suggested_capabilities) != len(gap_report.suggested_capabilities or []):
-            notes.append("已将误判为缺口的现有估值能力从 suggested_tools / suggested_capabilities 中移除。")
-            build_recommendations.insert(0, "估值类 Agent 先复用现有 PE/PB/PEG/同业对比能力，再补真正缺失的计算或数据链路。")
+            notes.append("已将误判为缺口的现有估值/财务质量能力从 suggested_tools / suggested_capabilities 中移除。")
+            build_recommendations.insert(0, "估值类 Agent 先复用现有 PE/PB/PEG、现金流质量、偿债健康和同业对比能力，再补真正缺失的计算或数据链路。")
+            logger.info(
+                "[AgentWorkshop][GapAnalysis][SuggestedFiltered] spec_id=%s suggested_tools_before=%s after=%s suggested_capabilities_before=%s after=%s",
+                spec.spec_id,
+                len(gap_report.suggested_tools or []),
+                len(filtered_suggested_tools),
+                len(gap_report.suggested_capabilities or []),
+                len(filtered_suggested_capabilities),
+            )
 
         gap_report.existing_tools = self._dedupe([*enforced_labels, *(gap_report.existing_tools or [])])[:12]
         gap_report.suggested_tools = filtered_suggested_tools[:8]
         gap_report.suggested_capabilities = filtered_suggested_capabilities[:8]
+        gap_report.blocking_gaps = self._dedupe(filtered_blocking_gaps)[:8]
         gap_report.build_recommendations = self._dedupe(build_recommendations)[:10]
         gap_report.notes = self._dedupe(notes)[:10]
         return gap_report
@@ -5546,7 +6024,7 @@ class AgentWorkshopService:
             response = await client.achat([
                 Message(role="system", content=system_prompt),
                 Message(role="user", content=prompt),
-            ])
+            ], response_format={"type": "json_object"})
         except Exception as exc:
             logger.error(
                 "[AgentWorkshop][requirement_clarification] spec_id=%s spec_name=%s user_id=%s request_failed elapsed_seconds=%.3f llm_runtime=%s prompt_metrics=%s error=%s",
@@ -5562,6 +6040,32 @@ class AgentWorkshopService:
             raise
         request_elapsed = round(perf_counter() - request_started_at, 3)
         raw_content = (response.content or "").strip()
+
+        # DeepSeek 等推理模型可能把 CoT 输出到 content 而非 reasoning_content，
+        # 同时 JSON 在 CoT 末尾，content 太长被截断。尝试从 reasoning_content 读取。
+        if not raw_content or not raw_content.endswith("}"):
+            reasoning = (getattr(response, "reasoning_content", None) or "").strip()
+            if reasoning:
+                logger.info(
+                    "[AgentWorkshop][requirement_clarification] content is non-JSON (len=%s), trying reasoning_content (len=%s)",
+                    len(raw_content),
+                    len(reasoning),
+                )
+                raw_content = reasoning
+
+        # 如果 content 包含大量 CoT（Chain-of-Thought）前缀，尝试从末尾提取 JSON
+        if raw_content and not raw_content.startswith("{") and "{" in raw_content:
+            last_brace = raw_content.rfind("{")
+            if last_brace >= 0:
+                candidate = raw_content[last_brace:]
+                # 确认候选内容以 { 开头且包含 }
+                if candidate.startswith("{") and "}" in candidate:
+                    logger.info(
+                        "[AgentWorkshop][requirement_clarification] extracting JSON from last { (content_len=%s, extracted_len=%s)",
+                        len(raw_content),
+                        len(candidate),
+                    )
+                    raw_content = candidate
         self._log_llm_exchange(
             "requirement_clarification",
             system_prompt,
@@ -5577,25 +6081,57 @@ class AgentWorkshopService:
             stripped = self._strip_markdown_fence(raw_content)
             if not stripped:
                 raise ValueError("LLM 返回空内容，无法解析为 JSON")
+
+            data: Any = None
+            parsed_ok = False
+
+            # 尝试 1：直接 json.loads
             try:
                 data = json.loads(stripped)
+                parsed_ok = isinstance(data, dict)
             except (json.JSONDecodeError, ValueError):
-                if json_repair is not None:
-                    try:
-                        data = json_repair.loads(stripped)
+                pass
+
+            # 尝试 2：json_repair
+            if not parsed_ok and json_repair is not None:
+                try:
+                    data = json_repair.loads(stripped)
+                    parsed_ok = isinstance(data, dict)
+                    if parsed_ok:
                         logger.info(
                             "[AgentWorkshop][requirement_clarification] spec_id=%s spec_name=%s json_repaired=True",
                             base_spec.spec_id,
                             base_spec.name,
                         )
-                    except Exception:
-                        raise
-                else:
-                    raise
-            if not isinstance(data, dict):
+                except Exception:
+                    pass
+
+            # 尝试 3：从混合内容中提取最外层 JSON object（处理 CoT + JSON 混合、非 dict 结果等）
+            if not parsed_ok:
+                data = self._extract_outermost_json(stripped)
+                if data is not None:
+                    parsed_ok = True
+                    logger.info(
+                        "[AgentWorkshop][requirement_clarification] spec_id=%s spec_name=%s json_extracted_outermost=True",
+                        base_spec.spec_id,
+                        base_spec.name,
+                    )
+
+            if not parsed_ok or not isinstance(data, dict):
                 raise ValueError("requirement clarification LLM 返回的不是 JSON object")
 
-            feasibility_status = self._require_feasibility_status(data, "requirement_clarification")
+            try:
+                feasibility_status = self._require_feasibility_status(data, "requirement_clarification")
+            except ValueError:
+                raw_fs = data.get("feasibility_status")
+                feasibility_status = self._normalize_feasibility_status(raw_fs)
+                logger.warning(
+                    "[AgentWorkshop][requirement_clarification] spec_id=%s spec_name=%s feasibility_status 缺失/无效，"
+                    "回退为 need-clarification（raw=%s）",
+                    base_spec.spec_id,
+                    base_spec.name,
+                    raw_fs,
+                )
             completeness_score = self._require_score_field(data, "completeness_score", "requirement_clarification")
             pending_questions = self._require_list_field(data, "pending_questions", "requirement_clarification")[:2]
             refusal_reason = self._require_string_field(data, "refusal_reason", "requirement_clarification", allow_empty=True)
@@ -5950,7 +6486,7 @@ class AgentWorkshopService:
         # 场景1：已存在的 spec 名称不是占位值 → 强制保留
         # 场景2：LLM 产出的名称看起来是 slu（纯英文+下划线，不含中文）→ 用已有名称覆盖
         fallback_name = str(fallback_spec.name or "").strip()
-        is_placeholder_name = not fallback_name or fallback_name in {"待确认 Agent", "新 Agent", "未命名 Agent"} or fallback_name.startswith("agent-workshop-")
+        is_placeholder_name = not fallback_name or fallback_name in {"待确认 Agent", "新 Agent", "未命名 Agent", "旧草案"} or fallback_name.startswith("agent-workshop-")
         llm_is_slug = bool(re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", llm_name)) and not re.search(r"[\u4e00-\u9fff]", llm_name)
 
         if not is_placeholder_name and llm_is_slug:
@@ -5965,12 +6501,13 @@ class AgentWorkshopService:
             name = llm_name
 
         resolved_spec_id = fallback_spec_id or fallback_spec.spec_id
+        output_identifier = name or fallback_spec.name or resolved_spec_id
         if not resolved_spec_id or resolved_spec_id.startswith("agent-workshop-"):
-            resolved_spec_id = self._slugify(name or fallback_spec.name or f"agent-workshop-{uuid.uuid4().hex[:8]}")
+            resolved_spec_id = self._slugify(output_identifier or f"agent-workshop-{uuid.uuid4().hex[:8]}")
 
         normalized_outputs = self._normalize_generated_output_items(
             self._require_io_fields_field(data, "outputs", "requirement_clarification"),
-            resolved_spec_id,
+            output_identifier,
         )
 
         return AgentSpec(
@@ -6007,6 +6544,46 @@ class AgentWorkshopService:
             content = content[:-3]
         return content.strip()
 
+    def _extract_outermost_json(self, content: str) -> Optional[Dict[str, Any]]:
+        """从混合了 CoT 文本和 JSON 的内容中提取最外层 JSON object。
+
+        DeepSeek 等推理模型有时会把 Chain-of-Thought 和 JSON 混在 content 中，
+        此方法通过扫描平衡括号找到最外层的 JSON 对象。
+        """
+        if not content:
+            return None
+        # 找到所有 '{' 的位置作为候选起点
+        candidates = []
+        depth = 0
+        start = -1
+        for i, ch in enumerate(content):
+            if ch == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == "}":
+                if depth > 0:
+                    depth -= 1
+                    if depth == 0 and start >= 0:
+                        candidates.append((start, i))
+                        start = -1
+        # 从后往前尝试解析（最后的候选块通常是最完整的）
+        for begin, end in reversed(candidates):
+            fragment = content[begin:end + 1]
+            try:
+                result = json.loads(fragment)
+                if isinstance(result, dict):
+                    return result
+            except (json.JSONDecodeError, ValueError):
+                if json_repair is not None:
+                    try:
+                        result = json_repair.loads(fragment)
+                        if isinstance(result, dict):
+                            return result
+                    except Exception:
+                        continue
+        return None
+
     def _require_string_field(self, data: Dict[str, Any], key: str, stage: str, allow_empty: bool = False) -> str:
         value = data.get(key)
         if not isinstance(value, str):
@@ -6016,12 +6593,14 @@ class AgentWorkshopService:
             raise ValueError(f"{stage} 字段 {key} 不能为空")
         return text
 
-    def _require_list_field(self, data: Dict[str, Any], key: str, stage: str) -> List[str]:
+    def _require_list_field(self, data: Dict[str, Any], key: str, stage: str, allow_missing: bool = False) -> List[str]:
         value = data.get(key)
         if not isinstance(value, list):
             # 兼容 LLM 返回单个字符串的情况
             if isinstance(value, str) and value.strip():
                 return [value.strip()]
+            if allow_missing:
+                return []
             raise ValueError(f"{stage} 缺少数组字段 {key}")
         normalized: List[str] = []
         for item in value:
@@ -6448,18 +7027,22 @@ class AgentWorkshopService:
                         "spec_name": spec.name,
                     },
                 )
-                json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-                if json_match:
-                    data = json.loads(json_match.group())
+                data = None
+                try:
+                    data = self._load_json_response(raw)
+                except Exception as parse_exc:
+                    last_error = parse_exc
+                    logger.warning(
+                        "[AgentWorkshop] gap_analysis 第 %s 次请求结果不可解析，准备升级上下文重试: spec_id=%s spec_name=%s error=%s",
+                        attempt_index,
+                        spec.spec_id,
+                        spec.name,
+                        parse_exc,
+                    )
+                    continue
+                if data is not None:
                     break
 
-                last_error = ValueError("gap analysis LLM 未返回合法 JSON")
-                logger.warning(
-                    "[AgentWorkshop] gap_analysis 第 %s 次请求结果不可解析，准备升级上下文重试: spec_id=%s spec_name=%s",
-                    attempt_index,
-                    spec.spec_id,
-                    spec.name,
-                )
             else:
                 if last_error is not None:
                     raise last_error
@@ -6579,6 +7162,184 @@ class AgentWorkshopService:
         max_tools = 8 if self._is_valuation_spec(spec) else 4
         return selected[:max_tools]
 
+    def _build_tool_selection_policy(self, spec: AgentSpec, required_tools: List[str]) -> Dict[str, Any]:
+        """为当前 Agent 版本生成确定性工具路由策略，避免 LLM 在相似工具间临场猜测。"""
+        tools = self._dedupe([str(item).strip() for item in (required_tools or []) if str(item).strip()])
+        if not tools:
+            return {
+                "version": 1,
+                "primary_tools": [],
+                "required_first_call_tools": [],
+                "specialized_tools": [],
+                "supporting_tools": [],
+                "generic_tools": [],
+                "fallback_tools": [],
+                "substitution_rules": [],
+            }
+
+        task_text = " ".join([
+            spec.name or "",
+            spec.primary_goal or "",
+            spec.domain or "",
+            " ".join(spec.responsibilities or []),
+            " ".join(spec.preferred_methods or []),
+            " ".join(spec.constraints or []),
+            " ".join(self._list_io_field_labels(spec.outputs)),
+        ]).lower()
+        risk_task = any(keyword in task_text for keyword in ["风险", "risk", "商誉", "应收", "现金流", "财务健康", "异常", "预警"])
+        valuation_task = self._is_valuation_spec(spec)
+        registry = get_tool_registry()
+        tool_metadata: Dict[str, Any] = {}
+        for tool_id in tools:
+            meta = registry.get(tool_id)
+            if meta is not None:
+                tool_metadata[tool_id] = meta
+
+        def _meta_list(tool_id: str, attr: str) -> List[str]:
+            meta = tool_metadata.get(tool_id)
+            values = getattr(meta, attr, []) if meta is not None else []
+            return [str(item).strip() for item in (values or []) if str(item).strip()]
+
+        def _role_hint(tool_id: str) -> str:
+            meta = tool_metadata.get(tool_id)
+            return str(getattr(meta, "tool_role_hint", "") or "").strip().lower() if meta is not None else ""
+
+        def _preferred_for_current_task(tool_id: str) -> bool:
+            preferred = set(_meta_list(tool_id, "preferred_for"))
+            tags = set(_meta_list(tool_id, "capability_tags"))
+            if risk_task and ({"financial_risk_signal_detection", "cashflow_quality_analysis", "financial_health_analysis"} & preferred or {"financial_risk", "cashflow_quality", "financial_health"} & tags):
+                return True
+            if valuation_task and ({"valuation_analysis"} & preferred or {"valuation"} & tags):
+                return True
+            return False
+
+        generic_candidates = {
+            "get_stock_fundamentals_unified",
+            "get_stock_market_data_unified",
+            "get_stock_news_unified",
+            "get_income_analysis",
+        }
+        supporting_candidates = {
+            "get_cashflow_analysis",
+            "get_balance_sheet_analysis",
+            "get_quality_factor_bundle_tool",
+        }
+        fallback_candidates = {
+            "get_stock_fundamentals_unified",
+            "get_income_analysis",
+        }
+
+        primary_tools: List[str] = []
+        for tool_id in tools:
+            if _role_hint(tool_id) == "primary" and _preferred_for_current_task(tool_id):
+                primary_tools.append(tool_id)
+        if risk_task and "get_financial_risk_factors" in tools and "get_financial_risk_factors" not in primary_tools:
+            primary_tools.append("get_financial_risk_factors")
+        elif valuation_task and "get_value_factor_bundle_tool" in tools and not primary_tools:
+            primary_tools.append("get_value_factor_bundle_tool")
+
+        specialized_tools: List[str] = []
+        supporting_tools: List[str] = []
+        generic_tools: List[str] = []
+        fallback_tools: List[str] = []
+        for tool_id in tools:
+            if tool_id in primary_tools:
+                continue
+            role_hint = _role_hint(tool_id)
+            if role_hint == "fallback":
+                fallback_tools.append(tool_id)
+                continue
+            if role_hint == "generic":
+                generic_tools.append(tool_id)
+                continue
+            if role_hint == "supporting":
+                supporting_tools.append(tool_id)
+                continue
+            if role_hint == "specialized" or _preferred_for_current_task(tool_id):
+                specialized_tools.append(tool_id)
+                continue
+            if tool_id in fallback_candidates:
+                fallback_tools.append(tool_id)
+                continue
+            if tool_id in generic_candidates:
+                generic_tools.append(tool_id)
+                continue
+            if risk_task and tool_id in supporting_candidates:
+                supporting_tools.append(tool_id)
+                continue
+            if any(token in tool_id for token in ["trend", "metrics", "percentile", "factor_bundle", "risk", "flags", "solvency", "valuation"]):
+                specialized_tools.append(tool_id)
+                continue
+            if tool_id.endswith("_analysis") or "analysis" in tool_id:
+                supporting_tools.append(tool_id)
+                continue
+            specialized_tools.append(tool_id)
+
+        not_replaced_by = self._dedupe([*supporting_tools, *generic_tools, *fallback_tools])
+        substitution_rules: List[Dict[str, Any]] = []
+        for primary in primary_tools:
+            capability = "financial_risk_signal_detection" if primary == "get_financial_risk_factors" else "primary_capability"
+            substitution_rules.append({
+                "capability": capability,
+                "preferred": primary,
+                "not_replaced_by": not_replaced_by,
+            })
+
+        return {
+            "version": 1,
+            "primary_tools": primary_tools,
+            "required_first_call_tools": list(primary_tools),
+            "specialized_tools": self._dedupe(specialized_tools),
+            "supporting_tools": self._dedupe(supporting_tools),
+            "generic_tools": self._dedupe(generic_tools),
+            "fallback_tools": self._dedupe(fallback_tools),
+            "substitution_rules": substitution_rules,
+            "role_priority": ["primary", "specialized", "supporting", "generic", "fallback"],
+        }
+
+    def _ordered_tools_from_selection_policy(self, required_tools: List[str], tool_selection_policy: Optional[Dict[str, Any]]) -> List[str]:
+        tools = self._dedupe([str(item).strip() for item in (required_tools or []) if str(item).strip()])
+        if not isinstance(tool_selection_policy, dict):
+            return tools
+        ordered = self._dedupe([
+            *self._pick_list(tool_selection_policy.get("primary_tools"), []),
+            *self._pick_list(tool_selection_policy.get("specialized_tools"), []),
+            *self._pick_list(tool_selection_policy.get("supporting_tools"), []),
+            *self._pick_list(tool_selection_policy.get("generic_tools"), []),
+            *self._pick_list(tool_selection_policy.get("fallback_tools"), []),
+            *tools,
+        ])
+        tool_set = set(tools)
+        return [tool for tool in ordered if tool in tool_set]
+
+    def _build_tool_selection_policy_lines(self, tool_selection_policy: Optional[Dict[str, Any]]) -> List[str]:
+        if not isinstance(tool_selection_policy, dict) or not tool_selection_policy:
+            return []
+        lines: List[str] = [
+            "- 当前版本启用了工具路由策略；遇到工具描述相似时，不要按关键词猜测，必须按角色优先级选择。",
+            "- 工具角色优先级：primary > specialized > supporting > generic > fallback。",
+        ]
+        role_labels = [
+            ("primary_tools", "主入口工具，必须优先用于核心任务"),
+            ("required_first_call_tools", "前置必验工具，相关任务应先调用"),
+            ("specialized_tools", "专项结构化工具，优先支撑对应子能力"),
+            ("supporting_tools", "补充/交叉验证工具，不得替代主入口"),
+            ("generic_tools", "通用概览工具，不得替代专项结论"),
+            ("fallback_tools", "降级工具，仅在主工具无数据或不可用时使用"),
+        ]
+        for key, label in role_labels:
+            values = self._pick_list(tool_selection_policy.get(key), [])
+            if values:
+                lines.append(f"- {label}：{'、'.join(values)}")
+        for rule in tool_selection_policy.get("substitution_rules") or []:
+            if not isinstance(rule, dict):
+                continue
+            preferred = str(rule.get("preferred") or "").strip()
+            blocked = self._pick_list(rule.get("not_replaced_by"), [])
+            if preferred and blocked:
+                lines.append(f"- 替代禁止：{preferred} 不得被 {'、'.join(blocked[:6])} 替代；这些工具只能补证据或降级说明。")
+        return lines
+
     def _select_required_capabilities(
         self,
         gap_report: AgentWorkshopGapAnalysis,
@@ -6668,6 +7429,7 @@ class AgentWorkshopService:
         required_tools: List[str],
         gap_report: Optional[AgentWorkshopGapAnalysis] = None,
         tooling_plan: Optional[Dict[str, Any]] = None,
+        tool_selection_policy: Optional[Dict[str, Any]] = None,
         project_memory_block: str = "",
         agent_builder_lesson_block: str = "",
     ) -> TemplateContent:
@@ -6700,6 +7462,7 @@ class AgentWorkshopService:
         constraints = "\n".join(self._dedupe(constraint_lines))
         tool_binding_contract_lines = self._build_required_tool_binding_contract(required_tools, tool_display_lines)
         tool_strategy_lines = self._build_required_tool_strategy_lines(required_tools)
+        tool_selection_policy_lines = self._build_tool_selection_policy_lines(tool_selection_policy)
 
         tool_guidance_title = "优先使用以下工具获取事实依据："
         if gap_existing_tools:
@@ -6707,6 +7470,8 @@ class AgentWorkshopService:
         tool_guidance = f"{tool_guidance_title}\n" + "\n".join(tool_display_lines)
         tool_guidance = f"{tool_guidance}\n\n当前版本绑定工具与约束联动：\n" + "\n".join(tool_binding_contract_lines)
         tool_guidance = f"{tool_guidance}\n\nrequired_tools 使用策略：\n" + "\n".join(tool_strategy_lines)
+        if tool_selection_policy_lines:
+            tool_guidance = f"{tool_guidance}\n\n工具路由策略：\n" + "\n".join(tool_selection_policy_lines)
         if numeric_rules:
             tool_guidance = f"{tool_guidance}\n\n数值输出总原则：\n" + "\n".join(numeric_rules)
 
@@ -6889,9 +7654,17 @@ class AgentWorkshopService:
             errors.append("缺少 PromptTemplate")
         else:
             if template_doc.get("agent_type") != "universal":
-                errors.append(f"PromptTemplate.agent_type={template_doc.get('agent_type')}，UniversalAgent 无法命中")
+                message = f"PromptTemplate.agent_type={template_doc.get('agent_type')}，UniversalAgent 无法命中"
+                if require_active_template:
+                    errors.append(message)
+                else:
+                    warnings.append(message)
             if template_doc.get("agent_name") != version.version_id:
-                errors.append(f"PromptTemplate.agent_name={template_doc.get('agent_name')} 与 version_id 不一致")
+                message = f"PromptTemplate.agent_name={template_doc.get('agent_name')} 与 version_id 不一致"
+                if require_active_template:
+                    errors.append(message)
+                else:
+                    warnings.append(message)
             if require_active_template and str(template_doc.get("status") or "") != "active":
                 errors.append("PromptTemplate 不是 active 状态")
 
@@ -6957,15 +7730,19 @@ class AgentWorkshopService:
         required_tools: List[str],
         gap_report: Optional[AgentWorkshopGapAnalysis] = None,
         tooling_plan: Optional[Dict[str, Any]] = None,
+        tool_selection_policy: Optional[Dict[str, Any]] = None,
         agent_builder_lesson_block: str = "",
     ) -> Dict[str, Any]:
         prompt_service = PromptTemplateService(db=self._db)
+        if tool_selection_policy is None:
+            tool_selection_policy = self._build_tool_selection_policy(spec, required_tools)
         project_memory_block = await self._build_project_memory_block_for_workshop()
         content = self._build_prompt_template_content(
             spec,
             required_tools,
             gap_report=gap_report,
             tooling_plan=tooling_plan,
+            tool_selection_policy=tool_selection_policy,
             project_memory_block=project_memory_block,
             agent_builder_lesson_block=agent_builder_lesson_block,
         )
@@ -6976,6 +7753,7 @@ class AgentWorkshopService:
                 "version_id": version_id,
                 "spec_id": spec.spec_id,
                 "required_tools": required_tools,
+                "tool_selection_policy": tool_selection_policy,
                 "template_content": content.model_dump(mode="json"),
             },
             context={
@@ -7194,9 +7972,24 @@ class AgentWorkshopService:
         execution_order = self._normalize_execution_order(version.agent_metadata.get("execution_order"), 50)
         show_in_reports = self._normalize_show_in_reports(version.agent_metadata.get("show_in_reports"), True)
         callable_surfaces = self._normalize_callable_surfaces(version.agent_metadata.get("callable_surfaces"))
+        tool_selection_policy = version.evaluation_policy.get("tool_selection_policy") if isinstance(version.evaluation_policy, dict) else {}
+        if not isinstance(tool_selection_policy, dict) or not tool_selection_policy:
+            tool_selection_policy = version.agent_metadata.get("tool_selection_policy") if isinstance(version.agent_metadata, dict) else {}
+        default_tools = self._ordered_tools_from_selection_policy(version.required_tools, tool_selection_policy)
         license_tier = version.agent_metadata.get("license_tier") or "free"
         if hasattr(license_tier, "value"):
             license_tier = license_tier.value
+
+        # 🔥 合并运行时已有的工具，防止 Workshop 覆盖 Runtime 侧绑定的 External Skill
+        required_tools_merged = list(version.required_tools or [])
+        try:
+            existing = await self._db.agent_configs.find_one({"agent_id": version.version_id})
+            if existing:
+                existing_effective = [str(t).strip() for t in (existing.get("effective_tools") or existing.get("tools") or []) if str(t).strip()]
+                existing_required = [str(t).strip() for t in (existing.get("required_tools") or []) if str(t).strip()]
+                required_tools_merged = self._dedupe([*required_tools_merged, *existing_effective, *existing_required])
+        except Exception:
+            pass
 
         await self._db.agent_configs.update_one(
             {"agent_id": version.version_id},
@@ -7222,8 +8015,8 @@ class AgentWorkshopService:
                     },
                     "prompt_template_type": "universal",
                     "prompt_template_name": version.version_id,
-                    "default_tools": version.required_tools,
-                    "required_tools": version.required_tools,
+                    "default_tools": default_tools,
+                    "required_tools": required_tools_merged,
                     "output_field": output_field,
                     "workflow_stage": workflow_stage,
                     "report_label": report_label,
@@ -7249,6 +8042,7 @@ class AgentWorkshopService:
                         "runtime_contract": version.evaluation_policy.get("runtime_contract") if isinstance(version.evaluation_policy, dict) else {},
                         "prompt_contract": version.evaluation_policy.get("prompt_contract") if isinstance(version.evaluation_policy, dict) else {},
                         "tooling_contract": version.evaluation_policy.get("tooling_contract") if isinstance(version.evaluation_policy, dict) else {},
+                        "tool_selection_policy": tool_selection_policy,
                         "project_memory_binding_active": bool((project_memory_binding or {}).get("enabled")),
                         "project_memory_binding_valid": bool((project_memory_binding or {}).get("valid")),
                         "version_status": version.status.value if hasattr(version.status, "value") else str(version.status),
@@ -7801,7 +8595,7 @@ class AgentWorkshopService:
 
         publish_blockers.extend(confirmed_issue_groups.get("constraint_control", []))
         publish_blockers.extend(confirmed_issue_groups.get("numeric_traceability", []))
-        publish_warnings.extend(confirmed_issue_groups.get("project_memory_binding", []))
+        publish_blockers.extend(confirmed_issue_groups.get("project_memory_binding", []))
         publish_blockers.extend(confirmed_issue_groups.get("execution_plan", []))
         publish_blockers.extend(confirmed_issue_groups.get("output_coverage", []))
 
@@ -8078,6 +8872,7 @@ class AgentWorkshopService:
         if candidate.category == "project_memory_binding":
             if not runtime_summary.has_system_prompt:
                 append_finding("缺少运行时项目记忆证据")
+                invalid_reasons.append("缺少 runtime system_prompt 证据，无法确认当前 L4 项目长期记忆是否真实注入。")
             else:
                 append_finding(
                     "运行时 Prompt 缺少当前项目长期记忆",
@@ -8890,6 +9685,10 @@ class AgentWorkshopService:
                 "category": "tool_usage",
             })
 
+        tool_routing_review = self._evaluate_tool_selection_policy(version, successful_tool_names)
+        for item in tool_routing_review.get("acceptance_results") or []:
+            acceptance_results.append(item)
+
         numeric_policy = self._get_numeric_traceability_policy(spec)
         if numeric_policy["enabled"]:
             acceptance_results.append({
@@ -8927,6 +9726,8 @@ class AgentWorkshopService:
         warning_issues: List[str] = []
         if missing_required_tools:
             blocker_issues.append("这次运行没有真正调用到版本声明的关键工具，当前结果更像 Prompt 演示，不像可复核的执行结果。")
+        blocker_issues.extend(self._pick_list(tool_routing_review.get("blocker_issues"), []))
+        warning_issues.extend(self._pick_list(tool_routing_review.get("warning_issues"), []))
         severe_output_mismatch = bool(missing_outputs) and (score < 0.55 or len(missing_outputs) >= max(1, len(output_labels) // 2 or 1))
         if severe_output_mismatch:
             blocker_issues.append("execution_plan 要求的核心输出字段仍有缺失，说明版本草案和实际运行结果还没对齐。")
@@ -8940,6 +9741,7 @@ class AgentWorkshopService:
         recommendations = self._dedupe([
             *( ["先按 execution_plan.sample_input 重新跑一次调试，确保版本默认样本能稳定通过。"] if sample_symbol and not sample_symbol_aligned else [] ),
             *( ["把 required_tools 的调用前置到分析主链路，而不是只在 Prompt 里声明。"] if missing_required_tools else [] ),
+            *self._pick_list(tool_routing_review.get("recommendations"), []),
             *( ["按 execution_plan.acceptance_checks 逐项补齐输出字段，再重新发起结果评估。"] if missing_outputs else [] ),
             *( ["如果当前工具无法支撑精确结论，就按 execution_plan.fallback_rules 降级输出，不要硬给确定性数字。"] if valuation_guardrail.get("violation") else [] ),
         ])
@@ -8960,6 +9762,7 @@ class AgentWorkshopService:
             "successful_tools": successful_tool_names,
             "successful_required_tools": successful_required_tools,
             "missing_required_tools": missing_required_tools,
+            "tool_routing_review": tool_routing_review,
             "acceptance_results": acceptance_results,
             "matched": self._dedupe(matched),
             "missing": self._dedupe(missing),
@@ -8968,6 +9771,91 @@ class AgentWorkshopService:
             "warning_issues": self._dedupe(warning_issues),
             "recommendations": recommendations,
             "notes": notes,
+        }
+
+    def _evaluate_tool_selection_policy(self, version: AgentVersion, successful_tool_names: List[str]) -> Dict[str, Any]:
+        policy: Dict[str, Any] = {}
+        if isinstance(version.evaluation_policy, dict):
+            candidate = version.evaluation_policy.get("tool_selection_policy")
+            if isinstance(candidate, dict):
+                policy = candidate
+            tooling_contract = version.evaluation_policy.get("tooling_contract")
+            if not policy and isinstance(tooling_contract, dict) and isinstance(tooling_contract.get("tool_selection_policy"), dict):
+                policy = tooling_contract.get("tool_selection_policy") or {}
+        if not policy and isinstance(version.agent_metadata, dict) and isinstance(version.agent_metadata.get("tool_selection_policy"), dict):
+            policy = version.agent_metadata.get("tool_selection_policy") or {}
+
+        successful = self._dedupe([str(item).strip() for item in (successful_tool_names or []) if str(item).strip()])
+        successful_set = set(successful)
+        required_first = self._dedupe(self._pick_list(policy.get("required_first_call_tools"), [])) if policy else []
+        primary_tools = self._dedupe(self._pick_list(policy.get("primary_tools"), [])) if policy else []
+        missing_first = [tool for tool in required_first if tool not in successful_set]
+        missing_primary = [tool for tool in primary_tools if tool not in successful_set]
+
+        acceptance_results: List[Dict[str, Any]] = []
+        blocker_issues: List[str] = []
+        warning_issues: List[str] = []
+        recommendations: List[str] = []
+        substitution_violations: List[Dict[str, Any]] = []
+
+        if required_first:
+            acceptance_results.append({
+                "label": "命中工具路由主入口",
+                "passed": not missing_first,
+                "detail": (
+                    f"已命中：{'、'.join(required_first)}" if not missing_first
+                    else f"缺少前置主工具调用：{'、'.join(missing_first)}"
+                ),
+                "category": "tool_routing",
+            })
+        if missing_first:
+            logger.warning(
+                "[AgentWorkshop][ToolRoutingViolation] version_id=%s missing_primary=%s successful_tools=%s",
+                version.version_id,
+                missing_first,
+                successful[:8],
+            )
+            blocker_issues.append(f"工具路由违规：未调用必须优先使用的主入口工具：{'、'.join(missing_first)}。")
+            recommendations.append("按 tool_selection_policy 把 primary/required_first_call_tools 前置到运行链路，不能只依赖通用工具生成报告。")
+        elif missing_primary:
+            warning_issues.append(f"工具路由提示：主入口工具未全部命中：{'、'.join(missing_primary)}。")
+
+        rules = policy.get("substitution_rules") if policy else []
+        for rule in rules or []:
+            if not isinstance(rule, dict):
+                continue
+            preferred = str(rule.get("preferred") or "").strip()
+            blocked = self._pick_list(rule.get("not_replaced_by"), [])
+            used_blocked = [tool for tool in blocked if tool in successful_set]
+            if preferred and preferred not in successful_set and used_blocked:
+                substitution_violations.append({
+                    "capability": rule.get("capability") or "primary_capability",
+                    "preferred": preferred,
+                    "used_instead": used_blocked,
+                })
+        for violation in substitution_violations:
+            logger.warning(
+                "[AgentWorkshop][ToolRoutingViolation] version_id=%s preferred=%s used_instead=%s",
+                version.version_id,
+                violation["preferred"],
+                violation["used_instead"],
+            )
+            blocker_issues.append(
+                "工具路由违规："
+                f"{violation['preferred']} 未调用，但使用了 {'、'.join(violation['used_instead'][:4])}，这些工具不能替代主入口。"
+            )
+        if substitution_violations:
+            recommendations.append("将通用/补充工具保留为交叉验证或降级来源，核心结论必须来自 primary/specialized 工具。")
+
+        return {
+            "policy": policy,
+            "successful_tools": successful,
+            "missing_required_first_call_tools": missing_first,
+            "substitution_violations": substitution_violations,
+            "acceptance_results": acceptance_results,
+            "blocker_issues": self._dedupe(blocker_issues),
+            "warning_issues": self._dedupe(warning_issues),
+            "recommendations": self._dedupe(recommendations),
         }
 
     def _analyze_valuation_numeric_guardrail(self, spec: AgentSpec, runtime_result: Dict[str, Any], output_text: str) -> Dict[str, Any]:
@@ -9390,10 +10278,10 @@ class AgentWorkshopService:
             if not isinstance(raw_dimension, dict):
                 raise ValueError(f"runtime_review 缺少维度对象 {key}")
             score = self._require_score_field(raw_dimension, "score", f"runtime_review.{key}")
-            evidence = self._require_list_field(raw_dimension, "evidence", f"runtime_review.{key}")[:6]
-            problems = self._require_list_field(raw_dimension, "problems", f"runtime_review.{key}")[:6]
-            suggestions = self._require_list_field(raw_dimension, "suggestions", f"runtime_review.{key}")[:6]
-            notes = self._require_list_field(raw_dimension, "notes", f"runtime_review.{key}")[:6]
+            evidence = self._require_list_field(raw_dimension, "evidence", f"runtime_review.{key}", allow_missing=True)[:6]
+            problems = self._require_list_field(raw_dimension, "problems", f"runtime_review.{key}", allow_missing=True)[:6]
+            suggestions = self._require_list_field(raw_dimension, "suggestions", f"runtime_review.{key}", allow_missing=True)[:6]
+            notes = self._require_list_field(raw_dimension, "notes", f"runtime_review.{key}", allow_missing=True)[:6]
             judgement = self._require_string_field(raw_dimension, "judgement", f"runtime_review.{key}")
 
             normalized_dimensions[key] = {
@@ -9412,8 +10300,8 @@ class AgentWorkshopService:
             "summary": self._require_string_field(data, "summary", "runtime_review"),
             "scores": normalized_scores,
             "dimensions": normalized_dimensions,
-            "issues": self._dedupe([*self._require_list_field(data, "issues", "runtime_review"), *all_issues]),
-            "recommendations": self._dedupe([*self._require_list_field(data, "recommendations", "runtime_review"), *all_recommendations]),
+            "issues": self._dedupe([*self._require_list_field(data, "issues", "runtime_review", allow_missing=True), *all_issues]),
+            "recommendations": self._dedupe([*self._require_list_field(data, "recommendations", "runtime_review", allow_missing=True), *all_recommendations]),
             "raw_response": raw_content,
         }
 

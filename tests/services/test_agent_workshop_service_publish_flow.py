@@ -27,7 +27,9 @@ from app.services.agent_workshop_service import (
     SPEC_COLLECTION,
     VERSION_COLLECTION,
 )
+from app.services.capability_index_service import CapabilityIndexService
 from core.memory.models import MemoryScope
+from core.tools import get_tool_registry
 
 
 class _FakeCursor:
@@ -1967,6 +1969,188 @@ async def test_create_prompt_template_binds_required_tools_with_constraints(monk
     assert "任何未出现在当前 required_tools 中的工具，都视为本次未绑定能力" in constraints
 
 
+def test_tool_selection_policy_marks_primary_and_fallback_roles():
+    svc = AgentWorkshopService(_FakeDb({}))
+    spec = _build_spec()
+    spec.name = "财报风险信号识别 Agent"
+    spec.primary_goal = "识别商誉、应收、现金流和财务健康风险"
+    spec.responsibilities = ["输出财务风险信号清单"]
+
+    policy = svc._build_tool_selection_policy(
+        spec,
+        [
+            "get_financial_risk_factors",
+            "get_cashflow_quality_trend_tool",
+            "get_cashflow_analysis",
+            "get_stock_fundamentals_unified",
+        ],
+    )
+
+    assert policy["primary_tools"] == ["get_financial_risk_factors"]
+    assert "get_cashflow_quality_trend_tool" in policy["specialized_tools"]
+    assert "get_cashflow_analysis" in policy["supporting_tools"]
+    assert "get_stock_fundamentals_unified" in policy["fallback_tools"]
+    assert policy["substitution_rules"][0]["preferred"] == "get_financial_risk_factors"
+
+
+def test_tool_selection_policy_consumes_generated_skill_role_metadata():
+    registry = get_tool_registry()
+    tool_id = "tmp_cashflow_quality_external_skill"
+    registry.register_external_skill(
+        tool_id=tool_id,
+        func=lambda **kwargs: {"ok": True},
+        display_name="现金流质量 External Skill",
+        description="结构化计算现金流质量指标",
+        category="external",
+        capability_tags=["cashflow_quality"],
+        tool_role_hint="specialized",
+        output_shape="structured_metrics",
+        preferred_for=["cashflow_quality_analysis"],
+    )
+    try:
+        svc = AgentWorkshopService(_FakeDb({}))
+        spec = _build_spec()
+        spec.name = "财报风险信号识别 Agent"
+        spec.primary_goal = "识别现金流和财务健康风险"
+
+        policy = svc._build_tool_selection_policy(
+            spec,
+            ["get_financial_risk_factors", tool_id, "get_cashflow_analysis"],
+        )
+
+        assert tool_id in policy["specialized_tools"]
+        assert "get_cashflow_analysis" in policy["supporting_tools"]
+        assert policy["primary_tools"] == ["get_financial_risk_factors"]
+    finally:
+        registry.unregister(tool_id)
+
+
+@pytest.mark.asyncio
+async def test_capability_index_merges_external_skill_role_metadata():
+    registry = get_tool_registry()
+    tool_id = "tmp_external_financial_health_skill"
+    registry.register_external_skill(
+        tool_id=tool_id,
+        func=lambda **kwargs: {"ok": True},
+        display_name="财务健康 External Skill",
+        description="结构化计算资产负债率和流动比率",
+        category="external",
+    )
+    try:
+        fake_db = _FakeDb({
+            "external_skills": _FakeCollection([
+                {
+                    "tool_id": tool_id,
+                    "display_name": "财务健康 External Skill",
+                    "description": "结构化计算资产负债率和流动比率",
+                    "status": "active",
+                    "category": "external",
+                    "metadata": {
+                        "capability_tags": ["financial_health"],
+                        "tool_role_hint": "specialized",
+                        "output_shape": "structured_metrics",
+                        "preferred_for": ["financial_health_analysis"],
+                    },
+                }
+            ]),
+        })
+        service = CapabilityIndexService(fake_db)
+        documents = service._build_registry_documents()
+
+        await service._merge_external_skills_documents(documents)
+
+        doc = documents[tool_id]
+        assert doc.tool_role_hint == "specialized"
+        assert doc.output_shape == "structured_metrics"
+        assert "financial_health" in doc.capability_tags
+        assert "financial_health_analysis" in doc.preferred_for
+        assert "tool_role_hint: specialized" in doc.retrieval_text
+    finally:
+        registry.unregister(tool_id)
+
+
+def test_execution_review_blocks_generic_tool_substituting_primary_tool():
+    svc = AgentWorkshopService(_FakeDb({}))
+    spec = _build_spec()
+    spec.name = "财报风险信号识别 Agent"
+    spec.primary_goal = "识别商誉、应收、现金流和财务健康风险"
+    spec.outputs = ["risk_report"]
+    version = _build_version(AgentVersionStatus.TESTING, "spec_financial_risk_signal_v1", 1)
+    version.required_tools = [
+        "get_financial_risk_factors",
+        "get_cashflow_analysis",
+        "get_stock_fundamentals_unified",
+    ]
+    version.evaluation_policy = {
+        "tool_selection_policy": svc._build_tool_selection_policy(spec, version.required_tools)
+    }
+
+    review = svc._evaluate_execution_plan_review(
+        version,
+        spec,
+        {
+            "debug_prompt": {
+                "tool_trace": [
+                    {"tool_name": "get_cashflow_analysis", "success": True},
+                    {"tool_name": "get_stock_fundamentals_unified", "success": True},
+                ]
+            },
+            "output_text": "现金流和基本面整体低风险。",
+            "output_payload": {"risk_report": "现金流和基本面整体低风险。"},
+        },
+        "现金流和基本面整体低风险。",
+        {"matched": ["risk_report"], "missing": [], "score": 1.0},
+        {"matched": ["风险"], "missing": [], "notes": [], "score": 1.0},
+        {"violation": False, "penalty": 0.0, "matched": [], "missing": [], "notes": []},
+    )
+
+    assert "get_financial_risk_factors" in review["tool_routing_review"]["missing_required_first_call_tools"]
+    assert review["tool_routing_review"]["substitution_violations"]
+    assert any("工具路由违规" in issue for issue in review["blocker_issues"])
+
+
+@pytest.mark.asyncio
+async def test_create_prompt_template_includes_tool_selection_policy(monkeypatch):
+    spec = _build_spec()
+    spec.name = "财报风险信号识别 Agent"
+    spec.primary_goal = "识别商誉、应收、现金流和财务健康风险"
+    spec.responsibilities = ["输出财务风险信号清单"]
+    fake_db = _FakeDb({
+        "prompt_templates": _FakeCollection([]),
+        "template_history": _FakeCollection([]),
+    })
+    svc = AgentWorkshopService(fake_db)
+    captured = {}
+
+    async def _fake_create_template(_self, _payload):
+        captured["payload"] = _payload
+        return SimpleNamespace(id="tpl_policy_001", template_name=_payload.template_name, status=_payload.status)
+
+    monkeypatch.setattr(
+        "app.services.agent_workshop_service.PromptTemplateService.create_template",
+        _fake_create_template,
+    )
+
+    await svc._create_prompt_template(
+        "spec_financial_risk_signal_v1",
+        spec,
+        [
+            "get_financial_risk_factors",
+            "get_cashflow_quality_trend_tool",
+            "get_cashflow_analysis",
+            "get_stock_fundamentals_unified",
+        ],
+    )
+
+    tool_guidance = captured["payload"].content.tool_guidance
+
+    assert "工具路由策略" in tool_guidance
+    assert "主入口工具，必须优先用于核心任务：get_financial_risk_factors" in tool_guidance
+    assert "补充/交叉验证工具，不得替代主入口：get_cashflow_analysis" in tool_guidance
+    assert "降级工具，仅在主工具无数据或不可用时使用：get_stock_fundamentals_unified" in tool_guidance
+    assert "get_financial_risk_factors 不得被 get_cashflow_analysis" in tool_guidance
+
+
 @pytest.mark.asyncio
 async def test_create_prompt_template_includes_section_level_numeric_traceability_rules(monkeypatch):
     spec = _build_spec()
@@ -2134,6 +2318,57 @@ async def test_build_execution_validation_plan_keeps_all_required_tools_visible(
         "get_quality_factor_bundle_tool",
         "analyze_a_share_dupont",
     ]
+
+
+@pytest.mark.asyncio
+async def test_builtin_standard_financial_tools_resolve_legacy_blocking_gaps():
+    svc = AgentWorkshopService(_FakeDb({}))
+    gap_report = AgentWorkshopGapAnalysis(
+        blocking_gaps=[
+            "缺少历史财务指标时间序列数据获取能力，导致盈利稳定性、现金流质量的长期趋势分析与波动性量化缺乏数据基础",
+            "缺少历史PE/PB分位数计算能力（规格已明确标注为信息缺口，并在报告中降级处理）",
+            "cash_flow_quality_metrics_tool：现金流质量指标自动计算：经营现金流/净利润、自由现金流/营收、经营现金流/负债等关键比率",
+            "financial_health_metrics_tool：财务健康指标自动计算：资产负债率、流动比率、利息覆盖倍数、长期债务/FCF 等",
+        ]
+    )
+
+    unresolved = svc._find_unresolved_blocking_gaps(gap_report, [])
+
+    assert unresolved == []
+
+
+@pytest.mark.asyncio
+async def test_enforce_valuation_gap_report_removes_existing_financial_quality_gap_aliases():
+    svc = AgentWorkshopService(_FakeDb({}))
+    spec = _build_spec()
+    gap_report = AgentWorkshopGapAnalysis(
+        existing_tools=[],
+        suggested_tools=[],
+        suggested_capabilities=[],
+        blocking_gaps=[
+            "cash_flow_quality_metrics_tool：现金流质量指标自动计算：经营现金流/净利润、自由现金流/营收、经营现金流/负债等关键比率",
+            "financial_health_metrics_tool：财务健康指标自动计算：资产负债率、流动比率、利息覆盖倍数、长期债务/FCF 等",
+        ],
+    )
+    capability_snapshot = {
+        "builtin_data_tools": [
+            "get_cashflow_quality_trend_tool | 现金流质量趋势",
+            "get_debt_solvency_trend_tool | 偿债能力长期趋势",
+            "get_quality_factor_bundle_tool | 质量因子包",
+            "get_growth_cashflow_factor_bundle_tool | 成长现金流因子包",
+        ],
+        "builtin_analysis_tools": [],
+        "external_data_skills": [],
+        "external_analysis_skills": [],
+        "valuation_tools": [],
+        "valuation_skills": [],
+    }
+
+    result = svc._enforce_valuation_gap_report(spec, gap_report, capability_snapshot)
+
+    assert result.blocking_gaps == []
+    assert "get_cashflow_quality_trend_tool | 现金流质量趋势" in result.existing_tools
+    assert "get_debt_solvency_trend_tool | 偿债能力长期趋势" in result.existing_tools
 
 
 @pytest.mark.asyncio
@@ -2388,7 +2623,7 @@ async def test_publish_version_requires_passed_evaluation_and_writes_runtime_con
     assert saved_session["stage"] == AgentWorkshopStage.COMPLETED.value
     assert agent_config is not None
     assert agent_config["enabled"] is True
-    assert agent_config["prompt_template_type"] == "custom_agent"
+    assert agent_config["prompt_template_type"] == "universal"
     assert agent_config["prompt_template_name"] == target_version.version_id
     assert agent_config["metadata"]["source"] == "agent_workshop"
     assert agent_config["metadata"]["version_id"] == target_version.version_id
@@ -3134,3 +3369,169 @@ async def test_list_versions_includes_project_memory_and_last_evaluation_summari
     assert item["prompt_template_project_memory_binding_summary"]["matched_items"] == 2
     assert item["last_evaluation_summary"]["decision"] == "pass"
     assert item["last_evaluation_summary"]["project_memory_binding"]["review_status"] == "pass"
+
+
+@pytest.mark.asyncio
+async def test_gap_guard_works_without_session_rebuilds_gap_from_spec(monkeypatch):
+    """会话丢失时，_assert_no_unresolved_blocking_gaps_for_version 应直接基于 spec 重新评估 gap。"""
+    spec = _build_spec()
+    spec.primary_goal = "识别财报风险信号，包括商誉减值风险、应收账款异常和现金流质量"
+    spec.responsibilities = [
+        "分析商誉占比和减值趋势",
+        "识别应收账款异常增长",
+        "评估现金流质量变化",
+    ]
+    spec.inputs = ["stock_code", "analysis_date"]
+    spec.outputs = ["risk_report"]
+    spec.status = AgentSpecStatus.TESTING
+    spec.latest_session_id = "session_lost_001"  # 指向不存在的会话
+
+    version = _build_version(AgentVersionStatus.TESTING, "spec_risk_signal_v1", 1)
+    version.spec_id = spec.spec_id
+    version.published_from_session_id = "session_lost_001"
+    version.required_tools = [
+        "get_financial_risk_factors",
+        "get_cashflow_analysis",
+        "get_balance_sheet_analysis",
+    ]
+
+    fake_db = _FakeDb({
+        SPEC_COLLECTION: _FakeCollection([spec.model_dump(mode="json", by_alias=True)]),
+        SESSION_COLLECTION: _FakeCollection([]),  # 会话已丢失
+        VERSION_COLLECTION: _FakeCollection([version.model_dump(mode="json", by_alias=True)]),
+        EVALUATION_COLLECTION: _FakeCollection([]),
+    })
+    svc = AgentWorkshopService(fake_db)
+
+    gap_report = AgentWorkshopGapAnalysis(
+        existing_tools=[
+            "get_financial_risk_factors | 财务风险因子识别",
+            "get_cashflow_analysis | 现金流结构分析",
+            "get_balance_sheet_analysis | 资产负债表分析",
+        ],
+        blocking_gaps=[
+            "财报风险信号识别：需要 get_financial_risk_factors 工具",
+        ],
+        suggested_tools=["get_financial_risk_factors"],
+    )
+
+    async def _fake_build_gap_analysis(_spec):
+        return gap_report
+
+    monkeypatch.setattr(svc, "_build_gap_analysis", _fake_build_gap_analysis)
+
+    # 会话丢失但工具已正确绑定，应该不报错
+    await svc._assert_no_unresolved_blocking_gaps_for_version(version, spec, stage="evaluate")
+
+
+@pytest.mark.asyncio
+async def test_gap_guard_blocks_when_tools_not_matching_gap(monkeypatch):
+    """工具未覆盖 gap 时仍应正确阻断。"""
+    spec = _build_spec()
+    spec.primary_goal = "需要高级估值模型计算"
+    spec.status = AgentSpecStatus.TESTING
+
+    version = _build_version(AgentVersionStatus.TESTING, "spec_valuation_v1", 1)
+    version.spec_id = spec.spec_id
+    version.published_from_session_id = "session_lost_001"
+    version.required_tools = ["get_basic_data_tool"]  # 只有基础数据工具，不满足估值需求
+
+    fake_db = _FakeDb({
+        SPEC_COLLECTION: _FakeCollection([spec.model_dump(mode="json", by_alias=True)]),
+        SESSION_COLLECTION: _FakeCollection([]),
+        VERSION_COLLECTION: _FakeCollection([version.model_dump(mode="json", by_alias=True)]),
+        EVALUATION_COLLECTION: _FakeCollection([]),
+    })
+    svc = AgentWorkshopService(fake_db)
+
+    gap_report = AgentWorkshopGapAnalysis(
+        existing_tools=["get_basic_data_tool | 基础数据工具"],
+        blocking_gaps=["需要高级估值模型：缺少 get_advanced_valuation_model 工具"],
+        suggested_tools=["get_advanced_valuation_model"],
+    )
+
+    async def _fake_build_gap_analysis(_spec):
+        return gap_report
+
+    monkeypatch.setattr(svc, "_build_gap_analysis", _fake_build_gap_analysis)
+
+    with pytest.raises(ValueError, match="blocking gap"):
+        await svc._assert_no_unresolved_blocking_gaps_for_version(version, spec, stage="publish")
+
+
+def test_tool_covers_gap_cross_language_matches_chinese_gaps():
+    """跨语言匹配：纯中文 gap 应能被英文 tool_id 识别为覆盖。"""
+    svc = AgentWorkshopService(_FakeDb({}))
+    # get_financial_risk_factors 覆盖商誉、应收账款、现金流等风险因子
+    assert svc._tool_covers_gap_cross_language("get_financial_risk_factors", "商誉减值风险专项评估") is True
+    assert svc._tool_covers_gap_cross_language("get_financial_risk_factors", "应收账款异常检测") is True
+    assert svc._tool_covers_gap_cross_language("get_financial_risk_factors", "现金流恶化风险") is True
+    assert svc._tool_covers_gap_cross_language("get_financial_risk_factors", "财务风险因子识别") is True
+    # 不相关的 gap 不应匹配
+    assert svc._tool_covers_gap_cross_language("get_financial_risk_factors", "PE/PB 估值分位计算") is False
+
+
+def test_tool_covers_gap_cross_language_with_registry_metadata(monkeypatch):
+    """跨语言匹配应利用工具注册表的 description / capability_tags。"""
+    svc = AgentWorkshopService(_FakeDb({}))
+
+    class _FakeMeta:
+        description = "财务风险因子识别工具，覆盖商誉减值、应收账款质量、现金流趋势等风险指标采集与计算"
+        name = "财务风险因子引擎"
+        capability_tags = ["financial_risk", "goodwill_impairment", "accounts_receivable", "cashflow_quality"]
+        preferred_for = ["financial_risk_signal_detection"]
+
+    class _FakeRegistry:
+        def get(self, tool_id):
+            return _FakeMeta()
+
+    monkeypatch.setattr(
+        "app.services.agent_workshop_service.get_tool_registry",
+        lambda: _FakeRegistry(),
+    )
+    assert svc._tool_covers_gap_cross_language("get_financial_risk_factors", "商誉减值风险") is True
+    assert svc._tool_covers_gap_cross_language("get_financial_risk_factors", "应收账款异常") is True
+    assert svc._tool_covers_gap_cross_language("get_financial_risk_factors", "现金流趋势") is True
+
+
+@pytest.mark.asyncio
+async def test_gap_guard_allows_cross_language_matching_after_session_lost(monkeypatch):
+    """会话丢失后，跨语言匹配应能让纯中文 gap 被正确覆盖。"""
+    spec = _build_spec()
+    spec.primary_goal = "对单只A股进行财报风险信号识别，聚焦商誉减值、应收账款异常、现金流恶化三大核心风险维度"
+    spec.status = AgentSpecStatus.TESTING
+
+    version = _build_version(AgentVersionStatus.TESTING, "spec_financial_risk_v1", 1)
+    version.spec_id = spec.spec_id
+    version.published_from_session_id = "session_lost_cross_lang"
+    version.required_tools = ["get_financial_risk_factors", "get_cashflow_analysis", "get_balance_sheet_analysis"]
+
+    fake_db = _FakeDb({
+        SPEC_COLLECTION: _FakeCollection([spec.model_dump(mode="json", by_alias=True)]),
+        SESSION_COLLECTION: _FakeCollection([]),
+        VERSION_COLLECTION: _FakeCollection([version.model_dump(mode="json", by_alias=True)]),
+        EVALUATION_COLLECTION: _FakeCollection([]),
+    })
+    svc = AgentWorkshopService(fake_db)
+
+    # 纯中文 gap（不包含英文工具名），需要跨语言匹配
+    gap_report = AgentWorkshopGapAnalysis(
+        existing_tools=[
+            "get_financial_risk_factors | 财务风险因子识别",
+            "get_cashflow_analysis | 现金流分析",
+        ],
+        blocking_gaps=[
+            "商誉减值风险：无法自动计算商誉/净资产比例变化和减值历史趋势",
+            "应收账款异常：无法自动计算周转率、账龄异常和坏账覆盖率",
+            "现金流恶化风险：缺少现金流质量趋势自动判定",
+        ],
+        suggested_tools=["goodwill_impairment_risk_metrics", "accounts_receivable_quality_metrics"],
+    )
+
+    async def _fake_build_gap_analysis(_spec):
+        return gap_report
+
+    monkeypatch.setattr(svc, "_build_gap_analysis", _fake_build_gap_analysis)
+
+    # 不应抛出异常：跨语言匹配应识别 get_financial_risk_factors 覆盖了商誉和应收账款
+    await svc._assert_no_unresolved_blocking_gaps_for_version(version, spec, stage="evaluate")

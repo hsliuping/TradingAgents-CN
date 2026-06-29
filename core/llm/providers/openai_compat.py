@@ -143,6 +143,14 @@ class OpenAICompatAdapter(BaseAdapter):
         if max_tokens:
             request_kwargs["max_tokens"] = max_tokens
 
+        # response_format: 支持 json_object / json_schema 等（OpenAI 兼容协议）
+        response_format = kwargs.pop("response_format", self.config.response_format if hasattr(self.config, "response_format") else None)
+        if response_format:
+            request_kwargs["response_format"] = response_format
+
+        # 其余 kwargs 透传（如 top_p、seed 等）
+        request_kwargs.update(kwargs)
+
         if tools:
             request_kwargs["tools"] = self.convert_tools_to_provider_format(tools)
             if self.config.tool_choice:

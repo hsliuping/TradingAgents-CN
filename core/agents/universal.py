@@ -146,6 +146,37 @@ class UniversalAgent(BaseAgent):
             else:
                 user_prompt = self._ensure_runtime_context(user_prompt, state)
 
+            # 🔥 应用 prompt_overrides（允许测试时覆盖模板内容）
+            overrides = state.get("prompt_overrides") or {}
+            if isinstance(overrides, dict) and overrides:
+                override_sys = overrides.get("system_prompt") or overrides.get("system")
+                override_user = overrides.get("user_prompt") or overrides.get("user")
+                if override_sys:
+                    logger.info(f"[UniversalAgent:{self.agent_id}] prompt_overrides.system_prompt 已应用 "
+                                f"(原长度 {len(system_prompt)} → 新长度 {len(str(override_sys))})")
+                    system_prompt = str(override_sys)
+                if override_user:
+                    logger.info(f"[UniversalAgent:{self.agent_id}] prompt_overrides.user_prompt 已应用 "
+                                f"(原长度 {len(user_prompt)} → 新长度 {len(str(override_user))})")
+                    user_prompt = str(override_user)
+                # 也支持嵌套在 content 里的格式
+                content_overrides = overrides.get("content") or {}
+                if isinstance(content_overrides, dict):
+                    if content_overrides.get("system_prompt") or content_overrides.get("system"):
+                        system_prompt = str(content_overrides.get("system_prompt") or content_overrides.get("system"))
+                        logger.info(f"[UniversalAgent:{self.agent_id}] prompt_overrides.content.system_prompt 已应用")
+                    if content_overrides.get("user_prompt") or content_overrides.get("user"):
+                        user_prompt = str(content_overrides.get("user_prompt") or content_overrides.get("user"))
+                        logger.info(f"[UniversalAgent:{self.agent_id}] prompt_overrides.content.user_prompt 已应用")
+
+            execution_guidance = self._build_execution_plan_guidance(state)
+            if execution_guidance:
+                system_prompt = f"{system_prompt}\n\n{execution_guidance}"
+                logger.info(
+                    f"[UniversalAgent:{self.agent_id}] 已注入 Agent Workshop execution_plan 运行约束 "
+                    f"(长度 {len(execution_guidance)})"
+                )
+
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt),
@@ -202,6 +233,73 @@ class UniversalAgent(BaseAgent):
         except Exception as e:
             logger.error(f"[UniversalAgent:{self.agent_id}] ❌ 执行失败: {e}", exc_info=True)
             return {self._output_field: f"执行失败: {str(e)}"}
+
+    def _build_execution_plan_guidance(self, state: Dict[str, Any]) -> str:
+        """把 Agent Workshop execution_plan 注入运行时提示词。
+
+        build_version 生成的 execution_plan 是版本执行契约，不能只留在评估阶段。
+        Runtime 必须在第一次工具调用前看到这些步骤、工具和验收项，否则 LLM 可能只按
+        宽泛角色提示生成报告，跳过版本声明的关键工具。
+        """
+        plan = state.get("agent_workshop_execution_plan")
+        if not isinstance(plan, dict) or not plan:
+            return ""
+
+        lines = [
+            "## Agent Workshop Execution Plan（运行时强约束）",
+            "以下内容来自当前版本的 build_version 执行计划。你必须按它执行，而不是只按角色描述自由发挥。",
+        ]
+
+        sample_input = plan.get("sample_input") if isinstance(plan.get("sample_input"), dict) else {}
+        if sample_input:
+            sample_parts = []
+            for key in ("symbol", "market_type", "analysis_date", "task_description"):
+                value = sample_input.get(key)
+                if value:
+                    sample_parts.append(f"{key}={value}")
+            if sample_parts:
+                lines.append(f"- 默认样本/任务上下文：{'; '.join(sample_parts)}")
+
+        steps = plan.get("execution_steps") if isinstance(plan.get("execution_steps"), list) else []
+        required_tools = []
+        if steps:
+            lines.append("- 执行步骤：")
+            for index, step in enumerate(steps[:6], 1):
+                if not isinstance(step, dict):
+                    continue
+                title = str(step.get("title") or step.get("step_id") or f"step-{index}").strip()
+                objective = str(step.get("objective") or "").strip()
+                tools = [str(item).strip() for item in (step.get("suggested_tools") or []) if str(item).strip()]
+                expected = [str(item).strip() for item in (step.get("expected_evidence") or []) if str(item).strip()]
+                required_tools.extend(tools)
+                line = f"  {index}. {title}"
+                if objective:
+                    line += f"：{objective}"
+                lines.append(line)
+                if tools:
+                    lines.append(f"     - 本步应优先调用工具：{', '.join(tools)}")
+                if expected:
+                    lines.append(f"     - 本步必须形成证据：{'；'.join(expected[:4])}")
+
+        required_tools = list(dict.fromkeys(required_tools))
+        if required_tools:
+            lines.append(f"- 关键工具调用要求：如果本次任务涉及这些工具对应的核心能力，必须优先调用：{', '.join(required_tools)}。")
+            lines.append("- 如果某个关键工具无法调用或返回无数据，必须在报告中说明失败原因和降级边界，不能用其他泛化报告冒充该工具结果。")
+
+        checks = [str(item).strip() for item in (plan.get("acceptance_checks") or []) if str(item).strip()]
+        if checks:
+            lines.append("- 交付前自检项：")
+            for item in checks[:8]:
+                lines.append(f"  - {item}")
+
+        fallback_rules = [str(item).strip() for item in (plan.get("fallback_rules") or []) if str(item).strip()]
+        if fallback_rules:
+            lines.append("- 降级规则：")
+            for item in fallback_rules[:6]:
+                lines.append(f"  - {item}")
+
+        lines.append("- 严禁只写 Prompt 演示式报告；最终结论必须能对应到工具调用、上游结构化输入或明确的数据缺口说明。")
+        return "\n".join(lines)
 
     def _build_prompt_variables(self, state: Dict[str, Any]) -> Dict[str, Any]:
         ticker = state.get("ticker") or state.get("stock_symbol") or state.get("company_of_interest", "")

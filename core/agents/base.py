@@ -177,9 +177,9 @@ class BaseAgent(ABC):
         model = getattr(self.config, 'llm_model', None)
         
         if not model:
-            logger.warning(
-                f"⚠️ Agent {self.agent_id} 的 config 中没有 llm_model，无法创建 LLM 客户端。"
-                f"LLM 应该由分析流程（WorkflowBuilder）在创建 Agent 时传入，而不是从 Agent 配置中读取。"
+            logger.info(
+                f"Agent {self.agent_id} 的 config 中没有 llm_model，跳过内部 LLM 客户端创建；"
+                f"LLM 将由分析流程（WorkflowBuilder）在创建 Agent 时传入。"
             )
             return
         
@@ -742,7 +742,7 @@ class BaseAgent(ABC):
                     current_messages.append(HumanMessage(content=analysis_prompt))
                 else:
                     # 如果没有提供 analysis_prompt，添加默认的报告生成提示
-                    logger.warning(f"⚠️ [{self.agent_id}] 未提供 analysis_prompt，使用默认提示")
+                    logger.info(f"[{self.agent_id}] 未提供 analysis_prompt，使用默认报告生成提示")
                     default_prompt = """✅ 工具调用已完成，所有需要的数据都已获取。
 
 🚫 **严格禁止再次调用工具**

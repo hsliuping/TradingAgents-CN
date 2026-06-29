@@ -14,7 +14,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # 配置常量
-MAX_TEMPLATE_LENGTH = 65536  # 64KB
+MAX_TEMPLATE_LENGTH = 262144  # 256KB（已从 64KB 扩大，以容纳复杂 Agent 的完整提示词+工具文档）
 MAX_DRAFT_TEMPLATES_PER_CONFIG = 5
 MAX_ACTIVE_TEMPLATES_PER_CONFIG = 1
 
