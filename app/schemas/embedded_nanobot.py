@@ -16,6 +16,9 @@ class EmbeddedNanobotThreadContext(BaseModel):
     node_id: str | None = None
     preference_id: str | None = None
     debug_template_id: str | None = None
+    has_blocking_gaps: bool | None = None
+    evaluation_status: str | None = None
+    intent: dict[str, Any] | None = None
     symbol: str | None = None
     stock_symbol: str | None = None
     object_type: str | None = None

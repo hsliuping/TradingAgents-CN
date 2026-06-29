@@ -163,6 +163,7 @@ export interface AgentWorkshopSessionDetail {
   refusal_reason?: string
   gap_report?: AgentWorkshopGapAnalysis | null
   tooling_plan?: AgentWorkshopToolingPlan | null
+  builder_contracts?: Record<string, any>
   created_at: string
   updated_at: string
 }

@@ -625,6 +625,16 @@ class AgentWorkshopService:
         if source_thread_id:
             summary_lines.append(f"来源线程：{source_thread_id}")
 
+        if source_thread_id:
+            builder_contracts = {
+                **builder_contracts,
+                "nanobot_source": {
+                    "thread_id": source_thread_id,
+                    "session_key": source_thread_id,
+                    "channel": "agent_workshop",
+                },
+            }
+
         session = AgentWorkshopSession(
             session_id=session_id,
             spec_id=spec.spec_id,
@@ -961,11 +971,12 @@ class AgentWorkshopService:
 
         gap_report = session.gap_report
         if gap_report is None:
-            if existing_draft_version is not None or spec.source == "nanobot":
-                gap_report = AgentWorkshopGapAnalysis()
-            else:
-                gap_report = await self._build_gap_analysis(spec)
-                session.gap_report = gap_report
+            # 🔥 所有 spec（含 nanobot 来源）都运行真实 gap 分析，
+            #    不再用空 AgentWorkshopGapAnalysis() 跳过。
+            #    这保证了 auto-build 能真正发现 blocking gaps，
+            #    也让 FlowController 的 "analyze_gaps 已内部完成" 有事实基础。
+            gap_report = await self._build_gap_analysis(spec)
+            session.gap_report = gap_report
 
         if existing_draft_version is not None:
             version_number = existing_draft_version.version
@@ -9055,12 +9066,13 @@ class AgentWorkshopService:
                 runtime_result,
                 rule_details,
             )
+            worker_thread_suffix = uuid.uuid4().hex
             response = await service.chat(
                 user_message=prompt,
-                session_key=f"embedded:agent-workshop-eval:{version.version_id}:{task.task_id}",
-                user_id=user_id or None,
+                session_key=f"embedded:agent-workshop-worker:{version.version_id}:{task.task_id}:{worker_thread_suffix}",
+                user_id=None,
                 channel="agent_workshop_evaluation",
-                chat_id=f"agent-workshop-eval:{version.version_id}:{task.task_id}",
+                chat_id=f"agent-workshop-worker:{version.version_id}:{task.task_id}:{worker_thread_suffix}",
                 skill_names=["nanobot-agent-design"],
                 thread_context={
                     "spec_id": spec.spec_id,

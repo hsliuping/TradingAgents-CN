@@ -26,6 +26,7 @@ from core.embedded_nanobot.cron.service import CronService
 from core.embedded_nanobot.providers.unified import TradingAgentsLLMProvider
 from core.embedded_nanobot.session.manager import SessionManager
 from core.embedded_nanobot.intent_context import IntentContext
+from core.embedded_nanobot.agent_builder_flow import build_flow_guidance_block, derive_flow_phase
 from core.embedded_nanobot.utils.helpers import estimate_prompt_tokens, estimate_prompt_tokens_chain, sanitize_content_blocks, sanitize_tool_result_content, strip_think
 from core.tools.config import ToolCategory
 
@@ -672,9 +673,12 @@ class EmbeddedNanobotRuntime:
                 "create_or_update_agent_workshop_draft is only for syncing a newly confirmed candidate agent into a Draft. Do not pass an existing Workshop spec_id or version_id into that tool when the user is modifying a published or active version."
             )
         if "build_agent_workshop_version" in tool_names:
-            guidance_lines.append(
-                "After iteration or draft updates, use build_agent_workshop_version to produce the next testing candidate rather than describing version creation as a manual user-only step."
-            )
+            # 🔒 FlowController 活跃时跳过此 guidance：FlowController 在 BUILDING 阶段
+            #    明确禁止 build_version（已构建过），此静态 guidance 不应与 FlowController 冲突。
+            if not spec_id:
+                guidance_lines.append(
+                    "After iteration or draft updates, use build_agent_workshop_version to produce the next testing candidate rather than describing version creation as a manual user-only step."
+                )
         if "debug_agent_workshop_version" in tool_names:
             guidance_lines.append(
                 "Use debug_agent_workshop_version only for prompt/runtime diagnosis, output preview, or investigating why a run failed. It does not persist an official evaluation record, does not change publish readiness, and must not be described as completed acceptance testing."
@@ -709,7 +713,7 @@ class EmbeddedNanobotRuntime:
 
         if "resolve_agent_workshop_blocking_gaps" in tool_names:
             guidance_lines.append(
-                "When analyze_agent_workshop_gaps reports blocking_gaps, do not silently auto-generate skills. First explain each blocking gap to the user, then obtain explicit confirmation before calling resolve_agent_workshop_blocking_gaps."
+                "When blocking gaps are discovered (from any source: auto-build, analyze_agent_workshop_gaps, or gap report), do not silently auto-generate skills. First explain each blocking gap to the user, then obtain explicit confirmation before calling resolve_agent_workshop_blocking_gaps."
             )
             guidance_lines.append(
                 "For any gap that requires external data sources, third-party interfaces, or live web access, disclose the data source and its risk to the user and get confirmation before triggering generation."
@@ -720,9 +724,12 @@ class EmbeddedNanobotRuntime:
             guidance_lines.append(
                 "Resolve at most 3 gaps per resolve_agent_workshop_blocking_gaps call; if there are more blocking gaps, propose resolving them in batches."
             )
-            guidance_lines.append(
-                "After resolve_agent_workshop_blocking_gaps completes, re-run search_project_capabilities and then build_agent_workshop_version to bind the newly generated skills, rather than treating skill generation as the final step."
-            )
+            # 🔒 FlowController 活跃时跳过：FlowController 的 GAP_RESOLVING 阶段
+            #    transition 已定义 "补齐成功 → BUILDING"，无需此静态 guidance。
+            if not spec_id:
+                guidance_lines.append(
+                    "After resolve_agent_workshop_blocking_gaps completes, re-run search_project_capabilities and then build_agent_workshop_version to bind the newly generated skills, rather than treating skill generation as the final step."
+                )
 
         guidance_lines.extend([
             "Do not claim that an agent or version still exists, or claim that the current config is known, unless a live inspection tool has just confirmed that state.",
@@ -1494,6 +1501,33 @@ class EmbeddedNanobotRuntime:
                     spec_id_for_focus,
                 )
 
+        # 🔒 Agent Builder 流程约束块：基于状态机告诉 Nanobot 当前能做什么、不能做什么
+        flow_guidance = None
+        if spec_id_for_focus:
+            intent_for_flow = IntentContext.from_dict(clean_thread_context.get("intent") or {})
+            if not intent_for_flow.spec_id:
+                intent_for_flow.spec_id = spec_id_for_focus
+            if not intent_for_flow.spec_name:
+                intent_for_flow.spec_name = str(clean_thread_context.get("spec_name") or "").strip()
+            flow_guidance = build_flow_guidance_block(
+                intent_for_flow,
+                has_version=bool(clean_thread_context.get("version_id")),
+                evaluation_status=str(clean_thread_context.get("evaluation_status") or clean_thread_context.get("official_acceptance_decision") or ""),
+                has_blocking_gaps=bool(clean_thread_context.get("has_blocking_gaps")),
+            )
+            if flow_guidance:
+                derived_phase = derive_flow_phase(
+                    intent_for_flow,
+                    has_version=bool(clean_thread_context.get("version_id")),
+                    evaluation_status=str(clean_thread_context.get("evaluation_status") or clean_thread_context.get("official_acceptance_decision") or ""),
+                    has_blocking_gaps=bool(clean_thread_context.get("has_blocking_gaps")),
+                )
+                logger.info(
+                    "[EmbeddedNanobot][FlowCtrl] injecting flow constraints for spec_id=%s phase=%s",
+                    spec_id_for_focus,
+                    derived_phase.value,
+                )
+
         if on_progress:
             await self._invoke_callback(on_progress, f"已选择 {len(active_tools.tool_names)} 个可用工具（核心 {len(self.CORE_TOOL_NAMES)} + 动态 {len(tool_selection['selected_dynamic_tools'])}）")
             if tool_selection.get("agent_first", {}).get("enabled"):
@@ -1524,6 +1558,7 @@ class EmbeddedNanobotRuntime:
                 project_memory_guidance,
                 agent_builder_lesson_guidance,
                 spec_focus_guidance,
+                flow_guidance,
                 tool_selection.get("agent_first", {}).get("guidance") or None,
                 tool_selection.get("agent_builder_governance", {}).get("guidance") or None,
             ),

@@ -56,11 +56,35 @@ def _normalize_thread_context(value: dict[str, Any] | None) -> dict[str, Any]:
         "node_id": str(raw.get("node_id") or "").strip() or None,
         "preference_id": str(raw.get("preference_id") or "").strip() or None,
         "debug_template_id": str(raw.get("debug_template_id") or "").strip() or None,
+        "has_blocking_gaps": bool(raw.get("has_blocking_gaps")) if "has_blocking_gaps" in raw else None,
+        "evaluation_status": str(raw.get("evaluation_status") or raw.get("official_acceptance_decision") or "").strip() or None,
+        "intent": raw.get("intent") if isinstance(raw.get("intent"), dict) else None,
         "symbol": normalized_symbol,
         "object_type": normalized_object_type,
         "object_key": normalized_object_key,
     }
     return {key: item for key, item in normalized.items() if item is not None}
+
+
+def _is_internal_worker_channel(channel: str | None) -> bool:
+    clean = str(channel or "").strip().lower()
+    return clean in {"agent_workshop_evaluation", "agent_workshop_worker"}
+
+
+def _is_internal_worker_thread_id(thread_id: str | None) -> bool:
+    clean = str(thread_id or "").strip()
+    return (
+        clean.startswith("agent-workshop-eval:")
+        or clean.startswith("embedded:agent-workshop-eval:")
+        or clean.startswith("agent-workshop-worker:")
+        or clean.startswith("embedded:agent-workshop-worker:")
+    )
+
+
+def _is_internal_worker_thread(doc: dict[str, Any] | None) -> bool:
+    if not doc:
+        return False
+    return _is_internal_worker_channel(doc.get("channel")) or _is_internal_worker_thread_id(doc.get("thread_id")) or _is_internal_worker_thread_id(doc.get("session_key"))
 
 
 class EmbeddedNanobotService:
@@ -269,8 +293,10 @@ class EmbeddedNanobotService:
             query["archived"] = True
         else:
             query["archived"] = {"$ne": True}
-        cursor = self._db[EMBEDDED_NANOBOT_THREAD_COLLECTION].find(query).sort("updated_at", -1).limit(limit)
+        cursor = self._db[EMBEDDED_NANOBOT_THREAD_COLLECTION].find(query).sort("updated_at", -1).limit(limit * 3)
         async for doc in cursor:
+            if _is_internal_worker_thread(doc):
+                continue
             updated_at = doc.get("updated_at")
             created_at = doc.get("created_at")
             items.append({
@@ -286,6 +312,8 @@ class EmbeddedNanobotService:
                 "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else updated_at,
                 "thread_context": _normalize_thread_context(doc.get("thread_context") or {}),
             })
+            if len(items) >= limit:
+                break
         return items
 
     async def restore_thread(self, user_id: str, thread_id: str) -> dict[str, Any]:
@@ -328,6 +356,8 @@ class EmbeddedNanobotService:
             "thread_id": clean_thread_id,
         })
         if not thread:
+            return None, []
+        if _is_internal_worker_thread(thread):
             return None, []
 
         messages: list[dict[str, Any]] = []

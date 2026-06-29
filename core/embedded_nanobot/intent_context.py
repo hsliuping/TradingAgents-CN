@@ -22,6 +22,16 @@ from typing import Any, Dict, Optional, List
 logger = logging.getLogger(__name__)
 
 
+def _to_str_list(value: Any) -> List[str]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if item is not None]
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    return []
+
+
 class IntentStage(str, Enum):
     """对话阶段枚举。"""
     EXPLORING = "exploring"              # 用户在探索/描述需求
@@ -78,6 +88,21 @@ class IntentContext:
     agents_discussed: List[Dict[str, str]] = field(default_factory=list)
     # [{"spec_id": "...", "spec_name": "...", "last_action": "create/iterate/test"}]
 
+    # --- 最近一次评估证据（用于 ITERATING 阶段路由） ---
+    last_evaluation_decision: str = ""      # pass / revise / reject
+    last_evaluation_blockers: List[str] = field(default_factory=list)
+    # 从 evaluation report 的 publish_readiness.blockers 提取
+    last_evaluation_categories: List[str] = field(default_factory=list)
+    # 从 evidence_bundle.findings.category 提取，如 ["tool_usage", "output_coverage", "execution_plan"]
+
+    # --- 待确认选项（解决 LLM 跨轮指代消解问题） ---
+    pending_options: List[Dict[str, Any]] = field(default_factory=list)
+    # 当前等待用户选择的选项列表，例如：
+    # [{"index":1,"id":"plan_a","name":"A方案","description":"..."}, ...]
+    pending_question: str = ""              # 当前等待用户回答的问题
+    last_proposed_items: List[Dict[str, Any]] = field(default_factory=list)
+    # 最近提出的方案/工具/股票等，用于兜底指代消解
+
     # --- 时间戳 ---
     created_at: float = 0.0
     updated_at: float = 0.0
@@ -97,6 +122,20 @@ class IntentContext:
             intent_summary=str(data.get("intent_summary") or ""),
             active_subtask=str(data.get("active_subtask") or ""),
             next_action=str(data.get("next_action") or ""),
+            last_evaluation_decision=str(data.get("last_evaluation_decision") or ""),
+            last_evaluation_blockers=_to_str_list(data.get("last_evaluation_blockers")),
+            last_evaluation_categories=_to_str_list(data.get("last_evaluation_categories")),
+            pending_options=[
+                {str(k): v for k, v in opt.items() if k is not None}
+                for opt in (data.get("pending_options") or [])
+                if isinstance(opt, dict) and opt.get("index")
+            ],
+            pending_question=str(data.get("pending_question") or ""),
+            last_proposed_items=[
+                {str(k): v for k, v in item.items() if k is not None}
+                for item in (data.get("last_proposed_items") or [])
+                if isinstance(item, dict)
+            ],
             task_stack=[
                 {
                     "type": str(t.get("type") or ""),
@@ -143,6 +182,13 @@ class IntentContext:
         intent_summary: str = "",
         active_subtask: str = "",
         next_action: str = "",
+        evaluation_decision: str = "",
+        evaluation_blockers: Optional[List[str]] = None,
+        evaluation_categories: Optional[List[str]] = None,
+        pending_options: Optional[List[Dict[str, Any]]] = None,
+        pending_question: str = "",
+        proposed_items: Optional[List[Dict[str, Any]]] = None,
+        clear_pending_options: bool = False,
         task: Optional[Dict[str, str]] = None,
         linked_skill: Optional[Dict[str, str]] = None,
     ) -> None:
@@ -161,6 +207,32 @@ class IntentContext:
             self.active_subtask = active_subtask
         if next_action:
             self.next_action = next_action
+        if evaluation_decision:
+            self.last_evaluation_decision = evaluation_decision
+        if evaluation_blockers is not None:
+            self.last_evaluation_blockers = evaluation_blockers
+        if evaluation_categories is not None:
+            self.last_evaluation_categories = evaluation_categories
+
+        # 待确认选项管理
+        if clear_pending_options:
+            self.pending_options = []
+            self.pending_question = ""
+        if pending_options is not None:
+            self.pending_options = [
+                opt for opt in pending_options
+                if isinstance(opt, dict) and opt.get("index")
+            ]
+            # 同时保存到 last_proposed_items 兜底
+            self.last_proposed_items = self.pending_options[-8:]
+        if pending_question:
+            self.pending_question = pending_question
+        if proposed_items is not None:
+            self.last_proposed_items = [
+                item for item in proposed_items
+                if isinstance(item, dict)
+            ][-8:]
+
         if task:
             self.upsert_task(
                 task_type=task.get("type", ""),
@@ -340,7 +412,47 @@ class IntentContext:
             "- 如果当前正在为 Agent 解决 gap 或创建 Skill，完成 Skill 后必须回到父 Agent 继续 build/test/iterate，不要把 Skill 当成最终目标",
             "- 回答进度时必须按任务链说明：父 Agent 状态、当前 gap/skill 状态、下一步动作",
             "",
+            "### 选项确认与指代消解规则",
+            "",
+            "当你向用户展示多个互斥选项（方案、工具、操作路径）时：",
+            "1. 必须以编号列表呈现，并更新 IntentContext.pending_options",
+            "2. 每个选项必须有明确名称和 index（从 1 开始）",
+            "3. 你必须记录 pending_question：当前等待用户回答的问题",
+            "",
+            "当用户用以下方式回复时，必须先解析为具体选项再行动：",
+            "- 「第一个」→ index=1，「第二个」→ index=2，以此类推",
+            "- 「那个」「刚才说的」「就按这个」→ 最近提出的选项或 pending_options 最后一个",
+            "- 「A 方案」「B 方案」→ 匹配 option.id 或 option.name",
+            "",
+            "在调用任何工具前，必须先用一句话复述你的理解：",
+            "「你选择的是：{option.name}。我现在按这个执行。」",
+            "如果无法确定用户指的是哪个选项，必须向用户确认，不要猜测执行。",
+            "永远不要把用户的简短确认当成新话题。",
+            "",
         ])
+
+        # 当前等待确认的选项
+        if self.pending_options:
+            lines.extend([
+                "### 当前等待确认的选项",
+                f"问题：{self.pending_question or '请从以下选项中选择'}" if self.pending_question else "",
+            ])
+            for opt in self.pending_options[-6:]:
+                idx = opt.get("index", "?")
+                name = opt.get("name") or opt.get("id") or "未命名"
+                desc = opt.get("description") or ""
+                lines.append(f"  {idx}. {name}" + (f" — {desc}" if desc else ""))
+            lines.append("")
+
+        if self.last_proposed_items and not self.pending_options:
+            lines.extend([
+                "### 最近提出的方案/选项（供指代消解参考）",
+            ])
+            for item in self.last_proposed_items[-4:]:
+                name = item.get("name") or item.get("id") or "未命名"
+                desc = item.get("description") or ""
+                lines.append(f"  - {name}" + (f" — {desc}" if desc else ""))
+            lines.append("")
 
         # 多 Agent 讨论历史（如果存在多个）
         other_agents = [a for a in self.agents_discussed if a["spec_id"] != self.spec_id]
@@ -391,6 +503,13 @@ def update_intent_context_in_thread(
     intent_summary: str = "",
     active_subtask: str = "",
     next_action: str = "",
+    evaluation_decision: str = "",
+    evaluation_blockers: Optional[List[str]] = None,
+    evaluation_categories: Optional[List[str]] = None,
+    pending_options: Optional[List[Dict[str, Any]]] = None,
+    pending_question: str = "",
+    proposed_items: Optional[List[Dict[str, Any]]] = None,
+    clear_pending_options: bool = False,
     task: Optional[Dict[str, str]] = None,
     linked_skill: Optional[Dict[str, str]] = None,
 ) -> IntentContext:
@@ -410,6 +529,13 @@ def update_intent_context_in_thread(
             intent_summary=intent_summary or intent.intent_summary,
             active_subtask=active_subtask,
             next_action=next_action,
+            evaluation_decision=evaluation_decision,
+            evaluation_blockers=evaluation_blockers,
+            evaluation_categories=evaluation_categories,
+            pending_options=pending_options,
+            pending_question=pending_question,
+            proposed_items=proposed_items,
+            clear_pending_options=clear_pending_options,
             task=task,
             linked_skill=linked_skill,
         )
@@ -421,10 +547,38 @@ def update_intent_context_in_thread(
             ctx["spec_name"] = intent.spec_name
         set_current_assistant_thread_context(ctx)
         logger.info(
-            "[IntentContext][Update] action=%s stage=%s spec_id=%s spec_name=%s",
-            action, stage, spec_id, spec_name,
+            "[IntentContext][Update] action=%s stage=%s spec_id=%s spec_name=%s pending_options=%d",
+            action, stage, spec_id, spec_name, len(intent.pending_options),
         )
         return intent
     except Exception as exc:
         logger.warning("[IntentContext][Update] failed: %s", exc)
+        return IntentContext()
+
+
+def update_evaluation_evidence_in_thread(
+    *,
+    decision: str = "",
+    blockers: Optional[List[str]] = None,
+    categories: Optional[List[str]] = None,
+) -> IntentContext:
+    """更新最近一次评估证据到意图上下文。"""
+    try:
+        from core.tools.context import get_current_assistant_thread_context, set_current_assistant_thread_context
+        ctx = get_current_assistant_thread_context() or {}
+        intent = IntentContext.from_dict(ctx.get("intent"))
+        intent.update_intent(
+            evaluation_decision=decision,
+            evaluation_blockers=blockers,
+            evaluation_categories=categories,
+        )
+        ctx["intent"] = intent.to_dict()
+        set_current_assistant_thread_context(ctx)
+        logger.info(
+            "[IntentContext][EvalEvidence] decision=%s categories=%s blockers=%d",
+            decision, categories, len(blockers or []),
+        )
+        return intent
+    except Exception as exc:
+        logger.warning("[IntentContext][EvalEvidence] failed: %s", exc)
         return IntentContext()

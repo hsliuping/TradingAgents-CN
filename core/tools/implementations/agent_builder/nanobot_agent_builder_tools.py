@@ -77,12 +77,22 @@ def _auto_update_intent(
     intent_summary: str = "",
     active_subtask: str = "",
     next_action: str = "",
+    evaluation_decision: str = "",
+    evaluation_blockers: list[str] | None = None,
+    evaluation_categories: list[str] | None = None,
+    pending_options: list[dict[str, Any]] | None = None,
+    pending_question: str = "",
+    proposed_items: list[dict[str, Any]] | None = None,
+    clear_pending_options: bool = False,
     task: dict[str, str] | None = None,
     linked_skill: dict[str, str] | None = None,
 ) -> None:
     """自动更新当前线程的意图上下文（contextvar）。"""
     try:
-        from core.embedded_nanobot.intent_context import update_intent_context_in_thread
+        from core.embedded_nanobot.intent_context import (
+            update_intent_context_in_thread,
+            update_evaluation_evidence_in_thread,
+        )
         update_intent_context_in_thread(
             action=action,
             stage=stage,
@@ -91,9 +101,19 @@ def _auto_update_intent(
             intent_summary=intent_summary,
             active_subtask=active_subtask,
             next_action=next_action,
+            pending_options=pending_options,
+            pending_question=pending_question,
+            proposed_items=proposed_items,
+            clear_pending_options=clear_pending_options,
             task=task,
             linked_skill=linked_skill,
         )
+        if evaluation_decision or evaluation_blockers or evaluation_categories:
+            update_evaluation_evidence_in_thread(
+                decision=evaluation_decision,
+                blockers=evaluation_blockers,
+                categories=evaluation_categories,
+            )
     except Exception as exc:
         logger.debug("[IntentContext][AutoUpdate] skipped: %s", exc)
 
@@ -2729,6 +2749,29 @@ async def prepare_agent_generation_confirmation(
             report_contract=report_contract,
             overwrite_risk=overwrite_risk,
         )
+        # 更新意图上下文：这是一个待确认项
+        _auto_update_intent(
+            action="create_agent",
+            stage="confirmation_pending",
+            spec_id=clean_agent_id,
+            spec_name=clean_agent_name,
+            intent_summary=f"创建 Agent：{clean_responsibility}",
+            pending_options=[{
+                "index": 1,
+                "id": f"confirm_generate_{clean_agent_id}",
+                "name": f"确认生成 {clean_agent_name}",
+                "description": f"按确认稿生成 Agent {clean_agent_id}，职责：{clean_responsibility}",
+            }, {
+                "index": 2,
+                "id": "modify_requirement",
+                "name": "修改需求",
+                "description": "先调整职责、工具或输出字段后再生成",
+            }],
+            pending_question="是否确认按以上方案生成该 Agent？",
+            active_subtask="等待用户确认 Agent 创建方案",
+            next_action="用户确认后调用 generate_confirmed_candidate_agent",
+        )
+
         return _json_response({
             "status": "ok",
             "confirmation_required": True,
@@ -3774,7 +3817,7 @@ async def create_or_update_agent_workshop_draft(
     auto_register=True,
     timeout_tier="light",
     when_to_use="当 Agent 工坊 Draft 已经确认到可以进入缺口分析，且希望继续由 Nanobot 主导后续阶段时使用。",
-    when_not_to_use="不适合在还没有有效 session_id 或规格尚未成形时调用。",
+    when_not_to_use="不适合在还没有有效 session_id 或规格尚未成形时调用。也不适合在版本已通过 auto-build（如 generate_confirmed_candidate_agent）自动构建后调用，因为自动构建内部已执行缺口分析。如果当前处于 BUILDING 阶段，应跳过此工具，直接进入测试。",
     returns="返回 JSON 字符串，包含 session_id、spec_id 与 gap_report 摘要。",
     example="analyze_agent_workshop_gaps(session_id='session_123')",
     related_tools=["generate_agent_workshop_tooling_plan", "build_agent_workshop_version"],
@@ -3816,8 +3859,8 @@ async def analyze_agent_workshop_gaps(
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当缺口分析已经完成，下一步需要产出工具需求草案，且希望保持 Nanobot 为主导入口时使用。",
-    when_not_to_use="不适合在 session_id 无效或缺口分析前置状态异常时调用。",
+    when_to_use="仅在需要人工诊断或单独查看工具需求草案时使用。普通 Agent 生成主流程不需要直接调用，因为 build_agent_workshop_version 和 resolve_agent_workshop_blocking_gaps 内部会自动生成/使用 tooling_plan。",
+    when_not_to_use="不适合在 session_id 无效时调用；不适合在普通自动构建流程中作为必经步骤调用；不适合在 BUILDING/TESTING/PUBLISHING 阶段重复调用。",
     returns="返回 JSON 字符串，包含 session_id、spec_id 与 tooling_plan。",
     example="generate_agent_workshop_tooling_plan(session_id='session_123')",
     related_tools=["analyze_agent_workshop_gaps", "build_agent_workshop_version"],
@@ -3863,8 +3906,8 @@ async def generate_agent_workshop_tooling_plan(
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当规格、缺口与工具计划已经足够明确，希望继续由 Nanobot 生成版本草案时使用。",
-    when_not_to_use="不适合在 session_id 缺失或规格尚未准备好时调用。",
+    when_to_use="当 Agent Draft 已生成但尚未产生测试版本（READY_TO_BUILD 阶段）时使用。该工具会在内部完成真实 gap 分析、工具计划和版本草案生成。",
+    when_not_to_use="不适合在 session_id 缺失或规格尚未准备好时调用。也不适合在版本已构建（处于 BUILDING/TESTING 阶段）、已发布（PUBLISHED）后重复构建。如需改进已构建版本，应使用 iterate_agent_workshop_version。",
     returns="返回 JSON 字符串，包含 session_id、spec_id 和 version。",
     example="build_agent_workshop_version(session_id='session_123')",
     related_tools=["analyze_agent_workshop_gaps", "generate_agent_workshop_tooling_plan"],
@@ -4190,6 +4233,35 @@ async def run_agent_workshop_real_data_test(
         evaluation = evaluation_result.get("evaluation") if isinstance(evaluation_result, dict) else None
         evaluation_decision = _read_mapping_or_attr(evaluation, "decision", None)
         acceptance_passed = evaluation_decision == "pass"
+
+        # 🔥 把评估证据写回意图上下文，供 ITERATING 阶段做细粒度路由
+        publish_readiness = (_read_mapping_or_attr(evaluation, "publish_readiness", {}) or {}) if isinstance(evaluation, dict) else {}
+        if isinstance(publish_readiness, dict):
+            eval_blockers = [str(b).strip() for b in (publish_readiness.get("blockers") or []) if str(b).strip()]
+            eval_categories = []
+            details = _read_mapping_or_attr(evaluation, "details", {}) or {}
+            evidence_bundle = details.get("evidence_bundle") if isinstance(details, dict) else None
+            if isinstance(evidence_bundle, dict):
+                for finding in (evidence_bundle.get("findings") or []):
+                    if isinstance(finding, dict):
+                        cat = str(finding.get("category") or "").strip()
+                        if cat:
+                            eval_categories.append(cat)
+            if not eval_categories:
+                # fallback：从 blockers 文本推断 category
+                blocker_text = " ".join(eval_blockers).lower()
+                if "工具" in blocker_text or "tool" in blocker_text:
+                    eval_categories.append("tool_usage")
+                if "输出字段" in blocker_text or "output" in blocker_text:
+                    eval_categories.append("output_coverage")
+                if "执行计划" in blocker_text or "execution_plan" in blocker_text:
+                    eval_categories.append("execution_plan")
+            _auto_update_intent(
+                evaluation_decision=str(evaluation_decision or "").strip().lower(),
+                evaluation_blockers=eval_blockers,
+                evaluation_categories=_dedupe_string_list(eval_categories),
+            )
+
         stage_events.append(_build_tool_stage_event(
             "run_agent_workshop_real_data_test.evaluate_version",
             "ok",
@@ -4954,6 +5026,29 @@ async def generate_confirmed_candidate_agent(
             if workshop_session_id:
                 workshop_version_result = await _auto_build_workshop_version_result(workshop_session_id)
                 if workshop_version_result.get("status") != "ok":
+                    error_message = str(workshop_version_result.get("message") or workshop_version_result.get("error") or "")
+                    likely_gap_blocked = any(
+                        marker in error_message.lower()
+                        for marker in ("blocking", "gap", "缺口", "阻断")
+                    )
+                    _auto_update_intent(
+                        action="create_agent",
+                        stage="gap_resolving" if likely_gap_blocked else "ready_to_build",
+                        spec_id=clean_agent_id,
+                        spec_name=clean_agent_name,
+                        intent_summary=f"Agent「{clean_agent_name}」已生成，但自动构建未通过",
+                        next_action=(
+                            "解释自动构建发现的 blocking gap，并在用户确认后调用 resolve_agent_workshop_blocking_gaps"
+                            if likely_gap_blocked
+                            else "检查构建失败原因，修复后重新调用 build_agent_workshop_version"
+                        ),
+                        task={
+                            "type": "agent",
+                            "id": clean_agent_id,
+                            "name": clean_agent_name,
+                            "status": "gap_resolving" if likely_gap_blocked else "ready_to_build",
+                        },
+                    )
                     return _json_response({"status": "error", "stage": "workshop_version", "result": workshop_version_result})
                 built_version = workshop_version_result.get("version")
                 if isinstance(built_version, dict):
@@ -4992,18 +5087,25 @@ async def generate_confirmed_candidate_agent(
         }
 
         # 🔥 自动更新意图上下文为"生成完成"
+        #    auto-build 成功: building = 版本已构建，准备测试
+        #    未 auto-build: ready_to_build = Draft 已生成，待构建版本
+        built_workshop_version = bool((workshop_version_result or {}).get("version"))
         _auto_update_intent(
             action="create_agent",
-            stage="testing" if auto_build_workshop_version else "building",
+            stage="building" if built_workshop_version else "ready_to_build",
             spec_id=clean_agent_id,
             spec_name=clean_agent_name,
-            intent_summary=f"Agent「{clean_agent_name}」已生成，{'已自动构建测试版本' if auto_build_workshop_version else '待构建版本'}",
-            next_action="运行真数据测试，检查是否通过评估；如有 blocking gap，回到当前 Agent 的能力补齐链路",
+            intent_summary=f"Agent「{clean_agent_name}」已生成，{'已自动构建测试版本' if built_workshop_version else '待构建版本'}",
+            next_action=(
+                "运行真数据测试（run_agent_workshop_real_data_test），检查是否通过评估；如有 blocking gap，先进入缺口补齐"
+                if built_workshop_version
+                else "调用 build_agent_workshop_version 生成测试版本，然后再运行真数据测试"
+            ),
             task={
                 "type": "agent",
                 "id": clean_agent_id,
                 "name": clean_agent_name,
-                "status": "testing" if auto_build_workshop_version else "building",
+                "status": "building" if built_workshop_version else "ready_to_build",
             },
         )
 
@@ -5055,12 +5157,14 @@ async def generate_confirmed_candidate_agent(
     auto_register=True,
     timeout_tier="heavy",
     when_to_use=(
-        "当 analyze_agent_workshop_gaps 返回 blocking_gaps 不为空，且这些缺口确实是可复用能力时使用。"
+        "当发现 blocking_gaps（来源不限：auto-build 的 gap_report、analyze_agent_workshop_gaps 返回值、或评估反馈），"
+        "且这些缺口确实是可复用能力时使用。"
         "Nanobot 无需手动逐个调用 Skill 创建工具，一个调用即可完成缺口补全。"
     ),
     when_not_to_use=(
-        "不适合在缺口分析尚未完成时调用；"
-        "不适合一次性补全过多（>3 个）缺口，那种情况建议分批处理。"
+        "不适合在缺口尚未明确时调用（先确认 blocking_gaps 存在）；"
+        "不适合一次性补全过多（>3 个）缺口，那种情况建议分批处理；"
+        "不适合在没有 gap 的 TESTING 或 PUBLISHING 阶段调用。"
     ),
     returns="返回 JSON 字符串，包含每个缺口的处理结果、生成的 Skill 信息，以及后续建议。",
     example="resolve_agent_workshop_blocking_gaps(session_id='ws_abc123')",
@@ -5477,9 +5581,9 @@ async def resolve_agent_workshop_blocking_gaps(
                             for r in successful
                         ]))
                         + (
-                            f"。所有 Skill 已验证通过，Agent 版本已自动构建完成，可以在 Agent Studio 中查看并发布。"
+                            "。所有 Skill 已验证通过，Agent 版本已自动续建/同步完成；请继续运行真数据测试并以评估结果决定是否可发布。"
                             if auto_continue.get("status") == "completed"
-                            else "。请继续构建 Agent 版本以绑定这些 Skill。"
+                            else "。请继续构建 Agent 版本以绑定这些 Skill，然后再运行真数据测试。"
                         )
                         if successful
                         else "未能成功补齐任何缺口，请检查失败原因后重试。"
@@ -5494,6 +5598,34 @@ async def resolve_agent_workshop_blocking_gaps(
         )
 
         # 🔥 记录 Agent → Gap → Skill 的父子任务链，确保 Nanobot 完成 Skill 后回到父 Agent
+        # 同时把需要用户确认的 dedup candidate 写入 last_proposed_items，支持后续指代消解
+        dedup_items = [
+            {
+                "index": idx + 1,
+                "id": f"dedup_{r.get('gap_id') or idx}",
+                "name": f"缺口「{r.get('gap_description') or r.get('gap_id') or '?'}」的候选 Skill「{str((r.get('dedup_candidate') or {}).get('name') or '?')}」",
+                "description": (
+                    f"相似度 {round(float((r.get('dedup_candidate') or {}).get('score') or 0) * 100)}%；"
+                    + f"候选描述：{str((r.get('dedup_candidate') or {}).get('description') or '')[:200]}"
+                ),
+                "gap_id": str(r.get("gap_id") or ""),
+                "candidate_name": str((r.get("dedup_candidate") or {}).get("name") or ""),
+                "candidate_score": float((r.get("dedup_candidate") or {}).get("score") or 0),
+            }
+            for idx, r in enumerate(pending_confirmation)
+        ]
+        if dedup_items:
+            _auto_update_intent(
+                action="resolve_gap",
+                stage="gap_resolving",
+                spec_id=agent_spec_id,
+                spec_name=agent_name,
+                pending_question=f"Agent「{agent_name}」有 {len(dedup_items)} 个缺口发现相似候选 Skill，请确认对每个缺口是复用候选还是新建 Skill？",
+                proposed_items=dedup_items,
+                active_subtask="等待用户确认候选 Skill 复用/新建",
+                next_action="用户确认后再次调用 resolve_agent_workshop_blocking_gaps 并传入明确参数",
+            )
+
         for idx, gap_text in enumerate(capped_gaps):
             _auto_update_intent(
                 action="resolve_gap",
@@ -5511,9 +5643,17 @@ async def resolve_agent_workshop_blocking_gaps(
                 },
             )
         for item in successful:
+            gaps_all_successful = len(successful) == len(capped_gaps)
+            next_stage_after_skill = (
+                "building"
+                if auto_continue.get("status") == "completed"
+                else "ready_to_build"
+                if gaps_all_successful
+                else "gap_resolving"
+            )
             _auto_update_intent(
                 action="resolve_gap",
-                stage="building" if auto_continue.get("status") == "completed" else "gap_resolving",
+                stage=next_stage_after_skill,
                 spec_id=agent_spec_id,
                 spec_name=agent_name,
                 linked_skill={

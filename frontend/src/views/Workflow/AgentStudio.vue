@@ -1303,10 +1303,10 @@ const latestVersionSpecFallback = computed<AgentSpec>(() => displaySpec.value ||
 const hasWorkspaceContext = computed(() => Boolean(displaySpec.value || displayedMessages.value.length))
 const currentWorkshopSessionId = computed(() => String(nanobotDraftLink.value?.sessionId || currentSession.value?.session_id || '').trim())
 const displayedMessages = computed(() => {
-  if (nanobotMessages.value.length) {
-    return nanobotMessages.value
-  }
-  return currentSession.value?.messages || []
+  // 中间聊天区只展示用户与 Nanobot 的真实交互历史。
+  // Agent Workshop session.messages 是内部治理状态（Draft 同步、gap 分析、版本构建等），
+  // 不应回退展示在聊天区，否则会把内部提示词误认为用户对话历史。
+  return nanobotMessages.value
 })
 
 const loadingHint = computed(() => {
@@ -1876,6 +1876,26 @@ const loadSession = async (sessionId?: string, options?: { syncNanobotThread?: b
   }
 }
 
+const findNanobotThreadForSpec = (specId: string, sourceThreadId?: string) => {
+  const normalizedSpecId = String(specId || '').trim()
+  const normalizedSourceThreadId = String(sourceThreadId || '').trim()
+  return recentNanobotThreads.value.find(t => {
+    const ctx = (t as any).thread_context || {}
+    const channel = String((t as any).channel || '').trim()
+    const threadId = String((t as any).thread_id || '').trim()
+    const sessionKey = String((t as any).session_key || '').trim()
+    if (
+      channel === 'agent_workshop_evaluation'
+      || threadId.startsWith('agent-workshop-eval:')
+      || sessionKey.startsWith('embedded:agent-workshop-eval:')
+      || threadId.startsWith('agent-workshop-worker:')
+      || sessionKey.startsWith('embedded:agent-workshop-worker:')
+    ) return false
+    if (normalizedSourceThreadId && (threadId === normalizedSourceThreadId || sessionKey === normalizedSourceThreadId)) return true
+    return normalizedSpecId && String(ctx.spec_id || '').trim() === normalizedSpecId
+  }) || null
+}
+
 const openAgentItem = async (item: AgentSpec) => {
   // 保存当前 Agent 的聊天记录
   const currentSpecId = String(displaySpec.value?.spec_id || '').trim()
@@ -1903,10 +1923,14 @@ const openAgentItem = async (item: AgentSpec) => {
     currentNanobotSessionKey.value = ''
 
     await loadNanobotThreads()
-    const matchingThread = recentNanobotThreads.value.find(t => {
-      const ctx = (t as any).thread_context || {}
-      return String(ctx.spec_id || '').trim() === item.spec_id
-    })
+    let sourceThreadId = ''
+    if (item.latest_session_id) {
+      try {
+        const session = await agentWorkshopApi.getSession(item.latest_session_id)
+        sourceThreadId = String((session.builder_contracts as any)?.nanobot_source?.thread_id || '').trim()
+      } catch {}
+    }
+    const matchingThread = findNanobotThreadForSpec(item.spec_id, sourceThreadId)
     if (matchingThread) {
       await loadNanobotThreadMessages({ sessionKey: matchingThread.session_key || matchingThread.thread_id, silent: true })
     }
@@ -2470,6 +2494,18 @@ const loadNanobotThreadMessages = async (options?: {
       targetThread = recentNanobotThreads.value.find(item => item.thread_id === requestedThreadId || item.session_key === requestedThreadId) || null
     }
     if (!targetThread) return false
+    const channel = String((targetThread as any).channel || '').trim()
+    const threadId = String((targetThread as any).thread_id || '').trim()
+    const sessionKey = String((targetThread as any).session_key || '').trim()
+    if (
+      channel === 'agent_workshop_evaluation'
+      || threadId.startsWith('agent-workshop-eval:')
+      || sessionKey.startsWith('embedded:agent-workshop-eval:')
+      || threadId.startsWith('agent-workshop-worker:')
+      || sessionKey.startsWith('embedded:agent-workshop-worker:')
+    ) {
+      return false
+    }
 
     try {
       const result = await embeddedNanobotApi.getThreadMessages(targetThread.thread_id)
