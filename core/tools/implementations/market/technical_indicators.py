@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
     description="获取股票的各类技术指标（MACD, RSI, KDJ, BOLL等），支持A股/港股/美股",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    related_tools=["get_stock_market_data_unified", "get_stock_fundamentals_unified", "get_technical_factor_bundle_tool", "get_crossover_signals", "get_candlestick_patterns"],
 )
 def get_technical_indicators(
     ticker: Annotated[str, "股票代码（支持A股、港股、美股）"],

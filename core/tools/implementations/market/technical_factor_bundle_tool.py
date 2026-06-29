@@ -49,6 +49,9 @@ def _pick_numeric(doc: Dict[str, Any], *keys: str) -> Any:
     is_online=False,
     auto_register=True,
     timeout_tier="light",
+    capability_tags=["technical_indicators", "factor_bundle", "structured_data", "ma", "rsi", "kdj", "macd"],
+    tool_role_hint="supporting",
+    preferred_for=["技术指标批量获取", "结构化技术因子", "Agent 技术面输入"],
     data_source="stock_technical_indicators/market_quotes",
     when_to_use=(
         "当 Agent 需要趋势、动量、超买超卖、MACD/KDJ 信号这类技术面指标时使用。"

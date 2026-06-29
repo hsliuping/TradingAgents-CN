@@ -134,7 +134,12 @@ def get_china_market_overview_bridge(curr_date: str) -> str:
     name="技术指标报告 (Stockstats/Legacy)",
     description="生成特定技术指标的分析报告（旧版接口）",
     category="technical",
-    is_online=False
+    is_online=False,
+    when_to_use="仅用于兼容旧版工作流。新项目应使用 get_technical_indicators 或 get_technical_factor_bundle_tool。",
+    when_not_to_use="新项目/新分析不应使用此旧版接口；数据准确性可能不如新版工具。",
+    tool_role_hint="fallback",
+    related_tools=["get_technical_indicators", "get_technical_factor_bundle_tool"],
+    capability_tags=["legacy", "technical_analysis", "deprecated"],
 )
 def get_stockstats_indicators_report_bridge(symbol: str, indicator: str, curr_date: str, look_back_days: int = 30) -> str:
     return _invoke_legacy_tool(Toolkit.get_stockstats_indicators_report, symbol=symbol, indicator=indicator, curr_date=curr_date, look_back_days=look_back_days)
@@ -144,7 +149,12 @@ def get_stockstats_indicators_report_bridge(symbol: str, indicator: str, curr_da
     name="实时技术指标报告 (Stockstats/Online/Legacy)",
     description="生成特定技术指标的实时分析报告（旧版接口）",
     category="technical",
-    is_online=True
+    is_online=True,
+    when_to_use="仅用于兼容旧版工作流。新项目应使用 get_technical_indicators 或 get_technical_factor_bundle_tool。",
+    when_not_to_use="新项目/新分析不应使用此旧版接口。",
+    tool_role_hint="fallback",
+    related_tools=["get_technical_indicators", "get_technical_factor_bundle_tool"],
+    capability_tags=["legacy", "technical_analysis", "deprecated"],
 )
 def get_stockstats_indicators_report_online_bridge(symbol: str, indicator: str, curr_date: str, look_back_days: int = 30) -> str:
     return _invoke_legacy_tool(Toolkit.get_stockstats_indicators_report_online, symbol=symbol, indicator=indicator, curr_date=curr_date, look_back_days=look_back_days)

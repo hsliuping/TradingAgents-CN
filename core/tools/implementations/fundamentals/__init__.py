@@ -20,6 +20,17 @@ from .standard_financial_tools import (
     get_historical_valuation_percentile_tool,
     get_profitability_stability_metrics_tool,
 )
+from .bond_tools import (
+    get_bond_yield_calculation,
+    get_credit_spread_analysis,
+    get_bond_duration_convexity,
+)
+from .option_tools import (
+    get_black_scholes_price,
+    get_implied_volatility,
+    get_option_greeks,
+    get_option_strategy_pnl,
+)
 
 __all__ = [
     'get_stock_fundamentals_unified',
@@ -36,5 +47,12 @@ __all__ = [
     'get_profitability_stability_metrics_tool',
     'get_cashflow_quality_trend_tool',
     'get_historical_valuation_percentile_tool',
+    'get_bond_yield_calculation',
+    'get_credit_spread_analysis',
+    'get_bond_duration_convexity',
+    'get_black_scholes_price',
+    'get_implied_volatility',
+    'get_option_greeks',
+    'get_option_strategy_pnl',
 ]
 

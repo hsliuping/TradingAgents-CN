@@ -76,8 +76,12 @@ def _parse_positions(positions_json: str) -> list[dict]:
     auto_register=True,
     timeout_tier="light",
     when_to_use="当需要正式公告、监管函、处罚、减持、质押、诉讼、分红公告等事件时间线时使用。",
+    when_not_to_use="不适合实时新闻流监控（请使用 get_stock_news）；不适合非正式/社交媒体传闻；不适合定量事件研究（请使用 get_event_study）。",
+    capability_tags=["event", "announcement", "regulatory"],
+    tool_role_hint="specialized",
     returns="返回 JSON 字符串，包含 events、summary、coverage、warnings。",
     example="get_company_event_timeline_tool(symbol='600519', lookback_days=365)",
+    related_tools=["get_risk_event_flags_tool", "get_company_announcements_tool", "get_event_study", "get_stock_news"],
 )
 def get_company_event_timeline_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
@@ -154,8 +158,12 @@ def get_shareholder_return_metrics_tool(
     auto_register=True,
     timeout_tier="medium",
     when_to_use="当用户提供持仓并需要组合风险、集中度、行业暴露、VaR 或最大回撤时使用。",
+    when_not_to_use="不适合单只股票风险分析（请使用 get_single_stock_risk_profile_tool）；不适合没有持仓数据的场景。",
+    capability_tags=["portfolio", "risk_management", "var"],
+    tool_role_hint="specialized",
     returns="返回 JSON 字符串，包含 positions、metrics、exposure、return_series、coverage、warnings。",
     example="get_portfolio_risk_profile_tool(positions_json='[{\"symbol\":\"600519\",\"market_value\":100000}]')",
+    related_tools=["get_correlation_matrix", "get_single_stock_risk_profile_tool", "get_cointegration_test"],
 )
 def get_portfolio_risk_profile_tool(
     positions_json: Annotated[str, "持仓 JSON 数组，元素包含 symbol/code 与 market_value 或 quantity*price"],
@@ -181,8 +189,13 @@ def get_portfolio_risk_profile_tool(
     auto_register=True,
     timeout_tier="light",
     when_to_use="当需要技术指标历史序列、支撑压力、ATR/BOLL/OBV 或结构化技术面输入时使用。",
+    when_not_to_use="如果只需要当前值（非历史序列），应使用 get_technical_factor_bundle_tool；如果需要可读文本分析报告，应使用 get_technical_indicators。",
+    capability_tags=["technical_indicators", "historical_series", "structured_data", "ma", "macd", "rsi", "kdj", "boll", "atr", "obv"],
+    tool_role_hint="supporting",
+    preferred_for=["技术指标历史序列", "回测数据准备", "结构化技术面输入"],
     returns="返回 JSON 字符串，包含 records、latest、summary、coverage、warnings。",
     example="get_technical_indicator_series_tool(symbol='600519', start_date='2024-01-01', end_date='2024-12-31')",
+    related_tools=["get_technical_factor_bundle_tool", "get_technical_indicators", "get_adjusted_price_series_tool"],
 )
 def get_technical_indicator_series_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
@@ -651,8 +664,12 @@ def get_peer_relative_quality_tool(
     auto_register=True,
     timeout_tier="light",
     when_to_use="当需要公司公告、披露、财报、分红、减持、重组等事件线索时使用。",
+    when_not_to_use="不适合正式公告数据库查询（请使用 get_company_event_timeline_tool）；不适合一般性新闻分析（请使用 get_stock_news）。",
+    capability_tags=["event", "announcement", "disclosure"],
+    tool_role_hint="specialized",
     returns="返回 JSON 字符串，包含 announcements、coverage、warnings。",
     example="get_company_announcements_tool(symbol='600519', lookback_days=365)",
+    related_tools=["get_company_event_timeline_tool", "get_risk_event_flags_tool", "get_stock_news"],
 )
 def get_company_announcements_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
@@ -677,8 +694,12 @@ def get_company_announcements_tool(
     auto_register=True,
     timeout_tier="light",
     when_to_use="当需要快速判断近期是否存在重大风险事件线索时使用。",
+    when_not_to_use="不适合深度事件定量分析（请使用 get_event_study）；不适合正式公告查询（请使用 get_company_event_timeline_tool）；不适合一般性新闻浏览（请使用 get_stock_news）。",
+    capability_tags=["event", "risk", "regulatory"],
+    tool_role_hint="specialized",
     returns="返回 JSON 字符串，包含 hit_flags、flags、news_count、warnings。",
     example="get_risk_event_flags_tool(symbol='600519', lookback_days=180)",
+    related_tools=["get_company_event_timeline_tool", "get_company_announcements_tool", "get_event_study", "get_stock_news"],
 )
 def get_risk_event_flags_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],

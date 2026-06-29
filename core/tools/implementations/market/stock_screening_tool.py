@@ -88,6 +88,11 @@ def _build_compact_candidate_line(
     is_online=False,
     auto_register=True,
     timeout_tier="light",
+    capability_tags=["screening", "fundamentals", "technical"],
+    tool_role_hint="specialized",
+    when_to_use="当需要按多个财务、交易和技术指标组合条件批量筛选 A 股股票时使用。支持 50+ 字段和 > < >= <= == != between in not_in contains 等操作符。适合复杂自定义筛选条件。",
+    when_not_to_use="不适合单只股票深度分析；不适合简单单条件筛选（可考虑专门的筛选工具如 get_graham_screen 等预置策略）。",
+    related_tools=["get_multi_factor_screening", "get_graham_screen", "get_growth_stock_screen", "get_dividend_stock_screen", "get_turnaround_screen"],
 )
 async def screen_stocks_by_criteria(
     conditions_json: Annotated[
