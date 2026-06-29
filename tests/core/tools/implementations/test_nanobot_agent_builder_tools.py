@@ -118,15 +118,22 @@ class _FakeCollection:
                 return False
         return True
 
+    @staticmethod
+    def _apply_projection(item, projection):
+        if not projection:
+            return item
+        enabled_values = list(projection.values())
+        include_keys = {key for key, enabled in projection.items() if enabled}
+        exclude_keys = {key for key, enabled in projection.items() if not enabled}
+        if include_keys and not all(enabled == 0 for enabled in enabled_values):
+            return {key: item[key] for key in include_keys if key in item}
+        return {key: value for key, value in item.items() if key not in exclude_keys}
+
     def find(self, query=None, projection=None):
         filtered = []
         for item in self._items:
             if self._match(item, query):
-                if projection:
-                    include_keys = {key for key, enabled in projection.items() if enabled}
-                    filtered.append({key: item[key] for key in include_keys if key in item})
-                else:
-                    filtered.append(item)
+                filtered.append(self._apply_projection(item, projection))
         return _FakeCursor(filtered)
 
     async def find_one(self, query=None, projection=None, sort=None):
@@ -183,6 +190,30 @@ class _FakeCollection:
     async def delete_many(self, query):
         self._items = [item for item in self._items if not self._match(item, query)]
         return None
+
+
+class _NestedFakeCollection(_FakeCollection):
+    def _match(self, item, query):
+        query = query or {}
+        for key, expected in query.items():
+            current = item
+            for part in key.split("."):
+                if not isinstance(current, dict) or part not in current:
+                    current = None
+                    break
+                current = current.get(part)
+            if isinstance(expected, dict):
+                if "$in" in expected:
+                    if current not in expected["$in"]:
+                        return False
+                    continue
+                if "$ne" in expected:
+                    if current == expected["$ne"]:
+                        return False
+                    continue
+            if current != expected:
+                return False
+        return True
 
 
 class _FakeDb:
@@ -587,14 +618,14 @@ async def test_create_or_update_agent_workshop_draft_creates_visible_spec_and_se
     payload = json.loads(raw)
 
     assert payload["status"] == "ok"
-    assert payload["spec_id"] == "spec_nanobot_valuation_candidate_v1"
+    assert payload["spec_id"] == "agent_valuation_candidate"
     assert payload["source"] == "nanobot"
     spec_doc = fake_db["agent_specs"]._items[0]
     assert spec_doc["owner_user_id"] == "user_001"
     assert spec_doc["source"] == "nanobot"
     assert spec_doc["outputs"] == ["valuation_report"]
     session_doc = fake_db["agent_workshop_sessions"]._items[0]
-    assert session_doc["spec_id"] == "spec_nanobot_valuation_candidate_v1"
+    assert session_doc["spec_id"] == "agent_valuation_candidate"
     assert session_doc["user_id"] == "user_001"
 
 
@@ -1040,7 +1071,7 @@ async def test_resolve_agent_workshop_blocking_gaps_medium_similarity_needs_conf
 @pytest.mark.asyncio
 async def test_resolve_agent_workshop_blocking_gaps_medium_similarity_can_autocreate_when_allowed(monkeypatch):
     fake_db = _FakeDb({
-        "skill_creation_sessions": _FakeCollection([
+        "skill_creation_sessions": _NestedFakeCollection([
             {
                 "session_id": "skill_session_allowed_001",
                 "status": "completed",
@@ -1853,6 +1884,188 @@ async def test_worker_dead_letter_after_max_auto_retries(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_worker_reuses_active_skill_session_and_passes_rich_handoff(monkeypatch):
+    fake_db = _FakeDb({
+        "agent_workshop_gap_resolution_jobs": _FakeCollection([
+            {
+                "job_id": "gap_job_reuse_001",
+                "workshop_session_id": "ws_reuse_001",
+                "spec_id": "spec_reuse_001",
+                "user_id": "user_reuse_001",
+                "status": "pending",
+                "mode": "auto",
+                "idempotency_key": "idem_reuse_001",
+                "execution": {"runner": "worker_required", "state": "queued"},
+                "gaps": [
+                    {
+                        "gap_id": "gap_1",
+                        "description": "缺少行业对比能力",
+                        "status": "pending",
+                        "pipeline_stage": "queued",
+                        "pipeline_message": "等待 worker 执行",
+                    }
+                ],
+            }
+        ]),
+        "skill_creation_sessions": _NestedFakeCollection([
+            {
+                "session_id": "skill_active_reuse_001",
+                "status": "generating",
+                "pipeline_stage": "agentic_loop",
+                "handoff_context": {
+                    "source": "agent_studio_gap",
+                    "source_spec_id": "spec_reuse_001",
+                    "workshop_session_id": "ws_reuse_001",
+                    "gap_id": "gap_1",
+                    "target_capability": "缺少行业对比能力",
+                },
+            }
+        ]),
+    })
+
+    class _FakeWorkshopService:
+        def __init__(self, db):
+            self.db = db
+
+        async def _load_session(self, session_id):
+            assert session_id == "ws_reuse_001"
+            return types.SimpleNamespace(
+                spec_id="spec_reuse_001",
+                user_id="user_reuse_001",
+                current_spec_snapshot=types.SimpleNamespace(name="测试 Agent", primary_goal="补齐能力缺口"),
+            )
+
+    class _FakeCapabilityService:
+        def __init__(self, db):
+            self.db = db
+
+        async def search_capabilities(self, query, top_k, bindable_only, source_types):
+            del query, top_k, bindable_only, source_types
+            return []
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: fake_db,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.AgentWorkshopService",
+        _FakeWorkshopService,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.CapabilityIndexService",
+        _FakeCapabilityService,
+    )
+
+    payload = await process_agent_workshop_gap_resolution_jobs_once(limit=1)
+
+    assert payload["status"] == "ok"
+    gap_doc = fake_db["agent_workshop_gap_resolution_jobs"]._items[0]["gaps"][0]
+    assert gap_doc["status"] == "running"
+    assert gap_doc["skill_session_id"] == "skill_active_reuse_001"
+    assert "复用" in gap_doc["pipeline_message"]
+
+
+@pytest.mark.asyncio
+async def test_worker_passes_known_context_and_rich_handoff_to_new_skill(monkeypatch):
+    captured = {}
+    fake_db = _FakeDb({
+        "agent_workshop_gap_resolution_jobs": _FakeCollection([
+            {
+                "job_id": "gap_job_context_001",
+                "workshop_session_id": "ws_context_001",
+                "spec_id": "spec_context_001",
+                "user_id": "user_context_001",
+                "status": "pending",
+                "mode": "auto",
+                "idempotency_key": "idem_context_001",
+                "execution": {"runner": "worker_required", "state": "queued"},
+                "gaps": [
+                    {
+                        "gap_id": "gap_done",
+                        "description": "缺少估值数据能力",
+                        "status": "failed",
+                        "agentic_failure_summary": "pe_ttm 字段不存在",
+                        "agentic_verified_facts": ["valuation helper 返回 pb_mrq"],
+                    },
+                    {
+                        "gap_id": "gap_2",
+                        "description": "缺少行业对比能力",
+                        "status": "pending",
+                        "pipeline_stage": "queued",
+                        "pipeline_message": "等待 worker 执行",
+                    },
+                ],
+            }
+        ]),
+        "skill_creation_sessions": _FakeCollection([]),
+    })
+
+    class _FakeWorkshopService:
+        def __init__(self, db):
+            self.db = db
+
+        async def _load_session(self, session_id):
+            assert session_id == "ws_context_001"
+            return types.SimpleNamespace(
+                spec_id="spec_context_001",
+                user_id="user_context_001",
+                current_spec_snapshot=types.SimpleNamespace(name="测试 Agent", primary_goal="补齐能力缺口"),
+            )
+
+    class _FakeCapabilityService:
+        def __init__(self, db):
+            self.db = db
+
+        async def search_capabilities(self, query, top_k, bindable_only, source_types):
+            del query, top_k, bindable_only, source_types
+            return []
+
+    class _FakeSkillService:
+        def __init__(self, db):
+            self.db = db
+
+        async def start_session(self, *args, **kwargs):
+            captured["handoff_context"] = kwargs.get("handoff_context")
+            return {"session_id": "skill_session_context_001"}
+
+        async def respond_to_session(self, *args, **kwargs):
+            return {"status": "ok"}
+
+        async def preview_spec(self, *args, **kwargs):
+            return {"status": "ok"}
+
+        async def confirm_spec(self, *args, **kwargs):
+            return {"status": "ok"}
+
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.get_mongo_db",
+        lambda: fake_db,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.AgentWorkshopService",
+        _FakeWorkshopService,
+    )
+    monkeypatch.setattr(
+        "core.tools.implementations.agent_builder.nanobot_agent_builder_tools.CapabilityIndexService",
+        _FakeCapabilityService,
+    )
+    monkeypatch.setattr(
+        "app.services.skill_generation_service.SkillGenerationService",
+        _FakeSkillService,
+    )
+
+    payload = await process_agent_workshop_gap_resolution_jobs_once(limit=1)
+
+    assert payload["status"] == "ok"
+    handoff = captured["handoff_context"]
+    assert handoff["known_failure_summaries"]
+    assert handoff["known_verified_facts"] == ["valuation helper 返回 pb_mrq"]
+    assert handoff["gap_context"]
+    assert "缺少估值数据能力" in handoff["related_gaps"]
+    assert handoff["searched_capabilities"]
+
+
+@pytest.mark.asyncio
 async def test_create_or_update_universal_agent_prompt_template_writes_template(monkeypatch):
     fake_db = _FakeDb({
         "prompt_templates": _FakeCollection([]),
@@ -2093,7 +2306,7 @@ async def test_get_current_thread_effective_prompt_template_uses_thread_context(
 
     assert payload["status"] == "ok"
     assert payload["thread_id"] == "thread_001"
-    assert payload["resolution_input"]["agent_type"] == "custom_agent"
+    assert payload["resolution_input"]["agent_type"] == "universal"
     assert payload["resolution_input"]["agent_name"] == "spec_001_v2"
     assert payload["resolution_input"]["is_debug_mode"] is True
     assert payload["resolution_input"]["debug_template_id"] == "tpl_explicit_debug_from_thread_context"
@@ -2101,7 +2314,7 @@ async def test_get_current_thread_effective_prompt_template_uses_thread_context(
     assert payload["resolution_input"]["node_id"] == "prompt_node_from_thread_context"
     assert payload["resolution_input"]["preference_id"] == "growth"
     assert payload["template"]["template_id"] == "tpl_debug_thread_001"
-    assert captured["agent_type"] == "custom_agent"
+    assert captured["agent_type"] == "universal"
     assert captured["agent_name"] == "spec_001_v2"
     assert captured["workflow_id"] == "agent_workshop_debug_from_thread_context"
     assert captured["node_id"] == "prompt_node_from_thread_context"
@@ -2519,7 +2732,7 @@ async def test_generate_confirmed_candidate_agent_runs_one_shot_after_confirmati
     assert payload["governance_boundary"]["workshop_governance"]["official_acceptance_status"] == "not_started"
     assert "样例" in payload["governance_boundary"]["warnings"][1]
     saved_agent = fake_db["agent_configs"]._items[0]
-    assert saved_agent["metadata"]["spec_id"] == "spec_nanobot_valuation_candidate_v1"
+    assert saved_agent["metadata"]["spec_id"] == "agent_valuation_candidate"
     assert saved_agent["metadata"]["session_id"]
     assert saved_agent["metadata"]["linked_agent_workshop"] is True
     assert saved_agent["metadata"]["latest_workshop_version_id"] == "spec_nanobot_valuation_candidate_v1_v1"
@@ -2533,13 +2746,11 @@ def test_prepare_agent_requirement_intake_returns_follow_up_questions_for_vague_
 
     assert payload["status"] == "ok"
     assert payload["can_proceed_to_confirmation"] is False
-    assert "single_responsibility" in payload["missing_decisions"]
-    assert "output_shape" in payload["missing_decisions"]
-    assert "valuation_method_scope" in payload["missing_decisions"]
-    assert "test_strategy" in payload["missing_decisions"]
-    assert "全局铁律：所有 Agent 一律禁止输出任何交易建议" in payload["known_context"]["recommendation_policy"]
-    assert payload["follow_up_questions"]
-    assert payload["recommended_next_step"] == "ask_requirement_questions"
+    assert [item["id"] for item in payload["critical_questions"]] == ["single_responsibility"]
+    assert payload["proposed_plan"]["output_shape"]
+    assert payload["proposed_plan"]["valuation_method_scope"]
+    assert payload["proposed_plan"]["test_strategy"] == "auto_test"
+    assert payload["recommended_next_step"] == "present_proposed_plan_and_ask_critical_questions"
 
 
 def test_prepare_agent_requirement_intake_detects_style_preview_scope_questions():
@@ -2552,8 +2763,9 @@ def test_prepare_agent_requirement_intake_detects_style_preview_scope_questions(
 
     assert payload["status"] == "ok"
     assert payload["request_profile"]["output_preview_request"] is True
-    assert "preview_mode" in payload["missing_decisions"]
-    assert "report_section_scope" in payload["missing_decisions"]
+    assert [item["id"] for item in payload["critical_questions"]] == ["tool_preferences"]
+    assert payload["proposed_plan"]["preview_mode"] == "structure_only"
+    assert payload["proposed_plan"]["report_section_scope"]
     assert payload["can_proceed_to_confirmation"] is False
 
 
@@ -2586,9 +2798,10 @@ async def test_prepare_agent_generation_confirmation_blocks_stock_agent_when_int
     })
     payload = json.loads(raw)
 
-    assert payload["status"] == "needs_requirement_intake"
-    assert "valuation_method_scope" in payload["missing_intake_fields"]
-    assert "test_strategy" in payload["missing_intake_fields"]
+    assert payload["status"] == "ok"
+    assert payload["confirmation_brief"]["valuation_method_scope"]
+    assert payload["confirmation_brief"]["test_strategy"] == "auto_test"
+    assert payload["confirmation_required"] is True
 
 
 @pytest.mark.asyncio
@@ -2624,9 +2837,10 @@ async def test_prepare_agent_generation_confirmation_blocks_style_preview_when_s
     })
     payload = json.loads(raw)
 
-    assert payload["status"] == "needs_requirement_intake"
-    assert "preview_mode" in payload["missing_intake_fields"]
-    assert "report_section_scope" in payload["missing_intake_fields"]
+    assert payload["status"] == "ok"
+    assert payload["confirmation_brief"]["preview_mode"] == "structure_only"
+    assert payload["confirmation_brief"]["report_section_scope"]
+    assert payload["confirmation_brief"]["report_contract"]["content_scope"]
 
 
 @pytest.mark.asyncio

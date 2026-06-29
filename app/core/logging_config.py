@@ -54,6 +54,31 @@ class SimpleJsonFormatter(logging.Formatter):
         return json.dumps(obj, ensure_ascii=False)
 
 
+class ErrorLogNoiseFilter(logging.Filter):
+    """过滤 error.log 中的已知非致命第三方/可选能力噪声。"""
+
+    _NOISY_PATTERNS = (
+        "predates v3 hybrid search",
+        "BM25 keyword scoring will be disabled",
+        "Multiple active PostHog clients detected",
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        return not any(pattern in message for pattern in self._NOISY_PATTERNS)
+
+
+def _error_handler_filters() -> list[str]:
+    return ["request_context", "error_noise_filter"]
+
+
+def _build_common_filters() -> dict:
+    return {
+        "request_context": {"()": "app.core.logging_context.LoggingContextFilter"},
+        "error_noise_filter": {"()": "app.core.logging_config.ErrorLogNoiseFilter"},
+    }
+
+
 def _parse_size(size_str: str) -> int:
     """解析大小字符串（如 '10MB'）为字节数"""
     if isinstance(size_str, int):
@@ -254,7 +279,7 @@ def setup_logging(log_level: str = "INFO"):
                     "maxBytes": error_max_bytes,
                     "backupCount": error_backup_count,
                     "encoding": "utf-8",
-                    "filters": ["request_context"],
+                    "filters": _error_handler_filters(),
                 }
 
             # 构建logger handlers列表
@@ -289,9 +314,7 @@ def setup_logging(log_level: str = "INFO"):
             logging_config = {
                 "version": 1,
                 "disable_existing_loggers": False,
-                "filters": {
-                    "request_context": {"()": "app.core.logging_context.LoggingContextFilter"}
-                },
+                "filters": _build_common_filters(),
                 "formatters": {
                     "console_fmt": {
                         "format": fmt_console,
@@ -389,7 +412,7 @@ def setup_logging(log_level: str = "INFO"):
     logging_config = {
         "version": 1,
         "disable_existing_loggers": False,
-        "filters": {"request_context": {"()": "app.core.logging_context.LoggingContextFilter"}},
+        "filters": _build_common_filters(),
         "formatters": {
             "default": {
                 "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s trace=%(trace_id)s",
@@ -432,7 +455,7 @@ def setup_logging(log_level: str = "INFO"):
                 "class": handler_class,
                 "formatter": "detailed",
                 "level": "WARNING",
-                "filters": ["request_context"],
+                "filters": _error_handler_filters(),
                 "filename": "logs/error.log",
                 "maxBytes": 10485760,
                 "backupCount": 5,
