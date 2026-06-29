@@ -208,9 +208,10 @@ PHASE_TABLE: Dict[FlowPhase, PhaseRule] = {
 
     FlowPhase.CAPABILITY_CHECK: PhaseRule(
         phase=FlowPhase.CAPABILITY_CHECK,
-        description="能力检查：确认哪些工具和 Skill 可以满足需求",
+        description="能力盘点：确认哪些工具和 Skill 可以满足需求，并准备进入真实 gap 分析",
         allowed_tools=[
             _TOOL["search_capability"],
+            _TOOL["prepare_confirmation"],
             _TOOL["inspect_assets"],
             _TOOL["inspect_runtime"],
         ],
@@ -224,13 +225,14 @@ PHASE_TABLE: Dict[FlowPhase, PhaseRule] = {
         ],
         recommended_next_phase=FlowPhase.DRAFT_PREPARING,
         preconditions=["需求基本明确"],
-        notes=["向用户展示可用的工具和 Skill，说明哪些能力已有、哪些可能需要新建。",
-               "不要在此阶段做正式的缺口分析（那是 BUILDING 阶段的事）。"],
+        notes=["先用 search_project_capabilities 了解可用工具/Skill；需求足够明确时调用 prepare_agent_generation_confirmation。",
+               "prepare_agent_generation_confirmation 会在不创建 Workshop session 的前提下完成能力盘点、gap 分析和多方案确认稿。",
+               "不要在此阶段直接生成、构建、测试或发布。"],
     ),
 
     FlowPhase.DRAFT_PREPARING: PhaseRule(
         phase=FlowPhase.DRAFT_PREPARING,
-        description="准备确认稿：生成 Agent 配置摘要供用户审核",
+        description="准备确认稿：能力盘点 + gap 分析 + 多方案选择稿",
         allowed_tools=[
             _TOOL["prepare_confirmation"],
             _TOOL["search_capability"],
@@ -249,14 +251,14 @@ PHASE_TABLE: Dict[FlowPhase, PhaseRule] = {
         recommended_next_tool=_TOOL["prepare_confirmation"],
         recommended_next_phase=FlowPhase.CONFIRMATION_PENDING,
         preconditions=["能力检查已完成，工具候选已明确"],
-        notes=["prepare_agent_generation_confirmation 生成确认稿。",
-               "展示给用户后等待明确确认（如'确认'、'启动生成'）。",
-               "未确认前不得调用 generate_confirmed_candidate_agent。"],
+        notes=["prepare_agent_generation_confirmation 会生成 capability_inventory、gap_report 和 candidate_plans。",
+               "展示给用户后等待其选择 direct / complete / quick / narrow 中的具体方案，也允许用户质疑 gap 或修改需求。",
+               "未选择方案前不得调用 generate_confirmed_candidate_agent。"],
     ),
 
     FlowPhase.CONFIRMATION_PENDING: PhaseRule(
         phase=FlowPhase.CONFIRMATION_PENDING,
-        description="等待用户确认：确认稿已展示，等待用户批准",
+        description="等待方案选择：多方案确认稿已展示，等待用户选择/质疑 gap/修改需求",
         allowed_tools=[
             _TOOL["generate_confirmed"],
             _TOOL["prepare_confirmation"],
@@ -276,12 +278,14 @@ PHASE_TABLE: Dict[FlowPhase, PhaseRule] = {
         recommended_next_phase=FlowPhase.GENERATING,
         preconditions=["确认稿已展示", "用户明确表示了确认"],
         transitions=[
-            ("用户确认生成", FlowPhase.GENERATING),
-            ("用户要求修改需求", FlowPhase.CAPABILITY_CHECK),
+            ("用户选择 direct/complete/quick 并确认", FlowPhase.GENERATING),
+            ("用户选择 narrow/缩小需求范围", FlowPhase.EXPLORING),
+            ("用户质疑 gap 或要求重新盘点", FlowPhase.DRAFT_PREPARING),
+            ("用户要求修改需求", FlowPhase.EXPLORING),
         ],
-        notes=["此阶段只有一个合法操作：generate_confirmed_candidate_agent。",
-               "必须等用户说出'确认'/'好的'/'启动'等明确肯定词才能调用。",
-               "不要在用户确认前尝试生成。"],
+        notes=["此阶段允许用户选择方案、质疑 gap 分析或修改需求；不允许直接 build/test/publish。",
+               "只有用户明确选择 direct / complete / quick 并确认时，才调用 generate_confirmed_candidate_agent，并传入 selected_plan_id 与 acknowledged_gaps。",
+               "用户选择 narrow/缩小范围时回到 EXPLORING，不要生成或进入 CAPABILITY_CHECK。"],
     ),
 
     FlowPhase.GENERATING: PhaseRule(
@@ -301,11 +305,10 @@ PHASE_TABLE: Dict[FlowPhase, PhaseRule] = {
             _TOOL["prepare_confirmation"],
         ],
         recommended_next_phase=FlowPhase.BUILDING,
-        preconditions=["用户已确认"],
-        notes=["generate_confirmed_candidate_agent 内部会自动："
-               "创建 Runtime Config → Prompt 模板 → 工具绑定 → Workshop Draft → 自动构建版本。",
-               "自动构建内部已运行缺口检查，不要再单独调用 analyze_agent_workshop_gaps。",
-               "完成后直接进入 BUILDING 阶段。"],
+        preconditions=["用户已选择并确认 direct/complete/quick 方案"],
+        notes=["generate_confirmed_candidate_agent 会按 selected_plan_id 执行已确认方案。",
+               "direct/quick 且可构建时进入 BUILDING；complete 且有 acknowledged_gaps 时进入 GAP_RESOLVING；narrow 应回到 EXPLORING。",
+               "确认后不要再给用户制造‘又做一次缺口分析再阻塞’的感受。"],
     ),
 
     FlowPhase.READY_TO_BUILD: PhaseRule(
@@ -327,7 +330,7 @@ PHASE_TABLE: Dict[FlowPhase, PhaseRule] = {
         recommended_next_phase=FlowPhase.BUILDING,
         preconditions=["Agent Draft 已生成", "尚未生成测试版本"],
         notes=["此阶段应调用 build_agent_workshop_version 生成测试版本。",
-               "不要先调用 analyze_agent_workshop_gaps；build_version 内部会完成真实 gap 分析。",
+               "build_version 只允许放行已被用户 acknowledged 且 selected_plan_id 明确允许（complete/quick）的 blocking gaps；未确认缺口仍会阻塞。",
                "版本构建完成后进入 BUILDING，下一步做真数据测试。"],
     ),
 

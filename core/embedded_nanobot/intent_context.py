@@ -406,7 +406,10 @@ class IntentContext:
             lines.append(f"- 不要在 save_memory 中保存其他 Agent 的信息")
 
         lines.extend([
-            "- 用户说「确认」或「好的」时，如果当前阶段是 confirmation_pending，则执行生成",
+            "- 用户说「确认」或「好的」时，如果当前阶段是 confirmation_pending，必须先解析 pending_options 中用户选择的方案，再按 selected_plan_id 执行；不要把确认理解成无条件生成",
+            "- Agent 创建 v2 流程必须遵循：需求澄清 → 能力盘点+gap分析 → 展示 direct/complete/quick/narrow 候选方案 → 用户选择方案 → 按方案生成/补能力/缩小需求",
+            "- 用户选择 complete/quick 时，必须把该方案的 acknowledged_gaps 传给 generate_confirmed_candidate_agent；用户选择 narrow 时回到需求澄清，不生成 Agent",
+            "- 已在 prepare 阶段形成 gap_report 和 candidate_plans 后，不要在用户确认后重新启动一轮独立 gap 分析；应按用户确认方案执行，执行或测试失败后再迭代",
             "- 执行任何写操作（create/build/iterate/publish）前，必须确认 spec_id 与 intent context 一致",
             "- 如果一个 agent_id 不是 intent context 中的 spec_id，拒绝操作并提示用户",
             "- 如果当前正在为 Agent 解决 gap 或创建 Skill，完成 Skill 后必须回到父 Agent 继续 build/test/iterate，不要把 Skill 当成最终目标",

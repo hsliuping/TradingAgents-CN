@@ -988,7 +988,11 @@ class AgentWorkshopService:
         required_tools = self._select_required_tools(spec, gap_report)
         auto_resolved_gaps = await self._collect_auto_resolved_gaps_for_session(session.session_id)
         unresolved_blocking_gaps = self._find_unresolved_blocking_gaps(gap_report, auto_resolved_gaps)
-        if unresolved_blocking_gaps:
+        allowed_unresolved_blocking_gaps = self._validate_acknowledged_blocking_gaps_for_build(
+            session,
+            unresolved_blocking_gaps,
+        )
+        if unresolved_blocking_gaps and not allowed_unresolved_blocking_gaps:
             logger.warning(
                 "[AgentWorkshop][BuildVersion] blocked unresolved gaps session_id=%s spec_id=%s gaps=%s",
                 session.session_id,
@@ -998,6 +1002,14 @@ class AgentWorkshopService:
             raise ValueError(
                 "当前 Agent 仍存在未补齐的 blocking gaps，不能构建/评审为通过版本："
                 + "；".join(unresolved_blocking_gaps[:5])
+            )
+        if allowed_unresolved_blocking_gaps:
+            logger.info(
+                "[AgentWorkshop][BuildVersion] continue with acknowledged gaps session_id=%s spec_id=%s selected_plan_id=%s gaps=%s",
+                session.session_id,
+                spec.spec_id,
+                self._get_session_selected_plan_id(session),
+                allowed_unresolved_blocking_gaps,
             )
 
         logger.info(
@@ -1067,6 +1079,26 @@ class AgentWorkshopService:
         metadata = self._build_agent_metadata(version_id, spec, required_tools, runtime_contract=runtime_contract)
         metadata["tool_selection_policy"] = tool_selection_policy
         metadata["default_tools"] = self._ordered_tools_from_selection_policy(required_tools, tool_selection_policy)
+        selected_plan_id = self._get_session_selected_plan_id(session)
+        acknowledged_gaps = self._get_session_acknowledged_gaps(session)
+        capability_inventory = self._get_session_capability_inventory(session)
+        if selected_plan_id:
+            metadata["selected_plan_id"] = selected_plan_id
+            evaluation_policy["selected_plan_id"] = selected_plan_id
+            tooling_contract["selected_plan_id"] = selected_plan_id
+        if acknowledged_gaps:
+            metadata["acknowledged_gaps"] = acknowledged_gaps
+            evaluation_policy["acknowledged_gaps"] = acknowledged_gaps
+            tooling_contract["acknowledged_gaps"] = acknowledged_gaps
+        if capability_inventory:
+            metadata["capability_inventory"] = capability_inventory
+            evaluation_policy["capability_inventory"] = capability_inventory
+        if gap_report is not None:
+            metadata["gap_report"] = gap_report.model_dump(mode="json")
+        if allowed_unresolved_blocking_gaps:
+            metadata["unresolved_blocking_gaps"] = allowed_unresolved_blocking_gaps
+            evaluation_policy["unresolved_blocking_gaps"] = allowed_unresolved_blocking_gaps
+            tooling_contract["unresolved_blocking_gaps"] = allowed_unresolved_blocking_gaps
         if auto_resolved_gaps:
             metadata["auto_resolved_gaps"] = auto_resolved_gaps
             evaluation_policy["auto_resolved_gaps"] = auto_resolved_gaps
@@ -1183,6 +1215,29 @@ class AgentWorkshopService:
 
         auto_resolved_gaps = await self._collect_auto_resolved_gaps_for_session(session_id)
         unresolved = self._find_unresolved_blocking_gaps(gap_report, auto_resolved_gaps)
+
+        if session is not None:
+            metadata = dict(version.agent_metadata or {})
+            metadata_unresolved = self._dedupe([
+                str(item or "").strip()
+                for item in list(metadata.get("unresolved_blocking_gaps") or [])
+                if str(item or "").strip()
+            ])
+            if metadata_unresolved:
+                logger.warning(
+                    "[AgentWorkshop][GapGuard] blocked stage=%s version_id=%s unresolved_metadata=%s",
+                    stage,
+                    version.version_id,
+                    metadata_unresolved,
+                )
+                action = "评审" if stage == "evaluate" else "发布"
+                raise ValueError(
+                    f"当前 Agent 仍有 {len(metadata_unresolved)} 个已确认但未补齐的 blocking gap，不能{action}为通过："
+                    + "；".join(metadata_unresolved[:5])
+                )
+            allowed_acknowledged = self._validate_acknowledged_blocking_gaps_for_build(session, unresolved)
+            if allowed_acknowledged:
+                return
 
         # 如果版本已绑定 required_tools，再检查 required_tools 是否覆盖了 gap
         if unresolved and version.required_tools:
@@ -1400,6 +1455,45 @@ class AgentWorkshopService:
         if resolved_count + len(builtin_resolved_texts) >= len(blocking_gaps):
             return []
         return unresolved
+
+    def _get_session_selected_plan_id(self, session: AgentWorkshopSession) -> str:
+        contracts = session.builder_contracts if isinstance(session.builder_contracts, dict) else {}
+        return str(contracts.get("selected_plan_id") or contracts.get("selected_plan") or "").strip().lower()
+
+    def _get_session_acknowledged_gaps(self, session: AgentWorkshopSession) -> List[str]:
+        contracts = session.builder_contracts if isinstance(session.builder_contracts, dict) else {}
+        source = contracts.get("acknowledged_gaps")
+        if source is None:
+            source = contracts.get("acknowledged_blocking_gaps")
+        if isinstance(source, str):
+            source = [item.strip() for item in source.split(",")]
+        values = source if isinstance(source, list) else []
+        return self._dedupe([str(item or "").strip() for item in values if str(item or "").strip()])
+
+    def _get_session_capability_inventory(self, session: AgentWorkshopSession) -> Dict[str, Any]:
+        contracts = session.builder_contracts if isinstance(session.builder_contracts, dict) else {}
+        source = contracts.get("capability_inventory")
+        return dict(source) if isinstance(source, dict) else {}
+
+    def _validate_acknowledged_blocking_gaps_for_build(
+        self,
+        session: AgentWorkshopSession,
+        unresolved_blocking_gaps: List[str],
+    ) -> List[str]:
+        unresolved = self._normalize_unique_list(unresolved_blocking_gaps)
+        if not unresolved:
+            return []
+        selected_plan_id = self._get_session_selected_plan_id(session)
+        if selected_plan_id not in {"complete", "quick"}:
+            return []
+        acknowledged = self._get_session_acknowledged_gaps(session)
+        acknowledged_set = {item.strip() for item in acknowledged if item.strip()}
+        if not acknowledged_set:
+            return []
+        allowed = [gap for gap in unresolved if gap in acknowledged_set]
+        if len(allowed) != len(unresolved):
+            return []
+        return allowed
 
     async def _collect_auto_resolved_gaps_for_session(self, session_id: str) -> List[Dict[str, Any]]:
         """收集当前 Agent Studio 会话中已自动补齐/复用的 Skill，用于版本追溯。"""
@@ -2383,6 +2477,20 @@ class AgentWorkshopService:
             raise ValueError(f"版本 {version_id} 不存在")
 
         version = AgentVersion(**version_doc)
+        unresolved_metadata_gaps = self._dedupe([
+            str(item or "").strip()
+            for item in (
+                version.agent_metadata.get("unresolved_blocking_gaps")
+                if isinstance(version.agent_metadata, dict)
+                else []
+            )
+            if str(item or "").strip()
+        ])
+        if unresolved_metadata_gaps:
+            raise ValueError(
+                f"版本 {version_id} 仍有已确认但未补齐的 blocking gaps，不能发布："
+                + "；".join(unresolved_metadata_gaps[:5])
+            )
         if version.status != AgentVersionStatus.TESTING:
             raise ValueError(
                 f"版本 {version_id} 当前状态为 {version.status.value}，只有 testing 状态的版本可以发布"
@@ -6833,23 +6941,40 @@ class AgentWorkshopService:
             return "待补可调用能力"
         return f"{normalized_tool_id} 可调用能力"
 
-    async def _build_gap_analysis(self, spec: AgentSpec) -> AgentWorkshopGapAnalysis:
-        capability_snapshot = await self._collect_capability_snapshot(
-            self._build_valuation_requirement_text(spec),
-            top_k=16,
-        )
+    async def analyze_spec_gaps(
+        self,
+        spec: AgentSpec,
+        capability_inventory: Optional[Dict[str, Any]] = None,
+        *,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> AgentWorkshopGapAnalysis:
+        """基于 AgentSpec 做纯缺口分析，不创建/依赖 Workshop session。"""
+        capability_snapshot = capability_inventory
+        if capability_snapshot is None:
+            capability_snapshot = await self._collect_capability_snapshot(
+                self._build_valuation_requirement_text(spec),
+                top_k=16,
+            )
         try:
-            return await self._build_gap_analysis_with_llm(spec, capability_snapshot)
+            gap_report = await self._build_gap_analysis_with_llm(spec, capability_snapshot)
+            return gap_report
         except Exception as exc:
-            logger.warning("[AgentWorkshop] 生成缺口分析时 LLM 失败，直接暴露错误: %s", exc, exc_info=True)
+            logger.warning(
+                "[AgentWorkshop] 生成缺口分析时 LLM 失败，直接暴露错误: %s context=%s",
+                exc,
+                context or {},
+                exc_info=True,
+            )
             raw_response = exc.raw_response if isinstance(exc, AgentWorkshopLLMStageError) else ""
-            gap_report = self._build_gap_analysis_error_report(
+            return self._build_gap_analysis_error_report(
                 spec,
                 capability_snapshot,
                 error_message=str(exc),
                 raw_response=raw_response,
             )
-            return gap_report
+
+    async def _build_gap_analysis(self, spec: AgentSpec) -> AgentWorkshopGapAnalysis:
+        return await self.analyze_spec_gaps(spec)
 
     def _build_gap_analysis_error_report(
         self,

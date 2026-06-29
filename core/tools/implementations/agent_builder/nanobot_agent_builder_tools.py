@@ -14,6 +14,7 @@ from langchain_core.tools import tool
 from app.core.database import get_mongo_db
 from app.core.database import get_mongo_db_sync
 from app.models.capability_index import CapabilitySearchHit
+from app.models.agent_workshop import AgentSpec, AgentSpecIOField, AgentSpecStatus
 from app.models.prompt_template import TemplateContent
 from app.services.agent_workshop_service import AgentWorkshopService
 from core.agents.factory import AgentFactory
@@ -1987,6 +1988,177 @@ def _is_report_like_request(*values: str) -> bool:
     return any(_contains_any_keyword(value, _REPORT_KEYWORDS) for value in values)
 
 
+def _build_temp_agent_spec_for_confirmation(
+    *,
+    agent_id: str,
+    agent_name: str,
+    responsibility: str,
+    output_field: str,
+    desired_output_shape: str,
+    non_goals: list[str],
+    constraints: list[str],
+    valuation_method_scope: str,
+    tool_ids: list[str],
+) -> AgentSpec:
+    capability_requirements = []
+    for idx, text in enumerate([responsibility, desired_output_shape, valuation_method_scope], start=1):
+        clean_text = str(text or "").strip()
+        if not clean_text:
+            continue
+        capability_requirements.append({
+            "capability_key": f"requirement_{idx}",
+            "capability_name": clean_text[:40],
+            "capability_type": "orchestration" if idx == 1 else "output",
+            "description": clean_text,
+            "delivery_requirement": "tool-or-prompt",
+            "acceptance_criteria": ["按确认稿边界交付，不超出单一职责"],
+        })
+    preferred_methods = [item for item in [valuation_method_scope] if str(item or "").strip()]
+    if tool_ids:
+        preferred_methods.append("候选工具：" + "、".join(tool_ids))
+    return AgentSpec(
+        spec_id=agent_id,
+        name=agent_name,
+        domain="stock_analysis" if _is_stock_analysis_request(agent_name, responsibility, desired_output_shape) else "general",
+        primary_goal=responsibility,
+        responsibilities=[responsibility],
+        non_goals=non_goals,
+        inputs=[AgentSpecIOField(name="symbol", type="string", required=False, description="股票代码或用户输入标的")],
+        outputs=[AgentSpecIOField(name=str(output_field or "analysis_report").strip() or "analysis_report", type="string", description=desired_output_shape or "分析报告")],
+        constraints=constraints,
+        preferred_methods=preferred_methods,
+        capability_requirements=capability_requirements,
+        status=AgentSpecStatus.DRAFT,
+        source="nanobot_prepare",
+    )
+
+
+def _build_capability_inventory_from_hits(hits: list[Any]) -> dict[str, Any]:
+    formatted: list[dict[str, Any]] = []
+    available_tools: list[str] = []
+    available_skills: list[str] = []
+    missing_capabilities: list[str] = []
+    for hit in hits or []:
+        try:
+            item = _format_capability_hit(hit)
+        except Exception:
+            continue
+        formatted.append(item)
+        tool_id = str(item.get("registry_tool_id") or item.get("capability_id") or "").strip()
+        source_type = str(item.get("source_type") or "").strip().lower()
+        if tool_id and source_type in {"skill", "external_skill"}:
+            available_skills.append(tool_id)
+        elif tool_id:
+            available_tools.append(tool_id)
+    return {
+        "available_tools": _dedupe_string_list(available_tools),
+        "available_skills": _dedupe_string_list(available_skills),
+        "missing_capabilities": missing_capabilities,
+        "results": formatted,
+        "count": len(formatted),
+    }
+
+
+def _gap_report_to_dict(gap_report: Any) -> dict[str, Any]:
+    if hasattr(gap_report, "model_dump"):
+        return gap_report.model_dump(mode="json")
+    return dict(gap_report or {}) if isinstance(gap_report, dict) else {}
+
+
+def _gap_item_to_text(item: Any) -> str:
+    if isinstance(item, dict):
+        return str(item.get("description") or item.get("gap") or item.get("gap_id") or "").strip()
+    return str(item or "").strip()
+
+
+def _quick_plan_feasible(gap_report: dict[str, Any], resolved_tools: list[str]) -> bool:
+    blocking = [_gap_item_to_text(item) for item in gap_report.get("blocking_gaps") or []]
+    if not resolved_tools:
+        return False
+    hard_markers = ("外部数据", "新数据源", "实时", "爬取", "api", "接口", "必须补齐", "无法降级")
+    return not any(any(marker in gap for marker in hard_markers) for gap in blocking)
+
+
+def _build_candidate_plans(gap_report: dict[str, Any], resolved_tools: list[str]) -> tuple[list[dict[str, Any]], str]:
+    blocking_gaps = [_gap_item_to_text(item) for item in gap_report.get("blocking_gaps") or [] if _gap_item_to_text(item)]
+    blocking_count = len(blocking_gaps)
+    plans: list[dict[str, Any]] = []
+    label_ord = ord("A")
+
+    def add_plan(plan_id: str, name: str, description: str, recommended: bool, risk: str, required_new_skills: list[str] | None = None) -> None:
+        nonlocal label_ord
+        display_label = chr(label_ord)
+        label_ord += 1
+        plans.append({
+            "plan_id": plan_id,
+            "display_label": display_label,
+            "plan_name": name,
+            "name": f"{display_label}. {name}",
+            "description": description,
+            "required_new_skills": required_new_skills or [],
+            "acknowledged_gaps": blocking_gaps if plan_id in {"complete", "quick"} else [],
+            "estimated_effort": "低" if plan_id in {"direct", "quick"} else "中-高" if plan_id == "complete" else "待重新确认",
+            "risk": risk,
+            "recommended": recommended,
+        })
+
+    if blocking_count == 0:
+        add_plan("direct", "直接生成", "当前能力盘点未发现 blocking gap，可按现有工具直接生成并进入测试版本构建。", True, "低：仍需后续真数据测试验证。")
+        return plans, "direct"
+
+    suggested_skills = []
+    for item in list(gap_report.get("suggested_tools") or []) + list(gap_report.get("suggested_capabilities") or []):
+        if isinstance(item, dict):
+            tool_id = str(item.get("tool_id") or item.get("capability_id") or "").strip()
+            if tool_id:
+                suggested_skills.append(tool_id)
+    add_plan("complete", "完整方案", "先承认并补齐 blocking gaps，再生成完整 Agent，保留原需求目标和输出深度。", True, "需要补能力或生成 Skill，耗时更高但目标完整。", _dedupe_string_list(suggested_skills))
+    if _quick_plan_feasible(gap_report, resolved_tools):
+        add_plan("quick", "快速方案", "不补新能力，先用现有工具生成简化版；缺失字段标注信息缺口，不输出综合四色评级。", False, "覆盖范围受限，适合先试跑验证。")
+    if blocking_count >= 3:
+        add_plan("narrow", "缩小需求范围", "先回到需求重定义，缩小目标或输出范围后重新盘点能力。", False, "需要用户重新确认范围，不直接生成。")
+    return plans, "complete"
+
+
+def _plan_options_for_intent(candidate_plans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "index": idx + 1,
+            "id": str(plan.get("plan_id") or ""),
+            "name": str(plan.get("name") or plan.get("plan_name") or plan.get("plan_id") or ""),
+            "description": str(plan.get("description") or ""),
+            "display_label": str(plan.get("display_label") or ""),
+            "selected_plan_id": str(plan.get("plan_id") or ""),
+            "acknowledged_gaps": list(plan.get("acknowledged_gaps") or []),
+        }
+        for idx, plan in enumerate(candidate_plans)
+    ]
+
+
+def _quick_plan_constraint_text(acknowledged_gaps: list[str] | None = None) -> str:
+    gap_text = "；".join([str(item).strip() for item in acknowledged_gaps or [] if str(item).strip()])
+    suffix = f" 已知缺口：{gap_text}" if gap_text else ""
+    return (
+        "quick 方案约束：只允许使用现有已绑定工具直接返回可追溯指标；缺失字段必须标注为信息缺口；"
+        "禁止要求 LLM 自行计算关键审计/财务/估值指标；禁止自行打综合四色评级或用缺失数据拼凑评分。"
+        + suffix
+    )
+
+
+def _parse_acknowledged_gaps(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        return _dedupe_string_list([str(item or "").strip() for item in raw if str(item or "").strip()])
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return _dedupe_string_list([str(item or "").strip() for item in parsed if str(item or "").strip()])
+    except Exception:
+        pass
+    return _parse_string_list(text)
+
 def _humanize_preview_mode(mode: str) -> str:
     normalized = str(mode or "").strip().lower()
     if normalized in {"structure_skeleton", "skeleton", "outline", ""}:
@@ -2720,6 +2892,36 @@ async def prepare_agent_generation_confirmation(
             return _json_response({"status": "error", "message": f"以下工具未注册: {', '.join(missing_tools)}", "missing_tools": missing_tools})
 
         db = get_mongo_db()
+        capability_hits = []
+        try:
+            capability_hits = await CapabilityIndexService(db).search_capabilities(
+                query=" ".join([clean_agent_name, clean_responsibility, desired_output_shape, valuation_method_scope]).strip(),
+                top_k=16,
+                bindable_only=True,
+                source_types=["builtin_tool", "skill", "external_skill", "mcp_tool"],
+            )
+        except Exception as exc:
+            logger.warning("确认稿能力盘点搜索失败，继续使用 Workshop 内部快照: %s", exc)
+        capability_inventory = _build_capability_inventory_from_hits(capability_hits)
+        temp_spec = _build_temp_agent_spec_for_confirmation(
+            agent_id=clean_agent_id,
+            agent_name=clean_agent_name,
+            responsibility=clean_responsibility,
+            output_field=output_field,
+            desired_output_shape=desired_output_shape,
+            non_goals=resolved_non_goals,
+            constraints=[effective_recommendation_policy],
+            valuation_method_scope=valuation_method_scope,
+            tool_ids=resolved_tools,
+        )
+        gap_report_model = await AgentWorkshopService(db=db).analyze_spec_gaps(
+            temp_spec,
+            capability_inventory,
+            context={"stage": "prepare_agent_generation_confirmation", "agent_id": clean_agent_id},
+        )
+        gap_report = _gap_report_to_dict(gap_report_model)
+        candidate_plans, recommended_plan_id = _build_candidate_plans(gap_report, resolved_tools)
+        pending_question = "请选择要执行的生成方案（可回复第一个/选A/complete/quick/narrow），或指出你要质疑的 gap。"
         overwrite_risk = await _inspect_agent_overwrite_risk(db, clean_agent_id, status=status)
         report_contract = None
         if report_like_request:
@@ -2749,33 +2951,31 @@ async def prepare_agent_generation_confirmation(
             report_contract=report_contract,
             overwrite_risk=overwrite_risk,
         )
-        # 更新意图上下文：这是一个待确认项
+        # 更新意图上下文：这是一个待确认的方案选择项
+        plan_options = _plan_options_for_intent(candidate_plans)
         _auto_update_intent(
             action="create_agent",
             stage="confirmation_pending",
             spec_id=clean_agent_id,
             spec_name=clean_agent_name,
             intent_summary=f"创建 Agent：{clean_responsibility}",
-            pending_options=[{
-                "index": 1,
-                "id": f"confirm_generate_{clean_agent_id}",
-                "name": f"确认生成 {clean_agent_name}",
-                "description": f"按确认稿生成 Agent {clean_agent_id}，职责：{clean_responsibility}",
-            }, {
-                "index": 2,
-                "id": "modify_requirement",
-                "name": "修改需求",
-                "description": "先调整职责、工具或输出字段后再生成",
-            }],
-            pending_question="是否确认按以上方案生成该 Agent？",
-            active_subtask="等待用户确认 Agent 创建方案",
-            next_action="用户确认后调用 generate_confirmed_candidate_agent",
+            pending_options=plan_options,
+            proposed_items=plan_options,
+            pending_question=pending_question,
+            active_subtask="等待用户选择 Agent 生成方案",
+            next_action="用户选择方案后调用 generate_confirmed_candidate_agent，并传入 selected_plan_id/acknowledged_gaps",
         )
 
         return _json_response({
             "status": "ok",
             "confirmation_required": True,
             "ready_to_execute": True,
+            "confirmation_type": "plan_selection",
+            "capability_inventory": capability_inventory,
+            "gap_report": gap_report,
+            "candidate_plans": candidate_plans,
+            "recommended_plan_id": recommended_plan_id,
+            "pending_question": pending_question,
             "confirmation_brief": {
                 "target_responsibility": clean_responsibility,
                 "proposed_agent_id": clean_agent_id,
@@ -2783,6 +2983,12 @@ async def prepare_agent_generation_confirmation(
                 "desired_output_shape": desired_output_shape,
                 "output_field": output_field,
                 "chosen_build_path": "create_universal_agent",
+                "confirmation_type": "plan_selection",
+                "candidate_plans": candidate_plans,
+                "recommended_plan_id": recommended_plan_id,
+                "pending_question": pending_question,
+                "capability_inventory": capability_inventory,
+                "gap_report": gap_report,
                 "bound_tools": resolved_tools,
                 "default_tools": resolved_default_tools,
                 "non_goals": resolved_non_goals,
@@ -2809,7 +3015,7 @@ async def prepare_agent_generation_confirmation(
                     "确认估值方法边界和生成后测试方式是否准确",
                     "若存在覆盖风险，确认是否允许覆盖现有配置",
                 ],
-                "suggested_user_reply": f"确认生成 {clean_agent_id}；allow_overwrite={'yes' if overwrite_risk['requires_explicit_overwrite'] else 'no'}",
+                "suggested_user_reply": f"选择 {recommended_plan_id} 方案并确认生成 {clean_agent_id}；allow_overwrite={'yes' if overwrite_risk['requires_explicit_overwrite'] else 'no'}",
             },
         })
     except Exception as exc:
@@ -4917,6 +5123,10 @@ async def generate_confirmed_candidate_agent(
     auto_build_workshop_version: Annotated[bool, "若已同步到 Agent 工坊 Draft，是否自动生成一个可测试版本，默认 true"] = True,
     confirmed: Annotated[bool, "是否已拿到用户明确确认"] = False,
     allow_overwrite: Annotated[bool, "若存在覆盖风险，是否允许覆盖现有配置"] = False,
+    selected_plan_id: Annotated[str, "用户选择的方案 ID：direct/complete/quick/narrow；为空时兼容旧确认流程"] = "",
+    acknowledged_gaps: Annotated[str, "用户已知晓并接受的 blocking gaps，JSON 数组或逗号分隔；旧流程可为空"] = "",
+    capability_inventory_json: Annotated[str, "prepare 阶段能力盘点 JSON，可为空"] = "",
+    gap_report_json: Annotated[str, "prepare 阶段 gap_report JSON，可为空"] = "",
 ) -> str:
     """确认后一次性生成候选 Agent。"""
     try:
@@ -4930,6 +5140,36 @@ async def generate_confirmed_candidate_agent(
         clean_agent_name = str(agent_name or "").strip()
         clean_responsibility = str(target_responsibility or "").strip()
         clean_system_prompt = str(system_prompt or "").strip()
+        clean_selected_plan_id = str(selected_plan_id or "").strip().lower()
+        parsed_acknowledged_gaps = _parse_acknowledged_gaps(acknowledged_gaps)
+        capability_inventory = _parse_optional_json_object(capability_inventory_json, "capability_inventory_json")
+        gap_report = _parse_optional_json_object(gap_report_json, "gap_report_json")
+        if clean_selected_plan_id == "narrow":
+            _auto_update_intent(
+                action="create_agent",
+                stage="exploring",
+                spec_id=clean_agent_id,
+                spec_name=clean_agent_name,
+                intent_summary=f"Agent「{clean_agent_name}」选择缩小需求范围",
+                next_action="回到需求重定义，先缩小目标/输出范围后重新做能力盘点与方案确认",
+                task={"type": "agent", "id": clean_agent_id, "name": clean_agent_name, "status": "exploring"},
+                clear_pending_options=True,
+            )
+            return _json_response({
+                "status": "ok",
+                "agent_id": clean_agent_id,
+                "selected_plan_id": "narrow",
+                "next_stage": "exploring",
+                "message": "已按 narrow 方案回到需求重定义。本方案不会直接生成 Agent，请先缩小范围后重新能力盘点。",
+            })
+        if clean_selected_plan_id not in {"", "direct", "complete", "quick"}:
+            return _json_response({"status": "error", "message": "selected_plan_id 只支持 direct/complete/quick/narrow"})
+        if clean_selected_plan_id == "quick":
+            quick_constraint = _quick_plan_constraint_text(parsed_acknowledged_gaps)
+            constraints = _append_trading_guard_constraint(f"{constraints}\n{quick_constraint}")
+            tool_guidance = f"{tool_guidance}\n{quick_constraint}"
+            analysis_requirements = f"{analysis_requirements}\n{quick_constraint}"
+            output_format = f"{output_format}\n必须对缺失字段标注信息缺口，不输出综合四色评级。"
         if not clean_agent_id or not clean_agent_name or not clean_responsibility or not clean_system_prompt:
             return _json_response({"status": "error", "message": "agent_id、agent_name、target_responsibility、system_prompt 不能为空"})
 
@@ -4945,6 +5185,9 @@ async def generate_confirmed_candidate_agent(
         resolved_default_tools = _parse_string_list(default_tools) or _parse_string_list(tool_ids)[:2]
         workshop_result = None
         if sync_to_workshop_draft:
+            workshop_constraints = constraints
+            if clean_selected_plan_id == "quick" and _quick_plan_constraint_text(parsed_acknowledged_gaps) not in workshop_constraints:
+                workshop_constraints = f"{workshop_constraints}\n{_quick_plan_constraint_text(parsed_acknowledged_gaps)}"
             workshop_result = _parse_json_tool_result(await create_or_update_agent_workshop_draft.ainvoke({
                 "agent_id": clean_agent_id,
                 "agent_name": clean_agent_name,
@@ -4955,8 +5198,8 @@ async def generate_confirmed_candidate_agent(
                 "show_in_reports": show_in_reports,
                 "execution_order": execution_order,
                 "tool_ids": tool_ids,
-                "preferred_methods": "",
-                "constraints": constraints,
+                "preferred_methods": "quick_plan" if clean_selected_plan_id == "quick" else "",
+                "constraints": workshop_constraints,
             }))
             if workshop_result.get("status") != "ok":
                 return _json_response({"status": "error", "stage": "workshop_draft", "result": workshop_result})
@@ -5005,6 +5248,32 @@ async def generate_confirmed_candidate_agent(
         dry_run_validation = binding_result.get("validation") or {}
         if sync_to_workshop_draft and isinstance(workshop_result, dict) and workshop_result.get("spec_id"):
             agent_configs = _get_collection(db, "agent_configs")
+            workshop_session_id = str(workshop_result.get("session_id") or "").strip()
+            builder_contracts_patch = {
+                "selected_plan_id": clean_selected_plan_id or "legacy_confirmed",
+                "acknowledged_gaps": parsed_acknowledged_gaps,
+            }
+            if capability_inventory:
+                builder_contracts_patch["capability_inventory"] = capability_inventory
+            if gap_report:
+                builder_contracts_patch["gap_report"] = gap_report
+            if clean_selected_plan_id == "quick":
+                builder_contracts_patch["quick_plan_constraints"] = _quick_plan_constraint_text(parsed_acknowledged_gaps)
+            sessions = _get_collection(db, "agent_workshop_sessions")
+            if sessions is not None and workshop_session_id:
+                await sessions.update_one(
+                    {"session_id": workshop_session_id},
+                    {"$set": {
+                        "builder_contracts.selected_plan_id": builder_contracts_patch["selected_plan_id"],
+                        "builder_contracts.acknowledged_gaps": parsed_acknowledged_gaps,
+                        "builder_contracts.capability_inventory": capability_inventory,
+                        "builder_contracts.gap_report": gap_report,
+                        "builder_contracts.quick_plan_constraints": builder_contracts_patch.get("quick_plan_constraints", ""),
+                        "gap_report": gap_report if gap_report else None,
+                        "updated_at": _utc_now_iso(),
+                    }},
+                    upsert=False,
+                )
             if agent_configs is not None:
                 await agent_configs.update_one(
                     {"agent_id": clean_agent_id},
@@ -5021,7 +5290,11 @@ async def generate_confirmed_candidate_agent(
                 )
 
         workshop_version_result = None
-        if auto_build_workshop_version and sync_to_workshop_draft and isinstance(workshop_result, dict):
+        should_auto_build_workshop_version = (
+            auto_build_workshop_version
+            and not (clean_selected_plan_id == "complete" and bool(parsed_acknowledged_gaps))
+        )
+        if should_auto_build_workshop_version and sync_to_workshop_draft and isinstance(workshop_result, dict):
             workshop_session_id = str(workshop_result.get("session_id") or "").strip()
             if workshop_session_id:
                 workshop_version_result = await _auto_build_workshop_version_result(workshop_session_id)
@@ -5074,6 +5347,8 @@ async def generate_confirmed_candidate_agent(
             "spec_status": "draft" if sync_to_workshop_draft else "not_synced",
             "version_generated": bool((workshop_version_result or {}).get("version")),
             "version_id": _extract_governance_version_id(workshop_version_result),
+            "selected_plan_id": clean_selected_plan_id or "legacy_confirmed",
+            "acknowledged_gaps": parsed_acknowledged_gaps,
             "official_acceptance_status": "not_started",
             "acceptance_ready": False,
             "release_ready": False,
@@ -5090,22 +5365,31 @@ async def generate_confirmed_candidate_agent(
         #    auto-build 成功: building = 版本已构建，准备测试
         #    未 auto-build: ready_to_build = Draft 已生成，待构建版本
         built_workshop_version = bool((workshop_version_result or {}).get("version"))
+        if clean_selected_plan_id == "complete" and parsed_acknowledged_gaps and not built_workshop_version:
+            next_stage = "gap_resolving"
+            next_action_text = "按已确认 complete 方案补齐 blocking gaps，完成后再构建测试版本"
+            task_status = "gap_resolving"
+        elif built_workshop_version:
+            next_stage = "building"
+            next_action_text = "按已确认方案已生成测试版本；下一步运行真数据测试（run_agent_workshop_real_data_test）"
+            task_status = "building"
+        else:
+            next_stage = "ready_to_build"
+            next_action_text = "按已确认方案已生成 Draft；下一步调用 build_agent_workshop_version 生成测试版本"
+            task_status = "ready_to_build"
         _auto_update_intent(
             action="create_agent",
-            stage="building" if built_workshop_version else "ready_to_build",
+            stage=next_stage,
             spec_id=clean_agent_id,
             spec_name=clean_agent_name,
-            intent_summary=f"Agent「{clean_agent_name}」已生成，{'已自动构建测试版本' if built_workshop_version else '待构建版本'}",
-            next_action=(
-                "运行真数据测试（run_agent_workshop_real_data_test），检查是否通过评估；如有 blocking gap，先进入缺口补齐"
-                if built_workshop_version
-                else "调用 build_agent_workshop_version 生成测试版本，然后再运行真数据测试"
-            ),
+            intent_summary=f"Agent「{clean_agent_name}」已按 {clean_selected_plan_id or 'legacy'} 方案生成",
+            next_action=next_action_text,
+            clear_pending_options=True,
             task={
                 "type": "agent",
                 "id": clean_agent_id,
                 "name": clean_agent_name,
-                "status": "building" if built_workshop_version else "ready_to_build",
+                "status": task_status,
             },
         )
 
@@ -5115,6 +5399,9 @@ async def generate_confirmed_candidate_agent(
             "confirmation": {
                 "confirmed": confirmed,
                 "allow_overwrite": allow_overwrite,
+                "selected_plan_id": clean_selected_plan_id or "legacy_confirmed",
+                "acknowledged_gaps": parsed_acknowledged_gaps,
+                "execution_message": "已按用户在 prepare 阶段确认的方案执行，本次不再重新要求确认缺口分析。",
             },
             "steps": {
                 "workshop_draft": workshop_result,
@@ -5125,6 +5412,9 @@ async def generate_confirmed_candidate_agent(
             },
             "final_validation": dry_run_validation,
             "governance_boundary": {
+                "selected_plan_id": clean_selected_plan_id or "legacy_confirmed",
+                "acknowledged_gaps": parsed_acknowledged_gaps,
+                "next_stage": next_stage,
                 "runtime_candidate_validation": {
                     "agent_config_written": config_result.get("status") == "ok",
                     "prompt_template_written": prompt_result.get("status") == "ok",
