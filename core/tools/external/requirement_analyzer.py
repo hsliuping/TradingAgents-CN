@@ -867,6 +867,34 @@ class RequirementAnalyzer:
             lines.append(f"- 待补目标能力: {context.target_capability}")
         if context.handoff_intent:
             lines.append(f"- 上游交接意图: {context.handoff_intent}")
+        if context.agent_goal:
+            lines.append(f"- 上游 Agent 目标: {context.agent_goal}")
+        if context.gap_context:
+            lines.append(f"- 当前缺口上下文: {context.gap_context[:800]}")
+        if context.searched_capabilities:
+            lines.append("- 上游已检索/评估过的能力:")
+            for item in context.searched_capabilities[:8]:
+                lines.append(f"  - {str(item)[:500]}")
+        if context.confirmed_data_sources:
+            lines.append("- 上游已确认的数据源/helper:")
+            for item in context.confirmed_data_sources[:8]:
+                lines.append(f"  - {str(item)[:500]}")
+        if context.user_clarifications:
+            lines.append("- 用户已澄清的关键结论:")
+            for item in context.user_clarifications[:8]:
+                lines.append(f"  - {str(item)[:500]}")
+        if context.related_gaps:
+            lines.append("- 同一次任务中的相关能力缺口:")
+            for item in context.related_gaps[:8]:
+                lines.append(f"  - {str(item)[:500]}")
+        if context.known_failure_summaries:
+            lines.append("- 同一次补齐任务中已知失败摘要（避免重复踩坑）:")
+            for item in context.known_failure_summaries[:5]:
+                lines.append(f"  - {str(item)[:500]}")
+        if context.known_verified_facts:
+            lines.append("- 同一次补齐任务中已验证环境事实:")
+            for item in context.known_verified_facts[:8]:
+                lines.append(f"  - {str(item)[:500]}")
         lines.extend([
             "- 你要先判断现有工具或已有 Skill 是否可复用。",
             "- 只有确实缺实现时，才把需求收敛成一个新增的最小能力单元。",
@@ -886,6 +914,7 @@ class RequirementAnalyzer:
             f"- 这次需求来自 {source_name} 的能力缺口交接，不是普通的从零自由脑暴。\n"
             f"- 你必须围绕上游指定的目标能力“{target_capability}”继续收敛，除非用户明确改题。\n"
             "- 不要把上游已经确认的目标能力偷偷改写成另一个你更熟悉的实现，比如把“估值分析”擅自收缩成“PB估值区间计算”。\n"
+            "- 若同一次补齐任务已经记录了失败摘要或已验证事实，必须显式避开这些已知错误路径，不要重新采用已被证伪的数据源/字段假设。\n"
             "- 若你判断完整目标更像 Agent/Workflow 而不是单个 Skill，要明确指出这是 Agent 级目标，并把当前 Skill 只定位为其中一个确定性的子能力；不要假装整个目标已经被一个 Skill 完整覆盖。\n"
             "- 若存在可复用的现有 Skill，应优先指出复用方案；若不存在，再定义新增 Skill 的最小职责边界。\n"
         )

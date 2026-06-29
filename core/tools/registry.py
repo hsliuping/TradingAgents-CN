@@ -307,6 +307,7 @@ class ToolRegistry:
         description: str,
         category: str = "external",
         parameters: Optional[List] = None,
+        **metadata_kwargs: Any,
     ) -> None:
         """
         注册 AI 生成的外部 Skill 到工具注册表。
@@ -322,6 +323,7 @@ class ToolRegistry:
             is_online=True,
             override=True,
             parameters=parameters,
+            **metadata_kwargs,
         )
         if tool_id in self._tools:
             self._tools[tool_id].source = "generated"

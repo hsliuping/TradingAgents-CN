@@ -186,6 +186,7 @@ async def load_external_skills_to_registry(db, registry) -> int:
             if category not in valid_categories:
                 category = "external"
 
+            skill_metadata = dict(doc.get("metadata") or {})
             registry.register_external_skill(
                 tool_id=tool_id,
                 func=wrapper,
@@ -193,6 +194,11 @@ async def load_external_skills_to_registry(db, registry) -> int:
                 description=doc.get("description", ""),
                 category=category,
                 parameters=tool_params,
+                capability_tags=doc.get("capability_tags") or skill_metadata.get("capability_tags") or [],
+                tool_role_hint=doc.get("tool_role_hint") or skill_metadata.get("tool_role_hint") or "",
+                output_shape=doc.get("output_shape") or skill_metadata.get("output_shape") or "",
+                preferred_for=doc.get("preferred_for") or skill_metadata.get("preferred_for") or [],
+                not_replacement_for=doc.get("not_replacement_for") or skill_metadata.get("not_replacement_for") or [],
             )
             count += 1
             logger.info(f"✅ 加载外部 Skill: {tool_id}")
@@ -229,6 +235,7 @@ def register_single_external_skill(db_sync, registry, skill_doc: Dict[str, Any])
         if category not in valid_categories:
             category = "external"
 
+        skill_metadata = dict(skill_doc.get("metadata") or {})
         registry.register_external_skill(
             tool_id=tool_id,
             func=wrapper,
@@ -236,6 +243,11 @@ def register_single_external_skill(db_sync, registry, skill_doc: Dict[str, Any])
             description=skill_doc.get("description", ""),
             category=category,
             parameters=tool_params,
+            capability_tags=skill_doc.get("capability_tags") or skill_metadata.get("capability_tags") or [],
+            tool_role_hint=skill_doc.get("tool_role_hint") or skill_metadata.get("tool_role_hint") or "",
+            output_shape=skill_doc.get("output_shape") or skill_metadata.get("output_shape") or "",
+            preferred_for=skill_doc.get("preferred_for") or skill_metadata.get("preferred_for") or [],
+            not_replacement_for=skill_doc.get("not_replacement_for") or skill_metadata.get("not_replacement_for") or [],
         )
         logger.info(f"✅ 热注册外部 Skill: {tool_id}")
         return True

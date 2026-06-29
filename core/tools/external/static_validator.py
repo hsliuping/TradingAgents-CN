@@ -67,6 +67,9 @@ ALLOWED_CORE_IMPORTS: Set[str] = {
 BLOCKED_IMPORT_PREFIXES: Set[str] = {
     "tradingagents.dataflows.providers",
     "tradingagents.dataflows.interface",
+    "hermes_tools",
+    "sandbox_tools",
+    "skill_build_tools",
 }
 
 # 依赖白名单：允许导入的第三方库

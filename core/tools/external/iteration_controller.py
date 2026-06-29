@@ -18,11 +18,13 @@
 import json
 import logging
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from core.llm import UnifiedLLMClient, Message
+from core.llm.tool_normalizer import ToolCallNormalizer
 
 from core.skill_runtime.project_access import PROJECT_DATA_ACCESS_DOC
 from core.skill_runtime.data_access import LOCAL_DATA_API_DOC
@@ -54,6 +56,48 @@ _STALE_FAILURE_THRESHOLD = 5
 # 快照落盘根目录（与 SkillGenerationService 保持一致）
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _SNAPSHOT_DIR = _PROJECT_ROOT / "data" / "code" / "skill"
+
+
+@dataclass
+class PipelineToolResult:
+    """Agentic Loop 中单轮 pipeline_tool 的结构化结果。"""
+
+    status: str = "fail"  # pass / fail / blocked
+    round_number: int = 1
+    iteration: Optional[IterationRound] = None
+    code_path: str = ""
+    snapshot_path: str = ""
+    static_validation: Dict[str, Any] = field(default_factory=dict)
+    sandbox_result: Dict[str, Any] = field(default_factory=dict)
+    evaluation: Dict[str, Any] = field(default_factory=dict)
+    failure_summary: str = ""
+    verified_facts: List[str] = field(default_factory=list)
+    should_retry: bool = True
+    final_code: str = ""
+    final_metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_public_dict(self) -> Dict[str, Any]:
+        return {
+            "status": self.status,
+            "round_number": self.round_number,
+            "code_path": self.code_path,
+            "snapshot_path": self.snapshot_path,
+            "static_validation": self.static_validation,
+            "sandbox_result": self.sandbox_result,
+            "evaluation": self.evaluation,
+            "failure_summary": self.failure_summary,
+            "verified_facts": self.verified_facts,
+            "should_retry": self.should_retry,
+            "has_final_code": bool(self.final_code),
+        }
+
+
+class _AgenticPipelineAbort(Exception):
+    """pipeline_tool 内部遇到不可恢复失败时用于中断单轮执行。"""
+
+    def __init__(self, result: PipelineToolResult):
+        self.result = result
+        super().__init__(result.failure_summary or result.status)
 
 
 class IterationController:
@@ -90,6 +134,7 @@ class IterationController:
         self._provider = provider
         self._model = model
         self._max_iterations = max_iterations
+        self._agentic_trace: List[Dict[str, Any]] = []
 
     def _get_client(self) -> UnifiedLLMClient:
         if self._llm_client is None:
@@ -816,6 +861,765 @@ class IterationController:
         """异步版本的 run"""
         import asyncio
         return await asyncio.get_event_loop().run_in_executor(None, self.run, spec)
+
+    # ==================== Agentic Loop / pipeline_tool ====================
+
+    def run_agentic(
+        self,
+        spec: SkillSpec,
+        initial_feedback: str = "",
+        initial_code: str = "",
+        progress_callback: Optional[Callable[[str, str, int, float], None]] = None,
+        fact_report: Optional[ImplementationFactReport] = None,
+    ) -> PipelineResult:
+        """SkillGeneration 专用 Agent Loop。
+
+        外层 LLM 可以在每轮 pipeline_tool 前后调用常驻查询/探针工具；pipeline_tool
+        只执行单轮候选生成与质控，不在内部做多轮重试。
+        """
+        start_time = time.time()
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        iterations: List[IterationRound] = []
+        feedback = initial_feedback
+        previous_code = initial_code
+        verified_facts: List[str] = []
+        self._agentic_trace = []
+        logger.info(
+            "🤖 [AgenticSkill] start tool_id=%s max_steps=%s initial_feedback_chars=%s initial_code_chars=%s fact_report=%s",
+            spec.tool_id,
+            self._max_iterations,
+            len(initial_feedback or ""),
+            len(initial_code or ""),
+            bool(fact_report),
+        )
+
+        def _report(stage: str, message: str, it: int, prog: float):
+            if progress_callback:
+                try:
+                    progress_callback(stage, message, it, prog)
+                except Exception as e:
+                    logger.warning("progress_callback 异常: %s", e)
+
+        if fact_report is None:
+            try:
+                _report("reconnaissance", "正在整理实现事实...", 0, 0.03)
+                fact_report = self._reconnaissance.analyze(spec)
+                self._persist_fact_report(spec.tool_id, run_id, fact_report)
+            except Exception as exc:
+                logger.warning("⚠️ Agentic 前置侦察失败，继续运行: %s", exc)
+        elif fact_report is not None:
+            self._persist_fact_report(spec.tool_id, run_id, fact_report)
+
+        tools = self._build_agentic_tools(
+            spec=spec,
+            run_id=run_id,
+            iterations=iterations,
+            fact_report=fact_report,
+            state={
+                "feedback": feedback,
+                "previous_code": previous_code,
+                "verified_facts": verified_facts,
+                "progress_callback": _report,
+            },
+        )
+        tool_defs = [ToolCallNormalizer.normalize_tool_definition(func) for func in tools.values()]
+        client = self._get_client()
+        client.inject_tools(tools)
+
+        known_context = self._extract_known_context_from_spec(spec)
+        logger.info(
+            "🤖 [AgenticSkill] context tool_id=%s known_failures=%s known_facts=%s tools=%s",
+            spec.tool_id,
+            len(known_context.get("known_failure_summaries") or []),
+            len(known_context.get("known_verified_facts") or []),
+            sorted(tools.keys()),
+        )
+        messages: List[Message] = [
+            Message(role="system", content=self._build_agentic_system_prompt()),
+            Message(role="user", content=self._build_agentic_task_prompt(spec, initial_feedback, fact_report, known_context)),
+        ]
+
+        final_result: Optional[PipelineToolResult] = None
+        failure_result: Optional[PipelineToolResult] = None
+        stale_failure_counts: Dict[str, int] = {}
+
+        for step in range(1, self._max_iterations + 1):
+            _report("agentic_loop", f"Agentic Skill 生成循环第 {step}/{self._max_iterations} 步", step, min(0.05 + step * 0.08, 0.9))
+            logger.info(
+                "🤖 [AgenticSkill] step=%s/%s tool_id=%s messages=%s verified_facts=%s",
+                step,
+                self._max_iterations,
+                spec.tool_id,
+                len(messages),
+                len(verified_facts),
+            )
+            try:
+                response = client.chat(
+                    messages,
+                    tools=tool_defs,
+                    auto_execute_tools=False,
+                    max_tokens=2048,
+                    temperature=0.2,
+                    tool_choice="auto",
+                )
+            except Exception as exc:
+                logger.warning("Agentic Loop LLM 调用失败，降级为单轮 pipeline_tool: %s", exc)
+                tools["pipeline_tool"]()
+                failure_result = self._last_agentic_pipeline_result
+                if failure_result and failure_result.iteration:
+                    iterations.append(failure_result.iteration)
+                break
+
+            if response.has_tool_calls:
+                tool_names = [str(call.name or "") for call in response.tool_calls]
+                logger.info(
+                    "🤖 [AgenticSkill] step=%s tool_calls=%s tool_id=%s",
+                    step,
+                    tool_names,
+                    spec.tool_id,
+                )
+                messages.append(response.to_message())
+                for tool_call in response.tool_calls:
+                    result = ToolCallNormalizer.execute_tool_call(tool_call, tools)
+                    content = result.content or ""
+                    if result.name != "pipeline_tool":
+                        fact = self._build_verified_fact_from_tool_result(result.name, content)
+                        if fact and fact not in verified_facts:
+                            verified_facts.append(fact)
+                    self._agentic_trace.append({
+                        "step": step,
+                        "tool": result.name,
+                        "arguments": tool_call.arguments,
+                        "is_error": result.is_error,
+                        "content_excerpt": content[:2000],
+                    })
+                    messages.append(Message(
+                        role="tool",
+                        content=content,
+                        tool_call_id=result.tool_call_id,
+                        name=result.name,
+                    ))
+                    if result.name == "pipeline_tool":
+                        latest = self._last_agentic_pipeline_result
+                        if latest and latest.iteration:
+                            if latest.iteration not in iterations:
+                                iterations.append(latest.iteration)
+                            failure_result = latest
+                            logger.info(
+                                "🤖 [AgenticSkill] pipeline_result tool_id=%s round=%s status=%s should_retry=%s summary=%s",
+                                spec.tool_id,
+                                latest.round_number,
+                                latest.status,
+                                latest.should_retry,
+                                (latest.failure_summary or "")[:300],
+                            )
+                            feedback = latest.failure_summary or feedback
+                            previous_code = latest.final_code or previous_code
+                            if latest.status == "pass":
+                                final_result = latest
+                                break
+                            if latest.failure_summary:
+                                signature = self._stale_failure_signature(latest.failure_summary)
+                                stale_failure_counts[signature] = stale_failure_counts.get(signature, 0) + 1
+                                messages.append(Message(
+                                    role="user",
+                                    content=(
+                                        "上一轮 pipeline_tool 失败摘要如下，请基于它决定下一步："
+                                        "需要查真实数据就调用 run_readonly_query，需要探测接口就调用 probe_interface，"
+                                        "需要诊断脚本就调用 run_diagnostic_script，信息足够后再调用 pipeline_tool。\n"
+                                        f"{latest.failure_summary}"
+                                    ),
+                                ))
+                                if stale_failure_counts[signature] >= _STALE_FAILURE_THRESHOLD:
+                                    failure_result = PipelineToolResult(
+                                        status="blocked",
+                                        round_number=latest.round_number,
+                                        failure_summary=f"连续 {_STALE_FAILURE_THRESHOLD} 次出现相同失败，触发 stale failure 熔断。\n{latest.failure_summary}",
+                                        verified_facts=list(verified_facts),
+                                        should_retry=False,
+                                    )
+                                    logger.warning(
+                                        "🤖 [AgenticSkill] stale_failure_blocked tool_id=%s signature=%s count=%s",
+                                        spec.tool_id,
+                                        signature[:120],
+                                        stale_failure_counts[signature],
+                                    )
+                                    break
+                            if latest.status == "blocked" or not latest.should_retry:
+                                break
+                if final_result:
+                    break
+                if failure_result and (failure_result.status == "blocked" or not failure_result.should_retry):
+                    break
+                continue
+
+            content = (response.content or "").strip()
+            if content:
+                messages.append(Message(role="assistant", content=content))
+            if not iterations:
+                logger.info("Agentic Loop 未调用 pipeline_tool，强制执行一轮受治理生成。")
+                tools["pipeline_tool"]()
+                failure_result = self._last_agentic_pipeline_result
+                if failure_result and failure_result.iteration:
+                    iterations.append(failure_result.iteration)
+                if failure_result and failure_result.status == "pass":
+                    final_result = failure_result
+            break
+
+        total_time = round(time.time() - start_time, 2)
+        if final_result:
+            _report("output_evaluation", "Agentic Skill 生成通过", final_result.round_number, 1.0)
+            logger.info(
+                "🤖 [AgenticSkill] success tool_id=%s rounds=%s total_time=%.2fs trace_events=%s verified_facts=%s",
+                spec.tool_id,
+                len(iterations),
+                total_time,
+                len(self._agentic_trace),
+                len(verified_facts),
+            )
+            return PipelineResult(
+                success=True,
+                tool_id=spec.tool_id,
+                final_code=final_result.final_code,
+                final_metadata={
+                    **(final_result.final_metadata or {}),
+                    "generation_engine": "agentic_loop",
+                    "agentic_trace": self._public_agentic_trace(self._agentic_trace),
+                    "verified_facts": verified_facts,
+                },
+                iterations=iterations,
+                total_rounds=len(iterations),
+                total_time=total_time,
+            )
+
+        error = self._build_failure_summary(iterations) if iterations else "Agentic Skill 生成未产生有效候选代码"
+        if failure_result and failure_result.failure_summary:
+            error = failure_result.failure_summary + "\n\n" + error
+        logger.warning(
+            "🤖 [AgenticSkill] failed tool_id=%s rounds=%s total_time=%.2fs trace_events=%s verified_facts=%s error=%s",
+            spec.tool_id,
+            len(iterations),
+            total_time,
+            len(self._agentic_trace),
+            len(verified_facts),
+            error[:500],
+        )
+        return PipelineResult(
+            success=False,
+            tool_id=spec.tool_id,
+            iterations=iterations,
+            total_rounds=len(iterations),
+            total_time=total_time,
+            error=error,
+            final_metadata={
+                "generation_engine": "agentic_loop",
+                "agentic_trace": self._public_agentic_trace(self._agentic_trace),
+                "verified_facts": verified_facts,
+            },
+        )
+
+    @property
+    def _last_agentic_pipeline_result(self) -> Optional[PipelineToolResult]:
+        trace = getattr(self, "_agentic_trace", []) or []
+        for item in reversed(trace):
+            result = item.get("pipeline_result")
+            if isinstance(result, PipelineToolResult):
+                return result
+        return None
+
+    @_last_agentic_pipeline_result.setter
+    def _last_agentic_pipeline_result(self, value: Optional[PipelineToolResult]) -> None:
+        if not hasattr(self, "_agentic_trace"):
+            self._agentic_trace = []
+        if value is None:
+            return
+        self._agentic_trace.append({
+            "event": "pipeline_result",
+            "status": value.status,
+            "round_number": value.round_number,
+            "failure_summary": value.failure_summary[:2000],
+            "code_path": value.code_path,
+            "snapshot_path": value.snapshot_path,
+            "should_retry": value.should_retry,
+            "pipeline_result": value,
+        })
+
+    @staticmethod
+    def _public_agentic_trace(trace: List[Dict[str, Any]], limit: int = 80) -> List[Dict[str, Any]]:
+        public_items: List[Dict[str, Any]] = []
+        for item in trace[-limit:]:
+            public_items.append({
+                key: value
+                for key, value in item.items()
+                if key != "pipeline_result"
+            })
+        return public_items
+
+    @staticmethod
+    def _stale_failure_signature(summary: str) -> str:
+        text = " ".join(str(summary or "").split())
+        return text[:500]
+
+    @staticmethod
+    def _build_verified_fact_from_tool_result(tool_name: str, content: str) -> str:
+        if not content:
+            return ""
+        try:
+            data = json.loads(content)
+        except Exception:
+            return f"{tool_name} returned {len(content)} chars"
+        if isinstance(data, dict):
+            if data.get("success") is False:
+                return f"{tool_name} failed: {str(data.get('error') or '')[:180]}"
+            if tool_name == "probe_interface":
+                func = data.get("function") or data.get("source_or_helper") or "unknown"
+                shape = data.get("shape") or {}
+                return f"probe_interface confirmed {func}: {shape}"
+            if tool_name == "run_readonly_query":
+                collection = data.get("collection") or "unknown"
+                return f"run_readonly_query confirmed {collection}: returned_count={data.get('returned_count')}"
+            if tool_name == "run_diagnostic_script":
+                output = data.get("output") if isinstance(data.get("output"), dict) else {}
+                return f"run_diagnostic_script success={data.get('success')}, tool_call_count={output.get('tool_call_count')}"
+        return f"{tool_name} returned structured result"
+
+    def _build_agentic_tools(
+        self,
+        *,
+        spec: SkillSpec,
+        run_id: str,
+        iterations: List[IterationRound],
+        fact_report: Optional[ImplementationFactReport],
+        state: Dict[str, Any],
+    ) -> Dict[str, Callable]:
+        from .recon_tools import (
+            check_field_coverage,
+            describe_runtime_helper,
+            inspect_collection_schema,
+            inspect_symbol_sample,
+            list_available_collections,
+            list_external_data_sources,
+            list_runtime_functions,
+            probe_interface,
+            run_readonly_query,
+        )
+
+        def run_diagnostic_script(script: str) -> str:
+            """在构建期沙箱中执行诊断脚本，可临时 import hermes_tools 调用只读工具。
+            仅用于确认真实字段、接口返回形状和数据覆盖率；最终 Skill 代码不得依赖 hermes_tools。"""
+            logger.info(
+                "🤖 [AgenticSkill] diagnostic_script tool_id=%s script_chars=%s",
+                spec.tool_id,
+                len(script or ""),
+            )
+            result = self._runner.run_diagnostic_script(script)
+            payload = {
+                "success": result.success,
+                "output": result.output,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "error": result.error,
+                "execution_time": result.execution_time,
+            }
+            return json.dumps(payload, ensure_ascii=False, default=str)
+
+        def pipeline_tool() -> str:
+            """执行一轮受治理的候选 Skill 生成与质控。
+            单轮包含：代码生成、静态校验、沙箱执行、Judge 评分、业务验收和边缘测试。
+            不会在工具内部自动进入下一轮；下一步由 Agent Loop 决定。"""
+            round_num = len(iterations) + 1
+            result = self._run_pipeline_tool_once(
+                spec=spec,
+                run_id=run_id,
+                round_num=round_num,
+                feedback=state.get("feedback", ""),
+                previous_code=state.get("previous_code", ""),
+                fact_report=fact_report,
+                progress_callback=state.get("progress_callback"),
+                verified_facts=state.get("verified_facts") or [],
+            )
+            self._last_agentic_pipeline_result = result
+            state["feedback"] = result.failure_summary or state.get("feedback", "")
+            if result.final_code:
+                state["previous_code"] = result.final_code
+            for fact in result.verified_facts:
+                if fact not in state["verified_facts"]:
+                    state["verified_facts"].append(fact)
+            return json.dumps(result.to_public_dict(), ensure_ascii=False, default=str)
+
+        return {
+            "pipeline_tool": pipeline_tool,
+            "run_diagnostic_script": run_diagnostic_script,
+            "run_readonly_query": run_readonly_query,
+            "probe_interface": probe_interface,
+            "inspect_collection_schema": inspect_collection_schema,
+            "inspect_symbol_sample": inspect_symbol_sample,
+            "check_field_coverage": check_field_coverage,
+            "describe_runtime_helper": describe_runtime_helper,
+            "list_runtime_functions": list_runtime_functions,
+            "list_available_collections": list_available_collections,
+            "list_external_data_sources": list_external_data_sources,
+        }
+
+    @staticmethod
+    def _build_agentic_system_prompt() -> str:
+        return """你是 SkillGeneration 专用 Agent Loop，不是普通聊天助手。
+目标：生成一个可注册的 Python Skill，并通过平台硬性质控。
+
+你可以调用工具：
+- run_readonly_query：查询真实样本文档，确认字段和覆盖率。
+- probe_interface：真实调用已登记 helper，确认返回形状。
+- run_diagnostic_script：执行构建期诊断脚本，可临时 import hermes_tools 调用只读工具；只用于诊断，不得写入最终 Skill。
+- inspect_collection_schema / inspect_symbol_sample / check_field_coverage / describe_runtime_helper / list_runtime_functions：结构探测。
+- pipeline_tool：执行一轮受治理的候选代码生成与质控。
+
+规则：
+1. 遇到数据字段、helper 返回结构、外部接口可用性不确定时，先查询/探针，不要盲目反复生成。
+2. pipeline_tool 是单轮工具；失败后你应根据 failure_summary 决定查数据、探接口，或再次调用 pipeline_tool。
+3. 最终 Skill 代码不得依赖 hermes_tools、RPC stub 或构建期诊断工具，只能使用 core.skill_runtime.* 正式 API。
+4. 不要跳过 pipeline_tool；只有 pipeline_tool pass 才算成功。
+5. 如果确认数据源无法提供目标能力，应停止重试并说明阻塞原因。"""
+
+    @staticmethod
+    def _extract_known_context_from_spec(spec: SkillSpec) -> Dict[str, List[str]]:
+        metadata = getattr(spec, "metadata", None) or {}
+        if not isinstance(metadata, dict):
+            return {"known_failure_summaries": [], "known_verified_facts": []}
+        return {
+            "known_failure_summaries": [str(item) for item in list(metadata.get("known_failure_summaries") or []) if str(item).strip()][:5],
+            "known_verified_facts": [str(item) for item in list(metadata.get("known_verified_facts") or []) if str(item).strip()][:12],
+        }
+
+    @staticmethod
+    def _build_agentic_task_prompt(
+        spec: SkillSpec,
+        initial_feedback: str,
+        fact_report: Optional[ImplementationFactReport],
+        known_context: Optional[Dict[str, List[str]]] = None,
+    ) -> str:
+        fact_summary = ""
+        if fact_report:
+            fact_summary = json.dumps(fact_report.model_dump(mode="json"), ensure_ascii=False, default=str)[:8000]
+        known_context = known_context or {}
+        known_failures = "\n".join(f"- {item}" for item in list(known_context.get("known_failure_summaries") or [])[:5])
+        known_facts = "\n".join(f"- {item}" for item in list(known_context.get("known_verified_facts") or [])[:12])
+        return f"""请完成以下 Skill 生成任务。
+
+【SkillSpec】
+{json.dumps(spec.model_dump(mode="json"), ensure_ascii=False, indent=2, default=str)}
+
+【已有反馈/经验】
+{initial_feedback or '(无)'}
+
+【同一次 GapJob 已知失败摘要】
+{known_failures or '(无)'}
+
+【同一次 GapJob 已验证环境事实】
+{known_facts or '(无)'}
+
+【已有侦察事实】
+{fact_summary or '(无)'}
+
+请先判断是否需要查询真实数据或探测接口；若信息足够，调用 pipeline_tool 生成并验证候选 Skill。"""
+
+    def _run_pipeline_tool_once(
+        self,
+        *,
+        spec: SkillSpec,
+        run_id: str,
+        round_num: int,
+        feedback: str,
+        previous_code: str,
+        fact_report: Optional[ImplementationFactReport],
+        progress_callback: Optional[Callable[[str, str, int, float], None]],
+        verified_facts: List[str],
+    ) -> PipelineToolResult:
+        iteration = IterationRound(round_number=round_num)
+
+        def _report(stage: str, message: str, progress: float) -> None:
+            if progress_callback:
+                progress_callback(stage, message, round_num, progress)
+
+        def _finish(status: str, summary: str, should_retry: bool = True) -> PipelineToolResult:
+            snapshot_path = self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
+            code_path = ""
+            if iteration.generated_code:
+                code_path = str(self._get_snapshot_dir(spec.tool_id, run_id) / f"round_{round_num:02d}.py")
+            return PipelineToolResult(
+                status=status,
+                round_number=round_num,
+                iteration=iteration,
+                code_path=code_path,
+                snapshot_path=str(snapshot_path or ""),
+                static_validation=iteration.validation.model_dump() if iteration.validation else {},
+                sandbox_result=iteration.sandbox.model_dump() if iteration.sandbox else {},
+                evaluation=self._build_pipeline_tool_evaluation(iteration),
+                failure_summary=summary,
+                verified_facts=list(verified_facts),
+                should_retry=should_retry,
+                final_code=iteration.generated_code.code if iteration.generated_code else "",
+                final_metadata=iteration.generated_code.metadata if iteration.generated_code else {},
+            )
+
+        try:
+            logger.info(
+                "🔁 [pipeline_tool] start tool_id=%s round=%s feedback_chars=%s previous_code_chars=%s verified_facts=%s",
+                spec.tool_id,
+                round_num,
+                len(feedback or ""),
+                len(previous_code or ""),
+                len(verified_facts or []),
+            )
+            _report("code_generation", "正在生成代码...", 0.1)
+            generated = self._generator.generate(
+                spec,
+                feedback=feedback,
+                previous_code=previous_code,
+                fact_report=fact_report,
+            )
+            iteration.generated_code = generated
+            self._persist_stage_artifact(
+                tool_id=spec.tool_id,
+                run_id=run_id,
+                round_num=round_num,
+                stage="code_generation",
+                payload={
+                    "success": True,
+                    "generation_time": generated.generation_time,
+                    "code_lines": len((generated.code or "").split("\n")),
+                    "metadata": generated.metadata or {},
+                    "agentic_loop": True,
+                },
+                code=generated.code,
+            )
+
+            _report("static_validation", "正在语法检查...", 0.25)
+            validation = self._validator.validate(generated, spec)
+            iteration.validation = validation
+            self._persist_stage_artifact(
+                tool_id=spec.tool_id,
+                run_id=run_id,
+                round_num=round_num,
+                stage="static_validation",
+                payload={"passed": validation.passed, "errors": validation.errors[:20], "warnings": validation.warnings[:20]},
+                code=generated.code,
+            )
+            if not validation.passed:
+                logger.warning(
+                    "🔁 [pipeline_tool] static_failed tool_id=%s round=%s errors=%s",
+                    spec.tool_id,
+                    round_num,
+                    validation.errors[:5],
+                )
+                iteration.decision = "RETRY"
+                summary = "静态验证失败：" + "；".join(validation.errors[:5])
+                iteration.feedback = self._build_rich_feedback(stage="静态验证", errors=validation.errors, code=generated.code, spec=spec)
+                return _finish("fail", summary)
+
+            _report("sandbox_execution", "正在沙箱执行...", 0.4)
+            sandbox = self._runner.run(generated.code, spec)
+            iteration.sandbox = sandbox
+            self._persist_stage_artifact(
+                tool_id=spec.tool_id,
+                run_id=run_id,
+                round_num=round_num,
+                stage="sandbox_execution",
+                payload={
+                    "success": sandbox.success,
+                    "execution_time": sandbox.execution_time,
+                    "error": sandbox.error,
+                    "stdout": sandbox.stdout,
+                    "stderr": sandbox.stderr,
+                    "output": sandbox.output,
+                },
+                code=generated.code,
+            )
+            if not sandbox.success:
+                logger.warning(
+                    "🔁 [pipeline_tool] sandbox_failed tool_id=%s round=%s error=%s stdout_chars=%s stderr_chars=%s",
+                    spec.tool_id,
+                    round_num,
+                    sandbox.error,
+                    len(sandbox.stdout or ""),
+                    len(sandbox.stderr or ""),
+                )
+                reflection = self._reflect_on_failure(
+                    spec=spec,
+                    code=generated.code,
+                    stage="沙箱执行",
+                    error=sandbox.error or "未知错误",
+                    stdout=sandbox.stdout,
+                    stderr=sandbox.stderr,
+                    output=sandbox.output,
+                )
+                iteration.reflection = reflection
+                iteration.decision = "FAIL" if not reflection.should_retry else "RETRY"
+                iteration.feedback = self._build_rich_feedback(
+                    stage="沙箱执行",
+                    errors=[sandbox.error or "未知错误"],
+                    code=generated.code,
+                    spec=spec,
+                    stdout=sandbox.stdout,
+                    stderr=sandbox.stderr,
+                    output=sandbox.output,
+                    reflection=reflection,
+                )
+                return _finish(
+                    "blocked" if not reflection.should_retry else "fail",
+                    self._build_agentic_failure_summary(iteration),
+                    should_retry=reflection.should_retry,
+                )
+
+            _report("output_evaluation", "正在质量评估...", 0.65)
+            eval_score = self._evaluator.evaluate(sandbox, spec, generated.code)
+            iteration.eval_score = eval_score
+            business_verification = self._business_verifiers.resolve(spec).verify(sandbox, spec, fact_report)
+            iteration.business_verification = business_verification
+            self._persist_stage_artifact(
+                tool_id=spec.tool_id,
+                run_id=run_id,
+                round_num=round_num,
+                stage="output_evaluation",
+                payload={
+                    "eval_score": eval_score.model_dump(),
+                    "business_verification": business_verification.model_dump(),
+                },
+                code=generated.code,
+            )
+
+            if self._is_systemic_business_verifier_failure(business_verification):
+                iteration.decision = "FAIL"
+                summary = "系统级业务验收规则配置错误，当前失败并非代码实现缺陷。"
+                iteration.feedback = summary
+                return _finish("blocked", summary, should_retry=False)
+
+            if eval_score.total >= PASS_THRESHOLD and business_verification.passed:
+                logger.info(
+                    "🔁 [pipeline_tool] quality_pass tool_id=%s round=%s score=%.2f business_pass=%s",
+                    spec.tool_id,
+                    round_num,
+                    eval_score.total,
+                    business_verification.passed,
+                )
+                _report("edge_testing", "正在执行边缘测试验证...", 0.8)
+                edge_failures = self._run_edge_tests(generated.code, spec)
+                if edge_failures:
+                    reflection = self._reflect_on_failure(
+                        spec=spec,
+                        code=generated.code,
+                        stage="边缘测试",
+                        error="\n".join(edge_failures),
+                        stdout=sandbox.stdout,
+                        stderr="",
+                        output=sandbox.output,
+                    )
+                    iteration.reflection = reflection
+                    iteration.decision = "RETRY"
+                    iteration.feedback = self._build_rich_feedback(
+                        stage="边缘测试",
+                        errors=edge_failures,
+                        code=generated.code,
+                        spec=spec,
+                        stdout=sandbox.stdout,
+                        output=sandbox.output,
+                        reflection=reflection,
+                    )
+                    return _finish("fail", self._build_agentic_failure_summary(iteration), should_retry=reflection.should_retry)
+
+                iteration.decision = "PASS"
+                result = _finish("pass", "pipeline_tool 单轮质控通过", should_retry=False)
+                logger.info(
+                    "🔁 [pipeline_tool] pass tool_id=%s round=%s code_path=%s snapshot=%s",
+                    spec.tool_id,
+                    round_num,
+                    result.code_path,
+                    result.snapshot_path,
+                )
+                _report("output_evaluation", "评估通过", 1.0)
+                return result
+
+            failure_messages: List[str] = []
+            logger.warning(
+                "🔁 [pipeline_tool] quality_failed tool_id=%s round=%s score=%.2f business_pass=%s business_failures=%s",
+                spec.tool_id,
+                round_num,
+                eval_score.total,
+                business_verification.passed,
+                len(business_verification.failures or []),
+            )
+            extra_context_parts: List[str] = []
+            if eval_score.total < PASS_THRESHOLD:
+                failure_messages.extend(self._build_eval_errors(eval_score))
+                extra_context_parts.append(self._build_eval_reflection_context(eval_score))
+            if not business_verification.passed:
+                failure_messages.extend(self._build_business_errors(business_verification))
+                extra_context_parts.append(self._build_business_reflection_context(business_verification))
+            reflection = self._reflect_on_failure(
+                spec=spec,
+                code=generated.code,
+                stage="质量评估/业务验收",
+                error="\n".join(failure_messages),
+                stdout=sandbox.stdout,
+                stderr=sandbox.stderr,
+                output=sandbox.output,
+                extra_context="\n\n".join(part for part in extra_context_parts if part),
+            )
+            iteration.reflection = reflection
+            iteration.decision = "FAIL" if not reflection.should_retry else "RETRY"
+            iteration.feedback = self._build_rich_feedback(
+                stage="质量评估/业务验收",
+                errors=failure_messages,
+                code=generated.code,
+                spec=spec,
+                stdout=sandbox.stdout,
+                stderr=sandbox.stderr,
+                output=sandbox.output,
+                reflection=reflection,
+            )
+            return _finish(
+                "blocked" if not reflection.should_retry else "fail",
+                self._build_agentic_failure_summary(iteration),
+                should_retry=reflection.should_retry,
+            )
+        except Exception as exc:
+            logger.error("pipeline_tool 单轮执行异常: %s", exc, exc_info=True)
+            iteration.decision = "FAIL"
+            iteration.feedback = f"pipeline_tool 执行异常: {exc}"
+            return _finish("blocked", iteration.feedback, should_retry=False)
+
+    @staticmethod
+    def _build_pipeline_tool_evaluation(iteration: IterationRound) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        if iteration.eval_score:
+            payload["eval_score"] = iteration.eval_score.model_dump()
+        if iteration.business_verification:
+            payload["business_verification"] = iteration.business_verification.model_dump()
+        if iteration.reflection:
+            payload["reflection"] = iteration.reflection.model_dump()
+        return payload
+
+    @staticmethod
+    def _build_agentic_failure_summary(iteration: IterationRound) -> str:
+        parts: List[str] = [f"第 {iteration.round_number} 轮失败"]
+        if iteration.validation and not iteration.validation.passed:
+            parts.append("静态验证失败：" + "；".join(iteration.validation.errors[:5]))
+        if iteration.sandbox and not iteration.sandbox.success:
+            parts.append(f"沙箱执行失败：{iteration.sandbox.error or '未知错误'}")
+            if iteration.sandbox.stdout:
+                parts.append("stdout 摘要：" + IterationController._summarize_text(iteration.sandbox.stdout, max_chars=1000))
+            if iteration.sandbox.stderr:
+                parts.append("stderr 摘要：" + IterationController._summarize_text(iteration.sandbox.stderr, max_chars=1000))
+        if iteration.eval_score:
+            parts.append(f"评分：total={iteration.eval_score.total}/10")
+        if iteration.business_verification and not iteration.business_verification.passed:
+            failures = [failure.message for failure in iteration.business_verification.failures[:5]]
+            if failures:
+                parts.append("业务验收失败：" + "；".join(failures))
+        if iteration.reflection:
+            parts.append(f"根因：{iteration.reflection.root_cause}")
+            if iteration.reflection.fix_plan:
+                parts.append("修复计划：" + "；".join(iteration.reflection.fix_plan[:5]))
+        return "\n".join(parts)
 
     # ==================== 反思机制 ====================
 

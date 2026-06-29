@@ -129,6 +129,11 @@ class CapabilityIndexService:
                 "related_tools": doc.related_tools,
                 "coverage_terms": doc.coverage_terms,
                 "data_source": doc.data_source,
+                "capability_tags": doc.capability_tags,
+                "tool_role_hint": doc.tool_role_hint,
+                "output_shape": doc.output_shape,
+                "preferred_for": doc.preferred_for,
+                "not_replacement_for": doc.not_replacement_for,
             }
             for doc in documents
         ]
@@ -189,8 +194,18 @@ class CapabilityIndexService:
                     related_tools=[str(item) for item in (tool.related_tools or []) if str(item).strip()],
                     data_source=str(tool.data_source or ""),
                     coverage_terms=coverage_terms,
+                    capability_tags=[str(item) for item in (tool.capability_tags or []) if str(item).strip()],
+                    tool_role_hint=str(tool.tool_role_hint or ""),
+                    output_shape=str(tool.output_shape or ""),
+                    preferred_for=[str(item) for item in (tool.preferred_for or []) if str(item).strip()],
+                    not_replacement_for=[str(item) for item in (tool.not_replacement_for or []) if str(item).strip()],
                 ),
                 data_source=str(tool.data_source or ""),
+                capability_tags=[str(item) for item in (tool.capability_tags or []) if str(item).strip()],
+                tool_role_hint=str(tool.tool_role_hint or ""),
+                output_shape=str(tool.output_shape or ""),
+                preferred_for=[str(item) for item in (tool.preferred_for or []) if str(item).strip()],
+                not_replacement_for=[str(item) for item in (tool.not_replacement_for or []) if str(item).strip()],
                 metadata={
                     "is_online": bool(tool.is_online),
                     "timeout_tier": str(tool.timeout_tier or ""),
@@ -230,6 +245,11 @@ class CapabilityIndexService:
                 returns=str(doc.get("returns") or getattr(base, "returns", "") or ""),
                 related_tools=list(getattr(base, "related_tools", []) or []),
                 data_source=str(doc.get("data_source") or getattr(base, "data_source", "") or ""),
+                capability_tags=list(getattr(base, "capability_tags", []) or []),
+                tool_role_hint=str(getattr(base, "tool_role_hint", "") or ""),
+                output_shape=str(getattr(base, "output_shape", "") or ""),
+                preferred_for=list(getattr(base, "preferred_for", []) or []),
+                not_replacement_for=list(getattr(base, "not_replacement_for", []) or []),
                 metadata={
                     **(base.metadata if base else {}),
                     "skill_type": doc.get("skill_type"),
@@ -249,6 +269,21 @@ class CapabilityIndexService:
             description = str(doc.get("description") or "").strip()
             base = documents.get(tool_id)
             bindable = status == "active" and tool_id in documents
+            metadata = dict(doc.get("metadata") or {})
+            capability_tags = self._dedupe([
+                *list(getattr(base, "capability_tags", []) or []),
+                *[str(item) for item in (doc.get("capability_tags") or metadata.get("capability_tags") or []) if str(item).strip()],
+            ])
+            tool_role_hint = str(doc.get("tool_role_hint") or metadata.get("tool_role_hint") or getattr(base, "tool_role_hint", "") or "").strip()
+            output_shape = str(doc.get("output_shape") or metadata.get("output_shape") or getattr(base, "output_shape", "") or "").strip()
+            preferred_for = self._dedupe([
+                *list(getattr(base, "preferred_for", []) or []),
+                *[str(item) for item in (doc.get("preferred_for") or metadata.get("preferred_for") or []) if str(item).strip()],
+            ])
+            not_replacement_for = self._dedupe([
+                *list(getattr(base, "not_replacement_for", []) or []),
+                *[str(item) for item in (doc.get("not_replacement_for") or metadata.get("not_replacement_for") or []) if str(item).strip()],
+            ])
             merged = self._merge_capability_document(
                 base=base,
                 capability_id=tool_id,
@@ -266,6 +301,11 @@ class CapabilityIndexService:
                 returns=str(doc.get("returns") or getattr(base, "returns", "") or ""),
                 related_tools=list(getattr(base, "related_tools", []) or []),
                 data_source=str(doc.get("data_source") or getattr(base, "data_source", "") or ""),
+                capability_tags=capability_tags,
+                tool_role_hint=tool_role_hint,
+                output_shape=output_shape,
+                preferred_for=preferred_for,
+                not_replacement_for=not_replacement_for,
                 metadata={
                     **(base.metadata if base else {}),
                     "session_id": doc.get("session_id"),
@@ -293,6 +333,11 @@ class CapabilityIndexService:
         related_tools: List[str],
         data_source: str,
         metadata: Dict[str, Any],
+        capability_tags: Optional[List[str]] = None,
+        tool_role_hint: str = "",
+        output_shape: str = "",
+        preferred_for: Optional[List[str]] = None,
+        not_replacement_for: Optional[List[str]] = None,
     ) -> CapabilityDocument:
         searchable = self._build_searchable_text(
             capability_id,
@@ -333,8 +378,18 @@ class CapabilityIndexService:
                 related_tools=related_tools,
                 data_source=data_source,
                 coverage_terms=coverage_terms,
+                capability_tags=capability_tags or [],
+                tool_role_hint=tool_role_hint,
+                output_shape=output_shape,
+                preferred_for=preferred_for or [],
+                not_replacement_for=not_replacement_for or [],
             ),
             data_source=data_source,
+            capability_tags=self._dedupe([str(item) for item in (capability_tags or []) if str(item).strip()]),
+            tool_role_hint=str(tool_role_hint or ""),
+            output_shape=str(output_shape or ""),
+            preferred_for=self._dedupe([str(item) for item in (preferred_for or []) if str(item).strip()]),
+            not_replacement_for=self._dedupe([str(item) for item in (not_replacement_for or []) if str(item).strip()]),
             metadata=metadata,
         )
 
@@ -351,6 +406,11 @@ class CapabilityIndexService:
         related_tools: List[str],
         data_source: str,
         coverage_terms: List[str],
+        capability_tags: Optional[List[str]] = None,
+        tool_role_hint: str = "",
+        output_shape: str = "",
+        preferred_for: Optional[List[str]] = None,
+        not_replacement_for: Optional[List[str]] = None,
     ) -> str:
         parts = [
             f"tool_id: {tool_id}",
@@ -364,6 +424,11 @@ class CapabilityIndexService:
             f"related_tools: {' '.join(related_tools)}",
             f"data_source: {data_source}",
             f"coverage_terms: {' '.join(coverage_terms)}",
+            f"capability_tags: {' '.join(capability_tags or [])}",
+            f"tool_role_hint: {tool_role_hint}",
+            f"output_shape: {output_shape}",
+            f"preferred_for: {' '.join(preferred_for or [])}",
+            f"not_replacement_for: {' '.join(not_replacement_for or [])}",
         ]
         return "\n".join(part for part in parts if part.strip())
 
@@ -384,9 +449,11 @@ class CapabilityIndexService:
             (r"ev/?ebitda", "ev_ebitda"),
             (r"可比公司|同业对比|peer comparison|peer", "peer_comparison"),
             (r"估值|估价|定价|目标价|价格区间|估值区间|相对估值", "valuation_cn"),
-            (r"增长|growth|营收同比|净利润同比", "growth"),
-            (r"现金流|cashflow|fcf|ocf", "cashflow"),
-            (r"roe|roa|毛利率|净利率|piotroski|altman|beneish", "quality"),
+            (r"增长|growth|营收同比|净利润同比|cagr", "growth"),
+            (r"现金流|cashflow|fcf|ocf|经营现金流|自由现金流", "cashflow"),
+            (r"roe|roa|roic|毛利率|净利率|利润率|盈利稳定性|资本效率|piotroski|altman|beneish", "quality"),
+            (r"历史|多年|年报序列|时间序列|trend|series", "historical_series"),
+            (r"分位|percentile|估值分位", "percentile"),
             (r"ma20|rsi14|kdj|macd|技术指标|technical", "technical"),
         ]
         matched: List[str] = []

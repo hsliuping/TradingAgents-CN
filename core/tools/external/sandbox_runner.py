@@ -18,7 +18,7 @@ import tempfile
 import textwrap
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 from core.python_runtime import resolve_python_executable
 from .skill_spec import SandboxResult, SkillSpec
@@ -85,6 +85,48 @@ class SandboxRunner:
             return result
         except Exception as e:
             logger.error(f"沙箱执行异常: {e}")
+            return SandboxResult(
+                success=False,
+                error=str(e),
+                execution_time=round(time.time() - start_time, 3),
+            )
+
+    def run_diagnostic_script(
+        self,
+        script: str,
+        *,
+        allowed_tools: Optional[Sequence[str]] = None,
+    ) -> SandboxResult:
+        """执行构建期诊断脚本，并注入 hermes_tools RPC 等价 stub。
+
+        该能力只供 Agentic Skill 生成阶段确认真实字段/接口返回形状，
+        不允许进入最终 Skill 产物；最终代码仍由 StaticValidator 拦截 hermes_tools 等依赖。
+        """
+        start_time = time.time()
+        logger.info(
+            "🧪 [DiagnosticSandbox] start script_chars=%s allowed_tools=%s timeout=%s",
+            len(script or ""),
+            list(allowed_tools or []),
+            self.timeout,
+        )
+        try:
+            runner_script = self._build_diagnostic_runner_script(
+                script,
+                allowed_tools=allowed_tools,
+            )
+            result = self._execute_in_subprocess(runner_script)
+            result.execution_time = round(time.time() - start_time, 3)
+            logger.info(
+                "🧪 [DiagnosticSandbox] done success=%s execution_time=%.3fs error=%s stdout_chars=%s stderr_chars=%s",
+                result.success,
+                result.execution_time,
+                result.error,
+                len(result.stdout or ""),
+                len(result.stderr or ""),
+            )
+            return result
+        except Exception as e:
+            logger.error("诊断沙箱执行异常: %s", e)
             return SandboxResult(
                 success=False,
                 error=str(e),
@@ -162,6 +204,71 @@ class SandboxRunner:
                     sys.exit(1)
         """)
         return script
+
+    def _build_diagnostic_runner_script(
+        self,
+        script: str,
+        *,
+        allowed_tools: Optional[Sequence[str]] = None,
+    ) -> str:
+        """构造构建期诊断脚本，提供 hermes_tools stub。"""
+        allowed = list(allowed_tools or (
+            "run_readonly_query",
+            "probe_interface",
+            "inspect_collection_schema",
+            "describe_runtime_helper",
+        ))
+        allowed_json = json.dumps(allowed, ensure_ascii=False)
+        user_script = str(script or "")
+        return textwrap.dedent(f"""\
+            import json
+            import os
+            import sys
+            import types
+
+            PROJECT_ROOT = r"{self._project_root}"
+            if PROJECT_ROOT not in sys.path:
+                sys.path.insert(0, PROJECT_ROOT)
+            os.chdir(PROJECT_ROOT)
+
+            _ALLOWED_TOOLS = set(json.loads('''{allowed_json}'''))
+            _CALL_COUNT = 0
+            _MAX_CALLS = 12
+
+            def _call_build_tool(name, *args, **kwargs):
+                global _CALL_COUNT
+                if name not in _ALLOWED_TOOLS:
+                    raise PermissionError(f"diagnostic tool not allowed: {{name}}")
+                _CALL_COUNT += 1
+                if _CALL_COUNT > _MAX_CALLS:
+                    raise RuntimeError("diagnostic tool call limit exceeded")
+                from core.tools.external import recon_tools
+                func = getattr(recon_tools, name, None)
+                if not callable(func):
+                    raise RuntimeError(f"diagnostic tool not found: {{name}}")
+                raw = func(*args, **kwargs)
+                try:
+                    return json.loads(raw)
+                except Exception:
+                    return raw
+
+            hermes_tools = types.ModuleType("hermes_tools")
+            for _name in _ALLOWED_TOOLS:
+                setattr(hermes_tools, _name, (lambda tool_name: (lambda *args, **kwargs: _call_build_tool(tool_name, *args, **kwargs)))(_name))
+            sys.modules["hermes_tools"] = hermes_tools
+
+            if __name__ == "__main__":
+                try:
+                    _globals = {{"__name__": "__diagnostic__"}}
+                    exec({user_script!r}, _globals, _globals)
+                    result = _globals.get("result", _globals.get("RESULT", None))
+                    print("__SANDBOX_OUTPUT_START__")
+                    print(json.dumps({{"result": result, "tool_call_count": _CALL_COUNT}}, ensure_ascii=False, default=str))
+                    print("__SANDBOX_OUTPUT_END__")
+                except Exception as e:
+                    print(json.dumps({{"__error__": str(e)}}), file=sys.stderr)
+                    sys.exit(1)
+        """)
 
     def _execute_in_subprocess(self, script: str) -> SandboxResult:
         """在子进程中执行脚本"""

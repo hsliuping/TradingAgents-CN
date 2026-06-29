@@ -85,6 +85,7 @@ class SkillSpec(BaseModel):
     constraints: List[str] = Field(default_factory=list)    # 行为约束
     test_input: Dict[str, Any] = Field(default_factory=dict)  # 测试输入
     test_expected: Dict[str, Any] = Field(default_factory=dict)  # 测试期望
+    metadata: Dict[str, Any] = Field(default_factory=dict)       # 生成期附加上下文，不属于最终输出契约
 
 
 class TestCase(BaseModel):
@@ -288,6 +289,13 @@ class SkillHandoffContext(BaseModel):
     gap_id: str = ""                 # 来源能力缺口标识
     agent_name: str = ""             # 来源 Agent 名称
     agent_goal: str = ""             # 来源 Agent 主要目标
+    searched_capabilities: List[str] = Field(default_factory=list)      # 上游已检索/评估过的能力
+    confirmed_data_sources: List[str] = Field(default_factory=list)     # 上游已确认可用的数据源或 helper
+    user_clarifications: List[str] = Field(default_factory=list)        # 用户在上游澄清过的关键结论
+    gap_context: str = ""                                           # 当前 gap 的上下文摘要
+    related_gaps: List[str] = Field(default_factory=list)              # 同一次补齐任务中的相关 gap
+    known_failure_summaries: List[str] = Field(default_factory=list)  # 同一次 job 内已知失败摘要
+    known_verified_facts: List[str] = Field(default_factory=list)      # 同一次 job 内已验证环境事实
 
 
 class PipelineProgressEvent(BaseModel):

@@ -6,6 +6,8 @@ Skill 生成服务 — 业务逻辑层
 
 import asyncio
 import logging
+import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -37,6 +39,7 @@ SKILL_CODE_SNAPSHOT_DIR = PROJECT_ROOT / "data" / "code" / "skill"
 SESSION_COLLECTION = "skill_creation_sessions"
 SKILL_COLLECTION = "external_skills"
 SKILL_PIPELINE_MAX_ITERATIONS = 8
+SKILL_GENERATION_AGENTIC_ENABLED = os.getenv("SKILL_GENERATION_AGENTIC_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 
 
 class SkillGenerationService:
@@ -91,6 +94,107 @@ class SkillGenerationService:
         if session is not None:
             conversation = self._analyzer._collect_conversation(session)
         return self._analyzer.build_recommendations(conversation=conversation)
+
+    @staticmethod
+    def _dedupe_text_list(items: Any) -> List[str]:
+        result: List[str] = []
+        seen: set[str] = set()
+        if not isinstance(items, list):
+            return result
+        for item in items:
+            value = str(item or "").strip()
+            if not value:
+                continue
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(value)
+        return result
+
+    @staticmethod
+    def _infer_skill_role_metadata(spec: SkillSpec, session: SkillCreationSession) -> Dict[str, Any]:
+        text = " ".join([
+            spec.tool_id or "",
+            spec.display_name or "",
+            spec.description or "",
+            spec.category or "",
+            spec.data_source or "",
+            " ".join(spec.constraints or []),
+            " ".join(spec.expected_output.fields or []),
+            spec.expected_output.description or "",
+            str((spec.metadata or {}).get("handoff_context_summary") or ""),
+            str((spec.metadata or {}).get("generation_context") or ""),
+        ]).lower()
+        handoff = session.handoff_context
+        source = str(getattr(handoff, "source", "") or "") if handoff is not None else ""
+        source_capability = str(getattr(handoff, "target_capability", "") or "") if handoff is not None else ""
+        if source_capability:
+            text += " " + source_capability.lower()
+
+        capability_tags: List[str] = []
+        tag_patterns = [
+            (r"现金流|cash\s*flow|cashflow|ocf|fcf|cfo|自由现金流", "cashflow_quality"),
+            (r"财务健康|偿债|负债|debt|solvency|liquidity|current_ratio|interest_coverage", "financial_health"),
+            (r"风险|risk|预警|异常|商誉|应收|goodwill|receivable", "financial_risk"),
+            (r"估值|valuation|pe|pb|percentile|分位|dcf|peg", "valuation"),
+            (r"趋势|trend|series|历史|多年|time_series", "historical_series"),
+            (r"质量|quality|roe|roa|roic|piotroski|altman|beneish", "quality_factor"),
+            (r"技术|technical|macd|rsi|kdj|ma20", "technical"),
+            (r"新闻|news|舆情|sentiment", "news_sentiment"),
+        ]
+        for pattern, tag in tag_patterns:
+            if re.search(pattern, text):
+                capability_tags.append(tag)
+
+        output_fields = [str(item or "").lower() for item in (spec.expected_output.fields or [])]
+        output_type = str(spec.expected_output.type or "").lower()
+        if output_type in {"dict", "list[dict]", "list"} and output_fields:
+            if any(re.search(r"ratio|rate|score|metrics?|指标|比率|分数|flag", field) for field in output_fields):
+                output_shape = "structured_metrics"
+            else:
+                output_shape = "structured_records"
+        elif "markdown" in text or "报告" in text or "report" in text:
+            output_shape = "report"
+        else:
+            output_shape = "structured_records" if output_fields else "text"
+
+        preferred_for: List[str] = []
+        if "financial_risk" in capability_tags:
+            preferred_for.append("financial_risk_signal_detection")
+        if "cashflow_quality" in capability_tags:
+            preferred_for.append("cashflow_quality_analysis")
+        if "financial_health" in capability_tags:
+            preferred_for.append("financial_health_analysis")
+        if "valuation" in capability_tags:
+            preferred_for.append("valuation_analysis")
+        if "historical_series" in capability_tags:
+            preferred_for.append("historical_trend_analysis")
+
+        if source in {"agent_studio_gap", "agent_workshop_gap"}:
+            tool_role_hint = "specialized"
+        elif output_shape == "report":
+            tool_role_hint = "supporting"
+        elif len(preferred_for) == 1:
+            tool_role_hint = "specialized"
+        elif preferred_for:
+            tool_role_hint = "specialized"
+        else:
+            tool_role_hint = "supporting"
+
+        not_replacement_for: List[str] = []
+        if tool_role_hint in {"supporting", "generic", "fallback"}:
+            not_replacement_for.extend(preferred_for)
+        if output_shape == "report":
+            not_replacement_for.extend(["structured_metric_calculation", "primary_capability"])
+
+        return {
+            "capability_tags": SkillGenerationService._dedupe_text_list(capability_tags),
+            "tool_role_hint": tool_role_hint,
+            "output_shape": output_shape,
+            "preferred_for": SkillGenerationService._dedupe_text_list(preferred_for),
+            "not_replacement_for": SkillGenerationService._dedupe_text_list(not_replacement_for),
+        }
 
     @staticmethod
     def _get_last_generated_code(pipeline_result: Optional[PipelineResult]) -> str:
@@ -512,14 +616,19 @@ test_input: {spec.test_input}
                             f"{mem0_lessons}\n\n{initial_feedback}" if initial_feedback
                             else mem0_lessons
                         )
+                        metadata = dict(getattr(spec, "metadata", None) or {})
+                        metadata["cross_session_skill_lessons"] = mem0_lessons[:2000]
+                        spec.metadata = metadata
                 except Exception as e:
                     logger.debug("[mem0] Skill 教训召回失败（已忽略）: %s", e)
 
                 # 捕获 fact_report 到局部变量，避免 lambda 闭包问题
                 _fr = fact_report
+                method_name = "run_agentic" if SKILL_GENERATION_AGENTIC_ENABLED else "run"
+                logger.info("Skill 生成引擎: %s", method_name)
                 result = await asyncio.get_event_loop().run_in_executor(
                     None,
-                    lambda: self._controller.run(
+                    lambda: getattr(self._controller, method_name)(
                         spec,
                         initial_feedback=enriched_feedback,
                         initial_code=initial_code,
@@ -593,6 +702,58 @@ test_input: {spec.test_input}
             "final_score": None,
             "error": None,
         }
+
+    @staticmethod
+    def _apply_handoff_context_to_spec(spec: SkillSpec, handoff_context: Any) -> None:
+        """将上游交接上下文附加到 SkillSpec.metadata，供 Agentic Loop 使用。"""
+        if spec is None or handoff_context is None:
+            return
+        metadata = dict(getattr(spec, "metadata", None) or {})
+
+        def _string_list(field: str, limit: int) -> List[str]:
+            return [
+                str(item).strip()
+                for item in list(getattr(handoff_context, field, None) or [])
+                if str(item).strip()
+            ][:limit]
+
+        context_summary = {
+            "source": str(getattr(handoff_context, "source", "") or ""),
+            "source_spec_id": str(getattr(handoff_context, "source_spec_id", "") or getattr(handoff_context, "spec_id", "") or ""),
+            "source_name": str(getattr(handoff_context, "source_name", "") or getattr(handoff_context, "agent_name", "") or ""),
+            "target_capability": str(getattr(handoff_context, "target_capability", "") or ""),
+            "handoff_intent": str(getattr(handoff_context, "handoff_intent", "") or ""),
+            "workshop_session_id": str(getattr(handoff_context, "workshop_session_id", "") or ""),
+            "gap_id": str(getattr(handoff_context, "gap_id", "") or ""),
+            "agent_goal": str(getattr(handoff_context, "agent_goal", "") or ""),
+            "gap_context": str(getattr(handoff_context, "gap_context", "") or ""),
+            "searched_capabilities": _string_list("searched_capabilities", 12),
+            "confirmed_data_sources": _string_list("confirmed_data_sources", 12),
+            "user_clarifications": _string_list("user_clarifications", 12),
+            "related_gaps": _string_list("related_gaps", 12),
+        }
+        context_summary = {
+            key: value for key, value in context_summary.items()
+            if value not in ("", [], None)
+        }
+        if context_summary:
+            metadata["handoff_context_summary"] = context_summary
+
+        failures = _string_list("known_failure_summaries", 5)
+        facts = _string_list("known_verified_facts", 12)
+        if failures:
+            metadata["known_failure_summaries"] = failures
+        if facts:
+            metadata["known_verified_facts"] = facts
+        if context_summary or failures or facts:
+            logger.info(
+                "[SkillGeneration][HandoffContext] tool_id=%s context_keys=%s known_failures=%s known_facts=%s",
+                getattr(spec, "tool_id", ""),
+                sorted(context_summary.keys()),
+                len(metadata.get("known_failure_summaries") or []),
+                len(metadata.get("known_verified_facts") or []),
+            )
+        spec.metadata = metadata
 
     @staticmethod
     def _has_generation_context(context: Optional[Dict[str, Any]]) -> bool:
@@ -761,6 +922,7 @@ test_input: {spec.test_input}
         # 缓存 spec 与 fact_report 到 session，confirm_spec 时直接复用，
         # 避免再次调用 LLM 生成规格导致前端长时间停留在 0%。
         session.spec = final_spec
+        self._apply_handoff_context_to_spec(session.spec, session.handoff_context)
         session.fact_report = fact_report
         await self._save_session(session)
 
@@ -825,6 +987,8 @@ test_input: {spec.test_input}
                 "status": "failed",
                 "message": "规格生成失败，请重新描述需求",
             }
+
+        self._apply_handoff_context_to_spec(spec, session.handoff_context)
 
         # fact_report 同时传递给管线，跳过内部重复侦察
         return await self._launch_pipeline_task(
@@ -1338,9 +1502,10 @@ test_input: {spec.test_input}
 
         # 执行代码生成管线（带 feedback 和 previous_code）
         current_code = skill_doc.get("code", "")
+        method_name = "run_agentic" if SKILL_GENERATION_AGENTIC_ENABLED else "run"
         result = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: self._controller.run(
+            lambda: getattr(self._controller, method_name)(
                 spec,
                 initial_feedback=enhanced_feedback,
                 initial_code=current_code,
@@ -1459,8 +1624,10 @@ test_input: {spec.test_input}
         """保存生成的 Skill 到 external_skills 集合"""
         now = datetime.utcnow().isoformat()
         generation_context = self._build_session_recommendations(spec=spec, session=session)
+        role_metadata = self._infer_skill_role_metadata(spec, session)
         metadata = dict(result.final_metadata or {})
         metadata["generation_context"] = generation_context
+        metadata.update({key: value for key, value in role_metadata.items() if value})
         skill_doc = {
             "tool_id": spec.tool_id,
             "display_name": spec.display_name,
@@ -1473,6 +1640,13 @@ test_input: {spec.test_input}
             "metadata": metadata,
             "test_input": spec.test_input,
             "generation_context": generation_context,
+            "capability_tags": role_metadata.get("capability_tags") or [],
+            "tool_role_hint": role_metadata.get("tool_role_hint") or "",
+            "output_shape": role_metadata.get("output_shape") or "",
+            "preferred_for": role_metadata.get("preferred_for") or [],
+            "not_replacement_for": role_metadata.get("not_replacement_for") or [],
+            "known_failure_summaries": metadata.get("known_failure_summaries") or [],
+            "known_verified_facts": metadata.get("known_verified_facts") or [],
             "status": "active",
             "source": "generated",
             "session_id": session.session_id,
@@ -1560,12 +1734,30 @@ async def _recall_skill_lessons(db, spec: SkillSpec) -> str:
 
 
 async def _store_skill_lessons(db, spec: SkillSpec, result: PipelineResult) -> None:
-    """将本次管线中的迭代教训写入 mem0"""
+    """将本次管线中的迭代教训写入 mem0。"""
     try:
         from core.memory.service import get_memory_service
         svc = get_memory_service(db)
 
         lessons = []
+        metadata = dict(result.final_metadata or {})
+        verified_facts = [str(item) for item in list(metadata.get("verified_facts") or []) if str(item).strip()]
+        agentic_trace = metadata.get("agentic_trace") if isinstance(metadata.get("agentic_trace"), list) else []
+        last_failure_summary = str(result.error or "").strip()
+        if not last_failure_summary:
+            for item in reversed(agentic_trace):
+                if isinstance(item, dict) and str(item.get("failure_summary") or "").strip():
+                    last_failure_summary = str(item.get("failure_summary") or "").strip()
+                    break
+
+        if last_failure_summary:
+            lessons.append(
+                f"Skill '{spec.tool_id}' ({spec.category}/{spec.data_source}) Agentic 失败摘要: {last_failure_summary[:1200]}"
+            )
+        if verified_facts:
+            lessons.append(
+                f"Skill '{spec.tool_id}' 已验证环境事实: " + "；".join(verified_facts[:8])
+            )
         for it in (result.iterations or []):
             if it.reflection and it.reflection.root_cause:
                 lessons.append(
@@ -1592,6 +1784,8 @@ async def _store_skill_lessons(db, spec: SkillSpec, result: PipelineResult) -> N
                 "data_source": spec.data_source,
                 "success": result.success,
                 "total_rounds": result.total_rounds,
+                "generation_engine": metadata.get("generation_engine", ""),
+                "verified_fact_count": len(verified_facts),
             },
         )
     except Exception as e:

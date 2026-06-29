@@ -21,6 +21,11 @@ class CapabilityDocument(BaseModel):
     coverage_terms: List[str] = Field(default_factory=list, description="领域覆盖关键词")
     retrieval_text: str = Field(default="", description="写入向量库的检索文本")
     data_source: str = Field(default="", description="底层数据源")
+    capability_tags: List[str] = Field(default_factory=list, description="结构化能力标签")
+    tool_role_hint: str = Field(default="", description="工具角色提示：primary/specialized/supporting/generic/fallback")
+    output_shape: str = Field(default="", description="输出形态：structured_metrics/report/text 等")
+    preferred_for: List[str] = Field(default_factory=list, description="优先适用的能力原语")
+    not_replacement_for: List[str] = Field(default_factory=list, description="不能替代的能力原语")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="附加元数据")
 
 

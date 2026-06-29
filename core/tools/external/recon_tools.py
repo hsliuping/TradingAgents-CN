@@ -9,9 +9,15 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import time
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
+
+_READONLY_QUERY_CALL_COUNT = 0
+_PROBE_INTERFACE_CALL_COUNT = 0
+_PROBE_INTERFACE_LAST_CALLED_AT: Dict[str, float] = {}
+_PROBE_INTERFACE_MIN_INTERVAL_SECONDS = 0.1
 
 # ---------------------------------------------------------------------------
 # 工具 1: 列出可用集合
@@ -198,7 +204,232 @@ def list_mcp_tools() -> str:
 
 
 # ---------------------------------------------------------------------------
-# 工具注册表（供 ReconnaissanceController 使用）
+# 工具 9: 读取真实样本文档
+# ---------------------------------------------------------------------------
+
+def _contains_mongo_operator(value: Any) -> bool:
+    """保守拒绝 MongoDB 操作符，确保只读查询工具只支持简单等值过滤。"""
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if str(key).startswith("$"):
+                return True
+            if _contains_mongo_operator(nested):
+                return True
+    elif isinstance(value, list):
+        return any(_contains_mongo_operator(item) for item in value)
+    return False
+
+
+def _json_safe_preview(value: Any, max_chars: int = 6000) -> Any:
+    """转换为 JSON 安全对象，并限制返回体积。"""
+    text = json.dumps(value, ensure_ascii=False, default=str)
+    if len(text) <= max_chars:
+        return json.loads(text)
+    return {
+        "truncated": True,
+        "original_chars": len(text),
+        "preview": text[:max_chars],
+    }
+
+
+def run_readonly_query(
+    collection: str,
+    filter: dict = None,
+    projection: dict = None,
+    limit: int = 20,
+) -> str:
+    """在白名单 MongoDB 集合上执行只读查询，返回真实样本文档。
+    参数 collection: 集合名，仅允许 skill_runtime.catalog.SUPPORTED_COLLECTIONS 中登记的集合。
+    参数 filter: 简单等值过滤条件，不允许 $where/$regex/$expr 等 Mongo 操作符。
+    参数 projection: 字段投影，默认排除 _id。
+    参数 limit: 返回条数，最大 20。
+    返回 JSON 对象，包含 collection、filter、returned_count、documents、metrics。"""
+    global _READONLY_QUERY_CALL_COUNT
+    _READONLY_QUERY_CALL_COUNT += 1
+    started = time.perf_counter()
+    from core.skill_runtime.catalog import SUPPORTED_COLLECTIONS
+    from core.skill_runtime.project_access import query_stock_collection
+
+    collection_name = str(collection or "").strip()
+    if collection_name not in SUPPORTED_COLLECTIONS:
+        return json.dumps({
+            "success": False,
+            "error": f"unsupported collection: {collection_name}",
+            "allowed_collections": sorted(SUPPORTED_COLLECTIONS),
+            "metrics": {"call_count": _READONLY_QUERY_CALL_COUNT},
+        }, ensure_ascii=False)
+
+    filters = filter or {}
+    projections = projection or {"_id": 0}
+    if not isinstance(filters, dict):
+        return json.dumps({"success": False, "error": "filter must be an object", "metrics": {"call_count": _READONLY_QUERY_CALL_COUNT}}, ensure_ascii=False)
+    if not isinstance(projections, dict):
+        return json.dumps({"success": False, "error": "projection must be an object", "metrics": {"call_count": _READONLY_QUERY_CALL_COUNT}}, ensure_ascii=False)
+    if _contains_mongo_operator(filters) or _contains_mongo_operator(projections):
+        return json.dumps({
+            "success": False,
+            "error": "Mongo operators are not allowed in run_readonly_query; use simple equality filters only",
+            "metrics": {"call_count": _READONLY_QUERY_CALL_COUNT},
+        }, ensure_ascii=False)
+
+    capped_limit = max(1, min(int(limit or 20), 20))
+    try:
+        docs = query_stock_collection(
+            collection=collection_name,
+            filters=filters,
+            projection=projections,
+            limit=capped_limit,
+        )
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+        payload = {
+            "success": True,
+            "collection": collection_name,
+            "filter": filters,
+            "projection": projections,
+            "limit": capped_limit,
+            "returned_count": len(docs),
+            "documents": docs,
+            "metrics": {
+                "call_count": _READONLY_QUERY_CALL_COUNT,
+                "elapsed_ms": elapsed_ms,
+                "limit_capped": int(limit or 20) != capped_limit,
+            },
+        }
+        return json.dumps(_json_safe_preview(payload), ensure_ascii=False, default=str)
+    except Exception as exc:
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+        logger.warning("[recon] run_readonly_query failed: %s", exc)
+        return json.dumps({
+            "success": False,
+            "error": str(exc),
+            "metrics": {"call_count": _READONLY_QUERY_CALL_COUNT, "elapsed_ms": elapsed_ms},
+        }, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# 工具 10: 真实调用运行时 helper / 外部接口探针
+# ---------------------------------------------------------------------------
+
+def _summarize_probe_shape(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        keys = list(value.keys())
+        summary: Dict[str, Any] = {
+            "type": "dict",
+            "keys": keys[:30],
+            "key_count": len(keys),
+        }
+        for key in ("data", "items", "result", "records"):
+            nested = value.get(key)
+            if isinstance(nested, list):
+                summary[f"{key}_length"] = len(nested)
+                if nested:
+                    summary[f"{key}_first_item_type"] = type(nested[0]).__name__
+                    if isinstance(nested[0], dict):
+                        summary[f"{key}_first_item_keys"] = list(nested[0].keys())[:30]
+            elif isinstance(nested, dict):
+                summary[f"{key}_keys"] = list(nested.keys())[:30]
+        return summary
+    if isinstance(value, list):
+        summary = {"type": "list", "length": len(value)}
+        if value:
+            summary["first_item_type"] = type(value[0]).__name__
+            if isinstance(value[0], dict):
+                summary["first_item_keys"] = list(value[0].keys())[:30]
+        return summary
+    return {"type": type(value).__name__}
+
+
+def _resolve_runtime_helper(source_or_helper: str):
+    import importlib
+
+    raw = str(source_or_helper or "").strip()
+    if not raw:
+        raise ValueError("source_or_helper is required")
+
+    module_map = {
+        "data_access": "core.skill_runtime.data_access",
+        "project_access": "core.skill_runtime.project_access",
+        "external_sources": "core.skill_runtime.external_sources",
+    }
+    allowed_modules = set(module_map.values())
+
+    if raw.count(".") >= 1:
+        module_part, func_name = raw.rsplit(".", 1)
+        module_name = module_map.get(module_part, module_part)
+        if module_name not in allowed_modules:
+            raise ValueError(f"unsupported helper module: {module_name}")
+        module = importlib.import_module(module_name)
+        func = getattr(module, func_name, None)
+        if callable(func) and not func_name.startswith("_"):
+            return module_name, func_name, func
+        raise ValueError(f"helper not found: {raw}")
+
+    for module_name in allowed_modules:
+        module = importlib.import_module(module_name)
+        func = getattr(module, raw, None)
+        if callable(func) and not raw.startswith("_"):
+            return module_name, raw, func
+    raise ValueError(f"helper not found: {raw}")
+
+
+def probe_interface(source_or_helper: str, sample_args: dict = None) -> str:
+    """真实调用一次已登记的 skill_runtime helper，返回可用性、返回形状和预览。
+    参数 source_or_helper: helper 名称，支持 get_external_valuation_data、external_sources.get_external_valuation_data、core.skill_runtime.external_sources.get_external_valuation_data 等。
+    参数 sample_args: 样例参数对象，例如 {"symbol":"600519", "start_date":"2024-01-01", "end_date":"2024-12-31"}。
+    返回 JSON 对象，包含 success、module、function、elapsed_ms、shape、preview、metrics 或 error。"""
+    global _PROBE_INTERFACE_CALL_COUNT
+    _PROBE_INTERFACE_CALL_COUNT += 1
+
+    args = sample_args or {}
+    if not isinstance(args, dict):
+        return json.dumps({"success": False, "error": "sample_args must be an object", "metrics": {"call_count": _PROBE_INTERFACE_CALL_COUNT}}, ensure_ascii=False)
+    if _contains_mongo_operator(args):
+        return json.dumps({"success": False, "error": "Mongo-style operators are not allowed in sample_args", "metrics": {"call_count": _PROBE_INTERFACE_CALL_COUNT}}, ensure_ascii=False)
+
+    started = time.perf_counter()
+    try:
+        module_name, func_name, func = _resolve_runtime_helper(source_or_helper)
+        rate_key = f"{module_name}.{func_name}"
+        now = time.perf_counter()
+        last_called = _PROBE_INTERFACE_LAST_CALLED_AT.get(rate_key, 0.0)
+        min_interval = _PROBE_INTERFACE_MIN_INTERVAL_SECONDS
+        waited_ms = 0.0
+        if min_interval > 0 and now - last_called < min_interval:
+            wait_seconds = min_interval - (now - last_called)
+            time.sleep(wait_seconds)
+            waited_ms = round(wait_seconds * 1000, 2)
+        _PROBE_INTERFACE_LAST_CALLED_AT[rate_key] = time.perf_counter()
+
+        result = func(**args)
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+        payload = {
+            "success": True,
+            "module": module_name,
+            "function": func_name,
+            "elapsed_ms": elapsed_ms,
+            "shape": _summarize_probe_shape(result),
+            "preview": _json_safe_preview(result, max_chars=4000),
+            "metrics": {
+                "call_count": _PROBE_INTERFACE_CALL_COUNT,
+                "rate_limit_wait_ms": waited_ms,
+                "min_interval_ms": round(min_interval * 1000, 2),
+            },
+        }
+        return json.dumps(payload, ensure_ascii=False, default=str)
+    except Exception as exc:
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+        logger.warning("[recon] probe_interface failed: %s", exc)
+        return json.dumps({
+            "success": False,
+            "source_or_helper": source_or_helper,
+            "elapsed_ms": elapsed_ms,
+            "error": str(exc),
+            "metrics": {"call_count": _PROBE_INTERFACE_CALL_COUNT},
+        }, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# 工具注册表（供 ReconnaissanceController / Agentic Loop 使用）
 # ---------------------------------------------------------------------------
 
 RECON_TOOLS: List[callable] = [
@@ -210,6 +441,9 @@ RECON_TOOLS: List[callable] = [
     list_runtime_functions,
     list_external_data_sources,
     list_mcp_tools,
+    run_readonly_query,
+    probe_interface,
 ]
-"""侦察阶段可用的全部工具函数列表。"""
+"""侦察阶段与 Agentic Skill 生成循环可用的全部工具函数列表。"""
+
 

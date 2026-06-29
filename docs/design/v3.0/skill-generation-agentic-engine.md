@@ -2,6 +2,7 @@
 
 > 版本：v3.0 设计文档
 > 更新时间：2026-06-28
+> 实现进度：Phase E0/E1/E2a/E2b 已完成第一版最小闭环；Phase E3a 已完成第一版；Phase E3b 待真实数据验证后决定。
 > 关联文档：[agent-studio-skill-auto-completion.md](./agent-studio-skill-auto-completion.md)
 > 目标：把 Skill 生成的内核从「固定 DAG 管线」升级为「工具增强的 Agent 循环」，让生成器在生成过程中能感知环境、能自递归、能复用 Nanobot 的上下文与经验，同时完整保留既有质控与治理闸门。
 > 外部参考：借鉴 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 的循环形状与工具模式，但不替换底座。本文 §3.4 记录了具体借鉴项与适用边界。
@@ -423,13 +424,28 @@ Skill 创建是异步任务，因此系统存在「已提交但尚未注册为�
 
 验收标准：同一 `agent_spec_id + gap_id/target_capability` 在任意时刻最多只有一个 active Skill 生成会话。
 
-## 6. 实施计划
+---
+
+## 6. 实施计划与进度
 
 > 推进原则：先以**最小侵入**验证「Agent 化是否真能解决复杂需求」，再决定是否扩大改造面。每一步都不动 Nanobot 底座、不引入 Hermes 替换底座。
 > 
 > Phase 顺序按依赖关系排列，不是按重要性。E2a 和 E2b 必须并行推进（互不依赖，但 E2b 是整个中间路线的支柱）。
 
 ### Phase E0：专用循环边界 + handoff_context 加厚 + in-flight 幂等
+
+状态：**部分完成（2026-06-28）**。
+
+已完成：
+
+1. [iteration_controller.py](../../../core/tools/external/iteration_controller.py) 新增 `run_agentic()`，Skill 生成默认进入 **SkillGeneration 专用 Agent Loop**，不运行在 Nanobot 主对话循环内。
+2. [skill_generation_service.py](../../../app/services/skill_generation_service.py) 默认调用 `run_agentic()`；保留 `SKILL_GENERATION_AGENTIC_ENABLED=false` 回退旧 `run()` 管线。
+3. 上游 Agent 工坊入口已补充 active `skill_creation_sessions` 复用逻辑，避免同一 gap 被同步入口和异步 GapJob 重复生成。
+
+待完成：
+
+1. `handoff_context` 仍需进一步加厚为完整现状摘要，并在 Agentic prompt 中更系统地消费。
+2. in-flight 幂等需要补充更完整的集成测试，覆盖所有入口。
 
 内容：
 
@@ -447,6 +463,25 @@ Skill 创建是异步任务，因此系统存在「已提交但尚未注册为�
 
 ### Phase E1：循环内常驻查询/探针工具
 
+状态：**已完成第一版（2026-06-28）**。
+
+已完成：
+
+1. [recon_tools.py](../../../core/tools/external/recon_tools.py) 新增 `run_readonly_query()`：
+   - 只允许查询 `skill_runtime.catalog.SUPPORTED_COLLECTIONS` 白名单集合。
+   - 仅支持简单等值过滤，拒绝 Mongo `$` 操作符。
+   - `limit` 上限为 20，并限制返回体积。
+2. [recon_tools.py](../../../core/tools/external/recon_tools.py) 新增 `probe_interface()`：
+   - 允许真实调用 `core.skill_runtime.data_access`、`project_access`、`external_sources` 中公开 helper。
+   - 返回 success、耗时、返回形状、结果预览。
+3. 两个工具已加入 `RECON_TOOLS`，并注册进 `run_agentic()` 的常驻工具集。
+4. 已新增测试覆盖操作符拒绝和 helper 返回形状探测。
+
+待增强：
+
+1. 增加更细粒度的频控/超时指标统计。
+2. 在真实复杂 Skill 生成中验证是否能纠正 schema 误判。
+
 内容：
 
 1. 新增 `run_readonly_query`、`probe_interface`，落实只读/白名单/限额/超时/频控约束。
@@ -461,6 +496,24 @@ Skill 创建是异步任务，因此系统存在「已提交但尚未注册为�
 3. 两个工具均无法触发写操作，且受 limit/超时/频控保护。
 
 ### Phase E2a：ReAct 反思替代显式根因分类
+
+状态：**已完成第一版（2026-06-28）**。
+
+已完成：
+
+1. [iteration_controller.py](../../../core/tools/external/iteration_controller.py) 新增 Agentic 外层循环，由 LLM 在每一步自主选择查询/探针/诊断脚本/`pipeline_tool`。
+2. `pipeline_tool` 失败后返回 `failure_summary`、`should_retry`、`evaluation`、`sandbox_result`，由外层 Agent Loop 决定下一步，而不是旧管线内部固定重试。
+3. `verified_facts` 会从 `run_readonly_query`、`probe_interface`、`run_diagnostic_script` 的工具结果中自动累积。
+4. `agentic_trace` 与 `verified_facts` 已写入 `PipelineResult.final_metadata`，成功/失败均可审计。
+
+保留项：
+
+- `_reflect_on_failure()` 暂未删除，仍作为 `pipeline_tool` 单轮内部的失败审计和 `should_retry` 判断来源；外层流程不再依赖显式「根因分类 → 再侦察」分支。
+
+待增强：
+
+1. 将 `failure_summary` 更明确地追加进下一轮 LLM 消息，而不是只作为状态变量供下一次 `pipeline_tool` 使用。
+2. 真实复杂用例验证后，再决定是否进一步弱化 `_reflect_on_failure()`。
 
 前置依赖：Phase E1（循环已有真实查询/探针工具可用）。
 
@@ -479,6 +532,24 @@ Skill 创建是异步任务，因此系统存在「已提交但尚未注册为�
 
 ### Phase E2b：管线工具化 + 沙箱工具访问
 
+状态：**已完成第一版（2026-06-28）**。
+
+已完成：
+
+1. [iteration_controller.py](../../../core/tools/external/iteration_controller.py) 新增 `_run_pipeline_tool_once()`，将「代码生成 → 静态校验 → 沙箱执行 → Judge 评分 → 业务验收 → 边缘测试」封装为单轮 `pipeline_tool`。
+2. `pipeline_tool` 对外返回 `status`、`code_path`、`snapshot_path`、`static_validation`、`sandbox_result`、`evaluation`、`failure_summary`、`verified_facts`、`should_retry`。
+3. [sandbox_runner.py](../../../core/tools/external/sandbox_runner.py) 新增 `run_diagnostic_script()`：
+   - 构建期诊断脚本可临时 `import hermes_tools`。
+   - `hermes_tools` stub 只映射白名单只读工具。
+   - 单次最多 12 次工具调用。
+4. [static_validator.py](../../../core/tools/external/static_validator.py) 已拦截最终 Skill 代码导入 `hermes_tools`、`sandbox_tools`、`skill_build_tools`，避免构建期 stub 泄漏到线上运行时。
+5. 新增 [test_skill_generation_agentic_engine.py](../../../tests/core/tools/test_skill_generation_agentic_engine.py)，覆盖诊断沙箱、构建期 stub、最终 Skill 拦截、查询/探针工具。
+
+待增强：
+
+1. 诊断沙箱目前是等价 stub，不是完整 RPC server；后续如需要更强隔离，可替换为真正主进程 RPC dispatch。
+2. `pipeline_tool` 的 stale failure 熔断目前主要依赖外层轮次和内部 `should_retry`，后续可补充显式相同失败签名计数。
+
 前置依赖：无（技术层面独立，可与 E2a 并行；但从验证节奏看，建议 E2a/E2b 同批推进）。
 
 内容：
@@ -494,6 +565,26 @@ Skill 创建是异步任务，因此系统存在「已提交但尚未注册为�
 3. 沙箱工具调用无法绕过白名单，且受限额保护。
 
 ### Phase E3a：同 job 内经验不重复犯错（低成本）
+
+状态：**已完成第一版（2026-06-28）**。
+
+已完成：
+
+1. [nanobot_agent_builder_tools.py](../../../core/tools/implementations/agent_builder/nanobot_agent_builder_tools.py) 新增同 job 经验聚合：`_collect_gap_job_known_context()` 会从同一 GapJob 的其他 gap 中收集 `agentic_failure_summary` 与 `agentic_verified_facts`。
+2. GapJob worker 在启动后续 Skill session 时，会将已知失败摘要和已验证事实写入 `handoff_context.known_failure_summaries` / `known_verified_facts`。
+3. GapJob 轮询到 Skill session `completed` / `failed` 时，会从 `skill_creation_sessions.pipeline_result.final_metadata` 抽取并回写：
+   - `agentic_failure_summary`
+   - `agentic_verified_facts`
+   - `agentic_trace`
+   - `generation_engine`
+4. [requirement_analyzer.py](../../../core/tools/external/requirement_analyzer.py) 的上游交接上下文会展示同 job 已知失败和已验证事实，要求后续 Skill 不要重复采用已被证伪的数据源/字段假设。
+5. [skill_generation_service.py](../../../app/services/skill_generation_service.py) 会将 handoff_context 中的已知经验写入 `SkillSpec.metadata`。
+6. [iteration_controller.py](../../../core/tools/external/iteration_controller.py) 的 Agentic 初始 prompt 会消费 `SkillSpec.metadata.known_failure_summaries` / `known_verified_facts`。
+
+待增强：
+
+1. 增加同 job 多 gap 经验复用的集成测试。
+2. 在真实 gap resolution 任务中观察是否明显减少重复踩坑。
 
 前置依赖：Phase E2a+E2b（循环已有完整工具集与审计留痕）。
 
@@ -551,7 +642,7 @@ Phase E0 专用循环边界 + 加厚 handoff_context + in-flight 幂等
   → Phase E1 常驻查询/探针工具（循环任一步都可调）
   → Phase E2a ReAct 反思替代显式根因分类 + failure_summary 工作记忆
   → Phase E2b 单轮 pipeline_tool + 沙箱工具访问边界
-  → Phase E3a 同 job 内不重复犯错
+  → Phase E3a 同 job 内不重复犯错（已完成第一版）
   → Phase E3b 跨 session 经验（看数据再决定做不做）
 ```
 
@@ -560,4 +651,4 @@ Phase E0 专用循环边界 + 加厚 handoff_context + in-flight 幂等
 - 跨 session 经验（E3b）不在当前阶段设计——先做完 E1+E2 并在真实复杂需求上跑数据后，再决定范围。
 - 治理、合规、质控闸门一毫米不松。
 
-先做 Phase E1–E2 拿到「能查数据、能验接口、能自递归」的最小闭环，在一条真实复杂需求上验证后，再决定是否推进 E3/E4——以及是否真的还需要 Hermes。
+先做 Phase E1–E2 拿到「能查数据、能验接口、能自递归」的最小闭环；截至 2026-06-28，E1–E3a 已完成第一版实现，并通过新增 Agentic Engine 单测。下一步应在真实复杂需求上验证效果，再决定 E3b 是否需要跨 session 经验。
