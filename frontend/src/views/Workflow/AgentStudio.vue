@@ -1010,7 +1010,7 @@ const applyThreadContext = async (threadContext?: EmbeddedNanobotThreadContext |
 
   if (sessionId) {
     if (String(currentSession.value?.session_id || '').trim() !== sessionId) {
-      await loadSession(sessionId, { syncNanobotThread: false })
+      await loadSession(sessionId, { syncNanobotThread: false, silent: true })
     }
   } else if (specId) {
     const currentSpecId = String(displaySpec.value?.spec_id || '').trim()
@@ -1835,7 +1835,7 @@ const loadLatestVersionContext = async (specId?: string) => {
   }
 }
 
-const loadSession = async (sessionId?: string, options?: { syncNanobotThread?: boolean }) => {
+const loadSession = async (sessionId?: string, options?: { syncNanobotThread?: boolean; silent?: boolean }) => {
   const normalized = String(sessionId || '').trim()
   if (!normalized) return
   if (sessionRequests.has(normalized)) {
@@ -1860,7 +1860,10 @@ const loadSession = async (sessionId?: string, options?: { syncNanobotThread?: b
         await loadNanobotThreadMessages({ sessionKey: currentNanobotSessionKey.value, silent: true })
       }
     } catch (error: any) {
-      ElMessage.error(error?.message || '加载会话失败')
+      if (!options?.silent) {
+        ElMessage.error(error?.message || '加载会话失败')
+      }
+      throw error
     } finally {
       loadingSession.value = false
     }
@@ -1886,15 +1889,9 @@ const openAgentItem = async (item: AgentSpec) => {
   expandAgentBranch(item.spec_id)
   await ensureSpecVersionsLoaded(item.spec_id)
   await loadLatestVersionContext(item.spec_id)
-  currentSession.value = null
-  nanobotDraftLink.value = {
-    specId: item.spec_id,
-    specName: item.name || '当前 Draft',
-    sessionId: item.latest_session_id || undefined,
-  }
-  await loadGapDeadLetters({ silent: true })
 
-  // 恢复目标 Agent 的聊天记录
+  // 🔥 优先加载并显示 Nanobot 聊天历史（用户真正的对话）
+  // workshop session 只用于状态管理（gap report、tooling plan 等），不用于显示消息
   const savedMessages = specMessagesMap.value[item.spec_id]
   const savedSessionKey = specSessionKeyMap.value[item.spec_id]
   if (savedMessages && savedMessages.length) {
@@ -1914,6 +1911,35 @@ const openAgentItem = async (item: AgentSpec) => {
       await loadNanobotThreadMessages({ sessionKey: matchingThread.session_key || matchingThread.thread_id, silent: true })
     }
   }
+
+  // 加载 workshop session（用于状态管理，不影响聊天显示）
+  if (item.latest_session_id) {
+    try {
+      await loadSession(item.latest_session_id, { syncNanobotThread: false, silent: true })
+      nanobotDraftLink.value = {
+        specId: currentSession.value?.current_spec_snapshot?.spec_id || item.spec_id,
+        specName: currentSession.value?.current_spec_snapshot?.name || item.name || '当前 Draft',
+        sessionId: currentSession.value?.session_id,
+      }
+    } catch {
+      currentSession.value = null
+      nanobotDraftLink.value = {
+        specId: item.spec_id,
+        specName: item.name || '当前 Draft',
+        sessionId: item.latest_session_id || undefined,
+      }
+    }
+  } else {
+    currentSession.value = null
+    nanobotDraftLink.value = {
+      specId: item.spec_id,
+      specName: item.name || '当前 Draft',
+      sessionId: undefined,
+    }
+  }
+
+  await loadGapDeadLetters({ silent: true })
+
   nanobotStreaming.value = false
   nanobotProgressHint.value = ''
   nanobotToolEvents.value = []
@@ -2266,7 +2292,13 @@ const loadInitialState = async () => {
   const restored = !hasExplicitRouteTarget ? restoreState() : false
 
   if (routeSessionId) {
-    await loadSession(routeSessionId, { syncNanobotThread: false })
+    try {
+      await loadSession(routeSessionId, { syncNanobotThread: false, silent: true })
+    } catch (error: any) {
+      if (isNotFoundError(error)) {
+        clearInvalidPersistedSpec(routeSessionId)
+      }
+    }
   } else if (routeSpecId) {
     const matchedAgent = agentItems.value.find(item => item.spec_id === routeSpecId)
     if (matchedAgent) {
@@ -2285,24 +2317,33 @@ const loadInitialState = async () => {
       } catch (error: any) {
         if (isNotFoundError(error)) {
           clearInvalidPersistedSpec(routeSpecId)
-          ElMessage.warning('该 Agent 已不存在，已清理本地缓存')
         }
       }
     }
   } else if (restored) {
     const persisted = readPersistedStudioState()
     if (persisted?.sessionId) {
-      await loadSession(persisted.sessionId, { syncNanobotThread: false })
-    } else if (persisted?.specId) {
       try {
-        standaloneSpec.value = await agentWorkshopApi.getSpec(persisted.specId)
-        expandAgentBranch(persisted.specId)
-        await ensureSpecVersionsLoaded(persisted.specId)
-        await loadLatestVersionContext(persisted.specId)
+        await loadSession(persisted.sessionId, { syncNanobotThread: false, silent: true })
       } catch (error: any) {
         if (isNotFoundError(error)) {
           clearInvalidPersistedSpec(persisted.specId)
-          ElMessage.warning('上次打开的 Agent 已被删除，已清理本地缓存')
+        }
+      }
+    } else if (persisted?.specId) {
+      const matchedByList = agentItems.value.find(item => item.spec_id === persisted.specId)
+      if (matchedByList) {
+        await openAgentItem(matchedByList)
+      } else {
+        try {
+          standaloneSpec.value = await agentWorkshopApi.getSpec(persisted.specId)
+          expandAgentBranch(persisted.specId)
+          await ensureSpecVersionsLoaded(persisted.specId)
+          await loadLatestVersionContext(persisted.specId)
+        } catch (error: any) {
+          if (isNotFoundError(error)) {
+            clearInvalidPersistedSpec(persisted.specId)
+          }
         }
       }
     }

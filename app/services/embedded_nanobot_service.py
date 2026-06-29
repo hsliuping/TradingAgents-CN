@@ -11,7 +11,7 @@ from typing import ClassVar
 from typing import Any
 
 from core.embedded_nanobot.runtime import EmbeddedNanobotRuntime
-from core.tools.context import set_current_assistant_thread_id, set_current_user_id
+from core.tools.context import get_current_assistant_thread_context, set_current_assistant_thread_context, set_current_assistant_thread_id, set_current_user_id
 
 
 logger = logging.getLogger(__name__)
@@ -438,6 +438,17 @@ class EmbeddedNanobotService:
 
         user_token = set_current_user_id(user_id) if user_id else None
         thread_token = set_current_assistant_thread_id(current_thread_id) if current_thread_id else None
+        thread_context_token = set_current_assistant_thread_context(thread_context)
+        logger.info(
+            "[EmbeddedNanobot][ThreadContext] chat thread_id=%s session_key=%s channel=%s spec_id=%s version_id=%s workshop_session_id=%s spec_name=%s",
+            current_thread_id or kwargs.get("chat_id") or session_key,
+            session_key,
+            kwargs.get("channel") or "embedded",
+            thread_context.get("spec_id"),
+            thread_context.get("version_id"),
+            thread_context.get("workshop_session_id"),
+            thread_context.get("spec_name"),
+        )
         try:
             result = await runtime.handle_message(
                 user_message=user_message,
@@ -449,6 +460,15 @@ class EmbeddedNanobotService:
             )
             if user_id:
                 try:
+                    # 工具执行期间可能更新了 contextvar 中的 intent context，持久化时必须使用最新上下文
+                    latest_thread_context = get_current_assistant_thread_context() or thread_context
+                    if latest_thread_context != thread_context:
+                        logger.info(
+                            "[EmbeddedNanobot][IntentContext] persist updated thread_context thread_id=%s spec_id=%s intent=%s",
+                            current_thread_id or kwargs.get("chat_id") or session_key,
+                            latest_thread_context.get("spec_id"),
+                            latest_thread_context.get("intent"),
+                        )
                     await self.persist_chat_turn(
                         user_id=user_id,
                         thread_id=current_thread_id or kwargs.get("chat_id") or session_key,
@@ -461,12 +481,13 @@ class EmbeddedNanobotService:
                         stop_reason=result.get("stop_reason"),
                         usage=result.get("usage") or {},
                         tool_events=result.get("tool_events") or [],
-                        thread_context=thread_context,
+                        thread_context=latest_thread_context,
                     )
                 except Exception:
                     logger.exception("[EmbeddedNanobot] 写入数据库会话历史失败")
             return result
         finally:
+            thread_context_token.var.reset(thread_context_token)
             if thread_token is not None:
                 thread_token.var.reset(thread_token)
             if user_token is not None:

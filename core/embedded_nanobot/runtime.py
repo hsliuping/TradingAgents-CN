@@ -25,6 +25,7 @@ from core.embedded_nanobot.command.router import CommandContext, CommandRouter
 from core.embedded_nanobot.cron.service import CronService
 from core.embedded_nanobot.providers.unified import TradingAgentsLLMProvider
 from core.embedded_nanobot.session.manager import SessionManager
+from core.embedded_nanobot.intent_context import IntentContext
 from core.embedded_nanobot.utils.helpers import estimate_prompt_tokens, estimate_prompt_tokens_chain, sanitize_content_blocks, sanitize_tool_result_content, strip_think
 from core.tools.config import ToolCategory
 
@@ -793,67 +794,124 @@ class EmbeddedNanobotRuntime:
         spec_id: str,
         thread_context: dict[str, Any],
     ) -> str | None:
-        """根据 thread_context.spec_id 加载当前 Agent 的聚焦信息块。"""
+        """构建当前 Agent 的意图上下文聚焦块。
+
+        优先使用 thread_context.intent（结构化意图上下文），
+        回退到旧字段（spec_name / version_id）。
+        """
         try:
-            spec_name = str(thread_context.get("spec_name") or "").strip()
-            version_id = str(thread_context.get("version_id") or "").strip()
-            version_status = str(thread_context.get("version_status") or "").strip()
+            # --- 先尝试从 thread_context.intent 构建 ---
+            intent_raw = thread_context.get("intent") if isinstance(thread_context, dict) else None
+            intent_ctx: IntentContext | None = None
+            if intent_raw and isinstance(intent_raw, dict):
+                intent_ctx = IntentContext.from_dict(intent_raw)
+                # 确保 intent_ctx 与当前 thread_context 的 spec_id 同步
+                if spec_id and (not intent_ctx.spec_id or intent_ctx.spec_id != spec_id):
+                    intent_ctx.spec_id = spec_id
+                    spec_name = str(thread_context.get("spec_name") or "").strip()
+                    if spec_name and not intent_ctx.spec_name:
+                        intent_ctx.spec_name = spec_name
 
+            # --- 如果没有 intent 字段，从旧字段构建 ---
+            if not intent_ctx or (not intent_ctx.spec_id and not intent_ctx.action):
+                spec_name = str(thread_context.get("spec_name") or "").strip()
+                version_id = str(thread_context.get("version_id") or "").strip()
+                version_status = str(thread_context.get("version_status") or "").strip()
+
+                if not spec_name:
+                    return None
+
+                intent_ctx = IntentContext(
+                    spec_id=spec_id,
+                    spec_name=spec_name,
+                    action="",
+                    stage="",
+                    intent_summary="",
+                )
+                intent_ctx.ensure_timestamps()
+
+            # --- 加载额外数据丰富 intent_ctx ---
             db = self.memory_db
-            spec_doc = await db.agent_workshop_specs.find_one({"spec_id": spec_id}) if hasattr(db, "agent_workshop_specs") else None
-            if not spec_doc and hasattr(db, "agent_specs"):
-                spec_doc = await db.agent_specs.find_one({"spec_id": spec_id})
-
+            spec_doc = await self._load_spec_doc(db, spec_id)
+            version_id = str(thread_context.get("version_id") or "").strip()
             version_doc = None
             if version_id:
-                try:
-                    version_doc = await db.agent_workshop_versions.find_one({"version_id": version_id}) if hasattr(db, "agent_workshop_versions") else None
-                except Exception:
-                    pass
-                if not version_doc and hasattr(db, "agent_versions"):
-                    try:
-                        version_doc = await db.agent_versions.find_one({"version_id": version_id})
-                    except Exception:
-                        pass
+                version_doc = await self._load_version_doc(db, version_id)
 
-            if not spec_doc and not spec_name:
-                return None
+            # 构建注入块
+            block = intent_ctx.build_injection_block()
 
-            name = spec_name or (spec_doc.get("name") if isinstance(spec_doc, dict) else "未知 Agent")
-            primary_goal = (spec_doc.get("primary_goal") or "") if isinstance(spec_doc, dict) else ""
-            domain = (spec_doc.get("domain") or "") if isinstance(spec_doc, dict) else ""
-
-            lines = [
-                "## Current Agent Focus",
-                "",
-                f"**当前正在操作的 Agent**：{name}（spec_id={spec_id}）",
-            ]
-            if primary_goal:
-                lines.append(f"**目标**：{primary_goal}")
-            if domain:
-                lines.append(f"**领域**：{domain}")
+            # 附加版本/工具信息（如果 intent 块未包含）
+            append_lines = []
+            if spec_doc and isinstance(spec_doc, dict):
+                primary_goal = (spec_doc.get("primary_goal") or "")
+                if primary_goal and "目标" not in block:
+                    append_lines.append(f"**目标**：{primary_goal}")
 
             if version_doc and isinstance(version_doc, dict):
-                status = version_doc.get("status") or version_status
+                status = version_doc.get("status") or ""
                 required_tools = version_doc.get("required_tools") or []
-                lines.append(f"**当前版本**：{version_id}（状态：{status}）")
-                if required_tools:
-                    lines.append(f"**绑定工具**：{', '.join(required_tools[:8])}")
+                if required_tools and "绑定工具" not in block:
+                    append_lines.append(f"**绑定工具**：{', '.join(required_tools[:8])}")
                 evaluation_policy = version_doc.get("evaluation_policy") or {}
                 if isinstance(evaluation_policy, dict):
                     min_score = evaluation_policy.get("minimum_score")
-                    if min_score:
-                        lines.append(f"**达标线**：{min_score}")
-            elif version_id:
-                lines.append(f"**当前版本**：{version_id}（状态：{version_status or '未知'}）")
+                    if min_score is not None:
+                        append_lines.append(f"**达标线**：{min_score}")
 
-            lines.append("")
-            lines.append("你对这个 Agent 的讨论、修改、测试和发布操作都应该以该 Agent 为目标。")
-            lines.append("如果需要查看该 Agent 的详细资产（规范、版本、配置、提示词），优先调用 inspect_agent_workshop_assets 或 inspect_runtime_agent_configs。")
+            if append_lines:
+                block += "\n" + "\n".join(append_lines) + "\n"
 
-            return "\n".join(lines)
+            # --- 删除 Agent 记忆检查 ---
+            try:
+                memory_dir = self._workspace / "memory"
+                memory_file = memory_dir / "MEMORY.md"
+                if memory_file.exists() and intent_ctx.spec_name:
+                    mem_content = memory_file.read_text(encoding="utf-8")
+                    has_deleted = "已删除 Agent — 严禁复用" in mem_content and intent_ctx.spec_name in mem_content
+                    if has_deleted:
+                        block += (
+                            "\n⚠️ **Deleted Agent Warning**:\n"
+                            f"- An agent named **{intent_ctx.spec_name}** was previously created, used, and then **deleted** by the user.\n"
+                            "- The plans, tool selections, gap analysis, and prompt designs from that deleted agent are **invalid**.\n"
+                            "- **DO NOT** reuse or repeat the old agent's design. Generate a completely new plan based on current tool capabilities and skills.\n\n"
+                        )
+                        logger.info(
+                            "[EmbeddedNanobot][IntentContext] detected deleted agent with same name '%s', "
+                            "appending anti-reuse warning for spec_id=%s",
+                            intent_ctx.spec_name, spec_id,
+                        )
+            except Exception:
+                pass
+
+            logger.info(
+                "[EmbeddedNanobot][IntentContext] injecting intent block: spec=%s action=%s stage=%s",
+                intent_ctx.spec_id, intent_ctx.action, intent_ctx.stage,
+            )
+            return block
+
         except Exception as exc:
-            logger.debug("EmbeddedNanobot spec focus block skipped: %s", exc)
+            logger.debug("EmbeddedNanobot intent context block skipped: %s", exc)
+            return None
+
+    async def _load_spec_doc(self, db, spec_id: str) -> dict | None:
+        """从数据库加载 spec 文档。"""
+        try:
+            doc = await db.agent_workshop_specs.find_one({"spec_id": spec_id}) if hasattr(db, "agent_workshop_specs") else None
+            if not doc and hasattr(db, "agent_specs"):
+                doc = await db.agent_specs.find_one({"spec_id": spec_id})
+            return doc
+        except Exception:
+            return None
+
+    async def _load_version_doc(self, db, version_id: str) -> dict | None:
+        """从数据库加载 version 文档。"""
+        try:
+            doc = await db.agent_workshop_versions.find_one({"version_id": version_id}) if hasattr(db, "agent_workshop_versions") else None
+            if not doc and hasattr(db, "agent_versions"):
+                doc = await db.agent_versions.find_one({"version_id": version_id})
+            return doc
+        except Exception:
             return None
 
     def _log_agent_builder_lesson_recall_observation(
@@ -1335,8 +1393,10 @@ class EmbeddedNanobotRuntime:
                 continue
             if role == "tool":
                 entry["content"] = sanitize_tool_result_content(content)
+                # 即使工具返回空列表也不要丢弃消息，否则对应的 assistant(tool_calls) 会变成孤儿，
+                # 导致下次 LLM 请求报错："insufficient tool messages following tool_calls message"
                 if isinstance(entry.get("content"), list) and not entry["content"]:
-                    continue
+                    entry["content"] = "(empty)"
             elif role == "user":
                 if isinstance(content, str) and content.startswith(runtime_tag):
                     parts = content.split("\n\n", 1)
@@ -1422,6 +1482,18 @@ class EmbeddedNanobotRuntime:
             tool_selection=tool_selection,
             thread_context=clean_thread_context,
         )
+
+        # 🔥 当前 Agent 聚焦块：只要 thread_context 里有 spec_id，就始终注入，不依赖 governance 意图检测
+        spec_focus_guidance = None
+        spec_id_for_focus = str(clean_thread_context.get("spec_id") or "").strip()
+        if spec_id_for_focus:
+            spec_focus_guidance = await self._build_current_spec_focus_block(spec_id_for_focus, clean_thread_context)
+            if spec_focus_guidance:
+                logger.info(
+                    "[EmbeddedNanobot][SpecFocus] injecting current agent focus block for spec_id=%s",
+                    spec_id_for_focus,
+                )
+
         if on_progress:
             await self._invoke_callback(on_progress, f"已选择 {len(active_tools.tool_names)} 个可用工具（核心 {len(self.CORE_TOOL_NAMES)} + 动态 {len(tool_selection['selected_dynamic_tools'])}）")
             if tool_selection.get("agent_first", {}).get("enabled"):
@@ -1451,6 +1523,7 @@ class EmbeddedNanobotRuntime:
             extra_system_guidance=self._merge_system_guidance(
                 project_memory_guidance,
                 agent_builder_lesson_guidance,
+                spec_focus_guidance,
                 tool_selection.get("agent_first", {}).get("guidance") or None,
                 tool_selection.get("agent_builder_governance", {}).get("guidance") or None,
             ),

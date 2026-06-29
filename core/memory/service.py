@@ -437,17 +437,20 @@ class MemoryService:
         normalized_metadata_filters = _normalize_metadata_filters(metadata_filters)
 
         kwargs: Dict[str, Any] = {"limit": 200}
+        filters_for_mem0 = _build_mem0_exact_filters(normalized_scopes, normalized_metadata_filters)
         if user_id:
-            kwargs["user_id"] = user_id
-        exact_filters = _build_mem0_exact_filters(normalized_scopes, normalized_metadata_filters)
-        if exact_filters:
-            kwargs["filters"] = exact_filters
+            # mem0 v3 get_all 不再支持顶层 user_id，必须通过 filters 传递。
+            if filters_for_mem0 is None:
+                filters_for_mem0 = {}
+            filters_for_mem0["user_id"] = user_id
+        if filters_for_mem0:
+            kwargs["filters"] = filters_for_mem0
 
         try:
             try:
                 results = await self._mem.get_all(**kwargs)
             except Exception:
-                if not exact_filters:
+                if not filters_for_mem0:
                     raise
                 logger.debug("[MemoryService] get_all 过滤器回退到客户端过滤")
                 fallback_kwargs = dict(kwargs)
@@ -490,7 +493,7 @@ class MemoryService:
         if not await self._ensure_init():
             return 0
         try:
-            results = await self._mem.get_all(user_id=user_id, limit=500)
+            results = await self._mem.get_all(filters={"user_id": user_id}, limit=500)
             raw_list = results.get("results", []) if isinstance(results, dict) else results
             count = 0
             for raw in raw_list:
@@ -520,7 +523,7 @@ class MemoryService:
                 "diagnostics": diagnostics,
             }
         try:
-            await self._mem.get_all(user_id="__health_check__", limit=1)
+            await self._mem.get_all(filters={"user_id": "__health_check__"}, limit=1)
             return {
                 "ok": True,
                 "mem0_version": _get_mem0_version(),

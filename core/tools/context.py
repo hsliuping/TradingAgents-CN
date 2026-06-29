@@ -24,6 +24,11 @@ _current_assistant_thread_id: contextvars.ContextVar[Optional[str]] = contextvar
     'current_assistant_thread_id', default=None
 )
 
+# 当前智能助手线程上下文（用于工具调用期读取前端当前选中的对象，如 Agent 工坊 spec/version）
+_current_assistant_thread_context: contextvars.ContextVar[Optional[Dict[str, Any]]] = contextvars.ContextVar(
+    'current_assistant_thread_context', default=None
+)
+
 # 当前分析数据源（在 Agent 工具调用前设置）
 _current_analysis_data_source: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     'current_analysis_data_source', default=None
@@ -99,6 +104,17 @@ def set_current_assistant_thread_id(thread_id: Optional[str]) -> contextvars.Tok
 def get_current_assistant_thread_id() -> Optional[str]:
     """获取当前智能助手主题 ID"""
     return _current_assistant_thread_id.get()
+
+
+def set_current_assistant_thread_context(thread_context: Optional[Dict[str, Any]]) -> contextvars.Token:
+    """设置当前智能助手线程上下文。"""
+    clean_context = dict(thread_context or {}) if isinstance(thread_context, dict) else None
+    return _current_assistant_thread_context.set(clean_context)
+
+
+def get_current_assistant_thread_context() -> Dict[str, Any]:
+    """获取当前智能助手线程上下文。"""
+    return dict(_current_assistant_thread_context.get() or {})
 
 
 def set_current_analysis_data_source(data_source: Optional[str]) -> contextvars.Token:

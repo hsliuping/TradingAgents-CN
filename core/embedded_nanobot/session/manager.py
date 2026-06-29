@@ -27,18 +27,50 @@ class Session:
 
     @staticmethod
     def _find_legal_start(messages: list[dict[str, Any]]) -> int:
+        """找到消息列表中第一个合法的起始位置。
+
+        处理两种非法情况：
+        1. 孤儿 tool 响应（tool 消息对应的 tool_call_id 没有前置 assistant 声明）
+        2. 孤儿 tool_calls（assistant 声明了 tool_calls 但后续缺失对应的 tool 响应）
+
+        返回需要裁剪掉的前缀消息数量。
+        """
         declared: set[str] = set()
+        satisfied: set[str] = set()
         start = 0
         for index, msg in enumerate(messages):
             if msg.get("role") == "assistant":
                 for tc in msg.get("tool_calls") or []:
                     if isinstance(tc, dict) and tc.get("id"):
                         declared.add(str(tc["id"]))
+                # 该 assistant 消息之后的所有 tool 响应会逐步满足 declared
+                satisfied.clear()
             elif msg.get("role") == "tool":
                 tool_call_id = msg.get("tool_call_id")
-                if tool_call_id and str(tool_call_id) not in declared:
-                    start = index + 1
-                    declared.clear()
+                if tool_call_id:
+                    tid = str(tool_call_id)
+                    if tid not in declared:
+                        # 孤儿 tool 响应：无法溯源的 tool 消息，跳过
+                        start = index + 1
+                        declared.clear()
+                        satisfied.clear()
+                    else:
+                        satisfied.add(tid)
+            # 如果某条 assistant 消息声明的 tool_calls 全被满足，degaard 可以重置
+            if declared and declared == satisfied:
+                declared.clear()
+                satisfied.clear()
+        # 循环结束后：如果 declared 中还有未满足的 tool_call_id，
+        # 说明最后一条含 tool_calls 的 assistant 缺少对应的 tool 响应 → 孤儿 tool_calls
+        if declared:
+            # 倒找最后一条含未满足 tool_calls 的 assistant 消息
+            for back_idx in range(len(messages) - 1, start - 1, -1):
+                msg = messages[back_idx]
+                if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                    unresolved_ids = {str(tc["id"]) for tc in msg["tool_calls"] if isinstance(tc, dict) and tc.get("id")}
+                    if unresolved_ids & declared:
+                        # 裁剪掉这条 assistant 及其之后的所有消息
+                        return back_idx
         return start
 
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
