@@ -13,6 +13,8 @@ Embedded Nanobot（对话式编排者）
     ↓
 IntentContext（结构化任务上下文 / 外部工作记忆）
     ↓
+AgentBuilderFlowController（状态机驱动层）           ← 新增
+    ↓
 Agent Workshop（规格、版本、缺口、测试、发布治理）
     ↓
 Skill Generation（为缺口生成可调用能力）
@@ -522,7 +524,136 @@ LLM 传入 agent_name=巴菲特价值筛选官
 
 ---
 
-## 8. 典型流程示例
+## 8. AgentBuilderFlowController（状态机驱动层）
+
+> 这是 IntentContext 的补充层。IntentContext 记录"现在做什么"，FlowController 规定"现在能做什么、不能做什么、下一步去哪"。
+>
+> 核心文件：`core/embedded_nanobot/agent_builder_flow.py`
+
+### 8.1 解决的问题
+
+在 FlowController 之前，Nanobot 靠分散的规则和工具元数据猜测下一步，导致：
+
+- 自动构建成功后仍然调用 `analyze_agent_workshop_gaps`（重复缺口检查）
+- 确认阶段就尝试直接生成
+- 测试未通过就尝试发布
+- Skill 生成后不知道要回到父 Agent
+
+FlowController 的核心原则：
+
+> **让 Nanobot 在框架内自主行事，而不是随意发挥。**
+
+### 8.2 状态机全图
+
+```text
+IDLE ──→ EXPLORING ──→ CAPABILITY_CHECK ──→ DRAFT_PREPARING ──→ CONFIRMATION_PENDING
+                                                                         │
+                                                                    用户确认
+                                                                         │
+                                                                         ▼
+                                                                    GENERATING
+                                                                         │
+                                                       ┌──── auto-build 成功 ────┐
+                                                       │                         │
+                                                READY_TO_BUILD              BUILDING ─────────────────────────────┐
+                        │                                                                    │
+                   有 blocking gap                                                       无 gap
+                        │                                                                    │
+                        ▼                                                                    ▼
+                  GAP_RESOLVING ──→ BUILDING                                            TESTING
+                        │              │                                                    │
+                   补齐 Skill     rebuild                                              run test
+                        │              │                                                    │
+                        └──────────────┘                                                    │
+                                                                                            ▼
+                                                                                      EVALUATING
+                                                                                      │    │    │
+                                                                                    pass  │  revise
+                                                                                      │    │    │
+                                                                                      ▼    │    ▼
+                                                                                 PUBLISHING │ ITERATING
+                                                                                      │         │
+                                                                                      ▼         │
+                                                                                 PUBLISHED     │
+                                                                                      └─────────┘
+                                                                                   回到 BUILDING
+```
+
+### 8.3 每个阶段做什么 / 不做什么
+
+| 阶段 | 能做 | 不能做 |
+|---|---|---|
+| **IDLE** | search_capabilities, inspect_* | analyze_gaps, build, test, publish, generate_confirmed |
+| **EXPLORING** | search_capabilities, inspect_* | analyze_gaps, build, test, publish, generate_confirmed, prepare_confirmation |
+| **CAPABILITY_CHECK** | search_capabilities, inspect_* | generate_confirmed, analyze_gaps, build, test, publish |
+| **DRAFT_PREPARING** | prepare_confirmation, search_capabilities | generate_confirmed, analyze_gaps, build, test, publish |
+| **CONFIRMATION_PENDING** | generate_confirmed | analyze_gaps, build, test, publish, iterate |
+| **GENERATING** | generate_confirmed (仅一次) | analyze_gaps, build, test, publish |
+| **READY_TO_BUILD** | build_version, inspect | analyze_gaps, test, publish, generate_confirmed |
+| **BUILDING** | real_data_test, debug, inspect, resolve_gaps | **analyze_gaps**（已内部完成）, **build_version**（已构建）, generate_confirmed |
+| **TESTING** | real_data_test, debug, evaluate, iterate | generate_confirmed, build（除非迭代） |
+| **EVALUATING** | real_data_test, debug, iterate, publish | generate_confirmed, build, analyze_gaps |
+| **GAP_RESOLVING** | resolve_gaps, search_capabilities, inspect | real_data_test, publish, generate_confirmed |
+| **ITERATING** | iterate, debug, test | publish, generate_confirmed |
+| **PUBLISHING** | publish_version | build, test, iterate, analyze_gaps, resolve_gaps |
+| **PUBLISHED** | inspect (只读) | 所有写操作 |
+
+### 8.4 System Prompt 注入格式
+
+每轮对话，当 IntentContext 有 `spec_id` 时，自动注入：
+
+```markdown
+## 🔒 Agent Builder 流程约束（必须遵守）
+
+当前阶段：版本已构建：自动构建完成，准备测试
+当前 Agent：财报风险信号识别器
+用户目标：创建财报风险信号识别 Agent，重点关注商誉、应收、现金流
+
+✅ 当前阶段可以调用的工具：
+  - run_agent_workshop_real_data_test
+  - debug_agent_workshop_version
+  - inspect_agent_workshop_assets
+
+⭐ 推荐下一步：调用 run_agent_workshop_real_data_test
+
+🚫 严禁在当前阶段调用以下工具：
+  - ❌ analyze_agent_workshop_gaps
+    （缺口分析已在自动构建阶段完成或不需要）
+  - ❌ build_agent_workshop_version（已构建过）
+  - ❌ generate_confirmed_candidate_agent（已生成过）
+
+📋 阶段约束说明：
+  - 🚫 严禁再次调用 analyze_agent_workshop_gaps，这会让用户感觉在重复检查。
+  - 如果构建时发现 blocking gap，直接进入 GAP_RESOLVING。
+  - 如果无 gap，下一步直接做 run_agent_workshop_real_data_test。
+```
+
+### 8.5 实现要点
+
+1. **状态源**：从 `IntentContext.stage` 推导，结合 `has_blocking_gaps` / `evaluation_status` 覆写派生状态
+2. **注入时机**：`runtime.py` 的 `handle_message` 中，紧跟 `spec_focus_guidance` 之后
+3. **注入条件**：仅当 `thread_context.spec_id` 非空时触发，不影响普通聊天
+4. **工具更新**：关键动作（如 `generate_confirmed_candidate_agent`）完成后更新 `IntentContext.stage` 为正确的下一阶段
+5. **Gap 分析基础**：`build_version` 对所有 spec（含 nanobot 来源）运行真实 gap 分析，不再用空 `AgentWorkshopGapAnalysis()` 跳过。这保证了 FlowController 的 `BUILDING` 阶段说"gap 已内部完成"有事实基础。
+
+### 8.6 与 IntentContext 的关系
+
+```text
+IntentContext:     记录当前事实（谁、做什么、什么阶段、下一步）
+FlowController:    定义当前规则（允许什么、禁止什么、只走哪条路径）
+
+两者协作：
+  IntentContext.stage = "building"
+  FlowController 查表 → 当前阶段 BUILDING
+  → 允许: real_data_test, debug
+  → 禁止: analyze_gaps, build_version
+  → 建议: real_data_test
+  → 注入 System Prompt
+```
+
+---
+
+## 9. 典型流程示例
 
 ### 8.1 创建财报风险信号识别器
 
@@ -530,67 +661,71 @@ LLM 传入 agent_name=巴菲特价值筛选官
 用户：我要一个能识别财报风险信号的助手，重点关注商誉减值、应收账款异常和现金流恶化。
 
 Nanobot:
-  - 更新 IntentContext:
-    action=create_agent
-    stage=exploring
-    spec_name=财报风险信号识别器
-    intent_summary=...
+  - IntentContext: action=create_agent, stage=exploring
+  - FlowController 注入约束: 允许 search_capabilities / inspect，禁止生成
+  - 调用 search_project_capabilities 查可用能力
 
 用户：确认生成。
 
 Nanobot:
+  - IntentContext: stage=confirmation_pending
+  - FlowController 注入约束: 仅允许 generate_confirmed_candidate_agent
   - 调用 generate_confirmed_candidate_agent
-  - 工具层校验 spec_id
+  - 工具层校验 spec_id（防名称漂移）
   - 创建 AgentSpec / AgentVersion / Runtime Config / Prompt Template
-  - IntentContext stage=testing
+  - auto-build 版本（内部已完成 gap 检查）
+  - IntentContext: stage=building
+  - FlowController 注入约束: 允许 real_data_test / debug
+                          🚫 禁止 analyze_gaps（已内部完成）
+                          🚫 禁止 build_version（已构建）
 ```
 
-### 8.2 发现能力缺口并创建 Skill
+### 9.2 发现能力缺口并创建 Skill
 
 ```text
-Workshop analyze_gaps:
-  blocking_gaps = [商誉减值风险专项评估]
+BUILDING 阶段发现 blocking gaps
+  → FlowController: 阶段 → GAP_RESOLVING
+  → 允许: resolve_gaps, search_capabilities
+  → 禁止: real_data_test, publish
 
 Nanobot 调用 resolve_agent_workshop_blocking_gaps:
   - 创建/复用 get_goodwill_analysis
-  - IntentContext 写入:
+  - IntentContext:
     task_stack:
       [agent] 财报风险信号识别器
       [gap] 商誉减值风险专项评估
       [skill] get_goodwill_analysis
     linked_skills:
       get_goodwill_analysis → 商誉减值风险专项评估
-    next_action:
-      回到父 Agent 重新构建并真数据测试
+  - 完成后: FlowController → BUILDING（重建版本）
+  - IntentContext: next_action=回到父 Agent 重新构建并真数据测试
 ```
 
-### 8.3 Skill 完成后回到 Agent
+### 9.3 Skill 完成后回到 Agent
 
 ```text
-Nanobot 下一轮看到 IntentContext:
-  当前子任务已完成
-  next_action=回到父 Agent 重新构建并真数据测试
-
-于是应调用:
-  build_agent_workshop_version
-  run_agent_workshop_real_data_test
-  evaluate_agent_workshop_version
+GAP_RESOLVING 完成
+  ├─ 自动续建成功 → BUILDING
+  │    → FlowController: 推荐 run_agent_workshop_real_data_test
+  │
+  └─ 自动续建失败 / 仅完成 Skill 绑定 → READY_TO_BUILD
+       → FlowController: 推荐 build_agent_workshop_version
+       → build 成功后进入 BUILDING → TESTING
 ```
 
 ---
 
-## 9. 日志与排查点
+## 10. 日志与排查点
 
 关键日志前缀：
 
-```text
-[EmbeddedNanobot][ThreadContext]
-[EmbeddedNanobot][IntentContext]
-[AgentWorkshop][IntentGuard]
-[AgentWorkshop][ThreadContextFilter]
-[IntentContext][Update]
-[resolve_gaps]
-```
+- `[ThreadContext]` — 当前线程上下文
+- `[IntentContext]` — 意图更新与校验
+- `[FlowCtrl]` — 流程约束注入
+- `[SpecFocus]` — Agent 聚焦块注入
+- `[Workshop]` — Agent Workshop 操作
+- `[BuildVersion]` — 版本构建
+- `[SkillGen]` — Skill 生成
 
 排查顺序：
 
@@ -603,26 +738,49 @@ Nanobot 下一轮看到 IntentContext:
 
 ---
 
-## 10. 工程原则
+## 11. 工程原则
 
-### 10.1 LLM 可以推理，但不能作为状态源
+### 11.1 LLM 可以推理，但不能作为状态源
 
 LLM 负责：
 
 - 理解用户表达
 - 组织自然语言
-- 选择下一步工具
+- 在允许范围内选择工具
 
 系统负责：
 
-- 保存当前状态
-- 校验操作对象
+- 保存当前状态（IntentContext）
+- 规定操作边界（FlowController）
+- 校验操作对象（spec_id 防漂移）
 - 管理父子任务关系
 - 决定是否允许写库
 
-### 10.2 当前对象必须由系统上下文确定
+### 11.2 当前对象必须由系统上下文确定
 
 不要让 LLM 自由选择当前 Agent。
+
+### 11.3 LLM 有自主性，但在框架内
+
+FlowController 定义了 12 个阶段，每个阶段明确允许和禁止的操作。
+LLM 在允许的工具范围内自由选择，但不能跳出框架。
+
+**类比**：框架是车道，LLM 是司机。司机可以决定加速减速和变道，但不能开出车道。
+
+### 11.4 缺能力先补 Skill，不要跳过 gap 分析
+
+Agent 有 blocking gap 时，必须先补齐 Skill，再重新构建和测试。
+不能跳过 gap 直接做测试。
+
+### 11.5 Skill 不是终点，完成后回到 Agent
+
+Skill 创建完成不代表任务结束。
+必须回到父 Agent 重新构建 → 测试 → 评估。
+
+### 11.6 缺口分析只做一次
+
+自动构建阶段内建 gap 检查。
+禁止在自动构建成功后重复调用 `analyze_agent_workshop_gaps`。
 
 正确方式：
 
@@ -664,7 +822,7 @@ not_replacement_for
 
 ---
 
-## 11. 后续建议
+## 12. 后续建议
 
 1. 将 IntentContext 的更新覆盖更多工具：
    - `build_agent_workshop_version`
