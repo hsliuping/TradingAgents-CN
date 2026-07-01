@@ -1,6 +1,9 @@
 from typing import Any
+import logging
 
 from core.embedded_nanobot.agent.tools.base import Tool
+
+logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
@@ -31,12 +34,16 @@ class ToolRegistry:
             params = tool.cast_params(params)
             errors = tool.validate_params(params)
             if errors:
+                logger.warning("[ToolRegistry][ValidationError] tool=%s errors=%s params=%s", name, errors, params)
                 return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + hint
             result = await tool.execute(**params)
             if isinstance(result, str) and result.startswith("Error"):
+                logger.warning("[ToolRegistry][ToolErrorResult] tool=%s result=%s", name, result[:1000])
                 return result + hint
+            logger.info("[ToolRegistry][ToolSuccess] tool=%s result_chars=%d", name, len(str(result or "")))
             return result
         except Exception as exc:
+            logger.exception("[ToolRegistry][Exception] tool=%s params=%s", name, params)
             return f"Error executing {name}: {exc}" + hint
 
     @property

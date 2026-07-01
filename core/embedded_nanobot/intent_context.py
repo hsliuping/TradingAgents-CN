@@ -36,8 +36,10 @@ class IntentStage(str, Enum):
     """对话阶段枚举。"""
     EXPLORING = "exploring"              # 用户在探索/描述需求
     CAPABILITY_CHECK = "capability_check"  # 正在检查能力缺口
-    DRAFT_PREPARING = "draft_preparing"    # 正在准备工坊草稿
-    CONFIRMATION_PENDING = "confirmation_pending"  # 等待用户确认生成
+    DRAFT_PREPARING = "draft_preparing"    # 正在准备工坊草稿/需求确认稿
+    REQUIREMENT_CONFIRMATION_PENDING = "requirement_confirmation_pending"  # 等待用户确认需求
+    PLAN_SELECTION_PENDING = "plan_selection_pending"  # 等待用户选择方案
+    CONFIRMATION_PENDING = "confirmation_pending"  # 兼容旧名，同 PLAN_SELECTION_PENDING
     GENERATING = "generating"              # 正在生成 Agent
     BUILDING = "building"                  # 正在构建版本
     TESTING = "testing"                    # 正在测试
@@ -102,6 +104,7 @@ class IntentContext:
     pending_question: str = ""              # 当前等待用户回答的问题
     last_proposed_items: List[Dict[str, Any]] = field(default_factory=list)
     # 最近提出的方案/工具/股票等，用于兜底指代消解
+    conversation_summary: str = ""          # 上一轮对话的摘要，注入下一轮避免上下文丢失
 
     # --- 时间戳 ---
     created_at: float = 0.0
@@ -136,6 +139,7 @@ class IntentContext:
                 for item in (data.get("last_proposed_items") or [])
                 if isinstance(item, dict)
             ],
+            conversation_summary=str(data.get("conversation_summary") or ""),
             task_stack=[
                 {
                     "type": str(t.get("type") or ""),
@@ -191,6 +195,7 @@ class IntentContext:
         clear_pending_options: bool = False,
         task: Optional[Dict[str, str]] = None,
         linked_skill: Optional[Dict[str, str]] = None,
+        conversation_summary: str = "",
     ) -> None:
         """更新意图上下文。"""
         if action:
@@ -232,6 +237,9 @@ class IntentContext:
                 item for item in proposed_items
                 if isinstance(item, dict)
             ][-8:]
+
+        if conversation_summary:
+            self.conversation_summary = conversation_summary
 
         if task:
             self.upsert_task(
@@ -408,7 +416,8 @@ class IntentContext:
         lines.extend([
             "- 用户说「确认」或「好的」时，如果当前阶段是 confirmation_pending，必须先解析 pending_options 中用户选择的方案，再按 selected_plan_id 执行；不要把确认理解成无条件生成",
             "- Agent 创建 v2 流程必须遵循：需求澄清 → 能力盘点+gap分析 → 展示 direct/complete/quick/narrow 候选方案 → 用户选择方案 → 按方案生成/补能力/缩小需求",
-            "- 用户选择 complete/quick 时，必须把该方案的 acknowledged_gaps 传给 generate_confirmed_candidate_agent；用户选择 narrow 时回到需求澄清，不生成 Agent",
+            "- 用户选择 complete/quick 时，必须把该方案的 acknowledged_gaps **和 gap_report_json**（prepare_agent_generation_confirmation 返回的 gap_report 字段）一并传给 generate_confirmed_candidate_agent；用户选择 narrow 时回到需求澄清，不生成 Agent",
+            "💡 如果 gap_report_json 或 capability_inventory_json 数据已丢失（多轮对话后被截断），直接传空即可——后端自动从 Workshop Session 的 builder_contracts 恢复，不要因为数据丢失而重新调用 prepare_agent_generation_confirmation。",
             "- 已在 prepare 阶段形成 gap_report 和 candidate_plans 后，不要在用户确认后重新启动一轮独立 gap 分析；应按用户确认方案执行，执行或测试失败后再迭代",
             "- 执行任何写操作（create/build/iterate/publish）前，必须确认 spec_id 与 intent context 一致",
             "- 如果一个 agent_id 不是 intent context 中的 spec_id，拒绝操作并提示用户",
@@ -446,6 +455,14 @@ class IntentContext:
                 desc = opt.get("description") or ""
                 lines.append(f"  {idx}. {name}" + (f" — {desc}" if desc else ""))
             lines.append("")
+
+        # 上一轮对话摘要（跨轮上下文不丢失）
+        if self.conversation_summary:
+            lines.extend([
+                "### 上一轮对话摘要",
+                self.conversation_summary,
+                "",
+            ])
 
         if self.last_proposed_items and not self.pending_options:
             lines.extend([
@@ -515,6 +532,7 @@ def update_intent_context_in_thread(
     clear_pending_options: bool = False,
     task: Optional[Dict[str, str]] = None,
     linked_skill: Optional[Dict[str, str]] = None,
+    conversation_summary: str = "",
 ) -> IntentContext:
     """更新当前线程的意图上下文（contextvar 级别，当前 turn 内生效）。
 
@@ -541,6 +559,7 @@ def update_intent_context_in_thread(
             clear_pending_options=clear_pending_options,
             task=task,
             linked_skill=linked_skill,
+            conversation_summary=conversation_summary,
         )
         ctx["intent"] = intent.to_dict()
         # 同步顶层字段，兼容现有前端/工具过滤逻辑
@@ -548,11 +567,21 @@ def update_intent_context_in_thread(
             ctx["spec_id"] = intent.spec_id
         if intent.spec_name:
             ctx["spec_name"] = intent.spec_name
+        # 当阶段进入 building/testing 时，清除 has_blocking_gaps 标记
+        # （quick plan 的缺口已确认接受，不应再触发 GAP_RESOLVING 回退）
+        if stage in ("building", "testing", "ready_to_build"):
+            ctx.pop("has_blocking_gaps", None)
         set_current_assistant_thread_context(ctx)
         logger.info(
             "[IntentContext][Update] action=%s stage=%s spec_id=%s spec_name=%s pending_options=%d",
             action, stage, spec_id, spec_name, len(intent.pending_options),
         )
+        # 🔒 写入模块级存储（按 thread_id 隔离，替代不稳定的 contextvar）
+        try:
+            from core.tools.context import set_latest_nanobot_intent
+            set_latest_nanobot_intent(intent.to_dict())
+        except Exception:
+            pass
         return intent
     except Exception as exc:
         logger.warning("[IntentContext][Update] failed: %s", exc)

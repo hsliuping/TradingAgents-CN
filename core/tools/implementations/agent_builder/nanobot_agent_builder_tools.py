@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
@@ -87,6 +88,7 @@ def _auto_update_intent(
     clear_pending_options: bool = False,
     task: dict[str, str] | None = None,
     linked_skill: dict[str, str] | None = None,
+    conversation_summary: str = "",
 ) -> None:
     """自动更新当前线程的意图上下文（contextvar）。"""
     try:
@@ -108,6 +110,7 @@ def _auto_update_intent(
             clear_pending_options=clear_pending_options,
             task=task,
             linked_skill=linked_skill,
+            conversation_summary=conversation_summary,
         )
         if evaluation_decision or evaluation_blockers or evaluation_categories:
             update_evaluation_evidence_in_thread(
@@ -279,6 +282,14 @@ def _parse_optional_json_object(raw: str, field_name: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"{field_name} 必须是 JSON 对象")
     return data
+
+
+def _json_compact_dump(obj: Any) -> str:
+    """紧凑 JSON 序列化，仅用于日志调试。"""
+    try:
+        return json.dumps(obj, ensure_ascii=False, default=str, separators=(",", ":"))
+    except Exception:
+        return str(obj)[:500]
 
 
 _EXTERNAL_DATA_RISK_KEYWORDS = (
@@ -1938,6 +1949,147 @@ def _looks_unspecified(value: str) -> bool:
     return text in vague_markers
 
 
+def _generate_short_agent_name_llm(user_request: str, target_responsibility: str = "") -> str:
+    """用 LLM 同步生成简短 Agent 名（在同步工具函数中调用）。
+
+    LLM 失败时回退到 _generate_short_agent_name_fallback 规则匹配。
+    """
+    text = f"{target_responsibility or ''} {user_request or ''}".strip()
+    if not text:
+        return "智能分析助手"
+
+    try:
+        from app.core.database import get_mongo_db_sync
+        from core.llm import UnifiedLLMClient
+        from core.llm.models import Message
+
+        # 同步读取 LLM 配置
+        sync_db = get_mongo_db_sync()
+        config_doc = sync_db.system_configs.find_one(
+            {"is_active": True},
+            sort=[("version", -1)],
+        )
+        if not config_doc or "llm_configs" not in config_doc:
+            return _generate_short_agent_name_fallback(user_request, target_responsibility)
+
+        # 复用 intelligent_assistant_service 的模型选择逻辑（同步部分）
+        from app.services.intelligent_assistant_service import _resolve_models, _selection_model_name, _selection_config_id, resolve_llm_config_from_config_doc
+        _, deep_selection, reasoning_selection, _ = _resolve_models(config_doc)
+        target_selection = reasoning_selection or deep_selection
+        target_model = _selection_model_name(target_selection)
+        target_config_id = _selection_config_id(target_selection)
+        if not target_model:
+            return _generate_short_agent_name_fallback(user_request, target_responsibility)
+
+        config = resolve_llm_config_from_config_doc(
+            config_doc,
+            target_model=target_model,
+            target_config_id=target_config_id,
+            purpose="agent_naming",
+        )
+        if not config:
+            return _generate_short_agent_name_fallback(user_request, target_responsibility)
+
+        client = UnifiedLLMClient.from_config(config)
+
+        system_prompt = """你是一个 Agent 命名专家。根据用户需求和职责描述，生成一个简短、专业、好记的 Agent 名字。
+
+命名规则：
+1. 名字必须简短：不超过 12 个汉字（可含英文缩写如 DCF/PE/PB）
+2. 名字必须体现 Agent 的核心业务能力，不要包含"对A股""上市公司""执行""输出"等冗余词
+3. 名字以"助手"或"专家"结尾（默认"助手"）
+4. 只输出名字本身，不要加引号、解释、标点
+5. 不要使用"Agent"这个英文词
+
+示例：
+- 需求"对A股上市公司执行多维度估值分析" → 多维度估值分析助手
+- 需求"帮我创建一个财报排雷助手" → 财报排雷助手
+- 需求"分析股息率和分红情况" → 股息率分析助手
+- 需求"做一个DCF估值工具" → DCF估值助手
+- 需求"创建一个技术分析Agent" → 技术分析助手
+- 需求"对上市公司进行风险排雷" → 风险排雷助手
+- 需求"生成研报" → 研报生成助手"""
+
+        user_prompt = f"用户需求：{user_request or '(未提供)'}\n职责描述：{target_responsibility or '(未提供)'}\n\n请生成一个简短的 Agent 名字（只输出名字）："
+
+        messages = [
+            Message(role="system", content=system_prompt),
+            Message(role="user", content=user_prompt),
+        ]
+        response = client.chat(messages, temperature=0.3, max_tokens=50)
+        name = str(response.content or "").strip().strip("\"'""''「」【】 ")
+
+        # 清理：去掉可能的换行、多余标点
+        name = name.split("\n")[0].strip()
+        # 去掉结尾的句号
+        name = name.rstrip("。.；;")
+
+        if name and len(name) <= 20:
+            logger.info("[AgentName][LLM] request=%s -> name=%s", user_request[:40], name)
+            return name
+
+        logger.warning("[AgentName][LLM] 生成的名字不合规: %s (len=%d)，回退规则", name, len(name))
+        return _generate_short_agent_name_fallback(user_request, target_responsibility)
+    except Exception as exc:
+        logger.warning("[AgentName][LLM] LLM 生成名字失败，回退规则: %s", exc, exc_info=True)
+        return _generate_short_agent_name_fallback(user_request, target_responsibility)
+
+
+def _generate_short_agent_name_fallback(user_request: str, target_responsibility: str = "") -> str:
+    """规则兜底：从需求/职责中提取核心业务关键词，加上"助手"后缀。"""
+    text = f"{target_responsibility or ''} {user_request or ''}".strip()
+    if not text:
+        return "智能分析助手"
+
+    # 业务领域关键词映射：按优先级匹配，取最具体的
+    # 每项 (关键词列表, 生成的名字模板)
+    domain_mappings = [
+        (["财报排雷", "财务造假", "财务舞弊"], "财报排雷助手"),
+        (["多维度估值", "综合估值", "估值分析"], "多维度估值分析助手"),
+        (["股息率", "分红", "派息", "股利"], "股息率分析助手"),
+        (["DCF", "现金流折现", "自由现金流"], "DCF估值助手"),
+        (["DDM", "股利贴现"], "DDM估值助手"),
+        (["估值"], "估值分析助手"),
+        (["财报分析", "财务分析", "基本面分析"], "基本面分析助手"),
+        (["技术分析", "技术面", "K线", "技术指标"], "技术分析助手"),
+        (["行业分析", "板块分析", "行业对比"], "行业分析助手"),
+        (["选股", "筛选", "股票筛选"], "智能选股助手"),
+        (["仓位", "组合", "投资组合"], "组合管理助手"),
+        (["风险", "风控", "风险评估"], "风险评估助手"),
+        (["研报", "研究报告", "报告生成"], "研报生成助手"),
+        (["宏观", "经济周期", "货币政策"], "宏观分析助手"),
+        (["情绪", "舆情", "市场情绪"], "舆情分析助手"),
+        (["资金流", "资金面", "主力"], "资金面分析助手"),
+        (["回测", "策略回测", "量化回测"], "策略回测助手"),
+        (["事件", "公告", "事件驱动"], "事件驱动分析助手"),
+        (["质押", "股权质押"], "质押风险分析助手"),
+        (["可比公司", "同业对比", "同行对比"], "可比公司估值助手"),
+    ]
+
+    text_lower = text.lower()
+    for keywords, name in domain_mappings:
+        for kw in keywords:
+            if kw.lower() in text_lower:
+                return name
+
+    # 兜底：从职责描述中提取前 8 个字 + "助手"
+    # 去掉常见的冗余前缀
+    cleaned = re.sub(r"^(帮我|请|我想要|我需要|创建|生成|做一个|建一个|新建)\s*", "", text)
+    # 去掉"对A股..."这类前缀
+    cleaned = re.sub(r"^(对|为|给)\s*[A-Za-z\u4e00-\u9fa5]{0,6}(上市公司|股票|A股)?\s*(执行|进行|做|实现)?\s*", "", cleaned)
+    # 取第一个逗号/句号前的部分
+    for sep in ["，", "。", ",", ".", "、", "；", ";", "\n"]:
+        if sep in cleaned:
+            cleaned = cleaned.split(sep)[0]
+            break
+    cleaned = cleaned.strip()
+    if len(cleaned) > 10:
+        cleaned = cleaned[:10]
+    if not cleaned:
+        return "智能分析助手"
+    return f"{cleaned}助手"
+
+
 def _contains_any_keyword(text: str, keywords: tuple[str, ...]) -> bool:
     lowered = str(text or "").strip().lower()
     if not lowered:
@@ -2187,32 +2339,53 @@ def _build_confirmation_template(
     report_contract: dict[str, Any] | None,
     overwrite_risk: dict[str, Any],
 ) -> str:
+    """以财经产品专家的口吻构建用户确认稿，避免技术清单式输出。
+
+    Nanobot 收到本模板后，应以财经产品顾问的角度与用户沟通——
+    讲分析框架和业务价值，不要逐行念工具ID和技术参数。
+    后端所需的技术绑定信息已在 JSON 的其他字段中传递。
+    """
+    # ── 业务叙事版确认稿（不是技术清单） ──
     lines = [
-        "请确认下面这份 Agent 生成方案：",
-        f"- Agent：{agent_name}（{agent_id}）",
-        f"- 单一职责：{responsibility}",
-        f"- 输出产物：{desired_output_shape}（output_field={output_field}）",
-        f"- 核心工具：{_join_display_items(bound_tools, default='待确认')}",
-        f"- 明确不做：{_join_display_items(non_goals, default='待确认')}",
-        f"- 方法边界：{str(valuation_method_scope or '未特别限定').strip()}",
-        f"- 生成后运行诊断方式（非正式验收）：{str(test_strategy or '未指定').strip()}",
+        "【方案概览】",
+        f"名称：{agent_name}",
+        f"定位：{responsibility}",
+        f"输出：{desired_output_shape}",
     ]
+
+    scope_parts = []
+    if valuation_method_scope:
+        scope_parts.append(f"估值方法：{valuation_method_scope}")
+    if resolved_default_tools := bound_tools:
+        # 不列 tool_id，只说覆盖了哪些维度
+        pass  # 维度覆盖由 capability_inventory 的 business 描述提供
+    lines.append("")
+
+    if non_goals:
+        lines.append("【明确不做的】")
+        for item in non_goals:
+            lines.append(f"- {item}")
+        lines.append("")
 
     if report_contract is not None:
         forbidden_items = report_contract.get("forbidden_expansions") or []
-        lines.extend([
-            "- 报告契约：",
-            f"  内容范围：{report_contract.get('content_scope') or '未指定'}",
-            f"  样式方式：{_humanize_preview_mode(str(report_contract.get('style_preview_mode') or ''))}",
-            f"  预览规则：{report_contract.get('preview_instruction') or '默认只展示结构骨架'}",
-            f"  明确排除：{_join_display_items(forbidden_items, default='无')}",
-        ])
+        lines.append("【报告内容边界】")
+        lines.append(f"章节范围：{report_contract.get('content_scope') or '与职责相匹配的估值分析章节'}")
+        lines.append(f"预览方式：{_humanize_preview_mode(str(report_contract.get('style_preview_mode') or ''))}")
+        if forbidden_items:
+            lines.append(f"明确排除：{_join_display_items(forbidden_items, default='无')}")
+        lines.append("")
 
-    overwrite_text = "会覆盖现有配置，需用户明确同意" if overwrite_risk.get("requires_explicit_overwrite") else "不会覆盖现有配置"
-    lines.append(f"- 覆盖风险：{overwrite_text}")
-    lines.append(
-        f"如果以上内容确认无误，请回复：确认生成 {agent_id}；allow_overwrite={'yes' if overwrite_risk.get('requires_explicit_overwrite') else 'no'}"
-    )
+    # 覆盖风险
+    overwrite_text = "会覆盖现有配置，需用户明确同意" if overwrite_risk.get("requires_explicit_overwrite") else "不影响现有配置"
+    lines.append(f"【覆盖影响】{overwrite_text}")
+    lines.append("")
+
+    # 确认引导
+    lines.append("如果以上内容确认无误，请回复：确认")
+    if overwrite_risk.get("requires_explicit_overwrite"):
+        lines.append("（注意：后续生成该 Agent 时会覆盖现有配置）")
+
     return "\n".join(lines)
 
 
@@ -2732,6 +2905,20 @@ def prepare_agent_requirement_intake(
         resolved_tools = _parse_string_list(preferred_tools)
         stock_analysis_request = _is_stock_analysis_request(clean_request, target_responsibility, desired_output_shape)
         output_preview_request = _is_output_preview_request(clean_request, desired_output_shape)
+
+        # ── 🔍 入口日志：需求采集 ──
+        logger.info(
+            "[Intake][Entry] request_len=%d responsibility_len=%d output_shape_len=%d "
+            "non_goals_len=%d preferred_tools=%s stock=%s output_preview=%s existing=%s",
+            len(clean_request),
+            len(str(target_responsibility or "")),
+            len(str(desired_output_shape or "")),
+            len(str(non_goals or "")),
+            str(preferred_tools or "")[:80],
+            "yes" if stock_analysis_request else "no",
+            "yes" if output_preview_request else "no",
+            str(existing_agent_id or ""),
+        )
         effective_recommendation_policy = _normalize_recommendation_policy(recommendation_policy)
 
         # === 智能默认值：用户没说的情况下，自动补全 ===
@@ -2776,9 +2963,13 @@ def prepare_agent_requirement_intake(
                 "why_critical": "工具范围影响能力边界，但你也可以完全交给我推荐。",
             })
 
+        # === 生成简短 Agent 名（不把整句职责描述当名字）===
+        proposed_agent_name = _generate_short_agent_name_llm(clean_request, target_responsibility)
+
         # === 构建提案 ===
         proposed_plan = {
             "single_responsibility": target_responsibility if not has_critical_single_responsibility_gap else "（待确认）",
+            "proposed_agent_name": proposed_agent_name,
             "output_shape": effective_output_shape,
             "non_goals": effective_non_goals,
             "preferred_tools": effective_tools if effective_tools else "（缺口分析阶段自动推荐）",
@@ -2792,6 +2983,38 @@ def prepare_agent_requirement_intake(
             proposed_plan["report_section_scope"] = effective_report_scope
 
         can_proceed_to_confirmation = len(critical_questions) == 0
+
+        # ── 🔍 出口日志：需求采集结果 ──
+        logger.info(
+            "[Intake][Exit] responsibility=%s output=%s can_proceed=%s critical_q=%d next=%s",
+            str(target_responsibility or "")[:80],
+            str(desired_output_shape or "")[:80],
+            "yes" if can_proceed_to_confirmation else "no",
+            len(critical_questions),
+            "prepare_agent_generation_confirmation" if can_proceed_to_confirmation else "present_proposed_plan_and_ask_critical_questions",
+        )
+
+        # ── 更新 thread_context：让 FlowController 追踪进度 ──
+        try:
+            from core.embedded_nanobot.intent_context import update_intent_context_in_thread
+            stage = "exploring" if not can_proceed_to_confirmation else "draft_preparing"
+            pending_q = ""
+            pending_opts = []
+            if not can_proceed_to_confirmation and critical_questions:
+                # 将关键问题写入 pending 状态，确保跨轮对话不丢失上下文
+                pending_q = critical_questions[0]["question"]
+                pending_opts = [
+                    {"index": i + 1, "id": q["id"], "name": q["question"][:60], "description": q.get("why_critical", "")}
+                    for i, q in enumerate(critical_questions[:3])
+                ]
+            update_intent_context_in_thread(
+                action="requirement_intake",
+                stage=stage,
+                pending_question=pending_q,
+                pending_options=pending_opts,
+            )
+        except Exception:
+            pass
 
         return _json_response({
             "status": "ok",
@@ -2808,16 +3031,40 @@ def prepare_agent_requirement_intake(
                 else "present_proposed_plan_and_ask_critical_questions"
             ),
             "nanobot_guidance": (
-                "✅ 方案已自动补全。把 proposed_plan 用自然语言呈现给用户，说明每个选择的理由——例如为什么默认选综合估值而非单一方法，为什么默认允许测试。"
-                "多轮沟通没问题，但每次都要有含金量：解释区别、讲清利弊、给出推荐理由。你是领域专家，用户希望听到你的分析和判断。"
-                "如果 critical_questions 非空（最多1-2个），展开说明：比如用户提到的「行业估值」是不是已经包含了 PE/PB 对比？DCF 和相对估值的适用场景差异是什么？"
-                "不要问用户「要不要包含PE/PB」这种没有上下文的选择题——你应该告诉用户「行业估值通常包含PE/PB/PEG等相对估值法，DCF是绝对估值法，两者互补。我建议都纳入，你看呢？」"
-                "用户说「可以」或表示认可即可推进。不要逐条列出所有维度让用户审阅。"
+                "✅ 方案已自动补全。你现在是财经产品专家，不是问卷调查员。\n\n"
+                "核心原则：抛砖引玉 —— 先给出你的专业草稿，用户自然会纠正。\n\n"
+                "沟通规则：\n"
+                "1. 先呈现 proposed_plan，用业务语言说明每个选择的理由。\n"
+                "2. 如果 critical_questions 非空，最多问 1 个最关键的问题，其余全部用默认值。\n"
+                "3. 每个问题必须给出背景、不同选择的区别、你的推荐方案和理由。\n"
+                "   例如不要说「你希望用哪些估值方法？」，而要说「估值有两大类：相对估值（PE/PB/PEG等，看同行业对比）和绝对估值（DCF等，看内在价值）。两者互补，我建议都纳入。你觉得呢？」\n"
+                "4. 禁止列出一长串问题让用户逐个回答。这是最低效的沟通方式。\n"
+                "5. 禁止问用户「你用什么数据源/数据终端」——平台内置 Tushare/AKShare/BaoStock 等数据源，Agent 通过工具自动获取数据，不需要用户选择。\n"
+                "6. 用户说「可以」「好的」「没意见」即视为认可，直接推进到确认阶段。\n"
+                "7. 用户没有提到的维度，直接用专业默认值补全，不要追问。\n"
+                "   例如用户没说要不要风险提示，默认加上；用户没说 A 股还是港股，默认 A 股。\n"
+                "   用户在草稿中看到默认值后如果不同意，自然会告诉你。\n"
+                "8. 【重要】禁止在回复中提及任何工具名（如 get_dcf_valuation、get_comparable_company_valuation 等）。\n"
+                "   用户不关心底层用了哪个工具，只关心 Agent 能解决什么业务问题。\n"
+                "   工具绑定是平台内部的事，会在后续能力盘点阶段自动处理，不需要也不应该暴露给用户。\n"
+                "   正确说法：「我们会自动获取同行业估值数据做横向对比」「系统会拉取历史估值区间计算分位」\n"
+                "   错误说法：「平台有 get_comparable_company_valuation 工具」「需要确认 get_historical_valuation_percentile_tool 是否就绪」"
             ) if can_proceed_to_confirmation else (
-                "✅ 方案已自动补全大部分维度。先简要呈现 proposed_plan 并说明理由。"
-                "然后针对 critical_questions（最多1-2个）展开——每个问题都要给出背景、区别、你的推荐方案和理由，不要只扔问题。"
-                "比如不要说「你希望用哪些估值方法？」，而要说「估值有两大类：相对估值（PE/PB/PEG等，看同行业对比）和绝对估值（DCF等，看内在价值）。两者互补，我建议都纳入。你觉得呢？」"
-                "多轮沟通没问题，关键是每轮都有专业含金量。"
+                "✅ 方案已自动补全大部分维度。你现在是财经产品专家，不是问卷调查员。\n\n"
+                "核心原则：抛砖引玉 —— 先给出你的专业草稿，用户自然会纠正。\n\n"
+                "沟通规则：\n"
+                "1. 先简要呈现 proposed_plan，说明每个默认选择的理由。\n"
+                "2. 针对 critical_questions，最多展开 1 个最关键的问题，其余全部用默认值。\n"
+                "3. 每个问题必须给出背景、不同选择、你的推荐方案和理由，不要只扔问题。\n"
+                "4. 禁止列出一长串问题让用户逐个回答。\n"
+                "5. 用户没有提到的维度，直接用专业默认值补全，不要追问。\n"
+                "6. 禁止问用户「你用什么数据源/数据终端」——平台内置 Tushare/AKShare/BaoStock 等数据源，Agent 通过工具自动获取数据，不需要用户选择。\n"
+                "7. 用户说「可以」「好的」「没意见」即视为认可，直接推进。\n"
+                "8. 【重要】禁止在回复中提及任何工具名（如 get_dcf_valuation、get_comparable_company_valuation 等）。\n"
+                "   用户不关心底层用了哪个工具，只关心 Agent 能解决什么业务问题。\n"
+                "   工具绑定是平台内部的事，会在后续能力盘点阶段自动处理，不需要也不应该暴露给用户。\n"
+                "   正确说法：「我们会自动获取同行业估值数据做横向对比」「系统会拉取历史估值区间计算分位」\n"
+                "   错误说法：「平台有 get_comparable_company_valuation 工具」「需要确认 get_historical_valuation_percentile_tool 是否就绪」"
             ),
         })
     except Exception as exc:
@@ -2864,6 +3111,15 @@ async def prepare_agent_generation_confirmation(
         if not clean_agent_id or not clean_agent_name or not clean_responsibility:
             return _json_response({"status": "error", "message": "agent_id、agent_name、target_responsibility 不能为空"})
 
+        # ── 🔍 入口日志：生成确认稿 ──
+        logger.info(
+            "[Prepare][Entry] agent_id=%s name=%s responsibility_len=%d tool_count=%d",
+            clean_agent_id,
+            str(clean_agent_name)[:60],
+            len(clean_responsibility),
+            len(_parse_string_list(tool_ids)),
+        )
+
         resolved_tools = _parse_string_list(tool_ids)
         resolved_default_tools = _parse_string_list(default_tools) or resolved_tools[:2] or list(resolved_tools)
         resolved_non_goals = _parse_string_list(non_goals)
@@ -2892,36 +3148,38 @@ async def prepare_agent_generation_confirmation(
             return _json_response({"status": "error", "message": f"以下工具未注册: {', '.join(missing_tools)}", "missing_tools": missing_tools})
 
         db = get_mongo_db()
-        capability_hits = []
+
+        # ── 幂等性保护：同一 agent_id 已有活跃确认稿时禁止覆盖 ──
         try:
-            capability_hits = await CapabilityIndexService(db).search_capabilities(
-                query=" ".join([clean_agent_name, clean_responsibility, desired_output_shape, valuation_method_scope]).strip(),
-                top_k=16,
-                bindable_only=True,
-                source_types=["builtin_tool", "skill", "external_skill", "mcp_tool"],
+            existing_doc = await db["agent_workshop_sessions"].find_one(
+                {"agent_id": clean_agent_id, "builder_contracts.stage": "confirmation_pending"},
+                {"session_id": 1, "builder_contracts": 1},
             )
-        except Exception as exc:
-            logger.warning("确认稿能力盘点搜索失败，继续使用 Workshop 内部快照: %s", exc)
-        capability_inventory = _build_capability_inventory_from_hits(capability_hits)
-        temp_spec = _build_temp_agent_spec_for_confirmation(
-            agent_id=clean_agent_id,
-            agent_name=clean_agent_name,
-            responsibility=clean_responsibility,
-            output_field=output_field,
-            desired_output_shape=desired_output_shape,
-            non_goals=resolved_non_goals,
-            constraints=[effective_recommendation_policy],
-            valuation_method_scope=valuation_method_scope,
-            tool_ids=resolved_tools,
+        except Exception:
+            existing_doc = None
+        if existing_doc:
+            logger.warning(
+                "[Prepare][Idempotent] ⚠️ agent_id=%s 已有活跃确认稿，拒绝覆盖 session_id=%s",
+                clean_agent_id,
+                existing_doc.get("session_id", ""),
+            )
+            return _json_response({
+                "status": "already_pending",
+                "message": (
+                    f"Agent `{clean_agent_id}` 已有待确认的生成方案。"
+                    f"请直接引导用户选择方案或回复质疑，不要重复生成确认稿。"
+                    f"如果用户已明确选择方案，调用 generate_confirmed_candidate_agent。"
+                ),
+            })
+
+        # ── V2 流程：需求确认阶段只确认职责/输出/边界，不展示工具候选，不做缺口分析 ──
+        # 缺口分析放在用户确认需求后的 CAPABILITY_CHECK 阶段统一进行。
+        # 此阶段不把 capability_inventory / gap_report 暴露给用户。
+        logger.info(
+            "[Prepare][RequirementOnly] agent_id=%s name=%s (no capability inventory, no gap analysis)",
+            clean_agent_id,
+            clean_agent_name,
         )
-        gap_report_model = await AgentWorkshopService(db=db).analyze_spec_gaps(
-            temp_spec,
-            capability_inventory,
-            context={"stage": "prepare_agent_generation_confirmation", "agent_id": clean_agent_id},
-        )
-        gap_report = _gap_report_to_dict(gap_report_model)
-        candidate_plans, recommended_plan_id = _build_candidate_plans(gap_report, resolved_tools)
-        pending_question = "请选择要执行的生成方案（可回复第一个/选A/complete/quick/narrow），或指出你要质疑的 gap。"
         overwrite_risk = await _inspect_agent_overwrite_risk(db, clean_agent_id, status=status)
         report_contract = None
         if report_like_request:
@@ -2951,30 +3209,57 @@ async def prepare_agent_generation_confirmation(
             report_contract=report_contract,
             overwrite_risk=overwrite_risk,
         )
-        # 更新意图上下文：这是一个待确认的方案选择项
-        plan_options = _plan_options_for_intent(candidate_plans)
+
+        pending_question = (
+            "以上是我对这个 Agent 需求的理解。请确认职责边界和输出形态是否符合你的预期。"
+            "如果无误，请回复「确认」；如需调整，请直接告诉我修改点。"
+        )
+
+        # 更新意图上下文：等待用户确认需求
         _auto_update_intent(
             action="create_agent",
-            stage="confirmation_pending",
+            stage="requirement_confirmation_pending",
             spec_id=clean_agent_id,
             spec_name=clean_agent_name,
             intent_summary=f"创建 Agent：{clean_responsibility}",
-            pending_options=plan_options,
-            proposed_items=plan_options,
+            pending_options=[],
+            proposed_items=[],
             pending_question=pending_question,
-            active_subtask="等待用户选择 Agent 生成方案",
-            next_action="用户选择方案后调用 generate_confirmed_candidate_agent，并传入 selected_plan_id/acknowledged_gaps",
+            active_subtask="等待用户确认需求",
+            next_action="用户确认需求后进入 CAPABILITY_CHECK，调用 search_project_capabilities + analyze_agent_workshop_gaps",
+        )
+
+        # ── 🔍 追踪日志：确认 prepare 阶段输出 ──
+        logger.info(
+            "[Prepare][Output] agent_id=%s confirmation_type=requirement_confirmation "
+            "responsibility_len=%d output_shape_len=%d pending_question_len=%d",
+            clean_agent_id,
+            len(clean_responsibility),
+            len(desired_output_shape or ""),
+            len(pending_question),
         )
 
         return _json_response({
             "status": "ok",
             "confirmation_required": True,
-            "ready_to_execute": True,
-            "confirmation_type": "plan_selection",
-            "capability_inventory": capability_inventory,
-            "gap_report": gap_report,
-            "candidate_plans": candidate_plans,
-            "recommended_plan_id": recommended_plan_id,
+            "ready_to_execute": False,
+            "confirmation_type": "requirement_confirmation",
+            "nanobot_guidance": (
+                "你现在是财经产品专家的身份与用户沟通，不是技术架构师。\n\n"
+                "核心原则：抛砖引玉 —— 先给出你的专业确认稿，用户自然会纠正。\n\n"
+                "沟通规则：\n"
+                "1. 只讲业务价值：这个 Agent 做什么、输出什么、不做什么。"
+                "不要讲「绑定了几个工具」或列出 tool_id。\n"
+                "2. 不要展示能力盘点：用户不需要知道系统有哪些工具，"
+                "只需要知道 Agent 能解决什么问题。\n"
+                "3. 不要提前给方案：此阶段只确认需求，方案会在需求确认后、"
+                "做完能力盘点再给出。\n"
+                "4. 不要问一连串问题：需求已通过 proposed_plan 自动补全了默认值，"
+                "直接呈现确认稿，让用户看到草稿后自然纠正。\n"
+                "5. 禁止问用户「你用什么数据源/数据终端」——平台内置 Tushare/AKShare/BaoStock 等数据源，Agent 通过工具自动获取数据，不需要用户选择。\n"
+                "6. 用户回复「确认」「好的」「可以」等任意认可表述，"
+                "就视为需求已确认，进入下一阶段做能力盘点。"
+            ),
             "pending_question": pending_question,
             "confirmation_brief": {
                 "target_responsibility": clean_responsibility,
@@ -2983,12 +3268,12 @@ async def prepare_agent_generation_confirmation(
                 "desired_output_shape": desired_output_shape,
                 "output_field": output_field,
                 "chosen_build_path": "create_universal_agent",
-                "confirmation_type": "plan_selection",
-                "candidate_plans": candidate_plans,
-                "recommended_plan_id": recommended_plan_id,
-                "pending_question": pending_question,
-                "capability_inventory": capability_inventory,
-                "gap_report": gap_report,
+                "confirmation_type": "requirement_confirmation",
+                "agent_id": clean_agent_id,
+                "agent_name": clean_agent_name,
+                "target_responsibility": clean_responsibility,
+                "desired_output_shape": desired_output_shape,
+                "output_field": output_field,
                 "bound_tools": resolved_tools,
                 "default_tools": resolved_default_tools,
                 "non_goals": resolved_non_goals,
@@ -3007,15 +3292,11 @@ async def prepare_agent_generation_confirmation(
                 "overwrite_risk": overwrite_risk,
                 "user_confirmation_template": user_confirmation_template,
                 "required_user_confirmations": [
-                    "确认单一职责边界是否准确",
-                    "确认输出形状和 output_field 是否符合预期",
-                    "如果输出是报告类产物，确认报告内容边界和样式预览方式是否符合预期，且章节范围不要越界",
-                    "确认核心工具集合是否合适",
-                    "确认非目标和研究边界是否准确，且全局禁止任何交易建议或操作性指令",
-                    "确认估值方法边界和生成后测试方式是否准确",
-                    "若存在覆盖风险，确认是否允许覆盖现有配置",
+                    "职责边界：这个 Agent 该做什么、不做什么，是否符合你的预期？",
+                    "输出内容：报告/分析的结构是否覆盖了你关心的维度？",
+                    "分析方法：估值逻辑和覆盖范围是否准确？",
                 ],
-                "suggested_user_reply": f"选择 {recommended_plan_id} 方案并确认生成 {clean_agent_id}；allow_overwrite={'yes' if overwrite_risk['requires_explicit_overwrite'] else 'no'}",
+                "suggested_user_reply": f"确认；allow_overwrite={'yes' if overwrite_risk['requires_explicit_overwrite'] else 'no'}",
             },
         })
     except Exception as exc:
@@ -3025,9 +3306,194 @@ async def prepare_agent_generation_confirmation(
 
 @tool
 @register_tool(
+    tool_id="propose_agent_build_plans",
+    name="基于缺口分析生成候选方案",
+    description="在需求确认后、根据 gap_report 生成 1-3 个 Agent 构建方案（完整版/快速版/缩小需求版），供用户选择。",
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    when_to_use=(
+        "当 Nanobot 已经确认用户需求，并已完成能力盘点和 gap 分析后，"
+        "需要把技术缺口翻译成用户可理解的多个可行方案时使用。"
+    ),
+    when_not_to_use=(
+        "不要在需求未确认前调用；也不要在没有任何 gap_report 时调用。"
+        "此工具只负责生成方案，不执行 Agent 创建。"
+    ),
+    returns=(
+        "返回 JSON 字符串，包含 candidate_plans（固定字段）、recommended_plan_id、pending_question。"
+    ),
+    example="propose_agent_build_plans(gap_report_json='{\"blocking_gaps\":[],\"non_blocking_gaps\":[]}')",
+    related_tools=["search_project_capabilities", "analyze_agent_workshop_gaps", "generate_confirmed_candidate_agent"],
+)
+async def propose_agent_build_plans(
+    gap_report_json: Annotated[str, "JSON 字符串，包含 blocking_gaps、non_blocking_gaps、suggested_tools 等"],
+    agent_responsibility: Annotated[str, "Agent 职责描述，用于生成更贴合的方案"] = "",
+    agent_output_shape: Annotated[str, "Agent 输出形状描述"] = "",
+) -> str:
+    """基于 gap 分析报告生成候选构建方案。"""
+    try:
+        gap_report = _parse_optional_json_object(gap_report_json, "gap_report_json")
+        blocking_gaps = gap_report.get("blocking_gaps") or []
+        non_blocking_gaps = gap_report.get("non_blocking_gaps") or []
+        if not isinstance(blocking_gaps, list):
+            blocking_gaps = []
+        if not isinstance(non_blocking_gaps, list):
+            non_blocking_gaps = []
+
+        # 构造 LLM 提示词
+        system_prompt = (
+            "你是一位资深的财经产品专家。你的任务是根据系统的能力缺口分析结果，"
+            "为用户生成 1-3 个清晰、可执行的 Agent 构建方案。\n\n"
+            "规则：\n"
+            "1. 输出必须是合法 JSON，不要包含 markdown 代码块标记。\n"
+            "2. 方案用业务语言描述，不要暴露内部工具 ID 或技术细节。\n"
+            "3. 方案数量：\n"
+            "   - 0 个 blocking gap：只有 plan_id='direct'（直接生成完整版）。\n"
+            "   - 1-2 个 blocking gap：提供 plan_id='complete'（补齐）和 plan_id='quick'（简化版）。\n"
+            "   - 3 个及以上 blocking gap：提供 complete、quick、plan_id='narrow'（缩小需求范围）。\n"
+            "4. complete 方案必须列出 required_new_skills（需要生成/复用的能力）。\n"
+            "5. quick 方案必须说明哪些输出会被降级或省略。\n"
+            "6. narrow 方案必须给出建议缩小后的职责范围。\n"
+            "7. 必须设置 recommended_plan_id，默认推荐 complete；只有 0 个 blocking gap 时推荐 direct。\n"
+        )
+
+        user_prompt = (
+            f"Agent 职责：{agent_responsibility or '（未提供）'}\n"
+            f"Agent 输出：{agent_output_shape or '（未提供）'}\n\n"
+            "能力缺口分析结果：\n"
+            f"blocking_gaps（阻塞性缺口）数量：{len(blocking_gaps)}\n"
+            f"blocking_gaps 详情：{_json_compact_dump(blocking_gaps)}\n"
+            f"non_blocking_gaps（非阻塞性缺口）数量：{len(non_blocking_gaps)}\n"
+            f"non_blocking_gaps 详情：{_json_compact_dump(non_blocking_gaps)}\n\n"
+            "请按以下固定 JSON 格式输出：\n"
+            "{\n"
+            '  "candidate_plans": [\n'
+            '    {"plan_id": "direct|complete|quick|narrow", "plan_name": "...", "description": "...", "required_new_skills": [...], "estimated_effort": "高|中|低", "risk": "...", "recommended": true|false}\n'
+            '  ],\n'
+            '  "recommended_plan_id": "...",\n'
+            '  "pending_question": "..."\n'
+            "}"
+        )
+
+        plan_data = None
+        try:
+            db = get_mongo_db()
+            from app.services.intelligent_assistant_service import get_reasoning_llm_config
+            from core.llm import UnifiedLLMClient
+            from core.llm.models import Message
+
+            config = await get_reasoning_llm_config(db)
+            if not config:
+                raise ValueError("系统中未找到可用的默认推理模型配置")
+            client = UnifiedLLMClient.from_config(config)
+
+            messages = [
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=user_prompt),
+            ]
+            response = await client.achat(messages, temperature=0.3, max_tokens=4000)
+            raw_content = str(response.content or "").strip()
+
+            # 尝试从 markdown 代码块中提取 JSON
+            plan_payload = _extract_json_from_markdown(raw_content) or raw_content
+            try:
+                plan_data = json.loads(plan_payload)
+            except Exception as exc:
+                logger.warning("[ProposePlans][ParseFailed] raw=%s exc=%s", raw_content[:500], exc)
+        except Exception as exc:
+            logger.warning("[ProposePlans][LLMFallback] using rule-based plans because llm failed: %s", exc, exc_info=True)
+
+        if not isinstance(plan_data, dict):
+            plan_data = _fallback_build_plans(blocking_gaps, non_blocking_gaps)
+
+        candidate_plans = plan_data.get("candidate_plans") or []
+        recommended_plan_id = str(plan_data.get("recommended_plan_id") or "").strip()
+        if not candidate_plans:
+            candidate_plans = _fallback_build_plans(blocking_gaps, non_blocking_gaps).get("candidate_plans", [])
+        if not recommended_plan_id:
+            recommended_plan_id = candidate_plans[0].get("plan_id") if candidate_plans else "direct"
+
+        # 规范每个 plan 的字段
+        normalized_plans = []
+        for p in candidate_plans:
+            plan_id = str(p.get("plan_id") or "").strip()
+            if not plan_id:
+                continue
+            normalized_plans.append({
+                "plan_id": plan_id,
+                "plan_name": str(p.get("plan_name") or _humanize_plan_id(plan_id)),
+                "description": str(p.get("description") or ""),
+                "required_new_skills": _to_str_list(p.get("required_new_skills")),
+                "estimated_effort": str(p.get("estimated_effort") or "中"),
+                "risk": str(p.get("risk") or ""),
+                "recommended": bool(p.get("recommended", False)),
+            })
+
+        # 确保 recommended 标志与 recommended_plan_id 一致
+        for p in normalized_plans:
+            p["recommended"] = (p["plan_id"] == recommended_plan_id)
+
+        pending_question = str(plan_data.get("pending_question") or "你希望采用哪个方案？").strip()
+
+        # 更新意图上下文：等待用户选择方案
+        pending_options = [
+            {
+                "index": i + 1,
+                "id": p["plan_id"],
+                "name": p["plan_name"],
+                "description": p["description"],
+                "recommended": bool(p.get("recommended")),
+                "acknowledged_gaps": blocking_gaps if p["plan_id"] in {"complete", "quick"} else [],
+            }
+            for i, p in enumerate(normalized_plans)
+        ]
+        _auto_update_intent(
+            action="create_agent",
+            stage="plan_selection_pending",
+            intent_summary="等待用户选择 Agent 构建方案",
+            pending_options=pending_options,
+            proposed_items=[{"index": i + 1, "id": p["plan_id"], "name": p["plan_name"]} for i, p in enumerate(normalized_plans)],
+            pending_question=pending_question,
+            active_subtask="等待用户选择方案",
+            next_action="用户选择方案后调用 generate_confirmed_candidate_agent，传入 selected_plan_id 与 acknowledged_gaps",
+        )
+
+        logger.info(
+            "[ProposePlans][Output] plan_count=%d recommended=%s blocking_gaps=%d pending_options=%d option_ids=%s",
+            len(normalized_plans),
+            recommended_plan_id,
+            len(blocking_gaps),
+            len(pending_options),
+            [opt.get("id") for opt in pending_options],
+        )
+
+        return _json_response({
+            "status": "ok",
+            "candidate_plans": normalized_plans,
+            "recommended_plan_id": recommended_plan_id,
+            "pending_question": pending_question,
+            "pending_options": pending_options,
+            "nanobot_guidance": (
+                "你现在是财经产品专家。向用户展示方案时：\n"
+                "1. 用业务语言解释每个方案的区别。\n"
+                "2. 不要暴露 direct/complete/quick/narrow 等内部代号。\n"
+                "3. 明确说明 complete 方案需要额外生成哪些能力，以及可能的风险。\n"
+                "4. 用户回复「选 A」「按推荐的来」「确认」等任意认可表述，"
+                "就视为已选择 recommended_plan_id，直接调用 generate_confirmed_candidate_agent。"
+            ),
+        })
+    except Exception as exc:
+        logger.error("生成候选方案失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"生成候选方案失败: {exc}"})
+
+
+@tool
+@register_tool(
     tool_id="search_project_capabilities",
     name="搜索项目能力",
-    description="轻量搜索当前项目里可复用的工具、skills、外部技能和 MCP 能力，用于 Agent 设计前的资源侦察。",
+    description="轻量搜索当前项目里可复用的工具、skills、外部技能和 MCP 能力，用于 Agent 设计前的资源侦察。", 
     category="assistant_ops",
     is_online=False,
     auto_register=True,
@@ -3993,18 +4459,29 @@ async def create_or_update_agent_workshop_draft(
             source_thread_id=current_thread_id,
         )
         # 🔥 自动更新意图上下文
+        # V2 流程：需求确认后才创建 session，此时可能处于 capability_check 阶段，
+        # 不应把 stage 改回 draft_preparing。
+        current_stage = _get_current_intent_stage()
+        if current_stage in {"capability_check", "plan_selection_pending", "requirement_confirmation_pending"}:
+            next_stage = "capability_check"
+            next_action = "继续执行能力盘点：search_project_capabilities + analyze_agent_workshop_gaps"
+            task_status = "capability_check"
+        else:
+            next_stage = "draft_preparing"
+            next_action = "继续执行缺口分析，若存在 blocking gap 则为当前 Agent 创建/绑定 Skill，之后回到版本构建和真数据测试"
+            task_status = "draft_preparing"
         _auto_update_intent(
             action="create_agent",
-            stage="draft_preparing",
+            stage=next_stage,
             spec_id=clean_agent_id,
             spec_name=clean_agent_name,
             intent_summary=f"创建 Agent「{clean_agent_name}」，准备工坊草稿",
-            next_action="继续执行缺口分析，若存在 blocking gap 则为当前 Agent 创建/绑定 Skill，之后回到版本构建和真数据测试",
+            next_action=next_action,
             task={
                 "type": "agent",
                 "id": clean_agent_id,
                 "name": clean_agent_name,
-                "status": "draft_preparing",
+                "status": task_status,
             },
         )
         return _json_response({**result, "status": "ok"})
@@ -4017,29 +4494,109 @@ async def create_or_update_agent_workshop_draft(
 @register_tool(
     tool_id="analyze_agent_workshop_gaps",
     name="执行 Agent 工坊缺口分析",
-    description="让 Nanobot 直接触发 Agent 工坊会话的缺口分析阶段，并返回结构化缺口摘要。",
+    description="让 Nanobot 直接触发 Agent 工坊会话的缺口分析阶段，并返回结构化缺口摘要。如果没有现成 session_id，可传入 agent_id 等基本信息自动创建临时 session。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当 Agent 工坊 Draft 已经确认到可以进入缺口分析，且希望继续由 Nanobot 主导后续阶段时使用。",
-    when_not_to_use="不适合在还没有有效 session_id 或规格尚未成形时调用。也不适合在版本已通过 auto-build（如 generate_confirmed_candidate_agent）自动构建后调用，因为自动构建内部已执行缺口分析。如果当前处于 BUILDING 阶段，应跳过此工具，直接进入测试。",
+    when_to_use="当用户需求已确认，需要运行真实 gap 分析时使用。如果已有 session_id 则直接分析；如果没有，可传入 agent_id/agent_name/target_responsibility/tool_ids 自动创建 session 后再分析。",
+    when_not_to_use="不适合在需求尚未确认时调用。也不适合在版本已通过 auto-build（如 generate_confirmed_candidate_agent）自动构建后调用，因为自动构建内部已执行缺口分析。如果当前处于 BUILDING 阶段，应跳过此工具，直接进入测试。",
     returns="返回 JSON 字符串，包含 session_id、spec_id 与 gap_report 摘要。",
-    example="analyze_agent_workshop_gaps(session_id='session_123')",
-    related_tools=["generate_agent_workshop_tooling_plan", "build_agent_workshop_version"],
+    example="analyze_agent_workshop_gaps(session_id='session_123') 或 analyze_agent_workshop_gaps(agent_id='risk_signal_agent', agent_name='财报风险信号助手', target_responsibility='识别财报风险信号', tool_ids='tool_a,tool_b')",
+    related_tools=["create_or_update_agent_workshop_draft", "search_project_capabilities", "generate_agent_workshop_tooling_plan", "build_agent_workshop_version"],
 )
 async def analyze_agent_workshop_gaps(
-    session_id: Annotated[str, "Agent 工坊会话 ID"],
+    session_id: Annotated[str, "Agent 工坊会话 ID；如果为空，则需要提供 agent_id 等参数自动创建"] = "",
+    agent_id: Annotated[str, "候选 Agent ID，session_id 为空时必填"] = "",
+    agent_name: Annotated[str, "Agent 显示名称，session_id 为空时必填"] = "",
+    target_responsibility: Annotated[str, "单一职责描述，session_id 为空时必填"] = "",
+    tool_ids: Annotated[str, "候选工具 ID，逗号分隔，session_id 为空时使用"] = "",
 ) -> str:
     """执行 Agent 工坊缺口分析并返回结构化结果。"""
     try:
         clean_session_id = str(session_id or "").strip()
-        if not clean_session_id:
-            return _json_response({"status": "error", "message": "session_id 不能为空"})
+        clean_agent_id = str(agent_id or "").strip()
+        clean_agent_name = str(agent_name or "").strip()
+        clean_responsibility = str(target_responsibility or "").strip()
 
         db = get_mongo_db()
+
+        # 如果没有 session_id，尝试根据 agent_id 查找或创建 session
+        if not clean_session_id:
+            if not clean_agent_id or not clean_agent_name or not clean_responsibility:
+                return _json_response({
+                    "status": "error",
+                    "message": "session_id 为空时，agent_id、agent_name、target_responsibility 不能为空",
+                })
+
+            # 优先查找同一线程同 agent_id 的现有 session
+            current_thread_id = (get_current_assistant_thread_id() or "").strip()
+            existing_session = None
+            try:
+                sessions = _get_collection(db, "agent_workshop_sessions")
+                if sessions is not None:
+                    existing_session = await sessions.find_one(
+                        {"agent_id": clean_agent_id, "source_thread_id": current_thread_id},
+                        {"session_id": 1},
+                        sort=[("created_at", -1)],
+                    )
+            except Exception:
+                existing_session = None
+
+            if existing_session and existing_session.get("session_id"):
+                clean_session_id = str(existing_session["session_id"]).strip()
+                logger.info("[AnalyzeGaps] 复用已有 session_id=%s agent_id=%s", clean_session_id, clean_agent_id)
+            else:
+                # 自动创建 draft session
+                draft_result = await AgentWorkshopService(db=db).create_nanobot_draft(
+                    agent_id=clean_agent_id,
+                    agent_name=clean_agent_name,
+                    target_responsibility=clean_responsibility,
+                    output_field="analysis_report",
+                    tool_ids=_parse_string_list(tool_ids),
+                    runtime_contract={"required_tools": _parse_string_list(tool_ids)},
+                    tooling_contract={"required_tools": _parse_string_list(tool_ids)},
+                    owner_user_id="",
+                    source_thread_id=current_thread_id,
+                )
+                clean_session_id = str(draft_result.get("session_id") or "").strip()
+                if not clean_session_id:
+                    return _json_response({
+                        "status": "error",
+                        "message": "自动创建 Agent 工坊 session 失败，无法执行缺口分析",
+                    })
+                logger.info("[AnalyzeGaps] 自动创建 session_id=%s agent_id=%s", clean_session_id, clean_agent_id)
+
         result = await AgentWorkshopService(db=db).analyze_gaps(clean_session_id)
         gap_report = result.get("gap_report") if isinstance(result, dict) else None
+        # AgentWorkshopService.analyze_gaps 返回的 gap_report 是 AgentWorkshopGapAnalysis
+        # Pydantic 模型对象。若直接传给 _json_response，json.dumps 的 default=str 会
+        # 把它转成字符串，导致下游 node_gap_analysis 提取不到 blocking_gaps 等字段
+        # （state["gap_report"] 永远为空 {}，进而 acknowledged_gaps=0，build 失败）。
+        # 这里统一转成 dict，保证 JSON 序列化后仍是结构化对象。
+        if gap_report is not None and not isinstance(gap_report, dict):
+            if hasattr(gap_report, "model_dump"):
+                gap_report = gap_report.model_dump(by_alias=True, exclude_none=False)
+            elif hasattr(gap_report, "dict"):
+                gap_report = gap_report.dict(by_alias=True)
+            else:
+                # 兜底：用 __dict__ 或 str
+                gap_report = (
+                    dict(getattr(gap_report, "__dict__", {}))
+                    if getattr(gap_report, "__dict__", None)
+                    else None
+                )
+
+        # 更新意图上下文：gap 分析完成后进入方案选择阶段
+        _auto_update_intent(
+            action="create_agent",
+            stage="plan_selection_pending",
+            spec_id=clean_agent_id,
+            spec_name=clean_agent_name,
+            intent_summary=f"为 Agent「{clean_agent_name}」完成能力缺口分析，等待生成候选方案",
+            next_action="调用 propose_agent_build_plans 生成候选方案",
+        )
+
         return _json_response({
             "status": "ok",
             "session_id": clean_session_id,
@@ -4172,13 +4729,33 @@ async def build_agent_workshop_version(
 
         result = await AgentWorkshopService(db=db).build_version(clean_session_id)
         version = result.get("version") if isinstance(result, dict) else None
+        # AgentWorkshopService.build_version 返回的 version 是 AgentVersion Pydantic 模型对象。
+        # 若直接传给 _json_response，json.dumps 的 default=str 会把它转成 str repr
+        # （形如 "id=ObjectId('...') version_id='...' spec_id='...' ..."），
+        # 导致下游 node_generate_candidate_agent / node_build_or_ready 提取到的
+        # version_id 是整个对象 repr 而非 version_id 字符串，进而 real_data_test /
+        # publish 全部失败。这里统一转成 dict，保证 JSON 序列化后仍是结构化对象。
+        if version is not None and not isinstance(version, dict):
+            if hasattr(version, "model_dump"):
+                version = version.model_dump(by_alias=True, exclude_none=False)
+            elif hasattr(version, "dict"):
+                version = version.dict(by_alias=True)
+            elif hasattr(version, "__dict__") and getattr(version, "__dict__", None):
+                version = dict(getattr(version, "__dict__"))
+            else:
+                version = {"_repr": str(version)}
+        # 顶层 version_id：方便下游直接取用，避免重复嵌套解析
+        top_version_id = ""
+        if isinstance(version, dict):
+            top_version_id = str(version.get("version_id") or "").strip()
         return _json_response({
             "status": "ok",
             "session_id": clean_session_id,
             "spec_id": result.get("spec_id") if isinstance(result, dict) else "",
+            "version_id": top_version_id,
             "version": version,
             "summary": {
-                "version_id": _read_mapping_or_attr(version, "version_id", None) if version is not None else None,
+                "version_id": top_version_id or None,
                 "required_tools": len(_read_mapping_or_attr(version, "required_tools", []) or []) if version is not None else 0,
                 "required_capabilities": len(_read_mapping_or_attr(version, "required_capabilities", []) or []) if version is not None else 0,
             },
@@ -5083,17 +5660,17 @@ async def bind_agent_tools_and_validate_candidate(
 @tool
 @register_tool(
     tool_id="generate_confirmed_candidate_agent",
-    name="确认后生成候选 Agent",
-    description="在用户明确确认后，一次性完成配置写入、提示词模板写入、工具绑定和干运行校验；若已同步到 Agent Workshop Draft，则默认自动生成一个测试版本，便于直接进入真数据测试。",
+    name="确认方案后生成候选 Agent",
+    description="在用户明确选择方案后，一次性完成配置写入、提示词模板写入、工具绑定和干运行校验；若已同步到 Agent Workshop Draft，则默认自动生成一个测试版本。V2 流程中必须传入 selected_plan_id、acknowledged_gaps 和 gap_report_json，避免执行阶段重复做缺口分析。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当 Nanobot 已完成确认稿并拿到用户明确确认后，用一次调用生成候选 Agent。",
-    when_not_to_use="未确认前不要调用；也不适合做资源侦察。",
+    when_to_use="当 Nanobot 已完成需求确认、能力盘点、方案选择，并拿到用户明确的方案选择后，用一次调用生成候选 Agent。",
+    when_not_to_use="未选择方案前不要调用；也不适合做资源侦察或缺口分析。",
     returns="返回 JSON 字符串，包含三步写入结果、最终干运行校验结果、可选的自动 version 生成结果，以及与 Agent Workshop 正式验收边界相关的治理提示。",
-    example="generate_confirmed_candidate_agent(agent_id='valuation_candidate_v1', agent_name='估值候选Agent', target_responsibility='输出A股估值结论', tool_ids='get_value_factor_bundle_tool', system_prompt='你是一名估值分析师', confirmed=True)",
-    related_tools=["prepare_agent_generation_confirmation", "bind_agent_tools_and_validate_candidate"],
+    example="generate_confirmed_candidate_agent(agent_id='valuation_candidate_v1', agent_name='估值候选Agent', target_responsibility='输出A股估值结论', tool_ids='get_value_factor_bundle_tool', system_prompt='你是一名估值分析师', selected_plan_id='complete', acknowledged_gaps='[\"financial_ratio_calculator\"]', gap_report_json='{...}')",
+    related_tools=["propose_agent_build_plans", "bind_agent_tools_and_validate_candidate", "resolve_agent_workshop_blocking_gaps"],
 )
 async def generate_confirmed_candidate_agent(
     agent_id: Annotated[str, "候选 Agent ID"],
@@ -5126,7 +5703,7 @@ async def generate_confirmed_candidate_agent(
     selected_plan_id: Annotated[str, "用户选择的方案 ID：direct/complete/quick/narrow；为空时兼容旧确认流程"] = "",
     acknowledged_gaps: Annotated[str, "用户已知晓并接受的 blocking gaps，JSON 数组或逗号分隔；旧流程可为空"] = "",
     capability_inventory_json: Annotated[str, "prepare 阶段能力盘点 JSON，可为空"] = "",
-    gap_report_json: Annotated[str, "prepare 阶段 gap_report JSON，可为空"] = "",
+    gap_report_json: Annotated[str, "prepare 阶段 analyze_spec_gaps 返回的 gap_report JSON。complete/quick 方案时必须传递；direct 方案可为空"] = "",
 ) -> str:
     """确认后一次性生成候选 Agent。"""
     try:
@@ -5144,6 +5721,28 @@ async def generate_confirmed_candidate_agent(
         parsed_acknowledged_gaps = _parse_acknowledged_gaps(acknowledged_gaps)
         capability_inventory = _parse_optional_json_object(capability_inventory_json, "capability_inventory_json")
         gap_report = _parse_optional_json_object(gap_report_json, "gap_report_json")
+        # ── 🔍 关键追踪日志：记录 LLM 传入的所有参数 ──
+        logger.info(
+            "[GenAgent][Params] agent_id=%s plan=%s acknowledged_gaps=%d gap_report_keys=%s gap_report_json_size=%d "
+            "capability_inventory_size=%d selected_plan_id_raw=%r",
+            clean_agent_id,
+            clean_selected_plan_id,
+            len(parsed_acknowledged_gaps),
+            sorted(gap_report.keys()) if gap_report else [],
+            len(str(gap_report_json or "")),
+            len(str(capability_inventory_json or "")),
+            str(selected_plan_id or "")[:120],
+        )
+        for i, item in list(enumerate(parsed_acknowledged_gaps))[:10]:
+            logger.info("[GenAgent][Params]   acknowledged_gaps[%d] = %s", i, item[:200])
+        for i, item in list(enumerate(gap_report.get("blocking_gaps") or []))[:10]:
+            _desc = str(item.get("description") or item.get("gap") or item)
+            logger.info("[GenAgent][Params]   gap_report.blocking_gaps[%d] = %s", i, _desc[:200])
+        if clean_selected_plan_id in {"complete", "quick"} and not gap_report:
+            logger.warning(
+                "[GenAgent][Params] ⚠️ %s 方案但 gap_report_json 为空！build_version 将尝试从 builder_contracts 恢复",
+                clean_selected_plan_id,
+            )
         if clean_selected_plan_id == "narrow":
             _auto_update_intent(
                 action="create_agent",
@@ -5293,7 +5892,27 @@ async def generate_confirmed_candidate_agent(
         should_auto_build_workshop_version = (
             auto_build_workshop_version
             and not (clean_selected_plan_id == "complete" and bool(parsed_acknowledged_gaps))
+            and clean_selected_plan_id != "quick"  # quick 方案已接受缺口，跳过 auto-build
         )
+        # ── 🔍 追踪日志：auto-build 决策 ──
+        logger.info(
+            "[GenAgent][AutoBuild] should_auto=%s plan=%s has_gaps=%s gap_report_keys=%s session_id=%s",
+            should_auto_build_workshop_version,
+            clean_selected_plan_id,
+            bool(parsed_acknowledged_gaps),
+            sorted(gap_report.keys()) if gap_report else [],
+            str(workshop_result.get("session_id") or "") if isinstance(workshop_result, dict) else "N/A",
+        )
+        # 安全网：complete/quick 方案下，若 gap_report 未传入，禁止 auto-build
+        # 否则 build_version 会重新运行 analyze_spec_gaps，产生不一致的 blocking_gap 文本，
+        # 导致 acknowledged_gaps 无法匹配而错误阻断
+        if clean_selected_plan_id in {"complete", "quick"} and not gap_report:
+            logger.warning(
+                "[GenAgent] gap_report_json 未传入但为 %s 方案，跳过 auto-build session_id=%s",
+                clean_selected_plan_id,
+                str(workshop_result.get("session_id") or "").strip(),
+            )
+            should_auto_build_workshop_version = False
         if should_auto_build_workshop_version and sync_to_workshop_draft and isinstance(workshop_result, dict):
             workshop_session_id = str(workshop_result.get("session_id") or "").strip()
             if workshop_session_id:
@@ -5364,11 +5983,16 @@ async def generate_confirmed_candidate_agent(
         # 🔥 自动更新意图上下文为"生成完成"
         #    auto-build 成功: building = 版本已构建，准备测试
         #    未 auto-build: ready_to_build = Draft 已生成，待构建版本
+        #    quick 方案: building = 缺口已接受，可直接测试（跳过 auto-build）
         built_workshop_version = bool((workshop_version_result or {}).get("version"))
         if clean_selected_plan_id == "complete" and parsed_acknowledged_gaps and not built_workshop_version:
             next_stage = "gap_resolving"
             next_action_text = "按已确认 complete 方案补齐 blocking gaps，完成后再构建测试版本"
             task_status = "gap_resolving"
+        elif clean_selected_plan_id == "quick":
+            next_stage = "building"
+            next_action_text = "简化版 Agent 已生成，缺口已确认接受；下一步直接运行真数据测试（run_agent_workshop_real_data_test）"
+            task_status = "building"
         elif built_workshop_version:
             next_stage = "building"
             next_action_text = "按已确认方案已生成测试版本；下一步运行真数据测试（run_agent_workshop_real_data_test）"
@@ -5396,6 +6020,16 @@ async def generate_confirmed_candidate_agent(
         return _json_response({
             "status": "ok",
             "agent_id": clean_agent_id,
+            "nanobot_guidance": (
+                "候选 Agent 已生成成功。请向用户简洁汇报生成结果，以业务价值为主。\n\n"
+                "回复规则：\n"
+                "1. 说明 Agent 名称、核心职责、输出什么报告即可。\n"
+                "2. 可以简要介绍报告结构（几个章节分别讲什么），帮用户建立预期。\n"
+                "3. 【禁止】罗列「可用路径 / 调用入口 / Assistant / Workflow / Agent Workshop」等技术接入方式——用户不关心从哪里调用，这是平台内部的事。\n"
+                "4. 【禁止】展示 Agent ID、执行顺序、运行模式、输出字段名等技术元数据。\n"
+                "5. 工具名可以在「已绑定能力」里用业务语言简述（如「同业估值对比、历史分位、DCF估值」），但不要写 get_xxx 这种函数名。\n"
+                "6. 结尾自然引导用户进入下一步：可以用真实股票代码跑一次测试验证效果（如「要不要用 600519 试跑一次？」）。"
+            ),
             "confirmation": {
                 "confirmed": confirmed,
                 "allow_overwrite": allow_overwrite,
@@ -5427,8 +6061,14 @@ async def generate_confirmed_candidate_agent(
                         "Dry-run 只代表候选 Agent 可按运行时配置被实例化；当前已自动生成测试版本，但这仍不代表真数据测试已经通过。"
                         if workshop_governance["version_generated"]
                         else "Dry-run 只代表候选 Agent 可按运行时配置被实例化，不代表 Agent Workshop 已生成 version。"
+                        if clean_selected_plan_id != "quick"
+                        else "简化版 Agent 已跳过 Workshop 版本构建（缺口已确认接受）。可直接运行真数据测试，或手动调用 build_agent_workshop_version 生成版本。"
                     ),
-                    "即使已自动生成测试版本，也必须先完成记录在 Agent Workshop 中的样例真数据测试评估，并以最新评估结论作为发布依据。",
+                    "即使已自动生成测试版本，也必须先完成记录在 Agent Workshop 中的样例真数据测试评估，并以最新评估结论作为发布依据。"
+                    if workshop_governance["version_generated"]
+                    else "简化版 Agent 可直接用 run_agent_workshop_real_data_test 进行真数据测试；测试通过后再评估是否发布。"
+                    if clean_selected_plan_id == "quick"
+                    else "即使已自动生成测试版本，也必须先完成记录在 Agent Workshop 中的样例真数据测试评估，并以最新评估结论作为发布依据。",
                 ],
             },
         })
@@ -6420,6 +7060,7 @@ async def retry_agent_workshop_gap_resolution_item(
 
 __all__ = [
     "search_project_capabilities",
+    "propose_agent_build_plans",
     "inspect_runtime_agent_configs",
     "inspect_agent_blueprints",
     "get_agent_blueprint_details",
@@ -6456,3 +7097,154 @@ async def _get_progress_collection():
         return collection
     except Exception:
         return None
+
+
+def _get_current_intent_stage() -> str:
+    """读取当前线程的 intent stage（优先 module 存储，其次 contextvar）。"""
+    try:
+        from core.tools.context import get_latest_nanobot_intent
+        intent = get_latest_nanobot_intent()
+        if isinstance(intent, dict):
+            return str(intent.get("stage") or "").strip()
+    except Exception:
+        pass
+    try:
+        from core.tools.context import get_current_assistant_thread_context
+        ctx = get_current_assistant_thread_context() or {}
+        intent = ctx.get("intent") or {}
+        if isinstance(intent, dict):
+            return str(intent.get("stage") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _extract_json_from_markdown(text: str) -> str:
+    """从 markdown 代码块中提取 JSON 字符串。"""
+    clean = str(text or "").strip()
+    if clean.startswith("```"):
+        # 去掉首行的 ```json / ```
+        lines = clean.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        return "\n".join(lines).strip()
+    return clean
+
+
+def _humanize_plan_id(plan_id: str) -> str:
+    """把内部 plan_id 翻译成用户可读的方案名。"""
+    mapping = {
+        "direct": "直接生成",
+        "complete": "完整方案",
+        "quick": "快速方案",
+        "narrow": "缩小范围",
+    }
+    return mapping.get(str(plan_id or "").strip().lower(), "方案")
+
+
+def _to_str_list(value: Any) -> list[str]:
+    """将任意值转换为字符串列表。
+
+    - None / 空值 → []
+    - list / tuple → 逐项 str() 并过滤空值
+    - 其它 → [str(value)] （过滤空值）
+    """
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        result: list[str] = []
+        for item in value:
+            text = str(item or "").strip()
+            if text:
+                result.append(text)
+        return result
+    text = str(value or "").strip()
+    return [text] if text else []
+
+
+def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]) -> dict[str, Any]:
+    """当 LLM 解析失败时的规则化方案生成。"""
+    blocking_count = len(blocking_gaps)
+    blocking_descriptions = []
+    for g in blocking_gaps:
+        if isinstance(g, dict):
+            desc = str(g.get("description") or g.get("gap") or "")
+        else:
+            desc = str(g)
+        if desc:
+            blocking_descriptions.append(desc)
+
+    if blocking_count == 0:
+        candidate_plans = [
+            {
+                "plan_id": "direct",
+                "plan_name": "直接生成",
+                "description": "现有能力已覆盖需求，可直接生成完整版 Agent。",
+                "required_new_skills": [],
+                "estimated_effort": "低",
+                "risk": "能力已覆盖，风险低",
+                "recommended": True,
+            }
+        ]
+        recommended_plan_id = "direct"
+    elif blocking_count <= 2:
+        candidate_plans = [
+            {
+                "plan_id": "complete",
+                "plan_name": "完整方案",
+                "description": f"补齐 {blocking_count} 个阻塞性能力缺口，输出完整功能。",
+                "required_new_skills": blocking_descriptions,
+                "estimated_effort": "高",
+                "risk": "需要生成新能力，可能失败或耗时",
+                "recommended": True,
+            },
+            {
+                "plan_id": "quick",
+                "plan_name": "快速方案",
+                "description": "用现有能力做简化版，跳过暂缺的能力。",
+                "required_new_skills": [],
+                "estimated_effort": "低",
+                "risk": "功能不完整，部分输出会降级或省略",
+                "recommended": False,
+            },
+        ]
+        recommended_plan_id = "complete"
+    else:
+        candidate_plans = [
+            {
+                "plan_id": "complete",
+                "plan_name": "完整方案",
+                "description": f"补齐 {blocking_count} 个阻塞性能力缺口，输出完整功能。",
+                "required_new_skills": blocking_descriptions,
+                "estimated_effort": "高",
+                "risk": "需要生成多个新能力，周期较长",
+                "recommended": True,
+            },
+            {
+                "plan_id": "quick",
+                "plan_name": "快速方案",
+                "description": "用现有能力做简化版，优先覆盖核心维度。",
+                "required_new_skills": [],
+                "estimated_effort": "低",
+                "risk": "功能不完整，部分输出会降级或省略",
+                "recommended": False,
+            },
+            {
+                "plan_id": "narrow",
+                "plan_name": "缩小范围",
+                "description": "把需求范围缩小到现有能力可覆盖的子集。",
+                "required_new_skills": [],
+                "estimated_effort": "低",
+                "risk": "只覆盖部分需求",
+                "recommended": False,
+            },
+        ]
+        recommended_plan_id = "complete"
+
+    return {
+        "candidate_plans": candidate_plans,
+        "recommended_plan_id": recommended_plan_id,
+        "pending_question": "你希望采用哪个方案？",
+    }

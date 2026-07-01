@@ -14,7 +14,7 @@ from typing import Any, Awaitable, Callable
 from core.embedded_nanobot.agent.context import ContextBuilder
 from core.embedded_nanobot.agent.hook import AgentHook, AgentHookContext
 from core.embedded_nanobot.agent.memory import MemoryConsolidator
-from core.embedded_nanobot.agent.runner import AgentRunSpec, AgentRunner
+from core.embedded_nanobot.agent.runner import AgentRunSpec, AgentRunner, AgentRunResult
 from core.embedded_nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from core.embedded_nanobot.agent.tools.tradingagents_bridge import TradingAgentsRegistryTool
 from core.embedded_nanobot.agent.tools.registry import ToolRegistry
@@ -26,9 +26,18 @@ from core.embedded_nanobot.cron.service import CronService
 from core.embedded_nanobot.providers.unified import TradingAgentsLLMProvider
 from core.embedded_nanobot.session.manager import SessionManager
 from core.embedded_nanobot.intent_context import IntentContext
-from core.embedded_nanobot.agent_builder_flow import build_flow_guidance_block, derive_flow_phase
+from core.embedded_nanobot.agent_builder_flow import build_flow_guidance_block, derive_flow_phase, get_plan_selection_decision
+from core.embedded_nanobot.agent.context_injection_policy import (
+    InjectionMode,
+    InjectionPolicy,
+    detect_injection_mode,
+    should_inject_mem0_lessons,
+)
 from core.embedded_nanobot.utils.helpers import estimate_prompt_tokens, estimate_prompt_tokens_chain, sanitize_content_blocks, sanitize_tool_result_content, strip_think
 from core.tools.config import ToolCategory
+
+# Agent Builder LangGraph 工作流（Feature Flag）
+_AGENT_BUILDER_GRAPH_ENABLED = True
 
 
 logger = logging.getLogger(__name__)
@@ -571,15 +580,35 @@ class EmbeddedNanobotRuntime:
         if self._capability_index_service is not None:
             return self._capability_index_service
         if self.memory_db is None:
-            logger.debug("未配置 memory_db，语义搜索不可用")
+            logger.debug("[CapabilityIndex] 未配置 memory_db，语义搜索不可用")
             self._capability_index_service = False
             return False
         try:
             from app.services.capability_index_service import CapabilityIndexService
+            from core.llm.embedding_manager import EmbeddingManager
+
+            # 检查 embedding 模型是否配置
+            embedding_config = EmbeddingManager(db=self.memory_db).get_config()
+            if not embedding_config.get("has_provider"):
+                logger.info(
+                    "[CapabilityIndex] ⚠️ 未配置 embedding 模型"
+                    "（当前: %s），语义搜索不可用，将使用关键词匹配",
+                    embedding_config.get("primary_provider", {}).get("display_name", "无"),
+                )
+                self._capability_index_service = False
+                return False
+
             self._capability_index_service = CapabilityIndexService(self.memory_db)
-            logger.info("✅ CapabilityIndexService 延迟初始化成功")
+            logger.info(
+                "[CapabilityIndex] ✅ 初始化成功"
+                "（embedding: %s / 模型: %s）",
+                embedding_config["primary_provider"]["display_name"],
+                embedding_config["primary_provider"]["model"],
+            )
         except Exception as exc:
-            logger.warning("⚠️ CapabilityIndexService 不可用，将回退关键词匹配: %s", exc)
+            logger.warning(
+                "[CapabilityIndex] ⚠️ 初始化失败，将回退关键词匹配: %s", exc
+            )
             self._capability_index_service = False
         return self._capability_index_service
 
@@ -614,10 +643,11 @@ class EmbeddedNanobotRuntime:
                     source_types=["builtin_tool"],
                 ))
         except Exception as exc:
-            logger.warning("语义搜索失败，回退关键词匹配: %s", exc)
+            logger.warning("[CapabilityIndex] 语义搜索失败，回退关键词匹配: %s", exc)
             return None
 
         if not hits:
+            logger.debug("[CapabilityIndex] 语义搜索无结果，回退关键词匹配")
             return None
 
         # role_hint 加权
@@ -918,13 +948,20 @@ class EmbeddedNanobotRuntime:
 
         if "prepare_agent_generation_confirmation" in tool_names:
             guidance_lines.extend([
-                "V2 creation flow: before generating an Agent, prepare_agent_generation_confirmation must perform capability inventory and gap analysis, then present candidate plans (direct/complete/quick/narrow) for the user to choose.",
-                "Do not present prepare_agent_generation_confirmation as a final yes/no confirmation only. It is a plan-selection checkpoint: show existing capabilities, blocking gaps, risks, and candidate plans before asking the user to confirm.",
+                "prepare_agent_generation_confirmation is a REQUIREMENT CONFIRMATION step only. It confirms: what this agent does, what it outputs, what it does NOT do. Do NOT include capability inventory, gap analysis, or candidate plans in this step.",
+                "The confirmation draft should be a business-level description: agent name, responsibility, input/output structure, boundaries, and test strategy. No tool names, no gap analysis.",
+                "After the user confirms the requirement, the NEXT step is capability check (analyze_agent_workshop_gaps), then plan generation (propose_agent_build_plans).",
+            ])
+        if "propose_agent_build_plans" in tool_names:
+            guidance_lines.extend([
+                "propose_agent_build_plans is the ONLY way to generate candidate build plans. You MUST call this tool to create structured plans (direct/complete/quick/narrow). Do NOT verbally describe plans without calling this tool.",
+                "propose_agent_build_plans requires gap_report_json from analyze_agent_workshop_gaps. Call analyze_agent_workshop_gaps first, then call propose_agent_build_plans with the gap report.",
+                "After propose_agent_build_plans returns, the plans are stored in pending_options. The user will then choose a plan, and you call generate_confirmed_candidate_agent.",
             ])
         if "generate_confirmed_candidate_agent" in tool_names:
             guidance_lines.extend([
-                "When calling generate_confirmed_candidate_agent after the V2 confirmation step, pass selected_plan_id and acknowledged_gaps from the user's selected option. If the user chose quick, preserve the quick-plan limitation; if the user chose narrow, return to requirement exploration instead of generating.",
-                "Do not re-run a new gap analysis after the user has selected a plan. Use the gap_report/candidate_plans from the confirmation step and proceed according to the selected plan.",
+                "When calling generate_confirmed_candidate_agent after the V2 plan-selection step, pass selected_plan_id and acknowledged_gaps from the user's selected option. If the user chose quick, preserve the quick-plan limitation; if the user chose narrow, return to requirement exploration instead of generating.",
+                "Do not re-run a new gap analysis after the user has selected a plan. Use the gap_report from analyze_agent_workshop_gaps and the candidate_plans from propose_agent_build_plans. Proceed according to the selected plan.",
             ])
 
         if "resolve_agent_workshop_blocking_gaps" in tool_names:
@@ -1223,7 +1260,8 @@ class EmbeddedNanobotRuntime:
                 return None
             return (
                 "# Agent Workshop historical lessons\n\n"
-                "Use the following validated lessons from earlier Agent Workshop evaluations to avoid repeating known defects and reuse verified fixes.\n\n"
+                "These are only historical anti-regression lessons. They are NOT current user requirements, NOT current workflow state, and NOT reusable designs for a new Agent.\n"
+                "For new Agent creation, never infer the current stage, selected plan, tool binding, prompt, or gap result from historical lessons. Use only the current thread and live Workshop/runtime state.\n\n"
                 f"{recalled.strip()}"
             )
         except Exception as exc:
@@ -1297,10 +1335,18 @@ class EmbeddedNanobotRuntime:
             semantic_hits = self._try_semantic_tool_search(query, selected_names)
             if semantic_hits:
                 registry_scores = semantic_hits
+                logger.debug(
+                    "[CapabilityIndex] 语义搜索选中 %d 个工具，查询: %s...",
+                    len(semantic_hits), query[:40],
+                )
             else:
                 # 回退关键词匹配
                 registry_scores = self._keyword_tool_search(
                     query, query_lower, query_terms, selected_names, category_matches
+                )
+                logger.debug(
+                    "[CapabilityIndex] 关键词匹配选中 %d 个工具，查询: %s...",
+                    len(registry_scores), query[:40],
                 )
 
         registry_scores.sort(key=lambda item: (-item[0], item[1]))
@@ -1438,6 +1484,73 @@ class EmbeddedNanobotRuntime:
         self._background_tasks.append(task)
         task.add_done_callback(lambda item: self._background_tasks.remove(item) if item in self._background_tasks else None)
 
+    async def _update_conversation_summary_for_agent_builder(
+        self,
+        *,
+        session,
+        thread_id: str,
+        user_message: str,
+        assistant_content: str,
+        tools_used: list[str],
+        current_intent: dict[str, Any],
+    ) -> None:
+        """为 Agent Builder 生成结构化摘要，并写入模块级 intent 存储。
+
+        本方法不调用 LLM，仅基于确定性规则从最近一轮消息中提取关键信息，
+        避免摘要生成失败或延迟阻塞主响应。
+        """
+        try:
+            # 提取最近一轮的 user / assistant 消息（不包含 tool result）
+            recent_messages = [m for m in session.messages if m.get("role") in ("user", "assistant")][-6:]
+            user_msgs = [m for m in recent_messages if m.get("role") == "user"]
+            assistant_msgs = [m for m in recent_messages if m.get("role") == "assistant" and m.get("content")]
+
+            last_user = user_msgs[-1].get("content", "") if user_msgs else user_message
+            last_assistant = assistant_msgs[-1].get("content", "") if assistant_msgs else assistant_content
+            if isinstance(last_user, list):
+                last_user = " ".join(str(x.get("text", "")) for x in last_user if isinstance(x, dict))
+            if isinstance(last_assistant, list):
+                last_assistant = " ".join(str(x.get("text", "")) for x in last_assistant if isinstance(x, dict))
+
+            # 基于当前 intent 中的 pending_question / pending_options 构造摘要
+            pending_question = current_intent.get("pending_question", "") or ""
+            pending_options = current_intent.get("pending_options") or []
+            current_stage = current_intent.get("stage", "") or ""
+
+            summary_parts = [f"阶段：{current_stage}"] if current_stage else []
+            if pending_question:
+                summary_parts.append(f"待确认问题：{pending_question}")
+            if pending_options:
+                opts = "；".join(
+                    f"{opt.get('index', '?')}. {opt.get('name') or opt.get('id') or '未命名'}"
+                    for opt in pending_options[-4:]
+                )
+                summary_parts.append(f"待确认选项：{opts}")
+
+            summary_parts.append(f"用户最后说：{str(last_user)[:120]}")
+            summary_parts.append(f"你最后说：{str(last_assistant)[:160]}")
+            if tools_used:
+                summary_parts.append(f"本轮调用工具：{', '.join(tools_used)}")
+
+            summary = "\n".join(summary_parts)
+            # 写入模块级 intent 存储，供下一轮持久化前读取
+            from core.tools.context import _nanobot_intents_by_thread, get_current_assistant_thread_id
+            # 优先使用传入 thread_id，避免当前 context 已被清理
+            key = thread_id or get_current_assistant_thread_id() or "unknown"
+            if key in _nanobot_intents_by_thread:
+                _nanobot_intents_by_thread[key]["conversation_summary"] = summary
+            else:
+                _nanobot_intents_by_thread[key] = {"conversation_summary": summary}
+            logger.info(
+                "[ConversationSummary] generated thread_id=%s stage=%s pending_options=%d chars=%d",
+                key,
+                current_stage,
+                len(pending_options),
+                len(summary),
+            )
+        except Exception as exc:
+            logger.warning("[ConversationSummary] failed: %s", exc)
+
     @staticmethod
     def _drop_oldest_turn(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not history:
@@ -1458,6 +1571,7 @@ class EmbeddedNanobotRuntime:
         channel: str,
         chat_id: str,
         extra_system_guidance: str | None = None,
+        mode: str = InjectionMode.GENERAL,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
         await self.memory_consolidator.maybe_consolidate_by_tokens(session)
 
@@ -1469,6 +1583,7 @@ class EmbeddedNanobotRuntime:
             media=media,
             channel=channel,
             chat_id=chat_id,
+            mode=mode,
         )
         initial_messages = self._inject_ephemeral_system_guidance(initial_messages, extra_system_guidance)
 
@@ -1594,6 +1709,117 @@ class EmbeddedNanobotRuntime:
             session.messages.append(entry)
         session.updated_at = datetime.now()
 
+    async def _force_propose_agent_builder_plans(
+        self,
+        *,
+        intent: IntentContext,
+        raw: str,
+        active_tools: ToolRegistry,
+    ) -> AgentRunResult | None:
+        """方案阶段强制结构化生成候选方案，避免 LLM 口头重复方案。"""
+        tool = active_tools.get("propose_agent_build_plans")
+        if tool is None:
+            logger.warning("[PlanSelection][ForcePropose] propose_agent_build_plans not available")
+            return None
+        logger.warning(
+            "[PlanSelection][ForcePropose] pending_options empty; forcing structured plan generation spec_id=%s user=%s",
+            intent.spec_id,
+            raw[:120],
+        )
+        gap_report_json = "{}"
+        if "没有阻塞性缺口" in str(intent.conversation_summary or "") or "无阻塞" in str(intent.conversation_summary or ""):
+            gap_report_json = json.dumps({"blocking_gaps": [], "non_blocking_gaps": []}, ensure_ascii=False)
+        tool_result = await tool.ainvoke({
+            "gap_report_json": gap_report_json,
+            "agent_responsibility": intent.intent_summary or intent.spec_name,
+            "agent_output_shape": "结构化研究报告",
+        })
+        tool_content = sanitize_tool_result_content(tool_result)
+        return AgentRunResult(
+            final_content=(
+                "我已把候选方案结构化生成并记录下来。"
+                "如果你选择方案 A/推荐方案，请直接再回复「方案A」，我会按该方案生成 Agent。"
+            ),
+            messages=[
+                {"role": "assistant", "content": "正在生成结构化候选方案。", "timestamp": datetime.now().isoformat()},
+                {"role": "tool", "name": "propose_agent_build_plans", "content": tool_content, "timestamp": datetime.now().isoformat()},
+            ],
+            tools_used=["propose_agent_build_plans"],
+            usage={},
+            stop_reason="completed",
+            tool_events=[{"name": "propose_agent_build_plans", "status": "ok", "detail": "forced_structured_plan_generation"}],
+        )
+
+    async def _repair_agent_builder_plan_selection_if_needed(
+        self,
+        *,
+        result: AgentRunResult,
+        session,
+        clean_thread_context: dict[str, Any],
+        raw: str,
+        active_tools: ToolRegistry,
+    ) -> AgentRunResult:
+        """兜底修复：方案阶段不得口头重复方案，必须落成结构化 pending_options。"""
+        intent = IntentContext.from_dict(clean_thread_context.get("intent") or {})
+        if intent.stage != "plan_selection_pending":
+            return result
+        if intent.pending_options:
+            return result
+        used = set(result.tools_used or [])
+        if "propose_agent_build_plans" in used or "generate_confirmed_candidate_agent" in used:
+            return result
+        if not any(marker in raw for marker in ("方案", "生成", "开始", "可以", "确认", "好的", "按这个", "推荐")):
+            return result
+
+        logger.warning(
+            "[PlanSelection][Repair] pending_options empty after run; forcing propose_agent_build_plans spec_id=%s user=%s tools_used=%s",
+            intent.spec_id,
+            raw[:120],
+            result.tools_used,
+        )
+        tool = active_tools.get("propose_agent_build_plans")
+        if tool is None:
+            logger.warning("[PlanSelection][Repair] propose_agent_build_plans not available in active tools")
+            return result
+        gap_report_json = "{}"
+        try:
+            summary = str(intent.conversation_summary or "")
+            if "没有阻塞性缺口" in summary or "无阻塞" in summary or "blocking_gaps=0" in summary:
+                gap_report_json = json.dumps({"blocking_gaps": [], "non_blocking_gaps": []}, ensure_ascii=False)
+        except Exception:
+            gap_report_json = "{}"
+        tool_result = await tool.ainvoke({
+            "gap_report_json": gap_report_json,
+            "agent_responsibility": intent.intent_summary or intent.spec_name,
+            "agent_output_shape": "结构化研究报告",
+        })
+        tool_content = sanitize_tool_result_content(tool_result)
+        messages = list(result.messages or [])
+        messages.append({
+            "role": "assistant",
+            "content": "我先把候选方案结构化生成，便于下一步按你选择的方案直接创建 Agent。",
+            "timestamp": datetime.now().isoformat(),
+        })
+        messages.append({
+            "role": "tool",
+            "name": "propose_agent_build_plans",
+            "content": tool_content,
+            "timestamp": datetime.now().isoformat(),
+        })
+        final_content = (
+            "我已把候选方案结构化生成并记录下来。"
+            "如果你选择方案 A/推荐方案，请直接再回复「方案A」，我会按该方案生成 Agent。"
+        )
+        return AgentRunResult(
+            final_content=final_content,
+            messages=messages,
+            tools_used=[*(result.tools_used or []), "propose_agent_build_plans"],
+            usage=result.usage,
+            stop_reason="completed",
+            error=result.error,
+            tool_events=[*(result.tool_events or []), {"name": "propose_agent_build_plans", "status": "ok", "detail": "auto_repair_pending_options"}],
+        )
+
     async def _invoke_callback(self, callback: Callable[[str], Awaitable[None]] | None, value: str) -> None:
         if callback is None:
             return
@@ -1601,9 +1827,202 @@ class EmbeddedNanobotRuntime:
         if inspect.isawaitable(result):
             await result
 
+    async def _run_agent_builder_graph(
+        self,
+        user_message: str,
+        session_key: str,
+        channel: str,
+        chat_id: str,
+        thread_context: dict[str, Any],
+        user_id: str | None,
+        thread_id: str | None,
+        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_stream: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        on_step_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> dict[str, Any]:
+        """使用 LangGraph 工作流处理 Agent Builder 对话。
+
+        流程控制权归 Graph 所有，LLM 只负责节点内沟通和工具调用。
+        """
+        from core.embedded_nanobot.workflows import (
+            AgentBuilderGraphStore,
+            new_agent_builder_state,
+            build_agent_builder_graph,
+            execute_graph,
+        )
+
+        # 构建 thread_id
+        effective_thread_id = thread_id or chat_id or f"agent-studio-{int(time.time() * 1000)}"
+        clean_thread_context = dict(thread_context or {})
+
+        logger.info(
+            "[AgentBuilderGraph][Entry] thread=%s user=%s msg_len=%d",
+            effective_thread_id, user_id, len(user_message),
+        )
+
+        # ── SSE 事件落盘 ──
+        try:
+            from app.routers.embedded_nanobot import _append_nanobot_event_log
+        except ImportError:
+            _append_nanobot_event_log = None
+
+        def _log_event(event: str, payload: dict):
+            if _append_nanobot_event_log:
+                try:
+                    _append_nanobot_event_log(
+                        chat_id=chat_id or effective_thread_id,
+                        session_key=session_key,
+                        event=event,
+                        payload=payload,
+                    )
+                except Exception:
+                    pass
+
+        _log_event("started", {"message": "助手已开始处理请求", "session_key": session_key})
+
+        async def event_callback(event_type: str, label: str, payload: Any = None):
+            """节点内事件 → SSE 流 + 落盘。"""
+            if event_type == "step" and on_step_event:
+                step_data = {
+                    "step": label,
+                    "status": "completed",
+                    "title": label,
+                    "detail": str(payload or ""),
+                    "session_key": session_key,
+                    "chat_id": chat_id or effective_thread_id,
+                    "channel": channel,
+                }
+                _log_event("step_event", step_data)
+                await self._invoke_callback(on_step_event, step_data)
+            elif event_type == "progress" and on_progress:
+                _log_event("progress", {"label": label})
+                await self._invoke_callback(on_progress, label)
+            elif event_type == "tool" and on_tool_event:
+                tool_data = {
+                    "name": payload if isinstance(payload, str) else label,
+                    "status": "running",
+                    "label": label,
+                }
+                _log_event("tool_event", tool_data)
+                await self._invoke_callback(on_tool_event, tool_data)
+            elif event_type == "tool_done" and on_tool_event:
+                tool_data = {
+                    "name": payload if isinstance(payload, str) else label,
+                    "status": "completed",
+                    "label": label,
+                }
+                _log_event("tool_event", tool_data)
+                await self._invoke_callback(on_tool_event, tool_data)
+            elif event_type == "tool_error" and on_tool_event:
+                tool_data = {
+                    "name": payload if isinstance(payload, str) else label,
+                    "status": "error",
+                    "label": label,
+                }
+                _log_event("tool_event", tool_data)
+                await self._invoke_callback(on_tool_event, tool_data)
+
+        store = AgentBuilderGraphStore(self.memory_db)
+
+        # 尝试恢复已有状态
+        state = await store.load_checkpoint(effective_thread_id)
+        if state:
+            state["user_message"] = user_message
+            state["user_id"] = user_id or ""
+            state["thread_id"] = effective_thread_id
+            state["channel"] = channel
+            state["chat_id"] = chat_id
+            logger.info(
+                "[AgentBuilderGraph][Resume] node=%s stage=%s",
+                state.get("current_node", "?"),
+                state.get("stage", "?"),
+            )
+        else:
+            # 新会话
+            state = new_agent_builder_state(
+                thread_id=effective_thread_id,
+                user_id=user_id or "",
+                user_message=user_message,
+                channel=channel,
+                chat_id=chat_id,
+            )
+
+        # 构建图
+        graph = build_agent_builder_graph()
+
+        # 执行图
+        try:
+            result = await execute_graph(
+                graph=graph,
+                state=state,
+                tool_registry=self.tools,
+                provider=self.provider,
+                model=self.model,
+                event_callback=event_callback,
+                on_stream=on_stream,
+                max_steps=10,
+            )
+        except Exception as e:
+            logger.error("[AgentBuilderGraph][Error] %s", e, exc_info=True)
+            return {
+                "content": f"抱歉，处理过程中出现了问题：{e}",
+                "tools_used": [],
+                "messages": [],
+                "stop_reason": "error",
+            }
+
+        # 判断是否需要暂停
+        if result.get("awaiting_user"):
+            await store.save_checkpoint(
+                effective_thread_id,
+                result,
+                result.get("current_node", "wait"),
+            )
+            logger.info(
+                "[AgentBuilderGraph][Checkpoint] saved node=%s stage=%s",
+                result.get("current_node"), result.get("stage"),
+            )
+
+        # 清理运行时注入字段
+        final_response = result.get("final_response", "")
+        tool_events = result.get("tool_events", [])
+
+        _log_event("done", {
+            "content": final_response[:500],
+            "tools_used": [e.get("name", "") for e in tool_events],
+            "stop_reason": "completed",
+        })
+
+        return {
+            "content": final_response or "处理完成",
+            "tools_used": [e.get("name", "") for e in tool_events],
+            "messages": [],
+            "stop_reason": "completed",
+            "tool_events": tool_events,
+        }
+
     async def handle_message(self, user_message: str = "", session_key: str = "embedded:default", channel: str = "embedded", chat_id: str = "default", media: list[str] | None = None, skill_names: list[str] | None = None, on_progress: Callable[[str], Awaitable[None]] | None = None, on_stream: Callable[[str], Awaitable[None]] | None = None, on_tool_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None, on_step_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None, thread_context: dict[str, Any] | None = None, user_id: str | None = None, thread_id: str | None = None) -> dict[str, Any]:
         raw = user_message.strip()
         session = self.sessions.get_or_create(session_key)
+
+        # ── Agent Builder Graph 模式：流程控制权归图 ──
+        if _AGENT_BUILDER_GRAPH_ENABLED and channel == "agent_workshop":
+            logger.info("[Nanobot][Route] Graph mode for agent_workshop channel")
+            return await self._run_agent_builder_graph(
+                user_message=user_message,
+                session_key=session_key,
+                channel=channel,
+                chat_id=chat_id,
+                thread_context=thread_context,
+                user_id=user_id,
+                thread_id=thread_id,
+                on_progress=on_progress,
+                on_stream=on_stream,
+                on_tool_event=on_tool_event,
+                on_step_event=on_step_event,
+            )
+
         clean_thread_context = dict(thread_context or {})
         session.metadata.update({
             "session_key": session_key,
@@ -1626,6 +2045,38 @@ class EmbeddedNanobotRuntime:
             session.metadata["object_type"] = object_type
         if object_key:
             session.metadata["object_key"] = object_key
+
+        # ── 🔍 每轮对话入口全景日志 ──
+        logger.info(
+            "[Nanobot][Entry] 🔵 本轮开始 channel=%s thread=%s user_msg_len=%d "
+            "spec_id=%s version=%s intent_stage=%s intent_spec=%s "
+            "eval=%s has_gaps=%s spec_name=%s workshop_session=%s",
+            channel,
+            (thread_id or chat_id or "default")[:60],
+            len(raw),
+            str(clean_thread_context.get("spec_id") or ""),
+            str(clean_thread_context.get("version_id") or ""),
+            str((clean_thread_context.get("intent") or {}).get("stage") or "missing"),
+            str((clean_thread_context.get("intent") or {}).get("spec_id") or ""),
+            str(clean_thread_context.get("evaluation_status") or clean_thread_context.get("official_acceptance_decision") or ""),
+            str(clean_thread_context.get("has_blocking_gaps") or ""),
+            str(clean_thread_context.get("spec_name") or ""),
+            str(clean_thread_context.get("workshop_session_id") or ""),
+        )
+
+        # ── Agent Builder 方案选择硬路由：用户已选方案时，不再交给 LLM 重新盘点/重复方案 ──
+        plan_selection_decision = get_plan_selection_decision(
+            IntentContext.from_dict(clean_thread_context.get("intent") or {}),
+            raw,
+        )
+        if plan_selection_decision.get("active"):
+            logger.info(
+                "[PlanSelection][Decision] pending_options=%s user_is_selecting=%s selected_plan_id=%s recommended_tool=%s",
+                plan_selection_decision.get("pending_options_count"),
+                plan_selection_decision.get("user_is_selecting"),
+                plan_selection_decision.get("selected_plan_id") or "none",
+                plan_selection_decision.get("recommended_tool") or "none",
+            )
 
         async def emit_step(step: str, status: str, title: str, detail: str = "", iteration: int | None = None) -> None:
             if not on_step_event:
@@ -1652,24 +2103,44 @@ class EmbeddedNanobotRuntime:
         if refined_intent is not None:
             active_tools, tool_selection = self._build_scoped_tools(raw, skill_names, intent_override=refined_intent, thread_context=clean_thread_context)
         tool_selection.setdefault("route_decision", {})["fallback"] = fallback_meta
+
+        spec_id_for_focus = str(clean_thread_context.get("spec_id") or "").strip()
+
+        # ── 🔒 上下文注入策略：检测模式，控制哪些 block 允许进入 prompt ──
+        injection_mode = detect_injection_mode(
+            channel=channel,
+            spec_id=spec_id_for_focus,
+            tool_selection=tool_selection,
+        )
+        policy = InjectionPolicy(mode=injection_mode)
+
         project_memory_guidance = await self._recall_project_memory_guidance(
             user_message=raw,
             tool_selection=tool_selection,
             thread_context=clean_thread_context,
         )
-        agent_builder_lesson_guidance = await self._recall_agent_builder_lesson_guidance(
-            user_message=raw,
-            user_id=str(session.metadata.get("user_id") or "").strip(),
-            tool_selection=tool_selection,
-            thread_context=clean_thread_context,
-        )
+        if project_memory_guidance:
+            policy.add_project_memory(project_memory_guidance)
+
+        # Agent Builder 模式下不依赖 Mem0，所有记忆走 MongoDB
+        if should_inject_mem0_lessons(injection_mode):
+            agent_builder_lesson_guidance = await self._recall_agent_builder_lesson_guidance(
+                user_message=raw,
+                user_id=str(session.metadata.get("user_id") or "").strip(),
+                tool_selection=tool_selection,
+                thread_context=clean_thread_context,
+            )
+            if agent_builder_lesson_guidance:
+                policy.try_add_mem0_lessons(agent_builder_lesson_guidance)
+        else:
+            agent_builder_lesson_guidance = None
 
         # 🔥 当前 Agent 聚焦块：只要 thread_context 里有 spec_id，就始终注入，不依赖 governance 意图检测
         spec_focus_guidance = None
-        spec_id_for_focus = str(clean_thread_context.get("spec_id") or "").strip()
         if spec_id_for_focus:
             spec_focus_guidance = await self._build_current_spec_focus_block(spec_id_for_focus, clean_thread_context)
             if spec_focus_guidance:
+                policy.add_spec_focus(spec_focus_guidance)
                 logger.info(
                     "[EmbeddedNanobot][SpecFocus] injecting current agent focus block for spec_id=%s",
                     spec_id_for_focus,
@@ -1677,19 +2148,26 @@ class EmbeddedNanobotRuntime:
 
         # 🔒 Agent Builder 流程约束块：基于状态机告诉 Nanobot 当前能做什么、不能做什么
         flow_guidance = None
-        if spec_id_for_focus:
+        if channel == "agent_workshop" or spec_id_for_focus:
             intent_for_flow = IntentContext.from_dict(clean_thread_context.get("intent") or {})
-            if not intent_for_flow.spec_id:
+            if spec_id_for_focus and not intent_for_flow.spec_id:
                 intent_for_flow.spec_id = spec_id_for_focus
             if not intent_for_flow.spec_name:
                 intent_for_flow.spec_name = str(clean_thread_context.get("spec_name") or "").strip()
+            # 🔥 Agent Studio 入口：无 spec_id 且无 stage 时，自动进入 exploring 阶段
+            # 避免 Nanobot 在 IDLE 阶段自由聊天而不调用结构化工具
+            if channel == "agent_workshop" and not intent_for_flow.spec_id and not intent_for_flow.stage:
+                intent_for_flow.stage = "exploring"
+                intent_for_flow.intent_summary = intent_for_flow.intent_summary or "用户在 Agent 工坊中描述需求"
             flow_guidance = build_flow_guidance_block(
                 intent_for_flow,
                 has_version=bool(clean_thread_context.get("version_id")),
                 evaluation_status=str(clean_thread_context.get("evaluation_status") or clean_thread_context.get("official_acceptance_decision") or ""),
                 has_blocking_gaps=bool(clean_thread_context.get("has_blocking_gaps")),
+                user_message=raw,
             )
             if flow_guidance:
+                policy.add_flow_guidance(flow_guidance)
                 derived_phase = derive_flow_phase(
                     intent_for_flow,
                     has_version=bool(clean_thread_context.get("version_id")),
@@ -1697,10 +2175,26 @@ class EmbeddedNanobotRuntime:
                     has_blocking_gaps=bool(clean_thread_context.get("has_blocking_gaps")),
                 )
                 logger.info(
-                    "[EmbeddedNanobot][FlowCtrl] injecting flow constraints for spec_id=%s phase=%s",
-                    spec_id_for_focus,
+                    "[EmbeddedNanobot][FlowCtrl] injecting flow constraints channel=%s spec_id=%s phase=%s guidance_len=%d",
+                    channel,
+                    spec_id_for_focus or "none",
                     derived_phase.value,
+                    len(flow_guidance),
                 )
+            else:
+                derived_phase = None
+
+        # ── 🔍 上下文注入审计日志 ──
+        merged_guidance = policy.get_merged_guidance()
+        audit = policy.get_audit(thread_id=str(thread_id or chat_id or ""))
+        logger.info(
+            "[EmbeddedNanobot][InjectionPolicy] mode=%s blocks=%d blocked=%d total_chars=%d blocked_names=%s",
+            injection_mode,
+            len(audit["included"]),
+            len(audit["blocked"]),
+            audit["total_chars"],
+            json.dumps(audit["blocked"], ensure_ascii=False, default=str),
+        )
 
         if on_progress:
             await self._invoke_callback(on_progress, f"已选择 {len(active_tools.tool_names)} 个可用工具（核心 {len(self.CORE_TOOL_NAMES)} + 动态 {len(tool_selection['selected_dynamic_tools'])}）")
@@ -1728,14 +2222,8 @@ class EmbeddedNanobotRuntime:
             media=media,
             channel=channel,
             chat_id=chat_id,
-            extra_system_guidance=self._merge_system_guidance(
-                project_memory_guidance,
-                agent_builder_lesson_guidance,
-                spec_focus_guidance,
-                flow_guidance,
-                tool_selection.get("agent_first", {}).get("guidance") or None,
-                tool_selection.get("agent_builder_governance", {}).get("guidance") or None,
-            ),
+            extra_system_guidance=merged_guidance,
+            mode=injection_mode,
         )
         if on_progress and estimated_tokens > 0:
             await self._invoke_callback(on_progress, f"上下文已准备完成，估算输入约 {estimated_tokens} tokens")
@@ -1753,6 +2241,17 @@ class EmbeddedNanobotRuntime:
             await self._invoke_callback(on_progress, f"上下文快照已写入 {dump_path}")
         await emit_step("context_preparation", "completed", "准备上下文", "上下文与可用能力已准备完成")
         runtime = self
+        forced_result: AgentRunResult | None = None
+        if (
+            plan_selection_decision.get("active")
+            and plan_selection_decision.get("recommended_tool") == "propose_agent_build_plans"
+            and plan_selection_decision.get("user_is_selecting")
+        ):
+            forced_result = await self._force_propose_agent_builder_plans(
+                intent=IntentContext.from_dict(clean_thread_context.get("intent") or {}),
+                raw=raw,
+                active_tools=active_tools,
+            )
 
         class _RuntimeHook(AgentHook):
             def __init__(self):
@@ -1773,6 +2272,13 @@ class EmbeddedNanobotRuntime:
                 self._stream_buf = ""
 
             async def before_execute_tools(self, context: AgentHookContext) -> None:
+                if context.tool_calls:
+                    tool_names = ', '.join(tc.name for tc in context.tool_calls)
+                    logger.info(
+                        "[Nanobot][ToolCall] 🔧 LLM 请求调用 %d 个工具: %s",
+                        len(context.tool_calls),
+                        tool_names,
+                    )
                 if on_progress and context.tool_calls:
                     await runtime._invoke_callback(on_progress, f"准备调用工具: {', '.join(tc.name for tc in context.tool_calls)}")
                 if context.tool_calls:
@@ -1808,7 +2314,17 @@ class EmbeddedNanobotRuntime:
             def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
                 return strip_think(content or "") or None
 
-        result = await self.runner.run(AgentRunSpec(initial_messages=initial_messages, tools=active_tools, model=self.model, max_iterations=self.max_iterations, hook=_RuntimeHook(), concurrent_tools=True))
+        if forced_result is not None:
+            result = forced_result
+        else:
+            result = await self.runner.run(AgentRunSpec(initial_messages=initial_messages, tools=active_tools, model=self.model, max_iterations=self.max_iterations, hook=_RuntimeHook(), concurrent_tools=True))
+            result = await self._repair_agent_builder_plan_selection_if_needed(
+                result=result,
+                session=session,
+                clean_thread_context=clean_thread_context,
+                raw=raw,
+                active_tools=active_tools,
+            )
         if result.stop_reason == "completed" and not (result.final_content or "").strip():
             result.stop_reason = "empty_response"
             result.final_content = "本轮模型调用已结束，但没有返回可显示的正文内容。请重试；如果问题持续出现，请检查 logs/embedded_nanobot_llm.log 中对应请求的原始响应。"
@@ -1820,6 +2336,16 @@ class EmbeddedNanobotRuntime:
                 if message.get("role") == "assistant":
                     message["tools_used"] = result.tools_used
                     break
+        # 生成并持久化本轮结构化摘要（不阻塞返回）
+        if injection_mode == InjectionMode.AGENT_BUILDER:
+            self._schedule_background(self._update_conversation_summary_for_agent_builder(
+                session=session,
+                thread_id=str(thread_id or chat_id or session_key),
+                user_message=raw,
+                assistant_content=str(result.final_content or ""),
+                tools_used=result.tools_used or [],
+                current_intent=clean_thread_context.get("intent") or {},
+            ))
         if self.max_session_messages is not None:
             session.retain_recent_legal_suffix(self.max_session_messages)
         self.sessions.save(session)
