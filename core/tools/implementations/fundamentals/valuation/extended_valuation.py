@@ -25,6 +25,37 @@ def _cagr(latest, earliest, periods):
     return (latest / earliest) ** (1 / periods) - 1
 
 
+def _resolve_shares(basic_info: dict, current_price=None, warnings: Optional[list] = None):
+    """统一解析总股本，返回单位为「股」的数值。
+
+    基础信息表中：
+      - total_share / float_share 单位为「万股」→ 需 ×1e4 换算成股
+      - total_mv / circ_mv 单位为「亿元」→ 需 ×1e8 换算成元
+    财报口径（equity_value/net_profit/total_equity 等）单位为「元」，
+    若直接用「万股」做除数，每股结果会放大 1e4 倍（如茅台会算出千万级/股）。
+    """
+    raw_shares = (
+        basic_info.get("total_shares")
+        or basic_info.get("total_share")   # 万股
+        or basic_info.get("float_shares")
+        or basic_info.get("float_share")   # 万股
+    )
+    if raw_shares is not None and raw_shares > 0:
+        return float(raw_shares) * 1e4  # 万股 → 股
+
+    # 兜底：市值 / 当前价推算
+    raw_mv = basic_info.get("total_mv") or basic_info.get("circ_mv")
+    market_cap = basic_info.get("market_cap") or basic_info.get("market_value")
+    if raw_mv and raw_mv > 0:
+        market_cap = float(raw_mv) * 1e8  # 亿元 → 元
+    if market_cap and current_price and current_price > 0:
+        return market_cap / current_price
+
+    if warnings is not None:
+        warnings.append("无法获取总股本，默认使用约 12.5 亿股估算。")
+    return 1.256e9
+
+
 # ─────────────────────────────────────────────────────────────
 # Tool 1: DCF 三阶段估值
 # ─────────────────────────────────────────────────────────────
@@ -193,14 +224,7 @@ def get_dcf_three_stage_valuation(
         basic_info = get_stock_basic_info(symbol) or {}
         current_price = get_latest_stock_price(symbol)
 
-        shares = basic_info.get("total_shares") or basic_info.get("total_share")
-        if shares is None:
-            market_cap = basic_info.get("total_mv") or basic_info.get("market_cap") or basic_info.get("market_value")
-            if market_cap and current_price and current_price > 0:
-                shares = market_cap / current_price
-            else:
-                shares = 1e9
-                warnings.append("无法获取总股本，默认使用 10 亿股估算。")
+        shares = _resolve_shares(basic_info, current_price, warnings)
 
         per_share_value = equity_value / shares if shares and shares > 0 else None
         upside_pct = ((per_share_value - current_price) / current_price * 100) if (per_share_value and current_price and current_price > 0) else None
@@ -243,7 +267,7 @@ def get_dcf_three_stage_valuation(
 
         payload = {
             "symbol": symbol,
-            "method": "three_stage_dcf",
+            "method": "三阶段DCF",
             "stages": {
                 "high_growth_years": n_high,
                 "transition_years": n_trans,
@@ -431,14 +455,7 @@ def get_residual_income_valuation(
 
         # 获取总股本
         basic_info = get_stock_basic_info(symbol) or {}
-        shares = basic_info.get("total_shares") or basic_info.get("total_share")
-        if shares is None:
-            market_cap = basic_info.get("total_mv") or basic_info.get("market_cap") or basic_info.get("market_value")
-            if market_cap and current_price and current_price > 0:
-                shares = market_cap / current_price
-            else:
-                shares = 1e9
-                warnings.append("无法获取总股本，默认使用 10 亿股估算。")
+        shares = _resolve_shares(basic_info, current_price, warnings)
 
         total_equity = latest.get("total_equity")
         if total_equity is None or total_equity <= 0 or shares is None or shares <= 0:
@@ -775,7 +792,7 @@ def get_fcff_fcfe_calculation(
 
         payload = {
             "symbol": symbol,
-            "method": "fcff_fcfe_calculation",
+            "method": "FCFF/FCFE计算",
             "latest": {
                 "fcff": latest.get("fcff"),
                 "fcfe": latest.get("fcfe"),
@@ -949,14 +966,7 @@ def get_graham_valuation(
         latest = records[0]
 
         # 获取总股本
-        shares = basic_info.get("total_shares") or basic_info.get("total_share")
-        if shares is None:
-            market_cap = basic_info.get("total_mv") or basic_info.get("market_cap") or basic_info.get("market_value")
-            if market_cap and current_price and current_price > 0:
-                shares = market_cap / current_price
-            else:
-                shares = 1e9
-                warnings.append("无法获取总股本，默认使用 10 亿股估算。")
+        shares = _resolve_shares(basic_info, current_price, warnings)
 
         # EPS
         net_profit = latest.get("net_profit")
@@ -994,7 +1004,7 @@ def get_graham_valuation(
 
         payload = {
             "symbol": symbol,
-            "method": "graham_number",
+            "method": "格雷厄姆估值",
             "parameters": {
                 "eps": round(eps, 4),
                 "bvps": round(bvps, 4),
@@ -1008,7 +1018,7 @@ def get_graham_valuation(
                 "safety_margin_level": margin_level,
             },
             "data_quality": {
-                "shares_source": "basic_info" if basic_info.get("total_shares") else "estimated",
+                "shares_source": "basic_info" if (basic_info.get("total_shares") or basic_info.get("total_share")) else "estimated",
                 "warnings": warnings,
             },
         }
@@ -1270,13 +1280,7 @@ def get_growth_adjusted_valuation(
         eps = None
         if records:
             net_profit = records[0].get("net_profit")
-            shares = basic_info.get("total_shares") or basic_info.get("total_share")
-            if shares is None:
-                market_cap = basic_info.get("total_mv") or basic_info.get("market_cap") or basic_info.get("market_value")
-                if market_cap and current_price and current_price > 0:
-                    shares = market_cap / current_price
-                else:
-                    shares = 1e9
+            shares = _resolve_shares(basic_info, current_price)
             if net_profit and shares and shares > 0:
                 eps = net_profit / shares
 
@@ -1284,7 +1288,7 @@ def get_growth_adjusted_valuation(
 
         payload = {
             "symbol": symbol,
-            "method": "growth_quality_adjusted_valuation",
+            "method": "增长质量调整估值",
             "parameters": {
                 "raw_pe_ttm": round(pe_ttm, 2) if pe_ttm else None,
             },

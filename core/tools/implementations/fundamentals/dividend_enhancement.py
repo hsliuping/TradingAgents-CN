@@ -181,7 +181,11 @@ def get_dividend_valuation_context(
             net_profit = _safe_float(latest_financial.get("net_profit"))
             if net_profit is not None and net_profit > 0:
                 basic_info = get_stock_basic_info(normalized_symbol) or {}
-                total_shares = _safe_float(basic_info.get("total_share") or basic_info.get("total_shares"))
+                # total_share/total_shares 单位为「万股」，需 ×1e4 换算成「股」，
+                # 否则 net_profit（元）/ 万股 会把 EPS 放大 1e4 倍，
+                # 导致派息率被缩小 1e4 倍（如茅台会算出 0.03%，实际约 50%）。
+                raw_shares = _safe_float(basic_info.get("total_share") or basic_info.get("total_shares"))
+                total_shares = raw_shares * 1e4 if raw_shares is not None and raw_shares > 0 else None
                 if total_shares is not None and total_shares > 0:
                     eps_approximate = net_profit / total_shares
                     payout_ratio = latest_cash / eps_approximate if eps_approximate > 0 else None
@@ -191,15 +195,15 @@ def get_dividend_valuation_context(
         dividend_growth = _cagr(cash_values) if len(cash_values) >= 2 else None
 
         # 7. 估值信号
-        valuation_signal = "neutral"
+        valuation_signal = "中性"
         if current_yield is not None and avg_5y_yield is not None:
             if current_yield > avg_5y_yield:
-                valuation_signal = "undervalued"
+                valuation_signal = "低估"
             else:
-                valuation_signal = "overvalued"
+                valuation_signal = "高估"
 
         # 8. 数据质量
-        data_quality = "sufficient" if len(annual_yields) >= 3 else "limited" if annual_yields else "insufficient"
+        data_quality = "数据充足" if len(annual_yields) >= 3 else "数据有限" if annual_yields else "数据不足"
 
         return _json_response({
             "status": "success",
@@ -353,7 +357,7 @@ def get_industry_valuation_distribution(
             "distribution_stats": result_stats,
             "cheapest_stocks": result_cheapest,
             "priciest_stocks": result_priciest,
-            "data_quality": "sufficient" if total_stocks > 0 else "insufficient",
+            "data_quality": "数据充足" if total_stocks > 0 else "数据不足",
             "warnings": [] if total_stocks > 0 else ["未获取到有效数据。"],
         })
     except Exception as exc:

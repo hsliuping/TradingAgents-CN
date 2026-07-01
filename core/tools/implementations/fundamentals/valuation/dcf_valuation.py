@@ -155,14 +155,35 @@ def get_dcf_valuation(
         basic_info = get_stock_basic_info(symbol) or {}
         current_price = get_latest_stock_price(symbol)
 
-        shares = basic_info.get("total_shares") or basic_info.get("total_share")
-        if shares is None:
-            market_cap = basic_info.get("total_mv") or basic_info.get("market_cap") or basic_info.get("market_value")
+        # ── 单位对齐 ──
+        # equity_value / free_cashflow / total_liab 等财报口径单位为「元」，
+        # 但基础信息表的股本 total_share/float_share 单位为「万股」，
+        # 市值 total_mv/circ_mv 单位为「亿元」。
+        # 若直接用「万股」做除数，per_share_value 会放大 1e4 倍
+        # （如茅台会算出 1262 万元/股，实际约 1264 元/股）。
+        # 这里统一把股本换算成「股」。
+        raw_shares = (
+            basic_info.get("total_shares")
+            or basic_info.get("total_share")   # 单位：万股
+            or basic_info.get("float_shares")
+            or basic_info.get("float_share")   # 单位：万股
+        )
+        shares = None
+        if raw_shares is not None and raw_shares > 0:
+            # total_share/float_share 单位为万股 → ×1e4 换算成股
+            shares = float(raw_shares) * 1e4
+        else:
+            # 兜底：用市值 / 当前价推算股数
+            # total_mv/circ_mv 单位为亿元 → ×1e8 换算成元
+            raw_mv = basic_info.get("total_mv") or basic_info.get("circ_mv")
+            market_cap = basic_info.get("market_cap") or basic_info.get("market_value")
+            if raw_mv and raw_mv > 0:
+                market_cap = float(raw_mv) * 1e8  # 亿元 → 元
             if market_cap and current_price and current_price > 0:
                 shares = market_cap / current_price
             else:
-                shares = 1e9  # 默认 10 亿股
-                warnings.append("无法获取总股本，默认使用 10 亿股估算。")
+                shares = 1.256e9  # 默认约 12.5 亿股
+                warnings.append("无法获取总股本，默认使用约 12.5 亿股估算。")
 
         per_share_value = equity_value / shares if shares and shares > 0 else None
         upside_pct = ((per_share_value - current_price) / current_price * 100) if (per_share_value and current_price and current_price > 0) else None

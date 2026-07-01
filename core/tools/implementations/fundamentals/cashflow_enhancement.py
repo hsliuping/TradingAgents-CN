@@ -260,7 +260,7 @@ def get_cashflow_quality_deep(
             "flags": flags,
             "trend_series": trend_series[:10],
             "coverage": coverage,
-            "data_quality": "sufficient" if len(trend) >= 3 else "limited" if trend else "insufficient",
+            "data_quality": "数据充足" if len(trend) >= 3 else "数据有限" if trend else "数据不足",
             "warnings": cashflow_warnings,
         })
     except Exception as exc:
@@ -326,7 +326,7 @@ def get_earnings_surprise_analysis(
                 "message": f"仅获取到 {len(recent_quarters)} 个季度的净利润数据，至少需要 3 个季度进行分析",
                 "symbol": normalized_symbol,
                 "recent_quarters_data": recent_quarters,
-                "data_quality": "insufficient",
+                "data_quality": "数据不足",
             })
 
         # 3. 计算环比增长率和趋势偏离
@@ -370,15 +370,15 @@ def get_earnings_surprise_analysis(
 
                 # 分类惊喜程度
                 if surprise_pct > 0.20:
-                    category = "large_positive_surprise"
+                    category = "大幅正向惊喜"
                 elif surprise_pct > 0.05:
-                    category = "moderate_positive_surprise"
+                    category = "温和正向惊喜"
                 elif surprise_pct > -0.05:
-                    category = "in_line"
+                    category = "符合预期"
                 elif surprise_pct > -0.20:
-                    category = "moderate_negative_surprise"
+                    category = "温和负向惊喜"
                 else:
-                    category = "large_negative_surprise"
+                    category = "大幅负向惊喜"
                 entry["surprise_category"] = category
 
                 # 记录显著的惊喜/惊吓
@@ -397,17 +397,17 @@ def get_earnings_surprise_analysis(
             negative_count = sum(1 for s in surprises if s["surprise_pct"] < 0)
             total_surprises = len(surprises)
             if positive_count >= total_surprises * 0.7:
-                overall_sentiment = "predominantly_positive"
+                overall_sentiment = "整体偏多"
             elif negative_count >= total_surprises * 0.7:
-                overall_sentiment = "predominantly_negative"
+                overall_sentiment = "整体偏空"
             elif positive_count > negative_count:
-                overall_sentiment = "mixed_positive"
+                overall_sentiment = "谨慎偏多"
             elif negative_count > positive_count:
-                overall_sentiment = "mixed_negative"
+                overall_sentiment = "谨慎偏空"
             else:
-                overall_sentiment = "mixed"
+                overall_sentiment = "多空均衡"
         else:
-            overall_sentiment = "stable"
+            overall_sentiment = "稳定"
 
         # 检查趋势方向
         if slope > 0:
@@ -435,7 +435,7 @@ def get_earnings_surprise_analysis(
                 "slope": round(slope, 2),
                 "intercept": round(intercept, 2),
             },
-            "data_quality": "sufficient" if periods_analyzed >= 6 else "limited",
+            "data_quality": "数据充足" if periods_analyzed >= 6 else "数据有限",
             "methodology_note": (
                 "由于系统不含券商盈利预测数据，'expected_profit' 基于最近 8 个季度净利润的简单线性回归趋势线估算。"
                 "'surprise' = actual_profit - expected_profit，大于 ±20% 视为显著意外变化。"
