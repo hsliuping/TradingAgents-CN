@@ -2,7 +2,7 @@
 
 > 状态：设计稿，待用户确认后实现。
 >
-> 本版本把「确认后自动 gap 分析并阻塞构建」改为「确认前做能力盘点 + 方案选择，确认后按方案实现，测试后再迭代」。
+> 本版本把「确认后自动 gap 分析并阻塞构建」改为「先确认需求，再做能力盘点 + 方案选择，确认方案后按方案实现，测试后再迭代」。
 
 ---
 
@@ -20,25 +20,27 @@
 
 ## 二、核心设计原则
 
-1. **能力盘点必须发生在用户确认之前**
-   - 在 `CONFIRMATION_PENDING` 阶段，用户必须已经清楚：
-     - 系统有哪些能力
-     - 缺什么能力
-     - 用现有的能不能满足需求
-     - 各方案的预期效果和风险
+1. **先确认需求，再盘点能力，最后选择方案**
+   - 需求确认：Nanobot 作为产品专家解读需求，确认职责边界、输出形状、排除项
+   - 能力盘点：系统内部查询现有工具/Skill，做真实 gap 分析
+   - 方案选择：基于 gap 结果给出多个可行方案，用户选择方案
 
-2. **用户确认的是「方案」，不是「需求」**
+2. **需求确认稿不包含工具候选**
+   - 用户不需要知道系统有哪些工具
+   - 确认稿只讲：这个 Agent 做什么、输出什么、不做什么
+
+3. **用户确认的是「方案」，不是「需求」**
    - 不再只是"确认生成"
    - 而是让用户在多个可行方案中选择：
      - A. 完整方案（补齐缺口）
      - B. 快速方案（现有工具简化版）
      - C. 调整方案（缩小需求范围）
 
-3. **确认后按方案实现，实现中遇到问题再反馈**
+4. **确认后按方案实现，实现中遇到问题再反馈**
    - 不再因为 auto-build 发现 gap 就阻止构建
    - 如果实现过程中发现 Skill 完成不了，进入 ITERATING 向用户反馈
 
-4. **测试评估是发现问题的第一现场**
+5. **测试评估是发现问题的第一现场**
    - 真数据测试 + LLM 评估产出 evidence
    - 根据 evidence 决定：补齐能力 / 迭代 Prompt / 重跑测试 / 发布
 
@@ -55,23 +57,36 @@
                             │
                             ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ 2. 能力盘点                                                  │
-│    Nanobot：                                                 │
+│ 2. 需求确认                                                  │
+│    Nanobot：以产品专家身份输出需求确认稿                     │
+│    - 这个 Agent 做什么                                       │
+│    - 输出什么                                                │
+│    - 不做什么                                                │
+│    用户："确认，按这个需求做"                                │
+└───────────────────────────┬──────────────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────────────┐
+│ 3. 能力盘点                                                  │
+│    系统内部：                                                │
 │      - 扫描现有工具/Skill（search_project_capabilities）     │
-│      - 运行真实缺口分析（_build_gap_analysis）               │
+│      - 运行真实缺口分析（analyze_agent_workshop_gaps）       │
 │      - 评估用现有工具能否满足需求                            │
 └───────────────────────────┬──────────────────────────────────┘
                             │
                             ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ 3. 方案选择与确认                                            │
-│    Nanobot：给出 2-3 个候选方案（动态，非固定 A/B/C）        │
+│ 4. 方案选择与确认                                            │
+│    Nanobot：基于 gap 结果给出 2-3 个候选方案                 │
+│    - A. 完整方案（补齐缺口）                                 │
+│    - B. 快速方案（现有工具简化版）                           │
+│    - C. 调整方案（缩小需求范围）                             │
 │    用户选方案，也可以质疑 gap 分析结果                       │
 └───────────────────────────┬──────────────────────────────────┘
                             │
                             ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ 4. 按方案实现                                                │
+│ 5. 按方案实现                                                │
 │    - 生成 Agent / Draft / Prompt / Runtime Config            │
 │    - 如需补缺口：生成/复用 Skill                             │
 │    - 实现中遇到问题 → 向用户反馈 → 调整方案                  │
@@ -79,14 +94,14 @@
                             │
                             ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ 5. 真数据测试                                                │
+│ 6. 真数据测试                                                │
 │    Nanobot：运行 run_agent_workshop_real_data_test           │
 │    系统：LLM 评估报告质量 + 工具调用覆盖率                   │
 └───────────────────────────┬──────────────────────────────────┘
                             │
                             ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ 6. 发布 / 迭代                                               │
+│ 7. 发布 / 迭代                                               │
 │    评估通过 → publish_version                                │
 │    评估失败 → 按 evidence 类型选择：                         │
 │      - 缺能力 → resolve_gaps（含 Plan B 升级到 A）          │
@@ -115,34 +130,71 @@ Nanobot 多轮询问
 
 ---
 
-### Phase 2: 能力盘点（新增，关键变化）
+### Phase 2: 需求确认（新增为独立阶段）
 
 ```text
-需求明确后
+用户输入
   │
   ▼
-search_project_capabilities（扫描 CapabilityIndex）
+Nanobot 多轮询问
   │
   ▼
-_build_gap_analysis(spec)（LLM 驱动的真实缺口分析）
-  │
-  ▼
-生成能力盘点报告（capability_inventory + gap_report）
+整理出明确的职责、维度、输出形态、排除项
   │
   ▼
 prepare_agent_generation_confirmation
   │
   ▼
-输出：多方案确认稿
+输出：需求确认稿（不含工具候选）
+```
+
+**状态机阶段**：`DRAFT_PREPARING → CONFIRMATION_PENDING`
+
+**关键规则**：
+
+- `prepare_agent_generation_confirmation` 只确认需求，不展示工具候选
+- 确认稿包含：Agent 名称、职责、输出形状、非目标、边界约束
+- 用户回复"确认"后进入 Phase 3
+- 如果用户修改需求，回到 `EXPLORING`
+
+---
+
+### Phase 3: 能力盘点（关键变化）
+
+```text
+用户确认需求后
+  │
+  ▼
+search_project_capabilities（扫描 CapabilityIndex）
+  │
+  ▼
+analyze_agent_workshop_gaps（LLM 驱动的真实缺口分析）
+  │
+  ▼
+生成能力盘点报告（capability_inventory + gap_report）
+  │
+  ▼
+propose_agent_build_plans
+  │
+  ▼
+输出：2-3 个候选方案
 ```
 
 **状态机阶段**：`CAPABILITY_CHECK → DRAFT_PREPARING`
 
 #### 技术要点
 
-1. **`_build_gap_analysis` 在 prepare 阶段不能依赖 session**
+1. **能力盘点在需求确认之后，方案选择之前**
 
-   v2 把 gap 分析前移到 prepare 阶段，但此时用户尚未确认方案，Workshop session 还不应该创建。
+   v2 把流程拆成三步：
+
+   ```text
+   Phase 2: prepare_agent_generation_confirmation → 需求确认稿
+   Phase 3: search_project_capabilities + analyze_spec_gaps → 能力盘点 + gap 分析
+            → propose_agent_build_plans → 候选方案
+   ```
+
+   此时用户已经确认需求，但尚未选择方案，Workshop session 还不应该创建。
 
    **定案：不在 prepare 阶段创建临时 session。**
 
@@ -187,9 +239,13 @@ prepare_agent_generation_confirmation
    ```text
    prepare_agent_generation_confirmation
      → 构造临时 AgentSpec（不落库）
+     → 输出需求确认稿
+
+   用户确认需求后
      → search_project_capabilities
      → analyze_spec_gaps(spec, capability_inventory)
-     → 输出多方案确认稿
+     → propose_agent_build_plans(gap_report)
+     → 输出候选方案
 
    build_version
      → 读取已落库 spec
@@ -197,7 +253,7 @@ prepare_agent_generation_confirmation
      → 写 gap_report / version metadata
    ```
 
-   持久化发生在用户确认之后：
+   持久化发生在用户确认方案之后：
 
    ```text
    用户选择方案
@@ -211,16 +267,38 @@ prepare_agent_generation_confirmation
 
    ```
    Step 1: search_project_capabilities  → capability_inventory（浅层工具名匹配）
-   Step 2: _build_gap_analysis(spec)    → gap_report（LLM 深度分析 blocking/non-blocking）
+   Step 2: analyze_spec_gaps(spec)      → gap_report（LLM 深度分析 blocking/non-blocking）
    ```
 
    两者互补：
    - capability_inventory 告诉我们有哪些工具
    - gap_report 告诉我们这些工具能不能覆盖 spec 需求
 
-3. **能力盘点结果持久化**
+3. **方案生成由独立工具承担**
 
-   capability_inventory 和 gap_report 写入 workshop session（即使 session 是临时创建的），后续实现失败再回来时不需要重新盘点。
+   `propose_agent_build_plans` 接收 gap_report，由 LLM 生成候选方案，但输出固定格式：
+
+   ```json
+   {
+     "candidate_plans": [
+       {
+         "plan_id": "A",
+         "plan_name": "完整方案",
+         "description": "...",
+         "required_new_skills": [...],
+         "estimated_effort": "高",
+         "risk": "...",
+         "recommended": true
+       }
+     ],
+     "recommended_plan_id": "A",
+     "pending_question": "..."
+   }
+   ```
+
+4. **能力盘点结果持久化**
+
+   capability_inventory 和 gap_report 写入 workshop session（用户确认方案后创建），后续实现失败再回来时不需要重新盘点。
 
 #### 关键输出
 
@@ -301,10 +379,10 @@ prepare_agent_generation_confirmation
 
 ---
 
-### Phase 3: 方案确认
+### Phase 4: 方案确认
 
 ```text
-多方案确认稿
+candidate_plans
   │
   ▼
 用户选择 A/B/C（或质疑 gap 分析结果）
@@ -334,9 +412,9 @@ prepare_agent_generation_confirmation
 
 ---
 
-### Phase 4: 按方案实现
+### Phase 5: 按方案实现
 
-#### 分支 4a：完整方案（plan A）
+#### 分支 5a：完整方案（plan A）
 
 ```text
 generate_confirmed_candidate_agent(selected_plan_id=A, acknowledged_gaps=[...])
@@ -362,7 +440,7 @@ BUILDING → 测试
 
 **注意**：Plan A 的 GAP_RESOLVING 发生在 Agent 已生成之后。用户感知："Agent 已经创建了，现在系统在给它补齐 Skill"。比"构建前阻塞"好。
 
-#### 分支 4b：快速方案（plan B）
+#### 分支 5b：快速方案（plan B）
 
 ```text
 generate_confirmed_candidate_agent(selected_plan_id=B)
@@ -392,7 +470,7 @@ Plan B → 测试 → 评估 → ITERATING
   → BUILDING → 测试 → 评估 → pass → PUBLISHING
 ```
 
-#### 分支 4c：调整方案（plan C）
+#### 分支 5c：调整方案（plan C）
 
 ```text
 用户选择 C
@@ -412,7 +490,7 @@ Nanobot 和用户重新讨论可接受的能力范围
 
 ---
 
-### Phase 5: 真数据测试
+### Phase 6: 真数据测试
 
 ```text
 BUILDING
@@ -432,7 +510,7 @@ run_agent_workshop_real_data_test
 
 ---
 
-### Phase 6: 迭代
+### Phase 7: 迭代
 
 ```text
 EVALUATING
@@ -458,66 +536,91 @@ EVALUATING
 
 ### 1. `prepare_agent_generation_confirmation`
 
-**当前输出**：单一确认稿 + 等待用户确认
+**v2 输出**：需求确认稿（不含工具候选）
 
-**v2 输出**：能力盘点 + 多方案 + 等待用户选择
-
-**内部两步**：
-
-```text
-Step 1: search_project_capabilities → capability_inventory
-Step 2: _build_gap_analysis(spec)   → gap_report
-```
+**作用**：
+- Nanobot 作为财经产品专家，把用户需求整理成清晰的职责边界和输出形态
+- 让用户确认"这个 Agent 做什么、输出什么、不做什么"
+- 不展示系统有哪些工具，也不做 gap 分析
 
 ```json
 {
   "status": "ok",
   "confirmation_required": true,
-  "confirmation_type": "plan_selection",
-  "capability_inventory": {
-    "available_tools": ["..."],
-    "available_skills": ["..."],
-    "missing_capabilities": ["..."]
-  },
+  "confirmation_type": "requirement_confirmation",
+  "agent_id": "...",
+  "agent_name": "...",
+  "target_responsibility": "...",
+  "desired_output_shape": "...",
+  "non_goals": [...],
+  "valuation_method_scope": "...",
+  "test_strategy": "...",
+  "report_contract": {...},
+  "pending_question": "以上需求边界和输出形态是否准确？如果确认无误，请回复'确认'。",
+  "suggested_user_reply": "确认"
+}
+```
+
+### 2. `propose_agent_build_plans`（新增）
+
+**作用**：
+- 在需求确认后、方案选择前调用
+- 基于 `gap_report` 由 LLM 生成候选方案
+- 输出固定格式，方便 `generate_confirmed_candidate_agent` 按 `selected_plan_id` 执行
+
+**输入**：
+
+```json
+{
   "gap_report": {
-    "blocking_gaps": [
-      {
-        "gap_id": "...",
-        "description": "...",
-        "confidence": "high",
-        "why_blocking": "..."
-      }
-    ],
-    "non_blocking_gaps": [...]
-  },
+    "blocking_gaps": [...],
+    "non_blocking_gaps": [...],
+    "suggested_tools": [...]
+  }
+}
+```
+
+**输出**：
+
+```json
+{
+  "status": "ok",
   "candidate_plans": [
     {
       "plan_id": "A",
       "plan_name": "完整方案",
-      "description": "...",
+      "description": "补齐所有 blocking gaps，输出完整功能",
       "required_new_skills": ["..."],
       "estimated_effort": "高",
-      "risk": "...",
+      "risk": "需要生成新 Skill，可能失败或耗时",
       "recommended": true
     },
     {
       "plan_id": "B",
       "plan_name": "快速方案",
-      "description": "...",
+      "description": "用现有工具做简化版，不补齐 blocking gaps",
       "required_new_skills": [],
       "estimated_effort": "低",
-      "risk": "...",
+      "risk": "功能不完整",
+      "recommended": false
+    },
+    {
+      "plan_id": "C",
+      "plan_name": "调整方案",
+      "description": "缩小需求范围到现有能力可覆盖的子集",
+      "required_new_skills": [],
+      "estimated_effort": "低",
+      "risk": "只覆盖部分需求",
       "recommended": false
     }
   ],
   "recommended_plan_id": "A",
   "pending_question": "你希望采用哪个方案？",
-  "suggested_user_reply": "选 A，补齐缺口做完整版",
-  "note": "方案数量根据缺口情况动态生成（1-3个）。如果对缺口分析有疑问，可以直接质疑。"
+  "suggested_user_reply": "选 A，补齐缺口做完整版"
 }
 ```
 
-### 2. `generate_confirmed_candidate_agent`
+### 3. `generate_confirmed_candidate_agent`
 
 **当前参数**：`agent_name`, `agent_id`, `responsibility`, ...
 
@@ -539,7 +642,7 @@ Step 2: _build_gap_analysis(spec)   → gap_report
 | Prompt 模板 | 完整版（含四色评级） | 简化版（不要求做不到的输出） |
 | 后续 | 自动进入 GAP_RESOLVING | 直接 BUILDING |
 
-### 3. `build_version`
+### 4. `build_version`
 
 **当前行为**：发现 unresolved blocking gaps 抛异常
 
@@ -558,7 +661,7 @@ if unresolved_blocking_gaps:
     # 不抛异常，继续构建
 ```
 
-### 4. IntentContext
+### 5. IntentContext
 
 **新增字段**：
 
@@ -575,7 +678,7 @@ if unresolved_blocking_gaps:
 - Plan B + acknowledged_gaps 为空 → BUILDING
 - Plan A 且无 unresolved gaps → BUILDING
 
-### 5. Plan B 升级路径（新工具或复用 ITERATING）
+### 6. Plan B 升级路径（新工具或复用 ITERATING）
 
 Plan B 想升级到 Plan A，走标准 ITERATING 路径：
 
@@ -598,9 +701,10 @@ select_plan: "upgrade_to_A"
 
 | 阶段 | 说明 | 变化 |
 |---|---|---|
-| `CAPABILITY_CHECK` | 能力盘点 | 新增为独立阶段，运行真实 gap 分析 |
-| `DRAFT_PREPARING` | 准备多方案确认稿 | 输出从单一确认稿改为多方案 |
-| `CONFIRMATION_PENDING` | 等待用户选择方案 | 不再只是"确认/否认"，支持质疑 gap |
+| `DRAFT_PREPARING` | 准备需求确认稿 | 输出从"多方案"改为"纯需求确认" |
+| `REQUIREMENT_CONFIRMATION_PENDING` | 等待用户确认需求 | 新增，用户确认需求后进入能力盘点 |
+| `CAPABILITY_CHECK` | 能力盘点 + gap 分析 | 新增为独立阶段，运行真实 gap 分析 |
+| `PLAN_SELECTION_PENDING` | 等待用户选择方案 | 新增，基于 gap 结果选择 A/B/C |
 | `GENERATING` | 按选定方案生成 | 新增 `selected_plan_id` |
 | `GAP_RESOLVING` | 补齐缺口 | 从"构建前阻塞"改为"方案 A 的实现步骤 / 测试失败后 / Plan B 升级" |
 | `BUILDING` | 版本构建完成 | 允许存在待验证缺口 |
@@ -613,15 +717,18 @@ IDLE
   ↓ 用户表达创建意图
 EXPLORING
   ↓ 需求明确
+DRAFT_PREPARING
+  ↓ 需求确认稿完成
+REQUIREMENT_CONFIRMATION_PENDING
+  ├─ 用户确认需求 → CAPABILITY_CHECK
+  └─ 用户修改需求 → EXPLORING
 CAPABILITY_CHECK
   ↓ 扫描完成 + 缺口分析完成
-DRAFT_PREPARING
-  ↓ 多方案稿完成
-CONFIRMATION_PENDING
+PLAN_SELECTION_PENDING
   ├─ 选 A → GENERATING → GAP_RESOLVING → BUILDING
   ├─ 选 B → GENERATING → BUILDING
   ├─ 选 C → EXPLORING（重新沟通需求范围）
-  └─ 质疑 gap → 重新评估 → 回到 DRAFT_PREPARING
+  └─ 质疑 gap → 重新评估 → 回到 CAPABILITY_CHECK
 BUILDING
   ↓
 TESTING
@@ -642,29 +749,54 @@ PUBLISHED
 
 ### 场景：财报风险信号识别器
 
-**Nanobot（能力盘点后）**：
+**Step 1: 需求确认**
+
+**Nanobot**：
 
 ```text
-基于你的需求，我做了能力盘点：
+我来确认一下你的需求：
+
+你想做一个「财报风险信号识别助手」，核心职责是：
+- 识别 A 股上市公司财报中的风险信号
+- 重点关注：商誉减值、应收账款异常、现金流恶化
+- 输出：结构化风险评级报告
+
+明确不做：
+- 不给出交易建议、不买/卖判断
+- 不输出目标价或仓位建议
+
+如果以上理解没错，请回复"确认"，我接下来会做能力盘点并给出可行方案。
+```
+
+**用户**："确认。"
+
+---
+
+**Step 2: 能力盘点后给出方案**
+
+**Nanobot**：
+
+```text
+基于确认的需求，我做了能力盘点：
 
 ✅ 已有能力：
-  - get_goodwill_analysis：商誉规模/占比/趋势
-  - get_financial_risk_factors：应收周转率/趋势标签
-  - get_cashflow_analysis：三类现金流
-  - get_risk_event_flags_tool：风险事件标记
+- 商誉规模与占比分析
+- 应收账款周转率与趋势
+- 三类现金流结构
+- 风险事件标记
 
 ❌ 缺少能力：
-  - 从原始科目计算风险比率的确定性工具（confidence: high）
-  - 把多维度指标聚合为四色评级的工具（confidence: high）
+- 从原始科目计算风险比率的确定性工具
+- 把多维度指标聚合为统一风险评级的工具
 
 我给你两个方案：
 
 A. 完整方案（推荐）
-   补齐两个 External Skill，输出完整四色风险评级。
+   补齐两个外部 Skill，输出完整风险评级。
    需要生成新 Skill，预计多轮验证。
 
 B. 快速方案
-   用现有工具做简化版，输出各维度指标但不输出统一四色评级。
+   用现有工具做简化版，输出各维度指标但不输出统一评级。
    可立即构建和测试。
 
 你希望采用哪个方案？如果有疑问可以直接告诉我。
@@ -676,7 +808,7 @@ B. 快速方案
 
 ```text
 你选择的是 A 方案（完整版）。
-我现在生成 Agent，然后补齐两个 External Skill。
+我现在生成 Agent，然后补齐两个外部 Skill。
 ```
 
 ---
@@ -725,8 +857,11 @@ B. 快速方案
 
 | 差异点 | 当前 | v2 |
 |---|---|---|
-| gap 分析时机 | build_version 内部 | prepare 阶段 |
-| 用户确认内容 | 单一方案 | 动态多方案选择 |
+| 流程阶段 | 需求+方案混在一起 | 拆成：需求确认 → 能力盘点 → 方案选择 |
+| `prepare_agent_generation_confirmation` | 输出能力盘点+多方案 | 只输出需求确认稿，不含工具候选 |
+| gap 分析时机 | build_version 内部 | 用户确认需求后、方案选择前 |
+| 新增工具 | 无 | `propose_agent_build_plans`（基于 gap 输出方案） |
+| 用户确认内容 | 单一方案 | 先确认需求，再确认方案 |
 | build_version 对 blocking gaps | 抛异常阻塞 | 记录并继续构建 |
 | GAP_RESOLVING 触发 | 构建前阻塞 | 方案 A 的实现步骤 / 测试失败后 / Plan B 升级 |
 | 用户感知 | "确认后又缺工具" | "确认前就知道风险和选择" |
@@ -742,27 +877,27 @@ B. 快速方案
 ### P0（必须，第一轮实现）
 
 1. 抽出 `analyze_spec_gaps(spec, capability_inventory)` 纯 gap 分析入口，prepare 阶段不创建临时 session
-2. `prepare_agent_generation_confirmation` 内部两步：`search_project_capabilities` + `analyze_spec_gaps`
-3. `prepare` 输出多方案（动态数量，含 confidence）
+2. `prepare_agent_generation_confirmation` 只输出需求确认稿（不含工具候选、不做 gap 分析）
+3. 新增 `propose_agent_build_plans(gap_report)` 工具，输出固定格式候选方案
 4. `generate_confirmed_candidate_agent` 支持 `selected_plan_id` + `acknowledged_gaps`
 5. Plan B 根据 `acknowledged_gaps` 调整 Prompt 模板（不要求做不到的输出）
 6. `build_version` 不因 blocking gaps 阻塞，写 metadata
-7. `FlowController` 新增 `CAPABILITY_CHECK` / `DRAFT_PREPARING` / 多方案 `CONFIRMATION_PENDING`
+7. `FlowController` 新增 `REQUIREMENT_CONFIRMATION_PENDING` / `CAPABILITY_CHECK` / `PLAN_SELECTION_PENDING`
 8. Plan C 回到 `EXPLORING` 而非 `CAPABILITY_CHECK`
 
 ### P1（重要，第二轮实现）
 
-8. 方案 A 自动进入 `GAP_RESOLVING`
-9. `IntentContext` 记录 `selected_plan_id` 和 `acknowledged_gaps`
-10. 能力盘点结果持久化到 workshop session
-11. Plan B 升级到 Plan A 路径（ITERATING → GAP_RESOLVING）
-12. 用户质疑 gap 时的重新评估流程
+9. 方案 A 自动进入 `GAP_RESOLVING`
+10. `IntentContext` 记录 `selected_plan_id` 和 `acknowledged_gaps`
+11. 能力盘点结果持久化到 workshop session
+12. Plan B 升级到 Plan A 路径（ITERATING → GAP_RESOLVING）
+13. 用户质疑 gap 时的重新评估流程
 
 ### P2（优化，第三轮实现）
 
-13. 能力盘点报告的可视化（前端展示方案卡片）
-14. 根据历史 Skill 成功率自动调整方案推荐
-15. 根据现有工具覆盖率决定方案 B 是否可行
+14. 能力盘点报告的可视化（前端展示方案卡片）
+15. 根据历史 Skill 成功率自动调整方案推荐
+16. 根据现有工具覆盖率决定方案 B 是否可行
 
 ---
 
@@ -958,11 +1093,14 @@ auto_build_workshop_version
 
 | 维度 | v1 | v2 |
 |---|---|---|
-| gap 分析时机 | 构建时 | 确认前 |
-| 用户知情权 | 确认后被告知"缺工具" | 确认前看到完整能力清单 |
+| 阶段拆分 | 需求+方案混在一起 | 需求确认 → 能力盘点 → 方案选择 |
+| `prepare` 输出 | 单一确认稿 | 纯需求确认稿（不含工具候选） |
+| gap 分析时机 | 构建时 | 用户确认需求后、方案选择前 |
+| 新增工具 | 无 | `propose_agent_build_plans` |
+| 用户知情权 | 确认后被告知"缺工具" | 确认需求后才做能力盘点，但方案选择前已告知缺口 |
 | 用户选择权 | 无 | A/B/C 动态方案 |
 | 构建可靠性 | 缺工具就抛异常 | 记录缺口继续构建 |
 | 迭代灵活性 | 单一 revise 路径 | evidence 分三类精确路由 |
 | 升级路径 | 无 Plan B→A | ITERATING 内支持 |
 | gap 可质疑 | 无 | confidence + 用户质疑流程 |
-| 返回认知 | "出尔反尔" | "先盘点再选择，按方案执行" |
+| 返回认知 | "出尔反尔" | "先确认需求、再盘点、再选方案、按方案执行" |
