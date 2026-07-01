@@ -907,7 +907,7 @@ class PortfolioService:
         adapter = QMTAdapter()
         snapshot = await asyncio.to_thread(adapter.query_account_snapshot, account_id, account_type)
         if snapshot is None:
-            raise ValueError("QMT 未查询到账户信息，请确认 MiniQMT 已登录且账号可用")
+            raise ValueError("QMT 未查询到账户信息，请确认 QMT 已登录且账号可用")
 
         positions_df = snapshot.get("positions_df")
         asset_summary = snapshot.get("asset") or {}
@@ -1946,7 +1946,7 @@ class PortfolioService:
         adapter = QMTAdapter()
         snapshot = await asyncio.to_thread(adapter.query_account_snapshot, account_id, account_type)
         if snapshot is None:
-            raise ValueError("QMT 未查询到账户信息，请确认 MiniQMT 已登录且账号可用")
+            raise ValueError("QMT 未查询到账户信息，请确认 QMT 已登录且账号可用")
 
         positions_df = snapshot.get("positions_df")
         asset_summary = snapshot.get("asset") or {}

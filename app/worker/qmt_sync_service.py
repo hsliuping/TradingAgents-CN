@@ -1,10 +1,10 @@
 """
-QMT (迅投 MiniQMT) 数据同步服务
+QMT 数据同步服务
 
 将 QMT 数据同步到 MongoDB。
 前置条件：
   1. xtquant 库已安装
-  2. MiniQMT 客户端已启动（仅 Windows）
+  2. QMT 客户端已启动（仅 Windows）
   3. 获取行情数据不需要登录券商账户
 新闻不支持，统一使用 AKShare。
 """
@@ -49,7 +49,7 @@ class QMTSyncService:
             self.historical_service = await get_historical_data_service()
             self.financial_service = await get_financial_data_service()
             if not self.adapter.is_available():
-                raise RuntimeError("❌ QMT 不可用，请确保 MiniQMT 客户端已启动")
+                raise RuntimeError("❌ QMT 不可用，请确保 QMT 客户端已启动")
             logger.info("✅ QMT 同步服务初始化完成")
         except Exception as e:
             logger.error(f"❌ QMT 同步服务初始化失败: {e}")
@@ -245,7 +245,7 @@ class QMTSyncService:
 
     async def sync_realtime_quotes(self, symbols: Optional[List[str]] = None, force: bool = False) -> Dict[str, Any]:
         """
-        同步实时行情到 market_quotes（可选，需 MiniQMT 运行）
+        同步实时行情到 market_quotes（可选，需 QMT 运行）
 
         Args:
             symbols: 指定股票列表，空则全市场

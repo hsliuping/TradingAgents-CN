@@ -314,7 +314,7 @@ class Settings(BaseSettings):
     BAOSTOCK_INIT_AUTO_START: bool = Field(default=False, description="应用启动时自动检查并初始化数据")
 
     # ==================== QMT 统一数据同步配置 ====================
-    QMT_UNIFIED_ENABLED: bool = Field(default=False, description="启用QMT统一数据同步（需 MiniQMT 运行）")
+    QMT_UNIFIED_ENABLED: bool = Field(default=False, description="启用QMT统一数据同步（需 QMT 交易终端运行）")
     QMT_BASIC_INFO_SYNC_ENABLED: bool = Field(default=True, description="启用QMT基础信息同步")
     QMT_BASIC_INFO_SYNC_CRON: str = Field(default="0 7 * * 1-5", description="QMT基础信息同步CRON表达式，默认工作日7点")
     QMT_QUOTES_SYNC_ENABLED: bool = Field(default=False, description="启用QMT实时行情同步")

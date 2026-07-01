@@ -641,7 +641,7 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                 result["basic_sync"] = {
                     "success": success_count > 0,
                     "message": f"基础数据同步{'成功' if success_count > 0 else '失败'}" + (
-                        f"（QMT 需 MiniQMT 运行）" if success_count == 0 else ""
+                        f"（QMT 需交易终端运行）" if success_count == 0 else ""
                     ),
                 }
                 logger.info(f"✅ {request.symbol} 基础数据同步完成 (QMT): {success_count}")

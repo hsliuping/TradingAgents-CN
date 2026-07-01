@@ -133,7 +133,7 @@
             placeholder="例如：D:\gjzq\bin.x64"
           />
           <div class="form-tip">
-            QMT 与 Tushare 不同，需填写本地 MiniQMT 安装目录或可用数据目录。
+            QMT 与 Tushare 不同，需填写本地 QMT 安装目录或可用数据目录。
           </div>
         </el-form-item>
 
@@ -232,7 +232,7 @@
             检测本地 QMT 是否已启动
           </el-button>
           <div class="form-tip">
-            将使用当前填写的 QMT 参数检测本地 MiniQMT 和 xtquant 是否可用。
+            将使用当前填写的 QMT 参数检测本地 QMT 和 xtquant 是否可用。
           </div>
         </el-form-item>
       </template>
@@ -410,12 +410,12 @@ const isQmtType = computed(() => (formData.value.type?.toLowerCase() || '') === 
 const apiKeyLabel = computed(() => (isQmtType.value ? 'QMT Token' : 'API Key'))
 const apiKeyPlaceholder = computed(() =>
   isQmtType.value
-    ? '输入 QMT Token（可选，留空则优先使用本地 MiniQMT 环境）'
+    ? '输入 QMT Token（可选，留空则优先使用本地 QMT 环境）'
     : '输入 API Key（可选，留空则使用环境变量）'
 )
 const apiKeyTip = computed(() =>
   isQmtType.value
-    ? 'QMT Token 为可选项。优先级：数据库配置 > 环境变量。未填写时优先使用本地 MiniQMT 环境。'
+    ? 'QMT Token 为可选项。优先级：数据库配置 > 环境变量。未填写时优先使用本地 QMT 环境。'
     : '优先级：数据库配置 > 环境变量。留空则使用 .env 文件中的配置'
 )
 const testButtonText = computed(() => (isQmtType.value ? '检测本地 QMT' : '测试连接'))
@@ -489,7 +489,7 @@ const handleTypeChange = () => {
   }
 
   if (selectedType === 'qmt') {
-    formData.value.provider = formData.value.provider || 'QMT / MiniQMT'
+    formData.value.provider = formData.value.provider || 'QMT'
     formData.value.endpoint = 'miniqmt://local'
     formData.value.qmt_data_dir = formData.value.qmt_data_dir || qmtDefaultConfig.data_dir
     formData.value.qmt_listen_port = formData.value.qmt_listen_port ?? qmtDefaultConfig.listen_port
@@ -592,7 +592,7 @@ const buildPayload = () => {
 
   if ((payload.type || '').toLowerCase() === 'qmt') {
     payload.endpoint = 'miniqmt://local'
-    payload.provider = payload.provider || 'QMT / MiniQMT'
+    payload.provider = payload.provider || 'QMT'
     payload.config_params = { ...(payload.config_params || {}) }
 
     Object.entries(qmtFieldMap).forEach(([fieldKey, configKey]) => {
@@ -644,10 +644,10 @@ const dataSourceTypes = [
     register_guide: 'BaoStock 是开源免费的证券数据平台，无需注册即可使用。访问官网了解更多：'
   },
   {
-    label: 'QMT / MiniQMT',
+    label: 'QMT',
     value: 'qmt',
     register_url: 'https://dict.thinktrader.net/nativeApi/code_examples.html',
-    register_guide: 'QMT 需要本地安装并启动 MiniQMT/xtquant。当前界面可直接配置安装目录、端口范围、初始化市场和自动补数等参数。'
+    register_guide: 'QMT 需要本地安装并启动 QMT/xtquant。当前界面可直接配置安装目录、端口范围、初始化市场和自动补数等参数。'
   },
 
   // 美股数据源

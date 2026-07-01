@@ -1820,15 +1820,15 @@ async def qmt_diagnosis(
         xt = _get_xtdata()
         if xt is None:
             diagnosis["checks"].append({"item": "xtquant 导入", "status": "failed", "detail": "xtquant 模块未找到"})
-            diagnosis["suggestions"].append("确认 MiniQMT 已安装，且 QMT_DATA_DIR 环境变量指向正确路径")
+            diagnosis["suggestions"].append("确认 QMT 已安装，且 QMT_DATA_DIR 环境变量指向正确路径")
             diagnosis["suggestions"].append("常见路径: D:\\gjzq\\bin.x64 或 C:\\gjzq\\bin.x64")
         else:
             diagnosis["checks"].append({"item": "xtquant 导入", "status": "ok", "detail": "xtdata 模块已加载"})
     except Exception as e:
         diagnosis["checks"].append({"item": "xtquant 导入", "status": "error", "detail": str(e)})
-        diagnosis["suggestions"].append("xtquant 导入失败，请确认 MiniQMT 客户端已安装")
+        diagnosis["suggestions"].append("xtquant 导入失败，请确认 QMT 客户端已安装")
 
-    # 3. 检查 MiniQMT 连接
+    # 3. 检查 QMT 连接
     try:
         from app.services.data_sources.qmt_adapter import QMTAdapter
         adapter = QMTAdapter()
@@ -1836,25 +1836,25 @@ async def qmt_diagnosis(
         diagnosis["available"] = available
         if available:
             diagnosis["connection"] = "connected"
-            diagnosis["checks"].append({"item": "MiniQMT 连接", "status": "ok", "detail": "MiniQMT 已连接"})
-
-            # 4. 测试数据获取
+            diagnosis["checks"].append({"item": "QMT 连接", "status": "ok", "detail": "QMT 已连接"})
+ 
+             # 4. 测试数据获取
             try:
                 items = adapter.get_kline("000001.SH", period="day", limit=5)
                 if items and len(items) > 0:
                     diagnosis["checks"].append({"item": "数据获取测试", "status": "ok", "detail": f"上证指数返回 {len(items)} 条K线"})
                 else:
                     diagnosis["checks"].append({"item": "数据获取测试", "status": "warning", "detail": "上证指数返回空数据"})
-                    diagnosis["suggestions"].append("MiniQMT 已连接但数据为空，可能需要等待数据同步")
+                    diagnosis["suggestions"].append("QMT 已连接但数据为空，可能需要等待数据同步")
             except Exception as e:
                 diagnosis["checks"].append({"item": "数据获取测试", "status": "failed", "detail": str(e)[:200]})
         else:
             diagnosis["connection"] = "disconnected"
-            diagnosis["checks"].append({"item": "MiniQMT 连接", "status": "failed", "detail": "未检测到 MiniQMT 连接"})
-            diagnosis["suggestions"].append("请确认 MiniQMT 客户端已启动并登录")
-            diagnosis["suggestions"].append("MiniQMT 需要在本机运行，不支持远程连接")
+            diagnosis["checks"].append({"item": "QMT 连接", "status": "failed", "detail": "未检测到 QMT 连接"})
+            diagnosis["suggestions"].append("请确认 QMT 客户端已启动并登录")
+            diagnosis["suggestions"].append("QMT 需要在本机运行，不支持远程连接")
     except Exception as e:
-        diagnosis["checks"].append({"item": "MiniQMT 连接", "status": "error", "detail": str(e)[:200]})
+        diagnosis["checks"].append({"item": "QMT 连接", "status": "error", "detail": str(e)[:200]})
         diagnosis["suggestions"].append(f"连接检查异常: {str(e)[:100]}")
 
     # 5. 检查 QMT_DATA_DIR 环境变量

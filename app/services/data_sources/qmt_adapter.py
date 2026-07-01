@@ -1,12 +1,12 @@
 """
-QMT (迅投 MiniQMT) 数据源适配器
+QMT (迅投 QMT 交易终端) 数据源适配器
 
-通过 xtquant.xtdata 连接本地 MiniQMT 客户端获取行情数据，并通过 xtquant.xttrader
+通过 xtquant.xtdata 连接本地 QMT 交易终端获取行情数据，并通过 xtquant.xttrader
 提供只读的持仓/资产查询能力。
 前置条件：
-    1. MiniQMT 客户端需已启动（仅 Windows 支持）
+    1. QMT 交易终端需已启动（仅 Windows 支持）
     2. 获取行情数据不需要登录券商账户
-    3. 持仓/资产查询需要券商账户已在 MiniQMT 中登录（本适配器不提供下单能力）
+    3. 持仓/资产查询需要券商账户已在 QMT 交易终端中登录（本适配器不提供下单能力）
 新闻不支持，统一使用 AKShare 数据源。
 """
 from typing import Optional, Dict, List, Any, Tuple
@@ -152,7 +152,7 @@ def _code_to_6digit(xt_code: str) -> str:
 
 
 class QMTAdapter(DataSourceAdapter):
-    """QMT 数据源适配器（需 MiniQMT 运行，新闻用 AKShare）"""
+    """QMT 数据源适配器（需 QMT 交易终端运行，新闻用 AKShare）"""
 
     _UNAVAILABLE_CACHE_UNTIL = 0.0
     _AVAILABLE_CACHE_UNTIL = 0.0
@@ -445,7 +445,7 @@ class QMTAdapter(DataSourceAdapter):
         return snapshot.get("positions_df")
 
     def _has_existing_connection(self, xt: Any) -> bool:
-        """优先复用已启动的 MiniQMT 连接，避免默认配置误触发独立初始化。"""
+        """优先复用已启动的 QMT 连接，避免默认配置误触发独立初始化。"""
         if xt is None:
             return False
         try:
@@ -507,7 +507,7 @@ class QMTAdapter(DataSourceAdapter):
         listen_port_range = self._parse_port_range(self._get_runtime_setting("QMT_LISTEN_PORT_RANGE", "58620-58650"))
 
         if self._has_existing_connection(xt):
-            logger.info("QMT: 检测到现有 MiniQMT 连接，跳过主动初始化")
+            logger.info("QMT: 检测到现有 QMT 连接，跳过主动初始化")
             return
 
         should_initialize = self._should_initialize_connection(
@@ -520,8 +520,8 @@ class QMTAdapter(DataSourceAdapter):
         )
         if not should_initialize:
             logger.info(
-                "QMT: 未检测到现有 MiniQMT 连接，且当前为默认 MiniQMT 模式，"
-                "跳过 xtdatacenter 主动初始化，请先启动并保持 MiniQMT 客户端运行"
+                "QMT: 未检测到现有 QMT 连接，且当前为默认 QMT 模式，"
+                "跳过 xtdatacenter 主动初始化，请先启动并保持 QMT 交易终端运行"
             )
             return
 
@@ -562,7 +562,7 @@ class QMTAdapter(DataSourceAdapter):
             xt.connect(port=connect_port)
             logger.info(f"QMT: 已根据配置初始化连接，端口 {connect_port}")
         except Exception as e:
-            logger.warning(f"QMT: 主动初始化连接失败，将回退到现有 MiniQMT 连接: {e}")
+            logger.warning(f"QMT: 主动初始化连接失败，将回退到现有 QMT 连接: {e}")
 
     def _prepare_sector_data(self) -> None:
         if self._sector_data_prepared:
@@ -624,7 +624,7 @@ class QMTAdapter(DataSourceAdapter):
         self._available = False
 
     def is_available(self) -> bool:
-        """检查 xtquant 是否可用且 MiniQMT 已连接"""
+        """检查 xtquant 是否可用且 QMT 已连接"""
         now = time.monotonic()
         if now < type(self)._UNAVAILABLE_CACHE_UNTIL:
             return False
@@ -655,7 +655,7 @@ class QMTAdapter(DataSourceAdapter):
                 self._mark_qmt_available()
                 return True
 
-            logger.debug("QMT 不可用: 未检测到可复用的 MiniQMT 连接")
+            logger.debug("QMT 不可用: 未检测到可复用的 QMT 连接")
             self._mark_qmt_unavailable()
             return False
         finally:
@@ -1007,7 +1007,7 @@ class QMTAdapter(DataSourceAdapter):
         """获取 K 线数据
 
         根据迅投官方文档：
-        1. 使用前需确保 MiniQMT 已有所需数据
+        1. 使用前需确保 QMT 已有所需数据
         2. 如果本地没有数据，先调用 download_history_data 下载
         3. 推荐使用 get_market_data_ex 接口
         """
@@ -1668,3 +1668,4 @@ class QMTAdapter(DataSourceAdapter):
         except Exception as e:
             logger.error(f"QMT: 历史日线成交额排名失败: {e}")
             return None
+

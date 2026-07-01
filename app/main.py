@@ -448,7 +448,7 @@ async def lifespan(app: FastAPI):
                 all_sources = await get_enabled_data_sources_async("a_shares")
                 # 排除缓存层，只保留真实 API 数据源
                 api_sources = [s for s in all_sources if s not in ("local", "mongodb", "local_file")]
-                # 启动期股票基础信息同步不使用 QMT 作为首选源，避免 MiniQMT 全市场列表拖慢启动。
+                # 启动期股票基础信息同步不使用 QMT 作为首选源，避免 QMT 全市场列表拖慢启动。
                 filtered_sources = [s for s in api_sources if s != "qmt"]
                 if api_sources:
                     logger.info(f"📊 股票基础信息同步原始数据源优先级（来自数据库）: {' > '.join(api_sources)}")

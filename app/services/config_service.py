@@ -602,7 +602,7 @@ class ConfigService:
                     rate_limit=600,
                     enabled=False,
                     priority=2,
-                    description="QMT / MiniQMT 本地数据接口",
+                    description="QMT 本地数据接口",
                     config_params={
                         "listen_port_range": "58620-58650",
                         "init_markets": "SH,SZ,BJ",
@@ -1713,7 +1713,7 @@ class ConfigService:
                         logger.warning("QMT 测试连接失败: adapter.is_available() returned False")
                         return {
                             "success": False,
-                            "message": "QMT 不可用：请确认 xtquant 已安装、MiniQMT 已启动，且本地行情连接参数正确",
+                            "message": "QMT 不可用：请确认 xtquant 已安装、QMT 已启动，且本地行情连接参数正确",
                             "response_time": time.time() - start_time,
                             "details": {
                                 "type": ds_type,
@@ -1727,14 +1727,14 @@ class ConfigService:
                         "response_time": time.time() - start_time,
                         "details": {
                             "type": ds_type,
-                            "test_result": "QMT 可用，本地 MiniQMT 连接检测通过",
+                            "test_result": "QMT 可用，本地 QMT 连接检测通过",
                         }
                     }
                 except asyncio.TimeoutError:
                     logger.error("QMT 测试连接超时: adapter.is_available() exceeded 15 seconds")
                     return {
                         "success": False,
-                        "message": "QMT 测试超时：本地连接检测超过 15 秒，请检查 MiniQMT 当前状态后重试",
+                        "message": "QMT 测试超时：本地连接检测超过 15 秒，请检查 QMT 当前状态后重试",
                         "response_time": time.time() - start_time,
                         "details": {
                             "type": ds_type,
@@ -1744,7 +1744,7 @@ class ConfigService:
                 except ImportError:
                     return {
                         "success": False,
-                        "message": "xtquant 库未安装，请先安装并确认运行环境支持 MiniQMT",
+                        "message": "xtquant 库未安装，请先安装并确认运行环境支持 QMT",
                         "response_time": time.time() - start_time,
                         "details": None
                     }

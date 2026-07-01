@@ -366,7 +366,7 @@ class UnifiedConfigManager:
                     endpoint="miniqmt://local",
                     enabled=qmt_enabled,
                     priority=2,
-                    description="QMT / MiniQMT 本地数据接口",
+                    description="QMT 本地数据接口",
                     config_params=qmt_config_params,
                 )
                 data_sources.append(qmt_config)
@@ -471,7 +471,7 @@ class UnifiedConfigManager:
                     endpoint="miniqmt://local",
                     enabled=qmt_enabled,
                     priority=2,
-                    description="QMT / MiniQMT 本地数据接口",
+                    description="QMT 本地数据接口",
                     config_params=qmt_config_params,
                 )
                 data_sources.append(qmt_config)

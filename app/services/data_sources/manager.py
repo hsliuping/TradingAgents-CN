@@ -32,7 +32,7 @@ class DataSourceManager:
             TushareAdapter(),
             AKShareAdapter(),
             BaoStockAdapter(),
-            QMTAdapter(),        # 迅投 QMT（需 MiniQMT 运行，新闻用 AKShare）
+            QMTAdapter(),        # 迅投 QMT（需 QMT 运行，新闻用 AKShare）
         ]
 
         # 使用统一的数据源优先级模块加载配置
