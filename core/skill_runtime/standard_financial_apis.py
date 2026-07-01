@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .data_access import (
     _get_db,
     get_industry_peer_basic_info,
+    get_latest_stock_price,
     get_market_quotes,
     get_stock_basic_info,
     get_stock_daily_quotes,
@@ -922,13 +923,30 @@ def get_current_valuation_snapshot(symbol: str) -> Dict[str, Any]:
     normalized_symbol = _normalize_symbol(symbol)
     basic = get_stock_basic_info(normalized_symbol) or {}
     quote = get_market_quotes(normalized_symbol) or {}
+    current_price = _pick_number(quote, "close", "price", "last_price") or _pick_number(basic, "close", "current_price")
+
+    # 股息率统一使用 shareholder_return_metrics 的可追溯口径：
+    # 已实施现金分红 / 同一个 current_price。避免本工具使用 daily_basic.dv_ratio，
+    # 而 dividend_valuation_context 使用分红明细重新计算，造成 4.36% vs 4.45% 这类差异。
+    raw_dividend_yield = _pick_number(basic, "dividend_yield", "dv_ttm")
+    dividend_yield = raw_dividend_yield
+    dividend_yield_source = "basic_info.daily_basic"
+    try:
+        shareholder = get_shareholder_return_metrics(normalized_symbol, years=5)
+        canonical_pct = _pick_number(shareholder.get("metrics") or {}, "latest_dividend_yield_pct")
+        if canonical_pct is not None:
+            dividend_yield = canonical_pct
+            dividend_yield_source = "shareholder_return_metrics.implemented_dividend/current_price"
+    except Exception:
+        pass
+
     return {
         "status": "success" if basic or quote else "no_data",
         "symbol": normalized_symbol,
         "name": basic.get("name") or quote.get("name"),
         "industry": basic.get("industry"),
         "trade_date": quote.get("trade_date") or basic.get("trade_date"),
-        "current_price": _pick_number(quote, "close", "price", "last_price") or _pick_number(basic, "close", "current_price"),
+        "current_price": current_price,
         "metrics": {
             "pe": _pick_number(basic, "pe", "pe_ttm"),
             "pe_ttm": _pick_number(basic, "pe_ttm", "pe"),
@@ -937,8 +955,14 @@ def get_current_valuation_snapshot(symbol: str) -> Dict[str, Any]:
             "ps": _pick_number(basic, "ps", "ps_ttm"),
             "ps_ttm": _pick_number(basic, "ps_ttm", "ps"),
             "peg": _pick_number(basic, "peg"),
-            "dividend_yield": _pick_number(basic, "dividend_yield", "dv_ttm"),
+            "dividend_yield": dividend_yield,
             "total_mv": _pick_number(basic, "total_mv", "market_cap", "market_value"),
+        },
+        "metric_sources": {
+            "dividend_yield": dividend_yield_source,
+        },
+        "raw_metrics": {
+            "basic_info_dividend_yield": raw_dividend_yield,
         },
         "data_source": basic.get("source") or basic.get("data_source") or quote.get("source") or quote.get("data_source"),
         "warnings": [] if basic else ["未在 stock_basic_info 中找到估值快照。"],
@@ -1739,15 +1763,41 @@ def get_shareholder_return_metrics(symbol: str, years: int = 5) -> Dict[str, Any
     if not rows:
         rows = _load_tushare_dividend_rows(normalized_symbol, max(20, int(years or 5) * 4))
         source = "tushare" if rows else None
-    implemented = [row for row in rows if str(row.get("div_proc") or row.get("status") or "").strip() in {"实施", "implemented", "实施分配"} or row.get("cash_div_tax") is not None or row.get("cash_div") is not None]
+    # Tushare 分红表对同一次分红事件返回多个阶段（预案/股东大会通过/实施），
+    # 每条都带 cash_div_tax。若不过滤，会把同一次分红的多个阶段重复累加，
+    # 导致每股分红和股息率被放大数倍（如茅台 2025 年被算成 183.94 元，实际约 52 元）。
+    # 因此只统计"实施"阶段的记录，且用 cash_div（实施到账金额）优先。
+    IMPLEMENTED_STATUS = {"实施", "implemented", "实施分配"}
+    implemented = [
+        row for row in rows
+        if str(row.get("div_proc") or row.get("status") or "").strip() in IMPLEMENTED_STATUS
+    ]
+    # 兜底：若数据源没有 div_proc 阶段标记（如部分本地表），退回到原有宽松口径，
+    # 但按 (end_date, ann_date) 去重，避免重复累加。
+    if not implemented:
+        seen_keys = set()
+        for row in rows:
+            cash = _pick_number(row, "cash_div", "cash_div_tax", "dividend_per_share")
+            if cash is None or cash <= 0:
+                continue
+            key = (str(row.get("end_date") or ""), str(row.get("ann_date") or ""))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            implemented.append(row)
     implemented.sort(key=lambda item: str(item.get("end_date") or item.get("ann_date") or ""), reverse=True)
     implemented = implemented[:max(1, min(int(years or 5) * 3, 50))]
     annual_cash: Dict[int, float] = {}
     records = []
+    seen_event_keys = set()
     for row in implemented:
         year = _period_year(row.get("end_date") or row.get("ann_date"))
-        cash = _pick_number(row, "cash_div_tax", "cash_div", "dividend_per_share")
-        if year and cash is not None:
+        # 实施记录优先用 cash_div（实际到账），回退 cash_div_tax
+        cash = _pick_number(row, "cash_div", "cash_div_tax", "dividend_per_share")
+        # 同一分红事件（end_date + ann_date）只计一次，防止重复累加
+        event_key = (str(row.get("end_date") or ""), str(row.get("ann_date") or ""))
+        if year and cash is not None and cash > 0 and event_key not in seen_event_keys:
+            seen_event_keys.add(event_key)
             annual_cash[year] = annual_cash.get(year, 0.0) + cash
         records.append({
             "end_date": _normalize_date(row.get("end_date")),
@@ -1757,8 +1807,10 @@ def get_shareholder_return_metrics(symbol: str, years: int = 5) -> Dict[str, Any
             "cash_div": _pick_number(row, "cash_div"),
             "div_proc": row.get("div_proc") or row.get("status"),
         })
-    quote = get_current_valuation_snapshot(normalized_symbol)
-    current_price = quote.get("current_price")
+    current_price = get_latest_stock_price(normalized_symbol)
+    if current_price is None or current_price <= 0:
+        basic = get_stock_basic_info(normalized_symbol) or {}
+        current_price = _pick_number(basic, "close", "current_price")
     latest_year = max(annual_cash.keys()) if annual_cash else None
     latest_cash = annual_cash.get(latest_year) if latest_year else None
     dividend_yield = _safe_div(latest_cash, current_price)

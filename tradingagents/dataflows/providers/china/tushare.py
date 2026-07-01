@@ -585,6 +585,51 @@ class TushareProvider(BaseStockDataProvider):
         except Exception as e:
             self.logger.error(f"❌ 获取每日基础数据失败 trade_date={trade_date}: {e}")
             return None
+
+    async def get_valuation_history(
+        self,
+        code: str,
+        start_date: str,
+        end_date: str,
+    ) -> Dict[str, Any]:
+        """获取股票历史估值序列（PE_TTM、PB_MRQ、PS_TTM、PCF_TTM）。
+
+        使用 Tushare daily_basic 的日期范围查询，一次调用获取全量数据。
+        返回格式与 Baostock get_valuation_history 一致。
+        """
+        if not self.is_available():
+            return {"source": "tushare", "data": []}
+
+        try:
+            ts_code = self._normalize_ts_code(code)
+            start_str = start_date.replace('-', '')
+            end_str = end_date.replace('-', '')
+            df = await asyncio.to_thread(
+                self.api.daily_basic,
+                ts_code=ts_code,
+                start_date=start_str,
+                end_date=end_str,
+                fields='ts_code,trade_date,close,pe_ttm,pb,ps_ttm,pcf_ncf_ttm',
+            )
+            if df is None or df.empty:
+                self.logger.warning(f"⚠️ Tushare 估值历史为空: {code} {start_date}~{end_date}")
+                return {"source": "tushare", "data": []}
+
+            records: List[Dict[str, Any]] = []
+            for _, row in df.iterrows():
+                records.append({
+                    "date": str(row.get("trade_date", "")),
+                    "close": float(row["close"]) if pd.notna(row.get("close")) else None,
+                    "pe_ttm": float(row["pe_ttm"]) if pd.notna(row.get("pe_ttm")) else None,
+                    "pb_mrq": float(row["pb"]) if pd.notna(row.get("pb")) else None,
+                    "ps_ttm": float(row["ps_ttm"]) if pd.notna(row.get("ps_ttm")) else None,
+                    "pcf_ttm": float(row["pcf_ncf_ttm"]) if pd.notna(row.get("pcf_ncf_ttm")) else None,
+                })
+            self.logger.info(f"✅ Tushare 估值历史: {code} {start_date}~{end_date} → {len(records)}条")
+            return {"source": "tushare", "data": records}
+        except Exception as e:
+            self.logger.error(f"❌ Tushare 估值历史失败 {code}: {e}")
+            return {"source": "tushare", "data": []}
     
     async def find_latest_trade_date(self) -> Optional[str]:
         """查找最新交易日期"""

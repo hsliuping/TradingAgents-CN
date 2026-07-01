@@ -1126,17 +1126,30 @@ def get_value_factor_bundle(symbol: str) -> Dict[str, Any]:
 
     pb_mrq = _to_float(_pick_first(basic_info.get("pb_mrq"), _estimate_pb_mrq(context)))
 
+    raw_dividend_yield = _to_float(_pick_first(
+        basic_info.get("dividend_yield"),
+        _get_nested(context["latest_financial"], "financial_indicators", "dividend_yield"),
+        context["latest_financial"].get("dividend_yield"),
+    ))
+    dividend_yield = raw_dividend_yield
+    try:
+        # 与 get_current_valuation_snapshot_tool / get_dividend_valuation_context 对齐：
+        # 使用已实施分红 / 当前价格的可追溯口径，避免同一报告里股息率出现 0.09pct 左右差异。
+        from core.skill_runtime.standard_financial_apis import get_shareholder_return_metrics
+        shareholder = get_shareholder_return_metrics(context["symbol"], years=5)
+        canonical_pct = _to_float((shareholder.get("metrics") or {}).get("latest_dividend_yield_pct"))
+        if canonical_pct is not None:
+            dividend_yield = canonical_pct
+    except Exception:
+        pass
+
     factors = {
         "pe": _to_float(_pick_first(basic_info.get("pe"), market_quotes.get("pe"))),
         "pe_ttm": pe_ttm,
         "pb": _to_float(_pick_first(basic_info.get("pb"), pb_mrq)),
         "pb_mrq": pb_mrq,
         "ps_ttm": _to_float(_pick_first(basic_info.get("ps_ttm"), basic_info.get("ps"))),
-        "dividend_yield": _to_float(_pick_first(
-            basic_info.get("dividend_yield"),
-            _get_nested(context["latest_financial"], "financial_indicators", "dividend_yield"),
-            context["latest_financial"].get("dividend_yield"),
-        )),
+        "dividend_yield": dividend_yield,
         "peg": peg,
         "industry_pe_median": _to_float(industry_pe_stats.get("median")),
         "industry_pb_median": _to_float(industry_pb_stats.get("median")),
@@ -1154,6 +1167,7 @@ def get_value_factor_bundle(symbol: str) -> Dict[str, Any]:
         },
         "calculation_notes": [
             "peg 使用 pe_ttm / net_profit_yoy，增长率按同季同比百分比口径计算。",
+            "dividend_yield 使用已实施现金分红 / 当前价格口径，与股息率估值增强和当前估值快照保持一致；basic_info.daily_basic 股息率作为回退口径。",
         ],
         "missing_factors": _find_missing(
             factors,

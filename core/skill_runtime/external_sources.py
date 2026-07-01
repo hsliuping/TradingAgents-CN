@@ -50,33 +50,32 @@ def get_external_valuation_data(
     source: Optional[str] = None,
     market_category: str = "a_shares",
 ) -> Dict[str, Any]:
-    """同步获取外部历史估值数据（PE_TTM、PB_MRQ 等）。
+    """同步获取外部历史估值数据（PE_TTM、PB_MRQ、PS_TTM、PCF_TTM）。
 
-    优先使用 BaoStock（原生支持日期范围内的 PE/PB 查询），
-    降级到 Tushare daily_basic 逐日查询。
+    使用 Tushare daily_basic 日期范围查询，一次调用获取全量数据。
     """
     for source_id in _resolve_sources(source, market_category):
         try:
             if source_id == "baostock":
-                from tradingagents.dataflows.providers.china.baostock import get_baostock_provider
+                # Baostock 不稳定，降级到 Tushare
+                pass
+            elif source_id == "tushare":
+                from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
 
-                provider = get_baostock_provider()
+                provider = get_tushare_provider()
                 result = run_async_in_sync(
                     provider.get_valuation_history(symbol, start_date, end_date)
                 )
                 if result.get("data"):
                     return result
-            elif source_id == "tushare":
-                # Tushare daily_basic 需逐日查询，仅作为降级方案
-                pass
         except Exception as exc:
             logger.warning("外部估值源 %s 调用失败: %s", source_id, exc)
 
-    # 降级：只用 baostock，如果失败就返回空
+    # 降级：直接再试一次 Tushare
     try:
-        from tradingagents.dataflows.providers.china.baostock import get_baostock_provider
+        from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
 
-        provider = get_baostock_provider()
+        provider = get_tushare_provider()
         result = run_async_in_sync(
             provider.get_valuation_history(symbol, start_date, end_date)
         )
