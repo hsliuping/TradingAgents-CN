@@ -28,6 +28,9 @@ export interface EmbeddedNanobotThreadContext {
   node_id?: string
   preference_id?: string
   debug_template_id?: string
+  has_blocking_gaps?: boolean
+  evaluation_status?: string
+  intent?: Record<string, any>
 }
 
 export interface EmbeddedNanobotChatResponse {
@@ -38,6 +41,7 @@ export interface EmbeddedNanobotChatResponse {
   tools_used: string[]
   usage: Record<string, number>
   tool_events: Array<Record<string, any>>
+  thread_context?: EmbeddedNanobotThreadContext
 }
 
 export interface EmbeddedNanobotThreadItem {

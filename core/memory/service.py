@@ -345,22 +345,47 @@ class MemoryService:
         metadata_filters: Optional[Dict[str, Any]] = None,
         limit: int = 5,
         max_chars: int = 1500,
+        ranking_profile: str = "",
+        group_by_scope: bool = False,
+        per_scope_limit: int = 0,
     ) -> str:
         """
         召回并格式化为可直接注入 LLM prompt 的文本。
 
         返回空字符串表示无可用记忆（调用方无需额外判断）。
+
+        Args:
+            ranking_profile: 排序策略（如 "agent_builder"、"assistant"）。
+                目前仅接受参数以兼容调用方，未来可实现基于 profile 的排序权重。
+            group_by_scope: 是否按 scope 分组返回。
+            per_scope_limit: group_by_scope=True 时，每个 scope 的最大条目数。
         """
+        # 如果需要按 scope 分组，扩大召回数量以确保每个 scope 有足够候选
+        recall_limit = limit
+        if group_by_scope and per_scope_limit > 0:
+            scope_count = max(len(scopes or []), 1)
+            recall_limit = max(limit, per_scope_limit * scope_count)
+
         items = await self.recall(
             query,
             user_id=user_id,
             agent_id=agent_id,
             scopes=scopes,
             metadata_filters=metadata_filters,
-            limit=limit,
+            limit=recall_limit,
         )
         if not items:
             return ""
+
+        # 按 scope 分组并限制每个 scope 的条目数
+        if group_by_scope and per_scope_limit > 0:
+            scoped_buckets: Dict[str, list] = {}
+            for item in items:
+                scope_key = getattr(item, "scope", "") or "default"
+                scoped_buckets.setdefault(scope_key, []).append(item)
+            items = []
+            for scope_key in scoped_buckets:
+                items.extend(scoped_buckets[scope_key][:per_scope_limit])
 
         lines: List[str] = []
         total = 0

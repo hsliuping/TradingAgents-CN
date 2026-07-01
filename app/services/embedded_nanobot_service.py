@@ -63,7 +63,16 @@ def _normalize_thread_context(value: dict[str, Any] | None) -> dict[str, Any]:
         "object_type": normalized_object_type,
         "object_key": normalized_object_key,
     }
-    return {key: item for key, item in normalized.items() if item is not None}
+    result = {key: item for key, item in normalized.items() if item is not None}
+    # 🔍 持久化前日志
+    logger.info(
+        "[EmbeddedNanobot][Normalize] input_keys=%s output_keys=%s intent_stage=%s intent_type=%s",
+        list(raw.keys()),
+        list(result.keys()),
+        (raw.get("intent") or {}).get("stage", ""),
+        type(raw.get("intent")).__name__,
+    )
+    return result
 
 
 def _is_internal_worker_channel(channel: str | None) -> bool:
@@ -233,18 +242,34 @@ class EmbeddedNanobotService:
         }
         if clean_thread_context:
             updates["thread_context"] = clean_thread_context
+            # 🔍 MongoDB 写入前日志
+            logger.info(
+                "[EmbeddedNanobot][MongoWrite] thread_id=%s thread_context_keys=%s intent_stage=%s intent_action=%s",
+                clean_thread_id,
+                list(clean_thread_context.keys()),
+                (clean_thread_context.get("intent") or {}).get("stage", ""),
+                (clean_thread_context.get("intent") or {}).get("action", ""),
+            )
         if clean_user_content:
             updates["last_user_message"] = clean_user_content[:200]
             updates["title"] = _build_thread_title(clean_user_content)
         if clean_assistant_content:
             updates["current_summary.abstract"] = clean_assistant_content[:120]
 
-        await self._db[EMBEDDED_NANOBOT_THREAD_COLLECTION].update_one(
+        write_result = await self._db[EMBEDDED_NANOBOT_THREAD_COLLECTION].update_one(
             {"user_id": user_id, "thread_id": clean_thread_id},
             {
                 "$set": updates,
                 "$inc": {"message_count": inserted_count},
             },
+        )
+        logger.info(
+            "[EmbeddedNanobot][MongoResult] thread_id=%s matched=%d modified=%d upserted=%s intent_in_updates=%s",
+            clean_thread_id,
+            write_result.matched_count,
+            write_result.modified_count,
+            str(write_result.upserted_id) if write_result.upserted_id else "none",
+            "yes" if "thread_context" in updates and (updates.get("thread_context") or {}).get("intent") else "no",
         )
 
     async def update_thread_context(
@@ -466,11 +491,56 @@ class EmbeddedNanobotService:
         runtime_kwargs = dict(kwargs)
         thread_context = runtime_kwargs.pop("thread_context", None) or {}
 
+        # ── 如果前端没传 intent，从 MongoDB 补上（防止跨轮丢失） ──
+        if not thread_context.get("intent") and current_thread_id and user_id:
+            logger.info(
+                "[EmbeddedNanobot][ThreadContext] MongoDB回退 trigger=intent_missing thread_id=%s has_user_id=%s",
+                current_thread_id,
+                bool(user_id),
+            )
+            try:
+                db_thread = await self._db[EMBEDDED_NANOBOT_THREAD_COLLECTION].find_one(
+                    {"user_id": user_id, "thread_id": current_thread_id},
+                    {"thread_context": 1},
+                )
+                db_ctx = (db_thread or {}).get("thread_context") or {}
+                db_intent = db_ctx.get("intent")
+                logger.info(
+                    "[EmbeddedNanobot][ThreadContext] MongoDB 回退查询 thread_id=%s found=%s db_ctx_keys=%s db_intent_type=%s",
+                    current_thread_id,
+                    bool(db_thread),
+                    list(db_ctx.keys()) if db_ctx else [],
+                    type(db_intent).__name__ if db_intent is not None else "None",
+                )
+                if isinstance(db_intent, dict):
+                    thread_context["intent"] = db_intent
+                    thread_context["spec_id"] = db_ctx.get("spec_id") or thread_context.get("spec_id")
+                    thread_context["spec_name"] = db_ctx.get("spec_name") or thread_context.get("spec_name")
+                    thread_context["workshop_session_id"] = db_ctx.get("workshop_session_id") or thread_context.get("workshop_session_id")
+                    thread_context["version_id"] = db_ctx.get("version_id") or thread_context.get("version_id")
+                    thread_context["has_blocking_gaps"] = db_ctx.get("has_blocking_gaps") or thread_context.get("has_blocking_gaps")
+                    thread_context["evaluation_status"] = db_ctx.get("evaluation_status") or thread_context.get("evaluation_status")
+                    logger.info(
+                        "[EmbeddedNanobot][ThreadContext] 从 MongoDB 补回 intent stage=%s spec_id=%s",
+                        db_intent.get("stage", ""),
+                        db_ctx.get("spec_id", ""),
+                    )
+            except Exception:
+                logger.info("[EmbeddedNanobot][ThreadContext] 从 MongoDB 读取 intent 异常", exc_info=True)
+        else:
+            logger.info(
+                "[EmbeddedNanobot][ThreadContext] MongoDB回退 skip has_intent=%s has_thread_id=%s has_user_id=%s intent_stage=%s",
+                bool(thread_context.get("intent")),
+                bool(current_thread_id),
+                bool(user_id),
+                thread_context.get("intent", {}).get("stage", "-") if isinstance(thread_context.get("intent"), dict) else "-",
+            )
+
         user_token = set_current_user_id(user_id) if user_id else None
         thread_token = set_current_assistant_thread_id(current_thread_id) if current_thread_id else None
         thread_context_token = set_current_assistant_thread_context(thread_context)
         logger.info(
-            "[EmbeddedNanobot][ThreadContext] chat thread_id=%s session_key=%s channel=%s spec_id=%s version_id=%s workshop_session_id=%s spec_name=%s",
+            "[EmbeddedNanobot][ThreadContext] chat thread_id=%s session_key=%s channel=%s spec_id=%s version_id=%s workshop_session_id=%s spec_name=%s intent=%s",
             current_thread_id or kwargs.get("chat_id") or session_key,
             session_key,
             kwargs.get("channel") or "embedded",
@@ -478,6 +548,7 @@ class EmbeddedNanobotService:
             thread_context.get("version_id"),
             thread_context.get("workshop_session_id"),
             thread_context.get("spec_name"),
+            (thread_context.get("intent") or {}).get("stage", "") or "missing",
         )
         try:
             result = await runtime.handle_message(
@@ -488,17 +559,56 @@ class EmbeddedNanobotService:
                 thread_id=current_thread_id or kwargs.get("chat_id") or session_key,
                 **runtime_kwargs,
             )
+            # 🔒 Intent 持久化治理：从模块级存储读取 intent（按 thread_id 隔离，不依赖不稳定的 contextvar）
+            # 设计原则：contextvar 只做同进程内加速缓存，跨轮持久化唯一来源是模块级 dict + MongoDB。
+            effective_intent = None
+            intent_source = "none"
+            try:
+                from core.tools.context import get_latest_nanobot_intent, get_current_assistant_thread_context, _nanobot_intents_by_thread
+                module_intent = get_latest_nanobot_intent()
+                if isinstance(module_intent, dict) and module_intent.get("stage"):
+                    effective_intent = module_intent
+                    intent_source = "module_dict"
+                else:
+                    ctx_intent = get_current_assistant_thread_context().get("intent")
+                    if isinstance(ctx_intent, dict) and ctx_intent.get("stage"):
+                        effective_intent = ctx_intent
+                        intent_source = "contextvar_fallback"
+                        logger.warning(
+                            "[EmbeddedNanobot][IntentPersist] module_dict empty, using contextvar fallback "
+                            "stage=%s spec_id=%s — this is unreliable, investgate why module_dict is empty",
+                            effective_intent.get("stage", "-"),
+                            effective_intent.get("spec_id", "-"),
+                        )
+            except Exception:
+                pass
+
+            logger.info(
+                "[EmbeddedNanobot][IntentMerge] source=%s stage=%s action=%s spec_id=%s conversation_summary=%s",
+                intent_source,
+                effective_intent.get("stage", "-") if effective_intent else "-",
+                effective_intent.get("action", "-") if effective_intent else "-",
+                effective_intent.get("spec_id", "-") if effective_intent else "-",
+                "yes" if effective_intent and effective_intent.get("conversation_summary") else "no",
+            )
+            if effective_intent:
+                thread_context["intent"] = dict(effective_intent)
+            latest_thread_context = get_current_assistant_thread_context() or thread_context
+            if isinstance(thread_context.get("intent"), dict):
+                latest_thread_context["intent"] = thread_context["intent"]
             if user_id:
                 try:
-                    # 工具执行期间可能更新了 contextvar 中的 intent context，持久化时必须使用最新上下文
-                    latest_thread_context = get_current_assistant_thread_context() or thread_context
-                    if latest_thread_context != thread_context:
-                        logger.info(
-                            "[EmbeddedNanobot][IntentContext] persist updated thread_context thread_id=%s spec_id=%s intent=%s",
-                            current_thread_id or kwargs.get("chat_id") or session_key,
-                            latest_thread_context.get("spec_id"),
-                            latest_thread_context.get("intent"),
-                        )
+                    intent_dict = (latest_thread_context.get("intent") or {}) if isinstance(latest_thread_context, dict) else {}
+                    logger.info(
+                        "[EmbeddedNanobot][PersistPre] thread_id=%s spec_id=%s intent_action=%s intent_stage=%s "
+                        "pending_options=%d is_same_object=%s",
+                        current_thread_id or kwargs.get("chat_id") or session_key,
+                        latest_thread_context.get("spec_id") if isinstance(latest_thread_context, dict) else "",
+                        intent_dict.get("action", ""),
+                        intent_dict.get("stage", "") or "empty",
+                        len(intent_dict.get("pending_options") or []),
+                        str(latest_thread_context is thread_context),
+                    )
                     await self.persist_chat_turn(
                         user_id=user_id,
                         thread_id=current_thread_id or kwargs.get("chat_id") or session_key,
@@ -515,6 +625,14 @@ class EmbeddedNanobotService:
                     )
                 except Exception:
                     logger.exception("[EmbeddedNanobot] 写入数据库会话历史失败")
+            result["thread_context"] = latest_thread_context
+            logger.info(
+                "[EmbeddedNanobot][DoneEvent] thread_context_keys=%s intent_stage=%s intent_action=%s spec_id=%s",
+                list(result["thread_context"].keys()) if isinstance(result["thread_context"], dict) else [],
+                result["thread_context"].get("intent", {}).get("stage", "-") if isinstance(result["thread_context"], dict) and isinstance(result["thread_context"].get("intent"), dict) else "-",
+                result["thread_context"].get("intent", {}).get("action", "-") if isinstance(result["thread_context"], dict) and isinstance(result["thread_context"].get("intent"), dict) else "-",
+                result["thread_context"].get("spec_id", "-") if isinstance(result["thread_context"], dict) else "-",
+            )
             return result
         finally:
             thread_context_token.var.reset(thread_context_token)
@@ -522,3 +640,41 @@ class EmbeddedNanobotService:
                 thread_token.var.reset(thread_token)
             if user_token is not None:
                 user_token.var.reset(user_token)
+
+
+def _extract_pending_from_response(assistant_content: str, user_message: str) -> dict:
+    """从 LLM 回复中提取待确认的问题和选项，作为 intent.pending 的兜底。"""
+    if not assistant_content:
+        return {}
+
+    result = {}
+    # 查找问句（以 ? 或 ？结尾的行，或包含「你觉得呢」「你怎么看」等）
+    lines = assistant_content.strip().split("\n")
+    question_lines = []
+    for line in lines[-10:]:  # 只看最后 10 行
+        stripped = line.strip()
+        if stripped.endswith("?") or stripped.endswith("？"):
+            question_lines.append(stripped)
+        elif any(kw in stripped for kw in ["你觉得呢", "你怎么看", "你更倾向", "你希望", "请确认", "请回复"]):
+            question_lines.append(stripped)
+
+    if question_lines:
+        result["pending_question"] = question_lines[-1]  # 取最后一个问句
+
+    # 查找选项（A/B/C 或 选项A/选项B 模式）
+    option_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r'^[（(]?[A-C][）)]?\s*[：:]', stripped) or re.match(r'^选项\s*[A-C]', stripped):
+            option_lines.append(stripped)
+
+    if option_lines and len(option_lines) >= 2:
+        result["pending_options"] = [
+            {"index": i + 1, "id": f"option_{chr(65 + i)}", "name": line[:80]}
+            for i, line in enumerate(option_lines[:5])
+        ]
+
+    return result
+
+
+    

@@ -56,8 +56,12 @@ class ToolRegistry:
             self._tools: Dict[str, ToolMetadata] = {}
             self._functions: Dict[str, Callable] = {}  # 存储实际函数实现
             self._load_builtin_tools()
-            self._load_tool_implementations()  # 自动加载工具实现
+            # ⚠️ 先标记已初始化，再加载工具模块。
+            # 否则 load_all() 导入模块时，模块的 @register_tool 装饰器会触发
+            # ToolRegistry() → __init__ → _initialized 还是 False → 重新进入
+            # load_all() → 无界递归（RecursionError）。
             self._initialized = True
+            self._load_tool_implementations()  # 自动加载工具实现
 
     def _load_builtin_tools(self) -> None:
         """加载内置工具元数据"""

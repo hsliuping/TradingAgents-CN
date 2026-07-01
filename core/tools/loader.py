@@ -7,6 +7,7 @@
 import logging
 import importlib
 import os
+import sys
 from pathlib import Path
 from typing import List, Optional
 
@@ -162,12 +163,28 @@ class ToolLoader:
 
         module_name = str(rel_path.with_suffix("")).replace(os.sep, ".")
 
-        # 避免重复加载
+        # 避免重复加载（local tracker）
         if module_name in self._loaded_modules:
             return
 
+        # 避免与 __init__.py 的显式 import 冲突：如果模块已由其它路径加载
+        # （如 __init__.py 的 from .xxx import ...），直接复用，不再二次导入
+        if module_name in sys.modules:
+            self._loaded_modules.add(module_name)
+            return
+
         # 导入模块
-        importlib.import_module(module_name)
+        try:
+            importlib.import_module(module_name)
+        except RecursionError:
+            # 循环引用：模块可能在另一个 import 链中正在加载，先记录下来
+            logger.warning(f"模块 {module_name} 因循环引用跳过（可能已由 __init__.py 加载）")
+            if module_name not in sys.modules:
+                logger.error(f"模块 {module_name} 未加载成功，存在真实的循环依赖问题")
+            else:
+                self._loaded_modules.add(module_name)
+            return
+
         self._loaded_modules.add(module_name)
 
         logger.debug(f"加载模块: {module_name}")

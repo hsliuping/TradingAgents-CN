@@ -42,6 +42,11 @@ class CapabilityIndexService:
 
         if not force and current_fingerprint == fingerprint and collection_count > 0:
             self._cached_documents = {doc.capability_id: doc for doc in documents}
+            logger.info(
+                "[CapabilityIndex] 📦 索引已存在，指纹匹配，跳过构建"
+                "（%d 个工具 / %d 个已索引 / 后端: %s）",
+                len(documents), collection_count, self._vector_store_manager.backend,
+            )
             return CapabilityIndexSyncResult(
                 collection_name=CAPABILITY_INDEX_COLLECTION,
                 fingerprint=fingerprint,
@@ -52,9 +57,36 @@ class CapabilityIndexService:
                 sync_mode="no_change",
             )
 
+        # 检查 embedding 模型是否可用
+        config = self._embedding_manager.get_config()
+        if not config.get("has_provider"):
+            logger.warning(
+                "[CapabilityIndex] ⚠️ 未配置 embedding 模型，跳过索引构建"
+                "（%d 个工具将使用关键词匹配回退）",
+                len(documents),
+            )
+            self._cached_documents = {doc.capability_id: doc for doc in documents}
+            return CapabilityIndexSyncResult(
+                collection_name=CAPABILITY_INDEX_COLLECTION,
+                fingerprint=fingerprint,
+                total_documents=len(documents),
+                indexed_documents=0,
+                skipped_documents=len(documents),
+                vector_backend=self._vector_store_manager.backend,
+                sync_mode="skipped_no_embedding",
+            )
+
         if force or not previous_hashes:
+            logger.info(
+                "[CapabilityIndex] 🔄 开始构建索引（%d 个工具，向量维度: %d）...",
+                len(documents), self._embedding_manager.get_embedding_dimension(),
+            )
             result = self._rebuild_index(documents, fingerprint)
         else:
+            logger.info(
+                "[CapabilityIndex] 🔄 增量同步索引（%d 个工具，%d 个已有索引）...",
+                len(documents), collection_count,
+            )
             result = self._sync_index_incrementally(
                 documents=documents,
                 fingerprint=fingerprint,
@@ -65,6 +97,11 @@ class CapabilityIndexService:
 
         await self._save_state(result, document_hashes)
         self._cached_documents = {doc.capability_id: doc for doc in documents}
+        logger.info(
+            "[CapabilityIndex] ✅ 索引就绪: %d/%d 已索引，%d 跳过，模式: %s",
+            result.indexed_documents, result.total_documents,
+            result.skipped_documents, result.sync_mode,
+        )
         return result
 
     async def search_capabilities(
@@ -479,7 +516,9 @@ class CapabilityIndexService:
 
         indexed = 0
         skipped = 0
-        for document in documents:
+        total = len(documents)
+        batch_size = max(1, total // 10)  # 每 10% 输出一次进度
+        for idx, document in enumerate(documents):
             embedding, provider = self._embedding_manager.get_embedding(document.retrieval_text)
             if embedding is None:
                 skipped += 1
@@ -493,6 +532,11 @@ class CapabilityIndexService:
                 ids=[str(uuid.uuid5(uuid.NAMESPACE_DNS, document.capability_id))],
             )
             indexed += 1
+            if indexed % batch_size == 0 or idx == total - 1:
+                logger.info(
+                    "[CapabilityIndex] 构建中... %d/%d (%d 跳过)",
+                    indexed, total, skipped,
+                )
 
         return CapabilityIndexSyncResult(
             collection_name=CAPABILITY_INDEX_COLLECTION,

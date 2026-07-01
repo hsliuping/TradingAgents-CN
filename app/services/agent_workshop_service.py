@@ -971,12 +971,39 @@ class AgentWorkshopService:
 
         gap_report = session.gap_report
         if gap_report is None:
-            # 🔥 所有 spec（含 nanobot 来源）都运行真实 gap 分析，
-            #    不再用空 AgentWorkshopGapAnalysis() 跳过。
-            #    这保证了 auto-build 能真正发现 blocking gaps，
-            #    也让 FlowController 的 "analyze_gaps 已内部完成" 有事实基础。
-            gap_report = await self._build_gap_analysis(spec)
+            # 优先从 builder_contracts 恢复确认阶段已生成的 gap_report
+            builder_contracts = session.builder_contracts or {}
+            saved_gap = builder_contracts.get("gap_report")
+            if saved_gap and isinstance(saved_gap, dict) and saved_gap.get("blocking_gaps") is not None:
+                from app.models.agent_workshop import AgentWorkshopGapAnalysis
+                gap_report = AgentWorkshopGapAnalysis(**(saved_gap))
+                logger.info(
+                    "[AgentWorkshop][BuildVersion] ✅ 从 builder_contracts 恢复 gap_report session_id=%s blocking_gaps=%d",
+                    session.session_id,
+                    len(gap_report.blocking_gaps or []),
+                )
+            elif saved_gap:
+                logger.warning(
+                    "[AgentWorkshop][BuildVersion] ⚠️ builder_contracts.gap_report 存在但无 blocking_gaps session_id=%s keys=%s",
+                    session.session_id,
+                    sorted(saved_gap.keys()) if isinstance(saved_gap, dict) else type(saved_gap).__name__,
+                )
+                gap_report = await self._build_gap_analysis(spec)
+            else:
+                # 兜底：运行真实 gap 分析（确认阶段未生成 gap_report 时）
+                logger.warning(
+                    "[AgentWorkshop][BuildVersion] ⚠️ 无 gap_report（session 和 builder_contracts 均为空），"
+                    "重新运行 analyze_spec_gaps session_id=%s → 可能与确认阶段 gap 文本不一致！",
+                    session.session_id,
+                )
+                gap_report = await self._build_gap_analysis(spec)
             session.gap_report = gap_report
+        else:
+            logger.info(
+                "[AgentWorkshop][BuildVersion] ✅ session.gap_report 已存在 session_id=%s blocking_gaps=%d",
+                session.session_id,
+                len(gap_report.blocking_gaps or []),
+            )
 
         if existing_draft_version is not None:
             version_number = existing_draft_version.version
@@ -988,6 +1015,21 @@ class AgentWorkshopService:
         required_tools = self._select_required_tools(spec, gap_report)
         auto_resolved_gaps = await self._collect_auto_resolved_gaps_for_session(session.session_id)
         unresolved_blocking_gaps = self._find_unresolved_blocking_gaps(gap_report, auto_resolved_gaps)
+        acknowledged_gaps = self._get_session_acknowledged_gaps(session)
+        selected_plan_id = self._get_session_selected_plan_id(session)
+        # ── 🔍 对比日志：gaps vs acknowledged ──
+        logger.info(
+            "[AgentWorkshop][BuildVersion] 🔍 gaps_vs_acknowledged session_id=%s plan=%s "
+            "unresolved=%d acknowledged=%d",
+            session.session_id,
+            selected_plan_id,
+            len(unresolved_blocking_gaps),
+            len(acknowledged_gaps),
+        )
+        for i, g in enumerate(unresolved_blocking_gaps[:10]):
+            logger.info("[AgentWorkshop][BuildVersion]   unresolved[%d] = %s", i, g[:200])
+        for i, a in enumerate(acknowledged_gaps[:10]):
+            logger.info("[AgentWorkshop][BuildVersion]   acknowledged[%d] = %s", i, a[:200])
         allowed_unresolved_blocking_gaps = self._validate_acknowledged_blocking_gaps_for_build(
             session,
             unresolved_blocking_gaps,
@@ -1484,15 +1526,24 @@ class AgentWorkshopService:
         if not unresolved:
             return []
         selected_plan_id = self._get_session_selected_plan_id(session)
-        if selected_plan_id not in {"complete", "quick"}:
+        # direct 方案也允许通过 acknowledged_gaps 接受未补齐的 blocking gaps
+        # 语义：用户选择"直接用现有工具"，即知晓并接受缺口
+        if selected_plan_id not in {"direct", "complete", "quick"}:
             return []
         acknowledged = self._get_session_acknowledged_gaps(session)
         acknowledged_set = {item.strip() for item in acknowledged if item.strip()}
         if not acknowledged_set:
             return []
         allowed = [gap for gap in unresolved if gap in acknowledged_set]
+        # ── 🔍 逐条对比日志 ──
         if len(allowed) != len(unresolved):
-            return []
+            matched_set = set(allowed)
+            for i, g in enumerate(unresolved[:10]):
+                if g not in matched_set:
+                    logger.warning(
+                        "[AgentWorkshop][BuildVersion] ⚠️ unmatched_gap[%d] = %s | acknowledged_set = %s",
+                        i, g[:300], sorted(acknowledged_set)[:5],
+                    )
         return allowed
 
     async def _collect_auto_resolved_gaps_for_session(self, session_id: str) -> List[Dict[str, Any]]:
@@ -2003,6 +2054,11 @@ class AgentWorkshopService:
         deleted_spec = await self._db[SPEC_COLLECTION].delete_one({"spec_id": spec_id})
 
         # 🔑 清理长期记忆（mem0）中与此 Agent 相关的记录
+        # TODO: 当 agent_builder_memory_ledger 集合实现后，在此处增加：
+        #   await self._db.agent_builder_memory_ledger.update_many(
+        #       {"spec_id": spec_id, "lifecycle_status": "active"},
+        #       {"$set": {"lifecycle_status": "invalidated", "invalidated_at": datetime.utcnow(), "invalidated_reason": "agent_deleted"}}
+        #   )
         memory_deleted_count = await self._cleanup_spec_memories(
             spec_id=spec_id,
             owner_user_id=spec_doc.get("owner_user_id", ""),
@@ -2480,7 +2536,7 @@ class AgentWorkshopService:
         unresolved_metadata_gaps = self._dedupe([
             str(item or "").strip()
             for item in (
-                version.agent_metadata.get("unresolved_blocking_gaps")
+                version.agent_metadata.get("unresolved_blocking_gaps") or []
                 if isinstance(version.agent_metadata, dict)
                 else []
             )
@@ -3793,7 +3849,6 @@ class AgentWorkshopService:
             # 🔥 缺失模板时自动重建，不阻塞调试
             logger.warning(f"[AgentWorkshop][debug_version] 版本 {version_id} 缺少提示词模板，自动重建")
             try:
-                from app.services.prompt_template_service import PromptTemplateService
                 prompt_ref = await self._create_prompt_template(
                     version.version_id,
                     spec,
@@ -4579,6 +4634,135 @@ class AgentWorkshopService:
         except Exception as exc:
             logger.warning("[AgentWorkshop] CapabilityIndex 检索失败，回退注册表快照: %s", exc)
             return await self._collect_capability_snapshot_fallback()
+
+    async def _collect_capability_snapshot_multi(
+        self,
+        query_texts: List[str],
+        top_k: int = 16,
+    ) -> Dict[str, Any]:
+        """对多个查询文本分别搜索，合并去重后返回能力快照。
+
+        解决单次搜索时 "股息率" 等具体关键词被 "估值" 等泛化词稀释的问题：
+        如果 spec 同时包含 PE/PB/DCF/股息率 等多个能力需求，
+        单次搜索的 top_k 结果可能被 PE/PB/DCF 工具占满，
+        股息率工具排在 top_k 之外。
+        为每个能力需求单独搜索，可以确保每个维度都有匹配的工具。
+        """
+        if not query_texts:
+            return await self._collect_capability_snapshot("", top_k=top_k)
+
+        try:
+            capability_index = CapabilityIndexService(self._db)
+            await capability_index.ensure_index()
+
+            # 对每个 query 做搜索，合并结果
+            merged_hits = {}  # capability_id -> (hit, score)
+            for query_text in query_texts[:8]:  # 限制最多 8 次搜索
+                hits = await capability_index.search_capabilities(
+                    query=query_text or "金融分析 Agent 能力",
+                    top_k=top_k,
+                    bindable_only=False,
+                )
+                for hit in hits:
+                    cap_id = hit.capability.capability_id
+                    if cap_id not in merged_hits or hit.score > merged_hits[cap_id][1]:
+                        merged_hits[cap_id] = (hit, hit.score)
+
+            if not merged_hits:
+                return await self._collect_capability_snapshot_fallback()
+
+            # 按分数排序，取 top_k * 2 个（多查询合并后适当扩大）
+            sorted_hits = sorted(merged_hits.values(), key=lambda x: x[1], reverse=True)
+            hits = [h[0] for h in sorted_hits[:top_k * 2]]
+
+            # 复用 _collect_capability_snapshot 的分类逻辑
+            all_capabilities = await capability_index.list_capabilities()
+            data_categories = {
+                ToolCategory.MARKET.value,
+                ToolCategory.FUNDAMENTALS.value,
+                ToolCategory.NEWS.value,
+                ToolCategory.SOCIAL.value,
+                ToolCategory.CHINA.value,
+            }
+            analysis_categories = {
+                ToolCategory.TECHNICAL.value,
+                ToolCategory.SCREENING.value,
+                ToolCategory.TRADE_REVIEW.value,
+                ToolCategory.ASSISTANT_OPS.value,
+                ToolCategory.UTILITY.value,
+                ToolCategory.KNOWLEDGE.value,
+                ToolCategory.MCP.value,
+            }
+
+            builtin_data_tools: List[str] = []
+            builtin_analysis_tools: List[str] = []
+            valuation_tools: List[str] = []
+            builtin_tool_details: List[Dict[str, Any]] = []
+            valuation_tool_details: List[Dict[str, Any]] = []
+            external_data_skills: List[str] = []
+            external_analysis_skills: List[str] = []
+            valuation_skills: List[str] = []
+            external_skill_tool_ids: List[str] = []
+            external_skill_details: List[Dict[str, Any]] = []
+            valuation_skill_details: List[Dict[str, Any]] = []
+
+            for hit in hits:
+                capability = hit.capability
+                detail = self._build_capability_detail_from_document(capability)
+                label = str(detail.get("label") or "")
+                category = str(capability.category or "")
+
+                if capability.registry_tool_id and capability.registry_tool_id not in external_skill_tool_ids:
+                    external_skill_tool_ids.append(capability.registry_tool_id)
+
+                if capability.source_type in {"builtin_tool", "mcp_tool"}:
+                    if category in data_categories and label not in builtin_data_tools:
+                        builtin_data_tools.append(label)
+                    if category in analysis_categories and label not in builtin_analysis_tools:
+                        builtin_analysis_tools.append(label)
+                    builtin_tool_details.append(detail)
+                else:
+                    if category in data_categories and label not in external_data_skills:
+                        external_data_skills.append(label)
+                    elif label not in external_analysis_skills:
+                        external_analysis_skills.append(label)
+                    external_skill_details.append(detail)
+
+                if self._looks_like_valuation_capability(str(detail.get("searchable") or "")):
+                    if capability.bindable:
+                        if label not in valuation_tools:
+                            valuation_tools.append(label)
+                            valuation_tool_details.append(detail)
+                    else:
+                        if label not in valuation_skills:
+                            valuation_skills.append(label)
+                            valuation_skill_details.append(detail)
+
+            return {
+                "builtin_data_tools": builtin_data_tools,
+                "builtin_analysis_tools": builtin_analysis_tools,
+                "external_data_skills": external_data_skills,
+                "external_analysis_skills": external_analysis_skills,
+                "builtin_tool_details": builtin_tool_details,
+                "external_skill_details": external_skill_details,
+                "external_skill_tool_ids": external_skill_tool_ids,
+                "valuation_tools": valuation_tools,
+                "valuation_skills": valuation_skills,
+                "valuation_tool_details": valuation_tool_details,
+                "valuation_skill_details": valuation_skill_details,
+                "totals": {
+                    "builtin_tools": len([doc for doc in all_capabilities if doc.bindable]),
+                    "external_skills": len([doc for doc in all_capabilities if doc.source_type == "external_skill"]),
+                    "indexed_capabilities": len(all_capabilities),
+                },
+                "queries_used": len(query_texts),
+            }
+        except Exception as exc:
+            logger.warning("[CapabilitySnapshot][Multi] 多查询搜索失败，回退到单查询: %s", exc, exc_info=True)
+            return await self._collect_capability_snapshot(
+                query_texts[0] if query_texts else "",
+                top_k=top_k,
+            )
 
     async def _collect_capability_snapshot_fallback(self) -> Dict[str, Any]:
         registry = get_tool_registry()
@@ -6951,9 +7135,37 @@ class AgentWorkshopService:
         """基于 AgentSpec 做纯缺口分析，不创建/依赖 Workshop session。"""
         capability_snapshot = capability_inventory
         if capability_snapshot is None:
-            capability_snapshot = await self._collect_capability_snapshot(
-                self._build_valuation_requirement_text(spec),
+            # 为每个 capability_requirement 单独搜索，再合并去重。
+            # 避免用整个 spec 拼成的长文本做单次搜索时，
+            # "股息率" 等具体关键词被 "估值" 等泛化词稀释，
+            # 导致 get_dividend_valuation_context 等工具排在 top_k 之外。
+            query_texts: List[str] = [self._build_valuation_requirement_text(spec)]
+            for req in (spec.capability_requirements or []):
+                parts = [req.capability_name, req.description, req.delivery_requirement]
+                q = " ".join(p for p in parts if p).strip()
+                if q and q not in query_texts:
+                    query_texts.append(q)
+            capability_snapshot = await self._collect_capability_snapshot_multi(
+                query_texts,
                 top_k=16,
+            )
+        # ── 🔍 追踪日志：gap 分析输入的关键质量 ──
+        _snap_keys = sorted(capability_snapshot.keys()) if isinstance(capability_snapshot, dict) else []
+        _builtin_count = len(capability_snapshot.get("builtin_tool_details") or [])
+        _external_count = len(capability_snapshot.get("external_skill_details") or [])
+        logger.info(
+            "[AnalyzeGaps] spec_id=%s snapshot_keys=%s builtin_tools=%d external_skills=%d source=%s",
+            getattr(spec, "spec_id", "") or "temp",
+            _snap_keys,
+            _builtin_count,
+            _external_count,
+            "self_collected" if capability_snapshot is not capability_inventory else "caller_provided",
+        )
+        if not _builtin_count:
+            logger.warning(
+                "[AnalyzeGaps] ⚠️ builtin_tool_details 为空！LLM 将看不到任何已知工具，"
+                "所有需求都会被标记为 blocking gap。snapshot_keys=%s",
+                _snap_keys,
             )
         try:
             gap_report = await self._build_gap_analysis_with_llm(spec, capability_snapshot)
@@ -8727,7 +8939,8 @@ class AgentWorkshopService:
                 publish_warnings.append("建议补齐少量缺失的核心输出字段后再作为发布候选。")
 
         if explain_breakdown.get("missing") and rule_scores.get("runtime_explainability", 0.0) < 0.7:
-            content_warnings.append("运行结果对关键假设、方法依据或失效条件说明不足。")
+            missing_items = explain_breakdown.get("missing", [])
+            content_warnings.append(f"运行结果缺少以下关键解释要素：{'、'.join(missing_items)}。" if missing_items else "运行结果对关键假设、方法依据或失效条件说明不足。")
 
         publish_blockers.extend(confirmed_issue_groups.get("constraint_control", []))
         publish_blockers.extend(confirmed_issue_groups.get("numeric_traceability", []))
@@ -8991,7 +9204,9 @@ class AgentWorkshopService:
             return findings, invalid_reasons
 
         if candidate.category == "reasoning_quality":
-            append_finding("关键解释要素不足", "运行结果对关键假设、方法依据或失效条件说明不足。")
+            missing_items = explain_breakdown.get("missing", [])
+            issue_msg = f"运行结果缺少以下关键解释要素：{'、'.join(missing_items)}。" if missing_items else "运行结果对关键假设、方法依据或失效条件说明不足。"
+            append_finding("关键解释要素不足", issue_msg)
             return findings, invalid_reasons
 
         if candidate.category == "constraint_control":
@@ -9696,7 +9911,8 @@ class AgentWorkshopService:
             else:
                 warning_issues.append("运行结果对部分核心输出字段覆盖不足。")
         if scores["runtime_explainability"] < 0.7:
-            warning_issues.append("运行结果对关键假设、方法依据或失效条件说明不足。")
+            explain_missing = self._dedupe([*explain_evidence["missing"], *method_evidence["missing"]])
+            warning_issues.append(f"运行结果缺少以下关键解释要素：{'、'.join(explain_missing)}。" if explain_missing else "运行结果对关键假设、方法依据或失效条件说明不足。")
         if scores["runtime_constraint_control"] < 0.8:
             issues.append("运行结果出现了越界表达，和规格中的非目标不一致。")
         if valuation_guardrail["violation"]:

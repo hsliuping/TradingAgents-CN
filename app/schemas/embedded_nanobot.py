@@ -45,6 +45,7 @@ class EmbeddedNanobotChatResponse(BaseModel):
     tools_used: list[str] = Field(default_factory=list)
     usage: dict[str, int] = Field(default_factory=dict)
     tool_events: list[dict[str, Any]] = Field(default_factory=list)
+    thread_context: dict[str, Any] | None = Field(default=None, description="本轮对话后持久化的线程上下文")
 
 
 class EmbeddedNanobotThreadItem(BaseModel):

@@ -6,7 +6,15 @@
 """
 
 import contextvars
+import logging
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
+
+# 🔒 按 thread_id 隔离的 intent 存储（替代不稳定的 contextvar）
+# contextvar 在 LangChain/LLM provider 的工具调用链中会被静默回退，
+# 因此用模块级 dict + thread_id 索引来可靠传递 intent 变化。
+_nanobot_intents_by_thread: Dict[str, Dict[str, Any]] = {}
 
 # 当前用户 ID（在 IntelligentAssistantService.chat 入口设置）
 _current_user_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
@@ -141,4 +149,44 @@ def reset_current_analysis_data_source(token: contextvars.Token) -> None:
 def get_current_analysis_data_source() -> Optional[str]:
     """获取当前分析数据源。"""
     return _current_analysis_data_source.get()
+
+
+# ── 独立于 contextvar 的 Nanobot Intent 存储 ──
+# contextvar 在异步工具调用中可能被 Task 边界隔离/覆盖，因此使用模块级 dict 作为兜底。
+# 写入路径：update_intent_context_in_thread() 同时写到这里
+# 读取路径：service.chat() persist 前读取
+#
+# 🔒 治理规则（来自 nanobot-memory-governance-design.md）：
+# - contextvar 只作为同进程内的加速缓存，不可作为跨轮唯一来源。
+# - 模块级 dict 按 thread_id 隔离，作为持久化前的可靠来源。
+# - 每轮对话结束时，embedded_nanobot_service.py 从此处读取 intent 并合并到 thread_context。
+# - 禁止在工具调用链内部通过 contextvar 隐式写入后不复写回模块级 dict。
+
+def set_latest_nanobot_intent(intent_dict: Dict[str, Any]) -> None:
+    """存储最新的 Nanobot intent（按 thread_id 隔离）。
+
+    每次工具调用完成后，应将当前 intent 写入此处。
+    这是跨轮持久化的唯一可靠来源。
+    """
+    thread_id = _current_assistant_thread_id.get() or "unknown"
+    _nanobot_intents_by_thread[thread_id] = dict(intent_dict)
+    logger.debug(
+        "[IntentStore] set_latest_nanobot_intent thread_id=%s stage=%s action=%s spec_id=%s",
+        thread_id,
+        intent_dict.get("stage", "-"),
+        intent_dict.get("action", "-"),
+        intent_dict.get("spec_id", "-"),
+    )
+
+
+def get_latest_nanobot_intent() -> Dict[str, Any]:
+    """读取最新 Nanobot intent（按 thread_id 隔离）。"""
+    thread_id = _current_assistant_thread_id.get() or "unknown"
+    return _nanobot_intents_by_thread.get(thread_id, {})
+
+
+def clear_latest_nanobot_intent() -> None:
+    """清除当前线程的 Nanobot intent。"""
+    thread_id = _current_assistant_thread_id.get() or "unknown"
+    _nanobot_intents_by_thread.pop(thread_id, None)
 

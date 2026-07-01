@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -17,6 +18,26 @@ from app.services.embedded_nanobot_service import EmbeddedNanobotService
 router = APIRouter(prefix="/api/embedded-nanobot", tags=["embedded-nanobot"])
 logger = logging.getLogger(__name__)
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+NANOBOT_EVENT_LOG_DIR = WORKSPACE_ROOT / "logs" / "embedded_nanobot_events"
+
+
+def _append_nanobot_event_log(*, chat_id: str, session_key: str, event: str, payload: dict) -> None:
+    """将前端流式事件追加写入 ndjson，方便刷新后排查。"""
+    try:
+        NANOBOT_EVENT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        safe_chat_id = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(chat_id or session_key or "default"))[:120]
+        log_path = NANOBOT_EVENT_LOG_DIR / f"{safe_chat_id}_{datetime.now().strftime('%Y%m%d')}.ndjson"
+        record = {
+            "ts": datetime.now().isoformat(timespec="milliseconds"),
+            "event": event,
+            "chat_id": chat_id,
+            "session_key": session_key,
+            "payload": payload,
+        }
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    except Exception as exc:
+        logger.debug("[EmbeddedNanobotEventLog] write skipped: %s", exc)
 
 
 def _sse_event(event: str, data: dict) -> str:
@@ -152,6 +173,7 @@ async def embedded_nanobot_chat(
         tools_used=result.get("tools_used", []),
         usage=result.get("usage", {}),
         tool_events=result.get("tool_events", []),
+        thread_context=result.get("thread_context"),
     )
 
 
@@ -175,7 +197,14 @@ async def embedded_nanobot_chat_stream(
         queue: asyncio.Queue[tuple[str, dict] | None] = asyncio.Queue()
 
         async def emit(event: str, payload: dict) -> None:
-            await queue.put((event, payload))
+            payload_with_meta = {**payload, "chat_id": chat_id}
+            _append_nanobot_event_log(
+                chat_id=chat_id,
+                session_key=session_key,
+                event=event,
+                payload=payload_with_meta,
+            )
+            await queue.put((event, payload_with_meta))
 
         await emit("started", {"message": "助手已开始处理请求", "session_key": session_key})
 
@@ -218,6 +247,7 @@ async def embedded_nanobot_chat_stream(
                     "tools_used": result.get("tools_used", []),
                     "usage": result.get("usage", {}),
                     "tool_events": result.get("tool_events", []),
+                    "thread_context": result.get("thread_context"),
                 })
             except Exception as exc:
                 logger.exception("[EmbeddedNanobot API] 流式对话失败")
