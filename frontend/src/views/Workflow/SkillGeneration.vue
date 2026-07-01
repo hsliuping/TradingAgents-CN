@@ -653,7 +653,7 @@ const getDraftMatchTagType = (draft: SessionDetail): 'success' | 'warning' | 'in
 const getDraftMatchTooltip = (draft: SessionDetail) => {
   const stockCount = draft.recommendations?.stock_collections?.length || 0
   const sourceCount = draft.recommendations?.external_sources?.length || 0
-  const clarity = String(draft.clarity_level || 'unknown')
+  const clarity = String(draft.clarity_level || '未知')
   const score = getDraftRecommendationWeight(draft)
   return `匹配度 ${score} 分：状态=${draft.status}，清晰度=${clarity}，本地推荐=${stockCount}，外部推荐=${sourceCount}`
 }
@@ -741,7 +741,7 @@ const getSkillSourceTagType = (row: ExternalSkill): 'success' | 'warning' | 'inf
 
 const getSkillUsageTooltip = (row: ExternalSkill) => {
   return (row.used_by_agents || [])
-    .map(item => `${item.agent_name || item.spec_id} v${item.version || '-'}（${item.status || 'unknown'}）`)
+    .map(item => `${item.agent_name || item.spec_id} v${item.version || '-'}（${item.status || '未知'}）`)
     .join('\n')
 }
 

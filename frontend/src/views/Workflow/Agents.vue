@@ -35,7 +35,7 @@
             <div class="agent-title">
               <h3>{{ agent.name }}</h3>
               <div class="agent-title-tags">
-                <el-tag size="small" :type="getLicenseType(agent.license_tier) || undefined">{{ agent.license_tier }}</el-tag>
+                <el-tag size="small" :type="getLicenseType(agent.license_tier) || undefined">{{ getLicenseLabel(agent.license_tier) }}</el-tag>
                 <el-tag v-if="agent.maintenance_status === 'unmaintained'" size="small" type="danger" effect="plain">停止维护</el-tag>
               </div>
             </div>
@@ -128,7 +128,16 @@ const getLicenseType = (tier: string) => {
     case 'basic': return 'success'
     case 'pro': return 'warning'
     case 'enterprise': return 'danger'
-    default: return ''
+    default: return 'info'
+  }
+}
+const getLicenseLabel = (tier: string) => {
+  switch (tier) {
+    case 'free': return '免费版'
+    case 'basic': return '基础版'
+    case 'pro': return '专业版'
+    case 'enterprise': return '企业版'
+    default: return tier || '未知'
   }
 }
 

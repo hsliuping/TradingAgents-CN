@@ -305,7 +305,7 @@
               <div class="kv"><span>输出字段</span><span><strong>{{ rightPanelOutputField }}</strong></span></div>
               <div class="kv"><span>工作流阶段</span><span><strong>{{ rightPanelWorkflowStage }}</strong></span></div>
               <div class="kv"><span>执行顺序</span><span><strong>{{ rightPanelExecutionOrder }}</strong></span></div>
-              <div class="kv"><span>Prompt Agent</span><span><strong>{{ rightPanelPromptAgentType }}</strong></span></div>
+              <div class="kv"><span>提示词代理</span><span><strong>{{ rightPanelPromptAgentType }}</strong></span></div>
               <div class="kv"><span>模板状态</span><span><strong>{{ rightPanelPromptStatus }}</strong></span></div>
             </div>
           </details>
@@ -354,7 +354,7 @@
                     <strong>{{ currentNanobotSessionKey ? '已连接' : '未连接' }}</strong>
                   </div>
                   <div class="status-metric-item">
-                    <span>Draft</span>
+                    <span>草稿</span>
                     <strong>{{ displaySpec ? '已同步' : '未同步' }}</strong>
                   </div>
                   <div class="status-metric-item">
@@ -437,7 +437,7 @@
                         <span><strong>{{ getVersionStatusLabel(versionDetailVersion) }}</strong></span>
                       </div>
                       <div class="kv">
-                        <span>Spec</span>
+                        <span>规格</span>
                         <span><strong>{{ versionDetailSpec?.name || versionDetailVersion.spec_id }}</strong></span>
                       </div>
                       <div class="kv">
@@ -555,7 +555,7 @@
                     </div>
                     <div class="kv">
                       <span>状态</span>
-                      <span><strong>{{ versionDetailPrompt?.status || versionDetailVersion?.prompt_template_ref?.status || 'unknown' }}</strong></span>
+                      <span><strong>{{ versionDetailPrompt?.status || versionDetailVersion?.prompt_template_ref?.status || '未知' }}</strong></span>
                     </div>
                     <div class="kv">
                       <span>Agent 类型</span>
@@ -758,6 +758,7 @@ type NanobotStudioPersistedState = {
   specId?: string
   specName?: string
   versionId?: string
+  threadContext?: EmbeddedNanobotThreadContext | null
 }
 
 marked.setOptions({ breaks: true, gfm: true })
@@ -795,6 +796,7 @@ const selectedVersionId = ref('')
 const currentSession = ref<AgentWorkshopSessionDetail | null>(null)
 const standaloneSpec = ref<AgentSpec | null>(null)
 const currentNanobotSessionKey = ref('')
+const currentNanobotThreadContext = ref<EmbeddedNanobotThreadContext | null>(null)
 const nanobotMessages = ref<AgentWorkshopMessage[]>([])
 // 按 spec_id 隔离聊天记录，切换 Agent 时自动保存/恢复
 const specMessagesMap = ref<Record<string, AgentWorkshopMessage[]>>({})
@@ -934,6 +936,7 @@ const persistState = () => {
         specId: nanobotDraftLink.value?.specId || displaySpec.value?.spec_id,
         specName: nanobotDraftLink.value?.specName || displaySpec.value?.name,
         versionId: selectedVersionId.value || latestVersion.value?.version_id,
+        threadContext: currentNanobotThreadContext.value,
       }),
     )
   } catch {}
@@ -981,7 +984,11 @@ const buildThreadContext = (): EmbeddedNanobotThreadContext => {
   const debugTemplateId = String(
     latestVersionPrompt.value?.template_id || latestVersion.value?.prompt_template_ref?.template_id || ''
   ).trim() || undefined
+  // 从上一轮 persisted context 继承工具写入的字段（intent, has_blocking_gaps, evaluation_status 等）
+  const persisted = currentNanobotThreadContext.value || {}
   return {
+    ...persisted as EmbeddedNanobotThreadContext,
+    // UI 当前状态始终覆盖 persisted 值（spec_id / version_id 等）
     spec_id: String(displaySpec.value?.spec_id || '').trim() || undefined,
     spec_name: String(displaySpec.value?.name || nanobotDraftLink.value?.specName || '').trim() || undefined,
     workshop_session_id: String(currentSession.value?.session_id || nanobotDraftLink.value?.sessionId || '').trim() || undefined,
@@ -1256,8 +1263,8 @@ const gapDeadLetterSummaryText = computed(() => {
 })
 const latestVersionRuntimeContract = computed(() => latestVersion.value?.evaluation_policy?.runtime_contract || {})
 const getLatestVersionMetadataValue = (key: string) => latestVersion.value?.agent_metadata?.[key] ?? latestVersionRuntimeContract.value?.[key]
-const rightPanelOutputField = computed(() => String(getLatestVersionMetadataValue('output_field') || 'analysis').trim() || 'analysis')
-const rightPanelWorkflowStage = computed(() => String(getLatestVersionMetadataValue('workflow_stage') || 'research').trim() || 'research')
+const rightPanelOutputField = computed(() => String(getLatestVersionMetadataValue('output_field') || '分析').trim() || '分析')
+const rightPanelWorkflowStage = computed(() => String(getLatestVersionMetadataValue('workflow_stage') || '研究').trim() || '研究')
 const rightPanelWorkflowStageText = computed(() => {
   const stage = rightPanelWorkflowStage.value
   const labels: Record<string, string> = {
@@ -1295,7 +1302,7 @@ const canPublishLatestVersion = computed(() => Boolean(latestVersion.value && la
 
 const latestVersionSpecFallback = computed<AgentSpec>(() => displaySpec.value || {
   spec_id: latestVersion.value?.spec_id || '',
-  name: latestVersion.value?.agent_metadata?.name || latestVersion.value?.version_id || 'Agent',
+  name: latestVersion.value?.agent_metadata?.name || latestVersion.value?.version_id || '智能体',
   primary_goal: latestVersion.value?.agent_metadata?.description || '',
   status: 'draft',
 } as AgentSpec)
@@ -2222,6 +2229,10 @@ const handleSendMessage = async () => {
           onDone(data) {
             stopTestProgressPolling()
             currentNanobotSessionKey.value = data.session_key || sessionKey
+            // 🔑 接收后端持久化后的完整 thread_context（含 intent），确保下次请求携带正确上下文
+            if (data.thread_context) {
+              currentNanobotThreadContext.value = data.thread_context
+            }
             if (!nextMessages[assistantIndex].content.trim()) {
               nextMessages[assistantIndex].content = data.content || '工坊助手已处理当前需求。'
             }
@@ -2419,6 +2430,7 @@ const clearStudioState = (preserveStorage = false) => {
   currentSession.value = null
   standaloneSpec.value = null
   currentNanobotSessionKey.value = ''
+  currentNanobotThreadContext.value = null
   nanobotMessages.value = []
   specMessagesMap.value = {}
   specSessionKeyMap.value = {}
@@ -2458,6 +2470,10 @@ const restoreState = (sessionKey?: string) => {
   const restoredVersionId = String(persisted.versionId || '').trim()
   if (restoredVersionId) {
     selectedVersionId.value = restoredVersionId
+  }
+
+  if (persisted.threadContext) {
+    currentNanobotThreadContext.value = persisted.threadContext as EmbeddedNanobotThreadContext
   }
 
   return Boolean(restoredSessionKey || restoredSpecId)

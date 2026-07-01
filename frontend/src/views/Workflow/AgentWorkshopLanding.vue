@@ -2,7 +2,7 @@
   <div class="agent-workshop-landing-page">
     <section class="hero-section">
       <div class="hero-copy">
-        <div class="hero-kicker">Agent Workshop</div>
+        <div class="hero-kicker">Agent 工坊</div>
         <h1>Agent 工坊</h1>
         <p class="hero-description">
           这里先不直接堆列表，而是先给你默认主路径。优先从助手模式进入，用对话快速澄清需求、起草 Agent 并推进迭代；需要更强的结构化控制时，再进入标准工作页。
@@ -24,7 +24,7 @@
         <el-card shadow="never" class="entry-card primary-entry-card">
           <div class="entry-card-head">
             <el-tag type="success" effect="dark" size="small">推荐主路径</el-tag>
-            <span class="entry-card-kicker">Assistant Mode</span>
+            <span class="entry-card-kicker">助手模式</span>
           </div>
           <div class="entry-card-title">助手模式</div>
           <p class="entry-card-description">
@@ -43,7 +43,7 @@
         <el-card shadow="never" class="entry-card standard-entry-card">
           <div class="entry-card-head">
             <el-tag type="primary" effect="plain" size="small">结构化流程</el-tag>
-            <span class="entry-card-kicker">Standard Flow</span>
+            <span class="entry-card-kicker">标准流程</span>
           </div>
           <div class="entry-card-title">标准工作页</div>
           <p class="entry-card-description">

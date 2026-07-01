@@ -411,7 +411,7 @@
                       </div>
                       <div class="note-item compact-note">{{ latestVersion.last_evaluation_summary.project_memory_binding.summary }}</div>
                       <div class="project-memory-summary-meta subtle" v-if="latestVersion.last_evaluation_summary.worker_execution_mode || latestVersion.last_evaluation_summary.evaluation_status">
-                        <span v-if="latestVersion.last_evaluation_summary.worker_execution_mode">Worker：{{ latestVersion.last_evaluation_summary.worker_execution_mode }}</span>
+                        <span v-if="latestVersion.last_evaluation_summary.worker_execution_mode">执行器：{{ latestVersion.last_evaluation_summary.worker_execution_mode }}</span>
                         <span v-if="latestVersion.last_evaluation_summary.evaluation_status">评估状态：{{ latestVersion.last_evaluation_summary.evaluation_status }}</span>
                       </div>
                     </div>
@@ -433,8 +433,8 @@
                   <div class="field-label">默认测试计划</div>
                   <div class="note-item" v-if="latestExecutionPlan.rationale">{{ latestExecutionPlan.rationale }}</div>
                   <div class="runtime-meta-row">
-                    <span>模式：{{ latestExecutionPlan.mode || 'tool-driven' }}</span>
-                    <span>状态：{{ latestExecutionPlan.validation_status || 'not-run' }}</span>
+                    <span>模式：{{ latestExecutionPlan.mode || '工具驱动' }}</span>
+                    <span>状态：{{ latestExecutionPlan.validation_status || '未运行' }}</span>
                   </div>
                   <div class="field-block" v-if="executionPlanSampleInputText" style="margin-top: 12px;">
                     <div class="field-label">默认调试输入</div>
@@ -531,7 +531,7 @@
                       </div>
                       <div class="note-item compact-note">{{ latestEvaluationSummary.project_memory_binding.summary }}</div>
                       <div class="project-memory-summary-meta subtle">
-                        <span v-if="latestEvaluationSummary.worker_execution_mode">Worker：{{ latestEvaluationSummary.worker_execution_mode }}</span>
+                        <span v-if="latestEvaluationSummary.worker_execution_mode">执行器：{{ latestEvaluationSummary.worker_execution_mode }}</span>
                         <span v-if="latestEvaluationSummary.review_mode">模式：{{ latestEvaluationSummary.review_mode }}</span>
                         <span v-if="latestEvaluationSummary.overall_score !== null && typeof latestEvaluationSummary.overall_score !== 'undefined'">综合分：{{ latestEvaluationSummary.overall_score }}</span>
                       </div>
@@ -771,7 +771,7 @@
                         <span>命中 {{ item.projectMemorySummary.matched_items }}/{{ item.projectMemorySummary.expected_items }}</span>
                       </div>
                       <div class="project-memory-summary-meta subtle" v-if="item.workerExecutionMode || item.evaluationStatus">
-                        <span v-if="item.workerExecutionMode">Worker：{{ item.workerExecutionMode }}</span>
+                        <span v-if="item.workerExecutionMode">执行器：{{ item.workerExecutionMode }}</span>
                         <span v-if="item.evaluationStatus">评估状态：{{ item.evaluationStatus }}</span>
                       </div>
                     </div>

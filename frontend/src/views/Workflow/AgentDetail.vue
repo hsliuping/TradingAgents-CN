@@ -14,7 +14,7 @@
       </div>
       <div class="header-actions">
         <el-tag :type="agent?.license_tier === 'free' ? 'info' : 'success'">
-          {{ agent?.license_tier }}
+          {{ getLicenseLabel(agent?.license_tier) }}
         </el-tag>
         <el-tag v-if="agentMaintenanceStatus === 'unmaintained'" type="danger" effect="plain">
           停止维护
@@ -767,6 +767,16 @@ const categoryMap: Record<string, string> = {
 
 const getCategoryName = (category?: string) => {
   return category ? categoryMap[category] || category : '未知'
+}
+
+const getLicenseLabel = (tier?: string) => {
+  switch (tier) {
+    case 'free': return '免费版'
+    case 'basic': return '基础版'
+    case 'pro': return '专业版'
+    case 'enterprise': return '企业版'
+    default: return tier || '未知'
+  }
 }
 
 // 解析输入输出参数
