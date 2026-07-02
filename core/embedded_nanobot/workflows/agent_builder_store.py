@@ -30,12 +30,23 @@ _KNOWN_KEYS = frozenset({
     "generated_agent", "workshop_session_id", "version_id", "build_status",
     "test_symbol", "test_result", "official_acceptance_decision",
     "errors", "conversation_summary", "tool_events", "final_response",
+    # ── 意图分类 v2 字段 ──
+    "user_intent", "user_selected_index", "user_selected_id",
+    "intent_confidence", "intent_reason",
+    # ── 对话历史（跨请求持久化，LLM 意图分类用） ──
+    "message_history",
+    # ── 澄清标记（跨请求保持） ──
+    "clarification_needed",
+    # ── 工具进度 ──
+    "test_progress",
 })
 
 # 运行时注入字段（不持久化）
 _RUNTIME_KEYS = frozenset({
     "db", "workspace", "provider", "event_callback",
-    "_tool_registry", "_provider", "_event_callback", "_on_stream", "_model",
+    "_tool_registry", "_llm_client", "_event_callback", "_on_stream",
+    # 兼容旧 checkpoint 中可能残留的字段（加载时会被自动剥离）
+    "_provider", "_model",
 })
 
 

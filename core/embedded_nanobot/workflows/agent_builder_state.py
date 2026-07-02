@@ -37,9 +37,11 @@ class AgentBuilderState(TypedDict, total=False):
     clarification_needed: bool  # 意图无法识别时，让 wait 节点输出澄清提示而非重复上轮内容
 
     # ── LLM 意图分类（由 classify_intent 节点写入） ──
-    user_intent: str  # confirmed / revise / select_option / explore_more / cancel
+    user_intent: str  # confirmed / revise / select_option / explore_more / cancel / new_agent / retry
     user_selected_index: int  # LLM 解析的选中方案序号
     user_selected_id: str  # LLM 解析的选中方案 ID
+    intent_confidence: float  # LLM 意图分类置信度 (0.0-1.0)
+    intent_reason: str  # LLM 意图分类推理说明
 
     # ── 需求阶段 ──
     spec_id: str
@@ -78,11 +80,11 @@ class AgentBuilderState(TypedDict, total=False):
     conversation_summary: str
     tool_events: list
     final_response: str
+    message_history: list  # [{role, content}] 最近 N 轮对话，供 LLM 意图分类用
 
     # ── 运行时注入（不持久化） ──
     _tool_registry: Any
-    _provider: Any
-    _model: str
+    _llm_client: Any  # UnifiedLLMClient 实例（替代旧的 _provider + _model）
     _event_callback: Any
     _on_stream: Any
 
@@ -128,4 +130,5 @@ def new_agent_builder_state(
         conversation_summary="",
         tool_events=[],
         final_response="",
+        message_history=[],
     )

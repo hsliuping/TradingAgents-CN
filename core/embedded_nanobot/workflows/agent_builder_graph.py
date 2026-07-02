@@ -47,8 +47,7 @@ def build_agent_builder_graph() -> StateGraph:
     graph.add_node("requirement_confirmation", _make_node_wrapper(nodes.node_requirement_confirmation))
     graph.add_node("wait_requirement_confirmation", _make_node_wrapper(nodes.node_wait_requirement_confirmation))
 
-    # 能力盘点阶段
-    graph.add_node("capability_search", _make_node_wrapper(nodes.node_capability_search))
+    # 缺口分析阶段
     graph.add_node("gap_analysis", _make_node_wrapper(nodes.node_gap_analysis))
 
     # 方案阶段
@@ -66,6 +65,7 @@ def build_agent_builder_graph() -> StateGraph:
     # 评估 / 发布（测试后等待用户决策）
     graph.add_node("wait_evaluation", _make_node_wrapper(nodes.node_wait_evaluation))
     graph.add_node("evaluate_or_publish", _make_node_wrapper(nodes.node_evaluate_or_publish))
+    graph.add_node("iterate_agent_version", _make_node_wrapper(nodes.node_iterate_agent_version))
 
     # 错误恢复
     graph.add_node("error_recovery", _make_node_wrapper(nodes.node_error_recovery))
@@ -82,7 +82,6 @@ def build_agent_builder_graph() -> StateGraph:
             "requirement_confirmation": "requirement_confirmation",
             "wait_intake_confirmation": "wait_intake_confirmation",
             "wait_requirement_confirmation": "wait_requirement_confirmation",
-            "capability_search": "capability_search",
             "gap_analysis": "gap_analysis",
             "plan_generation": "plan_generation",
             "wait_plan_selection": "wait_plan_selection",
@@ -91,6 +90,7 @@ def build_agent_builder_graph() -> StateGraph:
             "wait_test_request": "wait_test_request",
             "real_data_test": "real_data_test",
             "evaluate_or_publish": "evaluate_or_publish",
+            "iterate_agent_version": "iterate_agent_version",
             "wait_evaluation": "wait_evaluation",
             "error_recovery": "error_recovery",
             "end": END,
@@ -106,16 +106,17 @@ def build_agent_builder_graph() -> StateGraph:
             "requirement_confirmation": "requirement_confirmation",
             "wait_intake_confirmation": "wait_intake_confirmation",
             "wait_requirement_confirmation": "wait_requirement_confirmation",
-            "capability_search": "capability_search",
+            "gap_analysis": "gap_analysis",
+            "plan_generation": "plan_generation",
             "generate_candidate_agent": "generate_candidate_agent",
             "wait_plan_selection": "wait_plan_selection",
             "real_data_test": "real_data_test",
             "wait_test_request": "wait_test_request",
             "evaluate_or_publish": "evaluate_or_publish",
+            "iterate_agent_version": "iterate_agent_version",
             "wait_evaluation": "wait_evaluation",
             "error_recovery": "error_recovery",
             "build_or_ready": "build_or_ready",
-            "generate_candidate_agent": "generate_candidate_agent",
             "end": END,
         },
     )
@@ -139,9 +140,6 @@ def build_agent_builder_graph() -> StateGraph:
 
     # 等待需求边界确认 → 终端
     graph.add_edge("wait_requirement_confirmation", END)
-
-    # 能力盘点 → gap 分析
-    graph.add_edge("capability_search", "gap_analysis")
 
     # gap 分析 → 方案生成
     graph.add_edge("gap_analysis", "plan_generation")
@@ -186,8 +184,11 @@ def build_agent_builder_graph() -> StateGraph:
         },
     )
 
-    # 等待用户决策 → 终端
+    # 等待评估决策 → 终端
     graph.add_edge("wait_evaluation", END)
+
+    # 版本迭代创建后 → 终端，等待用户继续补充/确认升级需求
+    graph.add_edge("iterate_agent_version", END)
 
     # 评估/发布后 → 终端
     graph.add_edge("evaluate_or_publish", END)
@@ -206,7 +207,7 @@ def _make_node_wrapper(node_func):
     """将节点函数包装为 LangGraph 节点。
 
     根据节点函数签名动态注入参数。
-    - action 节点：注入 tool_registry, provider, model, event_callback, on_stream
+    - action 节点：注入 tool_registry, llm_client, event_callback, on_stream
     - wait 节点：只注入 event_callback, on_stream
     """
     import inspect
@@ -225,10 +226,8 @@ def _make_node_wrapper(node_func):
             kwargs["on_stream"] = state.get("_on_stream")
         if "tool_registry" in param_names:
             kwargs["tool_registry"] = state.get("_tool_registry")
-        if "provider" in param_names:
-            kwargs["provider"] = state.get("_provider")
-        if "model" in param_names:
-            kwargs["model"] = state.get("_model", "")
+        if "llm_client" in param_names:
+            kwargs["llm_client"] = state.get("_llm_client")
 
         result = await node_func(**kwargs)
 
@@ -252,8 +251,7 @@ async def execute_graph(
     graph: StateGraph,
     state: AgentBuilderState,
     tool_registry: Any,
-    provider: Any,
-    model: str,
+    llm_client: Any,
     event_callback: Optional[Callable] = None,
     on_stream: Optional[Callable] = None,
     max_steps: int = 10,
@@ -267,8 +265,7 @@ async def execute_graph(
     """
     # 注入运行时依赖
     state["_tool_registry"] = tool_registry
-    state["_provider"] = provider
-    state["_model"] = model
+    state["_llm_client"] = llm_client
     state["_event_callback"] = event_callback
     state["_on_stream"] = on_stream
 

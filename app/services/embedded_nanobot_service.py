@@ -10,8 +10,7 @@ from pathlib import Path
 from typing import ClassVar
 from typing import Any
 
-from core.embedded_nanobot.runtime import EmbeddedNanobotRuntime
-from core.tools.context import get_current_assistant_thread_context, set_current_assistant_thread_context, set_current_assistant_thread_id, set_current_user_id
+from core.tools.context import set_current_assistant_thread_context, set_current_assistant_thread_id, set_current_user_id
 
 
 logger = logging.getLogger(__name__)
@@ -64,14 +63,6 @@ def _normalize_thread_context(value: dict[str, Any] | None) -> dict[str, Any]:
         "object_key": normalized_object_key,
     }
     result = {key: item for key, item in normalized.items() if item is not None}
-    # 🔍 持久化前日志
-    logger.info(
-        "[EmbeddedNanobot][Normalize] input_keys=%s output_keys=%s intent_stage=%s intent_type=%s",
-        list(raw.keys()),
-        list(result.keys()),
-        (raw.get("intent") or {}).get("stage", ""),
-        type(raw.get("intent")).__name__,
-    )
     return result
 
 
@@ -97,8 +88,7 @@ def _is_internal_worker_thread(doc: dict[str, Any] | None) -> bool:
 
 
 class EmbeddedNanobotService:
-    _runtime_cache: ClassVar[dict[tuple[str, str | None], EmbeddedNanobotRuntime]] = {}
-    _runtime_locks: ClassVar[dict[tuple[str, str | None], asyncio.Lock]] = {}
+    _simple_chat_cache: ClassVar[dict[tuple[str, str | None], tuple[Any, list, dict]]] = {}
 
     def __init__(self, db, workspace: str | Path, preferred_model: str | None = None):
         self._db = db
@@ -457,25 +447,492 @@ class EmbeddedNanobotService:
     def _cache_key(self) -> tuple[str, str | None]:
         return (str(self._workspace.resolve()), self._preferred_model)
 
-    async def get_runtime(self) -> EmbeddedNanobotRuntime:
+    # ──────────────────────────────────────────────────────────────
+    # 简单对话模式（api channel）：直接用 UnifiedLLMClient，不走 Nanobot Runtime
+    # ──────────────────────────────────────────────────────────────
+
+    async def _get_simple_chat_client(self) -> tuple[Any, list, dict]:
+        """获取简单对话用的 LLM 客户端和工具（带缓存）。
+
+        返回 (UnifiedLLMClient, openai_tool_schemas, tool_functions)。
+        """
         cache_key = self._cache_key()
-        cached = self._runtime_cache.get(cache_key)
+        cached = self._simple_chat_cache.get(cache_key)
         if cached is not None:
             return cached
 
-        lock = self._runtime_locks.setdefault(cache_key, asyncio.Lock())
-        async with lock:
-            cached = self._runtime_cache.get(cache_key)
-            if cached is not None:
-                return cached
-            runtime = await EmbeddedNanobotRuntime.from_database(
-                self._db,
-                workspace=self._workspace,
-                preferred_model=self._preferred_model,
-                restrict_to_workspace=False,
+        from app.services.intelligent_assistant_service import _get_assistant_llm_config
+        from core.tools import get_tool_registry, tool_metadata_list_to_openai
+        from core.llm import UnifiedLLMClient
+
+        config = await _get_assistant_llm_config(
+            self._db,
+            use_reasoning_model=True,
+            preferred_models={"model": self._preferred_model} if self._preferred_model else None,
+        )
+        if not config:
+            raise ValueError("数据库中没有可用的 LLM 配置")
+
+        client = UnifiedLLMClient.from_config(config)
+        registry = get_tool_registry()
+        all_metadata = registry.list_all()
+        openai_tools = tool_metadata_list_to_openai(all_metadata)
+
+        tool_functions: dict[str, Any] = {}
+        for tool in all_metadata:
+            if tool.fc_enabled:
+                func = registry.get_function(tool.id)
+                if func:
+                    tool_functions[tool.id] = func
+
+        client.inject_tools(tool_functions)
+        logger.info(
+            "[EmbeddedNanobot][SimpleChat] 已加载 %d 个工具 (model=%s)",
+            len(openai_tools), config.model,
+        )
+
+        cached = (client, openai_tools, tool_functions)
+        self._simple_chat_cache[cache_key] = cached
+        return cached
+
+    async def _run_simple_chat(
+        self,
+        user_message: str,
+        on_progress: Any = None,
+        on_stream: Any = None,
+        on_tool_event: Any = None,
+        on_step_event: Any = None,
+        session_key: str = "",
+        chat_id: str = "",
+        channel: str = "api",
+    ) -> dict[str, Any]:
+        """简单对话模式：UnifiedLLMClient.achat(auto_execute_tools=True)。
+
+        用于 api channel（调试页），不经过 Nanobot Runtime。
+        """
+        from core.llm.models import Message, MessageRole
+
+        try:
+            client, openai_tools, _ = await self._get_simple_chat_client()
+        except Exception as e:
+            logger.error("[EmbeddedNanobot][SimpleChat] 获取客户端失败: %s", e, exc_info=True)
+            return {
+                "content": f"抱歉，助手暂时不可用：{e}",
+                "tools_used": [],
+                "messages": [],
+                "stop_reason": "error",
+            }
+
+        messages = [
+            Message(
+                role=MessageRole.SYSTEM,
+                content=(
+                    "你是 TradingAgentsCN 平台的智能助手。你可以使用工具获取实时数据。"
+                    "请基于工具返回的真实数据回答用户问题，不要编造数据。"
+                ),
+            ),
+            Message(role=MessageRole.USER, content=user_message),
+        ]
+
+        tools_used: list[str] = []
+
+        async def _progress(payload: dict) -> None:
+            event = payload.get("event", "")
+            tool_name = payload.get("tool", "")
+            if event == "tool_started" and tool_name:
+                if on_tool_event:
+                    await on_tool_event({
+                        "name": tool_name,
+                        "status": "running",
+                        "label": f"执行：{tool_name}",
+                    })
+                if on_step_event:
+                    await on_step_event({
+                        "step": f"tool_{tool_name}",
+                        "status": "running",
+                        "title": f"执行工具：{tool_name}",
+                        "session_key": session_key,
+                        "chat_id": chat_id,
+                        "channel": channel,
+                    })
+            elif event == "tool_completed" and tool_name:
+                is_error = payload.get("is_error", False)
+                if tool_name not in tools_used:
+                    tools_used.append(tool_name)
+                if on_tool_event:
+                    await on_tool_event({
+                        "name": tool_name,
+                        "status": "error" if is_error else "completed",
+                        "label": f"{'失败' if is_error else '完成'}：{tool_name}",
+                    })
+                if on_step_event:
+                    await on_step_event({
+                        "step": f"tool_{tool_name}",
+                        "status": "completed",
+                        "title": f"工具完成：{tool_name}",
+                        "session_key": session_key,
+                        "chat_id": chat_id,
+                        "channel": channel,
+                    })
+
+        if on_progress:
+            await on_progress("正在分析需求...")
+
+        try:
+            response = await client.achat(
+                messages,
+                tools=openai_tools,
+                auto_execute_tools=True,
+                max_tool_rounds=8,
+                tools_used=tools_used,
+                dry_run=False,
+                progress_callback=_progress,
             )
-            self._runtime_cache[cache_key] = runtime
-            return runtime
+            content = getattr(response, "content", "") or ""
+        except Exception as e:
+            logger.error("[EmbeddedNanobot][SimpleChat] 调用失败: %s", e, exc_info=True)
+            content = f"抱歉，处理过程中出现了问题：{e}"
+
+        if on_stream and content:
+            chunk_size = 40
+            for i in range(0, len(content), chunk_size):
+                await on_stream(content[i:i + chunk_size])
+                await asyncio.sleep(0.012)
+
+        return {
+            "content": content,
+            "tools_used": tools_used,
+            "messages": [],
+            "stop_reason": "completed",
+            "tool_events": [
+                {"name": name, "status": "ok"} for name in tools_used
+            ],
+        }
+
+    async def _chat_via_simple_chat(
+        self,
+        *,
+        user_message: str,
+        display_message: str | None,
+        session_key: str,
+        user_id: str | None,
+        current_thread_id: str | None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """api channel 入口：走 UnifiedLLMClient，不经过 Nanobot Runtime。
+
+        负责：提取 SSE 回调 → 设置 contextvar → 调用 _run_simple_chat → 持久化 → 返回。
+        """
+        runtime_kwargs = dict(kwargs)
+        thread_context = runtime_kwargs.pop("thread_context", None) or {}
+        on_progress = runtime_kwargs.get("on_progress")
+        on_stream = runtime_kwargs.get("on_stream")
+        on_tool_event = runtime_kwargs.get("on_tool_event")
+        on_step_event = runtime_kwargs.get("on_step_event")
+        chat_id = runtime_kwargs.get("chat_id") or current_thread_id or session_key
+        channel = "api"
+
+        logger.info(
+            "[EmbeddedNanobot][SimpleChat] enter thread_id=%s session_key=%s spec_id=%s",
+            chat_id, session_key, thread_context.get("spec_id"),
+        )
+
+        user_token = set_current_user_id(user_id) if user_id else None
+        thread_token = set_current_assistant_thread_id(current_thread_id) if current_thread_id else None
+        thread_context_token = set_current_assistant_thread_context(thread_context)
+        try:
+            result = await self._run_simple_chat(
+                user_message=user_message,
+                on_progress=on_progress,
+                on_stream=on_stream,
+                on_tool_event=on_tool_event,
+                on_step_event=on_step_event,
+                session_key=session_key,
+                chat_id=chat_id,
+                channel=channel,
+            )
+
+            if user_id:
+                try:
+                    await self.persist_chat_turn(
+                        user_id=user_id,
+                        thread_id=chat_id,
+                        session_key=session_key,
+                        channel=channel,
+                        user_content=user_message,
+                        user_display_content=display_message,
+                        assistant_content=str(result.get("content") or ""),
+                        tools_used=result.get("tools_used") or [],
+                        stop_reason=result.get("stop_reason"),
+                        usage=result.get("usage") or {},
+                        tool_events=result.get("tool_events") or [],
+                        thread_context=thread_context,
+                    )
+                except Exception:
+                    logger.exception("[EmbeddedNanobot][SimpleChat] 写入数据库会话历史失败")
+
+            result["thread_context"] = thread_context
+            logger.info(
+                "[EmbeddedNanobot][SimpleChat] done thread_id=%s tools_used=%s stop_reason=%s",
+                chat_id,
+                result.get("tools_used") or [],
+                result.get("stop_reason"),
+            )
+            return result
+        finally:
+            thread_context_token.var.reset(thread_context_token)
+            if thread_token is not None:
+                thread_token.var.reset(thread_token)
+            if user_token is not None:
+                user_token.var.reset(user_token)
+
+    async def _chat_via_graph(
+        self,
+        *,
+        user_message: str,
+        display_message: str | None,
+        session_key: str,
+        user_id: str | None,
+        current_thread_id: str | None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """agent_workshop channel 入口：走 LangGraph 工作流 + UnifiedLLMClient，不经过 Nanobot Runtime。
+
+        从 core.embedded_nanobot.runtime._run_agent_builder_graph 迁移而来。
+        负责：提取 SSE 回调 → 设置 contextvar → 执行 Graph → 持久化 → 返回。
+        """
+        from core.embedded_nanobot.workflows import (
+            AgentBuilderGraphStore,
+            new_agent_builder_state,
+            build_agent_builder_graph,
+            execute_graph,
+        )
+        from core.embedded_nanobot.workflows.tool_registry_adapter import StandardToolRegistryAdapter
+
+        runtime_kwargs = dict(kwargs)
+        thread_context = runtime_kwargs.pop("thread_context", None) or {}
+        on_progress = runtime_kwargs.get("on_progress")
+        on_stream = runtime_kwargs.get("on_stream")
+        on_tool_event = runtime_kwargs.get("on_tool_event")
+        on_step_event = runtime_kwargs.get("on_step_event")
+        chat_id = runtime_kwargs.get("chat_id") or current_thread_id or session_key
+        channel = "agent_workshop"
+
+        # 构建 thread_id
+        effective_thread_id = current_thread_id or chat_id or f"agent-studio-{int(datetime.now().timestamp() * 1000)}"
+
+        logger.info(
+            "[AgentBuilderGraph][Entry] thread=%s user=%s msg_len=%d",
+            effective_thread_id, user_id, len(user_message),
+        )
+
+        # ── SSE 事件落盘 ──
+        try:
+            from app.routers.embedded_nanobot import _append_nanobot_event_log
+        except ImportError:
+            _append_nanobot_event_log = None
+
+        def _log_event(event: str, payload: dict):
+            if _append_nanobot_event_log:
+                try:
+                    _append_nanobot_event_log(
+                        chat_id=chat_id or effective_thread_id,
+                        session_key=session_key,
+                        event=event,
+                        payload=payload,
+                    )
+                except Exception:
+                    pass
+
+        _log_event("started", {"message": "助手已开始处理请求", "session_key": session_key})
+
+        async def event_callback(event_type: str, label: str, payload: Any = None):
+            """节点内事件 → SSE 流 + 落盘。"""
+            if event_type == "step" and on_step_event:
+                step_data = {
+                    "step": label,
+                    "status": "completed",
+                    "title": label,
+                    "detail": str(payload or ""),
+                    "session_key": session_key,
+                    "chat_id": chat_id or effective_thread_id,
+                    "channel": channel,
+                }
+                _log_event("step_event", step_data)
+                await on_step_event(step_data)
+            elif event_type == "progress" and on_progress:
+                _log_event("progress", {"label": label})
+                await on_progress(label)
+            elif event_type == "tool" and on_tool_event:
+                tool_data = {
+                    "name": payload if isinstance(payload, str) else label,
+                    "status": "running",
+                    "label": label,
+                }
+                _log_event("tool_event", tool_data)
+                await on_tool_event(tool_data)
+            elif event_type == "tool_done" and on_tool_event:
+                tool_data = {
+                    "name": payload if isinstance(payload, str) else label,
+                    "status": "completed",
+                    "label": label,
+                }
+                _log_event("tool_event", tool_data)
+                await on_tool_event(tool_data)
+            elif event_type == "tool_error" and on_tool_event:
+                tool_data = {
+                    "name": payload if isinstance(payload, str) else label,
+                    "status": "error",
+                    "label": label,
+                }
+                _log_event("tool_event", tool_data)
+                await on_tool_event(tool_data)
+
+        # 设置 contextvar（与 _chat_via_simple_chat 保持一致）
+        user_token = set_current_user_id(user_id) if user_id else None
+        thread_token = set_current_assistant_thread_id(current_thread_id) if current_thread_id else None
+        thread_context_token = set_current_assistant_thread_context(thread_context)
+        try:
+            store = AgentBuilderGraphStore(self._db)
+
+            # 尝试恢复已有状态
+            state = await store.load_checkpoint(effective_thread_id)
+            if state:
+                state["user_message"] = user_message
+                state["user_id"] = user_id or ""
+                state["thread_id"] = effective_thread_id
+                state["channel"] = channel
+                state["chat_id"] = chat_id
+                logger.info(
+                    "[AgentBuilderGraph][Resume] node=%s stage=%s",
+                    state.get("current_node", "?"),
+                    state.get("stage", "?"),
+                )
+            else:
+                # 新会话
+                state = new_agent_builder_state(
+                    thread_id=effective_thread_id,
+                    user_id=user_id or "",
+                    user_message=user_message,
+                    channel=channel,
+                    chat_id=chat_id,
+                )
+
+            # 构建图
+            graph = build_agent_builder_graph()
+
+            # 创建工具注册表适配器（替代 Nanobot ToolRegistry）
+            tool_registry = StandardToolRegistryAdapter()
+
+            # 获取 UnifiedLLMClient（替代 self.provider.client）
+            client, _, _ = await self._get_simple_chat_client()
+            llm_client = client
+
+            # 执行图
+            try:
+                result = await execute_graph(
+                    graph=graph,
+                    state=state,
+                    tool_registry=tool_registry,
+                    llm_client=llm_client,
+                    event_callback=event_callback,
+                    on_stream=on_stream,
+                    max_steps=10,
+                )
+            except Exception as e:
+                logger.error("[AgentBuilderGraph][Error] %s", e, exc_info=True)
+                return {
+                    "content": f"抱歉，处理过程中出现了问题：{e}",
+                    "tools_used": [],
+                    "messages": [],
+                    "stop_reason": "error",
+                }
+
+            # 判断是否需要暂停
+            if result.get("awaiting_user"):
+                await store.save_checkpoint(
+                    effective_thread_id,
+                    result,
+                    result.get("current_node", "wait"),
+                )
+                logger.info(
+                    "[AgentBuilderGraph][Checkpoint] saved node=%s stage=%s",
+                    result.get("current_node"), result.get("stage"),
+                )
+
+            # 清理运行时注入字段
+            final_response = result.get("final_response", "")
+            tool_events = result.get("tool_events", [])
+            base_thread_context = dict(thread_context) if isinstance(thread_context, dict) else {}
+            result_gap_report = result.get("gap_report") if isinstance(result.get("gap_report"), dict) else {}
+            result_test_result = result.get("test_result") if isinstance(result.get("test_result"), dict) else {}
+            result_thread_context = {
+                **base_thread_context,
+                "spec_id": str(result.get("spec_id") or base_thread_context.get("spec_id") or "").strip() or None,
+                "spec_name": str(result.get("spec_name") or base_thread_context.get("spec_name") or "").strip() or None,
+                "workshop_session_id": str(result.get("workshop_session_id") or base_thread_context.get("workshop_session_id") or "").strip() or None,
+                "version_id": str(result.get("version_id") or base_thread_context.get("version_id") or "").strip() or None,
+                "workflow_id": str(result.get("workflow_id") or base_thread_context.get("workflow_id") or "").strip() or None,
+                "node_id": str(result.get("current_node") or base_thread_context.get("node_id") or "").strip() or None,
+                "has_blocking_gaps": bool(result_gap_report.get("blocking_gaps")) if result_gap_report else base_thread_context.get("has_blocking_gaps"),
+                "evaluation_status": str(result_test_result.get("status") or result.get("official_acceptance_decision") or base_thread_context.get("evaluation_status") or "").strip() or None,
+                "intent": {
+                    "action": str(result.get("user_intent") or "").strip(),
+                    "confidence": result.get("intent_confidence"),
+                    "stage": str(result.get("stage") or "").strip(),
+                    "reason": str(result.get("intent_reason") or "").strip(),
+                } if result.get("user_intent") else base_thread_context.get("intent"),
+            }
+            result_thread_context = _normalize_thread_context(result_thread_context)
+
+            _log_event("done", {
+                "content": final_response[:500],
+                "tools_used": [e.get("name", "") for e in tool_events],
+                "stop_reason": "completed",
+            })
+
+            result_dict = {
+                "content": final_response or "处理完成",
+                "tools_used": [e.get("name", "") for e in tool_events],
+                "messages": [],
+                "stop_reason": "completed",
+                "tool_events": tool_events,
+            }
+
+            # 持久化会话历史
+            if user_id:
+                try:
+                    await self.persist_chat_turn(
+                        user_id=user_id,
+                        thread_id=effective_thread_id,
+                        session_key=session_key,
+                        channel=channel,
+                        user_content=user_message,
+                        user_display_content=display_message,
+                        assistant_content=str(result_dict.get("content") or ""),
+                        tools_used=result_dict.get("tools_used") or [],
+                        stop_reason=result_dict.get("stop_reason"),
+                        usage=result_dict.get("usage") or {},
+                        tool_events=result_dict.get("tool_events") or [],
+                        thread_context=result_thread_context,
+                    )
+                except Exception:
+                    logger.exception("[EmbeddedNanobot][Graph] 写入数据库会话历史失败")
+
+            result_dict["thread_context"] = thread_context
+            logger.info(
+                "[EmbeddedNanobot][Graph] done thread_id=%s tools_used=%s stop_reason=%s",
+                effective_thread_id,
+                result_dict.get("tools_used") or [],
+                result_dict.get("stop_reason"),
+            )
+            return result_dict
+        finally:
+            thread_context_token.var.reset(thread_context_token)
+            if thread_token is not None:
+                thread_token.var.reset(thread_token)
+            if user_token is not None:
+                user_token.var.reset(user_token)
 
     async def chat(
         self,
@@ -486,160 +943,42 @@ class EmbeddedNanobotService:
         current_thread_id: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        runtime = await self.get_runtime()
-        await runtime.sync_tradingagents_capabilities(self._db)
-        runtime_kwargs = dict(kwargs)
-        thread_context = runtime_kwargs.pop("thread_context", None) or {}
+        channel = str(kwargs.get("channel") or "").strip()
 
-        # ── 如果前端没传 intent，从 MongoDB 补上（防止跨轮丢失） ──
-        if not thread_context.get("intent") and current_thread_id and user_id:
-            logger.info(
-                "[EmbeddedNanobot][ThreadContext] MongoDB回退 trigger=intent_missing thread_id=%s has_user_id=%s",
-                current_thread_id,
-                bool(user_id),
-            )
-            try:
-                db_thread = await self._db[EMBEDDED_NANOBOT_THREAD_COLLECTION].find_one(
-                    {"user_id": user_id, "thread_id": current_thread_id},
-                    {"thread_context": 1},
-                )
-                db_ctx = (db_thread or {}).get("thread_context") or {}
-                db_intent = db_ctx.get("intent")
-                logger.info(
-                    "[EmbeddedNanobot][ThreadContext] MongoDB 回退查询 thread_id=%s found=%s db_ctx_keys=%s db_intent_type=%s",
-                    current_thread_id,
-                    bool(db_thread),
-                    list(db_ctx.keys()) if db_ctx else [],
-                    type(db_intent).__name__ if db_intent is not None else "None",
-                )
-                if isinstance(db_intent, dict):
-                    thread_context["intent"] = db_intent
-                    thread_context["spec_id"] = db_ctx.get("spec_id") or thread_context.get("spec_id")
-                    thread_context["spec_name"] = db_ctx.get("spec_name") or thread_context.get("spec_name")
-                    thread_context["workshop_session_id"] = db_ctx.get("workshop_session_id") or thread_context.get("workshop_session_id")
-                    thread_context["version_id"] = db_ctx.get("version_id") or thread_context.get("version_id")
-                    thread_context["has_blocking_gaps"] = db_ctx.get("has_blocking_gaps") or thread_context.get("has_blocking_gaps")
-                    thread_context["evaluation_status"] = db_ctx.get("evaluation_status") or thread_context.get("evaluation_status")
-                    logger.info(
-                        "[EmbeddedNanobot][ThreadContext] 从 MongoDB 补回 intent stage=%s spec_id=%s",
-                        db_intent.get("stage", ""),
-                        db_ctx.get("spec_id", ""),
-                    )
-            except Exception:
-                logger.info("[EmbeddedNanobot][ThreadContext] 从 MongoDB 读取 intent 异常", exc_info=True)
-        else:
-            logger.info(
-                "[EmbeddedNanobot][ThreadContext] MongoDB回退 skip has_intent=%s has_thread_id=%s has_user_id=%s intent_stage=%s",
-                bool(thread_context.get("intent")),
-                bool(current_thread_id),
-                bool(user_id),
-                thread_context.get("intent", {}).get("stage", "-") if isinstance(thread_context.get("intent"), dict) else "-",
-            )
-
-        user_token = set_current_user_id(user_id) if user_id else None
-        thread_token = set_current_assistant_thread_id(current_thread_id) if current_thread_id else None
-        thread_context_token = set_current_assistant_thread_context(thread_context)
-        logger.info(
-            "[EmbeddedNanobot][ThreadContext] chat thread_id=%s session_key=%s channel=%s spec_id=%s version_id=%s workshop_session_id=%s spec_name=%s intent=%s",
-            current_thread_id or kwargs.get("chat_id") or session_key,
-            session_key,
-            kwargs.get("channel") or "embedded",
-            thread_context.get("spec_id"),
-            thread_context.get("version_id"),
-            thread_context.get("workshop_session_id"),
-            thread_context.get("spec_name"),
-            (thread_context.get("intent") or {}).get("stage", "") or "missing",
-        )
-        try:
-            result = await runtime.handle_message(
+        # ── api / agent_workshop_evaluation channel：直接走 UnifiedLLMClient，不经过 Nanobot Runtime ──
+        if channel in {"api", "agent_workshop_evaluation"}:
+            return await self._chat_via_simple_chat(
                 user_message=user_message,
+                display_message=display_message,
                 session_key=session_key,
-                thread_context=thread_context,
                 user_id=user_id,
-                thread_id=current_thread_id or kwargs.get("chat_id") or session_key,
-                **runtime_kwargs,
+                current_thread_id=current_thread_id,
+                **kwargs,
             )
-            # 🔒 Intent 持久化治理：从模块级存储读取 intent（按 thread_id 隔离，不依赖不稳定的 contextvar）
-            # 设计原则：contextvar 只做同进程内加速缓存，跨轮持久化唯一来源是模块级 dict + MongoDB。
-            effective_intent = None
-            intent_source = "none"
-            try:
-                from core.tools.context import get_latest_nanobot_intent, get_current_assistant_thread_context, _nanobot_intents_by_thread
-                module_intent = get_latest_nanobot_intent()
-                if isinstance(module_intent, dict) and module_intent.get("stage"):
-                    effective_intent = module_intent
-                    intent_source = "module_dict"
-                else:
-                    ctx_intent = get_current_assistant_thread_context().get("intent")
-                    if isinstance(ctx_intent, dict) and ctx_intent.get("stage"):
-                        effective_intent = ctx_intent
-                        intent_source = "contextvar_fallback"
-                        logger.warning(
-                            "[EmbeddedNanobot][IntentPersist] module_dict empty, using contextvar fallback "
-                            "stage=%s spec_id=%s — this is unreliable, investgate why module_dict is empty",
-                            effective_intent.get("stage", "-"),
-                            effective_intent.get("spec_id", "-"),
-                        )
-            except Exception:
-                pass
 
-            logger.info(
-                "[EmbeddedNanobot][IntentMerge] source=%s stage=%s action=%s spec_id=%s conversation_summary=%s",
-                intent_source,
-                effective_intent.get("stage", "-") if effective_intent else "-",
-                effective_intent.get("action", "-") if effective_intent else "-",
-                effective_intent.get("spec_id", "-") if effective_intent else "-",
-                "yes" if effective_intent and effective_intent.get("conversation_summary") else "no",
+        # ── agent_workshop channel：走 LangGraph 工作流 + UnifiedLLMClient，不经过 Nanobot Runtime ──
+        if channel == "agent_workshop":
+            return await self._chat_via_graph(
+                user_message=user_message,
+                display_message=display_message,
+                session_key=session_key,
+                user_id=user_id,
+                current_thread_id=current_thread_id,
+                **kwargs,
             )
-            if effective_intent:
-                thread_context["intent"] = dict(effective_intent)
-            latest_thread_context = get_current_assistant_thread_context() or thread_context
-            if isinstance(thread_context.get("intent"), dict):
-                latest_thread_context["intent"] = thread_context["intent"]
-            if user_id:
-                try:
-                    intent_dict = (latest_thread_context.get("intent") or {}) if isinstance(latest_thread_context, dict) else {}
-                    logger.info(
-                        "[EmbeddedNanobot][PersistPre] thread_id=%s spec_id=%s intent_action=%s intent_stage=%s "
-                        "pending_options=%d is_same_object=%s",
-                        current_thread_id or kwargs.get("chat_id") or session_key,
-                        latest_thread_context.get("spec_id") if isinstance(latest_thread_context, dict) else "",
-                        intent_dict.get("action", ""),
-                        intent_dict.get("stage", "") or "empty",
-                        len(intent_dict.get("pending_options") or []),
-                        str(latest_thread_context is thread_context),
-                    )
-                    await self.persist_chat_turn(
-                        user_id=user_id,
-                        thread_id=current_thread_id or kwargs.get("chat_id") or session_key,
-                        session_key=session_key,
-                        channel=str(kwargs.get("channel") or "embedded"),
-                        user_content=user_message,
-                        user_display_content=display_message,
-                        assistant_content=str(result.get("content") or ""),
-                        tools_used=result.get("tools_used") or [],
-                        stop_reason=result.get("stop_reason"),
-                        usage=result.get("usage") or {},
-                        tool_events=result.get("tool_events") or [],
-                        thread_context=latest_thread_context,
-                    )
-                except Exception:
-                    logger.exception("[EmbeddedNanobot] 写入数据库会话历史失败")
-            result["thread_context"] = latest_thread_context
-            logger.info(
-                "[EmbeddedNanobot][DoneEvent] thread_context_keys=%s intent_stage=%s intent_action=%s spec_id=%s",
-                list(result["thread_context"].keys()) if isinstance(result["thread_context"], dict) else [],
-                result["thread_context"].get("intent", {}).get("stage", "-") if isinstance(result["thread_context"], dict) and isinstance(result["thread_context"].get("intent"), dict) else "-",
-                result["thread_context"].get("intent", {}).get("action", "-") if isinstance(result["thread_context"], dict) and isinstance(result["thread_context"].get("intent"), dict) else "-",
-                result["thread_context"].get("spec_id", "-") if isinstance(result["thread_context"], dict) else "-",
-            )
-            return result
-        finally:
-            thread_context_token.var.reset(thread_context_token)
-            if thread_token is not None:
-                thread_token.var.reset(thread_token)
-            if user_token is not None:
-                user_token.var.reset(user_token)
+
+        # ── Nanobot Runtime 已移除：embedded channel（默认，无前端调用方）不再支持 ──
+        logger.warning(
+            "[EmbeddedNanobot][Deprecated] runtime 路径已废弃，channel=%s 不再支持。"
+            "请使用 agent_workshop / api / agent_workshop_evaluation channel。",
+            channel or "embedded",
+        )
+        return {
+            "content": "该通道已废弃，Nanobot Runtime 已移除。请使用 agent_workshop / api / agent_workshop_evaluation 通道。",
+            "tools_used": [],
+            "messages": [],
+            "stop_reason": "deprecated_channel",
+        }
 
 
 def _extract_pending_from_response(assistant_content: str, user_message: str) -> dict:

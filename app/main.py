@@ -347,6 +347,22 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  配置桥接失败: {e}")
         logger.warning("⚠️  TradingAgents 将使用 .env 文件中的配置")
 
+    # 启动期同步能力索引：工具元数据变更后，重启即可增量写入向量库。
+    try:
+        from app.core.database import get_mongo_db
+        from app.services.capability_index_service import CapabilityIndexService
+
+        result = await CapabilityIndexService(get_mongo_db()).ensure_index()
+        logger.info(
+            "✅ 能力索引同步完成: %s %d/%d backend=%s",
+            result.sync_mode,
+            result.indexed_documents,
+            result.total_documents,
+            result.vector_backend,
+        )
+    except Exception as e:
+        logger.error(f"❌ 能力索引同步失败: {e}", exc_info=True)
+
     # Apply dynamic settings (log_level, enable_monitoring) from ConfigProvider
     try:
         from app.services.config_provider import provider as config_provider  # local import to avoid early DB init issues

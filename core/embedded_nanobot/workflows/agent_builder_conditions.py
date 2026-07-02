@@ -90,30 +90,6 @@ def _is_cancel(text: str) -> bool:
     return any(t == w or t.startswith(w) for w in cancel_words)
 
 
-def _is_retry(text: str) -> bool:
-    """用户是否表示重试。"""
-    t = (text or "").strip().lower()
-    if not t:
-        return False
-    retry_words = ("重试", "再来", "再试", "retry", "重新试", "再跑一次", "再测")
-    return any(kw in t for kw in retry_words)
-
-
-def _is_skip(t: str) -> bool:
-    """判断用户是否想跳过当前步骤。"""
-    skip_words = ("跳过", "不管", "跳过这一步", "跳过测试", "跳过发布", "跳过发布评估")
-    return any(t == w or t.startswith(w) for w in skip_words)
-
-
-def _is_retry(t: str) -> bool:
-    """判断用户是否想重试/重跑。"""
-    retry_words = (
-        "重跑", "再测", "重测", "重新测试", "重新跑", "重跑测试",
-        "再跑一次", "再来一次", "重试", "retry", "测试",
-    )
-    return any(t == w or t.startswith(w) for w in retry_words)
-
-
 # ──────────────────────────────────────────────────────────────
 # 方案选择解析
 # ──────────────────────────────────────────────────────────────
@@ -235,32 +211,81 @@ def route_start(state: "AgentBuilderState") -> str:
 
 
 def route_after_classify(state: "AgentBuilderState") -> str:
-    """LLM 意图分类后的路由。
+    """LLM 意图分类后的路由（v2：置信度门槛 + new_agent 支持）。
 
-    读取 state["user_intent"] 和 state["current_node"]，
+    读取 state["user_intent"]、state["intent_confidence"]、state["current_node"]，
     决定下一步去哪个节点。
 
-    当用户意图无法转化为有效推进（仍停留在同一 wait 节点）时，
-    设置 clarification_needed 标记，让 wait 节点输出澄清提示，
-    而不是把上一轮的内容重复输出一遍。
+    规则：
+      1. confidence < 0.7 → 回到当前 wait 节点，触发 clarification_needed
+      2. intent = "new_agent" → end（引导用户去新建）
+      3. 其他按意图 + 节点组合路由
     """
     current_node = state.get("current_node", "")
     intent = state.get("user_intent", "explore_more")
+    confidence = state.get("intent_confidence", 0.0)
     msg = state.get("user_message", "")
 
-    # 默认清除澄清标记；只有在"停留原地"分支才置位
+    # 默认清除澄清标记
     state["clarification_needed"] = False
 
     logger.info(
-        "[Route][AfterClassify] current_node=%s intent=%s msg=%.60s",
-        current_node, intent, msg,
+        "[Route][AfterClassify] current_node=%s intent=%s confidence=%.2f msg=%.60s",
+        current_node, intent, confidence, msg,
     )
 
-    # cancel 在任何阶段都结束
+    # ── cancel 在任何阶段都结束 ──
     if intent == "cancel":
         result = "end"
         _log_route("route_after_classify", state, result)
         return result
+
+    # ── new_agent：用户想创建全新 Agent ──
+    if intent == "new_agent":
+        spec_name = state.get("spec_name", "") or "当前 Agent"
+        state["final_response"] = (
+            f"当前是「{spec_name}」的会话。创建新的 Agent 需要回到工坊主页面，"
+            f"点击「新建 Agent」开始。\n\n"
+            f"你的需求我已记下，需要我帮你整理成新 Agent 的需求草案吗？"
+        )
+        result = "end"
+        _log_route("route_after_classify", state, result)
+        return result
+
+    # ── rerun_gap：用户要求重跑当前 Agent 工坊能力缺口分析 ──
+    if intent == "rerun_gap":
+        state["stage"] = "capability_check"
+        state["gap_report"] = {}
+        state["candidate_plans"] = []
+        state["pending_options"] = []
+        state["selected_plan_id"] = ""
+        result = "gap_analysis"
+        _log_route("route_after_classify", state, result)
+        return result
+
+    # ── regenerate_plan：用户要求基于当前 gap 重新生成候选解决方案 ──
+    if intent == "regenerate_plan":
+        state["stage"] = "plan_selection_pending"
+        state["candidate_plans"] = []
+        state["pending_options"] = []
+        state["selected_plan_id"] = ""
+        result = "plan_generation"
+        _log_route("route_after_classify", state, result)
+        return result
+
+    # ── 低置信度：LLM 搞不清楚用户意思，回到当前 wait 节点触发澄清 ──
+    if confidence < 0.7:
+        wait_node = current_node
+        # 确保回到的是有效的 wait 节点
+        if not (wait_node.startswith("wait_") or wait_node in ("evaluate_or_publish", "error_recovery")):
+            wait_node = "wait_evaluation"  # 兜底
+        state["clarification_needed"] = True
+        logger.info(
+            "[Route][LowConfidence] confidence=%.2f → stay_on=%s clarify=1",
+            confidence, wait_node,
+        )
+        _log_route("route_after_classify", state, wait_node)
+        return wait_node
 
     # ── wait_intake_confirmation：需求探索阶段 ──
     if current_node == "wait_intake_confirmation":
@@ -276,7 +301,7 @@ def route_after_classify(state: "AgentBuilderState") -> str:
     # ── wait_requirement_confirmation：需求确认阶段 ──
     elif current_node == "wait_requirement_confirmation":
         if intent in ("confirmed", "select_option"):
-            result = "capability_search"
+            result = "gap_analysis"
         elif intent == "revise":
             result = "requirement_confirmation"
         else:  # explore_more
@@ -320,18 +345,15 @@ def route_after_classify(state: "AgentBuilderState") -> str:
 
     # ── wait_test_request：等待测试标的 ──
     elif current_node == "wait_test_request":
-        # 测试阶段：从消息中提取股票代码
-        symbol_match = re.search(r"\b(00\d{4}|30\d{4}|60\d{4}|68\d{4}|6\d{4})\b", msg)
-        if symbol_match:
-            state["test_symbol"] = symbol_match.group(1)
-            result = "real_data_test"
-        elif intent in ("confirmed", "retry") and state.get("test_symbol"):
+        # LLM 已在 classify_intent 中处理了所有股票代码提取：
+        # - 用户直接输入代码 → LLM 输出 test_symbol
+        # - 用户确认 Agent 建议的代码 → LLM 从上下文推断 test_symbol
+        # - 用户给股票名"贵州茅台" → LLM 无法提取 → explore_more → clarification
+        if state.get("test_symbol"):
             result = "real_data_test"
         elif intent == "cancel":
             result = "end"
         else:
-            # LLM 判断为 explore_more 或无法提取股票代码
-            # （如用户给了股票名"贵州茅台"而非代码"600519"）
             result = "wait_test_request"
             state["clarification_needed"] = True
 
@@ -344,22 +366,25 @@ def route_after_classify(state: "AgentBuilderState") -> str:
             # 用户确认发布 → 进入发布流程
             result = "evaluate_or_publish"
         elif intent in ("revise",):
-            result = "requirement_intake"
+            result = "iterate_agent_version" if state.get("version_id") else "requirement_intake"
         elif intent == "retry":
-            # 用户要求重测
-            result = "wait_test_request"
+            # 用户要求重测：如果本轮已解析出测试标的，直接进入真数据测试；否则先等待标的。
+            result = "real_data_test" if state.get("test_symbol") else "wait_test_request"
         else:
             result = "wait_evaluation"
             state["clarification_needed"] = True
 
     # ── 评估阶段（发布中） ──
     elif current_node == "evaluate_or_publish":
-        if intent in ("confirmed", "retry", "select_option"):
-            # 用户想重新测试（如"重跑测试""再测一次""重新测试"）
-            result = "wait_test_request"
+        if intent in ("confirmed", "select_option"):
+            # 用户确认发布/继续评估 → 进入发布评估节点。
+            result = "evaluate_or_publish"
+        elif intent == "retry":
+            # 用户想重新测试；有标的则直接测，否则先等待标的。
+            result = "real_data_test" if state.get("test_symbol") else "wait_test_request"
         elif intent == "revise":
-            # 用户想修改需求
-            result = "requirement_intake"
+            # 用户想升级/修改已评估版本 → 创建下一轮迭代草稿
+            result = "iterate_agent_version" if state.get("version_id") else "requirement_intake"
         elif intent == "cancel":
             result = "end"
         else:
@@ -383,9 +408,12 @@ def route_after_classify(state: "AgentBuilderState") -> str:
             state["clarification_needed"] = True
 
     else:
-        # 未知 wait 节点，回到该节点
-        result = current_node
-        state["clarification_needed"] = True
+        # 未知节点：安全兜底到 END，避免错误路由到 action 节点
+        logger.warning(
+            "[Route][AfterClassify] 非预期的 current_node=%s, intent=%s → 兜底到 end",
+            current_node, intent,
+        )
+        result = "end"
 
     _log_route("route_after_classify", state, result)
     return result
