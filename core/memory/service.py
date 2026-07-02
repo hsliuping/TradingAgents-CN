@@ -297,12 +297,13 @@ class MemoryService:
         normalized_metadata_filters = _normalize_metadata_filters(metadata_filters)
 
         kwargs: Dict[str, Any] = {"limit": limit}
-        if user_id:
-            kwargs["user_id"] = user_id
-        if agent_id:
-            kwargs["agent_id"] = agent_id
 
-        exact_filters = _build_mem0_exact_filters(normalized_scopes, normalized_metadata_filters)
+        exact_filters = _build_mem0_exact_filters(normalized_scopes, normalized_metadata_filters) or {}
+        # mem0 v3 search() 不再支持顶层 user_id / agent_id，必须通过 filters 传递。
+        if user_id:
+            exact_filters["user_id"] = user_id
+        if agent_id:
+            exact_filters["agent_id"] = agent_id
         if exact_filters:
             kwargs["filters"] = exact_filters
         if len(normalized_scopes) > 1 or normalized_metadata_filters:
@@ -328,6 +329,7 @@ class MemoryService:
             for raw in raw_list:
                 if isinstance(raw, dict):
                     items.append(MemoryItem.from_mem0(raw))
+            items = _filter_items_by_entities(items, user_id=user_id, agent_id=agent_id)
             items = _filter_items_by_scopes(items, normalized_scopes)
             items = _filter_items_by_metadata(items, normalized_metadata_filters)
             return items[:limit]
@@ -413,8 +415,10 @@ class MemoryService:
         if not await self._ensure_init():
             return ""
 
-        kwargs: Dict[str, Any] = {"user_id": user_id, "limit": 50}
-        scope_filter = _build_mem0_scope_filter(scopes)
+        kwargs: Dict[str, Any] = {"limit": 50}
+        scope_filter = _build_mem0_scope_filter(scopes) or {}
+        if user_id:
+            scope_filter["user_id"] = user_id
         if scope_filter:
             kwargs["filters"] = scope_filter
 
@@ -426,6 +430,7 @@ class MemoryService:
                 for r in raw_list
                 if isinstance(r, dict)
             ]
+            items = _filter_items_by_entities(items, user_id=user_id)
             items = _filter_items_by_scopes(items, scopes)
             facts = [item.memory for item in items if item.memory]
             if not facts:
@@ -487,6 +492,7 @@ class MemoryService:
                 for raw in raw_list
                 if isinstance(raw, dict)
             ]
+            all_items = _filter_items_by_entities(all_items, user_id=user_id)
             all_items = _filter_items_by_scopes(all_items, normalized_scopes)
             all_items = _filter_items_by_metadata(all_items, normalized_metadata_filters)
             total = len(all_items)
@@ -623,6 +629,21 @@ def _filter_items_by_scopes(items: List[MemoryItem], scopes: Optional[List[str]]
     if not normalized:
         return items
     return [item for item in items if (item.scope or "") in normalized]
+
+
+def _filter_items_by_entities(items: List[MemoryItem], *, user_id: str = "", agent_id: str = "") -> List[MemoryItem]:
+    expected_user = str(user_id or "").strip()
+    expected_agent = str(agent_id or "").strip()
+    if not expected_user and not expected_agent:
+        return items
+    matched: List[MemoryItem] = []
+    for item in items:
+        if expected_user and str(item.user_id or "").strip() != expected_user:
+            continue
+        if expected_agent and str(item.agent_id or "").strip() != expected_agent:
+            continue
+        matched.append(item)
+    return matched
 
 
 def _filter_items_by_metadata(items: List[MemoryItem], filters: Optional[Dict[str, str]]) -> List[MemoryItem]:

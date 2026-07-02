@@ -19,7 +19,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from threading import Lock
 from time import perf_counter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -105,6 +105,9 @@ class AgentWorkshopService:
     """Agent 工坊服务层"""
 
     _LLM_TIMEOUT = 360
+    _GAP_ANALYSIS_MIN_RETRIEVAL_SCORE = 0.42
+    _GAP_ANALYSIS_PER_QUERY_PIN_LIMIT = 4
+    _GAP_ANALYSIS_LEGAL_TOOL_LIMIT = 24
 
     def __init__(self, db: AsyncIOMotorDatabase):
         self._db = db
@@ -534,8 +537,9 @@ class AgentWorkshopService:
         if not clean_agent_id or not clean_agent_name or not clean_responsibility:
             raise ValueError("agent_id、agent_name、target_responsibility 不能为空")
 
+        output_identifier = " ".join([clean_agent_name, clean_responsibility]).strip() or clean_agent_id
         clean_output_field = self._normalize_nanobot_output_field(
-            clean_agent_id,
+            output_identifier,
             str(output_field or "analysis_report").strip(),
         )
 
@@ -578,7 +582,7 @@ class AgentWorkshopService:
             normalized_methods = self._dedupe([*normalized_methods, f"workflow_stage:{runtime_contract['workflow_stage']}"])
         normalized_outputs = self._normalize_nanobot_output_items(
             existing_spec.outputs if existing_spec and existing_spec.outputs else [clean_output_field],
-            clean_agent_id,
+            output_identifier,
         )
 
         if GLOBAL_NO_TRADING_ADVICE_CONSTRAINT not in normalized_constraints:
@@ -1266,6 +1270,9 @@ class AgentWorkshopService:
                 if str(item or "").strip()
             ])
             if metadata_unresolved:
+                current_unresolved_set = set(unresolved)
+                metadata_unresolved = [gap for gap in metadata_unresolved if gap in current_unresolved_set]
+            if metadata_unresolved:
                 logger.warning(
                     "[AgentWorkshop][GapGuard] blocked stage=%s version_id=%s unresolved_metadata=%s",
                     stage,
@@ -1280,44 +1287,6 @@ class AgentWorkshopService:
             allowed_acknowledged = self._validate_acknowledged_blocking_gaps_for_build(session, unresolved)
             if allowed_acknowledged:
                 return
-
-        # 如果版本已绑定 required_tools，再检查 required_tools 是否覆盖了 gap
-        if unresolved and version.required_tools:
-            still_unresolved = []
-            for gap in unresolved:
-                gap_lower = str(gap).lower()
-                covered = False
-                for tool in version.required_tools:
-                    tool_lower = str(tool).lower()
-                    # 检查工具名是否与 gap 描述中的关键词匹配
-                    if any(keyword in gap_lower and keyword in tool_lower for keyword in [
-                        "risk", "factor", "quality", "trend", "signal", "flag",
-                        "商誉", "风险", "质量", "趋势", "异常", "信号",
-                    ]):
-                        covered = True
-                        break
-                    # 🔥 跨语言匹配：利用 tool 注册表的 description / capability_tags
-                    if self._tool_covers_gap_cross_language(tool, gap):
-                        logger.info(
-                            "[AgentWorkshop][GapGuard][CrossLang] tool=%s covers gap=%s via cross-language matching",
-                            tool,
-                            gap,
-                        )
-                        covered = True
-                        break
-                    # 检查工具是否在 existing_tools 里（即 gap 已被现有工具覆盖）
-                    if gap in (gap_report.existing_tools or []):
-                        covered = True
-                        break
-                if not covered:
-                    still_unresolved.append(gap)
-            if still_unresolved != unresolved:
-                logger.info(
-                    "[AgentWorkshop][GapGuard] resolved %s gaps via cross-language matching, still_unresolved=%s",
-                    len(unresolved) - len(still_unresolved),
-                    still_unresolved,
-                )
-            unresolved = still_unresolved
 
         if not unresolved:
             return
@@ -1342,9 +1311,19 @@ class AgentWorkshopService:
 
         candidates: List[Tuple[List[str], List[str], str]] = [
             (
+                ["get_receivables_quality", "get_accounts_receivable_risk_analyzer", "get_financial_risk_factors"],
+                ["应收账款", "应收", "receivable", "receivables", "dso", "周转率", "周转天数", "账龄", "坏账", "回款", "收款", "信用减值"],
+                "应收账款质量/异常分析已由应收账款质量评分、应收账款风险分析和财务风险因子工具覆盖",
+            ),
+            (
                 ["get_historical_financial_annual_series_tool", "get_profitability_stability_metrics_tool", "get_cashflow_quality_trend_tool"],
                 ["历史财务", "财务指标时间序列", "多年序列", "年报序列", "盈利稳定性", "现金流质量", "长期趋势", "波动性"],
                 "历史财务指标时间序列能力已由标准财务序列、盈利稳定性和现金流质量趋势工具覆盖",
+            ),
+            (
+                ["get_cashflow_quality_trend_tool", "get_growth_cashflow_factor_bundle_tool", "get_cashflow_analysis", "get_financial_fraud_signals"],
+                ["现金流恶化", "现金流风险", "现金流异常", "现金流下滑", "经营现金流下滑", "经营现金流恶化", "自由现金流长期为负", "现金收入比", "利润含金量", "现金流质量"],
+                "现金流恶化/质量分析已由现金流质量趋势、成长现金流因子、现金流量表分析和财务造假信号工具覆盖",
             ),
             (
                 ["get_cashflow_quality_trend_tool", "get_growth_cashflow_factor_bundle_tool", "get_cashflow_analysis"],
@@ -1442,7 +1421,10 @@ class AgentWorkshopService:
         #    例如 get_financial_risk_factors → 覆盖 风险/财务/商誉/应收账款
         known_coverage = {
             "get_financial_risk_factors": ["商誉", "应收账款", "现金流", "风险", "减计", "减值", "异常", "财务"],
-            "get_cashflow_quality_trend_tool": ["现金流", "质量", "趋势", "波动"],
+            "get_receivables_quality": ["应收账款", "应收", "账龄", "坏账", "周转", "周转率", "dso", "回款", "质量", "异常", "风险"],
+            "get_accounts_receivable_risk_analyzer": ["应收账款", "应收", "信用减值", "坏账", "周转", "周转天数", "收入质量", "异常", "风险"],
+            "get_cashflow_quality_trend_tool": ["现金流", "质量", "趋势", "波动", "恶化", "下滑", "长期为负", "现金收入比", "利润含金量", "经营现金流", "自由现金流"],
+            "get_growth_cashflow_factor_bundle_tool": ["现金流", "成长", "增长", "fcf", "ocf", "自由现金流", "经营现金流", "fcf margin", "cashflow", "恶化"],
             "get_risk_event_flags_tool": ["风险", "事件", "信号", "预警", "异常"],
             "get_balance_sheet_analysis": ["资产负债表", "负债", "资产", "商誉", "应收", "应付", "存货"],
             "get_cashflow_analysis": ["现金流", "经营", "投资", "融资"],
@@ -1464,7 +1446,11 @@ class AgentWorkshopService:
         gap_report: Optional[AgentWorkshopGapAnalysis],
         auto_resolved_gaps: List[Dict[str, Any]],
     ) -> List[str]:
-        """找出仍未被自动补齐 Skill 或已注册内置工具覆盖的 blocking gaps。"""
+        """找出仍未被自动补齐 Skill 覆盖的 blocking gaps。
+
+        不再通过服务层关键词/跨语言规则把 gap 判定为已覆盖；gap 是否已被现有能力覆盖，
+        应由能力索引召回结果 + LLM gap_report 决定。
+        """
         blocking_gaps = [
             str(item or "").strip()
             for item in list(getattr(gap_report, "blocking_gaps", None) or [])
@@ -1478,25 +1464,7 @@ class AgentWorkshopService:
             for item in auto_resolved_gaps or []
             if str((item or {}).get("skill_tool_id") or "").strip()
         }
-        resolved_count = len([
-            item for item in auto_resolved_gaps or []
-            if str((item or {}).get("skill_tool_id") or "").strip()
-        ])
-
-        builtin_resolved_texts = {
-            gap for gap in blocking_gaps
-            if self._builtin_tool_evidence_for_gap(gap) is not None
-        }
-        if builtin_resolved_texts:
-            logger.info(
-                "[AgentWorkshop][GapGuard][BuiltinEvidence] resolved_by_builtin count=%s gaps=%s",
-                len(builtin_resolved_texts),
-                list(builtin_resolved_texts)[:5],
-            )
-        unresolved = [gap for gap in blocking_gaps if gap not in resolved_texts and gap not in builtin_resolved_texts]
-        if resolved_count + len(builtin_resolved_texts) >= len(blocking_gaps):
-            return []
-        return unresolved
+        return [gap for gap in blocking_gaps if gap not in resolved_texts]
 
     def _get_session_selected_plan_id(self, session: AgentWorkshopSession) -> str:
         contracts = session.builder_contracts if isinstance(session.builder_contracts, dict) else {}
@@ -1999,7 +1967,138 @@ class AgentWorkshopService:
 
         return {"spec_id": spec_id, "updated_fields": list(safe_updates.keys())}
 
-    async def delete_spec(self, spec_id: str) -> Dict[str, Any]:
+    async def _collect_workshop_prompt_template_ids(
+        self,
+        version_ids: List[str],
+        prompt_template_ids: Optional[List[str]] = None,
+    ) -> List[str]:
+        """收集 Agent 工坊版本关联的 PromptTemplate ID。"""
+        ids: Set[str] = {str(item).strip() for item in (prompt_template_ids or []) if str(item or "").strip()}
+        if not version_ids:
+            return list(ids)
+
+        query = {
+            "$or": [
+                {"agent_type": "universal", "agent_name": {"$in": version_ids}},
+            ]
+        }
+        object_ids = [ObjectId(item) for item in ids if ObjectId.is_valid(item)]
+        string_ids = [item for item in ids if item]
+        id_conditions: List[Dict[str, Any]] = []
+        if object_ids:
+            id_conditions.append({"_id": {"$in": object_ids}})
+        if string_ids:
+            id_conditions.append({"_id": {"$in": string_ids}})
+        if id_conditions:
+            query["$or"].extend(id_conditions)
+
+        docs = await self._db["prompt_templates"].find(query, {"_id": 1}).to_list(length=500)
+        for doc in docs:
+            template_id = str(doc.get("_id") or "").strip()
+            if template_id:
+                ids.add(template_id)
+        return list(ids)
+
+    async def _delete_prompt_templates_and_links(self, template_ids: List[str], agent_names: Optional[List[str]] = None) -> Dict[str, int]:
+        """删除模板、模板历史和用户模板配置，避免 Agent 工坊删除后留下孤儿数据。"""
+        clean_ids = [str(item).strip() for item in template_ids if str(item or "").strip()]
+        clean_agent_names = [str(item).strip() for item in (agent_names or []) if str(item or "").strip()]
+        object_ids = [ObjectId(item) for item in clean_ids if ObjectId.is_valid(item)]
+
+        template_delete_conditions: List[Dict[str, Any]] = []
+        if object_ids:
+            template_delete_conditions.append({"_id": {"$in": object_ids}})
+        if clean_ids:
+            template_delete_conditions.append({"_id": {"$in": clean_ids}})
+        if clean_agent_names:
+            template_delete_conditions.append({"agent_type": "universal", "agent_name": {"$in": clean_agent_names}})
+
+        history_conditions: List[Dict[str, Any]] = []
+        if clean_ids:
+            history_conditions.append({"template_id": {"$in": clean_ids}})
+        if object_ids:
+            history_conditions.append({"template_id": {"$in": object_ids}})
+
+        config_conditions: List[Dict[str, Any]] = []
+        if clean_ids:
+            config_conditions.append({"template_id": {"$in": clean_ids}})
+        if object_ids:
+            config_conditions.append({"template_id": {"$in": object_ids}})
+        if clean_agent_names:
+            config_conditions.append({"agent_type": "universal", "agent_name": {"$in": clean_agent_names}})
+
+        deleted_prompts = await self._db["prompt_templates"].delete_many({"$or": template_delete_conditions}) if template_delete_conditions else None
+        deleted_history = await self._db["template_history"].delete_many({"$or": history_conditions}) if history_conditions else None
+        deleted_configs = await self._db["user_template_configs"].delete_many({"$or": config_conditions}) if config_conditions else None
+
+        return {
+            "deleted_prompts": deleted_prompts.deleted_count if deleted_prompts is not None else 0,
+            "deleted_template_history": deleted_history.deleted_count if deleted_history is not None else 0,
+            "deleted_user_template_configs": deleted_configs.deleted_count if deleted_configs is not None else 0,
+        }
+
+    async def _check_workflow_references(self, agent_ids: List[str]) -> List[Dict[str, Any]]:
+        """检查 Agent 被哪些工作流引用，返回引用的工作流列表。
+
+        返回格式：
+        [
+            {"workflow_id": "...", "workflow_name": "...", "referenced_agents": ["agent_id1", ...]},
+            ...
+        ]
+        """
+        if not agent_ids:
+            return []
+
+        agent_id_set = set(str(aid).strip() for aid in agent_ids if str(aid or "").strip())
+        if not agent_id_set:
+            return []
+
+        try:
+            # 查找所有包含这些 agent_id 的工作流节点
+            # 使用 $elemMatch 匹配 nodes 数组中 agent_id 在目标列表中的文档
+            cursor = self._db["workflow_definitions"].find(
+                {
+                    "nodes": {
+                        "$elemMatch": {
+                            "agent_id": {"$in": list(agent_id_set)}
+                        }
+                    },
+                    "status": {"$ne": "deleted"}  # 排除已删除的工作流
+                },
+                {
+                    "id": 1,
+                    "name": 1,
+                    "nodes": 1,
+                    "status": 1,
+                    "updated_at": 1
+                }
+            )
+            workflows = await cursor.to_list(length=200)
+        except Exception:
+            # 如果集合不存在或查询出错，返回空列表
+            return []
+
+        result = []
+        for wf in workflows:
+            # 找出具体引用了哪些 agent
+            nodes = wf.get("nodes", []) or []
+            referenced = set()
+            for node in nodes:
+                node_agent_id = str(node.get("agent_id") or "").strip()
+                if node_agent_id and node_agent_id in agent_id_set:
+                    referenced.add(node_agent_id)
+            if referenced:
+                result.append({
+                    "workflow_id": str(wf.get("id") or wf.get("_id")),
+                    "workflow_name": str(wf.get("name") or "(未命名工作流)"),
+                    "status": str(wf.get("status") or "unknown"),
+                    "updated_at": wf.get("updated_at"),
+                    "referenced_agents": sorted(list(referenced)),
+                })
+
+        return result
+
+    async def delete_spec(self, spec_id: str, force: bool = False) -> Dict[str, Any]:
         spec_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": spec_id})
         if not spec_doc:
             return {"deleted": False, "spec_id": spec_id}
@@ -2014,6 +2113,22 @@ class AgentWorkshopService:
             if agent_id:
                 runtime_agent_ids.append(agent_id)
 
+        # 🔑 检查是否被工作流引用
+        all_agent_ids = list(set(runtime_agent_ids + version_ids))
+        workflow_refs = await self._check_workflow_references(all_agent_ids)
+        if workflow_refs and not force:
+            logger.warning(
+                "[AgentWorkshop][DeleteSpec] Agent 被工作流引用，阻止删除: spec_id=%s refs=%d",
+                spec_id, len(workflow_refs)
+            )
+            return {
+                "deleted": False,
+                "spec_id": spec_id,
+                "blocked_by_workflows": True,
+                "workflow_references": workflow_refs,
+                "message": f"该 Agent 被 {len(workflow_refs)} 个工作流引用，无法删除。请先从这些工作流中移除该 Agent。"
+            }
+
         prompt_template_ids: List[str] = []
         for item in version_docs:
             template_ref = item.get("prompt_template_ref") or {}
@@ -2021,15 +2136,15 @@ class AgentWorkshopService:
             if template_id:
                 prompt_template_ids.append(str(template_id))
 
+        prompt_template_ids = await self._collect_workshop_prompt_template_ids(
+            version_ids=version_ids,
+            prompt_template_ids=prompt_template_ids,
+        )
+
         deleted_sessions = await self._db[SESSION_COLLECTION].delete_many({"spec_id": spec_id})
         deleted_versions = await self._db[VERSION_COLLECTION].delete_many({"spec_id": spec_id})
         deleted_evaluations = await self._db[EVALUATION_COLLECTION].delete_many({"version_id": {"$in": version_ids}}) if version_ids else None
-        # 🔑 prompt_template_ids 是字符串，需转为 ObjectId 才能匹配 prompt_templates 集合中的 _id
-        prompt_template_object_ids: list[ObjectId] = []
-        for tid in prompt_template_ids:
-            if ObjectId.is_valid(tid):
-                prompt_template_object_ids.append(ObjectId(tid))
-        deleted_prompts = await self._db["prompt_templates"].delete_many({"_id": {"$in": prompt_template_object_ids}}) if prompt_template_object_ids else None
+        prompt_cleanup = await self._delete_prompt_templates_and_links(prompt_template_ids, agent_names=version_ids)
         runtime_config_query: Dict[str, Any] = {"$or": [{"metadata.spec_id": spec_id}]}
         runtime_binding_queries: List[Dict[str, Any]] = []
         if runtime_agent_ids:
@@ -2048,9 +2163,8 @@ class AgentWorkshopService:
             deleted_runtime_bindings = await self._db["tool_agent_bindings"].delete_many({"$or": runtime_binding_queries})
         else:
             deleted_runtime_bindings = None
-        # 🔑 清理 gap_resolution_jobs 和 template_history 中的孤儿数据
+        # 🔑 清理 gap_resolution_jobs 中的孤儿数据
         deleted_gap_jobs = await self._db["agent_workshop_gap_resolution_jobs"].delete_many({"spec_id": spec_id}) if "agent_workshop_gap_resolution_jobs" in await self._db.list_collection_names() else None
-        deleted_template_history = await self._db["template_history"].delete_many({"template_id": {"$in": prompt_template_ids}}) if prompt_template_ids else None
         deleted_spec = await self._db[SPEC_COLLECTION].delete_one({"spec_id": spec_id})
 
         # 🔑 清理长期记忆（mem0）中与此 Agent 相关的记录
@@ -2071,11 +2185,12 @@ class AgentWorkshopService:
             "deleted_sessions": deleted_sessions.deleted_count,
             "deleted_versions": deleted_versions.deleted_count,
             "deleted_evaluations": deleted_evaluations.deleted_count if deleted_evaluations is not None else 0,
-            "deleted_prompts": deleted_prompts.deleted_count if deleted_prompts is not None else 0,
+            "deleted_prompts": prompt_cleanup["deleted_prompts"],
+            "deleted_user_template_configs": prompt_cleanup["deleted_user_template_configs"],
             "deleted_runtime_configs": deleted_runtime_configs.deleted_count if deleted_runtime_configs is not None else 0,
             "deleted_runtime_bindings": deleted_runtime_bindings.deleted_count if deleted_runtime_bindings is not None else 0,
             "deleted_gap_jobs": deleted_gap_jobs.deleted_count if deleted_gap_jobs is not None else 0,
-            "deleted_template_history": deleted_template_history.deleted_count if deleted_template_history is not None else 0,
+            "deleted_template_history": prompt_cleanup["deleted_template_history"],
             "deleted_memories": memory_deleted_count,
         }
 
@@ -2345,7 +2460,7 @@ class AgentWorkshopService:
             doc["last_evaluation_summary"] = None
         return doc
 
-    async def delete_version(self, version_id: str) -> Dict[str, Any]:
+    async def delete_version(self, version_id: str, force: bool = False) -> Dict[str, Any]:
         version_doc = await self._db[VERSION_COLLECTION].find_one({"version_id": version_id})
         if not version_doc:
             return {"deleted": False, "version_id": version_id}
@@ -2356,15 +2471,36 @@ class AgentWorkshopService:
 
         agent_metadata = version.agent_metadata or {}
         runtime_agent_id = str(agent_metadata.get("id") or version.version_id or "").strip()
+
+        # 🔑 检查是否被工作流引用
+        agent_ids_to_check = [version_id]
+        if runtime_agent_id and runtime_agent_id != version_id:
+            agent_ids_to_check.append(runtime_agent_id)
+        workflow_refs = await self._check_workflow_references(agent_ids_to_check)
+        if workflow_refs and not force:
+            logger.warning(
+                "[AgentWorkshop][DeleteVersion] Agent 版本被工作流引用，阻止删除: version_id=%s refs=%d",
+                version_id, len(workflow_refs)
+            )
+            return {
+                "deleted": False,
+                "version_id": version_id,
+                "spec_id": version.spec_id,
+                "blocked_by_workflows": True,
+                "workflow_references": workflow_refs,
+                "message": f"该 Agent 版本被 {len(workflow_refs)} 个工作流引用，无法删除。请先从这些工作流中移除该 Agent。"
+            }
+
         template_ref = version.prompt_template_ref or {}
         prompt_template_id = str(template_ref.get("template_id") or "").strip()
 
+        prompt_template_ids = await self._collect_workshop_prompt_template_ids(
+            version_ids=[version_id],
+            prompt_template_ids=[prompt_template_id] if prompt_template_id else [],
+        )
+
         deleted_evaluations = await self._db[EVALUATION_COLLECTION].delete_many({"version_id": version_id})
-        # 🔑 prompt_template_id 是字符串，需转为 ObjectId 才能匹配 prompt_templates 集合中的 _id
-        if prompt_template_id and ObjectId.is_valid(prompt_template_id):
-            deleted_prompts = await self._db["prompt_templates"].delete_one({"_id": ObjectId(prompt_template_id)})
-        else:
-            deleted_prompts = None
+        prompt_cleanup = await self._delete_prompt_templates_and_links(prompt_template_ids, agent_names=[version_id])
         runtime_config_query: Dict[str, Any] = {"$or": [{"metadata.version_id": version_id}]}
         runtime_binding_queries: List[Dict[str, Any]] = []
         if runtime_agent_id:
@@ -2415,7 +2551,9 @@ class AgentWorkshopService:
             "current_version_id": fallback_version_id,
             "remaining_versions": remaining_version_count,
             "deleted_evaluations": deleted_evaluations.deleted_count,
-            "deleted_prompts": deleted_prompts.deleted_count if deleted_prompts is not None else 0,
+            "deleted_prompts": prompt_cleanup["deleted_prompts"],
+            "deleted_template_history": prompt_cleanup["deleted_template_history"],
+            "deleted_user_template_configs": prompt_cleanup["deleted_user_template_configs"],
             "deleted_runtime_configs": deleted_runtime_configs.deleted_count if deleted_runtime_configs is not None else 0,
             "deleted_runtime_bindings": deleted_runtime_bindings.deleted_count if deleted_runtime_bindings is not None else 0,
             "deleted_memories": memory_deleted_count,
@@ -2595,14 +2733,32 @@ class AgentWorkshopService:
         version.updated_at = now_tz()
         await self._save_version(version)
 
+        published_template_name = f"{spec.name} v{version.version}"
+        published_template_remark = f"Agent 工坊发布的正式版本模板，版本 {version.version_id}"
+
         template_id = str(version.prompt_template_ref.get("template_id") or "").strip()
+        if not template_id:
+            logger.warning(
+                "[AgentWorkshop][Publish] 版本缺少 PromptTemplate，发布前自动重建: version_id=%s spec_id=%s",
+                version.version_id,
+                spec.spec_id,
+            )
+            version.prompt_template_ref = await self._create_prompt_template(
+                version.version_id,
+                spec,
+                list(version.required_tools or []),
+            )
+            template_id = str(version.prompt_template_ref.get("template_id") or "").strip()
+            version.updated_at = now_tz()
+            await self._save_version(version)
+
         if template_id:
             template_filter: Dict[str, Any]
             if ObjectId.is_valid(template_id):
                 template_filter = {"_id": ObjectId(template_id)}
             else:
                 template_filter = {"_id": template_id}
-            await self._db["prompt_templates"].update_one(
+            update_result = await self._db["prompt_templates"].update_one(
                 template_filter,
                 {
                     "$set": {
@@ -2610,11 +2766,43 @@ class AgentWorkshopService:
                         "agent_name": version.version_id,
                         "workflow_id": None,
                         "node_id": None,
+                        "template_name": published_template_name,
+                        "remark": published_template_remark,
                         "status": "active",
                         "updated_at": now_tz(),
                     }
                 },
             )
+            if update_result.matched_count == 0:
+                logger.warning(
+                    "[AgentWorkshop][Publish] PromptTemplate 引用不存在，发布前自动重建: version_id=%s template_id=%s",
+                    version.version_id,
+                    template_id,
+                )
+                version.prompt_template_ref = await self._create_prompt_template(
+                    version.version_id,
+                    spec,
+                    list(version.required_tools or []),
+                )
+                template_id = str(version.prompt_template_ref.get("template_id") or "").strip()
+                if template_id:
+                    template_filter = {"_id": ObjectId(template_id)} if ObjectId.is_valid(template_id) else {"_id": template_id}
+                    await self._db["prompt_templates"].update_one(
+                        template_filter,
+                        {
+                            "$set": {
+                                "agent_type": "universal",
+                                "agent_name": version.version_id,
+                                "workflow_id": None,
+                                "node_id": None,
+                                "template_name": published_template_name,
+                                "remark": published_template_remark,
+                                "status": "active",
+                                "updated_at": now_tz(),
+                            }
+                        },
+                    )
+            version.prompt_template_ref["template_name"] = published_template_name
             version.prompt_template_ref["status"] = "active"
             version.prompt_template_ref["project_memory_binding"] = {
                 "enabled": project_memory_binding["enabled"],
@@ -4222,16 +4410,47 @@ class AgentWorkshopService:
         return f"agent_{normalized}"
 
     def _normalize_generated_output_identifier(self, identifier: str) -> str:
-        raw_identifier = str(identifier or "").strip().lower()
+        raw_text = str(identifier or "").strip()
+        semantic_identifier = self._infer_semantic_output_identifier(raw_text)
+        if semantic_identifier:
+            return semantic_identifier
+
+        raw_identifier = raw_text.lower()
         normalized_identifier = re.sub(r"[^a-zA-Z0-9_]+", "_", raw_identifier).strip("_")
         normalized_identifier = re.sub(r"^spec_nanobot_", "", normalized_identifier)
         normalized_identifier = re.sub(r"^spec_", "", normalized_identifier)
         normalized_identifier = re.sub(r"^agent_", "", normalized_identifier)
         normalized_identifier = re.sub(r"_v\d+$", "", normalized_identifier)
-        if normalized_identifier:
-          return normalized_identifier
+        if normalized_identifier and not re.match(r"^(candidate|agent_candidate)_[a-f0-9]{6,}$", normalized_identifier):
+            return normalized_identifier
         digest = hashlib.md5(raw_identifier.encode("utf-8")).hexdigest()[:8] if raw_identifier else uuid.uuid4().hex[:8]
-        return f"spec_{digest}"
+        return f"analysis_{digest}"
+
+    def _infer_semantic_output_identifier(self, text: str) -> str:
+        haystack = str(text or "").lower()
+        if any(keyword in haystack for keyword in ["估值", "valuation", "dcf", "pe", "pb", "peg"]):
+            return "valuation_analysis"
+        if any(keyword in haystack for keyword in ["财报风险", "财务风险", "风险评估", "风险信号", "排雷", "造假", "商誉", "应收", "现金流恶化"]):
+            return "financial_risk_assessment"
+        if any(keyword in haystack for keyword in ["现金流", "cashflow", "cash_flow"]):
+            return "cashflow_analysis"
+        if any(keyword in haystack for keyword in ["商誉", "goodwill"]):
+            return "goodwill_risk_assessment"
+        if any(keyword in haystack for keyword in ["应收", "receivable"]):
+            return "receivables_risk_assessment"
+        if any(keyword in haystack for keyword in ["行业", "同业", "peer", "industry"]):
+            return "industry_comparison"
+        if any(keyword in haystack for keyword in ["基本面", "fundamental"]):
+            return "fundamental_analysis"
+        if any(keyword in haystack for keyword in ["风险", "risk"]):
+            return "risk_assessment"
+        return ""
+
+    def _is_machine_generated_output_name(self, value: str) -> bool:
+        normalized = re.sub(r"[^a-zA-Z0-9_]+", "_", str(value or "").strip()).strip("_").lower()
+        normalized = re.sub(r"^spec_", "", normalized)
+        normalized = re.sub(r"^agent_", "", normalized)
+        return bool(re.match(r"^(candidate|agent_candidate)_[a-f0-9]{6,}(_v\d+)?_(report|result|summary|assessment|output)$", normalized))
 
     def _normalize_generated_output_field(self, identifier: str, output_field: str) -> str:
         generic_suffix_map = {
@@ -4250,7 +4469,7 @@ class AgentWorkshopService:
         normalized_output = re.sub(r"[^a-zA-Z0-9_]+", "_", str(output_field or "").strip()).strip("_").lower()
         normalized_identifier = self._normalize_generated_output_identifier(identifier)
 
-        if normalized_output and normalized_output not in generic_suffix_map:
+        if normalized_output and normalized_output not in generic_suffix_map and not self._is_machine_generated_output_name(normalized_output):
             if re.match(r"^\d", normalized_output):
                 return f"field_{normalized_output}"
             return normalized_output
@@ -4545,8 +4764,11 @@ class AgentWorkshopService:
             hits = await capability_index.search_capabilities(
                 query=query_text or "金融分析 Agent 能力",
                 top_k=top_k,
-                bindable_only=False,
+                bindable_only=True,
+                source_types=["builtin_tool", "skill", "external_skill", "mcp_tool"],
+                categories=self._gap_analysis_search_categories(),
             )
+            hits = [hit for hit in hits if float(hit.score or 0.0) >= self._GAP_ANALYSIS_MIN_RETRIEVAL_SCORE]
             if not hits:
                 return await self._collect_capability_snapshot_fallback()
 
@@ -4583,6 +4805,8 @@ class AgentWorkshopService:
             for hit in hits:
                 capability = hit.capability
                 detail = self._build_capability_detail_from_document(capability)
+                detail["retrieval_score"] = float(hit.score or 0.0)
+                detail["retrieval_rank"] = len(builtin_tool_details) + len(external_skill_details) + 1
                 label = str(detail.get("label") or "")
                 category = str(capability.category or "")
 
@@ -4635,6 +4859,18 @@ class AgentWorkshopService:
             logger.warning("[AgentWorkshop] CapabilityIndex 检索失败，回退注册表快照: %s", exc)
             return await self._collect_capability_snapshot_fallback()
 
+    def _gap_analysis_search_categories(self) -> List[str]:
+        return [
+            ToolCategory.MARKET.value,
+            ToolCategory.FUNDAMENTALS.value,
+            ToolCategory.NEWS.value,
+            ToolCategory.SOCIAL.value,
+            ToolCategory.CHINA.value,
+            ToolCategory.TECHNICAL.value,
+            ToolCategory.SCREENING.value,
+            ToolCategory.TRADE_REVIEW.value,
+        ]
+
     async def _collect_capability_snapshot_multi(
         self,
         query_texts: List[str],
@@ -4655,25 +4891,62 @@ class AgentWorkshopService:
             capability_index = CapabilityIndexService(self._db)
             await capability_index.ensure_index()
 
-            # 对每个 query 做搜索，合并结果
-            merged_hits = {}  # capability_id -> (hit, score)
-            for query_text in query_texts[:8]:  # 限制最多 8 次搜索
+            # 对每个 query 做搜索，合并结果，并保留每条查询的前几名。
+            # 这样具体能力词（如“现金流恶化”）不会被长规格查询的全局分数挤掉。
+            merged_hits: Dict[str, Tuple[Any, float, int]] = {}
+            per_query_top_ids: List[str] = []
+            below_threshold: List[Tuple[str, str, float, int]] = []
+            for query_index, query_text in enumerate(query_texts[:10], start=1):
                 hits = await capability_index.search_capabilities(
                     query=query_text or "金融分析 Agent 能力",
                     top_k=top_k,
-                    bindable_only=False,
+                    bindable_only=True,
+                    source_types=["builtin_tool", "skill", "external_skill", "mcp_tool"],
+                    categories=self._gap_analysis_search_categories(),
                 )
-                for hit in hits:
+                accepted_for_query = 0
+                for rank, hit in enumerate(hits, start=1):
                     cap_id = hit.capability.capability_id
-                    if cap_id not in merged_hits or hit.score > merged_hits[cap_id][1]:
-                        merged_hits[cap_id] = (hit, hit.score)
+                    score = float(hit.score or 0.0)
+                    if score < self._GAP_ANALYSIS_MIN_RETRIEVAL_SCORE:
+                        below_threshold.append((cap_id, hit.capability.label, score, query_index))
+                        continue
+                    accepted_for_query += 1
+                    if accepted_for_query <= self._GAP_ANALYSIS_PER_QUERY_PIN_LIMIT and cap_id not in per_query_top_ids:
+                        per_query_top_ids.append(cap_id)
+                    if cap_id not in merged_hits or score > merged_hits[cap_id][1]:
+                        merged_hits[cap_id] = (hit, score, rank)
 
             if not merged_hits:
                 return await self._collect_capability_snapshot_fallback()
 
-            # 按分数排序，取 top_k * 2 个（多查询合并后适当扩大）
-            sorted_hits = sorted(merged_hits.values(), key=lambda x: x[1], reverse=True)
-            hits = [h[0] for h in sorted_hits[:top_k * 2]]
+            pinned_hits = [merged_hits[cap_id][0] for cap_id in per_query_top_ids if cap_id in merged_hits]
+            sorted_hits = [
+                item[0]
+                for item in sorted(merged_hits.values(), key=lambda x: x[1], reverse=True)
+                if item[0].capability.capability_id not in set(per_query_top_ids)
+            ]
+            hits = [*pinned_hits, *sorted_hits][:max(top_k * 2, self._GAP_ANALYSIS_LEGAL_TOOL_LIMIT)]
+            logger.info(
+                "[CapabilitySnapshot][Multi][Scores] queries=%d min_score=%.2f accepted=%d pinned=%d below_threshold=%d top=%s below=%s",
+                min(len(query_texts), 10),
+                self._GAP_ANALYSIS_MIN_RETRIEVAL_SCORE,
+                len(merged_hits),
+                len(per_query_top_ids),
+                len(below_threshold),
+                [
+                    {
+                        "id": h.capability.capability_id,
+                        "label": h.capability.label,
+                        "score": round(float(h.score or 0.0), 4),
+                    }
+                    for h in hits[:24]
+                ],
+                [
+                    {"id": item[0], "label": item[1], "score": round(item[2], 4), "query": item[3]}
+                    for item in below_threshold[:20]
+                ],
+            )
 
             # 复用 _collect_capability_snapshot 的分类逻辑
             all_capabilities = await capability_index.list_capabilities()
@@ -4709,6 +4982,8 @@ class AgentWorkshopService:
             for hit in hits:
                 capability = hit.capability
                 detail = self._build_capability_detail_from_document(capability)
+                detail["retrieval_score"] = float(hit.score or 0.0)
+                detail["retrieval_rank"] = len(builtin_tool_details) + len(external_skill_details) + 1
                 label = str(detail.get("label") or "")
                 category = str(capability.category or "")
 
@@ -4901,9 +5176,10 @@ class AgentWorkshopService:
             return []
 
         patterns = [
+            # ── 估值类 ──
             (r"(?<![a-z0-9])(valuation|valuations)(?![a-z0-9])", "valuation"),
             (r"(?<![a-z0-9])dcf(?![a-z0-9])", "dcf"),
-            (r"(?<![a-z0-9])pe(?![a-z0-9])|市盈率|pe_ttm", "pe"),
+            (r"(?<![a-z0-9])pe(?![a-z0-9])|市盈率|pe_ttm|p/e", "pe"),
             (r"(?<![a-z0-9])pb(?![a-z0-9])|市净率|pb_mrq", "pb"),
             (r"(?<![a-z0-9])peg(?![a-z0-9])", "peg"),
             (r"(?<![a-z0-9])ps(?![a-z0-9])", "ps"),
@@ -4914,7 +5190,42 @@ class AgentWorkshopService:
             (r"历史|多年|年报序列|时间序列|trend|series", "historical_series"),
             (r"分位|percentile|估值分位", "percentile"),
             (r"现金流|cashflow|fcf|ocf|经营现金流|自由现金流", "cashflow"),
-            (r"roe|roa|roic|毛利率|净利率|利润率|盈利稳定性|资本效率", "quality"),
+            (r"roe|roa|roic|毛利率|净利率|利润率|盈利稳定性|资本效率|piotroski|altman|beneish", "quality"),
+            (r"ma20|rsi14|rsi|kdj|macd|技术指标|technical", "technical"),
+            # ── 资产质量 / 基本面风险 ──
+            (r"应收账款|receivables|(?<![a-z0-9])dso(?![a-z0-9])|账龄|坏账|bad_debt|回款|收款", "asset_quality_receivables"),
+            (r"存货|inventory|(?<![a-z0-9])dio(?![a-z0-9])|存货周转|跌价", "asset_quality_inventory"),
+            (r"资产质量|asset_quality|资产减值", "asset_quality"),
+            (r"偿债|solvency|debt_to_equity|资产负债率|利息覆盖|利息保障|debt_structure|有息负债", "solvency"),
+            (r"流动性|liquidity|current_ratio|quick_ratio|流动比率|速动比率|短期偿债", "liquidity"),
+            (r"商誉|goodwill|减值测试|impairment", "goodwill"),
+            (r"破产|bankruptcy|ohlson|z_score|zscore|altman|beneish|mscore|oscore|欺诈|fraud|财务造假|财务舞弊|风险|risk_adjusted|risk_profile|risk_event|risk_flag", "risk"),
+            # ── 资本成本 / 风险度量 / 投资组合 / 归因分析 / 统计分析 ──
+            (r"wacc|capm|cost_of_equity|cost_of_debt|折现率|资本成本|加权平均资本成本", "cost_of_capital"),
+            (r"(?<![a-z0-9])beta(?![a-z0-9])|(?<![a-z0-9])alpha(?![a-z0-9])|sharpe|sortino|treynor|calmar|jensen|information_ratio|(?<![a-z0-9])var(?![a-z0-9])|cvar|volatility|波动率|最大回撤|max_drawdown|downside|风险调整", "risk_metrics"),
+            (r"portfolio|组合|efficient_frontier|monte_carlo|蒙特卡洛|马科维茨|markowitz|optimal_weight|最优权重|scenario_analysis|情景分析", "portfolio"),
+            (r"attribution|归因|brinson|factor_attribution|sector_attribution", "attribution"),
+            (r"correlation|cointegration|协整|regression|回归|normality|正态|stationarity|平稳|(?<![a-z0-9])adf(?![a-z0-9])|garch|ewma|统计|statistical", "statistics"),
+            # ── 筛选 / 宏观 / 股息 / 筹码 / 量价 ──
+            (r"screen|筛选|filter|过滤|选股", "screening"),
+            (r"macro|宏观|economic_cycle|经济周期|monetary|货币环境|美林时钟|yield_curve|收益率曲线|景气|recession|衰退|recovery|复苏|overheating|过热|stagflation|滞胀", "macro"),
+            (r"dividend|股息|分红|送股|红利|股利|送转|每股分红", "dividend"),
+            (r"chip|筹码|获利比例|平均成本|集中度", "chip_distribution"),
+            (r"vwap|obv|turnover|换手率|成交量|量价|volume_profile|成交额|主力净流入|资金流|capital_flow|fund_flow", "volume_analysis"),
+            # ── 技术分析扩展 ──
+            (r"pivot|支撑|阻力|压力位|fibonacci|斐波那契|枢轴点|颈线|趋势线", "support_resistance"),
+            (r"candlestick|k线|k 线|chart_pattern|形态|头肩|双顶|双底|三角形|旗形|楔形|缺口|十字星|锤头", "chart_pattern"),
+            # ── 债券 / 期权 / 事件研究 ──
+            (r"bond|债券|久期|duration|凸性|convexity|credit_spread|信用利差|国债|企业债|可转债", "bond"),
+            (r"option|期权|black_scholes|greeks|希腊字母|delta|gamma|theta|vega|rho|implied_volatility|隐含波动率|行权价|strike", "option"),
+            (r"event_study|事件研究|事件日|事件驱动|event_driven|公告事件|监管事件|event_timeline", "event_study"),
+            # ── 财务报表 / ETF / 内部人 / 市场宽度 / 证券主数据 ──
+            (r"income_analysis|利润表|营收|主营业务|main_business|收入结构|费用分析", "income_statement"),
+            (r"financial_statement|财务报表|balance_sheet|资产负债表|financial_statements|fundamentals_unified|财务数据", "financial_statements"),
+            (r"(?<![a-z0-9])etf(?![a-z0-9])|基金基本面", "etf_fundamentals"),
+            (r"insider|内部人|内部人士|insider_sentiment|insider_transaction", "insider"),
+            (r"market_breadth|市场宽度|market_overview|市场概览|market_environment|市场环境|market_cycle|市场周期|涨跌家数|breadth|index_data|指数数据|sector_data|板块数据|sector_analysis|板块分析", "market_breadth"),
+            (r"security_master|证券主数据|上市状态|stock_master|证券信息|交易所|市值", "security_master"),
         ]
         matched: List[str] = []
         for pattern, normalized in patterns:
@@ -4955,86 +5266,64 @@ class AgentWorkshopService:
             "source": "builtin",
         }
 
+    def _is_gap_analysis_candidate_tool(self, detail: Dict[str, Any]) -> bool:
+        category = str(detail.get("category") or "").strip().lower()
+        source = str(detail.get("source") or "").strip().lower()
+        label = str(detail.get("label") or "").strip()
+        if not label:
+            return False
+        if source == "builtin" and category in {ToolCategory.ASSISTANT_OPS.value, ToolCategory.UTILITY.value, ToolCategory.KNOWLEDGE.value, ToolCategory.MCP.value}:
+            return False
+        return True
+
     def _select_gap_analysis_tool_details(
         self,
         spec: AgentSpec,
         capability_snapshot: Dict[str, Any],
-        limit: int = 8,
+        limit: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
-        spec_text = self._build_valuation_requirement_text(spec)
-        is_valuation_spec = self._is_valuation_spec(spec)
-        requested_terms = set(self._extract_valuation_terms(spec_text))
-        specific_requested_terms = {term for term in requested_terms if term not in {"valuation", "valuation_cn"}}
+        """选择进入 gap prompt 的工具详情。
+
+        这里必须保留能力索引/向量检索的召回顺序，不再基于业务关键词、preferred_ids 或
+        coverage_terms 做二次重排。召回效果不好时，应改工具元数据和能力索引文本，而不是在
+        gap 分析链路里补手工关键词规则。
+        """
         candidates = [
             *(capability_snapshot.get("builtin_tool_details", []) or []),
             *(capability_snapshot.get("external_skill_details", []) or []),
         ]
-        preferred_ids = {
-            "get_stock_market_data_unified",
-            "get_stock_fundamentals_unified",
-            "get_peer_comparison",
-            "get_sector_constituents",
-            "calculate_pb_relative_valuation",
-            "calculate_peg_valuation",
-        }
-        if is_valuation_spec:
-            preferred_ids.update({
-                "get_value_factor_bundle_tool",
-                "get_fundamental_factor_snapshot_tool",
-            })
-
-        scored: List[Tuple[int, Dict[str, Any]]] = []
-        for detail in candidates:
-            tool_id = str(detail.get("tool_id") or "")
-            searchable = str(detail.get("searchable") or "")
-            coverage_terms = detail.get("coverage_terms") or []
-            coverage_term_set = set(str(term) for term in coverage_terms if str(term).strip())
-            specific_overlap = specific_requested_terms & coverage_term_set
-            score = 0
-            if tool_id in preferred_ids:
-                score += 80
-            if is_valuation_spec and coverage_terms:
-                score += 60
-            if requested_terms and coverage_term_set:
-                score += len(requested_terms & coverage_term_set) * 25
-            if requested_terms and len(requested_terms & coverage_term_set) >= 2:
-                score += 20
-            if specific_overlap:
-                score += len(specific_overlap) * 30
-            if is_valuation_spec and detail.get("category") == ToolCategory.FUNDAMENTALS.value:
-                score += 20
-            if "行业" in spec_text or "peer" in spec_text:
-                if "peer_comparison" in coverage_terms or "peer" in searchable:
-                    score += 20
-            if "peg" in spec_text and "peg" in coverage_terms:
-                score += 30
-            if any(token in spec_text for token in ["pe", "市盈率"]) and "pe" in coverage_terms:
-                score += 30
-            if any(token in spec_text for token in ["pb", "市净率"]) and "pb" in coverage_terms:
-                score += 30
-            if any(token in spec_text for token in ["估值", "valuation"]) and self._looks_like_valuation_capability(searchable):
-                score += 20
-            if any(token in searchable for token in ["综合", "synthesis", "report", "模板"]) and any(token in spec_text for token in ["综合解读", "汇总", "权重"]):
-                score += 10
-            if is_valuation_spec and tool_id not in preferred_ids and coverage_term_set and coverage_term_set.issubset({"valuation", "valuation_cn"}):
-                score -= 40
-            if is_valuation_spec and tool_id not in preferred_ids and specific_requested_terms and not specific_overlap and detail.get("category") != ToolCategory.FUNDAMENTALS.value:
-                score -= 30
-            if score > 0:
-                scored.append((score, detail))
-
-        scored.sort(key=lambda item: (-item[0], str(item[1].get("label") or "")))
+        limit = limit or self._GAP_ANALYSIS_LEGAL_TOOL_LIMIT
         selected: List[Dict[str, Any]] = []
         seen_labels: set[str] = set()
-        for _, detail in scored:
-            label = str(detail.get("label") or "")
+        skipped_labels: List[str] = []
+        for detail in candidates:
+            label = str(detail.get("label") or "").strip()
             if not label or label in seen_labels:
                 continue
             seen_labels.add(label)
+            if not self._is_gap_analysis_candidate_tool(detail):
+                skipped_labels.append(label)
+                continue
             selected.append(detail)
             if len(selected) >= limit:
                 break
-
+        logger.info(
+            "[GapAnalysis][LegalTools] spec_id=%s spec_name=%s selected=%d skipped_ops=%d min_score=%.2f labels=%s skipped=%s",
+            spec.spec_id,
+            spec.name,
+            len(selected),
+            len(skipped_labels),
+            self._GAP_ANALYSIS_MIN_RETRIEVAL_SCORE,
+            [
+                {
+                    "label": str(item.get("label") or ""),
+                    "score": round(float(item.get("retrieval_score") or 0.0), 4),
+                    "rank": item.get("retrieval_rank"),
+                }
+                for item in selected[:24]
+            ],
+            skipped_labels[:12],
+        )
         return selected
 
     def _format_coverage_term_label(self, term: str) -> str:
@@ -5097,14 +5386,16 @@ class AgentWorkshopService:
         lines: List[str] = []
         for detail in tool_details[:limit]:
             label = str(detail.get("label") or "")
-            coverage_terms = "/".join(detail.get("coverage_terms") or [])
             summary = str(detail.get("summary") or "")
-            if coverage_terms and summary:
-                lines.append(f"- {label}：覆盖 {coverage_terms}；{summary}")
-            elif summary:
-                lines.append(f"- {label}：{summary}")
+            score = detail.get("retrieval_score")
+            rank = detail.get("retrieval_rank")
+            retrieval_note = ""
+            if score is not None:
+                retrieval_note = f"；向量召回 rank={rank or '-'} score={float(score):.4f}"
+            if summary:
+                lines.append(f"- {label}{retrieval_note}：{summary}")
             else:
-                lines.append(f"- {label}")
+                lines.append(f"- {label}{retrieval_note}")
         return lines
 
     def _normalize_capability_id(self, value: Any) -> str:
@@ -5507,6 +5798,22 @@ class AgentWorkshopService:
         ]).lower()
         return spec.domain == "stock_analysis" and self._looks_like_valuation_capability(searchable)
 
+    def _is_financial_risk_spec(self, spec: AgentSpec) -> bool:
+        searchable = " ".join([
+            spec.name,
+            spec.spec_id,
+            spec.primary_goal,
+            " ".join(spec.responsibilities or []),
+            " ".join(self._list_io_field_labels(spec.outputs)),
+            " ".join(spec.preferred_methods),
+            " ".join(spec.success_criteria),
+            " ".join(spec.constraints or []),
+        ]).lower()
+        return spec.domain == "stock_analysis" and any(
+            keyword in searchable
+            for keyword in ["风险", "risk", "商誉", "应收", "现金流", "财务异常", "预警", "恶化", "利润含金量"]
+        )
+
     def _build_capability_label_lookup(self, capability_snapshot: Dict[str, Any]) -> Dict[str, str]:
         lookup: Dict[str, str] = {}
         for group_name in [
@@ -5545,6 +5852,35 @@ class AgentWorkshopService:
             capability_ids.append("calculate_peg_valuation")
 
         return self._dedupe(capability_ids)
+
+    def _build_risk_reuse_guidance_lines(
+        self,
+        spec: AgentSpec,
+        capability_snapshot: Dict[str, Any],
+    ) -> List[str]:
+        if not self._is_financial_risk_spec(spec):
+            return []
+        registered_ids = self._collect_registered_capability_ids(capability_snapshot)
+        guidance_lines: List[str] = [
+            "- 对财务风险信号类规格，不要因为没有同名‘现金流恶化分析器’就判定缺口；先判断现有现金流质量、成长现金流因子、现金流量表和财务造假信号工具能否组合覆盖。",
+        ]
+        if "get_cashflow_quality_trend_tool" in registered_ids:
+            guidance_lines.append(
+                "- get_cashflow_quality_trend_tool 已覆盖 OCF/净利、FCF/净利、经营现金流率、自由现金流率等多年趋势，可用于识别经营现金流下滑、利润含金量变差、自由现金流长期为负等现金流恶化信号。"
+            )
+        if "get_growth_cashflow_factor_bundle_tool" in registered_ids:
+            guidance_lines.append(
+                "- get_growth_cashflow_factor_bundle_tool 已提供经营现金流/自由现金流增长、FCF margin、OCF yield 等现金流因子，可作为现金流恶化和成长质量判断输入。"
+            )
+        if "get_financial_fraud_signals" in registered_ids:
+            guidance_lines.append(
+                "- get_financial_fraud_signals 已在收入确认、利润质量、现金流异常等维度给出风险信号，不应重复新建平行的现金流异常检测能力。"
+            )
+        if "get_cashflow_analysis" in registered_ids:
+            guidance_lines.append(
+                "- get_cashflow_analysis 可补充经营/投资/筹资现金流和多期趋势报告；结构化趋势工具不足时可作为解释型支撑工具。"
+            )
+        return guidance_lines
 
     def _build_valuation_reuse_guidance_lines(
         self,
@@ -5588,6 +5924,77 @@ class AgentWorkshopService:
             "- 如果现有工具组合可通过 Prompt/模板把 PE/PB/PEG 结果整理成结构化输出、综合解读或权重说明，这属于复用方案，不属于 blocking gap。"
         )
         return guidance_lines
+
+    def _enforce_builtin_gap_report(
+        self,
+        spec: AgentSpec,
+        gap_report: AgentWorkshopGapAnalysis,
+        capability_snapshot: Dict[str, Any],
+    ) -> AgentWorkshopGapAnalysis:
+        """通用内置能力纠偏：移除已被现有工具覆盖的 blocking gap 和伪建议项。"""
+        builtin_resolved_gaps = [
+            gap for gap in (gap_report.blocking_gaps or [])
+            if self._builtin_tool_evidence_for_gap(gap) is not None
+        ]
+        if not builtin_resolved_gaps:
+            return gap_report
+
+        builtin_evidence = [
+            self._builtin_tool_evidence_for_gap(gap) or {}
+            for gap in builtin_resolved_gaps
+        ]
+        builtin_tool_ids = self._dedupe([
+            str(item.get("skill_tool_id") or "").strip()
+            for item in builtin_evidence
+            if item.get("skill_tool_id")
+        ])
+        label_lookup = self._build_capability_label_lookup(capability_snapshot)
+        added_labels = [label_lookup.get(tool_id, tool_id) for tool_id in builtin_tool_ids]
+        resolved_text = " ".join([*builtin_resolved_gaps, *[str(item.get("reason") or "") for item in builtin_evidence]]).lower()
+
+        def _suggestion_is_resolved(item: SuggestedToolItem) -> bool:
+            text = " ".join([item.tool_id, item.description, item.why_needed]).lower()
+            if not text:
+                return False
+            if self._normalize_capability_id(item.tool_id) in {self._normalize_capability_id(t) for t in builtin_tool_ids}:
+                return True
+            cashflow_terms = ["现金流", "cashflow", "cash_flow", "经营现金流", "自由现金流", "fcf", "ocf", "利润含金量", "现金收入比", "恶化"]
+            receivable_terms = ["应收", "receivable", "dso", "回款", "坏账", "账龄"]
+            goodwill_terms = ["商誉", "goodwill", "减值", "impairment"]
+            for terms in (cashflow_terms, receivable_terms, goodwill_terms):
+                if any(term in text for term in terms) and any(term in resolved_text for term in terms):
+                    return True
+            return False
+
+        gap_report.existing_tools = self._dedupe([*added_labels, *(gap_report.existing_tools or [])])[:12]
+        gap_report.suggested_tools = [
+            item for item in (gap_report.suggested_tools or [])
+            if not _suggestion_is_resolved(item)
+        ][:8]
+        gap_report.suggested_capabilities = [
+            item for item in (gap_report.suggested_capabilities or [])
+            if not _suggestion_is_resolved(item)
+        ][:8]
+        gap_report.blocking_gaps = self._dedupe([
+            gap for gap in (gap_report.blocking_gaps or [])
+            if gap not in builtin_resolved_gaps
+        ])[:8]
+        gap_report.notes = self._dedupe([
+            *(gap_report.notes or []),
+            "已将可由现有标准金融工具覆盖的 blocking gaps 解除：" + "、".join(builtin_resolved_gaps[:4]),
+        ])[:10]
+        if self._is_financial_risk_spec(spec):
+            gap_report.build_recommendations = self._dedupe([
+                "风险信号类 Agent 应优先组合复用现金流质量趋势、成长现金流因子、财务造假信号、商誉与应收账款工具，只有现有工具无法产出确定性字段时才新增能力。",
+                *(gap_report.build_recommendations or []),
+            ])[:10]
+        logger.info(
+            "[AgentWorkshop][GapAnalysis][BuiltinResolvedGaps] spec_id=%s removed_blocking_gaps=%s added_existing_tools=%s",
+            spec.spec_id,
+            builtin_resolved_gaps[:8],
+            added_labels[:8],
+        )
+        return gap_report
 
     def _enforce_valuation_gap_report(
         self,
@@ -6062,10 +6469,7 @@ class AgentWorkshopService:
             spec.name,
             spec.primary_goal,
             *spec.responsibilities,
-            *spec.constraints,
-            *self._list_io_field_labels(spec.outputs),
             *spec.success_criteria,
-            *spec.preferred_methods,
         ]
         return " ".join(part for part in [*requirement_parts, *fallback_parts] if part).lower()
 
@@ -6080,9 +6484,9 @@ class AgentWorkshopService:
 
     def _build_gap_analysis_decision_rules(self, spec: AgentSpec) -> List[str]:
         rules = [
-            "- 先把规格拆成能力原语，再判断缺口：数据原语、确定性计算原语、结果编排原语分开看。",
+            "- 先把规格拆成能力 Skill，再判断缺口：数据 Skill、确定性计算 Skill、结果编排 Skill 分开看。",
             "- 不要因为系统里某两个方法有专用工具，就自动推断第三个方法也必须有一个对称命名的专用工具。",
-            "- 如果现有工具已经能提供原始数据、同行对比和部分确定性计算，真正缺口应描述为更底层的能力原语，而不是发明一个镜像工具名。",
+            "- 如果现有工具已经能提供原始数据、同行对比和部分确定性计算，真正缺口应描述为更底层的能力 Skill，而不是发明一个镜像工具名。",
             "- suggested_tools 只能写真实缺失的能力封装；若缺的是历史序列、分位数计算、适用性规则或统一结构化结果模板，就直接写这一层。",
             "- 如果现有能力足以产出要求的结果，只是需要 Prompt/模板把结果组织出来，这属于复用，不属于 blocking gap。",
         ]
@@ -6107,8 +6511,6 @@ class AgentWorkshopService:
         spec_brief: str,
         capability_requirement_lines: List[str],
         key_tool_detail_lines: List[str],
-        capability_coverage_map_lines: List[str],
-        valuation_reuse_guidance_lines: List[str],
         agent_builder_lesson_block: str = "",
         compact: bool = False,
     ) -> str:
@@ -6125,7 +6527,7 @@ class AgentWorkshopService:
         }, ensure_ascii=False, indent=2)
 
         prompt_lines = [
-            "你正在做 Agent 工坊的资源缺口分析。只判断：现有能力能否交付规格要求；若不能，真正缺的最小能力原语是什么。",
+            "你正在做 Agent 工坊的资源缺口分析。只判断：现有能力能否交付规格要求；若不能，真正缺的最小能力 Skill 是什么。",
             "",
             "⚠️ 关键约束：existing_tools 字段只能从下方【合法工具清单】中选择，严禁编造或联想任何不在清单中的名称。",
             "",
@@ -6158,24 +6560,18 @@ class AgentWorkshopService:
 
         prompt_lines.extend([
             "",
-            "【能力覆盖映射 - 用于识别聚合工具内部已覆盖的可复用能力】",
-            "\n".join(capability_coverage_map_lines[:(4 if compact else 8)]) if capability_coverage_map_lines else "- 暂无显式映射",
-            "",
-            "【估值复用判定规则 - 仅用于避免把已覆盖能力误判成缺口】",
-            "\n".join(valuation_reuse_guidance_lines[:(4 if compact else 8)]) if valuation_reuse_guidance_lines else "- 暂无专门规则",
-            "",
             "suggested_tools/suggested_capabilities 应尽量少而精，优先补最小闭环，不要一次性铺太大能力面。每个条目必须是结构化对象，包含 tool_id（简洁的蛇形命名）、description（一句话说明该能力做什么）、why_needed（为什么当前系统缺这项能力）。",
             "只输出合法 JSON，不要输出 Markdown 或额外解释。",
             "输出格式（填充以下 JSON 结构）：",
             output_schema,
             "\n分析要求：",
             "1. existing_tools 只能从上方【合法工具清单】中原样复制，不能改写、缩写或编造任何名称。只列真正能直接支撑当前 Agent 目标的能力。",
-            "2. suggested_tools 只列当前闭环最缺的 1-4 个工具/Skill，每个必须是 {tool_id, description, why_needed} 对象。tool_id 必须对应真实缺失的能力原语，不能为了命名对称而臆造镜像工具。suggested_capabilities 同理。",
+            "2. suggested_tools 只列当前闭环最缺的 1-4 个工具/Skill，每个必须是 {tool_id, description, why_needed} 对象。tool_id 必须对应真实缺失的能力 Skill，不能为了命名对称而臆造镜像工具。suggested_capabilities 同理。",
             "3. blocking_gaps 要写成‘为什么现有能力还不够’，不是重复需求描述。",
             "4. fallback_strategy 要写成没补齐前 Agent 如何安全降级，不要写空话。",
             "5. build_recommendations 要给出实现顺序和边界控制建议。",
             "6. 如果用户明确要求多步或多方法分别返回结果，不能只建议补一个上游接口；要把真正缺少的能力层讲清楚。",
-            "7. 对估值类规格，必须优先参考 coverage_terms 与能力覆盖映射判断现有能力是否已被聚合工具覆盖，不能因为没有同名专用工具就把已存在的可调用能力误判为新缺口。",
+            "7. 判断现有能力时，只能依据【合法工具清单】和【重点工具能力说明】中的能力索引召回结果；如果召回结果没有相关能力，应如实列为缺口，不要依赖工具名联想或隐藏规则。",
         ])
         return "\n".join(prompt_lines)
 
@@ -6220,12 +6616,12 @@ class AgentWorkshopService:
             "3. 如果用户后续补充了限制、目标、输出、方法、样本或验收标准，必须覆盖到结果里。",
             "3.1 任何用户明确给出的数字型要求都必须原样保留，禁止擅自泛化。例如用户说“三种估值方式”，结果里不能偷换成“多种估值方法”。",
             "3.2 任何用户明确给出的交付方式都必须落到结构化字段里。例如用户说“根据这三种估值方式分别返回数据，并进行解读”，你就必须在 responsibilities、outputs、success_criteria 或 constraints 中明确体现“分别返回三种方法结果”和“对三种结果做解读”，不能只保留一个模糊的总目标。",
-            "3.2.1 outputs 必须使用结构化对象数组，且 name 必须是稳定英文蛇形字段名，只能包含小写字母、数字和下划线，例如 valuation_report、industry_comparison_report、financial_health_report；不要把中文描述、长句、冒号、逗号写进 name，中文说明写到 description。",
+            "3.2.1 outputs 必须使用结构化对象数组，且 name 必须是稳定英文蛇形字段名，只能包含小写字母、数字和下划线，例如 valuation_report、industry_comparison_report、financial_health_report；不要把中文描述、长句、冒号、逗号写进 name，中文说明写到 description；严禁使用 candidate_xxx_report、agent_xxx_report、spec_xxx_report 这类内部候选 ID 派生字段名。",
             "3.2.2 output 字段名建议以 _report、_result、_summary、_assessment、_decision、_plan 或 _opinion 结尾，便于进入动态 Schema、阶段聚合和最终报告。",
             "3.2.3 responsibilities 只写职责动作和交付要求，不写具体工具名、函数名或内部实现名。不要写“调用 get_peer_comparison 获取同业数据”，应改写成“获取同业估值数据，用于相对估值基准”。",
             "3.3 任何用户明确给出的非目标和禁止项都必须保留在 non_goals 或 constraints 中。例如“不直接给买卖建议”不能在整理过程中弱化或遗漏。",
             "3.4 primary_goal 可以概括，但不得吞掉关键限定词；如果用户要求里含有具体数量、方法清单、返回方式、解释要求，这些必须出现在 responsibilities / outputs / success_criteria / preferred_methods 中，而不是只剩一个抽象摘要。",
-            "3.5 你必须显式产出 capability_requirements，把这个 Agent 真正依赖的能力项拆出来。能力项不是工具名清单，而是执行链路里的能力原语，例如数据获取、确定性计算、结果编排、输出格式控制、适用性/失效条件判定等。",
+            "3.5 你必须显式产出 capability_requirements，把这个 Agent 真正依赖的能力项拆出来。能力项不是工具名清单，而是执行链路里的能力 Skill，例如数据获取、确定性计算、结果编排、输出格式控制、适用性/失效条件判定等。",
             "3.6 capability_requirements 至少包含 3-8 项；每项必须写清 capability_name、capability_type、description、delivery_requirement、acceptance_criteria。delivery_requirement 只能是 deterministic-tool、tool-or-prompt、prompt-only 之一。",
             "3.7 如果某能力项要求输出估值区间、评分、排序、权重或其他精确数值，delivery_requirement 不能写 prompt-only。",
             "3.8 如果用户没有明确要求，就不要主动加入高复杂度设计，例如多方法并行、长历史窗口、复杂评分体系、企业级审批流程或额外专家假设。默认采用当前系统最容易实现、最容易解释、最容易维护的方案。",
@@ -6293,7 +6689,7 @@ class AgentWorkshopService:
             '  ],',
             '  "sample_symbols": []',
             "}",
-            "自检要求：输出前请检查，用户原始需求里凡是出现了明确数量（如三种）、明确方法（如 DCF/PE-PB/PEG）、明确交付动作（如分别返回/进行解读）、明确禁止项（如不要直接给买卖建议），都必须在 JSON 中找到对应落点；找不到就说明你整理丢了。并且必须检查 capability_requirements 是否已经把能力原语拆清楚，而不是只重复业务目标。",
+            "自检要求：输出前请检查，用户原始需求里凡是出现了明确数量（如三种）、明确方法（如 DCF/PE-PB/PEG）、明确交付动作（如分别返回/进行解读）、明确禁止项（如不要直接给买卖建议），都必须在 JSON 中找到对应落点；找不到就说明你整理丢了。并且必须检查 capability_requirements 是否已经把能力 Skill 拆清楚，而不是只重复业务目标。",
         ])
         prompt = "\n".join(prompt_sections)
 
@@ -7125,6 +7521,29 @@ class AgentWorkshopService:
             return "待补可调用能力"
         return f"{normalized_tool_id} 可调用能力"
 
+    def _build_capability_search_queries(self, spec: AgentSpec) -> List[str]:
+        queries: List[str] = []
+        base_query = self._build_valuation_requirement_text(spec).strip()
+        if base_query:
+            queries.append(base_query)
+
+        for text in [
+            spec.primary_goal,
+            " ".join(spec.responsibilities or []),
+            " ".join(spec.success_criteria or []),
+        ]:
+            clean = str(text or "").strip()
+            if clean and clean not in queries:
+                queries.append(clean)
+
+        for req in (spec.capability_requirements or []):
+            parts = [req.capability_name, req.description, req.delivery_requirement]
+            q = " ".join(p for p in parts if p).strip()
+            if q and q not in queries:
+                queries.append(q)
+
+        return queries[:10]
+
     async def analyze_spec_gaps(
         self,
         spec: AgentSpec,
@@ -7135,16 +7554,7 @@ class AgentWorkshopService:
         """基于 AgentSpec 做纯缺口分析，不创建/依赖 Workshop session。"""
         capability_snapshot = capability_inventory
         if capability_snapshot is None:
-            # 为每个 capability_requirement 单独搜索，再合并去重。
-            # 避免用整个 spec 拼成的长文本做单次搜索时，
-            # "股息率" 等具体关键词被 "估值" 等泛化词稀释，
-            # 导致 get_dividend_valuation_context 等工具排在 top_k 之外。
-            query_texts: List[str] = [self._build_valuation_requirement_text(spec)]
-            for req in (spec.capability_requirements or []):
-                parts = [req.capability_name, req.description, req.delivery_requirement]
-                q = " ".join(p for p in parts if p).strip()
-                if q and q not in query_texts:
-                    query_texts.append(q)
+            query_texts = self._build_capability_search_queries(spec)
             capability_snapshot = await self._collect_capability_snapshot_multi(
                 query_texts,
                 top_k=16,
@@ -7231,7 +7641,6 @@ class AgentWorkshopService:
             error_message=error_message,
             raw_response=raw_excerpt,
         )
-        gap_report = self._enforce_valuation_gap_report(spec, gap_report, capability_snapshot)
         self._log_generated_result(
             "gap_analysis_error",
             gap_report.model_dump(mode="json"),
@@ -7266,9 +7675,7 @@ class AgentWorkshopService:
         known_tools = self._dedupe([
             *(detail.get("label") for detail in selected_tool_details if detail.get("label")),
         ])
-        key_tool_detail_lines = self._format_tool_detail_lines(selected_tool_details, limit=8)
-        valuation_reuse_guidance_lines = self._build_valuation_reuse_guidance_lines(spec, capability_snapshot)
-        capability_coverage_map_lines = self._build_capability_coverage_map_lines(spec, selected_tool_details)
+        key_tool_detail_lines = self._format_tool_detail_lines(selected_tool_details, limit=12)
         capability_requirement_lines = self._build_capability_requirement_lines(spec)
         decision_rule_lines = self._build_gap_analysis_decision_rules(spec)
         spec_brief = self._build_gap_analysis_spec_brief(spec)
@@ -7288,24 +7695,20 @@ class AgentWorkshopService:
             spec_brief=spec_brief,
             capability_requirement_lines=capability_requirement_lines,
             key_tool_detail_lines=key_tool_detail_lines,
-            capability_coverage_map_lines=capability_coverage_map_lines,
-            valuation_reuse_guidance_lines=valuation_reuse_guidance_lines,
             agent_builder_lesson_block=agent_builder_lesson_block,
             compact=False,
         )
         compact_prompt = self._build_gap_analysis_prompt(
             spec=spec,
-            known_tools=known_tools[:8],
+            known_tools=known_tools,
             decision_rule_lines=decision_rule_lines,
             spec_brief=spec_brief,
             capability_requirement_lines=capability_requirement_lines,
             key_tool_detail_lines=key_tool_detail_lines,
-            capability_coverage_map_lines=capability_coverage_map_lines,
-            valuation_reuse_guidance_lines=valuation_reuse_guidance_lines,
             agent_builder_lesson_block=agent_builder_lesson_block,
             compact=True,
         )
-        system_prompt = "你是 TradingAgents-CN Agent 工坊的缺口分析器。先判断现有能力能否满足规格，再识别真正缺失的最小能力原语。禁止因为命名对称或类比现有工具而臆造新工具。只输出合法 JSON。"
+        system_prompt = "你是 TradingAgents-CN Agent 工坊的缺口分析器。先判断现有能力能否满足规格，再识别真正缺失的最小能力 Skill。禁止因为命名对称或类比现有工具而臆造新工具。只输出合法 JSON。"
 
         raw = ""
         try:
@@ -7317,8 +7720,8 @@ class AgentWorkshopService:
                     "gap_analysis_request_compact_first",
                     compact_prompt,
                     {
-                        "known_tools": min(len(known_tools), 8),
-                        "selected_tool_details": min(len(selected_tool_details), 6),
+                        "known_tools": len(known_tools),
+                        "selected_tool_details": len(selected_tool_details),
                         "capability_requirements": len(spec.capability_requirements or []),
                         "agent_builder_lesson_chars": len(agent_builder_lesson_block),
                     },
@@ -7454,7 +7857,6 @@ class AgentWorkshopService:
             error_message="",
             raw_response=raw,
         )
-        gap_report = self._enforce_valuation_gap_report(spec, gap_report, capability_snapshot)
         self._log_generated_result(
             "gap_analysis",
             gap_report.model_dump(mode="json"),
@@ -7478,37 +7880,19 @@ class AgentWorkshopService:
         tool_id_set = set(tool_ids)
         selected: List[str] = []
 
-        if self._is_valuation_spec(spec):
-            preferred_ids = [
-                "get_value_factor_bundle_tool",
-                "get_stock_fundamentals_unified",
-                "get_peer_comparison",
-                "calculate_pb_relative_valuation",
-                "calculate_peg_valuation",
-                "get_growth_cashflow_factor_bundle_tool",
-                "get_income_analysis",
-                "get_cashflow_analysis",
-                "get_balance_sheet_analysis",
-                "get_stock_market_data_unified",
-            ]
-        else:
-            preferred_ids = [
-                "get_stock_market_data_unified",
-                "get_stock_fundamentals_unified",
-                "get_stock_news_unified",
-            ]
-        # 第三步生成版本时，优先继承第二步缺口分析已确认的 existing_tools，避免重新退回到通用默认工具集。
+        # 生成版本时优先继承 gap 分析基于能力索引确认的 existing_tools。
+        # 不再按领域关键词追加风险/估值 preferred_ids，避免绕过向量召回事实源。
         for tool_label in gap_report.existing_tools or []:
             tool_id = self._normalize_capability_id(tool_label)
             if tool_id in tool_id_set and tool_id not in selected:
                 selected.append(tool_id)
 
-        for tool_id in preferred_ids:
-            if tool_id in tool_id_set and tool_id not in selected:
-                selected.append(tool_id)
+        if not selected:
+            for tool_id in ["get_stock_market_data_unified", "get_stock_fundamentals_unified", "get_stock_news_unified"]:
+                if tool_id in tool_id_set and tool_id not in selected:
+                    selected.append(tool_id)
 
-        max_tools = 8 if self._is_valuation_spec(spec) else 4
-        return selected[:max_tools]
+        return selected[:8]
 
     def _build_tool_selection_policy(self, spec: AgentSpec, required_tools: List[str]) -> Dict[str, Any]:
         """为当前 Agent 版本生成确定性工具路由策略，避免 LLM 在相似工具间临场猜测。"""
@@ -8798,7 +9182,7 @@ class AgentWorkshopService:
         runtime_result: Dict[str, Any],
         user_feedback: str = "",
     ) -> tuple[Dict[str, float], List[str], List[str], Dict[str, Any]]:
-        rule_scores, rule_issues, rule_recommendations, rule_details = self._evaluate_runtime_result_rules(
+        rule_scores, rule_issues, rule_recommendations, rule_details = await self._evaluate_runtime_result_rules(
             version,
             spec,
             runtime_result,
@@ -9856,575 +10240,423 @@ class AgentWorkshopService:
 
         return results
 
-    def _evaluate_runtime_result_rules(
+    # ── LLM 驱动的运行时结果评估（替代硬编码规则匹配） ──
+
+    async def _evaluate_runtime_result_rules(
         self,
         version: AgentVersion,
         spec: AgentSpec,
         runtime_result: Dict[str, Any],
         user_feedback: str = "",
     ) -> tuple[Dict[str, float], List[str], List[str], Dict[str, Any]]:
+        """使用 5 个并行 LLM 子评估替代硬编码关键词匹配。
+
+        每个子评估只看一个维度，互不干扰，结果由聚合器合并。
+        """
         output_text = self._normalize_output_text(runtime_result.get("output_text"), runtime_result.get("output_payload"))
         payload = runtime_result.get("output_payload") if isinstance(runtime_result.get("output_payload"), dict) else {}
-        has_runtime_output = bool(output_text.strip())
         output_names = self._list_output_field_names(spec.outputs)
-        output_evidence = self._analyze_expected_outputs_runtime(output_names, payload, output_text)
-        explain_evidence = self._analyze_keywords(["假设", "风险", "失效", "不确定性"], output_text, has_runtime_output)
-        method_evidence = self._analyze_keywords(spec.preferred_methods[:3], output_text, has_runtime_output) if spec.preferred_methods else {
-            "matched": [],
-            "missing": [],
-            "score": 0.7,
-        }
-        forbidden_evidence = self._analyze_forbidden_keywords(spec.non_goals, output_text, has_runtime_output)
-        goal_evidence = self._analyze_goal_alignment(runtime_result.get("user_goal", spec.primary_goal), output_text, payload)
-        valuation_guardrail = self._analyze_valuation_numeric_guardrail(spec, runtime_result, output_text)
-        valuation_traceability = self._build_valuation_traceability(spec, runtime_result, output_text)
-        execution_plan_review = self._evaluate_execution_plan_review(
-            version,
-            spec,
-            runtime_result,
-            output_text,
-            output_evidence,
-            goal_evidence,
-            valuation_guardrail,
-        )
 
-        output_coverage = output_evidence["score"]
-        explainability = explain_evidence["score"]
-        method_quality = method_evidence["score"]
-        forbidden_penalty = max(forbidden_evidence["score"], valuation_guardrail["penalty"])
-        goal_alignment = goal_evidence["score"]
-
-        scores = {
-            "runtime_goal_alignment": round(goal_alignment, 2),
-            "runtime_output_coverage": round(output_coverage, 2),
-            "runtime_explainability": round((explainability + method_quality) / 2, 2),
-            "runtime_execution_readiness": round(execution_plan_review["score"], 2),
-            "runtime_constraint_control": round(max(0.0, 1.0 - forbidden_penalty), 2),
-        }
-        issues: List[str] = []
-        warning_issues: List[str] = []
+        # 快速失败：无运行输出
         if not output_text.strip() and not payload:
-            issues.append("未提供运行结果内容，无法完成运行结果评估。")
-        if scores["runtime_output_coverage"] < 0.7:
-            if scores["runtime_output_coverage"] < 0.55:
-                issues.append("运行结果没有覆盖足够的核心输出字段。")
-            else:
-                warning_issues.append("运行结果对部分核心输出字段覆盖不足。")
-        if scores["runtime_explainability"] < 0.7:
-            explain_missing = self._dedupe([*explain_evidence["missing"], *method_evidence["missing"]])
-            warning_issues.append(f"运行结果缺少以下关键解释要素：{'、'.join(explain_missing)}。" if explain_missing else "运行结果对关键假设、方法依据或失效条件说明不足。")
-        if scores["runtime_constraint_control"] < 0.8:
-            issues.append("运行结果出现了越界表达，和规格中的非目标不一致。")
-        if valuation_guardrail["violation"]:
-            issues.append("数值类结果违反可追溯硬约束：输出了高风险精确结论，但没有提供可追溯的数据源或工具计算依据。")
-            issues.append("当前更核心的问题不是文案表达，而是缺少可复核的数据链路或直接计算工具，导致 Agent 只能生成不可复核的发布级精确结论。")
-        warning_issues.extend([str(item).strip() for item in (valuation_guardrail.get("warnings") or []) if str(item).strip()])
-        issues.extend([str(item).strip() for item in (execution_plan_review.get("blocker_issues") or []) if str(item).strip()])
-        warning_issues.extend([str(item).strip() for item in (execution_plan_review.get("warning_issues") or []) if str(item).strip()])
-        if user_feedback.strip():
-            warning_issues.append(f"用户反馈中提到的问题待处理：{user_feedback.strip()}")
+            scores: Dict[str, float] = {
+                "runtime_goal_alignment": 0.0,
+                "runtime_output_coverage": 0.0,
+                "runtime_explainability": 0.0,
+                "runtime_execution_readiness": 0.0,
+                "runtime_constraint_control": 0.0,
+            }
+            issues = ["未提供运行结果内容，无法完成运行结果评估。"]
+            details = {
+                "mode": "llm_review",
+                "runtime_result": runtime_result,
+                "parsed_output_excerpt": "",
+                "issues": issues,
+                "warnings": [],
+                "score_breakdown": {k: {"score": 0.0, "reason": "无运行输出"} for k in scores},
+            }
+            return scores, issues, [], details
 
+        # ── 5 个并行 LLM 子评估 ──
+        import asyncio
+        tasks = [
+            self._llm_review_output_coverage(spec, output_names, output_text),
+            self._llm_review_explainability(spec, output_text),
+            self._llm_review_execution_readiness(version, spec, output_text),
+            self._llm_review_constraint_control(spec, output_text),
+            self._llm_review_goal_alignment(spec, runtime_result, output_text),
+        ]
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        coverage = self._parse_review_result(raw_results[0], "output_coverage", 0.5)
+        explain = self._parse_review_result(raw_results[1], "explainability", 0.5)
+        readiness = self._parse_review_result(raw_results[2], "execution_readiness", 0.5)
+        constraint = self._parse_review_result(raw_results[3], "constraint_control", 0.5)
+        goal = self._parse_review_result(raw_results[4], "goal_alignment", 0.5)
+
+        # ── 加权聚合 ──
+        scores = {
+            "runtime_goal_alignment": round(goal["score"], 2),
+            "runtime_output_coverage": round(coverage["score"], 2),
+            "runtime_explainability": round(explain["score"], 2),
+            "runtime_execution_readiness": round(readiness["score"], 2),
+            "runtime_constraint_control": round(
+                max(0.0, 1.0 - constraint["score"]), 2  # constraint 是高惩罚项，转为正向分数
+            ) if constraint.get("score", 0) < 1.0 else round(constraint["score"], 2),
+        }
+
+        # ── 收集阻断项和提示项 ──
+        all_blockers: List[str] = []
+        all_warnings: List[str] = []
+        for result, name in [
+            (coverage, "字段覆盖"),
+            (explain, "可解释性"),
+            (readiness, "执行就绪"),
+            (constraint, "约束控制"),
+            (goal, "目标对齐"),
+        ]:
+            for b in result.get("blockers", []) or []:
+                all_blockers.append(str(b).strip())
+            for w in result.get("warnings", []) or []:
+                all_warnings.append(str(w).strip())
+
+        if user_feedback.strip():
+            all_warnings.append(f"用户反馈中提到的问题待处理：{user_feedback.strip()}")
+
+        issues = self._dedupe(all_blockers)
+        warnings = self._dedupe(all_warnings)
+
+        # ── 建议 ──
         recommendations = self._dedupe([
-            "把当前运行结果中缺失的输出字段补进 Prompt 和输出 Schema。",
-            "为真实任务结果增加结构化字段，避免只返回长文本。",
-            "把这次 production review 中暴露的问题加入下一轮真实结果验收清单。",
-            *( ["对数值类结果增加原始数据、工具计算结果、输入参数和来源标签；没有足够依据时不要输出精确数字。"] if valuation_guardrail["violation"] else [] ),
-            *( ["下一轮工坊应优先补数据链路或直接计算工具，而不是继续微调 Prompt 让模型自己编数字。"] if valuation_guardrail["violation"] else [] ),
-            *execution_plan_review["recommendations"],
+            rd
+            for result in [coverage, explain, readiness, constraint, goal]
+            for rd in (result.get("recommendations", []) or [])
+            if str(rd).strip()
         ])
+        if not recommendations:
+            recommendations = [
+                "所有核心维度均通过 LLM 审核，建议基于实际使用场景进一步验证。",
+            ]
+
+        # ── 构建向后兼容的 details ──
         details = {
-            "mode": "production-review",
+            "mode": "llm_review",
             "runtime_result": runtime_result,
             "parsed_output_excerpt": output_text[:1200],
-            "valuation_guardrail": valuation_guardrail,
-            "valuation_traceability": valuation_traceability,
-            "execution_plan_review": execution_plan_review,
-            "warning_issues": self._dedupe(warning_issues),
             "score_breakdown": {
                 "runtime_goal_alignment": {
-                    "matched": goal_evidence["matched"],
-                    "missing": goal_evidence["missing"],
-                    "notes": goal_evidence["notes"],
+                    "score": goal["score"],
+                    "evidence": goal.get("evidence", []),
+                    "reason": goal.get("reason", ""),
+                    "blockers": goal.get("blockers", []),
                 },
                 "runtime_output_coverage": {
-                    "matched": output_evidence["matched"],
-                    "missing": output_evidence["missing"],
-                    "notes": [f"要求输出字段：{', '.join(output_names) if output_names else '未定义'}"],
+                    "score": coverage["score"],
+                    "evidence": coverage.get("evidence", []),
+                    "reason": coverage.get("reason", ""),
+                    "blockers": coverage.get("blockers", []),
                 },
                 "runtime_explainability": {
-                    "matched": self._dedupe([*explain_evidence["matched"], *method_evidence["matched"]]),
-                    "missing": self._dedupe([*explain_evidence["missing"], *method_evidence["missing"]]),
-                    "notes": [
-                        "检查是否解释了假设、风险、失效条件，以及规格要求的方法依据。",
-                    ],
+                    "score": explain["score"],
+                    "evidence": explain.get("evidence", []),
+                    "reason": explain.get("reason", ""),
+                    "blockers": explain.get("blockers", []),
                 },
                 "runtime_execution_readiness": {
-                    "matched": execution_plan_review["matched"],
-                    "missing": execution_plan_review["missing"],
-                    "notes": execution_plan_review["notes"],
+                    "score": readiness["score"],
+                    "evidence": readiness.get("evidence", []),
+                    "reason": readiness.get("reason", ""),
+                    "blockers": readiness.get("blockers", []),
                 },
                 "runtime_constraint_control": {
-                    "matched": self._dedupe([*forbidden_evidence["matched"], *valuation_guardrail["matched"]]),
-                    "missing": self._dedupe([*forbidden_evidence["missing"], *valuation_guardrail["missing"]]),
-                    "notes": self._dedupe([*forbidden_evidence["notes"], *valuation_guardrail["notes"]]),
+                    "score": constraint["score"],
+                    "evidence": constraint.get("evidence", []),
+                    "reason": constraint.get("reason", ""),
+                    "blockers": constraint.get("blockers", []),
                 },
             },
+            "issues": issues,
+            "warnings": warnings,
+            "valuation_guardrail": {"violation": False, "penalty": 0.0, "warnings": []},
+            "valuation_traceability": {"enabled": True, "items": [], "summary": "由 LLM 审核覆盖，未使用规则匹配", "used_tools": []},
+            "execution_plan_review": {"score": readiness["score"], "blocker_issues": [], "warning_issues": [], "recommendations": []},
+            "warning_issues": warnings,
+            "llm_review_summary": {
+                "output_coverage": coverage.get("reason", ""),
+                "explainability": explain.get("reason", ""),
+                "execution_readiness": readiness.get("reason", ""),
+                "constraint_control": constraint.get("reason", ""),
+                "goal_alignment": goal.get("reason", ""),
+            },
         }
-        return scores, self._dedupe(issues), recommendations, details
+        return scores, issues, recommendations, details
 
-    def _evaluate_execution_plan_review(
-        self,
-        version: AgentVersion,
-        spec: AgentSpec,
-        runtime_result: Dict[str, Any],
-        output_text: str,
-        output_evidence: Dict[str, Any],
-        goal_evidence: Dict[str, Any],
-        valuation_guardrail: Dict[str, Any],
+    # ── 5 个并行 LLM 子评估方法 ──
+
+    async def _llm_review_output_coverage(
+        self, spec: AgentVersion, output_names: List[str], output_text: str,
     ) -> Dict[str, Any]:
-        plan = version.execution_plan or AgentExecutionValidationPlan()
-        debug_prompt = self._extract_runtime_debug_prompt(runtime_result)
-        tool_trace = self._sanitize_tool_trace(debug_prompt.get("tool_trace"))
-        successful_tool_names = self._dedupe([
-            str(item.get("tool_name") or "").strip()
-            for item in tool_trace
-            if isinstance(item, dict) and item.get("success") and str(item.get("tool_name") or "").strip()
-        ])
-        required_tools = self._dedupe([str(item).strip() for item in (version.required_tools or []) if str(item).strip()])
-        successful_required_tools = [tool for tool in required_tools if tool in successful_tool_names]
-        missing_required_tools = [tool for tool in required_tools if tool not in successful_required_tools]
-
-        runtime_symbol = str(
-            runtime_result.get("symbol")
-            or runtime_result.get("stock_symbol")
-            or runtime_result.get("metadata", {}).get("symbol")
-            or ""
-        ).strip()
-        sample_symbol = str((plan.sample_input or {}).get("symbol") or "").strip()
-        sample_symbol_aligned = not sample_symbol or not runtime_symbol or runtime_symbol == sample_symbol
-
-        output_labels = self._list_io_field_labels(spec.outputs)
-        matched_outputs = self._dedupe([str(item) for item in (output_evidence.get("matched") or []) if item])
-        missing_outputs = self._dedupe([str(item) for item in (output_evidence.get("missing") or []) if item])
-
-        acceptance_results: List[Dict[str, Any]] = []
-        for label in output_labels[:6]:
-            matched = any(self._match_concept(label, candidate) for candidate in matched_outputs)
-            acceptance_results.append({
-                "label": f"覆盖输出字段：{label}",
-                "passed": matched,
-                "detail": "已在结果或结构化输出中识别到。" if matched else "本次运行没有稳定覆盖该字段。",
-                "category": "output",
-            })
-
-        success_criteria = self._dedupe([str(item).strip() for item in (spec.success_criteria or []) if str(item).strip()])
-        for item in success_criteria[:4]:
-            matched = self._match_concept(item, output_text) or any(self._match_concept(item, matched_item) for matched_item in goal_evidence.get("matched") or [])
-            acceptance_results.append({
-                "label": f"满足成功标准：{item}",
-                "passed": matched,
-                "detail": "输出中存在对应响应。" if matched else "当前输出还看不到这个成功标准的直接证据。",
-                "category": "success_criteria",
-            })
-
-        if required_tools:
-            acceptance_results.append({
-                "label": "至少命中一个 required_tools 成功调用",
-                "passed": bool(successful_required_tools),
-                "detail": (
-                    f"已命中：{'、'.join(successful_required_tools[:4])}" if successful_required_tools
-                    else "tool_trace 中还没有看到 required_tools 的成功调用。"
-                ),
-                "category": "tool_usage",
-            })
-
-        tool_routing_review = self._evaluate_tool_selection_policy(version, successful_tool_names)
-        for item in tool_routing_review.get("acceptance_results") or []:
-            acceptance_results.append(item)
-
-        numeric_policy = self._get_numeric_traceability_policy(spec)
-        if numeric_policy["enabled"]:
-            acceptance_results.append({
-                "label": "精确数字具备可追溯来源",
-                "passed": not valuation_guardrail.get("violation"),
-                "detail": "本次运行没有触发不可追溯数值问题。" if not valuation_guardrail.get("violation") else "出现了精确数字，但缺少结构化来源或工具证据。",
-                "category": "traceability",
-            })
-
-        passed_count = sum(1 for item in acceptance_results if item.get("passed"))
-        acceptance_score = passed_count / max(1, len(acceptance_results)) if acceptance_results else 0.7
-        tool_score = 1.0 if not required_tools else len(successful_required_tools) / len(required_tools)
-        sample_input_score = 1.0 if sample_symbol_aligned else 0.4
-        score = round((acceptance_score * 0.55) + (tool_score * 0.3) + (sample_input_score * 0.15), 2)
-
-        matched: List[str] = []
-        if sample_symbol:
-            matched.append(f"默认样本标的：{sample_symbol}") if sample_symbol_aligned else None
-        if successful_required_tools:
-            matched.append(f"已命中的 required_tools：{'、'.join(successful_required_tools[:4])}")
-        if not missing_outputs:
-            matched.append("规格要求的核心输出字段已全部覆盖。")
-        matched.extend([item["label"] for item in acceptance_results if item.get("passed")][:6])
-
-        missing: List[str] = []
-        if sample_symbol and not sample_symbol_aligned:
-            missing.append(f"默认样本建议标的为 {sample_symbol}，但本次调试输入是 {runtime_symbol or '空'}")
-        if missing_required_tools:
-            missing.append(f"未命中的 required_tools：{'、'.join(missing_required_tools[:4])}")
-        if missing_outputs:
-            missing.append(f"未覆盖输出字段：{'、'.join(missing_outputs[:4])}")
-        missing.extend([item["label"] for item in acceptance_results if not item.get("passed")][:6])
-
-        blocker_issues: List[str] = []
-        warning_issues: List[str] = []
-        if missing_required_tools:
-            blocker_issues.append("这次运行没有真正调用到版本声明的关键工具，当前结果更像 Prompt 演示，不像可复核的执行结果。")
-        blocker_issues.extend(self._pick_list(tool_routing_review.get("blocker_issues"), []))
-        warning_issues.extend(self._pick_list(tool_routing_review.get("warning_issues"), []))
-        severe_output_mismatch = bool(missing_outputs) and (score < 0.55 or len(missing_outputs) >= max(1, len(output_labels) // 2 or 1))
-        if severe_output_mismatch:
-            blocker_issues.append("execution_plan 要求的核心输出字段仍有缺失，说明版本草案和实际运行结果还没对齐。")
-        elif missing_outputs:
-            warning_issues.append("execution_plan 仍有少量输出字段未完全覆盖，建议在发布前补齐。")
-        if sample_symbol and not sample_symbol_aligned:
-            warning_issues.append("本次调试输入偏离了版本默认样本，当前评估结论不能直接代表 build_version 生成的执行计划是否成立。")
-        if score < 0.75 and not blocker_issues:
-            warning_issues.append("execution_plan 验收仍有未通过项，建议继续补强执行一致性。")
-
-        recommendations = self._dedupe([
-            *( ["先按 execution_plan.sample_input 重新跑一次调试，确保版本默认样本能稳定通过。"] if sample_symbol and not sample_symbol_aligned else [] ),
-            *( ["把 required_tools 的调用前置到分析主链路，而不是只在 Prompt 里声明。"] if missing_required_tools else [] ),
-            *self._pick_list(tool_routing_review.get("recommendations"), []),
-            *( ["按 execution_plan.acceptance_checks 逐项补齐输出字段，再重新发起结果评估。"] if missing_outputs else [] ),
-            *( ["如果当前工具无法支撑精确结论，就按 execution_plan.fallback_rules 降级输出，不要硬给确定性数字。"] if valuation_guardrail.get("violation") else [] ),
-        ])
-
-        status = "pass" if score >= 0.8 else "revise" if score >= 0.55 else "fail"
-        notes = self._dedupe([
-            f"执行计划模式：{plan.mode or 'tool-driven'}",
-            f"执行计划状态：{plan.validation_status or 'not-run'}",
-            *( [f"计划理由：{plan.rationale.strip()}"] if str(plan.rationale or '').strip() else [] ),
-            *( [f"成功工具轨迹：{'、'.join(successful_tool_names[:6])}"] if successful_tool_names else ["当前 debug_prompt 里没有成功的 tool_trace。"] ),
-            *( [f"降级规则：{'；'.join((plan.fallback_rules or [])[:3])}"] if plan.fallback_rules else [] ),
-        ])
-
-        return {
-            "status": status,
-            "score": score,
-            "sample_input": plan.sample_input,
-            "successful_tools": successful_tool_names,
-            "successful_required_tools": successful_required_tools,
-            "missing_required_tools": missing_required_tools,
-            "tool_routing_review": tool_routing_review,
-            "acceptance_results": acceptance_results,
-            "matched": self._dedupe(matched),
-            "missing": self._dedupe(missing),
-            "issues": self._dedupe([*blocker_issues, *warning_issues]),
-            "blocker_issues": self._dedupe(blocker_issues),
-            "warning_issues": self._dedupe(warning_issues),
-            "recommendations": recommendations,
-            "notes": notes,
+        """LLM 审核：输出字段覆盖度（对照 spec.outputs 逐字段检查）。"""
+        spec_info = {
+            "name": getattr(spec, "name", ""),
+            "outputs": output_names,
+            "primary_goal": getattr(spec, "primary_goal", ""),
         }
+        prompt = f"""你是 Agent 版本内容审核员，只检查"输出字段覆盖度"这一个维度。
 
-    def _evaluate_tool_selection_policy(self, version: AgentVersion, successful_tool_names: List[str]) -> Dict[str, Any]:
-        policy: Dict[str, Any] = {}
-        if isinstance(version.evaluation_policy, dict):
-            candidate = version.evaluation_policy.get("tool_selection_policy")
-            if isinstance(candidate, dict):
-                policy = candidate
-            tooling_contract = version.evaluation_policy.get("tooling_contract")
-            if not policy and isinstance(tooling_contract, dict) and isinstance(tooling_contract.get("tool_selection_policy"), dict):
-                policy = tooling_contract.get("tool_selection_policy") or {}
-        if not policy and isinstance(version.agent_metadata, dict) and isinstance(version.agent_metadata.get("tool_selection_policy"), dict):
-            policy = version.agent_metadata.get("tool_selection_policy") or {}
+## Agent 规格
+{json.dumps(spec_info, ensure_ascii=False, indent=2)}
 
-        successful = self._dedupe([str(item).strip() for item in (successful_tool_names or []) if str(item).strip()])
-        successful_set = set(successful)
-        required_first = self._dedupe(self._pick_list(policy.get("required_first_call_tools"), [])) if policy else []
-        primary_tools = self._dedupe(self._pick_list(policy.get("primary_tools"), [])) if policy else []
-        missing_first = [tool for tool in required_first if tool not in successful_set]
-        missing_primary = [tool for tool in primary_tools if tool not in successful_set]
+## 运行输出
+{output_text[:3000]}
 
-        acceptance_results: List[Dict[str, Any]] = []
-        blocker_issues: List[str] = []
-        warning_issues: List[str] = []
-        recommendations: List[str] = []
-        substitution_violations: List[Dict[str, Any]] = []
+## 任务
+对照规格中声明的每个 output 字段，检查运行输出中是否有实质性内容覆盖（不是只提了一下名字）。
 
-        if required_first:
-            acceptance_results.append({
-                "label": "命中工具路由主入口",
-                "passed": not missing_first,
-                "detail": (
-                    f"已命中：{'、'.join(required_first)}" if not missing_first
-                    else f"缺少前置主工具调用：{'、'.join(missing_first)}"
-                ),
-                "category": "tool_routing",
-            })
-        if missing_first:
-            logger.warning(
-                "[AgentWorkshop][ToolRoutingViolation] version_id=%s missing_primary=%s successful_tools=%s",
-                version.version_id,
-                missing_first,
-                successful[:8],
-            )
-            blocker_issues.append(f"工具路由违规：未调用必须优先使用的主入口工具：{'、'.join(missing_first)}。")
-            recommendations.append("按 tool_selection_policy 把 primary/required_first_call_tools 前置到运行链路，不能只依赖通用工具生成报告。")
-        elif missing_primary:
-            warning_issues.append(f"工具路由提示：主入口工具未全部命中：{'、'.join(missing_primary)}。")
+对每个字段标注：found（有实质覆盖）、hinted（有提及但浅）、missing（未覆盖）。
+引用原文片段作为证据（每条不超过 80 字）。
 
-        rules = policy.get("substitution_rules") if policy else []
-        for rule in rules or []:
-            if not isinstance(rule, dict):
-                continue
-            preferred = str(rule.get("preferred") or "").strip()
-            blocked = self._pick_list(rule.get("not_replaced_by"), [])
-            used_blocked = [tool for tool in blocked if tool in successful_set]
-            if preferred and preferred not in successful_set and used_blocked:
-                substitution_violations.append({
-                    "capability": rule.get("capability") or "primary_capability",
-                    "preferred": preferred,
-                    "used_instead": used_blocked,
-                })
-        for violation in substitution_violations:
-            logger.warning(
-                "[AgentWorkshop][ToolRoutingViolation] version_id=%s preferred=%s used_instead=%s",
-                version.version_id,
-                violation["preferred"],
-                violation["used_instead"],
-            )
-            blocker_issues.append(
-                "工具路由违规："
-                f"{violation['preferred']} 未调用，但使用了 {'、'.join(violation['used_instead'][:4])}，这些工具不能替代主入口。"
-            )
-        if substitution_violations:
-            recommendations.append("将通用/补充工具保留为交叉验证或降级来源，核心结论必须来自 primary/specialized 工具。")
+## 输出 JSON
+{{
+  "score": 0.0-1.0,
+  "reason": "一句话总结覆盖情况",
+  "evidence": [{{"field": "字段名", "status": "found|hinted|missing", "excerpt": "原文片段"}}],
+  "blockers": ["阻断性问题的中文描述（0条或更多）"],
+  "warnings": ["提示性问题的中文描述（0条或更多）"],
+  "recommendations": ["改进建议"]
+}}
 
-        return {
-            "policy": policy,
-            "successful_tools": successful,
-            "missing_required_first_call_tools": missing_first,
-            "substitution_violations": substitution_violations,
-            "acceptance_results": acceptance_results,
-            "blocker_issues": self._dedupe(blocker_issues),
-            "warning_issues": self._dedupe(warning_issues),
-            "recommendations": self._dedupe(recommendations),
+只输出 JSON。"""
+        return await self._call_llm_review(prompt, "output_coverage")
+
+    async def _llm_review_explainability(
+        self, spec: AgentVersion, output_text: str,
+    ) -> Dict[str, Any]:
+        """LLM 审核：可解释性（假设、风险、方法依据、失效条件）。"""
+        methods = getattr(spec, "preferred_methods", []) or []
+        spec_info = {
+            "name": getattr(spec, "name", ""),
+            "preferred_methods": methods[:5],
+            "primary_goal": getattr(spec, "primary_goal", ""),
         }
+        prompt = f"""你是 Agent 版本内容审核员，只检查"可解释性"这一个维度。
 
-    def _analyze_valuation_numeric_guardrail(self, spec: AgentSpec, runtime_result: Dict[str, Any], output_text: str) -> Dict[str, Any]:
-        policy = self._get_numeric_traceability_policy(spec)
-        if not policy["enabled"]:
-            return {"violation": False, "penalty": 0.0, "matched": [], "missing": [], "notes": []}
+## Agent 规格
+{json.dumps(spec_info, ensure_ascii=False, indent=2)}
 
-        range_mentions = self._extract_valuation_range_mentions(output_text)
-        if not range_mentions:
+## 运行输出
+{output_text[:3000]}
+
+## 任务
+检查报告中是否包含以下关键解释要素：
+1. 关键假设（分析前提、估值假设值等）
+2. 方法依据（为什么用这个方法、数据来源）
+3. 风险因素（主要不确定性来源）
+4. 失效条件（什么情况下结论不成立）
+
+逐项标注 present/absent，附原文片段作为证据。
+
+## 输出 JSON
+{{
+  "score": 0.0-1.0,
+  "reason": "一句话总结可解释性",
+  "evidence": [{{"check": "假设|方法|风险|失效", "status": "present|absent", "excerpt": "原文片段"}}],
+  "blockers": ["阻断性问题的中文描述"],
+  "warnings": ["提示性问题的中文描述"],
+  "recommendations": ["改进建议"]
+}}
+
+只输出 JSON。"""
+        return await self._call_llm_review(prompt, "explainability")
+
+    async def _llm_review_execution_readiness(
+        self, version: AgentVersion, spec: AgentVersion, output_text: str,
+    ) -> Dict[str, Any]:
+        """LLM 审核：执行就绪度（工具是否实际调用、输出是否能复核）。"""
+        required_tools = getattr(version, "required_tools", []) or []
+        version_info = {
+            "version_id": getattr(version, "version_id", ""),
+            "required_tools": required_tools,
+            "default_tools": list((getattr(version, "agent_metadata", {}) or {}).get("default_tools", [])),
+        }
+        prompt = f"""你是 Agent 版本内容审核员，只检查"执行就绪度"这一个维度。
+
+## 版本信息
+{json.dumps(version_info, ensure_ascii=False, indent=2)}
+
+## 运行输出
+{output_text[:3000]}
+
+## 任务
+检查运行输出是否证明：
+1. 关键工具被实际调用（输出中有明确的数据来源/计算过程/工具痕迹，而不是只有 Prompt 生成的文本）
+2. 输出结果可以复核（有具体数值、数据来源、工具名称，用户可以追溯到原始数据）
+
+如果输出中有工具调用痕迹（如具体的 PE/PB 数值、数据日期、数据来源），标注为证据。
+如果没有真实工具调用证据，要明确说明，不要假装看到了。
+
+## 输出 JSON
+{{
+  "score": 0.0-1.0,
+  "reason": "一句话总结执行就绪度",
+  "evidence": [{{"tool": "工具名", "called": true|false, "excerpt": "证据片段"}}],
+  "blockers": ["阻断性问题的中文描述"],
+  "warnings": ["提示性问题的中文描述"],
+  "recommendations": ["改进建议"]
+}}
+
+只输出 JSON。"""
+        return await self._call_llm_review(prompt, "execution_readiness")
+
+    async def _llm_review_constraint_control(
+        self, spec: AgentVersion, output_text: str,
+    ) -> Dict[str, Any]:
+        """LLM 审核：约束控制（是否有越界、幻觉、与 non_goals 冲突）。"""
+        non_goals = getattr(spec, "non_goals", []) or []
+        constraints = getattr(spec, "constraints", []) or []
+        spec_info = {
+            "name": getattr(spec, "name", ""),
+            "non_goals": non_goals,
+            "constraints": constraints,
+            "primary_goal": getattr(spec, "primary_goal", ""),
+        }
+        prompt = f"""你是 Agent 版本内容审核员，只检查"约束控制"这一个维度。
+
+## Agent 规格
+{json.dumps(spec_info, ensure_ascii=False, indent=2)}
+
+## 运行输出
+{output_text[:3000]}
+
+## 任务
+检查输出中是否存在：
+1. 越界内容（做了 non_goals 中声明不做的事，如建议买卖操作、推荐具体股票）
+2. 幻觉内容（没有数据支撑的精确数字、凭空编造的数据）
+3. 违反 constraints 的内容
+
+越界或幻觉越多，score 越低（惩罚项，0.0=无问题，1.0=严重问题）。
+
+## 输出 JSON
+{{
+  "score": 0.0-1.0,
+  "reason": "一句话总结约束控制情况",
+  "evidence": [{{"issue": "问题描述", "severity": "blocker|warning", "excerpt": "原文片段"}}],
+  "blockers": ["阻断性问题的中文描述"],
+  "warnings": ["提示性问题的中文描述"],
+  "recommendations": ["改进建议"]
+}}
+
+只输出 JSON。"""
+        return await self._call_llm_review(prompt, "constraint_control")
+
+    async def _llm_review_goal_alignment(
+        self, spec: AgentVersion, runtime_result: Dict[str, Any], output_text: str,
+    ) -> Dict[str, Any]:
+        """LLM 审核：目标对齐（输出是否真正回应用户目标）。"""
+        spec_info = {
+            "name": getattr(spec, "name", ""),
+            "primary_goal": getattr(spec, "primary_goal", ""),
+            "domain": getattr(spec, "domain", ""),
+        }
+        user_goal = runtime_result.get("user_goal", "") or getattr(spec, "primary_goal", "")
+        symbol = runtime_result.get("symbol", "未知")
+        prompt = f"""你是 Agent 版本内容审核员，只检查"目标对齐"这一个维度。
+
+## Agent 规格
+{json.dumps(spec_info, ensure_ascii=False, indent=2)}
+
+## 运行上下文
+- 股票：{symbol}
+- 用户目标：{user_goal}
+
+## 运行输出
+{output_text[:3000]}
+
+## 任务
+检查输出是否：
+1. 真正回应了用户/规格声明的核心目标
+2. 分析逻辑与目标一致（不是偏题或答非所问）
+3. 输出对用户有实质参考价值
+
+## 输出 JSON
+{{
+  "score": 0.0-1.0,
+  "reason": "一句话总结目标对齐情况",
+  "evidence": [{{"aspect": "核心目标/分析逻辑/参考价值", "status": "aligned|partial|misaligned", "excerpt": "原文片段"}}],
+  "blockers": ["阻断性问题的中文描述"],
+  "warnings": ["提示性问题的中文描述"],
+  "recommendations": ["改进建议"]
+}}
+
+只输出 JSON。"""
+        return await self._call_llm_review(prompt, "goal_alignment")
+
+    async def _call_llm_review(self, prompt: str, dimension: str) -> Dict[str, Any]:
+        """调用 LLM 执行单维度评估，带异常保护和解析。"""
+        try:
+            client = await self._ensure_llm_client()
+            system_prompt = "你是 TradingAgents-CN 平台的 Agent 版本审核员，严格对照规格审核运行输出。只输出 JSON，不要 Markdown。"
+            response = await client.achat([
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=prompt),
+            ])
+            raw = (response.content or "").strip()
+            return self._extract_json_from_text(raw)
+        except Exception as e:
+            logger.warning("[LLMReview] %s 评估失败: %s", dimension, e)
+            return {"score": 0.5, "reason": f"评估异常: {e}", "blockers": [], "warnings": [], "recommendations": [], "evidence": []}
+
+    def _parse_review_result(self, raw: Any, dimension: str, default_score: float) -> Dict[str, Any]:
+        """解析 LLM 审核结果，处理异常和缺失字段。"""
+        if isinstance(raw, Exception):
             return {
-                "violation": False,
-                "penalty": 0.0,
-                "matched": ["未检测到需要追溯的精确数值或区间，符合当前规格下的数值约束。"],
-                "missing": [],
-                "notes": [
-                    "若规格只要求定性判断或框架解读，不输出精确数值是允许的。",
-                    "若后续要输出精确数值或区间，则必须先补齐数据源或工具计算依据。",
-                ],
+                "score": default_score,
+                "reason": f"{dimension} 评估异常: {raw}",
+                "evidence": [],
+                "blockers": [],
+                "warnings": [],
+                "recommendations": [],
             }
-
-        payload = runtime_result.get("output_payload") if isinstance(runtime_result.get("output_payload"), dict) else {}
-        tool_trace = self._extract_runtime_tool_trace(runtime_result)
-        has_structured_calc = any(
-            key in payload for key in [
-                "valuation_calculations",
-                "valuation_sources",
-                "valuation_ranges",
-                "valuation_table",
-                "fair_value_range_by_tool",
-            ]
-        )
-        calc_tool_names = {
-            item.get("tool_name")
-            for item in tool_trace
-            if isinstance(item, dict) and item.get("tool_name")
-        }
-        used_calc_tools = [
-            item.get("tool_name") for item in tool_trace
-            if isinstance(item, dict) and item.get("tool_name") in calc_tool_names and item.get("success")
-        ]
-        traceability_items = self._build_numeric_traceability_items(range_mentions, output_text, used_calc_tools, has_structured_calc)
-        unresolved_items = [item for item in traceability_items if item.get("source_type") == "unverified"]
-        blocker_items = [item for item in unresolved_items if str(item.get("risk_level") or "") == "high"]
-        warning_items = [item for item in unresolved_items if str(item.get("risk_level") or "") != "high"]
-        violation = bool(blocker_items)
-        severity = "blocker" if blocker_items else "warning" if warning_items else "none"
-
-        notes = [
-            "数值类结果一旦出现，就必须来自数据源、工具计算或结构化计算结果，不能只由模型根据文本自行给出。",
-            *( [f"检测到精确区间: {'；'.join(range_mentions[:4])}"] if range_mentions else [] ),
-            *( [f"已识别到可用工具轨迹: {', '.join(used_calc_tools)}"] if used_calc_tools else ["当前未识别到可支撑这些数字的工具轨迹。"] ),
-            *( [f"以下高风险数值仍缺少可追溯依据: {'；'.join(str(item.get('value')) for item in blocker_items[:4])}"] if blocker_items else [] ),
-            *( [f"以下一般财务数值仍建议补充更清晰的来源映射: {'；'.join(str(item.get('value')) for item in warning_items[:4])}"] if warning_items else [] ),
-        ]
-        if not policy["requires_exact_numeric_outputs"]:
-            notes.append("当前规格本身未强制要求精确数值；本次拦截是因为实际输出出现了不可追溯的精确数字。")
+        if isinstance(raw, dict):
+            return {
+                "score": float(raw.get("score", default_score)),
+                "reason": str(raw.get("reason", "") or ""),
+                "evidence": raw.get("evidence", []) or [],
+                "blockers": raw.get("blockers", []) or [],
+                "warnings": raw.get("warnings", []) or [],
+                "recommendations": raw.get("recommendations", []) or [],
+            }
         return {
-            "violation": violation,
-            "severity": severity,
-            "penalty": 0.6 if blocker_items else 0.15 if warning_items else 0.0,
-            "matched": (["数值结果具备可追溯的数据或工具依据。"] if range_mentions and not unresolved_items else []),
-            "missing": (["高风险精确数值缺少可追溯的数据或工具依据。"] if blocker_items else []),
-            "warnings": (["一般财务数值缺少更细粒度的来源映射。"] if warning_items else []),
-            "unresolved_items": unresolved_items,
-            "notes": notes,
+            "score": default_score,
+            "reason": f"{dimension} 返回格式异常",
+            "evidence": [],
+            "blockers": [],
+            "warnings": [],
+            "recommendations": [],
         }
 
-    def _extract_valuation_range_mentions(self, output_text: str) -> List[str]:
-        if not output_text:
-            return []
-        patterns = [
-            re.compile(r"[^\n]{0,24}?(\d+(?:\.\d+)?\s*[-~至]\s*\d+(?:\.\d+)?)(?:\s*(?:元|分|%|倍|分数|评分|名|位))?", re.IGNORECASE),
-            re.compile(r"(?:评分|打分|排序|排名|权重|仓位|收益率|回报率|波动率|概率|目标价|价格区间|估值区间|score|rank|rating|weight|price|target|range)[^\n：:]{0,24}?(\d+(?:\.\d+)?)", re.IGNORECASE),
-        ]
-        matches: List[str] = []
-        for pattern in patterns:
-            matches.extend(match.group(0).strip() for match in pattern.finditer(output_text))
-        filtered: List[str] = []
-        for match_text in self._dedupe(matches):
-            normalized = match_text.strip()
-            if not normalized:
-                continue
-            if re.fullmatch(r"\**\d{4}-\d{2}(?:-\d{2})?\**", normalized):
-                continue
-            if re.search(r"分析日期|报告周期|数据期间|最近\d+个交易日", normalized, re.IGNORECASE):
-                continue
-            filtered.append(normalized)
-        return filtered
-
-    def _build_numeric_traceability_items(
-        self,
-        range_mentions: List[str],
-        output_text: str,
-        used_tool_names: List[str],
-        has_structured_calc: bool,
-    ) -> List[Dict[str, Any]]:
-        items: List[Dict[str, Any]] = []
-        unique_tool_names = self._dedupe([str(name) for name in used_tool_names if name])
-        has_report_level_context = self._has_report_level_traceability_context(output_text, unique_tool_names)
-        for mention in range_mentions:
-            context = self._extract_local_context(output_text, mention, window=120)
-            section_context = self._extract_markdown_section_context(output_text, mention)
-            local_has_tool = any(tool_name in context for tool_name in unique_tool_names)
-            local_has_source_label = any(keyword in context for keyword in ["来源", "数据源", "计算依据", "输入参数", "工具计算"])
-            section_has_tool = any(tool_name in section_context for tool_name in unique_tool_names)
-            section_has_source_label = any(keyword in section_context for keyword in ["来源", "数据源", "来源工具", "数据来源", "计算依据", "输入参数", "工具计算"])
-            section_has_period = bool(re.search(r"20\d{2}Q[1-4]|20\d{6,8}|报告期|报告期范围|分析日期|period", section_context, re.IGNORECASE))
-            is_high_risk = self._is_high_risk_numeric_mention(mention, section_context)
-            # 若 section 内包含明确免责声明（数值基于公开认知估算、缺乏工具数据），
-            # 即使当前无工具轨迹可追溯，也不再当作硬拦截（blocker），降级为正常风险（warning）。
-            if is_high_risk and self._section_has_numeric_qualifier_disclaimer(section_context):
-                is_high_risk = False
-            has_ranking_derivation_support = self._has_ranking_derivation_support(
-                mention,
-                context,
-                section_context,
-                unique_tool_names,
-                has_report_level_context,
-            )
-
-            if has_structured_calc:
-                source_type = "tool_or_data_backed"
-            elif local_has_tool and local_has_source_label:
-                source_type = "tool_or_data_backed"
-            elif is_high_risk and has_ranking_derivation_support:
-                source_type = "tool_or_data_backed"
-            elif not is_high_risk and section_has_tool and section_has_source_label and section_has_period:
-                source_type = "tool_or_data_backed"
-            elif not is_high_risk and has_report_level_context:
-                source_type = "tool_or_data_backed"
-            else:
-                source_type = "unverified"
-
-            items.append({
-                "label": "数值结果",
-                "value": mention,
-                "risk_level": "high" if is_high_risk else "normal",
-                "source_type": source_type,
-                "judgement": "具备可追溯依据" if source_type == "tool_or_data_backed" else "证据不足",
-                "evidence_tools": unique_tool_names if source_type == "tool_or_data_backed" else [],
-                "notes": [
-                    "检测到结构化数值来源。" if has_structured_calc else (
-                        "数值附近同时出现了来源标签和工具名。" if local_has_tool and local_has_source_label else (
-                            "该排名可由同报告内已标注来源的表格/列表数据直接复核。" if has_ranking_derivation_support and source_type == "tool_or_data_backed" else (
-                                "该数值所在小节具备来源映射、报告期和成功工具轨迹。" if source_type == "tool_or_data_backed" else "没有发现足够的来源标签、报告期或对应工具名。"
-                            )
-                        )
-                    )
-                ],
-            })
-        return items
-
-    def _extract_local_context(self, text: str, needle: str, window: int = 120) -> str:
-        if not text or not needle:
-            return ""
-        index = text.find(needle)
-        if index < 0:
-            return ""
-        start = max(0, index - window)
-        end = min(len(text), index + len(needle) + window)
-        return text[start:end]
-
-    def _locate_text_position(self, text: str, needle: str) -> Dict[str, Any]:
-        if not text or not needle:
+    def _extract_json_from_text(self, text: str) -> Dict[str, Any]:
+        """从 LLM 返回文本中提取 JSON 对象。"""
+        if not text:
             return {}
-        index = text.find(needle)
-        if index < 0:
-            return {}
-        lines = str(text).splitlines()
-        consumed = 0
-        for line_number, line in enumerate(lines, start=1):
-            line_length = len(line)
-            if consumed + line_length >= index:
-                column_number = max(1, index - consumed + 1)
-                return {
-                    "line_number": line_number,
-                    "column_number": column_number,
-                    "line_excerpt": line.strip(),
-                }
-            consumed += line_length + 1
+        # 尝试直接解析
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        # 尝试提取 {...}  块
+        for match in re.finditer(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, re.DOTALL):
+            try:
+                return json.loads(match.group())
+            except json.JSONDecodeError:
+                continue
+        # json_repair 兜底
+        if json_repair:
+            try:
+                return json_repair.repair_json(text, return_objects=True)
+            except Exception:
+                pass
         return {}
-
-    def _build_valuation_traceability(self, spec: AgentSpec, runtime_result: Dict[str, Any], output_text: str) -> Dict[str, Any]:
-        if not self._get_numeric_traceability_policy(spec)["enabled"]:
-            return {"enabled": False, "items": [], "summary": "当前版本未启用数值来源追踪。"}
-
-        tool_trace = self._extract_runtime_tool_trace(runtime_result)
-        used_tool_names = [item.get("tool_name") for item in tool_trace if isinstance(item, dict) and item.get("tool_name")]
-        range_mentions = self._extract_valuation_range_mentions(output_text)
-        runtime_payload = runtime_result.get("output_payload") if isinstance(runtime_result.get("output_payload"), dict) else {}
-        has_structured_calc = any(
-            key in runtime_payload for key in [
-                "valuation_calculations",
-                "valuation_sources",
-                "valuation_ranges",
-                "valuation_table",
-                "fair_value_range_by_tool",
-            ]
-        )
-        items = self._build_numeric_traceability_items(range_mentions, output_text, used_tool_names, has_structured_calc)
-
-        if not items:
-            return {
-                "enabled": True,
-                "items": [],
-                "summary": "当前输出里没有识别到需要追踪的精确数值或区间。",
-                "used_tools": self._dedupe([str(name) for name in used_tool_names if name]),
-            }
-
-        unresolved = [item for item in items if item.get("source_type") == "unverified"]
-        return {
-            "enabled": True,
-            "items": items,
-            "summary": "已识别的数值结果均具备可追溯依据。" if not unresolved else "检测到精确数值，但其中部分仍缺少可追溯依据。",
-            "used_tools": self._dedupe([str(name) for name in used_tool_names if name]),
-        }
 
     async def _judge_runtime_result_with_llm(
         self,

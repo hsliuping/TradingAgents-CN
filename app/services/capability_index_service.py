@@ -110,27 +110,47 @@ class CapabilityIndexService:
         top_k: int = CAPABILITY_INDEX_TOP_K,
         bindable_only: bool = False,
         source_types: Optional[List[str]] = None,
+        categories: Optional[List[str]] = None,
     ) -> List[CapabilitySearchHit]:
         await self.ensure_index()
         documents = list(self._cached_documents.values())
         if not documents:
             return []
 
-        hits = self._vector_search(query, top_k=max(top_k * 2, top_k))
+        allowed_sources = set(source_types or [])
+        allowed_categories = set(categories or [])
+        filtered_documents = [
+            doc for doc in documents
+            if (not bindable_only or doc.bindable)
+            and (not allowed_sources or doc.source_type in allowed_sources)
+            and (not allowed_categories or doc.category in allowed_categories)
+        ]
+        if not filtered_documents:
+            return []
+
+        hits = self._vector_search(query, top_k=max(top_k * 4, top_k))
         if not hits:
-            hits = self._lexical_search(query, documents, top_k=max(top_k * 2, top_k))
+            hits = self._lexical_search(query, filtered_documents, top_k=max(top_k * 4, top_k))
 
         filtered: List[CapabilitySearchHit] = []
-        allowed_sources = set(source_types or [])
+        allowed_ids = {doc.capability_id for doc in filtered_documents}
         for hit in hits:
             capability = hit.capability
-            if bindable_only and not capability.bindable:
-                continue
-            if allowed_sources and capability.source_type not in allowed_sources:
+            if capability.capability_id not in allowed_ids:
                 continue
             filtered.append(hit)
             if len(filtered) >= top_k:
                 break
+
+        if len(filtered) < top_k and hits:
+            lexical_hits = self._lexical_search(query, filtered_documents, top_k=max(top_k * 2, top_k))
+            seen_ids = {hit.capability.capability_id for hit in filtered}
+            for hit in lexical_hits:
+                if hit.capability.capability_id in seen_ids:
+                    continue
+                filtered.append(hit)
+                if len(filtered) >= top_k:
+                    break
         return filtered
 
     async def list_capabilities(self) -> List[CapabilityDocument]:
@@ -162,9 +182,11 @@ class CapabilityIndexService:
                 "name": doc.name,
                 "description": doc.description,
                 "when_to_use": doc.when_to_use,
+                "when_not_to_use": doc.when_not_to_use,
                 "returns": doc.returns,
                 "related_tools": doc.related_tools,
                 "coverage_terms": doc.coverage_terms,
+                "retrieval_text": doc.retrieval_text,
                 "data_source": doc.data_source,
                 "capability_tags": doc.capability_tags,
                 "tool_role_hint": doc.tool_role_hint,
@@ -477,9 +499,10 @@ class CapabilityIndexService:
 
         searchable = str(text or "").lower()
         patterns = [
+            # ── 估值类 ──
             (r"(?<![a-z0-9])(valuation|valuations)(?![a-z0-9])", "valuation"),
             (r"(?<![a-z0-9])dcf(?![a-z0-9])", "dcf"),
-            (r"(?<![a-z0-9])pe(?![a-z0-9])|市盈率|pe_ttm", "pe"),
+            (r"(?<![a-z0-9])pe(?![a-z0-9])|市盈率|pe_ttm|p/e", "pe"),
             (r"(?<![a-z0-9])pb(?![a-z0-9])|市净率|pb_mrq", "pb"),
             (r"(?<![a-z0-9])peg(?![a-z0-9])", "peg"),
             (r"(?<![a-z0-9])ps(?![a-z0-9])", "ps"),
@@ -491,7 +514,41 @@ class CapabilityIndexService:
             (r"roe|roa|roic|毛利率|净利率|利润率|盈利稳定性|资本效率|piotroski|altman|beneish", "quality"),
             (r"历史|多年|年报序列|时间序列|trend|series", "historical_series"),
             (r"分位|percentile|估值分位", "percentile"),
-            (r"ma20|rsi14|kdj|macd|技术指标|technical", "technical"),
+            (r"ma20|rsi14|rsi|kdj|macd|技术指标|technical", "technical"),
+            # ── 资产质量 / 基本面风险 ──
+            (r"应收账款|receivables|(?<![a-z0-9])dso(?![a-z0-9])|账龄|坏账|bad_debt|回款|收款", "asset_quality_receivables"),
+            (r"存货|inventory|(?<![a-z0-9])dio(?![a-z0-9])|存货周转|跌价", "asset_quality_inventory"),
+            (r"资产质量|asset_quality|资产减值", "asset_quality"),
+            (r"偿债|solvency|debt_to_equity|资产负债率|利息覆盖|利息保障|debt_structure|有息负债", "solvency"),
+            (r"流动性|liquidity|current_ratio|quick_ratio|流动比率|速动比率|短期偿债", "liquidity"),
+            (r"商誉|goodwill|减值测试|impairment", "goodwill"),
+            (r"破产|bankruptcy|ohlson|z_score|zscore|altman|beneish|mscore|oscore|欺诈|fraud|财务造假|财务舞弊|风险|risk_adjusted|risk_profile|risk_event|risk_flag", "risk"),
+            # ── 资本成本 / 风险度量 / 投资组合 / 归因分析 / 统计分析 ──
+            (r"wacc|capm|cost_of_equity|cost_of_debt|折现率|资本成本|加权平均资本成本", "cost_of_capital"),
+            (r"(?<![a-z0-9])beta(?![a-z0-9])|(?<![a-z0-9])alpha(?![a-z0-9])|sharpe|sortino|treynor|calmar|jensen|information_ratio|(?<![a-z0-9])var(?![a-z0-9])|cvar|volatility|波动率|最大回撤|max_drawdown|downside|风险调整", "risk_metrics"),
+            (r"portfolio|组合|efficient_frontier|monte_carlo|蒙特卡洛|马科维茨|markowitz|optimal_weight|最优权重|scenario_analysis|情景分析", "portfolio"),
+            (r"attribution|归因|brinson|factor_attribution|sector_attribution", "attribution"),
+            (r"correlation|cointegration|协整|regression|回归|normality|正态|stationarity|平稳|(?<![a-z0-9])adf(?![a-z0-9])|garch|ewma|统计|statistical", "statistics"),
+            # ── 筛选 / 宏观 / 股息 / 筹码 / 量价 ──
+            (r"screen|筛选|filter|过滤|选股", "screening"),
+            (r"macro|宏观|economic_cycle|经济周期|monetary|货币环境|美林时钟|yield_curve|收益率曲线|景气|recession|衰退|recovery|复苏|overheating|过热|stagflation|滞胀", "macro"),
+            (r"dividend|股息|分红|送股|红利|股利|送转|每股分红", "dividend"),
+            (r"chip|筹码|获利比例|平均成本|集中度", "chip_distribution"),
+            (r"vwap|obv|turnover|换手率|成交量|量价|volume_profile|成交额|主力净流入|资金流|capital_flow|fund_flow", "volume_analysis"),
+            # ── 技术分析扩展 ──
+            (r"pivot|支撑|阻力|压力位|fibonacci|斐波那契|枢轴点|颈线|趋势线", "support_resistance"),
+            (r"candlestick|k线|k 线|chart_pattern|形态|头肩|双顶|双底|三角形|旗形|楔形|缺口|十字星|锤头", "chart_pattern"),
+            # ── 债券 / 期权 / 事件研究 ──
+            (r"bond|债券|久期|duration|凸性|convexity|credit_spread|信用利差|国债|企业债|可转债", "bond"),
+            (r"option|期权|black_scholes|greeks|希腊字母|delta|gamma|theta|vega|rho|implied_volatility|隐含波动率|行权价|strike", "option"),
+            (r"event_study|事件研究|事件日|事件驱动|event_driven|公告事件|监管事件|event_timeline", "event_study"),
+            # ── 财务报表 / ETF / 内部人 / 市场宽度 / 证券主数据 ──
+            (r"income_analysis|利润表|营收|主营业务|main_business|收入结构|费用分析", "income_statement"),
+            (r"financial_statement|财务报表|balance_sheet|资产负债表|financial_statements|fundamentals_unified|财务数据", "financial_statements"),
+            (r"(?<![a-z0-9])etf(?![a-z0-9])|基金基本面", "etf_fundamentals"),
+            (r"insider|内部人|内部人士|insider_sentiment|insider_transaction", "insider"),
+            (r"market_breadth|市场宽度|market_overview|市场概览|market_environment|市场环境|market_cycle|市场周期|涨跌家数|breadth|index_data|指数数据|sector_data|板块数据|sector_analysis|板块分析", "market_breadth"),
+            (r"security_master|证券主数据|上市状态|stock_master|证券信息|交易所|市值", "security_master"),
         ]
         matched: List[str] = []
         for pattern, normalized in patterns:
