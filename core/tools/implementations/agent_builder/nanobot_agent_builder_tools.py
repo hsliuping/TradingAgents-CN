@@ -1515,6 +1515,24 @@ def _get_current_thread_context_spec_id() -> str:
         return ""
 
 
+def _agent_id_equivalent(left: str, right: str) -> bool:
+    """判断候选 Agent ID 是否只是历史前缀差异。"""
+    clean_left = str(left or "").strip()
+    clean_right = str(right or "").strip()
+    if not clean_left or not clean_right:
+        return False
+    if clean_left == clean_right:
+        return True
+
+    def _canonical(value: str) -> str:
+        for prefix in ("agent_candidate_", "candidate_"):
+            if value.startswith(prefix):
+                return value[len(prefix):]
+        return value
+
+    return _canonical(clean_left) == _canonical(clean_right)
+
+
 async def _resolve_spec_name(db: Any, spec_id: str) -> str:
     """从数据库解析 spec_id 对应的 name。"""
     try:
@@ -1949,14 +1967,15 @@ def _looks_unspecified(value: str) -> bool:
     return text in vague_markers
 
 
-def _generate_short_agent_name_llm(user_request: str, target_responsibility: str = "") -> str:
-    """用 LLM 同步生成简短 Agent 名（在同步工具函数中调用）。
+def _generate_short_agent_name_llm(user_request: str, target_responsibility: str = "") -> dict:
+    """用 LLM 同步生成简短 Agent 中文名和英文 slug（在同步工具函数中调用）。
 
     LLM 失败时回退到 _generate_short_agent_name_fallback 规则匹配。
+    返回 {"name": "中文名", "slug": "english_slug"}
     """
     text = f"{target_responsibility or ''} {user_request or ''}".strip()
     if not text:
-        return "智能分析助手"
+        return {"name": "智能分析助手", "slug": "intelligent_analysis"}
 
     try:
         from app.core.database import get_mongo_db_sync
@@ -1992,41 +2011,73 @@ def _generate_short_agent_name_llm(user_request: str, target_responsibility: str
 
         client = UnifiedLLMClient.from_config(config)
 
-        system_prompt = """你是一个 Agent 命名专家。根据用户需求和职责描述，生成一个简短、专业、好记的 Agent 名字。
+        system_prompt = """你是一个 Agent 命名专家。根据用户需求和职责描述，生成一个简短、专业、好记的 Agent 中文名和对应的英文标识（slug）。
 
 命名规则：
+【中文名】
 1. 名字必须简短：不超过 12 个汉字（可含英文缩写如 DCF/PE/PB）
 2. 名字必须体现 Agent 的核心业务能力，不要包含"对A股""上市公司""执行""输出"等冗余词
 3. 名字以"助手"或"专家"结尾（默认"助手"）
-4. 只输出名字本身，不要加引号、解释、标点
-5. 不要使用"Agent"这个英文词
+4. 不要使用"Agent"这个英文词
+
+【英文 slug】
+1. 全部小写，用下划线分隔，只能包含字母、数字、下划线
+2. 长度控制在 3-40 个字符之间
+3. 准确反映 Agent 的核心业务能力，优先用专业术语
+4. 以 "_analyst" 或 "_assistant" 结尾（默认用更具体的）
+5. 不要使用 "agent"、"nanobot"、"candidate" 等无意义词
+
+输出格式（严格 JSON，不要加解释）：
+{"name": "中文名", "slug": "english_slug"}
 
 示例：
-- 需求"对A股上市公司执行多维度估值分析" → 多维度估值分析助手
-- 需求"帮我创建一个财报排雷助手" → 财报排雷助手
-- 需求"分析股息率和分红情况" → 股息率分析助手
-- 需求"做一个DCF估值工具" → DCF估值助手
-- 需求"创建一个技术分析Agent" → 技术分析助手
-- 需求"对上市公司进行风险排雷" → 风险排雷助手
-- 需求"生成研报" → 研报生成助手"""
+- 需求"对A股上市公司执行多维度估值分析" → {"name": "多维度估值分析助手", "slug": "multidimensional_valuation_analyst"}
+- 需求"帮我创建一个财报排雷助手" → {"name": "财报排雷助手", "slug": "financial_risk_screener"}
+- 需求"分析股息率和分红情况" → {"name": "股息率分析助手", "slug": "dividend_yield_analyst"}
+- 需求"做一个DCF估值工具" → {"name": "DCF估值助手", "slug": "dcf_valuation_assistant"}
+- 需求"创建一个技术分析Agent" → {"name": "技术分析助手", "slug": "technical_analysis_assistant"}
+- 需求"对上市公司进行风险排雷" → {"name": "风险排雷助手", "slug": "risk_screening_assistant"}
+- 需求"生成研报" → {"name": "研报生成助手", "slug": "research_report_generator"}"""
 
-        user_prompt = f"用户需求：{user_request or '(未提供)'}\n职责描述：{target_responsibility or '(未提供)'}\n\n请生成一个简短的 Agent 名字（只输出名字）："
+        user_prompt = f"用户需求：{user_request or '(未提供)'}\n职责描述：{target_responsibility or '(未提供)'}\n\n请生成 Agent 的中文名和英文 slug（严格输出 JSON）："
 
         messages = [
             Message(role="system", content=system_prompt),
             Message(role="user", content=user_prompt),
         ]
-        response = client.chat(messages, temperature=0.3, max_tokens=50)
-        name = str(response.content or "").strip().strip("\"'""''「」【】 ")
+        response = client.chat(messages, temperature=0.3, max_tokens=150)
+        raw_content = str(response.content or "").strip()
 
-        # 清理：去掉可能的换行、多余标点
-        name = name.split("\n")[0].strip()
-        # 去掉结尾的句号
+        # 尝试解析 JSON
+        import json as _json
+        try:
+            # 清理可能的 markdown 代码块标记
+            cleaned = raw_content.strip("`")
+            if cleaned.lower().startswith("json"):
+                cleaned = cleaned[4:].strip()
+            # 只取第一行（如果有多行）
+            cleaned = cleaned.split("\n")[0].strip()
+            result = _json.loads(cleaned)
+            name = str(result.get("name", "")).strip()
+            slug = str(result.get("slug", "")).strip().lower()
+        except Exception:
+            # JSON 解析失败，尝试从文本中提取
+            name = raw_content.strip().strip("\"'""''「」【】 ").split("\n")[0].strip()
+            name = name.rstrip("。.；;")
+            slug = ""
+
+        # 清理中文名
         name = name.rstrip("。.；;")
 
+        # 验证 slug 格式
+        import re as _re
+        if not slug or not _re.match(r"^[a-z][a-z0-9_]{2,39}$", slug):
+            # slug 不合规，从中文名生成兜底
+            slug = _fallback_slug_from_name(name, user_request, target_responsibility)
+
         if name and len(name) <= 20:
-            logger.info("[AgentName][LLM] request=%s -> name=%s", user_request[:40], name)
-            return name
+            logger.info("[AgentName][LLM] request=%s -> name=%s slug=%s", user_request[:40], name, slug)
+            return {"name": name, "slug": slug}
 
         logger.warning("[AgentName][LLM] 生成的名字不合规: %s (len=%d)，回退规则", name, len(name))
         return _generate_short_agent_name_fallback(user_request, target_responsibility)
@@ -2035,11 +2086,56 @@ def _generate_short_agent_name_llm(user_request: str, target_responsibility: str
         return _generate_short_agent_name_fallback(user_request, target_responsibility)
 
 
-def _generate_short_agent_name_fallback(user_request: str, target_responsibility: str = "") -> str:
-    """规则兜底：从需求/职责中提取核心业务关键词，加上"助手"后缀。"""
+def _fallback_slug_from_name(name: str, user_request: str = "", target_responsibility: str = "") -> str:
+    """从中文名称/需求中生成英文 slug 的兜底函数（关键词映射）。"""
+    text = f"{name or ''} {target_responsibility or ''} {user_request or ''}".strip().lower()
+
+    # 英文关键词映射：按优先级匹配，取最具体的
+    slug_mappings = [
+        (["财报排雷", "财务造假", "财务舞弊", "financial risk", "fraud"], "financial_risk_screener"),
+        (["多维度估值", "综合估值", "估值分析", "valuation"], "valuation_analyst"),
+        (["股息率", "分红", "派息", "股利", "dividend"], "dividend_yield_analyst"),
+        (["dcf", "现金流折现", "自由现金流"], "dcf_valuation_analyst"),
+        (["ddm", "股利贴现"], "ddm_valuation_analyst"),
+        (["财报分析", "财务分析", "基本面分析", "fundamental"], "fundamentals_analyst"),
+        (["技术分析", "技术面", "k线", "技术指标", "technical"], "technical_analyst"),
+        (["行业分析", "板块分析", "行业对比", "sector", "industry"], "sector_analyst"),
+        (["选股", "筛选", "股票筛选", "stock screening", "stock picking"], "stock_screener"),
+        (["仓位", "组合", "投资组合", "portfolio"], "portfolio_manager"),
+        (["风险", "风控", "风险评估", "risk"], "risk_assessment"),
+        (["研报", "研究报告", "报告生成", "research report"], "research_report_gen"),
+        (["宏观", "经济周期", "货币政策", "macro", "economy"], "macro_analyst"),
+        (["情绪", "舆情", "市场情绪", "sentiment"], "sentiment_analyst"),
+        (["资金流", "资金面", "主力", "money flow"], "money_flow_analyst"),
+        (["回测", "策略回测", "量化回测", "backtest"], "backtest_engine"),
+        (["事件", "公告", "事件驱动", "event"], "event_driven_analyst"),
+        (["质押", "股权质押", "pledge"], "pledge_risk_analyst"),
+        (["可比公司", "同业对比", "同行对比", "comparable", "peer"], "peer_valuation_analyst"),
+        (["现金流", "cash flow", "cashflow"], "cashflow_analyst"),
+        (["商誉", "goodwill"], "goodwill_risk_analyst"),
+        (["应收", "应收账款", "receivable"], "receivables_analyst"),
+        (["流动性", "liquidity"], "liquidity_analyst"),
+        (["偿债", "solvency", "debt"], "solvency_analyst"),
+    ]
+
+    for keywords, slug in slug_mappings:
+        for kw in keywords:
+            if kw.lower() in text:
+                return slug
+
+    # 兜底：用简单的哈希 + 通用后缀
+    import hashlib
+    digest = hashlib.md5(text.encode("utf-8")).hexdigest()[:6]
+    return f"analysis_assistant_{digest}"
+
+
+def _generate_short_agent_name_fallback(user_request: str, target_responsibility: str = "") -> dict:
+    """规则兜底：从需求/职责中提取核心业务关键词，生成中文名和英文 slug。
+    返回 {"name": "中文名", "slug": "english_slug"}
+    """
     text = f"{target_responsibility or ''} {user_request or ''}".strip()
     if not text:
-        return "智能分析助手"
+        return {"name": "智能分析助手", "slug": "intelligent_analysis_assistant"}
 
     # 业务领域关键词映射：按优先级匹配，取最具体的
     # 每项 (关键词列表, 生成的名字模板)
@@ -2067,10 +2163,18 @@ def _generate_short_agent_name_fallback(user_request: str, target_responsibility
     ]
 
     text_lower = text.lower()
+    matched_name = None
     for keywords, name in domain_mappings:
         for kw in keywords:
             if kw.lower() in text_lower:
-                return name
+                matched_name = name
+                break
+        if matched_name:
+            break
+
+    if matched_name:
+        slug = _fallback_slug_from_name(matched_name, user_request, target_responsibility)
+        return {"name": matched_name, "slug": slug}
 
     # 兜底：从职责描述中提取前 8 个字 + "助手"
     # 去掉常见的冗余前缀
@@ -2086,8 +2190,11 @@ def _generate_short_agent_name_fallback(user_request: str, target_responsibility
     if len(cleaned) > 10:
         cleaned = cleaned[:10]
     if not cleaned:
-        return "智能分析助手"
-    return f"{cleaned}助手"
+        return {"name": "智能分析助手", "slug": "intelligent_analysis_assistant"}
+
+    name = f"{cleaned}助手"
+    slug = _fallback_slug_from_name(name, user_request, target_responsibility)
+    return {"name": name, "slug": slug}
 
 
 def _contains_any_keyword(text: str, keywords: tuple[str, ...]) -> bool:
@@ -2255,7 +2362,9 @@ def _build_candidate_plans(gap_report: dict[str, Any], resolved_tools: list[str]
         })
 
     if blocking_count == 0:
-        add_plan("direct", "直接生成", "当前能力盘点未发现 blocking gap，可按现有工具直接生成并进入测试版本构建。", True, "低：仍需后续真数据测试验证。")
+        add_plan("direct", "推荐完整交付", "现有能力已覆盖需求，可直接生成完整版 Agent，并按原定核心风险/分析维度进入真数据测试。", True, "低：主要风险来自真实数据质量和后续验收结果。")
+        add_plan("strict", "保守可追溯版", "仍使用现有能力，但收紧输出边界：只输出工具和数据明确支撑的结论，未覆盖或数据不足的部分标注为信息缺口。", False, "低：覆盖更稳健，但报告表达会更保守。")
+        add_plan("enhanced", "扩展增强版", "在核心需求已满足的基础上，把非阻塞增强项作为可选扩展，例如更细的预警分级、更多风险信号或更丰富的情景说明。", False, "中：不是当前交付的必要条件，扩展过多会增加测试和解释复杂度。")
         return plans, "direct"
 
     suggested_skills = []
@@ -2963,13 +3072,16 @@ def prepare_agent_requirement_intake(
                 "why_critical": "工具范围影响能力边界，但你也可以完全交给我推荐。",
             })
 
-        # === 生成简短 Agent 名（不把整句职责描述当名字）===
-        proposed_agent_name = _generate_short_agent_name_llm(clean_request, target_responsibility)
+        # === 生成简短 Agent 名（中文名 + 英文 slug）===
+        naming_result = _generate_short_agent_name_llm(clean_request, target_responsibility)
+        proposed_agent_name = naming_result.get("name", "智能分析助手")
+        proposed_agent_slug = naming_result.get("slug", "analysis_assistant")
 
         # === 构建提案 ===
         proposed_plan = {
             "single_responsibility": target_responsibility if not has_critical_single_responsibility_gap else "（待确认）",
             "proposed_agent_name": proposed_agent_name,
+            "proposed_agent_slug": proposed_agent_slug,
             "output_shape": effective_output_shape,
             "non_goals": effective_non_goals,
             "preferred_tools": effective_tools if effective_tools else "（缺口分析阶段自动推荐）",
@@ -3126,8 +3238,9 @@ async def prepare_agent_generation_confirmation(
         effective_recommendation_policy = _normalize_recommendation_policy(recommendation_policy)
         output_preview_request = _is_output_preview_request(clean_responsibility, desired_output_shape)
         report_like_request = _is_report_like_request(output_field, desired_output_shape, clean_responsibility)
-        if not resolved_tools:
-            return _json_response({"status": "error", "message": "至少需要一个拟绑定工具 ID"})
+        # 需求确认阶段允许 tool_ids 为空：此时确认稿只包含职责/输出/非目标，
+        # 工具候选留待能力盘点（CAPABILITY_CHECK）阶段补全。
+        # 与 _build_confirmation_template 的空 bound_tools 处理一致。
 
         stock_analysis_request = _is_stock_analysis_request(clean_agent_name, clean_responsibility, desired_output_shape)
         # 自动补全默认值，与 prepare_agent_requirement_intake 保持一致
@@ -3308,7 +3421,7 @@ async def prepare_agent_generation_confirmation(
 @register_tool(
     tool_id="propose_agent_build_plans",
     name="基于缺口分析生成候选方案",
-    description="在需求确认后、根据 gap_report 生成 1-3 个 Agent 构建方案（完整版/快速版/缩小需求版），供用户选择。",
+    description="在需求确认后、根据 gap_report 生成 2-4 个 Agent 构建方案（推荐完整版/严格交付版/扩展增强版/降级版），供用户选择。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
@@ -3345,18 +3458,18 @@ async def propose_agent_build_plans(
         # 构造 LLM 提示词
         system_prompt = (
             "你是一位资深的财经产品专家。你的任务是根据系统的能力缺口分析结果，"
-            "为用户生成 1-3 个清晰、可执行的 Agent 构建方案。\n\n"
+            "为用户生成 2-4 个清晰、可执行、可比较的 Agent 构建方案。即使没有 blocking gap，也必须给出不同交付取向的候选方案，而不是只给一套。\n\n"
             "规则：\n"
             "1. 输出必须是合法 JSON，不要包含 markdown 代码块标记。\n"
             "2. 方案用业务语言描述，不要暴露内部工具 ID 或技术细节。\n"
             "3. 方案数量：\n"
-            "   - 0 个 blocking gap：只有 plan_id='direct'（直接生成完整版）。\n"
-            "   - 1-2 个 blocking gap：提供 plan_id='complete'（补齐）和 plan_id='quick'（简化版）。\n"
-            "   - 3 个及以上 blocking gap：提供 complete、quick、plan_id='narrow'（缩小需求范围）。\n"
+            "   - 0 个 blocking gap：至少提供 direct（推荐完整交付）、strict（保守可追溯版）和 enhanced（扩展增强版）三套；enhanced 只能作为可选扩展，不能伪造必需缺口。\n"
+            "   - 1-2 个 blocking gap：提供 complete（补齐）、quick（降级先跑）和 strict（缩小到可追溯范围）。\n"
+            "   - 3 个及以上 blocking gap：提供 complete、quick、narrow 三套。\n"
             "4. complete 方案必须列出 required_new_skills（需要生成/复用的能力）。\n"
-            "5. quick 方案必须说明哪些输出会被降级或省略。\n"
+            "5. quick/strict 方案必须说明哪些输出会被降级、收窄或要求更严格的数据依据。\n"
             "6. narrow 方案必须给出建议缩小后的职责范围。\n"
-            "7. 必须设置 recommended_plan_id，默认推荐 complete；只有 0 个 blocking gap 时推荐 direct。\n"
+            "7. 必须设置 recommended_plan_id：0 个 blocking gap 时推荐 direct；有 blocking gap 时默认推荐 complete。\n"
         )
 
         user_prompt = (
@@ -3370,7 +3483,7 @@ async def propose_agent_build_plans(
             "请按以下固定 JSON 格式输出：\n"
             "{\n"
             '  "candidate_plans": [\n'
-            '    {"plan_id": "direct|complete|quick|narrow", "plan_name": "...", "description": "...", "required_new_skills": [...], "estimated_effort": "高|中|低", "risk": "...", "recommended": true|false}\n'
+            '    {"plan_id": "direct|strict|enhanced|complete|quick|narrow", "plan_name": "...", "description": "...", "required_new_skills": [...], "estimated_effort": "高|中|低", "risk": "...", "recommended": true|false}\n'
             '  ],\n'
             '  "recommended_plan_id": "...",\n'
             '  "pending_question": "..."\n'
@@ -3431,6 +3544,32 @@ async def propose_agent_build_plans(
                 "recommended": bool(p.get("recommended", False)),
             })
 
+        # 安全网：LLM 仍然只返回一套时，按规则补齐到可比较方案，避免方案选择阶段退化成单选。
+        min_expected = 3 if len(blocking_gaps) == 0 else 2
+        if len(normalized_plans) < min_expected:
+            fallback_plans = _fallback_build_plans(blocking_gaps, non_blocking_gaps).get("candidate_plans", [])
+            seen_plan_ids = {str(p.get("plan_id") or "").strip() for p in normalized_plans}
+            for fallback_plan in fallback_plans:
+                fallback_plan_id = str(fallback_plan.get("plan_id") or "").strip()
+                if not fallback_plan_id or fallback_plan_id in seen_plan_ids:
+                    continue
+                normalized_plans.append({
+                    "plan_id": fallback_plan_id,
+                    "plan_name": str(fallback_plan.get("plan_name") or _humanize_plan_id(fallback_plan_id)),
+                    "description": str(fallback_plan.get("description") or ""),
+                    "required_new_skills": _to_str_list(fallback_plan.get("required_new_skills")),
+                    "estimated_effort": str(fallback_plan.get("estimated_effort") or "中"),
+                    "risk": str(fallback_plan.get("risk") or ""),
+                    "recommended": bool(fallback_plan.get("recommended", False)),
+                })
+                seen_plan_ids.add(fallback_plan_id)
+                if len(normalized_plans) >= min_expected:
+                    break
+
+        if recommended_plan_id not in {p.get("plan_id") for p in normalized_plans}:
+            fallback_recommended = str(_fallback_build_plans(blocking_gaps, non_blocking_gaps).get("recommended_plan_id") or "").strip()
+            recommended_plan_id = fallback_recommended or (normalized_plans[0].get("plan_id") if normalized_plans else "direct")
+
         # 确保 recommended 标志与 recommended_plan_id 一致
         for p in normalized_plans:
             p["recommended"] = (p["plan_id"] == recommended_plan_id)
@@ -3478,8 +3617,8 @@ async def propose_agent_build_plans(
             "nanobot_guidance": (
                 "你现在是财经产品专家。向用户展示方案时：\n"
                 "1. 用业务语言解释每个方案的区别。\n"
-                "2. 不要暴露 direct/complete/quick/narrow 等内部代号。\n"
-                "3. 明确说明 complete 方案需要额外生成哪些能力，以及可能的风险。\n"
+                "2. 不要暴露 direct/strict/enhanced/complete/quick/narrow 等内部代号。\n"
+                "3. 明确说明各方案在交付范围、保守程度、是否补能力、是否扩展增强上的区别。\n"
                 "4. 用户回复「选 A」「按推荐的来」「确认」等任意认可表述，"
                 "就视为已选择 recommended_plan_id，直接调用 generate_confirmed_candidate_agent。"
             ),
@@ -4382,22 +4521,29 @@ async def create_or_update_agent_workshop_draft(
         # 🔥 防止 LLM 意图漂移：对比 agent_id 与当前线程上下文的 spec_id
         thread_context_spec_id = _get_current_thread_context_spec_id()
         if thread_context_spec_id and thread_context_spec_id != clean_agent_id:
-            existing_name = await _resolve_spec_name(db, thread_context_spec_id) or thread_context_spec_id
-            logger.warning(
-                "[AgentWorkshop][IntentGuard] ⚠️ LLM 意图漂移！"
-                " thread_context.spec_id='%s' name='%s' ≠ tool_arg.agent_id='%s' agent_name='%s'",
-                thread_context_spec_id, existing_name, clean_agent_id, clean_agent_name,
-            )
-            return _json_response({
-                "status": "error",
-                "code": "intent_drift_detected",
-                "message": (
-                    f"意图漂移检测：当前正在操作的 Agent 是 "
-                    f"「{existing_name}」（{thread_context_spec_id}），"
-                    f"但你传入的 agent_id 是「{clean_agent_id}」（{clean_agent_name}）。"
-                    f"请使用正确的 agent_id={thread_context_spec_id} agent_name={existing_name} 重试。"
-                ),
-            })
+            if _agent_id_equivalent(thread_context_spec_id, clean_agent_id):
+                logger.info(
+                    "[AgentWorkshop][IntentGuard] 允许历史候选 ID 前缀差异: thread_context.spec_id='%s' tool_arg.agent_id='%s'",
+                    thread_context_spec_id, clean_agent_id,
+                )
+                clean_agent_id = thread_context_spec_id
+            else:
+                existing_name = await _resolve_spec_name(db, thread_context_spec_id) or thread_context_spec_id
+                logger.warning(
+                    "[AgentWorkshop][IntentGuard] ⚠️ LLM 意图漂移！"
+                    " thread_context.spec_id='%s' name='%s' ≠ tool_arg.agent_id='%s' agent_name='%s'",
+                    thread_context_spec_id, existing_name, clean_agent_id, clean_agent_name,
+                )
+                return _json_response({
+                    "status": "error",
+                    "code": "intent_drift_detected",
+                    "message": (
+                        f"意图漂移检测：当前正在操作的 Agent 是 "
+                        f"「{existing_name}」（{thread_context_spec_id}），"
+                        f"但你传入的 agent_id 是「{clean_agent_id}」（{clean_agent_name}）。"
+                        f"请使用正确的 agent_id={thread_context_spec_id} agent_name={existing_name} 重试。"
+                    ),
+                })
 
         draft_target_context = await _resolve_workshop_draft_target_context(
             db,
@@ -5700,7 +5846,7 @@ async def generate_confirmed_candidate_agent(
     auto_build_workshop_version: Annotated[bool, "若已同步到 Agent 工坊 Draft，是否自动生成一个可测试版本，默认 true"] = True,
     confirmed: Annotated[bool, "是否已拿到用户明确确认"] = False,
     allow_overwrite: Annotated[bool, "若存在覆盖风险，是否允许覆盖现有配置"] = False,
-    selected_plan_id: Annotated[str, "用户选择的方案 ID：direct/complete/quick/narrow；为空时兼容旧确认流程"] = "",
+    selected_plan_id: Annotated[str, "用户选择的方案 ID：direct/strict/enhanced/complete/quick/narrow；为空时兼容旧确认流程"] = "",
     acknowledged_gaps: Annotated[str, "用户已知晓并接受的 blocking gaps，JSON 数组或逗号分隔；旧流程可为空"] = "",
     capability_inventory_json: Annotated[str, "prepare 阶段能力盘点 JSON，可为空"] = "",
     gap_report_json: Annotated[str, "prepare 阶段 analyze_spec_gaps 返回的 gap_report JSON。complete/quick 方案时必须传递；direct 方案可为空"] = "",
@@ -5736,7 +5882,7 @@ async def generate_confirmed_candidate_agent(
         for i, item in list(enumerate(parsed_acknowledged_gaps))[:10]:
             logger.info("[GenAgent][Params]   acknowledged_gaps[%d] = %s", i, item[:200])
         for i, item in list(enumerate(gap_report.get("blocking_gaps") or []))[:10]:
-            _desc = str(item.get("description") or item.get("gap") or item)
+            _desc = _gap_item_to_text(item)
             logger.info("[GenAgent][Params]   gap_report.blocking_gaps[%d] = %s", i, _desc[:200])
         if clean_selected_plan_id in {"complete", "quick"} and not gap_report:
             logger.warning(
@@ -5761,8 +5907,8 @@ async def generate_confirmed_candidate_agent(
                 "next_stage": "exploring",
                 "message": "已按 narrow 方案回到需求重定义。本方案不会直接生成 Agent，请先缩小范围后重新能力盘点。",
             })
-        if clean_selected_plan_id not in {"", "direct", "complete", "quick"}:
-            return _json_response({"status": "error", "message": "selected_plan_id 只支持 direct/complete/quick/narrow"})
+        if clean_selected_plan_id not in {"", "direct", "strict", "enhanced", "complete", "quick"}:
+            return _json_response({"status": "error", "message": "selected_plan_id 只支持 direct/strict/enhanced/complete/quick/narrow"})
         if clean_selected_plan_id == "quick":
             quick_constraint = _quick_plan_constraint_text(parsed_acknowledged_gaps)
             constraints = _append_trading_guard_constraint(f"{constraints}\n{quick_constraint}")
@@ -5820,19 +5966,24 @@ async def generate_confirmed_candidate_agent(
         if config_result.get("status") != "ok":
             return _json_response({"status": "error", "stage": "agent_config", "result": config_result})
 
-        prompt_result = _parse_json_tool_result(await create_or_update_universal_agent_prompt_template.ainvoke({
-            "agent_id": clean_agent_id,
-            "template_name": template_name or f"{clean_agent_name}模板",
-            "system_prompt": clean_system_prompt,
-            "user_prompt": user_prompt,
-            "tool_guidance": tool_guidance,
-            "analysis_requirements": analysis_requirements,
-            "output_format": output_format,
-            "constraints": constraints,
-            "status": status,
-        }))
-        if prompt_result.get("status") != "ok":
-            return _json_response({"status": "error", "stage": "prompt_template", "result": prompt_result})
+        # 🔑 只有不同步到 Workshop 时才单独创建通用模板
+        # 同步到 Workshop 时，Workshop 会在构建版本时创建版本模板，并同步短名配置的模板绑定
+        # 避免生成两套重复的模板
+        prompt_result = {"status": "ok", "message": "skipped (workshop manages templates)"}
+        if not sync_to_workshop_draft:
+            prompt_result = _parse_json_tool_result(await create_or_update_universal_agent_prompt_template.ainvoke({
+                "agent_id": clean_agent_id,
+                "template_name": template_name or f"{clean_agent_name}模板",
+                "system_prompt": clean_system_prompt,
+                "user_prompt": user_prompt,
+                "tool_guidance": tool_guidance,
+                "analysis_requirements": analysis_requirements,
+                "output_format": output_format,
+                "constraints": constraints,
+                "status": status,
+            }))
+            if prompt_result.get("status") != "ok":
+                return _json_response({"status": "error", "stage": "prompt_template", "result": prompt_result})
 
         binding_result = _parse_json_tool_result(await bind_agent_tools_and_validate_candidate.ainvoke({
             "agent_id": clean_agent_id,
@@ -7136,7 +7287,9 @@ def _extract_json_from_markdown(text: str) -> str:
 def _humanize_plan_id(plan_id: str) -> str:
     """把内部 plan_id 翻译成用户可读的方案名。"""
     mapping = {
-        "direct": "直接生成",
+        "direct": "推荐完整交付",
+        "strict": "保守可追溯版",
+        "enhanced": "扩展增强版",
         "complete": "完整方案",
         "quick": "快速方案",
         "narrow": "缩小范围",
@@ -7180,13 +7333,31 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
         candidate_plans = [
             {
                 "plan_id": "direct",
-                "plan_name": "直接生成",
-                "description": "现有能力已覆盖需求，可直接生成完整版 Agent。",
+                "plan_name": "推荐完整交付",
+                "description": "现有能力已覆盖需求，可直接生成完整版 Agent，并按原定核心风险/分析维度进入真数据测试。",
                 "required_new_skills": [],
                 "estimated_effort": "低",
-                "risk": "能力已覆盖，风险低",
+                "risk": "能力已覆盖，主要风险来自真实数据质量和后续验收结果。",
                 "recommended": True,
-            }
+            },
+            {
+                "plan_id": "strict",
+                "plan_name": "保守可追溯版",
+                "description": "仍使用现有能力，但收紧输出边界：只输出工具和数据明确支撑的结论，未覆盖或数据不足的部分标注为信息缺口。",
+                "required_new_skills": [],
+                "estimated_effort": "低",
+                "risk": "覆盖更稳健，但报告表达会更保守，部分扩展解读不会展开。",
+                "recommended": False,
+            },
+            {
+                "plan_id": "enhanced",
+                "plan_name": "扩展增强版",
+                "description": "在核心需求已满足的基础上，把非阻塞增强项作为可选扩展，例如更细的预警分级、更多风险信号或更丰富的情景说明。",
+                "required_new_skills": [],
+                "estimated_effort": "中",
+                "risk": "不是当前交付的必要条件；如果扩展过多，可能增加测试和解释复杂度。",
+                "recommended": False,
+            },
         ]
         recommended_plan_id = "direct"
     elif blocking_count <= 2:

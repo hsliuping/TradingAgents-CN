@@ -2880,8 +2880,8 @@ async def test_prepare_agent_generation_confirmation_does_not_treat_structured_r
     assert payload["confirmation_brief"]["report_contract"]["style_preview_mode"] == "structure_skeleton"
     assert "仅限当前已确认职责相关章节" in payload["confirmation_brief"]["report_contract"]["content_scope"]
     assert payload["confirmation_brief"]["report_contract_display"]["style_preview_mode"] == "只看结构骨架"
-    assert "请确认下面这份 Agent 生成方案" in payload["confirmation_brief"]["user_confirmation_template"]
-    assert "报告契约" in payload["confirmation_brief"]["user_confirmation_template"]
+    assert "如果以上内容确认无误，请回复：确认" in payload["confirmation_brief"]["user_confirmation_template"]
+    assert "报告内容边界" in payload["confirmation_brief"]["user_confirmation_template"]
 
 
 @pytest.mark.asyncio
