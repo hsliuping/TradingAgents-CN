@@ -202,7 +202,10 @@ def get_ohlson_oscore(symbol: Annotated[str, "A 股股票代码，如 600519、0
 @register_tool(
     tool_id="get_receivables_quality",
     name="应收账款质量评分",
-    description="评估A股公司应收账款质量，通过DSO、应收/营收比、应收/总资产比及同比变化综合评分0-100分。",
+    description=(
+        "评估 A 股公司应收账款质量，通过 DSO、应收/营收比、应收/总资产比及同比变化综合评分 0-100 分。"
+        "这里的“质量/风险”专指应收账款回款质量、客户信用风险和资产质量异常，不是现金流质量、盈利质量、数据质量或技术信号质量。"
+    ),
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -211,8 +214,8 @@ def get_ohlson_oscore(symbol: Annotated[str, "A 股股票代码，如 600519、0
     tool_role_hint="specialized",
     output_shape="structured_json",
     preferred_for=["accounts_receivable_quality_assessment"],
-    when_to_use="当需要评估公司回款能力、应收账款风险或客户信用风险时使用。",
-    when_not_to_use="不适用于无应收账款或现金交易占比极高的行业（如零售超市）。",
+    when_to_use="当需要评估公司回款能力、应收账款异常、账龄/周转风险、客户信用风险或资产质量中的应收部分时使用。",
+    when_not_to_use="不适用于无应收账款或现金交易占比极高的行业（如零售超市）；不用于现金流恶化、盈利质量、存货质量、数据质量或技术交易信号分析。",
     returns="返回JSON字符串，包含metrics、score、flags和data_quality。",
     example="get_receivables_quality(symbol='600519')",
     related_tools=["get_inventory_quality", "get_liquidity_stress_test"],

@@ -97,10 +97,15 @@ def get_sector_data(
 @register_tool(
     tool_id="get_fund_flow_data",
     name="资金流向",
-    description="获取板块资金流向数据，分析主力资金动向",
+    description=(
+        "获取板块资金流向数据，分析主力资金动向、板块资金净流入/流出和板块轮动。"
+        "这里的“资金流向”指交易市场资金面，不是财务报表中的经营现金流、投资现金流、筹资现金流或自由现金流。"
+    ),
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    when_to_use="当需要板块资金流、主力资金流入流出、行业轮动资金面证据时使用。",
+    when_not_to_use="不用于现金流量表分析、现金流恶化、利润含金量、财务风险或个股财务现金流质量判断；这些需求应使用现金流/财务风险工具。",
 )
 def get_fund_flow_data(
     trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"],

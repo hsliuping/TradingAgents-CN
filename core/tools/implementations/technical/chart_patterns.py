@@ -452,7 +452,10 @@ def _detect_channel(
 @register_tool(
     tool_id="get_chart_patterns",
     name="经典技术形态识别",
-    description="基于 OHLC 数据自动识别头肩顶/底、双顶/双底、三角、旗形、通道五大类经典技术形态。",
+    description=(
+        "基于 OHLC 数据自动识别头肩顶/底、双顶/双底、三角、旗形、通道五大类经典技术形态。"
+        "这里的“形态/缺口/图形”属于 K 线价格技术分析语境，不用于 Agent 工坊能力缺口、工具缺口、数据缺失或财务缺口分析。"
+    ),
     category="technical",
     is_online=False,
     auto_register=True,
@@ -461,8 +464,8 @@ def _detect_channel(
     tool_role_hint="specialized",
     output_shape="structured_json",
     preferred_for=["chart_pattern_recognition", "technical_patterns"],
-    when_to_use="当需要自动识别股票 K 线图中的经典技术形态（头肩、双顶、三角等）时使用。",
-    when_not_to_use="数据不足（少于 60 根 K 线）时检测可靠性不足；不适用于分时或分钟级别数据。",
+    when_to_use="当需要自动识别股票 K 线图中的经典技术形态（头肩、双顶、三角等）和价格图形结构时使用。",
+    when_not_to_use="数据不足（少于 60 根 K 线）时检测可靠性不足；不适用于分时或分钟级别数据；不用于 Agent 工坊能力 gap、数据缺口、财务风险缺口或现金流/估值分析。",
     returns="返回 JSON，包含 symbol、current_price、date、patterns 列表（每个形态含类型、价格、置信度）、data_quality。",
     example="get_chart_patterns(symbol='600519', lookback_days=180, pattern_types='all')",
     related_tools=["get_support_resistance_levels", "get_candlestick_patterns", "get_fibonacci_retracement", "get_fibonacci_extension"],

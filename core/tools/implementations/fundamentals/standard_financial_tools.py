@@ -183,13 +183,16 @@ def get_portfolio_risk_profile_tool(
 @register_tool(
     tool_id="get_technical_indicator_series_tool",
     name="技术指标历史序列",
-    description="基于标准价格序列结构化计算 MA、MACD、RSI、KDJ、BOLL、ATR、OBV、支撑压力等历史指标。",
+    description=(
+        "基于标准价格序列结构化计算 MA、MACD、RSI、KDJ、BOLL、ATR、OBV、支撑压力等历史指标。"
+        "这里的“技术信号/趋势”指价格和成交量的技术面指标序列，不是财务风险信号、公告事件信号或 Agent 能力缺口。"
+    ),
     category="technical",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当需要技术指标历史序列、支撑压力、ATR/BOLL/OBV 或结构化技术面输入时使用。",
-    when_not_to_use="如果只需要当前值（非历史序列），应使用 get_technical_factor_bundle_tool；如果需要可读文本分析报告，应使用 get_technical_indicators。",
+    when_to_use="当需要技术指标历史序列、支撑压力、ATR/BOLL/OBV 或结构化技术面输入时使用，适合技术分析、量价指标和价格趋势判断。",
+    when_not_to_use="不用于财务风险、现金流风险、公告事件信号、基本面质量或 Agent 工坊能力缺口分析。如果只需要当前值（非历史序列），应使用 get_technical_factor_bundle_tool；如果需要可读文本分析报告，应使用 get_technical_indicators。",
     capability_tags=["technical_indicators", "historical_series", "structured_data", "ma", "macd", "rsi", "kdj", "boll", "atr", "obv"],
     tool_role_hint="supporting",
     preferred_for=["技术指标历史序列", "回测数据准备", "结构化技术面输入"],
@@ -337,13 +340,17 @@ def get_profitability_stability_metrics_tool(
     name="现金流质量趋势",
     description=(
         "基于历史年报序列计算经营现金流/净利润、自由现金流/净利润、经营现金流率、自由现金流率等趋势。"
-        "适合判断利润含金量、现金流稳定性和自由现金流质量。"
+        "适合判断利润含金量、现金流稳定性、自由现金流质量，以及经营现金流下滑、自由现金流长期为负等现金流恶化信号。"
     ),
     category="fundamentals",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当需要长期现金流质量、CFO/净利、FCF/净利、现金流率等结构化指标时使用。",
+    capability_tags=["cashflow_quality", "cashflow_deterioration", "earnings_quality", "free_cashflow", "operating_cashflow"],
+    tool_role_hint="specialized",
+    output_shape="structured_json",
+    preferred_for=["cashflow_quality_analysis", "financial_risk_signal_detection", "earnings_quality_analysis"],
+    when_to_use="当需要长期现金流质量、CFO/净利、FCF/净利、现金流率、经营现金流下滑、自由现金流长期为负等结构化指标时使用。",
     when_not_to_use="如果只需要现金流量表文字摘要，可使用 get_cashflow_analysis。",
     returns="返回 JSON 字符串，包含 trend、summary、coverage、warnings。",
     example="get_cashflow_quality_trend_tool(symbol='600519', years=10)",
@@ -404,16 +411,16 @@ def get_historical_valuation_percentile_tool(
 @register_tool(
     tool_id="get_security_master_tool",
     name="证券主数据",
-    description="返回统一证券主数据，包括代码、名称、交易所、行业、上市状态、ST 标记、市值等。",
+    description="按股票代码或股票名称返回统一证券主数据，包括代码、名称、交易所、行业、上市状态、ST 标记、市值等。",
     category="market",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当 Agent 需要确认股票身份、行业、交易所、上市状态、基础元数据时使用。",
-    returns="返回 JSON 字符串，包含 symbol、name、exchange、industry、listing_status、coverage、warnings。",
-    example="get_security_master_tool(symbol='600519')",
+    when_to_use="当 Agent 需要确认股票身份、代码、名称、行业、交易所、上市状态、基础元数据时使用。支持输入股票代码或股票名称。",
+    returns="返回 JSON 字符串，包含 query、symbol、name、exchange、industry、listing_status、coverage、warnings。",
+    example="get_security_master_tool(symbol='600519') 或 get_security_master_tool(symbol='科大讯飞')",
 )
-def get_security_master_tool(symbol: Annotated[str, "A 股股票代码，如 600519、000001"]) -> str:
+def get_security_master_tool(symbol: Annotated[str, "A 股股票代码或股票名称，如 600519、科大讯飞、贵州茅台"]) -> str:
     """获取证券主数据。"""
     try:
         return _json_response(get_security_master(symbol))
@@ -534,12 +541,16 @@ def get_drawdown_metrics_tool(
 @register_tool(
     tool_id="get_current_valuation_snapshot_tool",
     name="当前估值快照",
-    description="结构化返回当前 PE/PB/PS/PEG/股息率/市值等估值快照。",
+    description=(
+        "结构化返回当前 PE/PB/PS/PEG/股息率/市值等估值快照。"
+        "用于当前截面的估值指标取数，不计算历史分位、同业相对位置、DCF 目标价或完整估值区间。"
+    ),
     category="fundamentals",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当只需要当前估值指标快照而不是历史分位时使用。",
+    when_to_use="当只需要当前 PE/PB/PS/PEG/股息率/市值等估值指标快照，而不是历史分位、同业比较或目标价模型时使用。",
+    when_not_to_use="不用于历史估值分位（用 get_historical_valuation_percentile_tool）、同业相对估值（用 get_peer_relative_valuation_tool）、DCF/目标价估值或财务质量/风险分析。",
     returns="返回 JSON 字符串，包含 current_price、metrics、data_source、warnings。",
     example="get_current_valuation_snapshot_tool(symbol='600519')",
 )
@@ -606,12 +617,16 @@ def get_peer_group_tool(
 @register_tool(
     tool_id="get_peer_relative_valuation_tool",
     name="同业相对估值",
-    description="结构化返回 PE/PB/PS 相对行业同行的均值、中位数和分位。",
+    description=(
+        "结构化返回 PE/PB/PS 相对行业同行的均值、中位数和分位。"
+        "用于横向同业估值比较和行业相对位置判断，不用于历史估值分位、DCF 目标价或单纯当前估值快照。"
+    ),
     category="fundamentals",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当需要同业估值比较、行业估值相对位置时使用。",
+    when_to_use="当需要同业估值比较、行业估值相对位置、PE/PB/PS 横向分位时使用。",
+    when_not_to_use="不用于历史估值分位时间序列（用 get_historical_valuation_percentile_tool）、当前估值快照（用 get_current_valuation_snapshot_tool）、DCF/目标价模型或质量因子分析。",
     returns="返回 JSON 字符串，包含 industry、metrics、warnings。",
     example="get_peer_relative_valuation_tool(symbol='600519', metrics='pe,pb,ps')",
 )
@@ -632,12 +647,16 @@ def get_peer_relative_valuation_tool(
 @register_tool(
     tool_id="get_peer_relative_quality_tool",
     name="同业相对质量",
-    description="结构化返回 ROE/PB/PE 等质量或估值质量指标相对同行的位置。",
+    description=(
+        "结构化返回 ROE/PB/PE 等质量或估值质量指标相对同行的位置。"
+        "这里的“质量”指公司基本面质量和同行相对质量，如 ROE、盈利能力、资产效率与部分估值质量，不是数据质量、报告质量、现金流专项质量或技术信号质量。"
+    ),
     category="fundamentals",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当需要判断公司质量指标在同行中的相对位置时使用。",
+    when_to_use="当需要判断公司基本面质量指标在同行中的相对位置，如 ROE、盈利能力、资产效率、估值质量横向比较时使用。",
+    when_not_to_use="不用于数据质量检查、报告质量评审、现金流专项质量趋势（用 get_cashflow_quality_trend_tool）或技术指标信号质量。",
     returns="返回 JSON 字符串，包含 industry、metrics、warnings。",
     example="get_peer_relative_quality_tool(symbol='600519', metrics='roe,pb,pe_ttm')",
 )
@@ -688,13 +707,16 @@ def get_company_announcements_tool(
 @register_tool(
     tool_id="get_risk_event_flags_tool",
     name="风险事件标记",
-    description="基于近期新闻标题/摘要识别监管处罚、诉讼、减持、质押、业绩预警、重组、高管变动等风险 flags。",
+    description=(
+        "基于近期新闻标题/摘要识别监管处罚、诉讼、减持、质押、业绩预警、重组、高管变动等风险 flags。"
+        "这里的“风险事件/信号”指新闻和公告事件线索，不是财务报表异常、现金流恶化、市场波动风险、技术买卖信号或 Agent 能力缺口。"
+    ),
     category="news",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当需要快速判断近期是否存在重大风险事件线索时使用。",
-    when_not_to_use="不适合深度事件定量分析（请使用 get_event_study）；不适合正式公告查询（请使用 get_company_event_timeline_tool）；不适合一般性新闻浏览（请使用 get_stock_news）。",
+    when_to_use="当需要快速判断近期是否存在监管处罚、诉讼、减持、质押、业绩预警、重组等重大新闻/公告事件线索时使用。",
+    when_not_to_use="不适合财务风险深度分析、现金流异常识别或财务造假信号检测；这类需求应使用财务风险/财报质量工具。不适合深度事件定量分析（请使用 get_event_study）；不适合正式公告查询（请使用 get_company_event_timeline_tool）；不适合一般性新闻浏览（请使用 get_stock_news）。",
     capability_tags=["event", "risk", "regulatory"],
     tool_role_hint="specialized",
     returns="返回 JSON 字符串，包含 hit_flags、flags、news_count、warnings。",
@@ -845,12 +867,16 @@ def get_industry_fundamental_summary_tool(
 @register_tool(
     tool_id="get_capital_flow_series_tool",
     name="个股资金流序列",
-    description="结构化返回本地个股资金流序列，包括主力净流入、净流入比例、大单/小单净流入等字段。",
+    description=(
+        "结构化返回本地个股资金流序列，包括主力净流入、净流入比例、大单/小单净流入等字段。"
+        "这里的“资金流”指交易资金流向和主力资金行为，不是财务报表中的经营现金流、投资现金流、筹资现金流或自由现金流。"
+    ),
     category="market",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当需要资金流趋势、主力资金行为、资金面证据时使用。若本地未同步资金流，将返回 no_data 和原因。",
+    when_to_use="当需要交易资金流趋势、主力资金行为、资金面证据、大单/小单净流入结构时使用。若本地未同步资金流，将返回 no_data 和原因。",
+    when_not_to_use="不用于财务报表现金流质量、经营现金流下滑、自由现金流为负或利润含金量分析；这些需求应使用 get_cashflow_quality_trend_tool、get_cashflow_analysis 或 get_growth_cashflow_factor_bundle_tool。",
     returns="返回 JSON 字符串，包含 records、summary、coverage、warnings。",
     example="get_capital_flow_series_tool(symbol='600519', start_date='2024-01-01', end_date='2024-12-31')",
 )

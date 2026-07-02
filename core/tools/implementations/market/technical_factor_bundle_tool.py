@@ -44,6 +44,7 @@ def _pick_numeric(doc: Dict[str, Any], *keys: str) -> Any:
         "返回股票的 technical_core 标准化技术因子包。"
         "适合一次性获取 MA20、RSI14、KDJ(K/D/J)、MACD(DIF/DEA/HIST) 这批当前仓库已物化并稳定支持的技术指标。"
         "输出是结构化 JSON，适合 Agent 直接绑定后做择时、趋势判断和技术面筛选。"
+        "这里的“因子/信号”是技术面价格指标，不是基本面因子、财务风险信号、情绪信号或 Agent 能力缺口。"
     ),
     category="technical",
     is_online=False,
@@ -59,6 +60,7 @@ def _pick_numeric(doc: Dict[str, Any], *keys: str) -> Any:
     ),
     when_not_to_use=(
         "不适合获取 PE/PB/ROE/现金流等基本面指标；"
+        "不适合财务风险、现金流恶化、公告事件、情绪面或 Agent 工坊能力缺口分析；"
         "也不适合需要完整历史序列回测的场景。若只需可读性较强的文本技术分析，可考虑 get_technical_indicators。"
     ),
     returns=(

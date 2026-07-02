@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import re
 from statistics import mean, median, pstdev
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -34,6 +35,50 @@ def _normalize_symbol(symbol: str) -> str:
         text = text.split(".", 1)[0]
     digits = "".join(ch for ch in text if ch.isdigit())
     return digits[-6:].zfill(6) if digits else ""
+
+
+def _resolve_security_query_to_symbol(query: str) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """把股票代码或股票名称解析为 6 位 A 股代码，并尽量返回基础信息。"""
+    text = str(query or "").strip()
+    if not text:
+        return "", None
+
+    normalized_symbol = _normalize_symbol(text)
+    if normalized_symbol:
+        basic = get_stock_basic_info(normalized_symbol)
+        return normalized_symbol, basic
+
+    # 股票名称查询：复用本地 stock_basic_info 集合，避免 LLM 猜代码。
+    keyword = re.sub(r"(换|一个|股票|测试|一下|重测|再测|用|的|代码|证券)", "", text).strip() or text
+    db = _get_db()
+    col = db["stock_basic_info"]
+    escaped = re.escape(keyword)
+    projection = {"_id": 0}
+    docs = list(col.find(
+        {
+            "$or": [
+                {"name": keyword},
+                {"name": {"$regex": escaped, "$options": "i"}},
+                {"code": keyword},
+                {"symbol": keyword},
+            ]
+        },
+        projection,
+    ).limit(20))
+    if not docs:
+        return "", None
+
+    def _score(doc: Dict[str, Any]) -> Tuple[int, int]:
+        name = str(doc.get("name") or "")
+        source = str(doc.get("source") or doc.get("data_source") or "")
+        exact = 1 if name == keyword else 0
+        preferred_source = 1 if source in ("tushare", "multi_source", "akshare", "baostock") else 0
+        return exact, preferred_source
+
+    best = sorted(docs, key=_score, reverse=True)[0]
+    code = str(best.get("code") or best.get("symbol") or "").strip()
+    match = re.search(r"\d{6}", code)
+    return (match.group(0), best) if match else ("", best)
 
 
 def _normalize_date(value: Any) -> str:
@@ -312,19 +357,24 @@ def _normalize_price_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_security_master(symbol: str) -> Dict[str, Any]:
-    """返回统一证券主数据。"""
-    normalized_symbol = _normalize_symbol(symbol)
-    basic = get_stock_basic_info(normalized_symbol) or {}
-    quote = get_market_quotes(normalized_symbol) or {}
+    """返回统一证券主数据，支持股票代码或股票名称。"""
+    original_query = str(symbol or "").strip()
+    normalized_symbol, resolved_basic = _resolve_security_query_to_symbol(original_query)
+    basic = resolved_basic or (get_stock_basic_info(normalized_symbol) if normalized_symbol else {}) or {}
+    quote = get_market_quotes(normalized_symbol) if normalized_symbol else {}
+    quote = quote or {}
     exchange = basic.get("exchange") or basic.get("market") or _exchange_suffix(normalized_symbol)
     name = basic.get("name") or quote.get("name")
     warnings: List[str] = []
-    if not basic:
+    if not normalized_symbol:
+        warnings.append("未能根据输入解析出有效证券代码。")
+    if normalized_symbol and not basic:
         warnings.append("未在 stock_basic_info 中找到证券基础信息。")
     return {
         "status": "success" if basic or quote else "no_data",
+        "query": original_query,
         "symbol": normalized_symbol,
-        "ts_code": basic.get("ts_code") or (f"{normalized_symbol}.{exchange}" if exchange else None),
+        "ts_code": basic.get("ts_code") or (f"{normalized_symbol}.{exchange}" if normalized_symbol and exchange else None),
         "name": name,
         "exchange": exchange,
         "industry": basic.get("industry") or basic.get("sw_industry") or basic.get("sector"),
@@ -338,6 +388,7 @@ def get_security_master(symbol: str) -> Dict[str, Any]:
         "coverage": {
             "has_basic_info": bool(basic),
             "has_market_quote": bool(quote),
+            "resolved_by_name": bool(normalized_symbol and original_query and not _normalize_symbol(original_query)),
         },
         "warnings": warnings,
     }

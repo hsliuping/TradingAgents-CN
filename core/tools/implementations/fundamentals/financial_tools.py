@@ -1,7 +1,7 @@
 """
 专项财务分析工具
 
-提供 7 个细分财务工具：
+提供 8 个细分财务工具：
 1. get_income_analysis - 利润表分析（营收、利润趋势）
 2. get_balance_sheet_analysis - 资产负债表分析（财务健康度）
 3. get_cashflow_analysis - 现金流量表分析
@@ -9,6 +9,7 @@
 5. get_dupont_analysis - 杜邦分析（ROE 三因子/五因子拆解）
 6. get_dividend_data - 分红送股数据
 7. get_main_business - 主营业务构成
+8. get_accounts_receivable_risk_analyzer - 应收账款风险三维分析（回收效率+收入质量+计提审慎性）
 """
 
 import logging
@@ -369,10 +370,20 @@ def get_balance_sheet_analysis(
 @register_tool(
     tool_id="get_cashflow_analysis",
     name="现金流量表分析",
-    description="分析股票的经营/投资/筹资现金流，评估现金流健康度",
+    description=(
+        "分析股票的经营/投资/筹资现金流，评估现金流健康度。"
+        "适合现金流恶化分析、经营现金流持续下滑识别、自由现金流为负识别、现金收入质量判断、"
+        "利润含金量评估和财务风险信号排查。"
+    ),
     category="fundamentals",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["cashflow_analysis", "cashflow_quality", "cashflow_deterioration", "operating_cashflow", "free_cashflow", "financial_risk"],
+    tool_role_hint="specialized",
+    output_shape="markdown_report",
+    preferred_for=["cashflow_quality_analysis", "financial_risk_signal_detection", "financial_statement_analysis"],
+    when_to_use="当需要解释财务报表口径的经营/投资/筹资现金流、多期现金流趋势、自由现金流、现金流健康度、现金流恶化风险和利润含金量时使用。",
+    when_not_to_use="不用于主力资金流、北向资金、成交资金流向或短线交易资金面分析；这些是市场资金流，不是财报现金流。若需要结构化长期现金流质量指标，优先用 get_cashflow_quality_trend_tool。",
 )
 def get_cashflow_analysis(
     ticker: Annotated[str, "股票代码，6位数字（如 600519、000001）"],
@@ -1013,3 +1024,319 @@ def get_main_business(
     except Exception as e:
         logger.error(f"❌ [主营业务] 执行失败: {e}")
         return f"❌ 主营业务构成查询失败: {e}"
+
+
+# ============================================================
+# Tool 8: 应收账款风险分析
+# ============================================================
+@tool
+@register_tool(
+    tool_id="get_accounts_receivable_risk_analyzer",
+    name="应收账款风险分析",
+    description="三维评估应收账款风险：回收效率（周转天数）、收入质量（应收-营收增速偏离）、计提审慎性（信用减值损失趋势），交叉验证生成综合风险评级",
+    category="fundamentals",
+    is_online=True,
+    auto_register=True
+)
+def get_accounts_receivable_risk_analyzer(
+    ticker: Annotated[str, "股票代码，6位数字（如 600519、000001）"],
+    years: Annotated[int, "回溯年数，默认4年"] = 4
+) -> str:
+    """
+    应收账款风险分析工具 —— 三维交叉验证
+
+    三个维度：
+    1. 回收效率：应收账款周转天数及变化趋势
+    2. 收入质量：应收账款增速 vs 营收增速的偏离度
+    3. 计提审慎性：信用减值损失/应收账款的变动，交叉对比周转天数
+
+    综合规则：
+    - 三者正常 → 低风险
+    - 单项恶化 → 关注
+    - 周转恶化 + 计提下降 → 高风险（粉饰嫌疑）
+    - 三者同时恶化 → 极高风险
+
+    Args:
+        ticker: 股票代码
+        years: 回溯年数
+
+    Returns:
+        str: 应收账款风险分析报告
+    """
+    logger.info(f"📊 [应收账款风险分析] 分析股票: {ticker}, 回溯{years}年")
+    try:
+        data = _get_financial_data_from_cache_or_api(ticker, limit=years * 4 + 4)
+        if not data:
+            return f"❌ 未获取到 {ticker} 的财务数据"
+
+        raw = data.get("raw_data", {})
+        balance_list = raw.get("balance_sheet", [])
+        income_list = raw.get("income_statement", [])
+        indicator_list = raw.get("financial_indicators", [])
+
+        # ---- 提取年报数据（每年取最后一条记录） ----
+        def _extract_annual(records: list, fields: list) -> dict:
+            """从季度列表中提取每年最后一条记录，返回 {year: {field: value}}"""
+            by_year: Dict[str, Dict[str, Any]] = {}
+            for rec in records:
+                end_date = str(rec.get('end_date', '') or rec.get('f_ann_date', ''))
+                if not end_date:
+                    continue
+                year = end_date[:4]
+                # 同一年取 end_date 更大的（即年报）
+                if year not in by_year or str(rec.get('end_date', '')) > str(by_year[year].get('end_date', '')):
+                    by_year[year] = rec
+            # 取最近 years 年，按年份降序
+            sorted_years = sorted(by_year.keys(), reverse=True)[:years]
+            result = {}
+            for y in sorted_years:
+                result[y] = {f: _coerce_float(by_year[y].get(f)) for f in fields}
+            return result
+
+        # 提取资产负债表年报：应收账款
+        ar_annual = _extract_annual(balance_list, ['accounts_receiv'])
+        # 提取利润表年报：营业收入、信用减值损失
+        income_annual = _extract_annual(income_list, ['revenue', 'credit_impa_loss', 'assets_impair_loss'])
+        # 提取财务指标年报：应收账款周转天数
+        indicator_annual = _extract_annual(indicator_list, ['arturn_days'])
+
+        year_keys = sorted(set(list(ar_annual.keys()) + list(income_annual.keys())), reverse=True)[:years]
+
+        # ---- 跳转缺少数据 ----
+        if len(year_keys) < 2:
+            return f"📊 {ticker} 年报数据不足（需至少2年），无法进行趋势分析"
+
+        # ---- 构建逐年数据表 ----
+        records = []
+        for y in year_keys:
+            ar_val = _coerce_float(ar_annual.get(y, {}).get('accounts_receiv'))
+            rev_val = _coerce_float(income_annual.get(y, {}).get('revenue'))
+            impa_val = _coerce_float(income_annual.get(y, {}).get('credit_impa_loss'))
+            arturn_days_val = _coerce_float(indicator_annual.get(y, {}).get('arturn_days'))
+
+            records.append({
+                'year': y,
+                'accounts_receiv': ar_val,
+                'revenue': rev_val,
+                'credit_impa_loss': impa_val,
+                'arturn_days': arturn_days_val,
+            })
+
+        # ---- 计算趋势指标 ----
+        def _safe_ratio(curr, prev) -> Optional[float]:
+            if curr is not None and prev is not None and prev != 0:
+                return (curr - prev) / abs(prev)
+            return None
+
+        # 计算应收账款周转天数（自算，与 arturn_days 对照验证）
+        for i, rec in enumerate(records):
+            if rec['accounts_receiv'] and rec['revenue'] and rec['revenue'] != 0:
+                rec['ar_turnover_days_self'] = 365 * rec['accounts_receiv'] / rec['revenue']
+            else:
+                rec['ar_turnover_days_self'] = None
+
+        # 计算增速和偏离度
+        for i in range(len(records) - 1):
+            curr, prev = records[i], records[i + 1]
+            curr['ar_growth'] = _safe_ratio(curr['accounts_receiv'], prev['accounts_receiv'])
+            curr['rev_growth'] = _safe_ratio(curr['revenue'], prev['revenue'])
+            if curr['ar_growth'] is not None and curr['rev_growth'] is not None:
+                curr['deviation'] = curr['ar_growth'] - curr['rev_growth']
+            else:
+                curr['deviation'] = None
+            # 计提比例
+            if curr['credit_impa_loss'] is not None and curr['accounts_receiv'] is not None and curr['accounts_receiv'] != 0:
+                curr['impa_ratio'] = curr['credit_impa_loss'] / curr['accounts_receiv']
+            else:
+                curr['impa_ratio'] = None
+
+        # ---- 输出报告 ----
+        lines = [f"# {ticker} 应收账款风险三维分析\n"]
+
+        # 最新一期概览
+        latest = records[0]
+        lines.append("## 📊 最新一期快照")
+        lines.append(f"- **报告年度**: {latest['year']}")
+        lines.append(f"- **应收账款**: {_wan_yi(latest['accounts_receiv'])}")
+        lines.append(f"- **营业收入**: {_wan_yi(latest['revenue'])}")
+        if latest['arturn_days'] is not None:
+            lines.append(f"- **应收账款周转天数** (数据源): {latest['arturn_days']:.1f} 天")
+        if latest.get('ar_turnover_days_self') is not None:
+            lines.append(f"- **应收账款周转天数** (自算): {latest['ar_turnover_days_self']:.1f} 天")
+        if latest.get('ar_growth') is not None:
+            lines.append(f"- **应收账款增速**: {latest['ar_growth'] * 100:+.1f}% (同比)")
+        if latest.get('rev_growth') is not None:
+            lines.append(f"- **营收增速**: {latest['rev_growth'] * 100:+.1f}% (同比)")
+        if latest.get('deviation') is not None:
+            lines.append(f"- **增速偏离度**: {latest['deviation'] * 100:+.1f} 百分点（正值 = 应收跑赢营收，虚胖信号）")
+        if latest.get('impa_ratio') is not None:
+            lines.append(f"- **信用减值损失/应收账款**: {latest['impa_ratio'] * 100:.2f}%")
+        lines.append("")
+
+        # 逐年趋势表
+        lines.append("## 📈 逐年趋势")
+        header = "| 年度 | 应收账款 | 营业收入 | 周转天数(源) | 周转天数(算) | 应收增速 | 营收增速 | 偏离度 | 减值/应收 |"
+        lines.append(header)
+        lines.append("|" + "|".join(["------"] * 9) + "|")
+        for rec in records:
+            ar = _wan_yi(rec['accounts_receiv'])
+            rev = _wan_yi(rec['revenue'])
+            atd = f"{rec['arturn_days']:.1f}" if rec['arturn_days'] is not None else "-"
+            atds = f"{rec.get('ar_turnover_days_self'):.1f}" if rec.get('ar_turnover_days_self') is not None else "-"
+            arg = f"{rec.get('ar_growth') * 100:+.1f}%" if rec.get('ar_growth') is not None else "-"
+            revg = f"{rec.get('rev_growth') * 100:+.1f}%" if rec.get('rev_growth') is not None else "-"
+            dev = f"{rec.get('deviation') * 100:+.1f}pp" if rec.get('deviation') is not None else "-"
+            impa = f"{rec.get('impa_ratio') * 100:.2f}%" if rec.get('impa_ratio') is not None else "-"
+            lines.append(f"| {rec['year']} | {ar} | {rev} | {atd} | {atds} | {arg} | {revg} | {dev} | {impa} |")
+        lines.append("")
+
+        # ---- 三维交叉风险评估 ----
+        lines.append("## 🔍 三维风险评估")
+
+        # 判定各维度状态
+        def _assess_turnover(rec) -> tuple:
+            """判定周转天数趋势：(方向, 程度)"""
+            atd = rec.get('arturn_days')
+            if atd is None:
+                return ("unknown", "数据缺失")
+            # 与上一期比较
+            idx = records.index(rec)
+            if idx < len(records) - 1:
+                prev_atd = records[idx + 1].get('arturn_days')
+                if prev_atd is not None:
+                    change_pct = (atd - prev_atd) / prev_atd if prev_atd != 0 else 0
+                    if change_pct > 0.15:
+                        return ("worsening", f"大幅恶化 (+{change_pct * 100:.0f}%)")
+                    elif change_pct > 0.05:
+                        return ("worsening", f"轻微恶化 (+{change_pct * 100:.0f}%)")
+                    elif change_pct < -0.05:
+                        return ("improving", f"改善 ({change_pct * 100:.0f}%)")
+                    else:
+                        return ("stable", "基本稳定")
+            # 绝对值判断
+            if atd > 365:
+                return ("worsening", f"严重: {atd:.0f}天 (>1年)")
+            elif atd > 180:
+                return ("worsening", f"偏高: {atd:.0f}天")
+            elif atd > 90:
+                return ("stable", f"正常偏高: {atd:.0f}天")
+            else:
+                return ("stable", f"健康: {atd:.0f}天")
+
+        def _assess_deviation(rec) -> tuple:
+            dev = rec.get('deviation')
+            if dev is None:
+                return ("unknown", "数据缺失")
+            if dev > 0.2:
+                return ("worsening", f"大幅偏离 (+{dev * 100:.0f}pp)")
+            elif dev > 0.1:
+                return ("worsening", f"明显偏离 (+{dev * 100:.0f}pp)")
+            elif dev > 0.05:
+                return ("stable", f"轻微偏离 (+{dev * 100:.0f}pp)")
+            else:
+                return ("stable", "正常")
+
+        def _assess_provision(rec) -> tuple:
+            """判定计提审慎性：如果周转恶化但计提比例反而下降 → 粉饰嫌疑"""
+            impa = rec.get('impa_ratio')
+            if impa is None:
+                # 检查是否有 assets_impair_loss 作为替代
+                return ("unknown", "信用减值损失数据缺失")
+            idx = records.index(rec)
+            # 当前计提比例
+            curr_ratio = impa
+            # 与上一期比较
+            if idx < len(records) - 1:
+                prev_rec = records[idx + 1]
+                prev_ratio = prev_rec.get('impa_ratio')
+                prev_atd = prev_rec.get('arturn_days')
+                curr_atd = rec.get('arturn_days')
+                if prev_ratio is not None and curr_atd is not None and prev_atd is not None:
+                    ratio_change = (curr_ratio - prev_ratio) / prev_ratio if prev_ratio != 0 else 0
+                    atd_change = (curr_atd - prev_atd) / prev_atd if prev_atd != 0 else 0
+                    # 核心逻辑：周转恶化 + 计提下降 = 粉饰嫌疑
+                    if atd_change > 0.05 and ratio_change < -0.1:
+                        return ("worsening", f"⚠️ 粉饰嫌疑: 周转恶化({atd_change * 100:+.0f}%)但计提下降({ratio_change * 100:+.0f}%)")
+                    elif atd_change > 0.05 and ratio_change > 0.1:
+                        return ("stable", f"正常响应: 周转恶化({atd_change * 100:+.0f}%)→计提同步上升({ratio_change * 100:+.0f}%)")
+                    elif atd_change < -0.05 and ratio_change < -0.1:
+                        return ("stable", f"合理: 周转改善→计提下降")
+                    else:
+                        return ("stable", "基本稳定")
+            return ("unknown", "缺少对比数据")
+
+        # 最新一期评估
+        turnover_status, turnover_detail = _assess_turnover(latest)
+        dev_status, dev_detail = _assess_deviation(latest)
+        provision_status, provision_detail = _assess_provision(latest)
+
+        # 汇总信号
+        signals = []
+        if turnover_status == "worsening":
+            signals.append(f"🔴 回收效率: {turnover_detail}")
+        elif turnover_status == "stable":
+            signals.append(f"🟡 回收效率: {turnover_detail}")
+        else:
+            signals.append(f"⬜ 回收效率: {turnover_detail}")
+
+        if dev_status == "worsening":
+            signals.append(f"🔴 收入质量: {dev_detail}")
+        elif dev_status == "stable":
+            signals.append(f"🟡 收入质量: {dev_detail}")
+        else:
+            signals.append(f"⬜ 收入质量: {dev_detail}")
+
+        if provision_status == "worsening":
+            signals.append(f"🔴 计提审慎性: {provision_detail}")
+        elif provision_status == "stable":
+            signals.append(f"🟢 计提审慎性: {provision_detail}")
+        else:
+            signals.append(f"⬜ 计提审慎性: {provision_detail}")
+
+        for s in signals:
+            lines.append(f"- {s}")
+
+        # 综合评级
+        worsening_count = sum(1 for status in [turnover_status, dev_status, provision_status] if status == "worsening")
+        stable_count = sum(1 for status in [turnover_status, dev_status, provision_status] if status == "stable")
+        unknown_count = sum(1 for status in [turnover_status, dev_status, provision_status] if status == "unknown")
+
+        lines.append("")
+        lines.append("## 🏷️ 综合风险评级")
+
+        if worsening_count == 0 and unknown_count == 0:
+            lines.append("> ✅ **低风险** — 三项指标均正常，应收账款质量健康")
+        elif worsening_count == 1:
+            if turnover_status == "worsening":
+                lines.append("> ⚠️ **关注（回收恶化）** — 回款速度下降，关注客户回款能力和信用政策变化")
+            elif dev_status == "worsening":
+                lines.append("> ⚠️ **关注（收入质量问题）** — 应收账款膨胀速度超出营收增长，可能存在收入确认激进行为")
+            else:
+                lines.append("> ⚠️ **关注（计提问题）** — 计提行为异常")
+        elif worsening_count == 2:
+            if turnover_status == "worsening" and provision_status == "worsening":
+                lines.append("> 🔴 **高风险 — 财务粉饰嫌疑** — 回款恶化 + 计提不升反降，公司可能在刻意压低减值以美化利润")
+            elif turnover_status == "worsening" and dev_status == "worsening":
+                lines.append("> 🔴 **高风险 — 双重恶化** — 收入质量下降同时回款困难，经营性现金流承压")
+            elif dev_status == "worsening" and provision_status == "worsening":
+                lines.append("> 🔴 **高风险 — 收入虚胖 + 计提不足** — 应收膨胀的同时减值准备不充分，利润表可信度存疑")
+            else:
+                lines.append("> 🔴 **高风险** — 两项指标恶化，需重点关注")
+        elif worsening_count == 3:
+            lines.append("> 🔴🔴 **极高风险 — 完美风暴** — 回收、收入质量、计提三者同时恶化，需高度警惕财务造假可能")
+        elif unknown_count >= 2:
+            lines.append("> ⬜ **数据不足** — 关键字段缺失，无法完成完整评估，建议检查数据源")
+        else:
+            lines.append("> 🟡 **无法判定** — 请结合具体指标手动评估")
+
+        lines.append("")
+        lines.append("---")
+        lines.append("*说明: 增速偏离度 = 应收增速 - 营收增速，正值意味着应收账款膨胀快于收入增长，是'纸面富贵'信号*")
+        lines.append("*计提审慎性 = 信用减值损失/应收账款，周转恶化时该比率应同步上升，若背离则存粉饰嫌疑*")
+        lines.append("*数据来源: Tushare / MongoDB 缓存*")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.error(f"❌ [应收账款风险分析] 执行失败: {e}", exc_info=True)
+        return f"❌ 应收账款风险分析失败: {e}"

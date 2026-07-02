@@ -371,6 +371,7 @@ def _calc_strength(df: pd.DataFrame, idx: int, window: int = 20) -> str:
         "检测均线、MACD、KDJ 等常用技术指标的金叉/死叉信号。"
         "覆盖 12 种均线配对交叉、MACD 金叉死叉+零轴穿越、KDJ 金叉死叉+超买超卖区。"
         "输出结构化 JSON，包含信号类型、方向、强度和发生日期。"
+        "这里的“信号”指价格/指标交叉产生的技术交易信号，不是财务造假信号、风险事件信号、情绪信号或 Agent 能力缺口。"
     ),
     category="technical",
     is_online=False,
@@ -387,6 +388,7 @@ def _calc_strength(df: pd.DataFrame, idx: int, window: int = 20) -> str:
     when_not_to_use=(
         "不适合单独作为交易决策依据（应结合其他工具）。"
         "不适合识别 K 线形态（应使用 get_candlestick_patterns）。"
+        "不用于财务报表异常、现金流风险、公告事件风险、市场情绪或 Agent 能力缺口分析。"
         "不适合基本面分析。"
     ),
     returns=(

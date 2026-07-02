@@ -29,6 +29,7 @@ def _json_response(payload: dict) -> str:
         "返回股票的 value_core 标准化价值因子包。"
         "适合一次性获取 PE、PE_TTM、PB、PB_MRQ、PS_TTM、股息率、PEG、行业 PE/PB 中位数等估值指标，"
         "并附带缺失因子、回退告警和计算说明。"
+        "这里的“价值/估值因子”是横截面估值输入，不直接生成 DCF 目标价、历史估值分位或完整投资评级。"
     ),
     category="fundamentals",
     is_online=False,
@@ -40,8 +41,8 @@ def _json_response(payload: dict) -> str:
     ),
     when_not_to_use=(
         "不适合做利润表趋势、偿债能力、现金流质量分析；"
-        "也不适合做技术面判断。需要质量因子请用 get_quality_factor_bundle_tool，"
-        "需要成长/现金流请用 get_growth_cashflow_factor_bundle_tool。"
+        "也不适合做技术面判断、DCF 目标价或历史估值分位。需要质量因子请用 get_quality_factor_bundle_tool，"
+        "需要成长/现金流请用 get_growth_cashflow_factor_bundle_tool，需要历史分位请用 get_historical_valuation_percentile_tool。"
     ),
     returns=(
         "返回 JSON 字符串，结构包含 symbol、name、industry、current_price、bundle=value_core、"
@@ -75,6 +76,7 @@ def get_value_factor_bundle_tool(
         "返回股票的 quality_core 标准化质量因子包。"
         "适合一次性获取 ROE、ROA、毛利率、净利率、资产负债率、流动比率、ROIC、"
         "现金转换率、应计利润比率、利息保障倍数、Piotroski F-Score、Altman Z-Score、Beneish M-Score 等质量指标。"
+        "这里的“质量”指公司基本面和财务报表质量，不是数据质量、报告质量、技术信号质量或产品质量。"
     ),
     category="fundamentals",
     is_online=False,
@@ -87,6 +89,7 @@ def get_value_factor_bundle_tool(
     ),
     when_not_to_use=(
         "不适合做估值贵不贵的判断，也不适合输出 MA、RSI、MACD 这类技术指标。"
+        "不用于数据质量检查、报告质量评审、技术信号质量或短线资金流向分析。"
         "需要估值因子请用 get_value_factor_bundle_tool，需要技术因子请用 get_technical_factor_bundle_tool。"
     ),
     returns=(
@@ -122,17 +125,25 @@ def get_quality_factor_bundle_tool(
         "返回股票的 growth_cashflow_core 标准化成长/现金流因子包。"
         "适合一次性获取营收同比、净利润同比、营业利润同比、三年 CAGR、TTM 营收、TTM 净利润、"
         "经营现金流、自由现金流、自由现金流收益率、经营现金流收益率、净营运资本等指标。"
+        "可用于现金流恶化分析、经营现金流持续下滑识别、自由现金流长期为负识别、现金收入质量判断、"
+        "利润含金量评估、财务风险信号识别和成长质量分析。"
     ),
     category="fundamentals",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
+    capability_tags=["growth_analysis", "cashflow_quality", "cashflow_deterioration", "operating_cashflow", "free_cashflow", "financial_risk"],
+    tool_role_hint="specialized",
+    output_shape="structured_json",
+    preferred_for=["cashflow_quality_analysis", "financial_risk_signal_detection", "growth_quality_analysis", "valuation_analysis"],
     when_to_use=(
         "当 Agent 需要判断公司增长速度、现金流造血能力、自由现金流质量、"
-        "营运资本变化时使用。适合成长分析、现金流健康度分析和 PEG/成长估值的前置取数。"
+        "经营现金流是否持续下滑、自由现金流是否长期为负、现金收入质量是否变差、"
+        "营运资本变化时使用。适合成长分析、现金流健康度分析、现金流恶化风险识别和 PEG/成长估值的前置取数。"
     ),
     when_not_to_use=(
         "不适合单独做估值倍数比较，也不适合技术面择时。"
+        "这里的现金流是财务报表口径的经营/自由现金流，不用于查询主力资金流、北向资金、成交资金流向或短线交易资金面。"
         "如果目标是 PE/PB/股息率等估值字段，优先用 get_value_factor_bundle_tool。"
     ),
     returns=(

@@ -35,7 +35,10 @@ def _safe_div(numerator, denominator) -> float | None:
 @register_tool(
     tool_id="get_earnings_quality_score",
     name="盈利质量评分",
-    description="从应计质量、现金流稳定性、盈利持续性、自由现金流覆盖和一次性项目影响五个维度评估公司盈利质量，总分100分。",
+    description=(
+        "从应计质量、现金流稳定性、盈利持续性、自由现金流覆盖和一次性项目影响五个维度评估公司盈利质量，总分100分。"
+        "这里的“质量”指盈利真实性、可持续性和会计质量，不是数据质量、报告质量、产品质量、技术信号质量或单纯现金流量表分析。"
+    ),
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -44,8 +47,8 @@ def _safe_div(numerator, denominator) -> float | None:
     tool_role_hint="specialized",
     output_shape="structured_json",
     preferred_for=["earnings_quality_assessment"],
-    when_to_use="当需要评估公司盈利的真实性和可持续性、识别会计质量问题时使用。",
-    when_not_to_use="不用于短期盈利预测；盈利质量评分衡量历史质量而非未来盈利。",
+    when_to_use="当需要评估公司盈利真实性、盈利可持续性、会计质量、应计利润风险、现金流对盈利覆盖情况时使用。",
+    when_not_to_use="不用于短期盈利预测；不用于数据质量检查、报告质量评审、技术信号或交易资金流分析；盈利质量评分衡量历史质量而非未来盈利。",
     returns="返回JSON字符串，包含total_score、rating、dimensions和data_quality。",
     example="get_earnings_quality_score(symbol='600519')",
     related_tools=["get_beneish_mscore", "get_piotroski_fscore"],

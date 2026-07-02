@@ -19,10 +19,15 @@ logger = logging.getLogger(__name__)
 @register_tool(
     tool_id="get_stock_sentiment_unified",
     name="统一股票情绪分析",
-    description="获取股票市场情绪和社交媒体情绪，支持A股、港股、美股",
+    description=(
+        "获取股票市场情绪和社交媒体情绪，支持 A 股、港股、美股。"
+        "这里的“情绪/信号”指新闻、社交媒体和市场舆论情绪，不是技术买卖信号、财务风险信号、公告风险事件或 Agent 能力缺口。"
+    ),
     category="social",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    when_to_use="当需要分析市场舆情、社交媒体情绪、投资者情绪和情绪面影响时使用。",
+    when_not_to_use="不用于技术指标交叉信号、财务报表异常、现金流风险、监管处罚/诉讼等公告事件识别或基本面估值。",
 )
 def get_stock_sentiment_unified(
     ticker: Annotated[str, "股票代码（支持A股、港股、美股）"],
