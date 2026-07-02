@@ -1,10 +1,4 @@
-from core.embedded_nanobot.bus.events import InboundMessage, OutboundMessage
-from core.embedded_nanobot.bus.queue import MessageBus
-from core.embedded_nanobot.providers.unified import TradingAgentsLLMProvider
+"""core.embedded_nanobot 包。
 
-__all__ = [
-    "InboundMessage",
-    "OutboundMessage",
-    "MessageBus",
-    "TradingAgentsLLMProvider",
-]
+Nanobot Runtime 已移除，保留 workflows/（LangGraph 工作流）和 intent_context.py（意图上下文工具）。
+"""
