@@ -1451,6 +1451,8 @@ class TushareProvider(BaseStockDataProvider):
                 "admin_exp": self._safe_float(latest_income.get('admin_exp')),  # 管理费用
                 "fin_exp": self._safe_float(latest_income.get('fin_exp')),  # 财务费用
                 "rd_exp": self._safe_float(latest_income.get('rd_exp')),  # 研发费用
+                "credit_impa_loss": self._safe_float(latest_income.get('credit_impa_loss')),  # 信用减值损失（含坏账准备当期计提）
+                "assets_impair_loss": self._safe_float(latest_income.get('assets_impair_loss')),  # 资产减值损失
 
                 # 资产负债表核心指标
                 "total_assets": self._safe_float(latest_balance.get('total_assets')),  # 总资产
