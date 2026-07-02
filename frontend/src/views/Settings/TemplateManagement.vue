@@ -14,6 +14,9 @@
               <el-option label="仓位分析 v2.0" value="position_analysis_v2" />
               <el-option label="后处理器 v2.0" value="post_processors_v2" />
             </el-option-group>
+            <el-option-group label="Agent工坊">
+              <el-option label="自定义Agent" value="universal" />
+            </el-option-group>
           </el-select>
         </el-form-item>
         <el-form-item label="Agent名称">
@@ -62,7 +65,7 @@
         </el-table-column>
         <el-table-column label="Agent名称" width="200">
           <template #default="scope">
-            <span>{{ labelAgentName(scope.row.agent_name) }}</span>
+            <span>{{ displayAgentName(scope.row) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="偏好" width="140">
@@ -113,7 +116,7 @@
       <div v-if="detail">
         <el-descriptions :column="1" border>
           <el-descriptions-item label="模板名称">{{ detail.template_name }}</el-descriptions-item>
-          <el-descriptions-item label="Agent">{{ labelAgentType(detail.agent_type) }} / {{ labelAgentName(detail.agent_name) }}</el-descriptions-item>
+          <el-descriptions-item label="Agent">{{ labelAgentType(detail.agent_type) }} / {{ displayAgentName(detail) }}</el-descriptions-item>
           <el-descriptions-item label="偏好">{{ labelPreference(detail.preference_type) }}</el-descriptions-item>
           <el-descriptions-item label="备注">{{ detail.remark || '-' }}</el-descriptions-item>
           <el-descriptions-item label="版本">{{ detail.version }}</el-descriptions-item>
@@ -265,7 +268,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { TemplatesApi, type TemplateItem } from '@/api/templates'
 import { ApiClient } from '@/api/request'
@@ -315,7 +318,9 @@ const agentTypeMap: Record<string, string> = {
   trader_v2: '交易员 v2.0',
   reviewers_v2: '复盘分析 v2.0',
   position_analysis_v2: '仓位分析 v2.0',
-  post_processors_v2: '后处理器 v2.0'
+  post_processors_v2: '后处理器 v2.0',
+  // Agent工坊
+  universal: '自定义Agent'
 }
 
 const agentNameMap: Record<string, string> = {
@@ -387,12 +392,28 @@ const agentTypeMapList: Record<string, string[]> = {
   post_processors_v2: ['data_preparer_v2','report_generator_v2']
 }
 const availableAgentCodes = ref<string[]>([])
+const workshopAgentNameMap = ref<Record<string, string>>({})
+const normalizeWorkshopTemplateName = (templateName?: string, agentName?: string) => {
+  const raw = String(templateName || '').trim()
+  if (!raw) return String(agentName || '').trim() || '-'
+  return raw
+    .replace(/\s+v\d+(?:\.\d+)?\s*$/i, '')
+    .replace(/\s*模板\s*$/i, '')
+    .trim() || raw
+}
+const displayAgentName = (row?: any) => {
+  const agentName = String(row?.agent_name || '').trim()
+  if (row?.agent_type === 'universal') {
+    return normalizeWorkshopTemplateName(row?.template_name, agentName)
+  }
+  return labelAgentName(agentName)
+}
 const agentOptions = computed(() => {
   const currentType = filters.agent_type || (typeof route.query.agent_type === 'string' ? (route.query.agent_type as string) : undefined)
   // 工坊自定义 Agent 没有预定义映射，直接用从 API 获取到的所有 agent_name
   if (currentType === 'universal') {
     return availableAgentCodes.value
-      .map((code) => ({ code, cn: agentNameMap[code] || code }))
+      .map((code) => ({ code, cn: workshopAgentNameMap.value[code] || agentNameMap[code] || code }))
       .sort((a, b) => a.cn.localeCompare(b.cn))
   }
   const baseCodes = currentType ? (agentTypeMapList[currentType] || []) : Object.keys(agentNameMap)
@@ -403,6 +424,7 @@ const agentOptions = computed(() => {
 const loadAvailableAgents = async () => {
   try {
     if (!filters.agent_type && typeof route.query.agent_type !== 'string') {
+      workshopAgentNameMap.value = {}
       availableAgentCodes.value = []
       return
     }
@@ -410,18 +432,26 @@ const loadAvailableAgents = async () => {
     const res = await TemplatesApi.list({ agent_type: currentType, limit: 200 })
     const items = (res.data && (res.data as any).items) ? (res.data as any).items : []
     const codes = Array.from(new Set(items.map((it: any) => it.agent_name).filter(Boolean)))
+    const nextWorkshopNameMap: Record<string, string> = {}
+    for (const item of items) {
+      const code = String((item as any).agent_name || '').trim()
+      if (!code) continue
+      nextWorkshopNameMap[code] = normalizeWorkshopTemplateName((item as any).template_name, code)
+    }
     // 工坊自定义 Agent 分类：只保留 Agent 工坊生成的模板，兼容旧的 spec_nanobot_ 与新的 agent_ 命名
     const isUniversal = (filters.agent_type || (typeof route.query.agent_type === 'string' ? route.query.agent_type : '')) === 'universal'
     const workshopCodes = isUniversal ? codes.filter((c) => {
       const code = String(c)
       return code.startsWith('agent_') || code.startsWith('spec_nanobot_')
     }) : codes
+    workshopAgentNameMap.value = isUniversal ? nextWorkshopNameMap : {}
     availableAgentCodes.value = workshopCodes as string[]
     // 选中值无效时清空
     if (filters.agent_name && !codes.includes(filters.agent_name)) {
       filters.agent_name = undefined
     }
   } catch {
+    workshopAgentNameMap.value = {}
     availableAgentCodes.value = []
   }
 }
@@ -481,15 +511,7 @@ const loadTemplates = async () => {
     
     // 🔥 过滤掉v1.0版本的模板，只保留v2.0版本
     const v1AgentTypes = ['analysts', 'researchers', 'debators', 'managers', 'trader', 'reviewers', 'position_analysis']
-    // 工坊自定义 Agent 分类：只保留 Agent 工坊生成的模板
-    const isUniversal = filters.agent_type === 'universal'
     items.value = allItems.filter((item: any) => {
-      if (isUniversal && item.agent_name) {
-        const code = String(item.agent_name)
-        if (!code.startsWith('agent_') && !code.startsWith('spec_nanobot_')) {
-          return false
-        }
-      }
       // 如果指定了agent_type，且是v1.0类型，则过滤掉
       if (item.agent_type && v1AgentTypes.includes(item.agent_type)) {
         return false

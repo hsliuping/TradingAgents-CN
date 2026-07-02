@@ -25,6 +25,8 @@ export const agentTypeMap: Record<string, string> = {
   post_processors_v2: '后处理器 v2.0',
   // 数据库中存在无 _v2 后缀的别名，统一显示中文
   post_processors: '后处理器 v2.0',
+  // Agent工坊
+  universal: '自定义Agent',
 }
 
 export const agentNameMap: Record<string, string> = {

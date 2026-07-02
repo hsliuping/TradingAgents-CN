@@ -9,7 +9,7 @@
         <el-button plain @click="goToLanding()">
           返回总览
         </el-button>
-        <el-button type="primary" @click="router.push('/workflow/agent-studio')">
+        <el-button type="primary" @click="router.push({ path: '/workflow/agent-studio', query: { mode: 'new' } })">
           新建 Agent
         </el-button>
         <el-button @click="refreshAll" :loading="draftLoading || listLoading">
@@ -497,8 +497,8 @@ const handleDeleteDraftSession = async (draft: AgentWorkshopSessionDetail) => {
 const handleDeleteSpec = async (spec: AgentSpec) => {
   try {
     await ElMessageBox.confirm(
-      `确定删除“${spec.name}”吗？这会同时删除它的会话、版本和评估记录。`,
-      '删除 Agent 草案',
+      `确定删除"${spec.name}"吗？这会同时删除它的会话、版本、评估记录、运行时配置和提示词模板。`,
+      '删除 Agent',
       {
         type: 'warning',
         confirmButtonText: '删除',
@@ -506,14 +506,72 @@ const handleDeleteSpec = async (spec: AgentSpec) => {
         confirmButtonClass: 'el-button--danger',
       }
     )
-
-    await agentWorkshopApi.deleteSpec(spec.spec_id)
-    ElMessage.success('Agent 草案已删除')
-    await refreshAll()
   } catch (error: any) {
     if (error === 'cancel' || error?.message === 'cancel') {
       return
     }
+  }
+
+  try {
+    // 第一次尝试删除
+    const result = await agentWorkshopApi.deleteSpec(spec.spec_id, false)
+    if (result.deleted) {
+      ElMessage.success('Agent 已删除')
+      await refreshAll()
+      return
+    }
+  } catch (error: any) {
+    // 如果是被工作流引用阻止（409），弹出二次确认
+    const errData = error?.response?.data || error?.data
+    if (errData?.data?.blocked_by_workflows && errData?.data?.workflow_references?.length) {
+      const refs = errData.data.workflow_references
+      const refHtml = refs.map((ref: any) =>
+        `<li style="margin-bottom:6px;">
+          <span style="font-weight:500;">${ref.workflow_name}</span>
+          <span style="color:#909399;margin-left:8px;font-size:12px;">
+            （引用：${ref.referenced_agents.join(', ')}）
+          </span>
+        </li>`
+      ).join('')
+
+      try {
+        await ElMessageBox.confirm(
+          `<p style="margin:0 0 12px;color:#e6a23c;">
+            ⚠️ 该 Agent 被 <strong>${refs.length}</strong> 个工作流引用，删除后这些工作流将无法正常运行：
+           </p>
+           <ul style="margin:0;padding-left:20px;color:#606266;font-size:13px;line-height:1.6;">
+             ${refHtml}
+           </ul>
+           <p style="margin:12px 0 0;color:#909399;font-size:12px;">
+             建议先从上述工作流中移除该 Agent，再执行删除。
+           </p>`,
+          '存在工作流引用，确认强制删除？',
+          {
+            type: 'error',
+            confirmButtonText: '强制删除',
+            cancelButtonText: '取消',
+            confirmButtonClass: 'el-button--danger',
+            dangerouslyUseHTMLString: true,
+          }
+        )
+
+        // 用户确认强制删除
+        const forceResult = await agentWorkshopApi.deleteSpec(spec.spec_id, true)
+        if (forceResult.deleted) {
+          ElMessage.success('Agent 已强制删除')
+          await refreshAll()
+        } else {
+          ElMessage.error(forceResult.message || '删除失败')
+        }
+      } catch (cancelErr: any) {
+        if (cancelErr === 'cancel' || cancelErr?.message === 'cancel') {
+          return
+        }
+        ElMessage.error(cancelErr?.message || '删除失败')
+      }
+      return
+    }
+
     ElMessage.error(error?.message || '删除失败')
   }
 }

@@ -1,5 +1,20 @@
 import request from './request'
 
+export interface WorkflowReference {
+  workflow_id: string
+  workflow_name: string
+  status: string
+  updated_at?: string
+  referenced_agents: string[]
+}
+
+export interface DeleteWithReferencesResult {
+  deleted: boolean
+  blocked_by_workflows?: boolean
+  workflow_references?: WorkflowReference[]
+  message?: string
+}
+
 export interface AgentWorkshopStartRequest {
   description: string
   user_id?: string
@@ -683,8 +698,11 @@ export const agentWorkshopApi = {
     return (res as any).data
   },
 
-  deleteSpec: async (specId: string): Promise<{ deleted: boolean; spec_id: string }> => {
-    const res = await request.delete<ApiOk<{ deleted: boolean; spec_id: string }>>(`${BASE}/specs/${specId}`)
+  deleteSpec: async (specId: string, force = false): Promise<DeleteWithReferencesResult & { spec_id: string }> => {
+    const res = await request.delete<ApiOk<DeleteWithReferencesResult & { spec_id: string }>>(
+      `${BASE}/specs/${specId}`,
+      { params: { force } }
+    )
     return (res as any).data
   },
 
@@ -698,20 +716,20 @@ export const agentWorkshopApi = {
     return (res as any).data
   },
 
-  deleteVersion: async (versionId: string): Promise<{
+  deleteVersion: async (versionId: string, force = false): Promise<DeleteWithReferencesResult & {
     deleted: boolean
     version_id: string
     spec_id: string
     current_version_id?: string | null
     remaining_versions: number
   }> => {
-    const res = await request.delete<ApiOk<{
+    const res = await request.delete<ApiOk<DeleteWithReferencesResult & {
       deleted: boolean
       version_id: string
       spec_id: string
       current_version_id?: string | null
       remaining_versions: number
-    }>>(`${BASE}/versions/${versionId}`)
+    }>>(`${BASE}/versions/${versionId}`, { params: { force } })
     return (res as any).data
   },
 

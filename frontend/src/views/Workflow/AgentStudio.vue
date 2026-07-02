@@ -155,18 +155,21 @@
             </div>
 
             <div v-if="latestVersion" class="quick-actions">
-              <el-button class="quick-action" plain size="small" @click="openLatestVersionDetail">
-                查看测试结果
-              </el-button>
-              <el-button class="quick-action" plain size="small" @click="openLatestVersionDetail">
-                检查发布配置
-              </el-button>
-              <el-button class="quick-action" type="primary" plain size="small" :disabled="!canPublishLatestVersion" @click="openLatestPublishConfirm">
-                发布版本
-              </el-button>
-              <el-button class="quick-action" plain size="small" @click="composerText = '我想继续优化这个 Agent 的职责和输出效果。'">
-                继续优化职责
-              </el-button>
+              <div class="quick-actions-hint">测试运行完成，可以查看详细结果：</div>
+              <div class="quick-actions-row">
+                <el-button class="quick-action" type="primary" size="small" @click="openLatestVersionDetail">
+                  查看测试结果
+                </el-button>
+                <el-button class="quick-action" plain size="small" @click="openLatestVersionDetail">
+                  检查发布配置
+                </el-button>
+                <el-button class="quick-action" type="primary" plain size="small" :disabled="!canPublishLatestVersion" @click="openLatestPublishConfirm">
+                  发布版本
+                </el-button>
+                <el-button class="quick-action" plain size="small" @click="composerText = '我想继续优化这个 Agent 的职责和输出效果。'">
+                  继续优化职责
+                </el-button>
+              </div>
             </div>
           </div>
         </div>
@@ -776,6 +779,19 @@ const exampleQuestions = [
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const routeQueryText = (value: unknown) => Array.isArray(value) ? String(value[0] || '') : String(value || '')
+const isNewAgentRoute = () => {
+  const mode = routeQueryText(route.query.mode).trim().toLowerCase()
+  const action = routeQueryText(route.query.action).trim().toLowerCase()
+  return mode === 'new' || action === 'new_agent'
+}
+const consumeNewAgentRouteParam = () => {
+  const nextQuery = { ...route.query }
+  delete nextQuery.mode
+  delete nextQuery.action
+  suppressNextRouteInit = true
+  router.replace({ path: route.path, query: nextQuery }).catch(() => {})
+}
 let suppressNextRouteInit = false
 let pendingRouteSync = false
 
@@ -2258,7 +2274,11 @@ const handleSendMessage = async () => {
 
       await loadNanobotThreadMessages({ threadId: sessionKey, silent: true })
       await loadAgentItems()
-      if (displaySpec.value?.spec_id) {
+      // 🔑 优先从后端返回的 thread_context 中获取 version_id（不依赖 displaySpec）
+      const ctxVersionId = currentNanobotThreadContext.value?.version_id || ''
+      if (ctxVersionId && (!latestVersion.value || String(latestVersion.value.version_id || '').trim() !== String(ctxVersionId).trim())) {
+        await loadVersionContext(ctxVersionId)
+      } else if (displaySpec.value?.spec_id) {
         await ensureSpecVersionsLoaded(displaySpec.value.spec_id)
         await loadLatestVersionContext(displaySpec.value.spec_id)
       }
@@ -2307,18 +2327,24 @@ const normalizeAssistantDisplayText = (value?: string | null) => {
 }
 
 const loadInitialState = async () => {
+  const newAgentMode = isNewAgentRoute()
+  if (newAgentMode) {
+    clearStudioState()
+    consumeNewAgentRouteParam()
+  }
+
   await loadAgentItems()
   await loadNanobotThreads()
 
-  const routeSessionId = String(route.query.sessionId || '').trim()
-  const routeAgentId = String(route.query.agent_id || route.query.agentId || '').trim()
-  const routeSpecId = String(route.query.specId || routeAgentId || '').trim()
-  const routeNanobotSessionKey = String(route.query.nanobotSessionKey || '').trim()
+  const routeSessionId = routeQueryText(route.query.sessionId).trim()
+  const routeAgentId = routeQueryText(route.query.agent_id || route.query.agentId).trim()
+  const routeSpecId = routeQueryText(route.query.specId || routeAgentId).trim()
+  const routeNanobotSessionKey = routeQueryText(route.query.nanobotSessionKey).trim()
 
-  const hasExplicitRouteTarget = routeSessionId || routeSpecId || routeNanobotSessionKey
+  const hasExplicitRouteTarget = Boolean(routeSessionId || routeSpecId || routeNanobotSessionKey || newAgentMode)
 
-  // 🔑 如果有明确的 URL 目标（agent_id/specId/sessionId），先清除旧状态，
-  // 防止并发 onMounted + watch 调用时从 localStorage 恢复的旧 selectedVersionId 污染新 Agent
+  // 🔑 如果有明确的 URL 目标（agent_id/specId/sessionId/nanobotSessionKey），或明确是新建模式，
+  // 先清除旧状态，防止 localStorage 恢复的旧 Agent / selectedVersionId 污染当前页面
   if (hasExplicitRouteTarget) {
     selectedVersionId.value = ''
     resetVersionContext()
@@ -3054,7 +3080,20 @@ const formatDisplayTime = (value?: string | null) => {
 }
 
 .quick-actions {
-  margin: 4px 0 20px 46px;
+  margin: 0 0 20px 46px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quick-actions-hint {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.quick-actions-row {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;

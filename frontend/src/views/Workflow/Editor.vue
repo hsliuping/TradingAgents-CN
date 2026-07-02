@@ -148,7 +148,7 @@
             <el-tag>{{ getNodeTypeName(selectedNode.type) }}</el-tag>
           </el-form-item>
           <el-form-item v-if="selectedNode.agent_id" label="智能体">
-            <el-tag type="success">{{ selectedNode.agent_id }}</el-tag>
+            <el-tag type="success">{{ getAgentDisplayName(selectedNode.agent_id) }}</el-tag>
           </el-form-item>
 
           <!-- 辩论节点配置 -->
@@ -417,6 +417,7 @@ import { ArrowLeft, ArrowRight, Check, DocumentChecked, VideoPlay, Lock, Star } 
 import { workflowApi, type WorkflowDefinition, type NodeDefinition, type EdgeDefinition, type ValidationResult } from '@/api/workflow'
 import { agentApi, type AgentMetadata, type AgentCategory, type AgentToolsConfig } from '@/api/agents'
 import { TemplatesApi, type TemplateItem } from '@/api/templates'
+import { labelAgentName } from '@/constants/agentLabels'
 import { useAuthStore } from '@/stores/auth'
 import { useLicenseStore } from '@/stores/license'
 import WorkflowCanvas from './components/WorkflowCanvas.vue'
@@ -564,6 +565,22 @@ const getNodeTypeName = (type: string) => {
     post_processor: '后处理器'
   }
   return names[type] || type
+}
+
+// 获取 Agent 显示名称（优先显示中文名称，其次显示原始ID）
+const getAgentDisplayName = (agentId: string): string => {
+  // 先从 agentLabels 中查找
+  const labelName = labelAgentName(agentId)
+  if (labelName !== agentId && labelName !== '-') {
+    return labelName
+  }
+  // 再从 agents 列表中查找
+  const agent = agents.value.find(a => a.id === agentId)
+  if (agent) {
+    return agent.name
+  }
+  // 最后 fallback 到原始 ID
+  return agentId
 }
 
 // 可用的辩论参与者
@@ -981,12 +998,33 @@ const loadAgentTemplates = async (agentId: string) => {
   loadingTemplates.value = true
   try {
     // 使用映射获取正确的 agent_type 和 agent_name
-    const mapping = agentTemplateMapping[agentId] || { type: 'analysts', name: agentId }
+    const mapping = agentTemplateMapping[agentId]
+    let agentType: string
+    let agentName: string
+
+    if (mapping) {
+      agentType = mapping.type
+      agentName = mapping.name
+    } else {
+      // Agent Workshop 生成的 Agent，先尝试 universal 类型
+      agentType = 'universal'
+      agentName = agentId
+    }
+
     // 传入当前用户 ID，获取系统模板 + 用户模板
     const userId = authStore.user?.id
-    console.log('loadAgentTemplates:', { agentId, mappedType: mapping.type, mappedName: mapping.name, userId })
-    const res = await TemplatesApi.listByAgent(mapping.type, mapping.name, undefined, userId)
-    agentTemplates.value = res.data?.templates || []
+    console.log('loadAgentTemplates:', { agentId, agentType, agentName, userId })
+    let res = await TemplatesApi.listByAgent(agentType, agentName, undefined, userId)
+    let templates = res.data?.templates || []
+
+    // 如果 universal 类型没找到，再 fallback 到 analysts 类型（兼容旧数据）
+    if (templates.length === 0 && !mapping) {
+      console.log('loadAgentTemplates: universal 类型无模板，尝试 analysts 类型')
+      res = await TemplatesApi.listByAgent('analysts', agentName, undefined, userId)
+      templates = res.data?.templates || []
+    }
+
+    agentTemplates.value = templates
     console.log('loadAgentTemplates result:', agentTemplates.value.length, '个模板')
   } catch (error) {
     console.error('加载模板列表失败:', error)
@@ -1016,12 +1054,24 @@ const goToTemplateEditor = () => {
   // 跳转到模板管理页面
   const agentId = selectedNode.value?.agent_id
   if (agentId) {
-    const mapping = agentTemplateMapping[agentId] || { type: 'analysts', name: agentId }
+    const mapping = agentTemplateMapping[agentId]
+    let agentType: string
+    let agentName: string
+
+    if (mapping) {
+      agentType = mapping.type
+      agentName = mapping.name
+    } else {
+      // Agent Workshop 生成的 Agent，使用 universal 类型
+      agentType = 'universal'
+      agentName = agentId
+    }
+
     router.push({
       path: '/settings/templates/manage',
       query: {
-        agent_type: mapping.type,
-        agent_name: mapping.name
+        agent_type: agentType,
+        agent_name: agentName
       }
     })
   } else {
