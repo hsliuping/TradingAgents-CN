@@ -281,23 +281,24 @@ async def get_agent_templates(
     template_service: PromptTemplateService = Depends(get_template_service),
     config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
-    """获取特定Agent的所有可用模板（系统模板 + 用户模板）"""
-    try:
-        user_id = str(current_user["id"])
+    """获取特定Agent的所有可用模板（系统模板 + 用户模板）
+    
+    兼容逻辑：如果用指定的 agent_type 查不到，会自动去 universal 类型里查找（Agent Workshop 生成的 Agent）。
+    """
+    async def _query_templates(type_name: str) -> list:
+        """查询指定类型的模板"""
         result = []
-        seen_ids = set()  # 去重
+        seen_ids = set()
 
-        # 基础查询条件
         base_query = {
-            "agent_type": agent_type,
+            "agent_type": type_name,
             "agent_name": agent_name,
-            "status": "active"  # 只返回已启用的模板
+            "status": "active"
         }
-
         if preference_type:
             base_query["preference_type"] = preference_type
 
-        # 1. 获取系统模板
+        # 系统模板
         if include_system:
             system_query = {**base_query, "is_system": True}
             cursor = template_service.templates_collection.find(system_query)
@@ -317,12 +318,12 @@ async def get_agent_templates(
                         "created_at": template_doc.get("created_at").isoformat() if isinstance(template_doc.get("created_at"), datetime) else template_doc.get("created_at")
                     })
 
-        # 2. 获取用户创建的模板
+        # 用户模板
         if include_user and user_id:
             try:
                 user_object_id = ObjectId(user_id)
             except Exception:
-                user_object_id = user_id  # 如果转换失败，使用原始字符串
+                user_object_id = user_id
 
             user_query = {**base_query, "created_by": user_object_id, "is_system": False}
             cursor = template_service.templates_collection.find(user_query)
@@ -341,6 +342,22 @@ async def get_agent_templates(
                         "created_by": user_id,
                         "created_at": template_doc.get("created_at").isoformat() if isinstance(template_doc.get("created_at"), datetime) else template_doc.get("created_at")
                     })
+        return result
+
+    try:
+        user_id = str(current_user["id"])
+
+        # 1. 先用指定的 agent_type 查询
+        result = await _query_templates(agent_type)
+
+        # 2. 如果查不到，且不是 universal 类型，自动 fallback 到 universal 类型
+        #    （兼容 Agent Workshop 生成的 Agent，它们的模板都在 universal 类型下）
+        if not result and agent_type != "universal":
+            logger.info(
+                "[TemplateQuery] 指定类型 %s 未找到模板，fallback 到 universal 类型: agent_name=%s",
+                agent_type, agent_name
+            )
+            result = await _query_templates("universal")
 
         return ok({
             "templates": result,

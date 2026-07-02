@@ -327,11 +327,22 @@ async def update_spec(
 @router.delete("/specs/{spec_id}")
 async def delete_spec(
     spec_id: str,
+    force: bool = Query(False, description="是否强制删除，即使被工作流引用"),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
     svc = _get_service(db)
-    result = await svc.delete_spec(spec_id)
+    result = await svc.delete_spec(spec_id, force=force)
     if not result.get("deleted"):
+        if result.get("blocked_by_workflows"):
+            # 被工作流引用阻止删除
+            return fail(
+                message=result.get("message", "该 Agent 被工作流引用，无法删除"),
+                code=409,
+                data={
+                    "blocked_by_workflows": True,
+                    "workflow_references": result.get("workflow_references", [])
+                }
+            )
         raise HTTPException(status_code=404, detail=f"规格 {spec_id} 不存在")
     return ok(result)
 
@@ -380,11 +391,22 @@ async def get_version(
 @router.delete("/versions/{version_id}")
 async def delete_version(
     version_id: str,
+    force: bool = Query(False, description="是否强制删除，即使被工作流引用"),
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
     svc = _get_service(db)
-    result = await svc.delete_version(version_id)
+    result = await svc.delete_version(version_id, force=force)
     if not result.get("deleted"):
+        if result.get("blocked_by_workflows"):
+            # 被工作流引用阻止删除
+            return fail(
+                message=result.get("message", "该 Agent 版本被工作流引用，无法删除"),
+                code=409,
+                data={
+                    "blocked_by_workflows": True,
+                    "workflow_references": result.get("workflow_references", [])
+                }
+            )
         raise HTTPException(status_code=404, detail=f"版本 {version_id} 不存在")
     return ok(result)
 
