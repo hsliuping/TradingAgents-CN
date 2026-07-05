@@ -19,6 +19,7 @@ from app.constants.model_capabilities import (
 )
 from app.core.unified_config import unified_config
 from app.core.response import ok, fail
+from app.services.config_service import config_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -262,17 +263,27 @@ async def batch_init_capabilities(request: BatchInitRequest):
     为数据库中的模型配置自动填充能力参数。
     """
     try:
-        # 获取所有LLM配置
-        llm_configs = unified_config.get_llm_configs()
+        # 从 MongoDB 获取系统配置（包含完整的 LLM 配置列表）
+        system_config = await config_service.get_system_config()
+        if not system_config or not system_config.llm_configs:
+            return ok(
+                {"updated_count": 0, "skipped_count": 0, "total_count": 0},
+                "未找到模型配置，无需初始化"
+            )
 
+        llm_configs = system_config.llm_configs
         updated_count = 0
         skipped_count = 0
+        updated_models = []  # 记录被更新的模型，最后一次性保存
 
         for config in llm_configs:
             model_name = config.model_name
 
             # 检查是否已有能力配置
-            has_capability = hasattr(config, 'capability_level') and config.capability_level is not None
+            has_capability = (
+                getattr(config, 'capability_level', None) is not None
+                and getattr(config, 'capability_level', 0) > 0
+            )
 
             if has_capability and not request.overwrite:
                 skipped_count += 1
@@ -282,20 +293,27 @@ async def batch_init_capabilities(request: BatchInitRequest):
             if model_name in DEFAULT_MODEL_CAPABILITIES:
                 default_config = DEFAULT_MODEL_CAPABILITIES[model_name]
 
-                # 更新配置
+                # 更新能力字段
                 config.capability_level = default_config["capability_level"]
                 config.suitable_roles = [str(role) for role in default_config["suitable_roles"]]
                 config.features = [str(feature) for feature in default_config["features"]]
                 config.recommended_depths = default_config["recommended_depths"]
                 config.performance_metrics = default_config.get("performance_metrics")
 
-                # 保存到数据库
-                # TODO: 实现保存逻辑
+                updated_models.append(config)
                 updated_count += 1
                 logger.info(f"已初始化模型 {model_name} 的能力参数")
             else:
                 logger.warning(f"模型 {model_name} 没有默认配置，跳过")
                 skipped_count += 1
+
+        # 一次性保存到数据库
+        if updated_models:
+            success = await config_service.save_system_config(system_config)
+            if not success:
+                logger.error("批量初始化保存到数据库失败")
+                raise HTTPException(status_code=500, detail="保存到数据库失败")
+            logger.info(f"批量初始化完成，已保存 {updated_count} 个模型的能力参数到数据库")
 
         return ok(
             {
@@ -305,8 +323,10 @@ async def batch_init_capabilities(request: BatchInitRequest):
             },
             f"批量初始化完成：更新{updated_count}个，跳过{skipped_count}个"
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"批量初始化失败: {e}")
+        logger.error(f"批量初始化失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
