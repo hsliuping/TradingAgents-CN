@@ -1559,14 +1559,28 @@ onBeforeUnmount(() => {
       border-collapse: collapse;
       margin: 8px 0;
       font-size: 13px;
+      width: 100%;
+      display: block;
+      overflow-x: auto;
+    }
+    :deep(thead), :deep(tbody), :deep(tr) {
+      display: table;
+      width: 100%;
+      table-layout: fixed;
     }
     :deep(th), :deep(td) {
       border: 1px solid var(--el-border-color-lighter);
       padding: 4px 10px;
+      text-align: left;
+      word-break: break-word;
     }
     :deep(th) {
       background: var(--el-fill-color-light);
       font-weight: 600;
+    }
+    :deep(td:empty)::after {
+      content: '—';
+      color: var(--el-text-color-placeholder);
     }
   }
 }

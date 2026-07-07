@@ -610,14 +610,30 @@
                   </section>
 
                   <section v-if="versionDetailEvaluationSummaryForDisplay" class="detail-card">
-                    <div class="detail-title">最近评估摘要</div>
+                    <div class="detail-title">
+                      <span>最近评估摘要</span>
+                      <el-button v-if="versionDetailEvaluation" size="small" link type="primary" @click="scrollToVersionDetailEvaluation">
+                        查看完整评估
+                      </el-button>
+                    </div>
                     <div class="memory-summary-head">
                       <strong>{{ getEvaluationDecisionLabel(versionDetailEvaluationSummaryForDisplay.decision) }}</strong>
                       <el-tag size="small" effect="plain" :type="getEvaluationDecisionTagType(versionDetailEvaluationSummaryForDisplay.decision)">
                         {{ getEvaluationDecisionLabel(versionDetailEvaluationSummaryForDisplay.decision) }}
                       </el-tag>
                     </div>
-                    <div class="memory-summary-body">{{ versionDetailEvaluationProjectMemorySummary?.summary || '最近评估已运行。' }}</div>
+                    <div class="memory-summary-body">{{ versionDetailEvaluationSummaryText }}</div>
+                    <div v-if="versionDetailEvaluationSummaryItems.length" class="evaluation-summary-detail-list">
+                      <div
+                        v-for="(item, idx) in versionDetailEvaluationSummaryItems"
+                        :key="`${item.type}-${idx}`"
+                        class="evaluation-summary-detail-item"
+                        :class="`evaluation-summary-detail-${item.type}`"
+                      >
+                        <span class="evaluation-summary-detail-label">{{ item.label }}</span>
+                        <span class="evaluation-summary-detail-text">{{ item.text }}</span>
+                      </div>
+                    </div>
                     <div class="memory-summary-meta" style="margin-top: 10px;">
                       <span v-if="versionDetailEvaluationSummaryForDisplay.created_at">{{ formatDisplayTime(versionDetailEvaluationSummaryForDisplay.created_at) }}</span>
                       <span v-if="typeof versionDetailEvaluationSummaryForDisplay.overall_score === 'number'">综合分 {{ versionDetailEvaluationSummaryForDisplay.overall_score }}</span>
@@ -645,9 +661,9 @@
                     <div v-else class="empty-note">最近一次测试没有保存可展示的报告正文。</div>
                   </section>
 
-                  <section class="detail-card">
+                  <section id="version-detail-evaluation-section" class="detail-card">
                     <div class="detail-title">
-                      最近评估
+                      <span>最近评估</span>
                       <div class="detail-actions">
                         <el-button
                           size="small"
@@ -704,6 +720,16 @@
                       <div v-if="versionDetailWarnings.length" class="compact-list">
                         <div v-for="(item, idx) in versionDetailWarnings.slice(0, 4)" :key="idx" class="list-row list-row-warning">
                           提示项 {{ idx + 1 }}：{{ item }}
+                        </div>
+                      </div>
+                      <div v-if="versionDetailEvaluationIssues.length" class="compact-list">
+                        <div v-for="(item, idx) in versionDetailEvaluationIssues" :key="idx" class="list-row list-row-danger">
+                          问题 {{ idx + 1 }}：{{ item }}
+                        </div>
+                      </div>
+                      <div v-if="versionDetailEvaluationRecommendations.length" class="compact-list">
+                        <div v-for="(item, idx) in versionDetailEvaluationRecommendations" :key="idx" class="list-row list-row-info">
+                          建议 {{ idx + 1 }}：{{ item }}
                         </div>
                       </div>
                     </div>
@@ -977,7 +1003,34 @@ const ensureNanobotContextAuth = async (): Promise<boolean> => {
 
 const renderMarkdown = (content: string) => {
   try {
-    return marked.parse(content || '') as string
+    let text = content || ''
+    if (!text) return ''
+    // 流式渲染时，修复不完整的 GFM 表格：
+    // 如果存在 | 但缺少闭合行（分隔行 |---|---| 后的行未完整），暂时隐藏不完整部分
+    // 策略：找到最后一个未完成的表格块（以 | 开头的连续行），如果它没有分隔行就暂时移除
+    const lines = text.split('\n')
+    let lastTableStart = -1
+    let hasSeparator = false
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const trimmed = lines[i].trim()
+      if (trimmed.startsWith('|') || trimmed === '') {
+        if (trimmed.includes('|') && trimmed.replace(/[|\-\s:]/g, '') === '') {
+          hasSeparator = true
+        }
+        if (lastTableStart === -1 && trimmed.startsWith('|')) {
+          lastTableStart = i
+        }
+      } else {
+        break
+      }
+    }
+    // 如果尾部有表格行但没有分隔行，说明表格刚开始，暂不渲染表格部分
+    if (lastTableStart >= 0 && !hasSeparator) {
+      const beforeTable = lines.slice(0, lastTableStart).join('\n')
+      const rendered = marked.parse(beforeTable) as string
+      return rendered + `<div class="streaming-table-hint" style="color:var(--el-text-color-placeholder);font-size:12px;margin-top:4px;">正在生成表格...</div>`
+    }
+    return marked.parse(text) as string
   } catch {
     return String(content || '')
   }
@@ -1044,8 +1097,13 @@ const applyThreadContext = async (threadContext?: EmbeddedNanobotThreadContext |
         expandAgentBranch(specId)
         await ensureSpecVersionsLoaded(specId)
         await loadLatestVersionContext(specId)
-      } catch {
-        // Ignore stale draft references
+      } catch (error: any) {
+        // 🔑 spec 还没创建（Agent Builder 流程中 spec 要到 generate_confirmed_candidate_agent
+        // 才写库，但 thread_context 中可能已携带 spec_id）。此时静默忽略 404，
+        // 并清除 nanobotDraftLink，避免前端持有无效的 specId。
+        if (isNotFoundError(error)) {
+          nanobotDraftLink.value = null
+        }
       }
     }
   }
@@ -1063,6 +1121,8 @@ const applyThreadContext = async (threadContext?: EmbeddedNanobotThreadContext |
       await loadVersionContext(versionId)
     }
   }
+
+  // new_agent 意图由后端直接回复提示消息，不再自动重置会话
 }
 
 const getAgentStatusGroup = (item: AgentSpec) => {
@@ -1496,6 +1556,58 @@ const getWarnings = (evaluation?: AgentEvaluationReport | null): string[] => {
 }
 const versionDetailBlockers = computed(() => getBlockers(versionDetailEvaluation.value))
 const versionDetailWarnings = computed(() => getWarnings(versionDetailEvaluation.value))
+
+type EvaluationSummaryItem = {
+  type: 'danger' | 'warning' | 'info'
+  label: string
+  text: string
+}
+
+const normalizeEvaluationText = (raw: any): string => {
+  if (!raw) return ''
+  if (typeof raw === 'string') return raw.trim()
+  if (typeof raw !== 'object') return String(raw).trim()
+  const severity = String(raw.severity || '').trim()
+  const dimension = String(raw.dimension || raw.category || '').trim()
+  const title = String(raw.title || '').trim()
+  const description = String(raw.description || raw.issue || raw.message || '').trim()
+  const evidence = Array.isArray(raw.evidence)
+    ? raw.evidence.map((item: any) => String(item || '').trim()).filter(Boolean).join('；')
+    : ''
+  return [severity, dimension, title, description || evidence].filter(Boolean).join('｜').trim()
+}
+
+const getEvaluationIssues = (evaluation?: AgentEvaluationReport | null): string[] => {
+  const raw = evaluation?.issues
+  return Array.isArray(raw) ? raw.map(normalizeEvaluationText).filter(Boolean) : []
+}
+
+const getEvaluationRecommendations = (evaluation?: AgentEvaluationReport | null): string[] => {
+  const raw = evaluation?.recommendations
+  return Array.isArray(raw) ? raw.map(normalizeEvaluationText).filter(Boolean) : []
+}
+
+const versionDetailEvaluationIssues = computed(() => getEvaluationIssues(versionDetailEvaluation.value))
+const versionDetailEvaluationRecommendations = computed(() => getEvaluationRecommendations(versionDetailEvaluation.value))
+const versionDetailEvaluationSummaryItems = computed<EvaluationSummaryItem[]>(() => {
+  const items: EvaluationSummaryItem[] = []
+  versionDetailBlockers.value.slice(0, 3).forEach(text => items.push({ type: 'danger', label: '阻断项', text }))
+  versionDetailWarnings.value.slice(0, 3).forEach(text => items.push({ type: 'warning', label: '提示项', text }))
+  versionDetailEvaluationIssues.value.slice(0, 4).forEach(text => items.push({ type: 'danger', label: '问题', text }))
+  versionDetailEvaluationRecommendations.value.slice(0, 3).forEach(text => items.push({ type: 'info', label: '建议', text }))
+  return items.slice(0, 8)
+})
+const versionDetailEvaluationSummaryText = computed(() => {
+  const summary = versionDetailEvaluationSummaryForDisplay.value
+  const decisionLabel = getEvaluationDecisionLabel(summary?.decision)
+  if (versionDetailEvaluationSummaryItems.value.length) {
+    return `${decisionLabel}：请查看下方主要问题和修订建议。`
+  }
+  return versionDetailEvaluationProjectMemorySummary.value?.summary || '最近评估已运行。'
+})
+const scrollToVersionDetailEvaluation = () => {
+  document.getElementById('version-detail-evaluation-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 const versionDetailOutputFieldText = computed(() => {
   if (!versionDetailVersion.value) return '-'
@@ -2157,10 +2269,8 @@ const handleSendMessage = async () => {
 
     const appendAssistantChunk = (chunk?: string) => {
       const t = String(chunk || '')
-      if (!t.trim()) return
-      nextMessages[assistantIndex].content = nextMessages[assistantIndex].content
-        ? `${nextMessages[assistantIndex].content}\n${t}`
-        : t
+      if (!t) return
+      nextMessages[assistantIndex].content = nextMessages[assistantIndex].content + t
       nanobotMessages.value = [...nextMessages]
     }
 
@@ -3079,6 +3189,36 @@ const formatDisplayTime = (value?: string | null) => {
   font-size: 12px;
 }
 
+.bubble .markdown-content {
+  :deep(table) {
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 13px;
+    width: 100%;
+    display: block;
+    overflow-x: auto;
+  }
+  :deep(thead), :deep(tbody), :deep(tr) {
+    display: table;
+    width: 100%;
+    table-layout: fixed;
+  }
+  :deep(th), :deep(td) {
+    border: 1px solid rgba(30, 58, 95, 0.12);
+    padding: 4px 10px;
+    text-align: left;
+    word-break: break-word;
+  }
+  :deep(th) {
+    background: #f8fafc;
+    font-weight: 600;
+  }
+  :deep(td:empty)::after {
+    content: '—';
+    color: #94a3b8;
+  }
+}
+
 .quick-actions {
   margin: 0 0 20px 46px;
   display: flex;
@@ -3970,6 +4110,58 @@ details.advanced summary::-webkit-details-marker {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin-top: 10px;
+}
+
+.evaluation-summary-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.evaluation-summary-detail-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.55;
+  background: #f8fafc;
+}
+
+.evaluation-summary-detail-label {
+  flex: 0 0 auto;
+  font-weight: 800;
+}
+
+.evaluation-summary-detail-text {
+  color: #334155;
+}
+
+.evaluation-summary-detail-danger {
+  background: #fef2f2;
+}
+
+.evaluation-summary-detail-danger .evaluation-summary-detail-label {
+  color: #dc2626;
+}
+
+.evaluation-summary-detail-warning {
+  background: #fffbeb;
+}
+
+.evaluation-summary-detail-warning .evaluation-summary-detail-label {
+  color: #d97706;
+}
+
+.evaluation-summary-detail-info {
+  background: #eff6ff;
+}
+
+.evaluation-summary-detail-info .evaluation-summary-detail-label {
+  color: #2563eb;
 }
 
 .list-row {
@@ -3983,6 +4175,10 @@ details.advanced summary::-webkit-details-marker {
 
 .list-row-warning {
   color: #d97706;
+}
+
+.list-row-info {
+  color: #2563eb;
 }
 
 .evaluation-review-form {
