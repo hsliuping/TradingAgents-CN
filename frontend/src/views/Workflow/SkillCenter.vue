@@ -111,24 +111,29 @@
                 <span v-else class="text-gray">未绑定</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="200" align="center">
+            <el-table-column label="操作" width="280" align="center">
               <template #default="scope">
                 <el-space>
-                  <el-tooltip content="测试" placement="top">
-                    <el-button
-                      size="small"
-                      icon="Play"
-                      circle
-                      @click="handleTest(scope.row)"
-                      :disabled="scope.row.status !== 'active'"
-                    />
-                  </el-tooltip>
-                  <el-tooltip v-if="scope.row.status === 'active'" content="禁用" placement="top">
-                    <el-button size="small" icon="Power" type="warning" circle @click="handleToggleStatus(scope.row)" />
-                  </el-tooltip>
-                  <el-tooltip v-else content="启用" placement="top">
-                    <el-button size="small" icon="Check" type="success" circle @click="handleToggleStatus(scope.row)" />
-                  </el-tooltip>
+                  <el-button
+                    size="small"
+                    icon="Play"
+                    @click="handleTest(scope.row)"
+                    :disabled="scope.row.status !== 'active'"
+                  >测试</el-button>
+                  <el-button
+                    size="small"
+                    icon="Power"
+                    type="warning"
+                    @click="handleToggleStatus(scope.row)"
+                    v-if="scope.row.status === 'active'"
+                  >禁用</el-button>
+                  <el-button
+                    size="small"
+                    icon="Check"
+                    type="success"
+                    @click="handleToggleStatus(scope.row)"
+                    v-else
+                  >启用</el-button>
                   <el-dropdown trigger="click" @command="(cmd: string) => handleMoreAction(cmd, scope.row)">
                     <el-button size="small" icon="MoreFilled" circle />
                     <template #dropdown>
@@ -345,10 +350,6 @@
 
       <el-tab-pane label="AI 生成" name="generate">
         <SkillGenerate @imported="handleSkillImported" />
-      </el-tab-pane>
-
-      <el-tab-pane label="能力缺口" name="gaps">
-        <SkillGaps />
       </el-tab-pane>
 
       <el-tab-pane label="执行日志" name="logs">
@@ -634,7 +635,6 @@ import {
   UploadFilled
 } from '@element-plus/icons-vue'
 import SkillGenerate from './SkillCenter/SkillGenerate.vue'
-import SkillGaps from './SkillGaps.vue'
 import { skillCenterApi } from '@/api/skillCenter'
 import { skillsApi } from '@/api/skills'
 
@@ -817,7 +817,7 @@ async function loadAgents() {
 }
 
 function handleCreateSkill() {
-  activeTab.value = 'generate'
+  window.location.href = '/workflow/skill-generation/create'
 }
 
 async function searchClawHubSkills() {
@@ -1022,9 +1022,17 @@ async function handleUninstall(skill: SkillSummary) {
   }
 
   try {
-    const skillName = skill.skill_id.replace(/_/g, '-')
-    const result = await skillsApi.deleteSkill(skillName)
-    ElMessage.success(result.message || `Skill "${skill.display_name}" 已卸载`)
+    if (skill.source === 'ai_generated') {
+      // AI 生成的 Skill 使用 skill-generation API
+      const { skillGenerationApi } = await import('@/api/skillGeneration')
+      const result = await skillGenerationApi.deleteSkill(skill.skill_id)
+      ElMessage.success(result.message || result.data?.message || `Skill "${skill.display_name}" 已卸载`)
+    } else {
+      // 手动安装的 Skill 使用 skills API
+      const skillName = skill.skill_id.replace(/_/g, '-')
+      const result = await skillsApi.deleteSkill(skillName)
+      ElMessage.success(result.message || `Skill "${skill.display_name}" 已卸载`)
+    }
     await loadSkills()
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail || '卸载失败')

@@ -8,13 +8,30 @@
           返回列表
         </el-button>
         <span class="header-divider">|</span>
-        <h1>🛠️ 创建新 Skill</h1>
+        <h1 v-if="isIterateMode">🔄 迭代优化 Skill</h1>
+        <h1 v-else>🛠️ 创建新 Skill</h1>
       </div>
       <div class="header-right">
         <el-button v-if="wizardStep < 3 && sessionId" text size="small" @click="goBack">
           保存草稿
         </el-button>
       </div>
+    </div>
+
+    <!-- 迭代优化提示 -->
+    <div v-if="isIterateMode && iterateSkillInfo" class="iterate-notice">
+      <el-alert
+        title="迭代优化模式"
+        type="info"
+        :closable="false"
+        show-icon
+      >
+        <template #default>
+          <p>正在迭代优化 Skill：<strong>{{ iterateSkillInfo.displayName }}</strong></p>
+          <p>当前描述：{{ iterateSkillInfo.description }}</p>
+          <p v-if="iterateSkillInfo.toolId" class="tool-id">原始 Tool ID：{{ iterateSkillInfo.toolId }}</p>
+        </template>
+      </el-alert>
     </div>
 
     <!-- 步骤条 -->
@@ -48,27 +65,32 @@
           <div v-if="chatMessages.length === 0 && !chatLoading" class="requirement-guide">
             <div class="guide-header">
               <el-icon class="guide-icon"><MagicStick /></el-icon>
-              <h3>如何描述你的需求？</h3>
-              <p class="guide-desc">用自然语言描述你需要的工具，AI 会通过 1～3 轮对话帮你完善需求，然后自动生成代码并验证。</p>
+              <h3 v-if="isIterateMode">🔄 开始迭代优化 Skill</h3>
+              <h3 v-else>用一句话告诉我你想要什么工具</h3>
+              <p v-if="isIterateMode" class="guide-desc">你正在对现有 Skill 进行迭代优化。告诉我你想要改进什么，比如：修复某个 Bug、添加新功能、优化性能、改进输出格式等。</p>
+              <p v-else class="guide-desc">不用想太细，说个大概就行。AI 会通过对话帮你完善需求，然后自动生成代码并验证。</p>
             </div>
-            <div class="guide-tips">
-              <div class="tip-item">
-                <span class="tip-label">💡 建议包含：</span>
-                <ul>
-                  <li><strong>数据来源</strong>：如东方财富、AKShare、财联社等</li>
-                  <li><strong>输入参数</strong>：如股票代码、日期范围、条数限制</li>
-                  <li><strong>期望输出</strong>：如新闻列表、行情数据、JSON 格式</li>
-                </ul>
-              </div>
-              <div class="tip-item">
-                <span class="tip-label">📝 示例：</span>
-                <ul class="guide-examples">
-                  <li>「用 AKShare 获取北向资金数据，按日期查询，返回 JSON」</li>
-                  <li>「获取东方财富某只股票的最新新闻，需要标题、链接、时间」</li>
-                  <li>「从财联社获取某股票的实时快讯，最多 20 条」</li>
-                </ul>
-              </div>
+
+            <div class="guide-quick-examples" v-if="!isIterateMode">
+              <div class="quick-label">比如可以这样说：</div>
+              <ul class="example-list">
+                <li>分析某只股票的护城河强度</li>
+                <li>查看个股的现金流质量趋势</li>
+                <li>获取某股票的历史估值分位</li>
+                <li>计算股票的盈利能力稳定性指标</li>
+              </ul>
             </div>
+
+            <div class="guide-quick-examples" v-else>
+              <div class="quick-label">迭代优化可以这样说：</div>
+              <ul class="example-list">
+                <li>修复质押比例计算错误的 Bug</li>
+                <li>添加按季度统计的功能</li>
+                <li>优化输出格式，增加更多可视化信息</li>
+                <li>提高数据准确性，增加数据源容错处理</li>
+              </ul>
+            </div>
+
             <p class="guide-footer">在下方输入框描述你的需求，按 <kbd>Ctrl+Enter</kbd> 或点击发送即可开始</p>
           </div>
           <div v-for="(msg, idx) in chatMessages" :key="idx"
@@ -117,11 +139,11 @@
           <div class="chat-actions">
             <span class="tip">Ctrl+Enter 发送 · 第 {{ currentRound }}/{{ expectedRounds }} 轮</span>
             <div>
-              <el-button v-if="canConfirm" type="success" @click="handleViewSpec" :loading="chatLoading">
-                📄 查看规格
-              </el-button>
               <el-button type="primary" @click="handleChatSend" :loading="chatLoading" :disabled="!userInput.trim()">
                 发送
+              </el-button>
+              <el-button v-if="canConfirm" type="success" @click="handleViewSpec" :loading="chatLoading">
+                📄 下一步·查看规格
               </el-button>
             </div>
           </div>
@@ -366,11 +388,23 @@
               </div>
             </div>
             <div class="preflight-grid">
+              <div v-if="preflightAvailableHelpers.length" class="recommendation-block">
+                <div class="recommendation-label">已命中 helper 函数（数据源已覆盖）</div>
+                <div class="tag-wrap">
+                  <el-tag v-for="entry in preflightAvailableHelpers" :key="`preflight-helper-${entry.module}.${entry.name}`" class="tag-item" :type="entry.data_source_handling === 'self_contained' || !entry.data_source_handling ? 'success' : 'warning'" effect="plain">
+                    {{ entry.module.split('.').pop() }}.{{ entry.name }}
+                  </el-tag>
+                </div>
+                <div class="catalog-note-item" style="margin-top: 6px; color: #67c23a;">
+                  共 {{ preflightAvailableHelpers.length }} 个，其中 {{ preflightSelfContainedHelpers.length }} 个自包含数据源（直接调用即可）
+                </div>
+              </div>
               <div class="recommendation-block">
                 <div class="recommendation-label">优先复用本地集合</div>
                 <div v-if="preflightLocalCollections.length" class="tag-wrap">
                   <el-tag v-for="entry in preflightLocalCollections" :key="`preflight-local-${entry}`" class="tag-item" type="success" effect="plain">{{ entry }}</el-tag>
                 </div>
+                <div v-else-if="preflightSelfContainedHelpers.length" class="recommendation-empty">数据源已由 helper 函数覆盖，无需额外命中本地集合。</div>
                 <div v-else class="recommendation-empty">当前没有明确命中的本地集合，生成时会更多依赖需求描述和目录上下文。</div>
               </div>
               <div class="recommendation-block">
@@ -378,6 +412,7 @@
                 <div v-if="preflightExternalSources.length" class="tag-wrap">
                   <el-tag v-for="entry in preflightExternalSources" :key="`preflight-source-${entry}`" class="tag-item" type="warning" effect="plain">{{ entry }}</el-tag>
                 </div>
+                <div v-else-if="preflightSelfContainedHelpers.length" class="recommendation-empty">数据源已由 helper 函数覆盖，外部来源不是必须项。</div>
                 <div v-else class="recommendation-empty">当前优先本地数据即可，外部来源不是必须项。</div>
               </div>
               <div class="recommendation-block">
@@ -606,6 +641,7 @@ const chatMessages = ref<ChatMsg[]>([])
 const chatLoading = ref(false)
 const userInput = ref('')
 const chatContainer = ref<HTMLElement | null>(null)
+
 const recommendationCardRef = ref<HTMLElement | null>(null)
 const confirmActionsRef = ref<HTMLElement | null>(null)
 const stockCardRefs = ref<Record<string, HTMLElement | null>>({})
@@ -638,6 +674,34 @@ const handoffContext = ref<SkillHandoffContext | null>(null)
 const highlightRecommendationCard = ref(false)
 const highlightConfirmActions = ref(false)
 
+// 迭代优化模式相关
+const isIterateMode = ref(false)
+interface IterateSkillInfo {
+  toolId: string
+  displayName: string
+  description: string
+  category: string
+}
+const iterateSkillInfo = ref<IterateSkillInfo | null>(null)
+
+// 从路由参数初始化迭代优化模式
+const initIterateMode = () => {
+  const mode = route.query.mode
+  if (mode === 'iterate') {
+    isIterateMode.value = true
+    iterateSkillInfo.value = {
+      toolId: String(route.query.toolId || ''),
+      displayName: String(route.query.displayName || ''),
+      description: String(route.query.description || ''),
+      category: String(route.query.category || '')
+    }
+    // 如果有描述，预填充到聊天中
+    if (iterateSkillInfo.value.description) {
+      userInput.value = `我想对这个 Skill 进行迭代优化：${iterateSkillInfo.value.displayName}\n\n${iterateSkillInfo.value.description}\n\n请帮我重新生成一个更好的版本，或者告诉我可以从哪些方面进行改进。`
+    }
+  }
+}
+
 const getRouteHandoffContext = (): SkillHandoffContext | null => {
   const sourceSpecId = typeof route.query.from_agent_workshop === 'string' ? route.query.from_agent_workshop.trim() : ''
   const targetCapability = typeof route.query.target_capability === 'string'
@@ -658,16 +722,35 @@ const getRouteHandoffContext = (): SkillHandoffContext | null => {
 
 const preflightLocalCollections = computed(() => backendRecommendations.value?.stock_collections || [])
 const preflightExternalSources = computed(() => backendRecommendations.value?.external_sources || [])
+// 已命中的 helper 函数（来自侦察层 fact_report.available_helpers）
+const preflightAvailableHelpers = computed(() => previewFactReport.value?.available_helpers || [])
+// 其中自包含数据源的 helper（self_contained 表示 helper 内部已封装数据源调用）
+const preflightSelfContainedHelpers = computed(() =>
+  preflightAvailableHelpers.value.filter(h => !h.data_source_handling || h.data_source_handling === 'self_contained')
+)
 const preflightNotes = computed(() => {
   const notes: string[] = []
+  // 优先展示命中的 helper 函数（这是数据源能力的核心信号，比本地集合更准确）
+  if (preflightSelfContainedHelpers.value.length) {
+    const helperNames = preflightSelfContainedHelpers.value.map(h => `${h.module.split('.').pop()}.${h.name}`)
+    notes.push(`已命中 ${preflightSelfContainedHelpers.value.length} 个自包含数据源的 helper 函数：${helperNames.join('、')}（直接调用即可，无需额外数据源）`)
+  } else if (preflightAvailableHelpers.value.length) {
+    notes.push(`已命中 ${preflightAvailableHelpers.value.length} 个 helper 函数（部分可能需要补充数据源）`)
+  }
+
   if (preflightLocalCollections.value.length) {
     notes.push(`优先复用本地集合：${preflightLocalCollections.value.join('、')}`)
+  } else if (preflightSelfContainedHelpers.value.length) {
+    // 已有自包含 helper，本地集合不再是必需项
+    notes.push('数据源已由 helper 函数覆盖，无需额外命中本地集合。')
   } else {
     notes.push('当前没有明确命中的本地集合，生成器会根据需求描述和目录信息决定是否直连外部来源。')
   }
 
   if (preflightExternalSources.value.length) {
     notes.push(`如本地数据不足，将优先考虑这些外部来源：${preflightExternalSources.value.join('、')}`)
+  } else if (preflightSelfContainedHelpers.value.length) {
+    notes.push('数据源已由 helper 函数覆盖，外部来源不是必须项。')
   } else {
     notes.push('当前推荐策略偏向本地优先，外部来源更多作为可选补充。')
   }
@@ -1289,6 +1372,7 @@ const handleChatSend = async () => {
       const res = await skillGenerationApi.startSession({
         description: text,
         handoff_context: handoffContext.value || undefined,
+        iterate_skill_id: isIterateMode.value ? iterateSkillInfo.value.toolId : undefined,
       })
       sessionId.value = res.session_id
       currentRound.value = res.current_round
@@ -1340,15 +1424,29 @@ const handleViewSpec = async () => {
 /** 确认并生成：调用 confirmSpec，若返回 generating 则轮询 */
 const handleConfirmAndGenerate = async () => {
   if (!sessionId.value) return
+  // 根据命中的 helper 函数和本地集合情况，生成更准确的确认文案
+  const helperCount = preflightSelfContainedHelpers.value.length
+  const helperHint = helperCount > 0
+    ? `已命中 ${helperCount} 个自包含数据源的 helper 函数，数据源已覆盖。`
+    : (preflightAvailableHelpers.value.length > 0
+        ? `已命中 ${preflightAvailableHelpers.value.length} 个 helper 函数（部分可能需补充数据源）。`
+        : '')
+  const localHint = preflightLocalCollections.value.length
+    ? `优先复用本地集合：${preflightLocalCollections.value.join('、')}`
+    : (helperCount > 0
+        ? '数据源已由 helper 函数覆盖，无需额外命中本地集合。'
+        : '当前没有明确命中的本地集合。')
+  const externalHint = preflightExternalSources.value.length
+    ? `候选外部来源：${preflightExternalSources.value.join('、')}`
+    : (helperCount > 0
+        ? '外部来源不是必须项。'
+        : '当前优先本地数据，外部来源不是必须项。')
   const confirmationText = [
-    preflightLocalCollections.value.length
-      ? `优先复用本地集合：${preflightLocalCollections.value.join('、')}`
-      : '当前没有明确命中的本地集合。',
-    preflightExternalSources.value.length
-      ? `候选外部来源：${preflightExternalSources.value.join('、')}`
-      : '当前优先本地数据，外部来源不是必须项。',
+    helperHint,
+    localHint,
+    externalHint,
     '确认后将开始代码生成、静态校验、沙箱执行和质量评估。',
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 
   try {
     await ElMessageBox.confirm(confirmationText, '生成前确认', {
@@ -1549,6 +1647,7 @@ const handlePreviewRepairPlan = async () => {
 onMounted(async () => {
   await loadStockDataCatalog()
   await loadExternalDataSourceCatalog()
+  initIterateMode()
   initFromRoute()
 })
 </script>
@@ -1561,6 +1660,21 @@ onMounted(async () => {
   min-height: 500px;
   padding: 16px 24px;
   background: var(--el-bg-color-page);
+}
+
+.iterate-notice {
+  margin-bottom: 16px;
+
+  p {
+    margin: 4px 0;
+    font-size: 14px;
+  }
+
+  .tool-id {
+    color: var(--el-text-color-secondary);
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 12px;
+  }
 }
 
 .page-header {
@@ -1695,41 +1809,28 @@ onMounted(async () => {
     }
   }
 
-  .guide-tips {
+  .guide-quick-examples {
     background: var(--el-bg-color);
     border: 1px solid var(--el-border-color-lighter);
     border-radius: 8px;
     padding: 16px 20px;
     margin-bottom: 20px;
-  }
 
-  .tip-item {
-    margin-bottom: 16px;
-
-    &:last-child {
-      margin-bottom: 0;
-    }
-
-    .tip-label {
-      display: block;
+    .quick-label {
       font-weight: 500;
       margin-bottom: 8px;
       color: var(--el-text-color-primary);
     }
 
-    ul {
+    .example-list {
       margin: 0;
       padding-left: 20px;
-      color: var(--el-text-color-regular);
+      color: var(--el-text-color-secondary);
 
       li {
-        margin-bottom: 6px;
+        margin-bottom: 4px;
+        font-style: italic;
       }
-    }
-
-    .guide-examples li {
-      color: var(--el-text-color-secondary);
-      font-style: italic;
     }
   }
 

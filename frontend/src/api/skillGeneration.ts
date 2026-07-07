@@ -7,6 +7,7 @@ export interface StartSessionRequest {
   description: string
   user_id?: string
   handoff_context?: SkillHandoffContext
+  iterate_skill_id?: string
   provider?: string
   model?: string
   /** 需求分析模型（覆盖系统默认的深度推理模型） */
@@ -223,7 +224,7 @@ export interface ReconToolTrace {
 export interface ImplementationFactReportView {
   task_summary: string
   recommended_strategy: string
-  available_helpers: Array<{ module: string; name: string; reason?: string }>
+  available_helpers: Array<{ module: string; name: string; reason?: string; signature?: string; data_source_handling?: string }>
   sample_fields: Record<string, string[]>
   validation_checks: Array<{ name: string; description: string; field?: string }>
   notes: string[]
