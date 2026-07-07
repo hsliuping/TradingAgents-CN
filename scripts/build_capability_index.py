@@ -33,9 +33,11 @@ async def main():
 
     start = time.time()
 
-    from app.dependencies.database import get_database
+    from app.core.database import get_database, init_database
     from app.services.capability_index_service import CapabilityIndexService
 
+    # 初始化 MongoDB 连接（独立脚本需显式初始化）
+    await init_database()
     db = get_database()
     service = CapabilityIndexService(db)
 

@@ -108,6 +108,10 @@ async def test_end_to_end():
     # 测试用的 thread_id
     test_thread_id = f"test-e2e-{int(asyncio.get_event_loop().time() * 1000)}"
 
+    # 提前导入 store，供 _run_step 中追踪 spec_id 使用
+    from core.embedded_nanobot.workflows.agent_builder_store import AgentBuilderGraphStore
+    _store_for_tracking = AgentBuilderGraphStore(db)
+
     # 收集 SSE 事件
     events = []
     xml_leak_found = False
@@ -150,6 +154,14 @@ async def test_end_to_end():
         tools_used = result.get("tools_used", []) or []
         print(f"  📤 回复: {content[:200]}...")
         print(f"  🔧 工具: {tools_used}")
+
+        # 🔑 追踪 spec_id 变化
+        _ckpt = await _store_for_tracking.load_checkpoint(test_thread_id)
+        if _ckpt:
+            _spec_id = _ckpt.get("spec_id", "")
+            _spec_name = _ckpt.get("spec_name", "")
+            _node = _ckpt.get("current_node", "")
+            print(f"  📌 state: spec_id={_spec_id!r}, spec_name={_spec_name!r}, node={_node}")
 
         # XML 泄露检测
         leaks = _detect_xml_leak(content)
@@ -244,11 +256,28 @@ async def test_end_to_end():
     print(f"  XML 泄露: {'❌ 发现' if xml_leak_found else '✅ 未发现'}")
 
     # 检查 MongoDB checkpoint
-    from core.embedded_nanobot.workflows.agent_builder_store import AgentBuilderGraphStore
-    store = AgentBuilderGraphStore(db)
+    store = _store_for_tracking
     checkpoint = await store.load_checkpoint(test_thread_id)
     if checkpoint:
         print(f"  Checkpoint: node={checkpoint.get('current_node')}, stage={checkpoint.get('stage')}")
+        # 🔑 打印 spec_id 追踪信息
+        spec_id = checkpoint.get("spec_id", "")
+        spec_name = checkpoint.get("spec_name", "")
+        print(f"  spec_id: {spec_id!r}")
+        print(f"  spec_name: {spec_name!r}")
+
+        # 🔑 用 spec_id 去数据库查 spec
+        if spec_id:
+            spec_doc = await db["agent_specs"].find_one({"spec_id": spec_id})
+            if spec_doc:
+                print(f"  ✅ 数据库中找到 spec: name={spec_doc.get('name')}, status={spec_doc.get('status')}")
+            else:
+                print(f"  ❌ 数据库中未找到 spec_id={spec_id}！这就是 404 的原因！")
+                # 列出数据库中所有的 spec_id，看看有没有类似的
+                all_specs = await db["agent_specs"].find({}, {"spec_id": 1, "name": 1}).to_list(length=20)
+                print(f"  📋 数据库中现有的 spec_id 列表:")
+                for s in all_specs:
+                    print(f"     - {s.get('spec_id')}: {s.get('name')}")
     else:
         print("  Checkpoint: 无（流程已完成或未保存）")
 
