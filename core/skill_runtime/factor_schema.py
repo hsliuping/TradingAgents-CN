@@ -316,10 +316,27 @@ ALL_FACTOR_FIELD_SCHEMA: Dict[str, FactorFieldSchema] = {
 
 
 def get_factor_field_schema(field_name: str) -> FactorFieldSchema | None:
+    """按字段名查询因子字段 Schema。
+
+    Args:
+        field_name: 因子字段名（如 "pe_ttm" / "roe" / "ma20"）
+
+    Returns:
+        FactorFieldSchema | None: 命中的字段 Schema 对象；未登记时返回 None
+    """
     return ALL_FACTOR_FIELD_SCHEMA.get(field_name)
 
 
 def list_bundle_fields(bundle: FactorBundleId) -> List[str]:
+    """返回指定因子 bundle 包含的字段名列表。
+
+    Args:
+        bundle: bundle 标识，可选值："value_core" / "quality_core" / "growth_cashflow_core"
+            （其余取值统一回退为 growth_cashflow_core 字段集）
+
+    Returns:
+        list[str]: 该 bundle 包含的字段名列表
+    """
     if bundle == "value_core":
         return list(P0_VALUE_FIELDS)
     if bundle == "quality_core":
@@ -328,6 +345,20 @@ def list_bundle_fields(bundle: FactorBundleId) -> List[str]:
 
 
 def get_p0_snapshot_schema() -> Dict[str, object]:
+    """返回 P0 因子快照的整体 Schema 描述。
+
+    Returns:
+        dict: 字段说明——
+            bundles: 各 bundle 字段集合
+                — value_core: list[str]，价值核心字段名列表
+                — quality_core: list[str]，质量核心字段名列表
+                — growth_cashflow_core: list[str]，成长与现金流核心字段名列表
+            snapshot_only_fields: list[str]，仅用于快照的字段名列表
+            public_screening_fields: list[str]，公开筛选可用字段名列表
+            technical_fields: list[str]，技术因子字段名列表
+            technical_public_screening_fields: list[str]，技术因子公开筛选字段名列表
+            fields: dict[str, dict]，全部字段名到字段 Schema dict 的映射
+    """
     return {
         "bundles": {
             "value_core": list(P0_VALUE_FIELDS),

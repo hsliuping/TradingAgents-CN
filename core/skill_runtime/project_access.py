@@ -165,7 +165,23 @@ def query_stock_collection(
     sort: Optional[Sequence[Sequence[Any]]] = None,
     limit: int = 100,
 ) -> List[Dict[str, Any]]:
-    """同步查询已开放的股票集合。"""
+    """同步查询已开放的股票集合。
+
+    Args:
+        collection: 集合名称，必须在 SUPPORTED_COLLECTIONS 中（如 "stock_basic_info" /
+            "market_quotes" / "stock_daily_quotes" / "stock_financial_data" /
+            "stock_financial_periods" / "stock_news"）
+        filters: MongoDB 查询过滤条件，为 None 时等价于空 dict（查询全部），默认 None
+        projection: MongoDB 投影规则，为 None 时默认排除 _id 字段（{"_id": 0}），默认 None
+        sort: 排序规则，形如 [("trade_date", -1), ("symbol", 1)] 的二元组序列，为 None 时不排序，默认 None
+        limit: 返回文档数量上限，会被截断到 [1, 500] 区间，默认 100
+
+    Returns:
+        list[dict]: 命中文档列表，每个元素为集合中的一条原始文档（dict）——
+            - 默认已剔除 _id 字段（除非 projection 显式包含）
+            - 列表长度 <= limit（经过 [1, 500] 截断后的值）
+            - 文档字段结构依集合定义而异，常见字段如 symbol/code/name/trade_date 等
+    """
     collection_name = str(collection or "").strip()
     if collection_name not in SUPPORTED_COLLECTIONS:
         raise ValueError(f"unsupported collection: {collection_name}")
@@ -182,7 +198,22 @@ def aggregate_stock_collection(
     pipeline: Sequence[Dict[str, Any]],
     limit: int = 100,
 ) -> List[Dict[str, Any]]:
-    """同步执行已开放股票集合的聚合查询。"""
+    """同步执行已开放股票集合的聚合查询。
+
+    Args:
+        collection: 集合名称，必须在 SUPPORTED_COLLECTIONS 中（如 "stock_basic_info" /
+            "market_quotes" / "stock_daily_quotes" / "stock_financial_data" /
+            "stock_financial_periods" / "stock_news"）
+        pipeline: MongoDB 聚合管道阶段序列，形如 [{"$match": {...}}, {"$group": {...}}]，
+            为空时返回全部文档
+        limit: 返回结果数量上限，会被截断到 [1, 500] 区间，默认 100
+
+    Returns:
+        list[dict]: 聚合结果列表，每个元素为聚合管道输出的一条文档（dict）——
+            - 已自动剔除每条结果中的 _id 字段
+            - 列表长度 <= limit（经过 [1, 500] 截断后的值）
+            - 字段结构由 pipeline 的 $group / $project 等阶段决定
+    """
     collection_name = str(collection or "").strip()
     if collection_name not in SUPPORTED_COLLECTIONS:
         raise ValueError(f"unsupported collection: {collection_name}")
@@ -200,7 +231,34 @@ def inspect_stock_collection_schema(
     sample_size: int = 20,
     filters: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """返回集合样本中的顶层字段、覆盖率、条数和结构摘要。"""
+    """返回集合样本中的顶层字段、覆盖率、条数和结构摘要。
+
+    Args:
+        collection: 集合名称，必须在 SUPPORTED_COLLECTIONS 中（如 "stock_basic_info" /
+            "market_quotes" / "stock_daily_quotes" / "stock_financial_data" /
+            "stock_financial_periods" / "stock_news"）
+        sample_size: 采样文档数量，会被截断到 [1, 100] 区间，默认 20
+        filters: MongoDB 查询过滤条件，为 None 时采样全部文档，默认 None
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            collection: 实际查询的集合名称
+            matching_document_count: 命中文档总数（filters 为空时为估算值）
+            matching_count_is_estimated: 命中数是否为估算值（filters 为空时为 True，
+                否则为 False 表示精确计数）
+            sample_count: 实际采样到的文档数（<= sample_size 截断后的值）
+            query_keys: 集合元数据中标记的常用查询字段列表（来自 catalog）
+            preferred_access: 集合元数据中标记的推荐访问方式列表（来自 catalog）
+            top_level_fields: 样本中出现的顶层字段名列表，按出现频次降序、字段名升序排列
+            field_coverage: 字段覆盖率字典 {field_name: coverage_ratio}，coverage_ratio
+                为 0-1 之间保留 4 位小数的浮点数，表示该字段在样本中的出现比例
+            sample_document_summaries: 前 min(3, sample_count) 条文档的摘要列表，
+                每个元素结构 — field_count(顶层字段总数),
+                non_null_field_count(非空字段数), fields(顶层字段名列表，最多 20 个),
+                truncated_field_count(被截断的字段数，可选),
+                scalar_preview(标量字段预览字典，可选),
+                nested_fields(嵌套对象/数组字段摘要字典，可选)
+    """
     collection_name = str(collection or "").strip()
     if collection_name not in SUPPORTED_COLLECTIONS:
         raise ValueError(f"unsupported collection: {collection_name}")
@@ -251,7 +309,32 @@ def inspect_symbol_documents(
     symbol: str,
     limit: int = 5,
 ) -> Dict[str, Any]:
-    """返回指定 symbol 在集合中的样本文档摘要，而不是完整文档。"""
+    """返回指定 symbol 在集合中的样本文档摘要，而不是完整文档。
+
+    Args:
+        collection: 集合名称，必须在 SUPPORTED_COLLECTIONS 中（如 "stock_basic_info" /
+            "market_quotes" / "stock_daily_quotes" / "stock_financial_data" /
+            "stock_financial_periods" / "stock_news"）
+        symbol: A 股股票代码（6 位数字或含交易所前后缀），内部会 zfill(6) 标准化，
+            同时匹配 symbol 或 code 字段
+        limit: 返回文档摘要数量上限，会被截断到 [1, 20] 区间，默认 5
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            collection: 实际查询的集合名称
+            symbol: 标准化后的 6 位股票代码
+            matching_document_count: 集合中匹配该 symbol/code 的文档总数（精确计数）
+            returned_summary_count: 实际返回的文档摘要数量（<= limit 截断后的值）
+            documents: 文档摘要列表，每个元素结构 — field_count(顶层字段总数),
+                non_null_field_count(非空字段数), fields(顶层字段名列表，最多 20 个),
+                truncated_field_count(被截断的字段数，可选),
+                scalar_preview(标量字段预览字典，可选),
+                nested_fields(嵌套对象/数组字段摘要字典，可选)
+            排序规则（按集合类型自动选择）：stock_daily_quotes 按 trade_date 倒序；
+                stock_financial_data 按 (report_period, report_date) 倒序；
+                stock_financial_periods 按 (report_period, ann_date) 倒序；
+                stock_news 按 publish_time 倒序；其它集合不排序
+    """
     collection_name = str(collection or "").strip()
     if collection_name not in SUPPORTED_COLLECTIONS:
         raise ValueError(f"unsupported collection: {collection_name}")
@@ -289,7 +372,27 @@ def inspect_field_coverage(
     filters: Optional[Dict[str, Any]] = None,
     sample_size: int = 50,
 ) -> Dict[str, Any]:
-    """返回字段在样本文档中的出现率和非空覆盖率。"""
+    """返回字段在样本文档中的出现率和非空覆盖率。
+
+    Args:
+        collection: 集合名称，必须在 SUPPORTED_COLLECTIONS 中（如 "stock_basic_info" /
+            "market_quotes" / "stock_daily_quotes" / "stock_financial_data" /
+            "stock_financial_periods" / "stock_news"）
+        fields: 待统计覆盖率的字段名序列，空字符串/空白字段会被自动过滤
+        filters: MongoDB 查询过滤条件，为 None 时采样全部文档，默认 None
+        sample_size: 采样文档数量上限，会被截断到 [1, 200] 区间，默认 50
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            collection: 实际查询的集合名称
+            sample_count: 实际采样到的文档数（<= sample_size 截断后的值）
+            fields: 字段覆盖率行列表，每个元素结构 —
+                field(字段名), present_count(出现的文档数),
+                non_null_count(非空文档数，None/""/[]/{} 视为空),
+                present_coverage(出现率 0-1 保留 4 位小数),
+                non_null_coverage(非空覆盖率 0-1 保留 4 位小数；
+                    sample_count 为 0 时为 0.0)
+    """
     collection_name = str(collection or "").strip()
     if collection_name not in SUPPORTED_COLLECTIONS:
         raise ValueError(f"unsupported collection: {collection_name}")

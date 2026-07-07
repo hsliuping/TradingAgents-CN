@@ -1113,6 +1113,32 @@ def _build_factor_diagnostics(context: Dict[str, Any], factors: Dict[str, Any]) 
 
 
 def get_value_factor_bundle(symbol: str) -> Dict[str, Any]:
+    """获取股票的价值因子 bundle（value_core）。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+
+    Returns:
+        dict: 字段说明（合并 _base_snapshot 后还包括 symbol/name/industry/current_price/
+            report_period/data_source）——
+            bundle: 固定值 "value_core"
+            factors: 价值因子字典，子字段：
+                — pe: 市盈率（静态）
+                — pe_ttm: TTM 市盈率
+                — pb: 市净率
+                — pb_mrq: 最近报告期市净率
+                — ps_ttm: TTM 市销率
+                — dividend_yield: 股息率（百分比，已与 shareholder return 口径对齐）
+                — peg: PEG = pe_ttm / net_profit_yoy（增长率非正或缺失时为 None）
+                — industry_pe_median: 行业 PE 中位数
+                — industry_pb_median: 行业 PB 中位数
+            factor_warnings: 该 bundle 的告警字典
+            industry_samples: 行业样本统计
+                — pe_count: PE 行业样本数
+                — pb_count: PB 行业样本数
+            calculation_notes: list[str]，计算口径说明
+            missing_factors: list[str]，缺失的关键因子名列表
+    """
     context = _build_context(symbol)
     basic_info = context["basic_info"]
     market_quotes = context["market_quotes"]
@@ -1177,6 +1203,42 @@ def get_value_factor_bundle(symbol: str) -> Dict[str, Any]:
 
 
 def get_quality_factor_bundle(symbol: str) -> Dict[str, Any]:
+    """获取股票的质量因子 bundle（quality_core）。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+
+    Returns:
+        dict: 字段说明（合并 _base_snapshot 后还包括 symbol/name/industry/current_price/
+            report_period/data_source）——
+            bundle: 固定值 "quality_core"
+            factors: 质量因子字典，子字段：
+                — roe: 净资产收益率
+                — roa: 总资产收益率
+                — gross_margin: 毛利率
+                — netprofit_margin: 净利率
+                — debt_to_assets: 资产负债率
+                — assets_to_eqt: 权益乘数
+                — current_ratio: 流动比率
+                — quick_ratio: 速动比率
+                — cash_ratio: 现金比率
+                — roic: 投入资本回报率（保守代理口径）
+                — cash_conversion: 经营现金流/净利润
+                — accrual_ratio: 应计比率（百分比）
+                — asset_turnover: 资产周转率
+                — gross_profit_to_assets: 毛利/总资产（百分比）
+                — interest_coverage: 利息保障倍数
+                — inventory_turnover: 存货周转率
+                — receivable_turnover: 应收账款周转率
+                — net_cash_position: 净现金比率（保守代理）
+                — piotroski_f_score: Piotroski F 评分
+                — altman_z_score: Altman Z 评分
+                — beneish_m_score: Beneish M 评分
+            factor_diagnostics: dict，因子的诊断信息（按字段名展开，含 data_quality_tier 等）
+            factor_warnings: 该 bundle 的告警字典
+            calculation_notes: list[str]，计算口径说明
+            missing_factors: list[str]，缺失的关键因子名列表
+    """
     context = _build_context(symbol)
     latest_financial = context["latest_financial"]
     roic = _estimate_roic(latest_financial)
@@ -1356,6 +1418,36 @@ def get_quality_factor_bundle(symbol: str) -> Dict[str, Any]:
 
 
 def get_growth_cashflow_factor_bundle(symbol: str) -> Dict[str, Any]:
+    """获取股票的成长与现金流因子 bundle（growth_cashflow_core）。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+
+    Returns:
+        dict: 字段说明（合并 _base_snapshot 后还包括 symbol/name/industry/current_price/
+            report_period/data_source）——
+            bundle: 固定值 "growth_cashflow_core"
+            factors: 成长与现金流因子字典，子字段：
+                — revenue_yoy: 营收同比增速
+                — net_profit_yoy: 净利润同比增速
+                — oper_profit_yoy: 营业利润同比增速
+                — revenue_cagr_3y: 营收 3 年复合增速
+                — profit_cagr_3y: 净利润 3 年复合增速
+                — revenue_ttm: TTM 营收
+                — net_profit_ttm: TTM 净利润
+                — n_cashflow_act: 经营活动现金流
+                — fcf: 自由现金流（保守代理）
+                — fcf_yield: 自由现金流收益率（百分比）
+                — fcf_margin: 自由现金流利润率（百分比）
+                — ocf_yield: 经营现金流收益率（百分比）
+                — total_cur_assets: 流动资产
+                — total_cur_liab: 流动负债
+                — net_working_capital: 净营运资本
+                — working_capital_change: 净营运资本变动额
+            factor_warnings: 该 bundle 的告警字典
+            calculation_notes: list[str]，计算口径说明
+            missing_factors: list[str]，缺失的关键因子名列表
+    """
     context = _build_context(symbol)
     latest_financial = context["latest_financial"]
     previous_financial = _previous_financial_record(context["financial_records"])
@@ -1456,6 +1548,28 @@ def get_growth_cashflow_factor_bundle(symbol: str) -> Dict[str, Any]:
 
 
 def get_fundamental_factor_snapshot(symbol: str) -> Dict[str, Any]:
+    """聚合价值/质量/成长三个 bundle，返回基本面因子综合快照。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+
+    Returns:
+        dict: 字段说明——
+            symbol: 标准化后的股票代码
+            name: 股票名称
+            industry: 所属行业
+            current_price: 当前价格
+            report_period: 报告期（优先 growth，其次 quality，最后 value）
+            data_source: 数据源（优先级同 report_period）
+            factors: dict，三个 bundle 因子的合并字典
+            factor_diagnostics: dict，三个 bundle 因子诊断信息的合并字典
+            factor_warnings: dict，三个 bundle 告警的合并字典
+            missing_factors: list[str]，三个 bundle 缺失因子的去重升序列表
+            bundles: 各 bundle 完整结果
+                — value_core: dict，价值 bundle 完整结果
+                — quality_core: dict，质量 bundle 完整结果
+                — growth_cashflow_core: dict，成长与现金流 bundle 完整结果
+    """
     value_bundle = get_value_factor_bundle(symbol)
     quality_bundle = get_quality_factor_bundle(symbol)
     growth_bundle = get_growth_cashflow_factor_bundle(symbol)

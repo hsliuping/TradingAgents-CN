@@ -63,17 +63,41 @@ STOCK_COLLECTION_SUMMARY: List[Dict[str, Any]] = [
 
 
 def list_supported_stock_collections() -> List[Dict[str, Any]]:
-    """返回允许 Skill 访问的本地集合目录。"""
+    """返回允许 Skill 访问的本地集合目录。
+
+    Returns:
+        list[dict]: 集合描述列表，每个元素字段说明——
+            collection: 集合名称（如 "stock_basic_info" / "market_quotes" / "stock_daily_quotes" /
+                "stock_financial_data" / "stock_financial_periods" / "stock_news"）
+            purpose: 集合用途描述
+            preferred_access: 推荐访问该集合的 helper 函数名列表
+            query_keys: 该集合支持的查询键名列表（如 ["symbol", "code", "source"]）
+    """
     return list(STOCK_COLLECTION_SUMMARY)
 
 
 def list_supported_external_sources(market_category: str = "a_shares") -> List[str]:
-    """返回某个市场下受支持的外部数据源。"""
+    """返回某个市场下受支持的外部数据源。
+
+    Args:
+        market_category: 市场类别，默认为 "a_shares"。可选值："a_shares" / "hk_stocks" / "us_stocks"
+
+    Returns:
+        list[str]: 受支持的外部数据源名称列表（如 ["tushare", "akshare", "baostock"]）；
+            未配置的市场类别返回空列表
+    """
     return list(SUPPORTED_EXTERNAL_SOURCES.get(market_category, ()))
 
 
 def list_configured_external_sources(market_category: str = "a_shares") -> List[str]:
-    """返回当前配置启用的外部数据源，已过滤 local 与不受支持的数据源。"""
+    """返回当前配置启用的外部数据源，已过滤 local 与不受支持的数据源。
+
+    Args:
+        market_category: 市场类别，默认为 "a_shares"。可选值："a_shares" / "hk_stocks" / "us_stocks"
+
+    Returns:
+        list[str]: 当前已启用且受支持的外部数据源名称列表，元素为数据源名称字符串
+    """
     configured = get_enabled_data_sources_sync(market_category=market_category)
     allowed = set(list_supported_external_sources(market_category))
     return [item for item in configured if item in allowed]

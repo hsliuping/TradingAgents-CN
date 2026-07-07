@@ -26,7 +26,20 @@ def get_external_stock_news(
     limit: int = 10,
     market_category: str = "a_shares",
 ) -> Dict[str, Any]:
-    """同步获取外部新闻数据。"""
+    """同步获取外部新闻数据。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        source: 指定数据源（目前仅支持 "akshare"），为 None 时自动选择已配置的源
+        limit: 返回新闻条数上限，默认 10
+        market_category: 市场类别，默认 "a_shares"
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            source: 数据源标识: "akshare" | None（无可用源或调用失败时为 None）
+            data: 新闻列表，元素为按列归一化的 dict（trade_date/title/content 等字段，
+                  依上游数据源而定）；无数据时为空列表 []
+    """
     for source_id in _resolve_sources(source, market_category):
         try:
             if source_id == "akshare":
@@ -53,6 +66,29 @@ def get_external_valuation_data(
     """同步获取外部历史估值数据（PE_TTM、PB_MRQ、PS_TTM、PCF_TTM）。
 
     使用 Tushare daily_basic 日期范围查询，一次调用获取全量数据。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        start_date: 起始日期（YYYY-MM-DD 或 YYYYMMDD）
+        end_date: 结束日期（YYYY-MM-DD 或 YYYYMMDD）
+        source: 指定数据源（"tushare" / "baostock"），为 None 时自动选择；
+                baostock 不稳定会自动降级到 tushare
+        market_category: 市场类别，默认 "a_shares"
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            成功时直接透传 tushare provider 返回的 dict，常见字段 ——
+                source: 数据源标识: "tushare"
+                symbol: 标准化后的股票代码
+                data: 估值序列列表，元素为 dict ——
+                    trade_date: 交易日期
+                    pe_ttm: 滚动市盈率
+                    pb_mrq: 最近报告期市净率
+                    ps_ttm: 滚动市销率
+                    pcf_ttm: 滚动市现率
+            失败降级时返回 ——
+                source: None
+                data: 空列表 []
     """
     for source_id in _resolve_sources(source, market_category):
         try:
@@ -95,7 +131,22 @@ def get_external_historical_data(
     source: Optional[str] = None,
     market_category: str = "a_shares",
 ) -> Dict[str, Any]:
-    """同步获取外部历史行情。"""
+    """同步获取外部历史行情。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        start_date: 起始日期（YYYY-MM-DD 或 YYYYMMDD）
+        end_date: 结束日期（YYYY-MM-DD 或 YYYYMMDD）
+        period: K 线周期，默认 "daily"；可选 "daily" / "weekly" / "monthly"（依上游数据源支持情况）
+        source: 指定数据源（"tushare" / "akshare" / "baostock"），为 None 时自动选择
+        market_category: 市场类别，默认 "a_shares"
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            source: 数据源标识: "tushare" | "akshare" | "baostock" | None（无可用源或调用失败时为 None）
+            data: 行情序列列表，元素为按列归一化的 dict（trade_date/open/high/low/close/volume
+                  等字段，依上游数据源而定）；无数据时为空列表 []
+    """
     for source_id in _resolve_sources(source, market_category):
         try:
             if source_id == "tushare":
@@ -133,7 +184,22 @@ def get_external_financial_data(
     period: Optional[str] = None,
     limit: int = 4,
 ) -> Dict[str, Any]:
-    """同步获取外部财务数据。"""
+    """同步获取外部财务数据。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        source: 指定数据源（"tushare" / "akshare" / "baostock"），为 None 时自动选择
+        market_category: 市场类别，默认 "a_shares"
+        report_type: 财报类型，默认 "quarterly"；可选 "quarterly" / "annual" 等（tushare 路径使用）
+        period: 报告期（如 "20240331"），为 None 时由上游默认行为决定；baostock 路径会解析为 year/quarter
+        limit: 返回记录数上限，默认 4（仅 tushare 路径生效）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            source: 数据源标识: "tushare" | "akshare" | "baostock" | None（无可用源或调用失败时为 None）
+            data: 财务数据，按列归一化的 dict（注意成功时为 dict 结构，而非列表）；
+                  字段依上游数据源而定（如总资产/净利润/营收等），无数据时为空 dict {}
+    """
     for source_id in _resolve_sources(source, market_category):
         try:
             if source_id == "tushare":
@@ -181,7 +247,20 @@ def get_external_query_news(
     look_back_days: int = 7,
     source: str = "google_news",
 ) -> Dict[str, Any]:
-    """同步获取按查询词聚合的外部新闻。"""
+    """同步获取按查询词聚合的外部新闻。
+
+    Args:
+        query: 查询关键词（公司名、股票名或主题词）
+        curr_date: 当前日期（YYYY-MM-DD），作为查询的右端点
+        look_back_days: 向前回溯天数，默认 7
+        source: 数据源，默认 "google_news"；可选 "google_news" / "finnhub"
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            source: 数据源标识: "google_news" | "finnhub" | None（无可用源或调用失败时为 None）
+            data: 新闻聚合结果，类型依上游返回而定（通常为字符串形式的新闻摘要文本）；
+                  无数据或调用失败时为空字符串 ""
+    """
     try:
         if source == "google_news":
             from tradingagents.dataflows.interface import get_google_news

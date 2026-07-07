@@ -997,10 +997,27 @@ FACTOR_RUNTIME_SEMANTIC_CONTRACTS = {
 
 
 def get_factor_definition(factor_id: str) -> Optional[FactorDefinition]:
+    """按 factor_id 查询通用因子目录中的因子定义。
+
+    Args:
+        factor_id: 因子标识（如 "pe_ttm" / "roe"），内部会去除首尾空白
+
+    Returns:
+        Optional[FactorDefinition]: 命中的因子定义对象；未登记时返回 None
+    """
     return COMMON_FACTOR_CATALOG.get(str(factor_id).strip())
 
 
 def list_factor_definitions(category: Optional[FactorCategory] = None) -> List[Dict[str, object]]:
+    """列出通用因子目录中的因子定义（按 category 与 factor_id 排序）。
+
+    Args:
+        category: 可选的因子类别过滤，默认为 None（不过滤）
+
+    Returns:
+        list[dict]: 因子定义 dict 列表，元素结构由 FactorDefinition.to_dict() 决定，按
+            (category, factor_id) 升序排序
+    """
     items = list(COMMON_FACTOR_CATALOG.values())
     if category:
         items = [item for item in items if item.category == category]
@@ -1008,6 +1025,16 @@ def list_factor_definitions(category: Optional[FactorCategory] = None) -> List[D
 
 
 def get_factor_pack(pack_id: str) -> List[Dict[str, object]]:
+    """按 pack_id 获取推荐因子包内的因子定义列表。
+
+    Args:
+        pack_id: 因子包标识（如 "value_core" / "quality_core" / "growth_cashflow_core" /
+            "technical_core" / "liquidity_core"），内部会去除首尾空白
+
+    Returns:
+        list[dict]: 该 pack 中所有已登记因子的 to_dict() 结果列表；
+            未配置或因子均未登记时返回空列表
+    """
     factor_ids = RECOMMENDED_FACTOR_PACKS.get(str(pack_id).strip(), [])
     return [COMMON_FACTOR_CATALOG[factor_id].to_dict() for factor_id in factor_ids if factor_id in COMMON_FACTOR_CATALOG]
 
@@ -1018,6 +1045,18 @@ def infer_recommended_factor_packs(
     category: str = "",
     expected_fields: Optional[List[str]] = None,
 ) -> List[str]:
+    """根据自然语言文本、类别或期望字段推断推荐的 factor pack 列表。
+
+    Args:
+        text: 自然语言需求描述，默认为 ""
+        category: 类别关键词，默认为 ""
+        expected_fields: 期望因子字段名列表，默认为 None
+
+    Returns:
+        list[str]: 推荐 pack_id 列表，元素可能值：
+            "value_core" / "quality_core" / "growth_cashflow_core" /
+            "technical_core" / "liquidity_core"；按命中顺序去重
+    """
     normalized = " ".join([
         str(text or "").lower(),
         str(category or "").lower(),
@@ -1057,6 +1096,19 @@ def select_relevant_factor_definitions(
     expected_fields: Optional[List[str]] = None,
     max_items: int = 16,
 ) -> List[Dict[str, object]]:
+    """根据需求文本/类别/期望字段挑选相关因子定义，最多返回 max_items 条。
+
+    Args:
+        text: 自然语言需求描述，默认为 ""
+        category: 类别关键词，默认为 ""
+        expected_fields: 期望因子字段名列表，默认为 None
+        max_items: 最多返回条目数，默认为 16
+
+    Returns:
+        list[dict]: 选中因子的 to_dict() 结果，元素结构由 FactorDefinition.to_dict() 决定；
+            选取顺序：先 expected_fields 命中字段，再 infer_recommended_factor_packs 命中字段，
+            最后按 fallback category 兜底；总数不超过 max_items
+    """
     selected_ids: List[str] = []
 
     for field_name in expected_fields or []:
@@ -1099,6 +1151,18 @@ def build_factor_catalog_prompt_context(
     expected_fields: Optional[List[str]] = None,
     max_items: int = 16,
 ) -> str:
+    """构建用于 Skill 生成提示的因子目录上下文文本。
+
+    Args:
+        text: 自然语言需求描述，默认为 ""
+        category: 类别关键词，默认为 ""
+        expected_fields: 期望因子字段名列表，默认为 None
+        max_items: 选取因子上限，默认为 16
+
+    Returns:
+        str: 多行 prompt 文本；包含推荐 pack、helper/bundle 提示、可用因子列表与生成约束；
+            若未命中任何因子且无 pack，返回空字符串 ""
+    """
     factor_items = select_relevant_factor_definitions(
         text,
         category=category,
@@ -1158,6 +1222,19 @@ def build_factor_catalog_prompt_context(
 
 
 def build_factor_implementation_outline(factor_ids: List[str]) -> Dict[str, object]:
+    """基于一组 factor_id 构建实现轮廓摘要。
+
+    Args:
+        factor_ids: 因子标识列表；未在 COMMON_FACTOR_CATALOG 中登记的会被忽略
+
+    Returns:
+        dict: 字段说明——
+            factor_ids: list[str]，命中并展开后的 factor_id 列表
+            collections: list[str]，涉及的数据集合名（去重升序）
+            helpers: list[str]，涉及的 helper 函数名（去重升序）
+            implementation_levels: list[str]，涉及的实现级别（去重升序）
+            warnings: list[str]，所有因子的告警文案（保留重复顺序）
+    """
     selected: List[FactorDefinition] = []
     for factor_id in factor_ids:
         factor = get_factor_definition(factor_id)
@@ -1174,6 +1251,23 @@ def build_factor_implementation_outline(factor_ids: List[str]) -> Dict[str, obje
 
 
 def validate_factor_catalog_schema_alignment() -> Dict[str, List[Dict[str, str]]]:
+    """校验 P0 factor schema 与 COMMON_FACTOR_CATALOG 的一致性。
+
+    Returns:
+        dict: 字段说明——
+            mismatches: list[dict]，schema 与 catalog 的 data_quality_tier / implementation_level
+                不一致条目，每个元素字段：
+                — field: 字段名
+                — catalog_implementation_level: catalog 中登记的 implementation_level
+                — schema_data_quality_tier: schema 中登记的 data_quality_tier
+            missing_catalog_entries: list[dict]，schema 已登记但 catalog 未登记的字段
+                — field: 字段名
+                — reason: 缺失原因说明
+            missing_cautious_catalog_entries: list[dict]，schema 标记为 cautious 但 catalog 未登记的字段
+                — field: 字段名
+                — expected_implementation_level: 期望级别（"cautious"）
+                — reason: 缺失原因说明
+    """
     mismatches: List[Dict[str, str]] = []
     missing_catalog_entries: List[Dict[str, str]] = []
     missing_cautious_catalog_entries: List[Dict[str, str]] = []
@@ -1215,6 +1309,18 @@ def validate_factor_catalog_schema_alignment() -> Dict[str, List[Dict[str, str]]
 
 
 def validate_technical_factor_catalog_schema_alignment() -> Dict[str, List[Dict[str, str]]]:
+    """校验技术因子 schema 与 COMMON_FACTOR_CATALOG 的一致性。
+
+    Returns:
+        dict: 字段说明——
+            mismatches: list[dict]，catalog 类别与期望 technical 不一致条目，每个元素字段：
+                — field: 字段名
+                — catalog_category: catalog 中登记的类别
+                — expected_category: 期望类别（"technical"）
+            missing_catalog_entries: list[dict]，technical schema 已登记但 catalog 未登记的字段
+                — field: 字段名
+                — reason: 缺失原因说明
+    """
     mismatches: List[Dict[str, str]] = []
     missing_catalog_entries: List[Dict[str, str]] = []
 
@@ -1245,6 +1351,18 @@ def validate_technical_factor_catalog_schema_alignment() -> Dict[str, List[Dict[
 
 
 def validate_factor_pack_schema_alignment() -> Dict[str, List[Dict[str, object]]]:
+    """校验 RECOMMENDED_FACTOR_PACKS 与 schema bundle 字段集是否对齐。
+
+    Returns:
+        dict: 字段说明——
+            mismatches: list[dict]，pack 字段集与 schema bundle 不一致条目，每个元素字段：
+                — pack_id: pack 标识（"value_core" / "quality_core" /
+                    "growth_cashflow_core" / "growth_core"）
+                — expected_fields: list[str]，期望的字段名列表
+                — actual_fields: list[str]，实际登记的字段名列表
+                — missing_fields: list[str]，缺失字段名
+                — extra_fields: list[str]，多余字段名
+    """
     mismatches: List[Dict[str, object]] = []
     expected_packs = {
         "value_core": list_bundle_fields("value_core"),
@@ -1270,6 +1388,15 @@ def validate_factor_pack_schema_alignment() -> Dict[str, List[Dict[str, object]]
 
 
 def validate_factor_catalog_source_alignment() -> Dict[str, List[Dict[str, object]]]:
+    """校验 catalog 中是否仍引用 legacy 数据源（stock_financial_data / get_stock_financial_data）。
+
+    Returns:
+        dict: 字段说明——
+            legacy_source_refs: list[dict]，仍引用 legacy 数据源的字段条目，每个元素字段：
+                — field: 字段名
+                — legacy_sources: list[str]，命中的 legacy 数据源名（"stock_financial_data"）
+                — legacy_helpers: list[str]，命中的 legacy helper 名（"get_stock_financial_data"）
+    """
     legacy_source_refs: List[Dict[str, object]] = []
 
     for field_name in P0_FACTOR_FIELD_SCHEMA.keys():
@@ -1296,6 +1423,23 @@ def validate_factor_catalog_source_alignment() -> Dict[str, List[Dict[str, objec
 
 
 def validate_factor_catalog_runtime_semantic_alignment() -> Dict[str, List[Dict[str, object]]]:
+    """校验 P0 schema 字段与 runtime semantic contract / catalog 的一致性。
+
+    Returns:
+        dict: 字段说明——
+            missing_contract_entries: list[dict]，schema 已登记但 runtime semantic contract
+                未登记的字段，元素字段：
+                — field: 字段名
+                — reason: 缺失原因说明
+            mismatches: list[dict]，contract 文本片段在 catalog 中缺失的条目，元素字段：
+                — field: 字段名
+                — missing_direct_fields: list[str]，catalog.required_fields 中缺失的 contract.direct_fields 片段
+                — missing_fallback_chain: list[str]，catalog.fallback_rules 中缺失的 contract.fallback_chain 片段
+                — missing_denominator_guards: list[str]，catalog.warnings 中缺失的 contract.denominator_guards 片段
+                — missing_unit_conversions: list[str]，catalog.warnings 中缺失的 contract.unit_conversions 片段
+                — missing_conservative_proxies: list[str]，catalog.warnings 中缺失的 contract.conservative_proxies 片段
+                — missing_availability_constraints: list[str]，catalog.warnings 中缺失的 contract.availability_constraints 片段
+    """
     missing_contract_entries: List[Dict[str, object]] = []
     mismatches: List[Dict[str, object]] = []
 
@@ -1356,6 +1500,18 @@ def validate_factor_catalog_runtime_semantic_alignment() -> Dict[str, List[Dict[
 
 
 def validate_technical_factor_catalog_runtime_semantic_alignment() -> Dict[str, List[Dict[str, object]]]:
+    """校验技术因子 schema 字段与 runtime semantic contract / catalog 的一致性。
+
+    Returns:
+        dict: 字段说明——
+            missing_contract_entries: list[dict]，technical schema 已登记但 contract 未登记的字段，元素字段：
+                — field: 字段名
+                — reason: 缺失原因说明
+            mismatches: list[dict]，contract 文本片段在 catalog 中缺失的条目，元素字段：
+                — field: 字段名
+                — missing_direct_fields: list[str]，catalog.required_fields 中缺失的 contract.direct_fields 片段
+                — missing_availability_constraints: list[str]，catalog.warnings 中缺失的 contract.availability_constraints 片段
+    """
     missing_contract_entries: List[Dict[str, object]] = []
     mismatches: List[Dict[str, object]] = []
 
@@ -1392,6 +1548,54 @@ def validate_technical_factor_catalog_runtime_semantic_alignment() -> Dict[str, 
 
 
 def validate_factor_schema_semantic_alignment() -> Dict[str, List[Dict[str, object]]]:
+    """校验 P0 factor schema 与 runtime semantic contract 在 source_priority /
+    minimum_input_groups / minimum_computable_conditions / warning 等维度的一致性。
+
+    Returns:
+        dict: 字段说明——
+            missing_schema_fields: list[dict]，contract 已登记但 schema 未登记的字段，元素字段：
+                — field: 字段名
+                — reason: 缺失原因说明
+            missing_source_priority_entries: list[dict]，任一侧 source_priority 缺失的字段，元素字段：
+                — field: 字段名
+                — schema_source_priority: list[str]
+                — contract_source_priority: list[str]
+            missing_minimum_input_group_entries: list[dict]，任一侧 minimum_input_groups 缺失的字段，元素字段：
+                — field: 字段名
+                — schema_minimum_input_groups: list[list[str]]
+                — contract_minimum_input_groups: list[list[str]]
+            missing_minimum_computable_condition_entries: list[dict]，需要可计算条件但任一侧缺失的字段，元素字段：
+                — field: 字段名
+                — schema_minimum_computable_conditions: list[str]
+                — contract_minimum_computable_conditions: list[str]
+            missing_warning_condition_entries: list[dict]，需要 warning 条件但任一侧缺失的字段，元素字段：
+                — field: 字段名
+                — schema_warning_conditions: list[str]
+                — contract_warning_conditions: list[str]
+            missing_warning_category_entries: list[dict]，需要 warning 类别但任一侧缺失的字段，元素字段：
+                — field: 字段名
+                — schema_warning_categories: list[str]
+                — contract_warning_categories: list[str]
+            mismatches: list[dict]，schema 与 contract 各维度不一致条目，元素字段：
+                — field: 字段名
+                — missing_semantic_tags: list[str]，缺失的语义标签
+                — schema_source_priority / contract_source_priority: list[str]
+                — source_priority_mismatch: bool
+                — schema_tax_estimation_strategy / contract_tax_estimation_strategy: str
+                — tax_estimation_strategy_mismatch: bool
+                — schema_period_selection_strategy / contract_period_selection_strategy: str
+                — period_selection_strategy_mismatch: bool
+                — schema_minimum_input_groups / contract_minimum_input_groups: list[list[str]]
+                — minimum_input_groups_mismatch: bool
+                — schema_minimum_computable_conditions / contract_minimum_computable_conditions: list[str]
+                — minimum_computable_conditions_mismatch: bool
+                — schema_warning_conditions / contract_warning_conditions: list[str]
+                — warning_conditions_mismatch: bool
+                — schema_warning_categories / contract_warning_categories: list[str]
+                — warning_categories_mismatch: bool
+                — schema_calculation_mode: str
+                — requires_non_direct_mode: bool，是否要求非 direct 计算模式
+    """
     missing_schema_fields: List[Dict[str, object]] = []
     missing_source_priority_entries: List[Dict[str, object]] = []
     missing_minimum_input_group_entries: List[Dict[str, object]] = []
@@ -1574,6 +1778,35 @@ def validate_factor_schema_semantic_alignment() -> Dict[str, List[Dict[str, obje
 
 
 def validate_technical_factor_schema_semantic_alignment() -> Dict[str, List[Dict[str, object]]]:
+    """校验技术因子 schema 与 runtime semantic contract 在 source_priority /
+    minimum_input_groups / minimum_computable_conditions 维度的一致性。
+
+    Returns:
+        dict: 字段说明——
+            missing_schema_fields: list[dict]，technical schema 字段未登记 contract 的条目，元素字段：
+                — field: 字段名
+                — reason: 缺失原因说明
+            missing_source_priority_entries: list[dict]，任一侧 source_priority 缺失的字段，元素字段：
+                — field: 字段名
+                — schema_source_priority: list[str]
+                — contract_source_priority: list[str]
+            missing_minimum_input_group_entries: list[dict]，任一侧 minimum_input_groups 缺失的字段，元素字段：
+                — field: 字段名
+                — schema_minimum_input_groups: list[list[str]]
+                — contract_minimum_input_groups: list[list[str]]
+            missing_minimum_computable_condition_entries: list[dict]，任一侧 minimum_computable_conditions 缺失的字段，元素字段：
+                — field: 字段名
+                — schema_minimum_computable_conditions: list[str]
+                — contract_minimum_computable_conditions: list[str]
+            mismatches: list[dict]，schema 与 contract 不一致条目，元素字段：
+                — field: 字段名
+                — schema_source_priority: list[str]
+                — contract_source_priority: list[str]
+                — schema_minimum_input_groups: list[list[str]]
+                — contract_minimum_input_groups: list[list[str]]
+                — schema_minimum_computable_conditions: list[str]
+                — contract_minimum_computable_conditions: list[str]
+    """
     missing_schema_fields: List[Dict[str, object]] = []
     missing_source_priority_entries: List[Dict[str, object]] = []
     missing_minimum_input_group_entries: List[Dict[str, object]] = []
