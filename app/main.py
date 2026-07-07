@@ -36,10 +36,14 @@ from app.routers import stock_data as stock_data_router
 from app.routers import stock_sync as stock_sync_router
 from app.routers import multi_market_stocks as multi_market_stocks_router
 from app.routers import notifications as notifications_router
+from app.routers import analysis_profiles as analysis_profiles_router
 from app.routers import websocket_notifications as websocket_notifications_router
 from app.routers import scheduler as scheduler_router
 from app.routers import prompt_templates as prompt_templates_router
 from app.routers import templates_debug as templates_debug_router  # ⚠️ DEPRECATED: v1 调试路由，v4.0 移除
+from app.routers import prompt_injection_policies as prompt_injection_policies_router
+from app.routers import prompt_preview as prompt_preview_router
+from app.routers import prompt_design as prompt_design_router
 from app.routers import analysis_preferences as analysis_preferences_router
 from app.routers import user_template_configs as user_template_configs_router
 from app.routers import template_history as template_history_router
@@ -1149,6 +1153,9 @@ app.include_router(websocket_notifications_router.router, prefix="/api", tags=["
 # 定时任务管理
 app.include_router(scheduler_router.router, tags=["scheduler"])
 
+# 分析画像
+app.include_router(analysis_profiles_router.router, tags=["analysis-profiles"])
+
 app.include_router(sse.router, prefix="/api/stream", tags=["streaming"])
 app.include_router(sync_router.router)
 app.include_router(multi_source_sync.router)
@@ -1172,6 +1179,9 @@ app.include_router(internal_messages.router, tags=["internal-messages"])
 # 提示词模板系统路由
 app.include_router(prompt_templates_router.router, tags=["prompt-templates"])
 app.include_router(templates_debug_router.router, tags=["templates-debug"])  # ⚠️ DEPRECATED: v1 调试路由
+app.include_router(prompt_injection_policies_router.router, tags=["prompt-policies"])
+app.include_router(prompt_preview_router.router, tags=["prompt-preview"])
+app.include_router(prompt_design_router.router, tags=["prompt-design"])
 app.include_router(analysis_preferences_router.router, tags=["analysis-preferences"])
 app.include_router(user_template_configs_router.router, tags=["user-template-configs"])
 app.include_router(template_history_router.router, tags=["template-history"])
