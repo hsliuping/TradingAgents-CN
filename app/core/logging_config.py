@@ -203,6 +203,24 @@ def setup_logging(log_level: str = "INFO"):
             print(f"  - 是否启用: {error_enabled}")
             print(f"  - 日志级别: {error_level}")
 
+            # Skill工坊日志文件（单独记录skill生成过程）
+            skill_handler_cfg = handlers_cfg.get("skill", {})
+            skill_dir = skill_handler_cfg.get("directory", file_dir)
+            skill_filename = skill_handler_cfg.get("filename", "skill_workshop.log")
+            if not Path(skill_filename).is_absolute():
+                skill_log = str(Path(skill_dir) / skill_filename)
+            else:
+                skill_log = skill_filename
+            skill_enabled = skill_handler_cfg.get("enabled", True)
+            skill_level = skill_handler_cfg.get("level", "DEBUG")
+            skill_max_bytes = _parse_size(skill_handler_cfg.get("max_size", "20MB"))
+            skill_backup_count = int(skill_handler_cfg.get("backup_count", 10))
+
+            print(f"🔍 [setup_logging] Skill工坊日志文件配置:")
+            print(f"  - 文件路径: {skill_log}")
+            print(f"  - 是否启用: {skill_enabled}")
+            print(f"  - 日志级别: {skill_level}")
+
             # JSON 开关：保持向后兼容（json/mode 仅控制台）；新增 file_json/file_mode 控制文件 handler
             use_json_console = bool(fmt_cfg.get("json", False)) or str(fmt_cfg.get("mode", "")).lower() == "json"
             use_json_file = (
@@ -282,6 +300,19 @@ def setup_logging(log_level: str = "INFO"):
                     "filters": _error_handler_filters(),
                 }
 
+            # Skill工坊日志处理器（单独记录skill生成过程）
+            if skill_enabled:
+                handlers_config["skill_file"] = {
+                    "class": handler_class,
+                    "formatter": "json_file_fmt" if use_json_file else "file_fmt",
+                    "level": skill_level,
+                    "filename": skill_log,
+                    "maxBytes": skill_max_bytes,
+                    "backupCount": skill_backup_count,
+                    "encoding": "utf-8",
+                    "filters": ["request_context"],
+                }
+
             # 构建logger handlers列表
             main_handlers = ["console"]
             if main_enabled:
@@ -310,6 +341,15 @@ def setup_logging(log_level: str = "INFO"):
                 worker_handlers.append("error_file")
 
             print(f"🔍 [setup_logging] worker_handlers: {worker_handlers}")
+
+            # Skill工坊 handlers：console + skill_file（+ error_file 捕获错误）
+            skill_handlers = ["console"]
+            if skill_enabled:
+                skill_handlers.append("skill_file")
+            if error_enabled:
+                skill_handlers.append("error_file")
+
+            print(f"🔍 [setup_logging] skill_handlers: {skill_handlers}")
 
             logging_config = {
                 "version": 1,
@@ -366,6 +406,19 @@ def setup_logging(log_level: str = "INFO"):
                     "core": {
                         "level": "INFO",
                         "handlers": main_handlers,
+                        "propagate": False
+                    },
+                    # Skill工坊专用 logger：skill 生成过程的日志单独输出到 skill_workshop.log
+                    # code_generator / iteration_controller / reconnaissance_controller 等模块使用
+                    "skill_workshop": {
+                        "level": "DEBUG",
+                        "handlers": skill_handlers,
+                        "propagate": False
+                    },
+                    # core.tools.external 下的 skill 生成相关模块也输出到 skill_workshop.log
+                    "core.tools.external": {
+                        "level": "DEBUG",
+                        "handlers": skill_handlers,
                         "propagate": False
                     },
                     "fontTools": {
@@ -461,6 +514,16 @@ def setup_logging(log_level: str = "INFO"):
                 "backupCount": 5,
                 "encoding": "utf-8",
             },
+            "skill_file": {
+                "class": handler_class,
+                "formatter": "detailed",
+                "level": "DEBUG",
+                "filters": ["request_context"],
+                "filename": "logs/skill_workshop.log",
+                "maxBytes": 20971520,
+                "backupCount": 10,
+                "encoding": "utf-8",
+            },
         },
         "loggers": {
             "webapi": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": True},
@@ -469,6 +532,8 @@ def setup_logging(log_level: str = "INFO"):
             "fastapi": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": False},
             "app": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": False},
             "core": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": False},
+            "skill_workshop": {"level": "DEBUG", "handlers": ["console", "skill_file", "error_file"], "propagate": False},
+            "core.tools.external": {"level": "DEBUG", "handlers": ["console", "skill_file", "error_file"], "propagate": False},
             "fontTools": {"level": "WARNING", "handlers": ["console", "file", "error_file"], "propagate": False},
             "fontTools.subset": {"level": "WARNING", "handlers": ["console", "file", "error_file"], "propagate": False},
         },

@@ -323,12 +323,13 @@ class UnifiedConfigManager:
         )
         data_sources.append(akshare_config)
 
-        # Tushare (如果有配置)
-        if settings.get("tushare_token"):
+        # Tushare (如果有配置) - 同时检查 settings.json 和 .env 文件
+        tushare_token = settings.get("tushare_token") or os.environ.get("TUSHARE_TOKEN") or os.environ.get("TUSHARE_API_KEY")
+        if tushare_token:
             tushare_config = DataSourceConfig(
                 name="Tushare",
                 type=DataSourceType.TUSHARE,
-                api_key=settings.get("tushare_token"),
+                api_key=tushare_token,
                 endpoint="http://api.tushare.pro",
                 enabled=True,
                 priority=2,
@@ -428,12 +429,13 @@ class UnifiedConfigManager:
         )
         data_sources.append(akshare_config)
 
-        # Tushare (如果有配置)
-        if settings.get("tushare_token"):
+        # Tushare (如果有配置) - 同时检查 settings.json 和 .env 文件
+        tushare_token = settings.get("tushare_token") or os.environ.get("TUSHARE_TOKEN") or os.environ.get("TUSHARE_API_KEY")
+        if tushare_token:
             tushare_config = DataSourceConfig(
                 name="Tushare",
                 type=DataSourceType.TUSHARE,
-                api_key=settings.get("tushare_token"),
+                api_key=tushare_token,
                 endpoint="http://api.tushare.pro",
                 enabled=True,
                 priority=2,

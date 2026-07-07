@@ -39,6 +39,15 @@ backup_count = 5
 directory = "./logs"
 filename = "error.log"
 
+# Skill工坊日志处理器（单独记录skill生成过程，方便排查）
+[logging.handlers.skill]
+enabled = true
+level = "DEBUG"  # skill生成过程需要详细日志
+max_size = "20MB"
+backup_count = 10
+directory = "./logs"
+filename = "skill_workshop.log"
+
 # 结构化日志处理器（JSON格式）
 [logging.handlers.structured]
 enabled = false  # 默认关闭，生产环境可启用
@@ -63,6 +72,10 @@ level = "INFO"
 # LLM适配器日志
 [logging.loggers.llm_adapters]
 level = "INFO"
+
+# Skill工坊日志（单独输出到 skill_workshop.log）
+[logging.loggers.skill_workshop]
+level = "DEBUG"
 
 # 第三方库日志（通常设置为WARNING减少噪音）
 [logging.loggers.streamlit]
